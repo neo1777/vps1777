@@ -1,0 +1,29 @@
+[project]
+name = "vps1777-gateway"
+version = "0.1.0"
+description = "vps1777 — OAuth 2.1 + DCR + reverse proxy MCP + /admin/* + /app/*"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "vps1777 contributors" }]
+
+dependencies = [
+    "starlette>=0.45.0",
+    "uvicorn[standard]>=0.32.0",
+    "httpx>=0.28.0",
+    "pyjwt>=2.10.0",
+    "bcrypt>=4.2.0",
+    "python-multipart>=0.0.20",
+    "itsdangerous>=2.2.0",
+    "authlib>=1.4.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "jinja2>=3.1.5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
