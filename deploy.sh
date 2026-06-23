@@ -166,17 +166,19 @@ if [ "$APPLY_MODE" = "1" ]; then
   '" || die "Scrittura secret/.env fallita"
   ok "Secret + .env aggiornati"
 
-  # 2. Tailscale up (se key fornita)
+  # 2. Tailscale: ricreo il container con la key (containerboot fa login +
+  #    Funnel puliti). Più robusto di 'docker exec up' su un sidecar che era
+  #    in standby.
   if [ -n "$TS_KEY" ]; then
-    log "Attivo Tailscale (tailscale up)..."
-    SSH "sudo docker exec vps1777-tailscale tailscale up --authkey='$TS_KEY' --hostname=vps1777 2>&1 | tail -5" || warn "tailscale up ha restituito un errore — verifica la key"
-    sleep 3
+    log "Attivo Tailscale (ricreo il sidecar con la key)..."
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d tailscale'" || warn "ricreazione tailscale fallita"
+    sleep 6
     TS_URL="$(SSH "sudo docker exec vps1777-tailscale tailscale status --json 2>/dev/null | python3 -c \"import sys,json;print('https://'+json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))\" 2>/dev/null" || echo "")"
     if echo "$TS_URL" | grep -q '\.ts\.net$'; then
       ok "Tailscale attivo: $TS_URL"
       [ -z "$PUB" ] && PUB="$TS_URL"
     else
-      warn "URL Tailscale non ricavato automaticamente — controlla 'tailscale status'"
+      warn "URL Tailscale non ancora pronto — riprova tra poco con: docker exec vps1777-tailscale tailscale status"
     fi
   fi
 
