@@ -1,60 +1,28 @@
-# compose.ingress.tailscale.yaml — Tailscale Funnel sidecar
+# compose.ingress.tailscale.yaml — Tailscale Funnel (Tailscale gira SULL'HOST)
 #
-# Pattern: container `tailscale/tailscale` con `network_mode: service:gateway`
-# → condivide il network namespace del gateway, quindi:
-#   - tailscale funnel inoltra a http://127.0.0.1:8080 (= gateway, stesso ns)
-#   - tailscale esce su internet attraverso la rete `ingress` del gateway
-#     (per questo il gateway DEVE restare su `ingress`, non solo backend)
+# Tailscale NON gira più in un container sidecar. Gira come servizio systemd
+# sull'HOST, installato e configurato dall'installer (engine.py) o da deploy.sh:
+#   tailscale up --auth-key=... --hostname=vps1777
+#   tailscale serve  --bg --https=443 http://127.0.0.1:8080
+#   tailscale funnel --bg 443
 #
-# NB: con network_mode: service:X NON si può usare `hostname:` né `networks:`
-#     sul container (eredita tutto dal gateway). TS_HOSTNAME (env) imposta
-#     comunque il nome del nodo nel tailnet.
+# Perché host e non sidecar (lezione appresa sul campo):
+#   - il container ufficiale tailscale ha avuto un bug di containerboot
+#     (panic in storeHTTPSEndpoint con TS_SERVE_CONFIG fuori da Kubernetes →
+#     crash-loop, vedi v1.78.x);
+#   - `network_mode: service:gateway` crea un netns fragile: ricreare il
+#     gateway orfanizza il sidecar (niente DNS/proxy).
+#   Sull'host `tailscaled` è robusto, sopravvive ai reboot nativamente, e la
+#   config serve/funnel persiste nello stato di tailscaled.
 #
-# Auth: TS_AUTHKEY (da .env). Vuoto → il container parte ma non si logga;
-#       autenticalo dopo con:
-#         docker exec -it vps1777-tailscale tailscale up --authkey=tskey-auth-...
+# Qui pubblichiamo solo il gateway su una porta dell'host che `tailscaled`
+# (sull'host) raggiunge per il serve/funnel. GATEWAY_BIND controlla l'esposizione:
+#   GATEWAY_BIND=127.0.0.1 → solo loopback (produzione: lo vede solo il Funnel)
+#   GATEWAY_BIND=0.0.0.0   → fallback raggiungibile via http://IP:8080 (se il Funnel non parte)
 #
 # Profilo: ingress.tailscale
 
 services:
-
-  tailscale:
-    profiles: [ingress.tailscale]
-    # NB: NON usare v1.78.0–v1.78.2: bug di containerboot (nil pointer in
-    # kubeClient.storeHTTPSEndpoint) con TS_SERVE_CONFIG fuori da Kubernetes →
-    # crash-loop, il Funnel non parte mai. Fixato da v1.78.3 in poi
-    # (tailscale/tailscale#14357). Pinnata a una stabile recente.
-    image: tailscale/tailscale:v1.98.4
-    container_name: vps1777-tailscale
-    restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun
-    environment:
-      TS_HOSTNAME: ${TS_HOSTNAME:-vps1777}
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_USERSPACE: "false"          # kernel WireGuard
-      TS_AUTHKEY: ${TS_AUTHKEY:-}     # vuoto = standby (no crash-loop)
-      TS_AUTH_ONCE: "true"
-      TS_SERVE_CONFIG: /config/serve.json
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-      - ./ingress/tailscale-serve.json:/config/serve.json:ro
-    network_mode: "service:gateway"  # condivide il network del gateway
-    # Wrapper: senza auth-key resta in STANDBY (tailscaled vivo, niente
-    # crash-loop). Con auth-key delega a containerboot (login + Funnel).
-    # Per attivarlo dopo: scrivi la key e `docker compose up -d tailscale`.
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - 'if [ -z "$${TS_AUTHKEY}" ]; then echo "[vps1777] tailscale in standby: nessuna TS_AUTHKEY. Aggiungila e: docker compose up -d tailscale"; exec tailscaled --statedir=/var/lib/tailscale; else exec containerboot; fi'
-    depends_on:
-      gateway:
-        condition: service_healthy
-
-# Il gateway resta sulle reti del compose base (backend + ingress).
-# `ingress` (bridge non-internal) dà a Tailscale l'egress verso i
-# coordination server. NON ridefiniamo qui le sue reti.
-
-volumes:
-  tailscale-state:
+  gateway:
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1}:8080:8080"

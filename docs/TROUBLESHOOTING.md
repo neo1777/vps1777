@@ -76,16 +76,10 @@ NON li porta). Servono tutti e tre:
 2. **HTTPS Certificates** abilitato — stessa pagina DNS
 3. Attributo **`funnel` nell'ACL** per `tag:vps1777` (l'installer lo scrive da sé se gli dai un **OAuth client** con scope `policy_file`; vedi [INGRESS.md](INGRESS.md))
 
-**Caso 0 — il sidecar tailscale è in crash-loop (versione immagine).** Sintomo:
-`docker ps` mostra `vps1777-tailscale` come `Restarting`, e `docker logs` contiene
-`panic: ... kubeClient.storeHTTPSEndpoint`. È un bug di containerboot v1.78.0–.2 con
-`TS_SERVE_CONFIG` fuori da Kubernetes. **Fix: usa l'immagine `v1.78.3`+** (il repo
-pinna `v1.98.4`). Verifica: `docker inspect vps1777-tailscale --format '{{.RestartCount}}'`
-deve restare basso.
-
-**Caso 0-bis — gateway irraggiungibile dal sidecar dopo un restart.** Se hai ricreato
-il gateway a mano, il sidecar (che ne condivide il netns via `network_mode: service:gateway`)
-resta sul netns vecchio. Ricrealo: `docker compose ... up -d --force-recreate tailscale`.
+> **Nota architettura**: Tailscale gira **sull'host** (servizio systemd), non in un
+> container. (Storicamente era un sidecar Docker, abbandonato per i bug di
+> containerboot e del netns condiviso.) Quindi i comandi qui sotto sono `tailscale ...`
+> diretti sull'host, non `docker exec`.
 
 Diagnosi (l'installer fallisce **subito**, allo STEP 3, se la provisioning OAuth non va):
 
@@ -93,12 +87,14 @@ Diagnosi (l'installer fallisce **subito**, allo STEP 3, se la provisioning OAuth
 - `token fallito` → Client ID/Secret errati.
 - `ACL non aggiornata … policy_file` → all'OAuth client manca lo scope `policy_file` (write).
 
-Se invece il nodo entra ma il Funnel non parte (URL già `*.ts.net` ma niente HTTPS), sulla VPS:
+Se invece il nodo entra ma il Funnel non parte, sulla VPS (host):
 ```bash
-docker exec vps1777-tailscale tailscale funnel status     # cosa è attivo
-docker logs vps1777-tailscale --tail 40                   # errore esatto
-docker exec vps1777-tailscale tailscale status            # login / DNSName del nodo
+tailscale funnel status     # cosa è pubblicato
+tailscale serve status      # mapping serve → 127.0.0.1:8080
+tailscale status            # login / DNSName del nodo
+sudo journalctl -u tailscaled --no-pager | tail -40   # errori cert/funnel
 ```
+Se serve, riattiva a mano: `tailscale serve --bg --https=443 http://127.0.0.1:8080 && tailscale funnel --bg 443`.
 - `Funnel not available; "funnel" node attribute not set` → manca il nodeAttr nell'ACL.
 - errori su `cert`/`HTTPS` → manca il toggle **HTTPS Certificates** (admin → DNS).
 - `Logged out` + `nessuna TS_AUTHKEY` nei log → la key non è arrivata in `.env` (provisioning fallita allo STEP 3).
@@ -129,15 +125,16 @@ sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE=https://vps1777.<tuo-tailnet>.ts.net|' .en
 docker compose -f compose.yaml -f compose.ingress.tailscale.yaml --profile ingress.tailscale up -d
 ```
 
-## Tailscale: container parte ma non si logga
+## Tailscale: il nodo non è autenticato
 
-Causa: `TS_AUTHKEY` vuoto al deploy. Il sidecar gira ma il nodo non è autenticato.
+Causa: `tailscale up` non è stato eseguito o la key era vuota/non valida.
 
-Fix:
+Fix (sull'host):
 ```bash
 ssh <user>@<vps>
-sudo docker exec -it vps1777-tailscale tailscale up --authkey=tskey-auth-...
-# Genera la key su https://login.tailscale.com/admin/settings/keys
+sudo tailscale up --authkey=tskey-auth-... --hostname=vps1777
+# Genera la key su https://login.tailscale.com/admin/machines/new-linux
+# Poi: sudo tailscale serve --bg --https=443 http://127.0.0.1:8080 && sudo tailscale funnel --bg 443
 ```
 
 ## Reset completo (perdi dati)

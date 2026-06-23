@@ -148,24 +148,23 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
 
       <div class="cond show" id="cond-ts">
         <div class="checklist">
-          <div class="checklist-h">Prima volta su Tailscale? 4 passi una tantum (poi l'installer fa il resto):</div>
+          <div class="checklist-h">Tailscale gira sull'host (lo installa l'installer). Prerequisiti una tantum:</div>
           <ol>
-            <li>Crea l'account su <a href="https://login.tailscale.com" target="_blank">login.tailscale.com</a></li>
+            <li>Account su <a href="https://login.tailscale.com" target="_blank">login.tailscale.com</a></li>
             <li>Abilita <strong>MagicDNS</strong> e <strong>HTTPS Certificates</strong> in <a href="https://login.tailscale.com/admin/dns" target="_blank">admin → DNS</a></li>
-            <li>Crea un <strong>OAuth client</strong> in <a href="https://login.tailscale.com/admin/settings/oauth" target="_blank">admin → OAuth clients</a> con scope <code>policy_file</code> (write) <strong>+</strong> <code>auth_keys</code>.
-              <strong>⚠ Nella sezione Tags dello scope <code>auth_keys</code> seleziona <code>tag:vps1777</code></strong> (se non esiste, aggiungilo lì: Tailscale lo mette nei tagOwners). Il client <strong>deve</strong> avere quel tag, o non potrà generare la key (errore <em>"tags not permitted"</em>).</li>
-            <li>Incolla qui sotto <strong>Client ID</strong> e <strong>Client Secret</strong></li>
+            <li>Concedi il <strong>Funnel</strong> nell'ACL: <a href="https://login.tailscale.com/admin/acls" target="_blank">Access Controls</a> → in <code>nodeAttrs</code> aggiungi <code>{"target":["autogroup:member"],"attr":["funnel"]}</code> <span class="opt">(con la modalità OAuth lo scrive l'installer da sé)</span></li>
           </ol>
-          <div class="checklist-note">Il Client Secret resta sul tuo PC: l'installer lo usa solo per scrivere il permesso Funnel nell'ACL e generare una chiave usa-e-getta. Sulla VPS finisce solo quella chiave.</div>
+          <div class="checklist-note">Poi scegli UN metodo qui sotto. <strong>Auth-key</strong> = più semplice (3 click). <strong>OAuth client</strong> = automatizza anche il punto 3 dell'ACL.</div>
         </div>
         <div class="field"><label>Hostname Tailscale</label><input type="text" id="ts_hostname" value="vps1777"></div>
+        <div class="field"><label>Auth-key <span class="opt">(semplice — da admin → Machines → Add Linux server, oppure Settings → Keys)</span></label>
+          <input type="password" id="ts_authkey" placeholder="tskey-auth-..." autocomplete="off"></div>
+        <div class="hint" style="margin:6px 0">— oppure — <strong>OAuth client</strong> (automatizza l'ACL; scope <code>policy_file</code>+<code>auth_keys</code>, tag <code>tag:vps1777</code> assegnato al client):</div>
         <div class="row2">
-          <div class="field"><label>OAuth Client ID</label><input type="text" id="ts_oauth_client_id" placeholder="k123ABC..." autocomplete="off"></div>
-          <div class="field"><label>OAuth Client Secret</label><input type="password" id="ts_oauth_client_secret" placeholder="tskey-client-..." autocomplete="off"></div>
+          <div class="field"><label>OAuth Client ID <span class="opt">(opz.)</span></label><input type="text" id="ts_oauth_client_id" placeholder="k123ABC..." autocomplete="off"></div>
+          <div class="field"><label>OAuth Client Secret <span class="opt">(opz.)</span></label><input type="password" id="ts_oauth_client_secret" placeholder="tskey-client-..." autocomplete="off"></div>
         </div>
-        <div class="hint">In alternativa, modalità avanzata: se preferisci gestire ACL/HTTPS a mano puoi usare una auth-key diretta — lascia vuoti i campi OAuth e <a href="#" onclick="document.getElementById('ts-adv').style.display='block';return false">mostra il campo auth-key</a>.</div>
-        <div class="field" id="ts-adv" style="display:none;margin-top:10px"><label>Tailscale auth-key <span class="opt">(avanzato)</span></label>
-          <input type="password" id="ts_authkey" placeholder="tskey-auth-..."></div>
+        <div class="hint">Il Client Secret resta sul tuo PC. Sulla VPS arriva solo una auth-key usa-e-getta.</div>
       </div>
       <div class="cond" id="cond-caddy">
         <div class="field"><label>Dominio</label><input type="text" id="caddy_domain" placeholder="vps.tuosito.com"></div>

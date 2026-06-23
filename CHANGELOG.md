@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Cambiato — Tailscale spostato SULL'HOST (via il sidecar Docker)
+
+Decisione architetturale dopo il debug: **Tailscale non gira più in un container sidecar, ma come servizio sull'host** (installato da installer/deploy.sh). Elimina alla radice i due bug peggiori incontrati: il crash-loop di `containerboot` (bug immagine) e il netns orfano (`network_mode: service:gateway`). `tailscaled` sull'host è robusto, sopravvive ai reboot nativamente, e la config serve/funnel persiste.
+
+- **`engine.py`**: `step_tailscale_host` installa Tailscale sull'host (`install.sh`), fa `tailscale up` con la key, poi `tailscale serve --bg --https=443 http://127.0.0.1:8080` + `tailscale funnel --bg 443` + pre-provisiona il cert. Niente più sidecar, `_relink_tailscale` rimosso. Verifica HTTPS post-reboot via `curl` dall'host.
+- **`compose.ingress.tailscale.yaml`**: niente più container tailscale; pubblica solo il gateway su `${GATEWAY_BIND:-127.0.0.1}:8080` (loopback in produzione → solo Funnel; `0.0.0.0` come fallback se il Funnel non parte). Rimosso `ingress/tailscale-serve.json`.
+- **`deploy.sh`**: stesso flusso host-mode (main + `--apply`).
+- **UI + INGRESS.md**: due metodi auth a pari livello — **auth-key** (semplice, dalla pagina "Add Linux server") e **OAuth client** (automatizza il nodeAttr nell'ACL). Prerequisiti account (MagicDNS/HTTPS/nodeAttr funnel) invariati.
+- ⚠ Refactor non testato E2E su deploy pulito (validato a pezzi sul campo) — da verificare al primo deploy da VPS vergine.
+
 ### Fix — Funnel Tailscale: crash containerboot + netns + cert (debug su VPS reale)
 
 Sessione di debug end-to-end su VPS reale (con accesso root). Trovati e corretti **tre** problemi che impedivano al Funnel HTTPS di servire (l'URL restava `http://IP:8080`):

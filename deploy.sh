@@ -166,19 +166,22 @@ if [ "$APPLY_MODE" = "1" ]; then
   '" || die "Scrittura secret/.env fallita"
   ok "Secret + .env aggiornati"
 
-  # 2. Tailscale: ricreo il container con la key (containerboot fa login +
-  #    Funnel puliti). Più robusto di 'docker exec up' su un sidecar che era
-  #    in standby.
+  # 2. Tailscale SULL'HOST: install + up + serve + funnel (no sidecar container).
   if [ -n "$TS_KEY" ]; then
-    log "Attivo Tailscale (ricreo il sidecar con la key)..."
-    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d tailscale'" || warn "ricreazione tailscale fallita"
-    sleep 6
-    TS_URL="$(SSH "sudo docker exec vps1777-tailscale tailscale status --json 2>/dev/null | python3 -c \"import sys,json;print('https://'+json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))\" 2>/dev/null" || echo "")"
+    log "Attivo Tailscale sull'host + Funnel..."
+    SSH "curl -fsSL https://tailscale.com/install.sh | sh" >/dev/null 2>&1 || warn "install tailscale fallito"
+    SSH "systemctl enable --now tailscaled" >/dev/null 2>&1 || true
+    SSH "tailscale up --authkey=$TS_KEY --hostname=${TS_HOSTNAME:-vps1777} --accept-dns=false --reset" >/dev/null 2>&1 || warn "tailscale up fallito"
+    sleep 5
+    TS_URL="$(SSH "tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);n=d.get('Self',{}).get('DNSName','').rstrip('.');print('https://'+n if n else '')\" 2>/dev/null" || echo "")"
     if echo "$TS_URL" | grep -q '\.ts\.net$'; then
-      ok "Tailscale attivo: $TS_URL"
+      SSH "tailscale serve --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
+      SSH "tailscale funnel --bg 443" >/dev/null 2>&1 || true
+      SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
+      ok "Funnel HTTPS attivo: $TS_URL"
       [ -z "$PUB" ] && PUB="$TS_URL"
     else
-      warn "URL Tailscale non ancora pronto — riprova tra poco con: docker exec vps1777-tailscale tailscale status"
+      warn "URL Tailscale non pronto — controlla key/prerequisiti (MagicDNS+HTTPS+nodeAttr funnel)."
     fi
   fi
 
@@ -188,11 +191,10 @@ if [ "$APPLY_MODE" = "1" ]; then
     ok "PUBLIC_BASE=$PUB"
   fi
 
-  # 4. Restart servizi SENZA compose.onboarding (chiude la porta 8080 in chiaro)
-  log "Riavvio i servizi (chiudo la porta 8080 di onboarding)..."
+  # 4. Restart servizi. Per tailscale il gateway resta su 127.0.0.1:8080
+  #    (GATEWAY_BIND), quindi la porta pubblica :8080 si chiude da sé.
+  log "Riavvio i servizi..."
   SSHT "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d'" || die "restart fallito"
-  # gateway ricreato → ri-aggancia il sidecar tailscale (netns condiviso)
-  case "$INGRESS_PROFILE" in *tailscale*) SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d --force-recreate tailscale'" >/dev/null 2>&1 || warn "relink tailscale fallito";; esac
   ok "Servizi riavviati"
 
   # 5. Cancella pending.json (contiene valori sensibili)
@@ -400,33 +402,38 @@ fi
 # ═══════════════════════════════════════════ 6. BUILD + UP
 step "6/8 — Build immagini + avvio stack (può richiedere alcuni minuti)"
 
-# Include compose.onboarding.yaml → espone :8080 sull'host per il pannello
-# /admin/setup (raggiungibile prima che Tailscale sia attivo). deploy.sh --apply
-# poi riavvia SENZA questo override, chiudendo la porta.
-COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml -f compose.onboarding.yaml --profile ingress.${INGRESS}"
+# Per tailscale (host-mode) l'esposizione la gestisce GATEWAY_BIND, NON
+# compose.onboarding (che pubblicherebbe una 2ª porta in conflitto sulla :8080).
+if [ "$INGRESS" = "tailscale" ]; then
+  COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.tailscale.yaml --profile ingress.tailscale"
+else
+  COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml -f compose.onboarding.yaml --profile ingress.${INGRESS}"
+fi
 SSHT "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD up -d --build'" \
   || die "docker compose up fallito"
-ok "Stack avviato (pannello onboarding su http://$VPS_IP:8080/admin/setup)"
+ok "Stack avviato"
 
 log "Stato container:"
 SSH "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
 
-# ── Auto-URL Tailscale: se la key è stata fornita ora, il sidecar si è
-#    loggato all'avvio. Ricavo l'URL .ts.net, lo metto in PUBLIC_BASE e
-#    riavvio il gateway (così OAuth/connector usano l'URL giusto da subito).
+# ── Tailscale SULL'HOST (no container): install + up + serve + funnel verso
+#    il gateway su 127.0.0.1:8080. Niente sidecar → niente containerboot/netns.
 if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
-  log "Tailscale: ricavo l'URL pubblico..."
-  sleep 4
-  TS_URL="$(SSH "sudo docker exec vps1777-tailscale tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);print('https://'+d.get('Self',{}).get('DNSName','').rstrip('.'))\" 2>/dev/null" || echo "")"
+  log "Tailscale: installo sull'host + Funnel..."
+  SSH "curl -fsSL https://tailscale.com/install.sh | sh" >/dev/null 2>&1 || warn "install tailscale fallito"
+  SSH "systemctl enable --now tailscaled" >/dev/null 2>&1 || true
+  SSH "tailscale up --authkey=$TS_AUTHKEY --hostname=${TS_HOSTNAME:-vps1777} --accept-dns=false --reset" >/dev/null 2>&1 || warn "tailscale up fallito"
+  sleep 5
+  TS_URL="$(SSH "tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);n=d.get('Self',{}).get('DNSName','').rstrip('.');print('https://'+n if n else '')\" 2>/dev/null" || echo "")"
   if echo "$TS_URL" | grep -q '\.ts\.net$'; then
     PUBLIC_BASE="$TS_URL"
-    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$TS_URL|\" .env || echo PUBLIC_BASE=$TS_URL >> .env)'"
-    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1 || true
-    # gateway ricreato → ri-aggancia il sidecar tailscale (netns condiviso via network_mode: service:gateway)
-    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d --force-recreate tailscale'" >/dev/null 2>&1 || true
-    ok "URL pubblico: $TS_URL"
+    SSH "tailscale serve --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
+    SSH "tailscale funnel --bg 443" >/dev/null 2>&1 || true
+    SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$TS_URL|\" .env || echo PUBLIC_BASE=$TS_URL >> .env) && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1 || true
+    ok "Funnel HTTPS attivo: $TS_URL"
   else
-    warn "URL Tailscale non ricavato — configuralo dal pannello dopo."
+    warn "URL Tailscale non ricavato — controlla key/prerequisiti (MagicDNS+HTTPS+nodeAttr funnel)."
   fi
 fi
 
