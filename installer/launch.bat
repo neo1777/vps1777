@@ -20,7 +20,13 @@ if errorlevel 1 (
   echo   Installo paramiko ^(dipendenza SSH^)...
   python -m pip install --quiet paramiko
   if errorlevel 1 (
-    echo Impossibile installare paramiko. Prova: pip install paramiko
+    echo   pip non disponibile, provo ensurepip...
+    python -m ensurepip
+    python -m pip install --quiet paramiko
+  )
+  python -c "import paramiko" 2>nul
+  if errorlevel 1 (
+    echo Impossibile installare paramiko. Prova a mano:  python -m pip install paramiko
     pause
     exit /b 1
   )
