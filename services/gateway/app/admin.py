@@ -75,37 +75,77 @@ def _require_admin(request: Request) -> tuple[str | None, Response | None]:
 # ───── HTML template minimale ─────
 # (in F8 refactor: estrai in Jinja2 templates/)
 
+_FONTS = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link href="https://fonts.googleapis.com/css2?'
+    'family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&'
+    'family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">'
+)
+
+# Timbro 1777: dark profondo, accent corallo, Fraunces display + JetBrains mono.
 _CSS = """
 <style>
-:root{--bg:#0d0e10;--fg:#e4e2dd;--muted:#86868b;--accent:#d97757;--ok:#5eb87a;--warn:#d4a35e;--err:#c47158;--line:#2a2a2c;--bg-card:#15161a}
+:root{
+  --bg:#0c0d10;--bg-card:#15161a;--bg-soft:#101116;
+  --fg:#e8e6e1;--muted:#8a8a90;--faint:#5c5c63;
+  --accent:#d97757;--accent-dim:#b35f44;
+  --ok:#5eb87a;--warn:#d4a35e;--err:#c47158;
+  --line:#262629;--line-soft:#1d1d20;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --display:'Fraunces',Georgia,serif;
+  --sans:system-ui,-apple-system,'Segoe UI',sans-serif;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--fg);line-height:1.55;padding:40px 24px;max-width:760px;margin:0 auto}
-header{margin-bottom:36px;padding-bottom:18px;border-bottom:1px solid var(--line)}
-h1{font-weight:600;letter-spacing:.02em}h1 em{color:var(--accent);font-style:normal;font-weight:400}
-.who{color:var(--muted);font-size:13px;margin-top:6px}
-.kicker{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px}
-section{background:var(--bg-card);border:1px solid var(--line);padding:22px;border-radius:6px;margin-bottom:24px}
-form .row{display:grid;grid-template-columns:140px 1fr;gap:16px;align-items:center;margin-bottom:14px}
+body{font-family:var(--sans);background:
+  radial-gradient(1100px 500px at 80% -10%,rgba(217,119,87,.07),transparent 60%),var(--bg);
+  color:var(--fg);line-height:1.6;padding:48px 24px;max-width:780px;margin:0 auto;
+  -webkit-font-smoothing:antialiased}
+header{margin-bottom:34px;padding-bottom:20px;border-bottom:1px solid var(--line)}
+h1{font-family:var(--display);font-weight:500;font-size:30px;letter-spacing:.01em}
+h1 em{color:var(--accent);font-style:normal;font-weight:600}
+h2{font-family:var(--display);font-weight:500;font-size:19px;margin:0 0 14px}
+.who{color:var(--muted);font-size:13px;margin-top:8px;font-family:var(--mono)}
+.kicker{color:var(--faint);font-size:11px;text-transform:uppercase;letter-spacing:.14em;margin-bottom:16px;font-family:var(--mono)}
+section{background:var(--bg-card);border:1px solid var(--line);padding:24px;border-radius:10px;margin-bottom:22px}
+p{color:var(--fg)}
+form .row{display:grid;grid-template-columns:160px 1fr;gap:18px;align-items:center;margin-bottom:16px}
+form .row.stack{grid-template-columns:1fr;gap:8px}
 label{color:var(--muted);font-size:13px}
-input[type=email],input[type=password],input[type=text],input[type=file]{background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:10px 12px;border-radius:4px;font-family:inherit;font-size:14px;width:100%}
-input:focus{outline:none;border-color:var(--accent)}
-.toolbar{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
-button,.btn{background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:8px 14px;border-radius:4px;cursor:pointer;text-decoration:none;font-size:13px;font-family:inherit}
-button.primary,.btn.primary{background:var(--accent);color:#15161a;border-color:var(--accent)}
+input[type=email],input[type=password],input[type=text],input[type=file],textarea{
+  background:var(--bg-soft);color:var(--fg);border:1px solid var(--line);padding:11px 13px;
+  border-radius:7px;font-family:var(--mono);font-size:13px;width:100%}
+input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(217,119,87,.12)}
+.hint{color:var(--faint);font-size:12px;margin-top:4px}
+.hint a{color:var(--accent-dim)}
+.toolbar{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;align-items:center}
+button,.btn{background:var(--bg-soft);color:var(--fg);border:1px solid var(--line);padding:9px 16px;
+  border-radius:7px;cursor:pointer;text-decoration:none;font-size:13px;font-family:var(--sans);transition:.15s}
+button.primary,.btn.primary{background:var(--accent);color:#15161a;border-color:var(--accent);font-weight:500}
+button.primary:hover,.btn.primary:hover{background:var(--accent-dim)}
 button:hover,.btn:hover{border-color:var(--accent)}
-.flash{padding:10px 14px;border-radius:4px;margin-bottom:18px;font-size:13px}
+.flash{padding:12px 16px;border-radius:7px;margin-bottom:20px;font-size:13px}
 .flash.ok{background:rgba(94,184,122,.1);border:1px solid var(--ok);color:var(--ok)}
-.flash.err{background:rgba(196,113,88,.1);border:1px solid var(--err);color:var(--err)}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
-.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.err{background:var(--err)}
-pre,code{font-family:'JetBrains Mono',monospace;font-size:12px}
-pre{background:var(--bg);padding:10px;border-radius:4px;overflow-x:auto;margin:8px 0}
-ol li{margin-bottom:12px}
-nav.tabs{display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--line)}
-nav.tabs a{padding:8px 16px;color:var(--muted);text-decoration:none;font-size:13px;border-bottom:2px solid transparent}
+.flash.err{background:rgba(196,113,88,.12);border:1px solid var(--err);color:var(--err)}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;vertical-align:middle;box-shadow:0 0 8px currentColor}
+.dot.ok{background:var(--ok);color:var(--ok)}.dot.warn{background:var(--warn);color:var(--warn)}
+.dot.err{background:var(--err);color:var(--err)}.dot.off{background:var(--faint);color:transparent;box-shadow:none}
+pre,code{font-family:var(--mono);font-size:12px}
+code{color:var(--accent-dim);background:var(--bg-soft);padding:1px 6px;border-radius:4px}
+pre{background:var(--bg-soft);padding:13px 15px;border-radius:7px;overflow-x:auto;margin:10px 0;border:1px solid var(--line-soft);color:var(--fg)}
+pre code{background:none;padding:0;color:var(--fg)}
+ol{margin-left:20px}ol li{margin-bottom:12px}
+ul{margin-left:18px}ul li{margin-bottom:7px;color:var(--muted)}
+nav.tabs{display:flex;gap:2px;margin-bottom:28px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+nav.tabs a{padding:9px 16px;color:var(--muted);text-decoration:none;font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px}
+nav.tabs a:hover{color:var(--fg)}
 nav.tabs a.active{color:var(--fg);border-color:var(--accent)}
-.audit-event{padding:6px 0;border-bottom:1px solid var(--line);font-family:'JetBrains Mono',monospace;font-size:11px;display:flex;gap:12px}
-.audit-event .ts{color:var(--muted);min-width:170px}.audit-event .ev{color:var(--accent);min-width:170px}
+.status-grid{display:grid;gap:12px;margin-bottom:8px}
+.status-row{display:flex;align-items:center;gap:10px;padding:13px 16px;background:var(--bg-soft);border:1px solid var(--line-soft);border-radius:8px}
+.status-row .lbl{font-weight:500}.status-row .val{color:var(--muted);font-size:12px;margin-left:auto;font-family:var(--mono)}
+.audit-event{padding:7px 0;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;display:flex;gap:14px}
+.audit-event .ts{color:var(--faint);min-width:170px}.audit-event .ev{color:var(--accent-dim);min-width:180px}
+.foot{color:var(--faint);font-size:11px;text-align:center;margin-top:40px;font-family:var(--mono);letter-spacing:.04em}
 </style>
 """
 
@@ -114,8 +154,9 @@ def _layout(title: str, body: str, current: str = "", flash: str = "", flash_kin
     tabs = ""
     if current:
         items = [
-            ("secrets", "Secrets"),
+            ("setup", "Setup"),
             ("nlm", "NotebookLM"),
+            ("secrets", "Secrets"),
             ("audit", "Audit"),
         ]
         rendered = "".join(
@@ -129,9 +170,11 @@ def _layout(title: str, body: str, current: str = "", flash: str = "", flash_kin
     out = f"""<!DOCTYPE html><html lang="it"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>vps1777 · {html.escape(title)}</title>
+{_FONTS}
 {_CSS}
 </head><body>
 {tabs}{flash_html}{body}
+<div class="foot">vps1777 · gateway</div>
 </body></html>"""
     return HTMLResponse(out)
 
@@ -142,7 +185,7 @@ async def admin_root(request: Request) -> Response:
     email, redirect = _require_admin(request)
     if redirect:
         return redirect
-    return RedirectResponse("/admin/nlm", status_code=302)
+    return RedirectResponse("/admin/setup", status_code=302)
 
 
 # ───── /admin/login ─────

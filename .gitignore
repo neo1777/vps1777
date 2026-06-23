@@ -25,6 +25,9 @@ data/*
 !data/.gitkeep
 volumes/
 
+# ───── Onboarding pending (valori sensibili temporanei) ─────
+onboarding/
+
 # ───── IDE / OS ─────
 .vscode/
 .idea/

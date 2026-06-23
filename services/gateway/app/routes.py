@@ -5,7 +5,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from . import admin, miniapp, oauth, proxy
+from . import admin, miniapp, oauth, onboarding, proxy
 from .settings import get_settings
 
 
@@ -36,6 +36,7 @@ routes = [
     Route("/admin/", admin.admin_root, methods=["GET"]),
     Route("/admin/login", admin.login, methods=["GET", "POST"]),
     Route("/admin/logout", admin.logout, methods=["POST"]),
+    Route("/admin/setup", onboarding.setup_view, methods=["GET", "POST"]),
     Route("/admin/nlm", admin.nlm_view, methods=["GET", "POST"]),
     Route("/admin/audit", admin.audit_view, methods=["GET"]),
     Route("/admin/secrets", admin.secrets_view, methods=["GET"]),

@@ -67,7 +67,8 @@ services:
       - telegram_bot_token
     volumes:
       - gateway-data:/var/lib/gateway
-      - nlm-auth:/var/lib/nlm:rw  # condiviso con nb1777-mcp per /admin/nlm upload
+      - nlm-auth:/var/lib/nlm:rw       # condiviso con nb1777-mcp per /admin/nlm upload
+      - ./onboarding:/var/lib/onboarding:rw  # bind-mount: pending.json letto da deploy.sh --apply
     networks:
       - backend
       - ingress

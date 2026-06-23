@@ -110,6 +110,7 @@ class Settings(BaseSettings):
     # ───── Storage ─────
     audit_log_path: str = "/var/lib/gateway/audit.jsonl"
     nlm_auth_dir: str = "/var/lib/nlm"
+    onboarding_dir: str = "/var/lib/onboarding"  # bind-mount condiviso col PC (deploy.sh --apply)
 
     # ───── helpers ─────
 

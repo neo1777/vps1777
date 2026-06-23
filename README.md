@@ -54,9 +54,10 @@ git clone https://github.com/<owner>/vps1777.git && cd vps1777
 4. Genera `.env` + secrets (random + bcrypt) sulla VPS
 5. `docker compose up -d --build`
 6. **Riavvia la VPS e verifica che i container ripartano da soli**
-7. Stampa gli URL finali
+7. Apre il **pannello di onboarding** su `http://<IP>:8080/admin/setup`
 
-Niente da fare a mano sulla VPS. Vedi [docs/INSTALL.md](docs/INSTALL.md) per dettagli + metodo manuale.
+Poi finisci **dal browser** (Tailscale, bot, NotebookLM) + `./deploy.sh --apply`
+per applicare. Niente comandi Docker da gestire. Vedi [docs/ONBOARDING.md](docs/ONBOARDING.md).
 
 ## 🛠 Install manuale (sulla VPS)
 

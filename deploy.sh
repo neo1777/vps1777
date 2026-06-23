@@ -80,6 +80,10 @@ for f in compose.yaml services/gateway/Dockerfile; do
   [ -f "$f" ] || die "File repo mancante: $f — lancia dalla dir di vps1777"
 done
 
+# Modalità: deploy completo (default) o --apply (applica config dal pannello)
+APPLY_MODE=0
+if [ "${1:-}" = "--apply" ]; then APPLY_MODE=1; shift; fi
+
 # ═══════════════════════════════════════════ 1. CONNESSIONE VPS
 step "1/8 — Connessione VPS"
 
@@ -112,6 +116,77 @@ OS_INFO=$(SSH '. /etc/os-release; echo "$PRETTY_NAME ($(uname -m))"' 2>/dev/null
 ok "Connesso: $OS_INFO"
 
 [ "$VPS_USER" = "root" ] || warn "User non-root: assicurati abbia sudo NOPASSWD, altrimenti alcuni step falliranno."
+
+# ═══════════════════════════════════════════ MODALITÀ --apply
+# Legge onboarding/pending.json (scritto dal pannello /admin/setup) e applica:
+# tailscale up, secret bot, PUBLIC_BASE, restart servizi.
+if [ "$APPLY_MODE" = "1" ]; then
+  OPERATOR_USER="${OPERATOR_USER:-vps1777}"
+  REMOTE_DIR="/home/$OPERATOR_USER/vps1777"
+  PENDING="$REMOTE_DIR/onboarding/pending.json"
+  INGRESS_PROFILE="$(SSH "sudo -u $OPERATOR_USER grep ^INGRESS_PROFILE= $REMOTE_DIR/.env 2>/dev/null | cut -d= -f2" || echo "ingress.tailscale")"
+  [ -z "$INGRESS_PROFILE" ] && INGRESS_PROFILE="ingress.tailscale"
+  INGRESS="${INGRESS_PROFILE#ingress.}"
+  COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml --profile ${INGRESS_PROFILE}"
+
+  step "APPLY — leggo la config dal pannello /admin/setup"
+  log "Leggo $PENDING ..."
+  SSH "test -f $PENDING" 2>/dev/null || die "Nessuna config trovata in $PENDING. Apri il pannello /admin/setup, compila e Salva, poi rilancia --apply."
+
+  get() { SSH "python3 -c \"import json;print(json.load(open('$PENDING')).get('$1',''))\" 2>/dev/null"; }
+  TS_KEY="$(get tailscale_authkey)"
+  TG_TOKEN="$(get telegram_bot_token)"
+  TG_OWNER="$(get telegram_owner_id)"
+  PUB="$(get public_base)"
+  ok "Config letta (ts_key:$([ -n "$TS_KEY" ] && echo sì || echo no), bot:$([ -n "$TG_TOKEN" ] && echo sì || echo no), owner:$([ -n "$TG_OWNER" ] && echo sì || echo no))"
+
+  # 1. Scrivi i secret + .env come operator
+  log "Scrivo secret + .env..."
+  SSH "sudo -u $OPERATOR_USER bash -lc '
+    cd ~/vps1777
+    set_kv() { grep -q \"^\$1=\" .env && sed -i \"s|^\$1=.*|\$1=\$2|\" .env || echo \"\$1=\$2\" >> .env; }
+    $([ -n "$TS_KEY" ]   && echo "printf %s \"$TS_KEY\"   > secrets/ts_authkey.txt; chmod 600 secrets/ts_authkey.txt")
+    $([ -n "$TG_TOKEN" ] && echo "printf %s \"$TG_TOKEN\" > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt")
+    $([ -n "$TG_OWNER" ] && echo "set_kv TELEGRAM_OWNER_ID \"$TG_OWNER\"")
+    $([ -n "$TS_KEY" ]   && echo "set_kv TS_AUTHKEY \"$TS_KEY\"")
+    $([ -n "$PUB" ]      && echo "set_kv PUBLIC_BASE \"$PUB\"")
+    true
+  '" || die "Scrittura secret/.env fallita"
+  ok "Secret + .env aggiornati"
+
+  # 2. Tailscale up (se key fornita)
+  if [ -n "$TS_KEY" ]; then
+    log "Attivo Tailscale (tailscale up)..."
+    SSH "sudo docker exec vps1777-tailscale tailscale up --authkey='$TS_KEY' --hostname=vps1777 2>&1 | tail -5" || warn "tailscale up ha restituito un errore — verifica la key"
+    sleep 3
+    TS_URL="$(SSH "sudo docker exec vps1777-tailscale tailscale status --json 2>/dev/null | python3 -c \"import sys,json;print('https://'+json.load(sys.stdin).get('Self',{}).get('DNSName','').rstrip('.'))\" 2>/dev/null" || echo "")"
+    if echo "$TS_URL" | grep -q '\.ts\.net$'; then
+      ok "Tailscale attivo: $TS_URL"
+      [ -z "$PUB" ] && PUB="$TS_URL"
+    else
+      warn "URL Tailscale non ricavato automaticamente — controlla 'tailscale status'"
+    fi
+  fi
+
+  # 3. Se ho un PUBLIC_BASE (fornito o da Tailscale), aggiorno .env
+  if [ -n "$PUB" ]; then
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$PUB|\" .env || echo PUBLIC_BASE=$PUB >> .env)'"
+    ok "PUBLIC_BASE=$PUB"
+  fi
+
+  # 4. Restart servizi SENZA compose.onboarding (chiude la porta 8080 in chiaro)
+  log "Riavvio i servizi (chiudo la porta 8080 di onboarding)..."
+  SSHT "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d'" || die "restart fallito"
+  ok "Servizi riavviati"
+
+  # 5. Cancella pending.json (contiene valori sensibili)
+  SSH "sudo -u $OPERATOR_USER rm -f $PENDING" && ok "pending.json rimosso"
+
+  echo
+  ok "Apply completato."
+  [ -n "$PUB" ] && log "URL: ${C_B}$PUB${C_R}  →  /admin/login · /admin/nlm · /<SECRET>/<service>/mcp"
+  exit 0
+fi
 
 # ═══════════════════════════════════════════ 2. CONFIG
 step "2/8 — Configurazione stack"
@@ -304,10 +379,13 @@ fi
 # ═══════════════════════════════════════════ 6. BUILD + UP
 step "6/8 — Build immagini + avvio stack (può richiedere alcuni minuti)"
 
-COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml --profile ingress.${INGRESS}"
+# Include compose.onboarding.yaml → espone :8080 sull'host per il pannello
+# /admin/setup (raggiungibile prima che Tailscale sia attivo). deploy.sh --apply
+# poi riavvia SENZA questo override, chiudendo la porta.
+COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml -f compose.onboarding.yaml --profile ingress.${INGRESS}"
 SSHT "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD up -d --build'" \
   || die "docker compose up fallito"
-ok "Stack avviato"
+ok "Stack avviato (pannello onboarding su http://$VPS_IP:8080/admin/setup)"
 
 log "Stato container:"
 SSH "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
@@ -345,39 +423,34 @@ step "8/8 — Fatto"
 
 GATEWAY_SECRET=$(SSH "sudo -u "$OPERATOR_USER" cat $REMOTE_DIR/secrets/gateway_secret.txt" 2>/dev/null || echo "<SECRET>")
 
-cat <<DONE
-
-${C_B}${C_OK}╔═══════════════════════════════════════════════════════════════╗
-║   ✅ vps1777 deployato                                         ║
-╚═══════════════════════════════════════════════════════════════╝${C_R}
-
-  ${C_B}Ingress:${C_R} $INGRESS
-  ${C_B}Repo sulla VPS:${C_R} $REMOTE_DIR
-
-  ${C_B}Prossimi step:${C_R}
-
-  1. ${C_B}URL pubblico${C_R}
-DONE
-
-case "$INGRESS" in
-  tailscale)
-    echo "     Tailscale assegna https://${TS_HOSTNAME:-vps1777}.<tuo-tailnet>.ts.net"
-    echo "     Verifica: sul pannello https://login.tailscale.com/admin/machines"
-    [ -z "$TS_AUTHKEY" ] && warn "     auth-key Tailscale NON fornita — il sidecar non si è loggato."
-    [ -z "$TS_AUTHKEY" ] && echo "     Carica una tskey-auth in $REMOTE_DIR/secrets/ts_authkey.txt e riavvia."
-    ;;
-  caddy)        echo "     https://$CADDY_DOMAIN (cert Let's Encrypt al primo accesso)" ;;
-  cloudflared)  echo "     L'hostname configurato sul tuo Cloudflare Tunnel" ;;
-esac
-
 cat <<DONE2
 
-  2. ${C_B}Login admin${C_R}: <URL>/admin/login  (email: $ADMIN_EMAIL)
-  3. ${C_B}Carica auth NotebookLM${C_R}: <URL>/admin/nlm
-  4. ${C_B}Connector claude.ai${C_R}: <URL>/$GATEWAY_SECRET/archive/mcp  (e /nb1777/mcp)
-  5. ${C_B}Bot Telegram${C_R}: manda /start al tuo bot
+${C_B}${C_OK}╔═══════════════════════════════════════════════════════════════╗
+║   ✅ vps1777 deployato — ora finisci dal PANNELLO web          ║
+╚═══════════════════════════════════════════════════════════════╝${C_R}
 
-  ${C_D}Per amministrare:  ssh $VPS_USER@$VPS_IP  →  sudo -u $OPERATOR_USER -i  →  cd vps1777${C_R}
-  ${C_D}Log:  $COMPOSE_CMD logs -f gateway${C_R}
+  ${C_B}Ingress:${C_R} $INGRESS    ${C_B}Repo:${C_R} $REMOTE_DIR
+  ${C_B}Admin:${C_R} email $ADMIN_EMAIL  (password: vedi sopra/password manager)
+
+  ${C_B}═══ COMPLETA TUTTO DA QUI — niente terminale ═══${C_R}
+
+  1. ${C_B}Apri il pannello${C_R} (porta aperta per il primo setup):
+        ${C_OK}http://$VPS_IP:8080/admin/setup${C_R}
+     Login con email + password admin.
+
+  2. ${C_B}Nel pannello inserisci${C_R}:
+        • Tailscale auth-key  (da login.tailscale.com/admin/settings/keys)
+        • Token bot Telegram + Owner ID  (opzionale)
+        • Carica auth.json NotebookLM  (bottone dedicato)
+     Clicca ${C_B}Salva configurazione${C_R}.
+
+  3. ${C_B}Applica${C_R} — da questo PC, nella cartella del repo:
+        ${C_OK}./deploy.sh --apply${C_R}
+     Attiva Tailscale, imposta l'URL, riavvia i servizi, chiude la
+     porta 8080. Stampa l'URL HTTPS finale.
+
+  4. ${C_B}Connector claude.ai${C_R}: <URL>/$GATEWAY_SECRET/archive/mcp  (e /nb1777/mcp)
+
+  ${C_D}Amministrazione: ssh $VPS_USER@$VPS_IP → sudo -u $OPERATOR_USER -i → cd vps1777${C_R}
 
 DONE2

@@ -1,0 +1,17 @@
+# compose.onboarding.yaml — espone il gateway su IP:8080 durante il primo setup.
+#
+# Chicken-egg: il pannello /admin/setup serve PRIMA che Tailscale sia attivo,
+# ma senza Tailscale il gateway non è raggiungibile da fuori. Questo override
+# mappa la porta 8080 sull'host, così puoi aprire:
+#     http://<IP_VPS>:8080/admin/setup
+# fare l'onboarding, e poi (dopo `deploy.sh --apply` che attiva Tailscale)
+# togliere questo override per chiudere la porta in chiaro.
+#
+# Uso (incluso automaticamente da deploy.sh finché l'onboarding non è completo):
+#   docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+#     -f compose.onboarding.yaml --profile ingress.tailscale up -d
+
+services:
+  gateway:
+    ports:
+      - "8080:8080"
