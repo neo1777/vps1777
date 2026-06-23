@@ -247,7 +247,7 @@ class Deployer:
     # ───── step ─────
 
     def step_prepare(self) -> Iterator[str]:
-        yield "── Installo Docker + Compose v2 + utente operatore…"
+        yield "── Installo Docker + Compose v2 + hardening + utente operatore…"
         script = f"""
 set -e
 export DEBIAN_FRONTEND=noninteractive
@@ -258,8 +258,18 @@ command -v curl   >/dev/null 2>&1 || NEED="$NEED curl"
 command -v age    >/dev/null 2>&1 || NEED="$NEED age"
 command -v python3 >/dev/null 2>&1 || NEED="$NEED python3"
 python3 -c "import bcrypt" 2>/dev/null || NEED="$NEED python3-bcrypt"
+dpkg -s unattended-upgrades >/dev/null 2>&1 || NEED="$NEED unattended-upgrades"
+dpkg -s fail2ban >/dev/null 2>&1 || NEED="$NEED fail2ban"
 if [ -n "$NEED" ]; then apt-get update -q && apt-get install -y -q $NEED ca-certificates; fi
 systemctl enable --now docker
+# Hardening SICURO (compatibile con auth password: NON tocchiamo sshd_config,
+# altrimenti il deploy via password e la riconnessione post-reboot fallirebbero):
+#  - unattended-upgrades: patch di sicurezza automatiche
+#  - fail2ban: blocca i brute-force SSH (non banna chi si autentica bene)
+printf 'APT::Periodic::Update-Package-Lists "1";\\nAPT::Periodic::Unattended-Upgrade "1";\\n' \
+  > /etc/apt/apt.conf.d/20auto-upgrades
+systemctl enable --now unattended-upgrades 2>/dev/null || true
+systemctl enable --now fail2ban 2>/dev/null || true
 if ! docker compose version >/dev/null 2>&1; then
   case "$(uname -m)" in x86_64) A=x86_64;; aarch64|arm64) A=aarch64;; *) A=x86_64;; esac
   mkdir -p /usr/local/lib/docker/cli-plugins
@@ -281,7 +291,7 @@ docker compose version >/dev/null 2>&1 && echo "COMPOSE_OK" || echo "COMPOSE_MIS
             yield line
         if not ok:
             raise DeployError("docker compose v2 non disponibile dopo l'install del plugin")
-        yield "✓ Docker + Compose + utente pronti"
+        yield "✓ Docker + Compose + utente pronti (hardening: unattended-upgrades + fail2ban)"
 
     def step_upload(self) -> Iterator[str]:
         assert self.client

@@ -50,6 +50,12 @@ Se rilanci `setup.sh`, salta gli step già fatti.
 3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`)
 4. **Bot Telegram**: `/start` al tuo bot
 
+## Ops opzionali
+
+Hardening di base (automatico: `unattended-upgrades` + `fail2ban`) e profili
+opzionali — Portainer (cruscotto visuale), Watchtower (auto-update), backup —
+sono documentati in [OPS.md](OPS.md).
+
 ## Aggiornamento
 
 Vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md). Con Watchtower (profilo `ops.autoupdate`) è automatico.

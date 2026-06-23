@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Aggiunto — Hardening host + profilo Portainer opzionale
+
+- **Hardening automatico** in `step_prepare`: l'installer ora installa e abilita **`unattended-upgrades`** (patch di sicurezza automatiche) e **`fail2ban`** (anti brute-force SSH). Scelta sicura: **non** tocca `sshd_config` (niente disabilitazione di password/root login), perché il deploy gira via password e si riconnette dopo il reboot — disabilitarli ti chiuderebbe fuori. La disabilitazione password/root è documentata in [OPS.md](docs/OPS.md) come passo manuale post-install (dopo aver caricato una chiave).
+- **`compose.ops.portainer.yaml`** (profilo `ops.portainer`): Portainer CE come cruscotto visuale dei container, **mai esposto a internet** — pubblicato solo su `127.0.0.1`, accesso via **tunnel SSH** (`ssh -L 9443:127.0.0.1:9443 ...`). Sta su rete `backend` (internal). Monta il Docker socket (motivo per cui resta locale); il gateway pubblico resta senza socket.
+- **`docs/OPS.md`** — nuovo doc che centralizza hardening + profili opzionali (Portainer, Watchtower, backup) e come combinarli. Linkato da README, INSTALL, SECURITY.
+
 ### Docs — Sync di coerenza pre-pubblicazione
 
 Audit completo di tutta la documentazione contro il codice attuale. Corretti:

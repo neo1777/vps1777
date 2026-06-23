@@ -31,6 +31,8 @@ Threat model dichiarato:
 - Bcrypt rounds=12 per password admin (file `secrets/admin_password_bcrypt.txt`)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`
 - Il gateway (unico servizio esposto) non ha accesso al Docker socket né ai secret host
+- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
+- Strumenti di management (Portainer) mai esposti: solo loopback + tunnel SSH (vedi [docs/OPS.md](docs/OPS.md))
 
 ## Out of scope
 

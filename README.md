@@ -105,7 +105,9 @@ Più tutti i **plugin** che ci aggiungerai dopo (vedi [docs/PLUGINS.md](docs/PLU
 - OAuth 2.1 con PKCE + refresh, JWT con `typ` separati (no cross-token-use)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, healthcheck su ogni servizio
 - Il gateway **non** ha accesso al Docker socket né ai secret host (container non privilegiato)
+- Hardening host automatico: `unattended-upgrades` (patch di sicurezza) + `fail2ban` (anti brute-force SSH)
 - Hardening: backup age-encrypted, rotate secrets senza downtime, auto-update via Watchtower
+- **Gestione visuale opzionale**: profilo `ops.portainer` (Portainer solo su loopback, accesso via tunnel SSH) — vedi [docs/OPS.md](docs/OPS.md)
 
 ## 📖 Documentazione
 
@@ -113,6 +115,8 @@ Più tutti i **plugin** che ci aggiungerai dopo (vedi [docs/PLUGINS.md](docs/PLU
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — flussi, contratti, security model
 - [PLUGINS.md](docs/PLUGINS.md) — aggiungere un MCP o un bot tuo
 - [SECRETS.md](docs/SECRETS.md) — gestione/rotation/backup secrets
+- [INGRESS.md](docs/INGRESS.md) — HTTPS pubblico: Tailscale / Caddy / Cloudflared
+- [OPS.md](docs/OPS.md) — hardening + profili opzionali (Portainer, Watchtower, backup)
 - [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) — backup volumi age-encrypted
 - [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — quando qualcosa va male
 

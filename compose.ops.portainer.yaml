@@ -1,0 +1,43 @@
+# compose.ops.portainer.yaml — cruscotto visuale dei container (Portainer CE)
+#
+# Portainer dà una UI web per vedere/gestire container, stack, log e volumi
+# dello stack vps1777. È OPT-IN, pensato per un uso "quando serve".
+#
+# ── SICUREZZA (leggi) ──────────────────────────────────────────────────────
+#   • NESSUNA porta pubblica: Portainer è pubblicato SOLO su 127.0.0.1 della
+#     VPS (loopback). Da internet NON è raggiungibile. Ci accedi via tunnel SSH:
+#         ssh -L 9443:127.0.0.1:9443 <user>@<IP_VPS>
+#     poi apri https://localhost:9443 sul tuo PC (al primo accesso crei l'admin).
+#   • Portainer monta il Docker socket (gli serve per gestire i container): è
+#     ESATTAMENTE il motivo per cui non lo si espone mai a internet. Il gateway
+#     pubblico resta senza socket; Portainer è un tool admin separato e locale.
+#   • Sta su `backend` (internal: true): nessun egress. Niente "phone home".
+#
+# ── Uso ────────────────────────────────────────────────────────────────────
+#   docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+#     -f compose.ops.portainer.yaml --profile ingress.tailscale \
+#     --profile ops.portainer up -d
+#
+# Profilo: ops.portainer
+
+services:
+
+  portainer:
+    profiles: [ops.portainer]
+    image: portainer/portainer-ce:lts   # pinna una versione (es. :2.27.4) in produzione
+    container_name: vps1777-portainer
+    restart: unless-stopped
+    command: --http-disabled            # solo HTTPS su 9443, niente HTTP in chiaro
+    ports:
+      - "127.0.0.1:9443:9443"           # SOLO loopback VPS → accesso via tunnel SSH
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-data:/data
+    networks:
+      - backend                         # internal: nessun egress
+    # NB: l'immagine Portainer non ha shell/wget → niente healthcheck via exec.
+
+volumes:
+  portainer-data:
