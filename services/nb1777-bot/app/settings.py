@@ -18,12 +18,25 @@ def _read_file(value: str | None) -> str:
 SecretFromFile = Annotated[str, BeforeValidator(_read_file)]
 
 
+def _int_or_zero(value: object) -> int:
+    """TELEGRAM_OWNER_ID="" (env non settata) → 0, invece di ValidationError."""
+    if value is None or value == "":
+        return 0
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return 0
+
+
+IntOrZero = Annotated[int, BeforeValidator(_int_or_zero)]
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
 
     telegram_bot_token_file: SecretFromFile = ""
     telegram_bot_token: str = ""
-    telegram_owner_id: int = 0
+    telegram_owner_id: IntOrZero = 0
     gateway_public_base: str = ""
     nb1777_mcp_url: str = "http://nb1777-mcp:8003/mcp"
     nlm_home: str = "/var/lib/nlm"

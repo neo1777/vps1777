@@ -17,11 +17,12 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends tini ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-RUN groupadd -g 1000 nb1777 && useradd -u 1000 -g 1000 -m -s /sbin/nologin nb1777
+RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
+RUN mkdir -p /var/lib/nlm && chown -R app:app /var/lib/nlm
 COPY --from=builder /build/.venv /opt/venv
 COPY --from=builder /build/app /app/app
 ENV PATH="/opt/venv/bin:$PATH" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     NLM_HOME=/var/lib/nlm
 WORKDIR /app
-USER nb1777
+USER app
 ENTRYPOINT ["tini", "--", "python", "-m", "app"]

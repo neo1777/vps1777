@@ -29,8 +29,10 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         tini ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Utente non-root (uid 1000)
-RUN groupadd -g 1000 nb1777 && useradd -u 1000 -g 1000 -m -s /sbin/nologin nb1777
+# Utente non-root condiviso (UID 1000 "app") — STESSO uid di gateway/bot
+# così il volume nlm-auth è accessibile da tutti i servizi che lo montano.
+RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
+RUN mkdir -p /var/lib/nlm && chown -R app:app /var/lib/nlm
 
 # Copia venv + codice dal builder
 COPY --from=builder /build/.venv /opt/venv
@@ -40,10 +42,11 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     NLM_HOME=/var/lib/nlm \
+    HOME=/var/lib/nlm \
     CHROME_BIN=/usr/bin/chromium
 
 WORKDIR /app
-USER nb1777
+USER app
 
 EXPOSE 8003
 

@@ -19,12 +19,8 @@ def main() -> None:
     log.info("vps1777-archive-mcp starting")
     log.info("listen=%s:%s stateless=%s", s.archive_http_host, s.archive_http_port, s.fastmcp_stateless_http)
 
-    mcp.run(
-        transport="streamable-http",
-        host=s.archive_http_host,
-        port=s.archive_http_port,
-        stateless_http=s.fastmcp_stateless_http,
-    )
+    # host/port/stateless sono già nel costruttore FastMCP (server.py)
+    mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":

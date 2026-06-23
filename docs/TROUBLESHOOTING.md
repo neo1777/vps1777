@@ -75,6 +75,31 @@ docker compose exec archive-mcp ls /var/lib/archive/data/
 
 Vedi [docs/ARCHITECTURE.md](ARCHITECTURE.md) §archive-mcp per i formati attesi.
 
+## Connector claude.ai non si autentica (Tailscale)
+
+Causa: `PUBLIC_BASE` è vuoto nel `.env` perché l'URL `*.ts.net` si conosce solo dopo il login Tailscale. L'issuer OAuth punta a loopback e claude.ai non completa il flow.
+
+Fix (dopo che Tailscale è loggato e hai l'URL):
+```bash
+ssh <user>@<vps>
+sudo -u vps1777 -i
+cd vps1777
+# Sostituisci con il tuo URL .ts.net reale
+sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE=https://vps1777.<tuo-tailnet>.ts.net|' .env
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml --profile ingress.tailscale up -d
+```
+
+## Tailscale: container parte ma non si logga
+
+Causa: `TS_AUTHKEY` vuoto al deploy. Il sidecar gira ma il nodo non è autenticato.
+
+Fix:
+```bash
+ssh <user>@<vps>
+sudo docker exec -it vps1777-tailscale tailscale up --authkey=tskey-auth-...
+# Genera la key su https://login.tailscale.com/admin/settings/keys
+```
+
 ## Reset completo (perdi dati)
 
 ```bash

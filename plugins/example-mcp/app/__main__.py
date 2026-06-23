@@ -5,11 +5,22 @@ import logging
 import os
 import sys
 
-from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 logging.basicConfig(level="INFO", stream=sys.stdout)
 
-mcp = FastMCP("example")
+_HOST = os.environ.get("PLUGIN_HOST", "0.0.0.0")
+_PORT = int(os.environ.get("PLUGIN_PORT", "8010"))
+_STATELESS = os.environ.get("FASTMCP_STATELESS_HTTP", "true").lower() == "true"
+
+mcp = FastMCP(
+    "example",
+    host=_HOST,
+    port=_PORT,
+    stateless_http=_STATELESS,
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 @mcp.tool()
@@ -25,12 +36,9 @@ def echo(payload: dict) -> dict:
 
 
 def main() -> None:
-    host = os.environ.get("PLUGIN_HOST", "0.0.0.0")
-    port = int(os.environ.get("PLUGIN_PORT", "8010"))
-    stateless = os.environ.get("FASTMCP_STATELESS_HTTP", "true").lower() == "true"
     log = logging.getLogger("example-mcp")
-    log.info("example-mcp starting on %s:%s", host, port)
-    mcp.run(transport="streamable-http", host=host, port=port, stateless_http=stateless)
+    log.info("example-mcp starting on %s:%s", _HOST, _PORT)
+    mcp.run(transport="streamable-http")
 
 
 if __name__ == "__main__":

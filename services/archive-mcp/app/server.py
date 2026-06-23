@@ -8,14 +8,24 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from . import db
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
 
-mcp = FastMCP("archive")
+_s = get_settings()
+mcp = FastMCP(
+    "archive",
+    host=_s.archive_http_host,
+    port=_s.archive_http_port,
+    stateless_http=_s.fastmcp_stateless_http,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=False,  # dietro gateway, rete interna
+    ),
+)
 
 
 @mcp.tool()

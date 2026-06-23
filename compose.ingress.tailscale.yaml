@@ -1,14 +1,18 @@
 # compose.ingress.tailscale.yaml — Tailscale Funnel sidecar
 #
 # Pattern: container `tailscale/tailscale` con `network_mode: service:gateway`
-# (condivide il network namespace col gateway → 127.0.0.1:8080 raggiungibile).
-# Funnel attivo via TS_SERVE_CONFIG (JSON) montato come secret.
+# → condivide il network namespace del gateway, quindi:
+#   - tailscale funnel inoltra a http://127.0.0.1:8080 (= gateway, stesso ns)
+#   - tailscale esce su internet attraverso la rete `ingress` del gateway
+#     (per questo il gateway DEVE restare su `ingress`, non solo backend)
 #
-# Auth modes supportati:
-#   1. OAuth client + tag (TS_AUTH_OAUTH_CLIENT_ID + TS_AUTH_OAUTH_CLIENT_SECRET_FILE)
-#   2. Auth-key (TS_AUTHKEY_FILE pointing to secrets/ts_authkey.txt)
+# NB: con network_mode: service:X NON si può usare `hostname:` né `networks:`
+#     sul container (eredita tutto dal gateway). TS_HOSTNAME (env) imposta
+#     comunque il nome del nodo nel tailnet.
 #
-# Setup vedi docs/INGRESS.md (TBD)
+# Auth: TS_AUTHKEY (da .env). Vuoto → il container parte ma non si logga;
+#       autenticalo dopo con:
+#         docker exec -it vps1777-tailscale tailscale up --authkey=tskey-auth-...
 #
 # Profilo: ingress.tailscale
 
@@ -18,26 +22,18 @@ services:
     profiles: [ingress.tailscale]
     image: tailscale/tailscale:v1.78.1
     container_name: vps1777-tailscale
-    hostname: ${TS_HOSTNAME:-vps1777}
     restart: unless-stopped
     cap_add:
       - NET_ADMIN
-      - SYS_MODULE
     devices:
       - /dev/net/tun
     environment:
       TS_HOSTNAME: ${TS_HOSTNAME:-vps1777}
       TS_STATE_DIR: /var/lib/tailscale
-      TS_USERSPACE: "false"        # kernel WireGuard (più veloce)
-      TS_ENABLE_HEALTH_CHECK: "true"
-      # ─── auth (uno dei due) ─────────────────────────────────────────────
-      # OAuth client mode (tag-owned, no scadenza 90gg)
-      TS_AUTH_KEY: ${TS_AUTHKEY:-}    # fallback se hai impostato auth-key inline
+      TS_USERSPACE: "false"          # kernel WireGuard
+      TS_AUTHKEY: ${TS_AUTHKEY:-}     # vuoto = login manuale dopo
       TS_AUTH_ONCE: "true"
-      # ─── funnel config ──────────────────────────────────────────────────
-      # JSON che dice: serve https://<host>.ts.net → http://127.0.0.1:8080
       TS_SERVE_CONFIG: /config/serve.json
-      TS_EXTRA_ARGS: --advertise-tags=tag:vps1777
     volumes:
       - tailscale-state:/var/lib/tailscale
       - ./ingress/tailscale-serve.json:/config/serve.json:ro
@@ -45,21 +41,10 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/health"]
-      interval: 60s
-      timeout: 5s
-      retries: 3
 
-  # Rimuoviamo l'expose del gateway su rete `ingress` (entra invece via TS)
-  gateway:
-    networks:
-      - backend
-      # `ingress` non serve in mode Tailscale
-    # Non serve `ports:` — Funnel arriva via :443 attraverso il sidecar
-
-networks:
-  ingress: {}  # placeholder, non collegato in questo profilo
+# Il gateway resta sulle reti del compose base (backend + ingress).
+# `ingress` (bridge non-internal) dà a Tailscale l'egress verso i
+# coordination server. NON ridefiniamo qui le sue reti.
 
 volumes:
   tailscale-state:
