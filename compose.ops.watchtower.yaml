@@ -1,0 +1,53 @@
+# compose.ops.watchtower.yaml — auto-update via Watchtower
+#
+# Sorveglia i container con label `com.centurylinklabs.watchtower.enable=true`
+# e fa auto-pull + restart graceful quando esce un nuovo tag.
+#
+# Modalità "label-only": solo i container esplicitamente opt-in vengono toccati.
+# Default: tutti i servizi vps1777 opt-in (gateway, archive-mcp, nb1777-mcp,
+# nb1777-bot). Watchtower stesso e i sidecar ingress NO (li gestisci tu).
+#
+# Profilo: ops.autoupdate
+
+services:
+
+  watchtower:
+    profiles: [ops.autoupdate]
+    image: containrrr/watchtower:1.7.1
+    container_name: vps1777-watchtower
+    restart: unless-stopped
+    environment:
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"           # rimuove immagini vecchie
+      WATCHTOWER_POLL_INTERVAL: "3600"      # 1h
+      WATCHTOWER_INCLUDE_RESTARTING: "true"
+      WATCHTOWER_NOTIFICATIONS: ""          # opzionale: slack, email, telegram
+      WATCHTOWER_TIMEOUT: "30s"
+      TZ: ${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - backend  # solo per logging, non per pull (lo fa da dockerd)
+    healthcheck:
+      test: ["CMD", "/watchtower", "--health-check"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ─── Opt-in dei servizi core (label) ─────────────────────────────────
+  gateway:
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  archive-mcp:
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  nb1777-mcp:
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  nb1777-bot:
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"

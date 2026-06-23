@@ -1,0 +1,50 @@
+# compose.ingress.caddy.yaml — Caddy reverse proxy + Let's Encrypt
+#
+# Caddy ascolta su 80+443, fa cert auto via ACME (HTTP-01 default).
+# Per DNS-01 (no porta 80), usa override `compose.ingress.caddy-dns01.yaml`
+# (immagine custom con plugin DNS provider + DNS_PROVIDER_TOKEN_FILE).
+#
+# Setup: CADDY_DOMAIN + CADDY_EMAIL in .env
+#
+# Profilo: ingress.caddy
+
+services:
+
+  caddy:
+    profiles: [ingress.caddy]
+    image: caddy:2.8-alpine
+    container_name: vps1777-caddy
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]  # serve per ascoltare su 80/443
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:?CADDY_DOMAIN obbligatorio in .env}
+      CADDY_EMAIL: ${CADDY_EMAIL:?CADDY_EMAIL obbligatorio in .env}
+    volumes:
+      - ./ingress/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data            # certificati ACME
+      - caddy-config:/config
+    networks:
+      - ingress
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/health"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+
+  gateway:
+    networks:
+      - backend
+      - ingress
+
+volumes:
+  caddy-data:
+  caddy-config:

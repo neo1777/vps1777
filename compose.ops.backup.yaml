@@ -1,0 +1,35 @@
+# compose.ops.backup.yaml — backup container con cron
+#
+# Container Alpine con cron che lancia ogni notte alle 03:00 UTC:
+#   /vps1777/tools/backup.sh
+#
+# Rotation: 7 daily + 4 weekly (gestita dallo stesso backup.sh).
+# Output in `backups/` montato dal host.
+#
+# Requisito host: chiave age + recipient configurati (vedi tools/age-recipients.txt).
+#
+# Profilo: ops.backup
+
+services:
+
+  backup:
+    profiles: [ops.backup]
+    image: alpine:3.20
+    container_name: vps1777-backup
+    restart: unless-stopped
+    command: ["/vps1777/tools/backup-container-setup.sh"]
+    environment:
+      TZ: ${TZ:-UTC}
+      BACKUP_DIR: /backups
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:rw  # serve per `docker run` dump volumi
+      - ${PWD}:/vps1777:rw                              # repo intero (per chiamare tools/backup.sh)
+      - ./backups:/backups:rw
+      - ${HOME}/.config/age/keys.txt:/root/.config/age/keys.txt:ro
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "crond"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    # NB: backup-container-setup.sh installa age + docker-cli + crea cron entry
+    # e poi exec crond in foreground.

@@ -1,0 +1,34 @@
+# vps1777 — Caddyfile
+#
+# Reverse proxy → gateway:8080. Cert auto via ACME (HTTP-01).
+# Per DNS-01 vedi commento sotto.
+
+{
+	# Global options
+	email {env.CADDY_EMAIL}
+	# Per DNS-01: scommenta + carica plugin in immagine custom
+	# acme_dns cloudflare {env.CF_API_TOKEN}
+}
+
+{env.CADDY_DOMAIN} {
+	encode zstd gzip
+
+	# Health check Caddy stesso
+	@health path /health
+	respond @health 200
+
+	# Forward al gateway (compresso, streaming OK per MCP)
+	reverse_proxy gateway:8080 {
+		flush_interval -1   # streaming/SSE compatibile
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# log
+	log {
+		output stdout
+		format json
+	}
+}
