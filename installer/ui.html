@@ -67,8 +67,20 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
 .deploy-bar .btn.primary{width:100%;padding:15px;font-size:15px}
 .gate{color:var(--faint);font-size:12px;text-align:center;margin-top:10px;font-family:var(--mono)}
 .gate.ready{color:var(--ok)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.spinner{width:20px;height:20px;border:2.5px solid var(--line);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+.progress-box{display:flex;align-items:center;gap:15px;padding:15px 17px;background:var(--bg-soft);
+  border:1px solid var(--line);border-radius:9px;margin-bottom:14px}
+.progress-box .txt{flex:1;min-width:0}
+.progress-box .cstep{font-weight:500;font-size:14px}
+.progress-box .cdetail{color:var(--muted);font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:var(--mono)}
+.progress-box .ctimer{font-family:var(--mono);color:var(--faint);font-size:13px;flex-shrink:0}
+.progress-box.done .spinner{display:none}
+.progress-box.done .badge{font-size:20px}
 .console{background:#08090b;border:1px solid var(--line);border-radius:10px;padding:16px;
-  font-family:var(--mono);font-size:11.5px;line-height:1.5;height:340px;overflow-y:auto;
+  font-family:var(--mono);font-size:11.5px;line-height:1.5;height:300px;overflow-y:auto;
   white-space:pre-wrap;word-break:break-word;color:#c8c6c1;display:none}
 .console.show{display:block}
 .console .ok{color:var(--ok)}.console .err{color:var(--err)}.console .warn{color:var(--warn)}
@@ -159,8 +171,18 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
 
   <!-- console -->
   <section id="console-sec" style="display:none">
-    <div class="sec-head"><h2>Installazione in corso…</h2><span class="dot warn" id="dot-deploy"></span></div>
+    <div class="sec-head"><h2>Installazione in corso…</h2></div>
+    <div class="progress-box" id="progress-box">
+      <span class="spinner" id="spinner"></span>
+      <span class="badge" id="badge" style="display:none">✅</span>
+      <div class="txt">
+        <div class="cstep" id="cur-step">Avvio…</div>
+        <div class="cdetail" id="cur-detail">connessione alla VPS</div>
+      </div>
+      <div class="ctimer" id="timer">0s</div>
+    </div>
     <div class="console show" id="console"></div>
+    <div class="hint" id="patience" style="margin-top:10px">L'installazione richiede alcuni minuti (build immagini + reboot). Lo spinner gira finché lavora — l'output può apparire a blocchi.</div>
   </section>
 
   <!-- result -->
@@ -175,11 +197,17 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
         <div class="k">Email admin</div><div class="v" id="r-email">—</div></div>
       <div class="card"><span class="copy" onclick="cp(this,'r-pwd')">copia</span>
         <div class="k">Password admin — SALVALA</div><div class="v big" id="r-pwd">—</div></div>
-      <div class="card"><span class="copy" onclick="cp(this,'r-arch')">copia</span>
+      <div id="https-warn" class="warnbox" style="display:none">
+        ⚠ L'URL è <strong>HTTP</strong> (IP diretto): claude.ai accetta solo connector <strong>HTTPS</strong>.
+        Attiva un ingress con HTTPS (Tailscale/Caddy/Cloudflared) per avere un URL valido.
+        Per Tailscale: inserisci la auth-key e rilancia, oppure dal pannello setup + <code>deploy.sh --apply</code>.
+        Il pannello admin su HTTP funziona comunque per il setup locale.
+      </div>
+      <div class="card connector-card"><span class="copy" onclick="cp(this,'r-arch')">copia</span>
         <div class="k">Connector claude.ai — archive</div><div class="v" id="r-arch">—</div></div>
-      <div class="card"><span class="copy" onclick="cp(this,'r-nb')">copia</span>
+      <div class="card connector-card"><span class="copy" onclick="cp(this,'r-nb')">copia</span>
         <div class="k">Connector claude.ai — nb1777</div><div class="v" id="r-nb">—</div></div>
-      <div class="hint" style="margin-top:8px">Apri il <strong>Pannello setup</strong> per caricare l'auth NotebookLM (bottone dedicato) e verificare i semafori. Su claude.ai → Settings → Integrations → Add, incolla gli URL connector e fai login con email+password admin.</div>
+      <div class="hint" style="margin-top:8px">Apri il <strong>Pannello setup</strong> per caricare l'auth NotebookLM (bottone dedicato) e verificare i semafori. Su claude.ai → Settings → Integrations → Add, incolla gli URL connector (HTTPS) e fai login con email+password admin.</div>
     </section>
   </div>
 
@@ -265,11 +293,22 @@ function parseResult(line){
   if(m){ R[m[1]]=m[2]; }
 }
 
+let timerInt=null, t0=0;
+function startTimer(){ t0=Date.now(); timerInt=setInterval(()=>{
+  const s=Math.floor((Date.now()-t0)/1000);
+  $('timer').textContent = s<60? s+'s' : Math.floor(s/60)+'m '+(s%60)+'s';
+},1000); }
+function stopTimer(){ if(timerInt){clearInterval(timerInt);timerInt=null;} }
+
 async function startDeploy(){
   $('form-view').style.display='none';
   $('console-sec').style.display='block';
+  startTimer();
   const con=$('console');
-  const r = await fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params())});
+  let r;
+  try{
+    r = await fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params())});
+  }catch(e){ $('cur-step').textContent='Errore di connessione al server locale'; stopTimer(); return; }
   const reader = r.body.getReader(); const dec=new TextDecoder(); let buf='';
   while(true){
     const {done,value}=await reader.read(); if(done) break;
@@ -281,31 +320,49 @@ async function startDeploy(){
       const line=obj.line||'';
       if(line.startsWith('__EXIT__')){ finishDeploy(parseInt(line.slice(8))); continue; }
       parseResult(line);
+      // aggiorna step corrente + dettaglio
+      const stepM = line.match(/^[═=]+\s*STEP\s*(.+)$/i) || line.match(/STEP\s+(\d\/\d.+)/i);
+      if(stepM){ $('cur-step').textContent = stepM[1].replace(/[—–-]\s*/,'· ').trim(); }
+      else if(line.trim() && !line.startsWith('RESULT_')){ $('cur-detail').textContent = line.replace(/^[▶✓✗!═─\s]+/,'').slice(0,90); }
       const div=document.createElement('div');
-      if(/\[✓\]|✅|Healthy|Started|Built/.test(line)) div.className='ok';
-      else if(/\[✗\]|Error|fallito|✘/.test(line)) div.className='err';
-      else if(/\[!\]|WARN|⚠/.test(line)) div.className='warn';
-      else if(/━━━|═══|FASE|STEP|\d\/8/.test(line)) div.className='step';
+      if(/\[✓\]|✅|Healthy|Started|Built|✓/.test(line)) div.className='ok';
+      else if(/\[✗\]|Error|fallito|✘|✗/.test(line)) div.className='err';
+      else if(/\[!\]|WARN|⚠|^!/.test(line)) div.className='warn';
+      else if(/━━━|═══|═ STEP|FASE|\d\/\d/.test(line)) div.className='step';
       div.textContent=line; con.appendChild(div); con.scrollTop=con.scrollHeight;
     }
   }
 }
 
 function finishDeploy(code){
-  setDot('dot-deploy', code===0?'ok':'err');
+  stopTimer();
+  $('spinner').style.display='none';
+  $('patience').style.display='none';
   if(code!==0){
+    $('cur-step').textContent='✗ Installazione interrotta';
+    $('cur-detail').textContent='exit '+code+' — controlla i log sopra';
     const con=$('console'); const d=document.createElement('div');
-    d.className='err'; d.textContent='\n✗ Installazione interrotta (exit '+code+'). Controlla i log sopra.';
+    d.className='err'; d.textContent='\n✗ Installazione interrotta (exit '+code+').';
     con.appendChild(d); con.scrollTop=con.scrollHeight; return;
   }
+  $('progress-box').classList.add('done');
+  $('badge').style.display='inline';
+  $('cur-step').textContent='Installazione completata';
+  $('cur-detail').textContent='vedi i dati qui sotto';
   // popola la schermata risultati
-  $('r-url').textContent = R.URL || '—';
-  $('r-setup').textContent = R.SETUP_URL || '—';
+  const url = (R.URL||'').replace(/\/$/,''); const sec=R.SECRET||'<SECRET>';
+  const isHttps = url.startsWith('https://');
+  $('r-url').textContent = url || '—';
+  $('r-setup').textContent = R.SETUP_URL || (url+'/admin/setup');
   $('r-email').textContent = R.ADMIN_EMAIL || '—';
   $('r-pwd').textContent = R.ADMIN_PWD || '(già impostata)';
-  const base = (R.URL||'').replace(/\/$/,''); const sec=R.SECRET||'<SECRET>';
-  $('r-arch').textContent = base+'/'+sec+'/archive/mcp';
-  $('r-nb').textContent = base+'/'+sec+'/nb1777/mcp';
+  $('r-arch').textContent = url+'/'+sec+'/archive/mcp';
+  $('r-nb').textContent = url+'/'+sec+'/nb1777/mcp';
+  // avviso HTTPS per i connector
+  if(!isHttps){
+    $('https-warn').style.display='block';
+    document.querySelectorAll('.connector-card').forEach(c=>c.style.opacity='.5');
+  }
   $('result').classList.add('show');
   $('result').scrollIntoView({behavior:'smooth'});
 }

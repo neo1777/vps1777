@@ -107,15 +107,45 @@ class Deployer:
         return data
 
     def _stream(self, cmd: str, label: str = "") -> Iterator[str]:
-        """Esegue cmd via SSH, yield righe (stdout+stderr combinati)."""
+        """
+        Esegue cmd via SSH, yield righe appena arrivano (lettura a chunk,
+        non bufferizzata per riga → output più reattivo attraverso WSL2).
+        """
         assert self.client
         chan = self.client.get_transport().open_session()  # type: ignore[union-attr]
         chan.get_pty()
         chan.set_combine_stderr(True)
+        chan.settimeout(0.0)  # non-bloccante
         chan.exec_command(cmd)
-        f = chan.makefile("r")
-        for line in f:
-            yield line.rstrip("\n")
+        buf = b""
+        while True:
+            got = False
+            try:
+                data = chan.recv(8192)
+                if data:
+                    got = True
+                    buf += data
+                    while b"\n" in buf:
+                        line, buf = buf.split(b"\n", 1)
+                        yield line.decode("utf-8", "replace").rstrip("\r")
+            except Exception:
+                pass
+            if chan.exit_status_ready() and not got:
+                # svuota il resto
+                try:
+                    while True:
+                        data = chan.recv(8192)
+                        if not data:
+                            break
+                        buf += data
+                except Exception:
+                    pass
+                if buf:
+                    for ln in buf.decode("utf-8", "replace").splitlines():
+                        yield ln.rstrip("\r")
+                break
+            if not got:
+                time.sleep(0.08)
         rc = chan.recv_exit_status()
         if rc != 0:
             raise DeployError(f"{label or 'comando'} fallito (exit {rc})")
