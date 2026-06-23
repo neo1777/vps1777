@@ -35,17 +35,17 @@ def check_or_raise() -> None:
 
 def ensure_nlm_home_in_env() -> None:
     """
-    nlm cerca auth.json in `~/.notebooklm-mcp-cli/` di default. Impostiamo
-    HOME per puntare al volume montato (NLM_HOME).
+    Sia server.py (legacy) sia nlm CLI cercano auth.json in
+    `Path.home() / ".notebooklm-mcp-cli"`. Forziamo HOME=NLM_HOME e creiamo
+    il symlink interno per allineare entrambi al volume montato.
     """
     home = get_settings().nlm_home
-    os.environ.setdefault("HOME", home)
-    # Garantisce che la dir esista (per il primo write)
+    # Forza HOME (sovrascrive il default del container)
+    os.environ["HOME"] = home
     Path(home).mkdir(parents=True, exist_ok=True)
-    # Symlink: ~/.notebooklm-mcp-cli → NLM_HOME (nlm scrive lì)
     link = Path(home) / ".notebooklm-mcp-cli"
     if not link.exists():
         try:
-            link.symlink_to(home)
+            link.symlink_to(home, target_is_directory=True)
         except (OSError, FileExistsError):
             pass

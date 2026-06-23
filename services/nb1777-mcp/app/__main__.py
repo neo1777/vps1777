@@ -22,12 +22,8 @@ def main() -> None:
     # Setup HOME per nlm (cerca auth.json in ~/.notebooklm-mcp-cli/)
     auth.ensure_nlm_home_in_env()
 
-    mcp.run(
-        transport=s.nb1777_transport,
-        host=s.nb1777_host,
-        port=s.nb1777_port,
-        stateless_http=s.fastmcp_stateless_http,
-    )
+    # FastMCP run senza ridichiarare host/port — già nel costruttore.
+    mcp.run(transport=s.nb1777_transport)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,25 @@
+# compose.example-bot.yaml — esempio plugin bot Telegram
+#
+# Il bot ha il SUO token (diverso da nb1777-bot).
+# Crea il file secrets/example_bot_token.txt prima di avviare.
+
+services:
+  example-bot:
+    build:
+      context: ./plugins/example-bot
+    image: vps1777/example-bot:${VPS1777_TAG:-dev}
+    init: true
+    environment:
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/example_bot_token
+      OWNER_ID: ${EXAMPLE_BOT_OWNER_ID:-0}
+    secrets:
+      - example_bot_token
+    networks: [backend]
+    restart: unless-stopped
+    labels:
+      - "vps1777.role=bot"
+      - "vps1777.name=example"
+
+secrets:
+  example_bot_token:
+    file: ./secrets/example_bot_token.txt

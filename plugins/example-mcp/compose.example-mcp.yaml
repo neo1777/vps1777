@@ -1,0 +1,31 @@
+# compose.example-mcp.yaml — esempio plugin MCP
+#
+# Per attivarlo:
+#   1. Aggiungi a .env: GATEWAY_UPSTREAMS=...,example=example-mcp:8010
+#   2. Lancia: docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+#              -f plugins/example-mcp/compose.example-mcp.yaml up -d
+
+services:
+  example-mcp:
+    build:
+      context: ./plugins/example-mcp
+    image: vps1777/example-mcp:${VPS1777_TAG:-dev}
+    init: true
+    environment:
+      PLUGIN_HOST: 0.0.0.0
+      PLUGIN_PORT: 8010
+      FASTMCP_STATELESS_HTTP: "true"
+    networks: [backend]
+    expose: ["8010"]
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "vps1777.role=mcp"
+      - "vps1777.name=example"

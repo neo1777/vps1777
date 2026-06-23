@@ -1,141 +1,417 @@
 """
-FastMCP wrapper su nlm CLI — MVP con tool essenziali.
+nb1777/mcp_server.py — FastMCP wrapper sopra core.py.
 
-Il pacchetto `notebooklm-mcp-cli` espone una classe core in Python (sopra
-il subprocess CLI o direttamente nel modulo). MVP delega a subprocess CLI
-per semplicità — sostituibile con import nativo se la libreria lo permette.
+Espone tutte le funzioni di `core.py` come tool MCP, in ascolto su loopback
+(default 127.0.0.1:8003). Davanti gli mettiamo il gateway OAuth sulla VPS.
+
+NIENTE chiave/secret qui: l'autenticazione è del gateway. Questo server è
+loopback-only e si aspetta di NON essere mai esposto direttamente.
+
+Avvio standalone:
+    python3 -m nb1777.mcp_server                  # streamable-http su :8003
+    NB1777_TRANSPORT=stdio python3 -m nb1777.mcp_server   # mode stdio (per dev)
+
+Variabili d'ambiente:
+    NB1777_HOST       (default 127.0.0.1)
+    NB1777_PORT       (default 8003)
+    NB1777_TRANSPORT  (default streamable-http; alt: stdio, sse)
 """
 from __future__ import annotations
 
 import asyncio
-import json
-import logging
-import subprocess
-from typing import Any
+import os
+from pathlib import Path
+from typing import Optional
 
-from fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
-from . import auth
-
-log = logging.getLogger(__name__)
-
-mcp = FastMCP("nb1777")
+from . import core
 
 
-async def _nlm(*args: str) -> str:
-    """Esegue `nlm <args>` come subprocess. Ritorna stdout (str) o solleva."""
-    auth.check_or_raise()
-    proc = await asyncio.create_subprocess_exec(
-        "nlm", *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout_b, stderr_b = await proc.communicate()
-    if proc.returncode != 0:
-        msg = stderr_b.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(f"nlm failed (rc={proc.returncode}): {msg}")
-    return stdout_b.decode("utf-8", errors="replace").strip()
+HOST = os.environ.get("NB1777_HOST", "127.0.0.1")
+PORT = int(os.environ.get("NB1777_PORT", "8003"))
+TRANSPORT = os.environ.get("NB1777_TRANSPORT", "streamable-http")
+
+# Origini autorizzate per DNS rebinding protection di FastMCP.
+# Servono per accettare richieste dal gateway forward (che inoltra l'Origin
+# del client originario, es. https://*.ts.net o https://claude.ai).
+# Default: tutti gli origin del tuo gateway pubblico.
+_origins_raw = os.environ.get(
+    "NB1777_ALLOWED_ORIGINS",
+    "https://claude.ai,https://web.telegram.org",  # default sensati
+).strip()
+ALLOWED_ORIGINS = [o.strip() for o in _origins_raw.split(",") if o.strip()]
+
+# Stateless HTTP: NO session_id required tra initialize/call.
+# Permette chiamate dirette tools/call senza initialize preventivo
+# (necessario per la Mini App + claude.ai che chiamano tool one-shot).
+mcp = FastMCP(
+    "nb1777",
+    host=HOST,
+    port=PORT,
+    stateless_http=True,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[f"{HOST}:{PORT}", HOST, "127.0.0.1", "localhost"],
+        allowed_origins=ALLOWED_ORIGINS,
+    ),
+)
 
 
-# ───── notebook tools ─────
+# Stato auth NotebookLM.
+# Se il file AUTH_PENDING.flag esiste, l'auth nlm non è caricata: ogni tool
+# ritorna un errore strutturato con istruzioni per l'admin panel /admin/nlm.
+NLM_CFG = Path.home() / ".notebooklm-mcp-cli"
+AUTH_FLAG = NLM_CFG / "AUTH_PENDING.flag"
+AUTH_JSON = NLM_CFG / "auth.json"
+
+
+def _check_auth_or_raise() -> None:
+    """Solleva RuntimeError se auth nlm non disponibile."""
+    if AUTH_FLAG.exists():
+        raise RuntimeError(
+            "Auth NotebookLM mancante (AUTH_PENDING). "
+            "Apri /admin/nlm sul tuo gateway, fai login admin, carica auth.json. "
+            "Il pannello ti guida passo-passo (devi installare nlm e fare nlm login "
+            "sul tuo PC prima per generare il file)."
+        )
+    if not AUTH_JSON.exists():
+        raise RuntimeError(
+            f"auth.json non presente in {AUTH_JSON}. "
+            "Apri /admin/nlm sul tuo gateway per caricarlo."
+        )
+
+
+# Helper: incapsula chiamate sync di core.py in un thread per non bloccare
+# l'event loop di FastMCP (nlm può prendere decine di secondi).
+# Verifica auth nlm prima di lanciare il thread → fail-fast con messaggio chiaro.
+async def _aio(fn, *args, **kwargs):
+    _check_auth_or_raise()
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+# ============================================================
+# NOTEBOOK
+# ============================================================
 
 @mcp.tool()
-async def nb_list() -> list[dict[str, Any]]:
-    """Elenca i notebook NotebookLM dell'account autorizzato."""
-    out = await _nlm("notebook", "list", "--json")
-    try:
-        return json.loads(out) if out else []
-    except json.JSONDecodeError:
-        return [{"raw": out}]
+async def nb_list() -> list[dict]:
+    """Lista tutti i notebook visibili al profilo attivo."""
+    return await _aio(core.nb_list)
 
 
 @mcp.tool()
-async def nb_get(notebook_id: str) -> dict[str, Any]:
-    """Dettagli completi di un notebook."""
-    out = await _nlm("notebook", "get", notebook_id, "--json")
-    return json.loads(out) if out else {}
+async def nb_get(notebook_id: str) -> dict:
+    """Dettagli di un singolo notebook."""
+    return await _aio(core.nb_get, notebook_id)
 
 
 @mcp.tool()
-async def nb_create(title: str) -> dict[str, Any]:
-    """Crea un nuovo notebook con il titolo dato."""
-    out = await _nlm("notebook", "create", title, "--json")
-    return json.loads(out) if out else {"title": title}
+async def nb_create(title: str) -> str:
+    """Crea un nuovo notebook. Ritorna l'ID."""
+    return await _aio(core.nb_create, title)
 
 
 @mcp.tool()
 async def nb_rename(notebook_id: str, new_title: str) -> str:
-    """Rinomina notebook."""
-    return await _nlm("notebook", "rename", notebook_id, new_title)
+    """Rinomina un notebook."""
+    await _aio(core.nb_rename, notebook_id, new_title)
+    return "ok"
 
 
 @mcp.tool()
 async def nb_delete(notebook_id: str) -> str:
-    """Cancella notebook (irreversibile!)."""
-    return await _nlm("notebook", "delete", notebook_id, "--yes")
-
-
-# ───── source tools ─────
-
-@mcp.tool()
-async def source_list(notebook_id: str) -> list[dict[str, Any]]:
-    """Lista delle fonti di un notebook."""
-    out = await _nlm("source", "list", notebook_id, "--json")
-    return json.loads(out) if out else []
+    """Cancella un notebook in modo permanente."""
+    await _aio(core.nb_delete, notebook_id)
+    return "deleted"
 
 
 @mcp.tool()
-async def source_add_url(notebook_id: str, url: str, title: str = "") -> dict[str, Any]:
-    """Aggiunge URL/YouTube come fonte."""
-    args = ["source", "add", notebook_id, "--url", url]
-    if title:
-        args.extend(["--title", title])
-    args.append("--json")
-    out = await _nlm(*args)
-    return json.loads(out) if out else {"url": url}
+async def nb_describe(notebook_id: str) -> str:
+    """Riassunto AI-generated del notebook (testo)."""
+    return await _aio(core.nb_describe, notebook_id)
+
+
+# ============================================================
+# SOURCE
+# ============================================================
+
+@mcp.tool()
+async def source_list(notebook_id: str) -> list[dict]:
+    """Lista tutte le fonti di un notebook."""
+    return await _aio(core.source_list, notebook_id)
 
 
 @mcp.tool()
-async def source_add_text(notebook_id: str, title: str, text: str) -> dict[str, Any]:
-    """Aggiunge testo libero come fonte."""
-    out = await _nlm(
-        "source", "add", notebook_id, "--text", text, "--title", title, "--json",
-    )
-    return json.loads(out) if out else {"title": title}
-
-
-# ───── chat ─────
-
-@mcp.tool()
-async def notebook_query(notebook_id: str, question: str) -> str:
-    """Chiede a NotebookLM una domanda RAG sul notebook."""
-    out = await _nlm("chat", notebook_id, question)
-    return out
-
-
-# ───── studio (i 9 artefatti) ─────
-
-@mcp.tool()
-async def studio_list(notebook_id: str) -> list[dict[str, Any]]:
-    """Lista degli artefatti studio di un notebook."""
-    out = await _nlm("studio", "list", notebook_id, "--json")
-    return json.loads(out) if out else []
+async def source_add_url(notebook_id: str, url: str, title: Optional[str] = None,
+                         wait: bool = True) -> str:
+    """Aggiunge una URL come fonte. Ritorna il source_id."""
+    return await _aio(core.source_add_url, notebook_id, url, title=title, wait=wait)
 
 
 @mcp.tool()
-async def studio_create_audio(notebook_id: str, topic: str = "") -> dict[str, Any]:
-    """Crea audio overview ('Deep Dive')."""
-    args = ["studio", "create", "audio", notebook_id]
-    if topic:
-        args.extend(["--topic", topic])
-    args.append("--json")
-    out = await _nlm(*args)
-    return json.loads(out) if out else {}
+async def source_add_text(notebook_id: str, text: str, title: str, wait: bool = True) -> str:
+    """Aggiunge testo libero come fonte (richiede titolo)."""
+    return await _aio(core.source_add_text, notebook_id, text, title, wait=wait)
 
 
 @mcp.tool()
-async def doctor() -> dict[str, Any]:
-    """Stato dell'integrazione nlm (auth, profili, versione)."""
-    auth.check_or_raise()
-    out = await _nlm("doctor")
-    return {"raw": out}
+async def source_add_file(notebook_id: str, file_path: str,
+                          title: Optional[str] = None, wait: bool = True) -> str:
+    """Carica un file locale come fonte (PDF/txt/md...)."""
+    return await _aio(core.source_add_file, notebook_id, file_path, title=title, wait=wait)
+
+
+@mcp.tool()
+async def source_add_youtube(notebook_id: str, url: str, wait: bool = True) -> str:
+    """Aggiunge un video YouTube come fonte."""
+    return await _aio(core.source_add_youtube, notebook_id, url, wait=wait)
+
+
+@mcp.tool()
+async def source_add_drive(notebook_id: str, document_id: str,
+                           doc_type: str = "doc", wait: bool = True) -> str:
+    """Collega un Google Drive document_id come fonte. doc_type: doc|slides|sheets|pdf"""
+    return await _aio(core.source_add_drive, notebook_id, document_id,
+                      doc_type=doc_type, wait=wait)
+
+
+@mcp.tool()
+async def source_delete(notebook_id: str, source_id: str) -> str:
+    """Elimina una fonte (irreversibile)."""
+    await _aio(core.source_delete, notebook_id, source_id)
+    return "deleted"
+
+
+@mcp.tool()
+async def source_get_content(notebook_id: str, source_id: str) -> str:
+    """Estrae il contenuto raw di una fonte (no AI)."""
+    return await _aio(core.source_get_content, notebook_id, source_id)
+
+
+@mcp.tool()
+async def source_rename(notebook_id: str, source_id: str, new_title: str) -> str:
+    await _aio(core.source_rename, notebook_id, source_id, new_title)
+    return "ok"
+
+
+# ============================================================
+# CHAT
+# ============================================================
+
+@mcp.tool()
+async def notebook_query(notebook_id: str, question: str,
+                         source_ids: Optional[list[str]] = None,
+                         conversation_id: Optional[str] = None) -> dict:
+    """Pone una domanda alla chat del notebook. Ritorna {answer, citations, ...}."""
+    return await _aio(core.notebook_query, notebook_id, question,
+                      source_ids=source_ids, conversation_id=conversation_id)
+
+
+# ============================================================
+# STUDIO — create (9 tipi)
+# ============================================================
+
+@mcp.tool()
+async def studio_create_audio(notebook_id: str,
+                              format: str = "deep_dive",
+                              length: str = "default",
+                              language: str = "it",
+                              focus: Optional[str] = None,
+                              source_ids: Optional[list[str]] = None) -> str:
+    """Crea Audio Overview (podcast). format: deep_dive|brief|critique|debate. RATE-LIMIT free tier."""
+    return await _aio(core.studio_create_audio, notebook_id, format=format, length=length,
+                      language=language, focus=focus, source_ids=source_ids)
+
+
+@mcp.tool()
+async def studio_create_video(notebook_id: str,
+                              format: str = "explainer",
+                              style: str = "auto_select",
+                              style_prompt: Optional[str] = None,
+                              focus: Optional[str] = None,
+                              language: str = "it",
+                              source_ids: Optional[list[str]] = None) -> str:
+    """Crea Video Overview. format: explainer|brief|cinematic."""
+    return await _aio(core.studio_create_video, notebook_id, format=format, style=style,
+                      style_prompt=style_prompt, focus=focus, language=language,
+                      source_ids=source_ids)
+
+
+@mcp.tool()
+async def studio_create_slides(notebook_id: str,
+                               format: str = "detailed_deck",
+                               length: str = "default",
+                               focus: Optional[str] = None,
+                               language: str = "it",
+                               source_ids: Optional[list[str]] = None) -> str:
+    """Crea Slide Deck. format: detailed_deck|presenter_slides. length: short|default."""
+    return await _aio(core.studio_create_slides, notebook_id, format=format, length=length,
+                      focus=focus, language=language, source_ids=source_ids)
+
+
+@mcp.tool()
+async def studio_create_mindmap(notebook_id: str,
+                                title: str = "Mind Map",
+                                source_ids: Optional[list[str]] = None) -> str:
+    """Crea Mind Map. NOTA: titolo/lingua/focus ignorati dal motore."""
+    return await _aio(core.studio_create_mindmap, notebook_id, title=title, source_ids=source_ids)
+
+
+@mcp.tool()
+async def studio_create_infographic(notebook_id: str,
+                                    orientation: str = "landscape",
+                                    detail: str = "standard",
+                                    style: str = "auto_select",
+                                    focus: Optional[str] = None,
+                                    language: str = "it",
+                                    source_ids: Optional[list[str]] = None) -> str:
+    """Crea Infographic (PNG). orientation: landscape|portrait|square."""
+    return await _aio(core.studio_create_infographic, notebook_id,
+                      orientation=orientation, detail=detail, style=style,
+                      focus=focus, language=language, source_ids=source_ids)
+
+
+@mcp.tool()
+async def studio_create_data_table(notebook_id: str, description: str,
+                                   language: str = "it",
+                                   source_ids: Optional[list[str]] = None) -> str:
+    """Crea Data Table. `description` OBBLIGATORIA (descrive le colonne)."""
+    return await _aio(core.studio_create_data_table, notebook_id, description,
+                      language=language, source_ids=source_ids)
+
+
+@mcp.tool()
+async def studio_create_report(notebook_id: str,
+                               format: str = "Briefing Doc",
+                               prompt: Optional[str] = None,
+                               language: str = "it",
+                               source_ids: Optional[list[str]] = None) -> str:
+    """Crea Report. format: 'Briefing Doc'|'Study Guide'|'Blog Post'|'Create Your Own'."""
+    return await _aio(core.studio_create_report, notebook_id, format=format, prompt=prompt,
+                      language=language, source_ids=source_ids)
+
+
+@mcp.tool()
+async def studio_create_quiz(notebook_id: str,
+                             count: int = 10,
+                             difficulty: int = 2,
+                             focus: Optional[str] = None,
+                             source_ids: Optional[list[str]] = None) -> str:
+    """Crea Quiz. difficulty 1=easy ... 5=hard."""
+    return await _aio(core.studio_create_quiz, notebook_id, count=count, difficulty=difficulty,
+                      focus=focus, source_ids=source_ids)
+
+
+@mcp.tool()
+async def studio_create_flashcards(notebook_id: str,
+                                   difficulty: str = "medium",
+                                   focus: Optional[str] = None,
+                                   source_ids: Optional[list[str]] = None) -> str:
+    """Crea Flashcards. difficulty: easy|medium|hard."""
+    return await _aio(core.studio_create_flashcards, notebook_id, difficulty=difficulty,
+                      focus=focus, source_ids=source_ids)
+
+
+@mcp.tool()
+async def studio_create_all_9(notebook_id: str,
+                              source_ids: Optional[list[str]] = None,
+                              language: str = "it",
+                              data_table_description: str = "Tabella con: Concetto, Definizione, Citazione dalla fonte.",
+                              report_format: str = "Study Guide",
+                              wait: bool = False,
+                              skip: Optional[list[str]] = None) -> dict:
+    """Crea tutti e 9 gli artefatti in sequenza. Ritorna {tipo: id_o_errore}."""
+    return await _aio(core.studio_create_all_9, notebook_id, source_ids=source_ids,
+                      language=language, data_table_description=data_table_description,
+                      report_format=report_format, wait=wait,
+                      skip=tuple(skip or ()))
+
+
+# ============================================================
+# STUDIO — status / wait / delete / rename
+# ============================================================
+
+@mcp.tool()
+async def studio_list(notebook_id: str) -> list[dict]:
+    """Lista tutti gli artefatti studio di un notebook con stato."""
+    return await _aio(core.studio_list, notebook_id)
+
+
+@mcp.tool()
+async def studio_status(notebook_id: str, artifact_id: str) -> dict:
+    """Stato di un singolo artefatto."""
+    return await _aio(core.studio_status, notebook_id, artifact_id)
+
+
+@mcp.tool()
+async def studio_wait(notebook_id: str, artifact_id: str,
+                      poll_interval: float = 5.0, timeout: float = 600.0) -> dict:
+    """Polling fino a stato terminale o timeout."""
+    return await _aio(core.studio_wait, notebook_id, artifact_id,
+                      poll_interval=poll_interval, timeout=timeout)
+
+
+@mcp.tool()
+async def studio_delete(notebook_id: str, artifact_id: str) -> str:
+    """Cancella un artefatto studio (irreversibile)."""
+    await _aio(core.studio_delete, notebook_id, artifact_id)
+    return "deleted"
+
+
+@mcp.tool()
+async def studio_rename(notebook_id: str, artifact_id: str, new_title: str) -> str:
+    await _aio(core.studio_rename, notebook_id, artifact_id, new_title)
+    return "ok"
+
+
+# ============================================================
+# STUDIO — download (un solo tool, dispatcha per kind)
+# ============================================================
+
+@mcp.tool()
+async def studio_download(kind: str, notebook_id: str, output_path: str,
+                          artifact_id: Optional[str] = None) -> str:
+    """Scarica un artefatto. kind: audio|video|slides|mindmap|infographic|data_table|report|quiz|flashcards.
+    Ritorna il path effettivo del file scritto."""
+    p = await _aio(core.studio_download, kind, notebook_id, output_path,
+                   artifact_id=artifact_id)
+    return str(p)
+
+
+# ============================================================
+# STUDIO — export
+# ============================================================
+
+@mcp.tool()
+async def studio_export_to_docs(notebook_id: str, artifact_id: str,
+                                title: Optional[str] = None) -> str:
+    """Esporta un Report su Google Docs. Ritorna l'URL."""
+    return await _aio(core.studio_export_to_docs, notebook_id, artifact_id, title=title)
+
+
+@mcp.tool()
+async def studio_export_to_sheets(notebook_id: str, artifact_id: str,
+                                  title: Optional[str] = None) -> str:
+    """Esporta una Data Table su Google Sheets. Ritorna l'URL."""
+    return await _aio(core.studio_export_to_sheets, notebook_id, artifact_id, title=title)
+
+
+# ============================================================
+# DOCTOR
+# ============================================================
+
+@mcp.tool()
+async def doctor() -> dict:
+    """Diagnostica: nlm reachable + count notebook."""
+    return await _aio(core.doctor)
+
+
+# ============================================================
+# main
+# ============================================================
+
+if __name__ == "__main__":
+    print(f"[nb1777-mcp] {TRANSPORT} on {HOST}:{PORT}")
+    mcp.run(transport=TRANSPORT)

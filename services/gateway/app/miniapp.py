@@ -76,6 +76,25 @@ async def app_index(_request: Request) -> Response:
     return HTMLResponse(body)
 
 
+async def plugins_list(_request: Request) -> Response:
+    """
+    GET /app/plugins — lista degli MCP/bot/plugin attivi.
+
+    Espone i nomi di `GATEWAY_UPSTREAMS` come fonte di verità.
+    La Mini App può usarli per generare la tab "I miei plugin".
+    """
+    s = get_settings()
+    items = [
+        {
+            "name": name,
+            "url": f"{s.gateway_public_base}/{s.effective_gateway_secret}/{name}/mcp"
+                   if s.gateway_public_base else f"http://localhost:8080/<SECRET>/{name}/mcp",
+        }
+        for name in sorted(s.gateway_upstreams)
+    ]
+    return JSONResponse({"plugins": items})
+
+
 async def miniapp_auth(request: Request) -> Response:
     """POST /app/auth — il frontend manda initData, riceve JWT typ=miniapp."""
     s = get_settings()

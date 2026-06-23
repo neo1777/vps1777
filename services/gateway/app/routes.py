@@ -44,6 +44,7 @@ routes = [
     Route("/app", miniapp.app_index, methods=["GET"]),
     Route("/app/", miniapp.app_index, methods=["GET"]),
     Route("/app/auth", miniapp.miniapp_auth, methods=["POST"]),
+    Route("/app/plugins", miniapp.plugins_list, methods=["GET"]),
 
     # Reverse proxy MCP — catch-all, ULTIMA
     Route("/{secret}/{service}", proxy.proxy,
