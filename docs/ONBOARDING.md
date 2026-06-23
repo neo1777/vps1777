@@ -36,7 +36,7 @@ Il pannello mostra **lo stato dei componenti** a semafori e i form per:
 
 | Sezione | Cosa inserisci | Dove lo prendi |
 |---|---|---|
-| Tailscale Funnel | pre-auth key `tskey-auth-...` | [login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys) |
+| Tailscale Funnel | OAuth client (Client ID + Secret) — vedi [INGRESS.md](INGRESS.md) per i prerequisiti account | [login.tailscale.com/admin/settings/oauth](https://login.tailscale.com/admin/settings/oauth) |
 | Bot Telegram | token + owner id | [@BotFather](https://t.me/BotFather) + [@userinfobot](https://t.me/userinfobot) |
 | URL pubblico | (opzionale) solo per Caddy/Cloudflared con dominio tuo | — |
 | NotebookLM | upload `auth.json` (bottone dedicato) | `nlm login` sul tuo PC |
@@ -56,7 +56,7 @@ Dal tuo PC, nella cartella del repo:
 ```
 
 Cosa fa (via SSH):
-- scrive i veri Docker secret (`ts_authkey`, `telegram_bot_token`) e `.env`
+- scrive `TS_AUTHKEY` in `.env` (dall'OAuth client o dalla key) + il Docker secret `telegram_bot_token`
 - `tailscale up` con la key → ricava l'URL `*.ts.net`
 - imposta `PUBLIC_BASE` con quell'URL
 - riavvia i servizi **senza** la porta 8080 (la chiude)

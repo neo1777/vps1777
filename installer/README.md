@@ -46,7 +46,7 @@ build+up, Tailscale, reboot test) **direttamente via SSH**. Tutto resta su
 
 1. **La tua VPS** — IP, utente, password → *Verifica connessione* (semaforo verde)
 2. **Admin** — email (la password è generata e mostrata alla fine)
-3. **Ingress** — Tailscale (key) / Caddy (dominio) / Cloudflared (token)
+3. **Ingress** — Tailscale (OAuth client + checklist prerequisiti) / Caddy (dominio) / Cloudflared (token)
 4. **Bot Telegram** — opzionale
 5. Quando tutti i semafori sono verdi, **Installa** si attiva → avanzamento
    live → schermata con URL, password admin, URL connector claude.ai.

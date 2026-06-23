@@ -1,5 +1,11 @@
 # Installazione — vps1777
 
+> **La via più semplice è l'installer grafico** (cross-OS, zero comandi): doppio-click
+> su `installer/launch.bat` (Windows) o `installer/launch.sh` (Linux/Mac/WSL), compili
+> un form e clicchi **Installa**. Vedi [installer/README.md](../installer/README.md).
+> Questo documento descrive il percorso **manuale/avanzato**, per chi vuole installare
+> a mano sulla VPS o capire ogni passo.
+
 Sequenza passo-passo dall'host vuoto a stack su.
 
 ## Prerequisiti

@@ -11,5 +11,6 @@ File attesi (sempre `chmod 600`):
 - `oauth_signing_secret.txt`
 - `admin_password_bcrypt.txt`
 - `telegram_bot_token.txt`
-- `ts_authkey.txt` (solo se ingress.tailscale + auth-key mode)
 - `cloudflared_token.txt` (solo se ingress.cloudflared)
+
+> Tailscale **non** usa un secret file: `TS_AUTHKEY` sta in `.env` (vedi [docs/INGRESS.md](../docs/INGRESS.md)).

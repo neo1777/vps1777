@@ -28,8 +28,9 @@ Threat model dichiarato:
 - OAuth 2.1 + DCR + PKCE per tutti i client OAuth (claude.ai, Mini App, future integrazioni)
 - JWT con `typ` separati: access_token (15min), refresh_token (30gg), admin (8h), miniapp (1h)
 - Path namespacing via `GATEWAY_SECRET`: l'URL contiene un segreto rotabile (se compromesso, rota e cambi URL)
-- Bcrypt rounds=12 per password admin (file `secrets/admin_password.txt`)
-- Container non-root UID 65532, `cap_drop: ALL`, `read_only` dove possibile
+- Bcrypt rounds=12 per password admin (file `secrets/admin_password_bcrypt.txt`)
+- Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`
+- Il gateway (unico servizio esposto) non ha accesso al Docker socket né ai secret host
 
 ## Out of scope
 

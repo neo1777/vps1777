@@ -10,8 +10,11 @@ Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei cont
 | `oauth_signing_secret` | `secrets/oauth_signing_secret.txt` | firma JWT HS256 (≥32 byte) | gateway |
 | `admin_password_bcrypt` | `secrets/admin_password_bcrypt.txt` | hash bcrypt della password admin (rounds=12) | gateway |
 | `telegram_bot_token` | `secrets/telegram_bot_token.txt` | TOKEN bot da BotFather | gateway, nb1777-bot |
-| `ts_authkey` | `secrets/ts_authkey.txt` | (opz) Tailscale auth-key | tailscale sidecar |
 | `cloudflared_token` | `secrets/cloudflared_token.txt` | (opz) CF Tunnel token | cloudflared sidecar |
+
+> **Tailscale**: `TS_AUTHKEY` **non** è un Docker secret — vive in `.env` (la legge
+> il sidecar via env). Con l'installer è una key usa-e-getta generata da un OAuth
+> client (il cui *secret* resta sul tuo PC). Vedi [INGRESS.md](INGRESS.md).
 
 ## Generazione iniziale
 

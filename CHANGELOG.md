@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Docs — Sync di coerenza pre-pubblicazione
+
+Audit completo di tutta la documentazione contro il codice attuale. Corretti:
+
+- **Refusi di sicurezza nel README e SECURITY.md** (importante prima del pubblico): UID dichiarato `65532` → in realtà **1000 `app`**; `read_only: true` dichiarato ma **non impostato** nel compose → rimosso, sostituito con i fatti reali (`cap_drop: ALL`, `no-new-privileges`, gateway senza Docker socket). Nome file password `admin_password.txt` → `admin_password_bcrypt.txt`.
+- **INGRESS.md**: riscritta la sezione Tailscale — la vecchia "Modalità A" aveva scope errati (`devices:read/write`) e citava un `secrets/ts_oauth.txt` inesistente. Ora descrive il flusso reale: OAuth client con scope `policy_file`+`auth_keys`, tag `tag:vps1777`, i 3 prerequisiti account, e l'automazione ACL+key dell'installer.
+- **TROUBLESHOOTING.md**: nuova diagnosi "Funnel non si attiva" coi 3 prerequisiti + comandi e messaggi d'errore reali.
+- **SECRETS.md / secrets/README.md / .env.example**: `ts_authkey` non è un Docker secret → vive in `.env` come `TS_AUTHKEY`; rimossi i riferimenti al file inesistente.
+- **README / deploy.sh refs**: utente `operator` → `vps1777`; deploy.sh marcato come via CLI per Linux/Mac/WSL (Windows nativo → installer grafico).
+- **INSTALL.md**: premesso l'installer grafico come via principale; ONBOARDING/installer README allineati al flusso OAuth.
+- Verificato che tutti gli script citati nei doc esistano (`setup.sh`, `deploy.sh`, `tools/rotate-secret.sh`, launcher).
+
 ### Aggiunto — Tailscale Funnel automatico via OAuth client
 
 Il deploy Tailscale ora attiva il **Funnel HTTPS in automatico** partendo da un **OAuth client** (invece della sola auth-key, che non bastava: il Funnel richiede prerequisiti a livello di account che la key non porta — nodeAttr `funnel` nell'ACL, HTTPS Certificates, MagicDNS).

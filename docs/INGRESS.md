@@ -6,27 +6,49 @@
 
 **Quando**: vuoi un URL HTTPS gratis con cert auto-rinnovato, sub-dominio `*.ts.net`, no DNS proprio.
 
-**Setup**:
+> **Perché serve più della auth-key.** Far entrare il nodo nel tailnet è facile;
+> attivare il **Funnel** (l'esposizione HTTPS pubblica) richiede 3 cose a livello
+> di **account**, che la sola auth-key non porta: **MagicDNS**, **HTTPS
+> Certificates** e l'attributo **`funnel` nell'ACL**. Per questo l'installer usa
+> un **OAuth client**: con quello automatizza la parte ACL + la generazione della
+> key; i due toggle (MagicDNS/HTTPS) restano manuali perché Tailscale non espone
+> API per abilitarli (è un consenso umano *by design*).
 
-### Modalità A — OAuth client (raccomandato 2026)
+### Modalità A — OAuth client (raccomandato, via installer)
 
-1. Vai su [admin.tailscale.com → Settings → OAuth clients](https://login.tailscale.com/admin/settings/oauth)
-2. **Generate OAuth client** con scope `devices:read,devices:write`, tag `tag:vps1777`
-3. Salva `client_id` e `client_secret` in `secrets/ts_oauth.txt` (formato: `<client_id>:<client_secret>`)
-4. Aggiungi a `.env`: `TS_HOSTNAME=vps1777`
-5. Lancia: `docker compose --profile ingress.tailscale up -d`
+**4 passi una tantum nella admin console Tailscale:**
 
-### Modalità B — Auth-key (fallback)
+1. Crea l'account su [login.tailscale.com](https://login.tailscale.com)
+2. In [admin → DNS](https://login.tailscale.com/admin/dns) abilita **MagicDNS** e **HTTPS Certificates**
+3. In [admin → OAuth clients](https://login.tailscale.com/admin/settings/oauth) crea un **OAuth client** con scope **`policy_file`** (write) + **`auth_keys`**, e assegna il tag **`tag:vps1777`** (creandolo lì → viene aggiunto ai `tagOwners` dell'ACL)
+4. Incolla **Client ID** e **Client Secret** nell'installer (sezione Ingress → Tailscale)
 
-1. Vai su [admin/settings/keys](https://login.tailscale.com/admin/settings/keys)
-2. **Generate auth key** (tag `tag:vps1777`, expiry 90gg)
-3. Salva la stringa `tskey-auth-...` in `secrets/ts_authkey.txt`
-4. Aggiungi a `.env`: `TS_HOSTNAME=vps1777` + `TS_AUTHKEY=` (lascia vuoto, lo legge dal file)
-5. Lancia: `docker compose --profile ingress.tailscale up -d`
+L'installer (engine, dal tuo PC) fa il resto **in automatico**:
+- ottiene un token OAuth dal client
+- scrive nell'ACL il `nodeAttr` `funnel` per `tag:vps1777` (merge idempotente)
+- genera una **auth-key taggata single-use** e la scrive in `.env` come `TS_AUTHKEY`
+
+> **Sicurezza**: il *Client Secret* non lascia il tuo PC. Sulla VPS finisce solo
+> la auth-key usa-e-getta, che si consuma al primo login del nodo.
+
+### Modalità B — Auth-key diretta (avanzata / manuale sulla VPS)
+
+Se installi a mano sulla VPS (senza l'installer) o preferisci gestire l'account
+da te:
+
+1. Abilita comunque **MagicDNS** + **HTTPS Certificates** (vedi sopra) e aggiungi all'ACL `{"target":["tag:vps1777"],"attr":["funnel"]}` in `nodeAttrs`
+2. Genera una **auth key** taggata `tag:vps1777` in [admin/settings/keys](https://login.tailscale.com/admin/settings/keys)
+3. Mettila in `.env`: `TS_HOSTNAME=vps1777` + `TS_AUTHKEY=tskey-auth-...`
+4. Lancia: `docker compose --profile ingress.tailscale up -d`
+
+> `TS_AUTHKEY` vive in `.env` (letta dal sidecar via env), **non** è un Docker
+> secret file. Senza i 3 prerequisiti account il Funnel non parte e si resta su
+> HTTP — vedi [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ### Hostname del nodo
 
-Tailscale assegna `<TS_HOSTNAME>.<tailnet>.ts.net`. Annota questa URL nel pannello — la userai come `PUBLIC_BASE` dopo il primo avvio.
+Tailscale assegna `<TS_HOSTNAME>.<tailnet>.ts.net`. L'installer ricava questa URL
+da solo e imposta `PUBLIC_BASE`; in manuale annotala e mettila in `.env`.
 
 ## 2. Caddy + Let's Encrypt
 

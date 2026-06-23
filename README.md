@@ -65,9 +65,9 @@ git clone https://github.com/<owner>/vps1777.git && cd vps1777
 ./deploy.sh
 ```
 
-`deploy.sh` (dal tuo PC, serve `sshpass` per auth password):
+`deploy.sh` (dal tuo PC; su Linux/Mac/WSL, serve `sshpass` per auth password — per Windows nativo usa l'installer grafico qui sopra):
 1. Chiede IP, user, password VPS + config (email admin, OWNER_ID, ingress)
-2. Installa Docker + Compose v2, crea utente `operator`
+2. Installa Docker + Compose v2, crea utente `vps1777`
 3. Trasferisce il repo via SSH
 4. Genera `.env` + secrets (random + bcrypt) sulla VPS
 5. `docker compose up -d --build`
@@ -101,9 +101,10 @@ Più tutti i **plugin** che ci aggiungerai dopo (vedi [docs/PLUGINS.md](docs/PLU
 ## 🛡 Sicurezza per design
 
 - Backend su rete Docker `internal: true` — solo il gateway è esposto verso fuori
-- Secrets via Docker `secrets:` (tmpfs `/run/secrets/`), MAI in env var
+- Secrets sensibili (password, signing key, token) via Docker `secrets:` (tmpfs `/run/secrets/`), MAI in env var
 - OAuth 2.1 con PKCE + refresh, JWT con `typ` separati (no cross-token-use)
-- Container non-root (UID 65532), `cap_drop: ALL`, `read_only: true`, healthcheck obbligatorio
+- Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, healthcheck su ogni servizio
+- Il gateway **non** ha accesso al Docker socket né ai secret host (container non privilegiato)
 - Hardening: backup age-encrypted, rotate secrets senza downtime, auto-update via Watchtower
 
 ## 📖 Documentazione

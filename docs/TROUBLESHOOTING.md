@@ -53,15 +53,29 @@ python3 -c "import json; d = json.load(open('~/.notebooklm-mcp-cli/auth.json'));
 # → ['profiles']
 ```
 
-## Tailscale Funnel: "https://<host>.ts.net" non risponde
+## Tailscale Funnel non si attiva (URL resta HTTP su :8080)
 
-Diagnosi:
+È il caso più comune al primo deploy. Il nodo entra nel tailnet ma il **Funnel
+HTTPS non parte** → l'installer lascia il fallback `http://<IP>:8080`.
+
+Causa quasi sempre: mancano i **prerequisiti a livello di account** (la auth-key
+NON li porta). Servono tutti e tre:
+
+1. **MagicDNS** abilitato — [admin → DNS](https://login.tailscale.com/admin/dns)
+2. **HTTPS Certificates** abilitato — stessa pagina DNS
+3. Attributo **`funnel` nell'ACL** per `tag:vps1777` (l'installer lo scrive da sé se gli dai un **OAuth client** con scope `policy_file`; vedi [INGRESS.md](INGRESS.md))
+
+Diagnosi sulla VPS:
 ```bash
-docker compose logs tailscale --tail 50
+docker exec vps1777-tailscale tailscale funnel status     # cosa è attivo
+docker logs vps1777-tailscale --tail 40                   # errore esatto
 ```
+- `Funnel not available; "funnel" node attribute not set` → manca il nodeAttr (punto 3). Con OAuth client: verifica lo scope `policy_file` (write). A mano: aggiungi `{"target":["tag:vps1777"],"attr":["funnel"]}` ai `nodeAttrs` dell'ACL.
+- errori su `cert`/`HTTPS` → manca il toggle HTTPS Certificates (punto 2).
+- `tailscale status` non mostra il device → key non valida/consumata o login fallito.
 
-- Hostname non risolto: verifica `tailscale status` mostri il device
-- Funnel non attivo: `docker exec tailscale tailscale funnel status`
+> L'installer mostra già questa diagnosi in chiaro nella console di deploy:
+> se vedi l'avviso, segui il link che indica.
 
 ## Archive MCP non trova niente (`search` ritorna vuoto)
 
