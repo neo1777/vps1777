@@ -76,6 +76,17 @@ NON li porta). Servono tutti e tre:
 2. **HTTPS Certificates** abilitato — stessa pagina DNS
 3. Attributo **`funnel` nell'ACL** per `tag:vps1777` (l'installer lo scrive da sé se gli dai un **OAuth client** con scope `policy_file`; vedi [INGRESS.md](INGRESS.md))
 
+**Caso 0 — il sidecar tailscale è in crash-loop (versione immagine).** Sintomo:
+`docker ps` mostra `vps1777-tailscale` come `Restarting`, e `docker logs` contiene
+`panic: ... kubeClient.storeHTTPSEndpoint`. È un bug di containerboot v1.78.0–.2 con
+`TS_SERVE_CONFIG` fuori da Kubernetes. **Fix: usa l'immagine `v1.78.3`+** (il repo
+pinna `v1.98.4`). Verifica: `docker inspect vps1777-tailscale --format '{{.RestartCount}}'`
+deve restare basso.
+
+**Caso 0-bis — gateway irraggiungibile dal sidecar dopo un restart.** Se hai ricreato
+il gateway a mano, il sidecar (che ne condivide il netns via `network_mode: service:gateway`)
+resta sul netns vecchio. Ricrealo: `docker compose ... up -d --force-recreate tailscale`.
+
 Diagnosi (l'installer fallisce **subito**, allo STEP 3, se la provisioning OAuth non va):
 
 - **`l'OAuth client NON è autorizzato al tag tag:vps1777`** / `requested tags [tag:vps1777] are invalid or not permitted` → l'OAuth client non ha quel tag assegnato. **FIX**: ricrea l'OAuth client e nello scope `auth_keys` **seleziona `tag:vps1777`** nei Tags (vedi [INGRESS.md](INGRESS.md)). È l'errore più comune.

@@ -191,6 +191,8 @@ if [ "$APPLY_MODE" = "1" ]; then
   # 4. Restart servizi SENZA compose.onboarding (chiude la porta 8080 in chiaro)
   log "Riavvio i servizi (chiudo la porta 8080 di onboarding)..."
   SSHT "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d'" || die "restart fallito"
+  # gateway ricreato → ri-aggancia il sidecar tailscale (netns condiviso)
+  case "$INGRESS_PROFILE" in *tailscale*) SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d --force-recreate tailscale'" >/dev/null 2>&1 || warn "relink tailscale fallito";; esac
   ok "Servizi riavviati"
 
   # 5. Cancella pending.json (contiene valori sensibili)
@@ -420,6 +422,8 @@ if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
     PUBLIC_BASE="$TS_URL"
     SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$TS_URL|\" .env || echo PUBLIC_BASE=$TS_URL >> .env)'"
     SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1 || true
+    # gateway ricreato → ri-aggancia il sidecar tailscale (netns condiviso via network_mode: service:gateway)
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d --force-recreate tailscale'" >/dev/null 2>&1 || true
     ok "URL pubblico: $TS_URL"
   else
     warn "URL Tailscale non ricavato — configuralo dal pannello dopo."

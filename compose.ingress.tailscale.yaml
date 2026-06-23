@@ -20,7 +20,11 @@ services:
 
   tailscale:
     profiles: [ingress.tailscale]
-    image: tailscale/tailscale:v1.78.1
+    # NB: NON usare v1.78.0–v1.78.2: bug di containerboot (nil pointer in
+    # kubeClient.storeHTTPSEndpoint) con TS_SERVE_CONFIG fuori da Kubernetes →
+    # crash-loop, il Funnel non parte mai. Fixato da v1.78.3 in poi
+    # (tailscale/tailscale#14357). Pinnata a una stabile recente.
+    image: tailscale/tailscale:v1.98.4
     container_name: vps1777-tailscale
     restart: unless-stopped
     cap_add:

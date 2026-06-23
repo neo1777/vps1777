@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Fix — Funnel Tailscale: crash containerboot + netns + cert (debug su VPS reale)
+
+Sessione di debug end-to-end su VPS reale (con accesso root). Trovati e corretti **tre** problemi che impedivano al Funnel HTTPS di servire (l'URL restava `http://IP:8080`):
+
+1. **[BLOCCANTE] Crash-loop del sidecar Tailscale.** L'immagine `tailscale/tailscale:v1.78.1` ha un bug di `containerboot` (nil pointer in `kubeClient.storeHTTPSEndpoint`) quando `TS_SERVE_CONFIG` è impostato **fuori da Kubernetes** → panic → restart-loop infinito (visto: RestartCount 27). Il nodo lampeggiava in Machines ma non serviva mai il Funnel. **Fix: immagine pinnata a `v1.98.4`** (bug fixato da v1.78.3, PR tailscale/tailscale#14357). Validato dal vivo: dopo il bump il Funnel si attiva.
+2. **[BLOCCANTE] netns orfano.** Il sidecar usa `network_mode: service:gateway` (condivide il netns del gateway). Ricreare il gateway (per `PUBLIC_BASE`, o per chiudere :8080) lascia tailscale agganciato al **netns vecchio/morto** → niente DNS, niente proxy verso il gateway. **Fix: `_relink_tailscale()`** — dopo ogni ricreazione del gateway l'engine ricrea anche il sidecar. Validato: il `/health` interno tornava raggiungibile solo dopo il relink.
+3. **[MEDIO] Cert Funnel pigro + finestra URL troppo corta.** Il cert HTTPS del Funnel veniva emesso solo alla 1ª richiesta pubblica → timeout. E il polling dell'URL `.ts.net` (60s, prima del reboot) scadeva su VPS fresca. **Fix**: `_warm_ts_cert()` pre-provisiona il cert (`tailscale cert`); finestra di polling estesa a 150s; **l'URL viene ri-derivato e l'HTTPS verificato DOPO il reboot** (stato a regime, netns sano), non solo prima.
+
+Diagnostica del Funnel migliorata (riconosce crash-loop/panic, nodeAttr, cert).
+
 ### Fix — Provisioning Tailscale robusta + login admin su HTTP
 
 Dopo un deploy reale: la auth-key non veniva generata (Funnel mai attivo, URL HTTP) e il login admin non procedeva. Diagnosi via API: l'OAuth client falliva la creazione della key con `requested tags [tag:vps1777] are invalid or not permitted` (il client non aveva il tag assegnato), ma l'engine **proseguiva in silenzio** con key vuota → sidecar in standby → HTTP. E su HTTP il cookie admin `Secure` non veniva salvato dal browser → login a vuoto.

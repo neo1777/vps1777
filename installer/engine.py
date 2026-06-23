@@ -440,51 +440,90 @@ echo CONFIG_OK
             yield line
         yield "✓ Stack avviato"
 
+    # ───── helper Tailscale ─────
+
+    def _ts_node_url(self) -> str:
+        """URL https://<host>.ts.net del nodo (vuoto se non ancora loggato)."""
+        return self._run_capture(
+            "docker exec vps1777-tailscale tailscale status --json 2>/dev/null | "
+            "python3 -c \"import sys,json;d=json.load(sys.stdin);n=d.get('Self',{}).get('DNSName','').rstrip('.');print('https://'+n if n else '')\" 2>/dev/null"
+        ).strip()
+
+    def _ts_funnel_ok(self) -> bool:
+        f = self._run_capture("docker exec vps1777-tailscale tailscale funnel status 2>/dev/null || true")
+        return ":443" in f or "funnel on" in f.lower()
+
+    def _relink_tailscale(self, ingress: str, onboarding: bool) -> None:
+        """Dopo aver (ri)creato il gateway, RI-AGGANCIA il sidecar tailscale.
+        Con network_mode: service:gateway, ricreare il gateway lascia tailscale
+        attaccato al netns vecchio (morto) → niente DNS, niente proxy. Ricrearlo
+        lo riaggancia al netns nuovo. (Il reboot finale fa lo stesso da solo.)"""
+        if ingress != "tailscale":
+            return
+        cmd = self._compose_cmd(ingress, onboarding=onboarding)
+        self._run_capture(self._sudo(f"cd {REMOTE_DIR} && {cmd} up -d --force-recreate tailscale"))
+
+    def _warm_ts_cert(self, url: str) -> None:
+        """Pre-provisiona il cert del Funnel (LE via Tailscale): senza, la PRIMA
+        richiesta pubblica deve emettere il cert live e va spesso in timeout."""
+        host = url.replace("https://", "").replace("http://", "").rstrip("/")
+        if host:
+            self._run_capture(
+                f"docker exec vps1777-tailscale tailscale cert {shlex.quote(host)} >/dev/null 2>&1 || true"
+            )
+
     def step_tailscale_url(self, p: dict, ingress: str) -> Iterator[str]:
         # production: True se possiamo chiudere la porta 8080 (Funnel HTTPS ok)
         self.production = False
         if ingress != "tailscale" or not p.get("ts_authkey"):
             return
         yield "── Attendo login Tailscale + Funnel…"
-        # il sidecar (containerboot) fa up + serve config; diamo tempo
+        # il sidecar parte DOPO che il gateway è healthy, poi fa login: su VPS
+        # fresca può richiedere parecchio → finestra ampia (30×5 = 150s).
         url = ""
-        for _ in range(12):
+        for _ in range(30):
             time.sleep(5)
-            url = self._run_capture(
-                "docker exec vps1777-tailscale tailscale status --json 2>/dev/null | "
-                "python3 -c \"import sys,json;d=json.load(sys.stdin);print('https://'+d.get('Self',{}).get('DNSName','').rstrip('.'))\" 2>/dev/null"
-            ).strip()
+            url = self._ts_node_url()
             if url.endswith(".ts.net"):
                 break
             yield "  ."
         if not url.endswith(".ts.net"):
-            yield "! URL Tailscale non ricavato — controlla la key e l'account. Lascio la porta 8080 aperta come fallback."
+            yield "! URL Tailscale non ricavato — il nodo non ha completato il login. Lascio :8080 come fallback."
             return
         self.result["URL"] = url
-        # imposta PUBLIC_BASE e riavvia gateway
+        yield f"✓ URL pubblico: {url}"
+        # PUBLIC_BASE in .env + ricrea gateway. ATTENZIONE: ricreare il gateway
+        # orfanizza il sidecar tailscale (netns condiviso) → subito dopo lo ri-aggancio.
         cmd = self._compose_cmd(ingress, onboarding=True)
         self._run_capture(self._sudo(
             f"cd {REMOTE_DIR} && (grep -q ^PUBLIC_BASE= .env && sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE={url}|' .env || echo PUBLIC_BASE={url} >> .env) && {cmd} up -d gateway"
         ))
-        yield f"✓ URL pubblico: {url}"
+        self._relink_tailscale(ingress, onboarding=True)
+        time.sleep(12)              # attendo che tailscale rifaccia login dopo il relink
+        self._warm_ts_cert(url)     # pre-provisiona il cert (evita timeout 1ª richiesta)
         # verifica Funnel attivo su :443
-        fstat = self._run_capture("docker exec vps1777-tailscale tailscale funnel status 2>/dev/null || true")
-        if ":443" in fstat or "https" in fstat.lower():
+        if self._ts_funnel_ok():
             self.production = True
-            yield "✓ Funnel HTTPS attivo su :443"
+            yield "✓ Funnel HTTPS attivo su :443 (cert pre-provisionato)"
         else:
-            # diagnostica REALE: leggo i log del sidecar per capire la causa esatta
+            # diagnostica REALE: leggo lo stato del container + i log del sidecar
+            status = self._run_capture(
+                "docker ps -a --filter name=vps1777-tailscale --format '{{.Status}}' 2>/dev/null"
+            ).lower()
             logs = self._run_capture(
                 "docker logs vps1777-tailscale 2>&1 | tail -40 || true"
             ).lower()
-            if "node attribute" in logs or "funnel" in logs and "not " in logs:
+            if "restarting" in status or "panic" in logs or "storehttpsendpoint" in logs:
+                yield "! Il sidecar tailscale è in CRASH-LOOP (panic containerboot)."
+                yield "  → Versione immagine buggata (v1.78.0–.2). Usa v1.78.3+ (qui pinnata v1.98.4)."
+            elif "node attribute" in logs and "funnel" in logs:
                 yield "! Funnel non attivo: manca il nodeAttr 'funnel' nell'ACL del tailnet."
-                yield "  → Se hai usato l'OAuth client, verifica lo scope 'policy_file' (write). Altrimenti aggiungilo a mano: Access Controls → nodeAttrs funnel."
-            elif "cert" in logs or "https" in logs and ("disabled" in logs or "not enabled" in logs):
+                yield "  → Verifica che l'OAuth client abbia lo scope 'policy_file' (write)."
+            elif "cert" in logs and ("disabled" in logs or "not enabled" in logs or "no cert" in logs):
                 yield "! Funnel non attivo: HTTPS Certificates non abilitato nel tailnet."
                 yield "  → Attivalo (una tantum): login.tailscale.com/admin/dns → Enable HTTPS."
             else:
-                yield "! Funnel non confermato — prerequisiti account mancanti (MagicDNS + HTTPS + nodeAttr funnel)."
+                yield "! Funnel non confermato — controlla i prerequisiti account (MagicDNS + HTTPS + nodeAttr funnel)."
                 yield "  → Checklist: login.tailscale.com/admin/dns (MagicDNS + HTTPS) e Access Controls (nodeAttr funnel)."
             yield "  Lascio la porta 8080 (HTTP) come fallback."
 
@@ -498,6 +537,7 @@ echo CONFIG_OK
         # --force-recreate sul gateway per applicare la rimozione del port mapping
         for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && {cmd} up -d --force-recreate gateway"), "finalize"):
             yield line
+        self._relink_tailscale(ingress, onboarding=False)  # gateway ricreato → ri-aggancia tailscale
         yield "✓ Porta 8080 chiusa — raggiungibile solo via HTTPS"
 
     def step_reboot(self, ingress: str) -> Iterator[str]:
@@ -524,24 +564,42 @@ echo CONFIG_OK
             yield "! VPS non ancora raggiungibile — controlla manualmente"
             return
         yield "✓ VPS tornata online, attendo i container…"
-        time.sleep(15)
+        time.sleep(20)
         cmd = self._compose_cmd(ingress, onboarding=not production)
         ps = self._run_capture(self._sudo(f"cd {REMOTE_DIR} && {cmd} ps"))
         for line in ps.splitlines():
             yield line
-        # verifica finale HTTPS se production
-        if production:
+        # Dopo il reboot tutto riparte pulito (tailscale ri-agganciato al gateway):
+        # è il momento AFFIDABILE per ricavare/confermare l'URL e il Funnel.
+        if ingress == "tailscale":
+            if not self.result.get("URL", "").endswith(".ts.net"):
+                yield "── Ricavo l'URL Tailscale a regime…"
+                for _ in range(18):  # 90s
+                    time.sleep(5)
+                    u = self._ts_node_url()
+                    if u.endswith(".ts.net"):
+                        self.result["URL"] = u
+                        self._run_capture(self._sudo(
+                            f"cd {REMOTE_DIR} && (grep -q ^PUBLIC_BASE= .env && sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE={u}|' .env || echo PUBLIC_BASE={u} >> .env) && {cmd} up -d gateway"
+                        ))
+                        self._relink_tailscale(ingress, onboarding=not production)
+                        time.sleep(12)
+                        yield f"✓ URL pubblico: {u}"
+                        break
+                    yield "  ."
             url = self.result.get("URL", "")
-            yield "── Verifico HTTPS pubblico…"
-            time.sleep(8)
-            health = self._run_capture(
-                f"docker exec vps1777-tailscale sh -c 'wget -qO- --no-check-certificate {url}/health 2>/dev/null' || true"
-            )
-            if '"ok"' in health or "ok" in health.lower():
-                yield f"✓ HTTPS pubblico risponde: {url}/health"
-                self.result["HTTPS_OK"] = "1"
-            else:
-                yield "! HTTPS non ancora confermato (può richiedere 1-2 min per il cert). Riprova: " + url + "/health"
+            if url.endswith(".ts.net"):
+                self._warm_ts_cert(url)
+                yield "── Verifico HTTPS pubblico…"
+                time.sleep(8)
+                health = self._run_capture(
+                    f"docker exec vps1777-tailscale sh -c 'wget -qO- --no-check-certificate {url}/health 2>/dev/null' || true"
+                ).lower()
+                if '"ok"' in health or "service" in health:
+                    yield f"✓ HTTPS pubblico risponde: {url}/health"
+                    self.result["HTTPS_OK"] = "1"
+                else:
+                    yield "! HTTPS non ancora confermato (cert/propagazione, 1-2 min). Riprova: " + url + "/health"
 
     def collect_result(self) -> Iterator[str]:
         sec = self._run_capture(self._sudo(f"cat {REMOTE_DIR}/secrets/gateway_secret.txt")).strip()
