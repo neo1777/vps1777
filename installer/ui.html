@@ -63,6 +63,13 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
 .ingress-opt .d{color:var(--muted);font-size:12px;margin-top:2px}
 .cond{margin-top:13px;padding-top:13px;border-top:1px solid var(--line-soft);display:none}
 .cond.show{display:block}
+.checklist{background:var(--bg-soft);border:1px solid var(--line);border-radius:9px;padding:14px 16px;margin-bottom:14px}
+.checklist-h{font-size:13px;color:var(--fg);font-weight:500;margin-bottom:8px}
+.checklist ol{margin:0 0 0 18px;padding:0}
+.checklist li{color:var(--muted);font-size:12.5px;margin-bottom:6px;line-height:1.5}
+.checklist li code{font-family:var(--mono);color:var(--accent-dim);font-size:11.5px;background:var(--bg);padding:1px 5px;border-radius:4px}
+.checklist a{color:var(--accent-dim)}
+.checklist-note{color:var(--faint);font-size:11.5px;margin-top:8px;border-top:1px solid var(--line-soft);padding-top:8px}
 .deploy-bar{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 30%);padding:24px 0 8px;margin-top:8px}
 .deploy-bar .btn.primary{width:100%;padding:15px;font-size:15px}
 .gate{color:var(--faint);font-size:12px;text-align:center;margin-top:10px;font-family:var(--mono)}
@@ -140,10 +147,24 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
       </div>
 
       <div class="cond show" id="cond-ts">
+        <div class="checklist">
+          <div class="checklist-h">Prima volta su Tailscale? 4 passi una tantum (poi l'installer fa il resto):</div>
+          <ol>
+            <li>Crea l'account su <a href="https://login.tailscale.com" target="_blank">login.tailscale.com</a></li>
+            <li>Abilita <strong>MagicDNS</strong> e <strong>HTTPS Certificates</strong> in <a href="https://login.tailscale.com/admin/dns" target="_blank">admin → DNS</a></li>
+            <li>Crea un <strong>OAuth client</strong> in <a href="https://login.tailscale.com/admin/settings/oauth" target="_blank">admin → OAuth clients</a> con scope <code>policy_file</code> (write) + <code>auth_keys</code>, e assegna il tag <code>tag:vps1777</code> (creandolo lì)</li>
+            <li>Incolla qui sotto <strong>Client ID</strong> e <strong>Client Secret</strong></li>
+          </ol>
+          <div class="checklist-note">Il Client Secret resta sul tuo PC: l'installer lo usa solo per scrivere il permesso Funnel nell'ACL e generare una chiave usa-e-getta. Sulla VPS finisce solo quella chiave.</div>
+        </div>
         <div class="field"><label>Hostname Tailscale</label><input type="text" id="ts_hostname" value="vps1777"></div>
-        <div class="field"><label>Tailscale auth-key</label>
-          <input type="password" id="ts_authkey" placeholder="tskey-auth-...">
-          <div class="hint">Generala su <a href="https://login.tailscale.com/admin/settings/keys" target="_blank">login.tailscale.com/admin/settings/keys</a> → Generate auth key (Reusable off).</div></div>
+        <div class="row2">
+          <div class="field"><label>OAuth Client ID</label><input type="text" id="ts_oauth_client_id" placeholder="k123ABC..." autocomplete="off"></div>
+          <div class="field"><label>OAuth Client Secret</label><input type="password" id="ts_oauth_client_secret" placeholder="tskey-client-..." autocomplete="off"></div>
+        </div>
+        <div class="hint">In alternativa, modalità avanzata: se preferisci gestire ACL/HTTPS a mano puoi usare una auth-key diretta — lascia vuoti i campi OAuth e <a href="#" onclick="document.getElementById('ts-adv').style.display='block';return false">mostra il campo auth-key</a>.</div>
+        <div class="field" id="ts-adv" style="display:none;margin-top:10px"><label>Tailscale auth-key <span class="opt">(avanzato)</span></label>
+          <input type="password" id="ts_authkey" placeholder="tskey-auth-..."></div>
       </div>
       <div class="cond" id="cond-caddy">
         <div class="field"><label>Dominio</label><input type="text" id="caddy_domain" placeholder="vps.tuosito.com"></div>
@@ -226,7 +247,7 @@ async function init(){
     const r = await fetch('/api/env'); const e = await r.json();
     if(!e.paramiko){ $('env-warn').innerHTML = '<div class="warnbox">⚠ paramiko non installato. Chiudi e rilancia launch.sh / launch.bat (lo installa da solo), oppure: sudo apt install python3-paramiko</div>'; }
   }catch(_){}
-  ['ip','user','password','admin_email','ts_authkey','caddy_domain','caddy_email','cf_token']
+  ['ip','user','password','admin_email','ts_oauth_client_id','ts_oauth_client_secret','ts_authkey','caddy_domain','caddy_email','cf_token']
     .forEach(id=>$(id).addEventListener('input',revalidate));
   // il bot va RI-verificato se cambia il token
   $('telegram_bot_token').addEventListener('input',()=>{ botOk=false; setDot('dot-bot',''); $('bot-msg').textContent=''; });
@@ -265,10 +286,15 @@ function revalidate(){
   // ingress
   const ing = document.querySelector('input[name=ingress]:checked').value;
   let ingOk=false;
-  if(ing==='1'){ ingOk = $('ts_authkey').value.trim().startsWith('tskey-auth-'); }
+  if(ing==='1'){
+    const oauthOk = $('ts_oauth_client_id').value.trim() && $('ts_oauth_client_secret').value.trim().length>5;
+    const keyOk = $('ts_authkey').value.trim().startsWith('tskey-auth-');
+    ingOk = oauthOk || keyOk;
+  }
   else if(ing==='2'){ ingOk = $('caddy_domain').value.trim() && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test($('caddy_email').value.trim()); }
   else if(ing==='3'){ ingOk = $('cf_token').value.trim().length>10; }
-  setDot('dot-ingress', ingOk?'ok':(ing==='1'&&!$('ts_authkey').value?'':'warn'));
+  const tsEmpty = ing==='1' && !$('ts_oauth_client_id').value && !$('ts_authkey').value;
+  setDot('dot-ingress', ingOk?'ok':(tsEmpty?'':'warn'));
   // tutto pronto?
   const ready = vpsOk && emailOk && ingOk;
   $('btn-deploy').disabled = !ready;
@@ -311,6 +337,7 @@ function params(){
     admin_email:$('admin_email').value.trim(),
     ingress_num:document.querySelector('input[name=ingress]:checked').value,
     ts_hostname:$('ts_hostname').value.trim()||'vps1777', ts_authkey:$('ts_authkey').value.trim(),
+    ts_oauth_client_id:$('ts_oauth_client_id').value.trim(), ts_oauth_client_secret:$('ts_oauth_client_secret').value.trim(),
     caddy_domain:$('caddy_domain').value.trim(), caddy_email:$('caddy_email').value.trim(),
     cf_token:$('cf_token').value.trim(),
     telegram_bot_token:$('telegram_bot_token').value.trim(), telegram_owner_id:$('telegram_owner_id').value.trim(),

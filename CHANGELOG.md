@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Aggiunto — Tailscale Funnel automatico via OAuth client
+
+Il deploy Tailscale ora attiva il **Funnel HTTPS in automatico** partendo da un **OAuth client** (invece della sola auth-key, che non bastava: il Funnel richiede prerequisiti a livello di account che la key non porta — nodeAttr `funnel` nell'ACL, HTTPS Certificates, MagicDNS).
+
+- **Form**: la sezione Tailscale chiede **OAuth Client ID + Secret** (la auth-key diretta resta come modalità avanzata, nascosta). Aggiunta una **checklist dei 4 passi una tantum** con link diretti: crea account → abilita MagicDNS + HTTPS in admin/dns → crea OAuth client (scope `policy_file` write + `auth_keys`, tag `tag:vps1777`) → incolla le credenziali.
+- **engine**: nuovo `step_ts_provision` che gira **sul PC** (urllib, niente dipendenze): ottiene il token OAuth, **scrive il nodeAttr `funnel` nell'ACL** del tailnet (merge idempotente, preserva il resto), e **genera una auth-key taggata single-use** che finisce in `.env`. **Il client-secret non lascia il PC**: sulla VPS arriva solo la key usa-e-getta.
+- **Diagnostica reale**: se il Funnel non parte, l'engine legge i log del sidecar e dice la causa esatta (nodeAttr mancante / HTTPS non abilitato / prerequisiti) con il link per risolvere, invece di un avviso generico.
+- I 2 toggle MagicDNS e HTTPS Certificates restano manuali (Tailscale non espone API per quelli — è un consenso umano *by design*). Resta il fallback HTTP:8080 se i prerequisiti mancano.
+- ⚠ La logica di merge ACL è verificata offline; le chiamate live all'API Tailscale (token, scrittura ACL, creazione key) vanno validate al primo deploy reale con un OAuth client vero.
+
 ### Fix — La password admin viene sempre mostrata alla fine
 
 - La schermata finale mostrava "(già impostata)" al posto della password quando la VPS aveva già `secrets/admin_password_bcrypt.txt` da un deploy precedente: la generazione era dentro un `if [ ! -s ... ]`, quindi su VPS non del tutto vergine la password non veniva rigenerata né emessa (`RESULT_ADMIN_PWD` assente → fallback inutile in UI).

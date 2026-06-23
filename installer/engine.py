@@ -17,6 +17,9 @@ import json
 import shlex
 import tarfile
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Iterator
 
@@ -26,6 +29,90 @@ REPO = Path(__file__).resolve().parent.parent
 COMPOSE_VERSION = "v2.32.4"
 OPERATOR_USER = "vps1777"
 REMOTE_DIR = f"/home/{OPERATOR_USER}/vps1777"
+
+# Tag usato per il nodo VPS nel tailnet. Deve combaciare col tag assegnato
+# all'OAuth client in fase di creazione (vedi checklist nella UI). Il nodeAttr
+# "funnel" viene concesso a questo tag nell'ACL → il Funnel HTTPS si attiva.
+TS_TAG = "tag:vps1777"
+TS_API = "https://api.tailscale.com/api/v2"
+
+
+# ── Provisioning Tailscale via OAuth client (gira sul PC, non sulla VPS) ────
+# Il client-secret OAuth resta in locale: lo usiamo per (1) ottenere un token,
+# (2) scrivere il nodeAttr funnel nell'ACL, (3) generare una auth-key taggata
+# single-use. Solo quella key viene poi scritta in .env sulla VPS.
+
+def _http_json(url: str, *, token: str = "", data: bytes | None = None,
+               headers: dict | None = None, method: str = "GET", timeout: int = 30):
+    """Chiamata HTTP JSON minimale (stdlib). Ritorna (obj, etag)."""
+    h = {"Accept": "application/json"}
+    if token:
+        h["Authorization"] = f"Bearer {token}"
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(url, data=data, headers=h, method=method)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        body = r.read()
+        etag = r.headers.get("ETag", "")
+        obj = json.loads(body) if body.strip() else {}
+        return obj, etag
+
+
+def _httperr(e: Exception) -> str:
+    """Estrae un messaggio leggibile da una HTTPError (corpo JSON o testo)."""
+    if isinstance(e, urllib.error.HTTPError):
+        try:
+            detail = e.read().decode("utf-8", "replace")
+        except Exception:
+            detail = ""
+        msg = detail.strip()
+        try:
+            j = json.loads(detail)
+            msg = j.get("message") or j.get("error") or detail
+        except Exception:
+            pass
+        return f"HTTP {e.code}: {msg[:200]}"
+    return str(e)
+
+
+def _ts_oauth_token(client_id: str, client_secret: str) -> str:
+    data = urllib.parse.urlencode({"client_id": client_id, "client_secret": client_secret}).encode()
+    obj, _ = _http_json(f"{TS_API}/oauth/token", data=data, method="POST",
+                        headers={"Content-Type": "application/x-www-form-urlencoded"})
+    tok = obj.get("access_token", "")
+    if not tok:
+        raise RuntimeError("token OAuth assente nella risposta")
+    return tok
+
+
+def _ts_ensure_funnel_attr(policy: dict, tag: str) -> bool:
+    """Aggiunge il nodeAttr funnel per `tag` se manca. Ritorna True se modifica."""
+    attrs = policy.setdefault("nodeAttrs", [])
+    for a in attrs:
+        if tag in (a.get("target") or []) and "funnel" in (a.get("attr") or []):
+            return False
+    attrs.append({"target": [tag], "attr": ["funnel"]})
+    # tagOwners: di norma già creato dalla console quando si fa l'OAuth client.
+    owners = policy.setdefault("tagOwners", {})
+    owners.setdefault(tag, ["autogroup:admin"])
+    return True
+
+
+def _ts_create_authkey(token: str, tag: str) -> str:
+    payload = {
+        "capabilities": {"devices": {"create": {
+            "reusable": False, "ephemeral": False, "preauthorized": True, "tags": [tag],
+        }}},
+        "expirySeconds": 86400,  # finestra per il primo login (key single-use)
+        "description": "vps1777 installer",
+    }
+    obj, _ = _http_json(f"{TS_API}/tailnet/-/keys", token=token,
+                        data=json.dumps(payload).encode(), method="POST",
+                        headers={"Content-Type": "application/json"})
+    key = obj.get("key", "")
+    if not key:
+        raise RuntimeError("auth-key assente nella risposta")
+    return key
 
 # Cartelle/file da NON includere nel tar caricato sulla VPS
 TAR_EXCLUDE = {
@@ -216,6 +303,50 @@ rm -f /tmp/vps1777.tar.gz
             yield line
         yield "✓ Repo in posizione"
 
+    def step_ts_provision(self, p: dict) -> Iterator[str]:
+        """OAuth client → nodeAttr funnel in ACL + auth-key taggata single-use.
+
+        Gira dal PC (urllib): il client-secret NON tocca la VPS. Il risultato
+        (la auth-key) viene messo in p['ts_authkey'] così che step_config la
+        scriva in .env come prima.
+        """
+        cid = (p.get("ts_oauth_client_id") or "").strip()
+        csec = (p.get("ts_oauth_client_secret") or "").strip()
+        # retrocompat: se l'utente ha ancora dato una auth-key diretta, la teniamo
+        if p.get("ts_authkey"):
+            yield "── Tailscale: uso la auth-key fornita (no OAuth provisioning)."
+            return
+        if not (cid and csec):
+            yield "! Tailscale: nessun OAuth client né auth-key — il Funnel non sarà attivo."
+            return
+        yield "── Tailscale: provisioning via OAuth client (dal PC)…"
+        try:
+            token = _ts_oauth_token(cid, csec)
+            yield "  ✓ token OAuth ottenuto"
+        except Exception as e:  # noqa: BLE001
+            yield f"! OAuth token fallito: {_httperr(e)} — controlla Client ID/Secret."
+            return
+        try:
+            policy, etag = _http_json(f"{TS_API}/tailnet/-/acl", token=token)
+            if _ts_ensure_funnel_attr(policy, TS_TAG):
+                hdrs = {"Content-Type": "application/json"}
+                if etag:
+                    hdrs["If-Match"] = etag
+                _http_json(f"{TS_API}/tailnet/-/acl", token=token,
+                           data=json.dumps(policy).encode(), method="POST", headers=hdrs)
+                yield f"  ✓ ACL aggiornata: nodeAttr funnel concesso a {TS_TAG}"
+            else:
+                yield f"  ✓ ACL già a posto (nodeAttr funnel per {TS_TAG})"
+        except Exception as e:  # noqa: BLE001
+            yield f"! ACL non aggiornata: {_httperr(e)} — serve lo scope 'policy_file' (write) sull'OAuth client."
+            # proseguo: l'ACL potrebbe essere già corretta a mano
+        try:
+            key = _ts_create_authkey(token, TS_TAG)
+            p["ts_authkey"] = key
+            yield "  ✓ auth-key taggata generata (single-use)"
+        except Exception as e:  # noqa: BLE001
+            yield f"! auth-key non creata: {_httperr(e)} — servono scope 'auth_keys' e il tag {TS_TAG} sull'OAuth client."
+
     def step_config(self, p: dict) -> Iterator[str]:
         yield "── Genero .env + secrets…"
         ingress = {"1": "tailscale", "2": "caddy", "3": "cloudflared"}.get(p.get("ingress_num", "1"), "tailscale")
@@ -314,7 +445,20 @@ echo CONFIG_OK
             self.production = True
             yield "✓ Funnel HTTPS attivo su :443"
         else:
-            yield "! Funnel non ancora confermato — verifica che sia abilitato nell'account Tailscale (Access Controls → nodeAttrs funnel)."
+            # diagnostica REALE: leggo i log del sidecar per capire la causa esatta
+            logs = self._run_capture(
+                "docker logs vps1777-tailscale 2>&1 | tail -40 || true"
+            ).lower()
+            if "node attribute" in logs or "funnel" in logs and "not " in logs:
+                yield "! Funnel non attivo: manca il nodeAttr 'funnel' nell'ACL del tailnet."
+                yield "  → Se hai usato l'OAuth client, verifica lo scope 'policy_file' (write). Altrimenti aggiungilo a mano: Access Controls → nodeAttrs funnel."
+            elif "cert" in logs or "https" in logs and ("disabled" in logs or "not enabled" in logs):
+                yield "! Funnel non attivo: HTTPS Certificates non abilitato nel tailnet."
+                yield "  → Attivalo (una tantum): login.tailscale.com/admin/dns → Enable HTTPS."
+            else:
+                yield "! Funnel non confermato — prerequisiti account mancanti (MagicDNS + HTTPS + nodeAttr funnel)."
+                yield "  → Checklist: login.tailscale.com/admin/dns (MagicDNS + HTTPS) e Access Controls (nodeAttr funnel)."
+            yield "  Lascio la porta 8080 (HTTP) come fallback."
 
     def step_finalize(self, ingress: str) -> Iterator[str]:
         """Se production (Funnel ok), riavvia SENZA onboarding → chiude :8080."""
@@ -396,6 +540,8 @@ def run(params: dict) -> Iterator[str]:
         yield "═ STEP 2/6 — Trasferimento repo"
         yield from d.step_upload()
         yield "═ STEP 3/6 — Config + secrets"
+        if ingress == "tailscale":
+            yield from d.step_ts_provision(params)
         yield from d.step_config(params)
         yield "═ STEP 4/6 — Build + avvio"
         yield from d.step_build(ingress)
