@@ -72,6 +72,7 @@ class Deployer:
         self.password = password
         self.client: paramiko.SSHClient | None = None
         self.result: dict[str, str] = {}
+        self.production = False
 
     # ───── connessione ─────
 
@@ -274,25 +275,54 @@ echo CONFIG_OK
         yield "✓ Stack avviato"
 
     def step_tailscale_url(self, p: dict, ingress: str) -> Iterator[str]:
+        # production: True se possiamo chiudere la porta 8080 (Funnel HTTPS ok)
+        self.production = False
         if ingress != "tailscale" or not p.get("ts_authkey"):
             return
-        yield "── Ricavo l'URL pubblico Tailscale…"
-        time.sleep(4)
-        url = self._run_capture(
-            "docker exec vps1777-tailscale tailscale status --json 2>/dev/null | "
-            "python3 -c \"import sys,json;d=json.load(sys.stdin);print('https://'+d.get('Self',{}).get('DNSName','').rstrip('.'))\" 2>/dev/null"
-        ).strip()
-        if url.endswith(".ts.net"):
-            self.result["URL"] = url
-            cmd = self._compose_cmd(ingress, onboarding=True)
-            self._run_capture(self._sudo(
-                f"cd {REMOTE_DIR} && (grep -q ^PUBLIC_BASE= .env && sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE={url}|' .env || echo PUBLIC_BASE={url} >> .env) && {cmd} up -d gateway"
-            ))
-            yield f"✓ URL pubblico: {url}"
+        yield "── Attendo login Tailscale + Funnel…"
+        # il sidecar (containerboot) fa up + serve config; diamo tempo
+        url = ""
+        for _ in range(12):
+            time.sleep(5)
+            url = self._run_capture(
+                "docker exec vps1777-tailscale tailscale status --json 2>/dev/null | "
+                "python3 -c \"import sys,json;d=json.load(sys.stdin);print('https://'+d.get('Self',{}).get('DNSName','').rstrip('.'))\" 2>/dev/null"
+            ).strip()
+            if url.endswith(".ts.net"):
+                break
+            yield "  ."
+        if not url.endswith(".ts.net"):
+            yield "! URL Tailscale non ricavato — controlla la key e l'account. Lascio la porta 8080 aperta come fallback."
+            return
+        self.result["URL"] = url
+        # imposta PUBLIC_BASE e riavvia gateway
+        cmd = self._compose_cmd(ingress, onboarding=True)
+        self._run_capture(self._sudo(
+            f"cd {REMOTE_DIR} && (grep -q ^PUBLIC_BASE= .env && sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE={url}|' .env || echo PUBLIC_BASE={url} >> .env) && {cmd} up -d gateway"
+        ))
+        yield f"✓ URL pubblico: {url}"
+        # verifica Funnel attivo su :443
+        fstat = self._run_capture("docker exec vps1777-tailscale tailscale funnel status 2>/dev/null || true")
+        if ":443" in fstat or "https" in fstat.lower():
+            self.production = True
+            yield "✓ Funnel HTTPS attivo su :443"
         else:
-            yield "! URL Tailscale non ricavato — configuralo dal pannello"
+            yield "! Funnel non ancora confermato — verifica che sia abilitato nell'account Tailscale (Access Controls → nodeAttrs funnel)."
+
+    def step_finalize(self, ingress: str) -> Iterator[str]:
+        """Se production (Funnel ok), riavvia SENZA onboarding → chiude :8080."""
+        if not getattr(self, "production", False):
+            yield "── Lascio la porta 8080 aperta (pannello setup raggiungibile via IP)"
+            return
+        yield "── Modalità production: chiudo la porta 8080 (solo HTTPS via Funnel)…"
+        cmd = self._compose_cmd(ingress, onboarding=False)
+        # --force-recreate sul gateway per applicare la rimozione del port mapping
+        for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && {cmd} up -d --force-recreate gateway"), "finalize"):
+            yield line
+        yield "✓ Porta 8080 chiusa — raggiungibile solo via HTTPS"
 
     def step_reboot(self, ingress: str) -> Iterator[str]:
+        production = getattr(self, "production", False)
         yield "── Riavvio la VPS (test auto-start)…"
         try:
             self._run_capture("nohup reboot >/dev/null 2>&1 &")
@@ -316,10 +346,23 @@ echo CONFIG_OK
             return
         yield "✓ VPS tornata online, attendo i container…"
         time.sleep(15)
-        cmd = self._compose_cmd(ingress, onboarding=True)
+        cmd = self._compose_cmd(ingress, onboarding=not production)
         ps = self._run_capture(self._sudo(f"cd {REMOTE_DIR} && {cmd} ps"))
         for line in ps.splitlines():
             yield line
+        # verifica finale HTTPS se production
+        if production:
+            url = self.result.get("URL", "")
+            yield "── Verifico HTTPS pubblico…"
+            time.sleep(8)
+            health = self._run_capture(
+                f"docker exec vps1777-tailscale sh -c 'wget -qO- --no-check-certificate {url}/health 2>/dev/null' || true"
+            )
+            if '"ok"' in health or "ok" in health.lower():
+                yield f"✓ HTTPS pubblico risponde: {url}/health"
+                self.result["HTTPS_OK"] = "1"
+            else:
+                yield "! HTTPS non ancora confermato (può richiedere 1-2 min per il cert). Riprova: " + url + "/health"
 
     def collect_result(self) -> Iterator[str]:
         sec = self._run_capture(self._sudo(f"cat {REMOTE_DIR}/secrets/gateway_secret.txt")).strip()
@@ -349,9 +392,11 @@ def run(params: dict) -> Iterator[str]:
         yield from d.step_config(params)
         yield "═ STEP 4/6 — Build + avvio"
         yield from d.step_build(ingress)
-        yield "═ STEP 5/6 — Tailscale URL"
+        yield "═ STEP 5/7 — Tailscale URL + Funnel"
         yield from d.step_tailscale_url(params, ingress)
-        yield "═ STEP 6/6 — Reboot test"
+        yield "═ STEP 6/7 — Finalizzazione (production)"
+        yield from d.step_finalize(ingress)
+        yield "═ STEP 7/7 — Reboot test + verifica HTTPS"
         yield from d.step_reboot(ingress)
         yield from d.collect_result()
         yield "__EXIT__0"

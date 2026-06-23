@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Aggiunto — Deploy production-ready con Tailscale (one-shot)
+
+- L'engine, quando ingress=Tailscale + auth-key nel form, ora porta la VPS a **production al reboot**:
+  - attende login Tailscale + Funnel, ricava URL `.ts.net`, imposta `PUBLIC_BASE`
+  - **verifica il Funnel** (`tailscale funnel status`); se attivo → `production=True`
+  - **STEP finalize**: in production riavvia *senza* `compose.onboarding` → **chiude la porta 8080 in chiaro** (resta solo HTTPS via Funnel)
+  - **STEP reboot**: dopo il riavvio verifica che `https://<host>.ts.net/health` risponda
+  - se il Funnel non parte (es. non abilitato nell'account Tailscale) → lascia 8080 come fallback + avviso
+- Step rinumerati 1/7…7/7. `RESULT_HTTPS_OK` per la UI.
+
+
 ### Aggiunto — Motore Python cross-OS (L2b)
 
 - **`installer/engine.py`** — deploy engine in Python puro via **paramiko**: si connette alla VPS (password o key), carica il repo via **SFTP** (tar in memoria, esclude .git/secrets/venv), ed esegue gli step **direttamente via SSH** — prepara Docker+Compose+utente, genera `.env`/secret (random + bcrypt sulla VPS), `compose up --build`, ricava URL Tailscale, reboot test, raccoglie `RESULT_*`. Niente bash/sshpass sul PC.
