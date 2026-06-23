@@ -432,3 +432,26 @@ def check(ip: str, user: str, password: str) -> dict:
         return {"ok": False, "error": "Autenticazione fallita (password/utente errati)"}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}
+
+
+def check_telegram(token: str) -> dict:
+    """Verifica REALE del bot token via l'API Telegram getMe."""
+    token = (token or "").strip()
+    if not token:
+        return {"ok": False, "error": "token vuoto"}
+    import json as _j
+    import urllib.request
+    try:
+        url = f"https://api.telegram.org/bot{token}/getMe"
+        with urllib.request.urlopen(url, timeout=10) as r:
+            d = _j.loads(r.read().decode("utf-8"))
+        if d.get("ok"):
+            res = d.get("result", {})
+            return {"ok": True, "username": res.get("username", "?"), "name": res.get("first_name", "")}
+        return {"ok": False, "error": "token rifiutato da Telegram"}
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            return {"ok": False, "error": "token non valido (401)"}
+        return {"ok": False, "error": f"HTTP {e.code}"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)}

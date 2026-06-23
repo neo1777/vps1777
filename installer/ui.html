@@ -155,12 +155,14 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
     </section>
 
     <section>
-      <div class="sec-head"><span class="sec-num">4</span><h2>Bot Telegram <span style="color:var(--faint);font-size:13px">· opzionale</span></h2><span class="dot ok" id="dot-bot"></span></div>
+      <div class="sec-head"><span class="sec-num">4</span><h2>Bot Telegram <span style="color:var(--faint);font-size:13px">· opzionale</span></h2><span class="dot" id="dot-bot"></span></div>
       <div class="field"><label>TELEGRAM_BOT_TOKEN <span class="opt">(lascia vuoto per configurarlo dopo)</span></label>
         <input type="password" id="telegram_bot_token" placeholder="123456:AAF..."></div>
       <div class="field"><label>TELEGRAM_OWNER_ID <span class="opt">(il tuo id numerico)</span></label>
         <input type="text" id="telegram_owner_id" placeholder="123456789"></div>
-      <div class="hint">Token da <a href="https://t.me/BotFather" target="_blank">@BotFather</a>, id da <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>.</div>
+      <button class="btn" id="btn-bot" onclick="checkBot()">Verifica bot</button>
+      <span id="bot-msg" class="hint"></span>
+      <div class="hint" style="margin-top:8px">Token da <a href="https://t.me/BotFather" target="_blank">@BotFather</a>, id da <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>. Opzionale: se lo lasci vuoto il bot resta in standby.</div>
     </section>
 
     <div class="deploy-bar">
@@ -217,6 +219,7 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
 <script>
 const $ = id => document.getElementById(id);
 let vpsOk = false;
+let botOk = false;
 
 async function init(){
   try{
@@ -225,6 +228,8 @@ async function init(){
   }catch(_){}
   ['ip','user','password','admin_email','ts_authkey','caddy_domain','caddy_email','cf_token']
     .forEach(id=>$(id).addEventListener('input',revalidate));
+  // il bot va RI-verificato se cambia il token
+  $('telegram_bot_token').addEventListener('input',()=>{ botOk=false; setDot('dot-bot',''); $('bot-msg').textContent=''; });
   revalidate();
 }
 
@@ -258,6 +263,20 @@ function revalidate(){
   $('btn-deploy').disabled = !ready;
   $('gate').textContent = ready ? '● Tutto verde — pronto a installare' : 'Completa i campi e verifica la connessione VPS';
   $('gate').className = 'gate'+(ready?' ready':'');
+}
+
+async function checkBot(){
+  const tok=$('telegram_bot_token').value.trim();
+  if(!tok){ $('bot-msg').innerHTML='<span style="color:var(--faint)">nessun token — il bot resterà in standby</span>'; return; }
+  const btn=$('btn-bot'); btn.disabled=true; btn.textContent='Verifico…';
+  botOk=false; setDot('dot-bot','');
+  try{
+    const r=await fetch('/api/check-telegram',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok})});
+    const res=await r.json();
+    if(res.ok){ botOk=true; setDot('dot-bot','ok'); $('bot-msg').innerHTML='<span style="color:var(--ok)">✓ @'+res.username+(res.name?' ('+res.name+')':'')+'</span>'; }
+    else { setDot('dot-bot','err'); $('bot-msg').innerHTML='<span style="color:var(--err)">✗ '+(res.error||'token non valido')+'</span>'; }
+  }catch(e){ setDot('dot-bot','err'); $('bot-msg').innerHTML='<span style="color:var(--err)">✗ '+e+'</span>'; }
+  btn.disabled=false; btn.textContent='Verifica bot';
 }
 
 async function checkVps(){

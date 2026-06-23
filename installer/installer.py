@@ -81,6 +81,10 @@ class Handler(BaseHTTPRequestHandler):
             p = self._read_json()
             res = engine.check(p.get("ip", ""), p.get("user", "root"), p.get("password", ""))
             self._send(200, json.dumps(res).encode(), "application/json")
+        elif self.path == "/api/check-telegram":
+            p = self._read_json()
+            res = engine.check_telegram(p.get("token", ""))
+            self._send(200, json.dumps(res).encode(), "application/json")
         elif self.path == "/api/deploy":
             p = self._read_json()
             self.send_response(200)
