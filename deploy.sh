@@ -171,10 +171,20 @@ SSH "export OPERATOR_USER='$OPERATOR_USER' COMPOSE_VERSION='$COMPOSE_VERSION'; b
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
-# 1. Docker engine
-if ! command -v docker >/dev/null; then
+# 1. Pacchetti base — installa solo ciò che manca (idempotente, granulare).
+#    python3-bcrypt serve allo step 5 per l'hash della password admin
+#    (Debian minimale non ha né pip né il modulo bcrypt).
+NEED=""
+command -v docker >/dev/null 2>&1 || NEED="$NEED docker.io"
+command -v git    >/dev/null 2>&1 || NEED="$NEED git"
+command -v curl   >/dev/null 2>&1 || NEED="$NEED curl"
+command -v age    >/dev/null 2>&1 || NEED="$NEED age"
+command -v python3 >/dev/null 2>&1 || NEED="$NEED python3"
+python3 -c "import bcrypt" 2>/dev/null || NEED="$NEED python3-bcrypt"
+if [ -n "$NEED" ]; then
   apt-get update -q
-  apt-get install -y -q docker.io git curl age ca-certificates || true
+  # shellcheck disable=SC2086
+  apt-get install -y -q $NEED ca-certificates || true
 fi
 systemctl enable --now docker
 
@@ -252,10 +262,7 @@ if [ ! -s secrets/admin_password_bcrypt.txt ]; then
   else
     PWD_RAW="$(printf '%s' "${ADMIN_PWD_MANUAL:-}")"
   fi
-  python3 -c "import bcrypt,sys; print(bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt(12)).decode())" "\$PWD_RAW" > secrets/admin_password_bcrypt.txt 2>/dev/null || {
-    python3 -m pip install --user --quiet bcrypt
-    python3 -c "import bcrypt,sys; print(bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt(12)).decode())" "\$PWD_RAW" > secrets/admin_password_bcrypt.txt
-  }
+  python3 -c "import bcrypt,sys; print(bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt(12)).decode())" "\$PWD_RAW" > secrets/admin_password_bcrypt.txt
   chmod 600 secrets/admin_password_bcrypt.txt
 fi
 
