@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated
 
 from pydantic import BeforeValidator, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 def _parse_db_paths(value: str | dict[str, str] | None) -> dict[str, Path]:
@@ -27,7 +27,8 @@ def _parse_db_paths(value: str | dict[str, str] | None) -> dict[str, Path]:
     return out
 
 
-DBPaths = Annotated[dict[str, Path], BeforeValidator(_parse_db_paths)]
+# NoDecode: niente json.loads sul valore env prima del validator (è CSV name:path).
+DBPaths = Annotated[dict[str, Path], NoDecode, BeforeValidator(_parse_db_paths)]
 
 
 class Settings(BaseSettings):

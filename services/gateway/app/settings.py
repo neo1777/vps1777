@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated
 
 from pydantic import Field, BeforeValidator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 def _read_secret_file(value: str | None) -> str:
@@ -37,7 +37,9 @@ def _csv_list(value: str | list[str] | None) -> list[str]:
     return [x.strip() for x in value.split(",") if x.strip()]
 
 
-CSVList = Annotated[list[str], BeforeValidator(_csv_list)]
+# NoDecode: impedisce a pydantic-settings di fare json.loads() sul valore env
+# prima del validator (i nostri campi sono CSV, non JSON).
+CSVList = Annotated[list[str], NoDecode, BeforeValidator(_csv_list)]
 
 
 def _parse_upstreams(value: str | dict[str, str] | None) -> dict[str, str]:
@@ -67,7 +69,7 @@ def _parse_upstreams(value: str | dict[str, str] | None) -> dict[str, str]:
     return out
 
 
-Upstreams = Annotated[dict[str, str], BeforeValidator(_parse_upstreams)]
+Upstreams = Annotated[dict[str, str], NoDecode, BeforeValidator(_parse_upstreams)]
 
 
 class Settings(BaseSettings):

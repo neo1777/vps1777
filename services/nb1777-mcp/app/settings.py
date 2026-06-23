@@ -4,7 +4,7 @@ from functools import lru_cache
 from typing import Annotated
 
 from pydantic import BeforeValidator, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 def _csv(value: str | list[str] | None) -> list[str]:
@@ -15,7 +15,8 @@ def _csv(value: str | list[str] | None) -> list[str]:
     return [x.strip() for x in value.split(",") if x.strip()]
 
 
-CSVList = Annotated[list[str], BeforeValidator(_csv)]
+# NoDecode: niente json.loads sul valore env prima del validator (è CSV).
+CSVList = Annotated[list[str], NoDecode, BeforeValidator(_csv)]
 
 
 class Settings(BaseSettings):
