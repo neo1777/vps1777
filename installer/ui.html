@@ -300,9 +300,12 @@ function startTimer(){ t0=Date.now(); timerInt=setInterval(()=>{
 },1000); }
 function stopTimer(){ if(timerInt){clearInterval(timerInt);timerInt=null;} }
 
+function guardUnload(e){ e.preventDefault(); e.returnValue='Installazione in corso: ricaricare o chiudere la interromperà.'; return e.returnValue; }
+
 async function startDeploy(){
   $('form-view').style.display='none';
   $('console-sec').style.display='block';
+  window.addEventListener('beforeunload', guardUnload);  // avvisa se si ricarica/chiude
   startTimer();
   const con=$('console');
   let r;
@@ -342,6 +345,7 @@ async function startDeploy(){
 
 function finishDeploy(code){
   stopTimer();
+  window.removeEventListener('beforeunload', guardUnload);  // deploy finito, libera il refresh
   $('spinner').style.display='none';
   $('patience').style.display='none';
   if(code!==0){
