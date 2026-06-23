@@ -193,7 +193,7 @@ let vpsOk = false;
 async function init(){
   try{
     const r = await fetch('/api/env'); const e = await r.json();
-    if(!e.ssh){ $('env-warn').innerHTML = '<div class="warnbox">⚠ ssh non trovato sul PC. Installa openssh-client.</div>'; }
+    if(!e.paramiko){ $('env-warn').innerHTML = '<div class="warnbox">⚠ paramiko non installato. Chiudi e rilancia launch.sh / launch.bat (lo installa da solo), oppure: sudo apt install python3-paramiko</div>'; }
   }catch(_){}
   ['ip','user','password','admin_email','ts_authkey','caddy_domain','caddy_email','cf_token']
     .forEach(id=>$(id).addEventListener('input',revalidate));
