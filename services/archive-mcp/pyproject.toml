@@ -2,7 +2,6 @@
 name = "vps1777-archive-mcp"
 version = "0.1.0"
 description = "vps1777 archive-mcp — FTS5 multi-DB MCP server (claude.ai + Claude Code)"
-readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 
