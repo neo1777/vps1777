@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Fix — Provisioning Tailscale robusta + login admin su HTTP
+
+Dopo un deploy reale: la auth-key non veniva generata (Funnel mai attivo, URL HTTP) e il login admin non procedeva. Diagnosi via API: l'OAuth client falliva la creazione della key con `requested tags [tag:vps1777] are invalid or not permitted` (il client non aveva il tag assegnato), ma l'engine **proseguiva in silenzio** con key vuota → sidecar in standby → HTTP. E su HTTP il cookie admin `Secure` non veniva salvato dal browser → login a vuoto.
+
+- **`step_ts_provision` ora fallisce FORTE e SUBITO** (STEP 3, prima della build): token OAuth e creazione key sono fatali (`DeployError`), con messaggio **azionabile**. Caso-tag riconosciuto esplicitamente: *"l'OAuth client NON è autorizzato al tag tag:vps1777 — assegnaglielo nello scope auth_keys"*. L'ACL resta warning non-fatale (l'attributo può già esserci). Niente più fallback HTTP silenzioso.
+- **Cookie admin `Secure` condizionato a `PUBLIC_BASE` https** (`admin.py`): su HTTP (setup locale / onboarding su :8080) il login ora funziona; su HTTPS resta `Secure`. Risolve il "login che non procede senza errore".
+- **Checklist UI + INGRESS.md**: reso esplicito il passo critico — nello scope `auth_keys` dell'OAuth client bisogna **selezionare il tag `tag:vps1777`** (la causa reale del fallimento). TROUBLESHOOTING: nuove voci per l'errore-tag e per il login su HTTP.
+
 ### Aggiunto — Hardening host + profilo Portainer opzionale
 
 - **Hardening automatico** in `step_prepare`: l'installer ora installa e abilita **`unattended-upgrades`** (patch di sicurezza automatiche) e **`fail2ban`** (anti brute-force SSH). Scelta sicura: **non** tocca `sshd_config` (niente disabilitazione di password/root login), perché il deploy gira via password e si riconnette dopo il reboot — disabilitarli ti chiuderebbe fuori. La disabilitazione password/root è documentata in [OPS.md](docs/OPS.md) come passo manuale post-install (dopo aver caricato una chiave).

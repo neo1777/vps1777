@@ -152,7 +152,8 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
           <ol>
             <li>Crea l'account su <a href="https://login.tailscale.com" target="_blank">login.tailscale.com</a></li>
             <li>Abilita <strong>MagicDNS</strong> e <strong>HTTPS Certificates</strong> in <a href="https://login.tailscale.com/admin/dns" target="_blank">admin → DNS</a></li>
-            <li>Crea un <strong>OAuth client</strong> in <a href="https://login.tailscale.com/admin/settings/oauth" target="_blank">admin → OAuth clients</a> con scope <code>policy_file</code> (write) + <code>auth_keys</code>, e assegna il tag <code>tag:vps1777</code> (creandolo lì)</li>
+            <li>Crea un <strong>OAuth client</strong> in <a href="https://login.tailscale.com/admin/settings/oauth" target="_blank">admin → OAuth clients</a> con scope <code>policy_file</code> (write) <strong>+</strong> <code>auth_keys</code>.
+              <strong>⚠ Nella sezione Tags dello scope <code>auth_keys</code> seleziona <code>tag:vps1777</code></strong> (se non esiste, aggiungilo lì: Tailscale lo mette nei tagOwners). Il client <strong>deve</strong> avere quel tag, o non potrà generare la key (errore <em>"tags not permitted"</em>).</li>
             <li>Incolla qui sotto <strong>Client ID</strong> e <strong>Client Secret</strong></li>
           </ol>
           <div class="checklist-note">Il Client Secret resta sul tuo PC: l'installer lo usa solo per scrivere il permesso Funnel nell'ACL e generare una chiave usa-e-getta. Sulla VPS finisce solo quella chiave.</div>
@@ -222,9 +223,10 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
         <div class="k">Password admin — SALVALA</div><div class="v big" id="r-pwd">—</div></div>
       <div id="https-warn" class="warnbox" style="display:none">
         ⚠ L'URL è <strong>HTTP</strong> (IP diretto): claude.ai accetta solo connector <strong>HTTPS</strong>.
-        Attiva un ingress con HTTPS (Tailscale/Caddy/Cloudflared) per avere un URL valido.
-        Per Tailscale: inserisci la auth-key e rilancia, oppure dal pannello setup + <code>deploy.sh --apply</code>.
-        Il pannello admin su HTTP funziona comunque per il setup locale.
+        Il Funnel Tailscale non si è attivato. Cause tipiche: l'OAuth client non ha il tag <code>tag:vps1777</code>,
+        oppure mancano <strong>MagicDNS</strong> / <strong>HTTPS Certificates</strong> sull'account.
+        Guarda il messaggio d'errore nella console del deploy qui sopra, sistema e rilancia.
+        Il pannello admin su HTTP funziona comunque per il setup locale (login incluso).
       </div>
       <div class="card connector-card"><span class="copy" onclick="cp(this,'r-arch')">copia</span>
         <div class="k">Connector claude.ai — archive</div><div class="v" id="r-arch">—</div></div>

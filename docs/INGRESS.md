@@ -20,7 +20,7 @@
 
 1. Crea l'account su [login.tailscale.com](https://login.tailscale.com)
 2. In [admin → DNS](https://login.tailscale.com/admin/dns) abilita **MagicDNS** e **HTTPS Certificates**
-3. In [admin → OAuth clients](https://login.tailscale.com/admin/settings/oauth) crea un **OAuth client** con scope **`policy_file`** (write) + **`auth_keys`**, e assegna il tag **`tag:vps1777`** (creandolo lì → viene aggiunto ai `tagOwners` dell'ACL)
+3. In [admin → OAuth clients](https://login.tailscale.com/admin/settings/oauth) crea un **OAuth client** con scope **`policy_file`** (write) + **`auth_keys`**. **⚠ Punto critico**: nella sezione **Tags** dello scope `auth_keys` **assegna `tag:vps1777`** (selezionalo; se non esiste, aggiungilo lì → Tailscale lo mette nei `tagOwners`). Se il client non possiede quel tag, la generazione della key fallisce con `requested tags [tag:vps1777] are invalid or not permitted` e il Funnel non parte.
 4. Incolla **Client ID** e **Client Secret** nell'installer (sezione Ingress → Tailscale)
 
 L'installer (engine, dal tuo PC) fa il resto **in automatico**:

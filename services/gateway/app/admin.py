@@ -55,7 +55,11 @@ def _set_admin_cookie(response: Response, email: str) -> None:
         ADMIN_COOKIE, tok,
         max_age=s.oauth_admin_cookie_lifetime,
         httponly=True,
-        secure=True,
+        # `Secure` solo se siamo davvero su HTTPS (PUBLIC_BASE https): un cookie
+        # Secure NON viene salvato dal browser su origine http, quindi su un
+        # accesso HTTP (es. pannello onboarding su :8080 prima del Funnel) il
+        # login andrebbe a vuoto. In produzione PUBLIC_BASE è https → Secure on.
+        secure=s.gateway_public_base.startswith("https://"),
         samesite="lax",
         path="/admin",
     )

@@ -330,12 +330,16 @@ rm -f /tmp/vps1777.tar.gz
             yield "! Tailscale: nessun OAuth client né auth-key — il Funnel non sarà attivo."
             return
         yield "── Tailscale: provisioning via OAuth client (dal PC)…"
+        # 1) Token OAuth — FATALE se fallisce (tutto l'ingress Tailscale ne dipende)
         try:
             token = _ts_oauth_token(cid, csec)
             yield "  ✓ token OAuth ottenuto"
         except Exception as e:  # noqa: BLE001
-            yield f"! OAuth token fallito: {_httperr(e)} — controlla Client ID/Secret."
-            return
+            raise DeployError(
+                f"OAuth Tailscale: token fallito ({_httperr(e)}). "
+                "Controlla Client ID e Client Secret dell'OAuth client."
+            )
+        # 2) ACL: nodeAttr funnel per il tag — NON fatale (potrebbe già esserci)
         try:
             policy, etag = _http_json(f"{TS_API}/tailnet/-/acl", token=token)
             if _ts_ensure_funnel_attr(policy, TS_TAG):
@@ -348,14 +352,28 @@ rm -f /tmp/vps1777.tar.gz
             else:
                 yield f"  ✓ ACL già a posto (nodeAttr funnel per {TS_TAG})"
         except Exception as e:  # noqa: BLE001
-            yield f"! ACL non aggiornata: {_httperr(e)} — serve lo scope 'policy_file' (write) sull'OAuth client."
-            # proseguo: l'ACL potrebbe essere già corretta a mano
+            yield (f"! ACL non aggiornata: {_httperr(e)} — serve lo scope 'policy_file' (write). "
+                   "Proseguo: l'attributo potrebbe già esserci.")
+        # 3) auth-key taggata — FATALE se fallisce (senza key il nodo non entra)
         try:
             key = _ts_create_authkey(token, TS_TAG)
             p["ts_authkey"] = key
             yield "  ✓ auth-key taggata generata (single-use)"
         except Exception as e:  # noqa: BLE001
-            yield f"! auth-key non creata: {_httperr(e)} — servono scope 'auth_keys' e il tag {TS_TAG} sull'OAuth client."
+            msg = _httperr(e)
+            low = msg.lower()
+            if "tag" in low and ("not permitted" in low or "invalid" in low):
+                # Caso tipico: l'OAuth client non possiede il tag richiesto.
+                raise DeployError(
+                    f"OAuth Tailscale: l'OAuth client NON è autorizzato al tag {TS_TAG} ({msg}). "
+                    f"FIX: nella admin Tailscale (Settings → OAuth clients) ricrea il client e, "
+                    f"nello scope 'auth_keys', ASSEGNAGLI il tag {TS_TAG} (selezionandolo dalla "
+                    "lista; dev'essere già in tagOwners). Evita di crearne uno nuovo a mano. Poi rilancia."
+                )
+            raise DeployError(
+                f"OAuth Tailscale: creazione auth-key fallita ({msg}). "
+                f"Servono lo scope 'auth_keys' e il tag {TS_TAG} assegnato all'OAuth client."
+            )
 
     def step_config(self, p: dict) -> Iterator[str]:
         yield "── Genero .env + secrets…"
