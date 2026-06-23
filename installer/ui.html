@@ -424,7 +424,7 @@ function finishDeploy(code){
   $('r-url').textContent = url || '—';
   $('r-setup').textContent = R.SETUP_URL || (url+'/admin/setup');
   $('r-email').textContent = R.ADMIN_EMAIL || '—';
-  $('r-pwd').textContent = R.ADMIN_PWD || '(già impostata)';
+  $('r-pwd').textContent = R.ADMIN_PWD || '⚠ non ricevuta — vedi TROUBLESHOOTING per il reset';
   $('r-arch').textContent = url+'/'+sec+'/archive/mcp';
   $('r-nb').textContent = url+'/'+sec+'/nb1777/mcp';
   // avviso HTTPS per i connector

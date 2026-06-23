@@ -229,14 +229,17 @@ cd {REMOTE_DIR}
 mkdir -p secrets
 gen() {{ python3 -c "import secrets;print(secrets.token_urlsafe($1))"; }}
 genpwd() {{ python3 -c "import secrets,string;print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))"; }}
+# gateway_secret e oauth_signing restano stabili (il primo è negli URL connector):
+# non li rigeneriamo se già presenti.
 [ -s secrets/gateway_secret.txt ]       || gen 24 > secrets/gateway_secret.txt
 [ -s secrets/oauth_signing_secret.txt ] || gen 48 > secrets/oauth_signing_secret.txt
 chmod 600 secrets/gateway_secret.txt secrets/oauth_signing_secret.txt
-if [ ! -s secrets/admin_password_bcrypt.txt ]; then
-  PW="$(genpwd)"; echo "GENERATED_ADMIN_PWD=$PW"
-  python3 -c "import bcrypt,sys;print(bcrypt.hashpw(sys.argv[1].encode(),bcrypt.gensalt(12)).decode())" "$PW" > secrets/admin_password_bcrypt.txt
-  chmod 600 secrets/admin_password_bcrypt.txt
-fi
+# La password admin è una credenziale per-installazione: la (ri)generiamo SEMPRE
+# fresca e la mostriamo alla fine. Dopo il reboot di STEP 7 il gateway rilegge
+# il bcrypt aggiornato, quindi la password mostrata è quella valida.
+PW="$(genpwd)"; echo "GENERATED_ADMIN_PWD=$PW"
+python3 -c "import bcrypt,sys;print(bcrypt.hashpw(sys.argv[1].encode(),bcrypt.gensalt(12)).decode())" "$PW" > secrets/admin_password_bcrypt.txt
+chmod 600 secrets/admin_password_bcrypt.txt
 printf %s {shlex.quote(p.get('telegram_bot_token', ''))} > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt
 {("printf %s " + shlex.quote(p.get('cf_token',''))) + " > secrets/cloudflared_token.txt; chmod 600 secrets/cloudflared_token.txt" if p.get('cf_token') else "true"}
 cp -n .env.example .env 2>/dev/null || true
