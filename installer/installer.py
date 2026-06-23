@@ -19,13 +19,54 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("VPS1777_INSTALLER_PORT", "8777"))
+
+# ── Stato del deploy (singleton) ───────────────────────────────────────────
+# Il deploy gira in un THREAD sul server e scrive le righe in un buffer in
+# memoria. La connessione HTTP della UI si limita a *rileggere* il buffer: se
+# il browser viene aggiornato/chiuso, il deploy continua indisturbato e la UI,
+# al ricaricamento, si riaggancia al buffer e riprende lo streaming da capo.
+# Niente più deploy uccisi da un refresh.
+DEPLOY: dict = {
+    "running": False,   # un deploy è in corso?
+    "done": False,      # un deploy è terminato (con successo o no)?
+    "exit": None,       # exit code finale (0 = ok)
+    "lines": [],        # tutte le righe emesse (replay completo a ogni attach)
+    "started": None,    # time.monotonic() di inizio (per il timer della UI)
+}
+DEPLOY_LOCK = threading.Lock()
+
+
+def _run_deploy(params: dict):
+    """Esegue engine.run() in un thread, accumulando le righe nel buffer."""
+    try:
+        for line in engine.run(params):
+            with DEPLOY_LOCK:
+                DEPLOY["lines"].append(line)
+            if line.startswith("__EXIT__"):
+                try:
+                    DEPLOY["exit"] = int(line[len("__EXIT__"):])
+                except ValueError:
+                    DEPLOY["exit"] = 1
+    except Exception as e:  # noqa: BLE001 — non far morire il thread in silenzio
+        with DEPLOY_LOCK:
+            DEPLOY["lines"].append(f"✗ Errore interno installer: {e}")
+            DEPLOY["lines"].append("__EXIT__1")
+            DEPLOY["exit"] = 1
+    finally:
+        with DEPLOY_LOCK:
+            if DEPLOY["exit"] is None:
+                DEPLOY["exit"] = 0
+            DEPLOY["running"] = False
+            DEPLOY["done"] = True
 
 # paramiko è la sola dipendenza esterna. Se manca, la UI lo segnala.
 try:
@@ -58,12 +99,61 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        path = urlparse(self.path).path
+        if path in ("/", "/index.html"):
             self._send(200, (HERE / "ui.html").read_bytes(), "text/html; charset=utf-8")
-        elif self.path == "/api/env":
+        elif path == "/api/env":
             self._send(200, json.dumps({"paramiko": _PARAMIKO}).encode(), "application/json")
+        elif path == "/api/status":
+            # La UI lo interroga al caricamento: se c'è un deploy vivo/finito,
+            # si riaggancia invece di ripartire dal form.
+            with DEPLOY_LOCK:
+                elapsed = (time.monotonic() - DEPLOY["started"]) if DEPLOY["started"] else 0
+                st = {
+                    "running": DEPLOY["running"],
+                    "done": DEPLOY["done"],
+                    "exit": DEPLOY["exit"],
+                    "count": len(DEPLOY["lines"]),
+                    "elapsed": int(elapsed),
+                }
+            self._send(200, json.dumps(st).encode(), "application/json")
+        elif path == "/api/stream":
+            self._stream_deploy()
         else:
             self._send(404, b"not found", "text/plain")
+
+    def _stream_deploy(self):
+        """Streaming ndjson del buffer di deploy: replay da ?from=N + tail live.
+
+        Riconnettersi (refresh) riapre questo stream da capo (from=0) e rivede
+        tutta la console + il seguito, perché il buffer vive nel server.
+        """
+        q = parse_qs(urlparse(self.path).query)
+        try:
+            idx = int(q.get("from", ["0"])[0])
+        except ValueError:
+            idx = 0
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        try:
+            while True:
+                with DEPLOY_LOCK:
+                    n = len(DEPLOY["lines"])
+                    batch = DEPLOY["lines"][idx:n]
+                    done = DEPLOY["done"]
+                for line in batch:
+                    self.wfile.write((json.dumps({"line": line}) + "\n").encode())
+                if batch:
+                    self.wfile.flush()
+                    idx = n
+                if done and idx >= n:
+                    break
+                if not batch:
+                    time.sleep(0.3)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _read_json(self):
         n = int(self.headers.get("Content-Length", "0"))
@@ -87,16 +177,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(res).encode(), "application/json")
         elif self.path == "/api/deploy":
             p = self._read_json()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/x-ndjson")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            try:
-                for line in engine.run(p):
-                    self.wfile.write((json.dumps({"line": line}) + "\n").encode())
-                    self.wfile.flush()
-            except BrokenPipeError:
-                pass
+            # Avvia il deploy in un thread. Se ne gira già uno, NON lo rilancia
+            # (un refresh che ri-POSTasse non deve duplicare il deploy).
+            with DEPLOY_LOCK:
+                if DEPLOY["running"]:
+                    self._send(200, json.dumps({"started": False, "running": True}).encode(), "application/json")
+                    return
+                DEPLOY["running"] = True
+                DEPLOY["done"] = False
+                DEPLOY["exit"] = None
+                DEPLOY["lines"] = []
+                DEPLOY["started"] = time.monotonic()
+            threading.Thread(target=_run_deploy, args=(p,), daemon=True).start()
+            self._send(200, json.dumps({"started": True}).encode(), "application/json")
         else:
             self._send(404, b"not found", "text/plain")
 

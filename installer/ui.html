@@ -184,7 +184,7 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
       <div class="ctimer" id="timer">0s</div>
     </div>
     <div class="console show" id="console"></div>
-    <div class="hint" id="patience" style="margin-top:10px">L'installazione richiede alcuni minuti (build immagini + reboot). Lo spinner gira finché lavora — l'output può apparire a blocchi.</div>
+    <div class="hint" id="patience" style="margin-top:10px">L'installazione richiede alcuni minuti (build immagini + reboot). Lo spinner gira finché lavora — l'output può apparire a blocchi. <strong>Puoi aggiornare o chiudere la pagina senza interrompere</strong>: il deploy gira sul server locale e, riaprendo <code>127.0.0.1:8777</code>, la console si riaggancia da sola.</div>
   </section>
 
   <!-- result -->
@@ -231,6 +231,17 @@ async function init(){
   // il bot va RI-verificato se cambia il token
   $('telegram_bot_token').addEventListener('input',()=>{ botOk=false; setDot('dot-bot',''); $('bot-msg').textContent=''; });
   revalidate();
+  // RIAGGANCIO: se un deploy è in corso (o appena finito), non ripartire dal
+  // form — riattaccati al buffer sul server. Questo rende il refresh sicuro:
+  // aggiornare la pagina non interrompe più l'installazione.
+  try{
+    const st = await (await fetch('/api/status')).json();
+    if(st.running || st.done){
+      showConsole();
+      if(st.running) startTimer(st.elapsed||0);
+      attachStream(0);
+    }
+  }catch(_){}
 }
 
 function ingressChange(){
@@ -313,58 +324,87 @@ function parseResult(line){
 }
 
 let timerInt=null, t0=0;
-function startTimer(){ t0=Date.now(); timerInt=setInterval(()=>{
+function startTimer(offsetSec){ stopTimer(); t0=Date.now()-(offsetSec||0)*1000; timerInt=setInterval(()=>{
   const s=Math.floor((Date.now()-t0)/1000);
   $('timer').textContent = s<60? s+'s' : Math.floor(s/60)+'m '+(s%60)+'s';
 },1000); }
 function stopTimer(){ if(timerInt){clearInterval(timerInt);timerInt=null;} }
 
-function guardUnload(e){ e.preventDefault(); e.returnValue='Installazione in corso: ricaricare o chiudere la interromperà.'; return e.returnValue; }
-
-async function startDeploy(){
+function showConsole(){
   $('form-view').style.display='none';
   $('console-sec').style.display='block';
-  window.addEventListener('beforeunload', guardUnload);  // avvisa se si ricarica/chiude
-  startTimer();
+}
+
+// Processa una singola riga di log dello streaming (replay o live, è lo stesso).
+function handleLine(line){
+  if(line.startsWith('__EXIT__')){ finishDeploy(parseInt(line.slice(8))); return; }
+  parseResult(line);
+  // rimuovi sequenze ANSI (colori, progress-bar) residue
+  line = line.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\r/g,'').trimEnd();
+  if(!line) return;
+  // aggiorna step corrente + dettaglio
+  const stepM = line.match(/^[═=]+\s*STEP\s*(.+)$/i) || line.match(/STEP\s+(\d\/\d.+)/i);
+  if(stepM){ $('cur-step').textContent = stepM[1].replace(/[—–-]\s*/,'· ').trim(); }
+  else if(line.trim() && !line.startsWith('RESULT_')){ $('cur-detail').textContent = line.replace(/^[▶✓✗!═─\s]+/,'').slice(0,90); }
   const con=$('console');
+  const div=document.createElement('div');
+  if(/\[✓\]|✅|Healthy|Started|Built|✓/.test(line)) div.className='ok';
+  else if(/\[✗\]|Error|fallito|✘|✗/.test(line)) div.className='err';
+  else if(/\[!\]|WARN|⚠|^!/.test(line)) div.className='warn';
+  else if(/━━━|═══|═ STEP|FASE|\d\/\d/.test(line)) div.className='step';
+  div.textContent=line; con.appendChild(div);
+  // cap: tieni solo le ultime 300 righe (evita di intasare il DOM)
+  while(con.childElementCount>300) con.removeChild(con.firstChild);
+  con.scrollTop=con.scrollHeight;
+}
+
+let deployFinished=false;
+let streamIdx=0;
+// Si aggancia al buffer di deploy sul server e lo segue. Il buffer vive nel
+// server: se la connessione cade (refresh, sleep del PC, rete), riconnette da
+// dove eravamo. Il deploy NON si interrompe: gira in un thread lato server.
+async function attachStream(from){
+  streamIdx = from||0;
   let r;
+  try{ r = await fetch('/api/stream?from='+streamIdx); }
+  catch(e){ if(!deployFinished) setTimeout(()=>attachStream(streamIdx),1000); return; }
+  const reader=r.body.getReader(); const dec=new TextDecoder(); let buf='';
   try{
-    r = await fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params())});
-  }catch(e){ $('cur-step').textContent='Errore di connessione al server locale'; stopTimer(); return; }
-  const reader = r.body.getReader(); const dec=new TextDecoder(); let buf='';
-  while(true){
-    const {done,value}=await reader.read(); if(done) break;
-    buf+=dec.decode(value,{stream:true});
-    let nl; while((nl=buf.indexOf('\n'))>=0){
-      const raw=buf.slice(0,nl); buf=buf.slice(nl+1);
-      if(!raw.trim()) continue;
-      let obj; try{obj=JSON.parse(raw);}catch(_){continue;}
-      const line=obj.line||'';
-      if(line.startsWith('__EXIT__')){ finishDeploy(parseInt(line.slice(8))); continue; }
-      parseResult(line);
-      // rimuovi sequenze ANSI (colori, progress-bar) residue
-      line = line.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\r/g,'').trimEnd();
-      if(!line) continue;
-      // aggiorna step corrente + dettaglio
-      const stepM = line.match(/^[═=]+\s*STEP\s*(.+)$/i) || line.match(/STEP\s+(\d\/\d.+)/i);
-      if(stepM){ $('cur-step').textContent = stepM[1].replace(/[—–-]\s*/,'· ').trim(); }
-      else if(line.trim() && !line.startsWith('RESULT_')){ $('cur-detail').textContent = line.replace(/^[▶✓✗!═─\s]+/,'').slice(0,90); }
-      const div=document.createElement('div');
-      if(/\[✓\]|✅|Healthy|Started|Built|✓/.test(line)) div.className='ok';
-      else if(/\[✗\]|Error|fallito|✘|✗/.test(line)) div.className='err';
-      else if(/\[!\]|WARN|⚠|^!/.test(line)) div.className='warn';
-      else if(/━━━|═══|═ STEP|FASE|\d\/\d/.test(line)) div.className='step';
-      div.textContent=line; con.appendChild(div);
-      // cap: tieni solo le ultime 300 righe (evita di intasare il DOM)
-      while(con.childElementCount>300) con.removeChild(con.firstChild);
-      con.scrollTop=con.scrollHeight;
+    while(true){
+      const {done,value}=await reader.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let nl; while((nl=buf.indexOf('\n'))>=0){
+        const raw=buf.slice(0,nl); buf=buf.slice(nl+1);
+        if(!raw.trim()) continue;
+        let obj; try{obj=JSON.parse(raw);}catch(_){continue;}
+        streamIdx++;
+        handleLine(obj.line||'');
+      }
     }
-  }
+  }catch(e){ /* connessione caduta a metà: proviamo a riagganciarci */ }
+  if(deployFinished) return;
+  // lo stream si è chiuso ma il deploy potrebbe essere ancora vivo: ricontrolla
+  try{
+    const st = await (await fetch('/api/status')).json();
+    if(st.running) setTimeout(()=>attachStream(streamIdx),800);
+    else if(st.done && !deployFinished){ /* finito senza __EXIT__ visto */ attachStream(streamIdx); }
+  }catch(_){ setTimeout(()=>attachStream(streamIdx),1000); }
+}
+
+async function startDeploy(){
+  showConsole();
+  deployFinished=false;
+  startTimer(0);
+  try{
+    await fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params())});
+  }catch(e){ $('cur-step').textContent='Errore di connessione al server locale'; stopTimer(); return; }
+  attachStream(0);
 }
 
 function finishDeploy(code){
+  if(deployFinished) return;   // idempotente: il replay potrebbe richiamarlo
+  deployFinished=true;
   stopTimer();
-  window.removeEventListener('beforeunload', guardUnload);  // deploy finito, libera il refresh
   $('spinner').style.display='none';
   $('patience').style.display='none';
   if(code!==0){
