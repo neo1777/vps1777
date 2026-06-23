@@ -320,6 +320,9 @@ async function startDeploy(){
       const line=obj.line||'';
       if(line.startsWith('__EXIT__')){ finishDeploy(parseInt(line.slice(8))); continue; }
       parseResult(line);
+      // rimuovi sequenze ANSI (colori, progress-bar) residue
+      line = line.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/\r/g,'').trimEnd();
+      if(!line) continue;
       // aggiorna step corrente + dettaglio
       const stepM = line.match(/^[═=]+\s*STEP\s*(.+)$/i) || line.match(/STEP\s+(\d\/\d.+)/i);
       if(stepM){ $('cur-step').textContent = stepM[1].replace(/[—–-]\s*/,'· ').trim(); }
@@ -329,7 +332,10 @@ async function startDeploy(){
       else if(/\[✗\]|Error|fallito|✘|✗/.test(line)) div.className='err';
       else if(/\[!\]|WARN|⚠|^!/.test(line)) div.className='warn';
       else if(/━━━|═══|═ STEP|FASE|\d\/\d/.test(line)) div.className='step';
-      div.textContent=line; con.appendChild(div); con.scrollTop=con.scrollHeight;
+      div.textContent=line; con.appendChild(div);
+      // cap: tieni solo le ultime 300 righe (evita di intasare il DOM)
+      while(con.childElementCount>300) con.removeChild(con.firstChild);
+      con.scrollTop=con.scrollHeight;
     }
   }
 }

@@ -114,7 +114,9 @@ class Deployer:
         """
         assert self.client
         chan = self.client.get_transport().open_session()  # type: ignore[union-attr]
-        chan.get_pty()
+        # NIENTE pty: con un tty BuildKit/apt producono progress-bar ANSI che
+        # si auto-refreshano → fiume di sequenze di escape che intasano la UI.
+        # Senza tty l'output è "plain" (una riga per evento), pulito da streammare.
         chan.set_combine_stderr(True)
         chan.settimeout(0.0)  # non-bloccante
         chan.exec_command(cmd)
@@ -270,7 +272,9 @@ echo CONFIG_OK
     def step_build(self, ingress: str) -> Iterator[str]:
         yield "── Build immagini + avvio (può richiedere alcuni minuti)…"
         cmd = self._compose_cmd(ingress, onboarding=True)
-        for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && {cmd} up -d --build"), "build"):
+        # progress plain + niente ANSI: output pulito per lo streaming web
+        env = "BUILDKIT_PROGRESS=plain COMPOSE_ANSI=never DOCKER_CLI_HINTS=false"
+        for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && {env} {cmd} up -d --build"), "build"):
             yield line
         yield "✓ Stack avviato"
 
