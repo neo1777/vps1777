@@ -6,7 +6,7 @@
 # Cosa fa, tutto via SSH:
 #   1. Chiede IP, user, password della VPS (o usa SSH key se password vuota)
 #   2. Raccoglie la config (email admin, OWNER_ID, ingress, token, ecc.)
-#   3. Prepara la VPS: installa Docker + Compose v2, crea utente `operator`
+#   3. Prepara la VPS: installa Docker + Compose v2, crea utente operatore (vps1777)
 #   4. Trasferisce questo repo sulla VPS (tar over SSH)
 #   5. Genera .env + secrets sulla VPS (random + bcrypt)
 #   6. `docker compose up -d --build`
@@ -154,38 +154,60 @@ else
   [ "${#ADMIN_PWD_MANUAL}" -lt 12 ] && die "Password troppo corta"
 fi
 
-REMOTE_DIR="/home/operator/vps1777"
+# Utente operatore sulla VPS. NON usare "operator" — su Debian è un nome
+# di sistema (gruppo GID 37) e adduser fallisce.
+OPERATOR_USER="${OPERATOR_USER:-vps1777}"
+REMOTE_DIR="/home/$OPERATOR_USER/vps1777"
+
+# Versione del plugin compose v2 da installare se manca (Debian docker.io
+# non lo include). Binario ufficiale da GitHub releases.
+COMPOSE_VERSION="v2.32.4"
 
 # ═══════════════════════════════════════════ 3. PREPARA VPS
-step "3/8 — Preparo la VPS (Docker + utente operator)"
+step "3/8 — Preparo la VPS (Docker + Compose v2 + utente $OPERATOR_USER)"
 
-log "Installo Docker + Compose v2 + git + age..."
-SSH bash -s <<'PREP'
+log "Installo Docker + Compose v2 + git + age (può richiedere 1-2 min)..."
+SSH "export OPERATOR_USER='$OPERATOR_USER' COMPOSE_VERSION='$COMPOSE_VERSION'; bash -s" <<'PREP'
 set -e
 export DEBIAN_FRONTEND=noninteractive
+
+# 1. Docker engine
 if ! command -v docker >/dev/null; then
   apt-get update -q
-  # docker.io + plugin compose; fallback nomi pacchetto
-  apt-get install -y -q docker.io git curl age || true
-  apt-get install -y -q docker-compose-v2 2>/dev/null || \
-    apt-get install -y -q docker-compose-plugin 2>/dev/null || true
+  apt-get install -y -q docker.io git curl age ca-certificates || true
 fi
 systemctl enable --now docker
-# utente operator (idempotente)
-if ! id operator >/dev/null 2>&1; then
-  adduser --disabled-password --gecos "" operator
+
+# 2. Compose v2 plugin — docker.io di Debian NON lo include.
+#    Installo il binario ufficiale come cli-plugin (funziona con docker.io 20.10+).
+if ! docker compose version >/dev/null 2>&1; then
+  case "$(uname -m)" in
+    x86_64)        CARCH=x86_64 ;;
+    aarch64|arm64) CARCH=aarch64 ;;
+    *)             CARCH=x86_64 ;;
+  esac
+  mkdir -p /usr/local/lib/docker/cli-plugins
+  curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${CARCH}" \
+    -o /usr/local/lib/docker/cli-plugins/docker-compose
+  chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 fi
-usermod -aG docker operator
-getent group sudo >/dev/null && usermod -aG sudo operator || true
-echo 'operator ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/90-operator
-chmod 0440 /etc/sudoers.d/90-operator
+
+# 3. Utente operatore (nome non collidente con utenti di sistema Debian)
+if ! id "$OPERATOR_USER" >/dev/null 2>&1; then
+  useradd -m -s /bin/bash "$OPERATOR_USER"
+fi
+usermod -aG docker "$OPERATOR_USER"
+getent group sudo >/dev/null && usermod -aG sudo "$OPERATOR_USER" || true
+echo "$OPERATOR_USER ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/90-$OPERATOR_USER"
+chmod 0440 "/etc/sudoers.d/90-$OPERATOR_USER"
+
 echo "DOCKER=$(docker --version 2>/dev/null || echo none)"
 docker compose version >/dev/null 2>&1 && echo "COMPOSE=ok" || echo "COMPOSE=MISSING"
 PREP
 
 COMPOSE_OK=$(SSH 'docker compose version >/dev/null 2>&1 && echo ok || echo no')
-[ "$COMPOSE_OK" = "ok" ] || die "docker compose v2 non disponibile sulla VPS. Installa manualmente docker-compose-plugin."
-ok "Docker + Compose v2 pronti, utente operator creato"
+[ "$COMPOSE_OK" = "ok" ] || die "docker compose v2 non disponibile sulla VPS dopo l'install del plugin. Controlla la connettività a github.com."
+ok "Docker + Compose v2 pronti, utente $OPERATOR_USER creato"
 
 # ═══════════════════════════════════════════ 4. TRASFERISCI REPO
 step "4/8 — Trasferisco il repo sulla VPS"
@@ -195,11 +217,11 @@ SSH "rm -rf /tmp/vps1777-xfer && mkdir -p /tmp/vps1777-xfer"
 tar --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='.venv' --exclude='secrets/*.txt' --exclude='backups' \
     -cf - . | PIPE_IN "tar -xf - -C /tmp/vps1777-xfer"
-SSH bash -s <<PREP2
+SSH "export OPERATOR_USER='$OPERATOR_USER' REMOTE_DIR='$REMOTE_DIR'; bash -s" <<'PREP2'
 set -e
-install -d -o operator -g operator "$REMOTE_DIR"
+install -d -o "$OPERATOR_USER" -g "$OPERATOR_USER" "$REMOTE_DIR"
 cp -a /tmp/vps1777-xfer/. "$REMOTE_DIR/"
-chown -R operator:operator "$REMOTE_DIR"
+chown -R "$OPERATOR_USER:$OPERATOR_USER" "$REMOTE_DIR"
 rm -rf /tmp/vps1777-xfer
 PREP2
 ok "Repo in $REMOTE_DIR"
@@ -208,7 +230,7 @@ ok "Repo in $REMOTE_DIR"
 step "5/8 — Genero .env + secrets sulla VPS"
 
 # Costruisco lo script di setup remoto con le variabili interpolate.
-# Gira come operator dentro REMOTE_DIR.
+# Gira come $OPERATOR_USER dentro REMOTE_DIR.
 REMOTE_SETUP=$(cat <<RSETUP
 set -e
 cd "$REMOTE_DIR"
@@ -262,7 +284,7 @@ echo "ENV_OK"
 RSETUP
 )
 
-OUT=$(SSH "sudo -u operator bash -lc $(printf '%q' "$REMOTE_SETUP")")
+OUT=$(SSH "sudo -u "$OPERATOR_USER" bash -lc $(printf '%q' "$REMOTE_SETUP")")
 echo "$OUT" | grep -q ENV_OK || { echo "$OUT"; die "Setup .env/secrets fallito"; }
 # Estrai password generata se c'è
 GENERATED_PWD=$(echo "$OUT" | sed -n 's/^GENERATED_ADMIN_PWD=//p')
@@ -276,12 +298,12 @@ fi
 step "6/8 — Build immagini + avvio stack (può richiedere alcuni minuti)"
 
 COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml --profile ingress.${INGRESS}"
-SSHT "sudo -u operator bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD up -d --build'" \
+SSHT "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD up -d --build'" \
   || die "docker compose up fallito"
 ok "Stack avviato"
 
 log "Stato container:"
-SSH "sudo -u operator bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
+SSH "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
 
 # ═══════════════════════════════════════════ 7. REBOOT TEST
 step "7/8 — Riavvio VPS per verificare che tutto riparta al boot"
@@ -303,7 +325,7 @@ if confirm "Riavvio la VPS ora? (verifica auto-start dei container)"; then
     log "Attendo 20s che Docker risollevi i container..."
     sleep 20
     log "Stato container dopo reboot:"
-    SSH "sudo -u operator bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
+    SSH "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
   else
     warn "VPS non ancora raggiungibile dopo 120s — controlla manualmente."
   fi
@@ -314,7 +336,7 @@ fi
 # ═══════════════════════════════════════════ 8. RIEPILOGO
 step "8/8 — Fatto"
 
-GATEWAY_SECRET=$(SSH "sudo -u operator cat $REMOTE_DIR/secrets/gateway_secret.txt" 2>/dev/null || echo "<SECRET>")
+GATEWAY_SECRET=$(SSH "sudo -u "$OPERATOR_USER" cat $REMOTE_DIR/secrets/gateway_secret.txt" 2>/dev/null || echo "<SECRET>")
 
 cat <<DONE
 
@@ -348,7 +370,7 @@ cat <<DONE2
   4. ${C_B}Connector claude.ai${C_R}: <URL>/$GATEWAY_SECRET/archive/mcp  (e /nb1777/mcp)
   5. ${C_B}Bot Telegram${C_R}: manda /start al tuo bot
 
-  ${C_D}Per amministrare:  ssh $VPS_USER@$VPS_IP  →  sudo -u operator -i  →  cd vps1777${C_R}
+  ${C_D}Per amministrare:  ssh $VPS_USER@$VPS_IP  →  sudo -u $OPERATOR_USER -i  →  cd vps1777${C_R}
   ${C_D}Log:  $COMPOSE_CMD logs -f gateway${C_R}
 
 DONE2
