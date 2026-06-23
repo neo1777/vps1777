@@ -49,6 +49,10 @@ attendi i semafori verdi, clicchi **Installa**, segui l'avanzamento live e a
 fine installazione vedi URL, password admin e i connector da incollare in
 claude.ai. Vedi [installer/README.md](installer/README.md).
 
+> **Cross-OS**: l'engine è Python puro (paramiko via SSH) — gira su **Windows
+> nativo, Mac e Linux**, senza bash né WSL. Serve solo Python 3 (i launcher
+> installano paramiko da soli).
+
 ## 🚀 Install one-click (CLI dal tuo PC)
 
 Preferisci il terminale? Stesso risultato, da riga di comando:

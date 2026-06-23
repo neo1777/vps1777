@@ -17,24 +17,30 @@ vai a quell'indirizzo a mano.
 
 ## Cosa serve sul PC
 
-- **python3** (il mini-server, zero dipendenze esterne)
-- **ssh** (OpenSSH client)
-- **sshpass** — solo se accedi alla VPS con password
-  (WSL/Linux: `sudo apt install sshpass`; Mac: `brew install hudochenkov/sshpass/sshpass`)
+- **python3** — Windows: da [python.org](https://python.org) (spunta "Add to PATH"); Linux/Mac: già presente
+- **paramiko** — libreria SSH Python; i launcher la installano da soli se manca
+
+**Niente altro**: nessun bash, nessun sshpass, nessun WSL. Funziona su
+**Windows / Mac / Linux nativo**.
 
 ## Come funziona
 
 ```
-Browser (UI form)  ──HTTP 127.0.0.1──►  mini-server Python  ──SSH──►  VPS
-   semafori live          /api/check  (test connessione)
-   pulsante Installa      /api/deploy (lancia deploy.sh, streaming)
+Browser (UI form)  ──HTTP 127.0.0.1──►  installer.py + engine.py  ──SSH (paramiko)──►  VPS
+   semafori live          /api/check    (test connessione)
+   pulsante Installa      /api/deploy   (engine esegue gli step via SSH, streaming)
    schermata finale       parse RESULT_* dall'output
 ```
 
 Il browser non può fare SSH (sandbox): il mini-server locale fa da ponte.
-Tutto resta su `127.0.0.1` — le credenziali non lasciano il tuo PC. Il
-server lancia `deploy.sh` (lo stesso del flusso CLI) in modalità
-non-interattiva, passando i valori del form via variabili d'ambiente.
+L'**engine Python** (`engine.py`, basato su paramiko) si connette alla VPS,
+carica il repo via SFTP ed esegue gli step (prepara Docker, genera secret,
+build+up, Tailscale, reboot test) **direttamente via SSH**. Tutto resta su
+`127.0.0.1` — le credenziali non lasciano il tuo PC.
+
+> **Cross-OS vero**: la VPS è Linux e riceve comandi shell standard; il PC
+> esegue solo Python. Per questo gira anche su Windows nativo, dove non
+> esistono bash/sshpass.
 
 ## Flusso UI
 
