@@ -35,9 +35,23 @@
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## 🚀 Install one-click (dal tuo PC)
+## 🖱 Install grafica (installer locale — zero comandi)
 
-Hai una VPS Linux fresh (solo IP + password root)? Dal tuo PC:
+Hai una VPS Linux fresh (solo IP + password root)? Sul tuo PC:
+
+| Sistema | Avvio |
+|---|---|
+| Windows | doppio-click `installer/launch.bat` |
+| Linux / Mac / WSL | doppio-click `installer/launch.sh` |
+
+Si apre una pagina nel browser: compili il form, **Verifica connessione**,
+attendi i semafori verdi, clicchi **Installa**, segui l'avanzamento live e a
+fine installazione vedi URL, password admin e i connector da incollare in
+claude.ai. Vedi [installer/README.md](installer/README.md).
+
+## 🚀 Install one-click (CLI dal tuo PC)
+
+Preferisci il terminale? Stesso risultato, da riga di comando:
 
 ```bash
 # 1. Ottieni il repo (clone o scompatta il tarball)

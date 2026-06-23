@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vps1777 · installer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c0d10;--bg-card:#15161a;--bg-soft:#101116;
+  --fg:#e8e6e1;--muted:#8a8a90;--faint:#5c5c63;
+  --accent:#d97757;--accent-dim:#b35f44;
+  --ok:#5eb87a;--warn:#d4a35e;--err:#c47158;
+  --line:#262629;--line-soft:#1d1d20;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --display:'Fraunces',Georgia,serif;
+  --sans:system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:
+  radial-gradient(1200px 600px at 80% -10%,rgba(217,119,87,.08),transparent 60%),var(--bg);
+  color:var(--fg);line-height:1.6;min-height:100vh;-webkit-font-smoothing:antialiased}
+.wrap{max-width:720px;margin:0 auto;padding:48px 24px 80px}
+header{margin-bottom:36px}
+h1{font-family:var(--display);font-weight:500;font-size:34px;letter-spacing:.01em}
+h1 em{color:var(--accent);font-style:normal;font-weight:600}
+.sub{color:var(--muted);font-size:14px;margin-top:8px}
+.sub code{font-family:var(--mono);color:var(--accent-dim);font-size:12px}
+section{background:var(--bg-card);border:1px solid var(--line);border-radius:12px;padding:24px;margin-bottom:18px}
+.sec-head{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.sec-head h2{font-family:var(--display);font-weight:500;font-size:19px}
+.sec-num{font-family:var(--mono);font-size:12px;color:var(--faint);border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--faint);box-shadow:none;transition:.2s;flex-shrink:0;margin-left:auto}
+.dot.ok{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.dot.err{background:var(--err);box-shadow:0 0 10px var(--err)}
+.dot.warn{background:var(--warn);box-shadow:0 0 10px var(--warn)}
+.field{margin-bottom:14px}
+.field:last-child{margin-bottom:0}
+label{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}
+label .opt{color:var(--faint);font-size:11px}
+input[type=text],input[type=email],input[type=password]{
+  width:100%;background:var(--bg-soft);color:var(--fg);border:1px solid var(--line);
+  padding:11px 13px;border-radius:8px;font-family:var(--mono);font-size:13px}
+input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(217,119,87,.12)}
+.hint{color:var(--faint);font-size:12px;margin-top:5px}
+.hint a{color:var(--accent-dim)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.btn{background:var(--bg-soft);color:var(--fg);border:1px solid var(--line);padding:10px 18px;
+  border-radius:8px;cursor:pointer;font-size:13px;font-family:var(--sans);transition:.15s}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:#15161a;border-color:var(--accent);font-weight:600}
+.btn.primary:hover:not(:disabled){background:var(--accent-dim)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.ingress-opts{display:grid;gap:10px}
+.ingress-opt{display:flex;align-items:flex-start;gap:11px;padding:13px 15px;background:var(--bg-soft);
+  border:1px solid var(--line);border-radius:9px;cursor:pointer;transition:.15s}
+.ingress-opt:hover{border-color:var(--accent-dim)}
+.ingress-opt.sel{border-color:var(--accent);background:rgba(217,119,87,.06)}
+.ingress-opt input{margin-top:3px}
+.ingress-opt .t{font-weight:500;font-size:14px}
+.ingress-opt .d{color:var(--muted);font-size:12px;margin-top:2px}
+.cond{margin-top:13px;padding-top:13px;border-top:1px solid var(--line-soft);display:none}
+.cond.show{display:block}
+.deploy-bar{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 30%);padding:24px 0 8px;margin-top:8px}
+.deploy-bar .btn.primary{width:100%;padding:15px;font-size:15px}
+.gate{color:var(--faint);font-size:12px;text-align:center;margin-top:10px;font-family:var(--mono)}
+.gate.ready{color:var(--ok)}
+.console{background:#08090b;border:1px solid var(--line);border-radius:10px;padding:16px;
+  font-family:var(--mono);font-size:11.5px;line-height:1.5;height:340px;overflow-y:auto;
+  white-space:pre-wrap;word-break:break-word;color:#c8c6c1;display:none}
+.console.show{display:block}
+.console .ok{color:var(--ok)}.console .err{color:var(--err)}.console .warn{color:var(--warn)}
+.console .step{color:var(--accent)}
+.result{display:none}
+.result.show{display:block}
+.result .card{background:var(--bg-soft);border:1px solid var(--line);border-radius:9px;padding:16px;margin-bottom:12px}
+.result .k{color:var(--muted);font-size:12px;margin-bottom:4px}
+.result .v{font-family:var(--mono);font-size:13px;color:var(--fg);word-break:break-all}
+.result .v.big{color:var(--accent);font-size:14px}
+.copy{float:right;font-size:11px;color:var(--accent-dim);cursor:pointer;border:1px solid var(--line);border-radius:5px;padding:2px 8px}
+.warnbox{background:rgba(212,163,94,.1);border:1px solid var(--warn);color:var(--warn);padding:11px 14px;border-radius:8px;font-size:12.5px;margin-bottom:16px}
+.foot{color:var(--faint);font-size:11px;text-align:center;margin-top:36px;font-family:var(--mono);letter-spacing:.04em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>vps1777 <em>installer</em></h1>
+    <div class="sub">Configura e installa il tuo stack su una VPS Linux fresh. Compila, attendi i semafori verdi, clicca <strong>Installa</strong>.</div>
+  </header>
+
+  <div id="env-warn"></div>
+
+  <!-- form -->
+  <div id="form-view">
+    <section>
+      <div class="sec-head"><span class="sec-num">1</span><h2>La tua VPS</h2><span class="dot" id="dot-vps"></span></div>
+      <div class="field"><label>IP pubblico</label><input type="text" id="ip" placeholder="38.45.64.63" autocomplete="off"></div>
+      <div class="row2">
+        <div class="field"><label>Utente SSH</label><input type="text" id="user" value="root" autocomplete="off"></div>
+        <div class="field"><label>Password SSH</label><input type="password" id="password" placeholder="••••••••" autocomplete="off"></div>
+      </div>
+      <button class="btn" id="btn-check" onclick="checkVps()">Verifica connessione</button>
+      <span id="vps-msg" class="hint"></span>
+    </section>
+
+    <section>
+      <div class="sec-head"><span class="sec-num">2</span><h2>Amministratore</h2><span class="dot" id="dot-admin"></span></div>
+      <div class="field"><label>Email admin (login del pannello + OAuth)</label>
+        <input type="email" id="admin_email" placeholder="tu@gmail.com" autocomplete="off"></div>
+      <div class="hint">La password admin viene generata automaticamente e te la mostro alla fine.</div>
+    </section>
+
+    <section>
+      <div class="sec-head"><span class="sec-num">3</span><h2>Come esporre HTTPS</h2><span class="dot" id="dot-ingress"></span></div>
+      <div class="ingress-opts" id="ingress-opts">
+        <label class="ingress-opt sel"><input type="radio" name="ingress" value="1" checked onchange="ingressChange()">
+          <div><div class="t">Tailscale Funnel <span style="color:var(--accent-dim)">· consigliato</span></div>
+          <div class="d">URL HTTPS gratis *.ts.net, niente dominio né porte aperte</div></div></label>
+        <label class="ingress-opt"><input type="radio" name="ingress" value="2" onchange="ingressChange()">
+          <div><div class="t">Caddy + Let's Encrypt</div>
+          <div class="d">Dominio tuo, cert automatico (apre porte 80/443)</div></div></label>
+        <label class="ingress-opt"><input type="radio" name="ingress" value="3" onchange="ingressChange()">
+          <div><div class="t">Cloudflare Tunnel</div>
+          <div class="d">Tunnel CF, anti-DDoS, nessuna porta aperta</div></div></label>
+      </div>
+
+      <div class="cond show" id="cond-ts">
+        <div class="field"><label>Hostname Tailscale</label><input type="text" id="ts_hostname" value="vps1777"></div>
+        <div class="field"><label>Tailscale auth-key</label>
+          <input type="password" id="ts_authkey" placeholder="tskey-auth-...">
+          <div class="hint">Generala su <a href="https://login.tailscale.com/admin/settings/keys" target="_blank">login.tailscale.com/admin/settings/keys</a> → Generate auth key (Reusable off).</div></div>
+      </div>
+      <div class="cond" id="cond-caddy">
+        <div class="field"><label>Dominio</label><input type="text" id="caddy_domain" placeholder="vps.tuosito.com"></div>
+        <div class="field"><label>Email Let's Encrypt</label><input type="email" id="caddy_email" placeholder="tu@gmail.com"></div>
+      </div>
+      <div class="cond" id="cond-cf">
+        <div class="field"><label>Cloudflare Tunnel token</label><input type="password" id="cf_token" placeholder="eyJ..."></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head"><span class="sec-num">4</span><h2>Bot Telegram <span style="color:var(--faint);font-size:13px">· opzionale</span></h2><span class="dot ok" id="dot-bot"></span></div>
+      <div class="field"><label>TELEGRAM_BOT_TOKEN <span class="opt">(lascia vuoto per configurarlo dopo)</span></label>
+        <input type="password" id="telegram_bot_token" placeholder="123456:AAF..."></div>
+      <div class="field"><label>TELEGRAM_OWNER_ID <span class="opt">(il tuo id numerico)</span></label>
+        <input type="text" id="telegram_owner_id" placeholder="123456789"></div>
+      <div class="hint">Token da <a href="https://t.me/BotFather" target="_blank">@BotFather</a>, id da <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>.</div>
+    </section>
+
+    <div class="deploy-bar">
+      <button class="btn primary" id="btn-deploy" disabled onclick="startDeploy()">Installa vps1777</button>
+      <div class="gate" id="gate">Completa i campi e verifica la connessione VPS</div>
+    </div>
+  </div>
+
+  <!-- console -->
+  <section id="console-sec" style="display:none">
+    <div class="sec-head"><h2>Installazione in corso…</h2><span class="dot warn" id="dot-deploy"></span></div>
+    <div class="console show" id="console"></div>
+  </section>
+
+  <!-- result -->
+  <div class="result" id="result">
+    <section>
+      <div class="sec-head"><h2>✅ Fatto — collega il tuo stack</h2></div>
+      <div class="card"><span class="copy" onclick="cp(this,'r-url')">copia</span>
+        <div class="k">URL pubblico</div><div class="v big" id="r-url">—</div></div>
+      <div class="card"><span class="copy" onclick="cp(this,'r-setup')">copia</span>
+        <div class="k">Pannello setup / admin</div><div class="v" id="r-setup">—</div></div>
+      <div class="card"><span class="copy" onclick="cp(this,'r-email')">copia</span>
+        <div class="k">Email admin</div><div class="v" id="r-email">—</div></div>
+      <div class="card"><span class="copy" onclick="cp(this,'r-pwd')">copia</span>
+        <div class="k">Password admin — SALVALA</div><div class="v big" id="r-pwd">—</div></div>
+      <div class="card"><span class="copy" onclick="cp(this,'r-arch')">copia</span>
+        <div class="k">Connector claude.ai — archive</div><div class="v" id="r-arch">—</div></div>
+      <div class="card"><span class="copy" onclick="cp(this,'r-nb')">copia</span>
+        <div class="k">Connector claude.ai — nb1777</div><div class="v" id="r-nb">—</div></div>
+      <div class="hint" style="margin-top:8px">Apri il <strong>Pannello setup</strong> per caricare l'auth NotebookLM (bottone dedicato) e verificare i semafori. Su claude.ai → Settings → Integrations → Add, incolla gli URL connector e fai login con email+password admin.</div>
+    </section>
+  </div>
+
+  <div class="foot">vps1777 · installer locale · gira su 127.0.0.1, le credenziali non lasciano il tuo PC</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let vpsOk = false;
+
+async function init(){
+  try{
+    const r = await fetch('/api/env'); const e = await r.json();
+    if(!e.ssh){ $('env-warn').innerHTML = '<div class="warnbox">⚠ ssh non trovato sul PC. Installa openssh-client.</div>'; }
+  }catch(_){}
+  ['ip','user','password','admin_email','ts_authkey','caddy_domain','caddy_email','cf_token']
+    .forEach(id=>$(id).addEventListener('input',revalidate));
+  revalidate();
+}
+
+function ingressChange(){
+  const v = document.querySelector('input[name=ingress]:checked').value;
+  document.querySelectorAll('.ingress-opt').forEach(o=>o.classList.toggle('sel', o.querySelector('input').checked));
+  $('cond-ts').classList.toggle('show', v==='1');
+  $('cond-caddy').classList.toggle('show', v==='2');
+  $('cond-cf').classList.toggle('show', v==='3');
+  revalidate();
+}
+
+function setDot(id,state){ const d=$(id); d.className='dot'+(state?(' '+state):''); }
+
+function revalidate(){
+  // VPS: serve check ok (vpsOk azzerato se cambiano i campi)
+  setDot('dot-vps', vpsOk?'ok':'');
+  // admin email
+  const email = $('admin_email').value.trim();
+  const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+  setDot('dot-admin', email? (emailOk?'ok':'err') : '');
+  // ingress
+  const ing = document.querySelector('input[name=ingress]:checked').value;
+  let ingOk=false;
+  if(ing==='1'){ ingOk = $('ts_authkey').value.trim().startsWith('tskey-auth-'); }
+  else if(ing==='2'){ ingOk = $('caddy_domain').value.trim() && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test($('caddy_email').value.trim()); }
+  else if(ing==='3'){ ingOk = $('cf_token').value.trim().length>10; }
+  setDot('dot-ingress', ingOk?'ok':(ing==='1'&&!$('ts_authkey').value?'':'warn'));
+  // tutto pronto?
+  const ready = vpsOk && emailOk && ingOk;
+  $('btn-deploy').disabled = !ready;
+  $('gate').textContent = ready ? '● Tutto verde — pronto a installare' : 'Completa i campi e verifica la connessione VPS';
+  $('gate').className = 'gate'+(ready?' ready':'');
+}
+
+async function checkVps(){
+  const btn=$('btn-check'); btn.disabled=true; btn.textContent='Verifico…';
+  $('vps-msg').textContent='';
+  vpsOk=false; setDot('dot-vps','');
+  try{
+    const r = await fetch('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ip:$('ip').value.trim(),user:$('user').value.trim()||'root',password:$('password').value})});
+    const res = await r.json();
+    if(res.ok){ vpsOk=true; setDot('dot-vps','ok'); $('vps-msg').innerHTML='<span style="color:var(--ok)">✓ '+(res.os||'connesso')+'</span>'; }
+    else { setDot('dot-vps','err'); $('vps-msg').innerHTML='<span style="color:var(--err)">✗ '+(res.error||'errore')+'</span>'; }
+  }catch(e){ setDot('dot-vps','err'); $('vps-msg').innerHTML='<span style="color:var(--err)">✗ '+e+'</span>'; }
+  btn.disabled=false; btn.textContent='Verifica connessione';
+  revalidate();
+}
+
+function params(){
+  return {
+    ip:$('ip').value.trim(), user:$('user').value.trim()||'root', password:$('password').value,
+    admin_email:$('admin_email').value.trim(),
+    ingress_num:document.querySelector('input[name=ingress]:checked').value,
+    ts_hostname:$('ts_hostname').value.trim()||'vps1777', ts_authkey:$('ts_authkey').value.trim(),
+    caddy_domain:$('caddy_domain').value.trim(), caddy_email:$('caddy_email').value.trim(),
+    cf_token:$('cf_token').value.trim(),
+    telegram_bot_token:$('telegram_bot_token').value.trim(), telegram_owner_id:$('telegram_owner_id').value.trim(),
+  };
+}
+
+const R = {};
+function parseResult(line){
+  const m = line.match(/^RESULT_([A-Z_]+)=(.*)$/);
+  if(m){ R[m[1]]=m[2]; }
+}
+
+async function startDeploy(){
+  $('form-view').style.display='none';
+  $('console-sec').style.display='block';
+  const con=$('console');
+  const r = await fetch('/api/deploy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params())});
+  const reader = r.body.getReader(); const dec=new TextDecoder(); let buf='';
+  while(true){
+    const {done,value}=await reader.read(); if(done) break;
+    buf+=dec.decode(value,{stream:true});
+    let nl; while((nl=buf.indexOf('\n'))>=0){
+      const raw=buf.slice(0,nl); buf=buf.slice(nl+1);
+      if(!raw.trim()) continue;
+      let obj; try{obj=JSON.parse(raw);}catch(_){continue;}
+      const line=obj.line||'';
+      if(line.startsWith('__EXIT__')){ finishDeploy(parseInt(line.slice(8))); continue; }
+      parseResult(line);
+      const div=document.createElement('div');
+      if(/\[✓\]|✅|Healthy|Started|Built/.test(line)) div.className='ok';
+      else if(/\[✗\]|Error|fallito|✘/.test(line)) div.className='err';
+      else if(/\[!\]|WARN|⚠/.test(line)) div.className='warn';
+      else if(/━━━|═══|FASE|STEP|\d\/8/.test(line)) div.className='step';
+      div.textContent=line; con.appendChild(div); con.scrollTop=con.scrollHeight;
+    }
+  }
+}
+
+function finishDeploy(code){
+  setDot('dot-deploy', code===0?'ok':'err');
+  if(code!==0){
+    const con=$('console'); const d=document.createElement('div');
+    d.className='err'; d.textContent='\n✗ Installazione interrotta (exit '+code+'). Controlla i log sopra.';
+    con.appendChild(d); con.scrollTop=con.scrollHeight; return;
+  }
+  // popola la schermata risultati
+  $('r-url').textContent = R.URL || '—';
+  $('r-setup').textContent = R.SETUP_URL || '—';
+  $('r-email').textContent = R.ADMIN_EMAIL || '—';
+  $('r-pwd').textContent = R.ADMIN_PWD || '(già impostata)';
+  const base = (R.URL||'').replace(/\/$/,''); const sec=R.SECRET||'<SECRET>';
+  $('r-arch').textContent = base+'/'+sec+'/archive/mcp';
+  $('r-nb').textContent = base+'/'+sec+'/nb1777/mcp';
+  $('result').classList.add('show');
+  $('result').scrollIntoView({behavior:'smooth'});
+}
+
+function cp(el,id){ navigator.clipboard.writeText($(id).textContent); const t=el.textContent; el.textContent='copiato'; setTimeout(()=>el.textContent=t,1200); }
+
+init();
+</script>
+</body>
+</html>

@@ -39,8 +39,14 @@ step() {
   printf '%s%s %s%s\n' "$C_B" "$C_I" "$*" "$C_R"
   printf '%s%s════════════════════════════════════════════════════════════%s\n\n' "$C_B" "$C_I" "$C_R"
 }
+# NONINTERACTIVE=1 → niente prompt: ask/ask_secret usano il valore già presente
+# nella variabile (es. esportata dall'installer web locale); confirm legge da
+# variabili *_YES. Permette di pilotare deploy.sh da un frontend.
 ask() {
   local var="$1" q="$2" def="${3:-}" resp
+  # Se la variabile è già valorizzata (env), salta il prompt.
+  if [ -n "${!var:-}" ]; then return; fi
+  if [ "${NONINTERACTIVE:-0}" = "1" ]; then printf -v "$var" '%s' "$def"; return; fi
   if [ -n "$def" ]; then printf '%s%s%s [%s]: ' "$C_B" "$q" "$C_R" "$def" >&2
   else printf '%s%s%s: ' "$C_B" "$q" "$C_R" >&2; fi
   IFS= read -r resp || true
@@ -49,6 +55,8 @@ ask() {
 }
 ask_secret() {
   local var="$1" q="$2" resp
+  if [ -n "${!var:-}" ]; then return; fi
+  if [ "${NONINTERACTIVE:-0}" = "1" ]; then printf -v "$var" '%s' ""; return; fi
   printf '%s%s%s: ' "$C_B" "$q" "$C_R" >&2
   IFS= read -rs resp || true
   echo >&2
@@ -56,6 +64,10 @@ ask_secret() {
 }
 confirm() {
   local q="$1" resp
+  if [ "${NONINTERACTIVE:-0}" = "1" ]; then
+    # In modalità non-interattiva: default "sì" (l'installer ha già deciso).
+    return 0
+  fi
   printf '%s%s%s [s/N]: ' "$C_B" "$q" "$C_R" >&2
   IFS= read -r resp || true
   case "$resp" in s|S|si|SI|y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
@@ -201,7 +213,9 @@ log "  1) Tailscale Funnel (consigliato)"
 log "  2) Caddy + Let's Encrypt (richiede tuo dominio)"
 log "  3) Cloudflare Tunnel (richiede token CF)"
 ask INGRESS_NUM "Scelta [1/2/3]" "1"
-CADDY_DOMAIN=""; CADDY_EMAIL=""; TS_AUTHKEY=""; CF_TOKEN=""; PUBLIC_BASE=""
+# Preserva eventuali valori già esportati (installer web), non azzerare.
+CADDY_DOMAIN="${CADDY_DOMAIN:-}"; CADDY_EMAIL="${CADDY_EMAIL:-}"
+TS_AUTHKEY="${TS_AUTHKEY:-}"; CF_TOKEN="${CF_TOKEN:-}"; PUBLIC_BASE="${PUBLIC_BASE:-}"
 case "$INGRESS_NUM" in
   1) INGRESS=tailscale
      ask TS_HOSTNAME "Hostname Tailscale (es. vps1777)" "vps1777"
@@ -221,12 +235,15 @@ esac
 
 ask_secret TG_TOKEN "TELEGRAM_BOT_TOKEN (da BotFather, vuoto = dopo)"
 
-GEN_PWD=""
-if confirm "Genero io una password admin sicura (24 char)?"; then
-  GEN_PWD="auto"
-else
-  ask_secret ADMIN_PWD_MANUAL "Password admin (min 12 char)"
-  [ "${#ADMIN_PWD_MANUAL}" -lt 12 ] && die "Password troppo corta"
+# GEN_PWD può essere pre-impostato dall'installer (auto). Altrimenti chiedi.
+GEN_PWD="${GEN_PWD:-}"
+if [ -z "$GEN_PWD" ]; then
+  if confirm "Genero io una password admin sicura (24 char)?"; then
+    GEN_PWD="auto"
+  else
+    ask_secret ADMIN_PWD_MANUAL "Password admin (min 12 char)"
+    [ "${#ADMIN_PWD_MANUAL}" -lt 12 ] && die "Password troppo corta"
+  fi
 fi
 
 # Utente operatore sulla VPS. NON usare "operator" — su Debian è un nome
@@ -390,6 +407,23 @@ ok "Stack avviato (pannello onboarding su http://$VPS_IP:8080/admin/setup)"
 log "Stato container:"
 SSH "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
 
+# ── Auto-URL Tailscale: se la key è stata fornita ora, il sidecar si è
+#    loggato all'avvio. Ricavo l'URL .ts.net, lo metto in PUBLIC_BASE e
+#    riavvio il gateway (così OAuth/connector usano l'URL giusto da subito).
+if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
+  log "Tailscale: ricavo l'URL pubblico..."
+  sleep 4
+  TS_URL="$(SSH "sudo docker exec vps1777-tailscale tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);print('https://'+d.get('Self',{}).get('DNSName','').rstrip('.'))\" 2>/dev/null" || echo "")"
+  if echo "$TS_URL" | grep -q '\.ts\.net$'; then
+    PUBLIC_BASE="$TS_URL"
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$TS_URL|\" .env || echo PUBLIC_BASE=$TS_URL >> .env)'"
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1 || true
+    ok "URL pubblico: $TS_URL"
+  else
+    warn "URL Tailscale non ricavato — configuralo dal pannello dopo."
+  fi
+fi
+
 # ═══════════════════════════════════════════ 7. REBOOT TEST
 step "7/8 — Riavvio VPS per verificare che tutto riparta al boot"
 
@@ -422,6 +456,14 @@ fi
 step "8/8 — Fatto"
 
 GATEWAY_SECRET=$(SSH "sudo -u "$OPERATOR_USER" cat $REMOTE_DIR/secrets/gateway_secret.txt" 2>/dev/null || echo "<SECRET>")
+
+# Righe machine-readable per l'installer web (le parsa per la schermata finale).
+echo "RESULT_URL=${PUBLIC_BASE:-http://$VPS_IP:8080}"
+echo "RESULT_SECRET=$GATEWAY_SECRET"
+echo "RESULT_ADMIN_EMAIL=$ADMIN_EMAIL"
+[ -n "${GENERATED_PWD:-}" ] && echo "RESULT_ADMIN_PWD=$GENERATED_PWD"
+echo "RESULT_SETUP_URL=${PUBLIC_BASE:-http://$VPS_IP:8080}/admin/setup"
+echo "RESULT_INGRESS=$INGRESS"
 
 cat <<DONE2
 
