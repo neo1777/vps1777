@@ -35,25 +35,38 @@
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## 🚀 Install rapida (4 step)
+## 🚀 Install one-click (dal tuo PC)
 
-Requisiti: Linux + Docker Engine 24+ + `docker compose` v2. Una VPS o macchina con IP pubblico/Tailscale.
+Hai una VPS Linux fresh (solo IP + password root)? Dal tuo PC:
 
 ```bash
-# 1. Clona
+# 1. Ottieni il repo (clone o scompatta il tarball)
 git clone https://github.com/<owner>/vps1777.git && cd vps1777
 
-# 2. Setup wizard: ti chiede 5-6 cose (email admin, ingress scelto, ecc.)
-./setup.sh
-
-# 3. Avvia (sostituisci con l'ingress che hai scelto al setup)
-docker compose --profile ingress.tailscale up -d
-
-# 4. URL del tuo gateway stampato dallo stage finale
-docker compose logs gateway | tail -5
+# 2. Lancia il deploy: chiede IP/user/password + config, fa TUTTO via SSH
+./deploy.sh
 ```
 
-Vedi [docs/INSTALL.md](docs/INSTALL.md) per la procedura passo-passo.
+`deploy.sh` (dal tuo PC, serve `sshpass` per auth password):
+1. Chiede IP, user, password VPS + config (email admin, OWNER_ID, ingress)
+2. Installa Docker + Compose v2, crea utente `operator`
+3. Trasferisce il repo via SSH
+4. Genera `.env` + secrets (random + bcrypt) sulla VPS
+5. `docker compose up -d --build`
+6. **Riavvia la VPS e verifica che i container ripartano da soli**
+7. Stampa gli URL finali
+
+Niente da fare a mano sulla VPS. Vedi [docs/INSTALL.md](docs/INSTALL.md) per dettagli + metodo manuale.
+
+## 🛠 Install manuale (sulla VPS)
+
+Se preferisci controllare ogni passo, oppure sei già sulla VPS:
+
+```bash
+git clone https://github.com/<owner>/vps1777.git && cd vps1777
+./setup.sh                                          # wizard interattivo
+docker compose --profile ingress.tailscale up -d    # o caddy / cloudflared
+```
 
 ## 🧩 Cosa include
 
