@@ -1,0 +1,29 @@
+name: Trivy vuln scan
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"  # ogni lunedì alle 6:00 UTC
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t vps1777-${{ matrix.service }}:scan services/${{ matrix.service }}
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: vps1777-${{ matrix.service }}:scan
+          format: sarif
+          output: trivy-${{ matrix.service }}.sarif
+          severity: CRITICAL,HIGH
+      - name: Upload Sarif to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif

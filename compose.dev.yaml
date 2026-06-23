@@ -1,0 +1,61 @@
+# compose.dev.yaml — override per sviluppo locale
+#
+# Aggiunge:
+#   - Watch sync per hot-reload del codice Python
+#   - Port forward 8080 sul host (no ingress in dev)
+#   - Debug log level
+#
+# Uso:
+#   docker compose -f compose.yaml -f compose.dev.yaml up --watch
+
+services:
+
+  gateway:
+    environment:
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8080:8080"
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./services/gateway/app
+          target: /app/app
+        - action: rebuild
+          path: ./services/gateway/pyproject.toml
+
+  archive-mcp:
+    environment:
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8002:8002"
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./services/archive-mcp/app
+          target: /app/app
+        - action: rebuild
+          path: ./services/archive-mcp/pyproject.toml
+
+  nb1777-mcp:
+    environment:
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8003:8003"
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./services/nb1777-mcp/app
+          target: /app/app
+        - action: rebuild
+          path: ./services/nb1777-mcp/pyproject.toml
+
+  nb1777-bot:
+    environment:
+      LOG_LEVEL: DEBUG
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./services/nb1777-bot/app
+          target: /app/app
+        - action: rebuild
+          path: ./services/nb1777-bot/pyproject.toml

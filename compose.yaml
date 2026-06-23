@@ -1,0 +1,199 @@
+# compose.yaml — vps1777 core
+#
+# Stack:
+#   - gateway:     OAuth 2.1 + /admin/* + /app/* + reverse proxy MCP
+#   - archive-mcp: FTS5 multi-DB (claude.ai web + Claude Code sessions)
+#   - nb1777-mcp:  NotebookLM via CLI nlm + headless Chromium
+#   - nb1777-bot:  Telegram bot (long-poll)
+#
+# Backend su rete `backend` (internal: true) — NIENTE è raggiungibile da fuori
+# tranne il gateway via ingress. L'ingress è in compose.ingress.<provider>.yaml
+# (Tailscale Funnel | Caddy | Cloudflared).
+#
+# Avvio tipico:
+#   docker compose --profile ingress.tailscale up -d
+#
+# Dev:
+#   docker compose -f compose.yaml -f compose.dev.yaml up --watch
+
+name: vps1777
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+x-security: &security
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+
+services:
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Gateway — l'unico servizio esposto all'ingress
+  # ──────────────────────────────────────────────────────────────────────
+  gateway:
+    <<: [*restart, *logging, *security]
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    image: vps1777/gateway:${VPS1777_TAG:-dev}
+    init: true
+    environment:
+      GATEWAY_HOST: 0.0.0.0
+      GATEWAY_PORT: 8080
+      GATEWAY_PUBLIC_BASE: ${PUBLIC_BASE:-http://127.0.0.1:8080}
+      GATEWAY_UPSTREAMS: ${GATEWAY_UPSTREAMS:-archive=archive-mcp:8002,nb1777=nb1777-mcp:8003}
+      OAUTH_REQUIRED: "true"
+      OAUTH_ACCESS_TOKEN_LIFETIME: "900"
+      OAUTH_REFRESH_TOKEN_LIFETIME: "2592000"
+      OAUTH_ALLOWED_EMAILS: ${ADMIN_EMAIL}
+      OAUTH_CORS_ORIGINS: "https://claude.ai,https://web.telegram.org"
+      AUDIT_LOG_PATH: /var/lib/gateway/audit.jsonl
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      OAUTH_PWD_HASH_FILE: /run/secrets/admin_password_bcrypt
+      GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
+      OAUTH_SIGNING_SECRET_FILE: /run/secrets/oauth_signing_secret
+    secrets:
+      - gateway_secret
+      - oauth_signing_secret
+      - admin_password_bcrypt
+      - telegram_bot_token
+    volumes:
+      - gateway-data:/var/lib/gateway
+      - nlm-auth:/var/lib/nlm:rw  # condiviso con nb1777-mcp per /admin/nlm upload
+    networks:
+      - backend
+      - ingress
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Archive MCP — FTS5 multi-DB
+  # ──────────────────────────────────────────────────────────────────────
+  archive-mcp:
+    <<: [*restart, *logging, *security]
+    build:
+      context: ./services/archive-mcp
+      dockerfile: Dockerfile
+    image: vps1777/archive-mcp:${VPS1777_TAG:-dev}
+    init: true
+    environment:
+      ARCHIVE_HTTP_HOST: 0.0.0.0
+      ARCHIVE_HTTP_PORT: 8002
+      ARCHIVE_DB_PATHS: "main:/var/lib/archive/db/archive.db,cc:/var/lib/archive/db/archive-cc.db,cc-dash:/var/lib/archive/db/archive-cc-dash.db"
+      FASTMCP_STATELESS_HTTP: "true"
+    volumes:
+      - archive-data:/var/lib/archive:rw
+    networks:
+      - backend
+    expose:
+      - "8002"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ──────────────────────────────────────────────────────────────────────
+  # NotebookLM MCP — nlm CLI + Chromium headless
+  # ──────────────────────────────────────────────────────────────────────
+  nb1777-mcp:
+    <<: [*restart, *logging, *security]
+    build:
+      context: ./services/nb1777-mcp
+      dockerfile: Dockerfile
+    image: vps1777/nb1777-mcp:${VPS1777_TAG:-dev}
+    init: true
+    environment:
+      NB1777_HOST: 0.0.0.0
+      NB1777_PORT: 8003
+      NB1777_TRANSPORT: streamable-http
+      NB1777_ALLOWED_ORIGINS: "https://claude.ai,https://web.telegram.org"
+      NLM_HOME: /var/lib/nlm
+      FASTMCP_STATELESS_HTTP: "true"
+    volumes:
+      - nlm-auth:/var/lib/nlm:rw  # auth.json caricato da /admin/nlm
+    networks:
+      - backend
+    expose:
+      - "8003"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ──────────────────────────────────────────────────────────────────────
+  # NotebookLM Telegram bot — long-poll, no porta esposta
+  # ──────────────────────────────────────────────────────────────────────
+  nb1777-bot:
+    <<: [*restart, *logging, *security]
+    build:
+      context: ./services/nb1777-bot
+      dockerfile: Dockerfile
+    image: vps1777/nb1777-bot:${VPS1777_TAG:-dev}
+    init: true
+    environment:
+      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID}
+      GATEWAY_PUBLIC_BASE: ${PUBLIC_BASE:-http://gateway:8080}
+      NB1777_MCP_URL: http://nb1777-mcp:8003/mcp
+      NLM_HOME: /var/lib/nlm
+    secrets:
+      - telegram_bot_token
+    volumes:
+      - nlm-auth:/var/lib/nlm:ro  # legge AUTH_PENDING.flag per messaggio guida
+    networks:
+      - backend
+    depends_on:
+      nb1777-mcp:
+        condition: service_healthy
+
+# ──────────────────────────────────────────────────────────────────────
+# Reti
+#   - backend: internal, niente ingress/egress
+#   - ingress: per il proxy davanti (Tailscale/Caddy/Cloudflared)
+# ──────────────────────────────────────────────────────────────────────
+networks:
+  backend:
+    driver: bridge
+    internal: true
+  ingress:
+    driver: bridge
+
+# ──────────────────────────────────────────────────────────────────────
+# Volumi nominati — persistono fra restart
+# ──────────────────────────────────────────────────────────────────────
+volumes:
+  gateway-data:    # /var/lib/gateway: audit log, ecc.
+  archive-data:    # /var/lib/archive/{data,db}
+  nlm-auth:        # /var/lib/nlm: auth.json + AUTH_PENDING.flag
+
+# ──────────────────────────────────────────────────────────────────────
+# Secrets — file-mounted, tmpfs /run/secrets/<name>
+# Generati da setup.sh, mai committati (.gitignore copre secrets/*)
+# ──────────────────────────────────────────────────────────────────────
+secrets:
+  gateway_secret:
+    file: ./secrets/gateway_secret.txt
+  oauth_signing_secret:
+    file: ./secrets/oauth_signing_secret.txt
+  admin_password_bcrypt:
+    file: ./secrets/admin_password_bcrypt.txt
+  telegram_bot_token:
+    file: ./secrets/telegram_bot_token.txt

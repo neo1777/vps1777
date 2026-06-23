@@ -1,0 +1,46 @@
+# ───── Secrets — MAI committare ─────
+secrets/*
+!secrets/.gitkeep
+!secrets/README.md
+.env
+.env.local
+.env.*.local
+
+# ───── Build / cache ─────
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+node_modules/
+dist/
+build/
+
+# ───── Backups + dati runtime ─────
+backups/
+data/*
+!data/.gitkeep
+volumes/
+
+# ───── IDE / OS ─────
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.swo
+
+# ───── Dev artifacts ─────
+coverage.xml
+htmlcov/
+.tox/
+*.log
+*.pid
+*.sock
+
+# ───── Compose ─────
+docker-compose.override.yml
+compose.override.yaml
+compose.local.yaml
