@@ -9,7 +9,12 @@
 # ─────────────────────────────────────── builder
 FROM python:3.12-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.5.18 /uv /uvx /usr/local/bin/
-ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1
+# UV_PROJECT_ENVIRONMENT=/opt/venv: costruisce il venv direttamente nel path
+# finale, così gli shebang dei console-script (es. `nlm`) puntano a
+# /opt/venv/bin/python (esistente nel runtime). Senza, il venv nasce in
+# /build/.venv e gli script restano con shebang rotto → ENOENT all'exec di nlm.
+ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1 \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /build
 COPY pyproject.toml ./
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -34,8 +39,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
 RUN mkdir -p /var/lib/nlm && chown -R app:app /var/lib/nlm
 
-# Copia venv + codice dal builder
-COPY --from=builder /build/.venv /opt/venv
+# Copia venv (già in /opt/venv, shebang corretti) + codice dal builder
+COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build/app /app/app
 
 ENV PATH="/opt/venv/bin:$PATH" \

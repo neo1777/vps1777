@@ -11,7 +11,10 @@
 # ─────────────────────────────────────────── builder
 FROM python:3.12-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.5.18 /uv /uvx /usr/local/bin/
-ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1
+# UV_PROJECT_ENVIRONMENT=/opt/venv: venv nel path finale → shebang dei
+# console-script corretti nel runtime (no /build/.venv rotto).
+ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1 \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /build
 COPY pyproject.toml ./
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -34,7 +37,7 @@ RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
 # named vuoto eredita questi permessi al primo attach.
 RUN mkdir -p /var/lib/gateway /var/lib/nlm && chown -R app:app /var/lib/gateway /var/lib/nlm
 
-COPY --from=builder /build/.venv /opt/venv
+COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build/app /app/app
 
 ENV PATH="/opt/venv/bin:$PATH" \

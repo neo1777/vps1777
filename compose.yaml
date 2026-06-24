@@ -131,6 +131,7 @@ services:
       - nlm-auth:/var/lib/nlm:rw  # auth.json caricato da /admin/nlm
     networks:
       - backend
+      - ingress   # egress: nlm deve raggiungere NotebookLM su internet
     expose:
       - "8003"
     # FastMCP espone solo /mcp (no /health) → healthcheck su TCP socket
@@ -163,6 +164,7 @@ services:
       - nlm-auth:/var/lib/nlm:ro  # legge AUTH_PENDING.flag per messaggio guida
     networks:
       - backend
+      - ingress   # egress: il bot deve raggiungere api.telegram.org
     depends_on:
       nb1777-mcp:
         condition: service_healthy
