@@ -46,13 +46,14 @@ Se rilanci `setup.sh`, salta gli step già fatti.
 ## Post-install
 
 1. **Login admin**: `<PUBLIC_BASE>/admin/login` → email + password admin
-2. **Auth NotebookLM**: sul TUO PC installa il CLI `nlm` e fai login, poi carichi l'`auth.json` generato su `<PUBLIC_BASE>/admin/nlm` (il container `nb1777-mcp` riparte e detecta auth):
+2. **Auth NotebookLM**: sul TUO PC installa il CLI `nlm`, fai login, poi carica il **profilo** (tar.gz) su `<PUBLIC_BASE>/admin/nlm`. La CLI `nlm` 0.7.x salva l'auth come cartella `profiles/default/` (non più un singolo `auth.json`):
    ```bash
-   # serve uv (astral.sh). Poi:
-   uv tool install notebooklm-mcp-cli --python 3.12
-   nlm login          # apre il browser → login NotebookLM → crea ~/.notebooklm-mcp-cli/auth.json
+   uv tool install notebooklm-mcp-cli --python 3.12      # serve uv (astral.sh)
+   nlm login                                             # apre il browser → login NotebookLM
+   cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default
    ```
-   Se `nlm` risulta "not found" dopo l'install: `uv tool update-shell` (mette `~/.local/bin` nel PATH) e riapri il terminale.
+   Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm` (login admin). Il gateway lo estrae sul volume; `nb1777-mcp` lo rileva alla prossima call.
+   Se `nlm` risulta "not found": `uv tool update-shell` (mette `~/.local/bin` nel PATH) e riapri il terminale.
 3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone **2 tool** (`search`, `get_conversation`), `nb1777` ne espone **35**. I connector **persistono** ai restart del gateway (DCR salvata su disco).
 4. **Bot Telegram**: `/start` al tuo bot
 

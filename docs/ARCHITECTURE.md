@@ -36,8 +36,8 @@ Backend è "world-isolated" — niente container interno può fare egress su int
 |---|---|---|
 | `gateway-data` | `/var/lib/gateway` | audit log, audit.jsonl |
 | `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5) |
-| `nlm-auth` | `/var/lib/nlm` | `auth.json` (NotebookLM) + `AUTH_PENDING.flag` |
-| `ts-data` (se Tailscale) | `/var/lib/tailscale` | stato Tailscale device |
+| `nlm-auth` | `/var/lib/nlm` | profilo NotebookLM `profiles/default/` + `AUTH_PENDING.flag` |
+| Tailscale (host) | `/var/lib/tailscale` sull'**host** | stato del nodo (non in container; vedi INGRESS.md) |
 | `caddy-data` (se Caddy) | `/data` | certificati ACME |
 | `cf-data` (se CF) | (nessuno) | token cred ephemeral |
 
@@ -51,7 +51,7 @@ Vedi [SECRETS.md](SECRETS.md). Tutti file-mounted in `/run/secrets/<name>` (tmpf
 |---|---|---|
 | Internet → gateway | HTTPS (ingress) | `/<SECRET>/<name>/mcp` |
 | gateway → MCP servers | HTTP loopback container | `http://<service>:<port>/mcp` |
-| gateway → nb1777-mcp filesystem | volume condiviso | `/var/lib/nlm/auth.json` |
+| gateway → nb1777-mcp filesystem | volume condiviso | `/var/lib/nlm/profiles/default/` |
 | nb1777-bot → nb1777-mcp | MCP client HTTP | `http://nb1777-mcp:8003/mcp` |
 | Telegram cloud → bot | long-poll outbound HTTPS | `api.telegram.org` |
 | claude.ai → gateway | OAuth 2.1 + MCP streamable-http | `/<SECRET>/<name>/mcp` |

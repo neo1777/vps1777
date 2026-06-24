@@ -15,21 +15,18 @@ from .settings import get_settings
 
 def _paths() -> tuple[Path, Path]:
     home = Path(get_settings().nlm_home)
-    return home / "auth.json", home / "AUTH_PENDING.flag"
+    # nlm 0.7.x: l'auth è il profilo profiles/default/cookies.json (non auth.json)
+    return home / "profiles" / "default" / "cookies.json", home / "AUTH_PENDING.flag"
 
 
 def check_or_raise() -> None:
-    auth_json, pending = _paths()
-    if pending.exists():
+    cookies, pending = _paths()
+    if pending.exists() or not cookies.exists():
         raise RuntimeError(
-            "Auth NotebookLM mancante (AUTH_PENDING). Apri /admin/nlm sul tuo "
-            "gateway, login admin, carica auth.json. Sul TUO PC: `uv tool install "
-            "notebooklm-mcp-cli --python 3.12 && nlm login` per generarlo."
-        )
-    if not auth_json.exists():
-        raise RuntimeError(
-            f"auth.json non presente in {auth_json}. Apri /admin/nlm sul gateway "
-            "per caricarlo."
+            "Auth NotebookLM mancante. Sul TUO PC: `uv tool install "
+            "notebooklm-mcp-cli --python 3.12 && nlm login`, poi "
+            "`cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` "
+            "e carica il tar.gz su /admin/nlm del gateway."
         )
 
 

@@ -10,7 +10,9 @@ demand, vedi nb1777-mcp/app/auth.py).
 from __future__ import annotations
 
 import html
+import io
 import json
+import tarfile
 import time
 from pathlib import Path
 
@@ -250,7 +252,34 @@ async def logout(_request: Request) -> Response:
     return resp
 
 
-# ───── /admin/nlm — upload auth.json ─────
+# ───── /admin/nlm — upload del profilo nlm (notebooklm-mcp-cli 0.7.x) ─────
+# La CLI nlm 0.7.x salva l'auth come CARTELLA profiles/default/{cookies.json,
+# metadata.json} (non più un singolo auth.json). Qui si carica un tar.gz di
+# quella cartella, che viene estratto in <nlm_auth_dir>/profiles/default/.
+
+def _extract_nlm_profile(content: bytes, auth_dir: Path) -> int:
+    """Estrae in sicurezza i file sotto profiles/ da un tar.gz. Ritorna #file."""
+    n = 0
+    with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as tar:
+        for m in tar.getmembers():
+            if not m.isfile():
+                continue
+            name = m.name.lstrip("./")
+            parts = Path(name).parts
+            if name.startswith("/") or ".." in parts:
+                raise ValueError(f"percorso non sicuro nel tar: {m.name}")
+            if not parts or parts[0] != "profiles":
+                continue  # ignora tutto ciò che non è il profilo
+            f = tar.extractfile(m)
+            if f is None:
+                continue
+            dest = auth_dir / name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(f.read())
+            dest.chmod(0o600)
+            n += 1
+    return n
+
 
 async def nlm_view(request: Request) -> Response:
     email, redirect = _require_admin(request)
@@ -260,7 +289,7 @@ async def nlm_view(request: Request) -> Response:
     s = get_settings()
     auth_dir = Path(s.nlm_auth_dir)
     auth_dir.mkdir(parents=True, exist_ok=True)
-    auth_path = auth_dir / "auth.json"
+    cookies_path = auth_dir / "profiles" / "default" / "cookies.json"
     pending = auth_dir / "AUTH_PENDING.flag"
 
     if request.method == "POST":
@@ -272,21 +301,20 @@ async def nlm_view(request: Request) -> Response:
         try:
             if not content:
                 raise ValueError("file vuoto")
-            if len(content) > 1_000_000:
-                raise ValueError("file troppo grande (>1MB)")
-            parsed = json.loads(content.decode("utf-8"))
-            if not isinstance(parsed, dict):
-                raise ValueError("formato non atteso (non è un dict)")
-            if "profiles" not in parsed:
-                raise ValueError("manca chiave 'profiles' (auth.json di nlm)")
-            auth_path.write_bytes(content)
-            auth_path.chmod(0o600)
+            if len(content) > 5_000_000:
+                raise ValueError("file troppo grande (>5MB)")
+            try:
+                n = _extract_nlm_profile(content, auth_dir)
+            except tarfile.TarError as e:
+                raise ValueError(f"non è un tar.gz valido del profilo nlm ({e})") from e
+            if not cookies_path.exists():
+                raise ValueError("il tar non contiene profiles/default/cookies.json — taggi la cartella giusta?")
             if pending.exists():
                 pending.unlink()
-            audit({"event": "admin_nlm_upload", "by": email, "bytes": len(content)})
-            msg = f"auth.json caricato ({len(content)} byte). nb1777-mcp prossima call leggerà il file."
+            audit({"event": "admin_nlm_upload", "by": email, "files": n})
+            msg = f"Profilo nlm caricato ({n} file). NotebookLM attivo alla prossima call."
             return RedirectResponse(f"/admin/nlm?msg={msg.replace(' ', '+')}&kind=ok", status_code=303)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             audit({"event": "admin_nlm_upload_err", "by": email, "error": str(exc)})
             return RedirectResponse(
                 f"/admin/nlm?msg=Errore:+{str(exc).replace(' ', '+')}&kind=err",
@@ -294,16 +322,11 @@ async def nlm_view(request: Request) -> Response:
             )
 
     # GET
-    auth_exists = auth_path.exists()
-    pending_exists = pending.exists()
-    auth_size = auth_path.stat().st_size if auth_exists else 0
-
-    if auth_exists and not pending_exists:
-        status_html = f'<div class="kicker"><span class="dot ok"></span>auth.json presente ({auth_size} byte). NotebookLM dovrebbe funzionare.</div>'
-    elif pending_exists or not auth_exists:
-        status_html = '<div class="kicker"><span class="dot warn"></span>AUTH_PENDING — carica auth.json per attivare NotebookLM.</div>'
+    ok = cookies_path.exists() and not pending.exists()
+    if ok:
+        status_html = '<div class="kicker"><span class="dot ok"></span>Profilo nlm presente. NotebookLM dovrebbe funzionare.</div>'
     else:
-        status_html = '<div class="kicker"><span class="dot"></span>stato sconosciuto</div>'
+        status_html = '<div class="kicker"><span class="dot warn"></span>Profilo nlm mancante — caricalo per attivare NotebookLM.</div>'
 
     flash = request.query_params.get("msg", "").replace("+", " ")
     flash_kind = request.query_params.get("kind", "ok")
@@ -315,27 +338,25 @@ async def nlm_view(request: Request) -> Response:
 </header>
 {status_html}
 <section>
-  <div class="kicker">come ottenere auth.json</div>
+  <div class="kicker">come ottenere il profilo nlm</div>
   <ol>
-    <li>Sul TUO PC locale (Mint/Mac/Windows), installa <code>nlm</code>:
-      <pre>curl -fsSL https://astral.sh/uv/install.sh | sh   # se non hai uv
-uv tool install notebooklm-mcp-cli --python 3.12</pre>
+    <li>Sul TUO PC, installa <code>nlm</code> (serve <a href="https://astral.sh" target="_blank">uv</a>):
+      <pre>uv tool install notebooklm-mcp-cli --python 3.12</pre>
     </li>
-    <li>Login Google (apre browser):
+    <li>Login Google (apre il browser):
       <pre>nlm login
 nlm notebook list   # verifica</pre>
     </li>
-    <li>Trova il file in:
-      <pre>~/.notebooklm-mcp-cli/auth.json   # Linux/Mac
-%USERPROFILE%\\.notebooklm-mcp-cli\\auth.json   # Windows</pre>
+    <li>Crea un tar.gz del profilo e caricalo qui sotto:
+      <pre>cd ~/.notebooklm-mcp-cli
+tar czf nlm-profile.tgz profiles/default</pre>
     </li>
-    <li>Caricalo qui sotto.</li>
   </ol>
 </section>
 
 <form method="POST" action="/admin/nlm" enctype="multipart/form-data">
   <section>
-    <div class="row"><label>auth.json</label><input type="file" name="auth_file" accept=".json,application/json" required></div>
+    <div class="row"><label>profilo nlm (.tgz)</label><input type="file" name="auth_file" accept=".tgz,.gz,.tar.gz,application/gzip" required></div>
     <div class="toolbar">
       <button type="submit" class="primary">Carica</button>
       <a class="btn" href="/admin/audit">Audit →</a>

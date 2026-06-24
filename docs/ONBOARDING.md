@@ -11,7 +11,7 @@ Dopo `./deploy.sh`, lo stack gira ma è "dormiente": mancano le credenziali
 │  1. ./deploy.sh           (dal PC, ~6 domande, build + avvio)    │
 │         ↓                                                        │
 │  2. http://<IP_VPS>:8080/admin/setup   (browser, login admin)   │
-│     inserisci: Tailscale key · bot token · carica auth.json     │
+│     inserisci: Tailscale key · bot token · profilo nlm (tgz)    │
 │     → Salva                                                     │
 │         ↓                                                        │
 │  3. ./deploy.sh --apply   (dal PC, applica tutto via SSH)       │
@@ -39,12 +39,12 @@ Il pannello mostra **lo stato dei componenti** a semafori e i form per:
 | Tailscale Funnel | OAuth client (Client ID + Secret) — vedi [INGRESS.md](INGRESS.md) per i prerequisiti account | [login.tailscale.com/admin/settings/oauth](https://login.tailscale.com/admin/settings/oauth) |
 | Bot Telegram | token + owner id | [@BotFather](https://t.me/BotFather) + [@userinfobot](https://t.me/userinfobot) |
 | URL pubblico | (opzionale) solo per Caddy/Cloudflared con dominio tuo | — |
-| NotebookLM | upload `auth.json` (bottone dedicato) | `nlm login` sul tuo PC |
+| NotebookLM | upload del **profilo nlm** (tar.gz, bottone dedicato) | `nlm login` sul tuo PC → `tar czf nlm-profile.tgz profiles/default` |
 
 Clicca **Salva configurazione**. I valori vanno in un file temporaneo
 (`onboarding/pending.json`) sulla VPS, in attesa di applicazione.
 
-> **NotebookLM è già attivo al volo**: l'upload di `auth.json` da `/admin/nlm`
+> **NotebookLM è già attivo al volo**: l'upload del profilo da `/admin/nlm`
 > non richiede `--apply`, il servizio lo legge alla prossima chiamata.
 
 ## 3. Applica

@@ -61,18 +61,22 @@ Se dopo l'install resta "not found": `uv` mette i binari in `~/.local/bin` →
 
 ## Bot risponde "Auth NotebookLM mancante"
 
-È atteso al primo avvio. Carica `auth.json` da `<PUBLIC_BASE>/admin/nlm`.
+È atteso al primo avvio. Carica il **profilo nlm** (tar.gz) da `<PUBLIC_BASE>/admin/nlm` (vedi sotto).
 
-## `/admin/nlm` upload — "non è JSON valido"
+## `/admin/nlm` — "il tar non contiene profiles/default/cookies.json"
 
-Causa: hai caricato il file sbagliato.
-
-`auth.json` corretto è quello che `nlm login` crea in `~/.notebooklm-mcp-cli/auth.json`. Deve avere chiave `profiles.default`.
-
-Verifica sul tuo PC:
+Causa: hai caricato l'archivio sbagliato. La CLI `nlm` 0.7.x salva l'auth come
+**cartella** `~/.notebooklm-mcp-cli/profiles/default/` (con `cookies.json` +
+`metadata.json`), non come `auth.json`. Crea il tar.gz dalla dir giusta:
 ```bash
-python3 -c "import json; d = json.load(open('~/.notebooklm-mcp-cli/auth.json')); print(list(d.keys()))"
-# → ['profiles']
+cd ~/.notebooklm-mcp-cli
+tar czf nlm-profile.tgz profiles/default     # NON da dentro profiles/default
+```
+Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm`.
+
+Verifica sul tuo PC che il profilo esista prima di taggarlo:
+```bash
+ls ~/.notebooklm-mcp-cli/profiles/default/   # → cookies.json  metadata.json
 ```
 
 ## Tailscale Funnel non si attiva (URL resta HTTP su :8080)

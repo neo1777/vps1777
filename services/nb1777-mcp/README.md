@@ -10,14 +10,14 @@ NotebookLM MCP wrapper — espone i tool del CLI `nlm` come MCP streamable-http.
 | `NB1777_PORT` | `8003` | porta |
 | `NB1777_TRANSPORT` | `streamable-http` | `streamable-http`, `stdio`, `sse` |
 | `NB1777_ALLOWED_ORIGINS` | `https://claude.ai,https://web.telegram.org` | CSV |
-| `NLM_HOME` | `/var/lib/nlm` | volume con `auth.json` + `AUTH_PENDING.flag` |
+| `NLM_HOME` | `/var/lib/nlm` | volume col profilo `profiles/default/` + `AUTH_PENDING.flag` |
 | `FASTMCP_STATELESS_HTTP` | `true` | MCP stateless mode |
 
 ## Auth NotebookLM (post-install)
 
-Lo stato auth è il file `${NLM_HOME}/auth.json`. Se manca o il file `${NLM_HOME}/AUTH_PENDING.flag` esiste, ogni tool MCP ritorna `RuntimeError("Vai su /admin/nlm per caricare auth.json")`.
+`nlm` 0.7.x salva l'auth come profilo `${NLM_HOME}/profiles/default/cookies.json`. Se manca (o esiste `${NLM_HOME}/AUTH_PENDING.flag`), ogni tool MCP ritorna `RuntimeError` con le istruzioni.
 
-Carica `auth.json` dal pannello del gateway: `<PUBLIC_BASE>/admin/nlm`.
+Sul tuo PC: `nlm login` → `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` → carica il tar.gz dal pannello `<PUBLIC_BASE>/admin/nlm`.
 
 ## Tool MCP esposti (MVP)
 

@@ -11,7 +11,7 @@ dependencies = [
     "pydantic-settings>=2.7.0",
     "uvicorn[standard]>=0.32.0",
     "starlette>=0.45.0",
-    "notebooklm-mcp-cli>=0.7.7",
+    "notebooklm-mcp-cli==0.7.7",  # pin: 0.7.x usa profiles/ (vedi auth.py + /admin/nlm)
 ]
 
 [build-system]
