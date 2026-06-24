@@ -2,16 +2,18 @@
 OAuth 2.1 endpoints — Dynamic Client Registration + Authorization Code + PKCE.
 
 In versione MVP supporto solo flow code+PKCE per claude.ai. Single-tenant:
-l'allowed email è 1 (l'admin), e i client DCR sono accettati con storage
-in-memory (clear su restart — sufficiente per claude.ai che ri-registra).
+l'allowed email è 1 (l'admin). I client DCR sono PERSISTITI su disco (volume
+gateway-data) → i connector sopravvivono ai restart del gateway.
 
-Per multi-tenant / multi-client persistente → tema futuro.
+Per multi-tenant / multi-replica → store condiviso (Redis/Postgres).
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets as pysecrets
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
@@ -23,11 +25,35 @@ from .jwt_helpers import JWTError, issue, verify
 from .settings import get_settings
 
 
-# ───── storage in-memory (semplice, single-process) ─────
-# Per scalare a multi-replica usa Redis/Postgres + token store condiviso.
+# ───── storage ─────
+# I client DCR (registrazioni connector di claude.ai) sono PERSISTITI su disco
+# (volume gateway-data): senza, ogni restart del gateway li perderebbe e ogni
+# connector andrebbe ri-aggiunto su claude.ai. I codes sono effimeri (scadono in
+# minuti) → restano in memoria. Per multi-replica → store condiviso (Redis/PG).
 
-_clients: dict[str, dict[str, Any]] = {}     # client_id → metadata
-_codes: dict[str, dict[str, Any]] = {}       # code → {client_id, redirect_uri, sub, code_challenge, expires_at}
+def _clients_file() -> Path:
+    # accanto all'audit log, sul volume persistente /var/lib/gateway
+    return Path(get_settings().audit_log_path).parent / "oauth_clients.json"
+
+
+def _load_clients() -> dict[str, dict[str, Any]]:
+    try:
+        return json.loads(_clients_file().read_text())
+    except Exception:
+        return {}
+
+
+def _save_clients() -> None:
+    try:
+        f = _clients_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(_clients))
+    except Exception as exc:  # non fatale: resta in memoria per questa sessione
+        audit({"event": "oauth_clients_persist_error", "error": str(exc)})
+
+
+_clients: dict[str, dict[str, Any]] = _load_clients()  # client_id → metadata (persistito)
+_codes: dict[str, dict[str, Any]] = {}       # code → {...} (effimero, in-memory)
 _revoked_refresh: set[str] = set()           # jti dei refresh_token revocati
 
 
@@ -75,6 +101,7 @@ async def register(request: Request) -> Response:
         "client_name": body.get("client_name", "unknown"),
         "registered_at": int(time.time()),
     }
+    _save_clients()   # persiste → sopravvive ai restart del gateway
     audit({"event": "oauth_register", "client_id": client_id})
     return JSONResponse(
         {
