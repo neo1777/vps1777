@@ -34,22 +34,35 @@ Browser (UI form)  ──HTTP 127.0.0.1──►  installer.py + engine.py  ─�
 
 Il browser non può fare SSH (sandbox): il mini-server locale fa da ponte.
 L'**engine Python** (`engine.py`, basato su paramiko) si connette alla VPS,
-carica il repo via SFTP ed esegue gli step (prepara Docker, genera secret,
-build+up, Tailscale, reboot test) **direttamente via SSH**. Tutto resta su
-`127.0.0.1` — le credenziali non lasciano il tuo PC.
+carica il repo via SFTP ed esegue gli step (prepara Docker + hardening, genera
+secret, build+up, **installa Tailscale sull'host** + Funnel, reboot test)
+**direttamente via SSH**. Tutto resta su `127.0.0.1` — le credenziali non
+lasciano il tuo PC.
 
 > **Cross-OS vero**: la VPS è Linux e riceve comandi shell standard; il PC
-> esegue solo Python. Per questo gira anche su Windows nativo, dove non
-> esistono bash/sshpass.
+> esegue solo Python (paramiko + urllib + stdlib). Per questo gira anche su
+> **Windows nativo**, dove non esistono bash/sshpass.
+
+> **Il deploy sopravvive al refresh**: l'installazione gira in un thread sul
+> mini-server locale; se aggiorni o chiudi la pagina e riapri `127.0.0.1:8777`,
+> la console si riaggancia e l'install prosegue.
 
 ## Flusso UI
 
 1. **La tua VPS** — IP, utente, password → *Verifica connessione* (semaforo verde)
 2. **Admin** — email (la password è generata e mostrata alla fine)
-3. **Ingress** — Tailscale (OAuth client + checklist prerequisiti) / Caddy (dominio) / Cloudflared (token)
-4. **Bot Telegram** — opzionale
-5. Quando tutti i semafori sono verdi, **Installa** si attiva → avanzamento
-   live → schermata con URL, password admin, URL connector claude.ai.
+3. **Ingress** — Tailscale (**auth-key** semplice *oppure* OAuth client; vedi checklist prerequisiti) / Caddy (dominio) / Cloudflared (token)
+4. **Bot Telegram** — opzionale (semaforo verde solo dopo "Verifica bot" reale)
+5. Quando i semafori sono verdi, **Installa** si attiva → avanzamento live →
+   schermata con URL, password admin, URL connector claude.ai.
+
+## Dopo l'installazione
+
+- Su [claude.ai](https://claude.ai) → Settings → Integrations → **Add**, incolla
+  gli URL connector (devono essere **HTTPS** — il Funnel li serve così) e fai
+  login con email + password admin.
+- **`archive` espone 2 tool** (`search`, `get_conversation`); **`nb1777` ne espone 35** — aggiungi entrambi i connector se li vuoi tutti.
+- I connector **persistono** ai restart del gateway (registrazioni DCR salvate su disco): li aggiungi una volta sola.
 
 ## Sicurezza
 
