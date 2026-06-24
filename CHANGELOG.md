@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Fix — Connector claude.ai end-to-end (OAuth + proxy MCP) — validato live
+
+Catena di 5 bug che impedivano al connector di funzionare, tutti trovati e corretti su VPS reale, ciascuno verificato dal vivo prima del successivo:
+
+1. **PKCE persa** (`"PKCE S256 required"`): il redirect `/authorize → /admin/login` interpolava `next` non-encodato → i parametri PKCE dell'authorize finivano come parametri di `/admin/login` e si perdevano. Fix: `quote(url, safe="")` + guard anti open-redirect.
+2. **Loop di login**: il cookie admin era su `path=/admin`, ma dopo il login il flusso va a `/authorize` (fuori da `/admin`) → cookie non inviato → sessione non vista. Fix: cookie su `path=/`.
+3. **Proxy MCP rotto** (`"archive1777 returned an error"`): `proxy.py` usava `client.request()` (bufferizza il body) e poi `aiter_raw()` → `httpx.StreamConsumed` su OGNI richiesta MCP. Fix: `build_request` + `send(stream=True)` → streaming corretto (SSE inclusa). Validato: `initialize` → 200 + risposta MCP reale.
+4. **DCR in-memory**: le registrazioni connector (Dynamic Client Registration) erano in RAM → ogni restart/rebuild del gateway le perdeva, costringendo a ri-aggiungere il connector. Fix: persistite in `/var/lib/gateway/oauth_clients.json` (volume `gateway-data`). Validato: register → restart → sopravvive.
+5. (Vedi sotto) il **502 del Funnel** col comando serve/funnel.
+
+Nota: `archive-mcp` espone **2 tool** (`search`, `get_conversation`) by design; i **35 tool** sono di `nb1777-mcp`.
+
 ### Fix — Funnel 502: comando serve/funnel corretto (validato pubblico, HTTP 200)
 
 Primo deploy host-mode riuscito (Funnel "on", cert ok), ma il pubblico dava **502 Bad Gateway**: il `serve status` mostrava `proxy http://127.0.0.1:443` invece di `:8080`. Causa: lanciare `tailscale serve --https=443 <t>` **e poi** `tailscale funnel --bg 443` fa interpretare "443" come *target* (proxy a :443) e sovrascrive il mapping. **Fix**: un solo comando combinato `tailscale funnel --bg --https=443 http://127.0.0.1:8080` (+ `tailscale serve reset` prima, per idempotenza). Validato dal vivo: `https://<host>.ts.net/health` → **HTTP 200** dal pubblico. Corretto in engine.py e deploy.sh.
