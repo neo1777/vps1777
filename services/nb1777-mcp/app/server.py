@@ -33,16 +33,6 @@ HOST = os.environ.get("NB1777_HOST", "127.0.0.1")
 PORT = int(os.environ.get("NB1777_PORT", "8003"))
 TRANSPORT = os.environ.get("NB1777_TRANSPORT", "streamable-http")
 
-# Origini autorizzate per DNS rebinding protection di FastMCP.
-# Servono per accettare richieste dal gateway forward (che inoltra l'Origin
-# del client originario, es. https://*.ts.net o https://claude.ai).
-# Default: tutti gli origin del tuo gateway pubblico.
-_origins_raw = os.environ.get(
-    "NB1777_ALLOWED_ORIGINS",
-    "https://claude.ai,https://web.telegram.org",  # default sensati
-).strip()
-ALLOWED_ORIGINS = [o.strip() for o in _origins_raw.split(",") if o.strip()]
-
 # Stateless HTTP: NO session_id required tra initialize/call.
 # Permette chiamate dirette tools/call senza initialize preventivo
 # (necessario per la Mini App + claude.ai che chiamano tool one-shot).
@@ -52,9 +42,12 @@ mcp = FastMCP(
     port=PORT,
     stateless_http=True,
     transport_security=TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=[f"{HOST}:{PORT}", HOST, "127.0.0.1", "localhost"],
-        allowed_origins=ALLOWED_ORIGINS,
+        # DNS-rebinding protection OFF: il server sta dietro il gateway su rete
+        # Docker interna (non esposto ai browser). Il gateway inoltra
+        # `Host: nb1777-mcp:8003`, che con la protezione attiva dava 421
+        # (Misdirected Request). Coerente con archive-mcp. La sicurezza è al
+        # gateway (OAuth + path-secret), non qui.
+        enable_dns_rebinding_protection=False,
     ),
 )
 
