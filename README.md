@@ -151,9 +151,10 @@ patti della comunità in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Stato
 
-Pre-1.0: il cuore (gateway OAuth, MCP, ingress, installer cross-OS, deploy con
-reboot-survival) è funzionante ed è stato validato end-to-end su VPS reale.
-Le novità sono tracciate nel [CHANGELOG.md](CHANGELOG.md).
+Pre-1.0: il cuore è funzionante e **validato end-to-end su VPS reale** —
+installer cross-OS (incluso **Windows nativo**) → Docker + Tailscale Funnel
+HTTPS → reboot-survival → connector OAuth+MCP agganciato da claude.ai. Le
+novità sono tracciate nel [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
