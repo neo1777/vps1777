@@ -48,6 +48,17 @@ Casi:
 - `TELEGRAM_OWNER_ID` sbagliato → controlla `.env`, deve essere il TUO numero (non `0`)
 - TOKEN revocato su BotFather → genera uno nuovo, aggiorna `secrets/telegram_bot_token.txt`
 
+## `nlm: command not found` (sul tuo PC)
+
+`nlm` è il pacchetto PyPI **`notebooklm-mcp-cli`**, non un pacchetto apt/snap.
+Installalo con [uv](https://astral.sh):
+```bash
+uv tool install notebooklm-mcp-cli --python 3.12
+nlm login
+```
+Se dopo l'install resta "not found": `uv` mette i binari in `~/.local/bin` →
+`uv tool update-shell` e riapri il terminale (o aggiungi `~/.local/bin` al PATH).
+
 ## Bot risponde "Auth NotebookLM mancante"
 
 È atteso al primo avvio. Carica `auth.json` da `<PUBLIC_BASE>/admin/nlm`.
