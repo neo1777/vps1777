@@ -6,8 +6,18 @@
 ![MCP](https://img.shields.io/badge/MCP-streamable--http-d97757.svg)
 ![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)
 
-> Gateway personale per **i tuoi MCP, bot, e servizi LLM**, dietro un solo URL HTTPS pubblico, protetto da OAuth 2.1.
-> Pensato per girare su una VPS Linux, con Docker, e crescere via plugin.
+> **Il tuo gateway personale per MCP, bot e servizi LLM** — dietro un solo URL
+> HTTPS pubblico, protetto da OAuth 2.1, in piedi su una VPS Linux in pochi
+> minuti e senza scrivere un comando.
+
+Colleghi i **tuoi** server MCP (e bot Telegram) a [claude.ai](https://claude.ai),
+Claude Code e all'app desktop, da un unico endpoint sicuro. vps1777 mette davanti
+ai tuoi servizi un gateway con autenticazione, reverse proxy, pannello di
+amministrazione e ingress HTTPS — e cresce con i plugin che ci aggiungi tu.
+
+Lo installi da una **UI grafica** sul tuo PC (Windows / Mac / Linux): compili un
+form, clicchi **Installa**, e alla fine hai l'URL HTTPS e i connector pronti da
+incollare in claude.ai. Niente Docker da gestire a mano, niente shell sulla VPS.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -35,103 +45,122 @@
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## 🖱 Install grafica (installer locale — zero comandi)
+## Perché
 
-Hai una VPS Linux fresh (solo IP + password root)? Sul tuo PC:
+Esporre un MCP a claude.ai significa, di solito, mettere mano a TLS, reverse
+proxy, autenticazione, un dominio, e tenere tutto in piedi al reboot. vps1777 fa
+quel lavoro una volta sola, bene: un gateway OAuth 2.1 davanti, un URL HTTPS
+gratuito via Tailscale Funnel (o Caddy/Cloudflare se preferisci), e ogni nuovo
+servizio diventa una voce nel routing. Tu pensi al tuo MCP; il resto è già qui.
+
+## Installazione
+
+Ti serve solo una **VPS Linux fresh** (Debian 13 consigliata) con IP e password
+root. Tre modi, dallo stesso repo.
+
+### 🖱 Installer grafico — zero comandi (consigliato)
+
+Sul **tuo PC**:
 
 | Sistema | Avvio |
 |---|---|
 | Windows | doppio-click `installer/launch.bat` |
 | Linux / Mac / WSL | doppio-click `installer/launch.sh` |
 
-Si apre una pagina nel browser: compili il form, **Verifica connessione**,
-attendi i semafori verdi, clicchi **Installa**, segui l'avanzamento live e a
-fine installazione vedi URL, password admin e i connector da incollare in
-claude.ai. Vedi [installer/README.md](installer/README.md).
+Si apre una pagina nel browser (`127.0.0.1:8777`): compili il form, premi
+**Verifica connessione**, attendi i semafori verdi, clicchi **Installa**. Segui
+l'avanzamento live; a fine installazione vedi **URL pubblico, password admin e i
+connector** da incollare in claude.ai. Dettagli: [installer/README.md](installer/README.md).
 
-> **Cross-OS**: l'engine è Python puro (paramiko via SSH) — gira su **Windows
-> nativo, Mac e Linux**, senza bash né WSL. Serve solo Python 3 (i launcher
-> installano paramiko da soli).
+> **Cross-OS vero**: l'engine è Python puro (paramiko via SSH) — gira su
+> **Windows nativo**, Mac e Linux, senza bash né WSL. Le credenziali non lasciano
+> il tuo PC (bind su `127.0.0.1`). Il deploy **sopravvive al refresh** della pagina.
 
-## 🚀 Install one-click (CLI dal tuo PC)
-
-Preferisci il terminale? Stesso risultato, da riga di comando:
+### 🚀 CLI — un comando dal tuo PC
 
 ```bash
-# 1. Ottieni il repo (clone o scompatta il tarball)
-git clone https://github.com/<owner>/vps1777.git && cd vps1777
-
-# 2. Lancia il deploy: chiede IP/user/password + config, fa TUTTO via SSH
-./deploy.sh
+git clone https://github.com/neo1777/vps1777.git && cd vps1777
+./deploy.sh        # chiede IP/user/password + config, fa TUTTO via SSH
 ```
 
-`deploy.sh` (dal tuo PC; su Linux/Mac/WSL, serve `sshpass` per auth password — per Windows nativo usa l'installer grafico qui sopra):
-1. Chiede IP, user, password VPS + config (email admin, OWNER_ID, ingress)
-2. Installa Docker + Compose v2, crea utente `vps1777`
-3. Trasferisce il repo via SSH
-4. Genera `.env` + secrets (random + bcrypt) sulla VPS
-5. `docker compose up -d --build`
-6. **Riavvia la VPS e verifica che i container ripartano da soli**
-7. Apre il **pannello di onboarding** su `http://<IP>:8080/admin/setup`
+`deploy.sh` (Linux/Mac/WSL; per auth password serve `sshpass`) prepara la VPS
+(Docker + Compose v2 + hardening), trasferisce il repo, genera `.env` + secrets
+(random + bcrypt), avvia lo stack, **installa Tailscale sull'host e attiva il
+Funnel HTTPS**, riavvia la VPS e verifica che tutto riparta al boot, infine
+stampa URL e connector.
 
-Poi finisci **dal browser** (Tailscale, bot, NotebookLM) + `./deploy.sh --apply`
-per applicare. Niente comandi Docker da gestire. Vedi [docs/ONBOARDING.md](docs/ONBOARDING.md).
-
-## 🛠 Install manuale (sulla VPS)
-
-Se preferisci controllare ogni passo, oppure sei già sulla VPS:
+### 🛠 Manuale — sulla VPS
 
 ```bash
-git clone https://github.com/<owner>/vps1777.git && cd vps1777
+git clone https://github.com/neo1777/vps1777.git && cd vps1777
 ./setup.sh                                          # wizard interattivo
 docker compose --profile ingress.tailscale up -d    # o caddy / cloudflared
 ```
 
-## 🧩 Cosa include
+Per l'HTTPS pubblico (Tailscale / Caddy / Cloudflare) e i prerequisiti, vedi
+[docs/INGRESS.md](docs/INGRESS.md). Per collegare i connector a claude.ai e
+caricare l'auth NotebookLM, [docs/INSTALL.md](docs/INSTALL.md).
+
+## Cosa include
 
 | Servizio | Cosa fa | Porta interna |
 |---|---|---|
 | **gateway** | OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*` | 8080 |
-| **archive-mcp** | Search FTS5 multi-DB (claude.ai web export, Claude Code sessions) | 8002 |
-| **nb1777-mcp** | NotebookLM via CLI `nlm` (60+ tool: list, query, 9 artefatti) | 8003 |
+| **archive-mcp** | Ricerca FTS5 su più DB (export web claude.ai, sessioni Claude Code) | 8002 |
+| **nb1777-mcp** | NotebookLM via CLI `nlm` — **35 tool** (notebook, source, chat, 9 artefatti studio, doctor) | 8003 |
 | **nb1777-bot** | Bot Telegram owner-only + Mini App | (long-poll) |
 
-Più tutti i **plugin** che ci aggiungerai dopo (vedi [docs/PLUGINS.md](docs/PLUGINS.md)).
+Più i **plugin** che ci aggiungi tu — un MCP o un bot in pochi file, senza
+toccare il core. Vedi [docs/PLUGINS.md](docs/PLUGINS.md).
 
-## 🛡 Sicurezza per design
+## Sicurezza per design
 
-- Backend su rete Docker `internal: true` — solo il gateway è esposto verso fuori
-- Secrets sensibili (password, signing key, token) via Docker `secrets:` (tmpfs `/run/secrets/`), MAI in env var
-- OAuth 2.1 con PKCE + refresh, JWT con `typ` separati (no cross-token-use)
+- Backend su rete Docker `internal: true` — **solo il gateway** è esposto verso l'esterno
+- Il gateway **non** ha accesso al Docker socket né ai secret dell'host (container non privilegiato)
+- Secrets sensibili (password, signing key, token) via Docker `secrets:` (tmpfs `/run/secrets/`), **mai** in env var
+- OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, healthcheck su ogni servizio
-- Il gateway **non** ha accesso al Docker socket né ai secret host (container non privilegiato)
-- Hardening host automatico: `unattended-upgrades` (patch di sicurezza) + `fail2ban` (anti brute-force SSH)
-- Hardening: backup age-encrypted, rotate secrets senza downtime, auto-update via Watchtower
-- **Gestione visuale opzionale**: profilo `ops.portainer` (Portainer solo su loopback, accesso via tunnel SSH) — vedi [docs/OPS.md](docs/OPS.md)
+- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
+- Backup volumi **age-encrypted**, rotate secrets senza downtime, auto-update opzionale via Watchtower
+- Gestione visuale opzionale (Portainer) **solo su loopback** + tunnel SSH — vedi [docs/OPS.md](docs/OPS.md)
 
-## 📖 Documentazione
+Vedi [SECURITY.md](SECURITY.md) per il threat model e come segnalare vulnerabilità.
 
-- [INSTALL.md](docs/INSTALL.md) — installazione passo-passo + scelta ingress
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — flussi, contratti, security model
-- [PLUGINS.md](docs/PLUGINS.md) — aggiungere un MCP o un bot tuo
-- [SECRETS.md](docs/SECRETS.md) — gestione/rotation/backup secrets
-- [INGRESS.md](docs/INGRESS.md) — HTTPS pubblico: Tailscale / Caddy / Cloudflared
-- [OPS.md](docs/OPS.md) — hardening + profili opzionali (Portainer, Watchtower, backup)
-- [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) — backup volumi age-encrypted
-- [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — quando qualcosa va male
+## Documentazione
 
-## 🛠 Sviluppo locale
+| Doc | Cosa trovi |
+|---|---|
+| [INSTALL.md](docs/INSTALL.md) | Installazione passo-passo + post-install (connector, NotebookLM) |
+| [INGRESS.md](docs/INGRESS.md) | HTTPS pubblico: Tailscale Funnel / Caddy / Cloudflare |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Flussi, contratti, security model |
+| [PLUGINS.md](docs/PLUGINS.md) | Aggiungere un tuo MCP o bot |
+| [SECRETS.md](docs/SECRETS.md) | Gestione, rotation e backup dei secret |
+| [OPS.md](docs/OPS.md) | Hardening + profili opzionali (Portainer, Watchtower, backup) |
+| [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) | Backup/restore volumi age-encrypted |
+| [ONBOARDING.md](docs/ONBOARDING.md) | Setup post-deploy dal pannello web |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Quando qualcosa va storto |
+
+## Sviluppo locale
 
 ```bash
 docker compose -f compose.yaml -f compose.dev.yaml up --watch
 ```
 
-Hot-reload via Compose Watch. Vedi [CONTRIBUTING.md](CONTRIBUTING.md).
+Hot-reload via Compose Watch. Linee guida in [CONTRIBUTING.md](CONTRIBUTING.md);
+patti della comunità in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
-## 📜 License
+## Stato
 
-MIT — vedi [LICENSE](LICENSE).
+Pre-1.0: il cuore (gateway OAuth, MCP, ingress, installer cross-OS, deploy con
+reboot-survival) è funzionante ed è stato validato end-to-end su VPS reale.
+Le novità sono tracciate nel [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE) © neo1777
 
 ---
 
-*vps1777 nasce dalla seconda generazione dello stack 1777, dopo aver capito che bash + python + sudo + service user erano troppe cose intrecciate. Docker pulisce tutto.*
+*vps1777 è la seconda generazione dello stack 1777: dopo aver imparato che bash +
+python + sudo + service-user intrecciati esplodono in modo non riproducibile, qui
+è Docker a tenere tutto pulito e immutabile. Costruito da [neo1777](https://github.com/neo1777).*
