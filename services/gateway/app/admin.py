@@ -60,12 +60,15 @@ def _set_admin_cookie(response: Response, email: str) -> None:
         # login andrebbe a vuoto. In produzione PUBLIC_BASE è https → Secure on.
         secure=s.gateway_public_base.startswith("https://"),
         samesite="lax",
-        path="/admin",
+        # path="/" e NON "/admin": il flusso OAuth dopo il login va a /authorize
+        # (fuori da /admin); con path=/admin il browser non manderebbe lì il
+        # cookie → /authorize non vede la sessione → loop di login.
+        path="/",
     )
 
 
 def _clear_admin_cookie(response: Response) -> None:
-    response.delete_cookie(ADMIN_COOKIE, path="/admin")
+    response.delete_cookie(ADMIN_COOKIE, path="/")
 
 
 def _require_admin(request: Request) -> tuple[str | None, Response | None]:
