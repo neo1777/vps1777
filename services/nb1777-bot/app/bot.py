@@ -30,8 +30,9 @@ log = logging.getLogger(__name__)
 
 def auth_pending() -> bool:
     s = get_settings()
-    return (Path(s.nlm_home) / "AUTH_PENDING.flag").exists() or \
-        not (Path(s.nlm_home) / "auth.json").exists()
+    # nlm 0.7.x: l'auth è il profilo profiles/default/cookies.json (non auth.json)
+    cookies = Path(s.nlm_home) / "profiles" / "default" / "cookies.json"
+    return (Path(s.nlm_home) / "AUTH_PENDING.flag").exists() or not cookies.exists()
 
 
 def owner_only(
@@ -80,8 +81,8 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
             "Cosa fare:\n"
             f"1. Apri *{link}* sul browser\n"
             "2. Login con email + password admin\n"
-            "3. Segui le istruzioni per generare `auth.json` con `nlm login`\n"
-            "4. Carica `auth.json` — riparto automaticamente",
+            "3. Sul PC: `nlm login`, poi `tar czf nlm-profile.tgz profiles/default`\n"
+            "4. Carica il `.tgz` — riparto automaticamente",
             parse_mode=ParseMode.MARKDOWN,
         )
         return

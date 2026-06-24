@@ -27,7 +27,7 @@ OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*`.
 - `POST /register` — Dynamic Client Registration OAuth
 - `GET /authorize`, `POST /token` — flow OAuth 2.1
 - `GET /admin/{login,secrets,nlm,audit}` — pannello admin
-- `POST /admin/nlm` — upload `auth.json` NotebookLM
+- `POST /admin/nlm` — upload del profilo nlm (tar.gz di `profiles/default`)
 - `GET /app/*` — Mini App Telegram
 - `* /{secret}/{service}/{path}` — reverse proxy a `<host>:<port>/<path>`
 

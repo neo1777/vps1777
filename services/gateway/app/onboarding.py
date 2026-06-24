@@ -57,13 +57,13 @@ def _status() -> dict[str, tuple[str, str]]:
     else:
         out["tailscale"] = ("off", "non configurato")
 
-    # NotebookLM auth
-    auth_json = Path(s.nlm_auth_dir) / "auth.json"
+    # NotebookLM auth (nlm 0.7.x: profilo profiles/default/cookies.json)
+    cookies = Path(s.nlm_auth_dir) / "profiles" / "default" / "cookies.json"
     pending_flag = Path(s.nlm_auth_dir) / "AUTH_PENDING.flag"
-    if auth_json.exists() and not pending_flag.exists():
-        out["nlm"] = ("ok", f"{auth_json.stat().st_size} byte")
+    if cookies.exists() and not pending_flag.exists():
+        out["nlm"] = ("ok", "profilo nlm presente")
     else:
-        out["nlm"] = ("off", "auth.json non caricato")
+        out["nlm"] = ("off", "profilo nlm non caricato")
 
     # Bot Telegram
     if s.effective_bot_token:
@@ -182,7 +182,7 @@ async def setup_view(request: Request) -> Response:
     </div>
     <div class="toolbar">
       <button type="submit" class="primary">Salva configurazione</button>
-      <a class="btn" href="/admin/nlm">Carica auth.json NotebookLM →</a>
+      <a class="btn" href="/admin/nlm">Carica profilo NotebookLM →</a>
     </div>
   </section>
 </form>
@@ -194,7 +194,7 @@ async def setup_view(request: Request) -> Response:
   <p class="hint">Legge i valori salvati via SSH, configura Tailscale + secret + URL,
     riavvia i servizi. {'<strong style="color:var(--warn)">Config in attesa di applicazione.</strong>' if has_pending else ''}</p>
   <ul>
-    <li>Per NotebookLM: usa il bottone sopra (carica <code>auth.json</code>) — quello è già attivo al volo, senza <code>--apply</code>.</li>
+    <li>Per NotebookLM: usa il bottone sopra (carica il <code>tar.gz</code> del profilo nlm) — è già attivo al volo, senza <code>--apply</code>.</li>
     <li>I valori sensibili restano cifrati nei Docker secret dopo l'apply; il file <code>pending.json</code> viene cancellato.</li>
   </ul>
 </section>

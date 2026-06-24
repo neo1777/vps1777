@@ -64,22 +64,18 @@ mcp = FastMCP(
 # ritorna un errore strutturato con istruzioni per l'admin panel /admin/nlm.
 NLM_CFG = Path.home() / ".notebooklm-mcp-cli"
 AUTH_FLAG = NLM_CFG / "AUTH_PENDING.flag"
-AUTH_JSON = NLM_CFG / "auth.json"
+# nlm 0.7.x: l'auth è il profilo profiles/default/cookies.json (non auth.json)
+AUTH_COOKIES = NLM_CFG / "profiles" / "default" / "cookies.json"
 
 
 def _check_auth_or_raise() -> None:
     """Solleva RuntimeError se auth nlm non disponibile."""
-    if AUTH_FLAG.exists():
+    if AUTH_FLAG.exists() or not AUTH_COOKIES.exists():
         raise RuntimeError(
-            "Auth NotebookLM mancante (AUTH_PENDING). "
-            "Apri /admin/nlm sul tuo gateway, fai login admin, carica auth.json. "
-            "Il pannello ti guida passo-passo (devi installare nlm e fare nlm login "
-            "sul tuo PC prima per generare il file)."
-        )
-    if not AUTH_JSON.exists():
-        raise RuntimeError(
-            f"auth.json non presente in {AUTH_JSON}. "
-            "Apri /admin/nlm sul tuo gateway per caricarlo."
+            "Auth NotebookLM mancante. Sul TUO PC: `uv tool install "
+            "notebooklm-mcp-cli --python 3.12 && nlm login`, poi "
+            "`cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` "
+            "e carica il tar.gz su /admin/nlm del gateway."
         )
 
 

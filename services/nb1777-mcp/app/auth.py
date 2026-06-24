@@ -1,5 +1,5 @@
 """
-AUTH gate — check del file auth.json + AUTH_PENDING.flag prima di ogni tool.
+AUTH gate — check del profilo nlm (profiles/default/cookies.json) + AUTH_PENDING.flag.
 
 Se auth è assente, ogni tool MCP raise `RuntimeError` con istruzioni per
 l'admin panel /admin/nlm. Il client (claude.ai, Mini App, bot) riceve un
