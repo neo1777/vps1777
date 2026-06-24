@@ -13,7 +13,6 @@ import html
 import json
 import time
 from pathlib import Path
-from typing import Any
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
