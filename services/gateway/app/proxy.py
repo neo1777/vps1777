@@ -109,9 +109,11 @@ async def proxy(request: Request) -> Response:
     client = httpx.AsyncClient(timeout=timeout, follow_redirects=False)
 
     try:
-        upstream_resp = await client.request(
-            method, target, headers=headers, content=body,
-        )
+        # IMPORTANTE: send(stream=True) NON legge il body → poi lo streammiamo
+        # con aiter_raw(). client.request() invece bufferizza tutto: un successivo
+        # aiter_raw() solleverebbe httpx.StreamConsumed (rompendo OGNI proxy MCP).
+        req = client.build_request(method, target, headers=headers, content=body)
+        upstream_resp = await client.send(req, stream=True)
     except httpx.RequestError as exc:
         log.warning("proxy upstream error: %s", exc)
         await client.aclose()
