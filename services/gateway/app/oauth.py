@@ -13,6 +13,7 @@ import hashlib
 import secrets as pysecrets
 import time
 from typing import Any
+from urllib.parse import quote
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -115,8 +116,12 @@ async def authorize(request: Request) -> Response:
     from .admin import verify_admin_cookie  # import qui per evitare circular
     email = verify_admin_cookie(request)
     if not email:
-        # Redirect a /admin/login con next_url=/authorize?... (preserva params)
-        next_url = str(request.url)
+        # Redirect a /admin/login con next=<URL completo di /authorize>.
+        # quote(safe="") è ESSENZIALE: l'URL di /authorize contiene i suoi
+        # `&...` (code_challenge, code_challenge_method=S256, ...); senza
+        # encoding quei parametri verrebbero letti come parametri di
+        # /admin/login e PERSI → al ritorno la PKCE sparisce → "PKCE S256 required".
+        next_url = quote(str(request.url), safe="")
         return RedirectResponse(f"/admin/login?next={next_url}", status_code=303)
 
     # Genera code

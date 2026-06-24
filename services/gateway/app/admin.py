@@ -232,6 +232,10 @@ async def login(request: Request) -> Response:
         )
 
     audit({"event": "admin_login_ok", "email": email})
+    # anti open-redirect: `next` solo relativo o same-origin (PUBLIC_BASE)
+    base = s.gateway_public_base
+    if not (next_url.startswith("/") or (base and next_url.startswith(base))):
+        next_url = "/admin/setup"
     resp = RedirectResponse(next_url, status_code=302)
     _set_admin_cookie(resp, email)
     return resp
