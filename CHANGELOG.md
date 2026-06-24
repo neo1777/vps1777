@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Fix — NotebookLM (nlm 0.7.x) + connector nb1777 (421)
+
+- **Auth NotebookLM allineata a `notebooklm-mcp-cli` 0.7.x**: la CLI non crea più un singolo `auth.json` ma un **profilo** `profiles/default/{cookies.json,metadata.json}`. Aggiornati TUTTI i punti che controllavano `auth.json` (gate `nb1777-mcp/server.py` — il gate reale dei 35 tool — e `auth.py`, semaforo `gateway/onboarding.py`, `nb1777-bot`), il pannello **`/admin/nlm`** (ora accetta un **tar.gz** del profilo, estratto in sicurezza), e i doc (INSTALL, TROUBLESHOOTING, ONBOARDING, ARCHITECTURE, README servizi). Dipendenza **pinnata** a `notebooklm-mcp-cli==0.7.7` (riproducibilità). Trasferimento profilo: `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` → upload su `/admin/nlm`.
+- **Connector nb1777: 421 Misdirected Request** → `nb1777-mcp` aveva la DNS-rebinding protection di FastMCP attiva con `allowed_hosts` che non includevano l'`Host` inoltrato dal gateway (`nb1777-mcp:8003`). Disabilitata (coerente con `archive-mcp`: entrambi dietro il gateway su rete interna; la sicurezza è OAuth + path-secret al gateway). Connector nb1777 ora aggancia i 35 tool.
+
 ### Fix — Connector claude.ai end-to-end (OAuth + proxy MCP) — validato live
 
 Catena di 5 bug che impedivano al connector di funzionare, tutti trovati e corretti su VPS reale, ciascuno verificato dal vivo prima del successivo:
