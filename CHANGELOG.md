@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Unreleased]
 
+### Fix — Funnel 502: comando serve/funnel corretto (validato pubblico, HTTP 200)
+
+Primo deploy host-mode riuscito (Funnel "on", cert ok), ma il pubblico dava **502 Bad Gateway**: il `serve status` mostrava `proxy http://127.0.0.1:443` invece di `:8080`. Causa: lanciare `tailscale serve --https=443 <t>` **e poi** `tailscale funnel --bg 443` fa interpretare "443" come *target* (proxy a :443) e sovrascrive il mapping. **Fix**: un solo comando combinato `tailscale funnel --bg --https=443 http://127.0.0.1:8080` (+ `tailscale serve reset` prima, per idempotenza). Validato dal vivo: `https://<host>.ts.net/health` → **HTTP 200** dal pubblico. Corretto in engine.py e deploy.sh.
+
 ### Cambiato — Tailscale spostato SULL'HOST (via il sidecar Docker)
 
 Decisione architetturale dopo il debug: **Tailscale non gira più in un container sidecar, ma come servizio sull'host** (installato da installer/deploy.sh). Elimina alla radice i due bug peggiori incontrati: il crash-loop di `containerboot` (bug immagine) e il netns orfano (`network_mode: service:gateway`). `tailscaled` sull'host è robusto, sopravvive ai reboot nativamente, e la config serve/funnel persiste.

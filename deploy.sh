@@ -175,8 +175,8 @@ if [ "$APPLY_MODE" = "1" ]; then
     sleep 5
     TS_URL="$(SSH "tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);n=d.get('Self',{}).get('DNSName','').rstrip('.');print('https://'+n if n else '')\" 2>/dev/null" || echo "")"
     if echo "$TS_URL" | grep -q '\.ts\.net$'; then
-      SSH "tailscale serve --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
-      SSH "tailscale funnel --bg 443" >/dev/null 2>&1 || true
+      SSH "tailscale serve reset" >/dev/null 2>&1 || true
+      SSH "tailscale funnel --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
       SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
       ok "Funnel HTTPS attivo: $TS_URL"
       [ -z "$PUB" ] && PUB="$TS_URL"
@@ -427,8 +427,8 @@ if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
   TS_URL="$(SSH "tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);n=d.get('Self',{}).get('DNSName','').rstrip('.');print('https://'+n if n else '')\" 2>/dev/null" || echo "")"
   if echo "$TS_URL" | grep -q '\.ts\.net$'; then
     PUBLIC_BASE="$TS_URL"
-    SSH "tailscale serve --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
-    SSH "tailscale funnel --bg 443" >/dev/null 2>&1 || true
+    SSH "tailscale serve reset" >/dev/null 2>&1 || true
+    SSH "tailscale funnel --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
     SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
     SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$TS_URL|\" .env || echo PUBLIC_BASE=$TS_URL >> .env) && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1 || true
     ok "Funnel HTTPS attivo: $TS_URL"

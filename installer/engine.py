@@ -502,9 +502,12 @@ echo CONFIG_OK
             return
         self.result["URL"] = url
         yield f"✓ Nodo Tailscale: {url}"
-        # serve + funnel verso il gateway (loopback dell'host)
-        self._run_capture("tailscale serve --bg --https=443 http://127.0.0.1:8080 2>&1")
-        fout = self._run_capture("tailscale funnel --bg 443 2>&1")
+        # Funnel HTTPS:443 → gateway (loopback). UN SOLO comando combinato:
+        # `tailscale serve --https=443 <t>` + `tailscale funnel 443` separati
+        # fanno interpretare "443" come TARGET (proxy a :443) e sovrascrivono
+        # il mapping → 502. La forma combinata imposta mapping+pubblicazione insieme.
+        self._run_capture("tailscale serve reset >/dev/null 2>&1 || true")
+        fout = self._run_capture("tailscale funnel --bg --https=443 http://127.0.0.1:8080 2>&1")
         self._warm_ts_cert(url)
         # PUBLIC_BASE in .env + ricrea il gateway (resta su 127.0.0.1:8080)
         cmd = self._compose_cmd(ingress, onboarding=False)
