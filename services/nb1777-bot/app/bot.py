@@ -135,19 +135,30 @@ async def cmd_lista(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not content:
         await msg.reply_text("Nessun notebook (o auth mancante — /start).")
         return
-    # Mostra primi 20 notebook (titolo + id)
-    body = result.get("result", {}).get("content", [{}])[0].get("text", "")
-    try:
-        nb = json.loads(body) if isinstance(body, str) else body
-    except json.JSONDecodeError:
-        nb = []
-    if not nb:
-        await msg.reply_text(body[:3500] or "Risposta vuota.")
+    # nb_list serializza i notebook come blocchi content separati (uno per
+    # notebook, ciascuno un JSON dict); alcune versioni usano un singolo blocco
+    # con un array. Gestiamo entrambi senza assumere la forma.
+    nbs: list[dict[str, Any]] = []
+    for block in content:
+        txt = block.get("text", "") if isinstance(block, dict) else ""
+        try:
+            obj = json.loads(txt)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(obj, list):
+            nbs.extend(x for x in obj if isinstance(x, dict))
+        elif isinstance(obj, dict):
+            nbs.append(obj)
+    if not nbs:
+        first = content[0].get("text", "") if isinstance(content[0], dict) else ""
+        await msg.reply_text(first[:3500] or "Risposta vuota.")
         return
     out = "\n".join(
         f"• `{n.get('id', '?')}` {n.get('title', '(senza titolo)')}"
-        for n in nb[:30]
+        for n in nbs[:30]
     )
+    if len(nbs) > 30:
+        out += f"\n… e altri {len(nbs) - 30}"
     await msg.reply_text(out, parse_mode=ParseMode.MARKDOWN)
 
 
@@ -172,6 +183,19 @@ async def cmd_chiedi(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await msg.reply_text(text[:4000] or "Risposta vuota.")
 
 
+# ───── error handler globale ─────
+# Senza questo, un'eccezione in un handler viene solo loggata e l'utente resta
+# in silenzio (è successo con /lista). Qui rispondiamo sempre qualcosa.
+
+async def _on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    log.exception("errore handler", exc_info=ctx.error)
+    try:
+        if isinstance(update, Update) and update.effective_message:
+            await update.effective_message.reply_text(f"Errore interno: {ctx.error}")
+    except Exception:  # noqa: BLE001 — non far fallire l'error handler
+        pass
+
+
 # ───── runner ─────
 
 def build_app() -> Application:
@@ -183,6 +207,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("aiuto", cmd_aiuto))
     app.add_handler(CommandHandler("lista", cmd_lista))
     app.add_handler(CommandHandler("chiedi", cmd_chiedi))
+    app.add_error_handler(_on_error)
     return app
 
 
