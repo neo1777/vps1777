@@ -270,7 +270,7 @@ def source_rename(nb_id: str, source_id: str, new_title: str) -> None:
 def notebook_query(nb_id: str, question: str, *,
                    source_ids: Optional[list[str]] = None,
                    conversation_id: Optional[str] = None,
-                   timeout: float = 120.0) -> dict:
+                   timeout: float = 240.0) -> dict:  # RAG su notebook grandi può essere lento
     """Pone una domanda alla chat del notebook. Ritorna {answer, citations, ...}."""
     args = ["query", "notebook", nb_id, question, "--json", "--timeout", str(timeout)]
     if source_ids:

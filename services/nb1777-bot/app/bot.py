@@ -66,7 +66,9 @@ async def _mcp_call(tool: str, args: dict[str, Any] | None = None) -> Any:
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    # timeout ampio: una query RAG su NotebookLM può richiedere qualche minuto
+    # (deve restare ≥ del timeout subprocess di nb1777-mcp, ~270s).
+    async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(s.nb1777_mcp_url, json=payload, headers=headers)
         resp.raise_for_status()
         if "text/event-stream" in resp.headers.get("content-type", ""):
@@ -174,6 +176,13 @@ async def cmd_chiedi(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     nb_id = args[0]
     question = " ".join(args[1:])
+    # feedback immediato: la query RAG può richiedere da decine di secondi a
+    # qualche minuto; senza, l'utente pensa che il bot sia bloccato.
+    await msg.reply_text("⏳ Interrogo NotebookLM… (può richiedere fino a qualche minuto)")
+    try:
+        await ctx.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
+    except Exception:  # noqa: BLE001 — il chat action è solo cosmetico
+        pass
     try:
         result = await _mcp_call("notebook_query", {"notebook_id": nb_id, "question": question})
     except (httpx.RequestError, httpx.HTTPStatusError) as exc:
