@@ -59,9 +59,23 @@ async def _mcp_call(tool: str, args: dict[str, Any] | None = None) -> Any:
         "method": "tools/call",
         "params": {"name": tool, "arguments": args or {}},
     }
+    # MCP streamable-http: l'Accept DEVE includere ENTRAMBI i tipi, altrimenti
+    # il server risponde 406 Not Acceptable. La risposta arriva come SSE
+    # (text/event-stream): va estratto il payload JSON dalla riga `data:`.
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    }
     async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(s.nb1777_mcp_url, json=payload)
+        resp = await client.post(s.nb1777_mcp_url, json=payload, headers=headers)
         resp.raise_for_status()
+        if "text/event-stream" in resp.headers.get("content-type", ""):
+            for line in resp.text.splitlines():
+                if line.startswith("data:"):
+                    data = line[5:].strip()
+                    if data:
+                        return json.loads(data)
+            raise RuntimeError("risposta SSE MCP senza payload 'data:'")
         return resp.json()
 
 
