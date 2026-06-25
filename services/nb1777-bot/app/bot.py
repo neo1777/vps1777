@@ -154,12 +154,13 @@ async def cmd_lista(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await msg.reply_text(first[:3500] or "Risposta vuota.")
         return
     out = "\n".join(
-        f"• `{n.get('id', '?')}` {n.get('title', '(senza titolo)')}"
+        f"• {n.get('id', '?')}  {n.get('title', '(senza titolo)')}"
         for n in nbs[:30]
     )
     if len(nbs) > 30:
         out += f"\n… e altri {len(nbs) - 30}"
-    await msg.reply_text(out, parse_mode=ParseMode.MARKDOWN)
+    # plain text: i titoli dei notebook sono arbitrari e romperebbero il Markdown
+    await msg.reply_text(out)
 
 
 @owner_only
