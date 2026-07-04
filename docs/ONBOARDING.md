@@ -8,7 +8,7 @@ Dopo `./deploy.sh`, lo stack gira ma è "dormiente": mancano le credenziali
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  1. ./deploy.sh           (dal PC, ~6 domande, build + avvio)    │
+│  1. ./deploy.sh           (dal PC, ~6 domande, pull + avvio)     │
 │         ↓                                                        │
 │  2. http://<IP_VPS>:8080/admin/setup   (browser, login admin)   │
 │     inserisci: Tailscale key · bot token · profilo nlm (tgz)    │
@@ -75,6 +75,11 @@ https://<host>.ts.net/<GATEWAY_SECRET>/nb1777/mcp
 (il `GATEWAY_SECRET` è stampato dal deploy; login OAuth con email+password admin.)
 
 E manda `/start` al tuo bot Telegram.
+
+> **Aggiornamenti già pronti**: l'installer ha attivato il canale di update
+> (comando `vps1777 update`, tab **Update** del pannello, check giornaliero con
+> notifica Telegram). Quando esce una release ti arriva un avviso; aggiorni con
+> un comando o un click, con backup e rollback automatici. Vedi [UPDATE.md](UPDATE.md).
 
 ## Perché questo flusso (e non tutto-web)?
 

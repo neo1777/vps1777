@@ -34,6 +34,33 @@ Threat model dichiarato:
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
 - Strumenti di management (Portainer) mai esposti: solo loopback + tunnel SSH (vedi [docs/OPS.md](docs/OPS.md))
 
+### Canale di aggiornamento
+
+L'aggiornamento (`vps1777 update` / pulsante admin) è progettato attorno allo
+stesso invariante: **il gateway non esegue nulla di privilegiato**.
+
+- **Collect→apply disaccoppiato**: il pulsante admin scrive solo un *intent file*
+  in `onboarding/` (bind-mount); l'update vero lo esegue la CLI host via systemd
+  path unit. Il gateway non tocca mai Docker.
+- **Intent validato e consumato**: schema, SemVer, TTL 10 min, nonce anti-replay,
+  e cancellazione **prima** di agire (nessun loop di ri-trigger).
+- **Anti-downgrade**: dal pulsante il target non può essere una versione più
+  vecchia di quella in esecuzione (version-floor SemVer) — così un gateway
+  compromesso non può forzare un downgrade a una release con vuln nota. Il
+  downgrade intenzionale resta possibile solo da terminale (chi ha la shell ha
+  già ogni privilegio).
+- **Supply-chain**: le immagini si pullano da GHCR e si verificano contro
+  `images.lock` (digest immutabili) del runtime bundle di release; il bundle è
+  firmato (`cosign sign-blob` keyless) e verificabile (`VPS1777_REQUIRE_COSIGN=1`
+  rende la verifica obbligatoria). Nessun aggiornamento build-in-place.
+- **Reversibilità**: backup age + snapshot locale prima di ogni update;
+  auto-rollback se lo stack non torna healthy. Nessuna finestra in cui i dati
+  restano senza rete di sicurezza.
+- **Zero telemetria**: il check versione è una GET non autenticata a GitHub;
+  nessun dato lascia la VPS.
+
+Dettaglio completo: [docs/UPDATE.md](docs/UPDATE.md) e [docs/SELF_UPDATE_PLAN.md](docs/SELF_UPDATE_PLAN.md).
+
 ## Out of scope
 
 - Vulnerabilità in immagini base (Python, Tailscale, Caddy) — segnalale a monte

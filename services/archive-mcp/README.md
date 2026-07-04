@@ -10,6 +10,7 @@ Search MCP server su FTS5 multi-DB.
 | `ARCHIVE_HTTP_PORT` | `8002` | porta |
 | `ARCHIVE_DB_PATHS` | `main:/var/lib/archive/db/archive.db,cc:.../archive-cc.db,cc-dash:.../archive-cc-dash.db` | CSV `name:path` |
 | `FASTMCP_STATELESS_HTTP` | `true` | MCP stateless mode (raccomandato) |
+| `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI) |
 
 ## Degraded mode
 

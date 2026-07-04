@@ -31,10 +31,10 @@ incollare in claude.ai. Niente Docker da gestire a mano, niente shell sulla VPS.
 │            │  Tailscale Funnel │  (o Caddy, o Cloudflared)       │
 │            └─────────┬─────────┘                                 │
 │                      ▼                                           │
-│            ┌───────────────────┐    /admin/login                 │
-│            │     gateway       │    /admin/secrets               │
-│            │  (OAuth 2.1 + DCR)│    /admin/nlm                   │
-│            │     +/app/* UI    │    /app/* (Mini App)            │
+│            ┌───────────────────┐    /admin/login · /admin/nlm    │
+│            │     gateway       │    /admin/update · /admin/audit │
+│            │  (OAuth 2.1 + DCR)│    /app/* (Mini App)            │
+│            │     +/app/* UI    │                                 │
 │            └─────────┬─────────┘                                 │
 │                      ▼                                           │
 │      ┌───────────────┼───────────────────────┐                   │
