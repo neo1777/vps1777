@@ -1,0 +1,16 @@
+# vps1777-check-update.timer — check giornaliero della release GitHub.
+#
+# RandomizedDelaySec distribuisce il carico (non tutti gli utenti alle 00:00);
+# Persistent recupera i check persi se la VPS era spenta.
+# Zero telemetria: il check è una singola GET non autenticata a api.github.com.
+
+[Unit]
+Description=vps1777 — check giornaliero aggiornamenti
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=4h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

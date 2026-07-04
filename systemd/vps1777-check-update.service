@@ -1,0 +1,23 @@
+# vps1777-check-update.service — esegue il check release (+ notifica Telegram).
+#
+# Scrive onboarding/update_status.json (letto dalla card admin del gateway)
+# e notifica il owner su Telegram alla prima vista di una versione nuova
+# (dedup su last_notified_version). Su GitHub irraggiungibile: nessun rumore.
+
+[Unit]
+Description=vps1777 — check aggiornamenti (GitHub Releases)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=vps1777
+Group=vps1777
+Environment=VPS1777_HOME=/home/vps1777/vps1777
+WorkingDirectory=/home/vps1777/vps1777
+ExecStart=/usr/local/bin/vps1777 check --notify
+TimeoutStartSec=120
+# Il check non ha bisogno di privilegi: niente sudo, niente escalation.
+NoNewPrivileges=true
+ProtectHome=read-only
+ReadWritePaths=/home/vps1777/vps1777
