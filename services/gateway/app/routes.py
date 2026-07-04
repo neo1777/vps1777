@@ -61,6 +61,8 @@ routes = [
     Route("/admin/logout", admin.logout, methods=["POST"]),
     Route("/admin/setup", onboarding.setup_view, methods=["GET", "POST"]),
     Route("/admin/nlm", admin.nlm_view, methods=["GET", "POST"]),
+    Route("/admin/update", admin.update_view, methods=["GET", "POST"]),
+    Route("/admin/update/state", admin.update_state, methods=["GET"]),
     Route("/admin/audit", admin.audit_view, methods=["GET"]),
     Route("/admin/secrets", admin.secrets_view, methods=["GET"]),
 

@@ -12,12 +12,14 @@ from __future__ import annotations
 import html
 import io
 import json
+import os
+import secrets as pysecrets
 import tarfile
 import time
 from pathlib import Path
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from .audit import audit, read_recent
 from .jwt_helpers import JWTError, issue, verify
@@ -164,6 +166,7 @@ def _layout(title: str, body: str, current: str = "", flash: str = "", flash_kin
         items = [
             ("setup", "Setup"),
             ("nlm", "NotebookLM"),
+            ("update", "Update"),
             ("secrets", "Secrets"),
             ("audit", "Audit"),
         ]
@@ -182,7 +185,8 @@ def _layout(title: str, body: str, current: str = "", flash: str = "", flash_kin
 {_CSS}
 </head><body>
 {tabs}{flash_html}{body}
-<div class="foot">vps1777 · gateway</div>
+<div class="foot">vps1777 · gateway · v{html.escape(os.environ.get("VPS1777_VERSION", "dev"))}
+ · tag {html.escape(os.environ.get("VPS1777_TAG", "dev"))}</div>
 </body></html>"""
     return HTMLResponse(out)
 
@@ -366,6 +370,162 @@ tar czf nlm-profile.tgz profiles/default</pre>
 </form>
 """
     return _layout("NotebookLM", body, current="nlm", flash=flash, flash_kind=flash_kind)
+
+
+# ───── /admin/update — canale di aggiornamento ─────
+# Il gateway NON ha privilegi Docker (vedi onboarding.py): questo pannello
+# raccoglie l'INTENT e mostra lo stato; l'update vero lo esegue la CLI host
+# `vps1777` via systemd path unit (pattern collect→apply, come pending.json).
+# File condivisi via bind-mount onboarding/:
+#   update_status.json   ← scritto dal timer di check (letto qui)
+#   update_pending_update.json → intent scritto qui (consumato dalla CLI)
+#   update_progress.json ← scritto dalla CLI a ogni step (pollato qui)
+
+def _read_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+async def update_state(request: Request) -> Response:
+    """JSON per il polling della card (stato check + progress updater)."""
+    email = verify_admin_cookie(request)
+    if not email:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    ob = Path(get_settings().onboarding_dir)
+    return JSONResponse({
+        "status": _read_json(ob / "update_status.json"),
+        "progress": _read_json(ob / "update_progress.json"),
+        "intent_pending": (ob / "update_pending_update.json").exists(),
+        "running_version": os.environ.get("VPS1777_VERSION", "dev"),
+        "running_tag": os.environ.get("VPS1777_TAG", "dev"),
+    })
+
+
+async def update_view(request: Request) -> Response:
+    email, redirect = _require_admin(request)
+    if redirect:
+        return redirect
+    s = get_settings()
+    ob = Path(s.onboarding_dir)
+    status = _read_json(ob / "update_status.json")
+
+    if request.method == "POST":
+        latest = str(status.get("latest") or "")
+        if not latest:
+            return RedirectResponse(
+                "/admin/update?msg=Nessuna+versione+nota:+attendi+il+check+giornaliero&kind=err",
+                status_code=303)
+        intent = {
+            "target_version": latest,
+            "requested_by": email,
+            "requested_at": time.time(),
+            "nonce": pysecrets.token_hex(16),
+        }
+        path = ob / "update_pending_update.json"
+        path.write_text(json.dumps(intent, indent=2) + "\n")
+        path.chmod(0o600)
+        audit({"event": "admin_update_requested", "by": email, "target": latest})
+        return RedirectResponse(
+            "/admin/update?msg=Update+richiesto:+l'updater+parte+entro+pochi+secondi&kind=ok",
+            status_code=303)
+
+    # GET
+    current = status.get("current") or os.environ.get("VPS1777_TAG", "dev")
+    latest = status.get("latest")
+    checked = status.get("checked_at", "mai")
+    check_err = status.get("error")
+    excerpt = status.get("changelog_excerpt", "")
+
+    if check_err:
+        head = ('<div class="kicker"><span class="dot warn"></span>'
+                f'Ultimo check fallito ({html.escape(str(check_err))}) — dato stantio.</div>')
+    elif latest and latest != current:
+        head = ('<div class="kicker"><span class="dot warn"></span>'
+                f'Aggiornamento disponibile: <strong>v{html.escape(str(latest))}</strong>'
+                f' (sei alla {html.escape(str(current))}).</div>')
+    elif latest:
+        head = ('<div class="kicker"><span class="dot ok"></span>'
+                'Sei alla versione più recente.</div>')
+    else:
+        head = ('<div class="kicker"><span class="dot off"></span>'
+                'Nessun check ancora eseguito (il timer gira una volta al giorno).</div>')
+
+    update_btn = ""
+    if latest and latest != current and not check_err:
+        update_btn = f"""
+<form method="POST" action="/admin/update"
+      onsubmit="return confirm('Aggiorno a v{html.escape(str(latest))}? Backup automatico prima, rollback automatico se non torna healthy.')">
+  <div class="toolbar"><button type="submit" class="primary">Aggiorna a v{html.escape(str(latest))}</button></div>
+</form>"""
+
+    changelog_html = ""
+    if excerpt:
+        changelog_html = f'<section><div class="kicker">changelog</div><pre>{html.escape(excerpt)}</pre></section>'
+
+    flash = request.query_params.get("msg", "").replace("+", " ")
+    flash_kind = request.query_params.get("kind", "ok")
+
+    body = f"""
+<header>
+  <h1>vps1777 <em>admin</em> · update</h1>
+  <div class="who">{html.escape(email)}</div>
+</header>
+{head}
+<section>
+  <div class="status-grid">
+    <div class="status-row"><span class="lbl">versione deployata</span><span class="val">{html.escape(str(current))}</span></div>
+    <div class="status-row"><span class="lbl">ultima release</span><span class="val">{html.escape(str(latest or '?'))}</span></div>
+    <div class="status-row"><span class="lbl">ultimo check</span><span class="val">{html.escape(str(checked))}</span></div>
+  </div>
+  {update_btn}
+  <p class="hint">L'update è eseguito dalla CLI host (backup → pull verificato → migrazioni →
+  health-gate → rollback automatico su fallimento). Da terminale: <code>vps1777 update</code>.</p>
+</section>
+{changelog_html}
+<section id="progress-card" style="display:none">
+  <div class="kicker">avanzamento update</div>
+  <div class="status-grid" id="progress-body"></div>
+</section>
+<script>
+async function pollProgress() {{
+  try {{
+    const r = await fetch('/admin/update/state', {{cache: 'no-store'}});
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json();
+    const p = d.progress || {{}};
+    const card = document.getElementById('progress-card');
+    const bodyEl = document.getElementById('progress-body');
+    if (p.step_name) {{
+      card.style.display = '';
+      const cls = p.status === 'ok' ? 'ok' : (p.status === 'running' ? 'warn' : 'err');
+      bodyEl.innerHTML = '<div class="status-row"><span class="dot ' + cls + '"></span>' +
+        '<span class="lbl">step ' + p.step + ' — ' + p.step_name + '</span>' +
+        '<span class="val">' + p.status + (p.detail ? ' · ' + p.detail : '') + '</span></div>' +
+        '<div class="status-row"><span class="lbl">target</span><span class="val">v' + (p.target || '?') +
+        ' · ' + (p.updated_at || '') + '</span></div>';
+      if (p.status === 'running' || d.intent_pending) setTimeout(pollProgress, 2000);
+    }} else if (d.intent_pending) {{
+      card.style.display = '';
+      bodyEl.innerHTML = '<div class="status-row"><span class="dot warn"></span>' +
+        '<span class="lbl">updater in avvio…</span></div>';
+      setTimeout(pollProgress, 2000);
+    }}
+  }} catch (e) {{
+    // il gateway stesso si riavvia a metà update: continua a pollare
+    const card = document.getElementById('progress-card');
+    card.style.display = '';
+    document.getElementById('progress-body').innerHTML =
+      '<div class="status-row"><span class="dot warn"></span>' +
+      '<span class="lbl">gateway in riavvio… riprovo</span></div>';
+    setTimeout(pollProgress, 2000);
+  }}
+}}
+pollProgress();
+</script>
+"""
+    return _layout("update", body, current="update", flash=flash, flash_kind=flash_kind)
 
 
 # ───── /admin/audit ─────
