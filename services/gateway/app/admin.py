@@ -425,7 +425,11 @@ async def update_view(request: Request) -> Response:
         }
         path = ob / "update_pending_update.json"
         path.write_text(json.dumps(intent, indent=2) + "\n")
-        path.chmod(0o600)
+        # 0644, non 0600: l'intent NON contiene segreti (target/nonce/email) e
+        # dev'essere LEGGIBILE dalla CLI host, che può girare con un uid diverso
+        # da quello del container gateway (uid 1000). La cancellazione la fa la
+        # CLI grazie alla ownership della dir onboarding/, non del file.
+        path.chmod(0o644)
         audit({"event": "admin_update_requested", "by": email, "target": latest})
         return RedirectResponse(
             "/admin/update?msg=Update+richiesto:+l'updater+parte+entro+pochi+secondi&kind=ok",

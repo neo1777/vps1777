@@ -318,7 +318,13 @@ fi
 
 # 3. Utente operatore (nome non collidente con utenti di sistema Debian)
 if ! id "$OPERATOR_USER" >/dev/null 2>&1; then
-  useradd -m -s /bin/bash "$OPERATOR_USER"
+  # uid 1000 = stesso uid dei container → nessun mismatch di ownership sui
+  # bind-mount (onboarding/) e sui file del canale update. Fallback se occupato.
+  if getent passwd 1000 >/dev/null; then
+    useradd -m -s /bin/bash "$OPERATOR_USER"
+  else
+    useradd -m -u 1000 -s /bin/bash "$OPERATOR_USER"
+  fi
 fi
 usermod -aG docker "$OPERATOR_USER"
 getent group sudo >/dev/null && usermod -aG sudo "$OPERATOR_USER" || true

@@ -289,6 +289,17 @@ def valid_semver(v: str) -> bool:
     return bool(SEMVER_RE.match(v.strip()))
 
 
+def version_key(v: str) -> tuple:
+    """Chiave d'ordinamento SemVer: una prerelease (X.Y.Z-rc) < della stable X.Y.Z."""
+    v = norm_ver(v)
+    core, _, pre = v.partition("-")
+    parts = tuple(int(x) if x.isdigit() else 0 for x in core.split("."))
+    while len(parts) < 3:
+        parts += (0,)
+    # senza suffisso pre → (…, 1); con suffisso → (…, 0, pre) così ordina prima
+    return (parts, 1, ()) if not pre else (parts, 0, tuple(pre.split(".")))
+
+
 def current_version(repo: Path) -> str:
     return env_read(repo).get("VPS1777_TAG", "dev")
 
@@ -310,9 +321,14 @@ def compose_cmd(repo: Path, *, files: list[Path] | None = None) -> list[str]:
     return cmd
 
 
-def compose_ps(repo: Path, env: dict | None = None) -> list[dict]:
-    res = run([*compose_cmd(repo), "ps", "--format", "json"],
-              capture=True, check=False, env=env)
+def compose_ps(repo: Path, env: dict | None = None,
+               all_states: bool = False) -> list[dict]:
+    # --all include i container exited/created: senza, un servizio CRASHATO
+    # sparisce da `ps` e il health-gate non lo vede (falso verde).
+    cmd = [*compose_cmd(repo), "ps", "--format", "json"]
+    if all_states:
+        cmd.append("--all")
+    res = run(cmd, capture=True, check=False, env=env)
     if res.returncode != 0:
         return []
     text = res.stdout.strip()
@@ -360,7 +376,8 @@ def health_gate(repo: Path, env: dict | None = None,
     baseline = restart_counts(repo)
     reason = "timeout finestra health"
     while time.monotonic() < deadline:
-        services = compose_ps(repo, env=env)
+        # --all: un container exited DEVE contare come non-green, non sparire
+        services = compose_ps(repo, env=env, all_states=True)
         green = bool(services)
         for svc in services:
             state = svc.get("State", "")
@@ -539,10 +556,13 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
     if bundle.exists():
         shutil.rmtree(bundle)
     bundle.mkdir()
+    bundle_root = str(bundle.resolve())
     with tarfile.open(stage / tarball, "r:gz") as tar:
         for m in tar.getmembers():
             dest = (bundle / m.name).resolve()
-            if not str(dest).startswith(str(bundle.resolve())):
+            # confronto con separatore: senza, /bundle-evil passerebbe il
+            # prefix-check di /bundle. E rifiuta link/hardlink fuori radice.
+            if dest != bundle.resolve() and not str(dest).startswith(bundle_root + os.sep):
                 raise RuntimeError(f"bundle malformato (path traversal): {m.name}")
         try:
             # Python ≥3.11.4: blocca anche symlink/device/permessi anomali
@@ -702,7 +722,10 @@ def snapshot_latest(repo: Path) -> Path | None:
     base = repo / "backups" / "pre-update"
     if not base.is_dir():
         return None
-    snaps = sorted((d for d in base.iterdir() if d.is_dir()), reverse=True)
+    # per mtime, non per nome: i nomi iniziano con la versione (0.10.0 < 0.9.0
+    # lessicograficamente) → l'ordinamento per stringa sceglierebbe il più vecchio
+    snaps = sorted((d for d in base.iterdir() if d.is_dir()),
+                   key=lambda d: d.stat().st_mtime, reverse=True)
     return snaps[0] if snaps else None
 
 
@@ -912,6 +935,9 @@ def cmd_update(repo: Path, args) -> int:
     # 1 — preflight
     if run(["docker", "info"], check=False, capture=True).returncode != 0:
         die("docker non attivo")
+    if norm_ver(cur) == "dev":
+        die("installazione in modalità dev (immagini locali): l'update gestito "
+            "richiede prima il cutover con `vps1777 bootstrap`")
     if not stack_running(repo):
         warn("lo stack non risulta in esecuzione — l'update lo avvierà comunque")
     if run(["docker", "ps", "--filter", "name=vps1777-watchtower",
@@ -934,6 +960,16 @@ def cmd_update(repo: Path, args) -> int:
     if norm_ver(cur) == target:
         ok(f"già aggiornato (v{target})")
         return 0
+    # Version-floor anti-downgrade sul canale NON interattivo (pulsante admin
+    # via --from-intent): un gateway compromesso potrebbe forgiare un intent
+    # verso una release più vecchia con vuln note. Il guard su update_status.json
+    # non basta (è nel bind-mount scrivibile dal gateway). Il downgrade resta
+    # possibile SOLO da terminale con --version esplicito (chi ha la shell può
+    # già tutto). `latest` naturale non downgrada mai.
+    if args.from_intent and version_key(target) < version_key(cur):
+        progress_write(repo, target, 0, "intent", "failed", "downgrade rifiutato")
+        die(f"downgrade rifiutato via pulsante: v{target} < v{cur} "
+            "(usa `vps1777 update --version` da terminale se intenzionale)")
     log(f"update: {cur} → {target}")
 
     # 3 — changelog
@@ -951,8 +987,12 @@ def cmd_update(repo: Path, args) -> int:
 
     # 5 — fetch + verifica bundle
     step(5, "fetch")
+    # require_cosign: flag CLI OPPURE VPS1777_REQUIRE_COSIGN=1 in .env/env
+    # (systemd non carica .env → va letto qui, non solo da os.environ).
+    require_cosign = (args.require_cosign
+                      or env_read(repo).get("VPS1777_REQUIRE_COSIGN") == "1")
     try:
-        bundle = fetch_bundle(repo, rel, args.require_cosign)
+        bundle = fetch_bundle(repo, rel, require_cosign)
         lockfile = json.loads((bundle / "images.lock").read_text())
     except (RuntimeError, OSError, json.JSONDecodeError, urllib.error.URLError) as exc:
         step(5, "fetch", "failed", str(exc))
@@ -1067,6 +1107,9 @@ def cmd_update(repo: Path, args) -> int:
     prune_old_images(repo, {target, cur}, st["history"])
     snapshot_prune(repo, keep=snap)
     releases_prune(repo, {target, cur})
+    # allinea la card admin subito (senza attendere il check giornaliero):
+    # current=target → non mostra più "aggiornamento disponibile" stantio
+    status_write(repo, current=target)
     step(15, "done", "ok")
     telegram_notify(repo, f"✅ vps1777 aggiornato: v{norm_ver(cur)} → v{target}")
     ok(f"aggiornato a v{target}")
@@ -1243,12 +1286,18 @@ def cmd_bootstrap(repo: Path, args) -> int:
 
     # install CLI + unit
     sudo(["install", "-m", "755", str(bundle / "tools" / "vps1777.py"), INSTALLED_CLI])
-    # copia i file gestiti (le unit arrivano con il sync)
+    # salva i compose LEGACY per il rollback del bootstrap. Solo la PRIMA volta:
+    # se pre-bootstrap esiste già (bootstrap precedente fallito e ri-tentato),
+    # NON sovrascrivere — sync_managed_files ha già mutato i compose nel repo,
+    # ri-salvarli catturerebbe la versione nuova e perderebbe il paracadute.
     pre = repo / "releases" / "pre-bootstrap"
-    pre.mkdir(parents=True, exist_ok=True)
-    for f in repo.glob("compose*.yaml"):
-        shutil.copy2(f, pre / f.name)
     old_tag = cur
+    if not pre.is_dir() or not any(pre.glob("compose*.yaml")):
+        pre.mkdir(parents=True, exist_ok=True)
+        for f in repo.glob("compose*.yaml"):
+            shutil.copy2(f, pre / f.name)
+    else:
+        log("pre-bootstrap già presente (ri-tentativo): compose legacy preservati")
     sync_managed_files(repo, bundle)
     install_systemd_units(repo, enable=True)
     envd = env_read(repo)

@@ -300,7 +300,16 @@ if ! docker compose version >/dev/null 2>&1; then
     -o /usr/local/lib/docker/cli-plugins/docker-compose
   chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 fi
-id {OPERATOR_USER} >/dev/null 2>&1 || useradd -m -s /bin/bash {OPERATOR_USER}
+# uid 1000 = STESSO uid dei container (tutti "app" uid 1000): così i bind-mount
+# (onboarding/) e i file di scambio del canale update non hanno mismatch di
+# ownership host↔container. Se 1000 è già preso, ripiego sul default.
+if ! id {OPERATOR_USER} >/dev/null 2>&1; then
+  if getent passwd 1000 >/dev/null; then
+    useradd -m -s /bin/bash {OPERATOR_USER}
+  else
+    useradd -m -u 1000 -s /bin/bash {OPERATOR_USER}
+  fi
+fi
 usermod -aG docker {OPERATOR_USER}
 getent group sudo >/dev/null && usermod -aG sudo {OPERATOR_USER} || true
 echo "{OPERATOR_USER} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/90-{OPERATOR_USER}

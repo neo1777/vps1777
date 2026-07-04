@@ -58,6 +58,21 @@ docker compose version >/dev/null 2>&1 || die "docker compose v2 non disponibile
 command -v python3 >/dev/null || die "python3 non installato"
 ok "Docker $(docker --version | awk '{print $3}' | tr -d ',') + Compose v2 OK"
 
+# Versione da installare (modello pull: immagini ghcr, MAI build sulla VPS 4GB).
+# Override: VPS1777_INSTALL_VERSION=X.Y.Z. Escape hatch dev: DEV_BUILD=1.
+DEV_BUILD="${DEV_BUILD:-0}"
+INSTALL_VERSION=""
+if [ "$DEV_BUILD" != "1" ]; then
+  INSTALL_VERSION="${VPS1777_INSTALL_VERSION:-$(curl -fsS -m 10 https://api.github.com/repos/neo1777/vps1777/releases/latest 2>/dev/null \
+    | python3 -c 'import sys,json;print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)}"
+  if [ -n "$INSTALL_VERSION" ]; then
+    ok "Installerò la release v$INSTALL_VERSION (pull da ghcr, nessuna build)"
+  else
+    warn "Nessuna release pubblicata trovata → fallback: build locale (dev)"
+    DEV_BUILD=1
+  fi
+fi
+
 # ───── 2. .env ─────
 if [ -f .env ]; then
   warn ".env esiste già. Per rigenerare, cancellalo prima."
@@ -94,6 +109,14 @@ else
   echo "INGRESS_PROFILE=ingress.$INGRESS" >> .env
   ok ".env creato"
 fi
+
+# VPS1777_TAG/IMAGE_BASE: versione deployata + registry (scritti sempre, anche
+# se .env preesiste, per allineare il tag da pullare).
+set_kv() { grep -q "^$1=" .env && sed -i "s|^$1=.*|$1=$2|" .env || echo "$1=$2" >> .env; }
+set_kv VPS1777_TAG "${INSTALL_VERSION:-dev}"
+set_kv VPS1777_IMAGE_BASE "${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}"
+# dir runtime create ORA (non da Docker come root): il gateway/CLI ci scrivono
+mkdir -p onboarding var backups releases && chmod 700 var
 
 # ───── 3. secrets ─────
 log "Genero secrets in secrets/..."
@@ -158,28 +181,58 @@ if [ ! -s secrets/telegram_bot_token.txt ]; then
   fi
 fi
 
-# ───── 4. Pull immagini ingress + start ─────
+# ───── 4. Immagini + start ─────
 INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env | cut -d= -f2)"
 COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
+# In dev l'overlay di build ri-aggiunge i build context (compose.yaml è pull-only)
+[ "$DEV_BUILD" = "1" ] && COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.build.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
 
 log ""
-log "Pronto a lanciare:"
-log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d --build"
+if [ "$DEV_BUILD" = "1" ]; then
+  log "Pronto a buildare in locale (dev) e avviare:"
+  log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d --build"
+else
+  log "Pronto a pullare le immagini v$INSTALL_VERSION da ghcr e avviare (nessuna build):"
+  log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE pull && ... up -d"
+fi
 log ""
 if confirm "Procedo ora?"; then
-  docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" up -d --build
+  if [ "$DEV_BUILD" = "1" ]; then
+    docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" up -d --build
+  else
+    docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" pull
+    docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" up -d
+  fi
   echo
   ok "Stack avviato. Stato:"
   docker compose "${COMPOSE_FILES[@]}" ps
   echo
-  log "URL gateway (attendi 30s che salga il healthcheck):"
-  docker compose "${COMPOSE_FILES[@]}" logs gateway --tail 20 | grep -i "url\|listen" || true
+  # ── canale di aggiornamento: CLI + unit systemd (richiede sudo) ──
+  if command -v sudo >/dev/null && [ -f tools/vps1777.py ]; then
+    log "Installo il canale di aggiornamento (CLI vps1777 + timer)…"
+    if sudo install -m755 tools/vps1777.py /usr/local/bin/vps1777 2>/dev/null; then
+      for u in systemd/vps1777-*; do
+        case "$u" in *.service|*.timer|*.path) sudo install -m644 "$u" /etc/systemd/system/ 2>/dev/null || true;; esac
+      done
+      sudo systemctl daemon-reload 2>/dev/null || true
+      sudo systemctl enable --now vps1777-check-update.timer vps1777-update.path 2>/dev/null \
+        && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero" \
+        || warn "Unit systemd non abilitate (systemd assente?) — la CLI è comunque installata"
+    else
+      warn "Installazione CLI saltata (sudo negato) — installala dopo con: sudo install -m755 tools/vps1777.py /usr/local/bin/vps1777"
+    fi
+  fi
   echo
   log "Prossimi step:"
   log "  - Apri il pannello admin: <PUBLIC_BASE>/admin/login"
-  log "  - Carica auth.json NotebookLM: <PUBLIC_BASE>/admin/nlm"
+  log "  - Carica il profilo NotebookLM: <PUBLIC_BASE>/admin/nlm"
   log "  - Aggiungi connector a claude.ai con URL: <PUBLIC_BASE>/<SECRET>/<service>/mcp"
+  log "  - Aggiornamenti: \`vps1777 update\` o tab Update del pannello (vedi docs/UPDATE.md)"
 else
   log "OK, avvialo a mano quando vuoi:"
-  log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d --build"
+  if [ "$DEV_BUILD" = "1" ]; then
+    log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d --build"
+  else
+    log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE pull && docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d"
+  fi
 fi

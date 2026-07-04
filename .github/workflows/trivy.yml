@@ -9,6 +9,12 @@ on:
     - cron: "0 6 * * 1"  # ogni lunedì alle 6:00 UTC
   workflow_dispatch:
 
+# upload-sarif richiede security-events: write. Senza, col default read-only
+# del GITHUB_TOKEN (standard dei repo nuovi) l'upload fallisce 403 ogni run.
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   scan:
     runs-on: ubuntu-latest

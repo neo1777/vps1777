@@ -143,8 +143,14 @@ jobs:
           VERSION: ${{ needs.guard.outputs.version }}
         run: |
           mkdir -p bundle/tools
-          cp compose*.yaml VERSION CHANGELOG.md images.lock bundle/
+          cp compose*.yaml CHANGELOG.md images.lock bundle/
           cp -r ingress migrations systemd bundle/
+          # VERSION nel bundle = versione del TAG, non il file del repo. Il
+          # guard ammette VERSION=base per le prerelease (0.9.0 con tag
+          # 0.9.0-rc.1) → copiarlo verbatim renderebbe il bundle incoerente
+          # (lock/manifest sono rc): `vps1777 bootstrap` legge bundle/VERSION
+          # e pullerebbe un tag inesistente. Qui lo forziamo alla versione reale.
+          printf '%s\n' "${VERSION}" > bundle/VERSION
           for f in backup.sh restore.sh rotate-secret.sh backup-container-setup.sh bootstrap.sh vps1777.py; do
             cp "tools/$f" bundle/tools/
           done

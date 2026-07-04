@@ -38,8 +38,10 @@ jobs:
         run: |
           git fetch origin main --depth=1
           # diff two-dot (confronto di TREE, niente merge-base: il checkout PR
-          # è il merge commit, che contiene già main → nessun falso positivo)
-          CHANGED="$(git diff --diff-filter=MD --name-only origin/main HEAD -- 'migrations/*/run.py' 'migrations/*/migration.json' || true)"
+          # è il merge commit, che contiene già main → nessun falso positivo).
+          # --no-renames: senza, un `git mv` di una migrazione + edit passa come
+          # status R (rename) e sfugge al filtro MD → immutabilità bypassata.
+          CHANGED="$(git diff --no-renames --diff-filter=MD --name-only origin/main HEAD -- 'migrations/*/run.py' 'migrations/*/migration.json' || true)"
           if [ -n "$CHANGED" ]; then
             echo "::error::migrazioni esistenti modificate o rimosse: $CHANGED"
             exit 1
