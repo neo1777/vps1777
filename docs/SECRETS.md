@@ -52,7 +52,11 @@ print(bcrypt.hashpw(os.environ["ADMIN_PWD_RAW"].encode(), bcrypt.gensalt(12)).de
 docker compose restart gateway
 ```
 
-Oppure dal pannello: `/admin/secrets` → Rotate password (riavvia automaticamente).
+Il pannello `/admin/secrets` documenta la procedura ma non la esegue: il
+gateway non ha privilegi per riscrivere i secret host né per riavviarsi
+(stesso design del canale update, vedi [ARCHITECTURE.md](ARCHITECTURE.md)) —
+la rotation si fa da CLI come sopra. Un `docker compose restart` non tocca le
+immagini: nessuna build, nessun pull.
 
 ## Backup
 

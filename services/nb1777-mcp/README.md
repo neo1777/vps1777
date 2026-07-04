@@ -12,6 +12,7 @@ NotebookLM MCP wrapper — espone i tool del CLI `nlm` come MCP streamable-http.
 | `NB1777_ALLOWED_ORIGINS` | `https://claude.ai,https://web.telegram.org` | CSV |
 | `NLM_HOME` | `/var/lib/nlm` | volume col profilo `profiles/default/` + `AUTH_PENDING.flag` |
 | `FASTMCP_STATELESS_HTTP` | `true` | MCP stateless mode |
+| `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI) |
 
 ## Auth NotebookLM (post-install)
 
@@ -21,7 +22,8 @@ Sul tuo PC: `nlm login` → `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz
 
 ## Tool MCP esposti (MVP)
 
-Sono un sottoinsieme dei ~60 del vecchio stack. In F8 li aggiungiamo tutti.
+Sono un sottoinsieme dei ~60 del vecchio stack; gli altri arriveranno in una
+release successiva.
 
 - `nb_list()` — elenca notebook
 - `nb_get(id)` — dettagli notebook

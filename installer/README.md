@@ -35,9 +35,10 @@ Browser (UI form)  ──HTTP 127.0.0.1──►  installer.py + engine.py  ─�
 Il browser non può fare SSH (sandbox): il mini-server locale fa da ponte.
 L'**engine Python** (`engine.py`, basato su paramiko) si connette alla VPS,
 carica il repo via SFTP ed esegue gli step (prepara Docker + hardening, genera
-secret, build+up, **installa Tailscale sull'host** + Funnel, reboot test)
-**direttamente via SSH**. Tutto resta su `127.0.0.1` — le credenziali non
-lasciano il tuo PC.
+secret, **pull delle immagini dell'ultima release** + avvio, **installa
+Tailscale sull'host** + Funnel, installa il **canale di aggiornamento** — CLI
+`vps1777` + unit systemd —, reboot test) **direttamente via SSH**. Tutto resta
+su `127.0.0.1` — le credenziali non lasciano il tuo PC.
 
 > **Cross-OS vero**: la VPS è Linux e riceve comandi shell standard; il PC
 > esegue solo Python (paramiko + urllib + stdlib). Per questo gira anche su
@@ -55,6 +56,20 @@ lasciano il tuo PC.
 4. **Bot Telegram** — opzionale (semaforo verde solo dopo "Verifica bot" reale)
 5. Quando i semafori sono verdi, **Installa** si attiva → avanzamento live →
    schermata con URL, password admin, URL connector claude.ai.
+
+## Quale versione installa
+
+L'engine installa l'**ultima release** pubblicata: pull delle immagini firmate
+da GHCR, **nessuna build sulla VPS** (vincolo 4GB). Scrive `VPS1777_TAG` e
+`VPS1777_IMAGE_BASE` nel `.env` e installa il canale di aggiornamento
+(`vps1777 update` / pulsante admin) — vedi [docs/UPDATE.md](../docs/UPDATE.md).
+
+Variabili d'ambiente avanzate (per chi lancia `installer.py` a mano):
+
+- `VPS1777_INSTALL_VERSION=X.Y.Z-rc.1` — installa una versione specifica (es. una rc)
+- `VPS1777_DEV_BUILD=1` — escape hatch: build locale con `compose.build.yaml` (solo sviluppo)
+
+Se nessuna release esiste ancora, l'engine ripiega da solo sulla build locale.
 
 ## Dopo l'installazione
 

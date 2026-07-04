@@ -2,7 +2,27 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.9.0] — 2026-07-04
+
+### Aggiunto — Canale di self-update gestito
+
+- **CLI host `vps1777`** (`check`, `update`, `rollback [--with-data]`, `status [--json --probe]`, `version`, `migrate`, `bootstrap`) — il motore unico degli aggiornamenti: backup age + snapshot locale pre-update (`backups/pre-update/`), pull con verifica digest contro `images.lock` del bundle di release, migrazioni, health-gate 180s, **auto-rollback** su fallimento, esito su Telegram. Installata in `/usr/local/bin` da installer/deploy.sh. Manuale utente: [docs/UPDATE.md](docs/UPDATE.md).
+- **Pannello admin → tab Update**: card con versione corrente / ultima release / changelog + pulsante **Aggiorna** con progress. Il gateway resta senza privilegi: il pulsante scrive un **intent file** (`onboarding/update_pending_update.json`, validato: schema, semver, TTL, nonce anti-replay) che la systemd **path unit** `vps1777-update.{path,service}` raccoglie ed esegue sull'host. Il footer admin mostra la versione deployata.
+- **Check giornaliero + notifica Telegram**: `vps1777-check-update.{service,timer}` — una GET a `api.github.com/releases/latest`, **zero telemetria**; messaggio al owner (una volta per release) + badge nella card admin.
+- **Migrazioni idempotenti** (`migrations/`): applicate una volta sola durante l'update, registro nel volume `gateway-data`; contratto in [migrations/README.md](migrations/README.md).
+- **Bootstrap one-shot** (`tools/bootstrap.sh` / `vps1777 bootstrap`): converte un'installazione legacy (immagini buildate in locale) al modello pull, senza mai toccare i volumi named.
+- **Healthcheck `nb1777-bot`**: file heartbeat `/tmp/nb1777-bot.heartbeat` (unhealthy se mtime > 90s) — il bot long-poll non espone porte.
+- **`/health?deep=1`** sul gateway: proba TCP gli upstream MCP (503 se giù); usato dal health-gate dell'update.
+- **`tools/restore.sh`**: nuovi flag `--yes` (nessuna conferma) e `--volumes-only <csv>`; accetta anche una **directory snapshot non cifrata** (`backups/pre-update/<dir>`) oltre al `.tar.age`. Default resta interattivo.
+
+### Cambiato — Distribuzione registry-pull
+
+- **`compose.yaml` è PULL-ONLY**: immagini `${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-<svc>:${VPS1777_TAG:-dev}` pubblicate dalla CI di release (firmate cosign, con SBOM). Nessun `build:` in compose.yaml: il build locale vive solo nel nuovo overlay **`compose.build.yaml`** (dev/CI: `docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch`). Sulla VPS non si builda **mai** (vincolo 4GB).
+- **`release.yml`** ora crea anche la **GitHub Release** col runtime bundle (`vps1777-runtime-vX.Y.Z.tar.gz` + `SHA256SUMS` + firma cosign) e marca prerelease i tag `-rc.*`; `:latest` segue solo le stable. trivy scansiona le immagini ghcr `:latest` pubblicate.
+- **File `VERSION`** nel repo (specchio del tag, guard in CI). `.env`: `VPS1777_TAG` = versione deployata (scritta **solo** da update/rollback/bootstrap/installer), nuova var `VPS1777_IMAGE_BASE`.
+- **Installer (`engine.py`) e `deploy.sh`**: installano l'ultima release via pull (STEP "Immagini + avvio") e il canale di aggiornamento (CLI + unit systemd). Escape hatch build locale: `DEV_BUILD=1` (deploy.sh) / `VPS1777_DEV_BUILD=1` (installer); override versione per rc: `VPS1777_INSTALL_VERSION`. Fallback automatico a build locale se nessuna release esiste.
+- **Watchtower (`ops.autoupdate`) declassato**: resta opt-in ma dichiarato **non supportato in concomitanza** col canale gestito (bypassa backup/migrazioni/health-gate/changelog/rollback). Il canale primario è `vps1777 update` / pulsante admin.
+- **`tools/backup.sh`**: il MANIFEST registra anche `VPS1777_TAG` e `VERSION`.
 
 ### Fix — NotebookLM (nlm 0.7.x) + connector nb1777 (421)
 

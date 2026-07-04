@@ -31,10 +31,10 @@ incollare in claude.ai. Niente Docker da gestire a mano, niente shell sulla VPS.
 │            │  Tailscale Funnel │  (o Caddy, o Cloudflared)       │
 │            └─────────┬─────────┘                                 │
 │                      ▼                                           │
-│            ┌───────────────────┐    /admin/login                 │
-│            │     gateway       │    /admin/secrets               │
-│            │  (OAuth 2.1 + DCR)│    /admin/nlm                   │
-│            │     +/app/* UI    │    /app/* (Mini App)            │
+│            ┌───────────────────┐    /admin/login · /admin/nlm    │
+│            │     gateway       │    /admin/update · /admin/audit │
+│            │  (OAuth 2.1 + DCR)│    /app/* (Mini App)            │
+│            │     +/app/* UI    │                                 │
 │            └─────────┬─────────┘                                 │
 │                      ▼                                           │
 │      ┌───────────────┼───────────────────────┐                   │
@@ -113,6 +113,20 @@ caricare l'auth NotebookLM, [docs/INSTALL.md](docs/INSTALL.md).
 Più i **plugin** che ci aggiungi tu — un MCP o un bot in pochi file, senza
 toccare il core. Vedi [docs/PLUGINS.md](docs/PLUGINS.md).
 
+## Aggiornamenti
+
+Le immagini sono **pubblicate su GHCR dalla CI di release** (firmate cosign,
+con SBOM): la VPS fa solo `docker compose pull`, **mai build** (vincolo 4GB).
+Per aggiornare:
+
+```bash
+vps1777 update      # backup → pull + verifica digest → migrazioni → health-gate
+```
+
+oppure un click dal **pannello admin → tab Update**. Quando esce una release
+il bot Telegram ti avvisa; se la nuova versione non torna in salute, **rollback
+automatico**. Manuale completo: [docs/UPDATE.md](docs/UPDATE.md).
+
 ## Sicurezza per design
 
 - Backend su rete Docker `internal: true` — **solo il gateway** è esposto verso l'esterno
@@ -121,7 +135,7 @@ toccare il core. Vedi [docs/PLUGINS.md](docs/PLUGINS.md).
 - OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, healthcheck su ogni servizio
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
-- Backup volumi **age-encrypted**, rotate secrets senza downtime, auto-update opzionale via Watchtower
+- Backup volumi **age-encrypted**, rotate secrets senza downtime, update gestiti con backup + verifica digest + rollback automatico ([docs/UPDATE.md](docs/UPDATE.md))
 - Gestione visuale opzionale (Portainer) **solo su loopback** + tunnel SSH — vedi [docs/OPS.md](docs/OPS.md)
 
 Vedi [SECURITY.md](SECURITY.md) per il threat model e come segnalare vulnerabilità.
@@ -136,6 +150,7 @@ Vedi [SECURITY.md](SECURITY.md) per il threat model e come segnalare vulnerabili
 | [PLUGINS.md](docs/PLUGINS.md) | Aggiungere un tuo MCP o bot |
 | [SECRETS.md](docs/SECRETS.md) | Gestione, rotation e backup dei secret |
 | [OPS.md](docs/OPS.md) | Hardening + profili opzionali (Portainer, Watchtower, backup) |
+| [UPDATE.md](docs/UPDATE.md) | Aggiornamenti: `vps1777 update`, pulsante admin, rollback |
 | [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) | Backup/restore volumi age-encrypted |
 | [ONBOARDING.md](docs/ONBOARDING.md) | Setup post-deploy dal pannello web |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Quando qualcosa va storto |
@@ -143,10 +158,12 @@ Vedi [SECURITY.md](SECURITY.md) per il threat model e come segnalare vulnerabili
 ## Sviluppo locale
 
 ```bash
-docker compose -f compose.yaml -f compose.dev.yaml up --watch
+docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch
 ```
 
-Hot-reload via Compose Watch. Linee guida in [CONTRIBUTING.md](CONTRIBUTING.md);
+Hot-reload via Compose Watch. `compose.yaml` referenzia solo immagini
+pubblicate (pull): il build locale esiste solo con l'overlay
+`compose.build.yaml` (dev/CI, mai in produzione). Linee guida in [CONTRIBUTING.md](CONTRIBUTING.md);
 patti della comunità in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Stato

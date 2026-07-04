@@ -1,6 +1,8 @@
 """Registry routes Starlette."""
 from __future__ import annotations
 
+import asyncio
+
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -9,14 +11,35 @@ from . import admin, miniapp, oauth, onboarding, proxy
 from .settings import get_settings
 
 
-async def health(_request: Request) -> JSONResponse:
+async def health(request: Request) -> JSONResponse:
     s = get_settings()
-    return JSONResponse({
+    body: dict = {
         "ok": True,
         "service": "vps1777-gateway",
         "oauth_required": s.oauth_required,
         "upstreams": sorted(s.gateway_upstreams),
-    })
+    }
+    # ?deep=1: proba TCP gli upstream MCP dalla rete backend. Usato dal
+    # health-gate di `vps1777 update` (via compose exec) — nessuna assunzione
+    # su porte host, funziona con qualunque overlay ingress.
+    if request.query_params.get("deep"):
+        checks: dict[str, bool] = {}
+        for name, hostport in s.gateway_upstreams.items():
+            host, _, port = hostport.rpartition(":")
+            try:
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, int(port)), timeout=3,
+                )
+                writer.close()
+                await writer.wait_closed()
+                checks[name] = True
+            except (OSError, asyncio.TimeoutError, ValueError):
+                checks[name] = False
+        body["deep"] = checks
+        if not all(checks.values()):
+            body["ok"] = False
+            return JSONResponse(body, status_code=503)
+    return JSONResponse(body)
 
 
 routes = [
@@ -38,6 +61,8 @@ routes = [
     Route("/admin/logout", admin.logout, methods=["POST"]),
     Route("/admin/setup", onboarding.setup_view, methods=["GET", "POST"]),
     Route("/admin/nlm", admin.nlm_view, methods=["GET", "POST"]),
+    Route("/admin/update", admin.update_view, methods=["GET", "POST"]),
+    Route("/admin/update/state", admin.update_state, methods=["GET"]),
     Route("/admin/audit", admin.audit_view, methods=["GET"]),
     Route("/admin/secrets", admin.secrets_view, methods=["GET"]),
 

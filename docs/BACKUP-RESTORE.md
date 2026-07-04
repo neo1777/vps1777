@@ -13,6 +13,8 @@ Cosa includi: `gateway-data`, `archive-data`, `nlm-auth`, `secrets/*`, `.env`, `
 
 Cosa NON includi: log container (sono in `/var/lib/docker/containers/*/`, gestiti dal driver json-file con rotation).
 
+Il `MANIFEST.txt` dentro l'archivio registra anche la versione deployata (`VPS1777_TAG` dal `.env`) e il `VERSION` del bundle.
+
 ## Backup automatico (cron)
 
 Aggiungi profilo `ops.backup`:
@@ -21,7 +23,7 @@ Aggiungi profilo `ops.backup`:
 docker compose --profile ops.backup up -d
 ```
 
-Container `backup` esegue ogni notte (cron 03:00). Mantiene gli ultimi 14 backup.
+Container `backup` esegue ogni notte (cron 03:00). Rotation: mantiene **7 backup giornalieri + 4 settimanali** (uno per settimana).
 
 ## Restore
 
@@ -34,6 +36,20 @@ Step:
 2. Decifra archivio con la tua chiave age
 3. Ripristina volumi + secrets
 4. `docker compose up -d`
+
+Default: interattivo (chiede conferma). Flag:
+
+- `--yes` — nessuna conferma (per script/automazioni)
+- `--volumes-only vol1,vol2` — ripristina SOLO i volumi elencati (CSV, nomi corti o completi), saltando secrets/config
+- come input accetta anche una **directory snapshot non cifrata** (`backups/pre-update/<dir>`), oltre al `.tar.age`
+
+## Snapshot pre-update
+
+`vps1777 update` crea in `backups/pre-update/` uno snapshot locale **non cifrato** dei volumi dati prima di ogni update — serve all'auto-rollback, che non può dipendere dalla age-key — e lo pota al successivo update riuscito (tenuto: l'ultimo). Vedi [UPDATE.md](UPDATE.md). Ripristino manuale:
+
+```bash
+./tools/restore.sh --yes --volumes-only gateway-data,archive-data,nlm-auth backups/pre-update/<dir>
+```
 
 ## Chiave age
 

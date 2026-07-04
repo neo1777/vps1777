@@ -40,9 +40,12 @@ RUN mkdir -p /var/lib/gateway /var/lib/nlm && chown -R app:app /var/lib/gateway 
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build/app /app/app
 
+# Versione iniettata dalla CI di release (build-arg); nei build locali resta dev.
+ARG VPS1777_VERSION=0.0.0-dev
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    VPS1777_VERSION=${VPS1777_VERSION}
 
 WORKDIR /app
 USER app

@@ -1,0 +1,15 @@
+# vps1777-update.path — trigger istantaneo del pulsante admin "Aggiorna".
+#
+# Il gateway (senza privilegi) scrive l'intent file nella dir onboarding/
+# (bind mount già esistente); questa path unit fa partire l'updater in <1s.
+# La CLI CONSUMA l'intent (valida e cancella) prima di agire → nessun loop.
+
+[Unit]
+Description=vps1777 — watcher intent di update dal pannello admin
+
+[Path]
+PathExists=/home/vps1777/vps1777/onboarding/update_pending_update.json
+Unit=vps1777-update.service
+
+[Install]
+WantedBy=multi-user.target

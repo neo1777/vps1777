@@ -1,0 +1,24 @@
+# vps1777-update.service — esegue l'update richiesto dal pulsante admin.
+#
+# Stesso identico motore del terminale (`vps1777 update`), con --from-intent:
+# la CLI valida (schema, semver, TTL 10 min, nonce anti-replay, target==latest
+# nota) e cancella l'intent PRIMA di agire. Progresso in
+# onboarding/update_progress.json (pollato dalla card admin); esito sempre
+# duplicato su Telegram — la UI può essere giù proprio durante l'update.
+#
+# NIENTE NoNewPrivileges qui: il self-update della CLI usa sudo install.
+
+[Unit]
+Description=vps1777 — updater (intent dal pannello admin)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=vps1777
+Group=vps1777
+Environment=VPS1777_HOME=/home/vps1777/vps1777
+WorkingDirectory=/home/vps1777/vps1777
+ExecStart=/usr/local/bin/vps1777 update --yes --from-intent /home/vps1777/vps1777/onboarding/update_pending_update.json
+# pull + migrazioni + health-gate (180s) + eventuale rollback: margine ampio
+TimeoutStartSec=1800

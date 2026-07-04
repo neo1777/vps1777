@@ -23,6 +23,16 @@ Durante il deploy, `step_prepare` applica un hardening minimo **sicuro** sull'ho
 > ```
 > Fallo solo dopo aver verificato che il login a chiave funziona.
 
+## Aggiornamenti — canale gestito
+
+Il canale primario di aggiornamento è la CLI host **`vps1777 update`**
+(installata da installer/deploy.sh) o il pulsante nel pannello admin → tab
+**Update**: backup age + snapshot pre-update, pull con verifica digest,
+migrazioni, health-gate 180s, **rollback automatico** se lo stack non torna
+in salute. Manuale completo: [UPDATE.md](UPDATE.md).
+
+Log dell'updater: `journalctl -u vps1777-update -u vps1777-check-update`.
+
 ## Profili opzionali
 
 Si attivano aggiungendo il file override + il `--profile`. Esempio con Tailscale:
@@ -52,11 +62,16 @@ container, stack, log e volumi.
   Portainer è un tool admin separato e locale. Sta su rete `backend` (internal,
   nessun egress).
 
-### `ops.autoupdate` — auto-update (Watchtower)
+### `ops.autoupdate` — auto-update (Watchtower) — declassato
 
 [Watchtower](https://containrrr.dev/watchtower/) fa auto-pull + restart graceful
-dei container vps1777 quando esce un nuovo tag. Modalità label-only: tocca solo
+dei container vps1777 quando cambia un tag. Modalità label-only: tocca solo
 i container opt-in (gateway, archive-mcp, nb1777-mcp, nb1777-bot).
+
+> **Non supportato in concomitanza col canale gestito**: Watchtower bypassa
+> backup, migrazioni, health-gate, changelog e rollback. Resta opt-in, ma il
+> canale primario è `vps1777 update` / pulsante admin ([UPDATE.md](UPDATE.md));
+> `vps1777 update` ti avvisa se lo trova attivo.
 
 ```bash
 docker compose ... -f compose.ops.watchtower.yaml --profile ops.autoupdate up -d

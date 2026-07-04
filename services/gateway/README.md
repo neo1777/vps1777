@@ -20,18 +20,26 @@ OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*`.
 | `TELEGRAM_BOT_TOKEN_FILE` | `/run/secrets/telegram_bot_token` | per Mini App initData HMAC |
 | `NLM_AUTH_DIR` | `/var/lib/nlm` | volume condiviso con nb1777-mcp |
 | `AUDIT_LOG_PATH` | `/var/lib/gateway/audit.jsonl` | path scrittura audit |
+| `VPS1777_TAG` | `dev` | versione deployata (mostrata nel footer + card Update) |
+| `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI di release) |
 
 ## Endpoint principali
 
-- `GET /health` — healthcheck
+- `GET /health` — healthcheck (`?deep=1`: proba anche gli upstream MCP, 503 se giù)
 - `POST /register` — Dynamic Client Registration OAuth
 - `GET /authorize`, `POST /token` — flow OAuth 2.1
-- `GET /admin/{login,secrets,nlm,audit}` — pannello admin
+- `GET /admin/{login,setup,nlm,update,secrets,audit}` — pannello admin
 - `POST /admin/nlm` — upload del profilo nlm (tar.gz di `profiles/default`)
+- `POST /admin/update` — scrive l'intent di aggiornamento (consumato dalla CLI host)
+- `GET /admin/update/state` — JSON stato/progress per il polling della card
 - `GET /app/*` — Mini App Telegram
 - `* /{secret}/{service}/{path}` — reverse proxy a `<host>:<port>/<path>`
 
 ## Build/run locale
+
+In produzione le immagini si **pullano** da ghcr (`compose.yaml` è pull-only).
+Per buildare in locale in sviluppo, il tag corto `vps1777/gateway:dev` vive
+solo nell'overlay `compose.build.yaml`:
 
 ```bash
 docker build -t vps1777/gateway:dev .

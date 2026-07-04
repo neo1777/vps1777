@@ -152,6 +152,49 @@ sudo tailscale up --authkey=tskey-auth-... --hostname=vps1777
 # Poi: sudo tailscale serve --bg --https=443 http://127.0.0.1:8080 && sudo tailscale funnel --bg 443
 ```
 
+## Update: "update già in corso"
+
+Causa: c'è un lock (`var/update.lock`) — un altro update sta girando, oppure è
+il residuo di un crash.
+
+Diagnosi:
+```bash
+vps1777 status                                      # mostra update_in_progress
+journalctl -u vps1777-update --no-pager | tail -30  # log dell'ultimo run
+```
+Se nessun processo è attivo, riprova: il lock è per-processo. Dettagli in
+[UPDATE.md](UPDATE.md).
+
+## Update: digest mismatch al pull
+
+Causa: i digest delle immagini pullate non combaciano con `images.lock` del
+bundle di release (release corrotta o manomissione registry).
+
+L'update abortisce **prima** di toccare lo stack — non è un guasto, è la
+verifica supply-chain che fa il suo lavoro. Controlla la release su GitHub e
+riprova. Vedi [UPDATE.md](UPDATE.md).
+
+## Update: rollback non healthy (exit 2)
+
+Il caso peggiore: nemmeno il rollback torna in salute. La CLI si ferma senza
+thrashing e ti avvisa su Telegram. Hai tre paracadute:
+
+1. snapshot locale in `backups/pre-update/` (non cifrato)
+2. backup age in `backups/`
+3. [BACKUP-RESTORE.md](BACKUP-RESTORE.md) per il disaster recovery
+
+## Card admin Update: "check stantio"
+
+Causa: il timer giornaliero (`vps1777-check-update.timer`) non gira o GitHub
+era irraggiungibile all'ultimo check (nessun rumore by design: solo il badge).
+
+Diagnosi:
+```bash
+systemctl list-timers vps1777-check-update.timer
+journalctl -u vps1777-check-update --no-pager | tail -20
+vps1777 check     # forza il check subito
+```
+
 ## Reset completo (perdi dati)
 
 ```bash

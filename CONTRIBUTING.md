@@ -15,10 +15,12 @@ Grazie per voler contribuire. Spiegazione veloce di come lavoriamo.
 git clone https://github.com/<owner>/vps1777.git
 cd vps1777
 ./setup.sh                 # configura .env locale + secrets
-docker compose -f compose.yaml -f compose.dev.yaml up --watch
+docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch
 ```
 
 Compose Watch ricarica i container su modifica `services/*/app/*.py`.
+L'overlay `compose.build.yaml` serve perché `compose.yaml` è pull-only
+(immagini da GHCR): il build locale esiste solo in dev/CI.
 
 ## Stile codice
 

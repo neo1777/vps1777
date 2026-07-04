@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from functools import wraps
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -206,6 +207,24 @@ async def _on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         pass
 
 
+# ───── heartbeat (healthcheck del container) ─────
+# Il bot è long-poll puro, nessuna porta esposta: l'unica prova di vita
+# osservabile da fuori è un file toccato periodicamente. Il healthcheck in
+# compose verifica che il mtime sia recente (<90s) — serve anche al
+# health-gate di `vps1777 update`.
+
+HEARTBEAT_FILE = Path(os.environ.get("BOT_HEARTBEAT_FILE", "/tmp/nb1777-bot.heartbeat"))
+
+
+async def _heartbeat_loop() -> None:
+    while True:
+        try:
+            HEARTBEAT_FILE.touch()
+        except OSError:  # path non scrivibile: logga, non uccidere il bot
+            log.warning("heartbeat non scrivibile: %s", HEARTBEAT_FILE)
+        await asyncio.sleep(30)
+
+
 # ───── runner ─────
 
 def build_app() -> Application:
@@ -222,16 +241,25 @@ def build_app() -> Application:
 
 
 async def run() -> None:
+    # Senza token il bot NON muore: resta idle col heartbeat attivo. Un
+    # crash-loop renderebbe il container unhealthy e farebbe fallire (e
+    # rollbackare) ogni `vps1777 update` sulle installazioni senza Telegram.
+    if not get_settings().effective_token:
+        log.warning("TELEGRAM_BOT_TOKEN mancante — bot in idle (configuralo e riavvia)")
+        await _heartbeat_loop()
+        return
     app = build_app()
     log.info("bot starting")
     async with app:
         await app.initialize()
         await app.start()
         await app.updater.start_polling()
+        heartbeat = asyncio.create_task(_heartbeat_loop())
         # blocca fino a SIGTERM
         try:
             await asyncio.Event().wait()
         finally:
+            heartbeat.cancel()
             await app.updater.stop()
             await app.stop()
             await app.shutdown()

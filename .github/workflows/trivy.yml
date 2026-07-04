@@ -1,9 +1,19 @@
 name: Trivy vuln scan
 
+# Scansiona le immagini PUBBLICATE su ghcr (:latest) — ciò che gli utenti
+# eseguono davvero — non un build locale ad-hoc. Prima della prima release
+# le immagini non esistono ancora: lo scan viene saltato con un warning.
+
 on:
   schedule:
     - cron: "0 6 * * 1"  # ogni lunedì alle 6:00 UTC
   workflow_dispatch:
+
+# upload-sarif richiede security-events: write. Senza, col default read-only
+# del GITHUB_TOKEN (standard dei repo nuovi) l'upload fallisce 403 ogni run.
+permissions:
+  contents: read
+  security-events: write
 
 jobs:
   scan:
@@ -13,17 +23,26 @@ jobs:
         service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot]
     steps:
       - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -t vps1777-${{ matrix.service }}:scan services/${{ matrix.service }}
+      - name: Check published image exists
+        id: exists
+        run: |
+          REF="ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:latest"
+          if docker manifest inspect "$REF" >/dev/null 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::$REF non ancora pubblicata (nessuna release stable?) — scan saltato"
+          fi
       - name: Trivy scan
+        if: steps.exists.outputs.ok == 'true'
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: vps1777-${{ matrix.service }}:scan
+          image-ref: ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:latest
           format: sarif
           output: trivy-${{ matrix.service }}.sarif
           severity: CRITICAL,HIGH
       - name: Upload Sarif to GitHub Security
-        if: always()
+        if: always() && steps.exists.outputs.ok == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-${{ matrix.service }}.sarif

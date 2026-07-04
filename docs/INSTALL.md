@@ -39,7 +39,9 @@ Lo stage finale ti stampa gli URL.
    - `oauth_signing_secret.txt` (64 byte url-safe)
    - `admin_password_bcrypt.txt` (bcrypt rounds=12 della password che scegli/che genera)
    - `telegram_bot_token.txt` (incolli il token)
-4. Lancia `docker compose --profile ingress.<scelta> up -d --build`
+4. Lancia `docker compose --profile ingress.<scelta> up -d` — le immagini
+   vengono **pullate da GHCR** (`compose.yaml` è pull-only: sulla VPS non si
+   builda mai; il build locale è solo dev, con l'overlay `compose.build.yaml`)
 
 Se rilanci `setup.sh`, salta gli step già fatti.
 
@@ -60,12 +62,20 @@ Se rilanci `setup.sh`, salta gli step già fatti.
 ## Ops opzionali
 
 Hardening di base (automatico: `unattended-upgrades` + `fail2ban`) e profili
-opzionali — Portainer (cruscotto visuale), Watchtower (auto-update), backup —
+opzionali — Portainer (cruscotto visuale), Watchtower (declassato), backup —
 sono documentati in [OPS.md](OPS.md).
 
 ## Aggiornamento
 
-Vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md). Con Watchtower (profilo `ops.autoupdate`) è automatico.
+Canale primario: la CLI host **`vps1777 update`** (installata da
+installer/deploy.sh) o il pulsante nel **pannello admin → tab Update** —
+backup automatico prima, pull con verifica digest, migrazioni, health-gate,
+rollback automatico se la nuova versione non torna in salute. Manuale
+completo: [UPDATE.md](UPDATE.md).
+
+Watchtower (profilo `ops.autoupdate`) è **declassato**: resta opt-in ma non è
+supportato in concomitanza col canale gestito (bypassa backup, migrazioni,
+health-gate e rollback) — vedi [OPS.md](OPS.md).
 
 ## Disinstallazione
 

@@ -5,8 +5,8 @@
 #   - Port forward 8080 sul host (no ingress in dev)
 #   - Debug log level
 #
-# Uso:
-#   docker compose -f compose.yaml -f compose.dev.yaml up --watch
+# Uso (serve anche compose.build.yaml: compose.yaml è pull-only):
+#   docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch
 
 services:
 
