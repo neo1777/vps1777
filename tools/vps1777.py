@@ -1286,6 +1286,17 @@ def cmd_bootstrap(repo: Path, args) -> int:
 
     # install CLI + unit
     sudo(["install", "-m", "755", str(bundle / "tools" / "vps1777.py"), INSTALLED_CLI])
+    # Dir runtime di proprietà dell'operator: su un'installazione LEGACY,
+    # onboarding/ è spesso root-owned (creata da Docker al primo bind-mount, il
+    # vecchio installer non la pre-creava) → CLI e gateway (stesso uid) non
+    # potrebbero scrivere update_status/pending/progress. Le creiamo e ne
+    # sistemiamo l'ownership all'uid del processo (l'operator). Verificato live
+    # su una VPS reale: senza, check/update/pulsante falliscono con PermissionError.
+    runtime_dirs = [repo / d for d in ("onboarding", "var", "backups", "releases")]
+    for d in runtime_dirs:
+        d.mkdir(exist_ok=True)
+    sudo(["chown", "-R", f"{os.getuid()}:{os.getgid()}", *[str(d) for d in runtime_dirs]])
+    (repo / "var").chmod(0o700)
     # salva i compose LEGACY per il rollback del bootstrap. Solo la PRIMA volta:
     # se pre-bootstrap esiste già (bootstrap precedente fallito e ri-tentato),
     # NON sovrascrivere — sync_managed_files ha già mutato i compose nel repo,
