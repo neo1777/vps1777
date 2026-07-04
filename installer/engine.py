@@ -408,7 +408,10 @@ rm -f /tmp/vps1777.tar.gz
         gen = f"""
 set -e
 cd {REMOTE_DIR}
-mkdir -p secrets
+# runtime dir create ORA come operatore: se le creasse Docker (bind mount)
+# sarebbero root-owned e gateway/CLI non potrebbero scriverci
+mkdir -p secrets onboarding var backups releases
+chmod 700 var
 gen() {{ python3 -c "import secrets;print(secrets.token_urlsafe($1))"; }}
 genpwd() {{ python3 -c "import secrets,string;print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))"; }}
 # gateway_secret e oauth_signing restano stabili (il primo è negli URL connector):

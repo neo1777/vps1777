@@ -241,6 +241,13 @@ def build_app() -> Application:
 
 
 async def run() -> None:
+    # Senza token il bot NON muore: resta idle col heartbeat attivo. Un
+    # crash-loop renderebbe il container unhealthy e farebbe fallire (e
+    # rollbackare) ogni `vps1777 update` sulle installazioni senza Telegram.
+    if not get_settings().effective_token:
+        log.warning("TELEGRAM_BOT_TOKEN mancante — bot in idle (configuralo e riavvia)")
+        await _heartbeat_loop()
+        return
     app = build_app()
     log.info("bot starting")
     async with app:

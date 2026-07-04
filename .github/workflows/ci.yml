@@ -37,7 +37,9 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           git fetch origin main --depth=1
-          CHANGED="$(git diff --diff-filter=MD --name-only origin/main...HEAD -- 'migrations/*/run.py' 'migrations/*/migration.json' || true)"
+          # diff two-dot (confronto di TREE, niente merge-base: il checkout PR
+          # è il merge commit, che contiene già main → nessun falso positivo)
+          CHANGED="$(git diff --diff-filter=MD --name-only origin/main HEAD -- 'migrations/*/run.py' 'migrations/*/migration.json' || true)"
           if [ -n "$CHANGED" ]; then
             echo "::error::migrazioni esistenti modificate o rimosse: $CHANGED"
             exit 1

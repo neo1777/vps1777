@@ -415,6 +415,15 @@ def _registry_write(data: dict) -> None:
         input=payload, text=True, check=True)
 
 
+class MigrationError(RuntimeError):
+    """Fallimento del runner con l'informazione che serve al rollback:
+    i dati sono (potenzialmente) stati mutati prima/durante il fallimento?"""
+
+    def __init__(self, msg: str, mutated: bool):
+        super().__init__(msg)
+        self.mutated = mutated
+
+
 def migrations_pending(repo: Path) -> list[Path]:
     migdir = repo / "migrations"
     if not migdir.is_dir():
@@ -439,22 +448,28 @@ def run_migrations(repo: Path, images: dict[str, str],
         meta = json.loads((d / "migration.json").read_text())
         mid = meta["id"]
         svc = meta["service"]
+        # se la migrazione che fallisce è data_mutating, i suoi write parziali
+        # contano come mutazione → il rollback deve ripristinare lo snapshot
+        would_mutate = any_mutating or bool(meta.get("data_mutating"))
         image = images.get(svc)
         if not image:
-            raise RuntimeError(f"migrazione {mid}: service sconosciuto '{svc}'")
+            raise MigrationError(f"migrazione {mid}: service sconosciuto '{svc}'",
+                                 any_mutating)
         log(f"migrazione {mid} ({meta.get('description', '')}) su {svc}…")
         cmd = ["docker", "run", "--rm", "--network", "none",
                "-v", f"{d.resolve()}:/migration:ro"]
         for vol in meta.get("volumes", []):
             mount = VOLUME_MOUNTS.get(vol)
             if not mount:
-                raise RuntimeError(f"migrazione {mid}: volume sconosciuto '{vol}'")
+                raise MigrationError(f"migrazione {mid}: volume sconosciuto '{vol}'",
+                                     any_mutating)
             cmd += ["-v", f"vps1777_{vol}:{mount}"]
         cmd += ["--entrypoint", "python", image, "/migration/run.py"]
         res = run(cmd, check=False, capture=True)
         if res.returncode != 0:
-            raise RuntimeError(
-                f"migrazione {mid} fallita (exit {res.returncode}):\n{res.stdout}\n{res.stderr}")
+            raise MigrationError(
+                f"migrazione {mid} fallita (exit {res.returncode}):\n{res.stdout}\n{res.stderr}",
+                would_mutate)
         checksum = hashlib.sha256((d / "run.py").read_bytes()).hexdigest()
         reg = registry_read()
         reg["applied"].append({"id": mid, "version": target_version,
@@ -529,7 +544,11 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
             dest = (bundle / m.name).resolve()
             if not str(dest).startswith(str(bundle.resolve())):
                 raise RuntimeError(f"bundle malformato (path traversal): {m.name}")
-        tar.extractall(bundle)
+        try:
+            # Python ≥3.11.4: blocca anche symlink/device/permessi anomali
+            tar.extractall(bundle, filter="data")
+        except TypeError:
+            tar.extractall(bundle)
     return bundle
 
 
@@ -636,7 +655,14 @@ def capture_current_images(repo: Path, version: str) -> dict[str, str]:
 
 
 def prune_old_images(repo: Path, keep_versions: set[str], history: list[dict]) -> None:
-    seen = {norm_ver(h.get("version", "")) for h in history} - {norm_ver(v) for v in keep_versions if v}
+    # le versioni viste stanno nei campi from/to della history
+    seen: set[str] = set()
+    for h in history:
+        for k in ("from", "to"):
+            v = norm_ver(str(h.get(k) or ""))
+            if v:
+                seen.add(v)
+    seen -= {norm_ver(v) for v in keep_versions if v}
     for ver in seen:
         if not ver or ver == "dev":
             continue
@@ -684,12 +710,13 @@ def snapshot_prune(repo: Path, keep: Path | None) -> None:
     base = repo / "backups" / "pre-update"
     if not base.is_dir():
         return
+    # pota al successivo update riuscito E dopo 72h — il più tardivo dei due:
+    # uno snapshot recente resta anche se un nuovo update è già riuscito.
     cutoff = time.time() - 72 * 3600
     for d in sorted(d for d in base.iterdir() if d.is_dir()):
         if keep and d == keep:
             continue
-        # pota al successivo update riuscito o dopo 72h — il più tardivo
-        if d.stat().st_mtime < cutoff or keep is not None:
+        if d.stat().st_mtime < cutoff:
             shutil.rmtree(d, ignore_errors=True)
 
 
@@ -941,8 +968,14 @@ def cmd_update(repo: Path, args) -> int:
             log("CLI aggiornata nel bundle → self-update + re-exec")
             sudo(["install", "-m", "755", str(new_cli), INSTALLED_CLI])
             lock.close()
-            os.execv(INSTALLED_CLI,
-                     [INSTALLED_CLI, *sys.argv[1:], "--skip-self-update", "--yes"])
+            # argv ricostruiti da zero: NIENTE --from-intent (l'intent è già
+            # stato consumato/cancellato — ripassarlo farebbe morire il
+            # re-exec su "intent illeggibile"); target pinnato con --version.
+            new_argv = [INSTALLED_CLI, "--home", str(repo), "update",
+                        "--version", target, "--yes", "--skip-self-update"]
+            if args.require_cosign:
+                new_argv.append("--require-cosign")
+            os.execv(INSTALLED_CLI, new_argv)
 
     # 7 — backup (age) + snapshot locale
     step(7, "backup")
@@ -1002,9 +1035,14 @@ def cmd_update(repo: Path, args) -> int:
         executed, need_data_restore = run_migrations(repo, lockfile, target)
         if executed:
             ok(f"{len(executed)} migrazioni applicate")
-    except (RuntimeError, subprocess.CalledProcessError) as exc:
+    except MigrationError as exc:
         return _rollback_routine(repo, st, target, cur, bundle, snap,
-                                 need_data_restore or True, f"migrazione fallita: {exc}")
+                                 exc.mutated, f"migrazione fallita: {exc}")
+    except subprocess.CalledProcessError as exc:
+        # fallimento del registro (busybox): non sappiamo cosa è successo
+        # ai dati → per prudenza si ripristina lo snapshot
+        return _rollback_routine(repo, st, target, cur, bundle, snap,
+                                 True, f"registro migrazioni fallito: {exc}")
 
     # 13 — up
     step(13, "up")
