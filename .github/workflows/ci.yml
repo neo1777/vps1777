@@ -20,13 +20,28 @@ jobs:
       - name: Lint Python (ruff)
         run: |
           uv tool install ruff
-          ruff check services/
+          ruff check services/ tools/vps1777.py
       - name: ShellCheck bash
         run: |
           sudo apt-get install -y shellcheck
           shellcheck setup.sh tools/*.sh || true
-      - name: Validate compose
-        run: docker compose -f compose.yaml config >/dev/null
+      # Entrambe le combinazioni devono restare valide: produzione (solo
+      # immagini ghcr) e sviluppo (overlay di build locale).
+      - name: Validate compose (production — pull only)
+        run: docker compose -f compose.yaml config -q
+      - name: Validate compose (dev — build overlay)
+        run: docker compose -f compose.yaml -f compose.build.yaml config -q
+      # Le migrazioni pubblicate sono immutabili: un run.py/migration.json già
+      # su main non può cambiare (il registro sulla VPS ne pinna il checksum).
+      - name: Migrations immutability
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin main --depth=1
+          CHANGED="$(git diff --diff-filter=MD --name-only origin/main...HEAD -- 'migrations/*/run.py' 'migrations/*/migration.json' || true)"
+          if [ -n "$CHANGED" ]; then
+            echo "::error::migrazioni esistenti modificate o rimosse: $CHANGED"
+            exit 1
+          fi
 
   build:
     runs-on: ubuntu-latest
@@ -43,6 +58,6 @@ jobs:
         with:
           context: ./services/${{ matrix.service }}
           push: false
-          tags: vps1777/${{ matrix.service }}:ci
+          tags: ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
