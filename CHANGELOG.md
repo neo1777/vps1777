@@ -2,7 +2,7 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
-## [0.9.0] — Unreleased
+## [0.9.0] — 2026-07-04
 
 ### Aggiunto — Canale di self-update gestito
 
