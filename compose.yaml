@@ -10,11 +10,13 @@
 # tranne il gateway via ingress. L'ingress è in compose.ingress.<provider>.yaml
 # (Tailscale Funnel | Caddy | Cloudflared).
 #
-# Avvio tipico:
+# Avvio tipico (produzione — immagini pullate da ghcr, MAI build sulla VPS):
 #   docker compose --profile ingress.tailscale up -d
 #
-# Dev:
-#   docker compose -f compose.yaml -f compose.dev.yaml up --watch
+# Dev (build locale delle immagini):
+#   docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch
+#
+# Aggiornamenti: `vps1777 update` (CLI host) o pulsante admin — vedi docs/UPDATE.md.
 
 name: vps1777
 
@@ -40,14 +42,14 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   gateway:
     <<: [*restart, *logging, *security]
-    build:
-      context: ./services/gateway
-      dockerfile: Dockerfile
-    image: vps1777/gateway:${VPS1777_TAG:-dev}
+    # Immagini pubblicate dalla CI di release (ghcr) — la VPS fa solo pull.
+    # Per il build locale in sviluppo: -f compose.yaml -f compose.build.yaml
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-gateway:${VPS1777_TAG:-dev}
     init: true
     environment:
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 8080
+      VPS1777_TAG: ${VPS1777_TAG:-dev}   # versione deployata (mostrata nell'admin)
       GATEWAY_PUBLIC_BASE: ${PUBLIC_BASE:-http://127.0.0.1:8080}
       GATEWAY_UPSTREAMS: ${GATEWAY_UPSTREAMS:-archive=archive-mcp:8002,nb1777=nb1777-mcp:8003}
       OAUTH_REQUIRED: "true"
@@ -86,10 +88,7 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   archive-mcp:
     <<: [*restart, *logging, *security]
-    build:
-      context: ./services/archive-mcp
-      dockerfile: Dockerfile
-    image: vps1777/archive-mcp:${VPS1777_TAG:-dev}
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}
     init: true
     environment:
       ARCHIVE_HTTP_HOST: 0.0.0.0
@@ -115,10 +114,7 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   nb1777-mcp:
     <<: [*restart, *logging, *security]
-    build:
-      context: ./services/nb1777-mcp
-      dockerfile: Dockerfile
-    image: vps1777/nb1777-mcp:${VPS1777_TAG:-dev}
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-mcp:${VPS1777_TAG:-dev}
     init: true
     environment:
       NB1777_HOST: 0.0.0.0
@@ -147,10 +143,7 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   nb1777-bot:
     <<: [*restart, *logging, *security]
-    build:
-      context: ./services/nb1777-bot
-      dockerfile: Dockerfile
-    image: vps1777/nb1777-bot:${VPS1777_TAG:-dev}
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-bot:${VPS1777_TAG:-dev}
     init: true
     environment:
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
@@ -168,6 +161,14 @@ services:
     depends_on:
       nb1777-mcp:
         condition: service_healthy
+    # Long-poll puro, nessuna porta: la prova di vita è un file heartbeat
+    # toccato dal bot ogni 30s (serve al health-gate di `vps1777 update`).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,time; p='/tmp/nb1777-bot.heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<90 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 # ──────────────────────────────────────────────────────────────────────
 # Reti

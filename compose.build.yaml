@@ -1,0 +1,40 @@
+# compose.build.yaml — overlay di BUILD locale (dev e CI, mai produzione)
+#
+# compose.yaml referenzia solo immagini pubblicate (ghcr.io/…/vps1777-<svc>).
+# Questo overlay ri-aggiunge i `build:` e rinomina le immagini nei nomi locali
+# corti `vps1777/<svc>:dev`, così `docker images` distingue a colpo d'occhio
+# un build locale da una release pullata — è una safety feature, non un caso.
+#
+# Uso (dev):
+#   docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch
+# Uso (solo build):
+#   docker compose -f compose.yaml -f compose.build.yaml build
+#
+# In produzione questo file NON va mai passato: la VPS fa solo `pull`
+# (vincolo 4GB — vedi docs/UPDATE.md e docs/SELF_UPDATE_PLAN.md).
+
+services:
+
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    image: vps1777/gateway:dev
+
+  archive-mcp:
+    build:
+      context: ./services/archive-mcp
+      dockerfile: Dockerfile
+    image: vps1777/archive-mcp:dev
+
+  nb1777-mcp:
+    build:
+      context: ./services/nb1777-mcp
+      dockerfile: Dockerfile
+    image: vps1777/nb1777-mcp:dev
+
+  nb1777-bot:
+    build:
+      context: ./services/nb1777-bot
+      dockerfile: Dockerfile
+    image: vps1777/nb1777-bot:dev

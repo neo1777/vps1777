@@ -25,6 +25,10 @@ data/*
 !data/.gitkeep
 volumes/
 
+# ───── Self-update runtime (esiste solo sulla VPS) ─────
+var/
+releases/
+
 # ───── Onboarding pending (valori sensibili temporanei) ─────
 onboarding/
 
