@@ -84,9 +84,13 @@ cp -a secrets/*.txt "$TMP/secrets/" 2>/dev/null || warn "Nessun secret"
 ok "Config + secrets archiviati"
 
 # ───── 3. metadata ─────
+# Identità versione: sulla VPS non c'è git (deploy via tar/bundle), quindi
+# la verità è il tag deployato (VPS1777_TAG) + il VERSION del bundle.
 {
   echo "vps1777 backup"
   echo "timestamp: $TIMESTAMP"
+  echo "version: $(grep '^VPS1777_TAG=' .env 2>/dev/null | cut -d= -f2 | head -1 || true)"
+  echo "bundle: $(tr -d '[:space:]' < VERSION 2>/dev/null || echo '?')"
   echo "git: $(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo 'no-git')"
   echo "host: $(hostname)"
   echo "docker: $(docker --version)"
