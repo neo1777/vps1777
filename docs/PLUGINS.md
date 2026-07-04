@@ -56,6 +56,10 @@ docker compose \
   up -d --build
 ```
 
+`--build` qui builda **solo il tuo plugin** (l'unico servizio con `build:`):
+il core è pull-only, le immagini vps1777 arrivano da GHCR e non si buildano
+mai sulla VPS — vedi [UPDATE.md](UPDATE.md).
+
 Il tuo MCP risponde a: `<PUBLIC_BASE>/<SECRET>/mio-mcp/mcp`.
 
 Aggiungilo come connector su claude.ai.

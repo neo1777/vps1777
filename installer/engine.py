@@ -36,6 +36,28 @@ REMOTE_DIR = f"/home/{OPERATOR_USER}/vps1777"
 TS_TAG = "tag:vps1777"
 TS_API = "https://api.tailscale.com/api/v2"
 
+# Repo GitHub delle release (immagini ghcr + runtime bundle)
+GITHUB_REPO = "neo1777/vps1777"
+
+
+def latest_release_version(prerelease: bool = False) -> str:
+    """Ultima release pubblicata (dal PC dell'installer). '' se nessuna.
+
+    L'installer produzione installa SEMPRE una release taggata (modello pull,
+    mai build sulla VPS 4GB). prerelease=True serve solo ai test rc.
+    """
+    try:
+        if prerelease:
+            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=1"
+            obj, _ = _http_json(url, headers={"User-Agent": "vps1777-installer"})
+            return obj[0]["tag_name"].lstrip("v") if obj else ""
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        obj, _ = _http_json(url, headers={"User-Agent": "vps1777-installer"})
+        return str(obj.get("tag_name", "")).lstrip("v")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, KeyError,
+            json.JSONDecodeError):
+        return ""
+
 
 # ── Provisioning Tailscale via OAuth client (gira sul PC, non sulla VPS) ────
 # Il client-secret OAuth resta in locale: lo usiamo per (1) ottenere un token,
@@ -115,9 +137,10 @@ def _ts_create_authkey(token: str, tag: str) -> str:
     return key
 
 # Cartelle/file da NON includere nel tar caricato sulla VPS
+# (var/ e releases/ sono runtime del canale self-update: esistono solo sulla VPS)
 TAR_EXCLUDE = {
     ".git", "__pycache__", ".venv", "node_modules", "backups",
-    "onboarding", ".pytest_cache", ".ruff_cache", ".mypy_cache",
+    "onboarding", "var", "releases", ".pytest_cache", ".ruff_cache", ".mypy_cache",
 }
 
 
@@ -411,6 +434,8 @@ set_kv TS_HOSTNAME {shlex.quote(p.get('ts_hostname','vps1777'))}
 set_kv TS_AUTHKEY {shlex.quote(p.get('ts_authkey',''))}
 set_kv CADDY_DOMAIN {shlex.quote(p.get('caddy_domain',''))}
 set_kv CADDY_EMAIL {shlex.quote(p.get('caddy_email',''))}
+set_kv VPS1777_TAG {shlex.quote(p.get('_vps1777_version') or 'dev')}
+set_kv VPS1777_IMAGE_BASE {shlex.quote(p.get('_image_base') or 'ghcr.io/neo1777')}
 echo CONFIG_OK
 """
         for line in self._stream(self._sudo(gen), "config"):
@@ -425,22 +450,64 @@ echo CONFIG_OK
         self.result["ADMIN_EMAIL"] = p.get("admin_email", "")
         yield "✓ .env + secrets pronti"
 
-    def _compose_cmd(self, ingress: str, onboarding: bool = True) -> str:
+    def _compose_cmd(self, ingress: str, onboarding: bool = True,
+                     build: bool = False) -> str:
         files = f"-f compose.yaml -f compose.ingress.{ingress}.yaml"
+        # compose.yaml è pull-only (immagini ghcr): l'overlay di build si
+        # aggiunge SOLO nell'escape hatch dev (mai in produzione — VPS 4GB).
+        if build:
+            files += " -f compose.build.yaml"
         # Per tailscale (host-mode) l'esposizione la gestisce GATEWAY_BIND, non
         # l'override onboarding (che pubblicherebbe una 2ª porta in conflitto).
         if onboarding and ingress != "tailscale":
             files += " -f compose.onboarding.yaml"
         return f"docker compose {files} --profile ingress.{ingress}"
 
-    def step_build(self, ingress: str) -> Iterator[str]:
-        yield "── Build immagini + avvio (può richiedere alcuni minuti)…"
+    def step_pull(self, ingress: str, version: str) -> Iterator[str]:
+        """Path produzione: pull delle immagini pubblicate (MAI build sulla VPS)."""
+        yield f"── Pull immagini v{version} da ghcr + avvio…"
         cmd = self._compose_cmd(ingress, onboarding=True)
+        env = "COMPOSE_ANSI=never DOCKER_CLI_HINTS=false"
+        for line in self._stream(
+                self._sudo(f"cd {REMOTE_DIR} && {env} {cmd} pull && {env} {cmd} up -d"),
+                "pull"):
+            yield line
+        yield "✓ Stack avviato (immagini pullate, niente build in produzione)"
+
+    def step_build(self, ingress: str) -> Iterator[str]:
+        """Escape hatch dev (--dev-build) o fallback pre-prima-release."""
+        yield "── Build LOCALE immagini + avvio (dev/fallback — non produzione)…"
+        cmd = self._compose_cmd(ingress, onboarding=True, build=True)
         # progress plain + niente ANSI: output pulito per lo streaming web
         env = "BUILDKIT_PROGRESS=plain COMPOSE_ANSI=never DOCKER_CLI_HINTS=false"
         for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && {env} {cmd} up -d --build"), "build"):
             yield line
-        yield "✓ Stack avviato"
+        yield "✓ Stack avviato (build locale)"
+
+    def step_selfupdate_setup(self) -> Iterator[str]:
+        """Installa il canale update: CLI vps1777 + unit systemd. Idempotente."""
+        yield "── Installo il canale di aggiornamento (CLI + timer)…"
+        script = f"""
+set -e
+install -m 755 {REMOTE_DIR}/tools/vps1777.py /usr/local/bin/vps1777
+for u in {REMOTE_DIR}/systemd/vps1777-*; do
+  case "$u" in *.service|*.timer|*.path) install -m 644 "$u" /etc/systemd/system/;; esac
+done
+systemctl daemon-reload
+systemctl enable --now vps1777-check-update.timer vps1777-update.path
+echo SELFUPDATE_OK
+"""
+        okf = False
+        for line in self._stream(script, "selfupdate-setup"):
+            if "SELFUPDATE_OK" in line:
+                okf = True
+            else:
+                yield line
+        if not okf:
+            raise DeployError("installazione canale update fallita")
+        # primo check (come operatore): popola update_status.json per la card admin
+        self._run_capture(self._sudo(f"cd {REMOTE_DIR} && /usr/local/bin/vps1777 check || true"))
+        yield "✓ Canale update attivo: `vps1777 update` + pulsante admin + check giornaliero"
 
     # ───── helper Tailscale (gira SULL'HOST, come root via SSH) ─────
 
@@ -621,6 +688,7 @@ echo CONFIG_OK
 
 def run(params: dict) -> Iterator[str]:
     """Generator completo: esegue tutti gli step, yield righe di log."""
+    import os as _os
     d = Deployer(params.get("ip", ""), params.get("user", "root") or "root",
                  params.get("password", ""))
     ingress = {"1": "tailscale", "2": "caddy", "3": "cloudflared"}.get(params.get("ingress_num", "1"), "tailscale")
@@ -628,21 +696,44 @@ def run(params: dict) -> Iterator[str]:
         yield "▶ Connessione alla VPS…"
         d.connect()
         yield f"✓ Connesso: {d.detect_os()}"
-        yield "═ STEP 1/6 — Preparazione VPS"
+
+        # Versione da installare: esplicita (test/rc) > ultima release stable.
+        # dev_build=True (o nessuna release pubblicata) → build locale (dev).
+        dev_build = bool(params.get("dev_build")) or _os.environ.get("VPS1777_DEV_BUILD") == "1"
+        version = ""
+        if not dev_build:
+            version = (params.get("vps1777_version")
+                       or _os.environ.get("VPS1777_INSTALL_VERSION")
+                       or latest_release_version(
+                           prerelease=_os.environ.get("VPS1777_RELEASE_CHANNEL") == "prerelease"))
+            if version:
+                yield f"✓ Installerò la release v{version} (immagini ghcr, nessuna build)"
+            else:
+                yield "! Nessuna release pubblicata trovata → fallback: build locale (dev)"
+                dev_build = True
+        params["_vps1777_version"] = "" if dev_build else version
+        params["_image_base"] = params.get("image_base", "")
+
+        yield "═ STEP 1/8 — Preparazione VPS"
         yield from d.step_prepare()
-        yield "═ STEP 2/6 — Trasferimento repo"
+        yield "═ STEP 2/8 — Trasferimento repo"
         yield from d.step_upload()
-        yield "═ STEP 3/6 — Config + secrets"
+        yield "═ STEP 3/8 — Config + secrets"
         if ingress == "tailscale":
             yield from d.step_ts_provision(params)
         yield from d.step_config(params)
-        yield "═ STEP 4/6 — Build + avvio"
-        yield from d.step_build(ingress)
-        yield "═ STEP 5/7 — Tailscale (host) + Funnel"
+        yield "═ STEP 4/8 — Immagini + avvio"
+        if dev_build:
+            yield from d.step_build(ingress)
+        else:
+            yield from d.step_pull(ingress, version)
+        yield "═ STEP 5/8 — Tailscale (host) + Funnel"
         yield from d.step_tailscale_host(params, ingress)
-        yield "═ STEP 6/7 — Finalizzazione (production)"
+        yield "═ STEP 6/8 — Canale di aggiornamento"
+        yield from d.step_selfupdate_setup()
+        yield "═ STEP 7/8 — Finalizzazione (production)"
         yield from d.step_finalize(ingress)
-        yield "═ STEP 7/7 — Reboot test + verifica HTTPS"
+        yield "═ STEP 8/8 — Reboot test + verifica HTTPS"
         yield from d.step_reboot(ingress)
         yield from d.collect_result()
         yield "__EXIT__0"

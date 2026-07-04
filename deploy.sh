@@ -261,6 +261,22 @@ REMOTE_DIR="/home/$OPERATOR_USER/vps1777"
 # non lo include). Binario ufficiale da GitHub releases.
 COMPOSE_VERSION="v2.32.4"
 
+# ── Versione vps1777 da installare (modello pull: immagini ghcr, MAI build
+#    sulla VPS 4GB). Override per test rc: VPS1777_INSTALL_VERSION=X.Y.Z-rc.1
+#    Escape hatch sviluppo: DEV_BUILD=1 (build locale con compose.build.yaml).
+DEV_BUILD="${DEV_BUILD:-0}"
+INSTALL_VERSION=""
+if [ "$DEV_BUILD" != "1" ]; then
+  INSTALL_VERSION="${VPS1777_INSTALL_VERSION:-$(curl -fsS -m 10 https://api.github.com/repos/neo1777/vps1777/releases/latest 2>/dev/null \
+    | python3 -c 'import sys,json;print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)}"
+  if [ -n "$INSTALL_VERSION" ]; then
+    ok "Installerò la release v$INSTALL_VERSION (pull da ghcr, nessuna build)"
+  else
+    warn "Nessuna release pubblicata trovata → fallback: build locale (dev)"
+    DEV_BUILD=1
+  fi
+fi
+
 # ═══════════════════════════════════════════ 3. PREPARA VPS
 step "3/8 — Preparo la VPS (Docker + Compose v2 + utente $OPERATOR_USER)"
 
@@ -322,8 +338,11 @@ step "4/8 — Trasferisco il repo sulla VPS"
 
 log "tar over SSH → $REMOTE_DIR..."
 SSH "rm -rf /tmp/vps1777-xfer && mkdir -p /tmp/vps1777-xfer"
+# onboarding/var/releases = runtime della VPS (pending.json, state del canale
+# update, bundle staged): mai sovrascritti da un re-deploy.
 tar --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='.venv' --exclude='secrets/*.txt' --exclude='backups' \
+    --exclude='onboarding' --exclude='var' --exclude='releases' \
     -cf - . | PIPE_IN "tar -xf - -C /tmp/vps1777-xfer"
 SSH "export OPERATOR_USER='$OPERATOR_USER' REMOTE_DIR='$REMOTE_DIR'; bash -s" <<'PREP2'
 set -e
@@ -385,6 +404,8 @@ set_kv TS_HOSTNAME "${TS_HOSTNAME:-}"
 set_kv TS_AUTHKEY "$TS_AUTHKEY"
 set_kv CADDY_DOMAIN "$CADDY_DOMAIN"
 set_kv CADDY_EMAIL "$CADDY_EMAIL"
+set_kv VPS1777_TAG "${INSTALL_VERSION:-dev}"
+set_kv VPS1777_IMAGE_BASE "${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}"
 echo "ENV_OK"
 RSETUP
 )
@@ -399,8 +420,8 @@ if [ -n "$GENERATED_PWD" ]; then
   warn "  → SALVALA SUBITO in un password manager. Non la rivedrai."
 fi
 
-# ═══════════════════════════════════════════ 6. BUILD + UP
-step "6/8 — Build immagini + avvio stack (può richiedere alcuni minuti)"
+# ═══════════════════════════════════════════ 6. IMMAGINI + UP
+step "6/8 — Immagini + avvio stack"
 
 # Per tailscale (host-mode) l'esposizione la gestisce GATEWAY_BIND, NON
 # compose.onboarding (che pubblicherebbe una 2ª porta in conflitto sulla :8080).
@@ -409,9 +430,27 @@ if [ "$INGRESS" = "tailscale" ]; then
 else
   COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml -f compose.onboarding.yaml --profile ingress.${INGRESS}"
 fi
-SSHT "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD up -d --build'" \
-  || die "docker compose up fallito"
-ok "Stack avviato"
+if [ "$DEV_BUILD" = "1" ]; then
+  # build locale: aggiunge l'overlay compose.build.yaml (solo dev/fallback)
+  COMPOSE_CMD_BUILD="${COMPOSE_CMD/--profile/-f compose.build.yaml --profile}"
+  SSHT "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD_BUILD up -d --build'" \
+    || die "docker compose up (build locale) fallito"
+  ok "Stack avviato (build locale — dev)"
+else
+  SSHT "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD pull && $COMPOSE_CMD up -d'" \
+    || die "docker compose pull/up fallito"
+  ok "Stack avviato (immagini v$INSTALL_VERSION pullate — niente build in produzione)"
+fi
+
+# ── Canale di aggiornamento: CLI vps1777 + unit systemd (idempotente)
+log "Installo il canale di aggiornamento (CLI + timer + path unit)..."
+SSH "install -m755 $REMOTE_DIR/tools/vps1777.py /usr/local/bin/vps1777 \
+  && for u in $REMOTE_DIR/systemd/vps1777-*; do case \"\$u\" in *.service|*.timer|*.path) install -m644 \"\$u\" /etc/systemd/system/;; esac; done \
+  && systemctl daemon-reload \
+  && systemctl enable --now vps1777-check-update.timer vps1777-update.path" \
+  && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero" \
+  || warn "Setup canale update fallito — installalo dopo con tools/bootstrap.sh"
+SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && /usr/local/bin/vps1777 check || true'" >/dev/null 2>&1 || true
 
 log "Stato container:"
 SSH "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true

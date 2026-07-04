@@ -66,6 +66,42 @@ Vedi [PLUGINS.md](PLUGINS.md). In sintesi:
 4. Restart gateway: `docker compose restart gateway`
 5. URL del tuo plugin: `<PUBLIC_BASE>/<SECRET>/<nome>/mcp`
 
+## Canale di aggiornamento
+
+Il motore degli update vive **sull'host**, non nei container: la CLI
+`/usr/local/bin/vps1777` (installata da installer/deploy.sh) è l'unico punto
+che tocca immagini e stack. Il gateway resta **senza privilegi**: il pulsante
+*Aggiorna* del pannello admin scrive solo un **intent file** in `onboarding/`
+(validato: schema, semver, TTL, nonce anti-replay); una systemd **path unit**
+(`vps1777-update.path` → `vps1777-update.service`) lo vede e lancia lo stesso
+`vps1777 update`. Un timer giornaliero (`vps1777-check-update.timer`) fa il
+check release + notifica Telegram al owner.
+
+```
+admin UI ──intent──► onboarding/update_pending_update.json
+                        │  (systemd path unit, host)
+                        ▼
+   vps1777 update ──► backup age + snapshot locale
+                  ──► pull + verifica digest (images.lock dal
+                      bundle firmato cosign della GitHub Release)
+                  ──► migrazioni ──► health-gate 180s
+                  ──► ✅ ok  │  AUTO-ROLLBACK
+```
+
+Le immagini arrivano **solo da GHCR** (`compose.yaml` è pull-only; il build
+locale esiste solo nell'overlay `compose.build.yaml`, dev/CI). Manuale utente
+completo: [UPDATE.md](UPDATE.md).
+
+## Healthcheck
+
+Ogni servizio ha un healthcheck compose (usati anche dal health-gate dell'update):
+
+| Servizio | Probe |
+|---|---|
+| gateway | `/health`; con `?deep=1` proba TCP gli upstream MCP (503 se giù) |
+| archive-mcp / nb1777-mcp | TCP sulla porta MCP |
+| nb1777-bot | long-poll, nessuna porta: file heartbeat `/tmp/nb1777-bot.heartbeat` (unhealthy se mtime > 90s) |
+
 ## OAuth flow
 
 ```
