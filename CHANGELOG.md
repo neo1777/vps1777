@@ -2,6 +2,12 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.9.2] — 2026-07-05
+
+### Aggiunto — `doctor` come verità viva (anti-memoria-stale)
+
+- Il tool **`doctor`** (nb1777) ora riporta **`vps1777_version`** (da `VPS1777_VERSION`, iniettata a ogni release → si aggiorna **da sola** a ogni update del gateway) e un **`contract_note`** che invita a fidarsi degli schemi live dei tool e di `doctor`, non di quirk memorizzati. Una sessione che chiama `doctor` all'inizio vede *quale* build sta interrogando e che i contratti `source`/`studio` sono pinnati e verificati dal contract-test. Rompe la dipendenza dalla memoria per i fatti volatili dell'MCP: la verità del gateway si aggiorna a ogni release, la memoria no.
+
 ## [0.9.1] — 2026-07-05
 
 ### Fix — nb1777-mcp: famiglia `source` + `studio_download` allineate a nlm 0.7.7
