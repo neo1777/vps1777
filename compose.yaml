@@ -93,7 +93,11 @@ services:
     environment:
       ARCHIVE_HTTP_HOST: 0.0.0.0
       ARCHIVE_HTTP_PORT: 8002
-      ARCHIVE_DB_PATHS: "main:/var/lib/archive/db/archive.db,cc:/var/lib/archive/db/archive-cc.db,cc-dash:/var/lib/archive/db/archive-cc-dash.db"
+      # L'archivio nasce VUOTO: ogni utente lo popola coi propri DB SQLite FTS5.
+      # Metti i file in archive-data e imposta ARCHIVE_DB_PATHS in .env come CSV
+      # "nome:/var/lib/archive/db/<file>.db,...". Vuoto = stato normale, non un
+      # errore (i tool tornano risultati vuoti finché non aggiungi un DB).
+      ARCHIVE_DB_PATHS: "${ARCHIVE_DB_PATHS:-}"
       FASTMCP_STATELESS_HTTP: "true"
     volumes:
       - archive-data:/var/lib/archive:rw

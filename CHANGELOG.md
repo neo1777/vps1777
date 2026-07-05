@@ -2,6 +2,28 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.9.1] — 2026-07-05
+
+### Fix — nb1777-mcp: famiglia `source` + `studio_download` allineate a nlm 0.7.7
+
+La 0.9.0 aveva **pinnato** `notebooklm-mcp-cli==0.7.7` ma il wrapper (`services/nb1777-mcp/app/core.py`) costruiva ancora gli `argv` di alcuni sottocomandi all'interfaccia precedente. Cinque tool erano di fatto rotti (scoperti da un health-check MCP live, verificati contro l'`--help` del binario):
+
+- **`source_get_content`**: passava `notebook_id` posizionale, ma `nlm source content` 0.7.7 vuole solo `SOURCE_ID` → *"Got unexpected extra argument(s)"*. Fix: `content SOURCE_ID`.
+- **`source_rename`**: `nlm source rename` 0.7.7 richiede il notebook come opzione `-n/--notebook` → *"Missing option --notebook"*. Fix: `rename -n NOTEBOOK SOURCE_ID TITLE`.
+- **`source_delete`**: passava `notebook_id` come primo `SOURCE_ID` → *"Failed to delete sources"* (failure-mode: cancellare l'oggetto sbagliato). Fix: `delete SOURCE_ID --confirm`.
+- **`source_add_*` (return-id)**: ritornavano `sources[-1]`, assumendo che l'ultima fonte in lista fosse quella appena creata — falso con ≥2 fonti (`source_add_url` restituiva l'id della fonte testo). Fix: `_add_and_resolve_id` ricava l'id per **differenza** degli id prima/dopo l'add (fallback loggato in caso di concorrenza sullo stesso account).
+- **`studio_download`**: passava `--no-progress`, opzione inesistente in `nlm download` 0.7.7 → download fallito (nell'health-check originale mascherato dal blocco-approvazione MCP a monte). Fix: rimosso.
+
+Tutti e cinque validati **live** su un notebook usa-e-getta (ciclo reversibile, cleanup completo).
+
+### Aggiunto — Contract-test anti-drift wrapper↔`nlm`
+
+- **`services/nb1777-mcp/tests/test_source_cli_contract.py`** + job CI **`contract`**: installa il pin `nlm 0.7.7` e verifica, parsando `--help`, che le firme dei sottocomandi `source *` e `download report` siano quelle su cui `core.py` si appoggia. Un futuro bump di `nlm` che cambia una firma fallisce **in CI**, non in produzione — il pin da solo non basta (la 0.9.0 lo dimostra).
+
+### Cambiato — `archive-mcp` nasce vuoto (first-class)
+
+- `compose.yaml` non cabla più DB SQLite specifici: `ARCHIVE_DB_PATHS` ha default **vuoto**, overridabile da `.env`. Un archivio vuoto è lo **stato normale** di un'installazione nuova (log `INFO`, non più *"degraded mode / SENZA DB"*): ogni utente lo popola coi propri DB FTS5. Il warning resta solo per la misconfig reale (path dichiarato ma file assente). README di `archive-mcp` riscritto in chiave generica.
+
 ## [0.9.0] — 2026-07-04
 
 ### Aggiunto — Canale di self-update gestito

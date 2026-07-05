@@ -20,3 +20,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+# Solo per test/CI — esclusi dall'immagine (Dockerfile fa `uv sync --no-dev`).
+[dependency-groups]
+dev = ["pytest>=8.0"]
