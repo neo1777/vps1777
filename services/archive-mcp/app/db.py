@@ -22,7 +22,13 @@ def load_registry() -> dict[str, Path]:
     s = get_settings()
     requested = s.archive_db_paths
     if not requested:
-        log.warning("ARCHIVE_DB_PATHS vuoto — server parte SENZA DB")
+        # Stato NORMALE di un'installazione nuova: l'archivio nasce vuoto e ogni
+        # utente lo popola coi propri DB (vedi README). Non è un errore: i tool
+        # rispondono con liste vuote finché non aggiungi un DB.
+        log.info(
+            "Archivio vuoto (ARCHIVE_DB_PATHS non impostato) — aggiungi i tuoi "
+            "DB SQLite FTS5 per abilitare la ricerca.",
+        )
         return {}
     out: dict[str, Path] = {}
     missing: list[str] = []
@@ -32,11 +38,13 @@ def load_registry() -> dict[str, Path]:
         else:
             missing.append(f"{name}={p}")
     if missing:
-        log.warning("DB mancanti (degraded mode): %s", ", ".join(missing))
+        # Qui sì è un problema di config: un path è stato DICHIARATO ma il file
+        # non esiste sul volume.
+        log.warning("DB dichiarati ma non trovati sul volume: %s", ", ".join(missing))
     if not out:
         log.warning(
-            "Nessun DB caricato. Server parte in degraded mode — tool ritornano "
-            "risultati vuoti finché non popoli i DB.",
+            "Nessuno dei DB dichiarati è stato caricato — la ricerca tornerà "
+            "risultati vuoti finché i file non esistono.",
         )
     return out
 

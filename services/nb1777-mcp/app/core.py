@@ -30,6 +30,7 @@ Gotcha noti (dal collaudo empirico 12/06 su GDR1777-lab):
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -89,6 +90,8 @@ DOWNLOAD_EXT = {
 
 NLM = shutil.which("nlm") or "nlm"
 _UUID_RE = re.compile(r"\b([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\b")
+
+log = logging.getLogger("nb1777-mcp.core")
 
 
 class NLMError(RuntimeError):
@@ -187,12 +190,53 @@ def source_list(nb_id: str) -> list[dict]:
     return list(_run_json(["source", "list", nb_id]))
 
 
+def _source_id_of(s: dict) -> str:
+    return s.get("id") or s.get("source_id") or s.get("uuid") or ""
+
+
+def _source_ids(nb_id: str) -> set[str]:
+    """Insieme degli id delle fonti attualmente nel notebook."""
+    return {sid for s in source_list(nb_id) if (sid := _source_id_of(s))}
+
+
 def _last_source_id(nb_id: str) -> str:
+    """Ripiego best-effort: l'ultima fonte in lista. Vedi _add_and_resolve_id
+    per perché NON è affidabile come identità della fonte appena creata."""
     sources = source_list(nb_id)
     if not sources:
         raise NLMError(f"nessuna fonte trovata in nb={nb_id} dopo add")
-    last = sources[-1]
-    return last.get("id") or last.get("source_id") or last.get("uuid") or ""
+    return _source_id_of(sources[-1])
+
+
+def _add_and_resolve_id(nb_id: str, args: list[str], *, timeout: float) -> str:
+    """Esegue un `source add` e ritorna l'id della fonte APPENA creata.
+
+    `nlm source add` non stampa l'id in modo affidabile, quindi lo si ricava
+    per differenza: si fotografano gli id prima e dopo l'add. Questo è robusto
+    contro l'ordinamento di `source list` — il vecchio `sources[-1]` assumeva
+    che l'ultima in lista fosse la nuova, falso con >=2 fonti (era il bug per
+    cui source_add_url tornava l'id della fonte testo precedente).
+
+    Limite dichiarato — concorrenza: se un'ALTRA sessione aggiunge una fonte
+    allo stesso notebook nella finestra fra i due snapshot (stesso account
+    NotebookLM), la differenza può contenere piu di un id. In quel caso non si
+    indovina: si logga e si ripiega sull'ultima (best-effort). Richiede wait=True
+    perché la fonte compaia nello snapshot 'dopo'.
+    """
+    before = _source_ids(nb_id)
+    _run(args, timeout=timeout + 60)
+    after = _source_ids(nb_id)
+    new = after - before
+    if len(new) == 1:
+        return next(iter(new))
+    if not new:
+        log.warning("source add: nessun id nuovo rilevato (nb=%s) — ripiego su last", nb_id)
+        return _last_source_id(nb_id)
+    log.warning(
+        "source add: %d id nuovi (nb=%s) — concorrenza sullo stesso account? ripiego su last",
+        len(new), nb_id,
+    )
+    return _last_source_id(nb_id)
 
 
 def source_add_url(nb_id: str, url: str, *, title: Optional[str] = None,
@@ -203,8 +247,7 @@ def source_add_url(nb_id: str, url: str, *, title: Optional[str] = None,
         args += ["--title", title]
     if wait:
         args += ["--wait", "--wait-timeout", str(timeout)]
-    _run(args, timeout=timeout + 60)
-    return _last_source_id(nb_id)
+    return _add_and_resolve_id(nb_id, args, timeout=timeout)
 
 
 def source_add_text(nb_id: str, text: str, title: str, *,
@@ -213,8 +256,7 @@ def source_add_text(nb_id: str, text: str, title: str, *,
     args = ["source", "add", nb_id, "--text", text, "--title", title]
     if wait:
         args += ["--wait", "--wait-timeout", str(timeout)]
-    _run(args, timeout=timeout + 60)
-    return _last_source_id(nb_id)
+    return _add_and_resolve_id(nb_id, args, timeout=timeout)
 
 
 def source_add_file(nb_id: str, file_path: Union[str, Path], *,
@@ -225,8 +267,7 @@ def source_add_file(nb_id: str, file_path: Union[str, Path], *,
         args += ["--title", title]
     if wait:
         args += ["--wait", "--wait-timeout", str(timeout)]
-    _run(args, timeout=timeout + 60)
-    return _last_source_id(nb_id)
+    return _add_and_resolve_id(nb_id, args, timeout=timeout)
 
 
 def source_add_youtube(nb_id: str, url: str, *, wait: bool = True, timeout: float = 900.0) -> str:
@@ -234,8 +275,7 @@ def source_add_youtube(nb_id: str, url: str, *, wait: bool = True, timeout: floa
     args = ["source", "add", nb_id, "--youtube", url]
     if wait:
         args += ["--wait", "--wait-timeout", str(timeout)]
-    _run(args, timeout=timeout + 60)
-    return _last_source_id(nb_id)
+    return _add_and_resolve_id(nb_id, args, timeout=timeout)
 
 
 def source_add_drive(nb_id: str, document_id: str, *,
@@ -244,23 +284,39 @@ def source_add_drive(nb_id: str, document_id: str, *,
     args = ["source", "add", nb_id, "--drive", document_id, "--type", doc_type]
     if wait:
         args += ["--wait", "--wait-timeout", str(timeout)]
-    _run(args, timeout=timeout + 60)
-    return _last_source_id(nb_id)
+    return _add_and_resolve_id(nb_id, args, timeout=timeout)
 
 
-def source_delete(nb_id: str, source_id: str) -> None:
-    """Elimina una fonte (irreversibile)."""
-    _run(["source", "delete", nb_id, source_id, "--confirm"])
+def source_delete(nb_id: str, source_id: str) -> None:  # noqa: ARG001 (nb_id tenuto per firma MCP)
+    """Elimina una fonte (irreversibile).
+
+    nlm 0.7.7: `source delete SOURCE_IDS... [--confirm]` — la fonte è
+    identificata dal solo source_id (globale), NON dal notebook. Passare nb_id
+    come primo posizionale lo farebbe interpretare come un source_id da
+    cancellare → "Failed to delete sources".
+    """
+    _run(["source", "delete", source_id, "--confirm"])
 
 
-def source_get_content(nb_id: str, source_id: str) -> str:
-    """Estrae il contenuto raw di una fonte (no elaborazione AI)."""
-    p = _run(["source", "content", nb_id, source_id], timeout=120)
+def source_get_content(nb_id: str, source_id: str) -> str:  # noqa: ARG001 (nb_id tenuto per firma MCP)
+    """Estrae il contenuto raw di una fonte (no elaborazione AI).
+
+    nlm 0.7.7: `source content SOURCE_ID` — un solo posizionale. Il notebook
+    non serve (source_id è globale). Passare nb_id → "Got unexpected extra
+    argument(s)".
+    """
+    p = _run(["source", "content", source_id], timeout=120)
     return p.stdout or ""
 
 
 def source_rename(nb_id: str, source_id: str, new_title: str) -> None:
-    _run(["source", "rename", nb_id, source_id, new_title])
+    """Rinomina una fonte.
+
+    nlm 0.7.7: `source rename -n NOTEBOOK SOURCE_ID TITLE` — il notebook è
+    un'opzione OBBLIGATORIA `-n/--notebook`, non un posizionale. Passarlo
+    posizionale → "Missing option --notebook".
+    """
+    _run(["source", "rename", "-n", nb_id, source_id, new_title])
 
 
 # ============================================================
@@ -523,7 +579,10 @@ def studio_download(kind: str, nb_id: str, output_path: Union[str, Path], *,
         raise NLMError(f"download: tipo non riconosciuto '{kind}'. Validi: {list(_CLI_DOWNLOAD)}")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    args = ["download", cli_kind, nb_id, "--output", str(output_path), "--no-progress"]
+    # nlm 0.7.7: `download <kind> NOTEBOOK_ID [-o PATH] [--id ARTIFACT]`. NON
+    # esiste `--no-progress` (era il motivo per cui studio_download falliva a
+    # valle: nel test MCP originale il blocco-approvazione lo mascherava).
+    args = ["download", cli_kind, nb_id, "--output", str(output_path)]
     if artifact_id:
         args += ["--id", artifact_id]
     _run(args, timeout=900)
