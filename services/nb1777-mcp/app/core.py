@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -679,8 +680,26 @@ def studio_create_all_9(nb_id: str, *,
 # ============================================================
 
 def doctor() -> dict:
-    """Diagnostica: verifica nlm + lista NB visibili."""
-    info: dict = {"nlm_path": NLM}
+    """Diagnostica viva: versione vps1777 + nlm + lista NB visibili.
+
+    `vps1777_version` è iniettata a build-time dalla CI di release (env
+    VPS1777_VERSION), quindi si aggiorna DA SOLA a ogni update del gateway: una
+    sessione che chiama doctor vede sempre la build corrente. `nlm_pinned` è la
+    versione del CLI su cui i tool sono contratti (verificata dal contract-test).
+
+    `contract_note` esiste per rompere la dipendenza dalla memoria: i quirk dei
+    sottocomandi cambiano fra versioni di nlm, quindi vanno LETTI qui/dagli schemi
+    dei tool, non ricordati. Fidati del vivo, non degli appunti.
+    """
+    info: dict = {
+        "vps1777_version": os.environ.get("VPS1777_VERSION", "0.0.0-dev"),
+        "nlm_path": NLM,
+        "contract_note": (
+            "Tool source/studio contratti su nlm 0.7.x e verificati da un "
+            "contract-test in CI. Verifica le firme dal vivo (doctor + schemi "
+            "dei tool), non da memoria: i quirk cambiano fra versioni di nlm."
+        ),
+    }
     try:
         p = _run(["--version"], check=True)
         info["version"] = (p.stdout or "").strip()
