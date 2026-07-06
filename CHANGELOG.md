@@ -2,6 +2,13 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.9.3] — 2026-07-05
+
+### Aggiunto — State card NotebookLM opzionale (hook post-update)
+
+- Se `.env` definisce **`VPS1777_STATECARD_NB`** (id notebook), dopo ogni `vps1777 update`/rollback riuscito la VPS fa **upsert idempotente** di una "state card" (versione + contratto tool + rimando a `doctor`, datata) come fonte testuale del notebook — via il nuovo entrypoint `app.statecard` nel container nb1777-mcp. **Best-effort**: un fallimento (auth assente, MCP giù, notebook rimosso) non blocca mai l'update. **Vuoto di default** ⇒ feature spenta. Serve ai contesti che leggono un notebook *senza* l'MCP; la verità viva resta il tool `doctor`. Riusa (dogfooda) i fix `source` di 0.9.1 — list/delete/add.
+- `.env.example`: documentati gli opzionali `VPS1777_STATECARD_NB` e `ARCHIVE_DB_PATHS` (come popolare l'archivio che dalla 0.9.1 nasce vuoto).
+
 ## [0.9.2] — 2026-07-05
 
 ### Aggiunto — `doctor` come verità viva (anti-memoria-stale)

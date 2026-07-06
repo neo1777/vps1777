@@ -896,6 +896,7 @@ def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
                               "to": previous, "at": now_iso(), "reason": reason})
         state_save(repo, st)
         progress_write(repo, target, 91, "rollback", "rolled_back", reason)
+        sync_state_card(repo, previous)  # la card riflette la versione ripristinata
         telegram_notify(repo, f"❌ vps1777: update a v{norm_ver(target)} fallito "
                               f"({reason}). Rollback a v{norm_ver(previous)} riuscito.")
         ok(f"rollback a v{norm_ver(previous)} riuscito")
@@ -910,6 +911,33 @@ def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
                           f"Backup age disponibile: {last_age}")
     die(f"rollback non healthy ({why}) — intervento manuale richiesto", 2)
     return 2
+
+
+def sync_state_card(repo: Path, version: str) -> None:
+    """Best-effort: upsert della state card vps1777 su un notebook NotebookLM.
+
+    Attiva SOLO se `.env` definisce `VPS1777_STATECARD_NB` (id notebook) —
+    vuoto di default, così per gli altri utenti la feature è spenta. Scrive via
+    l'entrypoint `app.statecard` nel container nb1777-mcp (che ha l'auth nlm +
+    il wrapper coi fix source). NON solleva MAI: l'update è già riuscito, la
+    card è un di-più; un fallimento (auth assente, MCP giù, notebook rimosso)
+    si logga e si prosegue. Single-writer: solo questo flusso la scrive.
+    """
+    nb = env_read(repo).get("VPS1777_STATECARD_NB", "").strip()
+    if not nb:
+        return  # feature spenta (default): nessun notebook configurato
+    try:
+        cmd = [*compose_cmd(repo), "exec", "-T", "nb1777-mcp",
+               "python", "-m", "app.statecard",
+               "--notebook", nb, "--version", norm_ver(version)]
+        res = run(cmd, capture=True, check=False, timeout=120)
+        if res.returncode == 0:
+            ok("state card NotebookLM aggiornata")
+        else:
+            detail = (res.stderr or res.stdout or "").strip()[:200]
+            warn(f"state card non aggiornata (best-effort): {detail}")
+    except Exception as exc:
+        warn(f"state card non aggiornata (best-effort): {exc}")
 
 
 def cmd_update(repo: Path, args) -> int:
@@ -1111,6 +1139,7 @@ def cmd_update(repo: Path, args) -> int:
     # current=target → non mostra più "aggiornamento disponibile" stantio
     status_write(repo, current=target)
     step(15, "done", "ok")
+    sync_state_card(repo, target)  # best-effort, mai bloccante
     telegram_notify(repo, f"✅ vps1777 aggiornato: v{norm_ver(cur)} → v{target}")
     ok(f"aggiornato a v{target}")
     return 0
