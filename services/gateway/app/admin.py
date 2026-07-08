@@ -9,6 +9,7 @@ demand, vedi nb1777-mcp/app/auth.py).
 """
 from __future__ import annotations
 
+import asyncio
 import html
 import io
 import json
@@ -237,8 +238,10 @@ async def login(request: Request) -> Response:
 
     if email != s.admin_email or not verify_admin_password(password):
         audit({"event": "admin_login_fail", "email": email})
-        # Aggiungiamo un piccolo delay per disincentivare brute-force
-        time.sleep(0.5)
+        # Delay anti-brute-force ASINCRONO: `time.sleep` bloccherebbe l'intero
+        # event loop (un attaccante che martella /admin/login renderebbe il
+        # gateway irraggiungibile — DoS su endpoint pubblico).
+        await asyncio.sleep(0.5)
         return _layout(
             "login",
             f'<form method="POST" action="/admin/login"><input type="hidden" name="next" value="{html.escape(next_url)}"><section><div class="kicker">accedi</div><div class="row"><label>email</label><input type="email" name="email" required value="{html.escape(email)}"></div><div class="row"><label>password</label><input type="password" name="password" required autofocus></div><div class="toolbar"><button type="submit" class="primary">Entra</button></div></section></form>',
