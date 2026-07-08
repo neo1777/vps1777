@@ -339,6 +339,55 @@ def notebook_query(nb_id: str, question: str, *,
 
 
 # ============================================================
+# transcribe — NotebookLM come motore OCR/estrazione (doer + checker)
+# ============================================================
+
+_TRANSCRIBE_PROMPT = (
+    "Riporta INTEGRALMENTE e VERBATIM tutto il contenuto testuale di questo "
+    "documento/immagine, nell'ordine originale. NON riassumere, NON commentare, "
+    "NON aggiungere nulla di tuo: solo il testo così com'è."
+)
+_VERIFY_PROMPT = (
+    "Il testo che hai appena trascritto è completo e fedele all'originale? "
+    "Segnala in 2-3 righe eventuali parti mancanti, tabelle, numeri o passaggi "
+    "incerti o poco leggibili. Se è tutto fedele, dillo esplicitamente."
+)
+
+
+def transcribe_document(file_path: Union[str, Path], *, title: Optional[str] = None,
+                        verify: bool = False, timeout: float = 600.0) -> dict:
+    """Estrae il testo di un file via NotebookLM (multimodale → legge anche le
+    immagini/scansioni che pypdf non sa fare).
+
+    Crea un notebook scratch usa-e-getta, aggiunge il file (NotebookLM lo
+    processa), chiede la trascrizione integrale via query, opzionalmente chiede
+    una verifica di fedeltà (NotebookLM controlla il proprio lavoro), poi
+    cancella lo scratch. Ritorna {text, chars, verification?}.
+
+    NB: la trascrizione è generata da LLM, non è OCR deterministico → su layout
+    complessi può omettere/allucinare. La query di verifica (`verify=True`) serve
+    a segnalarlo.
+    """
+    import os
+    path = Path(file_path)
+    nb = nb_create(f"_ingest_{os.urandom(4).hex()}")
+    try:
+        source_add_file(nb, path, title=title or path.name, wait=True, timeout=timeout)
+        q = notebook_query(nb, _TRANSCRIBE_PROMPT, timeout=timeout)
+        text = (q.get("answer") if isinstance(q, dict) else None) or ""
+        out: dict = {"text": text, "chars": len(text)}
+        if verify and text:
+            v = notebook_query(nb, _VERIFY_PROMPT, timeout=timeout)
+            out["verification"] = (v.get("answer") if isinstance(v, dict) else None) or ""
+        return out
+    finally:
+        try:
+            nb_delete(nb)
+        except NLMError as exc:
+            log.warning("transcribe: cleanup scratch nb fallito (%s): %s", nb, exc)
+
+
+# ============================================================
 # studio — create (i 9 artefatti)
 # ============================================================
 

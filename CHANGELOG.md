@@ -2,6 +2,17 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.12.0] — 2026-07-08
+
+### Aggiunto — Archive: OCR/lettura documenti via NotebookLM (`vps1777 archive-ingest`)
+
+- Nuovo comando host **`vps1777 archive-ingest <file> --db <nome> [--verify]`**: usa **NotebookLM come motore OCR/lettura multimodale** per estrarre il testo di file che `pypdf` non sa leggere (PDF-immagine, scansioni, screenshot) e indicizzarlo nell'archivio FTS. NotebookLM è **doer + checker**: trascrive il documento e, con `--verify`, verifica la fedeltà della propria trascrizione. Validato sul reale: PDF-immagine → ~13k caratteri estratti, cercabili in `archive1777`.
+  - Orchestrazione che rispetta il confine no-docker.sock: il CLI host copia il file in `nb1777-mcp` (che ha l'auth nlm) → `app.ingest` trascrive su un notebook usa-e-getta (cleanup incluso) → il testo passa al gateway → `archive_indexer` lo indicizza → `archive-mcp` lo scopre (scan-mode).
+- `nb1777-mcp`: nuova `core.transcribe_document()` + entrypoint `app.ingest`.
+- Pagina `/admin/archive`: box informativo sulla via NotebookLM per documenti/immagini; il messaggio d'errore sui PDF-immagine ora rimanda a `vps1777 archive-ingest`.
+- Doc: nuova guida [docs/ARCHIVE.md](docs/ARCHIVE.md) (pagina, formati, ingest via NotebookLM) + link dal README.
+- Caveat dichiarato: la trascrizione è generata da LLM, non OCR deterministico → ottima per ritrovare contenuti, non garantita fedele al 100% su layout complessi (per questo il `--verify`).
+
 ## [0.11.0] — 2026-07-08
 
 ### Aggiunto — Archive: formati PDF e Telegram

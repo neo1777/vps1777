@@ -318,8 +318,9 @@ def index_file(path: Union[str, Path], db_path: Union[str, Path], *, project: st
             # invece di un DB vuoto silenzioso.
             Path(db_path).unlink(missing_ok=True)
             raise ValueError(
-                "PDF senza testo estraibile (immagine/screenshot?). Serve OCR — "
-                "carica il testo sorgente (.md/.txt) o un PDF con layer di testo.")
+                "PDF senza testo estraibile (immagine/screenshot?). Per leggerlo serve "
+                "OCR: sull'host usa `vps1777 archive-ingest <file>` — NotebookLM lo legge "
+                "(anche le immagini) e ne indicizza il testo. Oppure carica il sorgente .md/.txt.")
         return n
     if suffix == ".json":
         # .json ambiguo: Telegram (oggetto con messages/chats) vs Claude Code
