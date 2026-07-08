@@ -13,10 +13,14 @@ import html
 import io
 import json
 import os
+import re
 import secrets as pysecrets
+import sqlite3
 import tarfile
 import time
 from pathlib import Path
+
+from . import archive_indexer
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -166,6 +170,7 @@ def _layout(title: str, body: str, current: str = "", flash: str = "", flash_kin
         items = [
             ("setup", "Setup"),
             ("nlm", "NotebookLM"),
+            ("archive", "Archive"),
             ("update", "Update"),
             ("secrets", "Secrets"),
             ("audit", "Audit"),
@@ -370,6 +375,137 @@ tar czf nlm-profile.tgz profiles/default</pre>
 </form>
 """
     return _layout("NotebookLM", body, current="nlm", flash=flash, flash_kind=flash_kind)
+
+
+# ───── /admin/archive — upload + indicizzazione sessioni per archive-mcp ─────
+# Il gateway monta il volume archive-data:rw. Riceve un .jsonl (sessione Claude
+# Code), lo streamma su disco e lo indicizza in-process (archive_indexer, memoria
+# costante) in <archive_db_dir>/<nome>.db. archive-mcp lo scopre da solo
+# (scan-mode) → cercabile subito, nessun restart, nessun docker.sock.
+
+_ARCHIVE_NAME_RE = re.compile(r"[^a-z0-9_-]+")
+
+
+def _safe_db_name(raw: str, fallback: str = "archivio") -> str:
+    name = _ARCHIVE_NAME_RE.sub("-", (raw or "").strip().lower()).strip("-")
+    return name or fallback
+
+
+def _archive_dbs() -> list[tuple[str, int]]:
+    """(nome, #messaggi) di ogni .db nella dir archive."""
+    db_dir = Path(get_settings().archive_db_dir)
+    if not db_dir.is_dir():
+        return []
+    return [(p.stem, archive_indexer.count_rows(p))
+            for p in sorted(db_dir.glob("*.db")) if p.is_file()]
+
+
+def _valid_archive_db(path: Path) -> bool:
+    """True se il file è un SQLite con la tabella messages_fts attesa (drop-in)."""
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            conn.execute("SELECT 1 FROM messages_fts LIMIT 1")
+            return True
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return False
+
+
+async def archive_view(request: Request) -> Response:
+    email, redirect = _require_admin(request)
+    if redirect:
+        return redirect
+
+    s = get_settings()
+    db_dir = Path(s.archive_db_dir)
+    db_dir.mkdir(parents=True, exist_ok=True)
+
+    if request.method == "POST":
+        form = await request.form()
+        upload = form.get("jsonl_file")
+        if upload is None or not hasattr(upload, "read"):
+            return RedirectResponse("/admin/archive?msg=Nessun+file+caricato&kind=err", status_code=303)
+        db_name = _safe_db_name(
+            str(form.get("db_name") or ""),
+            fallback=_safe_db_name(Path(getattr(upload, "filename", "") or "").stem),
+        )
+        project = str(form.get("project") or "").strip()
+        suffix = Path(str(getattr(upload, "filename", "") or "")).suffix.lower() or ".jsonl"
+        tmp = db_dir / f".upload-{db_name}-{os.getpid()}{suffix}"
+        db_path = db_dir / f"{db_name}.db"
+        try:
+            # stream su disco a chunk (memoria costante anche su file da decine di MB)
+            fh = upload.file  # type: ignore[union-attr]
+            fh.seek(0)
+            with open(tmp, "wb") as w:
+                while True:
+                    chunk = fh.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    w.write(chunk)
+            if suffix == ".db":
+                # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
+                if not _valid_archive_db(tmp):
+                    raise ValueError("il .db non ha lo schema atteso (messages_fts)")
+                tmp.replace(db_path)
+                n = archive_indexer.count_rows(db_path)
+                verb = "caricato (drop-in)"
+            else:
+                # dispatch per estensione: .jsonl/.json → Claude Code; .zip → claude.ai; .md/.txt → testo
+                n = archive_indexer.index_file(str(tmp), str(db_path), project=project)
+                verb = "indicizzati"
+            total = archive_indexer.count_rows(db_path)
+            audit({"event": "admin_archive_ingest", "by": email, "db": db_name, "fmt": suffix, "rows": n})
+            msg = f"{verb}: {n} record in '{db_name}' (totale {total}). Ricerca attiva subito."
+            return RedirectResponse(f"/admin/archive?msg={msg.replace(' ', '+')}&kind=ok", status_code=303)
+        except (ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
+            audit({"event": "admin_archive_ingest_err", "by": email, "db": db_name, "error": str(exc)})
+            return RedirectResponse(
+                f"/admin/archive?msg=Errore:+{str(exc).replace(' ', '+')}&kind=err", status_code=303)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    # GET
+    dbs = _archive_dbs()
+    if dbs:
+        rows = "".join(
+            f"<tr><td><code>{html.escape(n)}</code></td><td>{c} messaggi</td></tr>" for n, c in dbs
+        )
+        table = (f'<section><div class="kicker">DB nell\'archivio</div>'
+                 f'<table><thead><tr><th>nome</th><th>righe</th></tr></thead>'
+                 f'<tbody>{rows}</tbody></table></section>')
+        status_html = f'<div class="kicker"><span class="dot ok"></span>{len(dbs)} DB caricati, cercabili subito via il tool <code>search</code>.</div>'
+    else:
+        table = ""
+        status_html = '<div class="kicker"><span class="dot warn"></span>Archivio vuoto — carica una sessione per popolarlo.</div>'
+
+    flash = request.query_params.get("msg", "").replace("+", " ")
+    flash_kind = request.query_params.get("kind", "ok")
+    body = f"""
+<header>
+  <h1>vps1777 <em>admin</em> · Archive</h1>
+  <div class="who">{html.escape(email)}</div>
+</header>
+{status_html}
+{table}
+<section>
+  <div class="kicker">carica una fonte da indicizzare</div>
+  <p class="muted">Formati: <code>.jsonl</code> (sessione Claude Code), <code>.zip</code> (export account claude.ai: conversazioni + design chats + docs), <code>.md</code>/<code>.txt</code> (testo/markdown, es. output di web2md o lettoremd), <code>.db</code> (drop-in di un archivio già indicizzato). Viene reso cercabile subito. Ricaricare lo stesso <em>nome DB</em> non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano.</p>
+  <form method="POST" action="/admin/archive" enctype="multipart/form-data">
+    <div class="row"><label>fonte</label><input type="file" name="jsonl_file" accept=".jsonl,.json,.zip,.md,.txt,.db" required></div>
+    <div class="row"><label>nome DB</label><input type="text" name="db_name" placeholder="es. cc (vuoto = dal nome file)"></div>
+    <div class="row"><label>progetto</label><input type="text" name="project" placeholder="etichetta (vuoto = dedotta dalla fonte)"></div>
+    <div class="toolbar">
+      <button type="submit" class="primary">Carica e indicizza</button>
+      <a class="btn" href="/admin/audit">Audit →</a>
+      <form method="POST" action="/admin/logout" style="display:inline"><button type="submit">Logout</button></form>
+    </div>
+  </form>
+</section>
+"""
+    return _layout("Archive", body, current="archive", flash=flash, flash_kind=flash_kind)
 
 
 # ───── /admin/update — canale di aggiornamento ─────

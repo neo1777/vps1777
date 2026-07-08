@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     audit_log_path: str = "/var/lib/gateway/audit.jsonl"
     nlm_auth_dir: str = "/var/lib/nlm"
     onboarding_dir: str = "/var/lib/onboarding"  # bind-mount condiviso col PC (deploy.sh --apply)
+    # dir dei DB di archive-mcp: il gateway scrive qui i .db indicizzati da
+    # /admin/archive; archive-mcp li scopre (scan-mode). Volume condiviso.
+    archive_db_dir: str = "/var/lib/archive/db"
 
     # ───── helpers ─────
 

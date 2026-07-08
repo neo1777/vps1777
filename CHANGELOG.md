@@ -2,6 +2,20 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.10.0] — 2026-07-08
+
+### Aggiunto — Archivio di ricerca popolabile dall'admin (`/admin/archive`)
+
+- Nuovo tab **Archive** nel pannello admin: carichi una fonte, viene indicizzata in un DB SQLite FTS5 cercabile da `archive1777` **subito**, senza restart. Formati (dispatch per estensione):
+  - **`.jsonl`** — sessione Claude Code (record user/assistant)
+  - **`.zip`** — export account claude.ai: `conversations.json` + `design_chats/` + `projects/docs` (un export reale ≈ 13k messaggi indicizzati in ~6s)
+  - **`.md` / `.txt`** — testo/markdown generico, spezzato in chunk (ponte per l'output di altri tool: web2md, lettoremd, pulizia-transcript)
+  - **`.db`** — drop-in di un archivio già indicizzato (validato: schema `messages_fts`)
+- **Indexer condiviso** `services/gateway/app/archive_indexer.py` (stdlib-only, streaming, idempotente per id): usato server-side dalla pagina **e** runnabile standalone (`python3 archive_indexer.py <input> out.db --project nome`).
+- **`archive-mcp` scan-mode**: scansiona `ARCHIVE_DB_DIR` (default `/var/lib/archive/db`) per `*.db` e li scopre **senza restart** (refresh su mtime). `ARCHIVE_DB_PATHS` resta come override per path espliciti fuori dalla dir.
+- Il gateway monta `archive-data:rw` (come `nlm-auth`): scrive i `.db` che archive-mcp legge. Confine no-docker.sock rispettato — il gateway scrive un file, archive-mcp lo scopre.
+- Fix doc: rimosso `get_conversation` (tool inesistente) dal README di `archive-mcp`; documentati scan-mode e pagina di upload.
+
 ## [0.9.3] — 2026-07-05
 
 ### Aggiunto — State card NotebookLM opzionale (hook post-update)
