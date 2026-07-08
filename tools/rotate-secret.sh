@@ -30,6 +30,25 @@ die()  { printf '%s[✗]%s %s\n' "$C_E"  "$C_R" "$*" >&2; exit 1; }
 gen_random() { python3 -c "import secrets; print(secrets.token_urlsafe($1))"; }
 gen_pass()   { python3 -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range($1)))"; }
 
+# Gate di robustezza password: 0 = forte; altrimenti stampa il motivo e ritorna 1.
+# Policy: min 16 caratteri, almeno 3 classi (minuscole/MAIUSCOLE/cifre/simboli),
+# niente pattern comuni/prevedibili. Non permettiamo password deboli, punto.
+pw_weak_reason() {
+  local pw="$1" classes=0
+  if [ "${#pw}" -lt 16 ]; then echo "troppo corta (min 16 caratteri)"; return 1; fi
+  printf '%s' "$pw" | LC_ALL=C grep -q '[a-z]'      && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[A-Z]'      && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[0-9]'      && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[^a-zA-Z0-9]' && classes=$((classes+1))
+  if [ "$classes" -lt 3 ]; then
+    echo "poca varietà: servono almeno 3 tra minuscole, MAIUSCOLE, cifre e simboli"; return 1
+  fi
+  if printf '%s' "$pw" | LC_ALL=C grep -qiE 'password|12345|qwerty|abcdef|letmein|welcome|admin|vps1777|000000|111111'; then
+    echo "contiene un pattern comune/prevedibile"; return 1
+  fi
+  return 0
+}
+
 if [ -z "$WHICH" ]; then
   echo "Quale secret ruotare?"
   echo "  1) gateway_secret          — namespace URL"
@@ -78,18 +97,23 @@ case "$WHICH" in
     ;;
   admin_password)
     FILE=secrets/admin_password_bcrypt.txt
-    log "Rotation password admin OAuth"
+    log "Rotation password admin"
     if [ -t 0 ]; then
-      printf '%sNuova password (min 12 char, vuoto = genero io):%s ' "$C_B" "$C_R"
-      read -rs PWD
-      echo
+      while :; do
+        printf '%sNuova password (min 16, ≥3 classi; vuoto = la genero forte io):%s ' "$C_B" "$C_R"
+        read -rs PWD; echo
+        [ -z "$PWD" ] && break
+        if reason="$(pw_weak_reason "$PWD")"; then break; fi
+        warn "Password debole: $reason. Riprova (o Invio vuoto per generarne una forte)."
+      done
     fi
     if [ -z "${PWD:-}" ]; then
       PWD=$(gen_pass 24)
-      log "Password generata: ${C_B}$PWD${C_R}"
+      log "Password generata (forte, 24 char): ${C_B}$PWD${C_R}"
       log "  → SALVALA SUBITO in password manager. Non te la riproporrò."
+    elif ! reason="$(pw_weak_reason "$PWD")"; then
+      die "Password troppo debole: $reason. Rifiutata (policy: min 16, ≥3 classi, niente pattern comuni)."
     fi
-    if [ "${#PWD}" -lt 12 ]; then die "Password troppo corta (min 12 char)"; fi
     if ! python3 -c 'import bcrypt' 2>/dev/null; then
       python3 -m pip install --user --quiet bcrypt || die "bcrypt non installabile"
     fi

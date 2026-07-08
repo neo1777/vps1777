@@ -87,16 +87,48 @@ def _require_admin(request: Request) -> tuple[str | None, Response | None]:
     return email, None
 
 
-# ───── HTML template minimale ─────
-# (in F8 refactor: estrai in Jinja2 templates/)
+# ───── rate-limit login per-IP (difesa in profondità sopra la password forte) ─────
+# In-memory, best-effort: dopo _LOGIN_MAX fallimenti da un IP entro _LOGIN_WINDOW,
+# l'IP è bloccato per _LOGIN_LOCKOUT. Non è l'unica difesa (la password è forte per
+# policy), ma ferma il brute-force da singola sorgente. Si azzera al restart.
+_LOGIN_FAILS: dict[str, list[float]] = {}
+_LOGIN_LOCK: dict[str, float] = {}
+_LOGIN_WINDOW = 300.0
+_LOGIN_MAX = 5
+_LOGIN_LOCKOUT = 900.0
 
-_FONTS = (
-    '<link rel="preconnect" href="https://fonts.googleapis.com">'
-    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-    '<link href="https://fonts.googleapis.com/css2?'
-    'family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&'
-    'family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">'
-)
+
+def _client_ip(request: Request) -> str:
+    # uvicorn gira con proxy_headers=True → request.client.host è già l'IP reale
+    # dietro l'ingress; fallback su X-Forwarded-For.
+    if request.client and request.client.host:
+        return request.client.host
+    return (request.headers.get("x-forwarded-for", "") or "?").split(",")[0].strip()
+
+
+def _login_lock_remaining(ip: str) -> float:
+    return max(0.0, _LOGIN_LOCK.get(ip, 0.0) - time.time())
+
+
+def _login_record_fail(ip: str) -> None:
+    now = time.time()
+    fails = [t for t in _LOGIN_FAILS.get(ip, []) if now - t < _LOGIN_WINDOW]
+    fails.append(now)
+    if len(fails) >= _LOGIN_MAX:
+        _LOGIN_LOCK[ip] = now + _LOGIN_LOCKOUT
+        _LOGIN_FAILS.pop(ip, None)
+    else:
+        _LOGIN_FAILS[ip] = fails
+
+
+def _login_record_ok(ip: str) -> None:
+    _LOGIN_FAILS.pop(ip, None)
+    _LOGIN_LOCK.pop(ip, None)
+
+
+# ───── HTML template minimale ─────
+# Font di sistema (niente CDN esterno): la CSP resta senza origini esterne. Il
+# CSS ha già i fallback (Georgia / ui-monospace / system-ui).
 
 # Timbro 1777: dark profondo, accent corallo, Fraunces display + JetBrains mono.
 _CSS = """
@@ -184,17 +216,30 @@ def _layout(title: str, body: str, current: str = "", flash: str = "", flash_kin
     flash_html = ""
     if flash:
         flash_html = f'<div class="flash {flash_kind}">{html.escape(flash)}</div>'
+    # CSP stretta con nonce: gli script inline (es. polling della card update)
+    # portano il nonce; niente 'unsafe-inline' per gli script, niente origini
+    # esterne (i Google Fonts sono stati tolti → fallback di sistema).
+    nonce = pysecrets.token_urlsafe(16)
+    body = body.replace("<script>", f'<script nonce="{nonce}">')
     out = f"""<!DOCTYPE html><html lang="it"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>vps1777 · {html.escape(title)}</title>
-{_FONTS}
 {_CSS}
 </head><body>
 {tabs}{flash_html}{body}
 <div class="foot">vps1777 · gateway · v{html.escape(os.environ.get("VPS1777_VERSION", "dev"))}
  · tag {html.escape(os.environ.get("VPS1777_TAG", "dev"))}</div>
 </body></html>"""
-    return HTMLResponse(out)
+    resp = HTMLResponse(out)
+    resp.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+    )
+    resp.headers["X-Frame-Options"] = "DENY"
+    return resp
 
 
 # ───── /admin root ─────
@@ -211,7 +256,6 @@ async def admin_root(request: Request) -> Response:
 async def login(request: Request) -> Response:
     if request.method == "GET":
         next_url = request.query_params.get("next", "/admin/")
-        s = get_settings()
         body = f"""
 <header>
   <h1>vps1777 <em>admin</em></h1>
@@ -221,7 +265,7 @@ async def login(request: Request) -> Response:
   <input type="hidden" name="next" value="{html.escape(next_url)}">
   <section>
     <div class="kicker">accedi</div>
-    <div class="row"><label>email</label><input type="email" name="email" required autofocus value="{html.escape(s.admin_email)}"></div>
+    <div class="row"><label>email</label><input type="email" name="email" required autofocus autocomplete="off"></div>
     <div class="row"><label>password</label><input type="password" name="password" required></div>
     <div class="toolbar"><button type="submit" class="primary">Entra</button></div>
   </section>
@@ -235,9 +279,22 @@ async def login(request: Request) -> Response:
     password = str(form.get("password", ""))
     next_url = str(form.get("next", "/admin/"))
     s = get_settings()
+    ip = _client_ip(request)
+
+    locked = _login_lock_remaining(ip)
+    if locked > 0:
+        audit({"event": "admin_login_locked", "ip": ip})
+        await asyncio.sleep(0.5)
+        return _layout(
+            "login",
+            '<section><div class="kicker">accedi</div><p>Troppi tentativi falliti. '
+            f'Riprova fra {int(locked // 60) + 1} minuti.</p></section>',
+            flash="Accesso temporaneamente bloccato per questo IP", flash_kind="err",
+        )
 
     if email != s.admin_email or not verify_admin_password(password):
-        audit({"event": "admin_login_fail", "email": email})
+        _login_record_fail(ip)
+        audit({"event": "admin_login_fail", "email": email, "ip": ip})
         # Delay anti-brute-force ASINCRONO: `time.sleep` bloccherebbe l'intero
         # event loop (un attaccante che martella /admin/login renderebbe il
         # gateway irraggiungibile — DoS su endpoint pubblico).
@@ -248,7 +305,8 @@ async def login(request: Request) -> Response:
             flash="Email o password errati", flash_kind="err",
         )
 
-    audit({"event": "admin_login_ok", "email": email})
+    _login_record_ok(ip)
+    audit({"event": "admin_login_ok", "email": email, "ip": ip})
     # anti open-redirect: `next` solo relativo o same-origin (PUBLIC_BASE)
     base = s.gateway_public_base
     if not (next_url.startswith("/") or (base and next_url.startswith(base))):

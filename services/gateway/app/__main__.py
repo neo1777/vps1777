@@ -13,9 +13,44 @@ from .routes import routes
 from .settings import get_settings
 
 
+class SecurityHeadersASGI:
+    """Aggiunge header di sicurezza SAFE-per-tutti (nosniff, Referrer-Policy,
+    HSTS su https). Pure-ASGI: inietta gli header su `http.response.start` senza
+    bufferizzare il body → non rompe lo streaming del proxy MCP (a differenza di
+    BaseHTTPMiddleware). CSP e X-Frame-Options DENY restano sulle sole pagine
+    admin (in _layout): la mini-app Telegram deve poter stare in iframe."""
+
+    def __init__(self, app, hsts: bool) -> None:
+        self.app = app
+        self.hsts = hsts
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                present = {h[0].lower() for h in headers}
+
+                def add(k: str, v: str) -> None:
+                    if k.lower().encode() not in present:
+                        headers.append((k.encode(), v.encode()))
+
+                add("X-Content-Type-Options", "nosniff")
+                add("Referrer-Policy", "no-referrer")
+                if self.hsts:
+                    add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
 def build_app() -> Starlette:
     s = get_settings()
     middleware = [
+        Middleware(SecurityHeadersASGI, hsts=s.gateway_public_base.startswith("https://")),
         Middleware(
             CORSMiddleware,
             allow_origins=s.oauth_cors_origins or ["*"],
