@@ -2,6 +2,12 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.12.1] — 2026-07-08
+
+### Fix
+
+- `vps1777 archive-ingest`: la pulizia dei file temporanei nei container ora usa `compose exec -u root` — i temp sono creati da `docker cp` (root) e l'utente app (uid 1000, con `cap_drop: ALL` → niente `DAC_OVERRIDE`) non poteva rimuoverli. Nessun residuo in `/tmp` dopo l'ingest.
+
 ## [0.12.0] — 2026-07-08
 
 ### Aggiunto — Archive: OCR/lettura documenti via NotebookLM (`vps1777 archive-ingest`)
