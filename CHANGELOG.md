@@ -2,6 +2,15 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.11.0] — 2026-07-08
+
+### Aggiunto — Archive: formati PDF e Telegram
+
+- `/admin/archive` ora accetta anche:
+  - **`.pdf`** (documenti con **testo**): estratto via `pypdf` e indicizzato. Uno screenshot-PDF (immagine, senza layer di testo) non è indicizzabile senza OCR → messaggio d'errore **chiaro** invece di un DB vuoto silenzioso ("serve OCR — carica il testo sorgente").
+  - **`.json`** export **Telegram Desktop** (formato *Machine-readable JSON*): messaggi indicizzati con le *entities* del testo appiattite; i record `service` (pin, join, …) saltati. Il dispatch distingue Telegram (oggetto con `messages`/`chats`) da Claude Code (JSONL) per struttura.
+- Nuova dipendenza del gateway: **`pypdf`** (solo per l'estrazione testo dai PDF; gli altri formati restano stdlib).
+
 ## [0.10.0] — 2026-07-08
 
 ### Aggiunto — Archivio di ricerca popolabile dall'admin (`/admin/archive`)
