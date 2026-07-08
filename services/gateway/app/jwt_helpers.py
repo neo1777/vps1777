@@ -17,7 +17,7 @@ import jwt
 from .settings import get_settings
 
 
-VALID_TYPS = {"access", "refresh", "admin", "miniapp"}
+VALID_TYPS = {"access", "refresh", "admin", "miniapp", "csrf"}
 
 
 class JWTError(Exception):

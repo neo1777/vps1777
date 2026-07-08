@@ -2,6 +2,14 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.14.0] — 2026-07-08
+
+### Sicurezza — token CSRF sui form admin (difesa in profondità)
+
+- **Token CSRF** (synchronizer token firmato, legato alla sessione) su tutti i form admin autenticati, sopra a `samesite=lax`. Un form ostile cross-origin non può leggerlo né forgiarlo (non ha la chiave di firma) → la POST fallisce anche se il cookie arrivasse. La verifica è **centralizzata in `_require_admin`**: ogni POST admin — anche uno aggiunto in futuro — è protetto **d'ufficio**, senza doverselo ricordare handler per handler. Il token è iniettato automaticamente in ogni `<form>` da `_layout`.
+  - Motivazione (principio): non ci si fida del fatto che "oggi le azioni sono solo POST" — un prodotto in evoluzione può introdurre GET/plugin/contenuto same-site; la difesa deve reggere **a prescindere** dai cambi futuri.
+- `jwt_helpers`: nuovo `typ="csrf"`. Il login (pre-auth) resta senza CSRF (login-CSRF non applicabile a un singolo admin noto).
+
 ## [0.13.0] — 2026-07-08
 
 ### Sicurezza — hardening dell'autenticazione admin
