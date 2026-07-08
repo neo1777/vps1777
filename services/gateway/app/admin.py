@@ -810,26 +810,50 @@ async def audit_view(request: Request) -> Response:
     return _layout("audit", body, current="audit", csrf=_csrf_token(email))
 
 
-# ───── /admin/secrets (placeholder, da espandere) ─────
+# ───── /admin/secrets — età, scadenze, rotazione ─────
+# Legge onboarding/secrets_status.json, scritto dal check host (`vps1777
+# secrets-status`, timer settimanale): l'età deriva dall'mtime dei file secret.
 
 async def secrets_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
         return redirect
+    s = get_settings()
+    status = _read_json(Path(s.onboarding_dir) / "secrets_status.json")
+    secrets = status.get("secrets", [])
+    if secrets:
+        rows = ""
+        for it in secrets:
+            over = it.get("overdue")
+            badge = (f'<span class="dot {"warn" if over else "ok"}"></span>'
+                     f'{"da ruotare" if over else "ok"}')
+            rows += (
+                f'<tr><td><code>{html.escape(str(it.get("name", "")))}</code><br>'
+                f'<span class="muted">{html.escape(str(it.get("label", "")))}</span></td>'
+                f'<td>{it.get("age_days", "?")}g <span class="muted">/ max {it.get("max_age_days", "?")}g</span></td>'
+                f'<td>{badge}</td>'
+                f'<td><span class="muted">{html.escape(str(it.get("note", "")))}</span></td></tr>'
+            )
+        table = ('<section><table><thead><tr><th>secret</th><th>età</th><th>stato</th>'
+                 f'<th>rotazione</th></tr></thead><tbody>{rows}</tbody></table></section>')
+        checked = html.escape(str(status.get("checked_at", "")))
+        status_html = f'<div class="kicker">ultimo check: {checked}</div>'
+    else:
+        table = ""
+        status_html = ('<div class="kicker"><span class="dot off"></span>stato non ancora '
+                       'disponibile — gira <code>vps1777 secrets-status</code> sull\'host</div>')
     body = f"""
 <header>
   <h1>vps1777 <em>admin</em> · secrets</h1>
   <div class="who">{html.escape(email)}</div>
 </header>
+{status_html}
+{table}
 <section>
-  <div class="kicker">gestione secrets</div>
-  <p>I secret stanno in <code>/run/secrets/</code> (tmpfs read-only) e sono montati da file Docker.</p>
-  <p>Per ruotare:</p>
-  <ol>
-    <li>Modifica il file in <code>secrets/&lt;name&gt;.txt</code> sull'host</li>
-    <li>Da CLI: <code>docker compose restart gateway</code> (≤ 2s downtime)</li>
-  </ol>
-  <p>Vedi <a href="https://github.com/&lt;owner&gt;/vps1777/blob/main/docs/SECRETS.md" target="_blank" style="color:var(--accent)">docs/SECRETS.md</a>.</p>
+  <div class="kicker">come ruotare</div>
+  <p class="muted">La rotazione è guidata da CLI sull'host (mostra la nuova, la salvi nel password manager). Un check settimanale avvisa su Telegram i secret oltre soglia.</p>
+  <pre>cd /home/vps1777/vps1777 && sudo -u vps1777 ./tools/rotate-secret.sh &lt;nome&gt;</pre>
+  <p class="muted">Attenzione: ruotare <code>oauth_signing_secret</code> invalida i token (i connettori si ri-autenticano); <code>gateway_secret</code> cambia le URL MCP (vanno ri-aggiunti su claude.ai). Password e token bot sono solo manuali. La policy password impone min 16, ≥3 classi, niente pattern comuni.</p>
 </section>
 """
     return _layout("secrets", body, current="secrets", csrf=_csrf_token(email))

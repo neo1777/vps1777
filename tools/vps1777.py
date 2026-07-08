@@ -771,7 +771,8 @@ def install_systemd_units(repo: Path, *, enable: bool) -> None:
         sudo(["systemctl", "daemon-reload"])
     if enable:
         sudo(["systemctl", "enable", "--now",
-              "vps1777-check-update.timer", "vps1777-update.path"], check=False)
+              "vps1777-check-update.timer", "vps1777-update.path",
+              "vps1777-secrets-check.timer"], check=False)
 
 
 # ─────────────────────────────────────────── lock
@@ -1455,6 +1456,64 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         run([*cc, "exec", "-u", "root", "-T", "gateway", "rm", "-f", gw_txt], check=False)
 
 
+# ─────────────────────────────────────────── secrets-status (età + scadenze)
+
+# Policy per secret: (file, etichetta, max_giorni, auto-rotabile?, nota su come si ruota).
+# max_giorni = età oltre la quale va ruotato (promemoria, non enforcement).
+_SECRET_POLICY = [
+    ("oauth_signing_secret", "oauth_signing_secret.txt", "Chiave firma JWT", 90, False,
+     "manuale: invalida i token attivi → i connettori si ri-autenticano / re-login admin"),
+    ("admin_password", "admin_password_bcrypt.txt", "Password admin", 90, False,
+     "manuale: dalla pagina o `rotate-secret.sh admin_password`"),
+    ("gateway_secret", "gateway_secret.txt", "Namespace URL MCP", 180, False,
+     "manuale: cambia le URL dei connettori → vanno ri-aggiunti su claude.ai"),
+    ("telegram_bot_token", "telegram_bot_token.txt", "Token bot Telegram", 365, False,
+     "manuale: revoca e rigenera su @BotFather"),
+]
+
+
+def cmd_secrets_status(repo: Path, args) -> int:
+    """Età e scadenze dei secret. Scrive onboarding/secrets_status.json (letto
+    dalla pagina /admin/secrets) e — con --notify — avvisa su Telegram quelli
+    scaduti. L'età deriva dall'mtime del file (riscritto a ogni rotazione)."""
+    import time as _t
+    now = _t.time()
+    items: list[dict] = []
+    overdue: list[str] = []
+    for name, fname, label, max_days, auto, note in _SECRET_POLICY:
+        p = repo / "secrets" / fname
+        if not p.is_file():
+            continue
+        age_days = int((now - p.stat().st_mtime) / 86400)
+        is_overdue = age_days > max_days
+        items.append({
+            "name": name, "label": label, "age_days": age_days, "max_age_days": max_days,
+            "overdue": is_overdue, "auto_rotatable": auto, "note": note,
+            "last_rotated": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc)
+                            .strftime("%Y-%m-%dT%H:%M:%SZ"),
+        })
+        if is_overdue:
+            overdue.append(f"{label} ({age_days}g)")
+    status = {"checked_at": now_iso(), "secrets": items}
+    try:
+        (onboarding_dir(repo) / "secrets_status.json").write_text(json.dumps(status, indent=2))
+    except OSError as exc:
+        warn(f"scrittura secrets_status.json fallita: {exc}")
+
+    for it in items:
+        mark = "⚠️  SCADUTO" if it["overdue"] else "ok"
+        log(f"{it['label']:<22} {it['age_days']:>4}g / max {it['max_age_days']}g  [{mark}]")
+    if not items:
+        warn("nessun secret trovato in secrets/")
+    if overdue:
+        warn(f"da ruotare: {', '.join(overdue)}")
+        if args.notify:
+            telegram_notify(repo, "🔑 vps1777 — secret da ruotare:\n• " + "\n• ".join(overdue))
+    else:
+        ok("tutti i secret entro la soglia")
+    return 0
+
+
 # ─────────────────────────────────────────── main
 
 def main() -> int:
@@ -1499,6 +1558,9 @@ def main() -> int:
     p.add_argument("--project", help="etichetta progetto (default: nome DB)")
     p.add_argument("--verify", action="store_true", help="chiedi a NotebookLM di verificare la trascrizione")
 
+    p = sub.add_parser("secrets-status", help="età e scadenze dei secret (+ notifica Telegram)")
+    p.add_argument("--notify", action="store_true", help="notifica Telegram i secret scaduti")
+
     args = parser.parse_args()
     repo = find_repo(args.home)
     os.chdir(repo)
@@ -1506,7 +1568,8 @@ def main() -> int:
     handlers = {"check": cmd_check, "update": cmd_update, "rollback": cmd_rollback,
                 "status": cmd_status, "version": cmd_version,
                 "migrate": cmd_migrate, "bootstrap": cmd_bootstrap,
-                "archive-ingest": cmd_archive_ingest}
+                "archive-ingest": cmd_archive_ingest,
+                "secrets-status": cmd_secrets_status}
     try:
         return handlers[args.cmd](repo, args)
     except KeyboardInterrupt:
