@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     archive_http_host: str = "0.0.0.0"
     archive_http_port: int = 8002
     archive_db_paths: DBPaths = Field(default_factory=dict)
+    # Directory scansionata per *.db (name = nome file senza estensione). Un DB
+    # caricato/indicizzato qui compare SENZA restart. ARCHIVE_DB_PATHS resta
+    # come override per path espliciti fuori da questa dir.
+    archive_db_dir: str = "/var/lib/archive/db"
     fastmcp_stateless_http: bool = True
     log_level: str = "INFO"
 

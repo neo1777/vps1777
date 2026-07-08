@@ -70,6 +70,7 @@ services:
     volumes:
       - gateway-data:/var/lib/gateway
       - nlm-auth:/var/lib/nlm:rw       # condiviso con nb1777-mcp per /admin/nlm upload
+      - archive-data:/var/lib/archive:rw  # condiviso con archive-mcp: /admin/archive scrive i .db indicizzati
       - ./onboarding:/var/lib/onboarding:rw  # bind-mount: pending.json letto da deploy.sh --apply
     networks:
       - backend

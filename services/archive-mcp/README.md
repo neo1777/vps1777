@@ -11,26 +11,32 @@ errore — i tool rispondono con liste vuote finché non aggiungi un DB.
 |---|---|---|
 | `ARCHIVE_HTTP_HOST` | `0.0.0.0` | bind |
 | `ARCHIVE_HTTP_PORT` | `8002` | porta |
-| `ARCHIVE_DB_PATHS` | *(vuoto)* | CSV `nome:path` dei DB da montare, es. `main:/var/lib/archive/db/main.db,note:/var/lib/archive/db/note.db`. Vuoto ⇒ archivio vuoto. |
+| `ARCHIVE_DB_DIR` | `/var/lib/archive/db` | dir **scansionata** per `*.db` (nome = nome file). Un DB qui compare **senza restart** (scan-mode). |
+| `ARCHIVE_DB_PATHS` | *(vuoto)* | override: CSV `nome:path` per DB fuori dalla dir, es. `main:/data/main.db`. |
 | `FASTMCP_STATELESS_HTTP` | `true` | MCP stateless mode (raccomandato) |
 | `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI) |
 
 ## Come popolarlo
 
-1. Metti i file `.db` (SQLite FTS5) nel volume `archive-data` (montato su `/var/lib/archive`), tipicamente sotto `/var/lib/archive/db/`.
-2. Dichiarali in `.env` con `ARCHIVE_DB_PATHS="nome:/var/lib/archive/db/<file>.db,..."`.
-3. Riavvia `archive-mcp`. `list_databases()` mostrerà i nomi caricati.
+**Via UI (consigliato)**: pannello admin del gateway → tab **Archive** (`/admin/archive`). Carichi una sessione Claude Code `.jsonl`, viene indicizzata in un DB FTS5 e diventa **cercabile subito** — nessun restart, nessuna modifica a `.env`.
 
-Gli indexer (`tools/` nel repo principale: `index_build.py`, `build_cc_archive.py`, ecc.) sono un modo per costruire questi DB, non un requisito: qualunque SQLite con tabelle FTS5 conformi allo schema va bene.
+**A mano**: metti un `.db` (SQLite FTS5, schema sotto) in `/var/lib/archive/db/` (volume `archive-data`). Lo **scan-mode** lo scopre alla prossima ricerca. In alternativa, dichiara path espliciti con `ARCHIVE_DB_PATHS`.
+
+**Costruire un DB da linea di comando**: l'indexer `services/gateway/app/archive_indexer.py` è stdlib-only e gira standalone:
+```
+python3 archive_indexer.py sessione.jsonl out.db --project nome
+```
+
+### Schema atteso
+Un DB valido ha una tabella `messages(uuid PRIMARY KEY, project, ts, content)` + indice FTS5 esterno `messages_fts(uuid, project, ts, content)`. È quello che produce `archive_indexer`.
 
 ## Stati e messaggi d'avvio
 
-- **`ARCHIVE_DB_PATHS` vuoto** → archivio vuoto (stato normale, log `INFO`).
-- **Path dichiarato ma file assente** → warning esplicito (config da correggere); il server parte comunque, rimuovendo dalla registry i DB mancanti.
+- **Dir vuota / `ARCHIVE_DB_PATHS` vuoto** → archivio vuoto (stato normale, log `INFO`).
+- **Path dichiarato ma file assente** → warning esplicito (config da correggere); il server parte comunque.
 - Un tool che cerca un DB inesistente ritorna un errore esplicito.
 
 ## Tool MCP esposti
 
-- `search(query: str, db: str = "", limit: int = 20)` — FTS5 + BM25
+- `search(query: str, db_name: str = "", limit: int = 20)` — FTS5 + BM25 su uno o tutti i DB
 - `list_databases()` — elenca i DB disponibili
-- `get_conversation(uuid: str, db: str = "")` — recupera record completo
