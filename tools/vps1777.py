@@ -1448,9 +1448,11 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         ok(f"indicizzato nell'archivio → DB «{db_name}»: {(res2.stdout or '').strip()}")
         return 0
     finally:
+        # -u root: i temp sono creati da `compose cp` (root); l'utente app (uid
+        # 1000) non li potrebbe rimuovere.
         host_txt.unlink(missing_ok=True)
-        run([*cc, "exec", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)
-        run([*cc, "exec", "-T", "gateway", "rm", "-f", gw_txt], check=False)
+        run([*cc, "exec", "-u", "root", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)
+        run([*cc, "exec", "-u", "root", "-T", "gateway", "rm", "-f", gw_txt], check=False)
 
 
 # ─────────────────────────────────────────── main
