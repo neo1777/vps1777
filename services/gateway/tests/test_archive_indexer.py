@@ -117,7 +117,45 @@ def test_index_file_markdown(tmp_path: Path) -> None:
 
 def test_index_file_unsupported(tmp_path: Path) -> None:
     import pytest
-    bad = tmp_path / "x.pdf"
-    bad.write_bytes(b"%PDF-1.4")
+    bad = tmp_path / "x.rtf"
+    bad.write_bytes(b"{\\rtf1}")
     with pytest.raises(ValueError):
         archive_indexer.index_file(str(bad), str(tmp_path / "o.db"))
+
+
+def test_index_file_telegram_json(tmp_path: Path) -> None:
+    import json
+    j = tmp_path / "result.json"
+    j.write_text(json.dumps({
+        "name": "Canale", "id": 42, "type": "personal_chat",
+        "messages": [
+            {"id": 1, "type": "message", "date": "2026-01-01T00:00:00", "from": "Neo", "text": "prova zenith"},
+            {"id": 2, "type": "service", "action": "pin_message"},  # ignorato
+            {"id": 3, "type": "message", "date": "2026-01-01T00:01:00", "from": "Neo",
+             "text": [{"type": "bold", "text": "gras "}, "e normale"]},
+        ],
+    }), encoding="utf-8")
+    db = tmp_path / "tg.db"
+    n = archive_indexer.index_file(str(j), str(db))
+    assert n == 2  # i due 'message', non il 'service'
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        r = conn.execute("SELECT content FROM messages_fts WHERE messages_fts MATCH 'zenith'").fetchall()
+        assert len(r) == 1 and "[Neo]" in r[0][0]
+        # entities appiattite
+        r2 = conn.execute("SELECT content FROM messages_fts WHERE messages_fts MATCH 'normale'").fetchall()
+        assert r2 and "gras e normale" in r2[0][0]
+    finally:
+        conn.close()
+
+
+def test_tg_text_flatten() -> None:
+    assert archive_indexer._tg_text("ciao") == "ciao"
+    assert archive_indexer._tg_text(["a", {"type": "bold", "text": "b"}, "c"]) == "abc"
+    assert archive_indexer._tg_text(None) == ""
+
+
+def test_chunk_rows_deterministico(tmp_path: Path) -> None:
+    rows1 = list(archive_indexer._chunk_rows("a\n\nb\n\nc", "n", "t", "k"))
+    rows2 = list(archive_indexer._chunk_rows("a\n\nb\n\nc", "n", "t", "k"))
+    assert [r[0] for r in rows1] == [r[0] for r in rows2]  # uuid stabili → idempotente

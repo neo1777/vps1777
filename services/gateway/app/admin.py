@@ -492,9 +492,9 @@ async def archive_view(request: Request) -> Response:
 {table}
 <section>
   <div class="kicker">carica una fonte da indicizzare</div>
-  <p class="muted">Formati: <code>.jsonl</code> (sessione Claude Code), <code>.zip</code> (export account claude.ai: conversazioni + design chats + docs), <code>.md</code>/<code>.txt</code> (testo/markdown, es. output di web2md o lettoremd), <code>.db</code> (drop-in di un archivio già indicizzato). Viene reso cercabile subito. Ricaricare lo stesso <em>nome DB</em> non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano.</p>
+  <p class="muted">Formati: <code>.zip</code> (export account claude.ai: conversazioni + design chats + docs), <code>.jsonl</code> (sessione Claude Code), <code>.json</code> (export Telegram Desktop, formato JSON), <code>.pdf</code> (documento con testo — non gli screenshot), <code>.md</code>/<code>.txt</code> (testo, es. output di web2md o lettoremd), <code>.db</code> (drop-in già indicizzato). Viene reso cercabile subito. Ricaricare lo stesso <em>nome DB</em> non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano.</p>
   <form method="POST" action="/admin/archive" enctype="multipart/form-data">
-    <div class="row"><label>fonte</label><input type="file" name="jsonl_file" accept=".jsonl,.json,.zip,.md,.txt,.db" required></div>
+    <div class="row"><label>fonte</label><input type="file" name="jsonl_file" accept=".jsonl,.json,.zip,.md,.txt,.pdf,.db" required></div>
     <div class="row"><label>nome DB</label><input type="text" name="db_name" placeholder="es. cc (vuoto = dal nome file)"></div>
     <div class="row"><label>progetto</label><input type="text" name="project" placeholder="etichetta (vuoto = dedotta dalla fonte)"></div>
     <div class="toolbar">

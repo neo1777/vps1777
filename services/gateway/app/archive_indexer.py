@@ -203,61 +203,134 @@ def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[Row]:
                     yield (uuid, pname, doc.get("created_at") or "", body)
 
 
-# ── estrattore: testo / markdown generico ────────────────────────────────────
+# ── helper testo condiviso ───────────────────────────────────────────────────
 
-def _iter_text(path: Union[str, Path], project: str, *, chunk_chars: int = 1500) -> Iterator[Row]:
-    """Spezza un file testo/markdown in chunk cercabili (per paragrafi, raggruppati).
-
-    Ponte per l'output di altri tool (web2md, lettoremd, pulizia-transcript):
-    qualunque .md/.txt diventa messaggi indicizzabili. uuid deterministico
-    (nome file + indice) → re-index idempotente. ts = mtime del file.
-    """
-    path = Path(path)
-    name = project or path.stem
-    ts = ""
+def _file_ts(path: Path) -> str:
     try:
         import datetime
-        ts = datetime.datetime.utcfromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.datetime.utcfromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
     except OSError:
-        pass
+        return ""
+
+
+def _chunk_rows(text: str, name: str, ts: str, key: str, *, chunk_chars: int = 1500) -> Iterator[Row]:
+    """Spezza un testo in chunk cercabili (per paragrafi, raggruppati ~chunk_chars).
+    uuid deterministico (key + indice) → re-index idempotente."""
     buf: list[str] = []
-    size = 0
-    idx = 0
+    size = idx = 0
+    for para in text.split("\n\n"):
+        buf.append(para)
+        size += len(para)
+        if size >= chunk_chars:
+            joined = "\n".join(buf).strip()
+            if joined:
+                yield (_uid(key, str(idx)), name, ts, joined)
+                idx += 1
+            buf, size = [], 0
+    joined = "\n".join(buf).strip()
+    if joined:
+        yield (_uid(key, str(idx)), name, ts, joined)
 
-    def emit() -> Row | None:
-        nonlocal idx
-        text = "\n".join(buf).strip()
-        if not text:
-            return None
-        row = (_uid(name, str(idx)), name, ts, text)
-        idx += 1
-        return row
 
+# ── estrattore: testo / markdown generico ────────────────────────────────────
+
+def _iter_text(path: Union[str, Path], project: str) -> Iterator[Row]:
+    """Ponte per l'output di altri tool (web2md, lettoremd, pulizia-transcript):
+    qualunque .md/.txt diventa messaggi indicizzabili."""
+    path = Path(path)
+    name = project or path.stem
     with open(path, encoding="utf-8", errors="replace") as fh:
-        for para in fh.read().split("\n\n"):
-            buf.append(para)
-            size += len(para)
-            if size >= chunk_chars:
-                r = emit()
-                if r:
-                    yield r
-                buf, size = [], 0
-    r = emit()
-    if r:
-        yield r
+        yield from _chunk_rows(fh.read(), name, _file_ts(path), name)
+
+
+# ── estrattore: PDF (pypdf) ──────────────────────────────────────────────────
+
+def _iter_pdf(path: Union[str, Path], project: str) -> Iterator[Row]:
+    """Estrae il testo da un PDF (pypdf) e lo spezza in chunk. Il PDF è un
+    documento: niente struttura conversazione, solo testo cercabile."""
+    from pypdf import PdfReader
+    path = Path(path)
+    name = project or path.stem
+    reader = PdfReader(str(path))
+    pages: list[str] = []
+    for page in reader.pages:
+        try:
+            pages.append(page.extract_text() or "")
+        except Exception:  # noqa: BLE001 — pypdf inciampa su pagine malformate: si salta
+            continue
+    yield from _chunk_rows("\n\n".join(pages), name, _file_ts(path), name)
+
+
+# ── estrattore: export Telegram (result.json) ────────────────────────────────
+
+def _tg_text(text: object) -> str:
+    """`text` di Telegram: stringa o lista di (str | {type, text})."""
+    if isinstance(text, str):
+        return text
+    if isinstance(text, list):
+        parts = [t if isinstance(t, str) else str(t.get("text", ""))
+                 for t in text if isinstance(t, (str, dict))]
+        return "".join(parts)
+    return ""
+
+
+def _iter_telegram(data: dict) -> Iterator[Row]:
+    """Export Telegram Desktop JSON: singola chat ({name,id,messages}) o full
+    ({chats:{list:[...]}}). Ogni messaggio 'message' → riga."""
+    if isinstance(data.get("messages"), list):
+        chats = [data]
+    elif isinstance(data.get("chats"), dict):
+        chats = data["chats"].get("list") or []
+    else:
+        chats = []
+    for chat in chats:
+        if not isinstance(chat, dict):
+            continue
+        cname = chat.get("name") or f"telegram-{chat.get('id') or 'chat'}"
+        cid = str(chat.get("id") or cname)
+        for m in (chat.get("messages") or []):
+            if not isinstance(m, dict) or m.get("type") != "message":
+                continue
+            body = _tg_text(m.get("text")).strip()
+            if not body:
+                continue
+            sender = m.get("from") or ""
+            yield (_uid("tg", cid, str(m.get("id"))), cname, m.get("date") or "",
+                   f"[{sender}] {body}" if sender else body)
 
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
 
-SUPPORTED = (".jsonl", ".zip", ".md", ".txt", ".json")
+SUPPORTED = (".jsonl", ".zip", ".md", ".txt", ".json", ".pdf")
 
 
 def index_file(path: Union[str, Path], db_path: Union[str, Path], *, project: str = "") -> int:
-    """Indicizza `path` nel DB, scegliendo l'estrattore dall'estensione."""
+    """Indicizza `path` nel DB, scegliendo l'estrattore dall'estensione/contenuto."""
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix == ".zip":
         return write_rows(db_path, _iter_claude_zip(path))
+    if suffix == ".pdf":
+        n = write_rows(db_path, _iter_pdf(path, project))
+        if n == 0 and count_rows(db_path) == 0:
+            # PDF senza layer di testo: quasi sempre uno screenshot/scan. pypdf
+            # non estrae nulla → servirebbe OCR (fuori scope). Messaggio chiaro
+            # invece di un DB vuoto silenzioso.
+            Path(db_path).unlink(missing_ok=True)
+            raise ValueError(
+                "PDF senza testo estraibile (immagine/screenshot?). Serve OCR — "
+                "carica il testo sorgente (.md/.txt) o un PDF con layer di testo.")
+        return n
+    if suffix == ".json":
+        # .json ambiguo: Telegram (oggetto con messages/chats) vs Claude Code
+        # (in realtà JSONL → json.load fallisce → ripiego sul lettore a righe).
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                data = json.load(fh)
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            data = None
+        if isinstance(data, dict) and ("messages" in data or "chats" in data):
+            return write_rows(db_path, _iter_telegram(data))
     if suffix in (".jsonl", ".json"):
         with open(path, encoding="utf-8", errors="replace") as fh:
             return write_rows(db_path, _iter_claude_code(fh, project))
