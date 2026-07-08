@@ -504,6 +504,12 @@ async def archive_view(request: Request) -> Response:
     </div>
   </form>
 </section>
+<section>
+  <div class="kicker">documenti e immagini (PDF-scansione, screenshot)</div>
+  <p class="muted">I PDF <em>senza testo</em> (scansioni, screenshot) non si indicizzano qui: non hanno testo da estrarre. Ma <strong>NotebookLM può leggerli</strong> (OCR multimodale). Dall'host:</p>
+  <pre>vps1777 archive-ingest &lt;file&gt; --db &lt;nome&gt; --verify</pre>
+  <p class="muted">NotebookLM trascrive il documento (con una verifica di fedeltà opzionale), il testo viene indicizzato nell'archivio FTS e diventa cercabile qui accanto. Funziona con PDF-immagine, scansioni e qualunque file che NotebookLM sappia leggere. La trascrizione è generata da LLM: ottima per ritrovare contenuti, non garantita fedele al 100% su layout complessi.</p>
+</section>
 """
     return _layout("Archive", body, current="archive", flash=flash, flash_kind=flash_kind)
 

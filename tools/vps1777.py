@@ -1394,6 +1394,65 @@ def cmd_bootstrap(repo: Path, args) -> int:
     return 0
 
 
+# ─────────────────────────────────────────── archive-ingest (via NotebookLM)
+
+_ARCH_NAME_RE = re.compile(r"[^a-z0-9_-]+")
+
+
+def cmd_archive_ingest(repo: Path, args) -> int:
+    """Estrae il testo di un file via NotebookLM (OCR/lettura multimodale) e lo
+    indicizza nell'archivio FTS. Per immagini/scansioni che pypdf non sa leggere.
+
+    Orchestrazione (l'host ha docker; nb1777-mcp ha l'auth nlm; il gateway ha
+    l'indexer + il volume archive):
+      1. copia il file in nb1777-mcp → `app.ingest` trascrive (scratch usa-e-getta)
+      2. porta il testo nel gateway → `app.archive_indexer` lo indicizza nel .db
+      3. archive-mcp lo scopre da solo (scan-mode). Pulizia dei temp inclusa.
+    """
+    src = Path(args.file).expanduser().resolve()
+    if not src.is_file():
+        die(f"file non trovato: {src}")
+    db_name = _ARCH_NAME_RE.sub("-", (args.db or src.stem).lower()).strip("-") or "archivio"
+    project = args.project or db_name
+    rid = os.urandom(4).hex()
+    nb_in = f"/tmp/ing_{rid}{src.suffix}"
+    gw_txt = f"/tmp/ing_{rid}.txt"
+    host_txt = Path(f"/tmp/vps1777_ing_{rid}.txt")
+    cc = compose_cmd(repo)
+    try:
+        log(f"NotebookLM: trascrizione di «{src.name}» (può richiedere un minuto)…")
+        run([*cc, "cp", str(src), f"nb1777-mcp:{nb_in}"], check=True)
+        ecmd = [*cc, "exec", "-T", "nb1777-mcp", "python", "-m", "app.ingest", "--file", nb_in]
+        if args.verify:
+            ecmd.append("--verify")
+        res = run(ecmd, capture=True, check=False, timeout=900)
+        if res.returncode != 0:
+            die(f"trascrizione fallita: {(res.stderr or res.stdout or '').strip()[:300]}")
+        try:
+            data = json.loads((res.stdout or "").strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            die(f"output trascrizione non interpretabile: {(res.stdout or '')[:200]}")
+        text = data.get("text") or ""
+        if not text.strip():
+            die("NotebookLM non ha restituito testo — il file è leggibile?")
+        ok(f"trascritti {len(text)} caratteri da NotebookLM")
+        if data.get("verification"):
+            log(f"verifica NotebookLM: {data['verification'][:400]}")
+        host_txt.write_text(text, encoding="utf-8")
+        run([*cc, "cp", str(host_txt), f"gateway:{gw_txt}"], check=True)
+        db_path = f"/var/lib/archive/db/{db_name}.db"
+        res2 = run([*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
+                    gw_txt, db_path, "--project", project], capture=True, check=False)
+        if res2.returncode != 0:
+            die(f"indicizzazione fallita: {(res2.stderr or res2.stdout or '').strip()[:300]}")
+        ok(f"indicizzato nell'archivio → DB «{db_name}»: {(res2.stdout or '').strip()}")
+        return 0
+    finally:
+        host_txt.unlink(missing_ok=True)
+        run([*cc, "exec", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)
+        run([*cc, "exec", "-T", "gateway", "rm", "-f", gw_txt], check=False)
+
+
 # ─────────────────────────────────────────── main
 
 def main() -> int:
@@ -1432,13 +1491,20 @@ def main() -> int:
     p.add_argument("--bundle", help="dir del bundle estratto (default: auto-detect)")
     p.add_argument("--yes", action="store_true")
 
+    p = sub.add_parser("archive-ingest", help="indicizza un file nell'archivio via NotebookLM (OCR/lettura multimodale)")
+    p.add_argument("file", help="file da estrarre (PDF-immagine, scansione, doc…)")
+    p.add_argument("--db", help="nome del DB archivio (default: dal nome file)")
+    p.add_argument("--project", help="etichetta progetto (default: nome DB)")
+    p.add_argument("--verify", action="store_true", help="chiedi a NotebookLM di verificare la trascrizione")
+
     args = parser.parse_args()
     repo = find_repo(args.home)
     os.chdir(repo)
 
     handlers = {"check": cmd_check, "update": cmd_update, "rollback": cmd_rollback,
                 "status": cmd_status, "version": cmd_version,
-                "migrate": cmd_migrate, "bootstrap": cmd_bootstrap}
+                "migrate": cmd_migrate, "bootstrap": cmd_bootstrap,
+                "archive-ingest": cmd_archive_ingest}
     try:
         return handlers[args.cmd](repo, args)
     except KeyboardInterrupt:
