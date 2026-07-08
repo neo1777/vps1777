@@ -2,6 +2,12 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.12.2] — 2026-07-08
+
+### Sicurezza
+
+- **`/admin/login`**: il delay anti-brute-force ora è **asincrono** (`await asyncio.sleep`, non `time.sleep`). Il `time.sleep` sincrono bloccava l'intero event loop del gateway per 0,5s a ogni login fallito → un attaccante che martellava l'endpoint pubblico poteva renderlo irraggiungibile (DoS). Da audit dell'autenticazione admin (il resto della postura — bcrypt cost-12, cookie JWT httponly/secure/samesite, errori generici, secret 0600, anti-open-redirect — è risultato solido).
+
 ## [0.12.1] — 2026-07-08
 
 ### Fix
