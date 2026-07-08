@@ -2,6 +2,19 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.13.0] — 2026-07-08
+
+### Sicurezza — hardening dell'autenticazione admin
+
+Da audit dell'auth ("sicurezza al massimo"):
+- **Password forti obbligatorie** (`rotate-secret.sh admin_password`): policy **min 16** caratteri, **≥3 classi** (minuscole/MAIUSCOLE/cifre/simboli), niente pattern comuni/prevedibili. Le deboli sono **rifiutate a monte**; la generata di default è forte (24 char).
+- **`/admin/login`**: rimossa la **pre-compilazione dell'email** admin (non si espone l'utente valido); **rate-limit/lockout per-IP** (5 tentativi / 5 min → blocco 15 min) contro il brute-force da singola sorgente.
+- **Content-Security-Policy** stretta sulle pagine admin: `script-src 'self' 'nonce-…'` (**niente `unsafe-inline`** per gli script), niente origini esterne, `frame-ancestors 'none'` (anti-clickjacking), `base-uri 'none'`, `form-action 'self'`, `object-src 'none'`. Gli script inline portano un **nonce** per-risposta.
+- **Google Fonts (CDN esterno) rimossi** → font di sistema, nessuna richiesta esterna dal browser admin.
+- **Header di sicurezza globali** (middleware **pure-ASGI**, non rompe lo streaming del proxy MCP): `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Strict-Transport-Security` (https). `X-Frame-Options: DENY` + CSP **solo** sulle pagine admin — la mini-app Telegram resta frameable.
+
+La postura preesistente era già solida (bcrypt cost-12, cookie JWT httponly/secure/samesite=lax, errori login generici, secret 0600, anti-open-redirect). CSRF: difeso da `samesite=lax` (i POST cross-site non portano il cookie admin); token CSRF espliciti restano un rafforzamento futuro opzionale.
+
 ## [0.12.2] — 2026-07-08
 
 ### Sicurezza
