@@ -29,7 +29,7 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .admin import _layout, _require_admin
+from .admin import _csrf_token, _layout, _require_admin
 from .audit import audit
 from .settings import get_settings
 
@@ -82,7 +82,7 @@ def _pending_path() -> Path:
 
 
 async def setup_view(request: Request) -> Response:
-    email, redirect = _require_admin(request)
+    email, redirect = await _require_admin(request)
     if redirect:
         return redirect
 
@@ -199,4 +199,5 @@ async def setup_view(request: Request) -> Response:
   </ul>
 </section>
 """
-    return _layout("setup", body, current="setup", flash=flash, flash_kind=flash_kind)
+    return _layout("setup", body, current="setup", flash=flash, flash_kind=flash_kind,
+                   csrf=_csrf_token(email))

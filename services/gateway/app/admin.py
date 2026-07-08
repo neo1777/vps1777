@@ -80,10 +80,48 @@ def _clear_admin_cookie(response: Response) -> None:
     response.delete_cookie(ADMIN_COOKIE, path="/")
 
 
-def _require_admin(request: Request) -> tuple[str | None, Response | None]:
+# ───── CSRF (synchronizer token firmato, legato alla sessione) ─────
+# Difesa in profondità sopra a samesite=lax: un token imprevedibile e firmato,
+# embeddato in ogni form e verificato su ogni POST. Un form ostile cross-origin
+# non può leggerlo né forgiarlo (non ha la chiave di firma) → la POST fallisce
+# anche se il cookie arrivasse. La verifica è CENTRALIZZATA in _require_admin:
+# ogni POST admin — anche uno aggiunto in futuro — è protetto d'ufficio, senza
+# doverselo ricordare handler per handler.
+_CSRF_TTL_FALLBACK = 8 * 3600
+
+
+def _csrf_token(email: str) -> str:
+    s = get_settings()
+    return issue(typ="csrf", sub=email, aud="csrf",
+                 ttl=s.oauth_admin_cookie_lifetime or _CSRF_TTL_FALLBACK)
+
+
+def _verify_csrf(form, email: str) -> bool:
+    tok = str(form.get("csrf", ""))
+    if not tok:
+        return False
+    try:
+        claims = verify(tok, expected_typ="csrf", expected_aud="csrf")
+    except JWTError:
+        return False
+    return claims.get("sub", "").lower() == email
+
+
+async def _require_admin(request: Request) -> tuple[str | None, Response | None]:
+    """Gate admin di ogni pagina. Sui POST verifica ANCHE il token CSRF."""
     email = verify_admin_cookie(request)
     if not email:
         return None, RedirectResponse("/admin/login", status_code=302)
+    if request.method == "POST":
+        form = await request.form()  # cache-ata: l'handler la rilegge a costo zero
+        if not _verify_csrf(form, email):
+            audit({"event": "admin_csrf_fail", "email": email, "path": request.url.path})
+            return None, _layout(
+                "errore",
+                '<section><div class="kicker">sicurezza</div><p>Token CSRF mancante o '
+                'non valido. Ricarica la pagina e riprova.</p></section>',
+                flash="Richiesta rifiutata (protezione CSRF)", flash_kind="err",
+            )
     return email, None
 
 
@@ -197,7 +235,8 @@ nav.tabs a.active{color:var(--fg);border-color:var(--accent)}
 """
 
 
-def _layout(title: str, body: str, current: str = "", flash: str = "", flash_kind: str = "ok") -> HTMLResponse:
+def _layout(title: str, body: str, current: str = "", flash: str = "",
+            flash_kind: str = "ok", csrf: str = "") -> HTMLResponse:
     tabs = ""
     if current:
         items = [
@@ -221,6 +260,12 @@ def _layout(title: str, body: str, current: str = "", flash: str = "", flash_kin
     # esterne (i Google Fonts sono stati tolti → fallback di sistema).
     nonce = pysecrets.token_urlsafe(16)
     body = body.replace("<script>", f'<script nonce="{nonce}">')
+    # inietta il token CSRF in OGNI form (così un nuovo form è protetto senza
+    # doverci pensare). Il login (pre-auth) chiama _layout senza csrf → nessun
+    # campo, coerente: /admin/login non è dietro _require_admin.
+    if csrf:
+        _field = f'<input type="hidden" name="csrf" value="{html.escape(csrf)}">'
+        body = re.sub(r'(<form\b[^>]*>)', lambda m: m.group(1) + _field, body)
     out = f"""<!DOCTYPE html><html lang="it"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>vps1777 · {html.escape(title)}</title>
@@ -245,7 +290,7 @@ def _layout(title: str, body: str, current: str = "", flash: str = "", flash_kin
 # ───── /admin root ─────
 
 async def admin_root(request: Request) -> Response:
-    email, redirect = _require_admin(request)
+    email, redirect = await _require_admin(request)
     if redirect:
         return redirect
     return RedirectResponse("/admin/setup", status_code=302)
@@ -352,7 +397,7 @@ def _extract_nlm_profile(content: bytes, auth_dir: Path) -> int:
 
 
 async def nlm_view(request: Request) -> Response:
-    email, redirect = _require_admin(request)
+    email, redirect = await _require_admin(request)
     if redirect:
         return redirect
 
@@ -435,7 +480,8 @@ tar czf nlm-profile.tgz profiles/default</pre>
   </section>
 </form>
 """
-    return _layout("NotebookLM", body, current="nlm", flash=flash, flash_kind=flash_kind)
+    return _layout("NotebookLM", body, current="nlm", flash=flash, flash_kind=flash_kind,
+                   csrf=_csrf_token(email))
 
 
 # ───── /admin/archive — upload + indicizzazione sessioni per archive-mcp ─────
@@ -475,7 +521,7 @@ def _valid_archive_db(path: Path) -> bool:
 
 
 async def archive_view(request: Request) -> Response:
-    email, redirect = _require_admin(request)
+    email, redirect = await _require_admin(request)
     if redirect:
         return redirect
 
@@ -572,7 +618,8 @@ async def archive_view(request: Request) -> Response:
   <p class="muted">NotebookLM trascrive il documento (con una verifica di fedeltà opzionale), il testo viene indicizzato nell'archivio FTS e diventa cercabile qui accanto. Funziona con PDF-immagine, scansioni e qualunque file che NotebookLM sappia leggere. La trascrizione è generata da LLM: ottima per ritrovare contenuti, non garantita fedele al 100% su layout complessi.</p>
 </section>
 """
-    return _layout("Archive", body, current="archive", flash=flash, flash_kind=flash_kind)
+    return _layout("Archive", body, current="archive", flash=flash, flash_kind=flash_kind,
+                   csrf=_csrf_token(email))
 
 
 # ───── /admin/update — canale di aggiornamento ─────
@@ -607,7 +654,7 @@ async def update_state(request: Request) -> Response:
 
 
 async def update_view(request: Request) -> Response:
-    email, redirect = _require_admin(request)
+    email, redirect = await _require_admin(request)
     if redirect:
         return redirect
     s = get_settings()
@@ -732,13 +779,14 @@ async function pollProgress() {{
 pollProgress();
 </script>
 """
-    return _layout("update", body, current="update", flash=flash, flash_kind=flash_kind)
+    return _layout("update", body, current="update", flash=flash, flash_kind=flash_kind,
+                   csrf=_csrf_token(email))
 
 
 # ───── /admin/audit ─────
 
 async def audit_view(request: Request) -> Response:
-    email, redirect = _require_admin(request)
+    email, redirect = await _require_admin(request)
     if redirect:
         return redirect
     events = read_recent(200)
@@ -759,13 +807,13 @@ async def audit_view(request: Request) -> Response:
   {''.join(rows) if rows else '<p style="color:var(--muted)">Nessun evento ancora.</p>'}
 </section>
 """
-    return _layout("audit", body, current="audit")
+    return _layout("audit", body, current="audit", csrf=_csrf_token(email))
 
 
 # ───── /admin/secrets (placeholder, da espandere) ─────
 
 async def secrets_view(request: Request) -> Response:
-    email, redirect = _require_admin(request)
+    email, redirect = await _require_admin(request)
     if redirect:
         return redirect
     body = f"""
@@ -784,4 +832,4 @@ async def secrets_view(request: Request) -> Response:
   <p>Vedi <a href="https://github.com/&lt;owner&gt;/vps1777/blob/main/docs/SECRETS.md" target="_blank" style="color:var(--accent)">docs/SECRETS.md</a>.</p>
 </section>
 """
-    return _layout("secrets", body, current="secrets")
+    return _layout("secrets", body, current="secrets", csrf=_csrf_token(email))
