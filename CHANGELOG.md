@@ -2,6 +2,16 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.15.0] — 2026-07-08
+
+### Sicurezza — gestione secret (scadenze/notifiche) + oauth refresh rotation
+
+- **oauth: rotazione del refresh token + revoca durevole** (OAuth 2.1 BCP). A ogni uso del refresh il vecchio è revocato e ne viene emesso uno nuovo; la revoca è **persistita su disco** (sopravvive ai restart) e il **riuso di un refresh revocato viene rilevato** (segnale di furto → rifiuto + audit). Prima il refresh non ruotava e la revoca era in-memory (persa al restart). Validato live.
+- **Monitoraggio scadenze secret**: nuovo `vps1777 secrets-status [--notify]` — età di ogni secret (dall'mtime), confronto con soglia (signing 90g, admin_pw 90g, gateway 180g, bot 365g), scrive `onboarding/secrets_status.json` e **notifica su Telegram** i scaduti. Timer systemd **settimanale** `vps1777-secrets-check.timer` (installato/abilitato dall'installer).
+- **`/admin/secrets`**: da placeholder a pagina vera — età, ultima rotazione e stato di ogni secret + istruzioni di rotazione.
+- Roadmap dichiarata: l'auto-rotazione trasparente dei secret di sistema (signing/gateway) richiede un *key-ring con grazia* — rimandata. La gran parte dei secret resta a rotazione **manuale con notifica** (ruotarli a caso romperebbe i connettori attivi).
+- Doc: [docs/SECRETS.md](docs/SECRETS.md) → "Scadenze e monitoraggio".
+
 ## [0.14.0] — 2026-07-08
 
 ### Sicurezza — token CSRF sui form admin (difesa in profondità)

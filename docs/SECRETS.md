@@ -58,6 +58,30 @@ gateway non ha privilegi per riscrivere i secret host né per riavviarsi
 la rotation si fa da CLI come sopra. Un `docker compose restart` non tocca le
 immagini: nessuna build, nessun pull.
 
+## Scadenze e monitoraggio
+
+Un check host — `vps1777 secrets-status` (timer systemd **settimanale**
+`vps1777-secrets-check.timer`) — calcola l'**età** di ogni secret (dall'mtime del
+file, riscritto a ogni rotazione) e la confronta con una soglia:
+
+| Secret | Soglia consigliata | Rotazione |
+|---|---|---|
+| `oauth_signing_secret` | 90 giorni | manuale (invalida i token) |
+| `admin_password_bcrypt` | 90 giorni | manuale |
+| `gateway_secret` | 180 giorni | manuale (cambia le URL MCP) |
+| `telegram_bot_token` | 365 giorni | manuale (BotFather) |
+
+Se un secret supera la soglia, il check **notifica il owner su Telegram** (`--notify`)
+e lo segna nella pagina admin **`/admin/secrets`**, che mostra età, ultima rotazione
+e stato di ogni secret + le istruzioni di rotazione. Scrive `onboarding/secrets_status.json`
+(letto dal gateway). Manuale: `vps1777 secrets-status` in qualunque momento.
+
+> Perché quasi tutto è **manuale**: ruotare `oauth_signing_secret`/`gateway_secret`
+> in automatico romperebbe i connettori attivi (token/URL). L'auto-rotazione
+> trasparente richiede un *key-ring con grazia* (roadmap). Il **refresh token
+> OAuth**, invece, **ruota già da solo** a ogni uso, con revoca durevole e
+> rilevamento del riuso (difesa dal furto token).
+
 ## Backup
 
 Vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md). I secret vanno backuppati age-encrypted insieme ai volumi.

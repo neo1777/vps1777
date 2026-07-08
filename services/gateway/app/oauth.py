@@ -52,9 +52,32 @@ def _save_clients() -> None:
         audit({"event": "oauth_clients_persist_error", "error": str(exc)})
 
 
+def _revoked_file() -> Path:
+    return Path(get_settings().audit_log_path).parent / "oauth_revoked.json"
+
+
+def _load_revoked() -> set[str]:
+    try:
+        return set(json.loads(_revoked_file().read_text()))
+    except Exception:
+        return set()
+
+
+def _save_revoked() -> None:
+    try:
+        f = _revoked_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps(sorted(_revoked_refresh)))
+    except Exception as exc:  # non fatale: resta in memoria per questa sessione
+        audit({"event": "oauth_revoked_persist_error", "error": str(exc)})
+
+
 _clients: dict[str, dict[str, Any]] = _load_clients()  # client_id → metadata (persistito)
 _codes: dict[str, dict[str, Any]] = {}       # code → {...} (effimero, in-memory)
-_revoked_refresh: set[str] = set()           # jti dei refresh_token revocati
+# jti dei refresh_token già usati/revocati — PERSISTITO su disco (sopravvive ai
+# restart: una revoca deve restare tale). Cresce coi refresh; a scala personale
+# resta piccolo (i jti contano solo finché il token non sarebbe scaduto).
+_revoked_refresh: set[str] = _load_revoked()
 
 
 # ───── discovery ─────
@@ -223,15 +246,25 @@ async def token(request: Request) -> Response:
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
         jti = claims.get("jti", "")
         if jti in _revoked_refresh:
+            # REUSE DETECTION (OAuth 2.1 BCP): un refresh già ruotato/revocato
+            # ripresentato = segnale di furto → rifiuta e logga.
+            audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti})
             return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
         sub = claims.get("sub", "")
+        # ROTAZIONE: revoca (durevolmente) il refresh appena usato ed emettine uno
+        # nuovo. Così un token rubato ha vita corta e il riuso si rileva.
+        _revoked_refresh.add(jti)
+        _save_revoked()
         access = issue(typ="access", sub=sub, aud=client_id, ttl=s.oauth_access_token_lifetime)
-        audit({"event": "oauth_refresh_used", "sub": sub, "client_id": client_id})
+        new_jti = pysecrets.token_urlsafe(16)
+        new_refresh = issue(typ="refresh", sub=sub, aud=client_id,
+                            ttl=s.oauth_refresh_token_lifetime, extra={"jti": new_jti})
+        audit({"event": "oauth_refresh_rotated", "sub": sub, "client_id": client_id})
         return JSONResponse({
             "access_token": access,
             "token_type": "Bearer",
             "expires_in": s.oauth_access_token_lifetime,
-            "refresh_token": rt,  # rotation futura
+            "refresh_token": new_refresh,
         })
 
     return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
