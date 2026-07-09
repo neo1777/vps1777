@@ -506,7 +506,7 @@ for u in {REMOTE_DIR}/systemd/vps1777-*; do
   case "$u" in *.service|*.timer|*.path) install -m 644 "$u" /etc/systemd/system/;; esac
 done
 systemctl daemon-reload
-systemctl enable --now vps1777-check-update.timer vps1777-update.path
+systemctl enable --now vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer
 echo SELFUPDATE_OK
 """
         okf = False

@@ -2,6 +2,12 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.15.1] — 2026-07-09
+
+### Fix — l'installazione ora abilita il timer di check dei secret
+
+- **`vps1777-secrets-check.timer` non veniva abilitato da nessun percorso d'installazione.** `deploy.sh` e `installer/engine.py` *copiavano* la unit in `/etc/systemd/system/` ma la riga `systemctl enable --now` elencava solo `vps1777-check-update.timer` + `vps1777-update.path`, dimenticando il timer dei secret. Risultato: su ogni **nuova installazione** il check settimanale delle scadenze secret (introdotto in 0.15.0) restava **spento** — la notifica Telegram di un secret scaduto non sarebbe mai partita. Scoperto col collaudo di una fresh install reale. Fix: aggiunto `vps1777-secrets-check.timer` alla riga di enable in entrambi i file. (`install_systemd_units` in `tools/vps1777.py` lo abilitava già; le installazioni esistenti vanno allineate a mano con `systemctl enable --now vps1777-secrets-check.timer`.)
+
 ## [0.15.0] — 2026-07-08
 
 ### Sicurezza — gestione secret (scadenze/notifiche) + oauth refresh rotation
