@@ -2,6 +2,17 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.16.1] — 2026-07-10
+
+### Fix — l'ingest archive non mente più sugli zip
+
+Trovato collaudando `/admin/archive` con dati reali (export claude.ai da 325 MB + export Telegram):
+
+- **Design chats indicizzate.** Nell'export claude.ai i messaggi delle design chats hanno il `content` **annidato** (`{"role", "content"}`), che `extract_text` non gestiva → 0 righe in silenzio. Ora si scende nel dict (ricorsivo) e le design chats entrano, etichettate **`design:<progetto>`** (il loro `title` è sempre il generico "Chat"; l'etichetta utile è il progetto di appartenenza).
+- **Zip Telegram Desktop JSON supportato.** Prima ogni `.zip` era assunto export claude.ai; ora il dispatch guarda il **contenuto**: `result.json` (anche in sottocartella `ChatExport_*/`) → estrattore Telegram. Si carica direttamente lo zip della cartella esportata.
+- **Mai più "ok, 0 record".** Uno zip **HTML** di Telegram (`messages.html`) viene rifiutato spiegando di riesportare in JSON; uno zip **non riconosciuto** viene rifiutato dicendo cosa ci si aspetta; uno zip riconosciuto ma **senza messaggi estraibili** è un errore (e non lascia un DB vuoto; un DB già popolato resta intatto). Stesso principio del rifiuto dei PDF-immagine.
+- 7 test nuovi (44 totali gateway); aggiornati l'help di `/admin/archive` e [docs/ARCHIVE.md](docs/ARCHIVE.md).
+
 ## [0.16.0] — 2026-07-09
 
 ### Mini App Telegram completa — la plancia mobile di vps1777
