@@ -1,0 +1,176 @@
+"""Validazione initData Telegram — pura stdlib, zero dipendenze di terze parti.
+
+Isolata qui (fuori da miniapp.py, che importa starlette) così è importabile e
+testabile stdlib-only, come archive_indexer / asgi_security: la CI gira i test
+del gateway con `uvx pytest` senza installare le deps pesanti.
+
+Spec: https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
+"""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json as _json
+import time
+from urllib.parse import parse_qsl
+
+
+def verify_init_data(
+    init_data: str, bot_token: str, *, max_age_s: int = 86400, now: float | None = None
+) -> dict | None:
+    """Valida l'HMAC di `initData`. Ritorna il payload parsato (dict) se valido,
+    None altrimenti.
+
+    secret_key = HMAC_SHA256("WebAppData", bot_token); il campo `hash` è escluso
+    dal data_check_string. Scarta se più vecchio di max_age_s (auth_date).
+    """
+    if not init_data or not bot_token:
+        return None
+    pairs = list(parse_qsl(init_data, strict_parsing=False, keep_blank_values=True))
+    received_hash = None
+    data_pairs: list[tuple[str, str]] = []
+    for k, v in pairs:
+        if k == "hash":
+            received_hash = v
+        else:
+            data_pairs.append((k, v))
+    if not received_hash:
+        return None
+
+    data_pairs.sort(key=lambda kv: kv[0])
+    data_check = "\n".join(f"{k}={v}" for k, v in data_pairs)
+
+    secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
+    expected = hmac.new(secret_key, data_check.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, received_hash):
+        return None
+
+    # Freshness: auth_date è secondi epoch. 0/mancante o troppo vecchio → scarta.
+    auth_date = int(dict(data_pairs).get("auth_date", "0") or "0")
+    _now = time.time() if now is None else now
+    if auth_date == 0 or (_now - auth_date) > max_age_s:
+        return None
+
+    return dict(data_pairs)
+
+
+def is_owner(user_id: object, owner_id: int) -> bool:
+    """True se l'utente è l'owner. owner_id==0 → non configurato → nessun filtro
+    (coerente col bot: `if s.telegram_owner_id and ...`)."""
+    if not owner_id:
+        return True
+    try:
+        return int(user_id) == int(owner_id)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return False
+
+
+# ───── parsing risposte MCP (streamable-http) ─────
+# Il gateway chiama gli upstream MCP direttamente (rete backend) per gli
+# endpoint della Mini App. La risposta può arrivare come JSON puro o come SSE
+# (text/event-stream, payload nella riga `data:`) — stessa gestione del bot.
+
+def parse_mcp_payload(content_type: str, text: str) -> dict:
+    """Estrae il payload JSON-RPC da una risposta MCP streamable-http.
+    Solleva ValueError se non c'è payload riconoscibile."""
+    if "text/event-stream" in (content_type or ""):
+        for line in text.splitlines():
+            if line.startswith("data:"):
+                data = line[5:].strip()
+                if data:
+                    return _json.loads(data)
+        raise ValueError("risposta SSE MCP senza payload 'data:'")
+    return _json.loads(text)
+
+
+def extract_tool_texts(rpc: dict) -> list[str]:
+    """Dai content block del risultato tools/call ritorna i testi.
+    Solleva ValueError con messaggio leggibile se il tool ha fallito."""
+    if "error" in rpc:
+        raise ValueError(str(rpc["error"].get("message", rpc["error"])))
+    result = rpc.get("result", {}) or {}
+    content = result.get("content", []) or []
+    texts = [
+        b.get("text", "") for b in content
+        if isinstance(b, dict) and b.get("type", "text") == "text"
+    ]
+    if result.get("isError"):
+        raise ValueError((texts[0] if texts else "tool error")[:500])
+    return texts
+
+
+def parse_json_blocks(texts: list[str]) -> list[dict]:
+    """Interpreta i content block come oggetti JSON (un dict per block, o un
+    block con un array). Blocchi non-JSON vengono ignorati — stessa tolleranza
+    del bot: le versioni di FastMCP serializzano in modi diversi."""
+    out: list[dict] = []
+    for txt in texts:
+        try:
+            obj = _json.loads(txt)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(obj, list):
+            out.extend(x for x in obj if isinstance(x, dict))
+        elif isinstance(obj, dict):
+            out.append(obj)
+    return out
+
+
+def parse_string_blocks(texts: list[str]) -> list[str]:
+    """Interpreta i content block come stringhe (es. list_databases → list[str]).
+    Tollera le varie serializzazioni FastMCP: un block con un array JSON, un
+    block per stringa (JSON-quoted o plain)."""
+    out: list[str] = []
+    for txt in texts:
+        try:
+            obj = _json.loads(txt)
+        except (ValueError, TypeError):
+            if txt:
+                out.append(txt)
+            continue
+        if isinstance(obj, list):
+            out.extend(str(x) for x in obj)
+        elif isinstance(obj, (str, int, float)):
+            out.append(str(obj))
+    return out
+
+
+def extract_answer(text: str) -> str:
+    """notebook_query può ritornare il testo incapsulato in JSON
+    ({"answer": "..."}): all'utente va mostrato il testo, non l'involucro.
+    Se non è quel formato, il testo passa invariato."""
+    try:
+        obj = _json.loads(text)
+    except (ValueError, TypeError):
+        return text
+    if isinstance(obj, dict) and isinstance(obj.get("answer"), str):
+        return obj["answer"]
+    return text
+
+
+def version_gt(a: str, b: str) -> bool:
+    """True se la versione `a` è maggiore di `b` (semver semplice X.Y.Z).
+    Un update è "disponibile" solo se latest > running — `latest != running`
+    proporrebbe un downgrade quando il check giornaliero è stantio (es. latest
+    0.15.0 letto prima di una release, running 0.15.2). Componenti non numerici
+    → confronto stringa, meglio di un crash."""
+    if not a or not b:
+        return False
+    try:
+        ta = tuple(int(x) for x in a.strip().lstrip("v").split("."))
+        tb = tuple(int(x) for x in b.strip().lstrip("v").split("."))
+        return ta > tb
+    except ValueError:
+        return a > b
+
+
+def summarize_secrets(status: dict) -> dict:
+    """Riassunto compatto di secrets_status.json per la card overview."""
+    secrets = status.get("secrets", []) or []
+    overdue = [s.get("name", "?") for s in secrets if s.get("overdue")]
+    return {
+        "total": len(secrets),
+        "overdue": len(overdue),
+        "overdue_names": overdue,
+        "checked_at": status.get("checked_at", ""),
+    }

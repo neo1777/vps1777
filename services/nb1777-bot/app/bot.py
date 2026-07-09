@@ -14,7 +14,13 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
-from telegram import Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    MenuButtonWebApp,
+    Update,
+    WebAppInfo,
+)
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
@@ -84,6 +90,28 @@ async def _mcp_call(tool: str, args: dict[str, Any] | None = None) -> Any:
 
 # ───── comandi ─────
 
+def _miniapp_url() -> str | None:
+    """URL della Mini App, solo se il gateway è su https (requisito Telegram per
+    i bottoni web_app). In dev (http) → None: niente bottone, niente errori."""
+    base = get_settings().gateway_public_base
+    return f"{base}/app" if base.startswith("https://") else None
+
+
+@owner_only
+async def cmd_pannello(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    if not msg:
+        return
+    url = _miniapp_url()
+    if not url:
+        await msg.reply_text(
+            "Il pannello richiede il gateway su HTTPS pubblico "
+            "(PUBLIC_BASE non è https). Configuralo e riprova."
+        )
+        return
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎛 Apri il pannello", web_app=WebAppInfo(url=url))]])
+    await msg.reply_text("Il tuo pannello di controllo vps1777:", reply_markup=kb)
+
 @owner_only
 async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
@@ -116,6 +144,7 @@ async def cmd_aiuto(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await msg.reply_text(
         "*Comandi nb1777*\n\n"
+        "/pannello — apri il pannello di controllo (Mini App)\n"
         "/lista — elenca i tuoi notebook\n"
         "/chiedi `<id> <domanda>` — domanda RAG su un notebook\n"
         "/aiuto — questo messaggio\n"
@@ -234,10 +263,27 @@ def build_app() -> Application:
     app = Application.builder().token(s.effective_token).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("aiuto", cmd_aiuto))
+    app.add_handler(CommandHandler("pannello", cmd_pannello))
     app.add_handler(CommandHandler("lista", cmd_lista))
     app.add_handler(CommandHandler("chiedi", cmd_chiedi))
     app.add_error_handler(_on_error)
     return app
+
+
+async def _install_menu_button(app: Application) -> None:
+    """Imposta il bottone-menu del bot come launcher della Mini App (accanto al
+    campo di testo). Best-effort: se il gateway non è https o Telegram rifiuta,
+    logga e prosegue — il comando /pannello resta comunque disponibile."""
+    url = _miniapp_url()
+    if not url:
+        return
+    try:
+        await app.bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(text="Pannello", web_app=WebAppInfo(url=url))
+        )
+        log.info("menu button Mini App impostato → %s", url)
+    except Exception as exc:  # noqa: BLE001 — cosmetico, non deve bloccare l'avvio
+        log.warning("set_chat_menu_button fallito: %s", exc)
 
 
 async def run() -> None:
@@ -253,6 +299,7 @@ async def run() -> None:
     async with app:
         await app.initialize()
         await app.start()
+        await _install_menu_button(app)
         await app.updater.start_polling()
         heartbeat = asyncio.create_task(_heartbeat_loop())
         # blocca fino a SIGTERM

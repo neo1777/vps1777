@@ -59,6 +59,7 @@ services:
       OAUTH_CORS_ORIGINS: "https://claude.ai,https://web.telegram.org"
       AUDIT_LOG_PATH: /var/lib/gateway/audit.jsonl
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}   # Mini App owner-only (server-side)
       OAUTH_PWD_HASH_FILE: /run/secrets/admin_password_bcrypt
       GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
       OAUTH_SIGNING_SECRET_FILE: /run/secrets/oauth_signing_secret

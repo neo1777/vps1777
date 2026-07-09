@@ -2,6 +2,23 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.16.0] — 2026-07-09
+
+### Mini App Telegram completa — la plancia mobile di vps1777
+
+Da placeholder a pannello production-ready, aperto dal bot (bottone **Pannello** / `/pannello`), **senza password**: l'identità arriva da Telegram e la verifica il server.
+
+- **4 tab**: *Stato* (gateway, versione con badge release, connettori MCP con URL copiabile, riassunto secret) · *Notebook* (lista NotebookLM + **domanda RAG dal telefono**, con indicatore del tempo per le query lunghe) · *Archivio* (ricerca FTS5, tutti i DB o uno, snippet evidenziati) · *Sistema* (scadenze secret, **update a un tap** con conferma + progress in tempo reale — stesso meccanismo intent+CLI del pulsante admin — e ultimi eventi audit).
+- **Backend `/app/api/*`** (10 endpoint JSON, tutti dietro Bearer `typ=miniapp`): il gateway chiama gli upstream MCP direttamente sulla rete backend (`mcp_client.py`); parsing SSE/JSON e initData in `miniapp_core.py` (stdlib-only, 21 test). Frontend *thin*: riusa gli stessi file di stato di `/admin`, zero logica duplicata.
+- **Sicurezza**:
+  - `initData` verificata **server-side** (HMAC col token bot, scadenza 24h) + **owner-only** (`TELEGRAM_OWNER_ID`, ora passato anche al gateway): un altro utente Telegram riceve 403 anche con initData valida — il bottone del bot non è il gate, il server sì.
+  - **`/app/plugins` non è più pubblico**: era raggiungibile senza auth e restituiva gli URL MCP **col gateway secret** (leak). Ora è `/app/api/plugins`, dietro Bearer.
+  - CSP con nonce per-risposta sulla pagina; `Cache-Control: no-store` su `/app/auth` e `/app/api/*` (middleware, path-based); niente CSRF necessario (Bearer header, mai cookie).
+  - **Anti-downgrade alla fonte**: `available` usa un confronto di versione vero (`version_gt`), non `latest != running` — con un check giornaliero stantio la UI non propone più un downgrade, e il POST update lo rifiuta con 409 (trovato col collaudo E2E live).
+- **Bot**: nuovo comando `/pannello` + **menu button** impostato automaticamente all'avvio (`set_chat_menu_button` → `PUBLIC_BASE/app`, solo se https).
+- Validato **E2E sul VPS reale**: 29 check (auth positiva/negativa/manomessa, 401 su tutti gli endpoint senza Bearer, RAG reale su NotebookLM, anti-downgrade, CSP) — tutti verdi.
+- Doc: nuovo **[docs/MINIAPP.md](docs/MINIAPP.md)**; aggiornati README, SECURITY.md, INSTALL.md, TROUBLESHOOTING.md (launcher BotFather stantio, not-owner), `.env.example`.
+
 ## [0.15.2] — 2026-07-09
 
 ### Fix/hardening — le pagine admin non vengono più servite dalla cache del browser
