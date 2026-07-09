@@ -12,12 +12,17 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 
 | Formato | Cosa indicizza |
 |---|---|
-| `.zip` | export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs`) |
+| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs`) oppure export **Telegram Desktop JSON** (`result.json`, anche zippato come cartella `ChatExport_*/`) |
 | `.jsonl` | sessione **Claude Code** (`~/.claude/projects/<progetto>/<id>.jsonl`) |
 | `.json` | export **Telegram Desktop** (formato *Machine-readable JSON*) |
 | `.pdf` | documento **con testo** (estratto via `pypdf`) |
 | `.md` / `.txt` | testo/markdown generico (ponte per l'output di altri tool) |
 | `.db` | drop-in di un archivio SQLite già indicizzato (schema validato) |
+
+> ⚠️ L'export **HTML** di Telegram Desktop (`messages.html`) non è indicizzabile:
+> riesporta scegliendo il formato **JSON** (*machine-readable*). Uno zip non
+> riconosciuto, o senza messaggi estraibili, viene **rifiutato con un errore
+> chiaro** — mai un "ok, 0 record".
 
 Campi del form: **nome DB** (vuoto = dal nome file) e **progetto** (etichetta;
 vuoto = dedotta dalla fonte). Ricaricare lo stesso nome DB non duplica (dedup per

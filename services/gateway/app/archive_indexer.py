@@ -7,11 +7,16 @@ Schema prodotto (compatibile col `search` di archive-mcp):
     messages(uuid PRIMARY KEY, project, ts, content)          -- sorgente
     messages_fts USING fts5(uuid, project, ts, content, content='messages', ...)
 
-Formati (dispatch per estensione in `index_file`):
+Formati (dispatch per estensione in `index_file`; i .zip si riconoscono dal
+contenuto, non dal nome):
     .jsonl        → sessione Claude Code (record user/assistant)
-    .zip          → export account claude.ai (conversations.json + design_chats/ + projects/docs)
+    .zip claude.ai → export account (conversations.json + design_chats/ + projects/docs)
+    .zip Telegram  → export Desktop JSON (result.json, anche in sottocartella)
+    .json         → export Telegram Desktop (result.json) o sessione Claude Code
     .md / .txt    → testo/markdown generico (ponte per output di altri tool), spezzato in chunk
     (.db)         → NON qui: è un drop-in, si copia direttamente nella dir
+Uno zip non riconosciuto — o riconosciuto ma senza messaggi estraibili — è un
+ERRORE esplicito, mai un successo a 0 righe (stesso principio dei PDF-immagine).
 
 Indexer CONDIVISO, due usi:
   - server-side: il gateway lo importa e chiama `index_file(...)` in /admin/archive
@@ -101,10 +106,12 @@ def count_rows(db_path: Union[str, Path]) -> int:
 # ── helper testo ─────────────────────────────────────────────────────────────
 
 def extract_text(content: object) -> str:
-    """Testo leggibile da un campo `content` (stringa o lista di blocchi).
+    """Testo leggibile da un campo `content` (stringa, lista di blocchi o dict).
 
     stringa → così com'è. lista (blocchi Claude) → si prendono i `text`; il
     resto (thinking/tool_use/tool_result) è rumore per la ricerca e si scarta.
+    dict → forma annidata delle design chats claude.ai ({"role", "content"}):
+    si scende in `content`/`text` (ricorsivo — l'interno può essere str o lista).
     """
     if isinstance(content, str):
         return content.strip()
@@ -112,6 +119,11 @@ def extract_text(content: object) -> str:
         parts = [str(b["text"]) for b in content
                  if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
         return "\n".join(parts).strip()
+    if isinstance(content, dict):
+        inner = content.get("content")
+        if inner is None:
+            inner = content.get("text")
+        return extract_text(inner) if inner is not None else ""
     return ""
 
 
@@ -180,6 +192,13 @@ def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[Row]:
                         data = json.load(f)
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         continue
+                if isinstance(data, dict):
+                    # il title è sempre il generico "Chat": l'etichetta utile è
+                    # il progetto di appartenenza. `name` vince su `title` in
+                    # _iter_conversations, quindi la si impone qui.
+                    proj = data.get("project")
+                    pname = proj.get("name") if isinstance(proj, dict) else ""
+                    data = {**data, "name": f"design:{pname or data.get('title') or 'chat'}"}
                 yield from _iter_conversations(data, "claude-design-chats")
         for n in names:
             if n.startswith("projects/") and n.endswith(".json"):
@@ -299,9 +318,52 @@ def _iter_telegram(data: dict) -> Iterator[Row]:
                    f"[{sender}] {body}" if sender else body)
 
 
+def _iter_telegram_zip(zip_path: Union[str, Path], members: list[str]) -> Iterator[Row]:
+    """result.json dentro uno zip (l'export Desktop arriva spesso come cartella
+    zippata: ChatExport_.../result.json). Più member = più chat, si accumulano."""
+    with zipfile.ZipFile(zip_path) as z:
+        for m in members:
+            with z.open(m) as f:
+                try:
+                    data = json.load(f)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+            if isinstance(data, dict):
+                yield from _iter_telegram(data)
+
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 
 SUPPORTED = (".jsonl", ".zip", ".md", ".txt", ".json", ".pdf")
+
+
+def _index_zip(path: Path, db_path: Union[str, Path]) -> int:
+    """Dispatch dei .zip dal CONTENUTO (il nome non dice niente): export
+    claude.ai o export Telegram Desktop JSON. Tutto il resto è un errore
+    parlante — un "ok, 0 record" qui è sempre una bugia."""
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+    telegram_jsons = [n for n in names if Path(n).name == "result.json"]
+    if "conversations.json" in names or any(
+            n.startswith(("design_chats/", "projects/")) for n in names):
+        n, kind = write_rows(db_path, _iter_claude_zip(path)), "export claude.ai"
+    elif telegram_jsons:
+        n, kind = write_rows(db_path, _iter_telegram_zip(path, telegram_jsons)), "export Telegram"
+    elif any(Path(m).name.startswith("messages") and m.endswith(".html") for m in names):
+        raise ValueError(
+            "export Telegram in formato HTML (messages.html): il testo non è "
+            "estraibile. Riesporta da Telegram Desktop scegliendo il formato "
+            "JSON (machine-readable) e carica il result.json o il suo zip.")
+    else:
+        raise ValueError(
+            "zip non riconosciuto: mi aspetto un export claude.ai "
+            "(conversations.json / design_chats/ / projects/) oppure un export "
+            "Telegram Desktop JSON (result.json).")
+    if n == 0:
+        if count_rows(db_path) == 0:
+            Path(db_path).unlink(missing_ok=True)
+        raise ValueError(f"{kind} riconosciuto ma nessun messaggio estraibile (0 record)")
+    return n
 
 
 def index_file(path: Union[str, Path], db_path: Union[str, Path], *, project: str = "") -> int:
@@ -309,7 +371,7 @@ def index_file(path: Union[str, Path], db_path: Union[str, Path], *, project: st
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix == ".zip":
-        return write_rows(db_path, _iter_claude_zip(path))
+        return _index_zip(path, db_path)
     if suffix == ".pdf":
         n = write_rows(db_path, _iter_pdf(path, project))
         if n == 0 and count_rows(db_path) == 0:
