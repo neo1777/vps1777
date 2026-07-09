@@ -53,10 +53,22 @@ def test_admin_exact_path_no_store():
 
 
 def test_non_admin_has_no_cache_control():
-    # la mini-app /app NON deve avere no-store (deve poter essere cacheata)
+    # la pagina /app NON deve avere no-store (statica, cacheabile)
     h = _run("/app", hsts=True)
     assert "cache-control" not in h
     assert h.get("x-content-type-options") == "nosniff"  # gli header globali restano
+
+
+def test_miniapp_api_no_store():
+    # le API della Mini App (dati di controllo) non vanno mai cacheate
+    assert _run("/app/api/overview", hsts=True).get("cache-control") == "no-store"
+    assert _run("/app/api/update/state", hsts=True).get("cache-control") == "no-store"
+    assert _run("/app/auth", hsts=True).get("cache-control") == "no-store"
+
+
+def test_health_and_proxy_not_no_store():
+    assert "cache-control" not in _run("/health", hsts=True)
+    assert "cache-control" not in _run("/SECRET/nb1777/mcp", hsts=True)
 
 
 def test_admin_prefix_not_greedy():

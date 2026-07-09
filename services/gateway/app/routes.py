@@ -67,11 +67,20 @@ routes = [
     Route("/admin/audit", admin.audit_view, methods=["GET"]),
     Route("/admin/secrets", admin.secrets_view, methods=["GET"]),
 
-    # Mini App
+    # Mini App (pagina + API dietro Bearer typ=miniapp)
     Route("/app", miniapp.app_index, methods=["GET"]),
     Route("/app/", miniapp.app_index, methods=["GET"]),
     Route("/app/auth", miniapp.miniapp_auth, methods=["POST"]),
-    Route("/app/plugins", miniapp.plugins_list, methods=["GET"]),
+    Route("/app/api/overview", miniapp.api_overview, methods=["GET"]),
+    Route("/app/api/plugins", miniapp.api_plugins, methods=["GET"]),
+    Route("/app/api/notebooks", miniapp.api_notebooks, methods=["GET"]),
+    Route("/app/api/ask", miniapp.api_ask, methods=["POST"]),
+    Route("/app/api/archive/dbs", miniapp.api_archive_dbs, methods=["GET"]),
+    Route("/app/api/archive/search", miniapp.api_archive_search, methods=["POST"]),
+    Route("/app/api/secrets", miniapp.api_secrets, methods=["GET"]),
+    Route("/app/api/audit", miniapp.api_audit, methods=["GET"]),
+    Route("/app/api/update/state", miniapp.api_update_state, methods=["GET"]),
+    Route("/app/api/update", miniapp.api_update_trigger, methods=["POST"]),
 
     # Reverse proxy MCP — catch-all, ULTIMA
     Route("/{secret}/{service}", proxy.proxy,

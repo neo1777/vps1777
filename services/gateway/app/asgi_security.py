@@ -15,11 +15,13 @@ class SecurityHeadersASGI:
     BaseHTTPMiddleware). CSP e X-Frame-Options DENY restano sulle sole pagine
     admin (in _layout): la mini-app Telegram deve poter stare in iframe.
 
-    Sulle risposte admin aggiunge anche `Cache-Control: no-store`: le pagine di
-    controllo devono dire SEMPRE la verità (es. la versione deployata nel footer),
-    mai un render vecchio ricaricato dalla cache del browser. Path-based → vale
-    anche per ogni endpoint admin futuro, senza doverlo ricordare handler per
-    handler (stessa logica 'difesa a prescindere' del token CSRF).
+    Sulle risposte admin e sulle API della Mini App (/app/api) aggiunge anche
+    `Cache-Control: no-store`: le pagine/dati di controllo devono dire SEMPRE la
+    verità (es. la versione deployata, lo stato update), mai un render vecchio
+    ricaricato dalla cache del browser/webview. Path-based → vale anche per ogni
+    endpoint futuro sotto quei prefissi, senza doverlo ricordare handler per
+    handler (stessa logica 'difesa a prescindere' del token CSRF). La pagina
+    /app in sé resta cacheabile (statica), come /health e il proxy MCP.
     """
 
     def __init__(self, app, hsts: bool) -> None:
@@ -32,7 +34,8 @@ class SecurityHeadersASGI:
             return
 
         _path = scope.get("path", "")
-        is_admin = _path == "/admin" or _path.startswith("/admin/")
+        no_store = (_path == "/admin" or _path.startswith("/admin/")
+                    or _path.startswith("/app/api/") or _path == "/app/auth")
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
@@ -47,7 +50,7 @@ class SecurityHeadersASGI:
                 add("Referrer-Policy", "no-referrer")
                 if self.hsts:
                     add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-                if is_admin:
+                if no_store:
                     add("Cache-Control", "no-store")
             await send(message)
 

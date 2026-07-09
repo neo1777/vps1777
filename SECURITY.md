@@ -29,6 +29,11 @@ Threat model dichiarato:
 - JWT con `typ` separati: access_token (15min), refresh_token (30gg), admin (8h), miniapp (1h)
 - Path namespacing via `GATEWAY_SECRET`: l'URL contiene un segreto rotabile (se compromesso, rota e cambi URL)
 - Bcrypt rounds=12 per password admin (file `secrets/admin_password_bcrypt.txt`)
+- Pannello admin: token **CSRF** (synchronizer, verificato centralmente su ogni POST),
+  **CSP** con nonce per-risposta, lockout per-IP sul login, `Cache-Control: no-store`
+- Mini App: `initData` Telegram **verificata server-side** (HMAC col token bot,
+  scadenza 24h) + **owner-only** (`TELEGRAM_OWNER_ID`); API dietro Bearer `typ=miniapp`
+  — vedi [docs/MINIAPP.md](docs/MINIAPP.md)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`
 - Il gateway (unico servizio esposto) non ha accesso al Docker socket né ai secret host
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`

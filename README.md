@@ -108,10 +108,16 @@ caricare l'auth NotebookLM, [docs/INSTALL.md](docs/INSTALL.md).
 | **gateway** | OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*` | 8080 |
 | **archive-mcp** | Ricerca FTS5 su più DB (export web claude.ai, sessioni Claude Code) | 8002 |
 | **nb1777-mcp** | NotebookLM via CLI `nlm` — **35 tool** (notebook, source, chat, 9 artefatti studio, doctor) | 8003 |
-| **nb1777-bot** | Bot Telegram owner-only + Mini App | (long-poll) |
+| **nb1777-bot** | Bot Telegram owner-only + launcher Mini App | (long-poll) |
 
 Più i **plugin** che ci aggiungi tu — un MCP o un bot in pochi file, senza
 toccare il core. Vedi [docs/PLUGINS.md](docs/PLUGINS.md).
+
+E la **Mini App Telegram** — la plancia mobile: si apre dal bot (bottone
+*Pannello*), senza password (auth via identità Telegram, owner-only lato
+server). Notebook con domande RAG dal telefono, ricerca nell'archivio, URL dei
+connettori copiabili, scadenze secret, update a un tap. Vedi
+[docs/MINIAPP.md](docs/MINIAPP.md).
 
 ## Aggiornamenti
 
@@ -152,6 +158,7 @@ Vedi [SECURITY.md](SECURITY.md) per il threat model e come segnalare vulnerabili
 | [OPS.md](docs/OPS.md) | Hardening + profili opzionali (Portainer, Watchtower, backup) |
 | [UPDATE.md](docs/UPDATE.md) | Aggiornamenti: `vps1777 update`, pulsante admin, rollback |
 | [ARCHIVE.md](docs/ARCHIVE.md) | Archivio di ricerca: pagina `/admin/archive`, formati, ingest via NotebookLM |
+| [MINIAPP.md](docs/MINIAPP.md) | Mini App Telegram: la plancia mobile — auth initData, endpoint, sicurezza |
 | [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) | Backup/restore volumi age-encrypted |
 | [ONBOARDING.md](docs/ONBOARDING.md) | Setup post-deploy dal pannello web |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Quando qualcosa va storto |

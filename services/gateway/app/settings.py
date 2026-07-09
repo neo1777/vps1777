@@ -42,6 +42,19 @@ def _csv_list(value: str | list[str] | None) -> list[str]:
 CSVList = Annotated[list[str], NoDecode, BeforeValidator(_csv_list)]
 
 
+def _int_or_zero(value: object) -> int:
+    """TELEGRAM_OWNER_ID="" (env non settata) → 0, invece di ValidationError."""
+    if value is None or value == "":
+        return 0
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return 0
+
+
+IntOrZero = Annotated[int, BeforeValidator(_int_or_zero)]
+
+
 def _parse_upstreams(value: str | dict[str, str] | None) -> dict[str, str]:
     """
     Parsa "archive=archive-mcp:8002,nb1777=nb1777-mcp:8003" in
@@ -106,6 +119,11 @@ class Settings(BaseSettings):
     # ───── Telegram (per Mini App) ─────
     telegram_bot_token_file: SecretFromFile = ""
     telegram_bot_token: str = ""
+    # owner-only: la Mini App emette un token solo per QUESTO utente Telegram
+    # (0 = non configurato → nessuna restrizione, come il bot). Difesa in
+    # profondità: il bot mostra il bottone solo all'owner, ma il server verifica
+    # comunque l'id — non ci si fida del solo client.
+    telegram_owner_id: IntOrZero = 0
 
     # ───── Storage ─────
     audit_log_path: str = "/var/lib/gateway/audit.jsonl"

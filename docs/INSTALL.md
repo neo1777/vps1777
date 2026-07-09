@@ -58,6 +58,9 @@ Se rilanci `setup.sh`, salta gli step già fatti.
    Se `nlm` risulta "not found": `uv tool update-shell` (mette `~/.local/bin` nel PATH) e riapri il terminale.
 3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone **2 tool** (`search`, `get_conversation`), `nb1777` ne espone **35**. I connector **persistono** ai restart del gateway (DCR salvata su disco).
 4. **Bot Telegram**: `/start` al tuo bot
+5. **Mini App**: nel bot, bottone **Pannello** accanto al campo di testo (o
+   `/pannello`) → la plancia mobile: notebook, archivio, secret, update.
+   Richiede `PUBLIC_BASE` https. Vedi [MINIAPP.md](MINIAPP.md).
 
 ## Ops opzionali
 

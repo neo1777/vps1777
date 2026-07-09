@@ -195,6 +195,33 @@ journalctl -u vps1777-check-update --no-pager | tail -20
 vps1777 check     # forza il check subito
 ```
 
+## Mini App: il bottone apre un URL vecchio ("Name or service not known")
+
+Il client Telegram può avere in cache un **menu button legacy** o una **Main
+Mini App** configurata a mano in BotFather con un host che non esiste più.
+Il menu button corretto lo imposta il bot a ogni avvio (`set_chat_menu_button`
+→ "Pannello" → `PUBLIC_BASE/app`).
+
+1. Riavvia il client Telegram (o prova dal telefono): il bottone diventa
+   "Pannello".
+2. Se persiste: @BotFather → `/mybots` → il tuo bot → **Bot Settings →
+   Configure Mini App** → correggi o **disabilita** la Main App legacy.
+3. Verifica cosa c'è lato server:
+   ```bash
+   TOK=$(sudo cat /home/vps1777/vps1777/secrets/telegram_bot_token.txt)
+   curl -s "https://api.telegram.org/bot$TOK/getChatMenuButton"
+   ```
+
+## Mini App: "Questo account Telegram non è l'owner del gateway"
+
+`/app/auth` limita l'accesso a `TELEGRAM_OWNER_ID` (in `.env`) — verificato
+**server-side**, non basta che il bot ti risponda. Controlla che l'id sia il
+tuo (`@userinfobot`) e che il gateway lo veda:
+```bash
+docker exec vps1777-gateway-1 printenv TELEGRAM_OWNER_ID
+```
+Se è vuoto, aggiorna `.env` e ricrea il gateway (`docker compose up -d gateway`).
+
 ## Reset completo (perdi dati)
 
 ```bash
