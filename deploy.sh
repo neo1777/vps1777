@@ -456,8 +456,8 @@ log "Installo il canale di aggiornamento (CLI + timer + path unit)..."
 SSH "install -m755 $REMOTE_DIR/tools/vps1777.py /usr/local/bin/vps1777 \
   && for u in $REMOTE_DIR/systemd/vps1777-*; do case \"\$u\" in *.service|*.timer|*.path) install -m644 \"\$u\" /etc/systemd/system/;; esac; done \
   && systemctl daemon-reload \
-  && systemctl enable --now vps1777-check-update.timer vps1777-update.path" \
-  && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero" \
+  && systemctl enable --now vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer" \
+  && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + check settimanale secret" \
   || warn "Setup canale update fallito — installalo dopo con tools/bootstrap.sh"
 SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && /usr/local/bin/vps1777 check || true'" >/dev/null 2>&1 || true
 
