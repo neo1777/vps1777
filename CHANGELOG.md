@@ -2,6 +2,13 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.15.2] — 2026-07-09
+
+### Fix/hardening — le pagine admin non vengono più servite dalla cache del browser
+
+- **`Cache-Control: no-store` su tutte le risposte sotto `/admin`.** Le pagine di controllo devono dire *sempre* la verità: prima, una scheda admin già aperta poteva continuare a mostrare un render vecchio (es. la versione nel footer, ferma alla precedente dopo un update) finché non la si ricaricava a mano. Ora ogni navigazione rifetcha. Applicato **path-based nel middleware ASGI** → vale anche per ogni endpoint admin futuro, senza doverlo ricordare handler per handler (stessa logica "difesa a prescindere" del token CSRF). Le risposte non-admin (mini-app `/app`, `/health`, proxy MCP) restano invariate — nessun impatto sullo streaming.
+- **Refactor testabile**: il middleware `SecurityHeadersASGI` è stato estratto in `app/asgi_security.py` (puro stdlib) e coperto da `tests/test_asgi_security.py` — la CI gira i test del gateway con `uvx pytest` senza deps pesanti, quindi il modulo dev'essere stdlib-only (come `archive_indexer`). Prima era inline in `__main__.py`, non testato.
+
 ## [0.15.1] — 2026-07-09
 
 ### Fix — l'installazione ora abilita il timer di check dei secret
