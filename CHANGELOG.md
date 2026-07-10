@@ -2,6 +2,17 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.18.0] — 2026-07-10
+
+### L'export HTML di Telegram si indicizza direttamente
+
+Il formato **HTML è il default** di "Esporta cronologia chat" in Telegram Desktop, e il selettore JSON non è ovvio da trovare: chiedere all'utente di riesportare (come faceva la 0.16.1) era scaricare su di lui un problema del tool. Ora lo zip della cartella `ChatExport_*` si carica **così com'è**, in entrambi i formati.
+
+- Nuovo estrattore `_iter_telegram_html_zip` + `_TgHtmlParser` (**stdlib**, `html.parser`): `div.message[id]` → data completa dal `title` (convertita in ISO ordinabile), `from_name`, `div.text` (entità decodificate, `<br>` → newline, testo dei link preservato); i messaggi **joined** ereditano il mittente precedente; service message e media senza testo saltati; `messages2.html`, `messages3.html`… letti in ordine numerico.
+- Se lo zip contiene sia `result.json` sia `messages*.html` vince il **JSON** (più fedele). Avvertenza documentata: non mischiare HTML e JSON della stessa chat nello stesso DB (chiavi di dedup diverse → doppioni).
+- Validato su **due export reali** (908 e 964 messaggi): estrazione 1:1 coi `div.text`, zero mittenti orfani, timestamp ISO col fuso, FTS ok.
+- 5 test nuovi (50 totali gateway); aggiornati l'help di `/admin/archive` e [docs/ARCHIVE.md](docs/ARCHIVE.md).
+
 ## [0.17.0] — 2026-07-10
 
 ### Gestione dei DB archivio — lista completa ed eliminazione (admin + Mini App)

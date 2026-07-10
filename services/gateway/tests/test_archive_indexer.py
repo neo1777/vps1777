@@ -169,18 +169,103 @@ def test_index_file_telegram_zip(tmp_path: Path) -> None:
         conn.close()
 
 
-def test_index_file_telegram_html_zip_errore_parlante(tmp_path: Path) -> None:
-    """Export Telegram HTML: prima era 'ok, 0 record' — ora errore che spiega."""
+_TG_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body>
+<div class="page_wrap">
+ <div class="page_header">
+  <div class="content"><div class="text bold">
+Gruppo Prova 🚀
+  </div></div>
+ </div>
+ <div class="history">
+  <div class="message service" id="message-1"><div class="body details">2 March 2024</div></div>
+  <div class="message default clearfix" id="message-10">
+   <div class="pull_left userpic_wrap"><div class="userpic"><div class="initials">N</div></div></div>
+   <div class="body">
+    <div class="pull_right date details" title="02.03.2024 13:10:36 UTC+01:00">13:10</div>
+    <div class="from_name">
+Neo1777
+    </div>
+    <div class="text">
+Salve &amp; benvenuti<br>seconda riga
+    </div>
+   </div>
+  </div>
+  <div class="message default clearfix joined" id="message-11">
+   <div class="body">
+    <div class="pull_right date details" title="02.03.2024 13:11:00 UTC+01:00">13:11</div>
+    <div class="text">
+messaggio joined con <a href="https://x.y">un link</a>
+    </div>
+   </div>
+  </div>
+  <div class="message default clearfix" id="message-12">
+   <div class="pull_left userpic_wrap"><div class="userpic"><div class="initials">E</div></div></div>
+   <div class="body">
+    <div class="pull_right date details" title="02.03.2024 13:12:00 UTC+01:00">13:12</div>
+    <div class="from_name">
+Ema
+    </div>
+    <div class="media_wrap clearfix"><a class="sticker_wrap" href="stickers/s.webp">s</a></div>
+   </div>
+  </div>
+ </div>
+</div></body></html>"""
+
+
+def test_index_file_telegram_html_zip(tmp_path: Path) -> None:
+    """Export Telegram HTML (il formato DEFAULT di Telegram Desktop): si
+    indicizza direttamente — struttura modellata sull'export reale."""
+    import zipfile
+    zp = tmp_path / "ChatExport.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("ChatExport_2026-07-10/messages.html", _TG_HTML)
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(zp), str(db))
+    assert n == 2  # testo + joined; sticker-only e service saltati
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = conn.execute("SELECT project, ts, content FROM messages ORDER BY ts").fetchall()
+        assert all(r[0] == "Gruppo Prova 🚀" for r in rows)
+        # entità decodificate, <br> → newline, mittente presente
+        assert rows[0][1] == "2024-03-02T13:10:36+01:00"
+        assert rows[0][2] == "[Neo1777] Salve & benvenuti\nseconda riga"
+        # joined eredita il mittente; il testo del link resta
+        assert rows[1][2] == "[Neo1777] messaggio joined con un link"
+        r = conn.execute("SELECT content FROM messages_fts WHERE messages_fts MATCH 'benvenuti'").fetchall()
+        assert len(r) == 1
+    finally:
+        conn.close()
+
+
+def test_index_file_telegram_html_idempotente(tmp_path: Path) -> None:
+    import zipfile
+    zp = tmp_path / "ChatExport.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("ChatExport_2026-07-10/messages.html", _TG_HTML)
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    archive_indexer.index_file(str(zp), str(db))  # ricarico lo stesso export
+    assert archive_indexer.count_rows(db) == 2   # dedup per (chat, msg_id)
+
+
+def test_index_file_telegram_html_vuoto_errore(tmp_path: Path) -> None:
+    """HTML riconosciuto ma senza messaggi estraibili → errore, non 0 silenzioso."""
     import pytest
     import zipfile
     zp = tmp_path / "ChatExport.zip"
     with zipfile.ZipFile(zp, "w") as z:
-        z.writestr("ChatExport_2026-07-08/messages.html", "<html>...</html>")
-        z.writestr("ChatExport_2026-07-08/messages2.html", "<html>...</html>")
+        z.writestr("ChatExport_2026-07-08/messages.html", "<html><body>vuoto</body></html>")
     db = tmp_path / "out.db"
-    with pytest.raises(ValueError, match="JSON"):
+    with pytest.raises(ValueError, match="0 record"):
         archive_indexer.index_file(str(zp), str(db))
     assert not db.exists()
+
+
+def test_tg_html_ts() -> None:
+    assert archive_indexer._tg_html_ts("02.03.2024 13:10:33 UTC+01:00") == "2024-03-02T13:10:33+01:00"
+    assert archive_indexer._tg_html_ts("31.12.2025 23:59:59") == "2025-12-31T23:59:59"
+    assert archive_indexer._tg_html_ts("roba strana") == "roba strana"
 
 
 def test_index_file_zip_non_riconosciuto(tmp_path: Path) -> None:

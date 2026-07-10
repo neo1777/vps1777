@@ -11,7 +11,8 @@ Formati (dispatch per estensione in `index_file`; i .zip si riconoscono dal
 contenuto, non dal nome):
     .jsonl        → sessione Claude Code (record user/assistant)
     .zip claude.ai → export account (conversations.json + design_chats/ + projects/docs)
-    .zip Telegram  → export Desktop JSON (result.json, anche in sottocartella)
+    .zip Telegram  → export Desktop JSON (result.json) o HTML (messages*.html),
+                     anche in sottocartella ChatExport_*/
     .json         → export Telegram Desktop (result.json) o sessione Claude Code
     .md / .txt    → testo/markdown generico (ponte per output di altri tool), spezzato in chunk
     (.db)         → NON qui: è un drop-in, si copia direttamente nella dir
@@ -32,9 +33,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 import sys
 import zipfile
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import IO, Iterable, Iterator, Union
 
@@ -378,6 +381,132 @@ def _iter_telegram_zip(zip_path: Union[str, Path], members: list[str]) -> Iterat
                 yield from _iter_telegram(data)
 
 
+# ── estrattore: export Telegram Desktop HTML (messages*.html) ────────────────
+# Il formato DEFAULT di "Esporta cronologia chat" è HTML — molti utenti non
+# trovano (o non hanno) il selettore JSON. L'HTML è machine-generated e
+# stabile: div.message[id] › title con data completa › from_name › div.text.
+# I messaggi "joined" (stesso mittente del precedente) non ripetono from_name.
+
+def _tg_html_ts(raw: str) -> str:
+    """'02.03.2024 13:10:33 UTC+01:00' → '2024-03-02T13:10:33+01:00' (ISO,
+    ordinabile e coerente col formato JSON). Se non combacia → raw."""
+    m = re.match(
+        r"(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}:\d{2}:\d{2})"
+        r"(?:\s+UTC([+-]\d{2}):?(\d{2}))?", raw.strip())
+    if not m:
+        return raw.strip()
+    day, mon, year, hms, oh, om = m.groups()
+    return f"{year}-{mon}-{day}T{hms}" + (f"{oh}:{om or '00'}" if oh else "")
+
+
+class _TgHtmlParser(HTMLParser):
+    """Estrae (msg_id, sender, ts, text) da un messages*.html di Telegram
+    Desktop. Solo stdlib; ignora service message e media senza testo."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.chat_title = ""
+        self.msgs: list[tuple[str, str, str, str]] = []
+        self._depth = 0            # nesting dei soli <div>
+        self._msg_depth = 0        # profondità del div.message aperto (0 = fuori)
+        self._msg_id = ""
+        self._joined = False
+        self._ts = ""
+        self._sender = ""
+        self._last_sender = ""     # per i "joined" (mittente ereditato)
+        self._texts: list[str] = []
+        self._cap = ""             # cosa sto catturando: text | from_name | title
+        self._cap_depth = 0
+        self._buf: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag == "br":
+            if self._cap:
+                self._buf.append("\n")
+            return
+        if tag != "div":
+            return
+        self._depth += 1
+        a = dict(attrs)
+        classes = (a.get("class") or "").split()
+        if "message" in classes and "default" in classes:
+            self._flush_msg()      # difensivo: chiude un eventuale precedente
+            self._msg_depth = self._depth
+            self._msg_id = (a.get("id") or "").removeprefix("message")
+            self._joined = "joined" in classes
+            self._ts = self._sender = ""
+            self._texts = []
+        elif self._msg_depth:
+            if "date" in classes and "details" in classes and a.get("title"):
+                self._ts = self._ts or _tg_html_ts(a["title"])
+            elif classes == ["from_name"] and not self._cap:
+                self._cap, self._cap_depth, self._buf = "from_name", self._depth, []
+            elif classes == ["text"] and not self._cap:
+                self._cap, self._cap_depth, self._buf = "text", self._depth, []
+        elif classes == ["text", "bold"] and not self.chat_title and not self._cap:
+            self._cap, self._cap_depth, self._buf = "title", self._depth, []
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != "div":
+            return
+        if self._cap and self._depth == self._cap_depth:
+            got = "".join(self._buf).strip()
+            if self._cap == "from_name":
+                self._sender = self._sender or got
+            elif self._cap == "text":
+                if got:
+                    self._texts.append(got)
+            elif self._cap == "title":
+                self.chat_title = got
+            self._cap = ""
+        if self._msg_depth and self._depth == self._msg_depth:
+            self._flush_msg()
+        self._depth = max(0, self._depth - 1)
+
+    def handle_data(self, data: str) -> None:
+        if self._cap:
+            self._buf.append(data)
+
+    def _flush_msg(self) -> None:
+        if not self._msg_depth:
+            return
+        sender = self._sender or (self._last_sender if self._joined else "")
+        if self._sender:
+            self._last_sender = self._sender
+        text = "\n".join(self._texts).strip()
+        if text and self._msg_id:
+            self.msgs.append((self._msg_id, sender, self._ts, text))
+        self._msg_depth = 0
+        self._msg_id = self._ts = self._sender = ""
+        self._texts = []
+
+
+def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str]) -> Iterator[Row]:
+    """messages.html, messages2.html, … dentro uno zip export (in ordine
+    numerico, così i 'joined' a cavallo dei file ereditano il mittente giusto
+    per file — al peggio il primo joined di un file resta senza mittente).
+
+    Nota dedup: l'HTML non contiene l'id numerico della chat → la chiave usa il
+    titolo. Ricaricare lo stesso export non duplica; mischiare HTML e JSON
+    della STESSA chat nello stesso DB invece sì (chiavi diverse) — documentato.
+    """
+    def order(name: str) -> tuple:
+        m = re.search(r"messages(\d*)\.html$", name)
+        return (name.rsplit("/", 1)[0], int(m.group(1) or 1) if m else 0)
+
+    with zipfile.ZipFile(zip_path) as z:
+        for member in sorted(members, key=order):
+            with z.open(member) as f:
+                html_text = f.read().decode("utf-8", errors="replace")
+            p = _TgHtmlParser()
+            p.feed(html_text)
+            p.close()
+            cname = p.chat_title or "telegram-chat"
+            for msg_id, sender, ts, text in p.msgs:
+                yield (_uid("tg", cname, msg_id), cname, ts,
+                       f"[{sender}] {text}" if sender else text)
+
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 
 SUPPORTED = (".jsonl", ".zip", ".md", ".txt", ".json", ".pdf")
@@ -390,16 +519,17 @@ def _index_zip(path: Path, db_path: Union[str, Path]) -> int:
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
     telegram_jsons = [n for n in names if Path(n).name == "result.json"]
+    telegram_htmls = [n for n in names
+                      if re.fullmatch(r"messages\d*\.html", Path(n).name)]
     if "conversations.json" in names or any(
             n.startswith(("design_chats/", "projects/")) for n in names):
         n, kind = write_rows(db_path, _iter_claude_zip(path)), "export claude.ai"
     elif telegram_jsons:
+        # JSON preferito quando c'è: più fedele (id numerici, entities, service)
         n, kind = write_rows(db_path, _iter_telegram_zip(path, telegram_jsons)), "export Telegram"
-    elif any(Path(m).name.startswith("messages") and m.endswith(".html") for m in names):
-        raise ValueError(
-            "export Telegram in formato HTML (messages.html): il testo non è "
-            "estraibile. Riesporta da Telegram Desktop scegliendo il formato "
-            "JSON (machine-readable) e carica il result.json o il suo zip.")
+    elif telegram_htmls:
+        n, kind = (write_rows(db_path, _iter_telegram_html_zip(path, telegram_htmls)),
+                   "export Telegram HTML")
     else:
         raise ValueError(
             "zip non riconosciuto: mi aspetto un export claude.ai "
