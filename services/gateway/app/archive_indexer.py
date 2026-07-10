@@ -103,6 +103,52 @@ def count_rows(db_path: Union[str, Path]) -> int:
         return 0
 
 
+def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
+    """Scheda di un DB per le UI (admin + Mini App): righe, etichette distinte,
+    le `top` etichette più popolose, dimensione file e ultima modifica.
+    Robusto: DB assente o illeggibile → scheda a zero, mai un'eccezione."""
+    p = Path(db_path)
+    out: dict = {"name": p.stem, "rows": 0, "labels": 0, "top": [],
+                 "size": 0, "mtime": ""}
+    try:
+        out["size"] = p.stat().st_size
+        out["mtime"] = _file_ts(p)
+    except OSError:
+        pass
+    try:
+        conn = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+        try:
+            out["rows"] = int(conn.execute("SELECT count(*) FROM messages").fetchone()[0])
+            out["labels"] = int(conn.execute(
+                "SELECT count(DISTINCT project) FROM messages").fetchone()[0])
+            out["top"] = [
+                {"label": label or "", "rows": n}
+                for label, n in conn.execute(
+                    "SELECT project, count(*) FROM messages "
+                    "GROUP BY project ORDER BY count(*) DESC, project LIMIT ?",
+                    (max(0, top),),
+                )
+            ]
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    return out
+
+
+def find_db(db_dir: Union[str, Path], name: str) -> Union[Path, None]:
+    """Path del DB `name` dentro db_dir — SOLO se combacia con lo stem di un
+    *.db reale della dir (niente path traversal per costruzione: si confronta
+    col listato, non si costruisce un path dall'input)."""
+    d = Path(db_dir)
+    if not name or not d.is_dir():
+        return None
+    for p in d.glob("*.db"):
+        if p.is_file() and p.stem == name:
+            return p
+    return None
+
+
 # ── helper testo ─────────────────────────────────────────────────────────────
 
 def extract_text(content: object) -> str:

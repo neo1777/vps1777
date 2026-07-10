@@ -228,6 +228,12 @@ nav.tabs a.active{color:var(--fg);border-color:var(--accent)}
 .status-grid{display:grid;gap:12px;margin-bottom:8px}
 .status-row{display:flex;align-items:center;gap:10px;padding:13px 16px;background:var(--bg-soft);border:1px solid var(--line-soft);border-radius:8px}
 .status-row .lbl{font-weight:500}.status-row .val{color:var(--muted);font-size:12px;margin-left:auto;font-family:var(--mono)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{color:var(--faint);text-align:left;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:6px 10px 8px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid var(--line-soft);vertical-align:top}
+td.top-labels{color:var(--muted);font-size:11.5px;max-width:240px}
+button.danger{border-color:var(--err);color:var(--err)}
+button.danger:hover{background:rgba(196,113,88,.12);border-color:var(--err)}
 .audit-event{padding:7px 0;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;display:flex;gap:14px}
 .audit-event .ts{color:var(--faint);min-width:170px}.audit-event .ev{color:var(--accent-dim);min-width:180px}
 .foot{color:var(--faint);font-size:11px;text-align:center;margin-top:40px;font-family:var(--mono);letter-spacing:.04em}
@@ -498,13 +504,22 @@ def _safe_db_name(raw: str, fallback: str = "archivio") -> str:
     return name or fallback
 
 
-def _archive_dbs() -> list[tuple[str, int]]:
-    """(nome, #messaggi) di ogni .db nella dir archive."""
+def _archive_dbs() -> list[dict]:
+    """Scheda (db_info) di ogni .db nella dir archive."""
     db_dir = Path(get_settings().archive_db_dir)
     if not db_dir.is_dir():
         return []
-    return [(p.stem, archive_indexer.count_rows(p))
+    return [archive_indexer.db_info(p)
             for p in sorted(db_dir.glob("*.db")) if p.is_file()]
+
+
+def _fmt_size(n: float) -> str:
+    """Dimensione leggibile (99.4 MB)."""
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
 
 
 def _valid_archive_db(path: Path) -> bool:
@@ -577,12 +592,38 @@ async def archive_view(request: Request) -> Response:
     # GET
     dbs = _archive_dbs()
     if dbs:
-        rows = "".join(
-            f"<tr><td><code>{html.escape(n)}</code></td><td>{c} messaggi</td></tr>" for n, c in dbs
-        )
+        rows = ""
+        for d in dbs:
+            top = " · ".join(
+                f"{html.escape(t['label'] or '(senza etichetta)')} ({t['rows']})"
+                for t in d["top"][:3]
+            )
+            rows += (
+                f"<tr><td><code>{html.escape(d['name'])}</code></td>"
+                f"<td>{d['rows']}</td><td>{d['labels']}</td>"
+                f'<td class="top-labels">{top}</td>'
+                f"<td>{_fmt_size(d['size'])}</td>"
+                f"<td>{html.escape(str(d['mtime'])[:10])}</td>"
+                f'<td><form method="POST" action="/admin/archive/delete" class="delform">'
+                f'<input type="hidden" name="db" value="{html.escape(d["name"])}">'
+                f'<button type="submit" class="danger">Elimina</button></form></td></tr>'
+            )
         table = (f'<section><div class="kicker">DB nell\'archivio</div>'
-                 f'<table><thead><tr><th>nome</th><th>righe</th></tr></thead>'
-                 f'<tbody>{rows}</tbody></table></section>')
+                 f'<table><thead><tr><th>nome</th><th>messaggi</th><th>etichette</th>'
+                 f'<th>principali</th><th>dimensione</th><th>aggiornato</th><th></th></tr></thead>'
+                 f'<tbody>{rows}</tbody></table>'
+                 f'<p class="hint">Eliminare un DB toglie subito l\'archivio dalla ricerca. '
+                 f'Per <em>resettarlo</em>: elimina e ricarica la fonte con lo stesso nome.</p>'
+                 f"""</section>
+<script>
+document.querySelectorAll('form.delform').forEach(function(f){{
+  f.addEventListener('submit', function(ev){{
+    var db = f.querySelector('input[name=db]').value;
+    if (!window.confirm('Eliminare definitivamente il DB "' + db + '"? La ricerca su questo archivio smette subito.'))
+      ev.preventDefault();
+  }});
+}});
+</script>""")
         status_html = f'<div class="kicker"><span class="dot ok"></span>{len(dbs)} DB caricati, cercabili subito via il tool <code>search</code>.</div>'
     else:
         table = ""
@@ -620,6 +661,33 @@ async def archive_view(request: Request) -> Response:
 """
     return _layout("Archive", body, current="archive", flash=flash, flash_kind=flash_kind,
                    csrf=_csrf_token(email))
+
+
+async def archive_delete(request: Request) -> Response:
+    """POST /admin/archive/delete — elimina un DB dell'archivio (irreversibile).
+
+    Il nome viene risolto contro il listato reale della dir (find_db): niente
+    path costruiti dall'input. archive-mcp se ne accorge da solo (scan-mode).
+    """
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+    form = await request.form()
+    name = _safe_db_name(str(form.get("db") or ""), fallback="")
+    path = archive_indexer.find_db(get_settings().archive_db_dir, name)
+    if path is None:
+        audit({"event": "admin_archive_delete_err", "by": email, "db": name, "error": "not_found"})
+        return RedirectResponse("/admin/archive?msg=DB+non+trovato&kind=err", status_code=303)
+    rows = archive_indexer.count_rows(path)
+    try:
+        path.unlink()
+    except OSError as exc:
+        audit({"event": "admin_archive_delete_err", "by": email, "db": name, "error": str(exc)})
+        return RedirectResponse(
+            f"/admin/archive?msg=Errore:+{str(exc).replace(' ', '+')}&kind=err", status_code=303)
+    audit({"event": "admin_archive_delete", "by": email, "db": name, "rows": rows})
+    msg = f"DB '{name}' eliminato ({rows} messaggi). Per ripartire ricarica la fonte."
+    return RedirectResponse(f"/admin/archive?msg={msg.replace(' ', '+')}&kind=ok", status_code=303)
 
 
 # ───── /admin/update — canale di aggiornamento ─────

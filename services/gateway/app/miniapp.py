@@ -31,6 +31,7 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
+from .archive_indexer import count_rows, db_info, find_db
 from .audit import audit, read_recent
 from .jwt_helpers import JWTError, issue, verify
 from .mcp_client import MCPCallError, call_tool
@@ -38,7 +39,6 @@ from .miniapp_core import (
     extract_answer,
     is_owner,
     parse_json_blocks,
-    parse_string_blocks,
     summarize_secrets,
     verify_init_data,
     version_gt,
@@ -215,14 +215,44 @@ async def api_ask(request: Request) -> Response:
 
 
 async def api_archive_dbs(request: Request) -> Response:
-    """GET /app/api/archive/dbs — database indicizzati in archive-mcp."""
+    """GET /app/api/archive/dbs — DB dell'archivio con la scheda completa
+    (righe, etichette, top, dimensione, mtime). Letti direttamente dal volume
+    condiviso (stessa fonte di /admin/archive), non via MCP: più ricco e non
+    dipende dall'upstream per un dato che il gateway ha in casa."""
     if not _bearer_claims(request):
         return _unauthorized()
+    db_dir = Path(get_settings().archive_db_dir)
+    infos = ([db_info(p) for p in sorted(db_dir.glob("*.db")) if p.is_file()]
+             if db_dir.is_dir() else [])
+    return JSONResponse({"databases": infos})
+
+
+async def api_archive_db_delete(request: Request) -> Response:
+    """POST /app/api/archive/db/delete {db} — elimina un DB (irreversibile).
+
+    Stessa semantica di /admin/archive/delete: nome risolto contro il listato
+    reale (find_db, niente traversal), audit, archive-mcp se ne accorge da solo.
+    """
+    claims = _bearer_claims(request)
+    if not claims:
+        return _unauthorized()
     try:
-        texts = await call_tool(ARCHIVE_SERVICE, "list_databases", timeout=30.0)
-    except MCPCallError as exc:
-        return _mcp_error(exc)
-    return JSONResponse({"databases": parse_string_blocks(texts)})
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    name = str(body.get("db", "")).strip()
+    path = find_db(get_settings().archive_db_dir, name)
+    if path is None:
+        return JSONResponse({"error": "db_not_found"}, status_code=404)
+    rows = count_rows(path)
+    try:
+        path.unlink()
+    except OSError:
+        audit({"event": "miniapp_archive_delete_err", "user_id": claims.get("sub", ""), "db": name})
+        return JSONResponse({"error": "delete_failed"}, status_code=500)
+    audit({"event": "miniapp_archive_delete", "user_id": claims.get("sub", ""),
+           "db": name, "rows": rows})
+    return JSONResponse({"ok": True, "db": name, "rows": rows})
 
 
 async def api_archive_search(request: Request) -> Response:
@@ -681,19 +711,60 @@ function renderArchivio(){
     '<div class="srow"><input type="text" id="aq" placeholder="parole chiave…">'+
     '<select id="adb"><option value="">tutti</option></select></div>'+
     '<button class="b" id="ago">Cerca</button>'+
-    '<div id="ares" style="margin-top:10px"></div></div>';
+    '<div id="ares" style="margin-top:10px"></div></div>'+
+    '<div class="card"><h2>DB caricati <button class="re" id="reDbs">↻</button></h2>'+
+    '<div id="adbs">'+spin()+'</div></div>';
   var go=function(){ archSearch(); };
   $('ago').onclick=go;
   $('aq').addEventListener('keydown', function(ev){ if(ev.key==='Enter') go(); });
-  if (S.dbs) paintDbs(); else
-    api('/app/api/archive/dbs').then(function(d){ S.dbs=d.databases||[]; paintDbs(); })
-      .catch(function(){ /* select resta "tutti" */ });
+  $('reDbs').onclick=loadDbs;
+  if (S.dbs) paintDbs();  // cache per la reattività; poi rinfresco comunque
+  loadDbs();
+}
+function loadDbs(){
+  api('/app/api/archive/dbs').then(function(d){ S.dbs=d.databases||[]; paintDbs(); })
+    .catch(function(e){ var b=$('adbs'); if(b) b.innerHTML='<div class="empty">'+esc(err(e))+'</div>'; });
+}
+function fmtSize(n){
+  var u=['B','KB','MB','GB']; var i=0; n=n||0;
+  while (n>=1024 && i<u.length-1){ n/=1024; i++; }
+  return (i? n.toFixed(1) : n)+' '+u[i];
 }
 function paintDbs(){
-  var sel=$('adb'); if(!sel) return;
-  S.dbs.forEach(function(n){
-    var o=document.createElement('option'); o.value=n; o.textContent=n; sel.appendChild(o);
+  var sel=$('adb');
+  if (sel){
+    while (sel.options.length>1) sel.remove(1);  // reset (oltre "tutti")
+    S.dbs.forEach(function(db){
+      var o=document.createElement('option'); o.value=db.name; o.textContent=db.name; sel.appendChild(o);
+    });
+  }
+  var box=$('adbs'); if(!box) return;
+  if (!S.dbs.length){
+    box.innerHTML='<div class="empty">Archivio vuoto — carica una fonte da /admin/archive.</div>'; return;
+  }
+  box.innerHTML='';
+  S.dbs.forEach(function(db){
+    var el=document.createElement('div'); el.className='item';
+    var top=(db.top||[]).slice(0,3).map(function(t){
+      return esc(t.label||'(senza etichetta)')+' ('+t.rows+')'; }).join(' · ');
+    el.innerHTML='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">'+
+      '<div style="min-width:0"><div style="font-weight:600">'+esc(db.name)+'</div>'+
+      '<div class="pm">'+db.rows+' messaggi · '+db.labels+' etichette · '+fmtSize(db.size)+
+      (db.mtime?' · '+esc(String(db.mtime).slice(0,10)):'')+'</div>'+
+      (top?'<div class="pm" style="margin-top:2px">'+top+'</div>':'')+'</div>'+
+      '<button class="b danger" style="width:auto;flex:none;padding:8px 12px">🗑</button></div>';
+    el.querySelector('button').onclick=function(){ confirmDeleteDb(db.name, db.rows); };
+    box.appendChild(el);
   });
+}
+function confirmDeleteDb(name, rows){
+  var msg='Eliminare il DB "'+name+'" ('+rows+' messaggi)? L\'operazione non si annulla.';
+  var go=function(ok){ if(!ok) return;
+    post('/app/api/archive/db/delete', {db:name}).then(function(){
+      toast('DB "'+name+'" eliminato'); S.dbs=null; loadDbs();
+    }).catch(function(e){ toast('Errore: '+err(e)); });
+  };
+  if (TG && TG.showConfirm) TG.showConfirm(msg, go); else go(window.confirm(msg));
 }
 function archSearch(){
   var q=$('aq').value.trim(); if(!q) return;
