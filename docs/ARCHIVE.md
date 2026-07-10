@@ -12,15 +12,19 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 
 | Formato | Cosa indicizza |
 |---|---|
-| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs`) oppure export **Telegram Desktop JSON** (`result.json`, anche zippato come cartella `ChatExport_*/`) |
+| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs`) oppure export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/` |
 | `.jsonl` | sessione **Claude Code** (`~/.claude/projects/<progetto>/<id>.jsonl`) |
 | `.json` | export **Telegram Desktop** (formato *Machine-readable JSON*) |
 | `.pdf` | documento **con testo** (estratto via `pypdf`) |
 | `.md` / `.txt` | testo/markdown generico (ponte per l'output di altri tool) |
 | `.db` | drop-in di un archivio SQLite già indicizzato (schema validato) |
 
-> ⚠️ L'export **HTML** di Telegram Desktop (`messages.html`) non è indicizzabile:
-> riesporta scegliendo il formato **JSON** (*machine-readable*). Uno zip non
+> L'export chat di Telegram Desktop funziona **così com'è**: comprimi la
+> cartella `ChatExport_*` in zip e caricala — sia il formato **HTML** (il
+> default, `messages.html`) sia il **JSON** (`result.json`) vengono
+> indicizzati. Se ci sono entrambi, vince il JSON (più fedele). Unica
+> avvertenza: non mischiare HTML e JSON della *stessa* chat nello stesso DB —
+> le chiavi di dedup sono diverse e i messaggi si duplicherebbero. Uno zip non
 > riconosciuto, o senza messaggi estraibili, viene **rifiutato con un errore
 > chiaro** — mai un "ok, 0 record".
 
