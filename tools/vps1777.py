@@ -851,12 +851,37 @@ def cmd_check(repo: Path, args) -> int:
         state_save(repo, st)
         return 0
     latest = norm_ver(rel["tag_name"])
+    # /releases/latest può servire risposte STANTIE dalla cache di GitHub
+    # (visto dal vivo: 2 minuti dopo la publish della v0.18.0 rispondeva
+    # v0.16.1, più vecchia anche della v0.17.0 di 4 ore prima). Il campo
+    # `latest` per i consumatori (pagina admin, Mini App) significa "la più
+    # nuova NOTA": non deve mai regredire, o la UI propone un downgrade.
+    prev = ""
+    sf = onboarding_dir(repo) / "update_status.json"
+    if sf.is_file():
+        try:
+            prev = norm_ver(str(json.loads(sf.read_text()).get("latest") or ""))
+        except (OSError, json.JSONDecodeError):
+            prev = ""
+    if (prev and valid_semver(prev) and valid_semver(latest)
+            and version_key(latest) < version_key(prev)):
+        log(f"GitHub riporta v{latest} ma la latest nota è v{prev}: "
+            "risposta stantia della cache — tengo la nota")
+        status_write(repo, current=cur, error=None)  # solo current + checked_at
+        st["last_check"] = now_iso()
+        state_save(repo, st)
+        return 0
     excerpt = (rel.get("body") or "")[:800]
     status_write(repo, current=cur, latest=latest,
                  changelog_excerpt=excerpt, error=None,
                  html_url=rel.get("html_url", ""))
     st["last_check"] = now_iso()
-    if norm_ver(cur) != latest:
+    # notifica solo un VERO upgrade (mai un downgrade da risposta stantia)
+    if valid_semver(latest) and valid_semver(norm_ver(cur)):
+        newer = version_key(latest) > version_key(cur)
+    else:
+        newer = norm_ver(cur) != latest  # dev/tag non-semver: comportamento storico
+    if newer:
         log(f"aggiornamento disponibile: {cur} → {latest}")
         if args.notify and st.get("last_notified_version") != latest:
             telegram_notify(
@@ -994,11 +1019,18 @@ def cmd_update(repo: Path, args) -> int:
     # verso una release più vecchia con vuln note. Il guard su update_status.json
     # non basta (è nel bind-mount scrivibile dal gateway). Il downgrade resta
     # possibile SOLO da terminale con --version esplicito (chi ha la shell può
-    # già tutto). `latest` naturale non downgrada mai.
+    # già tutto).
     if args.from_intent and version_key(target) < version_key(cur):
         progress_write(repo, target, 0, "intent", "failed", "downgrade rifiutato")
         die(f"downgrade rifiutato via pulsante: v{target} < v{cur} "
             "(usa `vps1777 update --version` da terminale se intenzionale)")
+    # `latest` naturale più vecchia della corrente = cache GitHub stantia
+    # (/releases/latest NON è monotona, visto dal vivo): no-op, mai un
+    # downgrade implicito. Con --version esplicito si passa comunque.
+    if not target_req and version_key(target) < version_key(cur):
+        ok(f"la release più recente nota a GitHub (v{target}) è più vecchia "
+           f"della v{cur} in esecuzione — risposta stantia, niente da fare")
+        return 0
     log(f"update: {cur} → {target}")
 
     # 3 — changelog

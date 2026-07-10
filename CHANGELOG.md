@@ -2,6 +2,16 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.18.1] — 2026-07-10
+
+### Fix — la pagina admin non propone più downgrade (e il checker non ci casca)
+
+Caso reale: 2 minuti dopo la publish della v0.18.0, `/releases/latest` di GitHub ha servito dalla cache **v0.16.1** (più vecchia perfino della v0.17.0 di 4 ore prima) — l'endpoint non è monotono. La pagina `/admin/update` mostrava «Aggiornamento disponibile: v0.16.1 (sei alla 0.18.0)» col pulsante **"Aggiorna a v0.16.1"**. Il danno reale era già impossibile (la CLI host rifiuta i downgrade dal canale intent — la difesa in profondità ha retto), ma la UI mentiva. Tre livelli sistemati:
+
+- **Checker host (`vps1777 check`)**: `latest` significa "la più nuova NOTA" — se GitHub risponde con una release più vecchia di quella già registrata, la risposta stantia si logga e si scarta (si aggiorna solo `checked_at`). La notifica Telegram parte solo per un **vero** upgrade (prima un downgrade stantio avrebbe notificato "v0.16.1 disponibile (sei alla 0.18.0)").
+- **CLI (`vps1777 update`)**: una `latest` naturale più vecchia della versione in esecuzione è un **no-op** con messaggio chiaro, mai un prompt di downgrade. Il downgrade intenzionale resta possibile solo con `--version` esplicito.
+- **Pagina `/admin/update`**: banner e pulsante ora usano `version_gt` (stesso gate della Mini App, che era già a posto), il confronto con la versione **in esecuzione** (env, non solo file di stato); check stantio → messaggio esplicativo, niente pulsante; il POST rifiuta comunque un non-upgrade (audit `admin_update_rejected`). Bonus: la conferma del pulsante era un `onsubmit` inline **silenziosamente bloccato dalla CSP** — ora è uno `<script>` con nonce e funziona davvero.
+
 ## [0.18.0] — 2026-07-10
 
 ### L'export HTML di Telegram si indicizza direttamente
