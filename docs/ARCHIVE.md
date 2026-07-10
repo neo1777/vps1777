@@ -28,6 +28,19 @@ Campi del form: **nome DB** (vuoto = dal nome file) e **progetto** (etichetta;
 vuoto = dedotta dalla fonte). Ricaricare lo stesso nome DB non duplica (dedup per
 id); fonti diverse sullo stesso nome si accumulano.
 
+## Gestire i DB — lista ed eliminazione
+
+La pagina mostra per ogni DB la **scheda completa**: messaggi, etichette
+distinte (le "provenienze": titoli chat, `project:<nome>`, `design:<nome>`…),
+le etichette principali, la dimensione su disco e l'ultimo aggiornamento.
+
+Il bottone **Elimina** (con conferma) rimuove il DB: la ricerca su quell'archivio
+smette subito (archive-mcp se ne accorge da solo, scan-mode) e l'azione finisce
+nell'audit. È **irreversibile** — per *resettare* un archivio (es. ricaricarlo
+da zero dopo che la fonte è cambiata): elimina e ricarica la fonte con lo
+stesso nome DB. Lista ed eliminazione sono disponibili anche dalla **Mini App**
+(tab Archivio).
+
 ## Documenti e immagini (PDF-scansione, screenshot) — via NotebookLM
 
 Un PDF **senza testo** (scansione, screenshot) non ha nulla da estrarre con

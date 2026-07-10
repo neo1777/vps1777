@@ -2,6 +2,19 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.17.0] — 2026-07-10
+
+### Gestione dei DB archivio — lista completa ed eliminazione (admin + Mini App)
+
+Prima i DB caricati erano solo un elenco nome+righe, e per toglierne uno serviva la shell. Ora:
+
+- **Scheda per ogni DB** su `/admin/archive` e nella Mini App (tab Archivio): messaggi, **etichette distinte** e le principali (titoli chat, `project:*`, `design:*`…), dimensione su disco, ultimo aggiornamento. Il tutto da una nuova `db_info()` in `archive_indexer` (stdlib-only, testata).
+- **Elimina con conferma** (bottone su entrambe le superfici): rimuove il `.db`, archive-mcp se ne accorge da solo (scan-mode), evento in audit (`admin_archive_delete` / `miniapp_archive_delete`). Irreversibile; il *reset* è elimina + ricarica la fonte con lo stesso nome (il dedup fa il resto).
+- **Sicurezza**: il nome da eliminare è risolto **contro il listato reale** della dir (`find_db`, niente path costruiti dall'input → niente traversal); admin dietro CSRF (già centralizzato in `_require_admin`), Mini App dietro Bearer `typ=miniapp`; conferma via `showConfirm` Telegram (fallback `confirm`).
+- `/app/api/archive/dbs` ora legge il volume condiviso direttamente (stessa fonte di `/admin/archive`) e ritorna la scheda completa, non più il semplice elenco nomi via MCP.
+- CSS admin: stili tabella (prima erano i default del browser) e bottone `danger`.
+- 3 test nuovi (47 totali gateway); aggiornati [docs/ARCHIVE.md](docs/ARCHIVE.md) e [docs/MINIAPP.md](docs/MINIAPP.md).
+
 ## [0.16.1] — 2026-07-10
 
 ### Fix — l'ingest archive non mente più sugli zip

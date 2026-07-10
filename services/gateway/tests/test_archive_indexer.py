@@ -274,6 +274,44 @@ def test_tg_text_flatten() -> None:
     assert archive_indexer._tg_text(None) == ""
 
 
+def test_db_info(tmp_path: Path) -> None:
+    db = tmp_path / "out.db"
+    archive_indexer.write_rows(db, [
+        ("u1", "alpha", "2026-01-01", "uno"),
+        ("u2", "alpha", "2026-01-02", "due"),
+        ("u3", "beta", "2026-01-03", "tre"),
+    ])
+    info = archive_indexer.db_info(db, top=2)
+    assert info["name"] == "out"
+    assert info["rows"] == 3
+    assert info["labels"] == 2
+    # top ordinato per popolosità, poi alfabetico
+    assert info["top"] == [{"label": "alpha", "rows": 2}, {"label": "beta", "rows": 1}]
+    assert info["size"] > 0
+    assert info["mtime"]  # ISO non vuoto
+
+
+def test_db_info_assente_o_corrotto(tmp_path: Path) -> None:
+    info = archive_indexer.db_info(tmp_path / "manca.db")
+    assert info["rows"] == 0 and info["size"] == 0 and info["top"] == []
+    rotto = tmp_path / "rotto.db"
+    rotto.write_bytes(b"non un sqlite")
+    info2 = archive_indexer.db_info(rotto)
+    assert info2["rows"] == 0 and info2["size"] > 0  # stat ok, query no
+
+
+def test_find_db(tmp_path: Path) -> None:
+    db = tmp_path / "mio.db"
+    archive_indexer.write_rows(db, [("u1", "p", "t", "x")])
+    assert archive_indexer.find_db(tmp_path, "mio") == db
+    assert archive_indexer.find_db(tmp_path, "altro") is None
+    assert archive_indexer.find_db(tmp_path, "") is None
+    assert archive_indexer.find_db(tmp_path / "manca", "mio") is None
+    # niente traversal: il nome si confronta col listato, non diventa un path
+    assert archive_indexer.find_db(tmp_path, "../mio") is None
+    assert archive_indexer.find_db(tmp_path, "sub/mio") is None
+
+
 def test_chunk_rows_deterministico(tmp_path: Path) -> None:
     rows1 = list(archive_indexer._chunk_rows("a\n\nb\n\nc", "n", "t", "k"))
     rows2 = list(archive_indexer._chunk_rows("a\n\nb\n\nc", "n", "t", "k"))

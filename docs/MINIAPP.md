@@ -24,7 +24,10 @@ duplicata da mantenere.
 - **Notebook** — lista dei notebook NotebookLM; tap su uno → domanda RAG
   direttamente dal telefono (le query lunghe mostrano il tempo trascorso).
 - **Archivio** — ricerca FTS5 nell'archivio personale (tutti i DB o uno
-  specifico), snippet evidenziati.
+  specifico), snippet evidenziati; **lista dei DB caricati** con scheda
+  (messaggi, etichette principali, dimensione, ultimo aggiornamento) ed
+  **eliminazione** con conferma (irreversibile; per resettare un archivio:
+  elimina e ricarica la fonte con lo stesso nome).
 - **Sistema** — scadenze secret in dettaglio, **update a un tap** (stesso
   meccanismo del pulsante admin: intent + CLI host, con conferma e progress in
   tempo reale), ultimi eventi audit.
@@ -62,7 +65,8 @@ Perché è solido:
 | `/app/api/plugins` | GET | Bearer | connettori MCP con URL (contengono il gateway secret → mai pubblici) |
 | `/app/api/notebooks` | GET | Bearer | lista notebook (via nb1777-mcp) |
 | `/app/api/ask` | POST | Bearer | domanda RAG su un notebook (long-running) |
-| `/app/api/archive/dbs` | GET | Bearer | DB indicizzati in archive-mcp |
+| `/app/api/archive/dbs` | GET | Bearer | DB dell'archivio con scheda (righe, etichette, top, dimensione, mtime) |
+| `/app/api/archive/db/delete` | POST | Bearer | elimina un DB (irreversibile, con audit) |
 | `/app/api/archive/search` | POST | Bearer | ricerca FTS5 |
 | `/app/api/secrets` | GET | Bearer | scadenze secret (da `secrets_status.json`) |
 | `/app/api/audit` | GET | Bearer | ultimi eventi audit |
