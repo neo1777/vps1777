@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 from . import archive_indexer
+from .miniapp_core import version_gt
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -735,6 +736,17 @@ async def update_view(request: Request) -> Response:
             return RedirectResponse(
                 "/admin/update?msg=Nessuna+versione+nota:+attendi+il+check+giornaliero&kind=err",
                 status_code=303)
+        # anti-downgrade alla fonte (stesso gate della Mini App): un check
+        # stantio non deve poter trasformare il pulsante in un downgrade.
+        # La CLI host rifiuta comunque (version-floor su --from-intent), ma
+        # qui si evita proprio di scrivere l'intent.
+        running = str(os.environ.get("VPS1777_VERSION", "") or status.get("current") or "")
+        if not version_gt(latest, running):
+            audit({"event": "admin_update_rejected", "by": email,
+                   "target": latest, "running": running, "reason": "not_an_upgrade"})
+            msg = f"Rifiutato: v{latest} non è un upgrade rispetto a v{running} (check stantio?)"
+            return RedirectResponse(
+                f"/admin/update?msg={msg.replace(' ', '+')}&kind=err", status_code=303)
         intent = {
             "target_version": latest,
             "requested_by": email,
@@ -753,20 +765,29 @@ async def update_view(request: Request) -> Response:
             "/admin/update?msg=Update+richiesto:+l'updater+parte+entro+pochi+secondi&kind=ok",
             status_code=303)
 
-    # GET
-    current = status.get("current") or os.environ.get("VPS1777_TAG", "dev")
+    # GET — il confronto è SEMPRE version_gt (mai `!=`): un check stantio di
+    # GitHub può riportare una release più vecchia (successo davvero, v0.16.1
+    # servita 2' dopo la publish della v0.18.0) e `!=` proporrebbe un downgrade.
+    current = str(os.environ.get("VPS1777_VERSION", "") or status.get("current")
+                  or os.environ.get("VPS1777_TAG", "dev"))
     latest = status.get("latest")
     checked = status.get("checked_at", "mai")
     check_err = status.get("error")
     excerpt = status.get("changelog_excerpt", "")
+    upgrade = bool(latest) and version_gt(str(latest), current)
 
     if check_err:
         head = ('<div class="kicker"><span class="dot warn"></span>'
                 f'Ultimo check fallito ({html.escape(str(check_err))}) — dato stantio.</div>')
-    elif latest and latest != current:
+    elif upgrade:
         head = ('<div class="kicker"><span class="dot warn"></span>'
                 f'Aggiornamento disponibile: <strong>v{html.escape(str(latest))}</strong>'
-                f' (sei alla {html.escape(str(current))}).</div>')
+                f' (sei alla {html.escape(current)}).</div>')
+    elif latest and str(latest) != current:
+        head = ('<div class="kicker"><span class="dot ok"></span>'
+                f'Sei alla v{html.escape(current)} — l\'ultima release nota '
+                f'(v{html.escape(str(latest))}) è più vecchia: check stantio, '
+                'nessun aggiornamento.</div>')
     elif latest:
         head = ('<div class="kicker"><span class="dot ok"></span>'
                 'Sei alla versione più recente.</div>')
@@ -775,12 +796,19 @@ async def update_view(request: Request) -> Response:
                 'Nessun check ancora eseguito (il timer gira una volta al giorno).</div>')
 
     update_btn = ""
-    if latest and latest != current and not check_err:
+    if upgrade and not check_err:
+        # niente onsubmit inline: la CSP (script-src nonce) blocca gli handler
+        # inline in silenzio — la conferma va in uno <script> con nonce.
         update_btn = f"""
-<form method="POST" action="/admin/update"
-      onsubmit="return confirm('Aggiorno a v{html.escape(str(latest))}? Backup automatico prima, rollback automatico se non torna healthy.')">
+<form method="POST" action="/admin/update" id="updform">
   <div class="toolbar"><button type="submit" class="primary">Aggiorna a v{html.escape(str(latest))}</button></div>
-</form>"""
+</form>
+<script>
+document.getElementById('updform').addEventListener('submit', function(ev) {{
+  if (!window.confirm('Aggiorno a v{html.escape(str(latest))}? Backup automatico prima, rollback automatico se non torna healthy.'))
+    ev.preventDefault();
+}});
+</script>"""
 
     changelog_html = ""
     if excerpt:
