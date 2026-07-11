@@ -124,16 +124,16 @@ già dimostrati nel paper ma meno "prodotto-izzabili" singolarmente. [paper §6.
 
 | Lente | Cosa estrae | Pattern [paper §6.4] |
 |---|---|---|
-| **Genealogia dei Nomi** | quando e perché nasce un nome | `<nome> AND (nome OR "la mia" OR battezz*)` cross-DB; ricostruisce l'arco di un nome-progetto (prima menzione → battesimo → manifesto) dai messaggi datati |
-| **Estrattore di Gotcha** | runbook auto-generato delle regole dure | `SEQUENZIALI OR droppano OR "verifica alla fonte"` — restituisce ciò che fu ricopiato a mano molte volte |
-| **Cronotopo** | ritmi di lavoro dai timestamp | `count` + `sort` sui ts: come cambiano gli orari di lavoro nel tempo |
-| **Indice delle Persone** | ruoli e relazioni dai soli nomi | poche query ricostruiscono ruoli e legami di un gruppo chat dai nomi ricorrenti |
-| **Lente biografica** ⚠️ | marcatori datati per una eventuale autobiografia | *uso delicato*: tocca materiale personale; **solo con consenso esplicito, query non invasive — probabilmente da NON automatizzare** |
+| **Genealogia dei Nomi** | quando e perché nasce un nome | `<nome> AND (nome OR "la mia" OR battezz*)` cross-DB; es. l'arco di "aurora" (wake-word 2 mag → battesimo 29 mag → manifesto 2 giu) |
+| **Estrattore di Gotcha** | runbook auto-generato delle regole dure | `SEQUENZIALI OR droppano OR "verifica alla fonte"` — restituisce ciò che fu ricopiato a mano 12+ volte |
+| **Cronotopo** | ritmi di lavoro dai timestamp | `count` + `sort` sui ts (2024 pomeridiano → 2026 notturno) |
+| **Indice delle Persone** | ruoli e relazioni dai soli nomi | 3 query hanno ricostruito il gruppo Telegram (Lorenzo il tecnico, Edo l'entusiasta) |
+| **Sismografo biografico** ⚠️ | marcatori emotivi datati per l'autobiografia | *uso delicato*: la fascia personale ott 2025–mar 2026; **solo con consenso esplicito e query non invasive** |
 
 **Da decidere in sessione.** Se è **una** skill con più modalità, cinque skill
 piccole, o semplicemente una pagina di **query-pattern** nella doc di archive1777.
-La *Lente biografica* ha implicazioni etiche/di privacy che vanno trattate a parte
-e probabilmente **non** vanno automatizzate.
+Il *Sismografo* ha implicazioni etiche/di privacy che vanno trattate a parte e
+probabilmente **non** vanno automatizzate.
 
 **Stato:** contenitore opzionale; da triare con `create1777` (check anti-doppione,
 "ricorre / non banale / non già coperto") prima di decidere la forma.
