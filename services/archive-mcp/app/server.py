@@ -29,19 +29,77 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def search(query: str, db_name: str = "", limit: int = 20) -> list[dict[str, Any]]:
-    """
-    Cerca testi in archivio FTS5.
+def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
+           sort: str = "rank", since: str = "", until: str = "",
+           project: str = "", snippet_tokens: int = 32) -> list[dict[str, Any]]:
+    """Cerca nell'archivio full-text (SQLite FTS5) delle conversazioni.
+
+    COME SCRIVERE LA QUERY (leggere prima di cercare — evita falsi negativi):
+    - Operatori SEMPRE in MAIUSCOLO: `AND`, `OR`, `NOT`, `NEAR(a b, 5)`. In
+      minuscolo diventano termini di ricerca, non operatori.
+    - Ricerca senza stemming e bilingue: cerca sempre le due lingue,
+      `errore OR error`, `memoria OR memory`.
+    - Famiglie di nomi col PREFISSO: `palant*` trova palantir1777 (i numeri
+      attaccati non si separano: `1777` non trova N1777).
+    - Termini con caratteri speciali (`- . / @ : # '`) vanno tra doppi apici:
+      `"flutter-elinux"`, `"0.7.9"`, `"github.com"`, `"l'archivio"`. In modalità
+      smart (default) il server li quota da sé; con `raw=true` la query passa
+      intatta (per NEAR/parentesi complesse).
+    - Case- e accent-insensitive: `perché` ≡ `perche`.
+
+    PROTOCOLLO DELLO ZERO: 0 risultati NON prova assenza. Riprova quotando il
+    termine e togliendo i caratteri speciali; solo più tentativi coerenti a zero
+    valgono "non c'è". Una query malformata NON restituisce lista vuota: solleva
+    un errore che spiega come correggerla.
 
     Args:
-        query: stringa FTS5 (operatori: AND, OR, NOT, NEAR, "phrase")
-        db_name: nome del DB ('' = tutti). Vedi list_databases().
-        limit: max risultati (default 20)
+        query: espressione FTS5.
+        db_name: nome DB ('' = tutti; vedi list_databases / describe_databases).
+        limit: massimo risultati, GLOBALE anche su più DB (default 20).
+        raw: se True passa la query intatta senza auto-quoting (default False).
+        sort: 'rank' (rilevanza, default), 'newest' o 'oldest' (per data).
+        since / until: filtro temporale sul ts (ISO, confronto lessicografico).
+        project: filtra per etichetta esatta (titolo chat, project:*, design:*).
+        snippet_tokens: lunghezza dello snippet (default 32). Per il testo pieno
+            attorno a un risultato usa get_context(uuid).
+
+    Ritorna righe {db, uuid, project, ts, rank, snippet, snapshot}. `snapshot` è
+    la data dell'ultima modifica del DB: quanto è fresco ciò che leggi.
     """
-    return db.search(query, db_name, limit)
+    return db.search(query, db_name, limit, raw=raw, sort=sort, since=since,
+                     until=until, project=project, snippet_tokens=snippet_tokens)
+
+
+@mcp.tool()
+def count(query: str, db_name: str = "", raw: bool = False, since: str = "",
+          until: str = "", project: str = "") -> dict[str, Any]:
+    """Conta quanti messaggi corrispondono alla query (non limitato) — per
+    frequenze e prevalenze. Stessa sintassi di search. Ritorna
+    {total, per_db:{nome: n}}. Query malformata → errore parlante, non 0."""
+    return db.count(query, db_name, raw=raw, since=since, until=until, project=project)
+
+
+@mcp.tool()
+def get_context(uuid: str, db_name: str = "", before: int = 3,
+                after: int = 3) -> list[dict[str, Any]]:
+    """Restituisce i messaggi ATTORNO a un risultato (col contenuto pieno, non
+    lo snippet troncato). Dai a `uuid` uno dei valori tornati da search; `before`
+    e `after` sono quanti messaggi prendere prima e dopo nello stesso thread.
+    Ogni riga: {db, uuid, project, ts, content, is_match, snapshot}."""
+    return db.get_context(uuid, db_name, before=before, after=after)
 
 
 @mcp.tool()
 def list_databases() -> list[str]:
-    """Elenca i DB caricati nella registry."""
+    """Elenca i nomi dei DB caricati. Per la scheda (righe, date, freschezza)
+    usa describe_databases()."""
     return db.available_dbs()
+
+
+@mcp.tool()
+def describe_databases() -> list[dict[str, Any]]:
+    """Scheda di ogni DB caricato: {name, rows, oldest, newest, labels,
+    snapshot}. `oldest`/`newest` = intervallo temporale coperto; `snapshot` =
+    data dell'ultima modifica (freschezza). Utile per sapere PRIMA di cercare
+    quanto è ampio e aggiornato l'archivio."""
+    return db.describe()
