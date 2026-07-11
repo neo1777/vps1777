@@ -67,6 +67,8 @@ jobs:
         run: uv run pytest tests/ -v
       - name: Test archive indexer (gateway, stdlib-only)
         run: uvx pytest services/gateway/tests/ -v
+      - name: Test archive-mcp FTS (stdlib-only)
+        run: uvx pytest services/archive-mcp/tests/ -v
 
   build:
     runs-on: ubuntu-latest

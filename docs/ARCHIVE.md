@@ -45,6 +45,39 @@ da zero dopo che la fonte è cambiata): elimina e ricarica la fonte con lo
 stesso nome DB. Lista ed eliminazione sono disponibili anche dalla **Mini App**
 (tab Archivio).
 
+## Cercare — i tool MCP
+
+`archive-mcp` espone cinque tool via MCP (usabili dal connettore claude.ai e
+dalla Mini App):
+
+| Tool | Cosa fa |
+|---|---|
+| `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}` |
+| `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}` |
+| `get_context(uuid, db_name, before, after)` | i messaggi **attorno** a un risultato, col **contenuto pieno** (supera il troncamento dello snippet) |
+| `list_databases()` | i nomi dei DB caricati |
+| `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza) |
+
+**Sintassi della query FTS5** (le stesse regole sono nella docstring che il
+modello legge prima di cercare):
+
+- Operatori **in MAIUSCOLO**: `AND`, `OR`, `NOT`, `NEAR(a b, 5)` — in minuscolo
+  diventano termini.
+- Nessuno stemming, quindi **doppia lingua**: `errore OR error`.
+- Famiglie di nomi col **prefisso**: `palant*` (i numeri attaccati non si
+  separano: `1777` non trova `N1777`).
+- Termini con caratteri speciali (`- . / @ : # '`) **tra virgolette**:
+  `"flutter-elinux"`, `"0.7.9"`. In modalità *smart* (default) il server li quota
+  da sé; con `raw=true` la query passa intatta (per NEAR/parentesi complesse).
+- `sort`: `rank` (rilevanza, default), `newest`, `oldest`. Filtri `since`/`until`
+  (ISO) e `project` (etichetta esatta). Su più DB il `limit` è **globale**.
+
+> **Superficie d'errore parlante.** Una query malformata **non** restituisce
+> lista vuota (che sarebbe indistinguibile da "nessun match" — un falso negativo
+> silenzioso): solleva un errore che spiega come correggerla. Resta valido il
+> *protocollo dello zero*: 0 risultati non prova assenza — riprova quotando il
+> termine prima di concludere che "non c'è".
+
 ## Documenti e immagini (PDF-scansione, screenshot) — via NotebookLM
 
 Un PDF **senza testo** (scansione, screenshot) non ha nulla da estrarre con

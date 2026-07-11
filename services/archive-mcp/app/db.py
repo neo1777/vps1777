@@ -2,20 +2,36 @@
 Storage layer — astratto su SQLite FTS5.
 
 Mantiene la registry `DBS: dict[name, Path]` filtrata ai DB esistenti (degraded
-mode: i mancanti vengono rimossi all'avvio con un warning).
+mode: i mancanti vengono rimossi all'avvio con un warning). Orchestra il
+multi-DB (registry + freshness + limit globale) sopra la logica FTS pura di
+`fts.py` (stdlib-only, testabile senza il runtime del server).
 
-Per swap futuro a Postgres: implementa `_open` e `search` con backend diverso.
+Per swap futuro a Postgres: implementa `_open` e le funzioni di fts con backend
+diverso.
 """
 from __future__ import annotations
 
+import datetime
 import logging
 import sqlite3
 from pathlib import Path
 from typing import Any
 
+from . import fts
+from .fts import FtsSyntaxError  # noqa: F401 — riesportato per server.py
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
+
+
+def _snapshot(path: Path) -> str:
+    """Data di ultima modifica del file DB (ISO, UTC) — la 'freschezza' del DB:
+    ogni risposta la porta, così una sessione sa quanto è vecchio ciò che legge."""
+    try:
+        return datetime.datetime.utcfromtimestamp(
+            path.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except OSError:
+        return ""
 
 
 def _db_dir() -> Path | None:
@@ -109,39 +125,111 @@ def _targets(db: str) -> list[str]:
     return [db]
 
 
-def search(query: str, db: str = "", limit: int = 20) -> list[dict[str, Any]]:
-    """
-    Search FTS5 nel DB indicato (o in tutti se db == ""). Ritorna lista di dict.
+def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
+           sort: str = "rank", since: str = "", until: str = "",
+           project: str = "", snippet_tokens: int = 32) -> list[dict[str, Any]]:
+    """Search FTS5 nel DB indicato (o in TUTTI se db == "").
 
-    Lo schema atteso è: tabella `messages_fts` con colonne (uuid, project, ts, content).
-    Se il DB non ha questo schema, il tool ritorna errore.
-    """
+    Su più DB il `limit` è GLOBALE (non più per-DB) e i risultati sono fusi e
+    ri-ordinati per `sort` prima del taglio — niente più concatenamento cieco.
+    Ogni riga porta `db` e `snapshot` (freschezza del DB). Un errore di sintassi
+    FTS5 solleva FtsSyntaxError (non restituisce lista vuota muta)."""
     _maybe_reload()  # pesca eventuali DB caricati/indicizzati dopo l'avvio
-    results: list[dict[str, Any]] = []
+    collected: list[dict[str, Any]] = []
     for name in _targets(db):
         try:
             conn = _open(name)
         except KeyError:
             continue
         try:
-            cur = conn.execute(
-                """SELECT uuid, project, ts, snippet(messages_fts, -1, '«', '»', '…', 32) AS snip
-                   FROM messages_fts
-                   WHERE messages_fts MATCH ?
-                   ORDER BY bm25(messages_fts)
-                   LIMIT ?""",
-                (query, limit),
-            )
-            for row in cur:
-                results.append({
-                    "db": name,
-                    "uuid": row["uuid"],
-                    "project": row["project"],
-                    "ts": row["ts"],
-                    "snippet": row["snip"],
-                })
+            snap = _snapshot(_DBS[name])
+            rows = fts.search_conn(
+                conn, query, limit=limit, raw=raw, sort=sort, since=since,
+                until=until, project=project, snippet_tokens=snippet_tokens)
+            for r in rows:
+                r["db"] = name
+                r["snapshot"] = snap
+            collected.extend(rows)
+        except sqlite3.OperationalError as exc:
+            # schema non conforme (DB estraneo nella dir): salta, non è fatale
+            log.warning("DB %s schema error: %s", name, exc)
+        finally:
+            conn.close()
+    # ordinamento GLOBALE + limit globale: bm25 crescente (più rilevante prima),
+    # ts per newest/oldest. Fra DB diversi il bm25 non è perfettamente
+    # comparabile (documentato), ma è meglio del concatenamento per-DB.
+    if sort == "newest":
+        collected.sort(key=lambda r: r.get("ts") or "", reverse=True)
+    elif sort == "oldest":
+        collected.sort(key=lambda r: r.get("ts") or "")
+    else:
+        collected.sort(key=lambda r: r.get("rank", 0.0))
+    return collected[:limit]
+
+
+def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
+          until: str = "", project: str = "") -> dict[str, Any]:
+    """Numero di match per DB e totale (non limitato) — abilita frequenze e
+    prevalenze, impossibili con la sola `search` limitata."""
+    _maybe_reload()
+    per_db: dict[str, int] = {}
+    for name in _targets(db):
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            per_db[name] = fts.count_conn(
+                conn, query, raw=raw, since=since, until=until, project=project)
         except sqlite3.OperationalError as exc:
             log.warning("DB %s schema error: %s", name, exc)
         finally:
             conn.close()
-    return results
+    return {"total": sum(per_db.values()), "per_db": per_db}
+
+
+def get_context(uuid: str, db: str = "", *, before: int = 3,
+                after: int = 3) -> list[dict[str, Any]]:
+    """I messaggi attorno a uno `uuid` col contenuto PIENO — supera il
+    troncamento dello snippet di search. Cerca nel DB indicato o in tutti."""
+    _maybe_reload()
+    for name in _targets(db):
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            ctx = fts.context_conn(conn, uuid, before=before, after=after)
+            if ctx:
+                snap = _snapshot(_DBS[name])
+                for r in ctx:
+                    r["db"] = name
+                    r["snapshot"] = snap
+                return ctx
+        except sqlite3.OperationalError as exc:
+            log.warning("DB %s schema error: %s", name, exc)
+        finally:
+            conn.close()
+    return []
+
+
+def describe() -> list[dict[str, Any]]:
+    """Scheda di ogni DB: righe, intervallo temporale, n. etichette, snapshot
+    (freschezza). Più ricca di list_databases (che resta list[str] per compat)."""
+    _maybe_reload()
+    out: list[dict[str, Any]] = []
+    for name in sorted(_DBS):
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            info = fts.db_stats_conn(conn)
+        except sqlite3.OperationalError:
+            info = {"rows": 0, "oldest": "", "newest": "", "labels": 0}
+        finally:
+            conn.close()
+        info["name"] = name
+        info["snapshot"] = _snapshot(_DBS[name])
+        out.append(info)
+    return out

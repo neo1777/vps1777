@@ -2,6 +2,21 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.19.0] — 2026-07-11
+
+### archive-mcp: ricerca onesta, leggibile e potente
+
+Emerso da un collaudo sperimentale della ricerca (paper con 4 subagent, ~130 chiamate): l'FTS5 era potente ma con un difetto capitale, e mancavano strumenti per leggere e misurare. Riscrittura della logica di ricerca, retrocompatibile.
+
+- **Bug capitale — falsi negativi silenziosi (fix).** Un errore di sintassi FTS5 è un `sqlite3.OperationalError`: prima veniva **inghiottito** (`db.py`) e `search` restituiva lista vuota, indistinguibile da "nessun risultato" — lo strumento nato per non dimenticare produceva l'illusione opposta ("non ne abbiamo mai parlato" per un trattino non quotato). Ora una query malformata **solleva un errore parlante** che spiega come correggerla; i 0-risultati veri restano 0.
+- **Auto-quoting difensivo (smart mode, default).** I termini con caratteri speciali (`flutter-elinux`, `0.7.9`, `github.com`) vengono quotati dal server prima della `MATCH` — la trappola numero uno sparisce senza che il chiamante debba saperlo. Conservativo sulle query avanzate (NEAR, parentesi, `col:term`): le lascia intatte, con fallback all'originale. `raw=true` per passare la query così com'è.
+- **Docstring-cookbook.** La docstring di `search` — ciò che ogni Claude client legge *prima* di cercare — ora contiene le regole dure (operatori MAIUSCOLI, doppia lingua, prefissi, quoting, protocollo dello zero): previene l'errore a monte, lato client.
+- **Nuovi tool.** `count(query)` (frequenze/prevalenze, prima impossibili); `get_context(uuid, before, after)` (i messaggi attorno a un risultato col **contenuto pieno**, supera il troncamento dello snippet); `describe_databases()` (righe, intervallo date, etichette, **snapshot** di freschezza per DB). `list_databases` invariato per compatibilità col connettore.
+- **Ricerca più espressiva su `search`** (parametri opzionali, retrocompatibili): `sort` (`rank`/`newest`/`oldest`), `since`/`until`, `project`, `snippet_tokens`; su più DB il **`limit` è globale** e i risultati sono **fusi e ri-ordinati per rilevanza**, non più concatenati per DB. Ogni riga porta `snapshot` (freschezza del DB) — cura il "paradosso della memoria che invecchia".
+- **Primi test del servizio.** `archive-mcp` non aveva alcun test: nuovo modulo `fts.py` (stdlib-only, come `archive_indexer`) con 20 test, in CI via `uvx pytest`.
+
+Fuori da questa release, segnalati dal collaudo ma appartenenti ad altri strati: sync automatico del catalogo `masterIndex1777` (bibliotecario1777/NotebookLM, non vps1777) e le skill "Registro delle Promesse"/"Verificatore di Memorie" (pattern per `create1777`).
+
 ## [0.18.1] — 2026-07-10
 
 ### Fix — la pagina admin non propone più downgrade (e il checker non ci casca)
