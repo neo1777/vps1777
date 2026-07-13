@@ -24,7 +24,7 @@ Quando esce una release il bot Telegram ti avvisa (una volta sola).
 ## Cosa succede durante `vps1777 update`
 
 ```
-lock → preflight → changelog+conferma → download bundle (sha256 (+cosign))
+lock → preflight → changelog+conferma → download bundle (sha256 + cosign)
   → backup age + snapshot locale volumi → pull immagini → verifica digest
   ── punto di non ritorno ──
   → sync file gestiti → stop → migrazioni → start → health-gate (180s)
@@ -39,8 +39,11 @@ Garanzie:
   (che spesso vive solo sul tuo PC); viene potato al successivo update riuscito.
 - **Supply-chain**: il bundle di release porta `images.lock` con i digest
   immutabili delle 4 immagini; dopo il pull, i digest locali DEVONO combaciare.
-  Se hai `cosign` installato viene verificata anche la firma keyless
-  (`VPS1777_REQUIRE_COSIGN=1` in `.env` per renderla obbligatoria).
+  La firma keyless del bundle è verificata con `cosign` **di default e in
+  fail-closed**: se la verifica non passa — o se `cosign` manca e non è
+  auto-installabile — l'update si ferma. `cosign` viene auto-installato se
+  assente (versione pinnata). Via d'emergenza consapevole:
+  `VPS1777_REQUIRE_COSIGN=0` in `.env` oppure `--no-require-cosign`.
 - **Rollback automatico**: se dopo l'update lo stack non torna healthy entro
   180s (healthcheck compose + probe `/health?deep=1` del gateway), la VPS torna
   **da sola** alla versione precedente — le immagini vecchie sono ancora locali,

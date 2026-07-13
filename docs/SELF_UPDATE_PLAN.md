@@ -145,6 +145,8 @@ Il problema della age-key è reale: i recipient possono essere la chiave sul PC 
 ### (+) Gate supply-chain: cosign verify vs digest pinning
 **Raccomandazione: digest lock obbligatorio, cosign opzionale-strict.** Percorso obbligatorio (zero nuove dipendenze): `images.lock` del bundle pinna i 4 digest; dopo `compose pull` la CLI confronta i `RepoDigests` di ogni immagine col lock **prima** di `up`; integrità del bundle via `SHA256SUMS` dalla stessa Release. Questo sconfigge il tampering dei tag lato registry; la debolezza residua (compromissione dell'account GitHub compromette lock e immagini insieme) è la stessa trust root del sorgente stesso. Hardening opzionale: bootstrap/installer prova a installare il binario statico `cosign`; se presente, `vps1777 update` esegue `cosign verify-blob` su `SHA256SUMS` (keyless, `--certificate-identity-regexp` pinnata al workflow `release.yml` del repo, issuer GitHub Actions) e `cosign verify` su un'immagine; `--require-cosign` / `VPS1777_REQUIRE_COSIGN=1` in `.env` lo rende fatale. Razionale: un binario Go da ~60MB non deve essere dipendenza dura di ogni VPS 4GB, ma la verifica dev'essere first-class quando c'è.
 
+> **Aggiornamento (v0.23.0):** la raccomandazione "cosign opzionale-strict" è stata superata dall'hardening difensivo. La verifica `cosign` del bundle è ora **obbligatoria di default e fail-closed**: se non passa — o se `cosign` manca e non è auto-installabile — `vps1777 update` si ferma. La CLI **auto-installa** `cosign` (versione pinnata) se assente, così la verifica non dipende dal deploy iniziale. I flag sono **invertiti** rispetto al piano: la verifica non si attiva più con `VPS1777_REQUIRE_COSIGN=1`, ma si **disattiva** solo con la via d'emergenza consapevole `VPS1777_REQUIRE_COSIGN=0` (in `.env`) o `--no-require-cosign`.
+
 ---
 
 ## 3. Flusso di update, passo per passo
@@ -156,7 +158,7 @@ Il problema della age-key è reale: i recipient possono essere la chiave sul PC 
  2 CHECK       risolve il target (--version | releases/latest); target == current → "già aggiornato", exit 0 (idempotente)
  3 CHANGELOG   stampa il body della Release (cache in update_status.json se GitHub è down)
  4 CONFIRM     y/N interattivo salvo --yes / --from-intent
- 5 FETCH       scarica bundle+SHA256SUMS(+sig) → releases/vX.Y.Z/ ; verifica sha256 (+cosign se presente/richiesto)
+ 5 FETCH       scarica bundle+SHA256SUMS+sig → releases/vX.Y.Z/ ; verifica sha256 + cosign (obbligatorio di default, v0.23.0; salta solo con --no-require-cosign)
                └─ fallisce: abort, nulla toccato                                     [nessun rollback necessario]
  6 SELF-UPDATE CLI nel bundle ≠ CLI in esecuzione → sudo install → exec della nuova CLI con --resume
  7 BACKUP      tools/backup.sh (age) + snapshot locale dei 3 volumi dati
@@ -248,7 +250,7 @@ Si usano tag rc: `release.yml` scatta su qualunque `v*` da qualunque branch, e `
 - **Split compose build vs pull** → F1; `compose.dev.yaml` coordinato via catena `-f compose.build.yaml` documentata; la CI valida entrambe le combinazioni (nessuno dei due rompe l'altro).
 - **Distribuzione file non-immagine** → bundle in F2 (decisione §2.b).
 - **Migrazione installazioni esistenti** → F7 (§5), zero perdita dati per costruzione.
-- **Firma & verifica** → F2 (produce) + F4 (consuma); decisione §2.+ (digest lock obbligatorio, cosign opzionale-strict).
+- **Firma & verifica** → F2 (produce) + F4 (consuma); decisione §2.+ (digest lock obbligatorio; cosign reso poi obbligatorio di default e fail-closed, v0.23.0 — vedi nota in §2.+).
 - **Coordinamento backup/restore** → F4: `restore.sh --yes` + `--volumes-only`, default interattivo intatto; fix MANIFEST; fix doc rotation in F8.
 - **Collocazione della notifica** → F5 (decisione §2.d: timer host, zero telemetria).
 

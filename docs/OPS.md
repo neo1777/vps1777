@@ -43,6 +43,12 @@ docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
   --profile ingress.tailscale --profile ops.portainer up -d
 ```
 
+> **Immagini di terzi — digest-pinnate.** Le immagini non-vps1777 usate nei compose
+> (`alpine` per `ops.backup`, `caddy`, `cloudflared`, `portainer`, `watchtower`)
+> sono **pinnate al digest** (`tag@sha256:…`) e tracciate da **Dependabot** (v0.27.0):
+> l'aggiornamento arriva come PR verificabile, non come un `latest` che cambia sotto
+> i piedi.
+
 ### `ops.portainer` — cruscotto visuale dei container
 
 [Portainer CE](https://www.portainer.io/) dà una UI web per vedere/gestire
@@ -80,6 +86,15 @@ docker compose ... -f compose.ops.watchtower.yaml --profile ops.autoupdate up -d
 ### `ops.backup` — backup volumi age-encrypted
 
 Vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md).
+
+Il container `backup` **non monta `docker.sock`** e **non installa `docker-cli`**
+(finding H13): montare il socket darebbe a un container di servizio il controllo
+root-equivalente dell'host. I volumi dati gli sono invece montati **direttamente
+in sola lettura** sotto `/volumes/<nome>` e `backup.sh` li tara da lì
+(`BACKUP_VOLUMES_DIR`). Lo stesso `backup.sh` resta *dual-context*: sull'**host**
+dumpa via `docker run`, **dentro il container** usa i mount diretti. Col profilo
+`ingress.caddy` esistono anche `caddy-data`/`caddy-config`: nel compose ci sono due
+righe commentate da decommentare per includerli.
 
 ## Combinare i profili
 

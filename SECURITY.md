@@ -40,6 +40,97 @@ Threat model dichiarato:
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
 - Strumenti di management (Portainer) mai esposti: solo loopback + tunnel SSH (vedi [docs/OPS.md](docs/OPS.md))
 
+## Rassegna difensiva — l'hardening applicato
+
+Il modello sopra è il design; questa sezione è **cosa è stato reso fail-closed
+per costruzione**, dopo una review difensiva a tappeto (luglio 2026). Il pattern
+ricorrente che la review ha trovato — e chiuso — è *un default o un residuo che
+degrada in silenzio verso l'aperto*: il disegno era già fail-closed, non lo erano
+tutti i default. Ogni voce cita la versione in cui è entrata.
+
+### Autenticazione & accesso (i due punti critici)
+
+- **Owner-gating fail-closed** (`v0.22.0`, critico). Con `TELEGRAM_OWNER_ID`
+  assente o malformato la Mini App ora **nega tutti** (`/app/auth` → 503), invece
+  di lasciar passare chiunque apra il bot. `is_owner` ritorna `False` se l'owner
+  non è configurato; il bot applica `owner_only` allo stesso modo; warning
+  esplicito all'avvio se manca.
+- **Audience del proxy verificata** (`v0.25.0`). Un access token valido non
+  basta: il suo `sub` deve essere fra le email ammesse (`OAUTH_ALLOWED_EMAILS`),
+  altrimenti il proxy MCP rifiuta. Un token emesso per un altro soggetto non
+  raggiunge gli upstream.
+- **Rate-limit sugli endpoint auth pubblici** (`v0.25.0`). Finestra scorrevole
+  per-IP (in-memory, stdlib): `/register` 10/5min, `/token` 60/min, `/app/auth`
+  20/5min — sopra al lockout del login admin. Ferma la raffica da singola sorgente.
+- **Quick-wins OAuth/admin** (`v0.21.0`): `code_challenge` vuoto → 400 (niente
+  PKCE aggirabile); `state` url-encoded; redirect `next` con `//` o `/\` rifiutati
+  (no open-redirect); CORS senza wildcard (fail-closed, default `https://claude.ai`,
+  non `*`); header `Permissions-Policy` + `Cross-Origin-Opener-Policy`; il login
+  fallito logga un booleano `email_known`, non l'email.
+
+### Rete — l'IP client non è più falsificabile
+
+- **`forwarded_allow_ips` ristretto** (`v0.28.0`). uvicorn girava con `"*"`:
+  si fidava dell'header `X-Forwarded-For` da **qualunque** peer, quindi l'IP
+  client era spoofabile → rate-limit e lockout evadibili, audit avvelenabile.
+  Ora `GATEWAY_FORWARDED_ALLOW_IPS` (default `127.0.0.1,10.0.0.0/8,172.16.0.0/12,
+  192.168.0.0/16`) si fida dell'XFF **solo** dai range privati + loopback, **mai**
+  da un IP pubblico. Il reverse-proxy (tailscale sull'host, caddy/cloudflared in
+  container) arriva sempre da una bridge Docker privata; un client pubblico
+  diretto non è fidato e il suo XFF viene ignorato. Verificato sul campo: un
+  `X-Forwarded-For` iniettato dal client viene scartato, resta il vero IP.
+
+### Segreti — mai in chiaro dove non serve
+
+- **`GATEWAY_SECRET` redatto dai log** (`v0.24.0`). Il secret vive nel path del
+  proxy MCP (`/<SECRET>/<service>/mcp`) e finiva negli access-log di uvicorn. Un
+  filtro di logging lo maschera (`/***/…/mcp`) prima che qualunque riga sia
+  scritta.
+- **Segreti fuori dall'argv nel deploy** (`v0.29.0`). `deploy.sh` passava i
+  segreti (tailscale authkey, bot token, password) nell'argv di comandi remoti,
+  visibili via `ps`. Ora lo script viaggia nello STDIN di `bash -s`; `set_kv`
+  scrive con builtin (niente valore all'argv di `sed`); bcrypt legge da stdin;
+  `tailscale up` usa `--authkey=file:`.
+- **Chiave age fuori dalla VPS** (`v0.26.0`). Il backup si cifra con la sola
+  chiave **pubblica** (recipient); la privata vive sul PC dell'owner e serve solo
+  al restore. `backup.sh` non genera più la coppia sulla VPS (che avrebbe messo
+  la privata sullo stesso disco dei backup). Vedi [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md).
+- **Secrets sempre file-mounted** (baseline): password, signing key, token via
+  Docker `secrets:` in `tmpfs /run/secrets/`, **mai** in env var. Vedi [docs/SECRETS.md](docs/SECRETS.md).
+
+### Contenimento dei container
+
+- **`docker.sock` rimosso dal container di backup** (`v0.29.0`). Montare il
+  socket dà al container il controllo root-equivalente dell'host. Il container
+  `ops.backup` ora monta i volumi dati **direttamente in sola lettura** e li tara
+  da lì — niente `docker.sock`, niente `docker-cli`.
+- Container **non-root** (UID 1000), `cap_drop: ALL`, `no-new-privileges`,
+  backend su rete `internal: true`, gateway senza accesso al socket Docker né ai
+  secret dell'host (baseline).
+
+### Supply-chain & aggiornamenti
+
+- **Firma cosign obbligatoria di default** (`v0.23.0`, critico). Il self-update
+  verifica la firma keyless del bundle di release **fail-closed**: se la verifica
+  non passa (o `cosign` manca e non si installa), l'update si ferma. La via
+  d'emergenza è esplicita e rumorosa: `VPS1777_REQUIRE_COSIGN=0` /
+  `--no-require-cosign`. (Prima la verifica era opt-in e saltata in silenzio.)
+- **GitHub Actions pinnate a SHA** (`v0.27.0`). Ogni action è pinnata al commit
+  SHA (non al tag mobile): un tag ripuntato a monte non può iniettare codice.
+  `Dependabot` (github-actions + docker + docker-compose) tiene freschi gli SHA/i
+  digest. Permessi `least-privilege` per-job in `release.yml`. Le immagini di
+  terzi nei compose sono digest-pinnate.
+- **Digest immutabili** (baseline): le immagini si pullano da GHCR e si verificano
+  contro `images.lock` del bundle; nessun build-in-place.
+
+### Privacy & osservabilità
+
+- **Retention dell'audit** (`v0.24.0`): `AUDIT_RETENTION_DAYS` (default 90) con
+  pruning opportunistico — l'audit non cresce all'infinito.
+- **Comandi RAG del bot disattivabili** (`v0.24.0`): `BOT_RAG_COMMANDS=0` spegne
+  `/lista`·`/chiedi` (che passerebbero da Telegram). Con la sola Mini App i
+  notebook non transitano da terzi — vedi la tabella *Flussi di dati verso terzi*.
+
 ### Canale di aggiornamento
 
 L'aggiornamento (`vps1777 update` / pulsante admin) è progettato attorno allo
@@ -57,8 +148,9 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
   già ogni privilegio).
 - **Supply-chain**: le immagini si pullano da GHCR e si verificano contro
   `images.lock` (digest immutabili) del runtime bundle di release; il bundle è
-  firmato (`cosign sign-blob` keyless) e verificabile (`VPS1777_REQUIRE_COSIGN=1`
-  rende la verifica obbligatoria). Nessun aggiornamento build-in-place.
+  firmato (`cosign sign-blob` keyless) e la verifica è **obbligatoria di default**
+  (`VPS1777_REQUIRE_COSIGN=0` la disattiva solo come via d'emergenza esplicita).
+  Nessun aggiornamento build-in-place.
 - **Reversibilità**: backup age + snapshot locale prima di ogni update;
   auto-rollback se lo stack non torna healthy. Nessuna finestra in cui i dati
   restano senza rete di sicurezza.
@@ -85,6 +177,21 @@ servizi esterni. Nessuno è telemetria, ma è bene sapere **cosa esce verso chi*
 **Massima privacy**: imposta `BOT_RAG_COMMANDS=0` e usa la Mini App per i notebook
 (non fa passare nulla da Telegram); l'archivio (`archive1777`) e il gateway restano
 interamente sulla VPS.
+
+## Residui noti
+
+L'hardening è difesa in profondità, non una garanzia. Un residuo è tracciato e
+dichiarato:
+
+- **Il gateway monta in scrittura il profilo Google di NotebookLM** (`nlm-auth`).
+  `/admin/nlm` scrive il profilo caricato direttamente nel volume, quindi il
+  gateway — l'unico servizio esposto — ha accesso in scrittura ai cookie di
+  sessione Google. Il fix corretto è spostare la scrittura (e la lettura di stato)
+  dietro un endpoint interno su `nb1777-mcp`, lasciando il gateway ad accesso-zero
+  ai cookie. È un cambio d'architettura su un flusso core (il login NotebookLM) e
+  va fatto e verificato con cura: rendere il mount `:ro` non basterebbe, perché il
+  gateway deve comunque *leggere* la dir per lo stato, e la lettura già espone i
+  cookie. Tracciato, non ancora applicato.
 
 ## Out of scope
 

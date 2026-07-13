@@ -41,6 +41,8 @@ duplicata da mantenere.
    (`miniapp_core.verify_init_data`, spec Telegram), scarta initData più
    vecchie di 24h, e verifica che l'utente sia **l'owner**
    (`TELEGRAM_OWNER_ID`): chiunque altro riceve 403, anche con initData valida.
+   L'endpoint `/app/auth` è **rate-limited** (20 richieste / 5 min per-IP, dal
+   v0.25.0): oltre la soglia risponde 429.
 3. Se ok, emette un **JWT `typ=miniapp`** (1h) che il frontend usa come Bearer
    su `/app/api/*`. Alla scadenza la pagina si ri-autentica da sola (initData
    vale 24h).
@@ -50,6 +52,10 @@ Perché è solido:
   `initDataUnsafe` (dati lato client) ma solo della firma verificata;
 - l'owner-check è **server-side**: il bot mostra il bottone solo all'owner, ma
   non ci si fida del client (difesa in profondità);
+- l'owner-gating è **fail-closed** (dal v0.22.0): se `TELEGRAM_OWNER_ID` manca o
+  è malformato (→ 0), `/app/auth` risponde **503 `owner_not_configured`** e NEGA
+  tutti — non lascia più passare chiunque abbia una initData valida
+  (`is_owner` ritorna False quando l'owner non è configurato);
 - niente CSRF necessario: gli endpoint usano il Bearer header, mai cookie —
   un form cross-origin non può forgiarlo;
 - `typ=miniapp` è un boundary separato: quel token non vale né come `access`
@@ -82,8 +88,10 @@ messaggio chiaro.
 ## Configurazione
 
 - **`TELEGRAM_OWNER_ID`** in `.env` (lo stesso usato dal bot): il gateway lo
-  riceve via compose e limita `/app/auth` a quell'utente. Se è vuoto/0 la Mini
-  App accetta qualunque utente Telegram — configuralo sempre in produzione.
+  riceve via compose e limita `/app/auth` a quell'utente. Se è vuoto/0 (o
+  malformato) la Mini App **non si apre a nessuno**: `/app/auth` risponde 503
+  (`owner_not_configured`) e nega tutti — fail-closed dal v0.22.0. Configuralo
+  comunque sempre in produzione, o il pannello resta inaccessibile.
 - **HTTPS obbligatorio**: Telegram apre le Mini App solo su URL https con
   certificato valido. Con `PUBLIC_BASE` non-https il bot non mostra il bottone
   (e `/pannello` spiega il perché).
