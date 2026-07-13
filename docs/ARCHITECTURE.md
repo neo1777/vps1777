@@ -88,6 +88,11 @@ admin UI ──intent──► onboarding/update_pending_update.json
                   ──► ✅ ok  │  AUTO-ROLLBACK
 ```
 
+La verifica della firma **cosign** del bundle è **obbligatoria (fail-closed) di
+default** dalla v0.23.0: se cosign manca e non è installabile, l'update si ferma
+invece di procedere — la sola via d'emergenza *consapevole* è impostare
+`VPS1777_REQUIRE_COSIGN=0` nel `.env`.
+
 Le immagini arrivano **solo da GHCR** (`compose.yaml` è pull-only; il build
 locale esiste solo nell'overlay `compose.build.yaml`, dev/CI). Manuale utente
 completo: [UPDATE.md](UPDATE.md).
@@ -127,3 +132,46 @@ claude.ai                     gateway                    user browser
 ```
 
 JWT typ è la chiave: `access_token` non funziona dove serve `admin_cookie` e viceversa. Vedi [SECURITY.md](../SECURITY.md).
+
+## Modello di sicurezza
+
+La postura è **fail-closed**: in assenza di configurazione il gateway nega, non
+apre. Segue la sintesi degli hardening della review difensiva (luglio 2026,
+v0.19.1→v0.29.0); il dettaglio operativo sta in [SECURITY.md](../SECURITY.md).
+
+### Baseline (dall'inizio)
+
+- Backend su rete `internal: true` — world-isolated, nessun egress.
+- OAuth 2.1 + DCR + PKCE; JWT con `typ` separati (`access` ≠ `admin_cookie` ≠ miniapp).
+- `GATEWAY_SECRET` come path-namespace del proxy MCP.
+- Container non-root, `cap_drop: ALL`, `no-new-privileges`.
+- Gateway **senza** `docker.sock` né secret dell'host; immagini pinnate a digest (`images.lock`).
+
+### Hardening (v0.22.0 → v0.29.0)
+
+| Versione | Hardening |
+|---|---|
+| v0.22.0 | **Owner-gating fail-closed**: senza `TELEGRAM_OWNER_ID` la Mini App e il bot negano TUTTI (`/app/auth` → 503, `is_owner` → False). |
+| v0.23.0 | **cosign REQUIRED di default** sul self-update (vedi *Canale di aggiornamento*); escape consapevole `VPS1777_REQUIRE_COSIGN=0`. |
+| v0.24.0 | `GATEWAY_SECRET` redatto dagli access-log (redazione installata prima di servire la prima richiesta). |
+| v0.25.0 | **Rate-limit per-IP** sugli endpoint auth: `/register` 10/5min, `/token` 60/min, `/app/auth` 20/5min. Il proxy MCP verifica l'**audience**: il `sub` dell'access token deve essere in `OAUTH_ALLOWED_EMAILS`, altrimenti rifiuta (401 `subject_not_allowed`). |
+| v0.28.0 | **`forwarded_allow_ips` ristretto** — vedi sotto. |
+| v0.29.0 | Container di **backup senza `docker.sock`**: volumi montati diretti `:ro`. |
+
+### IP client e header proxy (v0.28.0)
+
+uvicorn gira con `proxy_headers=True` ma `forwarded_allow_ips` **ristretto** a
+`GATEWAY_FORWARDED_ALLOW_IPS` (default
+`127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`), non più `*`.
+L'`X-Forwarded-For` è fidato SOLO dai range privati + loopback: il reverse-proxy
+(Tailscale/Caddy/Cloudflared) arriva sempre da una bridge Docker privata
+(es. `172.21.0.1`), MAI da un IP pubblico. uvicorn cammina l'XFF da **destra** e
+prende il primo host non fidato, quindi un `X-Forwarded-For` iniettato da un
+client pubblico viene scartato. Conseguenza: l'IP client non è più spoofabile e
+rate-limit, lockout e audit non sono più evadibili.
+
+### Residuo documentato (NON risolto)
+
+Il gateway monta `nlm-auth` in **rw** (cookie Google) per servire `/admin/nlm`.
+Fix futuro: spostare l'operazione su un endpoint interno di nb1777-mcp, così il
+gateway resta ad accesso-zero sul profilo NotebookLM.

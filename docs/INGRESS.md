@@ -88,6 +88,20 @@ Aggiungi `secrets/cf_api_token.txt` + modifica `ingress/Caddyfile` con `tls.dns 
 
 CF gestisce HTTPS + DNS automaticamente.
 
+## Nota — IP client dietro il proxy (`forwarded_allow_ips`)
+
+Dal **v0.28.0** il gateway si fida dell'header `X-Forwarded-For` **solo** dai
+peer nei range privati + loopback (uvicorn `forwarded_allow_ips`), mai da un IP
+pubblico → l'IP del client non è spoofabile (rate-limit, lockout e audit
+restano affidabili). Il default è
+`127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`.
+
+Per gli ingress **in container** (Caddy, Cloudflared) il proxy arriva da una
+bridge Docker privata (es. `172.x.0.1`): il default **la copre già**, quindi di
+norma **non serve configurare nulla**. Solo topologie esotiche (proxy su un
+altro host, subnet fuori dai blocchi privati) richiedono un override via env
+**`GATEWAY_FORWARDED_ALLOW_IPS`** (uvicorn 0.51 accetta anche la notazione CIDR).
+
 ## Confronto rapido
 
 | Aspetto | Tailscale | Caddy | Cloudflared |

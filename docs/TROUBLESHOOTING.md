@@ -174,6 +174,24 @@ L'update abortisce **prima** di toccare lo stack — non è un guasto, è la
 verifica supply-chain che fa il suo lavoro. Controlla la release su GitHub e
 riprova. Vedi [UPDATE.md](UPDATE.md).
 
+## Update: verifica firma cosign fallita ("firma richiesta ma cosign assente")
+
+Da **v0.23.0** la verifica **cosign** della firma di release è **obbligatoria
+di default** (fail-closed): le release sono sempre firmate e la CLI prova a
+installare cosign da sé se manca. L'update abortisce **prima** di toccare lo
+stack se la firma non verifica o se cosign è assente e non installabile.
+
+Cause:
+- cosign mancante e non installabile (rete/permessi) → `verifica firma richiesta ma cosign è assente e non installabile`
+- firma `.sig`/`.pem` assente o non valida nel bundle → `cosign verify-blob fallita`
+
+Fix: risolvi la causa (installa cosign da [github.com/sigstore/cosign](https://github.com/sigstore/cosign), o verifica la release su GitHub). Via d'emergenza **consapevole** — accetti una release non verificata, usala solo se sai cosa fai:
+```bash
+vps1777 update --no-require-cosign          # una tantum
+# oppure, persistente, nel .env:  VPS1777_REQUIRE_COSIGN=0
+```
+Dettagli in [UPDATE.md](UPDATE.md).
+
 ## Update: rollback non healthy (exit 2)
 
 Il caso peggiore: nemmeno il rollback torna in salute. La CLI si ferma senza
@@ -221,6 +239,49 @@ tuo (`@userinfobot`) e che il gateway lo veda:
 docker exec vps1777-gateway-1 printenv TELEGRAM_OWNER_ID
 ```
 Se è vuoto, aggiorna `.env` e ricrea il gateway (`docker compose up -d gateway`).
+
+## Mini App: risponde `503 owner_not_configured`
+
+Causa: manca `TELEGRAM_OWNER_ID` nel `.env`. Da **v0.22.0** gli endpoint
+owner-only sono **fail-closed**: finché l'owner non è impostato la Mini App
+nega TUTTI (503) e il bot owner-only non risponde a nessuno. Lasciarlo vuoto
+**non** è senza conseguenze.
+
+Fix:
+```bash
+docker exec vps1777-gateway-1 printenv TELEGRAM_OWNER_ID   # vuoto = non configurato
+# prendi il tuo id da @userinfobot, mettilo in .env, poi ricrea il gateway:
+docker compose up -d gateway
+```
+
+## `429` / `rate_limited` su connector o Mini App
+
+Causa: da **v0.25.0** gli endpoint di auth pubblici hanno un **rate-limit
+per-IP** (difesa anti-raffica). Le soglie:
+- `/register` (DCR del connector): 10 ogni 5 min
+- `/token` (OAuth del connector): 60 al minuto
+- `/app/auth` (Mini App): 20 ogni 5 min
+
+Non è un guasto: hai superato la soglia (retry a raffica, script, o più client
+dietro lo stesso IP). Il contatore è **in-memory** e si azzera al **restart del
+gateway**. Aspetta la finestra o riavvia:
+```bash
+docker compose restart gateway
+```
+
+## Nei log/audit l'IP client è sempre lo stesso (es. l'IP della bridge Docker)
+
+Causa: da **v0.28.0** il gateway si fida degli header `X-Forwarded-*` solo dai
+peer in `GATEWAY_FORWARDED_ALLOW_IPS` (default
+`127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` — loopback + bridge Docker
+private). Dietro un ingress **custom** il cui IP non rientra in quei range l'XFF
+viene ignorato, e in audit/rate-limit compare sempre l'IP del proxy invece di
+quello reale del client.
+
+Fix: aggiungi l'IP/subnet del tuo ingress a `GATEWAY_FORWARDED_ALLOW_IPS` nel
+`.env` e ricrea il gateway (`docker compose up -d gateway`). **NON** impostarlo a
+`*`: riaprirebbe lo spoofing degli header (rate-limit/lockout/audit
+falsificabili da un client pubblico).
 
 ## Reset completo (perdi dati)
 

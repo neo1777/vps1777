@@ -137,14 +137,17 @@ automatico**. Manuale completo: [docs/UPDATE.md](docs/UPDATE.md).
 
 - Backend su rete Docker `internal: true` — **solo il gateway** è esposto verso l'esterno
 - Il gateway **non** ha accesso al Docker socket né ai secret dell'host (container non privilegiato)
-- Secrets sensibili (password, signing key, token) via Docker `secrets:` (tmpfs `/run/secrets/`), **mai** in env var
-- OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12
+- Secrets sensibili (password, signing key, token) via Docker `secrets:` (tmpfs `/run/secrets/`), **mai** in env var; il `GATEWAY_SECRET` è redatto dagli access-log
+- OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12; il proxy verifica anche l'**audience** del token
+- Mini App e bot **owner-only fail-closed**: senza `TELEGRAM_OWNER_ID` negano tutti, non aprono
+- Rate-limit per-IP sugli endpoint auth; `X-Forwarded-For` fidato **solo** dal proxy (IP client non falsificabile)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, healthcheck su ogni servizio
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
-- Backup volumi **age-encrypted**, rotate secrets senza downtime, update gestiti con backup + verifica digest + rollback automatico ([docs/UPDATE.md](docs/UPDATE.md))
+- Update firmati **cosign** e verificati **fail-closed di default**; digest immutabili (`images.lock`); backup age + snapshot + **rollback automatico** ([docs/UPDATE.md](docs/UPDATE.md))
+- CI con GitHub Actions **pinnate a SHA** + Dependabot; chiave di backup **fuori dalla VPS** (solo il recipient pubblico sul server)
 - Gestione visuale opzionale (Portainer) **solo su loopback** + tunnel SSH — vedi [docs/OPS.md](docs/OPS.md)
 
-Vedi [SECURITY.md](SECURITY.md) per il threat model e come segnalare vulnerabilità.
+Tutto questo è passato per una **review difensiva a tappeto** (luglio 2026): la rassegna completa dell'hardening applicato, il threat model, i flussi di dati verso terzi e i residui noti sono in [SECURITY.md](SECURITY.md).
 
 ## Documentazione
 

@@ -25,6 +25,15 @@ docker compose --profile ops.backup up -d
 
 Container `backup` esegue ogni notte (cron 03:00). Rotation: mantiene **7 backup giornalieri + 4 settimanali** (uno per settimana).
 
+> **Niente `docker.sock` (H13).** Il container di backup **non monta il Docker
+> socket** e **non installa `docker-cli`**: i volumi dati gli sono montati
+> **direttamente in sola lettura** (`/volumes/<nome>`) e `backup.sh` li archivia da
+> lì (variabile `BACKUP_VOLUMES_DIR`) — così un container di servizio non ha mai il
+> controllo root-equivalente dell'host. Lo stesso `backup.sh` resta *dual-context*:
+> lanciato sull'host dumpa via `docker run` come prima, dentro il container usa i
+> mount diretti. Col profilo `ingress.caddy` decommenta `caddy-data`/`caddy-config`
+> nel compose per includerli.
+
 ## Restore
 
 ```bash

@@ -84,11 +84,22 @@ e stato di ogni secret + le istruzioni di rotazione. Scrive `onboarding/secrets_
 
 ## Backup
 
-Vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md). I secret vanno backuppati age-encrypted insieme ai volumi.
+Vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md). I secret vanno backuppati age-encrypted
+insieme ai volumi. Dalla v0.26.0 il backup cifra con la sola chiave **pubblica**
+(recipient in `tools/age-recipients.txt`); la chiave **privata** vive sul PC
+dell'owner, **fuori dalla VPS**, e serve solo al restore — `backup.sh` non genera
+più la coppia sulla VPS.
 
 ## Threat model
 
 - `secrets/` ha mode 700 + file 600 (impostato da setup.sh)
 - Container vede solo `/run/secrets/<name>` con mode 400, owner root
-- Mai loggare i secret a video (gateway sanitizza i log)
+- **Log redatti** (v0.24.0): un filtro di logging (`app/logredact.py`) sostituisce
+  ogni secret con `***` in ogni riga *prima* che venga scritta. In particolare il
+  `gateway_secret` vive nel PATH del proxy MCP (`/<SECRET>/<service>/mcp`) e
+  finirebbe nella request-line dell'access-log di uvicorn: ora compare come
+  `/***/<service>/mcp` (redatto anche a valle, in Caddy/Cloudflare). È una difesa
+  a valle, non sostituisce la rotazione: smette solo di produrre nuovi leak.
+- **Segreti fuori dall'argv** (v0.29.0): `deploy.sh` passa i segreti via STDIN,
+  non nell'argv → non compaiono in `ps`/`/proc/<pid>/cmdline` sull'host remoto.
 - L'audit log NON contiene mai i valori, solo il nome del secret rotato
