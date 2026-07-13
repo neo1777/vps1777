@@ -39,50 +39,91 @@ import sys
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import IO, Iterable, Iterator, Union
+from typing import IO, Iterable, Iterator, NamedTuple, Union
 
-Row = tuple[str, str, str, str]  # (uuid, project, ts, content)
+Row = tuple[str, str, str, str]  # (uuid, project, ts, content) — forma breve, ancora accettata
+RowFull = tuple[str, str, str, str, str, str, str, str, str]
+# (uuid, project, ts, content, sender, tools, thinking, attachments, parent_uuid)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages(
-    uuid    TEXT PRIMARY KEY,
-    project TEXT,
-    ts      TEXT,
-    content TEXT
+    uuid        TEXT PRIMARY KEY,
+    project     TEXT,
+    ts          TEXT,
+    content     TEXT,
+    sender      TEXT DEFAULT '',
+    tools       TEXT DEFAULT '',
+    thinking    TEXT DEFAULT '',
+    attachments TEXT DEFAULT '',
+    parent_uuid TEXT DEFAULT ''
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-    uuid, project, ts, content,
+    uuid, project, ts, content, tools, attachments,
     content='messages', content_rowid='rowid'
 );
 """
+# NOTA sullo schema FTS — perché `tools` sì e `thinking` no.
+#
+# `tools` (tool_use + tool_result) È il contenuto informativo di un messaggio
+# agentico: il file aperto, il comando lanciato, la query eseguita. Scartarlo
+# significa costruire un archivio di sole DICHIARAZIONI, in cui una ricerca su un
+# tratto identitario premia la frase più esplicita — chiunque l'abbia detta — perché
+# non c'è nessuna AZIONE che possa contraddirla. Va nell'FTS: è ciò che si cerca.
+#
+# `thinking` si conserva nella tabella (recuperabile da get_context / SQL) ma NON si
+# indicizza: sono ~9.400 blocchi di ragionamento dell'assistente su un export reale,
+# e nessuno li sta cercando quando interroga l'archivio. Indicizzarli inquinerebbe
+# ogni `MATCH` e ogni `bm25`. Non buttarli ≠ metterli in mezzo.
+#
+# Chi volesse cercarli può aggiungerli all'FTS: `fts.py` supporta già il column
+# filter `col:term`, quindi la ricerca mirata è a costo zero.
+#
+# MIGRAZIONE: le colonne nuove hanno DEFAULT '' → un DB v1 (4 colonne) si apre e si
+# legge. Per portarlo allo schema nuovo servono ALTER TABLE + rebuild dell'FTS:
+# vedi `migrate_v1_to_v2()` in fondo al file.
 
 
 # ── core: scrittura DB ───────────────────────────────────────────────────────
 
-def write_rows(db_path: Union[str, Path], rows: Iterable[Row], *, batch: int = 500) -> int:
+_NCOLS = 9  # uuid, project, ts, content, sender, tools, thinking, attachments, parent_uuid
+
+
+def _pad(row: tuple) -> RowFull:
+    """Normalizza una riga alla forma piena. Accetta ancora le righe a 4 campi
+    (uuid, project, ts, content): gli estrattori esterni non si rompono."""
+    return tuple(row) + ("",) * (_NCOLS - len(row))  # type: ignore[return-value]
+
+
+def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int = 500) -> int:
     """Scrive/aggiorna le righe in db_path e ricostruisce l'FTS. Ritorna #righe.
 
     Riusabile da qualunque estrattore (server-side o locale). `rows` è un
     iterabile/generatore → streaming, memoria costante.
+
+    Accetta righe a 4 campi (forma storica) o a 8 (forma piena, con
+    sender/tools/thinking/attachments): le prime vengono completate con stringhe
+    vuote, così un estrattore di terze parti continua a funzionare.
     """
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
         conn.executescript(_SCHEMA)
+        _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
         n = 0
-        buf: list[Row] = []
+        buf: list[RowFull] = []
 
         def flush() -> None:
             if buf:
                 conn.executemany(
-                    "INSERT OR REPLACE INTO messages(uuid, project, ts, content) "
-                    "VALUES (?,?,?,?)", buf,
+                    "INSERT OR REPLACE INTO messages"
+                    "(uuid, project, ts, content, sender, tools, thinking, attachments,"
+                    " parent_uuid) VALUES (?,?,?,?,?,?,?,?,?)", buf,
                 )
                 buf.clear()
 
         for row in rows:
-            buf.append(row)
+            buf.append(_pad(row))
             n += 1
             if len(buf) >= batch:
                 flush()
@@ -90,6 +131,45 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[Row], *, batch: int = 5
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
         conn.commit()
         return n
+    finally:
+        conn.close()
+
+
+def _ensure_v2(conn: sqlite3.Connection) -> bool:
+    """Porta un DB v1 (4 colonne) allo schema v2, in modo idempotente.
+
+    Ritorna True se ha migrato. L'FTS viene ricostruita comunque a fine ingest
+    (`'rebuild'`), quindi qui basta aggiungere le colonne e rifare la tabella FTS
+    se ha ancora la forma vecchia.
+    """
+    have = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+    missing = [c for c in ("sender", "tools", "thinking", "attachments", "parent_uuid")
+               if c not in have]
+    if not missing:
+        return False
+    for col in missing:
+        conn.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT DEFAULT ''")
+    # l'FTS external-content deve rispecchiare le colonne indicizzate: si rifà.
+    conn.execute("DROP TABLE IF EXISTS messages_fts")
+    conn.executescript(_SCHEMA)
+    return True
+
+
+def migrate_v1_to_v2(db_path: Union[str, Path]) -> bool:
+    """Migra un DB esistente allo schema v2 (colonne nuove + FTS ricostruita).
+
+    Idempotente: su un DB già v2 non fa nulla e ritorna False. NON re-indicizza le
+    fonti: i messaggi già presenti restano com'erano (tools/thinking vuoti). Per
+    popolarli va ri-eseguito l'ingest sulla fonte originale — che è idempotente per
+    `uuid` (INSERT OR REPLACE), quindi non duplica.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        migrated = _ensure_v2(conn)
+        if migrated:
+            conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+            conn.commit()
+        return migrated
     finally:
         conn.close()
 
@@ -154,26 +234,86 @@ def find_db(db_dir: Union[str, Path], name: str) -> Union[Path, None]:
 
 # ── helper testo ─────────────────────────────────────────────────────────────
 
-def extract_text(content: object) -> str:
-    """Testo leggibile da un campo `content` (stringa, lista di blocchi o dict).
+class Blocks(NamedTuple):
+    """I pezzi di un messaggio, separati invece che buttati."""
+    text: str       # il parlato
+    tools: str      # tool_use + tool_result — LE AZIONI
+    thinking: str   # il ragionamento dell'assistente
 
-    stringa → così com'è. lista (blocchi Claude) → si prendono i `text`; il
-    resto (thinking/tool_use/tool_result) è rumore per la ricerca e si scarta.
+
+def _tool_line(b: dict) -> str:
+    """Un blocco tool_use/tool_result reso una riga cercabile.
+
+    `tool_use`  → "«Read» {\"file_path\": \"lib/main.dart\"}"  ← il dato che conta
+    `tool_result` → il testo del risultato (può essere str o lista di blocchi)
+    """
+    kind = b.get("type")
+    if kind == "tool_use":
+        name = str(b.get("name") or "tool")
+        inp = b.get("input")
+        arg = inp if isinstance(inp, str) else json.dumps(inp, ensure_ascii=False) if inp else ""
+        return f"{name} {arg}".strip()
+    if kind == "tool_result":
+        c = b.get("content")
+        if isinstance(c, str):
+            return c.strip()
+        if isinstance(c, list):
+            return "\n".join(
+                str(x.get("text", "")) for x in c
+                if isinstance(x, dict) and x.get("text")).strip()
+        return json.dumps(c, ensure_ascii=False) if c else ""
+    return ""
+
+
+def extract_blocks(content: object) -> Blocks:
+    """Scompone un campo `content` (stringa, lista di blocchi, dict) nei suoi pezzi.
+
+    Sostituisce la vecchia `extract_text`, che teneva SOLO i blocchi `type=="text"`
+    e scartava il resto come «rumore per la ricerca». Su un export claude.ai reale
+    (13.723 messaggi) quel «rumore» era: 9.634 `tool_use`, 9.610 `tool_result`,
+    9.402 `thinking` — e il campo `content` nel suo insieme vale **2,6× il campo
+    `text`**. I `tool_use` sono le AZIONI: il file aperto, il comando lanciato. Sono
+    il contenuto informativo del messaggio, non il suo rumore.
+
     dict → forma annidata delle design chats claude.ai ({"role", "content"}):
     si scende in `content`/`text` (ricorsivo — l'interno può essere str o lista).
     """
     if isinstance(content, str):
-        return content.strip()
+        return Blocks(content.strip(), "", "")
     if isinstance(content, list):
-        parts = [str(b["text"]) for b in content
-                 if isinstance(b, dict) and b.get("type") == "text" and b.get("text")]
-        return "\n".join(parts).strip()
+        texts: list[str] = []
+        tools: list[str] = []
+        thinks: list[str] = []
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            kind = b.get("type")
+            if kind == "text" and b.get("text"):
+                texts.append(str(b["text"]))
+            elif kind in ("tool_use", "tool_result"):
+                line = _tool_line(b)
+                if line:
+                    tools.append(line)
+            elif kind == "thinking" and b.get("thinking"):
+                thinks.append(str(b["thinking"]))
+        return Blocks("\n".join(texts).strip(),
+                      "\n".join(tools).strip(),
+                      "\n".join(thinks).strip())
     if isinstance(content, dict):
         inner = content.get("content")
         if inner is None:
             inner = content.get("text")
-        return extract_text(inner) if inner is not None else ""
-    return ""
+        return extract_blocks(inner) if inner is not None else Blocks("", "", "")
+    return Blocks("", "", "")
+
+
+def extract_text(content: object) -> str:
+    """Solo il parlato. Wrapper retrocompatibile su `extract_blocks`.
+
+    Resta per gli estrattori che vogliono il vecchio comportamento (e per i test
+    storici). Chi indicizza dovrebbe usare `extract_blocks`, che non perde le azioni.
+    """
+    return extract_blocks(content).text
 
 
 def _uid(*parts: str) -> str:
@@ -186,7 +326,7 @@ def _uid(*parts: str) -> str:
 _CC_TYPES = ("user", "assistant")
 
 
-def _iter_claude_code(fh: IO[str], project: str) -> Iterator[Row]:
+def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
     for line in fh:
         line = line.strip()
         if not line:
@@ -200,16 +340,115 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[Row]:
         uuid, ts = d.get("uuid"), d.get("timestamp")
         if not uuid or not ts:
             continue
-        text = extract_text((d.get("message") or {}).get("content"))
-        if not text:
+        msg = d.get("message") or {}
+        blocks = extract_blocks(msg.get("content"))
+        # PRIMA: `if not text: continue` — un messaggio fatto di soli tool_use (una
+        # sessione agentica ne è piena) spariva senza lasciare traccia. Ora basta che
+        # abbia UN contenuto qualsiasi.
+        if not (blocks.text or blocks.tools or blocks.thinking):
             continue
         proj = project or Path(str(d.get("cwd") or "unknown")).name or "unknown"
-        yield (uuid, proj, ts, text)
+        yield (uuid, proj, ts, blocks.text, str(msg.get("role") or d.get("type") or ""),
+               blocks.tools, blocks.thinking, "", str(d.get("parentUuid") or ""))
 
 
 # ── estrattore: export account claude.ai (.zip) ──────────────────────────────
 
-def _iter_conversations(convs: list, fallback: str) -> Iterator[Row]:
+def _attachment_names(m: dict) -> str:
+    """Nomi dei file allegati a un messaggio, cercabili. Su un export reale sono
+    1.520 i messaggi con allegati: oggi non se ne salva nessuno, e «quale file mi
+    aveva mandato?» è una domanda senza risposta.
+
+    Fallback sul `file_uuid`: 80 allegati hanno `file_name: null` ma un uuid valido.
+    Meglio un id cercabile che un allegato invisibile.
+    """
+    out: list[str] = []
+    for key in ("attachments", "files"):
+        for a in (m.get(key) or []):
+            if isinstance(a, dict):
+                n = (a.get("file_name") or a.get("name") or a.get("file_type")
+                     or a.get("file_uuid") or "")
+                if n:
+                    out.append(str(n))
+            elif isinstance(a, str):
+                out.append(a)
+    return "\n".join(out)
+
+
+def _iter_memories(data: object) -> Iterator[RowFull]:
+    """`memories.json` dell'export claude.ai — la MEMORIA PERSISTENTE dell'account.
+
+    Contiene `conversations_memory` (ciò che l'assistente "sa" dell'utente e porta in
+    OGNI conversazione) e `project_memories` (una per Project). Oggi non viene
+    indicizzato affatto: l'archivio non contiene la fonte che più di ogni altra
+    determina cosa l'assistente crede dell'utente.
+
+    Perché conta: è testo scritto DA un assistente SU una persona, senza citazioni e
+    senza fonti. È esattamente il tipo di materiale che, riletto mesi dopo da un'altra
+    sessione, diventa indistinguibile da una dichiarazione di prima persona.
+    Indicizzarlo lo rende almeno **interrogabile e confrontabile** con le fonti.
+    """
+    items = data if isinstance(data, list) else [data]
+    for acc in items:
+        if not isinstance(acc, dict):
+            continue
+        conv_mem = acc.get("conversations_memory")
+        if isinstance(conv_mem, str) and conv_mem.strip():
+            yield from _chunk_rows_full(conv_mem, "memory:conversations",
+                                        "", "memory-conversations", sender="memory")
+        # `project_memories` è una MAPPA {project_uuid: testo}, non una lista.
+        # (Su un export reale: 9 progetti, 74.404 caratteri — più di 7× la
+        # conversations_memory. Trattarla come lista ne perde il contenuto.)
+        pm = acc.get("project_memories")
+        entries: list[tuple[str, object]] = []
+        if isinstance(pm, dict):
+            entries = list(pm.items())
+        elif isinstance(pm, list):
+            entries = [(str(i), p) for i, p in enumerate(pm)]
+
+        for key, p in entries:
+            if isinstance(p, str):
+                body = p
+            elif isinstance(p, dict):
+                body = str(p.get("memory") or p.get("content") or p.get("text") or "")
+                key = str(p.get("name") or p.get("project_uuid") or key)
+            else:
+                continue
+            if body.strip():
+                label = f"memory:project:{key}"
+                yield from _chunk_rows_full(body, label, "", label, sender="memory")
+
+
+def _iter_users(data: object) -> Iterator[RowFull]:
+    """`users.json` — l'anagrafica dell'account (nome, email, telefono verificato).
+
+    Si indicizza come tutto il resto: **l'ingestione non filtra**. È un file che
+    l'utente ha scelto di caricare, e l'archivio deve contenerlo verbatim — al netto
+    della formattazione. La domanda «con che email è registrato l'account?» è
+    legittima, e oggi non ha risposta perché il file non c'è.
+
+    La protezione dei dati sensibili è un problema di **output**, non di ingresso, e
+    va risolta dove si legge (mascheramento in `search`, cifratura at-rest, ACL) —
+    non buttando il dato dove nessuno può più recuperarlo.
+    """
+    items = data if isinstance(data, list) else [data]
+    for u in items:
+        if not isinstance(u, dict):
+            continue
+        body = "\n".join(f"{k}: {v}" for k, v in u.items() if v not in (None, "", []))
+        if body.strip():
+            uid = str(u.get("uuid") or _uid("users", body[:64]))
+            yield (uid, "account:user", "", body, "account", "", "", "", "")
+
+
+def _chunk_rows_full(text: str, name: str, ts: str, key: str, *,
+                     sender: str = "", chunk_chars: int = 1500) -> Iterator[RowFull]:
+    """Come `_chunk_rows`, ma emette righe nella forma piena (con `sender`)."""
+    for uuid, proj, t, content in _chunk_rows(text, name, ts, key, chunk_chars=chunk_chars):
+        yield (uuid, proj, t, content, sender, "", "", "", "")
+
+
+def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
     if not isinstance(convs, list):
         convs = [convs]
     for c in convs:
@@ -220,20 +459,58 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[Row]:
             if not isinstance(m, dict):
                 continue
             uuid = m.get("uuid")
-            text = m.get("text") or extract_text(m.get("content"))
-            if not uuid or not text:
+            if not uuid:
+                continue
+            # PRIMA: `m.get("text") or extract_text(m.get("content"))`.
+            # Nell'export claude.ai `text` è SEMPRE valorizzato (misurato: 0 messaggi
+            # con text vuoto e content pieno) → il ramo destro dell'`or` non si
+            # eseguiva MAI, e il campo `content` — che vale 2,6× `text` e contiene
+            # tool_use/tool_result/thinking — non veniva letto nemmeno una volta.
+            blocks = extract_blocks(m.get("content"))
+            text = blocks.text or (m.get("text") or "")
+            attach = _attachment_names(m)
+            if not (text or blocks.tools or blocks.thinking or attach):
                 continue
             sender = m.get("sender") or m.get("role") or ""
-            content = f"[{sender}] {text}" if sender else text
-            yield (uuid, name, m.get("created_at") or "", content)
+            content = f"[{sender}] {text}" if sender and text else text
+            yield (uuid, name, m.get("created_at") or "", content, str(sender),
+                   blocks.tools, blocks.thinking, attach,
+                   str(m.get("parent_message_uuid") or ""))
 
 
-def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[Row]:
+def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[RowFull]:
     with zipfile.ZipFile(zip_path) as z:
         names = z.namelist()
         if "conversations.json" in names:
             with z.open("conversations.json") as f:
                 yield from _iter_conversations(json.load(f), "claude-conversations")
+        # memories.json — la memoria persistente dell'account. Non veniva indicizzata:
+        # l'archivio non conteneva la fonte che più di ogni altra determina cosa
+        # l'assistente crede dell'utente.
+        if "memories.json" in names:
+            with z.open("memories.json") as f:
+                try:
+                    yield from _iter_memories(json.load(f))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass
+        # users.json — anagrafica dell'account (nome, email, telefono verificato).
+        #
+        # SI INDICIZZA. L'ingestione non filtra: se l'utente carica un file,
+        # l'archivio deve contenerlo verbatim. Decidere qui che un dato è "troppo
+        # sensibile" è la stessa mossa che faceva `extract_text` scartando i tool_use
+        # perché "rumore": una policy di OUTPUT applicata all'INGRESSO, dove nessuno
+        # la può più rivedere. Chi carica sa cosa carica.
+        #
+        # Il posto giusto per la protezione è a valle (ricerca/risposta) e non esiste
+        # ancora: vedi la issue di design sui contenuti sensibili. Finché non c'è,
+        # l'archivio va trattato come un contenitore di dati personali — perché lo è,
+        # con o senza questo file.
+        if "users.json" in names:
+            with z.open("users.json") as f:
+                try:
+                    yield from _iter_users(json.load(f))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass
         for n in names:
             if n.startswith("design_chats/") and n.endswith(".json"):
                 with z.open(n) as f:
