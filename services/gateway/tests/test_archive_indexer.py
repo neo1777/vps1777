@@ -520,7 +520,8 @@ def test_v2_migrazione_da_db_v1(tmp_path: Path) -> None:
     """)
     conn.execute("INSERT INTO messages VALUES ('x1','p','2026-01-01','vecchio messaggio')")
     conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     assert archive_indexer.migrate_v1_to_v2(db) is True
     assert archive_indexer.migrate_v1_to_v2(db) is False      # idempotente

@@ -5,6 +5,35 @@ corpora: chat, sessioni, note, documenti. **Nasce vuoto**: lo popoli tu, dal
 pannello admin o da riga di comando. I DB caricati sono cercabili **subito**,
 senza riavvii, via i tool MCP `search` e `list_databases`.
 
+## Dati sensibili e privacy — leggi prima di caricare
+
+L'archivio indicizza **tutto ciò che carichi, verbatim** (il filtro sta a valle,
+non all'ingest: un ingestore che scarta metà del file mente su cosa contiene).
+Le tue chat e sessioni contengono, di fatto, **dati personali e segreti**: email,
+numeri di telefono, e — capita — **credenziali, chiavi SSH, IP e token incollati
+durante il lavoro**. Dalla v0.20.0 viene indicizzato anche il **contenuto pieno**
+dei messaggi (le *azioni*: comandi lanciati, file aperti, output di tool), quindi
+anche quei segreti diventano **cercabili**. È corretto — li hai caricati tu — ma
+va saputo.
+
+**La protezione, oggi, è l'ACCESSO — non la redazione.** L'archivio è raggiungibile
+solo attraverso il gateway (**OAuth 2.1 + path-secret**) ed è **owner-only**: chi
+non ha i token MCP non entra. Non c'è cifratura del contenuto né mascheramento
+dei segreti in output: **chiunque abbia accesso all'archivio trova tutto con una
+query.**
+
+**La regola pratica** (finché l'archivio resta tuo e dei modelli a cui dai *tu* il
+connettore, questa è una scelta difendibile):
+
+- Non caricare nell'archivio materiale che non vuoi ritrovare cercabile in chiaro.
+- Se prepari un export **da condividere o pubblicare**, ripuliscilo *prima* di
+  caricarlo — l'archivio non lo farà per te.
+- Il giorno in cui l'archivio dovesse essere **condiviso, esposto o dato in pasto
+  a un modello di terzi**, servirà prima una strategia di redazione o cifratura
+  (mascheramento in output, o marcatura `sensitive` con esclusione di default):
+  **è una decisione da prendere prima di crescere l'archivio in quella direzione,
+  non dopo.**
+
 ## Popolare dall'admin — `/admin/archive`
 
 Pannello admin → tab **Archive**. Carichi una fonte, viene indicizzata in un DB
