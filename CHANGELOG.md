@@ -2,6 +2,27 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.29.0] — 2026-07-14
+
+### Hardening segreti/host — segreti fuori dall'argv (deploy) e docker.sock fuori dal backup
+
+Due finding dell'area 04 chiusi; il terzo (H6) è documentato come residuo che richiede una sessione con l'owner (vedi sotto).
+
+**H7 — segreti nell'argv dei comandi remoti (`deploy.sh`), alto.** Durante il deploy i segreti (tailscale authkey, bot token, password admin) finivano nell'argv di comandi remoti, visibili via `ps` a ogni utente locale della VPS:
+
+- Lo script di setup, prima passato come argomento di `bash -lc` (l'intero testo coi segreti in argv), ora viaggia nello **STDIN di `bash -s`** (canale SSH cifrato) — sia nel deploy iniziale sia in `--apply`.
+- `set_kv` riscritto con soli **builtin** (`printf`-redirect): il valore non finisce più nell'argv di `sed`/`echo`.
+- L'hash bcrypt della password legge il valore da **stdin**, non da `sys.argv`.
+- `tailscale up` usa **`--authkey=file:`** (chiave via stdin → file temporaneo 600 → letta dal file, poi rimossa) invece di `--authkey=<segreto>` in argv.
+- Verificato: le tecniche (bash -s, set_kv builtin idempotente, bcrypt-da-stdin, authkey stdin→file 600) testate in isolamento sulla VPS. Il flusso completo `deploy.sh --apply` non è stato eseguito contro la produzione (riconfigura l'intero stack) — verificato per lettura + test delle tecniche.
+
+**H13 — `docker.sock` nel container di backup, medio-alto.** Il container `ops.backup` montava `/var/run/docker.sock:rw` (controllo root-equivalente dell'host) per dumpare i volumi via `docker run`:
+
+- Rimosso il mount di `docker.sock` **e** l'installazione di `docker-cli`. I volumi dati sono ora montati **direttamente in sola lettura** (`/volumes/<nome>`) e `backup.sh` li tara da lì (`BACKUP_VOLUMES_DIR`). `backup.sh` resta dual-context: sull'host usa `docker run` come prima; nel container usa i mount diretti.
+- Verificato: un backup one-shot contro i volumi reali di produzione, **senza docker.sock**, ha prodotto un `.tar.age` valido (95,8 MB coi 3 volumi + config + secrets).
+
+**H6 — il gateway monta rw i cookie Google (`nlm-auth`), alto — RESIDUO documentato.** `/admin/nlm` scrive il profilo NotebookLM caricato direttamente nel volume, quindi il gateway (l'unico servizio esposto) ha accesso in scrittura ai cookie di sessione Google. Il fix corretto — un endpoint interno su `nb1777-mcp` che riceve l'upload e possiede lui i cookie, con il gateway ad accesso-zero — è un cambio d'architettura su un flusso core (il login NotebookLM) che non è verificabile end-to-end senza la sessione Google dell'owner. Rinviato a una sessione con l'owner per non spedire non verificato. Nota: rendere il mount `:ro` non basterebbe (il gateway deve comunque *leggere* la dir per lo stato → la lettura già espone i cookie); serve l'accesso-zero.
+
 ## [0.28.0] — 2026-07-14
 
 ### Hardening rete — `forwarded_allow_ips` ristretto (IP client non più spoofabile)

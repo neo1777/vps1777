@@ -21,10 +21,19 @@ services:
     environment:
       TZ: ${TZ:-UTC}
       BACKUP_DIR: /backups
+      BACKUP_VOLUMES_DIR: /volumes   # backup.sh tara da qui → niente docker.sock
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:rw  # serve per `docker run` dump volumi
-      - ${PWD}:/vps1777:rw                              # repo intero (per chiamare tools/backup.sh)
+      # NIENTE docker.sock (finding 2.8/H13): montare il socket dà al container
+      # il controllo root-equivalente dell'host. I volumi dati sono invece
+      # montati DIRETTAMENTE in sola lettura e backup.sh li tara da /volumes.
+      - ${PWD}:/vps1777:rw                       # repo (tools/backup.sh + recipient age)
       - ./backups:/backups:rw
+      - gateway-data:/volumes/gateway-data:ro
+      - archive-data:/volumes/archive-data:ro
+      - nlm-auth:/volumes/nlm-auth:ro
+      # Col profilo ingress.caddy esistono anche questi — decommentali per includerli:
+      #- caddy-data:/volumes/caddy-data:ro
+      #- caddy-config:/volumes/caddy-config:ro
       # NIENTE mount della chiave privata age: il backup CIFRA con la sola chiave
       # pubblica (recipient in tools/age-recipients.txt). La privata vive sul PC
       # dell'owner e serve solo al restore — non deve stare sulla VPS.
@@ -33,5 +42,5 @@ services:
       interval: 60s
       timeout: 5s
       retries: 3
-    # NB: backup-container-setup.sh installa age + docker-cli + crea cron entry
-    # e poi exec crond in foreground.
+    # NB: backup-container-setup.sh installa age (NON docker-cli: i volumi sono
+    # montati direttamente) + crea la cron entry e poi exec crond in foreground.

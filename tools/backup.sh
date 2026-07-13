@@ -40,9 +40,14 @@ warn() { printf '%s[!]%s %s\n' "$C_W"  "$C_R" "$*"; }
 die()  { printf '%s[✗]%s %s\n' "$C_E"  "$C_R" "$*" >&2; exit 1; }
 
 # ───── prerequisiti ─────
-command -v docker >/dev/null || die "docker non trovato"
+# docker serve SOLO nel contesto host (dump via `docker run`). Nel container
+# backup i volumi sono montati direttamente (BACKUP_VOLUMES_DIR) e docker NON
+# serve — così il container non monta più docker.sock (finding 2.8/H13).
 command -v age    >/dev/null || die "age non installato (apt install age)"
 command -v tar    >/dev/null || die "tar non trovato"
+if [ -z "${BACKUP_VOLUMES_DIR:-}" ]; then
+  command -v docker >/dev/null || die "docker non trovato (né BACKUP_VOLUMES_DIR impostato)"
+fi
 
 # ───── recipients ─────
 # NIENTE auto-keygen sulla VPS: generare la chiave qui metterebbe la PRIVATA
@@ -61,18 +66,31 @@ Restore: porti la chiave privata dal PC e decifri (vedi docs/BACKUP-RESTORE.md).
 fi
 
 # ───── 1. dump volumi ─────
-log "Dump volumi Docker..."
 mkdir -p "$TMP/volumes"
-VOLUMES=$(docker volume ls -q | grep -E '^vps1777_(gateway-data|archive-data|nlm-auth|tailscale-state|caddy-data|caddy-config)$' || true)
-for vol in $VOLUMES; do
-  log "  → $vol"
-  docker run --rm \
-    -v "$vol:/src:ro" \
-    -v "$TMP/volumes:/dst" \
-    --entrypoint sh \
-    busybox:latest \
-    -c "cd /src && tar cf /dst/${vol}.tar ." 2>/dev/null || warn "    dump $vol fallito (volume vuoto?)"
-done
+if [ -n "${BACKUP_VOLUMES_DIR:-}" ] && [ -d "$BACKUP_VOLUMES_DIR" ]; then
+  # Contesto CONTAINER: i volumi sono montati (ro) sotto $BACKUP_VOLUMES_DIR →
+  # tar diretto, NIENTE docker.sock (H13). Un sottodir = un volume.
+  log "Dump volumi (mount diretti, no docker.sock)..."
+  for src in "$BACKUP_VOLUMES_DIR"/*/; do
+    [ -d "$src" ] || continue
+    name=$(basename "$src")
+    log "  → $name"
+    tar -C "$src" -cf "$TMP/volumes/vps1777_${name}.tar" . 2>/dev/null || warn "    dump $name fallito (vuoto?)"
+  done
+else
+  # Contesto HOST: docker disponibile → dump via `docker run` (volume ro).
+  log "Dump volumi Docker..."
+  VOLUMES=$(docker volume ls -q | grep -E '^vps1777_(gateway-data|archive-data|nlm-auth|tailscale-state|caddy-data|caddy-config)$' || true)
+  for vol in $VOLUMES; do
+    log "  → $vol"
+    docker run --rm \
+      -v "$vol:/src:ro" \
+      -v "$TMP/volumes:/dst" \
+      --entrypoint sh \
+      busybox:latest \
+      -c "cd /src && tar cf /dst/${vol}.tar ." 2>/dev/null || warn "    dump $vol fallito (volume vuoto?)"
+  done
+fi
 ok "Volumi dumpati"
 
 # ───── 2. config + secrets ─────
@@ -95,7 +113,7 @@ ok "Config + secrets archiviati"
   echo "bundle: $(tr -d '[:space:]' < VERSION 2>/dev/null || echo '?')"
   echo "git: $(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo 'no-git')"
   echo "host: $(hostname)"
-  echo "docker: $(docker --version)"
+  echo "docker: $(command -v docker >/dev/null && docker --version || echo 'n/d (contesto container)')"
 } > "$TMP/MANIFEST.txt"
 
 # ───── 4. tar + age ─────
