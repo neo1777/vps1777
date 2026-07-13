@@ -66,8 +66,9 @@ def test_is_owner():
     assert miniapp_core.is_owner(774881727, 774881727) is True
     assert miniapp_core.is_owner("999", 774881727) is False
     assert miniapp_core.is_owner("abc", 774881727) is False
-    # owner_id non configurato (0) → nessun filtro
-    assert miniapp_core.is_owner("qualunque", 0) is True
+    # owner_id non configurato (0) → FAIL-CLOSED: nessuno è owner (prima era True!)
+    assert miniapp_core.is_owner("qualunque", 0) is False
+    assert miniapp_core.is_owner(774881727, 0) is False
 
 
 # ───── parsing MCP ─────

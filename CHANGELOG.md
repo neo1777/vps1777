@@ -2,6 +2,20 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.22.0] — 2026-07-13
+
+### Hardening lotto 2 — owner-gating fail-closed (il 1° dei due CRITICI)
+
+`is_owner` con `owner_id` non configurato (`0`, o coerzione silenziosa di un valore malformato nel `.env`) ritornava **True** ("nessun filtro"): un `TELEGRAM_OWNER_ID` vuoto o storto in produzione avrebbe aperto **bot e Mini App a QUALUNQUE utente Telegram** con `initData` valida — accesso al pannello completo (URL MCP col gateway secret, RAG, archivio, audit, trigger update).
+
+- **`is_owner` ora fail-closed**: `owner_id==0` → nessuno è owner. Se non sappiamo chi è l'owner, non lo è nessuno.
+- **Mini App `/app/auth`**: `503 owner_not_configured` quando l'owner manca — errore chiaro invece di aprirsi a tutti.
+- **Bot `owner_only` fail-closed**: `if owner_id and …` corto-circuitava su `0` e rispondeva a chiunque; ora senza owner nega a tutti.
+- **Menu button della Mini App per-chat** (`chat_id=owner`): era impostato globale → visibile a ogni utente del bot.
+- **Warning all'avvio** del gateway se l'owner è assente; messaggio di `setup.sh` corretto (bot **e** Mini App negati finché non impostato).
+
+Findings: area 02 (2.1 CRITICO, 2.2). Verificato che `TELEGRAM_OWNER_ID` è impostato in produzione → **zero impatto sull'accesso dell'owner**.
+
 ## [0.21.0] — 2026-07-13
 
 ### Hardening lotto 1 — quick-wins auth/gateway (dalla review difensiva)

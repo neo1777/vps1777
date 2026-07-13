@@ -49,7 +49,11 @@ def owner_only(
     async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         s = get_settings()
         user_id = update.effective_user.id if update.effective_user else 0
-        if s.telegram_owner_id and user_id != s.telegram_owner_id:
+        # FAIL-CLOSED: senza owner configurato (owner_id==0) si NEGA a tutti, non
+        # si apre a tutti. Prima `if owner_id and ...` corto-circuitava su 0 →
+        # il bot rispondeva a chiunque. Un bot owner-only senza owner non deve
+        # funzionare per nessuno finché TELEGRAM_OWNER_ID non è impostato.
+        if not s.telegram_owner_id or user_id != s.telegram_owner_id:
             if update.effective_message:
                 await update.effective_message.reply_text("Bot privato.")
             return
@@ -275,13 +279,17 @@ async def _install_menu_button(app: Application) -> None:
     campo di testo). Best-effort: se il gateway non è https o Telegram rifiuta,
     logga e prosegue — il comando /pannello resta comunque disponibile."""
     url = _miniapp_url()
-    if not url:
+    owner = get_settings().telegram_owner_id
+    if not url or not owner:
         return
     try:
+        # chat_id=owner: il bottone-menu della Mini App va SOLO all'owner. Senza
+        # chat_id era il default globale → visibile a qualunque utente del bot.
         await app.bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="Pannello", web_app=WebAppInfo(url=url))
+            chat_id=owner,
+            menu_button=MenuButtonWebApp(text="Pannello", web_app=WebAppInfo(url=url)),
         )
-        log.info("menu button Mini App impostato → %s", url)
+        log.info("menu button Mini App impostato per l'owner → %s", url)
     except Exception as exc:  # noqa: BLE001 — cosmetico, non deve bloccare l'avvio
         log.warning("set_chat_menu_button fallito: %s", exc)
 

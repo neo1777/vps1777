@@ -106,6 +106,11 @@ async def miniapp_auth(request: Request) -> Response:
     user_id = str(user.get("id", "0"))
     if user_id == "0":
         return JSONResponse({"error": "no_user_id"}, status_code=400)
+    if not s.telegram_owner_id:
+        # fail-closed: senza owner configurato NON si emette alcun token, o la
+        # Mini App si aprirebbe a chiunque abbia initData valida. Errore chiaro.
+        audit({"event": "miniapp_auth_no_owner"})
+        return JSONResponse({"error": "owner_not_configured"}, status_code=503)
     if not is_owner(user_id, s.telegram_owner_id):
         # difesa in profondità: il bot mostra il bottone solo all'owner, ma qui
         # non ci si fida del client — un initData valido di un altro utente non

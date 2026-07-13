@@ -55,10 +55,16 @@ def verify_init_data(
 
 
 def is_owner(user_id: object, owner_id: int) -> bool:
-    """True se l'utente è l'owner. owner_id==0 → non configurato → nessun filtro
-    (coerente col bot: `if s.telegram_owner_id and ...`)."""
+    """True SOLO se l'utente è l'owner configurato.
+
+    FAIL-CLOSED: owner_id==0 (non configurato, o coerzione silenziosa di un
+    valore malformato nel .env) → False. Se non sappiamo chi è l'owner, nessuno
+    lo è. Prima ritornava True ("nessun filtro"): un OWNER_ID vuoto o storto in
+    produzione apriva bot e Mini App a QUALUNQUE utente Telegram con initData
+    valida. Il gate chiamante deve distinguere il caso "non configurato" per dare
+    un errore chiaro (503) invece di un generico 403."""
     if not owner_id:
-        return True
+        return False
     try:
         return int(user_id) == int(owner_id)  # type: ignore[arg-type]
     except (ValueError, TypeError):

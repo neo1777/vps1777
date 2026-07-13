@@ -81,7 +81,7 @@ else
   ask ADMIN_EMAIL "Email admin OAuth (il TUO Gmail)" ""
   [ -z "$ADMIN_EMAIL" ] && die "Email admin obbligatoria"
   ask TG_OWNER_ID "TELEGRAM_OWNER_ID (numerico, da @userinfobot)" ""
-  [ -z "$TG_OWNER_ID" ] && warn "OWNER_ID vuoto — il bot Telegram non risponderà. Imposterai dopo."
+  [ -z "$TG_OWNER_ID" ] && warn "OWNER_ID vuoto — bot Telegram E Mini App NEGATI a tutti (fail-closed) finché non lo imposti. Nessuno può entrare, nemmeno tu: configuralo appena hai l'ID."
 
   echo
   log "Scegli ingress:"
