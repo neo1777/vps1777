@@ -419,6 +419,28 @@ def _iter_memories(data: object) -> Iterator[RowFull]:
                 yield from _chunk_rows_full(body, label, "", label, sender="memory")
 
 
+def _iter_users(data: object) -> Iterator[RowFull]:
+    """`users.json` — l'anagrafica dell'account (nome, email, telefono verificato).
+
+    Si indicizza come tutto il resto: **l'ingestione non filtra**. È un file che
+    l'utente ha scelto di caricare, e l'archivio deve contenerlo verbatim — al netto
+    della formattazione. La domanda «con che email è registrato l'account?» è
+    legittima, e oggi non ha risposta perché il file non c'è.
+
+    La protezione dei dati sensibili è un problema di **output**, non di ingresso, e
+    va risolta dove si legge (mascheramento in `search`, cifratura at-rest, ACL) —
+    non buttando il dato dove nessuno può più recuperarlo.
+    """
+    items = data if isinstance(data, list) else [data]
+    for u in items:
+        if not isinstance(u, dict):
+            continue
+        body = "\n".join(f"{k}: {v}" for k, v in u.items() if v not in (None, "", []))
+        if body.strip():
+            uid = str(u.get("uuid") or _uid("users", body[:64]))
+            yield (uid, "account:user", "", body, "account", "", "", "", "")
+
+
 def _chunk_rows_full(text: str, name: str, ts: str, key: str, *,
                      sender: str = "", chunk_chars: int = 1500) -> Iterator[RowFull]:
     """Come `_chunk_rows`, ma emette righe nella forma piena (con `sender`)."""
@@ -464,12 +486,29 @@ def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[RowFull]:
                 yield from _iter_conversations(json.load(f), "claude-conversations")
         # memories.json — la memoria persistente dell'account. Non veniva indicizzata:
         # l'archivio non conteneva la fonte che più di ogni altra determina cosa
-        # l'assistente crede dell'utente. NOTA: `users.json` NON si indicizza — contiene
-        # dati personali (email, telefono verificato) e nessun contenuto cercabile.
+        # l'assistente crede dell'utente.
         if "memories.json" in names:
             with z.open("memories.json") as f:
                 try:
                     yield from _iter_memories(json.load(f))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    pass
+        # users.json — anagrafica dell'account (nome, email, telefono verificato).
+        #
+        # SI INDICIZZA. L'ingestione non filtra: se l'utente carica un file,
+        # l'archivio deve contenerlo verbatim. Decidere qui che un dato è "troppo
+        # sensibile" è la stessa mossa che faceva `extract_text` scartando i tool_use
+        # perché "rumore": una policy di OUTPUT applicata all'INGRESSO, dove nessuno
+        # la può più rivedere. Chi carica sa cosa carica.
+        #
+        # Il posto giusto per la protezione è a valle (ricerca/risposta) e non esiste
+        # ancora: vedi la issue di design sui contenuti sensibili. Finché non c'è,
+        # l'archivio va trattato come un contenitore di dati personali — perché lo è,
+        # con o senza questo file.
+        if "users.json" in names:
+            with z.open("users.json") as f:
+                try:
+                    yield from _iter_users(json.load(f))
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     pass
         for n in names:

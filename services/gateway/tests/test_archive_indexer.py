@@ -598,16 +598,28 @@ def test_v2_memories_indicizzate(tmp_path: Path) -> None:
         conn.close()
 
 
-def test_v2_users_json_non_indicizzato(tmp_path: Path) -> None:
-    """`users.json` contiene dati personali (email, telefono verificato) e nessun
-    contenuto cercabile: non deve finire nell'archivio."""
+def test_v2_users_json_indicizzato_lupload_non_filtra(tmp_path: Path) -> None:
+    """`users.json` (anagrafica: nome, email, telefono) SI indicizza.
+
+    L'ingestione non filtra: se l'utente carica un file, l'archivio lo contiene
+    verbatim. Decidere all'INGRESSO che un dato è "troppo sensibile" è la stessa
+    mossa che faceva `extract_text` scartando i tool_use perché "rumore" — una
+    policy di output applicata dove nessuno la può più rivedere.
+
+    La protezione dei dati sensibili è un problema di OUTPUT (mascheramento in
+    ricerca, cifratura at-rest, ACL) e va risolta dove si legge.
+    """
     db = tmp_path / "m.db"
     archive_indexer.index_file(str(_claude_zip_memories(tmp_path)), str(db))
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
-        rows = conn.execute(
+        (n,) = conn.execute(
             "SELECT count(*) FROM messages WHERE content LIKE '%x@y.z%'").fetchone()
-        assert rows[0] == 0
+        assert n == 1                                   # c'è, verbatim
+        rows = conn.execute(
+            "SELECT project FROM messages_fts WHERE messages_fts MATCH ?",
+            ("neo1777",)).fetchall()
+        assert any(r[0] == "account:user" for r in rows)  # ed è cercabile
     finally:
         conn.close()
 
