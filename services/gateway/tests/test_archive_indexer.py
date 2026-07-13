@@ -543,3 +543,107 @@ def test_v2_righe_a_4_campi_ancora_accettate(tmp_path: Path) -> None:
     db = tmp_path / "compat.db"
     n = archive_indexer.write_rows(db, [("u1", "p", "2026-01-01", "ciao")])
     assert n == 1 and archive_indexer.count_rows(db) == 1
+
+
+# ── v2b: memories.json e parent_message_uuid (indagine di follow-up su #22) ──
+
+def _claude_zip_memories(tmp_path: Path) -> Path:
+    """Export con `memories.json`: la memoria persistente dell'account.
+    `project_memories` è una MAPPA {project_uuid: testo}, non una lista."""
+    import json
+    import zipfile
+    convs = [{"uuid": "c1", "name": "chat", "chat_messages": [
+        {"uuid": "m1", "sender": "human", "created_at": "2026-01-01T00:00:00Z",
+         "text": "primo", "content": [{"type": "text", "text": "primo"}],
+         "parent_message_uuid": None},
+        {"uuid": "m2", "sender": "assistant", "created_at": "2026-01-01T00:00:01Z",
+         "text": "secondo", "content": [{"type": "text", "text": "secondo"}],
+         "parent_message_uuid": "m1"},
+    ]}]
+    memories = [{
+        "account_uuid": "acc",
+        "conversations_memory": "Neo lavora principalmente in Dart e Flutter.",
+        "project_memories": {
+            "proj-uuid-1": "Il libro di game development è al capitolo 81.",
+            "proj-uuid-2": "vps1777 ospita archive1777 e nb1777.",
+        },
+    }]
+    p = tmp_path / "export.zip"
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+        z.writestr("memories.json", json.dumps(memories))
+        # users.json c'è nell'export reale ma NON va indicizzato (email, telefono)
+        z.writestr("users.json", json.dumps([{"full_name": "neo1777",
+                                              "email_address": "x@y.z"}]))
+    return p
+
+
+def test_v2_memories_indicizzate(tmp_path: Path) -> None:
+    """`memories.json` è la fonte che più di ogni altra determina cosa l'assistente
+    crede dell'utente — e non veniva indicizzata affatto."""
+    db = tmp_path / "m.db"
+    archive_indexer.index_file(str(_claude_zip_memories(tmp_path)), str(db))
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        labels = {r[0] for r in conn.execute(
+            "SELECT DISTINCT project FROM messages WHERE project LIKE 'memory:%'")}
+        assert "memory:conversations" in labels
+        assert "memory:project:proj-uuid-1" in labels   # la mappa, non una lista
+        assert "memory:project:proj-uuid-2" in labels
+        rows = conn.execute(
+            "SELECT project FROM messages_fts WHERE messages_fts MATCH ?",
+            ('"Dart e Flutter"',)).fetchall()
+        assert rows and rows[0][0] == "memory:conversations"
+    finally:
+        conn.close()
+
+
+def test_v2_users_json_non_indicizzato(tmp_path: Path) -> None:
+    """`users.json` contiene dati personali (email, telefono verificato) e nessun
+    contenuto cercabile: non deve finire nell'archivio."""
+    db = tmp_path / "m.db"
+    archive_indexer.index_file(str(_claude_zip_memories(tmp_path)), str(db))
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT count(*) FROM messages WHERE content LIKE '%x@y.z%'").fetchone()
+        assert rows[0] == 0
+    finally:
+        conn.close()
+
+
+def test_v2_parent_uuid_salvato(tmp_path: Path) -> None:
+    """L'albero della conversazione (rami, riscritture, ritorni indietro): 11.214
+    messaggi su 13.723 hanno un parent, e non se ne salvava nessuno."""
+    db = tmp_path / "m.db"
+    archive_indexer.index_file(str(_claude_zip_memories(tmp_path)), str(db))
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        (parent,) = conn.execute(
+            "SELECT parent_uuid FROM messages WHERE uuid='m2'").fetchone()
+        assert parent == "m1"
+    finally:
+        conn.close()
+
+
+def test_v2_allegato_senza_nome_usa_uuid(tmp_path: Path) -> None:
+    """80 allegati reali hanno `file_name: null` ma un `file_uuid` valido: meglio un
+    id cercabile che un allegato invisibile."""
+    import json
+    import zipfile
+    convs = [{"uuid": "c1", "name": "chat", "chat_messages": [
+        {"uuid": "m1", "sender": "human", "created_at": "2026-01-01T00:00:00Z",
+         "text": "ecco", "content": [{"type": "text", "text": "ecco"}],
+         "files": [{"file_uuid": "5cd72e4f-dead-beef", "file_name": None}]},
+    ]}]
+    p = tmp_path / "e.zip"
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    db = tmp_path / "a.db"
+    archive_indexer.index_file(str(p), str(db))
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        (att,) = conn.execute("SELECT attachments FROM messages WHERE uuid='m1'").fetchone()
+        assert "5cd72e4f-dead-beef" in att
+    finally:
+        conn.close()
