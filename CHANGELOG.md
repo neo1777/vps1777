@@ -2,6 +2,18 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.19.1] — 2026-07-13
+
+### Fix — `studio_rename` ora funziona (nb1777-mcp)
+
+Affrontando la issue #21 (che segnalava 4 comandi disallineati alla CLI `nlm`): verificando alla fonte, **tre erano già a posto** — la *source family* era stata allineata a `nlm` 0.7.x in un commit precedente, con i relativi contract test. L'unico ancora rotto era **`studio_rename`**, sfuggito perché il contract test copriva `source` ma non `studio`.
+
+- **`studio_rename`** passava `notebook_id` come argomento posizionale, ma `nlm studio rename` vuole `ARTIFACT_ID NEW_TITLE` (l'artifact id è globale, niente notebook — a differenza di `studio delete`, che invece lo richiede). L'id di troppo faceva slittare gli argomenti → *"unexpected extra argument"*, comando **inutilizzabile**. Ora `nb_id` resta nella firma MCP ma **non** si inoltra alla CLI.
+- **Contract test esteso a `studio`** (`rename`/`delete`): blocca proprio l'asimmetria che aveva ingannato il wrapper (rename senza notebook, delete con).
+- Validato con `nlm` reale sul VPS: 3 posizionali → errore di parsing; 2 posizionali → comando ben formato.
+
+Chiude #21.
+
 ## [0.19.0] — 2026-07-11
 
 ### archive-mcp: ricerca onesta, leggibile e potente

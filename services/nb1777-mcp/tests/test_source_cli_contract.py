@@ -102,3 +102,24 @@ def test_download_report_shape() -> None:
     assert "--output" in h, h
     assert "--id" in h, h
     assert "--no-progress" not in h, "download NON espone --no-progress in 0.7.7"
+
+
+# ── studio: la trappola rename-vs-delete ──
+# `studio delete` VUOLE il notebook (NOTEBOOK_ID ARTIFACT_ID); `studio rename` NO
+# (ARTIFACT_ID NEW_TITLE): l'artifact id è già globale. La CLI è incoerente fra i
+# due, e il wrapper le trattava uguali → studio_rename passava nb_id come
+# posizionale ed era inutilizzabile ("unexpected extra argument"). Questi due
+# test bloccano proprio quella asimmetria.
+
+def test_studio_rename_takes_no_notebook() -> None:
+    h = _help_of("studio", "rename")
+    assert "ARTIFACT_ID" in h, h
+    assert "NEW_TITLE" in h or "TITLE" in h, h
+    assert "NOTEBOOK_ID" not in h, "studio rename NON prende un NOTEBOOK_ID posizionale"
+    assert "--notebook" not in h, "studio rename NON richiede --notebook"
+
+
+def test_studio_delete_takes_notebook_positional() -> None:
+    h = _help_of("studio", "delete")
+    assert "NOTEBOOK_ID" in h, h
+    assert "ARTIFACT_ID" in h, h

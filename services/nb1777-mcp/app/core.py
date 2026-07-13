@@ -613,8 +613,13 @@ def studio_delete(nb_id: str, artifact_id: str) -> None:
     _run(["studio", "delete", nb_id, artifact_id, "--confirm"])
 
 
-def studio_rename(nb_id: str, artifact_id: str, new_title: str) -> None:
-    _run(["studio", "rename", nb_id, artifact_id, new_title])
+def studio_rename(nb_id: str, artifact_id: str, new_title: str) -> None:  # noqa: ARG001 (nb_id tenuto per firma MCP)
+    # nlm 0.7.x: `studio rename ARTIFACT_ID NEW_TITLE` — l'artifact id è globale,
+    # niente notebook (a differenza di `studio delete`, che invece lo vuole).
+    # nb_id resta nella firma MCP per coerenza ma NON si inoltra alla CLI: prima
+    # veniva passato come posizionale e slittava gli argomenti (studio_rename era
+    # inutilizzabile — "unexpected extra argument").
+    _run(["studio", "rename", artifact_id, new_title])
 
 
 # ============================================================
