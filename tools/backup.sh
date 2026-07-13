@@ -45,17 +45,19 @@ command -v age    >/dev/null || die "age non installato (apt install age)"
 command -v tar    >/dev/null || die "tar non trovato"
 
 # ───── recipients ─────
+# NIENTE auto-keygen sulla VPS: generare la chiave qui metterebbe la PRIVATA
+# sullo stesso disco dei backup → la cifratura non proteggerebbe da furto/perdita
+# del disco. Il backup cifra con la sola chiave PUBBLICA (recipient); la privata
+# vive sul TUO PC e serve solo per il restore.
 if [ ! -s "$RECIPIENTS_FILE" ]; then
-  log "Nessun recipient age — genero una chiave nuova"
-  KEY="$HOME/.config/age/keys.txt"
-  if [ ! -f "$KEY" ]; then
-    mkdir -p "$(dirname "$KEY")" && chmod 700 "$(dirname "$KEY")"
-    age-keygen -o "$KEY" 2>/dev/null
-    chmod 600 "$KEY"
-    ok "Chiave age generata: $KEY"
-  fi
-  awk '/^# public key:/ {print $4}' "$KEY" > "$RECIPIENTS_FILE"
-  ok "Recipient salvato in $RECIPIENTS_FILE"
+  die "Nessun recipient age in $RECIPIENTS_FILE.
+
+Genera la coppia sul TUO PC (NON sulla VPS), la privata resta lì:
+    age-keygen -o ~/.config/age/keys.txt
+poi copia SOLO la riga 'public key' nel file recipient della VPS:
+    grep 'public key' ~/.config/age/keys.txt   # → age1...  in $RECIPIENTS_FILE
+
+Restore: porti la chiave privata dal PC e decifri (vedi docs/BACKUP-RESTORE.md)."
 fi
 
 # ───── 1. dump volumi ─────
