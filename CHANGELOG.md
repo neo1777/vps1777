@@ -2,6 +2,18 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.26.0] — 2026-07-13
+
+### Hardening lotto 5 — la chiave di backup fuori dalla VPS (`age`)
+
+Il backup cifrato resta (scelta dell'owner: mantenerlo, semplificato), ma la chiave privata torna a proteggere davvero. Prima `backup.sh` generava la coppia **sulla VPS** se il recipient mancava, mettendo la chiave privata **sullo stesso disco dei backup**: chi ruba o perde il disco ha (o perde) entrambi, e la cifratura non protegge da nulla (finding 2.4).
+
+- **Niente auto-keygen sulla VPS**: `backup.sh` senza recipient si ferma e istruisce a generare la coppia **sul PC**, dove resta la privata.
+- **Container backup senza chiave privata**: rimosso il mount di `keys.txt` — il backup cifra con la sola chiave **pubblica** (recipient); la privata serve solo al restore, dal PC.
+- **`docs/BACKUP-RESTORE.md` riscritta**: dove sta cosa (privata sul PC, recipient sulla VPS), perché conta, la **migrazione** per chi ha già una chiave sulla VPS (copiala sul PC, poi rimuovila), e il fatto che l'off-site dei `.tar.age` è una **scelta dell'owner** (la cartella `backups/` la porti tu su NAS/cloud) — vps1777 non trasferisce nulla in automatico.
+
+Findings: area 04 (2.4 media-alta). Resta separato il container backup con `docker.sock` (2.8/H13).
+
 ## [0.25.0] — 2026-07-13
 
 ### Hardening lotto 4 — rate-limit sugli endpoint auth + audience del proxy

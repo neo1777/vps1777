@@ -25,7 +25,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:rw  # serve per `docker run` dump volumi
       - ${PWD}:/vps1777:rw                              # repo intero (per chiamare tools/backup.sh)
       - ./backups:/backups:rw
-      - ${HOME}/.config/age/keys.txt:/root/.config/age/keys.txt:ro
+      # NIENTE mount della chiave privata age: il backup CIFRA con la sola chiave
+      # pubblica (recipient in tools/age-recipients.txt). La privata vive sul PC
+      # dell'owner e serve solo al restore — non deve stare sulla VPS.
     healthcheck:
       test: ["CMD", "pgrep", "-f", "crond"]
       interval: 60s
