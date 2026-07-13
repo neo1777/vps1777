@@ -7,7 +7,7 @@
 # python:3.12-slim + chromium + libs Playwright.
 
 # ─────────────────────────────────────── builder
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.5.18 /uv /uvx /usr/local/bin/
 # UV_PROJECT_ENVIRONMENT=/opt/venv: costruisce il venv direttamente nel path
 # finale, così gli shebang dei console-script (es. `nlm`) puntano a
@@ -23,7 +23,7 @@ COPY app ./app
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
 
 # ─────────────────────────────────────── runtime
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # Chromium + dipendenze Playwright (per nlm headless)
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

@@ -9,7 +9,7 @@
 # tra builder e runtime (distroless python3-debian12 = 3.11, mismatch col 3.12).
 
 # ─────────────────────────────────────────── builder
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.5.18 /uv /uvx /usr/local/bin/
 # UV_PROJECT_ENVIRONMENT=/opt/venv: venv nel path finale → shebang dei
 # console-script corretti nel runtime (no /build/.venv rotto).
@@ -23,7 +23,7 @@ COPY app ./app
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
 
 # ─────────────────────────────────────────── runtime
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # tini per signal handling + ca-certificates per HTTPS uscente
 RUN apt-get update && apt-get install -y --no-install-recommends tini ca-certificates \
