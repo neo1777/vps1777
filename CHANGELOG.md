@@ -2,6 +2,15 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.25.0] — 2026-07-13
+
+### Hardening lotto 4 — rate-limit sugli endpoint auth + audience del proxy
+
+- **Rate-limit per-IP** sugli endpoint di autenticazione pubblici, che finora avevano solo il lockout del login admin: `/register` (10 ogni 5 min), `/token` (60 al minuto), `/app/auth` (20 ogni 5 min). Nuovo modulo `RateLimiter` (stdlib, 4 test). Ferma la raffica da singola sorgente; difesa best-effort in-memory (si azzera al restart).
+- **Audience del proxy MCP**: il reverse-proxy accettava **qualunque** access token valido senza verificare a chi appartenesse. Ora il token è legato al **proprietario** — il `sub` dev'essere un'email ammessa (`oauth_allowed_emails`). vps1777 è single-owner: un token il cui soggetto non è l'owner non passa il proxy.
+
+Findings: aree 03 (R5 media), 01 (R1 parte). Lotti sicuri in autonomia; restano rete e segreti (con l'owner).
+
 ## [0.24.0] — 2026-07-13
 
 ### Hardening lotto 3 — privacy & logging

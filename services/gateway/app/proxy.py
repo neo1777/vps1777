@@ -55,9 +55,15 @@ def _check_bearer(request: Request) -> tuple[bool, str | None]:
         return False, "missing_bearer"
     token = auth_header.split(None, 1)[1].strip()
     try:
-        verify(token, expected_typ="access")
+        claims = verify(token, expected_typ="access")
     except JWTError as exc:
         return False, str(exc)
+    # Il proxy non ha un'audience fissa (l'aud dei token è il client_id DCR),
+    # ma vps1777 è single-owner: si lega il token al PROPRIETARIO. Un access
+    # token il cui `sub` non è un'email ammessa non è per questo gateway.
+    allowed = {e.lower() for e in s.oauth_allowed_emails}
+    if allowed and str(claims.get("sub", "")).lower() not in allowed:
+        return False, "subject_not_allowed"
     return True, None
 
 

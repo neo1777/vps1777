@@ -22,7 +22,16 @@ from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from .audit import audit
 from .jwt_helpers import JWTError, issue, verify
+from .ratelimit import RateLimiter
 from .settings import get_settings
+
+# rate-limit per-IP sugli endpoint auth pubblici (best-effort, in-memory).
+_REGISTER_LIMIT = RateLimiter(max_calls=10, window_s=300)   # DCR: 10 ogni 5 min
+_TOKEN_LIMIT = RateLimiter(max_calls=60, window_s=60)       # token: 60 al minuto
+
+
+def _ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 # ───── storage ─────
@@ -109,6 +118,8 @@ async def well_known_authserver(_request: Request) -> Response:
 # ───── DCR (Dynamic Client Registration) ─────
 
 async def register(request: Request) -> Response:
+    if not _REGISTER_LIMIT.allow(_ip(request), time.time()):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     try:
         body = await request.json()
     except Exception:
@@ -200,6 +211,8 @@ async def authorize(request: Request) -> Response:
 
 async def token(request: Request) -> Response:
     s = get_settings()
+    if not _TOKEN_LIMIT.allow(_ip(request), time.time()):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     try:
         form = await request.form()
     except Exception:

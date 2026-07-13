@@ -35,6 +35,7 @@ from .archive_indexer import count_rows, db_info, find_db
 from .audit import audit, read_recent
 from .jwt_helpers import JWTError, issue, verify
 from .mcp_client import MCPCallError, call_tool
+from .ratelimit import RateLimiter
 from .miniapp_core import (
     extract_answer,
     is_owner,
@@ -83,10 +84,16 @@ def _mcp_error(exc: MCPCallError) -> JSONResponse:
 
 # ───── auth ─────
 
+_AUTH_LIMIT = RateLimiter(max_calls=20, window_s=300)  # /app/auth: 20 ogni 5 min
+
+
 async def miniapp_auth(request: Request) -> Response:
     """POST /app/auth — il frontend manda initData, riceve JWT typ=miniapp.
     Owner-only: solo l'utente Telegram configurato ottiene un token."""
     s = get_settings()
+    ip = request.client.host if request.client else "unknown"
+    if not _AUTH_LIMIT.allow(ip, time.time()):
+        return JSONResponse({"error": "rate_limited"}, status_code=429)
     bot_token = s.effective_bot_token
     if not bot_token:
         return JSONResponse({"error": "bot_token_not_configured"}, status_code=503)
