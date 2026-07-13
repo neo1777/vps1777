@@ -20,7 +20,10 @@ def build_app() -> Starlette:
         Middleware(SecurityHeadersASGI, hsts=s.gateway_public_base.startswith("https://")),
         Middleware(
             CORSMiddleware,
-            allow_origins=s.oauth_cors_origins or ["*"],
+            # niente fallback wildcard: con allow_credentials=True un `["*"]`
+            # accoppiato ai cookie è pericoloso. Origine non configurata → CORS
+            # spento (lista vuota, fail-closed). Il default è ["https://claude.ai"].
+            allow_origins=s.oauth_cors_origins,
             allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
             allow_headers=["*"],
             allow_credentials=True,

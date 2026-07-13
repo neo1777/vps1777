@@ -47,6 +47,17 @@ def test_admin_get_no_store():
     assert "strict-transport-security" in h
 
 
+def test_permissions_policy_and_coop_globali():
+    # su OGNI risposta (anche non-admin): Permissions-Policy + COOP
+    h = _run("/app", hsts=True)
+    assert "camera=()" in h.get("permissions-policy", "")
+    assert h.get("cross-origin-opener-policy") == "same-origin"
+    # anche sul proxy MCP (path arbitrario)
+    h2 = _run("/SECRET/nb1777/mcp", hsts=False)
+    assert "permissions-policy" in h2
+    assert h2.get("cross-origin-opener-policy") == "same-origin"
+
+
 def test_admin_exact_path_no_store():
     # /admin senza slash finale è comunque admin
     assert _run("/admin", hsts=True).get("cache-control") == "no-store"

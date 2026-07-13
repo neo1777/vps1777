@@ -2,6 +2,21 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.21.0] — 2026-07-13
+
+### Hardening lotto 1 — quick-wins auth/gateway (dalla review difensiva)
+
+Primo lotto dell'applicazione della review difensiva, ri-verificata sul codice attuale prima di agire (6 agenti paralleli, un'area ciascuno). Sei fix chirurgici, testabili, **zero rischio di lockout**:
+
+- **Open redirect** sul parametro `next` del login: `//host` e `/\host` iniziano con `/` ma sono protocol-relative (redirect esterno) — ora rifiutati.
+- **`state` OAuth url-encoded** nella redirect finale: un `&`/`#` nello `state` scelto dal client non spezza più la query di redirect.
+- **`code_challenge` vuoto rifiutato** in `/authorize`: senza challenge la PKCE non protegge il code — meglio 400 che un code scambiabile.
+- **CORS senza fallback wildcard**: origine non configurata → CORS **spento** (fail-closed), niente più `["*"]` accoppiato ai cookie con `allow_credentials`.
+- **Header di sicurezza globali**: `Permissions-Policy` (nega camera/microfono/geolocalizzazione/usb) e `Cross-Origin-Opener-Policy: same-origin` su ogni risposta.
+- **Login fallito non logga più l'email digitata**: chi sbaglia campo può averci scritto la password — ora l'audit registra solo se l'utente esiste (booleano), utile al triage senza conservare un segreto.
+
+Findings: aree 01 (R3, R6, R8, R9), 03 (R6, R9), 06 (2.4). Primo di 7 lotti.
+
 ## [0.20.0] — 2026-07-13
 
 ### L'archivio indicizza il contenuto pieno — le azioni non sono rumore

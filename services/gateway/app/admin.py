@@ -346,7 +346,10 @@ async def login(request: Request) -> Response:
 
     if email != s.admin_email or not verify_admin_password(password):
         _login_record_fail(ip)
-        audit({"event": "admin_login_fail", "email": email, "ip": ip})
+        # NON loggare il valore digitato nel campo email: chi sbaglia campo può
+        # averci scritto la PASSWORD. Basta sapere se l'utente esiste (per il
+        # triage: raffica su email nota = credential stuffing; su ignota = scan).
+        audit({"event": "admin_login_fail", "email_known": email == s.admin_email, "ip": ip})
         # Delay anti-brute-force ASINCRONO: `time.sleep` bloccherebbe l'intero
         # event loop (un attaccante che martella /admin/login renderebbe il
         # gateway irraggiungibile — DoS su endpoint pubblico).
@@ -359,9 +362,13 @@ async def login(request: Request) -> Response:
 
     _login_record_ok(ip)
     audit({"event": "admin_login_ok", "email": email, "ip": ip})
-    # anti open-redirect: `next` solo relativo o same-origin (PUBLIC_BASE)
+    # anti open-redirect: `next` solo relativo VERO o same-origin (PUBLIC_BASE).
+    # `//host` e `/\host` iniziano con "/" ma sono protocol-relative → redirect
+    # ESTERNO: vanno esclusi esplicitamente.
     base = s.gateway_public_base
-    if not (next_url.startswith("/") or (base and next_url.startswith(base))):
+    same_origin = bool(base) and next_url.startswith(base)
+    relative = next_url.startswith("/") and not next_url.startswith(("//", "/\\"))
+    if not (relative or same_origin):
         next_url = "/admin/setup"
     resp = RedirectResponse(next_url, status_code=302)
     _set_admin_cookie(resp, email)
