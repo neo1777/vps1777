@@ -152,18 +152,34 @@ if [ "$APPLY_MODE" = "1" ]; then
   PUB="$(get public_base)"
   ok "Config letta (ts_key:$([ -n "$TS_KEY" ] && echo sì || echo no), bot:$([ -n "$TG_TOKEN" ] && echo sì || echo no), owner:$([ -n "$TG_OWNER" ] && echo sì || echo no))"
 
-  # 1. Scrivi i secret + .env come operator
+  # 1. Scrivi i secret + .env come operator.
+  # I segreti NON vanno mai nell'argv di un comando remoto (dove `ps` li
+  # mostrerebbe a ogni utente locale): lo script viaggia nello STDIN di
+  # `bash -s` (canale SSH cifrato), e set_kv scrive con printf-redirect
+  # (builtin) — il valore non finisce nell'argv di sed/echo.
   log "Scrivo secret + .env..."
-  SSH "sudo -u $OPERATOR_USER bash -lc '
-    cd ~/vps1777
-    set_kv() { grep -q \"^\$1=\" .env && sed -i \"s|^\$1=.*|\$1=\$2|\" .env || echo \"\$1=\$2\" >> .env; }
-    $([ -n "$TS_KEY" ]   && echo "printf %s \"$TS_KEY\"   > secrets/ts_authkey.txt; chmod 600 secrets/ts_authkey.txt")
-    $([ -n "$TG_TOKEN" ] && echo "printf %s \"$TG_TOKEN\" > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt")
-    $([ -n "$TG_OWNER" ] && echo "set_kv TELEGRAM_OWNER_ID \"$TG_OWNER\"")
-    $([ -n "$TS_KEY" ]   && echo "set_kv TS_AUTHKEY \"$TS_KEY\"")
-    $([ -n "$PUB" ]      && echo "set_kv PUBLIC_BASE \"$PUB\"")
-    true
-  '" || die "Scrittura secret/.env fallita"
+  APPLY_SCRIPT=$(cat <<'RS'
+cd ~/vps1777 || exit 1
+set_kv() {   # scrittura .env senza passare il valore all'argv di comandi esterni
+  k=$1; v=$2
+  rest=$(grep -v "^${k}=" .env 2>/dev/null || true)
+  { [ -n "$rest" ] && printf '%s\n' "$rest"; printf '%s=%s\n' "$k" "$v"; } > .env
+}
+RS
+)
+  # Righe dinamiche: i segreti sono interpolati nel TESTO dello script, che
+  # però transita via STDIN, non via argv. tailscale key e bot token sono
+  # [A-Za-z0-9:_-] → l'apice singolo è sicuro.
+  [ -n "$TS_KEY" ]   && APPLY_SCRIPT="$APPLY_SCRIPT
+printf %s '$TS_KEY' > secrets/ts_authkey.txt; chmod 600 secrets/ts_authkey.txt
+set_kv TS_AUTHKEY '$TS_KEY'"
+  [ -n "$TG_TOKEN" ] && APPLY_SCRIPT="$APPLY_SCRIPT
+printf %s '$TG_TOKEN' > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt"
+  [ -n "$TG_OWNER" ] && APPLY_SCRIPT="$APPLY_SCRIPT
+set_kv TELEGRAM_OWNER_ID '$TG_OWNER'"
+  [ -n "$PUB" ]      && APPLY_SCRIPT="$APPLY_SCRIPT
+set_kv PUBLIC_BASE '$PUB'"
+  printf '%s\n' "$APPLY_SCRIPT" | SSH "sudo -u $OPERATOR_USER bash -s" || die "Scrittura secret/.env fallita"
   ok "Secret + .env aggiornati"
 
   # 2. Tailscale SULL'HOST: install + up + serve + funnel (no sidecar container).
@@ -171,7 +187,8 @@ if [ "$APPLY_MODE" = "1" ]; then
     log "Attivo Tailscale sull'host + Funnel..."
     SSH "curl -fsSL https://tailscale.com/install.sh | sh" >/dev/null 2>&1 || warn "install tailscale fallito"
     SSH "systemctl enable --now tailscaled" >/dev/null 2>&1 || true
-    SSH "tailscale up --authkey=$TS_KEY --hostname=${TS_HOSTNAME:-vps1777} --accept-dns=false --reset" >/dev/null 2>&1 || warn "tailscale up fallito"
+    # authkey via STDIN → file temporaneo → --authkey=file: (mai in argv/ps)
+    printf %s "$TS_KEY" | SSH "umask 077; f=\$(mktemp); cat > \"\$f\"; tailscale up --authkey=file:\"\$f\" --hostname=${TS_HOSTNAME:-vps1777} --accept-dns=false --reset; r=\$?; rm -f \"\$f\"; exit \$r" >/dev/null 2>&1 || warn "tailscale up fallito"
     sleep 5
     TS_URL="$(SSH "tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);n=d.get('Self',{}).get('DNSName','').rstrip('.');print('https://'+n if n else '')\" 2>/dev/null" || echo "")"
     if echo "$TS_URL" | grep -q '\.ts\.net$'; then
@@ -388,7 +405,8 @@ if [ ! -s secrets/admin_password_bcrypt.txt ]; then
   else
     PWD_RAW="$(printf '%s' "${ADMIN_PWD_MANUAL:-}")"
   fi
-  python3 -c "import bcrypt,sys; print(bcrypt.hashpw(sys.argv[1].encode(), bcrypt.gensalt(12)).decode())" "\$PWD_RAW" > secrets/admin_password_bcrypt.txt
+  # password via STDIN, non argv (che ps mostrerebbe): printf builtin → python
+  printf '%s' "\$PWD_RAW" | python3 -c "import bcrypt,sys; print(bcrypt.hashpw(sys.stdin.buffer.read(), bcrypt.gensalt(12)).decode())" > secrets/admin_password_bcrypt.txt
   chmod 600 secrets/admin_password_bcrypt.txt
 fi
 
@@ -404,7 +422,11 @@ fi
 
 # .env
 cp -n .env.example .env 2>/dev/null || true
-set_kv() { grep -q "^\$1=" .env && sed -i "s|^\$1=.*|\$1=\$2|" .env || echo "\$1=\$2" >> .env; }
+set_kv() {   # scrive .env senza passare il valore all'argv di comandi esterni (sed/echo)
+  k=\$1; v=\$2
+  rest=\$(grep -v "^\${k}=" .env 2>/dev/null || true)
+  { [ -n "\$rest" ] && printf '%s\n' "\$rest"; printf '%s=%s\n' "\$k" "\$v"; } > .env
+}
 set_kv ADMIN_EMAIL "$ADMIN_EMAIL"
 set_kv TELEGRAM_OWNER_ID "$TG_OWNER_ID"
 set_kv PUBLIC_BASE "$PUBLIC_BASE"
@@ -419,7 +441,9 @@ echo "ENV_OK"
 RSETUP
 )
 
-OUT=$(SSH "sudo -u "$OPERATOR_USER" bash -lc $(printf '%q' "$REMOTE_SETUP")")
+# Lo script (con i segreti interpolati) viaggia via STDIN di `bash -s`, MAI
+# come argv di `bash -lc` (dove `ps` lo mostrerebbe a ogni utente locale).
+OUT=$(printf '%s\n' "$REMOTE_SETUP" | SSH "sudo -u $OPERATOR_USER bash -s")
 echo "$OUT" | grep -q ENV_OK || { echo "$OUT"; die "Setup .env/secrets fallito"; }
 # Estrai password generata se c'è
 GENERATED_PWD=$(echo "$OUT" | sed -n 's/^GENERATED_ADMIN_PWD=//p')
@@ -470,7 +494,8 @@ if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
   log "Tailscale: installo sull'host + Funnel..."
   SSH "curl -fsSL https://tailscale.com/install.sh | sh" >/dev/null 2>&1 || warn "install tailscale fallito"
   SSH "systemctl enable --now tailscaled" >/dev/null 2>&1 || true
-  SSH "tailscale up --authkey=$TS_AUTHKEY --hostname=${TS_HOSTNAME:-vps1777} --accept-dns=false --reset" >/dev/null 2>&1 || warn "tailscale up fallito"
+  # authkey via STDIN → file temporaneo → --authkey=file: (mai in argv/ps)
+  printf %s "$TS_AUTHKEY" | SSH "umask 077; f=\$(mktemp); cat > \"\$f\"; tailscale up --authkey=file:\"\$f\" --hostname=${TS_HOSTNAME:-vps1777} --accept-dns=false --reset; r=\$?; rm -f \"\$f\"; exit \$r" >/dev/null 2>&1 || warn "tailscale up fallito"
   sleep 5
   TS_URL="$(SSH "tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);n=d.get('Self',{}).get('DNSName','').rstrip('.');print('https://'+n if n else '')\" 2>/dev/null" || echo "")"
   if echo "$TS_URL" | grep -q '\.ts\.net$'; then

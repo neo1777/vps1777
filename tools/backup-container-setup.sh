@@ -8,8 +8,10 @@
 
 set -e
 
-echo "[backup] installing age + bash + docker-cli + py3-pip + tini..."
-apk add --no-cache age bash docker-cli py3-pip py3-bcrypt tini >/dev/null
+# NON installiamo docker-cli: i volumi dati sono montati direttamente (ro) e
+# backup.sh li tara da $BACKUP_VOLUMES_DIR → niente docker.sock (H13).
+echo "[backup] installing age + bash + py3-pip + tini..."
+apk add --no-cache age bash py3-pip py3-bcrypt tini >/dev/null
 
 echo "[backup] writing crontab..."
 cat > /etc/crontabs/root <<EOF
