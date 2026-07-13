@@ -127,6 +127,10 @@ class Settings(BaseSettings):
 
     # ───── Storage ─────
     audit_log_path: str = "/var/lib/gateway/audit.jsonl"
+    # retention dell'audit: le righe più vecchie di N giorni vengono potate quando
+    # il file supera una soglia di dimensione (0 = nessuna retention, cresce senza
+    # limite). Personalizzabile via AUDIT_RETENTION_DAYS.
+    audit_retention_days: int = 90
     nlm_auth_dir: str = "/var/lib/nlm"
     onboarding_dir: str = "/var/lib/onboarding"  # bind-mount condiviso col PC (deploy.sh --apply)
     # dir dei DB di archive-mcp: il gateway scrive qui i .db indicizzati da

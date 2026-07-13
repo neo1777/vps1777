@@ -39,6 +39,11 @@ def main() -> None:
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
         stream=sys.stdout,
     )
+    # reda i segreti dagli access-log PRIMA di qualunque richiesta: il
+    # gateway_secret vive nel path del proxy MCP → non deve finire in chiaro.
+    from .logredact import install as _install_redact
+    _install_redact([s.effective_gateway_secret])
+
     log = logging.getLogger("gateway")
     log.info("vps1777-gateway starting")
     log.info("public_base=%s", s.gateway_public_base or "(none)")
