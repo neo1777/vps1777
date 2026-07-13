@@ -1,0 +1,53 @@
+# Dependabot — tiene fresche le dipendenze pinnate senza rinunciare al pin.
+#
+# Perché conta: le GitHub Action sono pinnate al commit SHA (non al tag mobile)
+# e le immagini di terzi nei compose al digest sha256. Il pin blinda la
+# supply-chain — un tag ripuntato a monte non entra — ma senza manutenzione
+# invecchia (niente patch di sicurezza). Dependabot chiude il cerchio: apre PR
+# che bumpano SHA/digest e riscrivono il commento della versione, una alla
+# settimana, raggruppate per non frammentare.
+
+version: 2
+updates:
+  # ── GitHub Actions: mantiene freschi gli SHA pinnati nei 3 workflow ────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # ── Immagini base dei Dockerfile (python:3.12-slim), un servizio a directory ─
+  - package-ecosystem: docker
+    directories:
+      - /services/gateway
+      - /services/archive-mcp
+      - /services/nb1777-mcp
+      - /services/nb1777-bot
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    groups:
+      base-images:
+        patterns: ["*"]
+
+  # ── Immagini di terzi nei compose (alpine, caddy, cloudflared, portainer,
+  #    watchtower): bumpa il digest pinnato quando il tag avanza. Le 4 immagini
+  #    vps1777 usano un tag-variabile ${VPS1777_TAG} → Dependabot le salta da sé,
+  #    e comunque `vps1777 update` le verifica contro images.lock. ────────────
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    groups:
+      compose-images:
+        patterns: ["*"]
+    ignore:
+      # Immagini nostre: versionate dal release-flow, non da Dependabot.
+      - dependency-name: "ghcr.io/neo1777/vps1777-*"
