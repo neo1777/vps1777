@@ -501,6 +501,33 @@ def run_migrations(repo: Path, images: dict[str, str],
 
 # ─────────────────────────────────────────── bundle: fetch, verifica, sync
 
+_COSIGN_VERSION = "v2.4.1"
+_COSIGN_URL = (f"https://github.com/sigstore/cosign/releases/download/"
+               f"{_COSIGN_VERSION}/cosign-linux-amd64")
+
+
+def _ensure_cosign(repo: Path) -> str | None:
+    """Path di cosign; se manca, prova a installarlo (binario pinnato) in
+    /usr/local/bin. Ritorna None se non riesce. Rende la verifica firma
+    obbligatoria-di-default sostenibile anche su installazioni che non hanno
+    cosign, senza dipendere dal deploy iniziale."""
+    c = shutil.which("cosign")
+    if c:
+        return c
+    try:
+        tmp = repo / ".cosign-dl"
+        download(_COSIGN_URL, tmp)
+        sudo(["install", "-m", "755", str(tmp), "/usr/local/bin/cosign"])
+        tmp.unlink(missing_ok=True)
+        got = shutil.which("cosign")
+        if got:
+            ok(f"cosign installato ({_COSIGN_VERSION})")
+        return got
+    except (OSError, subprocess.CalledProcessError, urllib.error.URLError) as exc:
+        warn(f"auto-install di cosign fallito: {exc}")
+        return None
+
+
 def staging_dir(repo: Path, version: str) -> Path:
     return repo / "releases" / f"v{norm_ver(version)}"
 
@@ -533,10 +560,16 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
         raise RuntimeError(f"sha256 mismatch sul bundle: atteso {want or '?'} ottenuto {got}")
     ok("sha256 del bundle verificato")
 
-    # cosign: obbligatorio solo se richiesto; se presente, comunque usato
+    # cosign: obbligatorio di default. Se manca ma è richiesto, prova a
+    # installarlo (fail-closed: se non ci riesce, la verifica non si salta).
     cosign = shutil.which("cosign")
     if require_cosign and not cosign:
-        raise RuntimeError("--require-cosign ma cosign non è installato")
+        cosign = _ensure_cosign(repo)
+        if not cosign:
+            raise RuntimeError(
+                "verifica firma richiesta ma cosign è assente e non installabile. "
+                "Installalo (github.com/sigstore/cosign), oppure — via d'emergenza "
+                "CONSAPEVOLE — imposta VPS1777_REQUIRE_COSIGN=0 nel .env.")
     if cosign and (stage / "SHA256SUMS.sig").is_file() and (stage / "SHA256SUMS.pem").is_file():
         identity = rf"^https://github\.com/{re.escape(GITHUB_REPO)}/\.github/workflows/release\.yml@.*$"
         res = run([cosign, "verify-blob",
@@ -1048,10 +1081,12 @@ def cmd_update(repo: Path, args) -> int:
 
     # 5 — fetch + verifica bundle
     step(5, "fetch")
-    # require_cosign: flag CLI OPPURE VPS1777_REQUIRE_COSIGN=1 in .env/env
-    # (systemd non carica .env → va letto qui, non solo da os.environ).
-    require_cosign = (args.require_cosign
-                      or env_read(repo).get("VPS1777_REQUIRE_COSIGN") == "1")
+    # cosign è OBBLIGATORIO di default (fail-closed): le release sono sempre
+    # firmate (release.yml) e il CLI installa cosign da sé se manca. Via
+    # d'emergenza CONSAPEVOLE per sbloccarsi: VPS1777_REQUIRE_COSIGN=0 nel .env,
+    # o --no-require-cosign. (systemd non carica .env → va letto qui.)
+    _cosign_env = env_read(repo).get("VPS1777_REQUIRE_COSIGN", "").strip()
+    require_cosign = not (getattr(args, "no_require_cosign", False) or _cosign_env == "0")
     try:
         bundle = fetch_bundle(repo, rel, require_cosign)
         lockfile = json.loads((bundle / "images.lock").read_text())
@@ -1074,8 +1109,9 @@ def cmd_update(repo: Path, args) -> int:
             # re-exec su "intent illeggibile"); target pinnato con --version.
             new_argv = [INSTALLED_CLI, "--home", str(repo), "update",
                         "--version", target, "--yes", "--skip-self-update"]
-            if args.require_cosign:
-                new_argv.append("--require-cosign")
+            # propaga la via d'emergenza (il default resta obbligatorio)
+            if getattr(args, "no_require_cosign", False):
+                new_argv.append("--no-require-cosign")
             os.execv(INSTALLED_CLI, new_argv)
 
     # 7 — backup (age) + snapshot locale
@@ -1562,8 +1598,9 @@ def main() -> int:
     p.add_argument("--yes", action="store_true", help="nessuna conferma")
     p.add_argument("--from-intent", help="path dell'intent file scritto dal pulsante admin")
     p.add_argument("--require-cosign", action="store_true",
-                   default=os.environ.get("VPS1777_REQUIRE_COSIGN") == "1",
-                   help="fallisci se la verifica cosign non è possibile")
+                   help="(ridondante: la verifica cosign è già obbligatoria di default)")
+    p.add_argument("--no-require-cosign", action="store_true",
+                   help="VIA D'EMERGENZA: salta la verifica firma cosign (sconsigliato)")
     p.add_argument("--skip-self-update", action="store_true", help=argparse.SUPPRESS)
 
     p = sub.add_parser("rollback", help="torna alla versione precedente")

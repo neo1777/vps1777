@@ -2,6 +2,19 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.23.0] — 2026-07-13
+
+### Hardening lotto 2b — verifica firma `cosign` obbligatoria (il 2° dei due CRITICI)
+
+Le release sono sempre firmate (`cosign` keyless in `release.yml`) e il CLI aveva già la logica di verifica — ma era **saltata in silenzio** quando `cosign` non era installato (default `require_cosign=False`). Su un'installazione senza `cosign` il self-update faceva `sudo install` ed eseguiva codice dal bundle **senza verificarne la firma**.
+
+- **Verifica `cosign` obbligatoria di default** (fail-closed): se la firma non è verificabile, l'update si ferma invece di procedere.
+- **Auto-installazione di `cosign`**: se manca, il CLI lo installa da sé (binario pinnato `v2.4.1`) invece di dipendere dal deploy iniziale — copre anche le installazioni esistenti. Se l'installazione non riesce → fail-closed (non salta la verifica).
+- **Via d'emergenza consapevole**: `VPS1777_REQUIRE_COSIGN=0` nel `.env` o `--no-require-cosign`, propagata anche al re-exec del self-update.
+- **Prima di attivare il default**, verificato sul VPS che `cosign` valida la firma di una release reale (v0.22.0 → *Verified OK*), così il canale update non si blocca.
+
+Findings: area 05 (R1 CRITICO). Con questo, **entrambi i critici della review sono chiusi**.
+
 ## [0.22.0] — 2026-07-13
 
 ### Hardening lotto 2 — owner-gating fail-closed (il 1° dei due CRITICI)
