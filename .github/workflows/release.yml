@@ -14,19 +14,23 @@ on:
   push:
     tags: ["v*"]
 
+# Least privilege per-job (non un blocco unico al workflow): il floor è read,
+# ogni job alza SOLO ciò che gli serve. Prima guard — che si limita a leggere
+# VERSION/CHANGELOG — ereditava packages:write e id-token:write che non usa.
 permissions:
-  contents: write   # creazione della GitHub Release
-  packages: write
-  id-token: write   # cosign keyless
+  contents: read
 
 jobs:
   guard:
     runs-on: ubuntu-latest
+    # Legge soltanto il repo: nessuna scrittura, nessun token OIDC.
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.ver.outputs.VERSION }}
       prerelease: ${{ steps.ver.outputs.PRERELEASE }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Extract version
         id: ver
         run: |
@@ -62,15 +66,21 @@ jobs:
   release:
     runs-on: ubuntu-latest
     needs: guard
+    # Pubblica su GHCR (packages:write) e firma keyless (id-token:write).
+    # NON crea Release → niente contents:write.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     strategy:
       matrix:
         service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -89,7 +99,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
       - name: Build & push ${{ matrix.service }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: ./services/${{ matrix.service }}
           push: true
@@ -99,7 +109,7 @@ jobs:
           provenance: true
           sbom: true
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
       - name: Sign image (keyless)
         run: |
           cosign sign --yes \
@@ -108,12 +118,18 @@ jobs:
   bundle:
     runs-on: ubuntu-latest
     needs: [guard, release]
+    # Crea la GitHub Release (contents:write), rilegge i digest da GHCR
+    # (packages:read) e firma il blob keyless (id-token:write).
+    permissions:
+      contents: write
+      packages: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Login to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -172,7 +188,7 @@ jobs:
           sha256sum "vps1777-runtime-v${VERSION}.tar.gz" > SHA256SUMS
           cat SHA256SUMS
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
       - name: Sign SHA256SUMS (keyless)
         run: |
           cosign sign-blob --yes \
@@ -195,7 +211,7 @@ jobs:
             [ -s release-notes.md ] || printf 'Release v%s (vedi CHANGELOG.md).\n' "$VERSION" > release-notes.md
           fi
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           prerelease: ${{ needs.guard.outputs.prerelease == 'true' }}
           body_path: release-notes.md

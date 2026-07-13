@@ -2,6 +2,17 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.27.0] — 2026-07-14
+
+### Hardening CI/supply-chain — action pinnate a SHA, Dependabot, least-privilege
+
+La catena di fornitura della CI non può più iniettare codice tramite un tag ripuntato a monte, e il token di release non concede più del necessario. Findings: area 05 (H22/H23/H24).
+
+- **SHA-pin di tutte le GitHub Action** (H23): da tag major mobile a **commit SHA pieno**, con la versione umana nel commento. Caso peggiore risolto: `aquasecurity/trivy-action@master` (branch mobile) → tag rilasciato `v0.36.0` pinnato. Coperti `ci.yml`, `release.yml`, `trivy.yml` (10 riferimenti).
+- **Dependabot** (`.github/dependabot.yml`): perché il pin non invecchi. Ecosystem `github-actions` settimanale (bumpa SHA + commento versione, raggruppato); `docker` (base image dei Dockerfile, un servizio a directory); `docker-compose` (immagini di terzi). Le immagini vps1777 su ghcr sono ignorate: le versiona il release-flow.
+- **Permessi least-privilege per-job** in `release.yml` (H24): prima un blocco unico al workflow dava a `guard` — che legge soltanto — `packages:write` + `id-token:write` inutilizzati. Ora `guard` = `contents:read`; `release` = `packages:write` + `id-token:write` (push GHCR + firma keyless); `bundle` = `contents:write` + `packages:read` + `id-token:write`. `ci.yml` floored a `contents:read`.
+- **Digest-pin immagini di terzi nei compose** (H22): `tag@sha256` (tag tenuto come commento) per `alpine:3.20`, `caddy:2.8-alpine`, `cloudflare/cloudflared:2024.12.0`, `portainer/portainer-ce` (era il tag mobile `:lts`), `containrrr/watchtower:1.7.1`. Le 4 immagini vps1777 restano parametrizzate `${VPS1777_TAG}` e verificate contro `images.lock` da `vps1777 update`.
+
 ## [0.26.0] — 2026-07-13
 
 ### Hardening lotto 5 — la chiave di backup fuori dalla VPS (`age`)

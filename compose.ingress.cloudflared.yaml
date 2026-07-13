@@ -14,7 +14,7 @@ services:
 
   cloudflared:
     profiles: [ingress.cloudflared]
-    image: cloudflare/cloudflared:2024.12.0
+    image: cloudflare/cloudflared:2024.12.0@sha256:1b92a01338a9a310cf5e1c7b77c61cce333e14117398814e4c124e4e9f7bbde2
     container_name: vps1777-cloudflared
     restart: unless-stopped
     cap_drop: [ALL]
