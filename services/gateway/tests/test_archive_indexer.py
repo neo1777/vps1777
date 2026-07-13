@@ -401,3 +401,145 @@ def test_chunk_rows_deterministico(tmp_path: Path) -> None:
     rows1 = list(archive_indexer._chunk_rows("a\n\nb\n\nc", "n", "t", "k"))
     rows2 = list(archive_indexer._chunk_rows("a\n\nb\n\nc", "n", "t", "k"))
     assert [r[0] for r in rows1] == [r[0] for r in rows2]  # uuid stabili → idempotente
+
+
+# ── v2: il contenuto pieno (issue #22) ───────────────────────────────────────
+# Prima, `extract_text` teneva solo i blocchi type=="text" e scartava
+# thinking/tool_use/tool_result come «rumore per la ricerca». Su un export reale
+# quel «rumore» valeva 2,6× il parlato — e i tool_use sono le AZIONI.
+
+def _claude_zip_v2(tmp_path: Path) -> Path:
+    """Export claude.ai minimale con un messaggio agentico: text + tool_use +
+    tool_result + thinking + allegato."""
+    import json
+    import zipfile
+    convs = [{
+        "uuid": "c1", "name": "sessione agentica",
+        "chat_messages": [
+            {   # il caso che il vecchio codice mutilava: `text` piatto valorizzato,
+                # `content` ricco mai letto (il ramo destro dell'`or` era morto)
+                "uuid": "m1", "sender": "assistant", "created_at": "2026-01-01T00:00:00Z",
+                "text": "ho sistemato il file",
+                "content": [
+                    {"type": "thinking", "thinking": "devo aprire il main"},
+                    {"type": "text", "text": "ho sistemato il file"},
+                    {"type": "tool_use", "name": "Edit",
+                     "input": {"file_path": "lib/main.dart"}},
+                    {"type": "tool_result", "content": "1 riga modificata in main.dart"},
+                ],
+                "attachments": [{"file_name": "screenshot.png"}],
+            },
+            {   # messaggio di SOLI tool_use: prima spariva del tutto (`if not text`)
+                "uuid": "m2", "sender": "assistant", "created_at": "2026-01-01T00:00:01Z",
+                "text": "",
+                "content": [{"type": "tool_use", "name": "Bash",
+                             "input": {"command": "pytest -q"}}],
+            },
+        ],
+    }]
+    p = tmp_path / "export.zip"
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    return p
+
+
+def test_v2_le_azioni_finiscono_nel_db(tmp_path: Path) -> None:
+    db = tmp_path / "v2.db"
+    archive_indexer.index_file(str(_claude_zip_v2(tmp_path)), str(db))
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        tools, thinking, attach = conn.execute(
+            "SELECT tools, thinking, attachments FROM messages WHERE uuid='m1'").fetchone()
+        assert "main.dart" in tools and "Edit" in tools      # tool_use
+        assert "1 riga modificata" in tools                  # tool_result
+        assert "devo aprire il main" in thinking             # conservato
+        assert "screenshot.png" in attach                    # allegato
+    finally:
+        conn.close()
+
+
+def test_v2_messaggio_di_soli_tool_non_sparisce(tmp_path: Path) -> None:
+    """Una sessione agentica è piena di messaggi senza testo: prima venivano
+    scartati da `if not text: continue` e nessuno lo sapeva."""
+    db = tmp_path / "v2.db"
+    archive_indexer.index_file(str(_claude_zip_v2(tmp_path)), str(db))
+    assert archive_indexer.count_rows(db) == 2  # m1 + m2 (prima: solo m1)
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        (tools,) = conn.execute("SELECT tools FROM messages WHERE uuid='m2'").fetchone()
+        assert "pytest" in tools
+    finally:
+        conn.close()
+
+
+def test_v2_la_ricerca_trova_le_azioni(tmp_path: Path) -> None:
+    """Il punto dell'issue: `main.dart` non è mai stato scritto nel parlato —
+    esiste solo dentro un tool_use. Prima era invisibile alla ricerca."""
+    db = tmp_path / "v2.db"
+    archive_indexer.index_file(str(_claude_zip_v2(tmp_path)), str(db))
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = conn.execute(
+            "SELECT uuid FROM messages_fts WHERE messages_fts MATCH ?",
+            ('"main.dart"',)).fetchall()
+        assert [r[0] for r in rows] == ["m1"]
+        rows = conn.execute(
+            "SELECT uuid FROM messages_fts WHERE messages_fts MATCH ?",
+            ("pytest",)).fetchall()
+        assert [r[0] for r in rows] == ["m2"]
+    finally:
+        conn.close()
+
+
+def test_v2_thinking_conservato_ma_non_indicizzato(tmp_path: Path) -> None:
+    """`thinking` si salva (recuperabile) ma NON entra nell'FTS: su un export reale
+    sono ~9.400 blocchi di ragionamento, e inquinerebbero ogni MATCH."""
+    db = tmp_path / "v2.db"
+    archive_indexer.index_file(str(_claude_zip_v2(tmp_path)), str(db))
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        (n,) = conn.execute(
+            "SELECT count(*) FROM messages WHERE thinking LIKE '%devo aprire%'").fetchone()
+        assert n == 1                                    # c'è nella tabella
+        rows = conn.execute(
+            "SELECT uuid FROM messages_fts WHERE messages_fts MATCH ?",
+            ('"devo aprire il main"',)).fetchall()
+        assert rows == []                                # ma non nell'FTS
+    finally:
+        conn.close()
+
+
+def test_v2_migrazione_da_db_v1(tmp_path: Path) -> None:
+    """Un DB con lo schema vecchio (4 colonne) si migra senza perdere righe."""
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript("""
+        CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT);
+        CREATE VIRTUAL TABLE messages_fts USING fts5(
+            uuid, project, ts, content, content='messages', content_rowid='rowid');
+    """)
+    conn.execute("INSERT INTO messages VALUES ('x1','p','2026-01-01','vecchio messaggio')")
+    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+    conn.commit(); conn.close()
+
+    assert archive_indexer.migrate_v1_to_v2(db) is True
+    assert archive_indexer.migrate_v1_to_v2(db) is False      # idempotente
+    assert archive_indexer.count_rows(db) == 1                # niente perso
+
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+        assert {"sender", "tools", "thinking", "attachments"} <= cols
+        rows = conn.execute(
+            "SELECT uuid FROM messages_fts WHERE messages_fts MATCH ?", ("vecchio",)).fetchall()
+        assert [r[0] for r in rows] == ["x1"]                 # l'FTS è stata ricostruita
+    finally:
+        conn.close()
+
+
+def test_v2_righe_a_4_campi_ancora_accettate(tmp_path: Path) -> None:
+    """Retrocompatibilità: un estrattore esterno che produce (uuid, project, ts,
+    content) continua a funzionare."""
+    db = tmp_path / "compat.db"
+    n = archive_indexer.write_rows(db, [("u1", "p", "2026-01-01", "ciao")])
+    assert n == 1 and archive_indexer.count_rows(db) == 1
