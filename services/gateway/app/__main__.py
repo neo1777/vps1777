@@ -48,6 +48,9 @@ def main() -> None:
         log.warning("GATEWAY_SECRET is EMPTY — proxy will reject all requests with 404")
     if not s.effective_signing_secret:
         log.warning("OAUTH_SIGNING_SECRET is EMPTY — JWT issuance will fail")
+    if not s.telegram_owner_id:
+        log.warning("TELEGRAM_OWNER_ID not set (or malformed → coerced to 0) — "
+                    "Mini App /app/auth denies EVERYONE (fail-closed). Set it to enable.")
 
     uvicorn.run(
         "app.__main__:build_app",
