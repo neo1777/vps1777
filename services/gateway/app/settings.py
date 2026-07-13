@@ -97,6 +97,26 @@ class Settings(BaseSettings):
     gateway_port: int = 8080
     gateway_public_base: str = ""
     log_level: str = "INFO"
+    # Di quali peer TCP fidarsi per gli header X-Forwarded-* (uvicorn
+    # proxy_headers). Era "*" (fidati dell'XFF da CHIUNQUE → IP client
+    # spoofabile: rate-limit/lockout evadibili, audit avvelenabile). Ora si
+    # fida solo dei range PRIVATI + loopback, MAI di un IP pubblico.
+    #
+    # Perché i range privati e non il solo 127.0.0.1: il reverse-proxy non
+    # arriva mai da loopback. Nel profilo di produzione (ingress.tailscale)
+    # `tailscale serve` gira sull'host e inoltra alla porta pubblicata; il
+    # gateway vede il peer come la gateway della bridge Docker (es. 172.21.0.1),
+    # NON 127.0.0.1 (verificato sul campo). Docker assegna la subnet in modo
+    # dinamico (172.16–172.31), quindi si fida dell'intero blocco privato.
+    # Gli ingress in container (caddy/cloudflared) stanno anch'essi su una
+    # bridge privata → coperti dallo stesso default.
+    #
+    # Sicurezza: con una trust-list ≠ "*", uvicorn cammina l'XFF da DESTRA e
+    # prende il primo host non fidato. tailscale/caddy/cloudflared sanificano
+    # l'XFF (verificato: un `X-Forwarded-For: 6.6.6.6` iniettato dal client
+    # viene scartato, resta il vero IP). Un client pubblico che colpisse la
+    # porta direttamente (peer pubblico) NON è fidato → il suo XFF è ignorato.
+    gateway_forwarded_allow_ips: str = "127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
     # ───── routing ─────
     gateway_upstreams: Upstreams = Field(default_factory=dict)

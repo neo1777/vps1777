@@ -2,6 +2,16 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.28.0] — 2026-07-14
+
+### Hardening rete — `forwarded_allow_ips` ristretto (IP client non più spoofabile)
+
+Il gateway girava con `forwarded_allow_ips="*"`: uvicorn si fidava dell'header `X-Forwarded-For` da **qualunque** peer, quindi `request.client.host` era falsificabile via header. Conseguenza: il rate-limit e il lockout del login per-IP erano evadibili (un IP finto diverso a ogni richiesta → contatore sempre fresco) e l'audit avvelenabile. Finding: area 03 (H4, alto).
+
+- **`GATEWAY_FORWARDED_ALLOW_IPS`** (nuovo, default `127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`): ci si fida dell'XFF **solo** dai range privati + loopback, **mai** da un IP pubblico. Il reverse-proxy (tailscale sull'host, o caddy/cloudflared in container) arriva sempre dalla bridge Docker privata; un client pubblico che colpisse la porta direttamente non è fidato e il suo XFF è ignorato. Il default copre le subnet Docker dinamiche (172.16–172.31) senza configurazione.
+- **Verificato sul path di produzione live** (Funnel): con la trust-list ≠ `*` uvicorn cammina l'XFF **da destra** e prende il primo host non fidato. `tailscale serve` sanifica l'XFF — un `X-Forwarded-For: 6.6.6.6` iniettato dal client viene **scartato** e resta il vero IP (195.x). Richiesta pulita e richiesta spoofata loggano entrambe l'IP client reale, non quello iniettato.
+- **Contatore globale valutato e scartato**: una volta chiuso lo spoofing, il rate-limit per-IP torna a mordere sull'IP reale dell'attaccante; un limite globale sugli endpoint auth aggiungerebbe rischio di auto-lockout dell'owner per beneficio marginale su un sistema mono-utente. `semplificare è ok`.
+
 ## [0.27.0] — 2026-07-14
 
 ### Hardening CI/supply-chain — action pinnate a SHA, Dependabot, least-privilege

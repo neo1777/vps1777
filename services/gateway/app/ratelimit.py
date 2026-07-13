@@ -6,9 +6,10 @@ autenticazione pubblici — `/token`, `/register`, `/app/auth` — che finora
 avevano solo il lockout del login admin. Non è l'unica difesa (PKCE, initData
 firmata, password forte), ma ferma la raffica da singola sorgente.
 
-Nota: l'IP è quello che il gateway vede (`request.client.host`). Finché
-`forwarded_allow_ips` non è ristretto (finding a parte), è spoofabile via header
-— il limiter resta utile ma non è un confine forte. `now` è iniettabile per i test.
+Nota: l'IP è quello che il gateway vede (`request.client.host`). Da quando
+`forwarded_allow_ips` è ristretto al proxy locale (default 127.0.0.1), l'XFF è
+attendibile: uno spoof da un peer non fidato viene ignorato → il limiter conta
+sull'IP reale. `now` è iniettabile per i test.
 """
 from __future__ import annotations
 
