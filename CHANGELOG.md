@@ -2,6 +2,21 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.20.0] — 2026-07-13
+
+### L'archivio indicizza il contenuto pieno — le azioni non sono rumore
+
+L'indexer scartava **il 62% di quello che gli veniva dato**, e non era rumore: erano **le azioni**. Un archivio di sole dichiarazioni non può contraddire una frase con un fatto — una ricerca su un tratto identitario premia la dichiarazione più esplicita, chiunque l'abbia pronunciata, perché non esiste nessuna azione che la smentisca.
+
+- **`extract_blocks()`** scompone il `content` in `(text, tools, thinking, attachments)` invece di buttarlo (`extract_text()` resta come wrapper retrocompatibile). Prima, per l'export claude.ai il campo `content` non veniva letto **nemmeno una volta** (il ramo `text or extract_text(content)` cadeva sempre a sinistra), e i messaggi di soli `tool_use` sparivano in silenzio.
+- **Schema v2** (`+sender +tools +thinking +attachments +parent_uuid`). `tools` e `attachments` **vanno nell'FTS** (sono ciò che si cerca); `thinking` si **conserva ma non si indicizza** (~9.400 blocchi di ragionamento che inquinerebbero ogni `MATCH`/`bm25` — chi li vuole cercabili usa il column filter `col:` già supportato da `fts.py`). Migrazione `migrate_v1_to_v2()` idempotente, che non perde righe; le righe a 4 campi restano accettate (un estrattore esterno non si rompe).
+- **L'upload non filtra più a monte**: anche `users.json` (che era scartato) viene indicizzato. Il filtro sta a valle, non all'ingest.
+- Sull'export reale: da 42,4 M a **128,5 M** di caratteri indicizzati (**3,03×**); **1.440** messaggi con allegati che prima non c'erano. Chiude **#22**.
+
+### Privacy — dichiarato cosa contiene l'archivio e come è protetto (#24)
+
+Indicizzare il contenuto pieno rende **cercabili** anche i segreti incollati durante il lavoro (password, chiavi, IP). Scelta consapevole (opzione D): l'archivio è un contenitore di dati personali, la protezione è l'**accesso** (gateway OAuth 2.1 + path-secret, owner-only), non la redazione. Nuova sezione **"Dati sensibili e privacy"** in [docs/ARCHIVE.md](docs/ARCHIVE.md): cosa contiene, che chiunque abbia accesso lo trova con una query, e che una strategia di redazione/cifratura va decisa **prima** di condividere o esporre l'archivio. Chiude **#24**.
+
 ## [0.19.1] — 2026-07-13
 
 ### Fix — `studio_rename` ora funziona (nb1777-mcp)
