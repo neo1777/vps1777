@@ -48,6 +48,11 @@ class SecurityHeadersASGI:
 
                 add("X-Content-Type-Options", "nosniff")
                 add("Referrer-Policy", "no-referrer")
+                # Permissions-Policy: nega di default le API del browser che il
+                # gateway non usa (camera, microfono, geolocalizzazione). COOP:
+                # isola il contesto di navigazione da finestre cross-origin.
+                add("Permissions-Policy", "geolocation=(), microphone=(), camera=(), usb=()")
+                add("Cross-Origin-Opener-Policy", "same-origin")
                 if self.hsts:
                     add("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
                 if no_store:

@@ -156,6 +156,10 @@ async def authorize(request: Request) -> Response:
         return JSONResponse({"error": "unsupported_response_type"}, status_code=400)
     if code_challenge_method != "S256":
         return JSONResponse({"error": "invalid_request", "reason": "PKCE S256 required"}, status_code=400)
+    if not code_challenge:
+        # senza challenge la PKCE non protegge nulla: il code sarebbe scambiabile
+        # da chiunque lo intercetti. Rifiuta invece di emettere un code inutile.
+        return JSONResponse({"error": "invalid_request", "reason": "code_challenge required"}, status_code=400)
     client = _clients.get(client_id)
     if not client:
         return JSONResponse({"error": "invalid_client"}, status_code=400)
@@ -185,9 +189,11 @@ async def authorize(request: Request) -> Response:
     }
     audit({"event": "oauth_code_issued", "client_id": client_id, "sub": email})
 
-    # Redirect con code + state
+    # Redirect con code + state. `state` è opaco e scelto dal client: va
+    # url-encoded, o un '&'/'#' al suo interno spezzerebbe la query di redirect.
     sep = "&" if "?" in redirect_uri else "?"
-    return RedirectResponse(f"{redirect_uri}{sep}code={code}&state={state}", status_code=302)
+    return RedirectResponse(
+        f"{redirect_uri}{sep}code={code}&state={quote(state, safe='')}", status_code=302)
 
 
 # ───── token ─────
