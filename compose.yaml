@@ -49,6 +49,13 @@ services:
     environment:
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 8080
+      # Peer fidati per X-Forwarded-* (uvicorn). Default = range privati +
+      # loopback, MAI un IP pubblico: il reverse-proxy (tailscale sull'host,
+      # o caddy/cloudflared in container) arriva sempre dalla bridge Docker
+      # privata; un client pubblico che colpisse la porta direttamente non è
+      # fidato e il suo XFF viene ignorato. Copre le subnet Docker dinamiche
+      # (172.16–172.31) senza configurazione. Override solo per casi esotici.
+      GATEWAY_FORWARDED_ALLOW_IPS: ${GATEWAY_FORWARDED_ALLOW_IPS:-127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
       VPS1777_TAG: ${VPS1777_TAG:-dev}   # versione deployata (mostrata nell'admin)
       GATEWAY_PUBLIC_BASE: ${PUBLIC_BASE:-http://127.0.0.1:8080}
       GATEWAY_UPSTREAMS: ${GATEWAY_UPSTREAMS:-archive=archive-mcp:8002,nb1777=nb1777-mcp:8003}
