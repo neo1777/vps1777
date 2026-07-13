@@ -58,6 +58,7 @@ services:
       OAUTH_ALLOWED_EMAILS: ${ADMIN_EMAIL}
       OAUTH_CORS_ORIGINS: "https://claude.ai,https://web.telegram.org"
       AUDIT_LOG_PATH: /var/lib/gateway/audit.jsonl
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-90}   # potatura audit oltre N giorni
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}   # Mini App owner-only (server-side)
       OAUTH_PWD_HASH_FILE: /run/secrets/admin_password_bcrypt
@@ -157,6 +158,9 @@ services:
       GATEWAY_PUBLIC_BASE: ${PUBLIC_BASE:-http://gateway:8080}
       NB1777_MCP_URL: http://nb1777-mcp:8003/mcp
       NLM_HOME: /var/lib/nlm
+      # BOT_RAG_COMMANDS=0 disattiva /lista e /chiedi (che passano da Telegram):
+      # massima privacy = solo Mini App. Default: attivi.
+      BOT_RAG_COMMANDS: ${BOT_RAG_COMMANDS:-true}
     secrets:
       - telegram_bot_token
     volumes:

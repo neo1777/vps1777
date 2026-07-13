@@ -6,11 +6,37 @@ Ogni evento è una riga JSON con ts, event, e attributi arbitrari. Append-only.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from .settings import get_settings
+
+# sopra questa dimensione il log viene POTATO (righe oltre la retention). Il
+# controllo è su st_size (economico) → la potatura è rara, non a ogni scrittura.
+_PRUNE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
+def _prune(path: Path, retention_days: int) -> None:
+    """Riscrive il log tenendo solo le righe entro `retention_days` (per `ts`
+    ISO, confronto lessicografico). Le righe senza ts leggibile si scartano."""
+    if retention_days <= 0:
+        return
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    kept: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ts = json.loads(line).get("ts", "")
+        except json.JSONDecodeError:
+            continue
+        if ts >= cutoff:
+            kept.append(line)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
+    tmp.replace(path)  # atomico: un lettore concorrente vede il vecchio o il nuovo
 
 
 def audit(event: dict[str, Any]) -> None:
@@ -25,6 +51,9 @@ def audit(event: dict[str, Any]) -> None:
         }
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        # potatura opportunistica: solo quando il file è grande (raro)
+        if path.stat().st_size > _PRUNE_SIZE:
+            _prune(path, s.audit_retention_days)
     except Exception:
         # mai bloccare la response per un audit fail
         pass

@@ -157,10 +157,24 @@ async def cmd_aiuto(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+async def _rag_disabled(msg) -> bool:
+    """True (e avvisa) se i comandi RAG testuali sono disattivati. Passano dai
+    server Telegram (Bot API non è E2E): chi vuole privacy usa la Mini App."""
+    if get_settings().bot_rag_commands:
+        return False
+    await msg.reply_text(
+        "I comandi RAG testuali sono disattivati per privacy — passerebbero dai "
+        "server Telegram. Usa /pannello (Mini App): parla solo col tuo gateway."
+    )
+    return True
+
+
 @owner_only
 async def cmd_lista(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if not msg:
+        return
+    if await _rag_disabled(msg):
         return
     try:
         result = await _mcp_call("nb_list")
@@ -203,6 +217,8 @@ async def cmd_lista(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_chiedi(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if not msg:
+        return
+    if await _rag_disabled(msg):
         return
     args = ctx.args or []
     if len(args) < 2:

@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     nb1777_mcp_url: str = "http://nb1777-mcp:8003/mcp"
     nlm_home: str = "/var/lib/nlm"
     log_level: str = "INFO"
+    # I comandi RAG testuali (/lista, /chiedi) fanno transitare titoli e risposte
+    # dai server Telegram (Bot API non è E2E). Chi vuole la massima privacy li
+    # disabilita e usa la Mini App (che parla solo col gateway). Default: attivi.
+    bot_rag_commands: bool = True
 
     @property
     def effective_token(self) -> str:

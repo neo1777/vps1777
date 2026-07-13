@@ -8,7 +8,8 @@ Pre-1.0: solo l'ultima `main` riceve security fix.
 
 **Non** aprire una issue pubblica.
 
-Mandami un'email a `[da configurare]` con:
+Mandami un'email a `antigravity1777@gmail.com` (oppure apri una *GitHub Security
+Advisory* privata sul repo) con:
 - Descrizione della vuln
 - Step di riproduzione (PoC se possibile)
 - Impatto stimato
@@ -61,10 +62,29 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
 - **Reversibilità**: backup age + snapshot locale prima di ogni update;
   auto-rollback se lo stack non torna healthy. Nessuna finestra in cui i dati
   restano senza rete di sicurezza.
-- **Zero telemetria**: il check versione è una GET non autenticata a GitHub;
-  nessun dato lascia la VPS.
+- **Zero telemetria di vps1777**: vps1777 non ti traccia; il check versione è una
+  GET non autenticata a GitHub. Ma **per funzionare, alcuni dati escono verso
+  servizi terzi** — vedi la sezione seguente: non è telemetria, è il servizio che
+  usi, e va saputo.
 
 Dettaglio completo: [docs/UPDATE.md](docs/UPDATE.md) e [docs/SELF_UPDATE_PLAN.md](docs/SELF_UPDATE_PLAN.md).
+
+## Flussi di dati verso terzi
+
+vps1777 non è un'isola: per erogare le sue funzioni fa transitare dati verso due
+servizi esterni. Nessuno è telemetria, ma è bene sapere **cosa esce verso chi**.
+
+| Quando | Cosa esce | Verso | Note |
+|---|---|---|---|
+| Domanda RAG, aggiunta fonte, OCR (nb1777) | domande, contenuto delle fonti, documenti | **Google (NotebookLM)** | l'OCR manda il documento intero; è il funzionamento di NotebookLM |
+| Comandi **testuali** del bot (`/lista`, `/chiedi`) | titoli notebook, risposte RAG | **Telegram** | la Bot API **non è E2E**; disattivabili con `BOT_RAG_COMMANDS=0` |
+| Mini App (`/app/*`) | — | **nessun terzo** | parla solo col tuo gateway: è la superficie più privata |
+| Notifiche update (opzionali) | "v… disponibile" | **Telegram** | solo se `--notify` |
+| Check versione | — | GitHub | GET pubblica, nessun dato personale |
+
+**Massima privacy**: imposta `BOT_RAG_COMMANDS=0` e usa la Mini App per i notebook
+(non fa passare nulla da Telegram); l'archivio (`archive1777`) e il gateway restano
+interamente sulla VPS.
 
 ## Out of scope
 

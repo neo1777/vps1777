@@ -2,6 +2,17 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.24.0] — 2026-07-13
+
+### Hardening lotto 3 — privacy & logging
+
+- **`gateway_secret` fuori dai log**: il secret vive nel path del proxy MCP (`/<secret>/<service>/…`), quindi finiva nella request-line dell'access-log in chiaro — un leak continuo, una riga per ogni chiamata MCP. Nuovo filtro `RedactSecrets` (stdlib, testato) lo sostituisce con `***` in ogni record. Difesa a valle: non sostituisce la rotazione del secret, ma smette di produrne di nuovi in chiaro.
+- **Comandi RAG del bot disattivabili** (`BOT_RAG_COMMANDS=0`): `/lista` e `/chiedi` fanno transitare titoli e risposte dai server **Telegram** (Bot API non è E2E). Chi vuole la massima privacy li spegne e usa la **Mini App**, che parla solo col gateway. Default: attivi.
+- **Retention dell'audit** (`AUDIT_RETENTION_DAYS`, default **90**, personalizzabile): le righe più vecchie vengono potate quando il file supera 5 MB — niente più crescita illimitata di un log che contiene IP, email e user_id.
+- **`SECURITY.md`**: corretto il claim "zero telemetria" (vero per vps1777, ma i dati **funzionali** escono verso Google/Telegram) + nuova tabella **"Flussi di dati verso terzi"** (cosa esce verso chi) + email di contatto reale per le segnalazioni (era `[da configurare]`).
+
+Findings: aree 03 (R1 alta), 06 (2.3, 2.8), 02 (2.10), 05 (R6).
+
 ## [0.23.0] — 2026-07-13
 
 ### Hardening lotto 2b — verifica firma `cosign` obbligatoria (il 2° dei due CRITICI)
