@@ -199,15 +199,15 @@ interamente sulla VPS.
 ## Residui noti — cosa NON è ancora chiuso
 
 La review difensiva ha prodotto **43 interventi** (2 critici, 7 alti, 21 medi, 13
-bassi). La campagna `v0.21.0 → v0.30.2` ha chiuso **i due critici** e la sostanza
+bassi). La campagna `v0.19.1 → v0.30.2` (14 release) ha chiuso **i due critici** e la sostanza
 della fascia alta. Non ha chiuso tutto, e qui sta la lista vera — verificata
 contro il codice, non contro i buoni propositi:
 
 | | |
 |---|---|
 | **chiusi** | 8 |
-| **parziali** | 16 |
-| **aperti** | 19 |
+| **parziali** | 17 |
+| **aperti** | 18 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
 (`H2`) — sono chiusi e verificati in produzione. Sotto, i residui che pesano di
