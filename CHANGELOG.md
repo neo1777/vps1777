@@ -2,6 +2,30 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.30.0] — 2026-07-14
+
+### Hardening H6 — il gateway non tocca più i cookie Google (l'ultimo finding aperto)
+
+Era l'unico rilievo del dossier rimasto non applicato. Il gateway — **l'unico servizio esposto su Internet** — montava in **scrittura** il volume `nlm-auth`, cioè i cookie di sessione Google di NotebookLM, perché `/admin/nlm` ci estraeva dentro il profilo caricato. Un gateway compromesso poteva leggerli **e** riscriverli. Finding: area 04 (H6, alto).
+
+Ora vale un invariante semplice: **il volume dei cookie lo monta SOLO `nb1777-mcp`**, che è il servizio che quei cookie li usa davvero. Gateway e bot hanno **accesso zero** — né lettura né scrittura — e chiedono a lui su rete interna.
+
+- **Endpoint interni su `nb1777-mcp`** (`/internal/nlm/status`, `/internal/nlm/profile`): il primo dice solo *se* c'è un profilo valido (`{ok, has_cookies, pending}`) senza esporne il contenuto; il secondo riceve il tar.gz, lo valida e lo installa. Protetti da un **segreto condiviso** (`X-Vps1777-Internal`, confronto constant-time) e **fail-closed**: senza segreto configurato negano tutti. Si riusa il `gateway_secret` — che esiste su ogni installazione — invece di introdurre un secret nuovo, che mancherebbe agli update esistenti (compose non parte se il file del secret non c'è).
+- **Il proxy non attraversa `internal/`**: il reverse proxy MCP è un catch-all su `{path:path}`, quindi senza un blocco esplicito un client esterno avrebbe raggiunto quegli endpoint via `/<SECRET>/<service>/internal/…` — creando proprio la via di scrittura che H6 chiude. Ora ogni sotto-path `internal/` è rifiutato con 404 **prima di ogni altro controllo**, per **tutti** gli upstream: chi scrive un plugin ha un prefisso riservato di cui fidarsi.
+- **Upload non distruttivo**: il profilo si estrae in una staging, si **valida**, e solo allora sostituisce quello buono (con rollback se lo swap fallisce). Un tar sbagliato non ti scollega più da NotebookLM. Restano le difese sull'archivio non fidato (solo file regolari → niente symlink; niente path assoluti né `..`; solo sotto `profiles/`; file a 600).
+- Il **bot** non monta più il volume: per sapere se l'auth manca chiede lo stato (fail-safe: se `nb1777-mcp` non risponde, assume auth pendente e mostra la guida).
+
+Verificato: 12 test nuovi sul modulo che possiede il profilo (traversal, symlink, tar corrotto, non-distruttività) e prova end-to-end del servizio — 403 senza segreto e col segreto sbagliato, upload valido → `{"files":2}`, upload invalido → 400 **col profilo buono intatto**, cookie a 600.
+
+**Con questo il dossier di review difensiva è applicato per intero.**
+
+### `vps1777 update` — la proprietà degli artefatti non deriva più
+
+`vps1777 update` è pensato per girare come **operator** (che ha sudo NOPASSWD), ma capita di lanciarlo da una shell root. In quel caso le cartelle create — `releases/vX.Y.Z/` — restavano di **root**, e l'update successivo, lanciato dall'operator com'è giusto, non riusciva più a creare la cartella di rollback lì dentro: moriva con un `PermissionError` grezzo a metà strada (dopo il pull, prima del punto di non ritorno).
+
+- Nuova `reclaim_ownership()`: ciò che l'update crea sotto il repo resta dell'operator. Riallinea nei due versi — da root chowna a chi possiede il repo; da operator si riprende con `sudo` ciò che trova altrui. **Nessun intervento manuale.**
+- Se nonostante tutto la scrittura fallisce, ora si muore con un messaggio che dice cosa fare, non con un traceback.
+
 ## [0.29.0] — 2026-07-14
 
 ### Hardening segreti/host — segreti fuori dall'argv (deploy) e docker.sock fuori dal backup

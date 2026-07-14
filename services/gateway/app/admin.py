@@ -11,17 +11,15 @@ from __future__ import annotations
 
 import asyncio
 import html
-import io
 import json
 import os
 import re
 import secrets as pysecrets
 import sqlite3
-import tarfile
 import time
 from pathlib import Path
 
-from . import archive_indexer
+from . import archive_indexer, nlm_client
 from .miniapp_core import version_gt
 
 from starlette.requests import Request
@@ -384,42 +382,17 @@ async def logout(_request: Request) -> Response:
 # ───── /admin/nlm — upload del profilo nlm (notebooklm-mcp-cli 0.7.x) ─────
 # La CLI nlm 0.7.x salva l'auth come CARTELLA profiles/default/{cookies.json,
 # metadata.json} (non più un singolo auth.json). Qui si carica un tar.gz di
-# quella cartella, che viene estratto in <nlm_auth_dir>/profiles/default/.
-
-def _extract_nlm_profile(content: bytes, auth_dir: Path) -> int:
-    """Estrae in sicurezza i file sotto profiles/ da un tar.gz. Ritorna #file."""
-    n = 0
-    with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as tar:
-        for m in tar.getmembers():
-            if not m.isfile():
-                continue
-            name = m.name.lstrip("./")
-            parts = Path(name).parts
-            if name.startswith("/") or ".." in parts:
-                raise ValueError(f"percorso non sicuro nel tar: {m.name}")
-            if not parts or parts[0] != "profiles":
-                continue  # ignora tutto ciò che non è il profilo
-            f = tar.extractfile(m)
-            if f is None:
-                continue
-            dest = auth_dir / name
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(f.read())
-            dest.chmod(0o600)
-            n += 1
-    return n
-
+# quella cartella.
+#
+# H6: il gateway NON possiede più quel volume. È l'unico servizio esposto su
+# Internet, e teneva in scrittura i cookie di sessione Google. Ora il tar lo
+# riceve e lo inoltra a nb1777-mcp — l'unico a montare il volume — che valida e
+# installa. Il gateway non legge né scrive quei cookie: chiede soltanto lo stato.
 
 async def nlm_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
         return redirect
-
-    s = get_settings()
-    auth_dir = Path(s.nlm_auth_dir)
-    auth_dir.mkdir(parents=True, exist_ok=True)
-    cookies_path = auth_dir / "profiles" / "default" / "cookies.json"
-    pending = auth_dir / "AUTH_PENDING.flag"
 
     if request.method == "POST":
         form = await request.form()
@@ -427,32 +400,31 @@ async def nlm_view(request: Request) -> Response:
         if upload is None or not hasattr(upload, "read"):
             return RedirectResponse("/admin/nlm?msg=Nessun+file+caricato&kind=err", status_code=303)
         content = await upload.read()  # type: ignore[union-attr]
-        try:
-            if not content:
-                raise ValueError("file vuoto")
-            if len(content) > 5_000_000:
-                raise ValueError("file troppo grande (>5MB)")
-            try:
-                n = _extract_nlm_profile(content, auth_dir)
-            except tarfile.TarError as e:
-                raise ValueError(f"non è un tar.gz valido del profilo nlm ({e})") from e
-            if not cookies_path.exists():
-                raise ValueError("il tar non contiene profiles/default/cookies.json — taggi la cartella giusta?")
-            if pending.exists():
-                pending.unlink()
-            audit({"event": "admin_nlm_upload", "by": email, "files": n})
-            msg = f"Profilo nlm caricato ({n} file). NotebookLM attivo alla prossima call."
-            return RedirectResponse(f"/admin/nlm?msg={msg.replace(' ', '+')}&kind=ok", status_code=303)
-        except (ValueError, OSError) as exc:
-            audit({"event": "admin_nlm_upload_err", "by": email, "error": str(exc)})
-            return RedirectResponse(
-                f"/admin/nlm?msg=Errore:+{str(exc).replace(' ', '+')}&kind=err",
-                status_code=303,
-            )
 
-    # GET
-    ok = cookies_path.exists() and not pending.exists()
-    if ok:
+        if not content:
+            err: str | None = "file vuoto"
+        elif len(content) > 5_000_000:
+            err = "file troppo grande (>5MB)"
+        else:
+            # Un tar invalido viene rifiutato da nb1777-mcp SENZA toccare il
+            # profilo già buono (staging + swap): un errore non ti scollega.
+            n, err = await nlm_client.upload(content)
+            if err is None:
+                audit({"event": "admin_nlm_upload", "by": email, "files": n})
+                msg = f"Profilo nlm caricato ({n} file). NotebookLM attivo alla prossima call."
+                return RedirectResponse(f"/admin/nlm?msg={msg.replace(' ', '+')}&kind=ok", status_code=303)
+
+        audit({"event": "admin_nlm_upload_err", "by": email, "error": err})
+        return RedirectResponse(
+            f"/admin/nlm?msg=Errore:+{str(err).replace(' ', '+')}&kind=err",
+            status_code=303,
+        )
+
+    # GET — lo stato lo dice nb1777-mcp (il gateway non vede il volume)
+    st = await nlm_client.status()
+    if st is None:
+        status_html = '<div class="kicker"><span class="dot warn"></span>nb1777-mcp non raggiungibile — stato del profilo sconosciuto.</div>'
+    elif st.get("ok"):
         status_html = '<div class="kicker"><span class="dot ok"></span>Profilo nlm presente. NotebookLM dovrebbe funzionare.</div>'
     else:
         status_html = '<div class="kicker"><span class="dot warn"></span>Profilo nlm mancante — caricalo per attivare NotebookLM.</div>'

@@ -19,14 +19,18 @@ Variabili d'ambiente:
 from __future__ import annotations
 
 import asyncio
+import hmac
 import os
 from pathlib import Path
 from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
-from . import core
+from . import core, nlm_profile
+from .settings import get_settings
 
 
 HOST = os.environ.get("NB1777_HOST", "127.0.0.1")
@@ -78,6 +82,53 @@ def _check_auth_or_raise() -> None:
 async def _aio(fn, *args, **kwargs):
     _check_auth_or_raise()
     return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+# ============================================================
+# ENDPOINT INTERNI — il profilo NotebookLM (H6)
+# ============================================================
+# nb1777-mcp è l'UNICO servizio che monta il volume dei cookie Google. Il
+# gateway (l'unico esposto su Internet) e il bot non lo montano più: chiedono
+# qui. Così un gateway compromesso non può né leggere né riscrivere la
+# sessione Google.
+#
+# Questi endpoint NON sono raggiungibili dall'esterno: il proxy del gateway
+# rifiuta i sotto-path `internal/` (vedi gateway/app/proxy.py) e la rete
+# `backend` è `internal: true`. In più chiedono un segreto condiviso — così
+# nemmeno un container vicino compromesso (archive-mcp, bot) può scriverci.
+# Fail-closed: senza segreto configurato si nega tutto.
+
+def _internal_ok(request: "Request") -> bool:
+    secret = get_settings().effective_gateway_secret
+    if not secret:                       # non configurato → nega (fail-closed)
+        return False
+    got = request.headers.get("x-vps1777-internal", "")
+    return hmac.compare_digest(got, secret)
+
+
+@mcp.custom_route("/internal/nlm/status", methods=["GET"])
+async def internal_nlm_status(request: "Request") -> "JSONResponse":
+    """Stato del profilo, senza esporre i cookie: {ok, has_cookies, pending}."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    return JSONResponse(nlm_profile.profile_status(Path(get_settings().nlm_home)))
+
+
+@mcp.custom_route("/internal/nlm/profile", methods=["POST"])
+async def internal_nlm_profile(request: "Request") -> "JSONResponse":
+    """Installa il profilo da un tar.gz (body raw). Un tar invalido non tocca quello buono."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    body = await request.body()
+    try:
+        n = await asyncio.to_thread(
+            nlm_profile.install_profile, body, Path(get_settings().nlm_home)
+        )
+    except ValueError as exc:            # messaggio pensato per l'utente
+        return JSONResponse({"error": "invalid_profile", "reason": str(exc)}, status_code=400)
+    except OSError as exc:
+        return JSONResponse({"error": "write_failed", "reason": str(exc)}, status_code=500)
+    return JSONResponse({"files": n})
 
 
 # ============================================================

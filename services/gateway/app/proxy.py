@@ -74,6 +74,17 @@ async def proxy(request: Request) -> Response:
     service = path_params.get("service", "")
     sub_path = path_params.get("path", "")
 
+    # 0. `internal/` NON si attraversa. Il proxy è un catch-all su {path:path}:
+    # senza questo blocco, un client esterno raggiungerebbe gli endpoint privati
+    # di un upstream via /<secret>/<service>/internal/... — compreso quello che
+    # installa il profilo NotebookLM su nb1777-mcp (H6). Quel canale è solo
+    # gateway↔servizio, sulla rete interna. Vale per OGNI upstream, plugin
+    # futuri inclusi: chi scrive un plugin ha un prefisso riservato di cui
+    # fidarsi. Rifiuto PRIMA di ogni altro check → non rivela nulla.
+    if sub_path == "internal" or sub_path.startswith("internal/"):
+        audit({"event": "proxy_internal_blocked", "service": service, "path": sub_path})
+        return JSONResponse({"error": "not_found"}, status_code=404)
+
     # 1. Secret check (constant-time)
     expected = s.effective_gateway_secret
     if not expected or not _constant_eq(secret, expected):

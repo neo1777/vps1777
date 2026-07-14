@@ -35,11 +35,27 @@ log = logging.getLogger(__name__)
 
 # ───── helpers ─────
 
-def auth_pending() -> bool:
+async def auth_pending() -> bool:
+    """
+    C'è un profilo NotebookLM valido? Lo chiede a nb1777-mcp (H6): il bot non
+    monta più il volume coi cookie Google — non deve poterli leggere.
+    Fail-safe: se nb1777-mcp non risponde, si assume auth pendente (si mostra la
+    guida invece di far partire un comando che fallirebbe comunque).
+    """
     s = get_settings()
-    # nlm 0.7.x: l'auth è il profilo profiles/default/cookies.json (non auth.json)
-    cookies = Path(s.nlm_home) / "profiles" / "default" / "cookies.json"
-    return (Path(s.nlm_home) / "AUTH_PENDING.flag").exists() or not cookies.exists()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+            r = await client.get(
+                f"{s.nlm_internal_base.rstrip('/')}/internal/nlm/status",
+                headers={"x-vps1777-internal": s.effective_gateway_secret},
+            )
+        if r.status_code != 200:
+            log.warning("stato nlm: nb1777-mcp ha risposto %s", r.status_code)
+            return True
+        return not bool(r.json().get("ok"))
+    except (httpx.RequestError, ValueError) as exc:
+        log.warning("stato nlm: nb1777-mcp irraggiungibile (%s)", exc)
+        return True
 
 
 def owner_only(
@@ -121,7 +137,7 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if not msg:
         return
-    if auth_pending():
+    if await auth_pending():
         s = get_settings()
         link = f"{s.gateway_public_base}/admin/nlm" if s.gateway_public_base else "/admin/nlm"
         await msg.reply_text(

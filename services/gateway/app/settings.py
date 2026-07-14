@@ -151,7 +151,11 @@ class Settings(BaseSettings):
     # il file supera una soglia di dimensione (0 = nessuna retention, cresce senza
     # limite). Personalizzabile via AUDIT_RETENTION_DAYS.
     audit_retention_days: int = 90
-    nlm_auth_dir: str = "/var/lib/nlm"
+    # Il profilo NotebookLM (cookie Google) NON è più montato qui (H6): lo
+    # possiede nb1777-mcp, l'unico servizio che monta quel volume. Il gateway —
+    # l'unico esposto su Internet — glielo chiede su rete interna con un segreto
+    # condiviso. Vedi app/nlm_client.py.
+    nlm_internal_base: str = "http://nb1777-mcp:8003"
     onboarding_dir: str = "/var/lib/onboarding"  # bind-mount condiviso col PC (deploy.sh --apply)
     # dir dei DB di archive-mcp: il gateway scrive qui i .db indicizzati da
     # /admin/archive; archive-mcp li scopre (scan-mode). Volume condiviso.
