@@ -2,6 +2,21 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.36.0] — 2026-07-14
+
+### nb1777: il verdetto e la notifica — chiude la #30 (②③)
+
+Completa la #30: dopo ① (nb1777 *dichiara* il canonico), ora c'è il verdetto e la rete che avvisa Neo.
+
+- **② `memoria_check(versione_portata)`** — il *verdetto*: confronta la versione del blocco che una sessione porta col canonico e ritorna `{canonico, data, stale, delta}`. L'effetto collaterale è il punto: se la sessione è vecchia, mette in coda **un ping Telegram per Neo** — così anche se la sessione ignora il verdetto, Neo lo sa. `app/memoria.py`, stato persistito su `/var/lib/nlm` (il bot ha rootfs read-only → tutto lo stato sta nel server).
+- **③.1 ping drift** — «una sessione gira con memoria v2.2, il canonico è v2.4». Rate-limit **1 per coppia versione/giorno** (persistito), niente spam.
+- **③.2 promemoria cloud** — periodico: «il canonico è cambiato, aggiorna a mano le superfici cloud». L'ack è un **bottone Telegram «✓ Fatto»** *oppure* una fonte `cloud-ack vX.Y` nel notebook (l'automatismo file-simile). Il **poll del bot è il tick** — niente scheduler (sul VPS non c'è cron).
+- **Trasporto** — il bot resta senza stato e senza token verso il server: preleva le notifiche da `/internal/notifications` (secret condiviso, come `/internal/nlm/status`) e le manda; rimanda l'ack del bottone a `/internal/canonico/ack`. Nessuna modifica al compose.
+
+Verificato: `tests/test_memoria.py` (verdetto stale/allineato/assente, rate-limit drift, ack bottone+fonte col max, promemoria dovuto/spento/rate-limitato, drain) + `test_canonical.py` esteso (parser `cloud-ack`). Suite piena nb1777-mcp **70 passed**.
+
+**Il buco resta dichiarato:** un Project claude.ai **senza connettore MCP** non è raggiungibile da nessun canale. La #30 fa il massimo ottenibile: dove l'MCP c'è, la sessione lo sa e Neo viene avvisato; dove non c'è, nessun meccanismo può arrivare.
+
 ## [0.35.0] — 2026-07-14
 
 ### nb1777 dichiara il canonico del blocco di memoria (#30, parte ①)

@@ -29,7 +29,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from . import canonical, core, nlm_profile
+from . import canonical, core, memoria, nlm_profile
 from .settings import get_settings
 
 
@@ -472,6 +472,48 @@ async def canonico() -> dict:
     # NON via _aio: get_canonical è fail-open per contratto (deve poter dire
     # "available: false" invece di sollevare se l'auth/notebook manca).
     return canonical.public_view(await asyncio.to_thread(canonical.get_canonical))
+
+
+@mcp.tool()
+async def memoria_check(versione_portata: str) -> dict:
+    """MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che
+    porti (es. 'v2.2') col canonico attuale. Ritorna `{canonico, data, stale,
+    delta}`. Effetto collaterale che è IL PUNTO: se sei vecchio (`stale:true`),
+    manda a Neo UN ping Telegram (max 1 per versione al giorno) — così anche se la
+    sessione ignora il verdetto, Neo lo sa. Chiamalo all'avvio se la versione in
+    testa al tuo blocco potrebbe essere superata."""
+    verdict = await asyncio.to_thread(memoria.compare, versione_portata)
+    if verdict.get("stale") and verdict.get("canonico"):
+        await asyncio.to_thread(memoria.note_drift, versione_portata, verdict["canonico"])
+    return verdict
+
+
+@mcp.custom_route("/internal/notifications", methods=["GET"])
+async def internal_notifications(request: "Request") -> "JSONResponse":
+    """Il bot preleva qui le notifiche da mandare a Neo (drift + promemoria cloud).
+    Interno (secret condiviso): non è un tool pubblico, così una sessione non può
+    svuotare la coda al posto del bot."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    items = await asyncio.to_thread(memoria.drain)
+    return JSONResponse({"items": items})
+
+
+@mcp.custom_route("/internal/canonico/ack", methods=["POST"])
+async def internal_canonico_ack(request: "Request") -> "JSONResponse":
+    """Il bot registra qui l'ack del bottone «✓ Fatto»: superfici cloud aggiornate
+    a `version`. Spegne il promemoria fino al prossimo bump del canonico."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        body = await request.json()
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "bad_json"}, status_code=400)
+    version = str((body or {}).get("version") or "").strip()
+    if not version:
+        return JSONResponse({"error": "missing_version"}, status_code=400)
+    acked = await asyncio.to_thread(memoria.set_ack, version)
+    return JSONResponse({"ok": True, "acked": acked})
 
 
 # ============================================================

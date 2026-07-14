@@ -110,3 +110,19 @@ def test_get_canonical_fail_open_tiene_la_cache(monkeypatch) -> None:
 
     monkeypatch.setattr(canonical.core, "source_list", boom)
     assert canonical.get_canonical(force=True)["version"] == "v2.4"
+
+
+# ── cloud-ack: l'automatismo file-simile per l'ack (issue #30 ③.2) ───────────
+
+def test_cloud_ack_prende_la_piu_alta() -> None:
+    srcs = [
+        {"title": "cloud-ack v2.2 — 2026-07-11"},
+        {"title": "cloud-ack v2.4"},
+        {"title": "canonico v2.4 — 2026-07-13 — nota"},  # non è un cloud-ack
+    ]
+    assert canonical.highest_cloud_ack(srcs) == (2, 4)
+
+
+def test_cloud_ack_assente() -> None:
+    assert canonical.highest_cloud_ack(REAL_SOURCES) is None
+    assert canonical.highest_cloud_ack([]) is None
