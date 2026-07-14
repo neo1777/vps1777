@@ -2,6 +2,15 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.30.2] — 2026-07-14
+
+### Correzione — il dossier NON era applicato per intero (e una tar-bomb che avevo lasciato aperta)
+
+Una verifica voce-per-voce dei 43 interventi del dossier **contro il codice** (non contro il ricordo) ha smentito una dichiarazione fatta nella v0.30.0 e ripetuta in `SECURITY.md`.
+
+- **`SECURITY.md` diceva il falso in pubblico**: *«Nessuno dei rilievi della review è rimasto aperto»*. Il conteggio vero è **8 chiusi, 16 parziali, 19 aperti** su 43. Chiusi sono **entrambi i critici** (owner-gating fail-closed, cosign obbligatorio) e la sostanza della fascia alta — il resto no. La sezione *Residui noti* ora elenca i residui che pesano davvero, con il loro codice: cookie Google in chiaro nello snapshot pre-update (`H14`), tag `v*` non protetti (`H24`), sessione admin non revocabile (`H20`), operator con `sudo NOPASSWD: ALL` (`H12`), nessun 2FA (`H28`). È lo stesso scostamento doc↔codice che il dossier denuncia in `H21`: dichiararlo è l'unico modo di non ripeterlo.
+- **Tetti sul decompresso nell'upload del profilo NotebookLM** (`H39`): il cap di 5 MB imposto dal gateway è sul tar **compresso**, e non dice nulla su quanto quel tar si espande. `nlm_profile.py` estraeva senza guardare né la dimensione dichiarata dei membri né i byte cumulativi: **una tar-bomb da meno di 5 MB compressi poteva riempire il volume**. Ora c'è un tetto per-file (16 MB) e cumulativo (64 MB), la lettura è a blocchi, e il rifiuto non lascia residui né tocca il profilo buono (un profilo `nlm` vero pesa qualche decina di KB). Due test nuovi lo dimostrano.
+
 ## [0.30.1] — 2026-07-14
 
 ### Fix — ruotare `gateway_secret` non rompe più il canale interno
@@ -28,7 +37,9 @@ Ora vale un invariante semplice: **il volume dei cookie lo monta SOLO `nb1777-mc
 
 Verificato: 12 test nuovi sul modulo che possiede il profilo (traversal, symlink, tar corrotto, non-distruttività) e prova end-to-end del servizio — 403 senza segreto e col segreto sbagliato, upload valido → `{"files":2}`, upload invalido → 400 **col profilo buono intatto**, cookie a 600.
 
-**Con questo il dossier di review difensiva è applicato per intero.**
+**Con questo sono chiusi entrambi i finding CRITICI e la sostanza della fascia alta.**
+
+> **Correzione (v0.30.2).** Questa riga, in origine, diceva *«il dossier è applicato per intero»*. **Era falsa** e va corretta invece che nascosta: il dossier ha 43 interventi, e una verifica voce-per-voce contro il codice ne conta **8 chiusi, 16 parziali, 19 aperti**. Chiusi sono i due critici e il grosso della fascia alta; restano aperte voci reali (i cookie nello snapshot pre-update, la protezione dei tag, la revoca della sessione admin, i sudoers dell'operator). L'elenco onesto sta in [SECURITY.md](SECURITY.md#residui-noti--cosa-non-è-ancora-chiuso).
 
 ### `vps1777 update` — la proprietà degli artefatti non deriva più
 

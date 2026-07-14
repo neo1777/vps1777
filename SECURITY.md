@@ -196,16 +196,51 @@ servizi esterni. Nessuno è telemetria, ma è bene sapere **cosa esce verso chi*
 (non fa passare nulla da Telegram); l'archivio (`archive1777`) e il gateway restano
 interamente sulla VPS.
 
-## Residui noti
+## Residui noti — cosa NON è ancora chiuso
 
-Nessuno dei rilievi della review è rimasto aperto: il dossier è **applicato per
-intero** (l'ultimo, il mount rw dei cookie Google nel gateway, è chiuso in
-`v0.30.0`).
+La review difensiva ha prodotto **43 interventi** (2 critici, 7 alti, 21 medi, 13
+bassi). La campagna `v0.21.0 → v0.30.2` ha chiuso **i due critici** e la sostanza
+della fascia alta. Non ha chiuso tutto, e qui sta la lista vera — verificata
+contro il codice, non contro i buoni propositi:
 
-Questo non significa "sicuro": l'hardening è difesa in profondità, non una
-garanzia, e il progetto è pre-1.0. Restano vere le cose scritte sotto — le
-dipendenze a monte, le misconfigurazioni di chi installa, e gli account di terzi
-non sono nel nostro perimetro. Se trovi qualcosa, [scrivimi](#reporting-a-vulnerability).
+| | |
+|---|---|
+| **chiusi** | 8 |
+| **parziali** | 16 |
+| **aperti** | 19 |
+
+I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
+(`H2`) — sono chiusi e verificati in produzione. Sotto, i residui che pesano di
+più; il piano completo sta nel dossier di review.
+
+- **I cookie Google finiscono in chiaro nello snapshot pre-update** (`H14`).
+  `vps1777 update` fa uno snapshot **non cifrato** dei volumi dati prima di agire
+  (serve all'auto-rollback, che non può dipendere dalla chiave age), e fra quei
+  volumi c'è `nlm-auth`. Erode una parte di ciò che la `v0.30.0` ha chiuso: il
+  gateway non tocca più quei cookie, ma un dump di `backups/pre-update/` sì. Lo
+  snapshot è a `0700` e viene potato dopo 72h — sono mitigazioni, non il fix.
+- **I tag `v*` non sono protetti** (`H24`). Le release sono firmate cosign keyless
+  *dal workflow*, quindi chiunque possa pushare un tag `v*` conia una release
+  **regolarmente firmata**. La firma prova *da quale workflow* viene un artefatto,
+  non che qualcuno abbia autorizzato quel rilascio.
+- **La sessione admin non si revoca davvero** (`H20`). Il logout cancella il
+  cookie; il token `admin` non ha `jti` e non c'è revoke-list — un token rubato
+  resta valido fino alla scadenza (8h).
+- **L'operator ha `sudo NOPASSWD: ALL`** (`H12`), ed è nel gruppo `docker` (che è
+  root-equivalente). Il blast radius di una compromissione dell'operator è l'host.
+- **Nessun secondo fattore sul pannello admin** (`H28`): password + lockout per-IP.
+- **Il `TS_AUTHKEY` resta in `.env`** dopo l'uso (`H15`), e `.env` non è `chmod 600`.
+- **La password admin nasce sulla VPS** e torna sullo stdout SSH (`H16`).
+- **Nessuna pagina di consenso OAuth** (`H8`, parziale: la verifica dell'audience e
+  i limiti al DCR ci sono).
+- **`archive-data` è montato `rw`** in archive-mcp (`H42`), la sola-lettura è
+  applicativa.
+- Due parzialità sono **scelte deliberate**, non dimenticanze: il *contatore
+  globale* di `H4` (introdurrebbe un auto-lockout dell'owner) e il *push off-site*
+  di `H5` (la cartella `backups/` la porta dove vuole chi installa).
+
+L'hardening è difesa in profondità, non una garanzia, e il progetto è **pre-1.0**.
+Se trovi qualcosa, [scrivimi](#reporting-a-vulnerability).
 
 ## Out of scope
 
