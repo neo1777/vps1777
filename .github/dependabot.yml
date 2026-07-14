@@ -19,6 +19,14 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+    # I salti di MAJOR portano breaking change che rompono la CI: la PR #35
+    # bumpò 9 action ai major (setup-uv v3→v8 in un colpo) e la lint fallì. Qui
+    # il valore di Dependabot è tenere fresche le SHA DENTRO il major corrente
+    # (finding H23); i major si fanno a mano, quando c'è tempo di riparare la
+    # rottura. Minor e patch entrano come prima.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ── Immagini base dei Dockerfile (python:3.12-slim), un servizio a directory ─
   - package-ecosystem: docker
@@ -34,6 +42,17 @@ updates:
     groups:
       base-images:
         patterns: ["*"]
+    # python:3.12-slim → 3.14 è un salto MINOR in semver-docker (major=3 resta).
+    # Un cambio di runtime Python sull'immagine con Chromium/Playwright (nb1777-mcp)
+    # NON è validato dal solo `docker build` della CI: la PR #34 passava il build
+    # ma nessuno prova Chromium headless + il flusso nlm a runtime. Restiamo sulla
+    # linea 3.12, bump manuale quando la cadenza di release si assesta. `uv` e le
+    # patch di python restano liberi.
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
 
   # ── Immagini di terzi nei compose (alpine, caddy, cloudflared, portainer,
   #    watchtower): bumpa il digest pinnato quando il tag avanza. Le 4 immagini
