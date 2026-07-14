@@ -374,15 +374,20 @@ async def studio_create_all_9(notebook_id: str,
 # ============================================================
 
 @mcp.tool()
-async def studio_list(notebook_id: str) -> list[dict]:
-    """Lista tutti gli artefatti studio di un notebook con stato."""
-    return await _aio(core.studio_list, notebook_id)
+async def studio_list(notebook_id: str, verbose: bool = False) -> list[dict]:
+    """Lista gli artefatti studio di un notebook.
+
+    Default COMPATTO: per ognuno solo id/type/status/label (i primi 80 char del
+    focus). verbose=True restituisce il JSON pieno col focus intero (4-6 KB per
+    artefatto) — usalo solo se ti serve davvero il dettaglio."""
+    return await _aio(core.studio_list, notebook_id, verbose=verbose)
 
 
 @mcp.tool()
-async def studio_status(notebook_id: str, artifact_id: str) -> dict:
-    """Stato di un singolo artefatto."""
-    return await _aio(core.studio_status, notebook_id, artifact_id)
+async def studio_status(notebook_id: str, artifact_id: str, verbose: bool = False) -> dict:
+    """Stato di un singolo artefatto (id/type/status/label). verbose=True per
+    l'artefatto pieno col focus."""
+    return await _aio(core.studio_status, notebook_id, artifact_id, verbose=verbose)
 
 
 @mcp.tool()

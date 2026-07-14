@@ -558,8 +558,7 @@ def studio_create_audio(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=300)
-    return _last_artifact_id(nb_id, "audio")
+    return _create_and_resolve_artifact_id(nb_id, args, "audio", timeout=300)
 
 
 def studio_create_video(nb_id: str, *,
@@ -581,8 +580,7 @@ def studio_create_video(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=300)
-    return _last_artifact_id(nb_id, "video")
+    return _create_and_resolve_artifact_id(nb_id, args, "video", timeout=300)
 
 
 def studio_create_slides(nb_id: str, *,
@@ -600,8 +598,7 @@ def studio_create_slides(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=300)
-    return _last_artifact_id(nb_id, "slides")
+    return _create_and_resolve_artifact_id(nb_id, args, "slides", timeout=300)
 
 
 def studio_create_mindmap(nb_id: str, *,
@@ -612,8 +609,7 @@ def studio_create_mindmap(nb_id: str, *,
     """
     args = ["mindmap", "create", nb_id, "--title", title, "--confirm"]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "mindmap")
+    return _create_and_resolve_artifact_id(nb_id, args, "mindmap", timeout=240)
 
 
 def studio_create_infographic(nb_id: str, *,
@@ -635,8 +631,7 @@ def studio_create_infographic(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=300)
-    return _last_artifact_id(nb_id, "infographic")
+    return _create_and_resolve_artifact_id(nb_id, args, "infographic", timeout=300)
 
 
 def studio_create_data_table(nb_id: str, description: str, *,
@@ -649,8 +644,7 @@ def studio_create_data_table(nb_id: str, description: str, *,
     args = ["data-table", "create", nb_id, description,
             "--language", language, "--confirm"]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "data_table")
+    return _create_and_resolve_artifact_id(nb_id, args, "data_table", timeout=240)
 
 
 def studio_create_report(nb_id: str, *,
@@ -669,8 +663,7 @@ def studio_create_report(nb_id: str, *,
     if prompt:
         args += ["--prompt", prompt]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "report")
+    return _create_and_resolve_artifact_id(nb_id, args, "report", timeout=240)
 
 
 def studio_create_quiz(nb_id: str, *,
@@ -687,8 +680,7 @@ def studio_create_quiz(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "quiz")
+    return _create_and_resolve_artifact_id(nb_id, args, "quiz", timeout=240)
 
 
 def studio_create_flashcards(nb_id: str, *,
@@ -703,39 +695,108 @@ def studio_create_flashcards(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "flashcards")
+    return _create_and_resolve_artifact_id(nb_id, args, "flashcards", timeout=240)
 
 
 # ============================================================
 # studio — status / wait
 # ============================================================
 
-def studio_list(nb_id: str) -> list[dict]:
-    """Lista tutti gli artefatti studio di un notebook con stato corrente."""
-    return list(_run_json(["status", "artifacts", nb_id]))
+def _artifact_id_of(a: dict) -> str:
+    return a.get("id") or a.get("artifact_id") or ""
+
+
+def _artifact_compact(a: dict) -> dict:
+    """Proiezione compatta di un artefatto studio: id/type/status + un `label`
+    (i primi 80 char del focus). Il focus intero (`custom_instructions`, 4-6 KB
+    per un podcast) resta FUORI: è ~85:1 di rumore e il risultato di un tool MCP
+    entra inline nel contesto, non paginabile. Il label basta a riconoscerlo —
+    ed è indispensabile, perché senza è l'unico modo di distinguere due artefatti
+    dello stesso tipo."""
+    return {
+        "id": _artifact_id_of(a),
+        "type": a.get("type") or a.get("artifact_type"),
+        "status": a.get("status") or a.get("state"),
+        "label": (a.get("custom_instructions") or a.get("focus") or "")[:80],
+    }
+
+
+def studio_list(nb_id: str, verbose: bool = False) -> list[dict]:
+    """Lista gli artefatti studio di un notebook.
+
+    Default COMPATTO (id/type/status/label): la proiezione la sceglie chi
+    consuma, non chi produce. `verbose=True` restituisce il JSON pieno della CLI
+    (focus incluso) — solo quando serve davvero il dettaglio."""
+    arts = list(_run_json(["status", "artifacts", nb_id]))
+    return arts if verbose else [_artifact_compact(a) for a in arts]
+
+
+def _artifact_ids(nb_id: str) -> set[str]:
+    """Insieme degli id degli artefatti studio attualmente nel notebook."""
+    return {aid for a in studio_list(nb_id, verbose=True) if (aid := _artifact_id_of(a))}
 
 
 def _last_artifact_id(nb_id: str, kind: str) -> str:
-    """Restituisce l'ID dell'ultimo artefatto del tipo dato (assume order=cronologico)."""
-    arts = studio_list(nb_id)
+    """Ripiego best-effort: l'ultimo artefatto del tipo dato in lista. NON è
+    affidabile come identità dell'artefatto appena creato — l'ordine di
+    `status artifacts` non è cronologico (verificato il 14/07: sei create
+    consecutivi tornavano tutti l'id del primo). La via primaria è
+    `_create_and_resolve_artifact_id` (snapshot prima/dopo); questa resta solo
+    come fallback quando la differenza è ambigua (0 o >1 id nuovi)."""
+    arts = studio_list(nb_id, verbose=True)
     if not arts:
         return ""
     target = _norm_type(kind)
-    # mind_map mislabel come 'flashcards' in alcune versioni: se cercavi mindmap e non trovi,
-    # accetta anche le flashcards 'recenti' come fallback debole — meglio prendere l'ultima.
     matching = [a for a in arts
                 if _norm_type(a.get("type") or a.get("artifact_type") or "") == target]
     chosen = matching[-1] if matching else arts[-1]
-    return chosen.get("id") or chosen.get("artifact_id") or ""
+    return _artifact_id_of(chosen)
 
 
-def studio_status(nb_id: str, artifact_id: str) -> dict:
-    """Stato di un singolo artefatto (cerca per ID nella lista del NB)."""
-    for a in studio_list(nb_id):
-        aid = a.get("id") or a.get("artifact_id")
-        if aid == artifact_id:
-            return a
+def _create_and_resolve_artifact_id(nb_id: str, args: list[str], kind: str,
+                                    *, timeout: float) -> str:
+    """Esegue un `studio create` e ritorna l'id dell'artefatto APPENA creato.
+
+    Stessa cura delle fonti (`_add_and_resolve_id`): l'id NON si ricava
+    dall'ordine di `status artifacts` — verificato il 14/07, sei create
+    consecutivi tornavano tutti l'id del PRIMO artefatto. Lo si ricava per
+    DIFFERENZA: si fotografano gli id prima e dopo il create.
+
+    Limite dichiarato — concorrenza: se un'ALTRA sessione crea un artefatto sullo
+    stesso account NotebookLM nella finestra fra i due snapshot, la differenza
+    contiene più di un id. Si tenta di disambiguare col `kind` atteso; se resta
+    ambiguo si ripiega sul best-effort (`_last_artifact_id`) e si logga — non si
+    indovina in silenzio."""
+    before = _artifact_ids(nb_id)
+    _run(args, timeout=timeout)
+    after = _artifact_ids(nb_id)
+    new = after - before
+    if len(new) == 1:
+        return next(iter(new))
+    if not new:
+        log.warning("studio create (%s): nessun id nuovo (nb=%s) — ripiego best-effort",
+                    kind, nb_id)
+        return _last_artifact_id(nb_id, kind)
+    # >1 id nuovo: concorrenza sullo stesso account. Disambigua col tipo atteso.
+    target = _norm_type(kind)
+    typed = [aid for a in studio_list(nb_id, verbose=True)
+             if (aid := _artifact_id_of(a)) in new
+             and _norm_type(a.get("type") or a.get("artifact_type") or "") == target]
+    if len(typed) == 1:
+        return typed[0]
+    log.warning("studio create (%s): %d id nuovi (nb=%s) — concorrenza? ripiego best-effort",
+                kind, len(new), nb_id)
+    return _last_artifact_id(nb_id, kind)
+
+
+def studio_status(nb_id: str, artifact_id: str, verbose: bool = False) -> dict:
+    """Stato di un singolo artefatto (cerca per ID nella lista del NB).
+
+    Default COMPATTO (id/type/status/label): quasi sempre serve solo lo stato.
+    `verbose=True` per l'artefatto pieno col focus."""
+    for a in studio_list(nb_id, verbose=True):
+        if _artifact_id_of(a) == artifact_id:
+            return a if verbose else _artifact_compact(a)
     return {}
 
 
