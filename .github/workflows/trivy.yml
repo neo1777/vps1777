@@ -22,7 +22,7 @@ jobs:
       matrix:
         service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Check published image exists
         id: exists
         run: |
@@ -43,6 +43,6 @@ jobs:
           severity: CRITICAL,HIGH
       - name: Upload Sarif to GitHub Security
         if: always() && steps.exists.outputs.ok == 'true'
-        uses: github/codeql-action/upload-sarif@02c5e83432fe5497fd85b873b6c9f16a8578e1d9 # v3.37.0
+        uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4
         with:
           sarif_file: trivy-${{ matrix.service }}.sarif

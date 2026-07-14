@@ -422,8 +422,12 @@ findings:
         contains: ["github-actions", "docker-compose"]
       - file: .github/workflows/trivy.yml
         not_contains: ["trivy-action@master"]
+      # Evidenza robusta ai bump legittimi: checkout c'è ed è pinnata a SHA
+      # (NON a un tag mobile `@v...` o `@main`), che è ciò che H23 afferma. Il
+      # SHA specifico lo aggiorna Dependabot/il bump manuale; l'evidenza no.
       - file: .github/workflows/release.yml
-        contains: ["actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"]
+        contains: ["actions/checkout@"]
+        not_contains: ["actions/checkout@v", "actions/checkout@main"]
 
   - id: H24
     severity: medium
