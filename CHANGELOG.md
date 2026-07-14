@@ -2,6 +2,19 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.31.0] — 2026-07-14
+
+### Il registro dei rilievi — «dichiarato fatto ma assente» ora è una build rossa
+
+La campagna di hardening ha prodotto, oltre ai fix, **tre patologie** che vale la pena nominare perché non sono di questo progetto soltanto: *dichiarato fatto ma assente*, *soluzione scritta ma non applicata*, *fix che introduce un bug altrove*. Sotto le tre c'è **una** causa sola, e viene dall'angolo della provenienza: **una dichiarazione di sicurezza non ha coordinate**. Quando `SECURITY.md` ha scritto «il dossier è applicato per intero», quella frase non puntava a *nulla* — nessun file, nessuna riga, nessun test. Un claim infalsificabile non può marcire rumorosamente: marcisce in silenzio.
+
+- **`security/findings.yml`** — i 43 rilievi del dossier, ciascuno con stato (`closed`/`partial`/`open`) e, se chiuso, l'**evidenza puntuale**: i pattern che devono esistere (o non esistere più) nei file. L'evidenza è ancorata al *contenuto*, non al numero di riga, così regge mentre il codice si muove.
+- **`security/check_findings.py`**, in CI a ogni PR. Fallisce se: una voce `closed` non porta evidenza o la sua evidenza **è sparita dal codice**; un residuo non dichiara **cosa manca**; oppure i conteggi in `SECURITY.md` **non combaciano col registro**. Quest'ultimo controllo chiude il cerchio: il documento di sicurezza non può più dichiarare più di quanto il codice faccia — è lo scostamento doc↔codice che il dossier stesso denuncia in `H21`.
+
+Il gate ha ripagato **prima di entrare in CI**: alla prima esecuzione ha trovato un errore di conteggio introdotto venti minuti prima in `SECURITY.md` (8/17/18 invece di 8/16/19). Il numero corretto è ristabilito.
+
+Stato reale, ora verificato dalla macchina: **8 chiusi · 16 parziali · 19 aperti** su 43. Chiusi entrambi i critici.
+
 ## [0.30.2] — 2026-07-14
 
 ### Correzione — il dossier NON era applicato per intero (e una tar-bomb che avevo lasciato aperta)
