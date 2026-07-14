@@ -38,10 +38,16 @@ _CANON_RE = re.compile(
     re.IGNORECASE,
 )
 
+# `cloud-ack v2.4` — una fonte che Neo aggiunge al notebook per dire «superfici
+# cloud aggiornate a questa versione» (issue #30 ③.2: l'automatismo file-simile,
+# alternativo al bottone Telegram).
+_CLOUD_ACK_RE = re.compile(r"^\s*cloud-ack\s+v(\d+)\.(\d+)\b", re.IGNORECASE)
+
 # 15 min: il canonico cambia di rado (una fonte nuova ogni tanto), ma un refresh
 # periodico costa poco. Il deploy riavvia il processo → cache fredda comunque.
 _CACHE_TTL_S = 900.0
 _cache: dict = {"data": None, "ts": 0.0}
+_ack_cache: dict = {"data": None, "ts": 0.0}
 
 
 def highest_canonical(sources: list[dict]) -> Optional[dict]:
@@ -89,6 +95,36 @@ def get_canonical(*, force: bool = False) -> Optional[dict]:
         return data
     # notebook raggiungibile ma nessuna fonte `canonico vX.Y`: tieni la cache.
     return cached
+
+
+def highest_cloud_ack(sources: list[dict]) -> Optional[tuple[int, int]]:
+    """Versione più alta fra le fonti `cloud-ack vX.Y` (PURA). Ritorna la tupla
+    (major, minor) o None. È la controparte file-simile del bottone «Fatto»: Neo
+    aggiunge `cloud-ack v2.4` al notebook e il promemoria si spegne."""
+    best: Optional[tuple[int, int]] = None
+    for s in sources or []:
+        m = _CLOUD_ACK_RE.match((s.get("title") or "").strip())
+        if not m:
+            continue
+        cand = (int(m.group(1)), int(m.group(2)))
+        if best is None or cand > best:
+            best = cand
+    return best
+
+
+def get_cloud_ack(*, force: bool = False) -> Optional[tuple[int, int]]:
+    """Ultimo `cloud-ack` dal notebook, con cache TTL propria. Fail-open."""
+    now = time.monotonic()
+    if not force and _ack_cache["ts"] > 0 and (now - _ack_cache["ts"]) < _CACHE_TTL_S:
+        return _ack_cache["data"]
+    try:
+        data = highest_cloud_ack(core.source_list(CANON_NOTEBOOK_ID))
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        log.warning("cloud-ack: fetch fallito (%s) — uso la cache", exc)
+        return _ack_cache["data"]
+    _ack_cache["data"] = data
+    _ack_cache["ts"] = now
+    return data
 
 
 def public_view(data: Optional[dict]) -> dict:
