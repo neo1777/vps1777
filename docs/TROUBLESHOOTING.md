@@ -283,6 +283,28 @@ Fix: aggiungi l'IP/subnet del tuo ingress a `GATEWAY_FORWARDED_ALLOW_IPS` nel
 `*`: riaprirebbe lo spoofing degli header (rate-limit/lockout/audit
 falsificabili da un client pubblico).
 
+## `/admin/nlm` dice "nb1777-mcp non raggiungibile"
+
+Causa: dalla **v0.30.0** il gateway non monta più il volume del profilo
+NotebookLM (i cookie Google li possiede solo `nb1777-mcp`, vedi
+[SECURITY.md](../SECURITY.md)). Per mostrare lo stato — e per installare un
+profilo caricato — il gateway **chiede a `nb1777-mcp`** sulla rete interna. Se
+quel servizio è giù o non risponde, il gateway lo dice invece di mentire
+sostenendo che il profilo non c'è.
+
+Fix: guarda `nb1777-mcp`.
+```bash
+docker compose ps nb1777-mcp
+docker compose logs --tail 50 nb1777-mcp
+docker compose up -d nb1777-mcp
+```
+Se il servizio è su ma la risposta è comunque un errore, controlla che abbia il
+segreto condiviso montato (`GATEWAY_SECRET_FILE`): senza, gli endpoint interni
+negano tutti (fail-closed).
+```bash
+docker exec vps1777-nb1777-mcp-1 sh -c 'test -s /run/secrets/gateway_secret && echo secret ok || echo SECRET MANCANTE'
+```
+
 ## Reset completo (perdi dati)
 
 ```bash

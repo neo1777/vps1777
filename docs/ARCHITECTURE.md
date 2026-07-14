@@ -156,7 +156,8 @@ v0.19.1→v0.29.0); il dettaglio operativo sta in [SECURITY.md](../SECURITY.md).
 | v0.24.0 | `GATEWAY_SECRET` redatto dagli access-log (redazione installata prima di servire la prima richiesta). |
 | v0.25.0 | **Rate-limit per-IP** sugli endpoint auth: `/register` 10/5min, `/token` 60/min, `/app/auth` 20/5min. Il proxy MCP verifica l'**audience**: il `sub` dell'access token deve essere in `OAUTH_ALLOWED_EMAILS`, altrimenti rifiuta (401 `subject_not_allowed`). |
 | v0.28.0 | **`forwarded_allow_ips` ristretto** — vedi sotto. |
-| v0.29.0 | Container di **backup senza `docker.sock`**: volumi montati diretti `:ro`. |
+| v0.29.0 | Container di **backup senza `docker.sock`**: volumi montati diretti `:ro`. Segreti fuori dall'argv nel deploy. |
+| v0.30.0 | **Il gateway non tocca i cookie Google**: `nlm-auth` lo monta solo nb1777-mcp; gateway e bot ad accesso-zero, via canale interno. Il proxy rifiuta i sotto-path `internal/`. |
 
 ### IP client e header proxy (v0.28.0)
 
@@ -170,8 +171,31 @@ prende il primo host non fidato, quindi un `X-Forwarded-For` iniettato da un
 client pubblico viene scartato. Conseguenza: l'IP client non è più spoofabile e
 rate-limit, lockout e audit non sono più evadibili.
 
-### Residuo documentato (NON risolto)
+### Il profilo NotebookLM e il canale interno (v0.30.0)
 
-Il gateway monta `nlm-auth` in **rw** (cookie Google) per servire `/admin/nlm`.
-Fix futuro: spostare l'operazione su un endpoint interno di nb1777-mcp, così il
-gateway resta ad accesso-zero sul profilo NotebookLM.
+I cookie di sessione Google (volume `nlm-auth`) li monta **solo `nb1777-mcp`** —
+il servizio che li usa. Il gateway (l'unico esposto su Internet) e il bot hanno
+**accesso zero**: chiedono a lui.
+
+```
+gateway (esposto) ──┐
+                    ├─ HTTP interno + segreto condiviso ─► nb1777-mcp ─► [ nlm-auth ]
+bot               ──┘   X-Vps1777-Internal (constant-time)   (unico mount)
+```
+
+| Endpoint (solo rete `backend`) | Cosa fa |
+|---|---|
+| `GET /internal/nlm/status` | dice **se** c'è un profilo valido (`{ok, has_cookies, pending}`) — mai il contenuto |
+| `POST /internal/nlm/profile` | riceve il tar.gz, **valida**, installa (staging → swap con rollback) |
+
+Due proprietà da non perdere di vista se tocchi questa zona:
+
+- **`internal/` non si attraversa.** Il reverse proxy MCP è un catch-all su
+  `{path:path}`: senza un blocco esplicito, quegli endpoint sarebbero raggiungibili
+  da Internet via `/<SECRET>/<service>/internal/…`. `proxy.py` rifiuta ogni
+  sotto-path `internal/` con 404 **prima di ogni altro controllo** (secret, bearer),
+  per **tutti** gli upstream. È un **prefisso riservato**: un plugin può usarlo per
+  i propri endpoint privati sapendo che il proxy non li espone. Vedi [PLUGINS.md](PLUGINS.md).
+- **L'upload è non distruttivo.** Il tar si estrae in staging, si valida, e solo
+  allora sostituisce il profilo buono: un file sbagliato non ti scollega da
+  NotebookLM.
