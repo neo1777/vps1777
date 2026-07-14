@@ -311,6 +311,18 @@ def _layout(title: str, body: str, current: str = "", flash: str = "",
     flash_html = ""
     if flash:
         flash_html = f'<div class="flash {flash_kind}">{html.escape(flash)}</div>'
+    # Banner "sessione NON cifrata" (H10): se il gateway non è dietro HTTPS
+    # (PUBLIC_BASE non https → è attivo il fallback GATEWAY_BIND=0.0.0.0 su
+    # http://IP:8080, o si è ancora in setup), l'operatore DEVE saperlo — sta
+    # mandando la password su un canale in chiaro. Il fallback è comodo per non
+    # restare chiusi fuori, ma è temporaneo: appena il Funnel è su, va richiuso.
+    if not get_settings().gateway_public_base.startswith("https://"):
+        flash_html = (
+            '<div class="flash err">⚠ <b>Sessione NON cifrata</b> — questo gateway '
+            'non è dietro HTTPS (fallback su http). Va bene per il setup, ma non '
+            'esporlo così: attiva il Funnel/HTTPS e chiudi l\'accesso in chiaro.</div>'
+            + flash_html
+        )
     # CSP stretta con nonce: gli script inline (es. polling della card update)
     # portano il nonce; niente 'unsafe-inline' per gli script, niente origini
     # esterne (i Google Fonts sono stati tolti → fallback di sistema).
@@ -410,7 +422,10 @@ async def login(request: Request) -> Response:
         )
 
     _login_record_ok(ip)
-    audit({"event": "admin_login_ok", "email": email, "ip": ip})
+    # `insecure` (H10): traccia se il login è avvenuto su canale NON cifrato
+    # (fallback http). Così un accesso in chiaro lascia un segno nell'audit.
+    _https = get_settings().gateway_public_base.startswith("https://")
+    audit({"event": "admin_login_ok", "email": email, "ip": ip, "insecure": not _https})
     # anti open-redirect (H30): logica pura e TESTATA in admin_core (un bypass di
     # prefisso-vs-origine è già tornato una volta qui — mai più senza test).
     next_url = safe_next_url(next_url, s.gateway_public_base)
@@ -807,11 +822,13 @@ async def update_view(request: Request) -> Response:
         }
         path = ob / "update_pending_update.json"
         path.write_text(json.dumps(intent, indent=2) + "\n")
-        # 0644, non 0600: l'intent NON contiene segreti (target/nonce/email) e
-        # dev'essere LEGGIBILE dalla CLI host, che può girare con un uid diverso
-        # da quello del container gateway (uid 1000). La cancellazione la fa la
-        # CLI grazie alla ownership della dir onboarding/, non del file.
-        path.chmod(0o644)
+        # 0640 (H36): NON world-readable. L'intent porta un nonce che autorizza
+        # l'apply dell'update — non deve essere leggibile da ogni utente locale
+        # dell'host. 0640 (non 0600) per robustezza: il file lo scrive il
+        # container (uid 1000) e lo legge la CLI host, che sul bind-mount vede lo
+        # stesso uid/gid 1000 dell'operator — ma se un giorno divergessero, il
+        # gruppo copre la lettura senza rompere il pulsante update.
+        path.chmod(0o640)
         audit({"event": "admin_update_requested", "by": email, "target": latest})
         return RedirectResponse(
             "/admin/update?msg=Update+richiesto:+l'updater+parte+entro+pochi+secondi&kind=ok",

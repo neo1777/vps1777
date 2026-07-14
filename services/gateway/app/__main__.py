@@ -9,9 +9,31 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 
-from .asgi_security import SecurityHeadersASGI
+from .asgi_security import SecurityHeadersASGI, is_cors_scoped_path
 from .routes import routes
 from .settings import get_settings
+
+
+class ScopedCORS:
+    """CORSMiddleware applicato SOLO ai path che fanno davvero CORS cross-origin
+    (discovery + core OAuth + Mini App /app) — vedi is_cors_scoped_path (H31).
+
+    Perché non montarlo globale: con allow_credentials=True e claude.ai in
+    allowlist, un CORS su TUTTA l'app lascerebbe claude.ai leggere le risposte di
+    /admin (cookie dell'admin) via richiesta credenziata cross-origin. /admin è
+    same-origin e già protetto da CSRF: non deve rispondere a preflight né
+    esporre header CORS. Idem il proxy MCP (Bearer, non browser). Per i path
+    fuori scope si va diritti all'app: nessun header CORS, nessun preflight."""
+
+    def __init__(self, app, **cors_kwargs) -> None:
+        self.plain = app
+        self.cors = CORSMiddleware(app, **cors_kwargs)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and is_cors_scoped_path(scope.get("path", "")):
+            await self.cors(scope, receive, send)
+        else:
+            await self.plain(scope, receive, send)
 
 
 def build_app() -> Starlette:
@@ -19,12 +41,17 @@ def build_app() -> Starlette:
     middleware = [
         Middleware(SecurityHeadersASGI, hsts=s.gateway_public_base.startswith("https://")),
         Middleware(
-            CORSMiddleware,
+            ScopedCORS,
             # niente fallback wildcard: con allow_credentials=True un `["*"]`
             # accoppiato ai cookie è pericoloso. Origine non configurata → CORS
             # spento (lista vuota, fail-closed). Il default è ["https://claude.ai"].
             allow_origins=s.oauth_cors_origins,
             allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+            # allow_headers=["*"] resta, ma ora è confinato agli endpoint OAuth +
+            # /app (via ScopedCORS): l'origine è comunque ristretta a claude.ai e
+            # il wildcard non tocca più /admin. Stringere a una allowlist di
+            # header rischierebbe di rompere il preflight di claude.ai (che può
+            # inviare header non previsti) senza chiudere nulla in più.
             allow_headers=["*"],
             allow_credentials=True,
         ),

@@ -100,6 +100,48 @@ quella cartella dove preferisci — vps1777 non trasferisce nulla in automatico.
 > Il recipient in `tools/age-recipients.txt` resta: i backup esistenti e futuri
 > restano cifrabili, e ora decifrabili **solo** con la tua copia sul PC.
 
+## Rotazione della chiave age (H37)
+
+Ruotare la coppia age serve se sospetti che la **chiave privata** sia stata esposta,
+o come igiene periodica. Regola d'oro: la privata **non deve mai toccare la VPS** —
+si genera e si custodisce sul TUO PC; sulla VPS va solo il nuovo *recipient*.
+
+```bash
+# 1) sul TUO PC — genera la NUOVA coppia (non sovrascrivere subito la vecchia)
+age-keygen -o ~/.config/age/keys-new.txt
+grep 'public key' ~/.config/age/keys-new.txt        # → age1…  (il nuovo recipient)
+
+# 2) sulla VPS — sostituisci il recipient in tools/age-recipients.txt col nuovo age1…
+#    (una riga = un recipient; il commento '# created:'/altri sono ignorati)
+
+# 3) verifica: il prossimo backup si cifra con la chiave nuova
+./tools/backup.sh                                   # → un .tar.age nuovo
+```
+
+**Cosa succede ai backup VECCHI.** `age` cifra un archivio verso i *recipient*
+elencati **al momento della cifratura**: i `.tar.age` già prodotti restano cifrati
+con la **vecchia** chiave e si decifrano **solo con la vecchia privata**. Cambiare
+il recipient **non** li ri-cifra. Quindi:
+
+- **Conserva la vecchia privata** (offline) finché esistono backup cifrati con essa
+  — cioè finché non sono usciti dalla rotazione (7 giornalieri + 4 settimanali,
+  ~un mese) o li hai cancellati/ri-cifrati tu. Solo allora puoi ritirarla.
+- Sul PC promuovi la nuova a chiave attiva quando sei pronto:
+  ```bash
+  mv ~/.config/age/keys.txt ~/.config/age/keys-old.txt   # tienila, non buttarla
+  mv ~/.config/age/keys-new.txt ~/.config/age/keys.txt
+  ```
+- **Transizione morbida (opzionale)**: elenca **entrambi** i recipient (vecchio +
+  nuovo) in `tools/age-recipients.txt` durante il periodo di overlap — così ogni
+  nuovo backup è decifrabile con **una qualsiasi** delle due private. Rimuovi il
+  vecchio recipient a fine transizione.
+- **Ri-cifrare un backup vecchio sotto la chiave nuova** (se ne vuoi uno solo da
+  custodire): `age -d -i keys-old.txt vecchio.tar.age | age -r age1NUOVO… -o vecchio.rekey.tar.age`.
+
+> Gli **snapshot pre-update** (`backups/pre-update/`) **non** sono age-encrypted
+> (sono snapshot locali in chiaro per l'auto-rollback): la rotazione della chiave
+> age non li riguarda.
+
 ## Disaster recovery
 
 Scenario: VPS morta, nuova macchina, vuoi ripristinare.

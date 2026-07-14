@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import html
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from starlette.requests import Request
@@ -84,6 +84,51 @@ def _pending_path() -> Path:
     return d / "pending.json"
 
 
+# pending.json contiene authkey Tailscale + bot token IN CHIARO finché non parte
+# `deploy.sh --apply` (che lo consuma e lo cancella). Se l'apply non arriva mai,
+# quei segreti resterebbero a marcire su disco → TTL: dopo PENDING_TTL il file è
+# considerato scaduto e cancellato alla prima lettura (auto-wipe) — H36.
+PENDING_TTL = timedelta(hours=24)
+
+
+def _pending_is_stale(submitted_at: str | None, now: datetime) -> bool:
+    """True se il pending è più vecchio di PENDING_TTL. Logica pura (testabile).
+
+    Fail-closed: senza timestamp, o con un timestamp non parsabile, lo si tratta
+    come scaduto (meglio ri-chiedere i dati che tenere segreti di età ignota)."""
+    if not submitted_at:
+        return True
+    try:
+        ts = datetime.fromisoformat(submitted_at)
+    except ValueError:
+        return True
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return now - ts > PENDING_TTL
+
+
+def _read_pending() -> dict:
+    """Legge pending.json applicando il TTL. Se assente/illeggibile → {}. Se
+    scaduto → lo cancella (auto-wipe dei segreti in chiaro) e ritorna {}."""
+    pp = _pending_path()
+    try:
+        data = json.loads(pp.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict) or _pending_is_stale(
+        data.get("submitted_at"), datetime.now(timezone.utc)
+    ):
+        try:
+            pp.unlink()
+        except OSError:
+            pass
+        audit({"event": "onboarding_pending_expired"})
+        return {}
+    return data
+
+
 async def setup_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
@@ -93,13 +138,10 @@ async def setup_view(request: Request) -> Response:
         form = await request.form()
         pending: dict[str, str] = {}
         # Solo i campi compilati finiscono nel pending (merge non distruttivo).
-        existing = {}
+        # _read_pending applica il TTL: se il precedente è scaduto si riparte da
+        # zero (niente merge su segreti vecchi) invece di prolungarne la vita.
+        existing = _read_pending()
         pp = _pending_path()
-        if pp.exists():
-            try:
-                existing = json.loads(pp.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                existing = {}
         for key in ("tailscale_authkey", "telegram_bot_token", "telegram_owner_id", "public_base"):
             val = str(form.get(key, "")).strip()
             if val:
@@ -130,8 +172,9 @@ async def setup_view(request: Request) -> Response:
     def dot(state: str) -> str:
         return f'<span class="dot {state}"></span>'
 
-    pp = _pending_path()
-    has_pending = pp.exists()
+    # _read_pending applica il TTL: un pending scaduto viene cancellato qui (al
+    # semplice caricamento della pagina) e non risulta più "in attesa".
+    has_pending = bool(_read_pending())
 
     body = f"""
 <header>

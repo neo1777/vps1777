@@ -34,7 +34,10 @@ ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = ROOT / "security" / "findings.yml"
 SECURITY_MD = ROOT / "SECURITY.md"
 
-VALID_STATUS = {"closed", "partial", "open"}
+# `accepted` = la review l'ha sollevato, l'abbiamo considerato, e abbiamo deciso
+# di NON agire, con una motivazione. È un esito legittimo (risk acceptance): non
+# è "chiuso" (niente è stato fatto) né "aperto" (non è dimenticato, è una scelta).
+VALID_STATUS = {"closed", "partial", "open", "accepted"}
 VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # Quante voci il dossier ha per fascia: se il registro non le rispetta, qualcuno
 # ha aggiunto o perso un rilievo per strada.
@@ -82,7 +85,7 @@ def main() -> int:
     findings = data.get("findings") or []
 
     seen: set[str] = set()
-    counts = {"closed": 0, "partial": 0, "open": 0}
+    counts = {"closed": 0, "partial": 0, "open": 0, "accepted": 0}
     by_sev: dict[str, int] = {}
 
     for f in findings:
@@ -120,6 +123,12 @@ def main() -> int:
                  f"{fid}: è `{status}` ma non dichiara cosa manca.\n"
                  f"       Un residuo taciuto è un residuo dimenticato.")
 
+        # Un rischio accettato senza motivazione è un rischio nascosto.
+        if status == "accepted" and not (f.get("missing") or f.get("rationale")):
+            fail(errors,
+                 f"{fid}: è `accepted` ma non dice PERCHÉ non si fa.\n"
+                 f"       Accettare un rischio in silenzio è peggio che non accettarlo.")
+
         check_evidence(f, errors)
 
     # il dossier ha 43 voci, non una di meno
@@ -135,7 +144,8 @@ def main() -> int:
     # È il loop che si chiude: il documento non può più dichiarare più del codice.
     if SECURITY_MD.is_file():
         md = SECURITY_MD.read_text(encoding="utf-8")
-        for label, key in (("chiusi", "closed"), ("parziali", "partial"), ("aperti", "open")):
+        for label, key in (("chiusi", "closed"), ("parziali", "partial"),
+                           ("accettati", "accepted"), ("aperti", "open")):
             m = re.search(rf"\*\*{label}\*\*\s*\|\s*(\d+)", md)
             if not m:
                 fail(errors, f"SECURITY.md: non trovo il conteggio «{label}» nella tabella dei residui")
@@ -150,6 +160,7 @@ def main() -> int:
     print(f"{DIM}registro: {total} rilievi · "
           f"{GRN}{counts['closed']} chiusi{OFF}{DIM} · "
           f"{YEL}{counts['partial']} parziali{OFF}{DIM} · "
+          f"{DIM}{counts['accepted']} accettati · "
           f"{RED}{counts['open']} aperti{OFF}")
 
     if errors:

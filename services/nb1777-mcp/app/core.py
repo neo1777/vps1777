@@ -37,6 +37,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union
 
@@ -57,6 +58,12 @@ _ERR_CMD_MAX = 300
 NB_LAB_GDR1777 = "492a2e7b-1e08-4100-89ed-6a13febf1295"   # GDR1777 — laboratorio artefatti (test 9 strumenti)
 NB_VPS_1777 = "489e15bc-ddde-48ef-8c98-ba21bcb0a7da"      # vps-1777 (biblioteca VPS)
 NB_BOT_IMITATORE = "15290c4d-a842-4261-99e5-f7824b197c85" # bot-imitatore (da popolare)
+
+# H40 — prefisso dei notebook scratch usa-e-getta creati dall'OCR
+# (transcribe_document). È l'UNICO segnale per riconoscere e recuperare gli
+# scratch rimasti orfani quando il cleanup fallisce: chi lo cambia deve
+# aggiornare anche sweep_ingest_notebooks() e doctor().
+INGEST_NB_PREFIX = "_ingest_"
 
 # I 9 tipi di artefatto Studio NotebookLM (nome canonico interno)
 ARTIFACT_TYPES = (
@@ -404,6 +411,36 @@ _VERIFY_PROMPT = (
 )
 
 
+def _delete_notebook_with_retry(nb_id: str, *, attempts: int = 3, backoff: float = 1.0) -> None:
+    """`nb_delete` con qualche tentativo: la cancellazione di un notebook su
+    NotebookLM può fallire per un errore transiente (rete, rate-limit, 5xx). Si
+    riprova `attempts` volte con backoff lineare; se fallisce ancora, si rilancia
+    l'ultima NLMError e decide il chiamante. Usato sia dalla pulizia dell'OCR sia
+    dallo sweep di recupero (H40)."""
+    last: Optional[NLMError] = None
+    for i in range(attempts):
+        try:
+            nb_delete(nb_id)
+            return
+        except NLMError as exc:
+            last = exc
+            if i < attempts - 1:
+                time.sleep(backoff * (i + 1))
+    raise last if last is not None else NLMError(f"delete fallita: {nb_id}")
+
+
+def _parse_iso8601(ts: Optional[str]) -> Optional[float]:
+    """ISO-8601 (es. '2026-07-14T13:44:58Z') → epoch secondi UTC; None se assente
+    o non parsabile. `nlm notebook list --json` espone `updated_at` in questa forma
+    (verificato dal vivo); è il segnale d'età usato dallo sweep."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
 def transcribe_document(file_path: Union[str, Path], *, title: Optional[str] = None,
                         verify: bool = False, timeout: float = 600.0) -> dict:
     """Estrae il testo di un file via NotebookLM (multimodale → legge anche le
@@ -412,29 +449,87 @@ def transcribe_document(file_path: Union[str, Path], *, title: Optional[str] = N
     Crea un notebook scratch usa-e-getta, aggiunge il file (NotebookLM lo
     processa), chiede la trascrizione integrale via query, opzionalmente chiede
     una verifica di fedeltà (NotebookLM controlla il proprio lavoro), poi
-    cancella lo scratch. Ritorna {text, chars, verification?}.
+    cancella lo scratch. Ritorna {text, chars, cleanup_ok, verification?}.
+
+    H40 — `cleanup_ok` dice al chiamante se lo scratch è stato davvero cancellato.
+    Il documento OCR-ato vive dentro quel notebook: se la delete fallisce (anche
+    dopo i retry) resta su Google. In quel caso `cleanup_ok=False` e il notebook
+    (prefisso INGEST_NB_PREFIX) sarà recuperato più tardi da sweep_ingest_notebooks().
+    La pulizia gira SEMPRE, anche se la trascrizione stessa solleva.
 
     NB: la trascrizione è generata da LLM, non è OCR deterministico → su layout
     complessi può omettere/allucinare. La query di verifica (`verify=True`) serve
     a segnalarlo.
     """
-    import os
     path = Path(file_path)
-    nb = nb_create(f"_ingest_{os.urandom(4).hex()}")
+    out: dict = {"text": "", "chars": 0, "cleanup_ok": False}
+    nb = nb_create(f"{INGEST_NB_PREFIX}{os.urandom(4).hex()}")
     try:
         source_add_file(nb, path, title=title or path.name, wait=True, timeout=timeout)
         q = notebook_query(nb, _TRANSCRIBE_PROMPT, timeout=timeout)
         text = (q.get("answer") if isinstance(q, dict) else None) or ""
-        out: dict = {"text": text, "chars": len(text)}
+        out["text"] = text
+        out["chars"] = len(text)
         if verify and text:
             v = notebook_query(nb, _VERIFY_PROMPT, timeout=timeout)
             out["verification"] = (v.get("answer") if isinstance(v, dict) else None) or ""
-        return out
     finally:
         try:
-            nb_delete(nb)
+            _delete_notebook_with_retry(nb)
+            out["cleanup_ok"] = True
         except NLMError as exc:
-            log.warning("transcribe: cleanup scratch nb fallito (%s): %s", nb, exc)
+            log.warning(
+                "transcribe: cleanup scratch nb FALLITO dopo i retry (%s): %s — il "
+                "documento resta su NotebookLM; recuperabile con sweep_ingest_notebooks()",
+                nb, exc)
+    return out
+
+
+def sweep_ingest_notebooks(*, older_than_s: float = 3600.0, max_deletes: int = 50) -> dict:
+    """Recupera i notebook scratch '`_ingest_`*' rimasti orfani (H40).
+
+    Uno scratch dell'OCR (transcribe_document) che non è stato cancellato — perché
+    `nb_delete` ha fallito anche coi retry — resta su NotebookLM col documento
+    dentro. Questo sweep li elimina: prende i notebook col prefisso INGEST_NB_PREFIX
+    la cui ultima attività (`updated_at`) è più vecchia di `older_than_s`, e li
+    cancella (con retry). La soglia PROTEGGE una trascrizione ancora in corso
+    (updated_at recente): non toccare quella. Uno scratch senza timestamp è un
+    orfano non databile → si considera vecchio e si recupera.
+
+    Richiamabile a mano, da `doctor`, o da un timer periodico. Ritorna un
+    resoconto: {candidates, deleted:[id], failed:[{id,error}], skipped_recent,
+    swept_ok}.
+    """
+    now = time.time()
+    candidates: list[str] = []
+    skipped_recent = 0
+    for nb in nb_list():
+        if not (nb.get("title") or "").startswith(INGEST_NB_PREFIX):
+            continue
+        nb_id = nb.get("id") or nb.get("notebook_id") or ""
+        if not nb_id:
+            continue
+        age = _parse_iso8601(nb.get("updated_at") or nb.get("created_at"))
+        if age is not None and (now - age) < older_than_s:
+            skipped_recent += 1
+            continue
+        candidates.append(nb_id)
+
+    deleted: list[str] = []
+    failed: list[dict] = []
+    for nb_id in candidates[:max_deletes]:
+        try:
+            _delete_notebook_with_retry(nb_id)
+            deleted.append(nb_id)
+        except NLMError as exc:
+            failed.append({"id": nb_id, "error": str(exc)})
+    return {
+        "candidates": len(candidates),
+        "deleted": deleted,
+        "failed": failed,
+        "skipped_recent": skipped_recent,
+        "swept_ok": not failed,
+    }
 
 
 # ============================================================
@@ -814,6 +909,10 @@ def doctor() -> dict:
         nbs = nb_list()
         info["notebooks_count"] = len(nbs)
         info["first_3"] = [{"id": nb.get("id"), "title": nb.get("title")} for nb in nbs[:3]]
+        # H40 — visibilità (NON distruttiva) sugli scratch OCR rimasti orfani.
+        # doctor osserva; a cancellarli è sweep_ingest_notebooks() su richiesta.
+        info["ingest_orphans"] = sum(
+            1 for nb in nbs if (nb.get("title") or "").startswith(INGEST_NB_PREFIX))
     except Exception as e:
         info["list_error"] = str(e)
     return info

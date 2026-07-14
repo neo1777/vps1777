@@ -77,14 +77,27 @@ Un check host — `vps1777 secrets-status` (timer systemd **settimanale**
 `vps1777-secrets-check.timer`) — calcola l'**età** di ogni secret (dall'mtime del
 file, riscritto a ogni rotazione) e la confronta con una soglia:
 
-| Secret | Soglia consigliata | Rotazione |
-|---|---|---|
-| `oauth_signing_secret` | 90 giorni | manuale (invalida i token) |
-| `admin_password_bcrypt` | 90 giorni | manuale |
-| `gateway_secret` | 180 giorni | manuale (cambia le URL MCP) |
-| `telegram_bot_token` | 365 giorni | manuale (BotFather) — radice di fiducia della Mini App |
-| `cloudflared_token` | 365 giorni | manuale (se usi l'ingress Cloudflare) |
-| cookie NotebookLM | 14 giorni | ricarica da `/admin/nlm` — scadono da soli |
+| Secret | Fascia | Soglia consigliata | Rotazione |
+|---|---|---|---|
+| `telegram_bot_token` | **massima** (radice di fiducia Mini App) | **90 giorni** | manuale (revoca e rigenera su @BotFather) |
+| `oauth_signing_secret` | alta | 90 giorni | manuale (invalida i token) |
+| `admin_password_bcrypt` | alta | 90 giorni | manuale |
+| `gateway_secret` | media | 180 giorni | manuale (cambia le URL MCP) |
+| `cloudflared_token` | bassa | 365 giorni | manuale (se usi l'ingress Cloudflare) |
+| cookie NotebookLM | — | 14 giorni | ricarica da `/admin/nlm` — scadono da soli |
+
+> **Perché `telegram_bot_token` è fascia massima (H29).** Non è un segreto
+> "ordinario": è la **radice di fiducia della Mini App**. L'autenticazione della
+> Mini App valida l'`initData` firmandolo con il token del bot — quindi **chi ha il
+> token può forgiare un `initData` valido per QUALUNQUE user id**, compreso quello
+> dell'owner, e passare per chiunque. Vale quanto una chiave di firma di sessione,
+> non quanto un'API key qualsiasi: per questo la soglia consigliata scende a
+> **90 giorni** (allineata a `oauth_signing_secret`), non 365. La revoca è
+> immediata da @BotFather (rigenera il token → il vecchio smette di firmare).
+>
+> ⚠️ La soglia nel CODICE (il check `vps1777 secrets-status`) è ancora **365** in
+> `tools/vps1777.py` (`_SECRET_POLICY`, riga del `telegram_bot_token`): va portata
+> a 90 perché il promemoria automatico sia coerente con questa doc.
 
 Se un secret supera la soglia, il check **notifica il owner su Telegram** (`--notify`)
 e lo segna nella pagina admin **`/admin/secrets`**, che mostra età, ultima rotazione
@@ -103,7 +116,8 @@ Vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md). I secret vanno backuppati age-encry
 insieme ai volumi. Dalla v0.26.0 il backup cifra con la sola chiave **pubblica**
 (recipient in `tools/age-recipients.txt`); la chiave **privata** vive sul PC
 dell'owner, **fuori dalla VPS**, e serve solo al restore — `backup.sh` non genera
-più la coppia sulla VPS.
+più la coppia sulla VPS. Per **ruotare** la coppia age (e cosa ne è dei backup
+vecchi) vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md#rotazione-della-chiave-age-h37).
 
 ## Threat model
 

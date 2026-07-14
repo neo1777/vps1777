@@ -167,42 +167,49 @@ findings:
   - id: H8
     severity: high
     title: "OAuth: pagina di consenso, limiti al DCR, verifica dell'audience nel proxy"
-    status: partial
-    since: v0.25.0
+    status: closed
+    since: v0.33.0
     evidence:
       - file: services/gateway/app/proxy.py
         contains: ["subject_not_allowed"]
       - file: services/gateway/app/oauth.py
-        contains: ["_REGISTER_LIMIT", "_TOKEN_LIMIT"]
-    missing: >
-      La pagina di CONSENSO: /authorize emette il code subito dopo il cookie admin,
-      senza un passaggio di approvazione esplicita. docs/ARCHITECTURE.md la disegna
-      ancora nel flusso — scostamento doc↔codice.
+        contains: ["_REGISTER_LIMIT", "_TOKEN_LIMIT", "def _consent_page", "error=access_denied"]
+      - file: services/gateway/app/routes.py
+        contains: ['Route("/authorize", oauth.authorize, methods=["GET", "POST"]']
+    note: >
+      Consent page vera (Neo ha deciso: SÌ): /authorize da loggato mostra
+      "autorizzi <client>?" [Autorizza]/[Rifiuta], POST con CSRF, valori client
+      html-escaped (XSS), Rifiuta → error=access_denied. Audience + limiti DCR già
+      c'erano. Chiude anche uno scostamento: ARCHITECTURE.md la disegnava già.
 
   - id: H9
     severity: high
     title: "deploy.sh --apply: validare e non interpolare i dati scritti dal gateway"
-    status: partial
-    since: v0.29.0
+    status: closed
+    since: v0.33.0
     evidence:
       - file: deploy.sh
-        contains: ["bash -s"]
-    missing: >
-      La VALIDAZIONE. I valori di pending.json (scritti dal gateway) vengono letti
-      e usati senza schema né controllo di forma. L'interpolazione è chiusa (viaggiano
-      via stdin), la validazione no.
+        contains: ["bash -s", "Config non valida in pending.json", "grep -qE '^tskey-"]
+    note: >
+      Interpolazione chiusa (via stdin, v0.29.0) + VALIDAZIONE della forma di ogni
+      valore prima di scriverlo (tskey-…, <id>:<token>, owner numerico, URL https).
+      Verificato che rifiuta le injection ($(rm), ; cat /etc/shadow, http://). Vuoto
+      resta lecito (campo non compilato).
 
   # ═══════════════════════════ FASCIA MEDIA ═══════════════════════════
 
   - id: H10
     severity: medium
     title: "Degradi di esposizione espliciti, rumorosi e temporanei"
-    status: open
-    missing: >
-      L'installer imposta da sé GATEWAY_BIND=0.0.0.0 sul fallimento del Funnel, a
-      tempo indefinito: nessun banner "sessione non cifrata", nessun evento di audit
-      sul cambio di bind, nessuna richiusura automatica, nessuna via raccomandata
-      via tunnel SSH su loopback.
+    status: closed
+    since: v0.33.0
+    evidence:
+      - file: services/gateway/app/admin.py
+        contains: ["Sessione NON cifrata", '"insecure": not _https']
+    note: >
+      Il fallback http resta (per non restare chiusi fuori nel setup, scelta di Neo) ma
+      è RUMOROSO: banner "sessione NON cifrata" su ogni pagina admin quando il gateway
+      non è dietro HTTPS + flag `insecure` nell'audit del login.
 
   - id: H11
     severity: medium
@@ -326,15 +333,17 @@ findings:
   - id: H18
     severity: medium
     title: "Percorso di cancellazione per l'archivio + sezione «dati a riposo»"
-    status: partial
-    since: v0.17.0
+    status: closed
+    since: v0.33.0
     evidence:
       - file: services/gateway/app/admin.py
         contains: ["admin_archive_delete"]
-    missing: >
-      Cancellazione per singola conversazione (oggi solo per DB intero); sezione
-      «dati a riposo» in SECURITY.md (il volume archive non è cifrato a riposo);
-      propagazione della cancellazione nei backup già fatti.
+      - file: SECURITY.md
+        contains: ["Dati a riposo"]
+    note: >
+      Cancellazione per-DB + sezione «Dati a riposo» in SECURITY.md (volume archive e
+      disco VPS non cifrati a riposo — dichiarato). DECISIONE Neo: per-conversazione e
+      cifratura volume NON fatte (complessità non giustificata).
 
   - id: H19
     severity: medium
@@ -372,17 +381,21 @@ findings:
   - id: H21
     severity: medium
     title: "Riconciliazione doc↔codice + email di contatto + gate di release"
-    status: partial
-    since: v0.24.0
+    status: closed
+    since: v0.33.0
     evidence:
       - file: SECURITY.md
         contains: ["antigravity1777@gmail.com"]
-    missing: >
-      Restano scostamenti in doc: ARCHITECTURE.md disegna una consent page che non
-      esiste (H8) e una separazione egress che non esiste (H25); SECRETS.md dichiara
-      `secrets/` a mode 700 che setup.sh non imposta (H38). E manca il GATE: nessuna
-      checklist in PR-template/CI che pretenda una coordinata per ogni claim di
-      sicurezza. QUESTO FILE + check_findings.py sono l'inizio di quel gate.
+      - file: security/check_findings.py
+        contains: ["SECURITY.md dichiara", "non combacia"]
+      - file: .github/workflows/ci.yml
+        contains: ["security/check_findings.py"]
+    note: >
+      Gli scostamenti sono chiusi perché il codice ha RAGGIUNTO la doc: la consent page
+      (H8) e la separazione egress (H25) ORA esistono, e SECRETS.md mode-700 è vera (H38).
+      Il GATE di release è `security/findings.yml` + `check_findings.py` in CI: verifica
+      che ogni claim chiuso abbia la sua coordinata e che i conteggi in SECURITY.md
+      combacino col registro. Lo scostamento doc↔codice ora fa fallire la build.
 
   - id: H22
     severity: medium
@@ -445,12 +458,21 @@ findings:
   - id: H25
     severity: medium
     title: "Rete egress separata; su ingress solo gateway + sidecar; doc plugin oneste"
-    status: open
-    missing: >
-      Non esiste una rete `egress`: nb1777-mcp e il bot stanno sulla rete `ingress`
-      per poter uscire su Internet — 3 container su 4 hanno una gamba lì.
-      ARCHITECTURE.md dichiara il contrario («ingress: gateway + sidecar»): scostamento.
-      E PLUGINS.md non dice che un plugin è fiducia piena verso gli altri servizi.
+    status: closed
+    since: v0.33.0
+    why: >
+      nb1777-mcp e il bot stavano su `ingress` per uscire su Internet — la stessa rete
+      del proxy internet-facing. Un proxy compromesso si trovava accanto a loro.
+    evidence:
+      - file: compose.yaml
+        contains: ["egress:", "- egress"]
+      - file: docs/PLUGINS.md
+        contains: ["fiducia piena"]
+    note: >
+      Rete `egress` (bridge senza porte pubblicate: solo uscita); nb1777-mcp+bot spostati
+      lì, tolti da `ingress`. Su ingress restano solo gateway+proxy. VERIFICATO sul VPS:
+      da egress NotebookLM+Telegram=302, da rete internal=000 (uscita bloccata).
+      ARCHITECTURE.md allineato + nota "fiducia piena" in PLUGINS.md.
 
   - id: H26
     severity: medium
@@ -480,19 +502,23 @@ findings:
   - id: H28
     severity: medium
     title: "Secondo fattore (TOTP o passkey) sul pannello admin"
-    status: open
+    status: accepted
     missing: >
-      Nessun 2FA: il pannello è protetto da password (bcrypt 12) + lockout per-IP.
-      Contro una password rubata, non basta.
+      DECISIONE Neo (14 lug): NIENTE 2FA. Gateway mono-utente dietro Tailscale Funnel;
+      difese = password bcrypt-12 + lockout per-IP + CSRF + revoca reale sessione (H20).
+      Il 2FA aggiungerebbe attrito + un secret per guadagno marginale su questo profilo.
+      Rischio accettato, non dimenticato.
 
   - id: H29
     severity: medium
     title: "Token bot Telegram riclassificato di fascia massima"
-    status: open
-    missing: >
-      È la radice di fiducia della Mini App (con quel token si forgia un initData
-      valido per QUALUNQUE user id), ma è trattato come segreto ordinario: soglia di
-      rotazione a 365 giorni, nessuna menzione della sua criticità in doc.
+    status: closed
+    since: v0.33.0
+    evidence:
+      - file: tools/vps1777.py
+        contains: ["Token bot Telegram (radice Mini App)", "90, False"]
+      - file: docs/SECRETS.md
+        contains: ["radice di fiducia"]
 
   - id: H30
     severity: medium
@@ -515,47 +541,57 @@ findings:
   - id: H31
     severity: low
     title: "CORS: rimuovere il fallback wildcard con credenziali; scoping per path"
-    status: partial
-    since: v0.21.0
+    status: closed
+    since: v0.33.0
     evidence:
       - file: services/gateway/app/__main__.py
-        contains: ["allow_origins=s.oauth_cors_origins"]
+        contains: ["class ScopedCORS", "allow_origins=s.oauth_cors_origins"]
         not_contains: ['or ["*"]']
-    missing: >
-      Il middleware CORS è ancora GLOBALE (montato su tutta l'app, /admin incluso)
-      invece che scoped agli endpoint OAuth + /app; allow_headers resta ["*"].
+      - file: services/gateway/app/asgi_security.py
+        contains: ["def is_cors_scoped_path"]
+    note: >
+      CORS ora scoped ai soli endpoint OAuth + /app (non /admin, non il proxy) via
+      ScopedCORS. allow_headers=["*"] mantenuto MA confinato a quegli endpoint e con
+      origine ristretta a claude.ai: stringere gli header rischierebbe di rompere il
+      preflight di claude.ai senza chiudere nulla in più (lo scoping ha già tolto /admin).
 
   - id: H32
     severity: low
     title: "Igiene OAuth minore: state url-encoded, code_challenge vuoto, PKCE constant-time"
-    status: partial
-    since: v0.21.0
+    status: closed
+    since: v0.33.0
     evidence:
       - file: services/gateway/app/oauth.py
-        contains: ["quote(state, safe=", "code_challenge"]
-    missing: >
-      Il confronto PKCE non è constant-time (`if expected != ctx["code_challenge"]`):
-      manca hmac.compare_digest.
+        contains: ["quote(state, safe=", "hmac.compare_digest(expected"]
 
   - id: H33
     severity: low
     title: "/health: deep riservato ai chiamanti interni, body pubblico minimo"
-    status: open
-    missing: >
-      Il body pubblico espone oauth_required e i NOMI degli upstream; `?deep=1` apre
-      probe TCP verso i backend per chiunque, senza alcun gate.
+    status: closed
+    since: v0.33.0
+    evidence:
+      - file: services/gateway/app/routes.py
+        contains: ["ip_is_internal(client_host)", '"error": "forbidden"']
+        not_contains: ['"upstreams": sorted']
+      - file: services/gateway/app/asgi_security.py
+        contains: ["def ip_is_internal"]
+    note: >
+      `?deep` (port-probe dei backend) riservato ai chiamanti interni (loopback/RFC1918)
+      → 403 dall'esterno. Body pubblico ridotto a {"ok": true}: tolti oauth_required,
+      service E i nomi upstream. La Mini App li legge ora da /app/api/overview (Bearer).
 
   - id: H34
     severity: low
     title: "Security header aggiuntivi: Permissions-Policy, COOP, CSP di default"
-    status: partial
-    since: v0.21.0
+    status: closed
+    since: v0.33.0
     evidence:
       - file: services/gateway/app/asgi_security.py
-        contains: ["Permissions-Policy", "Cross-Origin-Opener-Policy"]
-    missing: >
-      Nessuna CSP minimale di DEFAULT nel middleware: la CSP esiste solo sulle pagine
-      admin e Mini App, non come rete di sicurezza globale.
+        contains: ["Permissions-Policy", "Cross-Origin-Opener-Policy", "DEFAULT_CSP"]
+    note: >
+      CSP di default restrittiva (default-src 'none'; base-uri 'none'; frame-ancestors
+      'none') nel middleware, come rete di sicurezza globale. NON sovrascrive la CSP-con-nonce
+      di admin/miniapp/consent-page (quelle vincono: la default vale solo dove manca).
 
   - id: H35
     severity: low
@@ -575,24 +611,28 @@ findings:
   - id: H36
     severity: low
     title: "pending.json con TTL/auto-wipe; intent file 0640"
-    status: open
-    missing: >
-      pending.json (che contiene authkey e bot token in chiaro finché non si lancia
-      --apply) non ha TTL né auto-wipe; l'intent file di update è 0644.
+    status: closed
+    since: v0.33.0
+    evidence:
+      - file: services/gateway/app/onboarding.py
+        contains: ["PENDING_TTL = timedelta", "def _pending_is_stale", "def _read_pending"]
+      - file: services/gateway/app/admin.py
+        contains: ["chmod(0o640)"]
+    note: >
+      pending.json con TTL 24h + auto-wipe alla lettura se scaduto (0600). Intent file
+      di update da 0644 → 0640: non più world-readable (porta un nonce che autorizza
+      l'apply); 0640 e non 0600 per robustezza uid/gid container↔CLI sul bind-mount.
 
   - id: H37
     severity: low
     title: "Monitoraggio segreti completo: cloudflared_token, cookie nlm, rotazione age"
-    status: partial
-    since: v0.32.0
+    status: closed
+    since: v0.33.0
     evidence:
       - file: tools/vps1777.py
         contains: ["cloudflared_token.txt", "def nlm_cookie_status", "NLM_COOKIE_MAX_DAYS"]
-    missing: >
-      Aggiunti cloudflared_token e la freschezza dei cookie NotebookLM (sondati via
-      docker stat sul mtime). RESTA da documentare la ROTAZIONE della chiave age in
-      docs/SECRETS.md e BACKUP-RESTORE.md (non ha un file-con-mtime sulla VPS da
-      monitorare, quindi è doc, non policy).
+      - file: docs/BACKUP-RESTORE.md
+        contains: ["Rotazione della chiave age"]
 
   - id: H38
     severity: low
@@ -633,11 +673,17 @@ findings:
   - id: H40
     severity: low
     title: "OCR via NotebookLM: esito del cleanup propagato + sweep dei notebook _ingest_"
-    status: open
-    missing: >
-      Se la cancellazione del notebook temporaneo fallisce, si prosegue in silenzio:
-      nessun retry, nessun `cleanup_ok` nel risultato, nessuno sweep periodico dei
-      notebook `_ingest_*` rimasti. I documenti OCR-ati restano su Google.
+    status: closed
+    since: v0.33.0
+    evidence:
+      - file: services/nb1777-mcp/app/core.py
+        contains: ["def _delete_notebook_with_retry", "def sweep_ingest_notebooks", "cleanup_ok"]
+      - file: services/nb1777-mcp/tests/test_ocr_cleanup.py
+        contains: ["test_sweep_prende_solo_ingest_vecchi"]
+    note: >
+      Retry della delete + `cleanup_ok` nel risultato + sweep dei notebook `_ingest_*`
+      vecchi (protegge quelli con attività recente) + `ingest_orphans` in doctor. Lo
+      sweep è on-demand/via doctor; il wiring a un timer automatico resta un miglioramento.
 
   - id: H41
     severity: low
@@ -673,19 +719,16 @@ findings:
   - id: H43
     severity: low
     title: "Hardening residuo di unit e container: sandbox update.service, unit templata, rootfs ro"
-    status: partial
-    since: v0.32.0
+    status: closed
+    since: v0.33.0
     evidence:
       - file: systemd/vps1777-secrets-check.service
         contains: ["User=@OPERATOR_USER@", "NoNewPrivileges=true"]
-      - file: systemd/vps1777-update.service
-        contains: ["ProtectKernelTunables=true"]
       - file: tools/vps1777.py
         contains: ["def render_unit"]
-    missing: >
-      Fatti: sandbox delle unit (calibrata su update.service — ProtectSystem/
-      NoNewPrivileges romperebbero l'update, documentato) e templatizzazione
-      @OPERATOR_USER@/@REPO@ (chiude il bug del monitoraggio che si spegneva con un
-      operatore diverso). RESTA: read_only:true sul rootfs dei container (compose);
-      e i 3 installer devono RENDERE i placeholder al deploy iniziale (a carico del
-      lotto host/deploy — senza, i fresh install si rompono).
+      - file: compose.yaml
+        contains: ["x-readonly:", "read_only: true"]
+    note: >
+      Sandbox unit + templatizzazione (v0.32.0) + rootfs read_only (v0.33.0) su gateway,
+      archive-mcp, bot con tmpfs /tmp. nb1777-mcp ESCLUSO di proposito (Chromium/Playwright
+      scrive /tmp, /dev/shm, cache profilo). Scelta dichiarata.

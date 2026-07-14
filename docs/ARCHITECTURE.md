@@ -25,10 +25,14 @@
 
 | Rete | Driver | `internal` | Servizi connessi |
 |---|---|---|---|
-| `backend` | bridge | ✅ true | tutti i MCP, bot, gateway |
-| `ingress` | bridge | ❌ false | gateway + sidecar ingress |
+| `backend` | bridge | ✅ true | tutti i servizi (comunicazione interna) |
+| `ingress` | bridge | ❌ false | **solo** gateway + proxy d'ingresso (caddy/cloudflared) |
+| `egress` | bridge | ❌ false | nb1777-mcp, bot — escono su Internet, **fuori** da `ingress` |
 
-Backend è "world-isolated" — niente container interno può fare egress su internet (se servisse, si aggiunge `extra_hosts:` mirato).
+Tre reti, tre ruoli distinti (H25):
+- **`backend`** è `internal: true` → world-isolated: chi sta solo qui (`archive-mcp`) non può esfiltrare nulla.
+- **`ingress`** ospita **solo** il servizio esposto (gateway) e il proxy che lo pubblica. Nient'altro.
+- **`egress`** dà l'uscita a Internet ai backend che ne hanno bisogno (`nb1777-mcp` → NotebookLM, `bot` → Telegram) **separandoli** dalla rete d'ingresso: un proxy d'ingresso compromesso non si trova sulla stessa rete di questi servizi. È un bridge senza porte pubblicate → consente l'uscita (NAT), non l'ingresso.
 
 ## Volumi persistenti
 

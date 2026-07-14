@@ -1703,7 +1703,9 @@ _SECRET_POLICY = [
      "manuale: dalla pagina o `rotate-secret.sh admin_password`"),
     ("gateway_secret", "gateway_secret.txt", "Namespace URL MCP", 180, False,
      "manuale: cambia le URL dei connettori → vanno ri-aggiunti su claude.ai"),
-    ("telegram_bot_token", "telegram_bot_token.txt", "Token bot Telegram", 365, False,
+    # 90 giorni, non 365 (H29): è la RADICE DI FIDUCIA della Mini App — con questo
+    # token si forgia un initData valido per qualunque user id. Fascia massima.
+    ("telegram_bot_token", "telegram_bot_token.txt", "Token bot Telegram (radice Mini App)", 90, False,
      "manuale: revoca e rigenera su @BotFather"),
     # H37: era scoperto. Solo con ingress.cloudflared (altrimenti file assente →
     # saltato). Ruotare = rigenerare il token del tunnel nella dashboard CF.

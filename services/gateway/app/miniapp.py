@@ -709,9 +709,11 @@ function renderStato(){
     '“Mostra”, e torna mascherato da solo dopo 30s.</div></div>';
   $('rePl').onclick = function(){ S.plugins=null; loadPlugins(); };
 
-  fetch('/health').then(function(r){return r.json()}).then(function(h){
+  // /health pubblico: solo il segnale online. Gli upstream li prende
+  // dall'overview AUTENTICATO (sotto) — così il body pubblico di /health non
+  // deve elencare i nomi dei servizi interni (H33).
+  fetch('/health').then(function(r){return r.json()}).then(function(){
     $('stG').innerHTML = '<span class="dot ok"></span>online';
-    $('stU').textContent = (h.upstreams||[]).join(', ') || '—';
   }).catch(function(){ $('stG').innerHTML = '<span class="dot err"></span>irraggiungibile'; });
 
   if (!TG || !TG.initData){
@@ -721,6 +723,7 @@ function renderStato(){
   }
   api('/app/api/overview').then(function(o){
     S.overview=o;
+    $('stU').textContent = (o.upstreams||[]).join(', ') || '—';
     var v=o.version||{};
     $('stV').innerHTML = esc(v.running||'—') + (v.available
       ? ' <span class="badge warn">v'+esc(v.latest)+' disponibile</span>'

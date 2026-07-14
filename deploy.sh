@@ -217,7 +217,18 @@ if [ "$APPLY_MODE" = "1" ]; then
   TG_TOKEN="$(get telegram_bot_token)"
   TG_OWNER="$(get telegram_owner_id)"
   PUB="$(get public_base)"
-  ok "Config letta (ts_key:$([ -n "$TS_KEY" ] && echo sì || echo no), bot:$([ -n "$TG_TOKEN" ] && echo sì || echo no), owner:$([ -n "$TG_OWNER" ] && echo sì || echo no))"
+
+  # VALIDAZIONE dei valori scritti dal gateway (H9). pending.json arriva da un
+  # servizio esposto su Internet: prima di scriverli in .env/secrets, si controlla
+  # la FORMA di ognuno. Vuoto è ok (campo non compilato); malformato → si ferma,
+  # invece di scrivere spazzatura in un file di configurazione.
+  vfail() { die "Config non valida in pending.json: $1"; }
+  [ -z "$TS_KEY" ]   || echo "$TS_KEY"   | grep -qE '^tskey-[A-Za-z0-9-]+$'        || vfail "tailscale_authkey (atteso tskey-…)"
+  [ -z "$TG_TOKEN" ] || echo "$TG_TOKEN" | grep -qE '^[0-9]{5,}:[A-Za-z0-9_-]{30,}$' || vfail "telegram_bot_token (atteso <id>:<token>)"
+  [ -z "$TG_OWNER" ] || echo "$TG_OWNER" | grep -qE '^[0-9]{1,20}$'                || vfail "telegram_owner_id (atteso numerico)"
+  [ -z "$PUB" ]      || echo "$PUB"      | grep -qE '^https://[A-Za-z0-9._-]+(/.*)?$' || vfail "public_base (attesa URL https://…)"
+
+  ok "Config letta e validata (ts_key:$([ -n "$TS_KEY" ] && echo sì || echo no), bot:$([ -n "$TG_TOKEN" ] && echo sì || echo no), owner:$([ -n "$TG_OWNER" ] && echo sì || echo no))"
 
   # 1. Scrivi i secret + .env come operator.
   # I segreti NON vanno mai nell'argv di un comando remoto (dove `ps` li

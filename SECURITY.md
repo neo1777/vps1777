@@ -210,43 +210,78 @@ interamente sulla VPS.
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
 La review difensiva ha prodotto **43 interventi** (2 critici, 7 alti, 21 medi, 13
-bassi). Le campagne `v0.19.1 → v0.32.0` hanno chiuso **entrambi i critici**, tutta
-la fascia alta (in fix o in scelta dichiarata), e il grosso di medi e bassi. Qui
-sta la lista vera — verificata contro il codice, non contro i buoni propositi:
+bassi). Le campagne `v0.19.1 → v0.33.0` li hanno affrontati **tutti**: nessuno è più
+aperto. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 20 |
-| **parziali** | 16 |
-| **aperti** | 7 |
+| **chiusi** | 35 |
+| **parziali** | 7 |
+| **accettati** | 1 |
+| **aperti** | 0 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
-(`H2`) — sono chiusi e verificati in produzione. I 7 **ancora aperti** sono tutti
-di fascia media/bassa; sotto, quelli che pesano di più (il piano completo, con
-l'evidenza per i chiusi e il *cosa manca* per gli altri, sta in
-[`security/findings.yml`](security/findings.yml)).
+(`H2`) — sono chiusi e verificati in produzione, come tutta la fascia alta.
 
-- **Nessun secondo fattore sul pannello admin** (`H28`, medio): password (bcrypt 12)
-  + lockout per-IP. Contro una password rubata, non basta.
-- **Esposizione di fallback non annunciata** (`H10`, medio): l'installer imposta da
-  sé `GATEWAY_BIND=0.0.0.0` se il Funnel non parte, a tempo indefinito e senza un
-  banner «sessione non cifrata» né un evento di audit.
-- **La rete `egress` non è separata** (`H25`, medio): `nb1777-mcp` e il bot stanno
-  sulla rete `ingress` per poter uscire su Internet. `ARCHITECTURE.md` va allineato.
-- **Il token del bot è trattato come segreto ordinario** (`H29`, medio): è invece la
-  radice di fiducia della Mini App (con quel token si forgia un `initData` valido).
-- Tre voci basse: `/health` espone i nomi degli upstream (`H33`); `pending.json`
-  senza TTL (`H36`); il cleanup dei notebook OCR temporanei non è propagato (`H40`).
+L'unico **accettato**: niente 2FA sul pannello admin (`H28`) — è un gateway
+mono-utente dietro Tailscale Funnel, con password bcrypt-12 + lockout per-IP + CSRF
++ revoca reale della sessione; il 2FA aggiungerebbe attrito per un guadagno marginale
+su questo profilo. È una decisione, non una dimenticanza.
 
-Fra i **16 parziali**, quattro sono **scelte deliberate**, non dimenticanze, e
-resteranno tali: il *contatore globale* di `H4` (introdurrebbe un auto-lockout
-dell'owner), il *push off-site* di `H5` (la cartella `backups/` la porta dove vuole
-chi installa), il gruppo `docker` dell'operator in `H12` (toglierlo romperebbe
-l'update), e `frame-ancestors`/`unsafe-inline` della CSP Mini App in `H35`
-(servirebbe un client Telegram reale per verificare che non rompano la pagina).
+I **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
+il loro *perché* nel registro:
+
+- **Scelte deliberate** (resteranno tali): il *contatore globale* di `H4` (auto-lockout
+  dell'owner); il *push off-site* di `H5` (la cartella `backups/` la porta dove vuole
+  chi installa); il gruppo `docker` dell'operator in `H12` (toglierlo romperebbe
+  l'update — la whitelist sudo è comunque fatta); il *chiaro-in-avanti* della password
+  in `H16` quando il PC non ha bcrypt (per non imporre una dipendenza al PC di deploy);
+  `frame-ancestors`/`unsafe-inline` della CSP Mini App in `H35` (servirebbe un client
+  Telegram reale per verificare che non rompano la pagina).
+- **Rinviati alla postilla** (sotto): il pinning ai digest delle 4 immagini vps1777
+  in `H22` (oggi l'invariante lo impone la CLI post-pull, non il file compose) e
+  l'approvazione manuale dei rilasci in `H24` (i tag pubblicati sono già immutabili).
 
 L'hardening è difesa in profondità, non una garanzia, e il progetto è **pre-1.0**.
 Se trovi qualcosa, [scrivimi](#reporting-a-vulnerability).
+
+## Dati a riposo
+
+Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontato:
+
+- **Il volume dell'archivio** (`archive-data`) e il **disco della VPS** non sono
+  cifrati. Chi ottiene un dump del disco legge l'archivio in chiaro. Se ti serve la
+  cifratura a riposo, va fatta a livello di disco/volume dall'infrastruttura (LUKS,
+  volume cifrato del provider) — vps1777 non la impone per non gestire un'altra
+  chiave sulla macchina.
+- **I secret** (`secrets/*.txt`) sono in chiaro sul disco (mode 600), montati in
+  `tmpfs /run/secrets/`. Stessa storia: la protezione è nei permessi e nel non
+  finire nei log/argv/backup-non-cifrati (vedi sopra), non nella cifratura a riposo.
+- **I backup** (`.tar.age`) invece **sono** cifrati (age), con la chiave privata
+  fuori dalla VPS. E lo snapshot pre-update, che non è cifrato, **non** contiene più
+  i cookie Google (`H14`).
+- **Cancellazione**: l'archivio si cancella per **DB intero** (`/admin/archive`,
+  con conferma e audit). La cancellazione per singola conversazione non c'è: è una
+  scelta, non una dimenticanza.
+
+## Postilla — l'hardening che faremo al 100% più avanti
+
+Alcune protezioni sono state **rimandate di proposito**, non scartate, perché in
+questa fase i rilasci sono frequenti e aggiungerebbero attrito:
+
+- **Approvazione manuale dei rilasci** (parte di `H24`): un GitHub *environment*
+  `release` con reviewer richiederebbe una tua approvazione a ogni tag. I tag
+  pubblicati sono già **immutabili** (ruleset in `security/rulesets/`); manca solo
+  l'approvazione sulla *creazione* di un tag nuovo. Lo attiveremo quando il ritmo dei
+  rilasci sarà più regolare.
+- **rootfs read-only su `nb1777-mcp`** (parte di `H43`): il servizio con Chromium è
+  escluso dal read-only finché non verifichiamo un giro NotebookLM reale con tutte le
+  tmpfs necessarie.
+- **Pinning ai digest delle 4 immagini vps1777 nel compose** (`H22`): oggi l'invariante
+  «gira solo il digest verificato» lo impone la CLI *dopo* il pull (contro `images.lock`);
+  farlo vivere anche nel file compose (override generato all'`up`) chiuderebbe il caso di
+  un `docker compose pull` lanciato a mano fuori dalla CLI. Tocca il percorso di update,
+  quindi lo faremo con un momento dedicato.
 
 ## Out of scope
 
