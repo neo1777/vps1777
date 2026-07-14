@@ -8,21 +8,29 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import admin, miniapp, oauth, onboarding, proxy
+from .asgi_security import ip_is_internal
 from .settings import get_settings
 
 
 async def health(request: Request) -> JSONResponse:
     s = get_settings()
-    body: dict = {
-        "ok": True,
-        "service": "vps1777-gateway",
-        "oauth_required": s.oauth_required,
-        "upstreams": sorted(s.gateway_upstreams),
-    }
-    # ?deep=1: proba TCP gli upstream MCP dalla rete backend. Usato dal
-    # health-gate di `vps1777 update` (via compose exec) — nessuna assunzione
-    # su porte host, funziona con qualunque overlay ingress.
-    if request.query_params.get("deep"):
+    want_deep = bool(request.query_params.get("deep"))
+
+    # ?deep proba i backend MCP via TCP: è un vettore d'abuso (port-scan /
+    # amplificazione) se aperto a chiunque → riservato ai chiamanti interni
+    # (H33). L'updater lo chiama via `compose exec` dentro il gateway → loopback;
+    # un esterno viene risolto al suo IP pubblico via XFF → 403.
+    client_host = request.client.host if request.client else None
+    if want_deep and not ip_is_internal(client_host):
+        return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
+
+    # Body pubblico MINIMO (H33): solo `{"ok": true}`. Niente `oauth_required`
+    # (postura auth), niente banner `service`, e niente `upstreams` — i NOMI dei
+    # servizi interni non li deve elencare un endpoint non autenticato. La Mini
+    # App li prende ora da /app/api/overview (dietro Bearer). L'healthcheck Docker
+    # e l'installer si accontentano di `{"ok": ...}`.
+    body: dict = {"ok": True}
+    if want_deep:
         checks: dict[str, bool] = {}
         for name, hostport in s.gateway_upstreams.items():
             host, _, port = hostport.rpartition(":")
@@ -51,7 +59,8 @@ routes = [
 
     # OAuth core
     Route("/register", oauth.register, methods=["POST"]),
-    Route("/authorize", oauth.authorize, methods=["GET"]),
+    # GET mostra la consent page (H8); POST è l'approvazione/rifiuto dell'admin.
+    Route("/authorize", oauth.authorize, methods=["GET", "POST"]),
     Route("/token", oauth.token, methods=["POST"]),
 
     # Admin

@@ -112,3 +112,62 @@ def test_does_not_duplicate_existing_header():
     asyncio.run(mw({"type": "http", "path": "/admin/"}, receive, send))
     nosniff = [p for p in h_pairs if p[0].lower() == b"x-content-type-options"]
     assert len(nosniff) == 1
+
+
+# ───── H34: CSP di default globale ─────
+
+def test_default_csp_su_risposta_senza_csp():
+    # /health non porta la sua CSP → il middleware mette la rete di sicurezza
+    h = _run("/health", hsts=True)
+    csp = h.get("content-security-policy", "")
+    assert "default-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
+
+
+def test_default_csp_su_proxy_e_oauth():
+    for path in ("/SECRET/nb1777/mcp", "/token", "/.well-known/oauth-authorization-server"):
+        assert "default-src 'none'" in _run(path, hsts=False).get("content-security-policy", "")
+
+
+def test_default_csp_NON_sovrascrive_quella_con_nonce():
+    # admin/miniapp mettono la loro CSP (con nonce) → deve VINCERE, non essere
+    # rimpiazzata dalla default restrittiva.
+    own = b"default-src 'self'; script-src 'self' 'nonce-abc'"
+    h = _run("/admin/", hsts=True,
+             start_headers=[(b"content-security-policy", own)])
+    assert h.get("content-security-policy") == own.decode()
+    assert "default-src 'none'" not in h.get("content-security-policy", "")
+
+
+# ───── H31: classificazione path CORS ─────
+
+def test_cors_scoped_paths_inclusi():
+    for p in ("/register", "/authorize", "/token", "/app", "/app/",
+              "/app/api/overview", "/app/auth",
+              "/.well-known/oauth-protected-resource",
+              "/.well-known/oauth-authorization-server"):
+        assert asgi_security.is_cors_scoped_path(p), p
+
+
+def test_cors_scoped_paths_esclusi():
+    # /admin (same-origin + CSRF), proxy MCP, /health, e path-prefissi ingannevoli
+    for p in ("/admin", "/admin/", "/admin/setup", "/health",
+              "/SECRET/nb1777/mcp", "/appfoo", "/",
+              "/.well-known/other"):
+        assert not asgi_security.is_cors_scoped_path(p), p
+
+
+# ───── H33: classificazione IP interni (gate di /health?deep) ─────
+
+def test_ip_interni_loopback_e_privati():
+    for host in ("127.0.0.1", "::1", "10.1.2.3", "172.16.0.9",
+                 "172.31.255.1", "192.168.0.5", "fc00::1"):
+        assert asgi_security.ip_is_internal(host), host
+
+
+def test_ip_esterni_e_invalidi_non_interni():
+    # IP pubblici inequivocabili (evito le doc-range 203.0.113/198.51.100 che in
+    # Python 3.12+ contano come private) + input non-IP.
+    for host in ("8.8.8.8", "1.1.1.1", "2606:4700:4700::1111",
+                 None, "", "not-an-ip", "example.com"):
+        assert not asgi_security.ip_is_internal(host), host

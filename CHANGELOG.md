@@ -2,6 +2,30 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.33.0] — 2026-07-14
+
+### Chiusura del dossier — zero rilievi aperti (35 chiusi · 7 parziali · 1 accettato · 0 aperti)
+
+L'ultima ondata sui residui, dopo le decisioni di Neo sui bivi. Nessun rilievo della review difensiva resta aperto: i 7 parziali sono scelte deliberate o rinvii dichiarati, l'unico accettato è il no-2FA (motivato). Tutto verificato dal gate in CI.
+
+**Costruiti (decisioni di Neo):**
+- **H8** — **pagina di consenso OAuth** vera: `/authorize` da loggato mostra "autorizzi <client>?" con [Autorizza]/[Rifiuta], POST dietro CSRF, valori client html-escaped, Rifiuta → `access_denied`. Chiude anche uno scostamento: `ARCHITECTURE.md` la disegnava già.
+- **H25** — **rete `egress` separata**: `nb1777-mcp` e il bot escono su Internet da una rete dedicata, tolti da `ingress` (dove restano solo gateway + proxy). Bridge senza porte pubblicate → solo uscita. Verificato sul VPS: da `egress` NotebookLM/Telegram = 302, da una rete `internal` = 000.
+
+**Chiusi:**
+- **H9** — `deploy.sh --apply` **valida** la forma dei valori di `pending.json` prima di scriverli (rifiuta le injection: `$(rm)`, `; cat /etc/shadow`, `http://`).
+- **H10** — banner "sessione NON cifrata" nel pannello quando il gateway non è dietro HTTPS + flag `insecure` nell'audit del login.
+- **H31/H33/H34/H36** — CORS scoped ai soli OAuth+/app (non `/admin`); `/health` con body minimo `{"ok":true}` e `?deep` riservato ai chiamanti interni; CSP di default globale (`default-src 'none'`); `pending.json` con TTL 24h + auto-wipe, intent file a `0640` (non più world-readable — porta un nonce che autorizza l'apply).
+- **H32** — confronto PKCE constant-time (`hmac.compare_digest`).
+- **H40** — cleanup OCR con retry + `cleanup_ok` + sweep dei notebook `_ingest_*` + `ingest_orphans` in `doctor`.
+- **H42** — `archive-data` montato `:ro` (verificato: DB in `journal_mode=delete`, non WAL).
+- **H43** — rootfs `read_only` su gateway/archive-mcp/bot con tmpfs `/tmp` (nb1777-mcp escluso: Chromium).
+- **H18** — sezione «Dati a riposo» in `SECURITY.md` (onestà su cosa non è cifrato). **H29** — token bot riclassificato fascia massima, soglia 365→90. **H37** — rotazione chiave age documentata. **H21** — riconciliazione doc↔codice completata (il codice ha raggiunto la doc) + il gate `check_findings.py` in CI.
+
+**Stato `accepted` nel registro** (nuovo): un rischio *deciso di non chiudere* non è né `open` (dimenticato) né `closed` (fatto). Il gate pretende che ogni `accepted` porti la sua motivazione. Primo: **H28** (no 2FA).
+
+**Postilla dichiarata** (`SECURITY.md`): l'approvazione manuale dei rilasci (`H24`), il rootfs read-only su `nb1777-mcp` (`H43`) e il pinning digest delle immagini nostre (`H22`) sono **rinviati di proposito** — li faremo al 100% quando il ritmo dei rilasci sarà più regolare.
+
 ## [0.32.0] — 2026-07-14
 
 ### Chiusura del dossier residuo — 12 interventi, con la disciplina che li verifica

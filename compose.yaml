@@ -35,13 +35,23 @@ x-security: &security
   security_opt:
     - no-new-privileges:true
 
+# rootfs immutabile (H43): il container non può scriversi addosso. I dati vanno
+# solo nei volumi montati; /tmp è una tmpfs (Starlette vi fa spooling dei
+# multipart). NON applicato a nb1777-mcp: gira Chromium/Playwright, che ha
+# bisogno di scrivere in /tmp, /dev/shm e nella cache del profilo — renderlo
+# read_only senza un giro NotebookLM reale da verificare sarebbe fragile.
+x-readonly: &readonly
+  read_only: true
+  tmpfs:
+    - /tmp
+
 services:
 
   # ──────────────────────────────────────────────────────────────────────
   # Gateway — l'unico servizio esposto all'ingress
   # ──────────────────────────────────────────────────────────────────────
   gateway:
-    <<: [*restart, *logging, *security]
+    <<: [*restart, *logging, *security, *readonly]
     # Immagini pubblicate dalla CI di release (ghcr) — la VPS fa solo pull.
     # Per il build locale in sviluppo: -f compose.yaml -f compose.build.yaml
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-gateway:${VPS1777_TAG:-dev}
@@ -100,7 +110,7 @@ services:
   # Archive MCP — FTS5 multi-DB
   # ──────────────────────────────────────────────────────────────────────
   archive-mcp:
-    <<: [*restart, *logging, *security]
+    <<: [*restart, *logging, *security, *readonly]
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}
     init: true
     environment:
@@ -158,7 +168,11 @@ services:
       - nlm-auth:/var/lib/nlm:rw
     networks:
       - backend
-      - ingress   # egress: nlm deve raggiungere NotebookLM su internet
+      # egress, NON ingress (H25): nb1777-mcp deve USCIRE verso NotebookLM, ma non
+      # deve stare sulla stessa rete del proxy internet-facing. `egress` è una
+      # bridge senza porte pubblicate → solo uscita, nessun ingresso. Il gateway
+      # lo raggiunge via `backend`. Così su `ingress` restano solo gateway + proxy.
+      - egress
     expose:
       - "8003"
     # FastMCP espone solo /mcp (no /health) → healthcheck su TCP socket
@@ -173,7 +187,7 @@ services:
   # NotebookLM Telegram bot — long-poll, no porta esposta
   # ──────────────────────────────────────────────────────────────────────
   nb1777-bot:
-    <<: [*restart, *logging, *security]
+    <<: [*restart, *logging, *security, *readonly]
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-bot:${VPS1777_TAG:-dev}
     init: true
     environment:
@@ -193,7 +207,7 @@ services:
     # sapere se l'auth manca chiede lo stato a nb1777-mcp su rete interna.
     networks:
       - backend
-      - ingress   # egress: il bot deve raggiungere api.telegram.org
+      - egress   # (H25) esce verso api.telegram.org, ma fuori dalla rete ingress
     depends_on:
       nb1777-mcp:
         condition: service_healthy
@@ -212,10 +226,20 @@ services:
 #   - ingress: per il proxy davanti (Tailscale/Caddy/Cloudflared)
 # ──────────────────────────────────────────────────────────────────────
 networks:
+  # Comunicazione interna fra i servizi. internal: true → nessuna uscita a
+  # Internet: chi sta SOLO qui (archive-mcp) non può esfiltrare nulla.
   backend:
     driver: bridge
     internal: true
+  # Esposizione pubblica: ci stanno SOLO il gateway (il servizio esposto) e il
+  # proxy d'ingresso (caddy/cloudflared). NON i backend che devono uscire.
   ingress:
+    driver: bridge
+  # Uscita verso Internet per i backend che ne hanno bisogno (nb1777-mcp →
+  # NotebookLM, bot → Telegram), SEPARATA da `ingress` (H25). Bridge senza porte
+  # pubblicate: consente l'uscita (NAT), non l'ingresso. Un proxy d'ingresso
+  # compromesso non si trova sulla stessa rete di questi servizi.
+  egress:
     driver: bridge
 
 # ──────────────────────────────────────────────────────────────────────

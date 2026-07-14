@@ -46,6 +46,14 @@ Edita `.env`:
 GATEWAY_UPSTREAMS=archive=archive-mcp:8002,nb1777=nb1777-mcp:8003,mio-mcp=mio-mcp:8010
 ```
 
+> **Onestà sulla fiducia.** Un plugin sulla rete `backend` gode di **fiducia piena**
+> verso gli altri servizi interni: il modello di sicurezza isola i backend
+> *dall'esterno* (solo il gateway è esposto), non l'uno dall'altro. Un plugin
+> compromesso può parlare con `nb1777-mcp`, `archive-mcp`, ecc. sulla rete interna.
+> Se il tuo plugin deve **uscire** su Internet, mettilo sulla rete `egress` (come
+> `nb1777-mcp`), non su `ingress`. E se non deve uscire affatto, lascialo su
+> `backend` (internal) e basta — non potrà esfiltrare nulla.
+
 ### Step 4: avvia
 
 ```bash
