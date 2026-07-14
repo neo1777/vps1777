@@ -6,7 +6,7 @@ Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei cont
 
 | Secret | File | Cosa contiene | Chi lo legge |
 |---|---|---|---|
-| `gateway_secret` | `secrets/gateway_secret.txt` | namespace nelle URL `/<SECRET>/<service>/mcp` (24-32 char) | gateway |
+| `gateway_secret` | `secrets/gateway_secret.txt` | namespace nelle URL `/<SECRET>/<service>/mcp` (24-32 char) **e** segreto del canale interno verso nb1777-mcp (v0.30.0) | gateway, nb1777-mcp, nb1777-bot |
 | `oauth_signing_secret` | `secrets/oauth_signing_secret.txt` | firma JWT HS256 (≥32 byte) | gateway |
 | `admin_password_bcrypt` | `secrets/admin_password_bcrypt.txt` | hash bcrypt della password admin (rounds=12) | gateway |
 | `telegram_bot_token` | `secrets/telegram_bot_token.txt` | TOKEN bot da BotFather | gateway, nb1777-bot |
@@ -27,9 +27,19 @@ Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei cont
 ```bash
 NEW=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
 echo -n "$NEW" > secrets/gateway_secret.txt
-docker compose restart gateway   # < 2s downtime
+# Riavvia TUTTI i consumatori, non solo il gateway (vedi sotto)
+docker compose restart gateway nb1777-mcp nb1777-bot   # < 2s downtime
 # I tuoi URL connector cambiano: rigenerali da claude.ai
 ```
+
+> **Perché tre servizi e non solo il gateway.** Dalla v0.30.0 il `gateway_secret`
+> non è più solo il namespace dell'URL: è **anche** il segreto con cui gateway e
+> bot si autenticano verso gli endpoint interni di `nb1777-mcp` (il profilo
+> NotebookLM — vedi [SECURITY.md](../SECURITY.md)). Riavviare il solo gateway lo
+> lascerebbe col segreto nuovo mentre gli altri due hanno ancora il vecchio: il
+> canale interno risponderebbe **403**, `/admin/nlm` direbbe "nb1777-mcp non
+> raggiungibile" e il bot crederebbe l'auth NotebookLM mancante.
+> `tools/rotate-secret.sh` lo fa già correttamente.
 
 ### Rota `oauth_signing_secret`
 

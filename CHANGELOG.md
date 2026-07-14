@@ -2,6 +2,17 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.30.1] — 2026-07-14
+
+### Fix — ruotare `gateway_secret` non rompe più il canale interno
+
+Regressione introdotta dalla v0.30.0 e trovata rileggendo i piani di lavoro futuri, prima che mordesse. Con H6 il `gateway_secret` ha smesso di essere *solo* il namespace dell'URL: è **anche** il segreto con cui gateway e bot si autenticano verso gli endpoint interni di `nb1777-mcp`. Ma `rotate-secret.sh` riavviava **solo il gateway** — lasciando `nb1777-mcp` e il bot col segreto **vecchio**: il canale interno avrebbe risposto **403**, `/admin/nlm` avrebbe detto "nb1777-mcp non raggiungibile" e il bot avrebbe creduto l'auth NotebookLM mancante.
+
+- `tools/rotate-secret.sh`: la rotazione di `gateway_secret` riavvia **tutti i consumatori** (`gateway nb1777-mcp nb1777-bot`).
+- `docs/SECRETS.md`: la tabella dei secret dice ora chi legge davvero il `gateway_secret` (tre servizi, non uno), e lo snippet di rotazione manuale riavvia tutti e tre, col perché.
+
+Verificato sul campo che il riavvio basta: i Docker secret con sorgente `file:` sono **bind mount** (non copie), quindi il container vede subito il contenuto nuovo e il restart lo fa rileggere.
+
 ## [0.30.0] — 2026-07-14
 
 ### Hardening H6 — il gateway non tocca più i cookie Google (l'ultimo finding aperto)
