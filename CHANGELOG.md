@@ -2,6 +2,22 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.35.0] — 2026-07-14
+
+### nb1777 dichiara il canonico del blocco di memoria (#30, parte ①)
+
+Prima, una sessione che partiva con un blocco di memoria vecchio **non aveva modo di accorgersene**: nessuno le diceva qual è il canonico. La regola client v2.4 («se nb1777 dichiara il canonico, confrontalo») presupponeva una dichiarazione che non esisteva. Questa è quella dichiarazione.
+
+- **`canonical.py`** — nb1777 legge il canonico dal notebook `claudemd1777`: le fonti hanno titolo `canonico vX.Y — <data> — <cosa cambia>`, la versione corrente è la `vX.Y` più alta (confronto **numerico**, v2.10 > v2.9). **Cache** 15 min, **fail-open** (se il notebook non risponde, nb1777 funziona e non dichiara nulla — la sessione fa il fallback con `notebook_query`).
+- **Veicolo A** — `FastMCP(instructions=…)`: la risposta di `initialize` dice alla sessione che nb1777 conosce il canonico e come confrontarsi. Testo statico (non dipende dall'auth nlm al boot).
+- **Veicolo B** — nuovo tool **`canonico`**: dichiara la versione canonica viva (`{version, date, note}`), fail-open con `available:false`. Il campo `canonico` è aggiunto anche a **`doctor`** (la chiamata tipica d'avvio sessione), così atterra senza un tool dedicato. Il Veicolo C (campo su ogni risposta) è **scartato**: costoso su 35 tool.
+
+Verificato: `tests/test_canonical.py` (9 casi: versione più alta dai titoli reali, ordinamento numerico, rumore ignorato, titolo senza data, malformati, cache, fail-open).
+
+**Cosa resta (dichiarato, non nascosto):**
+- **②** il tool `memoria_check(versione_portata)` che fa il *verdetto* (stale sì/no + delta) e **③** la notifica Telegram del bot quando una sessione gira vecchia (+ scheduler per il promemoria superfici cloud) — passi successivi.
+- **Il buco che resta aperto:** una chat in un Project claude.ai **senza connettore MCP** non è raggiungibile da nessun canale (l'MCP non c'è). Nessun meccanismo può toccarla — es. il Project del libro col `CLAUDE.md` caricato come file. ③ non lo risolverà: glielo *dirà*. È il massimo ottenibile.
+
 ## [0.34.0] — 2026-07-14
 
 ### nb1777 studio — id corretto e lista compatta (#42)
