@@ -69,7 +69,7 @@ fi
 case "$WHICH" in
   gateway_secret)
     FILE=secrets/gateway_secret.txt
-    log "Rotation gateway_secret (namespace URL)"
+    log "Rotation gateway_secret (namespace URL + canale interno)"
     log "ATTENZIONE: gli URL connector di claude.ai cambieranno. Dovrai rigenerare i connector."
     read -r -p "Procedo? [s/N]: " ack
     case "$ack" in s|S|si|SI|y|Y|yes|YES) ;; *) die "Annullato" ;; esac
@@ -77,8 +77,13 @@ case "$WHICH" in
     echo -n "$NEW" > "$FILE"
     chmod 600 "$FILE"
     ok "Nuovo gateway_secret: $NEW"
-    log "Restart gateway in corso..."
-    docker compose restart gateway
+    # Il gateway_secret NON è solo il namespace dell'URL: dalla v0.30.0 (H6) è
+    # anche il segreto del canale interno gateway/bot → nb1777-mcp (il profilo
+    # NotebookLM). Riavviare il solo gateway lascerebbe nb1777-mcp e il bot col
+    # segreto VECCHIO → 403 sul canale interno (/admin/nlm rotto, il bot che
+    # crede l'auth mancante). Vanno riavviati TUTTI i consumatori.
+    log "Restart dei consumatori (gateway, nb1777-mcp, nb1777-bot)..."
+    docker compose restart gateway nb1777-mcp nb1777-bot
     ok "Fatto. Aggiorna i connector claude.ai con i nuovi URL."
     ;;
   oauth_signing_secret)
