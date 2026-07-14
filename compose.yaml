@@ -78,7 +78,10 @@ services:
       - telegram_bot_token
     volumes:
       - gateway-data:/var/lib/gateway
-      - nlm-auth:/var/lib/nlm:rw       # condiviso con nb1777-mcp per /admin/nlm upload
+      # NIENTE nlm-auth (H6): il gateway è l'unico servizio esposto su Internet e
+      # non deve poter leggere né riscrivere i cookie di sessione Google. Il
+      # volume lo monta SOLO nb1777-mcp; /admin/nlm gli inoltra il tar e ne chiede
+      # lo stato su rete interna (app/nlm_client.py).
       - archive-data:/var/lib/archive:rw  # condiviso con archive-mcp: /admin/archive scrive i .db indicizzati
       - ./onboarding:/var/lib/onboarding:rw  # bind-mount: pending.json letto da deploy.sh --apply
     networks:
@@ -137,8 +140,15 @@ services:
       NB1777_ALLOWED_ORIGINS: "https://claude.ai,https://web.telegram.org"
       NLM_HOME: /var/lib/nlm
       FASTMCP_STATELESS_HTTP: "true"
+      # Segreto condiviso per gli endpoint INTERNI /internal/nlm/* (H6): solo
+      # gateway e bot, che lo hanno, possono chiedere lo stato o installare il
+      # profilo. Fail-closed: senza segreto quegli endpoint negano tutti.
+      GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
+    secrets:
+      - gateway_secret
     volumes:
-      - nlm-auth:/var/lib/nlm:rw  # auth.json caricato da /admin/nlm
+      # UNICO servizio a montare il volume dei cookie Google (H6): li possiede lui.
+      - nlm-auth:/var/lib/nlm:rw
     networks:
       - backend
       - ingress   # egress: nlm deve raggiungere NotebookLM su internet
@@ -164,14 +174,16 @@ services:
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID}
       GATEWAY_PUBLIC_BASE: ${PUBLIC_BASE:-http://gateway:8080}
       NB1777_MCP_URL: http://nb1777-mcp:8003/mcp
-      NLM_HOME: /var/lib/nlm
+      # Segreto condiviso per chiedere a nb1777-mcp se il profilo nlm c'è (H6).
+      GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
       # BOT_RAG_COMMANDS=0 disattiva /lista e /chiedi (che passano da Telegram):
       # massima privacy = solo Mini App. Default: attivi.
       BOT_RAG_COMMANDS: ${BOT_RAG_COMMANDS:-true}
     secrets:
       - telegram_bot_token
-    volumes:
-      - nlm-auth:/var/lib/nlm:ro  # legge AUTH_PENDING.flag per messaggio guida
+      - gateway_secret
+    # NIENTE nlm-auth (H6): il bot non deve poter leggere i cookie Google. Per
+    # sapere se l'auth manca chiede lo stato a nb1777-mcp su rete interna.
     networks:
       - backend
       - ingress   # egress: il bot deve raggiungere api.telegram.org

@@ -30,11 +30,12 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
 from .admin import _csrf_token, _layout, _require_admin
+from . import nlm_client
 from .audit import audit
 from .settings import get_settings
 
 
-def _status() -> dict[str, tuple[str, str]]:
+async def _status() -> dict[str, tuple[str, str]]:
     """
     Ritorna {chiave: (stato, dettaglio)} con stato in {ok,warn,off}.
     Euristiche lato gateway (non ha visibilità diretta sul sidecar Tailscale).
@@ -57,10 +58,12 @@ def _status() -> dict[str, tuple[str, str]]:
     else:
         out["tailscale"] = ("off", "non configurato")
 
-    # NotebookLM auth (nlm 0.7.x: profilo profiles/default/cookies.json)
-    cookies = Path(s.nlm_auth_dir) / "profiles" / "default" / "cookies.json"
-    pending_flag = Path(s.nlm_auth_dir) / "AUTH_PENDING.flag"
-    if cookies.exists() and not pending_flag.exists():
+    # NotebookLM auth: il profilo lo possiede nb1777-mcp (H6) — il gateway non
+    # monta più quel volume, chiede lo stato su rete interna.
+    nlm = await nlm_client.status()
+    if nlm is None:
+        out["nlm"] = ("warn", "nb1777-mcp non raggiungibile")
+    elif nlm.get("ok"):
         out["nlm"] = ("ok", "profilo nlm presente")
     else:
         out["nlm"] = ("off", "profilo nlm non caricato")
@@ -120,7 +123,7 @@ async def setup_view(request: Request) -> Response:
         )
 
     # ───── GET ─────
-    st = _status()
+    st = await _status()
     flash = request.query_params.get("msg", "").replace("+", " ")
     flash_kind = request.query_params.get("kind", "ok")
 

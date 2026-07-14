@@ -116,6 +116,41 @@ def sudo(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return run(["sudo", "-n", *cmd], **kw)
 
 
+# ─────────────────────────────────────────── proprietà degli artefatti
+
+def reclaim_ownership(path: Path, repo: Path) -> None:
+    """
+    Ciò che l'update crea sotto il repo resta dell'OPERATOR, sempre.
+
+    Perché esiste: `vps1777 update` è pensato per girare come operator (che ha
+    sudo NOPASSWD), ma capita di lanciarlo da una shell root. In quel caso le
+    cartelle create — `releases/vX.Y.Z/` — restavano di proprietà di root, e
+    l'update SUCCESSIVO, lanciato dall'operator com'è giusto, non riusciva più a
+    creare la sua cartella di rollback lì dentro: moriva con un PermissionError
+    grezzo, a metà (dopo il pull, prima del punto di non ritorno).
+
+    Qui la proprietà si riallinea da sé, nei due versi: se giriamo da root
+    chowniamo a chi possiede il repo; se giriamo da operator e troviamo roba
+    altrui, ce la riprendiamo con sudo. Nessun intervento manuale.
+    """
+    if not path.exists():
+        return
+    try:
+        uid, gid = repo.stat().st_uid, repo.stat().st_gid
+    except OSError:
+        return
+    if uid == 0:                       # repo di root: non c'è nulla da riallineare
+        return
+    try:
+        if os.geteuid() == 0:
+            for p in (path, *path.rglob("*")):
+                os.chown(p, uid, gid)
+        elif path.stat().st_uid != os.geteuid():
+            sudo(["chown", "-R", f"{uid}:{gid}", str(path)])
+    except (OSError, subprocess.CalledProcessError) as exc:
+        warn(f"proprietà di {path} non riallineata ({exc})")
+
+
 # ─────────────────────────────────────────── repo & file .env
 
 def find_repo(explicit: str | None) -> Path:
@@ -602,6 +637,11 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
             tar.extractall(bundle, filter="data")
         except TypeError:
             tar.extractall(bundle)
+
+    # Se questo update gira da root, ciò che ha appena creato deve restare
+    # dell'operator: altrimenti il PROSSIMO update (lanciato da lui, com'è
+    # giusto) non potrebbe scrivere qui dentro.
+    reclaim_ownership(stage, repo)
     return bundle
 
 
@@ -636,10 +676,20 @@ def sync_managed_files(repo: Path, bundle: Path) -> None:
 
 def save_rollback_files(repo: Path, version: str, bundle: Path) -> Path:
     """Copia lo stato corrente dei file gestiti in releases/<current>/rollback-files."""
-    dest = staging_dir(repo, version) / "rollback-files"
+    stage = staging_dir(repo, version)
+    # La dir della versione CORRENTE può essere stata creata da un update
+    # lanciato come root: senza riallineare la proprietà non potremmo scriverci
+    # dentro la cartella di rollback (ed è proprio dove si moriva).
+    reclaim_ownership(stage, repo)
+    dest = stage / "rollback-files"
     if dest.exists():
         shutil.rmtree(dest)
-    dest.mkdir(parents=True)
+    try:
+        dest.mkdir(parents=True)
+    except PermissionError as exc:
+        die(f"non riesco a creare {dest} ({exc}).\n"
+            f"È una deriva di proprietà: qualcosa sotto {repo / 'releases'} non è tuo.\n"
+            f"Rimedio: sudo chown -R $(id -u):$(id -g) {repo / 'releases'}")
     rels = set(load_manifest(bundle / "bundle-manifest.json")["files"]) | \
         set(load_manifest(repo / "bundle-manifest.json")["files"])
     for rel in sorted(rels):
