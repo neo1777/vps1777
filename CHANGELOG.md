@@ -2,6 +2,17 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.34.0] — 2026-07-14
+
+### nb1777 studio — id corretto e lista compatta (#42)
+
+Due bug emersi usando davvero il server (6 audio + 1 video in una mattina), che si moltiplicavano a vicenda:
+
+- **`studio_create_*` ritornava l'id sbagliato.** L'id dell'artefatto appena creato veniva preso per posizione in lista (`[-1]`, «assume ordine cronologico») — falso: sei create consecutivi tornavano tutti l'id del *primo*. Ora si ricava per **differenza di snapshot** (id prima/dopo il create), la stessa cura già in repo per le fonti (`_add_and_resolve_id`). Limite di concorrenza dichiarato: se un'altra sessione crea sullo stesso account nella finestra fra i due snapshot, si disambigua col tipo atteso o si ripiega best-effort — senza indovinare in silenzio.
+- **`studio_list` restituiva i focus interi** (`custom_instructions`, 4-6 KB per un podcast): ~85:1 di rumore, e il risultato di un tool MCP entra inline nel contesto, non paginabile. Ora il default è **compatto** (id/type/status/label a 80 char); `verbose=true` per il JSON pieno. Stesso trattamento per `studio_status`.
+
+Regola che li lega: **la proiezione la sceglie chi consuma, non chi produce** — la lista dà poco per default e tutto a richiesta, e il default non è mai irreversibile. Verificato da `tests/test_studio_id.py` (6 casi: compatto/verbose, id per differenza non per ordine, ripiego a 0 id nuovi, disambiguazione col tipo su concorrenza). Chiude #42.
+
 ## [0.33.0] — 2026-07-14
 
 ### Chiusura del dossier — zero rilievi aperti (35 chiusi · 7 parziali · 1 accettato · 0 aperti)
