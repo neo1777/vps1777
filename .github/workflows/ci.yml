@@ -31,6 +31,14 @@ jobs:
         run: |
           sudo apt-get install -y shellcheck
           shellcheck setup.sh tools/*.sh || true
+      # Il registro dei rilievi di sicurezza: ogni voce dichiarata `closed` deve
+      # portare un'evidenza, e quell'evidenza deve ESISTERE ANCORA nel codice.
+      # Nasce da un errore vero: SECURITY.md ha dichiarato «dossier applicato per
+      # intero» quando 8 rilievi su 43 erano chiusi, e nessuno se n'è accorto
+      # perché quella frase non puntava a nulla. Ora una dichiarazione falsa è
+      # una build rossa.
+      - name: Registro dei rilievi — nessun claim senza coordinata
+        run: uv run --with pyyaml security/check_findings.py
       # Entrambe le combinazioni devono restare valide: produzione (solo
       # immagini ghcr) e sviluppo (overlay di build locale).
       - name: Validate compose (production — pull only)

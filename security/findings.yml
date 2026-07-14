@@ -1,0 +1,585 @@
+# security/findings.yml — il registro dei rilievi della review difensiva.
+#
+# PERCHÉ ESISTE. A luglio 2026 SECURITY.md ha dichiarato «il dossier è applicato
+# per intero». Era falso: 8 chiusi su 43. Nessuno se n'era accorto perché quella
+# frase non puntava a NULLA — nessun file, nessuna riga, nessun test. Un claim
+# senza coordinata è infalsificabile, e quindi non può marcire rumorosamente:
+# marcisce in silenzio.
+#
+# Questo file è la cura. Ogni rilievo porta la sua EVIDENZA, e
+# `security/check_findings.py` (girato in CI) verifica che l'evidenza di ogni
+# voce dichiarata `closed` ESISTA ANCORA. Da qui in poi, «dichiarato fatto ma
+# assente» non è un errore di distrazione: è una build rossa.
+#
+# COME SI USA
+#   status:  closed | partial | open
+#   evidence: prove che lo stato è vero. Il checker le verifica per `closed`
+#             (e per la parte fatta di `partial`, se dichiarata).
+#     - file: percorso dal root del repo
+#       contains:     [stringhe che DEVONO esserci]      (opzionale)
+#       not_contains: [stringhe che NON devono esserci]  (opzionale)
+#   missing: cosa manca (obbligatorio per partial/open) — in italiano, asciutto.
+#
+# REGOLA: non si sposta una voce a `closed` senza evidenza che il checker sappia
+# verificare. Se non sai scrivere l'evidenza, non è chiusa.
+#
+# Base della review: commit v0.16.0. Aggiornato: 2026-07-14 (v0.30.2).
+
+meta:
+  dossier: "review difensiva vps1777, luglio 2026 — 5 fasi, 6 aree, 43 interventi deduplicati"
+  base_commit: "v0.16.0"
+  updated: "2026-07-14"
+
+findings:
+
+  # ═══════════════════════════ FASCIA CRITICA ═══════════════════════════
+
+  - id: H1
+    severity: critical
+    title: "Owner-gating fail-closed su bot e Mini App"
+    status: closed
+    since: v0.22.0
+    why: >
+      Con owner_id assente o con un typo, la condizione `if owner_id and ...`
+      corto-circuitava: la Mini App e il bot si aprivano a CHIUNQUE. Il pannello
+      completo — URL MCP col segreto, archivio, audit, tasto update.
+    evidence:
+      - file: services/gateway/app/miniapp_core.py
+        contains: ["if not owner_id:"]
+      - file: services/nb1777-bot/app/bot.py
+        contains: ["if not s.telegram_owner_id or user_id != s.telegram_owner_id:"]
+      - file: services/gateway/app/miniapp.py
+        contains: ["owner_not_configured"]
+
+  - id: H2
+    severity: critical
+    title: "Verifica cosign installata e obbligatoria di default sul canale update"
+    status: closed
+    since: v0.23.0
+    why: >
+      Il self-update fa `sudo install` ed esegue codice dal bundle come operator
+      (che ha NOPASSWD). La verifica della firma era opt-in e SALTATA IN SILENZIO
+      su un'installazione standard.
+    evidence:
+      - file: tools/vps1777.py
+        contains: ["VPS1777_REQUIRE_COSIGN", "_ensure_cosign", "verify-blob"]
+    note: >
+      Attenzione: la firma prova DA QUALE WORKFLOW viene un artefatto, non che
+      qualcuno abbia AUTORIZZATO quel rilascio. Vedi H24 (tag non protetti).
+
+  # ═══════════════════════════ FASCIA ALTA ═══════════════════════════
+
+  - id: H3
+    severity: high
+    title: "Redazione del gateway_secret nei log di accesso"
+    status: closed
+    since: v0.24.0
+    why: >
+      Il segreto vive nel PATH del proxy MCP: si depositava in chiaro nella
+      request-line di OGNI access-log. Esposizione certa, non condizionale.
+      E SECRETS.md dichiarava una sanitizzazione che non esisteva.
+    evidence:
+      - file: services/gateway/app/logredact.py
+        contains: ["class RedactSecrets", "def install"]
+      - file: services/gateway/app/__main__.py
+        contains: ["_install_redact"]
+
+  - id: H4
+    severity: high
+    title: "forwarded_allow_ips per profilo + contatore di fallimenti globale"
+    status: partial
+    since: v0.28.0
+    why: >
+      Con "*" uvicorn si fidava dell'X-Forwarded-For da qualunque peer: il client
+      sceglieva il proprio IP → rate-limit e lockout evadibili, audit avvelenabile.
+    evidence:
+      - file: services/gateway/app/settings.py
+        contains: ["gateway_forwarded_allow_ips"]
+      - file: services/gateway/app/__main__.py
+        contains: ["forwarded_allow_ips=s.gateway_forwarded_allow_ips"]
+        not_contains: ['forwarded_allow_ips="*"']
+    missing: >
+      Il contatore di fallimenti GLOBALE. SCARTATO PER SCELTA: chiuso lo spoofing,
+      il per-IP torna a mordere sull'IP reale; un tetto globale sugli endpoint auth
+      introdurrebbe un auto-lockout dell'owner per beneficio marginale su un
+      sistema mono-utente. Resta `partial` per onestà, non per dimenticanza.
+
+  - id: H5
+    severity: high
+    title: "Chiave age fuori dall'host; sulla VPS solo il recipient; push off-site"
+    status: partial
+    since: v0.26.0
+    why: >
+      Backup e chiave di decifratura sullo stesso disco: la cifratura non protegge
+      né dalla compromissione né dalla perdita dell'host.
+    evidence:
+      - file: tools/backup.sh
+        contains: ["Genera la coppia sul TUO PC"]
+        not_contains: ["age-keygen -o \"$KEY\""]
+      - file: compose.ops.backup.yaml
+        not_contains: ["keys.txt:/root/.config/age/keys.txt"]
+    missing: >
+      Il push off-site automatico. LASCIATO ALL'OWNER PER SCELTA: la cartella
+      backups/ la porta dove vuole (NAS, cloud); vps1777 non trasferisce nulla
+      in automatico.
+
+  - id: H6
+    severity: high
+    title: "Togliere al gateway il mount rw dei cookie Google (nlm-auth)"
+    status: closed
+    since: v0.30.0
+    why: >
+      Il gateway — l'UNICO servizio esposto su Internet — montava in scrittura i
+      cookie di sessione Google. Compromettere il gateway voleva dire leggerli E
+      riscriverli.
+    evidence:
+      - file: services/nb1777-mcp/app/nlm_profile.py
+        contains: ["def install_profile", "def profile_status"]
+      - file: services/gateway/app/nlm_client.py
+        contains: ["internal/nlm/status", "internal/nlm/profile"]
+      - file: services/gateway/app/proxy.py
+        contains: ['sub_path.startswith("internal/")']
+      - file: compose.yaml
+        not_contains: ["nlm-auth:/var/lib/nlm:ro"]
+    note: >
+      Il proxy MCP è un catch-all: senza il blocco di `internal/` quegli endpoint
+      sarebbero stati raggiungibili da Internet — il fix avrebbe APERTO la porta
+      che chiudeva. Vedi anche H14: i cookie finiscono ancora in chiaro nello
+      snapshot pre-update.
+
+  - id: H7
+    severity: high
+    title: "Segreti mai negli argv dei comandi remoti di provisioning"
+    status: closed
+    since: v0.29.0
+    why: >
+      tailscale authkey, bot token e password admin finivano nell'argv di comandi
+      remoti — visibili con `ps` a ogni utente locale della VPS.
+    evidence:
+      - file: deploy.sh
+        contains: ["bash -s", "--authkey=file:", "sys.stdin.buffer.read()"]
+        not_contains: ["tailscale up --authkey=$TS_KEY"]
+    note: >
+      NON verificato con un `deploy.sh --apply` completo contro la produzione
+      (riconfigura l'intero stack): verificato per lettura + test delle tecniche
+      in isolamento sulla VPS.
+
+  - id: H8
+    severity: high
+    title: "OAuth: pagina di consenso, limiti al DCR, verifica dell'audience nel proxy"
+    status: partial
+    since: v0.25.0
+    evidence:
+      - file: services/gateway/app/proxy.py
+        contains: ["subject_not_allowed"]
+      - file: services/gateway/app/oauth.py
+        contains: ["_REGISTER_LIMIT", "_TOKEN_LIMIT"]
+    missing: >
+      La pagina di CONSENSO: /authorize emette il code subito dopo il cookie admin,
+      senza un passaggio di approvazione esplicita. docs/ARCHITECTURE.md la disegna
+      ancora nel flusso — scostamento doc↔codice.
+
+  - id: H9
+    severity: high
+    title: "deploy.sh --apply: validare e non interpolare i dati scritti dal gateway"
+    status: partial
+    since: v0.29.0
+    evidence:
+      - file: deploy.sh
+        contains: ["bash -s"]
+    missing: >
+      La VALIDAZIONE. I valori di pending.json (scritti dal gateway) vengono letti
+      e usati senza schema né controllo di forma. L'interpolazione è chiusa (viaggiano
+      via stdin), la validazione no.
+
+  # ═══════════════════════════ FASCIA MEDIA ═══════════════════════════
+
+  - id: H10
+    severity: medium
+    title: "Degradi di esposizione espliciti, rumorosi e temporanei"
+    status: open
+    missing: >
+      L'installer imposta da sé GATEWAY_BIND=0.0.0.0 sul fallimento del Funnel, a
+      tempo indefinito: nessun banner "sessione non cifrata", nessun evento di audit
+      sul cambio di bind, nessuna richiusura automatica, nessuna via raccomandata
+      via tunnel SSH su loopback.
+
+  - id: H11
+    severity: medium
+    title: "Rate limiting su /token, /register, /app/auth + IP negli eventi di fallimento"
+    status: partial
+    since: v0.25.0
+    evidence:
+      - file: services/gateway/app/ratelimit.py
+        contains: ["class RateLimiter"]
+      - file: services/gateway/app/oauth.py
+        contains: ["_REGISTER_LIMIT.allow", "_TOKEN_LIMIT.allow"]
+      - file: services/gateway/app/miniapp.py
+        contains: ["_AUTH_LIMIT.allow"]
+    missing: >
+      L'IP non finisce negli eventi di fallimento della Mini App
+      (miniapp_auth_fail / _no_owner / _denied): la forense su /app/auth resta zoppa.
+
+  - id: H12
+    severity: medium
+    title: "Sudoers dell'operator: da NOPASSWD:ALL a whitelist di comandi"
+    status: open
+    missing: >
+      L'operator ha `ALL=(ALL) NOPASSWD: ALL` ed è nel gruppo docker (root-equivalente):
+      il raggio di danno di una sua compromissione è l'HOST INTERO. Serve una whitelist
+      dei comandi che gli servono davvero (install unit+CLI, systemctl, chown di
+      bootstrap) e la doc che dica che il gruppo docker è root-equivalente.
+
+  - id: H13
+    severity: medium
+    title: "Container di backup: via il docker.sock"
+    status: partial
+    since: v0.29.0
+    evidence:
+      - file: compose.ops.backup.yaml
+        not_contains: ["/var/run/docker.sock"]
+      - file: tools/backup.sh
+        contains: ["BACKUP_VOLUMES_DIR"]
+      - file: tools/backup-container-setup.sh
+        not_contains: ["bash docker-cli"]   # la riga di apk, non la parola nel commento
+    missing: >
+      Il container installa i pacchetti a runtime dalla rete (`apk add`) senza pinning
+      di versione: la catena di fornitura del container di backup resta mobile.
+
+  - id: H14
+    severity: medium
+    title: "Snapshot pre-update: escludere nlm-auth (cookie Google in chiaro)"
+    status: open
+    why: >
+      ERODE H6. `vps1777 update` fa uno snapshot NON CIFRATO dei volumi dati prima
+      di agire (serve all'auto-rollback, che non può dipendere dalla chiave age) — e
+      fra quei volumi c'è nlm-auth. Il gateway non tocca più quei cookie; un dump di
+      backups/pre-update/ sì.
+    missing: >
+      nlm-auth è ancora in DATA_VOLUMES e finisce in chiaro nello snapshot. Mitigazioni
+      presenti (dir 0700, prune 72h) ma non è il fix. Serve: escluderlo dallo snapshot
+      (accettando che un rollback non ripristini l'auth nlm — che si ricarica) oppure
+      cifrarlo con una chiave effimera.
+
+  - id: H15
+    severity: medium
+    title: "TS_AUTHKEY: wipe post-tailscale-up, chmod 600 su .env, file orfano"
+    status: open
+    missing: >
+      La authkey resta in .env dopo l'uso (ed è monouso); .env non è mai chmod 600;
+      secrets/ts_authkey.txt è un file orfano che nessun compose consuma; la doc
+      motiva ancora l'eccezione con "la legge il sidecar" — sidecar che non esiste più.
+
+  - id: H16
+    severity: medium
+    title: "Password admin: nasce sul PC, viaggia solo come hash, policy unica"
+    status: open
+    missing: >
+      La password è generata SULLA VPS e torna al PC sullo stdout SSH. La policy di
+      robustezza è incoerente fra deploy.sh, setup.sh e rotate-secret.sh (solo
+      quest'ultimo pretende 16 char + 3 classi).
+
+  - id: H17
+    severity: medium
+    title: "Audit: rotazione, retention, lettura tail-like, niente email digitata"
+    status: partial
+    since: v0.24.0
+    evidence:
+      - file: services/gateway/app/audit.py
+        contains: ["_prune", "audit_retention_days"]
+      - file: services/gateway/app/admin.py
+        contains: ["email_known"]
+    missing: >
+      read_recent legge ancora TUTTO il file in RAM (readlines()[-limit:]) invece di
+      leggere dalla coda; nessun contatore dei fallimenti di scrittura dell'audit
+      (l'except è muto); proxy_request loggato a ogni chiamata senza campionamento.
+
+  - id: H18
+    severity: medium
+    title: "Percorso di cancellazione per l'archivio + sezione «dati a riposo»"
+    status: partial
+    since: v0.17.0
+    evidence:
+      - file: services/gateway/app/admin.py
+        contains: ["admin_archive_delete"]
+    missing: >
+      Cancellazione per singola conversazione (oggi solo per DB intero); sezione
+      «dati a riposo» in SECURITY.md (il volume archive non è cifrato a riposo);
+      propagazione della cancellazione nei backup già fatti.
+
+  - id: H19
+    severity: medium
+    title: "Inventario dei flussi verso terzi + flag per i comandi RAG del bot"
+    status: closed
+    since: v0.24.0
+    evidence:
+      - file: SECURITY.md
+        contains: ["Flussi di dati verso terzi", "BOT_RAG_COMMANDS"]
+      - file: services/nb1777-bot/app/settings.py
+        contains: ["bot_rag_commands"]
+      - file: services/nb1777-bot/app/bot.py
+        contains: ["_rag_disabled"]
+
+  - id: H20
+    severity: medium
+    title: "Revoca reale della sessione admin (jti + revoke-list) e logout dietro CSRF"
+    status: open
+    missing: >
+      Il logout è FUORI da _require_admin (nessun CSRF) e cancella solo il cookie. Il
+      token admin non ha jti e non c'è revoke-list: un token rubato resta valido fino
+      a scadenza (8h). Il pattern esiste già per i refresh OAuth (oauth_revoked.json).
+
+  - id: H21
+    severity: medium
+    title: "Riconciliazione doc↔codice + email di contatto + gate di release"
+    status: partial
+    since: v0.24.0
+    evidence:
+      - file: SECURITY.md
+        contains: ["antigravity1777@gmail.com"]
+    missing: >
+      Restano scostamenti in doc: ARCHITECTURE.md disegna una consent page che non
+      esiste (H8) e una separazione egress che non esiste (H25); SECRETS.md dichiara
+      `secrets/` a mode 700 che setup.sh non imposta (H38). E manca il GATE: nessuna
+      checklist in PR-template/CI che pretenda una coordinata per ogni claim di
+      sicurezza. QUESTO FILE + check_findings.py sono l'inizio di quel gate.
+
+  - id: H22
+    severity: medium
+    title: "Compose pinnato ai digest, non solo ai tag"
+    status: partial
+    since: v0.27.0
+    evidence:
+      - file: compose.ops.backup.yaml
+        contains: ["@sha256:"]
+      - file: compose.ingress.caddy.yaml
+        contains: ["@sha256:"]
+    missing: >
+      Le 4 immagini vps1777 restano a tag mobile in compose.yaml; il pinning ai digest
+      vive solo POST-pull dentro la CLI (verify_digests contro images.lock). Un
+      `docker compose pull` lanciato fuori dalla CLI ri-risolve il tag senza controlli.
+
+  - id: H23
+    severity: medium
+    title: "Action GitHub pinnate a SHA (+ Dependabot)"
+    status: closed
+    since: v0.27.0
+    evidence:
+      - file: .github/dependabot.yml
+        contains: ["github-actions", "docker-compose"]
+      - file: .github/workflows/trivy.yml
+        not_contains: ["trivy-action@master"]
+      - file: .github/workflows/release.yml
+        contains: ["actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5"]
+
+  - id: H24
+    severity: medium
+    title: "Protezione dei tag v* e permessi per-job nei workflow"
+    status: partial
+    since: v0.27.0
+    why: >
+      Le release sono firmate cosign KEYLESS DAL WORKFLOW. Senza protezione sui tag,
+      chiunque possa pushare un tag `v*` conia una release REGOLARMENTE FIRMATA.
+      La firma prova da quale workflow viene un artefatto, non che qualcuno abbia
+      autorizzato quel rilascio. Erode il valore di H2.
+    evidence:
+      - file: .github/workflows/release.yml
+        contains: ["permissions:", "id-token: write"]
+    missing: >
+      La protezione dei tag `v*` NON esiste (verificato: `gh api repos/.../rulesets`
+      → []; nessuna tag-protection; main non protetto). Serve un ruleset che limiti
+      chi può creare tag v*, e/o un environment `release` con reviewer.
+
+  - id: H25
+    severity: medium
+    title: "Rete egress separata; su ingress solo gateway + sidecar; doc plugin oneste"
+    status: open
+    missing: >
+      Non esiste una rete `egress`: nb1777-mcp e il bot stanno sulla rete `ingress`
+      per poter uscire su Internet — 3 container su 4 hanno una gamba lì.
+      ARCHITECTURE.md dichiara il contrario («ingress: gateway + sidecar»): scostamento.
+      E PLUGINS.md non dice che un plugin è fiducia piena verso gli altri servizi.
+
+  - id: H26
+    severity: medium
+    title: "Mascherare il gateway_secret nella Mini App (reveal esplicito)"
+    status: open
+    missing: >
+      La Mini App stampa gli URL dei connector col segreto IN CHIARO nel DOM e li copia
+      in clipboard (che sui telefoni si sincronizza sul cloud). Serve mascheramento di
+      default + reveal esplicito al tap + avviso una-tantum.
+
+  - id: H27
+    severity: medium
+    title: "Finestra initData ridotta (6-12h) e owner re-check sul Bearer"
+    status: open
+    missing: >
+      max_age_s è ancora 86400 (24h). E _bearer_claims verifica solo typ/aud: NON
+      richiama is_owner — se l'owner cambiasse, un token miniapp già emesso resterebbe
+      valido fino a scadenza.
+
+  - id: H28
+    severity: medium
+    title: "Secondo fattore (TOTP o passkey) sul pannello admin"
+    status: open
+    missing: >
+      Nessun 2FA: il pannello è protetto da password (bcrypt 12) + lockout per-IP.
+      Contro una password rubata, non basta.
+
+  - id: H29
+    severity: medium
+    title: "Token bot Telegram riclassificato di fascia massima"
+    status: open
+    missing: >
+      È la radice di fiducia della Mini App (con quel token si forgia un initData
+      valido per QUALUNQUE user id), ma è trattato come segreto ordinario: soglia di
+      rotazione a 365 giorni, nessuna menzione della sua criticità in doc.
+
+  - id: H30
+    severity: medium
+    title: "Open redirect sul parametro next del login"
+    status: closed
+    since: v0.21.0
+    evidence:
+      - file: services/gateway/app/admin.py
+        contains: ['startswith(("//", "/\\"))']
+
+  # ═══════════════════════════ FASCIA BASSA ═══════════════════════════
+
+  - id: H31
+    severity: low
+    title: "CORS: rimuovere il fallback wildcard con credenziali; scoping per path"
+    status: partial
+    since: v0.21.0
+    evidence:
+      - file: services/gateway/app/__main__.py
+        contains: ["allow_origins=s.oauth_cors_origins"]
+        not_contains: ['or ["*"]']
+    missing: >
+      Il middleware CORS è ancora GLOBALE (montato su tutta l'app, /admin incluso)
+      invece che scoped agli endpoint OAuth + /app; allow_headers resta ["*"].
+
+  - id: H32
+    severity: low
+    title: "Igiene OAuth minore: state url-encoded, code_challenge vuoto, PKCE constant-time"
+    status: partial
+    since: v0.21.0
+    evidence:
+      - file: services/gateway/app/oauth.py
+        contains: ["quote(state, safe=", "code_challenge"]
+    missing: >
+      Il confronto PKCE non è constant-time (`if expected != ctx["code_challenge"]`):
+      manca hmac.compare_digest.
+
+  - id: H33
+    severity: low
+    title: "/health: deep riservato ai chiamanti interni, body pubblico minimo"
+    status: open
+    missing: >
+      Il body pubblico espone oauth_required e i NOMI degli upstream; `?deep=1` apre
+      probe TCP verso i backend per chiunque, senza alcun gate.
+
+  - id: H34
+    severity: low
+    title: "Security header aggiuntivi: Permissions-Policy, COOP, CSP di default"
+    status: partial
+    since: v0.21.0
+    evidence:
+      - file: services/gateway/app/asgi_security.py
+        contains: ["Permissions-Policy", "Cross-Origin-Opener-Policy"]
+    missing: >
+      Nessuna CSP minimale di DEFAULT nel middleware: la CSP esiste solo sulle pagine
+      admin e Mini App, non come rete di sicurezza globale.
+
+  - id: H35
+    severity: low
+    title: "CSP della Mini App raffinata"
+    status: open
+    missing: >
+      script-src consente l'intero host telegram.org invece del path dell'SDK;
+      style-src usa 'unsafe-inline'; frame-ancestors assente.
+
+  - id: H36
+    severity: low
+    title: "pending.json con TTL/auto-wipe; intent file 0640"
+    status: open
+    missing: >
+      pending.json (che contiene authkey e bot token in chiaro finché non si lancia
+      --apply) non ha TTL né auto-wipe; l'intent file di update è 0644.
+
+  - id: H37
+    severity: low
+    title: "Monitoraggio segreti completo: cloudflared_token, cookie nlm, rotazione age"
+    status: open
+    missing: >
+      _SECRET_POLICY copre 4 segreti su 6: mancano cloudflared_token e la freschezza
+      dei cookie NotebookLM. E la rotazione della chiave age non è documentata da
+      nessuna parte.
+
+  - id: H38
+    severity: low
+    title: "Permessi delle directory sensibili: chmod 700 su secrets/, backups/, onboarding/"
+    status: open
+    missing: >
+      setup.sh e deploy.sh creano secrets/, backups/, onboarding/ SENZA chmod 700
+      (solo var/ lo riceve). E SECRETS.md dichiara «secrets/ ha mode 700»: falso —
+      è esattamente lo scostamento doc↔codice di H21.
+
+  - id: H39
+    severity: low
+    title: "Tetti su upload e decompressione (nlm e archivio)"
+    status: partial
+    since: v0.30.2
+    why: >
+      Il cap di 5MB del gateway è sul tar COMPRESSO e non dice nulla su quanto quel
+      tar si espande: 20MB di zeri comprimono sotto i 5MB e passavano.
+    evidence:
+      - file: services/nb1777-mcp/app/nlm_profile.py
+        contains: ["MAX_MEMBER_BYTES", "MAX_TOTAL_BYTES"]
+      - file: services/nb1777-mcp/tests/test_nlm_profile.py
+        contains: ["test_tar_bomb_membro_enorme_rifiutato"]
+    missing: >
+      Il lato ARCHIVIO resta senza tetti: archive_indexer fa json.load() dell'intero
+      conversations.json dallo zip (RAM illimitata) e il parsing PDF non ha limiti;
+      l'upload su /admin/archive non ha un cap dichiarato.
+
+  - id: H40
+    severity: low
+    title: "OCR via NotebookLM: esito del cleanup propagato + sweep dei notebook _ingest_"
+    status: open
+    missing: >
+      Se la cancellazione del notebook temporaneo fallisce, si prosegue in silenzio:
+      nessun retry, nessun `cleanup_ok` nel risultato, nessuno sweep periodico dei
+      notebook `_ingest_*` rimasti. I documenti OCR-ati restano su Google.
+
+  - id: H41
+    severity: low
+    title: "Contenuti personali fuori da argv/errori di nlm + minori di logging"
+    status: partial
+    since: v0.19.0
+    evidence:
+      - file: services/archive-mcp/app/fts.py
+        not_contains: ["log.warning(\"query FTS5"]
+    missing: >
+      core.py passa il TESTO INTERO di una fonte in argv (`nlm source add --text ...`):
+      visibile nella process list. E in caso di timeout solleva un errore con la
+      command line INTERA, non troncata. Il gateway logga l'admin_email all'avvio.
+
+  - id: H42
+    severity: low
+    title: "archive-data montato :ro in archive-mcp"
+    status: open
+    missing: >
+      Il volume è montato :rw in archive-mcp; la sola-lettura è solo APPLICATIVA
+      (SQLite aperto in mode=ro). Una riga di compose la renderebbe strutturale.
+
+  - id: H43
+    severity: low
+    title: "Hardening residuo di unit e container: sandbox update.service, unit templata, rootfs ro"
+    status: open
+    missing: >
+      update.service non ha ProtectSystem/PrivateTmp/ReadWritePaths (a differenza di
+      check-update.service). La unit secrets-check HARDCODA l'utente `vps1777` mentre
+      il deploy è parametrico su OPERATOR_USER: con un operatore diverso il
+      monitoraggio delle scadenze SI SPEGNE IN SILENZIO. E nessun servizio ha
+      read_only: true sul rootfs.

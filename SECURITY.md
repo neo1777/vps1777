@@ -198,6 +198,17 @@ interamente sulla VPS.
 
 ## Residui noti — cosa NON è ancora chiuso
 
+> **Questo conteggio è verificato dalla CI.** I 43 rilievi vivono in
+> [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
+> chiuso, con l'**evidenza puntuale** nel codice.
+> [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
+> **fallisce** se l'evidenza di una voce chiusa è sparita, se un residuo non
+> dichiara cosa manca, o se i numeri qui sotto non combaciano col registro.
+>
+> Esiste perché questa sezione, una volta, ha dichiarato «nessun rilievo è rimasto
+> aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
+> infalsificabile: marcisce in silenzio. Ora non può più.
+
 La review difensiva ha prodotto **43 interventi** (2 critici, 7 alti, 21 medi, 13
 bassi). La campagna `v0.19.1 → v0.30.2` (14 release) ha chiuso **i due critici** e la sostanza
 della fascia alta. Non ha chiuso tutto, e qui sta la lista vera — verificata
@@ -206,8 +217,8 @@ contro il codice, non contro i buoni propositi:
 | | |
 |---|---|
 | **chiusi** | 8 |
-| **parziali** | 17 |
-| **aperti** | 18 |
+| **parziali** | 16 |
+| **aperti** | 19 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
 (`H2`) — sono chiusi e verificati in produzione. Sotto, i residui che pesano di
