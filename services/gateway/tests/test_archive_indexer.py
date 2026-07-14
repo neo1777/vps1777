@@ -660,3 +660,95 @@ def test_v2_allegato_senza_nome_usa_uuid(tmp_path: Path) -> None:
         assert "5cd72e4f-dead-beef" in att
     finally:
         conn.close()
+
+
+# ── H39: tetti su upload/decompressione (zip-bomb / OOM) ─────────────────────
+# La lezione: un limite su un input COMPRESSO non è un limite. Si conta ciò che
+# l'archivio DIVENTA, byte per byte, non ciò che dichiara.
+
+
+def _small_caps(monkeypatch) -> None:
+    """Abbassa i tetti a valori minuscoli per testare i rami di errore senza
+    dover generare gigabyte. Si patcha il modulo, non si toccano le costanti reali."""
+    monkeypatch.setattr(archive_indexer, "MAX_MEMBER_BYTES", 2000)
+    monkeypatch.setattr(archive_indexer, "MAX_ARCHIVE_BYTES", 4000)
+    monkeypatch.setattr(archive_indexer, "MAX_FILE_BYTES", 2000)
+
+
+def test_zip_member_oltre_il_tetto_fallisce_parlante(tmp_path, monkeypatch) -> None:
+    import json
+    import zipfile
+
+    import pytest
+    _small_caps(monkeypatch)
+    # conversations.json che DECOMPRESSO supera MAX_MEMBER_BYTES (2000): un solo
+    # messaggio con un text enorme. Lo zip compresso resta piccolo (zip-bomb-lite).
+    convs = [{"uuid": "c1", "name": "chat", "chat_messages": [
+        {"uuid": "m1", "sender": "human", "created_at": "2026-01-01", "text": "x" * 50_000},
+    ]}]
+    zp = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    assert zp.stat().st_size < 2000  # il COMPRESSO è sotto il tetto: il pericolo è a valle
+    with pytest.raises(ValueError, match="DECOMPRESSO|tetto"):
+        archive_indexer.index_file(str(zp), str(tmp_path / "o.db"))
+
+
+def test_zip_troppi_membri_fallisce(tmp_path, monkeypatch) -> None:
+    import zipfile
+
+    import pytest
+    monkeypatch.setattr(archive_indexer, "MAX_ZIP_MEMBERS", 5)
+    zp = tmp_path / "many.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", "[]")
+        for i in range(10):
+            z.writestr(f"projects/p{i}.json", "{}")
+    with pytest.raises(ValueError, match="troppi file"):
+        archive_indexer.index_file(str(zp), str(tmp_path / "o.db"))
+
+
+def test_budget_cumulativo_su_piu_membri(tmp_path, monkeypatch) -> None:
+    import json
+    import zipfile
+
+    import pytest
+    # Ogni membro sta sotto MAX_MEMBER_BYTES, ma la SOMMA supera MAX_ARCHIVE_BYTES:
+    # è la zip-bomb "a tanti file medi". Il budget condiviso deve fermarla.
+    monkeypatch.setattr(archive_indexer, "MAX_MEMBER_BYTES", 100_000)
+    monkeypatch.setattr(archive_indexer, "MAX_ARCHIVE_BYTES", 3000)
+    dc = {"uuid": "d", "title": "Chat", "messages": [
+        {"uuid": "m", "role": "user", "created_at": "2026-01-01",
+         "content": {"role": "user", "content": "y" * 2000}}]}
+    zp = tmp_path / "sum.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", "[]")
+        for i in range(5):
+            z.writestr(f"design_chats/d{i}.json", json.dumps(dc))
+    with pytest.raises(ValueError, match="archivio supera"):
+        archive_indexer.index_file(str(zp), str(tmp_path / "o.db"))
+
+
+def test_file_jsonl_oltre_il_tetto(tmp_path, monkeypatch) -> None:
+    import json
+
+    import pytest
+    _small_caps(monkeypatch)
+    big = tmp_path / "big.jsonl"
+    line = json.dumps({"type": "user", "uuid": "u1", "timestamp": "t",
+                       "message": {"content": "z" * 5000}})
+    big.write_text(line + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="troppo grande|MAX_FILE"):
+        archive_indexer.index_file(str(big), str(tmp_path / "o.db"))
+
+
+def test_zip_normale_sotto_i_tetti_passa(tmp_path) -> None:
+    import json
+    import zipfile
+    # Guardia di non-regressione: coi tetti REALI un export piccolo passa liscio.
+    convs = [{"uuid": "c1", "name": "chat", "chat_messages": [
+        {"uuid": "m1", "sender": "human", "created_at": "2026-01-01", "text": "ciao"}]}]
+    zp = tmp_path / "ok.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    assert archive_indexer.index_file(str(zp), str(tmp_path / "o.db")) == 1

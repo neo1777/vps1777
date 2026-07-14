@@ -19,13 +19,14 @@ import sqlite3
 import time
 from pathlib import Path
 
-from . import archive_indexer, nlm_client
+from . import admin_core, archive_indexer, nlm_client
+from .admin_core import safe_next_url
 from .miniapp_core import version_gt
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from .audit import audit, read_recent
+from .audit import audit, audit_health, read_recent
 from .jwt_helpers import JWTError, issue, verify
 from .security import verify_admin_password
 from .settings import get_settings
@@ -34,10 +35,31 @@ from .settings import get_settings
 ADMIN_COOKIE = "vps1777_admin"
 
 
+# ───── revoke-list della sessione admin (H20) ─────
+# Il cookie admin è un JWT verificato stateless: finché la firma regge e `exp`
+# non è passato, VALE. Il logout cancellava il cookie NEL BROWSER e basta → un
+# token rubato restava buono fino a 8h anche dopo che l'admin aveva fatto logout.
+# Ora ogni token porta un `jti` (jwt_helpers.issue) e il logout lo mette in una
+# revoke-list persistente: la revoca è reale e sopravvive ai restart.
+# Stessa filosofia dei refresh OAuth (oauth.py → oauth_revoked.json), stessa dir
+# dati; la logica pura sta in admin_core.py (stdlib-only, testabile).
+
+_admin_revoked: admin_core.RevocationList | None = None
+
+
+def _revocations() -> admin_core.RevocationList:
+    """Singleton lazy: le settings non sono disponibili all'import."""
+    global _admin_revoked
+    if _admin_revoked is None:
+        path = Path(get_settings().audit_log_path).parent / "admin_revoked.json"
+        _admin_revoked = admin_core.RevocationList(path)
+    return _admin_revoked
+
+
 # ───── cookie helpers ─────
 
-def verify_admin_cookie(request: Request) -> str | None:
-    """Ritorna l'email se cookie valido, None altrimenti."""
+def _admin_claims(request: Request) -> dict | None:
+    """Claims del cookie admin se valido, non revocato e dell'admin. Altrimenti None."""
     tok = request.cookies.get(ADMIN_COOKIE)
     if not tok:
         return None
@@ -49,7 +71,21 @@ def verify_admin_cookie(request: Request) -> str | None:
     s = get_settings()
     if email != s.admin_email:
         return None
-    return email
+    # Un token SENZA jti non è revocabile (non sapremmo cosa mettere in lista):
+    # rifiutalo invece di fidartene. In pratica succede una volta sola, ai cookie
+    # emessi prima di questo fix → un re-login, non un bug.
+    jti = str(claims.get("jti") or "")
+    if not jti or _revocations().is_revoked(jti):
+        return None
+    return claims
+
+
+def verify_admin_cookie(request: Request) -> str | None:
+    """Ritorna l'email se cookie valido, None altrimenti."""
+    claims = _admin_claims(request)
+    if claims is None:
+        return None
+    return str(claims.get("sub", "")).lower()
 
 
 def _set_admin_cookie(response: Response, email: str) -> None:
@@ -224,6 +260,8 @@ nav.tabs{display:flex;gap:2px;margin-bottom:28px;border-bottom:1px solid var(--l
 nav.tabs a{padding:9px 16px;color:var(--muted);text-decoration:none;font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px}
 nav.tabs a:hover{color:var(--fg)}
 nav.tabs a.active{color:var(--fg);border-color:var(--accent)}
+nav.tabs form.logout{margin-left:auto;display:flex;align-items:center;padding-bottom:6px}
+nav.tabs form.logout button{padding:6px 13px;font-size:12px}
 .status-grid{display:grid;gap:12px;margin-bottom:8px}
 .status-row{display:flex;align-items:center;gap:10px;padding:13px 16px;background:var(--bg-soft);border:1px solid var(--line-soft);border-radius:8px}
 .status-row .lbl{font-weight:500}.status-row .val{color:var(--muted);font-size:12px;margin-left:auto;font-family:var(--mono)}
@@ -256,7 +294,20 @@ def _layout(title: str, body: str, current: str = "", flash: str = "",
             f'<a href="/admin/{k}" class="{"active" if current==k else ""}">{label}</a>'
             for k, label in items
         )
-        tabs = f'<nav class="tabs">{rendered}</nav>'
+        # Logout: form POST col token CSRF, reso QUI e non dentro le pagine.
+        # Prima stava ANNIDATO dentro il <form> di upload di /admin/nlm e
+        # /admin/archive — e un <form> dentro un <form> il parser HTML lo BUTTA
+        # VIA: il bottone «Logout» finiva a submittare il form esterno (l'upload).
+        # Nel layout è sempre top-level, porta il suo csrf (ora /admin/logout è
+        # dietro _require_admin) ed è presente su OGNI pagina admin.
+        logout_form = ""
+        if csrf:
+            logout_form = (
+                '<form method="POST" action="/admin/logout" class="logout">'
+                f'<input type="hidden" name="csrf" value="{html.escape(csrf)}">'
+                '<button type="submit">Logout</button></form>'
+            )
+        tabs = f'<nav class="tabs">{rendered}{logout_form}</nav>'
     flash_html = ""
     if flash:
         flash_html = f'<div class="flash {flash_kind}">{html.escape(flash)}</div>'
@@ -360,20 +411,33 @@ async def login(request: Request) -> Response:
 
     _login_record_ok(ip)
     audit({"event": "admin_login_ok", "email": email, "ip": ip})
-    # anti open-redirect: `next` solo relativo VERO o same-origin (PUBLIC_BASE).
-    # `//host` e `/\host` iniziano con "/" ma sono protocol-relative → redirect
-    # ESTERNO: vanno esclusi esplicitamente.
-    base = s.gateway_public_base
-    same_origin = bool(base) and next_url.startswith(base)
-    relative = next_url.startswith("/") and not next_url.startswith(("//", "/\\"))
-    if not (relative or same_origin):
-        next_url = "/admin/setup"
+    # anti open-redirect (H30): logica pura e TESTATA in admin_core (un bypass di
+    # prefisso-vs-origine è già tornato una volta qui — mai più senza test).
+    next_url = safe_next_url(next_url, s.gateway_public_base)
     resp = RedirectResponse(next_url, status_code=302)
     _set_admin_cookie(resp, email)
     return resp
 
 
-async def logout(_request: Request) -> Response:
+async def logout(request: Request) -> Response:
+    """POST /admin/logout — dietro `_require_admin` (quindi CSRF verificato) e con
+    REVOCA vera del token, non solo la cancellazione del cookie nel browser.
+
+    Perché dietro CSRF: un logout forzabile cross-origin è un DoS di sessione (ti
+    butta fuori a ripetizione) — piccolo, ma è la stessa classe di bug degli altri
+    POST admin, e la verifica è già centralizzata in `_require_admin`: passarci
+    dentro è gratis. Il bottone è reso da `_layout` come form POST col token CSRF.
+    """
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+    claims = _admin_claims(request) or {}
+    jti = str(claims.get("jti") or "")
+    # `exp` del token = fin quando ha senso ricordarsi il jti: dopo, la verifica
+    # JWT lo rifiuta già da sé e la voce viene potata (la lista non cresce).
+    exp = float(claims.get("exp") or (time.time() + get_settings().oauth_admin_cookie_lifetime))
+    persisted = _revocations().revoke(jti, exp) if jti else False
+    audit({"event": "admin_logout", "email": email, "jti": jti, "persisted": persisted})
     resp = RedirectResponse("/admin/login", status_code=303)
     _clear_admin_cookie(resp)
     return resp
@@ -461,7 +525,6 @@ tar czf nlm-profile.tgz profiles/default</pre>
     <div class="toolbar">
       <button type="submit" class="primary">Carica</button>
       <a class="btn" href="/admin/audit">Audit →</a>
-      <form method="POST" action="/admin/logout" style="display:inline"><button type="submit">Logout</button></form>
     </div>
   </section>
 </form>
@@ -538,14 +601,25 @@ async def archive_view(request: Request) -> Response:
         tmp = db_dir / f".upload-{db_name}-{os.getpid()}{suffix}"
         db_path = db_dir / f"{db_name}.db"
         try:
-            # stream su disco a chunk (memoria costante anche su file da decine di MB)
+            # stream su disco a chunk (memoria costante anche su file da decine di MB).
+            # TETTO sull'upload (H39): i tetti di decompressione stanno a valle,
+            # nell'indexer — ma un upload da 100 GB riempirebbe il disco PRIMA di
+            # arrivarci. Si conta mentre si scrive e si taglia. È la lezione del
+            # tar-bomb: un limite sul trasporto va messo anche sul trasporto.
             fh = upload.file  # type: ignore[union-attr]
             fh.seek(0)
+            written = 0
             with open(tmp, "wb") as w:
                 while True:
                     chunk = fh.read(1024 * 1024)
                     if not chunk:
                         break
+                    written += len(chunk)
+                    if written > archive_indexer.MAX_UPLOAD_BYTES:
+                        raise ValueError(
+                            f"upload troppo grande (tetto "
+                            f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB). "
+                            f"Per archivi più grandi usa la CLI sulla VPS.")
                     w.write(chunk)
             if suffix == ".db":
                 # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
@@ -628,7 +702,6 @@ document.querySelectorAll('form.delform').forEach(function(f){{
     <div class="toolbar">
       <button type="submit" class="primary">Carica e indicizza</button>
       <a class="btn" href="/admin/audit">Audit →</a>
-      <form method="POST" action="/admin/logout" style="display:inline"><button type="submit">Logout</button></form>
     </div>
   </form>
 </section>
@@ -872,12 +945,23 @@ async def audit_view(request: Request) -> Response:
         extra = {k: v for k, v in e.items() if k not in ("ts", "event")}
         ex = html.escape(json.dumps(extra, ensure_ascii=False))
         rows.append(f'<div class="audit-event"><span class="ts">{ts}</span><span class="ev">{ev}</span><span>{ex}</span></div>')
+    # Salute dell'audit (H17): se la scrittura ha fallito, un elenco che sembra
+    # solo "vuoto" è una bugia per omissione. Va detto a schermo.
+    health = audit_health()
+    health_html = ""
+    if health.get("write_failures"):
+        health_html = (
+            f'<div class="kicker" style="color:var(--err)">⚠ audit degradato: '
+            f'{health["write_failures"]} scritture fallite — gli eventi che vedi '
+            f'potrebbero essere incompleti</div>'
+        )
     body = f"""
 <header>
   <h1>vps1777 <em>admin</em> · audit</h1>
   <div class="who">{html.escape(email)}</div>
 </header>
 <section>
+  {health_html}
   <div class="kicker">ultimi {len(events)} eventi</div>
   {''.join(rows) if rows else '<p style="color:var(--muted)">Nessun evento ancora.</p>'}
 </section>

@@ -25,6 +25,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -45,13 +46,46 @@ USER_AGENT = "vps1777-updater"
 
 SERVICES = ["gateway", "archive-mcp", "nb1777-mcp", "nb1777-bot"]
 # Volumi dati (nomi corti compose). Prefisso progetto: vps1777_
-DATA_VOLUMES = ["gateway-data", "archive-data", "nlm-auth"]
+NLM_AUTH_VOLUME = "nlm-auth"
+DATA_VOLUMES = ["gateway-data", "archive-data", NLM_AUTH_VOLUME]
 # Path canonico di mount di ogni volume nei container one-off delle migrazioni.
 VOLUME_MOUNTS = {
     "gateway-data": "/var/lib/gateway",
     "archive-data": "/var/lib/archive",
     "nlm-auth": "/var/lib/nlm",
 }
+
+# ── H14 — cosa NON finisce nello snapshot pre-update ─────────────────────────
+# Lo snapshot pre-update (backups/pre-update/) è NON CIFRATO per costruzione:
+# serve all'auto-rollback, che gira sulla VPS e non può dipendere dalla chiave
+# age (la privata vive sul PC dell'owner, e deve restarci). Quindi tutto ciò che
+# ci mettiamo dentro sta IN CHIARO sul disco dell'host.
+#
+# `nlm-auth` contiene i cookie di sessione Google di NotebookLM
+# (profiles/default/cookies.json). La v0.30.0 li ha tolti al gateway — l'unico
+# servizio esposto — perché nessuno tranne nb1777-mcp li vedesse (H6): copiarli
+# in chiaro in backups/ a ogni update erode esattamente quel lavoro (un dump
+# della cartella li restituisce tutti).
+#
+# Perché escluderlo NON rompe l'auto-rollback (verificato, non assunto):
+#  1. lo snapshot viene usato SOLO da _rollback_routine() e solo quando una
+#     migrazione data_mutating ha (forse) toccato i dati; serve a salvare i DATI
+#     (archivio, audit, stato gateway), non una sessione;
+#  2. l'auth NotebookLM non è un dato: è una sessione che si ricarica in un
+#     minuto da /admin/nlm (e comunque i cookie scadono da soli);
+#  3. il rollback non legge mai nlm-auth: ripristina file gestiti, tag immagine,
+#     volumi, poi health-gate (che non prova l'auth Google);
+#  4. il backup age (tools/backup.sh, eseguito allo step 7 subito PRIMA dello
+#     snapshot) include comunque nlm-auth, ma CIFRATO → niente perdita
+#     irreversibile, solo un restore in più a carico dell'owner;
+#  5. tools/restore.sh itera sui .tar PRESENTI nello snapshot e salta quelli non
+#     elencati (restore.sh:148-153) → un nlm-auth.tar assente non è un errore.
+SNAPSHOT_EXCLUDED_VOLUMES = [NLM_AUTH_VOLUME]
+SNAPSHOT_VOLUMES = [v for v in DATA_VOLUMES if v not in SNAPSHOT_EXCLUDED_VOLUMES]
+SNAPSHOT_EXCLUDED_REASON = (
+    "cookie di sessione Google (H6/H14): lo snapshot pre-update non è cifrato — "
+    "il profilo NotebookLM si ricarica da /admin/nlm, ed è nel backup age"
+)
 # Path (relativi al repo) che il sync dei file gestiti NON tocca MAI.
 PROTECTED_PREFIXES = (
     ".env", "secrets/", "onboarding/", "backups/", "var/", "releases/",
@@ -515,6 +549,14 @@ def run_migrations(repo: Path, images: dict[str, str],
             if not mount:
                 raise MigrationError(f"migrazione {mid}: volume sconosciuto '{vol}'",
                                      any_mutating)
+            # H14: i volumi esclusi non stanno nello snapshot → se una migrazione
+            # data_mutating li tocca, l'auto-rollback NON li ripristina. Non è
+            # fatale (l'auth nlm si ricarica da /admin/nlm, ed è nel backup age),
+            # ma chi scrive la migrazione deve saperlo prima di scoprirlo dopo.
+            if meta.get("data_mutating") and vol in SNAPSHOT_EXCLUDED_VOLUMES:
+                warn(f"migrazione {mid}: data_mutating su '{vol}', volume ESCLUSO "
+                     f"dallo snapshot pre-update → un rollback non lo ripristina "
+                     f"(ricarica il profilo da /admin/nlm, o restore dal backup age)")
             cmd += ["-v", f"vps1777_{vol}:{mount}"]
         cmd += ["--entrypoint", "python", image, "/migration/run.py"]
         res = run(cmd, check=False, capture=True)
@@ -778,27 +820,70 @@ def prune_old_images(repo: Path, keep_versions: set[str], history: list[dict]) -
 
 # ─────────────────────────────────────────── snapshot volumi (pre-update)
 
+def snapshot_stale_excluded(base: Path) -> list[Path]:
+    """I .tar di volumi ESCLUSI rimasti negli snapshot già sul disco.
+
+    Logica pura (testabile): gli snapshot creati da una CLI precedente a questo
+    fix contengono `nlm-auth.tar` in chiaro. Aggiornare la CLI non basta: quel
+    residuo va rimosso, o il segreto resta lì fino al prune (72h) — o per sempre,
+    se l'ultimo snapshot è quello tenuto come `keep`."""
+    if not base.is_dir():
+        return []
+    stale = []
+    for snap in sorted(d for d in base.iterdir() if d.is_dir()):
+        for vol in SNAPSHOT_EXCLUDED_VOLUMES:
+            tar = snap / f"{vol}.tar"
+            if tar.is_file():
+                stale.append(tar)
+    return stale
+
+
+def snapshot_purge_excluded(repo: Path) -> int:
+    """Cancella i .tar esclusi lasciati dagli snapshot vecchi. Mai fatale."""
+    removed = 0
+    for tar in snapshot_stale_excluded(repo / "backups" / "pre-update"):
+        try:
+            tar.unlink()
+            removed += 1
+        except OSError as exc:
+            warn(f"non rimuovo il residuo {tar.name}: {exc}")
+    if removed:
+        ok(f"rimossi {removed} .tar di volumi esclusi da snapshot precedenti "
+           f"({', '.join(SNAPSHOT_EXCLUDED_VOLUMES)} — {SNAPSHOT_EXCLUDED_REASON})")
+    return removed
+
+
 def snapshot_create(repo: Path, from_version: str, to_version: str) -> Path:
+    # prima di crearne uno nuovo, ripulisci il chiaro lasciato dalle CLI vecchie
+    snapshot_purge_excluded(repo)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     snap = repo / "backups" / "pre-update" / f"{norm_ver(to_version)}-{ts}"
     snap.mkdir(parents=True, exist_ok=True)
     snap.chmod(0o700)
-    for vol in DATA_VOLUMES:
+    # SNAPSHOT_VOLUMES, non DATA_VOLUMES: vedi il commento su H14 in testa al
+    # file — lo snapshot è in chiaro, i cookie Google non ci entrano.
+    for vol in SNAPSHOT_VOLUMES:
         log(f"snapshot volume {vol}…")
         run(["docker", "run", "--rm",
              "-v", f"vps1777_{vol}:/src:ro", "-v", f"{snap}:/dst",
              "--entrypoint", "sh", "busybox:latest",
              "-c", f"cd /src && tar cf /dst/{vol}.tar ."], check=True)
+    for vol in SNAPSHOT_EXCLUDED_VOLUMES:
+        log(f"snapshot volume {vol}: ESCLUSO — {SNAPSHOT_EXCLUDED_REASON}")
     (snap / "meta.json").write_text(json.dumps({
         "from_version": from_version, "to_version": to_version,
-        "created_at": now_iso(), "volumes": DATA_VOLUMES}, indent=2) + "\n")
+        "created_at": now_iso(), "volumes": SNAPSHOT_VOLUMES,
+        "excluded_volumes": SNAPSHOT_EXCLUDED_VOLUMES,
+        "excluded_reason": SNAPSHOT_EXCLUDED_REASON}, indent=2) + "\n")
     ok(f"snapshot locale: {snap}")
     return snap
 
 
 def snapshot_restore(repo: Path, snap: Path) -> None:
+    # si chiede a restore.sh esattamente ciò che lo snapshot contiene: i volumi
+    # esclusi non sono lì e non vanno toccati (il volume vivo resta com'è).
     run(["bash", str(repo / "tools" / "restore.sh"), "--yes",
-         "--volumes-only", ",".join(DATA_VOLUMES), str(snap)], check=True)
+         "--volumes-only", ",".join(SNAPSHOT_VOLUMES), str(snap)], check=True)
 
 
 def snapshot_latest(repo: Path) -> Path | None:
@@ -838,6 +923,28 @@ def releases_prune(repo: Path, keep_versions: set[str]) -> None:
 
 # ─────────────────────────────────────────── systemd units
 
+def render_unit(text: str, repo: Path) -> str:
+    """Sostituisce i placeholder @…@ delle unit con l'utente/home REALI.
+
+    H43: le unit sono installate verbatim ma il deploy è parametrico su
+    OPERATOR_USER. Chi esegue l'update è l'operatore stesso (l'updater gira
+    come lui): i suoi dati bastano a rendere le unit corrette per QUESTA
+    installazione, senza indovinare. Il repo path canonico è il --home con cui
+    la CLI è invocata (VPS1777_HOME nelle unit), non un /home/<user>/vps1777
+    presunto — così vale anche per un repo fuori dalla home.
+
+    Logica pura (testabile): text in, text out."""
+    try:
+        pw = pwd.getpwuid(os.getuid())
+        user, home = pw.pw_name, pw.pw_dir
+    except KeyError:  # uid senza voce passwd: non azzardare, lascia i default
+        user, home = "vps1777", "/home/vps1777"
+    return (text
+            .replace("@OPERATOR_USER@", user)
+            .replace("@OPERATOR_HOME@", home)
+            .replace("@REPO@", str(repo)))
+
+
 def install_systemd_units(repo: Path, *, enable: bool) -> None:
     src = repo / "systemd"
     if not src.is_dir():
@@ -846,9 +953,18 @@ def install_systemd_units(repo: Path, *, enable: bool) -> None:
     for unit in sorted(src.glob("vps1777-*")):
         if unit.suffix not in (".service", ".timer", ".path"):
             continue
+        # .timer/.path non hanno [Service] → nessun placeholder, ma render è
+        # idempotente su testo senza @…@, così il passaggio è uniforme.
+        rendered = render_unit(unit.read_text(), repo).encode()
         installed = Path("/etc/systemd/system") / unit.name
-        if not installed.is_file() or installed.read_bytes() != unit.read_bytes():
-            sudo(["install", "-m", "644", str(unit), str(installed)])
+        if not installed.is_file() or installed.read_bytes() != rendered:
+            tmp = repo / "var" / f".{unit.name}.rendered"
+            tmp.parent.mkdir(mode=0o700, exist_ok=True)
+            tmp.write_bytes(rendered)
+            try:
+                sudo(["install", "-m", "644", str(tmp), str(installed)])
+            finally:
+                tmp.unlink(missing_ok=True)
             changed = True
     if changed:
         sudo(["systemctl", "daemon-reload"])
@@ -1578,6 +1694,8 @@ def cmd_archive_ingest(repo: Path, args) -> int:
 
 # Policy per secret: (file, etichetta, max_giorni, auto-rotabile?, nota su come si ruota).
 # max_giorni = età oltre la quale va ruotato (promemoria, non enforcement).
+# I secret OPZIONALI (presenti solo con certi profili, es. cloudflared_token con
+# ingress.cloudflared) restano nella lista: se il file non c'è, il loop li salta.
 _SECRET_POLICY = [
     ("oauth_signing_secret", "oauth_signing_secret.txt", "Chiave firma JWT", 90, False,
      "manuale: invalida i token attivi → i connettori si ri-autenticano / re-login admin"),
@@ -1587,7 +1705,50 @@ _SECRET_POLICY = [
      "manuale: cambia le URL dei connettori → vanno ri-aggiunti su claude.ai"),
     ("telegram_bot_token", "telegram_bot_token.txt", "Token bot Telegram", 365, False,
      "manuale: revoca e rigenera su @BotFather"),
+    # H37: era scoperto. Solo con ingress.cloudflared (altrimenti file assente →
+    # saltato). Ruotare = rigenerare il token del tunnel nella dashboard CF.
+    ("cloudflared_token", "cloudflared_token.txt", "Token tunnel Cloudflare", 365, False,
+     "manuale: rigenera il token del tunnel su dash.cloudflare.com → aggiorna secrets/cloudflared_token.txt"),
 ]
+
+# H37 — freschezza dei cookie NotebookLM. NON è un file in secrets/: vive nel
+# volume docker nlm-auth (profiles/default/cookies.json, cfr. nb1777-mcp). Se
+# scadono in silenzio, NotebookLM smette di funzionare senza spiegazione → qui
+# se ne monitora la freschezza (mtime = ultima volta che il profilo è stato
+# scritto/ricaricato). Soglia di PROMEMORIA, non di enforcement: nudge a
+# ri-caricare da /admin/nlm prima che la sessione muoia del tutto.
+NLM_COOKIE_MAX_DAYS = 14
+_NLM_COOKIE_REL = "profiles/default/cookies.json"
+
+
+def nlm_cookie_status(repo: Path) -> dict | None:
+    """Età (giorni) dei cookie NotebookLM nel volume nlm-auth, o None se non
+    determinabile (docker assente, volume/profilo non ancora caricato). Puro
+    best-effort: non deve MAI far fallire secrets-status."""
+    vol = f"vps1777_{NLM_AUTH_VOLUME}"
+    try:
+        res = run(["docker", "run", "--rm", "--network", "none",
+                   "-v", f"{vol}:/src:ro", "--entrypoint", "sh", "busybox:latest",
+                   "-c", f"stat -c %Y /src/{_NLM_COOKIE_REL}"],
+                  check=False, capture=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None  # profilo mai caricato o volume assente: non è un errore
+    try:
+        mtime = int((res.stdout or "").strip())
+    except ValueError:
+        return None
+    now = time.time()
+    age_days = int((now - mtime) / 86400)
+    return {
+        "name": "nlm_cookies", "label": "Cookie sessione NotebookLM",
+        "age_days": age_days, "max_age_days": NLM_COOKIE_MAX_DAYS,
+        "overdue": age_days > NLM_COOKIE_MAX_DAYS, "auto_rotatable": False,
+        "note": "ricarica il profilo NotebookLM da /admin/nlm (i cookie Google scadono)",
+        "last_rotated": datetime.fromtimestamp(mtime, timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
 
 
 def cmd_secrets_status(repo: Path, args) -> int:
@@ -1612,6 +1773,13 @@ def cmd_secrets_status(repo: Path, args) -> int:
         })
         if is_overdue:
             overdue.append(f"{label} ({age_days}g)")
+    # H37: freschezza cookie NotebookLM (volume nlm-auth, non un file secrets/).
+    # Best-effort: se il profilo non è ancora caricato o docker non c'è, si salta.
+    nlm = nlm_cookie_status(repo)
+    if nlm is not None:
+        items.append(nlm)
+        if nlm["overdue"]:
+            overdue.append(f"{nlm['label']} ({nlm['age_days']}g)")
     status = {"checked_at": now_iso(), "secrets": items}
     try:
         (onboarding_dir(repo) / "secrets_status.json").write_text(json.dumps(status, indent=2))

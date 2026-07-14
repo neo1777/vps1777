@@ -73,6 +73,49 @@ confirm() {
   case "$resp" in s|S|si|SI|y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
 }
 
+# ─────────────────────────────────────────── policy password (H16)
+# UNA policy sola per i tre ingressi (deploy.sh, setup.sh, tools/rotate-secret.sh):
+# min 16 caratteri, almeno 3 classi, niente pattern comuni. Prima ognuno aveva la
+# sua (12 qui, 12 in setup.sh, 16+3classi solo in rotate-secret.sh): la porta più
+# debole decideva per tutte. Copia sincronizzata di tools/rotate-secret.sh —
+# se cambi qui, cambia LÀ (e in setup.sh).
+pw_weak_reason() {
+  local pw="$1" classes=0
+  if [ "${#pw}" -lt 16 ]; then echo "troppo corta (min 16 caratteri)"; return 1; fi
+  printf '%s' "$pw" | LC_ALL=C grep -q '[a-z]'        && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[A-Z]'        && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[0-9]'        && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[^a-zA-Z0-9]' && classes=$((classes+1))
+  if [ "$classes" -lt 3 ]; then
+    echo "poca varietà: servono almeno 3 tra minuscole, MAIUSCOLE, cifre e simboli"; return 1
+  fi
+  if printf '%s' "$pw" | LC_ALL=C grep -qiE 'password|12345|qwerty|abcdef|letmein|welcome|admin|vps1777|000000|111111'; then
+    echo "contiene un pattern comune/prevedibile"; return 1
+  fi
+  return 0
+}
+
+# Password admin generata QUI, sul PC (H16), non più sulla VPS: così il chiaro non
+# torna mai indietro sullo stdout SSH. Viaggia solo in avanti, dentro lo STDIN del
+# `bash -s` remoto (canale cifrato, mai argv), dove diventa un bcrypt.
+# python3 se c'è (è già un requisito di fatto: lo usiamo per la release), /dev/urandom
+# altrimenti. In entrambi i casi il risultato passa dal gate pw_weak_reason.
+gen_pwd_local() {
+  local p="" i=0
+  while [ "$i" -lt 20 ]; do
+    i=$((i+1))
+    if command -v python3 >/dev/null 2>&1; then
+      p="$(python3 -c "import secrets,string;print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))" 2>/dev/null || true)"
+    else
+      # `|| true`: head chiude la pipe e tr muore di SIGPIPE → con pipefail
+      # l'assegnazione fallirebbe sotto `set -e`.
+      p="$( { LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24; } 2>/dev/null || true )"
+    fi
+    if [ -n "$p" ] && pw_weak_reason "$p" >/dev/null; then printf '%s' "$p"; return 0; fi
+  done
+  die "generazione password fallita (né python3 né /dev/urandom utilizzabili)"
+}
+
 # ─────────────────────────────────────────── banner
 cat <<'BANNER'
 
@@ -129,6 +172,30 @@ ok "Connesso: $OS_INFO"
 
 [ "$VPS_USER" = "root" ] || warn "User non-root: assicurati abbia sudo NOPASSWD, altrimenti alcuni step falliranno."
 
+# ─────────────────────────────────────────── H15: la authkey è usa-e-getta
+# La auth-key Tailscale è MONOUSO: dopo un `tailscale up` riuscito il nodo ha la
+# sua identità nel tailnet e la key non serve più a nulla — resta solo a terra,
+# in chiaro, in un .env che nessuno ruota. Qui la azzeriamo (il nodo NON si
+# slogga: lo stato del login vive in /var/lib/tailscale, non in .env), mettiamo
+# .env a 600 e rimuoviamo l'orfano secrets/ts_authkey.txt.
+# Chiamare SOLO dopo un up confermato: se il login fallisce la key resta in .env
+# e `./deploy.sh --apply` può ritentare.
+ts_wipe_authkey() {
+  local script
+  script='cd ~/vps1777 || exit 1
+if grep -q "^TS_AUTHKEY=" .env 2>/dev/null; then
+  rest=$(grep -v "^TS_AUTHKEY=" .env || true)
+  { [ -n "$rest" ] && printf "%s\n" "$rest"; printf "%s\n" "TS_AUTHKEY="; } > .env
+fi
+chmod 600 .env 2>/dev/null || true
+rm -f secrets/ts_authkey.txt'
+  if printf '%s\n' "$script" | SSH "sudo -u $OPERATOR_USER bash -s" >/dev/null 2>&1; then
+    ok "TS_AUTHKEY azzerata in .env (key monouso, ormai consumata) · .env 600"
+  else
+    warn "wipe di TS_AUTHKEY non riuscito — controlla ~/vps1777/.env a mano"
+  fi
+}
+
 # ═══════════════════════════════════════════ MODALITÀ --apply
 # Legge onboarding/pending.json (scritto dal pannello /admin/setup) e applica:
 # tailscale up, secret bot, PUBLIC_BASE, restart servizi.
@@ -170,8 +237,10 @@ RS
   # Righe dinamiche: i segreti sono interpolati nel TESTO dello script, che
   # però transita via STDIN, non via argv. tailscale key e bot token sono
   # [A-Za-z0-9:_-] → l'apice singolo è sicuro.
+  # NB (H15): NIENTE `secrets/ts_authkey.txt` — era un file orfano, nessun compose
+  # lo consumava (Tailscale gira sull'host, non più come sidecar). La key sta in
+  # .env solo il tempo di servire, e viene azzerata dopo il `tailscale up`.
   [ -n "$TS_KEY" ]   && APPLY_SCRIPT="$APPLY_SCRIPT
-printf %s '$TS_KEY' > secrets/ts_authkey.txt; chmod 600 secrets/ts_authkey.txt
 set_kv TS_AUTHKEY '$TS_KEY'"
   [ -n "$TG_TOKEN" ] && APPLY_SCRIPT="$APPLY_SCRIPT
 printf %s '$TG_TOKEN' > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt"
@@ -179,8 +248,14 @@ printf %s '$TG_TOKEN' > secrets/telegram_bot_token.txt; chmod 600 secrets/telegr
 set_kv TELEGRAM_OWNER_ID '$TG_OWNER'"
   [ -n "$PUB" ]      && APPLY_SCRIPT="$APPLY_SCRIPT
 set_kv PUBLIC_BASE '$PUB'"
+  # .env contiene segreti (TS_AUTHKEY, e i valori che ci scrive il pannello):
+  # 600, non 644 (H15). E ripulisce l'orfano se un deploy precedente l'ha creato.
+  APPLY_SCRIPT="$APPLY_SCRIPT
+chmod 600 .env 2>/dev/null || true
+chmod 700 secrets backups onboarding 2>/dev/null || true
+rm -f secrets/ts_authkey.txt"
   printf '%s\n' "$APPLY_SCRIPT" | SSH "sudo -u $OPERATOR_USER bash -s" || die "Scrittura secret/.env fallita"
-  ok "Secret + .env aggiornati"
+  ok "Secret + .env aggiornati (.env 600, dir sensibili 700)"
 
   # 2. Tailscale SULL'HOST: install + up + serve + funnel (no sidecar container).
   if [ -n "$TS_KEY" ]; then
@@ -197,6 +272,7 @@ set_kv PUBLIC_BASE '$PUB'"
       SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
       ok "Funnel HTTPS attivo: $TS_URL"
       [ -z "$PUB" ] && PUB="$TS_URL"
+      ts_wipe_authkey   # up riuscito: la key monouso non serve più (H15)
     else
       warn "URL Tailscale non pronto — controlla key/prerequisiti (MagicDNS+HTTPS+nodeAttr funnel)."
     fi
@@ -264,10 +340,38 @@ if [ -z "$GEN_PWD" ]; then
   if confirm "Genero io una password admin sicura (24 char)?"; then
     GEN_PWD="auto"
   else
-    ask_secret ADMIN_PWD_MANUAL "Password admin (min 12 char)"
-    [ "${#ADMIN_PWD_MANUAL}" -lt 12 ] && die "Password troppo corta"
+    while :; do
+      ask_secret ADMIN_PWD_MANUAL "Password admin (min 16, ≥3 classi: minusc/MAIUSC/cifre/simboli)"
+      if reason="$(pw_weak_reason "$ADMIN_PWD_MANUAL")"; then break; fi
+      warn "Password debole: $reason."
+      # In NONINTERACTIVE non possiamo richiedere: la debole è un errore fatale.
+      [ "${NONINTERACTIVE:-0}" = "1" ] && die "Password admin fornita troppo debole: $reason"
+      ADMIN_PWD_MANUAL=""   # svuota così ask_secret richiede
+    done
   fi
 fi
+
+# H16 — la password admin NASCE SUL PC (qui), non più sulla VPS: così il chiaro
+# non torna mai indietro sullo stdout SSH (era il leak di H16). Viaggia solo in
+# AVANTI, dentro lo STDIN cifrato del `bash -s` remoto (mai argv), codificato
+# base64 per non rompersi su caratteri speciali/`$`. Sulla VPS diventa un bcrypt.
+# Se questo PC ha python3+bcrypt, l'hash lo calcoliamo QUI e attraversa SSH solo
+# l'hash (H16 "viaggia solo come hash"); altrimenti — nessuna dipendenza nuova
+# forzata sul PC — mandiamo il chiaro AVANTI e la VPS lo hasha (python3-bcrypt
+# è installato allo step 3). In entrambi i casi il chiaro non RITORNA.
+if [ "$GEN_PWD" = "auto" ]; then
+  ADMIN_PWD_PLAIN="$(gen_pwd_local)"
+else
+  ADMIN_PWD_PLAIN="$ADMIN_PWD_MANUAL"
+fi
+ADMIN_PWD_BCRYPT=""
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import bcrypt' 2>/dev/null; then
+  ADMIN_PWD_BCRYPT="$(printf '%s' "$ADMIN_PWD_PLAIN" \
+    | python3 -c 'import bcrypt,sys;print(bcrypt.hashpw(sys.stdin.buffer.read(),bcrypt.gensalt(12)).decode())' 2>/dev/null || true)"
+fi
+# base64 (portatile Linux/Mac) per un transito sicuro nell'heredoc interpolato.
+ADMIN_PWD_PLAIN_B64="$(printf '%s' "$ADMIN_PWD_PLAIN" | base64 | tr -d '\n')"
+ADMIN_PWD_BCRYPT_B64="$(printf '%s' "$ADMIN_PWD_BCRYPT" | base64 | tr -d '\n')"
 
 # Utente operatore sulla VPS. NON usare "operator" — su Debian è un nome
 # di sistema (gruppo GID 37) e adduser fallisce.
@@ -345,8 +449,37 @@ if ! id "$OPERATOR_USER" >/dev/null 2>&1; then
 fi
 usermod -aG docker "$OPERATOR_USER"
 getent group sudo >/dev/null && usermod -aG sudo "$OPERATOR_USER" || true
-echo "$OPERATOR_USER ALL=(ALL) NOPASSWD: ALL" > "/etc/sudoers.d/90-$OPERATOR_USER"
-chmod 0440 "/etc/sudoers.d/90-$OPERATOR_USER"
+# H12 — sudoers WHITELIST invece di NOPASSWD:ALL. Via sudo l'operator può
+# eseguire SOLO i binari che la CLI vps1777 e gli script di install/update usano:
+#   install    → CLI in /usr/local/bin, unit in /etc/systemd/system, cosign
+#   systemctl  → daemon-reload, enable --now dei timer/path
+#   chown      → ownership delle dir runtime (bootstrap, reclaim)
+# Censiti alla fonte: ogni sudo([...]) in tools/vps1777.py usa uno di questi tre.
+# ATTENZIONE: l'operator resta ROOT-EQUIVALENTE via gruppo docker (può montare /
+# in un container) — vedi SECURITY.md. Questa è riduzione della superficie sudo
+# (niente più `sudo bash`, `sudo cat /etc/shadow`, install pacchetti a caso),
+# non de-privilegio completo.
+SUDO_CMDS=""
+for _b in install systemctl chown; do
+  for _d in /usr/bin /bin /usr/sbin /sbin; do
+    [ -x "$_d/$_b" ] && SUDO_CMDS="$SUDO_CMDS${SUDO_CMDS:+, }$_d/$_b"
+  done
+done
+SUDOERS_FILE="/etc/sudoers.d/90-$OPERATOR_USER"
+if [ -n "$SUDO_CMDS" ]; then
+  _tmp_sudo="$(mktemp)"
+  printf '%s ALL=(root) NOPASSWD: %s\n' "$OPERATOR_USER" "$SUDO_CMDS" > "$_tmp_sudo"
+  # MAI installare un sudoers non validato (un file rotto blocca sudo per tutti).
+  if visudo -cf "$_tmp_sudo" >/dev/null 2>&1; then
+    install -m 0440 "$_tmp_sudo" "$SUDOERS_FILE"
+    echo "SUDOERS_WHITELIST_OK"
+  else
+    echo "SUDOERS_INVALID"   # non installo nulla: fail-closed
+  fi
+  rm -f "$_tmp_sudo"
+else
+  echo "SUDOERS_EMPTY"
+fi
 
 echo "DOCKER=$(docker --version 2>/dev/null || echo none)"
 docker compose version >/dev/null 2>&1 && echo "COMPOSE=ok" || echo "COMPOSE=MISSING"
@@ -354,6 +487,11 @@ PREP
 
 COMPOSE_OK=$(SSH 'docker compose version >/dev/null 2>&1 && echo ok || echo no')
 [ "$COMPOSE_OK" = "ok" ] || die "docker compose v2 non disponibile sulla VPS dopo l'install del plugin. Controlla la connettività a github.com."
+
+# H12 — verifica che la whitelist sudoers sia in posizione (senza, il canale
+# update dell'operator si romperebbe: la CLI usa `sudo -n`, niente prompt).
+SSH "test -f /etc/sudoers.d/90-$OPERATOR_USER" 2>/dev/null \
+  || warn "sudoers whitelist NON installata (vedi SUDOERS_INVALID sopra) — install/systemctl/chown via sudo falliranno per l'operator. Controlla /etc/sudoers.d/90-$OPERATOR_USER a mano."
 ok "Docker + Compose v2 pronti, utente $OPERATOR_USER creato"
 
 # ═══════════════════════════════════════════ 4. TRASFERISCI REPO
@@ -385,28 +523,31 @@ REMOTE_SETUP=$(cat <<RSETUP
 set -e
 cd "$REMOTE_DIR"
 # runtime dir create ORA come operatore: se le creasse Docker (bind mount)
-# sarebbero root-owned e gateway/CLI non potrebbero scriverci
+# sarebbero root-owned e gateway/CLI non potrebbero scriverci.
+# H38 — chmod 700 anche su secrets/, backups/, onboarding/ (prima solo var/).
+# backups/ 700 protegge per traversal anche backups/pre-update/ (creata poi
+# dalla CLI, che imposta 0700 sul singolo snapshot).
 mkdir -p secrets onboarding var backups releases
-chmod 700 var
+chmod 700 var secrets backups onboarding
 
 gen() { python3 -c "import secrets;print(secrets.token_urlsafe(\$1))"; }
-genpwd() { python3 -c "import secrets,string;print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))"; }
 
 # secrets random
 [ -s secrets/gateway_secret.txt ]       || { gen 24 > secrets/gateway_secret.txt; }
 [ -s secrets/oauth_signing_secret.txt ] || { gen 48 > secrets/oauth_signing_secret.txt; }
 chmod 600 secrets/gateway_secret.txt secrets/oauth_signing_secret.txt
 
-# admin password
+# admin password — generata SUL PC (H16). Arriva qui come hash bcrypt (se il PC
+# poteva calcolarlo) o come chiaro base64 da hashare qui. Mai come chiaro di
+# ritorno. Il chiaro decodificato va in python via STDIN (builtin printf), non
+# in argv.
 if [ ! -s secrets/admin_password_bcrypt.txt ]; then
-  if [ "$GEN_PWD" = "auto" ]; then
-    PWD_RAW="\$(genpwd)"
-    echo "GENERATED_ADMIN_PWD=\$PWD_RAW"
+  if [ -n "$ADMIN_PWD_BCRYPT_B64" ]; then
+    printf '%s' '$ADMIN_PWD_BCRYPT_B64' | base64 -d > secrets/admin_password_bcrypt.txt
   else
-    PWD_RAW="$(printf '%s' "${ADMIN_PWD_MANUAL:-}")"
+    printf '%s' '$ADMIN_PWD_PLAIN_B64' | base64 -d \
+      | python3 -c "import bcrypt,sys; print(bcrypt.hashpw(sys.stdin.buffer.read(), bcrypt.gensalt(12)).decode())" > secrets/admin_password_bcrypt.txt
   fi
-  # password via STDIN, non argv (che ps mostrerebbe): printf builtin → python
-  printf '%s' "\$PWD_RAW" | python3 -c "import bcrypt,sys; print(bcrypt.hashpw(sys.stdin.buffer.read(), bcrypt.gensalt(12)).decode())" > secrets/admin_password_bcrypt.txt
   chmod 600 secrets/admin_password_bcrypt.txt
 fi
 
@@ -437,6 +578,10 @@ set_kv CADDY_DOMAIN "$CADDY_DOMAIN"
 set_kv CADDY_EMAIL "$CADDY_EMAIL"
 set_kv VPS1777_TAG "${INSTALL_VERSION:-dev}"
 set_kv VPS1777_IMAGE_BASE "${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}"
+# H15 — .env contiene TS_AUTHKEY (e altri valori): 600, non 644. E rimuovi
+# l'eventuale orfano secrets/ts_authkey.txt (nessun compose lo consuma).
+chmod 600 .env 2>/dev/null || true
+rm -f secrets/ts_authkey.txt
 echo "ENV_OK"
 RSETUP
 )
@@ -445,9 +590,11 @@ RSETUP
 # come argv di `bash -lc` (dove `ps` lo mostrerebbe a ogni utente locale).
 OUT=$(printf '%s\n' "$REMOTE_SETUP" | SSH "sudo -u $OPERATOR_USER bash -s")
 echo "$OUT" | grep -q ENV_OK || { echo "$OUT"; die "Setup .env/secrets fallito"; }
-# Estrai password generata se c'è
-GENERATED_PWD=$(echo "$OUT" | sed -n 's/^GENERATED_ADMIN_PWD=//p')
-ok ".env + secrets generati"
+# H16 — la password NON torna più dalla VPS: l'abbiamo generata sul PC, la
+# mostriamo da qui. GENERATED_PWD serve al riepilogo/UI installer (righe locali).
+GENERATED_PWD=""
+[ "$GEN_PWD" = "auto" ] && GENERATED_PWD="$ADMIN_PWD_PLAIN"
+ok ".env + secrets generati (.env 600, dir sensibili 700)"
 if [ -n "$GENERATED_PWD" ]; then
   warn "PASSWORD ADMIN GENERATA: ${C_B}$GENERATED_PWD${C_R}"
   warn "  → SALVALA SUBITO in un password manager. Non la rivedrai."
@@ -478,7 +625,7 @@ fi
 # ── Canale di aggiornamento: CLI vps1777 + unit systemd (idempotente)
 log "Installo il canale di aggiornamento (CLI + timer + path unit)..."
 SSH "install -m755 $REMOTE_DIR/tools/vps1777.py /usr/local/bin/vps1777 \
-  && for u in $REMOTE_DIR/systemd/vps1777-*; do case \"\$u\" in *.service|*.timer|*.path) install -m644 \"\$u\" /etc/systemd/system/;; esac; done \
+  && for u in $REMOTE_DIR/systemd/vps1777-*; do case \"\$u\" in *.service|*.timer|*.path) sed -e \"s|@OPERATOR_USER@|$OPERATOR_USER|g\" -e \"s|@REPO@|$REMOTE_DIR|g\" \"\$u\" | install -m644 /dev/stdin /etc/systemd/system/\$(basename \"\$u\");; esac; done \
   && systemctl daemon-reload \
   && systemctl enable --now vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer" \
   && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + check settimanale secret" \
@@ -505,6 +652,7 @@ if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
     SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
     SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$TS_URL|\" .env || echo PUBLIC_BASE=$TS_URL >> .env) && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1 || true
     ok "Funnel HTTPS attivo: $TS_URL"
+    ts_wipe_authkey   # up riuscito: la key monouso non serve più (H15)
   else
     warn "URL Tailscale non ricavato — controlla key/prerequisiti (MagicDNS+HTTPS+nodeAttr funnel)."
   fi

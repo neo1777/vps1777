@@ -52,8 +52,29 @@ def test_missing_hash_rejected():
 def test_expired_rejected():
     old = 1_700_000_000
     init = _sign({"auth_date": str(old), "user": '{"id":1}'})
-    # 25h dopo → oltre il max_age di 24h
+    # 25h dopo → oltre il max_age (era 24h, ora 12h: scaduta a maggior ragione)
     assert miniapp_core.verify_init_data(init, BOT, now=old + 25 * 3600) is None
+
+
+def test_init_data_window_is_12h():
+    """H27: la finestra è 12h, non più 24h. Una initData di 13h fa NON deve più
+    passare — è il punto del rilievo, quindi il test guarda proprio il confine."""
+    assert miniapp_core.INIT_DATA_MAX_AGE_S == 12 * 3600
+    t = 1_700_000_000
+    init = _sign({"auth_date": str(t), "user": '{"id":1}'})
+    assert miniapp_core.verify_init_data(init, BOT, now=t + 11 * 3600) is not None  # dentro
+    assert miniapp_core.verify_init_data(init, BOT, now=t + 13 * 3600) is None      # fuori
+    # e il vecchio limite di 24h non vale più
+    assert miniapp_core.verify_init_data(init, BOT, now=t + 23 * 3600) is None
+
+
+def test_init_data_auth_date_nel_futuro_passa_ma_non_e_replay():
+    """auth_date nel futuro (clock skew del client): (now - auth_date) è negativo,
+    quindi passa. È voluto — un initData FIRMATO col token del bot non lo può
+    forgiare il client; qui documentiamo la semantica, non la cambiamo."""
+    t = 1_700_000_000
+    init = _sign({"auth_date": str(t + 300), "user": '{"id":1}'})
+    assert miniapp_core.verify_init_data(init, BOT, now=t) is not None
 
 
 def test_empty_inputs():
@@ -69,6 +90,35 @@ def test_is_owner():
     # owner_id non configurato (0) → FAIL-CLOSED: nessuno è owner (prima era True!)
     assert miniapp_core.is_owner("qualunque", 0) is False
     assert miniapp_core.is_owner(774881727, 0) is False
+
+
+# ───── URL dei connettori: il segreto non deve uscire per sbaglio (H26) ─────
+
+def test_masked_connector_url_non_contiene_il_segreto():
+    masked = miniapp_core.masked_connector_url("https://vps.example.com", "nb1777")
+    assert "s3cret-gateway-value" not in masked   # ovvio, ma è IL punto
+    assert masked == "https://vps.example.com/••••••••/nb1777/mcp"
+    # il mask è a lunghezza FISSA: non rivela quanto è lungo il segreto
+    assert masked == miniapp_core.masked_connector_url("https://vps.example.com", "nb1777")
+
+
+def test_masked_url_lunghezza_fissa_a_prescindere_dal_segreto():
+    # la forma mascherata non dipende dal segreto: non può nemmeno riceverlo
+    a = miniapp_core.masked_connector_url("https://h", "x")
+    b = miniapp_core.masked_connector_url("https://h", "x")
+    assert a == b and a.count("•") == 8
+
+
+def test_connector_url_completo():
+    assert miniapp_core.connector_url("https://vps.example.com/", "S3CRET", "archive") == \
+        "https://vps.example.com/S3CRET/archive/mcp"  # base con slash finale → un solo /
+
+
+def test_connector_url_senza_segreto_configurato():
+    # segreto assente: placeholder parlante, sia in chiaro sia mascherato
+    assert miniapp_core.connector_url("https://h", "", "nb1777") == "https://h/<SECRET>/nb1777/mcp"
+    assert miniapp_core.masked_connector_url("https://h", "nb1777", has_secret=False) == \
+        "https://h/<SECRET>/nb1777/mcp"
 
 
 # ───── parsing MCP ─────

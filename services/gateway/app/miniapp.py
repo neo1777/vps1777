@@ -12,9 +12,15 @@ Divisione delle superfici (per non duplicare):
   - bot             → notifiche + launcher + comandi testuali rapidi
 
 Sicurezza:
-  - /app/auth        → owner-only (telegram_owner_id), initData fresca e firmata.
-  - /app/api/*       → Bearer typ=miniapp obbligatorio; Cache-Control: no-store
-                       (middleware); CSP con nonce sulla pagina.
+  - /app/auth        → owner-only (telegram_owner_id), initData fresca (12h) e
+                       firmata; IP negli eventi di fallimento (H11).
+  - /app/api/*       → Bearer typ=miniapp obbligatorio E `sub` ancora owner
+                       corrente (H27): il token non sopravvive alla revoca
+                       dell'owner. Cache-Control: no-store (middleware); CSP con
+                       nonce sulla pagina.
+  - connettori MCP   → gli URL contengono il gateway_secret: la pagina mostra la
+                       forma MASCHERATA, l'URL vero si chiede esplicitamente
+                       (?reveal=<name>) ed è un evento di audit (H26).
   - niente CSRF: gli endpoint usano Bearer header (mai cookie) → un form
     cross-origin non può forgiarlo.
 La validazione HMAC e il parsing MCP puri stanno in miniapp_core (stdlib-only,
@@ -37,8 +43,10 @@ from .jwt_helpers import JWTError, issue, verify
 from .mcp_client import MCPCallError, call_tool
 from .ratelimit import RateLimiter
 from .miniapp_core import (
+    connector_url,
     extract_answer,
     is_owner,
+    masked_connector_url,
     parse_json_blocks,
     summarize_secrets,
     verify_init_data,
@@ -52,19 +60,59 @@ from .settings import get_settings
 NB_SERVICE = "nb1777"
 ARCHIVE_SERVICE = "archive"
 
+# Base pubblica di fallback quando GATEWAY_PUBLIC_BASE non è configurata (dev).
+DEFAULT_PUBLIC_BASE = "http://localhost:8080"
+
+# L'UNICO asset esterno della Mini App. È anche la sorgente CSP (H35): costante
+# unica così l'header e il tag <script> non possono divergere — se qualcuno
+# cambia l'URL dell'SDK senza toccare la CSP, l'SDK smette di caricare subito,
+# invece che allargare la CSP di nascosto.
+TELEGRAM_SDK_URL = "https://telegram.org/js/telegram-web-app.js"
+
 
 # ───── helpers ─────
 
+def _client_ip(request: Request) -> str:
+    """IP del chiamante — stesso pattern di admin.py:_client_ip (replicato, non
+    importato, per non far dipendere la Mini App dal modulo del pannello).
+    uvicorn gira con proxy_headers=True → request.client.host è già l'IP reale
+    dietro l'ingress; fallback su X-Forwarded-For."""
+    if request.client and request.client.host:
+        return request.client.host
+    return (request.headers.get("x-forwarded-for", "") or "?").split(",")[0].strip()
+
+
 def _bearer_claims(request: Request) -> dict | None:
-    """Estrae e verifica il Bearer token typ=miniapp. None se assente/invalido."""
+    """Estrae e verifica il Bearer token typ=miniapp. None se assente/invalido.
+
+    H27 — non basta che il token sia integro: il `sub` dev'essere ANCORA l'owner
+    corrente. La firma prova solo che il gateway l'ha emesso in passato; se
+    l'owner cambia (o viene tolto dal .env), un token già emesso resterebbe
+    buono fino a scadenza — una revoca che non revoca. Il controllo è a ogni
+    richiesta, non solo all'emissione, e FAIL-CLOSED come is_owner/H1: owner non
+    configurato → nessuno passa (get_settings è cachata: costa una lettura di
+    attributo, non un I/O)."""
     auth = request.headers.get("authorization", "")
     if not auth.lower().startswith("bearer "):
         return None
     token = auth[7:].strip()
     try:
-        return verify(token, expected_typ="miniapp", expected_aud="miniapp")
+        claims = verify(token, expected_typ="miniapp", expected_aud="miniapp")
     except JWTError:
         return None
+    owner_id = get_settings().telegram_owner_id
+    if not is_owner(claims.get("sub", ""), owner_id):
+        # Token firmato ma non più dell'owner: o l'owner è cambiato, o è stato
+        # rimosso. Evento raro e significativo → in audit con IP (mai in silenzio).
+        audit({
+            "event": "miniapp_bearer_not_owner",
+            "sub": str(claims.get("sub", "")),
+            "owner_configured": bool(owner_id),
+            "ip": _client_ip(request),
+            "path": request.url.path,
+        })
+        return None
+    return claims
 
 
 def _unauthorized() -> JSONResponse:
@@ -91,7 +139,10 @@ async def miniapp_auth(request: Request) -> Response:
     """POST /app/auth — il frontend manda initData, riceve JWT typ=miniapp.
     Owner-only: solo l'utente Telegram configurato ottiene un token."""
     s = get_settings()
-    ip = request.client.host if request.client else "unknown"
+    # H11: l'IP è la sola coordinata forense di /app/auth (niente sessione, niente
+    # cookie). Va in TUTTI gli eventi di fallimento, non solo nel rate limiter:
+    # senza, un brute force di initData non lascia traccia di CHI l'ha tentato.
+    ip = _client_ip(request)
     if not _AUTH_LIMIT.allow(ip, time.time()):
         return JSONResponse({"error": "rate_limited"}, status_code=429)
     bot_token = s.effective_bot_token
@@ -104,32 +155,35 @@ async def miniapp_auth(request: Request) -> Response:
     init_data = body.get("init_data", "")
     parsed = verify_init_data(init_data, bot_token)
     if not parsed:
-        audit({"event": "miniapp_auth_fail"})
+        # firma non valida O initData più vecchia di INIT_DATA_MAX_AGE_S (12h, H27)
+        audit({"event": "miniapp_auth_fail", "ip": ip})
         return JSONResponse({"error": "invalid_init_data"}, status_code=401)
     try:
         user = json.loads(parsed.get("user", "{}"))
     except json.JSONDecodeError:
+        audit({"event": "miniapp_auth_bad_user", "ip": ip})
         return JSONResponse({"error": "invalid_user"}, status_code=400)
     user_id = str(user.get("id", "0"))
     if user_id == "0":
+        audit({"event": "miniapp_auth_bad_user", "ip": ip})
         return JSONResponse({"error": "no_user_id"}, status_code=400)
     if not s.telegram_owner_id:
         # fail-closed: senza owner configurato NON si emette alcun token, o la
         # Mini App si aprirebbe a chiunque abbia initData valida. Errore chiaro.
-        audit({"event": "miniapp_auth_no_owner"})
+        audit({"event": "miniapp_auth_no_owner", "ip": ip})
         return JSONResponse({"error": "owner_not_configured"}, status_code=503)
     if not is_owner(user_id, s.telegram_owner_id):
         # difesa in profondità: il bot mostra il bottone solo all'owner, ma qui
         # non ci si fida del client — un initData valido di un altro utente non
         # deve poter ottenere un token per questo gateway.
-        audit({"event": "miniapp_auth_denied", "user_id": user_id})
+        audit({"event": "miniapp_auth_denied", "user_id": user_id, "ip": ip})
         return JSONResponse({"error": "not_owner"}, status_code=403)
     tok = issue(
         typ="miniapp", sub=user_id, aud="miniapp",
         ttl=s.oauth_miniapp_token_lifetime,
         extra={"username": user.get("username", "")},
     )
-    audit({"event": "miniapp_auth_ok", "user_id": user_id})
+    audit({"event": "miniapp_auth_ok", "user_id": user_id, "ip": ip})
     return JSONResponse({
         "access_token": tok,
         "expires_in": s.oauth_miniapp_token_lifetime,
@@ -168,20 +222,43 @@ async def api_overview(request: Request) -> Response:
 
 
 async def api_plugins(request: Request) -> Response:
-    """GET /app/api/plugins — connettori MCP + URL (col secret → mai pubblico)."""
-    if not _bearer_claims(request):
+    """GET /app/api/plugins — connettori MCP, URL **mascherato** (H26).
+    GET /app/api/plugins?reveal=<name> — l'URL VERO di UN connettore, su
+    richiesta esplicita dell'owner (tap su "Mostra"/"Copia").
+
+    Il gateway_secret sta nel path dell'URL: se lo mette la risposta di default,
+    finisce nel DOM di un telefono — e da lì in uno screenshot, nella
+    condivisione schermo, nella clipboard che si sincronizza sul cloud. Quindi:
+    di default mascherato, e il reveal è puntuale (un connettore per volta),
+    audito, e mai memorizzato dalla pagina.
+
+    Il reveal è un query param e non una rotta nuova di proposito: /app/api/*
+    è già coperto da `Cache-Control: no-store` (asgi_security) e dal Bearer.
+    """
+    claims = _bearer_claims(request)
+    if not claims:
         return _unauthorized()
     s = get_settings()
     secret = s.effective_gateway_secret
-    base = s.gateway_public_base or "http://localhost:8080"
+    base = s.gateway_public_base or DEFAULT_PUBLIC_BASE
+    names = sorted(s.gateway_upstreams)
+
+    reveal = str(request.query_params.get("reveal", "")).strip()
+    if reveal:
+        # il nome va risolto contro il listato reale: mai riflettere in una URL
+        # col segreto una stringa scelta dal client
+        if reveal not in names:
+            return JSONResponse({"error": "unknown_connector"}, status_code=404)
+        audit({"event": "miniapp_secret_revealed", "user_id": claims.get("sub", ""),
+               "connector": reveal, "ip": _client_ip(request)})
+        return JSONResponse({"name": reveal, "url": connector_url(base, secret, reveal),
+                             "has_secret": bool(secret)})
+
     items = [
-        {
-            "name": name,
-            "url": f"{base}/{secret}/{name}/mcp" if secret else f"{base}/<SECRET>/{name}/mcp",
-        }
-        for name in sorted(s.gateway_upstreams)
+        {"name": name, "url_masked": masked_connector_url(base, name, has_secret=bool(secret))}
+        for name in names
     ]
-    return JSONResponse({"plugins": items})
+    return JSONResponse({"plugins": items, "has_secret": bool(secret)})
 
 
 async def api_notebooks(request: Request) -> Response:
@@ -384,15 +461,35 @@ async def app_index(_request: Request) -> Response:
     l'SDK WebApp di Telegram. CSP con nonce per-risposta (niente inline
     arbitrario), coerente con l'hardening delle pagine admin."""
     nonce = pysecrets.token_urlsafe(16)
-    resp = HTMLResponse(_PAGE.replace("__NONCE__", nonce))
+    page = _PAGE.replace("__NONCE__", nonce).replace("__SDK_URL__", TELEGRAM_SDK_URL)
+    resp = HTMLResponse(page)
     resp.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        f"script-src 'nonce-{nonce}' https://telegram.org; "
+        # H35: il PATH esatto dell'SDK, non tutto l'host telegram.org. `script-src
+        # https://telegram.org` autorizzerebbe QUALUNQUE file servito da quel
+        # dominio (upload, pagine, redirect interni) come script della Mini App.
+        # La query string non partecipa al path-match CSP (?56 continua a passare);
+        # un redirect cross-origin non viene ri-controllato sul path, quindi
+        # restringere qui non rompe il caricamento dell'SDK.
+        f"script-src 'nonce-{nonce}' {TELEGRAM_SDK_URL}; "
+        # style-src resta 'unsafe-inline': la pagina usa attributi style="" inline
+        # (layout) e l'SDK Telegram tocca gli stili del documento. Toglierlo
+        # richiede riscrivere il markup in classi e verificarlo su un client vero:
+        # NON fatto qui, dichiarato aperto (H35 resta parziale). Con un nonce/hash
+        # in style-src, 'unsafe-inline' verrebbe IGNORATO dai browser e il layout
+        # cadrebbe — una mezza misura qui rompe, non protegge.
         "style-src 'unsafe-inline'; "
         "img-src 'self' data:; connect-src 'self'; "
-        "base-uri 'none'; object-src 'none'"
-        # niente frame-ancestors: la Mini App DEVE poter stare nella webview /
-        # iframe dei client Telegram (web.telegram.org inclusa).
+        "base-uri 'none'; object-src 'none'; form-action 'none'"
+        # niente frame-ancestors: la Mini App DEVE poter stare nell'iframe dei
+        # client Telegram Web (web.telegram.org) e nelle webview native. Non ho
+        # modo di verificare qui l'elenco COMPLETO degli origin che la incorniciano
+        # (client web ufficiali + eventuali domini futuri): una lista incompleta la
+        # renderebbe non apribile. Il guadagno sarebbe comunque ~nullo — un frame
+        # ostile di /app non ottiene nulla: niente cookie (auth via Bearer in
+        # memoria JS) e senza initData la pagina non chiama nemmeno /app/auth.
+        # Se l'owner usa SOLO i client mobile/desktop, può aggiungere
+        # "frame-ancestors https://web.telegram.org" e provare Telegram Web.
     )
     return resp
 
@@ -403,7 +500,7 @@ _PAGE = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>vps1777 · pannello</title>
-<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="__SDK_URL__"></script>
 <style>
   :root{
     --bg:#0f1115; --card:#181b22; --fg:#e8eaed; --muted:#9aa0aa;
@@ -449,14 +546,16 @@ _PAGE = r"""<!DOCTYPE html>
   .item.tap:active{opacity:.65}
   .pn{font-weight:600;display:flex;align-items:center;gap:8px;word-break:break-word}
   .pm{color:var(--muted);font-size:12px;margin-top:2px;word-break:break-all}
-  .urlrow{display:flex;gap:8px;align-items:stretch;margin-top:8px}
-  code.url{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:8px;
+  /* URL su una riga sua + i due bottoni (Mostra/Copia) sotto: su un telefono
+     stretto tre elementi in fila schiacciano l'URL a niente. */
+  .urlrow{display:flex;gap:8px;align-items:stretch;margin-top:8px;flex-wrap:wrap}
+  code.url{flex:1 1 100%;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:8px;
     padding:8px 10px;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
     overflow:auto;white-space:nowrap}
   button.b{background:var(--accent);color:#fff;border:0;border-radius:9px;
     padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
   button.b:disabled{opacity:.5}
-  button.b.sm{padding:0 14px}
+  button.b.sm{padding:9px 14px;font-size:14px}
   button.b.ghost{background:none;border:1px solid var(--line);color:var(--fg)}
   button.b.danger{background:var(--warn);color:#14161a}
   textarea,input[type=text]{width:100%;background:var(--bg);border:1px solid var(--line);
@@ -535,7 +634,8 @@ function toast(msg){ var t=$('toast'); t.textContent=msg; t.style.opacity='1';
 function spin(txt){ return '<div class="empty"><span class="spin"></span>'+esc(txt||'carico…')+'</div>'; }
 
 // ── auth + api wrapper (re-auth automatica su 401: il token dura 1h,
-//    l'initData 24h → la pagina si ri-autentica da sola in silenzio)
+//    l'initData 12h (H27) → dentro la finestra la pagina si ri-autentica da sola
+//    in silenzio; oltre, /app/auth risponde 401 e va riaperta dal bot)
 function authenticate(){
   if (!TG || !TG.initData) return Promise.reject(new Error('no_telegram'));
   return fetch('/app/auth', {method:'POST', headers:{'Content-Type':'application/json'},
@@ -604,7 +704,9 @@ function renderStato(){
     '<div class="card"><h2>Connettori MCP <button class="re" id="rePl">↻</button></h2>'+
     '<div id="stPl">'+spin()+'</div>'+
     '<div class="pm" id="stHint" style="display:none;margin-top:10px">Incolla un URL in '+
-    '<b>claude.ai → Settings → Connectors</b> per collegare il gateway.</div></div>';
+    '<b>claude.ai → Settings → Connectors</b> per collegare il gateway.<br>'+
+    'L\'URL contiene il <b>segreto</b> del gateway: resta mascherato finché non tocchi '+
+    '“Mostra”, e torna mascherato da solo dopo 30s.</div></div>';
   $('rePl').onclick = function(){ S.plugins=null; loadPlugins(); };
 
   fetch('/health').then(function(r){return r.json()}).then(function(h){
@@ -638,6 +740,34 @@ function loadPlugins(){
   api('/app/api/plugins').then(function(d){ S.plugins=d.plugins||[]; paintPlugins(); })
     .catch(function(e){ $('stPl').innerHTML='<div class="empty">'+esc(err(e))+'</div>'; });
 }
+// ── connettori MCP: l'URL contiene il gateway_secret (H26)
+// Il server manda solo la forma MASCHERATA: il segreto NON è nel DOM, e nemmeno
+// in un attributo data-* (che è DOM a tutti gli effetti: ispezionabile, copiabile,
+// visibile a chiunque legga la pagina). L'URL vero si chiede a ?reveal=<name> solo
+// quando l'owner tocca "Mostra"/"Copia", vive in una variabile di closure, e
+// sparisce dallo schermo da solo dopo REVEAL_MS.
+var REVEAL_MS = 30000;               // ri-mascheramento automatico
+var CLIP_KEY = 'vps1777_clip_warned';  // avviso clipboard: una tantum
+var clipWarnedMem = false;             // fallback se localStorage è negato
+
+function clipWarned(){
+  try { return localStorage.getItem(CLIP_KEY)==='1'; } catch(e){ return clipWarnedMem; }
+}
+function setClipWarned(){
+  try { localStorage.setItem(CLIP_KEY,'1'); } catch(e){ clipWarnedMem=true; }
+}
+function warnClipboard(next){
+  if (clipWarned()) return next();
+  var msg='L\'URL contiene il SEGRETO del gateway: chi ce l\'ha entra nei tuoi MCP.\n\n'+
+    'La clipboard del telefono si sincronizza spesso sul cloud (iCloud / appunti '+
+    'condivisi) ed è leggibile da altre app: incolla subito e poi copia altro per '+
+    'svuotarla.\n\nProcedo con la copia?';
+  var go=function(ok){ if(!ok) return; setClipWarned(); next(); };
+  if (TG && TG.showConfirm) TG.showConfirm(msg, go); else go(window.confirm(msg));
+}
+function revealUrl(name){  // → Promise<string> (l'URL vero, mai messo in S)
+  return api('/app/api/plugins?reveal='+encodeURIComponent(name)).then(function(d){ return d.url||''; });
+}
 function paintPlugins(){
   var box=$('stPl'); if(!box) return;
   if (!S.plugins.length){ box.innerHTML='<div class="empty">Nessun connettore attivo.</div>'; return; }
@@ -645,18 +775,46 @@ function paintPlugins(){
   S.plugins.forEach(function(p){
     var el=document.createElement('div'); el.className='item';
     el.innerHTML='<div class="pn">'+esc(p.name)+' <span class="badge">MCP</span></div>'+
-      '<div class="urlrow"><code class="url"></code><button class="b sm">Copia</button></div>';
-    el.querySelector('code').textContent=p.url;
-    el.querySelector('button').onclick=function(){ copy(p.url); };
+      '<div class="urlrow"><code class="url"></code>'+
+      '<button class="b sm ghost" data-act="show">Mostra</button>'+
+      '<button class="b sm" data-act="copy">Copia</button></div>';
+    var code=el.querySelector('code');
+    var bShow=el.querySelector('[data-act=show]');
+    var bCopy=el.querySelector('[data-act=copy]');
+    var shown=null, timer=null;  // l'URL in chiaro vive QUI, non nel DOM né in S
+
+    var mask=function(){
+      if (timer){ clearTimeout(timer); timer=null; }
+      shown=null; code.textContent=p.url_masked; bShow.textContent='Mostra';
+    };
+    var unmask=function(url){
+      shown=url; code.textContent=url; bShow.textContent='Nascondi';
+      if (timer) clearTimeout(timer);
+      timer=setTimeout(mask, REVEAL_MS);  // non lasciarlo sullo schermo a oltranza
+    };
+    mask();
+
+    bShow.onclick=function(){
+      if (shown) return mask();
+      bShow.disabled=true;
+      revealUrl(p.name).then(function(u){ bShow.disabled=false; unmask(u); })
+        .catch(function(e){ bShow.disabled=false; toast('Errore: '+err(e)); });
+    };
+    bCopy.onclick=function(){
+      warnClipboard(function(){
+        bCopy.disabled=true;
+        revealUrl(p.name).then(function(u){
+          bCopy.disabled=false;
+          if (navigator.clipboard && navigator.clipboard.writeText){
+            navigator.clipboard.writeText(u).then(function(){ toast('Copiato ✓'); },
+              function(){ unmask(u); toast('Tieni premuto sull\'URL per copiarlo'); });
+          } else { unmask(u); toast('Tieni premuto sull\'URL per copiarlo'); }
+        }).catch(function(e){ bCopy.disabled=false; toast('Errore: '+err(e)); });
+      });
+    };
     box.appendChild(el);
   });
   $('stHint').style.display='block';
-}
-function copy(txt){
-  var done=function(){ toast('Copiato ✓'); };
-  if (navigator.clipboard && navigator.clipboard.writeText)
-    navigator.clipboard.writeText(txt).then(done, function(){ toast('Copia manuale: tieni premuto sull\'URL'); });
-  else toast('Copia manuale: tieni premuto sull\'URL');
 }
 
 // ══ TAB: Notebook ══
@@ -901,6 +1059,13 @@ function err(e){
   var m=String((e&&e.message)||e);
   if (m==='not_owner') return 'Questo account Telegram non è l\'owner del gateway.';
   if (m==='no_telegram') return 'Apri dal bot Telegram.';
+  // initData oltre la finestra di 12h (H27): non è un bug, è la scadenza. La
+  // pagina non può rinnovarla da sola — solo Telegram ne emette una nuova.
+  if (m==='auth_401') return 'Sessione Telegram scaduta (12h). Chiudi e riapri il '+
+    'pannello dal bot per rientrare.';
+  // owner non configurato sul gateway → fail-closed (H1/H27): nessun token
+  if (m==='auth_503') return 'Il gateway non ha un owner configurato '+
+    '(TELEGRAM_OWNER_ID): per sicurezza non emette token.';
   return m;
 }
 

@@ -3,6 +3,12 @@
 # Scrive onboarding/update_status.json (letto dalla card admin del gateway)
 # e notifica il owner su Telegram alla prima vista di una versione nuova
 # (dedup su last_notified_version). Su GitHub irraggiungibile: nessun rumore.
+#
+# H43: utente e path NON sono hardcodati. La CLI (install_systemd_units →
+# render_unit) sostituisce @OPERATOR_USER@ / @REPO@ con i valori REALI di questa
+# installazione a ogni update; il deploy iniziale deve fare la stessa
+# sostituzione (vedi note per deploy.sh). Con un operatore diverso da "vps1777"
+# il monitoraggio NON si spegne più in silenzio.
 
 [Unit]
 Description=vps1777 — check aggiornamenti (GitHub Releases)
@@ -11,13 +17,13 @@ After=network-online.target docker.service
 
 [Service]
 Type=oneshot
-User=vps1777
-Group=vps1777
-Environment=VPS1777_HOME=/home/vps1777/vps1777
-WorkingDirectory=/home/vps1777/vps1777
+User=@OPERATOR_USER@
+Group=@OPERATOR_USER@
+Environment=VPS1777_HOME=@REPO@
+WorkingDirectory=@REPO@
 ExecStart=/usr/local/bin/vps1777 check --notify
 TimeoutStartSec=120
 # Il check non ha bisogno di privilegi: niente sudo, niente escalation.
 NoNewPrivileges=true
 ProtectHome=read-only
-ReadWritePaths=/home/vps1777/vps1777
+ReadWritePaths=@REPO@

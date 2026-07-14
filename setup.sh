@@ -4,7 +4,7 @@
 # Cosa fa:
 #   1. Controlla Docker + Compose v2 + python3
 #   2. Crea .env da .env.example (chiedendoti email admin, OWNER_ID, ingress scelto)
-#   3. Genera secrets/* (gateway_secret, oauth_signing, admin_password bcrypt, ts_authkey)
+#   3. Genera secrets/* (gateway_secret, oauth_signing, admin_password bcrypt)
 #   4. Avvia `docker compose --profile ingress.<scelto> up -d`
 #
 # Idempotente: rilanciabile, salta lo step se già fatto.
@@ -39,6 +39,24 @@ confirm() {
   printf '%s%s%s [s/N]: ' "$C_B" "$prompt" "$C_R" >&2
   IFS= read -r response || true
   case "$response" in s|S|si|SI|y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+# Policy password UNICA (H16), identica a deploy.sh e tools/rotate-secret.sh:
+# min 16 caratteri, ≥3 classi, niente pattern comuni. Se cambi qui, cambia LÀ.
+pw_weak_reason() {
+  local pw="$1" classes=0
+  if [ "${#pw}" -lt 16 ]; then echo "troppo corta (min 16 caratteri)"; return 1; fi
+  printf '%s' "$pw" | LC_ALL=C grep -q '[a-z]'        && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[A-Z]'        && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[0-9]'        && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[^a-zA-Z0-9]' && classes=$((classes+1))
+  if [ "$classes" -lt 3 ]; then
+    echo "poca varietà: servono almeno 3 tra minuscole, MAIUSCOLE, cifre e simboli"; return 1
+  fi
+  if printf '%s' "$pw" | LC_ALL=C grep -qiE 'password|12345|qwerty|abcdef|letmein|welcome|admin|vps1777|000000|111111'; then
+    echo "contiene un pattern comune/prevedibile"; return 1
+  fi
+  return 0
 }
 
 cat <<'BANNER'
@@ -109,18 +127,23 @@ else
   echo "INGRESS_PROFILE=ingress.$INGRESS" >> .env
   ok ".env creato"
 fi
+# .env può contenere TS_AUTHKEY e altri valori sensibili → 600 (H15/H38).
+chmod 600 .env 2>/dev/null || true
 
 # VPS1777_TAG/IMAGE_BASE: versione deployata + registry (scritti sempre, anche
 # se .env preesiste, per allineare il tag da pullare).
 set_kv() { grep -q "^$1=" .env && sed -i "s|^$1=.*|$1=$2|" .env || echo "$1=$2" >> .env; }
 set_kv VPS1777_TAG "${INSTALL_VERSION:-dev}"
 set_kv VPS1777_IMAGE_BASE "${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}"
-# dir runtime create ORA (non da Docker come root): il gateway/CLI ci scrivono
-mkdir -p onboarding var backups releases && chmod 700 var
+# dir runtime create ORA (non da Docker come root): il gateway/CLI ci scrivono.
+# H38 — chmod 700 anche su secrets/, backups/, onboarding/ (prima solo var/).
+# backups/ 700 protegge per traversal anche backups/pre-update/ (creata poi dalla
+# CLI, che imposta 0700 sul singolo snapshot).
+mkdir -p onboarding var backups releases secrets
+chmod 700 var secrets backups onboarding
 
 # ───── 3. secrets ─────
 log "Genero secrets in secrets/..."
-mkdir -p secrets
 
 gen_random() { python3 -c "import secrets; print(secrets.token_urlsafe($1))"; }
 
@@ -143,14 +166,23 @@ fi
 if [ ! -s secrets/admin_password_bcrypt.txt ]; then
   log ""
   if confirm "Vuoi che generi io una password admin random (24 char)?"; then
-    ADMIN_PWD="$(python3 -c 'import secrets,string; print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))')"
+    # rigenera finché non passa la policy (con ascii_letters+digits passa
+    # praticamente sempre al primo colpo; il loop è una cintura di sicurezza).
+    while :; do
+      ADMIN_PWD="$(python3 -c 'import secrets,string; print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))')"
+      pw_weak_reason "$ADMIN_PWD" >/dev/null && break
+    done
     log "Password admin generata: $C_B$ADMIN_PWD$C_R"
     log "  → SALVALA SUBITO in un password manager. Non te la riproporrò."
   else
-    printf '%sPassword admin (min 12 char):%s ' "$C_B" "$C_R"
-    read -rs ADMIN_PWD
-    echo
-    [ -z "$ADMIN_PWD" ] || [ ${#ADMIN_PWD} -lt 12 ] && die "Password troppo corta"
+    # H16 — policy UNICA: min 16, ≥3 classi, niente pattern comuni.
+    while :; do
+      printf '%sPassword admin (min 16, ≥3 classi: minusc/MAIUSC/cifre/simboli):%s ' "$C_B" "$C_R"
+      read -rs ADMIN_PWD
+      echo
+      if reason="$(pw_weak_reason "$ADMIN_PWD")"; then break; fi
+      warn "Password debole: $reason. Riprova."
+    done
   fi
   log "Calcolo bcrypt..."
   # Usa python3 di sistema con bcrypt (installato al volo se manca)
@@ -211,8 +243,14 @@ if confirm "Procedo ora?"; then
   if command -v sudo >/dev/null && [ -f tools/vps1777.py ]; then
     log "Installo il canale di aggiornamento (CLI vps1777 + timer)…"
     if sudo install -m755 tools/vps1777.py /usr/local/bin/vps1777 2>/dev/null; then
+      # H43 — le unit sono templatizzate (@OPERATOR_USER@/@REPO@): vanno RESE prima
+      # di install, altrimenti systemd non parsa `User=@OPERATOR_USER@` (fresh
+      # install rotto). Qui l'operatore è chi lancia setup.sh; il repo è SCRIPT_DIR.
       for u in systemd/vps1777-*; do
-        case "$u" in *.service|*.timer|*.path) sudo install -m644 "$u" /etc/systemd/system/ 2>/dev/null || true;; esac
+        case "$u" in *.service|*.timer|*.path)
+          sed -e "s|@OPERATOR_USER@|$(id -un)|g" -e "s|@REPO@|$SCRIPT_DIR|g" "$u" \
+            | sudo install -m644 /dev/stdin "/etc/systemd/system/$(basename "$u")" 2>/dev/null || true;;
+        esac
       done
       sudo systemctl daemon-reload 2>/dev/null || true
       sudo systemctl enable --now vps1777-check-update.timer vps1777-update.path 2>/dev/null \

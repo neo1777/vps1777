@@ -312,14 +312,42 @@ if ! id {OPERATOR_USER} >/dev/null 2>&1; then
 fi
 usermod -aG docker {OPERATOR_USER}
 getent group sudo >/dev/null && usermod -aG sudo {OPERATOR_USER} || true
-echo "{OPERATOR_USER} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/90-{OPERATOR_USER}
-chmod 0440 /etc/sudoers.d/90-{OPERATOR_USER}
+# H12 — sudoers WHITELIST invece di NOPASSWD:ALL. Via sudo l'operator esegue SOLO
+# i binari che la CLI vps1777 e gli script di install/update usano: install (CLI,
+# unit, cosign), systemctl (daemon-reload, enable), chown (ownership runtime).
+# Censiti alla fonte: ogni sudo([...]) in tools/vps1777.py usa uno di questi tre.
+# L'operator resta ROOT-EQUIVALENTE via gruppo docker (vedi SECURITY.md): questa
+# è riduzione della superficie sudo, non de-privilegio completo.
+SUDO_CMDS=""
+for _b in install systemctl chown; do
+  for _d in /usr/bin /bin /usr/sbin /sbin; do
+    if [ -x "$_d/$_b" ]; then
+      if [ -z "$SUDO_CMDS" ]; then SUDO_CMDS="$_d/$_b"; else SUDO_CMDS="$SUDO_CMDS, $_d/$_b"; fi
+    fi
+  done
+done
+if [ -n "$SUDO_CMDS" ]; then
+  _tmp_sudo="$(mktemp)"
+  printf '%s ALL=(root) NOPASSWD: %s\\n' "{OPERATOR_USER}" "$SUDO_CMDS" > "$_tmp_sudo"
+  if visudo -cf "$_tmp_sudo" >/dev/null 2>&1; then
+    install -m 0440 "$_tmp_sudo" /etc/sudoers.d/90-{OPERATOR_USER}
+  else
+    echo "SUDOERS_INVALID"
+  fi
+  rm -f "$_tmp_sudo"
+else
+  echo "SUDOERS_EMPTY"
+fi
 docker compose version >/dev/null 2>&1 && echo "COMPOSE_OK" || echo "COMPOSE_MISSING"
 """
         ok = False
         for line in self._stream(script, "prepare"):
             if "COMPOSE_OK" in line:
                 ok = True
+            elif "SUDOERS_INVALID" in line or "SUDOERS_EMPTY" in line:
+                yield ("! sudoers whitelist NON installata — install/systemctl/chown via sudo "
+                       "falliranno per l'operator (canale update). Controlla /etc/sudoers.d a mano.")
+                continue
             yield line
         if not ok:
             raise DeployError("docker compose v2 non disponibile dopo l'install del plugin")
@@ -413,26 +441,51 @@ rm -f /tmp/vps1777.tar.gz
         public_base = p.get("public_base", "")
         if ingress == "caddy" and p.get("caddy_domain"):
             public_base = f"https://{p['caddy_domain']}"
+        # H16 — la password admin NASCE SUL PC (qui, in Python), non più sulla VPS:
+        # così il chiaro non torna indietro sullo stdout SSH (era il leak di H16).
+        # Viaggia solo in AVANTI, base64, dentro lo STDIN del `bash -s` (mai argv →
+        # chiude anche l'H7 del vecchio `python3 -c "…" "$PW"`). Se questo PC ha
+        # bcrypt, l'hash lo calcoliamo QUI e attraversa SSH solo l'hash.
+        import base64 as _b64
+        import secrets as _secrets
+        import string as _string
+        while True:
+            admin_pw = "".join(_secrets.choice(_string.ascii_letters + _string.digits) for _ in range(24))
+            _classes = sum(bool(set(admin_pw) & set(g)) for g in
+                           (_string.ascii_lowercase, _string.ascii_uppercase, _string.digits))
+            if _classes >= 3:  # policy unica: ≥16 char (qui 24) e ≥3 classi
+                break
+        self.result["ADMIN_PWD"] = admin_pw
+        admin_bcrypt = ""
+        try:
+            import bcrypt as _bcrypt
+            admin_bcrypt = _bcrypt.hashpw(admin_pw.encode(), _bcrypt.gensalt(12)).decode()
+        except Exception:  # noqa: BLE001 — bcrypt non c'è sul PC → hash sulla VPS
+            admin_bcrypt = ""
+        admin_pw_b64 = _b64.b64encode(admin_pw.encode()).decode()
+        admin_bcrypt_b64 = _b64.b64encode(admin_bcrypt.encode()).decode()
         # script remoto eseguito come operator
         gen = f"""
 set -e
 cd {REMOTE_DIR}
 # runtime dir create ORA come operatore: se le creasse Docker (bind mount)
-# sarebbero root-owned e gateway/CLI non potrebbero scriverci
+# sarebbero root-owned e gateway/CLI non potrebbero scriverci.
+# H38 — chmod 700 anche su secrets/, backups/, onboarding/ (prima solo var/).
 mkdir -p secrets onboarding var backups releases
-chmod 700 var
+chmod 700 var secrets backups onboarding
 gen() {{ python3 -c "import secrets;print(secrets.token_urlsafe($1))"; }}
-genpwd() {{ python3 -c "import secrets,string;print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))"; }}
 # gateway_secret e oauth_signing restano stabili (il primo è negli URL connector):
 # non li rigeneriamo se già presenti.
 [ -s secrets/gateway_secret.txt ]       || gen 24 > secrets/gateway_secret.txt
 [ -s secrets/oauth_signing_secret.txt ] || gen 48 > secrets/oauth_signing_secret.txt
 chmod 600 secrets/gateway_secret.txt secrets/oauth_signing_secret.txt
-# La password admin è una credenziale per-installazione: la (ri)generiamo SEMPRE
-# fresca e la mostriamo alla fine. Dopo il reboot di STEP 7 il gateway rilegge
-# il bcrypt aggiornato, quindi la password mostrata è quella valida.
-PW="$(genpwd)"; echo "GENERATED_ADMIN_PWD=$PW"
-python3 -c "import bcrypt,sys;print(bcrypt.hashpw(sys.argv[1].encode(),bcrypt.gensalt(12)).decode())" "$PW" > secrets/admin_password_bcrypt.txt
+# La password admin (bcrypt) arriva dal PC: hash già pronto, o chiaro base64 da
+# hashare qui via STDIN (mai argv). Rigenerata SEMPRE fresca per-installazione.
+if [ -n '{admin_bcrypt_b64}' ]; then
+  printf %s '{admin_bcrypt_b64}' | base64 -d > secrets/admin_password_bcrypt.txt
+else
+  printf %s '{admin_pw_b64}' | base64 -d | python3 -c "import bcrypt,sys;print(bcrypt.hashpw(sys.stdin.buffer.read(),bcrypt.gensalt(12)).decode())" > secrets/admin_password_bcrypt.txt
+fi
 chmod 600 secrets/admin_password_bcrypt.txt
 printf %s {shlex.quote(p.get('telegram_bot_token', ''))} > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt
 {("printf %s " + shlex.quote(p.get('cf_token',''))) + " > secrets/cloudflared_token.txt; chmod 600 secrets/cloudflared_token.txt" if p.get('cf_token') else "true"}
@@ -448,14 +501,14 @@ set_kv CADDY_DOMAIN {shlex.quote(p.get('caddy_domain',''))}
 set_kv CADDY_EMAIL {shlex.quote(p.get('caddy_email',''))}
 set_kv VPS1777_TAG {shlex.quote(p.get('_vps1777_version') or 'dev')}
 set_kv VPS1777_IMAGE_BASE {shlex.quote(p.get('_image_base') or 'ghcr.io/neo1777')}
+# H15/H38 — .env contiene TS_AUTHKEY e altri valori: 600. E via l'orfano.
+chmod 600 .env 2>/dev/null || true
+rm -f secrets/ts_authkey.txt
 echo CONFIG_OK
 """
         for line in self._stream(self._sudo(gen), "config"):
-            if line.startswith("GENERATED_ADMIN_PWD="):
-                self.result["ADMIN_PWD"] = line.split("=", 1)[1].strip()
-                yield "  password admin generata (mostrata alla fine)"
-            elif "CONFIG_OK" in line:
-                pass
+            if "CONFIG_OK" in line:
+                yield "  password admin generata sul PC (mostrata alla fine)"
             else:
                 yield line
         self.result["INGRESS"] = ingress
@@ -502,8 +555,10 @@ echo CONFIG_OK
         script = f"""
 set -e
 install -m 755 {REMOTE_DIR}/tools/vps1777.py /usr/local/bin/vps1777
+# H43 — unit templatizzate (@OPERATOR_USER@/@REPO@): RESE prima di install, o
+# systemd non parsa `User=@OPERATOR_USER@` e il fresh install si rompe.
 for u in {REMOTE_DIR}/systemd/vps1777-*; do
-  case "$u" in *.service|*.timer|*.path) install -m 644 "$u" /etc/systemd/system/;; esac
+  case "$u" in *.service|*.timer|*.path) sed -e "s|@OPERATOR_USER@|{OPERATOR_USER}|g" -e "s|@REPO@|{REMOTE_DIR}|g" "$u" | install -m 644 /dev/stdin /etc/systemd/system/"$(basename "$u")";; esac
 done
 systemctl daemon-reload
 systemctl enable --now vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer
@@ -549,6 +604,21 @@ echo SELFUPDATE_OK
             f"cd {REMOTE_DIR} && (grep -q ^GATEWAY_BIND= .env && sed -i 's|^GATEWAY_BIND=.*|GATEWAY_BIND={bind}|' .env || echo GATEWAY_BIND={bind} >> .env) && {cmd} up -d gateway"
         ))
 
+    def _wipe_ts_authkey(self) -> None:
+        """H15 — la auth-key Tailscale è MONOUSO: dopo che il nodo è entrato nel
+        tailnet non serve più (il login vive in /var/lib/tailscale, non in .env).
+        La azzeriamo in .env, mettiamo .env a 600 e togliamo l'orfano
+        secrets/ts_authkey.txt. Idempotente."""
+        script = r'''cd ~/vps1777 || exit 1
+if grep -q "^TS_AUTHKEY=" .env 2>/dev/null; then
+  rest=$(grep -v "^TS_AUTHKEY=" .env || true)
+  { [ -n "$rest" ] && printf "%s\n" "$rest"; printf "%s\n" "TS_AUTHKEY="; } > .env
+fi
+chmod 600 .env 2>/dev/null || true
+rm -f secrets/ts_authkey.txt
+'''
+        self._run_capture(self._sudo(script))
+
     def step_tailscale_host(self, p: dict, ingress: str) -> Iterator[str]:
         """Tailscale SULL'HOST: install + up + serve + funnel + cert.
         Niente container/sidecar → niente bug containerboot, niente netns."""
@@ -562,9 +632,21 @@ echo SELFUPDATE_OK
             yield line
         self._run_capture("systemctl enable --now tailscaled 2>/dev/null || true")
         yield "── Login Tailscale (auth-key) + Funnel…"
+        # H7 — la key via FILE, mai in argv (dove `ps` la mostrerebbe a ogni utente
+        # locale). mktemp crea a 0600; SFTP ci scrive la key; up la legge con
+        # --authkey=file:… e la cancelliamo subito. Come già fa deploy.sh.
+        keyfile = self._run_capture("mktemp /tmp/.vps1777-tskey.XXXXXX").strip()
+        try:
+            sftp = self.client.open_sftp()  # type: ignore[union-attr]
+            with sftp.open(keyfile, "w") as fh:
+                fh.write(key)
+            sftp.chmod(keyfile, 0o600)
+            sftp.close()
+        except Exception:  # noqa: BLE001 — se fallisce, up sotto darà errore chiaro
+            pass
         up = self._run_capture(
-            f"tailscale up --authkey={shlex.quote(key)} --hostname={shlex.quote(hostname)} "
-            "--accept-dns=false --reset 2>&1"
+            f"tailscale up --authkey=file:{shlex.quote(keyfile)} --hostname={shlex.quote(hostname)} "
+            f"--accept-dns=false --reset 2>&1; r=$?; rm -f {shlex.quote(keyfile)}; exit $r"
         )
         # ricavo l'URL .ts.net del nodo
         url = ""
@@ -581,6 +663,8 @@ echo SELFUPDATE_OK
             return
         self.result["URL"] = url
         yield f"✓ Nodo Tailscale: {url}"
+        # Nodo entrato nel tailnet → la key monouso è spesa: via da .env (H15).
+        self._wipe_ts_authkey()
         # Funnel HTTPS:443 → gateway (loopback). UN SOLO comando combinato:
         # `tailscale serve --https=443 <t>` + `tailscale funnel 443` separati
         # fanno interpretare "443" come TARGET (proxy a :443) e sovrascrivono

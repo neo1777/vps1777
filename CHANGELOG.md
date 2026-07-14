@@ -2,6 +2,31 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.32.0] — 2026-07-14
+
+### Chiusura del dossier residuo — 12 interventi, con la disciplina che li verifica
+
+Dopo il registro dei rilievi (v0.31.0), la campagna che lo svuota. Sei lotti in parallelo, ognuno con quattro regole nel prompt — verifica alla fonte, nessun claim senza coordinata, «un fix è finito quando hai cercato chi hai rotto», ri-verifica anche il già-fatto. Da **8 chiusi** a inizio giornata a **20 chiusi · 16 parziali · 7 aperti** su 43, ogni transizione con l'evidenza che il gate in CI verifica.
+
+**Chiusi in questa release** (con il dettaglio in `security/findings.yml`):
+- **H20** — revoca reale della sessione admin: `jti` su ogni token + revoke-list persistente; il logout ora passa da CSRF e revoca davvero (prima cancellava solo il cookie). *Bonus trovato*: i form di logout erano annidati nei form di upload → il logout era già rotto.
+- **H14** — i cookie Google **fuori** dallo snapshot pre-update (erodeva H6), coi `.tar` in chiaro già scritti da CLI vecchie **cancellati**, non solo evitati d'ora in poi.
+- **H39** — tetti sul **decompresso** anche lato archivio (nlm era già in v0.30.2): byte contati mentre si leggono, non la dimensione dichiarata. *«Un limite su un input compresso non è un limite.»*
+- **H26/H27/H11** — Mini App: il `gateway_secret` non entra più nel DOM (mascherato, reveal esplicito); finestra `initData` 24h→12h + re-check dell'owner sul Bearer; l'IP negli eventi di fallimento.
+- **H17** — audit: lettura dalla coda (non più tutto il file in RAM) e contatore dei fallimenti **mostrato a schermo** (un elenco vuoto per errore di scrittura non è più una bugia per omissione).
+- **H41** — testo delle fonti fuori dall'`argv` (via file temporaneo) e command line troncata negli errori.
+- **H42** — `archive-data` montato `:ro` (verificato che i DB sono `journal_mode=delete`, non WAL).
+- **H38/H15** — `secrets/`·`backups/`·`onboarding/` a `700`; `TS_AUTHKEY` monouso azzerata da `.env` dopo l'uso, `.env` a `600`, file orfano rimosso.
+- **H13** — versioni `apk` pinnate nel container di backup.
+
+**Ri-verifica del già-fatto — la regola ha pagato:**
+- **H30** (open-redirect, dato per chiuso in v0.21.0) aveva un **bypass reale**: `startswith(base)` è un match di *prefisso*, non di *origine* — `https://host.evil.com/` superava il gate. La logica è ora in un modulo puro con 12 test d'attacco.
+- **H24** — i tag `v*` sono **immutabili** (ruleset GitHub `deletion + update`, in `security/rulesets/`). Provato sul campo: spostare o cancellare un tag è rifiutato, crearne uno nuovo no. *La regola `non_fast_forward` non bastava*: spostare un tag in avanti è un fast-forward.
+
+**Portati avanti in parziale, onestamente** (H12 sudo whitelist ma docker resta root-equiv; H16 password nasce sul PC ma il chiaro passa se manca bcrypt; H37, H43, H35, H8, H9, H18, H22, H31, H32, H34): il *cosa manca* di ognuno è nel registro, che la CI verifica sia dichiarato.
+
+Nessun claim senza coordinata: `security/check_findings.py` è verde e i conteggi in `SECURITY.md` combaciano col registro per costruzione.
+
 ## [0.31.0] — 2026-07-14
 
 ### Il registro dei rilievi — «dichiarato fatto ma assente» ora è una build rossa
