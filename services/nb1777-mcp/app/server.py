@@ -29,7 +29,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from . import core, nlm_profile
+from . import canonical, core, nlm_profile
 from .settings import get_settings
 
 
@@ -45,6 +45,10 @@ mcp = FastMCP(
     host=HOST,
     port=PORT,
     stateless_http=True,
+    # Canale involontario del canonico (issue #30, Veicolo A): le instructions
+    # viaggiano nella risposta di initialize. Testo STATICO → non dipende
+    # dall'auth nlm al boot; il numero di versione vivo lo dà il tool `canonico`.
+    instructions=canonical.declaration_text(),
     transport_security=TransportSecuritySettings(
         # DNS-rebinding protection OFF: il server sta dietro il gateway su rete
         # Docker interna (non esposto ai browser). Il gateway inoltra
@@ -449,8 +453,25 @@ async def studio_export_to_sheets(notebook_id: str, artifact_id: str,
 
 @mcp.tool()
 async def doctor() -> dict:
-    """Diagnostica: nlm reachable + count notebook."""
-    return await _aio(core.doctor)
+    """Diagnostica: nlm reachable + count notebook + canonico del blocco memoria."""
+    d = await _aio(core.doctor)
+    # Canonico anche qui: doctor è la chiamata tipica d'avvio sessione, così il
+    # canonico atterra senza un tool dedicato. Fail-open (get_canonical non alza).
+    d["canonico"] = canonical.public_view(await asyncio.to_thread(canonical.get_canonical))
+    return d
+
+
+@mcp.tool()
+async def canonico() -> dict:
+    """MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la
+    versione «buona» con cui una sessione dovrebbe allinearsi, letta dal notebook
+    claudemd1777. Chiamalo all'avvio se la versione in testa al blocco che porti
+    potrebbe essere vecchia, e confrontala: se sei più vecchio sei disallineato.
+    Fail-open: se il notebook non è raggiungibile ritorna `available: false` e la
+    via di fallback (notebook_query)."""
+    # NON via _aio: get_canonical è fail-open per contratto (deve poter dire
+    # "available: false" invece di sollevare se l'auth/notebook manca).
+    return canonical.public_view(await asyncio.to_thread(canonical.get_canonical))
 
 
 # ============================================================
