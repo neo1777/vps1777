@@ -136,7 +136,7 @@ automatico**. Manuale completo: [docs/UPDATE.md](docs/UPDATE.md).
 ## Sicurezza per design
 
 - Backend su rete Docker `internal: true` — **solo il gateway** è esposto verso l'esterno
-- Il gateway **non** ha accesso al Docker socket né ai secret dell'host (container non privilegiato)
+- Il gateway **non** ha accesso al Docker socket né ai secret dell'host (container non privilegiato), **né ai cookie Google** di NotebookLM: quel volume lo monta solo `nb1777-mcp`, il servizio che li usa
 - Secrets sensibili (password, signing key, token) via Docker `secrets:` (tmpfs `/run/secrets/`), **mai** in env var; il `GATEWAY_SECRET` è redatto dagli access-log
 - OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12; il proxy verifica anche l'**audience** del token
 - Mini App e bot **owner-only fail-closed**: senza `TELEGRAM_OWNER_ID` negano tutti, non aprono

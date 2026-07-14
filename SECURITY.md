@@ -100,6 +100,24 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
 
 ### Contenimento dei container
 
+- **Il gateway non tocca i cookie Google** (`v0.30.0`). Era l'ultimo finding
+  aperto. Il gateway — l'unico servizio esposto su Internet — montava in
+  **scrittura** il volume `nlm-auth` (i cookie di sessione Google di NotebookLM),
+  perché `/admin/nlm` ci estraeva dentro il profilo caricato: compromettere il
+  gateway voleva dire leggerli **e** riscriverli. Ora vale un invariante secco:
+  **quel volume lo monta SOLO `nb1777-mcp`**, il servizio che quei cookie li usa
+  davvero. Gateway e bot hanno **accesso zero** — né lettura né scrittura — e gli
+  chiedono su rete interna (`/internal/nlm/status` dice solo *se* c'è un profilo,
+  mai il contenuto; `/internal/nlm/profile` riceve il tar e lo installa),
+  autenticandosi con un segreto condiviso e fail-closed.
+  - **Il proxy non attraversa `internal/`**: il reverse proxy MCP è un catch-all,
+    quindi senza un blocco esplicito quegli endpoint sarebbero stati raggiungibili
+    da Internet via `/<SECRET>/<service>/internal/…` — proprio la via di scrittura
+    che il fix chiude. Ogni sotto-path `internal/` è rifiutato con 404 **prima di
+    ogni altro controllo**, per **tutti** gli upstream: un prefisso riservato di
+    cui i plugin possono fidarsi.
+  - **Upload non distruttivo**: staging → validazione → swap con rollback. Un tar
+    sbagliato non ti scollega da NotebookLM.
 - **`docker.sock` rimosso dal container di backup** (`v0.29.0`). Montare il
   socket dà al container il controllo root-equivalente dell'host. Il container
   `ops.backup` ora monta i volumi dati **direttamente in sola lettura** e li tara
@@ -180,18 +198,14 @@ interamente sulla VPS.
 
 ## Residui noti
 
-L'hardening è difesa in profondità, non una garanzia. Un residuo è tracciato e
-dichiarato:
+Nessuno dei rilievi della review è rimasto aperto: il dossier è **applicato per
+intero** (l'ultimo, il mount rw dei cookie Google nel gateway, è chiuso in
+`v0.30.0`).
 
-- **Il gateway monta in scrittura il profilo Google di NotebookLM** (`nlm-auth`).
-  `/admin/nlm` scrive il profilo caricato direttamente nel volume, quindi il
-  gateway — l'unico servizio esposto — ha accesso in scrittura ai cookie di
-  sessione Google. Il fix corretto è spostare la scrittura (e la lettura di stato)
-  dietro un endpoint interno su `nb1777-mcp`, lasciando il gateway ad accesso-zero
-  ai cookie. È un cambio d'architettura su un flusso core (il login NotebookLM) e
-  va fatto e verificato con cura: rendere il mount `:ro` non basterebbe, perché il
-  gateway deve comunque *leggere* la dir per lo stato, e la lettura già espone i
-  cookie. Tracciato, non ancora applicato.
+Questo non significa "sicuro": l'hardening è difesa in profondità, non una
+garanzia, e il progetto è pre-1.0. Restano vere le cose scritte sotto — le
+dipendenze a monte, le misconfigurazioni di chi installa, e gli account di terzi
+non sono nel nostro perimetro. Se trovi qualcosa, [scrivimi](#reporting-a-vulnerability).
 
 ## Out of scope
 

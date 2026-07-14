@@ -64,6 +64,17 @@ Il tuo MCP risponde a: `<PUBLIC_BASE>/<SECRET>/mio-mcp/mcp`.
 
 Aggiungilo come connector su claude.ai.
 
+> **`internal/` è un prefisso riservato — e ti serve.** Il reverse proxy inoltra
+> al tuo servizio qualunque sotto-path (`/<SECRET>/mio-mcp/<qualsiasi-cosa>`),
+> **tranne** quelli che iniziano per `internal/`: quelli li rifiuta con 404
+> **prima** del controllo del secret e del token. Vuol dire che un endpoint
+> `/internal/...` del tuo plugin **non è raggiungibile da Internet**, mai: è il
+> canale privato per parlare con gli altri servizi sulla rete `backend`. È così
+> che il gateway installa il profilo NotebookLM senza montarne i cookie
+> (vedi [ARCHITECTURE.md](ARCHITECTURE.md)). Corollario da ricordare: **ogni
+> altro path del tuo servizio è esposto** (dietro secret + OAuth) — se hai
+> un'operazione che non deve uscire, mettila sotto `internal/`.
+
 ## Caso 2 — Aggiungere un bot Telegram
 
 Stesso pattern, ma il bot **non espone porte** (è long-poll outbound).
