@@ -34,6 +34,18 @@ che queste skill richiedono [tool]:
 - superficie d'errore **parlante** → niente più falsi negativi silenziosi: una
   skill che conclude "non c'è" ora può fidarsi (dopo il *protocollo dello zero*).
 
+> **Aggiornamento 2026-07-14 — c'è più corpus di quanto questo doc assuma.** I 5
+> tool restano quelli, ma la **v0.20.0** ha cambiato *cosa viene indicizzato*: il
+> contenuto pieno, incluse le **azioni** (tool-call, allegati) — **3,03× indicizzato**
+> rispetto a prima, con schema v2 (`sender`, `tools`, `thinking`, `attachments`,
+> `parent_uuid`). Le conseguenze sono **a favore** delle skill qui sotto:
+> - **A1 (Registro delle Promesse)**: gli impegni presi *facendo* (un file inviato,
+>   un repo creato) ora sono cercabili, non solo quelli *detti* → la **chiusura**
+>   di una promessa è molto più verificabile.
+> - **A3 / Estrattore di Gotcha**: le regole dure emergono anche dalle azioni
+>   ripetute, non solo dalle frasi.
+> Ri-verifica la superficie reale con `describe_databases()` prima di progettare.
+
 > Vincolo di costruzione ricorrente: la logica pura di ogni skill che potrebbe
 > finire lato-server va tenuta **stdlib-only e testabile** (pattern vps1777:
 > `archive_indexer`, `fts.py`, `miniapp_core`). Per le skill pure-prompt non

@@ -29,6 +29,15 @@ diagnostico**. Lo strato *pensato per orientare* (il catalogo) è il più stanti
 interrogato su vps1777 rispondeva con l'architettura della generazione precedente
 (systemd/mcp1777) mentre vps1777 è ormai Docker+OAuth. [paper §7]
 
+> **Aggiornamento 2026-07-14 — la tabella è invecchiata, ed è la prova del suo
+> stesso punto.** Fra l'11 e il 14 luglio vps1777 è passato da v0.19.x a **v0.30.1**
+> (campagna di hardening: 13 release). Qualunque strato non aggiornato da allora —
+> il catalogo per primo — descrive un vps1777 che non esiste più. Non è un
+> aneddoto: è la **freschezza scalare** che colpisce di nuovo, e nella stessa
+> direzione. Quando lavori su B1, il **primo** test del sync è proprio questo:
+> il masterIndex sa che vps1777 è alla 0.30.1 e che il dossier di sicurezza è
+> chiuso? L'archivio, col suo lag, probabilmente **non ha ancora** questa campagna.
+
 ---
 
 ## B1 — Sync automatico del masterIndex1777

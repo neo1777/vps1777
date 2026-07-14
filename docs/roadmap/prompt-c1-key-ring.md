@@ -8,6 +8,11 @@
 >
 > Non contiene segreti: credenziali VPS, URL e password le fornisci tu a inizio
 > sessione (o sono già nel contesto operativo).
+>
+> **Rinfrescato il 2026-07-14** (base: v0.30.1, dopo la campagna di hardening
+> difensivo v0.19.1→v0.30.1). Il cambiamento che conta: **`gateway_secret` non è
+> più solo il namespace dell'URL** — vedi §3 e §4. I riferimenti `file:riga`
+> restano da ri-verificare: `settings.py` e `oauth.py` sono cresciuti.
 
 ---
 
@@ -96,8 +101,33 @@ e una chiave che non ruota mai è un rischio che cresce nel tempo.
   grazia) va in un modulo **testabile** — e la CI gira i test gateway con
   `uvx pytest` **senza deps pesanti**, quindi la logica pura dev'essere
   **stdlib-only** (pattern: `archive_indexer`, `fts.py`, `miniapp_core`,
-  `asgi_security`). Attenzione: `jwt_helpers` importa PyJWT → isola la parte
-  pura (anello + kid + grace) da quella che chiama PyJWT.
+  `asgi_security`, `ratelimit`). Attenzione: `jwt_helpers` importa PyJWT → isola
+  la parte pura (anello + kid + grace) da quella che chiama PyJWT.
+
+### Cosa è cambiato dopo l'hardening (v0.19.1 → v0.30.1) — leggilo, tocca te
+
+- **⚠️ `gateway_secret` non è più solo il namespace dell'URL.** Dalla **v0.30.0**
+  (finding H6) è **anche il segreto del canale interno**: gateway e bot lo usano
+  per autenticarsi verso gli endpoint privati di `nb1777-mcp`
+  (`/internal/nlm/*`, header `X-Vps1777-Internal`, confronto constant-time). Lo
+  leggono quindi **tre** servizi, non uno (`docs/SECRETS.md`). Conseguenza già
+  emersa e corretta in **v0.30.1**: ruotarlo richiede di riavviare **tutti e tre**
+  i consumatori (`tools/rotate-secret.sh`), altrimenti nb1777-mcp e il bot restano
+  col segreto vecchio e il canale interno risponde **403**. Se progetti una grace
+  window per `gateway_secret`, deve coprire **anche** quel canale (nb1777-mcp che
+  accetta vecchio+nuovo per la finestra) — vedi §4.
+- **`oauth.py` è cresciuto**: rate-limit per-IP su `/register` (10/5min) e `/token`
+  (60/min) (v0.25.0). Ci metti le mani per il key-ring → non romperli.
+- **Il proxy verifica l'audience** (v0.25.0): il `sub` dell'access token dev'essere
+  in `OAUTH_ALLOWED_EMAILS`, altrimenti 401 `subject_not_allowed` (`proxy.py`).
+  Il key-ring cambia *come si verifica la firma*, non *chi è ammesso*: non
+  toccare questo confine per sbaglio.
+- **Il proxy non attraversa `internal/`** (v0.30.0): rifiuta con 404 ogni
+  sotto-path `internal/`, per tutti gli upstream, **prima** di secret e bearer.
+  È un prefisso riservato (`docs/PLUGINS.md`).
+- **La postura di sicurezza è ora documentata per intero** in `SECURITY.md`
+  (sezione *Rassegna difensiva*): leggila prima di progettare, così non reintroduci
+  qualcosa che è stato appena chiuso.
 
 ## 4. Obiettivo e direzione tecnica proposta (non prescrittiva)
 
@@ -126,10 +156,17 @@ Costruire un **anello di chiavi** con **finestra di grazia**:
   di secret simmetrici** (più semplice, coerente con l'esistente) oppure passare
   ad **asimmetrico** (EdDSA/RS256 + JWKS) — più standard per il `kid`, ma scope
   maggiore e cambia il modello. Porta una raccomandazione, non farla di nascosto.
-- **`gateway_secret` (namespace URL):** è un secret diverso, la cui rotazione
-  cambia gli URL dei connector. Una "grace window" lì significa accettare **due
-  namespace** per una finestra. **Scope secondario:** valuta se includerlo o
-  lasciarlo a un follow-up; di' quale e perché.
+- **`gateway_secret` (namespace URL **+ canale interno**):** è un secret diverso, e
+  dalla v0.30.0 ha **due** ruoli (vedi §3): namespace degli URL connector **e**
+  segreto d'autenticazione del canale interno gateway/bot → nb1777-mcp. Ruotarlo
+  oggi è **più** disruptivo di prima, non meno: cambia gli URL dei connector **e**
+  richiede il riavvio dei tre consumatori. Una "grace window" qui significa **due
+  cose insieme**: accettare due namespace URL per una finestra, **e** far accettare
+  a `nb1777-mcp` sia il segreto vecchio sia il nuovo per la stessa finestra
+  (altrimenti il canale interno si rompe a metà rotazione). Proprio perché la
+  rotazione è diventata più costosa, **il valore di una grace window qui è
+  cresciuto**: valuta se includerlo in questa sessione o farne un follow-up, e
+  **di' quale e perché**.
 
 ## 5. Ricognizione iniziale obbligatoria (prima di scrivere codice)
 

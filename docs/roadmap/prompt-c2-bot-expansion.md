@@ -4,6 +4,10 @@
 > `vps1777`) che estende il bot Telegram. Copia il blocco sotto la riga come primo
 > messaggio. Scritto per reggere il tempo: se lo lanci fra settimane, la sessione
 > **prima verifica lo stato reale**. Nessun segreto: credenziali/URL li fornisci tu.
+>
+> **Rinfrescato il 2026-07-14** (base: v0.30.1). Il cambiamento che conta: **il
+> nodo di scope del §3 si è parzialmente risposto da solo** — Neo ha spento i
+> comandi RAG testuali in produzione. Leggi §3 prima di proporre comandi nuovi.
 
 ---
 
@@ -25,9 +29,13 @@ tensione di design reale: leggila prima di scrivere codice.
 - **Metodo 1777:** italiano, tono da pari e asciutto; **fatti (file:riga)
   distinti dalle inferenze**; niente rassicurazione; verifica alla fonte, mai a
   memoria. (Questo prompt stesso corregge un "fatto a memoria" — vedi §2.)
-- **Confini vps1777:** owner-only sul bot; il bot parla agli upstream **solo via
-  MCP** (`nb1777-mcp` sulla rete `internal`), non ha docker.sock né tocca il
-  sistema; azioni-sistema alla CLI host. Branch dedicato, mai `main`.
+- **Confini vps1777:** **owner-only** sul bot, ora **fail-closed** (senza
+  `TELEGRAM_OWNER_ID` il bot non risponde a *nessuno*, v0.22.0); il bot parla
+  **solo con `nb1777-mcp`** sulla rete `internal` — via MCP per i tool e, dalla
+  v0.30.0, via un **endpoint interno HTTP** (`/internal/nlm/status`) per sapere se
+  l'auth NotebookLM c'è; non ha docker.sock, **non monta più i cookie Google**
+  (H6) e non tocca il sistema; azioni-sistema alla CLI host. Branch dedicato, mai
+  `main`.
 
 ## 1. Cos'è vps1777 e dov'è il bot
 
@@ -67,6 +75,30 @@ seconda li tiene nella Mini App e lascia al bot solo l'essenziale + ciò che il
 bot fa *meglio*. **Chiedi a Neo quale delle due (o quale sintesi) vuole ora.**
 La mia raccomandazione — da discutere, non imporre — nel §4.
 
+### ⚠️ Aggiornamento (v0.24.0 + prod, lug 2026): il nodo si è mosso da sé
+
+Non è più una domanda del tutto aperta. Nel frattempo è successo un **fatto
+datato** che pende netto verso il *complementare*:
+
+- La v0.24.0 ha introdotto **`BOT_RAG_COMMANDS`**: `=0` **disattiva `/lista` e
+  `/chiedi`**. Ragione: quei comandi fanno transitare titoli e risposte RAG dai
+  **server Telegram**, e la **Bot API non è E2E**.
+- **Neo l'ha impostato a `0` in produzione.** Cioè: sul bot reale, oggi, i comandi
+  testuali RAG **sono spenti**, per privacy. La superficie che usa è la **Mini App**
+  (che parla solo col suo gateway).
+
+**Cosa ne segue per te (non ignorarlo):**
+- Proporre *altri* comandi testuali che facciano passare **contenuto** da Telegram
+  contraddirebbe una scelta esplicita dell'owner. Non farlo senza rimettere in
+  discussione la scelta **con lui**.
+- Il criterio di scope diventa più affilato: per ogni comando, chiedi **"che cosa
+  esce da Telegram?"**. Un *segnale di controllo* ("crea l'artefatto", "è pronto")
+  esce quasi a zero. Una *risposta RAG* o il *contenuto di una fonte* esce per
+  intero. Sono due categorie diverse, e vanno trattate diversamente.
+- Verifica alla fonte com'è oggi: `BOT_RAG_COMMANDS` in `.env` sulla VPS,
+  `_rag_disabled()` in `bot.py`, e la tabella *Flussi di dati verso terzi* in
+  `SECURITY.md` (dice esattamente cosa esce, verso chi).
+
 ## 4. Direzione tecnica proposta (non prescrittiva)
 
 **Raccomandazione: non clonare il legacy, ma dare al bot ciò che è suo e che le
@@ -78,12 +110,24 @@ altre superfici non fanno bene.** Tre fasce:
    Lanciarli e **ricevere un ping quando sono pronti** è il vero superpotere del
    bot — la Mini App e l'admin non notificano. Qui il bot vince: `/artefatti`,
    creazione (uno o tutti e 9), `/scarica <tipo>`, con notifica async a fine job.
+   → **Questa fascia esce rafforzata** dall'aggiornamento in §3: un "il tuo
+   artefatto è pronto" è un *segnale*, non *contenuto* — leaka quasi nulla da
+   Telegram, a differenza di una risposta RAG. È il pezzo più difendibile anche
+   dal lato privacy. (Attenzione al **download**: se il bot spedisce il file
+   dell'artefatto *dentro* Telegram, allora il contenuto esce davvero — decidi se
+   mandare il file o solo un link alla Mini App, e dillo a Neo.)
 2. **Comandi rapidi da tastiera** che in mobilità sono più veloci di aprire la
    Mini App: gestione notebook (`/nuovo`, `/rinomina`, `/cancella` con conferma
    inline), gestione fonti (`/fonti`, `/aggiungi <url>`, `/aggiungitesto`,
    `/cancellafonte`, upload file allegato → fonte), `/info <id>`, `/doctor`.
-   Già presenti e da tenere: `/lista`, `/chiedi`, `/pannello` (=/app), `/start`,
-   `/aiuto`.
+   Già presenti e da tenere: `/pannello` (=/app), `/start`, `/aiuto` — e
+   `/lista`, `/chiedi`, che però **oggi sono spenti in produzione**
+   (`BOT_RAG_COMMANDS=0`, §3).
+   → **Passa ogni comando di questa fascia al filtro del §3**: quali fanno uscire
+   *contenuto* da Telegram (una lista di titoli, il testo di una fonte) e quali
+   sono solo *comandi* (crea, rinomina, cancella)? I secondi sono molto più
+   difendibili dei primi. Se un comando utile leaka, valuta di farlo **agire** dal
+   bot e **mostrare** dalla Mini App.
 3. **Ciò che NON va nel bot** perché la Mini App lo fa meglio (UI ricca): la
    navigazione/lettura estesa, la ricerca archivio, il pannello di stato/update.
    Il bot le **lancia** (link alla Mini App), non le duplica.
@@ -107,9 +151,12 @@ altre superfici non fanno bene.** Tre fasce:
 ## 5. Ricognizione iniziale obbligatoria (prima di codice)
 
 1. **Codice attuale:** `services/nb1777-bot/app/bot.py` per intero (5 comandi:
-   start/aiuto/pannello/lista/chiedi; `owner_only`; `_mcp_call`; heartbeat;
-   `_install_menu_button`; error handler globale). `services/nb1777-bot/app/
-   settings.py` (`nb1777_mcp_url`, token, owner_id).
+   start/aiuto/pannello/lista/chiedi; `owner_only` **fail-closed**; `_mcp_call`;
+   `auth_pending()` — ora **async, via HTTP** verso l'endpoint interno di
+   nb1777-mcp, non più leggendo il volume; `_rag_disabled()` — il gate di
+   `BOT_RAG_COMMANDS`; heartbeat; `_install_menu_button`; error handler globale).
+   `services/nb1777-bot/app/settings.py` (`nb1777_mcp_url`, `nlm_internal_base`,
+   token, owner_id, `gateway_secret_file`, `bot_rag_commands`).
 2. **Superficie nb1777-mcp** (~35 tool, ciò che il bot può esporre): `nb_list/
    create/delete/rename/describe/get`, `notebook_query`, `source_add_{url,file,
    text,youtube,drive}`, `source_{list,delete,rename,get_content}`,
@@ -148,10 +195,12 @@ altre superfici non fanno bene.** Tre fasce:
 
 Puoi: proporre uno scope diverso da §4 e motivarlo; dire quali comandi **non**
 vanno nel bot; estendere (dillo prima) se scopri un tassello adiacente utile.
-Non puoi: clonare il legacy per inerzia senza risolvere il nodo §3; far parlare
-il bot con qualcosa che non sia `nb1777-mcp` via MCP; lavorare su `main`;
-dichiarare fatto senza E2E sul bot reale; duplicare nel bot ciò che la Mini App
-già fa meglio senza una ragione.
+Non puoi: clonare il legacy per inerzia senza risolvere il nodo §3; far parlare il
+bot con qualcosa che non sia `nb1777-mcp` (via MCP per i tool, via il suo endpoint
+interno per lo stato auth); **aggiungere comandi che fanno uscire contenuto da
+Telegram senza discuterlo con Neo** (ha spento i RAG apposta — §3); lavorare su
+`main`; dichiarare fatto senza E2E sul bot reale; duplicare nel bot ciò che la
+Mini App già fa meglio senza una ragione.
 
 ## 8. Riferimenti
 

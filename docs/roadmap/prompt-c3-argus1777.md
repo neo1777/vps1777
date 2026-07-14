@@ -10,6 +10,11 @@
 > con le sue credenziali e il suo consenso — legittima. Il compito della sessione
 > è renderla il **più sicura e privata possibile** ed essere **onesta sui rischi
 > residui**, non minimizzarli.
+>
+> **Rinfrescato il 2026-07-14** (base: v0.30.1). La sostanza regge. La novità:
+> vps1777 ha ora **in casa il pattern collaudato** per il requisito più duro di
+> questo fronte — «il servizio che possiede le credenziali è l'unico che le
+> monta» — vedi §4.
 
 ---
 
@@ -99,6 +104,34 @@ modello `nb1777-mcp`), container dedicato con **Chromium+Playwright headless**,
 dietro il gateway OAuth, **owner-only**. Tool tipo: naviga, leggi, compila,
 clicca, estrai — più la gestione sessione/login.
 
+### Il precedente che ora esiste in casa (v0.30.0, finding H6) — usalo
+
+Il tuo requisito più duro — *le credenziali dell'utente non devono stare a portata
+del servizio esposto* — vps1777 l'ha appena risolto per un caso analogo (i cookie
+di sessione Google di NotebookLM), e il pattern è **già collaudato nel repo**:
+
+- **Il servizio che possiede le credenziali è l'UNICO che monta il volume.** Il
+  gateway — l'unico esposto su Internet — ha **accesso zero**: non le legge né le
+  scrive. Vale anche per il bot.
+- **Chi ha bisogno di sapere, chiede.** Endpoint **interni** su quel servizio:
+  uno dice solo *se* la credenziale c'è (mai il contenuto), l'altro la riceve e la
+  installa. Autenticati con un **segreto condiviso** (constant-time) e
+  **fail-closed**.
+- **`internal/` è un prefisso riservato**: il reverse proxy rifiuta con 404 ogni
+  sotto-path `internal/` — **prima** del secret e del bearer — per *tutti* gli
+  upstream. Un endpoint privato del tuo MCP **non è raggiungibile da Internet**,
+  mai. Questo è il contratto che ti serve (`docs/PLUGINS.md`).
+- **Scrittura non distruttiva**: staging → validazione → swap con rollback.
+
+Traduzione per argus: **il profilo browser (cookie, sessioni) lo monta solo il
+container argus**; il gateway lo espone come tool ma non vede mai il profilo; le
+operazioni sensibili (login, sblocco, 2FA) passano da endpoint `internal/` non
+esposti. Riferimenti nel codice: `services/nb1777-mcp/app/nlm_profile.py`,
+`services/gateway/app/nlm_client.py`, il blocco `internal/` in
+`services/gateway/app/proxy.py`. **Attenzione:** questo pattern risolve *dove
+vivono* le credenziali, **non** il fatto che vivano su una VPS — il §3.3 e i
+"rischi residui" restano interi.
+
 **Modello di minaccia da scrivere esplicitamente** (è un deliverable): *cosa
 perde l'utente se la VPS o il container sono compromessi?* Risposta onesta: le
 sessioni/credenziali di **ogni account loggato**. Da qui si progetta per
@@ -148,7 +181,10 @@ sessioni/credenziali di **ogni account loggato**. Da qui si progetta per
    rischi che ora devi mitigare, non ignorare.
 2. **Modello vps1777 per un MCP:** come è fatto `nb1777-mcp` (Chromium headless in
    container, FastMCP streamable-http, healthcheck, `GATEWAY_UPSTREAMS`, rete);
-   `docs/PLUGINS.md` (il contratto plugin); i confini di sicurezza in `SECURITY.md`.
+   `docs/PLUGINS.md` (il contratto plugin — **incluso il prefisso riservato
+   `internal/`**); i confini di sicurezza in `SECURITY.md`, che ora contiene la
+   **Rassegna difensiva** completa (l'esito della review a tappeto di luglio 2026:
+   leggila, è la barra che questo fronte deve rispettare) e il pattern H6 (§4).
 3. **Memoria:** `argus1777-resta-locale`, `vps1777-security-auth`,
    `feedback-security-build-for-evolution` (previeni, non ragionare dallo stato
    attuale).
