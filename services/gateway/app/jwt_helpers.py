@@ -9,6 +9,7 @@ typ:
 """
 from __future__ import annotations
 
+import secrets as pysecrets
 import time
 from typing import Any
 
@@ -46,6 +47,13 @@ def issue(
         "typ": typ,
         "iat": now,
         "exp": now + ttl,
+        # `jti` d'ufficio su OGNI token (H20). Un token senza identificatore non
+        # è REVOCABILE: puoi solo aspettare che scada. Generarlo qui — e non nel
+        # chiamante — significa che nessuno può dimenticarselo, oggi o quando
+        # aggiungerà un nuovo `typ`. Chi ne vuole uno proprio (oauth.py, che deve
+        # ricordarsi il jti del refresh per la rotazione) lo passa in `extra` e
+        # vince, perché l'update arriva dopo.
+        "jti": pysecrets.token_urlsafe(16),
     }
     if extra:
         payload.update(extra)

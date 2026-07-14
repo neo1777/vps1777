@@ -45,6 +45,102 @@ Row = tuple[str, str, str, str]  # (uuid, project, ts, content) — forma breve,
 RowFull = tuple[str, str, str, str, str, str, str, str, str]
 # (uuid, project, ts, content, sender, tools, thinking, attachments, parent_uuid)
 
+
+# ── tetti su input e decompressione (H39) ────────────────────────────────────
+#
+# LA LEZIONE, imparata a caro prezzo: **un limite su un input COMPRESSO non è un
+# limite**. La dimensione di uno zip — e pure quella dichiarata nell'header dei
+# suoi membri — la scrive chi lo ha creato. Uno zip da 5 MB può contenere un
+# `conversations.json` da 40 GB: `json.load()` lo caricava per intero in RAM e il
+# gateway moriva di OOM (zip-bomb), senza un messaggio, senza un colpevole.
+#
+# Il tetto va quindi messo su ciò che l'archivio **diventa**: byte contati MENTRE
+# li si legge (`_read_capped`), non byte dichiarati. E quando si sfora si fallisce
+# con un messaggio parlante — un OOM non è un errore, è una sparizione.
+#
+# I numeri sono volutamente LARGHI: un export claude.ai reale è dell'ordine delle
+# centinaia di MB. Sono tetti anti-OOM, non quote di disciplina.
+
+MAX_MEMBER_BYTES = 512 * 1024 * 1024        # 512 MB — singolo file decompresso da uno zip
+MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB   — totale decompresso di UNO zip
+MAX_FILE_BYTES = 512 * 1024 * 1024          # 512 MB — singolo .jsonl/.json/.md/.txt su disco
+MAX_PDF_BYTES = 256 * 1024 * 1024           # 256 MB — PDF su disco
+MAX_PDF_PAGES = 10_000                      # pypdf non ha tetti: un PDF può dichiarare milioni di pagine
+MAX_PDF_TEXT_CHARS = 64 * 1024 * 1024       # 64 M caratteri estratti da un PDF
+MAX_ZIP_MEMBERS = 100_000                   # zip-bomb "a tanti file piccoli"
+
+# Cap sull'UPLOAD (byte scritti su disco dall'handler). Definito QUI perché il
+# tetto e la logica che lo motiva vivono insieme; l'handler `/admin/archive` sta
+# in admin.py e oggi NON lo applica — vedi la nota nel report.
+MAX_UPLOAD_BYTES = 1024 * 1024 * 1024       # 1 GB
+
+_READ_CHUNK = 1024 * 1024  # 1 MB
+
+
+def _mb(n: int) -> str:
+    return f"{n / (1024 * 1024):.0f} MB"
+
+
+class _Budget:
+    """Byte decompressi ancora concessi a UN archivio (condiviso fra i membri)."""
+
+    __slots__ = ("left", "total")
+
+    def __init__(self, total: Union[int, None] = None) -> None:
+        # letto LIVE dal modulo (non come default di firma): così il tetto resta
+        # una costante di modulo davvero tunabile (e monkeypatchabile nei test).
+        self.total = MAX_ARCHIVE_BYTES if total is None else total
+        self.left = self.total
+
+
+def _read_capped(fh: IO[bytes], what: str, budget: _Budget,
+                 *, cap: Union[int, None] = None) -> bytes:
+    """Legge `fh` fino a EOF contando i byte **mentre li legge**.
+
+    Non si fida di `ZipInfo.file_size` (è un numero scritto nell'archivio, cioè
+    dall'attaccante): conta ciò che esce davvero dal decompressore, blocco per
+    blocco. Una zip-bomb muore dopo `cap` byte letti, non dopo aver esaurito la RAM.
+    """
+    if cap is None:
+        cap = MAX_MEMBER_BYTES
+    out = bytearray()
+    while True:
+        chunk = fh.read(_READ_CHUNK)
+        if not chunk:
+            break
+        out += chunk
+        budget.left -= len(chunk)
+        if len(out) > cap:
+            raise ValueError(
+                f"'{what}' supera il tetto di {_mb(cap)} una volta DECOMPRESSO "
+                f"(zip-bomb?). Se l'export è davvero più grande, alza "
+                f"MAX_MEMBER_BYTES in archive_indexer.py.")
+        if budget.left < 0:
+            raise ValueError(
+                f"l'archivio supera il tetto di {_mb(budget.total)} decompressi "
+                f"(zip-bomb?) — fermato mentre leggevo '{what}'. Se l'export è "
+                f"davvero più grande, alza MAX_ARCHIVE_BYTES in archive_indexer.py.")
+    return bytes(out)
+
+
+def _zip_json(z: zipfile.ZipFile, name: str, budget: _Budget) -> object:
+    """`json.load` di un membro di zip, ma con il tetto sul decompresso."""
+    with z.open(name) as f:
+        raw = _read_capped(f, name, budget)
+    return json.loads(raw)
+
+
+def _check_file_size(path: Path, cap: int) -> None:
+    """Tetto su un file NON compresso già su disco: qui st_size è la verità."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size > cap:
+        raise ValueError(
+            f"file troppo grande: '{path.name}' è {_mb(size)}, il tetto è {_mb(cap)}. "
+            f"Spezzalo, oppure alza il tetto in archive_indexer.py.")
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages(
     uuid        TEXT PRIMARY KEY,
@@ -327,7 +423,15 @@ _CC_TYPES = ("user", "assistant")
 
 
 def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
+    # tetto anche qui: `index_jsonl` accetta un file-like (non solo un path), e su
+    # uno stream non c'è nessuno `st_size` da controllare. Si contano i byte letti.
+    read = 0
     for line in fh:
+        read += len(line)
+        if read > MAX_FILE_BYTES:
+            raise ValueError(
+                f"sessione troppo grande: superati {_mb(MAX_FILE_BYTES)} in lettura. "
+                f"Alza MAX_FILE_BYTES in archive_indexer.py se è legittima.")
         line = line.strip()
         if not line:
             continue
@@ -478,21 +582,23 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
                    str(m.get("parent_message_uuid") or ""))
 
 
-def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[RowFull]:
+def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[RowFull]:
     with zipfile.ZipFile(zip_path) as z:
         names = z.namelist()
         if "conversations.json" in names:
-            with z.open("conversations.json") as f:
-                yield from _iter_conversations(json.load(f), "claude-conversations")
+            # ERA: `json.load(f)` sull'intero membro → RAM illimitata (H39).
+            # Il file più grosso dell'export passa ora da _read_capped, che conta
+            # i byte decompressi e abortisce con un messaggio invece di un OOM.
+            yield from _iter_conversations(
+                _zip_json(z, "conversations.json", budget), "claude-conversations")
         # memories.json — la memoria persistente dell'account. Non veniva indicizzata:
         # l'archivio non conteneva la fonte che più di ogni altra determina cosa
         # l'assistente crede dell'utente.
         if "memories.json" in names:
-            with z.open("memories.json") as f:
-                try:
-                    yield from _iter_memories(json.load(f))
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    pass
+            try:
+                yield from _iter_memories(_zip_json(z, "memories.json", budget))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
         # users.json — anagrafica dell'account (nome, email, telefono verificato).
         #
         # SI INDICIZZA. L'ingestione non filtra: se l'utente carica un file,
@@ -506,18 +612,16 @@ def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[RowFull]:
         # l'archivio va trattato come un contenitore di dati personali — perché lo è,
         # con o senza questo file.
         if "users.json" in names:
-            with z.open("users.json") as f:
-                try:
-                    yield from _iter_users(json.load(f))
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    pass
+            try:
+                yield from _iter_users(_zip_json(z, "users.json", budget))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
         for n in names:
             if n.startswith("design_chats/") and n.endswith(".json"):
-                with z.open(n) as f:
-                    try:
-                        data = json.load(f)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        continue
+                try:
+                    data = _zip_json(z, n, budget)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
                 if isinstance(data, dict):
                     # il title è sempre il generico "Chat": l'etichetta utile è
                     # il progetto di appartenenza. `name` vince su `title` in
@@ -528,11 +632,10 @@ def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[RowFull]:
                 yield from _iter_conversations(data, "claude-design-chats")
         for n in names:
             if n.startswith("projects/") and n.endswith(".json"):
-                with z.open(n) as f:
-                    try:
-                        proj = json.load(f)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        continue
+                try:
+                    proj = _zip_json(z, n, budget)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
                 if not isinstance(proj, dict):
                     continue
                 pname = f"project:{proj.get('name') or 'senza-nome'}"
@@ -583,6 +686,7 @@ def _iter_text(path: Union[str, Path], project: str) -> Iterator[Row]:
     """Ponte per l'output di altri tool (web2md, lettoremd, pulizia-transcript):
     qualunque .md/.txt diventa messaggi indicizzabili."""
     path = Path(path)
+    _check_file_size(path, MAX_FILE_BYTES)  # `fh.read()` è tutto-in-RAM: prima il tetto
     name = project or path.stem
     with open(path, encoding="utf-8", errors="replace") as fh:
         yield from _chunk_rows(fh.read(), name, _file_ts(path), name)
@@ -592,17 +696,36 @@ def _iter_text(path: Union[str, Path], project: str) -> Iterator[Row]:
 
 def _iter_pdf(path: Union[str, Path], project: str) -> Iterator[Row]:
     """Estrae il testo da un PDF (pypdf) e lo spezza in chunk. Il PDF è un
-    documento: niente struttura conversazione, solo testo cercabile."""
+    documento: niente struttura conversazione, solo testo cercabile.
+
+    Tetti (H39): il PDF è un formato COMPRESSO — anche qui la dimensione del file
+    non dice quanto diventa. pypdf non ha nessun limite proprio, quindi si tappano
+    i tre assi che possono esplodere: byte del file, numero di pagine, caratteri
+    estratti (che si contano man mano, non alla fine).
+    """
     from pypdf import PdfReader
     path = Path(path)
+    _check_file_size(path, MAX_PDF_BYTES)
     name = project or path.stem
     reader = PdfReader(str(path))
+    n_pages = len(reader.pages)
+    if n_pages > MAX_PDF_PAGES:
+        raise ValueError(
+            f"PDF con troppe pagine: {n_pages} (tetto {MAX_PDF_PAGES}). "
+            f"Spezzalo, oppure alza MAX_PDF_PAGES in archive_indexer.py.")
     pages: list[str] = []
+    chars = 0
     for page in reader.pages:
         try:
-            pages.append(page.extract_text() or "")
+            txt = page.extract_text() or ""
         except Exception:  # noqa: BLE001 — pypdf inciampa su pagine malformate: si salta
             continue
+        chars += len(txt)
+        if chars > MAX_PDF_TEXT_CHARS:
+            raise ValueError(
+                f"PDF: superati {MAX_PDF_TEXT_CHARS} caratteri estratti "
+                f"(bomba di decompressione?). Alza MAX_PDF_TEXT_CHARS se è legittimo.")
+        pages.append(txt)
     yield from _chunk_rows("\n\n".join(pages), name, _file_ts(path), name)
 
 
@@ -644,16 +767,16 @@ def _iter_telegram(data: dict) -> Iterator[Row]:
                    f"[{sender}] {body}" if sender else body)
 
 
-def _iter_telegram_zip(zip_path: Union[str, Path], members: list[str]) -> Iterator[Row]:
+def _iter_telegram_zip(zip_path: Union[str, Path], members: list[str],
+                       budget: _Budget) -> Iterator[Row]:
     """result.json dentro uno zip (l'export Desktop arriva spesso come cartella
     zippata: ChatExport_.../result.json). Più member = più chat, si accumulano."""
     with zipfile.ZipFile(zip_path) as z:
         for m in members:
-            with z.open(m) as f:
-                try:
-                    data = json.load(f)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    continue
+            try:
+                data = _zip_json(z, m, budget)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
             if isinstance(data, dict):
                 yield from _iter_telegram(data)
 
@@ -758,7 +881,8 @@ class _TgHtmlParser(HTMLParser):
         self._texts = []
 
 
-def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str]) -> Iterator[Row]:
+def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str],
+                            budget: _Budget) -> Iterator[Row]:
     """messages.html, messages2.html, … dentro uno zip export (in ordine
     numerico, così i 'joined' a cavallo dei file ereditano il mittente giusto
     per file — al peggio il primo joined di un file resta senza mittente).
@@ -774,7 +898,8 @@ def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str]) -> I
     with zipfile.ZipFile(zip_path) as z:
         for member in sorted(members, key=order):
             with z.open(member) as f:
-                html_text = f.read().decode("utf-8", errors="replace")
+                # ERA: `f.read()` — l'intero membro decompresso in RAM, senza tetto.
+                html_text = _read_capped(f, member, budget).decode("utf-8", errors="replace")
             p = _TgHtmlParser()
             p.feed(html_text)
             p.close()
@@ -795,17 +920,26 @@ def _index_zip(path: Path, db_path: Union[str, Path]) -> int:
     parlante — un "ok, 0 record" qui è sempre una bugia."""
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
+    if len(names) > MAX_ZIP_MEMBERS:
+        # l'altra faccia della zip-bomb: non un file enorme, ma un milione di file
+        # minuscoli. Costa poco contarli, e il conto è sul REALE (la namelist).
+        raise ValueError(
+            f"zip con troppi file: {len(names)} (tetto {MAX_ZIP_MEMBERS}).")
+    # UN budget per tutto l'archivio: i tetti per-membro non bastano, mille membri
+    # da 500 MB l'uno stanno tutti sotto MAX_MEMBER_BYTES e affondano lo stesso.
+    budget = _Budget()
     telegram_jsons = [n for n in names if Path(n).name == "result.json"]
     telegram_htmls = [n for n in names
                       if re.fullmatch(r"messages\d*\.html", Path(n).name)]
     if "conversations.json" in names or any(
             n.startswith(("design_chats/", "projects/")) for n in names):
-        n, kind = write_rows(db_path, _iter_claude_zip(path)), "export claude.ai"
+        n, kind = write_rows(db_path, _iter_claude_zip(path, budget)), "export claude.ai"
     elif telegram_jsons:
         # JSON preferito quando c'è: più fedele (id numerici, entities, service)
-        n, kind = write_rows(db_path, _iter_telegram_zip(path, telegram_jsons)), "export Telegram"
+        n, kind = (write_rows(db_path, _iter_telegram_zip(path, telegram_jsons, budget)),
+                   "export Telegram")
     elif telegram_htmls:
-        n, kind = (write_rows(db_path, _iter_telegram_html_zip(path, telegram_htmls)),
+        n, kind = (write_rows(db_path, _iter_telegram_html_zip(path, telegram_htmls, budget)),
                    "export Telegram HTML")
     else:
         raise ValueError(
@@ -840,6 +974,7 @@ def index_file(path: Union[str, Path], db_path: Union[str, Path], *, project: st
     if suffix == ".json":
         # .json ambiguo: Telegram (oggetto con messages/chats) vs Claude Code
         # (in realtà JSONL → json.load fallisce → ripiego sul lettore a righe).
+        _check_file_size(path, MAX_FILE_BYTES)  # json.load = tutto in RAM
         try:
             with open(path, encoding="utf-8", errors="replace") as fh:
                 data = json.load(fh)

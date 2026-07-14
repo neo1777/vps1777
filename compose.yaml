@@ -113,7 +113,14 @@ services:
       ARCHIVE_DB_PATHS: "${ARCHIVE_DB_PATHS:-}"
       FASTMCP_STATELESS_HTTP: "true"
     volumes:
-      - archive-data:/var/lib/archive:rw
+      # SOLA LETTURA (H42): archive-mcp legge e basta — apre SQLite con
+      # `mode=ro` (app/db.py). Prima il :rw glielo permetteva comunque: la
+      # sola-lettura era solo applicativa, cioè una promessa del codice. Ora è
+      # strutturale — il kernel la fa rispettare.
+      # Verificato che i DB sono in journal_mode=delete (non WAL): senza WAL non
+      # servono i file -wal/-shm, che con un mount :ro fallirebbero. A scrivere
+      # i .db è il gateway (che monta :rw, sopra), non questo servizio.
+      - archive-data:/var/lib/archive:ro
     networks:
       - backend
     expose:

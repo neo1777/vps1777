@@ -35,9 +35,23 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Optional, Union
+
+# H41 — contenuti personali fuori da argv/errori.
+# Tutto ciò che sta in `argv` è visibile a OGNI utente della VPS via `ps` e
+# `/proc/<pid>/cmdline`. Il corpo di una fonte sono contenuti personali di Neo:
+# non deve MAI passare da lì. Sopra questa soglia il testo va scritto in un file
+# temporaneo 0600 e passato con `--file` (nlm non ha un canale stdin — verificato
+# su `nlm source add --help`). Sotto la soglia (etichette/snippet corti) resta in
+# argv: è la stessa dimensione dei titoli, già inevitabilmente lì.
+TEXT_ARGV_MAX = 256  # caratteri: oltre questo, il testo va su file temporaneo
+# Troncamento dei command-line negli errori: un timeout non deve ri-versare nei
+# log/nella response gli argomenti (domande, prompt, path) che pure stanno in argv.
+_ERR_ARG_MAX = 80
+_ERR_CMD_MAX = 300
 
 # === costanti: NB di lavoro noti ===
 NB_LAB_GDR1777 = "492a2e7b-1e08-4100-89ed-6a13febf1295"   # GDR1777 — laboratorio artefatti (test 9 strumenti)
@@ -103,12 +117,24 @@ class NLMError(RuntimeError):
 # helper interno: subprocess di nlm
 # ============================================================
 
+def _safe_cmd(cmd: list[str]) -> str:
+    """Command line per un messaggio d'errore, SENZA versare contenuti (H41).
+
+    In argv finiscono dati personali (domande, prompt, path, titoli). Un errore —
+    che finisce nei log e nella response — non deve ri-esporli: ogni argomento
+    lungo è troncato e il totale è capato. Prima il timeout stampava `' '.join(cmd)`
+    per intero, cioè anche il `--text <tutta la fonte>`."""
+    parts = [a if len(a) <= _ERR_ARG_MAX else a[:_ERR_ARG_MAX] + "…" for a in map(str, cmd)]
+    line = " ".join(parts)
+    return line if len(line) <= _ERR_CMD_MAX else line[:_ERR_CMD_MAX] + "…"
+
+
 def _run(args: list[str], *, timeout: float = 180.0, check: bool = True) -> subprocess.CompletedProcess:
     cmd = [NLM] + args
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
-        raise NLMError(f"timeout {timeout}s su: {' '.join(cmd)}") from e
+        raise NLMError(f"timeout {timeout}s su: {_safe_cmd(cmd)}") from e
     if check and p.returncode != 0:
         msg = (p.stderr or "").strip() or (p.stdout or "").strip()
         raise NLMError(f"nlm exit {p.returncode}: {msg[:400]}")
@@ -253,11 +279,35 @@ def source_add_url(nb_id: str, url: str, *, title: Optional[str] = None,
 
 def source_add_text(nb_id: str, text: str, title: str, *,
                     wait: bool = True, timeout: float = 600.0) -> str:
-    """Aggiunge testo libero come fonte (richiede un titolo)."""
-    args = ["source", "add", nb_id, "--text", text, "--title", title]
-    if wait:
-        args += ["--wait", "--wait-timeout", str(timeout)]
-    return _add_and_resolve_id(nb_id, args, timeout=timeout)
+    """Aggiunge testo libero come fonte (richiede un titolo).
+
+    H41 — il corpo NON va in argv (process list / /proc/<pid>/cmdline, leggibili
+    da ogni utente della VPS: sono contenuti personali). Sopra TEXT_ARGV_MAX lo si
+    scrive in un file temporaneo 0600 e lo si passa con `--file`; `nlm` non ha un
+    canale stdin (verificato su `nlm source add --help`), quindi il file è la via.
+    Il titolo resta in argv: è un'etichetta corta, come per tutte le altre fonti.
+    """
+    if len(text) <= TEXT_ARGV_MAX:
+        args = ["source", "add", nb_id, "--text", text, "--title", title]
+        if wait:
+            args += ["--wait", "--wait-timeout", str(timeout)]
+        return _add_and_resolve_id(nb_id, args, timeout=timeout)
+
+    # mkstemp crea già con permessi 0600 (O_CREAT|O_EXCL): il file col contenuto
+    # personale non è leggibile da altri utenti nemmeno per l'istante in cui esiste.
+    fd, tmp = tempfile.mkstemp(suffix=".txt", prefix="nb1777-src-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        args = ["source", "add", nb_id, "--file", tmp, "--title", title]
+        if wait:
+            args += ["--wait", "--wait-timeout", str(timeout)]
+        return _add_and_resolve_id(nb_id, args, timeout=timeout)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def source_add_file(nb_id: str, file_path: Union[str, Path], *,

@@ -210,45 +210,40 @@ interamente sulla VPS.
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
 La review difensiva ha prodotto **43 interventi** (2 critici, 7 alti, 21 medi, 13
-bassi). La campagna `v0.19.1 → v0.30.2` (14 release) ha chiuso **i due critici** e la sostanza
-della fascia alta. Non ha chiuso tutto, e qui sta la lista vera — verificata
-contro il codice, non contro i buoni propositi:
+bassi). Le campagne `v0.19.1 → v0.32.0` hanno chiuso **entrambi i critici**, tutta
+la fascia alta (in fix o in scelta dichiarata), e il grosso di medi e bassi. Qui
+sta la lista vera — verificata contro il codice, non contro i buoni propositi:
 
 | | |
 |---|---|
-| **chiusi** | 8 |
+| **chiusi** | 20 |
 | **parziali** | 16 |
-| **aperti** | 19 |
+| **aperti** | 7 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
-(`H2`) — sono chiusi e verificati in produzione. Sotto, i residui che pesano di
-più; il piano completo sta nel dossier di review.
+(`H2`) — sono chiusi e verificati in produzione. I 7 **ancora aperti** sono tutti
+di fascia media/bassa; sotto, quelli che pesano di più (il piano completo, con
+l'evidenza per i chiusi e il *cosa manca* per gli altri, sta in
+[`security/findings.yml`](security/findings.yml)).
 
-- **I cookie Google finiscono in chiaro nello snapshot pre-update** (`H14`).
-  `vps1777 update` fa uno snapshot **non cifrato** dei volumi dati prima di agire
-  (serve all'auto-rollback, che non può dipendere dalla chiave age), e fra quei
-  volumi c'è `nlm-auth`. Erode una parte di ciò che la `v0.30.0` ha chiuso: il
-  gateway non tocca più quei cookie, ma un dump di `backups/pre-update/` sì. Lo
-  snapshot è a `0700` e viene potato dopo 72h — sono mitigazioni, non il fix.
-- **I tag `v*` non sono protetti** (`H24`). Le release sono firmate cosign keyless
-  *dal workflow*, quindi chiunque possa pushare un tag `v*` conia una release
-  **regolarmente firmata**. La firma prova *da quale workflow* viene un artefatto,
-  non che qualcuno abbia autorizzato quel rilascio.
-- **La sessione admin non si revoca davvero** (`H20`). Il logout cancella il
-  cookie; il token `admin` non ha `jti` e non c'è revoke-list — un token rubato
-  resta valido fino alla scadenza (8h).
-- **L'operator ha `sudo NOPASSWD: ALL`** (`H12`), ed è nel gruppo `docker` (che è
-  root-equivalente). Il blast radius di una compromissione dell'operator è l'host.
-- **Nessun secondo fattore sul pannello admin** (`H28`): password + lockout per-IP.
-- **Il `TS_AUTHKEY` resta in `.env`** dopo l'uso (`H15`), e `.env` non è `chmod 600`.
-- **La password admin nasce sulla VPS** e torna sullo stdout SSH (`H16`).
-- **Nessuna pagina di consenso OAuth** (`H8`, parziale: la verifica dell'audience e
-  i limiti al DCR ci sono).
-- **`archive-data` è montato `rw`** in archive-mcp (`H42`), la sola-lettura è
-  applicativa.
-- Due parzialità sono **scelte deliberate**, non dimenticanze: il *contatore
-  globale* di `H4` (introdurrebbe un auto-lockout dell'owner) e il *push off-site*
-  di `H5` (la cartella `backups/` la porta dove vuole chi installa).
+- **Nessun secondo fattore sul pannello admin** (`H28`, medio): password (bcrypt 12)
+  + lockout per-IP. Contro una password rubata, non basta.
+- **Esposizione di fallback non annunciata** (`H10`, medio): l'installer imposta da
+  sé `GATEWAY_BIND=0.0.0.0` se il Funnel non parte, a tempo indefinito e senza un
+  banner «sessione non cifrata» né un evento di audit.
+- **La rete `egress` non è separata** (`H25`, medio): `nb1777-mcp` e il bot stanno
+  sulla rete `ingress` per poter uscire su Internet. `ARCHITECTURE.md` va allineato.
+- **Il token del bot è trattato come segreto ordinario** (`H29`, medio): è invece la
+  radice di fiducia della Mini App (con quel token si forgia un `initData` valido).
+- Tre voci basse: `/health` espone i nomi degli upstream (`H33`); `pending.json`
+  senza TTL (`H36`); il cleanup dei notebook OCR temporanei non è propagato (`H40`).
+
+Fra i **16 parziali**, quattro sono **scelte deliberate**, non dimenticanze, e
+resteranno tali: il *contatore globale* di `H4` (introdurrebbe un auto-lockout
+dell'owner), il *push off-site* di `H5` (la cartella `backups/` la porta dove vuole
+chi installa), il gruppo `docker` dell'operator in `H12` (toglierlo romperebbe
+l'update), e `frame-ancestors`/`unsafe-inline` della CSP Mini App in `H35`
+(servirebbe un client Telegram reale per verificare che non rompano la pagina).
 
 L'hardening è difesa in profondità, non una garanzia, e il progetto è **pre-1.0**.
 Se trovi qualcosa, [scrivimi](#reporting-a-vulnerability).

@@ -207,92 +207,121 @@ findings:
   - id: H11
     severity: medium
     title: "Rate limiting su /token, /register, /app/auth + IP negli eventi di fallimento"
-    status: partial
-    since: v0.25.0
+    status: closed
+    since: v0.32.0
     evidence:
       - file: services/gateway/app/ratelimit.py
         contains: ["class RateLimiter"]
       - file: services/gateway/app/oauth.py
         contains: ["_REGISTER_LIMIT.allow", "_TOKEN_LIMIT.allow"]
       - file: services/gateway/app/miniapp.py
-        contains: ["_AUTH_LIMIT.allow"]
-    missing: >
-      L'IP non finisce negli eventi di fallimento della Mini App
-      (miniapp_auth_fail / _no_owner / _denied): la forense su /app/auth resta zoppa.
+        contains: ['"event": "miniapp_auth_fail", "ip": ip', "def _client_ip"]
 
   - id: H12
     severity: medium
     title: "Sudoers dell'operator: da NOPASSWD:ALL a whitelist di comandi"
-    status: open
+    status: partial
+    since: v0.32.0
+    evidence:
+      - file: deploy.sh
+        contains: ["ALL=(root) NOPASSWD:", "visudo -cf"]
+        not_contains: ["NOPASSWD: ALL\n"]
+      - file: installer/engine.py
+        contains: ["ALL=(root) NOPASSWD:"]
     missing: >
-      L'operator ha `ALL=(ALL) NOPASSWD: ALL` ed è nel gruppo docker (root-equivalente):
-      il raggio di danno di una sua compromissione è l'HOST INTERO. Serve una whitelist
-      dei comandi che gli servono davvero (install unit+CLI, systemctl, chown di
-      bootstrap) e la doc che dica che il gruppo docker è root-equivalente.
+      Sudo ristretto a install/systemctl/chown (censiti alla fonte da ogni sudo() della
+      CLI; validato con visudo -cf prima di installare). MA l'operator RESTA
+      root-equivalente via il gruppo `docker` (può `docker run -v /:/host`): la whitelist
+      riduce la superficie sudo, non de-privilegia. Toglierlo dal gruppo docker
+      romperebbe l'update (la CLI usa docker) → è un residuo dichiarato, non un fix
+      mancato per distrazione.
 
   - id: H13
     severity: medium
     title: "Container di backup: via il docker.sock"
-    status: partial
-    since: v0.29.0
+    status: closed
+    since: v0.32.0
     evidence:
       - file: compose.ops.backup.yaml
         not_contains: ["/var/run/docker.sock"]
       - file: tools/backup.sh
         contains: ["BACKUP_VOLUMES_DIR"]
       - file: tools/backup-container-setup.sh
-        not_contains: ["bash docker-cli"]   # la riga di apk, non la parola nel commento
-    missing: >
-      Il container installa i pacchetti a runtime dalla rete (`apk add`) senza pinning
-      di versione: la catena di fornitura del container di backup resta mobile.
+        contains: ["apk add --no-cache age=1.2.1-r0 bash=5.2.26-r0"]
+    note: >
+      Versioni apk pinnate (verificate sugli indici Alpine 3.20 x86_64+aarch64).
+      Rimossi py3-pip/py3-bcrypt/tini, dipendenze del gateway finite qui per
+      copia-incolla e mai usate dal backup. Un rebuild upstream farà fallire l'apk
+      con messaggio chiaro, non con un pacchetto diverso in silenzio.
 
   - id: H14
     severity: medium
     title: "Snapshot pre-update: escludere nlm-auth (cookie Google in chiaro)"
-    status: open
+    status: closed
+    since: v0.32.0
     why: >
-      ERODE H6. `vps1777 update` fa uno snapshot NON CIFRATO dei volumi dati prima
-      di agire (serve all'auto-rollback, che non può dipendere dalla chiave age) — e
-      fra quei volumi c'è nlm-auth. Il gateway non tocca più quei cookie; un dump di
-      backups/pre-update/ sì.
-    missing: >
-      nlm-auth è ancora in DATA_VOLUMES e finisce in chiaro nello snapshot. Mitigazioni
-      presenti (dir 0700, prune 72h) ma non è il fix. Serve: escluderlo dallo snapshot
-      (accettando che un rollback non ripristini l'auth nlm — che si ricarica) oppure
-      cifrarlo con una chiave effimera.
+      ERODEVA H6: lo snapshot pre-update NON cifrato includeva nlm-auth → i cookie
+      Google finivano in chiaro in backups/pre-update/.
+    evidence:
+      - file: tools/vps1777.py
+        contains: ["SNAPSHOT_EXCLUDED_VOLUMES", "snapshot_purge_excluded", "for vol in SNAPSHOT_VOLUMES:"]
+    note: >
+      Scelta (a) esclusione, verificata leggendo il rollback: NON legge mai nlm-auth
+      (fa restore dati + health-gate, che non prova l'auth Google) → non lo rompe.
+      L'auth nlm non è un dato, è una sessione che si ricarica da /admin/nlm; e il
+      backup age la include comunque, cifrata. In più: purge dei nlm-auth.tar GIÀ
+      scritti in chiaro da CLI precedenti — aggiornare il codice non basta a togliere
+      il segreto dagli snapshot vecchi.
 
   - id: H15
     severity: medium
     title: "TS_AUTHKEY: wipe post-tailscale-up, chmod 600 su .env, file orfano"
-    status: open
-    missing: >
-      La authkey resta in .env dopo l'uso (ed è monouso); .env non è mai chmod 600;
-      secrets/ts_authkey.txt è un file orfano che nessun compose consuma; la doc
-      motiva ancora l'eccezione con "la legge il sidecar" — sidecar che non esiste più.
+    status: closed
+    since: v0.32.0
+    evidence:
+      - file: deploy.sh
+        contains: ["ts_wipe_authkey", "chmod 600 .env", "rm -f secrets/ts_authkey.txt"]
+      - file: installer/engine.py
+        contains: ["_wipe_ts_authkey"]
+    note: >
+      Wipe della authkey (monouso) da .env dopo un tailscale up riuscito; .env a 600;
+      file orfano rimosso (verificato: nessun compose lo consumava). Bonus: engine usa
+      --authkey=file: invece di argv (H7).
 
   - id: H16
     severity: medium
     title: "Password admin: nasce sul PC, viaggia solo come hash, policy unica"
-    status: open
+    status: partial
+    since: v0.32.0
+    evidence:
+      - file: deploy.sh
+        contains: ["pw_weak_reason"]
+        not_contains: ["GENERATED_ADMIN_PWD"]
+      - file: setup.sh
+        contains: ["pw_weak_reason"]
+      - file: tools/rotate-secret.sh
+        contains: ["pw_weak_reason"]
     missing: >
-      La password è generata SULLA VPS e torna al PC sullo stdout SSH. La policy di
-      robustezza è incoerente fra deploy.sh, setup.sh e rotate-secret.sh (solo
-      quest'ultimo pretende 16 char + 3 classi).
+      Fatto: la password NASCE sul PC (non più sulla VPS con ritorno sullo stdout SSH);
+      policy unica pw_weak_reason (min 16 + 3 classi) ai tre ingressi. RESIDUO onesto:
+      se il PC non ha bcrypt, il chiaro attraversa SSH IN AVANTI (stdin cifrato, mai
+      argv, mai di ritorno) invece dell'hash — non è "solo hash" al 100%. Non imposta
+      una dipendenza bcrypt obbligatoria sul PC per non rompere i deploy dove manca.
 
   - id: H17
     severity: medium
     title: "Audit: rotazione, retention, lettura tail-like, niente email digitata"
-    status: partial
-    since: v0.24.0
+    status: closed
+    since: v0.32.0
     evidence:
       - file: services/gateway/app/audit.py
-        contains: ["_prune", "audit_retention_days"]
+        contains: ["def _tail_lines", "def audit_health", "_write_failures"]
       - file: services/gateway/app/admin.py
-        contains: ["email_known"]
-    missing: >
-      read_recent legge ancora TUTTO il file in RAM (readlines()[-limit:]) invece di
-      leggere dalla coda; nessun contatore dei fallimenti di scrittura dell'audit
-      (l'except è muto); proxy_request loggato a ogni chiamata senza campionamento.
+        contains: ["audit_health()", "audit degradato"]
+    note: >
+      Lettura dalla coda a blocchi (non più readlines di tutto il file); contatore
+      dei fallimenti di scrittura ESPOSTO e mostrato nel pannello audit (un elenco
+      "vuoto" per errore di scrittura non è più una bugia per omissione).
 
   - id: H18
     severity: medium
@@ -323,11 +352,22 @@ findings:
   - id: H20
     severity: medium
     title: "Revoca reale della sessione admin (jti + revoke-list) e logout dietro CSRF"
-    status: open
-    missing: >
-      Il logout è FUORI da _require_admin (nessun CSRF) e cancella solo il cookie. Il
-      token admin non ha jti e non c'è revoke-list: un token rubato resta valido fino
-      a scadenza (8h). Il pattern esiste già per i refresh OAuth (oauth_revoked.json).
+    status: closed
+    since: v0.32.0
+    why: >
+      Il logout cancellava solo il cookie; il token admin non aveva jti né revoke-list
+      → un token rubato restava valido 8h anche dopo il logout. Bonus trovato: i due
+      form di logout erano ANNIDATI nei form di upload → il logout era già rotto.
+    evidence:
+      - file: services/gateway/app/jwt_helpers.py
+        contains: ['"jti"']
+      - file: services/gateway/app/admin_core.py
+        contains: ["class RevocationList", "def revoke", "def is_revoked"]
+      - file: services/gateway/app/admin.py
+        contains: ["admin_revoked.json", "_revocations().revoke", "admin_logout"]
+        not_contains: ["async def logout(_request: Request)"]
+      - file: services/gateway/tests/test_admin_core.py
+        contains: ["RevocationList"]
 
   - id: H21
     severity: medium
@@ -385,10 +425,22 @@ findings:
     evidence:
       - file: .github/workflows/release.yml
         contains: ["permissions:", "id-token: write"]
+    evidence_external:
+      - kind: github-ruleset
+        file: security/rulesets/tag-v-immutabili.json
+        verify: "gh api repos/neo1777/vps1777/rulesets --jq '.[]|.name+\": \"+.enforcement'"
+        note: >
+          È un'impostazione GitHub, NON un file: il checker non può verificarla.
+          Dichiararlo è meglio che fingere che sia verificata come le altre.
     missing: >
-      La protezione dei tag `v*` NON esiste (verificato: `gh api repos/.../rulesets`
-      → []; nessuna tag-protection; main non protetto). Serve un ruleset che limiti
-      chi può creare tag v*, e/o un environment `release` con reviewer.
+      I tag v* pubblicati sono ora IMMUTABILI (ruleset `tag-v-immutabili`: deletion +
+      update; provato sul campo che spostare o cancellare un tag è rifiutato, e che
+      crearne uno nuovo resta possibile — il rilascio funziona). LEZIONE: la regola
+      `non_fast_forward` NON bastava, perché spostare un tag IN AVANTI è un
+      fast-forward e passava.
+      RESTA APERTO: chi ha accesso in push può ancora coniare un tag NUOVO e quindi
+      una release nuova regolarmente firmata. Per chiudere anche quello serve un
+      environment `release` con reviewer.
 
   - id: H25
     severity: medium
@@ -403,20 +455,27 @@ findings:
   - id: H26
     severity: medium
     title: "Mascherare il gateway_secret nella Mini App (reveal esplicito)"
-    status: open
-    missing: >
-      La Mini App stampa gli URL dei connector col segreto IN CHIARO nel DOM e li copia
-      in clipboard (che sui telefoni si sincronizza sul cloud). Serve mascheramento di
-      default + reveal esplicito al tap + avviso una-tantum.
+    status: closed
+    since: v0.32.0
+    evidence:
+      - file: services/gateway/app/miniapp_core.py
+        contains: ["def masked_connector_url", "SECRET_MASK"]
+      - file: services/gateway/app/miniapp.py
+        contains: ["url_masked", "miniapp_secret_revealed"]
+    note: >
+      Il segreto vero non entra nel DOM (nemmeno in un data-*) finché l'utente non tocca
+      "Mostra"; ri-mascheramento dopo 30s; avviso clipboard una-tantum.
 
   - id: H27
     severity: medium
     title: "Finestra initData ridotta (6-12h) e owner re-check sul Bearer"
-    status: open
-    missing: >
-      max_age_s è ancora 86400 (24h). E _bearer_claims verifica solo typ/aud: NON
-      richiama is_owner — se l'owner cambiasse, un token miniapp già emesso resterebbe
-      valido fino a scadenza.
+    status: closed
+    since: v0.32.0
+    evidence:
+      - file: services/gateway/app/miniapp_core.py
+        contains: ["INIT_DATA_MAX_AGE_S = 12 * 3600"]
+      - file: services/gateway/app/miniapp.py
+        contains: ["miniapp_bearer_not_owner"]
 
   - id: H28
     severity: medium
@@ -440,9 +499,16 @@ findings:
     title: "Open redirect sul parametro next del login"
     status: closed
     since: v0.21.0
+    why: >
+      RI-VERIFICATO in v0.32.0 e trovato un BYPASS che era sfuggito: startswith(base)
+      è un match di PREFISSO, non di ORIGINE — https://host.evil.com/ superava il gate.
+      La logica è ora estratta in un modulo PURO e testata (12 attacchi), così non può
+      tornare in silenzio.
     evidence:
-      - file: services/gateway/app/admin.py
-        contains: ['startswith(("//", "/\\"))']
+      - file: services/gateway/app/admin_core.py
+        contains: ["def safe_next_url"]
+      - file: services/gateway/tests/test_admin_core.py
+        contains: ["test_next_ostile_viene_scartato"]
 
   # ═══════════════════════════ FASCIA BASSA ═══════════════════════════
 
@@ -494,10 +560,17 @@ findings:
   - id: H35
     severity: low
     title: "CSP della Mini App raffinata"
-    status: open
+    status: partial
+    since: v0.32.0
+    evidence:
+      - file: services/gateway/app/miniapp.py
+        contains: ["telegram.org/js/telegram-web-app.js", "form-action 'none'"]
     missing: >
-      script-src consente l'intero host telegram.org invece del path dell'SDK;
-      style-src usa 'unsafe-inline'; frame-ancestors assente.
+      script-src è ristretto al path dell'SDK e aggiunto form-action 'none'. Restano
+      style-src 'unsafe-inline' (togliere gli stili inline richiede un client Telegram
+      reale per verificare che il layout non si rompa) e frame-ancestors (una lista
+      incompleta degli origin di Telegram renderebbe la Mini App non apribile). Non
+      fatti DI PROPOSITO: una mezza misura qui rompe invece di proteggere.
 
   - id: H36
     severity: low
@@ -510,38 +583,52 @@ findings:
   - id: H37
     severity: low
     title: "Monitoraggio segreti completo: cloudflared_token, cookie nlm, rotazione age"
-    status: open
+    status: partial
+    since: v0.32.0
+    evidence:
+      - file: tools/vps1777.py
+        contains: ["cloudflared_token.txt", "def nlm_cookie_status", "NLM_COOKIE_MAX_DAYS"]
     missing: >
-      _SECRET_POLICY copre 4 segreti su 6: mancano cloudflared_token e la freschezza
-      dei cookie NotebookLM. E la rotazione della chiave age non è documentata da
-      nessuna parte.
+      Aggiunti cloudflared_token e la freschezza dei cookie NotebookLM (sondati via
+      docker stat sul mtime). RESTA da documentare la ROTAZIONE della chiave age in
+      docs/SECRETS.md e BACKUP-RESTORE.md (non ha un file-con-mtime sulla VPS da
+      monitorare, quindi è doc, non policy).
 
   - id: H38
     severity: low
     title: "Permessi delle directory sensibili: chmod 700 su secrets/, backups/, onboarding/"
-    status: open
-    missing: >
-      setup.sh e deploy.sh creano secrets/, backups/, onboarding/ SENZA chmod 700
-      (solo var/ lo riceve). E SECRETS.md dichiara «secrets/ ha mode 700»: falso —
-      è esattamente lo scostamento doc↔codice di H21.
+    status: closed
+    since: v0.32.0
+    evidence:
+      - file: deploy.sh
+        contains: ["chmod 700"]
+      - file: setup.sh
+        contains: ["chmod 700"]
+      - file: installer/engine.py
+        contains: ["chmod 700"]
+    note: >
+      secrets/, backups/, onboarding/ ora a 700 nei tre installer (prima solo var/).
+      La riga di SECRETS.md che lo dichiarava diventa VERA (era lo scostamento H21).
 
   - id: H39
     severity: low
     title: "Tetti su upload e decompressione (nlm e archivio)"
-    status: partial
-    since: v0.30.2
+    status: closed
+    since: v0.32.0
     why: >
-      Il cap di 5MB del gateway è sul tar COMPRESSO e non dice nulla su quanto quel
-      tar si espande: 20MB di zeri comprimono sotto i 5MB e passavano.
+      Un limite su un input COMPRESSO non è un limite: dice quanto si trasporta, non
+      quanto si espande. Il tetto va messo sui byte SCRITTI, contati mentre si scrivono.
     evidence:
       - file: services/nb1777-mcp/app/nlm_profile.py
         contains: ["MAX_MEMBER_BYTES", "MAX_TOTAL_BYTES"]
-      - file: services/nb1777-mcp/tests/test_nlm_profile.py
-        contains: ["test_tar_bomb_membro_enorme_rifiutato"]
-    missing: >
-      Il lato ARCHIVIO resta senza tetti: archive_indexer fa json.load() dell'intero
-      conversations.json dallo zip (RAM illimitata) e il parsing PDF non ha limiti;
-      l'upload su /admin/archive non ha un cap dichiarato.
+      - file: services/gateway/app/archive_indexer.py
+        contains: ["def _read_capped", "MAX_UPLOAD_BYTES"]
+      - file: services/gateway/app/admin.py
+        contains: ["archive_indexer.MAX_UPLOAD_BYTES"]
+    note: >
+      Lato nlm (v0.30.2) + lato archivio (byte contati mentre si leggono su
+      conversations.json, PDF, membri zip) + cap sull'upload di /admin/archive
+      PRIMA che i tetti di indicizzazione entrino in gioco.
 
   - id: H40
     severity: low
@@ -555,31 +642,50 @@ findings:
   - id: H41
     severity: low
     title: "Contenuti personali fuori da argv/errori di nlm + minori di logging"
-    status: partial
-    since: v0.19.0
+    status: closed
+    since: v0.32.0
     evidence:
+      - file: services/nb1777-mcp/app/core.py
+        contains: ["def _safe_cmd", "tempfile.mkstemp"]
       - file: services/archive-mcp/app/fts.py
-        not_contains: ["log.warning(\"query FTS5"]
-    missing: >
-      core.py passa il TESTO INTERO di una fonte in argv (`nlm source add --text ...`):
-      visibile nella process list. E in caso di timeout solleva un errore con la
-      command line INTERA, non troncata. Il gateway logga l'admin_email all'avvio.
+        not_contains: ['log.warning("query FTS5']
+    note: >
+      Testo > 256 char passato via file temporaneo 0600 (verificato che nlm 0.8.3 non
+      ha stdin); command line troncata negli errori; contract test esteso per bloccare
+      il canale --file/--title da cui ora dipende.
 
   - id: H42
     severity: low
     title: "archive-data montato :ro in archive-mcp"
-    status: open
-    missing: >
-      Il volume è montato :rw in archive-mcp; la sola-lettura è solo APPLICATIVA
-      (SQLite aperto in mode=ro). Una riga di compose la renderebbe strutturale.
+    status: closed
+    since: v0.32.0
+    why: >
+      La sola-lettura era solo APPLICATIVA (SQLite aperto in mode=ro): una promessa
+      del codice, non un confine. Col :rw il servizio poteva comunque scrivere.
+    evidence:
+      - file: compose.yaml
+        contains: ["archive-data:/var/lib/archive:ro"]
+    note: >
+      Verificato sui DB REALI di produzione che il journal_mode è `delete`, non WAL:
+      senza WAL non servono i file -wal/-shm, che con un mount :ro fallirebbero. È
+      la trappola classica di questo cambio, ed è stata misurata, non assunta.
 
   - id: H43
     severity: low
     title: "Hardening residuo di unit e container: sandbox update.service, unit templata, rootfs ro"
-    status: open
+    status: partial
+    since: v0.32.0
+    evidence:
+      - file: systemd/vps1777-secrets-check.service
+        contains: ["User=@OPERATOR_USER@", "NoNewPrivileges=true"]
+      - file: systemd/vps1777-update.service
+        contains: ["ProtectKernelTunables=true"]
+      - file: tools/vps1777.py
+        contains: ["def render_unit"]
     missing: >
-      update.service non ha ProtectSystem/PrivateTmp/ReadWritePaths (a differenza di
-      check-update.service). La unit secrets-check HARDCODA l'utente `vps1777` mentre
-      il deploy è parametrico su OPERATOR_USER: con un operatore diverso il
-      monitoraggio delle scadenze SI SPEGNE IN SILENZIO. E nessun servizio ha
-      read_only: true sul rootfs.
+      Fatti: sandbox delle unit (calibrata su update.service — ProtectSystem/
+      NoNewPrivileges romperebbero l'update, documentato) e templatizzazione
+      @OPERATOR_USER@/@REPO@ (chiude il bug del monitoraggio che si spegneva con un
+      operatore diverso). RESTA: read_only:true sul rootfs dei container (compose);
+      e i 3 installer devono RENDERE i placeholder al deploy iniziale (a carico del
+      lotto host/deploy — senza, i fresh install si rompono).

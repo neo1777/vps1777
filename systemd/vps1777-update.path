@@ -3,12 +3,15 @@
 # Il gateway (senza privilegi) scrive l'intent file nella dir onboarding/
 # (bind mount già esistente); questa path unit fa partire l'updater in <1s.
 # La CLI CONSUMA l'intent (valida e cancella) prima di agire → nessun loop.
+#
+# H43: @REPO@ è sostituito dalla CLI (render_unit) e dal deploy con il path REALE
+# del repo di questa installazione — non più /home/vps1777 hardcodato.
 
 [Unit]
 Description=vps1777 — watcher intent di update dal pannello admin
 
 [Path]
-PathExists=/home/vps1777/vps1777/onboarding/update_pending_update.json
+PathExists=@REPO@/onboarding/update_pending_update.json
 Unit=vps1777-update.service
 
 [Install]

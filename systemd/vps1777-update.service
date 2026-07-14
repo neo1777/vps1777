@@ -6,8 +6,28 @@
 # onboarding/update_progress.json (pollato dalla card admin); esito sempre
 # duplicato su Telegram — la UI può essere giù proprio durante l'update.
 #
-# NIENTE NoNewPrivileges qui: il self-update della CLI usa sudo install.
-
+# H43: utente e path NON sono hardcodati. La CLI (install_systemd_units →
+# render_unit) sostituisce @OPERATOR_USER@ / @REPO@ con i valori REALI; il deploy
+# iniziale fa lo stesso (vedi note per deploy.sh).
+#
+# H43 — perché il sandboxing filesystem qui è VOLUTAMENTE parziale (verificato,
+# non indovinato). Questo servizio è l'updater e per definizione fa cose da root
+# via `sudo -n` (NOPASSWD): install in /usr/local/bin (self-update + cosign),
+# install in /etc/systemd/system (le unit), chown, systemctl. Perciò:
+#  - NIENTE NoNewPrivileges: `sudo` usa il bit setuid → lo bloccherebbe.
+#  - NIENTE ProtectSystem=strict|full: il self-update e cosign scrivono in
+#    /usr/local/bin e le unit in /etc/systemd/system → li bloccherebbe a metà
+#    update.
+#  - NIENTE PrivateTmp: backup.sh e restore.sh passano un path /tmp (mktemp) come
+#    SORGENTE di un bind-mount `docker run`; il mount lo risolve il DEMONE docker,
+#    che vive fuori dal /tmp privato dell'unit → il dump/restore leggerebbe una
+#    dir vuota e il backup (o l'auto-rollback) si romperebbe in silenzio.
+#  - NIENTE ProtectHome: cosign (keyless, obbligatorio di default) inizializza la
+#    cache TUF sotto ~/.sigstore; renderla read-only rischia di far fallire la
+#    verifica firma, che è fail-closed → update abortito. Non verificabile su
+#    questa macchina, quindi non si azzarda.
+# Restano le protezioni che NON toccano i path dell'update (nessuna delle azioni
+# sopra scrive kernel-tunables, moduli, clock o hostname):
 [Unit]
 Description=vps1777 — updater (intent dal pannello admin)
 Wants=network-online.target
@@ -15,10 +35,16 @@ After=network-online.target docker.service
 
 [Service]
 Type=oneshot
-User=vps1777
-Group=vps1777
-Environment=VPS1777_HOME=/home/vps1777/vps1777
-WorkingDirectory=/home/vps1777/vps1777
-ExecStart=/usr/local/bin/vps1777 update --yes --from-intent /home/vps1777/vps1777/onboarding/update_pending_update.json
+User=@OPERATOR_USER@
+Group=@OPERATOR_USER@
+Environment=VPS1777_HOME=@REPO@
+WorkingDirectory=@REPO@
+ExecStart=/usr/local/bin/vps1777 update --yes --from-intent @REPO@/onboarding/update_pending_update.json
 # pull + migrazioni + health-gate (180s) + eventuale rollback: margine ampio
 TimeoutStartSec=1800
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+LockPersonality=true

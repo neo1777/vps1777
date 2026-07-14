@@ -12,9 +12,12 @@ Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei cont
 | `telegram_bot_token` | `secrets/telegram_bot_token.txt` | TOKEN bot da BotFather | gateway, nb1777-bot |
 | `cloudflared_token` | `secrets/cloudflared_token.txt` | (opz) CF Tunnel token | cloudflared sidecar |
 
-> **Tailscale**: `TS_AUTHKEY` **non** è un Docker secret — vive in `.env` (la legge
-> il sidecar via env). Con l'installer è una key usa-e-getta generata da un OAuth
-> client (il cui *secret* resta sul tuo PC). Vedi [INGRESS.md](INGRESS.md).
+> **Tailscale**: `TS_AUTHKEY` **non** è un Docker secret — passa da `.env` solo il
+> tempo del provisioning. Tailscale gira **sull'host** (non più in un sidecar), e la
+> authkey è **monouso**: dopo un `tailscale up` riuscito l'installer la **azzera da
+> `.env`** (che è a `chmod 600`) — così non resta sul disco una credenziale già
+> spesa (H15). Con l'installer è generata da un OAuth client (il cui *secret* resta
+> sul tuo PC). Vedi [INGRESS.md](INGRESS.md).
 
 ## Generazione iniziale
 
@@ -79,7 +82,9 @@ file, riscritto a ogni rotazione) e la confronta con una soglia:
 | `oauth_signing_secret` | 90 giorni | manuale (invalida i token) |
 | `admin_password_bcrypt` | 90 giorni | manuale |
 | `gateway_secret` | 180 giorni | manuale (cambia le URL MCP) |
-| `telegram_bot_token` | 365 giorni | manuale (BotFather) |
+| `telegram_bot_token` | 365 giorni | manuale (BotFather) — radice di fiducia della Mini App |
+| `cloudflared_token` | 365 giorni | manuale (se usi l'ingress Cloudflare) |
+| cookie NotebookLM | 14 giorni | ricarica da `/admin/nlm` — scadono da soli |
 
 Se un secret supera la soglia, il check **notifica il owner su Telegram** (`--notify`)
 e lo segna nella pagina admin **`/admin/secrets`**, che mostra età, ultima rotazione
@@ -102,7 +107,7 @@ più la coppia sulla VPS.
 
 ## Threat model
 
-- `secrets/` ha mode 700 + file 600 (impostato da setup.sh)
+- `secrets/`, `backups/`, `onboarding/` a mode 700 + file 600 (impostato dagli installer, H38)
 - Container vede solo `/run/secrets/<name>` con mode 400, owner root
 - **Log redatti** (v0.24.0): un filtro di logging (`app/logredact.py`) sostituisce
   ogni secret con `***` in ogni riga *prima* che venga scritta. In particolare il
