@@ -109,7 +109,12 @@ jobs:
           provenance: true
           sbom: true
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        # HELD a v3: cosign v4 cambia `sign-blob` (crea un bundle di default →
+        # rompe la firma detached SHA256SUMS.sig/.pem su cui si appoggia
+        # `vps1777 update`). Verificato con la rc v0.36.0-rc.1. cosign-installer
+        # NON è una action Node → non c'entra col warning Node 20; il bump a v4
+        # richiederebbe di cambiare anche la verifica (verify-blob) nel CLI.
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
       - name: Sign image (keyless)
         run: |
           cosign sign --yes \
@@ -188,7 +193,12 @@ jobs:
           sha256sum "vps1777-runtime-v${VERSION}.tar.gz" > SHA256SUMS
           cat SHA256SUMS
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        # HELD a v3: cosign v4 cambia `sign-blob` (crea un bundle di default →
+        # rompe la firma detached SHA256SUMS.sig/.pem su cui si appoggia
+        # `vps1777 update`). Verificato con la rc v0.36.0-rc.1. cosign-installer
+        # NON è una action Node → non c'entra col warning Node 20; il bump a v4
+        # richiederebbe di cambiare anche la verifica (verify-blob) nel CLI.
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
       - name: Sign SHA256SUMS (keyless)
         run: |
           cosign sign-blob --yes \
