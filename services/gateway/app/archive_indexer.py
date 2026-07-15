@@ -49,6 +49,16 @@ RowFull = tuple[str, str, str, str, str, str, str, str, str]
 # (uuid, project, ts, content, sender, tools, thinking, attachments, parent_uuid)
 
 
+class _Skip(NamedTuple):
+    """Un record che l'ingest ha scartato. Gli estrattori lo emettono nello STESSO
+    stream delle righe; `write_rows` lo instrada alla tabella `skipped` invece che a
+    `messages`. Trasforma un `continue` muto in una lapide reversibile e datata."""
+    source: str
+    reason: str
+    detail: str
+    ts: str
+
+
 # ── tetti su input e decompressione (H39) ────────────────────────────────────
 #
 # LA LEZIONE, imparata a caro prezzo: **un limite su un input COMPRESSO non è un
@@ -82,6 +92,12 @@ _READ_CHUNK = 1024 * 1024  # 1 MB
 
 def _mb(n: int) -> str:
     return f"{n / (1024 * 1024):.0f} MB"
+
+
+def _now_iso() -> str:
+    """Data-ora UTC ISO dell'ingest (per la lapide dello skip)."""
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class _Budget:
@@ -164,6 +180,18 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 -- lo usa `get_conversation` nel server MCP (una WITH RECURSIVE su parent_uuid).
 -- Ricreato a ogni ingest (IF NOT EXISTS), copre anche i DB migrati da v1.
 CREATE INDEX IF NOT EXISTS idx_parent ON messages(parent_uuid);
+-- Il "libro-mastro degli scarti" (D3): ogni record che l'ingest NON indicizza
+-- (senza uuid, contenuto vuoto, non-dict) lascia una LAPIDE datata e leggibile,
+-- invece di sparire in un `continue` muto. uid deterministico → re-ingest idempotente.
+-- Rende lo scarto reversibile: "i dati raw devono essere raggiungibili".
+CREATE TABLE IF NOT EXISTS skipped(
+    uid         TEXT PRIMARY KEY,
+    source      TEXT,
+    reason      TEXT,
+    detail      TEXT,
+    ts          TEXT,
+    ingest_date TEXT
+);
 """
 # NOTA sullo schema FTS — perché `tools` sì e `thinking` no.
 #
@@ -215,6 +243,8 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
         n = 0
         buf: list[RowFull] = []
+        skip_buf: list[tuple] = []
+        ingest_date = _now_iso()
 
         def flush() -> None:
             if buf:
@@ -225,12 +255,28 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
                 )
                 buf.clear()
 
+        def flush_skips() -> None:
+            if skip_buf:
+                # OR IGNORE: la prima ingest_date resta (ledger), il re-ingest non duplica.
+                conn.executemany(
+                    "INSERT OR IGNORE INTO skipped(uid, source, reason, detail, ts, ingest_date)"
+                    " VALUES (?,?,?,?,?,?)", skip_buf,
+                )
+                skip_buf.clear()
+
         for row in rows:
+            if isinstance(row, _Skip):
+                skip_buf.append((_uid(row.source, row.reason, row.detail[:200], row.ts),
+                                 row.source, row.reason, row.detail[:2000], row.ts, ingest_date))
+                if len(skip_buf) >= batch:
+                    flush_skips()
+                continue
             buf.append(_pad(row))
             n += 1
             if len(buf) >= batch:
                 flush()
         flush()
+        flush_skips()
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
         conn.commit()
         return n
@@ -289,13 +335,28 @@ def count_rows(db_path: Union[str, Path]) -> int:
         return 0
 
 
+def count_skipped(db_path: Union[str, Path]) -> int:
+    """Numero di record nel libro-mastro degli scarti (D3). 0 se assente/vecchio DB
+    senza la tabella. Il conteggio non è più muto: si legge da qui e da `db_info`."""
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            return int(conn.execute("SELECT count(*) FROM skipped").fetchone()[0])
+        except sqlite3.OperationalError:
+            return 0  # DB precedente alla tabella skipped
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return 0
+
+
 def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
     """Scheda di un DB per le UI (admin + Mini App): righe, etichette distinte,
     le `top` etichette più popolose, dimensione file e ultima modifica.
     Robusto: DB assente o illeggibile → scheda a zero, mai un'eccezione."""
     p = Path(db_path)
     out: dict = {"name": p.stem, "rows": 0, "labels": 0, "top": [],
-                 "size": 0, "mtime": ""}
+                 "size": 0, "mtime": "", "skipped": 0}
     try:
         out["size"] = p.stat().st_size
         out["mtime"] = _file_ts(p)
@@ -315,6 +376,10 @@ def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
                     (max(0, top),),
                 )
             ]
+            try:
+                out["skipped"] = int(conn.execute("SELECT count(*) FROM skipped").fetchone()[0])
+            except sqlite3.OperationalError:
+                pass  # DB precedente alla tabella skipped
         finally:
             conn.close()
     except sqlite3.Error:
@@ -450,6 +515,7 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             continue
         uuid, ts = d.get("uuid"), d.get("timestamp")
         if not uuid or not ts:
+            yield _Skip("claude-code", "no-uuid-o-ts", str(d.get("type") or ""), str(ts or ""))
             continue
         msg = d.get("message") or {}
         blocks = extract_blocks(msg.get("content"))
@@ -457,6 +523,7 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
         # sessione agentica ne è piena) spariva senza lasciare traccia. Ora basta che
         # abbia UN contenuto qualsiasi.
         if not (blocks.text or blocks.tools or blocks.thinking):
+            yield _Skip("claude-code", "empty", str(uuid), str(ts))
             continue
         proj = project or Path(str(d.get("cwd") or "unknown")).name or "unknown"
         yield (uuid, proj, ts, blocks.text, str(msg.get("role") or d.get("type") or ""),
@@ -576,9 +643,12 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
                    "summary", "", "", "", "")
         for m in (c.get("chat_messages") or c.get("messages") or []):
             if not isinstance(m, dict):
+                yield _Skip("claude-conversations", "non-dict", str(m), "")
                 continue
             uuid = m.get("uuid")
             if not uuid:
+                yield _Skip("claude-conversations", "no-uuid",
+                            str(m.get("text") or ""), str(m.get("created_at") or ""))
                 continue
             # PRIMA: `m.get("text") or extract_text(m.get("content"))`.
             # Nell'export claude.ai `text` è SEMPRE valorizzato (misurato: 0 messaggi
@@ -589,6 +659,8 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
             text = blocks.text or (m.get("text") or "")
             attach = _attachment_names(m)
             if not (text or blocks.tools or blocks.thinking or attach):
+                yield _Skip("claude-conversations", "empty", str(uuid),
+                            str(m.get("created_at") or ""))
                 continue
             sender = m.get("sender") or m.get("role") or ""
             content = f"[{sender}] {text}" if sender and text else text

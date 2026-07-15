@@ -166,6 +166,40 @@ def test_parent_uuid_index_created(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_skipped_ledger(tmp_path: Path) -> None:
+    """I record scartati dall'ingest (no-uuid, vuoti) finiscono nella tabella
+    `skipped` — reversibili e leggibili — invece di sparire in silenzio (D3/#56).
+    Idempotente: re-indicizzare non duplica le lapidi."""
+    import json
+    import zipfile
+    zp = tmp_path / "export.zip"
+    convs = [{
+        "uuid": "c1", "name": "Chat",
+        "chat_messages": [
+            {"uuid": "ok1", "sender": "human", "created_at": "2026-03-03T00:00:00Z", "text": "valido"},
+            {"sender": "human", "created_at": "2026-03-03T00:00:01Z", "text": "senza uuid"},
+            {"uuid": "empty1", "sender": "human", "created_at": "2026-03-03T00:00:02Z", "text": ""},
+        ],
+    }]
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(zp), str(db))
+    assert n == 1  # solo il messaggio valido finisce in messages
+    assert archive_indexer.count_skipped(db) == 2  # no-uuid + vuoto
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        reasons = sorted(r[0] for r in conn.execute("SELECT reason FROM skipped").fetchall())
+        assert reasons == ["empty", "no-uuid"]
+        d = conn.execute("SELECT detail FROM skipped WHERE reason='no-uuid'").fetchone()[0]
+        assert "senza uuid" in d  # il dato raw è reversibile, leggibile alla bisogna
+    finally:
+        conn.close()
+    assert archive_indexer.db_info(db)["skipped"] == 2  # conteggio superficiato, non muto
+    archive_indexer.index_file(str(zp), str(db))
+    assert archive_indexer.count_skipped(db) == 2  # re-index non duplica le lapidi
+
+
 def test_index_file_design_chats_zip(tmp_path: Path) -> None:
     """Le design chats hanno content ANNIDATO ({"role","content"}) — il caso
     reale che produceva 0 righe in silenzio."""
