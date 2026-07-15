@@ -279,6 +279,47 @@ def test_index_file_zip_non_riconosciuto(tmp_path: Path) -> None:
     assert not (tmp_path / "out.db").exists()
 
 
+def test_index_file_zip_di_documenti(tmp_path: Path) -> None:
+    """Zip che NON è un export ma contiene .md/.txt → indicizzato come documenti
+    (fallback 'archive deve indicizzare zip md txt, quel che è'). Ogni membro
+    diventa cercabile, col path del membro come progetto/chiave."""
+    import zipfile
+    zp = tmp_path / "note.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("a.md", "# Primo\n\nParola CHIAVEALFA nel primo doc.")
+        z.writestr("sub/b.txt", "Parola CHIAVEBETA nel secondo, dentro una cartella.")
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(zp), str(db))
+    assert n >= 2
+    conn = sqlite3.connect(str(db))
+    a = conn.execute("SELECT project FROM messages_fts WHERE messages_fts MATCH 'CHIAVEALFA'").fetchall()
+    b = conn.execute("SELECT project FROM messages_fts WHERE messages_fts MATCH 'CHIAVEBETA'").fetchall()
+    conn.close()
+    assert a == [("a.md",)]
+    assert b == [("sub/b.txt",)]
+    # idempotente: re-indicizzare lo stesso zip non duplica (uuid stabile)
+    archive_indexer.index_file(str(zp), str(db))
+    assert archive_indexer.count_rows(db) == n
+
+
+def test_index_file_zip_documenti_ignora_macosx(tmp_path: Path) -> None:
+    """Le resource-fork di macOS (__MACOSX/, ._*) non entrano come documenti
+    -fantasma: si indicizza solo il .md reale."""
+    import zipfile
+    zp = tmp_path / "mac.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("vero.md", "contenuto CHIAVEVERA reale")
+        z.writestr("__MACOSX/._vero.md", b"\x00\x05\x16\x07")  # resource fork binaria
+        z.writestr("._vero.md", b"\x00\x05\x16\x07")
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(zp), str(db))
+    assert n == 1
+    conn = sqlite3.connect(str(db))
+    rows = conn.execute("SELECT project FROM messages").fetchall()
+    conn.close()
+    assert rows == [("vero.md",)]
+
+
 def test_index_file_zip_riconosciuto_ma_vuoto(tmp_path: Path) -> None:
     """Zip claude.ai con zero messaggi estraibili → errore, niente DB vuoto."""
     import json

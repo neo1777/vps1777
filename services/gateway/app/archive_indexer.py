@@ -13,11 +13,14 @@ contenuto, non dal nome):
     .zip claude.ai → export account (conversations.json + design_chats/ + projects/docs)
     .zip Telegram  → export Desktop JSON (result.json) o HTML (messages*.html),
                      anche in sottocartella ChatExport_*/
+    .zip generico  → zip di documenti .md/.txt (fallback): indicizza ogni doc
+                     dentro l'archivio, come se fosse un .md/.txt sciolto
     .json         → export Telegram Desktop (result.json) o sessione Claude Code
     .md / .txt    → testo/markdown generico (ponte per output di altri tool), spezzato in chunk
     (.db)         → NON qui: è un drop-in, si copia direttamente nella dir
-Uno zip non riconosciuto — o riconosciuto ma senza messaggi estraibili — è un
-ERRORE esplicito, mai un successo a 0 righe (stesso principio dei PDF-immagine).
+Uno zip senza NÉ un export riconosciuto NÉ un documento .md/.txt — o riconosciuto
+ma senza messaggi estraibili — è un ERRORE esplicito, mai un successo a 0 righe
+(stesso principio dei PDF-immagine).
 
 Indexer CONDIVISO, due usi:
   - server-side: il gateway lo importa e chiama `index_file(...)` in /admin/archive
@@ -909,6 +912,59 @@ def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str],
                        f"[{sender}] {text}" if sender else text)
 
 
+# ── estrattore: zip di documenti generici (.md/.txt) ─────────────────────────
+
+# Le estensioni-testo che un "zip di documenti" può contenere: la stessa "porta"
+# di _iter_text (.md/.txt), estesa a uno zip. NON i formati-conversazione
+# (.json/.jsonl sono ambigui — Telegram vs Claude Code — e li disambigua
+# index_file sul singolo file; qui darebbero falsi positivi).
+_DOC_ZIP_EXTS = (".md", ".markdown", ".txt", ".text")
+
+
+def _zipinfo_ts(info: zipfile.ZipInfo) -> str:
+    """ts ISO dal `date_time` del membro zip (1980 = 'assente', epoca-zero DOS)."""
+    try:
+        y, mo, d, h, mi, s = info.date_time
+        if y < 1980:
+            return ""
+        return f"{y:04d}-{mo:02d}-{d:02d}T{h:02d}:{mi:02d}:{s:02d}Z"
+    except Exception:  # noqa: BLE001 — date_time malformato: meglio nessun ts
+        return ""
+
+
+def _doc_zip_members(names: list[str]) -> list[str]:
+    """I membri-documento di uno zip generico: .md/.txt reali, saltando le voci
+    di cartella, i dotfile e le resource-fork di macOS (__MACOSX/, ._*) — che
+    altrimenti entrerebbero come documenti-fantasma vuoti."""
+    out: list[str] = []
+    for n in names:
+        if n.endswith("/") or n.startswith("__MACOSX/"):
+            continue
+        base = Path(n).name
+        if base.startswith("._") or base.startswith("."):
+            continue
+        if Path(n).suffix.lower() in _DOC_ZIP_EXTS:
+            out.append(n)
+    return out
+
+
+def _iter_docs_zip(zip_path: Union[str, Path], members: list[str],
+                   budget: _Budget) -> Iterator[Row]:
+    """Fallback 'zip-di-documenti': uno zip che NON è un export riconosciuto ma
+    contiene .md/.txt (output di altri tool, un pacco di note, un dump). Ogni
+    documento diventa messaggi cercabili — stessa logica di _iter_text, ma dentro
+    un archivio, sotto il budget anti-zip-bomb condiviso (_read_capped conta il
+    decompresso). Il path del membro è progetto e chiave insieme: uuid stabile →
+    re-index idempotente."""
+    with zipfile.ZipFile(zip_path) as z:
+        for name in members:
+            info = z.getinfo(name)
+            with z.open(info) as f:
+                raw = _read_capped(f, name, budget)
+            text = raw.decode("utf-8", errors="replace")
+            yield from _chunk_rows(text, name, _zipinfo_ts(info), name)
+
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 
 SUPPORTED = (".jsonl", ".zip", ".md", ".txt", ".json", ".pdf")
@@ -942,10 +998,19 @@ def _index_zip(path: Path, db_path: Union[str, Path]) -> int:
         n, kind = (write_rows(db_path, _iter_telegram_html_zip(path, telegram_htmls, budget)),
                    "export Telegram HTML")
     else:
-        raise ValueError(
-            "zip non riconosciuto: mi aspetto un export claude.ai "
-            "(conversations.json / design_chats/ / projects/) oppure un export "
-            "Telegram Desktop JSON (result.json).")
+        # Fallback: non è un export, ma può essere uno zip di documenti .md/.txt
+        # ("archive deve indicizzare zip md txt, quel che è"). Se c'è almeno un
+        # documento lo si indicizza; altrimenti resta un errore parlante.
+        docs = _doc_zip_members(names)
+        if docs:
+            n, kind = (write_rows(db_path, _iter_docs_zip(path, docs, budget)),
+                       "zip di documenti (.md/.txt)")
+        else:
+            raise ValueError(
+                "zip non riconosciuto: mi aspetto un export claude.ai "
+                "(conversations.json / design_chats/ / projects/), un export "
+                "Telegram Desktop JSON (result.json), oppure uno zip con almeno "
+                "un documento .md/.txt.")
     if n == 0:
         if count_rows(db_path) == 0:
             Path(db_path).unlink(missing_ok=True)
