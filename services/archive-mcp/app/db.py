@@ -213,6 +213,73 @@ def get_context(uuid: str, db: str = "", *, before: int = 3,
     return []
 
 
+def get_conversation(uuid: str, db: str = "", *, limit: int = 200) -> list[dict[str, Any]]:
+    """Il thread INTERO che contiene `uuid` (camminando parent_uuid), col contenuto
+    pieno. Cerca il DB che contiene l'uuid, o in tutti."""
+    _maybe_reload()
+    for name in _targets(db):
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            conv = fts.conversation_conn(conn, uuid, limit=limit)
+            if conv:
+                snap = _snapshot(_DBS[name])
+                for r in conv:
+                    r["db"] = name
+                    r["snapshot"] = snap
+                return conv
+        except sqlite3.OperationalError as exc:
+            log.warning("DB %s schema error: %s", name, exc)
+        finally:
+            conn.close()
+    return []
+
+
+def list_projects(db: str = "", *, top: int = 1000) -> list[dict[str, Any]]:
+    """Le etichette `project` (con conteggi) per DB — per NAVIGARE l'archivio, non
+    solo cercarlo. Su più DB i risultati portano `db` e sono ordinati per conteggio."""
+    _maybe_reload()
+    out: list[dict[str, Any]] = []
+    for name in _targets(db):
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            for r in fts.projects_conn(conn, top=top):
+                r["db"] = name
+                out.append(r)
+        except sqlite3.OperationalError as exc:
+            log.warning("DB %s schema error: %s", name, exc)
+        finally:
+            conn.close()
+    out.sort(key=lambda r: r.get("rows", 0), reverse=True)
+    return out
+
+
+def archive_stats(db: str = "") -> list[dict[str, Any]]:
+    """Istogramma temporale per ANNO, per DB — «quando» l'archivio è fitto, prima
+    di cercare. Ogni riga porta `db`."""
+    _maybe_reload()
+    out: list[dict[str, Any]] = []
+    for name in _targets(db):
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            for r in fts.stats_by_period_conn(conn):
+                r["db"] = name
+                out.append(r)
+        except sqlite3.OperationalError as exc:
+            log.warning("DB %s schema error: %s", name, exc)
+        finally:
+            conn.close()
+    return out
+
+
 def describe() -> list[dict[str, Any]]:
     """Scheda di ogni DB: righe, intervallo temporale, n. etichette, snapshot
     (freschezza). Più ricca di list_databases (che resta list[str] per compat)."""

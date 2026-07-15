@@ -155,15 +155,56 @@ def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
     raise FtsSyntaxError(f"{_SYNTAX_HINT} (dettaglio: {last_exc})")
 
 
+def _thread_ids(conn: sqlite3.Connection, uuid: str) -> set[str]:
+    """Gli uuid del thread connesso a `uuid` via `parent_uuid` (antenati +
+    discendenti), camminando l'albero con due CTE ricorsive. Insieme = 1 solo
+    (il messaggio stesso) quando l'arco manca — fonti chunked (pdf/telegram/memory)
+    e db storici del prototipo, che `parent_uuid` non ce l'hanno. Su un DB v1 (4
+    colonne, senza `parent_uuid`) ritorna il solo `uuid` → i chiamanti ripiegano
+    sul comportamento storico invece di rompersi."""
+    try:
+        rows = conn.execute(
+            "WITH RECURSIVE "
+            " up(u) AS (SELECT ? UNION "
+            "   SELECT m.parent_uuid FROM messages m JOIN up ON m.uuid = up.u "
+            "   WHERE m.parent_uuid <> ''), "
+            " down(u) AS (SELECT ? UNION "
+            "   SELECT m.uuid FROM messages m JOIN down ON m.parent_uuid = down.u) "
+            "SELECT u FROM up UNION SELECT u FROM down",
+            (uuid, uuid),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {uuid}  # DB v1 senza colonna parent_uuid
+    return {r[0] for r in rows if r[0]}
+
+
 def context_conn(conn: sqlite3.Connection, uuid: str, *, before: int = 3,
                  after: int = 3) -> list[dict[str, Any]]:
-    """I messaggi attorno a `uuid` nello stesso project, ordinati per (ts, uuid),
-    con il CONTENUTO PIENO (non lo snippet troncato). Vuoto se l'uuid non c'è."""
+    """I messaggi attorno a `uuid`, col CONTENUTO PIENO (non lo snippet troncato).
+
+    Se il messaggio fa parte di un thread (`parent_uuid`), i vicini vengono dallo
+    STESSO thread — non più dalla sola vicinanza temporale nello stesso project, che
+    poteva mischiare conversazioni diverse (era l'over-claim di «stesso thread»).
+    Sulle fonti senza arco (chunked / db storici) ricade sull'adiacenza per
+    (ts, uuid) dello stesso project — il comportamento storico. Vuoto se l'uuid non c'è."""
     row = conn.execute(
         "SELECT project, ts FROM messages WHERE uuid = ?", (uuid,)).fetchone()
     if row is None:
         return []
     project, ts = row["project"], row["ts"]
+    ids = _thread_ids(conn, uuid)
+    if len(ids) > 1:
+        # threaded: la finestra ±N si prende DENTRO il thread, ordinato (ts, uuid).
+        qmarks = ",".join("?" * len(ids))
+        seq = [dict(r) for r in conn.execute(
+            f"SELECT uuid, project, ts, content FROM messages WHERE uuid IN ({qmarks}) "
+            "ORDER BY ts ASC, uuid ASC", tuple(ids)).fetchall()]
+        pos = next((i for i, r in enumerate(seq) if r["uuid"] == uuid), None)
+        if pos is not None:
+            out = seq[max(0, pos - int(before)): pos + int(after) + 1]
+            for r in out:
+                r["is_match"] = (r["uuid"] == uuid)
+            return out
     # ancora per (ts, uuid): stabile anche con ts uguali (dedup deterministico)
     prev = conn.execute(
         "SELECT uuid, project, ts, content FROM messages "
@@ -181,6 +222,56 @@ def context_conn(conn: sqlite3.Connection, uuid: str, *, before: int = 3,
     for r in out:
         r["is_match"] = (r["uuid"] == uuid)
     return out
+
+
+def conversation_conn(conn: sqlite3.Connection, uuid: str, *,
+                      limit: int = 200) -> list[dict[str, Any]]:
+    """Il thread di conversazione che CONTIENE `uuid` — camminando l'albero
+    `parent_uuid` (antenati + discendenti), col contenuto pieno e in ordine (ts, uuid).
+    Per LEGGERE una chat intera, non solo la finestra ±N di `context_conn`.
+
+    Dove l'arco manca — fonti chunked (pdf/telegram/memory) e db storici — ricade
+    sull'ordine lineare dello stesso archivio (`project`). La ricostruzione FEDELE
+    dell'ordine sulla coda-documenti (colonna `seq`) è un passo evolutivo DICHIARATO
+    fuori scope oggi. Vuoto se l'uuid non c'è."""
+    anchor = conn.execute(
+        "SELECT project FROM messages WHERE uuid = ?", (uuid,)).fetchone()
+    if anchor is None:
+        return []
+    ids = _thread_ids(conn, uuid)
+    if len(ids) > 1:
+        qmarks = ",".join("?" * len(ids))
+        rows = conn.execute(
+            f"SELECT uuid, project, ts, content, sender FROM messages "
+            f"WHERE uuid IN ({qmarks}) ORDER BY ts ASC, uuid ASC LIMIT ?",
+            (*ids, int(limit))).fetchall()
+    else:
+        # fallback lineare (coda-documenti / db storici senza arco)
+        rows = conn.execute(
+            "SELECT uuid, project, ts, content, sender FROM messages "
+            "WHERE project = ? ORDER BY ts ASC, uuid ASC LIMIT ?",
+            (anchor["project"], int(limit))).fetchall()
+    out = [dict(r) for r in rows]
+    for r in out:
+        r["is_match"] = (r["uuid"] == uuid)
+    return out
+
+
+def projects_conn(conn: sqlite3.Connection, *, top: int = 1000) -> list[dict[str, Any]]:
+    """Le etichette `project` di un DB con quanti messaggi ciascuna — per NAVIGARE
+    l'archivio invece di solo cercarlo (era uno dei tool di browse persi, B4)."""
+    return [{"project": p or "", "rows": int(n)} for p, n in conn.execute(
+        "SELECT project, count(*) FROM messages "
+        "GROUP BY project ORDER BY count(*) DESC, project LIMIT ?",
+        (max(0, int(top)),)).fetchall()]
+
+
+def stats_by_period_conn(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Istogramma temporale per ANNO (`substr(ts,1,4)`) — «quando» l'archivio è
+    fitto, prima di cercare. I ts vuoti (fonti senza data) sono esclusi."""
+    return [{"period": per, "rows": int(n)} for per, n in conn.execute(
+        "SELECT substr(ts, 1, 4) AS period, count(*) FROM messages "
+        "WHERE ts <> '' GROUP BY period ORDER BY period").fetchall()]
 
 
 def db_stats_conn(conn: sqlite3.Connection) -> dict[str, Any]:

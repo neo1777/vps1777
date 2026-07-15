@@ -192,3 +192,76 @@ def test_db_stats_vuoto():
     conn = _db([])
     st = fts.db_stats_conn(conn)
     assert st == {"rows": 0, "oldest": "", "newest": "", "labels": 0}
+
+
+# ── thread walk: get_conversation + context via parent_uuid (P2) ────────────
+
+_SCHEMA_FULL = """
+CREATE TABLE messages(uuid TEXT PRIMARY KEY, project, ts, content,
+    sender DEFAULT '', tools DEFAULT '', thinking DEFAULT '',
+    attachments DEFAULT '', parent_uuid DEFAULT '');
+CREATE VIRTUAL TABLE messages_fts USING fts5(
+    uuid, project, ts, content, tools, attachments,
+    content='messages', content_rowid='rowid');
+CREATE INDEX idx_parent ON messages(parent_uuid);
+"""
+
+
+def _db_full(rows):
+    """rows: (uuid, project, ts, content, sender, parent_uuid)."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_SCHEMA_FULL)
+    conn.executemany(
+        "INSERT INTO messages(uuid, project, ts, content, sender, parent_uuid) "
+        "VALUES (?,?,?,?,?,?)", rows)
+    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+    conn.commit()
+    return conn
+
+
+def test_conversation_walks_parent_uuid():
+    conn = _db_full([
+        ("m1", "P", "2026-01-01T00:00:00Z", "primo", "human", ""),
+        ("m2", "P", "2026-01-01T00:00:01Z", "secondo", "assistant", "m1"),
+        ("m3", "P", "2026-01-01T00:00:02Z", "terzo", "human", "m2"),
+        ("x9", "P", "2026-01-01T00:00:03Z", "altra chat", "human", ""),  # non connesso
+    ])
+    conv = fts.conversation_conn(conn, "m2")
+    assert [r["uuid"] for r in conv] == ["m1", "m2", "m3"]  # il thread, non x9
+    assert next(r for r in conv if r["uuid"] == "m2")["is_match"] is True
+
+
+def test_conversation_fallback_linear_senza_arco():
+    conn = _db_full([
+        ("d1", "doc", "2026-05-01T00:00:00Z", "chunk uno", "", ""),
+        ("d2", "doc", "2026-05-01T00:00:01Z", "chunk due", "", ""),
+    ])
+    conv = fts.conversation_conn(conn, "d1")
+    assert [r["uuid"] for r in conv] == ["d1", "d2"]  # ordine lineare dello stesso project
+
+
+def test_context_usa_il_thread_non_solo_ts():
+    # due conversazioni INTERLACCIATE nello stesso project: l'adiacenza per ts
+    # le mischerebbe; il thread parent_uuid no.
+    conn = _db_full([
+        ("a1", "P", "2026-01-01T00:00:01Z", "A uno", "", ""),
+        ("b1", "P", "2026-01-01T00:00:02Z", "B uno", "", ""),
+        ("a2", "P", "2026-01-01T00:00:03Z", "A due", "", "a1"),
+        ("b2", "P", "2026-01-01T00:00:04Z", "B due", "", "b1"),
+        ("a3", "P", "2026-01-01T00:00:05Z", "A tre", "", "a2"),
+    ])
+    ctx = fts.context_conn(conn, "a2", before=1, after=1)
+    assert [r["uuid"] for r in ctx] == ["a1", "a2", "a3"]  # thread A, non [b1,a2,b2]
+
+
+def test_list_projects():
+    conn = _db(_ROWS)
+    ps = fts.projects_conn(conn)
+    assert {p["project"]: p["rows"] for p in ps} == {"chatA": 2, "chatB": 2}
+
+
+def test_stats_by_period():
+    conn = _db(_ROWS)
+    st = fts.stats_by_period_conn(conn)
+    assert st == [{"period": "2026", "rows": 4}]

@@ -84,9 +84,40 @@ def get_context(uuid: str, db_name: str = "", before: int = 3,
                 after: int = 3) -> list[dict[str, Any]]:
     """Restituisce i messaggi ATTORNO a un risultato (col contenuto pieno, non
     lo snippet troncato). Dai a `uuid` uno dei valori tornati da search; `before`
-    e `after` sono quanti messaggi prendere prima e dopo nello stesso thread.
+    e `after` sono quanti messaggi prendere prima e dopo. Se il messaggio è in un
+    thread (`parent_uuid`), i vicini vengono dallo STESSO thread; sulle fonti senza
+    arco (documenti chunked, db storici) è l'adiacenza temporale nello stesso
+    archivio. Per la chat INTERA usa `get_conversation`.
     Ogni riga: {db, uuid, project, ts, content, is_match, snapshot}."""
     return db.get_context(uuid, db_name, before=before, after=after)
+
+
+@mcp.tool()
+def get_conversation(uuid: str, db_name: str = "", limit: int = 200) -> list[dict[str, Any]]:
+    """Il thread di conversazione INTERO che contiene `uuid` — camminando l'albero
+    `parent_uuid` (antenati + discendenti), col contenuto pieno e in ordine. Per
+    LEGGERE una chat dall'inizio alla fine, non solo la finestra ±N di get_context.
+
+    Dove l'albero manca — documenti chunked (pdf/telegram/memory) e db storici —
+    ricade sull'ordine lineare dello stesso archivio. Ogni riga:
+    {db, uuid, project, ts, content, sender, is_match, snapshot}."""
+    return db.get_conversation(uuid, db_name, limit=limit)
+
+
+@mcp.tool()
+def list_projects(db_name: str = "", top: int = 1000) -> list[dict[str, Any]]:
+    """Le etichette `project` dell'archivio con quanti messaggi ciascuna — per
+    NAVIGARE i contenuti (quali progetti/chat ci sono) invece di solo cercarli.
+    Ogni riga: {project, rows, db}. Ordinate per numero di messaggi."""
+    return db.list_projects(db_name, top=top)
+
+
+@mcp.tool()
+def archive_stats(db_name: str = "") -> list[dict[str, Any]]:
+    """Istogramma temporale per ANNO: quanti messaggi per anno in ogni archivio —
+    «quando» l'archivio è fitto, da sapere PRIMA di cercare. Ogni riga:
+    {period, rows, db}."""
+    return db.archive_stats(db_name)
 
 
 @mcp.tool()
