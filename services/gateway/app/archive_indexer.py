@@ -160,6 +160,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     uuid, project, ts, content, tools, attachments,
     content='messages', content_rowid='rowid'
 );
+-- Indice per camminare l'albero della conversazione (parent→figli) senza full-scan:
+-- lo usa `get_conversation` nel server MCP (una WITH RECURSIVE su parent_uuid).
+-- Ricreato a ogni ingest (IF NOT EXISTS), copre anche i DB migrati da v1.
+CREATE INDEX IF NOT EXISTS idx_parent ON messages(parent_uuid);
 """
 # NOTA sullo schema FTS — perché `tools` sì e `thinking` no.
 #
@@ -562,6 +566,14 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
         if not isinstance(c, dict):
             continue
         name = c.get("name") or c.get("title") or fallback
+        # La `summary` della conversazione — metadata per-conversazione che
+        # l'estrattore non leggeva mai: persa NON per schema ma per assenza di codice
+        # (~396k char su un export reale). Indicizzata come riga attribuita, cercabile.
+        summary = c.get("summary")
+        if isinstance(summary, str) and summary.strip():
+            yield (_uid("summary", str(c.get("uuid") or name)), name,
+                   str(c.get("updated_at") or ""), summary.strip(),
+                   "summary", "", "", "", "")
         for m in (c.get("chat_messages") or c.get("messages") or []):
             if not isinstance(m, dict):
                 continue

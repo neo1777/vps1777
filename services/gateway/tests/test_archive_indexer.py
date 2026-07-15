@@ -120,6 +120,52 @@ def test_index_file_claude_zip(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_conversation_summary_indexed(tmp_path: Path) -> None:
+    """La `summary` di una conversazione claude.ai viene indicizzata come riga
+    attribuita `sender='summary'` — prima era persa (nessun codice la leggeva)."""
+    import json
+    import zipfile
+    zp = tmp_path / "export.zip"
+    convs = [{
+        "uuid": "c1", "name": "Chat lunga", "updated_at": "2026-02-02T00:00:00Z",
+        "summary": "Discussione su ARCHIVISUMMARY e migrazione",
+        "chat_messages": [
+            {"uuid": "m1", "sender": "human", "created_at": "2026-02-02T00:00:00Z", "text": "ciao"},
+        ],
+    }]
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(zp), str(db))
+    assert n == 2  # 1 messaggio + 1 summary
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        r = conn.execute(
+            "SELECT project, sender FROM messages WHERE content LIKE '%ARCHIVISUMMARY%'").fetchall()
+        assert r == [("Chat lunga", "summary")]
+        hits = conn.execute(
+            "SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'ARCHIVISUMMARY'").fetchone()[0]
+        assert hits == 1
+    finally:
+        conn.close()
+
+
+def test_parent_uuid_index_created(tmp_path: Path) -> None:
+    """L'indice su `parent_uuid` (che abilita get_conversation) è creato all'ingest,
+    anche per i DB migrati da v1 (CREATE INDEX IF NOT EXISTS nello schema)."""
+    md = tmp_path / "n.md"
+    md.write_text("# t\n\ncorpo", encoding="utf-8")
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(md), str(db))
+    conn = sqlite3.connect(str(db))
+    try:
+        idx = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_parent'").fetchall()
+        assert idx == [("idx_parent",)]
+    finally:
+        conn.close()
+
+
 def test_index_file_design_chats_zip(tmp_path: Path) -> None:
     """Le design chats hanno content ANNIDATO ({"role","content"}) — il caso
     reale che produceva 0 righe in silenzio."""
