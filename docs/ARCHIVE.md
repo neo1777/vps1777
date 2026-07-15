@@ -41,7 +41,7 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 
 | Formato | Cosa indicizza |
 |---|---|
-| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs`) oppure export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/` |
+| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs`) oppure export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/`. **Fallback**: uno zip che non è un export ma contiene documenti `.md`/`.txt` viene indicizzato doc-per-doc (come i `.md`/`.txt` sciolti) |
 | `.jsonl` | sessione **Claude Code** (`~/.claude/projects/<progetto>/<id>.jsonl`) |
 | `.json` | export **Telegram Desktop** (formato *Machine-readable JSON*) |
 | `.pdf` | documento **con testo** (estratto via `pypdf`) |
@@ -139,9 +139,26 @@ python3 services/gateway/app/archive_indexer.py <input> out.db --project nome
 
 ## Schema di un DB valido
 
-Tabella `messages(uuid PRIMARY KEY, project, ts, content)` + indice FTS5 esterno
-`messages_fts(uuid, project, ts, content)`. È quello che producono `archive_indexer`
-e `archive-ingest`. Un `.db` drop-in deve avere questo schema (validato all'upload).
+Schema corrente (v2, dal PR #23):
+
+```sql
+messages(uuid PRIMARY KEY, project, ts, content,
+         sender, tools, thinking, attachments, parent_uuid)
+messages_fts USING fts5(uuid, project, ts, content, tools, attachments,
+                        content='messages', ...)   -- external-content
+```
+
+È quello che producono `archive_indexer` e `archive-ingest`. In FTS finiscono
+`content`, `tools` (le azioni: `tool_use` + `tool_result`) e `attachments`;
+`thinking` e `parent_uuid` si **conservano** nella tabella (leggibili via SQL /
+`get_context`) ma **non** si indicizzano — vedi la nota sullo schema in
+`archive_indexer.py`.
+
+Un `.db` drop-in è accettato se è un SQLite con la tabella `messages_fts`
+(controllo in `admin.py`). Anche un DB **v1** (le sole 4 colonne
+`uuid, project, ts, content`) resta valido: `migrate_v1_to_v2()` gli aggiunge le
+colonne nuove e ricostruisce l'FTS: le righe vecchie restano (con `tools`/`thinking`
+vuoti finché non ri-esegui l'ingest sulla fonte, idempotente per `uuid`).
 
 ## Come funziona sotto (confine no-docker.sock)
 
