@@ -16,6 +16,21 @@ secrets/*
 # questa riga non ferma `git add -f` né salva un file già tracciato.
 20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-*.txt
 
+# I transcript di sessione veri e propri: stessa classe, forma diversa. Su una
+# macchina di lavoro ne girano a centinaia — la probabilità che uno finisca in
+# un `add` non è teorica. (Una fixture piccola sotto tests/fixtures/ resta
+# possibile con `add -f`: il gate la ammette sotto i 64 KB.)
+*.jsonl
+
+# Database: un archivio committato per sbaglio non è «un file grosso», è
+# l'intero contenuto di un'installazione in un oggetto solo. I dati non stanno
+# nel repo.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
 # ───── Build / cache ─────
 __pycache__/
 *.py[cod]

@@ -40,9 +40,25 @@ import subprocess
 import sys
 from pathlib import Path
 
-# ── R1 — la forma di un export di sessione ────────────────────────────────────
-# `/export` di Claude Code produce: 2026-07-14-084038-<slug-della-prima-riga>.txt
+# ── R1 — roba che per natura non appartiene al repo ───────────────────────────
+# a) `/export` di Claude Code produce: 2026-07-14-084038-<slug-della-prima-riga>.txt
 SESSION_EXPORT = re.compile(r"(^|/)\d{4}-\d{2}-\d{2}-\d{6}-.*\.txt$")
+
+# b) I transcript di sessione veri e propri: stessa classe degli export (la
+#    conversazione integrale, password incollate comprese). Su una macchina di
+#    lavoro ne girano a centinaia: la probabilità che uno finisca in un `add`
+#    non è teorica.
+SESSION_JSONL = re.compile(r"\.jsonl$")
+
+# c) Database. Un `archive.db` committato per sbaglio non è "un file grosso": è
+#    l'intero archivio — decine di migliaia di messaggi — in un oggetto solo.
+#    Sono dati di un'installazione, non del progetto: non entrano, punto.
+DATABASE = re.compile(r"\.(db|sqlite3?)(-wal|-shm)?$")
+
+# Unica via d'uscita, stretta di proposito: una fixture di test piccola può
+# essere un .jsonl legittimo. Un transcript vero non ci sta dentro il tetto.
+FIXTURE_DIR = re.compile(r"(^|/)tests?/(fixtures?|data)/")
+FIXTURE_MAX_BYTES = 64 * 1024
 
 # ── R2 — materiale credenziale vero (non i segnaposto) ────────────────────────
 # Ogni pattern pretende alfabeto+lunghezza reali, così `tskey-auth-...` nella doc
@@ -94,6 +110,36 @@ def main() -> int:
                 f"       → toglilo (`git rm --cached`) e tienilo fuori dal repo."
             )
             continue
+
+        if DATABASE.search(path):
+            problems.append(
+                f"  [R1] {path}\n"
+                f"       → database tracciato. Non è «un file grosso»: è l'intero contenuto\n"
+                f"         di un'installazione (un archivio può valere decine di migliaia di\n"
+                f"         messaggi) in un oggetto solo. I dati non stanno nel repo.\n"
+                f"       → `git rm --cached` e tienilo fuori. Nessuna eccezione prevista."
+            )
+            continue
+
+        if SESSION_JSONL.search(path):
+            size = Path(path).stat().st_size if Path(path).is_file() else 0
+            if FIXTURE_DIR.search(path) and size <= FIXTURE_MAX_BYTES:
+                pass  # fixture piccola e in chiaro sotto tests/: legittima
+            else:
+                why = (
+                    f"supera il tetto fixture ({size} B > {FIXTURE_MAX_BYTES} B)"
+                    if FIXTURE_DIR.search(path)
+                    else "sta fuori da tests/fixtures/"
+                )
+                problems.append(
+                    f"  [R1] {path}\n"
+                    f"       → .jsonl tracciato che {why}.\n"
+                    f"         È la stessa classe degli export di sessione: un transcript\n"
+                    f"         integrale, password incollate comprese.\n"
+                    f"       → se è davvero una fixture, mettila in tests/fixtures/ e tienila\n"
+                    f"         piccola; se è un transcript, fuori dal repo."
+                )
+                continue
 
         if path in ALLOWLIST:
             continue
