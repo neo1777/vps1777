@@ -888,3 +888,32 @@ def test_meta_description(tmp_path: Path) -> None:
     archive_indexer.set_meta(db, "description", "note di lavoro 1777")
     assert archive_indexer.get_meta(db, "description") == "note di lavoro 1777"
     assert archive_indexer.db_info(db)["description"] == "note di lavoro 1777"
+
+
+def test_skipped_no_collapse(tmp_path: Path) -> None:
+    """Il caso provato da b82df434 (16/07): tre scarti GEMELLI (stesso tipo, niente
+    ts) devono produrre TRE lapidi, non una. L'uid era sha1(source·reason·detail·ts)
+    con detail=tipo e ts vuoto → collassavano via INSERT OR IGNORE: il contatore
+    della perdita perdeva. Ora il detail porta la posizione nel file (unica per riga,
+    stabile fra re-ingest: dedup fra ingest sì, collasso dentro l'ingest no)."""
+    p = tmp_path / "s.jsonl"
+    p.write_text("\n".join([
+        '{"type":"user","uuid":"ok1","timestamp":"2026-01-01T00:00:00Z","message":{"content":"valido"}}',
+        '{"type":"user","message":{"content":"senza ts 1"}}',
+        '{"type":"user","message":{"content":"senza ts 2"}}',
+        '{"type":"user","message":{"content":"senza ts 3"}}',
+    ]), encoding="utf-8")
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(p), str(db))
+    assert n == 1  # solo il valido
+    assert archive_indexer.count_skipped(db) == 3  # TRE lapidi, non una
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        details = [r[0] for r in conn.execute(
+            "SELECT detail FROM skipped WHERE reason='no-uuid-o-ts' ORDER BY detail").fetchall()]
+        assert len(details) == 3 and len(set(details)) == 3  # uniche
+    finally:
+        conn.close()
+    # la proprietà che NON va persa: re-ingest dello stesso file NON duplica le lapidi
+    archive_indexer.index_file(str(p), str(db))
+    assert archive_indexer.count_skipped(db) == 3

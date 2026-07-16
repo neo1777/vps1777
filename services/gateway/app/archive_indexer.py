@@ -539,7 +539,9 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
     # tetto anche qui: `index_jsonl` accetta un file-like (non solo un path), e su
     # uno stream non c'è nessuno `st_size` da controllare. Si contano i byte letti.
     read = 0
+    n_riga = 0  # posizione nel file: rende UNICA la lapide di ogni scarto (vedi sotto)
     for line in fh:
+        n_riga += 1
         read += len(line)
         if read > MAX_FILE_BYTES:
             raise ValueError(
@@ -556,7 +558,12 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             continue
         uuid, ts = d.get("uuid"), d.get("timestamp")
         if not uuid or not ts:
-            yield _Skip("claude-code", "no-uuid-o-ts", str(d.get("type") or ""), str(ts or ""))
+            # detail = tipo + POSIZIONE nel file: senza l'indice, tutti gli scarti dello
+            # stesso tipo collassavano in UNA lapide (uid identico + OR IGNORE) — il
+            # contatore della perdita perdeva. L'indice è stabile fra re-ingest dello
+            # stesso file: dedup fra ingest sì, collasso dentro l'ingest no.
+            yield _Skip("claude-code", "no-uuid-o-ts",
+                        f"{d.get('type') or ''}#r{n_riga}", str(ts or ""))
             continue
         msg = d.get("message") or {}
         blocks = extract_blocks(msg.get("content"))
@@ -682,14 +689,19 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
             yield (_uid("summary", str(c.get("uuid") or name)), name,
                    str(c.get("updated_at") or ""), summary.strip(),
                    "summary", "", "", "", "")
-        for m in (c.get("chat_messages") or c.get("messages") or []):
+        for i_msg, m in enumerate(c.get("chat_messages") or c.get("messages") or []):
+            # nome-conv + indice nel detail: due scarti gemelli (stesso testo, stesso
+            # tipo) devono restare DUE lapidi — l'uid è sha1 del detail, e il collasso
+            # da OR IGNORE dentro lo stesso ingest falserebbe la quadratura (#56).
             if not isinstance(m, dict):
-                yield _Skip("claude-conversations", "non-dict", str(m), "")
+                yield _Skip("claude-conversations", "non-dict",
+                            f"{name}[{i_msg}]: {str(m)[:150]}", "")
                 continue
             uuid = m.get("uuid")
             if not uuid:
                 yield _Skip("claude-conversations", "no-uuid",
-                            str(m.get("text") or ""), str(m.get("created_at") or ""))
+                            f"{name}[{i_msg}]: {str(m.get('text') or '')[:150]}",
+                            str(m.get("created_at") or ""))
                 continue
             # PRIMA: `m.get("text") or extract_text(m.get("content"))`.
             # Nell'export claude.ai `text` è SEMPRE valorizzato (misurato: 0 messaggi
