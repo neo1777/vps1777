@@ -12,7 +12,7 @@ Grazie per voler contribuire. Spiegazione veloce di come lavoriamo.
 ## Setup dev
 
 ```bash
-git clone https://github.com/<owner>/vps1777.git
+git clone https://github.com/neo1777/vps1777.git   # o il tuo fork, se contribuisci
 cd vps1777
 ./setup.sh                 # configura .env locale + secrets
 docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch

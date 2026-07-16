@@ -149,7 +149,10 @@ fonte di verità — qui c'è la sintesi, là il registro che la CI verifica.
 
 ### Baseline (dall'inizio)
 
-- Backend su rete `internal: true` — world-isolated, nessun egress.
+- Backend su rete `internal: true` — world-isolated. *(Vero per tutti all'inizio;
+  dalla v0.33.0 `nb1777-mcp` e il bot hanno un'uscita dedicata sulla rete `egress`
+  — vedi **Rete** sopra. Chi resta solo su `backend`, come `archive-mcp`, non può
+  esfiltrare nulla: è quello il punto, e per lui vale ancora alla lettera.)*
 - OAuth 2.1 + DCR + PKCE; JWT con `typ` separati (`access` ≠ `admin_cookie` ≠ miniapp).
 - `GATEWAY_SECRET` come path-namespace del proxy MCP.
 - Container non-root, `cap_drop: ALL`, `no-new-privileges`.
