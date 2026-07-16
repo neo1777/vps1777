@@ -292,11 +292,32 @@ def describe() -> list[dict[str, Any]]:
             continue
         try:
             info = fts.db_stats_conn(conn)
+            info["description"] = fts.meta_value_conn(conn, "description")
         except sqlite3.OperationalError:
-            info = {"rows": 0, "oldest": "", "newest": "", "labels": 0}
+            info = {"rows": 0, "oldest": "", "newest": "", "labels": 0, "description": ""}
         finally:
             conn.close()
         info["name"] = name
         info["snapshot"] = _snapshot(_DBS[name])
         out.append(info)
     return out
+
+
+def set_description(db: str, description: str) -> dict[str, Any]:
+    """Imposta/aggiorna la descrizione di un DB (scheda `meta`, D5).
+
+    È l'UNICA scrittura ammessa da questo layer — ogni altra apertura è
+    `mode=ro`. Qui si apre in scrittura, e si tocca solo `meta['description']`:
+    i messaggi non si scrivono mai da MCP."""
+    _maybe_reload()
+    if db not in _DBS:
+        raise KeyError(f"DB '{db}' non disponibile. Disponibili: {available_dbs()}")
+    conn = sqlite3.connect(str(_DBS[db]))
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('description', ?)",
+                     (str(description),))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"db": db, "description": str(description)}

@@ -274,6 +274,16 @@ def stats_by_period_conn(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         "WHERE ts <> '' GROUP BY period ORDER BY period").fetchall()]
 
 
+def meta_value_conn(conn: sqlite3.Connection, key: str, default: str = "") -> str:
+    """Una voce dalla scheda `meta` del DB (es. `description`, D5). `default` se la
+    tabella manca (DB precedenti alla feature) o la chiave non c'è."""
+    try:
+        row = conn.execute("SELECT value FROM meta WHERE key = ?", (str(key),)).fetchone()
+    except sqlite3.OperationalError:
+        return default
+    return row[0] if row and row[0] is not None else default
+
+
 def db_stats_conn(conn: sqlite3.Connection) -> dict[str, Any]:
     """Righe, intervallo temporale e n. di etichette di un DB (per describe)."""
     rows = int(conn.execute("SELECT count(*) FROM messages").fetchone()[0])

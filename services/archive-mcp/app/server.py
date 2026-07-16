@@ -130,7 +130,18 @@ def list_databases() -> list[str]:
 @mcp.tool()
 def describe_databases() -> list[dict[str, Any]]:
     """Scheda di ogni DB caricato: {name, rows, oldest, newest, labels,
-    snapshot}. `oldest`/`newest` = intervallo temporale coperto; `snapshot` =
-    data dell'ultima modifica (freschezza). Utile per sapere PRIMA di cercare
-    quanto è ampio e aggiornato l'archivio."""
+    snapshot, description}. `oldest`/`newest` = intervallo temporale coperto;
+    `snapshot` = data dell'ultima modifica (freschezza); `description` = a cosa
+    serve / cosa contiene l'archivio (scritta all'upload o via set_description).
+    Utile per sapere PRIMA di cercare quanto è ampio e aggiornato l'archivio."""
     return db.describe()
+
+
+@mcp.tool()
+def set_description(db_name: str, description: str) -> dict[str, Any]:
+    """Imposta/aggiorna la DESCRIZIONE di un archivio: a cosa serve, cosa
+    contiene, come va usato. Compare in describe_databases (campo `description`)
+    e nella pagina admin. Usala quando carichi o riorganizzi un archivio, o
+    quando la scheda è vuota/stale. È l'unica scrittura ammessa via MCP: tocca
+    solo la scheda, mai i messaggi."""
+    return db.set_description(db_name, description)

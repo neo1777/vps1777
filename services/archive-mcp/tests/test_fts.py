@@ -265,3 +265,13 @@ def test_stats_by_period():
     conn = _db(_ROWS)
     st = fts.stats_by_period_conn(conn)
     assert st == [{"period": "2026", "rows": 4}]
+
+
+def test_meta_value():
+    """La scheda `meta` (D5): default se la tabella manca (DB pre-feature),
+    il valore quando c'è."""
+    conn = _db(_ROWS)  # schema minimale, senza tabella meta
+    assert fts.meta_value_conn(conn, "description") == ""
+    conn.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute("INSERT INTO meta VALUES ('description', 'archivio di prova')")
+    assert fts.meta_value_conn(conn, "description") == "archivio di prova"

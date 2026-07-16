@@ -873,3 +873,18 @@ def test_zip_normale_sotto_i_tetti_passa(tmp_path) -> None:
     with zipfile.ZipFile(zp, "w") as z:
         z.writestr("conversations.json", json.dumps(convs))
     assert archive_indexer.index_file(str(zp), str(tmp_path / "o.db")) == 1
+
+
+def test_meta_description(tmp_path: Path) -> None:
+    """La descrizione dell'archivio (D5) vive nella tabella `meta`: scritta con
+    set_meta (upload admin / tool MCP), letta con get_meta, superficiata da
+    db_info. Assente → stringa vuota, mai un errore."""
+    md = tmp_path / "n.md"
+    md.write_text("# t\n\ncorpo", encoding="utf-8")
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(md), str(db))
+    assert archive_indexer.get_meta(db, "description") == ""
+    assert archive_indexer.db_info(db)["description"] == ""
+    archive_indexer.set_meta(db, "description", "note di lavoro 1777")
+    assert archive_indexer.get_meta(db, "description") == "note di lavoro 1777"
+    assert archive_indexer.db_info(db)["description"] == "note di lavoro 1777"

@@ -612,6 +612,7 @@ async def archive_view(request: Request) -> Response:
             fallback=_safe_db_name(Path(getattr(upload, "filename", "") or "").stem),
         )
         project = str(form.get("project") or "").strip()
+        description = str(form.get("description") or "").strip()
         suffix = Path(str(getattr(upload, "filename", "") or "")).suffix.lower() or ".jsonl"
         tmp = db_dir / f".upload-{db_name}-{os.getpid()}{suffix}"
         db_path = db_dir / f"{db_name}.db"
@@ -647,6 +648,8 @@ async def archive_view(request: Request) -> Response:
                 # dispatch per estensione: .jsonl/.json → Claude Code; .zip → claude.ai; .md/.txt → testo
                 n = archive_indexer.index_file(str(tmp), str(db_path), project=project)
                 verb = "indicizzati"
+            if description:
+                archive_indexer.set_meta(db_path, "description", description)
             total = archive_indexer.count_rows(db_path)
             audit({"event": "admin_archive_ingest", "by": email, "db": db_name, "fmt": suffix, "rows": n})
             msg = f"{verb}: {n} record in '{db_name}' (totale {total}). Ricerca attiva subito."
@@ -669,6 +672,7 @@ async def archive_view(request: Request) -> Response:
             )
             rows += (
                 f"<tr><td><code>{html.escape(d['name'])}</code></td>"
+                f"<td>{html.escape(d.get('description') or '—')}</td>"
                 f"<td>{d['rows']}</td><td>{d['labels']}</td>"
                 f'<td class="top-labels">{top}</td>'
                 f"<td>{_fmt_size(d['size'])}</td>"
@@ -678,7 +682,7 @@ async def archive_view(request: Request) -> Response:
                 f'<button type="submit" class="danger">Elimina</button></form></td></tr>'
             )
         table = (f'<section><div class="kicker">DB nell\'archivio</div>'
-                 f'<table><thead><tr><th>nome</th><th>messaggi</th><th>etichette</th>'
+                 f'<table><thead><tr><th>nome</th><th>descrizione</th><th>messaggi</th><th>etichette</th>'
                  f'<th>principali</th><th>dimensione</th><th>aggiornato</th><th></th></tr></thead>'
                  f'<tbody>{rows}</tbody></table>'
                  f'<p class="hint">Eliminare un DB toglie subito l\'archivio dalla ricerca. '
@@ -714,6 +718,7 @@ document.querySelectorAll('form.delform').forEach(function(f){{
     <div class="row"><label>fonte</label><input type="file" name="jsonl_file" accept=".jsonl,.json,.zip,.md,.txt,.pdf,.db" required></div>
     <div class="row"><label>nome DB</label><input type="text" name="db_name" placeholder="es. cc (vuoto = dal nome file)"></div>
     <div class="row"><label>progetto</label><input type="text" name="project" placeholder="etichetta (vuoto = dedotta dalla fonte)"></div>
+    <div class="row"><label>descrizione</label><input type="text" name="description" placeholder="a cosa serve / cosa contiene questo archivio (facoltativa, editabile dopo dall'MCP)"></div>
     <div class="toolbar">
       <button type="submit" class="primary">Carica e indicizza</button>
       <a class="btn" href="/admin/audit">Audit →</a>

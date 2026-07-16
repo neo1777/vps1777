@@ -192,6 +192,12 @@ CREATE TABLE IF NOT EXISTS skipped(
     ts          TEXT,
     ingest_date TEXT
 );
+-- Scheda dell'archivio (D5): `description` = a cosa serve / cosa contiene questo DB.
+-- Scritta all'upload (admin) e aggiornabile dal tool MCP `set_description`.
+CREATE TABLE IF NOT EXISTS meta(
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 # NOTA sullo schema FTS — perché `tools` sì e `thinking` no.
 #
@@ -335,6 +341,36 @@ def count_rows(db_path: Union[str, Path]) -> int:
         return 0
 
 
+def set_meta(db_path: Union[str, Path], key: str, value: str) -> None:
+    """Scrive una coppia nella scheda `meta` del DB (es. `description`). Read-write:
+    la usano l'upload (admin) e il tool MCP `set_description`. Crea la tabella se
+    manca (DB precedenti alla feature)."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                     (str(key), str(value)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_meta(db_path: Union[str, Path], key: str, default: str = "") -> str:
+    """Legge una coppia dalla scheda `meta` (es. `description`). `default` se assente
+    o se il DB è precedente alla tabella."""
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (str(key),)).fetchone()
+            return row[0] if row and row[0] is not None else default
+        except sqlite3.OperationalError:
+            return default  # DB precedente alla tabella meta
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return default
+
+
 def count_skipped(db_path: Union[str, Path]) -> int:
     """Numero di record nel libro-mastro degli scarti (D3). 0 se assente/vecchio DB
     senza la tabella. Il conteggio non è più muto: si legge da qui e da `db_info`."""
@@ -356,7 +392,7 @@ def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
     Robusto: DB assente o illeggibile → scheda a zero, mai un'eccezione."""
     p = Path(db_path)
     out: dict = {"name": p.stem, "rows": 0, "labels": 0, "top": [],
-                 "size": 0, "mtime": "", "skipped": 0}
+                 "size": 0, "mtime": "", "skipped": 0, "description": ""}
     try:
         out["size"] = p.stat().st_size
         out["mtime"] = _file_ts(p)
@@ -380,6 +416,11 @@ def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
                 out["skipped"] = int(conn.execute("SELECT count(*) FROM skipped").fetchone()[0])
             except sqlite3.OperationalError:
                 pass  # DB precedente alla tabella skipped
+            try:
+                r = conn.execute("SELECT value FROM meta WHERE key = 'description'").fetchone()
+                out["description"] = (r[0] if r and r[0] else "")
+            except sqlite3.OperationalError:
+                pass  # DB precedente alla tabella meta
         finally:
             conn.close()
     except sqlite3.Error:
