@@ -2,6 +2,27 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.37.3] — 2026-07-16
+
+### Il contatore della perdita non perde più
+
+Tre scarti gemelli (stesso tipo, senza timestamp) collassavano in **una** lapide
+del libro-mastro `skipped`: l'uid è `sha1(source·reason·detail·ts)`, il detail
+era il solo tipo e il ts è vuoto *per definizione* su quel bucket → l'`INSERT
+OR IGNORE` li fondeva. Lo strumento nato per la #56 — trasformare i «271 persi»
+da inferenza in aritmetica — **contava i tipi di scarto, non gli scarti**.
+Trovato eseguendo `write_rows` su un db di prova (6 scarti → 4 registrati),
+**prima** del re-ingest che l'avrebbe usato come metro di collaudo.
+
+Il `detail` ora porta la **posizione** (riga nel file per claude-code; nome
+conversazione + indice per claude.ai): unica per scarto, **stabile fra
+re-ingest** — la proprietà da non perdere: dedup fra ingest sì, collasso dentro
+l'ingest no. Una PK è un'opinione su cosa rende due cose «la stessa cosa»: se
+quell'opinione è sbagliata, il conteggio mente e nessun test lo vede.
+
+Verificato: +1 test (3 gemelli → 3 lapidi uniche + idempotenza al re-ingest);
+suite gateway **45 passed**.
+
 ## [0.37.2] — 2026-07-16
 
 ### Release pulita post-bonifica (la v0.37.1 spediva ancora il file)
