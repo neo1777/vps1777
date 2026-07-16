@@ -2,6 +2,54 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.37.1] — 2026-07-16
+
+> Il numero salta lo 0.37.0: quel tag è nato bruciato (puntava al merge senza il
+> bump — la guard `VERSION == tag` l'ha respinto in 8s, e i tag `v*` sono
+> immutabili per ruleset H24). Nessuna release pubblicata con quel numero:
+> resta un tag orfano innocuo. La guard ha fatto esattamente il suo mestiere.
+
+### archive: il thread, il browse, gli scarti, la scheda — le decisioni del tavolo a 4
+
+L'archivio smette di essere un solo-grep: sa leggere una chat intera, dire cosa
+contiene, contare ciò che scarta, e portare una scheda per ogni DB. Sono le
+decisioni D1–D5 del tavolo a 4 (le 3 sessioni + Neo), implementate e mergiate.
+
+- **Thread vero (D1, #57)** — nuovo tool **`get_conversation`**: il thread intero
+  che contiene un uuid, camminando l'albero `parent_uuid` (antenati + discendenti,
+  due CTE ricorsive; indice `idx_parent` creato all'ingest). E **`get_context`
+  riparato**: i vicini vengono dallo *stesso thread* quando l'arco c'è — prima
+  approssimava con `(project, ts)` e poteva mischiare conversazioni interlacciate
+  («stesso thread» era un over-claim). Sulle fonti senza arco (documenti chunked,
+  DB v1) entrambi ripiegano sul comportamento storico: nessuna regressione.
+- **Browse (D2)** — **`list_projects`** (le etichette con i conteggi) e
+  **`archive_stats`** (istogramma per anno): navigare l'archivio, non solo
+  cercarlo. La ricostruzione fedele dell'ordine dei chunk sulla coda-documenti è
+  dichiarata fuori scope: passo evolutivo.
+- **Il libro-mastro degli scarti (D3, #55/#56)** — ogni record che l'ingest non
+  indicizza (senza uuid, vuoto, malformato) lascia una lapide nella tabella
+  **`skipped`** (motivo, dettaglio, data) invece di sparire in un `continue`
+  muto. Conteggio in `db_info()["skipped"]` / `count_skipped()`; i dati raw
+  restano raggiungibili; il re-ingest non duplica le lapidi.
+- **Le summary non si perdono più (D4)** — l'estrattore legge il campo `summary`
+  delle conversazioni claude.ai (mancava il codice, non lo schema): righe
+  attribuite `sender='summary'`, cercabili (~396k char su un export reale).
+- **La scheda dell'archivio (D5)** — campo **descrizione** all'upload
+  (`/admin/archive`), colonna nella pagina, tabella `meta` nel DB; esposta da
+  `describe_databases` e aggiornabile col nuovo tool **`set_description`** —
+  l'unica scrittura ammessa via MCP (tocca la scheda, mai i messaggi).
+- **Zip di documenti** — uno zip che non è un export riconosciuto ma contiene
+  `.md`/`.txt` ora si indicizza doc-per-doc (budget anti-zip-bomb condiviso,
+  idempotente, resource-fork macOS saltate) invece di essere rifiutato.
+- **Doc allineata** — `ARCHIVE.md` riflette lo schema v2 reale, gli 8 tool e le
+  tabelle nuove; primo giro dell'audit doc: **`NB1777.md` nuovo** (37 tool
+  verificati dal codice, #30/#42 documentate) + fix di freschezza su
+  ARCHITECTURE/README/INSTALL/SECRETS/ONBOARDING/OPS/UPDATE.
+
+Verificato: suite gateway **151 passed** (nuovi: summary, idx_parent,
+skip-ledger, meta/descrizione, zip-di-documenti) + archive-mcp **26 passed**
+(thread-walk, fallback lineare, context-nel-thread, projects, stats, meta).
+
 ## [0.36.0] — 2026-07-14
 
 ### nb1777: il verdetto e la notifica — chiude la #30 (②③)
