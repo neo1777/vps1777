@@ -57,15 +57,18 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 > riconosciuto, o senza messaggi estraibili, viene **rifiutato con un errore
 > chiaro** — mai un "ok, 0 record".
 
-Campi del form: **nome DB** (vuoto = dal nome file) e **progetto** (etichetta;
-vuoto = dedotta dalla fonte). Ricaricare lo stesso nome DB non duplica (dedup per
-id); fonti diverse sullo stesso nome si accumulano.
+Campi del form: **nome DB** (vuoto = dal nome file), **progetto** (etichetta;
+vuoto = dedotta dalla fonte) e **descrizione** (facoltativa: a cosa serve / cosa
+contiene l'archivio — compare nella scheda e in `describe_databases`, ed è
+aggiornabile dopo col tool MCP `set_description`). Ricaricare lo stesso nome DB
+non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano.
 
 ## Gestire i DB — lista ed eliminazione
 
-La pagina mostra per ogni DB la **scheda completa**: messaggi, etichette
-distinte (le "provenienze": titoli chat, `project:<nome>`, `design:<nome>`…),
-le etichette principali, la dimensione su disco e l'ultimo aggiornamento.
+La pagina mostra per ogni DB la **scheda completa**: descrizione, messaggi,
+etichette distinte (le "provenienze": titoli chat, `project:<nome>`,
+`design:<nome>`…), le etichette principali, la dimensione su disco e l'ultimo
+aggiornamento.
 
 Il bottone **Elimina** (con conferma) rimuove il DB: la ricerca su quell'archivio
 smette subito (archive-mcp se ne accorge da solo, scan-mode) e l'azione finisce
@@ -76,16 +79,26 @@ stesso nome DB. Lista ed eliminazione sono disponibili anche dalla **Mini App**
 
 ## Cercare — i tool MCP
 
-`archive-mcp` espone cinque tool via MCP (usabili dal connettore claude.ai e
+`archive-mcp` espone questi tool via MCP (usabili dal connettore claude.ai e
 dalla Mini App):
 
 | Tool | Cosa fa |
 |---|---|
 | `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}` |
 | `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}` |
-| `get_context(uuid, db_name, before, after)` | i messaggi **attorno** a un risultato, col **contenuto pieno** (supera il troncamento dello snippet) |
+| `get_context(uuid, db_name, before, after)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; se il messaggio è in un thread, i vicini vengono dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale |
+| `get_conversation(uuid, db_name, limit)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N |
+| `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
+| `archive_stats(db_name)` | istogramma dei messaggi per **anno** — *quando* l'archivio è fitto, da sapere prima di cercare |
 | `list_databases()` | i nomi dei DB caricati |
-| `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza) |
+| `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza), **description** |
+| `set_description(db_name, description)` | scrive/aggiorna la **descrizione** dell'archivio — l'**unica scrittura** ammessa via MCP (tocca la scheda, mai i messaggi) |
+
+> **Fonti senza thread.** Sui documenti chunked (pdf/telegram/memory) e sui DB
+> storici `parent_uuid` è vuoto: lì `get_conversation` ripiega sull'ordine
+> lineare dell'archivio e `get_context` sull'adiacenza temporale. La
+> ricostruzione fedele dell'ordine dei chunk (colonna `seq`) è un passo
+> **evolutivo dichiarato**, fuori scope oggi.
 
 **Sintassi della query FTS5** (le stesse regole sono nella docstring che il
 modello legge prima di cercare):
@@ -146,6 +159,9 @@ messages(uuid PRIMARY KEY, project, ts, content,
          sender, tools, thinking, attachments, parent_uuid)
 messages_fts USING fts5(uuid, project, ts, content, tools, attachments,
                         content='messages', ...)   -- external-content
+CREATE INDEX idx_parent ON messages(parent_uuid);   -- il thread-walking di get_conversation
+skipped(uid PRIMARY KEY, source, reason, detail, ts, ingest_date)  -- libro-mastro degli scarti
+meta(key PRIMARY KEY, value)                        -- scheda: description, …
 ```
 
 È quello che producono `archive_indexer` e `archive-ingest`. In FTS finiscono
@@ -153,6 +169,17 @@ messages_fts USING fts5(uuid, project, ts, content, tools, attachments,
 `thinking` e `parent_uuid` si **conservano** nella tabella (leggibili via SQL /
 `get_context`) ma **non** si indicizzano — vedi la nota sullo schema in
 `archive_indexer.py`.
+
+Tre cose in più che l'ingest produce:
+
+- le **`summary`** delle conversazioni claude.ai diventano righe attribuite
+  `sender='summary'`, cercabili come tutto il resto;
+- ogni record **scartato** (senza uuid, vuoto, malformato) lascia una **lapide**
+  in `skipped` — datata, con motivo e dettaglio — invece di sparire in silenzio:
+  il conteggio è in `db_info()["skipped"]` / `count_skipped()`, e i dati raw
+  restano raggiungibili alla bisogna;
+- la **descrizione** dell'archivio vive in `meta['description']` (scritta
+  all'upload, aggiornabile via `set_description`).
 
 Un `.db` drop-in è accettato se è un SQLite con la tabella `messages_fts`
 (controllo in `admin.py`). Anche un DB **v1** (le sole 4 colonne
