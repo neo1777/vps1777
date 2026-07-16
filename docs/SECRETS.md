@@ -94,10 +94,8 @@ file, riscritto a ogni rotazione) e la confronta con una soglia:
 > non quanto un'API key qualsiasi: per questo la soglia consigliata scende a
 > **90 giorni** (allineata a `oauth_signing_secret`), non 365. La revoca è
 > immediata da @BotFather (rigenera il token → il vecchio smette di firmare).
->
-> ⚠️ La soglia nel CODICE (il check `vps1777 secrets-status`) è ancora **365** in
-> `tools/vps1777.py` (`_SECRET_POLICY`, riga del `telegram_bot_token`): va portata
-> a 90 perché il promemoria automatico sia coerente con questa doc.
+> La soglia è **90 anche nel codice** (`tools/vps1777.py`, `_SECRET_POLICY`) dalla
+> v0.33.0 (H29): il promemoria automatico e questa pagina dicono la stessa cosa.
 
 Se un secret supera la soglia, il check **notifica il owner su Telegram** (`--notify`)
 e lo segna nella pagina admin **`/admin/secrets`**, che mostra età, ultima rotazione

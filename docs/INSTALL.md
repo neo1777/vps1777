@@ -56,7 +56,7 @@ Se rilanci `setup.sh`, salta gli step già fatti.
    ```
    Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm` (login admin). Il gateway lo estrae sul volume; `nb1777-mcp` lo rileva alla prossima call.
    Se `nlm` risulta "not found": `uv tool update-shell` (mette `~/.local/bin` nel PATH) e riapri il terminale.
-3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone **2 tool** (`search`, `get_conversation`), `nb1777` ne espone **35**. I connector **persistono** ai restart del gateway (DCR salvata su disco).
+3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **37** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
 4. **Bot Telegram**: `/start` al tuo bot
 5. **Mini App**: nel bot, bottone **Pannello** accanto al campo di testo (o
    `/pannello`) → la plancia mobile: notebook, archivio, secret, update.
@@ -70,8 +70,8 @@ sono documentati in [OPS.md](OPS.md).
 
 ## Aggiornamento
 
-Canale primario: la CLI host **`vps1777 update`** (installata da
-installer/deploy.sh) o il pulsante nel **pannello admin → tab Update** —
+Canale primario: la CLI host **`vps1777 update`** (installata da `deploy.sh`,
+nella radice del repo) o il pulsante nel **pannello admin → tab Update** —
 backup automatico prima, pull con verifica digest, migrazioni, health-gate,
 rollback automatico se la nuova versione non torna in salute. Manuale
 completo: [UPDATE.md](UPDATE.md).

@@ -26,7 +26,7 @@ Durante il deploy, `step_prepare` applica un hardening minimo **sicuro** sull'ho
 ## Aggiornamenti — canale gestito
 
 Il canale primario di aggiornamento è la CLI host **`vps1777 update`**
-(installata da installer/deploy.sh) o il pulsante nel pannello admin → tab
+(installata da `deploy.sh`, nella radice del repo) o il pulsante nel pannello admin → tab
 **Update**: backup age + snapshot pre-update, pull con verifica digest,
 migrazioni, health-gate 180s, **rollback automatico** se lo stack non torna
 in salute. Manuale completo: [UPDATE.md](UPDATE.md).
