@@ -44,6 +44,12 @@ Garanzie:
   auto-installabile — l'update si ferma. `cosign` viene auto-installato se
   assente (versione pinnata). Via d'emergenza consapevole:
   `VPS1777_REQUIRE_COSIGN=0` in `.env` oppure `--no-require-cosign`.
+- **I tag `v*` sono immutabili** (H24, v0.32.0): un ruleset GitHub vieta di
+  spostarli o cancellarli. È il pezzo che rende *fidato* tutto il resto: se un
+  tag potesse essere ripuntato, il bundle firmato a cui l'update si àncora
+  potrebbe essere sostituito sotto i piedi, e la verifica del digest starebbe
+  confrontando la cosa sbagliata con sé stessa. (La regola `non_fast_forward`
+  da sola non bastava: spostare un tag *in avanti* è un fast-forward.)
 - **Rollback automatico**: se dopo l'update lo stack non torna healthy entro
   180s (healthcheck compose + probe `/health?deep=1` del gateway), la VPS torna
   **da sola** alla versione precedente — le immagini vecchie sono ancora locali,
@@ -63,12 +69,33 @@ del gateway stesso a metà update); l'esito arriva comunque su Telegram.
 
 ## Notifiche e check
 
-Un timer systemd (`vps1777-check-update.timer`, una volta al giorno) fa una
-GET **non autenticata** a `api.github.com/repos/neo1777/vps1777/releases/latest`
+Sulla VPS girano **due** timer systemd, con cadenze diverse perché sorvegliano
+cose che invecchiano a velocità diverse.
+
+**1. Nuove release** — `vps1777-check-update.timer`, **una volta al giorno**. Fa
+una GET **non autenticata** a `api.github.com/repos/neo1777/vps1777/releases/latest`
 — **zero telemetria**: nessun dato lascia la tua VPS. Se c'è una versione
 nuova: messaggio Telegram al owner (una sola volta per release) e badge nella
 card admin. Se GitHub è irraggiungibile: nessun rumore, solo un badge
 "check stantio".
+
+**2. Scadenze dei secret** — `vps1777-secrets-check.timer`, **settimanale**
+(i secret invecchiano lentamente: una nudge a settimana basta; `RandomizedDelaySec`
+distribuisce il carico, `Persistent=true` recupera i check persi a VPS spenta).
+Lancia `vps1777 secrets-status --notify`: legge l'mtime dei file in `secrets/`,
+scrive `onboarding/secrets_status.json` (che alimenta `/admin/secrets`) e
+notifica su Telegram i secret oltre soglia. Le soglie e il *perché* di ognuna
+stanno in [SECRETS.md](SECRETS.md). Puoi lanciarlo a mano quando vuoi:
+
+```bash
+vps1777 secrets-status          # a schermo
+vps1777 secrets-status --notify # + notifica Telegram se qualcosa è oltre soglia
+```
+
+> Entrambe le unit non hanno utente né path hardcodati: la CLI sostituisce
+> `@OPERATOR_USER@` / `@REPO@` coi valori reali a ogni update (H43). Era un bug
+> vero: con un operatore diverso da `vps1777` il controllo delle scadenze
+> smetteva di girare **in silenzio**.
 
 ## Rollback manuale
 
