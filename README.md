@@ -24,8 +24,8 @@ incollare in claude.ai. Niente Docker da gestire a mano, niente shell sulla VPS.
 │                                                                  │
 │   claude.ai ──┐                                                  │
 │   Claude Code ├──► https://<host>/<SECRET>/<service>/mcp         │
-│   Mini App ───┤        │                                         │
-│   Telegram ───┘        │                                         │
+│   Mini App ───┤        │   la Mini App entra su /app/*,          │
+│   Telegram ───┘        │   non sul path MCP                      │
 │                        ▼                                         │
 │            ┌───────────────────┐                                 │
 │            │  Tailscale Funnel │  (o Caddy, o Cloudflared)       │
