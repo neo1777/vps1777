@@ -2,6 +2,19 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.37.2] — 2026-07-16
+
+### Release pulita post-bonifica (la v0.37.1 spediva ancora il file)
+
+La v0.37.1 è stata taggata **prima** della bonifica del leak (5528267): il suo
+albero sorgente — quindi i tarball che GitHub genera dal tag e il bundle runtime
+allegato — contengono ancora l'export di sessione rimosso da main (verificato
+scaricandolo, non presunto). I tag `v*` sono immutabili (ruleset H24): questa
+release riparte dal main bonificato. **La release v0.37.1 è stata rimossa**
+(asset compresi); il suo tag resta orfano, come lo 0.37.0 — la coppia racconta
+la stessa lezione: ciò che un tag ha spedito non si disfa, si supera con una
+release più nuova. Nessun'altra modifica al codice rispetto alla 0.37.1.
+
 ## [0.37.1] — 2026-07-16
 
 > Il numero salta lo 0.37.0: quel tag è nato bruciato (puntava al merge senza il
