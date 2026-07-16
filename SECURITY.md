@@ -97,6 +97,14 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   la privata sullo stesso disco dei backup). Vedi [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md).
 - **Secrets sempre file-mounted** (baseline): password, signing key, token via
   Docker `secrets:` in `tmpfs /run/secrets/`, **mai** in env var. Vedi [docs/SECRETS.md](docs/SECRETS.md).
+- **Il repo è pubblico, e un gate lo tratta come tale** (`security/check_no_leaks.py`,
+  in CI a ogni PR). Fa fallire la build se entra un **export di sessione** (il `.txt`
+  di `/export`: nome innocuo, dentro il detto-e-fatto di una sessione di lavoro) o del
+  materiale credenziale vero — distinguendolo dai segnaposto della doc, perché un gate
+  che grida al lupo viene disattivato e allora non protegge più niente. Riporta *dove*,
+  mai *cosa*: i log della CI di un repo pubblico sono pubblici. Il `.gitignore` da solo
+  non basta — non ferma `git add -f` e non fa nulla per un file già tracciato. Regola
+  che il gate ricorda a chi lo incontra: **un segreto passato non si toglie, si ruota.**
 
 ### Contenimento dei container
 

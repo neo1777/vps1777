@@ -39,6 +39,15 @@ jobs:
       # una build rossa.
       - name: Registro dei rilievi — nessun claim senza coordinata
         run: uv run --with pyyaml security/check_findings.py
+      # Anti-leak: niente export di sessione tracciati, niente materiale
+      # credenziale nei file del repo. Nasce da un errore vero: un transcript di
+      # lavoro (.txt dal nome innocuo, ma con dentro tutto il detto-e-fatto della
+      # sessione) è entrato in una PR ed è finito su un repo pubblico. Il
+      # .gitignore da solo non bastava: non ferma `git add -f` e non fa nulla per
+      # un file già tracciato. Questo gira a ogni PR e dice no PRIMA del merge —
+      # perché dopo non si disfa: resta nella storia, nei diff e in ogni clone.
+      - name: Gate anti-leak — online solo ciò che online si può
+        run: python3 security/check_no_leaks.py
       # Entrambe le combinazioni devono restare valide: produzione (solo
       # immagini ghcr) e sviluppo (overlay di build locale).
       - name: Validate compose (production — pull only)
