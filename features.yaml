@@ -1,0 +1,205 @@
+# features.yaml — IL LEDGER DELLE FUNZIONI di vps1777 (e dei suoi MCP).
+#
+# ─ PERCHÉ ESISTE ──────────────────────────────────────────────────────────────
+# Regola d'oro (Neo, 17/07): «vps1777 sarà esteso tantissimo e non deve MAI capitare
+# che ci perdiamo funzioni per strada — anche cambiando sessione o LLM.»
+# Una memoria muore col cambio-sessione/LLM. Questo file NO: vive in git, e una
+# MACCHINA (tools/verify-features.py, in CI) lo controlla contro la realtà. Un LLM
+# nuovo non deve RICORDARE le funzioni: lancia il verificatore e le SCOPRE, e scopre
+# se la realtà combacia.
+#
+# ─ LA REGOLA DI CATTURA (setaccio) ────────────────────────────────────────────
+# Questo file NON registra una decisione: la DEFINISCE. «Abbiamo declassato X» non
+# è vero finché qui non c'è la voce con `status` + `decisione` + `follow_up`. Una
+# decisione senza la sua voce non è presa — è chiacchiera. Il verificatore la fa
+# rispettare: una `deferred` senza `follow_up` = CI ROSSA.
+# Prova storica: sotto questa regola Watchtower sarebbe stato
+#   status: deferred · decisione: 10/06 declassato · follow_up: {verify: exists timer}
+# e la CI sarebbe stata ROSSA dal 10/06 finché il timer non esisteva. Non l'avremmo
+# perso: avrebbe gridato per un mese, invece di svanire in silenzio.
+#
+# ─ IL VERIFICATORE È BIDIREZIONALE (b82df434, la quadratura sulle feature) ─────
+#   dichiarato → reale : ogni voce `active*` deve superare il suo `verify`.
+#                        Voce dichiarata ma REALE-ASSENTE → CI rossa. Cattura la PERDITA.
+#   reale → dichiarato : ogni tool MCP / systemd-unit / profilo compose REALE deve
+#                        avere una voce qui. Reale ma NON dichiarato → CI rossa.
+#                        Cattura ciò che entra senza traccia e POI si dimentica.
+# Solo con ENTRAMBI i versi il conto chiude — come 7.051==5.675 di stamattina.
+#
+# ─ CONFINE (setaccio, ratificato da Neo) ──────────────────────────────────────
+# Questo ledger è PARTE DEL PRODOTTO: protegge le funzioni DI vps1777. Vive nel repo,
+# il verificatore gira in CI (GitHub Actions) o sulla VPS. **MAI un daemon, MAI sul
+# PC utente.** NON copre la nostra infrastruttura di coordinamento (_chat, wait-bus,
+# battiti, ...): quella gira sul PC di sviluppo, non è il prodotto.
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEMA di una voce (i campi che verify-features.py valida su OGNI entry)
+# ══════════════════════════════════════════════════════════════════════════════
+_schema:
+  campi_obbligatori: [id, nome, cosa, dove, status, verify]
+  id: "identificatore stabile e unico. Convenzione: <area>.<feature>
+       (es. archive.search, ops.backup, update.auto-timer, gateway.oauth)."
+  nome: "nome umano breve."
+  cosa: "una riga: cosa fa e perché serve."
+  dove: "lista di coordinate REALI: 'file:riga', 'servizio:nome', 'systemd:unit',
+          'mcp-tool:<server>/<nome>', 'compose-profile:<file>#<profilo>'.
+          È ciò che il verify e il check-inverso usano per trovare la feature."
+  status:
+    active-default: "attiva senza che l'utente faccia nulla (l'installer la accende)."
+    opt-in:         "esiste ma va attivata di proposito. Legittima — ma DICHIARATA."
+    deferred:       "decisa ma non ancora fatta. OBBLIGA `follow_up` (o CI rossa)."
+    removed:        "tolta di proposito. OBBLIGA `decisione`. Resta agli atti perché
+                     lo storico ricordi che ESISTETTE (il codice non lo mostra più)."
+  since: "quando introdotta (versione SemVer o data). Opzionale ma consigliato."
+  decisione: "OBBLIGATORIO per opt-in/deferred/removed: quando + perché, con
+              provenienza [commit <sha>] / [conv <db·uuid·ts>] / [SECURITY.md:<riga>].
+              Un `removed`/`deferred` senza decisione è invisibile allo storico → CI rossa."
+  verify:
+    _nota: "COME la macchina prova che la feature c'è (e, dove possibile, funziona).
+            Una sola di queste chiavi per voce. `manual` è l'ultima spiaggia."
+    path_exists: "<percorso> esiste nel repo."
+    file_contains: "{path, pattern}  — regex presente nel file."
+    grep_count: "{path, pattern, min} — almeno `min` occorrenze (es. conteggio tool)."
+    systemd_unit: "<nome> — esiste systemd/<nome> (.service/.timer/.path)."
+    compose_profile: "{file, profile} — il profilo è dichiarato nel compose."
+    mcp_tool: "{service, name} — il tool è registrato (@mcp.tool + def <name>)."
+    cmd: "<comando> — exit 0 = presente/funziona. Usare con parsimonia (gira in CI)."
+    manual: "<descrizione> — nessuna macchina può provarlo. Il verificatore NON
+             lo fa passare né fallire: lo SEGNALA per revisione umana periodica."
+  follow_up:
+    _nota: "OBBLIGATORIO se status=deferred. Due specie (b82df434):"
+    verify: "una condizione VERIFICABILE (stessa forma di `verify` sopra): la CI la
+             controlla e AUTO-CHIUDE il deferred quando diventa vera. Es. il timer che
+             chiude Watchtower: {systemd_unit: vps1777-auto-update.timer}."
+    manuale: "{cosa, rivedi_dopo: <data>} — a giudizio umano (la CI non può decidere).
+              NON tiene la CI rossa (non è un bug), ma la SORVEGLIA: se oggi > rivedi_dopo,
+              il verificatore la rimette davanti («rivedi questo rinvio»). rivedi_dopo la
+              stima CHI rinvia — sa quanto lontano sta rinviando meglio di un N globale (setaccio)."
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ESEMPI — 4 voci reali che coprono le categorie e le due specie di follow_up.
+# setaccio semina QUI le voci della caccia (A/B) usando questo schema; ogni penna
+# aggiunge le sue voci, il verificatore valida che conformino allo schema.
+# ══════════════════════════════════════════════════════════════════════════════
+features:
+
+  - id: archive.search
+    nome: "Ricerca full-text archivio"
+    cosa: "Cerca nelle conversazioni indicizzate (FTS5). È il tool MCP centrale di archive-mcp."
+    dove: ["mcp-tool:archive/search", "services/archive-mcp/app/server.py"]
+    status: active-default
+    since: "0.19.0"
+    verify:
+      mcp_tool: {service: archive-mcp, name: search}
+
+  - id: ops.backup
+    nome: "Backup notturno dei volumi (age-encrypted)"
+    cosa: "Container cron 03:00 UTC, 7 giornalieri + 4 settimanali, cifrati age. La rete
+           di sicurezza dati: senza, un guasto perde tutto."
+    dove: ["compose-profile:compose.ops.backup.yaml#ops.backup", "tools/backup.sh"]
+    status: active-default    # ATTESO dopo il branch installer-autoupdate-backup (default-on via VPS1777_FEATURES)
+    since: "0.26.0 (opt-in) → default-on (branch feat/installer-autoupdate-backup)"
+    decisione: "reso default-on il 17/07: un backup opt-in che il reinstall perde in
+                silenzio è la perdita-tipo che Neo vuole impedire. [conv 17/07 caccia-feature-perdute]"
+    verify:
+      compose_profile: {file: compose.ops.backup.yaml, profile: ops.backup}
+    # NB per il verificatore: 'dichiarato attiva' qui + 'reale spento sulla VPS' è
+    # PROPRIO il divario che il check dichiarato→reale deve poter esporre (sul vivo).
+
+  - id: update.auto-timer
+    nome: "Auto-update sicuro (timer systemd)"
+    cosa: "Timer che lancia `vps1777 update --yes` = backup + firma + migrazioni +
+           health-gate + rollback. È il RIMPIAZZO sicuro di Watchtower (che bypassava tutto)."
+    dove: ["systemd:vps1777-auto-update.timer", "systemd:vps1777-auto-update.service"]
+    status: active-default    # PROMOSSA da deferred: rilasciata in v0.38.0, ora reale su main
+    since: "0.38.0"
+    decisione: "auto-install sicuro di default (Neo, 17/07). NON Watchtower — quello fu
+                declassato il 10/06 perché bypassa le protezioni. [conv 2026-06-10 b82df434]
+                Promossa da deferred quando il timer è atterrato su main [rilascio v0.38.0,
+                il verificatore ha segnalato PROMUOVI]. Acceso solo se 'autoupdate' in VPS1777_FEATURES (default sì)."
+    verify:
+      systemd_unit: vps1777-auto-update.timer
+
+  - id: sec.H24-release-approval
+    nome: "Approvazione manuale dei rilasci (GitHub environment)"
+    cosa: "Gate umano prima di pubblicare un rilascio. Rinviato di proposito."
+    dove: ["SECURITY.md:280"]
+    status: deferred
+    since: "rinviato (postilla SECURITY.md)"
+    decisione: "rimandato di proposito: i tag pubblicati sono già immutabili, il gate
+                serve quando il ritmo dei rilasci sarà regolare. [SECURITY.md:280]"
+    follow_up:
+      manuale: {cosa: "aggiungere il GitHub environment quando il ritmo rilasci è regolare",
+                rivedi_dopo: "2026-08-10"}
+    verify:
+      manual: "verifica umana: esiste un environment con reviewer richiesto sulla release?"
+
+  # ── SEME RUNTIME (71d540e6): il canale-update, l'ingress, lo stato dichiarato ──
+
+  - id: config.declared-features
+    nome: "Stato feature dichiarato (VPS1777_FEATURES)"
+    cosa: "La lista in .env che dice quali feature opzionali sono ON; letta da compose_cmd
+           così install/update/rollback riproducono lo stesso stato. È il fix-radice della
+           perdita silenziosa: senza, gli opt-in cadevano a ogni reinstall."
+    dove: ["tools/vps1777.py:enabled_features", "tools/vps1777.py:compose_cmd"]
+    status: active-default
+    since: "0.38.0"
+    verify:
+      file_contains: {path: tools/vps1777.py, pattern: "def enabled_features"}
+
+  - id: update.check-timer
+    nome: "Check giornaliero release + notifica"
+    cosa: "Timer che interroga GitHub per una release nuova e notifica su Telegram. NON applica."
+    dove: ["systemd:vps1777-check-update.timer", "systemd:vps1777-check-update.service"]
+    status: active-default
+    since: "0.9.0"
+    verify:
+      systemd_unit: vps1777-check-update.timer
+
+  - id: update.button
+    nome: "Pulsante Aggiorna del pannello admin (intent → path unit)"
+    cosa: "Il gateway (senza privilegi) scrive un intent-file; una path unit systemd lo
+           raccoglie e lancia `vps1777 update --from-intent`. L'apply manuale sicuro dal web."
+    dove: ["systemd:vps1777-update.path", "systemd:vps1777-update.service"]
+    status: active-default
+    since: "0.9.0"
+    verify:
+      systemd_unit: vps1777-update.path
+
+  - id: update.secrets-timer
+    nome: "Check settimanale scadenza secret"
+    cosa: "Timer che avvisa quando un secret (o il cookie NotebookLM) sta per scadere."
+    dove: ["systemd:vps1777-secrets-check.timer"]
+    status: active-default
+    since: "0.9.0"
+    verify:
+      systemd_unit: vps1777-secrets-check.timer
+
+  - id: ingress.tailscale
+    nome: "Ingress Tailscale Funnel (default)"
+    cosa: "Espone il gateway in HTTPS via Tailscale Funnel; gira sull'host, non in container."
+    dove: ["compose-profile:compose.ingress.tailscale.yaml#ingress.tailscale"]
+    status: active-default    # è il default; caddy/cloudflared sono le alternative opt-in
+    since: "0.9.0"
+    verify:
+      compose_profile: {file: compose.ingress.tailscale.yaml, profile: ingress.tailscale}
+
+  - id: ingress.caddy
+    nome: "Ingress Caddy (ACME/Let's Encrypt) — alternativa"
+    cosa: "Reverse-proxy Caddy con certificati ACME. Alternativa a Tailscale (se ne sceglie UNO)."
+    dove: ["compose-profile:compose.ingress.caddy.yaml#ingress.caddy"]
+    status: opt-in
+    since: "0.9.0"
+    decisione: "una delle tre opzioni di ingress mutuamente esclusive; l'utente ne sceglie una all'install. [docs/INSTALL.md]"
+    verify:
+      compose_profile: {file: compose.ingress.caddy.yaml, profile: ingress.caddy}
+
+  - id: ingress.cloudflared
+    nome: "Ingress Cloudflare Tunnel — alternativa"
+    cosa: "Tunnel outbound Cloudflare, nessuna porta aperta. Alternativa a Tailscale/Caddy."
+    dove: ["compose-profile:compose.ingress.cloudflared.yaml#ingress.cloudflared"]
+    status: opt-in
+    since: "0.9.0"
+    decisione: "una delle tre opzioni di ingress mutuamente esclusive; l'utente ne sceglie una all'install. [docs/INSTALL.md]"
+    verify:
+      compose_profile: {file: compose.ingress.cloudflared.yaml, profile: ingress.cloudflared}
