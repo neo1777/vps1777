@@ -1,0 +1,42 @@
+# vps1777-auto-update.service — auto-update PROGRAMMATO (opt-in, gestito).
+#
+# È l'alternativa SICURA a Watchtower (profilo ops.autoupdate, declassato): invece
+# di auto-pull+restart crudo, lancia lo STESSO motore del pulsante e del terminale
+# (`vps1777 update --yes`), quindi eredita gratis backup + verifica firma cosign +
+# migrazioni + health-gate 180s + auto-rollback. Il timer gemello lo schedula.
+# `--yes` salta solo la conferma interattiva; se è già alla latest → no-op.
+# NON `--from-intent`: qui non c'è nessun intent-file del pannello, è il canale
+# programmato. Mutuamente esclusivo con Watchtower — la CLI avvisa se lo trova attivo.
+#
+# H43: @OPERATOR_USER@ / @REPO@ non sono hardcodati — la CLI (install_systemd_units
+# → render_unit) e il deploy iniziale li sostituiscono coi valori REALI.
+#
+# Sandboxing filesystem VOLUTAMENTE parziale, identico a vps1777-update.service e
+# per le stesse ragioni verificate: l'updater fa cose da root via `sudo -n`
+# (install in /usr/local/bin + /etc/systemd/system, chown, systemctl), self-update
+# della CLI, cosign (cache TUF in ~/.sigstore), e backup.sh che passa un /tmp come
+# sorgente di bind-mount a `docker run`. Perciò NIENTE NoNewPrivileges (romperebbe
+# sudo/setuid), ProtectSystem (blocca il self-update + le unit), PrivateTmp (rompe
+# il bind-mount del backup → dump vuoto in silenzio), ProtectHome (rischia la cache
+# cosign → verifica firma fail-closed → update abortito). Restano le protezioni che
+# non toccano i path dell'update:
+[Unit]
+Description=vps1777 — auto-update programmato (gestito, sicuro)
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=@OPERATOR_USER@
+Group=@OPERATOR_USER@
+Environment=VPS1777_HOME=@REPO@
+WorkingDirectory=@REPO@
+ExecStart=/usr/local/bin/vps1777 update --yes
+# pull + backup + migrazioni + health-gate (180s) + eventuale rollback: margine ampio
+TimeoutStartSec=1800
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+LockPersonality=true

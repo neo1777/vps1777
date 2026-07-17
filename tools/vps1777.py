@@ -379,14 +379,47 @@ def ingress_profile(repo: Path) -> str:
     return env_read(repo).get("INGRESS_PROFILE", "ingress.tailscale")
 
 
+# Feature opzionali DICHIARATE in .env (VPS1777_FEATURES). Sono lo "stato voluto":
+# leggerle QUI — dove si costruisce OGNI comando compose (up/down/ps/health-gate) —
+# fa sì che install, update e rollback riproducano SEMPRE le stesse feature. È il fix
+# del difetto per cui un reinstall O un update lasciava cadere gli opt-in in silenzio
+# (backup notturno sparito senza un errore). Mappa: feature dichiarata → profilo
+# compose. `autoupdate` NON è qui: è un timer systemd (vps1777-auto-update), non un
+# container. `watchtower` è l'auto-update CRUDO (declassato), alternativa INSICURA ad
+# `autoupdate` — supportato solo se dichiarato esplicitamente, e in conflitto con esso.
+OPS_COMPOSE_FEATURES = {
+    "backup": "ops.backup",
+    "portainer": "ops.portainer",
+    "watchtower": "ops.autoupdate",
+}
+DEFAULT_FEATURES = {"backup", "autoupdate"}   # backup + auto-update SICURO accesi di default
+
+
+def enabled_features(repo: Path) -> set[str]:
+    """Le feature opzionali dichiarate in .env (VPS1777_FEATURES). Vuoto/assente → i
+    default. Un valore esplicito (anche 'none') vince: così si può anche spegnere tutto."""
+    val = env_read(repo).get("VPS1777_FEATURES")
+    if val is None:
+        return set(DEFAULT_FEATURES)
+    return {f.strip() for f in val.split(",") if f.strip() and f.strip() != "none"}
+
+
 def compose_cmd(repo: Path, *, files: list[Path] | None = None) -> list[str]:
     profile = ingress_profile(repo)
+    cmd = ["docker", "compose", "--project-directory", str(repo)]
+    extra_profiles: list[str] = []
     if files is None:
         files = [repo / "compose.yaml", repo / f"compose.{profile}.yaml"]
-    cmd = ["docker", "compose", "--project-directory", str(repo)]
+        feats = enabled_features(repo)
+        for feat, prof in OPS_COMPOSE_FEATURES.items():
+            if feat in feats:
+                files.append(repo / f"compose.{prof}.yaml")
+                extra_profiles.append(prof)
     for f in files:
         cmd += ["-f", str(f)]
     cmd += ["--profile", profile]
+    for p in extra_profiles:
+        cmd += ["--profile", p]
     return cmd
 
 
@@ -969,9 +1002,19 @@ def install_systemd_units(repo: Path, *, enable: bool) -> None:
     if changed:
         sudo(["systemctl", "daemon-reload"])
     if enable:
-        sudo(["systemctl", "enable", "--now",
-              "vps1777-check-update.timer", "vps1777-update.path",
-              "vps1777-secrets-check.timer"], check=False)
+        units = ["vps1777-check-update.timer", "vps1777-update.path",
+                 "vps1777-secrets-check.timer"]
+        # auto-update SICURO: acceso solo se dichiarato in VPS1777_FEATURES (default sì).
+        # Stato dichiarato AUTORITATIVO: se non è voluto, il timer va spento — una feature
+        # tolta dallo stato non deve restare accesa da un install precedente (è il difetto
+        # opposto della perdita silenziosa: una feature che resta accesa non richiesta).
+        auto = "autoupdate" in enabled_features(repo)
+        if auto:
+            units.append("vps1777-auto-update.timer")
+        sudo(["systemctl", "enable", "--now", *units], check=False)
+        if not auto:
+            sudo(["systemctl", "disable", "--now",
+                  "vps1777-auto-update.timer"], check=False)
 
 
 # ─────────────────────────────────────────── lock
