@@ -164,10 +164,27 @@ def main() -> int:
         return 0
 
     print(f"\n  ✗ NON QUADRA. Residuo inspiegato: {residuo} righe.")
-    print("    Non sono doppioni (quelli sono già contati sopra) e non sono scarti")
-    print("    (quelli hanno la lapide). Sono righe che la sorgente ha e di cui")
-    print("    l'archivio non sa NULLA: né indicizzate, né dichiarate perse.")
-    print("    È il difetto che il libro-mastro esiste per rendere impossibile.")
+    print("    Non sono doppioni (già contati sopra) e non sono scarti (quelli hanno")
+    print("    la lapide). Sono righe che la sorgente ha e di cui l'archivio non")
+    print("    dichiara NULLA: né indicizzate, né dichiarate perse.")
+    print()
+    print("    PRIMA DI CERCARE UNA PERDITA, chiediti se stai contando la stessa cosa.")
+    print("    Un residuo ha due nature, e sembrano identiche:")
+    print("      (a) PERDITA VERA  — righe che dovevano entrare e sono evaporate;")
+    print("      (b) DEFINIZIONI DIVERSE — la sorgente conta RIGHE, l'archivio tiene")
+    print("          MESSAGGI. Un export Claude Code è per ~1/3 metadati (ai-title,")
+    print("          attachment, system, queue-operation…): l'indexer tiene solo")
+    print("          user/assistant. Non è una perdita: è un'altra domanda.")
+    print("          Misurato il 17/07: bundle 116.968 righe → 78.470 user+assistant.")
+    print("          Il divario di ~38k NON era un guasto: erano due metri diversi.")
+    print()
+    print("    Come si distinguono, e non serve indovinare: **(b) ha una forma**. Se il")
+    print("    residuo è grande e costante in proporzione, sono definizioni diverse; se")
+    print("    è piccolo, irregolare o cresce nel tempo, è (a) e va cacciato.")
+    print("    E il test che chiude la questione: se l'indexer SCARTA in silenzio (un")
+    print("    `continue` senza lapide), nessun numero potrà mai chiudere — non per un")
+    print("    bug, ma perché una delle due parti non dichiara cosa lascia fuori.")
+    print("    → In quel caso il residuo non è una misura: è il buco del metro.")
     return 1
 
 
