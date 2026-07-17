@@ -150,7 +150,7 @@ features:
   - id: update.check-timer
     nome: "Check giornaliero release + notifica"
     cosa: "Timer che interroga GitHub per una release nuova e notifica su Telegram. NON applica."
-    dove: ["systemd:vps1777-check-update.timer", "systemd:vps1777-check-update.service"]
+    dove: ["systemd:vps1777-check-update.timer", "systemd:vps1777-check-update.service"]  # timer + il suo service (coppia)
     status: active-default
     since: "0.9.0"
     verify:
@@ -169,7 +169,7 @@ features:
   - id: update.secrets-timer
     nome: "Check settimanale scadenza secret"
     cosa: "Timer che avvisa quando un secret (o il cookie NotebookLM) sta per scadere."
-    dove: ["systemd:vps1777-secrets-check.timer"]
+    dove: ["systemd:vps1777-secrets-check.timer", "systemd:vps1777-secrets-check.service"]  # timer + il suo service (coppia)
     status: active-default
     since: "0.9.0"
     verify:
@@ -275,3 +275,329 @@ features:
                 rivedi_dopo: "2026-09-10"}
     verify:
       manual: "verifica umana: il compose (o un override generato) pinna le 4 immagini vps1777 ai digest?"
+
+  # ── CENSIMENTO TOOL MCP (setaccio, 17/07) — una voce per tool, cosa-fa dalla docstring del codice.
+  # Esclusi i tool GIÀ nel ledger (es. archive.search, seminato da b82df434). Lista verificata
+  # contro verify-features.py (i 2 mancati dal regex — source_rename/studio_rename — aggiunti a mano).
+  - id: archive.count
+    nome: "archive-mcp · count"
+    cosa: "Conta quanti messaggi corrispondono alla query (non limitato) — per frequenze e prevalenze."
+    dove: ["mcp-tool:archive-mcp/count"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: count}
+  - id: archive.check_term
+    nome: "archive-mcp · check_term"
+    cosa: "Diagnostica se un TERMINE con caratteri speciali (`C++`, `C#`, `g++`, `.NET`, `F#`) è davvero ricercabile o se l'indice lo fa COLLASSARE su."
+    dove: ["mcp-tool:archive-mcp/check_term"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: check_term}
+  - id: archive.get_context
+    nome: "archive-mcp · get_context"
+    cosa: "Restituisce i messaggi ATTORNO a un risultato (col contenuto pieno, non lo snippet troncato)."
+    dove: ["mcp-tool:archive-mcp/get_context"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: get_context}
+  - id: archive.get_conversation
+    nome: "archive-mcp · get_conversation"
+    cosa: "Il thread di conversazione INTERO che contiene `uuid` — camminando l'albero `parent_uuid` (antenati + discendenti), col contenuto pieno e in."
+    dove: ["mcp-tool:archive-mcp/get_conversation"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: get_conversation}
+  - id: archive.list_projects
+    nome: "archive-mcp · list_projects"
+    cosa: "Le etichette `project` dell'archivio con quanti messaggi ciascuna — per NAVIGARE i contenuti (quali progetti/chat ci sono) invece di solo ce."
+    dove: ["mcp-tool:archive-mcp/list_projects"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: list_projects}
+  - id: archive.archive_stats
+    nome: "archive-mcp · archive_stats"
+    cosa: "Istogramma temporale per ANNO: quanti messaggi per anno in ogni archivio — «quando» l'archivio è fitto, da sapere PRIMA di cercare."
+    dove: ["mcp-tool:archive-mcp/archive_stats"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: archive_stats}
+  - id: archive.list_databases
+    nome: "archive-mcp · list_databases"
+    cosa: "Elenca i nomi dei DB caricati."
+    dove: ["mcp-tool:archive-mcp/list_databases"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: list_databases}
+  - id: archive.describe_databases
+    nome: "archive-mcp · describe_databases"
+    cosa: "Scheda di ogni DB caricato: {name, rows, oldest, newest, labels, snapshot, description}."
+    dove: ["mcp-tool:archive-mcp/describe_databases"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: describe_databases}
+  - id: archive.set_description
+    nome: "archive-mcp · set_description"
+    cosa: "Imposta/aggiorna la DESCRIZIONE di un archivio: a cosa serve, cosa contiene, come va usato."
+    dove: ["mcp-tool:archive-mcp/set_description"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: set_description}
+  - id: nb.nb_list
+    nome: "nb1777-mcp · nb_list"
+    cosa: "Lista tutti i notebook visibili al profilo attivo."
+    dove: ["mcp-tool:nb1777-mcp/nb_list"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_list}
+  - id: nb.nb_get
+    nome: "nb1777-mcp · nb_get"
+    cosa: "Dettagli di un singolo notebook."
+    dove: ["mcp-tool:nb1777-mcp/nb_get"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_get}
+  - id: nb.nb_create
+    nome: "nb1777-mcp · nb_create"
+    cosa: "Crea un nuovo notebook."
+    dove: ["mcp-tool:nb1777-mcp/nb_create"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_create}
+  - id: nb.nb_rename
+    nome: "nb1777-mcp · nb_rename"
+    cosa: "Rinomina un notebook."
+    dove: ["mcp-tool:nb1777-mcp/nb_rename"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_rename}
+  - id: nb.nb_delete
+    nome: "nb1777-mcp · nb_delete"
+    cosa: "Cancella un notebook in modo permanente."
+    dove: ["mcp-tool:nb1777-mcp/nb_delete"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_delete}
+  - id: nb.nb_describe
+    nome: "nb1777-mcp · nb_describe"
+    cosa: "Riassunto AI-generated del notebook (testo)."
+    dove: ["mcp-tool:nb1777-mcp/nb_describe"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_describe}
+  - id: nb.source_list
+    nome: "nb1777-mcp · source_list"
+    cosa: "Lista tutte le fonti di un notebook."
+    dove: ["mcp-tool:nb1777-mcp/source_list"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_list}
+  - id: nb.source_add_url
+    nome: "nb1777-mcp · source_add_url"
+    cosa: "Aggiunge una URL come fonte."
+    dove: ["mcp-tool:nb1777-mcp/source_add_url"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_url}
+  - id: nb.source_add_text
+    nome: "nb1777-mcp · source_add_text"
+    cosa: "Aggiunge testo libero come fonte (richiede titolo)."
+    dove: ["mcp-tool:nb1777-mcp/source_add_text"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_text}
+  - id: nb.source_add_file
+    nome: "nb1777-mcp · source_add_file"
+    cosa: "Carica un file locale come fonte (PDF/txt/md...)."
+    dove: ["mcp-tool:nb1777-mcp/source_add_file"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_file}
+  - id: nb.source_add_youtube
+    nome: "nb1777-mcp · source_add_youtube"
+    cosa: "Aggiunge un video YouTube come fonte."
+    dove: ["mcp-tool:nb1777-mcp/source_add_youtube"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_youtube}
+  - id: nb.source_add_drive
+    nome: "nb1777-mcp · source_add_drive"
+    cosa: "Collega un Google Drive document_id come fonte."
+    dove: ["mcp-tool:nb1777-mcp/source_add_drive"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_drive}
+  - id: nb.source_delete
+    nome: "nb1777-mcp · source_delete"
+    cosa: "Elimina una fonte (irreversibile)."
+    dove: ["mcp-tool:nb1777-mcp/source_delete"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_delete}
+  - id: nb.source_get_content
+    nome: "nb1777-mcp · source_get_content"
+    cosa: "Estrae il contenuto raw di una fonte (no AI)."
+    dove: ["mcp-tool:nb1777-mcp/source_get_content"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_get_content}
+  - id: nb.notebook_query
+    nome: "nb1777-mcp · notebook_query"
+    cosa: "Pone una domanda alla chat del notebook."
+    dove: ["mcp-tool:nb1777-mcp/notebook_query"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: notebook_query}
+  - id: nb.studio_create_audio
+    nome: "nb1777-mcp · studio_create_audio"
+    cosa: "Crea Audio Overview (podcast)."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_audio"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_audio}
+  - id: nb.studio_create_video
+    nome: "nb1777-mcp · studio_create_video"
+    cosa: "Crea Video Overview."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_video"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_video}
+  - id: nb.studio_create_slides
+    nome: "nb1777-mcp · studio_create_slides"
+    cosa: "Crea Slide Deck."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_slides"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_slides}
+  - id: nb.studio_create_mindmap
+    nome: "nb1777-mcp · studio_create_mindmap"
+    cosa: "Crea Mind Map."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_mindmap"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_mindmap}
+  - id: nb.studio_create_infographic
+    nome: "nb1777-mcp · studio_create_infographic"
+    cosa: "Crea Infographic (PNG)."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_infographic"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_infographic}
+  - id: nb.studio_create_data_table
+    nome: "nb1777-mcp · studio_create_data_table"
+    cosa: "Crea Data Table."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_data_table"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_data_table}
+  - id: nb.studio_create_report
+    nome: "nb1777-mcp · studio_create_report"
+    cosa: "Crea Report."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_report"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_report}
+  - id: nb.studio_create_quiz
+    nome: "nb1777-mcp · studio_create_quiz"
+    cosa: "Crea Quiz."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_quiz"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_quiz}
+  - id: nb.studio_create_flashcards
+    nome: "nb1777-mcp · studio_create_flashcards"
+    cosa: "Crea Flashcards."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_flashcards"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_flashcards}
+  - id: nb.studio_create_all_9
+    nome: "nb1777-mcp · studio_create_all_9"
+    cosa: "Crea tutti e 9 gli artefatti in sequenza."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_all_9"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_all_9}
+  - id: nb.studio_list
+    nome: "nb1777-mcp · studio_list"
+    cosa: "Lista gli artefatti studio di un notebook."
+    dove: ["mcp-tool:nb1777-mcp/studio_list"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_list}
+  - id: nb.studio_status
+    nome: "nb1777-mcp · studio_status"
+    cosa: "Stato di un singolo artefatto (id/type/status/label)."
+    dove: ["mcp-tool:nb1777-mcp/studio_status"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_status}
+  - id: nb.studio_wait
+    nome: "nb1777-mcp · studio_wait"
+    cosa: "Polling fino a stato terminale o timeout."
+    dove: ["mcp-tool:nb1777-mcp/studio_wait"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_wait}
+  - id: nb.studio_delete
+    nome: "nb1777-mcp · studio_delete"
+    cosa: "Cancella un artefatto studio (irreversibile)."
+    dove: ["mcp-tool:nb1777-mcp/studio_delete"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_delete}
+  - id: nb.studio_download
+    nome: "nb1777-mcp · studio_download"
+    cosa: "Scarica un artefatto."
+    dove: ["mcp-tool:nb1777-mcp/studio_download"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_download}
+  - id: nb.studio_export_to_docs
+    nome: "nb1777-mcp · studio_export_to_docs"
+    cosa: "Esporta un Report su Google Docs."
+    dove: ["mcp-tool:nb1777-mcp/studio_export_to_docs"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_export_to_docs}
+  - id: nb.studio_export_to_sheets
+    nome: "nb1777-mcp · studio_export_to_sheets"
+    cosa: "Esporta una Data Table su Google Sheets."
+    dove: ["mcp-tool:nb1777-mcp/studio_export_to_sheets"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_export_to_sheets}
+  - id: nb.doctor
+    nome: "nb1777-mcp · doctor"
+    cosa: "Diagnostica: nlm reachable + count notebook + canonico del blocco memoria."
+    dove: ["mcp-tool:nb1777-mcp/doctor"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: doctor}
+  - id: nb.canonico
+    nome: "nb1777-mcp · canonico"
+    cosa: "MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la versione «buona» con cui una sessione dovrebbe allinearsi, letta da."
+    dove: ["mcp-tool:nb1777-mcp/canonico"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: canonico}
+  - id: nb.memoria_check
+    nome: "nb1777-mcp · memoria_check"
+    cosa: "MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che porti (es."
+    dove: ["mcp-tool:nb1777-mcp/memoria_check"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: memoria_check}
+  - id: nb.source_rename
+    nome: "nb1777-mcp · source_rename"
+    cosa: "Rinomina una fonte (source) di un notebook."
+    dove: ["mcp-tool:nb1777-mcp/source_rename"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_rename}
+  - id: nb.studio_rename
+    nome: "nb1777-mcp · studio_rename"
+    cosa: "Rinomina un artefatto Studio di un notebook."
+    dove: ["mcp-tool:nb1777-mcp/studio_rename"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_rename}
