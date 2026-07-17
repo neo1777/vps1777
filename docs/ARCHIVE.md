@@ -170,16 +170,32 @@ meta(key PRIMARY KEY, value)                        -- scheda: description, …
 `get_context`) ma **non** si indicizzano — vedi la nota sullo schema in
 `archive_indexer.py`.
 
-Tre cose in più che l'ingest produce:
+Cose in più che l'ingest produce:
 
 - le **`summary`** delle conversazioni claude.ai diventano righe attribuite
   `sender='summary'`, cercabili come tutto il resto;
-- ogni record **scartato** (senza uuid, vuoto, malformato) lascia una **lapide**
-  in `skipped` — datata, con motivo e dettaglio — invece di sparire in silenzio:
-  il conteggio è in `db_info()["skipped"]` / `count_skipped()`, e i dati raw
-  restano raggiungibili alla bisogna;
+- dalle **sessioni Claude Code** (`.jsonl`) l'ingest cattura anche i **titoli**
+  (`ai-title` → riga `sender='title'`: trovi una chat dal suo nome) e gli
+  **allegati** (`attachment` → riga `sender='attachment'` coi nomi-file), a
+  parità col percorso claude.ai. I record che **non sono messaggi** (`mode`,
+  `system`, `last-prompt`, `queue-operation`, …) non vengono indicizzati ma
+  **non spariscono**: lasciano una lapide `reason='non-message'` (vedi sotto);
+- ogni record **scartato** (senza uuid, vuoto, non-messaggio) lascia una
+  **lapide** in `skipped` — con motivo e il record grezzo — invece di sparire in
+  un `continue` muto: il conteggio è in `db_info()["skipped"]` / `count_skipped()`,
+  e i dati raw restano raggiungibili. *(Nota sul contare: la tabella `skipped`
+  deduplica per contenuto — due record identici sono una lapide, come il dedup
+  per `uuid` dei messaggi. Un collaudo che vuole quadrare col numero di **righe
+  lette** deve trattare i doppioni come categoria, non come perdita: vedi
+  `tools/collaudo-quadratura.py`.)*
 - la **descrizione** dell'archivio vive in `meta['description']` (scritta
   all'upload, aggiornabile via `set_description`).
+
+> **Righe-evento vs righe-stato.** Le chat sono **eventi** (un `ts`, immutabili);
+> `memory:*` e `account:user` sono **stati** (nessuna data, riscritti). `oldest`
+> in `describe_databases` usa `min(NULLIF(ts,''))` così gli stati senza data non
+> fanno vincere la stringa vuota sul minimo — l'archivio non dice più «non so da
+> quando» sapendolo.
 
 Un `.db` drop-in è accettato se è un SQLite con la tabella `messages_fts`
 (controllo in `admin.py`). Anche un DB **v1** (le sole 4 colonne
