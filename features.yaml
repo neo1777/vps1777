@@ -33,6 +33,18 @@
 # battiti, ...): quella gira sul PC di sviluppo, non è il prodotto.
 
 # ══════════════════════════════════════════════════════════════════════════════
+# META — lo stato del ledger stesso (letto da verify-features.py)
+# ══════════════════════════════════════════════════════════════════════════════
+_meta:
+  # true = ENFORCING: ogni feature REALE (tool MCP, systemd-unit, profilo compose)
+  #        senza voce qui = CI ROSSA (non più solo segnalata). Il "mai perdere una
+  #        funzione" di Neo diventa meccanico. Si accende SOLO a censimento completo
+  #        e verificatore a 0.
+  # Acceso il 17/07: censimento MCP (46) + timer↔service chiusi → 61 voci, 0/0.
+  # OK enforcing di b82df434 (possiede il verificatore) + concordato da setaccio.
+  baseline_completo: true
+
+# ══════════════════════════════════════════════════════════════════════════════
 # SCHEMA di una voce (i campi che verify-features.py valida su OGNI entry)
 # ══════════════════════════════════════════════════════════════════════════════
 _schema:
