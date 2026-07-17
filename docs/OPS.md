@@ -23,15 +23,62 @@ Durante il deploy, `step_prepare` applica un hardening minimo **sicuro** sull'ho
 > ```
 > Fallo solo dopo aver verificato che il login a chiave funziona.
 
-## Aggiornamenti — canale gestito
+## Le feature dichiarate — cosa il reinstall riproduce (e perché non si perde nulla)
 
-Il canale primario di aggiornamento è la CLI host **`vps1777 update`**
-(installata da `deploy.sh`, nella radice del repo) o il pulsante nel pannello admin → tab
-**Update**: backup age + snapshot pre-update, pull con verifica digest,
-migrazioni, health-gate 180s, **rollback automatico** se lo stack non torna
-in salute. Manuale completo: [UPDATE.md](UPDATE.md).
+Le funzioni operative di vps1777 (backup notturno, auto-update sicuro, Portainer) sono
+**dichiarate**, non attivate a mano una volta e poi dimenticate. La dichiarazione vive in
+una riga del `.env` della VPS:
 
-Log dell'updater: `journalctl -u vps1777-update -u vps1777-check-update`.
+```
+VPS1777_FEATURES=backup,autoupdate        # il default: backup + auto-update sicuro
+```
+
+L'installer legge questa riga e accende le feature corrispondenti; **install, update e
+rollback la rileggono sempre**. Quindi un reinstall della VPS non riparte "nudo": riproduce
+**esattamente** le feature dichiarate. E l'installer chiude con un **referto** che le elenca:
+
+```
+✓ Feature attive: backup=ON · auto-update sicuro=ON · portainer=OFF
+```
+
+> **Perché questa riga esiste — ed è il cuore del "non perdere funzioni".** Prima di v0.38.0
+> queste erano profili **opt-in**: attivati a mano, e un reformat della VPS li perdeva **in
+> silenzio** — nessun documento mentiva, ma la funzione spariva. È successo davvero con
+> l'auto-update: declassato a giugno, il rimpiazzo mai costruito, e per un mese la VPS non si
+> auto-aggiornava senza che nessuno se ne accorgesse.
+>
+> La cura non è "ricordarsi meglio" (la memoria di chi installa, o di una sessione di lavoro,
+> muore). La cura è **lo stato dichiarato**: se una feature non c'è, o è **dichiarata** (e il
+> referto lo mostra), o è un **bug che il reinstall non ha rispettato la dichiarazione** — mai
+> "ci siamo dimenticati". `VPS1777_FEATURES` è alla VPS ciò che il **ledger delle feature**
+> (`features.yaml`, verificato in CI) è al repo: la memoria che sopravvive a chi la scrive.
+
+Per cambiare le feature: modifica `VPS1777_FEATURES` e rilancia l'update (o il prossimo
+install le applicherà). Il referto ti confermerà il nuovo stato — **l'assenza parla.**
+
+## Aggiornamenti — auto-update sicuro (di default) + on-demand
+
+Da **v0.38.0** l'aggiornamento è **automatico e sicuro di default**, e resta anche
+manuale quando vuoi. Tre pezzi, un solo motore (`vps1777 update`, con backup + verifica
+firma/digest + migrazioni + health-gate 180s + **rollback automatico**):
+
+| quando | chi lo fa | cosa fa |
+|---|---|---|
+| **settimanale, da solo** | `vps1777-auto-update.timer` → `.service` | applica l'update sicuro **senza che tu faccia nulla** — ma solo se la feature `autoupdate` è nello stato dichiarato (`VPS1777_FEATURES`, default sì) |
+| **ogni giorno, avvisa** | `vps1777-check-update.timer` | **controlla e notifica** su Telegram («aggiornamento disponibile»), non applica |
+| **quando vuoi tu** | CLI `vps1777 update` o pulsante admin → tab **Update** | applica **on-demand**, stessa rete di sicurezza |
+
+> **Sicuro** vuol dire una cosa precisa: ogni applicazione fa **backup + snapshot** prima,
+> verifica la **firma cosign** e il **digest**, applica le **migrazioni**, e se lo stack non
+> torna in salute entro 180s fa **rollback automatico** ripristinando i dati. È la differenza
+> con Watchtower (sotto): l'auto-update sicuro NON è "pulla e riavvia e speriamo".
+
+> **Default dichiarato, non ricordato.** L'auto-update sicuro è ON di default perché
+> `autoupdate` è in `VPS1777_FEATURES` (`.env`). Un reinstall lo **riproduce** — non
+> sparisce in silenzio. Per spegnerlo: togli `autoupdate` da `VPS1777_FEATURES`; il referto
+> post-install ti confermerà `auto-update sicuro=OFF`.
+
+Log: `journalctl -u vps1777-auto-update -u vps1777-update -u vps1777-check-update`.
 
 ## Profili opzionali
 
@@ -68,18 +115,22 @@ container, stack, log e volumi.
   Portainer è un tool admin separato e locale. Sta su rete `backend` (internal,
   nessun egress).
 
-### `ops.autoupdate` — auto-update (Watchtower) — declassato
+### `ops.autoupdate` — Watchtower (legacy, opt-in, **NON usare**)
 
-[Watchtower](https://containrrr.dev/watchtower/) fa auto-pull + restart graceful
-dei container vps1777 quando cambia un tag. Modalità label-only: tocca solo
-i container opt-in (gateway, archive-mcp, nb1777-mcp, nb1777-bot).
+[Watchtower](https://containrrr.dev/watchtower/) fa auto-pull + restart dei container quando
+cambia un tag (modalità **label-only**: tocca solo i container opt-in — gateway, archive-mcp,
+nb1777-mcp, nb1777-bot). **Fu l'auto-update d'origine, declassato il 10/06/2026** perché
+**bypassa tutta la rete di sicurezza**: niente backup, niente migrazioni, niente health-gate,
+niente rollback, niente changelog. Il suo posto è ora dell'**auto-update sicuro** (il timer sopra).
 
-> **Non supportato in concomitanza col canale gestito**: Watchtower bypassa
-> backup, migrazioni, health-gate, changelog e rollback. Resta opt-in, ma il
-> canale primario è `vps1777 update` / pulsante admin ([UPDATE.md](UPDATE.md));
-> `vps1777 update` ti avvisa se lo trova attivo.
+> ⚠️ **Resta come profilo opt-in solo per compatibilità, ma è NON supportato e sconsigliato.**
+> Se lo attivi, `vps1777 update` ti avvisa che è in esecuzione e che confligge col canale
+> gestito. **Non attivarlo:** riaccenderlo rifà l'errore che il declassamento del 10/06 ha
+> corretto. Se ti serve l'auto-update, è già attivo di default in forma sicura — non serve
+> Watchtower.
 
 ```bash
+# solo se sai esattamente perché lo vuoi (e accetti di perdere backup/rollback):
 docker compose ... -f compose.ops.watchtower.yaml --profile ops.autoupdate up -d
 ```
 

@@ -15,24 +15,42 @@ Cosa NON includi: log container (sono in `/var/lib/docker/containers/*/`, gestit
 
 Il `MANIFEST.txt` dentro l'archivio registra anche la versione deployata (`VPS1777_TAG` dal `.env`) e il `VERSION` del bundle.
 
-## Backup automatico (cron)
+## Backup automatico (cron) — attivo di default
 
-Aggiungi profilo `ops.backup`:
+Il backup notturno è **attivo di default**: non devi fare nulla per averlo. L'installer
+lo accende leggendo lo **stato dichiarato** delle feature — `VPS1777_FEATURES` nel `.env`
+(default: `backup,autoupdate`). Il container `backup` esegue ogni notte (cron **03:00 UTC**)
+e tiene **7 backup giornalieri + 4 settimanali** (uno per settimana), tutti cifrati `age`.
 
-```bash
-docker compose --profile ops.backup up -d
+> **Perché "dichiarato" e non "ricordato" — ed è il cuore del non-perdere-funzioni.**
+> Prima (fino a v0.37.x) il backup era un profilo **opt-in**: un reinstall della VPS non lo
+> ri-accendeva, e nessuno se ne accorgeva — la rete di sicurezza spariva in silenzio.
+> Da **v0.38.0** la scelta vive in `VPS1777_FEATURES`: l'installer la legge, e install,
+> update e rollback **riproducono sempre le stesse feature**. Un reinstall non "dimentica"
+> il backup — lo **riproduce per costruzione**. E l'installer chiude col **referto**
+> (`✓ Feature attive: backup=ON · auto-update sicuro=ON · portainer=OFF`): un `OFF` non
+> richiesto **si vede subito nel log**, non si scopre dopo mesi.
+
+### Accendere o spegnere il backup
+
+Non con un comando `docker compose` a mano (quello non sopravvive a un reinstall): si
+cambia lo **stato dichiarato**. Nel `.env` della VPS:
+
+```
+VPS1777_FEATURES=backup,autoupdate    # il default: backup notturno + auto-update sicuro
+# togli 'backup' per disattivarlo; l'installer/update applicheranno la scelta e la
+# riprodurranno a ogni operazione. Il referto post-install ti confermerà backup=OFF.
 ```
 
-Container `backup` esegue ogni notte (cron 03:00). Rotation: mantiene **7 backup giornalieri + 4 settimanali** (uno per settimana).
+> ⚠ **Serve la chiave `age`.** Il backup cifra con la sola chiave pubblica del recipient
+> (la privata sta **fuori dalla VPS**, `v0.26.0`). Se `backup=ON` ma la chiave non è
+> configurata, il referto te lo dice (`⚠ chiave age da configurare per i backup`). Vedi
+> più sotto per generare la coppia e mettere la pubblica sul server.
 
-> **Niente `docker.sock` (H13).** Il container di backup **non monta il Docker
-> socket** e **non installa `docker-cli`**: i volumi dati gli sono montati
-> **direttamente in sola lettura** (`/volumes/<nome>`) e `backup.sh` li archivia da
-> lì (variabile `BACKUP_VOLUMES_DIR`) — così un container di servizio non ha mai il
-> controllo root-equivalente dell'host. Lo stesso `backup.sh` resta *dual-context*:
-> lanciato sull'host dumpa via `docker run` come prima, dentro il container usa i
-> mount diretti. Col profilo `ingress.caddy` decommenta `caddy-data`/`caddy-config`
-> nel compose per includerli.
+> **Niente `docker.sock` (H13).** Il container di backup **non monta il Docker socket** e
+> **non installa `docker-cli`**: i volumi dati gli sono montati **direttamente in sola
+> lettura** (`/volumes/<nome>`) e `backup.sh` li archivia da lì. Montare il socket darebbe
+> a un container di servizio il controllo root-equivalente dell'host.
 
 ## Restore
 
