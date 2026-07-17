@@ -2,6 +2,50 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.37.4] — 2026-07-17
+
+### Il tokenizer che collassava — `C++` cercava `C` (la causa dell'11/07)
+
+`unicode61` tratta `+ #` da **separatori**: `C++`, `C#`, `g++` perdono il suffisso
+e diventano il token `C`/`g`, comunissimo (coordinate SVG, copyright, gradi della
+caldaia). `count("C++")` non tornava vuoto — tornava **migliaia di falsi positivi
+silenziosi** (7.051 su 13.797, il 51% dell'archivio). È così che nacque il falso
+ricordo «Neo programmatore C++»: la ricerca non ha mentito, **ha risposto a una
+domanda diversa**. Gemello a verso opposto dell'FTS5 muto (PR #20): lì lista vuota,
+qui lista piena della cosa sbagliata — entrambi silenziosi. Trovato dalle tre
+sessioni durante una compattazione, misurato al singolo risultato (`C++`==`C#`==`C`).
+
+Fix su **due strati**, perché l'indice e la query sono piani diversi:
+
+- **indice** (`archive_indexer`) — l'FTS si crea con `tokenize='unicode61
+  tokenchars ''+#'''`: `C++`/`C#`/`g++` diventano token veri e distinti. Vale sui DB
+  costruiti **da qui in poi**; il `tokenize` è cotto nella CREATE (un `rebuild` non
+  lo cambia) → i DB già vivi vanno **re-ingeriti**. Il `.` resta separatore di
+  proposito (romperebbe `node.js`, `github.com`, `0.7.9`).
+- **query** (`fts.collapse_warnings_conn`, `count` → `warnings`, tool `check_term`)
+  — un **canary** che chiede all'INDICE: se `count(term)==count(prefisso)` il termine
+  è collassato e lo **dice**. Vale **subito** sui DB già vivi senza re-ingest, e si
+  auto-tara: su un DB ricostruito i conteggi divergono e l'avviso non scatta.
+
+### Crash `n_riga` sui titoli Claude Code senza `sessionId`
+
+Il ramo `ai-title` di `_iter_claude_code` referenziava `n_riga`, variabile rimossa
+in 0.37.3: un titolo **senza** `sessionId` sollevava `NameError` → moriva l'ingest
+dell'intero file. Invisibile ai test (il loro titolo il sessionId ce l'ha). L'uid
+ora ripiega sul testo del titolo.
+
+### Contratto dei bucket — legare l'indexer al preflight della app senza memoria
+
+`classify_cc()` + CLI `--classify` danno il verdetto per riga (`keep:<sender>` /
+`skip:<reason>`) **eseguendo** `_iter_claude_code`, non re-implementandolo. È
+l'interfaccia con cui la corsia app (standalone) verifica che il suo `_preflight`
+non si sia staccato in silenzio dalla mia logica: due classificatori vivi sulla
+stessa fixture, i verdetti devono combaciare.
+
+Verificato: gateway **48 passed**, archive-mcp **30 passed**; canary provato sul
+`.db` reale (`C++`/`C#`/`g++`/`.NET`/`F#` collassati → catturati, `node.js`/`flutter`
+zero falsi positivi).
+
 ## [0.37.3] — 2026-07-16
 
 ### Il contatore della perdita non perde più
