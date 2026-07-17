@@ -290,7 +290,12 @@ def db_stats_conn(conn: sqlite3.Connection) -> dict[str, Any]:
     oldest = newest = ""
     labels = 0
     if rows:
-        lo, hi = conn.execute("SELECT min(ts), max(ts) FROM messages").fetchone()
+        # min(NULLIF(ts,'')): le righe-STATO (memory:*, account:user) hanno ts vuoto —
+        # non sono EVENTI, non hanno una data di nascita. Senza NULLIF la stringa vuota
+        # vince su min() e `oldest` diventa "" — il tool direbbe «non so da quando»
+        # sapendolo. NULLIF le esclude dal minimo; max() le ignora già (vuoto ordina prima).
+        lo, hi = conn.execute(
+            "SELECT min(NULLIF(ts,'')), max(ts) FROM messages").fetchone()
         oldest, newest = lo or "", hi or ""
         labels = int(conn.execute(
             "SELECT count(DISTINCT project) FROM messages").fetchone()[0])

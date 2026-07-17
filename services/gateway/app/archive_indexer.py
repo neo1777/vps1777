@@ -539,9 +539,7 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
     # tetto anche qui: `index_jsonl` accetta un file-like (non solo un path), e su
     # uno stream non c'è nessuno `st_size` da controllare. Si contano i byte letti.
     read = 0
-    n_riga = 0  # posizione nel file: rende UNICA la lapide di ogni scarto (vedi sotto)
     for line in fh:
-        n_riga += 1
         read += len(line)
         if read > MAX_FILE_BYTES:
             raise ValueError(
@@ -554,7 +552,30 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             d = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if d.get("type") not in _CC_TYPES:
+        typ = d.get("type")
+        if typ not in _CC_TYPES:
+            # NON un messaggio user/assistant. Prima: `continue` MUTO → 38k righe di
+            # servizio sparivano dal conteggio (né in n né in skipped): la quadratura
+            # non poteva chiudere. Ora ogni riga-non-messaggio è CONTATA, e le due che
+            # portano contenuto utile (titolo, allegati) sono indicizzate — parità col
+            # path claude.ai, che già cattura summary e attachments.
+            if typ == "ai-title" and str(d.get("aiTitle") or "").strip():
+                yield (_uid("cc-title", str(d.get("sessionId") or n_riga)), "titoli",
+                       "", str(d["aiTitle"]).strip(), "title", "", "", "", "")
+            elif typ == "attachment" and d.get("uuid"):
+                att = d.get("attachment") if isinstance(d.get("attachment"), dict) else {}
+                added = " ".join(str(x) for x in (att.get("addedNames") or []))
+                if added.strip():
+                    yield (str(d["uuid"]),
+                           project or Path(str(d.get("cwd") or "unknown")).name or "unknown",
+                           str(d.get("timestamp") or ""), "", "attachment", "", "",
+                           added.strip(), str(d.get("parentUuid") or ""))
+                else:
+                    yield _Skip("claude-code", "non-message", str(d)[:200], str(d.get("timestamp") or ""))
+            else:
+                # metadati operativi (mode/system/last-prompt/queue-operation/…): non un
+                # messaggio, ma lascia una lapide contata invece di sparire in silenzio.
+                yield _Skip("claude-code", "non-message", str(d)[:200], str(d.get("timestamp") or ""))
             continue
         uuid, ts = d.get("uuid"), d.get("timestamp")
         if not uuid or not ts:
@@ -562,8 +583,7 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             # stesso tipo collassavano in UNA lapide (uid identico + OR IGNORE) — il
             # contatore della perdita perdeva. L'indice è stabile fra re-ingest dello
             # stesso file: dedup fra ingest sì, collasso dentro l'ingest no.
-            yield _Skip("claude-code", "no-uuid-o-ts",
-                        f"{d.get('type') or ''}#r{n_riga}", str(ts or ""))
+            yield _Skip("claude-code", "no-uuid-o-ts", str(d)[:200], str(ts or ""))
             continue
         msg = d.get("message") or {}
         blocks = extract_blocks(msg.get("content"))

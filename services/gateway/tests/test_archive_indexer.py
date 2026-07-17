@@ -917,3 +917,30 @@ def test_skipped_no_collapse(tmp_path: Path) -> None:
     # la proprietà che NON va persa: re-ingest dello stesso file NON duplica le lapidi
     archive_indexer.index_file(str(p), str(db))
     assert archive_indexer.count_skipped(db) == 3
+
+
+def test_claude_code_metadati(tmp_path: Path) -> None:
+    """Le righe non-user/assistant NON spariscono più in un continue muto (D3, 17/07):
+    i metadati operativi lasciano una lapide 'non-message' (contata → la quadratura
+    chiude), l'ai-title diventa una riga cercabile e l'attachment coi nomi-file è
+    indicizzato (parità col path claude.ai)."""
+    p = tmp_path / "s.jsonl"
+    p.write_text("\n".join([
+        '{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"content":"ciao"}}',
+        '{"type":"ai-title","aiTitle":"CHIAVETITOLO configurazione tick","sessionId":"s1"}',
+        '{"type":"attachment","uuid":"att1","timestamp":"2026-01-01T00:00:01Z","cwd":"/x/proj","parentUuid":"u1","attachment":{"addedNames":["CHIAVEFILE.dart"]}}',
+        '{"type":"mode","sessionId":"s1"}',            # metadato operativo → lapide
+        '{"type":"queue-operation","sessionId":"s1"}', # idem
+    ]), encoding="utf-8")
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(p), str(db))
+    assert n == 3  # user + ai-title + attachment (indicizzati)
+    assert archive_indexer.count_skipped(db) == 2  # mode + queue-operation (contati, non spariti)
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        assert conn.execute("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'CHIAVETITOLO'").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'CHIAVEFILE'").fetchone()[0] == 1
+        reasons = sorted(r[0] for r in conn.execute("SELECT reason FROM skipped").fetchall())
+        assert reasons == ["non-message", "non-message"]
+    finally:
+        conn.close()
