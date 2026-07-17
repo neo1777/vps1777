@@ -2,6 +2,7 @@
 """Collaudo della quadratura di un ingest in archive1777.
 
   Uso:  python3 collaudo-quadratura.py <db> --sorgente N [--ingest-n N]
+                                              [--ingest-skipped N]
 
 Risponde a UNA domanda: **il corpus è entrato tutto, o si è perso qualcosa?**
 E la risponde in modo che un residuo non possa essere confuso con una perdita.
@@ -14,6 +15,27 @@ finché non provi con numeri noti. Misurato il 16/07 su un corpus costruito appo
 
     n_ingest        + skipped =  6 + 5 = 11  vs sorgente 11   ✓ CHIUDE
     COUNT(messages) + skipped =  5 + 5 = 10  vs sorgente 11   ✗ NON chiude
+
+**E LA RIGA SOPRA ERA ANCORA SBAGLIATA — trovato sul carico vero il 17/07.**
+Quel `skipped` è `COUNT(skipped)`, cioè **post-dedup**: le lapidi entrano con
+`INSERT OR IGNORE` su `_uid()` e **deduplicano esattamente come i messaggi**. Nel
+corpus-giocattolo da 11 righe non c'erano scarti doppi, **quindi il difetto non si
+vedeva: l'esempio confermava la formula invece di provarla.** Sul bundle vero:
+
+    n_ingest(78.964) + COUNT(skipped)(22.790) = 101.754  vs 116.968 → «✗ NON QUADRA,
+                                                            residuo 15.214»   ← FALSO ALLARME
+    n_ingest(78.964) + skipped_EMESSI(38.004) = 116.968  vs 116.968 → ✓ chiude a ZERO
+
+**I 15.214 erano i dup-scarti** — la dedup del libro-mastro, che per costruzione non
+lascia firma nel DB. **Questo script sommava un numero PRE-dedup (`n`) a uno POST-dedup
+(`COUNT(skipped)`): due metri diversi — l'errore esatto che esiste per impedire**, e che
+predica sei righe più giù. Ha dichiarato una perdita su un ingest perfetto: **il gemello
+a verso opposto del difetto che curava** (là: «quadra» mentre mancava roba; qui:
+«manca roba» mentre quadrava). *Un metro che sbaglia in entrambi i versi resta un metro
+storto: il verso è un dettaglio, la classe è la stessa.*
+→ Serve **`--ingest-skipped`**: il totale degli scarti EMESSI (pre-dedup), che l'ingest
+  conosce e il DB no. Senza, la quadratura piena **non è calcolabile** — e questo script
+  ora lo DICE invece di dichiarare un residuo che non sa leggere.
 
 **«Indicizzati» NON è `COUNT(messages)`.** `write_rows` conta le righe che *legge*
 (`n += 1` prima della scrittura); la tabella poi **deduplica** per uuid con
@@ -88,6 +110,10 @@ def main() -> int:
     ap.add_argument("--ingest-n", type=int, default=None,
                     help="il numero che l'ingest ha STAMPATO (righe lette non scartate). "
                          "Senza questo la quadratura non è ricostruibile: vedi il docstring.")
+    ap.add_argument("--ingest-skipped", type=int, default=None,
+                    help="gli scarti EMESSI dall'ingest (pre-dedup). Diverso da "
+                         "COUNT(skipped), che è post-dedup: le lapidi deduplicano con "
+                         "INSERT OR IGNORE. Senza, la quadratura piena non è calcolabile.")
     a = ap.parse_args()
 
     if not a.db.exists():
@@ -149,18 +175,40 @@ def main() -> int:
         print("    oppure ri-ingerisci annotandolo.")
         return 1
 
-    quadra = a.ingest_n + skip_tot
     doppioni = a.ingest_n - msgs
-    residuo = a.sorgente - quadra
-
-    print(f"\n  QUADRATURA:  n_ingest({a.ingest_n}) + skipped({skip_tot}) = {quadra}"
-          f"  vs sorgente({a.sorgente})")
-    print(f"  doppioni collassati (n − messages): {doppioni}"
+    print(f"  doppioni-messaggio collassati (n − messages): {doppioni}"
           + ("   ← informazione, NON un allarme: la dedup ha lavorato" if doppioni else ""))
+
+    # Gli scarti EMESSI sono l'altra metà del libro-mastro, e il DB non li sa: le
+    # lapidi entrano con `INSERT OR IGNORE` su `_uid()` → deduplicano come i
+    # messaggi. Sommare `n` (pre-dedup) a `COUNT(skipped)` (post-dedup) è mescolare
+    # due metri: è quello che questo script faceva fino al 17/07, e ha dichiarato
+    # una perdita di 15.214 righe su un ingest che chiudeva a zero.
+    if a.ingest_skipped is None:
+        print("\n  ⚠ QUADRATURA PIENA NON CALCOLABILE: manca --ingest-skipped.")
+        print(f"    So gli scarti DISTINTI ({skip_tot}), non quelli EMESSI. Fra i due")
+        print("    c'è la dedup delle lapidi, che nel DB non lascia firma.")
+        print(f"    Posso solo dire: n_ingest({a.ingest_n}) + skipped_distinti({skip_tot})"
+              f" = {a.ingest_n + skip_tot} vs sorgente({a.sorgente}).")
+        print(f"    Il divario {a.sorgente - a.ingest_n - skip_tot} è **dup-scarti O perdita**,")
+        print("    e da qui NON si distinguono. Non chiamo 'perdita' ciò che non so leggere:")
+        print("    dammi gli scarti emessi dall'ingest e rispondo.")
+        return 1
+
+    quadra = a.ingest_n + a.ingest_skipped
+    residuo = a.sorgente - quadra
+    dup_scarti = a.ingest_skipped - skip_tot
+
+    print(f"\n  QUADRATURA:  n_ingest({a.ingest_n}) + skipped_emessi({a.ingest_skipped})"
+          f" = {quadra}  vs sorgente({a.sorgente})")
+    print(f"  doppioni-scarto collassati (emessi − distinti): {dup_scarti}"
+          + ("   ← idem: la dedup del libro-mastro" if dup_scarti else ""))
 
     if residuo == 0:
         print("\n  ✓ QUADRA. Residuo inspiegato: ZERO. Ogni riga della sorgente è")
         print("    indicizzata, oppure ha la sua lapide con un motivo.")
+        print(f"    Scomposizione: {a.sorgente} = {msgs} in tabella + {doppioni} dup-msg"
+              f" + {skip_tot} lapidi + {dup_scarti} dup-scarto")
         return 0
 
     print(f"\n  ✗ NON QUADRA. Residuo inspiegato: {residuo} righe.")
