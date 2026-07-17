@@ -448,6 +448,17 @@ if ! docker compose version >/dev/null 2>&1; then
   chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 fi
 
+# 2b. Hardening host — patch di sicurezza automatiche (unattended-upgrades) +
+#     anti brute-force SSH (fail2ban). Era SOLO nel web-installer (engine.py):
+#     chi usava deploy.sh non lo riceveva, nonostante OPS.md:5-11 dica "lo fa
+#     l'installer". Allineato. NON tocca sshd_config (password/root login restano:
+#     il deploy si riconnette via password — la disabilitazione è un passo manuale
+#     post-install documentato in OPS.md).
+if apt-get install -y -q unattended-upgrades fail2ban >/dev/null 2>&1; then
+  systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+  systemctl enable --now fail2ban >/dev/null 2>&1 || true
+fi
+
 # 3. Utente operatore (nome non collidente con utenti di sistema Debian)
 if ! id "$OPERATOR_USER" >/dev/null 2>&1; then
   # uid 1000 = stesso uid dei container → nessun mismatch di ownership sui
@@ -614,12 +625,69 @@ fi
 # ═══════════════════════════════════════════ 6. IMMAGINI + UP
 step "6/8 — Immagini + avvio stack"
 
+# FEATURE OPZIONALI DICHIARATE (stato voluto). Default: backup + auto-update SICURO.
+# Le stesse le legge la CLI (vps1777.py enabled_features) da VPS1777_FEATURES in .env:
+# così install, update e rollback riproducono SEMPRE le stesse feature — è il fix del
+# difetto per cui un reinstall/update lasciava cadere gli opt-in ops.* in silenzio.
+FEATURES="${VPS1777_FEATURES:-backup,autoupdate}"
+OPS_FILES=""; OPS_PROFILES=""
+case ",$FEATURES," in *,backup,*)     OPS_FILES="$OPS_FILES -f compose.ops.backup.yaml";    OPS_PROFILES="$OPS_PROFILES --profile ops.backup";;    esac
+case ",$FEATURES," in *,portainer,*)  OPS_FILES="$OPS_FILES -f compose.ops.portainer.yaml"; OPS_PROFILES="$OPS_PROFILES --profile ops.portainer";; esac
+# watchtower = auto-update CRUDO (declassato): supportato solo se dichiarato esplicito,
+# ed è in CONFLITTO con l'auto-update sicuro (la CLI avvisa). Il default NON lo include.
+case ",$FEATURES," in *,watchtower,*) OPS_FILES="$OPS_FILES -f compose.ops.watchtower.yaml"; OPS_PROFILES="$OPS_PROFILES --profile ops.autoupdate";; esac
+
+# Persisto lo stato dichiarato in .env: la CLI (vps1777.py enabled_features) lo legge,
+# così `vps1777 update`/`rollback` ricostruiscono lo stack con le STESSE feature — un
+# update non spegne più il backup, e un reinstall lo riaccende senza doverlo ricordare.
+SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && (grep -q ^VPS1777_FEATURES= .env && sed -i \"s|^VPS1777_FEATURES=.*|VPS1777_FEATURES=$FEATURES|\" .env || echo VPS1777_FEATURES=$FEATURES >> .env)'" \
+  && ok "Stato feature dichiarato in .env: $FEATURES" || warn "non ho scritto VPS1777_FEATURES in .env"
+
+# ── Chiave age per il backup cifrato (solo se 'backup' è dichiarato) ──────────
+# Il backup cifra con age; la chiave PRIVATA deve stare sul TUO PC, mai sulla VPS
+# (H26). L'installer la allestisce per te — (i) di default: genera la coppia SUL PC,
+# manda alla VPS solo il recipient pubblico, ti salva la privata qui. (ii) chi vuole
+# la propria: AGE_RECIPIENT=age1... salta la generazione. Mai silenzioso: se manca,
+# lo dice — un backup che non cifra è la perdita silenziosa applicata ai tuoi dati.
+case ",$FEATURES," in *,backup,*)
+  if SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && grep -q ^age1 tools/age-recipients.txt 2>/dev/null'"; then
+    ok "Backup: recipient age già presente sulla VPS (lascio com'è)"
+    AGE_STATE="ok (già presente)"
+  elif [ -n "${AGE_RECIPIENT:-}" ]; then
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && printf %s\\\\n \"$AGE_RECIPIENT\" > tools/age-recipients.txt'" \
+      && { ok "Backup: recipient age impostato (fornito da te — opzione ii)"; AGE_STATE="ok (fornito)"; } \
+      || AGE_STATE="ERRORE scrittura recipient"
+  elif command -v age-keygen >/dev/null 2>&1; then
+    AGE_KEY_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/vps1777"
+    mkdir -p "$AGE_KEY_DIR" && chmod 700 "$AGE_KEY_DIR"
+    AGE_KEY_FILE="$AGE_KEY_DIR/age-key.txt"
+    [ -f "$AGE_KEY_FILE" ] || { age-keygen -o "$AGE_KEY_FILE" >/dev/null 2>&1 && chmod 600 "$AGE_KEY_FILE"; }
+    AGE_PUB="$(age-keygen -y "$AGE_KEY_FILE" 2>/dev/null || true)"
+    if [ -n "$AGE_PUB" ]; then
+      SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && printf %s\\\\n \"$AGE_PUB\" > tools/age-recipients.txt'" \
+        && { ok "Backup: chiave age generata SUL PC (opzione i). Recipient pubblico sulla VPS."; \
+             warn "  → CHIAVE PRIVATA age SOLO qui: $AGE_KEY_FILE — SALVALA, senza non ripristini i backup."; \
+             AGE_STATE="ok (generata sul PC → $AGE_KEY_FILE)"; } \
+        || AGE_STATE="ERRORE invio recipient"
+    else
+      warn "Backup: age-keygen ha fallito — imposta tools/age-recipients.txt a mano o passa AGE_RECIPIENT=age1..."
+      AGE_STATE="MANCANTE (age-keygen fallito)"
+    fi
+  else
+    warn "Backup ABILITATO ma manca la chiave age: installa 'age' sul PC e rilancia, oppure AGE_RECIPIENT=age1..."
+    warn "  → Finché manca, il container backup gira ma i backup delle 03:00 FALLISCONO."
+    AGE_STATE="MANCANTE (installa age o passa AGE_RECIPIENT)"
+  fi
+  ;;
+  *) AGE_STATE="n/d (backup non attivo)";;
+esac
+
 # Per tailscale (host-mode) l'esposizione la gestisce GATEWAY_BIND, NON
 # compose.onboarding (che pubblicherebbe una 2ª porta in conflitto sulla :8080).
 if [ "$INGRESS" = "tailscale" ]; then
-  COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.tailscale.yaml --profile ingress.tailscale"
+  COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.tailscale.yaml$OPS_FILES --profile ingress.tailscale$OPS_PROFILES"
 else
-  COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml -f compose.onboarding.yaml --profile ingress.${INGRESS}"
+  COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml -f compose.onboarding.yaml$OPS_FILES --profile ingress.${INGRESS}$OPS_PROFILES"
 fi
 if [ "$DEV_BUILD" = "1" ]; then
   # build locale: aggiunge l'overlay compose.build.yaml (solo dev/fallback)
@@ -634,11 +702,16 @@ else
 fi
 
 # ── Canale di aggiornamento: CLI vps1777 + unit systemd (idempotente)
+# Le unit vengono installate TUTTE (glob), incluse le due dell'auto-update sicuro
+# (vps1777-auto-update.{service,timer}); il timer si ABILITA solo se `autoupdate`
+# è nello stato dichiarato (default sì). È l'alternativa gestita a Watchtower.
 log "Installo il canale di aggiornamento (CLI + timer + path unit)..."
+ENABLE_UNITS="vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer"
+case ",$FEATURES," in *,autoupdate,*) ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer";; esac
 SSH "install -m755 $REMOTE_DIR/tools/vps1777.py /usr/local/bin/vps1777 \
   && for u in $REMOTE_DIR/systemd/vps1777-*; do case \"\$u\" in *.service|*.timer|*.path) sed -e \"s|@OPERATOR_USER@|$OPERATOR_USER|g\" -e \"s|@REPO@|$REMOTE_DIR|g\" \"\$u\" | install -m644 /dev/stdin /etc/systemd/system/\$(basename \"\$u\");; esac; done \
   && systemctl daemon-reload \
-  && systemctl enable --now vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer" \
+  && systemctl enable --now $ENABLE_UNITS" \
   && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + check settimanale secret" \
   || warn "Setup canale update fallito — installalo dopo con tools/bootstrap.sh"
 SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && /usr/local/bin/vps1777 check || true'" >/dev/null 2>&1 || true
@@ -709,6 +782,19 @@ echo "RESULT_ADMIN_EMAIL=$ADMIN_EMAIL"
 [ -n "${GENERATED_PWD:-}" ] && echo "RESULT_ADMIN_PWD=$GENERATED_PWD"
 echo "RESULT_SETUP_URL=${PUBLIC_BASE:-http://$VPS_IP:8080}/admin/setup"
 echo "RESULT_INGRESS=$INGRESS"
+echo "RESULT_FEATURES=${FEATURES:-}"
+echo "RESULT_AGE=${AGE_STATE:-n/d}"
+
+# ── Referto feature: l'ASSENZA PARLA (mai più muta come Watchtower/backup). Ogni
+#    feature dichiarata è stampata ON/OFF; un OFF non richiesto lo VEDI, non lo scopri
+#    dopo mesi. È il canary del tokenizer applicato all'installer.
+_feat() { case ",${FEATURES:-}," in *",$1,"*) printf ON;; *) printf OFF;; esac; }
+printf '\n%b\n' "${C_B}  ═══ FEATURE (stato dichiarato — riprodotto a ogni update e reinstall) ═══${C_R}"
+printf '    backup notturno    : %s\n' "$(_feat backup)"
+printf '    auto-update sicuro : %s%s\n' "$(_feat autoupdate)" \
+  "$(case ",${FEATURES:-}," in *,watchtower,*) printf '  (⚠ watchtower CRUDO anche attivo — CONFLITTO)';; esac)"
+printf '    portainer          : %s\n' "$(_feat portainer)"
+printf '    chiave age (backup): %s\n' "${AGE_STATE:-n/d}"
 
 cat <<DONE2
 

@@ -387,10 +387,14 @@ def ingress_profile(repo: Path) -> str:
 # compose. `autoupdate` NON è qui: è un timer systemd (vps1777-auto-update), non un
 # container. `watchtower` è l'auto-update CRUDO (declassato), alternativa INSICURA ad
 # `autoupdate` — supportato solo se dichiarato esplicitamente, e in conflitto con esso.
+# feature dichiarata → (suffisso del FILE compose, nome del PROFILO). Per watchtower
+# i due DIFFERISCONO: il file è compose.ops.watchtower.yaml ma il profilo è
+# ops.autoupdate — derivare il file dal profilo darebbe compose.ops.autoupdate.yaml
+# (inesistente). Backup/portainer: file e profilo coincidono.
 OPS_COMPOSE_FEATURES = {
-    "backup": "ops.backup",
-    "portainer": "ops.portainer",
-    "watchtower": "ops.autoupdate",
+    "backup": ("ops.backup", "ops.backup"),
+    "portainer": ("ops.portainer", "ops.portainer"),
+    "watchtower": ("ops.watchtower", "ops.autoupdate"),
 }
 DEFAULT_FEATURES = {"backup", "autoupdate"}   # backup + auto-update SICURO accesi di default
 
@@ -411,9 +415,9 @@ def compose_cmd(repo: Path, *, files: list[Path] | None = None) -> list[str]:
     if files is None:
         files = [repo / "compose.yaml", repo / f"compose.{profile}.yaml"]
         feats = enabled_features(repo)
-        for feat, prof in OPS_COMPOSE_FEATURES.items():
+        for feat, (file_sfx, prof) in OPS_COMPOSE_FEATURES.items():
             if feat in feats:
-                files.append(repo / f"compose.{prof}.yaml")
+                files.append(repo / f"compose.{file_sfx}.yaml")
                 extra_profiles.append(prof)
     for f in files:
         cmd += ["-f", str(f)]

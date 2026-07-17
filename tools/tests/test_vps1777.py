@@ -98,6 +98,36 @@ def test_nlm_cookie_constants_present():
     assert callable(v.nlm_cookie_status)
 
 
+# ─────────────────────── stato-feature dichiarato (anti-perdita-silenziosa) ──
+
+def _repo_env(text: str) -> Path:
+    d = Path(tempfile.mkdtemp())
+    (d / ".env").write_text(text)
+    return d
+
+
+def test_enabled_features_default_explicit_none():
+    # .env senza VPS1777_FEATURES → i default (backup + auto-update SICURO)
+    assert v.enabled_features(_repo_env("INGRESS_PROFILE=ingress.tailscale\n")) == {"backup", "autoupdate"}
+    assert v.enabled_features(_repo_env("VPS1777_FEATURES=backup,portainer\n")) == {"backup", "portainer"}
+    # 'none' → tutto spento: lo stato dichiarato può anche disattivare
+    assert v.enabled_features(_repo_env("VPS1777_FEATURES=none\n")) == set()
+
+
+def test_compose_cmd_reflects_declared_state():
+    # default → overlay backup presente; l'auto-update sicuro NON è un profilo (è un timer)
+    j = " ".join(v.compose_cmd(_repo_env("INGRESS_PROFILE=ingress.tailscale\n")))
+    assert "compose.ops.backup.yaml" in j and "--profile ops.backup" in j
+    assert "compose.ops.autoupdate.yaml" not in j
+    # watchtower (auto-update CRUDO) → il FILE giusto è ops.watchtower, il PROFILO ops.autoupdate
+    # (regressione: derivare il file dal profilo referenziava compose.ops.autoupdate.yaml, inesistente)
+    j = " ".join(v.compose_cmd(_repo_env("VPS1777_FEATURES=watchtower\n")))
+    assert "compose.ops.watchtower.yaml" in j and "--profile ops.autoupdate" in j
+    assert "compose.ops.autoupdate.yaml" not in j
+    # none → nessun overlay ops
+    assert not any("ops." in x for x in v.compose_cmd(_repo_env("VPS1777_FEATURES=none\n")))
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

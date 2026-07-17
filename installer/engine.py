@@ -515,6 +515,21 @@ echo CONFIG_OK
         self.result["ADMIN_EMAIL"] = p.get("admin_email", "")
         yield "✓ .env + secrets pronti"
 
+    # Feature opzionali DICHIARATE (stato voluto). Default: backup + auto-update
+    # SICURO. Le stesse le legge la CLI (vps1777.py) da VPS1777_FEATURES in .env, così
+    # install/update/rollback riproducono SEMPRE le stesse feature — è il fix del
+    # difetto per cui un reinstall/update lasciava cadere gli opt-in ops.* in silenzio.
+    # `watchtower` = auto-update CRUDO (declassato), escluso dal default e in conflitto.
+    # (suffisso FILE, nome PROFILO): per watchtower differiscono (file ops.watchtower,
+    # profilo ops.autoupdate); per backup/portainer coincidono.
+    _OPS_PROFILES = {"backup": ("ops.backup", "ops.backup"),
+                     "portainer": ("ops.portainer", "ops.portainer"),
+                     "watchtower": ("ops.watchtower", "ops.autoupdate")}
+
+    def _features(self) -> list[str]:
+        raw = self.result.get("FEATURES") or "backup,autoupdate"
+        return [f.strip() for f in raw.split(",") if f.strip() and f.strip() != "none"]
+
     def _compose_cmd(self, ingress: str, onboarding: bool = True,
                      build: bool = False) -> str:
         files = f"-f compose.yaml -f compose.ingress.{ingress}.yaml"
@@ -526,7 +541,13 @@ echo CONFIG_OK
         # l'override onboarding (che pubblicherebbe una 2ª porta in conflitto).
         if onboarding and ingress != "tailscale":
             files += " -f compose.onboarding.yaml"
-        return f"docker compose {files} --profile ingress.{ingress}"
+        profiles = f"--profile ingress.{ingress}"
+        feats = self._features()
+        for feat, (file_sfx, prof) in self._OPS_PROFILES.items():
+            if feat in feats:
+                files += f" -f compose.{file_sfx}.yaml"
+                profiles += f" --profile {prof}"
+        return f"docker compose {files} {profiles}"
 
     def step_pull(self, ingress: str, version: str) -> Iterator[str]:
         """Path produzione: pull delle immagini pubblicate (MAI build sulla VPS)."""
@@ -538,6 +559,15 @@ echo CONFIG_OK
                 "pull"):
             yield line
         yield "✓ Stack avviato (immagini pullate, niente build in produzione)"
+        # Referto feature: l'assenza PARLA. Un OFF non richiesto si VEDE nel log web,
+        # non si scopre dopo mesi (è il difetto Watchtower/backup, chiuso alla radice).
+        feats = self._features()
+        yield ("✓ Feature attive: "
+               + f"backup={'ON' if 'backup' in feats else 'OFF'} · "
+               + f"auto-update sicuro={'ON' if 'autoupdate' in feats else 'OFF'} · "
+               + f"portainer={'ON' if 'portainer' in feats else 'OFF'}"
+               + ("  ⚠ chiave age da configurare per i backup"
+                  if 'backup' in feats else ""))
 
     def step_build(self, ingress: str) -> Iterator[str]:
         """Escape hatch dev (--dev-build) o fallback pre-prima-release."""
@@ -550,8 +580,14 @@ echo CONFIG_OK
         yield "✓ Stack avviato (build locale)"
 
     def step_selfupdate_setup(self) -> Iterator[str]:
-        """Installa il canale update: CLI vps1777 + unit systemd. Idempotente."""
+        """Installa il canale update: CLI vps1777 + unit systemd. Idempotente.
+        Le unit auto-update (vps1777-auto-update.{service,timer}) si installano col
+        glob; il timer si ABILITA solo se `autoupdate` è dichiarato (default sì)."""
         yield "── Installo il canale di aggiornamento (CLI + timer)…"
+        enable_units = ("vps1777-check-update.timer vps1777-update.path "
+                        "vps1777-secrets-check.timer")
+        if "autoupdate" in self._features():
+            enable_units += " vps1777-auto-update.timer"
         script = f"""
 set -e
 install -m 755 {REMOTE_DIR}/tools/vps1777.py /usr/local/bin/vps1777
@@ -561,7 +597,7 @@ for u in {REMOTE_DIR}/systemd/vps1777-*; do
   case "$u" in *.service|*.timer|*.path) sed -e "s|@OPERATOR_USER@|{OPERATOR_USER}|g" -e "s|@REPO@|{REMOTE_DIR}|g" "$u" | install -m 644 /dev/stdin /etc/systemd/system/"$(basename "$u")";; esac
 done
 systemctl daemon-reload
-systemctl enable --now vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer
+systemctl enable --now {enable_units}
 echo SELFUPDATE_OK
 """
         okf = False
