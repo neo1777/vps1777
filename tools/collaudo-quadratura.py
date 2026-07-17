@@ -30,6 +30,31 @@ quadratura non è più ricostruibile e il residuo-doppioni resta indistinguibile
 perdita vera, per sempre. Questo script lo chiede, e se non ce l'hai te lo dice
 invece di indovinarlo.
 
+NON TUTTE LE RIGHE SONO EVENTI (scoperto sul carico vero, 17/07)
+----------------------------------------------------------------
+L'archivio contiene **due specie** di righe, e questo script quadra solo la prima:
+
+- **eventi** — le chat: accadono in un istante, hanno un `ts`, **non cambiano mai più**;
+- **stati** — `memory:*` e `account:user`: non accadono, *sono*. **Nessuna data**, e
+  **vengono riscritti**.
+
+Lo schema ha una sola colonna `ts` e presuppone che tutto sia un evento. Da lì tre
+sintomi che sembrano bug e non lo sono: `describe_databases` dice `oldest: ""` (il
+`MIN` su una stringa vuota vince su ogni data); `archive_stats` non colloca quelle
+righe in nessun anno; e **confrontando due snapshot gli stati sembrano "perdite"**.
+
+Misurato sui due export di Neo, e chiude a zero in entrambi:
+
+    08/07 : 49 memory + 1 account:user = 50 righe senza data
+    16/07 : 57 memory + 1 account:user = 58 righe senza data
+    (il DB Telegram quadra perfetto: sono solo messaggi, e un messaggio la data ce l'ha sempre)
+
+→ **Quadra le chat, non gli stati.** Se confronti due date e vedi `memory:conversations`
+passare da 6 a 4, **non hai perso 2 messaggi**: hai fotografato due volte un documento
+vivo. Contarli come conversazioni produce perdite fantasma — ed è la stessa domanda
+della chiave primaria qui sotto, con un'altra faccia: *quando due cose sono la stessa
+cosa?* Stessa colonna ≠ stessa specie.
+
 PERCHÉ I BUCKET SI STAMPANO SINGOLARMENTE
 -----------------------------------------
 Un totale che torna grazie a due errori che si compensano è peggio di un totale che
@@ -84,10 +109,31 @@ def main() -> int:
     finally:
         conn.close()
 
+    # Gli STATI (memory:*, account:user) non sono eventi: niente `ts`, e vengono
+    # riscritti. Vanno contati a parte o produrranno "perdite" fantasma.
+    conn = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True)
+    try:
+        stati = conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE project LIKE 'memory:%'"
+            " OR project LIKE 'account:%'").fetchone()[0]
+        senza_ts = conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE ts IS NULL OR ts = ''").fetchone()[0]
+    except sqlite3.OperationalError:
+        stati = senza_ts = None
+    finally:
+        conn.close()
+
     print(f"\n  db            : {a.db}")
     print(f"  sorgente      : {a.sorgente} righe (dichiarate)")
     print(f"  messages      : {msgs}  (DISTINTI, post-dedup)")
     print(f"  skipped       : {skip_tot}")
+    if stati:
+        print(f"\n  ⓘ  STATI (non eventi): {stati} righe  ·  righe senza `ts`: {senza_ts}")
+        print("     `memory:*` e `account:*` non sono conversazioni: sono documenti VIVI,")
+        print("     senza data, che vengono RISCRITTI. Fra due snapshot CAMBIANO — e non è")
+        print("     una perdita. Se stai confrontando due date, quadra le chat, non questi.")
+        if senza_ts and senza_ts != stati:
+            print(f"     ⚠ {senza_ts - stati} righe senza `ts` NON sono stati: quelle vanno guardate.")
     print("\n  bucket degli scarti (i nomi sono quelli che trovo, non quelli che mi aspetto):")
     if not buckets:
         print("    (nessuno scarto registrato)")
