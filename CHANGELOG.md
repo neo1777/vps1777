@@ -2,6 +2,41 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.38.0] — 2026-07-17
+
+### L'installer allestisce TUTTO — niente più feature perse in silenzio
+
+Il difetto scoperto: un reinstall (o un update) lasciava cadere gli opt-in `ops.*`
+**in silenzio** — l'auto-install (Watchtower) e persino il backup notturno sparivano
+senza un errore, perché lo "stato voluto" viveva solo nei `--profile` digitati a mano,
+effimeri, mai catturati. Radice: nessun posto che l'installer legge *dichiarava* cosa
+deve girare; il divario fra dichiarato e reale non aveva un guardiano.
+
+**Stato feature dichiarato** (`VPS1777_FEATURES` in `.env`, default `backup,autoupdate`),
+letto dove si costruisce OGNI comando compose (`vps1777.py:compose_cmd`): install, update
+e rollback riproducono SEMPRE le stesse feature. Un update non spegne più il backup; un
+reinstall lo riaccende senza doverlo ricordare. Stato autoritativo: una feature tolta si
+spegne.
+
+**Auto-update SICURO** — le unit `systemd/vps1777-auto-update.{service,timer}` lanciano
+`vps1777 update --yes` (backup + firma cosign + migrazioni + health-gate 180s + auto-rollback),
+timer settimanale. È il rimpiazzo *automatico e gestito* che al declassamento di Watchtower
+(giugno) non fu mai costruito — Watchtower (`ops.autoupdate`) resta opt-in e in conflitto,
+mai il default.
+
+**L'installer fa tutto** (`deploy.sh` + `installer/engine.py`): al primo install accende
+backup + timer, imposta la chiave age del backup (genera la coppia SUL PC, manda alla VPS
+solo il recipient pubblico; oppure `AGE_RECIPIENT=…`), e stampa un **referto post-install**
+(`backup ON · auto-update ON · portainer OFF · age OK/manca`) — l'assenza *parla*, non si
+scopre dopo mesi. Corretta anche una divergenza: `unattended-upgrades`+`fail2ban` erano solo
+nel web-installer, ora anche in `deploy.sh`.
+
+Fix di regressione (preso dai test): `watchtower` ha file (`compose.ops.watchtower.yaml`)
+≠ profilo (`ops.autoupdate`) — derivare il file dal profilo referenziava un file inesistente.
+
+Verificato: `test_vps1777` **10 passed** (+2: stato dichiarato, fix watchtower); `deploy.sh`
+`bash -n` ok; `engine.py`/`vps1777.py` compilano.
+
 ## [0.37.4] — 2026-07-17
 
 ### Il tokenizer che collassava — `C++` cercava `C` (la causa dell'11/07)
