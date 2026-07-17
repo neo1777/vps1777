@@ -570,7 +570,11 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             # portano contenuto utile (titolo, allegati) sono indicizzate — parità col
             # path claude.ai, che già cattura summary e attachments.
             if typ == "ai-title" and str(d.get("aiTitle") or "").strip():
-                yield (_uid("cc-title", str(d.get("sessionId") or n_riga)), "titoli",
+                # uid per sessione se c'è, altrimenti sul TESTO del titolo (garantito
+                # non-vuoto dal guard sopra): titoli distinti → uid distinti, titoli
+                # uguali → una lapide sola. NB: `n_riga` era rimasto qui dopo la sua
+                # rimozione → NameError sui titoli senza sessionId (crash dell'ingest).
+                yield (_uid("cc-title", str(d.get("sessionId") or d["aiTitle"])), "titoli",
                        "", str(d["aiTitle"]).strip(), "title", "", "", "", "")
             elif typ == "attachment" and d.get("uuid"):
                 att = d.get("attachment") if isinstance(d.get("attachment"), dict) else {}
@@ -606,6 +610,28 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
         proj = project or Path(str(d.get("cwd") or "unknown")).name or "unknown"
         yield (uuid, proj, ts, blocks.text, str(msg.get("role") or d.get("type") or ""),
                blocks.tools, blocks.thinking, "", str(d.get("parentUuid") or ""))
+
+
+def classify_cc(fh: IO[str]) -> list[str]:
+    """Il VERDETTO per riga (`keep:<sender>` o `skip:<reason>`) che
+    `_iter_claude_code` dà su ogni record Claude Code. NON re-implementa la logica:
+    la ESEGUE — così è impossibile che diverga da ciò che l'ingest fa davvero.
+
+    È l'interfaccia del *contratto dei bucket* (`_chat/contract/cc_buckets.jsonl`):
+    la corsia app (setaccio) tiene un `_preflight` che PREVEDE questi conteggi
+    copiando l'ordine dei filtri di qui. Una copia invecchia in silenzio: se cambio
+    i bucket, il suo metro si stacca e nessun test lo vede. Il canary chiude il buco
+    — si CHIEDE a questa funzione, non alla memoria: entrambi gli strumenti
+    classificano la stessa fixture e i verdetti devono combaciare. Se divergono,
+    qualcuno ha cambiato un lato. (È il gemello, un piano su, del canary del
+    tokenizer: là si chiede all'indice, qui alla logica dei filtri.)"""
+    out: list[str] = []
+    for item in _iter_claude_code(fh, "contract"):
+        if isinstance(item, _Skip):
+            out.append(f"skip:{item.reason}")
+        else:
+            out.append(f"keep:{item[4]}")   # item[4] = sender (title/attachment/role)
+    return out
 
 
 # ── estrattore: export account claude.ai (.zip) ──────────────────────────────
@@ -1237,11 +1263,23 @@ def main(argv: list[str] | None = None) -> int:
         description="Indicizza sessioni/export in un DB FTS5 per archive-mcp.",
     )
     ap.add_argument("input", help="file di input (.jsonl / .zip / .md / .txt)")
-    ap.add_argument("db", help="file .db SQLite di output (creato/aggiornato)")
+    ap.add_argument("db", nargs="?", help="file .db SQLite di output (creato/aggiornato)")
     ap.add_argument("--project", default="", help="etichetta progetto (default: dedotta dalla fonte)")
+    ap.add_argument("--classify", action="store_true",
+                    help="NON indicizza: stampa il verdetto (keep:<sender>/skip:<reason>) "
+                         "per ogni riga di un .jsonl Claude Code. È l'interfaccia del "
+                         "contratto dei bucket: la corsia app la confronta col suo preflight.")
     args = ap.parse_args(argv)
     if not Path(args.input).is_file():
         print(f"input non trovato: {args.input}", file=sys.stderr)
+        return 1
+    if args.classify:
+        with open(args.input, encoding="utf-8") as fh:
+            for verdict in classify_cc(fh):
+                print(verdict)
+        return 0
+    if not args.db:
+        print("manca il file .db di output (o usa --classify)", file=sys.stderr)
         return 1
     try:
         n = index_file(args.input, args.db, project=args.project)

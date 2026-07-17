@@ -359,6 +359,58 @@ def test_index_file_zip_non_riconosciuto(tmp_path: Path) -> None:
     assert not (tmp_path / "out.db").exists()
 
 
+# ── contratto dei bucket + classify_cc (canary anti-drift col preflight app) ──
+
+def test_ai_title_senza_sessionId_non_crasha() -> None:
+    """Regression: `_iter_claude_code` referenziava `n_riga` (rimosso) nel ramo
+    ai-title → NameError su un titolo SENZA sessionId = crash dell'ingest del file.
+    Ora l'uid ripiega sul testo del titolo."""
+    import io
+    line = '{"type":"ai-title","aiTitle":"titolo orfano"}\n'
+    rows = list(archive_indexer._iter_claude_code(io.StringIO(line), "test"))
+    assert len(rows) == 1
+    assert rows[0][4] == "title" and rows[0][3] == "titolo orfano"
+
+
+# Il contratto: UN record per bucket. Tenuto INLINE (non un file .jsonl, che il
+# .gitignore esclude → non arriverebbe in CI). La copia condivisa per la corsia app
+# vive in `_chat/contract/cc_buckets.jsonl`; il suo canary confronta il proprio
+# preflight con la mia classify VIVA (`--classify`) sulla stessa fixture, quindi
+# regge anche se le due copie divergono — non si fida di un atteso salvato.
+_CC_BUCKETS = [
+    '{"type":"user","uuid":"u-1","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"ciao come va"}}',
+    '{"type":"assistant","uuid":"a-1","timestamp":"2026-01-01T10:00:01Z","message":{"role":"assistant","content":"bene, procedo"}}',
+    '{"type":"ai-title","sessionId":"sess-9","aiTitle":"Titolo con sessione"}',
+    '{"type":"ai-title","aiTitle":"Titolo SENZA sessione"}',
+    '{"type":"attachment","uuid":"att-1","attachment":{"addedNames":["schema.sql","note.md"]}}',
+    '{"type":"attachment","uuid":"att-2","attachment":{"addedNames":[]}}',
+    '{"type":"queue-operation","operation":"flush"}',
+    '{"type":"user","message":{"role":"user","content":"senza uuid ne ts"}}',
+    '{"type":"user","uuid":"u-empty","timestamp":"2026-01-01T10:00:02Z","message":{"role":"user","content":[]}}',
+]
+
+
+def test_contratto_bucket_classify_cc() -> None:
+    """Il contratto copre UN record per bucket; `classify_cc` deve dare questa
+    sequenza esatta di verdetti. Se cambio l'ordine/i bucket di `_iter_claude_code`,
+    questo test si spacca — ed è il segnale che il preflight della corsia app (che
+    replica la logica) va ri-verificato. Il canary è una sottrazione: entrambi gli
+    strumenti classificano la stessa fixture e i verdetti devono combaciare."""
+    import io
+    verdicts = archive_indexer.classify_cc(io.StringIO("\n".join(_CC_BUCKETS) + "\n"))
+    assert verdicts == [
+        "keep:user",
+        "keep:assistant",
+        "keep:title",          # ai-title con sessionId
+        "keep:title",          # ai-title senza sessionId (fix n_riga)
+        "keep:attachment",
+        "skip:non-message",    # attachment senza addedNames
+        "skip:non-message",    # queue-operation (type fuori da _CC_TYPES)
+        "skip:no-uuid-o-ts",
+        "skip:empty",
+    ]
+
+
 def test_index_file_zip_di_documenti(tmp_path: Path) -> None:
     """Zip che NON è un export ma contiene .md/.txt → indicizzato come documenti
     (fallback 'archive deve indicizzare zip md txt, quel che è'). Ogni membro
