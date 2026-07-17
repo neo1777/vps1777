@@ -203,3 +203,73 @@ features:
     decisione: "una delle tre opzioni di ingress mutuamente esclusive; l'utente ne sceglie una all'install. [docs/INSTALL.md]"
     verify:
       compose_profile: {file: compose.ingress.cloudflared.yaml, profile: ingress.cloudflared}
+
+  # ── SEME DALLA CACCIA STORICA (setaccio, 17/07) ──────────────────────────────
+  # Le voci qui sotto vengono dal dossier CACCIA-FEATURE-PERDUTE_2026-07-17.md, con
+  # provenienza millimetrica. Completano gli esempi con i casi che il verificatore
+  # DEVE conoscere: la feature RIMOSSA (Watchtower — lo storico deve ricordarla anche
+  # se il codice non la mostra più) e le due rinviate-a-giudizio (H43, H22).
+
+  - id: ops.autoupdate
+    nome: "Watchtower — auto-update d'origine (RIMOSSO dal flusso)"
+    cosa: "Auto-update via container Watchtower. Bypassava le protezioni (niente backup,
+           health-gate, rollback): per questo fu declassato. Sostituito da update.auto-timer.
+           Resta agli atti perché lo storico ricordi che ESISTETTE — il codice non lo mostra
+           più nel default, ma senza questa voce si sarebbe potuto 'ripristinarlo' e rifare
+           l'errore di giugno."
+    dove: ["compose-profile:compose.ops.watchtower.yaml#ops.autoupdate"]
+    status: removed
+    since: "declassato 2026-06-10"
+    decisione: "declassato il 10/06 a 'opt-in, non supportato' perché bypassa le protezioni;
+                il compose.ops.watchtower.yaml resta come opt-in LEGACY non-supportato. Il
+                rimpiazzo sicuro è update.auto-timer. [conv 2026-06-10 b82df434 · verbatim:
+                «Watchtower (ops.autoupdate) DECLASSATO — resta opt-in ma dichiarato NON supportato»]"
+    verify:
+      manual: "verifica umana periodica: NESSUN percorso di default (installer, compose base)
+               deve accendere Watchtower. Se ri-entra nel default → è la regressione di giugno.
+               Il sostituto attivo è update.auto-timer, non questo."
+
+  - id: ops.portainer
+    nome: "Portainer — UI di gestione container (opt-in)"
+    cosa: "Interfaccia web per gestire i container della VPS. Opt-in di proposito: comoda ma
+           amplia la superficie d'attacco, quindi non default."
+    dove: ["compose-profile:compose.ops.portainer.yaml#ops.portainer"]
+    status: opt-in
+    since: "0.26.0 (con i profili ops.*)"
+    decisione: "opt-in per scelta: un pannello di gestione container esposto è superficie in
+                più; chi lo vuole lo accende. Legittima, ma DICHIARATA (un reinstall non la
+                riaccende — è atteso). [conv 17/07 caccia-feature-perdute · compose.ops.portainer.yaml]"
+    verify:
+      compose_profile: {file: compose.ops.portainer.yaml, profile: ops.portainer}
+
+  - id: sec.H43-rootfs-ro
+    nome: "rootfs read-only su nb1777-mcp (rinviato)"
+    cosa: "Filesystem di root in sola lettura sul servizio con Chromium. Rinviato finché non
+           si verifica un giro NotebookLM reale con tutte le tmpfs necessarie."
+    dove: ["SECURITY.md:285"]
+    status: deferred
+    since: "rinviato (postilla SECURITY.md)"
+    decisione: "rimandato di proposito: il servizio con Chromium è escluso dal read-only finché
+                non è verificato un giro NotebookLM reale con le tmpfs. [SECURITY.md:285]"
+    follow_up:
+      manuale: {cosa: "abilitare read_only su nb1777-mcp dopo aver verificato un giro NotebookLM con le tmpfs",
+                rivedi_dopo: "2026-09-10"}
+    verify:
+      manual: "verifica umana: nb1777-mcp ha read_only:true nel compose, con le tmpfs necessarie?"
+
+  - id: sec.H22-digest-pin
+    nome: "Pinning ai digest delle immagini nel compose (rinviato)"
+    cosa: "L'invariante «gira solo il digest verificato» vive nel file compose (override
+           generato all'up), non solo nella CLI post-pull. Chiuderebbe il caso di un
+           `docker compose pull` lanciato a mano fuori dalla CLI."
+    dove: ["SECURITY.md:288"]
+    status: deferred
+    since: "rinviato (postilla SECURITY.md)"
+    decisione: "rimandato di proposito: oggi l'invariante lo impone la CLI dopo il pull (contro
+                images.lock); farlo vivere nel compose tocca il percorso di update, quindi con
+                un momento dedicato. [SECURITY.md:288]"
+    follow_up:
+      manuale: {cosa: "generare l'override compose coi digest pinnati all'up, in un momento dedicato al percorso update",
+                rivedi_dopo: "2026-09-10"}
+    verify:
+      manual: "verifica umana: il compose (o un override generato) pinna le 4 immagini vps1777 ai digest?"
