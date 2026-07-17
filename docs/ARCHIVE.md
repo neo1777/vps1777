@@ -85,7 +85,8 @@ dalla Mini App):
 | Tool | Cosa fa |
 |---|---|
 | `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}` |
-| `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}` |
+| `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings` |
+| `check_term(term, db_name)` | diagnostica se un termine con `+`/`#` (`C++`, `C#`, `g++`) è ricercabile o **collassa** sul prefisso — chiede all'indice, non alla doc |
 | `get_context(uuid, db_name, before, after)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; se il messaggio è in un thread, i vicini vengono dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale |
 | `get_conversation(uuid, db_name, limit)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N |
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
@@ -111,6 +112,7 @@ modello legge prima di cercare):
 - Termini con caratteri speciali (`- . / @ : # '`) **tra virgolette**:
   `"flutter-elinux"`, `"0.7.9"`. In modalità *smart* (default) il server li quota
   da sé; con `raw=true` la query passa intatta (per NEAR/parentesi complesse).
+  **Ma il quoting non basta per il suffisso** — vedi il riquadro sotto.
 - `sort`: `rank` (rilevanza, default), `newest`, `oldest`. Filtri `since`/`until`
   (ISO) e `project` (etichetta esatta). Su più DB il `limit` è **globale**.
 
@@ -119,6 +121,30 @@ modello legge prima di cercare):
 > silenzioso): solleva un errore che spiega come correggerla. Resta valido il
 > *protocollo dello zero*: 0 risultati non prova assenza — riprova quotando il
 > termine prima di concludere che "non c'è".
+
+> **Termini che COLLASSANO (`C++`, `C#`, `g++`) — il difetto dell'11/07.** Il
+> tokenizer `unicode61` tratta `+ #` da **separatori**: un termine come `C++`
+> perde il suffisso e diventa il token `C`, comunissimo (coordinate SVG,
+> copyright, gradi). `count("C++")` non torna vuoto — torna **migliaia di falsi
+> positivi silenziosi**: è così che nacque il falso ricordo «Neo programmatore
+> C++». È il gemello a verso opposto dell'errore parlante: lì lista vuota, qui
+> lista piena della cosa sbagliata. **Il quoting non protegge** — non è la
+> sintassi, è l'indice: nessun apice cerca un carattere che il tokenizer ha
+> buttato. Il difetto morde solo i caratteri **in coda** (`C++`); **in mezzo**
+> (`node.js`) il quoting tiene i due token come frase e funziona.
+>
+> Il fix è su **due strati**, perché indice e query sono piani diversi:
+> - **indice** — l'FTS si crea con `tokenize='unicode61 tokenchars ''+#'''`, così
+>   `C++`/`C#`/`g++` sono token veri e distinti. Vale sui DB **costruiti da qui in
+>   poi**; i DB già caricati vanno ricostruiti (re-ingest): il `tokenize` è
+>   fissato alla creazione, un `rebuild` non lo cambia. Il `.` resta separatore di
+>   proposito (romperebbe `node.js`, `github.com`, `0.7.9`).
+> - **query** — `count` e `check_term` fanno da **canary**: confrontano
+>   `count(term)` con `count(prefisso)`; se coincidono, il termine è collassato e
+>   lo **dicono** (campo `warnings`). Vale **subito** sui DB già vivi senza
+>   re-ingest, e si auto-tara: su un DB ricostruito i conteggi divergono e
+>   l'avviso non scatta. Chiedi `check_term("C++")` quando un conteggio ti sembra
+>   assurdo.
 
 ## Documenti e immagini (PDF-scansione, screenshot) — via NotebookLM
 
@@ -158,7 +184,8 @@ Schema corrente (v2, dal PR #23):
 messages(uuid PRIMARY KEY, project, ts, content,
          sender, tools, thinking, attachments, parent_uuid)
 messages_fts USING fts5(uuid, project, ts, content, tools, attachments,
-                        content='messages', ...)   -- external-content
+                        content='messages', ...,   -- external-content
+                        tokenize="unicode61 tokenchars '+#'")  -- C++/C# non collassano
 CREATE INDEX idx_parent ON messages(parent_uuid);   -- il thread-walking di get_conversation
 skipped(uid PRIMARY KEY, source, reason, detail, ts, ingest_date)  -- libro-mastro degli scarti
 meta(key PRIMARY KEY, value)                        -- scheda: description, …
