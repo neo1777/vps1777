@@ -144,21 +144,30 @@ def enum_reality(repo: Path) -> dict[str, set[str]]:
     return real
 
 
-def declared_keys(entries: list[dict]) -> dict[str, set[str]]:
-    """Cosa il ledger DICHIARA, nella stessa forma di enum_reality, così i due
-    insiemi si confrontano. Legge la chiave `verify` (e follow_up.verify) di ogni voce."""
-    dec: dict[str, set[str]] = {"mcp_tool": set(), "systemd_unit": set(), "compose_profile": set()}
-    for e in entries:
-        for spec in (e.get("verify"), (e.get("follow_up") or {}).get("verify")):
-            if not isinstance(spec, dict):
-                continue
+def _keys_of(e: dict) -> dict[str, set[str]]:
+    """Le chiavi-reali che UNA voce dichiara, lette da `verify`, `follow_up.verify` E
+    `dove`. Leggere anche `dove` (non solo verify) è ciò che permette a una voce con
+    verify `manual` — es. un `removed` — di risultare comunque DICHIARATA per la sua
+    coordinata (il buco fine trovato da setaccio: un profilo removed con verify manual
+    veniva dato per non-dichiarato)."""
+    k: dict[str, set[str]] = {"mcp_tool": set(), "systemd_unit": set(), "compose_profile": set()}
+    for spec in (e.get("verify"), (e.get("follow_up") or {}).get("verify")):
+        if isinstance(spec, dict):
             if "mcp_tool" in spec:
-                dec["mcp_tool"].add(f"{spec['mcp_tool']['service']}/{spec['mcp_tool']['name']}")
+                k["mcp_tool"].add(f"{spec['mcp_tool']['service']}/{spec['mcp_tool']['name']}")
             elif "systemd_unit" in spec:
-                dec["systemd_unit"].add(spec["systemd_unit"])
+                k["systemd_unit"].add(spec["systemd_unit"])
             elif "compose_profile" in spec:
-                dec["compose_profile"].add(spec["compose_profile"]["profile"])
-    return dec
+                k["compose_profile"].add(spec["compose_profile"]["profile"])
+    # dove: "compose-profile:<file>#<profilo>" · "mcp-tool:<svc>/<nome>" · "systemd:<unit>"
+    for d in e.get("dove", []):
+        if d.startswith("compose-profile:") and "#" in d:
+            k["compose_profile"].add(d.split("#", 1)[1])
+        elif d.startswith("mcp-tool:"):
+            k["mcp_tool"].add(d.split(":", 1)[1])
+        elif d.startswith("systemd:"):
+            k["systemd_unit"].add(d.split(":", 1)[1])
+    return k
 
 
 def main() -> int:
@@ -213,13 +222,34 @@ def main() -> int:
                              f"FALLISCE: {det}. La feature è sparita, o la voce mente.")
 
     # ── 3. REALE → DICHIARATO (cattura ciò che poi si dimentica) ──────────────
-    real, dec = enum_reality(repo), declared_keys(entries)
+    # Tre vie, non due (raffinamento dal buco fine di setaccio):
+    #   reale + dichiarato present (active/opt-in) → OK
+    #   reale + dichiarato removed                 → STATO≠REALTÀ (l'hai detto tolto, c'è ancora)
+    #   reale + nessuna voce                       → NON DICHIARATO (aggiungi la voce)
+    # (reale + deferred lo copre la sorveglianza [PROMUOVI] più sotto: è pronto a promozione.)
+    real = enum_reality(repo)
+    present: dict[str, set[str]] = {c: set() for c in real}
+    accounted: dict[str, set[str]] = {c: set() for c in real}
+    removed_keys: dict[str, set[str]] = {c: set() for c in real}
+    for e in entries:
+        keys = _keys_of(e)
+        for c in real:
+            accounted[c] |= keys[c]
+            if e.get("status") in ACTIVE:
+                present[c] |= keys[c]
+            if e.get("status") == "removed":
+                removed_keys[c] |= keys[c]
     for cat in real:
-        undeclared = real[cat] - dec[cat]
-        for u in sorted(undeclared):
-            msg = f"[NON DICHIARATO] {cat} '{u}' esiste nel codice ma NON è nel ledger"
-            (hard_fail if baseline_completo else surveil).append(
-                msg + ("" if baseline_completo else " (semina in corso: segnalato, non-fatale)"))
+        for u in sorted(real[cat]):
+            if u not in accounted[cat]:
+                msg = f"[NON DICHIARATO] {cat} '{u}' esiste nel codice ma NON è nel ledger"
+                (hard_fail if baseline_completo else surveil).append(
+                    msg + ("" if baseline_completo else " (semina in corso: segnalato, non-fatale)"))
+            elif u in removed_keys[cat]:
+                msg = (f"[STATO≠REALTÀ] {cat} '{u}' è nel ledger come 'removed' ma ESISTE ancora "
+                       "nel repo: togli l'artefatto (se davvero rimosso) o cambia status "
+                       "(es. opt-in, se resta disponibile ma declassato)")
+                (hard_fail if baseline_completo else surveil).append(msg)
 
     # ── SORVEGLIANZA: follow_up a-giudizio scaduti + verificabili pronti ──────
     for e in entries:

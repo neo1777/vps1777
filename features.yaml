@@ -211,23 +211,25 @@ features:
   # se il codice non la mostra più) e le due rinviate-a-giudizio (H43, H22).
 
   - id: ops.autoupdate
-    nome: "Watchtower — auto-update d'origine (RIMOSSO dal flusso)"
+    nome: "Watchtower — auto-update d'origine (DECLASSATO, opt-in legacy NON supportato)"
     cosa: "Auto-update via container Watchtower. Bypassava le protezioni (niente backup,
-           health-gate, rollback): per questo fu declassato. Sostituito da update.auto-timer.
-           Resta agli atti perché lo storico ricordi che ESISTETTE — il codice non lo mostra
-           più nel default, ma senza questa voce si sarebbe potuto 'ripristinarlo' e rifare
-           l'errore di giugno."
+           health-gate, rollback): declassato il 10/06. Il RUOLO auto-update è sostituito da
+           update.auto-timer (active-default). Il PROFILO esiste ancora nel repo → opt-in, MA
+           pericoloso: la voce lo tiene VISIBILE come 'disponibile-ma-da-non-riaccendere',
+           così il divieto viaggia col profilo invece di sparire."
     dove: ["compose-profile:compose.ops.watchtower.yaml#ops.autoupdate"]
-    status: removed
+    status: opt-in    # opt-in, NON removed: il file compose.ops.watchtower.yaml ESISTE ancora
+                      # (removed = 'sparito dal repo' → mentirebbe, e il verificatore v2 lo becca:
+                      # removed+file = STATO≠REALTÀ). Se Neo lo vuole VERAMENTE via: cancellare il
+                      # file E mettere removed. Finché il file c'è, opt-in è l'unica forma coerente. [b82df434]
     since: "declassato 2026-06-10"
-    decisione: "declassato il 10/06 a 'opt-in, non supportato' perché bypassa le protezioni;
-                il compose.ops.watchtower.yaml resta come opt-in LEGACY non-supportato. Il
-                rimpiazzo sicuro è update.auto-timer. [conv 2026-06-10 b82df434 · verbatim:
-                «Watchtower (ops.autoupdate) DECLASSATO — resta opt-in ma dichiarato NON supportato»]"
+    decisione: "declassato il 10/06 a 'opt-in, NON supportato' perché bypassa backup/health-gate/
+                rollback. NON riaccendere: nessun percorso di default (installer, compose base) deve
+                attivarlo; se rientra nel default è la regressione di giugno. Il sostituto sicuro è
+                update.auto-timer (active-default). [conv 2026-06-10 b82df434 · verbatim: «Watchtower
+                (ops.autoupdate) DECLASSATO — resta opt-in ma dichiarato NON supportato»]"
     verify:
-      manual: "verifica umana periodica: NESSUN percorso di default (installer, compose base)
-               deve accendere Watchtower. Se ri-entra nel default → è la regressione di giugno.
-               Il sostituto attivo è update.auto-timer, non questo."
+      compose_profile: {file: compose.ops.watchtower.yaml, profile: ops.autoupdate}
 
   - id: ops.portainer
     nome: "Portainer — UI di gestione container (opt-in)"
