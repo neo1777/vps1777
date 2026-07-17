@@ -173,6 +173,7 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
     prevalenze, impossibili con la sola `search` limitata."""
     _maybe_reload()
     per_db: dict[str, int] = {}
+    warnings: list[str] = []
     for name in _targets(db):
         try:
             conn = _open(name)
@@ -181,11 +182,50 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
         try:
             per_db[name] = fts.count_conn(
                 conn, query, raw=raw, since=since, until=until, project=project)
+            # canary: se un termine è collassato sul suo prefisso (`C++`→`C`), il
+            # numero appena letto è un falso positivo — dillo, non lasciarlo muto.
+            if not raw:
+                warnings.extend(
+                    f"[{name}] {w}" for w in fts.collapse_warnings_conn(conn, query))
         except sqlite3.OperationalError as exc:
             log.warning("DB %s schema error: %s", name, exc)
         finally:
             conn.close()
-    return {"total": sum(per_db.values()), "per_db": per_db}
+    out: dict[str, Any] = {"total": sum(per_db.values()), "per_db": per_db}
+    if warnings:
+        out["warnings"] = warnings
+    return out
+
+
+def check_term(term: str, db: str = "") -> dict[str, Any]:
+    """Diagnostica il COLLASSO di un termine con caratteri speciali (`C++`, `C#`,
+    `g++`, `.NET`, `F#`) — il canary di setaccio esposto come tool. Per ogni DB
+    confronta count(term) con count(prefisso-alfanumerico): se coincidono, per
+    quell'indice `term` == `prefix` e i risultati sono falsi positivi (la causa del
+    falso ricordo dell'11/07). Chiede all'INDICE, non alla doc; si auto-tara sui DB
+    ricostruiti con tokenchars (lì i conteggi divergono → collapsed=False)."""
+    _maybe_reload()
+    cands = fts.collapse_candidates(term)
+    prefix = cands[0][1] if cands else ""
+    per_db: dict[str, Any] = {}
+    for name in _targets(db):
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            n_term = fts.count_conn(conn, term)
+            n_pref = fts.count_conn(conn, prefix) if prefix else n_term
+            per_db[name] = {
+                "count_term": n_term,
+                "count_prefix": n_pref if prefix else None,
+                "collapsed": bool(prefix and n_pref > 0 and n_term == n_pref),
+            }
+        except (sqlite3.OperationalError, FtsSyntaxError) as exc:
+            log.warning("DB %s check_term error: %s", name, exc)
+        finally:
+            conn.close()
+    return {"term": term, "prefix": prefix or None, "per_db": per_db}
 
 
 def get_context(uuid: str, db: str = "", *, before: int = 3,

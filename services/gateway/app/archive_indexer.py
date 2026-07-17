@@ -174,7 +174,17 @@ CREATE TABLE IF NOT EXISTS messages(
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     uuid, project, ts, content, tools, attachments,
-    content='messages', content_rowid='rowid'
+    content='messages', content_rowid='rowid',
+    -- tokenchars '+#': senza, unicode61 tratta + e # da SEPARATORI e `C++`, `C#`,
+    -- `g++` perdono il suffisso e COLLASSANO sul token `C`/`g` — comunissimi
+    -- (coordinate SVG, copyright, gradi centigradi). È la causa del falso ricordo
+    -- dell'11/07: count("C++") == count("C"), migliaia di falsi positivi silenziosi.
+    -- Con tokenchars diventano token veri e distinti (verificato: C++→1, C→2, non 4=4).
+    -- Vale sui DB costruiti da qui in poi; i DB già vivi vanno ricostruiti/re-ingeriti
+    -- (il tokenize è fissato alla CREATE: un 'rebuild' NON lo cambia). Il `.` resta
+    -- separatore di proposito (blast-radius: romperebbe node.js/github.com/0.7.9) →
+    -- quel caso lo copre il canary lato query (collapse_warnings_conn in fts.py).
+    tokenize="unicode61 tokenchars '+#'"
 );
 -- Indice per camminare l'albero della conversazione (parent→figli) senza full-scan:
 -- lo usa `get_conversation` nel server MCP (una WITH RECURSIVE su parent_uuid).

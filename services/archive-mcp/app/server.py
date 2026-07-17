@@ -75,8 +75,29 @@ def count(query: str, db_name: str = "", raw: bool = False, since: str = "",
           until: str = "", project: str = "") -> dict[str, Any]:
     """Conta quanti messaggi corrispondono alla query (non limitato) — per
     frequenze e prevalenze. Stessa sintassi di search. Ritorna
-    {total, per_db:{nome: n}}. Query malformata → errore parlante, non 0."""
+    {total, per_db:{nome: n}}. Query malformata → errore parlante, non 0.
+    Se un termine COLLASSA (`C++`→`C`, vedi check_term) aggiunge `warnings`."""
     return db.count(query, db_name, raw=raw, since=since, until=until, project=project)
+
+
+@mcp.tool()
+def check_term(term: str, db_name: str = "") -> dict[str, Any]:
+    """Diagnostica se un TERMINE con caratteri speciali (`C++`, `C#`, `g++`, `.NET`,
+    `F#`) è davvero ricercabile o se l'indice lo fa COLLASSARE su una parola più
+    corta e comune. È una sottrazione: confronta count(term) con count(prefisso
+    alfanumerico). Se coincidono, per quell'indice `C++` == `C` e i risultati sono
+    falsi positivi silenziosi (la causa del falso ricordo dell'11/07: «Neo
+    programmatore C++» erano coordinate SVG, copyright, gradi centigradi). Non
+    chiede alla documentazione — chiede all'indice, e si auto-tara: su un DB
+    ricostruito con `tokenchars` i due conteggi divergono e collapsed=False.
+
+    Args:
+        term: il termine da verificare (es. 'C++').
+        db_name: nome DB ('' = tutti).
+    Ritorna {term, prefix, per_db:{nome:{count_term, count_prefix, collapsed}}}.
+    `collapsed=true` su un DB = quel DB va ricostruito con tokenchars per
+    distinguere il termine dal suo prefisso."""
+    return db.check_term(term, db_name)
 
 
 @mcp.tool()

@@ -154,6 +154,82 @@ def test_count_syntax_error():
         fts.count_conn(conn, "nonesistecol:foo", raw=True)
 
 
+# ── canary termini collassati (la causa dell'11/07) ──────────────────────────
+
+_SCHEMA_TOK = """
+CREATE TABLE messages(uuid TEXT PRIMARY KEY, project, ts, content);
+CREATE VIRTUAL TABLE messages_fts USING fts5(
+    uuid, project, ts, content, content='messages', content_rowid='rowid',
+    tokenize="unicode61 tokenchars '+#'");
+"""
+
+# righe scelte apposta per il collasso: `C++`/`C#`/`g++` reali + tante `C` isolate
+# (coordinate, gradi, copyright) su cui il termine collassa se `+ #` sono separatori
+_ROWS_CPP = [
+    ("c1", "p", "2026-01-01T10:00:00Z", "adoro programmare in C++ ogni giorno"),
+    ("c2", "p", "2026-01-02T10:00:00Z", "il backend è scritto in C#"),
+    ("c3", "p", "2026-01-03T10:00:00Z", "coordinate del path 219.54 C 106.20"),
+    ("c4", "p", "2026-01-04T10:00:00Z", "16 gradi C sotto quando non ci sei"),
+    ("c5", "p", "2026-01-05T10:00:00Z", "compilo con g++ e ottimizzo"),
+]
+
+
+def _db_tok(rows):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_SCHEMA_TOK)
+    conn.executemany(
+        "INSERT INTO messages(uuid, project, ts, content) VALUES (?,?,?,?)", rows)
+    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+    conn.commit()
+    return conn
+
+
+def test_collapse_candidates_statica():
+    # trovati: il suffisso + # sparisce → un solo token più corto
+    assert fts.collapse_candidates("C++") == [("C++", "C")]
+    assert fts.collapse_candidates("C#") == [("C#", "C")]
+    assert fts.collapse_candidates("g++") == [("g++", "g")]
+    assert fts.collapse_candidates(".NET") == [(".NET", "NET")]
+    # NON candidati: due token veri (frase, la regge il quoting), prefisso, parole
+    assert fts.collapse_candidates("node.js") == []       # separatore IN MEZZO
+    assert fts.collapse_candidates("flutter-elinux") == []
+    assert fts.collapse_candidates("palant*") == []        # prefisso FTS voluto
+    assert fts.collapse_candidates("A*") == []
+    assert fts.collapse_candidates("flutter") == []
+    # query strutturata: non ci mette becco
+    assert fts.collapse_candidates("NEAR(a b, 3)") == []
+
+
+def test_collapse_warning_su_db_default():
+    # DB come i vivi (senza tokenchars): C++ collassa su C → deve AVVISARE
+    conn = _db(_ROWS_CPP)
+    # prova il difetto nudo: per l'indice default C++ == C == C#
+    assert fts.count_conn(conn, "C++") == fts.count_conn(conn, "C")
+    warns = fts.collapse_warnings_conn(conn, "C++")
+    assert len(warns) == 1
+    assert 'collassato su "C"' in warns[0]
+
+
+def test_collapse_no_warning_con_tokenchars():
+    # DB ricostruito col fix: C++ è un token vero → NIENTE avviso (auto-taratura)
+    conn = _db_tok(_ROWS_CPP)
+    assert fts.count_conn(conn, "C++") < fts.count_conn(conn, "C")  # distinti
+    assert fts.collapse_warnings_conn(conn, "C++") == []
+    assert fts.collapse_warnings_conn(conn, "C#") == []
+
+
+def test_tokenchars_separa_i_termini():
+    # il cuore del fix all'INDICE: senza, C++/C#/C sono lo stesso token
+    default = _db(_ROWS_CPP)
+    assert fts.count_conn(default, "C++") == fts.count_conn(default, "C#")  # collassati
+    # con tokenchars, ognuno ha la sua identità
+    tok = _db_tok(_ROWS_CPP)
+    assert fts.count_conn(tok, "C++") == 1     # solo c1
+    assert fts.count_conn(tok, "C#") == 1      # solo c2
+    assert fts.count_conn(tok, "g++") == 1     # solo c5
+
+
 # ── context ─────────────────────────────────────────────────────────────────
 
 def test_context_intorno():

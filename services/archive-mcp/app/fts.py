@@ -155,6 +155,73 @@ def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
     raise FtsSyntaxError(f"{_SYNTAX_HINT} (dettaglio: {last_exc})")
 
 
+# ── canary dei termini collassati ─────────────────────────────────────────────
+# Il tokenizer FTS5 di default (unicode61) tratta `+ #` da SEPARATORI: un termine
+# come `C++` perde il suffisso e collassa sul token `C`, che compare ovunque
+# (coordinate SVG, copyright, gradi). La ricerca non si SVUOTA — restituisce
+# migliaia di risultati sbagliati (falso POSITIVO silenzioso). È la causa del falso
+# ricordo dell'11/07 e il gemello a verso opposto dell'FTS5 muto (PR #20): lì lista
+# vuota, qui lista piena della cosa sbagliata. La medicina è la stessa — un errore
+# PARLANTE — ma non basta la doc (descrive l'intenzione): si CHIEDE ALL'INDICE.
+#
+# `collapse_candidates` è statica (dal solo testo): trova i termini che si riducono
+# a UN token più corto (`C++`→`C`, `.NET`→`NET`, `g++`→`g`). Il separatore IN MEZZO
+# (`node.js`→node,js) dà DUE token veri: il quoting li tiene come frase, NON
+# collassano — esclusi. Il `*` di prefisso è sintassi voluta — escluso.
+#
+# `collapse_warnings_conn` conferma DINAMICAMENTE sul singolo DB: se
+# count(term)==count(prefix)>0 il termine non esiste per quell'indice. Si auto-tara:
+# su un DB ricostruito con `tokenchars` i due conteggi divergono e l'avviso NON
+# scatta. Costo: un count(prefix) in più per candidato (rari — solo termini con + #).
+
+# un token della query, spezzato sulle sequenze di word-char (come farebbe unicode61)
+_WORDS = re.compile(r"\w+", re.UNICODE)
+
+
+def collapse_candidates(query: str) -> list[tuple[str, str]]:
+    """Termini della query che il tokenizer ridurrebbe a un prefisso più corto.
+    Ritorna [(termine, prefisso)]. Statica: nessuna connessione, nessun I/O.
+    Le query strutturate (NEAR, parentesi, col:term) le lascia stare."""
+    if _ADVANCED.search(query or ""):
+        return []
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for tok in _SPLIT.findall(query or ""):
+        term = tok[1:-1] if len(tok) >= 2 and tok[0] == '"' and tok[-1] == '"' else tok
+        if term.endswith("*"):
+            term = term[:-1]              # prefisso FTS: sintassi voluta, non collasso
+        if not term or term in seen or term in _FTS_OPERATORS:
+            continue
+        parts = _WORDS.findall(term)
+        # UN solo token dopo lo strip, e diverso dal termine → il resto (+ #) è
+        # sparito su un token più corto. Due o più token = frase (la regge il quoting).
+        if len(parts) == 1 and parts[0] != term:
+            seen.add(term)
+            out.append((term, parts[0]))
+    return out
+
+
+def collapse_warnings_conn(conn: sqlite3.Connection, query: str) -> list[str]:
+    """Per i candidati, conferma sul DB reale che il termine è COLLASSATO sul suo
+    prefisso (stesso conteggio) e ritorna avvisi parlanti. Lista vuota = sano
+    (o DB già ricostruito con tokenchars)."""
+    warns: list[str] = []
+    for term, prefix in collapse_candidates(query):
+        try:
+            n_term = count_conn(conn, term)
+            n_pref = count_conn(conn, prefix)
+        except (sqlite3.OperationalError, FtsSyntaxError):
+            continue
+        if n_pref > 0 and n_term == n_pref:
+            warns.append(
+                f'"{term}" è collassato su "{prefix}" in questo indice: i {n_term} '
+                f'risultati riguardano "{prefix}", non "{term}" — il tokenizer non '
+                f'indicizza i caratteri +/#, il termine perde il suffisso. Questo DB '
+                f'va ricostruito con tokenchars per distinguerli (usa check_term).'
+            )
+    return warns
+
+
 def _thread_ids(conn: sqlite3.Connection, uuid: str) -> set[str]:
     """Gli uuid del thread connesso a `uuid` via `parent_uuid` (antenati +
     discendenti), camminando l'albero con due CTE ricorsive. Insieme = 1 solo
