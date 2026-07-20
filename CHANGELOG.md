@@ -2,6 +2,65 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.1] — 2026-07-20
+
+Patch, e una sola cosa: **il pre-flight dei segreti guardava la configurazione
+sbagliata**. Il primo aggiornamento alla 0.40.0 è fallito per questo — lo stack
+non è partito, l'health-gate è andato rosso, il rollback automatico ha
+funzionato e nessun dato è stato toccato.
+
+### ⚠️ Rettifica di quanto dichiarato nella 0.40.0
+
+Là sotto si legge: «*l'update ora ha un pre-flight che si ferma se manca*».
+**Non era vero**, ed è il caso più istruttivo di questa release: il controllo
+esisteva, girava, era verde — e leggeva il compose **installato**, mentre quello
+della release arriva col bundle uno step dopo. Quando girava, il file che
+avrebbe dovuto controllare non era ancora sul disco. Ogni parola di quella frase
+era vera della riga di codice; la protezione promessa non esisteva. Il difetto
+non era nella logica ma nella **posizione**, ed è per questo che, letta da sola,
+la funzione sembrava corretta a tutti.
+
+### Cambiato
+
+- **Il controllo fatale ora sta dopo il fetch e dopo il self-update della CLI**
+  (step 6-bis) e legge i compose **del bundle**, cercando i file in `secrets/`
+  del repo. La posizione non è dopo il self-update per comodità: prima, sarebbe
+  il parser della release *N* a leggere il compose della *N+1*, e un cambio di
+  formato del blocco `secrets:` impedirebbe di installare proprio la release che
+  contiene il parser capace di leggerlo. Fallendo dopo, invece, si resta con CLI
+  nuova e stack vecchio — uno stato che si ripara **rilanciando l'update**, e
+  che è comunque l'esito normale di ogni rollback riuscito.
+- **Il controllo sulla configurazione attuale resta, come avviso**: dice che la
+  rete di *rollback* è bucata, e non ferma l'aggiornamento. Se lo fermasse, una
+  release che rimuove un segreto già cancellato sarebbe l'unica installabile.
+- **Il rimedio suggerito non può più fabbricare un guasto peggiore.** Prima
+  consigliava `bash setup.sh`, che su una macchina viva è l'installatore
+  completo. Ma toglierlo non bastava: i segreti non hanno tutti la stessa natura,
+  e un `openssl rand` applicato a un token Telegram o all'hash bcrypt della
+  password admin produce un file **pieno e sbagliato** — il controllo tornerebbe
+  verde, lo stack partirebbe, e il guasto si vedrebbe solo all'uso. Ora il
+  comando compare **solo sotto il segreto a cui si applica**.
+- **Guarda tutti i compose che lo stack monta**, non solo quello base: l'overlay
+  di ingress (`cloudflared` dichiara un segreto) e quelli delle feature attive.
+- **Un file con solo spazi o un a capo conta come vuoto** (prima `st_size == 0`
+  lo lasciava passare: 1 byte è "pieno" per il codice e vuoto per chiunque).
+- **Un bundle senza `compose.yaml` si ferma** invece di rispondere "tutto a
+  posto": «non ho trovato il file» non è «non c'è niente da segnalare».
+- **«Mancano tutti i segreti» viene riconosciuto per quello che quasi sempre è**:
+  non un guasto, ma una radice sbagliata — e lo dice.
+
+### Aggiunto
+
+- La suite `tools/tests/` **gira in CI**. Era l'unica del repo che nessun
+  workflow lanciava: dieci test verdi sul componente che esegue gli
+  aggiornamenti in produzione, che non avevano mai protetto nulla.
+
+### Nota per chi aggiorna
+
+Nessuna azione richiesta, nessun segreto nuovo, nessuna migrazione. Se
+l'aggiornamento alla 0.40.0 era stato completato a mano creando
+`archive_desc_secret`, resta valido.
+
 ## [0.40.0] — 2026-07-20
 
 Minor e non patch: l'indexer cambia *cosa* legge, i DB cambiano *schema*, e nasce
