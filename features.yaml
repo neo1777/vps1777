@@ -712,15 +712,12 @@ features:
     dove: ["tools/vps1777.py#cmd_update", "tools/vps1777.py#_compose_sorgenti"]
     status: active-default
     since: "0.40.1"
-    follow_up:
-      manuale:
-        cosa: "Lo step 8 (stage-check) costruisce ancora la lista dei compose a mano, e
-               `compose_cmd` applica la stessa regola una seconda volta: sono DUE
-               derivazioni della stessa cosa, non una. Non sono sostituibili (compose_cmd
-               produce anche i profili e NON filtra i file assenti), quindi unificarle è
-               un cambio di comportamento, non un refactor: fuori dalla 0.40.1 di
-               proposito. Chi tocca una deve toccare l'altra."
-        rivedi_dopo: "2026-09-30"
+    decisione_2: "0.40.2 — lo stage-check (step 8) ora DERIVA la lista da
+                  `_compose_sorgenti` invece di riscriverla: validava meno compose di
+                  quanti lo stack ne monta. Resta la doppia derivazione con
+                  `compose_cmd`, che NON è unificabile senza cambiare il comportamento
+                  di docker (produce anche i profili e non filtra i file assenti):
+                  chi tocca una deve toccare l'altra."
     verify:
       file_contains: {path: tools/vps1777.py, pattern: "preflight-secrets-bundle"}
 
@@ -832,10 +829,12 @@ features:
            viva, dopo un update bloccato. Il modo più probabile in cui morderebbe non
            è un evento raro: è una procedura scritta senza dire come."
     dove: ["tools/vps1777.py#_secrets_mancanti_in"]
-    status: deferred
-    since: "0.40.1"
-    decisione: "20/07 — trovato da b82df434 dopo il tag, riprodotto da setaccio per
-                strada sua. NON corretto in 0.40.1: già pubblicata, e un fix per release."
+    status: active-default
+    since: "0.40.2"
+    decisione: "20/07 trovato da b82df434 dopo il tag e riprodotto da setaccio;
+                CHIUSO in 0.40.2 — tre stati distinti (ASSENTE / VUOTO / NON LEGGIBILE)
+                con tre rimedi diversi, e per l'illeggibile il messaggio non suggerisce
+                nessun comando con `>`: il file c'è, il guasto è l'accesso."
     follow_up:
       manuale:
         cosa: "Separare ASSENTE da NON-UTILIZZABILE in `_secrets_mancanti_in`, con due
@@ -845,7 +844,7 @@ features:
       # Come per ops.update-progress-journal: si verifica che il DIFETTO ci sia ancora,
       # così chi lo ripara trova il ledger rosso e aggiorna la voce invece di lasciarla
       # a descrivere un problema chiuso.
-      file_contains: {path: tools/vps1777.py, pattern: "not p.is_file() or not p.read_text("}
+      file_contains: {path: tools/vps1777.py, pattern: "NON LEGGIBILE"}
 
   - id: archive.ts-source
     nome: "ts_source: il regime del dato, promosso da nota a schema"
