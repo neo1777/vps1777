@@ -1138,10 +1138,10 @@ def test_migrazione_non_dichiara_messaggio_cio_che_non_sa(tmp_path):
     # b82df434 ha bocciato la prima (asserisce un regime mai verificato sulle memory),
     # setaccio ha bocciato la seconda (errore SIMMETRICO: negare 'messaggio' a righe-evento
     # vere avrebbe reso NULL il newest di nove DB, rompendo ciò che il requisito proteggeva).
-    # La proposta «ts pieno ⇒ messaggio» è stata scartata da una MISURA, non da un'opinione:
-    # su cc-bundle-200726, 221.514 righe su 222.651 hanno ts pieno e NON sono conversazioni
-    # (mcp-log, documenti, workfiles: ts preso dal timestamp del file nello zip). Sarebbe
-    # stata un'asserzione falsa sulla maggioranza dell'archivio.
+    # La proposta «ts pieno ⇒ messaggio» è stata scartata da una MISURA: su cc-bundle-200726,
+    # delle 221.514 righe con ts pieno **140.476 (63,4%) non sono conversazioni** — workfile,
+    # mcp-log e documenti, il cui ts è il timestamp del file nello zip. Asserzione falsa su
+    # quasi due terzi dell'archivio.
     assert reg["mem"] == "ignoto", "una memory migrata NON può risultare 'messaggio'"
     assert reg["msg"] == "ignoto", "nemmeno una riga con ts: il ts può venire dal filesystem"
     assert reg["nuovo"] == "messaggio", "ciò che entra ORA dall'ingest ha il regime noto"

@@ -460,11 +460,18 @@ def _ensure_v2(conn: sqlite3.Connection) -> bool:
         #  (2) 'ignoto' su tutto il migrato (questa) → sembrava perdere informazione.
         #  (3) 'messaggio' se `ts` è pieno, '' se vuoto (setaccio) → elegante, e SBAGLIATA:
         #      poggia su «un ts che c'è non è sintetico, quindi la riga è un messaggio».
-        #      MISURATO su cc-bundle-200726: **221.514 righe su 222.651 hanno ts pieno e NON
-        #      sono conversazioni** — sono `mcp-log:*`, documenti chunked e workfiles, il cui
-        #      ts viene da `_zipinfo_ts()`, cioè dal TIMESTAMP DEL FILE nello zip. La (3) le
-        #      avrebbe dichiarate tutte 'messaggio': non un margine di errore, la maggioranza
-        #      dell'archivio. → «ts pieno ⇒ messaggio» è falso, e lo era già prima di noi.
+        #      MISURATO su cc-bundle-200726 (cifra RETTIFICATA da b82df434, vedi sotto):
+        #      su 221.514 righe con ts pieno, **140.476 (63,4%) NON sono conversazioni** —
+        #      `workfile:*`, `mcp-log:*`, documenti chunked: il loro ts viene da
+        #      `_zipinfo_ts()`, cioè dal TIMESTAMP DEL FILE nello zip, non da un messaggio.
+        #      La (3) le avrebbe dichiarate tutte 'messaggio' → «ts pieno ⇒ messaggio» è
+        #      falso per quasi due terzi dell'archivio, e lo era già prima di noi.
+        #      ⚠️ La prima stesura di questo commento diceva «221.514 su 222.651»: era la
+        #      MISURA SBAGLIATA, e per un motivo che vale più della cifra — la query filtrava
+        #      `project NOT LIKE 'proj:%'` assumendo un prefisso che in questo DB NON ESISTE
+        #      (i project sono nomi liberi: `_chat`, `vps1777`, `dasboard dart mcp`…), quindi
+        #      contava come «non-conversazione» anche tutte le conversazioni vere. Il numero
+        #      gonfiato *rafforzava* la conclusione giusta, ed è per questo che non stonava.
         # Resta (2): 'ignoto' è l'unica etichetta vera per un regime che non è più ricostruibile.
         # Il newest NON si rompe perché il filtro è NEGATIVO (`<> 'data-export'`): le righe
         # ignote con ts reale restano dentro. Il regime vero si assegnerà quando l'ingest
