@@ -1677,6 +1677,16 @@ def cmd_update(repo: Path, args) -> int:
         die(f"backup fallito — stack intatto, update annullato: {exc}")
 
     # 8 — stage-check sui file del bundle
+    # ⚠️ QUESTA LISTA È INCOMPLETA, ed è dichiarato: `compose_cmd` (r.415-421) monta
+    # anche un overlay per ogni feature attiva, e `backup` è in DEFAULT_FEATURES ⇒ lo
+    # stage-check valida MENO compose di quanti lo stack ne monterà. Terza copia della
+    # stessa regola, dopo `compose_cmd` e `_compose_sorgenti` (r.1230): quest'ultima
+    # esiste apposta per derivarla, e usarla QUI cambierebbe cosa viene validato — un
+    # secondo fix, tenuto fuori dalla 0.40.1 di proposito. Registrato nel ledger come
+    # follow_up di `ops.preflight-secrets-bundle` con `rivedi_dopo: 2026-09-30`.
+    # Sta scritto qui e non solo là perché **chi legge questo punto non passa dalla
+    # docstring di un'altra funzione** (rilievo di setaccio): un'informazione che esiste
+    # nel file ma non dove serve è un'informazione che non c'è.
     step(8, "stage-check")
     profile = ingress_profile(repo)
     staged = [bundle / "compose.yaml", bundle / f"compose.{profile}.yaml"]
