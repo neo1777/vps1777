@@ -1212,6 +1212,37 @@ def sync_state_card(repo: Path, version: str) -> None:
         warn(f"state card non aggiornata (best-effort): {exc}")
 
 
+def _secrets_mancanti(repo: Path) -> list[str]:
+    """I segreti che il compose PRETENDE e che in `secrets/` mancano o sono vuoti.
+
+    Legge la sezione `secrets:` top-level del compose invece di una lista scritta
+    a mano: una lista andrebbe aggiornata a ogni segreto nuovo, e **il difetto che
+    questa funzione previene è esattamente quello di essersene dimenticati**. Il
+    compose è già la fonte di verità di cosa serve; qui la si interroga.
+
+    Un file VUOTO conta come mancante: con un segreto vuoto lo stack parte e il
+    canale resta fail-closed, che è più difficile da diagnosticare di un mancato
+    avvio (sembra un bug della feature, non un file da riempire).
+    """
+    compose = repo / "compose.yaml"
+    if not compose.is_file():
+        return []
+    testo = compose.read_text(encoding="utf-8", errors="replace")
+    m = re.search(r"^secrets:\n((?:[ \t]+.*\n|\n)*)", testo, re.M)
+    if not m:
+        return []
+    fuori = []
+    for nome, percorso in re.findall(r"^  ([A-Za-z0-9_]+):\n(?:[ \t]*#.*\n)*[ \t]*file:[ \t]*(\S+)",
+                                     m.group(1), re.M):
+        p = repo / percorso.lstrip("./")
+        try:
+            if not p.is_file() or p.stat().st_size == 0:
+                fuori.append(f"{nome} → {percorso}")
+        except OSError:
+            fuori.append(f"{nome} → {percorso}")
+    return fuori
+
+
 def cmd_update(repo: Path, args) -> int:
     # 0 — lock
     lock = acquire_lock(repo)
@@ -1291,6 +1322,27 @@ def cmd_update(repo: Path, args) -> int:
 
     def step(n: int, name: str, status: str = "running", detail: str = "") -> None:
         progress_write(repo, target, n, name, status, detail)
+
+    # 4-bis — PRE-FLIGHT DEI SEGRETI (b82df434, 20/07: copre la CLASSE, non il caso)
+    # `setup.sh` genera i segreti solo all'INSTALLAZIONE DA ZERO. L'update di una
+    # macchina viva non lo esegue mai, e `secrets/` è fra i path preservati: quindi
+    # una release che introduce un segreto NUOVO trova la cartella senza quel file.
+    # Cosa succederebbe senza questo controllo: il compose dichiara il secret, non
+    # lo trova, lo stack non parte, health-gate rosso, auto-rollback — e il sintomo
+    # sembra una release difettosa mentre manca solo un file. Peggio ancora se
+    # qualcuno "risolve" creando un file VUOTO: lo stack parte e il canale resta
+    # fail-closed, cioè un difetto di provisioning travestito da bug della feature.
+    # Qui si guarda cosa il compose PRETENDE e lo si confronta con cosa c'è, PRIMA
+    # di toccare qualunque cosa: un segreto mancante costa dieci secondi adesso e
+    # una finestra di deploy dopo.
+    mancanti = _secrets_mancanti(repo)
+    if mancanti:
+        step(4, "preflight-secrets", "failed", ", ".join(mancanti))
+        die("segreti dichiarati dal compose ma assenti o VUOTI in secrets/:\n"
+            + "".join(f"  · {m}\n" for m in mancanti)
+            + "L'update non li genera (secrets/ è preservato di proposito).\n"
+            + "Rimedio: `bash setup.sh` li crea senza toccare quelli esistenti,\n"
+            + "oppure creali a mano — vedi secrets/README.md.")
 
     # 5 — fetch + verifica bundle
     step(5, "fetch")

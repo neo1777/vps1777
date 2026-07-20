@@ -119,3 +119,22 @@ def test_il_segreto_dedicato_non_ha_fallback_silenzioso():
     prop = src[src.index("def effective_archive_desc_secret"):]
     prop = prop[:prop.index("\n\n")] if "\n\n" in prop else prop
     assert "gateway_secret" not in prop.split('"""')[-1], "nessun fallback su gateway_secret"
+
+
+# ── pre-flight dei segreti: guardia sulla CLASSE, non sul singolo segreto ──
+
+def test_update_ha_un_preflight_sui_segreti():
+    """Il fix di questo caso (generare archive_desc_secret in setup.sh) copriva
+    solo l'installazione DA ZERO: l'update di una macchina viva non esegue
+    setup.sh e `secrets/` è preservato, quindi un segreto NUOVO non arriverebbe
+    mai. Proposto da b82df434 come fix di classe: il prossimo segreto che
+    aggiungeremo avrebbe ripetuto lo stesso guasto.
+    """
+    src = (Path(__file__).resolve().parents[3] / "tools" / "vps1777.py").read_text(encoding="utf-8")
+    assert "_secrets_mancanti" in src, "manca il pre-flight dei segreti nell'update"
+    assert "preflight-secrets" in src, "il pre-flight non è uno step tracciato"
+    # legge il compose, NON una lista scritta a mano: una lista andrebbe
+    # aggiornata a ogni segreto nuovo, ed è proprio la dimenticanza che previene.
+    fn = src[src.index("def _secrets_mancanti"):src.index("def cmd_update")]
+    assert "compose.yaml" in fn, "la lista dei segreti va letta dal compose, non hardcodata"
+    assert "st_size == 0" in fn, "un segreto VUOTO deve contare come mancante"
