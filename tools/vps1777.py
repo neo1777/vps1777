@@ -1215,25 +1215,68 @@ def sync_state_card(repo: Path, version: str) -> None:
 def _secrets_mancanti(repo: Path) -> list[str]:
     """I segreti che il compose PRETENDE e che in `secrets/` mancano o sono vuoti.
 
-    Legge la sezione `secrets:` top-level del compose invece di una lista scritta
-    a mano: una lista andrebbe aggiornata a ogni segreto nuovo, e **il difetto che
-    questa funzione previene è esattamente quello di essersene dimenticati**. Il
-    compose è già la fonte di verità di cosa serve; qui la si interroga.
+    Legge il compose invece di una lista scritta a mano: una lista andrebbe
+    aggiornata a ogni segreto nuovo, e **il difetto che questa funzione previene è
+    esattamente quello di essersene dimenticati**.
 
     Un file VUOTO conta come mancante: con un segreto vuoto lo stack parte e il
-    canale resta fail-closed, che è più difficile da diagnosticare di un mancato
-    avvio (sembra un bug della feature, non un file da riempire).
+    canale resta fail-closed — più difficile da diagnosticare di un mancato avvio,
+    perché sembra un bug della feature invece di un file da riempire.
+
+    ⚠️ L'indentazione dei figli si MISURA, non si assume (b82df434, collaudo dei
+    negativi): la prima versione pretendeva esattamente due spazi. Con quattro —
+    YAML altrettanto valido — non vedeva nessun segreto e restituiva «tutto a
+    posto». **Non falliva: diceva di sì.** Questa funzione esiste per proteggere
+    da un cambiamento futuro che nessuno ricorderà, e un riformattatore YAML o una
+    mano diversa l'avrebbero disattivata IN SILENZIO, riportando il bug che deve
+    impedire. Una guardia che smette di guardare senza dirlo è peggio di nessuna
+    guardia: dà un verde a chi ha imparato a fidarsene.
     """
     compose = repo / "compose.yaml"
     if not compose.is_file():
         return []
-    testo = compose.read_text(encoding="utf-8", errors="replace")
-    m = re.search(r"^secrets:\n((?:[ \t]+.*\n|\n)*)", testo, re.M)
-    if not m:
+    righe = compose.read_text(encoding="utf-8", errors="replace").splitlines()
+    try:
+        start = next(n for n, r in enumerate(righe) if r.rstrip() == "secrets:")
+    except StopIteration:
         return []
+
+    # il blocco: tutto ciò che è indentato sotto `secrets:` a livello 0
+    blocco = []
+    for r in righe[start + 1:]:
+        if r.strip() and not r[:1].isspace():
+            break                                   # tornati a colonna 0: sezione finita
+        blocco.append(r)
+
+    # l'indentazione dei figli è quella della PRIMA riga non vuota e non-commento:
+    # si misura sul file reale invece di pretenderne una.
+    passo = next((len(r) - len(r.lstrip()) for r in blocco
+                  if r.strip() and not r.lstrip().startswith("#")), 0)
+    if not passo:
+        return []
+
+    nomi: list[tuple[str, str]] = []
+    corrente = ""
+    for r in blocco:
+        spoglia = r.strip()
+        if not spoglia or spoglia.startswith("#"):
+            continue
+        ind = len(r) - len(r.lstrip())
+        if ind == passo and spoglia.endswith(":"):
+            corrente = spoglia[:-1]
+        elif ind > passo and corrente and spoglia.startswith("file:"):
+            nomi.append((corrente, spoglia.split(":", 1)[1].strip()))
+
+    # ⚠️ Distinguere «nessun segreto dichiarato» da «non ho saputo leggere»:
+    # la sezione c'è ed è piena, ma non ne abbiamo estratto nemmeno uno ⇒ il
+    # formato è cambiato sotto di noi. Restituire [] qui sarebbe il falso verde
+    # in un'altra forma, quindi si SEGNALA invece di tacere.
+    if not nomi and any(r.strip() and not r.lstrip().startswith("#") for r in blocco):
+        return ["(pre-flight non ha saputo leggere la sezione `secrets:` del compose "
+                "— formato inatteso: verificare a mano prima di procedere)"]
+
     fuori = []
-    for nome, percorso in re.findall(r"^  ([A-Za-z0-9_]+):\n(?:[ \t]*#.*\n)*[ \t]*file:[ \t]*(\S+)",
-                                     m.group(1), re.M):
+    for nome, percorso in nomi:
         p = repo / percorso.lstrip("./")
         try:
             if not p.is_file() or p.stat().st_size == 0:
@@ -1241,7 +1284,6 @@ def _secrets_mancanti(repo: Path) -> list[str]:
         except OSError:
             fuori.append(f"{nome} → {percorso}")
     return fuori
-
 
 def cmd_update(repo: Path, args) -> int:
     # 0 — lock
