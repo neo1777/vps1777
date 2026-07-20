@@ -996,3 +996,109 @@ def test_claude_code_metadati(tmp_path: Path) -> None:
         assert reasons == ["non-message", "non-message"]
     finally:
         conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# D10/§1 — SNIFF DEL CONTENUTO e D18 — REVISIONI (20/07/2026)
+# Due decisioni di Neo nello stesso giro. I test stanno insieme perché insieme
+# chiudono la stessa domanda: «cosa fa l'indexer con ciò che non riconosce, e
+# con ciò che cambia sotto lo stesso identificatore?»
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_sniff_riconosce_il_testo_travestito():
+    """Un file fuori whitelist che È testo va letto, non seppellito.
+
+    Sul bundle reale erano 829 su 2.633 «non-testo» (31%): appunti senza
+    estensione, todo, script, Dockerfile, .cjs/.proto/.service/.xsd/.ndjson.
+    La classificazione per estensione è un'ETICHETTA, non una misura.
+    """
+    from archive_indexer import _sniff_e_testo
+    assert _sniff_e_testo(b"#!/bin/sh\necho ciao")            # script senza estensione
+    assert _sniff_e_testo(b'{"a":1}\n{"b":2}')                # ndjson
+    assert _sniff_e_testo("appunti: à è ì ò ù 🔧".encode())    # utf-8 con accenti ed emoji
+
+
+def test_sniff_non_promuove_i_binari():
+    """Il collaudo che conta: i NEGATIVI.
+
+    Un criterio troppo generoso infilerebbe spazzatura binaria nell'indice
+    full-text — peggio del problema che risolve.
+    """
+    from archive_indexer import _sniff_e_testo
+    assert not _sniff_e_testo(b"\x89PNG\r\n\x1a\n\x00\x00")   # NUL ⇒ binario
+    assert not _sniff_e_testo(b"\xff\xd8\xff\xe0JFIF")        # jpeg
+    assert not _sniff_e_testo(b"")                            # vuoto
+    assert not _sniff_e_testo(b"\x00" * 10)
+
+
+def _riga(uuid, contenuto, ts="2026-01-01T00:00:00Z"):
+    return (uuid, "proj:test", ts, contenuto, "human", "", "", "", "")
+
+
+def test_revisioni_non_nascono_su_dati_immutabili(tmp_path):
+    """Il NEGATIVO dichiarato da setaccio prima del merge: re-ingerire dati
+    immutabili deve produrre ZERO revisioni. Anche una sola = c'è un bug,
+    oppure abbiamo scoperto un contenuto che cambia e non lo sapevamo."""
+    from archive_indexer import write_rows
+    db = tmp_path / "a.db"
+    write_rows(db, [_riga("u1", "testo"), _riga("u2", "altro")])
+    write_rows(db, [_riga("u1", "testo"), _riga("u2", "altro")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT count(*) FROM revisions").fetchone()[0] == 0
+
+
+def test_revisioni_conservano_la_versione_uscente(tmp_path):
+    """Il caso `memory:*`: stesso uuid, contenuto diverso fra due export.
+
+    Prima di questa modifica l'INSERT OR REPLACE faceva vincere l'ultimo e il
+    primo spariva senza traccia. Le versioni sopravvivevano solo perché stavano
+    in DB separati — un accidente della topologia, non una proprietà.
+    """
+    from archive_indexer import write_rows
+    db = tmp_path / "b.db"
+    write_rows(db, [_riga("slot", "versione di maggio")])
+    write_rows(db, [_riga("slot", "versione di luglio")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT content FROM messages WHERE uuid='slot'").fetchone()[0] \
+            == "versione di luglio"          # la ricerca vede l'ultima: API invariata
+        assert c.execute("SELECT content FROM revisions WHERE uuid='slot'").fetchone()[0] \
+            == "versione di maggio"          # la storia non si perde
+
+
+def test_revisioni_si_accumulano_e_sono_idempotenti(tmp_path):
+    from archive_indexer import write_rows
+    db = tmp_path / "c.db"
+    for testo in ("prima", "seconda", "terza"):
+        write_rows(db, [_riga("s", testo)])
+    write_rows(db, [_riga("s", "terza")])     # ri-mando la corrente: nulla di nuovo
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT count(*) FROM revisions WHERE uuid='s'").fetchone()[0] == 2
+
+
+def test_ts_source_esiste_e_il_default_e_messaggio(tmp_path):
+    """Il regime del dato promosso da nota a schema: senza questa colonna, un ts
+    sintetico (data-export) sarebbe indistinguibile da un ts vero, e il `newest`
+    dichiarerebbe un istante in cui nessun messaggio è mai esistito."""
+    from archive_indexer import write_rows
+    db = tmp_path / "d.db"
+    write_rows(db, [_riga("x", "y")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT ts_source FROM messages WHERE uuid='x'").fetchone()[0] == "messaggio"
+
+
+def test_migrazione_db_preesistente_non_perde_dati(tmp_path):
+    """I nove archivi vivi sono nati prima di questa versione: la migrazione
+    deve essere trasparente."""
+    from archive_indexer import write_rows
+    db = tmp_path / "vecchio.db"
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT,"
+            " sender TEXT DEFAULT '', tools TEXT DEFAULT '', thinking TEXT DEFAULT '',"
+            " attachments TEXT DEFAULT '', parent_uuid TEXT DEFAULT '');")
+        c.execute("INSERT INTO messages(uuid,project,ts,content) VALUES('old','p','2026-05-01','storico')")
+    write_rows(db, [_riga("new", "nuovo")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT content FROM messages WHERE uuid='old'").fetchone()[0] == "storico"
+        assert c.execute("SELECT ts_source FROM messages WHERE uuid='old'").fetchone()[0] == "messaggio"
+        c.execute("SELECT count(*) FROM revisions")   # la tabella ora esiste

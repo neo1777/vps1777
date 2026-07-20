@@ -188,8 +188,40 @@ CREATE TABLE IF NOT EXISTS messages(
     tools       TEXT DEFAULT '',
     thinking    TEXT DEFAULT '',
     attachments TEXT DEFAULT '',
-    parent_uuid TEXT DEFAULT ''
+    parent_uuid TEXT DEFAULT '',
+    -- Il REGIME del dato, promosso da nota a SCHEMA (D10/§2-ter, 20/07).
+    -- 'messaggio'   = ts dell'evento reale (un messaggio detto non cambia più).
+    -- 'data-export' = ts SINTETICO messo da noi, perché la fonte non ne aveva uno:
+    --                 è la data della FOTOGRAFIA, non del contenuto (le voci `memory:*`
+    --                 e `account:user` arrivano senza ts e i filtri temporali le
+    --                 saltavano IN SILENZIO — un namespace intero invisibile a `since=`).
+    -- Serve a non fabbricare la bugia opposta: una memory di maggio fotografata a luglio
+    -- NON "è successa a luglio". Chi calcola il `newest` deve filtrare:
+    --     MAX(ts) WHERE ts_source='messaggio'
+    -- altrimenti l'archivio dichiara un istante in cui nessun messaggio è mai esistito.
+    ts_source   TEXT DEFAULT 'messaggio'
 );
+-- REVISIONI (D18, scelta di Neo 20/07: «cambio di schema: conservare le revisioni»).
+-- Il difetto: `messages` ha PK su uuid e si scrive con INSERT OR REPLACE → se lo stesso
+-- uuid torna con contenuto DIVERSO, l'ultimo vince e il primo sparisce SENZA TRACCIA.
+-- Non è teorico: le voci `memory:*` sono SLOT RISCRIVIBILI (stesso uuid, testo diverso in
+-- export diversi). Finora le versioni sopravvivevano solo perché stavano in DB separati —
+-- cioè la comparabilità degli snapshot era un ACCIDENTE DELLA TOPOLOGIA, non una proprietà.
+-- Qui diventa struttura: prima di ogni REPLACE che cambierebbe il contenuto, la versione
+-- USCENTE viene conservata. `messages` resta l'ultima versione (ricerca invariata: nessuna
+-- API cambia, nessuna PK si rompe); la storia si interroga a parte, per uuid.
+CREATE TABLE IF NOT EXISTS revisions(
+    uuid            TEXT NOT NULL,
+    ts              TEXT,
+    content         TEXT,
+    sender          TEXT DEFAULT '',
+    project         TEXT DEFAULT '',
+    ts_source       TEXT DEFAULT '',
+    content_sha     TEXT NOT NULL,   -- sha1 del contenuto uscente: dedup delle revisioni
+    superseded_date TEXT NOT NULL,   -- quando è stata soppiantata (data di questo ingest)
+    PRIMARY KEY (uuid, content_sha)  -- re-ingest idempotente: la stessa revisione non si duplica
+);
+CREATE INDEX IF NOT EXISTS idx_rev_uuid ON revisions(uuid);
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     uuid, project, ts, content, tools, attachments,
     content='messages', content_rowid='rowid',
@@ -293,9 +325,46 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         skip_buf: list[tuple] = []
         sight_buf: list[tuple] = []
         ingest_date = _now_iso()
+        n_rev = 0          # revisioni conservate in questo ingest (D18)
+
+        def _salva_revisioni() -> int:
+            """Conserva le versioni USCENTI prima che il REPLACE le sovrascriva (D18).
+
+            Va chiamata PRIMA dell'INSERT OR REPLACE: dopo, il vecchio contenuto non
+            esiste più da nessuna parte — è esattamente il difetto che questa funzione
+            chiude. Una sola query per batch (niente N+1): si leggono gli uuid del buf
+            che esistono già, si confrontano gli hash, e si archivia solo ciò che CAMBIA.
+            Uguale → nessuna revisione (il re-ingest di dati immutabili non sporca nulla).
+            """
+            if not buf:
+                return 0
+            by_uuid = {r[0]: r for r in buf}
+            ph = ",".join("?" * len(by_uuid))
+            esistenti = conn.execute(
+                f"SELECT uuid, project, ts, content, sender, ts_source FROM messages"
+                f" WHERE uuid IN ({ph})", tuple(by_uuid)).fetchall()
+            rev: list[tuple] = []
+            for u, proj, ts_old, cont_old, sender_old, tss_old in esistenti:
+                nuovo = by_uuid[u]
+                if (cont_old or "") == (nuovo[3] or ""):
+                    continue                      # stesso contenuto: niente da conservare
+                rev.append((u, ts_old, cont_old, sender_old or "", proj or "",
+                            tss_old or "messaggio",
+                            hashlib.sha1((cont_old or "").encode("utf-8")).hexdigest(),
+                            ingest_date))
+            if rev:
+                # OR IGNORE + PK(uuid, content_sha): la stessa versione non si archivia due
+                # volte, quindi ri-eseguire l'ingest è idempotente anche qui.
+                conn.executemany(
+                    "INSERT OR IGNORE INTO revisions"
+                    "(uuid, ts, content, sender, project, ts_source, content_sha,"
+                    " superseded_date) VALUES (?,?,?,?,?,?,?,?)", rev)
+            return len(rev)
 
         def flush() -> None:
             if buf:
+                nonlocal n_rev
+                n_rev += _salva_revisioni()      # PRIMA del replace, o il vecchio è perso
                 conn.executemany(
                     "INSERT OR REPLACE INTO messages"
                     "(uuid, project, ts, content, sender, tools, thinking, attachments,"
@@ -357,7 +426,21 @@ def _ensure_v2(conn: sqlite3.Connection) -> bool:
     have = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
     missing = [c for c in ("sender", "tools", "thinking", "attachments", "parent_uuid")
                if c not in have]
+    # ts_source (v2.1, 20/07) è trattata a parte di proposito: NON è indicizzata in FTS,
+    # quindi aggiungerla non richiede di rifare la tabella FTS. Tenerla nella lista sopra
+    # avrebbe forzato un DROP+rebuild dell'FTS su ogni DB già sano — costoso e inutile.
+    # Default 'messaggio': i DB esistenti contengono solo ts veri (nessuno era sintetico
+    # prima di questa versione), quindi il default è corretto per retro-compatibilità e
+    # non "promuove" nessun dato a un regime che non aveva.
+    ts_src_missing = "ts_source" not in have
+    if ts_src_missing:
+        conn.execute("ALTER TABLE messages ADD COLUMN ts_source TEXT DEFAULT 'messaggio'")
+    # la tabella `revisions` (D18) è CREATE IF NOT EXISTS nello _SCHEMA: eseguirlo basta
+    # a dotarne anche i DB vecchi, senza toccare `messages`.
     if not missing:
+        if ts_src_missing:
+            conn.executescript(_SCHEMA)   # crea revisions/indici sui DB preesistenti
+            return True
         return False
     for col in missing:
         conn.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT DEFAULT ''")
@@ -1177,6 +1260,40 @@ _DOC_ZIP_EXTS = (
 )
 
 
+# Soglia di lettura per lo sniff: bastano pochi KB per decidere se un file è testo.
+_SNIFF_BYTES = 4096
+
+def _sniff_e_testo(raw: bytes) -> bool:
+    """Il contenuto è testo leggibile? (D10/§1, decisione D10 di Neo — 20/07)
+
+    PERCHÉ ESISTE: la classificazione era per ESTENSIONE, cioè un'etichetta, non una
+    misura. Sul bundle reale: dei 2.633 file censiti come «non-testo», **829 (31%) sono
+    testo travestito** — 264 senza estensione (appunti, todo, script, Dockerfile) più
+    estensioni fuori whitelist (.cjs .proto .service .xsd .ndjson). Erano marcati
+    «niente da leggere qui» e nessuno li ha mai letti. Neo, sulla D10: «tutti i file
+    possono contenere testo o metadati utili, dovremo analizzarli molto bene».
+
+    Il criterio è volutamente CONSERVATIVO — meglio una lapide di troppo che spazzatura
+    binaria dentro l'indice full-text:
+      · un solo byte NUL → binario, chiuso (nessun formato testuale lo contiene);
+      · deve decodificarsi in UTF-8 senza errori di sostituzione rilevanti;
+      · ≥ 90% di caratteri stampabili/whitespace sul campione.
+    Legge solo i primi _SNIFF_BYTES: decidere non richiede il file intero.
+    """
+    if not raw:
+        return False
+    if b"\x00" in raw:
+        return False
+    try:
+        txt = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    if not txt.strip():
+        return False
+    ok = sum(1 for ch in txt if ch.isprintable() or ch in "\n\r\t")
+    return ok / len(txt) >= 0.90
+
+
 def _zipinfo_ts(info: zipfile.ZipInfo) -> str:
     """ts ISO dal `date_time` del membro zip (1980 = 'assente', epoca-zero DOS)."""
     try:
@@ -1353,8 +1470,20 @@ def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
                         raw = _read_capped(f, name, budget, cap=MAX_PDF_BYTES)
                     yield from _iter_pdf_bytes(raw, name, label, ts)
                 else:
-                    # binario / fuori whitelist: lapide col path, contata.
-                    yield _Skip("bundle-workfiles", "non-testo", name, ts)
+                    # PRIMA della lapide: guarda il CONTENUTO, non l'estensione (D10/§1).
+                    # Un file «fuori whitelist» può essere testo pieno — 829 lo erano.
+                    with z.open(info) as f:
+                        campione = f.read(_SNIFF_BYTES)
+                    if _sniff_e_testo(campione):
+                        with z.open(info) as f:
+                            raw = _read_capped(f, name, budget)
+                        # marcato [testo-sniffato] perché sia distinguibile da un file
+                        # entrato per estensione: chi legge deve sapere COME ci è arrivato.
+                        body = f"[{name}] [testo-sniffato]\n" + raw.decode("utf-8", errors="replace")
+                        yield from _chunk_rows(body, label, ts, name)
+                    else:
+                        # binario vero: lapide col path, contata.
+                        yield _Skip("bundle-workfiles", "non-testo", name, ts)
             elif name == "inventario/inventario-sessioni.tsv":
                 info = z.getinfo(name)
                 with z.open(info) as f:
