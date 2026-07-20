@@ -131,6 +131,16 @@ services:
       # errore (i tool tornano risultati vuoti finché non aggiungi un DB).
       ARCHIVE_DB_PATHS: "${ARCHIVE_DB_PATHS:-}"
       FASTMCP_STATELESS_HTTP: "true"
+      # D9 (20/07) — il tool `set_description` NON scrive più qui: inoltra al
+      # gateway, che è l'unico a montare il volume in :rw. Serve il segreto del
+      # canale interno, lo stesso pattern di nb1777-mcp per /internal/nlm/*.
+      # Il mount resta :ro: questo servizio continua a non poter scrivere, e la
+      # scrittura passa da chi ne ha il diritto — invece di essere promessa da
+      # un tool che non poteva mantenerla.
+      GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
+      GATEWAY_INTERNAL_BASE: http://gateway:8080
+    secrets:
+      - gateway_secret
     volumes:
       # SOLA LETTURA (H42): archive-mcp legge e basta — apre SQLite con
       # `mode=ro` (app/db.py). Prima il :rw glielo permetteva comunque: la
