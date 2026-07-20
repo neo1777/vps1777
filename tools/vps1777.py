@@ -1401,15 +1401,36 @@ def _secrets_mancanti_in(compose: Path, radice_repo: Path,
         # editor lascia il newline, e `echo "" > f` scrive un byte. Lo stack parte, il
         # canale resta fail-closed, e il sintomo sembra un bug della feature — cioè
         # **esattamente il fallimento che la docstring qui sopra dichiara di prevenire.**
-        # La docstring prometteva più del codice: la promessa è vecchia di oggi, il
-        # codice non l'aveva mai mantenuta.
-        try:
-            vuoto = not p.is_file() or not p.read_text(
-                encoding="utf-8", errors="replace").strip()
-        except OSError:
-            vuoto = True
-        if vuoto:
-            fuori.append(f"{nome} → {percorso}   [dichiarato in {compose.name}]")
+        #
+        # ⚠️⚠️ E «ASSENTE» E «C'È MA NON SI LEGGE» SONO DUE COSE, col rimedio OPPOSTO.
+        # Fino alla 0.40.1 questa riga era `not p.is_file() or not p.read_text(...)`:
+        # un `or` che **buttava via l'informazione già calcolata**. Un file integro ma
+        # illeggibile (permessi, ACL, mount, symlink rotto) finiva nel ramo «manca o è
+        # VUOTO», e il messaggio suggeriva il comando col `>` — che lo avrebbe
+        # **troncato**. Il rimedio distruggeva un segreto valido: la forma peggiore,
+        # perché il pre-flight esiste per far risparmiare tempo, non per far perdere un
+        # dato. Misurato: 3 segreti pieni, `chmod 000` su uno ⇒ 1 su 3 segnalato come
+        # «manca», e la guardia sulla radice sbagliata non scatta (scatta solo se
+        # mancano tutti). (Trovato da b82df434, riprodotto da setaccio.)
+        # ⇒ Non si enumerano le CAUSE (permessi, ACL, mount, immutable, symlink: quella
+        #   lista sarebbe incompleta dal primo giorno). Si usa il dato che il codice ha
+        #   già: `is_file()` separa i due mondi, la lettura decide dentro il secondo.
+        # ⭐ FORMA GENERALE, per chi legge: **un `or` fra due condizioni con rimedi
+        #   diversi è una perdita di informazione, non una semplificazione.**
+        stato = None                                   # None = a posto
+        if not p.is_file():
+            stato = "ASSENTE"
+        else:
+            try:
+                if not p.read_text(encoding="utf-8", errors="replace").strip():
+                    stato = "VUOTO"
+            except OSError as exc:
+                # C'È, e non riusciamo a leggerlo. Fermare l'update è GIUSTO (lo stack
+                # non partirebbe comunque); è il RIMEDIO a dover essere diverso, perché
+                # il file da salvare c'è già.
+                stato = f"NON LEGGIBILE ({exc.__class__.__name__})"
+        if stato:
+            fuori.append(f"{nome} → {percorso}   [{stato} · dichiarato in {compose.name}]")
     return fuori
 
 def cmd_update(repo: Path, args) -> int:
@@ -1653,6 +1674,21 @@ def cmd_update(repo: Path, args) -> int:
         for m in mancanti:
             nome = m.split(" → ")[0].strip()
             perche = SEGRETI_NON_GENERABILI.get(nome)
+            if "NON LEGGIBILE" in m:
+                # ⚠️ IL FILE C'È. Qualunque comando col `>` lo TRONCHEREBBE — cioè il
+                # rimedio distruggerebbe il segreto che stiamo cercando di salvare.
+                # Qui il guasto non è il contenuto ma l'accesso: si ripara il permesso,
+                # non il file. Questo ramo esiste perché fino alla 0.40.1 il messaggio
+                # diceva «manca o è VUOTO» di un segreto integro e suggeriva il `>`.
+                percorso = m.split(" → ")[1].split("   [")[0].lstrip("./")
+                righe.append(
+                    f"  · {m}\n"
+                    f"      ⛔ IL FILE C'È: **non ricrearlo e non svuotarlo**, il valore dentro\n"
+                    f"         è probabilmente ancora buono. Il guasto è l'ACCESSO, non il contenuto.\n"
+                    f"      → controlla permessi e proprietario, senza toccare il contenuto:\n"
+                    f"         ls -l {percorso}   #  poi, se serve:  chmod 600 {percorso}\n"
+                    f"      ⚠️ NON usare un comando con `>`: troncherebbe un segreto valido.\n")
+                continue
             if perche:
                 # ⚠️ per questi NON si stampa nessun comando: chi legge alle 23 con lo
                 # stack fermo copia la riga sotto il proprio nome, non la nota in coda.
@@ -1693,19 +1729,24 @@ def cmd_update(repo: Path, args) -> int:
         die(f"backup fallito — stack intatto, update annullato: {exc}")
 
     # 8 — stage-check sui file del bundle
-    # ⚠️ QUESTA LISTA È INCOMPLETA, ed è dichiarato: `compose_cmd` (r.415-421) monta
-    # anche un overlay per ogni feature attiva, e `backup` è in DEFAULT_FEATURES ⇒ lo
-    # stage-check valida MENO compose di quanti lo stack ne monterà. Terza copia della
-    # stessa regola, dopo `compose_cmd` e `_compose_sorgenti` (r.1230): quest'ultima
-    # esiste apposta per derivarla, e usarla QUI cambierebbe cosa viene validato — un
-    # secondo fix, tenuto fuori dalla 0.40.1 di proposito. Registrato nel ledger come
-    # follow_up di `ops.preflight-secrets-bundle` con `rivedi_dopo: 2026-09-30`.
-    # Sta scritto qui e non solo là perché **chi legge questo punto non passa dalla
-    # docstring di un'altra funzione** (rilievo di setaccio): un'informazione che esiste
-    # nel file ma non dove serve è un'informazione che non c'è.
+    # La lista si DERIVA da `_compose_sorgenti`, la stessa che usa il pre-flight: fino
+    # alla 0.40.1 era scritta a mano qui (base + overlay di ingress), mentre
+    # `compose_cmd` (r.415-421) ne monta anche uno per ogni feature attiva — e `backup`
+    # è in DEFAULT_FEATURES. **Lo stage-check validava meno compose di quanti lo stack
+    # ne avrebbe montati**: un `compose config` verde su un sottoinsieme non dice nulla
+    # sull'insieme che verrà usato davvero.
+    # Era la terza occorrenza in un giorno della stessa forma — *un posto sa che i file
+    # sono N, un altro ne guarda M* — e le prime due le avevamo chiuse nella 0.40.1
+    # lasciando aperta questa, di proposito: un fix per release.
+    # ⚠️ Non è un refactor: **cambia cosa viene validato**. Un overlay di feature con un
+    # errore di sintassi, che prima passava lo stage-check e faceva fallire l'`up` dopo
+    # il punto di non ritorno, adesso ferma l'update mentre è ancora abort-safe.
     step(8, "stage-check")
-    profile = ingress_profile(repo)
-    staged = [bundle / "compose.yaml", bundle / f"compose.{profile}.yaml"]
+    try:
+        staged = _compose_sorgenti(bundle, repo)
+    except FileNotFoundError as exc:
+        step(8, "stage-check", "failed", str(exc))
+        die(f"bundle v{target} incompleto: {exc}")
     env_new = {"VPS1777_TAG": target}
     res = run([*compose_cmd(repo, files=staged), "config", "-q"],
               check=False, capture=True, env=env_new)

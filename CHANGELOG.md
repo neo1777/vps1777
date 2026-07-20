@@ -2,6 +2,41 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.2] — 2026-07-21
+
+Due difetti trovati **dopo** aver taggato la 0.40.1, entrambi da chi non aveva
+scritto il codice, entrambi registrati prima di essere corretti.
+
+### Corretto
+
+- **«Manca» e «c'è ma non si legge» non sono più la stessa cosa.** Un segreto
+  integro ma illeggibile (permessi, ACL, mount, symlink rotto) veniva segnalato
+  come «manca o è VUOTO», e il rimedio suggerito — un comando con `>` — lo
+  avrebbe **troncato**: la riparazione distruggeva il segreto che doveva
+  salvare. Ora i casi sono tre (assente / vuoto / non leggibile) con tre rimedi
+  distinti, e per l'illeggibile il messaggio indica `ls -l` e `chmod`, mai una
+  ridirezione. La distinzione usa il dato che il codice aveva già, invece di
+  enumerare le cause: una lista di cause sarebbe stata incompleta dal primo
+  giorno.
+- **Lo `stage-check` valida gli stessi file compose che lo stack monta.** Ne
+  leggeva due (base + ingress) mentre il comando reale ne monta anche uno per
+  ogni feature attiva, e `backup` lo è di default: un controllo verde su un
+  sottoinsieme non dice nulla sull'insieme che verrà usato. Non è un refactor —
+  **cambia cosa viene validato**: un overlay di feature con un errore di
+  sintassi, che prima passava e faceva fallire l'avvio dopo il punto di non
+  ritorno, adesso ferma l'aggiornamento mentre è ancora annullabile.
+
+### Nota per chi aggiorna
+
+Nessuna azione richiesta, nessun segreto nuovo, nessuna migrazione.
+
+**Questo aggiornamento è la prima prova reale del pre-flight introdotto nella
+0.40.1.** Non lo era la 0.40.1: là a orchestrare era ancora la CLI precedente,
+col controllo vecchio, che si ferma prima di arrivare al nuovo. È solo
+aggiornando *da* una 0.40.1 già installata che il codice nuovo decide davvero —
+e si vede la differenza di severità fra il controllo sulla configurazione
+attuale (avviso) e quello sulla release in arrivo (fatale).
+
 ## [0.40.1] — 2026-07-20
 
 Patch, e una sola cosa: **il pre-flight dei segreti guardava la configurazione

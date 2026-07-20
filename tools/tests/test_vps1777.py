@@ -332,6 +332,68 @@ def test_il_rimedio_non_suggerisce_mai_di_generare_un_segreto_non_generabile():
         "il caso non-generabile deve essere valutato PRIMA di stampare un comando"
 
 
+def test_assente_e_illeggibile_sono_due_stati_distinti():
+    # 0.40.2 — il rimedio per «manca» (crealo, il `>` è sicuro) DISTRUGGE un segreto che
+    # c'è ma non si legge. Fino alla 0.40.1 un `or` appiattiva i due casi e il messaggio
+    # suggeriva il comando col `>` su un file integro. Misurato: 3 segreti pieni,
+    # chmod 000 su uno ⇒ segnalato come «manca o è VUOTO».
+    # ⚠️ Si distingue col dato che il codice HA GIÀ (`is_file()`), non enumerando le
+    # cause: permessi, ACL, mount, immutable, symlink rotto — quella lista sarebbe
+    # incompleta dal primo giorno.
+    repo = _installazione(segreti={"pieno.txt": "v", "vuoto.txt": "  \n"})
+    (repo / "compose.yaml").write_text(_compose_con("pieno", "vuoto", "sparito"))
+    fuori = v._secrets_mancanti([repo / "compose.yaml"], repo)
+    per_nome = {f.split(" → ")[0].strip(): f for f in fuori}
+    assert "ASSENTE" in per_nome["sparito"], "un file che non c'è deve dirsi ASSENTE"
+    assert "VUOTO" in per_nome["vuoto"], "un file di soli spazi deve dirsi VUOTO"
+    assert "pieno" not in per_nome, "un segreto valido non si segnala"
+
+
+def test_illeggibile_non_si_confonde_con_assente():
+    # Il caso che il chmod 000 riproduce, senza dipendere dai permessi (che come root
+    # non morderebbero): un percorso che esiste ma la cui lettura fallisce.
+    import os
+    if os.geteuid() == 0:
+        return                                    # da root chmod non blocca: caso non riproducibile
+    repo = _installazione(segreti={"chiuso.txt": "valore-vero-da-non-perdere"})
+    (repo / "compose.yaml").write_text(_compose_con("chiuso"))
+    (repo / "secrets" / "chiuso.txt").chmod(0o000)
+    try:
+        fuori = v._secrets_mancanti([repo / "compose.yaml"], repo)
+        assert len(fuori) == 1, "un segreto illeggibile deve comunque fermare l'update"
+        assert "NON LEGGIBILE" in fuori[0], f"deve distinguersi da ASSENTE: {fuori[0]}"
+        assert "ASSENTE" not in fuori[0]
+        # e il contenuto NON è stato toccato: è tutto il punto del fix
+        (repo / "secrets" / "chiuso.txt").chmod(0o600)
+        assert (repo / "secrets" / "chiuso.txt").read_text() == "valore-vero-da-non-perdere"
+    finally:
+        (repo / "secrets" / "chiuso.txt").chmod(0o600)
+
+
+def test_il_rimedio_per_illeggibile_non_contiene_mai_una_ridirezione():
+    # N13 esteso: per «c'è ma non si legge» il messaggio non deve suggerire NESSUN
+    # comando che scriva sul file — `>` troncherebbe il segreto che si vuole salvare.
+    src = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
+    i = src.index('if "NON LEGGIBILE" in m:')
+    ramo = src[i:src.index("continue", i)]
+    assert ">" not in ramo.split("ls -l")[0].split("chmod")[0] or "NON usare un comando con" in ramo
+    assert "chmod" in ramo and "ls -l" in ramo, "deve indicare come riparare l'ACCESSO"
+    assert "openssl rand" not in ramo, "non deve suggerire di rigenerare un file che esiste"
+
+
+def test_stage_check_valida_gli_stessi_compose_che_lo_stack_monta():
+    # 0.40.2 — lo step 8 costruiva la lista a mano (base + ingress) mentre `compose_cmd`
+    # monta anche un overlay per feature attiva (`backup` è di default): validava MENO
+    # compose di quanti ne sarebbero stati usati. Un `compose config` verde su un
+    # sottoinsieme non dice nulla sull'insieme reale.
+    src = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
+    blocco = src[src.index('step(8, "stage-check")'):src.index("# 9 — pull")]
+    assert "_compose_sorgenti(bundle, repo)" in blocco, \
+        "lo stage-check deve DERIVARE la lista, non riscriverla"
+    assert 'bundle / f"compose.{profile}.yaml"' not in blocco, \
+        "la lista scritta a mano è il difetto: se torna, torna in silenzio"
+
+
 def test_compose_sorgenti_base_assente_solleva_invece_di_dire_verde():
     # N6 / difetto (d): sulla base, nessun compose.yaml → [] = VERDE SILENZIOSO. Il ramo
     # non scattava mai perché repo/compose.yaml esiste sempre — ma puntando ai path del
