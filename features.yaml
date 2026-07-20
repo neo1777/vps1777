@@ -613,3 +613,68 @@ features:
     status: active-default
     verify:
       mcp_tool: {service: nb1777-mcp, name: studio_rename}
+
+  # ─── 0.40.0 (20/07/2026) — registrate SUBITO, non "poi" ────────────────────
+  # Il ledger esiste perché «non deve MAI capitare che ci perdiamo funzioni per
+  # strada». Queste quattro sono nate oggi e stavano per entrare in una release
+  # SENZA passare di qui: la CI era verde perché il verificatore controlla ciò che
+  # è dichiarato contro la realtà, e una funzione mai dichiarata **non ha nulla
+  # contro cui essere controllata**. Un ledger verde e incompleto è il difetto che
+  # il ledger stesso doveva impedire. Trovato da b82df434 prima del tag.
+  - id: archive.sniff-contenuto
+    nome: "Sniff del contenuto nell'ingest"
+    cosa: "Prima di archiviare un file come «non-testo», l'indexer ne guarda i primi 4 KB:
+           un byte NUL chiude la questione, serve UTF-8 valido e ≥90% di caratteri
+           stampabili. La classificazione per ESTENSIONE era un'etichetta, non una misura:
+           826 file su 2.633 censiti «non-testo» erano testo pieno (appunti senza
+           estensione, todo, script, Dockerfile, .cjs/.proto/.service/.xsd/.ndjson).
+           I promossi sono marcati [testo-sniffato]: chi legge sa COME ci sono arrivati."
+    dove: ["services/gateway/app/archive_indexer.py#_sniff_e_testo"]
+    status: active-default
+    since: "0.40.0"
+    verify:
+      file_contains: {path: services/gateway/app/archive_indexer.py, pattern: "def _sniff_e_testo"}
+
+  - id: archive.revisioni
+    nome: "Revisioni: le versioni sovrascritte non spariscono"
+    cosa: "`messages` ha PK su uuid e si scrive con INSERT OR REPLACE: lo stesso
+           identificatore con contenuto diverso faceva vincere l'ultimo e sparire il primo
+           SENZA traccia. Non è teorico — le voci memory:* sono slot riscrivibili. Prima
+           di ogni REPLACE che cambia il contenuto, la versione uscente va in `revisions`.
+           La ricerca continua a vedere l'ultima: nessuna API cambia."
+    dove: ["services/gateway/app/archive_indexer.py#revisions"]
+    status: active-default
+    since: "0.40.0"
+    verify:
+      file_contains: {path: services/gateway/app/archive_indexer.py, pattern: "CREATE TABLE IF NOT EXISTS revisions"}
+
+  - id: archive.set-description-via-gateway
+    nome: "set_description inoltrata al gateway"
+    cosa: "Il tool MCP non apre più il DB (il suo container lo monta in sola lettura per
+           scelta): inoltra a POST /internal/archive/description. Rete interna, segreto
+           DEDICATO (non gateway_secret: quello apre anche /internal/nlm/*), nome del DB in
+           whitelist col percorso composto dal gateway, cap di lunghezza, rifiuto dei
+           caratteri di controllo, audit di ogni scrittura. Ogni rifiuto risponde 404 e mai
+           403: un 403 confermerebbe l'esistenza della rotta."
+    dove: ["services/gateway/app/routes.py#internal_archive_description",
+           "services/archive-mcp/app/db.py#set_description"]
+    status: active-default
+    since: "0.40.0"
+    verify:
+      file_contains: {path: services/gateway/app/routes.py, pattern: "internal/archive/description"}
+
+  - id: ops.preflight-secrets
+    nome: "Pre-flight dei segreti nell'update"
+    cosa: "Prima di toccare qualunque cosa, l'update confronta i segreti che il compose
+           PRETENDE con quelli presenti e si ferma dicendo quali mancano. Serve perché
+           setup.sh gira solo all'installazione da zero e `secrets/` è preservato: una
+           release che introduce un segreto nuovo lo troverebbe assente, lo stack non
+           partirebbe e il sintomo sembrerebbe una release rotta. Un file VUOTO conta come
+           mancante (peggio: lo stack parte e il canale resta muto). L'elenco si legge dal
+           compose, non da una lista nel codice — una lista andrebbe aggiornata a ogni
+           segreto nuovo, ed è la dimenticanza che il controllo previene."
+    dove: ["tools/vps1777.py#_secrets_mancanti"]
+    status: active-default
+    since: "0.40.0"
+    verify:
+      file_contains: {path: tools/vps1777.py, pattern: "def _secrets_mancanti"}
