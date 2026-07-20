@@ -1244,7 +1244,19 @@ def _compose_sorgenti(root: Path, repo: Path) -> list[Path]:
     mentre `compose_cmd` ne monta anche uno per ogni feature attiva — e `backup` è
     acceso di DEFAULT. Ogni lista scritta a mano è una copia che invecchia da sola,
     in silenzio, e il silenzio è il punto: nessuna di esse *fallisce*, tutte dicono
-    di sì. Quindi la lista si DERIVA, da qui, una volta.
+    di sì. Quindi la lista si deriva, invece di scriverla.
+
+    ⚠️ MA NON È L'UNICA DERIVAZIONE, e dirlo qui è metà del suo valore. La stessa
+    regola è applicata una seconda volta da `compose_cmd` (r.415-421) per costruire il
+    comando docker. Le due **non sono unificate** e non sono interscambiabili:
+    `compose_cmd` produce anche `extra_profiles` e NON filtra i file assenti, questa
+    li filtra e non ha profili — farle chiamare l'una dall'altra cambierebbe il
+    comportamento di docker, che è un secondo fix travestito da refactor. Chi tocca
+    una **deve toccare l'altra**. (Trovato da b82df434 su questa docstring, che nella
+    prima stesura prometteva «da qui, una volta»: un invariante che il codice non
+    stabilisce. È la stessa forma del difetto (e) — una dichiarazione più larga della
+    sua implementazione — comparsa nella funzione scritta per spiegarla. Non è ironia:
+    è la misura di quanto la classe sia difficile da vedere dall'interno.)
 
     `root` è dove stanno i FILE (il repo installato, oppure il bundle di una release
     che si sta per installare); `repo` è dove sta la CONFIGURAZIONE che decide quali
