@@ -763,6 +763,47 @@ features:
     verify:
       file_contains: {path: .github/workflows/ci.yml, pattern: "tools/tests/"}
 
+  - id: ops.update-progress-journal
+    nome: "La progress dell'update conserva lo STATO, non la STORIA"
+    cosa: "⚠️ VOCE DI UN DIFETTO NOTO, non di una funzione — registrata perché una release
+           che promette una verifica su un meccanismo che non ne conserva l'evidenza è il
+           modo in cui una promessa onesta diventa falsa da sola.
+           `progress_write` (r.267-273) sovrascrive UN file, `onboarding/update_progress.json`,
+           a ogni step, e `step()` non stampa nulla: niente journal systemd. Quindi a update
+           FINITO il file contiene l'ultimo stato e non la sequenza.
+           ⇒ ASIMMETRIA: un update che RIESCE non lascia prova dell'ordine degli step (che il
+           pre-flight sia girato prima del backup non è più leggibile da nessuna parte); un
+           update che FALLISCE al 6-bis lascia `step 6 · preflight-secrets-bundle · failed`
+           con i segreti nominati — cioè la prova completa, in una riga.
+           ⇒ CONSEGUENZA OPERATIVA: il collaudo end-to-end del pre-flight richiede un update
+           che **fallisce** (segreto rinominato, non cancellato), e la riga va COPIATA subito:
+           il prossimo update la sovrascrive. *Un evento non osservato ma tracciato è
+           verificabile; un evento osservato e non tracciato è un ricordo.*
+           Il CHANGELOG 0.40.1 dichiara «il primo aggiornamento è anche la prima prova
+           end-to-end»: vero, ma il sistema non la registra se l'update riesce. La
+           dichiarazione è più larga di ciò che l'implementazione sostiene — la forma di
+           tutta la giornata del 20/07, comparsa stavolta nella riga scritta apposta per
+           essere onesti."
+    dove: ["tools/vps1777.py#progress_write", "CHANGELOG.md"]
+    status: deferred
+    since: "0.40.1"
+    decisione: "20/07 — trovato da b82df434 subito dopo il tag v0.40.1. NON corretto in
+                0.40.1: un fix per release, e la regola vale anche quando fa comodo romperla."
+    follow_up:
+      manuale:
+        cosa: "`progress_write` APPENDE una riga a un journal (`update_journal.ndjson`)
+               invece di sovrascrivere lo stato, così la sequenza resta leggibile anche
+               dopo un update riuscito. Chiude anche il caso «il timer aggiorna alle 9 del
+               mattino e nessuno vede cos'è successo»."
+        rivedi_dopo: "2026-08-31"
+    verify:
+      # ⚠️ Verifica che il DIFETTO sia ancora lì, non che una funzione ci sia. È l'uso
+      # onesto del ledger per una voce `deferred`: quando qualcuno sostituirà il
+      # `write_text` con un append, questa riga diventerà ROSSA e costringerà a
+      # aggiornare la voce invece di lasciarla a dichiarare un difetto già chiuso.
+      # Una voce che descrive un problema risolto è disinformazione a scoppio ritardato.
+      file_contains: {path: tools/vps1777.py, pattern: "p.write_text(json.dumps({"}
+
   - id: archive.ts-source
     nome: "ts_source: il regime del dato, promosso da nota a schema"
     cosa: "Colonna su `messages` con tre valori: `messaggio` (istante reale), `data-export`
