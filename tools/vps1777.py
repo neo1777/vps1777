@@ -1212,8 +1212,94 @@ def sync_state_card(repo: Path, version: str) -> None:
         warn(f"state card non aggiornata (best-effort): {exc}")
 
 
-def _secrets_mancanti(repo: Path) -> list[str]:
-    """I segreti che il compose PRETENDE e che in `secrets/` mancano o sono vuoti.
+# La NATURA di un segreto, che decide se il rimedio può suggerire di generarlo.
+# ⚠️ Non è una comodità: è la differenza fra un rimedio e un guasto peggiore. Un
+# `openssl rand` applicato a un token di BotFather produce un file **pieno e sbagliato**
+# ⇒ il pre-flight torna VERDE, lo stack parte, il servizio tace — e a quel punto nessun
+# controllo può più accorgersene, perché il file c'è e non è vuoto. Su
+# `admin_password_bcrypt` è peggio ancora: te ne accorgi al primo login admin.
+# (Isolato da setaccio leggendo setup.sh r.185-225, non dedotto.)
+#
+# ⚠️ E una lista scritta a mano è esattamente ciò che questa release sta togliendo di
+# mezzo altrove. Qui resta, ma **non può invecchiare in silenzio**: un test in
+# `tools/tests/` confronta questi nomi con i segreti realmente dichiarati nei compose e
+# fallisce se ne compare uno non classificato. La lista può invecchiare — deve
+# invecchiare RUMOROSAMENTE. È lo stesso patto del ledger `features.yaml`: non
+# «ricordarsi di aggiornare», ma non poter dimenticare in silenzio.
+SEGRETI_NON_GENERABILI = {
+    "telegram_bot_token": "token rilasciato da BotFather (Telegram)",
+    "cloudflared_token": "token del tunnel, dalla dashboard Cloudflare",
+    "admin_password_bcrypt": "hash bcrypt di una password SCELTA (vedi secrets/README.md)",
+}
+SEGRETI_GENERABILI = {"gateway_secret", "archive_desc_secret", "oauth_signing_secret"}
+
+
+def _compose_sorgenti(root: Path, repo: Path) -> list[Path]:
+    """I compose che lo stack monta davvero, cercati sotto `root`.
+
+    ⚠️ **Perché non si scrive la lista a mano.** Il 20/07 abbiamo trovato TRE difetti
+    della stessa forma in tre punti diversi: *un posto sa che i file sono N, un altro
+    ne guarda M*. Il pre-flight ne guardava uno solo mentre lo stack ne monta due
+    (`compose.ingress.cloudflared.yaml` dichiara segreti); lo step 8 ne passa due
+    mentre `compose_cmd` ne monta anche uno per ogni feature attiva — e `backup` è
+    acceso di DEFAULT. Ogni lista scritta a mano è una copia che invecchia da sola,
+    in silenzio, e il silenzio è il punto: nessuna di esse *fallisce*, tutte dicono
+    di sì. Quindi la lista si deriva, invece di scriverla.
+
+    ⚠️ MA NON È L'UNICA DERIVAZIONE, e dirlo qui è metà del suo valore. La stessa
+    regola è applicata una seconda volta da `compose_cmd` (r.415-421) per costruire il
+    comando docker. Le due **non sono unificate** e non sono interscambiabili:
+    `compose_cmd` produce anche `extra_profiles` e NON filtra i file assenti, questa
+    li filtra e non ha profili — farle chiamare l'una dall'altra cambierebbe il
+    comportamento di docker, che è un secondo fix travestito da refactor. Chi tocca
+    una **deve toccare l'altra**. (Trovato da b82df434 su questa docstring, che nella
+    prima stesura prometteva «da qui, una volta»: un invariante che il codice non
+    stabilisce. È la stessa forma del difetto (e) — una dichiarazione più larga della
+    sua implementazione — comparsa nella funzione scritta per spiegarla. Non è ironia:
+    è la misura di quanto la classe sia difficile da vedere dall'interno.)
+
+    `root` è dove stanno i FILE (il repo installato, oppure il bundle di una release
+    che si sta per installare); `repo` è dove sta la CONFIGURAZIONE che decide quali
+    file contano (`.env`: profilo di ingress + feature attive). Sono due cose diverse
+    e vanno tenute separate: il `.env` è preservato attraverso l'update, il compose no.
+
+    ⚠️ Il `compose.yaml` base è OBBLIGATORIO e la sua assenza si SOLLEVA, non si salta.
+    Gli overlay no: una release può non avere l'overlay di una feature attiva, e quello
+    è un file che non c'è, non un problema. La differenza è il difetto (d) trovato su
+    banco da b82df434 — sulla base, un `compose.yaml` assente restituiva `[]`, cioè
+    **verde silenzioso**. Oggi quel ramo non scatta mai perché `repo/compose.yaml`
+    esiste sempre; puntando ai path di un BUNDLE, un fetch parziale o un path sbagliato
+    lo rende raggiungibile. **Il fix introdurrebbe un nuovo modo di avere lo stesso
+    falso verde che sta riparando.** «Non ho trovato il file» non è «non c'è niente da
+    segnalare»: è la distinzione che il ramo «formato illeggibile» fa già per il
+    contenuto, estesa all'esistenza invece che reinventata.
+    """
+    base = root / "compose.yaml"
+    if not base.is_file():
+        raise FileNotFoundError(
+            f"compose.yaml assente in {root} — il pre-flight dei segreti non può "
+            f"dire né sì né no. Bundle incompleto o path errato: NON è un verde.")
+    files = [base, root / f"compose.{ingress_profile(repo)}.yaml"]
+    feats = enabled_features(repo)
+    for feat, (file_sfx, _prof) in OPS_COMPOSE_FEATURES.items():
+        if feat in feats:
+            files.append(root / f"compose.{file_sfx}.yaml")
+    return [f for f in files if f.is_file()]
+
+
+def _secrets_mancanti(compose_paths: list[Path], radice_repo: Path) -> list[str]:
+    """I segreti che i compose PRETENDONO e che sotto `radice_repo` mancano o sono vuoti.
+
+    ⚠️ **I due argomenti sono separati apposta, e la firma è metà del fix.** Prima
+    questa funzione prendeva un solo `repo` e lo usava per DUE scopi che allora
+    coincidevano: dove leggere la dichiarazione, e dove cercare i file. Coincidevano
+    finché il compose da controllare era quello installato. Nel momento in cui si
+    controlla il compose di un *bundle*, passare il bundle come unico argomento
+    cercherebbe i segreti in `bundle/secrets/` — che non esiste — e direbbe che
+    mancano **tutti**: un rosso totale, credibilissimo, su una funzione nata per
+    essere creduta. (Trappola vista da setaccio sul codice, prima che la scrivessi.)
+    La dichiarazione viene dallo staging; i file stanno SEMPRE nel repo, perché
+    `secrets/` è preservato di proposito attraverso l'update.
 
     Legge il compose invece di una lista scritta a mano: una lista andrebbe
     aggiornata a ogni segreto nuovo, e **il difetto che questa funzione previene è
@@ -1232,7 +1318,35 @@ def _secrets_mancanti(repo: Path) -> list[str]:
     impedire. Una guardia che smette di guardare senza dirlo è peggio di nessuna
     guardia: dà un verde a chi ha imparato a fidarsene.
     """
-    compose = repo / "compose.yaml"
+    fuori: list[str] = []
+    visti: set[tuple[str, str]] = set()
+    for compose in compose_paths:
+        for voce in _secrets_mancanti_in(compose, radice_repo, visti):
+            if voce not in fuori:
+                fuori.append(voce)
+
+    # ⚠️ «MANCANO TUTTI» QUASI MAI VUOL DIRE CHE MANCANO TUTTI: vuol dire che stiamo
+    # guardando nel posto sbagliato. La firma a due argomenti rende l'errore VISIBILE,
+    # non impossibile — prova empirica, e non è un'ipotesi: b82df434 ha scritto il caso
+    # di collaudo che descrive esattamente questa trappola e poi **ci è caduta al primo
+    # tentativo**, passando `repo/"secrets"` invece di `repo`. Il rosso che ne usciva era
+    # perfetto — nomi veri, percorsi veri, formato impeccabile — e niente in quell'output
+    # diceva «hai chiamato male la funzione». Se il nome inganna chi sta cercando proprio
+    # quell'errore, inganna chiunque.
+    # Stessa forma del ramo «non ho saputo leggere il formato»: si distingue **non lo so**
+    # da **no**. Un pre-flight che sa già dire l'uno deve saper dire anche l'altro.
+    if visti and len(fuori) == len(visti) and not (radice_repo / "secrets").is_dir():
+        return [f"(pre-flight: nessuno dei {len(visti)} segreti trovato E "
+                f"`{radice_repo}/secrets/` non esiste ⇒ quasi certamente la RADICE è "
+                f"sbagliata, non i segreti. I file stanno nel repo installato, mai nel "
+                f"bundle: la dichiarazione viene dallo staging, i file dal repo.)"]
+    return fuori
+
+
+def _secrets_mancanti_in(compose: Path, radice_repo: Path,
+                         visti: set[tuple[str, str]]) -> list[str]:
+    """Un compose solo. `visti` de-duplica fra overlay: lo stesso segreto dichiarato
+    in due file è un segreto solo, e va detto una volta."""
     if not compose.is_file():
         return []
     righe = compose.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -1272,17 +1386,30 @@ def _secrets_mancanti(repo: Path) -> list[str]:
     # formato è cambiato sotto di noi. Restituire [] qui sarebbe il falso verde
     # in un'altra forma, quindi si SEGNALA invece di tacere.
     if not nomi and any(r.strip() and not r.lstrip().startswith("#") for r in blocco):
-        return ["(pre-flight non ha saputo leggere la sezione `secrets:` del compose "
-                "— formato inatteso: verificare a mano prima di procedere)"]
+        return [f"(pre-flight non ha saputo leggere la sezione `secrets:` di "
+                f"{compose.name} — formato inatteso: verificare a mano prima di procedere)"]
 
     fuori = []
     for nome, percorso in nomi:
-        p = repo / percorso.lstrip("./")
+        if (nome, percorso) in visti:
+            continue                                # già segnalato da un altro compose
+        visti.add((nome, percorso))
+        p = radice_repo / percorso.lstrip("./")
+        # ⚠️ VUOTO = vuoto DOPO strip, non `st_size == 0` — difetto (e), riprodotto su
+        # banco da b82df434: un file con solo «\n» (1 byte) o con spazi passava per
+        # PIENO. Non è un caso di laboratorio: chi riempie un segreto a mano con un
+        # editor lascia il newline, e `echo "" > f` scrive un byte. Lo stack parte, il
+        # canale resta fail-closed, e il sintomo sembra un bug della feature — cioè
+        # **esattamente il fallimento che la docstring qui sopra dichiara di prevenire.**
+        # La docstring prometteva più del codice: la promessa è vecchia di oggi, il
+        # codice non l'aveva mai mantenuta.
         try:
-            if not p.is_file() or p.stat().st_size == 0:
-                fuori.append(f"{nome} → {percorso}")
+            vuoto = not p.is_file() or not p.read_text(
+                encoding="utf-8", errors="replace").strip()
         except OSError:
-            fuori.append(f"{nome} → {percorso}")
+            vuoto = True
+        if vuoto:
+            fuori.append(f"{nome} → {percorso}   [dichiarato in {compose.name}]")
     return fuori
 
 def cmd_update(repo: Path, args) -> int:
@@ -1365,26 +1492,65 @@ def cmd_update(repo: Path, args) -> int:
     def step(n: int, name: str, status: str = "running", detail: str = "") -> None:
         progress_write(repo, target, n, name, status, detail)
 
-    # 4-bis — PRE-FLIGHT DEI SEGRETI (b82df434, 20/07: copre la CLASSE, non il caso)
+    # 4-bis — RETE DI ROLLBACK: i segreti della configurazione ATTUALE (mai fatale).
+    #
+    # ⚠️ QUESTO CONTROLLO NON È PIÙ QUELLO CHE PROTEGGE L'UPDATE — quello è il 6-bis.
+    # Il testo che stava qui prometteva di guardare «cosa il compose PRETENDE, PRIMA di
+    # toccare qualunque cosa»: vero alla lettera, e per questo nessuno ha visto che il
+    # compose che pretende qualcosa di nuovo **non è ancora sul disco quando questo gira**.
+    # Un commento che descrive con precisione una riga può nascondere che la riga è nel
+    # posto sbagliato. Chi lo leggerà dopo di noi deve trovare scritta la DIVISIONE DEI
+    # COMPITI, non solo il funzionamento: qui = il passato (rollback), 6-bis = il futuro
+    # (la release che stai installando). Il `die` sta solo di là.
+    #
     # `setup.sh` genera i segreti solo all'INSTALLAZIONE DA ZERO. L'update di una
     # macchina viva non lo esegue mai, e `secrets/` è fra i path preservati: quindi
     # una release che introduce un segreto NUOVO trova la cartella senza quel file.
-    # Cosa succederebbe senza questo controllo: il compose dichiara il secret, non
-    # lo trova, lo stack non parte, health-gate rosso, auto-rollback — e il sintomo
-    # sembra una release difettosa mentre manca solo un file. Peggio ancora se
-    # qualcuno "risolve" creando un file VUOTO: lo stack parte e il canale resta
+    # E un file VUOTO è peggio di uno assente: lo stack parte e il canale resta
     # fail-closed, cioè un difetto di provisioning travestito da bug della feature.
-    # Qui si guarda cosa il compose PRETENDE e lo si confronta con cosa c'è, PRIMA
-    # di toccare qualunque cosa: un segreto mancante costa dieci secondi adesso e
-    # una finestra di deploy dopo.
-    mancanti = _secrets_mancanti(repo)
-    if mancanti:
-        step(4, "preflight-secrets", "failed", ", ".join(mancanti))
-        die("segreti dichiarati dal compose ma assenti o VUOTI in secrets/:\n"
-            + "".join(f"  · {m}\n" for m in mancanti)
-            + "L'update non li genera (secrets/ è preservato di proposito).\n"
-            + "Rimedio: `bash setup.sh` li crea senza toccare quelli esistenti,\n"
-            + "oppure creali a mano — vedi secrets/README.md.")
+    #
+    # Non è ridondante col 6-bis, e non è «verde per costruzione» come sembra: i segreti
+    # `file:` sono letti all'AVVIO del container. Se il file viene cancellato a stack
+    # acceso, i container proseguono col valore già montato e il disco è vuoto — lo stack
+    # è su, il verde è falso, e non ripartirebbe al primo `up`. Questo è l'unico controllo
+    # che becca «il file è sparito dopo l'ultimo avvio». (Controesempio di b82df434 a
+    # setaccio: due argomenti indipendenti che convergono valgono più di uno ripetuto.)
+    # ⚠️ QUESTO CONTROLLO NON PUÒ FERMARE L'UPDATE — e il perché è la parte che conta.
+    # Guarda i compose ATTUALI, cioè il passato. Il suo valore non è impedire di andare
+    # avanti: è dire che **la rete di rollback è bucata** — se l'update fallisce e si
+    # torna indietro, il compose vecchio pretende un segreto che non c'è più. È il
+    # momento in cui la rete ti serve ed è proprio quello in cui scopri che non c'è.
+    # Se invece facesse `die` sarebbe un LOCK-OUT: segreto X cancellato dal disco a
+    # stack acceso (i container l'hanno già montato, nessuno se ne accorge) + release
+    # che RIMUOVE X dal compose ⇒ l'unica release che elimina il problema diventa
+    # l'unica che non puoi installare. **Un controllo che decide sul passato non deve
+    # poter bloccare il futuro.** (Forma trovata da setaccio; è la stessa che ci ha
+    # fatto scegliere la posizione del controllo fatale — vedi step 6-bis.)
+    #
+    # ⚠️ NON scrive uno status nuovo nel progress, e non è pignoleria: `update_progress.json`
+    # è letto da DUE pannelli (`admin.py:988` e `miniapp.py:981-987`) che hanno una whitelist
+    # implicita — conoscono solo running/failed/ok/rolled_back. Uno status `warn` in
+    # admin.py cade nel ramo `else` → **pallino rosso** su un update che sta andando bene,
+    # e fa mancare la condizione `p.status === 'running'` che tiene vivo il polling →
+    # **il pannello si congela** mentre l'update prosegue. Un avviso scritto per informare
+    # avrebbe raccontato un guasto e poi smesso di parlare. Chi scrive il produttore di un
+    # file vede il campo, non la whitelist che sta dall'altra parte.
+    step(4, "preflight-secrets")
+    try:
+        rollback_bucato = _secrets_mancanti(_compose_sorgenti(repo, repo), repo)
+    except FileNotFoundError as exc:
+        # Qui il compose base è quello INSTALLATO: se manca, la macchina ha un problema
+        # più grande di questo update — ma non è questo controllo a doverlo decidere,
+        # perché è il ramo non-fatale. Si dice e si prosegue: sarà lo stage-check a
+        # fermarsi, con più contesto di quanto ne abbia il pre-flight.
+        warn(f"pre-flight rollback non eseguibile: {exc}")
+        rollback_bucato = []
+    if rollback_bucato:
+        warn("la rete di ROLLBACK è bucata — segreti che la configurazione ATTUALE "
+             "pretende e che mancano o sono vuoti in secrets/:\n"
+             + "".join(f"  · {m}\n" for m in rollback_bucato)
+             + "L'update prosegue (questo non è un motivo per non andare avanti), ma se "
+               "fallisse, il ritorno alla versione precedente troverebbe questi buchi.")
 
     # 5 — fetch + verifica bundle
     step(5, "fetch")
@@ -1421,6 +1587,102 @@ def cmd_update(repo: Path, args) -> int:
                 new_argv.append("--no-require-cosign")
             os.execv(INSTALLED_CLI, new_argv)
 
+    # 6-bis — PRE-FLIGHT DEI SEGRETI SUL COMPOSE CHE SI STA INSTALLANDO (fatale).
+    #
+    # PERCHÉ ESISTE: il 20/07 l'update alla 0.40.0 è fallito perché la release
+    # introduceva un segreto nuovo e nessun controllo se n'è accorto — lo stack non
+    # è partito, health-gate rosso, rollback riuscito. Il controllo dei segreti
+    # c'era già (step 4), ma legge i compose ATTUALI: **quando gira, il file che
+    # dovrebbe controllare non è ancora sul disco.** Non guardava la riga sbagliata,
+    # stava nel posto sbagliato — ed è per questo che, letto da solo, sembrava corretto.
+    #
+    # PERCHÉ QUI E NON PRIMA DEL SELF-UPDATE (la scelta costata tre giri fra noi):
+    # non perché «altrimenti girerebbe la logica vecchia» — **quello è falso**, il
+    # re-exec rientra in cmd_update dallo step 1 e il controllo nuovo girerebbe
+    # comunque. La ragione vera è il LOCK-OUT DA FORMATO: prima del re-exec sarebbe
+    # il parser della release N a leggere il compose della N+1; se la N+1 cambia il
+    # formato del blocco `secrets:`, il parser vecchio cade nel ramo «non ho saputo
+    # leggere» e fa die ⇒ **non puoi più installare la release che contiene il parser
+    # che lo capirebbe**, e se ne esce solo a mano. Qui invece parser e compose sono
+    # sempre della stessa epoca. Il prezzo è restare con CLI nuova + stack vecchio se
+    # questo controllo muore — ma quello stato **si auto-guarisce** (rilanci l'update:
+    # la CLI nuova col controllo nuovo ti dice cosa creare) ed è già l'esito normale
+    # di ogni rollback riuscito, perché _rollback_routine non tocca la CLI.
+    # ⇒ Il criterio non è «quale sbaglia meno spesso» ma «quale sbaglia in modo
+    #    recuperabile»: un difetto che si ripara da solo batte uno che richiede l'uomo.
+    #
+    # ⚠️ FUORI dal blocco `if not args.skip_self_update`: al 6-bis si arriva per TRE
+    # rami — con --skip-self-update (cioè il secondo passaggio dopo il re-exec, il
+    # caso NORMALE), con la CLI del bundle identica a quella installata, e quando la
+    # CLI gira da un path diverso da INSTALLED_CLI. Indentare queste righe di un
+    # livello le renderebbe morte proprio nel ramo che conta.
+    # Limite DICHIARATO: nel terzo ramo (uso da sviluppatore, `python3 repo/tools/…`)
+    # il codice che esegue può essere di un'epoca diversa dal bundle. Non è coperto e
+    # non va coperto — ma va detto qui, o qualcuno lo scoprirà come se fosse un bug.
+    step(6, "preflight-secrets-bundle")
+    # `_compose_sorgenti` SOLLEVA se il compose base manca nel bundle (difetto (d): un
+    # bundle incompleto non deve diventare un verde). Va catturata qui, o l'eccezione
+    # uscirebbe come stack trace **senza scrivere lo step `failed`**: il pannello
+    # resterebbe appeso su «running» per sempre, e chi guarda da lì vedrebbe un update
+    # in corso che non esiste più. Un errore che non sa raccontarsi è mezzo errore in più.
+    try:
+        sorgenti = _compose_sorgenti(bundle, repo)
+    except FileNotFoundError as exc:
+        step(6, "preflight-secrets-bundle", "failed", str(exc))
+        die(f"bundle v{target} incompleto: {exc}\n"
+            "Niente è stato toccato. Rilancia l'update: il bundle viene riscaricato.")
+    mancanti = _secrets_mancanti(sorgenti, repo)
+    if mancanti:
+        step(6, "preflight-secrets-bundle", "failed", ", ".join(mancanti))
+        # ⚠️ IL RIMEDIO PUÒ FABBRICARE UN GUASTO PEGGIORE DI QUELLO CHE CURA (setaccio,
+        # misurato su setup.sh). I segreti NON hanno tutti la stessa natura: alcuni sono
+        # valori casuali (gateway_secret, archive_desc_secret, oauth_signing_secret),
+        # uno è derivato da una password scelta (admin_password_bcrypt), altri sono
+        # rilasciati da un servizio esterno e **nessun valore generato è valido**
+        # (telegram_bot_token, cloudflared_token). Un messaggio che desse un solo comando
+        # «genera 32 byte casuali» applicato a un token produrrebbe un file pieno e
+        # sbagliato: **il pre-flight tornerebbe VERDE, lo stack partirebbe, e il servizio
+        # non risponderebbe** — con la differenza che a quel punto nessun controllo può
+        # più accorgersene, perché il file c'è e non è vuoto. Il difetto ② non si chiude
+        # togliendo `setup.sh`: si chiude non dando un comando che l'utente possa
+        # applicare al segreto sbagliato. Quindi la domanda viene PRIMA del comando, e il
+        # comando è esplicitamente condizionato. Non si tiene qui una tabella nome→natura:
+        # sarebbe l'ennesima lista scritta a mano che invecchia in silenzio — la natura
+        # sta in `secrets/README.md`, accanto al segreto che descrive.
+        righe = []
+        for m in mancanti:
+            nome = m.split(" → ")[0].strip()
+            perche = SEGRETI_NON_GENERABILI.get(nome)
+            if perche:
+                # ⚠️ per questi NON si stampa nessun comando: chi legge alle 23 con lo
+                # stack fermo copia la riga sotto il proprio nome, non la nota in coda.
+                righe.append(f"  · {m}\n      ⛔ NON generarlo con un valore casuale: è un "
+                             f"{perche}.\n         Un valore casuale qui dà un file pieno e "
+                             f"SBAGLIATO: lo stack parte,\n         questo controllo torna verde, "
+                             f"e il guasto si vede solo all'uso.\n")
+            elif nome in SEGRETI_GENERABILI:
+                percorso = m.split(" → ")[1].split("   [")[0].lstrip("./")
+                righe.append(f"  · {m}\n      → valore casuale, generalo:\n"
+                             f"         (umask 077; openssl rand -hex 32 > {percorso})\n")
+            else:
+                # segreto che nessuna delle due liste conosce: si DICE che non si sa,
+                # invece di indovinare. Il test che tiene sincronizzate le liste col
+                # compose dovrebbe impedirlo — questo ramo è la rete sotto quel test.
+                righe.append(f"  · {m}\n      ⚠️ natura non classificata: NON generarlo a caso, "
+                             f"vedi secrets/README.md.\n")
+        die(f"la release v{target} dichiara segreti che in secrets/ mancano o sono VUOTI:\n"
+            + "".join(righe)
+            + "\nLo stack NON partirebbe. L'update si ferma qui: niente è stato toccato\n"
+            + "(nessun backup, nessuna immagine scaricata, stack e dati intatti).\n"
+            + "L'update non genera i segreti da sé: `secrets/` è preservato di proposito.\n"
+            + "Un file creato con un valore della natura sbagliata NON viene intercettato\n"
+            + "da questo controllo: qui si verifica che il file ci sia e non sia vuoto,\n"
+            + "non che contenga quella cosa lì.\n"
+            + "\nPoi rilancia l'update: `vps1777 update`. Nessun valore passa dalla rete.\n"
+            + "⛔ NON lanciare `setup.sh` per questo: è l'installatore completo e su una\n"
+            + "   macchina viva fa molto più che creare un file.")
+    ok(f"segreti richiesti da v{target}: tutti presenti")
+
     # 7 — backup (age) + snapshot locale
     step(7, "backup")
     try:
@@ -1431,6 +1693,16 @@ def cmd_update(repo: Path, args) -> int:
         die(f"backup fallito — stack intatto, update annullato: {exc}")
 
     # 8 — stage-check sui file del bundle
+    # ⚠️ QUESTA LISTA È INCOMPLETA, ed è dichiarato: `compose_cmd` (r.415-421) monta
+    # anche un overlay per ogni feature attiva, e `backup` è in DEFAULT_FEATURES ⇒ lo
+    # stage-check valida MENO compose di quanti lo stack ne monterà. Terza copia della
+    # stessa regola, dopo `compose_cmd` e `_compose_sorgenti` (r.1230): quest'ultima
+    # esiste apposta per derivarla, e usarla QUI cambierebbe cosa viene validato — un
+    # secondo fix, tenuto fuori dalla 0.40.1 di proposito. Registrato nel ledger come
+    # follow_up di `ops.preflight-secrets-bundle` con `rivedi_dopo: 2026-09-30`.
+    # Sta scritto qui e non solo là perché **chi legge questo punto non passa dalla
+    # docstring di un'altra funzione** (rilievo di setaccio): un'informazione che esiste
+    # nel file ma non dove serve è un'informazione che non c'è.
     step(8, "stage-check")
     profile = ingress_profile(repo)
     staged = [bundle / "compose.yaml", bundle / f"compose.{profile}.yaml"]

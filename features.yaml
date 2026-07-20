@@ -664,20 +664,104 @@ features:
       file_contains: {path: services/gateway/app/routes.py, pattern: "internal/archive/description"}
 
   - id: ops.preflight-secrets
-    nome: "Pre-flight dei segreti nell'update"
-    cosa: "Prima di toccare qualunque cosa, l'update confronta i segreti che il compose
-           PRETENDE con quelli presenti e si ferma dicendo quali mancano. Serve perché
-           setup.sh gira solo all'installazione da zero e `secrets/` è preservato: una
-           release che introduce un segreto nuovo lo troverebbe assente, lo stack non
-           partirebbe e il sintomo sembrerebbe una release rotta. Un file VUOTO conta come
-           mancante (peggio: lo stack parte e il canale resta muto). L'elenco si legge dal
-           compose, non da una lista nel codice — una lista andrebbe aggiornata a ogni
-           segreto nuovo, ed è la dimenticanza che il controllo previene."
-    dove: ["tools/vps1777.py#_secrets_mancanti"]
+    nome: "Pre-flight dei segreti: la rete di ROLLBACK (avviso, mai fatale)"
+    cosa: "⚠️ QUESTA VOCE DICEVA IL FALSO fino alla 0.40.1, ed è il caso da ricordare:
+           prometteva che l'update «confronta i segreti che il compose PRETENDE e si
+           ferma», mentre leggeva i compose ATTUALI uno step prima che quello della
+           release esistesse sul disco. Ogni parola era vera della riga, e la protezione
+           dichiarata non esisteva. Il 20/07 la 0.40.0 è fallita esattamente lì.
+           Da 0.40.1 questo controllo ha un compito diverso e onesto: guarda i compose
+           ATTUALI per dire che la rete di ROLLBACK è bucata — se l'update fallisse, il
+           ritorno indietro non troverebbe quei segreti. NON è fatale, e non può esserlo:
+           una release che RIMUOVE un segreto già cancellato sarebbe l'unica che non
+           puoi installare. Becca un caso che nessun altro controllo becca: il file
+           cancellato a stack acceso (i container hanno il valore già montato, il disco
+           è vuoto, lo stack è su e non ripartirebbe).
+           Non scrive status nuovi nel progress: `update_progress.json` è letto da due
+           pannelli con una whitelist implicita, e uno status fuori lista dà pallino
+           rosso + polling congelato su un update sano."
+    dove: ["tools/vps1777.py#_secrets_mancanti", "tools/vps1777.py#_compose_sorgenti"]
     status: active-default
     since: "0.40.0"
+    decisione: "declassato da fatale ad avviso in 0.40.1 — il `die` sta solo su
+                ops.preflight-secrets-bundle, che guarda il futuro invece del passato"
     verify:
       file_contains: {path: tools/vps1777.py, pattern: "def _secrets_mancanti"}
+
+  - id: ops.preflight-secrets-bundle
+    nome: "Pre-flight dei segreti sulla RELEASE che si sta installando (fatale)"
+    cosa: "Step 6-bis: dopo il self-update della CLI e prima del backup, confronta i
+           segreti dichiarati dai compose DEL BUNDLE con i file presenti in secrets/ del
+           repo, e ferma l'update se ne manca uno. È l'unico punto che può fermare
+           l'update, ed è il fix del rosso del 20/07.
+           ⚠️ POSIZIONE VINCOLANTE — dopo il re-exec, e non prima: prima sarebbe il
+           parser della release N a leggere il compose della N+1, e un cambio di formato
+           del blocco `secrets:` impedirebbe di installare proprio la release che
+           contiene il parser capace di leggerlo (LOCK-OUT, se ne esce a mano). Il prezzo
+           è restare con CLI nuova + stack vecchio, che si auto-guarisce rilanciando
+           l'update ed è già l'esito normale di ogni rollback riuscito.
+           Criterio generale: fra due difetti vince quello che si ripara da solo.
+           ⚠️ Va FUORI dal blocco `if not args.skip_self_update`: al 6-bis si arriva per
+           tre rami. Indentarlo di un livello lo renderebbe morto nel ramo normale.
+           I compose si DERIVANO da `_compose_sorgenti` (base + overlay ingress + overlay
+           delle feature attive), mai da una lista scritta a mano: il 20/07 tre difetti
+           avevano tutti la forma «un posto sa che i file sono N, un altro ne guarda M».
+           Un bundle senza compose base SOLLEVA: «non ho trovato il file» non è «non c'è
+           niente da segnalare». Vuoto = vuoto DOPO strip (un file con solo «\\n» è 1 byte
+           e passava per pieno)."
+    dove: ["tools/vps1777.py#cmd_update", "tools/vps1777.py#_compose_sorgenti"]
+    status: active-default
+    since: "0.40.1"
+    follow_up:
+      manuale:
+        cosa: "Lo step 8 (stage-check) costruisce ancora la lista dei compose a mano, e
+               `compose_cmd` applica la stessa regola una seconda volta: sono DUE
+               derivazioni della stessa cosa, non una. Non sono sostituibili (compose_cmd
+               produce anche i profili e NON filtra i file assenti), quindi unificarle è
+               un cambio di comportamento, non un refactor: fuori dalla 0.40.1 di
+               proposito. Chi tocca una deve toccare l'altra."
+        rivedi_dopo: "2026-09-30"
+    verify:
+      file_contains: {path: tools/vps1777.py, pattern: "preflight-secrets-bundle"}
+
+  - id: ops.secrets-natura
+    nome: "La natura di un segreto, perché il rimedio non fabbrichi un guasto peggiore"
+    cosa: "I segreti non hanno tutti la stessa natura: alcuni sono valori casuali, uno è
+           l'hash bcrypt di una password scelta, altri sono token rilasciati da un
+           servizio esterno. Un messaggio d'errore che desse un solo comando «genera 32
+           byte casuali» applicato a `telegram_bot_token` o `admin_password_bcrypt`
+           produrrebbe un file PIENO e SBAGLIATO ⇒ il pre-flight tornerebbe verde, lo
+           stack partirebbe, e il guasto si vedrebbe solo all'uso — quando nessun
+           controllo può più accorgersene, perché il file c'è e non è vuoto.
+           Perciò il comando compare SOLO sotto il segreto a cui si applica, e per i non
+           generabili non compare affatto.
+           ⚠️ Sono liste scritte a mano — ciò che questa release toglie di mezzo altrove.
+           Restano solo perché NON POSSONO INVECCHIARE IN SILENZIO: un test le confronta
+           coi segreti realmente dichiarati nei compose e fallisce su uno non
+           classificato. Stesso patto di questo ledger: non «ricordarsi di aggiornare»,
+           ma non poter dimenticare senza che qualcosa diventi rosso."
+    dove: ["tools/vps1777.py#SEGRETI_NON_GENERABILI", "tools/vps1777.py#SEGRETI_GENERABILI"]
+    status: active-default
+    since: "0.40.1"
+    verify:
+      file_contains: {path: tools/vps1777.py, pattern: "SEGRETI_NON_GENERABILI"}
+
+  - id: ci.cli-tests
+    nome: "La suite della CLI gira in CI"
+    cosa: "`tools/tests/` era l'unica suite del repo che nessun workflow lanciava: dieci
+           test verdi sul componente che esegue gli update in PRODUZIONE, che non hanno
+           mai protetto niente. Trovato il 20/07 mentre si stavano per aggiungere altri
+           dieci test allo stesso posto. Un test che non gira non è una verifica: è un
+           commento con le parentesi.
+           Nella stessa release è emerso il gemello: un test che asseriva la STRINGA
+           `st_size == 0` invece della proprietà «un segreto vuoto conta come mancante»
+           rendeva quel difetto permanente — chi avesse corretto la riga avrebbe visto
+           rosso e concluso di aver sbagliato."
+    dove: [".github/workflows/ci.yml", "tools/tests/test_vps1777.py"]
+    status: active-default
+    since: "0.40.1"
+    verify:
+      file_contains: {path: .github/workflows/ci.yml, pattern: "tools/tests/"}
 
   - id: archive.ts-source
     nome: "ts_source: il regime del dato, promosso da nota a schema"

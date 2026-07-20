@@ -129,12 +129,34 @@ def test_update_ha_un_preflight_sui_segreti():
     setup.sh e `secrets/` è preservato, quindi un segreto NUOVO non arriverebbe
     mai. Proposto da b82df434 come fix di classe: il prossimo segreto che
     aggiungeremo avrebbe ripetuto lo stesso guasto.
+
+    ⚠️ 20/07 — QUESTO TEST PROTEGGEVA UN DIFETTO. Pretendeva la stringa `st_size == 0`
+    nel sorgente, cioè **un'implementazione** invece della proprietà che il suo stesso
+    commento dichiarava («un segreto VUOTO deve contare come mancante»). E `st_size == 0`
+    non implementa quella proprietà: un file con solo «\n» è 1 byte, quindi PIENO per il
+    codice e vuoto per chiunque altro (riprodotto su banco da b82df434). Un test che
+    asserisce la forma della riga rende quella riga **immodificabile** e quindi rende il
+    difetto permanente: chi l'avesse corretta avrebbe visto un test rosso e concluso di
+    aver sbagliato. Ora si asserisce la proprietà, e il comportamento è verificato
+    davvero — eseguendo la funzione — in `tools/tests/test_vps1777.py`, che dal 20/07 gira
+    in CI (prima non lo faceva: dieci test verdi che nessuno lanciava).
     """
     src = (Path(__file__).resolve().parents[3] / "tools" / "vps1777.py").read_text(encoding="utf-8")
     assert "_secrets_mancanti" in src, "manca il pre-flight dei segreti nell'update"
     assert "preflight-secrets" in src, "il pre-flight non è uno step tracciato"
+    # Il controllo FATALE guarda il compose che si sta INSTALLANDO, non quello attuale:
+    # è il rosso del 20/07 (la 0.40.0 è fallita perché il pre-flight girava uno step
+    # prima che il compose nuovo esistesse sul disco).
+    assert "preflight-secrets-bundle" in src, "manca il pre-flight sul compose del bundle"
+    assert "_secrets_mancanti(sorgenti, repo)" in src, \
+        "il controllo fatale deve leggere le sorgenti del BUNDLE e cercare i file nel repo"
     # legge il compose, NON una lista scritta a mano: una lista andrebbe
     # aggiornata a ogni segreto nuovo, ed è proprio la dimenticanza che previene.
-    fn = src[src.index("def _secrets_mancanti"):src.index("def cmd_update")]
+    fn = src[src.index("def _compose_sorgenti"):src.index("def cmd_update")]
     assert "compose.yaml" in fn, "la lista dei segreti va letta dal compose, non hardcodata"
-    assert "st_size == 0" in fn, "un segreto VUOTO deve contare come mancante"
+    # PROPRIETÀ, non implementazione: «vuoto» deve essere vuoto-dopo-strip. Se un giorno
+    # lo si scrive in un altro modo corretto, questo test non deve ostacolarlo — ma
+    # `st_size == 0` da solo non basta più, ed è quello che va impedito.
+    assert ".strip()" in fn, "un segreto con solo spazi/newline deve contare come VUOTO"
+    # il rimedio non deve rimandare all'installatore completo su una macchina viva
+    assert "NON lanciare `setup.sh`" in src, "il rimedio non deve consigliare setup.sh"
