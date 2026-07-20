@@ -13,6 +13,10 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
+import json
+import urllib.request
+import urllib.error
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -344,20 +348,66 @@ def describe() -> list[dict[str, Any]]:
 
 
 def set_description(db: str, description: str) -> dict[str, Any]:
-    """Imposta/aggiorna la descrizione di un DB (scheda `meta`, D5).
+    """Imposta la descrizione di un archivio — **inoltrandola al gateway** (D9).
 
-    È l'UNICA scrittura ammessa da questo layer — ogni altra apertura è
-    `mode=ro`. Qui si apre in scrittura, e si tocca solo `meta['description']`:
-    i messaggi non si scrivono mai da MCP."""
+    Perché non scrive qui: questo container monta il volume degli archivi in
+    SOLA LETTURA, per scelta deliberata (`compose.yaml`: «a scrivere i .db è il
+    gateway, non questo servizio»). Fino al 20/07/2026 questa funzione apriva
+    comunque il DB in scrittura e la docstring dichiarava «è l'UNICA scrittura
+    ammessa da questo layer»: due affermazioni entrambe vere, ognuna nel suo
+    file, che insieme mentivano — il tool prometteva una scrittura che il suo
+    container non poteva fare, e chi lo chiamava riceveva
+    `attempt to write a readonly database`.
+
+    L'inoltro non è un'architettura nuova: la docstring di `set_meta` nel gateway
+    dichiarava GIÀ «la usano l'upload (admin) e il tool MCP set_description».
+    Era il pezzo che qualcuno aveva dato per esistente e che non era mai stato
+    scritto.
+
+    Il canale è quello di casa (`/internal/*` + `x-vps1777-internal`), sulla rete
+    interna. Gli errori risalgono parlanti: chi chiama deve sapere *perché* non
+    ha scritto, non ricevere un silenzio.
+    """
     _maybe_reload()
     if db not in _DBS:
         raise KeyError(f"DB '{db}' non disponibile. Disponibili: {available_dbs()}")
-    conn = sqlite3.connect(str(_DBS[db]))
+
+    base = os.environ.get("GATEWAY_INTERNAL_BASE", "http://gateway:8080").rstrip("/")
+    secret = _leggi_segreto()
+    if not secret:
+        # fail-closed e PARLANTE: senza segreto la scrittura non parte, e chi
+        # chiama lo scopre subito invece di credere di aver scritto.
+        raise RuntimeError(
+            "set_description non configurata: manca il segreto interno "
+            "(GATEWAY_SECRET/GATEWAY_SECRET_FILE) — la scrittura passa dal gateway."
+        )
+    req = urllib.request.Request(
+        f"{base}/internal/archive/description",
+        data=json.dumps({"db": db, "description": str(description)}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-vps1777-internal": secret},
+        method="POST",
+    )
     try:
-        conn.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
-        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('description', ?)",
-                     (str(description),))
-        conn.commit()
-    finally:
-        conn.close()
-    return {"db": db, "description": str(description)}
+        with urllib.request.urlopen(req, timeout=30) as r:
+            esito = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as ex:
+        corpo = ex.read().decode("utf-8", "replace")[:200]
+        raise RuntimeError(f"il gateway ha rifiutato la scrittura ({ex.code}): {corpo}") from ex
+    except urllib.error.URLError as ex:
+        raise RuntimeError(f"gateway non raggiungibile per la scrittura: {ex.reason}") from ex
+    return {"db": db, "description": str(description), "via": "gateway", "esito": esito}
+
+
+def _leggi_segreto() -> str:
+    """Il segreto interno, da variabile o da file (come fa il gateway)."""
+    v = os.environ.get("GATEWAY_SECRET", "").strip()
+    if v:
+        return v
+    p = os.environ.get("GATEWAY_SECRET_FILE", "").strip()
+    if p:
+        try:
+            return Path(p).read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+    return ""
+
