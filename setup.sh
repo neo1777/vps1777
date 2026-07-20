@@ -4,7 +4,7 @@
 # Cosa fa:
 #   1. Controlla Docker + Compose v2 + python3
 #   2. Crea .env da .env.example (chiedendoti email admin, OWNER_ID, ingress scelto)
-#   3. Genera secrets/* (gateway_secret, oauth_signing, admin_password bcrypt)
+#   3. Genera secrets/* (gateway_secret, archive_desc_secret, oauth_signing, admin_password bcrypt)
 #   4. Avvia `docker compose --profile ingress.<scelto> up -d`
 #
 # Idempotente: rilanciabile, salta lo step se già fatto.
@@ -146,6 +146,25 @@ chmod 700 var secrets backups onboarding
 log "Genero secrets in secrets/..."
 
 gen_random() { python3 -c "import secrets; print(secrets.token_urlsafe($1))"; }
+
+# archive_desc_secret — canale set_description (archive-mcp → gateway, D9).
+# DELIBERATAMENTE separato da gateway_secret: quello apre anche /internal/nlm/*
+# (stato e installazione dei profili NotebookLM), e una feature che scrive un
+# campo di testo non deve portarsi dietro quel potere. Privilegio minimo anche
+# fra i nostri servizi.
+# ⚠️ Senza questo file il compose non parte (secret dichiarato ma assente) →
+# health-gate rosso → auto-rollback: la release sembrerebbe rotta quando manca
+# solo un file. E un file VUOTO sarebbe peggio: lo stack partirebbe e il canale
+# resterebbe fail-closed, cioè un difetto di provisioning travestito da bug del
+# codice. Per questo si genera qui, accanto agli altri, con lo stesso `-s` che
+# rende il blocco idempotente sulle installazioni che ce l'hanno già.
+if [ ! -s secrets/archive_desc_secret.txt ]; then
+  gen_random 24 > secrets/archive_desc_secret.txt
+  chmod 600 secrets/archive_desc_secret.txt
+  ok "archive_desc_secret.txt generato"
+else
+  ok "archive_desc_secret.txt già presente"
+fi
 
 if [ ! -s secrets/gateway_secret.txt ]; then
   gen_random 24 > secrets/gateway_secret.txt
