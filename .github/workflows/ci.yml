@@ -92,6 +92,13 @@ jobs:
         run: uvx pytest services/gateway/tests/ -v
       - name: Test archive-mcp FTS (stdlib-only)
         run: uvx pytest services/archive-mcp/tests/ -v
+      # La CLI è il componente che fa gli update in PRODUZIONE, ed era l'unico con
+      # una suite che nessuno lanciava: 10 test verdi che non hanno mai protetto
+      # niente. Trovato il 20/07 scrivendo i test del pre-flight — cioè stavo per
+      # aggiungerne altri dieci allo stesso posto. Un test che non gira non è una
+      # verifica: è un commento con le parentesi.
+      - name: Test CLI vps1777 (stdlib-only)
+        run: uvx pytest tools/tests/ -v
 
   build:
     runs-on: ubuntu-latest

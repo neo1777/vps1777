@@ -128,6 +128,218 @@ def test_compose_cmd_reflects_declared_state():
     assert not any("ops." in x for x in v.compose_cmd(_repo_env("VPS1777_FEATURES=none\n")))
 
 
+# ────────────── pre-flight dei segreti: il ROSSO del 20/07 (release 0.40.1) ──
+#
+# Il difetto: `_secrets_mancanti` girava allo step 4 leggendo i compose ATTUALI,
+# mentre il compose della release arriva col bundle allo step 5 — **quando girava,
+# il file che doveva controllare non era ancora sul disco**. La 0.40.0 è fallita
+# così: stack non partito, rollback riuscito. Non guardava la riga sbagliata, stava
+# nel posto sbagliato: ed è per questo che letta da sola sembrava corretta.
+
+def _installazione(env: str = "INGRESS_PROFILE=ingress.tailscale\n",
+                   segreti: dict[str, str] | None = None) -> Path:
+    """Un finto repo installato: `.env` + `secrets/` popolata."""
+    d = Path(tempfile.mkdtemp())
+    (d / ".env").write_text(env)
+    (d / "secrets").mkdir()
+    for nome, contenuto in (segreti or {}).items():
+        (d / "secrets" / nome).write_text(contenuto)
+    return d
+
+
+def _compose_con(*nomi: str) -> str:
+    corpo = "services:\n  x:\n    image: y\n\nsecrets:\n"
+    for n in nomi:
+        corpo += f"  {n}:\n    file: ./secrets/{n}.txt\n"
+    return corpo
+
+
+def test_secrets_dichiarazione_dallo_staging_file_dal_repo():
+    # LA TRAPPOLA (vista da setaccio sul codice, prima che fosse scritto): i due
+    # argomenti servono a scopi diversi. Passare il bundle anche come radice dei
+    # FILE cercherebbe i segreti in bundle/secrets/ — che non esiste — e direbbe
+    # che mancano TUTTI: un rosso totale, credibilissimo, su una funzione nata per
+    # essere creduta. Qui si dimostra che dichiarazione e file restano separati.
+    repo = _installazione(segreti={"alfa.txt": "v"})
+    bundle = Path(tempfile.mkdtemp())
+    (bundle / "compose.yaml").write_text(_compose_con("alfa"))
+    # dichiarazione dal bundle, file dal repo → il segreto c'è, nessuna mancanza
+    assert v._secrets_mancanti([bundle / "compose.yaml"], repo) == []
+    # la trappola: stessa dichiarazione, ma radice-file sbagliata → falso rosso totale
+    assert len(v._secrets_mancanti([bundle / "compose.yaml"], bundle)) == 1
+
+
+def test_secrets_release_che_introduce_un_segreto_e_fatale():
+    # IL CASO CHE HA FATTO FALLIRE LA 0.40.0, in miniatura: il compose ATTUALE non
+    # dichiara `nuovo`, quello del BUNDLE sì, e il file non c'è. Il vecchio controllo
+    # (compose attuale) diceva verde; questo lo vede.
+    repo = _installazione(segreti={"vecchio.txt": "v"})
+    (repo / "compose.yaml").write_text(_compose_con("vecchio"))
+    bundle = Path(tempfile.mkdtemp())
+    (bundle / "compose.yaml").write_text(_compose_con("vecchio", "nuovo"))
+    assert v._secrets_mancanti(v._compose_sorgenti(repo, repo), repo) == []      # il vecchio: verde
+    fuori = v._secrets_mancanti(v._compose_sorgenti(bundle, repo), repo)         # il nuovo: rosso
+    assert len(fuori) == 1 and "nuovo" in fuori[0]
+
+
+def test_secrets_release_che_toglie_un_segreto_passa():
+    # N10 (b82df434) / caso-limite di setaccio: una release che RIMUOVE un segreto il
+    # cui file è già sparito deve poter essere installata. Se il codice la blocca è
+    # rotto: sarebbe il falso positivo speculare al falso verde del 20/07 — l'unica
+    # release che elimina il problema diventa l'unica che non puoi installare.
+    repo = _installazione(segreti={"resta.txt": "v"})          # `orfano.txt` NON c'è
+    (repo / "compose.yaml").write_text(_compose_con("resta", "orfano"))
+    bundle = Path(tempfile.mkdtemp())
+    (bundle / "compose.yaml").write_text(_compose_con("resta"))
+    assert v._secrets_mancanti(v._compose_sorgenti(bundle, repo), repo) == []    # update legittimo
+    # …ma il 4-bis lo dice lo stesso, perché la rete di rollback è davvero bucata:
+    assert len(v._secrets_mancanti(v._compose_sorgenti(repo, repo), repo)) == 1
+
+
+def test_secrets_file_vuoto_conta_come_mancante():
+    # Un file vuoto è peggio di uno assente: lo stack parte e il canale resta
+    # fail-closed — un difetto di provisioning travestito da bug della feature.
+    repo = _installazione(segreti={"a.txt": ""})
+    (repo / "compose.yaml").write_text(_compose_con("a"))
+    assert len(v._secrets_mancanti([repo / "compose.yaml"], repo)) == 1
+
+
+def test_secrets_guarda_gli_overlay_non_solo_il_compose_base():
+    # DIFETTO (c), b82df434: il pre-flight guardava UN file, lo stack ne monta DUE.
+    # `compose.ingress.cloudflared.yaml` dichiara davvero un segreto (r.44 del reale).
+    repo = _installazione(env="INGRESS_PROFILE=ingress.cloudflared\nVPS1777_FEATURES=none\n")
+    (repo / "compose.yaml").write_text(_compose_con("base"))
+    (repo / "compose.ingress.cloudflared.yaml").write_text(_compose_con("cloudflared_token"))
+    (repo / "secrets" / "base.txt").write_text("v")            # `cloudflared_token.txt` manca
+    fuori = v._secrets_mancanti(v._compose_sorgenti(repo, repo), repo)
+    assert len(fuori) == 1 and "cloudflared_token" in fuori[0]
+
+
+def test_secrets_guarda_anche_gli_overlay_delle_feature_attive():
+    # QUARTO DIFETTO (71d540e6): `compose_cmd` monta anche un overlay per ogni feature
+    # attiva, e `backup` è in DEFAULT_FEATURES ⇒ montato ORA su questa macchina. Lo
+    # step 8 ne passa due soli: prendere la sua lista come modello ne eredita il difetto.
+    # Perciò la lista si DERIVA da `_compose_sorgenti`, che è l'unico posto che la sa.
+    repo = _installazione(env="INGRESS_PROFILE=ingress.tailscale\nVPS1777_FEATURES=backup\n")
+    (repo / "compose.yaml").write_text(_compose_con("base"))
+    (repo / "compose.ops.backup.yaml").write_text(_compose_con("chiave_backup"))
+    (repo / "secrets" / "base.txt").write_text("v")
+    fuori = v._secrets_mancanti(v._compose_sorgenti(repo, repo), repo)
+    assert len(fuori) == 1 and "chiave_backup" in fuori[0]
+    # …e con la feature SPENTA quell'overlay non conta più: nessun falso rosso.
+    spento = _installazione(env="VPS1777_FEATURES=none\n", segreti={"base.txt": "v"})
+    (spento / "compose.yaml").write_text(_compose_con("base"))
+    (spento / "compose.ops.backup.yaml").write_text(_compose_con("chiave_backup"))
+    assert v._secrets_mancanti(v._compose_sorgenti(spento, spento), spento) == []
+
+
+def test_secrets_stesso_segreto_in_due_compose_si_dice_una_volta():
+    repo = _installazione(env="INGRESS_PROFILE=ingress.cloudflared\nVPS1777_FEATURES=none\n")
+    (repo / "compose.yaml").write_text(_compose_con("doppio"))
+    (repo / "compose.ingress.cloudflared.yaml").write_text(_compose_con("doppio"))
+    assert len(v._secrets_mancanti(v._compose_sorgenti(repo, repo), repo)) == 1
+
+
+def test_secrets_formato_illeggibile_segnala_invece_di_tacere():
+    # La guardia contro il falso verde: sezione presente e piena, ma non ne esce
+    # nemmeno un nome ⇒ il formato è cambiato sotto di noi. Restituire [] sarebbe il
+    # falso verde in un'altra forma. (È anche la ragione per cui il controllo fatale
+    # sta DOPO il re-exec: questa guardia, messa prima, diventerebbe un lock-out —
+    # il parser vecchio non capirebbe il compose nuovo e impedirebbe di installare
+    # proprio la release che contiene il parser che lo capirebbe.)
+    repo = _installazione()
+    (repo / "compose.yaml").write_text("secrets:\n  qualcosa_che_non_capiamo: [1,2]\n")
+    fuori = v._secrets_mancanti([repo / "compose.yaml"], repo)
+    assert len(fuori) == 1 and "non ha saputo leggere" in fuori[0]
+
+
+def test_secrets_indentazione_a_quattro_spazi_resta_vista():
+    # Regressione del falso verde di b82df434: la prima versione pretendeva esattamente
+    # due spazi; con quattro — YAML altrettanto valido — non vedeva nulla e diceva
+    # «tutto a posto». Non falliva: diceva di sì.
+    repo = _installazione()
+    (repo / "compose.yaml").write_text(
+        "secrets:\n    tanto_indentato:\n        file: ./secrets/tanto_indentato.txt\n")
+    assert len(v._secrets_mancanti([repo / "compose.yaml"], repo)) == 1
+
+
+def test_secrets_vuoto_e_vuoto_dopo_strip_non_zero_byte():
+    # N5 / difetto (e), riprodotto su banco da b82df434 sulla base: `st_size == 0`
+    # lasciava passare un file con solo «\n» (1 byte) o con soli spazi. Chi riempie un
+    # segreto a mano con un editor lascia il newline. Lo stack parte, il canale resta
+    # fail-closed, e il sintomo sembra un bug della feature: cioè esattamente ciò che
+    # la docstring del pre-flight dichiarava di prevenire senza averlo mai fatto.
+    for contenuto, atteso_mancante in (("\n", True), ("   \n", True),
+                                       ("  \t \n", True), ("abc\n", False)):
+        repo = _installazione(segreti={"a.txt": contenuto})
+        (repo / "compose.yaml").write_text(_compose_con("a"))
+        fuori = v._secrets_mancanti([repo / "compose.yaml"], repo)
+        assert bool(fuori) is atteso_mancante, f"contenuto {contenuto!r}"
+
+
+def test_ogni_segreto_reale_ha_una_natura_dichiarata():
+    # IL PATTO CHE RENDE ACCETTABILE UNA LISTA SCRITTA A MANO: può invecchiare, ma non
+    # in silenzio. Se una release aggiunge un segreto e nessuno lo classifica, il
+    # messaggio d'errore non saprebbe se suggerire di generarlo — e suggerirlo a caso è
+    # il modo in cui un rimedio fabbrica un guasto peggiore di quello che cura
+    # (openssl rand su un token: file pieno, sbagliato, pre-flight verde).
+    # Stesso patto del ledger features.yaml: non «ricordarsi», ma non poter dimenticare.
+    classificati = v.SEGRETI_GENERABILI | set(v.SEGRETI_NON_GENERABILI)
+    reali = set()
+    for nome_file in ("compose.yaml", "compose.ingress.cloudflared.yaml"):
+        righe = (_ROOT / nome_file).read_text(encoding="utf-8").splitlines()
+        try:
+            start = next(n for n, r in enumerate(righe) if r.rstrip() == "secrets:")
+        except StopIteration:
+            continue
+        for r in righe[start + 1:]:
+            if r.strip() and not r[:1].isspace():
+                break
+            s = r.strip()
+            if s.endswith(":") and not s.startswith("#") and "file:" not in s:
+                reali.add(s[:-1])
+    assert reali, "nessun segreto letto dai compose: il test non sta misurando nulla"
+    non_classificati = reali - classificati
+    assert not non_classificati, (
+        f"segreti senza natura dichiarata: {sorted(non_classificati)} — vanno aggiunti a "
+        f"SEGRETI_GENERABILI o SEGRETI_NON_GENERABILI, altrimenti il rimedio del "
+        f"pre-flight non sa se può suggerire di generarli")
+
+
+def test_il_rimedio_non_suggerisce_mai_di_generare_un_segreto_non_generabile():
+    # N13 (b82df434), metà collaudabile: il messaggio non deve MAI accostare un comando
+    # generativo al nome di un segreto che non si può generare.
+    src = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
+    blocco = src[src.index("        righe = []"):src.index("    ok(f\"segreti richiesti")]
+    for nome in v.SEGRETI_NON_GENERABILI:
+        assert f"openssl rand -hex 32 > {nome}" not in blocco
+    # e il ramo generativo esiste solo dentro il caso `in SEGRETI_GENERABILI`
+    assert blocco.index("SEGRETI_NON_GENERABILI.get(nome)") < blocco.index("openssl rand"), \
+        "il caso non-generabile deve essere valutato PRIMA di stampare un comando"
+
+
+def test_compose_sorgenti_base_assente_solleva_invece_di_dire_verde():
+    # N6 / difetto (d): sulla base, nessun compose.yaml → [] = VERDE SILENZIOSO. Il ramo
+    # non scattava mai perché repo/compose.yaml esiste sempre — ma puntando ai path del
+    # BUNDLE (che è il fix) un fetch parziale lo rende raggiungibile: il fix
+    # introdurrebbe un nuovo modo di avere lo stesso falso verde che sta riparando.
+    vuota = Path(tempfile.mkdtemp())
+    repo = _installazione()
+    try:
+        v._compose_sorgenti(vuota, repo)
+        raise AssertionError("un bundle senza compose.yaml NON deve passare per verde")
+    except FileNotFoundError as exc:
+        assert "NON è un verde" in str(exc)
+
+
+def test_compose_sorgenti_ignora_i_file_che_non_esistono():
+    # Una release può non avere l'overlay di una feature attiva: non è una mancanza
+    # di segreti, è un file che non c'è. Deve essere saltato, non farci esplodere.
+    repo = _installazione(env="INGRESS_PROFILE=ingress.tailscale\nVPS1777_FEATURES=backup\n")
+    (repo / "compose.yaml").write_text(_compose_con("base"))
+    assert v._compose_sorgenti(repo, repo) == [repo / "compose.yaml"]
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
