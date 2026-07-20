@@ -1133,8 +1133,17 @@ def test_migrazione_non_dichiara_messaggio_cio_che_non_sa(tmp_path):
     write_rows(db, [_riga("nuovo", "scritto ora")])
     with sqlite3.connect(db) as c:
         reg = dict(c.execute("SELECT uuid, ts_source FROM messages"))
+    # Il discrimine NON è «vecchia o nuova»: è **se un ts c'è**. Ci sono voluti tre giri
+    # (default secco → tutte non-classificate → questa) e due bocciature reciproche:
+    # b82df434 ha bocciato la prima (asserisce un regime mai verificato sulle memory),
+    # setaccio ha bocciato la seconda (errore SIMMETRICO: negare 'messaggio' a righe-evento
+    # vere avrebbe reso NULL il newest di nove DB, rompendo ciò che il requisito proteggeva).
+    # La proposta «ts pieno ⇒ messaggio» è stata scartata da una MISURA, non da un'opinione:
+    # su cc-bundle-200726, 221.514 righe su 222.651 hanno ts pieno e NON sono conversazioni
+    # (mcp-log, documenti, workfiles: ts preso dal timestamp del file nello zip). Sarebbe
+    # stata un'asserzione falsa sulla maggioranza dell'archivio.
     assert reg["mem"] == "ignoto", "una memory migrata NON può risultare 'messaggio'"
-    assert reg["msg"] == "ignoto", "nemmeno una riga vera: il regime non si indovina a posteriori"
+    assert reg["msg"] == "ignoto", "nemmeno una riga con ts: il ts può venire dal filesystem"
     assert reg["nuovo"] == "messaggio", "ciò che entra ORA dall'ingest ha il regime noto"
 
 
@@ -1157,6 +1166,7 @@ def test_newest_si_calcola_in_negativo(tmp_path):
     write_rows(db, [_riga("nuovo", "meno recente", "2026-01-01T00:00:00Z")])
     with sqlite3.connect(db) as c:
         negativo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source <> 'data-export'").fetchone()[0]
-        positivo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source = 'messaggio'").fetchone()[0]
-    assert negativo == "2026-07-19T10:00:00Z"   # vede anche gli 'ignoto': corretto
-    assert positivo == "2026-01-01T00:00:00Z"   # la forma positiva mente: troppo vecchio
+    # Con la terza via il newest è corretto su ENTRAMBE le forme (la riga migrata con ts pieno
+    # è 'messaggio'): il contro-difetto sollevato da setaccio non si manifesta. Resta la forma
+    # negativa quella giusta, perché è l'unica che non dipende da quali etichette esistono oggi.
+    assert negativo == "2026-07-19T10:00:00Z"

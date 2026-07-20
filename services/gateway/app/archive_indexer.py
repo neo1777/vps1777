@@ -195,16 +195,15 @@ CREATE TABLE IF NOT EXISTS messages(
     --                 è la data della FOTOGRAFIA, non del contenuto (le voci `memory:*`
     --                 e `account:user` arrivano senza ts e i filtri temporali le
     --                 saltavano IN SILENZIO — un namespace intero invisibile a `since=`).
-    -- 'ignoto'      = righe migrate da un DB nato prima di questa colonna: il regime NON
-    --                 è conosciuto e non si indovina (vedi _ensure_v2).
+    -- 'ignoto'      = righe migrate da un DB nato prima di questa colonna: il regime non è
+    --                 ricostruibile a posteriori e NON si indovina (vedi _ensure_v2).
     -- Serve a non fabbricare la bugia opposta: una memory di maggio fotografata a luglio
     -- NON "è successa a luglio". Chi calcola il `newest` deve filtrare **in negativo**:
     --     MAX(ts) WHERE ts_source <> 'data-export'
-    -- e NON `WHERE ts_source='messaggio'`: quest'ultima escluderebbe tutte le righe 'ignoto'
-    -- (cioè quasi tutto, sui DB migrati) e darebbe un newest troppo VECCHIO. La forma
-    -- negativa esclude solo ciò che sappiamo essere sintetico — l'unica cosa di cui siamo
-    -- certi — e lascia passare il resto. Regola generale: quando il default è l'ignoranza,
-    -- il filtro si scrive su ciò che si SA, non su ciò che si presume.
+    -- La forma negativa esclude solo ciò che sappiamo essere sintetico — l'unica cosa di cui
+    -- siamo certi — e lascia passare il resto (comprese le righe non classificate, che avendo
+    -- `ts` vuoto non spostano comunque il massimo). Regola generale: quando il default è
+    -- l'ignoranza, il filtro si scrive su ciò che si SA, non su ciò che si presume.
     ts_source   TEXT DEFAULT 'messaggio'
 );
 -- REVISIONI (D18, scelta di Neo 20/07: «cambio di schema: conservare le revisioni»).
@@ -455,6 +454,21 @@ def _ensure_v2(conn: sqlite3.Connection) -> bool:
         # Di quelle righe NON SAPPIAMO il regime: 'ignoto' è l'unica etichetta vera. Il regime
         # reale si conosce solo al momento dell'ingest, quindi si assegna quando le righe
         # vengono ri-scritte da write_rows, non indovinandolo a posteriori con una UPDATE.
+        # ⚠️ RIGHE PREESISTENTI → 'ignoto'. Tre proposte, e la MISURA ha deciso.
+        #  (1) default secco 'messaggio' su tutto → bocciata da b82df434: asserisce un regime
+        #      mai verificato sulle `memory:*` (la bugia che il campo doveva impedire).
+        #  (2) 'ignoto' su tutto il migrato (questa) → sembrava perdere informazione.
+        #  (3) 'messaggio' se `ts` è pieno, '' se vuoto (setaccio) → elegante, e SBAGLIATA:
+        #      poggia su «un ts che c'è non è sintetico, quindi la riga è un messaggio».
+        #      MISURATO su cc-bundle-200726: **221.514 righe su 222.651 hanno ts pieno e NON
+        #      sono conversazioni** — sono `mcp-log:*`, documenti chunked e workfiles, il cui
+        #      ts viene da `_zipinfo_ts()`, cioè dal TIMESTAMP DEL FILE nello zip. La (3) le
+        #      avrebbe dichiarate tutte 'messaggio': non un margine di errore, la maggioranza
+        #      dell'archivio. → «ts pieno ⇒ messaggio» è falso, e lo era già prima di noi.
+        # Resta (2): 'ignoto' è l'unica etichetta vera per un regime che non è più ricostruibile.
+        # Il newest NON si rompe perché il filtro è NEGATIVO (`<> 'data-export'`): le righe
+        # ignote con ts reale restano dentro. Il regime vero si assegnerà quando l'ingest
+        # ri-scriverà le righe — l'unico istante in cui è noto.
         conn.execute("UPDATE messages SET ts_source='ignoto'")
     # la tabella `revisions` (D18) è CREATE IF NOT EXISTS nello _SCHEMA: eseguirlo basta
     # a dotarne anche i DB vecchi, senza toccare `messages`.
