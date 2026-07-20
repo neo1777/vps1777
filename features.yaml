@@ -718,6 +718,20 @@ features:
                   `compose_cmd`, che NON è unificabile senza cambiare il comportamento
                   di docker (produce anche i profili e non filtra i file assenti):
                   chi tocca una deve toccare l'altra."
+    collaudo_produzione: "21/07/2026 22:38:51→22:38:59Z — PROVATO SULLA MACCHINA VIVA,
+      eseguito da setaccio, fallimento controllato (`mv` di archive_desc_secret) lanciando
+      il SERVICE e non il comando, così da esercitare l'ambiente reale del timer.
+      Il journal mostra la severità differenziata nell'ordine giusto: `la rete di ROLLBACK
+      è bucata … L'update PROSEGUE` (4-bis, avviso, PRIMA del fetch) → scarico + sha256 +
+      firma cosign → `la release v0.40.2 dichiara segreti che mancano … si ferma qui`
+      (6-bis, fatale, DOPO). **`snapshots` 0 → 0: il backup non è mai partito**, che è
+      l'osservabile decisivo della POSIZIONE — un fix messo allo step 8 avrebbe dato lo
+      stesso messaggio avendo già pagato age+snapshot.
+      progress: `step 6 · preflight-secrets-bundle · failed · [ASSENTE · dichiarato in
+      compose.yaml]`; stack 5/5 healthy per tutta la prova, dati intatti, γ identico alla
+      baseline del mattino. Ripristino con `mv` + `trap EXIT INT TERM`: 33 byte, owner e
+      permessi identici alla baseline. Rilancio → `step 15 done ok`, VPS a 0.40.2.
+      ⇒ Da qui la voce NON è più «verificata solo su banco»."
     verify:
       file_contains: {path: tools/vps1777.py, pattern: "preflight-secrets-bundle"}
 
