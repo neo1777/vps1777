@@ -22,6 +22,14 @@ vederlo dal numero.
    `ts_source` su `messages` e tabella `revisions`. Trasparente e verificata sul
    dato preesistente; `ts_source` non è indicizzata in FTS, quindi non comporta un
    rebuild dell'indice.
+   I valori sono **tre**: `messaggio` (istante reale), `data-export` (data della
+   *fotografia*, non del contenuto) e **`ignoto`** — che riceve tutto ciò che
+   esisteva prima della 0.40.0, perché su un DB precedente **il regime non è
+   ricostruibile a posteriori**. Dichiararlo `messaggio` sarebbe stata
+   un'asserzione mai verificata: misurato sul bundle di riferimento, **140.476
+   righe su 221.514 con `ts` pieno non sono conversazioni** — sono log e documenti,
+   il cui `ts` è il timestamp del file. È anche il motivo del punto 3: gli
+   `ignoto` devono passare il filtro.
 3. **Il `newest` si calcola in NEGATIVO**: `MAX(ts) WHERE ts_source <> 'data-export'`,
    **non** `= 'messaggio'`. La forma positiva escluderebbe le righe migrate
    (marcate `ignoto`, perché il loro regime non è ricostruibile a posteriori) e
