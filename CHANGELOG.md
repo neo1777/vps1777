@@ -2,6 +2,17 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.39.3] — 2026-07-20
+
+### La pagina Archive regge gli upload giganti
+
+L'upload del bundle da 2,6 GB moriva con un 500: `/tmp` del gateway è una tmpfs
+in RAM (rootfs immutabile, H43) e Starlette vi spoola i multipart — 92 MB
+passavano, 2,6 GB la saturavano («No space left on device»). Nuovo volume
+`gateway-uploads` montato su `/var/lib/uploads` + `TMPDIR` puntato lì: lo spool
+va su disco, la tmpfs resta per il resto. Il volume è usa-e-getta e resta fuori
+dal backup. Il tetto applicativo (4 GB, v0.39.0) ora è raggiungibile davvero.
+
 ## [0.39.2] — 2026-07-20
 
 ### Il container backup non dipende più da DOVE lanci l'update

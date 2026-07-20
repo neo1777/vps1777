@@ -59,6 +59,9 @@ services:
     environment:
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 8080
+      # tempfile (e quindi lo spool multipart di Starlette) segue TMPDIR:
+      # gli upload grossi vanno sul volume-disco, non sulla tmpfs in RAM.
+      TMPDIR: /var/lib/uploads
       # Peer fidati per X-Forwarded-* (uvicorn). Default = range privati +
       # loopback, MAI un IP pubblico: il reverse-proxy (tailscale sull'host,
       # o caddy/cloudflared in container) arriva sempre dalla bridge Docker
@@ -94,6 +97,12 @@ services:
       # lo stato su rete interna (app/nlm_client.py).
       - archive-data:/var/lib/archive:rw  # condiviso con archive-mcp: /admin/archive scrive i .db indicizzati
       - ./onboarding:/var/lib/onboarding:rw  # bind-mount: pending.json letto da deploy.sh --apply
+      # Spool degli upload su DISCO, non in RAM: /tmp è una tmpfs (rootfs
+      # immutabile, H43) e Starlette vi spoola i multipart — un upload da 2,6 GB
+      # (bundle recupero-sessioni) la saturava e la pagina Archive moriva con un
+      # 500 «No space left on device» (2026-07-20, dal vivo; 92 MB passavano).
+      # TMPDIR sposta lo spool qui; il volume è usa-e-getta, fuori dal backup.
+      - gateway-uploads:/var/lib/uploads:rw
     networks:
       - backend
       - ingress
@@ -249,6 +258,7 @@ volumes:
   gateway-data:    # /var/lib/gateway: audit log, ecc.
   archive-data:    # /var/lib/archive/{data,db}
   nlm-auth:        # /var/lib/nlm: auth.json + AUTH_PENDING.flag
+  gateway-uploads: # /var/lib/uploads: spool multipart su disco (TMPDIR) — temp, NO backup
 
 # ──────────────────────────────────────────────────────────────────────
 # Secrets — file-mounted, tmpfs /run/secrets/<name>
