@@ -30,6 +30,19 @@ scritto il codice, entrambi registrati prima di essere corretti.
 
 Nessuna azione richiesta, nessun segreto nuovo, nessuna migrazione.
 
+**Questo aggiornamento è stato la prima prova reale del pre-flight introdotto
+nella 0.40.1 — ed è avvenuta: 21/07, verde.** Fallimento controllato su una
+macchina viva, lanciando il servizio di aggiornamento automatico (non il comando
+da terminale, che gira in un ambiente diverso da quello reale). Il registro di
+sistema mostra la sequenza nell'ordine che il fix prometteva: l'avviso sulla
+configurazione attuale *prima* del download, il blocco sulla release in arrivo
+*dopo* — e la cartella degli snapshot rimasta a zero, cioè il backup non è mai
+partito. Lo stack è rimasto in salute per tutta la prova e i dati non si sono
+mossi di una riga.
+
+Il testo qui sotto è come era stato scritto prima della prova, e si lascia:
+prometteva una verifica e la verifica c'è stata.
+
 **Questo aggiornamento è la prima prova reale del pre-flight introdotto nella
 0.40.1.** Non lo era la 0.40.1: là a orchestrare era ancora la CLI precedente,
 col controllo vecchio, che si ferma prima di arrivare al nuovo. È solo
