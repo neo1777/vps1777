@@ -2,6 +2,34 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.39.0] — 2026-07-20
+
+### Archive ingerisce il bundle di Recupero Sessioni — e i doppioni raccontano dove sono stati
+
+Il difetto scoperto (upload reale di Neo, 2,6 GB): il bundle «scarica tutto» dell'app
+locale di recupero sessioni moriva sul tetto upload da 1 GB — e anche sotto il tetto
+NON era un formato riconosciuto: cadeva nel fallback zip-di-documenti che indicizza
+solo i `.md/.txt`, ignorando **in silenzio** 1.476 sessioni e 17.851 log MCP.
+
+**Estrattore dedicato** (`_iter_bundle_zip`, riconoscimento `MANIFEST.json`+`sessions/`):
+sessioni → conversazioni; log MCP → documenti chunked (`mcp-log:<server>`); workfiles-testo
+→ documenti col path cercabile; i `.jsonl` dentro workfiles → sniff sul contenuto
+(sessione CC / log / dati). Whitelist `_DOC_ZIP_EXTS` allargata al **codice** (py/sh/js/
+dart/… markup, config) — vale anche per il fallback zip generico.
+
+**Tabella `sightings(uuid, source)`** — i doppioni collassano in `messages` (la ricerca
+non deve restituire dieci copie) ma ogni copia registra DOVE è stata vista: «questo file
+prima era in una cartella, poi in un'altra» diventa un `GROUP BY`, non un ricordo.
+I **binari** dei workfiles (zip/db/dill/so/immagini) non entrano nell'FTS ma lasciano
+una lapide ciascuno in `skipped` (reason=`non-testo`, detail=path): l'inventario del
+materiale non-indicizzato resta interrogabile. Tetti: archivio decompresso 2→16 GB,
+upload 1→4 GB.
+
+Verificato (locale): suite **48 passed**; bundle 254 MB → 111.137 record in 31 s,
+91.461 in tabella (73.612 = previsione esatta del MANIFEST); bundle 2,6 GB con
+workfiles → **376.706 record in 79 s, 61.100 uuid avvistati in 2+ path, 2.633 binari
+censiti, zero crash**; tokenizer sul DB nuovo: `count(C++)=769 ≠ count(C)=7.807`.
+
 ## [0.38.0] — 2026-07-17
 
 ### L'installer allestisce TUTTO — niente più feature perse in silenzio
