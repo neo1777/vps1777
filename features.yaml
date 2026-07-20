@@ -678,3 +678,25 @@ features:
     since: "0.40.0"
     verify:
       file_contains: {path: tools/vps1777.py, pattern: "def _secrets_mancanti"}
+
+  - id: archive.ts-source
+    nome: "ts_source: il regime del dato, promosso da nota a schema"
+    cosa: "Colonna su `messages` con tre valori: `messaggio` (istante reale), `data-export`
+           (data della FOTOGRAFIA, non del contenuto) e `ignoto` (righe migrate da un DB
+           pre-0.40.0, il cui regime non è ricostruibile a posteriori).
+           ⚠️ CONSEGUENZA VINCOLANTE: il `newest` si calcola in NEGATIVO —
+           `MAX(ts) WHERE ts_source <> 'data-export'` — e MAI `= 'messaggio'`, che
+           escluderebbe le righe `ignoto` restituendo una data troppo vecchia.
+           Esiste perché popolare i `ts` mancanti senza distinguere il regime avrebbe
+           fabbricato la bugia opposta a quella che si stava chiudendo: una memoria di
+           maggio fotografata a luglio NON è successa a luglio. Misurato: sul bundle di
+           riferimento 140.476 righe su 221.514 con ts pieno non sono conversazioni.
+           È l'unica delle quattro voci 0.40.0 che NON protegge una funzione visibile ma
+           una CONVENZIONE: senza questa riga, chi tocca db_info fra sei mesi non ha nulla
+           che gli dica perché il filtro è scritto al contrario, e lo 'semplifica'."
+    dove: ["services/gateway/app/archive_indexer.py#ts_source",
+           "services/gateway/tests/test_archive_indexer.py#test_newest_si_calcola_in_negativo"]
+    status: active-default
+    since: "0.40.0"
+    verify:
+      file_contains: {path: services/gateway/tests/test_archive_indexer.py, pattern: "def test_newest_si_calcola_in_negativo"}
