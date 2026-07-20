@@ -996,3 +996,183 @@ def test_claude_code_metadati(tmp_path: Path) -> None:
         assert reasons == ["non-message", "non-message"]
     finally:
         conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# D10/§1 — SNIFF DEL CONTENUTO e D18 — REVISIONI (20/07/2026)
+# Due decisioni di Neo nello stesso giro. I test stanno insieme perché insieme
+# chiudono la stessa domanda: «cosa fa l'indexer con ciò che non riconosce, e
+# con ciò che cambia sotto lo stesso identificatore?»
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_sniff_riconosce_il_testo_travestito():
+    """Un file fuori whitelist che È testo va letto, non seppellito.
+
+    Sul bundle reale erano 829 su 2.633 «non-testo» (31%): appunti senza
+    estensione, todo, script, Dockerfile, .cjs/.proto/.service/.xsd/.ndjson.
+    La classificazione per estensione è un'ETICHETTA, non una misura.
+    """
+    from archive_indexer import _sniff_e_testo
+    assert _sniff_e_testo(b"#!/bin/sh\necho ciao")            # script senza estensione
+    assert _sniff_e_testo(b'{"a":1}\n{"b":2}')                # ndjson
+    assert _sniff_e_testo("appunti: à è ì ò ù 🔧".encode())    # utf-8 con accenti ed emoji
+
+
+def test_sniff_non_promuove_i_binari():
+    """Il collaudo che conta: i NEGATIVI.
+
+    Un criterio troppo generoso infilerebbe spazzatura binaria nell'indice
+    full-text — peggio del problema che risolve.
+    """
+    from archive_indexer import _sniff_e_testo
+    assert not _sniff_e_testo(b"\x89PNG\r\n\x1a\n\x00\x00")   # NUL ⇒ binario
+    assert not _sniff_e_testo(b"\xff\xd8\xff\xe0JFIF")        # jpeg
+    assert not _sniff_e_testo(b"")                            # vuoto
+    assert not _sniff_e_testo(b"\x00" * 10)
+
+
+def _riga(uuid, contenuto, ts="2026-01-01T00:00:00Z"):
+    return (uuid, "proj:test", ts, contenuto, "human", "", "", "", "")
+
+
+def test_revisioni_non_nascono_su_dati_immutabili(tmp_path):
+    """Il NEGATIVO dichiarato da setaccio prima del merge: re-ingerire dati
+    immutabili deve produrre ZERO revisioni. Anche una sola = c'è un bug,
+    oppure abbiamo scoperto un contenuto che cambia e non lo sapevamo."""
+    from archive_indexer import write_rows
+    db = tmp_path / "a.db"
+    write_rows(db, [_riga("u1", "testo"), _riga("u2", "altro")])
+    write_rows(db, [_riga("u1", "testo"), _riga("u2", "altro")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT count(*) FROM revisions").fetchone()[0] == 0
+
+
+def test_revisioni_conservano_la_versione_uscente(tmp_path):
+    """Il caso `memory:*`: stesso uuid, contenuto diverso fra due export.
+
+    Prima di questa modifica l'INSERT OR REPLACE faceva vincere l'ultimo e il
+    primo spariva senza traccia. Le versioni sopravvivevano solo perché stavano
+    in DB separati — un accidente della topologia, non una proprietà.
+    """
+    from archive_indexer import write_rows
+    db = tmp_path / "b.db"
+    write_rows(db, [_riga("slot", "versione di maggio")])
+    write_rows(db, [_riga("slot", "versione di luglio")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT content FROM messages WHERE uuid='slot'").fetchone()[0] \
+            == "versione di luglio"          # la ricerca vede l'ultima: API invariata
+        assert c.execute("SELECT content FROM revisions WHERE uuid='slot'").fetchone()[0] \
+            == "versione di maggio"          # la storia non si perde
+
+
+def test_revisioni_si_accumulano_e_sono_idempotenti(tmp_path):
+    from archive_indexer import write_rows
+    db = tmp_path / "c.db"
+    for testo in ("prima", "seconda", "terza"):
+        write_rows(db, [_riga("s", testo)])
+    write_rows(db, [_riga("s", "terza")])     # ri-mando la corrente: nulla di nuovo
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT count(*) FROM revisions WHERE uuid='s'").fetchone()[0] == 2
+
+
+def test_ts_source_esiste_e_il_default_e_messaggio(tmp_path):
+    """Il regime del dato promosso da nota a schema: senza questa colonna, un ts
+    sintetico (data-export) sarebbe indistinguibile da un ts vero, e il `newest`
+    dichiarerebbe un istante in cui nessun messaggio è mai esistito."""
+    from archive_indexer import write_rows
+    db = tmp_path / "d.db"
+    write_rows(db, [_riga("x", "y")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT ts_source FROM messages WHERE uuid='x'").fetchone()[0] == "messaggio"
+
+
+def test_migrazione_db_preesistente_non_perde_dati(tmp_path):
+    """I nove archivi vivi sono nati prima di questa versione: la migrazione
+    deve essere trasparente."""
+    from archive_indexer import write_rows
+    db = tmp_path / "vecchio.db"
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT,"
+            " sender TEXT DEFAULT '', tools TEXT DEFAULT '', thinking TEXT DEFAULT '',"
+            " attachments TEXT DEFAULT '', parent_uuid TEXT DEFAULT '');")
+        c.execute("INSERT INTO messages(uuid,project,ts,content) VALUES('old','p','2026-05-01','storico')")
+    write_rows(db, [_riga("new", "nuovo")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT content FROM messages WHERE uuid='old'").fetchone()[0] == "storico"
+        # ⚠️ Questa riga asseriva 'messaggio' e PASSAVA: il test codificava il difetto che
+        # b82df434 ha poi trovato in 2ª lettura (una riga migrata NON è un messaggio noto —
+        # può essere una memory). Un test verde che certifica il comportamento sbagliato è
+        # peggio di nessun test: dà la conferma che nessuno andrà a ricontrollare.
+        assert c.execute("SELECT ts_source FROM messages WHERE uuid='old'").fetchone()[0] == "ignoto"
+        c.execute("SELECT count(*) FROM revisions")   # la tabella ora esiste
+
+
+def test_migrazione_non_dichiara_messaggio_cio_che_non_sa(tmp_path):
+    """Finding bloccante di b82df434 (2ª lettura, 20/07), prima del merge.
+
+    `ALTER TABLE … ADD COLUMN ts_source DEFAULT 'messaggio'` assegna 'messaggio'
+    a TUTTE le righe già in tabella — comprese `memory:*` e `account:user`, che
+    NON sono messaggi ma slot riscrivibili: cioè proprio ciò per cui la colonna
+    esiste. Sarebbe stata la bugia opposta, scritta in un colpo solo su nove
+    archivi vivi, e con l'aria di un dato verificato.
+    Il regime di una riga preesistente NON è conoscibile a posteriori: 'ignoto'
+    è l'unica etichetta vera.
+    """
+    from archive_indexer import write_rows
+    db = tmp_path / "mig.db"
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT,"
+            " sender TEXT DEFAULT '', tools TEXT DEFAULT '', thinking TEXT DEFAULT '',"
+            " attachments TEXT DEFAULT '', parent_uuid TEXT DEFAULT '');")
+        c.execute("INSERT INTO messages(uuid,project,ts,content)"
+                  " VALUES('mem','memory:conversations','','slot riscrivibile')")
+        c.execute("INSERT INTO messages(uuid,project,ts,content)"
+                  " VALUES('msg','proj:x','2026-05-01','un messaggio vero')")
+    write_rows(db, [_riga("nuovo", "scritto ora")])
+    with sqlite3.connect(db) as c:
+        reg = dict(c.execute("SELECT uuid, ts_source FROM messages"))
+    # Il discrimine NON è «vecchia o nuova»: è **se un ts c'è**. Ci sono voluti tre giri
+    # (default secco → tutte non-classificate → questa) e due bocciature reciproche:
+    # b82df434 ha bocciato la prima (asserisce un regime mai verificato sulle memory),
+    # setaccio ha bocciato la seconda (errore SIMMETRICO: negare 'messaggio' a righe-evento
+    # vere avrebbe reso NULL il newest di nove DB, rompendo ciò che il requisito proteggeva).
+    # La proposta «ts pieno ⇒ messaggio» è stata scartata da una MISURA: su cc-bundle-200726,
+    # delle 221.514 righe con ts pieno **140.476 (63,4%) non sono conversazioni** — workfile,
+    # mcp-log e documenti, il cui ts è il timestamp del file nello zip. Asserzione falsa su
+    # quasi due terzi dell'archivio.
+    assert reg["mem"] == "ignoto", "una memory migrata NON può risultare 'messaggio'"
+    assert reg["msg"] == "ignoto", "nemmeno una riga con ts: il ts può venire dal filesystem"
+    assert reg["nuovo"] == "messaggio", "ciò che entra ORA dall'ingest ha il regime noto"
+
+
+def test_newest_si_calcola_in_negativo(tmp_path):
+    """Corollario del fix: il filtro per il `newest` va scritto su ciò che si SA
+    (`<> 'data-export'`), non su ciò che si presume (`= 'messaggio'`).
+
+    Con la forma positiva, su un DB migrato le righe 'ignoto' sparirebbero dal
+    calcolo — cioè quasi tutte — e il newest risulterebbe troppo VECCHIO.
+    """
+    from archive_indexer import write_rows
+    db = tmp_path / "new.db"
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT,"
+            " sender TEXT DEFAULT '', tools TEXT DEFAULT '', thinking TEXT DEFAULT '',"
+            " attachments TEXT DEFAULT '', parent_uuid TEXT DEFAULT '');")
+        c.execute("INSERT INTO messages(uuid,project,ts,content)"
+                  " VALUES('vecchio','p','2026-07-19T10:00:00Z','recente ma migrato')")
+    write_rows(db, [_riga("nuovo", "meno recente", "2026-01-01T00:00:00Z")])
+    with sqlite3.connect(db) as c:
+        negativo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source <> 'data-export'").fetchone()[0]
+        positivo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source = 'messaggio'").fetchone()[0]
+    assert negativo == "2026-07-19T10:00:00Z", "la forma negativa vede le righe 'ignoto': corretta"
+    # ⚠️ QUESTO SECONDO ASSERT È IL CUORE DEL TEST, non un di più (b82df434, 20/07).
+    # In un giro di refactoring era stato tolto, lasciando solo la verifica che la forma GIUSTA
+    # funzioni. Ma `= 'messaggio'` è la forma più naturale da scrivere — era la mia prima
+    # versione — e senza questa riga la suite resterebbe VERDE mentre qualcuno la "semplifica",
+    # riportando il difetto. Un test che protegge un comportamento ma non la DECISIONE che c'è
+    # sotto lascia scoperto proprio ciò che è costato tre giri e due bocciature.
+    assert positivo != negativo, "la forma positiva DEVE sbagliare: esclude le righe 'ignoto'"
+    assert positivo == "2026-01-01T00:00:00Z", "…e sbaglia dando un newest troppo VECCHIO"
