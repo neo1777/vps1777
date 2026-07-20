@@ -1417,10 +1417,27 @@ def _secrets_mancanti_in(compose: Path, radice_repo: Path,
         #   già: `is_file()` separa i due mondi, la lettura decide dentro il secondo.
         # ⭐ FORMA GENERALE, per chi legge: **un `or` fra due condizioni con rimedi
         #   diversi è una perdita di informazione, non una semplificazione.**
+        # ⚠️ QUATTRO stati, non tre — e il quarto è una REGRESSIONE che ho introdotto
+        # separando i rami (b82df434, riprodotta sui due sha con la 0.40.1 come
+        # controprova). Prima un unico `except OSError` copriva tutto; separando le
+        # diagnosi è caduto il catch sul caso in cui a non essere leggibile è **il
+        # contenitore invece del contenuto**: `chmod 000` sulla DIRECTORY `secrets/`
+        # faceva sollevare `is_file()` e il pre-flight moriva con uno stack trace,
+        # **senza scrivere lo step failed** — quindi col pannello appeso su «running».
+        # È la stessa forma che avevo già chiuso per il `FileNotFoundError` del bundle:
+        # **avevo protetto la porta che conoscevo**. Separare i casi è giusto; separarli
+        # è anche il momento in cui si perde una copertura che l'`or` dava per pigrizia.
         stato = None                                   # None = a posto
-        if not p.is_file():
+        try:
+            esiste = p.is_file()
+        except OSError as exc:
+            # non è il file a non essere leggibile: è il PERCORSO. Rimedio diverso da
+            # tutti gli altri tre — si guarda la cartella, non il segreto.
+            esiste = None
+            stato = f"DIRECTORY NON LEGGIBILE ({exc.__class__.__name__})"
+        if stato is None and not esiste:
             stato = "ASSENTE"
-        else:
+        elif stato is None:
             try:
                 if not p.read_text(encoding="utf-8", errors="replace").strip():
                     stato = "VUOTO"
@@ -1674,6 +1691,16 @@ def cmd_update(repo: Path, args) -> int:
         for m in mancanti:
             nome = m.split(" → ")[0].strip()
             perche = SEGRETI_NON_GENERABILI.get(nome)
+            if "DIRECTORY NON LEGGIBILE" in m:
+                # Il guasto non è nel segreto né nel suo file: è nella CARTELLA che li
+                # contiene. Rimedio ancora diverso — e nessun comando che tocchi i file.
+                righe.append(
+                    f"  · {m}\n"
+                    f"      ⛔ Non è il segreto: è la cartella `secrets/` a non essere\n"
+                    f"         accessibile. I file dentro sono probabilmente intatti.\n"
+                    f"      → ls -ld {repo}/secrets    #  attesi: proprietario giusto, 0700\n"
+                    f"      ⚠️ NON ricreare né i file né la cartella: perderesti tutti i segreti.\n")
+                continue
             if "NON LEGGIBILE" in m:
                 # ⚠️ IL FILE C'È. Qualunque comando col `>` lo TRONCHEREBBE — cioè il
                 # rimedio distruggerebbe il segreto che stiamo cercando di salvare.

@@ -370,6 +370,37 @@ def test_illeggibile_non_si_confonde_con_assente():
         (repo / "secrets" / "chiuso.txt").chmod(0o600)
 
 
+def test_directory_secrets_illeggibile_non_fa_crashare():
+    # REGRESSIONE introdotta separando i rami e trovata da b82df434 sui due sha: prima
+    # un unico `except OSError` copriva tutto (PermissionError ne è sottoclasse);
+    # separando le diagnosi è caduto il caso in cui a non essere leggibile è il
+    # CONTENITORE invece del contenuto. Il pre-flight moriva con uno stack trace, senza
+    # scrivere lo step failed ⇒ pannello appeso su «running».
+    # Stessa forma già chiusa per il bundle: **si protegge la porta che si conosce.**
+    import os
+    if os.geteuid() == 0:
+        return
+    repo = _installazione(segreti={"a.txt": "v", "b.txt": "v"})
+    (repo / "compose.yaml").write_text(_compose_con("a", "b"))
+    (repo / "secrets").chmod(0o000)
+    try:
+        fuori = v._secrets_mancanti([repo / "compose.yaml"], repo)   # non deve sollevare
+        assert len(fuori) == 2
+        assert all("DIRECTORY NON LEGGIBILE" in f for f in fuori), fuori
+    finally:
+        (repo / "secrets").chmod(0o700)
+
+
+def test_il_rimedio_per_directory_illeggibile_non_tocca_i_file():
+    src = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
+    i = src.index('if "DIRECTORY NON LEGGIBILE" in m:')
+    ramo = src[i:src.index("continue", i)]
+    assert "ls -ld" in ramo, "deve far guardare la CARTELLA"
+    assert "openssl rand" not in ramo and "> secrets/" not in ramo, \
+        "nessun comando che scriva: i segreti sono intatti, è l'accesso a essere rotto"
+    assert "NON ricreare" in ramo
+
+
 def test_il_rimedio_per_illeggibile_non_contiene_mai_una_ridirezione():
     # N13 esteso: per «c'è ma non si legge» il messaggio non deve suggerire NESSUN
     # comando che scriva sul file — `>` troncherebbe il segreto che si vuole salvare.
