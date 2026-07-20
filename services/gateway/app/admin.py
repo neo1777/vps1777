@@ -794,6 +794,63 @@ async def update_state(request: Request) -> Response:
     })
 
 
+async def update_check(request: Request) -> Response:
+    """POST /admin/update/check — «Ricontrolla adesso»: rinfresca update_status.json
+    senza aspettare il timer giornaliero della CLI host.
+
+    Nato da un caso vero (2026-07-20): release v0.39.0 pubblicata alle 08:36Z, ultimo
+    check del timer alle 05:43Z → la pagina diceva «sei alla versione più recente» per
+    ore, senza nessun modo di forzare il refresh. Il CHECK è innocuo (un GET a GitHub
+    + un file json: niente Docker, niente privilegi) quindi può farlo il gateway;
+    l'UPDATE vero resta collect→apply della CLI host, invariato."""
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+    ob = Path(get_settings().onboarding_dir)
+    sf = ob / "update_status.json"
+    repo_slug = os.environ.get("VPS1777_GITHUB_REPO", "neo1777/vps1777")
+
+    def _fetch() -> dict:
+        import urllib.request
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{repo_slug}/releases/latest",
+            headers={"User-Agent": "vps1777-gateway-check",
+                     "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.load(resp)
+
+    prev = _read_json(sf)
+    current = str(os.environ.get("VPS1777_VERSION", "") or prev.get("current") or "")
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    try:
+        rel = await asyncio.to_thread(_fetch)
+    except Exception as exc:  # noqa: BLE001 — URLError/timeout/JSON: dato stantio, dichiarato
+        prev.update(error=str(exc)[:200], checked_at=now)
+        sf.write_text(json.dumps(prev, indent=2) + "\n")
+        audit({"event": "admin_update_check_err", "by": email, "error": str(exc)[:200]})
+        return RedirectResponse(
+            f"/admin/update?msg=Check+fallito:+{str(exc)[:80].replace(' ', '+')}&kind=err",
+            status_code=303)
+    latest = str(rel.get("tag_name") or "").lstrip("v")
+    known = str(prev.get("latest") or "")
+    # stessa guardia della CLI: /releases/latest può servire risposte stantie dalla
+    # cache di GitHub — la «latest nota» non deve mai regredire (downgrade proposto).
+    if known and latest and version_gt(known, latest):
+        prev.update(current=current, error=None, checked_at=now)
+        sf.write_text(json.dumps(prev, indent=2) + "\n")
+        msg = f"GitHub riporta v{latest} ma la latest nota è v{known} (cache stantia): tengo la nota"
+        return RedirectResponse(f"/admin/update?msg={msg.replace(' ', '+')}&kind=ok",
+                                status_code=303)
+    prev.update(current=current, latest=latest,
+                changelog_excerpt=(rel.get("body") or "")[:800],
+                html_url=rel.get("html_url", ""), error=None, checked_at=now)
+    sf.write_text(json.dumps(prev, indent=2) + "\n")
+    audit({"event": "admin_update_check", "by": email, "latest": latest})
+    return RedirectResponse(
+        f"/admin/update?msg=Check+eseguito:+ultima+release+v{latest}&kind=ok",
+        status_code=303)
+
+
 async def update_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
@@ -904,7 +961,12 @@ document.getElementById('updform').addEventListener('submit', function(ev) {{
     <div class="status-row"><span class="lbl">ultimo check</span><span class="val">{html.escape(str(checked))}</span></div>
   </div>
   {update_btn}
-  <p class="hint">L'update è eseguito dalla CLI host (backup → pull verificato → migrazioni →
+  <form method="POST" action="/admin/update/check">
+    <div class="toolbar"><button type="submit" class="btn">↻ Ricontrolla adesso</button></div>
+  </form>
+  <p class="hint">Il check automatico gira una volta al giorno (timer host): «ultimo check»
+  può essere più vecchio di una release appena pubblicata — «Ricontrolla adesso» lo rinfresca.
+  L'update è eseguito dalla CLI host (backup → pull verificato → migrazioni →
   health-gate → rollback automatico su fallimento). Da terminale: <code>vps1777 update</code>.</p>
 </section>
 {changelog_html}

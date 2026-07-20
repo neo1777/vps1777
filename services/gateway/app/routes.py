@@ -73,6 +73,7 @@ routes = [
     Route("/admin/archive", admin.archive_view, methods=["GET", "POST"]),
     Route("/admin/archive/delete", admin.archive_delete, methods=["POST"]),
     Route("/admin/update", admin.update_view, methods=["GET", "POST"]),
+    Route("/admin/update/check", admin.update_check, methods=["POST"]),
     Route("/admin/update/state", admin.update_state, methods=["GET"]),
     Route("/admin/audit", admin.audit_view, methods=["GET"]),
     Route("/admin/secrets", admin.secrets_view, methods=["GET"]),

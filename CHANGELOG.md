@@ -2,6 +2,19 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.39.1] — 2026-07-20
+
+### La pagina Update sa ricontrollare
+
+Caso vero: release v0.39.0 pubblicata alle 08:36Z, ultimo check del timer alle 05:43Z
+→ la pagina diceva «sei alla versione più recente» per ore, senza modo di forzare il
+refresh (il timer gira una volta al giorno). Nuovo bottone **«↻ Ricontrolla adesso»**
+(`POST /admin/update/check`): il gateway fa il GET a GitHub e rinfresca
+`update_status.json` — con la stessa guardia anti-regressione della CLI (la «latest
+nota» non regredisce mai su una risposta stantia della cache). Il check è innocuo
+(niente Docker, niente privilegi): l'update vero resta collect→apply della CLI host.
+Suite gateway: **155 passed**.
+
 ## [0.39.0] — 2026-07-20
 
 ### Archive ingerisce il bundle di Recupero Sessioni — e i doppioni raccontano dove sono stati
