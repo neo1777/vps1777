@@ -2,6 +2,71 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.0] — 2026-07-20
+
+Minor e non patch: l'indexer cambia *cosa* legge, i DB cambiano *schema*, e nasce
+un canale di scrittura fra due servizi. Chi legge questa storia fra sei mesi deve
+vederlo dal numero.
+
+### ⚠️ Chi aggiorna deve sapere queste quattro cose
+
+1. **Nuovo segreto `archive_desc_secret`.** Il canale `set_description` non riusa
+   `gateway_secret` di proposito: quello apre anche `/internal/nlm/*` (stato e
+   installazione dei profili NotebookLM), e una funzione che scrive un campo di
+   testo non deve portarsi dietro quel potere. `setup.sh` lo genera; l'update ora
+   ha un **pre-flight** che si ferma se manca, invece di lasciar fallire lo stack
+   con un sintomo che sembra una release rotta. Un file **vuoto** conta come
+   mancante: con un segreto vuoto lo stack parte e il canale resta muto, cioè un
+   difetto di provisioning travestito da bug della feature.
+2. **Migrazione di schema al primo ingest** su ogni DB esistente: colonna
+   `ts_source` su `messages` e tabella `revisions`. Trasparente e verificata sul
+   dato preesistente; `ts_source` non è indicizzata in FTS, quindi non comporta un
+   rebuild dell'indice.
+3. **Il `newest` si calcola in NEGATIVO**: `MAX(ts) WHERE ts_source <> 'data-export'`,
+   **non** `= 'messaggio'`. La forma positiva escluderebbe le righe migrate
+   (marcate `ignoto`, perché il loro regime non è ricostruibile a posteriori) e
+   restituirebbe una data troppo vecchia. Chi tocca `db_info` non riscriva la
+   forma positiva: è dimostrata rotta, e c'è un test che lo prova.
+4. **Lo sniff cambia i conteggi dei prossimi ingest** — 826 file promossi da
+   "non-testo" a documenti sul bundle di riferimento. Chi confronta i numeri
+   prima/dopo deve sapere perché ballano: non è una regressione, è che prima non
+   li leggevamo.
+
+### Aggiunto
+- **Sniff del contenuto nell'ingest.** La classificazione dei file era per
+  *estensione*: un'etichetta, non una misura. Sul bundle reale, 826 dei 2.633
+  censiti «non-testo» sono testo pieno — appunti senza estensione, todo, script,
+  Dockerfile, `.cjs/.proto/.service/.xsd/.ndjson`. Ora si guardano i primi 4 KB,
+  con criterio conservativo (un byte NUL chiude la questione, serve UTF-8 valido e
+  ≥90% di caratteri stampabili): meglio una lapide di troppo che spazzatura binaria
+  nell'indice full-text. I promossi sono marcati `[testo-sniffato]`.
+- **Tabella `revisions`.** `messages` ha chiave primaria su `uuid` e si scrive con
+  `INSERT OR REPLACE`: se lo stesso identificatore tornava con contenuto diverso,
+  l'ultimo vinceva e il primo spariva **senza traccia**. Non è teorico — le voci
+  `memory:*` sono slot riscrivibili. Finora le versioni sopravvivevano solo perché
+  stavano in DB separati: la comparabilità degli snapshot era un *accidente della
+  topologia*, non una proprietà. Ora è struttura. La ricerca continua a vedere
+  l'ultima versione: nessuna API cambia.
+- **`POST /internal/archive/description`** — il tool MCP `set_description`
+  inoltra qui invece di aprire il DB. Rete interna, segreto dedicato
+  constant-time, nome del DB in whitelist col percorso composto dal gateway, cap
+  di lunghezza, rifiuto dei caratteri di controllo, audit di ogni scrittura. Ogni
+  rifiuto risponde **404 e mai 403**: un 403 confermerebbe l'esistenza della rotta.
+- **Pre-flight dei segreti nell'update**, che legge l'elenco *dal compose* e non da
+  una lista nel codice — una lista andrebbe aggiornata a ogni segreto nuovo, ed è
+  esattamente la dimenticanza che il controllo previene.
+
+### Corretto
+- **`set_description` non falliva più silenziosamente.** Il tool si dichiarava
+  «l'unica scrittura ammessa da questo layer» mentre il suo container monta il
+  volume in sola lettura per scelta deliberata: due dichiarazioni entrambe vere,
+  ognuna nel suo file, che insieme mentivano. Chi lo chiamava riceveva
+  `attempt to write a readonly database`.
+- **Le voci senza `ts` erano invisibili ai filtri temporali** — un intero namespace
+  saltato in silenzio da `since=`. `ts_source` distingue un istante *reale* da una
+  *data di fotografia*, così chiudere quel buco non ne apre uno opposto: una
+  memoria di maggio fotografata a luglio non «è successa a luglio».
+
 ## [0.39.4] — 2026-07-20
 
 ### Il volume dello spool nasce con l'owner giusto
