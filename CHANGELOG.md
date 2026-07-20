@@ -2,6 +2,19 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.39.4] — 2026-07-20
+
+### Il volume dello spool nasce con l'owner giusto
+
+Terzo e ultimo anello del caso «upload 2,6 GB»: `TMPDIR=/var/lib/uploads` c'era
+(v0.39.3) ma il volume nuovo, creato da Docker, era `root:root` — e `tempfile`
+scarta IN SILENZIO una tempdir non scrivibile, ripiegando sulla tmpfs `/tmp`
+(che l'upload saturava: stesso 500 di prima, altra causa). Un volume vuoto al
+primo mount eredita owner/permessi dal path dell'IMMAGINE: ora il Dockerfile
+crea `/var/lib/uploads` chown-ato ad `app`, come già `/var/lib/gateway`. Sulle
+installazioni esistenti l'owner è già stato corretto a mano sul volume (persiste);
+questa release rende giusto ogni deploy futuro.
+
 ## [0.39.3] — 2026-07-20
 
 ### La pagina Archive regge gli upload giganti

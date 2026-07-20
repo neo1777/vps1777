@@ -35,7 +35,12 @@ RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
 
 # Mountpoint dei volumi creati con owner 1000 PRIMA del mount: un volume
 # named vuoto eredita questi permessi al primo attach.
-RUN mkdir -p /var/lib/gateway /var/lib/nlm && chown -R app:app /var/lib/gateway /var/lib/nlm
+# /var/lib/uploads: mountpoint del volume gateway-uploads (spool multipart, TMPDIR).
+# DEVE esistere nell'immagine con l'owner giusto: un volume vuoto al primo mount
+# eredita owner/permessi dal path dell'immagine — senza questa riga Docker lo crea
+# root:root, tempfile lo scarta IN SILENZIO (unwritable) e ripiega sulla tmpfs /tmp,
+# che un upload da 2,6 GB satura (visto dal vivo, 2026-07-20).
+RUN mkdir -p /var/lib/gateway /var/lib/nlm /var/lib/uploads && chown -R app:app /var/lib/gateway /var/lib/nlm /var/lib/uploads
 
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build/app /app/app
