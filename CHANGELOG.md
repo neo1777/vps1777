@@ -61,6 +61,23 @@ Nessuna azione richiesta, nessun segreto nuovo, nessuna migrazione. Se
 l'aggiornamento alla 0.40.0 era stato completato a mano creando
 `archive_desc_secret`, resta valido.
 
+**Fin dove è stato verificato, e fin dove no.** Questo fix è provato sulla
+funzione (banchi in directory temporanee, tre banchi indipendenti) e in CI —
+**mai su una macchina vera**. Nessuno ha ancora osservato l'ordine reale degli
+step durante un aggiornamento vero, né il fatto che al primo aggiornamento il
+controllo nuovo può scattare solo dopo il riavvio della CLI. Quindi:
+**l'aggiornamento a questa versione è anche la sua prima prova end-to-end.** Se
+fallisce, la rete è il rollback automatico — la stessa che ha funzionato il
+20/07 senza toccare un dato. Lo diciamo perché è precisamente la distanza — fra
+«i test passano» e «la macchina si aggiorna» — in cui era caduta la 0.40.0: una
+release che tace su cosa non ha provato si legge come se avesse provato tutto.
+
+**Difetto noto e non corretto**: lo `stage-check` (step 8) legge due file
+compose, mentre lo stack ne monta anche uno per ogni feature attiva (`backup`
+lo è di default). Stessa forma del difetto riparato qui, superficie diversa;
+sistemarlo avrebbe voluto dire due cose in una release. Registrato con data di
+revisione nel ledger delle funzioni.
+
 ## [0.40.0] — 2026-07-20
 
 Minor e non patch: l'indexer cambia *cosa* legge, i DB cambiano *schema*, e nasce
