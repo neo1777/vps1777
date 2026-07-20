@@ -731,7 +731,18 @@ features:
       compose.yaml]`; stack 5/5 healthy per tutta la prova, dati intatti, γ identico alla
       baseline del mattino. Ripristino con `mv` + `trap EXIT INT TERM`: 33 byte, owner e
       permessi identici alla baseline. Rilancio → `step 15 done ok`, VPS a 0.40.2.
-      ⇒ Da qui la voce NON è più «verificata solo su banco»."
+      ⇒ Da qui la voce NON è più «verificata solo su banco».
+      ⚠️ MA UNA COSA LA PROVA **NON** DIMOSTRA, e va scritta qui o il verbale promette
+      più di quanto ha misurato (b82df434, confermato da setaccio con una riga:
+      `git diff v0.40.1 v0.40.2 -- 'compose*.yaml'` → VUOTO): i due compose sono
+      IDENTICI, quindi il 6-bis leggendo quello del bundle **o** quello installato
+      produce lo stesso risultato. La prova dimostra la POSIZIONE (snapshots 0→0) e
+      l'ORDINE (avviso prima del fetch, fatale dopo) — **non l'INPUT**. Cioè non
+      dimostra la cosa che era il difetto originale: leggere il compose sbagliato.
+      Sarà dimostrata dalla prima release che MODIFICA un compose (aggiungendo un
+      segreto): allora il 6-bis vedrà qualcosa che il 4-bis non può vedere, e i due
+      rami diventeranno distinguibili. Fino ad allora: **provato per posizione e
+      ordine, non per input.** Non si dichiari altrimenti."
     verify:
       file_contains: {path: tools/vps1777.py, pattern: "preflight-secrets-bundle"}
 
