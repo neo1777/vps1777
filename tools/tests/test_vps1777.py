@@ -165,8 +165,22 @@ def test_secrets_dichiarazione_dallo_staging_file_dal_repo():
     (bundle / "compose.yaml").write_text(_compose_con("alfa"))
     # dichiarazione dal bundle, file dal repo → il segreto c'è, nessuna mancanza
     assert v._secrets_mancanti([bundle / "compose.yaml"], repo) == []
-    # la trappola: stessa dichiarazione, ma radice-file sbagliata → falso rosso totale
-    assert len(v._secrets_mancanti([bundle / "compose.yaml"], bundle)) == 1
+    # la trappola: stessa dichiarazione, ma radice-file sbagliata. NON deve uscire un
+    # rosso credibile sui nomi: deve dire che la RADICE è sbagliata. b82df434 ci è caduta
+    # al primo tentativo scrivendo il caso che la documenta — la firma rende l'errore
+    # visibile, questa guardia lo rende dicibile.
+    fuori = v._secrets_mancanti([bundle / "compose.yaml"], bundle)
+    assert len(fuori) == 1 and "RADICE è sbagliata" in fuori[0]
+
+
+def test_radice_sbagliata_non_si_confonde_con_segreti_davvero_mancanti():
+    # La guardia non deve mangiarsi il caso vero: se `secrets/` ESISTE e i file non ci
+    # sono, mancano davvero e i nomi vanno detti. Altrimenti avrei chiuso N9 creando un
+    # falso verde — il difetto (d) in un'altra forma.
+    repo = _installazione()                       # crea secrets/ ma vuota
+    (repo / "compose.yaml").write_text(_compose_con("a", "b"))
+    fuori = v._secrets_mancanti([repo / "compose.yaml"], repo)
+    assert len(fuori) == 2 and all("RADICE" not in f for f in fuori)
 
 
 def test_secrets_release_che_introduce_un_segreto_e_fatale():

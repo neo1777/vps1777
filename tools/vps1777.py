@@ -1287,8 +1287,8 @@ def _compose_sorgenti(root: Path, repo: Path) -> list[Path]:
     return [f for f in files if f.is_file()]
 
 
-def _secrets_mancanti(compose_paths: list[Path], secrets_root: Path) -> list[str]:
-    """I segreti che i compose PRETENDONO e che sotto `secrets_root` mancano o sono vuoti.
+def _secrets_mancanti(compose_paths: list[Path], radice_repo: Path) -> list[str]:
+    """I segreti che i compose PRETENDONO e che sotto `radice_repo` mancano o sono vuoti.
 
     ⚠️ **I due argomenti sono separati apposta, e la firma è metà del fix.** Prima
     questa funzione prendeva un solo `repo` e lo usava per DUE scopi che allora
@@ -1321,13 +1321,29 @@ def _secrets_mancanti(compose_paths: list[Path], secrets_root: Path) -> list[str
     fuori: list[str] = []
     visti: set[tuple[str, str]] = set()
     for compose in compose_paths:
-        for voce in _secrets_mancanti_in(compose, secrets_root, visti):
+        for voce in _secrets_mancanti_in(compose, radice_repo, visti):
             if voce not in fuori:
                 fuori.append(voce)
+
+    # ⚠️ «MANCANO TUTTI» QUASI MAI VUOL DIRE CHE MANCANO TUTTI: vuol dire che stiamo
+    # guardando nel posto sbagliato. La firma a due argomenti rende l'errore VISIBILE,
+    # non impossibile — prova empirica, e non è un'ipotesi: b82df434 ha scritto il caso
+    # di collaudo che descrive esattamente questa trappola e poi **ci è caduta al primo
+    # tentativo**, passando `repo/"secrets"` invece di `repo`. Il rosso che ne usciva era
+    # perfetto — nomi veri, percorsi veri, formato impeccabile — e niente in quell'output
+    # diceva «hai chiamato male la funzione». Se il nome inganna chi sta cercando proprio
+    # quell'errore, inganna chiunque.
+    # Stessa forma del ramo «non ho saputo leggere il formato»: si distingue **non lo so**
+    # da **no**. Un pre-flight che sa già dire l'uno deve saper dire anche l'altro.
+    if visti and len(fuori) == len(visti) and not (radice_repo / "secrets").is_dir():
+        return [f"(pre-flight: nessuno dei {len(visti)} segreti trovato E "
+                f"`{radice_repo}/secrets/` non esiste ⇒ quasi certamente la RADICE è "
+                f"sbagliata, non i segreti. I file stanno nel repo installato, mai nel "
+                f"bundle: la dichiarazione viene dallo staging, i file dal repo.)"]
     return fuori
 
 
-def _secrets_mancanti_in(compose: Path, secrets_root: Path,
+def _secrets_mancanti_in(compose: Path, radice_repo: Path,
                          visti: set[tuple[str, str]]) -> list[str]:
     """Un compose solo. `visti` de-duplica fra overlay: lo stesso segreto dichiarato
     in due file è un segreto solo, e va detto una volta."""
@@ -1378,7 +1394,7 @@ def _secrets_mancanti_in(compose: Path, secrets_root: Path,
         if (nome, percorso) in visti:
             continue                                # già segnalato da un altro compose
         visti.add((nome, percorso))
-        p = secrets_root / percorso.lstrip("./")
+        p = radice_repo / percorso.lstrip("./")
         # ⚠️ VUOTO = vuoto DOPO strip, non `st_size == 0` — difetto (e), riprodotto su
         # banco da b82df434: un file con solo «\n» (1 byte) o con spazi passava per
         # PIENO. Non è un caso di laboratorio: chi riempie un segreto a mano con un
