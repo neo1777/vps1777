@@ -2,6 +2,18 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.39.2] — 2026-07-20
+
+### Il container backup non dipende più da DOVE lanci l'update
+
+`compose.ops.backup.yaml` montava `${PWD}:/vps1777` — un'espansione d'ambiente,
+cioè la cwd del CHIAMANTE, non il repo. `vps1777 update` lanciato da `/root`
+montava `/root` sul container: «backup-container-setup.sh: no such file», compose
+up fallito, e l'auto-rollback rifalliva allo stesso modo (visto dal vivo, oggi).
+`--project-directory` non salva le espansioni d'ambiente; salva i path RELATIVI:
+il mount ora è `.:/vps1777` e si risolve sempre rispetto al repo.
+Workaround per chi è su ≤0.39.1: `cd /home/vps1777/vps1777 && vps1777 update`.
+
 ## [0.39.1] — 2026-07-20
 
 ### La pagina Update sa ricontrollare
