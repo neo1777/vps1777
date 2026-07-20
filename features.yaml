@@ -804,6 +804,49 @@ features:
       # Una voce che descrive un problema risolto è disinformazione a scoppio ritardato.
       file_contains: {path: tools/vps1777.py, pattern: "p.write_text(json.dumps({"}
 
+  - id: ops.secrets-assente-vs-illeggibile
+    nome: "«Assente» e «c'è ma non si legge» sono due cose, e il rimedio è opposto"
+    cosa: "⚠️ VOCE DI UN DIFETTO NOTO nel pre-flight 0.40.1, non di una funzione.
+           `_secrets_mancanti_in` calcola
+           `vuoto = not p.is_file() or not p.read_text(...).strip()` — e nell'`or`
+           **butta via l'informazione che aveva già**. Un file esistente ma illeggibile
+           (permessi, ACL, symlink rotto, mount) finisce nello stesso ramo di un file
+           assente: il messaggio dice «manca o è VUOTO» di un segreto **integro**, e
+           suggerisce il comando col `>` che **lo troncherebbe**. Cioè il rimedio
+           distrugge un segreto valido — la forma peggiore, perché il pre-flight esiste
+           per evitare che si perda tempo, non per far perdere un dato.
+           MISURATO: 3 segreti presenti e pieni, `chmod 000` su uno ⇒ 1 su 3 segnalato,
+           e la guardia N9 (radice sbagliata) NON scatta perché scatta solo se mancano
+           TUTTI. Nessuna attenuante.
+           RIMEDIO (per una release sua): separare i due rami invece di enumerare le
+           cause — `not p.is_file()` ⇒ ASSENTE, «crealo», il `>` è sicuro; esiste ma
+           non leggibile/vuoto ⇒ NON UTILIZZABILE, «c'è e non va bene», e il comando
+           col `>` NON si suggerisce. Non serve elencare permessi/ACL/mount: quella
+           lista sarebbe incompleta dal primo giorno.
+           ⭐ FORMA GENERALE: **un `or` fra due condizioni con rimedi diversi è una
+           perdita di informazione, non una semplificazione.** Il codice sapeva
+           distinguere e l'ha dimenticato in una riga.
+           ⚠️ PROCEDURA DI PROVA: il collaudo end-to-end toglie e rimette un segreto.
+           Va fatto con `mv` in entrambi i versi — `mv` preserva owner e permessi.
+           Con `cp` o ricreando il file si **produce** questo difetto sulla macchina
+           viva, dopo un update bloccato. Il modo più probabile in cui morderebbe non
+           è un evento raro: è una procedura scritta senza dire come."
+    dove: ["tools/vps1777.py#_secrets_mancanti_in"]
+    status: deferred
+    since: "0.40.1"
+    decisione: "20/07 — trovato da b82df434 dopo il tag, riprodotto da setaccio per
+                strada sua. NON corretto in 0.40.1: già pubblicata, e un fix per release."
+    follow_up:
+      manuale:
+        cosa: "Separare ASSENTE da NON-UTILIZZABILE in `_secrets_mancanti_in`, con due
+               messaggi distinti, e il comando generativo suggerito SOLO nel primo caso."
+        rivedi_dopo: "2026-08-31"
+    verify:
+      # Come per ops.update-progress-journal: si verifica che il DIFETTO ci sia ancora,
+      # così chi lo ripara trova il ledger rosso e aggiorna la voce invece di lasciarla
+      # a descrivere un problema chiuso.
+      file_contains: {path: tools/vps1777.py, pattern: "not p.is_file() or not p.read_text("}
+
   - id: archive.ts-source
     nome: "ts_source: il regime del dato, promosso da nota a schema"
     cosa: "Colonna su `messages` con tre valori: `messaggio` (istante reale), `data-export`
