@@ -13,8 +13,11 @@ contenuto, non dal nome):
     .zip claude.ai → export account (conversations.json + design_chats/ + projects/docs)
     .zip Telegram  → export Desktop JSON (result.json) o HTML (messages*.html),
                      anche in sottocartella ChatExport_*/
-    .zip generico  → zip di documenti .md/.txt (fallback): indicizza ogni doc
-                     dentro l'archivio, come se fosse un .md/.txt sciolto
+    .zip bundle    → bundle di Recupero Sessioni 1777 (MANIFEST.json + sessions/):
+                     sessioni come conversazioni, log MCP e workfiles-testo come
+                     documenti, binari censiti in `skipped`, copie in `sightings`
+    .zip generico  → zip di documenti/codice (fallback, whitelist _DOC_ZIP_EXTS):
+                     indicizza ogni doc dentro l'archivio, come un .md/.txt sciolto
     .json         → export Telegram Desktop (result.json) o sessione Claude Code
     .md / .txt    → testo/markdown generico (ponte per output di altri tool), spezzato in chunk
     (.db)         → NON qui: è un drop-in, si copia direttamente nella dir
@@ -35,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import re
 import sqlite3
@@ -59,6 +63,16 @@ class _Skip(NamedTuple):
     ts: str
 
 
+class _Sighting(NamedTuple):
+    """Un AVVISTAMENTO: «l'uuid X l'ho visto nella fonte Y». Emesso nello stream
+    come _Skip; `write_rows` lo instrada alla tabella `sightings`. Serve ai formati
+    dove lo stesso record vive in più path (il bundle di recupero-sessioni: la
+    stessa sessione in sessions/ e in un backup dentro workfiles/): la riga in
+    `messages` collassa per uuid, l'avvistamento conserva la topologia."""
+    uuid: str
+    source: str
+
+
 # ── tetti su input e decompressione (H39) ────────────────────────────────────
 #
 # LA LEZIONE, imparata a caro prezzo: **un limite su un input COMPRESSO non è un
@@ -75,17 +89,21 @@ class _Skip(NamedTuple):
 # centinaia di MB. Sono tetti anti-OOM, non quote di disciplina.
 
 MAX_MEMBER_BYTES = 512 * 1024 * 1024        # 512 MB — singolo file decompresso da uno zip
-MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB   — totale decompresso di UNO zip
+# 2 GB → 16 GB (2026-07-20): il bundle di recupero-sessioni-1777 (sessioni + log MCP
+# + workfiles di un disco reale) decomprime a ~5 GB legittimi. Resta un tetto
+# anti-OOM: i membri passano comunque da _read_capped, uno per volta.
+MAX_ARCHIVE_BYTES = 16 * 1024 * 1024 * 1024  # 16 GB — totale decompresso di UNO zip
 MAX_FILE_BYTES = 512 * 1024 * 1024          # 512 MB — singolo .jsonl/.json/.md/.txt su disco
 MAX_PDF_BYTES = 256 * 1024 * 1024           # 256 MB — PDF su disco
 MAX_PDF_PAGES = 10_000                      # pypdf non ha tetti: un PDF può dichiarare milioni di pagine
 MAX_PDF_TEXT_CHARS = 64 * 1024 * 1024       # 64 M caratteri estratti da un PDF
 MAX_ZIP_MEMBERS = 100_000                   # zip-bomb "a tanti file piccoli"
 
-# Cap sull'UPLOAD (byte scritti su disco dall'handler). Definito QUI perché il
-# tetto e la logica che lo motiva vivono insieme; l'handler `/admin/archive` sta
-# in admin.py e oggi NON lo applica — vedi la nota nel report.
-MAX_UPLOAD_BYTES = 1024 * 1024 * 1024       # 1 GB
+# Cap sull'UPLOAD (byte scritti su disco dall'handler /admin/archive, che LO APPLICA
+# contando i byte mentre li scrive). 1 GB → 4 GB (2026-07-20): il bundle reale con
+# workfiles è 2,6 GB compressi e moriva qui con "upload troppo grande". Il disco
+# della VPS deve avere spazio per upload + DB: verificare prima dei giganti.
+MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024   # 4 GB
 
 _READ_CHUNK = 1024 * 1024  # 1 MB
 
@@ -208,6 +226,19 @@ CREATE TABLE IF NOT EXISTS meta(
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+-- Gli AVVISTAMENTI (2026-07-20): dove ogni uuid è stato visto, una riga per fonte.
+-- I doppioni per uuid collassano in `messages` (giusto: la ricerca non deve
+-- restituire 10 copie della stessa riga) — ma il FATTO che una copia esistesse
+-- anche in un altro path è informazione: "questo file prima era in una cartella,
+-- poi in un'altra" si legge SOLO da qui. Il collasso resta, la topologia no.
+--   SELECT uuid, group_concat(source, ' | ') FROM sightings
+--   GROUP BY uuid HAVING count(*) > 1;   -- gli incroci
+CREATE TABLE IF NOT EXISTS sightings(
+    uuid        TEXT,
+    source      TEXT,
+    ingest_date TEXT,
+    PRIMARY KEY (uuid, source)
+);
 """
 # NOTA sullo schema FTS — perché `tools` sì e `thinking` no.
 #
@@ -260,6 +291,7 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         n = 0
         buf: list[RowFull] = []
         skip_buf: list[tuple] = []
+        sight_buf: list[tuple] = []
         ingest_date = _now_iso()
 
         def flush() -> None:
@@ -280,6 +312,15 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
                 )
                 skip_buf.clear()
 
+        def flush_sightings() -> None:
+            if sight_buf:
+                # OR IGNORE su (uuid, source): rivedere la stessa copia non duplica.
+                conn.executemany(
+                    "INSERT OR IGNORE INTO sightings(uuid, source, ingest_date)"
+                    " VALUES (?,?,?)", sight_buf,
+                )
+                sight_buf.clear()
+
         for row in rows:
             if isinstance(row, _Skip):
                 skip_buf.append((_uid(row.source, row.reason, row.detail[:200], row.ts),
@@ -287,12 +328,18 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
                 if len(skip_buf) >= batch:
                     flush_skips()
                 continue
+            if isinstance(row, _Sighting):
+                sight_buf.append((row.uuid, row.source[:500], ingest_date))
+                if len(sight_buf) >= batch:
+                    flush_sightings()
+                continue
             buf.append(_pad(row))
             n += 1
             if len(buf) >= batch:
                 flush()
         flush()
         flush_skips()
+        flush_sightings()
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
         conn.commit()
         return n
@@ -426,6 +473,10 @@ def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
                 out["skipped"] = int(conn.execute("SELECT count(*) FROM skipped").fetchone()[0])
             except sqlite3.OperationalError:
                 pass  # DB precedente alla tabella skipped
+            try:
+                out["sightings"] = int(conn.execute("SELECT count(*) FROM sightings").fetchone()[0])
+            except sqlite3.OperationalError:
+                out["sightings"] = 0  # DB precedente alla tabella sightings
             try:
                 r = conn.execute("SELECT value FROM meta WHERE key = 'description'").fetchone()
                 out["description"] = (r[0] if r and r[0] else "")
@@ -1108,10 +1159,22 @@ def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str],
 # ── estrattore: zip di documenti generici (.md/.txt) ─────────────────────────
 
 # Le estensioni-testo che un "zip di documenti" può contenere: la stessa "porta"
-# di _iter_text (.md/.txt), estesa a uno zip. NON i formati-conversazione
-# (.json/.jsonl sono ambigui — Telegram vs Claude Code — e li disambigua
-# index_file sul singolo file; qui darebbero falsi positivi).
-_DOC_ZIP_EXTS = (".md", ".markdown", ".txt", ".text")
+# di _iter_text (.md/.txt), estesa a uno zip — e ALLARGATA AL CODICE (2026-07-20,
+# richiesta esplicita: «indicizziamo il più possibile, poi decidiamo cosa prunare»).
+# Il codice sorgente È testo cercabile: il nome di una funzione, un TODO, una
+# stringa d'errore. NON i formati-conversazione (.json/.jsonl restano ambigui —
+# Telegram vs Claude Code — e li disambigua index_file sul singolo file; dentro il
+# BUNDLE li tratta _iter_bundle_zip con l'euristica sul contenuto).
+_DOC_ZIP_EXTS = (
+    ".md", ".markdown", ".txt", ".text", ".rst", ".adoc",
+    # codice
+    ".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".ts", ".tsx", ".jsx",
+    ".dart", ".c", ".h", ".cpp", ".hpp", ".cc", ".java", ".kt", ".rs", ".go",
+    ".rb", ".php", ".swift", ".lua", ".pl", ".r", ".sql", ".gd", ".tex",
+    # markup / config / dati leggibili
+    ".html", ".htm", ".css", ".xml", ".svg", ".yaml", ".yml", ".toml",
+    ".ini", ".cfg", ".conf", ".env.example", ".csv", ".tsv", ".log",
+)
 
 
 def _zipinfo_ts(info: zipfile.ZipInfo) -> str:
@@ -1158,6 +1221,159 @@ def _iter_docs_zip(zip_path: Union[str, Path], members: list[str],
             yield from _chunk_rows(text, name, _zipinfo_ts(info), name)
 
 
+# ── estrattore: bundle recupero-sessioni-1777 (.zip) ─────────────────────────
+# Il «scarica tutto» dell'app locale di recupero sessioni: un solo zip con
+#   sessions/<sid>.jsonl          conversazioni Claude Code (verbatim, dedup, __fN)
+#   mcp-logs/<sid>/<server>/…     log dei server MCP collegati
+#   workfiles/<cwd-encoded>/…     artefatti delle cartelle di lavoro (opzionali)
+#   inventario/ + MANIFEST.json/md
+# Riconoscibile da MANIFEST.json + sessions/. Principi (2026-07-20, con Neo):
+#   - indicizzare IL PIÙ POSSIBILE («poi decidiamo cosa prunare»): sessioni come
+#     conversazioni, log e workfiles-testo come documenti chunked, codice incluso;
+#   - i DOPPIONI collassano in `messages` ma ogni copia lascia un AVVISTAMENTO
+#     (tabella sightings) col path del membro: gli incroci («questo file prima era
+#     in una cartella, poi in un'altra») diventano query-abili;
+#   - i binari (zip/db/dill/so/immagini…) non hanno testo da cercare: NIENTE FTS,
+#     ma una LAPIDE per ciascuno in `skipped` (reason='non-testo', detail=path) —
+#     l'inventario del «materiale nascosto» resta interrogabile, niente sparisce.
+
+
+def _sniff_jsonl_kind(head: str) -> str:
+    """'cc' | 'mcp-log' | 'text' dalle prime righe di un .jsonl trovato nei
+    workfiles (lì l'estensione non basta: backup di sessioni, log e dati veri
+    convivono nella stessa cartella)."""
+    if ('"type":"user"' in head or '"type":"assistant"' in head
+            or '"type": "user"' in head or '"type": "assistant"' in head):
+        return "cc"
+    if '"sessionId"' in head:
+        return "mcp-log"
+    return "text"
+
+
+def _iter_cc_member(z: zipfile.ZipFile, name: str, project: str = "") -> Iterator:
+    """Sessione Claude Code dentro uno zip: streaming per riga (il tetto per-membro
+    è quello interno di _iter_claude_code) + un avvistamento per ogni riga tenuta."""
+    with z.open(name) as f:
+        fh = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
+        for item in _iter_claude_code(fh, project):
+            yield item
+            if not isinstance(item, _Skip):
+                yield _Sighting(str(item[0]), name)
+
+
+def _iter_cc_text(text: str, name: str) -> Iterator:
+    """Come _iter_cc_member, ma da testo già in RAM (i .jsonl dei workfiles
+    passano prima dallo sniff, che li ha già letti)."""
+    for item in _iter_claude_code(io.StringIO(text), ""):
+        yield item
+        if not isinstance(item, _Skip):
+            yield _Sighting(str(item[0]), name)
+
+
+def _workfile_label(name: str) -> str:
+    """Etichetta-progetto per un membro workfiles/: la cartella-cwd (primo livello
+    sotto workfiles/), non il path intero — le etichette devono restare contabili.
+    Il path completo resta cercabile: è la prima riga del contenuto e la fonte
+    dell'avvistamento/lapide."""
+    parts = name.split("/")
+    return f"workfile:{parts[1]}" if len(parts) > 2 else "workfile"
+
+
+def _iter_pdf_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator:
+    """PDF da bytes (membro di zip): stessi tetti di _iter_pdf, stessa resa a chunk.
+    pypdf assente o PDF rotto → lapide, mai un crash dell'intero bundle."""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(raw))
+        if len(reader.pages) > MAX_PDF_PAGES:
+            yield _Skip("bundle-workfiles", "pdf-troppe-pagine", name, ts)
+            return
+        pages: list[str] = []
+        chars = 0
+        for page in reader.pages:
+            try:
+                txt = page.extract_text() or ""
+            except Exception:  # noqa: BLE001 — pagina malformata: si salta
+                continue
+            chars += len(txt)
+            if chars > MAX_PDF_TEXT_CHARS:
+                break
+            pages.append(txt)
+        text = "\n\n".join(pages).strip()
+        if text:
+            yield from _chunk_rows(f"[{name}]\n{text}", label, ts, name)
+        else:
+            yield _Skip("bundle-workfiles", "pdf-senza-testo", name, ts)
+    except Exception as exc:  # noqa: BLE001 — ImportError/PdfReadError/…
+        yield _Skip("bundle-workfiles", "pdf-illeggibile", f"{name}: {exc}", ts)
+
+
+def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
+    with zipfile.ZipFile(zip_path) as z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        for name in names:
+            ext = Path(name).suffix.lower()
+            top = name.split("/", 1)[0]
+            if top == "sessions" and ext == ".jsonl":
+                yield from _iter_cc_member(z, name)
+            elif top == "mcp-logs":
+                # log MCP → documento chunked cercabile, col server nell'etichetta.
+                # Chunk larghi (4000): righe JSON dense, meno righe-indice.
+                info = z.getinfo(name)
+                with z.open(info) as f:
+                    raw = _read_capped(f, name, budget)
+                parts = name.split("/")
+                server = parts[2] if len(parts) >= 4 else "mcp"
+                yield from _chunk_rows(raw.decode("utf-8", errors="replace"),
+                                       f"mcp-log:{server}", _zipinfo_ts(info), name,
+                                       chunk_chars=4000)
+            elif top == "workfiles":
+                info = z.getinfo(name)
+                ts = _zipinfo_ts(info)
+                label = _workfile_label(name)
+                if ext in (".jsonl", ".json"):
+                    with z.open(info) as f:
+                        raw = _read_capped(f, name, budget)
+                    text = raw.decode("utf-8", errors="replace")
+                    kind = _sniff_jsonl_kind(text[:20000])
+                    if kind == "cc":
+                        # un backup di sessione dentro i workfiles: si indicizza
+                        # come CONVERSAZIONE (collassa per uuid con la copia di
+                        # sessions/) e l'avvistamento registra il path — l'incrocio.
+                        yield from _iter_cc_text(text, name)
+                    else:
+                        yield from _chunk_rows(text, label, ts, name, chunk_chars=4000)
+                elif ext in _DOC_ZIP_EXTS:
+                    with z.open(info) as f:
+                        raw = _read_capped(f, name, budget)
+                    body = f"[{name}]\n" + raw.decode("utf-8", errors="replace")
+                    yield from _chunk_rows(body, label, ts, name)
+                elif ext == ".pdf":
+                    with z.open(info) as f:
+                        raw = _read_capped(f, name, budget, cap=MAX_PDF_BYTES)
+                    yield from _iter_pdf_bytes(raw, name, label, ts)
+                else:
+                    # binario / fuori whitelist: lapide col path, contata.
+                    yield _Skip("bundle-workfiles", "non-testo", name, ts)
+            elif name == "inventario/inventario-sessioni.tsv":
+                info = z.getinfo(name)
+                with z.open(info) as f:
+                    raw = _read_capped(f, name, budget)
+                yield from _chunk_rows(raw.decode("utf-8", errors="replace"),
+                                       "inventario", _zipinfo_ts(info), name,
+                                       chunk_chars=4000)
+            elif name == "MANIFEST.md":
+                info = z.getinfo(name)
+                with z.open(info) as f:
+                    raw = _read_capped(f, name, budget)
+                yield from _chunk_rows(raw.decode("utf-8", errors="replace"),
+                                       "manifest", _zipinfo_ts(info), name)
+            else:
+                # MANIFEST.json / inventario-sessioni.json: ridondanti con le
+                # versioni leggibili già indicizzate — dichiarati, non spariti.
+                yield _Skip("bundle", "non-indicizzato-ridondante", name, "")
+
+
 # ── dispatch ─────────────────────────────────────────────────────────────────
 
 SUPPORTED = (".jsonl", ".zip", ".md", ".txt", ".json", ".pdf")
@@ -1180,7 +1396,12 @@ def _index_zip(path: Path, db_path: Union[str, Path]) -> int:
     telegram_jsons = [n for n in names if Path(n).name == "result.json"]
     telegram_htmls = [n for n in names
                       if re.fullmatch(r"messages\d*\.html", Path(n).name)]
-    if "conversations.json" in names or any(
+    if "MANIFEST.json" in names and any(n.startswith("sessions/") for n in names):
+        # bundle di recupero-sessioni-1777: PRIMA degli altri check — contiene .md
+        # che il fallback docs mangerebbe, ignorando sessioni e log.
+        n, kind = (write_rows(db_path, _iter_bundle_zip(path, budget)),
+                   "bundle recupero-sessioni-1777")
+    elif "conversations.json" in names or any(
             n.startswith(("design_chats/", "projects/")) for n in names):
         n, kind = write_rows(db_path, _iter_claude_zip(path, budget)), "export claude.ai"
     elif telegram_jsons:
