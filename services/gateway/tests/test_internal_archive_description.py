@@ -91,3 +91,31 @@ def test_scrive_solo_la_description_e_nulla_altro():
 def test_la_rotta_e_registrata():
     assert '"/internal/archive/description"' in SRC
     assert 'methods=["POST"]' in SRC[SRC.index("/internal/archive/description"):][:120]
+
+
+def test_usa_un_segreto_DEDICATO_e_non_quello_del_canale_nlm():
+    """La proprietà che il design vietava e che l'implementazione ha violato lo stesso.
+
+    `gateway_secret` apre anche `/internal/nlm/*`, cioè stato E INSTALLAZIONE dei
+    profili-cookie Google. Montarlo su archive-mcp — per una feature che scrive un
+    campo di testo — significa che un archive-mcp compromesso eredita QUEI poteri.
+    Il design consolidato lo escludeva a lettere chiare; la prima implementazione
+    l'ha fatto comunque, e nessun test poteva accorgersene perché **nessun test
+    copriva la scelta del segreto**: la suite verificava che il confronto fosse
+    constant-time e fail-closed, cioè COME si confronta, mai QUALE segreto.
+    Trovato da setaccio confrontando il compose col design. Questa guardia esiste
+    perché non serva più un umano per accorgersene.
+    """
+    assert "effective_archive_desc_secret" in CODICE, "deve usare il segreto dedicato"
+    assert "effective_gateway_secret" not in CODICE, \
+        "gateway_secret apre anche /internal/nlm/*: qui è un ampliamento di privilegio"
+
+
+def test_il_segreto_dedicato_non_ha_fallback_silenzioso():
+    """Un `or self.gateway_secret` in fondo alla property rimetterebbe in piedi
+    l'ampliamento di privilegio senza che nessuno lo noti: fail-closed, non
+    fail-back."""
+    src = (Path(__file__).resolve().parents[1] / "app" / "settings.py").read_text(encoding="utf-8")
+    prop = src[src.index("def effective_archive_desc_secret"):]
+    prop = prop[:prop.index("\n\n")] if "\n\n" in prop else prop
+    assert "gateway_secret" not in prop.split('"""')[-1], "nessun fallback su gateway_secret"

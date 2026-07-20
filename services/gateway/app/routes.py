@@ -101,8 +101,9 @@ async def internal_archive_description(request: Request) -> JSONResponse:
         audit({"event": "archive_desc_denied", "reason": "not_internal"})
         return JSONResponse({"error": "not_found"}, status_code=404)
 
-    atteso = s.effective_gateway_secret
-    got = request.headers.get("x-vps1777-internal", "")
+    # segreto DEDICATO, non quello del canale nlm: privilegio minimo fra servizi.
+    atteso = s.effective_archive_desc_secret
+    got = request.headers.get("x-vps1777-archive-desc", "")
     if not atteso or not hmac.compare_digest(got, atteso):
         audit({"event": "archive_desc_denied", "reason": "secret"})
         return JSONResponse({"error": "not_found"}, status_code=404)

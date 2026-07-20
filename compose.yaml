@@ -84,11 +84,13 @@ services:
       OAUTH_PWD_HASH_FILE: /run/secrets/admin_password_bcrypt
       GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
       OAUTH_SIGNING_SECRET_FILE: /run/secrets/oauth_signing_secret
+      ARCHIVE_DESC_SECRET_FILE: /run/secrets/archive_desc_secret
     secrets:
       - gateway_secret
       - oauth_signing_secret
       - admin_password_bcrypt
       - telegram_bot_token
+      - archive_desc_secret
     volumes:
       - gateway-data:/var/lib/gateway
       # NIENTE nlm-auth (H6): il gateway è l'unico servizio esposto su Internet e
@@ -137,10 +139,10 @@ services:
       # Il mount resta :ro: questo servizio continua a non poter scrivere, e la
       # scrittura passa da chi ne ha il diritto — invece di essere promessa da
       # un tool che non poteva mantenerla.
-      GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
+      ARCHIVE_DESC_SECRET_FILE: /run/secrets/archive_desc_secret
       GATEWAY_INTERNAL_BASE: http://gateway:8080
     secrets:
-      - gateway_secret
+      - archive_desc_secret
     volumes:
       # SOLA LETTURA (H42): archive-mcp legge e basta — apre SQLite con
       # `mode=ro` (app/db.py). Prima il :rw glielo permetteva comunque: la
@@ -277,6 +279,11 @@ volumes:
 secrets:
   gateway_secret:
     file: ./secrets/gateway_secret.txt
+  # D9 — canale set_description (archive-mcp → gateway). Deliberatamente SEPARATO
+  # da gateway_secret: quello apre anche /internal/nlm/* (profili Google), e una
+  # feature che scrive un campo di testo non deve portarsi dietro quel potere.
+  archive_desc_secret:
+    file: ./secrets/archive_desc_secret.txt
   oauth_signing_secret:
     file: ./secrets/oauth_signing_secret.txt
   admin_password_bcrypt:

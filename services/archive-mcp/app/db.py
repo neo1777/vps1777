@@ -379,12 +379,12 @@ def set_description(db: str, description: str) -> dict[str, Any]:
         # chiama lo scopre subito invece di credere di aver scritto.
         raise RuntimeError(
             "set_description non configurata: manca il segreto interno "
-            "(GATEWAY_SECRET/GATEWAY_SECRET_FILE) — la scrittura passa dal gateway."
+            "(ARCHIVE_DESC_SECRET/_FILE) — la scrittura passa dal gateway."
         )
     req = urllib.request.Request(
         f"{base}/internal/archive/description",
         data=json.dumps({"db": db, "description": str(description)}).encode("utf-8"),
-        headers={"Content-Type": "application/json", "x-vps1777-internal": secret},
+        headers={"Content-Type": "application/json", "x-vps1777-archive-desc": secret},
         method="POST",
     )
     try:
@@ -400,10 +400,10 @@ def set_description(db: str, description: str) -> dict[str, Any]:
 
 def _leggi_segreto() -> str:
     """Il segreto interno, da variabile o da file (come fa il gateway)."""
-    v = os.environ.get("GATEWAY_SECRET", "").strip()
+    v = os.environ.get("ARCHIVE_DESC_SECRET", "").strip()
     if v:
         return v
-    p = os.environ.get("GATEWAY_SECRET_FILE", "").strip()
+    p = os.environ.get("ARCHIVE_DESC_SECRET_FILE", "").strip()
     if p:
         try:
             return Path(p).read_text(encoding="utf-8").strip()

@@ -123,6 +123,15 @@ class Settings(BaseSettings):
     gateway_secret_file: SecretFromFile = ""
     gateway_secret: str = ""  # override via env in dev
 
+    # D9 — segreto DEDICATO al canale archive-mcp → gateway (set_description).
+    # Perché non si riusa `gateway_secret`: quello apre `/internal/nlm/*`, cioè
+    # stato E INSTALLAZIONE dei profili-cookie Google. Montarlo su archive-mcp
+    # significherebbe che un archive-mcp compromesso eredita QUEI poteri, per una
+    # feature che deve solo scrivere un campo di testo. Il principio del privilegio
+    # minimo vale anche fra i nostri servizi: si riusa il PATTERN, non il segreto.
+    archive_desc_secret_file: SecretFromFile = ""
+    archive_desc_secret: str = ""
+
     # ───── OAuth ─────
     oauth_required: bool = True
     oauth_access_token_lifetime: int = 900
@@ -166,6 +175,14 @@ class Settings(BaseSettings):
     @property
     def effective_gateway_secret(self) -> str:
         return self.gateway_secret or self.gateway_secret_file
+
+    @property
+    def effective_archive_desc_secret(self) -> str:
+        """Il segreto del canale set_description. NESSUN fallback su
+        gateway_secret: se non è configurato, la scrittura non parte (fail-closed).
+        Un fallback silenzioso qui rimetterebbe in piedi proprio l'ampliamento di
+        privilegio che questo campo esiste per evitare."""
+        return self.archive_desc_secret or self.archive_desc_secret_file
 
     @property
     def effective_signing_secret(self) -> str:
