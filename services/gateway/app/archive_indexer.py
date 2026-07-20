@@ -195,10 +195,16 @@ CREATE TABLE IF NOT EXISTS messages(
     --                 è la data della FOTOGRAFIA, non del contenuto (le voci `memory:*`
     --                 e `account:user` arrivano senza ts e i filtri temporali le
     --                 saltavano IN SILENZIO — un namespace intero invisibile a `since=`).
+    -- 'ignoto'      = righe migrate da un DB nato prima di questa colonna: il regime NON
+    --                 è conosciuto e non si indovina (vedi _ensure_v2).
     -- Serve a non fabbricare la bugia opposta: una memory di maggio fotografata a luglio
-    -- NON "è successa a luglio". Chi calcola il `newest` deve filtrare:
-    --     MAX(ts) WHERE ts_source='messaggio'
-    -- altrimenti l'archivio dichiara un istante in cui nessun messaggio è mai esistito.
+    -- NON "è successa a luglio". Chi calcola il `newest` deve filtrare **in negativo**:
+    --     MAX(ts) WHERE ts_source <> 'data-export'
+    -- e NON `WHERE ts_source='messaggio'`: quest'ultima escluderebbe tutte le righe 'ignoto'
+    -- (cioè quasi tutto, sui DB migrati) e darebbe un newest troppo VECCHIO. La forma
+    -- negativa esclude solo ciò che sappiamo essere sintetico — l'unica cosa di cui siamo
+    -- certi — e lascia passare il resto. Regola generale: quando il default è l'ignoranza,
+    -- il filtro si scrive su ciò che si SA, non su ciò che si presume.
     ts_source   TEXT DEFAULT 'messaggio'
 );
 -- REVISIONI (D18, scelta di Neo 20/07: «cambio di schema: conservare le revisioni»).
@@ -305,6 +311,10 @@ def _pad(row: tuple) -> RowFull:
 
 
 def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int = 500) -> int:
+    # ⚠️ `batch` è ACCOPPIATO a _salva_revisioni(), che costruisce `WHERE uuid IN (?,…)` con un
+    # parametro per riga: alzarlo oltre SQLITE_LIMIT_VARIABLE_NUMBER (250.000 qui, misurato)
+    # romperebbe l'ingest **solo sui carichi grossi**, cioè quando serve. Margine attuale 500×.
+    # Segnalato da b82df434 come accoppiamento implicito: chi lo alza deve guardare anche lì.
     """Scrive/aggiorna le righe in db_path e ricostruisce l'FTS. Ritorna #righe.
 
     Riusabile da qualunque estrattore (server-side o locale). `rows` è un
@@ -435,6 +445,17 @@ def _ensure_v2(conn: sqlite3.Connection) -> bool:
     ts_src_missing = "ts_source" not in have
     if ts_src_missing:
         conn.execute("ALTER TABLE messages ADD COLUMN ts_source TEXT DEFAULT 'messaggio'")
+        # ⚠️ E SUBITO DOPO, le righe PREESISTENTI vanno marcate 'ignoto' (b82df434, 2ª lettura
+        # 20/07 — finding bloccante prima del merge). L'ALTER con DEFAULT assegna 'messaggio'
+        # a TUTTO ciò che è già in tabella, comprese le `memory:*` e `account:user` — che NON
+        # sono messaggi: sono gli slot riscrivibili senza ts, cioè **il motivo per cui questa
+        # colonna esiste**. Lasciarlo così avrebbe fabbricato, in un colpo solo e su nove
+        # archivi vivi, esattamente la bugia che il campo doveva impedire — e con l'aria di un
+        # dato verificato, perché un campo popolato sembra sempre popolato apposta.
+        # Di quelle righe NON SAPPIAMO il regime: 'ignoto' è l'unica etichetta vera. Il regime
+        # reale si conosce solo al momento dell'ingest, quindi si assegna quando le righe
+        # vengono ri-scritte da write_rows, non indovinandolo a posteriori con una UPDATE.
+        conn.execute("UPDATE messages SET ts_source='ignoto'")
     # la tabella `revisions` (D18) è CREATE IF NOT EXISTS nello _SCHEMA: eseguirlo basta
     # a dotarne anche i DB vecchi, senza toccare `messages`.
     if not missing:

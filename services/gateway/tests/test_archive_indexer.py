@@ -1100,5 +1100,63 @@ def test_migrazione_db_preesistente_non_perde_dati(tmp_path):
     write_rows(db, [_riga("new", "nuovo")])
     with sqlite3.connect(db) as c:
         assert c.execute("SELECT content FROM messages WHERE uuid='old'").fetchone()[0] == "storico"
-        assert c.execute("SELECT ts_source FROM messages WHERE uuid='old'").fetchone()[0] == "messaggio"
+        # ⚠️ Questa riga asseriva 'messaggio' e PASSAVA: il test codificava il difetto che
+        # b82df434 ha poi trovato in 2ª lettura (una riga migrata NON è un messaggio noto —
+        # può essere una memory). Un test verde che certifica il comportamento sbagliato è
+        # peggio di nessun test: dà la conferma che nessuno andrà a ricontrollare.
+        assert c.execute("SELECT ts_source FROM messages WHERE uuid='old'").fetchone()[0] == "ignoto"
         c.execute("SELECT count(*) FROM revisions")   # la tabella ora esiste
+
+
+def test_migrazione_non_dichiara_messaggio_cio_che_non_sa(tmp_path):
+    """Finding bloccante di b82df434 (2ª lettura, 20/07), prima del merge.
+
+    `ALTER TABLE … ADD COLUMN ts_source DEFAULT 'messaggio'` assegna 'messaggio'
+    a TUTTE le righe già in tabella — comprese `memory:*` e `account:user`, che
+    NON sono messaggi ma slot riscrivibili: cioè proprio ciò per cui la colonna
+    esiste. Sarebbe stata la bugia opposta, scritta in un colpo solo su nove
+    archivi vivi, e con l'aria di un dato verificato.
+    Il regime di una riga preesistente NON è conoscibile a posteriori: 'ignoto'
+    è l'unica etichetta vera.
+    """
+    from archive_indexer import write_rows
+    db = tmp_path / "mig.db"
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT,"
+            " sender TEXT DEFAULT '', tools TEXT DEFAULT '', thinking TEXT DEFAULT '',"
+            " attachments TEXT DEFAULT '', parent_uuid TEXT DEFAULT '');")
+        c.execute("INSERT INTO messages(uuid,project,ts,content)"
+                  " VALUES('mem','memory:conversations','','slot riscrivibile')")
+        c.execute("INSERT INTO messages(uuid,project,ts,content)"
+                  " VALUES('msg','proj:x','2026-05-01','un messaggio vero')")
+    write_rows(db, [_riga("nuovo", "scritto ora")])
+    with sqlite3.connect(db) as c:
+        reg = dict(c.execute("SELECT uuid, ts_source FROM messages"))
+    assert reg["mem"] == "ignoto", "una memory migrata NON può risultare 'messaggio'"
+    assert reg["msg"] == "ignoto", "nemmeno una riga vera: il regime non si indovina a posteriori"
+    assert reg["nuovo"] == "messaggio", "ciò che entra ORA dall'ingest ha il regime noto"
+
+
+def test_newest_si_calcola_in_negativo(tmp_path):
+    """Corollario del fix: il filtro per il `newest` va scritto su ciò che si SA
+    (`<> 'data-export'`), non su ciò che si presume (`= 'messaggio'`).
+
+    Con la forma positiva, su un DB migrato le righe 'ignoto' sparirebbero dal
+    calcolo — cioè quasi tutte — e il newest risulterebbe troppo VECCHIO.
+    """
+    from archive_indexer import write_rows
+    db = tmp_path / "new.db"
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT,"
+            " sender TEXT DEFAULT '', tools TEXT DEFAULT '', thinking TEXT DEFAULT '',"
+            " attachments TEXT DEFAULT '', parent_uuid TEXT DEFAULT '');")
+        c.execute("INSERT INTO messages(uuid,project,ts,content)"
+                  " VALUES('vecchio','p','2026-07-19T10:00:00Z','recente ma migrato')")
+    write_rows(db, [_riga("nuovo", "meno recente", "2026-01-01T00:00:00Z")])
+    with sqlite3.connect(db) as c:
+        negativo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source <> 'data-export'").fetchone()[0]
+        positivo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source = 'messaggio'").fetchone()[0]
+    assert negativo == "2026-07-19T10:00:00Z"   # vede anche gli 'ignoto': corretto
+    assert positivo == "2026-01-01T00:00:00Z"   # la forma positiva mente: troppo vecchio
