@@ -1166,7 +1166,13 @@ def test_newest_si_calcola_in_negativo(tmp_path):
     write_rows(db, [_riga("nuovo", "meno recente", "2026-01-01T00:00:00Z")])
     with sqlite3.connect(db) as c:
         negativo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source <> 'data-export'").fetchone()[0]
-    # Con la terza via il newest è corretto su ENTRAMBE le forme (la riga migrata con ts pieno
-    # è 'messaggio'): il contro-difetto sollevato da setaccio non si manifesta. Resta la forma
-    # negativa quella giusta, perché è l'unica che non dipende da quali etichette esistono oggi.
-    assert negativo == "2026-07-19T10:00:00Z"
+        positivo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source = 'messaggio'").fetchone()[0]
+    assert negativo == "2026-07-19T10:00:00Z", "la forma negativa vede le righe 'ignoto': corretta"
+    # ⚠️ QUESTO SECONDO ASSERT È IL CUORE DEL TEST, non un di più (b82df434, 20/07).
+    # In un giro di refactoring era stato tolto, lasciando solo la verifica che la forma GIUSTA
+    # funzioni. Ma `= 'messaggio'` è la forma più naturale da scrivere — era la mia prima
+    # versione — e senza questa riga la suite resterebbe VERDE mentre qualcuno la "semplifica",
+    # riportando il difetto. Un test che protegge un comportamento ma non la DECISIONE che c'è
+    # sotto lascia scoperto proprio ciò che è costato tre giri e due bocciature.
+    assert positivo != negativo, "la forma positiva DEVE sbagliare: esclude le righe 'ignoto'"
+    assert positivo == "2026-01-01T00:00:00Z", "…e sbaglia dando un newest troppo VECCHIO"
