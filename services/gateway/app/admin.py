@@ -920,42 +920,36 @@ async def update_view(request: Request) -> Response:
     excerpt = status.get("changelog_excerpt", "")
     upgrade = bool(latest) and version_gt(str(latest), current)
 
-    if check_err:
+    # La DECISIONE (quale verdetto, e con che età) sta in admin_core, dove i
+    # test la guardano; qui resta solo la resa. Prima viveva tutta in questi
+    # rami e nessun test del gateway importa questo file.
+    classe, ore = admin_core.classe_verdetto_update(
+        current, latest, checked, check_err, piu_recente=version_gt)
+    if classe == "errore-check":
         head = ('<div class="kicker"><span class="dot warn"></span>'
                 f'Ultimo check fallito ({html.escape(str(check_err))}) — dato stantio.</div>')
-    elif upgrade:
+    elif classe == "aggiornamento":
         head = ('<div class="kicker"><span class="dot warn"></span>'
                 f'Aggiornamento disponibile: <strong>v{html.escape(str(latest))}</strong>'
                 f' (sei alla {html.escape(current)}).</div>')
-    elif latest and str(latest) != current:
+    elif classe == "latest-piu-vecchia":
         head = ('<div class="kicker"><span class="dot ok"></span>'
                 f'Sei alla v{html.escape(current)} — l\'ultima release nota '
                 f'(v{html.escape(str(latest))}) è più vecchia: check stantio, '
                 'nessun aggiornamento.</div>')
-    elif latest:
-        # Il verdetto porta la propria ETÀ, non solo la data accanto. «Sei alla
-        # versione più recente» è vero all'istante del check e invecchia in
-        # silenzio: il timer gira una volta al giorno, quindi può avere fino a
-        # ~24h — e da H50 il gateway non ha più uscita Internet, cioè non esiste
-        # più un modo di forzare il refresh dalla pagina. La data c'era già,
-        # stampata sotto in grigio: ma il perimetro scritto ACCANTO a un dato non
-        # è il perimetro incorporato nel VERDETTO, ed è il verdetto che si legge.
-        ore = admin_core.ore_da(checked)
-        if ore is None:
-            head = ('<div class="kicker"><span class="dot ok"></span>'
-                    'Sei alla versione più recente '
-                    '<em>(data dell\'ultimo controllo non leggibile)</em>.</div>')
-        elif ore >= 26:
-            # oltre il periodo del timer + un margine: non è «dato vecchio», è
-            # «il controllo non sta girando». Due cose diverse, due rimedi diversi.
-            head = ('<div class="kicker"><span class="dot warn"></span>'
-                    f'Ultimo controllo {ore} ore fa, più del ciclo giornaliero: '
-                    'il controllo automatico potrebbe non essere attivo '
-                    '(<code>systemctl status vps1777-check-update.timer</code>). '
-                    f'A quel momento eri alla v{html.escape(current)}, l\'ultima.</div>')
-        else:
-            head = ('<div class="kicker"><span class="dot ok"></span>'
-                    f'Sei alla versione più recente — controllato {ore} ore fa.</div>')
+    elif classe == "data-illeggibile":
+        head = ('<div class="kicker"><span class="dot ok"></span>'
+                'Sei alla versione più recente '
+                '<em>(data dell\'ultimo controllo non leggibile)</em>.</div>')
+    elif classe == "timer-fermo":
+        head = ('<div class="kicker"><span class="dot warn"></span>'
+                f'Ultimo controllo {ore} ore fa, più del ciclo giornaliero: '
+                'il controllo automatico potrebbe non essere attivo '
+                '(<code>systemctl status vps1777-check-update.timer</code>). '
+                f'A quel momento eri alla v{html.escape(current)}, l\'ultima.</div>')
+    elif classe == "aggiornato":
+        head = ('<div class="kicker"><span class="dot ok"></span>'
+                f'Sei alla versione più recente — controllato {ore} ore fa.</div>')
     else:
         head = ('<div class="kicker"><span class="dot off"></span>'
                 'Nessun check ancora eseguito (il timer gira una volta al giorno).</div>')

@@ -207,3 +207,73 @@ def test_ore_da_non_torna_mai_negativo():
     # produzione, e a quel punto la pagina ha già mentito.
     base = calendar.timegm(time.strptime("2026-07-26T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ"))
     assert admin_core.ore_da("2026-07-26T14:00:00Z", now=base) == 0
+
+
+# ── classe_verdetto_update: cosa legge l'admin nella card aggiornamenti ──────
+# Misurato il 26/07 (71d540e6): ZERO test in tutto il repo nominavano
+# update_check / update_status / _fetch / «Refresh». Il ramo che l'utente vede
+# a ogni visita non era coperto da niente — ed è quello che dice se il sistema
+# è aggiornato. La decisione vive qui apposta per poter essere provata.
+
+def _vg(a, b):
+    """version_gt semplificato per i test: confronto per tuple numeriche."""
+    pa = tuple(int(x) for x in str(a).split("."))
+    pb = tuple(int(x) for x in str(b).split("."))
+    return pa > pb
+
+
+def _adesso(delta_h=0.0):
+    base = calendar.timegm(time.strptime("2026-07-26T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ"))
+    return base, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(base - delta_h * 3600))
+
+
+def test_verdetto_aggiornato_porta_l_eta():
+    now, checked = _adesso(5)
+    assert admin_core.classe_verdetto_update("0.40.4", "0.40.4", checked, None,
+                                             now=now, piu_recente=_vg) == ("aggiornato", 5)
+
+
+def test_verdetto_oltre_il_ciclo_del_timer_cambia_natura():
+    # 26h+: non «dato vecchio» ma «il controllo potrebbe non girare» — rimedio diverso.
+    now, checked = _adesso(30)
+    classe, ore = admin_core.classe_verdetto_update("0.40.4", "0.40.4", checked, None,
+                                                    now=now, piu_recente=_vg)
+    assert (classe, ore) == ("timer-fermo", 30)
+    # e il confine si comporta: 25h è ancora «aggiornato», 26h no.
+    now, c25 = _adesso(25)
+    assert admin_core.classe_verdetto_update("0.40.4", "0.40.4", c25, None,
+                                             now=now, piu_recente=_vg)[0] == "aggiornato"
+
+
+def test_verdetto_non_dice_aggiornato_quando_ce_un_aggiornamento():
+    # la controprova che conta: il caso in cui un verde sarebbe una bugia.
+    now, checked = _adesso(1)
+    assert admin_core.classe_verdetto_update("0.40.3", "0.40.4", checked, None,
+                                             now=now, piu_recente=_vg)[0] == "aggiornamento"
+
+
+def test_verdetto_errore_vince_su_tutto():
+    # con un check fallito il dato è stantio: non si dichiara nulla sulla versione.
+    now, checked = _adesso(1)
+    assert admin_core.classe_verdetto_update("0.40.4", "0.40.4", checked, "boom",
+                                             now=now, piu_recente=_vg)[0] == "errore-check"
+
+
+def test_verdetto_latest_piu_vecchia_non_e_un_downgrade():
+    # cache stantia di GitHub: latest < current. Non è «aggiornamento disponibile».
+    now, checked = _adesso(1)
+    assert admin_core.classe_verdetto_update("0.40.4", "0.39.1", checked, None,
+                                             now=now, piu_recente=_vg)[0] == "latest-piu-vecchia"
+
+
+def test_verdetto_data_illeggibile_non_si_spaccia_per_appena_controllato():
+    now, _ = _adesso(0)
+    classe, ore = admin_core.classe_verdetto_update("0.40.4", "0.40.4", "mai", None,
+                                                    now=now, piu_recente=_vg)
+    assert (classe, ore) == ("data-illeggibile", None)
+
+
+def test_verdetto_mai_controllato_quando_non_ce_una_latest():
+    now, checked = _adesso(1)
+    assert admin_core.classe_verdetto_update("0.40.4", None, checked, None,
+                                             now=now, piu_recente=_vg)[0] == "mai-controllato"

@@ -182,3 +182,52 @@ def ore_da(iso_utc: str, now: float | None = None) -> int | None:
     except (ValueError, TypeError):
         return None
     return max(0, int(((now if now is not None else time.time()) - calendar.timegm(t)) // 3600))
+
+
+# Soglia oltre la quale «l'avviso è vecchio» diventa «il controllo non sta
+# girando»: il timer è giornaliero, 26h dà due ore di margine per il drift
+# dello scheduler senza dichiarare un guasto che non c'è.
+CHECK_STALE_H = 26
+
+
+def classe_verdetto_update(current: str, latest: str | None, checked_at: str,
+                           error: str | None, now: float | None = None,
+                           piu_recente=None) -> tuple[str, int | None]:
+    """Quale VERDETTO mostra la card degli aggiornamenti, e con che età.
+
+    Restituisce (classe, ore) — la resa HTML resta in admin.py, la DECISIONE sta
+    qui perché in admin.py nessun test la guarderebbe (starlette+pydantic: la CI
+    gira i test stdlib-only). Misurato il 26/07: zero test nominavano
+    update_check/update_status/_fetch in tutto il repo, cioè il ramo che l'utente
+    legge a ogni visita non era coperto da niente.
+
+    `piu_recente(a, b)` è iniettato (in produzione: version_gt) per non tirare
+    dentro un altro modulo: il confronto è SEMPRE per versione e mai `!=`, perché
+    /releases/latest può servire una risposta stantia dalla cache di GitHub e un
+    `!=` proporrebbe un downgrade.
+
+    Le classi, e perché sono distinte:
+      errore-check          il check è fallito: il dato è stantio e si sa perché
+      aggiornamento         c'è una versione più nuova
+      latest-piu-vecchia    GitHub ha risposto con una release più VECCHIA della
+                            corrente (cache stantia): non è un aggiornamento
+      aggiornato            sei all'ultima, e l'età del controllo sta nel range
+      timer-fermo           sei all'ultima SECONDO un controllo più vecchio del
+                            suo stesso ciclo ⇒ il problema non è il dato, è che
+                            il controllo potrebbe non girare più: rimedio diverso
+      data-illeggibile      non si sa QUANDO è stato controllato (≠ «adesso»)
+      mai-controllato       non è mai girato
+    """
+    if error:
+        return ("errore-check", None)
+    cmp_ = piu_recente or (lambda a, b: str(a) > str(b))
+    if latest and cmp_(str(latest), current):
+        return ("aggiornamento", None)
+    if latest and str(latest) != current:
+        return ("latest-piu-vecchia", None)
+    if not latest:
+        return ("mai-controllato", None)
+    ore = ore_da(checked_at, now=now)
+    if ore is None:
+        return ("data-illeggibile", None)
+    return ("timer-fermo" if ore >= CHECK_STALE_H else "aggiornato", ore)
