@@ -697,6 +697,15 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
         ok("firma cosign verificata")
     elif require_cosign:
         raise RuntimeError("--require-cosign ma la release non ha firma .sig/.pem")
+    else:
+        # H49: senza questo warn, un bundle NON firmato passa in silenzio quando
+        # VPS1777_REQUIRE_COSIGN=0 è nel .env (la via d'emergenza) e la release
+        # non ha .sig/.pem — nessun log, nessun audit. L'interruttore è
+        # persistente (letto dal .env a ogni update, incluso l'auto-update
+        # settimanale): chi lo usa per sbloccarsi in una crisi e si dimentica
+        # di toglierlo installa senza verifica firma a tempo indeterminato.
+        warn("firma cosign NON verificata (release senza .sig/.pem, "
+             "VPS1777_REQUIRE_COSIGN=0) — bundle installato senza verifica")
 
     # estrai (path traversal guard)
     bundle = stage / "bundle"

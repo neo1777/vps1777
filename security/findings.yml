@@ -898,6 +898,7 @@ findings:
         contains:
           - "VPS1777_REQUIRE_COSIGN=0"
           - "via d'emergenza"
+          - "firma cosign NON verificata"
       - file: .env.example
         contains: ["VPS1777_REQUIRE_COSIGN"]
     note: >
@@ -906,3 +907,15 @@ findings:
       "via d'emergenza CONSAPEVOLE" — non un default, un interruttore esplicito che l'operatore
       deve azionare sapendo cosa sta facendo. Non è un buco: era un trade-off senza coordinata,
       la stessa classe di H43/archive_desc_secret di oggi.
+
+      CORREZIONE (stessa giornata, riverifica riga-per-riga di setaccio): la nota sopra era
+      imprecisa su due punti. ① L'interruttore NON salta la firma quando è verificabile —
+      fetch_bundle() la esegue comunque se .sig/.pem esistono; salta solo quando cosign manca
+      e non è installabile, o la release non ha .sig/.pem: è un fail-open ultima-spiaggia più
+      prudente di come questa voce lo descriveva. ② MA nel caso in cui salta davvero, il ramo
+      non lasciava una riga — nessun warn, nessun audit: un bundle non firmato si installava in
+      silenzio. Fix in tools/vps1777.py: warn() nel ramo. ③ E l'interruttore è persistente, non
+      one-shot: letto dal .env a ogni update, incluso l'auto-update settimanale — chi lo mette
+      per sbloccarsi in una crisi e si dimentica di toglierlo lascia la verifica firma disattivata
+      a tempo indeterminato. Resta [da-tarare]: un avviso periodico se REQUIRE_COSIGN=0 resta nel
+      .env oltre N giorni, non ancora implementato.
