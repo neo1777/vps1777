@@ -25,7 +25,13 @@ jobs:
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       - name: Lint Python (ruff)
         run: |
-          uv tool install ruff
+          # PINNATO, come tutto il resto (actions per sha, immagini per digest):
+          # era l'unico strumento non pinnato della CI, e il 26/07 ha rotto main
+          # da solo — 0.15.22 verde il 20/07, 0.16.0 rosso il 26/07 su codice
+          # IDENTICO (181 rilievi da regole nuove, es. ISC004). Un linter che si
+          # aggiorna da sé è un gate che cambia contratto senza un commit.
+          # L'aggiornamento di ruff si fa apposta: bump qui + fix nello stesso PR.
+          uv tool install ruff==0.15.22
           ruff check services/ tools/vps1777.py
       - name: ShellCheck bash
         run: |
