@@ -943,20 +943,31 @@ findings:
       «Lasciare aperto mi sembra davvero pericoloso… d'altra parte l'aggiornamento
       automatico sembra cosa scontata per l'utente: lasciamo com'è e segniamo nei
       documenti possibili soluzioni; vediamo se il prossimo round trova buone idee.»
-      Il costo di chiudere oggi: il check-release fallirebbe IN SILENZIO (il pannello
-      smette di mostrare i nuovi rilasci senza dirlo) — inaccettabile senza un
-      sostituto. Rischio accettato, non dimenticato.
+      Rischio accettato, non dimenticato.
+
+      CORREZIONE DEL COSTO, stessa sera (trovata da chi aveva scritto il quadro,
+      verificata da una seconda mano su admin.py): il costo presentato a supporto
+      della decisione era SOVRASTIMATO. Diceva «chiudere rende muto il check-release»;
+      il vero flusso è: il pannello legge update_status.json, che scrive il TIMER
+      DELL'HOST (admin.py:771 e 789) — non tocca Internet. La `_fetch()` verso
+      api.github.com vive solo in update_check() (:798), cioè nel bottone
+      «Ricontrolla adesso». Chiudere l'uscita NON spegne l'avviso: degrada solo il
+      refresh manuale (l'avviso può invecchiare fino a 24h). La decisione è stata
+      presa sul quadro precedente e il quadro corretto è stato ridato al proprietario
+      la stessa sera: la voce resta `accepted` finché lui non la rivede.
 
       SOLUZIONI CANDIDATE, per il prossimo round di audit:
       (a) togliere `- ingress` dal blocco gateway di compose.yaml — una riga,
           misurata sui 3 profili: caddy e cloudflared ri-dichiarano la rete nel
           proprio overlay, tailscale usa il port-mapping su loopback e non la
-          userebbe comunque. Chiude l'uscita ma rende muto il check-release.
-      (b) file d'intento + systemd path unit sull'HOST che esegue la chiamata a
-          api.github.com al posto del gateway — il pattern esiste già in casa
-          (systemd/vps1777-update.path): il gateway scrive l'intento, l'host fa
-          la rete. Proposta emersa al round-5; costo: un componente in più, e se
-          la path unit muore il pannello tace di nuovo (serve un heartbeat).
+          userebbe comunque. Costo (corretto): il bottone «Ricontrolla adesso»
+          fallisce; l'avviso del timer resta e può invecchiare fino a 24h.
+      (b) il bottone scrive un INTENT invece di fare la GET — il pattern
+          collect→apply è già descritto in admin.py:766-772 e già usato per
+          l'update stesso (systemd/vps1777-update.path): l'host consuma l'intent
+          e rinfresca update_status.json. Insieme ad (a) chiude l'uscita SENZA
+          perdere niente; costo: un componente in più, e se la path unit muore
+          il refresh manuale tace (serve un heartbeat).
       (c) egress ristretto alla sola api.github.com (allowlist a livello rete):
           chiude quasi tutto ma è fragile ai cambi di IP di GitHub e complica il
           deploy — la meno promettente delle tre.
