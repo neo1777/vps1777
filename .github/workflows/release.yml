@@ -24,8 +24,10 @@ jobs:
   guard:
     runs-on: ubuntu-latest
     # Legge soltanto il repo: nessuna scrittura, nessun token OIDC.
+    # actions:read serve alla guard CI-verde (interroga i run del commit).
     permissions:
       contents: read
+      actions: read
     outputs:
       version: ${{ steps.ver.outputs.VERSION }}
       prerelease: ${{ steps.ver.outputs.PRERELEASE }}
@@ -62,6 +64,39 @@ jobs:
             echo "::error::CHANGELOG.md senza sezione '## [$TAG_VERSION]'"
             exit 1
           }
+      # La firma certifica l'ORIGINE di un artefatto, non che lo stato firmato
+      # abbia superato i propri controlli (H24, seconda metà — imparata il
+      # 26/07: v0.40.3 taggata su un commit la cui CI era rossa, e i fix sono
+      # arrivati DOPO il tag, fuori dalla release). L'ordine giusto è
+      # «CI verde → tag», e questa guard lo rende vero per costruzione:
+      # senza un run CI concluso in success sul commit taggato, niente release.
+      # Il poll copre il caso legittimo di tag e branch pushati insieme
+      # (la CI del commit è ancora in corso: si aspetta, non si boccia).
+      - name: Guard — la CI del commit taggato è VERDE
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 30); do
+            CONCLUSION="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=1" \
+              --jq '.workflow_runs[0].conclusion // "assente"')"
+            case "$CONCLUSION" in
+              success)
+                echo "CI verde sul commit taggato (${GITHUB_SHA}): si procede."
+                exit 0 ;;
+              null|assente|"")
+                echo "CI del commit non ancora conclusa (tentativo $i/30): attendo 30s…"
+                sleep 30 ;;
+              *)
+                echo "::error::La CI sul commit taggato è '${CONCLUSION}', non 'success'."
+                echo "::error::Niente release da uno stato che non passa i propri controlli:"
+                echo "::error::porta la CI al verde su questo commit, poi ri-tagga."
+                exit 1 ;;
+            esac
+          done
+          echo "::error::CI del commit taggato mai conclusa dopo 15 minuti: release fermata."
+          echo "::error::Verifica lo stato della CI e ri-lancia il workflow (o ri-tagga a CI verde)."
+          exit 1
 
   release:
     runs-on: ubuntu-latest
