@@ -20,6 +20,7 @@ sicurezza, solo byte. Quindi si pota: la lista non cresce all'infinito.
 """
 from __future__ import annotations
 
+import calendar
 import json
 import os
 import tempfile
@@ -157,3 +158,27 @@ def safe_next_url(next_url: str, public_base: str, fallback: str = "/admin/setup
         if rest == "" or rest[0] in "/?#":
             return next_url
     return fallback
+
+
+def ore_da(iso_utc: str, now: float | None = None) -> int | None:
+    """Ore intere trascorse da un timestamp «%Y-%m-%dT%H:%M:%SZ», o None.
+
+    Sta qui e non in admin.py per la ragione dichiarata in testa a questo modulo:
+    in admin.py non sarebbe testabile (la CI gira i test stdlib-only, admin.py
+    importa starlette e pydantic) — e una logica che decide COSA LEGGE L'UTENTE
+    non può stare dove nessun test la guarda.
+
+    `None` è un TERZO stato e non va confuso con zero: «non so quando è stato
+    controllato» ha un rimedio diverso da «è appena stato controllato», e chi
+    chiama deve poterli distinguere. È il motivo per cui il fallimento non
+    ritorna 0 — che si leggerebbe come «adesso».
+
+    Un istante nel futuro (orologi non allineati fra host e container) dà 0, mai
+    un numero negativo: «-3 ore fa» in una pagina è un difetto che si nota, ma
+    ci si arriva solo in produzione.
+    """
+    try:
+        t = time.strptime(str(iso_utc), "%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, TypeError):
+        return None
+    return max(0, int(((now if now is not None else time.time()) - calendar.timegm(t)) // 3600))

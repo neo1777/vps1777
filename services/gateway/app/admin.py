@@ -10,6 +10,7 @@ demand, vedi nb1777-mcp/app/auth.py).
 from __future__ import annotations
 
 import asyncio
+import calendar
 import html
 import json
 import os
@@ -932,8 +933,29 @@ async def update_view(request: Request) -> Response:
                 f'(v{html.escape(str(latest))}) è più vecchia: check stantio, '
                 'nessun aggiornamento.</div>')
     elif latest:
-        head = ('<div class="kicker"><span class="dot ok"></span>'
-                'Sei alla versione più recente.</div>')
+        # Il verdetto porta la propria ETÀ, non solo la data accanto. «Sei alla
+        # versione più recente» è vero all'istante del check e invecchia in
+        # silenzio: il timer gira una volta al giorno, quindi può avere fino a
+        # ~24h — e da H50 il gateway non ha più uscita Internet, cioè non esiste
+        # più un modo di forzare il refresh dalla pagina. La data c'era già,
+        # stampata sotto in grigio: ma il perimetro scritto ACCANTO a un dato non
+        # è il perimetro incorporato nel VERDETTO, ed è il verdetto che si legge.
+        ore = admin_core.ore_da(checked)
+        if ore is None:
+            head = ('<div class="kicker"><span class="dot ok"></span>'
+                    'Sei alla versione più recente '
+                    '<em>(data dell\'ultimo controllo non leggibile)</em>.</div>')
+        elif ore >= 26:
+            # oltre il periodo del timer + un margine: non è «dato vecchio», è
+            # «il controllo non sta girando». Due cose diverse, due rimedi diversi.
+            head = ('<div class="kicker"><span class="dot warn"></span>'
+                    f'Ultimo controllo {ore} ore fa, più del ciclo giornaliero: '
+                    'il controllo automatico potrebbe non essere attivo '
+                    '(<code>systemctl status vps1777-check-update.timer</code>). '
+                    f'A quel momento eri alla v{html.escape(current)}, l\'ultima.</div>')
+        else:
+            head = ('<div class="kicker"><span class="dot ok"></span>'
+                    f'Sei alla versione più recente — controllato {ore} ore fa.</div>')
     else:
         head = ('<div class="kicker"><span class="dot off"></span>'
                 'Nessun check ancora eseguito (il timer gira una volta al giorno).</div>')

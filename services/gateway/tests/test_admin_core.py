@@ -6,6 +6,7 @@ la lista cresce all'infinito, il fix è finto.
 """
 from __future__ import annotations
 
+import calendar
 import json
 import sys
 import time
@@ -177,3 +178,32 @@ def test_next_vuoto_va_al_fallback():
 
 def test_senza_public_base_solo_i_relativi_passano():
     assert admin_core.safe_next_url("/admin/audit", "") == "/admin/audit"
+
+
+# ── ore_da: l'età del verdetto «sei alla versione più recente» ───────────────
+# Nasce da una misura di abdd732a (26/07): la card diceva «Sei alla versione più
+# recente» al presente, con la data del check stampata sotto in grigio. Le due
+# righe insieme dicevano il vero; la prima da sola diceva il falso — ed è quella
+# che si legge. Da H50 il gateway non ha più uscita Internet, quindi non esiste
+# più un pulsante per rinfrescare: il verdetto DEVE portare la propria età.
+
+def test_ore_da_conta_le_ore_intere():
+    base = calendar.timegm(time.strptime("2026-07-26T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ"))
+    assert admin_core.ore_da("2026-07-26T12:00:00Z", now=base) == 0
+    assert admin_core.ore_da("2026-07-26T09:00:00Z", now=base) == 3
+    assert admin_core.ore_da("2026-07-25T10:00:00Z", now=base) == 26     # oltre il ciclo del timer
+    assert admin_core.ore_da("2026-07-26T11:01:00Z", now=base) == 0      # 59' non è «un'ora fa»
+
+
+def test_ore_da_distingue_NON_SO_da_ADESSO():
+    # Il terzo stato: se il fallimento tornasse 0, «data illeggibile» si
+    # leggerebbe come «appena controllato» — cioè il verde più bugiardo possibile.
+    for rotto in ("", "mai", "2026-07-26 21:00", "ieri", None, 12345):
+        assert admin_core.ore_da(rotto) is None, f"«{rotto}» doveva dare None, non un numero"
+
+
+def test_ore_da_non_torna_mai_negativo():
+    # host e container con orologi non allineati: «-3 ore fa» si vede solo in
+    # produzione, e a quel punto la pagina ha già mentito.
+    base = calendar.timegm(time.strptime("2026-07-26T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ"))
+    assert admin_core.ore_da("2026-07-26T14:00:00Z", now=base) == 0
