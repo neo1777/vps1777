@@ -60,6 +60,53 @@ def fail(errors: list[str], msg: str) -> None:
     errors.append(msg)
 
 
+def check_titolo_nomina_file(f: dict, errors: list[str]) -> None:
+    """Se il TITOLO nomina un file che esiste nel repo, quel file dev'essere fra le evidence.
+
+    Nasce da H43 (27/07): titolo «sandbox update.service», `closed`, CI verde — e le
+    sue prove verificavano un'ALTRA unit. Togliendo ogni direttiva di sandbox dal
+    servizio nominato nel titolo il gate restava verde: la voce era presidiata su un
+    oggetto diverso da quello che dichiarava.
+
+    La condizione «che esiste nel repo» non è un dettaglio: senza, il controllo
+    accusava anche H36, il cui titolo nomina `pending.json` — un file di RUNTIME, mai
+    versionato, che NON PUÒ essere un'evidence. Misurato da abdd732a prima di
+    proporre il presidio: 4 voci nominano un file nel titolo, 2 sembravano difettose,
+    1 lo era davvero. Un presidio che accusa una voce sana è quello che si impara a
+    ignorare.
+
+    LIMITI, dichiarati perché il verde non prometta più di quel che vale:
+      · guarda i TITOLI, non il corpo: una voce che nomina il file sbagliato nella
+        prosa passa (un pattern sul corpo produrrebbe rumore, non è stato misurato);
+      · verifica che il file COMPAIA fra le evidence, non che l'evidenza dica
+        qualcosa di vero su di esso. Chiude «il titolo parla di un file che la prova
+        non guarda», non «la prova lo guarda e non prova niente».
+    """
+    titolo = str(f.get("title", ""))
+    citati = {m for m in re.findall(r"[\w./-]+\.(?:py|sh|yml|yaml|json|service|timer|md|toml)", titolo)}
+    if not citati:
+        return
+    coperti = {str(ev.get("file", "")) for ev in (f.get("evidence") or [])}
+    for nome in sorted(citati):
+        # Il file dev'essere VERSIONATO: uno di runtime non può essere un'evidence.
+        # 🔴 La prima versione usava rglob(nome) — match ESATTO sul nome — e non
+        # trovava nulla: il titolo dice «update.service», il file si chiama
+        # `vps1777-update.service`. Il presidio girava, dava verde, e non poteva
+        # prendere il caso per cui era stato scritto. Scoperto con la controprova
+        # (rimettere H43 allo stato rotto): senza, sarebbe stato committato come
+        # «classe chiusa». Ora il match è per SUFFISSO, come si nominano i file
+        # in un titolo: per nome corto, non per percorso completo.
+        reali = [q for q in ROOT.rglob(f"*{nome}")
+                 if ".git" not in q.parts and q.is_file()]
+        if not reali:
+            continue
+        if not any(nome in c for c in coperti):
+            fail(errors,
+                 f"{f['id']}: il titolo nomina «{nome}», che esiste nel repo, ma nessuna\n"
+                 f"       evidence lo verifica. La voce è presidiata su un altro oggetto:\n"
+                 f"       si potrebbe svuotare {nome} e questo gate resterebbe verde.")
+
+
 def check_evidence(f: dict, errors: list[str]) -> None:
     """L'evidenza di una voce esiste ancora nel codice?"""
     fid = f["id"]
@@ -138,6 +185,7 @@ def main() -> int:
                  f"       Accettare un rischio in silenzio è peggio che non accettarlo.")
 
         check_evidence(f, errors)
+        check_titolo_nomina_file(f, errors)
 
     # l'àncora: il totale atteso, dichiarato in testa con la sua provenienza
     total = len(findings)
