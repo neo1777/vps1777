@@ -25,7 +25,7 @@ Mi impegno a:
 vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy / Cloudflared).
 
 Threat model dichiarato:
-- Backend (archive-mcp, nb1777-mcp, bot) su rete Docker `internal: true` — non raggiungibili dall'esterno (nb1777-mcp e bot hanno anche l'uscita `egress`, senza porte pubblicate: possono uscire, non essere raggiunti — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md))
+- Backend (archive-mcp, nb1777-mcp, bot) su rete Docker `internal: true` — non raggiungibili dall'esterno (nb1777-mcp e bot hanno anche l'uscita `egress`, senza porte pubblicate: possono uscire, non essere raggiunti — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)); nessun servizio pubblica `ports` in `compose.yaml` (`H48`)
 - OAuth 2.1 + DCR + PKCE per tutti i client OAuth (claude.ai, Mini App, future integrazioni)
 - JWT con `typ` separati: access_token (15min), refresh_token (30gg), admin (8h), miniapp (1h)
 - Path namespacing via `GATEWAY_SECRET`: l'URL contiene un segreto rotabile (se compromesso, rota e cambi URL)
@@ -36,11 +36,13 @@ Threat model dichiarato:
   scadenza 24h) + **owner-only** (`TELEGRAM_OWNER_ID`); API dietro Bearer `typ=miniapp`
   — vedi [docs/MINIAPP.md](docs/MINIAPP.md)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`
-- Il gateway (unico servizio esposto) non ha accesso al Docker socket né al filesystem
-  dell'host; vede i 5 secret Docker a lui assegnati (`telegram_bot_token` incluso — la
-  radice di fiducia della Mini App, vedi [docs/SECRETS.md](docs/SECRETS.md))
-- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
-- Strumenti di management (Portainer) mai esposti: solo loopback + tunnel SSH (vedi [docs/OPS.md](docs/OPS.md))
+- Il gateway (unico servizio esposto) non ha accesso al Docker socket né al filesystem dell'host (`H44`);
+  vede i 5 secret Docker a lui assegnati (`telegram_bot_token` incluso — la radice di fiducia della Mini
+  App, vedi [docs/SECRETS.md](docs/SECRETS.md))
+- `archive-data` è condiviso: `archive-mcp` lo monta `:ro` (`H46`), il gateway `:rw` — privilegio
+  funzionale (`/admin/archive` scrive i `.db` indicizzati), tracciato invece di taciuto
+- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
+- Strumenti di management (Portainer) mai esposti: solo loopback + tunnel SSH (vedi [docs/OPS.md](docs/OPS.md)) (`H47`)
 
 ## Rassegna difensiva — l'hardening applicato
 
@@ -227,7 +229,7 @@ aperto. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 35 |
+| **chiusi** | 40 |
 | **parziali** | 7 |
 | **accettati** | 1 |
 | **aperti** | 0 |
