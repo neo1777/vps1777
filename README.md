@@ -146,7 +146,7 @@ update sicuro **una volta a settimana** — feature `autoupdate` in
 - Mini App e bot **owner-only fail-closed**: senza `TELEGRAM_OWNER_ID` negano tutti, non aprono
 - Rate-limit per-IP sugli endpoint auth; `X-Forwarded-For` fidato **solo** dal proxy (IP client non falsificabile)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, healthcheck su ogni servizio
-- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
+- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
 - Update firmati **cosign** e verificati **fail-closed di default**; digest immutabili (`images.lock`); backup age + snapshot + **rollback automatico** ([docs/UPDATE.md](docs/UPDATE.md))
 - CI con GitHub Actions **pinnate a SHA** + Dependabot; chiave di backup **fuori dalla VPS** (solo il recipient pubblico sul server)
 - Gestione visuale opzionale (Portainer) **solo su loopback** + tunnel SSH — vedi [docs/OPS.md](docs/OPS.md)
