@@ -919,46 +919,17 @@ async def update_view(request: Request) -> Response:
     excerpt = status.get("changelog_excerpt", "")
     upgrade = bool(latest) and version_gt(str(latest), current)
 
-    # La DECISIONE (quale verdetto, e con che età) sta in admin_core, dove i
-    # test la guardano; qui resta solo la resa. Prima viveva tutta in questi
-    # rami e nessun test del gateway importa questo file.
+    # DECISIONE e TESTO stanno entrambi in admin_core, dove i test arrivano; qui
+    # resta solo il vestito HTML. L'ordine è quello che l'artefatto del round-6 ha
+    # imposto: prima la copertura, poi l'interfaccia — riscrivere una frase in un
+    # file che i test non attraversano produce una frase corretta e non presidiata.
     classe, ore = admin_core.classe_verdetto_update(
         current, latest, checked, check_err, piu_recente=version_gt)
-    if classe == "errore-check":
-        head = ('<div class="kicker"><span class="dot warn"></span>'
-                f'Ultimo check fallito ({html.escape(str(check_err))}) — dato stantio.</div>')
-    elif classe == "aggiornamento":
-        eta = (f' — rilevato da un controllo di {ore} ore fa' if ore is not None
-               else ' — data del controllo non leggibile')
-        head = ('<div class="kicker"><span class="dot warn"></span>'
-                f'Aggiornamento disponibile: <strong>v{html.escape(str(latest))}</strong>'
-                f' (sei alla {html.escape(current)}){eta}.</div>')
-    elif classe == "latest-piu-vecchia":
-        head = ('<div class="kicker"><span class="dot ok"></span>'
-                f'Sei alla v{html.escape(current)} — l\'ultima release nota '
-                f'(v{html.escape(str(latest))}) è più vecchia: check stantio, '
-                'nessun aggiornamento.</div>')
-    elif classe == "data-illeggibile":
-        head = ('<div class="kicker"><span class="dot ok"></span>'
-                'All\'ultimo controllo eri alla versione più recente '
-                '<em>(quando sia stato fatto, non è leggibile)</em>.</div>')
-    elif classe == "timer-fermo":
-        head = ('<div class="kicker"><span class="dot warn"></span>'
-                f'Ultimo controllo {ore} ore fa, più del ciclo giornaliero: '
-                'il controllo automatico potrebbe non essere attivo '
-                '(<code>systemctl status vps1777-check-update.timer</code>). '
-                f'A quel momento eri alla v{html.escape(current)}, l\'ultima.</div>')
-    elif classe == "aggiornato":
-        # Il VERBO, non solo la data (rilievo di abdd732a): «sei alla versione
-        # più recente — controllato 15 ore fa» si legge «lo sei, e l'ho
-        # verificato 15 ore fa». La data qualifica il controllo; il soggetto
-        # resta al presente, e in quelle 15 ore può essere uscita una release.
-        # Datare un verdetto non lo rende condizionale: lo fa il tempo del verbo.
-        head = ('<div class="kicker"><span class="dot ok"></span>'
-                f'Al controllo di {ore} ore fa eri alla versione più recente.</div>')
-    else:
-        head = ('<div class="kicker"><span class="dot off"></span>'
-                'Nessun check ancora eseguito (il timer gira una volta al giorno).</div>')
+    testo = admin_core.testo_verdetto_update(classe, ore, current, latest, check_err)
+    dot = "warn" if classe in ("errore-check", "aggiornamento", "timer-fermo") else (
+        "off" if classe == "mai-controllato" else "ok")
+    head = (f'<div class="kicker"><span class="dot {dot}"></span>'
+            f'{html.escape(testo)}</div>')
 
     update_btn = ""
     if upgrade and not check_err:

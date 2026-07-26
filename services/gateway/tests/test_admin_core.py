@@ -351,3 +351,46 @@ def test_aggiornamento_con_data_illeggibile_non_finge_di_saperlo():
     classe, ore = admin_core.classe_verdetto_update("0.40.3", "0.40.5", "mai", None,
                                                     now=now, piu_recente=_vg)
     assert (classe, ore) == ("aggiornamento", None)
+
+
+# ── testo_verdetto_update: le FRASI che l'operatore legge ────────────────────
+# Prima vivevano in admin.py, misurato allo 0% di copertura: la frase corretta
+# stanotte (il tempo del verbo) non era presidiata da niente e il difetto poteva
+# tornare il giorno dopo. È l'errore che l'artefatto del round-6 ha descritto —
+# «se inverti l'ordine, scrivi una frase corretta che sfuggirebbe ai test» — e
+# che avevamo commesso mentre lo citavamo.
+
+def test_il_verdetto_aggiornato_e_al_PASSATO_e_porta_l_eta():
+    t = admin_core.testo_verdetto_update("aggiornato", 5, "0.40.5", "0.40.5", None)
+    assert "eri alla versione più recente" in t, "il verbo dev'essere al passato"
+    assert "5 ore fa" in t
+    assert "Sei alla versione più recente" not in t, (
+        "il presente rende la data decorativa: «lo sei, e l'ho verificato N ore fa»"
+    )
+
+
+def test_il_ramo_che_porta_al_pulsante_dice_quanto_e_vecchio_il_dato():
+    t = admin_core.testo_verdetto_update("aggiornamento", 20, "0.40.3", "0.40.5", None)
+    assert "v0.40.5" in t and "20 ore fa" in t
+
+
+def test_data_illeggibile_non_si_scrive_mai_come_adesso():
+    t = admin_core.testo_verdetto_update("data-illeggibile", None, "0.40.5", "0.40.5", None)
+    assert "non è leggibile" in t
+    for bugia in ("0 ore fa", "appena", "adesso"):
+        assert bugia not in t
+
+
+def test_timer_fermo_nomina_il_rimedio_e_non_solo_il_sintomo():
+    t = admin_core.testo_verdetto_update("timer-fermo", 40, "0.40.5", "0.40.5", None)
+    assert "potrebbe non essere attivo" in t
+    assert "systemctl" in t, "un allarme senza il comando per guardare è solo un allarme"
+
+
+def test_ogni_classe_produce_un_testo_non_vuoto():
+    # se domani si aggiunge una classe e ci si dimentica la frase, il fallback
+    # non deve restituire stringa vuota: una card muta è peggio di una sbagliata.
+    for c in ("errore-check", "aggiornamento", "latest-piu-vecchia", "data-illeggibile",
+              "timer-fermo", "aggiornato", "mai-controllato", "classe-inventata"):
+        t = admin_core.testo_verdetto_update(c, 3, "0.40.5", "0.40.5", "boom")
+        assert t and len(t) > 20, f"la classe «{c}» produce un testo vuoto o troppo corto"

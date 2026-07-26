@@ -253,3 +253,46 @@ def classe_verdetto_update(current: str, latest: str | None, checked_at: str,
     if ore is None:
         return ("data-illeggibile", None)
     return ("timer-fermo" if ore >= CHECK_STALE_H else "aggiornato", ore)
+
+
+def testo_verdetto_update(classe: str, ore: int | None, current: str,
+                          latest: str | None, errore: str | None) -> str:
+    """Il TESTO che l'operatore legge nella card aggiornamenti. Niente HTML.
+
+    Sta qui e non in admin.py per la ragione che l'artefatto del round-6 ha
+    formulato meglio di noi: «applica prima il rimedio di COPERTURA, poi quello
+    di INTERFACCIA — se inverti, scrivi una frase corretta che sfuggirebbe
+    comunque ai test». Stanotte abbiamo fatto esattamente l'errore descritto:
+    corretto il tempo del verbo («al controllo di N ore fa ERI…» invece di «SEI»)
+    dentro admin.py, che i test non attraversano — misurato allo 0% con
+    sys.settrace. La logica era presidiata, la frase no: il difetto poteva
+    tornare il giorno dopo e nessun controllo se ne sarebbe accorto.
+
+    Le regole che queste stringhe DEVONO rispettare, e che ora un test può
+    pretendere invece di sperarci:
+      · un verdetto sul mondo esterno sta al PASSATO e porta la propria età —
+        datare una frase non la rende condizionale, lo fa il tempo del verbo;
+      · il ramo che porta a un'AZIONE (c'è un aggiornamento) porta l'età come e
+        più degli altri: è lì che si preme il pulsante;
+      · «non so quando» non si scrive mai come «adesso».
+    """
+    if classe == "errore-check":
+        return (f"Ultimo check fallito ({errore}) — dato stantio.")
+    if classe == "aggiornamento":
+        eta = (f" — rilevato da un controllo di {ore} ore fa" if ore is not None
+               else " — data del controllo non leggibile")
+        return f"Aggiornamento disponibile: v{latest} (sei alla {current}){eta}."
+    if classe == "latest-piu-vecchia":
+        return (f"Sei alla v{current} — l'ultima release nota (v{latest}) è più "
+                "vecchia: check stantio, nessun aggiornamento.")
+    if classe == "data-illeggibile":
+        return ("All'ultimo controllo eri alla versione più recente "
+                "(quando sia stato fatto, non è leggibile).")
+    if classe == "timer-fermo":
+        return (f"Ultimo controllo {ore} ore fa, più del ciclo giornaliero: il "
+                "controllo automatico potrebbe non essere attivo "
+                "(systemctl status vps1777-check-update.timer). A quel momento "
+                f"eri alla v{current}, l'ultima.")
+    if classe == "aggiornato":
+        return f"Al controllo di {ore} ore fa eri alla versione più recente."
+    return "Nessun check ancora eseguito (il timer gira una volta al giorno)."
