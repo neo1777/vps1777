@@ -62,6 +62,28 @@ def test_snapshot_stale_missing_base_is_empty():
         assert v.snapshot_stale_excluded(Path(d) / "nope") == []
 
 
+def test_snapshot_prune_with_keep_latest_survives_when_all_are_stale():
+    # round-5 (audio e1cff3b1): con keep=None il check giornaliero cancella
+    # TUTTI gli snapshot se sono tutti oltre il cutoff — incluso quello della
+    # versione in esecuzione. cmd_check ora passa keep=snapshot_latest(repo):
+    # anche se il più recente è vecchio quanto gli altri, resta.
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        base = repo / "backups" / "pre-update"
+        older = base / "0.40.1-a"
+        newer = base / "0.40.2-b"
+        older.mkdir(parents=True)
+        newer.mkdir(parents=True)
+        (older / "gateway-data.tar").write_text("x")
+        (newer / "gateway-data.tar").write_text("x")
+        stale_ts = __import__("time").time() - 200 * 3600  # oltre il cutoff di 72h
+        os.utime(older, (stale_ts, stale_ts))
+        os.utime(newer, (stale_ts + 60, stale_ts + 60))  # più recente, ma comunque stale
+        v.snapshot_prune(repo, keep=v.snapshot_latest(repo))
+        assert not older.exists()
+        assert newer.exists()
+
+
 # ─────────────────────────────── H43: render_unit ──────────────────────────
 
 def test_render_unit_substitutes_all_placeholders():

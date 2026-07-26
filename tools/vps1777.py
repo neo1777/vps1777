@@ -1096,7 +1096,13 @@ def cmd_check(repo: Path, args) -> int:
     # fallito e mai ritentato lasciava lo snapshot in chiaro a tempo
     # indeterminato. Qui gira col timer giornaliero, anche a stack rotto — e
     # PRIMA del fetch, perché non dipenda da GitHub raggiungibile.
-    snapshot_prune(repo, keep=None)
+    # keep=snapshot_latest(repo), non keep=None: il check giornaliero protegge
+    # SEMPRE il punto di ripristino della versione attualmente in esecuzione,
+    # anche quando è più vecchio del cutoff — round-5 (audio e1cff3b1): con
+    # keep=None, il primo giro dopo il rilascio di questo stesso fix avrebbe
+    # cancellato tutti gli snapshot esistenti, incluso quello a cui tornare se
+    # la versione corrente si rivelasse rotta.
+    snapshot_prune(repo, keep=snapshot_latest(repo))
     try:
         rel = latest_release(repo)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
