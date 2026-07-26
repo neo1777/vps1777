@@ -36,7 +36,9 @@ Threat model dichiarato:
   scadenza 24h) + **owner-only** (`TELEGRAM_OWNER_ID`); API dietro Bearer `typ=miniapp`
   — vedi [docs/MINIAPP.md](docs/MINIAPP.md)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`
-- Il gateway (unico servizio esposto) non ha accesso al Docker socket né ai secret host
+- Il gateway (unico servizio esposto) non ha accesso al Docker socket né al filesystem
+  dell'host; vede i 5 secret Docker a lui assegnati (`telegram_bot_token` incluso — la
+  radice di fiducia della Mini App, vedi [docs/SECRETS.md](docs/SECRETS.md))
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
 - Strumenti di management (Portainer) mai esposti: solo loopback + tunnel SSH (vedi [docs/OPS.md](docs/OPS.md))
 
@@ -134,7 +136,7 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   backend su rete `internal: true`, gateway senza accesso al socket Docker né al
   filesystem dell'host (baseline). I 5 secret Docker assegnati al gateway, però,
   lui li **vede** — `telegram_bot_token` incluso, la radice di fiducia della
-  Mini App: la superficie reale di un gateway compromesso è quella (`SECRETS.md`).
+  Mini App: la superficie reale di un gateway compromesso è quella (`docs/SECRETS.md`).
 
 ### Supply-chain & aggiornamenti
 
