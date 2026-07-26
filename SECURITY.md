@@ -131,8 +131,10 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   `ops.backup` ora monta i volumi dati **direttamente in sola lettura** e li tara
   da lì — niente `docker.sock`, niente `docker-cli`.
 - Container **non-root** (UID 1000), `cap_drop: ALL`, `no-new-privileges`,
-  backend su rete `internal: true`, gateway senza accesso al socket Docker né ai
-  secret dell'host (baseline).
+  backend su rete `internal: true`, gateway senza accesso al socket Docker né al
+  filesystem dell'host (baseline). I 5 secret Docker assegnati al gateway, però,
+  lui li **vede** — `telegram_bot_token` incluso, la radice di fiducia della
+  Mini App: la superficie reale di un gateway compromesso è quella (`SECRETS.md`).
 
 ### Supply-chain & aggiornamenti
 

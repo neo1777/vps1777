@@ -156,7 +156,10 @@ fonte di verità — qui c'è la sintesi, là il registro che la CI verifica.
 - OAuth 2.1 + DCR + PKCE; JWT con `typ` separati (`access` ≠ `admin_cookie` ≠ miniapp).
 - `GATEWAY_SECRET` come path-namespace del proxy MCP.
 - Container non-root, `cap_drop: ALL`, `no-new-privileges`.
-- Gateway **senza** `docker.sock` né secret dell'host; immagini pinnate a digest (`images.lock`).
+- Gateway **senza** `docker.sock` né accesso al filesystem dell'host; vede però i
+  5 secret Docker a lui assegnati (`telegram_bot_token` incluso: compromesso il
+  gateway, forgiabile l'`initData` della Mini App — vedi `SECRETS.md`); immagini
+  pinnate a digest (`images.lock`).
 
 ### Hardening (v0.22.0 → v0.33.0)
 

@@ -1082,6 +1082,12 @@ def consume_intent(repo: Path, path: Path, st: dict) -> str:
 def cmd_check(repo: Path, args) -> int:
     st = state_load(repo)
     cur = current_version(repo)
+    # La retention 72h dello snapshot pre-update deve valere in OGNI percorso:
+    # l'altra chiamata vive nello step-15 dell'update riuscito, quindi un update
+    # fallito e mai ritentato lasciava lo snapshot in chiaro a tempo
+    # indeterminato. Qui gira col timer giornaliero, anche a stack rotto — e
+    # PRIMA del fetch, perché non dipenda da GitHub raggiungibile.
+    snapshot_prune(repo, keep=None)
     try:
         rel = latest_release(repo)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
@@ -1147,6 +1153,10 @@ def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
                       reason: str) -> int:
     warn(f"AUTO-ROLLBACK: {reason}")
     progress_write(repo, target, 90, "rollback", "running", reason)
+    # keep=snap, non None: lo snapshot di QUESTO update serve più sotto per il
+    # restore dati e resta l'unica via di `rollback --with-data` manuale se il
+    # health-gate fallisce. Si potano solo i residui oltre le 72h.
+    snapshot_prune(repo, keep=snap)
     env = {"VPS1777_TAG": norm_ver(previous)}
     run([*compose_cmd(repo), "down"], check=False, env=env)
     rollback_dir = staging_dir(repo, previous) / "rollback-files"

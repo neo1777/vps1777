@@ -144,8 +144,9 @@ findings:
     note: >
       Il proxy MCP è un catch-all: senza il blocco di `internal/` quegli endpoint
       sarebbero stati raggiungibili da Internet — il fix avrebbe APERTO la porta
-      che chiudeva. Vedi anche H14: i cookie finiscono ancora in chiaro nello
-      snapshot pre-update.
+      che chiudeva. Vedi anche H14: i cookie finivano anche nello snapshot
+      pre-update in chiaro — chiuso lì (SNAPSHOT_EXCLUDED_VOLUMES esclude
+      nlm-auth).
 
   - id: H7
     severity: high
