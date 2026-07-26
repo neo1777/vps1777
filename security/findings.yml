@@ -125,7 +125,7 @@ findings:
 
   - id: H6
     severity: high
-    title: "Togliere al gateway il mount rw dei cookie Google (nlm-auth)"
+    title: "Togliere al gateway il mount rw dei cookie Google (nlm-auth) — il backup lo legge :ro per il proprio scopo"
     status: closed
     since: v0.30.0
     why: >
@@ -139,6 +139,8 @@ findings:
         contains: ["internal/nlm/status", "internal/nlm/profile"]
       - file: services/gateway/app/proxy.py
         contains: ['sub_path.startswith("internal/")']
+      - file: compose.ops.backup.yaml
+        contains: ["nlm-auth:/volumes/nlm-auth:ro"]
       - file: compose.yaml
         not_contains: ["nlm-auth:/var/lib/nlm:ro"]
     note: >
@@ -478,6 +480,14 @@ findings:
       lì, tolti da `ingress`. Su ingress restano solo gateway+proxy. VERIFICATO sul VPS:
       da egress NotebookLM+Telegram=302, da rete internal=000 (uscita bloccata).
       ARCHITECTURE.md allineato + nota "fiducia piena" in PLUGINS.md.
+
+      Trovato dall'audio round-3 e precisato: la voce protegge dal PROXY (che sta solo
+      su ingress), non dice che il GATEWAY sta su backend+ingress ed è quindi il ponte
+      logico fra le due reti (compose.yaml:108-110, commento a riga 194: "il gateway lo
+      raggiunge via backend"). Non è un difetto — il gateway deve parlare coi backend
+      per instradare — ma il limite dell'isolamento passa da lui: un gateway compromesso
+      raggiunge backend e da lì gli altri servizi con le loro uscite (es. egress). Va
+      dichiarato esplicitamente, non dedotto dal lettore.
 
   - id: H26
     severity: medium
