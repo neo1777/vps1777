@@ -752,6 +752,17 @@ findings:
     status: closed
     since: v0.33.0
     evidence:
+      # 🔴 L'EVIDENZA NON GUARDAVA L'UNIT DEL PROPRIO TITOLO (27/07): il titolo dice
+      # «sandbox update.service» e le tre prove verificavano secrets-check.service,
+      # render_unit e compose. ⇒ togliendo OGNI direttiva di sandbox da update.service
+      # questo gate sarebbe rimasto VERDE — la voce era presidiata su un altro oggetto.
+      # Trovato da abdd732a riprendendo una sua voce aperta al round-3, riverificato da
+      # b82df434 contando le direttive nelle due unit (update 6, secrets-check 5).
+      - file: systemd/vps1777-update.service
+        contains:
+          - "ProtectKernelTunables=true"
+          - "ProtectKernelModules=true"
+          - "LockPersonality=true"
       - file: systemd/vps1777-secrets-check.service
         contains: ["User=@OPERATOR_USER@", "NoNewPrivileges=true"]
       - file: tools/vps1777.py
