@@ -50,6 +50,15 @@ grep -noE "mktemp[^\"']*" "$REPO/tools/backup.sh" "$REPO/tools/restore.sh" 2>/de
 echo "   ⇒ ReadWritePaths verificato solo su questi path conta come misura; il resto resta inferenza."
 
 echo
+echo "── (d) quali path della proposta esistono DAVVERO sull'host — un ReadWritePaths= su un"
+echo "      path assente impedisce l'avvio della unit (serve il prefisso '-')"
+for p in /usr/local/bin /etc/systemd/system /var/lib/gateway "$HOME/.sigstore"; do
+  if [ -e "$p" ]; then printf '   %-24s esiste\n' "$p"
+  else printf '   %-24s ⚠️  ASSENTE — ReadWritePaths=%s bloccherebbe l'\''avvio senza il prefisso "-"\n' "$p" "$p"
+  fi
+done
+
+echo
 echo "── (b) ~/.sigstore — la ragione che la unit marca 'non verificabile su questa macchina'"
 if [ -d "$HOME/.sigstore" ]; then
   n=$(find "$HOME/.sigstore" -type f 2>/dev/null | wc -l)
