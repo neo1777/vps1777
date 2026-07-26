@@ -185,9 +185,23 @@ def ore_da(iso_utc: str, now: float | None = None) -> int | None:
 
 
 # Soglia oltre la quale «l'avviso è vecchio» diventa «il controllo non sta
-# girando»: il timer è giornaliero, 26h dà due ore di margine per il drift
-# dello scheduler senza dichiarare un guasto che non c'è.
-CHECK_STALE_H = 26
+# girando». NON è un numero scelto a occhio: viene da systemd/vps1777-check-
+# update.timer, che dichiara `OnCalendar=daily` + `RandomizedDelaySec=4h` ⇒
+# l'intervallo MASSIMO LEGITTIMO fra due controlli è 24+4 = 28h. 30 aggiunge un
+# margine per `Persistent=true`, che dopo un riavvio recupera un giro saltato.
+#
+# 🔴 La prima versione aveva 26 e fabbricava un falso allarme su un timer SANO
+# (misurato sulla VPS: LAST 02:25 → NEXT 00:20 = 21h55m, il delay varia davvero).
+# Un presidio che grida quando non c'è niente è quello che si impara a ignorare:
+# è il modo più affidabile di disattivarne uno. Trovato da abdd732a leggendo
+# l'unità, non il codice.
+#
+# ⚠️ Se qualcuno cambia `RandomizedDelaySec` nel .timer, questa soglia va rivista:
+# il numero vive qui, la sua ragione vive in un file che nessuno rilegge. Il test
+# `test_soglia_stale_copre_il_ritardo_massimo_del_timer` lega i due valori, così
+# la traccia non si perde.
+CHECK_TIMER_MAX_H = 28          # daily (24h) + RandomizedDelaySec (4h)
+CHECK_STALE_H = 30
 
 
 def classe_verdetto_update(current: str, latest: str | None, checked_at: str,

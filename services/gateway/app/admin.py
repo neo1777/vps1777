@@ -938,8 +938,8 @@ async def update_view(request: Request) -> Response:
                 'nessun aggiornamento.</div>')
     elif classe == "data-illeggibile":
         head = ('<div class="kicker"><span class="dot ok"></span>'
-                'Sei alla versione più recente '
-                '<em>(data dell\'ultimo controllo non leggibile)</em>.</div>')
+                'All\'ultimo controllo eri alla versione più recente '
+                '<em>(quando sia stato fatto, non è leggibile)</em>.</div>')
     elif classe == "timer-fermo":
         head = ('<div class="kicker"><span class="dot warn"></span>'
                 f'Ultimo controllo {ore} ore fa, più del ciclo giornaliero: '
@@ -947,8 +947,13 @@ async def update_view(request: Request) -> Response:
                 '(<code>systemctl status vps1777-check-update.timer</code>). '
                 f'A quel momento eri alla v{html.escape(current)}, l\'ultima.</div>')
     elif classe == "aggiornato":
+        # Il VERBO, non solo la data (rilievo di abdd732a): «sei alla versione
+        # più recente — controllato 15 ore fa» si legge «lo sei, e l'ho
+        # verificato 15 ore fa». La data qualifica il controllo; il soggetto
+        # resta al presente, e in quelle 15 ore può essere uscita una release.
+        # Datare un verdetto non lo rende condizionale: lo fa il tempo del verbo.
         head = ('<div class="kicker"><span class="dot ok"></span>'
-                f'Sei alla versione più recente — controllato {ore} ore fa.</div>')
+                f'Al controllo di {ore} ore fa eri alla versione più recente.</div>')
     else:
         head = ('<div class="kicker"><span class="dot off"></span>'
                 'Nessun check ancora eseguito (il timer gira una volta al giorno).</div>')

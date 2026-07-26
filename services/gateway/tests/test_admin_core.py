@@ -235,13 +235,13 @@ def test_verdetto_aggiornato_porta_l_eta():
 
 def test_verdetto_oltre_il_ciclo_del_timer_cambia_natura():
     # 26h+: non «dato vecchio» ma «il controllo potrebbe non girare» — rimedio diverso.
-    now, checked = _adesso(30)
+    now, checked = _adesso(35)
     classe, ore = admin_core.classe_verdetto_update("0.40.4", "0.40.4", checked, None,
                                                     now=now, piu_recente=_vg)
-    assert (classe, ore) == ("timer-fermo", 30)
-    # e il confine si comporta: 25h è ancora «aggiornato», 26h no.
-    now, c25 = _adesso(25)
-    assert admin_core.classe_verdetto_update("0.40.4", "0.40.4", c25, None,
+    assert (classe, ore) == ("timer-fermo", 35)
+    # il confine si comporta: sotto la soglia è ancora «aggiornato».
+    now, sotto = _adesso(admin_core.CHECK_STALE_H - 1)
+    assert admin_core.classe_verdetto_update("0.40.4", "0.40.4", sotto, None,
                                              now=now, piu_recente=_vg)[0] == "aggiornato"
 
 
@@ -277,3 +277,28 @@ def test_verdetto_mai_controllato_quando_non_ce_una_latest():
     now, checked = _adesso(1)
     assert admin_core.classe_verdetto_update("0.40.4", None, checked, None,
                                              now=now, piu_recente=_vg)[0] == "mai-controllato"
+
+
+def test_soglia_stale_copre_il_ritardo_massimo_del_timer():
+    """La soglia non può stare SOTTO il ritardo legittimo del timer.
+
+    systemd/vps1777-check-update.timer dichiara OnCalendar=daily +
+    RandomizedDelaySec=4h ⇒ 28h fra due controlli è normale, non un guasto.
+    Con una soglia più bassa la pagina accusa un timer sano di non funzionare —
+    e un allarme che suona senza motivo è quello che si impara a ignorare.
+    Questo test esiste perché il numero vive nel codice e la sua ragione in un
+    file .timer che nessuno rilegge: se qualcuno alza RandomizedDelaySec, qui
+    trova la traccia invece di scoprirlo dalla pagina che mente.
+    """
+    assert admin_core.CHECK_STALE_H > admin_core.CHECK_TIMER_MAX_H, (
+        "la soglia di allarme deve stare SOPRA il ritardo massimo legittimo "
+        f"({admin_core.CHECK_TIMER_MAX_H}h = daily + RandomizedDelaySec)"
+    )
+
+
+def test_un_timer_sano_al_suo_ritardo_massimo_non_fa_scattare_l_allarme():
+    # il caso concreto: 28h esatte — il peggior ritardo LEGITTIMO.
+    now, checked = _adesso(admin_core.CHECK_TIMER_MAX_H)
+    classe, _ = admin_core.classe_verdetto_update("0.40.4", "0.40.4", checked, None,
+                                                  now=now, piu_recente=_vg)
+    assert classe == "aggiornato", "28h è il ritardo massimo NORMALE: niente allarme"
