@@ -10,7 +10,6 @@ demand, vedi nb1777-mcp/app/auth.py).
 from __future__ import annotations
 
 import asyncio
-import calendar
 import html
 import json
 import os
