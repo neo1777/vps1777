@@ -2,6 +2,59 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.5] — 2026-07-26
+
+Chiude il secondo dei due difetti che il ciclo di audit aveva **misurato** sul
+sistema vivo invece di dedurlo dai documenti: il gateway — il solo servizio
+esposto su Internet, e quello che monta i cinque secret — aveva un'uscita
+verso qualunque host. Ora non ce l'ha.
+
+### Corretto
+
+- **Il gateway non esce più su Internet.** Stava sulla rete `ingress`, che è un
+  bridge non-`internal`: aveva quindi una via d'uscita NAT verso qualsiasi
+  destinazione — verificato con un socket aperto dall'interno del container, non
+  dedotto da una lettura. La rete non è più dichiarata nel compose di base: la
+  ri-mette il profilo che ne ha bisogno (Caddy e Cloudflared lo facevano già da
+  sé; col profilo Tailscale il gateway è raggiunto da una porta pubblicata su
+  loopback e non le serve). Verificato eseguendo `docker compose config` su
+  tutti e tre i profili: col profilo Tailscale la rete `ingress` non viene
+  nemmeno creata, perché nessun servizio la usa.
+- **Il pannello non chiama più «guasto» una cosa che è una scelta.** Il pulsante
+  «Ricontrolla adesso» interrogava GitHub dal gateway e ora non può più: senza
+  un rimedio, avrebbe mostrato un errore di rete indistinguibile da un
+  malfunzionamento. Il messaggio dice che non è un guasto e che l'avviso di
+  aggiornamento continua ad aggiornarsi da solo — senza affermare quale delle
+  due cause sia, perché il gateway non può distinguere «non ho rete» da «GitHub
+  non risponde», e sceglierne una sarebbe inventare una diagnosi.
+- **Il verdetto sugli aggiornamenti porta la propria età.** Diceva «Sei alla
+  versione più recente» al presente, con la data dell'ultimo controllo stampata
+  sotto in grigio: le due righe insieme dicevano il vero, la prima da sola no —
+  ed è quella che si legge. Il controllo gira una volta al giorno, quindi quel
+  verdetto poteva avere fino a un giorno. Ora l'età è dentro la frase, e oltre
+  le 26 ore cambia significato: non «dato vecchio» ma «il controllo automatico
+  potrebbe non essere attivo», col comando per verificarlo. Sono due condizioni
+  diverse e finora erano lo stesso verde.
+
+### Aggiunto
+
+- **La logica che decide cosa legge l'amministratore ora ha dei test.** Nessuno
+  dei test del gateway importava `admin.py` — non può, tira dentro starlette e
+  pydantic mentre la CI gira i test senza dipendenze pesanti: tutta quella
+  logica viveva dove nessun controllo la guardava. La decisione è stata estratta
+  nel modulo puro accanto (`admin_core`, che esiste per questo e lo dichiara),
+  con dieci test nuovi e le rispettive controprove — mutando la soglia e il
+  confronto di versione, i test falliscono.
+
+### Nota per chi aggiorna
+
+Nessuna migrazione, nessun segreto nuovo. **Dopo questo aggiornamento il
+pulsante «Ricontrolla adesso» del pannello smette di funzionare**: è
+intenzionale, ed è il prezzo di un gateway che non parla con Internet.
+L'avviso di aggiornamento resta e si rinfresca da sé una volta al giorno dal
+controllo che gira sull'host, che la rete ce l'ha; la pagina ora dice
+esplicitamente quanto è vecchio quel controllo.
+
 ## [0.40.4] — 2026-07-26
 
 Rilascio di allineamento: la `0.40.3` è stata taggata su uno stato la cui CI
