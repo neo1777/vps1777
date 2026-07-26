@@ -212,7 +212,7 @@ interamente sulla VPS.
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** I 43 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 50 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -223,24 +223,29 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-La review difensiva ha prodotto **43 interventi** (2 critici, 7 alti, 21 medi, 13
-bassi). Le campagne `v0.19.1 → v0.33.0` li hanno affrontati **tutti**: nessuno è più
-aperto. Il conteggio, verificato contro il codice dal gate in CI:
+La review difensiva ha prodotto **50 interventi** (2 critici, 8 alti, 26 medi, 14
+bassi): 43 dalla campagna originaria (`v0.19.1 → v0.33.0`, affrontati tutti) e 7
+(`H44`-`H50`) dal ciclo di audit con misure sul sistema vivo culminato nella
+`v0.40.3`. Nessuno è aperto. Il conteggio, verificato contro il codice dal gate
+in CI:
 
 | | |
 |---|---|
-| **chiusi** | 40 |
+| **chiusi** | 41 |
 | **parziali** | 7 |
-| **accettati** | 1 |
+| **accettati** | 2 |
 | **aperti** | 0 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
 (`H2`) — sono chiusi e verificati in produzione, come tutta la fascia alta.
 
-L'unico **accettato**: niente 2FA sul pannello admin (`H28`) — è un gateway
-mono-utente dietro Tailscale Funnel, con password bcrypt-12 + lockout per-IP + CSRF
-+ revoca reale della sessione; il 2FA aggiungerebbe attrito per un guadagno marginale
-su questo profilo. È una decisione, non una dimenticanza.
+I due **accettati** sono decisioni, non dimenticanze: niente 2FA sul pannello admin
+(`H28` — gateway mono-utente dietro Tailscale Funnel, password bcrypt-12 + lockout
+per-IP + CSRF + revoca reale della sessione: il 2FA aggiungerebbe attrito per un
+guadagno marginale su questo profilo); e l'uscita Internet del gateway (`H50` —
+misurata sul sistema vivo, tenuta aperta per scelta del proprietario, con le tre
+soluzioni candidate e i loro costi documentati nella voce, in esame al prossimo
+ciclo di audit).
 
 I **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
 il loro *perché* nel registro:

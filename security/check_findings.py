@@ -39,9 +39,17 @@ SECURITY_MD = ROOT / "SECURITY.md"
 # è "chiuso" (niente è stato fatto) né "aperto" (non è dimenticato, è una scelta).
 VALID_STATUS = {"closed", "partial", "open", "accepted"}
 VALID_SEVERITY = {"critical", "high", "medium", "low"}
-# Quante voci il dossier ha per fascia: se il registro non le rispetta, qualcuno
-# ha aggiunto o perso un rilievo per strada.
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 7, "medium": 21, "low": 13}
+# Quante voci il registro DEVE avere per fascia: se non le rispetta, qualcuno
+# ha aggiunto o perso un rilievo per strada. L'àncora si muove SOLO con un
+# commit deliberato che nomina le voci nuove — mai per far passare la CI.
+# Provenienza dei numeri: 43 dal dossier della review difensiva originaria
+# (2 critical · 7 high · 21 medium · 13 low) + 7 dal ciclo di audit con misure
+# sul vivo chiuso in v0.40.3 (H44-H48 medium · H49 low · H50 high) = 50.
+# NB: questo scostamento è rimasto invisibile per un giorno intero perché
+# tutti leggevamo la coda dell'output senza l'exit code — il registro era a
+# 44+ dal round-2 e ogni «checker verde» dichiarato quel giorno era falso.
+EXPECTED_TOTAL = 50
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 8, "medium": 26, "low": 14}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
@@ -131,10 +139,10 @@ def main() -> int:
 
         check_evidence(f, errors)
 
-    # il dossier ha 43 voci, non una di meno
+    # l'àncora: il totale atteso, dichiarato in testa con la sua provenienza
     total = len(findings)
-    if total != 43:
-        fail(errors, f"il registro ha {total} voci, il dossier ne conta 43")
+    if total != EXPECTED_TOTAL:
+        fail(errors, f"il registro ha {total} voci, l'àncora ne dichiara {EXPECTED_TOTAL}")
     for sev, expected in EXPECTED_BY_SEVERITY.items():
         got = by_sev.get(sev, 0)
         if got != expected:
