@@ -707,7 +707,7 @@ findings:
 
   - id: H42
     severity: low
-    title: "archive-data montato :ro in archive-mcp"
+    title: "archive-data: :ro in archive-mcp — il gateway lo monta :rw (privilegio funzionale, tracciato in H46)"
     status: closed
     since: v0.32.0
     why: >
@@ -769,3 +769,90 @@ findings:
       af94006: un claim non si cerca per stringa, si cerca per forma. I due not_contains
       presidiano esattamente quello: entrambe le formulazioni fallaci, così la frase non può
       rientrare in silenzio in nessuna delle due vesti.
+
+  - id: H45
+    severity: medium
+    title: "Hardening host (unattended-upgrades + fail2ban) in TUTTI E TRE gli installer"
+    status: closed
+    since: v0.40.2
+    why: >
+      «Hardening host automatico all'install» (SECURITY.md:42, README.md:149) era falso per setup.sh:
+      presente in deploy.sh e installer/engine.py, assente nel wizard — chi seguiva il percorso manuale
+      di docs/INSTALL.md restava senza anti-brute-force SSH credendo di averlo per iscritto. Terza
+      recidiva della stessa classe (le prime due: secrets-check.timer, auto-update.timer).
+    evidence:
+      - file: setup.sh
+        contains: ["unattended-upgrades", "fail2ban"]
+      - file: deploy.sh
+        contains: ["unattended-upgrades", "fail2ban"]
+      - file: installer/engine.py
+        contains: ["unattended-upgrades", "fail2ban"]
+    note: >
+      L'evidenza è su tutti e tre APPOSTA: il perimetro-hardening non ha una fonte di verità condivisa
+      (le unit sì, via VPS1777_FEATURES), quindi è duplicato in tre file. Finché resta così, questa voce
+      è il solo presidio contro la quarta recidiva: chi tocca un installer e salta gli altri due fa
+      fallire la CI invece di scoprirlo in produzione. Il fix strutturale (una funzione condivisa)
+      renderebbe questa voce più semplice, non inutile: l'evidenza si sposterebbe sul punto unico.
+
+  - id: H46
+    severity: medium
+    title: "archive-data è condiviso: :ro in archive-mcp, :rw nel gateway — e il :rw è funzionale"
+    status: closed
+    since: v0.40.2
+    why: >
+      H42 dichiara il :ro di archive-mcp e tace che il gateway — l'unico servizio esposto su Internet —
+      monta lo stesso volume in scrittura. Chi legge il registro conclude che i dati dell'archivio siano
+      protetti in scrittura: non lo sono. Il :rw NON è un difetto (compose.yaml:100 lo documenta:
+      /admin/archive scrive i .db indicizzati) — il difetto era che nessuna voce lo nominasse.
+    evidence:
+      - file: compose.yaml
+        contains:
+          - "archive-data:/var/lib/archive:rw"
+          - "archive-data:/var/lib/archive:ro"
+    note: >
+      Le due evidenze insieme, non separate: la voce afferma la CONVIVENZA, quindi cade se sparisce una
+      qualsiasi delle due. Se un domani qualcuno togliesse il :rw «per sicurezza» romperebbe
+      /admin/archive, e la CI lo dice prima della produzione. Trovato dall'audio del round-2 del
+      loop-audit e verificato riga per riga.
+
+  - id: H47
+    severity: medium
+    title: "Portainer pubblicato SOLO su 127.0.0.1 e dietro profilo opt-in"
+    status: closed
+    since: v0.40.2
+    why: >
+      SECURITY.md:43 promette «strumenti di management mai esposti: solo loopback + tunnel SSH». La
+      garanzia REGGE (il binding all'interfaccia di loopback è il meccanismo, non una convenzione) ma
+      era infalsificabile: nessun test la verificava. Chi togliesse il prefisso 127.0.0.1 per un debug
+      esporrebbe il pannello di gestione dei container su Internet, e nessuno se ne accorgerebbe.
+    evidence:
+      - file: compose.ops.portainer.yaml
+        contains:
+          - "127.0.0.1:9443:9443"
+          - "profiles: [ops.portainer]"
+    note: >
+      Il profilo è parte dell'evidenza: senza opt-in il container non parte, ed è metà della garanzia.
+      Nota di superficie da tenere presente: Portainer monta /var/run/docker.sock (riga 36) — quando è
+      attivo, sulla macchina c'è un container col socket Docker. Il claim «il gateway non ha accesso al
+      socket» resta vero (zero occorrenze in compose.yaml), ma la superficie del sistema cambia.
+
+  - id: H48
+    severity: medium
+    title: "Nessun servizio pubblica porte in compose.yaml: la pubblicazione vive solo negli overlay ingress"
+    status: closed
+    since: v0.40.2
+    why: >
+      I servizi su `egress` (nb1777-mcp, nb1777-bot) hanno uscita NAT verso Internet ma nessun ingresso:
+      egress è un bridge senza porte pubblicate. Questa proprietà non era verificata da nulla — una
+      direttiva `ports` aggiunta per un debug avrebbe aperto un ingresso su un servizio backend senza
+      che nessuno lo notasse.
+    evidence:
+      - file: compose.yaml
+        not_contains: ["ports:"]
+    note: >
+      Il controllo è su `ports`, NON su `expose`: expose non pubblica sull'host (lo usano tutti e tre i
+      servizi, incluso archive-mcp che è world-isolated su backend internal:true), ports sì. L'audio del
+      round-2 aveva proposto di vietare entrambe: con `expose` la voce sarebbe nata rossa su una
+      configurazione corretta. La pubblicazione legittima vive negli overlay (compose.ingress.*.yaml),
+      che questa voce non tocca. ⚠️ Se un domani servisse un `ports` in compose.yaml, questa voce va
+      aggiornata insieme al cambio: è un not_contains, quindi è volutamente rigido.
