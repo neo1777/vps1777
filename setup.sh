@@ -293,6 +293,20 @@ if confirm "Procedo ora?"; then
       sudo systemctl enable --now $ENABLE_UNITS 2>/dev/null \
         && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + scadenze secret (settimanale)$AUTOUPD_MSG" \
         || warn "Unit systemd non abilitate (systemd assente?) — la CLI è comunque installata"
+      # TERZA RECIDIVA della classe documentata qui sopra: l'hardening host
+      # (unattended-upgrades + fail2ban) era in deploy.sh (457) e in engine.py
+      # (284) ma non qui — e SECURITY.md/README lo promettono «automatico
+      # all'install» senza distinguere il percorso. Chi installava con setup.sh
+      # restava senza anti-brute-force SSH credendo di averlo per iscritto.
+      # Stesso perimetro degli altri due installer: sshd_config NON si tocca
+      # (la disabilitazione delle password è un passo manuale, vedi OPS.md).
+      if sudo apt-get install -y -q unattended-upgrades fail2ban >/dev/null 2>&1; then
+        sudo systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+        sudo systemctl enable --now fail2ban >/dev/null 2>&1 || true
+        ok "Hardening host attivo: unattended-upgrades + fail2ban"
+      else
+        warn "Hardening host non applicato (apt-get non riuscito) — a mano: sudo apt-get install -y unattended-upgrades fail2ban"
+      fi
     else
       warn "Installazione CLI saltata (sudo negato) — installala dopo con: sudo install -m755 tools/vps1777.py /usr/local/bin/vps1777"
     fi

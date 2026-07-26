@@ -737,3 +737,35 @@ findings:
       Sandbox unit + templatizzazione (v0.32.0) + rootfs read_only (v0.33.0) su gateway,
       archive-mcp, bot con tmpfs /tmp. nb1777-mcp ESCLUSO di proposito (Chromium/Playwright
       scrive /tmp, /dev/shm, cache profilo). Scelta dichiarata.
+
+  - id: H44
+    severity: medium
+    title: "I doc dichiarano i secret che il gateway VEDE, non solo quelli che non vede"
+    status: closed
+    since: v0.40.2
+    why: >
+      «Il gateway non vede i secret dell'host» era vero alla lettera e fuorviante nella
+      sostanza: il gateway monta 5 secret Docker, `telegram_bot_token` incluso — che
+      docs/SECRETS.md chiama radice di fiducia della Mini App (chi ha il token forgia un
+      initData valido per QUALUNQUE user id, owner compreso). Un lettore del modello di
+      minaccia concludeva che un gateway compromesso non arrivasse ai segreti: ci arriva,
+      ed è la sua superficie reale.
+    evidence:
+      - file: SECURITY.md
+        contains:
+          - "vede i 5 secret Docker a lui assegnati"
+          - "I 5 secret Docker assegnati al gateway"
+        not_contains:
+          - "né ai secret host"
+          - "né ai secret dell'host"
+      - file: README.md
+        contains: ["5 secret Docker a lui assegnati"]
+      - file: docs/ARCHITECTURE.md
+        contains: ["5 secret Docker a lui assegnati"]
+    note: >
+      Trovato nel round-1 del loop-audit (audio 1764eb2e su notebook 9748e969) e corretto in
+      5ca0f98 su TRE incarnazioni. La quarta — SECURITY.md:39, sezione modello-di-minaccia —
+      è sopravvissuta al fix perché diceva lo stesso claim con altre parole, e ha richiesto
+      af94006: un claim non si cerca per stringa, si cerca per forma. I due not_contains
+      presidiano esattamente quello: entrambe le formulazioni fallaci, così la frase non può
+      rientrare in silenzio in nessuna delle due vesti.
