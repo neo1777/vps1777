@@ -11,7 +11,13 @@
 # COSA NON FA: nessuna scrittura, nessun restart. Solo due GET.
 # EXIT: 0 = PASS (interno sì / esterno no) · 1 = FAIL · 2 = non eseguibile.
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 2
+# Repo per VARIABILE prima che per posizione (stesso pattern di prova-1/4): copiata in
+# /tmp ed eseguita lì, `dirname/../..` porterebbe a «/» e docker compose non troverebbe
+# il compose.yaml. Se il repo non si trova: exit 2, MAI un PASS.
+REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../.." 2>/dev/null && pwd)}"
+[ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ] || {
+  echo "⚠️  repo non trovato (compose.yaml assente) — usa VPS1777_REPO=<path>"; exit 2; }
+cd "$REPO" || exit 2
 command -v docker >/dev/null || { echo "⚠️  docker assente"; exit 2; }
 docker compose ps --status running -q gateway >/dev/null 2>&1 || { echo "⚠️  gateway non in esecuzione"; exit 2; }
 
@@ -19,6 +25,8 @@ echo "── prova-3 · /health?deep è chiuso agli esterni?   $(date '+%F %T')"
 PORT="${GATEWAY_PORT:-8080}"
 
 # ① DA DENTRO il container (loopback) → deve rispondere col deep
+# `</dev/null` alla fine di questa exec: inoltra stdin al container e, se lo script
+# arriva da stdin, si mangia il resto del file → falso PASS. Misurato il 26/07 19:54.
 dentro=$(docker compose exec -T gateway python3 -c "
 import json,urllib.request
 try:
@@ -26,7 +34,7 @@ try:
     b=r.read(400).decode('utf-8','replace')
     print(r.status, 'DEEP' if ('checks' in b or 'deep' in b) else 'SHALLOW')
 except Exception as e: print('ERR', type(e).__name__)
-" 2>/dev/null | tr -d '\r')
+" </dev/null 2>/dev/null | tr -d '\r')
 echo "   da dentro (127.0.0.1): $dentro"
 
 # ② DALL'HOST con un XFF pubblico iniettato → l'XFF NON deve essere creduto.

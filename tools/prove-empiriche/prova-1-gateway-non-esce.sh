@@ -12,7 +12,15 @@
 #   Solo `docker compose exec` con una richiesta in uscita e un timeout.
 # EXIT: 0 = PASS (non esce) · 1 = FAIL (esce) · 2 = non eseguibile.
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 2
+# Il repo si trova per variabile PRIMA che per posizione: questa prova gira anche
+# passata via stdin (`ssh host 'VPS1777_REPO=… bash -s' < prova-1.sh`), dove
+# BASH_SOURCE non esiste e un `cd` relativo a sé stessa porterebbe altrove.
+# Stesso pattern di prova-4. Se il repo non si trova: exit 2 (non eseguibile),
+# MAI un PASS — «non misurato» non è «passato».
+REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../.." 2>/dev/null && pwd)}"
+[ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ] || {
+  echo "⚠️  repo non trovato (compose.yaml assente) — usa VPS1777_REPO=<path>"; exit 2; }
+cd "$REPO" || exit 2
 
 command -v docker >/dev/null || { echo "⚠️  docker assente — prova non eseguibile"; exit 2; }
 docker compose ps --status running -q gateway >/dev/null 2>&1 || {
@@ -25,8 +33,13 @@ echo "── prova-1 · il gateway raggiunge Internet?   $(date '+%F %T')"
 esce=0
 for t in "https://1.1.1.1" "https://example.com" "https://api.telegram.org"; do
   # -m 6: se la rete è bloccata il timeout scade; se è aperta risponde in <2s.
+  # `</dev/null` NON è cosmetico: `docker compose exec -T` INOLTRA stdin al container.
+  # Lanciata via `ssh host 'bash -s' < prova-1.sh`, la prima exec si mangia il RESTO
+  # dello script → bash finisce l'input, esce 0 e stampa un PASS senza aver misurato.
+  # Misurato sul campo il 26/07 19:54: falso PASS su una garanzia di sicurezza.
   code=$(docker compose exec -T gateway sh -c \
-        "command -v curl >/dev/null && curl -s -o /dev/null -m 6 -w '%{http_code}' '$t' || echo NOCURL" 2>/dev/null | tr -d '\r')
+        "command -v curl >/dev/null && curl -s -o /dev/null -m 6 -w '%{http_code}' '$t' || echo NOCURL" \
+        </dev/null 2>/dev/null | tr -d '\r')
   case "$code" in
     NOCURL) echo "   ?  $t → curl assente nel container (uso il fallback sotto)"; continue ;;
     000|"")  echo "   ✅ $t → nessuna risposta (uscita bloccata)" ;;
@@ -43,7 +56,7 @@ try:
     socket.create_connection(('1.1.1.1', 443)); print('APERTO')
 except Exception as e:
     print('CHIUSO', type(e).__name__)
-" 2>/dev/null | tr -d '\r')
+" </dev/null 2>/dev/null | tr -d '\r')
   case "$out" in
     APERTO*) echo "   🔴 socket diretto 1.1.1.1:443 → APERTO — IL GATEWAY ESCE"; esce=1 ;;
     CHIUSO*) echo "   ✅ socket diretto 1.1.1.1:443 → $out" ;;

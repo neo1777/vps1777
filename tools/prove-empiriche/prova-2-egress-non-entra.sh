@@ -10,19 +10,41 @@
 # COSA NON FA: non apre porte, non modifica il compose, non riavvia nulla.
 # EXIT: 0 = PASS · 1 = FAIL (raggiungibile dall'esterno) · 2 = non eseguibile.
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 2
+# Repo per VARIABILE prima che per posizione (come prova-1/3/4): copiata in /tmp,
+# `dirname/../..` porterebbe a «/». Se non si trova: exit 2, MAI un PASS.
+REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../.." 2>/dev/null && pwd)}"
+[ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ] || {
+  echo "⚠️  repo non trovato (compose.yaml assente) — usa VPS1777_REPO=<path>"; exit 2; }
+cd "$REPO" || exit 2
 command -v docker >/dev/null || { echo "⚠️  docker assente"; exit 2; }
 
 echo "── prova-2 · la rete egress è unidirezionale?   $(date '+%F %T')"
 
-# ① nessuna porta pubblicata dai servizi su egress (il fatto configurativo)
-pub=$(docker compose ps --format '{{.Service}} {{.Publishers}}' 2>/dev/null \
-      | grep -E '^(nb1777-mcp|nb1777-bot) ' | grep -v '^\S* *$' || true)
+# ① nessuna porta PUBBLICATA dai servizi su egress (il fatto configurativo)
+#
+# 🔴 QUI C'ERA UN FALSO POSITIVO, misurato sul vivo il 26/07 alle 20:03. La versione
+#    precedente leggeva `{{.Publishers}}`, che elenca ANCHE le porte solo ESPOSTE
+#    (`EXPOSE` nel Dockerfile) con `PublishedPort: 0`. Su nb1777-mcp ha stampato
+#    «{ 8003 0 tcp}» e ha gridato FAIL: ma `docker port` era VUOTO e sull'host non
+#    c'era nulla in ascolto su :8003 — la porta è esposta alle reti docker, NON
+#    pubblicata. ⇒ `expose` ≠ `ports`, ed è la stessa distinzione che il round-4
+#    aveva già dovuto fare su H48. Sapevamo la differenza e lo strumento no.
+#    ⭐ Un falso FAIL non è più innocuo di un falso PASS: manda a caccia di un
+#      problema che non esiste e toglie credibilità ai rossi veri.
+# Ora si chiede a `docker port`, che risponde SOLO delle pubblicazioni reali.
+pub=""
+for svc in nb1777-mcp nb1777-bot; do
+  cid=$(docker compose ps -q "$svc" 2>/dev/null | head -1)
+  [ -n "$cid" ] || continue
+  mapped=$(docker port "$cid" 2>/dev/null)          # vuoto = nessuna pubblicazione
+  [ -n "$mapped" ] && pub="$pub$svc → $mapped"$'\n'
+done
 if [ -n "$pub" ]; then
-  echo "   🔴 servizi su egress con porte pubblicate:"; echo "$pub" | sed 's/^/      /'
+  echo "   🔴 servizi su egress con porte PUBBLICATE sull'host:"; printf '%s' "$pub" | sed 's/^/      /'
   echo "🔴 FAIL — una porta pubblicata è un ingresso, non un'uscita."; exit 1
 fi
-echo "   ✅ nessuna porta pubblicata da nb1777-mcp / nb1777-bot"
+echo "   ✅ nessuna porta pubblicata da nb1777-mcp / nb1777-bot (le porte EXPOSE non contano:"
+echo "      sono visibili solo alle reti docker, non all'host)"
 
 # ② l'uscita FUNZIONA (controprova positiva: se qui fallisce, il ① sopra non
 #    prova niente — un servizio isolato del tutto darebbe lo stesso verde)
@@ -33,7 +55,7 @@ try:
     socket.create_connection(('1.1.1.1', 443)); print('ESCE')
 except Exception as e:
     print('NON-ESCE', type(e).__name__)
-" 2>/dev/null | tr -d '\r')
+" </dev/null 2>/dev/null | tr -d '\r')
 case "$out" in
   ESCE)     echo "   ✅ nb1777-mcp ESCE (controprova positiva: la prova sa dire sì)" ;;
   NON-ESCE*) echo "   ⚠️  nb1777-mcp NON esce ($out) — allora il verde del ① non dimostra il NAT:"
@@ -42,7 +64,7 @@ case "$out" in
 esac
 
 # ③ l'IP del container su egress non è raggiungibile dall'host su porte comuni
-ip=$(docker compose exec -T nb1777-mcp hostname -i 2>/dev/null | tr -d '\r' | awk '{print $1}')
+ip=$(docker compose exec -T nb1777-mcp hostname -i </dev/null 2>/dev/null | tr -d '\r' | awk '{print $1}')
 if [ -n "$ip" ]; then
   echo "   ip interno di nb1777-mcp: $ip (privato: atteso)"
   for p in 8003 80 443; do
