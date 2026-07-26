@@ -20,6 +20,9 @@ vps1777 rollback        # torna alla versione precedente
 
 Oppure dal **pannello admin → tab Update**: stessa cosa, un click.
 Quando esce una release il bot Telegram ti avvisa (una volta sola).
+E se non fai niente, **fa da sola**: di default `vps1777-auto-update.timer`
+applica l'update sicuro una volta a settimana (feature `autoupdate`,
+spegnibile da `VPS1777_FEATURES` — vedi [OPS.md](OPS.md)).
 
 ## Cosa succede durante `vps1777 update`
 
@@ -69,8 +72,8 @@ del gateway stesso a metà update); l'esito arriva comunque su Telegram.
 
 ## Notifiche e check
 
-Sulla VPS girano **due** timer systemd, con cadenze diverse perché sorvegliano
-cose che invecchiano a velocità diverse.
+Sulla VPS girano **tre** timer systemd, con cadenze diverse: due **sorvegliano**
+cose che invecchiano a velocità diverse, il terzo **applica**.
 
 **1. Nuove release** — `vps1777-check-update.timer`, **una volta al giorno**. Fa
 una GET **non autenticata** a `api.github.com/repos/neo1777/vps1777/releases/latest`
@@ -92,7 +95,15 @@ vps1777 secrets-status          # a schermo
 vps1777 secrets-status --notify # + notifica Telegram se qualcosa è oltre soglia
 ```
 
-> Entrambe le unit non hanno utente né path hardcodati: la CLI sostituisce
+**3. Auto-update sicuro** — `vps1777-auto-update.timer`, **settimanale**.
+Questo non sorveglia: **applica** `vps1777 update --yes`, con l'intera rete di
+sicurezza del canale gestito (backup, verifica digest, migrazioni, health-gate,
+rollback) — e solo se la feature `autoupdate` è nello stato dichiarato
+(`VPS1777_FEATURES`, default sì). È il motivo per cui il check quotidiano può
+limitarsi ad avvisare: l'applicazione ha già un suo canale sicuro. Dettagli e
+spegnimento: [OPS.md](OPS.md).
+
+> Le unit non hanno utente né path hardcodati: la CLI sostituisce
 > `@OPERATOR_USER@` / `@REPO@` coi valori reali a ogni update (H43). Era un bug
 > vero: con un operatore diverso da `vps1777` il controllo delle scadenze
 > smetteva di girare **in silenzio**.

@@ -133,6 +133,10 @@ oppure un click dal **pannello admin → tab Update**. Quando esce una release
 il bot Telegram ti avvisa; se la nuova versione non torna in salute, **rollback
 automatico**. Manuale completo: [docs/UPDATE.md](docs/UPDATE.md).
 
+E di default **fa da sola**: `vps1777-auto-update.timer` applica lo stesso
+update sicuro **una volta a settimana** — feature `autoupdate` in
+`VPS1777_FEATURES`, attiva di default; per spegnerla vedi [docs/OPS.md](docs/OPS.md).
+
 ## Sicurezza per design
 
 - Backend su rete Docker `internal: true` — **solo il gateway** è esposto verso l'esterno

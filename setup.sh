@@ -272,14 +272,26 @@ if confirm "Procedo ora?"; then
         esac
       done
       sudo systemctl daemon-reload 2>/dev/null || true
-      # Le tre unit vanno ABILITATE tutte: il ciclo sopra le installa (glob su
+      # Le unit di base vanno ABILITATE tutte: il ciclo sopra le installa (glob su
       # *.timer/*.path), ma un timer installato e non abilitato non gira — e non
       # lo dice a nessuno. `vps1777-secrets-check.timer` mancava qui: il fix #13
       # (6c764bc) allineò deploy.sh e installer/engine.py e saltò questo path,
       # quindi chi installava con setup.sh restava senza il controllo delle
       # scadenze dei secret, in silenzio. Stessa classe di H43.
-      sudo systemctl enable --now vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer 2>/dev/null \
-        && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + scadenze secret (settimanale)" \
+      # RECIDIVA: vps1777-auto-update.timer rifece lo stesso percorso — aggiunto
+      # a deploy.sh (710) ed engine.py (590), saltato qui. Da qui in poi setup.sh
+      # legge la STESSA fonte di verità degli altri due installer: lo stato
+      # dichiarato VPS1777_FEATURES, con lo stesso default (deploy.sh:632).
+      ENABLE_UNITS="vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer"
+      FEATURES="$(sed -n 's/^VPS1777_FEATURES=//p' .env 2>/dev/null | tail -1)"
+      FEATURES="${FEATURES:-backup,autoupdate}"
+      AUTOUPD_MSG=""
+      case ",$FEATURES," in *,autoupdate,*)
+        ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer"
+        AUTOUPD_MSG=" + auto-update sicuro (settimanale)";;
+      esac
+      sudo systemctl enable --now $ENABLE_UNITS 2>/dev/null \
+        && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + scadenze secret (settimanale)$AUTOUPD_MSG" \
         || warn "Unit systemd non abilitate (systemd assente?) — la CLI è comunque installata"
     else
       warn "Installazione CLI saltata (sudo negato) — installala dopo con: sudo install -m755 tools/vps1777.py /usr/local/bin/vps1777"
