@@ -922,12 +922,16 @@ findings:
 
   - id: H50
     severity: high
-    title: "Uscita Internet del gateway: MISURATA sul vivo, tenuta aperta per decisione del proprietario"
-    status: accepted
+    title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa nel codice, non ancora in produzione"
+    status: partial
     since: v0.40.3
     evidence:
+      - file: compose.yaml
+        contains:
+          - "`ingress` NON qui (H50)"
+          - "nessun servizio di questo file può USCIRE su Internet"
       - file: services/gateway/app/admin.py
-        contains: ["def _fetch", "api.github.com"]
+        contains: ["Refresh non disponibile", "non è un guasto"]
       - file: tools/prove-empiriche/prova-1-gateway-non-esce.sh
         contains: ["il gateway raggiunge Internet"]
     missing: >
@@ -956,18 +960,31 @@ findings:
       presa sul quadro precedente e il quadro corretto è stato ridato al proprietario
       la stessa sera: la voce resta `accepted` finché lui non la rivede.
 
-      SOLUZIONI CANDIDATE, per il prossimo round di audit:
-      (a) togliere `- ingress` dal blocco gateway di compose.yaml — una riga,
-          misurata sui 3 profili: caddy e cloudflared ri-dichiarano la rete nel
-          proprio overlay, tailscale usa il port-mapping su loopback e non la
-          userebbe comunque. Costo (corretto): il bottone «Ricontrolla adesso»
-          fallisce; l'avviso del timer resta e può invecchiare fino a 24h.
-      (b) il bottone scrive un INTENT invece di fare la GET — il pattern
-          collect→apply è già descritto in admin.py:766-772 e già usato per
-          l'update stesso (systemd/vps1777-update.path): l'host consuma l'intent
-          e rinfresca update_status.json. Insieme ad (a) chiude l'uscita SENZA
-          perdere niente; costo: un componente in più, e se la path unit muore
-          il refresh manuale tace (serve un heartbeat).
-      (c) egress ristretto alla sola api.github.com (allowlist a livello rete):
-          chiude quasi tutto ma è fragile ai cambi di IP di GitHub e complica il
-          deploy — la meno promettente delle tre.
+      FATTO NEL CODICE (26/07, dopo la correzione del costo): applicata la
+      soluzione (a) — `- ingress` tolta dal blocco gateway di compose.yaml, che
+      resta solo su `backend` (internal: true) ⇒ nessuna uscita NAT. VERIFICATO
+      eseguendo `docker compose config` su tutti e tre i profili, non leggendo:
+      tailscale → gateway [backend] + ports 127.0.0.1:8080 (e la rete `ingress`
+      non viene nemmeno creata, nessuno la usa); caddy → gateway [backend,
+      ingress] e caddy [ingress], si parlano; cloudflared → gateway [backend,
+      ingress]. Insieme: il ramo d'errore di update_check() in admin.py ora
+      spiega che il refresh non disponibile NON è un guasto e che l'avviso
+      continua ad aggiornarsi dal timer dell'host — senza affermare quale delle
+      due cause sia, perché il gateway non può distinguere «non ho rete» da
+      «GitHub non risponde». 175 test del gateway verdi.
+
+      PERCHÉ RESTA `partial` E NON `closed`: il fix è nel CODICE, non in
+      PRODUZIONE. La VPS gira una versione in cui il gateway ha ancora l'uscita:
+      si chiude quando una release che contiene questo commit è applicata e
+      prova-1 lo conferma sul vivo (oggi dà FAIL, deve diventare PASS da sola).
+      È la stessa distanza fra «fix scritto» e «fix che gira» che il round-5 ha
+      misurato in sei giorni e un rilascio.
+
+      SOLUZIONI SCARTATE, e perché — così non si ridiscutono da zero:
+      (b) il bottone scrive un INTENT che l'host consuma (pattern collect→apply,
+          già in casa: systemd/vps1777-update.path). Non perderebbe NIENTE, ma
+          aggiunge un componente e un modo nuovo di fallire in silenzio (se la
+          path unit muore il refresh tace, servirebbe un heartbeat). Tenuta in
+          riserva: si fa solo se il refresh on-demand si rivelasse necessario.
+      (c) egress ristretto alla sola api.github.com (allowlist di rete): fragile
+          ai cambi di IP di GitHub e complica il deploy. Scartata.

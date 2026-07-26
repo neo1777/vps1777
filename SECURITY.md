@@ -232,20 +232,26 @@ in CI:
 | | |
 |---|---|
 | **chiusi** | 41 |
-| **parziali** | 7 |
-| **accettati** | 2 |
+| **parziali** | 8 |
+| **accettati** | 1 |
 | **aperti** | 0 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
 (`H2`) — sono chiusi e verificati in produzione, come tutta la fascia alta.
 
-I due **accettati** sono decisioni, non dimenticanze: niente 2FA sul pannello admin
-(`H28` — gateway mono-utente dietro Tailscale Funnel, password bcrypt-12 + lockout
-per-IP + CSRF + revoca reale della sessione: il 2FA aggiungerebbe attrito per un
-guadagno marginale su questo profilo); e l'uscita Internet del gateway (`H50` —
-misurata sul sistema vivo, tenuta aperta per scelta del proprietario, con le tre
-soluzioni candidate e i loro costi documentati nella voce, in esame al prossimo
-ciclo di audit).
+L'unico **accettato**: niente 2FA sul pannello admin (`H28`) — è un gateway
+mono-utente dietro Tailscale Funnel, con password bcrypt-12 + lockout per-IP + CSRF
++ revoca reale della sessione; il 2FA aggiungerebbe attrito per un guadagno marginale
+su questo profilo. È una decisione, non una dimenticanza.
+
+L'ottavo **parziale** è `H50`, il più recente e il solo trovato da una misura invece
+che da una lettura: il gateway — il servizio esposto, quello che monta i secret —
+aveva un'uscita verso qualunque host su Internet. Il codice ora la chiude (la rete
+`ingress` non è più dichiarata nel compose di base; la ri-mette solo il profilo che
+ne ha bisogno), ma la voce resta parziale finché il fix non gira in produzione e la
+prova empirica non lo conferma sul vivo: **fix scritto e fix che gira sono due stati
+diversi, e il registro tiene la differenza** invece di dichiarare chiuso ciò che è
+soltanto committato.
 
 I **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
 il loro *perché* nel registro:

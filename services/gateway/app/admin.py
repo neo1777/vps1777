@@ -825,11 +825,23 @@ async def update_check(request: Request) -> Response:
     try:
         rel = await asyncio.to_thread(_fetch)
     except Exception as exc:  # noqa: BLE001 — URLError/timeout/JSON: dato stantio, dichiarato
-        prev.update(error=str(exc)[:200], checked_at=now)
+        # Dal fix H50 il gateway non ha più uscita su Internet: questa chiamata
+        # FALLISCE per progetto, e un «Check fallito: <errno>» la farebbe leggere
+        # come un guasto da riparare. Il messaggio dice cosa NON è caduto (l'avviso
+        # lo scrive il timer sull'host, il gateway lo legge dal disco) senza
+        # affermare quale delle due cause sia: il gateway non può distinguere
+        # «non ho la rete» da «GitHub non risponde», e dichiararne una sarebbe
+        # inventare. Il dettaglio tecnico resta, in coda.
+        spiega = ("Refresh non disponibile: il gateway non raggiunge GitHub. "
+                  "Se questa installazione tiene il gateway senza uscita Internet "
+                  "(impostazione predefinita) è atteso, non è un guasto: l'avviso "
+                  "di aggiornamento continua ad aggiornarsi da solo — lo scrive il "
+                  "controllo giornaliero sull'host. Dettaglio: ")
+        prev.update(error=spiega + str(exc)[:200], checked_at=now)
         sf.write_text(json.dumps(prev, indent=2) + "\n")
         audit({"event": "admin_update_check_err", "by": email, "error": str(exc)[:200]})
         return RedirectResponse(
-            f"/admin/update?msg=Check+fallito:+{str(exc)[:80].replace(' ', '+')}&kind=err",
+            f"/admin/update?msg={(spiega + str(exc)[:60]).replace(' ', '+')}&kind=err",
             status_code=303)
     latest = str(rel.get("tag_name") or "").lstrip("v")
     known = str(prev.get("latest") or "")

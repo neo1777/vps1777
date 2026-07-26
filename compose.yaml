@@ -6,9 +6,14 @@
 #   - nb1777-mcp:  NotebookLM via CLI nlm + headless Chromium
 #   - nb1777-bot:  Telegram bot (long-poll)
 #
-# Backend su rete `backend` (internal: true) — NIENTE è raggiungibile da fuori
-# tranne il gateway via ingress. L'ingress è in compose.ingress.<provider>.yaml
-# (Tailscale Funnel | Caddy | Cloudflared).
+# Backend su rete `backend` (internal: true) — NIENTE è raggiungibile da fuori,
+# e nessun servizio di questo file può USCIRE su Internet: la rete `ingress` non
+# è dichiarata qui per nessuno, nemmeno per il gateway. La dichiara il profilo
+# che ne ha bisogno (compose.ingress.<provider>.yaml: Caddy e Cloudflared la
+# ri-mettono sul gateway, Tailscale non le serve perché pubblica una porta su
+# loopback). Vedi H50: prima il gateway stava su `ingress` anche col profilo
+# Tailscale, che è un bridge NON internal → aveva un'uscita NAT verso qualunque
+# host, misurata sul vivo il 26/07 (prova-1).
 #
 # Avvio tipico (produzione — immagini pullate da ghcr, MAI build sulla VPS):
 #   docker compose --profile ingress.tailscale up -d
@@ -107,7 +112,15 @@ services:
       - gateway-uploads:/var/lib/uploads:rw
     networks:
       - backend
-      - ingress
+      # `ingress` NON qui (H50): la ri-dichiara il profilo che ne ha bisogno —
+      # compose.ingress.caddy.yaml e .cloudflared.yaml lo fanno già da sé, e col
+      # profilo Tailscale il gateway è raggiunto dal port mapping su loopback
+      # (compose.ingress.tailscale.yaml), non dalla rete. Dichiararla qui dava al
+      # gateway — il solo servizio esposto, e quello che monta 5 secret — un'uscita
+      # NAT verso qualunque host: misurata sul vivo, non dedotta (prova-1, 26/07).
+      # Costo accettato: il pulsante «Ricontrolla adesso» non può più interrogare
+      # GitHub; l'AVVISO di aggiornamento resta, lo scrive il timer sull'host in
+      # onboarding/update_status.json e il gateway lo legge dal disco.
     expose:
       - "8080"
     healthcheck:
