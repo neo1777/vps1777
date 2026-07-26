@@ -919,3 +919,44 @@ findings:
       per sbloccarsi in una crisi e si dimentica di toglierlo lascia la verifica firma disattivata
       a tempo indeterminato. Resta [da-tarare]: un avviso periodico se REQUIRE_COSIGN=0 resta nel
       .env oltre N giorni, non ancora implementato.
+
+  - id: H50
+    severity: high
+    title: "Uscita Internet del gateway: MISURATA sul vivo, tenuta aperta per decisione del proprietario"
+    status: accepted
+    since: v0.40.3
+    evidence:
+      - file: services/gateway/app/admin.py
+        contains: ["def _fetch", "api.github.com"]
+      - file: tools/prove-empiriche/prova-1-gateway-non-esce.sh
+        contains: ["il gateway raggiunge Internet"]
+    missing: >
+      MISURATO sul vivo (26/07/2026, prova-1, profilo Tailscale Funnel): il gateway
+      ESCE su Internet a livello TCP (socket verso 1.1.1.1:443 riuscito dentro il
+      container). È il servizio che monta 5 secret ed è l'unico esposto al pubblico:
+      un gateway compromesso avrebbe una via di esfiltrazione. L'unica destinazione
+      legittima nota nel codice (ricerca su tutti i moduli, 26/07) è api.github.com
+      per il check-release (admin.py, _fetch) — le altre due chiamate uscenti sono
+      interne alla rete docker.
+
+      DECISIONE Neo (26 lug, sul canale delle decisioni): si lascia com'è, per ora.
+      «Lasciare aperto mi sembra davvero pericoloso… d'altra parte l'aggiornamento
+      automatico sembra cosa scontata per l'utente: lasciamo com'è e segniamo nei
+      documenti possibili soluzioni; vediamo se il prossimo round trova buone idee.»
+      Il costo di chiudere oggi: il check-release fallirebbe IN SILENZIO (il pannello
+      smette di mostrare i nuovi rilasci senza dirlo) — inaccettabile senza un
+      sostituto. Rischio accettato, non dimenticato.
+
+      SOLUZIONI CANDIDATE, per il prossimo round di audit:
+      (a) togliere `- ingress` dal blocco gateway di compose.yaml — una riga,
+          misurata sui 3 profili: caddy e cloudflared ri-dichiarano la rete nel
+          proprio overlay, tailscale usa il port-mapping su loopback e non la
+          userebbe comunque. Chiude l'uscita ma rende muto il check-release.
+      (b) file d'intento + systemd path unit sull'HOST che esegue la chiamata a
+          api.github.com al posto del gateway — il pattern esiste già in casa
+          (systemd/vps1777-update.path): il gateway scrive l'intento, l'host fa
+          la rete. Proposta emersa al round-5; costo: un componente in più, e se
+          la path unit muore il pannello tace di nuovo (serve un heartbeat).
+      (c) egress ristretto alla sola api.github.com (allowlist a livello rete):
+          chiude quasi tutto ma è fragile ai cambi di IP di GitHub e complica il
+          deploy — la meno promettente delle tre.

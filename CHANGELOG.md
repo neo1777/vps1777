@@ -60,11 +60,13 @@ di riferimento: 7 su 8 rimossi, ~12 GB liberati, **non recuperabili** (erano
 copie di update riusciti del 20/07). Chi vuole conservarne uno come campione
 lo copi fuori da `backups/pre-update/` prima del primo check.
 
-Resta aperto, misurato e dichiarato nel registro: il gateway ha un'uscita
-reale verso Internet (serve al solo check-release verso `api.github.com`);
-la restrizione è progettata ma non ancora committata, perché il costo — il
-pannello che smette di vedere i nuovi rilasci, in silenzio — è una scelta di
-prodotto, non tecnica.
+Resta aperto, misurato e dichiarato nel registro (`H50`): il gateway ha
+un'uscita reale verso Internet, che serve al solo check-release verso
+`api.github.com`. La scelta è stata presa dal proprietario, non rinviata:
+si tiene aperta **per ora**, perché chiuderla oggi renderebbe muto il
+check-release senza un sostituto — e le tre soluzioni candidate (rete,
+file d'intento + path unit sull'host, allowlist) sono documentate nella
+voce di registro, in attesa del prossimo round di audit.
 
 ## [0.40.2] — 2026-07-21
 
