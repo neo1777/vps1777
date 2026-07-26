@@ -928,9 +928,11 @@ async def update_view(request: Request) -> Response:
         head = ('<div class="kicker"><span class="dot warn"></span>'
                 f'Ultimo check fallito ({html.escape(str(check_err))}) — dato stantio.</div>')
     elif classe == "aggiornamento":
+        eta = (f' — rilevato da un controllo di {ore} ore fa' if ore is not None
+               else ' — data del controllo non leggibile')
         head = ('<div class="kicker"><span class="dot warn"></span>'
                 f'Aggiornamento disponibile: <strong>v{html.escape(str(latest))}</strong>'
-                f' (sei alla {html.escape(current)}).</div>')
+                f' (sei alla {html.escape(current)}){eta}.</div>')
     elif classe == "latest-piu-vecchia":
         head = ('<div class="kicker"><span class="dot ok"></span>'
                 f'Sei alla v{html.escape(current)} — l\'ultima release nota '

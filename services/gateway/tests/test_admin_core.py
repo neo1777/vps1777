@@ -329,3 +329,25 @@ def test_un_timer_sano_al_suo_ritardo_massimo_non_fa_scattare_l_allarme():
     classe, _ = admin_core.classe_verdetto_update("0.40.4", "0.40.4", checked, None,
                                                   now=now, piu_recente=_vg)
     assert classe == "aggiornato", "28h è il ritardo massimo NORMALE: niente allarme"
+
+
+def test_anche_il_ramo_aggiornamento_porta_l_eta():
+    """Trovato dall'artefatto del round-6, ed è il ramo dove l'età conta di più.
+
+    La prima versione dava l'età a «sei alla versione più recente» e non a
+    «aggiornamento disponibile»: il contesto stava dove non si decide nulla e
+    mancava dove l'operatore preme il pulsante. Con un dato di 28 ore può essere
+    uscita una versione più nuova, o quella release può essere stata ritirata.
+    """
+    now, checked = _adesso(20)
+    classe, ore = admin_core.classe_verdetto_update("0.40.3", "0.40.5", checked, None,
+                                                    now=now, piu_recente=_vg)
+    assert classe == "aggiornamento"
+    assert ore == 20, "il ramo che porta a un'azione deve dire quanto è vecchio il dato"
+
+
+def test_aggiornamento_con_data_illeggibile_non_finge_di_saperlo():
+    now, _ = _adesso(0)
+    classe, ore = admin_core.classe_verdetto_update("0.40.3", "0.40.5", "mai", None,
+                                                    now=now, piu_recente=_vg)
+    assert (classe, ore) == ("aggiornamento", None)

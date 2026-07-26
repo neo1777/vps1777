@@ -236,7 +236,15 @@ def classe_verdetto_update(current: str, latest: str | None, checked_at: str,
         return ("errore-check", None)
     cmp_ = piu_recente or (lambda a, b: str(a) > str(b))
     if latest and cmp_(str(latest), current):
-        return ("aggiornamento", None)
+        # L'ETÀ SERVE QUI PIÙ CHE ALTROVE, e la prima versione non la dava.
+        # Trovato dall'artefatto del round-6 (27/07): avevo messo il perimetro sul
+        # ramo tranquillo («sei aggiornato — controllato N ore fa») e non su quello
+        # che porta a un'AZIONE. Ma è qui che l'operatore preme «aggiorna» su un
+        # dato che può avere fino a 28h: nel frattempo può essere uscita una
+        # versione più nuova, o quella release può essere stata ritirata.
+        # Un'asimmetria che dava il contesto dove non decide nulla e lo toglieva
+        # dove decide.
+        return ("aggiornamento", ore_da(checked_at, now=now))
     if latest and str(latest) != current:
         return ("latest-piu-vecchia", None)
     if not latest:
