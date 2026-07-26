@@ -2,6 +2,70 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.3] — 2026-07-26
+
+Prima release nata da un ciclo di audit con misure sulla macchina viva (cinque
+tornate: lettura del codice → verifica indipendente → prova empirica → fix →
+gate incrociato, tre sessioni che si controllano a vicenda). I due difetti che
+corregge non sono stati trovati leggendo: sono stati **misurati** su una
+installazione di produzione, e uno dei due esisteva da sempre senza che nessun
+documento mentisse.
+
+### Corretto
+
+- **La retention degli snapshot pre-update ora scatta davvero.** La potatura a
+  72h viveva solo nello step finale di un update *riuscito*: con update più
+  rari della finestra, non scattava mai — misurato sul vivo: 8 snapshot non
+  cifrati, ~14,5 GB, fermi da 6 giorni. Ora `cmd_check` pota **a ogni giro del
+  timer giornaliero**, prima del fetch da GitHub (funziona anche a rete rotta),
+  e protegge **sempre** lo snapshot più recente (`keep=snapshot_latest`, non
+  `keep=None`): il punto di ripristino della versione in esecuzione sopravvive
+  a qualunque età. Senza quella protezione — trovato al quinto giro di audit,
+  sul diff del fix stesso — il primo check dopo questo rilascio avrebbe potato
+  *tutti* gli snapshot, incluso quello a cui tornare se la versione corrente
+  si rivelasse rotta. Anche la rollback-routine ora passa `keep=snap`: il
+  ripristino non cancella lo snapshot che gli serve.
+- **Il fail-open della firma cosign non è più silenzioso.** Con
+  `VPS1777_REQUIRE_COSIGN=0` e una release senza `.sig`/`.pem`, il bundle
+  veniva installato senza verifica **e senza dirlo**. La scelta resta possibile
+  (è l'ultima spiaggia dichiarata, non un bypass), ma ora produce un avviso
+  esplicito nel log — e la nota va detta intera: quell'interruttore in `.env` è
+  **persistente**, vale per tutti gli update futuri finché non lo si rimuove.
+- **`setup.sh` allinea l'hardening host agli altri due installer.** Installava
+  lo stack senza `unattended-upgrades` né `fail2ban`, che `deploy.sh` e
+  l'installer web applicano da sempre: terza incarnazione dello stesso blocco,
+  ora presente in tutti e tre i percorsi. E abilita `auto-update.timer` dalla
+  feature dichiarata (`VPS1777_FEATURES`), come gli altri.
+
+### Aggiunto
+
+- **`tools/prove-empiriche/` — sei prove eseguibili sul sistema vivo**, con
+  exit code a tre stati (0 regge · 1 non regge · 2 non misurabile, mai
+  confuso con un verde). Nate dal ciclo di audit e già temprate sul campo: le
+  prime tre hanno prodotto un falso PASS (script troncato via stdin di
+  `docker exec`) e un falso FAIL (`expose` scambiato per `ports`), corretti
+  misurando di nuovo. La prova-4 (snapshot) confronta ciò che il codice
+  proteggerebbe con la **versione in esecuzione** letta da una fonte esterna
+  ai dati giudicati: sa dire di no anche al codice che presidia.
+- **`CODEOWNERS`**: le modifiche a `security/` chiedono la review del
+  proprietario. Da solo non impone nulla — lo impone una branch protection, e
+  il registro (`H24`) dichiara esattamente questo limite invece di tacerlo.
+
+### Nota per chi aggiorna
+
+Nessun segreto nuovo, nessuna migrazione. **Al primo check giornaliero dopo
+questo aggiornamento, gli snapshot pre-update più vecchi di 72h vengono potati
+— tranne il più recente, che resta come punto di ripristino.** Sulla macchina
+di riferimento: 7 su 8 rimossi, ~12 GB liberati, **non recuperabili** (erano
+copie di update riusciti del 20/07). Chi vuole conservarne uno come campione
+lo copi fuori da `backups/pre-update/` prima del primo check.
+
+Resta aperto, misurato e dichiarato nel registro: il gateway ha un'uscita
+reale verso Internet (serve al solo check-release verso `api.github.com`);
+la restrizione è progettata ma non ancora committata, perché il costo — il
+pannello che smette di vedere i nuovi rilasci, in silenzio — è una scelta di
+prodotto, non tecnica.
+
 ## [0.40.2] — 2026-07-21
 
 Due difetti trovati **dopo** aver taggato la 0.40.1, entrambi da chi non aveva
