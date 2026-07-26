@@ -144,18 +144,18 @@ def test_rilegge_se_il_file_cambia_sotto(tmp_path):
 # ───── H30: l'open-redirect è già tornato una volta in un rilievo "chiuso" ─────
 
 
-BASE = "https://vps1777-1.tail0c1f07.ts.net"
+BASE = "https://vps1777.tailnet-esempio.ts.net"
 
 
 @pytest.mark.parametrize("hostile", [
-    "https://vps1777-1.tail0c1f07.ts.net.evil.com/",  # IL BYPASS: prefisso ≠ origine
-    "https://vps1777-1.tail0c1f07.ts.netEVIL.com",     # prefisso senza separatore
+    "https://vps1777.tailnet-esempio.ts.net.evil.com/",  # IL BYPASS: prefisso ≠ origine
+    "https://vps1777.tailnet-esempio.ts.netEVIL.com",     # prefisso senza separatore
     "//evil.com",                                       # protocol-relative
     "/\\evil.com",                                      # backslash
     "/\t/evil.com",                                     # tab: il browser la cancella → //evil.com
     "/\r\n//evil.com",                                  # CRLF
     "https://evil.com",                                 # esterno secco
-    "http://vps1777-1.tail0c1f07.ts.net/x",             # schema diverso da public_base
+    "http://vps1777.tailnet-esempio.ts.net/x",             # schema diverso da public_base
 ])
 def test_next_ostile_viene_scartato(hostile):
     assert admin_core.safe_next_url(hostile, BASE) == "/admin/setup"
@@ -164,9 +164,9 @@ def test_next_ostile_viene_scartato(hostile):
 @pytest.mark.parametrize("legit", [
     "/admin/audit",
     "/admin/setup?msg=ok",
-    "https://vps1777-1.tail0c1f07.ts.net/admin/nlm",
-    "https://vps1777-1.tail0c1f07.ts.net",
-    "https://vps1777-1.tail0c1f07.ts.net?x=1",
+    "https://vps1777.tailnet-esempio.ts.net/admin/nlm",
+    "https://vps1777.tailnet-esempio.ts.net",
+    "https://vps1777.tailnet-esempio.ts.net?x=1",
 ])
 def test_next_legittimo_passa(legit):
     # se questi non passano, il login legittimo è rotto
