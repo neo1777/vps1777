@@ -452,6 +452,15 @@ findings:
         note: >
           È un'impostazione GitHub, NON un file: il checker non può verificarla.
           Dichiararlo è meglio che fingere che sia verificata come le altre.
+      - kind: github-branch-protection
+        target: main
+        verify: "gh api repos/neo1777/vps1777/branches/main/protection"
+        note: >
+          Assente (404 «Branch not protected», misurato 26/07). Senza di essa il
+          `CODEOWNERS` di security/ non impone review a nessuno: chi ha accesso in
+          push entra su main senza passare da una PR, e da lì può coniare un tag
+          v* nuovo regolarmente firmato — la stessa strada che «chi ha accesso in
+          push» già descrive sotto, ma senza il gate del CODEOWNERS a fermarla.
     missing: >
       I tag v* pubblicati sono ora IMMUTABILI (ruleset `tag-v-immutabili`: deletion +
       update; provato sul campo che spostare o cancellare un tag è rifiutato, e che
@@ -461,6 +470,12 @@ findings:
       RESTA APERTO: chi ha accesso in push può ancora coniare un tag NUOVO e quindi
       una release nuova regolarmente firmata. Per chiudere anche quello serve un
       environment `release` con reviewer.
+      LA CONGIUNZIONE (round-4, nota di provenienza di Fucina nel corpus — non una
+      scoperta dell'audio, che l'ha letta e ripetuta): oggi «chi ha accesso in push»
+      È il perimetro reale, perché main non ha branch protection e il CODEOWNERS
+      appena aggiunto (914de9e) non impone review a nessuno finché non lo fa una
+      regola GitHub. Il rimedio (environment `release` con reviewer) chiuderebbe
+      anche questo, non solo il caso tag.
 
   - id: H25
     severity: medium
@@ -866,3 +881,28 @@ findings:
       configurazione corretta. La pubblicazione legittima vive negli overlay (compose.ingress.*.yaml),
       che questa voce non tocca. ⚠️ Se un domani servisse un `ports` in compose.yaml, questa voce va
       aggiornata insieme al cambio: è un not_contains, quindi è volutamente rigido.
+
+  - id: H49
+    severity: low
+    title: "Fail-closed della supply-chain (cosign obbligatorio) ha una via d'emergenza dichiarata"
+    status: closed
+    since: v0.23.0
+    why: >
+      L'audio del round-4 ha chiuso su una domanda che nessuna voce del registro copriva:
+      un fail-closed che blocca il canale di aggiornamento è corretto contro un artefatto
+      compromesso, ma diventa un denial-of-service autoinflitto se sigstore o il registry
+      sono irraggiungibili durante una crisi che richiede una patch urgente. 48 voci nel
+      registro, zero sul fail-closed della supply-chain.
+    evidence:
+      - file: tools/vps1777.py
+        contains:
+          - "VPS1777_REQUIRE_COSIGN=0"
+          - "via d'emergenza"
+      - file: .env.example
+        contains: ["VPS1777_REQUIRE_COSIGN"]
+    note: >
+      La domanda dell'audio era buona, la risposta era già nel codice: VPS1777_REQUIRE_COSIGN=0
+      (o --no-require-cosign) sbypassa la verifica, e il messaggio d'errore stesso la cita come
+      "via d'emergenza CONSAPEVOLE" — non un default, un interruttore esplicito che l'operatore
+      deve azionare sapendo cosa sta facendo. Non è un buco: era un trade-off senza coordinata,
+      la stessa classe di H43/archive_desc_secret di oggi.

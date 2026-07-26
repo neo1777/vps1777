@@ -20,13 +20,14 @@ bash tools/prove-empiriche/prova-1-gateway-non-esce.sh
 (prerequisito mancante) — e il 2 è il valore che conta più degli altri: *distingue «non c'è niente» da «non
 ho saputo vedere», che è il difetto per cui una guardia muta è peggio di nessuna guardia.*
 
-## Le quattro prove
+## Le cinque prove
 | | cosa misura | invasiva? |
 |---|---|---|
 | **1** `gateway-non-esce` | il gateway raggiunge Internet? (se sì, un gateway bucato esfiltra i 5 secret che monta) | no — solo richieste in uscita |
 | **2** `egress-non-entra` | su `egress` si esce ma non si entra? È **la lacuna che l'audio del round-2 ha dichiarato**: *«il vero isolamento NAT di egress non è stato testato dal vivo»* | no |
 | **3** `health-deep-solo-interni` | `/health?deep` è chiuso agli esterni, e un `X-Forwarded-For` iniettato non fa passare per interni | no — due GET |
 | **4** `snapshot-in-chiaro` | quanti snapshot pre-update ci sono, che età, se cifrati. **Osserva, non provoca** | no — sola lettura |
+| **5** `sandbox-update-service` | prima di stringere `vps1777-update.service` con `ProtectSystem=strict`: quali path scrive davvero il codice, se `~/.sigstore` esiste, se l'ultimo backup ha contenuto (dove `PrivateTmp` romperebbe in silenzio). **Nata dal round-4**: la proposta dell'audio conteneva un path sbagliato (`/var/lib/gateway`, container-side) e ne mancava uno vero (`/tmp`) | no — solo lettura + `find`/`stat` |
 
 ## ⚠️ COSA QUESTE PROVE NON SONO — leggere prima di fidarsi di un verde
 - 🔴 **Non sono state eseguite sul target.** Di ognuna è verificata la **sintassi** (`bash -n`) e la logica è
