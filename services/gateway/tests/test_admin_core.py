@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -279,26 +280,52 @@ def test_verdetto_mai_controllato_quando_non_ce_una_latest():
                                              now=now, piu_recente=_vg)[0] == "mai-controllato"
 
 
-def test_soglia_stale_copre_il_ritardo_massimo_del_timer():
-    """La soglia non può stare SOTTO il ritardo legittimo del timer.
+def _ritardo_massimo_dal_timer() -> int:
+    """Legge l'UNITÀ VERA e ne deriva il ritardo massimo legittimo, in ore.
 
-    systemd/vps1777-check-update.timer dichiara OnCalendar=daily +
-    RandomizedDelaySec=4h ⇒ 28h fra due controlli è normale, non un guasto.
-    Con una soglia più bassa la pagina accusa un timer sano di non funzionare —
-    e un allarme che suona senza motivo è quello che si impara a ignorare.
-    Questo test esiste perché il numero vive nel codice e la sua ragione in un
-    file .timer che nessuno rilegge: se qualcuno alza RandomizedDelaySec, qui
-    trova la traccia invece di scoprirlo dalla pagina che mente.
+    Non una costante: il file. Prima versione di questo test (rilievo di
+    abdd732a): confrontava CHECK_STALE_H con CHECK_TIMER_MAX_H — due costanti
+    dello STESSO modulo. Se qualcuno alza RandomizedDelaySec nel .timer, quel
+    test resta VERDE mentre la pagina ricomincia ad accusare un timer sano:
+    legava due cose che si muovono insieme, non il codice alla sua ragione.
+    Un presidio deve leggere la fonte che sorveglia, non una sua copia.
     """
-    assert admin_core.CHECK_STALE_H > admin_core.CHECK_TIMER_MAX_H, (
-        "la soglia di allarme deve stare SOPRA il ritardo massimo legittimo "
-        f"({admin_core.CHECK_TIMER_MAX_H}h = daily + RandomizedDelaySec)"
+    unit = Path(__file__).resolve().parents[3] / "systemd" / "vps1777-check-update.timer"
+    testo = unit.read_text()
+    assert "OnCalendar=daily" in testo, (
+        f"{unit.name} non è più `OnCalendar=daily`: questo test e la soglia "
+        "CHECK_STALE_H vanno rivisti insieme al timer."
+    )
+    m = re.search(r"^RandomizedDelaySec=(\d+)h", testo, re.M)
+    assert m, f"{unit.name}: RandomizedDelaySec non leggibile o non in ore"
+    return 24 + int(m.group(1))
+
+
+def test_soglia_stale_copre_il_ritardo_massimo_DELL_UNITA_VERA():
+    """La soglia non può stare SOTTO il ritardo legittimo del timer REALE.
+
+    Il valore non è preso da una costante ma dal file systemd che governa il
+    check: se il timer cambia, questo test lo vede e lo dice. Con una soglia
+    più bassa la pagina accuserebbe un timer sano di non funzionare — e un
+    allarme che suona senza motivo è quello che si impara a ignorare, cioè il
+    modo più affidabile di disattivare un presidio.
+    """
+    massimo = _ritardo_massimo_dal_timer()
+    assert admin_core.CHECK_STALE_H > massimo, (
+        f"soglia {admin_core.CHECK_STALE_H}h ≤ ritardo massimo legittimo {massimo}h "
+        "(OnCalendar=daily + RandomizedDelaySec letti dall'unità)"
+    )
+    # e la costante nel modulo deve combaciare con l'unità: se divergono, è la
+    # copia ad aver smesso di dire il vero — la fonte è il file.
+    assert admin_core.CHECK_TIMER_MAX_H == massimo, (
+        f"CHECK_TIMER_MAX_H={admin_core.CHECK_TIMER_MAX_H} ma l'unità dice {massimo}: "
+        "la costante è una copia stantia del timer"
     )
 
 
 def test_un_timer_sano_al_suo_ritardo_massimo_non_fa_scattare_l_allarme():
     # il caso concreto: 28h esatte — il peggior ritardo LEGITTIMO.
-    now, checked = _adesso(admin_core.CHECK_TIMER_MAX_H)
+    now, checked = _adesso(_ritardo_massimo_dal_timer())
     classe, _ = admin_core.classe_verdetto_update("0.40.4", "0.40.4", checked, None,
                                                   now=now, piu_recente=_vg)
     assert classe == "aggiornato", "28h è il ritardo massimo NORMALE: niente allarme"
