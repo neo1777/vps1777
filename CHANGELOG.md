@@ -2,6 +2,48 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.4] — 2026-07-26
+
+Rilascio di allineamento: la `0.40.3` è stata taggata su uno stato la cui CI
+non era mai passata al verde, e i tre commit che l'hanno riportata verde sono
+finiti **dopo** il tag, fuori dalla release. Nessun servizio ne era toccato —
+il bundle runtime non contiene nessuno dei file corretti, quindi l'artefatto
+installabile della `0.40.3` è identico a quello che sarebbe uscito dallo stato
+verde — ma il sorgente al tag `v0.40.3` fallisce il proprio controllo del
+registro, e per un progetto il cui valore dichiarato è «il registro presidia
+le garanzie» quella incoerenza vale un rilascio.
+
+### Corretto
+
+- **`SECURITY.md` combacia col registro** (50 rilievi, 41 chiusi, 2 accettati:
+  i numeri erano fermi al dossier originario di 43 mentre il ciclo di audit ne
+  ha aggiunti 7 legittimi). Il gate `check_findings.py` è verde di nuovo, e la
+  sua àncora ora **dichiara la propria provenienza** invece di portare numeri
+  nudi: chi la sposta deve nominare le voci che aggiunge.
+- **`ruff` è pinnato** (`0.15.22`). Era l'unico strumento non pinnato di un
+  repo che pinna le action per sha e le immagini per digest: si è aggiornato
+  da solo a `0.16.0` e ha bocciato con 181 rilievi codice identico a quello
+  verde di sei giorni prima. Un linter che cambia versione da sé è un gate che
+  cambia contratto senza un commit.
+
+### Aggiunto
+
+- **La release non parte più da uno stato che non passa i propri controlli.**
+  Il job `guard` di `release.yml` verifica che la CI del commit taggato sia
+  conclusa in `success` prima di costruire e firmare: fallita → release
+  fermata con un messaggio che dice cosa fare; ancora in corso → attende fino
+  a 15 minuti (il caso legittimo di tag e branch pushati insieme). Chiude la
+  seconda metà di `H24`: la firma cosign certifica **da quale workflow** viene
+  un artefatto, non che quello stato fosse in regola — e finora niente lo
+  verificava. Questo rilascio è la sua prima esecuzione reale.
+
+### Nota per chi aggiorna
+
+Nessuna migrazione, nessun segreto, nessun cambiamento di comportamento nei
+servizi: chi è già sulla `0.40.3` non ha nulla di rotto da riparare. Restano
+valide la nota sulla potatura degli snapshot e il residuo dichiarato in `H50`
+(l'uscita Internet del gateway) della `0.40.3` qui sotto.
+
 ## [0.40.3] — 2026-07-26
 
 Prima release nata da un ciclo di audit con misure sulla macchina viva (cinque
