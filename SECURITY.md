@@ -394,8 +394,27 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
   `tmpfs /run/secrets/`. Stessa storia: la protezione è nei permessi e nel non
   finire nei log/argv/backup-non-cifrati (vedi sopra), non nella cifratura a riposo.
 - **I backup** (`.tar.age`) invece **sono** cifrati (age), con la chiave privata
-  fuori dalla VPS. E lo snapshot pre-update, che non è cifrato, **non** contiene più
-  i cookie Google (`H14`).
+  fuori dalla VPS. **Lo snapshot pre-update no**, ed è una scelta: contiene
+  `archive-data.tar` (~2,6 GB, l'archivio **in chiaro**) e `gateway-data.tar`, e
+  **non** contiene più i cookie Google (`H14`, `H56`). *Dire solo cosa non contiene
+  sarebbe la metà comoda della verità: lo stesso contenuto viaggia cifrato per una
+  strada e in chiaro per l'altra.*
+  - 🔒 **Perché non è cifrato, e perché cifrarlo sarebbe un peggioramento**: quello
+    snapshot serve all'**auto-rollback** di `vps1777 update`, che gira **sulla VPS**,
+    mentre la chiave privata age vive sul PC dell'owner e deve restarci. Cifrarlo
+    renderebbe il rollback incapace di leggere ciò che gli serve **proprio nel momento
+    in cui serve** — durante un aggiornamento andato male. Vedi `tools/restore.sh:9-13`
+    e il blocco `H14` in `tools/vps1777.py:58-82`. ⚠️ Vale anche per la variante
+    «escludiamo `archive-data` dallo snapshot»: l'archivio **è** il dato che il
+    rollback deve poter ripristinare.
+  - 📏 **Quanto resta in chiaro, e per quanto**: `snapshot_prune`
+    (`tools/vps1777.py:1021-1032`) pota uno snapshot solo quando è più vecchio di
+    **72h** *e* non è quello da conservare — «il più tardivo dei due». Non tiene
+    «l'ultimo»: **ogni aggiornamento aggiunge ~2,6 GB in chiaro che restano 72 ore.**
+    Misurato il 27/07/2026: due snapshot conviventi, 4,9 GB, con la stessa copia
+    dell'archivio due volte (dimensione identica al byte — nessuna deduplicazione).
+    Con rilasci frequenti il totale è dell'ordine di (aggiornamenti in 72h) × 2,6 GB,
+    e pesa sul disco oltre che sulla riservatezza.
 - **Cancellazione**: l'archivio si cancella per **DB intero** (`/admin/archive`,
   con conferma e audit). La cancellazione per singola conversazione non c'è: è una
   scelta, non una dimenticanza.
@@ -405,6 +424,13 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
 Alcune protezioni sono state **rimandate di proposito**, non scartate, perché in
 questa fase i rilasci sono frequenti e aggiungerebbero attrito:
 
+- **Cifratura del disco della VPS** (chiude in un colpo archivio, secret e snapshot
+  pre-update, **senza toccare l'auto-rollback**, perché il decifrato è trasparente
+  alla macchina — vedi §Dati a riposo per il perché cifrare il solo snapshot non si
+  può). Decisione dell'owner del **27/07/2026**: *«per ora i backup li lasciamo in
+  chiaro, cripteremo il disco quando lo formatto la prossima volta»*. ⇒ Si fa **sul
+  disco, non nel codice**: `vps1777` non la impone né gestisce un'altra chiave sulla
+  macchina. Stato al 27/07/2026: `vda1 ext4`, nessun `dm-crypt` attivo.
 - **Approvazione manuale dei rilasci** (parte di `H24`): un GitHub *environment*
   `release` con reviewer richiederebbe una tua approvazione a ogni tag. I tag
   pubblicati sono già **immutabili** (ruleset in `security/rulesets/`); manca solo
