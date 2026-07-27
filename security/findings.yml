@@ -1053,6 +1053,13 @@ findings:
           - "VPS1777_SERVIZIO"
       - file: compose.ingress.tailscale.yaml
         contains: ["enable_ip_masquerade"]
+      - file: tools/vps1777.py
+        contains:
+          - "def valuta_porta_esterna"
+          - "porta_esterna_ok"
+          - "irraggiungibile dall'host"
+      - file: tools/tests/test_vps1777.py
+        contains: ["test_porta_esterna_il_caso_dell_incidente_nessuna_porta_e_nessun_proxy"]
     missing: >
       MISURATO sul vivo, come incidente vero e non come ipotesi (27/07/2026,
       ~07:52-09:32, 1h40m di irraggiungibilità pubblica del servizio).
@@ -1084,12 +1091,30 @@ findings:
       «il container è `healthy` lo stesso» non è stato esercitato — il container
       di controprova non aveva healthcheck.
 
-      COSA MANCA: la prova-7 è uno strumento che qualcuno deve LANCIARE. Il
-      guasto resta invisibile ai presìdi che girano DA SOLI:
-        (a) l'health-gate dell'update non la esegue → un aggiornamento che
-            rende il servizio irraggiungibile continua a non fare rollback.
-            È il residuo più grave: è la stessa mattina, ripetibile.
-        (b) nessun controllo periodico sonda la porta dall'esterno.
-      Finché (a) è aperto, questa voce non si chiude: la lezione è scritta ma
-      il sistema non la applica da sé — ed è esattamente la distanza fra «lo
-      sappiamo» e «ci difende» che questo registro esiste per misurare.
+      (a) CHIUSO — l'health-gate ora guarda anche da fuori. `health_gate()`
+      chiama `porta_esterna_ok()`, che dall'HOST verifica che la porta sia
+      pubblicata e risponda 200; se non lo è, il gate diventa rosso e la catena
+      di rollback automatico riparte. La logica di verdetto è isolata in
+      `valuta_porta_esterna()` — pura, quindi provabile su tutti i rami senza
+      un docker vivo: 7 test, incluso quello che riproduce lo stato esatto
+      dell'incidente (nessuna porta, nessun proxy → rosso, col motivo scritto)
+      e uno che verifica che la chiamata sia davvero CABLATA in `health_gate`,
+      perché test verdi su codice scollegato sono l'esca di questa stessa
+      classe. Regola scritta dentro: si fallisce solo con EVIDENZA POSITIVA del
+      guasto — «non ho misurato» non è «è rotto», perché qui un falso rosso
+      costa un rollback non necessario; e con caddy/cloudflared la sonda si
+      dichiara non applicabile invece di accusare. Provata anche sul vivo
+      (27/07, sulla VPS in produzione): VERDE, col comando compose reale e i
+      suoi overlay — nessun falso rosso in agguato al prossimo aggiornamento.
+
+      COSA MANCA ANCORA:
+        (b) nessun controllo PERIODICO sonda la porta dall'esterno: il gate
+            guarda solo durante un aggiornamento. Un guasto che arrivi in altro
+            modo (una rete ricreata a mano, un riavvio parziale) resta invisibile
+            finché non lo apre una persona.
+        (c) la sonda si ferma alla porta sull'host: non attraversa il Funnel.
+            Un Funnel giù con la porta viva è un guasto che nessun presidio vede.
+        (d) `tools/prove-empiriche/` non entra nel pacchetto di rilascio: la
+            prova-7 sulla macchina non c'è, va copiata a mano.
+      Resta `partial` per (b), (c) e (d): la classe è presidiata dove faceva
+      male, non ovunque — e la differenza è scritta invece che taciuta.

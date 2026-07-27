@@ -461,6 +461,73 @@ def deep_health_ok(repo: Path, env: dict | None = None) -> bool:
     return res.returncode == 0
 
 
+# Profili in cui a ricevere il traffico è un container proxy, non il gateway:
+# lì il gateway NON deve pubblicare porte e la sonda esterna non si applica.
+PROXY_IN_CONTAINER = ("caddy", "cloudflared")
+
+
+def valuta_porta_esterna(port_map: str, servizi: list[str],
+                         http_status: int | None) -> tuple[bool, str]:
+    """Il gateway è raggiungibile da FUORI del proprio container?
+
+    Logica pura, separata dalla raccolta dei dati per poter essere provata sui
+    due esiti senza un docker vivo.
+
+    PERCHÉ ESISTE (H51, incidente del 27/07/2026): tutte le sonde di questo
+    gate interrogano il gateway DA DENTRO il container — `deep_health_ok` fa
+    `compose exec gateway`, e lo healthcheck di compose fa lo stesso. Sul
+    loopback interno la porta risponde SEMPRE, anche quando dall'esterno non è
+    pubblicata affatto: è successo davvero (gateway rimasto su una sola rete
+    `internal: true`, da cui una porta non si può pubblicare) e il gate ha dato
+    verde su un servizio irraggiungibile per 1h40m, senza fare rollback.
+
+    FAIL SOLO CON EVIDENZA POSITIVA DEL GUASTO. Un falso rosso qui provoca un
+    rollback non necessario, quindi non si conclude per assenza di dati: si
+    conclude quando o nessuno può ricevere traffico, o la porta c'è e non
+    risponde. Ogni altro caso passa, dicendo perché.
+    """
+    if any(p in servizi for p in PROXY_IN_CONTAINER):
+        proxy = next(p for p in PROXY_IN_CONTAINER if p in servizi)
+        return True, f"non applicabile: a ricevere il traffico è {proxy}, non il gateway"
+    if not port_map.strip():
+        return False, ("il gateway non pubblica alcuna porta e non c'è un proxy in container: "
+                       "nessuno può ricevere traffico. Causa tipica: il gateway sta solo su "
+                       "reti `internal: true`, da cui una porta non si può pubblicare (docker "
+                       "accetta `ports:` e non la applica, in silenzio)")
+    if http_status is None:
+        return True, f"porta pubblicata ({port_map.strip()}), risposta non misurata"
+    if http_status != 200:
+        return False, (f"la porta è pubblicata ({port_map.strip()}) ma dall'host risponde "
+                       f"{http_status or 'nulla'}: dietro il mapping non c'è nessuno")
+    return True, f"raggiungibile dall'host su {port_map.strip()}"
+
+
+def porta_esterna_ok(repo: Path, env: dict | None = None) -> tuple[bool, str]:
+    """Raccoglie i dati per `valuta_porta_esterna` e interroga la porta DALL'HOST."""
+    import urllib.error
+    import urllib.request
+
+    servizi = [s.get("Service", "") for s in compose_ps(repo, env=env, all_states=True)]
+    res = run([*compose_cmd(repo), "port", "gateway", "8080"],
+              check=False, capture=True, env=env)
+    port_map = (res.stdout or "").strip().splitlines()[0] if (res.stdout or "").strip() else ""
+
+    status: int | None = None
+    if port_map:
+        hostport = port_map
+        # 0.0.0.0 e [::] non si interrogano: si usa il loopback corrispondente.
+        if hostport.startswith(("0.0.0.0:", "[::]:")):
+            hostport = "127.0.0.1:" + hostport.rsplit(":", 1)[-1]
+        try:
+            with urllib.request.urlopen(f"http://{hostport}/health", timeout=5) as r:
+                status = r.status
+        except urllib.error.HTTPError as e:
+            status = e.code
+        except Exception:
+            status = 0   # nessuna risposta: distinto da «non misurato» (None)
+    return valuta_porta_esterna(port_map, servizi, status)
+
+
 def restart_counts(repo: Path) -> dict[str, int]:
     res = run([*compose_cmd(repo), "ps", "-q"], capture=True, check=False)
     counts: dict[str, int] = {}
@@ -499,6 +566,14 @@ def health_gate(repo: Path, env: dict | None = None,
         if green and not deep_health_ok(repo, env=env):
             green = False
             reason = "gateway /health?deep=1 non risponde 200"
+        # H51: le sonde qui sopra guardano tutte DA DENTRO il container, dove la
+        # porta risponde anche quando dall'esterno non esiste. Questa guarda da
+        # fuori — è l'unica che può vedere «healthy ma irraggiungibile».
+        if green:
+            raggiungibile, perche = porta_esterna_ok(repo, env=env)
+            if not raggiungibile:
+                green = False
+                reason = f"irraggiungibile dall'host — {perche}"
         if green:
             consecutive += 1
             if consecutive >= HEALTH_CONSECUTIVE:

@@ -480,3 +480,66 @@ if __name__ == "__main__":
                 fails += 1
                 print(f"FAIL {name}: {exc}")
     raise SystemExit(1 if fails else 0)
+
+
+# ───────── H51: la sonda che guarda il gateway da FUORI del container ─────────
+# Nasce dall'incidente del 27/07/2026: tutte le sonde dell'health-gate
+# interrogavano il gateway dall'interno, dove la porta risponde sempre. Il gate
+# ha dato verde per 1h40m su un servizio irraggiungibile, senza fare rollback.
+# Questi test coprono i rami UNO PER UNO, incluso quello che il gate non vedeva.
+
+def test_porta_esterna_il_caso_dell_incidente_nessuna_porta_e_nessun_proxy():
+    """Il gateway non pubblica nulla e non c'è chi riceva al posto suo → ROSSO.
+
+    È esattamente lo stato del 27/07: gateway su una sola rete `internal: true`,
+    `ports:` accettata da docker e non applicata. Senza questo ramo l'intera
+    funzione sarebbe decorativa — è l'unico caso per cui è stata scritta.
+    """
+    ok, perche = v.valuta_porta_esterna("", ["gateway", "archive-mcp"], None)
+    assert ok is False
+    assert "internal" in perche          # dice la causa, non solo l'esito
+    assert "nessuno può ricevere traffico" in perche
+
+
+def test_porta_esterna_pubblicata_e_risponde():
+    ok, perche = v.valuta_porta_esterna("127.0.0.1:8080", ["gateway"], 200)
+    assert ok is True
+    assert "127.0.0.1:8080" in perche
+
+
+def test_porta_esterna_pubblicata_ma_dietro_non_risponde_nessuno():
+    """Pubblicata ≠ servita: docker-proxy tiene il listener anche a vuoto."""
+    ok, perche = v.valuta_porta_esterna("127.0.0.1:8080", ["gateway"], 0)
+    assert ok is False
+    assert "non c'è nessuno" in perche
+
+
+def test_porta_esterna_pubblicata_ma_risponde_male():
+    ok, perche = v.valuta_porta_esterna("127.0.0.1:8080", ["gateway"], 503)
+    assert ok is False
+    assert "503" in perche
+
+
+def test_porta_esterna_non_si_applica_quando_riceve_un_proxy_in_container():
+    """Con caddy/cloudflared il gateway NON deve pubblicare: qui zero porte è
+    lo stato corretto, e un rosso sarebbe un rollback provocato dal presidio."""
+    for proxy in ("caddy", "cloudflared"):
+        ok, perche = v.valuta_porta_esterna("", ["gateway", proxy], None)
+        assert ok is True, f"{proxy}: falso rosso → rollback non necessario"
+        assert proxy in perche
+
+
+def test_porta_esterna_non_misurata_non_e_un_fallimento():
+    """Fail solo con evidenza POSITIVA del guasto: «non ho misurato» non è
+    «è rotto» — un falso rosso qui costa un rollback."""
+    ok, perche = v.valuta_porta_esterna("127.0.0.1:8080", ["gateway"], None)
+    assert ok is True
+    assert "non misurata" in perche
+
+
+def test_health_gate_interroga_davvero_la_porta_dall_esterno():
+    """Il collegamento è cablato: se qualcuno togliesse la chiamata da
+    health_gate, i test qui sopra resterebbero verdi su codice morto."""
+    import inspect
+    sorgente = inspect.getsource(v.health_gate)
+    assert "porta_esterna_ok" in sorgente
