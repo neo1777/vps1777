@@ -2,7 +2,7 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
-## [0.40.13] — 2026-07-27
+## [0.40.14] — 2026-07-27
 
 Il rilascio che chiude il **residuo dichiarato** del giro precedente: la copia di sicurezza
 si scrive su un nome provvisorio e prende il nome definitivo solo quando è finita.
@@ -29,6 +29,14 @@ si scrive su un nome provvisorio e prende il nome definitivo solo quando è fini
 rinomina, ma se lo strumento di sistema non accetta quel modo si prosegue senza — una copia
 scritta vale più di una garanzia in più non ottenuta. In quel caso una mancanza di corrente
 lascerebbe un file provvisorio, non una copia monca: il danno peggiora nel modo giusto.*
+
+> ⚠️ **La 0.40.13 esiste come etichetta e non è mai stata pubblicata.** L'avevo marcata su
+> un commit i cui controlli erano rossi — un controllo del registro che avevo lanciato in
+> modo da non vederne l'esito. Il rilascio **si è fermato da solo**: il primo passo del
+> processo verifica che i controlli del commit etichettato siano verdi, e ha rifiutato di
+> pubblicare. Nessun pacchetto rotto è uscito. L'etichetta resta dov'è perché una regola
+> del repository, giustamente, vieta di cancellarla — *questo contenuto è qui, sotto il
+> numero successivo.*
 
 ## [0.40.12] — 2026-07-27
 
