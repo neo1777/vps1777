@@ -2334,6 +2334,68 @@ def nlm_cookie_status(repo: Path) -> dict | None:
     }
 
 
+# H49 ③ — la via d'emergenza cosign è PERSISTENTE, e nessuno la ricorda.
+# `VPS1777_REQUIRE_COSIGN=0` nel `.env` sblocca una crisi (release senza firma,
+# sigstore irraggiungibile) ed è giusto che esista. Ma è riletta a OGNI update,
+# incluso l'auto-update settimanale che gira da solo: chi la mette per sbloccarsi
+# e si dimentica di toglierla lascia la verifica della firma spenta a tempo
+# indeterminato, e non c'è niente che glielo dica. La voce H49 lo dichiarava già
+# ("resta [da-tarare]: un avviso periodico se REQUIRE_COSIGN=0 resta nel .env
+# oltre N giorni, non ancora implementato") — dichiarato il 04/07, implementato
+# qui: era scritto nel registro e restava prosa.
+#
+# ⚠️ PROMEMORIA, NON ENFORCEMENT — deliberatamente contro il suggerimento del
+# round-7bis ("un TTL di 24 ore, scaduto il quale il sistema forza il ripristino
+# a cosign obbligatorio"). Un ri-armo automatico è la stessa forma del lock-out
+# descritto allo step 4 dell'update: la crisi che ti ha fatto mettere la flag può
+# durare più di 24 ore, e il ri-armo ti chiuderebbe fuori proprio mentre stai
+# riparando. Un controllo che decide sul passato non deve poter bloccare il
+# futuro: qui si ALZA LA VOCE, non si gira la chiave.
+#
+# ⚠️ E l'età è «da quando il CLI l'ha VISTA», non «da quando è stata scritta».
+# Una data di scrittura affidabile non esiste: l'mtime del `.env` si azzera a
+# ogni modifica per qualunque motivo, e darebbe un'età sistematicamente più
+# giovane del vero — cioè un falso verde, la classe di difetto di H51. Meglio
+# un'età dichiaratamente per difetto e un marcatore esplicito che una data che
+# mente in silenzio. Il marcatore vive in onboarding/ come il resto dello stato
+# host, e si cancella da sé appena la flag sparisce.
+COSIGN_BYPASS_MAX_DAYS = 1
+_COSIGN_BYPASS_MARKER = "cosign_bypass_since"
+
+
+def cosign_bypass_status(repo: Path) -> dict | None:
+    """Da quanti giorni la via d'emergenza cosign è attiva nel `.env`, o None se
+    non lo è. Nel caso None il marcatore viene rimosso: la voce sparisce da sola
+    appena l'operatore rimette la verifica, senza che nessuno debba ricordarsene.
+
+    Best-effort come `nlm_cookie_status`: non deve MAI far fallire secrets-status.
+    La forma del dict è quella delle voci di `_SECRET_POLICY` — /admin/secrets e
+    la Mini App iterano sulle voci e leggono queste chiavi, e una chiave con un
+    altro nome sparirebbe dalla pagina senza un errore da nessuna parte."""
+    marker = onboarding_dir(repo) / _COSIGN_BYPASS_MARKER
+    try:
+        attiva = env_read(repo).get("VPS1777_REQUIRE_COSIGN", "").strip() == "0"
+        if not attiva:
+            marker.unlink(missing_ok=True)
+            return None
+        if not marker.is_file():
+            marker.write_text(now_iso() + "\n")
+        da = datetime.strptime(marker.read_text().strip(),
+                               "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (OSError, ValueError):
+        return None
+    age_days = max(0, int((datetime.now(timezone.utc) - da).total_seconds() / 86400))
+    return {
+        "name": "cosign_bypass", "label": "Verifica firma cosign DISATTIVATA",
+        "age_days": age_days, "max_age_days": COSIGN_BYPASS_MAX_DAYS,
+        "overdue": age_days > COSIGN_BYPASS_MAX_DAYS, "auto_rotatable": False,
+        "note": "togli VPS1777_REQUIRE_COSIGN=0 dal .env — finché c'è, ogni update "
+                "(anche quello automatico) può installare un bundle non firmato "
+                "senza fermarsi",
+        "last_rotated": da.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
 def cmd_secrets_status(repo: Path, args) -> int:
     """Età e scadenze dei secret. Scrive onboarding/secrets_status.json (letto
     dalla pagina /admin/secrets) e — con --notify — avvisa su Telegram quelli
@@ -2363,6 +2425,15 @@ def cmd_secrets_status(repo: Path, args) -> int:
         items.append(nlm)
         if nlm["overdue"]:
             overdue.append(f"{nlm['label']} ({nlm['age_days']}g)")
+    # H49 ③: non è un secret in secrets/ — è un interruttore di sicurezza lasciato
+    # aperto. Sta QUI e non in un check nuovo perché questa è già la pagina delle
+    # cose che scadono e vanno rimesse a posto, ha già il suo timer settimanale e
+    # il suo canale Telegram: un promemoria in più non merita un timer in più.
+    cosign = cosign_bypass_status(repo)
+    if cosign is not None:
+        items.append(cosign)
+        if cosign["overdue"]:
+            overdue.append(f"{cosign['label']} ({cosign['age_days']}g)")
     status = {"checked_at": now_iso(), "secrets": items}
     try:
         (onboarding_dir(repo) / "secrets_status.json").write_text(json.dumps(status, indent=2))

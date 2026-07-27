@@ -469,19 +469,6 @@ def test_compose_sorgenti_ignora_i_file_che_non_esistono():
     assert v._compose_sorgenti(repo, repo) == [repo / "compose.yaml"]
 
 
-if __name__ == "__main__":
-    fails = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"ok   {name}")
-            except Exception as exc:  # noqa: BLE001
-                fails += 1
-                print(f"FAIL {name}: {exc}")
-    raise SystemExit(1 if fails else 0)
-
-
 # ───────── H51: la sonda che guarda il gateway da FUORI del container ─────────
 # Nasce dall'incidente del 27/07/2026: tutte le sonde dell'health-gate
 # interrogavano il gateway dall'interno, dove la porta risponde sempre. Il gate
@@ -543,3 +530,147 @@ def test_health_gate_interroga_davvero_la_porta_dall_esterno():
     import inspect
     sorgente = inspect.getsource(v.health_gate)
     assert "porta_esterna_ok" in sorgente
+
+
+# ───── H49 ③: l'interruttore d'emergenza cosign lasciato aperto e dimenticato ─────
+# La voce H49 dichiarava il buco dal 04/07 e diceva "non ancora implementato".
+# Questi test coprono i rami uno per uno, compresa la sparizione automatica della
+# voce quando l'operatore rimette la verifica — che è la parte che nessuno
+# ricontrolla mai, e senza la quale l'avviso resterebbe acceso per sempre.
+
+def _repo_con_env(tmp: Path, contenuto: str) -> Path:
+    (tmp / ".env").write_text(contenuto)
+    return tmp
+
+
+def test_cosign_bypass_assente_non_produce_nessuna_voce():
+    """Il caso normale: nessuna flag, nessun rumore sulla pagina."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = _repo_con_env(Path(td), "VPS1777_REQUIRE_COSIGN=1\n")
+        assert v.cosign_bypass_status(repo) is None
+
+
+def test_cosign_bypass_env_mancante_non_e_un_errore():
+    """Repo senza .env (macchina non ancora configurata): best-effort, non crash."""
+    with tempfile.TemporaryDirectory() as td:
+        assert v.cosign_bypass_status(Path(td)) is None
+
+
+def test_cosign_bypass_attivo_arma_il_marcatore_e_parte_da_zero_giorni():
+    """Prima volta che il CLI la vede: la voce compare, l'età è 0, e NON è
+    ancora scaduta — mettere la flag durante una crisi non deve subito
+    suonare l'allarme che riguarda il dimenticarsela."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = _repo_con_env(Path(td), "VPS1777_REQUIRE_COSIGN=0\n")
+        it = v.cosign_bypass_status(repo)
+        assert it is not None
+        assert it["age_days"] == 0 and it["overdue"] is False
+        assert (repo / "onboarding" / v._COSIGN_BYPASS_MARKER).is_file()
+
+
+def test_cosign_bypass_dimenticato_diventa_scaduto():
+    """Il caso per cui la voce esiste: la flag è lì da più giorni della soglia."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = _repo_con_env(Path(td), "VPS1777_REQUIRE_COSIGN=0\n")
+        v.cosign_bypass_status(repo)                      # arma il marcatore
+        marker = repo / "onboarding" / v._COSIGN_BYPASS_MARKER
+        import datetime as _dt
+        vecchio = v.datetime.now(v.timezone.utc) - _dt.timedelta(days=9)
+        marker.write_text(vecchio.strftime("%Y-%m-%dT%H:%M:%SZ") + "\n")
+        it = v.cosign_bypass_status(repo)
+        assert it["age_days"] == 9 and it["overdue"] is True
+
+
+def test_cosign_bypass_rimosso_fa_sparire_la_voce_e_il_marcatore():
+    """CONTROPROVA: l'operatore rimette la verifica → la voce sparisce da sola.
+    Senza questo ramo l'avviso, una volta acceso, non si spegnerebbe più — e un
+    avviso che non si spegne smette di essere letto."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = _repo_con_env(Path(td), "VPS1777_REQUIRE_COSIGN=0\n")
+        v.cosign_bypass_status(repo)
+        marker = repo / "onboarding" / v._COSIGN_BYPASS_MARKER
+        assert marker.is_file()
+        _repo_con_env(repo, "VPS1777_REQUIRE_COSIGN=1\n")
+        assert v.cosign_bypass_status(repo) is None
+        assert not marker.exists(), "il marcatore resta e l'età ripartirebbe sbagliata"
+
+
+def test_cosign_bypass_marcatore_illeggibile_non_fa_crashare_il_check():
+    """Best-effort davvero: un marcatore corrotto a mano non deve far fallire
+    secrets-status, che è il portatore di TUTTI gli altri promemoria."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = _repo_con_env(Path(td), "VPS1777_REQUIRE_COSIGN=0\n")
+        v.cosign_bypass_status(repo)
+        (repo / "onboarding" / v._COSIGN_BYPASS_MARKER).write_text("ieri sera\n")
+        assert v.cosign_bypass_status(repo) is None
+
+
+def test_cosign_bypass_ha_le_chiavi_che_le_pagine_leggono_davvero():
+    """La trappola del consumatore: /admin/secrets e la Mini App iterano sulle
+    voci e leggono chiavi FISSE. Una chiave con un altro nome non dà errore da
+    nessuna parte — la riga esce semplicemente vuota, o la voce non conta come
+    scaduta. Qui la forma si confronta con quella di una voce già in pagina."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = _repo_con_env(Path(td), "VPS1777_REQUIRE_COSIGN=0\n")
+        it = v.cosign_bypass_status(repo)
+    lette_dalle_pagine = {"name", "label", "age_days", "max_age_days",
+                          "overdue", "auto_rotatable", "note", "last_rotated"}
+    assert lette_dalle_pagine <= set(it), f"mancano: {lette_dalle_pagine - set(it)}"
+
+
+def test_cosign_bypass_e_cablato_nel_check_settimanale():
+    """Il collegamento: senza la chiamata dentro cmd_secrets_status i test qui
+    sopra resterebbero verdi su una funzione che nessuno invoca — e il timer
+    settimanale, l'unico che gira da solo, non direbbe niente."""
+    import inspect
+    sorgente = inspect.getsource(v.cmd_secrets_status)
+    assert "cosign_bypass_status" in sorgente
+
+
+def test_cosign_bypass_non_e_fatale_e_non_riarma_da_solo():
+    """Scelta deliberata contro il suggerimento del round-7bis (TTL che forza il
+    ri-armo): la via d'emergenza deve restare percorribile finché la crisi dura.
+    Se un domani qualcuno la rendesse fatale, questo test glielo ricorda."""
+    import inspect
+    sorgente = inspect.getsource(v.cosign_bypass_status)
+    assert "die(" not in sorgente
+    assert "env_set(" not in sorgente, "il check non deve RISCRIVERE il .env dell'operatore"
+
+
+# ───── il runner diretto vedeva 32 test su 39: il presidio del presidio ─────
+
+def test_il_runner_diretto_esegue_tutti_i_test_del_file():
+    """MISURATO il 27/07: `python3 tools/tests/test_vps1777.py` ne eseguiva 32,
+    pytest 39. Il blocco `__main__` stava a metà file e itera su `globals()` —
+    le funzioni definite DOPO non esistono ancora quando gira, e il runner
+    stampava «ok» per tutto uscendo 0. I sette test invisibili erano i più
+    recenti: quelli scritti lo stesso giorno per l'incidente.
+
+    Non basta averlo spostato in fondo: la trappola torna al prossimo `append`.
+    Questo test la chiude — se qualcuno aggiunge un test sotto il blocco, va
+    rosso subito e dice dove."""
+    import ast
+    sorgente = Path(__file__).read_text()
+    albero = ast.parse(sorgente)
+    ultimo_test = max((n.lineno for n in albero.body
+                       if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")),
+                      default=0)
+    blocchi_main = [n.lineno for n in albero.body
+                    if isinstance(n, ast.If) and "__main__" in ast.dump(n.test)]
+    assert blocchi_main, "il blocco di esecuzione diretta è sparito"
+    assert blocchi_main[0] > ultimo_test, (
+        f"il blocco __main__ è alla riga {blocchi_main[0]} ma c'è un test alla "
+        f"{ultimo_test}: l'esecuzione diretta non lo vedrebbe e uscirebbe 0 lo stesso")
+
+
+if __name__ == "__main__":
+    fails = 0
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            try:
+                fn()
+                print(f"ok   {name}")
+            except Exception as exc:  # noqa: BLE001
+                fails += 1
+                print(f"FAIL {name}: {exc}")
+    raise SystemExit(1 if fails else 0)

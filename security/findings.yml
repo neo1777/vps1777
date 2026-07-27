@@ -912,6 +912,14 @@ findings:
           - "firma cosign NON verificata"
       - file: .env.example
         contains: ["VPS1777_REQUIRE_COSIGN"]
+      - file: tools/vps1777.py
+        contains:
+          - "def cosign_bypass_status"
+          - "COSIGN_BYPASS_MAX_DAYS"
+      - file: tools/tests/test_vps1777.py
+        contains:
+          - "test_cosign_bypass_dimenticato_diventa_scaduto"
+          - "test_cosign_bypass_rimosso_fa_sparire_la_voce_e_il_marcatore"
     note: >
       La domanda dell'audio era buona, la risposta era già nel codice: VPS1777_REQUIRE_COSIGN=0
       (o --no-require-cosign) sbypassa la verifica, e il messaggio d'errore stesso la cita come
@@ -930,6 +938,30 @@ findings:
       per sbloccarsi in una crisi e si dimentica di toglierlo lascia la verifica firma disattivata
       a tempo indeterminato. Resta [da-tarare]: un avviso periodico se REQUIRE_COSIGN=0 resta nel
       .env oltre N giorni, non ancora implementato.
+
+      IMPLEMENTATO il 27/07/2026 — e il ritardo è il dato più utile di questa voce. Il [da-tarare]
+      qui sopra è del 04/07: per 23 giorni il buco è stato SCRITTO, esatto, in un registro che
+      una pipeline controlla a ogni commit — e non è diventato codice, perché niente falliva se
+      restava prosa. È la domanda che Neo ha fatto il 27/07 ("trovate un problema, lo scrivete
+      nel durevole, ma poi rimane li o lo fissate?"): la risposta misurata era «rimane lì», e
+      questa riga è la prima volta che si muove. Il round-7bis ha rialzato lo stesso punto senza
+      sapere che era già dichiarato: un audit esterno che ri-scopre un tuo [da-tarare] non ti sta
+      dicendo una cosa nuova, ti sta misurando quanto è vecchia.
+
+      COSA FA: cosign_bypass_status() marca in onboarding/cosign_bypass_since il momento in cui
+      il CLI vede per la prima volta la flag, e cmd_secrets_status (timer settimanale, canale
+      Telegram, pagina /admin/secrets già esistenti) la mostra come voce scaduta oltre
+      COSIGN_BYPASS_MAX_DAYS. Il marcatore si cancella da sé appena la flag sparisce.
+
+      COSA NON FA, deliberatamente: il round-7bis proponeva un TTL di 24h che FORZA il ri-armo
+      della verifica. Rifiutato — è la stessa forma del lock-out documentato allo step 4
+      dell'update: la crisi che ti ha fatto mettere la flag può durare più di 24 ore, e il
+      ri-armo automatico ti chiude fuori mentre stai riparando. Un controllo che decide sul
+      passato non deve poter bloccare il futuro: qui si alza la voce, non si gira la chiave.
+      LIMITE DICHIARATO: l'età è "da quando il CLI l'ha vista", non "da quando è stata scritta" —
+      l'mtime del .env si azzera a ogni modifica per qualunque motivo e darebbe un'età sempre
+      più giovane del vero, cioè un falso verde (la classe di H51). Meglio un'età per difetto
+      e dichiarata che una data che mente in silenzio.
 
   - id: H50
     severity: high
