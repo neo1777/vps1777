@@ -13,8 +13,14 @@ set -uo pipefail
 # Repo per VARIABILE prima che per posizione (come prova-1/3/4): copiata in /tmp,
 # `dirname/../..` porterebbe a «/». Se non si trova: exit 2, MAI un PASS.
 REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../.." 2>/dev/null && pwd)}"
-[ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ] || {
-  echo "⚠️  repo non trovato (compose.yaml assente) — usa VPS1777_REPO=<path>"; exit 2; }
+# PRIMA: `A && B || C`. Qui C è davvero il ramo d'errore in tutti i casi, ma la
+# forma è quella che inganna (SC2015): se B fallisse dopo una A vera, C partirebbe
+# lo stesso — che qui è giusto e altrove no. Riscritto esplicito, così non c'è da
+# ragionarci. ⚠️ E il rilievo lo vede shellcheck 0.9.0 (quello della CI) e NON
+# 0.11.0 (quello con cui l'avevo provato in locale): due versioni dello stesso
+# strumento, due verdetti sullo stesso codice.
+if ! { [ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ]; }; then {
+  echo "⚠️  repo non trovato (compose.yaml assente) — usa VPS1777_REPO=<path>"; exit 2; } fi
 cd "$REPO" || exit 2
 command -v docker >/dev/null || { echo "⚠️  docker assente"; exit 2; }
 

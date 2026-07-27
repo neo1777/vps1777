@@ -40,7 +40,16 @@ jobs:
           ruff check services/ tools/ security/
       - name: ShellCheck bash
         run: |
-          sudo apt-get install -y shellcheck
+          # PINNATO PER DIGEST, come le immagini e le action di questo repo — e per
+          # una ragione misurata il 27/07, non per simmetria: `apt-get install
+          # shellcheck` dava la 0.9.0 sul runner, io validavo in locale con la
+          # 0.11.0, e le due versioni davano VERDETTI DIVERSI SULLO STESSO CODICE
+          # (4 rilievi SC2015 che solo la 0.9.0 vede). Verde in locale, rosso in CI,
+          # e nessuno dei due sbagliava: erano due strumenti diversi con lo stesso
+          # nome. È il gemello esatto dell'incidente ruff del 26/07, preso
+          # dall'altro capo — là il gate cambiava contratto da solo, qui lo
+          # cambiavo io senza saperlo.
+          SHELLCHECK="koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d"  # v0.11.0
           # ⚠️ QUI C'ERA `|| true`, e con lui questo step non poteva diventare
           # rosso: un gate che per costruzione non fallisce non è un gate, è una
           # riga di log. Misurato il 27/07 togliendolo: shellcheck usciva 1 su
@@ -56,7 +65,7 @@ jobs:
           # ragione che il prossimo può contestare.
           # tools/prove-empiriche/ era fuori dal glob: le otto prove che
           # verificano il resto non erano verificate da niente.
-          shellcheck setup.sh tools/*.sh tools/prove-empiriche/*.sh
+          docker run --rm -v "$PWD:/mnt" -w /mnt "$SHELLCHECK" setup.sh tools/*.sh tools/prove-empiriche/*.sh
       # Il registro dei rilievi di sicurezza: ogni voce dichiarata `closed` deve
       # portare un'evidenza, e quell'evidenza deve ESISTERE ANCORA nel codice.
       # Nasce da un errore vero: SECURITY.md ha dichiarato «dossier applicato per

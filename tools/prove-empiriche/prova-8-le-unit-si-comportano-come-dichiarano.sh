@@ -43,8 +43,12 @@
 set -uo pipefail
 
 REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../.." 2>/dev/null && pwd)}"
-[ -n "${REPO:-}" ] && [ -d "$REPO/systemd" ] || {
-  echo "⚠️  repo non trovato (manca systemd/) — usa VPS1777_REPO=<path>"; exit 2; }
+# `A && B || C` riscritto esplicito (SC2015): la forma inganna anche quando il
+# risultato è giusto, e il rilievo lo vede shellcheck 0.9.0 — quello della CI — e
+# non 0.11.0, quello con cui l'avevo provato in locale.
+if ! { [ -n "${REPO:-}" ] && [ -d "$REPO/systemd" ]; }; then
+  echo "⚠️  repo non trovato (manca systemd/) — usa VPS1777_REPO=<path>"; exit 2
+fi
 command -v systemctl >/dev/null || {
   echo "⚠️  systemctl assente: senza un demone systemd questa prova non è eseguibile."
   echo "    NON è un PASS — è il caso in cui non ho saputo vedere."; exit 2; }

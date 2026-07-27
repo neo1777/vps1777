@@ -1384,7 +1384,8 @@ findings:
     evidence:
       - file: .github/workflows/ci.yml
         contains:
-          - "shellcheck setup.sh tools/*.sh tools/prove-empiriche/*.sh"
+          - "koalaman/shellcheck@sha256:"
+          - "setup.sh tools/*.sh tools/prove-empiriche/*.sh"
           - "ruff check services/ tools/ security/"
         not_contains:
           - "shellcheck setup.sh tools/*.sh || true"
@@ -1456,6 +1457,23 @@ findings:
             ⭐ La differenza fra le due strade è tutta qui: una soglia alzata nasconde
             N cose e non dice quali; un'eccezione dichiarata è UNA cosa, con un nome e
             una ragione che il prossimo può contestare.
+
+            🔴 E ABBASSANDO LA SOGLIA LA CI È DIVENTATA ROSSA, per un motivo che non
+            era nel codice: `apt-get install shellcheck` dava la 0.9.0 sul runner,
+            mentre in locale validavo con la 0.11.0 — e le due versioni danno
+            VERDETTI DIVERSI SULLO STESSO CODICE (4 rilievi SC2015 che solo la 0.9.0
+            vede, nelle prove empiriche). Verde da una parte, rosso dall'altra, e
+            nessuna delle due sbagliava: erano due strumenti diversi con lo stesso
+            nome. È il gemello dell'incidente ruff del 26/07 preso dall'altro capo —
+            là il gate cambiava contratto da solo, qui lo cambiavo io senza saperlo,
+            perché «shellcheck» in locale e «shellcheck» in CI non erano la stessa
+            cosa e niente lo diceva.
+            FATTO: i 4 `A && B || C` riscritti espliciti (la forma inganna anche
+            quando il risultato è giusto), e shellcheck PINNATO PER DIGEST in CI come
+            le immagini e le action. Ora le due versioni concordano — verificato
+            eseguendo 0.9.0 e 0.11.0 sullo stesso albero, entrambe exit 0 — e le prove
+            riscritte sono state RIESEGUITE, incluso il ramo «repo non trovato» che
+            deve dare 2 e non un PASS.
 
   - id: H54
     severity: medium
