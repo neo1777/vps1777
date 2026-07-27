@@ -1853,7 +1853,7 @@ findings:
   - id: H58
     severity: medium
     title: "Un backup interrotto lascia un file troncato col nome giusto, e la ritenzione lo conta come il backup di quel giorno; la guardia di spazio dell'update era una costante misurata contro dati che crescono"
-    status: partial
+    status: closed
     scoperta:
       quando: "2026-07-27"
       come: misura
@@ -1864,8 +1864,16 @@ findings:
     natura: comportamento
     # `partial` da qui: il grosso è in produzione dalla 0.40.10, il residuo dichiarato
     # (scrittura non atomica) è ancora aperto e non ha una versione.
-    since: v0.40.10
+    since: v0.40.14
     prova:
+      - comando: "ssh <vps> 'python3 tools/vps1777.py update --yes && grep -c PARZIALE= tools/backup.sh'  # v0.40.14"
+        output: "aggiornato a v0.40.14 · la scrittura atomica è sulla macchina (1) · 5 container healthy · e l'update non è costato un giorno: 26 + 27(nuovo) = 2 giorni, come prima"
+        exit: 0
+        quando: "2026-07-27"
+      - comando: "bash tools/tests/test-backup-retention.sh  (11 casi) e la controprova togliendo la SOLA pulizia dei resti"
+        output: "11/11 col fix · senza la pulizia: ⑪ rosso e ⑩ verde — giusto, perché ⑩ dipende dal glob e non dalla pulizia"
+        exit: 0
+        quando: "2026-07-27"
       # la soglia, calcolata sulla MACCHINA con i suoi dati veri
       - comando: "ssh <vps> python3 -c 'spazio_richiesto_update(repo)'  # v0.40.10 in produzione"
         output: "soglia calcolata: 5.81 GiB (la vecchia costante era 5.00) — «il backup più grande pesa 2.4 GiB e un update ne scrive due, più 1 GiB di margine»"

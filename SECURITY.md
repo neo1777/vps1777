@@ -233,8 +233,8 @@ verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 45 |
-| **parziali** | 15 |
+| **chiusi** | 46 |
+| **parziali** | 14 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -470,9 +470,15 @@ essere cieco**, che è un'altra cosa e va saputa lo stesso. *Una domanda senza r
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è
-soltanto committato. `H57`, `H59` e `H60` sono **chiusi e misurati sulla macchina**; `H58` resta **parziale per
-una cosa sola e dichiarata**: la scrittura della copia non è atomica, quindi contro uno
-spegnimento brutale il file troncato resterebbe.
+soltanto committato. `H57`, `H59` e `H60` sono **chiusi e misurati sulla macchina**; `H58` è **chiuso**: la copia ora si scrive
+accanto, con un nome provvisorio, e prende il nome definitivo solo quando è finita — la
+rinomina è istantanea e indivisibile, quindi *sparisce l'istante in cui poteva esistere una
+copia a metà*. **Non era stato fatto subito apposta**: la modifica precedente toccava la
+conservazione delle copie e doveva andare in produzione da sola e misurabile. Ci è andata,
+è stata misurata, e solo allora si è toccato il secondo pezzo. *Residuo più stretto,
+dichiarato: se lo strumento di sistema non accetta di spingere su disco quel singolo file,
+si prosegue senza — e lì una mancanza di corrente lascerebbe un file provvisorio, non una
+copia monca. Il danno peggiora nel modo giusto.*
 
 ⭐ **E installando il controllo sulla copertura è arrivata la conferma che serviva**: quel
 secondo aggiornamento **non è costato un giorno**. La copia fatta prima di aggiornare ha
