@@ -183,5 +183,24 @@ verifica_dice "⑨ sette file di un giorno solo: la copertura dice 1, non 7" \
   "$(n 2026-07-27-040000)" "$(n 2026-07-27-050000)" "$(n 2026-07-27-060000)" \
   "$(n 2026-07-27-070000)"
 
+# ─── ⑩⑪ LA SCRITTURA ATOMICA — il residuo di H58 ────────────────────────────
+# Il nome provvisorio `.parziale` esiste perché la rinomina è atomica: il nome
+# definitivo o non c'è, o è un file completo. Ma un nome nuovo in questa cartella
+# va provato contro DUE cose, non una: che la ritenzione non lo scambi per un
+# backup, e che venga rimosso invece di restare lì per sempre a 2,5 GB.
+
+# ⑩ RISPOSTA NOTA: un resto di scrittura interrotta NON è il backup di quel
+#    giorno. Se contasse, la copertura direbbe 3 giorni e uno dei tre sarebbe un
+#    file che non si apre — cioè esattamente il difetto che `.parziale` cura.
+verifica_dice "⑩ un resto .parziale non conta come il backup del suo giorno" \
+  "copertura: 2 giorni distinti (2026-07-26 → 2026-07-27)" \
+  "$(n 2026-07-25-030000).parziale" "$(n 2026-07-26-030000)" "$(n 2026-07-27-030000)"
+
+# ⑪ RISPOSTA NOTA: e viene RIMOSSO, dicendolo. Un resto che sopravvive in
+#    silenzio occupa quanto un backup vero e non ne è uno.
+verifica "⑪ il resto interrotto viene rimosso, i backup veri no" \
+  "$(n 2026-07-26-030000) $(n 2026-07-27-030000)" \
+  "$(n 2026-07-25-030000).parziale" "$(n 2026-07-26-030000)" "$(n 2026-07-27-030000)"
+
 printf '\n%d passati, %d falliti\n' "$passati" "$falliti"
 [ "$falliti" -eq 0 ]

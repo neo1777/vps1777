@@ -181,9 +181,31 @@ while IFS= read -r r; do
 done < "$RECIPIENTS_FILE"
 [ ${#RECIPIENT_ARGS[@]} -eq 0 ] && die "Nessun recipient valido in $RECIPIENTS_FILE"
 
-INCOMPLETO="$OUT"
-tar -C "$TMP" -cf - . | age "${RECIPIENT_ARGS[@]}" -o "$OUT"
-chmod 600 "$OUT"
+# SCRITTURA ATOMICA — il residuo dichiarato di H58, curato qui perché la ragione
+# per cui l'avevo rimandato è scaduta: volevo che la modifica della RITENZIONE
+# andasse in produzione DA SOLA e misurabile, e ci è andata (0.40.10, misurata).
+#
+# Il trap copre l'interruzione ordinata; NON copre un `kill -9` né un crash del
+# kernel, perché lì il trap non gira. Scrivendo su un nome provvisorio e
+# rinominando alla fine, quella classe si chiude per costruzione: la rinomina è
+# atomica, quindi il nome definitivo o non esiste o è un file completo. Non c'è
+# istante in cui esista un `.tar.age` a metà — che era il modo in cui la
+# ritenzione poteva contare come «la copia di quel giorno» un file che non si apre.
+#
+# `.parziale` NON combacia con `vps1777-*.tar.age`: né il glob della ritenzione,
+# né la regex della copertura (ancorata a `.tar.age$`) lo vedono. Verificato coi
+# casi ⑩ e ⑪ del test invece che dedotto dalla forma del pattern.
+PARZIALE="$OUT.parziale"
+INCOMPLETO="$PARZIALE"
+tar -C "$TMP" -cf - . | age "${RECIPIENT_ARGS[@]}" -o "$PARZIALE"
+chmod 600 "$PARZIALE"
+# I byte sul disco prima della rinomina: senza, la rinomina sarebbe atomica
+# rispetto ai PROCESSI ma non rispetto a un'interruzione dell'alimentazione, e
+# resterebbe un nome definitivo su un file mai sceso dalla cache. `sync` con un
+# argomento fa fdatasync su quel file solo; se la versione non lo accetta, si
+# prosegue — un backup scritto vale più di una garanzia in più non ottenuta.
+sync "$PARZIALE" 2>/dev/null || true
+mv -f "$PARZIALE" "$OUT"
 INCOMPLETO=""
 SIZE=$(du -h "$OUT" | cut -f1)
 ok "Backup completato: $OUT ($SIZE)"
@@ -196,6 +218,18 @@ fi
 # ───── 5. rotation (mantieni schema 7 GIORNI + 4 weekly) ─────
 log "Pruning vecchi backup (7 giorni distinti + 4 weekly)..."
 cd "$BACKUP_DIR"
+
+# I resti delle scritture uccise prima del trap (`kill -9`, crash, spegnimento).
+# A questo punto la rinomina è già avvenuta, quindi qualunque `.parziale` qui è
+# spazzatura di un giro precedente — 2,5 GB l'uno su una macchina in cui i backup
+# sono già il 69% del disco occupato. Si dicono invece di sparire in silenzio: un
+# `.parziale` rimasto è la traccia di un backup MORTO, cioè di una notte scoperta.
+for resto in vps1777-*.tar.age.parziale; do
+  [ -e "$resto" ] || continue
+  warn "resto di una scrittura interrotta, lo rimuovo: $resto ($(du -h "$resto" | cut -f1))"
+  warn "  ⇒ quel backup NON è mai stato completato: quella notte non è coperta."
+  rm -f "$resto"
+done
 
 # I quattro `ls` di questa sezione e di restore.sh danno SC2012 («usa find»).
 # Dichiarati invece che riscritti: i nomi li genera QUESTO script
