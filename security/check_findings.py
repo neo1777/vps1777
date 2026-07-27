@@ -186,6 +186,33 @@ def check_since(f: dict, rilasciate: set[str], errors: list[str]) -> bool:
     return False
 
 
+# Nei file di CODICE una riga che comincia con `#` è un commento. Non vale per i
+# `.md`, dove non c'è codice da distinguere: là un `contains` è sempre una citazione.
+_SUFFISSI_CON_COMMENTI = {".py", ".sh", ".yml", ".yaml", ".service", ".timer", ".path"}
+
+
+def solo_in_commenti(path: Path, needle: str) -> bool:
+    """L'ago compare SOLTANTO su righe di commento?
+
+    Nasce il 27/07 da un rilievo di abdd732a: un `contains` su un identificatore è
+    soddisfatto anche se quell'identificatore vive solo in un commento — cioè il
+    presidio può essere verde mentre il CODICE che dovrebbe presidiare non c'è più.
+    Misurato su questo registro: 5 aghi su 56 voci stanno solo nei commenti.
+
+    ⚠️ NON sono tutti difetti, ed è il punto: alcuni sono RICEVUTE deliberate — un
+    commento che spiega perché una cosa è fatta così, e che non deve poter sparire in
+    silenzio. Il difetto non è che esistano: è che il registro non distingueva una
+    RICEVUTA da un PRESIDIO, e chi legge non poteva sapere quale delle due stesse
+    guardando. Ora le ricevute si dichiarano (`ricevute:`) e un ago di `contains:` che
+    finisce solo nei commenti fa fallire il gate.
+    """
+    if path.suffix not in _SUFFISSI_CON_COMMENTI:
+        return False
+    righe = [r for r in path.read_text(encoding="utf-8", errors="replace").splitlines()
+             if needle in r]
+    return bool(righe) and all(r.lstrip().startswith("#") for r in righe)
+
+
 def check_evidence(f: dict, errors: list[str]) -> None:
     """L'evidenza di una voce esiste ancora nel codice?"""
     fid = f["id"]
@@ -201,6 +228,24 @@ def check_evidence(f: dict, errors: list[str]) -> None:
                      f"{fid}: EVIDENZA SPARITA — «{needle}» non è più in {ev['file']}.\n"
                      f"       O il fix è stato rimosso, o l'evidenza va aggiornata. "
                      f"Non lasciare la voce a `{f['status']}` senza guardare.")
+            elif solo_in_commenti(path, needle):
+                fail(errors,
+                     f"{fid}: PRESIDIO NEI COMMENTI — «{needle}» in {ev['file']} compare\n"
+                     f"       SOLO su righe di commento. Il gate resterebbe verde anche se\n"
+                     f"       sparisse il codice: sta guardando la spiegazione, non la cosa.\n"
+                     f"       Se è deliberato — una RICEVUTA, cioè un commento che non deve\n"
+                     f"       sparire in silenzio — spostalo sotto `ricevute:` invece di\n"
+                     f"       `contains:`, così si legge cosa promette.")
+        # Le RICEVUTE: aghi che DEVONO stare in un commento. Si verificano come i
+        # `contains` (devono esserci ancora), ma dichiarano di provare che una
+        # ragione è ancora scritta — non che un comportamento esista.
+        for needle in ev.get("ricevute") or []:
+            if needle not in text:
+                fail(errors,
+                     f"{fid}: RICEVUTA SPARITA — «{needle}» non è più in {ev['file']}.\n"
+                     f"       Era la ragione scritta di una scelta: se la scelta è cambiata\n"
+                     f"       la voce va riletta, se è solo il commento a essere sparito\n"
+                     f"       qualcuno ha tolto il perché senza toccare il cosa.")
         for needle in ev.get("not_contains") or []:
             if needle in text:
                 fail(errors,

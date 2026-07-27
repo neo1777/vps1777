@@ -970,7 +970,9 @@ findings:
     since: v0.40.3
     evidence:
       - file: compose.yaml
-        contains:
+        # RICEVUTE: sono commenti, e devono restare — spiegano perché una rete NON
+        # è qui. Non presidiano un comportamento: presidiano la ragione.
+        ricevute:
           - "`ingress` NON qui (H50)"
           - "nessun servizio di questo file può USCIRE su Internet"
       - file: services/gateway/app/admin.py
@@ -980,6 +982,9 @@ findings:
       - file: compose.ingress.tailscale.yaml
         contains:
           - "enable_ip_masquerade"
+        # RICEVUTA: il commento che racconta l'incidente del 27/07. Se sparisce,
+        # la prossima persona rifà lo stesso errore senza sapere che c'è già stato.
+        ricevute:
           - "NON SI PUÒ PUBBLICARE DA UNA RETE"
     missing: >
       MISURATO sul vivo (26/07/2026, prova-1, profilo Tailscale Funnel): il gateway
@@ -1081,8 +1086,10 @@ findings:
     evidence:
       - file: tools/prove-empiriche/prova-7-porta-pubblicata-davvero.sh
         contains:
-          - "dall'host, la porta esiste e risponde?"
           - "VPS1777_SERVIZIO"
+        # RICEVUTA: l'intestazione della prova, cioè la domanda che si pone.
+        ricevute:
+          - "dall'host, la porta esiste e risponde?"
       - file: compose.ingress.tailscale.yaml
         contains: ["enable_ip_masquerade"]
       - file: tools/vps1777.py
@@ -1258,7 +1265,10 @@ findings:
           - "file dice"
           - "controprova dello strumento"
       - file: security/check_findings.py
-        contains: ["if needle not in text:"]
+        contains:
+          - "if needle not in text:"
+          - "def solo_in_commenti"
+          - "PRESIDIO NEI COMMENTI"
     missing: >
       TROVATO DALL'ANALISI ESTERNA del round-7 (27/07/2026), che l'ha formulato
       meglio di come l'avevamo formulato noi:
@@ -1311,6 +1321,28 @@ findings:
             vede nessuno. Quella domanda è di una review, non di una prova.
         (c) copre le unit systemd. Le stesse evidenze «per stringa» esistono per
             i compose e per il codice Python, e lì non c'è un demone a cui chiedere.
+
+      AVANZAMENTO del 27/07 — un pezzo di (b) è stato meccanizzato, e nasce da un
+      rilievo di abdd732a: un `contains` su un identificatore è soddisfatto anche se
+      quell'identificatore vive SOLO in un commento. Il presidio può essere verde
+      mentre il codice che dovrebbe presidiare non c'è più: sta guardando la
+      spiegazione, non la cosa. `check_findings.py` ora lo rileva e FALLISCE, a meno
+      che l'ago non sia dichiarato sotto `ricevute:` — un'evidenza che promette di
+      tenere in vita una RAGIONE, non un comportamento. Misurato su questo registro
+      prima di scrivere la regola: 5 aghi su 56 voci stavano solo nei commenti, tutti
+      e cinque legittimi come ricevute (H50 ×3, H51 ×1, H56 ×1). Il difetto non era
+      che esistessero: era che il registro non distingueva una ricevuta da un presidio,
+      e chi leggeva non poteva sapere quale delle due stesse guardando.
+
+      MISURATA E NON APPLICATA, la regola più forte: «ogni voce deve avere almeno un
+      ancoraggio comportamentale — un `contains` in un file di codice, o un
+      `not_contains`». Oggi la violerebbero 3 voci su 56, e tutte e tre per un motivo
+      legittimo: H28 è `accepted` e non ha evidenze per costruzione; H44 ha per OGGETTO
+      la documentazione (le sue evidenze sono .md perché è lì che vive il fix); H48 usa
+      un `not_contains` e nessun `contains`. Applicarla così com'è accuserebbe tre voci
+      sane — un presidio che grida al lupo si impara a spegnere. Serve prima un modo di
+      dichiarare «questa voce ha per oggetto un documento», e non lo si inventa di corsa
+      a fine giornata. Il numero è qui perché la prossima non debba rimisurarlo.
 
   - id: H53
     severity: medium
@@ -1486,7 +1518,9 @@ findings:
     evidence:
       # LA RICEVUTA: la ragione esiste nel codice e non può sparire in silenzio.
       - file: tools/vps1777.py
-        contains:
+        # RICEVUTA dichiarata: è un commento, ed è il suo mestiere — tiene in vita la
+        # RAGIONE per cui lo snapshot non è cifrato. Il presidio vero è qui sotto.
+        ricevute:
           - "serve all'auto-rollback, che gira sulla VPS e non può dipendere dalla chiave"
       # IL PRESIDIO: l'invariante CONGELATO sul suo valore esatto. Qualunque modifica
       # alla lista — un nome diverso, un .append(), una lista costruita altrove —
