@@ -223,7 +223,7 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **55 voci** (2 critiche, 9 alte, 30 medie, 14 basse): 43 dalla
+Il registro conta **56 voci** (2 critiche, 9 alte, 31 medie, 14 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3` — e 4 che non
 vengono da una review ma da quello che è successo dopo: `H51` da un guasto in
@@ -234,7 +234,7 @@ verificato contro il codice dal gate in CI:
 | | |
 |---|---|
 | **chiusi** | 41 |
-| **parziali** | 13 |
+| **parziali** | 14 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -340,6 +340,22 @@ file nella disponibilità di chi userà il comando dopo. Resta parziale perché 
 che riallinea i permessi **non è collaudato dai test** (servirebbe eseguirli con altri
 privilegi): è verificato leggendolo, che è esattamente ciò che il rilievo precedente
 denuncia.
+
+Il quattordicesimo è `H56`, ed è **la seconda metà di un rilievo che risultava
+chiuso**. Prima di ogni aggiornamento la macchina prende una copia di sicurezza locale
+per poter tornare indietro; una voce chiusa raccontava che da quella copia erano stati
+esclusi i cookie di Google. Vero — ma era **un archivio su due**, e quello che resta è
+dodicimila volte più grande: circa 2,58 GB di archivio **in chiaro**, mentre gli stessi
+dati, per l'altra strada, viaggiano cifrati. *Il difetto non è il chiaro: quella copia
+serve al ripristino automatico, che gira sulla macchina e non può dipendere da una
+chiave che sta altrove — cifrarla la renderebbe illeggibile proprio a chi deve usarla.*
+**Il difetto è che chi leggeva il registro concludeva che il problema fosse chiuso.**
+Ora è scritto, col residuo dichiarato: cresce di una copia a ogni aggiornamento e
+ciascuna resta 72 ore, e l'unica cura che non rompe il ripristino è cifrare il disco —
+che si fa sul disco e non nel codice, quindi è una decisione di chi possiede la
+macchina. È la terza volta che troviamo la stessa forma: **una voce chiusa il cui
+titolo nomina un elemento invece della categoria.** Tre non è un caso, ed è il motivo
+per cui vale la pena rileggere le altre.
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è

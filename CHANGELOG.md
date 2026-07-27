@@ -2,10 +2,30 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
-## Non rilasciato
+## [0.40.8] — 2026-07-27
 
-Su `main`, non ancora in una versione. `security/check_findings.py` le conta e le
-stampa a ogni esecuzione (`⧗ N su main, non ancora rilasciati`).
+Il rilascio che **porta gli strumenti dove servono**. Tre correzioni nate tutte dallo
+stesso gesto — aggiornare davvero la macchina e guardare cosa succede, invece di
+leggere il codice.
+
+> La più istruttiva non è un fix ma una **cosa data per impossibile e misurata lo
+> stesso**: il controllo che esce su Internet e rientra sembrava non potersi fare dalla
+> macchina, perché la richiesta avrebbe girato su sé stessa. Misurata, esce davvero.
+> *Un limite dedotto invece che misurato è un numero senza misura travestito da
+> vincolo tecnico.*
+
+### Dichiarato
+
+- **La seconda metà di un rilievo che risultava chiuso** (`H56`). Prima di ogni
+  aggiornamento la macchina prende una copia di sicurezza locale per poter tornare
+  indietro. Una voce chiusa raccontava che da quella copia erano stati esclusi i cookie
+  di Google: vero, ma era **un archivio su due**, e quello che resta è dodicimila volte
+  più grande — circa 2,58 GB **in chiaro**, mentre gli stessi dati per l'altra strada
+  viaggiano cifrati. *Il chiaro non è il difetto: quella copia serve al ripristino
+  automatico, e cifrarla la renderebbe illeggibile proprio a chi deve usarla.* **Il
+  difetto è che chi leggeva il registro concludeva che il problema fosse chiuso.**
+  Misurato sulla macchina viva, non dedotto. La cura possibile — cifrare il disco — si
+  fa sul disco e non nel codice: è una decisione di chi possiede la macchina.
 
 ### Aggiunto
 

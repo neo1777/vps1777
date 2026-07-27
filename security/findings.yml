@@ -1403,7 +1403,7 @@ findings:
     severity: medium
     title: "La telemetria poteva far cadere una riparazione: progress_write/status_write scrivevano nudi, e una PermissionError uccideva `vps1777 update` a metà"
     status: partial
-    since: unreleased
+    since: v0.40.8
     evidence:
       - file: tools/vps1777.py
         contains:
@@ -1458,3 +1458,78 @@ findings:
         (c) la causa a monte — la unit gira come root perché le serve docker e
             l'installazione del binario — non è toccata. Qui si è tolto il danno,
             non l'asimmetria.
+
+  - id: H56
+    severity: medium
+    title: "La seconda metà di H14 — nello snapshot pre-update archive-data resta IN CHIARO: funzionale al rollback, non rimovibile, e finora non scritto da nessuna parte"
+    status: partial
+    # La CONDIZIONE esiste da quando esiste lo snapshot (v0.30.0). Questa data dice
+    # quando è entrata NEL REGISTRO, che è un'altra cosa: separare «da quando è vero»
+    # da «da quando lo diciamo» è la stessa disciplina con cui H51 distingue
+    # l'origine dall'impatto. Per due mesi è stato vero e non scritto.
+    since: v0.40.8
+    evidence:
+      # LA RICEVUTA: la ragione esiste nel codice e non può sparire in silenzio.
+      - file: tools/vps1777.py
+        contains:
+          - "serve all'auto-rollback, che gira sulla VPS e non può dipendere dalla chiave"
+      # IL PRESIDIO: l'invariante CONGELATO sul suo valore esatto. Qualunque modifica
+      # alla lista — un nome diverso, un .append(), una lista costruita altrove —
+      # cambia questa riga e fa rossa la CI.
+      - file: tools/vps1777.py
+        contains:
+          - "SNAPSHOT_EXCLUDED_VOLUMES = [NLM_AUTH_VOLUME]"
+    missing: >
+      MISURATO SULLA VPS VIVA da abdd732a (27/07/2026, 12:3x, profilo ingress.tailscale),
+      e ri-verificato da b82df434 sul registro e sul codice prima di applicarlo.
+
+      IL FATTO: in backups/pre-update/ convivono archive-data.tar (2.581.040.640 byte) e
+      gateway-data.tar (202.240 byte) IN CHIARO, mentre nella cartella padre gli stessi
+      dati viaggiano cifrati con age. Lo stesso contenuto va cifrato per una strada e in
+      chiaro per l'altra.
+
+      IL DIFETTO NON È IL CHIARO — è tracciato e ha una ragione buona (lo snapshot serve
+      all'auto-rollback, che gira sulla VPS e non può dipendere dalla chiave privata age,
+      che sta sul PC dell'owner). IL DIFETTO È CHE IL REGISTRO DICHIARAVA CHIUSA METÀ DEL
+      PROBLEMA: H14 è `closed` e il suo titolo nomina un volume solo — nlm-auth, il più
+      piccolo. Chi legge «H14 closed, escludere nlm-auth ✓» conclude che «snapshot in
+      chiaro» è chiuso. È chiuso per un volume su due sensibili, e quello che resta è
+      dodicimila volte più grande. Nessuna voce nominava archive-data.tar in chiaro:
+      verificato, zero occorrenze in tutto il registro prima di questa.
+
+      ⭐ È LA TERZA INCARNAZIONE DELLA STESSA CLASSE, e tre non sono un caso: una voce
+      `closed` il cui titolo nomina UN elemento di un insieme che ne ha più d'uno.
+      H42 (archive-data :ro in archive-mcp, :rw nel gateway, 26/07), H44→H54 (i doc
+      dichiarano i secret, il rischio del token no, 27/07), e questa. Vale la pena
+      rileggere le voci `closed` il cui titolo nomina un elemento invece della categoria.
+
+      LE DUE CURE OVVIE SONO ENTRAMBE SBAGLIATE, e abdd732a le ha proposte e ritirate
+      entrambe leggendo il codice: cifrare lo snapshot con age lo renderebbe indecifrabile
+      proprio al rollback (la chiave privata non è sulla macchina); aggiungere archive-data
+      alle esclusioni romperebbe il rollback DEI DATI, che è lo scopo per cui lo snapshot
+      esiste. Il criterio di H14 le esclude entrambe: si può escludere un volume se non
+      serve al rollback E è comunque nel backup cifrato — per l'archivio la seconda è vera
+      e la prima è falsa.
+
+      COSA MANCA: la sola cura che non rompe il rollback è la cifratura a livello di
+      volume o di disco (oggi assente: vda1 ext4, /dev/mapper vuoto). Si fa sul disco e
+      non nel codice: è una decisione dell'owner, e finché non è presa questa voce resta
+      `partial` — scritta, non risolta.
+      E il residuo CRESCE con la frequenza dei rilasci: snapshot_prune pota per ETÀ
+      (>72h) e non per numero, quindi ogni update aggiunge ~2,58 GB in chiaro che restano
+      72 ore. Misurato: 2 snapshot conviventi = 4,9 GB, con la stessa copia dell'archivio
+      due volte, identica al byte, senza deduplicazione.
+
+      PERIMETRO DELLA MISURA, perché senza non è un dato: una macchina, un profilo di
+      ingresso, immagini 0.40.5, ore 12:3x del 27/07. La chiave pubblica age non è stata
+      cercata oltre .env e compose.yaml — si dice dove non si è guardato, non che non ci sia.
+
+      📌 NOTA SUL PRESIDIO, e viene da un errore commesso scrivendo questa voce: la prima
+      stesura usava `not_contains` con DUE formulazioni possibili dell'aggiunta. Sarebbe
+      stata una denylist sul CASO IMMAGINATO — un `.append()`, un nome diverso, una lista
+      costruita altrove, e il presidio resta verde mentre il rollback muore. La forma
+      corretta è l'opposto: `contains` sul valore ESATTO che deve restare tale, che copre
+      tutte le varianti per costruzione. Raffina la regola che avevamo («not_contains è il
+      presidio, contains è solo la ricevuta»): vale quando devi VIETARE la comparsa di
+      qualcosa; quando devi CONGELARE un invariante, `contains` sull'esatto è più forte,
+      perché non devi indovinare in quanti modi qualcuno potrebbe romperlo.
