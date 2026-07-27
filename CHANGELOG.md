@@ -2,6 +2,28 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.12] — 2026-07-27
+
+Il rilascio in cui **un controllo nato ieri impara a dire «non lo so»**. Una riga sola di
+sostanza, e viene da una rilettura fatta lo stesso giorno in cui quel controllo è nato.
+
+> **La cosa che vale più del fix**: il difetto colpiva esattamente il criterio che quel
+> controllo si era dato da sé. *Un allarme che grida al lupo brucia la fiducia prima della
+> volta in cui è vero* — e gridare «le tue copie di sicurezza sono sparite» per un
+> problema di permessi fa quel danno per un'altra strada.
+
+### Corretto
+
+- **«Non riesco a leggere» non è «non c'è niente».** Il controllo sulla copertura delle
+  copie, se la cartella non era leggibile, otteneva zero e lo trattava come una perdita:
+  avrebbe mandato l'avviso più allarmante che sappia produrre — *«la finestra di
+  ripristino si è accorciata: zero giorni»* — per un problema di permessi. *Su questa
+  macchina non è un caso di scuola: la stessa forma, permessi fra utente e
+  amministratore, ha fermato un aggiornamento vero la mattina del 27 luglio.*
+  Ora distingue **tre** stati: non misurato, misurato e vuoto, N giorni. Sul non misurato
+  non allarma e non tocca la memoria di quanto copriva prima — **dichiara di essere
+  cieco**, che è un'altra cosa e va saputa lo stesso.
+
 ## [0.40.11] — 2026-07-27
 
 Il rilascio in cui **due regole scritte diventano controlli**. Nessuna funzione nuova per
