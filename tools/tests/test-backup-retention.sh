@@ -67,6 +67,28 @@ verifica() {
   passati=$((passati + 1))
 }
 
+# Come `verifica`, ma guarda COSA DICE invece di cosa resta: il rendiconto è a
+# sua volta un presidio, e un presidio che nessuno prova è una riga di log.
+verifica_dice() {
+  local nome="$1"; shift
+  local atteso="$1"; shift
+  local dir; dir="$(mktemp -d)"
+  local f
+  for f in "$@"; do
+    : > "$dir/$f"
+  done
+  local out
+  out="$(BACKUP_DIR="$dir" bash "$BACKUP_SH" --prune-only 2>&1)"
+  rm -rf "$dir"
+  case "$out" in
+    *"$atteso"*)
+      printf '  ✓ %s\n' "$nome"; passati=$((passati + 1)) ;;
+    *)
+      printf '  ✗ %s\n      atteso nell output: %s\n     ottenuto:\n%s\n' "$nome" "$atteso" "$out"
+      falliti=$((falliti + 1)) ;;
+  esac
+}
+
 n() { printf 'vps1777-%s.tar.age' "$1"; }
 
 printf 'ritenzione backup — casi a risposta nota (script: %s)\n' "$BACKUP_SH"
@@ -133,6 +155,33 @@ verifica "⑤ un nome illeggibile non ruba un posto ai backup veri" \
 # RISPOSTA NOTA: nessun sopravvissuto e nessun errore. È il caso che scopre le
 # guardie mancanti su array vuoti sotto `set -u`.
 verifica "⑥ cartella vuota: niente da fare, e nessun errore" ""
+
+# ─── ⑦⑧⑨ IL RENDICONTO PARLA NELL'UNITÀ DELLA PROMESSA ─────────────────────
+# Il difetto che questi tre casi presidiano è che «7 file» e «7 giorni» sono
+# due cose, e la riga finale diceva solo la prima. RISPOSTE NOTE:
+
+# ⑦ la situazione REALE della macchina il 27/07 dopo l'update: due giorni, e la
+#    riga deve DIRLO — non limitarsi a un conteggio che torna.
+verifica_dice "⑦ con 2 giorni il rendiconto lo dice, e avvisa" \
+  "copertura: 2 giorni distinti (2026-07-26 → 2026-07-27) sui 7 promessi" \
+  "$(n 2026-07-26-030000)" "$(n 2026-07-27-142609)"
+
+# ⑧ CIÒ CHE NON DEVE ALLARMARE: a regime la copertura è piena e non si avvisa.
+#    Un presidio che avvisa anche quando va bene viene ignorato quando serve.
+verifica_dice "⑧ con 7 giorni pieni non avvisa" \
+  "copertura: 7 giorni distinti (2026-07-21 → 2026-07-27)" \
+  "$(n 2026-07-21-030000)" "$(n 2026-07-22-030000)" "$(n 2026-07-23-030000)" \
+  "$(n 2026-07-24-030000)" "$(n 2026-07-25-030000)" "$(n 2026-07-26-030000)" \
+  "$(n 2026-07-27-030000)"
+
+# ⑨ IL CASO CHE INGANNA IL CONTEGGIO, ed è il motivo per cui la riga esiste:
+#    sette FILE, un giorno solo. Il vecchio rendiconto avrebbe detto «7» e
+#    sarebbe stato vero. Qui la ritenzione ne tiene uno e la copertura dice UNO.
+verifica_dice "⑨ sette file di un giorno solo: la copertura dice 1, non 7" \
+  "copertura: 1 giorni distinti" \
+  "$(n 2026-07-27-010000)" "$(n 2026-07-27-020000)" "$(n 2026-07-27-030000)" \
+  "$(n 2026-07-27-040000)" "$(n 2026-07-27-050000)" "$(n 2026-07-27-060000)" \
+  "$(n 2026-07-27-070000)"
 
 printf '\n%d passati, %d falliti\n' "$passati" "$falliti"
 [ "$falliti" -eq 0 ]

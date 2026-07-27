@@ -1235,7 +1235,8 @@ findings:
       🔴 L'AVEVO DATO PER IMPOSSIBILE, e l'ho misurato invece di assumerlo: credevo che
       dalla macchina il nome pubblico risolvesse all'indirizzo del tailnet, facendo un
       giro su sé stesso. FALSO — risolve a indirizzi PUBBLICI dell'ingresso Tailscale.
-      Misura del 27/07 dalla VPS: 200 da 209.177.145.192 in 360 ms sul nome pubblico,
+      Misura del 27/07 dalla VPS: 200 in 360 ms sul nome pubblico da un indirizzo
+      pubblico dell'ingresso Tailscale (l'indirizzo REDATTO — vedi H60),
       contro 000 sull'indirizzo di tailnet. La richiesta esce davvero: la sonda è una
       sonda, non un'eco. (Se non l'avessi misurato avrei scritto «non fattibile dalla
       macchina» — un limite dedotto, cioè la stessa classe di errore della durata
@@ -1937,3 +1938,167 @@ findings:
       avrebbero reso illeggibile quale dei due ha prodotto quale effetto.
       Il resto è in produzione dal 27/07 (v0.40.10) e misurato: la soglia sulla macchina
       vale 5,81 GiB contro i 5,00 della vecchia costante, e cresce da sola con l'archivio.
+
+  - id: H59
+    severity: medium
+    title: "La finestra di ripristino si accorcia in silenzio: il rendiconto dei backup è un CONTEGGIO mentre la promessa è in GIORNI, e nessuna sonda guarda quel numero"
+    status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: misura
+      nota: >
+        abdd732a, rimisurando i backup subito dopo l'arrivo della v0.40.10: il fix di H57
+        è corretto, la copertura reale è di due giorni, e non esiste nulla che lo dica.
+        La sua formulazione, presa così com'è: «se `backup.sh` avesse stampato "copertura:
+        2 giorni distinti" questa cosa si sarebbe vista da sola, stamattina, senza che
+        nessuna la cercasse».
+    natura: comportamento
+    since: v0.40.10
+    evidence:
+      - file: tools/backup.sh
+        contains:
+          - "copertura: $copertura giorni distinti"
+      - file: tools/vps1777.py
+        contains:
+          - "def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:"
+      - file: tools/tests/test-backup-retention.sh
+        contains:
+          - "⑨ sette file di un giorno solo: la copertura dice 1, non 7"
+    missing: >
+      IL FATTO: `backup.sh` chiudeva con «Backup totali mantenuti: N». Un CONTEGGIO,
+      mentre la promessa che quello script implementa è in GIORNI. Il 27/07 il numero
+      diceva «7» ed era vero: sette file, tre giorni. Poi «7» di nuovo: sette file, due
+      giorni. La riga non ha mai mentito e non ha mai detto nulla.
+
+      ⭐ LA FORMA, ed è la stessa di H57 salita di un piano: il difetto era che la
+      RITENZIONE contasse file invece di giorni; questo è che il RENDICONTO DELLA CURA
+      faccia lo stesso. Un presidio che rendiconta in un'unità diversa dalla propria
+      promessa non mente — tace nel momento esatto in cui dovrebbe parlare. E il momento
+      esatto è quello in cui il numero torna e la garanzia no.
+
+      E LA SECONDA METÀ, che è più grande della prima: anche col rendiconto giusto,
+      quella riga finisce in /var/log/backup.log DENTRO il container del backup, che
+      nessuno apre. Il 27/07 la finestra è passata da sette giorni a due e l'ha scoperto
+      una sessione che stava misurando altro. Non esisteva una sola sonda che guardasse
+      quel numero, e il registro non aveva una voce che lo dicesse.
+
+      IL RIMEDIO, in due pezzi:
+      ① `backup.sh` stampa la copertura in giorni distinti col loro intervallo, e AVVISA
+      quando è sotto i sette — con la nota su come leggerla (dopo un'installazione nuova
+      è normale, altrimenti il sospettato tipico è un giorno con più aggiornamenti).
+      ② `_sorveglia_copertura_backup` nel `check` giornaliero — dove il timer gira già,
+      accanto alla sonda di raggiungibilità e per la stessa ragione: una domanda che si
+      può fare in un posto che c'è già non merita un'unità nuova da installare, ricordare
+      e dimenticare.
+
+      ⭐ E LA DECISIONE CHE DECIDE SE QUESTO PRESIDIO VERRÀ LETTO O DISATTIVATO: notifica
+      una REGRESSIONE, non una finestra non ancora piena. Dopo un'installazione nuova la
+      copertura è 1, poi 2, poi 3 — normale, e un allarme che suona lì verrebbe silenziato
+      prima di servire davvero. Quello che non è mai normale è che scenda sotto il massimo
+      già raggiunto, perché a regime i backup si SOSTITUISCONO, non si perdono. La memoria
+      è il massimo storico; l'allarme è la discesa da lì; e si notifica la transizione, non
+      lo stato — un messaggio al giorno che dice sempre la stessa cosa smette di essere
+      letto entro una settimana.
+
+      ⚠️ RESIDUO DICHIARATO: `copertura_max` non scende mai. Se un giorno la ritenzione
+      venisse volutamente accorciata, il presidio resterebbe in allarme finché qualcuno
+      non tocca lo stato. È il prezzo di non avere una soglia configurabile, ed è scritto
+      qui invece di essere scoperto.
+
+      COSA MANCA per `closed`: è in `main` e provato su nove casi a risposta nota (sei per
+      la ritenzione, tre per il rendiconto) più quattro unit sulla sorveglianza, con la
+      controprova vista rossa. NON è in produzione.
+
+  - id: H60
+    severity: low
+    title: "Una regola scritta e non presidiata: un indirizzo pubblico è vissuto otto ore in `main` e in tre release, entrato con il commit che implementava la raccomandazione di un audit"
+    status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: lettura
+      nota: >
+        71d540e6, facendo il controllo di ammissione dei file da caricare sul corpus
+        esterno del round-9. Trovato leggendo, non misurando: `git log -S` dice che UN solo
+        commit lo introduce, ed è 9c5fce3 — quello che implementa la sonda raccomandata
+        dall'audio-7. Verificato da b82df434 prima di applicarlo, e con una correzione di
+        merito (sotto).
+    natura: comportamento
+    since: v0.40.10
+    evidence:
+      - file: security/check_no_leaks.py
+        contains:
+          - "ALLOWLIST_R3 = {"
+          - "def indirizzo_da_ignorare(ip: str) -> bool:"
+      - file: tools/tests/test_no_leaks.py
+        contains:
+          - "def test_un_numero_di_sezione_non_e_un_indirizzo():"
+    missing: >
+      IL FATTO: `security/findings.yml` e `tools/vps1777.py` contenevano un indirizzo IPv4
+      pubblico, in `main` e nei tag v0.40.8, v0.40.9, v0.40.10 di un repo PUBBLICO, dalle
+      12:54 del 27/07 alla sera. Tolto da entrambi.
+
+      ⚖️ LA SEVERITÀ, e la metto BASSA con il ragionamento scritto perché sono io
+      l'autrice del commit e gonfiare il proprio errore è l'altra faccia del minimizzarlo
+      — contestatela se non regge. Quell'indirizzo NON è la macchina di Neo e NON è il suo
+      tailnet: è un ingresso PUBBLICO e CONDIVISO di Tailscale, e lo dice il testo stesso
+      in cui era scritto. Non dà accesso a niente, non identifica la rete di nessuno, e
+      che il servizio stia dietro un Funnel il repo lo dichiara ovunque per disegno. La
+      prima formulazione del rilievo diceva «l'indirizzo a cui risponde il servizio»: vero
+      alla lettera, ma invita a leggere «l'indirizzo del servizio», che è un'altra cosa.
+      Decisione di Neo, 27/07: resta nella storia, «di monito ai posteri» — riscrivere la
+      storia di un repo pubblico ha un costo e il dato non lo giustifica. Lo stato onesto
+      da scrivere è «non più in vista», non «rimosso».
+
+      ⭐ IL DIFETTO VERO NON È L'INDIRIZZO: è che la regola esisteva, era scritta, e
+      nessun presidio la applicava. «Nessun indirizzo, hostname o URL della macchina, in
+      nessuna forma» la applicavamo ai corpus a mano; il prodotto no. E la stessa CLASSE
+      era già stata trovata al round-6 (un hostname in `.env.example` e in un test, tolto
+      in 3b3b4b2): il rimedio di allora tolse il valore e non costruì il presidio, quindi
+      cinque settimane dopo la classe è tornata in un'altra forma.
+
+      ⚠️ E LA FORMA DI COME CI È ENTRATO merita più del caso: documentando la PROVA di una
+      misura ci è finito dentro l'ENDPOINT della misura. Il commit è quello che implementa
+      ciò che un audit aveva chiesto. Il rimedio raccomandato da una revisione ha
+      introdotto l'esposizione, e la prova che lo documentava era il veicolo. 📌 Nota di
+      merito: l'indirizzo non serviva all'argomento — la nota dimostrava «risolve a un
+      ingresso PUBBLICO, non al tailnet», che è una CATEGORIA. Il dato sfuggito era
+      decorazione, ed è il caso tipico: si redige ciò che si crede sensibile, non ciò che
+      è superfluo.
+
+      IL RIMEDIO — R3 in `security/check_no_leaks.py`: indirizzi IPv4 pubblici e nomi di
+      tailnet reali fanno fallire la build. Con le esclusioni giuste, che sono metà del
+      lavoro: reti private, loopback, link-local, multicast, gli indirizzi RFC 5737 nati
+      apposta per la documentazione, e un elenco di bersagli di test dichiarati UNO PER
+      UNO COL PERCHÉ.
+
+      🔴 TRE COSE CHE IL PRESIDIO HA TROVATO SU SÉ STESSO, e sono il valore di averlo
+      provato invece di averlo scritto:
+      (a) al primo giro è diventato rosso su `installer/ui.html`, dove il campo «IP
+      pubblico» aveva come segnaposto un indirizzo pubblico VERO. Sostituito con 203.0.113
+      (RFC 5737). Non lo cercava nessuno.
+      (b) la regex dei nomi tailnet non combaciava MAI: il `\b` era finito in una stringa
+      non-raw, quindi cercava un carattere di backspace. Sempre verde per costruzione —
+      la stessa classe che quel file esiste per impedire. L'ha trovata il test al primo
+      giro, e solo perché fra i casi ce n'era uno che DOVEVA diventare rosso.
+      (c) scrivendo il test ho riscritto l'indirizzo vero DENTRO il file che esiste per
+      impedirlo, sotto un commento che diceva «non è scritto qui». E il gate ha detto
+      verde, perché scansionava solo i file già TRACCIATI e quello era nuovo. Corretti
+      entrambi: l'indirizzo tolto, e il gate ora guarda anche ciò che sta per essere
+      aggiunto. ⭐ Un presidio che non vede ciò che stai per aggiungere vede solo i tuoi
+      errori passati.
+
+      📌 E UNA DISTINZIONE CHE VALE OLTRE QUESTO FILE: l'allowlist era per FILE, quindi
+      esentava da OGNI regola. `security/findings.yml` era esente perché cita i pattern
+      dei segreti — e per quella ragione non veniva scansionato affatto, che è il motivo
+      per cui l'indirizzo ci è vissuto dentro. Ora l'esenzione è per REGOLA: quel file
+      resta esente da R2 e NON da R3. Un'esenzione concessa per una ragione non deve
+      estendersi a tutte le ragioni.
+
+      COSA MANCA per `closed`: il presidio è provato (11 casi a risposta nota, metà dei
+      quali contro i FALSI rossi — un gate che grida al lupo viene spento) e visto rosso
+      su due casi reali. Non è ancora girato in CI su una release.
+      ⚠️ RESIDUO DICHIARATO, e va guardato con gli occhi: `security/check_no_leaks.py` e
+      `tools/tests/test_no_leaks.py` sono esenti da R3, perché gli indirizzi li contengono
+      per mestiere. Sono i due soli posti in cui un indirizzo vero potrebbe nascondersi
+      senza che nessuno lo veda. Sono due e sono corti — un'esenzione che non si può
+      rileggere a mano sarebbe troppo larga.

@@ -1286,8 +1286,14 @@ def funnel_ok(repo: Path, tentativi: int = 2) -> tuple[bool, str]:
 
     MISURATO PRIMA DI SCRIVERLA, perché sembrava impossibile: dalla VPS il nome
     pubblico NON risolve all'indirizzo del tailnet, risolve a indirizzi PUBBLICI
-    dell'ingresso Tailscale (27/07: risposta 200 da 209.177.145.192 in 360 ms,
-    mentre la stessa richiesta all'indirizzo di tailnet dà 000). La richiesta esce
+    dell'ingresso Tailscale (27/07: risposta 200 in 360 ms da un indirizzo
+    pubblico dell'ingresso — REDATTO, vedi sotto — mentre la stessa richiesta
+    all'indirizzo di tailnet dà 000).
+    L'indirizzo misurato NON è scritto qui, e la nota vale più del dato: era
+    decorazione. L'argomento è «risolve a un ingresso PUBBLICO, non al tailnet»
+    — una categoria, non un indirizzo. Ci è finito dentro il 27/07 col commit che
+    implementava questa stessa sonda, ed è rimasto in `main` e in tre release di
+    un repo PUBBLICO fino a sera (H60). La richiesta esce
     davvero e rientra: la sonda è una sonda, non un giro su sé stessa.
 
     Due tentativi: un singolo errore di rete verso Internet è un evento comune, e
@@ -1368,6 +1374,87 @@ def _sorveglia_raggiungibilita(repo: Path, st: dict, notifica: bool) -> None:
                               f"Era giù dalle {caduta_da} — {quanto}.")
 
 
+COPERTURA_BACKUP_ATTESA = 7
+
+
+def copertura_backup(repo: Path) -> tuple[int, str | None, str | None]:
+    """Giorni DISTINTI coperti dai backup cifrati, col primo e l'ultimo.
+
+    Non conta i file: conta i giorni — che è l'unità in cui la promessa è
+    scritta. È la stessa distinzione che ha prodotto H57, applicata qui prima
+    che serva: sette file possono essere sette giorni o uno solo.
+    """
+    d = repo / "backups"
+    if not d.is_dir():
+        return 0, None, None
+    giorni = set()
+    for f in d.glob("vps1777-*.tar.age"):
+        m = re.match(r"vps1777-(\d{4}-\d{2}-\d{2})-", f.name)
+        if m:
+            giorni.add(m.group(1))
+    if not giorni:
+        return 0, None, None
+    ordinati = sorted(giorni)
+    return len(ordinati), ordinati[0], ordinati[-1]
+
+
+def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
+    """H59 — la finestra di ripristino si accorcia in silenzio, e nessuno lo dice.
+
+    `backup.sh` scrive la copertura nel suo log, dentro il container, in un file
+    che nessuno apre. Il 27/07 la finestra è passata da sette giorni a due e
+    l'ha scoperto una sessione che stava misurando altro: non esisteva una sola
+    sonda che guardasse quel numero.
+
+    ⭐ AVVISA UNA REGRESSIONE, NON UNA FINESTRA NON ANCORA PIENA — ed è la
+    differenza che decide se questo presidio verrà letto o disattivato. Dopo
+    un'installazione nuova la copertura è 1, poi 2, poi 3: è normale e non è un
+    guasto. Quello che NON è mai normale è che scenda sotto il massimo già
+    raggiunto, perché a regime i backup si sostituiscono, non si perdono. Quindi
+    la memoria è il massimo storico, e l'allarme è la discesa da lì.
+
+    Sotto la soglia si AVVISA SEMPRE nel log (il dato si vede), ma si NOTIFICA
+    solo la transizione — come per la raggiungibilità: notificare uno stato
+    invece di un cambiamento produce un messaggio al giorno, e un messaggio al
+    giorno che dice sempre la stessa cosa smette di essere letto entro una
+    settimana.
+
+    ⚠️ RESIDUO DICHIARATO: `copertura_max` non scende mai. Se un giorno la
+    ritenzione venisse volutamente accorciata, questo presidio resterebbe in
+    allarme finché qualcuno non tocca lo stato. È il prezzo di non avere una
+    soglia configurabile, e va scritto invece che scoperto.
+    """
+    quanti, primo, ultimo = copertura_backup(repo)
+    dove = f" ({primo} → {ultimo})" if primo else ""
+    massimo = int(st.get("copertura_max") or 0)
+    if quanti > massimo:
+        st["copertura_max"] = quanti
+        massimo = quanti
+    if quanti < COPERTURA_BACKUP_ATTESA:
+        warn(f"copertura backup: {quanti} giorni distinti{dove} "
+             f"sui {COPERTURA_BACKUP_ATTESA} promessi")
+    scesa_da = str(st.get("copertura_scesa_da") or "")
+    if quanti < massimo:
+        if not scesa_da:
+            st["copertura_scesa_da"] = now_iso()
+            if notifica:
+                telegram_notify(
+                    repo,
+                    f"🔴 vps1777: la finestra di ripristino si è accorciata.\n"
+                    f"Copertura: {quanti} giorni distinti{dove}, "
+                    f"erano {massimo}.\n"
+                    f"Un giorno con più aggiornamenti è il sospettato tipico: "
+                    f"ognuno fa la sua copia.")
+        return
+    if not scesa_da:
+        return
+    st.pop("copertura_scesa_da", None)
+    ok(f"copertura backup tornata a {quanti} giorni distinti{dove}")
+    if notifica:
+        telegram_notify(repo, f"🟢 vps1777: la finestra di ripristino è tornata "
+                              f"a {quanti} giorni distinti{dove}.")
+
+
 def cmd_check(repo: Path, args) -> int:
     st = state_load(repo)
     cur = current_version(repo)
@@ -1386,6 +1473,11 @@ def cmd_check(repo: Path, args) -> int:
     # H51 (b): prima del fetch, perché il giorno che la macchina sta peggio è anche
     # quello in cui GitHub può risultare irraggiungibile — e da lì si esce subito.
     _sorveglia_raggiungibilita(repo, st, bool(getattr(args, "notify", False)))
+    # H59: come la sorella qui sopra, e per la stessa ragione — sta dove il timer
+    # gira già invece di chiedere un'unità nuova. Anche questa PRIMA del fetch:
+    # la copertura dei backup si legge sul disco e non dipende da GitHub, quindi
+    # non deve morire insieme a lui.
+    _sorveglia_copertura_backup(repo, st, bool(getattr(args, "notify", False)))
     try:
         rel = latest_release(repo)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:

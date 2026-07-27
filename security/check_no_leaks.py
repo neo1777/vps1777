@@ -82,17 +82,121 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 # File che PARLANO dei pattern per mestiere (questo gate, e il registro dei
 # rilievi che cita le evidenze). Allowlist stretta e motivata: se cresce, è un
 # segnale che qualcosa non va — non una comodità.
-ALLOWLIST = {
+# ⚠️ VALE SOLO PER R2 (materiale credenziale), e la restrizione è il fix di H60:
+# era GLOBALE, quindi `security/findings.yml` non veniva scansionato affatto —
+# ed è esattamente il file in cui il 27/07 è vissuto per otto ore un indirizzo
+# pubblico, in `main` e in tre release. Un'esenzione concessa per una ragione
+# («questo file cita i pattern dei segreti») si era estesa a tutte le ragioni.
+# ⭐ La forma: un'allowlist per FILE esenta da OGNI regola; quella per REGOLA
+# esenta da una sola. La prima è comoda da scrivere e cieca da usare.
+ALLOWLIST_R2 = {
     "security/check_no_leaks.py",
     "security/findings.yml",
 }
+
+# ── R3 — indirizzi dell'AMBIENTE: mai, in nessuna forma ───────────────────────
+# La regola che ci siamo dati è più stretta di «niente segreti»: nessun indirizzo,
+# hostname o URL della macchina, né in un esempio né in un output di prova. Fino a
+# H60 era una regola scritta e non presidiata, e infatti è stata violata dal commit
+# che implementava la raccomandazione di un audit: documentando la PROVA di una
+# misura ci è finito dentro l'ENDPOINT della misura.
+# 📌 Ottetti 0-255 obbligatori: senza, «2.581.040.640» (byte di un backup) sarebbe
+# un indirizzo. E le lookaround su punto/cifra evitano di ritagliare un pezzo di
+# una versione o di un numero più lungo.
+IPV4 = re.compile(
+    r"(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}"
+    r"(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?![\d.])"
+)
+# Un nome di tailnet reale identifica la RETE di una persona, non una macchina:
+# per questo si guarda l'etichetta di mezzo. Il segnaposto a una sola etichetta
+# (la forma con le parentesi angolari usata nel CHANGELOG) non combacia per
+# costruzione; quello a due etichette usato nei test e in .env.example è
+# dichiarato qui sotto per nome.
+# 🔴 PRIMA QUESTA REGEX NON COMBACIAVA MAI: il `\b` stava in una stringa non-raw,
+# quindi cercava un carattere di backspace. Sempre verde, per costruzione — la
+# stessa classe che questo file esiste per impedire. L'ha trovata il suo test al
+# primo giro, e solo perché fra i casi ce n'era uno che DOVEVA diventare rosso.
+# Il segnaposto di tailnet usato in tutto il repo dal round-6 (commit 3b3b4b2, che
+# tolse il nome vero). Sta qui per nome e col perché: senza, il gate era rosso su
+# tre file legittimi — e un gate che grida al lupo viene spento, che è scritto
+# venti righe più su e vale anche per chi lo scrive.
+TSNET_AMMESSI = {"tailnet-esempio": "segnaposto del repo dal round-6, non è una rete reale"}
+TSNET = re.compile(r"\b[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*\.ts\.net\b", re.I)
+
+# Indirizzi che NON sono ambiente, uno per uno e col perché — mai una regex
+# generica «tanto sono esempi». Un'eccezione dichiarata è una cosa con un nome;
+# una soglia allargata è N cose senza nome.
+IP_AMMESSI = {
+    "1.1.1.1": "resolver pubblico Cloudflare, bersaglio delle prove di rete",
+    "8.8.8.8": "resolver pubblico Google, idem",
+    "6.6.6.6": "indirizzo di comodo nei test dell'header X-Forwarded-For",
+    "1.2.3.4": "esempio nella doc di deploy.sh e nei test OAuth",
+    "4.1.2.1": "NON è un indirizzo: è il §4.1.2.1 di OAuth 2.0 citato in oauth.py",
+}
+
+
+# I DUE file in cui un indirizzo può comparire per mestiere: questo gate, che i
+# pattern li contiene, e il suo test, che deve provare che un indirizzo pubblico
+# venga fermato — e non può farlo senza scriverne uno.
+# ⚠️ È un'esenzione per REGOLA e non per file, che è la distinzione con cui H60 si
+# cura: `security/findings.yml` resta esente da R2 (cita i pattern dei segreti) ma
+# NON da R3, ed è lì che l'indirizzo era finito.
+# 🔴 E il prezzo va detto: questi due file sono l'unico posto dove un indirizzo
+# vero potrebbe nascondersi senza che nessuno lo veda. Sono due, sono corti, e si
+# leggono con gli occhi — un'esenzione che non si può leggere a mano è troppo larga.
+ALLOWLIST_R3 = {
+    "security/check_no_leaks.py",
+    "tools/tests/test_no_leaks.py",
+}
+
+
+def tsnet_da_ignorare(nome: str) -> bool:
+    """True se il nome combaciato usa il segnaposto dichiarato del repo.
+
+    È una funzione e non due righe dentro il loop apposta: l'esenzione di un
+    presidio è la parte che va provata per prima, perché è l'unica che può
+    renderlo cieco senza farlo sembrare rotto.
+    """
+    return nome.lower().rsplit(".ts.net", 1)[0].rsplit(".", 1)[-1] in TSNET_AMMESSI
+
+
+def indirizzo_da_ignorare(ip: str) -> bool:
+    """True se non è un indirizzo dell'ambiente di qualcuno.
+
+    Il criterio è «può identificare una macchina reale?», non «sembra finto».
+    """
+    if ip in IP_AMMESSI:
+        return True
+    try:
+        o = [int(x) for x in ip.split(".")]
+    except ValueError:  # pragma: no cover — la regex lo esclude
+        return True
+    if o[0] in (0, 127) or o == [255, 255, 255, 255]:
+        return True                                    # loopback e riservati
+    if o[0] == 10 or (o[0] == 172 and 16 <= o[1] <= 31) or (o[0] == 192 and o[1] == 168):
+        return True                                    # RFC 1918, reti private
+    if o[0] == 169 and o[1] == 254:
+        return True                                    # link-local
+    if 224 <= o[0] <= 239:
+        return True                                    # multicast
+    # RFC 5737: gli indirizzi che esistono APPOSTA per la documentazione.
+    if (o[0], o[1], o[2]) in ((192, 0, 2), (198, 51, 100), (203, 0, 113)):
+        return True
+    return False
 
 BINARY_HINT = b"\x00"
 
 
 def tracked_files() -> list[str]:
+    # `--others --exclude-standard` aggiunge i file NUOVI e non ignorati: senza,
+    # il gate rispondeva sul repo com'è e non su come sta per diventare. Misurato
+    # il 27/07 nel modo peggiore — ha detto verde mentre in un file appena creato
+    # veniva riscritto l'indirizzo che H60 aveva appena tolto. In CI la differenza
+    # non si vede (là è tutto tracciato); in locale, prima di `git add`, è la
+    # differenza fra un presidio e un condono.
     out = subprocess.run(
-        ["git", "ls-files", "-z"], capture_output=True, check=True
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, check=True
     ).stdout
     return [p for p in out.decode("utf-8", "replace").split("\0") if p]
 
@@ -141,9 +245,6 @@ def main() -> int:
                 )
                 continue
 
-        if path in ALLOWLIST:
-            continue
-
         p = Path(path)
         if not p.is_file():
             continue
@@ -156,6 +257,47 @@ def main() -> int:
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
+            continue
+
+        # R3 gira anche sui file esenti da R2 — vedi il commento su ALLOWLIST_R2 —
+        # e salta solo i due che gli indirizzi li contengono per mestiere.
+        if path in ALLOWLIST_R3:
+            if path in ALLOWLIST_R2:
+                continue
+            for label, pattern in SECRET_PATTERNS:
+                for m in pattern.finditer(text):
+                    line = text.count("\n", 0, m.start()) + 1
+                    problems.append(f"  [R2] {path}:{line} → sembra {label}.")
+                    break
+            continue
+        for m in IPV4.finditer(text):
+            ip = m.group(0)
+            if indirizzo_da_ignorare(ip):
+                continue
+            line = text.count("\n", 0, m.start()) + 1
+            problems.append(
+                f"  [R3] {path}:{line}\n"
+                f"       → un indirizzo IP pubblico (valore non stampato di proposito).\n"
+                f"       → la regola è più stretta di «niente segreti»: nessun indirizzo\n"
+                f"         dell'ambiente, nemmeno in un esempio o in un output di prova.\n"
+                f"       → se serve un esempio, usa RFC 5737 (192.0.2.x, 198.51.100.x,\n"
+                f"         203.0.113.x): esistono apposta e non sono di nessuno.\n"
+                f"       → se è un bersaglio di test noto, aggiungilo a IP_AMMESSI COL PERCHÉ."
+            )
+            break
+        for m in TSNET.finditer(text):
+            if tsnet_da_ignorare(m.group(0)):
+                continue
+            line = text.count("\n", 0, m.start()) + 1
+            problems.append(
+                f"  [R3] {path}:{line}\n"
+                f"       → un nome di tailnet reale (valore non stampato di proposito).\n"
+                f"       → nella doc si scrive `<host>.ts.net`: identifica la forma,\n"
+                f"         non la rete di una persona."
+            )
+            break
+
+        if path in ALLOWLIST_R2:
             continue
 
         for label, pattern in SECRET_PATTERNS:

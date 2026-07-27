@@ -311,4 +311,49 @@ fi
 # della cartella vuota — cioè uno dei casi messi lì «perché non la riguardano».
 # shellcheck disable=SC2012
 KEPT=$( (ls -1 vps1777-*.tar.age 2>/dev/null || true) | wc -l)
-ok "Backup totali mantenuti: $KEPT"
+
+# ───── 6. il rendiconto, nell'unità della promessa ─────
+# PRIMA c'era solo «Backup totali mantenuti: N» — un CONTEGGIO, mentre la
+# promessa è in GIORNI. È esattamente il difetto che questa release cura,
+# sopravvissuto nella riga che RENDICONTA la cura: il 27/07 sette file
+# coprivano tre giorni, e il rendiconto diceva «7» — vero, e muto.
+# ⭐ Se questa riga fosse esistita, la finestra ristretta si sarebbe vista da
+# sola, nel log del cron, senza che nessuno la cercasse. Un presidio che
+# rendiconta in un'unità diversa dalla propria promessa non mente: tace nel
+# momento esatto in cui avrebbe dovuto parlare.
+# Rilievo di abdd732a, misurando l'arrivo della 0.40.10 in produzione.
+# La copertura si misura su ciò che è RIMASTO SUL DISCO, non sull'insieme che
+# volevamo tenere: misurare l'intento invece del risultato è la stessa classe
+# di errore, un piano più su.
+# shellcheck disable=SC2012
+mapfile -t restanti < <( (ls -1 vps1777-*.tar.age 2>/dev/null || true) | sort )
+declare -A visti
+copertura=0
+primo=""
+ultimo=""
+for f in "${restanti[@]}"; do
+  ymd=$(echo "$f" | sed -E 's/^vps1777-([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\1/')
+  if ! date -d "$ymd" +%F >/dev/null 2>&1; then
+    continue
+  fi
+  if [ -z "${visti[$ymd]:-}" ]; then
+    visti[$ymd]=1
+    copertura=$((copertura + 1))
+    if [ -z "$primo" ]; then
+      primo=$ymd
+    fi
+    ultimo=$ymd
+  fi
+done
+
+if [ "$copertura" -eq 0 ]; then
+  warn "copertura: NESSUN giorno — non c'è un solo backup con una data leggibile"
+elif [ "$copertura" -lt 7 ]; then
+  warn "copertura: $copertura giorni distinti ($primo → $ultimo) sui 7 promessi.
+  Su un'installazione nuova è normale: la finestra si riempie una notte per volta.
+  Se NON è nuova, qualcosa ha potato più del dovuto — il sospettato tipico è un
+  giorno con più aggiornamenti, perché ognuno fa la sua copia."
+else
+  ok "copertura: $copertura giorni distinti ($primo → $ultimo)"
+fi
+ok "Backup totali mantenuti: $KEPT file"

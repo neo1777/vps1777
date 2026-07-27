@@ -234,7 +234,7 @@ verificato contro il codice dal gate in CI:
 | | |
 |---|---|
 | **chiusi** | 42 |
-| **parziali** | 15 |
+| **parziali** | 17 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -402,6 +402,57 @@ esiste più una copia giornaliera. La finestra riparte da due giorni e si riempi
 notte per volta, tornando a sette il 2 agosto. Non è un residuo del rimedio: è il danno
 che il difetto aveva già fatto, e sta scritto perché nessuno legga qui una riparazione
 più completa di quella che è.
+
+Il sedicesimo è `H59`, ed è **il difetto di `H57` salito di un piano**. Lo script dei
+backup chiudeva dicendo «copie totali mantenute: 7». Un **conteggio**, mentre la promessa
+che quello script mantiene è in **giorni**. Il 27 luglio ha detto «7» quando i giorni
+erano tre, e poi ancora «7» quando erano due: *non ha mai mentito e non ha mai detto
+niente*. ⭐ **Un controllo che rendiconta in un'unità diversa dalla propria promessa tace
+nel momento esatto in cui dovrebbe parlare** — e il momento esatto è quello in cui il
+numero torna e la garanzia no. La seconda metà è più grande della prima: anche scritta
+giusta, quella riga finisce in un file di log dentro un container che nessuno apre. La
+finestra si è dimezzata e se n'è accorta una sessione che stava misurando altro.
+
+Ora lo script dice **quanti giorni distinti** copre e da quando a quando, e il controllo
+giornaliero — quello che già ogni giorno verifica se il servizio risponde — guarda anche
+quel numero e **avvisa su Telegram**. 🔑 **Ma avvisa di una regressione, non di una
+finestra non ancora piena**, ed è la scelta che decide se questo controllo verrà letto o
+messo a tacere: dopo un'installazione nuova la copertura è 1, poi 2, poi 3, ed è normale.
+Quello che non è mai normale è che *scenda* sotto il massimo già raggiunto — a regime le
+copie si sostituiscono, non si perdono. *Residuo dichiarato: quel massimo non scende mai,
+quindi accorciare di proposito la conservazione lascerebbe l'avviso acceso finché
+qualcuno non tocca lo stato.*
+
+Il diciassettesimo è `H60`, ed è **una nostra regola violata da noi**. La regola dice:
+nessun indirizzo, nome o URL della macchina, in nessuna forma — nemmeno in un esempio,
+nemmeno nell'output di una prova. Era scritta, la applicavamo a mano, e **nessun controllo
+la faceva rispettare**. Il 27 luglio un indirizzo pubblico è entrato nel repo dentro una
+nota che documentava una misura, ed è rimasto visibile per otto ore, in `main` e in tre
+versioni pubblicate.
+
+⚖️ **Quanto è grave, detto senza gonfiarlo — e chi scrive è l'autrice del commit.** Quel
+numero **non è la macchina** e non è la rete privata: è un ingresso pubblico e condiviso
+di Tailscale. Non dà accesso a niente e non identifica la rete di nessuno; che il servizio
+stia dietro quel tipo di ingresso, il repo lo dichiara ovunque per scelta. *Decisione del
+proprietario: resta nella storia, «di monito ai posteri» — riscrivere la storia di un repo
+pubblico costa più di quanto valga il dato.* Lo stato onesto è **«non più in vista»**, non
+«rimosso».
+
+⭐ **Il difetto vero non è l'indirizzo: è che una regola scritta non era presidiata da
+nulla.** E la stessa classe era già emersa cinque settimane fa: allora fu tolto il valore
+e non fu costruito il controllo, così è tornata in un'altra forma. Ora c'è: indirizzi
+pubblici e nomi di rete reali fanno fallire la build, con le esclusioni giuste — reti
+private, indirizzi che esistono apposta per la documentazione, e i bersagli di test
+dichiarati **uno per uno col perché**, perché un controllo che grida al lupo viene spento.
+
+🔴 **E provandolo ha trovato tre cose su sé stesso**, che è il motivo per cui un controllo
+si prova invece di scriverlo: è diventato rosso su un campo dell'installer che aveva come
+esempio un indirizzo pubblico vero; la regola sui nomi di rete **non funzionava affatto**
+per un errore di scrittura, quindi era verde per costruzione; e la prima stesura del suo
+test **riscriveva l'indirizzo dentro il file che esiste per impedirlo** — con il controllo
+che diceva verde, perché guardava solo i file già registrati e quello era nuovo. *Ora
+guarda anche ciò che si sta per aggiungere: un controllo che non vede quello vede solo gli
+errori passati.*
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è

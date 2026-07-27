@@ -1012,6 +1012,72 @@ def test_spazio_ignora_cio_che_non_e_un_backup():
     assert serve == v.SPAZIO_MINIMO_UPDATE, "solo i vps1777-*.tar.age contano"
 
 
+# ── H59: la copertura dei backup, e l'allarme che NON deve suonare a vuoto ───
+
+def _repo_con_giorni(d: str, *nomi: str) -> Path:
+    repo = Path(d)
+    (repo / "backups").mkdir(parents=True, exist_ok=True)
+    for n in nomi:
+        (repo / "backups" / f"vps1777-{n}.tar.age").write_bytes(b"x")
+    return repo
+
+
+def test_copertura_conta_giorni_non_file():
+    # RISPOSTA NOTA: sette file di un giorno solo sono UN giorno. È il difetto
+    # H57 riportato al livello della misura — se la sonda contasse i file,
+    # ripeterebbe l'errore che esiste per sorvegliare.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_giorni(d, *[f"2026-07-27-0{h}0000" for h in range(1, 8)])
+        quanti, primo, ultimo = v.copertura_backup(repo)
+    assert (quanti, primo, ultimo) == (1, "2026-07-27", "2026-07-27")
+
+
+def test_copertura_ignora_nomi_illeggibili_e_altri_file():
+    # CIÒ CHE NON LA RIGUARDA: nella stessa cartella vivono gli snapshot e i log.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_giorni(d, "2026-07-26-030000", "2026-07-27-030000", "non-una-data")
+        (repo / "backups" / "appunti.txt").write_bytes(b"x")
+        quanti, primo, ultimo = v.copertura_backup(repo)
+    assert (quanti, primo, ultimo) == (2, "2026-07-26", "2026-07-27")
+
+
+def test_finestra_che_si_riempie_NON_fa_scattare_l_allarme():
+    # ⭐ IL CASO CHE DECIDE SE IL PRESIDIO VERRÀ LETTO O DISATTIVATO.
+    # Installazione nuova: copertura 2 su 7. È sotto soglia, quindi il log lo
+    # dice — ma NON è una regressione, quindi non si notifica. Un allarme che
+    # suona quando va tutto bene viene silenziato prima di servire davvero.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_giorni(d, "2026-07-26-030000", "2026-07-27-030000")
+        st = {}
+        v._sorveglia_copertura_backup(repo, st, notifica=False)
+    assert st.get("copertura_max") == 2
+    assert "copertura_scesa_da" not in st, "una finestra che si riempie non è un guasto"
+
+
+def test_una_REGRESSIONE_fa_scattare_l_allarme_una_volta_sola():
+    # RISPOSTA NOTA: si era già arrivati a 7; ora sono 2 ⇒ qualcosa ha potato.
+    # E la seconda chiamata NON deve riarmare: si notifica la transizione, non
+    # lo stato, o diventa un messaggio al giorno che nessuno legge più.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_giorni(d, "2026-07-26-030000", "2026-07-27-030000")
+        st = {"copertura_max": 7}
+        v._sorveglia_copertura_backup(repo, st, notifica=False)
+        assert st.get("copertura_scesa_da"), "una discesa dal massimo è un guasto e va segnata"
+        segnata = st["copertura_scesa_da"]
+        v._sorveglia_copertura_backup(repo, st, notifica=False)
+        assert st["copertura_scesa_da"] == segnata, "la seconda chiamata non deve riarmare"
+
+
+def test_il_rientro_pulisce_lo_stato():
+    # RISPOSTA NOTA: tornati al massimo, l'allarme si chiude da solo — o resta
+    # acceso per sempre e diventa arredamento.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_giorni(d, *[f"2026-07-2{g}-030000" for g in range(1, 8)])
+        st = {"copertura_max": 7, "copertura_scesa_da": "2026-07-27T00:00:00Z"}
+        v._sorveglia_copertura_backup(repo, st, notifica=False)
+    assert "copertura_scesa_da" not in st
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
