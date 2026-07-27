@@ -1497,11 +1497,21 @@ findings:
       dodicimila volte più grande. Nessuna voce nominava archive-data.tar in chiaro:
       verificato, zero occorrenze in tutto il registro prima di questa.
 
-      ⭐ È LA TERZA INCARNAZIONE DELLA STESSA CLASSE, e tre non sono un caso: una voce
-      `closed` il cui titolo nomina UN elemento di un insieme che ne ha più d'uno.
-      H42 (archive-data :ro in archive-mcp, :rw nel gateway, 26/07), H44→H54 (i doc
-      dichiarano i secret, il rischio del token no, 27/07), e questa. Vale la pena
-      rileggere le voci `closed` il cui titolo nomina un elemento invece della categoria.
+      ⭐ È LA SECONDA INCARNAZIONE DI QUESTA FORMA — non la terza, e la differenza vale
+      più della somma. La forma: una voce `closed` il cui titolo nomina UN elemento di un
+      insieme che ne ha più d'uno. Due casi: H42 (archive-data `:ro` in archive-mcp, `:rw`
+      nel gateway, 26/07) e questa.
+      🔴 RETTIFICA DI UNA MIA RIGA, scritta nel commit di rilascio e corretta qui: ci
+      avevo messo dentro anche H44→H54 facendo «tre», e H44 è una forma DIVERSA — è
+      `closed` su un oggetto diverso (la lacuna DOCUMENTALE), col rischio sotto che non
+      aveva voce. «Il titolo copre un sottoinsieme» e «lo stato è vero di un altro
+      oggetto» si somigliano perché producono lo stesso effetto sul lettore, ma si curano
+      in due modi opposti: la prima allargando il titolo, la seconda aprendo una voce
+      nuova. Contarle insieme faceva un pattern più grosso e un rimedio più confuso —
+      ed è la stessa cosa che rimproveriamo agli audio quando gonfiano un numero.
+      Vale comunque rileggere le voci `closed` il cui titolo nomina un elemento invece
+      della categoria: due casi in due giorni sono abbastanza per guardare, non per
+      concludere.
 
       LE DUE CURE OVVIE SONO ENTRAMBE SBAGLIATE, e abdd732a le ha proposte e ritirate
       entrambe leggendo il codice: cifrare lo snapshot con age lo renderebbe indecifrabile

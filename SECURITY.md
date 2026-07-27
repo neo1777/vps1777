@@ -353,9 +353,12 @@ chiave che sta altrove — cifrarla la renderebbe illeggibile proprio a chi deve
 Ora è scritto, col residuo dichiarato: cresce di una copia a ogni aggiornamento e
 ciascuna resta 72 ore, e l'unica cura che non rompe il ripristino è cifrare il disco —
 che si fa sul disco e non nel codice, quindi è una decisione di chi possiede la
-macchina. È la terza volta che troviamo la stessa forma: **una voce chiusa il cui
-titolo nomina un elemento invece della categoria.** Tre non è un caso, ed è il motivo
-per cui vale la pena rileggere le altre.
+macchina. È la **seconda** volta che troviamo questa forma — una voce chiusa
+il cui titolo nomina un elemento invece della categoria — ed è il motivo per cui vale
+la pena rileggere le altre. *(La prima stesura di questa riga diceva «la terza», e ci
+metteva dentro un caso che ha una forma diversa: là lo stato era vero di un altro
+oggetto, non di un sottoinsieme. Si somigliano nell'effetto sul lettore e si curano in
+modi opposti — contarli insieme faceva un pattern più grosso e un rimedio più confuso.)*
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è
