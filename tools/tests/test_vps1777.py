@@ -786,6 +786,24 @@ def test_funnel_la_sorveglianza_lo_interroga_dopo_la_porta_non_al_posto_suo():
     assert src.index("porta_esterna_ok") < src.index("funnel_ok")
 
 
+def test_le_prove_empiriche_viaggiano_nel_pacchetto_di_rilascio():
+    """H51 (d): sono l'unico strumento che misura sul SISTEMA VIVO ciò che gli altri
+    gate verificano leggendo file, e restavano nel repo di sviluppo — sulla macchina
+    andavano copiate a mano, quindi non c'erano. Un presidio che per essere usato
+    richiede un gesto manuale, nel giorno del guasto non esiste.
+
+    ⚠️ LIMITE DICHIARATO: questo test legge una stringa nel workflow, non costruisce
+    il pacchetto. È esattamente la classe che H52 denuncia — un'etichetta di testo al
+    posto del comportamento — e la sola cosa verificabile senza far girare la CI.
+    Prende «qualcuno ha tolto la riga», non «il tar è arrivato completo»."""
+    wf = (_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    assert "cp -r tools/prove-empiriche bundle/tools/" in wf, (
+        "le prove non entrano più nel bundle: sulla macchina tornerebbero assenti")
+    # e devono esistere davvero: una riga che copia una cartella vuota è verde e inutile
+    prove = sorted((_ROOT / "tools" / "prove-empiriche").glob("prova-*.sh"))
+    assert len(prove) >= 8, f"solo {len(prove)} prove trovate"
+
+
 def test_funnel_non_e_nel_cancello_dell_update():
     """SCELTA DELIBERATA, e un test la tiene ferma: l'health-gate giudica ciò che
     l'update può rompere. Il tunnel non lo tocca un update — e un suo singhiozzo

@@ -210,6 +210,14 @@ jobs:
           for f in backup.sh restore.sh rotate-secret.sh backup-container-setup.sh bootstrap.sh vps1777.py; do
             cp "tools/$f" bundle/tools/
           done
+          # H51 (d): le prove empiriche VANNO sulla macchina. Sono l'unico strumento
+          # che misura sul sistema vivo ciò che il resto dei gate verifica leggendo
+          # file — e finora restavano nel repo di sviluppo: sulla VPS andavano
+          # copiate a mano, quindi non c'erano. Un presidio che per essere usato
+          # richiede un gesto manuale è un presidio che nel giorno del guasto non
+          # esiste. 72 KB di shell, nessuna dipendenza: il costo non è un argomento.
+          # (`copy2` lato updater conserva i permessi: arrivano eseguibili.)
+          cp -r tools/prove-empiriche bundle/tools/
           python3 - <<'PY'
           import hashlib, json, os
           root = "bundle"

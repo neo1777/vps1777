@@ -20,6 +20,13 @@ stampa a ogni esecuzione (`⧗ N su main, non ancora rilasciati`).
   l'aggiornamento può rompere, e un singhiozzo del tunnel farebbe tornare indietro
   una versione sana.
 
+- **Le prove empiriche viaggiano col pacchetto** (`H51` d). Sono l'unico strumento che
+  misura sul **sistema vivo** ciò che gli altri controlli verificano leggendo file — e
+  restavano nel repo di sviluppo: sulla macchina andavano copiate a mano, quindi non
+  c'erano. *Un controllo che per essere usato richiede un gesto manuale, nel giorno del
+  guasto non esiste.* Settantadue kilobyte di script, nessuna dipendenza: il costo non
+  era l'argomento.
+
 ### Corretto
 
 - **Un aggiornamento non viene più abortito dal file che serve a raccontarlo**

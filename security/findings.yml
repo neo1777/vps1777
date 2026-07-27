@@ -1208,10 +1208,25 @@ findings:
       rollback: lì la soglia può essere più bassa perché il prezzo dell'errore è più
       basso. Stesso fatto, due presìdi, due soglie diverse, e il perché è scritto.
 
-      COSA MANCA ANCORA:
-        (d) `tools/prove-empiriche/` non entra nel pacchetto di rilascio: la
-            prova-7 sulla macchina non c'è, va copiata a mano.
-      Resta `partial` per (d) soltanto: la classe è presidiata dove faceva
+      (d) CHIUSO (27/07, stessa giornata) — `tools/prove-empiriche/` entra nel pacchetto
+      di rilascio (`cp -r tools/prove-empiriche bundle/tools/` in release.yml, e `copy2`
+      lato updater conserva i permessi: arrivano eseguibili). Sono l'unico strumento che
+      misura sul SISTEMA VIVO ciò che gli altri gate verificano leggendo file, e finora
+      restavano nel repo di sviluppo: sulla macchina andavano copiate a mano, quindi non
+      c'erano. Un presidio che per essere usato richiede un gesto manuale, nel giorno del
+      guasto non esiste. 72 KB di shell senza dipendenze: il costo non era l'argomento.
+      Un test lo tiene: se qualcuno toglie la riga, la build lo dice.
+      ⚠️ LIMITE del test, dichiarato: legge una STRINGA nel workflow, non costruisce il
+      pacchetto. È la classe che H52 denuncia, applicata a sé stessa — prende «qualcuno
+      ha tolto la riga», non «il tar è arrivato completo».
+      📌 La stessa assenza aveva due facce: le prove erano fuori dal bundle E fuori dal
+      corpus dell'audio (rilievo di 71d540e6 nel piano del round-8). Un file che non esce
+      di casa in nessuna delle due direzioni finisce per non esistere per nessuno tranne
+      chi l'ha scritto.
+
+      NESSUN RESIDUO APERTO su questa voce: resta `partial` finché il pacchetto con le
+      prove non è RILASCIATO e installato — la 0.40.7 in produzione non le ha ancora.
+      Resta `partial` finché il pacchetto con le prove non è in produzione: la classe è presidiata dove faceva
       male, non ovunque — e la differenza è scritta invece che taciuta.
 
   - id: H52
