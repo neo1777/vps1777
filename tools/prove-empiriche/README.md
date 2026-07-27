@@ -20,7 +20,7 @@ bash tools/prove-empiriche/prova-1-gateway-non-esce.sh
 (prerequisito mancante) — e il 2 è il valore che conta più degli altri: *distingue «non c'è niente» da «non
 ho saputo vedere», che è il difetto per cui una guardia muta è peggio di nessuna guardia.*
 
-## Le sette prove
+## Le otto prove
 | | cosa misura | invasiva? |
 |---|---|---|
 | **1** `gateway-non-esce` | il gateway raggiunge Internet? (se sì, un gateway bucato esfiltra i 5 secret che monta) | no — solo richieste in uscita |
@@ -30,6 +30,7 @@ ho saputo vedere», che è il difetto per cui una guardia muta è peggio di ness
 | **5** `sandbox-update-service` | prima di stringere `vps1777-update.service` con `ProtectSystem=strict`: quali path scrive davvero il codice, se `~/.sigstore` esiste, se l'ultimo backup ha contenuto (dove `PrivateTmp` romperebbe in silenzio). **Nata dal round-4** — dice *cosa serve* | no — solo lettura + `find`/`stat` |
 | **6** `sandbox-strict-regge-sul-kernel` | costruisce con `systemd-run` la sandbox proposta dall'audio (`ProtectSystem=strict` + i path) e prova a scrivere: cosa consente il kernel e cosa nega, con una controprova negativa su `/etc` e `/usr/bin`. **Nata dallo stesso round, sullo stesso bersaglio** — dice *se la stretta regge* | sì — richiede `sudo`/root; nessun update reale lanciato |
 | **7** `porta-pubblicata-davvero` | la porta del gateway è pubblicata **e risponde, vista dall'host** — cioè da fuori del container, l'unico lato da cui il guasto si vede. **Nata da un guasto vero** (27/07, 1h28m di irraggiungibilità con tre verdi addosso), non da una lettura | no — un `docker port` e una GET sul loopback |
+| **8** `le-unit-si-comportano-come-dichiarano` | per ogni `systemd/*.service`, le direttive di sandboxing che il file DICHIARA sono davvero APPLICATE dal kernel? Chiede al demone (`systemctl show`) invece di leggere la stringa nel file. **Nata dal round-7**, dall'accusa che «il registro convalida il bugiardino invece del farmaco» | no — `grep` + `systemctl show`, sola lettura |
 
 ## ⚠️ COSA QUESTE PROVE NON SONO — leggere prima di fidarsi di un verde
 - 🟡 **Quali hanno girato davvero, e quali no** *(la riga qui sotto diceva «nessuna» ed era vera il 26/07:
@@ -37,6 +38,8 @@ ho saputo vedere», che è il difetto per cui una guardia muta è peggio di ness
   - **1** e **4** hanno girato sulla VPS viva il 27/07, e hanno chiuso due FAIL misurati con un PASS.
   - **7** ha girato sui **due esiti**: PASS sul gateway reale, FAIL su un container rotto apposta. È l'unica
     di cui si sappia che *sa diventare rossa* — per le altre il rosso non è mai stato osservato.
+  - **8** ha girato sui **due esiti** sulla VPS viva: PASS su 23 direttive reali di 4 unit, e FAIL
+    su un file che promette due direttive che il demone non applica.
   - **2**, **3**, **5**, **6** restano non eseguite sul target.
 - 🔴 *(26/07, all'origine)* **Non sono state eseguite sul target.** Di ognuna è verificata la **sintassi**
   (`bash -n`) e la logica è scritta sui meccanismi reali letti nel codice (nomi dei *servizi* compose, non

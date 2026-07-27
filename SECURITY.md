@@ -232,7 +232,7 @@ in CI:
 | | |
 |---|---|
 | **chiusi** | 41 |
-| **parziali** | 9 |
+| **parziali** | 10 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 

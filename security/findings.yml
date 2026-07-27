@@ -1138,3 +1138,69 @@ findings:
             prova-7 sulla macchina non c'è, va copiata a mano.
       Resta `partial` per (b), (c) e (d): la classe è presidiata dove faceva
       male, non ovunque — e la differenza è scritta invece che taciuta.
+
+  - id: H52
+    severity: medium
+    title: "Le garanzie di hardening sono certificate per STRINGA, non per comportamento: il gate cerca il testo nel file, non chiede al sistema che cosa applica"
+    status: partial
+    since: v0.40.7
+    evidence:
+      - file: tools/prove-empiriche/prova-8-le-unit-si-comportano-come-dichiarano.sh
+        contains:
+          - "systemctl show"
+          - "file dice"
+          - "controprova dello strumento"
+      - file: security/check_findings.py
+        contains: ["if needle not in text:"]
+    missing: >
+      TROVATO DALL'ANALISI ESTERNA del round-7 (27/07/2026), che l'ha formulato
+      meglio di come l'avevamo formulato noi:
+
+        «Il registro convalida un'ETICHETTA DI TESTO: cerca la stringa nel file
+         sorgente invece di collaudare il comportamento che quella riga dovrebbe
+         generare nel sistema operativo. Avere 41 voci dichiarate chiuse basandosi
+         sulla lettura del bugiardino crea un falso senso di invulnerabilità.»
+
+      È VERO E VERIFICATO: `check_findings.py` fa `if needle not in text` — un
+      match di sottostringa. Il presidio `check_titolo_nomina_file` (26/07) lega
+      il TITOLO di una voce al FILE che nomina, e nei propri limiti dichiarava già
+      di «non verificare che l'evidenza dica qualcosa di vero». La distanza fra
+      quel limite scritto e un'azione è rimasta aperta finché non l'ha nominata
+      qualcuno da fuori.
+
+      🔴 IL SUGGERIMENTO NON È STATO PRESO ALLA LETTERA, e la ragione è misurata.
+      L'analisi proponeva: «la pipeline esegua `systemctl show vps1777-update` e
+      FALLISCA se non restituisce NoNewPrivileges=yes». Applicato così IL TEST
+      FALLIREBBE SEMPRE: quella unit NON PUÒ avere `NoNewPrivileges` — usa `sudo`,
+      che è setuid, e lo bloccherebbe; sta scritto nella unit stessa alla riga 17.
+      Misurato sulla macchina viva: `systemctl show vps1777-update.service -p
+      NoNewPrivileges` → `no`. L'analisi ha mescolato due unit proprio nel
+      passaggio in cui accusa il registro di guardare l'unit sbagliata.
+      ⇒ Preso il MECCANISMO (chiedere al demone), scartato l'ESEMPIO. La prova non
+      ha una lista fissa di direttive attese: legge quelle che ogni unit dichiara
+      per sé, così una unit che non può avere una direttiva non viene accusata di
+      non averla.
+      ⚠️ Nota a chi ratifica: questo residuo è stato scritto DOPO che l'esempio
+      rotto era già stato accettato come buono in una consegna — la sostanza era
+      giusta e l'esempio non era stato verificato. Verificare anche ciò che si
+      ratifica è parte del ratificare.
+
+      FATTO: `prova-8`, eseguita sui DUE esiti sulla VPS in produzione (27/07):
+      PASS su 23 direttive di 4 unit (dichiarate E applicate), FAIL su un file che
+      promette due direttive che il demone non applica. Porta una controprova
+      interna — cerca una direttiva NON dichiarata e pretende che il demone
+      risponda `no` — perché uno strumento che dicesse «sì» a qualunque domanda
+      darebbe un verde perfetto e falso; e quando quella controprova non può
+      girare, lo DICHIARA invece di tacere.
+
+      COSA MANCA:
+        (a) la prova non gira in CI. Richiede un demone systemd con le unit
+            caricate: il runner non le ha. Va eseguita sull'host, e oggi la lancia
+            una persona. Finché è così, questo presidio è una buona abitudine con
+            un exit code — che è precisamente ciò che questa voce denuncia, un
+            piano più in basso.
+        (b) verifica che il DICHIARATO sia effettivo, non che il dichiarato sia
+            SUFFICIENTE: una direttiva che manca e che sarebbe opportuna non la
+            vede nessuno. Quella domanda è di una review, non di una prova.
+        (c) copre le unit systemd. Le stesse evidenze «per stringa» esistono per
+            i compose e per il codice Python, e lì non c'è un demone a cui chiedere.
