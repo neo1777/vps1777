@@ -740,6 +740,61 @@ def test_raggiungibilita_senza_notify_non_spedisce_ma_segna_lo_stesso():
         ripristina()
 
 
+def test_funnel_non_applicabile_quando_l_ingresso_non_e_funnel():
+    """Con caddy/cloudflared, o senza tailscale, la sonda si dichiara NON
+    APPLICABILE invece di accusare: un rosso qui sveglierebbe una persona per una
+    cosa che su quel profilo è lo stato corretto."""
+    orig = v.nome_pubblico_funnel
+    v.nome_pubblico_funnel = lambda: ""
+    try:
+        raggiungibile, perche = v.funnel_ok(Path("/non/serve"))
+        assert raggiungibile is True
+        assert "non applicabile" in perche
+    finally:
+        v.nome_pubblico_funnel = orig
+
+
+def test_funnel_giu_e_un_rosso_dopo_piu_di_un_tentativo():
+    """Un singolo errore di rete verso Internet è comune: la sonda riprova, e solo
+    se insiste dichiara giù. Il conteggio delle chiamate è la prova che riprova
+    davvero — senza, «tentativi=2» sarebbe un parametro decorativo."""
+    chiamate = []
+    orig_nome, orig_urlopen = v.nome_pubblico_funnel, v.urllib.request.urlopen
+    v.nome_pubblico_funnel = lambda: "esempio.invalid"
+    def _rifiuta(req, timeout=0):
+        chiamate.append(1)
+        raise v.urllib.error.URLError("rete assente")
+    v.urllib.request.urlopen = _rifiuta
+    orig_sleep = v.time.sleep
+    v.time.sleep = lambda s: None
+    try:
+        raggiungibile, perche = v.funnel_ok(Path("/non/serve"), tentativi=2)
+        assert raggiungibile is False
+        assert len(chiamate) == 2, f"un solo tentativo: {len(chiamate)}"
+        assert "non risponde" in perche
+    finally:
+        v.nome_pubblico_funnel, v.urllib.request.urlopen = orig_nome, orig_urlopen
+        v.time.sleep = orig_sleep
+
+
+def test_funnel_la_sorveglianza_lo_interroga_dopo_la_porta_non_al_posto_suo():
+    """L'ordine è il fix: prima la porta sull'host (il guasto del 27/07), POI il
+    tunnel. Sostituire l'una con l'altro lascerebbe scoperto il caso misurato."""
+    import inspect
+    src = inspect.getsource(v._sorveglia_raggiungibilita)
+    assert "porta_esterna_ok" in src and "funnel_ok" in src
+    assert src.index("porta_esterna_ok") < src.index("funnel_ok")
+
+
+def test_funnel_non_e_nel_cancello_dell_update():
+    """SCELTA DELIBERATA, e un test la tiene ferma: l'health-gate giudica ciò che
+    l'update può rompere. Il tunnel non lo tocca un update — e un suo singhiozzo
+    farebbe tornare indietro una versione sana. Se un domani qualcuno lo aggiunge
+    lì, questo test glielo ricorda."""
+    import inspect
+    assert "funnel_ok" not in inspect.getsource(v.health_gate)
+
+
 def test_raggiungibilita_e_cablata_in_check_e_prima_del_fetch():
     """Il collegamento, e l'ORDINE: dev'essere chiamata prima di `latest_release`,
     perché quando GitHub è irraggiungibile `cmd_check` esce subito — e quel giorno

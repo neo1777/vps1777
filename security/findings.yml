@@ -1092,11 +1092,15 @@ findings:
           - "irraggiungibile dall'host"
           - "def _sorveglia_raggiungibilita"
           - "irraggiungibile_da"
+          - "def funnel_ok"
+          - "def nome_pubblico_funnel"
       - file: tools/tests/test_vps1777.py
         contains:
           - "test_porta_esterna_il_caso_dell_incidente_nessuna_porta_e_nessun_proxy"
           - "test_raggiungibilita_e_cablata_in_check_e_prima_del_fetch"
           - "test_raggiungibilita_ritorno_misura_la_durata_fra_i_due_istanti"
+          - "test_funnel_non_e_nel_cancello_dell_update"
+          - "test_funnel_giu_e_un_rosso_dopo_piu_di_un_tentativo"
     missing: >
       MISURATO sul vivo, come incidente vero e non come ipotesi (27/07/2026,
       durata misurata 1h27m50s di irraggiungibilità pubblica del servizio).
@@ -1182,12 +1186,32 @@ findings:
       e la volta dopo non la sveglia più).
       LIMITE: la cadenza è giornaliera. Restringe la finestra cieca, non la chiude.
 
+      (c) CHIUSO (27/07, stessa giornata) — `funnel_ok()` ESCE dal server e rientra da
+      Internet. Con la porta viva e il tunnel giù, per chi apre l'indirizzo il servizio
+      è giù e la sonda sull'host direbbe «tutto bene»: è il buco che restava.
+      🔴 L'AVEVO DATO PER IMPOSSIBILE, e l'ho misurato invece di assumerlo: credevo che
+      dalla macchina il nome pubblico risolvesse all'indirizzo del tailnet, facendo un
+      giro su sé stesso. FALSO — risolve a indirizzi PUBBLICI dell'ingresso Tailscale.
+      Misura del 27/07 dalla VPS: 200 da 209.177.145.192 in 360 ms sul nome pubblico,
+      contro 000 sull'indirizzo di tailnet. La richiesta esce davvero: la sonda è una
+      sonda, non un'eco. (Se non l'avessi misurato avrei scritto «non fattibile dalla
+      macchina» — un limite dedotto, cioè la stessa classe di errore della durata
+      dedotta di stamattina.)
+      Collaudata sui TRE rami sulla macchina in produzione: PASS sul Funnel vero,
+      FAIL su un nome inesistente, «non applicabile» quando il profilo non usa Funnel.
+      Due tentativi con pausa: un singolo errore di rete verso Internet è comune, e un
+      falso allarme che arriva due volte a vuoto smette di essere letto.
+      ⚠️ NON è nell'health-gate dell'update, ed è una scelta con un test che la tiene
+      ferma: quel cancello giudica ciò che l'update PUÒ rompere, e un update non tocca
+      il tunnel — un suo singhiozzo farebbe tornare indietro una versione sana. Nella
+      sorveglianza giornaliera invece un falso allarme costa una notifica, non un
+      rollback: lì la soglia può essere più bassa perché il prezzo dell'errore è più
+      basso. Stesso fatto, due presìdi, due soglie diverse, e il perché è scritto.
+
       COSA MANCA ANCORA:
-        (c) la sonda si ferma alla porta sull'host: non attraversa il Funnel.
-            Un Funnel giù con la porta viva è un guasto che nessun presidio vede.
         (d) `tools/prove-empiriche/` non entra nel pacchetto di rilascio: la
             prova-7 sulla macchina non c'è, va copiata a mano.
-      Resta `partial` per (c) e (d): la classe è presidiata dove faceva
+      Resta `partial` per (d) soltanto: la classe è presidiata dove faceva
       male, non ovunque — e la differenza è scritta invece che taciuta.
 
   - id: H52

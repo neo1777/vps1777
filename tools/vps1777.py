@@ -1206,6 +1206,67 @@ def consume_intent(repo: Path, path: Path, st: dict) -> str:
 
 # ═══════════════════════════════════════════ sottocomandi
 
+def nome_pubblico_funnel() -> str:
+    """Il nome con cui il servizio è pubblicato su Internet, o "" se questo profilo
+    d'ingresso non usa Tailscale Funnel (caddy/cloudflared) o tailscale non c'è.
+    Non lo si scrive in nessun file: si usa e si butta."""
+    try:
+        res = run(["tailscale", "status", "--json"], check=False, capture=True, timeout=20)
+        if res.returncode != 0:
+            return ""
+        nome = str(json.loads(res.stdout or "{}").get("Self", {}).get("DNSName", "")).rstrip(".")
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, AttributeError):
+        return ""
+    if not nome:
+        return ""
+    try:
+        fs = run(["tailscale", "funnel", "status"], check=False, capture=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    # «Funnel on» è la riga che tailscale stampa quando la pubblicazione è attiva:
+    # senza, il nome esiste ma il servizio non è su Internet e sondarlo direbbe
+    # «giù» su una macchina sana — un falso rosso su un profilo che non usa Funnel.
+    return nome if "Funnel on" in (fs.stdout or "") else ""
+
+
+def funnel_ok(repo: Path, tentativi: int = 2) -> tuple[bool, str]:
+    """H51 (c) — la sonda che ESCE dal server e rientra da Internet.
+
+    `porta_esterna_ok` guarda la porta sull'host: vede il buco di docker del 27/07,
+    NON vedrebbe un tunnel caduto, un DNS che non risolve o un instradamento pubblico
+    rotto. Con la porta viva e il Funnel giù, per chi apre l'indirizzo il servizio è
+    giù — e nessun presidio lo direbbe.
+
+    MISURATO PRIMA DI SCRIVERLA, perché sembrava impossibile: dalla VPS il nome
+    pubblico NON risolve all'indirizzo del tailnet, risolve a indirizzi PUBBLICI
+    dell'ingresso Tailscale (27/07: risposta 200 da 209.177.145.192 in 360 ms,
+    mentre la stessa richiesta all'indirizzo di tailnet dà 000). La richiesta esce
+    davvero e rientra: la sonda è una sonda, non un giro su sé stessa.
+
+    Due tentativi: un singolo errore di rete verso Internet è un evento comune, e
+    qui un falso allarme costa una notifica a una persona — la seconda volta che
+    arriva a vuoto, quella persona smette di leggerla.
+    """
+    nome = nome_pubblico_funnel()
+    if not nome:
+        return True, "non applicabile: questo ingresso non pubblica via Tailscale Funnel"
+    ultimo = ""
+    for n in range(tentativi):
+        try:
+            req = urllib.request.Request(f"https://{nome}/health", method="GET")
+            with urllib.request.urlopen(req, timeout=20) as r:   # noqa: S310
+                if r.status == 200:
+                    return True, "raggiungibile da Internet attraverso il Funnel"
+                ultimo = f"il Funnel risponde {r.status}"
+        except urllib.error.HTTPError as exc:
+            ultimo = f"il Funnel risponde {exc.code}"
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            ultimo = f"il Funnel non risponde ({exc})"
+        if n + 1 < tentativi:
+            time.sleep(3)
+    return False, ultimo or "il Funnel non risponde"
+
+
 def _sorveglia_raggiungibilita(repo: Path, st: dict, notifica: bool) -> None:
     """H51 (b) — la porta guardata da fuori anche QUANDO NON SI AGGIORNA.
 
@@ -1228,6 +1289,14 @@ def _sorveglia_raggiungibilita(repo: Path, st: dict, notifica: bool) -> None:
     delle release fallisca, e da lì `cmd_check` esce subito.
     """
     raggiungibile, perche = porta_esterna_ok(repo)
+    if raggiungibile:
+        # H51 (c): la porta viva NON basta. Con la porta su e il tunnel giù, per chi
+        # apre l'indirizzo il servizio è giù — e la sonda sull'host direbbe «tutto
+        # bene». Qui si esce e si rientra da Internet; nell'health-gate dell'update
+        # NO, di proposito: quel cancello giudica ciò che l'update può rompere, e un
+        # singhiozzo del tunnel farebbe tornare indietro una versione sana. Qui
+        # invece un falso allarme costa una notifica, non un rollback.
+        raggiungibile, perche = funnel_ok(repo)
     caduta_da = str(st.get("irraggiungibile_da") or "")
     if not raggiungibile:
         warn(f"il servizio non risponde dall'host — {perche}")

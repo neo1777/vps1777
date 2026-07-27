@@ -7,6 +7,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 Su `main`, non ancora in una versione. `security/check_findings.py` le conta e le
 stampa a ogni esecuzione (`⧗ N su main, non ancora rilasciati`).
 
+### Aggiunto
+
+- **Il controllo giornaliero esce su Internet e rientra** (`H51` c). Fino a ieri
+  guardava la porta *sulla macchina*: con la porta viva e il tunnel pubblico caduto,
+  per chi apre l'indirizzo il servizio è giù e nessun controllo lo direbbe. Ora la
+  richiesta parte, esce davvero verso l'esterno e rientra dall'indirizzo pubblico.
+  *Era stata data per impossibile — sembrava che dalla macchina la richiesta girasse
+  su sé stessa: misurata, esce; la stessa richiesta all'indirizzo interno non
+  risponde.* Provata sui tre esiti sulla macchina in produzione. **Non** entra nel
+  cancello dell'aggiornamento, di proposito: quel cancello giudica ciò che
+  l'aggiornamento può rompere, e un singhiozzo del tunnel farebbe tornare indietro
+  una versione sana.
+
 ### Corretto
 
 - **Un aggiornamento non viene più abortito dal file che serve a raccontarlo**

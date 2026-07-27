@@ -273,11 +273,19 @@ dell'aggiornamento ora la esegue** — lo stesso guasto farebbe tornare indietro
 l'aggiornamento da sé — e da oggi la stessa domanda viene fatta anche **una volta al
 giorno**, quando non si sta aggiornando niente: se il servizio smette di rispondere
 arriva un avviso, e quando torna su arriva la **durata misurata fra i due istanti**,
-che è precisamente il numero che quel giorno nessuno aveva. Resta parziale per due
-motivi, scritti invece che taciuti: la sonda si ferma alla porta sulla macchina e non
-attraversa il tunnel pubblico — un tunnel giù con la porta viva nessuno lo vede — e
-le prove empiriche non entrano nel pacchetto di rilascio, quindi sulla macchina vanno
-copiate a mano.
+che è precisamente il numero che quel giorno nessuno aveva. E il controllo giornaliero non si ferma
+alla porta sulla macchina: **esce su Internet e rientra dall'indirizzo pubblico**,
+perché con la porta viva e il tunnel caduto, per chi apre l'indirizzo il servizio è
+giù e un controllo interno direbbe che va tutto bene. *Quella sonda l'avevo data per
+impossibile — pensavo che dalla macchina la richiesta girasse su sé stessa: misurata,
+esce davvero, e la stessa richiesta fatta all'indirizzo interno non risponde. Un
+limite dedotto invece che misurato è la stessa classe di errore che questo rilievo
+racconta.* Il controllo del tunnel **non** entra nel cancello dell'aggiornamento, ed è
+una scelta: quel cancello giudica ciò che l'aggiornamento può rompere, e un
+singhiozzo del tunnel farebbe tornare indietro una versione sana — nel controllo
+giornaliero, invece, un falso allarme costa un avviso e non un ripristino. Resta
+parziale per un motivo solo, scritto invece che taciuto: le prove empiriche non
+entrano nel pacchetto di rilascio, quindi sulla macchina vanno copiate a mano.
 
 Il decimo è `H52`, e non l'abbiamo trovato noi: l'ha nominato l'analisi esterna del
 round-7. Le garanzie di irrobustimento dei servizi di sistema erano certificate
