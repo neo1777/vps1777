@@ -1200,7 +1200,7 @@ findings:
     # che nessun controllo leggeva — in un file che esiste per rendere falsificabili
     # i claim. Ora check_findings.py lo verifica contro il CHANGELOG, e `unreleased`
     # è il valore vero finché la release non c'è: viene contato e stampato a ogni giro.
-    since: unreleased
+    since: v0.40.7
     evidence:
       - file: tools/prove-empiriche/prova-8-le-unit-si-comportano-come-dichiarano.sh
         contains:
@@ -1266,7 +1266,7 @@ findings:
     severity: medium
     title: "Gate che non potevano fallire: lo step shellcheck in .github/workflows/ci.yml girava con `|| true`, e il lint copriva due percorsi su quattro"
     status: partial
-    since: unreleased
+    since: v0.40.7
     evidence:
       - file: .github/workflows/ci.yml
         contains:
@@ -1321,7 +1321,7 @@ findings:
     severity: medium
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
     status: partial
-    since: unreleased
+    since: v0.40.7
     evidence:
       - file: compose.yaml
         contains: ["telegram_bot_token"]

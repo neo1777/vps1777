@@ -2,14 +2,31 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
-## Non rilasciato
+## [0.40.7] — 2026-07-27
 
-Su `main`, non ancora in una versione. `security/check_findings.py` le conta e le
-stampa a ogni esecuzione (`⧗ N su main, non ancora rilasciati`) — perché un lavoro
-finito e non rilasciato è un residuo, e un residuo che nessuno conta si dimentica.
+Il rilascio dei **controlli che non controllavano**. La `0.40.6` ha rimesso in piedi
+il servizio; questa guarda i presìdi stessi e trova che alcuni non potevano vedere
+ciò per cui esistevano — uno era verde per costruzione e nascondeva un difetto vero
+nella conservazione dei backup.
+
+> **La cosa più utile della giornata non è un fix, è una misura**: uno dei difetti
+> che l'analisi esterna ha segnalato era **già scritto nel registro dal 4 luglio**,
+> esatto, dentro un file che una pipeline controlla a ogni commit — e non era
+> diventato codice per ventitré giorni, perché *nulla falliva se restava prosa*.
+> Un audit che ri-scopre una tua nota «da fare» non ti dice una cosa nuova: ti
+> misura quanto è vecchia.
 
 ### Aggiunto
 
+- **Il servizio è controllato anche quando non si sta aggiornando nulla** (`H51` b).
+  Il controllo che guarda la porta *da fuori* del container esisteva dalla `0.40.6`,
+  ma girava solo durante un aggiornamento: un guasto arrivato in altro modo restava
+  invisibile finché non apriva l'indirizzo una persona — che è precisamente com'è
+  andata il 27 luglio, per un'ora e mezza. Ora la stessa domanda si fa **una volta al
+  giorno**, dentro il controllo che già gira, e arriva un avviso quando il servizio
+  smette di rispondere e un altro quando torna, **con la durata misurata fra i due
+  istanti** — il numero che quel giorno nessuno aveva. Notifica i cambi di stato, non
+  lo stato: un avviso che si ripete ogni giorno uguale si impara a ignorare.
 - **La via d'emergenza `cosign` non si dimentica più da sola** (`H49` ③). Mettere
   `VPS1777_REQUIRE_COSIGN=0` nel `.env` sblocca una crisi ed è giusto che si possa
   fare — ma finora restava lì per sempre, riletta a ogni aggiornamento compreso
@@ -47,6 +64,22 @@ finito e non rilasciato è un residuo, e un residuo che nessuno conta si dimenti
   dichiarato e vuoto**, la classe da cui veniva un divario di quasi settemila record.
   Il codice era già giusto: mancava il controllo che lo tiene giusto — e la fixture
   di prima passava verde sulla stessa regressione.
+- **Il documento di sicurezza diceva una cosa non più vera** su sé stesso: sosteneva
+  che il controllo della raggiungibilità «qualcuno deve lanciarlo» e che «lo stesso
+  guasto passerebbe di nuovo». Falso dalla `0.40.6`. Il registro lo sapeva, il
+  documento no, e nessun controllo poteva accorgersene — verifica che un rilievo sia
+  *nominato*, non che la frase dica il vero.
+
+### Dichiarato
+
+- **Un rischio che il registro copriva solo di sponda** (`H54`). Il gateway monta
+  cinque credenziali, e c'era una voce **chiusa** su questo terreno — ma chiudeva una
+  lacuna *nella documentazione*, non il rischio: chi cercava cosa resta scoperto non
+  trovava nulla. Misurato, il numero giusto è **uno, non cinque**: quattro di quelle
+  credenziali sono del gateway stesso, e chi prende il gateway le ha già. Il token del
+  bot no — quello serve a **parlare come il bot**, anche fuori da qui. Non è risolto:
+  è scritto con lo stato che lo dice, perché la difesa possibile costa un pezzo in più
+  da mantenere ed è un baratto che decide chi possiede la macchina.
 
 ## [0.40.6] — 2026-07-27
 
