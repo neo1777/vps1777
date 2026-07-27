@@ -8,7 +8,7 @@
 #   parla con sé stesso». Questa prova fa la sola domanda che conta per chi usa
 #   il servizio: **dall'host, la porta esiste e risponde?**
 #
-# PERCHÉ ESISTE (27/07/2026, incidente reale, 1h40m di irraggiungibilità):
+# PERCHÉ ESISTE (27/07/2026, incidente reale, 1h27m50s di irraggiungibilità):
 #   il fix di H50 ha lasciato il gateway solo su una rete `internal: true`. Da una
 #   rete `internal` UNA PORTA NON SI PUÒ PUBBLICARE: docker accetta la direttiva
 #   `ports:` e non la applica, IN SILENZIO. Per tutta la durata del guasto:

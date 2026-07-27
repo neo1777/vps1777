@@ -996,7 +996,7 @@ findings:
       «rete guasta»). È la prima volta in sei round che un FAIL misurato si chiude
       con una misura e non con uno sha.
 
-      🔴 MA IL FIX HA ROTTO LA PRODUZIONE PER 1h40m, ed è la parte che conta.
+      🔴 MA IL FIX HA ROTTO LA PRODUZIONE PER 1h27m50s, ed è la parte che conta.
       Tolta `ingress`, il gateway è rimasto SOLO su `backend`, che è
       `internal: true` — e da una rete `internal` UNA PORTA NON SI PUÒ PUBBLICARE:
       docker accetta la direttiva `ports:` e non la applica, in silenzio. Il
@@ -1062,7 +1062,27 @@ findings:
         contains: ["test_porta_esterna_il_caso_dell_incidente_nessuna_porta_e_nessun_proxy"]
     missing: >
       MISURATO sul vivo, come incidente vero e non come ipotesi (27/07/2026,
-      ~07:52-09:32, 1h40m di irraggiungibilità pubblica del servizio).
+      durata misurata 1h27m50s di irraggiungibilità pubblica del servizio).
+
+      GLI ESTREMI, perché una durata senza i suoi due istanti è un aggettivo:
+        inizio  2026-07-27T05:56:13Z — l'update ricrea i container; il gateway
+                nasce senza porta pubblicata. [istante misurato su archive-mcp e
+                nb1777-mcp con `docker inspect .Created`; per il gateway è
+                un'INFERENZA FORTE — quel container non esiste più, ma è stato
+                creato dallo stesso `compose up`]
+        fine    2026-07-27T07:24:03Z — il gateway riparte con la rete `funnel`
+                e la porta torna pubblicata. [misurato: `.State.StartedAt`]
+      ⚠️ La macchina è su fuso US/Eastern (EDT, -0400) mentre il proprietario
+      legge in CEST (+0200): sei ore di scarto. Il journal dice «01:51:55» per
+      un evento che per lui sono le 07:51:55. Un log letto senza questa riga
+      sposta ogni evento di sei ore, e la cronologia diventa un'altra storia.
+
+      🔴 CORREZIONE DI UNA MIA MISURA, scritta qui perché è dello stesso tipo
+      che questa voce denuncia: le prime stesure dicevano «1h40m». Non l'avevo
+      misurato — l'avevo dedotto dall'ora di partenza dell'update (07:51) e
+      dall'ora in cui stavo scrivendo, cioè da due istanti che non sono gli
+      estremi del guasto. Dodici minuti in eccesso, dentro il documento che
+      accusa i numeri senza misura. Corretto sugli istanti reali.
 
       IL DIFETTO: lo healthcheck del gateway esegue, DENTRO il container, una
       richiesta a http://127.0.0.1:8080/health. Sul loopback interno la porta

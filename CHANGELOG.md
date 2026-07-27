@@ -6,7 +6,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 Rilascio di riparazione, e la parte che conta non è la riparazione. La `0.40.5`
 chiudeva un buco reale e **ha reso il servizio irraggiungibile da Internet per
-un'ora e quaranta** — mentre tre controlli indipendenti davano verde.
+un'ora e ventotto minuti** — mentre tre controlli indipendenti davano verde.
+
+> **Rettifica interna al rilascio**: la prima stesura di questa voce diceva «un'ora
+> e quaranta». Il numero era **dedotto**, non misurato — preso dall'ora di partenza
+> dell'aggiornamento e dall'ora in cui stavamo scrivendo, che non sono gli estremi
+> del guasto. Gli istanti reali (`05:56:13Z` → `07:24:03Z`) danno **1h27m50s**.
+> Corretto perché un numero senza la sua misura è esattamente il difetto che questa
+> versione documenta.
 
 ### Corretto
 

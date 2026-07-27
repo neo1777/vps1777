@@ -29,7 +29,7 @@ ho saputo vedere», che è il difetto per cui una guardia muta è peggio di ness
 | **4** `snapshot-in-chiaro` | quanti snapshot pre-update ci sono, che età, se cifrati. **Osserva, non provoca** | no — sola lettura |
 | **5** `sandbox-update-service` | prima di stringere `vps1777-update.service` con `ProtectSystem=strict`: quali path scrive davvero il codice, se `~/.sigstore` esiste, se l'ultimo backup ha contenuto (dove `PrivateTmp` romperebbe in silenzio). **Nata dal round-4** — dice *cosa serve* | no — solo lettura + `find`/`stat` |
 | **6** `sandbox-strict-regge-sul-kernel` | costruisce con `systemd-run` la sandbox proposta dall'audio (`ProtectSystem=strict` + i path) e prova a scrivere: cosa consente il kernel e cosa nega, con una controprova negativa su `/etc` e `/usr/bin`. **Nata dallo stesso round, sullo stesso bersaglio** — dice *se la stretta regge* | sì — richiede `sudo`/root; nessun update reale lanciato |
-| **7** `porta-pubblicata-davvero` | la porta del gateway è pubblicata **e risponde, vista dall'host** — cioè da fuori del container, l'unico lato da cui il guasto si vede. **Nata da un guasto vero** (27/07, 1h40m di irraggiungibilità con tre verdi addosso), non da una lettura | no — un `docker port` e una GET sul loopback |
+| **7** `porta-pubblicata-davvero` | la porta del gateway è pubblicata **e risponde, vista dall'host** — cioè da fuori del container, l'unico lato da cui il guasto si vede. **Nata da un guasto vero** (27/07, 1h28m di irraggiungibilità con tre verdi addosso), non da una lettura | no — un `docker port` e una GET sul loopback |
 
 ## ⚠️ COSA QUESTE PROVE NON SONO — leggere prima di fidarsi di un verde
 - 🟡 **Quali hanno girato davvero, e quali no** *(la riga qui sotto diceva «nessuna» ed era vera il 26/07:

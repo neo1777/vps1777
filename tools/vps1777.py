@@ -479,7 +479,7 @@ def valuta_porta_esterna(port_map: str, servizi: list[str],
     loopback interno la porta risponde SEMPRE, anche quando dall'esterno non è
     pubblicata affatto: è successo davvero (gateway rimasto su una sola rete
     `internal: true`, da cui una porta non si può pubblicare) e il gate ha dato
-    verde su un servizio irraggiungibile per 1h40m, senza fare rollback.
+    verde su un servizio irraggiungibile per 1h28m, senza fare rollback.
 
     FAIL SOLO CON EVIDENZA POSITIVA DEL GUASTO. Un falso rosso qui provoca un
     rollback non necessario, quindi non si conclude per assenza di dati: si

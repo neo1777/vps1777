@@ -485,7 +485,7 @@ if __name__ == "__main__":
 # ───────── H51: la sonda che guarda il gateway da FUORI del container ─────────
 # Nasce dall'incidente del 27/07/2026: tutte le sonde dell'health-gate
 # interrogavano il gateway dall'interno, dove la porta risponde sempre. Il gate
-# ha dato verde per 1h40m su un servizio irraggiungibile, senza fare rollback.
+# ha dato verde per 1h28m su un servizio irraggiungibile, senza fare rollback.
 # Questi test coprono i rami UNO PER UNO, incluso quello che il gate non vedeva.
 
 def test_porta_esterna_il_caso_dell_incidente_nessuna_porta_e_nessun_proxy():

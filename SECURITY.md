@@ -256,7 +256,8 @@ riprende la rete condivisa col proxy, e lì l'uscita è ancora aperta.
 
 Il nono è `H51`, e non viene da un audit: viene da un **guasto vero**. Quel fix di
 `H50`, applicato, ha reso il servizio irraggiungibile da Internet per un'ora e
-quaranta — il gateway era rimasto solo su una rete interna, e **da una rete interna
+ventotto minuti — misurati fra i due istanti, non stimati fra due orari comodi —
+il gateway era rimasto solo su una rete interna, e **da una rete interna
 una porta non si può pubblicare**: Docker accetta l'istruzione e non la esegue,
 senza dirlo. La parte che conta non è l'errore, è che **tre controlli indipendenti
 hanno dato verde mentre il servizio era giù**: il controllo di salute del container
