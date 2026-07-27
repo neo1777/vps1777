@@ -2,6 +2,66 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.10] — 2026-07-27
+
+Il rilascio in cui **le copie di sicurezza smettono di perdere giorni**. Nessuna
+funzione nuova per chi usa il servizio: la macchina teneva sette copie e copriva tre
+giorni, e nessuno poteva accorgersene perché il conteggio tornava.
+
+> **La cosa che vale più del fix**: la finestra di ripristino si accorciava proprio nel
+> giorno in cui qualcosa si rompeva. Ogni aggiornamento fa la sua copia; il 27 luglio la
+> macchina è stata aggiornata quattro volte in una mattina perché c'era un guasto, e
+> quelle quattro copie hanno occupato quattro dei sette posti, cancellando le notti dal
+> 20 al 24. *L'evento che consuma i posti è lo stesso che rende quelle copie necessarie.*
+
+### Corretto
+
+- **Sette copie non erano sette giorni.** La rotazione teneva gli ultimi sette *file* e
+  la riga accanto prometteva «7 giornalieri»: due unità di misura con lo stesso nome, che
+  coincidono finché arriva una copia per notte — cioè sempre, tranne nel giorno storto.
+  Ora se ne tiene **una per giorno, la più recente, per sette giorni distinti**. Per il
+  giorno in corso la più recente è quella fatta subito prima dell'ultimo aggiornamento,
+  che è esattamente ciò che serve per tornare indietro. *Il secondo livello — una copia a
+  settimana — non poteva rimediare: ha la stessa larghezza del primo, sette giorni,
+  quindi non lo estende, lo ricopre.*
+  **Il disco non cresce di un byte**: stessi sette posti, stessi ~18 GB. Tenerne di più
+  non era la strada — su quella macchina le copie sono già il 69% del disco occupato.
+
+- **Una copia interrotta restava lì e sembrava buona.** Se la scrittura si fermava a metà
+  — disco pieno, processo ucciso — rimaneva un file col nome giusto e il contenuto
+  troncato, e la rotazione lo contava come la copia di quel giorno. Ora viene rimosso se
+  la scrittura non arriva in fondo. *Residuo dichiarato: contro uno spegnimento brutale
+  servirebbe scrivere su un nome provvisorio e rinominare alla fine.*
+
+- **Una guardia fissa a difesa di dati che crescono.** Prima di aggiornare si controllava
+  di avere 5 GB liberi, e le due copie che quell'aggiornamento scrive ne occupano circa 5.
+  Il difetto non era la cifra: era che fosse **una costante**. Il giorno in cui una copia
+  peserà il doppio, quella soglia direbbe di sì a un'operazione che non ci sta — e
+  sembrerebbe verde fino a quel giorno. Ora si calcola dalla copia più grande presente e
+  cresce da sola. Il vecchio valore resta come minimo assoluto.
+
+- **Il backup notturno non aveva nessuna guardia di spazio.** Ora la stima dalla copia
+  precedente e, se non ci sta, **rifiuta di scrivere invece di fallire a metà**. Al primo
+  giro non c'è nulla da cui stimare e lo dichiara, invece di inventare una soglia.
+
+### Aggiunto
+
+- **Il primo controllo automatico sulla rotazione**, su sei casi costruiti di cui la
+  risposta si conosce prima di eseguirli — compresi quelli che deve *lasciar passare*.
+  Due dei sei hanno trovato difetti che nessuno cercava: su cartella vuota lo script
+  usciva con un codice d'errore *dopo* aver finito il lavoro, e un nome di file
+  illeggibile rubava davvero un posto alle copie vere. La rotazione è l'unico pezzo di
+  vps1777 che cancella dati non rigenerabili, e fino a oggi non aveva una sola prova.
+- `bash tools/backup.sh --prune-only` — applica la rotazione senza fare una copia nuova.
+  È ciò che rende la rotazione provabile senza cifrare 2,5 GB.
+
+### Verificato
+
+- Due controlli non guardavano dove serviva: l'analizzatore degli script di shell non
+  copriva la cartella dei test, e il lanciatore dei test Python non vede i file di shell —
+  il nuovo controllo sulla rotazione sarebbe rimasto fermo sul disco con la build verde.
+  Entrambi estesi.
+
 ## [0.40.9] — 2026-07-27
 
 Il rilascio in cui **i controlli hanno controllato sé stessi**. Nessuna funzione nuova
