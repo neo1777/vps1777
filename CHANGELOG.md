@@ -2,6 +2,48 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.9] — 2026-07-27
+
+Il rilascio in cui **i controlli hanno controllato sé stessi**. Nessuna funzione nuova
+per chi usa il servizio: quattro difetti nei controlli, e uno dei quattro nascondeva un
+errore vero nella conservazione dei backup.
+
+> **La cosa che vale più dei fix**: lo stesso controllo, eseguito in due posti, dava due
+> verdetti diversi sullo stesso identico codice — verde qui, rosso nella build — perché
+> «lo strumento X» non identifica uno strumento: identifica *una copia* di quello
+> strumento, in *quel* posto, a *quella* versione. Ora è fissato per impronta, come tutto
+> il resto.
+
+### Corretto
+
+- **Un controllo che approvava senza sapere.** Il passo che impedisce di modificare le
+  migrazioni già pubblicate catturava il confronto con un «va bene comunque» in coda: se
+  il confronto fosse fallito per un motivo vero, il risultato sarebbe stato vuoto e il
+  passo avrebbe **approvato la modifica**. Ora, se non riesce a confrontare, si ferma e
+  lo dice: *«non so dire se le migrazioni siano intatte, e "non lo so" non è "vanno
+  bene"»*.
+- **La soglia dell'analisi degli script abbassata al minimo** invece che alzata. Prima
+  ignorava una categoria di segnalazioni *senza dire quali*; ora non tollera niente in
+  silenzio, e le sette eccezioni che restano sono scritte nel codice una per una **col
+  perché accanto**. *Una soglia alzata nasconde N cose e non dice quali; un'eccezione
+  dichiarata è una cosa sola, con un nome e una ragione che il prossimo può contestare.*
+  Fra queste, una era un difetto vero: una forma che *sembra* un se-allora-altrimenti e
+  non lo è, nell'installer.
+- **Lo strumento di analisi fissato per impronta.** Nella build era una versione, in
+  locale un'altra, e le due davano verdetti diversi. Nessuna delle due sbagliava: erano
+  due strumenti diversi con lo stesso nome, e niente lo diceva.
+- **Il registro non si fida più di un commento.** Le sue prove cercano un testo dentro i
+  file: se quel testo sopravviveva *solo in un commento*, la prova restava verde mentre
+  il codice che doveva sorvegliare non c'era più — guardava la spiegazione, non la cosa.
+  Verificato sul caso peggiore: cancellando una riga che protegge i cookie di Google e
+  lasciandone il commento, prima passava, ora si ferma. Le prove che devono *davvero*
+  vivere in un commento — quelle che tengono in vita una **ragione** — ora si dichiarano
+  come tali.
+- **Il ledger delle funzioni si accorgeva di ciò che nasce, non di ciò che cambia.**
+  Quattro funzioni entrate oggi vivono dentro comandi e timer che esistevano già: non
+  creando nulla di nuovo, erano invisibili al controllo automatico — ed è esattamente ciò
+  per cui quel ledger esiste. Aggiunte; il buco resta scritto accanto a loro.
+
 ## [0.40.8] — 2026-07-27
 
 Il rilascio che **porta gli strumenti dove servono**. Tre correzioni nate tutte dallo
