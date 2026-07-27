@@ -982,6 +982,53 @@ def prune_old_images(repo: Path, keep_versions: set[str], history: list[dict]) -
     # rimuove a mano: sono il paracadute del bootstrap.
 
 
+# ───────────────────────────────────── spazio disco richiesto da un update
+
+# Il pavimento storico. Resta come minimo assoluto: sotto questa soglia non si
+# aggiorna nemmeno se la stima dicesse di meno.
+SPAZIO_MINIMO_UPDATE = 5 * 1024**3
+
+
+def backup_piu_grande(repo: Path) -> int:
+    """Byte del backup cifrato più grande che c'è. 0 se non ce n'è nessuno."""
+    d = repo / "backups"
+    if not d.is_dir():
+        return 0
+    try:
+        return max((f.stat().st_size for f in d.glob("vps1777-*.tar.age")), default=0)
+    except OSError:
+        return 0
+
+
+def spazio_richiesto_update(repo: Path) -> tuple[int, str]:
+    """Quanto spazio serve per un update, stimato sul disco invece che a occhio.
+
+    IL DIFETTO CHE CURA, misurato sulla VPS il 27/07/2026: la guardia chiedeva
+    5 GiB fissi, e le due operazioni che protegge ne consumano ~5,0 GB — il
+    backup cifrato (2,58 GB) più lo snapshot pre-update (~2,4 GB). Una soglia
+    pari al costo dell'operazione che sorveglia autorizza esattamente l'update
+    che non ci sta.
+
+    ⭐ MA IL DIFETTO VERO È UN ALTRO, ed è la ragione per cui questa è una
+    funzione e non un numero più grande: 5 GiB era una COSTANTE misurata contro
+    un dato che CRESCE. L'archivio raddoppia e la soglia no; il giorno in cui un
+    backup pesa 4 GB la guardia dice sì a un update che ne consuma 9. Una
+    guardia costante su un bersaglio mobile non invecchia male — invecchia in
+    silenzio, e sembra sempre verde.
+
+    Ritorna (byte richiesti, perché) — il perché finisce nel messaggio d'errore:
+    una soglia che non dice come è nata non si può contestare.
+    """
+    rif = backup_piu_grande(repo)
+    if rif == 0:
+        return (SPAZIO_MINIMO_UPDATE,
+                "nessun backup da cui stimare: applico il minimo storico di 5 GiB")
+    serve = 2 * rif + 1024**3
+    return (max(serve, SPAZIO_MINIMO_UPDATE),
+            f"il backup più grande pesa {rif / 1024**3:.1f} GiB e un update ne scrive "
+            f"due (l'archivio cifrato + lo snapshot pre-update), più 1 GiB di margine")
+
+
 # ─────────────────────────────────────────── snapshot volumi (pre-update)
 
 def snapshot_stale_excluded(base: Path) -> list[Path]:
@@ -1744,8 +1791,10 @@ def cmd_update(repo: Path, args) -> int:
         warn("profilo ops.autoupdate (Watchtower) attivo: NON supportato insieme "
              "al canale gestito — valuta di disattivarlo")
     free = shutil.disk_usage(str(repo)).free
-    if free < 5 * 1024**3:
-        die(f"spazio disco insufficiente ({free / 1024**3:.1f} GiB liberi, servono ≥5)")
+    serve, perche = spazio_richiesto_update(repo)
+    if free < serve:
+        die(f"spazio disco insufficiente: {free / 1024**3:.1f} GiB liberi, ne servono "
+            f"{serve / 1024**3:.1f} — {perche}")
 
     # 2 — risolvi target
     try:

@@ -234,7 +234,7 @@ verificato contro il codice dal gate in CI:
 | | |
 |---|---|
 | **chiusi** | 41 |
-| **parziali** | 14 |
+| **parziali** | 16 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -360,9 +360,41 @@ metteva dentro un caso che ha una forma diversa: là lo stato era vero di un alt
 oggetto, non di un sottoinsieme. Si somigliano nell'effetto sul lettore e si curano in
 modi opposti — contarli insieme faceva un pattern più grosso e un rimedio più confuso.)*
 
+Il quindicesimo e il sedicesimo, `H57` e `H58`, riguardano **le copie di sicurezza
+notturne**, e sono nati dalla stessa domanda: *quanti giorni indietro si può davvero
+tornare?*
+
+`H57` — la macchina tiene **sette copie**, e la riga che le governa promette «sette
+giorni». Sono due cose diverse, e coincidono soltanto finché arriva una copia per notte.
+Il 27 luglio la macchina è stata aggiornata quattro volte in una mattina perché qualcosa
+si era rotto, e **ogni aggiornamento fa la sua copia**: quattro dei sette posti sono
+finiti alla stessa mattina, e le notti dal 20 al 24 sono state cancellate. Sul disco
+c'erano sette copie — il conteggio tornava — ma coprivano **tre giorni invece di sette**,
+e nulla lo segnalava. *Il secondo livello, quello che tiene una copia a settimana, non
+poteva rimediare: dal 20 al 26 luglio è tutta la stessa settimana.* ⭐ La cosa da
+ricordare è la forma: **la finestra di ripristino si accorcia proprio nel giorno in cui
+qualcosa si rompe** — l'evento che consuma i posti è lo stesso che rende quelle copie
+necessarie. Ora se ne tiene **una per giorno**, la più recente, per sette giorni distinti:
+stessi sette posti sul disco, stessi 18 GB, ma sette giorni di storia. *Tenerne di più
+non era la strada: le copie sono già il 69% del disco occupato di quella macchina.*
+
+`H58` — due difetti trovati misurando **quanto pesa una copia** (2,58 GB). Il primo: se
+la scrittura si interrompe a metà — disco pieno, processo ucciso — resta sul disco un
+file **col nome giusto e il contenuto a metà**, e la ritenzione lo conta come la copia di
+quel giorno. Una copia rotta che occupa il posto di una buona è peggio di una copia
+mancante, perché il conteggio non le distingue. Ora il file incompleto viene rimosso se
+la scrittura non arriva in fondo, *col residuo dichiarato: contro uno spegnimento brutale
+servirebbe scrivere su un nome provvisorio e rinominare alla fine, e non è stato fatto in
+questo giro.* Il secondo: prima di aggiornare, la macchina controllava di avere **5 GB
+liberi** — ma le due copie che quell'aggiornamento scrive ne occupano circa 5. ⭐ Il
+difetto non è che 5 fosse poco: è che era **un numero fisso messo a guardia di dati che
+crescono**. Il giorno in cui una copia peserà il doppio, quella soglia direbbe di sì a
+un'operazione che non ci sta — e sembrerebbe verde fino a quel giorno. Ora la soglia **si
+calcola dalla copia più grande che c'è** e cresce da sola.
+
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è
-soltanto committato.
+soltanto committato. `H57` e `H58` sono qui: **provati, non ancora in produzione.**
 
 Gli altri **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
 il loro *perché* nel registro:

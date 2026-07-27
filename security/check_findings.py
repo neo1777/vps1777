@@ -68,8 +68,8 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 1 (H56 medium, 27/07) = 56. H56 è la seconda metà di H14, misurata sulla VPS viva
 # da abdd732a: lo snapshot pre-update tiene archive-data IN CHIARO (~2,58 GB) e nessuna
 # voce lo diceva — H14 era `closed` su un volume solo, il più piccolo.
-EXPECTED_TOTAL = 56
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 9, "medium": 31, "low": 14}
+EXPECTED_TOTAL = 58
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 32, "low": 14}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

@@ -1745,3 +1745,163 @@ findings:
       presidio, contains è solo la ricevuta»): vale quando devi VIETARE la comparsa di
       qualcosa; quando devi CONGELARE un invariante, `contains` sull'esatto è più forte,
       perché non devi indovinare in quanti modi qualcuno potrebbe romperlo.
+
+  - id: H57
+    severity: high
+    title: "La ritenzione dei backup conta FILE e promette GIORNI: quattro update nella stessa mattina hanno accorciato la finestra di ripristino da 7 giorni a 3, in silenzio"
+    status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: misura
+      nota: >
+        abdd732a, guardando gli mtime dei backup sulla VPS viva dopo essersi accorta che
+        una sua frase del mattino («7 file .tar.age») aveva scambiato SETTE FILE per SETTE
+        GIORNI. Confermata da b82df434 con una misura indipendente e da una porta diversa
+        (`find` sui nomi invece degli mtime), più il calcolo delle settimane ISO.
+    natura: comportamento
+    # v0.40.9 è la versione in cui la voce ENTRA NEL REGISTRO, non quella in cui il
+    # difetto è nato: `head -7` c'è da quando c'è la rotazione. Finché i backup sono
+    # arrivati uno per notte, sette file e sette giorni sono stati la stessa cosa —
+    # ed è per questo che nessuno ha mai avuto motivo di guardare.
+    since: v0.40.9
+    prova:
+      - comando: "bash tools/tests/test-backup-retention.sh"
+        output: "6 passati, 0 falliti"
+        exit: 0
+        quando: "2026-07-27"
+      - comando: "BACKUP_SH=<backup.sh con la sola selezione daily riportata a `head -7`> bash tools/tests/test-backup-retention.sh"
+        output: "4 passati, 2 falliti — ① tiene 3 giorni invece di 7; ⑤ lascia che un nome illeggibile rubi un posto"
+        exit: 1
+        quando: "2026-07-27"
+    evidence:
+      - file: tools/backup.sh
+        contains:
+          - "declare -A giorni"
+          - "if [ -z \"${giorni[$ymd]:-}\" ] && [ ${#daily[@]} -lt 7 ]; then"
+      - file: tools/tests/test-backup-retention.sh
+        contains:
+          - "① 4 update nello stesso giorno non mangiano la storia"
+    missing: >
+      IL FATTO, misurato in produzione il 27/07/2026. In backups/ vivevano sette
+      `.tar.age` — il conteggio che la ritenzione promette — ma coprivano TRE GIORNI:
+      25, 26 e 27 luglio. Quattro dei sette erano backup pre-update della stessa mattina
+      (01:54, 06:41, 07:10, 07:50), fatti dai quattro tentativi di aggiornamento del
+      guasto. I notturni dal 20 al 24 erano stati potati.
+
+      IL MECCANISMO: `ls | sort -r | head -7` tiene gli ultimi sette FILE. La riga
+      accanto dice «7 daily». Sono due unità di misura diverse con lo stesso nome, e
+      coincidono esattamente finché arriva un backup per notte — cioè sempre, tranne nel
+      giorno in cui qualcosa si rompe.
+
+      ⚠️ E IL LIVELLO WEEKLY NON POTEVA SALVARLI, il che è la metà meno ovvia: tiene un
+      backup per settimana ISO, e dal 20 al 26 luglio è tutta la settimana 2026-30
+      (verificato con `date +%G-%V`; il 27 è lunedì, quindi 2026-31). I due livelli hanno
+      la STESSA LARGHEZZA — sette giorni — quindi il secondo non copre mai i buchi del
+      primo. Una ridondanza che si sovrappone al primo livello invece di estenderlo non
+      è ridondanza: è la stessa copertura scritta due volte.
+
+      ⭐ LA FORMA, che vale oltre questo file: la ritenzione conta EVENTI, la promessa è
+      in GIORNI, e il produttore di eventi extra è l'update — cioè l'evento a rischio.
+      Il giorno in cui aggiorni quattro volte perché qualcosa si è rotto è il giorno in
+      cui la finestra di ripristino si accorcia. Il presidio si indebolisce esattamente
+      quando serve, ed è la stessa forma di H51 su un altro piano.
+
+      💾 PERCHÉ IL RIMEDIO NON È «TENERNE DI PIÙ», e qui il vincolo hardware ha deciso il
+      disegno: ogni backup pesa 2,58 GB, i sette occupano ~18 GB, e i backup sono il 69%
+      del disco occupato della macchina (27 GB su 39 GB usati, 74 GB liberi su 118 GB).
+      Alzare il conteggio a 14 avrebbe raddoppiato l'occupazione per curare uno spreco.
+      La cura giusta era smettere di sprecare i posti sullo stesso giorno: UNO per giorno,
+      il più recente — che per il giorno in corso è il backup fatto subito prima
+      dell'ultimo update, cioè proprio quello che serve a un rollback. Stessi sette posti,
+      stessi 18 GB, sette giorni invece di tre.
+
+      🔎 IL TEST HA TROVATO DUE COSE CHE NON CERCAVA, ed è la ragione per cui i casi
+      «che non la riguardano» vanno messi:
+      (a) col codice precedente un nome NON interpretabile rubava davvero un posto daily
+      — ordina prima delle date («n» > «2») e finiva in cima ai sette. La guardia messa
+      il 27 mattina per SC2106 proteggeva il livello weekly, che i nomi li parsa; il
+      livello daily non li parsava affatto, quindi non è mai stato protetto. La cura di
+      un difetto ha coperto un ramo e lasciato scoperto il suo gemello.
+      (b) su cartella vuota `ls vps1777-*.tar.age` non combacia, esce 2, `pipefail` lo
+      propaga e `set -e` uccide lo script DOPO che ha finito — un backup riuscito che
+      esce con un codice d'errore. Latente e irraggiungibile finché un file veniva sempre
+      creato prima; il nuovo `--prune-only` lo raggiunge, e il caso ⑥ del test l'ha visto.
+
+      COSA MANCA per passare a `closed`: il fix è in `main` e provato, NON è in
+      produzione. Chiuso significa in produzione — e la prova che conta sarà la ritenzione
+      eseguita sulla macchina con i sette giorni veri sotto.
+
+  - id: H58
+    severity: medium
+    title: "Un backup interrotto lascia un file troncato col nome giusto, e la ritenzione lo conta come il backup di quel giorno; la guardia di spazio dell'update era una costante misurata contro dati che crescono"
+    status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: misura
+      nota: >
+        b82df434, misurando la taglia dei backup sulla VPS per decidere se il rimedio a
+        H57 potesse permettersi più file. La domanda era «quanto costa un posto in più»;
+        la risposta ha aperto due cose che non c'entravano con la domanda.
+    natura: comportamento
+    since: v0.40.9
+    prova:
+      - comando: "python3 tools/tests/test_vps1777.py 2>&1 | grep spazio"
+        output: "ok test_spazio_senza_backup_ricade_sul_minimo_e_lo_dice · ok test_spazio_scala_col_backup_piu_grande · ok test_spazio_col_backup_minuscolo_tiene_comunque_il_pavimento · ok test_spazio_ignora_cio_che_non_e_un_backup"
+        exit: 0
+        quando: "2026-07-27"
+    evidence:
+      - file: tools/backup.sh
+        contains:
+          - "INCOMPLETO=\"$OUT\""
+          - "meglio nessuno che uno troncato."
+      - file: tools/vps1777.py
+        contains:
+          - "def spazio_richiesto_update(repo: Path) -> tuple[int, str]:"
+    missing: >
+      DUE COSE, trovate insieme perché nascono dalla stessa misura: un backup di questa
+      macchina pesa 2,58 GB, e lo snapshot pre-update ~2,4 GB.
+
+      ① IL FILE TRONCATO CHE SEMBRA UN BACKUP. `tar … | age -o "$OUT"` scrive
+      direttamente sul nome finale. Se la scrittura si interrompe — disco pieno, OOM, un
+      kill — resta sul disco un `.tar.age` col nome giusto e il contenuto a metà. La
+      ritenzione lo conta come il backup di quel giorno, il conteggio torna, e nella
+      finestra di ripristino c'è un file che non si apre. Un backup rotto che occupa il
+      posto di uno buono è peggio di un backup mancante, perché il conteggio non lo
+      distingue e nessuno va a guardare. RIMEDIO: il nome resta segnato come incompleto
+      finché la scrittura non è finita, e il trap lo rimuove se lo script muore prima.
+      ⚠️ RESIDUO DICHIARATO: il trap non copre un `kill -9` né un crash del kernel. Il
+      file troncato resterebbe. Curarlo davvero vuol dire scrivere su un nome temporaneo
+      e rinominare alla fine — la rinomina è atomica, l'interruzione non lascia mai un
+      nome valido. Non l'ho fatto in questo giro: cambia il percorso di scrittura di uno
+      script di backup, e volevo che il cambiamento della ritenzione andasse in produzione
+      da solo, misurabile.
+
+      ② LA GUARDIA COSTANTE SU UN BERSAGLIO MOBILE. Prima dell'update, `cmd_update`
+      chiedeva 5 GiB liberi fissi. Le due operazioni che quella guardia protegge —
+      `backup.sh` (2,58 GB) e `snapshot_create` (~2,4 GB) — ne consumano ~5,0 GB: la
+      soglia era pari al costo dell'operazione, cioè autorizzava esattamente l'update che
+      non ci sta, lasciando ~0,4 GB durante l'esecuzione.
+      ⭐ MA IL DIFETTO VERO NON È CHE 5 SIANO POCHI — è che 5 era una COSTANTE misurata
+      contro un dato che CRESCE. L'archivio raddoppia e la soglia no: il giorno in cui un
+      backup pesa 4 GB, la guardia dice sì a un update che ne consuma 9. Una guardia
+      costante su un bersaglio mobile non invecchia male, invecchia in silenzio, e sembra
+      verde fino al giorno in cui non lo è. RIMEDIO: la soglia si stima dal backup più
+      grande presente sul disco (due oggetti della taglia dei dati + 1 GiB di margine),
+      col vecchio 5 GiB tenuto come pavimento assoluto. Sulla macchina di oggi passa da
+      5,0 a 5,8 GiB, e cresce da sola con l'archivio.
+      E `backup.sh` non aveva NESSUNA guardia di spazio: ora stima dal backup precedente
+      — quello di ieri contiene gli stessi volumi, quindi è la miglior previsione di oggi
+      — e se non ci sta rifiuta di scrivere invece di fallire a metà. Al primo giro non
+      c'è nulla da cui stimare e lo dichiara, invece di inventare una soglia.
+
+      NON È UN RILIEVO NUOVO SULLO SNAPSHOT: che `snapshot_prune` poti per ETÀ (>72h) e
+      non per numero è GIÀ SCRITTO in H56, misurato da abdd732a, e resta di sua
+      competenza. Verificato prima di scrivere questa voce, per non ripresentare come
+      scoperta una cosa che il registro dichiara — è esattamente ciò che rimproveriamo
+      agli audio esterni quando drammatizzano un limite dichiarato.
+      📌 Cercato anche il contrario prima di dire «non c'era»: zero occorrenze di «spazio
+      disco» nel registro, tre di «disco» e nessuna sulla guardia dell'update.
+
+      COSA MANCA per `closed`: entrambi i rimedi sono in `main` e provati su casi
+      costruiti, non in produzione. E il residuo del punto ① (scrittura non atomica)
+      resta aperto e scritto.

@@ -954,6 +954,64 @@ def test_il_runner_diretto_esegue_tutti_i_test_del_file():
         f"{ultimo_test}: l'esecuzione diretta non lo vedrebbe e uscirebbe 0 lo stesso")
 
 
+# ────────── H58: lo spazio richiesto da un update si STIMA, non si indovina ──
+# Casi costruiti di cui la risposta è nota prima di eseguirli — compresi quelli
+# che la funzione deve lasciar passare e quelli che non la riguardano.
+
+def _repo_con_backup(d: str, *dimensioni: int) -> Path:
+    repo = Path(d)
+    (repo / "backups").mkdir(parents=True, exist_ok=True)
+    for i, n in enumerate(dimensioni):
+        (repo / "backups" / f"vps1777-2026-07-2{i}-030000.tar.age").write_bytes(b"\0" * n)
+    return repo
+
+
+def test_spazio_senza_backup_ricade_sul_minimo_e_lo_dice():
+    # RISPOSTA NOTA: niente da cui stimare ⇒ il pavimento storico, e il perché
+    # deve dire che è una ricaduta, non una misura. Una soglia che non distingue
+    # «misurata» da «di default» fa credere a un dato che non c'è.
+    with tempfile.TemporaryDirectory() as d:
+        serve, perche = v.spazio_richiesto_update(Path(d))
+    assert serve == v.SPAZIO_MINIMO_UPDATE
+    assert "nessun backup" in perche
+
+
+def test_spazio_scala_col_backup_piu_grande():
+    # RISPOSTA NOTA: un update scrive DUE oggetti della taglia dei dati —
+    # l'archivio cifrato e lo snapshot pre-update — più 1 GiB di margine.
+    # È il caso misurato in produzione il 27/07: la vecchia costante di 5 GiB
+    # stava SOTTO il costo reale dell'operazione che doveva sorvegliare.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_backup(d, 3 * 1024**3, 1024**3)   # 3 GiB e 1 GiB
+        serve, perche = v.spazio_richiesto_update(repo)
+    assert serve == 2 * 3 * 1024**3 + 1024**3, "deve usare il PIÙ GRANDE, non l'ultimo né la somma"
+    assert serve > v.SPAZIO_MINIMO_UPDATE, "con dati grandi la stima deve superare la vecchia costante"
+    assert "3.0 GiB" in perche
+
+
+def test_spazio_col_backup_minuscolo_tiene_comunque_il_pavimento():
+    # CIÒ CHE DEVE LASCIAR PASSARE: un'installazione quasi vuota non deve far
+    # scendere la guardia sotto il minimo storico. Una stima che può solo
+    # crescere è una stima; una che può anche crollare è un permesso.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_backup(d, 1024)   # 1 KiB
+        serve, _ = v.spazio_richiesto_update(repo)
+    assert serve == v.SPAZIO_MINIMO_UPDATE
+
+
+def test_spazio_ignora_cio_che_non_e_un_backup():
+    # CIÒ CHE NON LA RIGUARDA: nella stessa cartella vivono gli snapshot
+    # pre-update e i log. Contarli gonfierebbe la soglia fino a bloccare update
+    # legittimi — un falso rosso su un canale di aggiornamento è un canale
+    # fermo, che è il modo in cui una macchina resta indietro sulle patch.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_backup(d, 1024)
+        (repo / "backups" / "un-file-enorme.tar").write_bytes(b"\0" * 9 * 1024**3)
+        (repo / "backups" / "pre-update").mkdir()
+        serve, _ = v.spazio_richiesto_update(repo)
+    assert serve == v.SPAZIO_MINIMO_UPDATE, "solo i vps1777-*.tar.age contano"
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

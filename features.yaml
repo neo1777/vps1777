@@ -106,8 +106,12 @@ features:
 
   - id: ops.backup
     nome: "Backup notturno dei volumi (age-encrypted)"
-    cosa: "Container cron 03:00 UTC, 7 giornalieri + 4 settimanali, cifrati age. La rete
-           di sicurezza dati: senza, un guasto perde tutto."
+    cosa: "Container cron 03:00 UTC, cifrati age: UN backup per GIORNO su 7 giorni
+           distinti + 4 settimanali. La rete di sicurezza dati: senza, un guasto perde
+           tutto. «7 giorni», non «7 file»: fino al 27/07 la riga diceva '7 giornalieri'
+           e il codice teneva gli ultimi 7 FILE — con quattro update nella stessa mattina
+           la finestra si era ristretta a 3 giorni (H57). L'ambiguità stava anche qui,
+           in un ledger che esiste per dire cosa fa davvero una funzione."
     dove: ["compose-profile:compose.ops.backup.yaml#ops.backup", "tools/backup.sh"]
     status: active-default    # ATTESO dopo il branch installer-autoupdate-backup (default-on via VPS1777_FEATURES)
     since: "0.26.0 (opt-in) → default-on (branch feat/installer-autoupdate-backup)"

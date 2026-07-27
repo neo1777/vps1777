@@ -65,7 +65,11 @@ jobs:
           # ragione che il prossimo può contestare.
           # tools/prove-empiriche/ era fuori dal glob: le otto prove che
           # verificano il resto non erano verificate da niente.
-          docker run --rm -v "$PWD:/mnt" -w /mnt "$SHELLCHECK" setup.sh tools/*.sh tools/prove-empiriche/*.sh
+          # tools/tests/*.sh aggiunto il 27/07 nello stesso giro in cui nasce il
+          # primo test in shell: era la stessa forma del buco di prove-empiriche
+          # — uno script che verifica gli altri e che nessuno verifica. Il glob
+          # si allarga insieme al codice, o il gate resta indietro in silenzio.
+          docker run --rm -v "$PWD:/mnt" -w /mnt "$SHELLCHECK" setup.sh tools/*.sh tools/prove-empiriche/*.sh tools/tests/*.sh
       # Il registro dei rilievi di sicurezza: ogni voce dichiarata `closed` deve
       # portare un'evidenza, e quell'evidenza deve ESISTERE ANCORA nel codice.
       # Nasce da un errore vero: SECURITY.md ha dichiarato «dossier applicato per
@@ -149,6 +153,14 @@ jobs:
       # verifica: è un commento con le parentesi.
       - name: Test CLI vps1777 (stdlib-only)
         run: uvx pytest tools/tests/ -v
+      # `pytest tools/tests/` NON vede i file .sh: la suite qui sopra sarebbe
+      # rimasta verde con il test della ritenzione fermo sul disco, che è
+      # letteralmente il difetto raccontato nel commento qui sopra, ripetuto
+      # nello stesso file lo stesso giorno. La ritenzione è l'unico pezzo di
+      # vps1777 che CANCELLA dati non rigenerabili: se un gate deve girare, è
+      # questo.
+      - name: Test ritenzione backup (bash, casi a risposta nota)
+        run: bash tools/tests/test-backup-retention.sh
 
   build:
     runs-on: ubuntu-latest

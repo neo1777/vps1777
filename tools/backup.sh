@@ -12,8 +12,25 @@
 #
 # Usa la chiave age da `tools/age-recipients.txt` (una riga = un recipient).
 # Se non esiste, fa age-keygen e crea uno solo.
+#
+# Uso:
+#   bash tools/backup.sh                 backup nuovo + ritenzione
+#   bash tools/backup.sh --prune-only    SOLO ritenzione, nessun backup nuovo
+#
+# `--prune-only` non è un'opzione di comodo: la ritenzione decide quali backup
+# sopravvivono, ed è l'unico pezzo di questo script che si può provare senza
+# cifrare 2,5 GB. Senza di lei una modifica alla ritenzione andrebbe in
+# produzione senza controprova — su backup.
 
 set -euo pipefail
+
+# ───── argomenti ─────
+PRUNE_ONLY=0
+case "${1:-}" in
+  --prune-only) PRUNE_ONLY=1 ;;
+  "")           ;;
+  *)            printf 'uso: %s [--prune-only]\n' "$0" >&2; exit 2 ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -26,7 +43,14 @@ RECIPIENTS_FILE="$SCRIPT_DIR/age-recipients.txt"
 TIMESTAMP="$(date -u +%Y-%m-%d-%H%M%S)"
 OUT="$BACKUP_DIR/vps1777-${TIMESTAMP}.tar.age"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# INCOMPLETO tiene il nome del backup mentre lo stiamo scrivendo, e si svuota
+# quando è finito. Senza, un'interruzione a metà — disco pieno, OOM, un kill —
+# lascia sul disco un `.tar.age` TRONCATO col nome giusto: la ritenzione lo
+# conta come il backup di quel giorno, il conteggio torna, e la finestra di
+# ripristino ha dentro un file che non si apre. Un backup rotto che occupa il
+# posto di uno buono è peggio di un backup mancante, perché non si vede.
+INCOMPLETO=""
+trap 'rm -rf "$TMP"; if [ -n "$INCOMPLETO" ]; then rm -f "$INCOMPLETO"; fi' EXIT
 
 # ───── UI ─────
 if [ -t 1 ]; then
@@ -38,6 +62,18 @@ log()  { printf '%s[*]%s %s\n' "$C_I"  "$C_R" "$*"; }
 ok()   { printf '%s[✓]%s %s\n' "$C_OK" "$C_R" "$*"; }
 warn() { printf '%s[!]%s %s\n' "$C_W"  "$C_R" "$*"; }
 die()  { printf '%s[✗]%s %s\n' "$C_E"  "$C_R" "$*" >&2; exit 1; }
+
+# ╔═ SOLO SE STIAMO CREANDO UN BACKUP ════════════════════════════════════════╗
+# Le sezioni «prerequisiti», «recipients» e 1-4 restano NON indentate dentro
+# questo if: è voluto. Rientrarle avrebbe fatto un diff di sessanta righe su uno
+# script di backup per una modifica che non le tocca — e un diff illeggibile su
+# questo file è un rischio, non uno stile.
+#
+# I prerequisiti stanno DENTRO e non fuori: la ritenzione non cifra e non
+# dumpa, quindi non ha bisogno né di `age` né di docker né di tar. Lasciarli
+# fuori avrebbe reso `--prune-only` ineseguibile proprio dove serve provarlo —
+# su una macchina qualunque, senza il corredo della VPS.
+if [ "$PRUNE_ONLY" -eq 0 ]; then
 
 # ───── prerequisiti ─────
 # docker serve SOLO nel contesto host (dump via `docker run`). Nel container
@@ -116,7 +152,28 @@ ok "Config + secrets archiviati"
   echo "docker: $(command -v docker >/dev/null && docker --version || echo 'n/d (contesto container)')"
 } > "$TMP/MANIFEST.txt"
 
-# ───── 4. tar + age ─────
+# ───── 4. spazio, poi tar + age ─────
+# La stima è il backup più recente che c'è: questo archivio contiene gli stessi
+# volumi di ieri, quindi ieri è la miglior previsione di oggi. Al primo giro non
+# c'è nulla da cui stimare e non si inventa una soglia — si dice che non si è
+# controllato. Il 20% di margine copre la crescita normale dei dati fra due
+# notti, non un raddoppio.
+# Perché serve: senza, un disco quasi pieno non ferma il backup — lo fa fallire
+# a metà scrittura, che è la strada per il file troncato di cui sopra.
+# shellcheck disable=SC2012
+ULTIMO=$(ls -1t "$BACKUP_DIR"/vps1777-*.tar.age 2>/dev/null | head -1 || true)
+if [ -n "$ULTIMO" ]; then
+  SERVE_KB=$(( $(du -k "$ULTIMO" | cut -f1) * 12 / 10 ))
+  LIBERI_KB=$(df -P "$BACKUP_DIR" | awk 'NR==2 {print $4}')
+  if [ "$LIBERI_KB" -lt "$SERVE_KB" ]; then
+    die "spazio insufficiente in $BACKUP_DIR: $((LIBERI_KB / 1024)) MB liberi,
+ne servono almeno $((SERVE_KB / 1024)) (l'ultimo backup pesa $(du -h "$ULTIMO" | cut -f1) + 20% di margine).
+Nessun backup scritto: meglio nessuno che uno troncato."
+  fi
+else
+  warn "nessun backup precedente da cui stimare lo spazio necessario: non controllato"
+fi
+
 log "Cifro con age..."
 RECIPIENT_ARGS=()
 while IFS= read -r r; do
@@ -124,13 +181,20 @@ while IFS= read -r r; do
 done < "$RECIPIENTS_FILE"
 [ ${#RECIPIENT_ARGS[@]} -eq 0 ] && die "Nessun recipient valido in $RECIPIENTS_FILE"
 
+INCOMPLETO="$OUT"
 tar -C "$TMP" -cf - . | age "${RECIPIENT_ARGS[@]}" -o "$OUT"
 chmod 600 "$OUT"
+INCOMPLETO=""
 SIZE=$(du -h "$OUT" | cut -f1)
 ok "Backup completato: $OUT ($SIZE)"
 
-# ───── 5. rotation (mantieni schema 7 daily + 4 weekly) ─────
-log "Pruning vecchi backup (7 daily + 4 weekly)..."
+else
+  log "--prune-only: nessun backup nuovo, applico solo la ritenzione"
+fi
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# ───── 5. rotation (mantieni schema 7 GIORNI + 4 weekly) ─────
+log "Pruning vecchi backup (7 giorni distinti + 4 weekly)..."
 cd "$BACKUP_DIR"
 
 # I quattro `ls` di questa sezione e di restore.sh danno SC2012 («usa find»).
@@ -140,11 +204,61 @@ cd "$BACKUP_DIR"
 # RITENZIONE DEI BACKUP per un rilievo di stile: il rischio sbagliato da correre.
 # La riga qui sotto tiene la soglia della CI al minimo senza tollerare nulla in
 # silenzio — un'eccezione scritta è diversa da un avviso ignorato.
-# Daily: tieni gli ultimi 7
-# shellcheck disable=SC2012
-mapfile -t daily < <(ls -1 vps1777-*.tar.age 2>/dev/null | sort -r | head -7)
 # shellcheck disable=SC2012
 mapfile -t all < <(ls -1 vps1777-*.tar.age 2>/dev/null | sort -r)
+
+# Daily: UNO per GIORNO — il più recente di quel giorno — per gli ultimi 7
+# giorni DISTINTI.
+#
+# PRIMA: `ls | sort -r | head -7`, cioè gli ultimi 7 FILE. La riga prometteva
+# «7 daily» e consegnava sette file: due unità di misura diverse con lo stesso
+# nome. Finché i backup arrivano uno per notte le due coincidono, ed è per
+# questo che è passata inosservata per mesi.
+#
+# 🔴 MISURATO IN PRODUZIONE il 27/07/2026: sette file, TRE giorni (25-26-27).
+# Quattro update nella stessa mattina — 01:54, 06:41, 07:10, 07:50 — hanno
+# fatto quattro backup pre-update che si sono presi quattro dei sette posti,
+# e i notturni dal 20 al 24 sono stati potati. La finestra di ripristino è
+# passata da 7 giorni a 3 senza che nulla lo segnalasse.
+#
+# ⚠️ E il livello weekly non poteva salvarli: tiene UN backup per settimana
+# ISO, e dal 20 al 26 luglio è tutta la settimana 2026-30 (verificato con
+# `date +%G-%V`). I due livelli hanno la stessa larghezza — sette giorni —
+# quindi il secondo non copre mai i buchi del primo.
+#
+# ⭐ LA FORMA, che è la cosa da ricordare: la ritenzione conta EVENTI, la
+# promessa è in GIORNI, e il produttore di eventi extra è l'update — cioè
+# l'evento a rischio. Il giorno in cui aggiorni quattro volte perché qualcosa
+# si è rotto è il giorno in cui la finestra di ripristino si accorcia.
+#
+# 💾 Il costo su disco NON cambia: restano sette posti, ognuno da ~2,58 GB.
+# Cambia solo che ora sono sette giorni invece di sette file. Su una macchina
+# in cui i backup sono già il 69% del disco occupato, «tenerne di più» non era
+# una strada: quella giusta era smettere di sprecarli sullo stesso giorno.
+declare -A giorni
+daily=()
+for f in "${all[@]}"; do
+  ymd=$(echo "$f" | sed -E 's/^vps1777-([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\1/')
+  # stessa guardia del weekly qui sotto, e per la stessa ragione: un nome non
+  # parsabile non deve occupare un posto. `sed` non fallisce su un nome che non
+  # combacia — restituisce la stringa intera — quindi la validazione la fa
+  # `date`, che su quella stringa non parsa.
+  if ! date -d "$ymd" +%F >/dev/null 2>&1; then
+    # non occupa un posto — ma nemmeno sparisce in silenzio. Sotto, la
+    # cancellazione lo prende comunque perché non è in `keep`: un file che
+    # questo script non sa leggere e cancella senza dirlo è il modo in cui si
+    # perde un backup senza accorgersene.
+    warn "nome non interpretabile, escluso dalla ritenzione: $f"
+    continue
+  fi
+  # `all` è ordinato decrescente ⇒ la prima occorrenza di un giorno è la sua
+  # più recente. Per il giorno in corso è il backup fatto appena prima
+  # dell'ultimo update: esattamente quello che serve a un rollback.
+  if [ -z "${giorni[$ymd]:-}" ] && [ ${#daily[@]} -lt 7 ]; then
+    giorni[$ymd]=$f
+    daily+=("$f")
+  fi
+done
 
 # Weekly: tieni 1 per settimana negli ultimi 4 (in più dei 7 daily se distanti)
 declare -A weeks
@@ -189,6 +303,12 @@ else
 fi
 
 # vedi il blocco in testa alla rotazione
+# `|| true` NON è tolleranza: senza, su cartella vuota `ls` esce 2, `pipefail`
+# lo propaga e `set -e` uccide lo script DOPO che ha già fatto tutto — con un
+# codice d'errore che dice «backup fallito» su un backup riuscito. Difetto
+# preesistente ma irraggiungibile: nel flusso normale un file c'è sempre,
+# perché lo abbiamo appena creato. L'ha scoperto il caso ⑥ del test, quello
+# della cartella vuota — cioè uno dei casi messi lì «perché non la riguardano».
 # shellcheck disable=SC2012
-KEPT=$(ls vps1777-*.tar.age 2>/dev/null | wc -l)
+KEPT=$( (ls -1 vps1777-*.tar.age 2>/dev/null || true) | wc -l)
 ok "Backup totali mantenuti: $KEPT"
