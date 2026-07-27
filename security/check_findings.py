@@ -275,6 +275,47 @@ def check_natura_e_prova(f: dict, errors: list[str], senza_natura: list[str]) ->
                  f"       dice a QUANDO si riferisce.")
 
 
+# ── l'EPOCA DI SCOPERTA (round-8) ─────────────────────────────────────────────
+# Secondo rilievo dell'analisi esterna: «includere scoperte empiriche successive nel
+# bilancio di una revisione passata altera la percezione della qualità del codice
+# originale … il denominatore per valutare l'efficacia del ciclo precedente deve
+# rimanere fisso». Lui lo inquadra come GIUSTIZIA verso la revisione passata.
+#
+# ⚠️ Il nostro problema è più grande del suo, e la differenza vale: il registro non sa
+# QUANDO una voce è diventata conoscibile. Senza quel dato, «stiamo migliorando?» non è
+# falsificabile — il denominatore si muove sotto la domanda, e ogni round sembra andare
+# meglio o peggio a seconda di quante voci sono nate nel frattempo.
+#
+# `since` dice DA QUALE VERSIONE la voce è nello stato che dichiara.
+# `scoperta` dice QUANDO e COME l'abbiamo saputa. Sono due assi diversi — origine e
+# impatto — e confonderli è il difetto che H51 racconta su un altro piano.
+COME_SCOPERTA = {
+    "lettura",        # qualcuno ha letto il codice o un documento
+    "misura",         # qualcuno ha eseguito qualcosa e guardato il risultato
+    "incidente",      # si è rotto in produzione e l'abbiamo capito riparando
+    "audio-esterno",  # l'ha nominata l'analisi esterna di un round
+}
+
+
+def check_scoperta(f: dict, errors: list[str], senza: list[str]) -> None:
+    """`scoperta: {quando, come}` — quando l'abbiamo saputa e per quale strada.
+
+    Contata e non pretesa, come `natura`: dichiararla su 56 voci è archeologia, e
+    inventare una data è peggio che non averla. Il numero resta sullo schermo.
+    """
+    sc = f.get("scoperta")
+    if sc is None:
+        senza.append(f.get("id", "?"))
+        return
+    fid = f.get("id", "?")
+    if not sc.get("quando"):
+        fail(errors, f"{fid}: `scoperta` senza `quando` — una scoperta senza data non\n"
+                     f"       si può collocare in nessun bilancio.")
+    come = sc.get("come")
+    if come not in COME_SCOPERTA:
+        fail(errors, f"{fid}: `scoperta.come: {come}` non è valido (attesi: {sorted(COME_SCOPERTA)}).")
+
+
 def check_evidence(f: dict, errors: list[str]) -> None:
     """L'evidenza di una voce esiste ancora nel codice?"""
     fid = f["id"]
@@ -315,7 +356,45 @@ def check_evidence(f: dict, errors: list[str]) -> None:
                      f"       Il fix dichiarava che non ci fosse.")
 
 
+def rapporto_epoca(findings: list[dict], data: str) -> int:
+    """`--epoca AAAA-MM-GG` — quante voci erano NOTE a quella data, e per quale strada.
+
+    È lo strumento che rende falsificabile «stiamo migliorando?»: senza, il
+    denominatore si muove sotto la domanda. Nasce dal round-8, che l'ha chiesto come
+    giustizia verso una revisione passata; qui serve a una cosa più larga — poter dire
+    «a questa data ne conoscevamo N» senza ricostruirlo a memoria.
+
+    ⚠️ Dichiara sempre quante voci NON hanno la data: un conteggio che tace ciò che non
+    sa è la cosa che questo registro esiste per non fare.
+    """
+    note, ignote, per_strada = [], [], {}
+    for f in findings:
+        sc = f.get("scoperta") or {}
+        quando = str(sc.get("quando") or "")
+        if not quando:
+            ignote.append(f.get("id"))
+            continue
+        if quando <= data:
+            note.append(f.get("id"))
+            per_strada[sc.get("come", "?")] = per_strada.get(sc.get("come", "?"), 0) + 1
+    print(f"{DIM}al {data}: {len(note)} voci NOTE su {len(findings)} nel registro di oggi{OFF}")
+    for strada, n in sorted(per_strada.items(), key=lambda x: -x[1]):
+        print(f"  {strada:14} {n}")
+    if ignote:
+        print(f"{YEL}⚠️  {len(ignote)} voci senza data di scoperta: NON sono nel conteggio.{OFF}")
+        print(f"{DIM}    Il numero sopra è un minimo garantito, non il totale.{OFF}")
+    return 0
+
+
 def main() -> int:
+    if "--epoca" in sys.argv:
+        i = sys.argv.index("--epoca")
+        if i + 1 >= len(sys.argv):
+            print("uso: check_findings.py --epoca AAAA-MM-GG")
+            return 2
+        data = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))
+        return rapporto_epoca(data.get("findings") or [], sys.argv[i + 1])
+
     errors: list[str] = []
 
     if not REGISTRY.is_file():
@@ -331,6 +410,7 @@ def main() -> int:
     rilasciate = versioni_rilasciate()
     non_rilasciate: list[str] = []
     senza_natura: list[str] = []
+    senza_scoperta: list[str] = []
     if not rilasciate:
         fail(errors,
              "CHANGELOG.md assente o senza intestazioni di versione: senza di lui\n"
@@ -381,6 +461,7 @@ def main() -> int:
         if check_since(f, rilasciate, errors):
             non_rilasciate.append(fid)
         check_natura_e_prova(f, errors, senza_natura)
+        check_scoperta(f, errors, senza_scoperta)
         check_evidence(f, errors)
         check_titolo_nomina_file(f, errors)
 
@@ -439,6 +520,9 @@ def main() -> int:
         print(f"{YEL}◍ {len(senza_natura)} voci senza `natura` dichiarata{OFF}"
               f"{DIM} — per loro la regola «un difetto di comportamento si chiude con una "
               f"prova eseguita» non può ancora valere.{OFF}")
+    if senza_scoperta:
+        print(f"{YEL}◍ {len(senza_scoperta)} voci senza `scoperta` (quando e come l'abbiamo saputa){OFF}"
+              f"{DIM} — finché sono tante, «stiamo migliorando?» non è una domanda falsificabile.{OFF}")
     if non_rilasciate:
         # Stampato SEMPRE, non solo in errore: è il residuo che aspetta una
         # release. Finché ha un numero sullo schermo a ogni commit, nessuno può

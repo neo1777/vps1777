@@ -762,6 +762,10 @@ findings:
     severity: low
     title: "Hardening residuo di unit e container: sandbox update.service, unit templata, rootfs ro"
     status: closed
+    scoperta:
+      quando: "2026-07-26"
+      come: lettura
+      nota: "review difensiva sull'hardening delle unit"
     natura: comportamento
     prova:
       - comando: "bash tools/prove-empiriche/prova-8-le-unit-si-comportano-come-dichiarano.sh"
@@ -1109,6 +1113,10 @@ findings:
     severity: high
     title: "Il presidio di salute sonda dal lato in cui il guasto non si vede: healthcheck e health-gate interrogano il loopback DA DENTRO il container"
     status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: incidente
+      nota: "il servizio irraggiungibile per 1h27m50s mentre tre presìdi davano verde"
     natura: comportamento
     since: v0.40.6
     evidence:
@@ -1279,6 +1287,10 @@ findings:
     severity: medium
     title: "Le garanzie di hardening sono certificate per STRINGA, non per comportamento: il gate cerca il testo nel file, non chiede al sistema che cosa applica"
     status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: audio-esterno
+      nota: "l'analisi del round-7: «il registro convalida un'etichetta di testo»"
     natura: comportamento
     # Era `v0.40.7`: una versione mai rilasciata, assente dal CHANGELOG e dai tag,
     # scritta il 27/07 ancorando la voce alla release SUCCESSIVA come se fosse già
@@ -1399,6 +1411,10 @@ findings:
     severity: medium
     title: "Gate che non potevano fallire: lo step shellcheck in .github/workflows/ci.yml girava con `|| true`, e il lint copriva due percorsi su quattro"
     status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: misura
+      nota: "misurando la copertura dei gate invece di leggerla: shellcheck girava con `|| true`"
     natura: comportamento
     since: v0.40.7
     evidence:
@@ -1499,6 +1515,10 @@ findings:
     severity: medium
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
     status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: audio-esterno
+      nota: "nominata dal round-7 e portata qui da 71d540e6; il numero corretto (uno, non cinque) è nostro"
     # il rischio è nella superficie, non in un comportamento da eseguire
     natura: documento
     since: v0.40.7
@@ -1544,6 +1564,10 @@ findings:
     severity: medium
     title: "La telemetria poteva far cadere una riparazione: progress_write/status_write scrivevano nudi, e una PermissionError uccideva `vps1777 update` a metà"
     status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: misura
+      nota: "aggiornando davvero la macchina: `vps1777 update` è morto allo step 4"
     natura: comportamento
     since: v0.40.8
     evidence:
@@ -1609,6 +1633,10 @@ findings:
     severity: medium
     title: "La seconda metà di H14 — nello snapshot pre-update archive-data resta IN CHIARO: funzionale al rollback, non rimovibile, e finora non scritto da nessuna parte"
     status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: misura
+      nota: "abdd732a, misurando gli snapshot sulla VPS viva"
     # la cura è una decisione di chi possiede la macchina (Neo, 27/07)
     natura: decisione
     # La CONDIZIONE esiste da quando esiste lo snapshot (v0.30.0). Questa data dice
