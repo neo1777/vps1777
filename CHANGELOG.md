@@ -2,6 +2,34 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.13] — 2026-07-27
+
+Il rilascio che chiude il **residuo dichiarato** del giro precedente: la copia di sicurezza
+si scrive su un nome provvisorio e prende il nome definitivo solo quando è finita.
+
+> **Perché non era stato fatto subito, ed è la parte che vale**: la modifica precedente
+> toccava la *conservazione* delle copie, e volevo che andasse in produzione **da sola e
+> misurabile**. Ci è andata, è stata misurata sulla macchina, e solo allora si è toccato
+> il secondo pezzo. *Due cambiamenti insieme sullo stesso file avrebbero reso illeggibile
+> quale dei due produceva quale effetto.*
+
+### Corretto
+
+- **Una copia interrotta non lascia più un file col nome giusto.** Prima si scriveva
+  direttamente sul nome definitivo: un processo ucciso o uno spegnimento lasciavano un
+  file **col nome buono e il contenuto a metà**, che la rotazione contava come la copia di
+  quel giorno. Ora si scrive accanto, con un nome provvisorio, e si rinomina alla fine —
+  la rinomina è **istantanea e indivisibile**, quindi il nome definitivo o non esiste o è
+  un file completo. *Sparisce l'istante in cui poteva esistere una copia a metà.*
+- **E i resti delle scritture morte vengono rimossi dicendolo.** Un resto pesa 2,5 GB, e
+  non è spazzatura: è **la traccia di una copia mai completata**, cioè di una notte
+  scoperta. Il messaggio lo dice invece di ripulire in silenzio.
+
+*Residuo che resta, più stretto del precedente: i byte vengono spinti su disco prima della
+rinomina, ma se lo strumento di sistema non accetta quel modo si prosegue senza — una copia
+scritta vale più di una garanzia in più non ottenuta. In quel caso una mancanza di corrente
+lascerebbe un file provvisorio, non una copia monca: il danno peggiora nel modo giusto.*
+
 ## [0.40.12] — 2026-07-27
 
 Il rilascio in cui **un controllo nato ieri impara a dire «non lo so»**. Una riga sola di
