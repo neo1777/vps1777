@@ -2142,3 +2142,62 @@ findings:
       per mestiere. Sono i due soli posti in cui un indirizzo vero potrebbe nascondersi
       senza che nessuno lo veda. Sono due e sono corti — un'esenzione che non si può
       rileggere a mano sarebbe troppo larga.
+
+  - id: H61
+    severity: low
+    title: "Il presidio nato da H59 confondeva «cartella illeggibile» con «zero backup», e avrebbe gridato «i tuoi backup sono spariti» per un problema di permessi"
+    status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: lettura
+      nota: >
+        abdd732a, leggendo `copertura_backup()` lo stesso giorno in cui è nata — e
+        cercando LA SECONDA RIGA e non solo la prima, che è la guardia che si era data
+        dopo essersi fermata alla prima al mattino. Riprodotta da b82df434 su tre casi
+        prima di correggerla: leggibile → (2, date), ILLEGGIBILE → (0, None, None),
+        assente → (0, None, None). Tre stati, due valori.
+    natura: comportamento
+    since: v0.40.11
+    evidence:
+      - file: tools/vps1777.py
+        contains:
+          - "return None, None, None"
+          - "copertura backup: NON MISURATA"
+      - file: tools/tests/test_vps1777.py
+        contains:
+          - "def test_cartella_illeggibile_NON_e_zero_giorni():"
+    missing: >
+      IL FATTO: `Path.glob` su una cartella senza permessi NON solleva — restituisce
+      vuoto. «Zero file» e «zero permessi» collassavano nello stesso valore, e
+      `_sorveglia_copertura_backup` leggeva quel collasso come una regressione: notifica
+      «🔴 la finestra di ripristino si è accorciata. Copertura: 0 giorni». Il messaggio
+      più allarmante che quel presidio sappia produrre, per un dato che non aveva.
+
+      ⚠️ E IL PRECEDENTE SU QUESTA MACCHINA NON È TEORICO: è H55, un `PermissionError`
+      per lo stesso identico pattern root-contro-utente, che la mattina del 27/07 ha
+      ucciso un update vero. La condizione oggi non si verifica — verificato sulla VPS
+      prima di scrivere: `backups/` è dell'utente del servizio e la unit gira come root,
+      quindi legge — ma «oggi non capita» non è «non può capitare».
+
+      ⭐ IL RILIEVO CADE ESATTAMENTE SUL CRITERIO CHE IL PRESIDIO SI ERA DATO. La sua
+      stessa docstring argomenta che si notifica una REGRESSIONE e non una finestra non
+      ancora piena, perché «un allarme che suona quando va tutto bene viene silenziato
+      prima di servire davvero». Un allarme che grida «i tuoi backup non ci sono più»
+      per un problema di permessi brucia la fiducia nel presidio PRIMA della volta in cui
+      è vero — cioè fa il danno che quella riga esiste per evitare, per un'altra strada.
+
+      📌 PERCHÉ UNA VOCE NUOVA E NON UN EMENDAMENTO A H59: H59 è chiuso e il suo rimedio
+      è in produzione. Questo è un difetto DEL rimedio, trovato dopo. Riscrivere H59
+      farebbe sparire dal registro il fatto che il presidio è nato con questo buco — ed è
+      la stessa ragione per cui H56 è una voce e non una riga aggiunta a H14.
+
+      IL RIMEDIO: tri-stato. `None` = NON MISURATO (cartella illeggibile), `0` = misurato
+      e vuoto (cartella assente o senza backup), `N` = N giorni. Sul non-misurato il
+      presidio NON tocca il massimo storico, NON arma l'allarme sulla copertura, e segna
+      una CECITÀ separata — con la sua notifica gialla e la sua transizione, perché un
+      presidio che non può vedere è esso stesso una cosa da sapere. Una domanda senza
+      risposta non è una risposta cattiva.
+
+      COSA MANCA per `closed`: quattro casi a risposta nota verdi (illeggibile, assente,
+      il rientro dalla cecità, e il massimo storico che non si muove sul non-misurato).
+      NON è ancora in produzione.

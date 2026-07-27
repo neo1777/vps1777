@@ -1041,6 +1041,50 @@ def test_copertura_ignora_nomi_illeggibili_e_altri_file():
     assert (quanti, primo, ultimo) == (2, "2026-07-26", "2026-07-27")
 
 
+def test_cartella_illeggibile_NON_e_zero_giorni():
+    # 🔴 IL FALSO ALLARME PEGGIORE CHE QUESTO PRESIDIO POTESSE PRODURRE, trovato
+    # da abdd732a leggendo il codice il giorno stesso in cui è nato: `Path.glob`
+    # su una cartella senza permessi NON solleva — restituisce vuoto. «Zero file»
+    # e «zero permessi» collassavano nello stesso valore, e la sorveglianza
+    # leggeva quel collasso come «i tuoi backup sono spariti».
+    # ⚠️ Il precedente non è teorico: H55, stesso pattern root-contro-utente, ha
+    # ucciso un update vero la mattina del 27/07.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_giorni(d, "2026-07-26-030000", "2026-07-27-030000")
+        os.chmod(repo / "backups", 0o000)
+        try:
+            quanti, _, _ = v.copertura_backup(repo)
+            st = {"copertura_max": 7}
+            v._sorveglia_copertura_backup(repo, st, notifica=False)
+        finally:
+            os.chmod(repo / "backups", 0o755)
+    assert quanti is None, "illeggibile deve essere NON MISURATO, non zero"
+    assert "copertura_scesa_da" not in st, "una domanda senza risposta non è una risposta cattiva"
+    assert st.get("copertura_cieca_da"), "la cecità va segnata, non taciuta"
+    assert st["copertura_max"] == 7, "un dato che non c'è non deve toccare il massimo storico"
+
+
+def test_cartella_assente_e_davvero_zero():
+    # CIÒ CHE NON LA RIGUARDA: nessuna cartella = nessun backup, ed è un dato
+    # vero. Su un'installazione nuova non allarma comunque, perché anche il
+    # massimo storico è zero.
+    with tempfile.TemporaryDirectory() as d:
+        quanti, _, _ = v.copertura_backup(Path(d))
+        st = {}
+        v._sorveglia_copertura_backup(Path(d), st, notifica=False)
+    assert quanti == 0
+    assert "copertura_scesa_da" not in st
+
+
+def test_la_cecita_si_chiude_quando_torna_leggibile():
+    # Il rientro pulisce lo stato, o l'avviso resta acceso per sempre.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_giorni(d, "2026-07-26-030000", "2026-07-27-030000")
+        st = {"copertura_max": 2, "copertura_cieca_da": "2026-07-27T00:00:00Z"}
+        v._sorveglia_copertura_backup(repo, st, notifica=False)
+    assert "copertura_cieca_da" not in st
+
+
 def test_finestra_che_si_riempie_NON_fa_scattare_l_allarme():
     # ⭐ IL CASO CHE DECIDE SE IL PRESIDIO VERRÀ LETTO O DISATTIVATO.
     # Installazione nuova: copertura 2 su 7. È sotto soglia, quindi il log lo

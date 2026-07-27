@@ -1377,19 +1377,39 @@ def _sorveglia_raggiungibilita(repo: Path, st: dict, notifica: bool) -> None:
 COPERTURA_BACKUP_ATTESA = 7
 
 
-def copertura_backup(repo: Path) -> tuple[int, str | None, str | None]:
+def copertura_backup(repo: Path) -> tuple[int | None, str | None, str | None]:
     """Giorni DISTINTI coperti dai backup cifrati, col primo e l'ultimo.
 
     Non conta i file: conta i giorni — che è l'unità in cui la promessa è
     scritta. È la stessa distinzione che ha prodotto H57, applicata qui prima
     che serva: sette file possono essere sette giorni o uno solo.
+
+    🔑 `None` significa NON MISURATO, ed è diverso da `0`. Se la cartella non è
+    leggibile da questo utente, `Path.glob` non solleva niente: restituisce
+    vuoto. Zero file e zero-permessi collassavano nello stesso valore, e la
+    sorveglianza qui sotto leggeva quel collasso come «i backup sono spariti» —
+    cioè il messaggio più allarmante che sappia produrre, per un dato che non
+    aveva. Rilievo di abdd732a (27/07), riprodotto prima di correggerlo.
+
+    ⚠️ E il precedente su questa macchina non è teorico: è H55, un
+    `PermissionError` per lo stesso identico pattern root-contro-utente, che
+    stamattina ha ucciso un update vero. Il costo del falso lo scrive la
+    docstring qui sotto: un allarme che grida «i tuoi backup non ci sono più»
+    per un problema di permessi brucia la fiducia nel presidio PRIMA della volta
+    in cui è vero.
     """
     d = repo / "backups"
     if not d.is_dir():
+        # non esiste ancora: è davvero zero backup, e su un'installazione nuova
+        # non fa scattare niente perché anche il massimo storico è zero.
         return 0, None, None
+    try:
+        nomi = [f.name for f in d.iterdir()]
+    except OSError:
+        return None, None, None
     giorni = set()
-    for f in d.glob("vps1777-*.tar.age"):
-        m = re.match(r"vps1777-(\d{4}-\d{2}-\d{2})-", f.name)
+    for nome in nomi:
+        m = re.match(r"vps1777-(\d{4}-\d{2}-\d{2})-.*\.tar\.age$", nome)
         if m:
             giorni.add(m.group(1))
     if not giorni:
@@ -1425,6 +1445,24 @@ def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
     soglia configurabile, e va scritto invece che scoperto.
     """
     quanti, primo, ultimo = copertura_backup(repo)
+    if quanti is None:
+        # NON MISURATO ≠ zero. Qui non si tocca il massimo storico e non si
+        # arma nessun allarme sulla copertura: una domanda senza risposta non
+        # è una risposta cattiva.
+        warn("copertura backup: NON MISURATA — la cartella dei backup non è "
+             "leggibile da questo utente. Non vuol dire che i backup non ci "
+             "siano: vuol dire che questo controllo, adesso, è cieco.")
+        if not str(st.get("copertura_cieca_da") or ""):
+            st["copertura_cieca_da"] = now_iso()
+            if notifica:
+                telegram_notify(
+                    repo,
+                    "🟡 vps1777: non riesco a leggere la cartella dei backup, "
+                    "quindi non so dire quanti giorni copre.\n"
+                    "NON vuol dire che i backup manchino — vuol dire che questo "
+                    "controllo è cieco finché non si sistemano i permessi.")
+        return
+    st.pop("copertura_cieca_da", None)
     dove = f" ({primo} → {ultimo})" if primo else ""
     massimo = int(st.get("copertura_max") or 0)
     if quanti > massimo:

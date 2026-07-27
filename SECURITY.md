@@ -234,7 +234,7 @@ verificato contro il codice dal gate in CI:
 | | |
 |---|---|
 | **chiusi** | 44 |
-| **parziali** | 15 |
+| **parziali** | 16 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -453,6 +453,20 @@ test **riscriveva l'indirizzo dentro il file che esiste per impedirlo** — con 
 che diceva verde, perché guardava solo i file già registrati e quello era nuovo. *Ora
 guarda anche ciò che si sta per aggiungere: un controllo che non vede quello vede solo gli
 errori passati.*
+
+`H61` è **un difetto del rimedio di `H59`, trovato il giorno stesso in cui è nato** — e
+lo teniamo come voce separata invece di correggere quella vecchia, perché riscriverla
+farebbe sparire il fatto che il controllo è nato con questo buco. Il controllo sulla
+copertura, quando la cartella delle copie **non è leggibile**, otteneva «zero» e non
+«non lo so»: avrebbe mandato il messaggio più allarmante che sappia produrre — *«la
+finestra di ripristino si è accorciata: zero giorni»* — per un problema di permessi.
+⚠️ *Su questa macchina non è un caso di scuola: la stessa forma, permessi fra utente e
+amministratore, ha ucciso un aggiornamento vero la mattina del 27 luglio.* ⭐ E colpisce
+esattamente il criterio che quel controllo si era dato: **un allarme che grida al lupo
+brucia la fiducia prima della volta in cui è vero**. Ora distingue tre stati — non
+misurato, misurato e vuoto, N giorni — e sul *non misurato* non allarma: **segnala di
+essere cieco**, che è un'altra cosa e va saputa lo stesso. *Una domanda senza risposta non
+è una risposta cattiva.*
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è
