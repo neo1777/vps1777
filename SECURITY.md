@@ -233,8 +233,8 @@ verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 41 |
-| **parziali** | 16 |
+| **chiusi** | 42 |
+| **parziali** | 15 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -360,9 +360,9 @@ metteva dentro un caso che ha una forma diversa: là lo stato era vero di un alt
 oggetto, non di un sottoinsieme. Si somigliano nell'effetto sul lettore e si curano in
 modi opposti — contarli insieme faceva un pattern più grosso e un rimedio più confuso.)*
 
-Il quindicesimo e il sedicesimo, `H57` e `H58`, riguardano **le copie di sicurezza
-notturne**, e sono nati dalla stessa domanda: *quanti giorni indietro si può davvero
-tornare?*
+Il quindicesimo è `H58`, e nasce dalla stessa domanda di `H57` — *quanti giorni
+indietro si può davvero tornare?* — che invece è **chiuso e verificato sulla macchina**.
+Li racconto insieme perché sono lo stesso pomeriggio.
 
 `H57` — la macchina tiene **sette copie**, e la riga che le governa promette «sette
 giorni». Sono due cose diverse, e coincidono soltanto finché arriva una copia per notte.
@@ -392,9 +392,23 @@ crescono**. Il giorno in cui una copia peserà il doppio, quella soglia direbbe 
 un'operazione che non ci sta — e sembrerebbe verde fino a quel giorno. Ora la soglia **si
 calcola dalla copia più grande che c'è** e cresce da sola.
 
+🔴 **E l'installazione della cura ha mostrato il difetto un'ultima volta**, che è il
+dato più onesto di questa pagina: ogni aggiornamento fa la sua copia *prima* di
+sostituire i file, quindi quella copia è stata fatta e potata dal codice **vecchio** —
+ha preso un posto e ha cancellato il 25 luglio. Prima dell'aggiornamento tre giorni,
+subito dopo due. *Era inevitabile, ma andava previsto e scritto, non scoperto guardando
+l'elenco dopo.* ⚠️ **E i giorni già cancellati non tornano**: dal 20 al 25 luglio non
+esiste più una copia giornaliera. La finestra riparte da due giorni e si riempie una
+notte per volta, tornando a sette il 2 agosto. Non è un residuo del rimedio: è il danno
+che il difetto aveva già fatto, e sta scritto perché nessuno legga qui una riparazione
+più completa di quella che è.
+
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è
-soltanto committato. `H57` e `H58` sono qui: **provati, non ancora in produzione.**
+soltanto committato. `H57` è **chiuso e misurato sulla macchina** (rotazione eseguita in
+produzione, 12 GB liberati); `H58` resta **parziale per una cosa sola e dichiarata**: la
+scrittura della copia non è atomica, quindi contro uno spegnimento brutale il file
+troncato resterebbe.
 
 Gli altri **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
 il loro *perché* nel registro:

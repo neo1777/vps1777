@@ -1749,7 +1749,7 @@ findings:
   - id: H57
     severity: high
     title: "La ritenzione dei backup conta FILE e promette GIORNI: quattro update nella stessa mattina hanno accorciato la finestra di ripristino da 7 giorni a 3, in silenzio"
-    status: partial
+    status: closed
     scoperta:
       quando: "2026-07-27"
       come: misura
@@ -1759,12 +1759,18 @@ findings:
         GIORNI. Confermata da b82df434 con una misura indipendente e da una porta diversa
         (`find` sui nomi invece degli mtime), più il calcolo delle settimane ISO.
     natura: comportamento
-    # v0.40.9 è la versione in cui la voce ENTRA NEL REGISTRO, non quella in cui il
-    # difetto è nato: `head -7` c'è da quando c'è la rotazione. Finché i backup sono
-    # arrivati uno per notte, sette file e sette giorni sono stati la stessa cosa —
-    # ed è per questo che nessuno ha mai avuto motivo di guardare.
-    since: v0.40.9
+    # v0.40.10 è la versione in cui la voce è nello stato che dichiara — `closed`,
+    # con la rotazione nuova in produzione. NON è quando il difetto è nato: `head -7`
+    # c'è da quando c'è la rotazione. Finché i backup sono arrivati uno per notte,
+    # sette file e sette giorni sono stati la stessa cosa — ed è per questo che nessuno
+    # ha mai avuto motivo di guardare.
+    since: v0.40.10
     prova:
+      # LA PROVA CHE CHIUDE: eseguita sulla MACCHINA, non in un temp locale.
+      - comando: "ssh <vps> 'cd /home/vps1777/vps1777 && bash tools/backup.sh --prune-only'"
+        output: "[✓] Rimossi 5 vecchi backup · [✓] Backup totali mantenuti: 2 — da 7 file su 2 giorni a 1 per giorno; disco da 42G a 30G usati (12 GB liberati)"
+        exit: 0
+        quando: "2026-07-27"
       - comando: "bash tools/tests/test-backup-retention.sh"
         output: "6 passati, 0 falliti"
         exit: 0
@@ -1827,9 +1833,21 @@ findings:
       esce con un codice d'errore. Latente e irraggiungibile finché un file veniva sempre
       creato prima; il nuovo `--prune-only` lo raggiunge, e il caso ⑥ del test l'ha visto.
 
-      COSA MANCA per passare a `closed`: il fix è in `main` e provato, NON è in
-      produzione. Chiuso significa in produzione — e la prova che conta sarà la ritenzione
-      eseguita sulla macchina con i sette giorni veri sotto.
+      CHIUSA il 27/07 con la ritenzione ESEGUITA sulla macchina (v0.40.10): sette file
+      su due giorni sono diventati uno per giorno, exit 0, 12 GB liberati.
+
+      🔴 E IL DEPLOY DEL FIX HA DIMOSTRATO IL DIFETTO UN'ULTIMA VOLTA, il che è il dato
+      più onesto di questa voce. L'update alla 0.40.10 fa il suo backup pre-update PRIMA
+      di sostituire i file, quindi quel backup è stato fatto e potato dal codice VECCHIO:
+      ha occupato un settimo posto e ha cancellato il 25 luglio. Misurato: prima
+      dell'update 3 giorni (25-26-27), subito dopo 2 (26-27). *Installare la cura è
+      costato un altro giorno di storia, ed era inevitabile — ma andava previsto e
+      scritto, non scoperto guardando l'elenco dopo.*
+      ⚠️ I GIORNI GIÀ POTATI NON TORNANO. Dal 20 al 25 luglio non esiste più un backup
+      giornaliero: la finestra riparte da due giorni e si riempie una notte per volta,
+      arrivando a sette il 2 agosto. Questo NON è un residuo del fix — è il danno che il
+      difetto aveva già fatto, e va detto perché il registro non racconti una riparazione
+      più completa di quella che è.
 
   - id: H58
     severity: medium
@@ -1843,8 +1861,15 @@ findings:
         H57 potesse permettersi più file. La domanda era «quanto costa un posto in più»;
         la risposta ha aperto due cose che non c'entravano con la domanda.
     natura: comportamento
-    since: v0.40.9
+    # `partial` da qui: il grosso è in produzione dalla 0.40.10, il residuo dichiarato
+    # (scrittura non atomica) è ancora aperto e non ha una versione.
+    since: v0.40.10
     prova:
+      # la soglia, calcolata sulla MACCHINA con i suoi dati veri
+      - comando: "ssh <vps> python3 -c 'spazio_richiesto_update(repo)'  # v0.40.10 in produzione"
+        output: "soglia calcolata: 5.81 GiB (la vecchia costante era 5.00) — «il backup più grande pesa 2.4 GiB e un update ne scrive due, più 1 GiB di margine»"
+        exit: 0
+        quando: "2026-07-27"
       - comando: "python3 tools/tests/test_vps1777.py 2>&1 | grep spazio"
         output: "ok test_spazio_senza_backup_ricade_sul_minimo_e_lo_dice · ok test_spazio_scala_col_backup_piu_grande · ok test_spazio_col_backup_minuscolo_tiene_comunque_il_pavimento · ok test_spazio_ignora_cio_che_non_e_un_backup"
         exit: 0
@@ -1902,6 +1927,13 @@ findings:
       📌 Cercato anche il contrario prima di dire «non c'era»: zero occorrenze di «spazio
       disco» nel registro, tre di «disco» e nessuna sulla guardia dell'update.
 
-      COSA MANCA per `closed`: entrambi i rimedi sono in `main` e provati su casi
-      costruiti, non in produzione. E il residuo del punto ① (scrittura non atomica)
-      resta aperto e scritto.
+      COSA MANCA per `closed`, ed è UNA cosa sola e dichiarata: la scrittura del backup
+      NON è atomica. Il trap copre l'interruzione ordinata, non un `kill -9` né un crash
+      del kernel — lì il file troncato resterebbe. La cura vera è scrivere su un nome
+      provvisorio e rinominare alla fine, perché la rinomina è atomica e un'interruzione
+      non lascia mai un nome valido. Non fatto in questo giro apposta: cambia il percorso
+      di scrittura di uno script di backup, e volevo che la modifica della RITENZIONE
+      andasse in produzione da sola e misurabile. Due cambiamenti insieme su questo file
+      avrebbero reso illeggibile quale dei due ha prodotto quale effetto.
+      Il resto è in produzione dal 27/07 (v0.40.10) e misurato: la soglia sulla macchina
+      vale 5,81 GiB contro i 5,00 della vecchia costante, e cresce da sola con l'archivio.
