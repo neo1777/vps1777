@@ -892,3 +892,94 @@ features:
     since: "0.40.0"
     verify:
       file_contains: {path: services/gateway/tests/test_archive_indexer.py, pattern: "def test_newest_si_calcola_in_negativo"}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 27/07/2026 — QUATTRO FUNZIONI ENTRATE OGGI SENZA UNA VOCE QUI, e il buco è
+  # istruttivo: il check inverso (reale → dichiarato) enumera tool MCP, unit
+  # systemd e profili compose. Queste quattro NON hanno creato nessuno dei tre —
+  # vivono DENTRO comandi e timer che esistevano già. Il ledger non poteva
+  # vederle, e sono esattamente ciò che esiste per non perdere.
+  # ⇒ Un ledger che si accorge di ciò che NASCE ma non di ciò che CAMBIA copre
+  #   metà del rischio. Le voci qui sotto sono scritte a mano; il residuo — un
+  #   check inverso che enumeri anche i comportamenti — è dichiarato, non chiuso.
+  - id: ops.raggiungibilita-giornaliera
+    nome: "Il servizio è controllato da fuori anche fra un aggiornamento e l'altro"
+    cosa: >
+      Il cancello dell'aggiornamento guarda la porta dall'host, ma solo DURANTE un
+      update: un guasto arrivato in altro modo restava invisibile finché non apriva
+      l'indirizzo una persona — com'è andata il 27/07, per 1h27m50s. Ora `vps1777
+      check` (timer giornaliero, notifica già attiva) fa la stessa domanda ogni
+      giorno, avvisa alla caduta e al ritorno dà la DURATA misurata fra i due
+      istanti. Notifica le transizioni, non lo stato: un avviso che si ripete uguale
+      si impara a ignorare. Limite dichiarato: cadenza giornaliera, quindi una
+      finestra cieca fino a 24 ore — restringe, non chiude.
+    dove:
+      - "tools/vps1777.py#_sorveglia_raggiungibilita"
+      - "systemd:vps1777-check-update.timer"
+    status: active-default
+    since: "0.40.8"
+    verify:
+      file_contains:
+        path: tools/vps1777.py
+        pattern: "def _sorveglia_raggiungibilita"
+
+  - id: ops.funnel-blackbox
+    nome: "La sonda che esce dal server e rientra da Internet"
+    cosa: >
+      La sonda sull'host vede il buco di docker ma non un tunnel caduto, un DNS che
+      non risolve, un instradamento pubblico rotto: con la porta viva e il Funnel
+      giù, per chi apre l'indirizzo il servizio è giù e nessun presidio lo direbbe.
+      `funnel_ok()` chiede al nome PUBBLICO e la richiesta esce davvero (misurato:
+      risolve a indirizzi pubblici dell'ingresso Tailscale, non al tailnet). Due
+      tentativi con pausa, perché un errore di rete isolato è comune. NON è
+      nell'health-gate dell'update, di proposito: quel cancello giudica ciò che
+      l'update può rompere, e un singhiozzo del tunnel farebbe tornare indietro una
+      versione sana.
+    dove:
+      - "tools/vps1777.py#funnel_ok"
+      - "tools/vps1777.py#nome_pubblico_funnel"
+    status: active-default
+    since: "0.40.8"
+    verify:
+      file_contains:
+        path: tools/vps1777.py
+        pattern: "def funnel_ok"
+
+  - id: ops.cosign-bypass-promemoria
+    nome: "La via d'emergenza della firma non si dimentica più da sola"
+    cosa: >
+      `VPS1777_REQUIRE_COSIGN=0` nel .env sblocca una crisi ed è giusto che esista,
+      ma è riletta a ogni update compreso l'automatico: chi la mette e se ne
+      dimentica lascia la verifica firma spenta a tempo indeterminato. Il promemoria
+      settimanale dei segreti ora la mostra con da quanti giorni è aperta, e la voce
+      sparisce da sé appena la si toglie. NON forza il ri-armo: la crisi può durare
+      più di un giorno, e richiudere da soli chiuderebbe fuori chi sta riparando.
+      Era dichiarato nel registro dal 04/07 e non era diventato codice per 23 giorni.
+    dove:
+      - "tools/vps1777.py#cosign_bypass_status"
+      - "systemd:vps1777-secrets-check.timer"
+    status: active-default
+    since: "0.40.7"
+    verify:
+      file_contains:
+        path: tools/vps1777.py
+        pattern: "def cosign_bypass_status"
+
+  - id: ops.telemetria-non-fatale
+    nome: "La telemetria non può far cadere una riparazione"
+    cosa: >
+      I file che i pannelli leggono per disegnare la barra di avanzamento non servono
+      a FARE l'update: servono a mostrarlo. Finché la scrittura era nuda, una
+      PermissionError su di essi uccideva `vps1777 update` con un traceback a metà
+      strada — misurato sulla VPS il 27/07, dove il file era di root perché il timer
+      automatico gira da root. Ora si avvisa e si prosegue, una volta per esecuzione,
+      e da root il file viene riallineato al proprietario della cartella così il
+      comando manuale successivo lo trova scrivibile.
+    dove:
+      - "tools/vps1777.py#_scrivi_telemetria"
+    status: active-default
+    since: "0.40.8"
+    verify:
+      file_contains:
+        path: tools/vps1777.py
+        pattern: "def _scrivi_telemetria"
