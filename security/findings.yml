@@ -1224,9 +1224,20 @@ findings:
       di casa in nessuna delle due direzioni finisce per non esistere per nessuno tranne
       chi l'ha scritto.
 
-      NESSUN RESIDUO APERTO su questa voce: resta `partial` finché il pacchetto con le
-      prove non è RILASCIATO e installato — la 0.40.7 in produzione non le ha ancora.
-      Resta `partial` finché il pacchetto con le prove non è in produzione: la classe è presidiata dove faceva
+      (d) VERIFICATO IN PRODUZIONE (27/07, v0.40.8): le prove sono ARRIVATE sulla macchina
+      col pacchetto, `-rwxr-xr-x`, e la prova-7 è stata eseguita là per la prima volta
+      senza copiarla a mano — PASS, con il suo limite stampato in coda («misura la porta
+      sull'host, non il percorso pubblico»). Chiuso significa in produzione, e questo lo è.
+
+      RESTA `partial` PER UNA COSA SOLA, e non è un pezzo non fatto: è un limite del
+      disegno scelto. La sorveglianza esterna gira UNA VOLTA AL GIORNO, quindi fra due
+      giri esiste una finestra cieca fino a 24 ore. Rispetto al 27/07 — dove ad accorgersi
+      del guasto è stata una persona — è un guadagno, non una copertura: un guasto che
+      inizia e finisce dentro la finestra non lo vede nessuno. Portarla a pochi minuti
+      significherebbe un timer dedicato e traffico verso Internet ogni volta: si può fare,
+      non è stato deciso, e finché non lo è la voce dice che la finestra c'è invece di
+      dichiararsi chiusa su una classe che copre a intervalli.
+      Resta `partial` per la finestra cieca fra due giri: la classe è presidiata dove faceva
       male, non ovunque — e la differenza è scritta invece che taciuta.
 
   - id: H52
@@ -1448,13 +1459,17 @@ findings:
       tentativo era invalida — la mutazione lasciava un `except` orfano e il file non
       compilava: un rosso da SyntaxError non prova niente sul fix.
 
+      OSSERVATO IN PRODUZIONE il 27/07 con la v0.40.8, e questo cambia due residui:
+        (a) il ramo che riallinea il proprietario NON è esercitato dai test (serve root,
+            la suite gira da utente) — MA È STATO VISTO FUNZIONARE SUL VIVO: dopo
+            l'aggiornamento `onboarding/update_progress.json` è passato da `root:root` a
+            `vps1777:vps1777`. Resta scoperto dai test, non più solo dalla lettura: una
+            osservazione singola in produzione non è una prova ripetibile, ed è la
+            differenza fra «l'ho visto» e «non può regredire in silenzio».
+        (b) RISOLTO: `vps1777 check` lanciato come utente del servizio sulla macchina
+            esce 0. Era il comando che moriva con un traceback.
+
       COSA MANCA:
-        (a) il ramo che riallinea il proprietario NON è esercitato dai test: richiede
-            di girare da root, e la suite gira da utente. È scritto e provato solo
-            dalla lettura — che è precisamente ciò che H52 denuncia.
-        (b) sulla macchina il file resta di root finché non ci passa sopra un
-            aggiornamento con QUESTA versione del CLI: la 0.40.7 installata non ha
-            ancora il fix. Fino ad allora il comando manuale è ancora rotto lì.
         (c) la causa a monte — la unit gira come root perché le serve docker e
             l'installazione del binario — non è toccata. Qui si è tolto il danno,
             non l'asimmetria.
