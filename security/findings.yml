@@ -1090,8 +1090,13 @@ findings:
           - "def valuta_porta_esterna"
           - "porta_esterna_ok"
           - "irraggiungibile dall'host"
+          - "def _sorveglia_raggiungibilita"
+          - "irraggiungibile_da"
       - file: tools/tests/test_vps1777.py
-        contains: ["test_porta_esterna_il_caso_dell_incidente_nessuna_porta_e_nessun_proxy"]
+        contains:
+          - "test_porta_esterna_il_caso_dell_incidente_nessuna_porta_e_nessun_proxy"
+          - "test_raggiungibilita_e_cablata_in_check_e_prima_del_fetch"
+          - "test_raggiungibilita_ritorno_misura_la_durata_fra_i_due_istanti"
     missing: >
       MISURATO sul vivo, come incidente vero e non come ipotesi (27/07/2026,
       durata misurata 1h27m50s di irraggiungibilità pubblica del servizio).
@@ -1159,16 +1164,30 @@ findings:
       (27/07, sulla VPS in produzione): VERDE, col comando compose reale e i
       suoi overlay — nessun falso rosso in agguato al prossimo aggiornamento.
 
+      (b) CHIUSO (27/07, stessa giornata) — la porta è guardata da fuori anche QUANDO
+      NON SI AGGIORNA. `_sorveglia_raggiungibilita()` gira dentro `vps1777 check`, che
+      il timer lancia ogni giorno con la notifica attiva: nessuna unit nuova da
+      installare, ricordare e dimenticare. È chiamata PRIMA del fetch delle release,
+      e l'ordine è presidiato da un test — il giorno in cui la macchina sta peggio è
+      anche quello in cui GitHub può risultare irraggiungibile, e da lì `cmd_check`
+      esce subito: una sonda messa dopo non verrebbe mai eseguita proprio quando serve.
+      Notifica le TRANSIZIONI e non lo stato: la caduta quando avviene (una volta sola,
+      l'istante non si sposta), il ritorno con la DURATA misurata fra i due istanti —
+      cioè esattamente il numero che il 27/07 nessuno aveva e che infatti abbiamo
+      dedotto sbagliando di dodici minuti. Un avviso che si ripete ogni giorno uguale
+      si impara a ignorare; uno che non si spegne mai non è un avviso.
+      6 test, incluso quello che verifica l'ordine e quello che pretende SILENZIO
+      quando la sonda non ha potuto misurare (regola invariata: si grida solo con
+      evidenza positiva del guasto — un falso rosso qui sveglia una persona per niente,
+      e la volta dopo non la sveglia più).
+      LIMITE: la cadenza è giornaliera. Restringe la finestra cieca, non la chiude.
+
       COSA MANCA ANCORA:
-        (b) nessun controllo PERIODICO sonda la porta dall'esterno: il gate
-            guarda solo durante un aggiornamento. Un guasto che arrivi in altro
-            modo (una rete ricreata a mano, un riavvio parziale) resta invisibile
-            finché non lo apre una persona.
         (c) la sonda si ferma alla porta sull'host: non attraversa il Funnel.
             Un Funnel giù con la porta viva è un guasto che nessun presidio vede.
         (d) `tools/prove-empiriche/` non entra nel pacchetto di rilascio: la
             prova-7 sulla macchina non c'è, va copiata a mano.
-      Resta `partial` per (b), (c) e (d): la classe è presidiata dove faceva
+      Resta `partial` per (c) e (d): la classe è presidiata dove faceva
       male, non ovunque — e la differenza è scritta invece che taciuta.
 
   - id: H52

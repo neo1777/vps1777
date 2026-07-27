@@ -268,9 +268,16 @@ che mostra la configurazione (che dice cosa è *dichiarato*, non cosa Docker rie
 ad applicare) e il cancello dell'aggiornamento automatico — che per questo **non ha
 fatto marcia indietro**. Se ne è accorta una persona, aprendo l'indirizzo. Ora esiste
 una prova che guarda la porta **da fuori** del container, ed è stata verificata sui
-due esiti: verde sul servizio sano, rossa su uno rotto apposta. Resta parziale
-perché quella prova qualcuno deve lanciarla: il cancello dell'aggiornamento non la
-esegue ancora, quindi lo stesso guasto passerebbe di nuovo.
+due esiti: verde sul servizio sano, rossa su uno rotto apposta. **Il cancello
+dell'aggiornamento ora la esegue** — lo stesso guasto farebbe tornare indietro
+l'aggiornamento da sé — e da oggi la stessa domanda viene fatta anche **una volta al
+giorno**, quando non si sta aggiornando niente: se il servizio smette di rispondere
+arriva un avviso, e quando torna su arriva la **durata misurata fra i due istanti**,
+che è precisamente il numero che quel giorno nessuno aveva. Resta parziale per due
+motivi, scritti invece che taciuti: la sonda si ferma alla porta sulla macchina e non
+attraversa il tunnel pubblico — un tunnel giù con la porta viva nessuno lo vede — e
+le prove empiriche non entrano nel pacchetto di rilascio, quindi sulla macchina vanno
+copiate a mano.
 
 Il decimo è `H52`, e non l'abbiamo trovato noi: l'ha nominato l'analisi esterna del
 round-7. Le garanzie di irrobustimento dei servizi di sistema erano certificate

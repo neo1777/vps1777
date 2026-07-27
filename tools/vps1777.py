@@ -1163,6 +1163,52 @@ def consume_intent(repo: Path, path: Path, st: dict) -> str:
 
 # ═══════════════════════════════════════════ sottocomandi
 
+def _sorveglia_raggiungibilita(repo: Path, st: dict, notifica: bool) -> None:
+    """H51 (b) — la porta guardata da fuori anche QUANDO NON SI AGGIORNA.
+
+    Il gate esterno introdotto in 0.40.6 chiude il buco che ha nascosto il guasto
+    del 27/07, ma guarda solo *durante* un update. Un guasto che arrivi in altro
+    modo — una rete ricreata a mano, un riavvio parziale, un container che non
+    risale — resta invisibile finché non apre l'indirizzo una persona. Il 27/07 è
+    andata esattamente così: 1h27m50s, e ad accorgersene è stato il proprietario.
+
+    Sta dentro `check` e non in un timer nuovo perché `check` gira già tutti i
+    giorni con la notifica attiva: aggiungere un'unità per una domanda che si può
+    fare in un posto che c'è già è un pezzo in più da installare, ricordare e
+    dimenticare.
+
+    Notifica le TRANSIZIONI, non lo stato: la caduta quando avviene, il ritorno con
+    la durata misurata fra i due istanti — che è precisamente il numero che il
+    27/07 nessuno aveva, e che infatti la prima volta abbiamo dedotto sbagliando di
+    dodici minuti. Chiamata PRIMA di interrogare GitHub, di proposito: il momento in
+    cui la macchina sta peggio è anche quello in cui è più probabile che il fetch
+    delle release fallisca, e da lì `cmd_check` esce subito.
+    """
+    raggiungibile, perche = porta_esterna_ok(repo)
+    caduta_da = str(st.get("irraggiungibile_da") or "")
+    if not raggiungibile:
+        warn(f"il servizio non risponde dall'host — {perche}")
+        if not caduta_da:
+            st["irraggiungibile_da"] = now_iso()
+            if notifica:
+                telegram_notify(repo, f"🔴 vps1777: il servizio non risponde.\n{perche}")
+        return
+    if not caduta_da:
+        return
+    # ritorno: la durata è misurata fra i due istanti, non stimata fra due orari comodi
+    st.pop("irraggiungibile_da", None)
+    try:
+        giu = datetime.strptime(caduta_da, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        secondi = int((datetime.now(timezone.utc) - giu).total_seconds())
+        quanto = f"{secondi // 3600}h{(secondi % 3600) // 60:02d}m{secondi % 60:02d}s"
+    except ValueError:
+        quanto = "durata non calcolabile"
+    ok(f"il servizio risponde di nuovo (era giù da {caduta_da}, {quanto})")
+    if notifica:
+        telegram_notify(repo, f"🟢 vps1777: il servizio risponde di nuovo.\n"
+                              f"Era giù dalle {caduta_da} — {quanto}.")
+
+
 def cmd_check(repo: Path, args) -> int:
     st = state_load(repo)
     cur = current_version(repo)
@@ -1178,6 +1224,9 @@ def cmd_check(repo: Path, args) -> int:
     # cancellato tutti gli snapshot esistenti, incluso quello a cui tornare se
     # la versione corrente si rivelasse rotta.
     snapshot_prune(repo, keep=snapshot_latest(repo))
+    # H51 (b): prima del fetch, perché il giorno che la macchina sta peggio è anche
+    # quello in cui GitHub può risultare irraggiungibile — e da lì si esce subito.
+    _sorveglia_raggiungibilita(repo, st, bool(getattr(args, "notify", False)))
     try:
         rel = latest_release(repo)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:

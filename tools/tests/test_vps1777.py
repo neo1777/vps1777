@@ -637,6 +637,119 @@ def test_cosign_bypass_non_e_fatale_e_non_riarma_da_solo():
     assert "env_set(" not in sorgente, "il check non deve RISCRIVERE il .env dell'operatore"
 
 
+# ───── H51 (b): la porta guardata da fuori anche quando NON si aggiorna ─────
+# Il gate esterno della 0.40.6 guarda solo durante un update. Il 27/07 il guasto
+# è durato 1h27m50s e ad accorgersene è stata una persona che apriva l'indirizzo.
+# Questi test coprono le TRANSIZIONI, che sono la cosa che si sbaglia: non notificare
+# ogni giorno lo stesso guasto, e non tacere quando torna su.
+
+class _Spia:
+    """Sostituisce telegram_notify: raccoglie i messaggi invece di spedirli."""
+
+    def __init__(self):
+        self.messaggi = []
+
+    def __call__(self, repo, testo):
+        self.messaggi.append(testo)
+
+
+def _con_sonda(monkey_ok: bool, perche: str = ""):
+    """Installa una porta_esterna_ok finta e una spia sulle notifiche.
+    Ritorna (spia, ripristina)."""
+    spia = _Spia()
+    orig_sonda, orig_notify = v.porta_esterna_ok, v.telegram_notify
+    v.porta_esterna_ok = lambda repo, env=None: (monkey_ok, perche)
+    v.telegram_notify = spia
+
+    def ripristina():
+        v.porta_esterna_ok, v.telegram_notify = orig_sonda, orig_notify
+
+    return spia, ripristina
+
+
+def test_raggiungibilita_caduta_segna_l_istante_e_avvisa_una_volta():
+    spia, ripristina = _con_sonda(False, "nessuna porta pubblicata")
+    try:
+        st = {}
+        v._sorveglia_raggiungibilita(Path("/non/serve"), st, True)
+        assert st.get("irraggiungibile_da"), "senza l'istante la durata non si può misurare"
+        assert len(spia.messaggi) == 1
+        primo_istante = st["irraggiungibile_da"]
+        # secondo giro con lo stesso guasto: NON deve rinotificare né spostare l'istante
+        v._sorveglia_raggiungibilita(Path("/non/serve"), st, True)
+        assert len(spia.messaggi) == 1, "una notifica al giorno per lo stesso guasto è rumore"
+        assert st["irraggiungibile_da"] == primo_istante, (
+            "spostare l'istante a ogni giro farebbe misurare 0 di durata al ritorno")
+    finally:
+        ripristina()
+
+
+def test_raggiungibilita_ritorno_misura_la_durata_fra_i_due_istanti():
+    """CONTROPROVA della caduta: senza questo ramo l'avviso resterebbe acceso e
+    nessuno saprebbe quanto è durato — che è esattamente il numero che il 27/07
+    abbiamo dedotto sbagliando di dodici minuti."""
+    import datetime as _dt
+    spia, ripristina = _con_sonda(True, "raggiungibile")
+    try:
+        giu = (v.datetime.now(v.timezone.utc) - _dt.timedelta(hours=1, minutes=27, seconds=50))
+        st = {"irraggiungibile_da": giu.strftime("%Y-%m-%dT%H:%M:%SZ")}
+        v._sorveglia_raggiungibilita(Path("/non/serve"), st, True)
+        assert "irraggiungibile_da" not in st, "il marcatore resta e il prossimo guasto misura male"
+        assert len(spia.messaggi) == 1
+        assert "1h27m50s" in spia.messaggi[0], spia.messaggi[0]
+    finally:
+        ripristina()
+
+
+def test_raggiungibilita_servizio_sano_non_dice_niente():
+    """Il caso normale: nessun rumore. Un avviso che arriva anche quando va tutto
+    bene è un avviso che si impara a ignorare."""
+    spia, ripristina = _con_sonda(True, "raggiungibile")
+    try:
+        st = {}
+        v._sorveglia_raggiungibilita(Path("/non/serve"), st, True)
+        assert st == {} and spia.messaggi == []
+    finally:
+        ripristina()
+
+
+def test_raggiungibilita_non_misurata_non_e_un_allarme():
+    """`porta_esterna_ok` torna True quando non ha potuto misurare: la regola è
+    fallire solo con evidenza POSITIVA del guasto. Qui un falso rosso sveglia una
+    persona di notte per niente, e la volta dopo non la sveglia più."""
+    spia, ripristina = _con_sonda(True, "porta pubblicata, risposta non misurata")
+    try:
+        st = {}
+        v._sorveglia_raggiungibilita(Path("/non/serve"), st, True)
+        assert spia.messaggi == []
+    finally:
+        ripristina()
+
+
+def test_raggiungibilita_senza_notify_non_spedisce_ma_segna_lo_stesso():
+    """`vps1777 check` a mano non deve mandare Telegram — ma l'istante va segnato
+    comunque, o il giro successivo del timer crederebbe che sia appena caduto."""
+    spia, ripristina = _con_sonda(False, "giù")
+    try:
+        st = {}
+        v._sorveglia_raggiungibilita(Path("/non/serve"), st, False)
+        assert spia.messaggi == []
+        assert st.get("irraggiungibile_da")
+    finally:
+        ripristina()
+
+
+def test_raggiungibilita_e_cablata_in_check_e_prima_del_fetch():
+    """Il collegamento, e l'ORDINE: dev'essere chiamata prima di `latest_release`,
+    perché quando GitHub è irraggiungibile `cmd_check` esce subito — e quel giorno
+    è proprio il più probabile per un guasto."""
+    import inspect
+    src = inspect.getsource(v.cmd_check)
+    assert "_sorveglia_raggiungibilita" in src
+    assert src.index("_sorveglia_raggiungibilita") < src.index("latest_release("), (
+        "chiamata dopo il fetch: su GitHub irraggiungibile non verrebbe mai eseguita")
+
+
 # ───── il runner diretto vedeva 32 test su 39: il presidio del presidio ─────
 
 def test_il_runner_diretto_esegue_tutti_i_test_del_file():
