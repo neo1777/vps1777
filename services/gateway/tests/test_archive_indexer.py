@@ -387,6 +387,19 @@ _CC_BUCKETS = [
     '{"type":"queue-operation","operation":"flush"}',
     '{"type":"user","message":{"role":"user","content":"senza uuid ne ts"}}',
     '{"type":"user","uuid":"u-empty","timestamp":"2026-01-01T10:00:02Z","message":{"role":"user","content":[]}}',
+    # ── EMPTY-BLOCK: blocchi PRESENTI ma vuoti (aggiunti 25/07 da abdd732a) ────────
+    # 🔴 Perché non bastava `content: []`: il divario di **+6.919 record** del 17/07 non
+    #   veniva dai messaggi senza contenuto, ma da quelli col contenuto DICHIARATO E VUOTO
+    #   (9.813 casi nel bundle). Il contratto copriva la lista vuota e NON questa classe:
+    #   il canary restava verde su una fixture di 9 righe che non conteneva il caso per cui
+    #   il canary esiste. *Il divario lo trovò un diff full-bundle, non la guardia.*
+    # ⭐ Una guardia va collaudata sul caso che deve PRENDERE — e su quello che deve
+    #   LASCIAR PASSARE: l'ultimo record qui sotto è la controprova (testo vero → keep).
+    #   Senza di lei, «tutto skip» passerebbe il test come fosse un successo.
+    '{"type":"user","uuid":"u-txt0","timestamp":"2026-01-01T10:00:03Z","message":{"role":"user","content":[{"type":"text","text":""}]}}',
+    '{"type":"assistant","uuid":"a-think0","timestamp":"2026-01-01T10:00:04Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":""}]}}',
+    '{"type":"user","uuid":"u-tr0","timestamp":"2026-01-01T10:00:05Z","message":{"role":"user","content":[{"type":"tool_result","content":""}]}}',
+    '{"type":"user","uuid":"u-ok","timestamp":"2026-01-01T10:00:06Z","message":{"role":"user","content":[{"type":"text","text":"vero"}]}}',
 ]
 
 
@@ -407,7 +420,11 @@ def test_contratto_bucket_classify_cc() -> None:
         "skip:non-message",    # attachment senza addedNames
         "skip:non-message",    # queue-operation (type fuori da _CC_TYPES)
         "skip:no-uuid-o-ts",
-        "skip:empty",
+        "skip:empty",          # content: [] — lista vuota
+        "skip:empty",          # text: ""      — blocco presente, vuoto
+        "skip:empty",          # thinking: ""  — idem
+        "skip:empty",          # tool_result vuoto — idem
+        "keep:user",           # CONTROPROVA: testo vero → deve PASSARE
     ]
 
 
