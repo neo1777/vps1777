@@ -233,7 +233,7 @@ verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 46 |
+| **chiusi** | 47 |
 | **parziali** | 14 |
 | **accettati** | 1 |
 | **aperti** | 0 |
@@ -467,6 +467,24 @@ brucia la fiducia prima della volta in cui è vero**. Ora distingue tre stati �
 misurato, misurato e vuoto, N giorni — e sul *non misurato* non allarma: **segnala di
 essere cieco**, che è un'altra cosa e va saputa lo stesso. *Una domanda senza risposta non
 è una risposta cattiva.*
+
+Il registro ha imparato una cosa su sé stesso, ed è `H62`. Ogni voce **parziale** racconta
+il difetto per esteso — com'era, cosa si è fatto, cosa si è scartato e perché — e il pezzo
+che dice *cosa non è ancora fatto* finiva in fondo a quel racconto. Chi legge prende la
+denuncia lunga e si ferma lì. 🔴 **Non è un timore: è successo, e due volte lo stesso
+giorno.** Un'analisi esterna ha chiuso il suo intervento profetizzando un disastro
+imminente su una soglia che *nella versione che stava esaminando era già stata corretta* —
+aveva letto il difetto e non il rimedio, che stava nello stesso paragrafo, più in basso. E
+prima ancora due di noi avevano classificato quella stessa riga in modo **opposto**, in
+buona fede. *Quando un documento produce due letture contrarie fra chi l'ha scritto, il
+difetto non è nel lettore.*
+
+Ora ogni voce parziale porta **una riga sola** che dice cosa resta aperto oggi, separata dal
+racconto — con un tetto di lunghezza, *perché se serve un paragrafo quello che hai scritto è
+un altro racconto e il problema torna identico*. Tutte e quattordici sono state compilate
+rileggendo la loro storia, non a memoria. ⚠️ *Limite dichiarato: questo cura le voci
+parziali. Una voce chiusa il cui titolo nomina una cosa sola di un insieme che ne ha due
+resta illeggibile allo stesso modo — ed è una forma che abbiamo già incontrato due volte.*
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è

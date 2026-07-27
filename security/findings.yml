@@ -98,6 +98,8 @@ findings:
     severity: high
     title: "forwarded_allow_ips per profilo + contatore di fallimenti globale"
     status: partial
+    resta_aperto: >
+      Niente da fare: il contatore GLOBALE è scartato per scelta — su un sistema mono-utente farebbe l'auto-lockout dell'owner. `partial` per onestà, non per lavoro rimasto.
     since: v0.28.0
     why: >
       Con "*" uvicorn si fidava dell'X-Forwarded-For da qualunque peer: il client
@@ -118,6 +120,8 @@ findings:
     severity: high
     title: "Chiave age fuori dall'host; sulla VPS solo il recipient; push off-site"
     status: partial
+    resta_aperto: >
+      Il push off-site resta all'owner: vps1777 non trasferisce nulla in automatico, e non lo farà.
     since: v0.26.0
     why: >
       Backup e chiave di decifratura sullo stesso disco: la cifratura non protegge
@@ -241,6 +245,8 @@ findings:
     severity: medium
     title: "Sudoers dell'operator: da NOPASSWD:ALL a whitelist di comandi"
     status: partial
+    resta_aperto: >
+      L'operator è ancora root-equivalente via il gruppo `docker`: la whitelist sudo riduce la superficie, non de-privilegia. Toglierlo dal gruppo romperebbe l'update.
     since: v0.32.0
     evidence:
       - file: deploy.sh
@@ -312,6 +318,8 @@ findings:
     severity: medium
     title: "Password admin: nasce sul PC, viaggia solo come hash, policy unica"
     status: partial
+    resta_aperto: >
+      Se il PC non ha bcrypt, la password in chiaro attraversa SSH IN AVANTI invece dell'hash: non è «solo hash» al 100%.
     since: v0.32.0
     evidence:
       - file: deploy.sh
@@ -414,6 +422,8 @@ findings:
     severity: medium
     title: "Compose pinnato ai digest, non solo ai tag"
     status: partial
+    resta_aperto: >
+      Le 4 immagini vps1777 restano a tag mobile in compose.yaml: un `docker compose pull` lanciato fuori dalla CLI ri-risolve il tag senza controlli.
     since: v0.27.0
     evidence:
       - file: compose.ops.backup.yaml
@@ -446,6 +456,8 @@ findings:
     severity: medium
     title: "Protezione dei tag v* e permessi per-job nei workflow"
     status: partial
+    resta_aperto: >
+      `main` non ha branch protection e il CODEOWNERS non impone review a nessuno: serve un environment `release` con reviewer.
     since: v0.27.0
     why: >
       Le release sono firmate cosign KEYLESS DAL WORKFLOW. Senza protezione sui tag,
@@ -639,6 +651,8 @@ findings:
     severity: low
     title: "CSP della Mini App raffinata"
     status: partial
+    resta_aperto: >
+      Restano `style-src 'unsafe-inline'` e `frame-ancestors`: chiuderli senza un client Telegram reale romperebbe la Mini App invece di proteggerla.
     since: v0.32.0
     evidence:
       - file: services/gateway/app/miniapp.py
@@ -998,6 +1012,8 @@ findings:
     severity: high
     title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa nel codice, non ancora in produzione"
     status: partial
+    resta_aperto: >
+      Niente sul difetto, che è chiuso e misurato: restano due opzioni SCARTATE (refresh on-demand via path unit, egress ristretto a api.github.com) e la scelta è scritta.
     since: v0.40.3
     evidence:
       - file: compose.yaml
@@ -1113,6 +1129,8 @@ findings:
     severity: high
     title: "Il presidio di salute sonda dal lato in cui il guasto non si vede: healthcheck e health-gate interrogano il loopback DA DENTRO il container"
     status: partial
+    resta_aperto: >
+      La finestra cieca fra due giri del check: la classe è presidiata dove faceva male, non ovunque. Sonda continua verso Internet: si può fare, non è deciso.
     scoperta:
       quando: "2026-07-27"
       come: incidente
@@ -1288,6 +1306,8 @@ findings:
     severity: medium
     title: "Le garanzie di hardening sono certificate per STRINGA, non per comportamento: il gate cerca il testo nel file, non chiede al sistema che cosa applica"
     status: partial
+    resta_aperto: >
+      La regola «una voce che parla di un DOCUMENTO non può chiudersi con un solo `not_contains`» non è applicata: così com'è accuserebbe tre voci sane. Serve prima un modo di dichiarare l'oggetto della voce.
     rilievo_esterno:
       fonte: "analisi esterna del round-7 (audio 59332893)"
       difetto: vero
@@ -1425,6 +1445,8 @@ findings:
     severity: medium
     title: "Gate che non potevano fallire: lo step shellcheck in .github/workflows/ci.yml girava con `|| true`, e il lint copriva due percorsi su quattro"
     status: partial
+    resta_aperto: >
+      Niente sul difetto: gate riparati, shellcheck pinnato per digest, prove rieseguite. Resta `partial` perché `deploy.sh` è ancora FUORI dal perimetro del gate — misurato: il 70% dei rilievi sta lì.
     scoperta:
       quando: "2026-07-27"
       come: misura
@@ -1529,6 +1551,8 @@ findings:
     severity: medium
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
     status: partial
+    resta_aperto: >
+      La decisione A (container mediatore) o B (il bot che il token lo monta già): è un baratto vero su una macchina da 4 GB, e lo decide chi possiede la macchina.
     rilievo_esterno:
       fonte: "analisi esterna del round-7 (audio 59332893)"
       difetto: vero
@@ -1589,6 +1613,8 @@ findings:
     severity: medium
     title: "La telemetria poteva far cadere una riparazione: progress_write/status_write scrivevano nudi, e una PermissionError uccideva `vps1777 update` a metà"
     status: partial
+    resta_aperto: >
+      La causa a monte: la unit gira come root perché le servono docker e l'installazione del binario. È stato tolto il danno, non l'asimmetria.
     scoperta:
       quando: "2026-07-27"
       come: misura
@@ -1658,6 +1684,8 @@ findings:
     severity: medium
     title: "La seconda metà di H14 — nello snapshot pre-update archive-data resta IN CHIARO: funzionale al rollback, non rimovibile, e finora non scritto da nessuna parte"
     status: partial
+    resta_aperto: >
+      La cifratura a livello di volume o di disco — l'unica cura che non rompe il rollback. Si fa sul disco e non nel codice: è una decisione dell'owner.
     scoperta:
       quando: "2026-07-27"
       come: misura
@@ -2241,3 +2269,55 @@ findings:
       H55 verrà curato facendo girare la unit senza privilegi, H61 diventerebbe
       raggiungibile. È stato curato PRIMA di quel giorno, ed è l'unica ragione per cui la
       sequenza non produce un guasto.
+
+  - id: H62
+    severity: low
+    title: "Una voce `partial` racconta il difetto e seppellisce il rimedio: chi legge — noi comprese — la prende per una denuncia attuale"
+    status: closed
+    scoperta:
+      quando: "2026-07-27"
+      come: audio-esterno
+      nota: >
+        71d540e6, dalla divergenza del round-9: lei e abdd732a hanno classificato la stessa
+        riga di H58 in modo OPPOSTO — vera e falsa — e per scioglierla è servito aprire il
+        codice. La causa non era una lettura sbagliata: era che la voce non diceva da
+        nessuna parte cosa fosse ancora aperto.
+    natura: documento
+    since: v0.40.14
+    evidence:
+      - file: security/check_findings.py
+        contains:
+          - "def check_resta_aperto(f: dict, errors: list[str]) -> None:"
+      - file: security/findings.yml
+        contains:
+          - "    resta_aperto: >"
+    missing: >
+      IL FATTO, e ha una conseguenza MISURATA e non ipotetica. L'analisi esterna del
+      round-9 ha chiuso il suo intervento — l'ultima parola, il posto di massimo impatto —
+      profetizzando che «il giorno in cui il singolo backup peserà 4 GB, il sistema troverà
+      5 GB liberi, dirà semaforo verde e saturerà il disco». Alla versione d'arrivo
+      (v0.40.10) quella soglia era GIÀ calcolata dal backup più grande presente: verificato
+      al tag, `spazio_richiesto_update` esiste ed è chiamata. L'audio ha letto il DIFETTO
+      di H58 e non il suo RIMEDIO, che stava nello stesso paragrafo, più in basso.
+
+      ⭐ E prima ancora era successo a noi: due sessioni hanno classificato quella riga
+      VERA e FALSA, in buona fede, ed è servito leggere il codice per decidere. Quando un
+      documento produce due letture opposte fra chi l'ha scritto, il difetto non è nel
+      lettore.
+
+      LA FORMA: `missing:` racconta la STORIA — com'era, cosa si è fatto, cosa si è
+      scartato e perché. È il campo giusto per quella roba e non va tolto. Ma la domanda
+      «cosa NON è fatto adesso?» è un'altra, e finché le due convivevano nello stesso
+      paragrafo vinceva sempre la prima: è più lunga e viene prima.
+
+      IL RIMEDIO: campo `resta_aperto:` obbligatorio su ogni voce `partial`, una riga o
+      due, con un tetto di 400 caratteri — perché se serve un paragrafo quello che hai
+      scritto è un altro `missing:` e il problema torna identico. Il gate lo pretende:
+      controprova eseguita togliendolo da H54, rosso su quella voce sola, ripristinato
+      verde. Tutte e 14 le `partial` compilate leggendo il loro `missing:`, non a memoria.
+
+      ⚠️ LIMITE DICHIARATO, ed è la metà che questa regola NON risolve: una voce `closed`
+      il cui titolo nomina un SOTTOINSIEME resta illeggibile allo stesso modo. È la forma
+      di H42 (archive-data `:ro` in un servizio e `:rw` in un altro) e di H56 (H14 chiuso
+      su un volume su due). Quelle si curano allargando il titolo, non aggiungendo un
+      campo — e non le tocca nessuno oggi.

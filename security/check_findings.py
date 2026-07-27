@@ -68,8 +68,8 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 1 (H56 medium, 27/07) = 56. H56 è la seconda metà di H14, misurata sulla VPS viva
 # da abdd732a: lo snapshot pre-update tiene archive-data IN CHIARO (~2,58 GB) e nessuna
 # voce lo diceva — H14 era `closed` su un volume solo, il più piccolo.
-EXPECTED_TOTAL = 61
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 33, "low": 16}
+EXPECTED_TOTAL = 62
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 33, "low": 17}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
@@ -235,6 +235,49 @@ def solo_in_commenti(path: Path, needle: str) -> bool:
 # Una regola basata sulla natura non invecchia alla voce successiva; una basata
 # sul numero sì.
 NATURE = {"comportamento", "documento", "decisione"}
+
+
+def check_resta_aperto(f: dict, errors: list[str]) -> None:
+    """Una voce `partial` deve dire, in una riga, COSA RESTA APERTO OGGI.
+
+    IL CASO CHE L'HA GENERATA (27/07/2026, round-9, rilievo di 71d540e6): una voce
+    `partial` racconta il difetto per esteso e il rimedio lo seppellisce in fondo al
+    `missing:`. Chi legge — un umano di fretta o un'analisi esterna — prende la voce
+    per una DENUNCIA ATTUALE.
+
+    ⭐ E il costo l'abbiamo pagato lo stesso giorno, due volte:
+      · l'audio del round-9 ha chiuso il suo intervento profetizzando che «un giorno il
+        backup peserà 4 GB e la soglia fissa di 5 GB saturerà il disco» — ma alla
+        versione d'arrivo quella soglia era GIÀ calcolata. Ha letto il difetto di H58 e
+        non il suo rimedio, e ci ha costruito sopra la sua ultima parola.
+      · e prima ancora due di noi hanno classificato la stessa riga in modo opposto —
+        VERA e FALSA — e per scioglierla è servito aprire il codice.
+
+    🔑 `missing:` racconta la STORIA (com'era, cosa si è fatto, cosa si è scartato e
+    perché); `resta_aperto:` dice lo STATO (cosa non è fatto ADESSO). Sono due domande
+    diverse, e finché convivevano nello stesso paragrafo vinceva sempre la prima —
+    perché è più lunga e viene prima.
+
+    ⚠️ LIMITE DICHIARATO: risolve il caso `partial`. Una voce `closed` il cui titolo
+    nomina un sottoinsieme resta illeggibile allo stesso modo — è la forma di H42 e H56,
+    e questa regola non la tocca.
+    """
+    if f.get("status") != "partial":
+        return
+    riga = (f.get("resta_aperto") or "").strip()
+    if not riga:
+        fail(errors,
+             f"{f.get('id', '?')}: è `partial` ma non dice COSA RESTA APERTO.\n"
+             f"       `missing:` racconta la storia; serve una riga `resta_aperto:` che\n"
+             f"       dica lo STATO DI OGGI. Senza, chi legge prende il difetto\n"
+             f"       raccontato per esteso e lo crede ancora vivo — è successo il 27/07\n"
+             f"       a un'analisi esterna E a due di noi, sulla stessa voce.")
+        return
+    if len(riga) > 400:
+        fail(errors,
+             f"{f.get('id', '?')}: `resta_aperto` è lungo {len(riga)} caratteri.\n"
+             f"       Deve stare in una riga o due: se serve un paragrafo, quello che\n"
+             f"       hai scritto è un altro `missing:` e il problema torna identico.")
 
 
 def check_natura_e_prova(f: dict, errors: list[str], senza_natura: list[str]) -> None:
@@ -508,6 +551,7 @@ def main() -> int:
 
         if check_since(f, rilasciate, errors):
             non_rilasciate.append(fid)
+        check_resta_aperto(f, errors)
         check_natura_e_prova(f, errors, senza_natura)
         check_scoperta(f, errors, senza_scoperta)
         check_rilievo_esterno(f, errors)
