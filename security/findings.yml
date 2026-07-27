@@ -1287,6 +1287,19 @@ findings:
     severity: medium
     title: "Le garanzie di hardening sono certificate per STRINGA, non per comportamento: il gate cerca il testo nel file, non chiede al sistema che cosa applica"
     status: partial
+    rilievo_esterno:
+      fonte: "analisi esterna del round-7 (audio 59332893)"
+      difetto: vero
+      rimedio: sbagliato
+      inquadramento: stesso
+      nota: >
+        Il difetto — «il registro convalida un'etichetta di testo invece del
+        comportamento» — è vero e verificato. Il RIMEDIO che proponeva («la pipeline
+        fallisca se `systemctl show vps1777-update` non dà NoNewPrivileges=yes») avrebbe
+        rotto la build PER SEMPRE: quella unit usa sudo, che ha bisogno del bit setuid,
+        ed è scritto alla riga 17 del file che l'audio raccomandava di cambiare.
+        ⇒ Questa voce è il motivo per cui i tre verdetti esistono. Con una domanda sola
+        l'avremmo implementato.
     scoperta:
       quando: "2026-07-27"
       come: audio-esterno
@@ -1515,6 +1528,17 @@ findings:
     severity: medium
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
     status: partial
+    rilievo_esterno:
+      fonte: "analisi esterna del round-7 (audio 59332893)"
+      difetto: vero
+      rimedio: assente
+      inquadramento: piu-largo
+      nota: >
+        «Cinque segreti Docker in chiaro sul gateway, incluso il token Telegram»: il
+        difetto è vero, ma l'inquadramento era PIÙ LARGO del reale. Quattro di quei
+        cinque sono credenziali del gateway stesso, e chi prende il gateway le ha già
+        per definizione: la superficie aggiuntiva è UNA. «Cinque» risponde a «cosa
+        vede», «uno» a «cosa si guadagna a prenderlo». Nessun rimedio proposto.
     scoperta:
       quando: "2026-07-27"
       come: audio-esterno

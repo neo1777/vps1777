@@ -316,6 +316,54 @@ def check_scoperta(f: dict, errors: list[str], senza: list[str]) -> None:
         fail(errors, f"{fid}: `scoperta.come: {come}` non è valido (attesi: {sorted(COME_SCOPERTA)}).")
 
 
+# ── il rilievo che viene da FUORI si giudica su TRE assi (round-8) ────────────
+# Terzo rilievo dell'analisi esterna: «introdurre una matrice a due colonne per ogni
+# voce: la A valida il perimetro del difetto, la B valuta separatamente la soluzione.
+# Questo impedirebbe che una cura tossica invalidi una diagnosi corretta.»
+#
+# È vero, ed è costato caro: al round-7 la riga più pericolosa aveva DIFETTO VERO e
+# RIMEDIO che avrebbe rotto la build per sempre (NoNewPrivileges su una unit che usa
+# sudo). Chi avesse risposto a una domanda sola l'avrebbe implementata.
+#
+# ⚠️ Le colonne però sono TRE, non due, e la terza l'abbiamo pagata allo stesso round:
+#   difetto        ciò che l'audit DICE che è rotto — è vero?
+#   rimedio        ciò che propone — è giusto?
+#   inquadramento  il difetto che c'è DAVVERO è lo stesso che descrive?
+# Al round-7 un rilievo sul rollback era «vero a metà», e il difetto reale era un altro:
+# l'abbiamo trovato per conto nostro dopo, non grazie al metro. Un metro a due domande
+# fa passare l'INQUADRAMENTO dell'audit senza esaminarlo.
+VERDETTI = {
+    "difetto": {"vero", "vero-a-meta", "falso", "non-decidibile"},
+    "rimedio": {"giusto", "costoso", "sbagliato", "assente"},
+    "inquadramento": {"stesso", "diverso", "piu-stretto", "piu-largo"},
+}
+
+
+def check_rilievo_esterno(f: dict, errors: list[str]) -> None:
+    """Una voce nata da un'analisi esterna porta i TRE verdetti, o nessuno.
+
+    Non è pignoleria di schema: registrare «il difetto è vero» e agire è esattamente
+    come il round-7 ha quasi rotto la build. I tre campi obbligano a scrivere le tre
+    risposte — e a scoprire, scrivendole, quando divergono.
+    """
+    r = f.get("rilievo_esterno")
+    if r is None:
+        return
+    fid = f.get("id", "?")
+    if not r.get("fonte"):
+        fail(errors, f"{fid}: `rilievo_esterno` senza `fonte` — un rilievo di cui non si\n"
+                     f"       sa da dove viene non si può nemmeno rimandare indietro.")
+    for campo, ammessi in VERDETTI.items():
+        v = r.get(campo)
+        if v is None:
+            fail(errors,
+                 f"{fid}: `rilievo_esterno` senza `{campo}`. I tre verdetti si danno\n"
+                 f"       INSIEME o non si dà nessuno: al round-7 «il difetto è vero» da\n"
+                 f"       solo avrebbe fatto implementare un rimedio che rompeva la build.")
+        elif v not in ammessi:
+            fail(errors, f"{fid}: `{campo}: {v}` non è valido (attesi: {sorted(ammessi)}).")
+
+
 def check_evidence(f: dict, errors: list[str]) -> None:
     """L'evidenza di una voce esiste ancora nel codice?"""
     fid = f["id"]
@@ -462,6 +510,7 @@ def main() -> int:
             non_rilasciate.append(fid)
         check_natura_e_prova(f, errors, senza_natura)
         check_scoperta(f, errors, senza_scoperta)
+        check_rilievo_esterno(f, errors)
         check_evidence(f, errors)
         check_titolo_nomina_file(f, errors)
 
