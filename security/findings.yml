@@ -1878,7 +1878,13 @@ findings:
     evidence:
       - file: tools/backup.sh
         contains:
-          - "INCOMPLETO=\"$OUT\""
+          # l'invariante che conta ora è la RINOMINA, non il nome segnato: si
+          # scrive accanto e si rinomina alla fine. La riga precedente diceva
+          # `INCOMPLETO="$OUT"` ed è stata sostituita dalla cura del residuo —
+          # il gate se n'è accorto, ed è per questo che l'evidenza è puntuale
+          # invece di generica.
+          - "PARZIALE=\"$OUT.parziale\""
+          - "mv -f \"$PARZIALE\" \"$OUT\""
           - "meglio nessuno che uno troncato."
       - file: tools/vps1777.py
         contains:
