@@ -587,6 +587,25 @@ def health_gate(repo: Path, env: dict | None = None,
                 window_s: int = HEALTH_WINDOW_S) -> tuple[bool, str]:
     """True se tutti i servizi compose sono running+healthy E /health?deep=1
     risponde 200, per HEALTH_CONSECUTIVE poll consecutivi entro la finestra."""
+    # ── AGGANCIO DI COLLAUDO (H51/M4-b, 27/07) ────────────────────────────────
+    # PERCHÉ ESISTE. Il fail-closed dell'update — `if not healthy: rollback` a riga
+    # ~2280 — è il ramo che protegge la macchina da una release rotta, ed è l'unico
+    # pezzo importante di questo file che NESSUN TEST TOCCA: richiede docker, systemd
+    # e una release davvero malata. La tentazione era certificarlo staticamente
+    # (`assert "_rollback_routine" in getsource(...)`) e sarebbe stata H52 rifatta da
+    # noi: un verde su una STRINGA accanto a un ramo mai eseguito.
+    # 🔑 QUESTO AGGANCIO PUÒ SOLO DIRE «NO». Non esiste un modo di usarlo per far
+    # passare un update malato: forza il gate verso il rifiuto, che è la direzione
+    # sicura. Il peggio che può causare è un rollback non necessario — cioè
+    # esattamente il comportamento che serve collaudare.
+    # ⚠️ E si dichiara rumorosamente: se restasse acceso per sbaglio, ogni update
+    # tornerebbe indietro, e la riga qui sotto è la sola cosa che lo spiegherebbe a
+    # chi guarda i log alle tre di notte.
+    if os.environ.get("VPS1777_COLLAUDO_HEALTH_KO") == "1":
+        warn("VPS1777_COLLAUDO_HEALTH_KO=1: health-gate forzato a FALLIRE (aggancio "
+             "di collaudo). Se non stai eseguendo la prova-9, spegnilo: ogni update "
+             "tornerà indietro.")
+        return False, "collaudo: fallimento forzato via VPS1777_COLLAUDO_HEALTH_KO"
     deadline = time.monotonic() + window_s
     consecutive = 0
     baseline = restart_counts(repo)

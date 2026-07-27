@@ -1122,6 +1122,59 @@ def test_il_rientro_pulisce_lo_stato():
     assert "copertura_scesa_da" not in st
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# M4-b — l'aggancio di collaudo del health-gate.
+#
+# 📌 Questi tre casi sono nati SOTTO il blocco `__main__` e li ho spostati qui perché
+#    `test_il_runner_diretto_esegue_tutti_i_test_del_file` è andato ROSSO — il presidio
+#    scritto lo stesso giorno per quella trappola ha preso me, alla prima occasione.
+#    *Un `append` in fondo a un file di test è il gesto più naturale che esista, ed è
+#    esattamente per questo che quel presidio serviva.*
+#
+# Il fail-closed dell'update (`if not healthy: rollback`) è l'unico ramo importante
+# di vps1777.py che nessun test tocca: richiede docker, systemd e una release
+# davvero malata. L'aggancio permette di eseguirlo per davvero invece di
+# certificarlo con una stringa — che sarebbe H52 rifatta da noi.
+#
+# Questi casi pinnano la sola cosa che conta dell'aggancio: che possa dire NO e
+# che NON possa dire sì, e che si accenda solo col valore esatto.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_aggancio_collaudo_forza_il_no(monkeypatch, tmp_path):
+    monkeypatch.setenv("VPS1777_COLLAUDO_HEALTH_KO", "1")
+    ok, why = v.health_gate(tmp_path)
+    assert ok is False
+    assert "collaudo" in why
+
+
+def test_aggancio_collaudo_si_accende_solo_con_1(monkeypatch, tmp_path):
+    """Un valore diverso da «1» NON deve accenderlo.
+
+    Non è pignoleria: `VPS1777_COLLAUDO_HEALTH_KO=0` significa «spento» per
+    chiunque lo legga, e un aggancio che si accende con qualunque stringa
+    trasformerebbe quella riga in una trappola. Qui si verifica che con «0» la
+    funzione NON restituisca la ragione di collaudo — se prosegue e fallisce per
+    altro (niente docker in CI) va bene: quello che non deve fare è dire
+    «collaudo».
+    """
+    for valore in ("0", "", "true", "si"):
+        monkeypatch.setenv("VPS1777_COLLAUDO_HEALTH_KO", valore)
+        try:
+            _, why = v.health_gate(tmp_path, window_s=0)
+        except Exception:
+            continue          # senza docker può sollevare: non è questo il punto
+        assert "collaudo" not in why, f"acceso a torto con «{valore}»"
+
+
+def test_aggancio_collaudo_spento_di_default(monkeypatch, tmp_path):
+    monkeypatch.delenv("VPS1777_COLLAUDO_HEALTH_KO", raising=False)
+    try:
+        _, why = v.health_gate(tmp_path, window_s=0)
+    except Exception:
+        return                # niente docker: il ramo di collaudo non è stato preso
+    assert "collaudo" not in why
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
