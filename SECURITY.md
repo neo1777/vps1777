@@ -233,8 +233,8 @@ verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 42 |
-| **parziali** | 17 |
+| **chiusi** | 44 |
+| **parziali** | 15 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -403,7 +403,7 @@ notte per volta, tornando a sette il 2 agosto. Non è un residuo del rimedio: è
 che il difetto aveva già fatto, e sta scritto perché nessuno legga qui una riparazione
 più completa di quella che è.
 
-Il sedicesimo è `H59`, ed è **il difetto di `H57` salito di un piano**. Lo script dei
+`H59` è **il difetto di `H57` salito di un piano**, ed è chiuso e verificato sulla macchina. Lo script dei
 backup chiudeva dicendo «copie totali mantenute: 7». Un **conteggio**, mentre la promessa
 che quello script mantiene è in **giorni**. Il 27 luglio ha detto «7» quando i giorni
 erano tre, e poi ancora «7» quando erano due: *non ha mai mentito e non ha mai detto
@@ -423,7 +423,7 @@ copie si sostituiscono, non si perdono. *Residuo dichiarato: quel massimo non sc
 quindi accorciare di proposito la conservazione lascerebbe l'avviso acceso finché
 qualcuno non tocca lo stato.*
 
-Il diciassettesimo è `H60`, ed è **una nostra regola violata da noi**. La regola dice:
+`H60` è **una nostra regola violata da noi**, e il controllo che ora la applica è in produzione. La regola dice:
 nessun indirizzo, nome o URL della macchina, in nessuna forma — nemmeno in un esempio,
 nemmeno nell'output di una prova. Era scritta, la applicavamo a mano, e **nessun controllo
 la faceva rispettare**. Il 27 luglio un indirizzo pubblico è entrato nel repo dentro una
@@ -456,10 +456,20 @@ errori passati.*
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è
-soltanto committato. `H57` è **chiuso e misurato sulla macchina** (rotazione eseguita in
-produzione, 12 GB liberati); `H58` resta **parziale per una cosa sola e dichiarata**: la
-scrittura della copia non è atomica, quindi contro uno spegnimento brutale il file
-troncato resterebbe.
+soltanto committato. `H57`, `H59` e `H60` sono **chiusi e misurati sulla macchina**; `H58` resta **parziale per
+una cosa sola e dichiarata**: la scrittura della copia non è atomica, quindi contro uno
+spegnimento brutale il file troncato resterebbe.
+
+⭐ **E installando il controllo sulla copertura è arrivata la conferma che serviva**: quel
+secondo aggiornamento **non è costato un giorno**. La copia fatta prima di aggiornare ha
+*sostituito* quella dello stesso giorno invece di aggiungersi — prima due giorni, dopo
+due. *Aggiornare non consuma più la storia*, ed è la prova sul campo che il primo rimedio
+funziona, arrivata da un'operazione fatta per tutt'altro. ⚠️ Resta vero che oggi la
+copertura è di **due giorni** e tornerà a sette il 2 agosto: il controllo adesso lo **dice
+a ogni giro** invece di lasciarlo dedurre, che è tutto quello che poteva fare.
+
+📌 E su `H60`, «chiuso» significa **il controllo**, non il dato: l'indirizzo resta nella
+storia del repo e nelle tre versioni, per decisione del proprietario.
 
 Gli altri **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
 il loro *perché* nel registro:

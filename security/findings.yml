@@ -1942,7 +1942,7 @@ findings:
   - id: H59
     severity: medium
     title: "La finestra di ripristino si accorcia in silenzio: il rendiconto dei backup è un CONTEGGIO mentre la promessa è in GIORNI, e nessuna sonda guarda quel numero"
-    status: partial
+    status: closed
     scoperta:
       quando: "2026-07-27"
       come: misura
@@ -1953,7 +1953,20 @@ findings:
         2 giorni distinti" questa cosa si sarebbe vista da sola, stamattina, senza che
         nessuna la cercasse».
     natura: comportamento
-    since: v0.40.10
+    since: v0.40.11
+    prova:
+      - comando: "ssh <vps> 'cd /home/vps1777/vps1777 && bash tools/backup.sh --prune-only'  # v0.40.11"
+        output: "copertura: 2 giorni distinti (2026-07-26 → 2026-07-27) sui 7 promessi — con la nota su come leggerlo · «Backup totali mantenuti: 2 file»"
+        exit: 0
+        quando: "2026-07-27"
+      - comando: "ssh <vps> 'python3 tools/vps1777.py check'  # la sorveglianza nel check giornaliero"
+        output: "[!] copertura backup: 2 giorni distinti (2026-07-26 → 2026-07-27) sui 7 promessi"
+        exit: 0
+        quando: "2026-07-27"
+      - comando: "bash tools/tests/test-backup-retention.sh · python3 tools/tests/test_vps1777.py"
+        output: "9 passati 0 falliti · 4 unit sulla sorveglianza verdi; controprova senza il blocco copertura: ⑦⑧⑨ rossi, ①-⑥ verdi"
+        exit: 0
+        quando: "2026-07-27"
     evidence:
       - file: tools/backup.sh
         contains:
@@ -2005,14 +2018,24 @@ findings:
       non tocca lo stato. È il prezzo di non avere una soglia configurabile, ed è scritto
       qui invece di essere scoperto.
 
-      COSA MANCA per `closed`: è in `main` e provato su nove casi a risposta nota (sei per
-      la ritenzione, tre per il rendiconto) più quattro unit sulla sorveglianza, con la
-      controprova vista rossa. NON è in produzione.
+      CHIUSA il 27/07 con la v0.40.11 in produzione e le prove ESEGUITE sulla macchina:
+      il rendiconto parla in giorni e avvisa, la sorveglianza gira dentro `check`.
+
+      ⭐ E LA MISURA CHE VALE PIÙ DELLE ALTRE, presa installando questa stessa release:
+      l'update NON è costato un giorno. Alla 0.40.10 il backup pre-update girava ancora
+      col codice vecchio e aveva potato il 25 luglio; qui il backup nuovo del 27 ha
+      SOSTITUITO quello del 27 invece di aggiungersi — prima 2 giorni, dopo 2 giorni.
+      *Aggiornare non consuma più la storia: è la conferma sul vivo che H57 è curato, ed è
+      arrivata da un'operazione fatta per altro.*
+
+      ⚠️ RESIDUO REALE E NON DEL FIX: la copertura sulla macchina è di DUE giorni e ci
+      resta finché le notti non la riempiono — sette il 2 agosto. Il presidio adesso lo
+      DICE a ogni giro invece di lasciarlo dedurre, che è tutto ciò che poteva fare.
 
   - id: H60
     severity: low
     title: "Una regola scritta e non presidiata: un indirizzo pubblico è vissuto otto ore in `main` e in tre release, entrato con il commit che implementava la raccomandazione di un audit"
-    status: partial
+    status: closed
     scoperta:
       quando: "2026-07-27"
       come: lettura
@@ -2023,7 +2046,20 @@ findings:
         dall'audio-7. Verificato da b82df434 prima di applicarlo, e con una correzione di
         merito (sotto).
     natura: comportamento
-    since: v0.40.10
+    since: v0.40.11
+    prova:
+      - comando: "python3 security/check_no_leaks.py  (con un file nuovo contenente un IP pubblico)"
+        output: "[R3] esca-di-prova.txt:1 → un indirizzo IP pubblico (valore non stampato di proposito)"
+        exit: 1
+        quando: "2026-07-27"
+      - comando: "python3 security/check_no_leaks.py  (albero pulito)"
+        output: "✓ gate anti-leak: nessun export di sessione tracciato, nessun materiale credenziale."
+        exit: 0
+        quando: "2026-07-27"
+      - comando: "python3 tools/tests/test_no_leaks.py"
+        output: "11 casi a risposta nota, tutti ok — sei dei quali contro i FALSI rossi (§4.1.2.1, 2.581.040.640, versioni, reti private, RFC 5737, il segnaposto tailnet)"
+        exit: 0
+        quando: "2026-07-27"
     evidence:
       - file: security/check_no_leaks.py
         contains:
@@ -2094,9 +2130,13 @@ findings:
       resta esente da R2 e NON da R3. Un'esenzione concessa per una ragione non deve
       estendersi a tutte le ragioni.
 
-      COSA MANCA per `closed`: il presidio è provato (11 casi a risposta nota, metà dei
-      quali contro i FALSI rossi — un gate che grida al lupo viene spento) e visto rosso
-      su due casi reali. Non è ancora girato in CI su una release.
+      CHIUSA il 27/07 con la v0.40.11: il presidio gira in CI su una release, è stato
+      visto rosso su DUE casi reali e non costruiti (il segnaposto dell'installer e
+      un'esca in un file nuovo), ed è provato su 11 casi a risposta nota.
+      ⚠️ MA «chiuso» qui vuol dire IL PRESIDIO, non il dato: l'indirizzo resta nella storia
+      di git e nei tre tag, per decisione datata di Neo («di monito ai posteri»). Lo stato
+      onesto dell'esposizione è «non più in vista», non «rimosso» — ed è scritto anche in
+      SECURITY.md perché nessuno legga il verde come una cancellazione.
       ⚠️ RESIDUO DICHIARATO, e va guardato con gli occhi: `security/check_no_leaks.py` e
       `tools/tests/test_no_leaks.py` sono esenti da R3, perché gli indirizzi li contengono
       per mestiere. Sono i due soli posti in cui un indirizzo vero potrebbe nascondersi
