@@ -233,8 +233,8 @@ verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 44 |
-| **parziali** | 16 |
+| **chiusi** | 45 |
+| **parziali** | 15 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 

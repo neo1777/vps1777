@@ -2146,7 +2146,7 @@ findings:
   - id: H61
     severity: low
     title: "Il presidio nato da H59 confondeva «cartella illeggibile» con «zero backup», e avrebbe gridato «i tuoi backup sono spariti» per un problema di permessi"
-    status: partial
+    status: closed
     scoperta:
       quando: "2026-07-27"
       come: lettura
@@ -2157,7 +2157,20 @@ findings:
         prima di correggerla: leggibile → (2, date), ILLEGGIBILE → (0, None, None),
         assente → (0, None, None). Tre stati, due valori.
     natura: comportamento
-    since: v0.40.11
+    since: v0.40.12
+    prova:
+      - comando: "ssh <vps> runuser -u <utente-servizio> -- python3 <tri-stato sul codice INSTALLATO, cartella finta>  # v0.40.12"
+        output: "leggibile → (2, '2026-07-26', '2026-07-27') · ILLEGGIBILE → (None, None, None) · allarme-perdita armato? NO · massimo storico intatto? True · cecità dichiarata? True"
+        exit: 0
+        quando: "2026-07-27"
+      - comando: "lo stesso script eseguito come ROOT sulla stessa macchina"
+        output: "ILLEGGIBILE → (2, ...) — root ignora i permessi: NON riproduce la condizione, e infatti la prima stesura di questa prova non provava niente"
+        exit: 0
+        quando: "2026-07-27"
+      - comando: "python3 tools/tests/test_vps1777.py"
+        output: "4 casi nuovi verdi: illeggibile≠zero · assente=zero · il rientro pulisce la cecità · il massimo storico non si muove sul non-misurato"
+        exit: 0
+        quando: "2026-07-27"
     evidence:
       - file: tools/vps1777.py
         contains:
@@ -2198,6 +2211,19 @@ findings:
       presidio che non può vedere è esso stesso una cosa da sapere. Una domanda senza
       risposta non è una risposta cattiva.
 
-      COSA MANCA per `closed`: quattro casi a risposta nota verdi (illeggibile, assente,
-      il rientro dalla cecità, e il massimo storico che non si muove sul non-misurato).
-      NON è ancora in produzione.
+      CHIUSA il 27/07 con la v0.40.12 in produzione e la prova eseguita sulla macchina.
+
+      🔴 E LA PRIMA STESURA DI QUELLA PROVA NON PROVAVA NIENTE — quinta controprova rotta
+      della giornata, sempre per lo stesso motivo. Girava come ROOT, e root ignora i
+      permessi: `chmod 000` non impediva la lettura, quindi il caso «illeggibile» tornava
+      (2, date) come il caso leggibile. Rifatta con `runuser` verso l'utente del servizio,
+      e lì la condizione si riproduce. ⭐ La forma, di nuovo: verificavo l'oggetto vicino a
+      quello che conta — e stavolta l'oggetto sbagliato era il PRIVILEGIO con cui misuravo.
+
+      ⭐ E IL CONFRONTO FRA I DUE RUN DICE UNA COSA CHE VALE PIÙ DELLA CHIUSURA: la
+      condizione di H61 oggi NON PUÒ accadere su questa macchina, perché la unit gira come
+      root — che è esattamente il residuo dichiarato in H55, ancora aperto. Un residuo ne
+      maschera un altro: finché il primo resta, il secondo è invisibile; il giorno in cui
+      H55 verrà curato facendo girare la unit senza privilegi, H61 diventerebbe
+      raggiungibile. È stato curato PRIMA di quel giorno, ed è l'unica ragione per cui la
+      sequenza non produce un guasto.
