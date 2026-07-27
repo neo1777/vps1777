@@ -62,7 +62,17 @@ findings:
       su un'installazione standard.
     evidence:
       - file: tools/vps1777.py
-        contains: ["VPS1777_REQUIRE_COSIGN", "_ensure_cosign", "verify-blob"]
+        # L'ago era il nome nudo `VPS1777_REQUIRE_COSIGN`: lo soddisfa anche una
+        # menzione in un messaggio d'errore o in una nota. Ora è ancorato alla LETTURA
+        # della variabile — la forma `get("…", "")` non compare in nessun commento e
+        # non si scrive per caso. Rilievo di abdd732a (27/07); il conteggio con cui
+        # l'aveva portato non combaciava col mio (lei 6 occorrenze su 8 in commento,
+        # io 3 su 8, misurate riga per riga), ma il rimedio regge indipendentemente
+        # dal conteggio — ed è il motivo per cui l'ho preso lo stesso.
+        contains:
+          - 'get("VPS1777_REQUIRE_COSIGN", "")'
+          - "_ensure_cosign"
+          - "verify-blob"
     note: >
       Attenzione: la firma prova DA QUALE WORKFLOW viene un artefatto, non che
       qualcuno abbia AUTORIZZATO quel rilascio. Vedi H24 (tag non protetti).
@@ -1333,6 +1343,28 @@ findings:
       e cinque legittimi come ricevute (H50 ×3, H51 ×1, H56 ×1). Il difetto non era
       che esistessero: era che il registro non distingueva una ricevuta da un presidio,
       e chi leggeva non poteva sapere quale delle due stesse guardando.
+
+      E UNA SECONDA MISURA, che ha ristretto il problema invece di allargarlo: gli aghi
+      MISTI — presenti sia nel codice sia in un commento — sono 19 su 56 voci. Sembravano
+      la coda del difetto e NON LO SONO: se il codice sparisce restano solo i commenti, e
+      a quel punto il controllo qui sopra li prende. Il caso misto è già coperto.
+
+      🔴 QUEL CHE RESTA DAVVERO, ed è più stretto e più cattivo: un ago la cui unica
+      occorrenza «in codice» è dentro una STRINGA — un messaggio d'errore, una nota,
+      un testo di log — invece che in un'istruzione che fa qualcosa. Là il gate vede
+      codice e sta guardando prosa. Trovato e corretto su H2 (`critical`): l'ago era il
+      nome nudo `VPS1777_REQUIRE_COSIGN`, e 3 delle 8 occorrenze erano commenti mentre
+      altre 2 erano stringhe di messaggio. Ora è ancorato a `get("…", "")`, cioè alla
+      LETTURA della variabile: forma che nessun commento scrive e che non capita per
+      caso. Controprova: tolta la lettura e lasciate tutte le menzioni → il gate diventa
+      rosso, dove prima sarebbe rimasto verde.
+      NON meccanizzato: distinguere «dentro una stringa» da «istruzione» richiede di
+      leggere l'albero sintattico, e solo per il Python — i compose e gli script di shell
+      resterebbero fuori. È scritto qui invece che risolto di corsa.
+      📌 Il rilievo è di abdd732a. Il suo conteggio su H2 (6 occorrenze su 8 in commento)
+      non combacia col mio (3 su 8, misurate riga per riga e stampate): non l'ho ratificato
+      e non l'ho scartato — ho preso il RIMEDIO, che regge indipendentemente dal numero,
+      e ho detto la divergenza invece di lasciarla passare.
 
       MISURATA E NON APPLICATA, la regola più forte: «ogni voce deve avere almeno un
       ancoraggio comportamentale — un `contains` in un file di codice, o un
