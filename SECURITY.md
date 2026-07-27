@@ -232,7 +232,7 @@ in CI:
 | | |
 |---|---|
 | **chiusi** | 41 |
-| **parziali** | 8 |
+| **parziali** | 9 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -244,16 +244,36 @@ mono-utente dietro Tailscale Funnel, con password bcrypt-12 + lockout per-IP + C
 + revoca reale della sessione; il 2FA aggiungerebbe attrito per un guadagno marginale
 su questo profilo. È una decisione, non una dimenticanza.
 
-L'ottavo **parziale** è `H50`, il più recente e il solo trovato da una misura invece
-che da una lettura: il gateway — il servizio esposto, quello che monta i secret —
-aveva un'uscita verso qualunque host su Internet. Il codice ora la chiude (la rete
-`ingress` non è più dichiarata nel compose di base; la ri-mette solo il profilo che
-ne ha bisogno), ma la voce resta parziale finché il fix non gira in produzione e la
-prova empirica non lo conferma sul vivo: **fix scritto e fix che gira sono due stati
-diversi, e il registro tiene la differenza** invece di dichiarare chiuso ciò che è
+L'ottavo **parziale** è `H50`, il primo trovato da una misura invece che da una
+lettura: il gateway — il servizio esposto, quello che monta i secret — aveva
+un'uscita verso qualunque host su Internet. Ora è **chiusa in produzione**, e non
+per un commit: l'aggiornamento automatico ha installato il fix da sé e la prova
+empirica è passata da FAIL a PASS senza che nessuno toccasse la macchina, con la
+controprova che dallo stesso momento un altro container esce regolarmente (senza
+quella, un timeout non distingue un blocco mirato da una rete guasta). Resta
+parziale perché negli altri due profili d'ingresso (caddy, cloudflared) il gateway
+riprende la rete condivisa col proxy, e lì l'uscita è ancora aperta.
+
+Il nono è `H51`, e non viene da un audit: viene da un **guasto vero**. Quel fix di
+`H50`, applicato, ha reso il servizio irraggiungibile da Internet per un'ora e
+quaranta — il gateway era rimasto solo su una rete interna, e **da una rete interna
+una porta non si può pubblicare**: Docker accetta l'istruzione e non la esegue,
+senza dirlo. La parte che conta non è l'errore, è che **tre controlli indipendenti
+hanno dato verde mentre il servizio era giù**: il controllo di salute del container
+(che interroga sé stesso dall'interno, dove la porta risponde sempre), il comando
+che mostra la configurazione (che dice cosa è *dichiarato*, non cosa Docker riesce
+ad applicare) e il cancello dell'aggiornamento automatico — che per questo **non ha
+fatto marcia indietro**. Se ne è accorta una persona, aprendo l'indirizzo. Ora esiste
+una prova che guarda la porta **da fuori** del container, ed è stata verificata sui
+due esiti: verde sul servizio sano, rossa su uno rotto apposta. Resta parziale
+perché quella prova qualcuno deve lanciarla: il cancello dell'aggiornamento non la
+esegue ancora, quindi lo stesso guasto passerebbe di nuovo.
+
+**Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
+altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è
 soltanto committato.
 
-I **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
+Gli altri **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
 il loro *perché* nel registro:
 
 - **Scelte deliberate** (resteranno tali): il *contatore globale* di `H4` (auto-lockout

@@ -44,12 +44,15 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # commit deliberato che nomina le voci nuove — mai per far passare la CI.
 # Provenienza dei numeri: 43 dal dossier della review difensiva originaria
 # (2 critical · 7 high · 21 medium · 13 low) + 7 dal ciclo di audit con misure
-# sul vivo chiuso in v0.40.3 (H44-H48 medium · H49 low · H50 high) = 50.
+# sul vivo chiuso in v0.40.3 (H44-H48 medium · H49 low · H50 high) = 50,
+# + 1 (H51 high, 27/07) = 51. H51 non nasce da una lettura: nasce da un
+# incidente in produzione — il presidio di salute sonda il loopback da dentro
+# il container e non può vedere un servizio irraggiungibile.
 # NB: questo scostamento è rimasto invisibile per un giorno intero perché
 # tutti leggevamo la coda dell'output senza l'exit code — il registro era a
 # 44+ dal round-2 e ogni «checker verde» dichiarato quel giorno era falso.
-EXPECTED_TOTAL = 50
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 8, "medium": 26, "low": 14}
+EXPECTED_TOTAL = 51
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 9, "medium": 26, "low": 14}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

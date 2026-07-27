@@ -945,6 +945,10 @@ findings:
         contains: ["Refresh non disponibile", "non è un guasto"]
       - file: tools/prove-empiriche/prova-1-gateway-non-esce.sh
         contains: ["il gateway raggiunge Internet"]
+      - file: compose.ingress.tailscale.yaml
+        contains:
+          - "enable_ip_masquerade"
+          - "NON SI PUÒ PUBBLICARE DA UNA RETE"
     missing: >
       MISURATO sul vivo (26/07/2026, prova-1, profilo Tailscale Funnel): il gateway
       ESCE su Internet a livello TCP (socket verso 1.1.1.1:443 riuscito dentro il
@@ -984,12 +988,49 @@ findings:
       due cause sia, perché il gateway non può distinguere «non ho rete» da
       «GitHub non risponde». 175 test del gateway verdi.
 
-      PERCHÉ RESTA `partial` E NON `closed`: il fix è nel CODICE, non in
-      PRODUZIONE. La VPS gira una versione in cui il gateway ha ancora l'uscita:
-      si chiude quando una release che contiene questo commit è applicata e
-      prova-1 lo conferma sul vivo (oggi dà FAIL, deve diventare PASS da sola).
-      È la stessa distanza fra «fix scritto» e «fix che gira» che il round-5 ha
-      misurato in sei giorni e un rilascio.
+      IN PRODUZIONE DAL 27/07 07:56, e l'uscita è chiusa DAVVERO: l'auto-update
+      ha installato la 0.40.5 da sé e prova-1 è passata da FAIL a PASS senza che
+      nessuno toccasse la macchina — socket verso 1.1.1.1:443 in TimeoutError dal
+      gateway, e la controprova positiva dal container del bot, dove lo stesso
+      socket RIESCE (senza quella, un timeout non distingue «blocco mirato» da
+      «rete guasta»). È la prima volta in sei round che un FAIL misurato si chiude
+      con una misura e non con uno sha.
+
+      🔴 MA IL FIX HA ROTTO LA PRODUZIONE PER 1h40m, ed è la parte che conta.
+      Tolta `ingress`, il gateway è rimasto SOLO su `backend`, che è
+      `internal: true` — e da una rete `internal` UNA PORTA NON SI PUÒ PUBBLICARE:
+      docker accetta la direttiva `ports:` e non la applica, in silenzio. Il
+      Funnel bussava a 127.0.0.1:8080 e non c'era nessun listener. Misurato con
+      tre strumenti indipendenti: `docker port` vuoto, `ss -ltn` senza 8080,
+      connessione rifiutata.
+
+      COME È PASSATO IL CONTROLLO: qui sopra c'è scritto «VERIFICATO eseguendo
+      `docker compose config` su tutti e tre i profili, non leggendo». Era vero e
+      INUTILE — `config` dice che cosa è DICHIARATO, non che cosa docker riesce ad
+      APPLICARE, e infatti mostrava il port mapping corretto mentre il servizio era
+      giù. Aver eseguito uno strumento non è aver misurato l'effetto: la frase
+      resta scritta com'era, con accanto il suo esito, perché è il reperto.
+
+      CURA (27/07, verificata sui due esiti prima di dichiararla): una rete bridge
+      dedicata al profilo Tailscale — `funnel` in compose.ingress.tailscale.yaml —
+      con `com.docker.network.bridge.enable_ip_masquerade: "false"`. Il DNAT in
+      ingresso resta (la porta si pubblica e serve), l'SNAT in uscita no (i
+      pacchetti verso Internet partono con un IP privato e non tornano). Misurata
+      su due versioni di docker — 20.10.24 sulla VPS e 29.4.1 in laboratorio — e
+      sul vivo dopo l'applicazione: porta pubblicata, HTTP 200 dall'host, HTTP 200
+      dall'esterno attraverso il Funnel, uscita in TimeoutError, controprova dal
+      bot aperta.
+
+      PERCHÉ UNA RETE NUOVA E NON `ingress` COL MASQUERADE SPENTO: `ingress` è la
+      rete su cui il gateway parla con caddy e cloudflared negli altri due profili,
+      e cloudflared DEVE uscire su Internet per funzionare. Spegnere il masquerade
+      lì avrebbe chiuso questo buco rompendo quel profilo.
+
+      PERCHÉ RESTA `partial` E NON `closed`: nei profili caddy e cloudflared il
+      gateway ridichiara `ingress`, che ha il masquerade attivo — lì l'uscita NAT
+      è ancora aperta. Chiuso per il profilo in produzione (Tailscale), aperto per
+      gli altri due. Si chiude quando anche quelli hanno una via d'ingresso senza
+      uscita, oppure quando la si accetta con una motivazione scritta.
 
       SOLUZIONI SCARTATE, e perché — così non si ridiscutono da zero:
       (b) il bottone scrive un INTENT che l'host consuma (pattern collect→apply,
@@ -999,3 +1040,56 @@ findings:
           riserva: si fa solo se il refresh on-demand si rivelasse necessario.
       (c) egress ristretto alla sola api.github.com (allowlist di rete): fragile
           ai cambi di IP di GitHub e complica il deploy. Scartata.
+
+  - id: H51
+    severity: high
+    title: "Il presidio di salute sonda dal lato in cui il guasto non si vede: healthcheck e health-gate interrogano il loopback DA DENTRO il container"
+    status: partial
+    since: v0.40.6
+    evidence:
+      - file: tools/prove-empiriche/prova-7-porta-pubblicata-davvero.sh
+        contains:
+          - "dall'host, la porta esiste e risponde?"
+          - "VPS1777_SERVIZIO"
+      - file: compose.ingress.tailscale.yaml
+        contains: ["enable_ip_masquerade"]
+    missing: >
+      MISURATO sul vivo, come incidente vero e non come ipotesi (27/07/2026,
+      ~07:52-09:32, 1h40m di irraggiungibilità pubblica del servizio).
+
+      IL DIFETTO: lo healthcheck del gateway esegue, DENTRO il container, una
+      richiesta a http://127.0.0.1:8080/health. Sul loopback interno la porta
+      risponde SEMPRE — anche quando dall'esterno non è pubblicata affatto.
+      `healthy` non significa «raggiungibile»: significa «il processo parla con
+      sé stesso». L'health-gate dell'auto-update usa lo stesso segnale, quindi
+      la CATENA DI ROLLBACK AUTOMATICO eredita la stessa cecità.
+
+      COSA È SUCCESSO, e perché è una classe e non un incidente: il fix di H50
+      ha lasciato il gateway solo su `backend` (`internal: true`), e da una rete
+      internal una porta NON SI PUÒ PUBBLICARE — docker accetta `ports:` e non
+      la applica, in silenzio. Durante tutto il guasto:
+        · il container risultava `healthy`                     → nessun allarme
+        · `docker compose config` mostrava il port mapping     → nessun allarme
+        · l'health-gate ha dato OK e NON ha fatto rollback     → nessun allarme
+      Tre verdi indipendenti su un servizio giù. Il guasto l'ha visto una
+      persona aprendo l'URL. Un presidio che non può osservare il guasto che
+      dovrebbe osservare non tace: DÀ VERDE, ed è peggio del silenzio.
+
+      COSA È GIÀ FATTO (perché `partial` e non `open`): esiste la prova-7, che
+      misura dall'HOST — fuori dal container — che la porta sia pubblicata E che
+      risponda, e distingue «non applicabile» (profilo con proxy in container)
+      da PASS, uscendo 2 e mai 0. Provata sui DUE esiti prima di essere
+      dichiarata: PASS sul gateway reale, FAIL su un container deliberatamente
+      privo di porta pubblicata (exit 1). Limite noto: il ramo che segnala
+      «il container è `healthy` lo stesso» non è stato esercitato — il container
+      di controprova non aveva healthcheck.
+
+      COSA MANCA: la prova-7 è uno strumento che qualcuno deve LANCIARE. Il
+      guasto resta invisibile ai presìdi che girano DA SOLI:
+        (a) l'health-gate dell'update non la esegue → un aggiornamento che
+            rende il servizio irraggiungibile continua a non fare rollback.
+            È il residuo più grave: è la stessa mattina, ripetibile.
+        (b) nessun controllo periodico sonda la porta dall'esterno.
+      Finché (a) è aperto, questa voce non si chiude: la lezione è scritta ma
+      il sistema non la applica da sé — ed è esattamente la distanza fra «lo
+      sappiamo» e «ci difende» che questo registro esiste per misurare.
