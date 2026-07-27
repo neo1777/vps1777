@@ -1415,14 +1415,22 @@ findings:
             lacuna poteva durare — un buco che non fa male non lascia tracce.
 
       COSA MANCA:
-        (a) la sweep non è esaustiva. Ho cercato `|| true`, `continue-on-error` e
-            `allow_failure` nei workflow: l'unico altro `|| true` (ci.yml, step
-            "Migrations immutability") è legittimo — protegge solo la cattura di
-            `git diff`, e il verdetto è un `exit 1` esplicito dopo. MA ha un suo
-            falso-verde residuo: se quel `git diff` fallisse per un motivo vero
-            (ref sbagliata, fetch incompleto), `CHANGED` resterebbe vuoto e il
-            gate passerebbe verde su una PR che modifica una migrazione. Non
-            corretto qui: è un altro gesto, e va fatto guardando, non di corsa.
+        (a) CHIUSO lo stesso giorno, guardando invece che di corsa. Il `|| true`
+            dello step "Migrations immutability" proteggeva solo la cattura di
+            `git diff` — ma se quel diff fosse fallito per un motivo VERO (ref
+            sbagliata, fetch incompleto, repo in uno stato strano), `CHANGED`
+            sarebbe rimasto vuoto e il gate avrebbe approvato una PR che modifica
+            una migrazione già pubblicata. Ora l'esito si cattura e si distingue:
+            `set +e` / `RC=$?` / `set -e`, e se `RC != 0` lo step muore dicendo
+            «non so dire se le migrazioni siano intatte, e "non lo so" non è
+            "vanno bene"». Provata in locale sui TRE esiti: comando fallito →
+            rosso (era il falso verde), riuscito e vuoto → verde, riuscito con
+            risultati → rosso.
+            RESTA la parte onesta: la sweep dei gate incapaci di fallire ha
+            coperto i workflow (`|| true`, `continue-on-error`, `allow_failure`).
+            Non ha coperto gli script fuori dalla CI, dove lo stesso motivo può
+            annidarsi in altre forme — un `2>/dev/null` che nasconde l'errore, un
+            `if` senza `else`, un `exit 0` in coda a una funzione.
         (b) restano i gate che falliscono correttamente ma MISURANO la cosa
             sbagliata. Questa voce copre solo quelli che non potevano fallire
             affatto: è la metà facile del problema.

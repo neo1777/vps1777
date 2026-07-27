@@ -85,7 +85,22 @@ jobs:
           # è il merge commit, che contiene già main → nessun falso positivo).
           # --no-renames: senza, un `git mv` di una migrazione + edit passa come
           # status R (rename) e sfugge al filtro MD → immutabilità bypassata.
-          CHANGED="$(git diff --no-renames --diff-filter=MD --name-only origin/main HEAD -- 'migrations/*/run.py' 'migrations/*/migration.json' || true)"
+          # ⚠️ QUI C'ERA `|| true` in coda alla sostituzione, ed era un falso verde in
+          # agguato: se il `git diff` fosse fallito per un motivo VERO — ref sbagliata,
+          # fetch incompleto, repo in uno stato strano — `CHANGED` sarebbe rimasto
+          # vuoto e questo gate avrebbe approvato una PR che modifica una migrazione
+          # già pubblicata. Il `|| true` serviva solo a non far morire lo step per
+          # `set -e`: adesso l'esito si CATTURA e si distingue.
+          # (Trovato il 27/07 mentre chiudevo H53, cercando altri gate incapaci di
+          #  fallire. Questo poteva fallire — ma non nel caso che conta.)
+          set +e
+          CHANGED="$(git diff --no-renames --diff-filter=MD --name-only origin/main HEAD -- 'migrations/*/run.py' 'migrations/*/migration.json')"
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::il confronto con origin/main è FALLITO (exit $RC): non so dire se le migrazioni siano intatte, e «non lo so» non è «vanno bene»."
+            exit 1
+          fi
           if [ -n "$CHANGED" ]; then
             echo "::error::migrazioni esistenti modificate o rimosse: $CHANGED"
             exit 1
