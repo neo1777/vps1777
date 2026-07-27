@@ -543,6 +543,8 @@ findings:
     severity: medium
     title: "Secondo fattore (TOTP o passkey) sul pannello admin"
     status: accepted
+    # si è deciso di NON fare: non c'è niente da eseguire
+    natura: decisione
     missing: >
       DECISIONE Neo (14 lug): NIENTE 2FA. Gateway mono-utente dietro Tailscale Funnel;
       difese = password bcrypt-12 + lockout per-IP + CSRF + revoca reale sessione (H20).
@@ -760,6 +762,19 @@ findings:
     severity: low
     title: "Hardening residuo di unit e container: sandbox update.service, unit templata, rootfs ro"
     status: closed
+    natura: comportamento
+    prova:
+      - comando: "bash tools/prove-empiriche/prova-8-le-unit-si-comportano-come-dichiarano.sh"
+        dove: "sulla VPS in produzione (v0.40.9)"
+        output: "PASS — 23 direttive su 4 unit: dichiarate E applicate."
+        exit: 0
+        quando: "2026-07-27"
+        nota: >
+          Prima voce del registro chiusa con una PROVA ESEGUITA e non con un file e una
+          riga. Il file dice dov'è la direttiva; questa dice che il demone la applica —
+          ed è esattamente la differenza che H52 denuncia. La prova è arrivata sulla
+          macchina col pacchetto dalla 0.40.8: prima andava copiata a mano, quindi lì
+          non c'era.
     since: v0.33.0
     evidence:
       # 🔴 L'EVIDENZA NON GUARDAVA L'UNIT DEL PROPRIO TITOLO (27/07): il titolo dice
@@ -788,6 +803,8 @@ findings:
     severity: medium
     title: "I doc dichiarano i secret che il gateway VEDE, non solo quelli che non vede"
     status: closed
+    # ha per OGGETTO ciò che i documenti dichiarano: si verifica leggendoli
+    natura: documento
     since: v0.40.2
     why: >
       «Il gateway non vede i secret dell'host» era vero alla lettera e fuorviante nella
@@ -1092,6 +1109,7 @@ findings:
     severity: high
     title: "Il presidio di salute sonda dal lato in cui il guasto non si vede: healthcheck e health-gate interrogano il loopback DA DENTRO il container"
     status: partial
+    natura: comportamento
     since: v0.40.6
     evidence:
       - file: tools/prove-empiriche/prova-7-porta-pubblicata-davvero.sh
@@ -1261,6 +1279,7 @@ findings:
     severity: medium
     title: "Le garanzie di hardening sono certificate per STRINGA, non per comportamento: il gate cerca il testo nel file, non chiede al sistema che cosa applica"
     status: partial
+    natura: comportamento
     # Era `v0.40.7`: una versione mai rilasciata, assente dal CHANGELOG e dai tag,
     # scritta il 27/07 ancorando la voce alla release SUCCESSIVA come se fosse già
     # uscita. Nessuno se n'è accorto perché `since` era l'unico campo del registro
@@ -1380,6 +1399,7 @@ findings:
     severity: medium
     title: "Gate che non potevano fallire: lo step shellcheck in .github/workflows/ci.yml girava con `|| true`, e il lint copriva due percorsi su quattro"
     status: partial
+    natura: comportamento
     since: v0.40.7
     evidence:
       - file: .github/workflows/ci.yml
@@ -1479,6 +1499,8 @@ findings:
     severity: medium
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
     status: partial
+    # il rischio è nella superficie, non in un comportamento da eseguire
+    natura: documento
     since: v0.40.7
     evidence:
       - file: compose.yaml
@@ -1522,6 +1544,7 @@ findings:
     severity: medium
     title: "La telemetria poteva far cadere una riparazione: progress_write/status_write scrivevano nudi, e una PermissionError uccideva `vps1777 update` a metà"
     status: partial
+    natura: comportamento
     since: v0.40.8
     evidence:
       - file: tools/vps1777.py
@@ -1586,6 +1609,8 @@ findings:
     severity: medium
     title: "La seconda metà di H14 — nello snapshot pre-update archive-data resta IN CHIARO: funzionale al rollback, non rimovibile, e finora non scritto da nessuna parte"
     status: partial
+    # la cura è una decisione di chi possiede la macchina (Neo, 27/07)
+    natura: decisione
     # La CONDIZIONE esiste da quando esiste lo snapshot (v0.30.0). Questa data dice
     # quando è entrata NEL REGISTRO, che è un'altra cosa: separare «da quando è vero»
     # da «da quando lo diciamo» è la stessa disciplina con cui H51 distingue

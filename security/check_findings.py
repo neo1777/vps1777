@@ -213,6 +213,68 @@ def solo_in_commenti(path: Path, needle: str) -> bool:
     return bool(righe) and all(r.lstrip().startswith("#") for r in righe)
 
 
+# ── la misura supera la sorgente (round-8) ───────────────────────────────────
+# Rilievo dell'analisi esterna del round-8, e il suo contributo migliore:
+#   «per dichiarare chiuso un elemento, il documento dovrebbe richiedere
+#    obbligatoriamente l'inclusione dell'output testuale e dell'exit code dello
+#    script. Quella diventa la condizione primaria per il PASS. L'esistenza della
+#    funzione nel file Python verrebbe relegata a evidenza secondaria.»
+#
+# ⚠️ NON applicato come l'ha detto lui. La sua regola era «obbligatorio per tutte
+# le voci oltre la H50»: un perimetro fissato su un NUMERO, che invecchia alla
+# voce successiva — la prima voce nuova che parla di documentazione verrebbe
+# accusata di non avere una prova sul vivo che non può avere. È la forma del
+# `NoNewPrivileges` del round-7: giusta come principio, distruttiva come regola.
+# (La somiglianza l'ha vista 71d540e6; che oggi non morda l'ho misurato io —
+#  6 voci oltre H50, ZERO `closed`, e per tutte una prova sul vivo è possibile.)
+#
+# ⇒ Il perimetro è la NATURA DELL'OGGETTO, e si DICHIARA invece di indovinarla:
+#     comportamento  ciò che il sistema FA. `closed` ⇒ serve una prova eseguita.
+#     documento      ciò che il progetto DICE (H44). Si verifica leggendo, ed è giusto così.
+#     decisione      ciò che si è scelto di non fare (H28). Non si esegue niente.
+# Una regola basata sulla natura non invecchia alla voce successiva; una basata
+# sul numero sì.
+NATURE = {"comportamento", "documento", "decisione"}
+
+
+def check_natura_e_prova(f: dict, errors: list[str], senza_natura: list[str]) -> None:
+    """Una voce `closed` di natura `comportamento` deve portare una PROVA ESEGUITA.
+
+    `prova:` è un blocco con `comando`, `output` (anche solo l'ultima riga che conta),
+    `exit` e `quando`. Non sostituisce le `evidence`: le SOPRAVANZA. Il file e la riga
+    restano — dicono dov'è il codice; la prova dice che quel codice fa la cosa.
+
+    Il campo `natura` non è ancora su tutte le voci: chi non ce l'ha viene CONTATO e
+    stampato, non accusato. Un residuo con un numero sullo schermo a ogni giro è
+    diverso da un residuo taciuto — ed è lo stesso patto del contatore ⧗.
+    """
+    fid, natura = f.get("id", "?"), f.get("natura")
+    if natura is None:
+        senza_natura.append(fid)
+        return
+    if natura not in NATURE:
+        fail(errors, f"{fid}: `natura: {natura}` non è valida (attese: {sorted(NATURE)})")
+        return
+    if natura != "comportamento" or f.get("status") != "closed":
+        return
+    prove = f.get("prova") or []
+    if not prove:
+        fail(errors,
+             f"{fid}: è `closed` ed è di natura COMPORTAMENTO, ma non porta nessuna\n"
+             f"       `prova:` eseguita. Un file e una riga dicono dov'è il codice, non\n"
+             f"       che faccia la cosa: serve comando + output + exit code.\n"
+             f"       (Se invece parla di ciò che il progetto DICE, la natura è `documento`.)")
+        return
+    for p in prove:
+        mancanti = [k for k in ("comando", "output", "exit", "quando") if p.get(k) in (None, "")]
+        if mancanti:
+            fail(errors,
+                 f"{fid}: una `prova:` è incompleta — mancano {mancanti}.\n"
+                 f"       Un output senza il comando non è ripetibile; un comando senza\n"
+                 f"       l'exit code non dice com'è finito; nessuno dei due senza la data\n"
+                 f"       dice a QUANDO si riferisce.")
+
+
 def check_evidence(f: dict, errors: list[str]) -> None:
     """L'evidenza di una voce esiste ancora nel codice?"""
     fid = f["id"]
@@ -268,6 +330,7 @@ def main() -> int:
     by_sev: dict[str, int] = {}
     rilasciate = versioni_rilasciate()
     non_rilasciate: list[str] = []
+    senza_natura: list[str] = []
     if not rilasciate:
         fail(errors,
              "CHANGELOG.md assente o senza intestazioni di versione: senza di lui\n"
@@ -317,6 +380,7 @@ def main() -> int:
 
         if check_since(f, rilasciate, errors):
             non_rilasciate.append(fid)
+        check_natura_e_prova(f, errors, senza_natura)
         check_evidence(f, errors)
         check_titolo_nomina_file(f, errors)
 
@@ -368,6 +432,13 @@ def main() -> int:
           f"{YEL}{counts['partial']} parziali{OFF}{DIM} · "
           f"{DIM}{counts['accepted']} accettati · "
           f"{RED}{counts['open']} aperti{OFF}")
+    if senza_natura:
+        # Contato e stampato, non accusato: la classificazione delle 56 voci è un
+        # lavoro di giudizio e non si fa di corsa. Il numero scende a ogni voce
+        # dichiarata, e finché è sullo schermo nessuno può dire di non averlo visto.
+        print(f"{YEL}◍ {len(senza_natura)} voci senza `natura` dichiarata{OFF}"
+              f"{DIM} — per loro la regola «un difetto di comportamento si chiude con una "
+              f"prova eseguita» non può ancora valere.{OFF}")
     if non_rilasciate:
         # Stampato SEMPRE, non solo in errore: è il residuo che aspetta una
         # release. Finché ha un numero sullo schermo a ogni commit, nessuno può
