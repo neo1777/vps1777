@@ -290,9 +290,19 @@ if confirm "Procedo ora?"; then
         ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer"
         AUTOUPD_MSG=" + auto-update sicuro (settimanale)";;
       esac
-      sudo systemctl enable --now $ENABLE_UNITS 2>/dev/null \
-        && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + scadenze secret (settimanale)$AUTOUPD_MSG" \
-        || warn "Unit systemd non abilitate (systemd assente?) — la CLI è comunque installata"
+      # SC2086 disabilitata di proposito: $ENABLE_UNITS è una LISTA di nomi di unit
+      # separati da spazi, e la divisione in parole è ciò che serve. Virgolettarla la
+      # passerebbe a systemctl come un unico nome inesistente.
+      # shellcheck disable=SC2086
+      if sudo systemctl enable --now $ENABLE_UNITS 2>/dev/null; then
+        ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + scadenze secret (settimanale)$AUTOUPD_MSG"
+      else
+        # PRIMA: `cmd && ok "…" || warn "…"`. Sembra un if-then-else e non lo è: se
+        # fosse `ok` a fallire, partirebbe ANCHE il ramo d'errore, e l'installer
+        # direbbe insieme «attivo» e «non abilitate». Qui `ok` è un echo e non
+        # fallisce mai — ma la forma è la trappola, non l'occorrenza.
+        warn "Unit systemd non abilitate (systemd assente?) — la CLI è comunque installata"
+      fi
       # TERZA RECIDIVA della classe documentata qui sopra: l'hardening host
       # (unattended-upgrades + fail2ban) era in deploy.sh (457) e in engine.py
       # (284) ma non qui — e SECURITY.md/README lo promettono «automatico

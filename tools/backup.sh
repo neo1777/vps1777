@@ -133,8 +133,17 @@ ok "Backup completato: $OUT ($SIZE)"
 log "Pruning vecchi backup (7 daily + 4 weekly)..."
 cd "$BACKUP_DIR"
 
+# I quattro `ls` di questa sezione e di restore.sh danno SC2012 («usa find»).
+# Dichiarati invece che riscritti: i nomi li genera QUESTO script
+# (vps1777-${TIMESTAMP}.tar.age, TIMESTAMP da `date`) — niente spazi, niente a capo,
+# niente caratteri strani. `find` sarebbe più generale e cambierebbe la logica di
+# RITENZIONE DEI BACKUP per un rilievo di stile: il rischio sbagliato da correre.
+# La riga qui sotto tiene la soglia della CI al minimo senza tollerare nulla in
+# silenzio — un'eccezione scritta è diversa da un avviso ignorato.
 # Daily: tieni gli ultimi 7
+# shellcheck disable=SC2012
 mapfile -t daily < <(ls -1 vps1777-*.tar.age 2>/dev/null | sort -r | head -7)
+# shellcheck disable=SC2012
 mapfile -t all < <(ls -1 vps1777-*.tar.age 2>/dev/null | sort -r)
 
 # Weekly: tieni 1 per settimana negli ultimi 4 (in più dei 7 daily se distanti)
@@ -179,5 +188,7 @@ else
   ok "Nessun backup da rimuovere"
 fi
 
+# vedi il blocco in testa alla rotazione
+# shellcheck disable=SC2012
 KEPT=$(ls vps1777-*.tar.age 2>/dev/null | wc -l)
 ok "Backup totali mantenuti: $KEPT"

@@ -47,11 +47,16 @@ jobs:
           # main da chissà quanto, e fra i rilievi c'era un BUG VERO nella
           # ritenzione dei backup (SC2106 in tools/backup.sh — vedi il commento
           # là). Nessuno poteva vederlo: lo step era verde per definizione.
-          # --severity=warning: i 6 rilievi `info` restanti sono stilistici e
-          # non bloccano; se un giorno li si vuole, si abbassa la soglia qui.
+          # SOGLIA AL MINIMO (27/07, stessa giornata): era `--severity=warning`,
+          # che lasciava passare i rilievi `info` senza dire quali. Ora non si
+          # tollera nulla in silenzio — le sette eccezioni residue sono scritte
+          # nel codice come `# shellcheck disable=` CON IL PERCHÉ accanto.
+          # ⭐ La differenza è tutta lì: una soglia alzata nasconde N cose e non
+          # dice quali; un'eccezione dichiarata è UNA cosa, con un nome e una
+          # ragione che il prossimo può contestare.
           # tools/prove-empiriche/ era fuori dal glob: le otto prove che
           # verificano il resto non erano verificate da niente.
-          shellcheck --severity=warning setup.sh tools/*.sh tools/prove-empiriche/*.sh
+          shellcheck setup.sh tools/*.sh tools/prove-empiriche/*.sh
       # Il registro dei rilievi di sicurezza: ogni voce dichiarata `closed` deve
       # portare un'evidenza, e quell'evidenza deve ESISTERE ANCORA nel codice.
       # Nasce da un errore vero: SECURITY.md ha dichiarato «dossier applicato per

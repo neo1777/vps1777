@@ -54,6 +54,9 @@ esac
 echo "✅ PASS parziale — l'interno funziona e la richiesta con XFF iniettato non ha alterato l'esito."
 echo "   ⚠️  LIMITE DA LEGGERE: questa prova NON dimostra il diniego a un vero esterno."
 echo "      L'unico test valido è una GET dall'ESTERNO verso l'URL pubblico:"
+# SC2028: la sequenza `\n` NON deve essere espansa — questa riga stampa un comando
+# da copiare e incollare, e nel comando ci va la barra-enne letterale.
+# shellcheck disable=SC2028
 echo "         curl -s -o /dev/null -w '%{http_code}\\n' 'https://<PUBLIC_BASE>/health?deep=1'"
 echo "      atteso: risposta SHALLOW (o 403), mai il deep. Va lanciata FUORI dalla VPS."
 exit 0

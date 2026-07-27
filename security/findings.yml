@@ -1384,7 +1384,7 @@ findings:
     evidence:
       - file: .github/workflows/ci.yml
         contains:
-          - "shellcheck --severity=warning setup.sh tools/*.sh tools/prove-empiriche/*.sh"
+          - "shellcheck setup.sh tools/*.sh tools/prove-empiriche/*.sh"
           - "ruff check services/ tools/ security/"
         not_contains:
           - "shellcheck setup.sh tools/*.sh || true"
@@ -1434,10 +1434,28 @@ findings:
         (b) restano i gate che falliscono correttamente ma MISURANO la cosa
             sbagliata. Questa voce copre solo quelli che non potevano fallire
             affatto: è la metà facile del problema.
-        (c) i 6 rilievi `info` di shellcheck (SC2012 `ls | wc -l`, SC2015) sono
-            noti e non corretti: cambiare quelle righe in tools/backup.sh e
-            tools/restore.sh tocca la logica di ritenzione e di ripristino, e va
-            fatto con una prova che li esegua, non con una sostituzione a vista.
+        (c) CHIUSO lo stesso giorno, e con la soglia ABBASSATA invece che alzata.
+            Erano 7 e non 6 (il conteggio di prima è del momento in cui
+            tools/prove-empiriche/ era ancora fuori dal glob: un numero vero alla
+            sua data, che il giorno dopo descriveva un altro insieme). Ora la CI
+            gira shellcheck alla soglia MINIMA — nessun `--severity` — e le sette
+            eccezioni sono dichiarate nel codice, una per una, col perché accanto:
+              · SC2015 in setup.sh: CORRETTO. `cmd && ok "…" || warn "…"` sembra
+                un if-then-else e non lo è — se fallisse `ok` partirebbe anche il
+                ramo d'errore, e l'installer direbbe insieme «attivo» e «non
+                abilitate». Riscritto if/then/else: la forma era la trappola, non
+                l'occorrenza.
+              · SC2086 in setup.sh: la divisione in parole di $ENABLE_UNITS è VOLUTA
+                (è una lista di unit); virgolettarla la romperebbe.
+              · SC2028 in prova-3: la `\n` letterale è il punto — quella riga stampa
+                un comando da copiare.
+              · SC2012 ×4 in backup.sh e restore.sh: i nomi li genera lo script stesso
+                (vps1777-${TIMESTAMP}.tar.age), niente spazi né a capo. `find` sarebbe
+                più generale e cambierebbe la logica di RITENZIONE DEI BACKUP per un
+                rilievo di stile: il rischio sbagliato da correre.
+            ⭐ La differenza fra le due strade è tutta qui: una soglia alzata nasconde
+            N cose e non dice quali; un'eccezione dichiarata è UNA cosa, con un nome e
+            una ragione che il prossimo può contestare.
 
   - id: H54
     severity: medium

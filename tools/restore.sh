@@ -60,6 +60,8 @@ if [ -z "$ARCHIVE" ]; then
   echo "Uso: $0 [--yes] [--volumes-only v1,v2] <backup.tar.age | snapshot-dir>"
   echo
   echo "Backup disponibili in backups/:"
+  # nomi generati da backup.sh: nessun carattere strano
+  # shellcheck disable=SC2012
   ls -1 backups/vps1777-*.tar.age 2>/dev/null | sed 's/^/  /' || echo "  (nessuno)"
   exit 1
 fi
