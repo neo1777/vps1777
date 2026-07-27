@@ -65,11 +65,20 @@ jobs:
           # ragione che il prossimo può contestare.
           # tools/prove-empiriche/ era fuori dal glob: le otto prove che
           # verificano il resto non erano verificate da niente.
-          # tools/tests/*.sh aggiunto il 27/07 nello stesso giro in cui nasce il
-          # primo test in shell: era la stessa forma del buco di prove-empiriche
-          # — uno script che verifica gli altri e che nessuno verifica. Il glob
-          # si allarga insieme al codice, o il gate resta indietro in silenzio.
-          docker run --rm -v "$PWD:/mnt" -w /mnt "$SHELLCHECK" setup.sh tools/*.sh tools/prove-empiriche/*.sh tools/tests/*.sh
+          # ⭐ NIENTE PIÙ ELENCO DI PERCORSI — il glob li prende TUTTI da git.
+          # Storia, perché è la terza volta: il perimetro era `setup.sh tools/*.sh`,
+          # poi ci sono state aggiunte `tools/prove-empiriche/` (il 27/07 mattina) e
+          # `tools/tests/` (il 27/07 pomeriggio), ogni volta scoprendo che un pezzo
+          # non era guardato da nessuno. La terza volta, la sera dello stesso giorno:
+          # `deploy.sh` — lo script che INSTALLA SULLA MACCHINA — non c'era mai stato,
+          # con 16 rilievi dentro di cui 5 warning sulle virgolette di un `sudo -u`.
+          # 🔑 Un elenco scritto a mano invecchia in silenzio, e chi lo allarga guarda
+          # ciò che sta aggiungendo, non ciò che manca: l'ho allargato io stessa quel
+          # pomeriggio e non ho visto `deploy.sh`, che era lì da sempre.
+          # `git ls-files` non può dimenticare un file: se è nel repo, è nel gate.
+          mapfile -t SCRIPTS < <(git ls-files '*.sh')
+          echo "shellcheck su ${#SCRIPTS[@]} script"
+          docker run --rm -v "$PWD:/mnt" -w /mnt "$SHELLCHECK" "${SCRIPTS[@]}"
       # Il registro dei rilievi di sicurezza: ogni voce dichiarata `closed` deve
       # portare un'evidenza, e quell'evidenza deve ESISTERE ANCORA nel codice.
       # Nasce da un errore vero: SECURITY.md ha dichiarato «dossier applicato per

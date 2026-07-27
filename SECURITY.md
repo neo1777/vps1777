@@ -233,8 +233,8 @@ verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 47 |
-| **parziali** | 14 |
+| **chiusi** | 48 |
+| **parziali** | 13 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -485,6 +485,17 @@ un altro racconto e il problema torna identico*. Tutte e quattordici sono state 
 rileggendo la loro storia, non a memoria. ⚠️ *Limite dichiarato: questo cura le voci
 parziali. Una voce chiusa il cui titolo nomina una cosa sola di un insieme che ne ha due
 resta illeggibile allo stesso modo — ed è una forma che abbiamo già incontrato due volte.*
+
+E `H53` — i controlli che non controllavano — **si chiude stasera con la terza scoperta
+dello stesso difetto in un giorno solo**: l'elenco dei file da analizzare era scritto a
+mano. Al mattino ci mancava la cartella delle prove; al pomeriggio quella dei test; alla
+sera **`deploy.sh` — lo script che installa sulla macchina** — che non c'era mai stato, con
+sedici rilievi dentro di cui cinque su una virgoletta di troppo che annullava le altre due
+attorno al nome dell'utente. 🔑 *Un elenco scritto a mano invecchia in silenzio, e chi lo
+allarga guarda ciò che sta aggiungendo, non ciò che manca: l'ho allargato io stessa quel
+pomeriggio senza vedere un file che era lì da sempre.* Ora l'elenco non esiste più: i file
+li chiede a **git**, che non può dimenticarne uno. *Le correzioni sono state verificate
+confrontando il comando che finisce sulla macchina prima e dopo — identico.*
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è

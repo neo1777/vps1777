@@ -1444,20 +1444,34 @@ findings:
   - id: H53
     severity: medium
     title: "Gate che non potevano fallire: lo step shellcheck in .github/workflows/ci.yml girava con `|| true`, e il lint copriva due percorsi su quattro"
-    status: partial
-    resta_aperto: >
-      Niente sul difetto: gate riparati, shellcheck pinnato per digest, prove rieseguite. Resta `partial` perché `deploy.sh` è ancora FUORI dal perimetro del gate — misurato: il 70% dei rilievi sta lì.
+    status: closed
     scoperta:
       quando: "2026-07-27"
       come: misura
       nota: "misurando la copertura dei gate invece di leggerla: shellcheck girava con `|| true`"
     natura: comportamento
     since: v0.40.7
+    prova:
+      - comando: "mapfile -t SCRIPTS < <(git ls-files '*.sh'); shellcheck (digest pinnato) \"${SCRIPTS[@]}\""
+        output: "shellcheck su 17 script — deploy.sh e installer/launch.sh compresi, che non erano MAI stati nel perimetro"
+        exit: 0
+        quando: "2026-07-27"
+      - comando: "shellcheck deploy.sh  (PRIMA del fix, stessa immagine)"
+        output: "16 rilievi: 5 SC2027 (warning) + 5 SC2086 sulle virgolette che si annullavano in `sudo -u \"$OPERATOR_USER\"`, 2 SC2015, 2 SC2016, 2 SC2029"
+        exit: 1
+        quando: "2026-07-27"
+      - comando: "bash -n deploy.sh e confronto del comando remoto generato prima/dopo"
+        output: "sintassi ok · «sudo -u vps1777 bash -lc '…'» IDENTICO prima e dopo: la correzione toglie una virgoletta di troppo, non cambia ciò che gira sulla macchina"
+        exit: 0
+        quando: "2026-07-27"
     evidence:
       - file: .github/workflows/ci.yml
         contains:
           - "koalaman/shellcheck@sha256:"
-          - "setup.sh tools/*.sh tools/prove-empiriche/*.sh"
+          # l'invariante non è più QUALI percorsi: è che non ci sia un elenco.
+          # `git ls-files` non può dimenticare un file — se qualcuno torna a
+          # scriverli a mano, questa riga sparisce e il gate diventa rosso.
+          - "mapfile -t SCRIPTS < <(git ls-files '*.sh')"
           - "ruff check services/ tools/ security/"
         not_contains:
           - "shellcheck setup.sh tools/*.sh || true"

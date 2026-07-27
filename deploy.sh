@@ -157,8 +157,15 @@ if [ -n "$VPS_PASS" ]; then
   SSHT() { sshpass -p "$VPS_PASS" ssh -t "${SSH_OPTS[@]}" "$VPS_USER@$VPS_IP" "$@"; }
   PIPE_IN() { sshpass -p "$VPS_PASS" ssh "${SSH_OPTS[@]}" "$VPS_USER@$VPS_IP" "$@"; }
 else
+  # SC2029 dice «questo espande sul client»: è VERO ed è il mestiere di questi
+  # wrapper — ricevono un comando già costruito dal chiamante e lo passano.
+  # Chi costruisce il comando decide cosa espandere di qua e cosa di là, e lo fa
+  # con le virgolette (vedi SC2016 poco sotto). Spostare l'espansione qui
+  # toglierebbe quella scelta a chi chiama.
+  # shellcheck disable=SC2029
   SSH()  { ssh  "${SSH_OPTS[@]}" "$VPS_USER@$VPS_IP" "$@"; }
   SSHT() { ssh -t "${SSH_OPTS[@]}" "$VPS_USER@$VPS_IP" "$@"; }
+  # shellcheck disable=SC2029
   PIPE_IN() { ssh "${SSH_OPTS[@]}" "$VPS_USER@$VPS_IP" "$@"; }
 fi
 
@@ -167,6 +174,10 @@ ssh-keygen -f "$HOME/.ssh/known_hosts" -R "$VPS_IP" >/dev/null 2>&1 || true
 
 log "Test connessione..."
 SSH 'echo ok' >/dev/null 2>&1 || die "Connessione fallita. Verifica IP/user/password e che la VPS sia up."
+# SC2016 dice «negli apici singoli non espande»: è ESATTAMENTE lo scopo.
+# `$PRETTY_NAME` e `$(uname -m)` devono valutarsi sulla VPS, non qui — se li
+# espandessimo in locale leggeremmo il sistema operativo di CHI LANCIA il deploy.
+# shellcheck disable=SC2016
 OS_INFO=$(SSH '. /etc/os-release; echo "$PRETTY_NAME ($(uname -m))"' 2>/dev/null || echo "?")
 ok "Connesso: $OS_INFO"
 
@@ -182,6 +193,10 @@ ok "Connesso: $OS_INFO"
 # e `./deploy.sh --apply` può ritentare.
 ts_wipe_authkey() {
   local script
+  # stessa ragione: lo script viaggia LETTERALE e si valuta là. Espanderlo qui
+  # metterebbe i valori del PC dentro un comando che gira sulla macchina — ed è
+  # anche il motivo per cui i segreti non passano dall'argv (H-deploy, v0.29.0).
+  # shellcheck disable=SC2016
   script='cd ~/vps1777 || exit 1
 if grep -q "^TS_AUTHKEY=" .env 2>/dev/null; then
   rest=$(grep -v "^TS_AUTHKEY=" .env || true)
@@ -640,8 +655,14 @@ case ",$FEATURES," in *,watchtower,*) OPS_FILES="$OPS_FILES -f compose.ops.watch
 # Persisto lo stato dichiarato in .env: la CLI (vps1777.py enabled_features) lo legge,
 # così `vps1777 update`/`rollback` ricostruiscono lo stack con le STESSE feature — un
 # update non spegne più il backup, e un reinstall lo riaccende senza doverlo ricordare.
-SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && (grep -q ^VPS1777_FEATURES= .env && sed -i \"s|^VPS1777_FEATURES=.*|VPS1777_FEATURES=$FEATURES|\" .env || echo VPS1777_FEATURES=$FEATURES >> .env)'" \
-  && ok "Stato feature dichiarato in .env: $FEATURES" || warn "non ho scritto VPS1777_FEATURES in .env"
+# `A && B || C` NON è if-then-else: se il comando riesce ma `ok` fallisce, parte
+# anche il `warn`. Qui `ok` è un printf e in pratica non fallisce — ma la forma
+# inganna chi legge, ed è la stessa che oggi ha nascosto un difetto altrove.
+if SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && (grep -q ^VPS1777_FEATURES= .env && sed -i \"s|^VPS1777_FEATURES=.*|VPS1777_FEATURES=$FEATURES|\" .env || echo VPS1777_FEATURES=$FEATURES >> .env)'"; then
+  ok "Stato feature dichiarato in .env: $FEATURES"
+else
+  warn "non ho scritto VPS1777_FEATURES in .env"
+fi
 
 # ── Chiave age per il backup cifrato (solo se 'backup' è dichiarato) ──────────
 # Il backup cifra con age; la chiave PRIVATA deve stare sul TUO PC, mai sulla VPS
@@ -692,11 +713,11 @@ fi
 if [ "$DEV_BUILD" = "1" ]; then
   # build locale: aggiunge l'overlay compose.build.yaml (solo dev/fallback)
   COMPOSE_CMD_BUILD="${COMPOSE_CMD/--profile/-f compose.build.yaml --profile}"
-  SSHT "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD_BUILD up -d --build'" \
+  SSHT "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD_BUILD up -d --build'" \
     || die "docker compose up (build locale) fallito"
   ok "Stack avviato (build locale — dev)"
 else
-  SSHT "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD pull && $COMPOSE_CMD up -d'" \
+  SSHT "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD pull && $COMPOSE_CMD up -d'" \
     || die "docker compose pull/up fallito"
   ok "Stack avviato (immagini v$INSTALL_VERSION pullate — niente build in produzione)"
 fi
@@ -708,16 +729,19 @@ fi
 log "Installo il canale di aggiornamento (CLI + timer + path unit)..."
 ENABLE_UNITS="vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer"
 case ",$FEATURES," in *,autoupdate,*) ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer";; esac
-SSH "install -m755 $REMOTE_DIR/tools/vps1777.py /usr/local/bin/vps1777 \
+# stessa ragione della riga più su: `A && B || C` non è if-then-else.
+if SSH "install -m755 $REMOTE_DIR/tools/vps1777.py /usr/local/bin/vps1777 \
   && for u in $REMOTE_DIR/systemd/vps1777-*; do case \"\$u\" in *.service|*.timer|*.path) sed -e \"s|@OPERATOR_USER@|$OPERATOR_USER|g\" -e \"s|@REPO@|$REMOTE_DIR|g\" \"\$u\" | install -m644 /dev/stdin /etc/systemd/system/\$(basename \"\$u\");; esac; done \
   && systemctl daemon-reload \
-  && systemctl enable --now $ENABLE_UNITS" \
-  && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + check settimanale secret" \
-  || warn "Setup canale update fallito — installalo dopo con tools/bootstrap.sh"
+  && systemctl enable --now $ENABLE_UNITS"; then
+  ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + check settimanale secret"
+else
+  warn "Setup canale update fallito — installalo dopo con tools/bootstrap.sh"
+fi
 SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && /usr/local/bin/vps1777 check || true'" >/dev/null 2>&1 || true
 
 log "Stato container:"
-SSH "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
+SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
 
 # ── Tailscale SULL'HOST (no container): install + up + serve + funnel verso
 #    il gateway su 127.0.0.1:8080. Niente sidecar → niente containerboot/netns.
@@ -762,7 +786,7 @@ if confirm "Riavvio la VPS ora? (verifica auto-start dei container)"; then
     log "Attendo 20s che Docker risollevi i container..."
     sleep 20
     log "Stato container dopo reboot:"
-    SSH "sudo -u "$OPERATOR_USER" bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
   else
     warn "VPS non ancora raggiungibile dopo 120s — controlla manualmente."
   fi
@@ -773,7 +797,7 @@ fi
 # ═══════════════════════════════════════════ 8. RIEPILOGO
 step "8/8 — Fatto"
 
-GATEWAY_SECRET=$(SSH "sudo -u "$OPERATOR_USER" cat $REMOTE_DIR/secrets/gateway_secret.txt" 2>/dev/null || echo "<SECRET>")
+GATEWAY_SECRET=$(SSH "sudo -u $OPERATOR_USER cat $REMOTE_DIR/secrets/gateway_secret.txt" 2>/dev/null || echo "<SECRET>")
 
 # Righe machine-readable per l'installer web (le parsa per la schermata finale).
 echo "RESULT_URL=${PUBLIC_BASE:-http://$VPS_IP:8080}"
