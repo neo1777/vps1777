@@ -2335,3 +2335,68 @@ findings:
       di H42 (archive-data `:ro` in un servizio e `:rw` in un altro) e di H56 (H14 chiuso
       su un volume su due). Quelle si curano allargando il titolo, non aggiungendo un
       campo — e non le tocca nessuno oggi.
+
+  - id: H63
+    severity: low
+    title: "Il checker del registro chiude una run ROSSA affermando la proprietà appena fallita: «Nessun claim senza coordinata» stampato mentre elenca i claim senza coordinata"
+    status: closed
+    scoperta:
+      quando: "2026-07-27"
+      come: lettura
+      nota: >
+        abdd732a, cercando altro nel checker. Aveva il fix pronto e non l'ha pushato
+        perché è la corsia di b82df434: l'ha lasciato con le coordinate esatte
+        (`check_findings.py:631`) invece di applicarlo. b82df434 l'ha ri-misurato da sé
+        prima di crederci — eseguendo il checker su un registro rotto in copia, non
+        rileggendo la riga.
+    natura: comportamento
+    since: unreleased
+    prova:
+      - comando: "cp security/{check_findings.py,findings.yml} $S/security/ && cd $S && uv run --with pyyaml security/check_findings.py  (PRIMA del fix)"
+        dove: "copia del solo registro in scratchpad, senza i file d'evidenza attorno: il modo più corto per ottenere un ROSSO vero"
+        output: "10 righe «l'evidenza punta a un file che non esiste», e come ULTIMA riga: «Nessun claim senza coordinata. Nessun residuo taciuto.»"
+        exit: 1
+        quando: "2026-07-27"
+        nota: >
+          È la misura che rende il rilievo un fatto e non una lettura: la frase non
+          l'ho giudicata rileggendola, l'ho vista arrivare in fondo a un rosso.
+      - comando: "uv run --with pyyaml security/check_findings.py  (DOPO il fix, sul registro con H63 ancora incompleta)"
+        dove: "repo locale — il rosso l'ha prodotto il gate stesso bocciando questa voce"
+        output: "«La regola che questo registro deve reggere: nessun claim senza coordinata, nessun residuo taciuto. Sopra c'è dove non regge.»"
+        exit: 1
+        quando: "2026-07-27"
+        nota: >
+          Controprova gratuita e non cercata: il gate ha bocciato H63 per altri quattro
+          motivi (since inesistente, natura senza prova, `come` non valido, conteggio in
+          SECURITY.md) e nel farlo ha stampato la riga nuova su un rosso VERO. Il fix si
+          è collaudato sul primo caso reale che ha incontrato, che era sé stesso.
+    evidence:
+      - file: security/check_findings.py
+        contains:
+          - "La regola che questo registro deve reggere: nessun claim "
+    missing: >
+      IL FATTO, misurato e non dedotto: eseguito `check_findings.py` su una copia del
+      registro senza i file d'evidenza attorno, l'uscita è dieci righe di errore e poi,
+      IN FONDO — l'ultima cosa che resta sullo schermo — la riga
+      «Nessun claim senza coordinata. Nessun residuo taciuto.». All'indicativo presente,
+      dentro il ramo in cui è falsa, nella stessa posizione in cui il ramo verde mette la
+      sua affermazione. Nata con il file il 14/07 (57bbae9) e sopravvissuta tredici giorni.
+
+      🔑 LA FRASE NON ERA SBAGLIATA: ERA NEL MODO SBAGLIATO. Vale come REGOLA — «ecco cosa
+      questo registro deve reggere» — e nel ramo rosso si leggeva come RESOCONTO — «ecco
+      cosa regge». Il rimedio non la toglie, la rimette al suo modo: «La regola che questo
+      registro deve reggere: … Sopra c'è dove non regge.»
+
+      ⭐ LA CLASSE, ed è la stessa del `|| true` (H53) presa dall'altro capo: là un gate
+      che non POTEVA dire di no; qui un gate che dice di no e si smentisce nella riga
+      dopo. In entrambi i casi il difetto non è nel controllo — è in ciò che il controllo
+      DICE di sé quando ha finito.
+
+      PERIMETRO DEL SETACCIO, dichiarato perché un conteggio senza la sua popolazione non
+      è un dato: cercata la classe su tutti gli 89 file `.py`/`.sh` tracciati, con
+      l'euristica «riga che stampa + token affermativo + marcatore d'errore nelle 12
+      righe sopra». 27 righe segnalate, 26 reggono all'esame — fra queste
+      `prova-4-snapshot-in-chiaro.sh`, che spiega ogni PASS e distingue «zero misurato»
+      (exit 2) da «tutto a posto». Una sola istanza vera, ed è questa. L'euristica NON
+      copre le affermazioni fuori da un ramo d'errore esplicito: un verde stampato per
+      abitudine dove non c'è nessun `if errors` le sfugge.

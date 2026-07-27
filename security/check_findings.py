@@ -68,8 +68,8 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 1 (H56 medium, 27/07) = 56. H56 è la seconda metà di H14, misurata sulla VPS viva
 # da abdd732a: lo snapshot pre-update tiene archive-data IN CHIARO (~2,58 GB) e nessuna
 # voce lo diceva — H14 era `closed` su un volume solo, il più piccolo.
-EXPECTED_TOTAL = 62
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 33, "low": 17}
+EXPECTED_TOTAL = 63
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 33, "low": 18}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
@@ -628,7 +628,20 @@ def main() -> int:
         print(f"\n{RED}✗ il registro non regge — {len(errors)} problemi:{OFF}\n")
         for e in errors:
             print(f"  {RED}•{OFF} {e}")
-        print(f"\n{DIM}Nessun claim senza coordinata. Nessun residuo taciuto.{OFF}")
+        # ⚠️ QUI C'ERA, IDENTICA, la riga «Nessun claim senza coordinata. Nessun
+        # residuo taciuto.» — al presente indicativo, dentro il ramo in cui è
+        # FALSA, e in fondo: l'ultima cosa che resta sullo schermo di una run
+        # rossa era l'affermazione della proprietà appena fallita. Misurato il
+        # 27/07 eseguendo il checker su un registro rotto: dieci righe di errore
+        # e poi, in chiusura, la rassicurazione.
+        # 🔑 La frase non era sbagliata: era nel MODO sbagliato. Vale come
+        # REGOLA («ecco cosa questo registro deve reggere»), non come RESOCONTO
+        # («ecco cosa regge»), e nel ramo rosso si leggeva come il secondo.
+        # È la stessa classe del `|| true` in CI, presa dall'altro capo: là un
+        # gate che non poteva dire di no, qui un gate che dice di no e poi si
+        # smentisce da solo nella riga dopo.
+        print(f"\n{DIM}La regola che questo registro deve reggere: nessun claim "
+              f"senza coordinata, nessun residuo taciuto. Sopra c'è dove non regge.{OFF}")
         return 1
 
     print(f"{GRN}✓ ogni voce chiusa ha la sua evidenza, e l'evidenza c'è ancora.{OFF}")

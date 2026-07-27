@@ -233,7 +233,7 @@ verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 48 |
+| **chiusi** | 49 |
 | **parziali** | 13 |
 | **accettati** | 1 |
 | **aperti** | 0 |
