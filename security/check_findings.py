@@ -62,8 +62,11 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # round-7 che il registro copriva solo di sponda: H44 era `closed` sulla lacuna
 # DOCUMENTALE, e il rischio sotto non aveva una voce propria — chi cercava il
 # residuo sotto `partial` non trovava niente.
-EXPECTED_TOTAL = 54
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 9, "medium": 29, "low": 14}
+# + 1 (H55 medium, 27/07) = 55. H55 non è stata letta: è stata TROVATA aggiornando
+# davvero la macchina — `vps1777 update`, il comando che la documentazione consiglia,
+# moriva con un traceback su un file che serve solo a disegnare una barra.
+EXPECTED_TOTAL = 55
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 9, "medium": 30, "low": 14}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

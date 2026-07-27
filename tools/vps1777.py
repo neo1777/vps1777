@@ -264,26 +264,69 @@ def onboarding_dir(repo: Path) -> Path:
     return d
 
 
+# H55 — la telemetria non deve poter far cadere una riparazione.
+# `update_progress.json` e `update_status.json` sono ciò che i pannelli LEGGONO per
+# disegnare la barra di avanzamento e il badge «aggiornamento disponibile». Non
+# servono a fare l'update: servono a mostrarlo. Finché la scrittura era nuda, una
+# `PermissionError` su quei file uccideva `vps1777 update` con un traceback Python
+# a metà strada — misurato sulla VPS il 27/07: `update_progress.json` era di root
+# (lo lascia così il timer automatico, che gira da root) mentre il resto di
+# onboarding/ è dell'utente del servizio, e il comando manuale che sta nella
+# documentazione moriva allo step 4.
+# ⚠️ Il fail-closed è giusto sulla FIRMA del bundle, non sul file che disegna una
+# barra: là si rifiuta di installare qualcosa di non verificato, qui si rifiuterebbe
+# di RIPARARE perché non si riesce a raccontarlo. Ora si avvisa e si prosegue.
+_TELEMETRIA_MUTA = False
+
+
+def _scrivi_telemetria(repo: Path, nome: str, testo: str) -> None:
+    """Scrive un file di stato per i pannelli. Non solleva MAI: al massimo avvisa,
+    e lo fa UNA volta per esecuzione — un update ha quindici step, e quindici righe
+    identiche seppelliscono il resto dell'output proprio quando serve leggerlo."""
+    global _TELEMETRIA_MUTA
+    try:
+        p = onboarding_dir(repo) / nome
+        p.write_text(testo)
+        # Scritto da root (le unit girano come root), il file resta di root e il
+        # comando manuale — che la documentazione consiglia — non può più
+        # riscriverlo. Si riallinea al proprietario della cartella: è lui l'utente
+        # del servizio. Best-effort, e su un filesystem che non lo permette si tace.
+        try:
+            if os.geteuid() == 0:
+                st = (repo / "onboarding").stat()
+                if p.stat().st_uid != st.st_uid or p.stat().st_gid != st.st_gid:
+                    os.chown(p, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+    except OSError as exc:
+        if not _TELEMETRIA_MUTA:
+            _TELEMETRIA_MUTA = True
+            warn(f"telemetria non scrivibile ({nome}: {exc}) — i pannelli mostreranno "
+                 f"uno stato vecchio, ma l'operazione prosegue: questi file servono a "
+                 f"RACCONTARE l'aggiornamento, non a farlo.")
+
+
 def progress_write(repo: Path, target: str, step: int, name: str,
                    status: str, detail: str = "") -> None:
-    p = onboarding_dir(repo) / "update_progress.json"
-    p.write_text(json.dumps({
+    _scrivi_telemetria(repo, "update_progress.json", json.dumps({
         "target": target, "step": step, "step_name": name,
         "status": status, "detail": detail, "updated_at": now_iso(),
     }, indent=2) + "\n")
 
 
 def status_write(repo: Path, **fields) -> None:
-    p = onboarding_dir(repo) / "update_status.json"
     data: dict = {}
-    if p.is_file():
-        try:
+    try:
+        p = onboarding_dir(repo) / "update_status.json"
+        if p.is_file():
             data = json.loads(p.read_text())
-        except json.JSONDecodeError:
-            data = {}
+    except (OSError, json.JSONDecodeError):
+        # anche la LETTURA può fallire (cartella non attraversabile, file corrotto):
+        # si riparte da un dizionario vuoto invece di morire prima di scrivere.
+        data = {}
     data.update(fields)
     data["checked_at"] = now_iso()
-    p.write_text(json.dumps(data, indent=2) + "\n")
+    _scrivi_telemetria(repo, "update_status.json", json.dumps(data, indent=2) + "\n")
 
 
 # ─────────────────────────────────────────── Telegram (notifica, mai fatale)

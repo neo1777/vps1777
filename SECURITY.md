@@ -223,7 +223,7 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **54 voci** (2 critiche, 9 alte, 29 medie, 14 basse): 43 dalla
+Il registro conta **55 voci** (2 critiche, 9 alte, 30 medie, 14 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3` — e 4 che non
 vengono da una review ma da quello che è successo dopo: `H51` da un guasto in
@@ -234,7 +234,7 @@ verificato contro il codice dal gate in CI:
 | | |
 |---|---|
 | **chiusi** | 41 |
-| **parziali** | 12 |
+| **parziali** | 13 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -317,6 +317,21 @@ impersonarlo anche fuori da qui. *«Cinque» risponde a «cosa vede»; «uno» r
 processo separato che tenga il token e accetti solo «manda questo messaggio» — costa
 un pezzo in più da mantenere su una macchina piccola: è un baratto vero, e lo decide
 chi possiede la macchina, non un rilievo.
+
+Il tredicesimo è `H55`, e non l'ha trovato una lettura: è saltato fuori **aggiornando
+davvero la macchina**. Il comando che questa documentazione consiglia moriva a metà
+strada con un errore di programma, perché non riusciva a scrivere il file che i
+pannelli leggono per **disegnare la barra di avanzamento**. Il motivo è
+un'asimmetria: l'aggiornamento automatico gira con privilegi diversi da quelli di chi
+lancia il comando a mano, e lascia dietro un file che l'altro non può più riscrivere.
+**Il punto non è il permesso: è che una riparazione è stata abortita da un file che
+serve solo a raccontarla.** Rifiutarsi di installare qualcosa la cui firma non torna è
+giusto; rifiutarsi di riparare perché non si riesce a scriverne il resoconto non lo è.
+Ora avvisa e prosegue — una volta sola, non a ogni passo — e quando può rimette il
+file nella disponibilità di chi userà il comando dopo. Resta parziale perché il pezzo
+che riallinea i permessi **non è collaudato dai test** (servirebbe eseguirli con altri
+privilegi): è verificato leggendolo, che è esattamente ciò che il rilievo precedente
+denuncia.
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è

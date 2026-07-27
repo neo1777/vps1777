@@ -2,6 +2,24 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## Non rilasciato
+
+Su `main`, non ancora in una versione. `security/check_findings.py` le conta e le
+stampa a ogni esecuzione (`⧗ N su main, non ancora rilasciati`).
+
+### Corretto
+
+- **Un aggiornamento non viene più abortito dal file che serve a raccontarlo**
+  (`H55`). Il comando `vps1777 update` — quello che la documentazione consiglia —
+  moriva a metà strada con un errore di programma se non riusciva a scrivere il file
+  che i pannelli leggono per **disegnare la barra di avanzamento**. Trovato
+  aggiornando davvero la macchina, non leggendo il codice: l'aggiornamento automatico
+  gira con privilegi diversi da chi lancia il comando a mano, e lascia dietro un file
+  che l'altro non può più riscrivere. **Rifiutarsi di installare qualcosa la cui firma
+  non torna è giusto; rifiutarsi di riparare perché non si riesce a scriverne il
+  resoconto non lo è.** Ora avvisa e prosegue — una volta sola, non a ogni passo — e
+  quando può rimette il file nella disponibilità di chi userà il comando dopo.
+
 ## [0.40.7] — 2026-07-27
 
 Il rilascio dei **controlli che non controllavano**. La `0.40.6` ha rimesso in piedi

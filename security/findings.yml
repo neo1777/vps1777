@@ -1359,3 +1359,63 @@ findings:
       macchina da 4 GB e per un bot mono-utente. È un baratto vero, non un fix ovvio:
       va deciso da chi possiede la macchina, e finché non è deciso questa voce resta
       `partial` — scritta, non risolta, e con lo stato che lo dice.
+
+  - id: H55
+    severity: medium
+    title: "La telemetria poteva far cadere una riparazione: progress_write/status_write scrivevano nudi, e una PermissionError uccideva `vps1777 update` a metà"
+    status: partial
+    since: unreleased
+    evidence:
+      - file: tools/vps1777.py
+        contains:
+          - "def _scrivi_telemetria"
+          - "_TELEMETRIA_MUTA"
+          - "RACCONTARE l'aggiornamento, non a farlo"
+      - file: tools/tests/test_vps1777.py
+        contains:
+          - "test_progress_write_il_caso_esatto_della_vps_cartella_ok_file_no"
+          - "test_progress_write_avvisa_una_volta_sola_e_non_quindici"
+    missing: >
+      TROVATO AGGIORNANDO DAVVERO LA MACCHINA, il 27/07/2026 — non leggendo il codice:
+      `vps1777 update`, cioè il comando che docs/UPDATE.md consiglia, è morto allo
+      step 4 con un traceback Python e `PermissionError` su
+      onboarding/update_progress.json.
+
+      IL MECCANISMO: `vps1777-update.service` gira come `User=root`, e ogni giro del
+      timer automatico lascia quel file di proprietà di root. Tutto il resto di
+      onboarding/ è dell'utente del servizio. Da quel momento il comando manuale —
+      lanciato come utente del servizio, che è il modo naturale — non può più
+      riscriverlo. Sulla VPS il file era di root dalle 01:57.
+
+      PERCHÉ È UNA CLASSE E NON UN INCIDENTE: `update_progress.json` e
+      `update_status.json` sono ciò che i pannelli LEGGONO per disegnare la barra di
+      avanzamento e il badge «aggiornamento disponibile». Non servono a fare l'update:
+      servono a mostrarlo. Un aggiornamento — cioè una riparazione — è stato abortito
+      perché non si riusciva a scrivere il file che lo RACCONTA. Il fail-closed è
+      giusto sulla firma del bundle, dove si rifiuta di installare qualcosa di non
+      verificato; è sbagliato qui, dove si rifiuta di riparare perché non si riesce a
+      raccontarlo.
+
+      FATTO: `_scrivi_telemetria()` avvisa e prosegue invece di sollevare, UNA volta
+      per esecuzione (un update ha quindici step: quindici righe identiche seppelliscono
+      il resto dell'output proprio quando serve leggerlo). E quando gira da root
+      riallinea il file al proprietario della cartella, così il comando manuale
+      successivo lo trova scrivibile: si toglie la causa, non solo il sintomo.
+      6 test, con la CONTROPROVA fatta sul caso ESATTO della VPS — cartella scrivibile
+      e singolo FILE no. I primi due test rendevano non scrivibile la CARTELLA: stessa
+      classe, meccanismo diverso, e un fix collaudato solo su quello sarebbe stato
+      verde sul caso sbagliato. Verificata anche in negativo (`except OSError` reso
+      inefficace → 3 test rossi con PermissionError), e la controprova al primo
+      tentativo era invalida — la mutazione lasciava un `except` orfano e il file non
+      compilava: un rosso da SyntaxError non prova niente sul fix.
+
+      COSA MANCA:
+        (a) il ramo che riallinea il proprietario NON è esercitato dai test: richiede
+            di girare da root, e la suite gira da utente. È scritto e provato solo
+            dalla lettura — che è precisamente ciò che H52 denuncia.
+        (b) sulla macchina il file resta di root finché non ci passa sopra un
+            aggiornamento con QUESTA versione del CLI: la 0.40.7 installata non ha
+            ancora il fix. Fino ad allora il comando manuale è ancora rotto lì.
+        (c) la causa a monte — la unit gira come root perché le serve docker e
+            l'installazione del binario — non è toccata. Qui si è tolto il danno,
+            non l'asimmetria.

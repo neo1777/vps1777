@@ -7,6 +7,7 @@ sia direttamente: `python3 tools/tests/test_vps1777.py`.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import pwd
 import tempfile
@@ -748,6 +749,110 @@ def test_raggiungibilita_e_cablata_in_check_e_prima_del_fetch():
     assert "_sorveglia_raggiungibilita" in src
     assert src.index("_sorveglia_raggiungibilita") < src.index("latest_release("), (
         "chiamata dopo il fetch: su GitHub irraggiungibile non verrebbe mai eseguita")
+
+
+# ───── H55: la telemetria non fa cadere una riparazione ─────
+# Misurato sulla VPS il 27/07 aggiornando davvero: `update_progress.json` era di
+# root (lo lascia così il timer automatico, che gira da root) mentre il resto di
+# onboarding/ è dell'utente del servizio. Il comando manuale che sta nella
+# documentazione moriva allo step 4 con un traceback Python — un aggiornamento,
+# cioè una riparazione, abortito da un file che serve solo a DISEGNARE una barra.
+
+def _onboarding_non_scrivibile(tmp: Path) -> Path:
+    """Un repo finto la cui `onboarding/` non si può scrivere. Se il test gira da
+    root il permesso non morde: in quel caso si salta invece di dare un verde
+    falso — un test che non può fallire è la classe che H53 denuncia."""
+    (tmp / "compose.yaml").write_text("services: {}\n")
+    ob = tmp / "onboarding"
+    ob.mkdir()
+    ob.chmod(0o500)          # r-x: si entra, non si scrive
+    return ob
+
+
+def test_progress_write_non_uccide_l_update_se_non_puo_scrivere():
+    if os.geteuid() == 0:
+        return  # da root il chmod non morde: il caso non è riproducibile qui
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        ob = _onboarding_non_scrivibile(repo)
+        try:
+            v._TELEMETRIA_MUTA = False
+            v.progress_write(repo, "0.0.1", 4, "preflight-secrets", "running")
+            v.status_write(repo, current="0.0.1")
+        finally:
+            ob.chmod(0o700)
+        # nessuna eccezione: è tutto il punto. Prima moriva con PermissionError.
+
+
+def test_progress_write_avvisa_una_volta_sola_e_non_quindici():
+    """Un update ha quindici step: quindici righe identiche seppelliscono il resto
+    dell'output proprio quando serve leggerlo."""
+    if os.geteuid() == 0:
+        return
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        ob = _onboarding_non_scrivibile(repo)
+        avvisi = []
+        orig_warn = v.warn
+        v.warn = lambda m: avvisi.append(m)
+        try:
+            v._TELEMETRIA_MUTA = False
+            for n in range(1, 16):
+                v.progress_write(repo, "0.0.1", n, f"step-{n}", "running")
+        finally:
+            v.warn = orig_warn
+            ob.chmod(0o700)
+        assert len(avvisi) == 1, f"{len(avvisi)} avvisi per lo stesso guasto"
+        assert "prosegue" in avvisi[0], avvisi[0]
+
+
+def test_progress_write_scrive_davvero_quando_puo():
+    """CONTROPROVA: senza questa, «non solleva mai» sarebbe soddisfatto anche da
+    una funzione che non scrive nulla — il verde perfetto di chi non fa niente."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        (repo / "compose.yaml").write_text("services: {}\n")
+        v._TELEMETRIA_MUTA = False
+        v.progress_write(repo, "0.40.7", 4, "preflight-secrets", "running", "det")
+        letto = json.loads((repo / "onboarding" / "update_progress.json").read_text())
+        assert letto["step"] == 4 and letto["target"] == "0.40.7"
+        assert letto["step_name"] == "preflight-secrets" and letto["detail"] == "det"
+
+
+def test_progress_write_il_caso_esatto_della_vps_cartella_ok_file_no():
+    """LA RIPRODUZIONE FEDELE, non un'approssimazione: sulla VPS la cartella era
+    scrivibile e il singolo FILE no (di root, lasciato dal timer automatico). I due
+    test qui sopra rendono non scrivibile la CARTELLA — stessa classe, meccanismo
+    diverso, e un fix che coprisse solo quello sarebbe verde sul caso sbagliato."""
+    if os.geteuid() == 0:
+        return
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        (repo / "compose.yaml").write_text("services: {}\n")
+        (repo / "onboarding").mkdir()
+        f = repo / "onboarding" / "update_progress.json"
+        f.write_text("{}\n")
+        f.chmod(0o400)                       # cartella scrivibile, file no
+        try:
+            v._TELEMETRIA_MUTA = False
+            v.progress_write(repo, "0.40.7", 4, "preflight-secrets", "running")
+        finally:
+            f.chmod(0o600)
+        assert f.read_text() == "{}\n", "il file non doveva cambiare, e l'update non doveva morire"
+
+
+def test_status_write_sopravvive_a_un_file_corrotto():
+    """La lettura può fallire quanto la scrittura: un JSON troncato da un'uscita
+    brusca non deve impedire di scriverne uno buono."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        (repo / "compose.yaml").write_text("services: {}\n")
+        (repo / "onboarding").mkdir()
+        (repo / "onboarding" / "update_status.json").write_text('{"current": "0.4')
+        v._TELEMETRIA_MUTA = False
+        v.status_write(repo, current="0.40.7")
+        letto = json.loads((repo / "onboarding" / "update_status.json").read_text())
+        assert letto["current"] == "0.40.7"
 
 
 # ───── il runner diretto vedeva 32 test su 39: il presidio del presidio ─────
