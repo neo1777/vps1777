@@ -2,6 +2,72 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.6] — 2026-07-27
+
+Rilascio di riparazione, e la parte che conta non è la riparazione. La `0.40.5`
+chiudeva un buco reale e **ha reso il servizio irraggiungibile da Internet per
+un'ora e quaranta** — mentre tre controlli indipendenti davano verde.
+
+### Corretto
+
+- **Il servizio torna raggiungibile, senza riaprire il buco che la `0.40.5`
+  aveva chiuso.** Tolta al gateway l'ultima rete non-interna che aveva, era
+  rimasto solo su una rete `internal: true` — e **da una rete interna una porta
+  non si può pubblicare**: Docker accetta l'istruzione `ports:` e non la applica,
+  senza dirlo. Il tunnel bussava a una porta dove non c'era nessun processo in
+  ascolto. Ora il profilo Tailscale usa una rete propria in cui **il traffico in
+  ingresso passa e quello in uscita no** (il `masquerade` è spento: i pacchetti
+  verso Internet partono con un indirizzo privato e non tornano indietro).
+  Misurato sui due esiti, su due versioni di Docker, e poi sul sistema vivo dopo
+  l'applicazione: porta pubblicata, risposta dall'host, risposta da fuori
+  attraverso il tunnel, uscita verso Internet in timeout — e la controprova che
+  da un altro container la stessa uscita riesce, senza la quale un timeout non
+  distingue un blocco mirato da una rete guasta.
+- **Il controllo di salute dell'aggiornamento guarda anche da fuori.** È il
+  motivo per cui il guasto è passato: tutte le sonde interrogavano il gateway
+  **dall'interno del suo container**, dove la porta risponde sempre — anche
+  quando dall'esterno non esiste. Il container risultava sano, il comando che
+  mostra la configurazione mostrava la porta (dice cosa è *dichiarato*, non cosa
+  Docker riesce ad applicare), e il cancello dell'aggiornamento ha dato via
+  libera: **per questo non è scattata la marcia indietro automatica**. Ora c'è
+  anche una sonda che guarda la porta dall'host. Fallisce solo con una prova
+  positiva del guasto — «non ho misurato» non è «è rotto», perché qui un falso
+  allarme provocherebbe un ritorno indietro non necessario — e con Caddy o
+  Cloudflared, dove a ricevere il traffico è il proxy, si dichiara non
+  applicabile invece di accusare.
+
+### Aggiunto
+
+- **Una prova che misura la porta dal lato da cui il guasto si vede**
+  (`tools/prove-empiriche/prova-7`): verifica dall'host che la porta sia
+  pubblicata **e** che risponda, e distingue «non applicabile» da «passata»
+  uscendo con un codice diverso. È stata provata sui due esiti prima di essere
+  dichiarata utile: verde sul servizio vero, **rossa su un container rotto
+  apposta**. Delle sette prove è per ora l'unica di cui si sappia che sa
+  diventare rossa.
+- **Il registro dei rilievi ha una voce nuova, `H51`**, che non nasce da una
+  lettura ma da un guasto: *i controlli di salute sondano dal lato in cui il
+  problema non si vede*. Resta dichiarata parziale, con i tre residui scritti:
+  nessun controllo periodico, la sonda non attraversa il tunnel, e le prove
+  empiriche non entrano ancora nel pacchetto di aggiornamento.
+
+### Nota per chi aggiorna
+
+Nessuna migrazione, nessun segreto nuovo. Chi usa il profilo Tailscale ottiene
+una rete Docker nuova (`funnel`) e il gateway ricreato una volta. Chi usa Caddy
+o Cloudflared non cambia nulla — **e su quei due profili il gateway ha ancora
+l'uscita verso Internet**: `H50` resta parziale per loro, ed è scritto invece che
+taciuto, perché la rete che userebbe la stessa cura è quella su cui Cloudflared
+deve poter uscire per funzionare.
+
+### Rettifica alla nota della `0.40.5`
+
+Quella voce diceva: «Verificato eseguendo `docker compose config` su tutti e tre
+i profili». Era vero e **non bastava**: quel comando riporta ciò che è
+dichiarato, non ciò che Docker riesce ad applicare, e infatti mostrava la porta
+mentre il servizio era giù. Aver eseguito uno strumento non è aver misurato un
+effetto.
+
 ## [0.40.5] — 2026-07-26
 
 Chiude il secondo dei due difetti che il ciclo di audit aveva **misurato** sul
