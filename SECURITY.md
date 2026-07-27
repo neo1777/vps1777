@@ -223,18 +223,18 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **53 voci** (2 critiche, 9 alte, 28 medie, 14 basse): 43 dalla
+Il registro conta **54 voci** (2 critiche, 9 alte, 29 medie, 14 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
-ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3` — e 3 che non
+ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3` — e 4 che non
 vengono da una review ma da quello che è successo dopo: `H51` da un guasto in
-produzione, `H52` da un'analisi esterna, `H53` dall'aver misurato la copertura dei
-controlli invece di leggerla. Nessuna è aperta. Il conteggio, verificato contro il
-codice dal gate in CI:
+produzione, `H52` e `H54` da un'analisi esterna, `H53` dall'aver misurato la
+copertura dei controlli invece di leggerla. Nessuna è aperta. Il conteggio,
+verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
 | **chiusi** | 41 |
-| **parziali** | 11 |
+| **parziali** | 12 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -302,6 +302,21 @@ davvero — verificato rimettendo il difetto apposta. Nella stessa misura è eme
 il controllo di stile del Python guardava due percorsi su quattro: esteso, e fuori non
 c'era nulla di rotto — che è il motivo per cui la lacuna poteva durare. Resta parziale
 perché la ricerca di altri controlli nella stessa condizione non è esaustiva.
+
+Il dodicesimo è `H54`, e ci è arrivato per una strada storta che vale la pena dire:
+l'analisi esterna ha osservato che il gateway monta **cinque credenziali in chiaro**,
+compreso il token del bot Telegram. Il registro copriva quel terreno solo di sponda —
+c'era una voce **chiusa**, ma chiudeva una lacuna *nella documentazione*, non il
+rischio. Chi scorreva l'elenco cercando cosa resta scoperto non trovava nulla.
+Misurato, però, il numero giusto è **uno, non cinque**: quattro di quelle credenziali
+sono del gateway stesso — firma le proprie sessioni, verifica la password — e chi
+prende il gateway le ha già per definizione. Il token del bot no: quello non gli serve
+per *essere sé stesso*, gli serve per **parlare come il bot**, e chi lo prende può
+impersonarlo anche fuori da qui. *«Cinque» risponde a «cosa vede»; «uno» risponde a
+«cosa si guadagna a prenderlo»*. Resta parziale perché la difesa possibile — un
+processo separato che tenga il token e accetti solo «manda questo messaggio» — costa
+un pezzo in più da mantenere su una macchina piccola: è un baratto vero, e lo decide
+chi possiede la macchina, non un rilievo.
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è

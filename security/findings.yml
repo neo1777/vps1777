@@ -1316,3 +1316,46 @@ findings:
             noti e non corretti: cambiare quelle righe in tools/backup.sh e
             tools/restore.sh tocca la logica di ritenzione e di ripristino, e va
             fatto con una prova che li esegua, non con una sostituzione a vista.
+
+  - id: H54
+    severity: medium
+    title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
+    status: partial
+    since: unreleased
+    evidence:
+      - file: compose.yaml
+        contains: ["telegram_bot_token"]
+      - file: SECURITY.md
+        contains: ["H54"]
+    missing: >
+      NOMINATO DALL'ANALISI ESTERNA del round-7 come «cinque segreti Docker in chiaro
+      sul gateway, incluso il token Telegram, che è la radice di fiducia dell'app», e
+      portato qui da 71d540e6 con un rilievo che l'audio non poteva fare: il registro
+      aveva H44 `closed` su questo terreno, ma H44 chiude una lacuna DOCUMENTALE («i
+      doc dichiarano i secret che il gateway vede»). Chi scorreva il registro cercando
+      il rischio residuo sotto `partial` non trovava niente — e il rischio non era
+      mitigato, era solo scritto.
+
+      LA CORREZIONE DI MERITO, misurata (compose.yaml, servizio gateway): i segreti
+      montati sono cinque — gateway_secret, oauth_signing_secret, admin_password_bcrypt,
+      telegram_bot_token, archive_desc_secret. Ma QUATTRO SONO SUOI: firma le proprie
+      sessioni, firma l'OAuth, verifica la password admin (di cui tiene l'hash bcrypt,
+      non la password), descrive l'archivio. Perderli significa perdere il gateway, che
+      in uno scenario di compromissione del gateway è già perso per definizione:
+      elencarli come superficie aggiuntiva gonfia il numero senza aggiungere rischio.
+      LA SUPERFICIE VERA È UNO SOLO — `telegram_bot_token`. Quel token non serve al
+      gateway per essere sé stesso: serve a PARLARE come il bot. Chi lo prende può
+      scrivere a nome del bot, leggerne gli aggiornamenti e impersonarlo fuori dal
+      perimetro del gateway — cioè ottiene qualcosa che il gateway, di suo, non è.
+      «Cinque» è il numero giusto per la domanda «cosa vede»; «uno» è il numero giusto
+      per la domanda «cosa si guadagna a prenderlo». L'audio faceva la prima domanda e
+      rispondeva come se fosse la seconda.
+
+      COSA MANCA: la mitigazione non è decisa, e non la decide un rilievo. L'opzione
+      nota è un mediatore — un processo separato che tiene il token ed espone al gateway
+      solo «manda questo messaggio a questo destinatario», così una compromissione del
+      gateway permette di mandare messaggi ma non di portarsi via l'identità del bot.
+      Costa un container, un canale interno e una superficie nuova da presidiare, su una
+      macchina da 4 GB e per un bot mono-utente. È un baratto vero, non un fix ovvio:
+      va deciso da chi possiede la macchina, e finché non è deciso questa voce resta
+      `partial` — scritta, non risolta, e con lo stato che lo dice.

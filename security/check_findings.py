@@ -58,8 +58,12 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 1 (H53 medium, 27/07) = 53. H53 non nasce da una lettura né da un audio:
 # nasce dal misurare la copertura dei gate invece di leggerla — lo step shellcheck
 # girava con `|| true` e nascondeva un bug vero nella ritenzione dei backup.
-EXPECTED_TOTAL = 53
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 9, "medium": 28, "low": 14}
+# + 1 (H54 medium, 27/07) = 54. H54 nasce da un rilievo dell'analisi esterna del
+# round-7 che il registro copriva solo di sponda: H44 era `closed` sulla lacuna
+# DOCUMENTALE, e il rischio sotto non aveva una voce propria — chi cercava il
+# residuo sotto `partial` non trovava niente.
+EXPECTED_TOTAL = 54
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 9, "medium": 29, "low": 14}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
