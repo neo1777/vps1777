@@ -148,6 +148,18 @@ class Settings(BaseSettings):
     # ───── Telegram (per Mini App) ─────
     telegram_bot_token_file: SecretFromFile = ""
     telegram_bot_token: str = ""
+    # La chiave GIÀ DERIVATA con cui Telegram firma initData (H54, 27/07):
+    # HMAC_SHA256("WebAppData", token), 64 caratteri esadecimali. Se c'è, il gateway
+    # NON ha bisogno del token intero — e non montarlo è tutto il punto del rilievo:
+    # il token intero permette di parlare come il bot fuori dal perimetro del gateway,
+    # la chiave derivata no (la derivazione è a senso unico).
+    # Misurato prima di scriverla: il gateway non chiama MAI l'API di Telegram —
+    # zero occorrenze di api.telegram.org, sendMessage, getUpdates in services/gateway/.
+    # L'unico uso a runtime era derivare questa chiave e verificare una firma.
+    # Facoltativa di proposito: senza, tutto funziona come prima. Migrare è una
+    # decisione di chi possiede la macchina, non un effetto collaterale di un update.
+    telegram_webapp_secret_file: SecretFromFile = ""
+    telegram_webapp_secret: str = ""
     # owner-only: la Mini App emette un token solo per QUESTO utente Telegram
     # (0 = non configurato → nessuna restrizione, come il bot). Difesa in
     # profondità: il bot mostra il bottone solo all'owner, ma il server verifica
@@ -195,6 +207,20 @@ class Settings(BaseSettings):
     @property
     def effective_bot_token(self) -> str:
         return self.telegram_bot_token or self.telegram_bot_token_file
+
+    @property
+    def effective_webapp_secret(self) -> str:
+        """La chiave derivata, se è stata provisionata. Stringa vuota = non c'è,
+        e il chiamante ricade sul token (H54). NESSUNA derivazione automatica qui:
+        derivarla al volo dal token avrebbe l'aria di risolvere il rilievo mentre
+        il token resta montato — cioè la forma esatta del difetto che il registro
+        chiama «dichiarato ma non applicato»."""
+        return self.telegram_webapp_secret or self.telegram_webapp_secret_file
+
+    @property
+    def miniapp_auth_configurata(self) -> bool:
+        """Se la Mini App può autenticare: serve UNA delle due, non entrambe."""
+        return bool(self.effective_webapp_secret or self.effective_bot_token)
 
     @property
     def admin_email(self) -> str:

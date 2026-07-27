@@ -69,7 +69,13 @@ async def _status() -> dict[str, tuple[str, str]]:
         out["nlm"] = ("off", "profilo nlm non caricato")
 
     # Bot Telegram
-    if s.effective_bot_token:
+    # H54: il pannello dice COSA c'è, non «token sì/no». Un'installazione migrata
+    # alla chiave derivata è configurata — meglio di prima — e un pannello che le
+    # dicesse «token non impostato» manderebbe a rimontare proprio il segreto che
+    # si è appena tolto.
+    if s.effective_webapp_secret:
+        out["bot"] = ("ok", "chiave Mini App derivata (il token intero non è montato)")
+    elif s.effective_bot_token:
         out["bot"] = ("ok", "token presente")
     else:
         out["bot"] = ("off", "token non impostato")

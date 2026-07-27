@@ -209,3 +209,94 @@ def test_version_gt():
 def test_summarize_secrets_empty():
     assert miniapp_core.summarize_secrets({}) == {
         "total": 0, "overdue": 0, "overdue_names": [], "checked_at": ""}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# H54 — la chiave DERIVATA al posto del token intero.
+#
+# Il rilievo dice: il gateway monta il token del bot, e col token si parla come
+# il bot fuori dal suo perimetro. Misurato il 27/07: il gateway non chiama MAI
+# l'API di Telegram (zero occorrenze di api.telegram.org/sendMessage/getUpdates),
+# quindi del token gli serve solo la chiave che se ne deriva — e la derivazione
+# è a senso unico.
+#
+# Questi casi provano le due metà: che la chiave derivata BASTA, e che tutto
+# ciò che funzionava prima funziona ancora identico.
+# ─────────────────────────────────────────────────────────────────────────────
+
+WEBAPP_HEX = hmac.new(b"WebAppData", BOT.encode(), hashlib.sha256).hexdigest()
+
+
+def test_chiave_derivata_verifica_senza_il_token():
+    """La metà che chiude il rilievo: si valida SENZA passare il token."""
+    now = 1_700_000_000
+    init = _sign({"auth_date": str(now), "user": '{"id":774881727}'})
+    out = miniapp_core.verify_init_data(init, "", webapp_secret_hex=WEBAPP_HEX, now=now)
+    assert out is not None
+    assert out["user"] == '{"id":774881727}'
+
+
+def test_derivata_e_token_danno_lo_stesso_verdetto():
+    """Retrocompatibilità: le due strade non possono divergere, o la migrazione
+    diventerebbe un cambio di comportamento travestito da cambio di segreto."""
+    now = 1_700_000_000
+    init = _sign({"auth_date": str(now), "user": '{"id":1}'})
+    assert (miniapp_core.verify_init_data(init, BOT, now=now)
+            == miniapp_core.verify_init_data(init, "", webapp_secret_hex=WEBAPP_HEX, now=now))
+
+
+def test_la_derivata_vince_sul_token():
+    """Se ci sono entrambi si usa la derivata: altrimenti un token dimenticato
+    nel compose terrebbe in vita la strada che si voleva chiudere, e nessuno se
+    ne accorgerebbe perché tutto continuerebbe a funzionare."""
+    now = 1_700_000_000
+    init = _sign({"auth_date": str(now), "user": '{"id":1}'}, token="UN-ALTRO-token")
+    altra = hmac.new(b"WebAppData", b"UN-ALTRO-token", hashlib.sha256).hexdigest()
+    # firmata con l'altro token: passa con la SUA derivata anche se BOT è presente
+    assert miniapp_core.verify_init_data(init, BOT, webapp_secret_hex=altra, now=now) is not None
+    # e la derivata di BOT la rifiuta, pur essendo BOT il token passato
+    assert miniapp_core.verify_init_data(init, BOT, webapp_secret_hex=WEBAPP_HEX, now=now) is None
+
+
+def test_derivata_sbagliata_rifiuta():
+    now = 1_700_000_000
+    init = _sign({"auth_date": str(now), "user": '{"id":1}'})
+    sbagliata = hmac.new(b"WebAppData", b"altro", hashlib.sha256).hexdigest()
+    assert miniapp_core.verify_init_data(init, "", webapp_secret_hex=sbagliata, now=now) is None
+
+
+def test_derivata_malformata_non_esplode_e_rifiuta():
+    """Un segreto non-esadecimale o troncato in provisioning deve dare un rifiuto
+    pulito, non un'eccezione e non un falso positivo. La lunghezza si controlla:
+    una chiave troncata darebbe un 401 di firma, che si legge come «initData
+    scaduta» e manda a cercare dalla parte opposta."""
+    now = 1_700_000_000
+    init = _sign({"auth_date": str(now), "user": '{"id":1}'})
+    for cattiva in ("non-esadecimale", "ab", WEBAPP_HEX[:-2], WEBAPP_HEX + "ff", ""):
+        if cattiva == "":
+            continue  # vuota = «non configurata», copre il ramo del token
+        assert miniapp_core.verify_init_data(init, "", webapp_secret_hex=cattiva, now=now) is None
+
+
+def test_senza_niente_rifiuta():
+    """Né token né derivata: non si valida per difetto. Fail-closed."""
+    now = 1_700_000_000
+    init = _sign({"auth_date": str(now), "user": '{"id":1}'})
+    assert miniapp_core.verify_init_data(init, "", webapp_secret_hex="", now=now) is None
+
+
+def test_la_derivata_non_e_il_token():
+    """Il punto del rilievo, in una riga: chi ha la chiave non ha il token.
+    Se un giorno qualcuno «semplificasse» montando il token al posto suo, questo
+    test non se ne accorgerebbe — ma chi lo legge sì."""
+    assert WEBAPP_HEX != BOT
+    assert BOT not in WEBAPP_HEX
+    assert miniapp_core.webapp_secret_key(BOT).hex() == WEBAPP_HEX
+
+
+def test_la_scadenza_vale_anche_con_la_derivata():
+    """Il presidio di freschezza (H27, 12h) non deve saltare sulla strada nuova:
+    è il modo classico in cui un ramo aggiunto perde un controllo che l'altro ha."""
+    now = 1_700_000_000
+    vecchio = _sign({"auth_date": str(now - 13 * 3600), "user": '{"id":1}'})
+    assert miniapp_core.verify_init_data(vecchio, "", webapp_secret_hex=WEBAPP_HEX, now=now) is None

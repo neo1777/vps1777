@@ -145,15 +145,21 @@ async def miniapp_auth(request: Request) -> Response:
     ip = _client_ip(request)
     if not _AUTH_LIMIT.allow(ip, time.time()):
         return JSONResponse({"error": "rate_limited"}, status_code=429)
+    # H54: la chiave derivata basta e avanza per verificare la firma; il token
+    # intero è un'alternativa retrocompatibile, non un requisito. Il 503 scatta
+    # solo se non c'è NESSUNA delle due — altrimenti un'installazione migrata
+    # (segreto derivato, token smontato) riceverebbe «non configurato» pur
+    # essendo configurata meglio di prima.
     bot_token = s.effective_bot_token
-    if not bot_token:
+    webapp_secret = s.effective_webapp_secret
+    if not s.miniapp_auth_configurata:
         return JSONResponse({"error": "bot_token_not_configured"}, status_code=503)
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     init_data = body.get("init_data", "")
-    parsed = verify_init_data(init_data, bot_token)
+    parsed = verify_init_data(init_data, bot_token, webapp_secret_hex=webapp_secret)
     if not parsed:
         # firma non valida O initData più vecchia di INIT_DATA_MAX_AGE_S (12h, H27)
         audit({"event": "miniapp_auth_fail", "ip": ip})

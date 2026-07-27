@@ -1566,7 +1566,36 @@ findings:
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
     status: partial
     resta_aperto: >
-      La decisione A (container mediatore) o B (il bot che il token lo monta già): è un baratto vero su una macchina da 4 GB, e lo decide chi possiede la macchina.
+      Un GESTO DI PROVISIONING, non più una scelta di architettura: generare la chiave
+      derivata e smontare il token dal gateway. Il codice la accetta già dal 27/07;
+      finché il compose monta il token, il rilievo è mitigato nel software e non sulla
+      macchina — e questa riga resta finché non lo è là.
+    prova:
+      - comando: "grep -rn 'api.telegram.org\\|sendMessage\\|getUpdates' services/gateway/"
+        dove: "repo, a v0.40.14"
+        output: "nessuna occorrenza — il gateway non chiama MAI l'API di Telegram"
+        exit: 1
+        quando: "2026-07-27"
+        nota: >
+          È la misura che ha cambiato la domanda, e Neo l'aveva sospettato rispondendo
+          «scegliete voi O CAMBIATE TIPO DI DOMANDA». L'opzione A — un container mediatore
+          che espone «manda questo messaggio» — avrebbe dato al gateway una capacità che
+          non ha e non usa: un canale nuovo, da presidiare, per un traffico inesistente.
+          L'unico uso del token a runtime era derivare la chiave con cui si VERIFICA la
+          firma della Mini App. La derivazione è a senso unico: chi ha la chiave può
+          fingersi l'owner davanti a un gateway che in quello scenario è già suo, ma non
+          può parlare come il bot fuori di lì. È esattamente il surplus che questa voce
+          nomina, tolto senza un container in più.
+      - comando: "uvx pytest services/gateway/tests/test_miniapp_core.py -q"
+        output: "33 passed — la derivata valida SENZA token · derivata e token danno lo stesso verdetto · la derivata VINCE se ci sono entrambi · chiave malformata o troncata rifiutata senza eccezioni · la scadenza 12h di H27 vale anche sulla strada nuova"
+        exit: 0
+        quando: "2026-07-27"
+        nota: >
+          Tre di questi test sono nati ROSSI e hanno preso un difetto vero: la derivazione
+          originale era rimasta più in basso nella funzione e sovrascriveva la chiave
+          scelta dal ramo nuovo, che con token vuoto derivava dalla stringa vuota. Avevo
+          aggiunto un ramo lasciando in piedi il calcolo che quel ramo doveva sostituire.
+          Rileggendo il pezzo appena scritto non si vede: si vede solo eseguendo.
     rilievo_esterno:
       fonte: "analisi esterna del round-7 (audio 59332893)"
       difetto: vero
