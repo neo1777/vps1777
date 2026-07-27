@@ -32,11 +32,26 @@ jobs:
           # aggiorna da sé è un gate che cambia contratto senza un commit.
           # L'aggiornamento di ruff si fa apposta: bump qui + fix nello stesso PR.
           uv tool install ruff==0.15.22
-          ruff check services/ tools/vps1777.py
+          # I percorsi erano `services/ tools/vps1777.py`: fuori restavano
+          # security/ (il guardiano del registro), tools/verify-features.py e
+          # tutta tools/tests/. Misurato il 27/07 estendendo il comando: zero
+          # rilievi — cioè il gate non copriva quel codice e non se ne sarebbe
+          # mai accorto nessuno, perché il non-coperto era anche pulito.
+          ruff check services/ tools/ security/
       - name: ShellCheck bash
         run: |
           sudo apt-get install -y shellcheck
-          shellcheck setup.sh tools/*.sh || true
+          # ⚠️ QUI C'ERA `|| true`, e con lui questo step non poteva diventare
+          # rosso: un gate che per costruzione non fallisce non è un gate, è una
+          # riga di log. Misurato il 27/07 togliendolo: shellcheck usciva 1 su
+          # main da chissà quanto, e fra i rilievi c'era un BUG VERO nella
+          # ritenzione dei backup (SC2106 in tools/backup.sh — vedi il commento
+          # là). Nessuno poteva vederlo: lo step era verde per definizione.
+          # --severity=warning: i 6 rilievi `info` restanti sono stilistici e
+          # non bloccano; se un giorno li si vuole, si abbassa la soglia qui.
+          # tools/prove-empiriche/ era fuori dal glob: le otto prove che
+          # verificano il resto non erano verificate da niente.
+          shellcheck --severity=warning setup.sh tools/*.sh tools/prove-empiriche/*.sh
       # Il registro dei rilievi di sicurezza: ogni voce dichiarata `closed` deve
       # portare un'evidenza, e quell'evidenza deve ESISTERE ANCORA nel codice.
       # Nasce da un errore vero: SECURITY.md ha dichiarato «dossier applicato per

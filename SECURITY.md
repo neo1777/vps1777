@@ -223,16 +223,18 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-La review difensiva ha prodotto **50 interventi** (2 critici, 8 alti, 26 medi, 14
-bassi): 43 dalla campagna originaria (`v0.19.1 → v0.33.0`, affrontati tutti) e 7
-(`H44`-`H50`) dal ciclo di audit con misure sul sistema vivo culminato nella
-`v0.40.3`. Nessuno è aperto. Il conteggio, verificato contro il codice dal gate
-in CI:
+Il registro conta **53 voci** (2 critiche, 9 alte, 28 medie, 14 basse): 43 dalla
+campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
+ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3` — e 3 che non
+vengono da una review ma da quello che è successo dopo: `H51` da un guasto in
+produzione, `H52` da un'analisi esterna, `H53` dall'aver misurato la copertura dei
+controlli invece di leggerla. Nessuna è aperta. Il conteggio, verificato contro il
+codice dal gate in CI:
 
 | | |
 |---|---|
 | **chiusi** | 41 |
-| **parziali** | 10 |
+| **parziali** | 11 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -269,6 +271,30 @@ una prova che guarda la porta **da fuori** del container, ed è stata verificata
 due esiti: verde sul servizio sano, rossa su uno rotto apposta. Resta parziale
 perché quella prova qualcuno deve lanciarla: il cancello dell'aggiornamento non la
 esegue ancora, quindi lo stesso guasto passerebbe di nuovo.
+
+Il decimo è `H52`, e non l'abbiamo trovato noi: l'ha nominato l'analisi esterna del
+round-7. Le garanzie di irrobustimento dei servizi di sistema erano certificate
+**leggendo una stringa nel file di configurazione**, non chiedendo al sistema che
+cosa applica davvero: un file può dichiarare una protezione che il sistema ignora, e
+il controllo restava verde lo stesso. Ora una prova interroga il sistema
+(`systemctl show`) e confronta la risposta con ciò che il file dichiara, con la
+controprova dentro — cerca anche una protezione *non* dichiarata e pretende che il
+sistema dica di no, altrimenti la prova starebbe misurando se stessa. Resta parziale
+perché copre i servizi di sistema e non ancora i file dei container né il Python.
+
+L'undicesimo è `H53`, e riguarda i controlli stessi. Il passo che analizza gli script
+di shell girava con un `|| true` in coda: qualunque cosa trovasse, il risultato veniva
+buttato via e il passo restava verde. **Un controllo che per costruzione non può
+fallire non è un controllo, è una riga di log.** Tolto quel pezzo, il risultato è
+uscito subito: sette segnalazioni, e una era un **difetto vero nella conservazione dei
+backup** — un file col nome fuori formato non veniva scartato come previsto e si
+prendeva uno dei quattro posti riservati ai backup settimanali, buttandone fuori uno
+buono. Presente da quando lo script esiste, visibile allo strumento dal primo giorno,
+invisibile a chi guardava la build. Corretto, e ora quel passo può diventare rosso
+davvero — verificato rimettendo il difetto apposta. Nella stessa misura è emerso che
+il controllo di stile del Python guardava due percorsi su quattro: esteso, e fuori non
+c'era nulla di rotto — che è il motivo per cui la lacuna poteva durare. Resta parziale
+perché la ricerca di altri controlli nella stessa condizione non è esaustiva.
 
 **Fix scritto e fix che gira sono due stati diversi — e un fix che gira può rompere
 altro. Il registro tiene tutte e tre le cose** invece di dichiarare chiuso ciò che è

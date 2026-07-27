@@ -33,6 +33,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 REGISTRY = ROOT / "security" / "findings.yml"
 SECURITY_MD = ROOT / "SECURITY.md"
+CHANGELOG = ROOT / "CHANGELOG.md"
 
 # `accepted` = la review l'ha sollevato, l'abbiamo considerato, e abbiamo deciso
 # di NON agire, con una motivazione. È un esito legittimo (risk acceptance): non
@@ -54,8 +55,11 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # NB: questo scostamento è rimasto invisibile per un giorno intero perché
 # tutti leggevamo la coda dell'output senza l'exit code — il registro era a
 # 44+ dal round-2 e ogni «checker verde» dichiarato quel giorno era falso.
-EXPECTED_TOTAL = 52
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 9, "medium": 27, "low": 14}
+# + 1 (H53 medium, 27/07) = 53. H53 non nasce da una lettura né da un audio:
+# nasce dal misurare la copertura dei gate invece di leggerla — lo step shellcheck
+# girava con `|| true` e nascondeva un bug vero nella ritenzione dei backup.
+EXPECTED_TOTAL = 53
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 9, "medium": 28, "low": 14}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
@@ -113,6 +117,65 @@ def check_titolo_nomina_file(f: dict, errors: list[str]) -> None:
                  f"       si potrebbe svuotare {nome} e questo gate resterebbe verde.")
 
 
+SINCE_NON_RILASCIATO = "unreleased"
+
+
+def versioni_rilasciate() -> set[str]:
+    """Le versioni che il CHANGELOG dichiara rilasciate.
+
+    È il CHANGELOG e NON `git tag`, e la differenza non è di gusto: la CI fa
+    `actions/checkout` senza `fetch-tags`, quindi lassù `git tag` non stampa
+    niente. Un gate ancorato ai tag sarebbe verde in locale (60 tag) e avrebbe
+    bocciato TUTTE le 51 voci in CI — un presidio che si comporta in modo
+    diverso dove gira davvero è peggio di nessun presidio. Il CHANGELOG è un
+    file versionato: c'è in ogni checkout, anche il più superficiale.
+    """
+    if not CHANGELOG.is_file():
+        return set()
+    return set(re.findall(r"^##\s*\[?v?(\d+\.\d+\.\d+)\]?",
+                          CHANGELOG.read_text(encoding="utf-8"), re.M))
+
+
+def check_since(f: dict, rilasciate: set[str], errors: list[str]) -> bool:
+    """`since` dichiara da quale versione la voce è nello stato che dice.
+
+    Era l'UNICO campo del registro che nessuno controllava — e il 27/07/2026
+    conteneva `v0.40.7`: una versione mai rilasciata, assente dal CHANGELOG,
+    assente dai tag, diversa dal VERSION del repo. Ce l'avevo messa io poche
+    ore prima, ancorando H52 alla release successiva come se fosse già uscita.
+    Il gate era verde: un registro nato per rendere falsificabili i claim
+    portava una provenienza infalsificabile, ed è esattamente la classe che
+    H52 stessa denuncia.
+
+    Ritorna True se la voce è dichiarata NON ancora rilasciata: `main` la conta
+    e la stampa a ogni esecuzione. Non è un errore — il lavoro sta su main e
+    aspetta la release — ma non deve poter marcire in silenzio: un numero
+    stampato a ogni commit è un residuo che qualcuno vede.
+    """
+    fid, since = f.get("id", "?"), str(f.get("since") or "").strip()
+    if not since:
+        # `accepted` = si è deciso di non fare: non c'è una versione da cui
+        # «vale», e pretenderla sarebbe chiedere una data a una non-azione.
+        if f.get("status") != "accepted":
+            fail(errors, f"{fid}: non dichiara da quale versione (`since`) vale il suo stato.")
+        return False
+    if since == SINCE_NON_RILASCIATO:
+        return True
+    if not rilasciate:
+        # Nessuna versione leggibile: il problema è UNO (il CHANGELOG), non 51.
+        # `main` lo dice una volta sola; qui non si accusa ogni voce di un difetto
+        # che non ha. Una sonda che riporta 51 guasti quando ce n'è uno mente
+        # sulla FORMA del problema, ed è la lezione delle otto sonde difettose.
+        return False
+    if since.lstrip("v") not in rilasciate:
+        fail(errors,
+             f"{fid}: `since: {since}` non è una versione rilasciata — il CHANGELOG\n"
+             f"       non la nomina. O è un refuso, o è una release che non è mai\n"
+             f"       uscita: se il lavoro è su main e aspetta il rilascio, scrivi\n"
+             f"       `since: {SINCE_NON_RILASCIATO}`, che è vero e viene contato.")
+    return False
+
+
 def check_evidence(f: dict, errors: list[str]) -> None:
     """L'evidenza di una voce esiste ancora nel codice?"""
     fid = f["id"]
@@ -148,6 +211,13 @@ def main() -> int:
     seen: set[str] = set()
     counts = {"closed": 0, "partial": 0, "open": 0, "accepted": 0}
     by_sev: dict[str, int] = {}
+    rilasciate = versioni_rilasciate()
+    non_rilasciate: list[str] = []
+    if not rilasciate:
+        fail(errors,
+             "CHANGELOG.md assente o senza intestazioni di versione: senza di lui\n"
+             "       il campo `since` di ogni voce torna a essere prosa non verificata.\n"
+             "       (Il gate NON accusa le singole voci: il difetto è uno solo, qui.)")
 
     for f in findings:
         fid = f.get("id", "<senza id>")
@@ -190,6 +260,8 @@ def main() -> int:
                  f"{fid}: è `accepted` ma non dice PERCHÉ non si fa.\n"
                  f"       Accettare un rischio in silenzio è peggio che non accettarlo.")
 
+        if check_since(f, rilasciate, errors):
+            non_rilasciate.append(fid)
         check_evidence(f, errors)
         check_titolo_nomina_file(f, errors)
 
@@ -201,6 +273,23 @@ def main() -> int:
         got = by_sev.get(sev, 0)
         if got != expected:
             fail(errors, f"fascia {sev}: {got} voci nel registro, {expected} nel dossier")
+
+    # ── ogni RESIDUO dev'essere NOMINATO in SECURITY.md, non solo contato ──
+    # Il controllo qui sotto confronta quattro numeri, e quattro numeri combaciano
+    # anche quando il testo racconta un'altra cosa. Misurato il 27/07: la tabella
+    # diceva 10 parziali e la prosa ne descriveva 9 — H52, aggiunta quel giorno,
+    # non era nominata da nessuna parte. Il gate era verde: il totale tornava.
+    # Un residuo che nessuna riga nomina è un residuo che nessuno legge.
+    if SECURITY_MD.is_file():
+        md_ids = SECURITY_MD.read_text(encoding="utf-8")
+        for f in findings:
+            fid = str(f.get("id", ""))
+            if f.get("status") in {"partial", "open"} and fid and not re.search(
+                    rf"\b{re.escape(fid)}\b", md_ids):
+                fail(errors,
+                     f"{fid}: è `{f.get('status')}` ma SECURITY.md non lo NOMINA mai.\n"
+                     f"       Il conteggio tornerebbe lo stesso — ed è il punto: un\n"
+                     f"       residuo contato e non raccontato sparisce dalla lettura.")
 
     # ── il conteggio in SECURITY.md deve combaciare col registro ──
     # È il loop che si chiude: il documento non può più dichiarare più del codice.
@@ -224,6 +313,13 @@ def main() -> int:
           f"{YEL}{counts['partial']} parziali{OFF}{DIM} · "
           f"{DIM}{counts['accepted']} accettati · "
           f"{RED}{counts['open']} aperti{OFF}")
+    if non_rilasciate:
+        # Stampato SEMPRE, non solo in errore: è il residuo che aspetta una
+        # release. Finché ha un numero sullo schermo a ogni commit, nessuno può
+        # dire di non averlo visto.
+        print(f"{YEL}⧗ {len(non_rilasciate)} su main, non ancora rilasciati: "
+              f"{', '.join(non_rilasciate)}{OFF}"
+              f"{DIM} — l'evidenza è nel codice, la versione che la porta non è uscita.{OFF}")
 
     if errors:
         print(f"\n{RED}✗ il registro non regge — {len(errors)} problemi:{OFF}\n")

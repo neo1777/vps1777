@@ -1175,7 +1175,13 @@ findings:
     severity: medium
     title: "Le garanzie di hardening sono certificate per STRINGA, non per comportamento: il gate cerca il testo nel file, non chiede al sistema che cosa applica"
     status: partial
-    since: v0.40.7
+    # Era `v0.40.7`: una versione mai rilasciata, assente dal CHANGELOG e dai tag,
+    # scritta il 27/07 ancorando la voce alla release SUCCESSIVA come se fosse già
+    # uscita. Nessuno se n'è accorto perché `since` era l'unico campo del registro
+    # che nessun controllo leggeva — in un file che esiste per rendere falsificabili
+    # i claim. Ora check_findings.py lo verifica contro il CHANGELOG, e `unreleased`
+    # è il valore vero finché la release non c'è: viene contato e stampato a ogni giro.
+    since: unreleased
     evidence:
       - file: tools/prove-empiriche/prova-8-le-unit-si-comportano-come-dichiarano.sh
         contains:
@@ -1236,3 +1242,58 @@ findings:
             vede nessuno. Quella domanda è di una review, non di una prova.
         (c) copre le unit systemd. Le stesse evidenze «per stringa» esistono per
             i compose e per il codice Python, e lì non c'è un demone a cui chiedere.
+
+  - id: H53
+    severity: medium
+    title: "Gate che non potevano fallire: lo step shellcheck in .github/workflows/ci.yml girava con `|| true`, e il lint copriva due percorsi su quattro"
+    status: partial
+    since: unreleased
+    evidence:
+      - file: .github/workflows/ci.yml
+        contains:
+          - "shellcheck --severity=warning setup.sh tools/*.sh tools/prove-empiriche/*.sh"
+          - "ruff check services/ tools/ security/"
+        not_contains:
+          - "shellcheck setup.sh tools/*.sh || true"
+      - file: tools/backup.sh
+        contains: ["if ! week=$(date -d \"$ymd\" +%G-%V 2>/dev/null); then"]
+    missing: >
+      TROVATO IL 27/07/2026 misurando la copertura reale dei gate, non leggendola.
+      Due difetti nello stesso step di CI, e la stessa forma di H51/H52: un presidio
+      che gira, dà verde, e NON PUÒ vedere ciò per cui esiste.
+
+        (1) `shellcheck setup.sh tools/*.sh || true` — con quel `|| true` lo step
+            era verde per costruzione. Misurato togliendolo: shellcheck usciva 1
+            su main, con 7 rilievi, e uno era un BUG VERO nella ritenzione dei
+            backup: `week=$(date … || continue)` in tools/backup.sh:146. Il
+            `continue` girava dentro la sostituzione di comando — cioè in una
+            subshell — e non saltava niente (SC2106). Un file col nome non
+            parsabile non veniva scartato: `week` restava vuoto, `weeks[""]`
+            veniva occupato, e quel file si prendeva UNO DEI QUATTRO POSTI
+            weekly, buttando fuori un backup vero. Presente da quando lo script
+            esiste, visibile a shellcheck dal primo giorno, invisibile alla CI
+            per sempre. Corretto, e lo step ora fallisce davvero (--severity=warning:
+            i 6 rilievi `info` restanti sono stilistici e non bloccano).
+
+        (2) `ruff check services/ tools/vps1777.py` — fuori restavano security/
+            (il guardiano del registro, cioè QUESTO controllo), tools/verify-features.py
+            e tutta tools/tests/. Esteso a `services/ tools/ security/`: zero
+            rilievi. Il non-coperto era anche pulito, ed è il motivo per cui la
+            lacuna poteva durare — un buco che non fa male non lascia tracce.
+
+      COSA MANCA:
+        (a) la sweep non è esaustiva. Ho cercato `|| true`, `continue-on-error` e
+            `allow_failure` nei workflow: l'unico altro `|| true` (ci.yml, step
+            "Migrations immutability") è legittimo — protegge solo la cattura di
+            `git diff`, e il verdetto è un `exit 1` esplicito dopo. MA ha un suo
+            falso-verde residuo: se quel `git diff` fallisse per un motivo vero
+            (ref sbagliata, fetch incompleto), `CHANGED` resterebbe vuoto e il
+            gate passerebbe verde su una PR che modifica una migrazione. Non
+            corretto qui: è un altro gesto, e va fatto guardando, non di corsa.
+        (b) restano i gate che falliscono correttamente ma MISURANO la cosa
+            sbagliata. Questa voce copre solo quelli che non potevano fallire
+            affatto: è la metà facile del problema.
+        (c) i 6 rilievi `info` di shellcheck (SC2012 `ls | wc -l`, SC2015) sono
+            noti e non corretti: cambiare quelle righe in tools/backup.sh e
+            tools/restore.sh tocca la logica di ritenzione e di ripristino, e va
+            fatto con una prova che li esegua, non con una sostituzione a vista.

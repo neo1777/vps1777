@@ -2,6 +2,52 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## Non rilasciato
+
+Su `main`, non ancora in una versione. `security/check_findings.py` le conta e le
+stampa a ogni esecuzione (`⧗ N su main, non ancora rilasciati`) — perché un lavoro
+finito e non rilasciato è un residuo, e un residuo che nessuno conta si dimentica.
+
+### Aggiunto
+
+- **La via d'emergenza `cosign` non si dimentica più da sola** (`H49` ③). Mettere
+  `VPS1777_REQUIRE_COSIGN=0` nel `.env` sblocca una crisi ed è giusto che si possa
+  fare — ma finora restava lì per sempre, riletta a ogni aggiornamento compreso
+  quello automatico settimanale, e nessuno lo diceva. Ora il promemoria settimanale
+  che già segnala i segreti da rinnovare segnala anche questa, con da quanti giorni
+  è aperta, e la voce sparisce da sola appena la si toglie. **Non forza il ripristino
+  della verifica**: la crisi che ti ha fatto aprire la via d'emergenza può durare più
+  di un giorno, e richiuderla da soli ti chiuderebbe fuori mentre stai riparando.
+  Era dichiarato nel registro dal 4 luglio come «da fare, non ancora implementato»:
+  ventitré giorni di prosa esatta che non diventava codice perché nulla falliva se
+  restava prosa.
+
+### Corretto
+
+- **Un difetto vero nella conservazione dei backup** (`H53`). Un file di backup col
+  nome fuori formato non veniva scartato come previsto: si prendeva uno dei quattro
+  posti riservati ai backup settimanali, buttandone fuori uno buono. Presente da
+  sempre, e **segnalato dal primo giorno** dallo strumento di analisi degli script —
+  che però in build girava con un pezzo in coda che ne buttava via il risultato.
+- **Due controlli che non potevano fallire** (`H53`). Il passo che analizza gli script
+  di shell era verde per costruzione; ora può diventare rosso, verificato rimettendo
+  il difetto apposta. Il controllo di stile del Python guardava due percorsi su
+  quattro: esteso a tutti, e fuori non c'era nulla di rotto — che è il motivo per cui
+  la lacuna poteva durare tanto.
+- **Il registro non poteva più dire di venire da una versione che non esiste.** Il
+  campo che dichiara da quale versione vale ogni voce era l'unico che nessun
+  controllo leggeva, e conteneva una versione mai rilasciata. Ora è verificato contro
+  questo file. E ogni residuo dev'essere **nominato** in `SECURITY.md`, non solo
+  contato: la tabella diceva dieci, il testo ne raccontava nove, e i conti tornavano.
+- **Il file di test della CLI eseguiva 32 test su 39 quando lo si lanciava a mano**,
+  uscendo `0`. I sette invisibili erano i più recenti. Corretto, e chiuso con un
+  controllo che rilegge il file: se qualcuno ne aggiunge uno nel punto sbagliato,
+  la build lo dice invece di tacere.
+- **Il contratto dell'indicizzatore d'archivio copre i messaggi con contenuto
+  dichiarato e vuoto**, la classe da cui veniva un divario di quasi settemila record.
+  Il codice era già giusto: mancava il controllo che lo tiene giusto — e la fixture
+  di prima passava verde sulla stessa regressione.
+
 ## [0.40.6] — 2026-07-27
 
 Rilascio di riparazione, e la parte che conta non è la riparazione. La `0.40.5`

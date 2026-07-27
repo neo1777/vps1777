@@ -143,7 +143,16 @@ weekly_keep=()
 for f in "${all[@]}"; do
   # Estrai YYYY-MM-DD dal nome
   ymd=$(echo "$f" | sed -E 's/^vps1777-([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\1/')
-  week=$(date -d "$ymd" +%G-%V 2>/dev/null || continue)
+  # PRIMA: `week=$(date … || continue)` — il `continue` girava DENTRO la
+  # sostituzione di comando, cioè in una subshell, e non saltava un bel niente
+  # (SC2106). Un nome di file non parsabile non veniva scartato: `week` restava
+  # vuoto, `weeks[""]` veniva occupato, e quel file si prendeva UNO DEI QUATTRO
+  # POSTI weekly buttando fuori un backup vero. In uno script di ritenzione dei
+  # backup. Lo diceva shellcheck dal primo giorno: la CI lo eseguiva con
+  # `|| true` e ne buttava via il verdetto.
+  if ! week=$(date -d "$ymd" +%G-%V 2>/dev/null); then
+    continue
+  fi
   if [ -z "${weeks[$week]:-}" ] && [ ${#weekly_keep[@]} -lt 4 ]; then
     weeks[$week]=$f
     weekly_keep+=("$f")
