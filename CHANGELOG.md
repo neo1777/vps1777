@@ -2,6 +2,60 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.40.11] — 2026-07-27
+
+Il rilascio in cui **due regole scritte diventano controlli**. Nessuna funzione nuova per
+chi usa il servizio: due cose che il progetto prometteva a parole e che nessun controllo
+faceva rispettare.
+
+> **La cosa che vale più dei due fix**: entrambi i controlli, la prima volta che sono
+> stati eseguiti, hanno trovato un difetto **in sé stessi**. Uno era verde per costruzione
+> — non poteva diventare rosso nemmeno volendo. *Un controllo che non si è mai visto
+> fallire non è un controllo: è una riga di log con la faccia seria.*
+
+### Corretto
+
+- **La finestra di ripristino si accorciava in silenzio.** Lo script dei backup chiudeva
+  dicendo «copie totali mantenute: 7» — un **conteggio**, mentre la promessa che quello
+  script mantiene è in **giorni**. Il 27 luglio ha detto «7» quando i giorni erano tre, e
+  poi ancora «7» quando erano due: non ha mai mentito e non ha mai detto niente. Ora dice
+  **quanti giorni distinti** copre e da quando a quando, e avvisa se sono meno di sette
+  spiegando come leggerlo.
+- **E quel numero adesso lo guarda qualcuno.** Anche scritta giusta, quella riga finisce
+  in un file di log dentro un container che nessuno apre. Il controllo giornaliero — lo
+  stesso che già ogni giorno verifica se il servizio risponde — ora guarda anche la
+  copertura e **avvisa su Telegram**. 🔑 Avvisa di una **regressione**, non di una finestra
+  non ancora piena: dopo un'installazione nuova la copertura è 1, poi 2, poi 3, ed è
+  normale — *un allarme che suona quando va tutto bene viene messo a tacere prima di
+  servire davvero*. Quello che non è mai normale è che scenda sotto il massimo già
+  raggiunto, perché a regime le copie si sostituiscono, non si perdono.
+- **Un indirizzo pubblico nel repo, e nessun controllo che lo impedisse.** La regola era
+  scritta — nessun indirizzo o nome della macchina, in nessuna forma, nemmeno in un
+  esempio — e la applicavamo a mano. Un indirizzo è entrato dentro una nota che
+  documentava una misura ed è rimasto visibile per otto ore. *Non è la macchina né la sua
+  rete privata: è un ingresso pubblico e condiviso, e non dà accesso a niente.* Ora
+  indirizzi pubblici e nomi di rete reali **fanno fallire la build**, con le esclusioni
+  giuste: reti private, indirizzi nati apposta per la documentazione, e i bersagli di test
+  dichiarati **uno per uno col perché** — *un controllo che grida al lupo viene spento.*
+
+### Aggiunto
+
+- **Il controllo sui backup ora si può provare**: `bash tools/backup.sh --prune-only`
+  applica la rotazione senza scrivere 2,5 GB. Nove casi a risposta nota, e i tre nuovi
+  presidiano il rendiconto — compreso quello che inganna il conteggio: sette file di un
+  solo giorno.
+- **Undici casi per il controllo sugli indirizzi**, metà dei quali contro i *falsi* rossi:
+  un numero di sezione di una specifica (`§4.1.2.1`) somiglia a un indirizzo, e la
+  dimensione di un file scritta all'italiana pure.
+
+### Verificato
+
+- Il controllo sugli indirizzi ora guarda anche i file **nuovi**, non solo quelli già
+  registrati: prima rispondeva sul repo com'è invece che su come sta per diventare.
+- Le esenzioni sono **per regola** e non più per file: un file esentato perché parla dei
+  segreti non è più esentato anche dal resto. *Era esattamente il motivo per cui
+  l'indirizzo è potuto restare dov'era.*
+
 ## [0.40.10] — 2026-07-27
 
 Il rilascio in cui **le copie di sicurezza smettono di perdere giorni**. Nessuna
