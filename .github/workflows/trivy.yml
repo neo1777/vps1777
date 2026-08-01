@@ -23,16 +23,53 @@ jobs:
         service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # 🔴 DIFETTO CURATO IL 02/08 (b82df434, referto di un agente via abdd732a).
+      #   Prima: `docker manifest inspect "$REF" >/dev/null 2>&1` — l'errore finiva
+      #   nel nulla, e QUALUNQUE fallimento dava `ok=false` ⇒ lo scan Trivy veniva
+      #   saltato dall'`if:` e **il workflow restava VERDE**.
+      # ⭐ Cinque cause diverse producevano lo stesso verde: immagine non ancora
+      #   pubblicata · pacchetto non pubblico (qui non c'è `docker login`) · registry
+      #   giù · rate limit · nome del repo sbagliato. **E questo workflow è
+      #   SCHEDULATO**: un verde settimanale nessuno lo apre. Uno scan di
+      #   vulnerabilità che non gira per mesi si scopre quando serviva.
+      # 📌 MISURATO IL 02/08, e cambia il peso della cura: tutte e quattro le
+      #   immagini sono pubblicate e leggibili SENZA login (`docker manifest
+      #   inspect` da una macchina non autenticata). ⇒ il caso «non ancora
+      #   pubblicata», scritto quando la prima release non esisteva, oggi **non si
+      #   applica più**: un salto oggi non è pre-release, è un guasto nascosto.
+      # 🔑 LA CURA non è «non saltare mai»: è **distinguere ASSENTE da NON HO
+      #   POTUTO GUARDARE**, che è la stessa distinzione che le prove empiriche
+      #   fanno con l'exit 2. Assente ⇒ warning e salto. Non ho potuto guardare
+      #   ⇒ il job FALLISCE, perché un verde che non ha scansionato mente.
       - name: Check published image exists
         id: exists
         run: |
           REF="ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:latest"
-          if docker manifest inspect "$REF" >/dev/null 2>&1; then
+          if err="$(docker manifest inspect "$REF" 2>&1 >/dev/null)"; then
             echo "ok=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::$REF non ancora pubblicata (nessuna release stable?) — scan saltato"
+            exit 0
           fi
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+          # l'errore NON si butta: è l'unica cosa che distingue i casi.
+          echo "manifest inspect ha detto: ${err:-<nessun messaggio>}"
+          case "$err" in
+            *"manifest unknown"*|*"not found"*|*"no such manifest"*|*NAME_UNKNOWN*)
+              # ⚠️ RESIDUO DICHIARATO, misurato in collaudo: da qui «non pubblicata» e
+              #   «nome sbagliato» sono INDISTINGUIBILI — entrambe danno «not found».
+              #   Non lo si può risolvere leggendo l'errore; lo si risolve guardando.
+              echo "::warning::$REF non trovata — scan saltato. ⚠️ Due cause danno questo"\
+                   "stesso messaggio e da qui non si distinguono: non ancora pubblicata,"\
+                   "oppure NOME SBAGLIATO nel workflow. Al 02/08 tutte e quattro le"\
+                   "immagini risultavano pubblicate e leggibili senza login ⇒ se lo vedi"\
+                   "oggi, il primo sospettato è il nome, non la release."
+              ;;
+            *)
+              echo "::error::NON HO POTUTO VERIFICARE $REF — non è «assente», è «non lo so»:"\
+                   "${err:-nessun messaggio}. Lo scan NON è stato eseguito e questo job"\
+                   "fallisce apposta: un verde che non ha scansionato mente."
+              exit 1
+              ;;
+          esac
       - name: Trivy scan
         if: steps.exists.outputs.ok == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
