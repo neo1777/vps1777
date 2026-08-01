@@ -110,6 +110,54 @@ def test_un_indirizzo_non_si_ritaglia_da_dentro_un_numero_piu_lungo():
     assert not g.IPV4.search("1.10.0.0.1")
 
 
+# ────────────────── R2 · stringhe di connessione (01/08, `abdd732a`) ─────────
+# 🔴 QUESTI SONO I PRIMI TEST DI R2 IN QUESTO FILE, e la scoperta vale più del
+#   pattern che provano: fino a oggi qui si testava **solo R3**. Il file è esente
+#   da R3 (deve contenere indirizzi veri per provare che vengono fermati) ma NON
+#   da R2 — e non se n'era mai accorto nessuno, perché non conteneva materiale
+#   credenziale. ⭐ *L'esenzione reggeva per una proprietà del CONTENUTO, non per
+#   una decisione: bastava il primo test di R2 a farla cadere.*
+# 🛡️ LA TECNICA, ed è il motivo per cui le stringhe sono spezzate: un caso di
+#   prova scritto per intero **farebbe scattare il gate su questo stesso file** e
+#   bloccherebbe ogni commit. Concatenandolo a runtime, la sequenza non esiste mai
+#   nel sorgente — il gate legge il testo, il test vede la stringa intera.
+#   *È l'unico modo di provare R2 qui dentro senza allargare l'allowlist: e
+#   allargarla sarebbe stato esattamente il difetto che H60 ha già pagato.*
+
+def _dsn(schema: str, pwd: str) -> str:
+    """Compone un DSN a runtime: nel sorgente non esiste come sequenza."""
+    return schema + "://app:" + pwd + "@" + "db.example.com:5432/prod"
+
+
+def _r2(testo: str) -> bool:
+    return any(p.search(testo) for _, p in g.SECRET_PATTERNS)
+
+
+def test_r2_ferma_una_stringa_di_connessione_con_password_vera():
+    assert _r2(_dsn("postgresql", "Kj3nR8vQx2Lm"))
+    assert _r2(_dsn("mysql", "aB9xK2mQ7pLw"))
+    assert _r2(_dsn("mongodb+srv", "Zx8Kq2mNv5Rt"))
+    assert _r2(_dsn("redis", "Q7wErTy9UiOp"))
+
+
+def test_r2_lascia_passare_i_segnaposto_di_una_stringa_di_connessione():
+    # La metà che impedisce il falso rosso: se un gate grida al lupo sulla doc,
+    # viene disattivato — e allora non protegge più niente.
+    assert not _r2("postgresql://app:" + "$DB_PASSWORD" + "@db:5432/prod")
+    assert not _r2("postgresql://app:" + "${DB_PASS}" + "@db:5432/prod")
+    assert not _r2("postgres://user:" + "<password>" + "@host/db")
+    assert not _r2("mysql://root:" + "changeme" + "@localhost/test")
+    assert not _r2(_dsn("postgresql", "pass"))          # segnaposto corto
+    assert not _r2("postgresql://app" + "@db:5432/prod")  # nessuna password
+
+
+def test_r2_non_scatta_su_un_url_qualunque():
+    # Un `://` con dentro i due punti non è una credenziale: senza questo caso il
+    # pattern potrebbe prendere qualunque URL con una porta e nessuno lo saprebbe.
+    assert not _r2("https://api.example.com:8443/v1/token")
+    assert not _r2("http://localhost:17772/dati")
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):

@@ -45,10 +45,17 @@ ho saputo vedere», che è il difetto per cui una guardia muta è peggio di ness
   (`bash -n`) e la logica è scritta sui meccanismi reali letti nel codice (nomi dei *servizi* compose, non
   dei container: i `container_name` non sono dichiarati, quindi indovinarli sarebbe stato un errore).
   **Nessuna ha girato su una VPS viva** — chi le lancia la prima volta è il loro primo collaudo, e va saputo.
-- 🔴 **Non arrivano sulla VPS da sole.** Il pacchetto di rilascio non include questa cartella: le prove
-  vanno copiate a mano sulla macchina che devono misurare. Scoperto il 27/07 nel modo peggiore — il primo
-  comando ha risposto `RC=0` su uno script che sulla macchina **non esisteva** (era l'exit di `tail`).
-  *Un presidio assente non dà un rosso: dà un verde.*
+- 🟢 **Arrivano sulla VPS col pacchetto di rilascio** — `release.yml` fa `cp -r tools/prove-empiriche
+  bundle/tools/` (commit `87f6391`, 27/07 **12:57**, H51 d).
+  🔴 *(27/07 **09:33**, all'origine)* **Non arrivano sulla VPS da sole.** Il pacchetto di rilascio non
+  include questa cartella: le prove vanno copiate a mano sulla macchina che devono misurare. Scoperto il
+  27/07 nel modo peggiore — il primo comando ha risposto `RC=0` su uno script che sulla macchina **non
+  esisteva** (era l'exit di `tail`). *Un presidio assente non dà un rosso: dà un verde.*
+  ⚠️ **Le due righe distano tre ore e mezza, e per quattro giorni ha parlato solo la seconda.** *Non era
+  sbagliata: era vera alle 09:33 e il commit delle 12:57 l'ha resa falsa senza toccarla.* ⭐ **Un file che
+  descrive i propri limiti invecchia esattamente quando il limite viene curato** — ed è il momento in cui
+  nessuno lo rilegge, perché chi cura guarda il codice. *Trovato il 01/08 da `abdd732a` mentre verificava
+  un audio che quella contraddizione non l'aveva vista, pur avendo letto entrambi i file.*
 - 🔴 **La 2 e la 3 hanno un limite strutturale dichiarato dentro lo script**: girano **sulla** VPS, e la
   domanda vera («è raggiungibile da Internet?») si risponde solo **da fuori**. Lo dicono nel loro output
   invece di far credere il contrario. *Una prova che tace il proprio punto cieco è peggio di una che manca.*

@@ -77,6 +77,26 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         "password letterale in sshpass",
         re.compile(r"""sshpass\s+-p\s*['"]?(?![$<{.…])[^\s'"`$<>]{6,}"""),
     ),
+    # 🔴 AGGIUNTO IL 01/08 (`abdd732a`) — il buco lo ha nominato l'audio `de03744a` del
+    # round-10, che però lo attribuiva all'esenzione R3. Non c'entrava: una stringa di
+    # connessione con la password dentro **non era coperta in NESSUN file del repo**,
+    # esente o no. *Fatto vero, causa sbagliata — e la causa sbagliata è ciò che rende
+    # un rilievo facile da archiviare: si smonta la causa e si butta anche il fatto.*
+    # 🛡️ La password dev'essere REALE, come per gli altri pattern: `$VAR`, `${…}`,
+    # `<password>`, `changeme`, `xxx` e `pass` sono segnaposto e passano.
+    # 📏 MISURATO PRIMA DI ENTRARE, sui 176 file del corpus `6d9f9d5`: **0 match** —
+    # e la controprova su 12 casi (4 devono scattare, 8 devono tacere) dà 12/12.
+    # *Uno zero su un repo intero è il risultato di cui fidarsi meno: senza la
+    # controprova sarebbe indistinguibile da un pattern che non sa dire di sì.*
+    (
+        "stringa di connessione con credenziali",
+        re.compile(
+            r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss"
+            r"|amqps?|clickhouse)://[A-Za-z0-9._%-]+:"
+            r"(?![\$<{*.…]|xxx|yyy|pass(?:word)?[@:]|changeme|segreto|placeholder"
+            r"|redacted)[^\s'\"`@/\\]{6,}@"
+        ),
+    ),
 ]
 
 # File che PARLANO dei pattern per mestiere (questo gate, e il registro dei
