@@ -419,6 +419,11 @@ def check_scoperta(f: dict, errors: list[str], senza: list[str]) -> None:
 # Al round-7 un rilievo sul rollback era «vero a metà», e il difetto reale era un altro:
 # l'abbiamo trovato per conto nostro dopo, non grazie al metro. Un metro a due domande
 # fa passare l'INQUADRAMENTO dell'audit senza esaminarlo.
+# Voci nate da un'analisi esterna che NON portano i tre verdetti: sorvegliate e
+# stampate a ogni giro (vedi `check_rilievo_esterno`). Lista e non contatore: un
+# numero senza i nomi non si può spuntare, e queste vanno chiuse una per una.
+SORVEGLIATE: list[str] = []
+
 VERDETTI = {
     "difetto": {"vero", "vero-a-meta", "falso", "non-decidibile"},
     "rimedio": {"giusto", "costoso", "sbagliato", "assente"},
@@ -434,9 +439,35 @@ def check_rilievo_esterno(f: dict, errors: list[str]) -> None:
     risposte — e a scoprire, scrivendole, quando divergono.
     """
     r = f.get("rilievo_esterno")
-    if r is None:
-        return
     fid = f.get("id", "?")
+    if r is None:
+        # 🔴 IL BUCO (02/08, da un rilievo di un agent, verificato sul registro).
+        #   Questa regola si applicava SOLO a chi si autodenuncia: bastava non scrivere
+        #   il campo — che è FACOLTATIVO — per non essere guardati. E chi non lo scrive
+        #   era indistinguibile da chi non ne ha bisogno.
+        # 📏 MISURATO adesso su `findings.yml`: le voci con `scoperta.come:
+        #   audio-esterno` sono 5 (H48, H49, H52, H54, H62); quelle con
+        #   `rilievo_esterno` sono 2 (H52, H54). ⇒ **H48, H49 e H62 sono nate da
+        #   un'analisi esterna, sono tutte e tre `closed`, e non passano da nessuno
+        #   dei tre verdetti** — e il gate usciva 0 stampando «ogni voce chiusa ha la
+        #   sua evidenza».
+        # ⭐ Il dato per accorgersene era DENTRO il registro (`scoperta.come`): non
+        #   mancava l'informazione, mancava chi la incrociasse.
+        # ⚠️ SORVEGLIANZA, NON CANCELLO — e dichiaro perché, perché il pattern
+        #   «segnalato, non fatale» è esattamente quello che stanotte abbiamo trovato
+        #   essere un verde-per-costruzione: i tre verdetti sono un GIUDIZIO su un
+        #   rilievo altrui, non un campo da riempire, e non posso inventarli né farli
+        #   inventare da chi passa di qui col gate rosso. Le due differenze che lo
+        #   rendono un presidio e non un alibi: **compare nell'OUTPUT a ogni giro** (non
+        #   tace) e **ha un criterio di uscita scritto** — quando le tre voci hanno i
+        #   loro verdetti, questo blocco diventa `fail()` e la regola vale per tutte.
+        if (f.get("scoperta") or {}).get("come") == "audio-esterno":
+            SORVEGLIATE.append(
+                f"{fid} ({f.get('status', '?')}): nata da un'analisi esterna "
+                f"(`scoperta.come: audio-esterno`) e SENZA `rilievo_esterno` ⇒ i tre "
+                f"verdetti non sono mai stati dati."
+            )
+        return
     if not r.get("fonte"):
         fail(errors, f"{fid}: `rilievo_esterno` senza `fonte` — un rilievo di cui non si\n"
                      f"       sa da dove viene non si può nemmeno rimandare indietro.")
@@ -708,6 +739,18 @@ def main() -> int:
     if senza_scoperta:
         print(f"{YEL}◍ {len(senza_scoperta)} voci senza `scoperta` (quando e come l'abbiamo saputa){OFF}"
               f"{DIM} — finché sono tante, «stiamo migliorando?» non è una domanda falsificabile.{OFF}")
+    if SORVEGLIATE:
+        # Stessa disciplina delle due qui sopra: contato, NOMINATO e stampato — non
+        # accusato. I tre verdetti sono un giudizio su un rilievo altrui, non un campo
+        # da riempire di corsa; ma finché i nomi sono sullo schermo a ogni giro,
+        # nessuno può dire di non averli visti — ed è l'unica differenza fra una
+        # sorveglianza e un verde-per-costruzione.
+        print(f"{YEL}◍ {len(SORVEGLIATE)} voci da analisi esterna SENZA i tre verdetti{OFF}"
+              f"{DIM} — la regola `rilievo_esterno` si applicava solo a chi si autodenuncia:{OFF}")
+        for r in SORVEGLIATE:
+            print(f"  {YEL}·{OFF} {r}")
+        print(f"{DIM}    Quando queste hanno i loro verdetti, il ramo in "
+              f"`check_rilievo_esterno` diventa un `fail()` e la regola vale per tutte.{OFF}")
     if non_rilasciate:
         # Stampato SEMPRE, non solo in errore: è il residuo che aspetta una
         # release. Finché ha un numero sullo schermo a ogni commit, nessuno può
