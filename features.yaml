@@ -991,3 +991,32 @@ features:
       python_def:
         path: tools/vps1777.py
         name: _scrivi_telemetria
+
+  - id: ops.quadratura-ingest-manuale
+    nome: "La quadratura di un ingest è uno strumento MANUALE, e deve restarlo"
+    cosa: >
+      `collaudo-quadratura.py` risponde a una domanda sola — «il corpus è entrato
+      tutto, o si è perso qualcosa?» — confrontando ciò che il DB contiene
+      (messaggi + lapidi in `skipped`) con quante righe la SORGENTE aveva. Quel
+      numero si passa a mano (`--sorgente N`) e il docstring lo chiama «dichiarate».
+      È DICHIARATO qui perché il ledger non lo vedeva: `enum_reality` ha guardato
+      `tools/` solo dal 02/08, e fino ad allora questo strumento è esistito per
+      sei giorni senza che nessun presidio sapesse che c'era — e senza che nessuno
+      lo invocasse.
+      ⚠️ NON è un presidio scollegato da agganciare, ed è la parte che conta: il
+      numero della sorgente deve venire da FUORI il DB. Se lo prendesse
+      dall'ingest, la quadratura confronterebbe l'ingest con sé stesso e
+      diventerebbe una tautologia che non può fallire — cioè esattamente il
+      «verde che non ha guardato» che questo progetto insegue. Il costo di
+      automatizzarlo è distruggerlo.
+      Quel che SI PUÒ automatizzare è ricordare che esiste e che per un dato DB
+      non è mai stata eseguita: è un promemoria, non una misura.
+    dove:
+      - "tools/collaudo-quadratura.py#main"
+      - "docs/ARCHIVE.md"
+    status: active-default
+    since: "0.40.x (esistente dal 26/07, dichiarato il 02/08)"
+    verify:
+      python_def:
+        path: tools/collaudo-quadratura.py
+        name: main
