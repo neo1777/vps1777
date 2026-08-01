@@ -87,9 +87,50 @@ done
 # ── Il record, con DOVE oltre che QUANDO ──────────────────────────────────────
 # La macchina fa parte del dato: una prova verde sul portatile non dice niente
 # della VPS, e senza `dove` fra un mese non si potrà più distinguere.
-printf '{"quando":"%s","dove":"%s","totale":%d,"ok":%d,"rosse":%d,"non_eseguite":%d,"prove":[%s]}\n' \
-  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname)" "$tot" "$ok" "$ko" "$salt" \
+#
+# 🔴 DIFETTO CURATO IL 02/08 (b82df434, voce `e12aa7ec` aperta da 71d540e6 su
+#   segnalazione di un agente — difetto verificato riga per riga da entrambe).
+#   `--solo prova-3` eseguiva UNA prova e scriveva il record **sullo stesso file**:
+#   `totale:1 ok:1 rosse:0 non_eseguite:0`, cancellando il referto delle nove. Al
+#   giro dopo l'intestazione stampava «N ore fa · 1/1 verdi» — **che è esattamente
+#   la frase che questo script esiste per rendere impossibile.**
+# ⭐ E la seconda faccia, più silenziosa: `tot` contava ciò che IL GLOB aveva
+#   trovato. Se il glob trovasse meno file dei tracciati (un bundle di release
+#   incompleto), le mancanti non sarebbero «non eseguite»: **semplicemente non
+#   contate.** ⇒ serve un ATTESO che non venga dallo stesso glob che sto contando.
+#
+# LA CURA, in due pezzi e nessuno dei due copiato:
+#  ① l'atteso viene da `git ls-files`, non dal glob — stesso criterio della CI
+#    (`ci.yml:79`, «un elenco scritto a mano invecchia in silenzio»). Se git non
+#    risponde NON si inventa un numero: si scrive `null` e si dichiara.
+#  ② una corsa PARZIALE non tocca il referto completo. Va su un file suo, e lo
+#    dice. *Marcare il record «parziale» non basterebbe: il referto completo
+#    sarebbe comunque distrutto, e un dato marcato bene ma perso è perso.*
+atteso="$(git -C "$REPO" ls-files 'tools/prove-empiriche/prova-*.sh' 2>/dev/null | wc -l)"
+[ "${atteso:-0}" -gt 0 ] || atteso=""      # git assente ⇒ «non lo so», non uno zero
+_atteso_json="${atteso:-null}"
+
+if [ -n "$SOLO" ]; then
+  FUORI="${FUORI%.json}-parziale.json"
+  printf '  ⚠️  corsa PARZIALE (--solo «%s»): il referto completo NON è stato toccato.\n' "$SOLO"
+  printf '     Questo esito va in %s — una corsa su %s prove non può\n' "${FUORI##*/}" "$tot"
+  printf '     sostituire il quadro di %s.\n' "${atteso:-tutte le}"
+fi
+
+printf '{"quando":"%s","dove":"%s","parziale":%s,"filtro":"%s","atteso":%s,"totale":%d,"ok":%d,"rosse":%d,"non_eseguite":%d,"prove":[%s]}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname)" \
+  "$([ -n "$SOLO" ] && echo true || echo false)" "$SOLO" "$_atteso_json" \
+  "$tot" "$ok" "$ko" "$salt" \
   "$(IFS=,; echo "${righe[*]:-}")" > "$FUORI"
+
+# 🛡️ E il caso che nessuno dei due pezzi copre: corsa COMPLETA che vede meno
+#   prove di quante ne siano tracciate. Non è «non eseguite»: è che non le ha
+#   nemmeno viste. Va detto qui, o resta un verde su un insieme rimpicciolito.
+if [ -z "$SOLO" ] && [ -n "$atteso" ] && [ "$tot" -lt "$atteso" ]; then
+  printf '  🔴 ho eseguito %d prove ma ne risultano %d tracciate: %d NON sono state\n' \
+    "$tot" "$atteso" "$((atteso - tot))"
+  printf '     nemmeno viste dal glob. Non sono «non eseguite» — sono assenti.\n'
+fi
 
 printf '\n  %d verdi · %d rosse · %d non eseguite   →  %s\n' "$ok" "$ko" "$salt" "${FUORI#"$REPO"/}"
 [ $salt -gt 0 ] && printf '  ⚪ le NON ESEGUITE non sono passate: mancava un prerequisito (di solito docker).\n     Sono contate a parte apposta — un verde che include ciò che non hai guardato\n     è esattamente il difetto che queste prove esistono per non commettere.\n'
