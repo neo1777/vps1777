@@ -52,9 +52,24 @@ async def _status() -> dict[str, tuple[str, str]]:
     else:
         out["url"] = ("off", "non impostato")
 
-    # Tailscale (deduzione: URL .ts.net presente)
+    # Tailscale — è una DEDUZIONE, e adesso lo dice.
+    # 🔴 Qui c'era ("ok", "Funnel attivo") dedotto da `.ts.net` in PUBLIC_BASE:
+    # una stringa del `.env` che NON cambia mai se l'auth-key scade, se il nodo
+    # esce dal tailnet, o se qualcuno spegne il Funnel per manutenzione e non lo
+    # riaccende. ⚠️ Ed è la pagina che l'utente apre proprio per sapere COSA
+    # MANCA: era l'ultimo posto in cui potesse stare un verde non misurato.
+    # ⭐ È il gemello del difetto curato in `90fd647` (l'installer chiudeva la
+    # porta 8080 fidandosi di `tailscale funnel status`): stessa forma, altro
+    # file — la cura non si era propagata.
+    # 📌 La forma giusta è SEI RIGHE PIÙ SOTTO, in questo stesso file:
+    # `nlm_client.status()` risponde `None` quando non sa, «invece di mentire».
+    # 🖐️ Il dato vero esiste e non è collegato: `funnel_ok` (tools/vps1777.py)
+    # esce su Internet e rientra, gira ogni giorno dentro `vps1777 check` e
+    # finisce in `var/state.json`. Portarlo fin qui vuole un canale come
+    # `update_status.json`/`secrets_status.json` — è il passo successivo,
+    # dichiarato e NON fatto qui: meglio un giallo onesto di un verde dedotto.
     if pb and ".ts.net" in pb:
-        out["tailscale"] = ("ok", "Funnel attivo")
+        out["tailscale"] = ("warn", "URL Funnel configurato — non verificato da qui")
     else:
         out["tailscale"] = ("off", "non configurato")
 
