@@ -858,18 +858,66 @@ def test_raggiungibilita_senza_notify_non_spedisce_ma_segna_lo_stesso():
         ripristina()
 
 
-def test_funnel_non_applicabile_quando_l_ingresso_non_e_funnel():
-    """Con caddy/cloudflared, o senza tailscale, la sonda si dichiara NON
-    APPLICABILE invece di accusare: un rosso qui sveglierebbe una persona per una
-    cosa che su quel profilo è lo stato corretto."""
-    orig = v.nome_pubblico_funnel
+def test_funnel_non_applicabile_solo_se_NESSUN_indirizzo_pubblico_e_dichiarato():
+    """«Non applicabile» è onesto solo quando non c'è NIENTE da sondare.
+
+    🔴 QUESTO TEST CRISTALLIZZAVA IL DIFETTO (corretto il 02/08). Il suo docstring
+    diceva che con caddy/cloudflared «non applicabile» era «lo stato corretto su quel
+    profilo» — e su quella frase la sorveglianza giornaliera restava con **zero sonde
+    su due profili d'ingresso su tre**: `porta_esterna_ok` esce al primo `if` per i
+    proxy, `funnel_ok` usciva qui. Un caddy morto non mandava nessuna notifica.
+    ⭐ Il test passava, ed era il test a essere sbagliato: descriveva come voluto un
+    comportamento che nessuno aveva scelto. *Un caso a risposta nota vale quanto la
+    risposta che ci si è scritti accanto.*
+    """
+    orig_nome, orig_env = v.nome_pubblico_funnel, v.env_read
     v.nome_pubblico_funnel = lambda: ""
+    v.env_read = lambda repo: {}                  # nessun PUBLIC_BASE: davvero niente
     try:
         raggiungibile, perche = v.funnel_ok(Path("/non/serve"))
         assert raggiungibile is True
         assert "non applicabile" in perche
     finally:
-        v.nome_pubblico_funnel = orig
+        v.nome_pubblico_funnel, v.env_read = orig_nome, orig_env
+
+
+def test_con_caddy_la_sonda_USA_public_base_invece_di_arrendersi():
+    """IL caso che il difetto lasciava scoperto: niente Tailscale, ma un indirizzo
+    pubblico c'è ed è nel `.env` (`deploy.sh` lo scrive come `https://$CADDY_DOMAIN`).
+    La sonda deve interrogare QUELLO, non dichiararsi inapplicabile."""
+    chiamate = []
+    orig_nome, orig_env = v.nome_pubblico_funnel, v.env_read
+    orig_urlopen, orig_sleep = v.urllib.request.urlopen, v.time.sleep
+    v.nome_pubblico_funnel = lambda: ""
+    v.env_read = lambda repo: {"PUBLIC_BASE": "https://esempio.invalid/"}
+    def _rifiuta(req, timeout=0):
+        chiamate.append(req.full_url)
+        raise v.urllib.error.URLError("rete assente")
+    v.urllib.request.urlopen = _rifiuta
+    v.time.sleep = lambda s: None
+    try:
+        raggiungibile, perche = v.funnel_ok(Path("/non/serve"), tentativi=1)
+        assert chiamate, "con PUBLIC_BASE la sonda DEVE uscire: non l'ha fatto"
+        assert chiamate[0] == "https://esempio.invalid/health", chiamate[0]
+        assert raggiungibile is False
+        assert "non applicabile" not in perche
+    finally:
+        v.nome_pubblico_funnel, v.env_read = orig_nome, orig_env
+        v.urllib.request.urlopen, v.time.sleep = orig_urlopen, orig_sleep
+
+
+def test_un_public_base_malformato_non_diventa_un_bersaglio():
+    """Il verso opposto: `PUBLIC_BASE=vps1777` o vuoto non deve produrre una
+    richiesta a un URL inventato — meglio «non applicabile» di un falso rosso."""
+    orig_nome, orig_env = v.nome_pubblico_funnel, v.env_read
+    v.nome_pubblico_funnel = lambda: ""
+    try:
+        for valore in ("", "   ", "esempio.invalid", "ftp://esempio.invalid"):
+            v.env_read = lambda repo, _v=valore: {"PUBLIC_BASE": _v}
+            raggiungibile, perche = v.funnel_ok(Path("/non/serve"))
+            assert raggiungibile is True and "non applicabile" in perche, valore
+    finally:
+        v.nome_pubblico_funnel, v.env_read = orig_nome, orig_env
 
 
 def test_funnel_giu_e_un_rosso_dopo_piu_di_un_tentativo():

@@ -1412,24 +1412,47 @@ def funnel_ok(repo: Path, tentativi: int = 2) -> tuple[bool, str]:
     qui un falso allarme costa una notifica a una persona — la seconda volta che
     arriva a vuoto, quella persona smette di leggerla.
     """
+    # 🔴 IL BUCO CHE QUESTO BLOCCO CHIUDE (02/08): il bersaglio veniva SOLO da
+    # `nome_pubblico_funnel()`, che per `caddy` e `cloudflared` ritorna "" — e da lì
+    # si usciva con «non applicabile: vero». Insieme a `porta_esterna_ok`, che per
+    # quei profili esce al primo `if` (r.532, «a ricevere il traffico è il proxy»),
+    # **la sorveglianza giornaliera aveva ZERO sonde su 2 profili d'ingresso su 3**:
+    # un caddy morto (OOM, cert non rinnovato) non scriveva `irraggiungibile_da` e
+    # non mandava NESSUNA notifica. È lo stato del mondo dell'incidente del 27/07
+    # dentro il presidio scritto per non ripeterlo.
+    # ⭐ La sonda era giusta, le mancava il BERSAGLIO: per quei profili l'indirizzo
+    # pubblico esiste ed è già nel `.env` — `PUBLIC_BASE`, scritto da `deploy.sh:373`.
+    # 📌 Il nome `funnel_ok` resta, ed è ormai più stretto di ciò che fa: è citato
+    # come evidenza in `security/findings.yml:1233` (`"def funnel_ok"`), e rinominarlo
+    # renderebbe rosso il gate dei findings per un fatto di stile. Il commento qui
+    # vale più del nome: **questa funzione chiede «il servizio risponde da Internet?»,
+    # comunque sia pubblicato.**
     nome = nome_pubblico_funnel()
-    if not nome:
-        return True, "non applicabile: questo ingresso non pubblica via Tailscale Funnel"
+    if nome:
+        base, via = f"https://{nome}", "il Funnel"
+    else:
+        pb = (env_read(repo).get("PUBLIC_BASE") or "").strip().rstrip("/")
+        base, via = (pb, "l'indirizzo pubblico") if pb[:8].lower().startswith("http") else ("", "")
+    if not base:
+        # Qui «non applicabile» è ONESTO: nessun indirizzo pubblico è dichiarato da
+        # nessuna parte, quindi non c'è niente da sondare. Prima invece era il ramo
+        # in cui finivano DUE profili su tre che un indirizzo pubblico ce l'hanno.
+        return True, "non applicabile: nessun indirizzo pubblico dichiarato per questo ingresso"
     ultimo = ""
     for n in range(tentativi):
         try:
-            req = urllib.request.Request(f"https://{nome}/health", method="GET")
+            req = urllib.request.Request(f"{base}/health", method="GET")
             with urllib.request.urlopen(req, timeout=20) as r:   # noqa: S310
                 if r.status == 200:
-                    return True, "raggiungibile da Internet attraverso il Funnel"
-                ultimo = f"il Funnel risponde {r.status}"
+                    return True, f"raggiungibile da Internet attraverso {via}"
+                ultimo = f"{via} risponde {r.status}"
         except urllib.error.HTTPError as exc:
-            ultimo = f"il Funnel risponde {exc.code}"
+            ultimo = f"{via} risponde {exc.code}"
         except (urllib.error.URLError, OSError, ValueError) as exc:
-            ultimo = f"il Funnel non risponde ({exc})"
+            ultimo = f"{via} non risponde ({exc})"
         if n + 1 < tentativi:
             time.sleep(3)
-    return False, ultimo or "il Funnel non risponde"
+    return False, ultimo or f"{via} non risponde"
 
 
 def _sorveglia_raggiungibilita(repo: Path, st: dict, notifica: bool) -> None:
