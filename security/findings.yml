@@ -1307,7 +1307,7 @@ findings:
     title: "Le garanzie di hardening sono certificate per STRINGA, non per comportamento: il gate cerca il testo nel file, non chiede al sistema che cosa applica"
     status: partial
     resta_aperto: >
-      La regola «una voce che parla di un DOCUMENTO non può chiudersi con un solo `not_contains`» non è applicata: così com'è accuserebbe tre voci sane. Serve prima un modo di dichiarare l'oggetto della voce.
+      Certificare per STRINGA un COMPORTAMENTO: 47 voci su 63 non dichiarano `natura`, e senza quella la regola non le raggiunge. (Il pezzo sui DOCUMENTI è applicato dal 01/08: `check_documento_non_solo_assenza`.)
     rilievo_esterno:
       fonte: "analisi esterna del round-7 (audio 59332893)"
       difetto: vero
@@ -1565,11 +1565,32 @@ findings:
     severity: medium
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
     status: partial
+    scoperta:
+      quando: "2026-07-27"
+      come: lettura
+      nota: >
+        Entrata col commit 4186bb4 — «il rischio che il registro copriva solo di sponda»:
+        nessuna voce diceva che il gateway ha il token, lo si deduceva da H29 (il token
+        riclassificato di fascia massima) e da H6 (i cookie tolti al gateway). Ri-emersa
+        il 01/08 nell'audio `d80ad880` del round-10, che l'ha chiamata col suo numero —
+        segno che il registro è dentro il corpus, non che l'audit l'ha riscoperta.
+    natura: comportamento
     resta_aperto: >
       Un GESTO DI PROVISIONING, non più una scelta di architettura: generare la chiave
       derivata e smontare il token dal gateway. Il codice la accetta già dal 27/07;
       finché il compose monta il token, il rilievo è mitigato nel software e non sulla
       macchina — e questa riga resta finché non lo è là.
+      STRUMENTO PRONTO dal 01/08: `tools/migra-chiave-miniapp.sh` deriva la chiave senza
+      mai stampare né copiare il token, scrive l'overlay `compose.miniapp-secret.yaml`
+      che smonta `telegram_bot_token` dal gateway, e verifica di non aver perso gli altri
+      quattro secrets. Si annulla togliendo un `-f`. `--verifica` mostra lo stato senza
+      scrivere nulla. NON applica: la migrazione resta il gesto di chi ha la macchina —
+      lo dice `settings.py:159`, e `effective_webapp_secret` rifiuta apposta di derivare
+      al volo perché «avrebbe l'aria di risolvere il rilievo mentre il token resta montato».
+      ⇒ per chiudere servono i due comandi del punto 2 dello strumento, ESEGUITI: che in
+      `/run/secrets/` del gateway il token non ci sia più, E che la Mini App autentichi
+      ancora. Il primo senza il secondo non è una migrazione: è un servizio rotto in
+      silenzio, e ce ne accorgeremmo solo quando qualcuno prova ad aprire il pannello.
     prova:
       - comando: "grep -rn 'api.telegram.org\\|sendMessage\\|getUpdates' services/gateway/"
         dove: "repo, a v0.40.14"

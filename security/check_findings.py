@@ -340,6 +340,50 @@ COME_SCOPERTA = {
 }
 
 
+def check_documento_non_solo_assenza(f: dict, errors: list[str]) -> None:
+    """Una voce di natura `documento` non si chiude con la sola ASSENZA di una stringa.
+
+    ⇒ È la regola che `H52` teneva in sospeso. Il suo `resta_aperto` diceva: *«non è
+    applicata: così com'è accuserebbe tre voci sane. Serve prima un modo di dichiarare
+    l'oggetto della voce»*.
+    🔑 **Quel modo è arrivato**: il campo `natura`, introdotto con `H62`/`H63` il 27-28/07.
+    Misurato il 01/08 prima di scrivere questa funzione:
+        · voci che si chiudono con SOLO `not_contains`  →  UNA (H48)
+        · e H48 NON è un documento: è `compose.yaml`, dove l'assenza di `ports:`
+          **È** il comportamento, perché è il file che docker legge.
+        · le tre voci `natura: documento` (H44, H54, H62) hanno tutte un `contains`.
+    ⇒ **la regola oggi non accusa nessuno**, e il blocco dichiarato in `H52` è
+      invecchiato: valeva quando `natura` non c'era e la regola avrebbe dovuto
+      applicarsi a tutte le voci indistintamente.
+
+    PERCHÉ SOLO SUI DOCUMENTI. Per una configurazione l'assenza di una riga è la
+    proprietà stessa (H48). Per un DOCUMENTO no: «il testo X non c'è» non dimostra
+    che il documento dica la cosa giusta — potrebbe dirla altrove, in altra forma, o
+    non dirla affatto. *Un `not_contains` da solo prova che una frase è sparita, non
+    che la verità sia scritta.*
+
+    ⚠️ E non chiude `H52`, che è più largo (certificare per stringa un COMPORTAMENTO).
+    Chiude il pezzo che `H52` dichiarava bloccato — e lo dice invece di lasciar credere
+    che il rilievo sia risolto.
+    """
+    if f.get("natura") != "documento" or f.get("status") != "closed":
+        return
+    ev = f.get("evidence") or []
+    if not ev:
+        return
+    chiavi: set[str] = set()
+    for e in ev:
+        chiavi |= set(e.keys()) - {"file"}
+    if chiavi == {"not_contains"}:
+        errors.append(
+            f"  {f.get('id')}: è una voce `natura: documento` chiusa con la sola ASSENZA "
+            f"di una stringa.\n"
+            f"       «quel testo non c'è» prova che una frase è sparita, non che il "
+            f"documento dica la cosa giusta.\n"
+            f"       Aggiungi un `contains` con la frase che DEVE esserci, o una `prova` "
+            f"di lettura.")
+
+
 def check_scoperta(f: dict, errors: list[str], senza: list[str]) -> None:
     """`scoperta: {quando, come}` — quando l'abbiamo saputa e per quale strada.
 
@@ -553,6 +597,7 @@ def main() -> int:
             non_rilasciate.append(fid)
         check_resta_aperto(f, errors)
         check_natura_e_prova(f, errors, senza_natura)
+        check_documento_non_solo_assenza(f, errors)
         check_scoperta(f, errors, senza_scoperta)
         check_rilievo_esterno(f, errors)
         check_evidence(f, errors)
