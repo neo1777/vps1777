@@ -385,9 +385,16 @@ PY
   # e sistema» non è un rimedio ammesso: sarebbe chiedergli ciò che gli abbiamo detto che
   # non serviva.
   if [ "${TS_FALLBACK:-0}" = "1" ]; then
-    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^GATEWAY_BIND= .env && sed -i \"s|^GATEWAY_BIND=.*|GATEWAY_BIND=0.0.0.0|\" .env || echo GATEWAY_BIND=0.0.0.0 >> .env)'" \
-      && warn "Apro la porta 8080 (HTTP) come fallback: il Funnel non ha risposto." \
-      || warn "NON sono riuscito ad aprire il fallback :8080 — la VPS può restare irraggiungibile."
+    # 📌 if-then-else vero e non `A && B || C`: shellcheck (SC2015) l'ha preso al primo
+    #   giro, ed è un rilievo GIUSTO — con quella forma, se il `warn` di successo
+    #   fallisse girerebbe anche il ramo d'errore, e verrebbe stampato «non sono
+    #   riuscito» dopo essere riuscito. È la stessa classe che questo fix sta curando:
+    #   un costrutto che sembra fare una cosa e ne fa un'altra.
+    if SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^GATEWAY_BIND= .env && sed -i \"s|^GATEWAY_BIND=.*|GATEWAY_BIND=0.0.0.0|\" .env || echo GATEWAY_BIND=0.0.0.0 >> .env)'"; then
+      warn "Apro la porta 8080 (HTTP) come fallback: il Funnel non ha risposto."
+    else
+      warn "NON sono riuscito ad aprire il fallback :8080 — la VPS può restare irraggiungibile."
+    fi
   fi
 
   # 4. Restart servizi. Per tailscale il gateway resta su 127.0.0.1:8080
