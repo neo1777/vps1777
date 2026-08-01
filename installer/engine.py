@@ -622,8 +622,58 @@ echo SELFUPDATE_OK
         ).strip()
 
     def _ts_funnel_ok(self) -> bool:
+        """La configurazione DICHIARATA sulla VPS — non il servizio raggiungibile.
+
+        ⚠️ Da sola non basta e non va usata da sola: vedi `_funnel_confermato_da_qui`.
+        """
         f = self._run_capture("tailscale funnel status 2>/dev/null || true")
         return ":443" in f or "funnel on" in f.lower()
+
+    def _funnel_confermato_da_qui(self, url: str, tentativi: int = 2) -> tuple[bool, str]:
+        """H51 (c) portata nell'installer: la conferma la dà una richiesta che ESCE.
+
+        🔴 IL DIFETTO CHE CHIUDE: `_ts_funnel_ok()` legge `tailscale funnel status`
+        SULLA VPS. È la configurazione dichiarata dalla macchina su sé stessa, e da
+        quella si concludeva «✓ Funnel HTTPS attivo» *e si chiudeva la porta 8080*
+        (`step_finalize` guarda `self.production`). Con la configurazione a posto e
+        il tunnel non funzionante, l'utente restava senza HTTPS **e** senza fallback.
+
+        ⭐ E la sonda che esce esiste già nel repo — `tools/vps1777.py:funnel_ok`,
+        docstring verbatim: «una guardia locale NON vedrebbe un tunnel caduto, un DNS
+        che non risolve o un instradamento pubblico rotto». Qui NON la chiamiamo:
+        quella deve uscire dalla VPS e rientrare perché gira SULLA VPS. **L'installer
+        gira sul PC dell'utente, che è già dalla parte giusta della rete** — la
+        richiesta parte da fuori per costruzione, ed è la stessa che farà lui domani.
+
+        📌 Conta come conferma QUALUNQUE risposta HTTP, 401 e 404 compresi: il gateway
+        ha l'autenticazione e su `/` risponde legittimamente 401. Ciò che si sta
+        provando è che il tunnel porta i byte fin lì — non che l'app dica sì. Contare
+        solo i 200 sarebbe un falso rosso garantito, e un gate che grida al lupo
+        viene spento.
+
+        Due tentativi come `funnel_ok`, e per la stessa ragione: un singolo errore di
+        rete è un evento comune, e qui un falso allarme lascia aperta una porta che
+        andava chiusa.
+        """
+        if not url:
+            return False, "nessun URL pubblico da interrogare"
+        ultimo = ""
+        for n in range(tentativi):
+            if n:
+                time.sleep(3)  # il cert appena emesso può non essere ancora servito
+            try:
+                req = urllib.request.Request(
+                    url, method="GET", headers={"User-Agent": "vps1777-installer"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    return True, f"HTTP {r.status} dal tuo PC"
+            except urllib.error.HTTPError as e:
+                # una risposta c'è: il tunnel porta i byte, ed è tutto ciò che qui serve
+                return True, f"HTTP {e.code} dal tuo PC (il gateway richiede auth: atteso)"
+            except urllib.error.URLError as e:
+                ultimo = str(getattr(e, "reason", e))[:120]
+            except Exception as e:  # noqa: BLE001 — timeout, TLS, DNS: tutti «non arriva»
+                ultimo = f"{type(e).__name__}: {e}"[:120]
+        return False, ultimo or "nessuna risposta"
 
     def _warm_ts_cert(self, url: str) -> None:
         """Pre-provisiona il cert del Funnel (LE via Tailscale): senza, la PRIMA
@@ -715,8 +765,19 @@ rm -f secrets/ts_authkey.txt
         ))
         time.sleep(4)
         if self._ts_funnel_ok():
-            self.production = True
-            yield "✓ Funnel HTTPS attivo su :443 (cert pre-provisionato)"
+            # La configurazione dice attivo. Prima di CREDERLE — e soprattutto prima
+            # di chiudere la porta 8080 — si chiede a chi sta fuori: questo PC.
+            confermato, perche = self._funnel_confermato_da_qui(url)
+            if confermato:
+                self.production = True
+                yield f"✓ Funnel HTTPS attivo su :443 — confermato dal tuo PC ({perche})"
+            else:
+                yield "! Funnel CONFIGURATO sulla VPS ma NON raggiungibile da qui: " + perche
+                yield "  → la macchina dichiara il Funnel attivo; una richiesta dal tuo PC non arriva."
+                yield "  → NON chiudo la porta 8080: resta il fallback finché non risponde davvero."
+                yield "  → se il certificato è appena stato emesso può servire qualche minuto;"
+                yield f"    riprova ad aprire {url} fra poco, e se risponde sei a posto."
+                self._set_gateway_bind(ingress, "0.0.0.0")
         else:
             low = (fout + " " + up).lower()
             if "funnel" in low and ("attribute" in low or "not permitted" in low or "denied" in low):
