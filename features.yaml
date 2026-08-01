@@ -1020,3 +1020,47 @@ features:
       python_def:
         path: tools/collaudo-quadratura.py
         name: main
+
+  - id: ops.prove-empiriche
+    nome: "Le nove prove empiriche e il loro contratto a TRE stati"
+    cosa: >
+      Nove script che misurano il sistema VIVO — non il codice: la rete che non
+      esce, l'ingresso che non entra, il deep-health chiuso agli esterni, gli
+      snapshot in chiaro, la sandbox della unit di update, il kernel che la
+      regge, la porta davvero pubblicata, le unit che si comportano come
+      dichiarano, il fail-closed che torna indietro davvero. Più
+      `lancia-tutte.sh`, che le esegue tutte e DATA l'esito in
+      `onboarding/prove-empiriche.json` (quando, e su quale host).
+      ⭐ IL CONTRATTO E' LA COSA CHE VALE, ed è dichiarato in testa a `prova-8`:
+      **0 = PASS · 1 = FAIL · 2 = NON ESEGUIBILE**. Il terzo stato esiste perché
+      «non ho potuto guardare» non è «va bene»: senza di lui una prova lanciata
+      dove il sistema non c'è stampa un verde che non ha misurato niente.
+      Misurato il 01-02/08 su un PC senza vps1777: prova-1 e prova-3 davano un
+      falso PASS su una guardia a vuoto (`docker compose ps -q` esce 0 con
+      output VUOTO), prova-2 su un ciclo che iterava su ZERO container, prova-5
+      dichiarando «non osservabile» proprio sul blocco che può dare FAIL, e
+      prova-6 uscendo 0 pur dichiarando di non aver visto il caso silenzioso.
+      Curate: adesso su quella macchina è 1 verde, 0 rosse, 8 non eseguite.
+      ⚠️ COSA IL LEDGER NON PROVA DI LORO: che siano LANCIATE. Non sono nel gate
+      di aggiornamento e nessuna CI le esegue — girano dove gira il prodotto, e
+      il loro esito lo produce chi le lancia. È una scelta (misurano il vivo,
+      non il repo), non una dimenticanza — ma va saputa: un verde della CI non
+      dice niente su queste.
+    dove:
+      - "tools/prove-empiriche/lancia-tutte.sh"
+      - "tools/prove-empiriche/prova-1-gateway-non-esce.sh"
+      - "tools/prove-empiriche/prova-2-egress-non-entra.sh"
+      - "tools/prove-empiriche/prova-3-health-deep-solo-interni.sh"
+      - "tools/prove-empiriche/prova-4-snapshot-in-chiaro.sh"
+      - "tools/prove-empiriche/prova-5-sandbox-update-service.sh"
+      - "tools/prove-empiriche/prova-6-sandbox-strict-regge-sul-kernel.sh"
+      - "tools/prove-empiriche/prova-7-porta-pubblicata-davvero.sh"
+      - "tools/prove-empiriche/prova-8-le-unit-si-comportano-come-dichiarano.sh"
+      - "tools/prove-empiriche/prova-9-il-fail-closed-torna-indietro-davvero.sh"
+    status: active-default
+    since: "esistenti dal 26/07, contratto a tre stati curato il 01-02/08"
+    verify:
+      manual: "verifica umana: le prove misurano il sistema VIVO — una macchina
+               deve lanciarle. Il ledger prova che esistono (i file sono nel
+               `dove`), NON che siano state eseguite: quello lo dice la data in
+               `onboarding/prove-empiriche.json`, che il lanciatore scrive."
