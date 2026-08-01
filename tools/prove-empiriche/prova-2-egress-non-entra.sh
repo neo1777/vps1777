@@ -79,7 +79,17 @@ except Exception as e:
 case "$out" in
   ESCE)     echo "   ✅ nb1777-mcp ESCE (controprova positiva: la prova sa dire sì)" ;;
   NON-ESCE*) echo "   ⚠️  nb1777-mcp NON esce ($out) — allora il verde del ① non dimostra il NAT:"
-             echo "      questo servizio deve poter parlare con NotebookLM. Da guardare."; ;;
+             echo "      questo servizio deve poter parlare con NotebookLM. Da guardare."
+             # 🔴 IL RAMO CHE LA CURA DEL 02/08 AVEVA SALTATO, e non uno qualunque:
+             #    è ESATTAMENTE il caso che il commento del ② descrive — «un servizio
+             #    isolato del tutto darebbe lo stesso verde». La cura ha messo `exit 2`
+             #    sul ramo `*)` (esito non interpretabile) e ha lasciato questo, che è
+             #    il caso NOMINATO nella frase che motivava la cura.
+             # ⭐ La forma: quando si chiude un difetto descritto da un commento, il
+             #    ramo da controllare per primo è quello che il commento CITA — ed è
+             #    quello che si legge come già trattato proprio perché è nominato.
+             echo "      ⇒ senza la controprova, il verde del ① non dimostra nulla."
+             exit 2 ;;
   *)        echo "   ?  esito non interpretabile («$out») — NON concludo"
             # 🔴 E FINO AL 02/08 QUESTO «NON CONCLUDO» ERA SEGUITO DA UN «✅ PASS».
             #    Lo dice il commento del ② qui sopra, scritto prima di me: «se qui
