@@ -212,7 +212,7 @@ interamente sulla VPS.
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** I 50 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 63 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -223,13 +223,14 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **56 voci** (2 critiche, 9 alte, 31 medie, 14 basse): 43 dalla
+Il registro conta **63 voci** (2 critiche, 10 alte, 33 medie, 18 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
-ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3` — e 4 che non
-vengono da una review ma da quello che è successo dopo: `H51` da un guasto in
+ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
+vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
 produzione, `H52` e `H54` da un'analisi esterna, `H53` dall'aver misurato la
-copertura dei controlli invece di leggerla. Nessuna è aperta. Il conteggio,
-verificato contro il codice dal gate in CI:
+copertura dei controlli invece di leggerla) — e 9 (`H55`-`H63`) dal loop di audit
+in corso, che è la fonte più produttiva delle quattro. Nessuna è aperta. Il
+conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|

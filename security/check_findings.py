@@ -645,6 +645,53 @@ def main() -> int:
                      f"       È lo scostamento doc↔codice (H21). Allinea il documento, "
                      f"non il registro — il registro lo verifica il codice.")
 
+    # ── …e ANCHE il conteggio in PROSA, non solo quello della tabella ──
+    #
+    # 🔴 PERCHÉ (abdd732a, 01/08). Il blocco qui sopra copre la TABELLA dei residui
+    #   (chiusi/parziali/accettati/aperti), e SECURITY.md dichiara due righe più su:
+    #   «Questo conteggio è verificato dalla CI … fallisce se i numeri qui sotto non
+    #   combaciano col registro». Chi legge capisce «tutti i numeri di questa sezione».
+    #   Erano quattro su otto. MISURATO quel giorno, col gate VERDE (exit 0):
+    #     SECURITY.md  «Il registro conta 56 voci (2 critiche, 9 alte, 31 medie, 14 basse)»
+    #     registro      63 voci (2 critiche, 10 alte, 33 medie, 18 basse)
+    #     e la scomposizione in prosa sommava a 54, non ai 56 che dichiarava.
+    # ⭐ LA FORMA, ed è quella che questo file esiste per impedire: *un check verde su
+    #   una condizione PARZIALE è peggio di nessun check, perché sposta la fiducia su un
+    #   perimetro più stretto di quello che sembra coprire.* La sezione dichiara di non
+    #   poter più marcire in silenzio — e stava marcendo nella metà non coperta.
+    if SECURITY_MD.is_file():
+        md = SECURITY_MD.read_text(encoding="utf-8")
+        sev_reali = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        for f in findings:
+            s = str(f.get("severity", ""))
+            if s in sev_reali:
+                sev_reali[s] += 1
+        m = re.search(
+            r"Il registro conta \*\*(\d+) voci\*\*\s*\(\s*(\d+)\s+critiche?,\s*"
+            r"(\d+)\s+alte?,\s*(\d+)\s+medie?,\s*(\d+)\s+basse?\s*\)", md)
+        if not m:
+            fail(errors,
+                 "SECURITY.md: non trovo la frase «Il registro conta **N voci** (A critiche, "
+                 "B alte, C medie, D basse)».\n"
+                 "       Se l'hai riscritta, aggiorna anche questo controllo: un gate che non\n"
+                 "       trova più il suo bersaglio TACE, e il silenzio qui somiglia a un ok.")
+        else:
+            dich = {"totale": int(m.group(1)), "critical": int(m.group(2)),
+                    "high": int(m.group(3)), "medium": int(m.group(4)), "low": int(m.group(5))}
+            reali = dict(sev_reali, totale=total)
+            for k in ("totale", "critical", "high", "medium", "low"):
+                if dich[k] != reali[k]:
+                    fail(errors,
+                         f"SECURITY.md (prosa) dichiara {dich[k]} «{k}», il registro ne conta "
+                         f"{reali[k]}.\n"
+                         f"       Allinea il documento, non il registro.")
+            somma = dich["critical"] + dich["high"] + dich["medium"] + dich["low"]
+            if somma != dich["totale"]:
+                fail(errors,
+                     f"SECURITY.md (prosa): le severità dichiarate sommano a {somma}, ma il "
+                     f"totale dichiarato è {dich['totale']}.\n"
+                     f"       Il documento non torna con SE STESSO, prima ancora che col registro.")
+
     # ── esito ──
     print(f"{DIM}registro: {total} rilievi · "
           f"{GRN}{counts['closed']} chiusi{OFF}{DIM} · "
