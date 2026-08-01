@@ -132,6 +132,7 @@ findings:
     severity: high
     title: "forwarded_allow_ips per profilo + contatore di fallimenti globale"
     status: partial
+    natura: decisione
     resta_aperto: >
       Niente da fare: il contatore GLOBALE è scartato per scelta — su un sistema mono-utente farebbe l'auto-lockout dell'owner. `partial` per onestà, non per lavoro rimasto.
     since: v0.28.0
@@ -154,6 +155,7 @@ findings:
     severity: high
     title: "Chiave age fuori dall'host; sulla VPS solo il recipient; push off-site"
     status: partial
+    natura: decisione
     resta_aperto: >
       Il push off-site resta all'owner: vps1777 non trasferisce nulla in automatico, e non lo farà.
     since: v0.26.0
@@ -279,6 +281,7 @@ findings:
     severity: medium
     title: "Sudoers dell'operator: da NOPASSWD:ALL a whitelist di comandi"
     status: partial
+    natura: decisione
     resta_aperto: >
       L'operator è ancora root-equivalente via il gruppo `docker`: la whitelist sudo riduce la superficie, non de-privilegia. Toglierlo dal gruppo romperebbe l'update.
     since: v0.32.0
@@ -352,6 +355,7 @@ findings:
     severity: medium
     title: "Password admin: nasce sul PC, viaggia solo come hash, policy unica"
     status: partial
+    natura: decisione
     resta_aperto: >
       Se il PC non ha bcrypt, la password in chiaro attraversa SSH IN AVANTI invece dell'hash: non è «solo hash» al 100%.
     since: v0.32.0
@@ -456,6 +460,7 @@ findings:
     severity: medium
     title: "Compose pinnato ai digest, non solo ai tag"
     status: partial
+    natura: comportamento
     resta_aperto: >
       Le 4 immagini vps1777 restano a tag mobile in compose.yaml: un `docker compose pull` lanciato fuori dalla CLI ri-risolve il tag senza controlli.
     since: v0.27.0
@@ -490,6 +495,7 @@ findings:
     severity: medium
     title: "Protezione dei tag v* e permessi per-job nei workflow"
     status: partial
+    natura: decisione
     resta_aperto: >
       `main` non ha branch protection e il CODEOWNERS non impone review a nessuno: serve un environment `release` con reviewer.
     since: v0.27.0
@@ -685,6 +691,7 @@ findings:
     severity: low
     title: "CSP della Mini App raffinata"
     status: partial
+    natura: decisione
     resta_aperto: >
       Restano `style-src 'unsafe-inline'` e `frame-ancestors`: chiuderli senza un client Telegram reale romperebbe la Mini App invece di proteggerla.
     since: v0.32.0
@@ -1076,6 +1083,7 @@ findings:
     severity: high
     title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa nel codice, non ancora in produzione"
     status: partial
+    natura: comportamento
     scoperta:
       quando: "2026-07-26"
       come: misura
