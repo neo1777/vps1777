@@ -71,6 +71,10 @@ _schema:
             Una sola di queste chiavi per voce. `manual` è l'ultima spiaggia."
     path_exists: "<percorso> esiste nel repo."
     file_contains: "{path, pattern}  — regex presente nel file."
+    python_def: "{path, name} — la funzione/classe e' DEFINITA davvero (albero
+                 sintattico, non testo). Piu' forte di file_contains: una `def` che
+                 sta in un commento o in una stringa NON passa, e un file che non
+                 compila fallisce. NON prova che sia chiamata ne' accesa a runtime."
     grep_count: "{path, pattern, min} — almeno `min` occorrenze (es. conteggio tool)."
     systemd_unit: "<nome> — esiste systemd/<nome> (.service/.timer/.path)."
     compose_profile: "{file, profile} — il profilo è dichiarato nel compose."
@@ -161,7 +165,7 @@ features:
     status: active-default
     since: "0.38.0"
     verify:
-      file_contains: {path: tools/vps1777.py, pattern: "def enabled_features"}
+      python_def: {path: tools/vps1777.py, name: enabled_features}
 
   - id: update.check-timer
     nome: "Check giornaliero release + notifica"
@@ -637,7 +641,7 @@ features:
     status: active-default
     since: "0.40.0"
     verify:
-      file_contains: {path: services/gateway/app/archive_indexer.py, pattern: "def _sniff_e_testo"}
+      python_def: {path: services/gateway/app/archive_indexer.py, name: _sniff_e_testo}
 
   - id: archive.revisioni
     nome: "Revisioni: le versioni sovrascritte non spariscono"
@@ -690,7 +694,7 @@ features:
     decisione: "declassato da fatale ad avviso in 0.40.1 — il `die` sta solo su
                 ops.preflight-secrets-bundle, che guarda il futuro invece del passato"
     verify:
-      file_contains: {path: tools/vps1777.py, pattern: "def _secrets_mancanti"}
+      python_def: {path: tools/vps1777.py, name: _secrets_mancanti}
 
   - id: ops.preflight-secrets-bundle
     nome: "Pre-flight dei segreti sulla RELEASE che si sta installando (fatale)"
@@ -895,7 +899,7 @@ features:
     status: active-default
     since: "0.40.0"
     verify:
-      file_contains: {path: services/gateway/tests/test_archive_indexer.py, pattern: "def test_newest_si_calcola_in_negativo"}
+      python_def: {path: services/gateway/tests/test_archive_indexer.py, name: test_newest_si_calcola_in_negativo}
 
   # ─────────────────────────────────────────────────────────────────────────────
   # 27/07/2026 — QUATTRO FUNZIONI ENTRATE OGGI SENZA UNA VOCE QUI, e il buco è
@@ -923,9 +927,9 @@ features:
     status: active-default
     since: "0.40.8"
     verify:
-      file_contains:
+      python_def:
         path: tools/vps1777.py
-        pattern: "def _sorveglia_raggiungibilita"
+        name: _sorveglia_raggiungibilita
 
   - id: ops.funnel-blackbox
     nome: "La sonda che esce dal server e rientra da Internet"
@@ -945,9 +949,9 @@ features:
     status: active-default
     since: "0.40.8"
     verify:
-      file_contains:
+      python_def:
         path: tools/vps1777.py
-        pattern: "def funnel_ok"
+        name: funnel_ok
 
   - id: ops.cosign-bypass-promemoria
     nome: "La via d'emergenza della firma non si dimentica più da sola"
@@ -965,9 +969,9 @@ features:
     status: active-default
     since: "0.40.7"
     verify:
-      file_contains:
+      python_def:
         path: tools/vps1777.py
-        pattern: "def cosign_bypass_status"
+        name: cosign_bypass_status
 
   - id: ops.telemetria-non-fatale
     nome: "La telemetria non può far cadere una riparazione"
@@ -984,6 +988,6 @@ features:
     status: active-default
     since: "0.40.8"
     verify:
-      file_contains:
+      python_def:
         path: tools/vps1777.py
-        pattern: "def _scrivi_telemetria"
+        name: _scrivi_telemetria

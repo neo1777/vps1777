@@ -30,6 +30,7 @@ mette il flag a true e diventa DURO (cattura ogni feature nuova non dichiarata).
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime
 import re
 import subprocess
@@ -70,6 +71,36 @@ def run_check(spec: dict, repo: Path) -> tuple[bool, str]:
             return False, f"file MANCA: {arg['path']}"
         hit = re.search(arg["pattern"], p.read_text(errors="replace"))
         return bool(hit), f"pattern {'trovato' if hit else 'ASSENTE'} in {arg['path']}"
+
+    if kind == "python_def":
+        # `file_contains` con pattern «def nome_funzione» era il controllo più usato di
+        # questo registro (dieci voci su sedici), ed è il caso in cui una ricerca testuale
+        # è più debole di quanto sembri: la stessa stringa passa anche se sta in un
+        # commento, in una docstring, dentro un'altra stringa, o se il file NON SI COMPILA.
+        # 🔑 Il rilievo è dell'audit del round-11 e regge: `tools/prove-empiriche/
+        # prova-8-le-unit-si-comportano-come-dichiarano.sh` condanna il match di
+        # sottostringa, e questo registro lo praticava. Qui non si esegue nulla — si
+        # legge l'ALBERO SINTATTICO, che è strettamente più forte del testo e non ha
+        # gli effetti collaterali di un import.
+        #
+        # ⚠️ COSA NON PROVA, e va detto perché il difetto che cura nasce dal non dirlo:
+        #    che la funzione sia CHIAMATA · che il file sia importato da qualcuno ·
+        #    che la feature sia ACCESA a runtime. Prova che è DEFINITA, e che il file
+        #    che la contiene è codice Python valido. Per il resto ci sono `mcp_tool`,
+        #    `systemd_unit` e le prove empiriche.
+        p = repo / arg["path"]
+        if not p.exists():
+            return False, f"file MANCA: {arg['path']}"
+        try:
+            albero = ast.parse(p.read_text(errors="replace"))
+        except SyntaxError as e:
+            return False, (f"{arg['path']} NON SI COMPILA (riga {e.lineno}): "
+                           f"una ricerca testuale non se ne sarebbe accorta")
+        nomi = {n.name for n in ast.walk(albero)
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+        ok = arg["name"] in nomi
+        return ok, (f"{arg['name']} {'DEFINITA' if ok else 'NON definita'} in "
+                    f"{arg['path']} (albero sintattico, non testo)")
 
     if kind == "grep_count":
         p = repo / arg["path"]
