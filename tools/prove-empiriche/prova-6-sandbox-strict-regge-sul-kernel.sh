@@ -132,6 +132,7 @@ done
 # ─── ③ il caso silenzioso: il bind-mount del backup vede DATI, non un exit code ───
 echo
 echo "   ③ IL CASO SILENZIOSO — mktemp + bind-mount del backup"
+non_misurato=0
 if grep -q 'mktemp -d' "$REPO/tools/backup.sh" 2>/dev/null; then
   echo "      backup.sh usa mktemp -d          ✅ confermato sul file (la ragione della unit è reale)"
   echo "      ⚠️  E QUI L'EXIT CODE NON BASTA: sotto PrivateTmp/ProtectSystem il demone docker"
@@ -139,9 +140,11 @@ if grep -q 'mktemp -d' "$REPO/tools/backup.sh" 2>/dev/null; then
   echo "         con rc=0. Chi verifica la stretta deve guardare la DIMENSIONE del dump prodotto,"
   echo "         non il suo codice di uscita. Questa prova non lo fa: lanciare un backup reale"
   echo "         è una decisione di chi possiede il server."
+  non_misurato=1
 else
   echo "      ⚠️  'mktemp -d' non trovato in tools/backup.sh — la ragione dichiarata nella unit"
   echo "         va riverificata: o il file è cambiato, o il repo è un altro."
+  non_misurato=1
 fi
 
 # ─── verdetto ───
@@ -150,6 +153,34 @@ if [ "$falliti" -gt 0 ]; then
   echo "🔴 FAIL — $falliti prove non attese. La proposta ②-1 NON si committa così com'è."
   echo "   Se il negato è /tmp: la stretta rompe il BACKUP, non l'update — e in silenzio."
   exit 1
+fi
+# 🔴 IL DIFETTO CHE CHIUDE (abdd732a, 02/08, MISURATO lanciando tutte e nove le prove
+#   su un PC che il sistema NON ha): otto davano `exit 2` — «non eseguibile» — e questa
+#   dava `exit 0`, cioè **un PASS su una macchina dove non c'era niente da misurare**.
+# ⭐ E la ragione non era un prerequisito mancante: era che il §③ QUI SOPRA DICHIARA di
+#   non aver misurato il caso silenzioso («questa prova non lo fa») e l'esito restava
+#   comunque un ✅ verde. *La prova sapeva di non aver guardato, e diceva di sì.*
+# 🔑 Il contratto della famiglia è dichiarato in `prova-8` e rispettato da
+#   `lancia-tutte.sh:76` — **0 = PASS · 1 = FAIL · 2 = non eseguibile** — e mancava
+#   il quarto stato reale: «misurato in PARTE». Mapparlo su 0 afferma più di quanto
+#   si è visto; mapparlo su 1 sarebbe un falso rosso su un meccanismo che regge.
+#   ⇒ va su **2**, che nel contratto significa esattamente «non ho potuto guardare
+#     tutto», ed è l'unico esito che non mente in nessuna delle due direzioni.
+# ⚠️ Conseguenza dichiarata, perché è un costo vero: **finché il caso silenzioso non è
+#   misurabile, questa prova non darà MAI 0.** Non è un difetto della cura — è che il
+#   §③ richiede un backup reale sul server, e nessuno l'ha ancora fatto. Il giorno che
+#   qualcuno lo esegue e guarda la DIMENSIONE del dump, questo ramo diventa un PASS
+#   pieno. *Una prova che non può passare finché manca una misura è il modo giusto di
+#   ricordare che la misura manca: un verde se la dimentica.*
+if [ "${non_misurato:-0}" -eq 1 ]; then
+  echo "⚪ PASS PARZIALE — non è un verde, ed è un dato preciso su cosa è stato visto:"
+  echo "   ✅ MISURATO   la sandbox consente i quattro path necessari (compreso /tmp)"
+  echo "                 e nega /etc e /usr/bin: il MECCANISMO regge sul kernel."
+  echo "   ⚪ NON VISTO  il caso silenzioso del §③: sotto PrivateTmp il dump del backup"
+  echo "                 può uscire VUOTO con rc=0, e qui non è stato provato."
+  echo "   ⇒ per completarla serve un backup REALE sul server e la DIMENSIONE del dump."
+  echo "      Finché manca, questa prova esce 2 («non eseguibile per intero»), non 0."
+  exit 2
 fi
 echo "✅ PASS — la sandbox proposta consente i quattro path necessari (compreso /tmp) e nega /etc e /usr/bin."
 echo "   ⚠️  NON significa che l'update reale non scriva altrove: questa prova misura il MECCANISMO."
