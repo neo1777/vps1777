@@ -48,6 +48,11 @@ for u in "${UNITS[@]}"; do
   [ -n "$gg" ] && GRUPPI="$GRUPPI $gg"
   [ -z "$REPO" ] && REPO="$wd"
 done
+# shellcheck disable=SC2086  # lo split di $UTENTI è VOLUTO: la variabile accumula
+# più utenti separati da spazio (righe 47-48) e serve una riga per utente per
+# `sort -u`. Virgolettarla stamperebbe una riga sola e il conteggio dei distinti
+# direbbe sempre 1. ⇒ eccezione DICHIARATA con la ragione, non soglia alzata:
+# un'eccezione è UNA cosa con un nome, una soglia ne nasconde N. [b82df434, 01/08]
 U_UNICI="$(printf '%s\n' $UTENTI | sort -u | tr '\n' ' ')"
 echo
 echo "② IL REPO — chi lo possiede (è QUI che si legge l'utente giusto)"

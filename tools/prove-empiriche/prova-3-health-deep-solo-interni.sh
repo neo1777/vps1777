@@ -25,7 +25,12 @@ if ! { [ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ]; }; then {
   echo "⚠️  repo non trovato (compose.yaml assente) — usa VPS1777_REPO=<path>"; exit 2; } fi
 cd "$REPO" || exit 2
 command -v docker >/dev/null || { echo "⚠️  docker assente"; exit 2; }
-docker compose ps --status running -q gateway >/dev/null 2>&1 || { echo "⚠️  gateway non in esecuzione"; exit 2; }
+# Stessa guardia a vuoto curata in prova-1 il 01/08: `docker compose ps -q` esce 0
+# con output VUOTO se il servizio non gira. Qui l'effetto era un FAIL invece di un
+# PASS — meno pericoloso, ma altrettanto falso: diceva «il claim non è verificabile»
+# quando la verità era «non c'è niente da verificare su questa macchina».
+_gw="$(docker compose ps --status running -q gateway 2>/dev/null)"
+[ -n "$_gw" ] || { echo "⚠️  gateway non in esecuzione — prova non eseguibile"; exit 2; }
 
 echo "── prova-3 · /health?deep è chiuso agli esterni?   $(date '+%F %T')"
 PORT="${GATEWAY_PORT:-8080}"
