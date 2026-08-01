@@ -35,7 +35,14 @@ def test_ferma_un_indirizzo_pubblico_qualunque():
     # gesto: il valore riscritto, e il presidio che non poteva vederlo.
     # ⭐ Un presidio che non guarda ciò che stai per aggiungere guarda solo i tuoi
     # errori passati.
-    for ip in ("38.45.64.63", "5.9.100.7", "185.199.108.153"):
+    # 🔺 01/08: qui c'era ANCORA l'indirizzo vero della macchina — non nella
+    # prima stesura (quella l'aveva già corretta il gate), ma nel valore rimasto
+    # dentro il test dopo la cura. Il commento sopra racconta il difetto al
+    # passato mentre il difetto era ancora due righe più giù.
+    # ⭐ Trovato passando il CORPUS di un audit al gate PRIMA di caricarlo su un
+    # servizio esterno: il presidio su ciò che entra in git non aveva mai guardato
+    # ciò che ESCE dal disco. 93.184.216.34 è pubblico, di nessuno, e prova identico.
+    for ip in ("93.184.216.34", "5.9.100.7", "185.199.108.153"):
         assert not g.indirizzo_da_ignorare(ip), ip
 
 
