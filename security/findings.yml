@@ -11,6 +11,40 @@
 # voce dichiarata `closed` ESISTA ANCORA. Da qui in poi, «dichiarato fatto ma
 # assente» non è un errore di distrazione: è una build rossa.
 #
+# ┌────────────────────────────────────────────────────────────────────────────┐
+# │ 🛑 LE 42 VOCI SENZA `scoperta` — NON RIEMPIRLE CON LA DATA DEL COMMIT       │
+# │                                                                            │
+# │ Il checker stampa «42 voci senza `scoperta`» a ogni giro, ed è una          │
+# │ tentazione: la data si ricava in un minuto dal `git log`. **NON FARLO.**    │
+# │                                                                            │
+# │ Ricostruito il 01/08/2026 (agent, metodo dichiarato): H1–H42 sono nate      │
+# │ TUTTE nello stesso commit — `57bbae9` del 14/07, quello che ha CREATO       │
+# │ questo file versandoci dentro 43 voci di un dossier preesistente.           │
+# │ ⇒ **`2026-07-14` è un TETTO, non una data di scoperta**, ed è un tetto      │
+# │ dimostrabilmente stretto: H1 e H2 hanno `since: v0.22.0`/`v0.23.0`, tag     │
+# │ del **13/07** — erano già trovate E RIPARATE il giorno prima di entrare.    │
+# │                                                                            │
+# │ 🔑 Scrivere 42 righe con `quando: 2026-07-14` non sarebbe «approssimato»:   │
+# │ sarebbe falso NELLA DIREZIONE PEGGIORE. Gonfia il denominatore del passato  │
+# │ e fa sembrare che il registro sia migliorato MENO di quanto è migliorato —  │
+# │ cioè rompe esattamente la domanda per cui il campo `scoperta` esiste.       │
+# │                                                                            │
+# │ COSA SERVE PER CHIUDERLE DAVVERO: il dossier originale della review         │
+# │ difensiva (5 fasi, 6 aree, 43 interventi, codici R3/R6/R8/R9) **non è mai   │
+# │ stato committato** — a `57bbae9` in `security/` ci sono solo questo file e  │
+# │ il checker. Se salta fuori, 42 righe passano da «non-ricavabile» a datate.  │
+# │ Senza, la risposta onesta è che non lo sappiamo.                            │
+# │ ⚠️ Un vincolo utile intanto: `audio-esterno` è IMPOSSIBILE per quel blocco  │
+# │ — il primo audit audio è del 26/07, dodici giorni dopo.                     │
+# │                                                                            │
+# │ ⭐ E una trappola sul METODO, pagata ricostruendo: `git log --diff-filter=M │
+# │ -S "id: H<N>"` dà VUOTO per 43 voci su 49 — perché `-M` esclude per         │
+# │ costruzione il commit che ha CREATO il file. Uno zero da piano sbagliato,   │
+# │ indistinguibile da «non è mai successo». E `-S "id: H1"` è una sottostringa │
+# │ che matcha anche H10–H19. Il metodo che regge: per ogni commit che tocca    │
+# │ questo file, `git show <c>:security/findings.yml` + regex ANCORATA.         │
+# └────────────────────────────────────────────────────────────────────────────┘
+#
 # COME SI USA
 #   status:  closed | partial | open
 #   evidence: prove che lo stato è vero. Il checker le verifica per `closed`
@@ -822,6 +856,11 @@ findings:
     title: "I doc dichiarano i secret che il gateway VEDE, non solo quelli che non vede"
     status: closed
     # ha per OGGETTO ciò che i documenti dichiarano: si verifica leggendoli
+    scoperta:
+      quando: "2026-07-26"
+      come: lettura
+      nota: >
+        voce di setaccio: bersaglio prioritario verificato sul codice da lei e controprovato; lo stesso commit dichiara che l audio non aveva ancora parlato (bc8c4ca).
     natura: documento
     since: v0.40.2
     why: >
@@ -855,6 +894,11 @@ findings:
     severity: medium
     title: "Hardening host (unattended-upgrades + fail2ban) in TUTTI E TRE gli installer"
     status: closed
+    scoperta:
+      quando: "2026-07-26"
+      come: lettura
+      nota: >
+        una delle cinque voci pronte di setaccio (FIX-PRONTI-round2): hardening host tracciato sui TRE installer insieme (0b8f884).
     since: v0.40.2
     why: >
       «Hardening host automatico all'install» (SECURITY.md:42, README.md:149) era falso per setup.sh:
@@ -879,6 +923,11 @@ findings:
     severity: medium
     title: "archive-data è condiviso: :ro in archive-mcp, :rw nel gateway — e il :rw è funzionale"
     status: closed
+    scoperta:
+      quando: "2026-07-26"
+      come: lettura
+      nota: >
+        da setaccio: la convivenza :ro/:rw su archive-data, tracciata invece di taciuta (0b8f884).
     since: v0.40.2
     why: >
       H42 dichiara il :ro di archive-mcp e tace che il gateway — l'unico servizio esposto su Internet —
@@ -900,6 +949,11 @@ findings:
     severity: medium
     title: "Portainer pubblicato SOLO su 127.0.0.1 e dietro profilo opt-in"
     status: closed
+    scoperta:
+      quando: "2026-07-26"
+      come: lettura
+      nota: >
+        da setaccio: il binding di loopback e il profilo opt-in di Portainer resi falsificabili in CI invece che promessi in prosa (0b8f884).
     since: v0.40.2
     why: >
       SECURITY.md:43 promette «strumenti di management mai esposti: solo loopback + tunnel SSH». La
@@ -921,6 +975,11 @@ findings:
     severity: medium
     title: "Nessun servizio pubblica porte in compose.yaml: la pubblicazione vive solo negli overlay ingress"
     status: closed
+    scoperta:
+      quando: "2026-07-26"
+      come: audio-esterno
+      nota: >
+        versione CORRETTA di una proposta dell audio, che aveva confuso expose con ports (0b8f884).
     since: v0.40.2
     why: >
       I servizi su `egress` (nb1777-mcp, nb1777-bot) hanno uscita NAT verso Internet ma nessun ingresso:
@@ -942,6 +1001,11 @@ findings:
     severity: low
     title: "Fail-closed della supply-chain (cosign obbligatorio) ha una via d'emergenza dichiarata"
     status: closed
+    scoperta:
+      quando: "2026-07-26"
+      come: audio-esterno
+      nota: >
+        l audio ha chiuso chiedendo cosa succede se sigstore/registry sono giu durante una patch d emergenza con cosign fail-closed (e6f4747).
     since: v0.23.0
     why: >
       L'audio del round-4 ha chiuso su una domanda che nessuna voce del registro copriva:
@@ -1012,6 +1076,11 @@ findings:
     severity: high
     title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa nel codice, non ancora in produzione"
     status: partial
+    scoperta:
+      quando: "2026-07-26"
+      come: misura
+      nota: >
+        la voce porta la misura: uscita del gateway misurata sul vivo con prova-1 (523aed1). Il commit attesta la MISURA, non chi ha sollevato il tema per primo.
     resta_aperto: >
       Niente sul difetto, che è chiuso e misurato: restano due opzioni SCARTATE (refresh on-demand via path unit, egress ristretto a api.github.com) e la scelta è scritta.
     since: v0.40.3
