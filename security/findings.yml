@@ -1565,32 +1565,9 @@ findings:
     severity: medium
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
     status: partial
-    scoperta:
-      quando: "2026-07-27"
-      come: lettura
-      nota: >
-        Entrata col commit 4186bb4 — «il rischio che il registro copriva solo di sponda»:
-        nessuna voce diceva che il gateway ha il token, lo si deduceva da H29 (il token
-        riclassificato di fascia massima) e da H6 (i cookie tolti al gateway). Ri-emersa
-        il 01/08 nell'audio `d80ad880` del round-10, che l'ha chiamata col suo numero —
-        segno che il registro è dentro il corpus, non che l'audit l'ha riscoperta.
-    natura: comportamento
     resta_aperto: >
-      Un GESTO DI PROVISIONING, non più una scelta di architettura: generare la chiave
-      derivata e smontare il token dal gateway. Il codice la accetta già dal 27/07;
-      finché il compose monta il token, il rilievo è mitigato nel software e non sulla
-      macchina — e questa riga resta finché non lo è là.
-      STRUMENTO PRONTO dal 01/08: `tools/migra-chiave-miniapp.sh` deriva la chiave senza
-      mai stampare né copiare il token, scrive l'overlay `compose.miniapp-secret.yaml`
-      che smonta `telegram_bot_token` dal gateway, e verifica di non aver perso gli altri
-      quattro secrets. Si annulla togliendo un `-f`. `--verifica` mostra lo stato senza
-      scrivere nulla. NON applica: la migrazione resta il gesto di chi ha la macchina —
-      lo dice `settings.py:159`, e `effective_webapp_secret` rifiuta apposta di derivare
-      al volo perché «avrebbe l'aria di risolvere il rilievo mentre il token resta montato».
-      ⇒ per chiudere servono i due comandi del punto 2 dello strumento, ESEGUITI: che in
-      `/run/secrets/` del gateway il token non ci sia più, E che la Mini App autentichi
-      ancora. Il primo senza il secondo non è una migrazione: è un servizio rotto in
-      silenzio, e ce ne accorgeremmo solo quando qualcuno prova ad aprire il pannello.
+      Eseguire `tools/migra-chiave-miniapp.sh` sulla macchina: finché il compose monta
+      il token, il rilievo è mitigato nel software e non là dove gira.
     prova:
       - comando: "grep -rn 'api.telegram.org\\|sendMessage\\|getUpdates' services/gateway/"
         dove: "repo, a v0.40.14"
@@ -1672,6 +1649,25 @@ findings:
       macchina da 4 GB e per un bot mono-utente. È un baratto vero, non un fix ovvio:
       va deciso da chi possiede la macchina, e finché non è deciso questa voce resta
       `partial` — scritta, non risolta, e con lo stato che lo dice.
+
+      AGGIORNAMENTO 01/08 — LA DECISIONE È CAMBIATA E LO STRUMENTO C'È. Il mediatore è
+      stato scartato con 6d9f9d5: misurato che il gateway non chiama MAI l'API di
+      Telegram, quindi un canale «manda questo messaggio» gli darebbe una capacità che
+      non usa. Al suo posto la chiave derivata, che il codice accetta dal 27/07 — ma quel
+      commit non ha toccato `compose.yaml`, e il servizio `gateway` monta ancora
+      `telegram_bot_token` (righe 87 e 97). Da qui il residuo attuale, che è un GESTO DI
+      PROVISIONING e non più una scelta di architettura.
+      `tools/migra-chiave-miniapp.sh` (01/08) deriva la chiave senza mai stampare né
+      copiare il token, scrive l'overlay `compose.miniapp-secret.yaml` che smonta
+      `telegram_bot_token` dal gateway, e verifica di non aver perso gli altri quattro
+      secrets; si annulla togliendo un `-f`, e `--verifica` mostra lo stato senza scrivere
+      nulla. NON applica: `settings.py:159` dice che migrare è la decisione di chi possiede
+      la macchina, ed `effective_webapp_secret` rifiuta apposta di derivare al volo perché
+      «avrebbe l'aria di risolvere il rilievo mentre il token resta montato».
+      Per chiudere servono i due comandi ESEGUITI: che in `/run/secrets/` del gateway il
+      token non ci sia più, E che la Mini App autentichi ancora. Il primo senza il secondo
+      non è una migrazione: è un servizio rotto in silenzio, e ce ne accorgeremmo solo
+      quando qualcuno prova ad aprire il pannello.
 
   - id: H55
     severity: medium
