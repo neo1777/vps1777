@@ -233,8 +233,8 @@ verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 49 |
-| **parziali** | 13 |
+| **chiusi** | 50 |
+| **parziali** | 12 |
 | **accettati** | 1 |
 | **aperti** | 0 |
 
@@ -326,7 +326,8 @@ processo separato che tenga il token e accetti solo «manda questo messaggio» �
 un pezzo in più da mantenere su una macchina piccola: è un baratto vero, e lo decide
 chi possiede la macchina, non un rilievo.
 
-Il tredicesimo è `H55`, e non l'ha trovato una lettura: è saltato fuori **aggiornando
+`H55` **è stato chiuso il 01/08/2026**, e la sua storia vale più del conteggio: non
+l'ha trovato una lettura, è saltato fuori **aggiornando
 davvero la macchina**. Il comando che questa documentazione consiglia moriva a metà
 strada con un errore di programma, perché non riusciva a scrivere il file che i
 pannelli leggono per **disegnare la barra di avanzamento**. Il motivo è
@@ -336,10 +337,21 @@ lancia il comando a mano, e lascia dietro un file che l'altro non può più risc
 serve solo a raccontarla.** Rifiutarsi di installare qualcosa la cui firma non torna è
 giusto; rifiutarsi di riparare perché non si riesce a scriverne il resoconto non lo è.
 Ora avvisa e prosegue — una volta sola, non a ogni passo — e quando può rimette il
-file nella disponibilità di chi userà il comando dopo. Resta parziale perché il pezzo
-che riallinea i permessi **non è collaudato dai test** (servirebbe eseguirli con altri
-privilegi): è verificato leggendolo, che è esattamente ciò che il rilievo precedente
-denuncia.
+file nella disponibilità di chi userà il comando dopo. Il pezzo che riallinea i permessi resta verificato
+leggendolo e non dai test (servirebbero altri privilegi) — ma **la causa a monte è
+caduta**, ed è la parte che teneva aperta la voce.
+
+Per mesi il registro ha attribuito quell'asimmetria a «la unit gira come root perché le
+servono docker e l'installazione del binario». **Era falso, e nessuno l'aveva verificato**:
+nel repository nessuna unit dice `User=root` — tutte portano un segnaposto. La causa vera
+è che il codice **deduceva l'operatore da chi lanciava l'installer** invece di dichiararlo:
+un'installazione fatta da amministratore produceva unit amministrative, in silenzio. Lo
+stesso difetto viveva in due dei tre installer, scritto in due linguaggi diversi, mentre
+il terzo fissava già il nome giusto da sempre.
+Ora entrambi **si rifiutano** di rendere le unit come amministratore, e dicono come uscirne.
+Sulla macchina in produzione le quattro unit sono state riportate all'operatore e una di
+esse **è stata eseguita davvero**, uscendo con successo e senza fermare nessun servizio —
+perché «il file dice la cosa giusta» non è «il servizio funziona».
 
 Il quattordicesimo è `H56`, ed è **la seconda metà di un rilievo che risultava
 chiuso**. Prima di ogni aggiornamento la macchina prende una copia di sicurezza locale

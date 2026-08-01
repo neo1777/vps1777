@@ -1672,9 +1672,10 @@ findings:
   - id: H55
     severity: medium
     title: "La telemetria poteva far cadere una riparazione: progress_write/status_write scrivevano nudi, e una PermissionError uccideva `vps1777 update` a metà"
-    status: partial
+    status: closed
     resta_aperto: >
-      La causa a monte: la unit gira come root perché le servono docker e l'installazione del binario. È stato tolto il danno, non l'asimmetria.
+      Niente: la causa a monte è caduta il 01/08 — le unit girano come `vps1777`,
+      verificato con la unit ESEGUITA (Result=success). Vedi la prova qui sotto.
     scoperta:
       quando: "2026-07-27"
       come: misura
@@ -1691,6 +1692,41 @@ findings:
         contains:
           - "test_progress_write_il_caso_esatto_della_vps_cartella_ok_file_no"
           - "test_progress_write_avvisa_una_volta_sola_e_non_quindici"
+      # 01/08 — la CAUSA A MONTE, chiusa: l'operatore non è più chi lancia.
+      - file: tools/vps1777.py
+        contains:
+          - "OPERATOR_USER"
+          - "le unit systemd verrebbero installate con User=root"
+          - "non esiste su questa macchina"
+      - file: tools/tests/test_vps1777.py
+        contains:
+          - "test_render_unit_rifiuta_root_e_dice_come_uscirne"
+          - "test_render_unit_operator_user_inesistente_SI_FERMA"
+          - "test_render_unit_operator_user_vuoto_non_e_una_dichiarazione"
+    prova:
+      - comando: "grep -H '^User=' /etc/systemd/system/vps1777-*.service"
+        dove: "la VPS in produzione (eseguito da Neo, 01/08 ~15:56 locali)"
+        output: >
+          tutte e quattro le unit — auto-update, check-update, secrets-check,
+          update — rispondono `User=vps1777`. Erano tutte e quattro `User=root`
+          venti minuti prima, misurate dallo stesso comando.
+        exit: 0
+        quando: "2026-08-01"
+      - comando: "systemctl start vps1777-check-update.service && systemctl show -p Result -p ExecMainStatus"
+        dove: "la stessa macchina, subito dopo il cambio"
+        output: "Result=success · ExecMainStatus=0 · i 5 container «Up 4 days (healthy)»"
+        exit: 0
+        quando: "2026-08-01"
+        nota: >
+          È la prova che rende il rilievo chiuso e non «applicato»: le prime due
+          righe dicono solo che i FILE sono cambiati, e «il file dice la cosa
+          giusta» non è «il servizio funziona». Qui una unit ha GIRATO come
+          l'operatore ed è uscita 0, e nessun container è caduto.
+          ⚠️ Il fix nel codice impedisce che le unit RINASCANO come root; NON
+          ripara un'installazione già fatta. Questa seconda parte è stata
+          eseguita a mano sulla macchina, ed è il motivo per cui la voce resta
+          leggibile: chi installerà altrove non ha bisogno di questo passo,
+          chi ha installato PRIMA del 01/08 sì.
     missing: >
       TROVATO AGGIORNANDO DAVVERO LA MACCHINA, il 27/07/2026 — non leggendo il codice:
       `vps1777 update`, cioè il comando che docs/UPDATE.md consiglia, è morto allo
