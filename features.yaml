@@ -1064,3 +1064,64 @@ features:
                deve lanciarle. Il ledger prova che esistono (i file sono nel
                `dove`), NON che siano state eseguite: quello lo dice la data in
                `onboarding/prove-empiriche.json`, che il lanciatore scrive."
+
+  - id: ops.suite-di-test
+    nome: "La suite di test, e cosa NON prova"
+    cosa: >
+      Cinque file di collaudo: `test_vps1777.py` (il grosso, sulla CLI),
+      `test_no_leaks.py` (il gate anti-leak provato sui suoi stessi pattern),
+      `test_migra_chiave_miniapp.py` (H54, la chiave derivata), `test_installer_funnel.py`
+      e `test-backup-retention.sh`. Girano in CI nel job `contract`.
+      📊 CENSITA il 01/08 su richiesta di un audit che parlava di «tanti controlli
+      fittizi»: dei 105 test, **85 importano e chiamano davvero il codice**, 14
+      ispezionano (leggono file o l'albero sintattico) e 6 toccano il sistema
+      reale. «Fittizi» era il 13%, non la maggioranza — il rilievo era gonfiato,
+      ma la misura non esisteva prima che qualcuno lo dicesse.
+      ⚠️ COSA NON PROVA: che il prodotto FUNZIONI sulla macchina dell'utente. La
+      suite gira su un repo, non su una VPS; le nove prove empiriche
+      (`ops.prove-empiriche`) sono l'unico strato che tocca il vivo, e nessuna CI
+      le esegue. Un `contract` verde e un servizio giù convivono benissimo.
+    dove:
+      - "tools/tests/test_vps1777.py"
+      - "tools/tests/test_no_leaks.py"
+      - "tools/tests/test_migra_chiave_miniapp.py"
+      - "tools/tests/test_installer_funnel.py"
+      - "tools/tests/test-backup-retention.sh"
+      - ".github/workflows/ci.yml"
+    status: active-default
+    since: "in CI dal job `contract`; censita il 01/08"
+    verify:
+      python_def:
+        path: tools/tests/test_migra_chiave_miniapp.py
+        name: test_1_la_chiave_e_identica_a_quella_del_gateway
+
+  - id: ops.verificatore-del-ledger
+    nome: "Il verificatore del ledger — che fino al 02/08 non era NEL ledger"
+    cosa: >
+      `verify-features.py` è ciò che tiene onesto questo file: confronta le voci
+      dichiarate col codice reale in DUE versi — dichiarato→reale (una feature
+      dichiarata attiva il cui verify fallisce è una PERDITA) e reale→dichiarato
+      (qualcosa che esiste e nessuna voce nomina).
+      ⭐ E per sei giorni NON ERA DICHIARATO QUI. Il guardiano fuori dal registro
+      che sorveglia: non è ironia, è la stessa classe che sorveglia — «una cosa
+      che c'è e nessun presidio sa che c'è». Se ne è accorto il verso
+      reale→dichiarato il 02/08, il giorno in cui ha imparato a guardare `tools/`.
+      I tipi di verify che conosce: `mcp_tool` · `python_def` · `file_contains` ·
+      `compose_profile` · `systemd_unit` · `path_exists` · `grep_count` · `cmd` ·
+      `manual`. I primi due camminano l'ALBERO SINTATTICO (`ast`), non il testo:
+      una `def` dentro un commento o una stringa NON passa, e un file che non
+      compila FALLISCE invece di sembrare vuoto.
+      ⚠️ COSA NON PROVA: che una feature sia ACCESA a runtime, che il codice sia
+      CHIAMATO, che il servizio parta. Prova che l'artefatto ESISTE nella forma
+      dichiarata. E `_meta.baseline_completo` non è una proprietà del ledger: è
+      una proprietà delle CATEGORIE che l'enumerazione guardava quando fu messo a
+      true — per questo ogni categoria nuova ha la sua semina (`CATEGORIE_IN_SEMINA`).
+    dove:
+      - "tools/verify-features.py"
+      - ".github/workflows/verify-features.yml"
+    status: active-default
+    since: "0.38.0 (dichiarato qui il 02/08)"
+    verify:
+      python_def:
+        path: tools/verify-features.py
+        name: enum_reality
