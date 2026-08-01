@@ -847,6 +847,26 @@ def studio_download(kind: str, nb_id: str, output_path: Union[str, Path], *,
     if artifact_id:
         args += ["--id", artifact_id]
     _run(args, timeout=900)
+    # 🔴 SI PROVA CHE IL FILE C'È, non si promette perché il comando è uscito 0.
+    #   Prima qui c'era `return output_path` subito dopo `_run`: il valore di ritorno era
+    #   *il path che il chiamante aveva chiesto*, non un fatto osservato. Un `nlm` che esce
+    #   0 senza scrivere — o che scrive altrove — produceva una funzione che restituisce
+    #   un percorso valido verso il nulla, e l'errore compariva molto più a valle, addosso
+    #   a chi apriva il file.
+    #   ⚠️ E succede davvero: questa funzione scrive sul filesystem del SERVER, non su
+    #   quello di chi la chiama. Un chiamante remoto che passa un suo path locale ottiene
+    #   `[Errno 13]` se la cartella non è scrivibile — ma se il path ESISTE anche sul
+    #   server (es. `/tmp`), il comando riesce, il file finisce là, e il chiamante riceve
+    #   un percorso che sulla SUA macchina non esiste. Il successo era l'exit di `nlm`.
+    if not output_path.exists():
+        raise NLMError(
+            f"download: `nlm` è uscito senza errore ma {output_path} non esiste. "
+            "Nota: il file viene scritto sul filesystem del SERVER — se hai passato un "
+            "path della tua macchina, cercalo là.")
+    if output_path.stat().st_size == 0:
+        # Un file vuoto è peggio di un file assente: ha il nome giusto e passa ogni
+        # controllo di esistenza. Chi lo carica come fonte ottiene un artefatto muto.
+        raise NLMError(f"download: {output_path} esiste ma è VUOTO (0 byte).")
     return output_path
 
 
