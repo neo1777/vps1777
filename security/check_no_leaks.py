@@ -60,6 +60,36 @@ DATABASE = re.compile(r"\.(db|sqlite3?)(-wal|-shm)?$")
 FIXTURE_DIR = re.compile(r"(^|/)tests?/(fixtures?|data)/")
 FIXTURE_MAX_BYTES = 64 * 1024
 
+# d) I file che contengono materiale credenziale PER MESTIERE — cioè NOSTRO.
+# 🔴 IL BUCO CHE QUESTA REGOLA CHIUDE, ed era il più grave del gate: R2 riconosce
+# formati di TERZI (auth-key Tailscale, token BotFather, chiave age, PEM, DSN) e i
+# nostri segreti non hanno un formato — `secrets.token_urlsafe` produce base64
+# casuale, e `admin_password_bcrypt` un hash. **Misurato: zero match su tutti e
+# quattro**, mentre la controprova (una tskey vera) fa match. ⇒ un
+# `git add -f secrets/oauth_signing_secret.txt` passava il gate con ✓ ed exit 0,
+# e quella chiave firma i token admin e miniapp.
+# ⭐ Perché mancava: R1 conosceva tre forme di NOME FILE (export, jsonl, db), tutte
+# riconoscibili da una regex sul nome. `secrets/` è una CARTELLA — forma diversa,
+# e il presidio non c'era arrivato. *Il presidio segue la forma del dato, non il
+# rischio.*
+# 📌 La lista rispecchia `PROTECTED_PREFIXES` di `tools/vps1777.py` («i path che il
+# sync NON tocca MAI»), ma NON è la stessa cosa e non si copia alla cieca: quella
+# risponde a «cosa non sovrascrivere», questa a «cosa non deve uscire». Il test
+# pretende che chi ne allarga una guardi l'altra — la lista può invecchiare, ma
+# non in silenzio.
+SEGRETI_PER_MESTIERE = re.compile(
+    r"^(\.env(\.|$)|secrets/|onboarding/|backups/|var/|releases/|tools/age-recipients\.txt$)"
+)
+
+# Le eccezioni, una per una e col perché NEL DATO — non in un commento.
+# 🔴 Misurate prima di scrivere la regola: senza queste tre il gate sarebbe nato
+# rosso su file legittimi già in `main`, e un gate che grida al lupo viene spento.
+AMMESSI_R1 = {
+    ".env.example": "il template della configurazione: nomi delle variabili, mai i valori",
+    "secrets/.gitkeep": "tiene la cartella in git ed è vuoto per costruzione",
+    "secrets/README.md": "spiega come si generano i segreti, non ne contiene nessuno",
+}
+
 # ── R2 — materiale credenziale vero (non i segnaposto) ────────────────────────
 # Ogni pattern pretende alfabeto+lunghezza reali, così `tskey-auth-...` nella doc
 # non lo fa scattare ma `tskey-auth-kA9f…` sì.
@@ -236,6 +266,21 @@ def main() -> int:
 
     for path in tracked_files():
         # R1 — la forma del nome basta a bocciarlo: non serve guardarci dentro.
+        # Questo per primo: è l'unico che parla dei NOSTRI segreti, e sono quelli
+        # che R2 non sa riconoscere (non hanno un formato, sono base64 casuale).
+        if SEGRETI_PER_MESTIERE.search(path) and path not in AMMESSI_R1:
+            problems.append(
+                f"  [R1] {path}\n"
+                f"       → file che contiene materiale credenziale PER MESTIERE (nostro).\n"
+                f"       → R2 non può prenderlo: i nostri segreti non hanno un formato\n"
+                f"         riconoscibile — `token_urlsafe` è base64 casuale, e un hash\n"
+                f"         bcrypt somiglia a mille altre stringhe. Qui si guarda DOVE sta.\n"
+                f"       → `git rm --cached` e tienilo fuori. Se è un file legittimo che\n"
+                f"         vive lì (un template, un README), dichiaralo in AMMESSI_R1\n"
+                f"         COL PERCHÉ — e allora ruota il segreto, perché è già uscito."
+            )
+            continue
+
         if SESSION_EXPORT.search(path):
             problems.append(
                 f"  [R1] {path}\n"

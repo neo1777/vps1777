@@ -13,6 +13,7 @@ lupo viene disattivato, e allora non protegge più niente.
 """
 from __future__ import annotations
 
+import ast
 import importlib.util
 from pathlib import Path
 
@@ -179,8 +180,8 @@ def test_r2_non_scatta_su_un_url_qualunque():
 # 📌 Il test gira sull'elenco degli elenchi e non su quattro casi scritti a mano,
 #   così un QUINTO elenco che nasca `set` cade qui invece di nascere cieco.
 
-ESENZIONI = ("ALLOWLIST_R2", "ALLOWLIST_R3", "IP_AMMESSI", "TSNET_AMMESSI")
-ESENZIONI_PER_FILE = ("ALLOWLIST_R2", "ALLOWLIST_R3")
+ESENZIONI = ("ALLOWLIST_R2", "ALLOWLIST_R3", "IP_AMMESSI", "TSNET_AMMESSI", "AMMESSI_R1")
+ESENZIONI_PER_FILE = ("ALLOWLIST_R2", "ALLOWLIST_R3", "AMMESSI_R1")
 
 
 def test_ogni_esenzione_porta_il_suo_perche_dentro_il_dato():
@@ -207,6 +208,70 @@ def test_nessuna_esenzione_per_file_punta_a_un_file_che_non_esiste():
             assert (_ROOT / path).is_file(), (
                 f"{nome}: «{path}» non esiste più — esenzione fantasma"
             )
+
+
+# ───── R1-d · i NOSTRI segreti, che R2 non può riconoscere (02/08, `71d540e6`) ─
+# 🔴 IL BUCO: R2 conosce formati di TERZI (auth-key, token BotFather, chiave age,
+#   PEM, DSN). I nostri segreti non hanno un formato — `secrets.token_urlsafe` è
+#   base64 casuale, `admin_password_bcrypt` è un hash. **Misurato: zero match su
+#   tutti e quattro**, mentre una tskey vera fa match ⇒ il gate non era rotto, era
+#   cieco su una categoria sola: la nostra.
+# ⭐ E R1 non arrivava lì perché conosceva tre forme di NOME FILE, tutte da regex
+#   sul nome. `secrets/` è una CARTELLA — forma diversa, presidio assente.
+
+def test_r1_ferma_i_file_che_contengono_i_NOSTRI_segreti():
+    for path in ("secrets/gateway_secret.txt", "secrets/oauth_signing_secret.txt",
+                 "secrets/admin_password_bcrypt.txt", ".env", ".env.production",
+                 "onboarding/pending.json", "var/state.json",
+                 "backups/2026-08-01.age", "releases/v0.40.12.tar.gz",
+                 "tools/age-recipients.txt"):
+        assert g.SEGRETI_PER_MESTIERE.search(path), path
+        assert path not in g.AMMESSI_R1, f"{path} non può essere ammesso"
+
+
+def test_r1_lascia_passare_i_file_legittimi_che_vivono_negli_stessi_posti():
+    # LA METÀ CHE IMPEDISCE IL FALSO ROSSO, e non è teorica: senza queste tre
+    # eccezioni il gate sarebbe nato ROSSO su file già in `main` — misurato prima
+    # di scrivere la regola. Un gate che grida al lupo viene disattivato.
+    for path in (".env.example", "secrets/.gitkeep", "secrets/README.md"):
+        assert path in g.AMMESSI_R1, f"{path} è legittimo e deve essere ammesso"
+        assert g.AMMESSI_R1[path], f"{path} ammesso senza il perché scritto"
+
+
+def test_r1_non_scatta_su_un_file_che_somiglia_soltanto():
+    # `onboarding/` è la cartella dello STATO alla radice; il codice del gateway
+    # sta in services/gateway/app/onboarding.py e non c'entra nulla. Senza questo
+    # caso la regola prenderebbe un modulo sorgente e nessuno saprebbe perché.
+    for path in ("services/gateway/app/onboarding.py", "docs/env-guide.md",
+                 "tools/tests/test_env.py", "environment.yml"):
+        assert not g.SEGRETI_PER_MESTIERE.search(path), path
+
+
+def test_la_lista_dei_path_protetti_non_puo_divergere_in_silenzio():
+    """Il patto: la lista può invecchiare, ma RUMOROSAMENTE.
+
+    `PROTECTED_PREFIXES` (tools/vps1777.py) risponde a «cosa il sync non
+    sovrascrive»; `SEGRETI_PER_MESTIERE` a «cosa non deve uscire». Sono domande
+    diverse e le liste possono legittimamente differire — ma non per distrazione.
+    Qui si pretende che ogni prefisso protetto sia o coperto dal gate o dichiarato
+    fuori: se qualcuno ne aggiunge uno di là, questo test glielo fa guardare.
+    """
+    vps = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
+    albero = ast.parse(vps)
+    protetti: tuple[str, ...] = ()
+    for n in ast.walk(albero):
+        if (isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "PROTECTED_PREFIXES"
+                        for t in n.targets)):
+            protetti = tuple(e.value for e in n.value.elts
+                             if isinstance(e, ast.Constant))
+    assert protetti, "PROTECTED_PREFIXES non trovato: il patto non è verificabile"
+    scoperti = [p for p in protetti if not g.SEGRETI_PER_MESTIERE.search(p.rstrip("/") + "/x")
+                and not g.SEGRETI_PER_MESTIERE.search(p)]
+    assert not scoperti, (
+        f"prefissi protetti dal sync ma NON dal gate anti-leak: {scoperti} — "
+        f"o li copri, o dichiari qui perché non devono esserlo"
+    )
 
 
 if __name__ == "__main__":
