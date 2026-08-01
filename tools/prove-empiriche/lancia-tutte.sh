@@ -134,5 +134,32 @@ fi
 
 printf '\n  %d verdi · %d rosse · %d non eseguite   →  %s\n' "$ok" "$ko" "$salt" "${FUORI#"$REPO"/}"
 [ $salt -gt 0 ] && printf '  ⚪ le NON ESEGUITE non sono passate: mancava un prerequisito (di solito docker).\n     Sono contate a parte apposta — un verde che include ciò che non hai guardato\n     è esattamente il difetto che queste prove esistono per non commettere.\n'
-[ $ko -gt 0 ] && exit 1
+# ─── il verdetto ──────────────────────────────────────────────────────────────
+# 🔴 DIFETTO CURATO IL 02/08 (abdd732a, da un rilievo di un agente, verificato sul
+#   vivo: lanciato su un PC senza docker stampava «0 verdi · 0 rosse · 9 non
+#   eseguite» e usciva **0**).
+# ⭐ Il TESTO era onesto e il CODICE DI RITORNO no — e il codice di ritorno è ciò
+#   che legge chi appende questo a un timer, a un hook o a un altro script. Tre
+#   righe più su questo file dice: «un verde che include ciò che non hai guardato
+#   è esattamente il difetto che queste prove esistono per non commettere».
+#   Lo diceva a parole, e usciva 0.
+# 🔑 Il contratto della famiglia — 0=PASS · 1=FAIL · 2=non eseguibile, dichiarato
+#   in `prova-8` e già applicato qui alle singole prove (:76) — non era applicato
+#   al lanciatore stesso. *Lo strumento che aggrega non rispettava il contratto
+#   che fa rispettare.*
+# ⚠️ COSTO DICHIARATO: da adesso, se anche UNA sola prova non è eseguibile, il
+#   lanciatore NON esce 0. Su una macchina che ha lo stack devono girare tutte e
+#   nove; se una resta strutturalmente non eseguibile, il 2 è il promemoria che
+#   manca una misura — e va tolto curando la prova, non allargando questa soglia.
+if [ $ko -gt 0 ]; then
+  exit 1
+fi
+if [ $ok -eq 0 ]; then
+  echo "⚪ NESSUNA prova eseguita ($salt su $tot non eseguibili): non è un verde, è un'assenza di dato."
+  exit 2
+fi
+if [ $salt -gt 0 ]; then
+  echo "⚪ PARZIALE: $ok eseguite e verdi, $salt su $tot NON eseguite — non è un PASS pieno."
+  exit 2
+fi
 exit 0
