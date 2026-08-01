@@ -2879,9 +2879,14 @@ def cmd_secrets_status(repo: Path, args) -> int:
     now = _t.time()
     items: list[dict] = []
     overdue: list[str] = []
+    mancanti: list[str] = []
     for name, fname, label, max_days, auto, note in _SECRET_POLICY:
         p = repo / "secrets" / fname
         if not p.is_file():
+            # 🔴 PRIMA QUI C'ERA SOLO `continue`. Un secret ATTESO e ASSENTE è peggio
+            # di uno vecchio — quello vecchio almeno esiste — e spariva in silenzio:
+            # il riquadro mostrava le righe rimaste e sembrava completo.
+            mancanti.append(label)
             continue
         age_days = int((now - p.stat().st_mtime) / 86400)
         is_overdue = age_days > max_days
@@ -2909,7 +2914,7 @@ def cmd_secrets_status(repo: Path, args) -> int:
         items.append(cosign)
         if cosign["overdue"]:
             overdue.append(f"{cosign['label']} ({cosign['age_days']}g)")
-    status = {"checked_at": now_iso(), "secrets": items}
+    status = {"checked_at": now_iso(), "secrets": items, "mancanti": mancanti}
     try:
         (onboarding_dir(repo) / "secrets_status.json").write_text(json.dumps(status, indent=2))
     except OSError as exc:
@@ -2918,8 +2923,26 @@ def cmd_secrets_status(repo: Path, args) -> int:
     for it in items:
         mark = "⚠️  SCADUTO" if it["overdue"] else "ok"
         log(f"{it['label']:<22} {it['age_days']:>4}g / max {it['max_age_days']}g  [{mark}]")
+    if mancanti:
+        warn(f"secret ATTESI e NON trovati ({len(mancanti)}): {', '.join(mancanti)}")
     if not items:
-        warn("nessun secret trovato in secrets/")
+        # 🔴 QUI IL FLUSSO CADEVA NEL RAMO `else` E STAMPAVA «tutti i secret entro la
+        # soglia», USCENDO 0 — dopo aver appena detto «nessun secret trovato». Due
+        # frasi opposte nello stesso output, e il verde era l'ultima parola.
+        # ⭐ È la distinzione che `copertura_backup` (r.1515) fa già in questo file:
+        # **None = non misurato ≠ 0 = misurato e vuoto**. Zero secret osservati su
+        # una macchina installata non è «sano»: è «non ho potuto guardare» — il caso
+        # di H55 (una unit che gira con un `--home` sbagliato, o `secrets/` non
+        # attraversabile da quell'utente) è documentato in questo stesso file.
+        # 🛡️ Esce 2 e non 1: è il terzo stato, «non eseguibile», lo stesso modello di
+        # `prova-8` — così l'unit systemd risulta fallita e la cosa è VISIBILE,
+        # invece di essere un verde che nessuno rilegge.
+        warn("nessun secret trovato in secrets/ — stato NON MISURATO, non «sano»")
+        if args.notify:
+            telegram_notify(repo, "🔑 vps1777 — secrets-status non ha trovato NESSUN "
+                                  "secret: non è «tutto a posto», è che non ha potuto "
+                                  "guardare (percorso sbagliato o permessi).")
+        return 2
     if overdue:
         warn(f"da ruotare: {', '.join(overdue)}")
         if args.notify:

@@ -815,7 +815,24 @@ def test_raggiungibilita_ritorno_misura_la_durata_fra_i_due_istanti():
         v._sorveglia_raggiungibilita(Path("/non/serve"), st, True)
         assert "irraggiungibile_da" not in st, "il marcatore resta e il prossimo guasto misura male"
         assert len(spia.messaggi) == 1
-        assert "1h27m50s" in spia.messaggi[0], spia.messaggi[0]
+        # 🔴 QUI C'ERA `assert "1h27m50s" in ...`, ED ERA FLAKY (trovato il 02/08
+        # aggiungendo due test altrove, che hanno rallentato la suite di un secondo).
+        # Il test costruisce l'istante con `now()` e il codice ne legge un ALTRO:
+        # se fra le due letture scatta un secondo, la durata è 1h27m**51**s e
+        # l'assert cade. ⭐ Misurava la velocità della macchina, non la durata.
+        # 🛡️ Adesso pretende il valore ENTRO UNA FINESTRA DICHIARATA: la cosa che
+        # questo test esiste per provare è che la durata sia MISURATA fra i due
+        # istanti e non stimata — e due secondi di tolleranza non la indeboliscono,
+        # mentre un secondo di rigidità la rendeva rossa a caso.
+        import re as _re
+        m = _re.search(r"(\d+)h(\d+)m(\d+)s", spia.messaggi[0])
+        assert m, f"la durata non è nemmeno nel messaggio: {spia.messaggi[0]}"
+        secondi = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+        atteso = 1 * 3600 + 27 * 60 + 50
+        assert atteso <= secondi <= atteso + 2, (
+            f"durata {secondi}s fuori dalla finestra [{atteso}, {atteso + 2}]: "
+            f"{spia.messaggi[0]}"
+        )
     finally:
         ripristina()
 
@@ -1339,6 +1356,62 @@ def test_aggancio_collaudo_spento_di_default(monkeypatch, tmp_path):
     except Exception:
         return                # niente docker: il ramo di collaudo non è stato preso
     assert "collaudo" not in why
+
+
+# ───── secrets-status · il verde su ZERO osservati (02/08, `71d540e6`) ────────
+# 🔴 IL DIFETTO: con `items == []` il flusso stampava «nessun secret trovato» e poi
+#   cadeva nel ramo `else` con «tutti i secret entro la soglia», uscendo **0**. Due
+#   frasi opposte nello stesso output, e il verde era l'ultima parola.
+# ⭐ È la distinzione che `copertura_backup` fa già in questo file: **None = non
+#   misurato ≠ 0 = misurato e vuoto.** Zero secret su una macchina installata non è
+#   «sano»: è «non ho potuto guardare» — il caso di H55 (unit con `--home` sbagliato
+#   o `secrets/` non attraversabile) è documentato nel file stesso.
+
+class _ArgsFinti:
+    notify = False
+
+
+def test_secrets_status_su_zero_osservati_NON_dice_che_e_tutto_a_posto(tmp_path):
+    (tmp_path / "onboarding").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "secrets").mkdir(parents=True, exist_ok=True)   # esiste ma è VUOTA
+    detto: list[str] = []
+    orig_ok, orig_warn, orig_log = v.ok, v.warn, v.log
+    v.ok = lambda m: detto.append(f"ok:{m}")
+    v.warn = lambda m: detto.append(f"warn:{m}")
+    v.log = lambda m: detto.append(f"log:{m}")
+    try:
+        rc = v.cmd_secrets_status(tmp_path, _ArgsFinti())
+    finally:
+        v.ok, v.warn, v.log = orig_ok, orig_warn, orig_log
+    assert rc == 2, f"zero secret osservati deve essere «non eseguibile», non 0 (rc={rc})"
+    assert not any("tutti i secret entro la soglia" in d for d in detto), (
+        f"dichiara sano uno stato che non ha misurato: {detto}"
+    )
+    assert any("NON MISURATO" in d for d in detto), detto
+
+
+def test_secrets_status_segnala_i_secret_ATTESI_e_assenti(tmp_path):
+    """Un secret atteso e assente è peggio di uno vecchio: quello vecchio esiste."""
+    (tmp_path / "onboarding").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "secrets").mkdir(parents=True, exist_ok=True)
+    # ne creo UNO solo: gli altri della policy restano assenti
+    nome_file = v._SECRET_POLICY[0][1]
+    (tmp_path / "secrets" / nome_file).write_text("x")
+    detto: list[str] = []
+    orig_ok, orig_warn, orig_log = v.ok, v.warn, v.log
+    v.ok = lambda m: detto.append(f"ok:{m}")
+    v.warn = lambda m: detto.append(f"warn:{m}")
+    v.log = lambda m: detto.append(f"log:{m}")
+    try:
+        rc = v.cmd_secrets_status(tmp_path, _ArgsFinti())
+    finally:
+        v.ok, v.warn, v.log = orig_ok, orig_warn, orig_log
+    assert rc == 0, "con almeno un secret osservato il comando resta eseguibile"
+    assert any("ATTESI e NON trovati" in d for d in detto), (
+        f"i secret assenti spariscono in silenzio: {detto}"
+    )
+    stato = json.loads((tmp_path / "onboarding" / "secrets_status.json").read_text())
+    assert stato.get("mancanti"), "l'elenco dei mancanti deve arrivare anche a /admin/secrets"
 
 
 if __name__ == "__main__":
