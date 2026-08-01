@@ -226,7 +226,26 @@ def env_set(repo: Path, key: str, value: str) -> None:
             break
     else:
         lines.append(f"{key}={value}")
-    envf.write_text("\n".join(lines) + "\n")
+
+    # 🔴 SCRITTURA ATOMICA (02/08, b82df434) — PRIMA ERA `envf.write_text(...)`, cioè
+    #   TRONCA-E-RISCRIVI. Un kill o un disco pieno a metà lasciava `.env` mutilato, e
+    #   `.env` è il file da cui i container prendono OGNI variabile: mutilarlo li lascia
+    #   senza configurazione al primo restart.
+    # ⭐ E PESA PER **DOVE** VIENE CHIAMATA: `env_set` scrive `VPS1777_TAG` nel percorso
+    #   di update (:2342), in quello di rollback (:1686, :2425, :2615) e al cambio
+    #   immagine (:2596) — cioè esattamente nei momenti in cui qualcosa può interrompersi.
+    # 🔑 La cura non è nuova: **`state_save()`, venticinque righe più sotto, la fa già
+    #   così** (tmp + `replace`). Il pattern era in casa e questa funzione non lo usava.
+    # ⚠️ E IL PEZZO CHE UNA CURA INGENUA ROMPEREBBE: `.env` è a 600 (installer/engine.py
+    #   :505 e :703). `Path.replace()` sostituisce il file col TMP, quindi il risultato
+    #   eredita i permessi del tmp — che nasce a 644 meno umask. Un fix di affidabilità
+    #   scritto senza guardare renderebbe leggibile a tutti il file dei segreti:
+    #   ⇒ il modo si legge dal file ESISTENTE e si riapplica al tmp PRIMA del replace.
+    modo = (envf.stat().st_mode & 0o777) if envf.is_file() else 0o600
+    tmp = envf.with_name(".env.tmp")          # stessa cartella = stesso filesystem,
+    tmp.write_text("\n".join(lines) + "\n")   # senza cui `replace` non è atomico
+    os.chmod(tmp, modo)
+    tmp.replace(envf)
 
 
 # ─────────────────────────────────────────── state.json
