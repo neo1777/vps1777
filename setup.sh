@@ -265,9 +265,39 @@ if confirm "Procedo ora?"; then
       # H43 — le unit sono templatizzate (@OPERATOR_USER@/@REPO@): vanno RESE prima
       # di install, altrimenti systemd non parsa `User=@OPERATOR_USER@` (fresh
       # install rotto). Qui l'operatore è chi lancia setup.sh; il repo è SCRIPT_DIR.
+      #
+      # 🔴 H55 — «chi lancia» NON è una policy: è un'assunzione, e qui decide il
+      #   privilegio permanente di quattro unit. Lanciando `sudo bash setup.sh`,
+      #   `id -un` dà **root** e le unit nascono con `User=root`: l'updater
+      #   automatico girerebbe coi privilegi pieni della macchina, a ogni avvio.
+      #   ⚠️ E `git log -S "User=root" -- systemd/` è VUOTO: nel repo c'è solo il
+      #   segnaposto, il valore nasce QUI. Cercarlo nei file non poteva trovarlo.
+      # ⭐ La policy giusta esiste già nel repo, in un installer su tre:
+      #   `installer/engine.py:30` → `OPERATOR_USER = "vps1777"`, costante. Non è una
+      #   decisione nuova: è quella, applicata dove mancava.
+      # 🛡️ L'escape non è inventato: `deploy.sh:218` usa già l'env `OPERATOR_USER`.
+      OP_USER="${OPERATOR_USER:-$(id -un)}"
+      if [ "$OP_USER" = "root" ]; then
+        cat >&2 <<'H55'
+
+🔴 le unit systemd verrebbero installate con User=root.
+
+   L'operatore di vps1777 NON è chi lancia l'installer: è un utente
+   dedicato e non privilegiato (installer/engine.py lo fissa a «vps1777»).
+   Renderizzare le unit come root darebbe all'updater automatico i
+   privilegi pieni della macchina, a ogni avvio, per sempre.
+
+   Dimmi chi è l'operatore e riprovo:
+       OPERATOR_USER=vps1777 <il comando che hai lanciato>
+
+   Oppure lancia l'installer come quell'utente, senza sudo.
+
+H55
+        exit 1
+      fi
       for u in systemd/vps1777-*; do
         case "$u" in *.service|*.timer|*.path)
-          sed -e "s|@OPERATOR_USER@|$(id -un)|g" -e "s|@REPO@|$SCRIPT_DIR|g" "$u" \
+          sed -e "s|@OPERATOR_USER@|$OP_USER|g" -e "s|@REPO@|$SCRIPT_DIR|g" "$u" \
             | sudo install -m644 /dev/stdin "/etc/systemd/system/$(basename "$u")" 2>/dev/null || true;;
         esac
       done
