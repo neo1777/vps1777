@@ -17,8 +17,6 @@ in modo SILENZIOSO — cioè nel modo che questo progetto insegue da settimane:
    segreto. Il test ③ è quella versione, resa impossibile.
 """
 
-import hashlib
-import hmac
 import re
 import shutil
 import subprocess
