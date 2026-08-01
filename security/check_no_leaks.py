@@ -109,9 +109,13 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 # («questo file cita i pattern dei segreti») si era estesa a tutte le ragioni.
 # ⭐ La forma: un'allowlist per FILE esenta da OGNI regola; quella per REGOLA
 # esenta da una sola. La prima è comoda da scrivere e cieca da usare.
+# 📌 È un dict e non un set perché la ragione sta NEL DATO: finché stava nel
+# commento qui sopra, il test poteva pretenderla da IP_AMMESSI e TSNET_AMMESSI
+# (che erano dict) e non da qui — e i due elenchi senza presidio erano proprio
+# quelli per FILE, cioè i più larghi. Un commento non è controllabile.
 ALLOWLIST_R2 = {
-    "security/check_no_leaks.py",
-    "security/findings.yml",
+    "security/check_no_leaks.py": "questo gate: i pattern dei segreti li contiene per mestiere",
+    "security/findings.yml": "il registro dei rilievi: cita le evidenze dei pattern",
 }
 
 # ── R3 — indirizzi dell'AMBIENTE: mai, in nessuna forma ───────────────────────
@@ -164,9 +168,15 @@ IP_AMMESSI = {
 # 🔴 E il prezzo va detto: questi due file sono l'unico posto dove un indirizzo
 # vero potrebbe nascondersi senza che nessuno lo veda. Sono due, sono corti, e si
 # leggono con gli occhi — un'esenzione che non si può leggere a mano è troppo larga.
+# 📌 Dict come ALLOWLIST_R2, e per la stessa ragione: di tutti e quattro gli
+# elenchi di esenzione questo è quello che il commento qui sopra dichiara più
+# pericoloso, ed era l'unico che nessun test guardava.
 ALLOWLIST_R3 = {
-    "security/check_no_leaks.py",
-    "tools/tests/test_no_leaks.py",
+    "security/check_no_leaks.py": "questo gate: gli indirizzi di esempio li contiene per mestiere",
+    "tools/tests/test_no_leaks.py": (
+        "il test del gate: deve provare che un indirizzo pubblico venga fermato, "
+        "e non può farlo senza scriverne uno"
+    ),
 }
 
 

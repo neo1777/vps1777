@@ -165,6 +165,50 @@ def test_r2_non_scatta_su_un_url_qualunque():
     assert not _r2("http://localhost:17772/dati")
 
 
+# ───────── le QUATTRO esenzioni, guardate tutte insieme (02/08, `71d540e6`) ──
+# 🔴 IL DIFETTO CHE QUESTI DUE TEST CHIUDONO: le esenzioni di questo gate sono
+#   QUATTRO — due per FILE (`ALLOWLIST_R2`, `ALLOWLIST_R3`) e due per VALORE
+#   (`IP_AMMESSI`, `TSNET_AMMESSI`) — e il presidio «ogni esenzione porta il suo
+#   perché» valeva solo per le due per valore. Non per una decisione: perché
+#   quelle erano `dict` e le altre due `set`, e la ragione di un `set` può stare
+#   solo in un commento. ⭐ *Le due senza presidio erano le più LARGHE: una
+#   allowlist per file esenta da ogni riga di quel file.* E il commento sopra
+#   `ALLOWLIST_R3` la dichiara «l'unico posto dove un indirizzo vero potrebbe
+#   nascondersi senza che nessuno lo veda»: l'elenco più pericoloso era l'unico
+#   che nessun test guardava.
+# 📌 Il test gira sull'elenco degli elenchi e non su quattro casi scritti a mano,
+#   così un QUINTO elenco che nasca `set` cade qui invece di nascere cieco.
+
+ESENZIONI = ("ALLOWLIST_R2", "ALLOWLIST_R3", "IP_AMMESSI", "TSNET_AMMESSI")
+ESENZIONI_PER_FILE = ("ALLOWLIST_R2", "ALLOWLIST_R3")
+
+
+def test_ogni_esenzione_porta_il_suo_perche_dentro_il_dato():
+    for nome in ESENZIONI:
+        elenco = getattr(g, nome)
+        assert isinstance(elenco, dict), (
+            f"{nome} non è un dict: la sua ragione starebbe in un commento, "
+            f"e un commento nessun test lo può leggere"
+        )
+        assert elenco, f"{nome} è vuoto: un'esenzione che non esiste non si dichiara"
+        for voce, perche in elenco.items():
+            assert isinstance(perche, str) and len(perche.strip()) >= 20, (
+                f"{nome}[{voce!r}] è esentato senza una ragione leggibile — "
+                f"tre parole non sono un perché"
+            )
+
+
+def test_nessuna_esenzione_per_file_punta_a_un_file_che_non_esiste():
+    # Un path rinominato lascia dietro un'esenzione che non protegge più niente e
+    # non fa NESSUN rumore: il gate resta verde, l'allowlist cresce di voci morte,
+    # e la prossima che la legge crede che quei file siano ancora coperti.
+    for nome in ESENZIONI_PER_FILE:
+        for path in getattr(g, nome):
+            assert (_ROOT / path).is_file(), (
+                f"{nome}: «{path}» non esiste più — esenzione fantasma"
+            )
+
+
 if __name__ == "__main__":
     fails = 0
     for name, fn in sorted(globals().items()):
