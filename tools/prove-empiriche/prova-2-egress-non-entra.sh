@@ -38,13 +38,27 @@ echo "── prova-2 · la rete egress è unidirezionale?   $(date '+%F %T')"
 #    ⭐ Un falso FAIL non è più innocuo di un falso PASS: manda a caccia di un
 #      problema che non esiste e toglie credibilità ai rossi veri.
 # Ora si chiede a `docker port`, che risponde SOLO delle pubblicazioni reali.
+# 🔴 SECONDO DIFETTO, curato il 02/08 (b82df434) — IL CICLO SU ZERO ELEMENTI.
+#    Se nessuno dei due servizi gira, ogni giro fa `continue`, `pub` resta vuoto e la
+#    riga sotto stampa «✅ nessuna porta pubblicata». **Non è falso: è NON GUARDATO.**
+#    Misurato lanciando la prova su un PC dove vps1777 non è installato: verde pieno.
+# ⭐ È la forma ② della caccia del round-12 — «il ciclo che itera su zero elementi e
+#    conclude tutto a posto» — trovata nella nostra stessa prova empirica.
+#    ⇒ si conta quanti container si sono davvero esaminati, e zero non è un PASS.
 pub=""
+visti=0
 for svc in nb1777-mcp nb1777-bot; do
   cid=$(docker compose ps -q "$svc" 2>/dev/null | head -1)
   [ -n "$cid" ] || continue
+  visti=$((visti + 1))
   mapped=$(docker port "$cid" 2>/dev/null)          # vuoto = nessuna pubblicazione
   [ -n "$mapped" ] && pub="$pub$svc → $mapped"$'\n'
 done
+if [ "$visti" -eq 0 ]; then
+  echo "   ⚠️  né nb1777-mcp né nb1777-bot sono in esecuzione: NON c'è niente da esaminare."
+  echo "      «nessuna porta pubblicata» qui vorrebbe dire «nessun container», non «nessun ingresso»."
+  echo "⚠️  prova non eseguibile su questa macchina."; exit 2
+fi
 if [ -n "$pub" ]; then
   echo "   🔴 servizi su egress con porte PUBBLICATE sull'host:"; printf '%s' "$pub" | sed 's/^/      /'
   echo "🔴 FAIL — una porta pubblicata è un ingresso, non un'uscita."; exit 1
@@ -66,7 +80,16 @@ case "$out" in
   ESCE)     echo "   ✅ nb1777-mcp ESCE (controprova positiva: la prova sa dire sì)" ;;
   NON-ESCE*) echo "   ⚠️  nb1777-mcp NON esce ($out) — allora il verde del ① non dimostra il NAT:"
              echo "      questo servizio deve poter parlare con NotebookLM. Da guardare."; ;;
-  *)        echo "   ?  esito non interpretabile («$out») — NON concludo" ;;
+  *)        echo "   ?  esito non interpretabile («$out») — NON concludo"
+            # 🔴 E FINO AL 02/08 QUESTO «NON CONCLUDO» ERA SEGUITO DA UN «✅ PASS».
+            #    Lo dice il commento del ② qui sopra, scritto prima di me: «se qui
+            #    fallisce, il ① sopra non prova niente — un servizio isolato del tutto
+            #    darebbe lo stesso verde». La controprova c'era, e non governava il
+            #    verdetto: era un'osservazione, non un cancello.
+            # ⭐ **Un presidio che sa dire «non concludo» e poi conclude lo stesso è
+            #    peggio di uno che tace: la frase onesta fa da alibi al verde.**
+            echo "      ⇒ senza la controprova, il verde del ① non dimostra nulla."
+            exit 2 ;;
 esac
 
 # ③ l'IP del container su egress non è raggiungibile dall'host su porte comuni

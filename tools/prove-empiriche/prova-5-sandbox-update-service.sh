@@ -73,9 +73,11 @@ echo "── (c) contenuto dell'ultimo backup — dove PrivateTmp romperebbe in 
 BACKUPS="$REPO/backups"
 last=$(find "$BACKUPS" -maxdepth 1 -name 'vps1777-*.tar.age' -newer "$UNIT" 2>/dev/null | sort | tail -1)
 [ -z "$last" ] && last=$(find "$BACKUPS" -maxdepth 1 -name 'vps1777-*.tar.age' 2>/dev/null | sort | tail -1)
+c_osservato=0
 if [ -z "$last" ]; then
   echo "   ℹ️  nessun backup .tar.age trovato in $BACKUPS — non osservabile."
 else
+  c_osservato=1
   sz=$(stat -c %s "$last" 2>/dev/null || echo 0)
   printf '   %s — %s byte\n' "$(basename "$last")" "$sz"
   if [ "$sz" -lt 1024 ]; then
@@ -92,7 +94,26 @@ if [ "$fail" -eq 1 ]; then
   echo "🔴 FAIL — vedi sopra. NON applicare ProtectSystem=strict senza aver risolto il punto (c)."
   exit 1
 fi
-echo "✅ Osservazioni coerenti col claim del round-4: la proposta dell'audio va corretta"
+# 🔴 CURATO IL 02/08 (b82df434) — IL VERDETTO NON DISTINGUEVA «HO GUARDATO E VA BENE»
+#    DA «NON HO POTUTO GUARDARE». Misurato su un PC senza vps1777: (a) e (d) osservano
+#    davvero (leggono il repo e i path dell'host), (b) e (c) stampano «non osservabile»
+#    — e lo script usciva 0 con «✅ Osservazioni coerenti».
+# ⭐ E il punto NON è che due blocchi su quattro tacciano: è QUALE tace. Il blocco (c) è
+#    l'unico che può produrre un FAIL — un backup sotto 1 KiB è il sintomo esatto del
+#    guasto silenzioso che PrivateTmp introdurrebbe. **Un verde su (c) mai eseguito è
+#    precisamente il verde che non ha guardato**, ed è il contratto in testa a questo
+#    file a dire cosa farne: «2 = non osservabile». C'era, e non era usato.
+# 📌 (a) e (d) restano validi e la loro conclusione si stampa lo stesso: dire «non
+#    concludo» su tutto sarebbe l'errore opposto — buttare due misure vere.
+echo "✅ (a) e (d) hanno osservato: la proposta dell'audio va corretta"
 echo "   (togliere /var/lib/gateway, aggiungere /tmp) PRIMA di essere applicata alla unit —"
 echo "   e resta un [da-prototipare]: nessuna riga qui prova che la unit riparta con la stretta."
+if [ "$c_osservato" -eq 0 ]; then
+  echo
+  echo "⚠️  MA IL BLOCCO (c) NON HA GUARDATO — nessun backup da ispezionare su questa macchina."
+  echo "   (c) è l'UNICO che può dare FAIL: senza di lui questo non è un via libera,"
+  echo "   è una misura parziale. ⇒ esito 2 «non osservabile», non 0."
+  echo "   Per completarla: lanciala dove i backup esistono (la macchina che gira)."
+  exit 2
+fi
 exit 0
