@@ -29,7 +29,17 @@ if ! { [ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ]; }; then {
 cd "$REPO" || exit 2
 
 command -v docker >/dev/null || { echo "⚠️  docker assente — prova non eseguibile"; exit 2; }
-docker compose ps --status running -q gateway >/dev/null 2>&1 || {
+# 🔴 01/08 — QUESTA GUARDIA PASSAVA A VUOTO, e la prova dichiarava PASS su un
+# gateway che non esisteva. `docker compose ps -q <svc>` esce **0 con output
+# VUOTO** quando il servizio non gira: controllare l'exit code chiede «il comando
+# ha funzionato?», non «ha TROVATO qualcosa?». Sono due domande diverse, e la
+# seconda è quella che serve.
+# ⭐ L'effetto era il difetto che queste prove esistono per non commettere:
+#    «non ho potuto guardare» usciva come «✅ PASS — nessuna uscita rilevata».
+#    Trovato lanciando la prova DOVE NON PUÒ FUNZIONARE — che è il modo per
+#    scoprire se una prova sa di essere nell'ambiente sbagliato.
+_gw="$(docker compose ps --status running -q gateway 2>/dev/null)"
+[ -n "$_gw" ] || {
   echo "⚠️  il servizio 'gateway' non è in esecuzione — prova non eseguibile"; exit 2; }
 
 echo "── prova-1 · il gateway raggiunge Internet?   $(date '+%F %T')"
