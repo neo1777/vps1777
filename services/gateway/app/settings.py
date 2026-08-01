@@ -55,6 +55,12 @@ def _int_or_zero(value: object) -> int:
 IntOrZero = Annotated[int, BeforeValidator(_int_or_zero)]
 
 
+# Le voci di GATEWAY_UPSTREAMS che il parser ha scartato perché malformate.
+# Esiste perché uno scarto silenzioso rende invisibile un proxy che non instrada:
+# `/health?deep=1` lo legge e lo mostra a chi sta diagnosticando.
+UPSTREAMS_SCARTATI: list[str] = []
+
+
 def _parse_upstreams(value: str | dict[str, str] | None) -> dict[str, str]:
     """
     Parsa "archive=archive-mcp:8002,nb1777=nb1777-mcp:8003" in
@@ -76,7 +82,14 @@ def _parse_upstreams(value: str | dict[str, str] | None) -> dict[str, str]:
             name, host, port = spec.split(":", 2)
             target = f"{host}:{port}"
         else:
-            # malformato — skip
+            # 🔴 PRIMA QUI C'ERA SOLO `continue`, col commento «malformato — skip».
+            # Scartare in silenzio è ciò che rendeva invisibile l'intero difetto:
+            # con `GATEWAY_UPSTREAMS=archive-mcp:8002,nb1777-mcp:8003` (i prefissi
+            # `nome=` dimenticati) il dict usciva VUOTO, il proxy non instradava
+            # più nulla, e nessuno aveva un posto dove leggerlo.
+            # 📌 Non si alza: un avvio che esplode per una virgola è peggio del
+            # difetto. Lo scarto si REGISTRA, e `/health?deep=1` lo mostra.
+            UPSTREAMS_SCARTATI.append(spec)
             continue
         out[name.strip()] = target.strip()
     return out

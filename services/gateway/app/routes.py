@@ -14,7 +14,7 @@ from pathlib import Path
 from . import admin, archive_indexer, miniapp, oauth, onboarding, proxy
 from .audit import audit
 from .asgi_security import ip_is_internal
-from .settings import get_settings
+from .settings import UPSTREAMS_SCARTATI, get_settings
 
 
 async def health(request: Request) -> JSONResponse:
@@ -49,6 +49,28 @@ async def health(request: Request) -> JSONResponse:
             except (OSError, asyncio.TimeoutError, ValueError):
                 checks[name] = False
         body["deep"] = checks
+        # 🔴 `all({})` è True: senza questa guardia un dict VUOTO dava 200 «sano»
+        # avendo sondato ZERO backend — il ciclo su zero elementi.
+        # ⚠️ E chi consuma questo endpoint è il FAIL-CLOSED dell'update:
+        # `deep_health_ok` (tools/vps1777.py:517) esce 0 solo su status 200. Un 200
+        # a vuoto dichiarava sana una release in cui il proxy MCP non instrada più
+        # nulla, e il ramo `if not healthy: rollback` non scattava per un guasto
+        # che gli stava esattamente sotto il naso.
+        # 📌 Zero upstream non è una configurazione possibile: il default di
+        # `compose.yaml:79` ne porta due. Un dict vuoto significa GATEWAY_UPSTREAMS
+        # scritto male — tipicamente i prefissi `nome=` dimenticati — e fino a oggi
+        # il parser scartava le voci in SILENZIO. Ora le riporta.
+        if not checks:
+            body["ok"] = False
+            scartate = list(getattr(s, "upstreams_scartati", None) or UPSTREAMS_SCARTATI)
+            body["errore"] = (
+                "nessun upstream da sondare: GATEWAY_UPSTREAMS è vuoto o tutte le "
+                "sue voci sono malformate. Forma attesa: nome=host:porta, separate "
+                "da virgola."
+            )
+            if scartate:
+                body["scartate"] = scartate
+            return JSONResponse(body, status_code=503)
         if not all(checks.values()):
             body["ok"] = False
             return JSONResponse(body, status_code=503)
