@@ -122,3 +122,71 @@ def test_prune_toglie_le_voci_scadute(monkeypatch, tmp_path) -> None:
     audit._prune(log, retention_days=30)
     kept = [json.loads(ln)["event"] for ln in log.read_text().splitlines() if ln.strip()]
     assert kept == ["nuovo"]  # lo scaduto è potato, il vivo resta
+
+
+# ── redazione: l'audit accetta solo ciò che SA (d96526b5) ────────────────────
+
+def test_chiave_non_dichiarata_non_finisce_nel_log(monkeypatch, tmp_path) -> None:
+    """Il vettore vero: un chiamante che infila un campo nuovo con dentro un segreto."""
+    log = _wire(monkeypatch, tmp_path)
+    audit.audit({"event": "prova", "password": "hunter2-questo-non-deve-uscire"})
+    riga = log.read_text(encoding="utf-8")
+    assert "hunter2" not in riga            # il valore NON c'è
+    assert "password" in riga               # ma la chiave sì: il buco resta visibile
+    assert "non dichiarata" in riga
+
+
+def test_le_chiavi_note_passano_intatte(monkeypatch, tmp_path) -> None:
+    log = _wire(monkeypatch, tmp_path)
+    audit.audit({"event": "admin_login_ok", "email": "a@b.c", "ip": "10.0.0.1"})
+    rec = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+    assert rec["email"] == "a@b.c" and rec["ip"] == "10.0.0.1"
+
+
+def test_un_valore_lunghissimo_viene_troncato(monkeypatch, tmp_path) -> None:
+    """`error` è ammessa ma a contenuto libero: si limita la superficie, non si indovina."""
+    log = _wire(monkeypatch, tmp_path)
+    audit.audit({"event": "boom", "error": "x" * 5000})
+    rec = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+    assert len(rec["error"]) < 600 and "troncati" in rec["error"]
+
+
+def test_OGNI_chiave_usata_nel_repo_e_dichiarata(monkeypatch) -> None:
+    """Il presidio vero: se qualcuno aggiunge una chiave e non la dichiara, QUI si rompe.
+
+    Senza questo test l'allowlist diventa silenziosamente una censura: il campo nuovo
+    smette di essere scritto e nessuno se ne accorge finché non serve leggerlo.
+    Le chiavi si estraggono con l'AST — un grep si ferma a fine riga e sulle chiamate
+    multi-riga ne perde (misurato: 24 col grep, 30 con l'AST).
+    """
+    import ast
+    from pathlib import Path
+    radice = Path(__file__).resolve().parents[3]
+    usate, non_letterali = set(), 0
+    for p in radice.rglob("*.py"):
+        if ".git" in p.parts or "test_" in p.name:
+            continue
+        try:
+            albero = ast.parse(p.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for n in ast.walk(albero):
+            if not (isinstance(n, ast.Call)
+                    and getattr(n.func, "id", getattr(n.func, "attr", "")) == "audit"):
+                continue
+            for a in n.args:
+                if isinstance(a, ast.Dict):
+                    for k in a.keys:
+                        if isinstance(k, ast.Constant):
+                            usate.add(k.value)
+                        else:
+                            non_letterali += 1
+                else:
+                    non_letterali += 1
+    assert usate, "nessuna chiamata trovata: la sonda non sta guardando il repo giusto"
+    mancanti = usate - audit._CHIAVI_NOTE
+    assert not mancanti, f"chiavi usate ma NON dichiarate in _CHIAVI_NOTE: {sorted(mancanti)}"
+    # un dict costruito a runtime sfugge all'allowlist statica: va saputo, non scoperto dopo
+    assert non_letterali == 0, (
+        f"{non_letterali} chiamate ad audit() con un dict non letterale: questo test non "
+        "può vederne le chiavi, e la garanzia vale solo per quelle statiche")

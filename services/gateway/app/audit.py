@@ -102,6 +102,59 @@ def _prune(path: Path, retention_days: int) -> None:
     tmp.replace(path)  # atomico: un lettore concorrente vede il vecchio o il nuovo
 
 
+# ── ③ Un audit log accetta solo ciò che SA, non tutto ciò che riceve ────────────────
+# `audit()` scriveva `{"ts": now, **event}`: qualunque cosa un chiamante mettesse nel dict
+# finiva su disco verbatim. Il vettore concreto non è la malizia, è `{"error": str(exc)}` —
+# un'eccezione che porta con sé una stringa di connessione, un header Authorization, un
+# token in un URL. Basta un `except` che allarga il messaggio e il segreto è nel log.
+#
+# ⚠️ PERCHÉ UN'ALLOWLIST E NON UN RILEVATORE DI SEGRETI. I pattern esistono già e sono
+#   curati: `security/check_no_leaks.py`, SECRET_PATTERNS. Ma il gateway gira in un
+#   container il cui Dockerfile copia SOLO `app/` — `security/` non c'è a runtime, e
+#   ricopiare quei pattern qui significherebbe due elenchi che divergono, cioè il difetto
+#   che quel file esiste per impedire. ⇒ qui non si indovina cosa è segreto: si dichiara
+#   cosa è ammesso. Fail-closed, e nessuna fonte duplicata.
+#
+# 🔑 LIMITE DICHIARATO, perché nessuno lo scambi per una difesa che non è: questo NON
+#   rileva segreti. Contiene la SUPERFICIE. Un segreto messo in `error` (chiave ammessa,
+#   contenuto libero) passa, troncato a 500 caratteri. Il rilevatore vero resta in CI.
+#
+# Le 30 chiavi sono state estratte con l'AST da tutte le 53 chiamate del repo, non con un
+# grep: il grep si ferma a fine riga e sulle chiamate multi-riga ne perdeva sei.
+_CHIAVI_NOTE = frozenset({
+    "by", "client_id", "connector", "db", "email", "email_known", "error", "event",
+    "fields", "files", "fmt", "i", "insecure", "ip", "jti", "latest", "len", "method",
+    "notebook", "owner_configured", "path", "persisted", "reason", "rows", "running",
+    "service", "status", "sub", "target", "user_id",
+    # scritte dal modulo stesso, non dai chiamanti. `dropped`/`last_error` appartengono al
+    # record di recovery, che oggi si scrive DIRETTO (r.182) e non passa di qui: sono
+    # dichiarate perché il giorno che passasse non si rompa in silenzio.
+    # ⚠️ qui avevo scritto "audit_write_recovered", che è un VALORE del campo `event`, non
+    #    una chiave: un'allowlist di chiavi che contiene un valore non protegge nulla in più
+    #    e fa credere il contrario.
+    "ts", "dropped", "last_error",
+})
+_MAX_VALORE = 500
+
+
+def _redigi(event: dict[str, Any]) -> dict[str, Any]:
+    """Chiavi ignote → il valore non si scrive (la CHIAVE resta, o si nasconde il buco).
+
+    Tenere la chiave e togliere il valore è deliberato: un campo sparito è invisibile a chi
+    legge il log, un campo `<non dichiarata>` dice che qualcuno ha provato a scrivere lì.
+    """
+    out: dict[str, Any] = {}
+    for k, v in event.items():
+        if k not in _CHIAVI_NOTE:
+            out[k] = "<valore non scritto: chiave non dichiarata>"
+            continue
+        if isinstance(v, str) and len(v) > _MAX_VALORE:
+            out[k] = v[:_MAX_VALORE] + f"…(+{len(v) - _MAX_VALORE} caratteri troncati)"
+        else:
+            out[k] = v
+    return out
+
+
 def audit(event: dict[str, Any]) -> None:
     """Append evento al log JSONL. Non solleva mai eccezioni — ma non è più MUTO."""
     global _write_failures, _last_error, _last_failure_ts, _next_prune_at
@@ -111,7 +164,7 @@ def audit(event: dict[str, Any]) -> None:
         s = _settings()
         path = Path(s.audit_log_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        record = {"ts": now, **event}
+        record = {"ts": now, **_redigi(event)}
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as exc:  # noqa: BLE001 — mai bloccare la response per un audit fail
