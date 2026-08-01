@@ -1163,12 +1163,62 @@ def render_unit(text: str, repo: Path) -> str:
     la CLI è invocata (VPS1777_HOME nelle unit), non un /home/<user>/vps1777
     presunto — così vale anche per un repo fuori dalla home.
 
-    Logica pura (testabile): text in, text out."""
-    try:
-        pw = pwd.getpwuid(os.getuid())
-        user, home = pw.pw_name, pw.pw_dir
-    except KeyError:  # uid senza voce passwd: non azzardare, lascia i default
-        user, home = "vps1777", "/home/vps1777"
+    🔴 H55 (01/08) — «CHI ESEGUE L'UPDATE È L'OPERATORE STESSO» ERA UN'ASSUNZIONE.
+    La riga sopra lo dice come un vincolo, ma niente impediva a root di lanciare la
+    CLI: `getpwuid(getuid())` restituisce chi lancia, quindi **un install eseguito
+    da root rendeva le unit con `User=root`** — l'updater automatico con i privilegi
+    pieni della macchina, a ogni avvio, per sempre. E in silenzio.
+
+    Il registro attribuiva il fatto (file `root:root`) a «la unit gira come root»,
+    che nel repo NON era vero: le unit portano `@OPERATOR_USER@`. Il meccanismo vero
+    è questa riga, trovato da @abdd732a; il fatto restava, la causa no.
+
+    ⭐ La policy non è nuova e non l'abbiamo decisa noi: `installer/engine.py:30` la
+    fissa già — `OPERATOR_USER = "vps1777"`. Era scritta in UN installer su tre,
+    mentre gli altri due la deducevano da chi digitava il comando. Qui non si
+    inventa una regola: si applica dove mancava.
+
+    ⚠️ Lo stesso difetto vive in `setup.sh:270` (`sed` con `$(id -un)`), in bash —
+    quindi non si trova cercando `getuid`. È curato là con lo STESSO messaggio,
+    concordato prima di scriverlo perché due testi diversi per un difetto solo si
+    leggono come due difetti.
+
+    Logica pura (testabile): text in, text out — il rifiuto è l'unica eccezione, e
+    riguarda la configurazione, non il testo."""
+    # `OPERATOR_USER` è la via d'uscita, e NON è inventata qui: `deploy.sh:218` la
+    # usa già (`OPERATOR_USER="${OPERATOR_USER:-vps1777}"`). Chi installa da root
+    # dice chi è l'operatore; chi installa come operatore non cambia niente.
+    forzato = os.environ.get("OPERATOR_USER", "").strip()
+    if forzato:
+        try:
+            pw = pwd.getpwnam(forzato)
+            user, home = pw.pw_name, pw.pw_dir
+        except KeyError:
+            # l'utente dichiarato non esiste ancora sulla macchina: non invento la
+            # home, uso la convenzione degli altri installer e lo dico nel testo.
+            user, home = forzato, f"/home/{forzato}"
+    else:
+        try:
+            pw = pwd.getpwuid(os.getuid())
+            user, home = pw.pw_name, pw.pw_dir
+        except KeyError:  # uid senza voce passwd: non azzardare, lascia i default
+            user, home = "vps1777", "/home/vps1777"
+
+    if user == "root":
+        raise SystemExit(
+            "🔴 le unit systemd verrebbero installate con User=root.\n"
+            "\n"
+            "   L'operatore di vps1777 NON è chi lancia l'installer: è un utente\n"
+            "   dedicato e non privilegiato (installer/engine.py lo fissa a «vps1777»).\n"
+            "   Renderizzare le unit come root darebbe all'updater automatico i\n"
+            "   privilegi pieni della macchina, a ogni avvio, per sempre.\n"
+            "\n"
+            "   Dimmi chi è l'operatore e riprovo:\n"
+            "       OPERATOR_USER=vps1777 <il comando che hai lanciato>\n"
+            "\n"
+            "   Oppure lancia l'installer come quell'utente, senza sudo.\n"
+        )
+
     return (text
             .replace("@OPERATOR_USER@", user)
             .replace("@OPERATOR_HOME@", home)

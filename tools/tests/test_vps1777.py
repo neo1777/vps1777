@@ -13,6 +13,8 @@ import pwd
 import tempfile
 from pathlib import Path
 
+import pytest   # usato dai casi H55: `pytest.raises` sul rifiuto da root
+
 _ROOT = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("vps1777_cli", _ROOT / "tools" / "vps1777.py")
 v = importlib.util.module_from_spec(_spec)
@@ -104,6 +106,82 @@ def test_render_unit_substitutes_all_placeholders():
 def test_render_unit_idempotent_on_placeholderless_text():
     plain = "[Timer]\nOnCalendar=daily\nPersistent=true\n"
     assert v.render_unit(plain, Path("/opt/vps1777")) == plain
+
+
+# ─────────────────────── H55: l'operatore NON è chi lancia ──────────────────
+# 🔴 IL DIFETTO (01/08): `render_unit` deduceva l'utente da `getpwuid(getuid())`.
+#   Un install lanciato da root rendeva le unit con `User=root` — l'updater
+#   automatico con i privilegi pieni della macchina, a ogni avvio, e in silenzio.
+#   Il registro attribuiva il fatto a «la unit gira come root», che nel repo non
+#   era vero: le unit portano `@OPERATOR_USER@`. Il fatto reggeva, la causa no.
+# ⭐ La policy esisteva già in UN installer su tre (`installer/engine.py:30`,
+#   `OPERATOR_USER = "vps1777"`): qui non se ne inventa una, si applica dove
+#   mancava. La via d'uscita `OPERATOR_USER` è quella che `deploy.sh:218` usa già.
+# ⚠️ I test NON cambiano uid (non si può, e non si deve): sostituiscono `getuid`
+#   e `getpwuid` nel modulo. È un doppio dello STATO del sistema, non della
+#   funzione che si prova — la logica sotto esame resta quella vera.
+
+class _Pw:
+    def __init__(self, name, home):
+        self.pw_name, self.pw_dir = name, home
+
+
+def test_render_unit_rifiuta_root_e_dice_come_uscirne(monkeypatch):
+    """Il caso che il difetto produceva in silenzio: install da root."""
+    monkeypatch.delenv("OPERATOR_USER", raising=False)
+    monkeypatch.setattr(v.os, "getuid", lambda: 0)
+    monkeypatch.setattr(v.pwd, "getpwuid", lambda _uid: _Pw("root", "/root"))
+
+    with pytest.raises(SystemExit) as e:
+        v.render_unit("User=@OPERATOR_USER@\n", Path("/opt/vps1777"))
+
+    msg = str(e.value)
+    # non basta che rifiuti: deve dire COSA succederebbe, PERCHÉ, e il COMANDO.
+    # Un rifiuto senza via d'uscita viene aggirato, e allora non protegge più.
+    assert "User=root" in msg
+    assert "OPERATOR_USER=vps1777" in msg, "manca il comando da incollare"
+    assert "senza sudo" in msg, "manca la seconda strada"
+
+
+def test_render_unit_da_root_con_operator_user_dichiarato(monkeypatch):
+    """La via d'uscita deve FUNZIONARE, o il rifiuto è solo un muro."""
+    monkeypatch.setenv("OPERATOR_USER", "vps1777")
+    monkeypatch.setattr(v.os, "getuid", lambda: 0)
+    monkeypatch.setattr(v.pwd, "getpwuid", lambda _uid: _Pw("root", "/root"))
+    monkeypatch.setattr(v.pwd, "getpwnam", lambda n: _Pw(n, f"/home/{n}"))
+
+    out = v.render_unit("User=@OPERATOR_USER@\nHome=@OPERATOR_HOME@\n",
+                        Path("/opt/vps1777"))
+    assert "User=vps1777" in out
+    assert "Home=/home/vps1777" in out
+    assert "root" not in out
+
+
+def test_render_unit_operator_user_inesistente_non_inventa_la_home(monkeypatch):
+    """L'utente dichiarato può non esistere ANCORA sulla macchina: si usa la
+    convenzione degli altri installer invece di fallire o di indovinare."""
+    monkeypatch.setenv("OPERATOR_USER", "nuovo1777")
+    monkeypatch.setattr(v.os, "getuid", lambda: 0)
+    monkeypatch.setattr(v.pwd, "getpwnam", _kaboom)
+
+    out = v.render_unit("User=@OPERATOR_USER@\nHome=@OPERATOR_HOME@\n",
+                        Path("/opt/vps1777"))
+    assert "User=nuovo1777" in out and "Home=/home/nuovo1777" in out
+
+
+def test_render_unit_non_root_resta_come_prima(monkeypatch):
+    """CONTROPROVA: il fix non deve cambiare il percorso normale — un presidio
+    che rompe il caso legittimo si finisce per disattivarlo."""
+    monkeypatch.delenv("OPERATOR_USER", raising=False)
+    monkeypatch.setattr(v.os, "getuid", lambda: 1000)
+    monkeypatch.setattr(v.pwd, "getpwuid", lambda _uid: _Pw("operatore", "/home/operatore"))
+
+    out = v.render_unit("User=@OPERATOR_USER@\n", Path("/opt/vps1777"))
+    assert out == "User=operatore\n"
+
+
+def _kaboom(_n):
+    raise KeyError("utente non ancora creato")
 
 
 # ─────────────────────────────── H37: secret policy ────────────────────────
