@@ -157,16 +157,38 @@ def test_render_unit_da_root_con_operator_user_dichiarato(monkeypatch):
     assert "root" not in out
 
 
-def test_render_unit_operator_user_inesistente_non_inventa_la_home(monkeypatch):
-    """L'utente dichiarato può non esistere ANCORA sulla macchina: si usa la
-    convenzione degli altri installer invece di fallire o di indovinare."""
+def test_render_unit_operator_user_inesistente_SI_FERMA(monkeypatch):
+    """🔺 QUESTO CASO È STATO ROVESCIATO IL 01/08, ed è la storia che vale.
+
+    Prima verificava l'opposto — «non inventa la home, usa la convenzione degli
+    altri installer» — e passava. Il codice sotto accettava un utente inesistente
+    e lo scriveva nelle unit, motivato con «potrebbe non esistere ANCORA».
+
+    ⭐ In astratto regge. Applicato a una macchina VIVA no: systemd rifiuta una
+    unit con un utente che non sa risolvere («Failed to determine user
+    credentials») e il servizio NON PARTE. Un difetto di privilegi sarebbe
+    diventato un'INTERRUZIONE — e con `User=root` il servizio, male, funziona.
+
+    Trovato da @abdd732a mentre il comando era già nella casella di Neo, sulla
+    cui macchina le quattro unit giravano davvero come root. Il test vecchio non
+    era sbagliato: rispondeva alla domanda giusta in un mondo in cui l'installer
+    crea l'utente DOPO. Negli installer veri lo crea PRIMA (engine.py:306-314,
+    unit a :583+) ⇒ se non esiste, qualcosa è già fuori posto e fermarsi è la
+    risposta.
+    🔑 Un test che passa non dice che il comportamento sia GIUSTO: dice che è
+    QUELLO CHE VOLEVAMO quando l'abbiamo scritto. Quando cambia il mondo attorno,
+    va rovesciato — e la traccia di com'era resta qui, o la prossima lo riscrive."""
     monkeypatch.setenv("OPERATOR_USER", "nuovo1777")
     monkeypatch.setattr(v.os, "getuid", lambda: 0)
     monkeypatch.setattr(v.pwd, "getpwnam", _kaboom)
 
-    out = v.render_unit("User=@OPERATOR_USER@\nHome=@OPERATOR_HOME@\n",
-                        Path("/opt/vps1777"))
-    assert "User=nuovo1777" in out and "Home=/home/nuovo1777" in out
+    with pytest.raises(SystemExit) as e:
+        v.render_unit("User=@OPERATOR_USER@\n", Path("/opt/vps1777"))
+
+    msg = str(e.value)
+    assert "nuovo1777" in msg, "deve dire QUALE utente manca"
+    assert "useradd" in msg, "deve dare il comando per crearlo, o è solo un muro"
+    assert "non partirebbero" in msg, "deve dire COSA succederebbe, non «errore»"
 
 
 @pytest.mark.parametrize("valore", ["", "   ", "\t\n"])

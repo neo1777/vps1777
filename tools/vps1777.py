@@ -1194,9 +1194,33 @@ def render_unit(text: str, repo: Path) -> str:
             pw = pwd.getpwnam(forzato)
             user, home = pw.pw_name, pw.pw_dir
         except KeyError:
-            # l'utente dichiarato non esiste ancora sulla macchina: non invento la
-            # home, uso la convenzione degli altri installer e lo dico nel testo.
-            user, home = forzato, f"/home/{forzato}"
+            # 🔴 PRIMA QUI SI ACCETTAVA E SI SCRIVEVA `user, home = forzato,
+            #   f"/home/{forzato}"`, motivato con «l'utente potrebbe non esistere
+            #   ANCORA». In astratto regge; applicato a una macchina VIVA no:
+            #   systemd rifiuta una unit con un utente inesistente
+            #   («Failed to determine user credentials») e il servizio NON PARTE.
+            #   ⇒ un difetto di sicurezza sarebbe diventato un'interruzione.
+            #   Trovato da @abdd732a il 01/08, PRIMA che il comando arrivasse alla
+            #   macchina di Neo — dove le quattro unit giravano davvero come root.
+            # ⭐ E non c'è un caso legittimo da salvare: negli installer l'utente
+            #   si crea PRIMA (installer/engine.py: useradd :306-314, unit :583+).
+            #   Se non esiste quando si rendono le unit, qualcosa è già fuori posto.
+            raise SystemExit(
+                f"🔴 OPERATOR_USER=«{forzato}» non esiste su questa macchina.\n"
+                "\n"
+                "   Le unit verrebbero installate con un utente che systemd non sa\n"
+                "   risolvere: non partirebbero più («Failed to determine user\n"
+                "   credentials»), e un problema di privilegi diventerebbe\n"
+                "   un'interruzione del servizio.\n"
+                "\n"
+                "   Crea l'operatore PRIMA — con la home, il repo e i permessi:\n"
+                f"       sudo useradd -m -s /bin/bash {forzato}\n"
+                f"       sudo usermod -aG docker,sudo {forzato}\n"
+                f"       sudo chown -R {forzato}:{forzato} <la cartella del repo>\n"
+                "   (è quello che fa `installer/engine.py:306-322`, in un colpo solo)\n"
+                "\n"
+                "   Oppure indica un utente che esiste già:  id <nome>\n"
+            )
     else:
         try:
             pw = pwd.getpwuid(os.getuid())
