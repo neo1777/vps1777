@@ -283,6 +283,49 @@ rm -f secrets/ts_authkey.txt"
   printf '%s\n' "$APPLY_SCRIPT" | SSH "sudo -u $OPERATOR_USER bash -s" || die "Scrittura secret/.env fallita"
   ok "Secret + .env aggiornati (.env 600, dir sensibili 700)"
 
+  # La conferma che il Funnel PORTA I BYTE, chiesta da questo PC (02/08, abdd732a).
+  # Modellata su `installer/engine.py:_funnel_confermato_da_qui`, e con le sue due scelte:
+  # 📌 conta QUALUNQUE risposta HTTP, 401 e 404 compresi — il gateway ha l'autenticazione
+  #   e su `/` risponde legittimamente 401. Si sta provando che il tunnel porta i byte fin
+  #   lì, non che l'app dica sì: contare solo i 200 sarebbe un falso rosso garantito, e un
+  #   controllo che grida al lupo viene spento.
+  # 📌 due tentativi, perché il cert appena emesso può non essere ancora servito.
+  # ⚠️ Se `python3` non c'è su QUESTO PC non invento un verde: dico che non ho potuto
+  #   misurare e il chiamante applica il fallback. «Non ho guardato» non è «va bene».
+  FUNNEL_PERCHE=""
+  funnel_confermato_da_qui() {
+    local url="$1" n out
+    [ -n "$url" ] || { FUNNEL_PERCHE="nessun URL pubblico da interrogare"; return 1; }
+    if ! command -v python3 >/dev/null 2>&1; then
+      FUNNEL_PERCHE="python3 non è installato su questo PC: NON ho potuto misurare (non è un ok)"
+      return 1
+    fi
+    for n in 1 2; do
+      [ "$n" -eq 2 ] && sleep 3
+      out="$(python3 - "$url" <<'PY' 2>/dev/null
+import sys, urllib.request, urllib.error
+url = sys.argv[1]
+try:
+    req = urllib.request.Request(url, method="GET",
+                                 headers={"User-Agent": "vps1777-deploy"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        print("OK HTTP %s" % r.status)
+except urllib.error.HTTPError as e:
+    # una risposta c'è: il tunnel porta i byte, ed è tutto ciò che qui serve
+    print("OK HTTP %s (una risposta e' arrivata: il tunnel porta i byte)" % e.code)
+except Exception as e:
+    print("KO %s: %s" % (type(e).__name__, str(e)[:100]))
+PY
+)"
+      case "$out" in
+        OK*) FUNNEL_PERCHE="${out#OK }"; return 0 ;;
+        *)   FUNNEL_PERCHE="${out#KO }" ;;
+      esac
+    done
+    [ -n "$FUNNEL_PERCHE" ] || FUNNEL_PERCHE="nessuna risposta"
+    return 1
+  }
+
   # 2. Tailscale SULL'HOST: install + up + serve + funnel (no sidecar container).
   if [ -n "$TS_KEY" ]; then
     log "Attivo Tailscale sull'host + Funnel..."
@@ -296,7 +339,30 @@ rm -f secrets/ts_authkey.txt"
       SSH "tailscale serve reset" >/dev/null 2>&1 || true
       SSH "tailscale funnel --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
       SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
-      ok "Funnel HTTPS attivo: $TS_URL"
+      # 🔴 IL DIFETTO CHE CHIUDE (02/08). Le tre righe qui sopra hanno `|| true` e
+      #   l'output scartato: se l'ACL del tailnet non ha il nodeAttr `funnel` (o HTTPS
+      #   Certificates è spento) falliscono in silenzio. Prima di qui si stampava
+      #   «✓ Funnel HTTPS attivo» avendo verificato SOLO che il nodo fosse entrato nel
+      #   tailnet — che è un'altra cosa. E costava l'accesso: il gateway resta su
+      #   127.0.0.1:8080 (GATEWAY_BIND), quindi l'utente restava senza HTTPS **e**
+      #   senza fallback, con un verde a schermo.
+      # ⭐ È LO STESSO DIFETTO curato in `installer/engine.py` (90fd647) tre ore fa, e
+      #   qui era sopravvissuto perché la cura è stata cercata con la chiave `engine.py`:
+      #   `deploy.sh` è l'ALTRO percorso di installazione dello stesso prodotto.
+      # 🔑 La conferma la può dare solo una richiesta che ESCE, e questo script gira sul
+      #   PC dell'utente (riga 4) — cioè è già dalla parte giusta della rete: la stessa
+      #   richiesta che farà lui domani dal browser.
+      if funnel_confermato_da_qui "$TS_URL"; then
+        ok "Funnel HTTPS attivo (confermato da questo PC): $TS_URL"
+      else
+        warn "Funnel CONFIGURATO sulla VPS ma NON raggiungibile da qui: $FUNNEL_PERCHE"
+        warn "  → la macchina lo dichiara attivo; una richiesta da questo PC non arriva."
+        warn "  → NON chiudo la porta 8080: resta il fallback finché non risponde davvero."
+        warn "  → se il certificato è appena stato emesso può servire qualche minuto."
+        warn "  → controlla: login.tailscale.com/admin/dns (MagicDNS + HTTPS) e"
+        warn "    Access Controls (nodeAttr «funnel»), poi riapri $TS_URL."
+        TS_FALLBACK=1
+      fi
       [ -z "$PUB" ] && PUB="$TS_URL"
       ts_wipe_authkey   # up riuscito: la key monouso non serve più (H15)
     else
@@ -310,8 +376,22 @@ rm -f secrets/ts_authkey.txt"
     ok "PUBLIC_BASE=$PUB"
   fi
 
+  # 3-bis. IL FALLBACK, e senza questo il fix sopra sarebbe solo un messaggio più onesto.
+  # Il commento del punto 4 dice «la porta pubblica :8080 si chiude da sé» — ed è vero,
+  # perché `GATEWAY_BIND` sta a `127.0.0.1` per default (.env.example:91) e questo script
+  # non lo assegna mai. Va bene QUANDO il Funnel risponde; quando non risponde chiude
+  # l'ultima via d'accesso a una macchina che l'utente non sa raggiungere altrimenti —
+  # e il prodotto gli promette «niente shell sulla VPS» (README:20), quindi «entra in SSH
+  # e sistema» non è un rimedio ammesso: sarebbe chiedergli ciò che gli abbiamo detto che
+  # non serviva.
+  if [ "${TS_FALLBACK:-0}" = "1" ]; then
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^GATEWAY_BIND= .env && sed -i \"s|^GATEWAY_BIND=.*|GATEWAY_BIND=0.0.0.0|\" .env || echo GATEWAY_BIND=0.0.0.0 >> .env)'" \
+      && warn "Apro la porta 8080 (HTTP) come fallback: il Funnel non ha risposto." \
+      || warn "NON sono riuscito ad aprire il fallback :8080 — la VPS può restare irraggiungibile."
+  fi
+
   # 4. Restart servizi. Per tailscale il gateway resta su 127.0.0.1:8080
-  #    (GATEWAY_BIND), quindi la porta pubblica :8080 si chiude da sé.
+  #    (GATEWAY_BIND) SE il Funnel ha risposto; altrimenti il punto 3-bis l'ha aperta.
   log "Riavvio i servizi..."
   SSHT "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d'" || die "restart fallito"
   ok "Servizi riavviati"
