@@ -11,7 +11,17 @@
 # Requisiti host: docker, age, tar.
 #
 # Usa la chiave age da `tools/age-recipients.txt` (una riga = un recipient).
-# Se non esiste, fa age-keygen e crea uno solo.
+# Se non esiste, SI FERMA e ti dice come generare la coppia SUL TUO PC (H5).
+# 🔴 NIENTE auto-keygen qui: generare la chiave sulla VPS metterebbe la PRIVATA
+#    sullo stesso disco dei backup, e la cifratura non proteggerebbe più da furto
+#    o perdita del disco — cioè dalla cosa per cui la si sta usando.
+#    Il codice che lo impedisce è alle righe 93-102, con le istruzioni.
+#
+# ⚠️ Fino al 01/08 queste due righe dicevano il contrario — «Se non esiste, fa
+#    age-keygen e crea uno solo» — che era vero PRIMA del fix di H5 e non è mai
+#    stato aggiornato. Un header che promette proprio il gesto che il corpo del
+#    file vieta per sicurezza: chi legge solo l'intestazione conclude che lo
+#    script se la cava da solo, e sulla VPS è esattamente ciò che non deve fare.
 #
 # Uso:
 #   bash tools/backup.sh                 backup nuovo + ritenzione
