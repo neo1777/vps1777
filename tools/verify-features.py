@@ -133,15 +133,24 @@ def run_check(spec: dict, repo: Path) -> tuple[bool, str]:
         return hit, f"profilo {arg['profile']} {'dichiarato' if hit else 'ASSENTE'} in {arg['file']}"
 
     if kind == "mcp_tool":
-        # il tool è registrato se il file del server ha @mcp.tool poi def <name>
+        # il tool è registrato se una `def <name>` porta il decoratore `@…​.tool`
         svc = repo / "services" / arg["service"] / "app"
         if not svc.exists():
             return False, f"servizio MANCA: {arg['service']}"
         want = arg["name"]
+        rotti = []
         for f in svc.rglob("*.py"):
-            txt = f.read_text(errors="replace")
-            if re.search(r"@mcp\.tool[\s\S]{0,200}?def\s+" + re.escape(want) + r"\b", txt):
-                return True, f"tool MCP {arg['service']}/{want} registrato"
+            esito = _tool_mcp_definito(f, want)
+            if esito is None:
+                rotti.append(f.name)
+            elif esito:
+                return True, (f"tool MCP {arg['service']}/{want} registrato "
+                              "(albero sintattico, non testo)")
+        if rotti:
+            # un file che non compila non è «il tool non c'è»: è «non ho potuto guardare».
+            return False, (f"tool MCP {arg['service']}/{want} non trovato, MA "
+                           f"{len(rotti)} file NON COMPILANO ({', '.join(rotti[:3])}): "
+                           "questo esito non distingue «assente» da «illeggibile»")
         return False, f"tool MCP {arg['service']}/{want} NON registrato"
 
     if kind == "cmd":
@@ -149,6 +158,41 @@ def run_check(spec: dict, repo: Path) -> tuple[bool, str]:
         return r.returncode == 0, f"`{arg}` exit {r.returncode}"
 
     return False, f"tipo di verify sconosciuto: {kind}"
+
+
+# 🔴 PERCHÉ QUESTA FUNZIONE ESISTE (b82df434, 02/08 — rilievo di `abdd732a`, referto
+#   di un suo agente, verificato da me con una controprova prima di toccare).
+#   Il matcher era una REGEX: `@mcp\.tool[\s\S]{0,200}?def\s+<nome>`. Misurato:
+#     · codice interamente COMMENTATO   → PASSA
+#     · dentro una DOCSTRING            → PASSA
+#   E copre **47 delle 67 feature attive**: il 70% del verso anti-perdita del ledger
+#   era una ricerca testuale su un file, cioè la stessa classe che stamattina avevo
+#   curato per `file_contains` introducendo `python_def` — e non avevo guardato qui.
+# ⭐ La cura era già in casa, scritta da me otto ore prima, e le 47 voci più importanti
+#   non la usavano. *Curare una classe su un tipo e non cercarla sugli altri è il modo
+#   in cui un difetto sopravvive a chi lo conosce.*
+# 📌 COSA ACCETTA, dichiarato: una `def`/`async def` col nome giusto che porti un
+#   decoratore `<qualcosa>.tool` (con o senza chiamata). Misurato sul repo: tutte e 47
+#   le occorrenze sono `@mcp.tool()` su `mcp = FastMCP`. Non vincolo il nome
+#   dell'oggetto a «mcp» di proposito — una rinomina del server non deve fingere
+#   che 47 tool siano spariti.
+# ⚠️ COSA NON PROVA: che il tool sia RAGGIUNGIBILE a runtime, che il servizio parta,
+#   che il file sia importato. Prova che è DEFINITO e DECORATO.
+def _tool_mcp_definito(path: Path, want: str) -> bool | None:
+    """True/False se il tool è definito+decorato. **None se il file non compila** —
+    e la distinzione è il punto: «non ho potuto guardare» non è «non c'è»."""
+    try:
+        albero = ast.parse(path.read_text(errors="replace"))
+    except SyntaxError:
+        return None
+    for n in ast.walk(albero):
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) or n.name != want:
+            continue
+        for d in n.decorator_list:
+            f = d.func if isinstance(d, ast.Call) else d      # @x.tool  e  @x.tool()
+            if isinstance(f, ast.Attribute) and f.attr == "tool":
+                return True
+    return False
 
 
 # ── enumeratori del REALE (per il verso reale→dichiarato) ─────────────────────
@@ -199,8 +243,21 @@ def enum_reality(repo: Path) -> dict[str, set[str]]:
                 if part == "services" and i + 1 < len(f.parts):
                     service = f.parts[i + 1]
                     break
-            for m in re.finditer(r"@mcp\.tool[\s\S]{0,200}?def\s+(\w+)", f.read_text(errors="replace")):
-                real["mcp_tool"].add(f"{service}/{m.group(1)}")
+            # stesso criterio del verso opposto: albero sintattico, non regex.
+            # Se il file non compila NON si enumera nulla da lì — e il verso
+            # dichiarato→reale lo dirà, invece di far sparire i tool in silenzio.
+            try:
+                albero = ast.parse(f.read_text(errors="replace"))
+            except SyntaxError:
+                continue
+            for n in ast.walk(albero):
+                if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                for d in n.decorator_list:
+                    fn = d.func if isinstance(d, ast.Call) else d
+                    if isinstance(fn, ast.Attribute) and fn.attr == "tool":
+                        real["mcp_tool"].add(f"{service}/{n.name}")
+                        break
 
     sysd = repo / "systemd"
     if sysd.exists():
