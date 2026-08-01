@@ -169,6 +169,24 @@ def test_render_unit_operator_user_inesistente_non_inventa_la_home(monkeypatch):
     assert "User=nuovo1777" in out and "Home=/home/nuovo1777" in out
 
 
+@pytest.mark.parametrize("valore", ["", "   ", "\t\n"])
+def test_render_unit_operator_user_vuoto_non_e_una_dichiarazione(monkeypatch, valore):
+    """`OPERATOR_USER=""` NON deve valere come «te l'ho detto».
+
+    ⭐ Caso trovato da @abdd732a sul pezzo bash (`4cc25eb`): là sarebbe passato con
+    un utente VUOTO — cioè `User=` nella unit, che systemd rifiuta o interpreta a
+    modo suo. Il ramo python è protetto da uno `.strip()` + test di verità, ma
+    **non aveva un caso che lo provasse**: una riscrittura che toglie lo `.strip()`
+    non farebbe fallire niente. Il test esiste perché il buco è stato trovato
+    ALTROVE — la stessa regola in due linguaggi si controlla in due posti."""
+    monkeypatch.setenv("OPERATOR_USER", valore)
+    monkeypatch.setattr(v.os, "getuid", lambda: 0)
+    monkeypatch.setattr(v.pwd, "getpwuid", lambda _uid: _Pw("root", "/root"))
+
+    with pytest.raises(SystemExit):
+        v.render_unit("User=@OPERATOR_USER@\n", Path("/opt/vps1777"))
+
+
 def test_render_unit_non_root_resta_come_prima(monkeypatch):
     """CONTROPROVA: il fix non deve cambiare il percorso normale — un presidio
     che rompe il caso legittimo si finisce per disattivarlo."""

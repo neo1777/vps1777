@@ -1703,6 +1703,31 @@ findings:
       lanciato come utente del servizio, che è il modo naturale — non può più
       riscriverlo. Sulla VPS il file era di root dalle 01:57.
 
+      🔺 CORREZIONE DELLA CAUSA — 01/08. Il FATTO regge (il file era di root, misurato).
+      La causa scritta qui sopra NO: nessuna unit di questo repo dice `User=root`.
+      Tutte e quattro portano `User=@OPERATOR_USER@`, e `git log --all -S "User=root"
+      -- systemd/` è vuoto — vuoto PER COSTRUZIONE, perché il valore vero nasce al
+      rendering, sulla macchina. Cercarlo nel repo non poteva rispondere, e lo zero
+      era indistinguibile da un «non è mai successo».
+      LA CAUSA VERA, trovata da abdd732a: `render_unit` NON fissava l'utente, lo
+      EREDITAVA da chi lanciava l'installer (`tools/vps1777.py`, `getpwuid(getuid())`,
+      e `setup.sh:270` con `sed "$(id -un)"`). Un install eseguito da root — che è il
+      modo naturale, visto che scrivere in /etc/systemd/system richiede sudo —
+      produceva unit `User=root`. Il terzo installer non aveva il difetto:
+      `installer/engine.py:30` fissa `OPERATOR_USER = "vps1777"` da sempre.
+      ⇒ la stessa regola viveva in tre posti e in due linguaggi, e due su tre
+      sbagliavano nello stesso modo.
+      CURATO il 01/08: entrambi i percorsi rifiutano quando l'utente risolto è root,
+      con lo stesso messaggio e la stessa via d'uscita (`OPERATOR_USER=<nome>`, l'env
+      che `deploy.sh:218` usa già). Python: `b06b4cf`, 4 casi + 3 sul valore vuoto.
+      Bash: `4cc25eb` (abdd732a), 4 casi.
+      ⚠️ NON RIPARA le unit già installate su una macchina viva: se là
+      `/etc/systemd/system/vps1777-*.service` dice `User=root`, va corretto là.
+      Verifica: `grep -H "^User=" /etc/systemd/system/vps1777-*.service`.
+      ⭐ Perché questa correzione conta più del fix: un rilievo con la causa sbagliata
+      manda chi lo legge a de-privilegiare una unit che nel repo è già de-privilegiata,
+      e il difetto vero resta scoperto MENTRE il registro dice che lo stiamo guardando.
+
       PERCHÉ È UNA CLASSE E NON UN INCIDENTE: `update_progress.json` e
       `update_status.json` sono ciò che i pannelli LEGGONO per disegnare la barra di
       avanzamento e il badge «aggiornamento disponibile». Non servono a fare l'update:
