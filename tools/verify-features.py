@@ -44,6 +44,14 @@ except ImportError:
 
 REQUIRED = ("id", "nome", "cosa", "dove", "status", "verify")
 STATUSES = ("active-default", "opt-in", "deferred", "removed")
+# 🔴 CATEGORIE ENTRATE NELL'ENUMERAZIONE DOPO CHE `baseline_completo` ERA GIÀ `true`.
+#   Il flag non è una proprietà del ledger: è una proprietà **delle categorie che
+#   `enum_reality` guardava QUANDO è stato messo a true**. Aggiungerne una senza dirlo
+#   trasformerebbe la sua promessa («tutto ciò che esiste è dichiarato») in una bugia
+#   retroattiva, e lo farebbe con 20 fallimenti duri in un colpo.
+# ⭐ Quindi ogni categoria nuova ha la SUA semina: segnalata, non fatale, finché le sue
+#   voci non sono scritte. Poi si toglie da qui — e da quel momento è dura come le altre.
+CATEGORIE_IN_SEMINA = {"tools_script"}
 # gli status che DEVONO essere reali adesso (il verso dichiarato→reale li controlla).
 # 'deferred' e 'removed' NON si controllano contro il reale: il primo non c'è ANCORA,
 # il secondo non c'è PIÙ di proposito — la loro assenza è corretta, non un guasto.
@@ -147,7 +155,39 @@ def run_check(spec: dict, repo: Path) -> tuple[bool, str]:
 def enum_reality(repo: Path) -> dict[str, set[str]]:
     """Cosa ESISTE davvero nel repo, per categoria. Ogni chiave qui DEVE trovare una
     voce nel ledger, o il verso reale→dichiarato segnala/fallisce."""
-    real: dict[str, set[str]] = {"mcp_tool": set(), "systemd_unit": set(), "compose_profile": set()}
+    real: dict[str, set[str]] = {"mcp_tool": set(), "systemd_unit": set(),
+                                 "compose_profile": set(), "tools_script": set()}
+
+    # ── tools_script ──────────────────────────────────────────────────────────
+    # 🔴 PERCHÉ QUESTA CATEGORIA ESISTE (b82df434, 02/08/2026 00:0x).
+    #   Il verso reale→dichiarato enumerava TRE categorie. Tutto `tools/` era fuori
+    #   dall'insieme che guarda — quindi il ledger anti-amnesia, il cui scopo scritto
+    #   è «che vps1777 non perda MAI una funzione», su quel piano dava verde **senza
+    #   aver guardato**. Misurato: 20 script su 24 mai nominati nel ledger.
+    # ⭐ E si vede da cosa è stato trovato: `tools/collaudo-quadratura.py` contiene la
+    #   sonda che un audit del round-12 proponeva come «cosa che ci manca». Non manca:
+    #   c'è, e non la invoca nessuno. Il presidio che doveva accorgersene non guardava lì.
+    # ⚠️ COSA NON PROVA, e va detto perché è la stessa classe che sto curando:
+    #   · NON prova che lo script sia INVOCATO da qualcuno (è la domanda vera, e questa
+    #     enumerazione non la risponde: dice solo «esiste e il ledger lo nomina o no»);
+    #   · NON prova che serva, che funzioni, o che sia raggiungibile a runtime.
+    #   ⇒ è un inventario, non un collaudo. Chiamarlo altrimenti sarebbe rifare il difetto.
+    # 📌 L'insieme è `git ls-files`, non un glob del disco: stesso criterio dello
+    #   shellcheck in CI (`mapfile -t SCRIPTS < <(git ls-files '*.sh')`), così un file
+    #   non tracciato non entra e un file tracciato non può sfuggire.
+    try:
+        tracciati = subprocess.run(
+            ["git", "-C", str(repo), "ls-files",
+             "tools/*.sh", "tools/*.py", "tools/prove-empiriche/*.sh"],
+            capture_output=True, text=True, check=True, timeout=30).stdout.split("\n")
+    except (subprocess.SubprocessError, OSError):
+        # git assente o non è un repo: NON fingo un insieme vuoto — un set vuoto qui
+        # direbbe «nessuno script non dichiarato», che è esattamente il verde-senza-
+        # aver-guardato. Lascio la categoria fuori: il referto dirà che manca.
+        del real["tools_script"]
+    else:
+        real["tools_script"] = {r for r in (x.strip() for x in tracciati) if r}
+
 
     svc = repo / "services"
     if svc.exists():
@@ -181,7 +221,8 @@ def _keys_of(e: dict) -> dict[str, set[str]]:
     verify `manual` — es. un `removed` — di risultare comunque DICHIARATA per la sua
     coordinata (il buco fine trovato da setaccio: un profilo removed con verify manual
     veniva dato per non-dichiarato)."""
-    k: dict[str, set[str]] = {"mcp_tool": set(), "systemd_unit": set(), "compose_profile": set()}
+    k: dict[str, set[str]] = {"mcp_tool": set(), "systemd_unit": set(),
+                              "compose_profile": set(), "tools_script": set()}
     for spec in (e.get("verify"), (e.get("follow_up") or {}).get("verify")):
         if isinstance(spec, dict):
             if "mcp_tool" in spec:
@@ -198,6 +239,11 @@ def _keys_of(e: dict) -> dict[str, set[str]]:
             k["mcp_tool"].add(d.split(":", 1)[1])
         elif d.startswith("systemd:"):
             k["systemd_unit"].add(d.split(":", 1)[1])
+        # tools_script: il `dove` è già il percorso nudo (`tools/backup.sh`) — nessun
+        # prefisso nuovo da imparare, e le voci che lo citano risultano dichiarate
+        # senza toccarle. È il motivo per cui la semina parte già non-vuota.
+        elif d.startswith("tools/"):
+            k["tools_script"].add(d.split("#", 1)[0].split(":", 1)[0].strip())
     return k
 
 
@@ -271,11 +317,18 @@ def main() -> int:
             if e.get("status") == "removed":
                 removed_keys[c] |= keys[c]
     for cat in real:
+        # una categoria in semina è NUOVA per l'enumerazione: `baseline_completo` non
+        # parlava di lei, quindi non può renderla fatale senza mentire su cosa prometteva.
+        in_semina = cat in CATEGORIE_IN_SEMINA
         for u in sorted(real[cat]):
             if u not in accounted[cat]:
                 msg = f"[NON DICHIARATO] {cat} '{u}' esiste nel codice ma NON è nel ledger"
-                (hard_fail if baseline_completo else surveil).append(
-                    msg + ("" if baseline_completo else " (semina in corso: segnalato, non-fatale)"))
+                if in_semina:
+                    surveil.append(msg + f" (categoria '{cat}' in semina: segnalato, "
+                                         "non-fatale finché le sue voci non sono scritte)")
+                else:
+                    (hard_fail if baseline_completo else surveil).append(
+                        msg + ("" if baseline_completo else " (semina in corso: segnalato, non-fatale)"))
             elif u in removed_keys[cat]:
                 msg = (f"[STATO≠REALTÀ] {cat} '{u}' è nel ledger come 'removed' ma ESISTE ancora "
                        "nel repo: togli l'artefatto (se davvero rimosso) o cambia status "
