@@ -216,7 +216,9 @@ bot               ──┘   X-Vps1777-Internal (constant-time)   (unico mount)
 | `GET /internal/notifications` | bot | preleva la coda notifiche (drift memoria + promemoria canonico, v0.36.0) |
 | `POST /internal/canonico/ack` | bot | registra l'ack del bottone «✓ Fatto» (v0.36.0) |
 
-Senza `gateway_secret` configurato → **403**: fail-closed anche qui. Il dettaglio
+Senza `gateway_secret` configurato → **404**: fail-closed anche qui. *Il 404 è
+deliberato e non un 403: un 403 confermerebbe che la risorsa esiste, il 404 no —
+vedi `services/gateway/app/proxy.py` e l'avviso all'avvio in `__main__.py`.* Il dettaglio
 dei due endpoint memoria e del perché esistono sta in [NB1777.md](NB1777.md) §6-§7.
 
 Due proprietà da non perdere di vista se tocchi questa zona:
