@@ -564,6 +564,42 @@ def valuta_porta_esterna(port_map: str, servizi: list[str],
     return True, f"raggiungibile dall'host su {port_map.strip()}"
 
 
+def ingresso_esterno_osservabile(servizi: list[str]) -> tuple[bool, str]:
+    """Il gate PUÒ osservare l'ingresso da fuori, su questo profilo? (logica pura)
+
+    ⚠️ NON dice se l'ingresso funziona: dice se il gate è in grado di GUARDARLO.
+    Sono due domande diverse, e `valuta_porta_esterna` le fondeva in un unico `True`:
+    sul profilo caddy/cloudflared usciva al primo `if` con «non applicabile», che è
+    un verde — cioè rispondeva «va bene» alla domanda «hai guardato?».
+
+    🔴 IL DIFETTO CHE RENDE LA DISTINZIONE NECESSARIA (misurato il 02/08):
+      · caddy e cloudflared sono SERVIZI COMPOSE, e `compose_cmd` monta sempre il
+        file del profilo ⇒ **l'update li RICREA**.
+      · tutte le altre sonde del gate guardano da DENTRO il gateway, dove la porta
+        risponde comunque.
+      ⇒ un update che rompe il proxy (Caddyfile, cert, token) lascia il sito giù da
+        Internet, il gate vede 200 dall'interno e **il rollback non scatta**.
+        È la classe di H51 dentro il presidio nato per H51.
+
+    📌 E la giustificazione scritta — «il tunnel non lo tocca un update» — è vera solo
+    per tailscale, dove il Funnel è un demone SULL'HOST e sopravvive al `compose up`.
+    Era scritta come se valesse per tutti e tre i profili.
+
+    🔑 QUESTA FUNZIONE NON CAMBIA NESSUNA DECISIONE, ed è deliberato: mettere una
+    sonda esterna nel gate a tappeto reintrodurrebbe il rollback-su-singhiozzo che la
+    scelta attuale evita, e quella è una decisione sul percorso critico — non un fix
+    di passaggio. Qui si rende **visibile** la zona cieca, che è il prerequisito per
+    poterla decidere.
+    """
+    proxy = next((p for p in PROXY_IN_CONTAINER if p in servizi), "")
+    if proxy:
+        return False, (f"a ricevere il traffico da Internet è «{proxy}», un servizio "
+                       f"compose che l'update RICREA. Le sonde del gate guardano il "
+                       f"gateway dall'interno: se il proxy si rompe, questo gate NON "
+                       f"se ne accorge e il rollback non scatta")
+    return True, ""
+
+
 def porta_esterna_ok(repo: Path, env: dict | None = None) -> tuple[bool, str]:
     """Raccoglie i dati per `valuta_porta_esterna` e interroga la porta DALL'HOST."""
     import urllib.error
@@ -658,6 +694,21 @@ def health_gate(repo: Path, env: dict | None = None,
         if green:
             consecutive += 1
             if consecutive >= HEALTH_CONSECUTIVE:
+                # ⚠️ IL VERDE DICHIARA LA PROPRIA COPERTURA (b82df434, 02/08).
+                #   Prima qui c'era `return True, "ok"`: il motivo del verde era la
+                #   stringa «ok», e tutto ciò che il gate aveva guardato — o NON
+                #   guardato — veniva buttato. Misurato sui quattro chiamanti:
+                #   `why` viene letto SOLO nel ramo `if not healthy`. ⇒ un verde
+                #   parziale era indistinguibile da un verde pieno, per costruzione.
+                # 🔑 Un verde muto non mente su ciò che ha visto: tace su ciò che
+                #   non ha visto — e chi legge un «ok» capisce «ho controllato tutto».
+                osservabile, cieco = ingresso_esterno_osservabile(
+                    [s.get("Service", "") for s in services])
+                if not osservabile:
+                    warn(f"health-gate VERDE, ma con una ZONA CIECA: {cieco}. "
+                         f"Il verde vale per i container e per il gateway visto "
+                         f"dall'interno — NON per la raggiungibilità da Internet.")
+                    return True, f"ok — MA l'ingresso esterno non è stato verificato: {cieco}"
                 return True, "ok"
         else:
             consecutive = 0

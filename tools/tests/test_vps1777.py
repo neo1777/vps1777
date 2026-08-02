@@ -1538,14 +1538,124 @@ def test_un_proxy_che_pubblica_SENZA_public_base_non_e_non_applicabile():
         v.nome_pubblico_funnel, v.env_read, v.compose_ps, v.warn = orig
 
 
+
+
+# ═══════════════════════ la ZONA CIECA del gate, dichiarata (b82df434, 02/08) ══
+# Perché questi test esistono: `valuta_porta_esterna` rispondeva `True` sul profilo
+# caddy/cloudflared con la motivazione «non applicabile» — cioè rispondeva «va bene»
+# alla domanda «hai guardato?». Ma caddy e cloudflared sono servizi compose che
+# l'update RICREA: se si rompono, il sito è giù da Internet e il gate non lo vede.
+# `ingresso_esterno_osservabile` separa le due domande senza cambiare le decisioni.
+
+def test_ingresso_osservabile_su_tailscale_il_gate_puo_guardare():
+    """Nessun proxy in container → il gate vede la porta dall'host: può guardare.
+
+    È il profilo in cui la giustificazione storica («il tunnel non lo tocca un
+    update») è VERA: lì il Funnel è un demone sull'host e sopravvive al compose up.
+    """
+    ok, cieco = v.ingresso_esterno_osservabile(["gateway", "archive-mcp"])
+    assert ok is True
+    assert cieco == ""
+
+
+def test_ingresso_NON_osservabile_dove_l_update_ricrea_il_proxy():
+    for proxy in ("caddy", "cloudflared"):
+        ok, cieco = v.ingresso_esterno_osservabile(["gateway", proxy])
+        assert ok is False, f"su {proxy} il gate NON può osservare l'ingresso"
+        # ⚠️ Il messaggio deve dire la CAUSA e la CONSEGUENZA, non solo l'esito:
+        # è l'unica cosa che chi legge un log alle tre di notte ha in mano.
+        assert proxy in cieco
+        assert "RICREA" in cieco, "deve dire PERCHÉ è cieco: l'update ricrea il proxy"
+        assert "rollback non scatta" in cieco, "e cosa costa: il fail-closed non protegge"
+
+
+def test_la_zona_cieca_NON_e_un_verde_e_NON_e_un_rosso():
+    """Il punto della cura: separare «non ho guardato» da «va bene».
+
+    ⚠️ QUESTO TEST PROTEGGE UNA DECISIONE, non un comportamento. La tentazione
+    ovvia — far fallire il gate dove non può guardare — reintrodurrebbe il
+    rollback-su-singhiozzo che la scelta attuale evita di proposito. La cura NON
+    cambia l'esito: cambia cosa il verde DICHIARA. Se qualcuno «completa» il fix
+    facendo tornare False, questo test cade e la discussione si riapre dove va
+    fatta — sul percorso critico, non in un commit di passaggio.
+    """
+    osservabile, _ = v.ingresso_esterno_osservabile(["gateway", "caddy"])
+    verdetto, _ = v.valuta_porta_esterna("", ["gateway", "caddy"], None)
+    assert osservabile is False, "il gate non può guardare…"
+    assert verdetto is True, "…ma il verdetto resta verde: l'esito NON cambia"
+
+
+
+def test_il_runner_diretto_distingue_SALTATO_da_FALLITO():
+    """Il runner non deve essere rosso per costruzione (b82df434, 02/08).
+
+    MISURATO prima della cura: 85 ok, 10 FAIL, exit 1 — e i dieci fallivano tutti
+    con «missing required positional arguments: monkeypatch, tmp_path». Non erano
+    rotti: chiedevano fixture che solo pytest fornisce. Il runner era quindi ROSSO
+    SEMPRE, e un allarme che scatta sempre è spento: il suo exit non distingueva
+    più «ho rotto qualcosa» da «dieci test usano una fixture».
+
+    ⚠️ Questo test lancia il file come sottoprocesso, quindi si auto-escluderebbe
+    all'infinito: la sentinella d'ambiente rompe la ricorsione al primo giro.
+    """
+    import subprocess
+    import sys
+    res = subprocess.run([sys.executable, str(Path(__file__).resolve())],
+                         capture_output=True, text=True, timeout=600,
+                         env={**os.environ, "VPS1777_RUNNER_SELFTEST": "1"})
+    assert "skip " in res.stdout, (
+        "i test non eseguibili da qui devono essere DICHIARATI, non contati come "
+        "fallimenti: «non eseguibile» non è «fallito»")
+    assert "NON eseguiti da questo runner" in res.stdout, (
+        "e il conto dei saltati va detto in chiaro: un esito che non dichiara la "
+        "propria copertura si legge come copertura piena")
+    assert res.returncode == 0, (
+        f"con tutti i test eseguibili verdi il runner deve uscire 0, altrimenti "
+        f"è rosso per costruzione e nessuno lo guarda più.\n{res.stdout[-600:]}")
+
+
+# Questo test lancia il file come sottoprocesso: se il runner lo eseguisse, si
+# richiamerebbe all'infinito. Il marcatore glielo fa SALTARE dichiarandolo — e non
+# fingere «ok» su un giro in cui non ha verificato nulla, che sarebbe il difetto
+# stesso che questo test protegge.
+test_il_runner_diretto_distingue_SALTATO_da_FALLITO.non_eseguibile_dal_runner = True
+
+
 if __name__ == "__main__":
-    fails = 0
+    # ⚠️ TRE ESITI, NON DUE (b82df434, 02/08). MISURATO prima di toccare:
+    #   85 test eseguiti «ok», 10 «FAIL», exit 1 — e i 10 fallivano tutti con
+    #   «missing required positional arguments: monkeypatch, tmp_path»: non sono
+    #   rotti, chiedono fixture che SOLO pytest fornisce.
+    # 🔴 Il difetto non era la disonestà — il runner li dichiarava — ma la
+    #   CONSEGUENZA: questo runner era ROSSO PER COSTRUZIONE, sempre, e un allarme
+    #   che scatta sempre è spento. Non distingueva «ho rotto qualcosa» da «dieci
+    #   test usano una fixture», quindi il suo exit non poteva più dire niente.
+    # 🔑 «Non eseguibile qui» non è «fallito»: è la stessa distinzione delle prove
+    #   empiriche (0 PASS · 1 FAIL · 2 non eseguibile) e del gate che ora dichiara
+    #   la propria zona cieca. Il salto si CONTA e si DICE — un test che sparisce
+    #   in silenzio è il difetto che il meta-test qui sopra esiste per impedire.
+    import inspect
+
+    fails = saltati = 0
     for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"ok   {name}")
-            except Exception as exc:  # noqa: BLE001
-                fails += 1
-                print(f"FAIL {name}: {exc}")
+        if not (name.startswith("test_") and callable(fn)):
+            continue
+        if inspect.signature(fn).parameters:
+            saltati += 1
+            print(f"skip {name}: chiede fixture pytest — NON eseguibile da qui")
+            continue
+        if getattr(fn, "non_eseguibile_dal_runner", False):
+            saltati += 1
+            print(f"skip {name}: dichiarato non eseguibile da questo runner")
+            continue
+        try:
+            fn()
+            print(f"ok   {name}")
+        except Exception as exc:  # noqa: BLE001
+            fails += 1
+            print(f"FAIL {name}: {exc}")
+    if saltati:
+        print(f"\n[!] {saltati} test NON eseguiti da questo runner (chiedono fixture "
+              f"pytest). Questo esito NON copre quelli: per la copertura piena serve\n"
+              f"    python3 -m pytest {Path(__file__).name}")
     raise SystemExit(1 if fails else 0)
