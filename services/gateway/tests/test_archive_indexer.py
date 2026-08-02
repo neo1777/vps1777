@@ -799,6 +799,25 @@ def test_v2_users_json_indicizzato_lupload_non_filtra(tmp_path: Path) -> None:
 
     La protezione dei dati sensibili è un problema di OUTPUT (mascheramento in
     ricerca, cifratura at-rest, ACL) e va risolta dove si legge.
+
+    🔺 E NESSUNA DELLE TRE ESISTE — misurato il 02/08, e va scritto qui perché
+    questa frase è ciò che rende accettabile la riga sopra:
+      · `grep -riE "redact|masche|mask|anonim|acl|cifrat|encrypt"` su
+        `services/archive-mcp/**/*.py` → **0 occorrenze**
+      · `security/findings.yml` → **0 voci** su anagrafica / dati personali
+        dell'archivio: non è nemmeno tracciato come lavoro aperto
+      · il percorso verso l'esterno è vivo: `search()` è un `@mcp.tool`
+        (`archive-mcp/app/server.py:32`) instradato dal gateway
+        (`GATEWAY_UPSTREAMS=archive=archive-mcp:8002`) al connettore
+    ⇒ una ricerca qualunque restituisce le righe verbatim — nome, email, telefono —
+    a un modello di terze parti.
+
+    ⭐ Il ragionamento resta giusto: filtrare all'INGRESSO è la mossa sbagliata.
+    Ma «va risolta dove si legge» descrive una protezione che **non è stata né
+    scritta né aperta**, e finché resta così questa frase fa sembrare decisa una
+    zona che nessuno ha deciso. È il compenso citato che rende invisibile il debito.
+    🖐️ Non è un fix da fare di passaggio: è una decisione di prodotto sui dati di
+    chi usa l'archivio. Voce aperta nel registro con la misura.
     """
     db = tmp_path / "m.db"
     archive_indexer.index_file(str(_claude_zip_memories(tmp_path)), str(db))
