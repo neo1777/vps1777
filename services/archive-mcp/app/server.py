@@ -5,13 +5,14 @@ Stateless mode (FASTMCP_STATELESS_HTTP=true) per scalare.
 """
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from . import db
+from . import db, redazione
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -26,6 +27,44 @@ mcp = FastMCP(
         enable_dns_rebinding_protection=False,  # dietro gateway, rete interna
     ),
 )
+
+
+# ── REDAZIONE IN USCITA: si avvolge `mcp.tool` STESSO, non i singoli tool ────────────
+# I tool che restituiscono testo sono 3 su 9. Avvolgerne 3 significa che **il quarto
+# nasce cieco** — la forma di difetto che abbiamo misurato sette volte in una notte: il
+# presidio segue la forma del dato invece del rischio. Sostituendo il decoratore, un tool
+# nuovo scritto con `@mcp.tool()` eredita la redazione **per costruzione**, e chi lo
+# scrive non deve saperlo.
+# ⚠️ L'ORDINE È IL PUNTO FRAGILE: un `@mcp.tool()` scritto SOPRA questo blocco userebbe il
+#    decoratore originale. Lo verifica `test_redazione_copre_tutti_i_tool` con l'AST, che
+#    fallisce se compare un tool prima della sostituzione.
+_tool_originale = mcp.tool
+
+
+def _tool_con_redazione(*args: Any, **kw: Any) -> Any:
+    decoratore = _tool_originale(*args, **kw)
+
+    def applica(fn):
+        @functools.wraps(fn)
+        def avvolta(*a: Any, **k: Any) -> Any:
+            risultato = fn(*a, **k)
+            if not redazione.ATTIVA:
+                return risultato
+            try:
+                noti = db.valori_anagrafici()
+            except Exception as exc:                      # noqa: BLE001
+                # Fail-CLOSED sui pattern: se l'anagrafica non è leggibile perdo i valori
+                # noti ma NON la redazione. Il contrario — restituire il risultato grezzo
+                # perché una query è fallita — sarebbe un presidio che si spegne da solo
+                # nell'unico momento in cui qualcosa non va.
+                log.warning("valori anagrafici non disponibili (%s): restano i pattern", exc)
+                noti = set()
+            return redazione.maschera(risultato, noti)
+        return decoratore(avvolta)
+    return applica
+
+
+mcp.tool = _tool_con_redazione                            # type: ignore[method-assign]
 
 
 @mcp.tool()

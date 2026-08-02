@@ -100,6 +100,40 @@ def _maybe_reload() -> None:
         reload_registry()
 
 
+_ANAGRAFICA: tuple[tuple, set[str]] | None = None      # (firma della dir, valori)
+
+
+def valori_anagrafici() -> set[str]:
+    """I valori dell'anagrafica presenti negli indici — da mascherare in USCITA.
+
+    Sta QUI e non in `redazione.py` perché è l'unico posto che sa aprire i DB; la
+    redazione resta pura e collaudabile senza filesystem.
+
+    In CACHE sulla firma della dir (la stessa di `_maybe_reload`): la query girerebbe a
+    ogni chiamata di ogni tool, e un presidio che costa a ogni richiesta è un presidio che
+    prima o poi qualcuno spegne. La cache si invalida da sola quando un DB cambia — non
+    per un timer, che scadrebbe nel momento sbagliato.
+    """
+    global _ANAGRAFICA
+    _maybe_reload()
+    sig = _dir_sig()
+    if _ANAGRAFICA is not None and _ANAGRAFICA[0] == sig:
+        return _ANAGRAFICA[1]
+    from . import redazione
+    valori: set[str] = set()
+    for name in list(_DBS):
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            valori |= redazione.valori_noti(conn)
+        finally:
+            conn.close()
+    _ANAGRAFICA = (sig, valori)
+    return valori
+
+
 def available_dbs() -> list[str]:
     _maybe_reload()
     return sorted(_DBS)

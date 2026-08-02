@@ -800,24 +800,32 @@ def test_v2_users_json_indicizzato_lupload_non_filtra(tmp_path: Path) -> None:
     La protezione dei dati sensibili è un problema di OUTPUT (mascheramento in
     ricerca, cifratura at-rest, ACL) e va risolta dove si legge.
 
-    🔺 E NESSUNA DELLE TRE ESISTE — misurato il 02/08, e va scritto qui perché
-    questa frase è ciò che rende accettabile la riga sopra:
-      · `grep -riE "redact|masche|mask|anonim|acl|cifrat|encrypt"` su
-        `services/archive-mcp/**/*.py` → **0 occorrenze**
-      · `security/findings.yml` → **0 voci** su anagrafica / dati personali
-        dell'archivio: non è nemmeno tracciato come lavoro aperto
-      · il percorso verso l'esterno è vivo: `search()` è un `@mcp.tool`
-        (`archive-mcp/app/server.py:32`) instradato dal gateway
-        (`GATEWAY_UPSTREAMS=archive=archive-mcp:8002`) al connettore
-    ⇒ una ricerca qualunque restituisce le righe verbatim — nome, email, telefono —
-    a un modello di terze parti.
+    ✅ AGGIORNATO 02/08: LA PRIMA DELLE TRE ORA ESISTE — e questa riga va letta con
+    la precisione con cui è stato scritto il buco, perché la frase sopra è ciò che
+    rende accettabile l'indicizzazione verbatim.
+      · `services/archive-mcp/app/redazione.py` + la sostituzione di `mcp.tool` in
+        `server.py`: ogni tool esce redatto, e uno NUOVO lo eredita per costruzione
+        (verificato con l'AST da `test_redazione_copre_tutti_i_tool`)
+      · scelta fra le tre e sua ragione nel docstring di `redazione.py`; decisione
+        di Neo del 02/08 07:09 («la migliore, non la più economica»)
+    🔴 E COSA **NON** COPRE, provato da un test invece che dichiarato
+    (`test_il_limite_dichiarato_e_vero`) — un filtro sui dati sensibili si giudica
+    sui FALSI NEGATIVI, non sui falsi positivi:
+      · escono redatti: email e telefoni OVUNQUE (transcript compresi) e i valori
+        dell'anagrafica anche scritti a mano dentro un messaggio
+      · NON esce redatto: un dato personale senza formato riconoscibile e assente
+        dall'anagrafica — il nome di un terzo dentro una conversazione
+      · il DB su disco resta IN CHIARO: questo è mascheramento in uscita, non
+        cifratura at-rest. Delle tre, le altre due restano da fare.
+    ⇒ la frase difendibile non è «i dati personali non escono in chiaro»: è
+      «gli identificatori in formato riconoscibile e l'anagrafica non escono in
+      chiaro da nessun tool». Più stretta, e vera.
 
     ⭐ Il ragionamento resta giusto: filtrare all'INGRESSO è la mossa sbagliata.
-    Ma «va risolta dove si legge» descrive una protezione che **non è stata né
-    scritta né aperta**, e finché resta così questa frase fa sembrare decisa una
-    zona che nessuno ha deciso. È il compenso citato che rende invisibile il debito.
-    🖐️ Non è un fix da fare di passaggio: è una decisione di prodotto sui dati di
-    chi usa l'archivio. Voce aperta nel registro con la misura.
+    📌 Reperto da non perdere: fino al 02/08 questa docstring prometteva tre
+    protezioni che non esistevano — «va risolta dove si legge» faceva sembrare
+    decisa una zona che nessuno aveva deciso, ed è il compenso citato che rende
+    invisibile il debito. Il difetto non era l'indicizzazione: era la promessa.
     """
     db = tmp_path / "m.db"
     archive_indexer.index_file(str(_claude_zip_memories(tmp_path)), str(db))

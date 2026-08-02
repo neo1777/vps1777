@@ -2590,3 +2590,85 @@ findings:
       (exit 2) da «tutto a posto». Una sola istanza vera, ed è questa. L'euristica NON
       copre le affermazioni fuori da un ramo d'errore esplicito: un verde stampato per
       abitudine dove non c'è nessun `if errors` le sfugge.
+
+  - id: H64
+    severity: medium
+    title: "L'anagrafica dell'account (nome, email, telefono) usciva verbatim da ogni tool dell'archivio verso un modello di terze parti, mentre il test dichiarava una protezione di output che non esisteva"
+    status: closed
+    scoperta:
+      quando: "2026-08-02"
+      come: lettura
+      nota: >
+        71d540e6, leggendo il test che GIUSTIFICA l'indicizzazione verbatim di
+        `users.json`. Il difetto non era l'indicizzazione — quella è la scelta giusta,
+        e il test lo argomenta bene: filtrare all'ingresso è una policy di output
+        applicata dove nessuno la può più rivedere. Il difetto era la frase che la
+        compensava: «la protezione è un problema di output (mascheramento in ricerca,
+        cifratura at-rest, ACL) e va risolta dove si legge» — scritta all'indicativo,
+        con NESSUNA delle tre esistente. Un compenso citato rende invisibile il debito:
+        chi legge quella riga smette di cercare.
+    natura: comportamento
+    since: unreleased
+    prova:
+      - comando: "grep -riE 'redact|masche|mask|anonim|acl|cifrat|encrypt' services/archive-mcp/**/*.py"
+        dove: "il servizio che espone i tool di ricerca"
+        output: "0 occorrenze — nessuna delle tre protezioni citate esisteva"
+        exit: 1
+        quando: "2026-08-02"
+      - comando: "python3 -m pytest services/archive-mcp/tests/test_redazione.py -q"
+        dove: "dopo la cura"
+        output: "9 passed — fra cui test_redazione_copre_tutti_i_tool (AST) e test_il_limite_dichiarato_e_vero"
+        exit: 0
+        quando: "2026-08-02"
+        nota: >
+          Il test sulla copertura NON conta i tool che sono stati avvolti (tautologia):
+          verifica con l'AST che NESSUN `@mcp.tool` compaia prima della sostituzione di
+          `mcp.tool`. È l'unico punto fragile del meccanismo, ed è quello misurato.
+    evidence:
+      - file: services/archive-mcp/app/redazione.py
+        contains:
+          - "def maschera("
+          - 'ATTIVA = os.getenv("ARCHIVE_REDACT", "1")'
+      - file: services/archive-mcp/app/server.py
+        contains:
+          - "mcp.tool = _tool_con_redazione"
+          - "redazione.maschera(risultato, noti)"
+      - file: services/archive-mcp/app/db.py
+        contains:
+          - "def valori_anagrafici("
+      - file: services/archive-mcp/tests/test_redazione.py
+        contains:
+          - "def test_redazione_copre_tutti_i_tool("
+          - "def test_il_limite_dichiarato_e_vero("
+    cura: >
+      Mascheramento in USCITA (`services/archive-mcp/app/redazione.py`), scelto fra le
+      tre su decisione di Neo del 02/08 07:09 («la migliore, non la più economica, poi ce
+      lo contestano nell'audit»): la cifratura at-rest protegge il disco e non impedisce
+      che il dato esca dal tool; l'ACL protegge da chi accede, e il flusso verso il
+      modello terzo è AUTORIZZATO. Solo il mascheramento copre il canale che espone.
+
+      Applicato sostituendo `mcp.tool` invece di decorare i tre tool che restituiscono
+      testo: i tool sono 9, quelli con testo 3, e avvolgerne 3 significa che il quarto
+      nasce cieco — la forma misurata sette volte nella notte del 01-02/08 («il presidio
+      segue la forma del dato, non il rischio»). Con la sostituzione un tool nuovo eredita
+      la redazione per costruzione e chi lo scrive non deve saperlo.
+
+      Due meccanismi: per PATTERN (email, telefono) ovunque compaiano, transcript
+      compresi; e per VALORE NOTO, leggendo i valori dell'anagrafica dall'indice stesso
+      (`project = 'account:user'`) — si mascherano i nomi che si SANNO essere nomi invece
+      di indovinare cosa sia un nome, così un riconoscitore non corrompe i risultati di
+      ricerca con falsi positivi. Attiva per default (`ARCHIVE_REDACT`), si spegne solo
+      con una scelta esplicita; se l'anagrafica non è leggibile restano i pattern.
+    residuo: >
+      DICHIARATO E PROVATO DA UN TEST, non solo scritto: un filtro sui dati sensibili si
+      giudica sui FALSI NEGATIVI (rilievo di abdd732a, arrivato prima della stesura).
+      NON viene mascherato un dato personale che non ha formato riconoscibile e non è in
+      anagrafica — il nome di un terzo scritto dentro una conversazione. L'archivio è
+      fatto di transcript, cioè della popolazione dove un dato personale ha più
+      probabilità di essere scritto a mano che registrato; quanti ce ne siano NON è
+      misurato, perché contiene materiale personale e non si apre per contarli.
+      Restano da fare le altre due delle tre: il DB su disco è in chiaro (nessuna
+      cifratura at-rest) e non c'è ACL. La frase difendibile in un audit è quindi
+      «gli identificatori in formato riconoscibile e l'anagrafica non escono in chiaro da
+      nessun tool» — non «i dati personali non escono in chiaro», che sarebbe più larga
+      della misura.

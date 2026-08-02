@@ -68,8 +68,15 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 1 (H56 medium, 27/07) = 56. H56 è la seconda metà di H14, misurata sulla VPS viva
 # da abdd732a: lo snapshot pre-update tiene archive-data IN CHIARO (~2,58 GB) e nessuna
 # voce lo diceva — H14 era `closed` su un volume solo, il più piccolo.
-EXPECTED_TOTAL = 63
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 33, "low": 18}
+# + 1 (H64 medium, 02/08) = 64. H64 non nasce da una lettura del codice ma dalla
+# lettura di un TEST: la docstring che giustifica l'indicizzazione verbatim di
+# `users.json` prometteva tre protezioni di output — «mascheramento in ricerca,
+# cifratura at-rest, ACL» — all'indicativo, e nessuna delle tre esisteva. Il difetto
+# non era l'indicizzazione (quella è la scelta giusta e il test la argomenta bene):
+# era il compenso citato, che rende invisibile il debito perché chi lo legge smette
+# di cercare. Curata la prima delle tre; le altre due restano nel residuo.
+EXPECTED_TOTAL = 64
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 34, "low": 18}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
