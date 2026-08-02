@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 import pwd
+import re
 import tempfile
 from pathlib import Path
 
@@ -1412,6 +1413,43 @@ def test_secrets_status_segnala_i_secret_ATTESI_e_assenti(tmp_path):
     )
     stato = json.loads((tmp_path / "onboarding" / "secrets_status.json").read_text())
     assert stato.get("mancanti"), "l'elenco dei mancanti deve arrivare anche a /admin/secrets"
+
+
+def test_SECRET_POLICY_non_puo_dimenticare_un_segreto_in_silenzio():
+    """Il patto: la lista può invecchiare, ma RUMOROSAMENTE.
+
+    🔴 Il 02/08 `archive_desc_secret` era l'unico dei sei segreti dichiarati nei
+    compose a non avere una politica di scadenza — e non per una decisione: è
+    l'unico **mai digitato da un umano e mai nominato in un rituale di rotazione**,
+    quindi non aveva lasciato traccia in nessuno dei due elenchi scritti a mano.
+    ⭐ Lo stesso patto esiste già in questo file per `SEGRETI_GENERABILI` (r.442),
+    con la ragione scritta: «non "ricordarsi", ma non poter dimenticare».
+    `_SECRET_POLICY` non ce l'aveva — il suo test pinnava i nomi a mano, quindi un
+    settimo segreto nascerebbe cieco esattamente come il sesto.
+    """
+    in_policy = {voce[0] for voce in v._SECRET_POLICY}
+    reali = set()
+    for nome_file in ("compose.yaml", "compose.ingress.cloudflared.yaml"):
+        righe = (_ROOT / nome_file).read_text(encoding="utf-8").splitlines()
+        try:
+            start = next(n for n, r in enumerate(righe) if r.rstrip() == "secrets:")
+        except StopIteration:
+            continue
+        for r in righe[start + 1:]:
+            if r and not r.startswith(" "):
+                break
+            m = re.match(r"^  ([a-z_]+):", r)
+            if m:
+                reali.add(m.group(1))
+    assert reali, "nessun secret letto dai compose: la sonda non guarda dove crede"
+    # `admin_password` in policy ↔ `admin_password_bcrypt` nei compose: stesso
+    # oggetto, due nomi. Si confronta sul NOME FILE, che è l'unica cosa che combacia.
+    file_policy = {voce[1].removesuffix(".txt") for voce in v._SECRET_POLICY}
+    scoperti = reali - file_policy - in_policy
+    assert not scoperti, (
+        f"segreti dichiarati nei compose e SENZA politica di scadenza: {sorted(scoperti)} — "
+        f"aggiungili a _SECRET_POLICY col loro max_giorni, o dichiara qui perché non ne hanno"
+    )
 
 
 if __name__ == "__main__":

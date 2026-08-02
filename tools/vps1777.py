@@ -2759,6 +2759,23 @@ _SECRET_POLICY = [
      "manuale: dalla pagina o `rotate-secret.sh admin_password`"),
     ("gateway_secret", "gateway_secret.txt", "Namespace URL MCP", 180, False,
      "manuale: cambia le URL dei connettori → vanno ri-aggiunti su claude.ai"),
+    # 🔴 ERA L'UNICO DEI SEI SENZA POLITICA (aggiunto il 02/08). Non per una
+    # decisione: perché è l'unico **mai digitato da un umano e mai nominato in un
+    # rituale di rotazione** — non aveva lasciato traccia né qui né in
+    # `tools/rotate-secret.sh`, che sono due elenchi scritti a mano.
+    # ⭐ Stessa forma degli altri buchi di stanotte: *il presidio segue la forma del
+    # dato, non il rischio.* E il rischio qui non è piccolo — protegge
+    # `/internal/archive/description`, l'unico canale di SCRITTURA verso i DB
+    # d'archivio, il cui testo finisce nel contesto di un LLM (D17).
+    # 📌 180 giorni come `gateway_secret`: ruotarlo non invalida sessioni utente né
+    # token, cambia solo chi può scrivere le descrizioni — costo basso, urgenza bassa.
+    # 🔺 `auto=False` E LA PRIMA STESURA DI QUESTA RIGA DICEVA `True`, citando un
+    # comando che NON esiste: `tools/rotate-secret.sh` copre **3 segreti su 6**
+    # (gateway_secret · oauth_signing_secret · admin_password, righe 61-63) e questo
+    # non c'è. *Stavo scrivendo una promessa falsa dentro il file che presidia i
+    # segreti* — la nota di una policy la legge chi deve agire in fretta.
+    ("archive_desc_secret", "archive_desc_secret.txt", "Firma descrizioni archivio", 180, False,
+     "manuale: rigenera il file e ricrea il gateway — `rotate-secret.sh` NON lo copre"),
     # 90 giorni, non 365 (H29): è la RADICE DI FIDUCIA della Mini App — con questo
     # token si forgia un initData valido per qualunque user id. Fascia massima.
     ("telegram_bot_token", "telegram_bot_token.txt", "Token bot Telegram (radice Mini App)", 90, False,
