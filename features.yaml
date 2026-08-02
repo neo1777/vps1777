@@ -1216,3 +1216,14 @@ features:
     status: active-default
     since: "0.20.0 (dichiarato qui il 02/08)"
     verify: {cli_command: archive-ingest}
+
+  - id: cli.archive-retag
+    nome: "vps1777 archive-retag"
+    cosa: "Ri-classifica `voice` sui DB dell'archivio quando le soglie del classificatore
+           cambiano. A SECCO di default: calcola il delta per intero (reale, non stimato)
+           e non scrive finché non arriva `--scrivi`. È l'unico comando che riscrive in
+           blocco una colonna di giudizi, e per questo il suo default è l'opt-in."
+    dove: ["cli:archive-retag", "tools/vps1777.py"]
+    status: active-default
+    since: "0.41.0 (voice-tagging Fase 4)"
+    verify: {cli_command: archive-retag}
