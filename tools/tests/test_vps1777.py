@@ -1177,8 +1177,23 @@ def test_status_write_sopravvive_a_un_file_corrotto():
 
 # ───── il runner diretto vedeva 32 test su 39: il presidio del presidio ─────
 
-def test_il_runner_diretto_esegue_tutti_i_test_del_file():
-    """MISURATO il 27/07: `python3 tools/tests/test_vps1777.py` ne eseguiva 32,
+def test_nessun_test_e_definito_sotto_il_blocco_main():
+    """RINOMINATO il 02/08 — il nome vecchio prometteva più di ciò che questo misura.
+
+    Si chiamava `..._esegue_TUTTI_i_test_del_file`, e chi lo leggeva concludeva che
+    la copertura del runner fosse verificata. Non lo è: **questo confronta due numeri
+    di riga**. Se il blocco `__main__` iterasse sull'insieme sbagliato, o se un test
+    fosse dentro una classe invece che al livello del modulo, passerebbe lo stesso.
+    ⭐ È la classe «la garanzia è più larga della misura», e la cura giusta NON è
+    allargare il presidio (funziona, e allargarlo produrrebbe falsi rossi): è
+    **restringere la promessa**, cioè il nome.
+
+    🔑 E il nome vecchio andava cambiato PROPRIO PERCHÉ il test è utile: ha preso
+    tre persone diverse in due giorni — l'ultima il 02/08, con un test appeso in
+    fondo dopo il blocco. Un presidio che morde spesso è quello che più di tutti
+    non deve mentire su cosa copre, perché è quello di cui ci si fida.
+
+    MISURATO il 27/07: `python3 tools/tests/test_vps1777.py` ne eseguiva 32,
     pytest 39. Il blocco `__main__` stava a metà file e itera su `globals()` —
     le funzioni definite DOPO non esistono ancora quando gira, e il runner
     stampava «ok» per tutto uscendo 0. I sette test invisibili erano i più
