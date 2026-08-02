@@ -1027,7 +1027,13 @@ findings:
           - "via d'emergenza"
           - "firma cosign NON verificata"
       - file: .env.example
-        contains: ["VPS1777_REQUIRE_COSIGN"]
+        # 02/08: era sotto `contains:`, ma in `.env.example` quella variabile compare
+        # su UNA riga sola ed è commentata (`#VPS1777_REQUIRE_COSIGN=1`) — cioè è una
+        # RICEVUTA (l'opzione è documentata e si attiva così), non la prova che un
+        # comportamento esista. Il gate non lo vedeva perché filtrava per suffisso e
+        # `.env.example` ha suffisso `.example`; ora lo vede, e questo è il canale
+        # giusto — lo dice il suo stesso messaggio d'errore.
+        ricevute: ["VPS1777_REQUIRE_COSIGN"]
       - file: tools/vps1777.py
         contains:
           - "def cosign_bypass_status"

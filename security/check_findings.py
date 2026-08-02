@@ -188,7 +188,25 @@ def check_since(f: dict, rilasciate: set[str], errors: list[str]) -> bool:
 
 # Nei file di CODICE una riga che comincia con `#` è un commento. Non vale per i
 # `.md`, dove non c'è codice da distinguere: là un `contains` è sempre una citazione.
-_SUFFISSI_CON_COMMENTI = {".py", ".sh", ".yml", ".yaml", ".service", ".timer", ".path"}
+# 🔴 IL BUCO CHE QUESTA LISTA AVEVA (curato il 02/08): il filtro è per SUFFISSO, e
+# `Path(".env.example").suffix` è `".example"` — mentre `#` è il carattere di commento
+# lì dentro. ⇒ un `contains:` su `.env.example` poteva essere soddisfatto da una riga
+# COMMENTATA e il presidio non se ne accorgeva: **caso vivo misurato**, H49 aveva
+# `VPS1777_REQUIRE_COSIGN` che in quel file compare su una riga sola, `#…=1`.
+# ⭐ E la forma del difetto è quella che abbiamo misurato sei volte quella notte: il
+# presidio riconosceva i file dalla FORMA DEL NOME, e i file col nome di forma diversa
+# (`.env.example`, `Dockerfile`, `Caddyfile` — che un suffisso non ce l'hanno affatto)
+# restavano fuori dal perimetro senza che nessuno l'avesse deciso.
+_SUFFISSI_CON_COMMENTI = {".py", ".sh", ".yml", ".yaml", ".service", ".timer", ".path",
+                          ".example", ".toml", ".ini", ".cfg", ".conf", ".env"}
+# I file che il commento ce l'hanno ma un suffisso NO: qui il nome è tutto il nome.
+_NOMI_CON_COMMENTI = {"Dockerfile", "Caddyfile", "Makefile", ".env", ".gitignore",
+                      ".dockerignore", "requirements.txt"}
+
+
+def _ha_commenti_hash(path: Path) -> bool:
+    """`#` è il commento in questo file? Guarda il suffisso E il nome intero."""
+    return path.suffix in _SUFFISSI_CON_COMMENTI or path.name in _NOMI_CON_COMMENTI
 
 
 def solo_in_commenti(path: Path, needle: str) -> bool:
@@ -206,7 +224,7 @@ def solo_in_commenti(path: Path, needle: str) -> bool:
     guardando. Ora le ricevute si dichiarano (`ricevute:`) e un ago di `contains:` che
     finisce solo nei commenti fa fallire il gate.
     """
-    if path.suffix not in _SUFFISSI_CON_COMMENTI:
+    if not _ha_commenti_hash(path):
         return False
     righe = [r for r in path.read_text(encoding="utf-8", errors="replace").splitlines()
              if needle in r]
