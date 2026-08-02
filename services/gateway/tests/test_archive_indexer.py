@@ -1275,14 +1275,22 @@ def test_migrate_v3_aggiunge_colonne_e_deriva_speaker(tmp_path: Path):
         assert {"speaker", "voice", "quoted_share", "voice_conf", "content_flags"} <= cols
         got = dict(c.execute("SELECT uuid, speaker FROM messages"))
         vuoti = c.execute("SELECT count(*) FROM messages WHERE speaker=''").fetchone()[0]
-        # `voice` NON viene popolato dalla Fase 1: è una stima, e la stima arriva in Fase 2.
+        # 🔻 AGGIORNATO 02/08 (Fase 3): questa riga asseriva `voice == 0` — «la Fase 1 non
+        #    deve scrivere `voice`, è una stima e la stima arriva in Fase 2». La ragione
+        #    era ed è giusta, ma diceva **una cosa più stretta di quello che voleva dire**:
+        #    proibiva il valore invece di pretendere che fosse CALCOLATO. Ora la migrazione
+        #    chiama `popola_voice`, quindi la stima c'è ed è legittima — e il principio
+        #    resta, girato dalla parte utile: dopo la migrazione **nessuna riga resta senza
+        #    classificazione**, perché una colonna a metà è peggio di una vuota (chi la
+        #    interroga non distingue «non è di quel tipo» da «non è mai stata guardata»).
+        senza_voice = c.execute("SELECT count(*) FROM messages WHERE voice=''").fetchone()[0]
         voci = c.execute("SELECT count(*) FROM messages WHERE voice<>''").fetchone()[0]
     assert got == {"u1": "human", "a1": "assistant", "t1": "unknown", "f1": "unknown"}
     assert vuoti == 0, "dopo la migrazione nessuna riga resta senza asse-mittente"
-    assert voci == 0, (
-        "la Fase 1 non deve scrivere `voice`: un campo popolato sembra sempre popolato "
-        "apposta, e una stima mai calcolata che si legge come classificazione è la bugia "
-        "che queste colonne devono impedire")
+    assert senza_voice == 0, (
+        "una riga con `voice=''` dopo la migrazione è una riga che NESSUNO ha guardato, e "
+        "sui filtri della Fase 3 sarebbe indistinguibile da una riga 'di un altro tipo'")
+    assert voci == 4, "e la classificazione dev'essere stata CALCOLATA, non lasciata al default"
 
 
 def test_migrate_v3_e_idempotente(tmp_path: Path):
@@ -1387,3 +1395,93 @@ def test_classify_non_inventa_su_cio_che_non_sa():
                                        sender="attachment", project="doc")
     assert v[0] == "unknown", "un allegato non dice chi ha scritto: non e' own"
     assert v[2] == 0.0, "e la confidenza zero lo dichiara"
+
+
+# ════════════════ VOICE-TAGGING — il POPOLAMENTO, che alla Fase 2 mancava ══════
+# 🔴 Il difetto che questi test avrebbero preso e non c'era nessuno a prenderlo:
+#    `classify_voice` esisteva, era testata da nove casi, ed era chiamata SOLO dai
+#    test. Nessun punto del codice di produzione la usava ⇒ la colonna `voice` era
+#    vuota su tutto l'archivio, e i filtri della Fase 3 avrebbero risposto ZERO a
+#    ogni interrogazione, senza un errore e senza un log.
+# ⭐ La Fase 2 SEMBRAVA fatta perché aveva le due cose che si guardano — la funzione
+#    e i suoi test. Mancava l'unica che conta: qualcuno che la chiami.
+
+def test_ingest_classifica_la_voce_delle_righe_che_scrive(tmp_path: Path):
+    """DOPO un ingest, `voice` è popolato. È il test che avrebbe preso il buco.
+
+    Non prova `classify_voice` (ci sono già nove casi per quello): prova che
+    l'indexer LA CHIAMI. Sono due cose diverse, e per una settimana solo la prima
+    era coperta.
+    """
+    src = tmp_path / "c.jsonl"
+    src.write_text(
+        '{"uuid":"u1","sessionId":"s","type":"user",'
+        '"message":{"role":"user","content":"una frase mia qualunque"},'
+        '"timestamp":"2026-01-01T00:00:00Z"}\n', encoding="utf-8")
+    db = tmp_path / "a.db"
+    archive_indexer.index_jsonl(str(src), str(db), project="p")
+
+    with sqlite3.connect(db) as c:
+        vuoti = c.execute("SELECT count(*) FROM messages WHERE voice=''").fetchone()[0]
+        tutte = c.execute("SELECT count(*) FROM messages").fetchone()[0]
+    assert tutte > 0, "l'ingest non ha scritto niente: il test non prova nulla"
+    assert vuoti == 0, (
+        "riga ingerita e MAI classificata: `voice=''` sopravvive all'ingest. È il "
+        "difetto della Fase 2 — la funzione c'era e non la chiamava nessuno")
+
+
+def test_popola_voice_e_idempotente_e_non_ritocca_i_giudizi(tmp_path: Path):
+    """Seconda passata: zero righe. E `unknown` NON viene ri-classificato.
+
+    🔑 `unknown` è un GIUDIZIO («guardata, non riconosciuta»), non un vuoto. Se
+    `popola_voice` lo ripescasse, ogni ritocco delle soglie riscriverebbe in
+    silenzio decisioni già prese — e il retag della Fase 4 non avrebbe più un
+    prima/dopo da confrontare.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "user"),
+                           ("u2", "p", "2026-01-01T00:01:00Z", "y", "attachment")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        assert archive_indexer.popola_voice(c) == 0, "la seconda passata deve scrivere ZERO"
+        unknown = c.execute("SELECT count(*) FROM messages WHERE voice='unknown'").fetchone()[0]
+        assert unknown > 0, "il caso serve: senza righe `unknown` non prova niente"
+        assert archive_indexer.popola_voice(c) == 0, "e `unknown` non è ripescabile"
+
+
+def test_il_vuoto_e_lo_sconosciuto_restano_due_stati(tmp_path: Path):
+    """`voice=''` (nessuno l'ha guardata) ≠ `voice='unknown'` (guardata, non riconosciuta).
+
+    🖐️ Condizione posta da `71d540e6` firmando i nomi delle classi, e la ragione è
+    sua: *se collassassero in un nome solo, chi cerca `voice:unknown` crederebbe di
+    avere «le righe difficili» mentre ha «le righe mai lette» — e stavolta lo
+    crederebbe un utente, non noi che sappiamo com'è fatto.*
+    ⭐ È la regola più ricorrente che abbiamo — `None` = non misurato ≠ `0` = misurato
+    e vuoto — al posto dove costa meno oggi: dopo la Fase 3 separarli richiederebbe
+    un DROP+rebuild dell'indice.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "attachment")])
+    with sqlite3.connect(db) as c:
+        archive_indexer._ensure_v3(c)
+        prima = c.execute("SELECT voice FROM messages").fetchone()[0]
+        assert prima == "", "prima del classificatore la riga NON è 'unknown': è non-guardata"
+        archive_indexer.popola_voice(c)
+        dopo = c.execute("SELECT voice FROM messages").fetchone()[0]
+    assert dopo == "unknown", "dopo, è un giudizio — e ha un nome diverso dal vuoto"
+
+
+def test_popola_voice_non_gira_a_vuoto_se_una_regola_torna_stringa_vuota(monkeypatch,
+                                                                        tmp_path: Path):
+    """La guardia anti-loop, provata invece che dichiarata.
+
+    Il ciclo esce quando `voice=''` non trova più righe: una regola che tornasse `''`
+    lascerebbe la riga eleggibile per sempre. Su un DB da 61k righe sarebbe un blocco
+    silenzioso dell'ingest — non un errore, un processo che non finisce.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "user")])
+    monkeypatch.setattr(archive_indexer, "classify_voice",
+                        lambda *a, **k: ("", 0.0, 0.0, ""))
+    with sqlite3.connect(db) as c:
+        archive_indexer._ensure_v3(c)
+        assert archive_indexer.popola_voice(c) == 1
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "unknown", (
+            "la guardia deve scrivere un valore NON vuoto, o il ciclo non termina")

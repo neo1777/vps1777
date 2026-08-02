@@ -454,6 +454,11 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         flush()
         flush_skips()
         flush_sightings()
+        # Voice-tagging: le righe appena scritte nascono con `voice=''`. Si classificano
+        # QUI e non in `_ensure_v3` perché questa legge il `content` di ogni riga — è il
+        # costo di un ingest, non quello di ogni apertura di DB. Idempotente: al secondo
+        # passaggio non trova più `voice=''` e scrive zero.
+        popola_voice(conn)
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
         conn.commit()
         return n
@@ -679,6 +684,63 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
     return ("unknown", quota, 0.0, flags)
 
 
+def popola_voice(conn: sqlite3.Connection, batch: int = 2000) -> int:
+    """Applica `classify_voice` alle righe non ancora classificate. Ritorna quante ne ha scritte.
+
+    🔴 PERCHÉ ESISTE, e perché è un difetto trovato attaccando la Fase 3 (02/08).
+    La Fase 2 ha prodotto `classify_voice` e i suoi test, **e si è fermata lì**: la
+    funzione era chiamata SOLO dai test, da nessun punto del codice di produzione.
+    ⇒ la colonna `voice` era vuota su **tutto** l'archivio, e i filtri `voice:` della
+    Fase 3 avrebbero risposto ZERO a ogni interrogazione — indistinguibile da «non
+    esistono righe di quel tipo». **Un filtro su una colonna mai popolata è il verde
+    che mente nella sua forma più pulita**: nessun errore, nessun log, solo un
+    risultato vuoto e credibile.
+    📌 `popola_speaker` era agganciata (r.706), questa no: la Fase 2 sembrava fatta
+    perché aveva la funzione e i test — le due cose che si guardano.
+
+    ⚠️ NON è agganciata a `_ensure_v3` come `popola_speaker`, ed è deliberato:
+    derivare `speaker` costa una `UPDATE` per mittente distinto (una manciata),
+    mentre questa **legge il `content` di ogni riga**. Farla a ogni apertura di DB
+    sarebbe un costo pagato sempre per un lavoro che serve una volta. Va chiamata
+    dopo un ingest e dalla migrazione.
+
+    🛡️ IL CONFINE FRA I DUE VUOTI (condizione posta da `71d540e6` firmando i nomi, e
+    accolta qui):
+        voice = ''         → NON CLASSIFICATA: nessuno l'ha guardata
+        voice = 'unknown'  → GUARDATA e non riconosciuta: è un giudizio, con la sua
+                             incertezza in `voice_conf`
+    Sono due stati diversi e questa funzione li tiene diversi: filtra su `voice=''`
+    (quindi non ri-classifica mai ciò che è già stato deciso) e non scrive mai `''`.
+    *Se collassassero in un nome solo, chi cerca `voice:unknown` crederebbe di avere
+    «le righe difficili» mentre ha «le righe mai lette».*
+    """
+    scritte = 0
+    while True:
+        righe = conn.execute(
+            "SELECT rowid, content, sender, project FROM messages WHERE voice='' LIMIT ?",
+            (batch,)).fetchall()
+        if not righe:
+            break
+        agg = []
+        for rid, content, sender, project in righe:
+            v, quota, conf, flags = classify_voice(content or "", sender or "", project or "")
+            # 🛡️ GUARDIA ANTI-LOOP, e non è teorica: il `while` esce solo quando
+            # `voice=''` non trova più righe. Se una regola futura tornasse `''`, la
+            # riga resterebbe eleggibile e questo ciclo non finirebbe mai — su un DB
+            # da 61k righe sarebbe un blocco silenzioso dell'ingest, non un errore.
+            # Meglio classificarla `unknown` (che è vero: l'abbiamo guardata) che
+            # girare a vuoto.
+            # `content_flags` è dichiarata «json» nello schema (r.242) e `classify_voice`
+            # torna una LISTA: va serializzata qui. E `[]` NON è `''` — è la stessa
+            # distinzione di `voice`: «calcolato, nessuna bandiera» contro «mai calcolato».
+            agg.append((v or "unknown", quota, conf, json.dumps(flags or []), rid))
+        conn.executemany(
+            "UPDATE messages SET voice=?, quoted_share=?, voice_conf=?, content_flags=? "
+            "WHERE rowid=?", agg)
+        scritte += len(agg)
+    return scritte
+
+
 def _quota_citata(testo: str) -> float:
     """Quota 0-1 di righe citate (`>` o dentro un fence). Quantifica il `mixed`."""
     righe = [r for r in testo.splitlines() if r.strip()]
@@ -708,14 +770,19 @@ def _ensure_v3(conn: sqlite3.Connection) -> bool:
 
 
 def migrate_v2_to_v3(db_path: Union[str, Path]) -> bool:
-    """Porta un DB allo schema v3 (colonne voice-tagging + `speaker` derivato).
+    """Porta un DB allo schema v3 (colonne voice-tagging + `speaker` e `voice` derivati).
 
     Ritorna True se ha aggiunto colonne. NON ricostruisce l'FTS: le colonne nuove non sono
     indicizzate (vedi `_ensure_v3`), quindi l'indice esistente resta valido e intatto.
+
+    📌 Classifica anche `voice`, e su un archivio esistente è il grosso del lavoro: qui
+    la si paga una volta sola, che è esattamente il posto giusto. Senza questa chiamata
+    un DB migrato avrebbe le colonne e nessun valore dentro — schema v3 e archivio muto.
     """
     conn = sqlite3.connect(str(db_path))
     try:
         migrato = _ensure_v3(conn)
+        popola_voice(conn)
         conn.commit()
         return migrato
     finally:
