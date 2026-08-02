@@ -1004,6 +1004,18 @@ findings:
       che questa voce non tocca. ⚠️ Se un domani servisse un `ports` in compose.yaml, questa voce va
       aggiornata insieme al cambio: è un not_contains, quindi è volutamente rigido.
 
+    rilievo_esterno:
+      fonte: "analisi esterna del round-2 (audio bbfda105)"
+      difetto: falso
+      rimedio: assente
+      inquadramento: diverso
+      nota: >
+        L'audio proponeva un fix sulle porte pubblicate in `compose.yaml`, avendo
+        confuso `expose` con `ports` (la nota di scoperta lo dice: «versione CORRETTA
+        di una proposta dell audio»). Il difetto descritto non esisteva, quindi non
+        c'era un rimedio da pesare — la proposta poggiava sulla confusione. E il fatto
+        reale e' un altro: la pubblicazione delle porte vive negli overlay ingress,
+        non in compose.yaml. Verdetti dati il 02/08 da abdd732a chiudendo 73b8d8ac.
   - id: H49
     severity: low
     title: "Fail-closed della supply-chain (cosign obbligatorio) ha una via d'emergenza dichiarata"
@@ -1085,6 +1097,23 @@ findings:
       più giovane del vero, cioè un falso verde (la classe di H51). Meglio un'età per difetto
       e dichiarata che una data che mente in silenzio.
 
+    rilievo_esterno:
+      fonte: "analisi esterna del round-4 (audio f80f9e40)"
+      difetto: vero
+      rimedio: assente
+      inquadramento: piu-stretto
+      nota: >
+        L'audio ha CHIUSO CHIEDENDO cosa succede se sigstore/registry sono giu durante
+        una patch d'emergenza con cosign fail-closed: una domanda, non una proposta —
+        percio' rimedio assente. Il difetto e' vero (un fail-closed senza via d'uscita
+        blocca una patch d'emergenza). Ma l'inquadramento e' PIU STRETTO del rischio
+        reale, e la differenza e' gia' scritta nel codice: tools/vps1777.py:909-913 dice
+        che l'interruttore e' PERSISTENTE, «letto dal .env a ogni update, incluso
+        l auto-update settimanale... a tempo indeterminato». L'audio guardava la
+        DISPONIBILITA di sigstore; il rischio vero e' la PERSISTENZA dell'interruttore.
+        E' la prova che la terza colonna serve: con due sole domande questa voce sarebbe
+        passata come «vero, nessun rimedio», e lo scarto d'inquadramento — il pezzo utile
+        — non sarebbe stato registrato. Verdetti dati il 02/08 da abdd732a (73b8d8ac).
   - id: H50
     severity: high
     title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa nel codice, non ancora in produzione"
@@ -2480,7 +2509,7 @@ findings:
     status: closed
     scoperta:
       quando: "2026-07-27"
-      come: audio-esterno
+      come: lettura
       nota: >
         71d540e6, dalla divergenza del round-9: lei e abdd732a hanno classificato la stessa
         riga di H58 in modo OPPOSTO — vera e falsa — e per scioglierla è servito aprire il
