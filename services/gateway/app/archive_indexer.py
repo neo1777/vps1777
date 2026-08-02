@@ -741,6 +741,57 @@ def popola_voice(conn: sqlite3.Connection, batch: int = 2000) -> int:
     return scritte
 
 
+def retag_voice(conn: sqlite3.Connection, *, scrivi: bool = False,
+                batch: int = 2000) -> dict:
+    """Ri-classifica TUTTE le righe (non solo le non classificate) e riporta il delta.
+
+    Fase 4 della spec. Serve quando le soglie cambiano: `popola_voice` per
+    costruzione non tocca ciò che è già stato deciso — giustamente, o ogni ritocco
+    riscriverebbe in silenzio giudizi presi. Questa invece riscrive apposta, e per
+    questo NON scrive di default.
+
+    🛡️ IL DEFAULT È A SECCO, ed è la scelta che conta qui: un comando che riscrive
+    61.100 righe non deve poter partire per una svista. `scrivi=False` calcola
+    tutto — quindi il delta è reale, non stimato — e non salva niente.
+
+    ⭐ IL DELTA È ESSO STESSO UN DATO (spec §4, [A §6]): «quante voci-terze si
+    nascondono» si legge in `cambiate`, non nella distribuzione finale. Due
+    tarature che producono la stessa distribuzione possono aver spostato righe
+    diverse, e senza il delta le due sono indistinguibili.
+
+    Ritorna {righe, prima:{voice:n}, dopo:{voice:n}, cambiate, scritto:bool}.
+    """
+    prima = {v or "": n for v, n in conn.execute(
+        "SELECT voice, count(*) FROM messages GROUP BY voice")}
+    dopo: dict[str, int] = {}
+    cambiate = 0
+    righe_tot = 0
+    agg_totale: list = []
+    off = 0
+    while True:
+        righe = conn.execute(
+            "SELECT rowid, content, sender, project, voice FROM messages "
+            "ORDER BY rowid LIMIT ? OFFSET ?", (batch, off)).fetchall()
+        if not righe:
+            break
+        off += len(righe)
+        for rid, content, sender, project, vecchio in righe:
+            v, quota, conf, flags = classify_voice(content or "", sender or "", project or "")
+            v = v or "unknown"
+            dopo[v] = dopo.get(v, 0) + 1
+            righe_tot += 1
+            if v != (vecchio or ""):
+                cambiate += 1
+            agg_totale.append((v, quota, conf, json.dumps(flags or []), rid))
+    if scrivi and agg_totale:
+        for i in range(0, len(agg_totale), batch):
+            conn.executemany(
+                "UPDATE messages SET voice=?, quoted_share=?, voice_conf=?, "
+                "content_flags=? WHERE rowid=?", agg_totale[i:i + batch])
+    return {"righe": righe_tot, "prima": prima, "dopo": dopo,
+            "cambiate": cambiate, "scritto": bool(scrivi and agg_totale)}
+
+
 def _quota_citata(testo: str) -> float:
     """Quota 0-1 di righe citate (`>` o dentro un fence). Quantifica il `mixed`."""
     righe = [r for r in testo.splitlines() if r.strip()]
@@ -1951,17 +2002,40 @@ def main(argv: list[str] | None = None) -> int:
         prog="archive_indexer",
         description="Indicizza sessioni/export in un DB FTS5 per archive-mcp.",
     )
-    ap.add_argument("input", help="file di input (.jsonl / .zip / .md / .txt)")
+    ap.add_argument("input", help="file di input (.jsonl / .zip / .md / .txt), "
+                                  "oppure il .db da ri-taggare con --retag")
     ap.add_argument("db", nargs="?", help="file .db SQLite di output (creato/aggiornato)")
     ap.add_argument("--project", default="", help="etichetta progetto (default: dedotta dalla fonte)")
     ap.add_argument("--classify", action="store_true",
                     help="NON indicizza: stampa il verdetto (keep:<sender>/skip:<reason>) "
                          "per ogni riga di un .jsonl Claude Code. È l'interfaccia del "
                          "contratto dei bucket: la corsia app la confronta col suo preflight.")
+    ap.add_argument("--retag", action="store_true",
+                    help="NON indicizza: ri-classifica `voice` su TUTTE le righe del DB "
+                         "passato come `input` e stampa il delta. A SECCO se non c'è "
+                         "--scrivi: il delta è reale (calcolato) ma niente viene salvato.")
+    ap.add_argument("--scrivi", action="store_true",
+                    help="con --retag: applica davvero. Senza, il retag è solo un referto.")
     args = ap.parse_args(argv)
     if not Path(args.input).is_file():
         print(f"input non trovato: {args.input}", file=sys.stderr)
         return 1
+    if args.retag:
+        # 🛡️ `--scrivi` è richiesto ESPLICITAMENTE e non è il default: questo comando
+        # riscrive la classificazione di ogni riga del DB, e un default che scrive
+        # trasforma una svista di battitura in una perdita di giudizi.
+        conn = sqlite3.connect(args.input)
+        try:
+            esito = retag_voice(conn, scrivi=args.scrivi)
+            if args.scrivi:
+                conn.commit()
+        finally:
+            conn.close()
+        print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
+        if not args.scrivi:
+            print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
+                  file=sys.stderr)
+        return 0
     if args.classify:
         with open(args.input, encoding="utf-8") as fh:
             for verdict in classify_cc(fh):

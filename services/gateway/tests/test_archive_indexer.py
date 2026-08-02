@@ -1,6 +1,7 @@
 """Test dell'indexer archive (stdlib-only, offline)."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -1485,3 +1486,80 @@ def test_popola_voice_non_gira_a_vuoto_se_una_regola_torna_stringa_vuota(monkeyp
         assert archive_indexer.popola_voice(c) == 1
         assert c.execute("SELECT voice FROM messages").fetchone()[0] == "unknown", (
             "la guardia deve scrivere un valore NON vuoto, o il ciclo non termina")
+
+
+# ═══════════════ VOICE-TAGGING Fase 4 — il retag, e il suo default a secco ════
+
+def test_retag_a_secco_calcola_e_non_scrive(tmp_path: Path):
+    """Il delta è REALE (calcolato riga per riga), ma niente viene salvato.
+
+    🛡️ È la proprietà che rende il comando usabile: un referto che si può chiedere
+    senza conseguenze. Se il dry-run stimasse invece di calcolare, il numero che
+    guida la decisione di scrivere sarebbe diverso da quello che poi succede.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='SEGNAPOSTO'")
+        c.commit()
+        esito = archive_indexer.retag_voice(c, scrivi=False)
+        assert esito["righe"] == 1
+        assert esito["cambiate"] == 1, "il delta dev'essere calcolato, non stimato"
+        assert esito["scritto"] is False
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "SEGNAPOSTO", (
+            "a secco il DB NON deve cambiare: è tutto il senso del default")
+
+
+def test_retag_con_scrivi_applica_e_riporta_lo_stesso_delta(tmp_path: Path):
+    """Ciò che il secco prometteva è ciò che lo scrivi fa. Se divergessero, il
+    referto sarebbe una previsione e non un'anteprima."""
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='SEGNAPOSTO'")
+        c.commit()
+        secco = archive_indexer.retag_voice(c, scrivi=False)
+        vero = archive_indexer.retag_voice(c, scrivi=True)
+        c.commit()
+        assert vero["cambiate"] == secco["cambiate"]
+        assert vero["dopo"] == secco["dopo"]
+        assert vero["scritto"] is True
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] != "SEGNAPOSTO"
+
+
+def test_retag_riscrive_anche_cio_che_popola_voice_non_tocca(tmp_path: Path):
+    """La differenza fra i due, che è la ragione per cui il retag esiste.
+
+    `popola_voice` tocca SOLO `voice=''` — giustamente, o ogni ritocco delle soglie
+    riscriverebbe in silenzio giudizi già presi. `retag_voice` riscrive apposta, ed
+    è per questo che non parte da solo.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='vecchio_giudizio'")
+        c.commit()
+        assert archive_indexer.popola_voice(c) == 0, "popola_voice non tocca i giudizi"
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "vecchio_giudizio"
+        archive_indexer.retag_voice(c, scrivi=True)
+        c.commit()
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] != "vecchio_giudizio"
+
+
+def test_retag_dalla_riga_di_comando_non_scrive_senza_scrivi(tmp_path: Path, capsys):
+    """L'entrypoint CLI ha lo stesso default della funzione.
+
+    🔑 Non è ridondante col test sulla funzione: il default vive in DUE posti (la
+    firma e l'argparse) e possono divergere. Una `store_true` scritta al contrario
+    renderebbe il comando distruttivo per difetto, con la funzione ancora prudente.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='SEGNAPOSTO'")
+        c.commit()
+    assert archive_indexer.main([str(db), "--retag"]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["scritto"] is False and out["cambiate"] == 1
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "SEGNAPOSTO"

@@ -1794,6 +1794,30 @@ def test_il_runner_diretto_distingue_SALTATO_da_FALLITO():
 test_il_runner_diretto_distingue_SALTATO_da_FALLITO.non_eseguibile_dal_runner = True
 
 
+def test_archive_retag_e_registrato_e_non_scrive_per_difetto():
+    """Il comando esiste NEL DISPATCHER e il suo default è a secco.
+
+    🔴 Perché servono entrambe le metà. Un sottocomando può essere definito nel
+    parser e non essere nella mappa che lo esegue: `argparse` accetta la riga di
+    comando, e poi non succede niente — o peggio, cade con un KeyError che sembra
+    un bug del comando invece che un comando mai collegato. È la stessa forma del
+    `classify_voice` senza chiamanti trovato oggi nell'indexer.
+    🛡️ E il default: `--scrivi` deve essere `store_true`. Se qualcuno lo
+    trasformasse in `--secco` (store_true al contrario), il comando riscriverebbe
+    la classificazione di ogni riga PER DIFETTO — e il test cade prima.
+    """
+    src = (_ROOT / "tools" / "vps1777.py").read_text()
+    assert '"archive-retag": cmd_archive_retag' in src, (
+        "sottocomando definito ma NON collegato al dispatcher: la riga di comando "
+        "verrebbe accettata e non eseguirebbe niente")
+    assert 'sub.add_parser("archive-retag"' in src
+    blocco = src[src.index('sub.add_parser("archive-retag"'):]
+    blocco = blocco[:blocco.index("sub.add_parser", 10)]
+    assert '"--scrivi", action="store_true"' in blocco, (
+        "il default deve NON scrivere: `--scrivi` è l'opt-in, non l'opt-out")
+    assert "--secco" not in blocco, "il verso del default è invertito"
+
+
 if __name__ == "__main__":
     # ⚠️ TRE ESITI, NON DUE (b82df434, 02/08). MISURATO prima di toccare:
     #   85 test eseguiti «ok», 10 «FAIL», exit 1 — e i 10 fallivano tutti con
