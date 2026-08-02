@@ -527,6 +527,36 @@ def deep_health_ok(repo: Path, env: dict | None = None) -> bool:
 # lì il gateway NON deve pubblicare porte e la sonda esterna non si applica.
 PROXY_IN_CONTAINER = ("caddy", "cloudflared")
 
+# Profili in cui l'ingresso NON è un container di questo compose: `tailscale`
+# pubblica con un demone sull'HOST (il Funnel), quindi un update che ricrea i
+# container non lo tocca — ed è la ragione per cui `funnel_ok` lo sonda per nome
+# pubblico invece che per `PUBLIC_BASE`.
+#
+# 🛡️ PERCHÉ QUESTA LISTA ESISTE, e non è una duplicazione della prima.
+# Fino al 02/08 esisteva solo `PROXY_IN_CONTAINER`, e tutto ciò che non vi
+# compariva ricadeva IN SILENZIO nel ramo «l'ingresso non è un container» —
+# cioè veniva trattato come `tailscale`. Un `compose.ingress.nginx.yaml` nuovo
+# avrebbe ereditato l'assunzione «l'update non tocca l'ingresso», che per un
+# proxy in container è FALSA: è esattamente il difetto da cui nasce `f5a797e3`.
+# ⭐ Il default silenzioso stava dalla parte sbagliata: chi aggiunge un profilo
+# non deve *ricordarsi* di classificarlo — deve non riuscire a non farlo.
+# 📌 MISURATO PRIMA DI SCRIVERLA (02/08): la classificazione NON è derivabile
+# dai file. Provati due criteri sui tre profili reali:
+#   porte pubblicate   caddy 2 · cloudflared 0 · tailscale 0
+#     → `cloudflared` (proxy) e `tailscale` (non proxy) hanno lo STESSO valore:
+#       il criterio non separa. È una prova diretta, non un'impressione.
+#   chiavi di primo livello   caddy 4 · cloudflared 3 · tailscale 2
+#     → i tre numeri sono distinti, ma non c'è una soglia che voglia dire
+#       qualcosa: quelle chiavi mescolano servizi veri (`caddy`, `funnel`),
+#       volumi (`caddy-data`, `caddy-config`) e secret (`cloudflared_token`).
+#       Contare «4» non dice chi riceve il traffico — sono due popolazioni in
+#       un campo solo, e ordinarle è un caso, non una regola.
+# Perciò la lista resta a mano, e ciò che si può
+# rendere automatico non è il contenuto ma l'ACCORGERSENE: il test
+# `test_ogni_profilo_ingress_e_classificato` legge i `compose.ingress.*.yaml`
+# dal repo e cade se ne nasce uno che non sta in nessuna delle due liste.
+INGRESS_SENZA_PROXY = ("tailscale",)
+
 
 def valuta_porta_esterna(port_map: str, servizi: list[str],
                          http_status: int | None) -> tuple[bool, str]:

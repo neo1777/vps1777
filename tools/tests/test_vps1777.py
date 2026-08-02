@@ -1547,6 +1547,63 @@ def test_un_proxy_che_pubblica_SENZA_public_base_non_e_non_applicabile():
         v.nome_pubblico_funnel, v.env_read, v.compose_ps, v.warn = orig
 
 
+def test_ogni_profilo_ingress_e_classificato():
+    """Un profilo d'ingresso nuovo non deve poter nascere NON CLASSIFICATO.
+
+    🔴 IL DIFETTO CHE CHIUDE (`f5a797e3`, 02/08). Fino a oggi esisteva una lista
+    sola, `PROXY_IN_CONTAINER`, e tutto ciò che non vi compariva ricadeva IN
+    SILENZIO nel ramo «l'ingresso non è un container di questo compose» — cioè
+    veniva trattato come `tailscale`, di cui vale «un update non lo tocca».
+    Per un proxy in container quell'assunzione è FALSA: l'update lo RICREA, e se
+    lo rompe il gate vede 200 dall'interno e il rollback non scatta. È la classe
+    di H51 dentro il presidio scritto per H51.
+    ⭐ Il difetto non era la lista: era il DEFAULT. Chi aggiunge
+    `compose.ingress.nginx.yaml` non deve *ricordarsi* di classificarlo — deve
+    non riuscire a non farlo. Questo test è quel «non riuscire».
+
+    📌 PERCHÉ UN TEST E NON UNA DERIVAZIONE AUTOMATICA: la classificazione non è
+    derivabile dai file. Misurato sui tre profili reali (02/08): le porte
+    pubblicate sono 2 · 0 · 0, e `cloudflared` (proxy) e `tailscale` (non proxy)
+    condividono lo 0 — il criterio non separa. Quindi la lista resta a mano, e
+    ciò che si automatizza non è il contenuto ma l'ACCORGERSENE.
+
+    🛡️ CONTROLLA I DUE VERSI, e il secondo non discende dal primo:
+      · un FILE senza una lista  → il profilo nuovo eredita in silenzio il ramo
+        sbagliato (il difetto di sopra);
+      · una LISTA senza un file  → la voce invecchia PUNTANDO: il profilo è
+        stato tolto o rinominato e la classificazione resta, vera per un mondo
+        che non c'è più. È la deriva delle coordinate, e un test che guarda un
+        verso solo non la vede.
+    """
+    dal_disco = {p.name.split(".")[2] for p in _ROOT.glob("compose.ingress.*.yaml")}
+
+    # 🔴 Uno zero che non sa di essere zero: se la radice fosse sbagliata, `glob`
+    # tornerebbe vuoto e il confronto passerebbe per assenza di dati. Il test
+    # DEVE distinguere «ho guardato e va bene» da «non ho potuto guardare».
+    assert dal_disco, (
+        f"zero `compose.ingress.*.yaml` sotto {_ROOT}: la RADICE è sbagliata o i "
+        f"profili sono spariti. Questo NON è un verde — è un test che non ha guardato.")
+
+    classificati = set(v.PROXY_IN_CONTAINER) | set(v.INGRESS_SENZA_PROXY)
+
+    senza_lista = dal_disco - classificati
+    assert not senza_lista, (
+        f"profilo d'ingresso NON CLASSIFICATO: {sorted(senza_lista)}.\n"
+        f"Decidi a quale delle due liste appartiene, in tools/vps1777.py:\n"
+        f"  · PROXY_IN_CONTAINER  → a ricevere il traffico è un container di questo\n"
+        f"    compose. L'update lo RICREA: il gateway non deve pubblicare porte, e il\n"
+        f"    profilo ha bisogno di PUBLIC_BASE nel .env o resta senza sonda esterna.\n"
+        f"  · INGRESS_SENZA_PROXY → l'ingresso vive FUORI dal compose (demone\n"
+        f"    sull'host). Un update non lo tocca, e `funnel_ok` lo sonda per nome\n"
+        f"    pubblico.\n"
+        f"Non c'è un default giusto: sceglierne uno in silenzio è il difetto f5a797e3.")
+
+    senza_file = classificati - dal_disco
+    assert not senza_file, (
+        f"classificati ma SENZA file compose: {sorted(senza_file)}.\n"
+        f"O il profilo è stato tolto/rinominato e la lista è rimasta indietro, o il\n"
+        f"file è altrove. Una classificazione che punta a un profilo inesistente non\n"
+        f"dà errore da sola: continua a rispondere, su un mondo che non c'è più.")
 
 
 # ═══════════════════════ la ZONA CIECA del gate, dichiarata (b82df434, 02/08) ══
