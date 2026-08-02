@@ -204,7 +204,31 @@ CREATE TABLE IF NOT EXISTS messages(
     -- siamo certi — e lascia passare il resto (comprese le righe non classificate, che avendo
     -- `ts` vuoto non spostano comunque il massimo). Regola generale: quando il default è
     -- l'ignoranza, il filtro si scrive su ciò che si SA, non su ciò che si presume.
-    ts_source   TEXT DEFAULT 'messaggio'
+    ts_source   TEXT DEFAULT 'messaggio',
+    -- ─── VOICE-TAGGING, Fase 1 (spec: RICONCILIAZIONE-VOICE-TAGGING, §1 e §4) ───
+    -- Due assi che NON vanno fusi, ed è l'intera ragione di queste colonne:
+    --   speaker = chi INVIA   (un fatto: sta nella fonte)
+    --   voice   = natura del CONTENUTO (una stima: la calcola un'euristica, Fase 2)
+    -- Il caso-scuola che li separa: un messaggio inviato da un umano il cui contenuto è
+    -- un'analisi incollata di un'AI. `speaker=human` E `voice=pasted_ai`: fondere i due
+    -- assi rende quel caso INESPRIMIBILE, ed è il caso che ci ha fatto sbagliare (C++).
+    --
+    -- 🔴 MISURATO PRIMA DI SCRIVERE (02/08, 61.100 messaggi reali di un DB vivo):
+    --      assistant 36.484 · user 21.157 · attachment 2.327 · title 1.132 · zero vuoti
+    --    `sender` è popolato al 100% — ma MESCOLA GIÀ I DUE ASSI: `user`/`assistant` sono
+    --    mittenti, `attachment`/`title` sono NATURE DELLA RIGA. La spec diceva «il dato
+    --    esiste già, va solo PROMOSSO»: la prima metà regge, la seconda no. Non si promuove
+    --    `sender`, si SEPARA ciò che `sender` aveva confuso.
+    --
+    -- ⚠️ E PER LE RIGHE CHE NON DICONO CHI HA SCRITTO (`attachment`, `title`) il valore è
+    --    'unknown', non una scelta comoda. È la lezione già pagata qui sopra con `ts_source`:
+    --    un default che ASSERISCE fabbrica, in un colpo solo e su archivi vivi, esattamente
+    --    la bugia che la colonna doveva impedire — e con l'aria di un dato verificato.
+    speaker       TEXT DEFAULT '',   -- human/assistant/unknown (derivato da `sender`, Fase 1)
+    voice         TEXT DEFAULT '',   -- own/pasted_transcript/pasted_ai/character/doc/mixed
+    quoted_share  REAL DEFAULT 0,    -- quota 0-1 di materiale incollato (quantifica `mixed`)
+    voice_conf    REAL DEFAULT 0,    -- confidenza dell'euristica
+    content_flags TEXT DEFAULT ''    -- json: l'autopsia del verdetto di `classify_voice`
 );
 -- REVISIONI (D18, scelta di Neo 20/07: «cambio di schema: conservare le revisioni»).
 -- Il difetto: `messages` ha PK su uuid e si scrive con INSERT OR REPLACE → se lo stesso
@@ -329,6 +353,7 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
     try:
         conn.executescript(_SCHEMA)
         _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
+        _ensure_v3(conn)  # voice-tagging Fase 1: colonne nuove + `speaker` derivato
         n = 0
         buf: list[RowFull] = []
         skip_buf: list[tuple] = []
@@ -490,6 +515,86 @@ def _ensure_v2(conn: sqlite3.Connection) -> bool:
     conn.execute("DROP TABLE IF EXISTS messages_fts")
     conn.executescript(_SCHEMA)
     return True
+
+
+# ══════════════════════════════════════════ VOICE-TAGGING — Fase 1 (speaker) ══
+# Perché una FASE 1 da sola: `speaker` è un FATTO già presente nella fonte, `voice` è una
+# STIMA che richiede euristiche e un golden-set (Fase 2). Separarle vuol dire che il dato
+# certo entra subito e quello incerto entra quando è tarato — invece di aspettarsi a vicenda.
+
+# Solo ciò che SAPPIAMO. Un sender non elencato NON diventa 'human' per somiglianza: la
+# spec prevede anche i nomi Telegram come mittenti umani, ma da qui un nome di persona e
+# un'etichetta di sistema sono indistinguibili — e indovinare è il difetto che queste
+# colonne esistono per curare. Si taranno in Fase 2, col golden-set davanti.
+_SPEAKER_NOTI = {
+    "user": "human",
+    "human": "human",
+    "assistant": "assistant",
+}
+
+
+def speaker_da_sender(sender: str) -> str:
+    """Traduce il `sender` della fonte nell'asse-mittente. Mai indovina: 'unknown'.
+
+    `attachment` e `title` NON sono mittenti — sono nature della riga (misurato: 3.459 righe
+    su 61.100 in un DB vivo). Mapparle su un mittente qualsiasi fabbricherebbe un'attribuzione
+    che la fonte non contiene.
+    """
+    s = (sender or "").strip().lower()
+    return _SPEAKER_NOTI.get(s, "unknown")
+
+
+def popola_speaker(conn: sqlite3.Connection) -> int:
+    """Deriva `speaker` da `sender` per le righe che non ce l'hanno. Ritorna quante ne ha scritte.
+
+    Idempotente per costruzione: tocca **solo** `speaker=''`. Alla seconda esecuzione trova
+    zero righe e scrive zero. Vale anche dopo un ingest nuovo (le righe nuove nascono con
+    `speaker=''` e vengono derivate al passaggio successivo), quindi non serve toccare
+    `write_rows` né la forma a 9 colonne delle tuple.
+    """
+    scritte = 0
+    mittenti = [r[0] for r in conn.execute(
+        "SELECT DISTINCT sender FROM messages WHERE speaker=''")]
+    for snd in mittenti:
+        cur = conn.execute(
+            "UPDATE messages SET speaker=? WHERE speaker='' AND sender IS ?",
+            (speaker_da_sender(snd), snd))
+        scritte += cur.rowcount
+    return scritte
+
+
+def _ensure_v3(conn: sqlite3.Connection) -> bool:
+    """Aggiunge le colonne del voice-tagging a un DB v2. Idempotente.
+
+    ⚠️ NESSUNA delle colonne nuove entra nell'FTS in questa fase, ed è deliberato: metterle
+    nell'indice impone un DROP+rebuild della tabella FTS su ogni archivio vivo — costoso, e
+    inutile finché non esistono i filtri che le interrogano (Fase 3). È la stessa scelta già
+    presa qui per `ts_source`, e per la stessa ragione.
+    """
+    have = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+    nuove = (("speaker", "TEXT DEFAULT ''"), ("voice", "TEXT DEFAULT ''"),
+             ("quoted_share", "REAL DEFAULT 0"), ("voice_conf", "REAL DEFAULT 0"),
+             ("content_flags", "TEXT DEFAULT ''"))
+    mancanti = [(c, d) for c, d in nuove if c not in have]
+    for col, decl in mancanti:
+        conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {decl}")
+    popola_speaker(conn)
+    return bool(mancanti)
+
+
+def migrate_v2_to_v3(db_path: Union[str, Path]) -> bool:
+    """Porta un DB allo schema v3 (colonne voice-tagging + `speaker` derivato).
+
+    Ritorna True se ha aggiunto colonne. NON ricostruisce l'FTS: le colonne nuove non sono
+    indicizzate (vedi `_ensure_v3`), quindi l'indice esistente resta valido e intatto.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        migrato = _ensure_v3(conn)
+        conn.commit()
+        return migrato
+    finally:
+        conn.close()
 
 
 def migrate_v1_to_v2(db_path: Union[str, Path]) -> bool:

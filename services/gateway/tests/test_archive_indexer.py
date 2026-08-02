@@ -1220,3 +1220,91 @@ def test_newest_si_calcola_in_negativo(tmp_path):
     # sotto lascia scoperto proprio ciò che è costato tre giri e due bocciature.
     assert positivo != negativo, "la forma positiva DEVE sbagliare: esclude le righe 'ignoto'"
     assert positivo == "2026-01-01T00:00:00Z", "…e sbaglia dando un newest troppo VECCHIO"
+
+
+# ═══════════════════════════════════════════ VOICE-TAGGING — Fase 1 (speaker) ══
+
+def test_speaker_da_sender_traduce_solo_cio_che_sa():
+    """`speaker` è un FATTO: ciò che la fonte non dice resta 'unknown'."""
+    f = archive_indexer.speaker_da_sender
+    assert f("user") == "human"
+    assert f("assistant") == "assistant"
+    assert f("USER") == "human", "il case della fonte non deve cambiare il verdetto"
+    assert f("  user  ") == "human", "né gli spazi"
+    # ⚠️ IL CUORE DEL TEST, e la ragione per cui queste colonne esistono (b82df434, 02/08).
+    # `attachment` e `title` sono nature della RIGA, non mittenti — misurato su un DB vivo:
+    # 2.327 + 1.132 righe su 61.100. La tentazione naturale è mapparle su 'human' (un
+    # allegato l'ha caricato un umano, no?) o su 'assistant'. Entrambe fabbricherebbero
+    # un'attribuzione che la fonte NON contiene, che è esattamente il difetto che il
+    # voice-tagging esiste per curare. Se qualcuno "completa" la mappa, questo test cade.
+    assert f("attachment") == "unknown", "un allegato non dice CHI l'ha scritto"
+    assert f("title") == "unknown", "un titolo non è un mittente"
+    assert f("memory") == "unknown"
+    assert f("") == "unknown"
+    assert f(None) == "unknown", "nessun crash sul NULL della colonna"
+    assert f("Mario Rossi") == "unknown", (
+        "un nome sconosciuto NON diventa 'human' per somiglianza: la spec prevede i nomi "
+        "Telegram come umani, ma da qui nome-persona ed etichetta-di-sistema sono "
+        "indistinguibili. Si tara in Fase 2, col golden-set.")
+
+
+def _db_v2(tmp_path: Path, righe) -> Path:
+    """Un DB nello schema v2 (senza le colonne del voice-tagging), come quelli già vivi."""
+    db = tmp_path / "v2.db"
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT,"
+            " content TEXT, sender TEXT DEFAULT '', tools TEXT DEFAULT '',"
+            " thinking TEXT DEFAULT '', attachments TEXT DEFAULT '',"
+            " parent_uuid TEXT DEFAULT '', ts_source TEXT DEFAULT 'messaggio')")
+        c.executemany("INSERT INTO messages(uuid,project,ts,content,sender)"
+                      " VALUES(?,?,?,?,?)", righe)
+    return db
+
+
+def test_migrate_v3_aggiunge_colonne_e_deriva_speaker(tmp_path: Path):
+    db = _db_v2(tmp_path, [
+        ("u1", "p", "2026-01-01T00:00:00Z", "domanda", "user"),
+        ("a1", "p", "2026-01-01T00:00:01Z", "risposta", "assistant"),
+        ("t1", "p", "2026-01-01T00:00:02Z", "un titolo", "title"),
+        ("f1", "p", "2026-01-01T00:00:03Z", "un allegato", "attachment"),
+    ])
+    assert archive_indexer.migrate_v2_to_v3(db) is True
+    with sqlite3.connect(db) as c:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(messages)")}
+        assert {"speaker", "voice", "quoted_share", "voice_conf", "content_flags"} <= cols
+        got = dict(c.execute("SELECT uuid, speaker FROM messages"))
+        vuoti = c.execute("SELECT count(*) FROM messages WHERE speaker=''").fetchone()[0]
+        # `voice` NON viene popolato dalla Fase 1: è una stima, e la stima arriva in Fase 2.
+        voci = c.execute("SELECT count(*) FROM messages WHERE voice<>''").fetchone()[0]
+    assert got == {"u1": "human", "a1": "assistant", "t1": "unknown", "f1": "unknown"}
+    assert vuoti == 0, "dopo la migrazione nessuna riga resta senza asse-mittente"
+    assert voci == 0, (
+        "la Fase 1 non deve scrivere `voice`: un campo popolato sembra sempre popolato "
+        "apposta, e una stima mai calcolata che si legge come classificazione è la bugia "
+        "che queste colonne devono impedire")
+
+
+def test_migrate_v3_e_idempotente(tmp_path: Path):
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "user")])
+    assert archive_indexer.migrate_v2_to_v3(db) is True
+    assert archive_indexer.migrate_v2_to_v3(db) is False, "la seconda volta non migra nulla"
+    with sqlite3.connect(db) as c:
+        assert archive_indexer.popola_speaker(c) == 0, "e non riscrive nessuna riga"
+        assert c.execute("SELECT speaker FROM messages").fetchone()[0] == "human"
+
+
+def test_speaker_non_sovrascrive_un_valore_gia_scritto(tmp_path: Path):
+    """`popola_speaker` tocca SOLO `speaker=''`.
+
+    Serve perché la Fase 2 (e il retag della Fase 4) scriveranno valori più precisi di
+    quelli derivabili da `sender` — es. un nome Telegram riconosciuto come umano. Se la
+    derivazione li riscrivesse a ogni ingest, il lavoro fine verrebbe cancellato dal
+    lavoro grezzo, e in silenzio.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "Mario Rossi")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET speaker='human' WHERE uuid='u1'")
+        assert archive_indexer.popola_speaker(c) == 0
+        assert c.execute("SELECT speaker FROM messages").fetchone()[0] == "human"
