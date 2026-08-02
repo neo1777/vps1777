@@ -836,32 +836,41 @@ def test_raggiungibilita_ritorno_misura_la_durata_fra_i_due_istanti():
     nessuno saprebbe quanto è durato — che è esattamente il numero che il 27/07
     abbiamo dedotto sbagliando di dodici minuti."""
     import datetime as _dt
+
+    # 🔴 DUE CURE SBAGLIATE PRIMA DI QUESTA, e la seconda è la lezione.
+    #   ① `assert "1h27m50s" in …` — FLAKY: il test costruiva l'istante con `now()` e
+    #      il codice ne legge un ALTRO; se fra le due letture scattava un secondo la
+    #      durata era 1h27m51s. Misurava la velocità della macchina, non la durata.
+    #   ② finestra di tolleranza [atteso, atteso+2] — **è caduta lo stesso**, in CI, con
+    #      5273 contro [5270, 5272]: una macchina condivisa può perdere tre secondi fra
+    #      due righe. ⭐ Allargare la finestra non toglieva la dipendenza dall'orologio:
+    #      la rendeva più rara, cioè più difficile da attribuire quando fosse tornata.
+    #      È «la cura a metà»: cura il sintomo del caso visto e lascia in piedi la causa.
+    #   ✅ ③ il test FERMA l'orologio invece di inseguirlo. Senza `now()` nel mezzo, la
+    #      durata è esatta per costruzione e l'assert torna a essere quello vero —
+    #      `1h27m50s`, non una finestra. Un test deterministico non ha bisogno di
+    #      tolleranza, e la tolleranza in un test è quasi sempre il segno che una
+    #      dipendenza non dichiarata è rimasta dentro.
+    class _OrologioFermo:
+        """`v.datetime` sostituito: `now()` fisso, tutto il resto delegato al vero."""
+        def __init__(self, quando): self.quando = quando
+        def now(self, tz=None): return self.quando
+        def __getattr__(self, nome): return getattr(_dt.datetime, nome)
+
     spia, ripristina = _con_sonda(True, "raggiungibile")
+    vero_datetime = v.datetime
     try:
-        giu = (v.datetime.now(v.timezone.utc) - _dt.timedelta(hours=1, minutes=27, seconds=50))
+        adesso = _dt.datetime(2026, 8, 2, 12, 0, 0, tzinfo=_dt.timezone.utc)
+        giu = adesso - _dt.timedelta(hours=1, minutes=27, seconds=50)
+        v.datetime = _OrologioFermo(adesso)
         st = {"irraggiungibile_da": giu.strftime("%Y-%m-%dT%H:%M:%SZ")}
         v._sorveglia_raggiungibilita(Path("/non/serve"), st, True)
         assert "irraggiungibile_da" not in st, "il marcatore resta e il prossimo guasto misura male"
         assert len(spia.messaggi) == 1
-        # 🔴 QUI C'ERA `assert "1h27m50s" in ...`, ED ERA FLAKY (trovato il 02/08
-        # aggiungendo due test altrove, che hanno rallentato la suite di un secondo).
-        # Il test costruisce l'istante con `now()` e il codice ne legge un ALTRO:
-        # se fra le due letture scatta un secondo, la durata è 1h27m**51**s e
-        # l'assert cade. ⭐ Misurava la velocità della macchina, non la durata.
-        # 🛡️ Adesso pretende il valore ENTRO UNA FINESTRA DICHIARATA: la cosa che
-        # questo test esiste per provare è che la durata sia MISURATA fra i due
-        # istanti e non stimata — e due secondi di tolleranza non la indeboliscono,
-        # mentre un secondo di rigidità la rendeva rossa a caso.
-        import re as _re
-        m = _re.search(r"(\d+)h(\d+)m(\d+)s", spia.messaggi[0])
-        assert m, f"la durata non è nemmeno nel messaggio: {spia.messaggi[0]}"
-        secondi = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
-        atteso = 1 * 3600 + 27 * 60 + 50
-        assert atteso <= secondi <= atteso + 2, (
-            f"durata {secondi}s fuori dalla finestra [{atteso}, {atteso + 2}]: "
-            f"{spia.messaggi[0]}"
-        )
+        assert "1h27m50s" in spia.messaggi[0], (
+            f"la durata non è quella fra i due istanti: {spia.messaggi[0]}")
     finally:
+        v.datetime = vero_datetime
         ripristina()
 
 
