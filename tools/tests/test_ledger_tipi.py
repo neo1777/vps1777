@@ -27,7 +27,13 @@ import ast
 import re
 from pathlib import Path
 
-import yaml
+# 🔴 STDLIB-ONLY, e l'ho imparato dalla CI. La prima stesura importava `yaml` e
+# passava in locale (PyYAML c'è); il job che lancia questi test si chiama
+# «Test CLI vps1777 (stdlib-only)» e non lo ha. ⇒ verde in casa, rosso nel posto
+# che conta. `verify-features.py` PUÒ usare yaml perché gira in un job suo con le
+# dipendenze; `tools/tests/` no, e il vincolo era scritto nel NOME del job.
+# ⭐ La lezione non è «ricordati di guardare la CI»: è che un verde ottenuto in un
+# ambiente diverso da quello vero non è un verde — è un'altra misura.
 
 _ROOT = Path(__file__).resolve().parents[2]
 _VERIF = _ROOT / "tools" / "verify-features.py"
@@ -58,21 +64,41 @@ def _tipi_trattati() -> set[str]:
 
 
 def _tipi_usati() -> set[str]:
-    """I `type` che le voci del ledger usano davvero, da `verify` e `follow_up.verify`."""
-    doc = yaml.safe_load(_LEDGER.read_text(errors="replace")) or {}
-    voci = doc.get("features") or doc.get("voci") or []
-    if not isinstance(voci, list):
-        voci = [v for v in doc.values() if isinstance(v, list) for v in v]
+    """I `type` usati dalle voci, letti dal TESTO del ledger — senza PyYAML.
+
+    Due forme nel file, entrambe coperte:
+        verify: {cli_command: status}          ← inline
+        verify:                                ← a blocco
+          mcp_tool: {service: …, name: …}
+
+    🛡️ La guardia in fondo è la parte che conta: un parser a regex che smette di
+    combaciare tornerebbe l'insieme VUOTO, e un confronto contro il vuoto passa
+    sempre. Il test direbbe verde **senza aver letto niente** — che è la classe
+    esatta che questo file esiste per prendere, girata contro se stessa.
+    """
     usati: set[str] = set()
-    for e in voci:
-        if not isinstance(e, dict):
+    righe = _LEDGER.read_text(errors="replace").splitlines()
+    for i, r in enumerate(righe):
+        m = re.match(r"\s*(?:verify|follow_up)?\s*verify:\s*\{?\s*([a-z][a-z_]*)\s*:", r)
+        if m:
+            usati.add(m.group(1))
             continue
-        for spec in (e.get("verify"), (e.get("follow_up") or {}).get("verify")):
-            if isinstance(spec, dict):
-                usati |= set(spec.keys())
-            elif isinstance(spec, str):
-                usati.add(spec)
-    return usati - _MANUALI
+        if re.match(r"\s*verify:\s*$", r):
+            for succ in righe[i + 1:i + 3]:
+                # `[a-z][a-z_]*` e non `[a-z_]+`: le chiavi che iniziano con `_`
+                # sono ANNOTAZIONI del ledger (`_nota`, come `_meta`/`_schema`), non
+                # tipi di verifica. Escluderle per forma invece che per nome vale
+                # anche per quelle che nasceranno.
+                m2 = re.match(r"\s+([a-z][a-z_]*):", succ)
+                if m2:
+                    usati.add(m2.group(1))
+                    break
+    usati -= _MANUALI
+    assert len(usati) >= 3, (
+        f"il parser del ledger ha letto solo {sorted(usati)}: il formato di "
+        f"features.yaml è cambiato e questo test starebbe confrontando il VUOTO, "
+        f"cioè passando senza guardare")
+    return usati
 
 
 def test_ogni_tipo_del_ledger_ha_il_suo_verificatore():
@@ -107,12 +133,15 @@ def test_nessun_verificatore_e_INTROVABILE():
     ⇒ cade solo su un tipo che non è né usato da una voce né descritto in `_schema`.
     """
     trattati, usati = _tipi_trattati() - _MANUALI, _tipi_usati()
-    documentati = set((yaml.safe_load(_LEDGER.read_text(errors="replace"))
-                       or {}).get("_schema", {}).get("verify", {}) or {})
-    if not documentati:                      # lo schema descrive i tipi altrove
-        documentati = set(re.findall(r"^\s{4}([a-z_]+):",
-                                     str((yaml.safe_load(_LEDGER.read_text()) or {})
-                                         .get("_schema", "")), re.M))
+    # i tipi DESCRITTI in `_schema`: il blocco fra `_schema:` e la chiave di primo
+    # livello successiva, righe `    <nome>: "…"`.
+    testo = _LEDGER.read_text(errors="replace")
+    inizio = testo.find("_schema:")
+    blocco = testo[inizio:] if inizio >= 0 else ""
+    fine = re.search(r"^[a-z_]+:", blocco[len("_schema:"):], re.M)
+    if fine:
+        blocco = blocco[:len("_schema:") + fine.start()]
+    documentati = set(re.findall(r"^\s{2,6}([a-z][a-z_]*):", blocco, re.M))
     introvabili = trattati - usati - documentati
     assert not introvabili, (
         f"verificatori né usati né documentati in `_schema`: {sorted(introvabili)}.\n"
