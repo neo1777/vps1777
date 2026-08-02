@@ -894,8 +894,19 @@ if confirm "Riavvio la VPS ora? (verifica auto-start dei container)"; then
       warn "Reboot test: $REBOOT_TEST — l'auto-start NON è stato verificato."
     else
       giu=""
+      # `su` viene da `ps --services`: è separato da NEWLINE, e il match qui sotto
+      # cerca `*" $s "*`, cioè spazi. Prima si usava `$(echo $su)` non quotato, che
+      # collassava i newline per word splitting — funzionava, ma shellcheck lo
+      # bocciava (SC2116 + SC2086) e ha reso rossa la CI.
+      # ⚠️ Il suggerimento del linter — `echo "$su"` — AVREBBE ROTTO LA LOGICA: con
+      # le virgolette i newline restano, il pattern non combacia più e **tutti** i
+      # servizi risulterebbero giù. Applicare un fix di lint alla lettera, qui,
+      # trasformava un warning di stile in un falso allarme su ogni deploy.
+      # 🛡️ La conversione è esplicita, quotata, e si fa UNA volta invece che a ogni
+      # giro: dice cosa succede ai newline invece di lasciarlo a un effetto laterale.
+      su_sp=" $(printf '%s' "$su" | tr '\n' ' ') "
       for s in $attesi; do
-        case " $(echo $su) " in *" $s "*) ;; *) giu="$giu $s";; esac
+        case "$su_sp" in *" $s "*) ;; *) giu="$giu $s";; esac
       done
       if [ -n "${giu# }" ]; then
         # ⚠️ I NOMI, non un contatore: un numero non si può spuntare, una lista sì.
