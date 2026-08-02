@@ -51,6 +51,10 @@ STATUSES = ("active-default", "opt-in", "deferred", "removed")
 #   retroattiva, e lo farebbe con 20 fallimenti duri in un colpo.
 # ⭐ Quindi ogni categoria nuova ha la SUA semina: segnalata, non fatale, finché le sue
 #   voci non sono scritte. Poi si toglie da qui — e da quel momento è dura come le altre.
+# `cli_command` è uscita dalla semina il 02/08 nello stesso commit che l'ha creata:
+# le sue dieci voci sono state scritte subito, quindi non c'è un intervallo in cui
+# la categoria segnala e nessuno agisce. Una semina che dura è una segnalazione che
+# si impara a ignorare.
 CATEGORIE_IN_SEMINA = {"tools_script"}
 # gli status che DEVONO essere reali adesso (il verso dichiarato→reale li controlla).
 # 'deferred' e 'removed' NON si controllano contro il reale: il primo non c'è ANCORA,
@@ -120,6 +124,23 @@ def run_check(spec: dict, repo: Path) -> tuple[bool, str]:
                 for f in files if f.is_file())
         ok = n >= arg.get("min", 1)
         return ok, f"{n} occorrenze di /{arg['pattern']}/ (min {arg.get('min', 1)})"
+
+    if kind == "cli_command":
+        # 🔴 PERCHÉ DUE CONDIZIONI E NON UNA (b82df434, 02/08). Un sottocomando vive
+        # in DUE posti: l'`add_parser` che lo fa accettare dalla riga di comando, e
+        # la mappa nome→funzione che lo esegue. **Divergono**: un `add_parser` senza
+        # voce nella mappa fa sì che `vps1777 <cmd>` venga accettato e non faccia
+        # NIENTE — o cada con un KeyError che si legge come un bug del comando invece
+        # che come un comando mai collegato.
+        # ⇒ «esiste» qui vuol dire ENTRAMBE. Provarne una sola darebbe un verde su
+        # metà della cosa, che è la classe che questo ledger esiste per chiudere.
+        src = (repo / "tools" / "vps1777.py").read_text(errors="replace")
+        nel_parser = f'sub.add_parser("{arg}"' in src
+        nel_dispatch = f'"{arg}": cmd_' in src
+        ok = nel_parser and nel_dispatch
+        return ok, (f"{arg}: parser {'sì' if nel_parser else 'NO'} · "
+                    f"dispatcher {'sì' if nel_dispatch else 'NO'}"
+                    + ("" if ok else " ⇒ definito a metà"))
 
     if kind == "systemd_unit":
         p = repo / "systemd" / arg
@@ -200,7 +221,29 @@ def enum_reality(repo: Path) -> dict[str, set[str]]:
     """Cosa ESISTE davvero nel repo, per categoria. Ogni chiave qui DEVE trovare una
     voce nel ledger, o il verso reale→dichiarato segnala/fallisce."""
     real: dict[str, set[str]] = {"mcp_tool": set(), "systemd_unit": set(),
-                                 "compose_profile": set(), "tools_script": set()}
+                                 "compose_profile": set(), "tools_script": set(),
+                                 "cli_command": set()}
+
+    # ── cli_command ───────────────────────────────────────────────────────────
+    # 🔴 PERCHÉ QUESTA CATEGORIA ESISTE (b82df434, 02/08/2026 09:2x), ed è la SECONDA
+    #   volta che questo verso si scopre cieco su un piano. Stanotte avevo aggiunto
+    #   `tools_script` perché tutto `tools/` era fuori dall'enumerazione. Restava
+    #   fuori un piano più fine: i SOTTOCOMANDI dentro `tools/vps1777.py` — un file
+    #   solo, dieci funzioni-comando. Curato «i file», non «i comandi dentro un file».
+    # 📏 Misurato quando è stata scritta: 9 sottocomandi definiti, ZERO con una voce
+    #   nel ledger. Le voci `update.*` che sembravano coprirlo sono altro (timer,
+    #   bottone), e le ho aperte una per una prima di dire zero.
+    # ⚠️ E il modo in cui è saltato fuori vale più del numero: `verify-features` è
+    #   passato VERDE sulla PR che AGGIUNGE `archive-retag`. Il verde era corretto —
+    #   era su un piano che il presidio non guarda. Uno zero che non sa di essere zero,
+    #   dentro il presidio scritto apposta per gli zeri.
+    # 🖐️ COSA NON PROVA: che il comando FUNZIONI, o che qualcuno lo usi. Prova che è
+    #   accettato dalla riga di comando E collegato a una funzione — le due metà che
+    #   possono divergere in silenzio.
+    cli = repo / "tools" / "vps1777.py"
+    if cli.exists():
+        testo = cli.read_text(errors="replace")
+        real["cli_command"] = set(re.findall(r'sub\.add_parser\("([a-z0-9-]+)"', testo))
 
     # ── tools_script ──────────────────────────────────────────────────────────
     # 🔴 PERCHÉ QUESTA CATEGORIA ESISTE (b82df434, 02/08/2026 00:0x).
@@ -279,7 +322,8 @@ def _keys_of(e: dict) -> dict[str, set[str]]:
     coordinata (il buco fine trovato da setaccio: un profilo removed con verify manual
     veniva dato per non-dichiarato)."""
     k: dict[str, set[str]] = {"mcp_tool": set(), "systemd_unit": set(),
-                              "compose_profile": set(), "tools_script": set()}
+                              "compose_profile": set(), "tools_script": set(),
+                              "cli_command": set()}
     for spec in (e.get("verify"), (e.get("follow_up") or {}).get("verify")):
         if isinstance(spec, dict):
             if "mcp_tool" in spec:
@@ -288,6 +332,8 @@ def _keys_of(e: dict) -> dict[str, set[str]]:
                 k["systemd_unit"].add(spec["systemd_unit"])
             elif "compose_profile" in spec:
                 k["compose_profile"].add(spec["compose_profile"]["profile"])
+            elif "cli_command" in spec:
+                k["cli_command"].add(spec["cli_command"])
     # dove: "compose-profile:<file>#<profilo>" · "mcp-tool:<svc>/<nome>" · "systemd:<unit>"
     for d in e.get("dove", []):
         if d.startswith("compose-profile:") and "#" in d:
@@ -296,6 +342,8 @@ def _keys_of(e: dict) -> dict[str, set[str]]:
             k["mcp_tool"].add(d.split(":", 1)[1])
         elif d.startswith("systemd:"):
             k["systemd_unit"].add(d.split(":", 1)[1])
+        elif d.startswith("cli:"):
+            k["cli_command"].add(d.split(":", 1)[1])
         # tools_script: il `dove` è già il percorso nudo (`tools/backup.sh`) — nessun
         # prefisso nuovo da imparare, e le voci che lo citano risultano dichiarate
         # senza toccarle. È il motivo per cui la semina parte già non-vuota.

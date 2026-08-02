@@ -1125,3 +1125,94 @@ features:
       python_def:
         path: tools/verify-features.py
         name: enum_reality
+
+  # ── i COMANDI della riga di comando ────────────────────────────────────────
+  # 🔴 Fino al 02/08 NESSUNO di questi era nel ledger: 9 su 9. Il verso
+  #    reale→dichiarato enumerava tool MCP, unit systemd e profili compose — i
+  #    sottocomandi di `tools/vps1777.py` erano una QUARTA forma, fuori.
+  # ⭐ È la seconda cecità dello stesso presidio in dodici ore: stanotte era
+  #    `tools/` (una CARTELLA intera), adesso i comandi DENTRO un file. La parte
+  #    scoperta non è mai casuale — è quella con la forma diversa dalle altre,
+  #    perché un presidio nasce dove è facile metterlo (@71d540e6, 6ª istanza).
+  # 🔑 E la forma diversa era anche la più esposta: `status`, `check`, `rollback`,
+  #    `update` sono la superficie con cui Neo USA vps1777.
+  # 🛡️ `verify: cli_command` controlla DUE cose, perché divergono: che il comando
+  #    sia accettato dal parser E collegato nel dispatcher. Un `add_parser` senza
+  #    voce nella mappa fa accettare la riga di comando e non esegue niente.
+
+  - id: cli.status
+    nome: "vps1777 status"
+    cosa: "Stato dei servizi, versione, salute — il comando con cui si guarda la macchina."
+    dove: ["cli:status", "tools/vps1777.py"]
+    status: active-default
+    since: "0.1.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: status}
+
+  - id: cli.check
+    nome: "vps1777 check"
+    cosa: "Diagnostica: preflight e controlli sull'installazione."
+    dove: ["cli:check", "tools/vps1777.py"]
+    status: active-default
+    since: "0.1.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: check}
+
+  - id: cli.update
+    nome: "vps1777 update"
+    cosa: "Aggiornamento con snapshot, health-gate e rollback automatico. È il percorso
+           critico del self-update: se questo comando sparisse, la macchina resterebbe
+           aggiornabile solo a mano."
+    dove: ["cli:update", "tools/vps1777.py"]
+    status: active-default
+    since: "0.9.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: update}
+
+  - id: cli.rollback
+    nome: "vps1777 rollback"
+    cosa: "Ritorno alla versione precedente con ripristino dei dati. La rete di sicurezza
+           dell'update: va dichiarata perché la sua assenza si scoprirebbe nel momento
+           peggiore possibile."
+    dove: ["cli:rollback", "tools/vps1777.py"]
+    status: active-default
+    since: "0.9.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: rollback}
+
+  - id: cli.migrate
+    nome: "vps1777 migrate"
+    cosa: "Migrazioni di schema/installazione fra versioni."
+    dove: ["cli:migrate", "tools/vps1777.py"]
+    status: active-default
+    since: "0.9.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: migrate}
+
+  - id: cli.bootstrap
+    nome: "vps1777 bootstrap"
+    cosa: "Prima installazione da zero su una macchina nuova."
+    dove: ["cli:bootstrap", "tools/vps1777.py"]
+    status: active-default
+    since: "0.1.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: bootstrap}
+
+  - id: cli.version
+    nome: "vps1777 version"
+    cosa: "Versione installata (e attesa) — la coordinata con cui si datano tutti gli altri esiti."
+    dove: ["cli:version", "tools/vps1777.py"]
+    status: active-default
+    since: "0.1.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: version}
+
+  - id: cli.secrets-status
+    nome: "vps1777 secrets-status"
+    cosa: "Età e scadenze dei secret, con notifica Telegram opzionale."
+    dove: ["cli:secrets-status", "tools/vps1777.py"]
+    status: active-default
+    since: "0.13.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: secrets-status}
+
+  - id: cli.archive-ingest
+    nome: "vps1777 archive-ingest"
+    cosa: "Indicizza un file nell'archivio passando da NotebookLM per la lettura
+           multimodale (OCR): è la via per PDF-immagine e scansioni che pypdf non legge."
+    dove: ["cli:archive-ingest", "tools/vps1777.py"]
+    status: active-default
+    since: "0.20.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: archive-ingest}
