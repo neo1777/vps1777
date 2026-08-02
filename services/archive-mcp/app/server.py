@@ -70,7 +70,8 @@ mcp.tool = _tool_con_redazione                            # type: ignore[method-
 @mcp.tool()
 def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
            sort: str = "rank", since: str = "", until: str = "",
-           project: str = "", snippet_tokens: int = 32) -> list[dict[str, Any]]:
+           project: str = "", speaker: str = "", voice: str = "",
+           snippet_tokens: int = 32) -> list[dict[str, Any]]:
     """Cerca nell'archivio full-text (SQLite FTS5) delle conversazioni.
 
     COME SCRIVERE LA QUERY (leggere prima di cercare — evita falsi negativi):
@@ -99,24 +100,49 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
         sort: 'rank' (rilevanza, default), 'newest' o 'oldest' (per data).
         since / until: filtro temporale sul ts (ISO, confronto lessicografico).
         project: filtra per etichetta esatta (titolo chat, project:*, design:*).
+        speaker: CHI HA SCRITTO la riga — 'human', 'assistant', 'unknown'. È un
+            FATTO preso dalla fonte, non una stima.
+        voice: DI CHI È LA VOCE nel contenuto — è una STIMA euristica, con la sua
+            confidenza. Valori: 'own', 'pasted_transcript', 'pasted_ai',
+            'character', 'mixed', 'unknown', più due alias e un terzo stato:
+              'direct'  = own con poca citazione (quoted_share < 0.2)
+              'quoted'  = prevalentemente citato (quoted_share >= 0.5)
+              'none'    = MAI CLASSIFICATA — nessuno l'ha guardata. NON è
+                          'unknown', che invece è un giudizio: «guardata e non
+                          riconosciuta». Chiederli insieme è chiedere due cose.
         snippet_tokens: lunghezza dello snippet (default 32). Per il testo pieno
             attorno a un risultato usa get_context(uuid).
+
+    ⚠️ `voice:own` NON VUOL DIRE «lo ha scritto Neo». Vuol dire «chi ha scritto
+    questo messaggio parlava di suo», e vale anche per l'assistente: misurato il
+    02/08 su 61.100 righe, `own` contiene 10.629 messaggi dell'assistente —
+    l'80% del totale `own`. **Per le parole di una persona servono DUE filtri:**
+    `speaker='human', voice='own'`. Un filtro solo risponde a un'altra domanda.
+
+    🔑 LA REGOLA D'ORO, ora interrogabile: cerchi chi-È-una-cosa (una definizione,
+    un'attribuzione, «X è Y»)? Aggiungi `voice='direct'`. Un match identitario
+    trovato SENZA quel filtro può venire da materiale incollato: prima di usarlo
+    come fatto, `get_context(uuid)` — la citazione non diventa un fatto finché
+    non sai chi parla.
 
     Ritorna righe {db, uuid, project, ts, rank, snippet, snapshot}. `snapshot` è
     la data dell'ultima modifica del DB: quanto è fresco ciò che leggi.
     """
     return db.search(query, db_name, limit, raw=raw, sort=sort, since=since,
-                     until=until, project=project, snippet_tokens=snippet_tokens)
+                     until=until, project=project, speaker=speaker, voice=voice,
+                     snippet_tokens=snippet_tokens)
 
 
 @mcp.tool()
 def count(query: str, db_name: str = "", raw: bool = False, since: str = "",
-          until: str = "", project: str = "") -> dict[str, Any]:
+          until: str = "", project: str = "", speaker: str = "",
+          voice: str = "") -> dict[str, Any]:
     """Conta quanti messaggi corrispondono alla query (non limitato) — per
     frequenze e prevalenze. Stessa sintassi di search. Ritorna
     {total, per_db:{nome: n}}. Query malformata → errore parlante, non 0.
     Se un termine COLLASSA (`C++`→`C`, vedi check_term) aggiunge `warnings`."""
-    return db.count(query, db_name, raw=raw, since=since, until=until, project=project)
+    return db.count(query, db_name, raw=raw, since=since, until=until, project=project,
+                    speaker=speaker, voice=voice)
 
 
 @mcp.tool()
