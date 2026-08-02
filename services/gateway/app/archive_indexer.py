@@ -225,7 +225,18 @@ CREATE TABLE IF NOT EXISTS messages(
     --    un default che ASSERISCE fabbrica, in un colpo solo e su archivi vivi, esattamente
     --    la bugia che la colonna doveva impedire — e con l'aria di un dato verificato.
     speaker       TEXT DEFAULT '',   -- human/assistant/unknown (derivato da `sender`, Fase 1)
-    voice         TEXT DEFAULT '',   -- own/pasted_transcript/pasted_ai/character/doc/mixed
+    -- 🔴 `doc` NON è un valore di `voice`, e toglierlo è la cura (obiezione di
+    --   abdd732a, 02/08, accolta). Il criterio che separa i due assi:
+    --     `voice`   = COME SI È FORMATO il testo   (parlato · incollato · recitato)
+    --     `speaker` = CHI/CHE COSA lo ha immesso   (human · assistant · unknown)
+    --   «è un allegato» è una proprietà della RIGA, non del modo in cui il testo è
+    --   nato ⇒ vive in `speaker`. Tenerlo in entrambi avrebbe fatto **rientrare
+    --   dalla finestra, col nome nuovo, il difetto che queste colonne curano**:
+    --   `sender` mescolava già i due assi, ed è la ragione per cui esistono.
+    -- 📊 E il dato lo conferma: i 3.459 `unknown` misurati sul DB vivo sono
+    --   ESATTAMENTE `attachment` + `title` — la natura-documento è già in
+    --   `speaker`, e in `voice` sarebbe un duplicato che si sfalsa col tempo.
+    voice         TEXT DEFAULT '',   -- own/pasted_transcript/pasted_ai/character/mixed/unknown
     quoted_share  REAL DEFAULT 0,    -- quota 0-1 di materiale incollato (quantifica `mixed`)
     voice_conf    REAL DEFAULT 0,    -- confidenza dell'euristica
     content_flags TEXT DEFAULT ''    -- json: l'autopsia del verdetto di `classify_voice`
@@ -584,13 +595,21 @@ def popola_speaker(conn: sqlite3.Connection) -> int:
 #   ed è provata, ma `voice` resta '' finché la Fase 3 non decide DOVE chiamarla.
 #   Un campo popolato sembra sempre popolato apposta.
 
-# Soglie: costanti dichiarate perché si TARANO sul golden set, non si scoprono
-# leggendo il codice. La spec le dà come proposte (§7②, decisione di Neo).
-TS_VIDEO_MIN = 2          # timestamp «(m:ss)» ravvicinati per sospettare un transcript
-EN_BLOCCO_MIN = 25        # parole di un blocco inglese perché conti come blocco
-EN_RATIO_MIN = 0.18       # quota di stopword inglesi sopra cui il blocco è EN
-PROSA_PROPRIA_MAX = 0.30  # sotto questa quota di prosa propria: cornice, non testo
-QUOTE_FENCE_MIN = 0.50    # quota citata sopra cui si alza il flag `quote_fence`
+# ⚠️ SOGLIE **PROVVISORIE — da tarare sul golden set** (fissate 02/08/2026).
+#   Sono PROPOSTE prese dalla spec, NON valori studiati: nessuna è stata misurata
+#   su un insieme di casi etichettati a mano. Chi le legge fra un mese deve saperlo
+#   dal codice, non da un messaggio.
+# 🔑 PERCHÉ LA DATA E LA PAROLA STANNO QUI e non sul bus (richiesta di abdd732a,
+#   accolta): una decisione che vive solo in un messaggio **decade in silenzio** —
+#   misurato ieri su «findings.yml NON entra nel corpus», che era una misura vera e
+#   due round dopo era dentro senza che nessuno l'avesse revocata.
+# 📌 Si tarano con un campione etichettato a mano; finché non esiste, un valore qui
+#   è un'ipotesi che funziona, non una che è stata scelta.
+TS_VIDEO_MIN = 2          # PROVVISORIA · timestamp «(m:ss)» ravvicinati per sospettare un transcript
+EN_BLOCCO_MIN = 25        # PROVVISORIA · parole di un blocco inglese perché conti come blocco
+EN_RATIO_MIN = 0.18       # PROVVISORIA · quota di stopword inglesi sopra cui il blocco è EN
+PROSA_PROPRIA_MAX = 0.30  # PROVVISORIA · sotto questa quota di prosa propria: cornice, non testo
+QUOTE_FENCE_MIN = 0.50    # PROVVISORIA · quota citata sopra cui si alza il flag `quote_fence`
 
 _RE_TS = re.compile(r"[(\[]?\b\d{1,2}:\d{2}(?::\d{2})?\b[)\]]?")
 _RE_TRAP = re.compile(r"transcript|analyz|analisi|trascriz|pulizia|youtube", re.I)
