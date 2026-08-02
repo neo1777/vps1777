@@ -716,12 +716,39 @@ def test_cosign_bypass_rimosso_fa_sparire_la_voce_e_il_marcatore():
 
 
 def test_cosign_bypass_marcatore_illeggibile_non_fa_crashare_il_check():
-    """Best-effort davvero: un marcatore corrotto a mano non deve far fallire
-    secrets-status, che è il portatore di TUTTI gli altri promemoria."""
+    """Non crashare NON vuol dire sparire: il bypass è attivo e va detto lo stesso.
+
+    🔴 QUESTO TEST PRETENDEVA `is None`, E CRISTALLIZZAVA UN DIFETTO. `None` per
+    contratto significa «la via d'emergenza NON è attiva» — mentre qui il `.env`
+    dice `VPS1777_REQUIRE_COSIGN=0`, cioè il contrario. `cmd_secrets_status` fa
+    `if cosign is not None`, quindi con un marcatore corrotto la riga spariva da
+    /admin/secrets, dal JSON e dal Telegram settimanale, e l'ultima parola era
+    «tutti i secret entro la soglia».
+    ⭐ «Non so DA QUANDO» e «non è attivo» erano lo stesso valore. Il test copriva
+    solo la metà innocua della domanda («non crasha?») e la sua motivazione scritta
+    rendeva l'altra metà invisibile.
+    🛡️ `overdue=True`: non sapere da quanto dura una via d'emergenza è PEGGIO che
+    saperlo, non meglio.
+    """
     with tempfile.TemporaryDirectory() as td:
         repo = _repo_con_env(Path(td), "VPS1777_REQUIRE_COSIGN=0\n")
         v.cosign_bypass_status(repo)
         (repo / "onboarding" / v._COSIGN_BYPASS_MARKER).write_text("ieri sera\n")
+        it = v.cosign_bypass_status(repo)
+        assert it is not None, (
+            "il bypass è ATTIVO nel .env: sparire dalla pagina è peggio che "
+            "mostrare un'età sconosciuta"
+        )
+        assert it["age_days"] is None, "l'età non è nota: non si inventa uno zero"
+        assert it["overdue"] is True, "non sapere da quando dura è peggio, non meglio"
+        assert "ILLEGGIBILE" in it["note"], it["note"]
+
+
+def test_cosign_bypass_non_attivo_resta_None():
+    """Il verso opposto: la cura non deve far comparire la voce quando il bypass
+    non c'è — sarebbe un promemoria per una cosa che nessuno ha fatto."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = _repo_con_env(Path(td), "VPS1777_REQUIRE_COSIGN=1\n")
         assert v.cosign_bypass_status(repo) is None
 
 

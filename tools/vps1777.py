@@ -2895,8 +2895,31 @@ def cosign_bypass_status(repo: Path) -> dict | None:
             marker.write_text(now_iso() + "\n")
         da = datetime.strptime(marker.read_text().strip(),
                                "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    except (OSError, ValueError):
+    except OSError:
         return None
+    except ValueError:
+        # 🔴 QUI SI TORNAVA `None`, E `None` PER CONTRATTO SIGNIFICA «la via
+        # d'emergenza NON è attiva» — mentre il `.env` dice l'opposto: siamo in
+        # questo ramo solo perché `attiva` era vera. `cmd_secrets_status` fa
+        # `if cosign is not None`, quindi la riga spariva da /admin/secrets, dal
+        # JSON e dal Telegram settimanale, e l'ultima parola era «tutti i secret
+        # entro la soglia». ⇒ **un marcatore corrotto faceva sparire il promemoria
+        # che ogni update può installare un bundle non firmato.**
+        # ⭐ «Non so DA QUANDO» e «non è attivo» erano lo stesso valore. È la
+        # distinzione che questo file fa già venti righe sotto (`if not items:` —
+        # None = non misurato ≠ 0 = misurato e vuoto) e in `copertura_backup`.
+        # 🛡️ `overdue=True` di proposito: non sapere da quando dura una via
+        # d'emergenza è PEGGIO che saperlo, non meglio.
+        return {
+            "name": "cosign_bypass", "label": "Verifica firma cosign DISATTIVATA",
+            "age_days": None, "max_age_days": COSIGN_BYPASS_MAX_DAYS,
+            "overdue": True, "auto_rotatable": False,
+            "note": ("togli VPS1777_REQUIRE_COSIGN=0 dal .env. ⚠️ Il marcatore della "
+                     "data è ILLEGGIBILE: la via d'emergenza è attiva e non so da "
+                     "quando — cancella onboarding/cosign_bypass_since per ripartire "
+                     "dalla data di oggi, o togli la flag."),
+            "last_rotated": None,
+        }
     age_days = max(0, int((datetime.now(timezone.utc) - da).total_seconds() / 86400))
     return {
         "name": "cosign_bypass", "label": "Verifica firma cosign DISATTIVATA",
@@ -2960,7 +2983,11 @@ def cmd_secrets_status(repo: Path, args) -> int:
 
     for it in items:
         mark = "⚠️  SCADUTO" if it["overdue"] else "ok"
-        log(f"{it['label']:<22} {it['age_days']:>4}g / max {it['max_age_days']}g  [{mark}]")
+        # `age_days` può essere None: «attivo, ma non so da quando» (marcatore
+        # illeggibile). Si stampa `  ??` invece di rompere la riga — e la nota
+        # accanto dice cosa fare. Un'età che non si sa non è un'età zero.
+        eta = "  ??" if it["age_days"] is None else f"{it['age_days']:>4}"
+        log(f"{it['label']:<22} {eta}g / max {it['max_age_days']}g  [{mark}]")
     if mancanti:
         warn(f"secret ATTESI e NON trovati ({len(mancanti)}): {', '.join(mancanti)}")
     if not items:
