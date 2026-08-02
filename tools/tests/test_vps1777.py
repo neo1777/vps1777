@@ -1606,6 +1606,98 @@ def test_ogni_profilo_ingress_e_classificato():
         f"dà errore da sola: continua a rispondere, su un mondo che non c'è più.")
 
 
+# ═══════ setup.sh: l'ingresso che pubblica DEVE avere un bersaglio (070f8844) ══
+
+def _esegui_case_ingress(scelta: str, risposte: list[str]) -> tuple[str, list[str]]:
+    """Esegue il `case` REALE di `setup.sh`, non una copia, con `ask`/`warn` stubbati.
+
+    🛡️ PERCHÉ ESTRARRE E NON RISCRIVERE: un test che riscrive la logica prova la
+    propria copia. Qui il blocco viene ritagliato dal file vero, quindi se qualcuno
+    cambia il `case` il test cambia con lui — o non trova più il blocco e cade,
+    che è comunque un rosso onesto invece di un verde su codice morto.
+    """
+    import subprocess
+
+    src = (_ROOT / "setup.sh").read_text()
+    inizio = src.index('case "$INGRESS_NUM" in')
+    fine = src.index("esac", inizio) + len("esac")
+    blocco = src[inizio:fine]
+
+    coda = "\n".join(risposte)
+    # `ADMIN_EMAIL` è definita PRIMA del case nel setup vero (r.99) e il ramo `caddy`
+    # la usa come default. Senza, sotto `set -u` lo scaffold muore lì e il test cade
+    # per un motivo che non è quello che sta provando — successo davvero mentre
+    # scrivevo questi test, ed è la ragione per cui la riga è qui e non tolta.
+    script = f"""
+set -u
+ADMIN_EMAIL="admin@esempio.invalid"
+ask()  {{ local var="$1"; local def="${{3:-}}"; local r; IFS= read -r r || true
+          [ -z "$r" ] && r="$def"; printf -v "$var" '%s' "$r"; }}
+warn() {{ printf 'WARN:%s\\n' "$1" >&2; }}
+die()  {{ printf 'DIE:%s\\n' "$1" >&2; exit 3; }}
+INGRESS_NUM={scelta}
+{blocco}
+printf 'PUBLIC_BASE=%s\\n' "${{PUBLIC_BASE-}}"
+"""
+    res = subprocess.run(["bash", "-c", script], input=coda, capture_output=True, text=True)
+    assert "unbound variable" not in res.stderr, (
+        f"lo scaffold è morto prima di eseguire il case — il test non ha provato "
+        f"NIENTE: {res.stderr.strip()[:200]}")
+    pb = ""
+    for riga in res.stdout.splitlines():
+        if riga.startswith("PUBLIC_BASE="):
+            pb = riga.split("=", 1)[1]
+    warn_visti = [r[5:] for r in res.stderr.splitlines() if r.startswith("WARN:")]
+    return pb, warn_visti
+
+
+def test_cloudflared_chiede_il_proprio_hostname():
+    """`cloudflared` pubblica su Internet: senza `PUBLIC_BASE` nessuna sonda lo guarda.
+
+    🔴 IL DIFETTO (voce `070f8844`, 02/08). `setup.sh` scriveva `PUBLIC_BASE=""` per
+    questo profilo e non chiedeva altro. A valle, `funnel_ok` cerca il bersaglio lì
+    e non lo trova: il profilo restava NON SORVEGLIATO — e non per eccezione, **per
+    costruzione**, cioè su ogni installazione.
+    ⭐ L'hostname non è scopribile dalla macchina: il tunnel è remotely-managed
+    (`tunnel run` col token, nessun `config.yml` sul disco) e la configurazione vive
+    su Cloudflare. **Ma chi installa lo CONOSCE** — ha dovuto crearlo sul dashboard.
+    ⇒ non si scopre: si chiede. È la stessa cosa che `caddy` fa già col dominio.
+    """
+    pb, warn = _esegui_case_ingress("3", ["vps.esempio.invalid"])
+    assert pb == "https://vps.esempio.invalid", pb
+    assert not warn, f"con l'hostname dato non serve nessun avviso: {warn}"
+
+
+def test_cloudflared_senza_hostname_avvisa_invece_di_tacere():
+    """Il vuoto si accetta — l'hostname può non essere ancora deciso — ma si DICE.
+
+    🔑 Il presidio a valle (`funnel_ok`) lo ripete ogni giorno, ma a quel punto parla
+    a chi legge i log. Qui parla a chi sta installando, che è l'unico momento in cui
+    rimediare costa zero. Un vuoto silenzioso e un vuoto dichiarato producono lo
+    stesso `.env` e due installazioni diverse.
+    """
+    pb, warn = _esegui_case_ingress("3", [""])
+    assert pb == "", pb
+    assert warn, "il vuoto è passato in SILENZIO: è il difetto, non la cura"
+    assert "SENZA sonda" in warn[0], warn
+
+
+def test_cloudflared_non_raddoppia_lo_schema():
+    """Chi incolla «https://host» dal dashboard non deve ottenere «https://https://host».
+
+    Caso banale e per questo probabile: l'hostname si copia dalla barra del browser,
+    e lì lo schema c'è.
+    """
+    pb, _ = _esegui_case_ingress("3", ["https://vps.esempio.invalid"])
+    assert pb == "https://vps.esempio.invalid", pb
+
+
+def test_caddy_resta_come_prima():
+    """Non-regressione: la cura su `cloudflared` non deve toccare il ramo `caddy`."""
+    pb, _ = _esegui_case_ingress("2", ["vps.esempio.invalid", "a@esempio.invalid"])
+    assert pb == "https://vps.esempio.invalid", pb
+
+
 # ═══════════════════════ la ZONA CIECA del gate, dichiarata (b82df434, 02/08) ══
 # Perché questi test esistono: `valuta_porta_esterna` rispondeva `True` sul profilo
 # caddy/cloudflared con la motivazione «non applicabile» — cioè rispondeva «va bene»

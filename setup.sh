@@ -114,7 +114,25 @@ else
        ask CADDY_EMAIL "Email per Let's Encrypt" "$ADMIN_EMAIL"
        PUBLIC_BASE="https://$CADDY_DOMAIN"
        ;;
-    3) INGRESS=cloudflared; PUBLIC_BASE=""; CADDY_DOMAIN=""; CADDY_EMAIL="" ;;
+    # Il tunnel è REMOTELY-MANAGED (`tunnel run` col token, nessun config.yml sul
+    # disco): l'hostname vive nella configurazione su Cloudflare, non qui. Non è
+    # scopribile dalla macchina — ma chi arriva a questo punto lo CONOSCE, perché
+    # ha dovuto configurarlo sul dashboard (passo 2 di compose.ingress.cloudflared.yaml).
+    # ⇒ non si scopre: si CHIEDE. Prima non lo si chiedeva, e il vuoto che ne usciva
+    # lasciava il profilo senza nessuna sonda dall'esterno (voce `070f8844`).
+    3) INGRESS=cloudflared; CADDY_DOMAIN=""; CADDY_EMAIL=""
+       ask CF_HOSTNAME "Hostname pubblico del tunnel (es. vps.miosito.com), quello che hai configurato sul dashboard CF" ""
+       if [ -n "$CF_HOSTNAME" ]; then
+         PUBLIC_BASE="https://${CF_HOSTNAME#https://}"
+       else
+         PUBLIC_BASE=""
+         # Si accetta il vuoto — l'hostname può non essere ancora deciso — ma si
+         # dice COSA COSTA, qui e adesso, che è l'unico momento in cui rimediare
+         # è gratis. Il presidio a valle (`funnel_ok`) lo ripete ogni giorno, ma
+         # a quel punto parla a chi legge i log, non a chi sta installando.
+         warn "Hostname non impostato: questo profilo resterà SENZA sonda dall'esterno. La sorveglianza vedrà il gateway rispondere DENTRO la macchina anche se da Internet il sito è giù. Rimedio in qualsiasi momento: scrivi PUBLIC_BASE=https://tuo-hostname in .env"
+       fi
+       ;;
     *) die "Scelta non valida" ;;
   esac
 
