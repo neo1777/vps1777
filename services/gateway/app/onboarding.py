@@ -45,8 +45,14 @@ async def _status() -> dict[str, tuple[str, str]]:
 
     # PUBLIC_BASE / URL
     pb = s.gateway_public_base
+    # 📌 Qui il verde è ONESTO ma va detto cosa promette: `PUBLIC_BASE` è una riga
+    # del `.env`, quindi «ok» significa **«è impostato»**, non «risponde». La
+    # differenza col Funnel qui sotto — dove «attivo» era un'affermazione sul mondo
+    # dedotta dalla stessa stringa — è che lì il verde mentiva, qui è ambiguo: con
+    # caddy giù questa riga resta verde, e questa è la pagina che l'utente apre
+    # PROPRIO per sapere cosa manca. ⇒ il livello resta, la parola lo qualifica.
     if pb and pb.startswith("https://"):
-        out["url"] = ("ok", pb)
+        out["url"] = ("ok", f"{pb} — configurato (non è una prova che risponda)")
     elif pb:
         out["url"] = ("warn", pb)
     else:

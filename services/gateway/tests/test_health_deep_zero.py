@@ -92,8 +92,18 @@ def test_health_deep_non_dice_sano_con_zero_backend():
         "manca `if not checks:` — `all({})` è True, quindi /health?deep=1 "
         "risponderebbe 200 avendo sondato zero backend"
     )
-    if all_calls:
-        assert min(guardie) < min(all_calls), (
-            "la guardia sul dict vuoto deve precedere il controllo `all(...)`, "
-            "altrimenti il caso zero non viene mai raggiunto"
+    # 🔴 QUI C'ERA `if all_calls:` — e un assert dentro un `if` si spegne da solo.
+    # Riscrivendo `all(checks.values())` in un `any(...)` o in una comprehension la
+    # lista si svuota, l'assert non viene MAI eseguito, e resta solo «esiste un
+    # `if not checks:` da qualche parte» — non il suo ORDINE, che è la proprietà
+    # che questo file esiste per proteggere. Trovato da un agent il 02/08: era uno
+    # dei soli 2 assert condizionali del repo, e l'avevo scritto io poche ore prima.
+    assert all_calls, (
+        "non trovo più `if not all(...)`: se il controllo è stato riscritto in "
+        "un'altra forma, questo test non può più verificare l'ordine — aggiornalo "
+        "invece di lasciarlo passare a vuoto"
+    )
+    assert min(guardie) < min(all_calls), (
+        "la guardia sul dict vuoto deve precedere il controllo `all(...)`, "
+        "altrimenti il caso zero non viene mai raggiunto"
         )
