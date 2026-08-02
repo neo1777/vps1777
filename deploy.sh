@@ -873,11 +873,47 @@ if confirm "Riavvio la VPS ora? (verifica auto-start dei container)"; then
     log "Attendo 20s che Docker risollevi i container..."
     sleep 20
     log "Stato container dopo reboot:"
-    SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || true
+    # 🔴 `-a` NON è cosmetico: senza, `compose ps` mostra SOLO i container vivi
+    #   («-a, --all  Show all stopped containers», verificato sul binario). Cioè
+    #   proprio i morti — l'unica cosa che questo passo cerca — restavano fuori
+    #   dalla tabella, e la tabella corta somigliava a una tabella sana.
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps -a'" || true
+    # ── L'ESITO SI CALCOLA, NON SI GUARDA. Prima di oggi qui c'era solo la `ps`
+    #    qui sopra con `|| true`: l'output non era letto da NULLA — nessun grep,
+    #    nessuna variabile, nessun exit — e i tre esiti (container morti / VPS mai
+    #    tornata / reboot rifiutato) finivano tutti sulla stessa riga «8/8 Fatto»
+    #    col riquadro verde. Un passo che si chiama «verifica» e non conclude è
+    #    un'osservazione travestita da cancello.
+    # 🔑 Tre stati, come le prove empiriche: ok · FALLITO · NON CONCLUSO. Il terzo
+    #    esiste perché «non ho potuto guardare» non è «non c'è niente».
+    attesi="$(SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps --services'" 2>/dev/null | tr -d '\r')"; rc_a=$?
+    su="$(SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps --services --filter status=running'" 2>/dev/null | tr -d '\r')"; rc_s=$?
+    if [ "$rc_a" != "0" ] || [ "$rc_s" != "0" ] || [ -z "$attesi" ]; then
+      # NON è un PASS e NON è un FAIL: l'elenco non ha risposto, quindi non so.
+      REBOOT_TEST="NON CONCLUSO (non ho potuto elencare i servizi sulla VPS)"
+      warn "Reboot test: $REBOOT_TEST — l'auto-start NON è stato verificato."
+    else
+      giu=""
+      for s in $attesi; do
+        case " $(echo $su) " in *" $s "*) ;; *) giu="$giu $s";; esac
+      done
+      if [ -n "${giu# }" ]; then
+        # ⚠️ I NOMI, non un contatore: un numero non si può spuntare, una lista sì.
+        REBOOT_TEST="FALLITO — NON ripartiti al boot:${giu}"
+        warn "Reboot test: $REBOOT_TEST"
+        warn "  → manca restart:unless-stopped su quel servizio, o un volume non rimonta al boot."
+      else
+        REBOOT_TEST="ok (tutti i servizi ripartiti al boot)"
+        ok "Reboot test: $REBOOT_TEST"
+      fi
+    fi
   else
+    REBOOT_TEST="NON CONCLUSO (VPS non raggiungibile dopo 120s)"
     warn "VPS non ancora raggiungibile dopo 120s — controlla manualmente."
+    warn "  → il test di auto-start NON ha potuto concludere: non sai se i container sono ripartiti."
   fi
 else
+  REBOOT_TEST="NON ESEGUITO (reboot rifiutato)"
   log "Reboot saltato. Test auto-start non eseguito."
 fi
 
@@ -895,6 +931,7 @@ echo "RESULT_SETUP_URL=${PUBLIC_BASE:-http://$VPS_IP:8080}/admin/setup"
 echo "RESULT_INGRESS=$INGRESS"
 echo "RESULT_FEATURES=${FEATURES:-}"
 echo "RESULT_AGE=${AGE_STATE:-n/d}"
+echo "RESULT_REBOOT=${REBOOT_TEST:-n/d (passo 7 non raggiunto)}"
 
 # ── Referto feature: l'ASSENZA PARLA (mai più muta come Watchtower/backup). Ogni
 #    feature dichiarata è stampata ON/OFF; un OFF non richiesto lo VEDI, non lo scopri
@@ -906,6 +943,9 @@ printf '    auto-update sicuro : %s%s\n' "$(_feat autoupdate)" \
   "$(case ",${FEATURES:-}," in *,watchtower,*) printf '  (⚠ watchtower CRUDO anche attivo — CONFLITTO)';; esac)"
 printf '    portainer          : %s\n' "$(_feat portainer)"
 printf '    chiave age (backup): %s\n' "${AGE_STATE:-n/d}"
+# L'ESITO DEL PASSO 7 STA QUI, accanto alle feature, per la stessa ragione scritta
+# sopra: un test che non ha concluso lo VEDI ora, non lo scopri al primo reboot vero.
+printf '    reboot / auto-start: %s\n' "${REBOOT_TEST:-n/d (passo 7 non raggiunto)}"
 
 cat <<DONE2
 
