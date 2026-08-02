@@ -1434,10 +1434,31 @@ def funnel_ok(repo: Path, tentativi: int = 2) -> tuple[bool, str]:
         pb = (env_read(repo).get("PUBLIC_BASE") or "").strip().rstrip("/")
         base, via = (pb, "l'indirizzo pubblico") if pb[:8].lower().startswith("http") else ("", "")
     if not base:
-        # Qui «non applicabile» è ONESTO: nessun indirizzo pubblico è dichiarato da
-        # nessuna parte, quindi non c'è niente da sondare. Prima invece era il ramo
-        # in cui finivano DUE profili su tre che un indirizzo pubblico ce l'hanno.
-        return True, "non applicabile: nessun indirizzo pubblico dichiarato per questo ingresso"
+        # 🔴 LA CURA DEL 02/08 (3600b07) COPRIVA UN PROFILO SU DUE, e l'avevo
+        # dichiarata chiusa. `caddy` ha `PUBLIC_BASE=https://$CADDY_DOMAIN`
+        # (deploy.sh:440) e viene sondato; **`cloudflared` ha `PUBLIC_BASE=""`**
+        # (setup.sh:117) e ricadeva qui — cioè restava senza NESSUNA sonda, che è
+        # esattamente il difetto che quel commit diceva di aver curato.
+        # ⭐ E il test che avevo scritto col fix diceva «meglio "non applicabile"
+        # di un falso rosso»: **la giustificazione del buco l'avevo scritta io,
+        # dentro il test della cura.** È la forma che stavo cacciando.
+        # 🛡️ Qui non si inventa un bersaglio (senza URL non si può sondare) e non
+        # si alza un allarme (sarebbe un rosso quotidiano su una macchina che
+        # magari funziona, e un gate che grida al lupo viene spento). Si separano
+        # i due «vero» che prima collassavano: **«non c'è niente da sondare»** e
+        # **«dovrei sondare e non so dove»** — il secondo è un buco, e si vede.
+        proxy = ""
+        try:
+            servizi = {str(s.get("Service") or "") for s in compose_ps(repo, all_states=True)}
+            proxy = next((p for p in PROXY_IN_CONTAINER if p in servizi), "")
+        except Exception:                        # noqa: BLE001 — la sonda non deve morire qui
+            proxy = ""
+        if proxy:
+            warn(f"sorveglianza esterna CIECA su «{proxy}»: pubblica su Internet ma "
+                 f"PUBLIC_BASE non è nel .env, quindi non so a quale indirizzo guardare. "
+                 f"Mettilo in .env perché questo profilo abbia una sonda dall'esterno.")
+            return True, f"NON SORVEGLIATO: «{proxy}» pubblica ma manca PUBLIC_BASE"
+        return True, "non applicabile: questo ingresso non pubblica su Internet"
     ultimo = ""
     for n in range(tentativi):
         try:

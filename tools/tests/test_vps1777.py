@@ -925,8 +925,16 @@ def test_con_caddy_la_sonda_USA_public_base_invece_di_arrendersi():
 
 
 def test_un_public_base_malformato_non_diventa_un_bersaglio():
-    """Il verso opposto: `PUBLIC_BASE=vps1777` o vuoto non deve produrre una
-    richiesta a un URL inventato — meglio «non applicabile» di un falso rosso."""
+    """Un URL inventato non si sonda — ma «non applicabile» NON copre tutti i casi.
+
+    🔴 IL DOCSTRING DI QUESTO TEST GIUSTIFICAVA UN BUCO, e l'avevo scritto io col
+    fix `3600b07`: diceva «meglio "non applicabile" di un falso rosso», e su quella
+    frase **`cloudflared` restava senza NESSUNA sonda** — `setup.sh:117` scrive
+    `PUBLIC_BASE=""` per quel profilo, quindi ricadeva sempre qui. La cura copriva
+    `caddy` (che il `PUBLIC_BASE` ce l'ha, deploy.sh:440) e si fermava lì.
+    ⭐ Cioè: nel test della cura di un difetto di questa classe avevo scritto la
+    frase che protegge il pezzo di difetto rimasto. Vedi il test qui sotto.
+    """
     orig_nome, orig_env = v.nome_pubblico_funnel, v.env_read
     v.nome_pubblico_funnel = lambda: ""
     try:
@@ -1450,6 +1458,38 @@ def test_SECRET_POLICY_non_puo_dimenticare_un_segreto_in_silenzio():
         f"segreti dichiarati nei compose e SENZA politica di scadenza: {sorted(scoperti)} — "
         f"aggiungili a _SECRET_POLICY col loro max_giorni, o dichiara qui perché non ne hanno"
     )
+
+
+def test_un_proxy_che_pubblica_SENZA_public_base_non_e_non_applicabile():
+    """`cloudflared` pubblica su Internet e non ha `PUBLIC_BASE`: senza questo caso
+    resta senza nessuna sonda, ed è il buco che `3600b07` NON aveva chiuso.
+
+    Non si inventa un bersaglio (senza URL non si può sondare) e non si alza un
+    allarme (sarebbe un rosso quotidiano su una macchina che magari funziona). Si
+    separano i due «vero» che prima collassavano: «non c'è niente da sondare» e
+    «dovrei sondare e non so dove». Il secondo deve LASCIARE UNA TRACCIA.
+    """
+    detto = []
+    orig = (v.nome_pubblico_funnel, v.env_read, v.compose_ps, v.warn)
+    v.nome_pubblico_funnel = lambda: ""
+    v.env_read = lambda repo: {"PUBLIC_BASE": ""}
+    v.warn = lambda m: detto.append(m)
+    try:
+        v.compose_ps = lambda repo, all_states=False: [{"Service": "gateway"},
+                                                       {"Service": "cloudflared"}]
+        ok, perche = v.funnel_ok(Path("/non/serve"))
+        assert ok is True, "non deve provocare un rollback né un allarme"
+        assert "NON SORVEGLIATO" in perche, perche
+        assert detto and "CIECA" in detto[0], f"nessun avviso visibile: {detto}"
+
+        # …e chi NON pubblica resta «non applicabile», senza rumore.
+        detto.clear()
+        v.compose_ps = lambda repo, all_states=False: [{"Service": "gateway"}]
+        ok2, perche2 = v.funnel_ok(Path("/non/serve"))
+        assert ok2 is True and "non applicabile" in perche2, perche2
+        assert not detto, f"avviso su un profilo che non pubblica: {detto}"
+    finally:
+        v.nome_pubblico_funnel, v.env_read, v.compose_ps, v.warn = orig
 
 
 if __name__ == "__main__":
