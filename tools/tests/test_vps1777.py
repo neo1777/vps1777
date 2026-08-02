@@ -1024,10 +1024,29 @@ def test_le_prove_empiriche_viaggiano_nel_pacchetto_di_rilascio():
 
 
 def test_funnel_non_e_nel_cancello_dell_update():
-    """SCELTA DELIBERATA, e un test la tiene ferma: l'health-gate giudica ciò che
-    l'update può rompere. Il tunnel non lo tocca un update — e un suo singhiozzo
-    farebbe tornare indietro una versione sana. Se un domani qualcuno lo aggiunge
-    lì, questo test glielo ricorda."""
+    """SCELTA DELIBERATA, e un test la tiene ferma — ma la RAGIONE vale per UN
+    profilo su tre, e va detto invece di lasciarla generalizzata.
+
+    La scelta: l'health-gate giudica ciò che l'update può rompere, e un singhiozzo
+    del tunnel farebbe tornare indietro una versione sana. Resta valida.
+
+    🔴 LA GIUSTIFICAZIONE «il tunnel non lo tocca un update» È VERA SOLO PER
+    TAILSCALE (il Funnel è un demone sull'host). Misurato il 02/08:
+      · `caddy` e `cloudflared` sono SERVIZI COMPOSE
+        (compose.ingress.caddy.yaml:13 · compose.ingress.cloudflared.yaml:15)
+      · `compose_cmd` monta sempre `compose.{profilo}.yaml` ⇒ **l'update li ricrea**
+      · `deep_health_ok` sonda `127.0.0.1:8080` **da DENTRO** il gateway
+      · `porta_esterna_ok` su quei profili è un no-op («a ricevere è il proxy»)
+    ⇒ su caddy/cloudflared un update che rompe il proxy (Caddyfile, cert, token)
+    lascia il sito giù da Internet, il gate vede 200 dall'interno e **il rollback
+    non scatta**. È la classe di H51 dentro il presidio scritto per H51.
+
+    🖐️ NON è stato cambiato qui, ed è una scelta: mettere `funnel_ok` nel gate a
+    tappeto reintrodurrebbe il rollback-su-singhiozzo che questa scelta evita. La
+    forma giusta è distinguere i profili in cui l'update RICREA l'ingresso — ed è
+    una decisione sul percorso critico, non un fix da fare di passaggio.
+    Voce aperta nel registro con la misura dentro.
+    """
     import inspect
     assert "funnel_ok" not in inspect.getsource(v.health_gate)
 
