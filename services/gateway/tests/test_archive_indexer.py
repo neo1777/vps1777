@@ -1308,3 +1308,82 @@ def test_speaker_non_sovrascrive_un_valore_gia_scritto(tmp_path: Path):
         c.execute("UPDATE messages SET speaker='human' WHERE uuid='u1'")
         assert archive_indexer.popola_speaker(c) == 0
         assert c.execute("SELECT speaker FROM messages").fetchone()[0] == "human"
+
+
+# ═══════════════════════════ VOICE-TAGGING — Fase 2 (classify_voice) ══
+# Il principio di taratura e' ASIMMETRICO (spec §2): falsi negativi accettabili,
+# falsi positivi CARI. Questi test lo proteggono nei due versi.
+
+def test_classify_il_falso_positivo_e_il_caso_che_conta():
+    """Una frase VERA di chi scrive non deve MAI diventare `pasted`.
+
+    ⚠️ E' il test piu' importante dei cinque, ed e' quello che si e' tentati di
+    non scrivere perche' «tanto non succede». Il caso-C++ e' successo proprio
+    cosi': una frase vera attribuita alla persona sbagliata. Qui la direzione e'
+    l'altra — una frase propria marcata come altrui — e il costo e' lo stesso:
+    l'archivio smette di poter dire di chi sono le parole.
+    """
+    v = archive_indexer.classify_voice(
+        "Io il C++ praticamente non lo conosco. Io sono Dart, e sono un amatoriale. "
+        "Ne parlavamo ieri alle 14:30 e anche stamattina alle 9:15.",
+        sender="user", project="chat qualunque")
+    assert v[0] == "own", f"una frase propria con due ORARI dentro resta own, non {v[0]}"
+    assert v[2] >= 0.5
+
+
+def test_classify_transcript_serve_piu_di_un_segnale():
+    testo = "(0:12) allora vediamo (1:45) come dicevo (2:30) e qui si chiude"
+    # con il titolo-trappola: due segnali indipendenti → transcript
+    v = archive_indexer.classify_voice(testo, sender="user", project="Analisi transcript video")
+    assert v[0] == "pasted_transcript"
+    assert "video_ts" in v[3] and "trap_title" in v[3], "le bandiere sono l'autopsia del verdetto"
+    # ⚠️ SENZA il titolo, TRE timestamp NON bastano — e questo test l'ha scoperto
+    # cadendo: la mia aspettativa era piu' permissiva del codice, e il codice aveva
+    # ragione. Tre orari citati in una chat sono plausibili («alle 9:15, alle 14:30
+    # e alle 18:00»); un transcript vero ne ha decine. Il principio dice falsi
+    # positivi CARI ⇒ da solo, il segnale deve essere molto forte (TS_VIDEO_MIN*3).
+    v2 = archive_indexer.classify_voice(testo, sender="user", project="chat")
+    assert v2[0] != "pasted_transcript", "tre timestamp da soli non bastano"
+    assert "video_ts" in v2[3], "ma la bandiera si alza lo stesso: il segnale c'e', non basta"
+    # con SEI, il segnale e' forte abbastanza da reggere da solo
+    molti = testo + " (3:10) e poi (4:20) e infine (5:00)"
+    v3 = archive_indexer.classify_voice(molti, sender="user", project="chat")
+    assert v3[0] == "pasted_transcript"
+    assert v3[2] < v[2], "ma con UN segnale solo la CONFIDENZA resta sotto quella a due"
+
+
+def test_classify_character_dal_progetto_e_la_regola_piu_solida():
+    """L'unica delle sette che non guarda il testo: il project lo DICHIARA."""
+    v = archive_indexer.classify_voice("Il mago avanza di due caselle.",
+                                       sender="user", project="GDR1777 — il caso graphify")
+    assert v[0] == "character"
+    assert v[2] >= 0.8, "e' la regola piu' affidabile, la confidenza lo dice"
+
+
+def test_classify_blocco_inglese_da_umano_e_MIXED_non_pasted_ai():
+    """Il caso-scuola: l'umano scrive la cornice, l'AI il materiale.
+
+    Fondere i due assi renderebbe questo caso inesprimibile — ed e' il caso che
+    ci ha fatto sbagliare. `speaker=human` E `voice=mixed`: entrambi veri.
+    """
+    testo = ("Guarda cosa mi ha risposto:\n"
+             "The system should be designed with the assumption that the network "
+             "is not reliable, and that any of the components can fail at any time; "
+             "this is the only way to build software that will not surprise you in "
+             "production when it matters the most for the users of the platform.")
+    v = archive_indexer.classify_voice(testo, sender="user", project="chat")
+    assert v[0] == "mixed", f"da umano e' mixed, non pasted_ai (era {v[0]})"
+    assert "en_in_it" in v[3]
+    # lo stesso testo da un assistant non ha una cornice umana davanti
+    v2 = archive_indexer.classify_voice(testo, sender="assistant", project="chat")
+    assert v2[0] == "pasted_ai"
+
+
+def test_classify_non_inventa_su_cio_che_non_sa():
+    """Vuoto e mittente ignoto: `unknown`, non un default comodo."""
+    assert archive_indexer.classify_voice("")[0] == "unknown"
+    assert archive_indexer.classify_voice("   \n  ")[0] == "unknown"
+    v = archive_indexer.classify_voice("testo qualunque senza bandiere",
+                                       sender="attachment", project="doc")
+    assert v[0] == "unknown", "un allegato non dice chi ha scritto: non e' own"
+    assert v[2] == 0.0, "e la confidenza zero lo dichiara"

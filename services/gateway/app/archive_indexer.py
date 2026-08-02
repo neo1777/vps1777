@@ -563,6 +563,112 @@ def popola_speaker(conn: sqlite3.Connection) -> int:
     return scritte
 
 
+# ═══════════════════════════════════ VOICE-TAGGING — Fase 2 (classify_voice) ══
+# `speaker` è un FATTO (sta nella fonte). `voice` è una STIMA: la calcola questa
+# euristica, deterministica e stdlib-only — NIENTE LLM nell'indexer, così un
+# re-ingest sugli stessi dati dà sempre lo stesso risultato.
+#
+# 🔑 IL PRINCIPIO DI TARATURA, vincolante e asimmetrico (spec §2):
+#   FALSI NEGATIVI ACCETTABILI · FALSI POSITIVI CARI.
+#   Meglio un incollato marcato `own` (resta la cintura comportamentale: chi cerca
+#   un'identità apre comunque il contesto) che una frase VERA di Neo marcata
+#   `pasted`. Perciò le regole 2 e 3 esigono segnali FORTI, e in dubbio si tace.
+#
+# ⚠️ IL PERIMETRO, ed è la parte che si dimentica (spec §8): queste soglie sono
+#   tarate sul corpus claude.ai. Su un corpus diverso il tasso di falsi positivi
+#   VA RI-MISURATO prima di fidarsene — misurato allora: il flag «(mm:ss)» dava
+#   50/50 di falsi positivi sui NOSTRI orari, dove i due punti sono un'ora e non
+#   un timestamp video. Una bandiera giusta altrove afferma più di quanto sa qui.
+#
+# 📌 QUESTA FASE NON È AGGANCIATA ALL'INGEST, ed è deliberato: la funzione esiste
+#   ed è provata, ma `voice` resta '' finché la Fase 3 non decide DOVE chiamarla.
+#   Un campo popolato sembra sempre popolato apposta.
+
+# Soglie: costanti dichiarate perché si TARANO sul golden set, non si scoprono
+# leggendo il codice. La spec le dà come proposte (§7②, decisione di Neo).
+TS_VIDEO_MIN = 2          # timestamp «(m:ss)» ravvicinati per sospettare un transcript
+EN_BLOCCO_MIN = 25        # parole di un blocco inglese perché conti come blocco
+EN_RATIO_MIN = 0.18       # quota di stopword inglesi sopra cui il blocco è EN
+PROSA_PROPRIA_MAX = 0.30  # sotto questa quota di prosa propria: cornice, non testo
+QUOTE_FENCE_MIN = 0.50    # quota citata sopra cui si alza il flag `quote_fence`
+
+_RE_TS = re.compile(r"[(\[]?\b\d{1,2}:\d{2}(?::\d{2})?\b[)\]]?")
+_RE_TRAP = re.compile(r"transcript|analyz|analisi|trascriz|pulizia|youtube", re.I)
+_RE_CHARACTER = re.compile(r"gdr|roleplay|agora|simposio|partita", re.I)
+_RE_FENCE = re.compile(r"^\s*(>|```)", re.M)
+_EN_STOP = {"the", "of", "and", "to", "in", "is", "it", "that", "for", "with",
+            "as", "on", "this", "be", "are", "by", "from", "which", "you", "not",
+            "have", "has", "was", "were", "can", "will", "would", "should"}
+
+
+def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
+    """Stima la NATURA del contenuto. Ritorna (voice, quoted_share, conf, flags).
+
+    Ordine di precedenza dalla spec §2. Ogni regola alza le sue bandiere, e le
+    bandiere sono l'AUTOPSIA del verdetto: senza, `voice` sarebbe un'etichetta di
+    cui non si può discutere. In dubbio ritorna `own`/`unknown`, mai `pasted`.
+    """
+    testo = content or ""
+    flags: list[str] = []
+    if not testo.strip():
+        return ("unknown", 0.0, 0.0, [])
+
+    # ① character — il PROGETTO lo dichiara: è la sola regola che non guarda il testo,
+    #    e per questo è la più affidabile delle sette.
+    if project and _RE_CHARACTER.search(project):
+        return ("character", 0.0, 0.85, ["project_gdr"])
+
+    # ② pasted_transcript — timestamp ravvicinati, o un titolo-trappola nel project.
+    #    ⚠️ Il timestamp da solo NON basta: «alle 14:30» è un orario. Serve la
+    #    RIPETIZIONE (≥ TS_VIDEO_MIN), che un orario in prosa non produce.
+    ts = _RE_TS.findall(testo)
+    trap = bool(project and _RE_TRAP.search(project))
+    if trap:
+        flags.append("trap_title")
+    if len(ts) >= TS_VIDEO_MIN:
+        flags.append("video_ts")
+    if (len(ts) >= TS_VIDEO_MIN and trap) or len(ts) >= TS_VIDEO_MIN * 3:
+        # due segnali indipendenti, oppure uno solo ma molto forte
+        conf = 0.8 if trap else 0.6
+        return ("pasted_transcript", _quota_citata(testo), conf, flags)
+
+    # ③ pasted_ai — un blocco inglese lungo dentro un messaggio a dominanza italiana.
+    parole = testo.split()
+    if len(parole) >= EN_BLOCCO_MIN:
+        basse = [p.strip(".,;:!?()[]\"'").lower() for p in parole]
+        ratio = sum(1 for p in basse if p in _EN_STOP) / max(len(basse), 1)
+        if ratio >= EN_RATIO_MIN:
+            flags.append("en_in_it")
+            # su un mittente umano è `mixed` e non `pasted_ai`: l'umano ha scritto
+            # la cornice, l'AI il materiale — ed è il caso-scuola (spec §0).
+            if speaker_da_sender(sender) == "human":
+                return ("mixed", _quota_citata(testo), 0.5, flags)
+            return ("pasted_ai", _quota_citata(testo), 0.6, flags)
+
+    # ⑤ mixed — cornice + materiale: poca prosa propria e molto citato.
+    quota = _quota_citata(testo)
+    if quota >= QUOTE_FENCE_MIN:
+        flags.append("quote_fence")
+    if quota > (1 - PROSA_PROPRIA_MAX):
+        return ("mixed", quota, 0.5, flags)
+
+    # ⑥ own — default per chi scrive di suo, senza bandiere.
+    if speaker_da_sender(sender) in ("human", "assistant"):
+        return ("own", quota, 0.9 if not flags else 0.5, flags)
+
+    # ⑦ unknown — nessuna regola confidente.
+    return ("unknown", quota, 0.0, flags)
+
+
+def _quota_citata(testo: str) -> float:
+    """Quota 0-1 di righe citate (`>` o dentro un fence). Quantifica il `mixed`."""
+    righe = [r for r in testo.splitlines() if r.strip()]
+    if not righe:
+        return 0.0
+    citate = sum(1 for r in righe if _RE_FENCE.match(r))
+    return round(citate / len(righe), 3)
+
+
 def _ensure_v3(conn: sqlite3.Connection) -> bool:
     """Aggiunge le colonne del voice-tagging a un DB v2. Idempotente.
 
