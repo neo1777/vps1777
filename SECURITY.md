@@ -24,6 +24,8 @@ Mi impegno a:
 
 vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy / Cloudflared).
 
+> **Un'eccezione, e dura quanto il primo setup.** Prima che l'ingress sia attivo il pannello di onboarding non sarebbe raggiungibile — è il chicken-and-egg che `compose.onboarding.yaml` risolve pubblicando il gateway su `:8080` **in chiaro**. `deploy.sh` include quell'overlay all'avvio; `--apply` riavvia senza, e la porta si chiude ([CHANGELOG](CHANGELOG.md), voci `compose.onboarding.yaml` e STEP finalize).
+
 Threat model dichiarato:
 - Backend (archive-mcp, nb1777-mcp, bot) su rete Docker `internal: true` — non raggiungibili dall'esterno (nb1777-mcp e bot hanno anche l'uscita `egress`, senza porte pubblicate: possono uscire, non essere raggiunti — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)); nessun servizio pubblica `ports` in `compose.yaml` (`H48`)
 - OAuth 2.1 + DCR + PKCE per tutti i client OAuth (claude.ai, Mini App, future integrazioni)
