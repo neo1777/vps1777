@@ -1383,6 +1383,106 @@ def releases_prune(repo: Path, keep_versions: set[str]) -> None:
 
 # ─────────────────────────────────────────── systemd units
 
+# Le direttive di sandboxing di systemd. Su una unit che gira con `User=` non-root
+# queste riaccendono `NoNewPrivileges` da sé per applicare il filtro seccomp — e `sudo`,
+# che è setuid, smette di funzionare. È così che l'auto-update è morto il 03/08 alle
+# 04:32, con `NoNewPrivileges=no` già scritto nel file: la riga **non vince**
+# sull'implicazione (misurato sulla VPS con unit transitorie).
+#
+# ⚠️ L'elenco è PIÙ LARGO di ciò che systemd implica, e di proposito: la
+#   `man systemd.exec` documenta l'implicazione solo per `DynamicUser=`, e la prova
+#   sulla VPS ha misurato le sei INSIEME — quale delle sei l'accenda non lo sappiamo.
+#   Su un servizio che eleva non si indovina cosa è innocuo. (Stessa forma di
+#   `_CHIAVI_NOTE` in `services/gateway/app/audit.py`: si dichiara l'ammesso.)
+#
+# 🔑 È L'ELENCO UNICO DEL REPO: `tools/tests/test_unit_dichiarano_nonewprivileges.py`
+#   lo LEGGE da qui invece di riscriverlo — due elenchi che divergono sono il difetto
+#   che quel test esiste per impedire.
+PREFISSI_SANDBOX = ("Protect", "Restrict", "Lock", "Private", "Memory", "System",
+                    "Capability", "RemoveIPC", "DynamicUser", "AmbientCapabilities")
+
+
+def _direttive_attive(testo: str) -> list[tuple[str, str]]:
+    """(nome, riga) delle direttive che systemd esegue: i commenti no.
+
+    Serve davvero: «NoNewPrivileges» compare NEI COMMENTI delle unit, per spiegare
+    perché non lo si vuole. Un controllo che cerca la stringa nel file intero la trova
+    lì — *la cura, spiegandosi, scrive ciò che il controllo cerca.*
+    """
+    fuori = []
+    for riga in testo.splitlines():
+        r = riga.strip()
+        if r and not r.startswith("#") and "=" in r and r[:1].isalpha():
+            fuori.append((r.split("=", 1)[0].strip(), r))
+    return fuori
+
+
+def _sandbox_attive(testo: str) -> set[str]:
+    return {n for n, _ in _direttive_attive(testo)
+            if n != "NoNewPrivileges" and n.startswith(PREFISSI_SANDBOX)}
+
+
+def _dichiara_di_elevare(testo: str) -> bool:
+    """`NoNewPrivileges=no` è la dichiarazione «questo servizio deve elevare»."""
+    for nome, riga in _direttive_attive(testo):
+        if nome == "NoNewPrivileges":
+            return riga.split("=", 1)[1].strip().lower() in ("no", "false", "off", "0")
+    return False
+
+
+def unit_regredisce(installata: str, in_arrivo: str) -> set[str]:
+    """Sandboxing che il bundle AGGIUNGE a una unit che, su QUESTA macchina, eleva.
+
+    🔑 IL GIUDIZIO È RELATIVO, E LA PRIMA VERSIONE NON LO ERA. Avevo scritto il
+    controllo come assoluto — «la unit in arrivo dichiara `=no` e porta sandboxing» —
+    e misurandolo è risultato **cieco proprio sul caso da cui doveva difendere**: le
+    unit dei tag `v0.40.14` e `v0.41.0` non dichiarano `NoNewPrivileges` affatto, il
+    ramo non si apriva e il controllo passava. *Cercavo una condizione che esiste solo
+    nello stato CURATO, cioè guardavo dove sono io e non da dove arriva il pericolo.*
+
+    Qui la domanda è l'altra: **questo bundle annulla una cura che ho già sul disco?**
+    Se la unit installata dichiara `=no` (qui e ora questo servizio eleva) e quella in
+    arrivo aggiunge sandboxing, dopo l'update `sudo` non funzionerà più: è un ritorno
+    indietro travestito da aggiornamento. Generalizza oltre le sei direttive.
+
+    Vuoto = niente da segnalare. **Non solleva mai**: su una unit installata che non
+    dichiara `=no` (o su un testo che non sa leggere) risponde `set()`, cioè «non lo so
+    → prosegui». Il fail-closed vale solo sulla regressione riconosciuta — un controllo
+    che muore sul dubbio impedirebbe di installare proprio la release che lo sistema.
+    """
+    if not _dichiara_di_elevare(installata):
+        return set()
+    return _sandbox_attive(in_arrivo) - _sandbox_attive(installata)
+
+
+def regressioni_del_bundle(bundle: Path, repo: Path,
+                           installate: Path = Path("/etc/systemd/system")) -> dict[str, list[str]]:
+    """Per ogni unit del bundle: cosa AGGIUNGE rispetto a quella installata sul disco.
+
+    ⚠️ Esiste come funzione a sé, e non inline nel flusso di `cmd_update`, per una
+    ragione sola: **così si può provare**. Il ciclo dentro `cmd_update` sarebbe
+    verificabile solo con docker, rete e un bundle firmato — cioè da nessuno — e
+    l'errore che ci si aspetta lì (scambiare `installata` e `in arrivo`) passerebbe
+    tutti i test della funzione pura restando invisibile. `installate` è un parametro
+    e non una costante per lo stesso motivo.
+    """
+    fuori: dict[str, list[str]] = {}
+    for src in sorted(bundle.glob("systemd/vps1777-*.service")):
+        gia = installate / src.name
+        try:
+            if not gia.is_file():
+                continue  # unit nuova: non c'è niente da annullare
+            aggiunte = unit_regredisce(
+                gia.read_text(encoding="utf-8", errors="replace"),
+                render_unit(src.read_text(encoding="utf-8", errors="replace"), repo))
+        except OSError as exc:  # illeggibile → «non lo so», non «va bene»
+            log(f"preflight-unit: {src.name} non confrontabile ({exc}) — proseguo")
+            continue
+        if aggiunte:
+            fuori[src.name] = sorted(aggiunte)
+    return fuori
+
+
 def render_unit(text: str, repo: Path) -> str:
     """Sostituisce i placeholder @…@ delle unit con l'utente/home REALI.
 
@@ -2439,6 +2539,42 @@ def cmd_update(repo: Path, args) -> int:
     except (RuntimeError, OSError, json.JSONDecodeError, urllib.error.URLError) as exc:
         step(5, "fetch", "failed", str(exc))
         die(f"fetch/verifica bundle fallita: {exc}")
+
+    # 5-bis — PRE-FLIGHT DELLE UNIT DEL BUNDLE (fatale). PRIMA DEL SELF-UPDATE.
+    #
+    # 🔑 PERCHÉ QUI E NON DOPO IL SELF-UPDATE — ed è l'OPPOSTO della scelta fatta per i
+    #   segreti allo step 6-bis, per una ragione che vale solo per questo controllo.
+    #   Il commento del 6-bis chiarisce che dopo il re-exec «il controllo nuovo girerebbe
+    #   comunque»: vero, ma sarebbe quello della release IN ARRIVO. E qui l'oggetto da cui
+    #   difendersi è proprio un bundle che porta INDIETRO una unit ⇒ un bundle vecchio
+    #   DISATTIVEREBBE IL PROPRIO CONTROLLO. Deve giudicarlo la CLI installata, prima di
+    #   cedere il posto. (Il lock-out da formato che motiva il 6-bis qui non morde: si
+    #   leggono file `.service`, INI di systemd, non un formato nostro.)
+    #
+    # PERCHÉ ESISTE: il 03/08 la cura all'auto-update è entrata in `main` DOPO che 0.41.0
+    #   era già tagliata. La macchina è stata curata a mano — e un `vps1777 update` a
+    #   0.41.0, o una pressione del pulsante del pannello (`vps1777-update.path` →
+    #   `update.service`), avrebbe reinstallato la unit del bundle CANCELLANDO la cura,
+    #   in silenzio e con exit 0. L'unica difesa era ricordarsene.
+    #
+    # ⚠️ NON HA UNA VIA D'EMERGENZA, e non è una svista: qui il lock-out È il
+    #   comportamento voluto — l'alternativa è cancellare senza dirlo una cura di
+    #   sicurezza presente sul disco. La via d'uscita esiste e non passa da un flag:
+    #   `--version` verso una release sana, o la unit installata a mano.
+    regressioni = regressioni_del_bundle(bundle, repo)
+    if regressioni:
+        step(5, "preflight-unit", "failed",
+             "; ".join(f"{u}: {', '.join(d)}" for u, d in regressioni.items()))
+        dettaglio = "".join(
+            f"    {u}\n" + "".join(f"      + {d}\n" for d in dirs)
+            for u, dirs in regressioni.items())
+        die(f"la release v{target} REINTRODURREBBE direttive di sandboxing su unit che "
+            f"devono elevare:\n{dettaglio}"
+            "  Su un servizio con `User=` non-root queste riaccendono NoNewPrivileges da "
+            "sé, e `sudo` smette di funzionare: la unit installata dichiara "
+            "`NoNewPrivileges=no` proprio perché ne ha bisogno.\n"
+            "  Niente è stato toccato. Installa una release che contenga la cura "
+            "(`--version`), o metti la unit a mano se sai cosa stai facendo.")
 
     # 6 — self-update della CLI (poi re-exec)
     if not args.skip_self_update:
