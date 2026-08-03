@@ -219,3 +219,41 @@ def test_il_preflight_gira_PRIMA_del_self_update() -> None:
         "reintroduce le direttive porta con sé anche la versione del controllo che non "
         "le vede. Il giudizio deve restare alla CLI installata."
     )
+
+
+def test_il_SITO_DI_CHIAMATA_passa_gli_argomenti_nell_ordine_giusto() -> None:
+    """Il pezzo è di b82df434, adattato alla firma keyword-only. Perché entrambi.
+
+    Lei l'ha scritto contro la versione precedente di questo codice — dove `repo` era
+    posizionale — e provato nei due versi: invertito, tutta la suite restava verde
+    (235 passati, misurato da abdd732a e confermato da lei in indipendenza).
+    Nel frattempo la firma è diventata `(bundle, *, repo, installate)`, quindi lo
+    scambio POSIZIONALE non arriva più a girare: `TypeError`.
+
+    ⚠️ **Resta un caso che la firma non chiude**: `regressioni_del_bundle(bundle=repo,
+    repo=bundle)` — lo scambio scritto per esteso. Improbabile, non impossibile, e non
+    costa niente presidiarlo. *Una firma rende un difetto inesprimibile in una forma,
+    non in tutte.*
+
+    Via AST e non regex: una regex sul testo non distingue la chiamata dalla
+    definizione né dai commenti che la nominano.
+    """
+    import ast
+    albero = ast.parse((RADICE / "tools" / "vps1777.py").read_text(encoding="utf-8"))
+    chiamate = [n for n in ast.walk(albero)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == "regressioni_del_bundle"]
+    assert chiamate, "nessuna chiamata a regressioni_del_bundle: il preflight non gira"
+    for c in chiamate:
+        posizionali = [a.id for a in c.args if isinstance(a, ast.Name)]
+        assert posizionali[:1] == ["bundle"], (
+            f"r.{c.lineno}: primo argomento {posizionali[:1]}, atteso ['bundle'].\n"
+            "  Invertiti, il preflight confronta il repo col bundle e NON VEDE MAI una "
+            "regressione: verde su tutto, incluso il caso da cui difende."
+        )
+        per_nome = {k.arg: (k.value.id if isinstance(k.value, ast.Name) else None)
+                    for k in c.keywords}
+        assert per_nome.get("repo") == "repo", (
+            f"r.{c.lineno}: `repo=` riceve {per_nome.get('repo')!r}, atteso 'repo'.\n"
+            "  È lo scambio scritto per esteso — la firma keyword-only non lo ferma."
+        )
