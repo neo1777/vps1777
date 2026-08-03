@@ -55,7 +55,20 @@ if [ -n "$atteso" ] && [ "$atteso" != "$protetto" ]; then
   echo "🔴 FAIL — il punto di ripristino protetto NON è quello della versione che gira."
   exit 1
 fi
-[ -z "$atteso" ] && echo "   ⚠️  nessuno snapshot per la versione $VERS: il rollback dati non ha un punto di ritorno"
+if [ -z "$atteso" ]; then
+  echo "   ⚠️  nessuno snapshot per la versione $VERS: il rollback dati non ha un punto di ritorno"
+  echo "   ⇒ NON è un PASS: la tesi di questa prova — «il punto di ripristino protetto è quello"
+  echo "      della versione che gira» — non è VALUTABILE senza uno snapshot di quella versione."
+  echo "      Stesso trattamento del caso «versione non leggibile» qui sopra, e per la stessa"
+  echo "      ragione: manca l'ancoraggio esterno, non il risultato."
+  # Prima si stampava solo il ⚠️ e si proseguiva: con `tot>0` e `vecchi==0` la prova
+  # arrivava a `exit 0` e il referto la contava VERDE, mentre la sua asserzione centrale
+  # non era stata valutata. E il ⚠️ non salvava niente — `lancia-tutte.sh` classifica sul
+  # CODICE D'USCITA, non sull'output: quel messaggio nessun raccoglitore lo legge.
+  # ⭐ È il difetto che questo stesso file argomenta alle righe 28-40: un verde che nessuno
+  #   controlla. Qui era il file a produrlo.
+  exit 2
+fi
 while IFS= read -r d; do
   [ -z "$d" ] && continue
   tot=$((tot+1))
