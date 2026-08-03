@@ -24,11 +24,20 @@ Mi impegno a:
 
 vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy / Cloudflared).
 
-> **Un'eccezione, e dura quanto il primo setup.** Prima che l'ingress sia attivo il pannello di onboarding non sarebbe raggiungibile — il chicken-and-egg che `compose.onboarding.yaml` risolve pubblicando il gateway su **`0.0.0.0:8080`, in HTTP**: `ports: ["8080:8080"]` senza indirizzo, quindi su tutte le interfacce, raggiungibile da chiunque conosca l'IP (il confronto che lo rende evidente è `compose.ingress.tailscale.yaml`, che invece lega a `127.0.0.1`).
+> **Un'eccezione — e NON dura solo il primo setup: dipende dal profilo di ingress.**
+> `compose.onboarding.yaml` pubblica il gateway su **`0.0.0.0:8080`, in HTTP** (`ports: ["8080:8080"]`, senza indirizzo ⇒ tutte le interfacce). Serve a risolvere il chicken-and-egg: prima che l'ingress sia attivo il pannello non sarebbe raggiungibile.
 >
-> **Cosa transita in quella finestra**: il form di primo setup chiede `tailscale_authkey`, `telegram_bot_token`, `telegram_owner_id` e `public_base` ([`onboarding.py`](services/gateway/app/onboarding.py)) — cioè **credenziali digitate su una pagina non cifrata**. Il rischio da dimensionare è questo, non «una porta aperta».
+> | profilo | l'overlay onboarding | la 8080 |
+> |---|---|---|
+> | `tailscale` | **escluso** da `deploy.sh` | il gateway è legato a `${GATEWAY_BIND:-127.0.0.1}` — **loopback** |
+> | `caddy` | **incluso** | `0.0.0.0:8080` **finché lo stack gira così** |
+> | `cloudflared` | **incluso** | idem |
 >
-> 🖐️ *Il pannello resta comunque dietro autenticazione: `setup_view` chiama `_require_admin` come prima istruzione — non c'è una finestra in cui chiunque arrivi possa configurarlo.* `deploy.sh` include l'overlay all'avvio; `--apply` riavvia senza, e la porta si chiude ([CHANGELOG](CHANGELOG.md), voci `compose.onboarding.yaml` e STEP finalize).
+> Il ramo che decide è in [`deploy.sh`](deploy.sh) (`if [ "$INGRESS" = "tailscale" ]`): per tailscale l'esposizione la gestisce `GATEWAY_BIND` e l'overlay pubblicherebbe una seconda porta in conflitto; per gli altri due l'overlay resta nel comando di avvio. **Con `caddy` o `cloudflared` la porta in chiaro non è una finestra: è lo stato di esercizio**, finché non si riavvia lo stack senza quell'overlay.
+>
+> **Cosa transita da lì**: il form di primo setup chiede `tailscale_authkey`, `telegram_bot_token`, `telegram_owner_id`, `public_base` ([`onboarding.py`](services/gateway/app/onboarding.py)) — **credenziali su una pagina non cifrata**. Il rischio da dimensionare è questo, non «una porta aperta».
+>
+> 🖐️ *Il pannello resta dietro autenticazione: `setup_view` chiama `_require_admin` come prima istruzione — non c'è una finestra in cui chiunque arrivi possa configurarlo.*
 
 Threat model dichiarato:
 - Backend (archive-mcp, nb1777-mcp, bot) su rete Docker `internal: true` — non raggiungibili dall'esterno (nb1777-mcp e bot hanno anche l'uscita `egress`, senza porte pubblicate: possono uscire, non essere raggiunti — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)); nessun servizio pubblica `ports` in `compose.yaml` (`H48`)
