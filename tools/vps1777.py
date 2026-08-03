@@ -1455,7 +1455,7 @@ def unit_regredisce(installata: str, in_arrivo: str) -> set[str]:
     return _sandbox_attive(in_arrivo) - _sandbox_attive(installata)
 
 
-def regressioni_del_bundle(bundle: Path, repo: Path,
+def regressioni_del_bundle(bundle: Path, *, repo: Path,
                            installate: Path = Path("/etc/systemd/system")) -> dict[str, list[str]]:
     """Per ogni unit del bundle: cosa AGGIUNGE rispetto a quella installata sul disco.
 
@@ -2561,7 +2561,7 @@ def cmd_update(repo: Path, args) -> int:
     #   comportamento voluto — l'alternativa è cancellare senza dirlo una cura di
     #   sicurezza presente sul disco. La via d'uscita esiste e non passa da un flag:
     #   `--version` verso una release sana, o la unit installata a mano.
-    regressioni = regressioni_del_bundle(bundle, repo)
+    regressioni = regressioni_del_bundle(bundle, repo=repo)
     if regressioni:
         step(5, "preflight-unit", "failed",
              "; ".join(f"{u}: {', '.join(d)}" for u, d in regressioni.items()))
