@@ -133,6 +133,13 @@ _CHIAVI_NOTE = frozenset({
     #    una chiave: un'allowlist di chiavi che contiene un valore non protegge nulla in più
     #    e fa credere il contrario.
     "ts", "dropped", "last_error",
+    # 03/08 — `libero_mb`: i MB liberi sul disco quando un upload viene rifiutato per
+    # spazio (admin.py). È un numero, non un path e non un identificativo: dice quanto
+    # era stretto il disco, che è l'unica cosa utile per capire se il rifiuto era al
+    # limite o abissale. **Aggiunta perché il presidio qui sopra mi ha fermata**: il test
+    # `test_OGNI_chiave_usata_nel_repo_e_dichiarata` è diventato rosso appena ho scritto
+    # la chiave nuova — ed è la ragione per cui quel test esiste.
+    "libero_mb",
 })
 _MAX_VALORE = 500
 

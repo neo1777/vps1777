@@ -15,6 +15,7 @@ import json
 import os
 import re
 import secrets as pysecrets
+import shutil
 import sqlite3
 import time
 from pathlib import Path
@@ -622,6 +623,34 @@ async def archive_view(request: Request) -> Response:
             # nell'indexer — ma un upload da 100 GB riempirebbe il disco PRIMA di
             # arrivarci. Si conta mentre si scrive e si taglia. È la lezione del
             # tar-bomb: un limite sul trasporto va messo anche sul trasporto.
+            # 🔴 LO SPAZIO SI GUARDA PRIMA DI SCRIVERE, e fino al 03/08 nessuno lo faceva.
+            #   Il commento di `archive_indexer.py:105` lo prescriveva da tre settimane
+            #   — «Il disco della VPS deve avere spazio per upload + DB: verificare prima
+            #   dei giganti» — e in tutto `services/` c'erano ZERO `statvfs`/`disk_usage`.
+            #   Un difetto scritto come specifica: la riga descrive il rimedio, e nessuno
+            #   l'ha letta come «da fare» perché ha la forma di una cosa già decisa.
+            # ⚠️ IL DANNO che previene non è l'upload fallito: è il DISCO PIENO. Il loop
+            #   qui sotto scrive a chunk e si ferma solo al tetto — su un disco corto
+            #   riempie tutto e muore a metà, e sulla stessa partizione ci sono il DB
+            #   dell'archivio e i suoi journal. `archive-mcp` monta quel volume in `:ro`
+            #   (H46): a disco pieno non potrebbe nemmeno riparare il proprio journal.
+            # 📏 LA SOGLIA NON È INVENTATA: è `MAX_UPLOAD_BYTES`, che esiste già. Non
+            #   conosciamo la dimensione dell'upload in anticipo (è uno stream), quindi
+            #   l'unica soglia onesta è «lo spazio che servirebbe nel caso peggiore
+            #   ammesso». È conservativa di proposito, e lo dice a chi la incontra.
+            try:
+                _libero = shutil.disk_usage(db_dir).free
+            except OSError:
+                _libero = None      # non misurabile ≠ misurato e va bene: si prosegue
+            if _libero is not None and _libero < archive_indexer.MAX_UPLOAD_BYTES:
+                audit({"event": "admin_archive_upload_rifiutato_spazio", "by": email,
+                       "db": db_name, "libero_mb": _libero // (1024 * 1024)})
+                raise ValueError(
+                    f"spazio su disco insufficiente: liberi "
+                    f"{_libero // (1024 * 1024)} MB, ne servono almeno "
+                    f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
+                    f"(il tetto di un upload). Libera spazio, oppure usa la CLI sulla "
+                    f"VPS che scrive direttamente senza il file temporaneo.")
             fh = upload.file  # type: ignore[union-attr]
             fh.seek(0)
             written = 0
