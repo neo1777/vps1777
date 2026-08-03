@@ -42,6 +42,28 @@ WorkingDirectory=@REPO@
 ExecStart=/usr/local/bin/vps1777 update --yes --from-intent @REPO@/onboarding/update_pending_update.json
 # pull + migrazioni + health-gate (180s) + eventuale rollback: margine ampio
 TimeoutStartSec=1800
+# 🔴 ESPLICITO, e non «omesso»: qui sta il difetto che ha rotto l'auto-update il
+# 03/08 alle 04:32 (`sudo: The "no new privileges" flag is set, which prevents
+# sudo from running as root` → il self-update della CLI muore, e l'update con lui).
+#   L'intenzione era gia' scritta nel commento in testa a questo file — «Perciò
+#   NIENTE NoNewPrivileges (romperebbe sudo/setuid)» — ed era GIUSTA. E' stata
+#   realizzata TOGLIENDO la riga, e l'assenza non e' una scelta: e' uno spazio che
+#   systemd riempie da se'. Con un filtro seccomp (le direttive qui sotto) su un
+#   servizio che gira come utente NON privilegiato, systemd accende NNP di
+#   conseguenza — nessuno l'ha impostato.
+# 📏 Misurato con unit transitorie, il 03/08:
+#     le sei direttive, come root            -> NoNewPrivs: 0
+#     le sei + User=<operator> (questa unit) -> NoNewPrivs: 1
+#     solo User=<operator>, senza hardening  -> NoNewPrivs: 0
+#   => ne' l'hardening da solo ne' l'utente da solo: la COMBINAZIONE.
+# ⚠️ E `systemctl show … -p NoNewPrivileges` rispondeva `no` mentre il processo
+#   aveva `1`: riporta il valore DICHIARATO, non l'effettivo. Chi verificava di li'
+#   archiviava l'ipotesi giusta — il verdetto su una proprieta' di runtime sta nel
+#   processo (`/proc/<pid>/status`), non nella configurazione.
+# 🔑 Le unit che NON usano sudo (`check-update`, `secrets-check`) hanno
+#   `NoNewPrivileges=true` scritto per esteso. Qui serve il contrario, e per la
+#   stessa ragione: detto, non lasciato al default.
+NoNewPrivileges=no
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectClock=true
