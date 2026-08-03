@@ -25,13 +25,15 @@ Mi impegno a:
 vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy / Cloudflared).
 
 > **La porta del pannello di setup: dalla 0.41.0 è sul loopback su tutti e tre i profili.**
-> `compose.onboarding.yaml` pubblica il pannello su **`${ONBOARDING_BIND:-127.0.0.1}:8080`**: raggiungibile dalla macchina, non dalla rete. Ci si arriva con un tunnel SSH — `ssh -L 8080:127.0.0.1:8080 <utente>@<vps>`, poi `http://127.0.0.1:8080/admin/setup` dal proprio computer.
+> `compose.onboarding.yaml` pubblica il pannello su **`${ONBOARDING_BIND:-127.0.0.1}:8080`**: raggiungibile dalla macchina, non dalla rete. **Con `caddy` e `cloudflared` al pannello si arriva dal dominio HTTPS del proxy**, che è servito dal primo avvio perché la destinazione è configurata prima — `CADDY_DOMAIN` è obbligatorio in `.env` ([`compose.ingress.caddy.yaml:26`](compose.ingress.caddy.yaml), `${CADDY_DOMAIN:?…}`), e per cloudflared il tunnel è pre-creato con l'hostname che punta a `http://gateway:8080` e il token in `secrets/cloudflared_token.txt`. **In ogni caso, e per `tailscale` prima che il tunnel esista, resta la via del tunnel SSH**: `ssh -L 8080:127.0.0.1:8080 <utente>@<vps>`, poi `http://127.0.0.1:8080/admin/setup` dal proprio computer.
 >
 > | profilo | l'overlay onboarding | la 8080, per default | chi la lega al loopback |
 > |---|---|---|---|
 > | `tailscale` | **escluso** da `deploy.sh` | **loopback** | `${GATEWAY_BIND:-127.0.0.1}` sul gateway |
 > | `caddy` | **incluso** | **loopback** | `${ONBOARDING_BIND:-127.0.0.1}` nell'overlay |
 > | `cloudflared` | **incluso** | **loopback** | idem |
+>
+> **La porta sull'host non serve ai due proxy**: `ingress/Caddyfile` fa `reverse_proxy gateway:8080` **per nome**, e `cloudflared` sta sulla rete `ingress` — entrambi raggiungono il gateway dalla rete Docker. Il chicken-and-egg che l'aveva motivata è di **tailscale**, dove l'authkey si mette dal pannello e quindi prima del pannello non c'è tunnel.
 >
 > Il ramo è in [`deploy.sh`](deploy.sh) (`if [ "$INGRESS" = "tailscale" ]`): per tailscale l'esposizione la gestisce `GATEWAY_BIND` e l'overlay pubblicherebbe una seconda porta in conflitto; per gli altri due l'overlay resta nel comando di avvio. **Il risultato è lo stesso — loopback — ma per due vie diverse: chi tocca una delle due non ha toccato l'altra.**
 >
