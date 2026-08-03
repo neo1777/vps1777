@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from . import fts
+from . import integrita
 from .fts import FtsSyntaxError  # noqa: F401 — riesportato per server.py
+from .integrita import ArchivioSporco  # noqa: F401 — riesportato per server.py
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -150,7 +152,13 @@ def reload_registry() -> list[str]:
 def _open(name: str) -> sqlite3.Connection:
     if name not in _DBS:
         raise KeyError(f"DB '{name}' non disponibile. Disponibili: {available_dbs()}")
-    conn = sqlite3.connect(f"file:{_DBS[name]}?mode=ro", uri=True)
+    percorso = Path(_DBS[name])
+    # Costa un `exists()`: la ragione per cui può stare sul percorso caldo — e la
+    # ragione per cui `verifica()` NON ci sta — è scritta in `integrita.py`.
+    sporco = integrita.journal_caldo(percorso)
+    if sporco is not None:
+        raise ArchivioSporco(integrita.messaggio_sporco(name, sporco))
+    conn = sqlite3.connect(f"file:{percorso}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 

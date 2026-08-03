@@ -87,6 +87,19 @@ jobs:
       # una build rossa.
       - name: Registro dei rilievi — nessun claim senza coordinata
         run: uv run --with pyyaml security/check_findings.py
+      # I TRE INSTALLER devono concordare. Nasce dal round-16 (`bedecdcb`): non
+      # c'era NESSUN job che li confrontasse, e la divergenza è già costata due
+      # volte — il fix #13 (6c764bc) allineò deploy.sh e engine.py e saltò
+      # setup.sh; H55 li trovò con due policy diverse sull'operatore.
+      # ⚠️ È statico: vede i nomi nei file, non ciò che accade a runtime. Un
+      #   verde qui dice «i nomi concordano», non «fanno la stessa cosa» — e il
+      #   docstring lo scrive, così nessuno legge più di quel che c'è.
+      # 🛡️ L'autoprova gira PRIMA: un presidio che non sa scattare darebbe verde
+      #   su tre installer divergenti, ed è il difetto che questo job previene.
+      - name: I tre installer concordano — e il presidio sa scattare
+        run: |
+          python3 security/confronta-installer.py --autoprova
+          python3 security/confronta-installer.py
       # Anti-leak: niente export di sessione tracciati, niente materiale
       # credenziale nei file del repo. Nasce da un errore vero: un transcript di
       # lavoro (.txt dal nome innocuo, ma con dentro tutto il detto-e-fatto della
