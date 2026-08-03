@@ -80,3 +80,32 @@ def test_la_sonda_SA_DIRE_DI_NO():
     """Controprova: su una unit finta senza OnFailure gli assert devono fallire."""
     finta = "[Unit]\nDescription=x\n\n[Service]\nExecStart=/bin/true\n"
     assert not [r for r in finta.splitlines() if r.strip().startswith("OnFailure=")]
+
+
+def test_OGNI_unit_che_chiama_la_CLI_ha_un_OnFailure():
+    """La regola non è una LISTA di quattro nomi: è una RELAZIONE.
+
+    🔑 PERCHÉ. `71d540e6` propone che la sua notifica (dentro `_esci()`) TACCIA
+       sotto systemd, così un fallimento non manda due avvisi: fuori da systemd
+       parla la sua, dentro parla `OnFailure`. **La partizione è giusta e non
+       lascia buchi — a UNA condizione: che ogni unit che invoca la CLI abbia un
+       `OnFailure`.** Se domani ne nascesse una senza, quel percorso resterebbe
+       muto da entrambe le parti: la sua tace perché è sotto systemd, la mia non
+       c'è. *Un buco che nasce da due cure corrette messe insieme.*
+
+    ⇒ Questo test è la condizione, resa eseguibile. Una lista di quattro nomi
+      invecchierebbe al primo servizio nuovo; questa domanda no.
+    """
+    senza = []
+    for u in sorted(SYSTEMD.glob("vps1777-*.service")):
+        testo = u.read_text(encoding="utf-8")
+        if "ExecStart=/usr/local/bin/vps1777" not in testo:
+            continue
+        if u.name.startswith("vps1777-avvisa-fallimento"):
+            continue          # è LEI l'avviso: OnFailure sull'OnFailure non esiste
+        if not [r for r in testo.splitlines() if r.strip().startswith("OnFailure=")]:
+            senza.append(u.name)
+    assert not senza, (
+        f"unit che invocano la CLI senza OnFailure: {senza}. Con la notifica "
+        "interna silenziata sotto systemd, questi percorsi non avvisano da "
+        "NESSUNA delle due parti — un buco nato da due cure corrette insieme.")
