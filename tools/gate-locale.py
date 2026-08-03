@@ -33,11 +33,17 @@ ESITO  0 = tutti gli step eseguiti sono passati
        2 = non misurabile (workflow illeggibile, job assente, pyyaml mancante,
            ZERO step eseguibili). *Uno zero di step non è un verde.*
 
-USO    python3 tools/gate-locale.py                 → esegue il job `lint`
+USO    python3 tools/gate-locale.py                 → TUTTI i job del workflow
+       python3 tools/gate-locale.py --job lint      → un job solo
        python3 tools/gate-locale.py --elenco        → dice cosa farebbe, senza fare
-       python3 tools/gate-locale.py --job contract  → un altro job
        python3 tools/gate-locale.py --solo Shell    → i soli step il cui nome contiene…
        python3 tools/gate-locale.py --autoprova     → prova che sa dire di no
+
+📌 Il default è TUTTI i job perché la prima stesura girava il solo `lint` e dava un
+   verde su un job su tre senza nominare gli altri — e `contract` era proprio quello
+   che quel giorno aveva bocciato due PR. Un job che qui non si può eseguire (oggi
+   `build`: solo `uses:` e una `strategy.matrix`) esce come ⚪ **non misurabile** e
+   viene detto in coda, non lasciato annegare nel verde degli altri.
 """
 
 from __future__ import annotations
@@ -77,7 +83,17 @@ def carica(percorso: Path) -> tuple[int, object, str]:
 
 
 def raccogli(wf: object, job: str, solo: str | None) -> tuple[list, list]:
-    """(da_eseguire, saltati) — ogni voce è (nome, corpo_o_motivo)."""
+    """(da_eseguire, saltati) — da_eseguire è (nome, corpo, working_directory, nota).
+
+    ⚠️ `working-directory` NON è un dettaglio: due step di `contract` girano in
+       `services/nb1777-mcp`, e senza onorarlo `uv run pytest tests/` cercherebbe
+       `tests/` nella radice e darebbe un rosso che la CI non dà. *Riprodurre il
+       comando senza il CONTESTO in cui gira è la stessa classe di difetto che
+       questo file esiste per chiudere, un livello più in basso.*
+    📌 `if:` invece non lo VALUTO — non c'è un evento GitHub qui. Lo step si esegue
+       comunque e la condizione viene stampata accanto: «gira anche quando in CI
+       forse no» è un dato che chi legge deve avere, non una cosa da tacere.
+    """
     jobs = wf.get("jobs", {}) if isinstance(wf, dict) else {}
     if job not in jobs:
         return [], [("(job assente)", f"il workflow non ha un job «{job}»")]
@@ -93,7 +109,8 @@ def raccogli(wf: object, job: str, solo: str | None) -> tuple[list, list]:
         elif "${{" in st["run"]:
             saltati.append((nome, SALTA_EXPR))
         else:
-            esegui.append((nome, st["run"]))
+            nota = f"`if: {st['if']}` — non valutata qui, lo step gira comunque" if "if" in st else ""
+            esegui.append((nome, st["run"], st.get("working-directory"), nota))
     return esegui, saltati
 
 
@@ -122,8 +139,10 @@ def _effetti(corpo: str) -> list[str]:
 def elenca(esegui: list, saltati: list) -> int:
     print(f"Da {WORKFLOW.relative_to(RADICE)}\n")
     print(f"ESEGUIREBBE ({len(esegui)})")
-    for nome, corpo in esegui:
-        print(f"  • {nome}")
+    for nome, corpo, wd, nota in esegui:
+        print(f"  • {nome}{f'   [in {wd}]' if wd else ''}")
+        if nota:
+            print(f"      ⚪ {nota}")
         for r in _effetti(corpo):
             print(f"      ⚠️ tocca l'ambiente: {r[:96]}")
     print(f"\nSALTA ({len(saltati)}) — dichiarati, non taciuti")
@@ -143,11 +162,18 @@ def esegui_step(esegui: list, saltati: list, radice: Path) -> int:
         return 2
 
     falliti = 0
-    for nome, corpo in esegui:
-        print(f"\n─── {nome}")
+    for nome, corpo, wd, nota in esegui:
+        dove = (radice / wd) if wd else radice
+        print(f"\n─── {nome}{f'   [in {wd}]' if wd else ''}")
+        if nota:
+            print(f"     ⚪ {nota}")
+        if not dove.is_dir():
+            falliti += 1
+            print(f"  🔴 working-directory inesistente: {dove}")
+            continue
         p = subprocess.run(  # noqa: S602 — il corpo viene dal workflow del repo, non da input
             ["bash", "-eo", "pipefail", "-c", corpo],
-            cwd=radice, text=True, capture_output=True, check=False,
+            cwd=dove, text=True, capture_output=True, check=False,
         )
         if p.returncode == 0:
             print(f"  ✅ exit 0{('  ' + p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else ''}")
@@ -233,14 +259,123 @@ def autoprova() -> int:
             if not buono:
                 ok = 1
 
+    # ── E i casi MULTI-JOB, che sono la cura del rilievo di b82df434 ──────────
+    # Il verde di un job non deve coprire un job che qui non si può eseguire: senza
+    # questi tre casi, «tutti i job» sarebbe una promessa invece di una misura.
+    with tempfile.TemporaryDirectory() as d:
+        radice = Path(d)
+        import contextlib
+        import io
+
+        def prova_job(jobs: dict, job: str | None = None) -> tuple[int, str]:
+            wf = yaml.safe_load(yaml.safe_dump({"jobs": jobs}))
+            b = io.StringIO()
+            with contextlib.redirect_stdout(b):
+                e = su_piu_job(wf, job, None, False, radice)
+            return e, b.getvalue()
+
+        e1, _ = prova_job({"a": {"steps": [{"name": "v", "run": "true"}]},
+                           "b": {"steps": [{"name": "r", "run": "exit 1"}]}})
+        segna("due job, uno rosso", 1, e1)
+
+        e2, t2 = prova_job({"a": {"steps": [{"name": "v", "run": "true"}]},
+                            "b": {"steps": [{"name": "u", "uses": "actions/checkout@v4"}]}})
+        segna("un job verde + uno NON misurabile", 0, e2)
+        avvisa = "NON sono misurabili qui" in t2 and "b" in t2
+        print(f"  {'✅' if avvisa else '🔴'} {'…e lo dice invece di annegarlo nel verde':<44} → "
+              f"{avvisa} (atteso True)")
+        if not avvisa:
+            ok = 1
+
+        e3, _ = prova_job({"a": {"steps": [{"name": "u", "uses": "actions/checkout@v4"}]},
+                           "b": {"steps": []}})
+        segna("tutti i job non misurabili", 2, e3)
+
+        e4, _ = prova_job({"a": {"steps": [{"name": "v", "run": "true"}]}}, job="assente")
+        segna("--job su un nome che non esiste", 2, e4)
+
+        # working-directory: senza onorarlo, due step di `contract` girerebbero nella
+        # radice e darebbero un rosso che la CI non dà. Il caso vero, non simulato:
+        # il comando riesce SOLO se il cwd è quello giusto.
+        (radice / "sotto").mkdir()
+        (radice / "sotto" / "segno.txt").write_text("x", encoding="utf-8")
+        e5, _ = prova_job({"a": {"steps": [
+            {"name": "wd", "run": "test -f segno.txt", "working-directory": "sotto"}]}})
+        segna("working-directory onorato", 0, e5)
+        e6, _ = prova_job({"a": {"steps": [{"name": "wd", "run": "test -f segno.txt"}]}})
+        segna("…e senza, lo stesso comando FALLISCE", 1, e6)
+        e7, _ = prova_job({"a": {"steps": [
+            {"name": "wd", "run": "true", "working-directory": "non-esiste"}]}})
+        segna("working-directory inesistente → rosso", 1, e7)
+
+        # `if:` non si valuta, ma lo step deve girare E la condizione va detta.
+        e8, t8 = prova_job({"a": {"steps": [
+            {"name": "cond", "run": "true", "if": "github.event_name == 'pull_request'"}]}})
+        segna("step con `if:` gira comunque", 0, e8)
+        dice_if = "if:" in t8 and "non valutata" in t8
+        print(f"  {'✅' if dice_if else '🔴'} {'…e la condizione viene DICHIARATA':<44} → "
+              f"{dice_if} (atteso True)")
+        if not dice_if:
+            ok = 1
+
     print("\n✅ il gate sa fallire." if ok == 0
           else "\n🔴 AUTOPROVA FALLITA — il gate non è affidabile.")
     return ok
 
 
+def tutti_i_job(wf: object) -> list[str]:
+    return list(wf.get("jobs", {}).keys()) if isinstance(wf, dict) else []
+
+
+def su_piu_job(wf: object, job: str | None, solo: str | None,
+               elenco: bool, radice: Path) -> int:
+    """Il DEFAULT è ogni job del workflow, e i job non misurabili si DICHIARANO.
+
+    🔴 Nasce da un rilievo di `b82df434` sulla prima stesura: il default era il solo
+       `lint`, e chi lanciava senza argomenti leggeva «8 step · 0 falliti · verde»
+       su UN JOB SU TRE, senza che l'output nominasse gli altri due. E `contract` è
+       il job che quel giorno aveva bocciato due PR — cioè il gate avrebbe detto sì
+       proprio nel caso per cui esiste.
+    🔑 *È la regola di questo file applicata un piano sopra: la dichiaravo per gli
+       STEP saltati e non per i JOB non eseguiti.* Il danno non era non eseguirli:
+       era **credere di averli eseguiti**.
+    """
+    nomi = [job] if job else tutti_i_job(wf)
+    if not nomi:
+        print("⚪ NON MISURATO — il workflow non dichiara nessun job.")
+        return 2
+
+    esiti: dict[str, int] = {}
+    for n in nomi:
+        esegui, saltati = raccogli(wf, n, solo)
+        print(f"\n{'=' * 4} job «{n}» {'=' * 4}")
+        esiti[n] = elenca(esegui, saltati) if elenco else esegui_step(esegui, saltati, radice)
+
+    if len(nomi) > 1 or job:
+        print("\n── riepilogo ──")
+        for n, e in esiti.items():
+            faccia = {0: "✅ passato", 1: "🔴 FALLITO", 2: "⚪ non misurabile qui"}[e]
+            print(f"  {n:<12} {faccia}")
+
+    # Un job non misurabile in locale NON deve annegare in un verde complessivo: se
+    # ce n'è anche uno solo, il verde va detto per quello che è.
+    non_misurati = [n for n, e in esiti.items() if e == 2]
+    if non_misurati and not any(e == 1 for e in esiti.values()):
+        print(f"\n⚠️ ATTENZIONE: {len(non_misurati)} job su {len(nomi)} NON sono misurabili qui "
+              f"({', '.join(non_misurati)}).")
+        print("   Il verde qui sopra vale per gli altri. Chi li salta lo sappia.")
+
+    if any(e == 1 for e in esiti.values()):
+        return 1
+    if all(e == 2 for e in esiti.values()):
+        return 2
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--job", default="lint")
+    ap.add_argument("--job", default=None,
+                    help="un solo job (default: TUTTI quelli del workflow)")
     ap.add_argument("--solo", default=None, help="solo gli step il cui nome contiene questo")
     ap.add_argument("--elenco", action="store_true", help="dice cosa farebbe, senza farlo")
     ap.add_argument("--autoprova", action="store_true")
@@ -253,8 +388,7 @@ def main() -> int:
     if a.autoprova:
         return autoprova()
 
-    esegui, saltati = raccogli(wf, a.job, a.solo)
-    return elenca(esegui, saltati) if a.elenco else esegui_step(esegui, saltati, RADICE)
+    return su_piu_job(wf, a.job, a.solo, a.elenco, RADICE)
 
 
 if __name__ == "__main__":
