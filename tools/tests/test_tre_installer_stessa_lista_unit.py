@@ -28,9 +28,20 @@
 
 ⚠️ COSA NON FA, dichiarato perché non lo si scopra come se fosse un bug:
    verifica la lista che i tre CALCOLANO, non che `systemctl enable` vada a buon
-   fine, né che le unit esistano sul disco. È il confronto fra tre intenzioni
-   espresse in tre modi — che è precisamente il punto in cui sono divergute.
+   fine. È il confronto fra tre intenzioni espresse in tre modi — che è
+   precisamente il punto in cui sono divergute.
    *L'esito sulla macchina lo prende `prova-8` e il collaudo, non un test statico.*
+
+   ✅ E ciò che invece È coperto, perché dirlo scoperto sarebbe un altro errore:
+      **che le unit esistano sul disco** lo verifica già il ledger —
+      `tools/verify-features.py:145-147` (`kind == "systemd_unit"` → `p.exists()`),
+      eseguito in CI da `.github/workflows/verify-features.yml:31`. Tutte e quattro
+      le unit di questa lista sono dichiarate in `features.yaml`.
+      🔑 *La prima stesura scriveva «né che le unit esistano sul disco»: un limite
+      **più largo del vero**, che fa sembrare aperto un fronte chiuso. È l'immagine
+      speculare del difetto per cui un limite dichiarato si legge come gestito — e
+      passa più facilmente, perché ha la forma della prudenza.* (rilievo di
+      `b82df434`, riverificato prima di accettarlo.)
 """
 
 from __future__ import annotations
