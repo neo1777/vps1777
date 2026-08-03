@@ -204,7 +204,42 @@ CREATE TABLE IF NOT EXISTS messages(
     -- siamo certi — e lascia passare il resto (comprese le righe non classificate, che avendo
     -- `ts` vuoto non spostano comunque il massimo). Regola generale: quando il default è
     -- l'ignoranza, il filtro si scrive su ciò che si SA, non su ciò che si presume.
-    ts_source   TEXT DEFAULT 'messaggio'
+    ts_source   TEXT DEFAULT 'messaggio',
+    -- ─── VOICE-TAGGING, Fase 1 (spec: RICONCILIAZIONE-VOICE-TAGGING, §1 e §4) ───
+    -- Due assi che NON vanno fusi, ed è l'intera ragione di queste colonne:
+    --   speaker = chi INVIA   (un fatto: sta nella fonte)
+    --   voice   = natura del CONTENUTO (una stima: la calcola un'euristica, Fase 2)
+    -- Il caso-scuola che li separa: un messaggio inviato da un umano il cui contenuto è
+    -- un'analisi incollata di un'AI. `speaker=human` E `voice=pasted_ai`: fondere i due
+    -- assi rende quel caso INESPRIMIBILE, ed è il caso che ci ha fatto sbagliare (C++).
+    --
+    -- 🔴 MISURATO PRIMA DI SCRIVERE (02/08, 61.100 messaggi reali di un DB vivo):
+    --      assistant 36.484 · user 21.157 · attachment 2.327 · title 1.132 · zero vuoti
+    --    `sender` è popolato al 100% — ma MESCOLA GIÀ I DUE ASSI: `user`/`assistant` sono
+    --    mittenti, `attachment`/`title` sono NATURE DELLA RIGA. La spec diceva «il dato
+    --    esiste già, va solo PROMOSSO»: la prima metà regge, la seconda no. Non si promuove
+    --    `sender`, si SEPARA ciò che `sender` aveva confuso.
+    --
+    -- ⚠️ E PER LE RIGHE CHE NON DICONO CHI HA SCRITTO (`attachment`, `title`) il valore è
+    --    'unknown', non una scelta comoda. È la lezione già pagata qui sopra con `ts_source`:
+    --    un default che ASSERISCE fabbrica, in un colpo solo e su archivi vivi, esattamente
+    --    la bugia che la colonna doveva impedire — e con l'aria di un dato verificato.
+    speaker       TEXT DEFAULT '',   -- human/assistant/unknown (derivato da `sender`, Fase 1)
+    -- 🔴 `doc` NON è un valore di `voice`, e toglierlo è la cura (obiezione di
+    --   abdd732a, 02/08, accolta). Il criterio che separa i due assi:
+    --     `voice`   = COME SI È FORMATO il testo   (parlato · incollato · recitato)
+    --     `speaker` = CHI/CHE COSA lo ha immesso   (human · assistant · unknown)
+    --   «è un allegato» è una proprietà della RIGA, non del modo in cui il testo è
+    --   nato ⇒ vive in `speaker`. Tenerlo in entrambi avrebbe fatto **rientrare
+    --   dalla finestra, col nome nuovo, il difetto che queste colonne curano**:
+    --   `sender` mescolava già i due assi, ed è la ragione per cui esistono.
+    -- 📊 E il dato lo conferma: i 3.459 `unknown` misurati sul DB vivo sono
+    --   ESATTAMENTE `attachment` + `title` — la natura-documento è già in
+    --   `speaker`, e in `voice` sarebbe un duplicato che si sfalsa col tempo.
+    voice         TEXT DEFAULT '',   -- own/pasted_transcript/pasted_ai/character/mixed/unknown
+    quoted_share  REAL DEFAULT 0,    -- quota 0-1 di materiale incollato (quantifica `mixed`)
+    voice_conf    REAL DEFAULT 0,    -- confidenza dell'euristica
+    content_flags TEXT DEFAULT ''    -- json: l'autopsia del verdetto di `classify_voice`
 );
 -- REVISIONI (D18, scelta di Neo 20/07: «cambio di schema: conservare le revisioni»).
 -- Il difetto: `messages` ha PK su uuid e si scrive con INSERT OR REPLACE → se lo stesso
@@ -329,6 +364,7 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
     try:
         conn.executescript(_SCHEMA)
         _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
+        _ensure_v3(conn)  # voice-tagging Fase 1: colonne nuove + `speaker` derivato
         n = 0
         buf: list[RowFull] = []
         skip_buf: list[tuple] = []
@@ -418,6 +454,11 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         flush()
         flush_skips()
         flush_sightings()
+        # Voice-tagging: le righe appena scritte nascono con `voice=''`. Si classificano
+        # QUI e non in `_ensure_v3` perché questa legge il `content` di ogni riga — è il
+        # costo di un ingest, non quello di ogni apertura di DB. Idempotente: al secondo
+        # passaggio non trova più `voice=''` e scrive zero.
+        popola_voice(conn)
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
         conn.commit()
         return n
@@ -490,6 +531,313 @@ def _ensure_v2(conn: sqlite3.Connection) -> bool:
     conn.execute("DROP TABLE IF EXISTS messages_fts")
     conn.executescript(_SCHEMA)
     return True
+
+
+# ══════════════════════════════════════════ VOICE-TAGGING — Fase 1 (speaker) ══
+# Perché una FASE 1 da sola: `speaker` è un FATTO già presente nella fonte, `voice` è una
+# STIMA che richiede euristiche e un golden-set (Fase 2). Separarle vuol dire che il dato
+# certo entra subito e quello incerto entra quando è tarato — invece di aspettarsi a vicenda.
+
+# Solo ciò che SAPPIAMO. Un sender non elencato NON diventa 'human' per somiglianza: la
+# spec prevede anche i nomi Telegram come mittenti umani, ma da qui un nome di persona e
+# un'etichetta di sistema sono indistinguibili — e indovinare è il difetto che queste
+# colonne esistono per curare. Si taranno in Fase 2, col golden-set davanti.
+_SPEAKER_NOTI = {
+    "user": "human",
+    "human": "human",
+    "assistant": "assistant",
+}
+
+
+def speaker_da_sender(sender: str) -> str:
+    """Traduce il `sender` della fonte nell'asse-mittente. Mai indovina: 'unknown'.
+
+    `attachment` e `title` NON sono mittenti — sono nature della riga (misurato: 3.459 righe
+    su 61.100 in un DB vivo). Mapparle su un mittente qualsiasi fabbricherebbe un'attribuzione
+    che la fonte non contiene.
+    """
+    s = (sender or "").strip().lower()
+    return _SPEAKER_NOTI.get(s, "unknown")
+
+
+def popola_speaker(conn: sqlite3.Connection) -> int:
+    """Deriva `speaker` da `sender` per le righe che non ce l'hanno. Ritorna quante ne ha scritte.
+
+    Idempotente per costruzione: tocca **solo** `speaker=''`. Alla seconda esecuzione trova
+    zero righe e scrive zero. Vale anche dopo un ingest nuovo (le righe nuove nascono con
+    `speaker=''` e vengono derivate al passaggio successivo), quindi non serve toccare
+    `write_rows` né la forma a 9 colonne delle tuple.
+    """
+    scritte = 0
+    mittenti = [r[0] for r in conn.execute(
+        "SELECT DISTINCT sender FROM messages WHERE speaker=''")]
+    for snd in mittenti:
+        cur = conn.execute(
+            "UPDATE messages SET speaker=? WHERE speaker='' AND sender IS ?",
+            (speaker_da_sender(snd), snd))
+        scritte += cur.rowcount
+    return scritte
+
+
+# ═══════════════════════════════════ VOICE-TAGGING — Fase 2 (classify_voice) ══
+# `speaker` è un FATTO (sta nella fonte). `voice` è una STIMA: la calcola questa
+# euristica, deterministica e stdlib-only — NIENTE LLM nell'indexer, così un
+# re-ingest sugli stessi dati dà sempre lo stesso risultato.
+#
+# 🔑 IL PRINCIPIO DI TARATURA, vincolante e asimmetrico (spec §2):
+#   FALSI NEGATIVI ACCETTABILI · FALSI POSITIVI CARI.
+#   Meglio un incollato marcato `own` (resta la cintura comportamentale: chi cerca
+#   un'identità apre comunque il contesto) che una frase VERA di Neo marcata
+#   `pasted`. Perciò le regole 2 e 3 esigono segnali FORTI, e in dubbio si tace.
+#
+# ⚠️ IL PERIMETRO, ed è la parte che si dimentica (spec §8): queste soglie sono
+#   tarate sul corpus claude.ai. Su un corpus diverso il tasso di falsi positivi
+#   VA RI-MISURATO prima di fidarsene — misurato allora: il flag «(mm:ss)» dava
+#   50/50 di falsi positivi sui NOSTRI orari, dove i due punti sono un'ora e non
+#   un timestamp video. Una bandiera giusta altrove afferma più di quanto sa qui.
+#
+# 📌 QUESTA FASE NON È AGGANCIATA ALL'INGEST, ed è deliberato: la funzione esiste
+#   ed è provata, ma `voice` resta '' finché la Fase 3 non decide DOVE chiamarla.
+#   Un campo popolato sembra sempre popolato apposta.
+
+# ⚠️ SOGLIE **PROVVISORIE — da tarare sul golden set** (fissate 02/08/2026).
+#   Sono PROPOSTE prese dalla spec, NON valori studiati: nessuna è stata misurata
+#   su un insieme di casi etichettati a mano. Chi le legge fra un mese deve saperlo
+#   dal codice, non da un messaggio.
+# 🔑 PERCHÉ LA DATA E LA PAROLA STANNO QUI e non sul bus (richiesta di abdd732a,
+#   accolta): una decisione che vive solo in un messaggio **decade in silenzio** —
+#   misurato ieri su «findings.yml NON entra nel corpus», che era una misura vera e
+#   due round dopo era dentro senza che nessuno l'avesse revocata.
+# 📌 Si tarano con un campione etichettato a mano; finché non esiste, un valore qui
+#   è un'ipotesi che funziona, non una che è stata scelta.
+TS_VIDEO_MIN = 2          # PROVVISORIA · timestamp «(m:ss)» ravvicinati per sospettare un transcript
+EN_BLOCCO_MIN = 25        # PROVVISORIA · parole di un blocco inglese perché conti come blocco
+EN_RATIO_MIN = 0.18       # PROVVISORIA · quota di stopword inglesi sopra cui il blocco è EN
+PROSA_PROPRIA_MAX = 0.30  # PROVVISORIA · sotto questa quota di prosa propria: cornice, non testo
+QUOTE_FENCE_MIN = 0.50    # PROVVISORIA · quota citata sopra cui si alza il flag `quote_fence`
+
+_RE_TS = re.compile(r"[(\[]?\b\d{1,2}:\d{2}(?::\d{2})?\b[)\]]?")
+_RE_TRAP = re.compile(r"transcript|analyz|analisi|trascriz|pulizia|youtube", re.I)
+_RE_CHARACTER = re.compile(r"gdr|roleplay|agora|simposio|partita", re.I)
+_RE_FENCE = re.compile(r"^\s*(>|```)", re.M)
+_EN_STOP = {"the", "of", "and", "to", "in", "is", "it", "that", "for", "with",
+            "as", "on", "this", "be", "are", "by", "from", "which", "you", "not",
+            "have", "has", "was", "were", "can", "will", "would", "should"}
+
+
+def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
+    """Stima la NATURA del contenuto. Ritorna (voice, quoted_share, conf, flags).
+
+    Ordine di precedenza dalla spec §2. Ogni regola alza le sue bandiere, e le
+    bandiere sono l'AUTOPSIA del verdetto: senza, `voice` sarebbe un'etichetta di
+    cui non si può discutere. In dubbio ritorna `own`/`unknown`, mai `pasted`.
+    """
+    testo = content or ""
+    flags: list[str] = []
+    if not testo.strip():
+        return ("unknown", 0.0, 0.0, [])
+
+    # ① character — il PROGETTO lo dichiara: è la sola regola che non guarda il testo,
+    #    e per questo è la più affidabile delle sette.
+    if project and _RE_CHARACTER.search(project):
+        return ("character", 0.0, 0.85, ["project_gdr"])
+
+    # ② pasted_transcript — timestamp ravvicinati, o un titolo-trappola nel project.
+    #    ⚠️ Il timestamp da solo NON basta: «alle 14:30» è un orario. Serve la
+    #    RIPETIZIONE (≥ TS_VIDEO_MIN), che un orario in prosa non produce.
+    ts = _RE_TS.findall(testo)
+    trap = bool(project and _RE_TRAP.search(project))
+    if trap:
+        flags.append("trap_title")
+    if len(ts) >= TS_VIDEO_MIN:
+        flags.append("video_ts")
+    if (len(ts) >= TS_VIDEO_MIN and trap) or len(ts) >= TS_VIDEO_MIN * 3:
+        # due segnali indipendenti, oppure uno solo ma molto forte
+        conf = 0.8 if trap else 0.6
+        return ("pasted_transcript", _quota_citata(testo), conf, flags)
+
+    # ③ pasted_ai — un blocco inglese lungo dentro un messaggio a dominanza italiana.
+    parole = testo.split()
+    if len(parole) >= EN_BLOCCO_MIN:
+        basse = [p.strip(".,;:!?()[]\"'").lower() for p in parole]
+        ratio = sum(1 for p in basse if p in _EN_STOP) / max(len(basse), 1)
+        if ratio >= EN_RATIO_MIN:
+            flags.append("en_in_it")
+            # su un mittente umano è `mixed` e non `pasted_ai`: l'umano ha scritto
+            # la cornice, l'AI il materiale — ed è il caso-scuola (spec §0).
+            if speaker_da_sender(sender) == "human":
+                return ("mixed", _quota_citata(testo), 0.5, flags)
+            return ("pasted_ai", _quota_citata(testo), 0.6, flags)
+
+    # ⑤ mixed — cornice + materiale: poca prosa propria e molto citato.
+    quota = _quota_citata(testo)
+    if quota >= QUOTE_FENCE_MIN:
+        flags.append("quote_fence")
+    if quota > (1 - PROSA_PROPRIA_MAX):
+        return ("mixed", quota, 0.5, flags)
+
+    # ⑥ own — default per chi scrive di suo, senza bandiere.
+    if speaker_da_sender(sender) in ("human", "assistant"):
+        return ("own", quota, 0.9 if not flags else 0.5, flags)
+
+    # ⑦ unknown — nessuna regola confidente.
+    return ("unknown", quota, 0.0, flags)
+
+
+def popola_voice(conn: sqlite3.Connection, batch: int = 2000) -> int:
+    """Applica `classify_voice` alle righe non ancora classificate. Ritorna quante ne ha scritte.
+
+    🔴 PERCHÉ ESISTE, e perché è un difetto trovato attaccando la Fase 3 (02/08).
+    La Fase 2 ha prodotto `classify_voice` e i suoi test, **e si è fermata lì**: la
+    funzione era chiamata SOLO dai test, da nessun punto del codice di produzione.
+    ⇒ la colonna `voice` era vuota su **tutto** l'archivio, e i filtri `voice:` della
+    Fase 3 avrebbero risposto ZERO a ogni interrogazione — indistinguibile da «non
+    esistono righe di quel tipo». **Un filtro su una colonna mai popolata è il verde
+    che mente nella sua forma più pulita**: nessun errore, nessun log, solo un
+    risultato vuoto e credibile.
+    📌 `popola_speaker` era agganciata (r.706), questa no: la Fase 2 sembrava fatta
+    perché aveva la funzione e i test — le due cose che si guardano.
+
+    ⚠️ NON è agganciata a `_ensure_v3` come `popola_speaker`, ed è deliberato:
+    derivare `speaker` costa una `UPDATE` per mittente distinto (una manciata),
+    mentre questa **legge il `content` di ogni riga**. Farla a ogni apertura di DB
+    sarebbe un costo pagato sempre per un lavoro che serve una volta. Va chiamata
+    dopo un ingest e dalla migrazione.
+
+    🛡️ IL CONFINE FRA I DUE VUOTI (condizione posta da `71d540e6` firmando i nomi, e
+    accolta qui):
+        voice = ''         → NON CLASSIFICATA: nessuno l'ha guardata
+        voice = 'unknown'  → GUARDATA e non riconosciuta: è un giudizio, con la sua
+                             incertezza in `voice_conf`
+    Sono due stati diversi e questa funzione li tiene diversi: filtra su `voice=''`
+    (quindi non ri-classifica mai ciò che è già stato deciso) e non scrive mai `''`.
+    *Se collassassero in un nome solo, chi cerca `voice:unknown` crederebbe di avere
+    «le righe difficili» mentre ha «le righe mai lette».*
+    """
+    scritte = 0
+    while True:
+        righe = conn.execute(
+            "SELECT rowid, content, sender, project FROM messages WHERE voice='' LIMIT ?",
+            (batch,)).fetchall()
+        if not righe:
+            break
+        agg = []
+        for rid, content, sender, project in righe:
+            v, quota, conf, flags = classify_voice(content or "", sender or "", project or "")
+            # 🛡️ GUARDIA ANTI-LOOP, e non è teorica: il `while` esce solo quando
+            # `voice=''` non trova più righe. Se una regola futura tornasse `''`, la
+            # riga resterebbe eleggibile e questo ciclo non finirebbe mai — su un DB
+            # da 61k righe sarebbe un blocco silenzioso dell'ingest, non un errore.
+            # Meglio classificarla `unknown` (che è vero: l'abbiamo guardata) che
+            # girare a vuoto.
+            # `content_flags` è dichiarata «json» nello schema (r.242) e `classify_voice`
+            # torna una LISTA: va serializzata qui. E `[]` NON è `''` — è la stessa
+            # distinzione di `voice`: «calcolato, nessuna bandiera» contro «mai calcolato».
+            agg.append((v or "unknown", quota, conf, json.dumps(flags or []), rid))
+        conn.executemany(
+            "UPDATE messages SET voice=?, quoted_share=?, voice_conf=?, content_flags=? "
+            "WHERE rowid=?", agg)
+        scritte += len(agg)
+    return scritte
+
+
+def retag_voice(conn: sqlite3.Connection, *, scrivi: bool = False,
+                batch: int = 2000) -> dict:
+    """Ri-classifica TUTTE le righe (non solo le non classificate) e riporta il delta.
+
+    Fase 4 della spec. Serve quando le soglie cambiano: `popola_voice` per
+    costruzione non tocca ciò che è già stato deciso — giustamente, o ogni ritocco
+    riscriverebbe in silenzio giudizi presi. Questa invece riscrive apposta, e per
+    questo NON scrive di default.
+
+    🛡️ IL DEFAULT È A SECCO, ed è la scelta che conta qui: un comando che riscrive
+    61.100 righe non deve poter partire per una svista. `scrivi=False` calcola
+    tutto — quindi il delta è reale, non stimato — e non salva niente.
+
+    ⭐ IL DELTA È ESSO STESSO UN DATO (spec §4, [A §6]): «quante voci-terze si
+    nascondono» si legge in `cambiate`, non nella distribuzione finale. Due
+    tarature che producono la stessa distribuzione possono aver spostato righe
+    diverse, e senza il delta le due sono indistinguibili.
+
+    Ritorna {righe, prima:{voice:n}, dopo:{voice:n}, cambiate, scritto:bool}.
+    """
+    prima = {v or "": n for v, n in conn.execute(
+        "SELECT voice, count(*) FROM messages GROUP BY voice")}
+    dopo: dict[str, int] = {}
+    cambiate = 0
+    righe_tot = 0
+    agg_totale: list = []
+    off = 0
+    while True:
+        righe = conn.execute(
+            "SELECT rowid, content, sender, project, voice FROM messages "
+            "ORDER BY rowid LIMIT ? OFFSET ?", (batch, off)).fetchall()
+        if not righe:
+            break
+        off += len(righe)
+        for rid, content, sender, project, vecchio in righe:
+            v, quota, conf, flags = classify_voice(content or "", sender or "", project or "")
+            v = v or "unknown"
+            dopo[v] = dopo.get(v, 0) + 1
+            righe_tot += 1
+            if v != (vecchio or ""):
+                cambiate += 1
+            agg_totale.append((v, quota, conf, json.dumps(flags or []), rid))
+    if scrivi and agg_totale:
+        for i in range(0, len(agg_totale), batch):
+            conn.executemany(
+                "UPDATE messages SET voice=?, quoted_share=?, voice_conf=?, "
+                "content_flags=? WHERE rowid=?", agg_totale[i:i + batch])
+    return {"righe": righe_tot, "prima": prima, "dopo": dopo,
+            "cambiate": cambiate, "scritto": bool(scrivi and agg_totale)}
+
+
+def _quota_citata(testo: str) -> float:
+    """Quota 0-1 di righe citate (`>` o dentro un fence). Quantifica il `mixed`."""
+    righe = [r for r in testo.splitlines() if r.strip()]
+    if not righe:
+        return 0.0
+    citate = sum(1 for r in righe if _RE_FENCE.match(r))
+    return round(citate / len(righe), 3)
+
+
+def _ensure_v3(conn: sqlite3.Connection) -> bool:
+    """Aggiunge le colonne del voice-tagging a un DB v2. Idempotente.
+
+    ⚠️ NESSUNA delle colonne nuove entra nell'FTS in questa fase, ed è deliberato: metterle
+    nell'indice impone un DROP+rebuild della tabella FTS su ogni archivio vivo — costoso, e
+    inutile finché non esistono i filtri che le interrogano (Fase 3). È la stessa scelta già
+    presa qui per `ts_source`, e per la stessa ragione.
+    """
+    have = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+    nuove = (("speaker", "TEXT DEFAULT ''"), ("voice", "TEXT DEFAULT ''"),
+             ("quoted_share", "REAL DEFAULT 0"), ("voice_conf", "REAL DEFAULT 0"),
+             ("content_flags", "TEXT DEFAULT ''"))
+    mancanti = [(c, d) for c, d in nuove if c not in have]
+    for col, decl in mancanti:
+        conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {decl}")
+    popola_speaker(conn)
+    return bool(mancanti)
+
+
+def migrate_v2_to_v3(db_path: Union[str, Path]) -> bool:
+    """Porta un DB allo schema v3 (colonne voice-tagging + `speaker` e `voice` derivati).
+
+    Ritorna True se ha aggiunto colonne. NON ricostruisce l'FTS: le colonne nuove non sono
+    indicizzate (vedi `_ensure_v3`), quindi l'indice esistente resta valido e intatto.
+
+    📌 Classifica anche `voice`, e su un archivio esistente è il grosso del lavoro: qui
+    la si paga una volta sola, che è esattamente il posto giusto. Senza questa chiamata
+    un DB migrato avrebbe le colonne e nessun valore dentro — schema v3 e archivio muto.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        migrato = _ensure_v3(conn)
+        popola_voice(conn)
+        conn.commit()
+        return migrato
+    finally:
+        conn.close()
 
 
 def migrate_v1_to_v2(db_path: Union[str, Path]) -> bool:
@@ -1710,17 +2058,40 @@ def main(argv: list[str] | None = None) -> int:
         prog="archive_indexer",
         description="Indicizza sessioni/export in un DB FTS5 per archive-mcp.",
     )
-    ap.add_argument("input", help="file di input (.jsonl / .zip / .md / .txt)")
+    ap.add_argument("input", help="file di input (.jsonl / .zip / .md / .txt), "
+                                  "oppure il .db da ri-taggare con --retag")
     ap.add_argument("db", nargs="?", help="file .db SQLite di output (creato/aggiornato)")
     ap.add_argument("--project", default="", help="etichetta progetto (default: dedotta dalla fonte)")
     ap.add_argument("--classify", action="store_true",
                     help="NON indicizza: stampa il verdetto (keep:<sender>/skip:<reason>) "
                          "per ogni riga di un .jsonl Claude Code. È l'interfaccia del "
                          "contratto dei bucket: la corsia app la confronta col suo preflight.")
+    ap.add_argument("--retag", action="store_true",
+                    help="NON indicizza: ri-classifica `voice` su TUTTE le righe del DB "
+                         "passato come `input` e stampa il delta. A SECCO se non c'è "
+                         "--scrivi: il delta è reale (calcolato) ma niente viene salvato.")
+    ap.add_argument("--scrivi", action="store_true",
+                    help="con --retag: applica davvero. Senza, il retag è solo un referto.")
     args = ap.parse_args(argv)
     if not Path(args.input).is_file():
         print(f"input non trovato: {args.input}", file=sys.stderr)
         return 1
+    if args.retag:
+        # 🛡️ `--scrivi` è richiesto ESPLICITAMENTE e non è il default: questo comando
+        # riscrive la classificazione di ogni riga del DB, e un default che scrive
+        # trasforma una svista di battitura in una perdita di giudizi.
+        conn = sqlite3.connect(args.input)
+        try:
+            esito = retag_voice(conn, scrivi=args.scrivi)
+            if args.scrivi:
+                conn.commit()
+        finally:
+            conn.close()
+        print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
+        if not args.scrivi:
+            print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
+                  file=sys.stderr)
+        return 0
     if args.classify:
         with open(args.input, encoding="utf-8") as fh:
             for verdict in classify_cc(fh):

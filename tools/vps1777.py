@@ -2950,6 +2950,69 @@ def cmd_bootstrap(repo: Path, args) -> int:
 _ARCH_NAME_RE = re.compile(r"[^a-z0-9_-]+")
 
 
+def cmd_archive_retag(repo: Path, args) -> int:
+    """Ri-classifica `voice` sui DB dell'archivio e mostra il delta. A SECCO di default.
+
+    Fase 4 del voice-tagging. Serve quando le soglie del classificatore cambiano:
+    l'ingest normale (`popola_voice`) tocca solo le righe MAI classificate, e non
+    riscrive giudizi già presi — giustamente. Questo comando riscrive apposta.
+
+    🛡️ IL DEFAULT NON SCRIVE. Il referto è calcolato per intero (il delta è reale,
+    non stimato) e non salva niente finché non arriva `--scrivi`. Un comando che
+    riscrive la classificazione di decine di migliaia di righe non deve poter
+    partire da una svista di battitura.
+
+    ⭐ IL DELTA È IL DATO, non la distribuzione finale: `cambiate` dice quante righe
+    la nuova taratura sposta. Due soglie diverse possono produrre la stessa
+    distribuzione muovendo righe diverse — senza il delta sono indistinguibili.
+    """
+    cc = compose_cmd(repo)
+    res = run([*cc, "exec", "-T", "gateway", "sh", "-lc",
+               "ls /var/lib/archive/db/*.db 2>/dev/null"], capture=True, check=False)
+    trovati = [r.strip() for r in (res.stdout or "").splitlines() if r.strip()]
+    if res.returncode != 0 and not trovati:
+        # 🔴 Tre stati, non due: «non ho potuto guardare» non è «non ci sono DB».
+        die("non ho potuto elencare i DB dell'archivio (il gateway risponde?)")
+    if args.db:
+        voluto = f"/var/lib/archive/db/{args.db}.db"
+        trovati = [d for d in trovati if d == voluto]
+        if not trovati:
+            die(f"DB «{args.db}» non trovato nell'archivio")
+    if not trovati:
+        log("nessun DB nell'archivio: niente da ri-taggare")
+        return 0
+
+    if not args.scrivi:
+        log("modalità A SECCO: calcolo il delta e non scrivo nulla (--scrivi per applicare)")
+    uscita = 0
+    for db_path in trovati:
+        nome = Path(db_path).stem
+        cmd = [*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
+               db_path, "--retag"]
+        if args.scrivi:
+            cmd.append("--scrivi")
+        r = run(cmd, capture=True, check=False, timeout=1800)
+        if r.returncode != 0:
+            warn(f"«{nome}»: retag fallito — {(r.stderr or r.stdout or '').strip()[:200]}")
+            uscita = 1
+            continue
+        try:
+            esito = json.loads((r.stdout or "").strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            warn(f"«{nome}»: output non interpretabile — {(r.stdout or '')[:160]}")
+            uscita = 1
+            continue
+        verbo = "cambierebbero" if not esito.get("scritto") else "cambiate"
+        log(f"  {nome}: {esito['righe']} righe · {verbo} {esito['cambiate']}")
+        for v, n in sorted(esito.get("dopo", {}).items(), key=lambda kv: -kv[1]):
+            prima = esito.get("prima", {}).get(v, 0)
+            segno = f"{n - prima:+d}" if n != prima else "="
+            log(f"      {v or '(non classificate)':22s} {n:7d}  ({segno})")
+    if not args.scrivi:
+        log("niente è stato scritto. Ripeti con --scrivi per applicare.")
+    return uscita
+
+
 def cmd_archive_ingest(repo: Path, args) -> int:
     """Estrae il testo di un file via NotebookLM (OCR/lettura multimodale) e lo
     indicizza nell'archivio FTS. Per immagini/scansioni che pypdf non sa leggere.
@@ -3301,6 +3364,11 @@ def main() -> int:
     p.add_argument("--project", help="etichetta progetto (default: nome DB)")
     p.add_argument("--verify", action="store_true", help="chiedi a NotebookLM di verificare la trascrizione")
 
+    p = sub.add_parser("archive-retag", help="ri-classifica `voice` sui DB dell'archivio (a secco di default)")
+    p.add_argument("--db", help="un solo DB (nome senza .db); default: tutti")
+    p.add_argument("--scrivi", action="store_true",
+                   help="applica davvero. Senza, stampa solo il delta e non tocca nulla.")
+
     p = sub.add_parser("secrets-status", help="età e scadenze dei secret (+ notifica Telegram)")
     p.add_argument("--notify", action="store_true", help="notifica Telegram i secret scaduti")
 
@@ -3316,6 +3384,7 @@ def main() -> int:
                 "status": cmd_status, "version": cmd_version,
                 "migrate": cmd_migrate, "bootstrap": cmd_bootstrap,
                 "archive-ingest": cmd_archive_ingest,
+                "archive-retag": cmd_archive_retag,
                 "secrets-status": cmd_secrets_status}
     try:
         return handlers[args.cmd](repo, args)

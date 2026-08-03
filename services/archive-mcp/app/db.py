@@ -165,7 +165,8 @@ def _targets(db: str) -> list[str]:
 
 def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
            sort: str = "rank", since: str = "", until: str = "",
-           project: str = "", snippet_tokens: int = 32) -> list[dict[str, Any]]:
+           project: str = "", speaker: str = "", voice: str = "",
+           snippet_tokens: int = 32) -> list[dict[str, Any]]:
     """Search FTS5 nel DB indicato (o in TUTTI se db == "").
 
     Su più DB il `limit` è GLOBALE (non più per-DB) e i risultati sono fusi e
@@ -183,7 +184,8 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
             snap = _snapshot(_DBS[name])
             rows = fts.search_conn(
                 conn, query, limit=limit, raw=raw, sort=sort, since=since,
-                until=until, project=project, snippet_tokens=snippet_tokens)
+                until=until, project=project, speaker=speaker, voice=voice,
+                snippet_tokens=snippet_tokens)
             for r in rows:
                 r["db"] = name
                 r["snapshot"] = snap
@@ -206,7 +208,8 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
 
 
 def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
-          until: str = "", project: str = "") -> dict[str, Any]:
+          until: str = "", project: str = "", speaker: str = "",
+          voice: str = "") -> dict[str, Any]:
     """Numero di match per DB e totale (non limitato) — abilita frequenze e
     prevalenze, impossibili con la sola `search` limitata."""
     _maybe_reload()
@@ -219,7 +222,8 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
             continue
         try:
             per_db[name] = fts.count_conn(
-                conn, query, raw=raw, since=since, until=until, project=project)
+                conn, query, raw=raw, since=since, until=until, project=project,
+                speaker=speaker, voice=voice)
             # canary: se un termine è collassato sul suo prefisso (`C++`→`C`), il
             # numero appena letto è un falso positivo — dillo, non lasciarlo muto.
             if not raw:

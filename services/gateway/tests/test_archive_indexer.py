@@ -1,6 +1,7 @@
 """Test dell'indexer archive (stdlib-only, offline)."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -1220,3 +1221,345 @@ def test_newest_si_calcola_in_negativo(tmp_path):
     # sotto lascia scoperto proprio ciò che è costato tre giri e due bocciature.
     assert positivo != negativo, "la forma positiva DEVE sbagliare: esclude le righe 'ignoto'"
     assert positivo == "2026-01-01T00:00:00Z", "…e sbaglia dando un newest troppo VECCHIO"
+
+
+# ═══════════════════════════════════════════ VOICE-TAGGING — Fase 1 (speaker) ══
+
+def test_speaker_da_sender_traduce_solo_cio_che_sa():
+    """`speaker` è un FATTO: ciò che la fonte non dice resta 'unknown'."""
+    f = archive_indexer.speaker_da_sender
+    assert f("user") == "human"
+    assert f("assistant") == "assistant"
+    assert f("USER") == "human", "il case della fonte non deve cambiare il verdetto"
+    assert f("  user  ") == "human", "né gli spazi"
+    # ⚠️ IL CUORE DEL TEST, e la ragione per cui queste colonne esistono (b82df434, 02/08).
+    # `attachment` e `title` sono nature della RIGA, non mittenti — misurato su un DB vivo:
+    # 2.327 + 1.132 righe su 61.100. La tentazione naturale è mapparle su 'human' (un
+    # allegato l'ha caricato un umano, no?) o su 'assistant'. Entrambe fabbricherebbero
+    # un'attribuzione che la fonte NON contiene, che è esattamente il difetto che il
+    # voice-tagging esiste per curare. Se qualcuno "completa" la mappa, questo test cade.
+    assert f("attachment") == "unknown", "un allegato non dice CHI l'ha scritto"
+    assert f("title") == "unknown", "un titolo non è un mittente"
+    assert f("memory") == "unknown"
+    assert f("") == "unknown"
+    assert f(None) == "unknown", "nessun crash sul NULL della colonna"
+    assert f("Mario Rossi") == "unknown", (
+        "un nome sconosciuto NON diventa 'human' per somiglianza: la spec prevede i nomi "
+        "Telegram come umani, ma da qui nome-persona ed etichetta-di-sistema sono "
+        "indistinguibili. Si tara in Fase 2, col golden-set.")
+
+
+def _db_v2(tmp_path: Path, righe) -> Path:
+    """Un DB nello schema v2 (senza le colonne del voice-tagging), come quelli già vivi."""
+    db = tmp_path / "v2.db"
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT,"
+            " content TEXT, sender TEXT DEFAULT '', tools TEXT DEFAULT '',"
+            " thinking TEXT DEFAULT '', attachments TEXT DEFAULT '',"
+            " parent_uuid TEXT DEFAULT '', ts_source TEXT DEFAULT 'messaggio')")
+        c.executemany("INSERT INTO messages(uuid,project,ts,content,sender)"
+                      " VALUES(?,?,?,?,?)", righe)
+    return db
+
+
+def test_migrate_v3_aggiunge_colonne_e_deriva_speaker(tmp_path: Path):
+    db = _db_v2(tmp_path, [
+        ("u1", "p", "2026-01-01T00:00:00Z", "domanda", "user"),
+        ("a1", "p", "2026-01-01T00:00:01Z", "risposta", "assistant"),
+        ("t1", "p", "2026-01-01T00:00:02Z", "un titolo", "title"),
+        ("f1", "p", "2026-01-01T00:00:03Z", "un allegato", "attachment"),
+    ])
+    assert archive_indexer.migrate_v2_to_v3(db) is True
+    with sqlite3.connect(db) as c:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(messages)")}
+        assert {"speaker", "voice", "quoted_share", "voice_conf", "content_flags"} <= cols
+        got = dict(c.execute("SELECT uuid, speaker FROM messages"))
+        vuoti = c.execute("SELECT count(*) FROM messages WHERE speaker=''").fetchone()[0]
+        # 🔻 AGGIORNATO 02/08 (Fase 3): questa riga asseriva `voice == 0` — «la Fase 1 non
+        #    deve scrivere `voice`, è una stima e la stima arriva in Fase 2». La ragione
+        #    era ed è giusta, ma diceva **una cosa più stretta di quello che voleva dire**:
+        #    proibiva il valore invece di pretendere che fosse CALCOLATO. Ora la migrazione
+        #    chiama `popola_voice`, quindi la stima c'è ed è legittima — e il principio
+        #    resta, girato dalla parte utile: dopo la migrazione **nessuna riga resta senza
+        #    classificazione**, perché una colonna a metà è peggio di una vuota (chi la
+        #    interroga non distingue «non è di quel tipo» da «non è mai stata guardata»).
+        senza_voice = c.execute("SELECT count(*) FROM messages WHERE voice=''").fetchone()[0]
+        voci = c.execute("SELECT count(*) FROM messages WHERE voice<>''").fetchone()[0]
+    assert got == {"u1": "human", "a1": "assistant", "t1": "unknown", "f1": "unknown"}
+    assert vuoti == 0, "dopo la migrazione nessuna riga resta senza asse-mittente"
+    assert senza_voice == 0, (
+        "una riga con `voice=''` dopo la migrazione è una riga che NESSUNO ha guardato, e "
+        "sui filtri della Fase 3 sarebbe indistinguibile da una riga 'di un altro tipo'")
+    assert voci == 4, "e la classificazione dev'essere stata CALCOLATA, non lasciata al default"
+
+
+def test_migrate_v3_e_idempotente(tmp_path: Path):
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "user")])
+    assert archive_indexer.migrate_v2_to_v3(db) is True
+    assert archive_indexer.migrate_v2_to_v3(db) is False, "la seconda volta non migra nulla"
+    with sqlite3.connect(db) as c:
+        assert archive_indexer.popola_speaker(c) == 0, "e non riscrive nessuna riga"
+        assert c.execute("SELECT speaker FROM messages").fetchone()[0] == "human"
+
+
+def test_speaker_non_sovrascrive_un_valore_gia_scritto(tmp_path: Path):
+    """`popola_speaker` tocca SOLO `speaker=''`.
+
+    Serve perché la Fase 2 (e il retag della Fase 4) scriveranno valori più precisi di
+    quelli derivabili da `sender` — es. un nome Telegram riconosciuto come umano. Se la
+    derivazione li riscrivesse a ogni ingest, il lavoro fine verrebbe cancellato dal
+    lavoro grezzo, e in silenzio.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "Mario Rossi")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET speaker='human' WHERE uuid='u1'")
+        assert archive_indexer.popola_speaker(c) == 0
+        assert c.execute("SELECT speaker FROM messages").fetchone()[0] == "human"
+
+
+# ═══════════════════════════ VOICE-TAGGING — Fase 2 (classify_voice) ══
+# Il principio di taratura e' ASIMMETRICO (spec §2): falsi negativi accettabili,
+# falsi positivi CARI. Questi test lo proteggono nei due versi.
+
+def test_classify_il_falso_positivo_e_il_caso_che_conta():
+    """Una frase VERA di chi scrive non deve MAI diventare `pasted`.
+
+    ⚠️ E' il test piu' importante dei cinque, ed e' quello che si e' tentati di
+    non scrivere perche' «tanto non succede». Il caso-C++ e' successo proprio
+    cosi': una frase vera attribuita alla persona sbagliata. Qui la direzione e'
+    l'altra — una frase propria marcata come altrui — e il costo e' lo stesso:
+    l'archivio smette di poter dire di chi sono le parole.
+    """
+    v = archive_indexer.classify_voice(
+        "Io il C++ praticamente non lo conosco. Io sono Dart, e sono un amatoriale. "
+        "Ne parlavamo ieri alle 14:30 e anche stamattina alle 9:15.",
+        sender="user", project="chat qualunque")
+    assert v[0] == "own", f"una frase propria con due ORARI dentro resta own, non {v[0]}"
+    assert v[2] >= 0.5
+
+
+def test_classify_transcript_serve_piu_di_un_segnale():
+    testo = "(0:12) allora vediamo (1:45) come dicevo (2:30) e qui si chiude"
+    # con il titolo-trappola: due segnali indipendenti → transcript
+    v = archive_indexer.classify_voice(testo, sender="user", project="Analisi transcript video")
+    assert v[0] == "pasted_transcript"
+    assert "video_ts" in v[3] and "trap_title" in v[3], "le bandiere sono l'autopsia del verdetto"
+    # ⚠️ SENZA il titolo, TRE timestamp NON bastano — e questo test l'ha scoperto
+    # cadendo: la mia aspettativa era piu' permissiva del codice, e il codice aveva
+    # ragione. Tre orari citati in una chat sono plausibili («alle 9:15, alle 14:30
+    # e alle 18:00»); un transcript vero ne ha decine. Il principio dice falsi
+    # positivi CARI ⇒ da solo, il segnale deve essere molto forte (TS_VIDEO_MIN*3).
+    v2 = archive_indexer.classify_voice(testo, sender="user", project="chat")
+    assert v2[0] != "pasted_transcript", "tre timestamp da soli non bastano"
+    assert "video_ts" in v2[3], "ma la bandiera si alza lo stesso: il segnale c'e', non basta"
+    # con SEI, il segnale e' forte abbastanza da reggere da solo
+    molti = testo + " (3:10) e poi (4:20) e infine (5:00)"
+    v3 = archive_indexer.classify_voice(molti, sender="user", project="chat")
+    assert v3[0] == "pasted_transcript"
+    assert v3[2] < v[2], "ma con UN segnale solo la CONFIDENZA resta sotto quella a due"
+
+
+def test_classify_character_dal_progetto_e_la_regola_piu_solida():
+    """L'unica delle sette che non guarda il testo: il project lo DICHIARA."""
+    v = archive_indexer.classify_voice("Il mago avanza di due caselle.",
+                                       sender="user", project="GDR1777 — il caso graphify")
+    assert v[0] == "character"
+    assert v[2] >= 0.8, "e' la regola piu' affidabile, la confidenza lo dice"
+
+
+def test_classify_blocco_inglese_da_umano_e_MIXED_non_pasted_ai():
+    """Il caso-scuola: l'umano scrive la cornice, l'AI il materiale.
+
+    Fondere i due assi renderebbe questo caso inesprimibile — ed e' il caso che
+    ci ha fatto sbagliare. `speaker=human` E `voice=mixed`: entrambi veri.
+    """
+    testo = ("Guarda cosa mi ha risposto:\n"
+             "The system should be designed with the assumption that the network "
+             "is not reliable, and that any of the components can fail at any time; "
+             "this is the only way to build software that will not surprise you in "
+             "production when it matters the most for the users of the platform.")
+    v = archive_indexer.classify_voice(testo, sender="user", project="chat")
+    assert v[0] == "mixed", f"da umano e' mixed, non pasted_ai (era {v[0]})"
+    assert "en_in_it" in v[3]
+    # lo stesso testo da un assistant non ha una cornice umana davanti
+    v2 = archive_indexer.classify_voice(testo, sender="assistant", project="chat")
+    assert v2[0] == "pasted_ai"
+
+
+def test_classify_non_inventa_su_cio_che_non_sa():
+    """Vuoto e mittente ignoto: `unknown`, non un default comodo."""
+    assert archive_indexer.classify_voice("")[0] == "unknown"
+    assert archive_indexer.classify_voice("   \n  ")[0] == "unknown"
+    v = archive_indexer.classify_voice("testo qualunque senza bandiere",
+                                       sender="attachment", project="doc")
+    assert v[0] == "unknown", "un allegato non dice chi ha scritto: non e' own"
+    assert v[2] == 0.0, "e la confidenza zero lo dichiara"
+
+
+# ════════════════ VOICE-TAGGING — il POPOLAMENTO, che alla Fase 2 mancava ══════
+# 🔴 Il difetto che questi test avrebbero preso e non c'era nessuno a prenderlo:
+#    `classify_voice` esisteva, era testata da nove casi, ed era chiamata SOLO dai
+#    test. Nessun punto del codice di produzione la usava ⇒ la colonna `voice` era
+#    vuota su tutto l'archivio, e i filtri della Fase 3 avrebbero risposto ZERO a
+#    ogni interrogazione, senza un errore e senza un log.
+# ⭐ La Fase 2 SEMBRAVA fatta perché aveva le due cose che si guardano — la funzione
+#    e i suoi test. Mancava l'unica che conta: qualcuno che la chiami.
+
+def test_ingest_classifica_la_voce_delle_righe_che_scrive(tmp_path: Path):
+    """DOPO un ingest, `voice` è popolato. È il test che avrebbe preso il buco.
+
+    Non prova `classify_voice` (ci sono già nove casi per quello): prova che
+    l'indexer LA CHIAMI. Sono due cose diverse, e per una settimana solo la prima
+    era coperta.
+    """
+    src = tmp_path / "c.jsonl"
+    src.write_text(
+        '{"uuid":"u1","sessionId":"s","type":"user",'
+        '"message":{"role":"user","content":"una frase mia qualunque"},'
+        '"timestamp":"2026-01-01T00:00:00Z"}\n', encoding="utf-8")
+    db = tmp_path / "a.db"
+    archive_indexer.index_jsonl(str(src), str(db), project="p")
+
+    with sqlite3.connect(db) as c:
+        vuoti = c.execute("SELECT count(*) FROM messages WHERE voice=''").fetchone()[0]
+        tutte = c.execute("SELECT count(*) FROM messages").fetchone()[0]
+    assert tutte > 0, "l'ingest non ha scritto niente: il test non prova nulla"
+    assert vuoti == 0, (
+        "riga ingerita e MAI classificata: `voice=''` sopravvive all'ingest. È il "
+        "difetto della Fase 2 — la funzione c'era e non la chiamava nessuno")
+
+
+def test_popola_voice_e_idempotente_e_non_ritocca_i_giudizi(tmp_path: Path):
+    """Seconda passata: zero righe. E `unknown` NON viene ri-classificato.
+
+    🔑 `unknown` è un GIUDIZIO («guardata, non riconosciuta»), non un vuoto. Se
+    `popola_voice` lo ripescasse, ogni ritocco delle soglie riscriverebbe in
+    silenzio decisioni già prese — e il retag della Fase 4 non avrebbe più un
+    prima/dopo da confrontare.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "user"),
+                           ("u2", "p", "2026-01-01T00:01:00Z", "y", "attachment")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        assert archive_indexer.popola_voice(c) == 0, "la seconda passata deve scrivere ZERO"
+        unknown = c.execute("SELECT count(*) FROM messages WHERE voice='unknown'").fetchone()[0]
+        assert unknown > 0, "il caso serve: senza righe `unknown` non prova niente"
+        assert archive_indexer.popola_voice(c) == 0, "e `unknown` non è ripescabile"
+
+
+def test_il_vuoto_e_lo_sconosciuto_restano_due_stati(tmp_path: Path):
+    """`voice=''` (nessuno l'ha guardata) ≠ `voice='unknown'` (guardata, non riconosciuta).
+
+    🖐️ Condizione posta da `71d540e6` firmando i nomi delle classi, e la ragione è
+    sua: *se collassassero in un nome solo, chi cerca `voice:unknown` crederebbe di
+    avere «le righe difficili» mentre ha «le righe mai lette» — e stavolta lo
+    crederebbe un utente, non noi che sappiamo com'è fatto.*
+    ⭐ È la regola più ricorrente che abbiamo — `None` = non misurato ≠ `0` = misurato
+    e vuoto — al posto dove costa meno oggi: dopo la Fase 3 separarli richiederebbe
+    un DROP+rebuild dell'indice.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "attachment")])
+    with sqlite3.connect(db) as c:
+        archive_indexer._ensure_v3(c)
+        prima = c.execute("SELECT voice FROM messages").fetchone()[0]
+        assert prima == "", "prima del classificatore la riga NON è 'unknown': è non-guardata"
+        archive_indexer.popola_voice(c)
+        dopo = c.execute("SELECT voice FROM messages").fetchone()[0]
+    assert dopo == "unknown", "dopo, è un giudizio — e ha un nome diverso dal vuoto"
+
+
+def test_popola_voice_non_gira_a_vuoto_se_una_regola_torna_stringa_vuota(monkeypatch,
+                                                                        tmp_path: Path):
+    """La guardia anti-loop, provata invece che dichiarata.
+
+    Il ciclo esce quando `voice=''` non trova più righe: una regola che tornasse `''`
+    lascerebbe la riga eleggibile per sempre. Su un DB da 61k righe sarebbe un blocco
+    silenzioso dell'ingest — non un errore, un processo che non finisce.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "user")])
+    monkeypatch.setattr(archive_indexer, "classify_voice",
+                        lambda *a, **k: ("", 0.0, 0.0, ""))
+    with sqlite3.connect(db) as c:
+        archive_indexer._ensure_v3(c)
+        assert archive_indexer.popola_voice(c) == 1
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "unknown", (
+            "la guardia deve scrivere un valore NON vuoto, o il ciclo non termina")
+
+
+# ═══════════════ VOICE-TAGGING Fase 4 — il retag, e il suo default a secco ════
+
+def test_retag_a_secco_calcola_e_non_scrive(tmp_path: Path):
+    """Il delta è REALE (calcolato riga per riga), ma niente viene salvato.
+
+    🛡️ È la proprietà che rende il comando usabile: un referto che si può chiedere
+    senza conseguenze. Se il dry-run stimasse invece di calcolare, il numero che
+    guida la decisione di scrivere sarebbe diverso da quello che poi succede.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='SEGNAPOSTO'")
+        c.commit()
+        esito = archive_indexer.retag_voice(c, scrivi=False)
+        assert esito["righe"] == 1
+        assert esito["cambiate"] == 1, "il delta dev'essere calcolato, non stimato"
+        assert esito["scritto"] is False
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "SEGNAPOSTO", (
+            "a secco il DB NON deve cambiare: è tutto il senso del default")
+
+
+def test_retag_con_scrivi_applica_e_riporta_lo_stesso_delta(tmp_path: Path):
+    """Ciò che il secco prometteva è ciò che lo scrivi fa. Se divergessero, il
+    referto sarebbe una previsione e non un'anteprima."""
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='SEGNAPOSTO'")
+        c.commit()
+        secco = archive_indexer.retag_voice(c, scrivi=False)
+        vero = archive_indexer.retag_voice(c, scrivi=True)
+        c.commit()
+        assert vero["cambiate"] == secco["cambiate"]
+        assert vero["dopo"] == secco["dopo"]
+        assert vero["scritto"] is True
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] != "SEGNAPOSTO"
+
+
+def test_retag_riscrive_anche_cio_che_popola_voice_non_tocca(tmp_path: Path):
+    """La differenza fra i due, che è la ragione per cui il retag esiste.
+
+    `popola_voice` tocca SOLO `voice=''` — giustamente, o ogni ritocco delle soglie
+    riscriverebbe in silenzio giudizi già presi. `retag_voice` riscrive apposta, ed
+    è per questo che non parte da solo.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='vecchio_giudizio'")
+        c.commit()
+        assert archive_indexer.popola_voice(c) == 0, "popola_voice non tocca i giudizi"
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "vecchio_giudizio"
+        archive_indexer.retag_voice(c, scrivi=True)
+        c.commit()
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] != "vecchio_giudizio"
+
+
+def test_retag_dalla_riga_di_comando_non_scrive_senza_scrivi(tmp_path: Path, capsys):
+    """L'entrypoint CLI ha lo stesso default della funzione.
+
+    🔑 Non è ridondante col test sulla funzione: il default vive in DUE posti (la
+    firma e l'argparse) e possono divergere. Una `store_true` scritta al contrario
+    renderebbe il comando distruttivo per difetto, con la funzione ancora prudente.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='SEGNAPOSTO'")
+        c.commit()
+    assert archive_indexer.main([str(db), "--retag"]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["scritto"] is False and out["cambiate"] == 1
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "SEGNAPOSTO"

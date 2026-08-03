@@ -74,20 +74,81 @@ def sanitize_query(query: str) -> str:
 
 # ── ricerca ──────────────────────────────────────────────────────────────────
 
+# `ts` è qualificato `f.`: con la JOIN su `messages` (filtri dell'asse-voce) il
+# nome è ambiguo — entrambe le tabelle ce l'hanno — e SQLite alza
+# «ambiguous column name». Senza JOIN `f` esiste comunque (l'alias è sempre nel
+# FROM), quindi la qualifica è sempre valida e non ha un ramo scoperto.
 _SORTS = {
     "rank": "bm25(messages_fts)",
-    "oldest": "ts ASC",
-    "newest": "ts DESC",
+    "oldest": "f.ts ASC",
+    "newest": "f.ts DESC",
 }
+
+
+# ─────────────────────────── voice-tagging: i filtri sull'asse-voce (Fase 3) ──
+# 🔑 PERCHÉ UNA JOIN E NON COLONNE NELL'INDICE. `speaker`, `voice`, `quoted_share`
+# vivono in `messages` e NON in `messages_fts` — scelta della Fase 1, che rimandava
+# il costo «finché non esistono i filtri che le interrogano (Fase 3)», cioè adesso.
+# ⭐ MISURATO PRIMA DI SCEGLIERE (02/08, su copia del DB reale da 61.100 righe): il
+# rebuild NON serve. `messages_fts` è una tabella FTS5 **external content**
+# (`content='messages'`, `content_rowid='rowid'`), quindi una JOIN su `rowid` dà
+# accesso a ogni colonna di `messages` senza toccare l'indice: 5 conteggi filtrati
+# in 0,14s, e la somma per `voice` torna esatta al totale non filtrato (4790=4790).
+# ⇒ un DROP+rebuild dell'FTS su ogni archivio vivo — che è ciò che la Fase 1 dava
+# per necessario — sarebbe stato un costo pagato per niente.
+_JOIN_MSG = " JOIN messages m ON m.rowid = f.rowid"
+
+
+def _filtri_voce(speaker: str = "", voice: str = "") -> tuple[str, list]:
+    """Traduce i filtri dell'asse-voce in `WHERE` + parametri. Alias inclusi.
+
+    Gli ALIAS vivono qui e non nello schema (spec §3): sono comodità di
+    interrogazione, e metterli in una colonna li congelerebbe.
+        voice:direct  → own con poca citazione   (quoted_share < 0.2)
+        voice:quoted  → prevalentemente citato   (quoted_share >= 0.5)
+
+    🔴 QUANTO MORDONO DAVVERO, misurato il 02/08 su 61.100 righe reali — perché un
+    alias che non taglia niente è peggio di nessun alias, dà l'impressione di aver
+    filtrato:
+        quoted_share > 0     343 righe  (0,56%)   massimo osservato: 0,667
+        >= 0.2                87 righe  (0,14%)
+        >= 0.5                 7 righe  (0,01%)   ← tutto ciò che `quoted` prende
+    ⇒ `quoted` è quasi inerte e `direct` taglia pochissimo (su una query campione:
+    643 righe su 656 `own`, cioè 13 escluse).
+    ⭐ LA CAUSA NON È LA SOGLIA, è cosa misura la metrica: `_quota_citata` conta le
+    righe con marcatore di citazione (`>` o fence). **L'incollato SENZA formattazione
+    — che è il caso per cui il voice-tagging esiste — non produce nessun marcatore
+    e non entra in `quoted_share`.** Le soglie sono marcate PROVVISORIE e si tarano
+    col campione cieco previsto dalla spec §5, ma spostarle non recupererebbe
+    l'incollato piatto: quello chiede un segnale diverso, non un numero diverso.
+    🔴 `voice:none` è un terzo valore e NON è `unknown`: sono le righe che nessuno
+    ha classificato (`voice=''`). Tenerle separate è la condizione posta da
+    `71d540e6`: chi cerca `unknown` deve avere «le righe guardate e non
+    riconosciute», non «le righe mai lette».
+    """
+    where, extra = "", []
+    if speaker:
+        where += " AND m.speaker = ?"
+        extra.append(speaker)
+    if voice == "direct":
+        where += " AND m.voice = 'own' AND m.quoted_share < 0.2"
+    elif voice == "quoted":
+        where += " AND m.quoted_share >= 0.5"
+    elif voice == "none":
+        where += " AND m.voice = ''"
+    elif voice:
+        where += " AND m.voice = ?"
+        extra.append(voice)
+    return where, extra
 
 
 def _run_match(conn: sqlite3.Connection, match: str, *, where_extra: str,
                params_extra: list, order: str, limit: int,
-               snippet_tokens: int) -> list[dict[str, Any]]:
+               snippet_tokens: int, join: str = "") -> list[dict[str, Any]]:
     sql = (
-        f"SELECT uuid, project, ts, bm25(messages_fts) AS rank, "
+        f"SELECT f.uuid, f.project, f.ts, bm25(messages_fts) AS rank, "
         f"snippet(messages_fts, -1, '«', '»', '…', {int(snippet_tokens)}) AS snip "
-        f"FROM messages_fts WHERE messages_fts MATCH ?{where_extra} "
+        f"FROM messages_fts f{join} WHERE messages_fts MATCH ?{where_extra} "
         f"ORDER BY {order} LIMIT ?"
     )
     cur = conn.execute(sql, [match, *params_extra, int(limit)])
@@ -97,6 +158,7 @@ def _run_match(conn: sqlite3.Connection, match: str, *, where_extra: str,
 def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
                 raw: bool = False, sort: str = "rank",
                 since: str = "", until: str = "", project: str = "",
+                speaker: str = "", voice: str = "",
                 snippet_tokens: int = 32) -> list[dict[str, Any]]:
     """Cerca su UNA connessione. Distingue 0-risultati da errore di sintassi
     (solleva FtsSyntaxError). In modalità smart (default) prova la query
@@ -106,21 +168,26 @@ def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
     where = ""
     extra: list = []
     if since:
-        where += " AND ts >= ?"
+        where += " AND f.ts >= ?"
         extra.append(since)
     if until:
-        where += " AND ts <= ?"
+        where += " AND f.ts <= ?"
         extra.append(until)
     if project:
-        where += " AND project = ?"
+        where += " AND f.project = ?"
         extra.append(project)
+    w_voce, e_voce = _filtri_voce(speaker, voice)
+    where += w_voce
+    extra += e_voce
+    join = _JOIN_MSG if w_voce else ""
 
     candidates = [query] if raw else [sanitize_query(query), query]
     last_exc: sqlite3.OperationalError | None = None
     for match in candidates:
         try:
             rows = _run_match(conn, match, where_extra=where, params_extra=extra,
-                              order=order, limit=limit, snippet_tokens=snippet_tokens)
+                              order=order, limit=limit, snippet_tokens=snippet_tokens,
+                              join=join)
         except sqlite3.OperationalError as exc:
             last_exc = exc
             continue
@@ -131,20 +198,32 @@ def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
 
 
 def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
-               since: str = "", until: str = "", project: str = "") -> int:
-    """Numero di match (non limitato). Stessa disciplina d'errore di search."""
+               since: str = "", until: str = "", project: str = "",
+               speaker: str = "", voice: str = "") -> int:
+    """Numero di match (non limitato). Stessa disciplina d'errore di search.
+
+    Gli stessi filtri di `search_conn`, e non è un dettaglio: se `count` e `search`
+    accettassero filtri diversi, un conteggio e la lista che dovrebbe spiegarlo
+    parlerebbero di due popolazioni — che è il difetto che questo archivio ci ha
+    già fatto fare più volte, con due numeri veri e nessuno confrontabile.
+    """
     where = ""
     extra: list = []
     if since:
-        where += " AND ts >= ?"
+        where += " AND f.ts >= ?"
         extra.append(since)
     if until:
-        where += " AND ts <= ?"
+        where += " AND f.ts <= ?"
         extra.append(until)
     if project:
-        where += " AND project = ?"
+        where += " AND f.project = ?"
         extra.append(project)
-    sql = f"SELECT count(*) FROM messages_fts WHERE messages_fts MATCH ?{where}"
+    w_voce, e_voce = _filtri_voce(speaker, voice)
+    where += w_voce
+    extra += e_voce
+    join = _JOIN_MSG if w_voce else ""
+    sql = (f"SELECT count(*) FROM messages_fts f{join} "
+           f"WHERE messages_fts MATCH ?{where}")
     candidates = [query] if raw else [sanitize_query(query), query]
     last_exc: sqlite3.OperationalError | None = None
     for match in candidates:
@@ -366,4 +445,22 @@ def db_stats_conn(conn: sqlite3.Connection) -> dict[str, Any]:
         oldest, newest = lo or "", hi or ""
         labels = int(conn.execute(
             "SELECT count(DISTINCT project) FROM messages").fetchone()[0])
-    return {"rows": rows, "oldest": oldest, "newest": newest, "labels": labels}
+    return {"rows": rows, "oldest": oldest, "newest": newest, "labels": labels,
+            "voci": distribuzione_voce_conn(conn)}
+
+
+def distribuzione_voce_conn(conn: sqlite3.Connection) -> dict[str, int]:
+    """Quante righe per `voice` — «quanto è contaminato» un DB a colpo d'occhio.
+
+    🔑 `''` NON viene rinominato in `unknown` qui, e non è pedanteria: un DB con
+    tutte le righe a `''` è un DB **mai classificato**, e va potuto distinguere da
+    uno in cui il classificatore ha guardato e non ha saputo dire. Sono due schede
+    diverse dello stesso archivio.
+    📌 Torna `{}` — non uno zero — se le colonne non ci sono: su un DB v2 la
+    domanda non ha risposta, e «non ho potuto guardare» non è «non c'è niente».
+    """
+    try:
+        return {(v or "(non classificate)"): int(n) for v, n in conn.execute(
+            "SELECT voice, count(*) FROM messages GROUP BY voice ORDER BY 2 DESC")}
+    except sqlite3.OperationalError:
+        return {}
