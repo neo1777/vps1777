@@ -2326,7 +2326,7 @@ def cmd_update(repo: Path, args) -> int:
 
     # 3 — changelog
     body = rel.get("body") or "(nessun changelog)"
-    print("\n─── Changelog ───\n" + body[:2000] + "\n─────────────────\n")
+    print("\n─── Changelog ───\n" + _redigi(body[:2000]) + "\n─────────────────\n")
 
     # 4 — conferma
     if not args.yes and not args.from_intent:
@@ -2747,16 +2747,16 @@ def cmd_status(repo: Path, args) -> int:
             for s in services}
         data["deep_health"] = deep_health_ok(repo)
     if args.json:
-        print(json.dumps(data, indent=2))
+        print(_redigi(json.dumps(data, indent=2)))
     else:
         print(f"versione corrente : {data['current']}")
         print(f"precedente        : {data['previous'] or '-'}")
         print(f"latest nota       : {data['latest_known'] or '?'}")
         print(f"ultimo check      : {data['last_check'] or 'mai'}")
         if data["check_error"]:
-            print(f"errore check      : {data['check_error']}")
+            print(f"errore check      : {_redigi(str(data['check_error']))}")
         if data["update_in_progress"]:
-            print(f"⚠ update in corso : {data['update_in_progress']}")
+            print(f"⚠ update in corso : {_redigi(str(data['update_in_progress']))}")
         if args.probe:
             for name, s in data.get("services", {}).items():
                 print(f"  {name:<14} {s['state']:<10} {s['health']}")

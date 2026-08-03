@@ -158,3 +158,30 @@ def test_secrets_c_e_ma_vuota_arma_lo_stesso(tmp_path):
     v._SEGRETI = []
     assert v.arma_redazione(r) == 0
     assert v._ARMATA is True, "fonti leggibili e zero segreti = armata"
+
+
+def test_i_print_con_dati_dinamici_redigono():
+    """⑥ I `print()` diretti che portano dati NON NOSTRI devono redigere.
+
+    🔴 Rilievo di `abdd732a` sulla PR #72: «13 print() bypassano _redigi, e uno
+      stampa proprio il dato che il fix protegge». Aveva ragione — il commento
+      del fix dice «i punti in cui il testo LASCIA il processo», e i punti erano
+      cinque su diciotto.
+    ⭐ Il peggiore era `print(f"errore check : {data['check_error']}")`: un
+      MESSAGGIO D'ERRORE stampato in chiaro, cioè esattamente la classe che il
+      fix esiste per contenere.
+    🖐️ NON tutti i print devono redigere: quelli di sola etichetta non portano
+      dati, e l'avviso «redazione NON armata» non deve passare da `_redigi` per
+      costruzione — un avviso che dipende dal presidio che denuncia è muto.
+      Questo test guarda i QUATTRO che portano dati dinamici.
+    """
+    src = (REPO / "tools" / "vps1777.py").read_text()
+    portano_dati = ["check_error", "json.dumps(data", "update_in_progress",
+                    "Changelog ───"]
+    scoperti = []
+    for riga in src.splitlines():
+        if "print(" in riga and any(m in riga for m in portano_dati):
+            if "_redigi" not in riga:
+                scoperti.append(riga.strip()[:70])
+    assert not scoperti, (
+        "print con dati dinamici che NON redigono:\n  " + "\n  ".join(scoperti))
