@@ -3393,5 +3393,50 @@ def main() -> int:
         return 130
 
 
+# ── L'AUTO-UPDATE NON DEVE FALLIRE IN SILENZIO ───────────────────────────────────
+# 🔴 MISURATO il 03/08 (b82df434): il timer dell'auto-update è fallito alle 04:32, la
+#   macchina è rimasta alla 0.40.14 con il bundle della 0.41.0 già scaricato — e
+#   **nessuno l'ha saputo per dieci ore**. L'ha scoperto lei andando a guardare il
+#   journal, non un avviso.
+#   ⇒ Un auto-update che non aggiorna E NON LO DICE è peggio di un auto-update
+#     assente: il secondo lo si sa, e si aggiorna a mano.
+#
+# 🔑 PERCHÉ QUI E NON `OnFailure=` NELLA UNIT, che sarebbe la via systemd-nativa:
+#   le unit nascono da TRE installer e il loro elenco vive in almeno tre posti
+#   (`setup.sh:356`, `deploy.sh`, `features.yaml:133`). Aggiungere una unit
+#   destinataria significa toccarli tutti — ed è la classe che oggi abbiamo curato
+#   per la quarta volta sullo stesso blocco di hardening. **Qui è UN punto, e copre
+#   ogni modo di lanciare il comando: il timer, la mano, il pulsante admin.**
+#   ⚠️ `OnFailure=` resta migliore su un asse: prende anche il caso in cui il
+#     processo muoia senza arrivare a questa riga (OOM, SIGKILL, timeout di
+#     systemd). *Questa cura NON lo copre, e non è un dettaglio: è il caso in cui
+#     la macchina sta peggio.* Voce da aprire, non silenzio.
+#
+# 🛡️ E l'avviso NON deve poter rompere il comando: se la notifica fallisce (rete giù,
+#   token assente, bot irraggiungibile) l'esito dell'update resta quello vero. *Un
+#   canale d'allarme che fa fallire ciò che sorveglia trasforma un problema in due.*
+def _esci(codice: int) -> None:
+    if codice != 0:
+        cmd = " ".join(sys.argv[1:]) or "(nessun argomento)"
+        try:
+            telegram_notify(
+                # `find_repo(None)` — la firma verificata, non indovinata: qui si
+                # arriva DOPO che main() ha già risolto il repo, quindi la stessa
+                # ricerca non può fallire in modo nuovo.
+                find_repo(None),
+                f"🔴 vps1777 — «{cmd}» è USCITO {codice}\n"
+                f"Se era l'auto-update: la macchina NON è stata aggiornata e resta "
+                f"alla versione precedente.\n"
+                f"Dettaglio: journalctl -u vps1777-auto-update.service -n 50",
+            )
+        except Exception:                                          # noqa: BLE001
+            # Volutamente muto e volutamente LARGO: qualunque cosa vada storta
+            # nell'avviso, l'esito che conta è `codice`. Un except stretto qui
+            # sceglierebbe quali guasti dell'allarme possono rompere il comando —
+            # e non c'è nessun guasto dell'allarme che debba poterlo fare.
+            pass
+    sys.exit(codice)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _esci(main())
