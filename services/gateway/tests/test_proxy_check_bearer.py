@@ -15,6 +15,7 @@ Solo stdlib + gli stub. Nessuna rete, nessun token vero.
 """
 from __future__ import annotations
 
+import ast
 import importlib.util
 import sys
 import types
@@ -122,6 +123,39 @@ def _install_stubs():
 proxy = _install_stubs()
 
 
+def _estrai_funzione(nome: str, sorgente: Path):
+    """Compila UNA funzione presa dal sorgente, senza importare il modulo.
+
+    🔴 Perché esiste, e il rilievo è di `b82df434` sulla prima versione di questo
+    file: là il test su `_csv_list` importava `settings.py`, e su `ImportError`
+    faceva `pytest.skip("… la premessa resta da verificare in CI")`.
+
+    **In CI quel test è saltato esattamente come qui.** `.github/workflows/ci.yml`
+    lancia `uvx pytest services/gateway/tests/`, cioè un ambiente effimero con
+    pytest e basta: `pydantic` non c'è. Il rimando puntava a un posto vuoto.
+
+    ⭐ E uno skip che NOMINA UN LUOGO è peggio di uno skip muto: non dice «non
+    verificato», dice *dove* la verifica avviene. Chi legge `1 skipped` e poi il
+    motivo si tranquillizza due volte — c'è una ragione **e** c'è un posto.
+
+    La funzione presa qui è stdlib-pura (`split`, `strip`, un confronto di tipo):
+    si compila e si esegue in un namespace isolato, senza toccare gli import del
+    modulo. Se un giorno smettesse di esserlo — se usasse un nome che `settings.py`
+    importa da fuori — il test cadrebbe con `NameError`, che è **rumoroso**: la
+    stessa proprietà che allo skip mancava.
+    """
+    albero = ast.parse(sorgente.read_text(encoding="utf-8"))
+    for nodo in albero.body:
+        if isinstance(nodo, ast.FunctionDef) and nodo.name == nome:
+            ns: dict = {}
+            exec(compile(ast.Module(body=[nodo], type_ignores=[]),
+                         str(sorgente), "exec"), ns)
+            return ns[nome]
+    raise AssertionError(
+        f"`{nome}` non è più in {sorgente.name}: se è stata rinominata o spostata, "
+        f"il test che la presidia non sta più guardando niente")
+
+
 class _Req:
     """Il minimo che `_check_bearer` usa di una Request: gli header."""
     def __init__(self, authorization: str | None = None):
@@ -178,20 +212,11 @@ def test_la_lista_di_stringhe_vuote_NON_E_PRODUCIBILE_dalla_config():
     togliesse quel filtro, il fail-closed tornerebbe aggirabile e nessun test di
     `proxy.py` se ne accorgerebbe — perché il difetto non sarebbe in `proxy.py`.
     """
-    spec = importlib.util.spec_from_file_location(
-        "settings_reale", str(APP_DIR / "settings.py"))
-    # `settings.py` importa pydantic: se non c'è, la premessa non è verificabile da
-    # qui e il test lo DICE invece di passare in silenzio.
-    try:
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-    except ImportError as exc:
-        pytest.skip(f"settings.py non importabile in questo ambiente ({exc}): "
-                    f"la premessa resta da verificare in CI")
-    assert mod._csv_list("") == []
-    assert mod._csv_list(",") == []
-    assert mod._csv_list(" , ") == []
-    assert mod._csv_list("a@b.c, ,d@e.f") == ["a@b.c", "d@e.f"]
+    csv_list = _estrai_funzione("_csv_list", APP_DIR / "settings.py")
+    assert csv_list("") == []
+    assert csv_list(",") == []
+    assert csv_list(" , ") == []
+    assert csv_list("a@b.c, ,d@e.f") == ["a@b.c", "d@e.f"]
 
 
 def test_lista_vuota_in_qualunque_forma_vuota_rifiuta():
