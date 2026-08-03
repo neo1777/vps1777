@@ -981,6 +981,30 @@ printf '    chiave age (backup): %s\n' "${AGE_STATE:-n/d}"
 # sopra: un test che non ha concluso lo VEDI ora, non lo scopri al primo reboot vero.
 printf '    reboot / auto-start: %s\n' "${REBOOT_TEST:-n/d (passo 7 non raggiunto)}"
 
+# COME si apre il pannello: dipende da DOVE è legata la porta, e da oggi il default
+# è il loopback (compose.onboarding.yaml). Dire «apri http://IP:8080» quando la porta
+# NON è più su 0.0.0.0 manderebbe l'utente contro un rifiuto di connessione, e la
+# lettura naturale sarebbe «il deploy è fallito». L'istruzione si costruisce qui, dal
+# valore vero, invece di essere una riga fissa che descrive un mondo passato.
+if [ "$INGRESS" = "tailscale" ]; then
+  ISTR_PANNELLO=" (via Funnel, appena Tailscale è attivo):
+        ${C_OK}${PUBLIC_BASE:-https://<nome>.ts.net}/admin/setup${C_R}"
+elif [ "${ONBOARDING_BIND:-127.0.0.1}" = "127.0.0.1" ]; then
+  ISTR_PANNELLO=" — la porta NON è aperta su Internet (scelta: sta sul loopback).
+     Apri un tunnel SSH dal TUO computer:
+        ${C_OK}ssh -L 8080:127.0.0.1:8080 $VPS_USER@$VPS_IP${C_R}
+     e poi, sempre dal tuo computer:
+        ${C_OK}http://127.0.0.1:8080/admin/setup${C_R}
+     ⚠️ Serve la porta aperta davvero? \`ONBOARDING_BIND=0.0.0.0\` la rimette su tutte
+        le interfacce — ma il pannello e il login viaggiano in HTTP: password e
+        sessione admin passano in chiaro sulla rete finché non c'è HTTPS."
+else
+  ISTR_PANNELLO=" (porta aperta su TUTTE le interfacce — ONBOARDING_BIND=${ONBOARDING_BIND}):
+        ${C_OK}http://$VPS_IP:8080/admin/setup${C_R}
+     ⚠️ In HTTP: password e sessione admin passano in chiaro finché non c'è HTTPS.
+        Finito il setup, rilancia senza ONBOARDING_BIND per richiudere la porta."
+fi
+
 cat <<DONE2
 
 ${C_B}${C_OK}╔═══════════════════════════════════════════════════════════════╗
@@ -992,8 +1016,7 @@ ${C_B}${C_OK}╔═════════════════════�
 
   ${C_B}═══ COMPLETA TUTTO DA QUI — niente terminale ═══${C_R}
 
-  1. ${C_B}Apri il pannello${C_R} (porta aperta per il primo setup):
-        ${C_OK}http://$VPS_IP:8080/admin/setup${C_R}
+  1. ${C_B}Apri il pannello${C_R}${ISTR_PANNELLO}
      Login con email + password admin.
 
   2. ${C_B}Nel pannello inserisci${C_R}:
