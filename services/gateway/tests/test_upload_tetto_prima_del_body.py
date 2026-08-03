@@ -18,9 +18,16 @@ non dove passa il materiale.*
 quanta RAM ha la macchina — non misurabile da qui e diverso su ogni VPS. Questo non
 dipende né dalla RAM né dalla versione di Starlette.
 
-⚠️ E perché la guardia NON rifiuta quando l'header manca: «non l'ho potuto leggere» non è
-«è troppo grande». A valle restano il tetto sul loop di scrittura e la guardia sul disco:
-questa è una rete in più sul caso peggiore, non l'unica.
+⚠️ IL PERIMETRO, dichiarato perché la prima formulazione prometteva di più (rilievo di
+`b82df434` sulla #94): `Content-Length` **lo dichiara il client**. Questa guardia copre
+il caso ONESTO e **non** quello malevolo — chi vuole riempire la tmpfs apposta omette
+l'header o ci scrive un numero piccolo.
+
+⭐ E la via che sembrava chiuderlo NON esiste: `Request.form()` espone `max_part_size`,
+ma **misurato** (starlette 1.3.1) non è un tetto — una parte da 3 MB passa sia col
+default da 1 MB sia con 2 MB. *È la dimensione del chunk di parsing: il nome inganna, e
+una firma letta non è un comportamento.* ⇒ il tetto contro un client che mente sta nel
+proxy che conta i byte veri, e non è in questa PR.
 
 Stile stdlib-only come il resto della suite: la proprietà è **strutturale** — esiste un
 controllo, e sta PRIMA della riga che legge il body. Un test funzionale non la
