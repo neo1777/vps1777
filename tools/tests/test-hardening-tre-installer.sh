@@ -52,6 +52,33 @@ CAPACITA=(
   "scrive la periodicità apt|20auto-upgrades"
 )
 
+# 🔴 I COMMENTI NON CONTANO — e la ragione è che questo test l'ha quasi bevuta.
+#   Rilievo di abdd732a sulla PR #90: la cura che ha introdotto questo file scrive
+#   ANCHE un commento che nomina `20auto-upgrades` in setup.sh e deploy.sh. ⇒ chi
+#   domani togliesse la RIGA DI CODICE lasciando il commento vedrebbe il presidio
+#   passare: cieco esattamente sulla riga per cui esiste.
+#   ⭐ La controprova originale era valida quando l'ho eseguita — su origin/main
+#   quei commenti non c'erano ancora. *È la cura che scrive la stringa che il
+#   presidio cerca*, e lo stesso giorno la stessa classe ha preso l'altra sessione
+#   dall'altro lato (un grep che trovava la nota in cui si raccontava sé stesso).
+# 🛡️ Il rimedio è già nel repo, in Python: `_solo_codice()` di
+#   test_proxy_internal_404.py:32, nato perché un commento di proxy.py nomina il 403
+#   per dire che NON lo usa. Qui sono due righe di bash.
+#
+# 🔴 E NON SI USA IN PIPE CON `grep -q`. Provato: `_solo_codice f | grep -qF pat`
+#   falliva in modo NON DETERMINISTICO — 4 rossi a un giro, 5 al giro dopo, sugli
+#   stessi file mai toccati. Causa: `grep -q` esce al PRIMO match e chiude la pipe,
+#   il `grep -v` a monte muore di SIGPIPE (141), e `set -o pipefail` in testa a
+#   questo file prende quel 141 come esito della pipe. ⇒ **il test diceva «manca»
+#   proprio quando il match era stato TROVATO SUBITO.**
+#   ⭐ È «head uccide il comando» girato: là il lettore tronca lo scrittore, qui il
+#   lettore ha FRETTA. E il sintomo — va e viene senza che nessuno tocchi niente —
+#   è quello che fa scrivere «transiente» e rispondere «riprova».
+# 🛡️ La funzione restituisce una STRINGA e il confronto è un glob di bash: niente
+#   pipe, niente secondo processo, niente exit code da interpretare.
+_solo_codice() { grep -v '^[[:space:]]*#' "$1" 2>/dev/null || true; }
+_contiene() { case "$(_solo_codice "$1")" in *"$2"*) return 0 ;; *) return 1 ;; esac; }
+
 for voce in "${CAPACITA[@]}"; do
   nome="${voce%%|*}"
   pat="${voce#*|}"
@@ -62,7 +89,7 @@ for voce in "${CAPACITA[@]}"; do
       # Un installer che non esiste non è «una capacità mancante»: è un test che sta
       # guardando un repo diverso da quello che crede. Va detto come tale.
       mancanti+=("$f(ASSENTE)")
-    elif ! grep -qF -- "$pat" "$percorso"; then
+    elif ! _contiene "$percorso" "$pat"; then
       mancanti+=("$f")
     fi
   done
@@ -74,20 +101,37 @@ for voce in "${CAPACITA[@]}"; do
   fi
 done
 
-# ── E la prova che il test sa dire di NO ────────────────────────────────────────
+# ── E le prove che il test sa dire di NO ────────────────────────────────────────
 # Un test che passa sempre è indistinguibile da un test che funziona, finché non
-# serve. Qui si prova la POLARITÀ su una capacità inventata: se anche questa
-# «passasse», il ciclo sopra non starebbe guardando niente.
+# serve.
+#
+# ① Polarità su una capacità inventata: se anche questa «passasse», il ciclo sopra
+#    non starebbe guardando niente.
 ESEGUITI=$((ESEGUITI + 1))
 _trovata=0
 for f in "${INSTALLER[@]}"; do
-  grep -qF -- "capacita-che-non-esiste-1777" "$RADICE/$f" 2>/dev/null && _trovata=1
+  _contiene "$RADICE/$f" "capacita-che-non-esiste-1777" && _trovata=1
 done
 if [ "$_trovata" -eq 0 ]; then
   ok "polarità: una capacità inventata NON viene trovata (il test sa dire di no)"
 else
   fail "polarità" "una stringa inventata è stata trovata: il confronto non sta leggendo i file che crede"
 fi
+
+# ② 🔴 LA POLARITÀ SUL CASO VERO, che la ① NON copre e che è quella che è successa.
+#    La ① usa una stringa assente da OGNI file: prova che il grep gira, non che
+#    ignori i commenti. Il caso reale è l'opposto — stringa PRESENTE in un commento
+#    e ASSENTE dal codice — ed è esattamente ciò che rendeva il presidio cieco.
+#    ⇒ si costruisce un file finto e gli si chiede: lo vedi come «manca»?
+ESEGUITI=$((ESEGUITI + 1))
+_finto="$(mktemp)"
+printf '#!/usr/bin/env bash\n# questo commento nomina 20auto-upgrades e basta\necho ciao\n' > "$_finto"
+if _contiene "$_finto" "20auto-upgrades"; then
+  fail "polarità sul caso vero" "una capacità nominata SOLO in un commento è stata contata come presente: è il difetto della PR #90, tornato"
+else
+  ok "polarità sul caso vero: una capacità solo-nel-commento NON conta come presente"
+fi
+rm -f "$_finto"
 
 printf '\n%s test · %s falliti\n' "$ESEGUITI" "$FALLITI"
 [ "$FALLITI" -eq 0 ] || exit 1
