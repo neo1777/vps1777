@@ -22,7 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from . import fts
+from . import integrita
 from .fts import FtsSyntaxError  # noqa: F401 — riesportato per server.py
+from .integrita import ArchivioSporco  # noqa: F401 — riesportato per server.py
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -147,105 +149,18 @@ def reload_registry() -> list[str]:
     return sorted(_DBS)
 
 
-class ArchivioSporco(RuntimeError):
-    """Il DB ha un journal caldo: uno scrittore è morto a metà transazione.
-
-    Non è un errore di questo servizio ed è **irreparabile da qui**: il volume è
-    montato in sola lettura di proposito (a scrivere è il gateway), e SQLite non
-    può fare il rollback di un journal senza permesso di scrittura.
-    """
-
-
-def _journal_caldo(percorso: Path) -> Path | None:
-    """Il journal di rollback esiste e non è vuoto? Allora la scrittura è morta a metà.
-
-    🔓 PERCHÉ ESISTE (round-16, rilievo `bd02ca6f`, audio B «cosa non è coperto»).
-       Il gateway monta `archive-data` in `:rw` (compose.yaml:105), questo servizio
-       in `:ro` (compose.yaml:167). Se il gateway muore a metà scrittura — OOM
-       killer, SIGKILL, container fermato — resta un `-journal` caldo. **E qui
-       nessuno ripulisce**: `H46` traccia la convivenza `:ro`/`:rw` e dichiara che
-       il `:rw` è funzionale, ma non copre il caso CRASH.
-
-    ⚠️ COSA FA SQLITE SENZA QUESTO CONTROLLO. Aprendo in `mode=ro` un DB con
-       journal caldo, il rollback è impossibile e l'errore che risale è
-       `SQLITE_READONLY_ROLLBACK` — testo: «attempt to write a readonly
-       database». **Quel messaggio parla del PERMESSO e non del DANNO**: chi lo
-       legge conclude «ho sbagliato i mount», va a guardare compose.yaml, lo trova
-       giusto, e non pensa mai a un archivio interrotto. *Un errore vero che manda
-       a cercare nel posto sbagliato costa più di un errore assente.*
-
-    🔑 COSTA `os.path.exists`, quindi può stare sul percorso caldo. La verifica
-       vera (`PRAGMA quick_check`) costa una scansione e sta in `integrita()`,
-       a richiesta — **le due cose non si mettono nello stesso posto**.
-    """
-    for suffisso in ("-journal", "-wal"):
-        j = percorso.with_name(percorso.name + suffisso)
-        try:
-            if j.is_file() and j.stat().st_size > 0:
-                return j
-        except OSError:
-            # non poter guardare non è «non c'è»: si tace e si lascia provare a
-            # SQLite, che almeno fallirà sul dato invece che su una nostra ipotesi.
-            return None
-    return None
-
-
 def _open(name: str) -> sqlite3.Connection:
     if name not in _DBS:
         raise KeyError(f"DB '{name}' non disponibile. Disponibili: {available_dbs()}")
     percorso = Path(_DBS[name])
-    sporco = _journal_caldo(percorso)
+    # Costa un `exists()`: la ragione per cui può stare sul percorso caldo — e la
+    # ragione per cui `verifica()` NON ci sta — è scritta in `integrita.py`.
+    sporco = integrita.journal_caldo(percorso)
     if sporco is not None:
-        raise ArchivioSporco(
-            f"L'archivio '{name}' ha un journal caldo ({sporco.name}): una scrittura "
-            "è morta a metà e il DB è in uno stato intermedio.\n"
-            "  · NON è un problema di permessi: i mount sono giusti (`:rw` al gateway, "
-            "`:ro` qui) ed è la ragione per cui da qui NON si può riparare.\n"
-            "  · Il rimedio è dal lato che scrive: aprire il DB in scrittura una volta "
-            "(il gateway lo fa da solo al primo indicizzamento) fa applicare il "
-            "rollback a SQLite.\n"
-            "  · Finché resta, ciò che leggeresti sarebbe uno stato NON committato."
-        )
+        raise ArchivioSporco(integrita.messaggio_sporco(name, sporco))
     conn = sqlite3.connect(f"file:{percorso}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
-
-
-def integrita(db: str = "") -> dict[str, Any]:
-    """`PRAGMA quick_check` sui DB indicati (o su tutti). **Costa una scansione.**
-
-    Separata da `_journal_caldo` di proposito: quello è un `exists()` e sta sul
-    percorso caldo, questo legge il file intero e sta a richiesta. *Mettere una
-    verifica costosa su un percorso caldo la fa disattivare al primo rallentamento,
-    e una verifica disattivata è peggio di una assente perché risulta presente.*
-
-    `quick_check(1)` si ferma al PRIMO problema: dice **se** è rotto, non quanto.
-    Per «quanto» serve `PRAGMA integrity_check` completo, e non lo facciamo qui.
-
-    Esiti per DB: `ok` · `sporco` (journal caldo) · `corrotto` · `non_misurabile`.
-    """
-    _maybe_reload()
-    out: dict[str, Any] = {}
-    for nome in _targets(db):
-        percorso = Path(_DBS[nome])
-        sporco = _journal_caldo(percorso)
-        if sporco is not None:
-            out[nome] = {"esito": "sporco", "dettaglio": f"journal caldo: {sporco.name}"}
-            continue
-        try:
-            conn = sqlite3.connect(f"file:{percorso}?mode=ro", uri=True)
-            try:
-                righe = conn.execute("PRAGMA quick_check(1)").fetchall()
-            finally:
-                conn.close()
-        except sqlite3.Error as exc:
-            out[nome] = {"esito": "non_misurabile", "dettaglio": str(exc)}
-            continue
-        # SQLite risponde una riga sola con "ok" quando è sano.
-        esito = [r[0] for r in righe]
-        out[nome] = ({"esito": "ok", "dettaglio": ""} if esito == ["ok"]
-                     else {"esito": "corrotto", "dettaglio": "; ".join(esito)[:400]})
-    return out
 
 
 def _targets(db: str) -> list[str]:
