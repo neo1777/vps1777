@@ -371,7 +371,21 @@ def autoprova() -> int:
 
         e2, t2 = prova_job({"a": {"steps": [{"name": "v", "run": "true"}]},
                             "b": {"steps": [{"name": "u", "uses": "actions/checkout@v4"}]}})
-        segna("un job verde + uno NON misurabile", 0, e2)
+        # 🔴 03/08 — QUESTA RIGA DICEVA `0`, E PROTEGGEVA IL DIFETTO.
+        #   L'avevo scritta io: «un job non misurabile non deve rendere rosso
+        #   l'insieme» — vero a metà. Non deve renderlo **1** (fallito); deve
+        #   renderlo **2** (non misurato), che è ciò che `--job build` diceva già
+        #   da solo. *Il test codificava la mia intenzione, non il contratto.*
+        #   ⭐ È il caso peggiore di tutti: un presidio che DIFENDE un difetto —
+        #   finché il valore atteso resta lì, chiunque curi il codice vede rosso
+        #   e pensa di aver rotto qualcosa. (rilievo di `b82df434`, misurato con
+        #   l'asimmetria `--job build`=2 contro `--elenco`=0.)
+        segna("un job verde + uno NON misurabile → 2", 2, e2)
+        # E il caso che rende la cura una MISURA e non una scelta: il singolo job
+        # e l'aggregazione devono dire la STESSA cosa sullo stesso fatto. Era
+        # l'asimmetria non dichiarata che ha fatto trovare il difetto.
+        e2b, _ = prova_job({"b": {"steps": [{"name": "u", "uses": "actions/checkout@v4"}]}})
+        segna("lo stesso job da solo → 2 (coerenza)", 2, e2b)
         avvisa = "NON sono misurabili qui" in t2 and "b" in t2
         print(f"  {'✅' if avvisa else '🔴'} {'…e lo dice invece di annegarlo nel verde':<44} → "
               f"{avvisa} (atteso True)")
@@ -450,15 +464,33 @@ def su_piu_job(wf: object, job: str | None, solo: str | None,
 
     # Un job non misurabile in locale NON deve annegare in un verde complessivo: se
     # ce n'è anche uno solo, il verde va detto per quello che è.
+    #
+    # 🔴 03/08 — E LA PRIMA VERSIONE LO DICEVA E BASTA. Rilievo di `b82df434`,
+    #   misurato: `--elenco --job build` usciva **2**, `--elenco` su tutti usciva
+    #   **0** — con l'avviso stampato sopra. *Il singolo job sapeva dire «non
+    #   misurato», l'aggregazione no.*
+    #   ⭐ È la riga «uno zero non è un verde» — che avevo scritto io in tre punti
+    #   di questo file — persa nel punto in cui i job si sommano. E la forma è la
+    #   mia peggiore: **avevo scritto la ragione giusta nel commento e scelto la
+    #   scala più debole nel codice** (un avviso invece dell'esito). Un guardiano
+    #   che parla si elude; qui bastava non leggere due righe.
+    #
+    # ⚖️ PERCHÉ 2 E NON 0, dato che `build` non sarà MAI misurabile qui: perché è
+    #   la verità. `build` gira solo con `uses:` e una matrix — in locale non c'è
+    #   niente da eseguire, quindi «tutta la CI è passata» è falso a prescindere.
+    #   2 = NON MISURATO è esattamente questo, ed è ciò che `--job build` dice già.
+    # ⚠️ Non è «il gate nasce rosso»: 2 non è 1. Chi vuole il verde dei job che
+    #   QUI si possono misurare usa `--job lint` / `--job contract`, che escono 0.
     non_misurati = [n for n, e in esiti.items() if e == 2]
     if non_misurati and not any(e == 1 for e in esiti.values()):
         print(f"\n⚠️ ATTENZIONE: {len(non_misurati)} job su {len(nomi)} NON sono misurabili qui "
               f"({', '.join(non_misurati)}).")
-        print("   Il verde qui sopra vale per gli altri. Chi li salta lo sappia.")
+        print("   Il verde qui sopra vale per gli altri, e l'esito complessivo è 2:")
+        print("   non «è andato male», ma «non ho guardato tutto».")
 
     if any(e == 1 for e in esiti.values()):
         return 1
-    if all(e == 2 for e in esiti.values()):
+    if any(e == 2 for e in esiti.values()):
         return 2
     return 0
 
