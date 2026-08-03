@@ -126,3 +126,56 @@ def test_il_messaggio_dice_COSA_non_e_successo_non_solo_che_e_fallito():
         "il messaggio non dice dove guardare: un avviso che non porta al passo "
         "successivo lascia il lavoro a chi lo riceve"
     )
+
+
+# ── LA PARTIZIONE CON `OnFailure=` (concordata con b82df434, PR #100) ─────────────
+
+def test_sotto_systemd_l_avviso_TACE():
+    """Sotto systemd avvisa `OnFailure=`, che copre di più: prende anche il crash che
+    non arriva mai a `_esci` (OOM, SIGKILL, timeout).
+
+    ⚠️ E la partizione è sicura SOLO se ogni unit che chiama la CLI ha `OnFailure=` —
+    condizione che NON è un'assunzione: la impone
+    `test_avvisa_fallimento.py::test_OGNI_unit_che_chiama_la_CLI_ha_un_OnFailure`.
+    *Senza quella, due cure corrette messe insieme aprirebbero il buco che entrambe
+    curano — ed è la forma del rilievo `e6dec6cd` del round-4: il difetto nella
+    CONGIUNZIONE, dove i due pezzi presi da soli reggono.*
+    """
+    f = _funzione("_esci")
+    d = ast.dump(f)
+    assert "INVOCATION_ID" in d, (
+        "`_esci` non guarda INVOCATION_ID: sotto systemd manderebbe un secondo avviso "
+        "oltre a quello di OnFailure=, e un canale che raddoppia insegna a ignorarlo"
+    )
+
+
+def test_il_segnale_e_INVOCATION_ID_e_NON_il_tty():
+    """Il TTY sembra il modo naturale di dire «l'ha lanciato una persona». Non lo è.
+
+    Un `vps1777 update` dentro una pipe, in uno script o via ssh non interattivo **non
+    ha un TTY** e resterebbe muto — che è il caso in cui l'avviso serve di più.
+    `INVOCATION_ID` lo mette systemd in ogni unit che esegue, e nessun altro: dice
+    «non è una persona», non «non c'è un terminale».
+    """
+    f = _funzione("_esci")
+    d = ast.dump(f)
+    assert "isatty" not in d and "stdout" not in d, (
+        "`_esci` usa il TTY per decidere se avvisare: un comando in una pipe o in uno "
+        "script perderebbe l'avviso, ed è il caso in cui serve di più"
+    )
+
+
+def test_a_mano_l_avviso_RESTA():
+    """Il ramo dev'essere condizionato, non rimosso: `OnFailure=` copre le unit e NON
+    il lancio a mano, che è come l'update viene lanciato quando qualcosa è già rotto."""
+    f = _funzione("_esci")
+    d = ast.dump(f)
+    assert "telegram_notify" in d, (
+        "la notifica è sparita del tutto: sotto systemd va bene (c'è OnFailure), ma a "
+        "mano nessuno direbbe niente"
+    )
+    # La condizione dev'essere una CONGIUNZIONE: codice != 0 AND non-sotto-systemd.
+    assert "BoolOp" in d or "And" in d or "not" in d.lower(), (
+        "la condizione non combina il codice d'uscita con il contesto: o avvisa sempre, "
+        "o non avvisa mai"
+    )
