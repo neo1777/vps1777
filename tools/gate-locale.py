@@ -108,6 +108,8 @@ def raccogli(wf: object, job: str, solo: str | None) -> tuple[list, list]:
             saltati.append((nome, "né `run:` né `uses:`"))
         elif "${{" in st["run"]:
             saltati.append((nome, SALTA_EXPR))
+        elif (guasto := _guasta_il_repo(st["run"])):
+            saltati.append((nome, f"{SALTA_REPO}: `{guasto}`"))
         else:
             nota = f"`if: {st['if']}` — non valutata qui, lo step gira comunque" if "if" in st else ""
             esegui.append((nome, st["run"], st.get("working-directory"), nota))
@@ -125,6 +127,59 @@ SPIE = (
     re.compile(r"\bdocker\s+(?:run|pull|build)\b"),
     re.compile(r"\b(?:apt-get|apk|brew)\b"),
 )
+
+# ── E POI C'È CIÒ CHE NON BASTA SEGNALARE. ────────────────────────────────────────────
+#
+# 🔴 SUCCESSO DAVVERO, il 03/08: `ci.yml` ha uno step «Migrations immutability» che fa
+#    `git fetch origin main --depth=1`. In CI è giusto — il runner clona per un giro
+#    solo. In LOCALE quel comando scrive `.git/shallow` e **tronca la storia del repo
+#    di lavoro**: `origin/main` è passato a 2 commit visibili su 380 veri. Per tre ore
+#    `merge-base`, `--is-ancestor` e `rev-list --count` hanno risposto a tutte e tre
+#    in modo plausibile e sbagliato — «branch non mergiato, ahead 138» su una storia
+#    che non c'era. Nessun errore, nessun avviso: **il danno è silenzioso e sopravvive
+#    al processo che l'ha fatto.**
+#
+# ⚠️ PERCHÉ NON BASTA UNA `SPIA`. Le SPIE stampano «tocca l'ambiente» e lo step gira
+#    lo stesso: è la scala giusta per `apt-get` (rumoroso, reversibile, e chi legge
+#    decide). Qui no — quando l'avviso si legge, il `.git/shallow` è già scritto.
+#    *Un guardiano che parla si elude; su un danno irreversibile serve quello che
+#    blocca.* ⇒ questi step **non si eseguono**, e il motivo viene dichiarato.
+#
+# 📌 PERCHÉ NON RISCRIVO IL COMANDO (togliere `--depth=1` e lanciarlo). Sarebbe la
+#    cura peggiore: questo file esiste per **leggere** gli step invece di riscriverli,
+#    e uno step riscritto non prova più ciò che la CI esegue. Meglio un buco
+#    dichiarato che una copia che si spaccia per l'originale.
+#
+# ⚠️ LIMITE, scritto perché non lo si scopra dopo: è un match sul TESTO del comando.
+#    Un `--depth` costruito a runtime (`git fetch $FLAGS`) non lo vedo. Non è un caso
+#    ipotetico che copro a metà: è un caso che **dichiaro di non coprire**.
+GUASTA_IL_REPO = (
+    # tronca la storia: silenzioso, e falsa ogni sonda su merge-base/ancestry
+    re.compile(r"\bgit\s+(?:fetch|clone|pull)\b[^\n]*--(?:depth|shallow-since|shallow-exclude)\b"),
+    # cambiano il HEAD sotto i piedi di chi sta lavorando nella working tree
+    re.compile(r"\bgit\s+(?:checkout|switch)\s+(?!-{1,2}(?:help|version)\b)[^\n]*"),
+    re.compile(r"\bgit\s+reset\s+[^\n]*--hard\b"),
+    # cancella file non tracciati: il lavoro in corso di un'altra sessione
+    re.compile(r"\bgit\s+clean\b[^\n]*-[a-z]*[fd]"),
+)
+SALTA_REPO = "modifica il REPO DI LAVORO in modo non reversibile"
+
+
+def _guasta_il_repo(corpo: str) -> str | None:
+    """La prima riga di codice che romperebbe il repo locale, o None.
+
+    Solo il CODICE: una riga di commento che nomina `--depth` per spiegare perché
+    non si usa non deve far saltare lo step. È lo stesso criterio di `_effetti`, e
+    la ragione è la stessa per cui `\\binstall\\b` non è la sottostringa «install».
+    """
+    for riga in corpo.splitlines():
+        r = riga.strip()
+        if not r or r.startswith("#"):
+            continue
+        for spia in GUASTA_IL_REPO:
+            if spia.search(r):
+                return r[:72]
+    return None
 
 
 def _effetti(corpo: str) -> list[str]:
@@ -224,6 +279,12 @@ def autoprova() -> int:
             r_expr = prova([{"name": "con-espressione", "run": "echo ${{ github.sha }}"}])
             r_dopo = prova([{"name": "rosso", "run": "exit 1"},
                             {"name": "zzz-verde", "run": "true"}])
+            # Lo step distruttivo NON deve girare. La prova sta nell'esito 2
+            # («nulla da eseguire»), non in un messaggio: se girasse, `exit 1`
+            # darebbe 1 — cioè l'autoprova saprebbe distinguere «saltato» da
+            # «eseguito e fallito», che è l'unica cosa che conta qui.
+            r_depth = prova([{"name": "shallow",
+                              "run": "git fetch origin main --depth=1\nexit 1"}])
         testo = buf.getvalue()
 
         segna("uno step verde", 0, r_verde)
@@ -232,6 +293,13 @@ def autoprova() -> int:
         segna("solo `uses:` → nulla da eseguire", 2, r_uses)
         segna("solo `${{ }}` → nulla da eseguire", 2, r_expr)
         segna("rosso seguito da verde (il verde non copre)", 1, r_dopo)
+        # 2 = «nulla da eseguire», cioè SALTATO. Se lo step girasse, l'`exit 1`
+        # che gli sta accanto darebbe 1: il caso sa distinguere «non eseguito»
+        # da «eseguito e andato male», che senza l'`exit 1` sarebbero identici.
+        segna("`--depth` non viene ESEGUITO", 2, r_depth)
+        distrut = "modifica il REPO" in testo and "--depth=1" in testo
+        print(f"  {'✅' if distrut else '🔴'} {'dice PERCHÉ e QUALE riga':<44} → {distrut} (atteso True)")
+        ok = ok or (0 if distrut else 1)
 
         # Un gate che fallisce senza dire QUALE step non serve a chi guarda l'output,
         # e un `uses:` saltato in silenzio è un verde che copre più del dovuto.
@@ -256,6 +324,29 @@ def autoprova() -> int:
             buono = ott == atteso
             print(f"  {'✅' if buono else '🔴'} spia «{perche}»{'':<{max(0, 30 - len(perche))}} → "
                   f"{'scatta' if ott else 'tace'} (atteso {'scatta' if atteso else 'tace'})")
+            if not buono:
+                ok = 1
+
+        # Le righe distruttive, con le CONTROPROVE DI POLARITÀ accanto: senza il
+        # caso che deve TACERE, una regex che scatta su tutto passerebbe l'esame.
+        # I due `git fetch` differiscono per il solo `--depth`: è la coppia minima.
+        for riga, atteso, perche in (
+            ("git fetch origin main --depth=1", True, "il caso VERO di ci.yml"),
+            ("git fetch origin main", False, "lo stesso comando SENZA --depth"),
+            ("git fetch --unshallow origin", False, "RIPARA la storia, non la rompe"),
+            ("git checkout -b prova origin/main", True, "sposta il HEAD"),
+            ("git checkout --version", False, "interroga, non tocca"),
+            ("git reset --hard origin/main", True, "butta il lavoro locale"),
+            ("git reset HEAD~1", False, "soft: non tocca la working tree"),
+            ("git clean -fd", True, "cancella i file non tracciati"),
+            ("git status --porcelain", False, "sola lettura"),
+            ("# git fetch --depth=1  ← perché NON lo facciamo", False,
+             "COMMENTO che nomina il comando"),
+        ):
+            ott = _guasta_il_repo(riga) is not None
+            buono = ott == atteso
+            print(f"  {'✅' if buono else '🔴'} repo «{perche}»{'':<{max(0, 30 - len(perche))}} → "
+                  f"{'salta' if ott else 'lascia'} (atteso {'salta' if atteso else 'lascia'})")
             if not buono:
                 ok = 1
 
