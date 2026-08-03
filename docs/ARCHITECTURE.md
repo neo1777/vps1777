@@ -197,6 +197,20 @@ prende il primo host non fidato, quindi un `X-Forwarded-For` iniettato da un
 client pubblico viene scartato. Conseguenza: l'IP client non è più spoofabile e
 rate-limit, lockout e audit non sono più evadibili.
 
+> **Su cosa poggia questa garanzia — le due gambe, e una non è nostra.**
+> ① *la trust-list non è `*`* — è nostra, sta in `settings.py`, ed è presidiata da
+> `services/gateway/tests/test_xff_trust_list.py`.
+> ② *«uvicorn cammina l'XFF da destra»* — **non è nostro**: è il comportamento di
+> `ProxyHeadersMiddleware`, e **è storicamente cambiato** (versioni più vecchie
+> prendevano il primo elemento **da sinistra**, cioè la parte che un client può
+> iniettare). Il vincolo in `services/gateway/pyproject.toml` è `>=`, aperto verso
+> l'alto, e `uvicorn` è `0.x`: anche un minor può cambiare comportamento.
+> ⇒ *La conseguenza scritta sopra vale finché ② regge. Un test non può verificarlo:
+> la suite del gateway gira senza le dipendenze del gateway. Se un giorno l'IP client
+> torna spoofabile senza che nessuno abbia toccato la nostra configurazione, **questo
+> è il posto da cui ripartire** — e la strada è confrontare il comportamento di
+> `ProxyHeadersMiddleware` nella versione installata con quello descritto qui.*
+
 ### Il profilo NotebookLM e il canale interno (v0.30.0)
 
 I cookie di sessione Google (volume `nlm-auth`) li monta **solo `nb1777-mcp`** —
