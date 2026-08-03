@@ -2,6 +2,112 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.41.0] — 2026-08-03
+
+**86 commit in sette giorni, e quasi tutti hanno la stessa forma: un controllo che non
+guardava, e un verde che lo copriva.** Non è un tema scelto — è quello che è emerso
+auditando, ed è il motivo per cui questa è una `minor` e non una `patch`.
+
+> **Il filo, in una riga:** *l'assenza di un segnale non è un segnale di assenza.* Un gate
+> che esamina zero file e dice «tutto bene»; una prova che non trova l'oggetto da misurare
+> ed esce `0`; un `if <dato> and <condizione>` dove il dato può mancare — e allora il ramo
+> di rifiuto non viene mai preso. In tutti questi casi non c'è niente di rotto da vedere:
+> il risultato è *pieno*, plausibile, e dice il contrario del vero.
+
+### ⚠️ Se aggiorni una macchina già installata con `caddy` o `cloudflared`
+
+**Il pannello smette di rispondere su `http://<IP>:8080`.** La porta si sposta sul loopback
+(vedi sotto), e l'overlay di onboarding si riapplica a **ogni** deploy, non solo al primo:
+quindi il cambio ti arriva col primo aggiornamento, non con una nuova installazione.
+
+```
+  la strada che resta, ed è quella giusta:   https://<il tuo dominio>/admin/setup
+  se ti serve la porta com'era:              ONBOARDING_BIND=0.0.0.0  (col tradeoff sotto)
+  se il pannello non risponde da nessuna
+  delle due:                                 ssh -L 8080:127.0.0.1:8080 <utente>@<vps>
+                                             poi http://127.0.0.1:8080/admin/setup
+```
+
+*Con il profilo `tailscale` non cambia niente: quell'overlay era già escluso, e la porta era
+già sul loopback.*
+
+🔑 **Lo scriviamo qui perché un fail-closed corretto può chiudere fuori chi stava entrando
+dalla porta giusta di ieri.** Il difetto non è la cura: è scoprirla dal sintomo.
+
+### Sicurezza — controlli che non scattavano
+
+- **Il proxy MCP accettava qualunque token quando l'owner non era configurato.**
+  `_check_bearer` era `if allowed and <sub> not in allowed`: con `OAUTH_ALLOWED_EMAILS`
+  vuota la condizione è sempre falsa, il ramo di rifiuto non veniva mai preso e **ogni
+  access token valido attraversava il proxy**. Ora è fail-closed, con `owner_not_configured`
+  distinto da `subject_not_allowed` — due casi che si curano in modo opposto e nell'audit
+  devono contarsi separatamente. Il precedente era già in casa: `miniapp_core.is_owner`
+  ritorna `False` quando l'owner non c'è (*«se non sappiamo chi è l'owner, nessuno lo è»*).
+- **L'anti-downgrade dell'update si spegneva se la nota di versione spariva.** `consume_intent`
+  leggeva `update_status.json` e trattava «file assente», «illeggibile» e «campo vuoto» come
+  un solo stato muto. Ora sono tre e ognuno rifiuta. E **c'era un percorso, dentro il
+  gateway, che quel file se lo cancellava da solo**: `admin_update_check` scriveva
+  `latest: ""` sopra la nota buona quando la risposta di GitHub non portava il `tag_name`.
+- **Un intent senza nonce era riusabile all'infinito.** Non solo il replay non veniva
+  rilevato: `if nonce:` saltava anche la registrazione, quindi non lasciava traccia.
+- **La porta del pannello di setup restava aperta in chiaro, per sempre, su due profili
+  d'ingresso su tre.** Il criterio che includeva l'override di onboarding non era «il setup
+  è finito» ma «quale ingress hai scelto»: con `caddy` o `cloudflared` la `:8080` in HTTP
+  restava su `0.0.0.0` a tempo indeterminato. Ora sta sul **loopback** (`ONBOARDING_BIND`
+  per riaprirla, col tradeoff scritto) — e la porta non serviva ai due proxy, che
+  raggiungono il gateway dalla rete Docker.
+- **L'audit log accetta solo chiavi dichiarate** (allowlist, non rilevamento), e
+  l'anagrafica non esce più verbatim verso un modello terzo (`H64`).
+- **`H54`**: al gateway basta la chiave derivata, non il token del bot. **`H55`**: le unit
+  systemd non si rendono più come root, su entrambi i percorsi. **`H5`**, **`H52`**,
+  **`H53`**, **`H58`**, **`H62`**, **`H63`** chiusi.
+
+### Presìdi che dicevano «verde» senza aver guardato
+
+- Il **gate anti-leak** rispondeva «tutto bene» dopo aver esaminato **zero file**; e conosceva
+  le credenziali altrui, non le nostre.
+- **`/health?deep=1`** rispondeva `200` avendo sondato **zero** backend.
+- **`trivy`**: uno scan *saltato* lasciava il workflow verde — e gira schedulato.
+- **`secrets-status`**: verde su zero secret osservati.
+- **Nove prove empiriche non eseguite** uscivano `0`, cioè «tutto a posto»: *il testo era
+  onesto, il codice no*. Ora una corsa parziale non distrugge il quadro delle nove, e
+  `prova-4` senza l'ancoraggio esterno esce `2` (non-eseguita) invece di `0`.
+- **«Funnel HTTPS attivo»** veniva dichiarato senza aver toccato il Funnel — e la porta di
+  fallback si chiudeva su quella dichiarazione.
+
+### Contabilità dell'ingest e del registro
+
+- **L'estrattore HTML di Telegram era l'unico a scartare in silenzio**: un messaggio senza
+  id spariva col suo testo, e nessuno lo contava. Ora emette `_Skip` come gli altri, con
+  gli scarti che non collassano fra loro.
+- **Il ledger**: il matcher era una regex che passava su codice *commentato* (47 voci); il
+  verso reale→dichiarato non guardava `tools/` (20 script su 24 invisibili); le verifiche
+  `def X` ora leggono l'albero invece di cercare una stringa.
+- **`SECURITY.md` dichiarava 56 voci e il registro ne aveva 63** — e il gate era verde.
+
+### Aggiunto
+
+- **voice-tagging**: separa *chi ha scritto* da *di chi è la voce*, e lo rende interrogabile.
+  Quattro stati distinti (`''` non classificato · `unknown` · classificato · `ignoto`
+  pre-migrazione), migrazioni idempotenti, FTS *external content* — nessun rebuild
+  distruttivo sugli archivi vivi.
+- **Presìdi nuovi**: il fail-closed dell'update (`prova-9`), un aggancio di collaudo che
+  *può solo dire no* (health-gate), e i test sulla trust-list dell'`X-Forwarded-For`.
+
+### Dichiarato, non risolto
+
+- **La garanzia sull'`X-Forwarded-For` ha due gambe, e una non è nostra.** *«L'IP client non
+  è più spoofabile»* poggia sul comportamento di `ProxyHeadersMiddleware` di uvicorn
+  («cammina da destra»), che **è storicamente cambiato** — le versioni più vecchie leggevano
+  da sinistra, cioè la parte che un client inietta. Il vincolo è `>=`, e uvicorn è `0.x`.
+  La gamba nostra è presidiata da test; l'altra è **scritta in `docs/ARCHITECTURE.md`**, con
+  la strada da cui ripartire se un giorno l'IP tornasse spoofabile senza che nessuno abbia
+  toccato la configurazione.
+- **L'installer non poteva distinguere «non c'è nessuna release» da «non ho potuto
+  chiedere»**: ora sì, in tutti e tre gli installer, e un errore di rete **ferma**
+  l'installazione invece di degradarla in silenzio a build locale — che non passa dalla
+  verifica della firma.
+
 ## [0.40.14] — 2026-07-27
 
 Il rilascio che chiude il **residuo dichiarato** del giro precedente: la copia di sicurezza
