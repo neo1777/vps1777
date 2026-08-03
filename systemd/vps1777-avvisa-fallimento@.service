@@ -37,6 +37,16 @@ WorkingDirectory=@REPO@
 ExecStart=/usr/local/bin/vps1777 avvisa-fallimento --unit %i
 # breve: se non parte in un minuto, non è un avviso — è un secondo problema
 TimeoutStartSec=60
+# 🔒 `yes`, e per questa unit è la risposta GIUSTA — non un compromesso.
+#   Le altre quattro dichiarano `no` perché DEVONO elevare (`sudo install` per il
+#   self-update): lì il flag rompe il lavoro, ed è la causa del guasto del 03/08.
+#   **Questa non eleva niente**: legge il journal e fa una chiamata HTTPS. Quindi
+#   può permettersi la protezione più forte, e dichiararlo dice a chi legge che
+#   NON è un'esenzione dimenticata ma una misura presa.
+# ⚠️ Se `journalctl` le venisse negato, il comando NON fallisce: allega
+#   «(journal non leggibile)» e manda l'avviso lo stesso. *Un avviso senza il
+#   dettaglio vale infinitamente più di nessun avviso.*
+NoNewPrivileges=yes
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectClock=true
