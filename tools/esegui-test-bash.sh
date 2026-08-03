@@ -76,36 +76,58 @@ autoprova() {
   # shellcheck disable=SC2064
   trap "rm -rf '$d'" RETURN
 
+  # ⚠️ QUI NIENTE `$( ... )` NEL RAMO CHE SEGNA L'ESITO, e la ragione è un difetto
+  #    VERO che ha vissuto in questo file: la prima stesura scriveva
+  #      printf '%s …' "$([ "$rc" -eq 2 ] && echo ✅ || { ok=1; echo 🔴; })"
+  #    e `ok=1` finiva in una SUBSHELL: stampava 🔴 e tornava comunque 0. ⇒ era
+  #    l'autoprova a non sapere fallire — cioè esattamente ciò che deve escludere.
+  #    Preso da shellcheck della CI (SC2030/SC2031) e NON dalla mia prova locale,
+  #    che girava con `-S warning` mentre il gate del repo non alza soglie apposta.
+  #    ⭐ Stessa forma di `${2:?…}` dentro `$( )`: l'effetto esce, il processo no.
+  segna() {  # $1=descrizione  $2=atteso  $3=ottenuto  [$4=condizione extra, 0=ok]
+    local esito=0
+    [ "$2" = "$3" ] || esito=1
+    [ "${4:-0}" -eq 0 ] || esito=1
+    if [ "$esito" -eq 0 ]; then
+      printf '  ✅ %-26s → esito %s (atteso %s)\n' "$1" "$3" "$2"
+    else
+      printf '  🔴 %-26s → esito %s (atteso %s)\n' "$1" "$3" "$2"
+      ok=1
+    fi
+  }
+
   printf 'AUTOPROVA — il runner sa dire di no?\n'
 
   # ① directory vuota → 2, non 0. È il caso che un ciclo ingenuo sbaglia.
   DIR_TEST="$d" esegui_tutti "$d" >/dev/null 2>&1; local rc=$?
-  printf '  %s nessun test              → esito %s (atteso 2)\n' \
-    "$([ "$rc" -eq 2 ] && echo ✅ || { ok=1; echo 🔴; })" "$rc"
+  segna "nessun test" 2 "$rc"
 
   # ② un test che passa → 0
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/test-verde.sh"
   esegui_tutti "$d" >/dev/null 2>&1; rc=$?
-  printf '  %s un test verde            → esito %s (atteso 0)\n' \
-    "$([ "$rc" -eq 0 ] && echo ✅ || { ok=1; echo 🔴; })" "$rc"
+  segna "un test verde" 0 "$rc"
 
-  # ③ un test che fallisce → 1, ed è il caso per cui il runner esiste
+  # ③ un test che fallisce → 1, ed è il caso per cui il runner esiste. Non basta
+  #    l'esito: deve anche NOMINARLO, o chi guarda la CI sa che qualcosa è rotto
+  #    e non cosa.
   printf '#!/usr/bin/env bash\necho "il difetto finto"\nexit 1\n' > "$d/test-rosso.sh"
   local out; out="$(esegui_tutti "$d" 2>&1)"; rc=$?
-  local nomina=0; printf '%s' "$out" | grep -q 'test-rosso.sh' && nomina=1
-  printf '  %s un test rosso            → esito %s e lo NOMINA (atteso 1)\n' \
-    "$([ "$rc" -eq 1 ] && [ "$nomina" -eq 1 ] && echo ✅ || { ok=1; echo 🔴; })" "$rc"
+  local nomina=1
+  printf '%s' "$out" | grep -q 'test-rosso.sh' && nomina=0
+  segna "un test rosso, e lo nomina" 1 "$rc" "$nomina"
 
   # ④ il rosso non deve essere coperto dal verde che gli sta accanto: `sort` mette
   #    test-rosso prima di test-verde, quindi ② non prova che l'esito sopravviva a
   #    un passaggio successivo. Qui il verde viene DOPO.
   printf '#!/usr/bin/env bash\nexit 0\n' > "$d/test-zzz-verde.sh"
   esegui_tutti "$d" >/dev/null 2>&1; rc=$?
-  printf '  %s rosso seguito da verde   → esito %s (atteso 1: il verde non lo copre)\n' \
-    "$([ "$rc" -eq 1 ] && echo ✅ || { ok=1; echo 🔴; })" "$rc"
+  segna "rosso seguito da verde" 1 "$rc"
 
-  [ "$ok" -eq 0 ] && printf '\n✅ il runner sa fallire.\n' \
-                  || printf '\n🔴 AUTOPROVA FALLITA — il runner non è affidabile.\n'
+  if [ "$ok" -eq 0 ]; then
+    printf '\n✅ il runner sa fallire.\n'
+  else
+    printf '\n🔴 AUTOPROVA FALLITA — il runner non è affidabile.\n'
+  fi
   return "$ok"
 }
 
