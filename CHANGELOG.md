@@ -2,6 +2,57 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.41.1] — 2026-08-03
+
+**Una patch tagliata per un motivo solo: la `0.41.0` non poteva installarsi da sola.**
+Il canale di auto-update era rotto — le unit `update` e `auto-update` giravano con `User=`
+non-root e sei direttive di sandboxing, e systemd in quella combinazione accende
+`NoNewPrivileges` **implicitamente**: `sudo -n install` falliva, e l'aggiornamento moriva
+prima di installarsi. La `0.41.0` conteneva il guasto; questa lo toglie e aggiunge il
+controllo che impedisce a un bundle futuro di rimetterlo.
+
+> **Il filo:** *un presidio che parla si elude — quello che blocca protegge.* Quasi ogni
+> voce qui sotto è un controllo che diceva la cosa giusta con la scala sbagliata.
+
+### 🔴 Corretto — il canale di aggiornamento
+
+- **`update.service` e `auto-update.service` non portano più sandboxing** (#104). Con
+  `User=` non-root basta **una** direttiva seccomp perché systemd accenda `NoNewPrivs`:
+  misurato sulla macchina, non dedotto. Costo dichiarato nella voce `H43`
+  (`systemd-analyze security` 8.0 → 9.2 su ciascuna) — la rinuncia è scritta, non taciuta.
+- **Un bundle non può più annullare una cura già sul disco** (#109). Prima del
+  self-update, `vps1777 update` confronta le unit in arrivo con quelle installate e si
+  ferma se il pacchetto **rimetterebbe** il sandboxing su una unit che dichiara di elevare.
+  *Serviva perché la cura è entrata in `main` dopo che la `0.41.0` era già tagliata: senza
+  questo controllo, premere «aggiorna» avrebbe cancellato la riparazione in silenzio.*
+- **Se una unit fallisce, ora si sa** (#100, #99): `OnFailure=` + `avvisa-fallimento`, e un
+  comando che esce ≠ 0 lo dice invece di tacere. *L'auto-update era fallito alle 04:32 del
+  03/08 e nessuno se n'era accorto fino a sera.*
+
+### 🛡️ Presìdi che prima guardavano la riga sbagliata
+
+- **Le unit che elevano non possono portare sandboxing** (#105) — il test precedente
+  chiedeva che `NoNewPrivileges` fosse *dichiarato*, e dava verde sulla unit con cui la
+  macchina è morta. Ora la regola è sulla **combinazione**, con allowlist vuota (fail-closed).
+- **I tre installer abilitano le stesse unit** (#106) — la lista si **esegue** estraendola
+  dai tre file, non si confronta come testo. Chiude la divergenza che nel fix #13 aveva
+  lasciato `secrets-check.timer` scoperto su un percorso d'installazione su tre.
+- **Tutti i test bash girano** (#91) — via l'elenco a mano, che dimenticava tre file su cinque.
+- **Le dipendenze Python dei quattro servizi sono sorvegliate** (#95) e i lock entrano
+  nella build (#96).
+
+### 🧹 Altro
+
+- Spazio disco verificato **prima** di scrivere l'upload (#88) e tetto controllato prima di
+  leggere il body (#94); journal caldo visibile in `archive-mcp` (#89); cadenza dichiarata
+  per `unattended-upgrades` (#90) e per `secrets-check` (#92); default vuoto dichiarato in
+  `settings` (#98); il 404 dal proxy documentato come scelta (#83, già in 0.41.0).
+
+### ⚠️ Se aggiorni una macchina installata con la `0.41.0` o precedente
+
+L'auto-update **non può portarti qui da solo**: è il guasto che questa versione ripara. Serve
+un aggiornamento manuale una volta sola — da terminale, non dal pulsante del pannello.
+
 ## [0.41.0] — 2026-08-03
 
 **Tutto quello che è entrato dopo la `0.40.14` (27/07), e quasi tutto ha la stessa forma:
