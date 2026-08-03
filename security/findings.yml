@@ -860,12 +860,29 @@ findings:
       #   `AmbientCapabilities=CAP_DAC_OVERRIDE` scrive il file MANTENENDO
       #   `NoNewPrivs=1` — le ambient non passano da setuid, quindi NNP non le tocca.
       #   Copre 4 install + 2 chown; manca una regola polkit per `daemon-reload`.
+      #   ⚠️ 03/08, SECONDA PASSATA — L'EVIDENZA QUI SOTTO CERTIFICA LA RIGA CHE NON
+      #   BASTA. `contains: NoNewPrivileges=no` era GIÀ vero nella versione con cui
+      #   l'auto-update è morto (37bf7d5^: la riga c'era, insieme alle sei direttive).
+      #   ⇒ una recidiva che rimettesse le sei LASCIANDO `=no` non farebbe rosso qui.
+      #   Non è un difetto nuovo: è il difetto scritto a r.842 di questa stessa voce,
+      #   ricomparso nella cura che gli sta sotto.
+      #   🛡️ Presidiato dov'è eseguibile — `test_le_unit_che_elevano_non_portano_sandbox`
+      #   (girato sul file di 37bf7d5^: ROSSO; su main: verde). L'evidenza aggiunta punta
+      #   al TEST e non a una stringa nelle unit, per due ragioni: il test ESEGUE, e
+      #   `not_contains: ["LockPersonality", …]` sulle unit diventerebbe un falso rosso
+      #   il giorno che un commento nomina una delle sei per spiegare perché non c'è
+      #   (`check_findings.py` applica `solo_in_commenti` a `contains`, non a
+      #   `not_contains` — r.519-546).
       - file: systemd/vps1777-update.service
         contains:
           - "NoNewPrivileges=no"
       - file: systemd/vps1777-auto-update.service
         contains:
           - "NoNewPrivileges=no"
+      - file: tools/tests/test_unit_dichiarano_nonewprivileges.py
+        contains:
+          - "def test_le_unit_che_elevano_non_portano_sandbox"
+          - "SANDBOX_PROVATE_INNOCUE"
       - file: systemd/vps1777-secrets-check.service
         contains: ["User=@OPERATOR_USER@", "NoNewPrivileges=true"]
       - file: tools/vps1777.py
