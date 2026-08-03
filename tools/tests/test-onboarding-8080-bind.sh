@@ -78,13 +78,21 @@ prova_istruzione() {
     return
   fi
   local box out; box="$(mktemp -d)"
+  # Heredoc QUOTATO: qui dentro non espande niente, ed e' quello che serve —
+  # `$ISTR_PANNELLO` e `\n` devono arrivare LETTERALI nel file generato, che e' dove
+  # verranno interpretati. Con `echo '...'` shellcheck ha ragione due volte (SC2028 sul
+  # `\n`, SC2016 sul `$`), e sono `info`: la CI lancia shellcheck senza soglia, quindi
+  # un `info` e' rosso quanto un `error`. E' la seconda volta oggi che lo sbaglio.
   {
-    echo 'set -u'
-    echo 'C_B=""; C_R=""; C_OK=""'
-    echo 'VPS_IP="203.0.113.9"; VPS_USER="tizio"; PUBLIC_BASE=""'
-    printf '%s
-' "$blocco"
-    echo 'printf "%s\n" "$ISTR_PANNELLO"'
+    cat <<'INTESTA'
+set -u
+C_B=""; C_R=""; C_OK=""
+VPS_IP="203.0.113.9"; VPS_USER="tizio"; PUBLIC_BASE=""
+INTESTA
+    printf '%s\n' "$blocco"
+    cat <<'CODA'
+printf "%s\n" "$ISTR_PANNELLO"
+CODA
   } > "$box/p.sh"
   out="$(env "$@" bash "$box/p.sh" 2>&1)"
   rm -rf "$box"
