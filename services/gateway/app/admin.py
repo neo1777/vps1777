@@ -621,11 +621,25 @@ async def archive_view(request: Request) -> Response:
         #   RAM ha la macchina, che da qui non è misurabile e cambia da VPS a VPS.
         #   Questa non dipende né dalla RAM né dalla versione di Starlette: rifiuta
         #   sulla DICHIARAZIONE del client, prima di materializzare un byte.
-        # ⚠️ `Content-Length` può MANCARE (transfer-encoding chunked) o mentire. Qui
-        #   «non l'ho potuto leggere» ≠ «è troppo grande»: se manca si prosegue, e a
-        #   valle restano il tetto sul loop di scrittura e la guardia sul disco. È una
-        #   rete IN PIÙ sul caso peggiore, non l'unica — e non rifiuta mai per un dato
-        #   che non ha.
+        # ⚠️ IL PERIMETRO, e la prima versione di questo commento prometteva di più.
+        #   `Content-Length` LO DICHIARA IL CLIENT. Questa guardia copre il caso
+        #   ONESTO — l'upload troppo grande per errore — e **NON copre quello
+        #   malevolo**: chi vuole riempire la tmpfs apposta omette l'header (chunked)
+        #   o ci scrive un numero piccolo, e passa di qui senza essere visto.
+        #   🔴 Avevo scritto «rete in più sul caso PEGGIORE»: il caso peggiore è
+        #     esattamente quello che non copre. *Rilievo di b82df434 sulla PR #94, e
+        #     non è sul codice — è sulla riga che ne descrive il perimetro.*
+        #   ⭐ E la via che sembrava chiuderlo NON esiste: `Request.form()` espone
+        #     `max_part_size`, ma **misurato** (starlette 1.3.1, prova eseguita) NON è
+        #     un tetto — una parte da 3 MB passa sia col default da 1 MB sia con 2 MB:
+        #     è la dimensione del chunk di parsing, e il nome inganna. *Non dedotto
+        #     dalla firma: provato, perché una firma letta non è un comportamento.*
+        #   ⇒ Il tetto che regge anche contro un client che mente sta PRIMA del
+        #     gateway, nel proxy che conta i byte veri (`request_body max_size` in
+        #     Caddy). Voce aperta: copre 1 ingresso su 3 (Caddy sì, cloudflared e
+        #     tailscale-serve no) — la stessa forma dei tre installer.
+        #   Qui resta ciò che questa riga fa davvero: «non l'ho potuto leggere» ≠ «è
+        #   troppo grande», e a valle restano il tetto sul loop e la guardia sul disco.
         _dichiarata = request.headers.get("content-length")
         if _dichiarata is not None:
             try:
