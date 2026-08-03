@@ -181,8 +181,24 @@ jobs:
       # nello stesso file lo stesso giorno. La ritenzione è l'unico pezzo di
       # vps1777 che CANCELLA dati non rigenerabili: se un gate deve girare, è
       # questo.
-      - name: Test ritenzione backup (bash, casi a risposta nota)
-        run: bash tools/tests/test-backup-retention.sh
+      #
+      # 🔴 03/08 — E LA RISPOSTA DI ALLORA ERA UNA LISTA, che si è fermata al primo.
+      #   Misurato: 5 file .sh in tools/tests/, 1 eseguito qui, 1 raccolto da un
+      #   test pytest, TRE mai eseguiti da nessuno. Uno dei tre porta scritto
+      #   dentro «una regola che nessuno strumento impone è persa con la faccia di
+      #   essere al sicuro» — cioè il difetto è arrivato dentro la sua stessa cura.
+      #   ⇒ non una voce in più nella lista: VIA la lista. Chi scrive il sesto test
+      #   non deve ricordarsi di niente, il file entra in tools/tests/ e da lì gira.
+      # 🛡️ L'autoprova gira PRIMA: un runner che non sa fallire darebbe verde su
+      #   una suite rotta, cioè risponderebbe al posto dei test. Prova anche il caso
+      #   che un ciclo ingenuo sbaglia — ZERO test trovati → esito 2, non 0.
+      # 📏 Controprova eseguita su copia (03/08): rotto test-onboarding-8080-bind.sh
+      #   in un punto raggiunto → `uvx pytest tools/tests/` resta VERDE (175 passed),
+      #   il runner esce 1 e lo nomina.
+      - name: Test bash di tools/tests — tutti, e il runner sa fallire
+        run: |
+          bash tools/esegui-test-bash.sh --autoprova
+          bash tools/esegui-test-bash.sh
 
   build:
     runs-on: ubuntu-latest
