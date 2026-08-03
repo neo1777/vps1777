@@ -4,8 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [0.41.0] — 2026-08-03
 
-**86 commit in sette giorni, e quasi tutti hanno la stessa forma: un controllo che non
-guardava, e un verde che lo copriva.** Non è un tema scelto — è quello che è emerso
+**Tutto quello che è entrato dopo la `0.40.14` (27/07), e quasi tutto ha la stessa forma:
+un controllo che non guardava, e un verde che lo copriva.** Non è un tema scelto — è quello che è emerso
 auditando, ed è il motivo per cui questa è una `minor` e non una `patch`.
 
 > **Il filo, in una riga:** *l'assenza di un segnale non è un segnale di assenza.* Un gate
