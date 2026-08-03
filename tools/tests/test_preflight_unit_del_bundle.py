@@ -141,29 +141,35 @@ def test_il_giro_sui_file_vede_la_regressione(tmp_path) -> None:
     bundle, installate = tmp_path / "bundle", tmp_path / "etc"
     _scrivi(bundle / "systemd", "vps1777-auto-update.service", DEI_TAG)
     _scrivi(installate, "vps1777-auto-update.service", CURATA)
-    fuori = _cli.regressioni_del_bundle(bundle, tmp_path, installate)
+    fuori = _cli.regressioni_del_bundle(bundle, repo=tmp_path, installate=installate)
     assert set(fuori) == {"vps1777-auto-update.service"}
     assert set(fuori["vps1777-auto-update.service"]) == NOMI_DELLE_SEI
 
 
 def test_ARGOMENTI_SCAMBIATI_darebbero_un_altro_esito(tmp_path) -> None:
-    """La controprova che rende utile il test qui sopra.
+    """La funzione è ASIMMETRICA: scambiare i due lati dà un verde invece di un rosso.
 
-    Se il flusso passasse il bundle come «installata» e viceversa, il verdetto sarebbe
-    VUOTO — cioè un verde. Questo test fissa l'asimmetria: se un giorno qualcuno
-    inverte i due argomenti, sopra diventa rosso e qui si legge perché.
+    ⚠️ E questo test **non presidia chi la chiama** — lo diceva la versione precedente
+    di questa docstring, e abdd732a l'ha smentita misurando: invertire gli argomenti
+    NEL SITO DI CHIAMATA lasciava passare l'intera suite (235 verdi). Il test chiama la
+    funzione lui, con gli argomenti giusti: fissa l'asimmetria, non l'uso.
+
+    🛡️ Il sito di chiamata non è presidiato da un test ma dalla FIRMA: `repo` è
+    keyword-only, quindi `regressioni_del_bundle(repo, bundle)` non arriva a girare.
+    *Un difetto reso impossibile batte un difetto sorvegliato* — e `bundle` e `repo`
+    sono entrambi `Path` con nomi simili, cioè lo scambio più facile da non vedere.
     """
     bundle, installate = tmp_path / "bundle", tmp_path / "etc"
     _scrivi(bundle / "systemd", "vps1777-auto-update.service", CURATA)
     _scrivi(installate, "vps1777-auto-update.service", DEI_TAG)
-    assert _cli.regressioni_del_bundle(bundle, tmp_path, installate) == {}
+    assert _cli.regressioni_del_bundle(bundle, repo=tmp_path, installate=installate) == {}
 
 
 def test_unit_NUOVA_nel_bundle_non_e_una_regressione(tmp_path) -> None:
     bundle, installate = tmp_path / "bundle", tmp_path / "etc"
     _scrivi(bundle / "systemd", "vps1777-nuova.service", DEI_TAG)
     installate.mkdir(parents=True, exist_ok=True)  # esiste, ma vuota
-    assert _cli.regressioni_del_bundle(bundle, tmp_path, installate) == {}
+    assert _cli.regressioni_del_bundle(bundle, repo=tmp_path, installate=installate) == {}
 
 
 def test_un_bundle_SENZA_systemd_non_e_un_verde_inventato(tmp_path) -> None:
@@ -173,7 +179,7 @@ def test_un_bundle_SENZA_systemd_non_e_un_verde_inventato(tmp_path) -> None:
     elementi passa in silenzio. Qui il `{}` è corretto (il die non scatta), ma chi
     legge deve sapere che quel verde non copre nulla.
     """
-    assert _cli.regressioni_del_bundle(tmp_path / "vuoto", tmp_path, tmp_path / "etc") == {}
+    assert _cli.regressioni_del_bundle(tmp_path / "vuoto", repo=tmp_path, installate=tmp_path / "etc") == {}
 
 
 def test_il_preflight_gira_PRIMA_del_self_update() -> None:
