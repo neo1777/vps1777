@@ -1171,6 +1171,19 @@ def _tg_html_ts(raw: str) -> str:
     return f"{year}-{mon}-{day}T{hms}" + (f"{oh}:{om or '00'}" if oh else "")
 
 
+def _forma(text: str, sender: str) -> str:
+    """Il `detail` di uno scarto Telegram: la FORMA del record, non il contenuto.
+
+    Gli altri estrattori ci mettono `str(d)[:200]`, cioè il record grezzo. Qui no,
+    ed è una scelta: la tabella `skipped` serve a QUADRARE l'ingest (quanti ne sono
+    entrati, quanti no e perché), e per quello bastano la lunghezza e la presenza
+    del mittente. Copiare il testo di un messaggio personale in una seconda tabella
+    non aggiunge niente alla quadratura e allarga la superficie di ciò che il DB
+    contiene — con una chiave di ricerca in meno per accorgersene.
+    """
+    return f"len={len(text)} sender={'sì' if sender else 'no'}"
+
+
 class _TgHtmlParser(HTMLParser):
     """Estrae (msg_id, sender, ts, text) da un messages*.html di Telegram
     Desktop. Solo stdlib; ignora service message e media senza testo."""
@@ -1179,6 +1192,11 @@ class _TgHtmlParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.chat_title = ""
         self.msgs: list[tuple[str, str, str, str]] = []
+        # (motivo, dettaglio, ts) dei messaggi che il parser NON ha potuto emettere.
+        # Un HTMLParser non è un generatore e non può fare `yield _Skip(...)` da sé:
+        # accumula, e il chiamante li instrada come tutti gli altri scarti.
+        self.scartati: list[tuple[str, str, str]] = []
+        self._n_msg = 0            # quanti div.message chiusi finora in QUESTO file
         self._depth = 0            # nesting dei soli <div>
         self._msg_depth = 0        # profondità del div.message aperto (0 = fuori)
         self._msg_id = ""
@@ -1246,8 +1264,42 @@ class _TgHtmlParser(HTMLParser):
         if self._sender:
             self._last_sender = self._sender
         text = "\n".join(self._texts).strip()
+        # Progressivo del messaggio DENTRO il documento. Serve a distinguere due
+        # scarti che hanno tutto il resto uguale — vedi il commento sull'uid sotto.
+        # È stabile fra re-ingest perché dipende solo dal contenuto del file: la
+        # stessa passata sullo stesso HTML dà gli stessi numeri, e `INSERT OR IGNORE`
+        # continua a fare da ledger invece di gonfiare la tabella a ogni ricarica.
+        self._n_msg += 1
         if text and self._msg_id:
             self.msgs.append((self._msg_id, sender, self._ts, text))
+        elif text and not self._msg_id:
+            # ⇐ IL CASO CHE SPARIVA. Un div.message senza id — markup cambiato,
+            # export parziale, frammento troncato — portava via CON SÉ il testo, e
+            # nessuno lo contava. `tools/collaudo-quadratura.py` dichiara che «dal
+            # solo DB non si distingue un DOPPIONE COLLASSATO da un MESSAGGIO
+            # PERSO»: un drop non contabilizzato è precisamente ciò che rende cieco
+            # quel confronto. Era l'UNICO estrattore del file a non emettere scarti.
+            #
+            # ⚠️ `n=` NON è decorazione. `_uid` impasta (source, reason, detail, ts) e
+            # qui l'id per definizione non c'è: senza un discriminante due messaggi
+            # persi con la stessa forma e lo stesso secondo — o entrambi senza data —
+            # producono lo STESSO uid, e `INSERT OR IGNORE` ne tiene uno solo.
+            # Sarebbe il difetto che questo blocco cura, spostato di una tabella: e
+            # peggiore, perché un conteggio che sembra una misura tranquillizza chi
+            # quadra. (Rilievo di b82df434 sulla #77, provato eseguendo `_uid`.)
+            self.scartati.append(
+                ("no-msg-id", f"{_forma(text, sender)} n={self._n_msg}", self._ts))
+        elif self._msg_id and not text:
+            # Media e service message: scarto legittimo e previsto dal docstring
+            # della classe — ma contarlo costa nulla e rende il totale quadrabile.
+            # È lo stesso `_Skip(..., "empty", ...)` degli altri due estrattori.
+            # Qui l'id C'È — è la condizione del ramo — e metterlo nel dettaglio
+            # rende l'uid unico a costo zero: senza, un album di foto (stesso
+            # mittente, stesso secondo, e `len` sempre 0 perché è il ramo «not text»)
+            # collasserebbe in UNA riga sola. `id=` è un identificatore, non
+            # contenuto: la scelta di `_forma()` resta intatta.
+            self.scartati.append(
+                ("empty", f"{_forma(text, sender)} id={self._msg_id}", self._ts))
         self._msg_depth = 0
         self._msg_id = self._ts = self._sender = ""
         self._texts = []
@@ -1279,6 +1331,10 @@ def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str],
             for msg_id, sender, ts, text in p.msgs:
                 yield (_uid("tg", cname, msg_id), cname, ts,
                        f"[{sender}] {text}" if sender else text)
+            # Gli scarti nello STESSO stream delle righe, come fanno tutti gli altri
+            # estrattori: `write_rows` li instrada alla tabella `skipped`.
+            for motivo, dettaglio, ts in p.scartati:
+                yield _Skip("telegram-html", motivo, f"{member} {dettaglio}", ts)
 
 
 # ── estrattore: zip di documenti generici (.md/.txt) ─────────────────────────
