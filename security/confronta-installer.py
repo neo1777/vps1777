@@ -92,7 +92,8 @@ def autoprova() -> int:
     rotto — e oggi i tre concordano davvero, quindi il verde da solo non
     distingue un presidio che funziona da uno che non guarda.
     """
-    import tempfile, shutil
+    import shutil
+    import tempfile
     ok = True
     with tempfile.TemporaryDirectory() as d:
         finta = Path(d)
