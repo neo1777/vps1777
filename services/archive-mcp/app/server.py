@@ -224,6 +224,22 @@ def describe_databases() -> list[dict[str, Any]]:
 
 
 @mcp.tool()
+def check_integrity(db_name: str = "") -> dict[str, Any]:
+    """Integrità degli archivi: `ok` · `sporco` · `corrotto` · `non_misurabile`.
+
+    Serve a rispondere a UNA domanda che nessun altro tool risponde: **questo
+    archivio è in uno stato leggibile, o sto servendo dati di una transazione mai
+    committata?** Un archivio `sporco` ha un journal caldo — lo scrittore (il
+    gateway) è morto a metà — e da qui **non è riparabile**: il volume è montato
+    in sola lettura di proposito. Il rimedio è dal lato che scrive.
+
+    Costa una scansione per DB (`PRAGMA quick_check`): chiamalo quando un
+    risultato sembra strano o dopo un riavvio brusco, non a ogni ricerca.
+    """
+    return db.integrita_archivi(db_name)
+
+
+@mcp.tool()
 def set_description(db_name: str, description: str) -> dict[str, Any]:
     """Imposta/aggiorna la DESCRIZIONE di un archivio: a cosa serve, cosa
     contiene, come va usato. Compare in describe_databases (campo `description`)
