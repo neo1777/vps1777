@@ -861,8 +861,11 @@ async def update_check(request: Request) -> Response:
                     error="GitHub non ha riportato una versione (tag_name assente)",
                     checked_at=now)
         sf.write_text(json.dumps(prev, indent=2) + "\n")
+        # `latest` e non una chiave nuova: audit._CHIAVI_NOTE è un'allowlist, e il
+        # valore da registrare qui È la latest nota — quella che si è TENUTA invece
+        # di sovrascrivere. L'evento e `reason` dicono già in che senso.
         audit({"event": "admin_update_check_incomplete", "by": email,
-               "reason": "tag_name_vuoto", "kept": known})
+               "reason": "tag_name_vuoto", "latest": known})
         msg = ("GitHub non ha riportato una versione: tengo la nota"
                + (f" (v{known})" if known else " (non ce n'era una)"))
         return RedirectResponse(f"/admin/update?msg={msg.replace(' ', '+')}&kind=err",
