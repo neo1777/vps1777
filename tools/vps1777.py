@@ -3462,7 +3462,27 @@ def main() -> int:
 #   token assente, bot irraggiungibile) l'esito dell'update resta quello vero. *Un
 #   canale d'allarme che fa fallire ciò che sorveglia trasforma un problema in due.*
 def _esci(codice: int) -> None:
-    if codice != 0:
+    # 🤝 SOTTO systemd QUESTO AVVISO TACE, e la ragione è una partizione concordata con
+    #   `b82df434` (PR #100): lì l'avviso lo manda `OnFailure=` — che copre di più,
+    #   perché systemd sa che una unit è fallita **qualunque sia la ragione**, incluso
+    #   un crash che non arriva mai a questa riga (OOM, SIGKILL, timeout).
+    #   ⇒ Qui resta il caso che `OnFailure=` NON copre: il comando lanciato **a mano**.
+    #     È come Neo lancerà l'update stasera, e senza questo ramo tornerebbe muto.
+    #
+    # 🔴 E LA PARTIZIONE È SICURA SOLO SOTTO UNA CONDIZIONE, che non è mia e non è
+    #   un'assunzione: **ogni unit che chiama questa CLI deve avere `OnFailure=`.**
+    #   Senza, il mio avviso tace e nessun altro parla — cioè due cure CORRETTE,
+    #   messe insieme, aprirebbero il buco che entrambe curano.
+    #   ⭐ La condizione è imposta da `tools/tests/test_avvisa_fallimento.py`
+    #     (`test_OGNI_unit_che_chiama_la_CLI_ha_un_OnFailure`), che guarda la RELAZIONE
+    #     e non una lista di nomi: una lista invecchierebbe al primo servizio nuovo.
+    #
+    # ⚠️ `INVOCATION_ID` è messo da systemd in ogni unit che esegue, e da nessun altro:
+    #   è il segnale che il comando NON è stato lanciato da una persona. Non si guarda
+    #   il TTY — un `vps1777 update` in una pipe o in uno script di Neo non ha un TTY
+    #   e resterebbe muto, che è il caso in cui l'avviso serve di più.
+    sotto_systemd = bool(os.environ.get("INVOCATION_ID"))
+    if codice != 0 and not sotto_systemd:
         cmd = " ".join(sys.argv[1:]) or "(nessun argomento)"
         try:
             telegram_notify(
