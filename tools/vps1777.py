@@ -170,20 +170,53 @@ def arma_redazione(repo: Path) -> int:
     chiaro, ma a quel punto non abbiamo ancora letto nessun segreto, quindi non
     c'è niente di nostro da perdere. *Il buco è sul messaggio, non sul dato.*
     """
+    # 🔴 «HO PROVATO» NON È «HO GUARDATO» — rilievo di 71d540e6 sulla PR #72, ed è
+    #   il difetto che questa stessa funzione esiste per curare, un giro più in là.
+    #   La prima stesura faceva `_ARMATA = True` PRIMA della scansione. Se la prima
+    #   chiamata trovava zero valori perché non aveva potuto LEGGERE — `secrets/`
+    #   non ancora montata, `.env` illeggibile, repo sbagliato — il flag restava
+    #   True, la lista vuota, e `_redigi` diventava un no-op PER SEMPRE. Nessuno
+    #   riprovava, e il chiamante leggeva «armata» come «protetta».
+    # ⭐ Gli stati sono TRE, non due: non-provato · provato-e-vuoto · NON-HO-POTUTO-
+    #   GUARDARE. Avevo introdotto `_ARMATA` proprio per separare i primi due, e ho
+    #   fatto collassare il terzo dentro il secondo. *Uno zero che non sa dire se
+    #   ha guardato: è la classe che auditiamo, dentro il presidio che la cura.*
+    # 🛡️ Ora si arma solo se ha potuto LEGGERE almeno una delle due fonti. Se non
+    #   ha potuto, resta disarmata e RIPROVERÀ — e lo dice, perché un presidio
+    #   degradato in silenzio è peggio di uno assente.
     global _SEGRETI, _ARMATA
-    _ARMATA = True          # PRIMA della scansione: se questa fallisce a metà, la
-    #                         redazione resta debole ma non si ri-tenta a ogni riga.
     trovati: set[str] = set()
-    for f in sorted((repo / "secrets").glob("*.txt")):
-        try:
-            v = f.read_text().strip()
-        except OSError:
-            continue
-        if len(v) >= _MIN_SEGRETO:
-            trovati.add(v)
-    for k, v in env_read(repo).items():
+    letto = False
+    sd = repo / "secrets"
+    if sd.is_dir():
+        letto = True
+        for f in sorted(sd.glob("*.txt")):
+            try:
+                v = f.read_text().strip()
+            except OSError:
+                continue
+            if len(v) >= _MIN_SEGRETO:
+                trovati.add(v)
+    # 🔴 `env_read` NON SOLLEVA su `.env` assente: ritorna un dict VUOTO (r.~205).
+    #   La prima stesura di questa cura lo avvolgeva in un `try/except OSError`
+    #   che non scattava mai ⇒ `letto` restava True e il difetto sopravviveva alla
+    #   sua stessa cura. **Preso dal test, non dalla rilettura**: il test diceva
+    #   `_ARMATA is False` e la funzione rispondeva True.
+    # ⇒ si guarda IL FILE, non l'eccezione. Un'assenza che non alza le mani va
+    #   interrogata, non aspettata.
+    if (repo / ".env").is_file():
+        letto = True
+    env = env_read(repo)
+    for k, v in env.items():
         if _CHIAVI_SENSIBILI.search(k) and len(v.strip()) >= _MIN_SEGRETO:
             trovati.add(v.strip())
+    _ARMATA = letto
+    if not letto:
+        # NON passa da `warn()`: warn redige, e qui la redazione è per definizione
+        # spenta. Un avviso che dipende dal presidio che sta denunciando è muto.
+        print(f"[!] redazione NON armata: né {sd} né .env leggibili in {repo} — "
+              f"i messaggi d'errore usciranno in chiaro finché non riesce",
+              file=sys.stderr, flush=True)
     # Dal PIÙ LUNGO al più corto: se un segreto è prefisso di un altro, sostituire
     # prima il corto spezzerebbe il lungo lasciandone la coda in chiaro. Stessa
     # cura, e stessa ragione, di `logredact.py`.

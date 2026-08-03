@@ -126,3 +126,35 @@ def test_vuoto_e_non_fatto_sono_due_stati(tmp_path):
     assert v.arma_redazione(r) == 0, "un repo senza segreti deve trovarne zero"
     assert v._ARMATA is True, "armata è armata anche se non ha trovato niente"
     assert v._SEGRETI == []
+
+
+def test_non_ho_potuto_guardare_non_e_armata(tmp_path):
+    """⑤ Il terzo stato: NON-HO-POTUTO-GUARDARE ≠ provato-e-vuoto.
+
+    🔴 Rilievo di `71d540e6` sulla PR #72. La stesura precedente metteva
+      `_ARMATA = True` PRIMA della scansione: se la prima chiamata trovava zero
+      valori perché non aveva potuto LEGGERE (`secrets/` non montata, `.env`
+      assente), il flag restava True e `_redigi` diventava un no-op PER SEMPRE.
+    ⭐ Gli stati sono tre. Avevo introdotto `_ARMATA` per separarne due, e ho
+      fatto collassare il terzo dentro il secondo — la stessa classe che questo
+      file cura, un giro più in là.
+    """
+    vuota = tmp_path / "repo-inesistente"          # niente secrets/, niente .env
+    vuota.mkdir()
+    v._ARMATA = False
+    v._SEGRETI = []
+    assert v.arma_redazione(vuota) == 0
+    assert v._ARMATA is False, "senza fonti leggibili NON è armata: deve riprovare"
+
+
+def test_secrets_c_e_ma_vuota_arma_lo_stesso(tmp_path):
+    """Il verso opposto, o il test sopra passerebbe anche rompendo tutto.
+
+    Una `secrets/` che ESISTE e non contiene segreti è «provato-e-vuoto»:
+    armata, niente da redigere, e NON si riprova a ogni riga.
+    """
+    r = _repo_finto(tmp_path, {}, {"PORTA": "8080"})
+    v._ARMATA = False
+    v._SEGRETI = []
+    assert v.arma_redazione(r) == 0
+    assert v._ARMATA is True, "fonti leggibili e zero segreti = armata"
