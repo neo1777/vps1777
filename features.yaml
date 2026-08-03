@@ -355,6 +355,13 @@ features:
     status: active-default
     verify:
       mcp_tool: {service: archive-mcp, name: describe_databases}
+  - id: archive.check_integrity
+    nome: "archive-mcp · check_integrity"
+    cosa: "Integrità degli archivi: ok · sporco (journal caldo, scrittore morto a metà) · corrotto · non_misurabile. Risponde alla domanda che nessun altro tool risponde: sto servendo dati di una transazione mai committata? Nato dal round-16, rilievo bd02ca6f."
+    dove: ["mcp-tool:archive-mcp/check_integrity"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: check_integrity}
   - id: archive.set_description
     nome: "archive-mcp · set_description"
     cosa: "Imposta/aggiorna la DESCRIZIONE di un archivio: a cosa serve, cosa contiene, come va usato."
