@@ -24,6 +24,8 @@ from . import admin_core, archive_indexer, nlm_client
 from .admin_core import safe_next_url
 from .miniapp_core import version_gt
 
+from urllib.parse import quote_plus
+
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
@@ -604,6 +606,45 @@ async def archive_view(request: Request) -> Response:
     db_dir.mkdir(parents=True, exist_ok=True)
 
     if request.method == "POST":
+        # 🔴 IL TETTO SI GUARDA PRIMA DI `request.form()`, e la riga sotto è il punto
+        #   esatto in cui il danno avviene: `form()` legge il body e Starlette ci
+        #   spilla il multipart in `/tmp` (`SpooledTemporaryFile`, rollover a 1 MB).
+        #   ⚠️ E `/tmp` NON è il disco: `compose.yaml:43-52` lo monta come **tmpfs**
+        #   — il commento lo dice a voce — **senza un `size:` dichiarato**, quindi
+        #   vale il default del kernel: metà della RAM.
+        # ⇒ MISURATO il 03/08 (71d540e6, voce `2bd05092`, dalla revisione della #88):
+        #   la guardia sullo spazio disco introdotta lì è GIUSTA e guarda `db_dir` —
+        #   ma un upload da 4 GB, che `MAX_UPLOAD_BYTES` **ammette**, riempie la
+        #   tmpfs prima che quella guardia venga mai valutata. *Lo spazio era protetto
+        #   dove si scrive il risultato, non dove transita il materiale.*
+        # 🛡️ Perché QUESTA cura e non `tmpfs: size=`: quella richiede di sapere quanta
+        #   RAM ha la macchina, che da qui non è misurabile e cambia da VPS a VPS.
+        #   Questa non dipende né dalla RAM né dalla versione di Starlette: rifiuta
+        #   sulla DICHIARAZIONE del client, prima di materializzare un byte.
+        # ⚠️ `Content-Length` può MANCARE (transfer-encoding chunked) o mentire. Qui
+        #   «non l'ho potuto leggere» ≠ «è troppo grande»: se manca si prosegue, e a
+        #   valle restano il tetto sul loop di scrittura e la guardia sul disco. È una
+        #   rete IN PIÙ sul caso peggiore, non l'unica — e non rifiuta mai per un dato
+        #   che non ha.
+        _dichiarata = request.headers.get("content-length")
+        if _dichiarata is not None:
+            try:
+                _n = int(_dichiarata)
+            except ValueError:
+                _n = -1          # header illeggibile: come se mancasse, non un rifiuto
+            # Margine per l'overhead del multipart (boundary + campi del form): il
+            # file al tetto esatto deve poter passare, o rifiuteremmo un upload che
+            # il loop di scrittura accetterebbe.
+            _tetto = archive_indexer.MAX_UPLOAD_BYTES + 1024 * 1024
+            if _n > _tetto:
+                audit({"event": "admin_archive_upload_rifiutato_dichiarato", "by": email,
+                       "dichiarati_mb": _n // (1024 * 1024)})
+                return RedirectResponse(
+                    "/admin/archive?msg=" + quote_plus(
+                        f"upload rifiutato: dichiarati {_n // (1024 * 1024)} MB, il "
+                        f"tetto è {archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} "
+                        f"MB. Per archivi più grandi usa la CLI sulla VPS."
+                    ) + "&kind=err", status_code=303)
         form = await request.form()
         upload = form.get("jsonl_file")
         if upload is None or not hasattr(upload, "read"):
