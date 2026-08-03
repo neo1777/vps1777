@@ -3234,6 +3234,47 @@ def cosign_bypass_status(repo: Path) -> dict | None:
     }
 
 
+def cmd_avvisa_fallimento(repo: Path, args) -> int:
+    """Dice a @Neo che una unit è fallita, con la coda del journal.
+
+    🔴 PERCHÉ: il 03/08 `vps1777-auto-update` è fallito sulla VPS viva e nessuno
+       l'ha saputo per dieci ore. La notifica di fallimento viveva **dentro la
+       routine di rollback** (righe ~2005/2014), cioè scattava solo se l'update
+       aveva già toccato lo stack. Il fallimento allo step 6 — il self-update —
+       propagava un traceback e basta.
+       ⇒ *Il fallimento che NON rompe niente era l'unico senza voce, ed è quello
+         che nessuno nota: la macchina resta indietro in silenzio.*
+
+    🔑 Chiamata da `OnFailure=` in systemd, non dal flusso dell'update: systemd
+       sa che la unit è fallita **qualunque sia la ragione**, incluso un crash
+       che il codice non aveva previsto. Una notifica dentro il flusso copre solo
+       i fallimenti che il flusso ha immaginato — ed è esattamente il buco.
+
+    ⚠️ Non fallisce MAI (esce 0 anche se la notifica non parte): un avviso che
+       rompe è un secondo problema sopra il primo, e `OnFailure` non ha un
+       `OnFailure`. Se il canale è muto resta il journal, che è la fonte.
+    """
+    unit = str(args.unit)
+    coda = ""
+    try:
+        r = subprocess.run(["journalctl", "-u", unit, "-n", str(args.righe),
+                            "--no-pager", "-o", "cat"],
+                           capture_output=True, text=True, timeout=20)
+        coda = (r.stdout or "").strip()[-1200:]
+    except Exception as exc:                      # noqa: BLE001 — vedi docstring
+        coda = f"(journal non leggibile: {exc})"
+    testo = (f"🔴 vps1777: la unit `{unit}` è FALLITA.\n\n"
+             f"{coda or '(nessuna riga di journal)'}\n\n"
+             f"Non è detto che qualcosa sia rotto: un update che fallisce PRIMA "
+             f"di toccare lo stack non rompe niente — lascia la macchina "
+             f"indietro, in silenzio. Questo messaggio esiste per quello.")
+    try:
+        telegram_notify(repo, testo)
+    except Exception as exc:                      # noqa: BLE001
+        log(f"avvisa-fallimento: notifica non partita ({exc}) — resta il journal")
+    return 0
+
+
 def cmd_secrets_status(repo: Path, args) -> int:
     """Età e scadenze dei secret. Scrive onboarding/secrets_status.json (letto
     dalla pagina /admin/secrets) e — con --notify — avvisa su Telegram quelli
@@ -3369,6 +3410,10 @@ def main() -> int:
     p.add_argument("--scrivi", action="store_true",
                    help="applica davvero. Senza, stampa solo il delta e non tocca nulla.")
 
+    p = sub.add_parser("avvisa-fallimento",
+                       help="dice su Telegram che una unit systemd è fallita (usato da OnFailure=)")
+    p.add_argument("--unit", required=True, help="nome della unit fallita (il segnaposto %%n di systemd)")
+    p.add_argument("--righe", type=int, default=12, help="quante righe di journal allegare")
     p = sub.add_parser("secrets-status", help="età e scadenze dei secret (+ notifica Telegram)")
     p.add_argument("--notify", action="store_true", help="notifica Telegram i secret scaduti")
 
@@ -3385,7 +3430,8 @@ def main() -> int:
                 "migrate": cmd_migrate, "bootstrap": cmd_bootstrap,
                 "archive-ingest": cmd_archive_ingest,
                 "archive-retag": cmd_archive_retag,
-                "secrets-status": cmd_secrets_status}
+                "secrets-status": cmd_secrets_status,
+                "avvisa-fallimento": cmd_avvisa_fallimento}
     try:
         return handlers[args.cmd](repo, args)
     except KeyboardInterrupt:
