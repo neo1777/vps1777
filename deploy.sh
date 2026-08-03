@@ -501,12 +501,35 @@ COMPOSE_VERSION="v2.32.4"
 DEV_BUILD="${DEV_BUILD:-0}"
 INSTALL_VERSION=""
 if [ "$DEV_BUILD" != "1" ]; then
-  INSTALL_VERSION="${VPS1777_INSTALL_VERSION:-$(curl -fsS -m 10 https://api.github.com/repos/neo1777/vps1777/releases/latest 2>/dev/null \
-    | python3 -c 'import sys,json;print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)}"
+  if [ -n "${VPS1777_INSTALL_VERSION:-}" ]; then
+    INSTALL_VERSION="$VPS1777_INSTALL_VERSION"
+  else
+    # (stesso blocco di setup.sh e installer/engine.py: il codice era identico in
+    # tre punti e il registro ne nominava uno solo — la cura vale per tutti e tre.)
+    # «GitHub non mi ha risposto» e «GitHub dice che non ci sono release» sono due
+    # fatti diversi, e prima finivano nella stessa stringa vuota. Il secondo porta a
+    # `DEV_BUILD=1`, cioè a una BUILD LOCALE, che non passa dalla verifica della
+    # firma cosign — valida sul bundle di release, non sul sorgente compilato in
+    # loco. Un blip di rete degradava «immagine firmata» in «build da quel che c'è
+    # sul disco», e il messaggio dava la colpa a GitHub.
+    # L'esito di curl si cattura PRIMA della pipe: dopo, `$?` è l'exit di python.
+    _rel_json=""; _rel_rc=0
+    _rel_json="$(curl -fsS -m 10 https://api.github.com/repos/neo1777/vps1777/releases/latest 2>/dev/null)" || _rel_rc=$?
+    if [ "$_rel_rc" -ne 0 ]; then
+      die "Non ho potuto chiedere a GitHub qual è l'ultima release (curl exit $_rel_rc: rete, DNS, proxy o rate-limit).
+    Questo NON vuol dire che non ci sia una release: vuol dire che non lo so. Installare
+    una build locale al posto di un'immagine firmata sarebbe un downgrade silenzioso.
+    Riprova, oppure scegli deliberatamente:
+      VPS1777_INSTALL_VERSION=X.Y.Z  bash deploy.sh …   installa quella release
+      DEV_BUILD=1                    bash deploy.sh …   build locale, SENZA verifica firma"
+    fi
+    INSTALL_VERSION="$(printf '%s' "$_rel_json" \
+      | python3 -c 'import sys,json;print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)"
+  fi
   if [ -n "$INSTALL_VERSION" ]; then
     ok "Installerò la release v$INSTALL_VERSION (pull da ghcr, nessuna build)"
   else
-    warn "Nessuna release pubblicata trovata → fallback: build locale (dev)"
+    warn "GitHub ha risposto e non riporta nessuna release pubblicata → fallback: build locale (dev)"
     DEV_BUILD=1
   fi
 fi

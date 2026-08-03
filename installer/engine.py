@@ -40,8 +40,23 @@ TS_API = "https://api.tailscale.com/api/v2"
 GITHUB_REPO = "neo1777/vps1777"
 
 
+class ReleaseNonInterrogabile(RuntimeError):
+    """GitHub non ha risposto: NON sappiamo se una release ci sia o no.
+
+    Diverso da «GitHub ha risposto e non ce n'è nessuna», che è `''`. La
+    differenza conta perché il ramo «nessuna» fa scivolare l'installazione sulla
+    build locale, che non passa dalla verifica della firma.
+    """
+
+
 def latest_release_version(prerelease: bool = False) -> str:
-    """Ultima release pubblicata (dal PC dell'installer). '' se nessuna.
+    """Ultima release pubblicata (dal PC dell'installer).
+
+    Ritorna '' SOLO quando GitHub ha risposto e non c'è nessuna release.
+    Se la domanda non ha avuto risposta (rete, DNS, proxy, rate-limit 403 a 60
+    req/h per IP non autenticato, 5xx, JSON inatteso) solleva
+    `ReleaseNonInterrogabile`: prima anche quel caso tornava '', e il docstring
+    stesso — «'' se nessuna» — dichiarava la conflazione senza vederla.
 
     L'installer produzione installa SEMPRE una release taggata (modello pull,
     mai build sulla VPS 4GB). prerelease=True serve solo ai test rc.
@@ -50,13 +65,14 @@ def latest_release_version(prerelease: bool = False) -> str:
         if prerelease:
             url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=1"
             obj, _ = _http_json(url, headers={"User-Agent": "vps1777-installer"})
-            return obj[0]["tag_name"].lstrip("v") if obj else ""
+            return str(obj[0]["tag_name"]).lstrip("v") if obj else ""
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         obj, _ = _http_json(url, headers={"User-Agent": "vps1777-installer"})
         return str(obj.get("tag_name", "")).lstrip("v")
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, KeyError,
-            json.JSONDecodeError):
-        return ""
+            IndexError, TypeError, json.JSONDecodeError) as exc:
+        raise ReleaseNonInterrogabile(
+            f"{type(exc).__name__}: {exc}") from exc
 
 
 # ── Provisioning Tailscale via OAuth client (gira sul PC, non sulla VPS) ────
@@ -896,13 +912,30 @@ def run(params: dict) -> Iterator[str]:
         version = ""
         if not dev_build:
             version = (params.get("vps1777_version")
-                       or _os.environ.get("VPS1777_INSTALL_VERSION")
-                       or latest_release_version(
-                           prerelease=_os.environ.get("VPS1777_RELEASE_CHANNEL") == "prerelease"))
+                       or _os.environ.get("VPS1777_INSTALL_VERSION"))
+            if not version:
+                try:
+                    version = latest_release_version(
+                        prerelease=_os.environ.get("VPS1777_RELEASE_CHANNEL") == "prerelease")
+                except ReleaseNonInterrogabile as exc:
+                    # Fermarsi qui è la scelta: il ramo alternativo è la build
+                    # locale, che salta la verifica della firma. Un errore di rete
+                    # non deve poter decidere un downgrade di sicurezza al posto
+                    # di chi installa — che ha due modi espliciti per proseguire.
+                    yield ("✗ Non ho potuto chiedere a GitHub qual è l'ultima release "
+                           f"({exc}). Non vuol dire che non ce ne sia una: vuol dire "
+                           "che non lo so.")
+                    raise RuntimeError(
+                        "Versione da installare non determinabile. Riprova, oppure "
+                        "scegli deliberatamente: indica la versione (campo «versione» "
+                        "o VPS1777_INSTALL_VERSION=X.Y.Z), oppure spunta «build locale» "
+                        "(dev_build), che NON verifica la firma delle immagini."
+                    ) from exc
             if version:
                 yield f"✓ Installerò la release v{version} (immagini ghcr, nessuna build)"
             else:
-                yield "! Nessuna release pubblicata trovata → fallback: build locale (dev)"
+                yield ("! GitHub ha risposto e non riporta nessuna release pubblicata "
+                       "→ fallback: build locale (dev)")
                 dev_build = True
         params["_vps1777_version"] = "" if dev_build else version
         params["_image_base"] = params.get("image_base", "")
