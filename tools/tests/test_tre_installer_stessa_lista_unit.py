@@ -160,6 +160,48 @@ def test_i_tre_installer_abilitano_le_STESSE_unit(features: str, con_autoupdate:
     )
 
 
+# Unit ATTIVABILI (`.timer`/`.path`) che si è deciso di NON abilitare all'install.
+# Oggi è VUOTA, e va tenuta vuota finché una decisione non dice il contrario: ogni
+# nome qui dentro è un timer che esiste sul disco e non parte, cioè una feature
+# spenta in silenzio. ⇒ chi aggiunge una riga scriva ACCANTO perché.
+# (Fail-closed, come `SANDBOX_PROVATE_INNOCUE` in test_unit_dichiarano_nonewprivileges.py:
+#  non si indovina cosa è innocuo omettere — si dichiara ciò che è stato deciso.)
+ATTIVABILI_NON_ABILITATE: dict[str, str] = {}
+
+
+def test_ogni_unit_attivabile_e_nella_lista_ENABLE() -> None:
+    """«I tre concordano» non è «i tre hanno ragione».
+
+    🔑 IL BUCO CHE QUESTO CHIUDE (rilievo di `b82df434` sulla #106): il test sopra
+       prova che i tre calcolano lo STESSO insieme. Se lo sbagliassero **tutti e
+       tre allo stesso modo** — una unit nuova aggiunta a `systemd/` e a nessuno
+       dei tre installer — resterebbe verde. *Concordare è una proprietà della
+       relazione fra i tre; qui serve un ancoraggio FUORI da loro.*
+
+    L'ancoraggio è il disco: un `.timer` o un `.path` esiste per essere acceso. Se
+    è lì e nessuno lo abilita, o è un difetto o è una decisione — e una decisione
+    si scrive, non si deduce dal silenzio.
+
+    ⚠️ NON tocca i `.service`: quelli sono attivati dal loro timer o istanziati da
+       un `OnFailure=` (come `vps1777-avvisa-fallimento@.service`, che è un
+       template e non si abilita affatto). Il perimetro è «ciò che si accende da sé».
+    """
+    attivabili = {p.name for p in (RADICE / "systemd").glob("vps1777-*")
+                  if p.suffix in (".timer", ".path")}
+    assert attivabili, "nessuna unit attivabile in systemd/: sospetto, non un verde"
+
+    # La lista con TUTTE le feature accese: è l'unione, cioè il massimo che i tre
+    # installer sanno abilitare. Un buco qui è un buco in ogni configurazione.
+    massima = _lista_setup("backup,autoupdate")
+    orfane = attivabili - massima - set(ATTIVABILI_NON_ABILITATE)
+    assert not orfane, (
+        f"unit attivabili che NESSUN installer abilita: {sorted(orfane)}\n"
+        "  ⇒ o vanno aggiunte alla lista dei tre, o dichiarate in\n"
+        "    ATTIVABILI_NON_ABILITATE con la ragione accanto.\n"
+        "  Un timer che esiste e non parte è una feature spenta in silenzio."
+    )
+
+
 def test_la_lista_NON_e_ricopiata_qui() -> None:
     """Il test non deve contenere la risposta che verifica.
 
