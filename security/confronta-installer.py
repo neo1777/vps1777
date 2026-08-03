@@ -44,7 +44,22 @@ INSTALLER = ["setup.sh", "deploy.sh", "installer/engine.py"]
 # file è un INSIEME di stringhe, e i tre insiemi devono essere uguali.
 ASSI: list[tuple[str, str]] = [
     ("unit systemd abilitate", r"vps1777-[a-z-]+\.(?:timer|service|path)"),
-    ("hardening host", r"\b(?:fail2ban|unattended-upgrades)\b"),
+    # 🔴 `20auto-upgrades` aggiunto il 03/08 (71d540e6), e la ragione è che senza di
+    #   esso questo presidio PASSAVA sul difetto della PR #90 — provato: sul codice
+    #   pre-cura (`@f6b3b51`) esce **0, «concordano»**, mentre due installer su tre
+    #   non scrivevano `/etc/apt/apt.conf.d/20auto-upgrades`.
+    #   ⇒ tutti e tre NOMINANO i due pacchetti (e l'asse era soddisfatto), ma solo
+    #     `engine.py` dava loro una CADENZA: `unattended-upgrades` restava abilitato
+    #     e mai eseguito — il caso peggiore, perché un servizio attivo si legge come
+    #     protezione mentre un servizio assente si nota.
+    # ⭐ E il modo in cui è emerso vale quanto la riga: avevo scritto un SECONDO
+    #   presidio in bash e stavo per toglierlo come «doppione», perché così l'avevo
+    #   dichiarato sul bus. **Prima di toglierlo l'ho misurato**, e i due erano
+    #   COMPLEMENTARI: il mio guardava la periodicità, questo no. *«È un doppione» è
+    #   un'affermazione che si misura, non si deduce dal fatto che due cose si
+    #   somigliano — e toglierla senza misurare avrebbe lasciato scoperta proprio la
+    #   riga che la PR aggiungeva.* ⇒ un presidio solo, completo, invece di due parziali.
+    ("hardening host", r"\b(?:fail2ban|unattended-upgrades|20auto-upgrades)\b"),
 ]
 
 
