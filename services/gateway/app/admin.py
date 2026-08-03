@@ -845,6 +845,28 @@ async def update_check(request: Request) -> Response:
             status_code=303)
     latest = str(rel.get("tag_name") or "").lstrip("v")
     known = str(prev.get("latest") or "")
+    # `tag_name` assente, vuoto o non stringa NON significa «non c'è una release»:
+    # significa che questa risposta non lo dice. Il `or ""` sopra rende le due cose
+    # indistinguibili, e senza questa guardia il blocco in fondo scriverebbe
+    # latest="" sopra la nota buona — cancellandola.
+    #
+    # Perché è la nota, e non un campo qualunque: `update_status.json` è l'UNICO
+    # input dell'anti-downgrade della CLI (tools/vps1777.py, consume_intent), che è
+    # scritto `if known_latest and …`. Con la nota vuota quel controllo non scatta e
+    # non lascia traccia: il dato che manca spegne la guardia invece di fermarla.
+    # La guardia qui sotto non copre questo caso — confronta due versioni, e una
+    # stringa vuota non è una versione: regredire a vuoto è la regressione massima.
+    if not latest:
+        prev.update(current=current,
+                    error="GitHub non ha riportato una versione (tag_name assente)",
+                    checked_at=now)
+        sf.write_text(json.dumps(prev, indent=2) + "\n")
+        audit({"event": "admin_update_check_incomplete", "by": email,
+               "reason": "tag_name_vuoto", "kept": known})
+        msg = ("GitHub non ha riportato una versione: tengo la nota"
+               + (f" (v{known})" if known else " (non ce n'era una)"))
+        return RedirectResponse(f"/admin/update?msg={msg.replace(' ', '+')}&kind=err",
+                                status_code=303)
     # stessa guardia della CLI: /releases/latest può servire risposte stantie dalla
     # cache di GitHub — la «latest nota» non deve mai regredire (downgrade proposto).
     if known and latest and version_gt(known, latest):

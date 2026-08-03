@@ -1555,20 +1555,48 @@ def consume_intent(repo: Path, path: Path, st: dict) -> str:
     if age > INTENT_TTL_S or age < -60:
         raise RuntimeError(f"intent scaduto ({int(age)}s > {INTENT_TTL_S}s)")
     nonces = st.setdefault("intent_nonces", [])
-    if nonce and nonce in nonces:
+    # Un intent SENZA nonce non è un intent con un campo in meno: è un intent che
+    # nessuno dei nostri due scrittori produce. `if nonce and nonce in nonces` lo
+    # lasciava passare due volte — non veniva riconosciuto come replay E `if nonce:`
+    # non lo registrava, quindi restava replayabile all'infinito senza lasciare una
+    # riga in `intent_nonces`. Il nonce è dichiarato portatore dell'autorizzazione
+    # (vedi il commento sui permessi 0640 in admin.py), e chi lo omette è esattamente
+    # chi scrive sul bind-mount senza passare dal gateway — il modello di minaccia
+    # che il version-floor di cmd_update nomina per esteso.
+    # Compatibilità verificata prima di chiudere: admin.py e miniapp.py mettono il
+    # nonce entrambi già in v0.40.14 (la versione in esercizio) ⇒ nessun intent
+    # legittimo, nemmeno scritto da un gateway non ancora aggiornato, ne è privo.
+    if not nonce:
+        raise RuntimeError("intent: nonce mancante — rifiutato (fail-closed)")
+    if nonce in nonces:
         raise RuntimeError("intent: nonce già consumato (replay?)")
-    if nonce:
-        nonces.append(nonce)
-        del nonces[:-50]
-    # il pulsante può chiedere solo la latest nota (niente downgrade via web)
+    nonces.append(nonce)
+    del nonces[:-50]
+    # il pulsante può chiedere solo la latest nota (niente downgrade via web).
+    # Gli stati sono TRE, non due: «la nota dice X» · «la nota dice il vuoto» · «non
+    # ho potuto leggerla». Prima gli ultimi due collassavano in known_latest="" e il
+    # confronto qui sotto, scritto `if known_latest and …`, semplicemente NON scattava:
+    # il dato mancante SPEGNEVA la guardia invece di fermare l'update, e senza
+    # lasciare traccia. Chi scrive questo file è il gateway, cioè l'attore che il
+    # commento al version-floor considera compromissibile: potergli far saltare il
+    # controllo cancellando un file è più facile che forgiarne il contenuto.
+    # Rifiutare è sicuro: l'operatore sull'host ha sempre `vps1777 update --version
+    # <v>` senza intent, e il chiamante (cmd_update, --from-intent) tratta già ogni
+    # RuntimeError come «intent rifiutato» con progress_write(..., "failed").
     status_file = onboarding_dir(repo) / "update_status.json"
-    known_latest = ""
-    if status_file.is_file():
-        try:
-            known_latest = json.loads(status_file.read_text()).get("latest", "")
-        except json.JSONDecodeError:
-            known_latest = ""
-    if known_latest and norm_ver(target) != norm_ver(known_latest):
+    try:
+        known_latest = str(json.loads(status_file.read_text()).get("latest", "") or "")
+    except (OSError, json.JSONDecodeError) as exc:
+        # OSError era scoperto anche prima: `is_file()` non protegge da permessi
+        # negati o da un file sparito fra il test e la lettura, e un OSError qui
+        # non è un RuntimeError — sarebbe risalito oltre il gestore del chiamante.
+        raise RuntimeError(
+            f"intent: latest nota non leggibile ({status_file.name}: {exc}) — "
+            f"rifiutato") from exc
+    if not known_latest:
+        raise RuntimeError(
+            "intent: latest nota vuota — rifiutato (rifai il check dal pannello admin)")
+    if norm_ver(target) != norm_ver(known_latest):
         raise RuntimeError(
             f"intent: target {target} ≠ latest nota {known_latest} — rifiutato")
     return target
