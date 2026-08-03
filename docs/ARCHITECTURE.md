@@ -216,10 +216,19 @@ bot               ──┘   X-Vps1777-Internal (constant-time)   (unico mount)
 | `GET /internal/notifications` | bot | preleva la coda notifiche (drift memoria + promemoria canonico, v0.36.0) |
 | `POST /internal/canonico/ack` | bot | registra l'ack del bottone «✓ Fatto» (v0.36.0) |
 
-Senza `gateway_secret` configurato → **404**: fail-closed anche qui. *Il 404 è
-deliberato e non un 403: un 403 confermerebbe che la risorsa esiste, il 404 no —
-vedi `services/gateway/app/proxy.py` e l'avviso all'avvio in `__main__.py`.* Il dettaglio
-dei due endpoint memoria e del perché esistono sta in [NB1777.md](NB1777.md) §6-§7.
+Senza `gateway_secret` configurato → **403**: fail-closed anche qui. *Questi quattro
+endpoint li serve `nb1777-mcp`, e la guardia è `_internal_ok` (`server.py`): «senza
+segreto configurato si nega tutto».* Il dettaglio dei due endpoint memoria e del perché
+esistono sta in [NB1777.md](NB1777.md) §6-§7.
+
+> **403 qui, 404 dal proxy — e non è un'incoerenza.** Sono due porte diverse:
+> *da dentro* la rete `backend`, senza segreto, `nb1777-mcp` risponde **403**
+> (fail-closed dichiarato); *da fuori*, il reverse-proxy del gateway rifiuta ogni
+> sotto-path `internal/` con **404**, perché un 403 confermerebbe l'esistenza della
+> rotta a chi la sta cercando (`proxy.py`, e la scelta è scritta in `routes.py`:
+> «ogni gradino risponde 404, non 403»). Chi legge un log deve poterli distinguere:
+> un **403** dice *il segreto non torna*, un **404** dice *questa superficie, per te,
+> non esiste*.
 
 Due proprietà da non perdere di vista se tocchi questa zona:
 
