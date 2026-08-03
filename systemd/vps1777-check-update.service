@@ -15,6 +15,11 @@ Description=vps1777 — check aggiornamenti (GitHub Releases)
 Wants=network-online.target
 After=network-online.target docker.service
 
+# 🔔 Se questa unit fallisce, @Neo lo deve SAPERE. Il 03/08 auto-update è
+# fallito e nessuno l'ha saputo per dieci ore: la notifica viveva dentro la
+# routine di rollback, cioè solo sul fallimento che rompe qualcosa.
+OnFailure=vps1777-avvisa-fallimento@%n.service
+
 [Service]
 Type=oneshot
 User=@OPERATOR_USER@

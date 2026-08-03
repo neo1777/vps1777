@@ -1,0 +1,45 @@
+# vps1777-avvisa-fallimento@.service — dice a @Neo che una unit è fallita.
+#
+# 🔴 PERCHÉ ESISTE, e non è ipotesi: il 03/08 alle 04:32 `vps1777-auto-update`
+#   è fallito sulla VPS viva e **nessuno l'ha saputo**. Il bundle della 0.41.0
+#   era scaricato e verificato; si è rotto nel copiare la CLI nuova (step 6,
+#   self-update), con un `CalledProcessError` non gestito. Trovato solo andando
+#   a leggere il journal a mano, dieci ore dopo.
+#
+# ⭐ E L'ASIMMETRIA CHE LO SPIEGA, misurata in `tools/vps1777.py`:
+#     update fallito DOPO aver toccato lo stack  → rollback → telegram_notify ✅
+#                                                  (righe 2005, 2014)
+#     update fallito PRIMA (preflight, fetch,    → traceback → SILENZIO 🔴
+#     self-update)
+#   ⇒ **la notifica viveva dentro la routine di ROLLBACK**, cioè solo sul
+#     fallimento che rompe qualcosa. Il fallimento che NON rompe niente — e che
+#     quindi nessuno nota — era l'unico senza voce. *La buona notizia («c'è una
+#     versione nuova», `check --notify`) passava; il fallimento nel prenderla no.*
+#
+# 🔑 STA IN SYSTEMD E NON NEL CODICE DELL'UPDATE di proposito: systemd sa che la
+#   unit è fallita **qualunque sia la ragione**, incluso un crash che il codice
+#   non ha previsto. Una notifica dentro il flusso copre solo i fallimenti che il
+#   flusso ha immaginato — ed è esattamente quello che è successo.
+#
+# ⚠️ NON avvisa se a fallire è QUESTA unit (non c'è un OnFailure sull'OnFailure).
+#   Dichiarato invece che scoperto: se il canale Telegram è giù, il silenzio
+#   torna. Il rimedio è guardare il journal, che resta la fonte.
+[Unit]
+Description=vps1777 — avvisa che %i è fallita
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=@OPERATOR_USER@
+Group=@OPERATOR_USER@
+Environment=VPS1777_HOME=@REPO@
+WorkingDirectory=@REPO@
+ExecStart=/usr/local/bin/vps1777 avvisa-fallimento --unit %i
+# breve: se non parte in un minuto, non è un avviso — è un secondo problema
+TimeoutStartSec=60
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+LockPersonality=true
