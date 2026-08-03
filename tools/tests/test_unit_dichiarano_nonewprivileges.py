@@ -39,6 +39,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -141,13 +142,18 @@ def test_la_dichiarazione_ha_una_RAGIONE_accanto(unit: Path) -> None:
 #   scrive `=true` resta rotta e questo test tace: quel caso lo prende solo la macchina
 #   (`prova-8`, e `grep NoNewPrivs /proc/<pid>/status`).
 
-# Prefissi delle direttive di sandboxing di systemd. Non è l'elenco di ciò che implica
-# NoNewPrivileges — è più largo di proposito: su una unit che eleva, tutto ciò che
-# somiglia a sandboxing va guardato da una persona prima di entrare.
-_PREFISSI_SANDBOX = (
-    "Protect", "Restrict", "Lock", "Private", "Memory", "System", "Capability",
-    "RemoveIPC", "DynamicUser", "AmbientCapabilities",
-)
+# 🔑 L'ELENCO NON È QUI: si LEGGE da `tools/vps1777.py`, dove serve anche a runtime
+#   (il pre-flight che rifiuta un bundle il quale reintroduce sandboxing su una unit che
+#   eleva). Scriverlo in due posti sarebbe **il difetto che questo file esiste per
+#   trovare**: due elenchi che divergono, e diverge quello che nessuno confronta.
+#   Il modulo si carica col pattern già usato da `test_intent_fail_closed.py`.
+_spec = importlib.util.spec_from_file_location("vps1777_cli", RADICE / "tools" / "vps1777.py")
+_cli = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_cli)
+
+_PREFISSI_SANDBOX = _cli.PREFISSI_SANDBOX
+_direttive_attive = _cli._direttive_attive
+_dichiara_di_elevare = _cli._dichiara_di_elevare
 
 # Direttive PROVATE innocue su una unit che eleva: si aggiunge qui SOLO dopo aver
 # misurato `NoNewPrivs` in `/proc/<pid>/status` con la direttiva attiva. Vuota non è
@@ -155,21 +161,17 @@ _PREFISSI_SANDBOX = (
 SANDBOX_PROVATE_INNOCUE: frozenset[str] = frozenset()
 
 
-def _direttive_attive(testo: str) -> list[tuple[str, str]]:
-    """(nome, riga) delle direttive che systemd esegue. I commenti no — vedi sopra."""
-    out = []
-    for r in solo_codice(testo).splitlines():
-        r = r.strip()
-        if "=" in r and r[:1].isalpha():
-            out.append((r.split("=", 1)[0].strip(), r))
-    return out
+def test_l_elenco_arriva_dal_CLI_e_non_e_vuoto() -> None:
+    """Se l'import fallisse in silenzio, sopra resterebbe una tupla vuota.
 
-
-def _dichiara_di_elevare(testo: str) -> bool:
-    for nome, riga in _direttive_attive(testo):
-        if nome == "NoNewPrivileges":
-            return riga.split("=", 1)[1].strip().lower() in ("no", "false", "off", "0")
-    return False
+    `nome.startswith(())` è **False per ogni nome**: il test dei colpevoli non
+    troverebbe mai nulla e sarebbe verde su qualunque unit. Un elenco vuoto non è un
+    elenco permissivo, è un controllo spento — e sarebbe indistinguibile da un verde.
+    """
+    assert _PREFISSI_SANDBOX, "PREFISSI_SANDBOX letto dal CLI è vuoto: il controllo è spento"
+    assert "Lock" in _PREFISSI_SANDBOX and "Protect" in _PREFISSI_SANDBOX, (
+        f"PREFISSI_SANDBOX non ha la forma attesa: {_PREFISSI_SANDBOX}"
+    )
 
 
 @pytest.mark.parametrize("unit", unit_di_servizio(), ids=lambda p: p.name)
