@@ -38,13 +38,22 @@ prova() {
     FALLITI=$((FALLITI + 1)); rm -rf "$box"; return
   fi
 
+  # Heredoc QUOTATO (<<'FINE'): niente espande qui dentro, ed è quello che serve —
+  # `$*`, `$INSTALL_VERSION` e `\n` devono arrivare LETTERALI nel file generato, che
+  # è il posto dove verranno interpretati. Con `echo '…'` shellcheck ha ragione due
+  # volte (SC2028 sul `\n`, SC2016 sul `$`), e sono `info`: la CI lancia shellcheck
+  # senza soglia, quindi un `info` è rosso quanto un `error`.
   {
-    echo 'set -euo pipefail'
-    echo 'die()  { printf "ESITO=die %s\n" "$*" >&2; exit 1; }'
-    echo 'ok()   { printf "ESITO=ok %s\n"   "$*"; }'
-    echo 'warn() { printf "ESITO=warn %s\n" "$*"; }'
+    cat <<'FINE'
+set -euo pipefail
+die()  { printf "ESITO=die %s\n"  "$*" >&2; exit 1; }
+ok()   { printf "ESITO=ok %s\n"   "$*"; }
+warn() { printf "ESITO=warn %s\n" "$*"; }
+FINE
     printf '%s\n' "$blocco"
-    echo 'printf "FINALE INSTALL_VERSION=[%s] DEV_BUILD=[%s]\n" "$INSTALL_VERSION" "$DEV_BUILD"'
+    cat <<'FINE'
+printf "FINALE INSTALL_VERSION=[%s] DEV_BUILD=[%s]\n" "$INSTALL_VERSION" "$DEV_BUILD"
+FINE
   } > "$box/prova.sh"
 
   local out piatto
