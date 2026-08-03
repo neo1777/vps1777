@@ -86,13 +86,25 @@ updates:
   #   che dipende da un pacchetto non pinnato e non sorvegliato.
   #   *È la voce `39b5a89d` di 71d540e6, vista dal lato dell'aggiornamento.*
   #
-  # 🖐️ COSA QUESTO **NON** RISOLVE, e va detto: `gateway` e `archive-mcp` non
-  #   hanno `uv.lock` (gli altri due sì) e nessun Dockerfile usa `--frozen`.
-  #   Finché è così, ogni ricostruzione risolve da capo e può prendere una
-  #   uvicorn nuova **fra una PR di Dependabot e l'altra**. Dependabot ti dice
-  #   che è uscita; il lock impedirebbe di prenderla senza accorgersene.
-  #   **Sono due cose diverse e serve tutt'e due**: questa è quella che costa
-  #   dieci righe, l'altra resta aperta nella voce `23cc4783`.
+  # 🖐️ L'ALTRA METÀ — e questo blocco è stato RISCRITTO perché era invecchiato.
+  #   Al 03/08 12:22 diceva: «`gateway` e `archive-mcp` non hanno `uv.lock` e
+  #   nessun Dockerfile usa `--frozen`». Era vero quando è stato scritto ed è
+  #   FALSO da due ore dopo: `b29d4f7` (PR #96, 14:19) ha portato il lock ai due
+  #   servizi scoperti e `--frozen` in tutti e quattro i Dockerfile.
+  #   ⇒ misurato su `origin/main` prima di riscrivere: uv.lock 4/4 · --frozen 4/4.
+  #
+  #   Il PERCHÉ delle due cose resta, ed è il motivo per cui questo file esiste:
+  #   il lock impedisce di prendere una uvicorn nuova senza accorgersene fra una
+  #   PR di Dependabot e l'altra; Dependabot ti dice che è uscita. Sono due
+  #   presidi diversi e servono entrambi — **ora ci sono entrambi.**
+  #
+  # 🔑 E il rilievo `23cc4783` NON «resta aperto»: è CHIUSO da `b29d4f7`. La
+  #   riga vecchia lo dava per pendente, ed è la parte che fuorviava di più —
+  #   un lettore ci avrebbe cercato dentro un lavoro da fare che non c'è.
+  #   (Lo stesso id è citato in `test_lock_nella_build.py` e in
+  #   `test_dependabot_copre_i_servizi.py`: là descrive l'ORIGINE del test,
+  #   e resta corretto — un rilievo chiuso non smette di essere il motivo
+  #   per cui un presidio esiste.)
   - package-ecosystem: uv
     directories:
       - /services/gateway
