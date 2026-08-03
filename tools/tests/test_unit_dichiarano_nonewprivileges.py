@@ -104,3 +104,107 @@ def test_la_dichiarazione_ha_una_RAGIONE_accanto(unit: Path) -> None:
         f"{unit.name}: NoNewPrivileges è dichiarato ma senza una ragione scritta sopra.\n"
         "  Un flag di sicurezza nudo è una riga che il prossimo toglie «per pulizia»."
     )
+
+
+# ── ② E IL PRESIDIO QUI SOPRA NON PRENDE IL GUASTO. Provato, non temuto. ─────────────
+#
+# Il test precedente chiede che `NoNewPrivileges` sia DICHIARATO. È nato dalla prima
+# diagnosi — «la riga manca» — e quella diagnosi era **incompleta**: la cura scritta su
+# quella base (`NoNewPrivileges=no`, PR #101) è finita in `main` e **non ha riparato
+# niente**. La riga da sola non vince sull'implicazione.
+#
+# 📏 LA MISURA CHE LO DIMOSTRA, fatta il 03/08 su questo stesso file di test:
+#     le unit di `origin/main` (curate)            -> 11 passed
+#     la unit di 37bf7d5^ — quella con cui l'auto-update  -> 11 passed   🔴
+#     è FALLITO DAVVERO sulla macchina (User= non-root
+#     + le sei direttive + NoNewPrivileges=no)
+#   => il presidio dà VERDE su una unit rotta. Non è un'ipotesi: quello stato è
+#      esistito, in produzione, e questo test l'avrebbe lasciato passare.
+#
+# 🔑 PERCHÉ SUCCEDE, ed è la forma generale: **un presidio nasce tarato sulla diagnosi
+#   del momento, e resta tarato su quella anche quando la diagnosi viene corretta.**
+#   La diagnosi vera (misurata sulla VPS, vedi il commento in testa) è che a rompere è
+#   la COMBINAZIONE: `User=` non-root + una direttiva che tira dentro seccomp. Nessuna
+#   delle due da sola.
+#
+# ⚠️ PERCHÉ UN'ALLOWLIST VUOTA E NON UN ELENCO DI DIRETTIVE VIETATE. L'elenco di ciò
+#   che systemd implica non è nella `man systemd.exec` di questa macchina (verificato:
+#   documenta l'implicazione solo per `DynamicUser=`), e la prova sulla VPS ha misurato
+#   le SEI insieme — non sappiamo quale delle sei lo accenda, né se ce ne siano altre.
+#   ⇒ Su una unit che dichiara di dover ELEVARE non si indovina cosa è innocuo: si
+#   vieta tutto il sandboxing e si dichiara ciò che è stato PROVATO innocuo. Fail-closed,
+#   come `_CHIAVI_NOTE` in `audit.py`. Oggi la lista dei provati è **vuota**, e le due
+#   unit che elevano non hanno nessuna direttiva: il test non ha falsi positivi da curare.
+#
+# ⚠️ COSA NON FA: non sa se una unit usa `sudo`. Si fida di ciò che la unit DICHIARA —
+#   `NoNewPrivileges=no` è la dichiarazione «io devo elevare». Una unit che usa sudo e
+#   scrive `=true` resta rotta e questo test tace: quel caso lo prende solo la macchina
+#   (`prova-8`, e `grep NoNewPrivs /proc/<pid>/status`).
+
+# Prefissi delle direttive di sandboxing di systemd. Non è l'elenco di ciò che implica
+# NoNewPrivileges — è più largo di proposito: su una unit che eleva, tutto ciò che
+# somiglia a sandboxing va guardato da una persona prima di entrare.
+_PREFISSI_SANDBOX = (
+    "Protect", "Restrict", "Lock", "Private", "Memory", "System", "Capability",
+    "RemoveIPC", "DynamicUser", "AmbientCapabilities",
+)
+
+# Direttive PROVATE innocue su una unit che eleva: si aggiunge qui SOLO dopo aver
+# misurato `NoNewPrivs` in `/proc/<pid>/status` con la direttiva attiva. Vuota non è
+# una svista: è lo stato di `main` dopo la #104.
+SANDBOX_PROVATE_INNOCUE: frozenset[str] = frozenset()
+
+
+def _direttive_attive(testo: str) -> list[tuple[str, str]]:
+    """(nome, riga) delle direttive che systemd esegue. I commenti no — vedi sopra."""
+    out = []
+    for r in solo_codice(testo).splitlines():
+        r = r.strip()
+        if "=" in r and r[:1].isalpha():
+            out.append((r.split("=", 1)[0].strip(), r))
+    return out
+
+
+def _dichiara_di_elevare(testo: str) -> bool:
+    for nome, riga in _direttive_attive(testo):
+        if nome == "NoNewPrivileges":
+            return riga.split("=", 1)[1].strip().lower() in ("no", "false", "off", "0")
+    return False
+
+
+@pytest.mark.parametrize("unit", unit_di_servizio(), ids=lambda p: p.name)
+def test_le_unit_che_elevano_non_portano_sandbox(unit: Path) -> None:
+    testo = unit.read_text(encoding="utf-8")
+    if not _dichiara_di_elevare(testo):
+        pytest.skip("non dichiara NoNewPrivileges=no: qui non è in gioco")
+    colpevoli = [
+        riga for nome, riga in _direttive_attive(testo)
+        if nome.startswith(_PREFISSI_SANDBOX)
+        and nome != "NoNewPrivileges"
+        and nome not in SANDBOX_PROVATE_INNOCUE
+    ]
+    assert not colpevoli, (
+        f"{unit.name} dichiara `NoNewPrivileges=no` (deve elevare: usa sudo) e insieme "
+        f"{len(colpevoli)} direttive di sandboxing:\n"
+        + "".join(f"    {r}\n" for r in colpevoli)
+        + "  Con `User=` non-root queste RIACCENDONO NoNewPrivileges da sé, e `=no` non\n"
+        "  vince: è così che l'auto-update è morto il 03/08 alle 04:32, con la riga\n"
+        "  `NoNewPrivileges=no` già presente nel file.\n"
+        "  Se una di queste è stata PROVATA innocua (NoNewPrivs=0 in /proc/<pid>/status\n"
+        "  con la direttiva attiva), aggiungila a SANDBOX_PROVATE_INNOCUE con la misura."
+    )
+
+
+def test_questo_test_guarda_almeno_una_unit_che_eleva() -> None:
+    """Se nessuna unit dichiara `=no`, sopra è tutto skip e il verde non copre niente.
+
+    È il gemello di `test_ci_sono_unit_da_controllare`: lì zero unit, qui zero unit
+    IN GIOCO. Un parametrize che salta tutto ha lo stesso colore di uno che passa.
+    """
+    che_elevano = [u.name for u in unit_di_servizio()
+                   if _dichiara_di_elevare(u.read_text(encoding="utf-8"))]
+    assert che_elevano, (
+        "nessuna unit dichiara NoNewPrivileges=no: il test qui sopra ha saltato tutto.\n"
+        "  Se è cambiato per davvero (nessun servizio eleva più) togli questo blocco; "
+        "se invece è cambiata la forma della dichiarazione, il presidio è cieco."
+    )
