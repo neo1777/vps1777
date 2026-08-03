@@ -70,3 +70,45 @@ updates:
     ignore:
       # Immagini nostre: versionate dal release-flow, non da Dependabot.
       - dependency-name: "ghcr.io/neo1777/vps1777-*"
+
+  # ── LE DIPENDENZE PYTHON DEI QUATTRO SERVIZI ────────────────────────────────
+  # 🔴 PERCHÉ MANCAVANO, ed è il rilievo `23cc4783` (round-16, revisionando la
+  #   #82). Qui c'erano github-actions, docker e docker-compose: **nessun
+  #   ecosystem per Python**. Quindi le dipendenze che il gateway IMPORTA — non
+  #   l'immagine base, quelle dentro — non le guardava nessuno.
+  #
+  # ⚠️ E NON È UN DETTAGLIO DI IGIENE. `docs/ARCHITECTURE.md` fa poggiare una
+  #   delle garanzie più forti del prodotto — *l'IP del client non è
+  #   falsificabile* — sul comportamento di `ProxyHeadersMiddleware`, che è un
+  #   **dettaglio interno di uvicorn**. E `services/gateway/pyproject.toml:11`
+  #   dice `uvicorn[standard]>=0.32.0`: nessun tetto, su un pacchetto in 0.x,
+  #   dove il contratto può cambiare fra due minori. ⇒ una garanzia di sicurezza
+  #   che dipende da un pacchetto non pinnato e non sorvegliato.
+  #   *È la voce `39b5a89d` di 71d540e6, vista dal lato dell'aggiornamento.*
+  #
+  # 🖐️ COSA QUESTO **NON** RISOLVE, e va detto: `gateway` e `archive-mcp` non
+  #   hanno `uv.lock` (gli altri due sì) e nessun Dockerfile usa `--frozen`.
+  #   Finché è così, ogni ricostruzione risolve da capo e può prendere una
+  #   uvicorn nuova **fra una PR di Dependabot e l'altra**. Dependabot ti dice
+  #   che è uscita; il lock impedirebbe di prenderla senza accorgersene.
+  #   **Sono due cose diverse e serve tutt'e due**: questa è quella che costa
+  #   dieci righe, l'altra resta aperta nella voce `23cc4783`.
+  - package-ecosystem: uv
+    directories:
+      - /services/gateway
+      - /services/archive-mcp
+      - /services/nb1777-mcp
+      - /services/nb1777-bot
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    groups:
+      python-runtime:
+        patterns: ["*"]
+    ignore:
+      # I major li guardiamo a mano: la stessa scelta già fatta per le action
+      # (#48/#49) e per le immagini. Un major che entra da solo in un servizio
+      # che regge una garanzia di sicurezza è esattamente ciò che non vogliamo.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
