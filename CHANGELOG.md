@@ -58,9 +58,17 @@ dalla porta giusta di ieri.** Il difetto non è la cura: è scoprirla dal sintom
   raggiungono il gateway dalla rete Docker.
 - **L'audit log accetta solo chiavi dichiarate** (allowlist, non rilevamento), e
   l'anagrafica non esce più verbatim verso un modello terzo (`H64`).
-- **`H54`**: al gateway basta la chiave derivata, non il token del bot. **`H55`**: le unit
-  systemd non si rendono più come root, su entrambi i percorsi. **`H5`**, **`H52`**,
-  **`H53`**, **`H58`**, **`H62`**, **`H63`** chiusi.
+- **Chiusi**: `H53` (il perimetro del gate non è più un elenco scritto a mano) · `H55` (le
+  unit systemd non si rendono più come root, su entrambi i percorsi) · `H58` · `H62` · `H63`
+  · `H64`.
+- **Avanzati, e restano `partial` — il registro lo dice e questa riga non lo contraddice**:
+  `H5` (il push off-site resta all'owner: è una **scelta**, non un arretrato — ma «chiuso»
+  direbbe che non c'è più niente da sapere) · `H52` (le garanzie di hardening sono
+  certificate **per stringa e non per comportamento**: il gate cerca il testo nel file) ·
+  `H54` (esiste lo **strumento** della migrazione alla chiave derivata; la migrazione no).
+  🔑 *Questa distinzione è la stessa cosa di cui parla la release: `partial` scritto «chiuso»
+  è un verde che non ha guardato — su un registro di sicurezza, e nel documento che qualcuno
+  legge per decidere se fidarsi.*
 
 ### Presìdi che dicevano «verde» senza aver guardato
 
