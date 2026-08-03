@@ -149,6 +149,14 @@ def _c(code: str) -> str:
 #     i valori si DERIVANO da `secrets/` e dal `.env` a ogni avvio. Un segreto
 #     nuovo è coperto appena esiste, senza che nessuno aggiorni niente.
 _SEGRETI: list[str] = []
+# 🔴 UN FLAG SEPARATO, e non `if not _SEGRETI` — il difetto l'ho trovato scrivendo
+#   il pacchetto di revisione, non provandolo. Su una macchina SENZA `secrets/` e
+#   senza chiavi sensibili nel `.env`, `arma_redazione` trova ZERO valori e la lista
+#   resta vuota: `telegram_notify` la scambierebbe per «non ancora armata» e
+#   rifarebbe la scansione del disco A OGNI NOTIFICA, per sempre.
+# ⭐ «Vuoto» e «non fatto» sono due stati diversi, e una lista vuota li confonde.
+#   È la stessa forma degli zeri che audiamo: uno zero che non sa dire se ha guardato.
+_ARMATA = False
 _MIN_SEGRETO = 8          # sotto, il valore è troppo corto per essere distintivo:
 #                           redigerlo sporcherebbe ogni messaggio con `***` a caso
 _CHIAVI_SENSIBILI = re.compile(r"TOKEN|SECRET|PASSWORD|KEY|CREDENTIAL", re.I)
@@ -162,7 +170,9 @@ def arma_redazione(repo: Path) -> int:
     chiaro, ma a quel punto non abbiamo ancora letto nessun segreto, quindi non
     c'è niente di nostro da perdere. *Il buco è sul messaggio, non sul dato.*
     """
-    global _SEGRETI
+    global _SEGRETI, _ARMATA
+    _ARMATA = True          # PRIMA della scansione: se questa fallisce a metà, la
+    #                         redazione resta debole ma non si ri-tenta a ogni riga.
     trovati: set[str] = set()
     for f in sorted((repo / "secrets").glob("*.txt")):
         try:
@@ -445,7 +455,7 @@ def telegram_notify(repo: Path, text: str) -> None:
     #   Ci si arma da sé invece di fidarsi che il chiamante l'abbia fatto: questa
     #   funzione ha `repo`, quindi non ha scuse — e un presidio che dipende
     #   dall'ordine delle chiamate è un presidio che un giorno non gira.
-    if not _SEGRETI:
+    if not _ARMATA:
         arma_redazione(repo)
     payload = urllib.parse.urlencode({"chat_id": owner, "text": _redigi(text)}).encode()
     req = urllib.request.Request(

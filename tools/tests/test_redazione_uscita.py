@@ -106,3 +106,23 @@ def test_le_quattro_uscite_sono_agganciate():
     # e il canale che il round-15 ha trovato scoperto
     i = src.index("def telegram_notify(")
     assert '"text": _redigi(text)' in src[i:i + 1400], "telegram_notify non redige"
+
+
+def test_vuoto_e_non_fatto_sono_due_stati(tmp_path):
+    """④ Una macchina SENZA segreti non deve ri-scansionare il disco per sempre.
+
+    🔴 Il difetto: `telegram_notify` si armava con `if not _SEGRETI`. Su
+      un'installazione senza `secrets/` e senza chiavi sensibili nel `.env`,
+      `arma_redazione` trova ZERO valori — e la lista vuota veniva scambiata per
+      «non ancora armata». Risultato: una scansione del disco A OGNI NOTIFICA.
+    ⭐ «Vuoto» e «non fatto» sono due stati diversi, e una lista sola li confonde.
+      È la stessa forma degli zeri che questo repo audita: uno zero che non sa
+      dire se ha guardato.
+    🖐️ Trovato scrivendo il pacchetto di revisione, NON provandolo — cioè
+      spiegando il codice a qualcun altro. Vale come metodo, non solo come fix.
+    """
+    r = _repo_finto(tmp_path, {}, {"PORTA": "8080"})   # nessun segreto: niente da armare
+    v._ARMATA = False
+    assert v.arma_redazione(r) == 0, "un repo senza segreti deve trovarne zero"
+    assert v._ARMATA is True, "armata è armata anche se non ha trovato niente"
+    assert v._SEGRETI == []
