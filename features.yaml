@@ -1155,6 +1155,22 @@ features:
     since: "0.1.0 (dichiarato qui il 02/08)"
     verify: {cli_command: status}
 
+  - id: cli.avvisa_fallimento
+    nome: "vps1777 avvisa-fallimento"
+    cosa: "Dice su Telegram che una unit systemd è fallita, con la coda del journal. Chiamato da OnFailure=, non a mano. Nasce dal 03/08: auto-update fallito alle 04:32 e nessuno l'ha saputo per dieci ore, perché la notifica viveva dentro la routine di rollback e copriva solo il fallimento che ROMPE qualcosa."
+    dove: ["cli:avvisa-fallimento", "tools/vps1777.py"]
+    status: active-default
+    since: "0.42.0 (round-17)"
+    verify: {cli_command: avvisa-fallimento}
+
+  - id: unit.avvisa_fallimento
+    nome: "vps1777-avvisa-fallimento@.service"
+    cosa: "Unit template agganciata a OnFailure= di auto-update, update, check-update e secrets-check. Sta in systemd e non nel flusso perché systemd sa che una unit è fallita QUALUNQUE sia la ragione, incluso un crash che il codice non aveva previsto."
+    dove: ["systemd/vps1777-avvisa-fallimento@.service"]
+    status: active-default
+    since: "0.42.0 (round-17)"
+    verify: {systemd_unit: "vps1777-avvisa-fallimento@.service"}
+
   - id: cli.check
     nome: "vps1777 check"
     cosa: "Diagnostica: preflight e controlli sull'installazione."
