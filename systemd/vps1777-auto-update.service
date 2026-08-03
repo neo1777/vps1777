@@ -60,10 +60,24 @@ TimeoutStartSec=1800
 # 🔑 Le unit che NON usano sudo (`check-update`, `secrets-check`) hanno
 #   `NoNewPrivileges=true` scritto per esteso. Qui serve il contrario, e per la
 #   stessa ragione: detto, non lasciato al default.
+# 🔴 LE SEI DIRETTIVE SECCOMP SONO STATE TOLTE — decisione a tre del 03/08, e la
+#   ragione è che con `User=` non-root systemd accende `NoNewPrivileges` DI
+#   CONSEGUENZA, e NNP blocca `sudo` (che è setuid). È così che l'auto-update si è
+#   rotto il 03/08 alle 04:32, lasciando la macchina alla 0.40.14 col bundle 0.41.0
+#   già scaricato e verificato.
+# 📏 MISURATO, non dedotto — unit transitorie, produzione mai toccata:
+#     con le sei direttive             sudo=KO   NoNewPrivs=1   ← il guasto
+#     SENZA le sei + NoNewPrivileges=no sudo=OK  NoNewPrivs=0   ← ripara
+#   ⚠️ e NON esiste un sottoinsieme: BASTA UNA QUALUNQUE delle sei ad accendere il
+#   flag. O ci sono tutte, o nessuna.
+#   ⚠️ `NoNewPrivileges=no` DA SOLO non basta: non vince sull'implicazione (provato,
+#   e una PR che lo faceva è stata ritirata). Serve togliere le direttive.
+# 💰 IL COSTO, misurato con `systemd-analyze security`:  8.0 EXPOSED → 9.2 UNSAFE.
+#   Non è gratis. È stato accettato perché questa unit era GIÀ a 8.0 CON l'hardening
+#   (le sei valevano 1,2 punti) e perché la via alternativa — capabilities al posto di
+#   sudo — richiede una regola polkit per `daemon-reload`, che è un pezzo nuovo e non
+#   provabile senza una macchina di prova, con l'installer congelato fino al collaudo.
+# 🛠️ LA VIA CHE RESTA APERTA, mappata e non persa: `AmbientCapabilities=CAP_DAC_OVERRIDE`
+#   scrive il file MANTENENDO NoNewPrivs=1 (provato: le ambient non passano da setuid,
+#   quindi NNP non le tocca). Copre 4 install + 2 chown. Manca solo `daemon-reload`.
 NoNewPrivileges=no
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectClock=true
-ProtectHostname=true
-RestrictRealtime=true
-LockPersonality=true

@@ -842,11 +842,30 @@ findings:
       # questo gate sarebbe rimasto VERDE — la voce era presidiata su un altro oggetto.
       # Trovato da abdd732a riprendendo una sua voce aperta al round-3, riverificato da
       # b82df434 contando le direttive nelle due unit (update 6, secrets-check 5).
+      # 🔴 03/08 — LA SANDBOX SU `update.service` E `auto-update.service` È STATA
+      #   TOLTA, con decisione a tre (voce `a329f659`, 3 voti su 3). NON è
+      #   un'evidenza scaduta da riagganciare altrove: è una protezione RINUNCIATA,
+      #   e questa voce lo dice invece di puntare a un oggetto che regge ancora.
+      #   PERCHÉ: con `User=` non-root systemd accende `NoNewPrivileges` DI
+      #   CONSEGUENZA per applicare il filtro seccomp, e NNP blocca `sudo` (setuid).
+      #   L'auto-update è fallito così il 03/08 alle 04:32, lasciando la macchina alla
+      #   0.40.14 col bundle 0.41.0 già scaricato e verificato. E basta UNA QUALUNQUE
+      #   delle sei direttive: non esiste un sottoinsieme — o tutte, o nessuna.
+      #   COSTO MISURATO (`systemd-analyze security`): 8.0 EXPOSED → 9.2 UNSAFE su
+      #   ciascuna delle due. Accettato a tre perché erano GIÀ a 8.0 CON l'hardening:
+      #   le sei direttive valevano 1,2 punti.
+      #   ⚠️ QUESTA È LA PARTE DI H43 CHE NON È PIÙ CHIUSA. Le altre reggono (unit
+      #   templata, secrets-check, rootfs ro) e restano verificate qui sotto.
+      #   🛠️ VIA APERTA per riprenderla, mappata e provata a metà:
+      #   `AmbientCapabilities=CAP_DAC_OVERRIDE` scrive il file MANTENENDO
+      #   `NoNewPrivs=1` — le ambient non passano da setuid, quindi NNP non le tocca.
+      #   Copre 4 install + 2 chown; manca una regola polkit per `daemon-reload`.
       - file: systemd/vps1777-update.service
         contains:
-          - "ProtectKernelTunables=true"
-          - "ProtectKernelModules=true"
-          - "LockPersonality=true"
+          - "NoNewPrivileges=no"
+      - file: systemd/vps1777-auto-update.service
+        contains:
+          - "NoNewPrivileges=no"
       - file: systemd/vps1777-secrets-check.service
         contains: ["User=@OPERATOR_USER@", "NoNewPrivileges=true"]
       - file: tools/vps1777.py
