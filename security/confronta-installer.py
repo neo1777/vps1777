@@ -48,6 +48,57 @@ ASSI: list[tuple[str, str]] = [
 ]
 
 
+def solo_codice(testo: str, nome: str) -> str:
+    """Toglie i COMMENTI. Senza questo il presidio è cieco dove dovrebbe vedere.
+
+    🔴 PROVATO, non temuto (`abdd732a`, 03/08): togliendo
+       `vps1777-secrets-check.timer` dal CODICE di `setup.sh` e lasciandolo in un
+       commento — che è **esattamente come si scrive una divergenza vera**, con
+       accanto la nota che la spiega — il confronto usciva **0, «concordano»**.
+       Una divergenza reale, e il presidio dava verde.
+
+    ⭐ E LA MIA AUTOPROVA NON L'AVEVA PRESA: il caso ② sostituiva la stringa con
+       `# rimossa-per-prova`, cioè la faceva **sparire**. *Testavo la versione
+       facile del guasto: quella in cui il difetto si toglie di mezzo da solo.*
+       Il caso vero è quello in cui resta lì, in un commento, a dire il contrario.
+
+    ⚠️ LIMITE DICHIARATO. Per `.py` è esatto (`tokenize` conosce le stringhe).
+       Per `.sh` è un'euristica di riga: taglia da un `#` che non sia dentro
+       apici. Un `#` dentro una stringa a doppi apici con apici singoli annidati
+       può ingannarla. ⇒ **può togliere codice di troppo (falso positivo:
+       segnala una divergenza che non c'è), mai lasciarne di meno.**
+       *Sbaglia nel verso in cui l'errore lo paga chi guarda, non chi si fida.*
+    """
+    if nome.endswith(".py"):
+        import io
+        import tokenize
+        try:
+            fuori = []
+            for tok in tokenize.generate_tokens(io.StringIO(testo).readline):
+                if tok.type != tokenize.COMMENT:
+                    fuori.append(tok.string)
+            return "\n".join(fuori)
+        except (tokenize.TokenError, IndentationError, SyntaxError):
+            # non poter tokenizzare non è «non ci sono commenti»: si dichiara
+            # tenendo il testo intero, e il confronto sarà più permissivo. Il
+            # rischio resta scritto qui invece di sparire in un except muto.
+            return testo
+    out = []
+    for riga in testo.splitlines():
+        singoli = doppi = 0
+        taglio = None
+        for i, c in enumerate(riga):
+            if c == "'" and doppi % 2 == 0:
+                singoli += 1
+            elif c == '"' and singoli % 2 == 0:
+                doppi += 1
+            elif c == "#" and singoli % 2 == 0 and doppi % 2 == 0:
+                taglio = i
+                break
+        out.append(riga if taglio is None else riga[:taglio])
+    return "\n".join(out)
+
+
 def estrai(testo: str, pattern: str) -> set[str]:
     return {m.group(0) for m in re.finditer(pattern, testo)}
 
@@ -60,7 +111,8 @@ def confronta(radice: Path = RADICE) -> tuple[int, list[str]]:
         p = radice / nome
         if not p.is_file():
             return 2, [f"⚪ NON MISURATO — manca `{nome}`: non posso dire che concordino."]
-        contenuti[nome] = p.read_text(encoding="utf-8", errors="replace")
+        contenuti[nome] = solo_codice(
+            p.read_text(encoding="utf-8", errors="replace"), nome)
 
     divergenze = 0
     for asse, pattern in ASSI:
@@ -95,6 +147,7 @@ def autoprova() -> int:
     import shutil
     import tempfile
     ok = True
+    casi = 0
     with tempfile.TemporaryDirectory() as d:
         finta = Path(d)
         (finta / "installer").mkdir()
@@ -104,6 +157,7 @@ def autoprova() -> int:
         esito, _ = confronta(finta)
         print(f"  {'✅' if esito == 0 else '🔴'} copia fedele → esito {esito} (atteso 0)")
         ok = ok and esito == 0
+        casi += 1
         # ② tolgo una unit da UN solo installer → deve scattare
         p = finta / "setup.sh"
         p.write_text(p.read_text(encoding="utf-8")
@@ -114,13 +168,41 @@ def autoprova() -> int:
         print(f"  {'✅' if scatta else '🔴'} unit tolta da UN installer → esito {esito} "
               f"e la NOMINA (atteso 1)")
         ok = ok and scatta
+        casi += 1
+        # ②bis IL CASO CHE LA MIA PRIMA AUTOPROVA NON PRENDEVA: la unit non
+        #      sparisce, RESTA in un commento — come si scrive una divergenza vera.
+        for nome in INSTALLER:
+            shutil.copy(RADICE / nome, finta / nome)
+        # ⚠️ Va tolta SOLO dalla riga di CODICE. In `setup.sh` quella unit
+        #   compare già due volte: riga 348 in un commento, riga 356 dentro
+        #   `ENABLE_UNITS="…"`. **È la forma esatta di una divergenza vera**:
+        #   il codice smette di abilitarla e il commento continua a nominarla.
+        #   *Il mio primo tentativo sostituiva ENTRAMBE, e la seconda finiva
+        #   dentro una stringa a doppi apici — dove un `#` NON è un commento,
+        #   e lo stripper faceva bene a lasciarlo. Il test era malformato, non
+        #   il codice: l'ho scoperto guardando le due righe invece del verdetto.*
+        p = finta / "setup.sh"
+        righe_f = p.read_text(encoding="utf-8").splitlines()
+        for i, r in enumerate(righe_f):
+            if "ENABLE_UNITS=" in r and "vps1777-secrets-check.timer" in r:
+                righe_f[i] = r.replace(" vps1777-secrets-check.timer", "")
+        p.write_text("\n".join(righe_f), encoding="utf-8")
+        esito, righe = confronta(finta)
+        scatta = esito == 1 and any("secrets-check" in r for r in righe)
+        print(f"  {'✅' if scatta else '🔴'} unit tolta dal CODICE ma lasciata in un "
+              f"COMMENTO → esito {esito} (atteso 1)")
+        ok = ok and scatta
+        casi += 1
         # ③ un file mancante NON è un verde
         (finta / "deploy.sh").unlink()
         esito, _ = confronta(finta)
         print(f"  {'✅' if esito == 2 else '🔴'} installer mancante → esito {esito} "
               f"(atteso 2: «non misurato», non 0)")
         ok = ok and esito == 2
-    print(f"\n  ⇒ autoprova {'PASSATA' if ok else 'FALLITA'} (3 casi)")
+        casi += 1
+    # il numero si CONTA, non si scrive: era «3 casi» mentre ne giravano 4 —
+    # un numero scritto a mano racconta l'intenzione, non il fatto.
+    print(f"\n  ⇒ autoprova {'PASSATA' if ok else 'FALLITA'} ({casi} casi)")
     return 0 if ok else 1
 
 
