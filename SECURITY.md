@@ -24,18 +24,24 @@ Mi impegno a:
 
 vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy / Cloudflared).
 
-> **Un'eccezione — e NON dura solo il primo setup: dipende dal profilo di ingress.**
-> `compose.onboarding.yaml` pubblica il gateway su **`0.0.0.0:8080`, in HTTP** (`ports: ["8080:8080"]`, senza indirizzo ⇒ tutte le interfacce). Serve a risolvere il chicken-and-egg: prima che l'ingress sia attivo il pannello non sarebbe raggiungibile.
+> **La porta del pannello di setup: dalla 0.41.0 è sul loopback su tutti e tre i profili.**
+> `compose.onboarding.yaml` pubblica il pannello su **`${ONBOARDING_BIND:-127.0.0.1}:8080`**: raggiungibile dalla macchina, non dalla rete. **Con `caddy` e `cloudflared` al pannello si arriva dal dominio HTTPS del proxy**, che è servito dal primo avvio perché la destinazione è configurata prima — `CADDY_DOMAIN` è obbligatorio in `.env` ([`compose.ingress.caddy.yaml:26`](compose.ingress.caddy.yaml), `${CADDY_DOMAIN:?…}`), e per cloudflared il tunnel è pre-creato con l'hostname che punta a `http://gateway:8080` e il token in `secrets/cloudflared_token.txt`. **In ogni caso, e per `tailscale` prima che il tunnel esista, resta la via del tunnel SSH**: `ssh -L 8080:127.0.0.1:8080 <utente>@<vps>`, poi `http://127.0.0.1:8080/admin/setup` dal proprio computer.
 >
-> | profilo | l'overlay onboarding | la 8080 |
-> |---|---|---|
-> | `tailscale` | **escluso** da `deploy.sh` | il gateway è legato a `${GATEWAY_BIND:-127.0.0.1}` — **loopback** |
-> | `caddy` | **incluso** | `0.0.0.0:8080` **finché lo stack gira così** |
-> | `cloudflared` | **incluso** | idem |
+> | profilo | l'overlay onboarding | la 8080, per default | chi la lega al loopback |
+> |---|---|---|---|
+> | `tailscale` | **escluso** da `deploy.sh` | **loopback** | `${GATEWAY_BIND:-127.0.0.1}` sul gateway |
+> | `caddy` | **incluso** | **loopback** | `${ONBOARDING_BIND:-127.0.0.1}` nell'overlay |
+> | `cloudflared` | **incluso** | **loopback** | idem |
 >
-> Il ramo è in [`deploy.sh`](deploy.sh) (`if [ "$INGRESS" = "tailscale" ]`): per tailscale l'esposizione la gestisce `GATEWAY_BIND` e l'overlay pubblicherebbe una seconda porta in conflitto; per gli altri due l'overlay resta nel comando di avvio. **Con `caddy` o `cloudflared` la porta in chiaro non è una finestra: è lo stato di esercizio**, finché non si riavvia lo stack senza quell'overlay.
+> **La porta sull'host non serve ai due proxy**: `ingress/Caddyfile` fa `reverse_proxy gateway:8080` **per nome**, e `cloudflared` sta sulla rete `ingress` — entrambi raggiungono il gateway dalla rete Docker. Il chicken-and-egg che l'aveva motivata è di **tailscale**, dove l'authkey si mette dal pannello e quindi prima del pannello non c'è tunnel.
 >
-> **Cosa transita da lì**: il form di primo setup chiede `tailscale_authkey`, `telegram_bot_token`, `telegram_owner_id`, `public_base` ([`onboarding.py`](services/gateway/app/onboarding.py)) — **credenziali su una pagina non cifrata**. Il rischio da dimensionare è questo, non «una porta aperta».
+> Il ramo è in [`deploy.sh`](deploy.sh) (`if [ "$INGRESS" = "tailscale" ]`): per tailscale l'esposizione la gestisce `GATEWAY_BIND` e l'overlay pubblicherebbe una seconda porta in conflitto; per gli altri due l'overlay resta nel comando di avvio. **Il risultato è lo stesso — loopback — ma per due vie diverse: chi tocca una delle due non ha toccato l'altra.**
+>
+> **`ONBOARDING_BIND=0.0.0.0` rimette la porta su tutte le interfacce**, ed è un tradeoff dichiarato, non una scorciatoia: il form di primo setup chiede `tailscale_authkey`, `telegram_bot_token`, `telegram_owner_id`, `public_base` ([`onboarding.py`](services/gateway/app/onboarding.py)), e il login admin viaggia in HTTP — con `PUBLIC_BASE` non ancora `https` il cookie di sessione **non è `Secure`** ([`admin.py:105`](services/gateway/app/admin.py)), quindi password e sessione passano in chiaro sulla rete. Serve davvero in un caso: **il certificato ACME che non arriva** (DNS non propagato, porta 80 chiusa), in cui il pannello non è raggiungibile via HTTPS. Chi lo usa richiude rilanciando senza quella variabile.
+>
+> 🔴 **Questa garanzia vale dalla `0.41.0` in avanti, e non è retroattiva.** Una macchina installata con una versione precedente e **non ancora aggiornata** ha la 8080 su `0.0.0.0` come prima: il default sta nel `compose.onboarding.yaml` che ha sul disco, non in questo documento. Chi vuole sapere se la propria è esposta guarda lì, non qui. *E chi aggiorna deve saperlo prima: se accedeva al pannello via `http://<IP>:8080`, dopo l'aggiornamento non ci arriva più — serve l'HTTPS del proxy o il tunnel SSH (vedi [`CHANGELOG.md`](CHANGELOG.md), 0.41.0).*
+>
+> 🖐️ *Perché questo blocco è cambiato tre volte in ventiquattro ore (02→03/08): prima diceva che l'eccezione «dura quanto il primo setup» — falso, `deploy.sh` includeva l'overlay in base al **profilo**, non allo stato dell'onboarding; poi è stato corretto in «stato di esercizio» — vero fino alla 0.41.0; ora il default è cambiato e quella riga sarebbe falsa dall'altro verso. **Se tocchi il bind della 8080, questo paragrafo fa parte della modifica.***
 >
 > 🖐️ *Il pannello resta dietro autenticazione: `setup_view` chiama `_require_admin` come prima istruzione — non c'è una finestra in cui chiunque arrivi possa configurarlo.*
 
