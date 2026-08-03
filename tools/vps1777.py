@@ -109,20 +109,142 @@ def _c(code: str) -> str:
     return f"\033[{code}m" if _TTY else ""
 
 
+# ─────────────────────────────────────────── redazione di ciò che ESCE
+# 🔴 PERCHÉ ESISTE (round-15, 03/08). Il gateway protegge DUE canali e ne lasciava
+#   scoperti tre, e la ragione è strutturale: **la redazione era agganciata al
+#   TRASPORTO invece che al DATO**.
+#     i LOG      → logredact.py, RedactSecrets            protetto
+#     l'AUDIT    → audit.py, _redigi + allowlist          protetto
+#     Telegram · il terminale · journald                  NIENTE
+#   La catena misurata: `migrazione {mid} fallita (exit …):\n{stdout}\n{stderr}`
+#   diventa `reason`, che finisce in `telegram_notify(...)` e in `die(...)`. Gli
+#   stessi byte che nei log sarebbero `***` uscivano interi verso api.telegram.org
+#   e verso il terminale dell'operatore.
+# ⭐ La cura NON è una toppa per canale: sono i punti in cui il testo LASCIA il
+#   processo. Chi aggiunge un canale domani è coperto se passa di qui — e se non
+#   ci passa si vede, perché deve scriversi il proprio `print`.
+# 🔑 LIMITE DICHIARATO, perché nessuno lo scambi per una difesa che non è: questo
+#   NON rileva segreti, CONTIENE la superficie. Un segreto che non sta in
+#   `secrets/` né nel `.env` — una password dentro una stringa di connessione
+#   scritta a mano in una migrazione — esce come prima. È la stessa scelta di
+#   `audit.py`, e per la stessa ragione: qui non si indovina cosa è segreto, si
+#   dichiara cosa è noto. Indovinare produce sia falsi negativi sia un output
+#   illeggibile, e un presidio illeggibile viene disattivato.
+#
+# ❓ «PERCHÉ NON CHIAMI UNO DEI REDATTORI CHE ESISTONO GIÀ?» — la domanda giusta,
+#   posta da `abdd732a` che ne ha contati TRE con due filosofie opposte
+#   (`audit.py` allowlist/fail-closed · `logredact.py` denylist · `check_no_leaks.py`
+#   pattern). Un quarto criterio diverge dagli altri alla prima cura. **Risposta
+#   misurata, non di comodo:**
+#     · `audit.py` e `logredact.py` vivono nell'immagine del GATEWAY. Questa CLI
+#       gira sull'HOST, fuori da ogni container: non può importarli.
+#     · `security/check_no_leaks.py` **non entra nel bundle di release** — il
+#       workflow copia `compose*`, `ingress/`, `migrations/`, `systemd/` e alcuni
+#       `tools/`, non `security/`. Sulla VPS quel file NON ESISTE. È lo stesso
+#       muro che `audit.py` dichiara alla riga 113, per un secondo motivo
+#       indipendente.
+#   ⇒ Non è un quarto CRITERIO: è lo stesso principio di `logredact.py`
+#     (sostituire valori noti) applicato dove `logredact.py` non arriva.
+#   ⭐ E non c'è un elenco da tenere allineato a mano — che era il rischio vero:
+#     i valori si DERIVANO da `secrets/` e dal `.env` a ogni avvio. Un segreto
+#     nuovo è coperto appena esiste, senza che nessuno aggiorni niente.
+_SEGRETI: list[str] = []
+# 🔴 UN FLAG SEPARATO, e non `if not _SEGRETI` — il difetto l'ho trovato scrivendo
+#   il pacchetto di revisione, non provandolo. Su una macchina SENZA `secrets/` e
+#   senza chiavi sensibili nel `.env`, `arma_redazione` trova ZERO valori e la lista
+#   resta vuota: `telegram_notify` la scambierebbe per «non ancora armata» e
+#   rifarebbe la scansione del disco A OGNI NOTIFICA, per sempre.
+# ⭐ «Vuoto» e «non fatto» sono due stati diversi, e una lista vuota li confonde.
+#   È la stessa forma degli zeri che audiamo: uno zero che non sa dire se ha guardato.
+_ARMATA = False
+_MIN_SEGRETO = 8          # sotto, il valore è troppo corto per essere distintivo:
+#                           redigerlo sporcherebbe ogni messaggio con `***` a caso
+_CHIAVI_SENSIBILI = re.compile(r"TOKEN|SECRET|PASSWORD|KEY|CREDENTIAL", re.I)
+
+
+def arma_redazione(repo: Path) -> int:
+    """Carica i valori che non devono uscire. Ritorna quanti ne ha trovati.
+
+    Va chiamata appena il repo è noto. Prima di allora `_redigi` è un no-op:
+    è un buco DICHIARATO — gli errori più precoci (repo non trovato) escono in
+    chiaro, ma a quel punto non abbiamo ancora letto nessun segreto, quindi non
+    c'è niente di nostro da perdere. *Il buco è sul messaggio, non sul dato.*
+    """
+    # 🔴 «HO PROVATO» NON È «HO GUARDATO» — rilievo di 71d540e6 sulla PR #72, ed è
+    #   il difetto che questa stessa funzione esiste per curare, un giro più in là.
+    #   La prima stesura faceva `_ARMATA = True` PRIMA della scansione. Se la prima
+    #   chiamata trovava zero valori perché non aveva potuto LEGGERE — `secrets/`
+    #   non ancora montata, `.env` illeggibile, repo sbagliato — il flag restava
+    #   True, la lista vuota, e `_redigi` diventava un no-op PER SEMPRE. Nessuno
+    #   riprovava, e il chiamante leggeva «armata» come «protetta».
+    # ⭐ Gli stati sono TRE, non due: non-provato · provato-e-vuoto · NON-HO-POTUTO-
+    #   GUARDARE. Avevo introdotto `_ARMATA` proprio per separare i primi due, e ho
+    #   fatto collassare il terzo dentro il secondo. *Uno zero che non sa dire se
+    #   ha guardato: è la classe che auditiamo, dentro il presidio che la cura.*
+    # 🛡️ Ora si arma solo se ha potuto LEGGERE almeno una delle due fonti. Se non
+    #   ha potuto, resta disarmata e RIPROVERÀ — e lo dice, perché un presidio
+    #   degradato in silenzio è peggio di uno assente.
+    global _SEGRETI, _ARMATA
+    trovati: set[str] = set()
+    letto = False
+    sd = repo / "secrets"
+    if sd.is_dir():
+        letto = True
+        for f in sorted(sd.glob("*.txt")):
+            try:
+                v = f.read_text().strip()
+            except OSError:
+                continue
+            if len(v) >= _MIN_SEGRETO:
+                trovati.add(v)
+    # 🔴 `env_read` NON SOLLEVA su `.env` assente: ritorna un dict VUOTO (r.~205).
+    #   La prima stesura di questa cura lo avvolgeva in un `try/except OSError`
+    #   che non scattava mai ⇒ `letto` restava True e il difetto sopravviveva alla
+    #   sua stessa cura. **Preso dal test, non dalla rilettura**: il test diceva
+    #   `_ARMATA is False` e la funzione rispondeva True.
+    # ⇒ si guarda IL FILE, non l'eccezione. Un'assenza che non alza le mani va
+    #   interrogata, non aspettata.
+    if (repo / ".env").is_file():
+        letto = True
+    env = env_read(repo)
+    for k, v in env.items():
+        if _CHIAVI_SENSIBILI.search(k) and len(v.strip()) >= _MIN_SEGRETO:
+            trovati.add(v.strip())
+    _ARMATA = letto
+    if not letto:
+        # NON passa da `warn()`: warn redige, e qui la redazione è per definizione
+        # spenta. Un avviso che dipende dal presidio che sta denunciando è muto.
+        print(f"[!] redazione NON armata: né {sd} né .env leggibili in {repo} — "
+              f"i messaggi d'errore usciranno in chiaro finché non riesce",
+              file=sys.stderr, flush=True)
+    # Dal PIÙ LUNGO al più corto: se un segreto è prefisso di un altro, sostituire
+    # prima il corto spezzerebbe il lungo lasciandone la coda in chiaro. Stessa
+    # cura, e stessa ragione, di `logredact.py`.
+    _SEGRETI = sorted(trovati, key=len, reverse=True)
+    return len(_SEGRETI)
+
+
+def _redigi(msg: str) -> str:
+    for s in _SEGRETI:
+        if s in msg:
+            msg = msg.replace(s, "***")
+    return msg
+
+
 def log(msg: str) -> None:
-    print(f"{_c('34')}[*]{_c('0')} {msg}", flush=True)
+    print(f"{_c('34')}[*]{_c('0')} {_redigi(msg)}", flush=True)
 
 
 def ok(msg: str) -> None:
-    print(f"{_c('32')}[✓]{_c('0')} {msg}", flush=True)
+    print(f"{_c('32')}[✓]{_c('0')} {_redigi(msg)}", flush=True)
 
 
 def warn(msg: str) -> None:
-    print(f"{_c('33')}[!]{_c('0')} {msg}", flush=True)
+    print(f"{_c('33')}[!]{_c('0')} {_redigi(msg)}", flush=True)
 
 
 def die(msg: str, code: int = 1) -> None:
-    print(f"{_c('31')}[✗]{_c('0')} {msg}", file=sys.stderr, flush=True)
+    print(f"{_c('31')}[✗]{_c('0')} {_redigi(msg)}", file=sys.stderr, flush=True)
     sys.exit(code)
 
 
@@ -360,7 +482,15 @@ def telegram_notify(repo: Path, text: str) -> None:
     token = token_file.read_text().strip()
     if not token:
         return
-    payload = urllib.parse.urlencode({"chat_id": owner, "text": text}).encode()
+    # 🛡️ Round-15: questo era IL canale scoperto. Il `reason` di un update fallito
+    #   porta `res.stdout`+`res.stderr` COMPLETI del container di migrazione, e
+    #   usciva verso api.telegram.org senza passare da niente.
+    #   Ci si arma da sé invece di fidarsi che il chiamante l'abbia fatto: questa
+    #   funzione ha `repo`, quindi non ha scuse — e un presidio che dipende
+    #   dall'ordine delle chiamate è un presidio che un giorno non gira.
+    if not _ARMATA:
+        arma_redazione(repo)
+    payload = urllib.parse.urlencode({"chat_id": owner, "text": _redigi(text)}).encode()
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
         data=payload, headers={"User-Agent": USER_AGENT})
@@ -2196,7 +2326,7 @@ def cmd_update(repo: Path, args) -> int:
 
     # 3 — changelog
     body = rel.get("body") or "(nessun changelog)"
-    print("\n─── Changelog ───\n" + body[:2000] + "\n─────────────────\n")
+    print("\n─── Changelog ───\n" + _redigi(body[:2000]) + "\n─────────────────\n")
 
     # 4 — conferma
     if not args.yes and not args.from_intent:
@@ -2617,16 +2747,16 @@ def cmd_status(repo: Path, args) -> int:
             for s in services}
         data["deep_health"] = deep_health_ok(repo)
     if args.json:
-        print(json.dumps(data, indent=2))
+        print(_redigi(json.dumps(data, indent=2)))
     else:
         print(f"versione corrente : {data['current']}")
         print(f"precedente        : {data['previous'] or '-'}")
         print(f"latest nota       : {data['latest_known'] or '?'}")
         print(f"ultimo check      : {data['last_check'] or 'mai'}")
         if data["check_error"]:
-            print(f"errore check      : {data['check_error']}")
+            print(f"errore check      : {_redigi(str(data['check_error']))}")
         if data["update_in_progress"]:
-            print(f"⚠ update in corso : {data['update_in_progress']}")
+            print(f"⚠ update in corso : {_redigi(str(data['update_in_progress']))}")
         if args.probe:
             for name, s in data.get("services", {}).items():
                 print(f"  {name:<14} {s['state']:<10} {s['health']}")
@@ -3149,6 +3279,10 @@ def main() -> int:
     args = parser.parse_args()
     repo = find_repo(args.home)
     os.chdir(repo)
+    # Appena il repo è noto, `log`/`ok`/`warn`/`die` e le notifiche smettono di
+    # poter stampare un segreto. Prima di qui `_redigi` è un no-op — dichiarato
+    # in `arma_redazione`: a quel punto non ne abbiamo ancora letto nessuno.
+    arma_redazione(repo)
 
     handlers = {"check": cmd_check, "update": cmd_update, "rollback": cmd_rollback,
                 "status": cmd_status, "version": cmd_version,
