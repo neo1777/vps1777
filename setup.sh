@@ -381,7 +381,18 @@ H55
       # restava senza anti-brute-force SSH credendo di averlo per iscritto.
       # Stesso perimetro degli altri due installer: sshd_config NON si tocca
       # (la disabilitazione delle password è un passo manuale, vedi OPS.md).
+      # 🔴 QUARTA DIVERGENZA della stessa classe, misurata il 03/08 (71d540e6): le tre
+      # copie installano e abilitano gli stessi due pacchetti, ma SOLO engine.py:309
+      # scrive /etc/apt/apt.conf.d/20auto-upgrades. Senza quel file la PERIODICITÀ
+      # dipende dal default della distribuzione — su Ubuntu il pacchetto lo porta con
+      # sé, su Debian nasce da `dpkg-reconfigure -plow unattended-upgrades` che qui
+      # nessuno lancia. ⇒ due host su tre potevano avere unattended-upgrades ATTIVO
+      # e mai eseguito, cioè il caso peggiore: il servizio c'è, il presidio no.
+      # ⭐ Non dipendiamo dal default di una distribuzione che non controlliamo: la
+      # scrittura è idempotente e dice a voce quello che prima era un'assunzione.
       if sudo apt-get install -y -q unattended-upgrades fail2ban >/dev/null 2>&1; then
+        printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
+          | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null 2>&1 || true
         sudo systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
         sudo systemctl enable --now fail2ban >/dev/null 2>&1 || true
         ok "Hardening host attivo: unattended-upgrades + fail2ban"

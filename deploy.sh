@@ -579,7 +579,15 @@ fi
 #     l'installer". Allineato. NON tocca sshd_config (password/root login restano:
 #     il deploy si riconnette via password — la disabilitazione è un passo manuale
 #     post-install documentato in OPS.md).
+#     🔴 03/08 (71d540e6): mancava la PERIODICITÀ. engine.py:309 scrive
+#     /etc/apt/apt.conf.d/20auto-upgrades, qui e in setup.sh no — e senza quel file
+#     unattended-upgrades resta abilitato ma la sua cadenza dipende dal default della
+#     distro (Ubuntu lo porta col pacchetto, Debian lo crea con dpkg-reconfigure, che
+#     nessuno dei tre lancia). ⇒ il servizio attivo e mai eseguito è peggio del servizio
+#     assente: il primo si legge come protezione, il secondo si nota.
 if apt-get install -y -q unattended-upgrades fail2ban >/dev/null 2>&1; then
+  printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
+    > /etc/apt/apt.conf.d/20auto-upgrades
   systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
   systemctl enable --now fail2ban >/dev/null 2>&1 || true
 fi
