@@ -177,6 +177,15 @@ jobs:
       # Copre i QUATTRO servizi. NON i `plugins/`: `example-mcp` e `example-bot` non
       # hanno lock apposta (risolvono a build-time, per chi li usa come punto di
       # partenza) — dirlo qui invece di lasciar credere che il gate li guardi.
+      #
+      # ⚠️ E NON VEDE LA DIVERGENZA FRA SERVIZI GEMELLI (rilievo di abdd732a, 09/08).
+      #   Questo confronta ogni lock col SUO pyproject: `archive-mcp` (mcp 1.29.0) e
+      #   `nb1777-mcp` (mcp 1.28.1) hanno lo stesso vincolo e versioni diverse, e sono
+      #   **entrambi verdi per costruzione**. Non è un buco da tappare qui: è un'altra
+      #   domanda («due gemelli concordano fra loro?»), e va detta perché questo è il
+      #   presidio più vicino, quindi quello che verrebbe naturale invocare per quel caso.
+      #   La divergenza nasce da `uv lock` che è MINIMAL-CHANGE: un tetto nuovo muove il
+      #   lock di chi lo VIOLA e lascia dov'è chi era già conforme.
       - name: pyproject e uv.lock concordano (tutti e quattro i servizi)
         run: |
           for s in gateway archive-mcp nb1777-mcp nb1777-bot; do
