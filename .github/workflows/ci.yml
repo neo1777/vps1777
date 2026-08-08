@@ -199,6 +199,20 @@ jobs:
         run: |
           bash tools/esegui-test-bash.sh --autoprova
           bash tools/esegui-test-bash.sh
+      # 🔴 QUI MANCAVA, ed è il difetto che questo file predica due volte più sopra
+      #   (r.97 e r.192: «l'autoprova gira PRIMA: un presidio che non sa scattare darebbe
+      #   verde»). `gate-locale.py` è nato con la sua autoprova e NON era agganciato a
+      #   niente: gli altri due --autoprova del repo lo sono, questo no. Rilievo di
+      #   71d540e6 sulla #93, ferma 5 giorni con CI 7/7 — e i 7 verdi non lo vedevano,
+      #   perché un presidio che nessuno esegue non fallisce mai.
+      #   ⭐ *Ho scritto un presidio e non l'ho presidiato: la stessa frase che avevo
+      #     appena usato per H48.*
+      # ⚠️ SOLO `--autoprova`, MAI il gate nudo: `gate-locale.py` senza argomenti esegue
+      #   TUTTI i job di QUESTO workflow (vedi il suo USO) ⇒ metterlo qui farebbe girare
+      #   la CI dentro la CI. Il gate è per il locale — è nel nome. Qui si presidia il
+      #   PRESIDIO: che sappia ancora dire di no.
+      - name: Gate locale — l'autoprova (che sappia ancora dire di no)
+        run: python3 tools/gate-locale.py --autoprova
 
   build:
     runs-on: ubuntu-latest
