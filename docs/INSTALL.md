@@ -87,9 +87,10 @@ health-gate e rollback) — vedi [OPS.md](OPS.md).
 ## Disinstallazione
 
 ```bash
-# gli -f servono anche in `down`: senza, il container dell'ingress non è nel progetto
-# che stai fermando e resta acceso.
-docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
-  --profile ingress.tailscale down -v                 # -v cancella i volumi
+# `--remove-orphans` non è opzionale: il container dell'ingress sta in un overlay, non
+# è nel modello che `down` costruisce da solo, e senza RESTA ACCESO. Si usa questo e non
+# gli `-f` perché qui non sappiamo quale ingress hai scelto — e una riga che deve
+# indovinarlo è sbagliata per chi ha scelto l'altro.
+docker compose down -v --remove-orphans               # -v cancella i volumi
 rm -rf secrets/                                       # cancella i secret
 ```
