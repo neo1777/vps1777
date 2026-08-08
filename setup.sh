@@ -5,7 +5,8 @@
 #   1. Controlla Docker + Compose v2 + python3
 #   2. Crea .env da .env.example (chiedendoti email admin, OWNER_ID, ingress scelto)
 #   3. Genera secrets/* (gateway_secret, archive_desc_secret, oauth_signing, admin_password bcrypt)
-#   4. Avvia `docker compose --profile ingress.<scelto> up -d`
+#   4. Avvia `docker compose -f compose.yaml -f compose.ingress.<scelto>.yaml
+#      --profile ingress.<scelto> up -d`  (gli -f sono quelli di COMPOSE_FILES, r.278)
 #
 # Idempotente: rilanciabile, salta lo step se già fatto.
 

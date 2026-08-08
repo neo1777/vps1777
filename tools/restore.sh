@@ -174,5 +174,10 @@ INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env 2>/dev/null | cut -d= -f2)"
 if [ -n "$INGRESS_PROFILE" ]; then
   log "  docker compose -f compose.yaml -f compose.${INGRESS_PROFILE}.yaml --profile $INGRESS_PROFILE up -d"
 else
-  log "  docker compose --profile ingress.tailscale up -d   # o caddy / cloudflared"
+  # Stessa forma del ramo sopra: gli `-f` non sono facoltativi. Senza, l'overlay
+  # ingress non entra nel progetto (gateway senza `ports:`, rete `funnel` assente)
+  # ⇒ lo stack riparte e NON è raggiungibile. Qui il profilo non si sa (.env
+  # illeggibile): si mostra il default, ma completo.
+  log "  docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \\"
+  log "    --profile ingress.tailscale up -d   # o caddy / cloudflared"
 fi

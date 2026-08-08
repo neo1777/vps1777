@@ -16,7 +16,10 @@
 # host, misurata sul vivo il 26/07 (prova-1).
 #
 # Avvio tipico (produzione — immagini pullate da ghcr, MAI build sulla VPS):
-#   docker compose --profile ingress.tailscale up -d
+#   docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+#     --profile ingress.tailscale up -d
+#   ⚠️ gli `-f` non sono facoltativi: senza, l'overlay ingress non entra nel progetto
+#      (il `gateway` resta senza `ports:` e la rete `funnel` non viene creata).
 #
 # Dev (build locale delle immagini):
 #   docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch

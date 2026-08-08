@@ -25,7 +25,9 @@ Sequenza passo-passo dall'host vuoto a stack su.
 git clone https://github.com/<owner>/vps1777.git
 cd vps1777
 ./setup.sh                                      # wizard interattivo
-docker compose --profile ingress.tailscale up -d  # o caddy / cloudflared
+# solo se hai risposto «no» a «Procedo ora?» — setup.sh avvia già, con gli stessi -f:
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+  --profile ingress.tailscale up -d             # o caddy / cloudflared
 ```
 
 Lo stage finale ti stampa gli URL.
@@ -39,7 +41,9 @@ Lo stage finale ti stampa gli URL.
    - `oauth_signing_secret.txt` (64 byte url-safe)
    - `admin_password_bcrypt.txt` (bcrypt rounds=12 della password che scegli/che genera)
    - `telegram_bot_token.txt` (incolli il token)
-4. Lancia `docker compose --profile ingress.<scelta> up -d` — le immagini
+4. Lancia `docker compose -f compose.yaml -f compose.ingress.<scelta>.yaml --profile
+   ingress.<scelta> up -d` — gli `-f` non sono decorativi: senza, l'overlay ingress non
+   viene montato (il `gateway` resta senza `ports:` e manca la rete `funnel`) — le immagini
    vengono **pullate da GHCR** (`compose.yaml` è pull-only: sulla VPS non si
    builda mai; il build locale è solo dev, con l'overlay `compose.build.yaml`)
 
@@ -83,6 +87,9 @@ health-gate e rollback) — vedi [OPS.md](OPS.md).
 ## Disinstallazione
 
 ```bash
-docker compose --profile ingress.tailscale down -v   # -v cancella i volumi
+# gli -f servono anche in `down`: senza, il container dell'ingress non è nel progetto
+# che stai fermando e resta acceso.
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+  --profile ingress.tailscale down -v                 # -v cancella i volumi
 rm -rf secrets/                                       # cancella i secret
 ```
