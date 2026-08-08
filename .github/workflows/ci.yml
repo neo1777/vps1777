@@ -186,11 +186,31 @@ jobs:
       #   presidio più vicino, quindi quello che verrebbe naturale invocare per quel caso.
       #   La divergenza nasce da `uv lock` che è MINIMAL-CHANGE: un tetto nuovo muove il
       #   lock di chi lo VIOLA e lascia dov'è chi era già conforme.
-      - name: pyproject e uv.lock concordano (tutti e quattro i servizi)
+      - name: pyproject e uv.lock concordano (ovunque ci sia un lock)
         run: |
-          for s in gateway archive-mcp nb1777-mcp nb1777-bot; do
-            echo "── $s"
-            (cd "services/$s" && uv lock --check)
+          # ⭐ NIENTE ELENCO A MANO — i servizi li dà git. La prima stesura ciclava su
+          #   `gateway archive-mcp nb1777-mcp nb1777-bot`, e qui è il caso velenoso
+          #   (rilievo di 71d540e6 in review): un servizio nuovo non darebbe errore,
+          #   darebbe SILENZIO. È lo stesso difetto per cui `shellcheck` qui sopra è
+          #   passato a `git ls-files '*.sh'` — «un elenco scritto a mano invecchia in
+          #   silenzio, e chi lo allarga guarda ciò che aggiunge, non ciò che manca».
+          #   Il glob sui LOCK esclude i `plugins/` per COSTRUZIONE (non ne hanno) invece
+          #   che per una nostra ricordanza: la stessa frase che dovevo scrivere in un
+          #   commento diventa il criterio.
+          mapfile -t LOCKS < <(git ls-files 'services/*/uv.lock')
+          # 🛡️ GUARDIA SULLO ZERO (chiesta da 71d540e6 insieme alla cura, perché la cura
+          #   da sola la introdurrebbe): se il glob non trovasse nulla — path rinominati,
+          #   lock spostati — il `for` non girerebbe e lo step uscirebbe VERDE senza aver
+          #   guardato niente. Uno zero non verificato è il modo più elegante di passare.
+          if [ "${#LOCKS[@]}" -eq 0 ]; then
+            echo "::error::nessun services/*/uv.lock trovato: questo gate non ha verificato NULLA"
+            exit 1
+          fi
+          echo "lock da verificare: ${#LOCKS[@]}"
+          for lock in "${LOCKS[@]}"; do
+            servizio="$(dirname "$lock")"
+            echo "── $servizio"
+            (cd "$servizio" && uv lock --check)
           done
       - name: Sync nb1777-mcp (installa nlm pinnato + pytest)
         working-directory: services/nb1777-mcp
