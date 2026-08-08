@@ -54,14 +54,33 @@ import asyncio
 from pathlib import Path
 
 # Import NUDI e voluti: se mancano, questo file deve ROMPERE la suite (clausola-skip).
+import starlette
+import uvicorn
 from starlette.requests import Request
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 _SETTINGS = Path(__file__).resolve().parents[1] / "app" / "settings.py"
 
 # L'XFF che un client pubblico si scrive da solo, e l'IP vero che il proxy APPENDE dopo.
-SPOOF = "6.6.6.6"
-VERO = "203.0.113.7"
+#
+# ⚠️ QUESTI DUE VALORI HANNO UNA TRAPPOLA, e sta scritta qui perché non si vede dal test.
+#   `203.0.113.0/24` è un range di documentazione (RFC 5737) — la scelta giusta per un
+#   test, e l'unica che il gate anti-leak accetta: un IP REALE nel repo è un rilievo, e
+#   giustamente (provato il 09/08: sostituirli con un indirizzo vero fa fallire il gate).
+#   MA misurato lo stesso giorno:
+#
+#       ipaddress.ip_address("203.0.113.7").is_private   →   True
+#
+#   Python considera privati TUTTI i range di documentazione. Qui NON cambia l'esito:
+#   `ProxyHeadersMiddleware` confronta con la trust-list ESPLICITA, mai con `is_private`.
+#   Conta per chi estenderà questi test: `asgi_security.ip_is_internal()` usa proprio
+#   `is_private`, ed è il SECONDO consumatore di questa garanzia (riserva `/health?deep`
+#   ai chiamanti interni). Con un TEST-NET quella funzione risponde «interno» e si vede
+#   un buco che non esiste — è successo, e per un minuto è sembrato un difetto grosso.
+#   ⇒ se estendi verso `ip_is_internal`, NON riusare queste costanti: passa un IP
+#     globale costruito nel test, senza scriverlo nel repo.
+SPOOF = "6.6.6.6"        # ciò che il client si scrive da solo
+VERO = "203.0.113.7"     # ciò che il proxy appende: l'IP reale del chiamante
 
 
 def _trust_list_di_produzione() -> str:
@@ -111,9 +130,31 @@ def _ip_visto_dall_app(trusted: str | list[str], xff: str, client=("127.0.0.1", 
 
 # ───────── i casi, con la trust-list VERA letta da settings.py ─────────
 
+def _perimetro() -> str:
+    """Su COSA ha girato questo verde — senza, un test verde non dice niente di preciso.
+
+    Rilievo di abdd732a in review alla #117: «se domani il lock cambia, il verde è
+    identico». La versione entra nei messaggi di fallimento e nell'header della sessione
+    pytest, così il perimetro resta scritto accanto all'esito invece di essere dedotto.
+    """
+    return f"uvicorn {uvicorn.__version__} · starlette {starlette.__version__}"
+
+
+def test_registra_su_quale_uvicorn_sta_girando(capsys):
+    """Non misura la garanzia: DATA il verde degli altri cinque.
+
+    Fallisce se le versioni non sono leggibili — cioè se l'ambiente non è quello che
+    crediamo. Il valore finisce nel report perché `-v` lo mostra col nome del test.
+    """
+    with capsys.disabled():
+        print(f"\n  PERIMETRO DI QUESTO VERDE → {_perimetro()}")
+    assert uvicorn.__version__ and starlette.__version__
+
+
 def test_un_xff_iniettato_non_vince_quando_il_proxy_sta_su_loopback():
     """Il client mente, il proxy appende la verità in coda: vince la coda."""
-    assert _ip_visto_dall_app(_trust_list_di_produzione(), f"{SPOOF}, {VERO}") == VERO
+    visto = _ip_visto_dall_app(_trust_list_di_produzione(), f"{SPOOF}, {VERO}")
+    assert visto == VERO, f"atteso {VERO}, visto {visto} — {_perimetro()}"
 
 
 def test_un_xff_iniettato_non_vince_nemmeno_col_proxy_in_una_rete_docker():
