@@ -25,7 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: PyYAML (unica dipendenza del verificatore)
-        run: python3 -m pip install --quiet pyyaml
+      - name: PyYAML (unica dipendenza del verificatore) — versione e hash fissati
+        # `--require-hashes` rifiuta qualunque file che non corrisponda: il verificatore
+        # delle regole di sicurezza non può più installare «l'ultima versione» di ciò che
+        # usa per leggerle. Il perché per esteso, e come si aggiorna, stanno nel file.
+        run: python3 -m pip install --quiet --require-hashes -r .github/requirements-verify-features.txt
       - name: Verifica il ledger delle feature (features.yaml)
         run: python3 tools/verify-features.py
