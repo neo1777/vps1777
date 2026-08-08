@@ -215,6 +215,42 @@ jobs:
         with:
           context: ./services/${{ matrix.service }}
           push: false
+          load: true   # senza questo l'immagine resta nel builder e non si può ESEGUIRE
           tags: ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # 🔴 PERCHÉ ESISTE QUESTO STEP — il 08/08 la v0.41.1 è arrivata sulla macchina con
+      #   SEI check verdi e non è partita: `archive-mcp` moriva all'import
+      #   (`from mcp.server.fastmcp import FastMCP`, path rimosso in mcp 2.0.0) →
+      #   restart-loop → health-gate → auto-rollback.
+      #   Nessun test poteva vederlo: `build` costruiva l'immagine e NON LA AVVIAVA MAI,
+      #   e i test girano con `uvx pytest`, cioè in un ambiente che NON è quello
+      #   dell'immagine (che installa dal lock, con --frozen).
+      #   ⇒ *un container che non parte deve rompere la CI, non l'update.*
+      # 📌 La forma è quella con cui `abdd732a` ha TROVATO il difetto la sera stessa,
+      #   su un container vero: 12 secondi, nessuna suite. Presa com'è invece di una
+      #   mia versione più completa e mai eseguita.
+      # ⚠️ CIÒ CHE QUESTO GATE **NON** FA (scritto qui perché fra sei mesi «la CI avvia
+      #   ciò che costruisce» suonerà più larga di quello che è — rilievo di b82df434):
+      #     · prende le major che SPOSTANO o RINOMINANO un modulo (`mcp.server.fastmcp`
+      #       sparito): quella di stasera.
+      #     · NON prende una major che tiene i moduli e cambia le FIRME dentro:
+      #       l'import passa verde e il crash arriva al primo uso.
+      #     · NON prende i difetti di STATO (un dato sul disco che fa fallire l'avvio):
+      #       quelli si vedono solo con i volumi veri.
+      - name: L'immagine parte davvero (import nell'ambiente REALE dell'immagine)
+        run: |
+          docker run --rm --network none \
+            --entrypoint python \
+            "ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:ci" -c '
+          import importlib, importlib.util, sys
+          # `app.server` dove esiste (archive-mcp, nb1777-mcp: è il modulo che importa
+          # l`SDK ed è dove il difetto si è manifestato); altrimenti il package `app`.
+          # ⚠️ COPERTURA DICHIARATA: su gateway e nb1777-bot questo importa solo `app/__init__`
+          #    — prende un SDK rotto solo se è importato lì. È meno della metà del gate, e
+          #    va detto: un presidio che sembra coprire quattro servizi mentre ne copre due
+          #    è esattamente il verde che ci ha portati qui.
+          mod = "app.server" if importlib.util.find_spec("app.server") else "app"
+          importlib.import_module(mod)
+          print("import ok:", mod)
+          '
