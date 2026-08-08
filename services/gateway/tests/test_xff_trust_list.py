@@ -9,7 +9,7 @@
 
 ```
   GAMBA 1 — NOSTRA        la trust-list non è "*"          ⇐ questi test
-  GAMBA 2 — DI TERZI      uvicorn «cammina da destra»      ⇐ NON testabile qui
+  GAMBA 2 — DI TERZI      uvicorn «cammina da destra»      ⇐ ../tests_runtime/ (dal 09/08)
 ```
 
 **La gamba 2 è un dettaglio di implementazione di una libreria di terzi, ed è
@@ -18,15 +18,25 @@ il primo elemento **da sinistra**, cioè esattamente quello che un client può i
 Il vincolo in `pyproject.toml` è `>=`, quindi aperto verso l'alto — e `uvicorn` è
 `0.x`, dove anche un minor può cambiare comportamento.
 
-⭐ **Perché questi test leggono i FILE invece di importare i moduli.** In CI la suite
-del gateway gira con `uvx pytest`, che porta pytest e basta: `pydantic`, `starlette` e
-`uvicorn` **non ci sono** (è la ragione per cui `test_oauth_consent.py` stubba tutto).
-Un test che importasse `settings` o `uvicorn` non fallirebbe: non verrebbe **raccolto**,
-e una suite che non raccoglie un test è verde. ⇒ qui si legge il testo con `ast`, che
-non ha dipendenze e non può essere zittito da un import mancante.
+⭐ **Perché questi test leggono i FILE invece di importare i moduli.** In CI questa suite
+gira con `uvx pytest`, che porta pytest e basta: `pydantic`, `starlette` e `uvicorn`
+**non ci sono** (è la ragione per cui `test_oauth_consent.py` stubba tutto). Un test che
+importasse `settings` o `uvicorn` **romperebbe questa suite**: l'import fallisce in fase
+di raccolta e `pytest` esce **2**. ⇒ qui si legge il testo con `ast`, che non ha
+dipendenze e gira ovunque.
 
-*La gamba 2 resta un rischio dichiarato, non coperto — vedi la voce di registro
-`39b5a89d`. Questi test coprono ciò che è NOSTRO e rendono visibile ciò che non lo è.*
+📐 *Rettifica misurata il 09/08: qui c'era scritto che un test simile «non verrebbe
+raccolto, e una suite che non raccoglie un test è verde». **Non è così** — provato su un
+caso costruito apposta: un `import` mancante dà `ERROR … Interrupted: 1 error during
+collection`, exit **2**, non verde. La conclusione (leggere con `ast`) resta giusta, ma
+la ragione è l'opposta: non «passerebbe in silenzio», bensì «farebbe fallire una suite
+che deve restare stdlib-only». La differenza conta per chi progetta il prossimo test:
+un import nudo è un presidio che si fa sentire, non uno che tace.*
+
+✅ **La gamba 2 non è più scoperta** (voce di registro `39b5a89d`, chiusa il 09/08):
+`../tests_runtime/test_gamba2_xff_da_destra.py` ESEGUE `ProxyHeadersMiddleware` con la
+trust-list letta da qui, in un job CI che gira con le deps del lock. *Questi test
+coprono ciò che è NOSTRO; quelli coprono ciò che non lo è.*
 """
 from __future__ import annotations
 
