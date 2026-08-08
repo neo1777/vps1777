@@ -258,6 +258,14 @@ jobs:
           #    (una 0.x: per semver non ha major, e nessun `ignore: semver-major` la copre).
           #    *Un presidio tarato sul difetto che hai appena visto ha la forma di quel
           #    difetto, non della classe.*
+          # ⚠️ E LA COPERTURA SU `uvicorn` RESTA 1 SERVIZIO SU 3, non 3 (misura di b82df434):
+          #      gateway      6 moduli lo importano   ✅ coperto
+          #      archive-mcp  0 · nb1777-mcp 0        ❌ CIECO PER COSTRUZIONE
+          #    Lì `uvicorn` è dichiarato nel pyproject e non importato da nessun modulo
+          #    nostro: lo usa `fastmcp` dentro di sé ⇒ se si rompe, si rompe a RUNTIME
+          #    dentro la libreria, e nessun gate d import può vederlo. Non è un buco da
+          #    tappare: è il CONFINE. Scritto qui perché «il gate copre le dipendenze» è
+          #    falso, e fra sei mesi qualcuna ci costruirebbe sopra una garanzia.
           mods = ["app.__main__"]
           if importlib.util.find_spec("app.server"):
               mods.append("app.server")   # dove esiste, resta coperto anche lui
