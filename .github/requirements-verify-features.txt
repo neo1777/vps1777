@@ -1,0 +1,23 @@
+# Dipendenze di `tools/verify-features.py` — il verificatore del ledger delle feature.
+#
+# 🔴 PERCHÉ IL PIN E GLI HASH, e non un semplice `pip install pyyaml` (rilievo del round-17,
+#    lente B «archivista», verificato su b29d4f7 e ancora vero su main 12 commit dopo):
+#    il workflow ancorava `actions/checkout` a uno SHA di 40 caratteri — e DUE RIGHE SOTTO
+#    scaricava «l'ultima versione» della libreria che parsa i file su cui si basa la verifica.
+#    Un pacchetto compromesso, o solo un bug nuovo nel parser, e il verificatore delle regole
+#    di sicurezza continua a stampare verde. *L'infrastruttura imponeva un determinismo
+#    paranoico a tutto tranne che al proprio controllore.*
+#
+# Gli hash coprono i wheel manylinux x86_64 da cp311 a cp314 più l'sdist: il workflow non
+# fissa la versione di Python, quindi il file giusto dipende dal runner e un solo hash
+# romperebbe il CI al primo aggiornamento di `ubuntu-latest`.
+#
+# Per aggiornare: cambia la versione e rigenera gli hash da PyPI
+#   python3 -c "import json,urllib.request as u; d=json.load(u.urlopen('https://pypi.org/pypi/PyYAML/<VER>/json')); [print('--hash=sha256:'+f['digests']['sha256']) for f in d['urls']]"
+pyyaml==6.0.3 \
+    --hash=sha256:b8bb0864c5a28024fac8a632c443c87c5aa6f215c0b126c449ae1a150412f31d \
+    --hash=sha256:ba1cc08a7ccde2d2ec775841541641e4548226580ab850948cbfda66a1befcdc \
+    --hash=sha256:0f29edc409a6392443abf94b9cf89ce99889a1dd5376d94316ae5145dfedd5d6 \
+    --hash=sha256:c458b6d084f9b935061bc36216e8a69a7e293a2f1e68bf956dcd9e6cbcd143f5 \
+    --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
+    --hash=sha256:d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f
