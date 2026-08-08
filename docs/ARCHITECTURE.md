@@ -205,11 +205,20 @@ rate-limit, lockout e audit non sono più evadibili.
 > prendevano il primo elemento **da sinistra**, cioè la parte che un client può
 > iniettare). Il vincolo in `services/gateway/pyproject.toml` è `>=`, aperto verso
 > l'alto, e `uvicorn` è `0.x`: anche un minor può cambiare comportamento.
-> ⇒ *La conseguenza scritta sopra vale finché ② regge. Un test non può verificarlo:
-> la suite del gateway gira senza le dipendenze del gateway. Se un giorno l'IP client
-> torna spoofabile senza che nessuno abbia toccato la nostra configurazione, **questo
-> è il posto da cui ripartire** — e la strada è confrontare il comportamento di
-> `ProxyHeadersMiddleware` nella versione installata con quello descritto qui.*
+> ⇒ *La conseguenza scritta sopra vale finché ② regge.*
+> ✅ **E dal 09/08 ② è presidiata anche lei** — `services/gateway/tests_runtime/`
+> `test_gamba2_xff_da_destra.py`, che ESEGUE `ProxyHeadersMiddleware` con la trust-list
+> letta da `settings.py` e verifica che l'XFF iniettato non vinca. *Qui c'era scritto
+> «un test non può verificarlo: la suite del gateway gira senza le dipendenze del
+> gateway»: era vero per QUELLA suite (`uvx pytest`, solo stdlib), non per il problema.
+> La via era girare dove le dipendenze ci sono* — job dedicato in `ci.yml` con
+> `uv sync --frozen`, così si misura la `uvicorn` che l'immagine installa davvero e non
+> una presa a parte. Chiude la voce di registro `39b5a89d`.
+> ⚠️ *Il test misura il COMPORTAMENTO, non ratifica la VERSIONE: il vincolo resta `>=`
+> e le major continuano a entrare senza che nessuno le decida (`starlette>=0.45.0` è
+> arrivata a 1.3.1 attraversando la 1.0 in silenzio). Se un giorno l'IP client torna
+> spoofabile, ora te lo dice la CI; se cambia il regime di versione di una dipendenza,
+> **no** — quella resta una decisione da prendere a mano.*
 
 ### Il profilo NotebookLM e il canale interno (v0.30.0)
 
