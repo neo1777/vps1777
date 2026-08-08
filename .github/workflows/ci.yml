@@ -166,6 +166,28 @@ jobs:
         run: uv run pytest tests/ -v
       - name: Test archive indexer (gateway, stdlib-only)
         run: uvx pytest services/gateway/tests/ -v
+      # GAMBA 2 della garanzia «l'IP client non è spoofabile». `test_xff_trust_list.py`
+      # copre la gamba NOSTRA (la trust-list, letta con `ast`) e dichiara scoperta quella
+      # di TERZI: «uvicorn cammina l'XFF da destra» — un dettaglio interno che è
+      # STORICAMENTE CAMBIATO (le versioni vecchie prendevano il primo elemento da
+      # sinistra, cioè quello che un client può iniettare).
+      #
+      # 🔑 PERCHÉ UN JOB SUO E NON `uvx` COME I DUE QUI SOPRA: `uvx pytest` porta pytest e
+      #   basta — niente uvicorn, niente starlette. Un test che li importa lì darebbe
+      #   *collection error* e romperebbe la suite stdlib-only. Qui si gira con le deps
+      #   DEL LOCK, così misuriamo la uvicorn che l'immagine installa davvero e non una
+      #   presa a parte: un test che si porta la propria copia è verde su un ambiente che
+      #   non è quello che gira (è il buco della #114).
+      #
+      # ⚠️ E NON deve mai fare `skip` se le deps mancano: gli import stanno nudi in testa
+      #   apposta. Misurato: senza deps → exit 2, non una suite verde. *Un presidio
+      #   saltabile in silenzio è verde senza aver guardato.*
+      - name: Sync gateway (deps DEL LOCK, per i test runtime)
+        working-directory: services/gateway
+        run: uv sync --frozen
+      - name: Test gamba-2 XFF — uvicorn del lock, non uvx (garanzia IP client)
+        working-directory: services/gateway
+        run: uv run --with pytest pytest tests_runtime/ -v
       - name: Test archive-mcp FTS (stdlib-only)
         run: uvx pytest services/archive-mcp/tests/ -v
       # La CLI è il componente che fa gli update in PRODUZIONE, ed era l'unico con
