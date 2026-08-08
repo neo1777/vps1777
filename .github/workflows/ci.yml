@@ -244,13 +244,24 @@ jobs:
             --entrypoint python \
             "ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:ci" -c '
           import importlib, importlib.util, sys
-          # `app.server` dove esiste (archive-mcp, nb1777-mcp: è il modulo che importa
-          # l`SDK ed è dove il difetto si è manifestato); altrimenti il package `app`.
-          # ⚠️ COPERTURA DICHIARATA: su gateway e nb1777-bot questo importa solo `app/__init__`
-          #    — prende un SDK rotto solo se è importato lì. È meno della metà del gate, e
-          #    va detto: un presidio che sembra coprire quattro servizi mentre ne copre due
-          #    è esattamente il verde che ci ha portati qui.
-          mod = "app.server" if importlib.util.find_spec("app.server") else "app"
-          importlib.import_module(mod)
-          print("import ok:", mod)
+          # `app.__main__` è il PUNTO DI INGRESSO VERO: l ENTRYPOINT è
+          # ["tini","--","python","-m","app"], quindi è questo il modulo che il container
+          # esegue, ed è dove stanno gli import che decidono se parte (uvicorn nel gateway,
+          # starlette, l SDK). Tutti e quattro hanno il guard `if __name__ == "__main__"`,
+          # quindi importarlo NON avvia il server: misurato prima di scrivere questa riga.
+          #
+          # 🔴 PERCHÉ NON C ERA, e la lezione vale più della riga: la prima versione di
+          #    questo gate importava `app.server`, cioè **il luogo dell ultimo incidente**
+          #    (mcp==2.0.0 in archive-mcp) invece del **punto di ingresso**. Copriva il
+          #    difetto già capitato e lasciava fuori `import uvicorn`, che vive solo in
+          #    `__main__` del gateway — la dipendenza che al momento è la MENO protetta
+          #    (una 0.x: per semver non ha major, e nessun `ignore: semver-major` la copre).
+          #    *Un presidio tarato sul difetto che hai appena visto ha la forma di quel
+          #    difetto, non della classe.*
+          mods = ["app.__main__"]
+          if importlib.util.find_spec("app.server"):
+              mods.append("app.server")   # dove esiste, resta coperto anche lui
+          for m in mods:
+              importlib.import_module(m)
+          print("import ok:", ", ".join(mods))
           '
