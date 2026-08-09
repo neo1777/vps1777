@@ -9,7 +9,13 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 
-from .asgi_security import SecurityHeadersASGI, is_cors_scoped_path
+from . import archive_indexer
+from .asgi_security import (
+    BODY_CAP_DEFAULT,
+    BodyCapASGI,
+    SecurityHeadersASGI,
+    is_cors_scoped_path,
+)
 from .routes import routes
 from .settings import get_settings
 
@@ -40,6 +46,15 @@ def build_app() -> Starlette:
     s = get_settings()
     middleware = [
         Middleware(SecurityHeadersASGI, hsts=s.gateway_public_base.startswith("https://")),
+        # Tetto sul body PRIMA che il body diventi un file (voce 92118d4e). Sta
+        # DENTRO SecurityHeadersASGI di proposito: così anche la 413 esce con gli
+        # header di sicurezza, invece di essere l'unica risposta nuda dell'app.
+        # `upload_max` è lo stesso tetto che admin.py già applica a valle
+        # (MAX_UPLOAD_BYTES): qui non si stringe la policy, si sposta il punto in
+        # cui viene fatta rispettare — dal disco, alla connessione.
+        Middleware(BodyCapASGI,
+                   default_max=BODY_CAP_DEFAULT,
+                   upload_max=archive_indexer.MAX_UPLOAD_BYTES),
         Middleware(
             ScopedCORS,
             # niente fallback wildcard: con allow_credentials=True un `["*"]`
