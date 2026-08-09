@@ -17,6 +17,32 @@
 	@health path /health
 	respond @health 200
 
+	# Tetto ASSOLUTO sul body — difesa in profondità sopra quello del gateway
+	# (voce 92118d4e). Il taglio FINE, per path, resta nel gateway
+	# (`asgi_security.BodyCapASGI`: 32 MB di default, MAX_UPLOAD_BYTES sui due path
+	# di upload). Qui NON si replica quella lista: due copie della stessa lista in
+	# due linguaggi divergono, e la copia sbagliata sarebbe quella che decide per
+	# prima. Caddy taglia solo l'ASSURDO — ciò che nessun path può mai accettare.
+	#
+	# 📏 PERCHÉ 5GB E NON 4GB: il massimo legittimo del sistema è MAX_UPLOAD_BYTES
+	#   = 4 GB, ma un upload multipart di 4 GB ha un BODY leggermente più grande
+	#   (boundary + header della parte). Con `max_size 4GB` Caddy taglierebbe un
+	#   upload che il gateway accetterebbe: diventerebbe LUI il decisore, e la
+	#   logica per-path del gateway non verrebbe mai raggiunta. Il margine serve a
+	#   restare la seconda linea, non la prima.
+	#
+	# 🔬 MISURATO il 09/08 su caddy:2.8-alpine (lo stesso digest di
+	#   compose.ingress.caddy.yaml), perché la direttiva ha un comportamento che la
+	#   documentazione non rende ovvio — e la prima prova mi aveva dato un falso OK:
+	#     request_body max_size 1KB + `respond`        → body da 5000 byte: HTTP 200 (!)
+	#     request_body max_size 1KB + `reverse_proxy`  → body da 5000 byte: HTTP 413
+	#   Il tetto scatta quando qualcosa LEGGE il body. Con `respond` nessuno lo
+	#   legge, quindi non taglia: provarlo con un `respond` avrebbe certificato una
+	#   protezione inesistente. Qui siamo nel ramo `reverse_proxy`, dove funziona.
+	request_body {
+		max_size 5GB
+	}
+
 	# Forward al gateway (compresso, streaming OK per MCP)
 	reverse_proxy gateway:8080 {
 		flush_interval -1   # streaming/SSE compatibile
