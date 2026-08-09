@@ -212,6 +212,101 @@ jobs:
             echo "── $servizio"
             (cd "$servizio" && uv lock --check)
           done
+      # ⭐ IL GATE SULL'**ATTO** DI RIGENERARE UN LOCK (abdd732a, 09/08) — l'altra metà
+      #   del buco che lo step qui sopra dichiara di non coprire.
+      #
+      # 🔴 PERCHÉ: `dependabot.yml` IGNORA le major per `uv` (riga ~126), quindi le major
+      #   non arrivano MAI da una PR automatica — arrivano quando una di noi lancia
+      #   `uv lock`. E lì il salto è **una riga fra centinaia, identica a un salto di
+      #   patch**: `starlette` 0.45 → 1.3.1 (#96) e `mcp` → 2.0.0 (#112) sono passate
+      #   così, e la seconda ha impedito l'avvio della 0.41.1.
+      #   Lo step sopra chiede «il lock concorda col SUO pyproject?»; questo chiede
+      #   «questa rigenerazione ATTRAVERSA un confine di regime?». Due domande diverse.
+      #
+      # 🔑 Sotto la 1.0 il confine è la **MINOR**, non la major: in `0.x` semver non
+      #   promette nulla, e trattarle con indulgenza è il ragionamento che ha lasciato
+      #   `uvicorn` venti minor oltre il proprio vincolo.
+      #
+      # ⚠️ LIMITE DICHIARATO: la ratifica è «il pacchetto è NOMINATO nella PR». Chi vuole
+      #   aggirarlo scrive il nome e passa — il gate non pretende di fermare la malafede,
+      #   pretende di fermare la DISTRAZIONE, che è ciò che ci è costato la 0.41.1.
+      #   E non gira su `push` (serve una base con cui confrontare): lo dice invece di
+      #   uscire verde.
+      - name: la rigenerazione di un lock dichiara i salti di regime
+        if: github.event_name == 'pull_request'
+        env:
+          # Titolo e corpo passano da ENV, MAI interpolati nel `run`: `${{ }}` dentro uno
+          # script è script-injection — il corpo di una PR lo scrive chiunque la apra.
+          PR_TITOLO: ${{ github.event.pull_request.title }}
+          PR_CORPO: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch -q --depth=1 origin "$BASE_SHA"
+          mapfile -t CAMBIATI < <(git diff --name-only "$BASE_SHA" HEAD -- 'services/*/uv.lock')
+          if [ "${#CAMBIATI[@]}" -eq 0 ]; then
+            echo "nessun uv.lock toccato da questa PR: niente da verificare"
+            exit 0
+          fi
+          echo "lock rigenerati in questa PR: ${#CAMBIATI[@]}"
+          RATIFICA="$PR_TITOLO
+          $PR_CORPO"
+          ESITO=0
+          for lock in "${CAMBIATI[@]}"; do
+            echo "── $lock"
+            # 🔴 «il lock NON C'ERA» e «non sono riuscita a leggerlo» NON sono la stessa
+            #   cosa, e la prima stesura li faceva collassare entrambi in un file VUOTO —
+            #   che vuol dire «nessun pacchetto prima» = nessun salto = PASSA.
+            #   Rilievo di 71d540e6 in review, e il caso che colpisce è il PEGGIORE che
+            #   abbiamo: `b29d4f7`, il commit che INTRODUSSE i lock, è quello che ha
+            #   portato dentro `starlette` 1.3.1 e `mcp` 2.0.0. Un lock che NASCE è
+            #   esattamente l'istante in cui le major entrano — se passa in silenzio,
+            #   questo gate manca il proprio caso d'uso storico.
+            if git cat-file -e "$BASE_SHA:$lock" 2>/dev/null; then
+              git show "$BASE_SHA:$lock" > /tmp/lock-prima
+            else
+              # Lock NUOVO: non c'è un «prima» con cui confrontarlo. Non è un errore, ma
+              # non è nemmeno un verde: N pacchetti entrano tutti insieme e nessuno è
+              # stato confrontato con niente. Va DICHIARATO, come i salti.
+              N=$(grep -c '^name = ' <(git show "HEAD:$lock") || true)
+              echo "  ⚠️  lock NUOVO ($N pacchetti, nessun confronto possibile)"
+              if printf '%s' "$RATIFICA" | grep -qiE 'lock nuovo|nuovo lock|primo lock|introduc'; then
+                echo "  ✓ la PR dichiara di introdurre un lock nuovo"
+              else
+                echo "::error::$lock è un lock NUOVO: $N pacchetti entrano senza essere confrontati con nulla, ed è l'istante in cui le major entrano (b29d4f7: starlette 1.3.1, mcp 2.0.0). Dichiaralo nella PR — basta la frase «lock nuovo»."
+                ESITO=1
+              fi
+              continue
+            fi
+            git show "HEAD:$lock"      > /tmp/lock-dopo
+            set +e
+            REPORT="$(python3 tools/lock-salti.py /tmp/lock-prima /tmp/lock-dopo 2>&1)"
+            CODICE=$?
+            set -e
+            echo "$REPORT"
+            # Contratto a TRE valori: 2 non è «va bene», è «non ho guardato».
+            if [ "$CODICE" -eq 2 ]; then
+              echo "::error::$lock — il gate NON ha potuto misurare: nessun verdetto, non un verde"
+              ESITO=1
+            elif [ "$CODICE" -eq 1 ]; then
+              # Ratifica = il pacchetto E la sua versione di destinazione sono nominati
+              # nella PR. Il nome da solo NON basta: «mcp» sta dentro «nb1777-mcp», cioè
+              # dentro il nome del servizio, che si nomina sempre — il gate sarebbe stato
+              # compiacente proprio nel caso più frequente (falso positivo trovato in
+              # autoreview, non in produzione). Una versione non ci finisce per caso.
+              while IFS= read -r riga; do
+                pkg="${riga%%==*}"; ver="${riga##*==}"
+                if printf '%s' "$RATIFICA" | grep -qF -- "$ver" \
+                   && printf '%s' "$RATIFICA" | grep -qiF -- "$pkg"; then
+                  echo "  ✓ «$pkg» → $ver: nominato con la versione, salto dichiarato"
+                else
+                  echo "::error::«$pkg» attraversa un confine di regime (verso $ver) e la PR non lo dichiara. Scrivi nome E versione nel titolo o nel corpo — il nome del servizio non conta: un salto che nessuno nomina è un salto che nessuno ha guardato."
+                  ESITO=1
+                fi
+              done < <(printf '%s\n' "$REPORT" | sed -n 's/^RATIFICA-RICHIESTA: //p')
+            fi
+          done
+          exit "$ESITO"
       - name: Sync nb1777-mcp (installa nlm pinnato + pytest)
         working-directory: services/nb1777-mcp
         run: uv sync
