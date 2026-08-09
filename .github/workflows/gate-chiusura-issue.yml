@@ -1,0 +1,38 @@
+# Il gate «chiude la #N» ha un workflow SUO, e non è una scelta di stile.
+#
+# Rilievo di @abdd732a sulla revisione della #137: `on: pull_request` senza `types`
+# vale [opened, synchronize, reopened] — **`edited` non c'è**. Il gate legge il CORPO
+# della PR, e il corpo è l'unica cosa che si cambia **senza toccare un commit**: chi
+# toglie `Closes #N` dopo l'ultimo push non fa rigirare niente, e il presidio resta
+# verde su un testo che non ha mai letto.
+# 🔴 L'ho vissuto senza accorgermene mentre aprivo questa stessa PR: ho riscritto il
+#    corpo tre volte via API, e il gate non è ripartito nessuna delle tre.
+#
+# PERCHÉ UN FILE A PARTE e non `types: [..., edited]` su ci.yml: quel trigger è del
+# WORKFLOW, non del job. Aggiungere `edited` là farebbe ripartire tutti e quattro i
+# job — build delle immagini compresa — a ogni correzione di refuso nel corpo. Un
+# presidio che costa una build per una virgola viene tolto, e viene tolto con ragione.
+name: Gate chiusura issue
+
+on:
+  pull_request:
+    branches: [main]
+    # `edited` è il motivo per cui questo file esiste: senza, il gate non vede
+    # le modifiche al corpo. Gli altri tre coprono apertura, push e riapertura.
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  chiusura-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: «chiude la #N» non chiude la #N
+        # Il corpo lo scrive CHIUNQUE apra una PR: passa da `env`, mai interpolato
+        # in uno script di shell — `${{ … }}` dentro un `run:` è script injection.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 tools/gate-chiusura-issue.py
