@@ -104,6 +104,13 @@ MAX_ZIP_MEMBERS = 100_000                   # zip-bomb "a tanti file piccoli"
 # workfiles è 2,6 GB compressi e moriva qui con "upload troppo grande". Il disco
 # della VPS deve avere spazio per upload + DB: verificare prima dei giganti.
 MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024   # 4 GB
+# ⚠️ SE LO ALZI, guarda anche `ingress/Caddyfile` (`request_body max_size`, oggi 5GB):
+#    quello è il tetto ASSOLUTO davanti al gateway, e deve restare SOPRA questo. Se
+#    lo superi, Caddy diventa il primo decisore e risponde 413 su un upload che qui
+#    sarebbe legittimo — il margine è voluto (#122). La regola è scritta qui perché
+#    chi cambia questo numero apre QUESTO file, non il Caddyfile.
+#    (rilievo di b82df434; il controllo automatico è in tests/test_tetti_coerenti.py,
+#     perché una riga si legge quando si rilegge il file, non quando si digita il numero)
 
 _READ_CHUNK = 1024 * 1024  # 1 MB
 
