@@ -29,6 +29,15 @@ quando la `2.0.0` era già fuori — e ora viene riprodotto fedele.
   due su tre; *un insieme enumerato a mano non fallisce quando è incompleto — risponde,
   e sembra una risposta.*
 
+- **Il tetto sul body conta i byte veri, non quelli dichiarati** (#119). `admin.py`
+  guardava il `Content-Length` — che lo dichiara il client: chi vuole riempire il disco lo
+  omette (chunked) o ci scrive un numero piccolo. Il taglio che contava i byte veri partiva
+  quando `upload.file` era **già pieno**: proteggeva la destinazione, non l'arrivo.
+- **Tetto a `httpx`: `>=0.28,<1`** (#118), su `gateway` e `nb1777-bot` — le sole due che lo
+  dichiarano. Oggi non c'è deriva (lock `0.28.1`, che è l'ultima stabile), ma su PyPI ci
+  sono già le `1.0.dev*`: senza tetto, la prima rigenerazione di lock dopo il rilascio se la
+  porterebbe dentro senza che nessuno lo decida.
+
 ### 🛡️ Presìdi — la CI ora guarda l'artefatto, non un suo sostituto
 
 - **La build avvia ciò che costruisce** (#114). Il job `build` costruiva l'immagine e
@@ -49,6 +58,23 @@ quando la `2.0.0` era già fuori — e ora viene riprodotto fedele.
   programma che valida il ledger delle feature. Ora `--require-hashes`.
 - **Il gate locale esegue gli step della CI leggendoli dal workflow** (#93), invece di
   riscriverli: due copie di una procedura sono una cache, e una cache scade in silenzio.
+
+- **Un tetto committato senza rigenerare il lock non è più verde** (#118). `uv sync
+  --frozen` fa quel che promette — usa il lock com'è — e **non** verifica la coerenza col
+  `pyproject`: si poteva committare un vincolo puramente cosmetico e vederlo passare. Ora
+  `uv lock --check` gira su tutti i servizi, e la lista dei servizi **la dà `git ls-files`**,
+  non un elenco scritto a mano (un quinto servizio, in quel caso, sarebbe stato silenzio).
+  Il gate **dichiara il proprio limite**: verifica l'accordo lock↔pyproject *dentro* un
+  servizio, quindi due gemelli con lo stesso `pyproject` e lock diversi restano entrambi
+  verdi. *Un limite scritto è un limite che il prossimo non deve riscoprire.*
+
+### 📚 Documentazione
+
+- **Gli `-f` dell'overlay ingress non sono facoltativi** (#116). In nove punti la
+  documentazione scriveva `docker compose --profile ingress.<x> up -d` senza `-f`: misurato
+  col diff delle due config, senza gli `-f` il gateway resta **senza porte pubblicate** e
+  fuori dalla rete `funnel`. Chi seguiva la riga alla lettera otteneva un ingress che non
+  ingressa.
 
 ### ⚠️ Note per chi aggiorna
 
