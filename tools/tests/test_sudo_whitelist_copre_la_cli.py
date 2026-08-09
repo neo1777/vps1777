@@ -73,6 +73,28 @@ def comandi_richiesti(src: str) -> set[str]:
     return set(re.findall(r'sudo\(\[\s*"([a-z0-9_/-]+)"', src))
 
 
+def chiamate_non_lette(src: str) -> int:
+    """Quante chiamate a `sudo(` la regex sopra NON riesce a leggere.
+
+    🔴 Rilievo di @b82df434 sulla revisione di questa PR, e coglie il difetto sull'asse
+    su cui il test stesso si giustifica. `comandi_richiesti` legge solo la forma
+    letterale `sudo(["nome", …])`. Con una variabile — `sudo(cmd)` — o con l'unpacking
+    — `sudo([*base, "x"])` — la regex non vede la chiamata, ma `richiesti` resta NON
+    vuoto: **la guardia dello zero non scatta e il test passa verde tacendo.**
+    Controprova eseguita da lei: 2 chiamate su 3 invisibili, zero errori segnalati.
+
+    ⭐ *Una regex parziale ha la stessa proprietà di una lista incompleta — senza
+    sembrarlo.* La guardia esistente copre il caso ZERO; questa copre il PARZIALE, che
+    è il caso in cui il test continua a rispondere e la risposta è su un sottoinsieme.
+    """
+    # `(?<!def )`: la DEFINIZIONE `def sudo(cmd, **kw)` non è una chiamata. Senza questo
+    # il conteggio dà 1 di scarto sul codice sano — falso allarme trovato collaudando,
+    # e un presidio che grida sul caso buono viene spento al primo giro.
+    tutte = len(re.findall(r"(?<!def )\bsudo\(", src))
+    lette = len(re.findall(r'sudo\(\[\s*"[a-z0-9_/-]+"', src))
+    return tutte - lette
+
+
 def comandi_concessi(src: str) -> set[str]:
     """La whitelist: `for _b in install systemctl chown; do`."""
     m = re.search(r"for\s+_b\s+in\s+([a-z0-9_ -]+);\s*do", src)
@@ -96,6 +118,14 @@ def main() -> int:
     print(f"la CLI chiede via sudo -n: {', '.join(sorted(richiesti))}")
 
     errori = 0
+    cieche = chiamate_non_lette(CLI.read_text(encoding="utf-8"))
+    if cieche:
+        errori += 1
+        print(f"  ✗ {cieche} chiamate a `sudo(` che questo test NON sa leggere.\n"
+              f"      Riconosco solo la forma letterale `sudo([\"nome\", …])`. Con una\n"
+              f"      variabile o l'unpacking la chiamata è invisibile, e il confronto\n"
+              f"      qui sotto girerebbe su un SOTTOINSIEME dicendo verde.\n"
+              f"      Rendile letterali, o insegna la forma nuova a `comandi_richiesti()`.")
     for nome, path in CON_WHITELIST.items():
         if not path.is_file():
             errori += 1
