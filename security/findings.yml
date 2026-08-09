@@ -307,6 +307,14 @@ findings:
     evidence:
       - file: compose.ops.backup.yaml
         not_contains: ["/var/run/docker.sock"]
+      # issue #69②: l'evidence qui sopra prova «il container di BACKUP non monta il
+      # socket» — vero, ma la proprietà che un registro di sicurezza promette è
+      # «NESSUN container lo monta». Un compose nuovo lo monterebbe e H13 resterebbe
+      # verde: il gate guardava un nome di file, non la proprietà. Il test qui sotto
+      # scandaglia TUTTI i compose*.y*ml e ammette solo eccezioni NOMINATE, valide
+      # finché accanto al mount resta scritto perché sono accettate.
+      - file: tools/tests/test_docker_sock_perimetro.py
+        contains: ["ECCEZIONI", "compose*.y*ml"]
       - file: tools/backup.sh
         contains: ["BACKUP_VOLUMES_DIR"]
       - file: tools/backup-container-setup.sh
