@@ -120,7 +120,13 @@ jobs:
       - name: Migrations immutability
         if: github.event_name == 'pull_request'
         run: |
-          git fetch origin main --depth=1
+          # `--depth=1` TOLTO QUI per la stessa ragione dell'altro gate (commento lungo
+          # più sotto): in CI è innocuo, ma provando lo step in LOCALE rende shallow un
+          # repo che non lo era — successo il 09/08 sul checkout condiviso, e per venti
+          # minuti i conteggi di storia di tre sessioni hanno dato numeri diversi.
+          # Questo step non l'ho scritto io: la trappola però è identica, e lasciarla
+          # qui vorrebbe dire che la lezione vale per metà del file.
+          git fetch origin main
           # diff two-dot (confronto di TREE, niente merge-base: il checkout PR
           # è il merge commit, che contiene già main → nessun falso positivo).
           # --no-renames: senza, un `git mv` di una migrazione + edit passa come
