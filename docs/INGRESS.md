@@ -108,6 +108,7 @@ altro host, subnet fuori dai blocchi privati) richiedono un override via env
 
 | Aspetto | Tailscale | Caddy | Cloudflared |
 |---|---|---|---|
+| **Chi può raggiungere il servizio** | **solo chi è nel tuo tailnet** (o chiunque, se attivi Funnel) | **chiunque su Internet** | **chiunque su Internet** |
 | Costo | gratis (free tier) | gratis | gratis |
 | Dominio tuo | no (*.ts.net) | sì obbligatorio | sì o sub-dominio |
 | Porte aperte | nessuna | 80 + 443 | nessuna |
@@ -115,3 +116,12 @@ altro host, subnet fuori dai blocchi privati) richiedono un override via env
 | Anti-DDoS | no | no | sì |
 | Setup minuti | ~5 | ~10 | ~10 |
 | Vincoli | account Tailscale | account ACME | account Cloudflare |
+
+> ⚠️ **La prima riga è la prima apposta** (issue #63). Le altre pesano costo e minuti di
+> setup; quella dice **se il prodotto fa la cosa che promette** — il `README` offre di
+> collegare i propri MCP a claude.ai e all'app desktop, e un client di terzi raggiunge il
+> gateway **solo se l'ingress è pubblico**. Con `tailscale` senza Funnel il servizio è
+> raggiungibile solo da dentro il tuo tailnet: perfetto per l'uso personale da un
+> dispositivo tuo, **inutile per claude.ai**. Non è un difetto del profilo — è la
+> condizione d'uso, e stava sotto sette righe che parlavano d'altro.
+
