@@ -197,6 +197,12 @@ services:
       NB1777_TRANSPORT: streamable-http
       NB1777_ALLOWED_ORIGINS: "https://claude.ai,https://web.telegram.org"
       NLM_HOME: /var/lib/nlm
+      # H6-bis: gli artefatti scaricati (audio/video/pdf…) nascono QUI e solo qui.
+      # Volume SEPARATO da nlm-auth apposta: `studio_download` accettava un
+      # `output_path` scelto dal chiamante, cioè una scrittura arbitraria dentro
+      # l'unico container che possiede i cookie Google. Ora il path del chiamante
+      # vale come nome, e i file finiscono in una directory che NON contiene segreti.
+      NLM_ARTIFACTS: /var/lib/nlm-artifacts
       FASTMCP_STATELESS_HTTP: "true"
       # Segreto condiviso per gli endpoint INTERNI /internal/nlm/* (H6): solo
       # gateway e bot, che lo hanno, possono chiedere lo stato o installare il
@@ -207,6 +213,8 @@ services:
     volumes:
       # UNICO servizio a montare il volume dei cookie Google (H6): li possiede lui.
       - nlm-auth:/var/lib/nlm:rw
+      # Artefatti scaricati da NotebookLM: volume PROPRIO, senza segreti dentro.
+      - nlm-artifacts:/var/lib/nlm-artifacts:rw
     networks:
       - backend
       # egress, NON ingress (H25): nb1777-mcp deve USCIRE verso NotebookLM, ma non
@@ -290,6 +298,7 @@ volumes:
   gateway-data:    # /var/lib/gateway: audit log, ecc.
   archive-data:    # /var/lib/archive/{data,db}
   nlm-auth:        # /var/lib/nlm: auth.json + AUTH_PENDING.flag
+  nlm-artifacts:   # /var/lib/nlm-artifacts: artefatti Studio scaricati — NIENTE segreti
   gateway-uploads: # /var/lib/uploads: spool multipart su disco (TMPDIR) — temp, NO backup
 
 # ──────────────────────────────────────────────────────────────────────
