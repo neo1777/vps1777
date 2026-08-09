@@ -2,6 +2,64 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.41.2] — 2026-08-09
+
+**Una patch tagliata per un motivo solo: la `0.41.1` non si avvia.** `archive-mcp` muore
+all'import — `from mcp.server.fastmcp import FastMCP`, un path che in `mcp==2.0.0` non
+esiste più — e il processo non arriva a toccare un dato: restart-loop → health-gate →
+auto-rollback. Il vincolo era **identico** nella `0.40.14` (`mcp>=1.2.0`, senza tetto):
+non è cambiato il vincolo, è cambiato **quando viene risolto**. Prima si risolveva a
+build-time e la `2.0.0` non era ancora uscita; dalla `0.41.0` c'è il lock, generato
+quando la `2.0.0` era già fuori — e ora viene riprodotto fedele.
+
+> **Il filo:** *un lock garantisce riproducibilità, non correttezza — riproduce
+> fedelmente anche una major sbagliata.* Prima era una lotteria, e finora aveva vinto.
+> Le voci qui sotto sono la cura, più i presìdi che d'ora in poi guardano l'artefatto
+> invece del suo sostituto.
+
+### 🔴 Corretto — la dipendenza che impediva l'avvio
+
+- **Tetto alla major di `mcp`: `>=1.28,<2`** (#112). Nei due servizi che lo importano
+  (`archive-mcp`, `nb1777-mcp`) e nei lock. `archive-mcp` risale da `2.0.0` a `1.29.0`,
+  e con lui escono `httpx2`, `httpcore2`, `mcp-types`, `opentelemetry-api`, `truststore`.
+- **Lo stesso tetto in `plugins/example-mcp`** (#113), che ne era rimasto fuori — cioè
+  **il posto da cui si copia**. Non ha un lock, quindi risolve a build-time: oggi
+  avrebbe preso la `2.0.0` e sarebbe stato rotto per chiunque lo usi come punto di
+  partenza. Il primo censimento iterava una lista di nomi scritta a mano e aveva curato
+  due su tre; *un insieme enumerato a mano non fallisce quando è incompleto — risponde,
+  e sembra una risposta.*
+
+### 🛡️ Presìdi — la CI ora guarda l'artefatto, non un suo sostituto
+
+- **La build avvia ciò che costruisce** (#114). Il job `build` costruiva l'immagine e
+  non la eseguiva mai; i test giravano con `uvx pytest`, in un ambiente effimero che non
+  è quello dell'immagine (che installa dal lock, con `--frozen`). CI e artefatto
+  guardavano due mondi diversi, e il verde certificava il primo. Ora un container che non
+  parte rompe la CI.
+- **Il gate importa il punto di ingresso, non il luogo dell'ultimo incidente** (#115).
+  La prima versione importava `app.server` — il modulo dove il difetto si era
+  manifestato — ma l'entrypoint delle quattro immagini è `python -m app`: il modulo che
+  il container **esegue** è `app.__main__`, e nessuno lo importava. Restava scoperto
+  `import uvicorn`, che esiste in un solo posto in tutto il repo.
+- **La garanzia «IP client non spoofabile» ora la misura la CI** (#117), non più solo la
+  documentazione: sei test, incluso il caso in cui l'header arriva già riscritto a monte.
+- **Il verificatore delle regole non installa più «l'ultima versione» di ciò che le
+  legge** (#111). `verify-features.yml` ancorava `actions/checkout` a uno SHA e due righe
+  sotto faceva `pip install pyyaml` senza versione né hash — cioè l'unica dipendenza del
+  programma che valida il ledger delle feature. Ora `--require-hashes`.
+- **Il gate locale esegue gli step della CI leggendoli dal workflow** (#93), invece di
+  riscriverli: due copie di una procedura sono una cache, e una cache scade in silenzio.
+
+### ⚠️ Note per chi aggiorna
+
+- Se sei sulla `0.41.0` o `0.41.1` e l'aggiornamento è tornato indietro da solo, **è
+  questo il motivo**: l'auto-rollback ha funzionato: non hai perso dati, il servizio è
+  rimasto sulla versione precedente.
+- I lock dei due gemelli restano su versioni `mcp` diverse (`archive-mcp` 1.29.0,
+  `nb1777-mcp` 1.28.1): **entrambe dentro il tetto**, nessuna delle due rotta. È il
+  risultato meccanico della cura — `uv lock` non muove ciò che è già conforme — e
+  l'allineamento è un atto separato, da fare guardando il diff.
+
 ## [0.41.1] — 2026-08-03
 
 **Una patch tagliata per un motivo solo: la `0.41.0` non poteva installarsi da sola.**
