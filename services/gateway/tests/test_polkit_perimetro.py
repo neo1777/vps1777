@@ -64,14 +64,40 @@ def test_concede_solo_reload_daemon():
         )
 
 
+def _operator_user() -> str:
+    """`OPERATOR_USER` letto da installer/engine.py — NON riscritto qui.
+
+    🔴 La prima versione di questo file confrontava con la stringa `"vps1777"`
+    scritta a mano. Rilievo di b82df434 sulla #125, ed è lo stesso difetto che
+    avevo appena curato nella #123 (`_UNITA` tarata su una misura, non ancorata
+    alla fonte): se un domani `OPERATOR_USER` cambia, un test che riscrive il
+    valore resta VERDE mentre la regola polkit punta a un utente che non esiste
+    più — e polkit non protesta, semplicemente non concede niente a nessuno.
+    Il self-update tornerebbe a morire su `daemon-reload`, con la suite verde.
+    """
+    engine = Path(__file__).resolve().parents[3] / "installer" / "engine.py"
+    testo = engine.read_text(encoding="utf-8")
+    m = re.search(r'^OPERATOR_USER\s*=\s*["\']([^"\']+)["\']', testo, re.M)
+    assert m, (
+        "OPERATOR_USER non trovato in installer/engine.py: è stato spostato o "
+        "rinominato, e questo test stava per confrontare la regola polkit con un "
+        "utente inventato invece che con quello vero."
+    )
+    return m.group(1)
+
+
 def test_e_legata_all_utente_operatore_e_non_a_tutti():
     codice = "\n".join(_righe_di_codice())
     assert re.search(r"subject\.user\s*==", codice), (
         "la regola non vincola più `subject.user`: così vale per CHIUNQUE, che è "
         "esattamente il contrario del suo scopo."
     )
-    assert "vps1777" in codice, (
-        "l'utente non è più `vps1777` (OPERATOR_USER in installer/engine.py:30)"
+    atteso = _operator_user()
+    assert atteso in codice, (
+        f"la regola polkit concede a un utente diverso da OPERATOR_USER "
+        f"(«{atteso}», letto da installer/engine.py). Una regola che punta a un "
+        f"utente che non esiste non dà errore: non concede e basta, e il "
+        f"self-update torna a morire su daemon-reload senza che nulla diventi rosso."
     )
 
 
