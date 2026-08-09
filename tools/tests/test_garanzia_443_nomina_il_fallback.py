@@ -42,7 +42,20 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SEC = ROOT / "SECURITY.md"
-DEPLOY = ROOT / "deploy.sh"
+
+# I DUE file che possono portare il gateway su 0.0.0.0, ciascuno col pattern che lo dice.
+# ⚠️ Il perimetro era UN file solo (`deploy.sh`), e il rilievo di abdd732a sulla #133 non
+# era «copertura mancante»: era uno scenario in cui il test **chiede di togliere una
+# garanzia ancora necessaria**. Se un domani il ramo `TS_FALLBACK` sparisce da deploy.sh e
+# restano i tre di engine.py → `apre=False`, `nominato=True` → scatta il ramo «SECURITY.md
+# descrive un pericolo inesistente, il paragrafo va tolto». *Il pericolo esisterebbe ancora,
+# in un file che il test non guardava.* ⇒ un presidio col perimetro stretto non è solo
+# cieco: può dare un ordine sbagliato con la voce di chi ha misurato.
+PERCORSI = {
+    "deploy.sh": (ROOT / "deploy.sh", re.compile(r"GATEWAY_BIND=0\.0\.0\.0")),
+    "installer/engine.py": (ROOT / "installer" / "engine.py",
+                            re.compile(r'_set_gateway_bind\([^)]*"0\.0\.0\.0"')),
+}
 
 
 def _righe_di_codice(testo: str) -> str:
@@ -52,33 +65,57 @@ def _righe_di_codice(testo: str) -> str:
 
 
 def main() -> int:
-    if not (SEC.is_file() and DEPLOY.is_file()):
-        print("✗ SECURITY.md o deploy.sh non trovati: la sonda non sta guardando il repo giusto")
+    if not SEC.is_file():
+        print("✗ SECURITY.md non trovato: la sonda non sta guardando il repo giusto")
         return 1
-    sec, dep = SEC.read_text(encoding="utf-8"), _righe_di_codice(DEPLOY.read_text(encoding="utf-8"))
+    mancanti = [n for n, (p, _) in PERCORSI.items() if not p.is_file()]
+    if mancanti:
+        # Un file del perimetro che sparisce NON è «un percorso in meno»: è la sonda che
+        # non può più rispondere. Tacerlo lascerebbe `apre=False` per assenza di dati, e
+        # quel False finisce dritto nel ramo «togli il paragrafo».
+        print(f"✗ non trovo {', '.join(mancanti)}: NON posso dire se il fallback esiste.\n"
+              "      (assenza di file ≠ assenza del percorso — e qui la differenza decide\n"
+              "      se questo test chiede di TOGLIERE una garanzia.)")
+        return 1
+    sec = SEC.read_text(encoding="utf-8")
 
-    # il percorso esiste? (nel CODICE, non nei commenti)
-    apre = bool(re.search(r"GATEWAY_BIND=0\.0\.0\.0", dep))
+    # il percorso esiste? (nel CODICE, non nei commenti) — su OGNI file del perimetro
+    dove = [n for n, (p, rx) in PERCORSI.items()
+            if rx.search(_righe_di_codice(p.read_text(encoding="utf-8")))]
+    apre = bool(dove)
     nominato = "TS_FALLBACK" in sec and "0.0.0.0" in sec
 
     if apre and not nominato:
-        print("  ✗ `deploy.sh` può portare il gateway su 0.0.0.0 (ramo TS_FALLBACK) e\n"
+        print(f"  ✗ il prodotto può portare il gateway su 0.0.0.0 ({', '.join(dove)}) e\n"
               "      SECURITY.md non lo nomina. La garanzia «solo la 443 via tunnel»\n"
               "      descrive lo stato normale e tace su quello d'eccezione — che è\n"
               "      esattamente ciò che si va a cercare in un modello di sicurezza.")
         return 1
     if nominato and not apre:
-        print("  ✗ SECURITY.md descrive il fallback TS_FALLBACK→0.0.0.0, ma nel codice di\n"
-              "      deploy.sh quel percorso NON c'è più. Un modello di sicurezza che\n"
-              "      elenca un pericolo inesistente si legge male quanto uno che ne tace:\n"
-              "      se il fallback è stato tolto, il paragrafo va tolto con lui.")
+        print("  ✗ SECURITY.md descrive il fallback →0.0.0.0, ma in NESSUNO dei file del\n"
+              f"      perimetro ({', '.join(PERCORSI)}) quel percorso c'è più. Un modello\n"
+              "      di sicurezza che elenca un pericolo inesistente si legge male quanto\n"
+              "      uno che ne tace: se il fallback è stato tolto, va tolto il paragrafo.")
         return 1
 
     if apre:
-        print("  ✓ il fallback esiste in deploy.sh ed è nominato in SECURITY.md")
+        print(f"  ✓ il fallback esiste ({', '.join(dove)}) ed è nominato in SECURITY.md")
     else:
         print("  ✓ nessun percorso porta il gateway su 0.0.0.0, e il documento non lo promette")
     return 0
+
+
+def test_presidio_gira_anche_in_ci() -> None:
+    """Il gancio senza il quale questo file NON viene eseguito dalla CI.
+
+    `uvx pytest tools/tests/ -v` esegue le FUNZIONI `test_*`. Un file con solo `main()` +
+    `if __name__` viene raccolto — il nome combacia — e non esegue niente: verde su zero
+    test. Il 09/08 tre presidi erano in quello stato su `main` (misurato sabotandone uno:
+    la suite restava «250 passed»), e questa PR era l'unica ancora aperta, cioè l'unica in
+    cui si poteva curare PRIMA invece che dopo. Rilievo di abdd732a.
+    ⭐ *Un test che non gira non è una verifica: è un commento con le parentesi.*
+    """
+    assert main() == 0
 
 
 if __name__ == "__main__":
