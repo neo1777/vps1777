@@ -25,6 +25,17 @@ services:
       WATCHTOWER_TIMEOUT: "30s"
       TZ: ${TZ:-UTC}
     volumes:
+      # ⚠️ IL `:ro` NON LIMITA L'API — e questa riga esiste perché sembra il contrario.
+      # `:ro` rende non scrivibile il NODO del filesystem, non le richieste che passano
+      # sul socket: chi lo raggiunge parla con l'API Docker e può creare container,
+      # montare `/` dell'host, ottenere root. Dal punto di vista delle capacità, qui
+      # `:ro` equivale a `rw`.
+      # È accettato SOLO perché questo profilo è `ops.autoupdate`: opt-in, non attivo di
+      # default, e Watchtower è dichiarato declassato/non supportato (docs/INSTALL.md).
+      # Chi lo attiva sta dando a un container accesso root all'host: è una decisione,
+      # non un dettaglio di configurazione.
+      # 🔒 Presidiato da tools/tests/test_docker_sock_perimetro.py: questo è l'UNICO
+      #    compose che può montare il socket, e solo se questo avviso resta scritto.
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - backend  # solo per logging, non per pull (lo fa da dockerd)
