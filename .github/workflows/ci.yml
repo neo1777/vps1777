@@ -254,7 +254,30 @@ jobs:
           ESITO=0
           for lock in "${CAMBIATI[@]}"; do
             echo "── $lock"
-            git show "$BASE_SHA:$lock" > /tmp/lock-prima 2>/dev/null || : > /tmp/lock-prima
+            # 🔴 «il lock NON C'ERA» e «non sono riuscita a leggerlo» NON sono la stessa
+            #   cosa, e la prima stesura li faceva collassare entrambi in un file VUOTO —
+            #   che vuol dire «nessun pacchetto prima» = nessun salto = PASSA.
+            #   Rilievo di 71d540e6 in review, e il caso che colpisce è il PEGGIORE che
+            #   abbiamo: `b29d4f7`, il commit che INTRODUSSE i lock, è quello che ha
+            #   portato dentro `starlette` 1.3.1 e `mcp` 2.0.0. Un lock che NASCE è
+            #   esattamente l'istante in cui le major entrano — se passa in silenzio,
+            #   questo gate manca il proprio caso d'uso storico.
+            if git cat-file -e "$BASE_SHA:$lock" 2>/dev/null; then
+              git show "$BASE_SHA:$lock" > /tmp/lock-prima
+            else
+              # Lock NUOVO: non c'è un «prima» con cui confrontarlo. Non è un errore, ma
+              # non è nemmeno un verde: N pacchetti entrano tutti insieme e nessuno è
+              # stato confrontato con niente. Va DICHIARATO, come i salti.
+              N=$(grep -c '^name = ' <(git show "HEAD:$lock") || true)
+              echo "  ⚠️  lock NUOVO ($N pacchetti, nessun confronto possibile)"
+              if printf '%s' "$RATIFICA" | grep -qiE 'lock nuovo|nuovo lock|primo lock|introduc'; then
+                echo "  ✓ la PR dichiara di introdurre un lock nuovo"
+              else
+                echo "::error::$lock è un lock NUOVO: $N pacchetti entrano senza essere confrontati con nulla, ed è l'istante in cui le major entrano (b29d4f7: starlette 1.3.1, mcp 2.0.0). Dichiaralo nella PR — basta la frase «lock nuovo»."
+                ESITO=1
+              fi
+              continue
+            fi
             git show "HEAD:$lock"      > /tmp/lock-dopo
             set +e
             REPORT="$(python3 tools/lock-salti.py /tmp/lock-prima /tmp/lock-dopo 2>&1)"
