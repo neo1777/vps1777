@@ -38,6 +38,15 @@ jobs:
           # rilievi — cioè il gate non copriva quel codice e non se ne sarebbe
           # mai accorto nessuno, perché il non-coperto era anche pulito.
           ruff check services/ tools/ security/
+      - name: Gate «chiude la #N» — GitHub legge solo l'inglese
+        # Il corpo di una PR lo scrive CHIUNQUE la apra: passa da `env`, mai
+        # interpolato in uno script di shell (sarebbe injection). Lo script lo
+        # legge da lì, e si può eseguire a mano: `PR_BODY="..." python3 tools/...`
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 tools/gate-chiusura-issue.py
       - name: ShellCheck bash
         run: |
           # PINNATO PER DIGEST, come le immagini e le action di questo repo — e per
