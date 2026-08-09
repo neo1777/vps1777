@@ -179,6 +179,8 @@ routes = [
     Route("/admin/logout", admin.logout, methods=["POST"]),
     Route("/admin/setup", onboarding.setup_view, methods=["GET", "POST"]),
     Route("/admin/nlm", admin.nlm_view, methods=["GET", "POST"]),
+    # Il file lo possiede nb1777-mcp (H6): qui si INOLTRA, non si monta nulla.
+    Route("/admin/nlm/artifact/{name}", admin.nlm_artifact, methods=["GET"]),
     Route("/admin/archive", admin.archive_view, methods=["GET", "POST"]),
     Route("/admin/archive/delete", admin.archive_delete, methods=["POST"]),
     Route("/admin/update", admin.update_view, methods=["GET", "POST"]),

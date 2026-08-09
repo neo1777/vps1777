@@ -10,6 +10,8 @@ sessione Google: può solo chiedere «c'è un profilo?» e «installa questo tar
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 
@@ -43,6 +45,52 @@ async def status() -> dict | None:
     except (httpx.RequestError, ValueError) as exc:
         log.warning("nlm status: nb1777-mcp irraggiungibile (%s)", exc)
         return None
+
+
+async def artifacts() -> list[dict] | None:
+    """Gli artefatti scaricati da NotebookLM: [{name, bytes, mtime}].
+
+    `None` se nb1777-mcp non risponde — la pagina lo dice, invece di mostrare una
+    lista vuota che sembrerebbe «non ne hai» ([[la sonda senza credenziali]]).
+    """
+    base, headers = _base_and_headers()
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(f"{base}/internal/nlm/artifacts", headers=headers)
+        if r.status_code != 200:
+            log.warning("nlm artifacts: nb1777-mcp ha risposto %s", r.status_code)
+            return None
+        return r.json().get("artifacts", [])
+    except (httpx.RequestError, ValueError) as exc:
+        log.warning("nlm artifacts: nb1777-mcp irraggiungibile (%s)", exc)
+        return None
+
+
+@asynccontextmanager
+async def artifact_stream(name: str) -> AsyncIterator[tuple[httpx.Response, httpx.AsyncClient]]:
+    """Apre lo STREAM di un artefatto. Il chiamante lo inoltra a valle senza bufferare.
+
+    Un artefatto è un audio o un video: leggerlo in memoria nel gateway per poi
+    riemetterlo significherebbe tenere in RAM un file intero per ogni download. Lo
+    stesso motivo per cui `proxy.py` usa `send(stream=True)` invece di `request()`.
+
+    Il gateway NON monta il volume: chiede il file a chi lo possiede (H6). Qui passa
+    solo il NOME, e a validarlo è nb1777-mcp — che è l'unico a sapere cosa c'è dentro.
+    """
+    base, headers = _base_and_headers()
+    client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=5.0))
+    try:
+        req = client.build_request(
+            "GET", f"{base}/internal/nlm/artifact", params={"name": name}, headers=headers)
+        resp = await client.send(req, stream=True)
+    except httpx.RequestError:
+        await client.aclose()
+        raise
+    try:
+        yield resp, client
+    finally:
+        await resp.aclose()
+        await client.aclose()
 
 
 async def upload(content: bytes) -> tuple[int | None, str | None]:

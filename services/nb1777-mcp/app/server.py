@@ -27,7 +27,7 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 
 from . import canonical, core, memoria, nlm_profile
 from .settings import get_settings
@@ -116,6 +116,39 @@ async def internal_nlm_status(request: "Request") -> "JSONResponse":
     if not _internal_ok(request):
         return JSONResponse({"error": "forbidden"}, status_code=403)
     return JSONResponse(nlm_profile.profile_status(Path(get_settings().nlm_home)))
+
+
+@mcp.custom_route("/internal/nlm/artifacts", methods=["GET"])
+async def internal_nlm_artifacts(request: "Request") -> "JSONResponse":
+    """Elenco degli artefatti scaricati: [{name, bytes, mtime}]. Nessun contenuto."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    return JSONResponse({"artifacts": await asyncio.to_thread(core.artifact_list)})
+
+
+@mcp.custom_route("/internal/nlm/artifact", methods=["GET"])
+async def internal_nlm_artifact(request: "Request") -> "Response":
+    """Serve UN artefatto (`?name=`). È la via che porta il file fuori dal container.
+
+    Sta qui e non nel gateway per la stessa ragione di /internal/nlm/profile (H6): il
+    volume lo monta solo questo servizio. Il gateway INOLTRA — non monta niente, e
+    resta senza accesso al filesystem che contiene i cookie.
+
+    `core.artifact_path` risolve il nome DENTRO la directory artefatti e alza se esce:
+    l'unico input che arriva da fuori è quel nome.
+    """
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    name = request.query_params.get("name", "")
+    if not name:
+        return JSONResponse({"error": "missing_name"}, status_code=400)
+    try:
+        p = await asyncio.to_thread(core.artifact_path, name)
+    except core.NLMError as exc:
+        # 404 e non 400: dall'esterno «nome non ammesso» e «non c'è» non devono
+        # distinguersi, o l'errore diventa un oracolo su cosa esiste nel container.
+        return JSONResponse({"error": "not_found", "reason": str(exc)}, status_code=404)
+    return FileResponse(p, filename=p.name, media_type="application/octet-stream")
 
 
 @mcp.custom_route("/internal/nlm/profile", methods=["POST"])
@@ -421,12 +454,26 @@ async def studio_rename(notebook_id: str, artifact_id: str, new_title: str) -> s
 
 @mcp.tool()
 async def studio_download(kind: str, notebook_id: str, output_path: str,
-                          artifact_id: Optional[str] = None) -> str:
+                          artifact_id: Optional[str] = None) -> dict:
     """Scarica un artefatto. kind: audio|video|slides|mindmap|infographic|data_table|report|quiz|flashcards.
-    Ritorna il path effettivo del file scritto."""
+
+    `output_path` vale come NOME del file, non come destinazione: il file nasce sul
+    filesystem del SERVER, nella directory degli artefatti. Ritorna dove prenderlo
+    (`download_url`, dal pannello admin del gateway), non un path da aprire in locale.
+    """
     p = await _aio(core.studio_download, kind, notebook_id, output_path,
                    artifact_id=artifact_id)
-    return str(p)
+    # Prima qui c'era `return str(p)`: un percorso che sul disco di chi chiama NON
+    # ESISTE, restituito come se fosse un risultato utilizzabile. Chi lo riceveva
+    # provava ad aprirlo e trovava il nulla — il valore era vero sul server e falso
+    # per il lettore. Ora il ritorno dice DOVE prenderlo davvero.
+    return {
+        "name": p.name,
+        "bytes": p.stat().st_size,
+        "download_url": f"/admin/nlm/artifact/{p.name}",
+        "nota": "Il file è sul server. Scaricalo dal pannello: /admin/nlm (sezione "
+                "artefatti). Il path del container non è raggiungibile da qui.",
+    }
 
 
 # ============================================================

@@ -146,6 +146,23 @@ _CHIAVI_NOTE = frozenset({
     # `test_OGNI_chiave_usata_nel_repo_e_dichiarata` è diventato rosso appena ho scritto
     # la chiave nuova — ed è la ragione per cui quel test esiste.
     "libero_mb", "dichiarati_mb",
+    # 09/08 — `name`: l'artefatto NotebookLM chiesto in download
+    # (/admin/nlm/artifact/{name}). Serve, perché «chi ha scaricato COSA» è l'unica
+    # domanda utile su un endpoint che fa USCIRE dati dal container che tiene i cookie.
+    # ⚠️ È il path param GREZZO, non un nome già ripulito — e ci va di proposito: la
+    #    normalizzazione (`safe_artifact_name`) avviene DOPO, dentro nb1777-mcp, e un
+    #    audit che registrasse il nome ripulito direbbe cosa è stato SERVITO invece di
+    #    cosa è stato CHIESTO. Se qualcuno prova `../../etc/passwd`, l'audit deve
+    #    contenere quello, non `passwd`. Il valore è comunque troncato da `_redigi`
+    #    (_MAX_VALORE), e chi legge i log sa che questa chiave viene da fuori.
+    #    *Prima riga scritta qui: «nome già normalizzato da nb1777-mcp» — FALSA sul mio
+    #    stesso codice, e in un ledger di sicurezza un commento falso è peggio di
+    #    nessun commento: dice al lettore che il valore è ristretto quando non lo è.
+    #    Trovata rileggendo dopo il rilievo di abdd732a sulla #130 («viene da FUORI»).*
+    # **Aggiunta perché il presidio mi ha fermata**: la CI è diventata rossa appena ho
+    # scritto la chiave nuova, esattamente come per `libero_mb` qui sopra. *Due volte lo
+    # stesso test ferma due persone diverse allo stesso punto: è quello che deve fare.*
+    "name",
 })
 _MAX_VALORE = 500
 
