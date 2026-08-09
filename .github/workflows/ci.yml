@@ -242,7 +242,17 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          git fetch -q --depth=1 origin "$BASE_SHA"
+          # ⚠️ NIENTE `--depth=1` QUI, e la ragione l'ho pagata sul campo: in CI sarebbe
+          #   innocuo (il checkout è effimero), ma provando questo step in LOCALE —
+          #   che è il nostro metodo, proviamo tutto prima di proporlo — `fetch --depth=1`
+          #   RENDE SHALLOW un repo che non lo era. Il 09/08 ha troncato il checkout
+          #   condiviso al commit di base del mio test, e per venti minuti i conteggi di
+          #   storia di tutte hanno dato numeri diversi senza che nulla lo dichiarasse.
+          #   🔑 Un comando può essere corretto nel suo ambiente e distruttivo in quello
+          #      in cui lo si prova — e il banco di prova, qui, è condiviso.
+          #   Il repo intero pesa meno di 1 MiB: la profondità non ci fa risparmiare
+          #   niente che valga un effetto collaterale su chi non ha lanciato il comando.
+          git fetch -q origin "$BASE_SHA"
           mapfile -t CAMBIATI < <(git diff --name-only "$BASE_SHA" HEAD -- 'services/*/uv.lock')
           if [ "${#CAMBIATI[@]}" -eq 0 ]; then
             echo "nessun uv.lock toccato da questa PR: niente da verificare"
