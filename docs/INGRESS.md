@@ -108,7 +108,7 @@ altro host, subnet fuori dai blocchi privati) richiedono un override via env
 
 | Aspetto | Tailscale | Caddy | Cloudflared |
 |---|---|---|---|
-| **Chi può raggiungere il servizio** | **solo chi è nel tuo tailnet** (o chiunque, se attivi Funnel) | **chiunque su Internet** | **chiunque su Internet** |
+| **Chi può raggiungere il servizio** | **chiunque su Internet** (il profilo attiva il Funnel) | **chiunque su Internet** | **chiunque su Internet** |
 | Costo | gratis (free tier) | gratis | gratis |
 | Dominio tuo | no (*.ts.net) | sì obbligatorio | sì o sub-dominio |
 | Porte aperte | nessuna | 80 + 443 | nessuna |
@@ -118,10 +118,22 @@ altro host, subnet fuori dai blocchi privati) richiedono un override via env
 | Vincoli | account Tailscale | account ACME | account Cloudflare |
 
 > ⚠️ **La prima riga è la prima apposta** (issue #63). Le altre pesano costo e minuti di
-> setup; quella dice **se il prodotto fa la cosa che promette** — il `README` offre di
-> collegare i propri MCP a claude.ai e all'app desktop, e un client di terzi raggiunge il
-> gateway **solo se l'ingress è pubblico**. Con `tailscale` senza Funnel il servizio è
-> raggiungibile solo da dentro il tuo tailnet: perfetto per l'uso personale da un
-> dispositivo tuo, **inutile per claude.ai**. Non è un difetto del profilo — è la
-> condizione d'uso, e stava sotto sette righe che parlavano d'altro.
+> setup; questa dice **chi arriva alla porta** — ed è l'unica in cui i tre profili **non
+> si distinguono: sono pubblici tutti e tre.** [`SECURITY.md`](../SECURITY.md#security-model)
+> lo dichiara già in una riga («espone su Internet **solo** il gateway, porta 443 via
+> Tailscale Funnel / Caddy / Cloudflared»), ma non stava *qui*, dove l'ingress si sceglie.
+>
+> Il punto è **`tailscale`**, perché il nome evoca una rete privata e il profilo non lo è:
+> `setup.sh` propone «1) Tailscale Funnel (consigliato)» **ed è il default**, e `deploy.sh`
+> esegue `tailscale serve reset` seguito da `tailscale funnel --bg --https=443
+> http://127.0.0.1:8080`. **Scegliere `tailscale` attiva il Funnel**, e il servizio esce su
+> `*.ts.net` per chiunque. Un tailnet-only — `serve` senza `funnel` — questo repo non lo
+> installa: sulla VPS il gateway resta sul loopback (`GATEWAY_BIND=127.0.0.1`) e l'unica
+> via d'ingresso è il Funnel.
+>
+> ⇒ **È la condizione che rende possibile la promessa del `README`** (collegare i propri
+> MCP a claude.ai, Claude Code e all'app desktop): un client di terzi arriva solo su un
+> ingress pubblico. E **raggiungere non è entrare** — chi arriva alla porta trova
+> l'autenticazione, che è l'altra metà della domanda:
+> [`SECURITY.md` § Security model](../SECURITY.md#security-model).
 
