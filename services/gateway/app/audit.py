@@ -146,6 +146,15 @@ _CHIAVI_NOTE = frozenset({
     # `test_OGNI_chiave_usata_nel_repo_e_dichiarata` è diventato rosso appena ho scritto
     # la chiave nuova — ed è la ragione per cui quel test esiste.
     "libero_mb", "dichiarati_mb",
+    # 09/08 — `name`: il nome dell'artefatto NotebookLM chiesto in download
+    # (/admin/nlm/artifact/{name}). Non è un path e non è contenuto: è un nome file già
+    # normalizzato da nb1777-mcp (`safe_artifact_name`: niente directory, whitelist di
+    # caratteri), e serve nell'audit perché «chi ha scaricato cosa» è l'unica domanda
+    # utile su un endpoint che fa USCIRE dati dal container che tiene i cookie Google.
+    # **Aggiunta perché il presidio mi ha fermata**: la CI è diventata rossa appena ho
+    # scritto la chiave nuova, esattamente come per `libero_mb` qui sopra. *Due volte lo
+    # stesso test ferma due persone diverse allo stesso punto: è quello che deve fare.*
+    "name",
 })
 _MAX_VALORE = 500
 
