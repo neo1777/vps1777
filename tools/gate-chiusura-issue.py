@@ -53,9 +53,37 @@ RE_EN = re.compile(rf"\b{EN}\s+(?:the\s+)?[*_`]*#(\d+)", re.I)
 RE_IT = re.compile(rf"\b{IT}\s+(?:la\s+|il\s+|le\s+|i\s+)?[*_`]*#(\d+)", re.I)
 
 
+# Ciò che è CITATO non è ciò che si sta facendo: code-span `…`, blocchi ``` … ``` e righe
+# di citazione «> …». Vanno tolti PRIMA di cercare l'annuncio.
+RE_FENCE = re.compile(r"```.*?```", re.S)
+RE_CODE = re.compile(r"`[^`\n]+`")
+RE_QUOTE = re.compile(r"^\s*>.*$", re.M)
+
+
+def senza_citazioni(testo: str) -> str:
+    """Toglie il testo che PARLA invece di FARE.
+
+    🔴 Trovato eseguendo il gate sulla PR che lo introduce. Quel corpo cita
+    «(chiude #71)» come *esempio del difetto*, e il gate stava per fallire su sé stesso.
+    Non è fallito solo perché nella stessa pagina compariva anche `Fixes #71` fra i casi
+    di prova, che copriva il numero: **è passato per fortuna, non per correttezza.**
+
+    ⭐ È la trappola H48 — *i commenti che documentano la cura contengono la stringa del
+    difetto* — e qui morde più forte che altrove, perché in questo repo **spiegare un
+    difetto a parole è la norma**: un gate che scatta su chi lo descrive verrebbe
+    disattivato dalla prima PR che prova a raccontarlo.
+    """
+    t = RE_FENCE.sub(" ", testo)
+    t = RE_CODE.sub(" ", t)
+    return RE_QUOTE.sub(" ", t)
+
+
 def issue_non_chiuse(testo: str) -> list[str]:
     """I numeri annunciati come chiusi in italiano e non coperti da una keyword inglese."""
-    it = RE_IT.findall(testo)
+    # Le keyword inglesi si cercano nel testo INTERO: `Closes #63` scritto dentro un
+    # code-span resta un'intenzione dichiarata dall'autrice, e vale come copertura.
+    # L'annuncio italiano no: quello si cerca solo dove il testo FA, non dove cita.
+    it = RE_IT.findall(senza_citazioni(testo))
     en = set(RE_EN.findall(testo))
     # dedup mantenendo l'ordine di apparizione: chi legge cerca il primo caso, non un set
     visti, fuori = set(), []
