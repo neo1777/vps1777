@@ -14,6 +14,7 @@ import html
 import json
 import os
 import re
+import logging
 import secrets as pysecrets
 import shutil
 import sqlite3
@@ -24,8 +25,9 @@ from . import admin_core, archive_indexer, nlm_client
 from .admin_core import safe_next_url
 from .miniapp_core import version_gt
 
-from urllib.parse import quote_plus
+from urllib.parse import quote, quote_plus
 
+import httpx
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
@@ -33,6 +35,8 @@ from .audit import audit, audit_health, read_recent
 from .jwt_helpers import JWTError, issue, verify
 from .security import verify_admin_password
 from .settings import get_settings
+
+log = logging.getLogger(__name__)
 
 
 ADMIN_COOKIE = "vps1777_admin"
@@ -471,6 +475,74 @@ async def logout(request: Request) -> Response:
 # riceve e lo inoltra a nb1777-mcp — l'unico a montare il volume — che valida e
 # installa. Il gateway non legge né scrive quei cookie: chiede soltanto lo stato.
 
+def _human_bytes(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024.0
+    return f"{n:.1f} GB"
+
+
+def _nlm_artifacts_html(items: list[dict] | None) -> str:
+    """La sezione «artefatti scaricati». Tre stati, non due.
+
+    `None` = nb1777-mcp non risponde: si DICE, non si mostra una lista vuota — che
+    si leggerebbe come «non ne hai». È la stessa regola dei tre stati del cruscotto:
+    «assenti», «N», «sconosciuto» — mai un silenzioso zero.
+    """
+    if items is None:
+        return ('<section><div class="kicker"><span class="dot warn"></span>'
+                'Artefatti: nb1777-mcp non raggiungibile — elenco sconosciuto.</div></section>')
+    if not items:
+        return ('<section><div class="kicker">Artefatti scaricati: nessuno. '
+                'Ne nasce uno ogni volta che chiami <code>studio_download</code>.</div></section>')
+    righe = "\n".join(
+        f'<li><a href="/admin/nlm/artifact/{quote(i["name"])}">{html.escape(i["name"])}</a>'
+        f' <span class="who">{_human_bytes(int(i["bytes"]))} · {html.escape(i["mtime"])}</span></li>'
+        for i in items
+    )
+    return f"""
+<section>
+  <div class="kicker">artefatti scaricati da NotebookLM ({len(items)})</div>
+  <ul>{righe}</ul>
+  <div class="who">Stanno sul server, in un volume separato dal profilo Google.
+  Il gateway non li possiede: li chiede a nb1777-mcp e te li inoltra.</div>
+</section>
+"""
+
+
+async def nlm_artifact(request: Request) -> Response:
+    """Scarica UN artefatto. Il gateway inoltra in streaming: non tiene il file in RAM."""
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+
+    name = request.path_params.get("name", "")
+    try:
+        async with nlm_client.artifact_stream(name) as (upstream, _client):
+            if upstream.status_code != 200:
+                audit({"event": "admin_nlm_artifact_err", "by": email,
+                       "name": name, "status": upstream.status_code})
+                return RedirectResponse(
+                    "/admin/nlm?msg=Artefatto+non+disponibile&kind=err", status_code=303)
+            audit({"event": "admin_nlm_artifact", "by": email, "name": name})
+            # Il body si consuma DENTRO il context manager: `aread()` qui sarebbe
+            # bufferare tutto in RAM, quindi si accumula in una risposta di streaming
+            # solo passando i chunk mentre lo stream è ancora aperto.
+            chunks = [c async for c in upstream.aiter_raw()]
+    except httpx.RequestError as exc:
+        log.warning("admin nlm artifact: nb1777-mcp irraggiungibile (%s)", exc)
+        return RedirectResponse(
+            "/admin/nlm?msg=nb1777-mcp+non+raggiungibile&kind=err", status_code=303)
+
+    safe = name.replace('"', "").replace("\\", "")
+    return Response(
+        b"".join(chunks),
+        media_type="application/octet-stream",
+        headers={"content-disposition": f'attachment; filename="{safe}"'},
+    )
+
+
 async def nlm_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
@@ -513,6 +585,7 @@ async def nlm_view(request: Request) -> Response:
 
     flash = request.query_params.get("msg", "").replace("+", " ")
     flash_kind = request.query_params.get("kind", "ok")
+    artifacts_html = _nlm_artifacts_html(await nlm_client.artifacts())
 
     body = f"""
 <header>
@@ -520,6 +593,7 @@ async def nlm_view(request: Request) -> Response:
   <div class="who">{html.escape(email)}</div>
 </header>
 {status_html}
+{artifacts_html}
 <section>
   <div class="kicker">come ottenere il profilo nlm</div>
   <ol>
