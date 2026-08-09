@@ -129,5 +129,16 @@ def main() -> int:
     return 1 if errori else 0
 
 
+def test_presidio_gira_anche_in_ci() -> None:
+    """Il gancio che rende questo file un test PER PYTEST, non solo per la mano.
+
+    Senza, `uvx pytest tools/tests/` — la riga che lo esegue in CI — RACCOGLIE il file
+    (il nome combacia) e **non esegue niente**: nessuna funzione `test_*`, nessun errore,
+    verde. Misurato il 09/08 sabotando questo file su `main`: eseguito a mano usciva 1,
+    la suite restava «250 passed».
+    """
+    assert main() == 0
+
+
 if __name__ == "__main__":
     sys.exit(main())
