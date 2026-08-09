@@ -181,3 +181,44 @@ def test_i_valori_letti_sono_quelli_attesi_oggi():
     # Il margine, scritto in chiaro perché è la grandezza che conta e nessuno la
     # calcola a mente: 5·10⁹ − 4·2³⁰ = 705.032.704 byte ≈ 672 MiB. NON 1 GB.
     assert _caddy_max_size() - _max_upload_bytes() == 705_032_704
+
+
+# ─────────────────────── l'ancora della misura ───────────────────────
+# 🔴 RILIEVO DI abdd732a sulla #123, curato qui: `_UNITA` non è una verità di Caddy,
+#   è il risultato di UNA misura fatta su UNA immagine — `caddy:2.8-alpine` al digest
+#   pinnato in compose.ingress.caddy.yaml. Finché quel digest non cambia la tabella non
+#   può invecchiare. Ma i tre test sopra DERIVANO TUTTI da `_UNITA`: se l'immagine cambia
+#   e le unità con lei, restano tutti e tre VERDI dichiarando un margine falso.
+#   ⭐ *Tre test che condividono la stessa assunzione non sono tre verifiche* [abdd732a].
+#
+# ⏰ E non è un rischio remoto: `.github/dependabot.yml` ha `package-ecosystem:
+#   docker-compose` su `/` — quel digest lo bumpa un giro AUTOMATICO, settimanale.
+#   Senza questo test la finestra fra il bump e l'accorgersene è indefinita.
+_DIGEST_MISURATO = "sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17"
+_COMPOSE_CADDY = _RADICE / "compose.ingress.caddy.yaml"
+
+
+def test_le_unita_sono_ancorate_all_immagine_su_cui_le_ho_misurate():
+    """Se il digest di Caddy cambia, `_UNITA` torna un'ASSUNZIONE: qui si rompe.
+
+    Non prova che le unità siano giuste — prova che l'oggetto su cui sono state
+    misurate è ancora quello. È l'unico dei quattro test che non dipende da `_UNITA`,
+    ed è per questo che esiste: rompe la catena di assunzioni condivise.
+    """
+    testo = _COMPOSE_CADDY.read_text(encoding="utf-8")
+    riga = next((r for r in testo.splitlines()
+                 if r.strip().startswith("image:") and "caddy" in r), None)
+    assert riga, "immagine caddy non trovata in compose.ingress.caddy.yaml"
+    assert _DIGEST_MISURATO in riga, (
+        "Il digest di caddy è cambiato. `_UNITA` in questo file dice che Caddy usa unità\n"
+        "DECIMALI (1KB = 1000): è il risultato di una misura fatta il 09/08 su\n"
+        f"{_DIGEST_MISURATO[:23]}…, non una garanzia dell'upstream.\n"
+        "\n"
+        "  RIFAI LA MISURA prima di aggiornare questa costante:\n"
+        "    Caddyfile di prova con `request_body { max_size 1KB }` + `reverse_proxy`\n"
+        "    body  990 byte  → atteso 200\n"
+        "    body 1010 byte  → atteso 413   (se dà 200, le unità sono diventate binarie)\n"
+        "\n"
+        "  ⚠️ `respond` NON va bene per la prova: il tetto scatta solo se qualcuno LEGGE\n"
+        "     il body, e con `respond` nessuno lo legge → 200 anche oltre il tetto."
+    )
