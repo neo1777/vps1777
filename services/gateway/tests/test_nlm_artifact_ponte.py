@@ -156,6 +156,24 @@ def test_il_nome_finisce_nell_html_ESCAPED_e_nell_url_QUOTED() -> None:
     assert 'html.escape(i["name"])' in codice, "nome non escapato nel testo del link"
 
 
+def test_l_audit_registra_il_nome_CHIESTO_non_quello_servito() -> None:
+    """Nell'audit va il path param GREZZO: se qualcuno prova `../../etc/passwd`, si vede.
+
+    La cura «ovvia» che questo test impedisce è ripulire il nome prima di scriverlo nel
+    log — sembra igiene, ed è perdita di prove: un audit che registra il nome ripulito
+    dice cosa è stato SERVITO, mentre la domanda a cui deve rispondere è cosa è stato
+    CHIESTO. `name` è dichiarato in `_CHIAVI_NOTE` proprio come valore che viene da fuori.
+    """
+    fn = _funzione(ADMIN, "nlm_artifact")
+    codice = _solo_codice(fn, ADMIN)
+    assert 'request.path_params.get("name"' in codice, "il nome non arriva più dal path"
+    # gli audit devono citare la variabile grezza, non una sua versione ripulita
+    for chiamata in re.findall(r"audit\(\{[^}]*\}\)", codice, re.S):
+        if '"name"' in chiamata:
+            assert re.search(r'"name":\s*name\b', chiamata), (
+                f"l'audit non registra il nome grezzo: {chiamata.strip()[:120]}")
+
+
 # ── il canale interno ────────────────────────────────────────────────────────
 
 def test_artifact_stream_usa_lo_STESSO_segreto_degli_altri_interni() -> None:
