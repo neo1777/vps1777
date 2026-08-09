@@ -25,7 +25,16 @@ def main() -> None:
         log.warning("TELEGRAM_BOT_TOKEN mancante — bot in standby (heartbeat attivo).")
         log.warning("Configura secrets/telegram_bot_token.txt e: docker compose restart nb1777-bot")
     elif not s.telegram_owner_id:
-        log.warning("TELEGRAM_OWNER_ID=0 — bot accetterà chiunque! Configura in .env")
+        # 🔴 Diceva «bot accetterà chiunque!», cioè l'OPPOSTO di quello che il codice fa
+        # (issue #71). Il gate è fail-closed — bot.py: `if not s.telegram_owner_id or
+        # user_id != s.telegram_owner_id` → con owner_id==0 la prima condizione è vera
+        # per chiunque, quindi NEGA A TUTTI. È la garanzia H1 di SECURITY.md, e regge.
+        # Un warning che descrive il rischio sbagliato non è un dettaglio di prosa: chi
+        # legge il log in produzione crede di avere un bot APERTO e agisce di corsa —
+        # o, peggio, impara a non fidarsi di un gate che invece funziona.
+        log.warning("TELEGRAM_OWNER_ID=0 — il bot NEGA A TUTTI (gate fail-closed): "
+                    "non risponderà a nessuno, nemmeno a te. Configura in .env e: "
+                    "docker compose restart nb1777-bot")
     try:
         asyncio.run(bot.run())
     except KeyboardInterrupt:
