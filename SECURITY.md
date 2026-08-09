@@ -24,6 +24,23 @@ Mi impegno a:
 
 vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy / Cloudflared).
 
+> ⚠️ **UN PERCORSO CAMBIA QUESTA RIGA, ed è nell'installer: `TS_FALLBACK=1`.**
+> Se il Funnel non risponde durante il deploy, `deploy.sh` scrive `GATEWAY_BIND=0.0.0.0`
+> nel `.env` ([`deploy.sh`](deploy.sh), ramo `TS_FALLBACK`) e il gateway finisce in
+> ascolto **su tutte le interfacce, sulla 8080 in HTTP** — non più solo sulla 443 via
+> tunnel. Il *soggetto* della garanzia resta vero (è sempre e solo il gateway); cambiano
+> **la porta e il canale**, e passare da HTTPS-via-Funnel a HTTP-in-chiaro
+> sull'indirizzo pubblico è precisamente la proprietà che questa riga promette.
+>
+> Non è un difetto dell'installer: è un rimedio esplicito e opt-in a una VPS che
+> resterebbe irraggiungibile, e l'alternativa (dire all'utente «entra e sistema» dopo
+> avergli detto che non serviva) è peggiore. **È un difetto della frase**, che descrive
+> lo stato normale e tace su quello d'eccezione — e chi legge un modello di sicurezza sta
+> leggendo proprio per sapere quando la garanzia non vale.
+>
+> 🔎 Come si controlla, su una macchina qualsiasi: `grep ^GATEWAY_BIND= ~/vps1777/.env`
+> (`0.0.0.0` = il fallback è attivo) e `ss -tlnp | grep :8080`.
+
 > **La porta del pannello di setup: dalla 0.41.0 è sul loopback su tutti e tre i profili.**
 > `compose.onboarding.yaml` pubblica il pannello su **`${ONBOARDING_BIND:-127.0.0.1}:8080`**: raggiungibile dalla macchina, non dalla rete. **Con `caddy` e `cloudflared` al pannello si arriva dal dominio HTTPS del proxy**, che è servito dal primo avvio perché la destinazione è configurata prima — `CADDY_DOMAIN` è obbligatorio in `.env` ([`compose.ingress.caddy.yaml:26`](compose.ingress.caddy.yaml), `${CADDY_DOMAIN:?…}`), e per cloudflared il tunnel è pre-creato con l'hostname che punta a `http://gateway:8080` e il token in `secrets/cloudflared_token.txt`. **In ogni caso, e per `tailscale` prima che il tunnel esista, resta la via del tunnel SSH**: `ssh -L 8080:127.0.0.1:8080 <utente>@<vps>`, poi `http://127.0.0.1:8080/admin/setup` dal proprio computer.
 >
