@@ -37,7 +37,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union
 
@@ -64,6 +64,46 @@ NB_BOT_IMITATORE = "15290c4d-a842-4261-99e5-f7824b197c85" # bot-imitatore (da po
 # scratch rimasti orfani quando il cleanup fallisce: chi lo cambia deve
 # aggiornare anche sweep_ingest_notebooks() e doctor().
 INGEST_NB_PREFIX = "_ingest_"
+
+# H6-bis — gli artefatti scaricati nascono in UNA directory, e solo in quella.
+#
+# `studio_download` scriveva dove diceva il chiamante, con `mkdir(parents=True)` e
+# nessun vincolo. Dentro QUESTO container non è un dettaglio di comodità: è l'unico
+# che monta il volume dei cookie Google (H6, il gateway ne è stato privato apposta),
+# quindi un `output_path` scelto da chi chiama è una scrittura arbitraria che arriva
+# anche su /var/lib/nlm. Il tool riapriva DALL'INTERNO la superficie che H6 aveva
+# chiuso dall'esterno.
+#
+# Ora il path del chiamante vale solo per il NOME: il file nasce sempre qui. Non è
+# una perdita d'uso — nessun chiamante remoto poteva comunque APRIRE il path che
+# sceglieva, perché sta sul filesystem del SERVER (è la sorpresa documentata più
+# in basso, in studio_download).
+ARTIFACTS_DIR_DEFAULT = "/var/lib/nlm-artifacts"
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def artifacts_dir() -> Path:
+    """La directory degli artefatti (env `NLM_ARTIFACTS`), creata se manca."""
+    p = Path(os.environ.get("NLM_ARTIFACTS") or ARTIFACTS_DIR_DEFAULT)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def safe_artifact_name(raw: Union[str, Path]) -> str:
+    """Riduce un path/nome QUALUNQUE a un nome file innocuo.
+
+    `Path(...).name` butta ogni componente di directory (`../../etc/passwd` → `passwd`),
+    poi restano solo `[A-Za-z0-9._-]` e via i punti iniziali (niente dotfile, niente `..`).
+    Se non resta nulla di utilizzabile si ALZA: un nome inventato al posto di uno vuoto
+    farebbe finire il file da qualche parte senza che nessuno l'abbia chiesto.
+    """
+    name = _UNSAFE_NAME.sub("_", Path(str(raw)).name).lstrip(".")
+    if not name:
+        raise NLMError(
+            f"download: da '{raw}' non si ricava un nome file valido. "
+            "Passa un nome semplice, es. 'round-15-audit.m4a'.")
+    return name[:120]
+
 
 # I 9 tipi di artefatto Studio NotebookLM (nome canonico interno)
 ARTIFACT_TYPES = (
@@ -838,8 +878,9 @@ def studio_download(kind: str, nb_id: str, output_path: Union[str, Path], *,
     cli_kind = _CLI_DOWNLOAD.get(kind)
     if not cli_kind:
         raise NLMError(f"download: tipo non riconosciuto '{kind}'. Validi: {list(_CLI_DOWNLOAD)}")
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Il path del chiamante vale come NOME, non come destinazione (H6-bis, in cima
+    # al file): il file nasce nella directory degli artefatti e da nessun'altra parte.
+    output_path = artifacts_dir() / safe_artifact_name(output_path)
     # nlm 0.7.7: `download <kind> NOTEBOOK_ID [-o PATH] [--id ARTIFACT]`. NON
     # esiste `--no-progress` (era il motivo per cui studio_download falliva a
     # valle: nel test MCP originale il blocco-approvazione lo mascherava).
@@ -861,13 +902,46 @@ def studio_download(kind: str, nb_id: str, output_path: Union[str, Path], *,
     if not output_path.exists():
         raise NLMError(
             f"download: `nlm` è uscito senza errore ma {output_path} non esiste. "
-            "Nota: il file viene scritto sul filesystem del SERVER — se hai passato un "
-            "path della tua macchina, cercalo là.")
+            "Nota: il file viene scritto sul filesystem del SERVER, nella directory "
+            "degli artefatti — non sul disco di chi chiama.")
     if output_path.stat().st_size == 0:
         # Un file vuoto è peggio di un file assente: ha il nome giusto e passa ogni
         # controllo di esistenza. Chi lo carica come fonte ottiene un artefatto muto.
         raise NLMError(f"download: {output_path} esiste ma è VUOTO (0 byte).")
     return output_path
+
+
+def artifact_list() -> list[dict]:
+    """Gli artefatti presenti, dal più recente. Solo file regolari: niente sotto-directory."""
+    out: list[dict] = []
+    for p in artifacts_dir().iterdir():
+        if not p.is_file():
+            continue
+        st = p.stat()
+        out.append({
+            "name": p.name,
+            "bytes": st.st_size,
+            "mtime": datetime.fromtimestamp(
+                st.st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        })
+    return sorted(out, key=lambda d: d["mtime"], reverse=True)
+
+
+def artifact_path(name: str) -> Path:
+    """Path di UN artefatto da servire. Alza se il nome esce dalla directory o non c'è.
+
+    Il nome passa da `safe_artifact_name` (che già toglie ogni componente di directory)
+    e POI si verifica che il risolto stia davvero dentro: due controlli sullo stesso
+    fatto, perché qui l'input arriva da fuori e il primo è una normalizzazione, non
+    una guardia. Se un giorno la normalizzazione cambia, la guardia resta.
+    """
+    base = artifacts_dir().resolve()
+    p = (base / safe_artifact_name(name)).resolve()
+    if p.parent != base:
+        raise NLMError(f"artefatto: nome non ammesso '{name}'.")
+    if not p.is_file():
+        raise NLMError(f"artefatto: '{p.name}' non esiste fra quelli scaricati.")
+    return p
 
 
 def studio_download_audio(nb_id, out, *, artifact_id=None): return studio_download("audio", nb_id, out, artifact_id=artifact_id)
