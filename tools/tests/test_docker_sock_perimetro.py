@@ -68,7 +68,15 @@ ECCEZIONI: dict[str, tuple[str, tuple[str, ...]]] = {
 
 
 def main() -> int:
-    compose = sorted(p for p in ROOT.glob("compose*.y*ml") if p.is_file())
+    # rglob e non glob (rilievo 71d540e6, 09/08): con `glob` il perimetro era la ROOT
+    # (10 file) mentre la proprietà promessa è «nessun container DI QUESTO REPO» — e i
+    # compose sono 12: due stanno in `plugins/` (example-bot, example-mcp). Oggi nessuno
+    # dei due monta il socket, quindi non c'era un difetto vivo — ma erano fuori dal cono
+    # del presidio, ⭐ ed è la STESSA distanza fra domanda e sonda che questo test cura
+    # passando da un file a tutti. Peggio: quei due sono TEMPLATE DA COPIARE, quindi il
+    # codice nuovo nasce proprio dove il presidio non guardava.
+    compose = sorted(p for p in ROOT.rglob("compose*.y*ml")
+                     if p.is_file() and ".git" not in p.parts)
     if not compose:
         print("✗ nessun compose trovato: la sonda non sta guardando il repo giusto")
         return 1
@@ -93,7 +101,14 @@ def main() -> int:
                   f"      decisione scritta, non un controllo che tace.")
             continue
         ragione, aghi = ECCEZIONI[p.name]
-        mancanti = [a for a in aghi if a not in testo]
+        # «accanto al mount» si MISURA (rilievo 71d540e6): prima era `a not in testo`,
+        # cioè in TUTTO il file — spostando l'avviso in fondo il test restava verde e la
+        # garanzia dichiarata era più stretta di quella misurata. Ora la finestra sono le
+        # 15 righe che precedono la riga del mount: se l'avviso si allontana, si vede.
+        tutte = testo.splitlines()
+        i_mount = next(i for i, r in enumerate(tutte) if SOCK in r and not r.lstrip().startswith("#"))
+        finestra = "\n".join(tutte[max(0, i_mount - 15):i_mount])
+        mancanti = [a for a in aghi if a not in finestra]
         if mancanti:
             errori += 1
             print(f"  ✗ {p.name}: l'eccezione è ammessa ({ragione}) ma l'AVVISO è sparito.\n"
