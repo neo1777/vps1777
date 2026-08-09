@@ -77,6 +77,46 @@ def senza_gancio(file: list[Path]) -> list[Path]:
     return [p for p in file if not _DEF_TEST.search(p.read_text(encoding="utf-8"))]
 
 
+def cartelle_passate_a_pytest() -> list[str]:
+    """Tutte le cartelle che la CI passa a pytest, LETTE dal ci.yml (righe `run:`, non commenti).
+
+    Rilievo di 71d540e6/abdd732a sulla #136: *la proprietà che questo file difende non è di
+    `tools/tests/` — è di qualunque cartella che pytest esegue*, e sono cinque. Il gate
+    ne copre una.
+    ⇒ La scelta è deliberata e sta qui invece che in una frase: **su `tools/tests/` FALLISCE**
+    (è dove il difetto è stato misurato e curato), **sulle altre RIPORTA** — le nomina e
+    conta i fantasma senza bloccare. Allargare il fallimento a cartelle che nessuno ha
+    ancora guardato significherebbe rompere la CI su un difetto non istruito.
+    ⭐ E soprattutto: il limite così non è una riga di prosa che invecchia in silenzio, è un
+    **numero rimisurato a ogni run**. Se domani nasce la sesta cartella, compare da sé nel
+    report — nessuno deve ricordarsi di aggiornare un elenco. *È la lezione di `ci.yml:68-77`
+    sul perimetro di ShellCheck: un elenco scritto a mano invecchia, e chi lo allarga guarda
+    ciò che aggiunge, non ciò che manca.*
+
+    ⚠️ Il path va risolto contro `working-directory:`, non preso alla lettera. La prima
+    versione lo prendeva alla lettera e riportava «tests/ (non esiste su questo checkout)»
+    per DUE cartelle su quattro: esistono eccome, ma sotto `services/nb1777-mcp/` e
+    `services/gateway/`. *Un path dentro un comando non è un path sul disco finché non sai
+    da DOVE quel comando viene eseguito* — e la sonda dava quell'assenza per un fatto.
+    (Stessa famiglia, oggi, di un `git log -L` che «falliva» solo perché lanciato dalla
+    cartella sbagliata.)
+    """
+    if not CI.is_file():
+        return []
+    cartelle, wd = [], None
+    for riga in CI.read_text(encoding="utf-8").splitlines():
+        if re.match(r"^\s*-\s+name:", riga):
+            wd = None                      # nuovo step: il contesto precedente non vale più
+        m = re.match(r"^\s*working-directory:\s*(\S+)", riga)
+        if m:
+            wd = m.group(1).strip("'\"")
+        p = re.match(r"^\s*run:.*?pytest\s+([\w./-]+/)", riga)
+        if p:
+            arg = p.group(1)
+            cartelle.append(f"{wd.rstrip('/')}/{arg}" if wd and wd != "." else arg)
+    return sorted(set(cartelle))
+
+
 def la_ci_usa_ancora_pytest() -> bool:
     """La premessa di questo test è ancora vera?
 
@@ -124,6 +164,25 @@ def main() -> int:
               "  la proprietà che controlla sia vera.")
         return 1
     print("✓ ogni presidio di tools/tests ha un gancio: la CI li esegue davvero")
+
+    # IL PERIMETRO, riportato e non taciuto (vedi `cartelle_passate_a_pytest`).
+    altre = [c for c in cartelle_passate_a_pytest() if c.rstrip("/") != "tools/tests"]
+    if altre:
+        print(f"\nfuori dal mio perimetro — le altre {len(altre)} cartelle che la CI passa"
+              " a pytest (le CONTO, non le blocco):")
+        for c in altre:
+            d = ROOT / c
+            if not d.is_dir():
+                print(f"      {c:<32} (non esiste su questo checkout)")
+                continue
+            f = sorted(d.glob("test_*.py"))
+            orf = senza_gancio(f)
+            segno = "⚠️ " if orf else "  "
+            print(f"   {segno}  {c:<32} {len(f):>3} file · {len(orf)} senza gancio"
+                  + (f" → {', '.join(p.name for p in orf)}" if orf else ""))
+        print("   (se qui compare un ⚠️, il difetto è lo stesso e la cura è la stessa —"
+              " questo gate lo NOMINA ma non fa fallire la CI su una cartella"
+              " che nessuno ha ancora istruito.)")
     return 0
 
 
