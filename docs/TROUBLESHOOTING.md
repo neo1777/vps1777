@@ -308,7 +308,9 @@ docker exec vps1777-nb1777-mcp-1 sh -c 'test -s /run/secrets/gateway_secret && e
 ## Reset completo (perdi dati)
 
 ```bash
-docker compose down -v       # -v cancella volumi
+docker compose down -v --remove-orphans   # -v cancella i volumi; --remove-orphans
+                                          # prende anche l'ingress, che sta in un
+                                          # overlay e senza resterebbe acceso
 rm -rf secrets/ .env backups/
 ./setup.sh                   # ricominci da capo
 ```

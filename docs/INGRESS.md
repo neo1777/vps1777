@@ -57,7 +57,8 @@ da solo (`tailscale status`) e imposta `PUBLIC_BASE`.
 3. Aggiungi a `.env`:
    - `CADDY_DOMAIN=vps.tuosito.com`
    - `CADDY_EMAIL=tu@gmail.com`
-4. Lancia: `docker compose --profile ingress.caddy up -d`
+4. Lancia: `docker compose -f compose.yaml -f compose.ingress.caddy.yaml --profile ingress.caddy up -d`
+   (senza gli `-f` l'overlay non viene montato e Caddy non entra nel progetto)
 
 Caddy fa cert ACME via HTTP-01 al primo avvio.
 
@@ -84,7 +85,8 @@ Aggiungi `secrets/cf_api_token.txt` + modifica `ingress/Caddyfile` con `tls.dns 
 1. Su [one.dash.cloudflare.com → Networks → Tunnels](https://one.dash.cloudflare.com/) → Create Tunnel
 2. Configura **Public Hostname** che punta a `http://gateway:8080`
 3. Copia il **tunnel token** (lungo, base64) in `secrets/cloudflared_token.txt`
-4. Lancia: `docker compose --profile ingress.cloudflared up -d`
+4. Lancia: `docker compose -f compose.yaml -f compose.ingress.cloudflared.yaml --profile ingress.cloudflared up -d`
+   (senza gli `-f` l'overlay non viene montato e il tunnel non entra nel progetto)
 
 CF gestisce HTTPS + DNS automaticamente.
 

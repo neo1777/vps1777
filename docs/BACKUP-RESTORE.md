@@ -59,7 +59,9 @@ VPS1777_FEATURES=backup,autoupdate    # il default: backup notturno + auto-updat
 ```
 
 Step:
-1. `docker compose down`
+1. `docker compose down --remove-orphans` — l'`--remove-orphans` serve: senza, il
+   container dell'ingress non è nel modello (sta in un overlay) e **resta acceso**,
+   servendo traffico sopra volumi che si stanno ripristinando
 2. Decifra archivio con la tua chiave age
 3. Ripristina volumi + secrets
 4. `docker compose up -d`

@@ -17,7 +17,7 @@
 #                          o con prefisso vps1777_); salta config e secrets
 #
 # Procedura:
-#   1. ferma stack: docker compose down
+#   1. ferma stack: docker compose down --remove-orphans  (senza, l'ingress resta su)
 #   2. decifra/legge l'input
 #   3. ripristina volumi Docker (+ secrets/config se non --volumes-only)
 #   4. lascia all'utente (o alla CLI) lanciare `docker compose up -d`
@@ -90,8 +90,23 @@ if [ "$ASSUME_YES" != "1" ]; then
 fi
 
 # ───── 1. stop stack ─────
+# 🔴 `--remove-orphans` NON è una rifinitura: senza, questo `down` lasciava ACCESO
+#    l'ingress. Misurato il 09/08 (docker 29.4.1, A/B in sandbox): un `down` senza gli
+#    `-f` costruisce il modello dai soli file che vede, e ciò che sta nell'overlay non
+#    è nel modello ⇒ non viene fermato. Le label di progetto NON bastano (ipotesi
+#    verificata e caduta): il container dell'overlay restava su e la rete usciva con
+#    «Resource is still in use».
+#      up  -f compose.yaml -f compose.ingress.X.yaml  →  base + ingress
+#      down (senza -f)                                →  ferma base, ingress RESTA
+#      down --remove-orphans                          →  ferma tutto, rete rimossa
+#    Qui pesa perché è il passo 1 di un RESTORE: l'ingress servirebbe traffico sopra
+#    volumi che stanno venendo ripristinati sotto di lui.
+# 🔑 Si usa `--remove-orphans` e non gli `-f` di proposito: a questo punto il profilo
+#    non è ancora stato letto (succede a r.180), e una cura che deve INDOVINARE quale
+#    overlay era attivo sarebbe l'ennesimo insieme enumerato a mano. Docker sa già
+#    cosa appartiene al progetto: glielo si chiede, invece di dirglielo.
 log "Stop stack..."
-docker compose down 2>/dev/null || true
+docker compose down --remove-orphans 2>/dev/null || true
 
 # ───── 2. decifra / leggi input ─────
 TMP="$(mktemp -d)"
@@ -174,5 +189,10 @@ INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env 2>/dev/null | cut -d= -f2)"
 if [ -n "$INGRESS_PROFILE" ]; then
   log "  docker compose -f compose.yaml -f compose.${INGRESS_PROFILE}.yaml --profile $INGRESS_PROFILE up -d"
 else
-  log "  docker compose --profile ingress.tailscale up -d   # o caddy / cloudflared"
+  # Stessa forma del ramo sopra: gli `-f` non sono facoltativi. Senza, l'overlay
+  # ingress non entra nel progetto (gateway senza `ports:`, rete `funnel` assente)
+  # ⇒ lo stack riparte e NON è raggiungibile. Qui il profilo non si sa (.env
+  # illeggibile): si mostra il default, ma completo.
+  log "  docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \\"
+  log "    --profile ingress.tailscale up -d   # o caddy / cloudflared"
 fi

@@ -94,7 +94,9 @@ stampa URL e connector.
 ```bash
 git clone https://github.com/neo1777/vps1777.git && cd vps1777
 ./setup.sh                                          # wizard interattivo
-docker compose --profile ingress.tailscale up -d    # o caddy / cloudflared
+# se hai risposto «no» a «Procedo ora?» (setup.sh avvia già lo stack, con gli stessi -f):
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+  --profile ingress.tailscale up -d                 # o caddy / cloudflared
 ```
 
 Per l'HTTPS pubblico (Tailscale / Caddy / Cloudflare) e i prerequisiti, vedi

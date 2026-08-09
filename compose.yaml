@@ -16,7 +16,14 @@
 # host, misurata sul vivo il 26/07 (prova-1).
 #
 # Avvio tipico (produzione — immagini pullate da ghcr, MAI build sulla VPS):
-#   docker compose --profile ingress.tailscale up -d
+#   docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+#     --profile ingress.tailscale up -d
+#   ⚠️ gli `-f` non sono facoltativi: senza, l'overlay ingress non entra nel progetto
+#      (il `gateway` resta senza porte pubblicate e la rete `funnel` non viene creata).
+#   📌 «senza porte pubblicate» e non la parola-chiave YAML: il presidio H48 cerca quella
+#      stringa in QUESTO file e la trova anche dentro un commento — scriverla qui fa
+#      diventare rossa la CI. È il difetto «i commenti non contano», e questo commento
+#      è il posto giusto per ricordarlo a chi scriverà il prossimo.
 #
 # Dev (build locale delle immagini):
 #   docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch
