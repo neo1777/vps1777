@@ -74,8 +74,36 @@ def test_il_floor_usa_la_funzione_e_non_il_confronto_nudo():
 
     Senza questo, la funzione potrebbe restare corretta mentre `cmd_update` torna al
     confronto diretto — la cura viva in un posto che nessuno esegue.
+
+    ⚠️ SI CHIEDE ALL'AST, NON AL TESTO. Qui c'era un `in sorgente` su una stringa
+    esatta, e bastavano DUE PARENTESI per farlo gridare: riscrivendo la riga come
+    `if (args.from_intent) and floor_blocca(...)` — stesso identico senso — il test
+    diventava rosso (misurato il 10/08 riformattando e ripristinando).
+    ⭐ *Un falso positivo su una riformattazione innocua non protegge: insegna a
+    disattivare il presidio.* E il difetto è quello che abbiamo curato cinque volte
+    oggi in altri file: **un insieme definito da una stringa, dove la stringa ha una
+    grammatica che il confronto ignora.**
+    Con l'AST il test regge alla FORMA e cade solo sulla SOSTANZA: se qualcuno toglie
+    la condizione `from_intent`, o chiama un'altra funzione, o confronta a mano.
     """
-    sorgente = (_ROOT / "tools" / "vps1777.py").read_text()
-    assert "args.from_intent and floor_blocca(target, cur)" in sorgente, (
-        "cmd_update non usa più floor_blocca: il version-floor è tornato al confronto nudo"
+    import ast
+
+    albero = ast.parse((_ROOT / "tools" / "vps1777.py").read_text())
+
+    def _nomi(nodo):
+        return {n.id for n in ast.walk(nodo) if isinstance(n, ast.Name)} | {
+            n.attr for n in ast.walk(nodo) if isinstance(n, ast.Attribute)
+        }
+
+    guardie = [
+        n for n in ast.walk(albero)
+        if isinstance(n, ast.If)
+        and "floor_blocca" in _nomi(n.test)
+        and "from_intent" in _nomi(n.test)
+    ]
+    assert guardie, (
+        "nessun `if` che testi INSIEME `from_intent` e `floor_blocca`: o il "
+        "version-floor è tornato al confronto nudo, o non è più agganciato al "
+        "percorso del pulsante. (Chiesto all'AST: una riformattazione non basta "
+        "a far fallire questo test, e non basta a farlo passare.)"
     )
