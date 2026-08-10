@@ -211,7 +211,7 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   d'emergenza è esplicita e rumorosa: `VPS1777_REQUIRE_COSIGN=0` /
   `--no-require-cosign`. (Prima la verifica era opt-in e saltata in silenzio.)
 - **GitHub Actions pinnate a SHA** (`v0.27.0`). Ogni action è pinnata al commit
-  SHA (non al tag mobile): un tag ripuntato a monte non può iniettare codice.
+  SHA (non al tag mobile): un tag ripuntato a monte non può iniettare codice (`H65`).
   `Dependabot` (github-actions + docker + docker-compose) tiene freschi gli SHA/i
   digest. Permessi `least-privilege` per-job in `release.yml`. Le immagini di
   terzi nei compose sono digest-pinnate.
@@ -286,7 +286,7 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **64 voci** (2 critiche, 10 alte, 34 medie, 18 basse): 43 dalla
+Il registro conta **65 voci** (2 critiche, 10 alte, 35 medie, 18 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -297,7 +297,7 @@ conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 51 |
+| **chiusi** | 52 |
 | **parziali** | 12 |
 | **accettati** | 1 |
 | **aperti** | 0 |
