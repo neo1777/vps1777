@@ -1654,7 +1654,19 @@ findings:
           # l'invariante non è più QUALI percorsi: è che non ci sia un elenco.
           # `git ls-files` non può dimenticare un file — se qualcuno torna a
           # scriverli a mano, questa riga sparisce e il gate diventa rosso.
-          - "mapfile -t SCRIPTS < <(git ls-files '*.sh')"
+          #
+          # 🔴 10/08: questa evidenza ERA la riga intera, e ha fatto FALLIRE la CI
+          #   quando il glob è stato allargato allo shebang (#150). Il gate aveva
+          #   ragione a fermarsi — «o il fix è stato rimosso, o l'evidenza va
+          #   aggiornata» — e la risposta era la seconda: l'elenco non è tornato,
+          #   ne è stato tolto l'ULTIMO rimasto (l'estensione `.sh`, che escludeva
+          #   `tools/hooks/pre-commit`, cioè il gate stesso).
+          #   ⇒ un'evidenza che cita la riga INTERA marcisce a ogni miglioria della
+          #     riga, e chiede attenzione proprio quando qualcuno la sta rafforzando.
+          #     È la lezione di H65 sugli SHA, dall'altro lato: lì troppo specifica
+          #     avrebbe gridato a ogni Dependabot, qui a ogni cura. Resta la sola
+          #     parte che è l'INVARIANTE: la lista viene da git, non da una mano.
+          - "git ls-files"
           - "ruff check services/ tools/ security/"
         not_contains:
           - "shellcheck setup.sh tools/*.sh || true"
