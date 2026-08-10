@@ -75,8 +75,15 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # non era l'indicizzazione (quella è la scelta giusta e il test la argomenta bene):
 # era il compenso citato, che rende invisibile il debito perché chi lo legge smette
 # di cercare. Curata la prima delle tre; le altre due restano nel residuo.
-EXPECTED_TOTAL = 64
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 34, "low": 18}
+# + 1 (H65 medium, 10/08) = 65. H65 non nasce da un difetto: nasce da una garanzia
+# VERA e non presidiata. «Ogni action è pinnata al commit SHA» era esatta — 16 `uses:`
+# su 16, misurati — e non la teneva nessun test: sarebbe diventata falsa al primo
+# `uses: …@v4`, la forma che ogni README del mondo suggerisce, senza che nessun file
+# cambiasse il proprio testo. ⇒ *una promessa vera non ha sintomi finché regge, e
+# quando smette non ne ha comunque.* Trovata lavorando la voce `a80025f1` col suo
+# metodo: per ogni frase-garanzia in prosa, il codice regge? se sì merita un id.
+EXPECTED_TOTAL = 65
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 35, "low": 18}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

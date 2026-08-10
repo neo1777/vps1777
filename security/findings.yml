@@ -2766,3 +2766,69 @@ findings:
       «gli identificatori in formato riconoscibile e l'anagrafica non escono in chiaro da
       nessun tool» — non «i dati personali non escono in chiaro», che sarebbe più larga
       della misura.
+
+  - id: H65
+    severity: medium
+    title: "«Ogni action è pinnata al commit SHA» era una garanzia VERA e non presidiata: nessun test la teneva, e sarebbe diventata falsa al primo `uses: …@v4` senza che nessun file cambiasse il proprio testo"
+    status: closed
+    scoperta:
+      quando: "2026-08-10"
+      come: lettura
+      nota: >
+        abdd732a, lavorando la voce `a80025f1` («40 affermazioni-garanzia in prosa nei
+        doc di sicurezza non citano un id di findings.yml»). Il metodo della voce è:
+        per ogni frase, il codice regge? se sì merita un id, se no è il finding.
+        Qui il codice REGGEVA — 16 `uses:` su 16 pinnati a SHA(40), misurati su
+        origin/main — e proprio per questo mancava il presidio: una promessa vera
+        non ha sintomi finché non smette di esserlo, e allora non li ha comunque.
+    natura: comportamento
+    since: unreleased
+    prova:
+      - comando: "for f in .github/workflows/*.yml; do grep -oE 'uses:\\s*\\S+' $f; done | sort -u | grep -cE '@[0-9a-f]{40}'"
+        dove: "worktree su origin/main (206abdf), il 10/08/2026"
+        output: "16 su 16 — e `grep -vE '@[0-9a-f]{40}'` sullo stesso elenco non stampa nulla: la garanzia REGGEVA gia' prima del test"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "uvx pytest tools/tests/test_actions_pinnate_a_sha.py -q"
+        dove: "come la CI (ci.yml gira questa suite con uvx, STDLIB-ONLY)"
+        output: "2 passed in 0.02s"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "printf '\\n      - uses: qualcuno/azione-non-pinnata@v4\\n' >> .github/workflows/ci.yml && uvx pytest tools/tests/test_actions_pinnate_a_sha.py -q"
+        dove: "PROVA A CONTRARIO nel worktree, poi ripristinato: un presidio che non sa fallire e' un silenzio travestito da verde"
+        output: "1 failed, 1 passed — «ci.yml:478  uses: qualcuno/azione-non-pinnata@v4»: nomina file, riga e valore"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "uvx pytest tools/tests/ -q"
+        dove: "suite intera: in tools/tests/ un import di troppo non fallisce il tuo test, impedisce agli altri di partire (COLLECT)"
+        output: "277 passed, 4 skipped in 63.24s"
+        exit: 0
+        quando: "2026-08-10"
+    evidence:
+      - file: tools/tests/test_actions_pinnate_a_sha.py
+        contains:
+          - "def test_ogni_uses_e_pinnato_a_uno_sha_di_commit("
+          - "def test_ci_sono_workflow_da_controllare("
+      - file: SECURITY.md
+        contains:
+          - "GitHub Actions pinnate a SHA"
+    fix: >
+      Un test che ENUMERA invece di campionare: legge ogni `uses:` di
+      `.github/workflows/*.yml` e chiede che porti un SHA di 40 esadecimali,
+      escludendo per nome i casi che uno SHA di commit non ce l'hanno (action
+      locali `./…`, `docker://`). Provato a contrario aggiungendo un
+      `uses: …@v4`: il test cade e stampa file, riga e valore.
+      Porta con sé la guardia della guardia (`test_ci_sono_workflow_da_controllare`):
+      se i workflow sparissero o cambiassero cartella, l'altro test passerebbe su una
+      lista VUOTA — verde per assenza di bersaglio, che è il modo più comune in cui un
+      presidio smette di proteggere senza dirlo.
+    residuo: >
+      NON È ESPRIMIBILE COME `contains:` DI UN'EVIDENZA, ed è la ragione per cui esiste
+      il test: gli SHA cambiano a ogni bump di Dependabot (una stringa fissa marcirebbe
+      in settimane, e marcirebbe come falso allarme su una garanzia che regge), e
+      soprattutto un `contains` prova che UNA riga è pinnata, non che lo siano TUTTE.
+      Quando una promessa dice «ogni», l'evidenza non può essere un esempio.
+      Il test copre i workflow; NON copre le action riusabili chiamate da altri repo,
+      né le immagini nei compose — quelle stanno in una garanzia diversa della stessa
+      riga di SECURITY.md, verificata a mano il 10/08 (caddy, cloudflared, alpine,
+      portainer, watchtower: tutte `@sha256:`) e ancora senza presidio proprio.
