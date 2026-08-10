@@ -313,8 +313,14 @@ findings:
       # verde: il gate guardava un nome di file, non la proprietà. Il test qui sotto
       # scandaglia TUTTI i compose*.y*ml e ammette solo eccezioni NOMINATE, valide
       # finché accanto al mount resta scritto perché sono accettate.
+      # 10/08 (H67): il `not_contains` qui sopra resta com'è, e la ragione va scritta o
+      # sembra una dimenticanza — allargarlo a "docker.sock" lo farebbe FALLIRE proprio
+      # su questo file, che la stringa ce l'ha nel commento in cui dichiara di NON
+      # montare il socket. ⇒ un'evidenza testuale non sa distinguere il codice dal
+      # commento che lo racconta: è il TEST qui sotto a fare quel lavoro, e per questo
+      # la garanzia vive lì e non in un `contains`.
       - file: tools/tests/test_docker_sock_perimetro.py
-        contains: ["ECCEZIONI", "compose*.y*ml"]
+        contains: ["ECCEZIONI", "compose*.y*ml", "SOCK_RE", "def senza_commento("]
       - file: tools/backup.sh
         contains: ["BACKUP_VOLUMES_DIR"]
       - file: tools/backup-container-setup.sh
@@ -2904,3 +2910,173 @@ findings:
       da sorvegliare: se un domani si aggiungesse un'esenzione allargando la regex del
       digest invece che la funzione `_e_di_terzi()`, sparirebbe dalla vista di chi
       legge il test. L'esenzione va aggiunta DOVE si vede, col suo perche'.
+
+  - id: H67
+    severity: medium
+    title: "«Il gateway non tocca mai Docker» era una garanzia VERA e presidiata a metà: il presidio che copriva la via principale riconosceva il socket da UN path (`/var/run/docker.sock`) e non dallo stesso socket montato come `/run/docker.sock` — stesso inode, presidio verde"
+    status: closed
+    scoperta:
+      quando: "2026-08-10"
+      come: lettura
+      nota: >
+        abdd732a, lavorando la voce `a80025f1` sulla mappa di coordinate consegnata da
+        71d540e6. La frase è `SECURITY.md:236`, in fondo al punto elenco «Collect→apply
+        disaccoppiato» del canale di aggiornamento, e non citava alcun id.
+        IL METODO DELLA VOCE AVEVA DUE ESITI — il codice regge? sì, merita un id; no, è
+        un finding — e questo è il TERZO, nominato da 71d540e6 lo stesso giorno:
+        **regge, è presidiato, e il presidio non copre tutte le forme dell'oggetto.**
+        Aggiungere l'id e basta avrebbe fatto sembrare chiusa una garanzia che una
+        variante di path scavalcava.
+        COME È VENUTO FUORI: prima di scrivere un presidio nuovo ho misurato la
+        copertura di quello che c'era (`test_docker_sock_perimetro.py`, nato dalla
+        issue #69), sabotando un compose invece di leggerne il codice. Dal path
+        canonico usciva 1; dallo stesso socket scritto `/run/docker.sock` usciva 0 —
+        e stampava «10/12 compose NON montano il socket» mentre uno lo montava.
+        ⭐ Un guardiano muto lascia il dubbio, uno che rendiconta in positivo lo toglie.
+        PERCHÉ ERA RIMASTO, ed è la parte riusabile: la issue #69 aveva allargato bene
+        il PERIMETRO DEI FILE (da 1 file a tutti i `compose*.y*ml` con `rglob`, inclusi
+        i template in `plugins/`) lasciando invariata la CHIAVE cercata dentro ogni
+        file. L'asse allargato non era quello bucato.
+        NESSUNA ESPOSIZIONE REALE: su origin/main nessun compose montava il socket dal
+        path alternativo, e i due che lo montano (portainer, watchtower) sono profili
+        opt-in già nominati come eccezioni. Il difetto era nella capacità di accorgersene.
+    natura: comportamento
+    since: unreleased
+    prova:
+      - comando: "stat -c '%i %n' /run/docker.sock /var/run/docker.sock"
+        dove: "macchina di sviluppo con Docker attivo, il 10/08/2026"
+        output: "1537 /run/docker.sock · 1537 /var/run/docker.sock — stesso inode: /var/run è un symlink a /run, i due path sono lo STESSO socket"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "printf '\\n  finto:\\n    volumes:\\n      - /run/docker.sock:/run/docker.sock\\n' >> compose.dev.yaml && python3 tools/tests/test_docker_sock_perimetro.py"
+        dove: "PRIMA della cura, worktree su origin/main (3d5a380), poi ripristinato"
+        output: "exit 0 e «10/12 compose NON montano il socket» — il presidio TACEVA, e affermava il contrario"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "python3 tools/tests/test_docker_sock_perimetro.py    # dopo la cura, baseline"
+        dove: "worktree su origin/main (3d5a380), il 10/08/2026"
+        output: "exit 0 · «10/12 compose NON montano il socket · 2 lo montano (portainer, watchtower)»"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "per ognuno dei tre path (/var/run/…, /run/…, ~/.docker/run/…) sabotato compose.dev.yaml e rilanciato test_docker_sock_perimetro.py"
+        dove: "PROVA A CONTRARIO nel worktree, ripristinato dopo ognuna (git diff --stat vuoto)"
+        output: "exit 1 su tutti e tre: la chiave è passata dal path al basename `docker.sock`, che è la forma che li accomuna"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "python3 tools/tests/test_gateway_non_tocca_docker.py"
+        dove: "worktree su origin/main (3d5a380), il 10/08/2026"
+        output: "exit 0 · 8 definizioni del servizio gateway lette nei compose, 4 mezzi cercati, 20 sorgenti del gateway letti con `ast`: la garanzia REGGEVA già prima del test"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "sabotato il gateway in compose.yaml con /run/docker.sock, poi con DOCKER_HOST, poi aggiunto `import subprocess` in services/gateway/app/admin.py"
+        dove: "PROVA A CONTRARIO sui tre mezzi, worktree, ripristinato dopo ognuno"
+        output: "exit 1 su tutti e tre — un presidio che non sa fallire è un silenzio travestito da verde"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "aggiunto in testa a services/gateway/app/admin.py un COMMENTO che nomina docker.sock, DOCKER_HOST e docker, poi rilanciato"
+        dove: "PROVA A CONTRARIO NEL VERSO OPPOSTO: il commento non è una violazione"
+        output: "exit 0 — il lato codice si legge con `ast`, e i commenti non entrano nell'albero: la classe «un controllo che cerca una stringa non distingue il codice dal commento che lo racconta» qui non si applica per costruzione"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "matrice 5x2: /./:/host · /var/./run:/x · //var//run:/x · /opt/../run:/x · /run:/host-run:ro, ognuno sabotato in un compose ORDINARIO e in uno d'ECCEZIONE (portainer)"
+        dove: "worktree su origin/main, dopo la cura dei due fenomeni; ogni file ripristinato (git diff --stat vuoto)"
+        output: "10 su 10 exit 1. PRIMA della cura la stessa matrice dava 3 rossi su 10 — ed e' esattamente la matrice su cui le due revisioni divergevano: chi sabotava un file ordinario vedeva rosso, chi sabotava un'eccezione vedeva verde"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "sette forme di mount sabotate una per volta in compose.dev.yaml: /var/run/docker.sock · /run/docker.sock:/tmp/d.sock · /run:/host-run:ro · /var/run:/var/run · /var/run/:/hr · /:/host:ro · /run/alias.sock:/tmp/d.sock"
+        dove: "DOPO la seconda cura (regola per REGIONE), worktree su origin/main, ripristinato dopo ognuna"
+        output: "exit 1 su tutte e sette. Le ultime cinque NON nominano mai `docker.sock`: sono la revisione di 71d540e6 e b82df434 sulla PR #147, che hanno sabotato la cura appena scritta e trovato che l'oggetto era ancora identificato per NOME"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "quattro mount legittimi provati nel verso opposto: ./onboarding:/onboarding · gateway-uploads:/uploads · /opt/dati:/dati:ro · ${VPS1777_DIR}/secrets:/run/secrets:ro"
+        dove: "PROVA A CONTRARIO: una regola per regione che grida su un mount normale e' un guardiano che si impara a ignorare"
+        output: "nessuno scatta — e l'ultimo e' il caso che lo dimostra: la DESTINAZIONE in /run e' legittima, conta la sorgente"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "mv tools/tests/test_docker_sock_perimetro.py /tmp/ && python3 tools/tests/test_gateway_non_tocca_docker.py"
+        dove: "il legame fra i due presidi provato TOGLIENDO la definizione canonica"
+        output: "exit 1, FileNotFoundError esplicito — se il canonico sparisce il presidio non diventa verde, che e' il punto di importarlo invece di ricopiarlo"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "uvx pytest tools/tests/ -q"
+        dove: "suite intera come la CI: in tools/tests/ un import di troppo non fallisce il tuo test, impedisce agli altri di partire (COLLECT)"
+        output: "317 passed, 4 skipped in 66.63s"
+        exit: 0
+        quando: "2026-08-10"
+    evidence:
+      - file: tools/tests/test_gateway_non_tocca_docker.py
+        contains:
+          - "def test_il_gateway_non_ha_mezzi_verso_docker("
+          - "def test_la_sonda_sa_diventare_rossa("
+          - "MODULI_VIETATI"
+      - file: tools/tests/test_docker_sock_perimetro.py
+        contains:
+          - "SOCK_RE = re.compile(r\"docker\\.sock\")"
+          - "def test_riconosce_ogni_forma_del_mount("
+          - "def senza_commento("
+          - "def sorgente_pericolosa("
+          - "RADICI = (\"/run\", \"/var/run\")"
+      - file: SECURITY.md
+        contains:
+          - "Il gateway non tocca mai Docker (`H67`)"
+    fix: >
+      Due mosse, e la seconda esiste solo perché la prima ha cambiato la superficie.
+      ① `test_docker_sock_perimetro.py` non cerca più un PATH ma il **basename**
+      `docker.sock`: è la forma che accomuna ogni nome che porta a quel socket
+      (`/run`, `/var/run`, il rootless sotto `~`, qualunque prefisso). La proposta di
+      b82df434 — confrontare l'inode invece del nome — è la risposta giusta alla
+      domanda «è quell'oggetto?» ma non è eseguibile qui: **il test gira in CI, dove il
+      socket non esiste**, e la sorgente di un bind mount è comunque un path della
+      macchina di produzione, non del runner. Il principio è accolto, il meccanismo no,
+      e il perché è scritto nel file.
+      ② `test_gateway_non_tocca_docker.py`, nuovo, presidia la frase per intero: i MEZZI
+      sono più d'uno e il mount è solo il primo. Guarda il servizio `gateway` in ogni
+      compose che lo definisce — **con gli alias YAML risolti**, perché il blocco
+      comincia con `<<: [*restart, *logging, *security, *readonly]` e un volume dentro
+      un anchor sarebbe invisibile — e cerca socket, `DOCKER_HOST`, `group_add`,
+      `privileged`. Poi legge il codice del gateway con `ast`: nessuna SDK Docker,
+      nessun modulo che esegua processi. Se il servizio non si trova, o un alias non si
+      risolve, FALLISCE: un presidio che non trova il bersaglio tace, e il silenzio
+      somiglia a un ok.
+    residuo: >
+      LA CURA DEL FALSO NEGATIVO HA FABBRICATO UN FALSO POSITIVO, ed è il pezzo che
+      vale più del difetto: allargata la chiave al basename, la baseline è diventata
+      ROSSA su `compose.ops.backup.yaml` — il file che il socket non lo monta e lo
+      dichiara («NIENTE docker.sock (finding 2.8/H13)»), con il commento a FINE riga
+      mentre il filtro guardava solo `lstrip().startswith("#")`.
+      ⇒ curare un buco di copertura è un cambio di SUPERFICIE, e la domanda non è «la
+      chiave nuova è giusta?» ma *«quale popolazione entra adesso in ogni filtro a
+      valle, e su quale era tarato?»*. Curato con `senza_commento()`, e il caso vero è
+      dentro la controprova invece che nella memoria di chi l'ha visto.
+      ⭐⭐ E IL DIFETTO PIÙ GRAVE DEI QUATTRO È USCITO DA UN DISACCORDO, non da un
+      sabotaggio: 71d540e6 misurava `/./:/host` PRESO e b82df434 lo misurava PASSATO,
+      sullo STESSO commit. Nessuna delle due sonde era sbagliata — sabotavano file
+      diversi, e **l'eccezione era indicizzata per NOME DI FILE**: dopo il primo mount col
+      suo avviso, in `compose.ops.portainer.yaml` e `compose.ops.watchtower.yaml` nessuna
+      altra riga veniva più esaminata. Nei due compose che il socket lo montano
+      legittimamente si poteva montare `/` e il presidio restava verde.
+      «Questo FILE ha una ragione» era diventato «in questo file non guardo più».
+      ⇒ 🛡️ **due misure oneste che divergono sullo stesso oggetto non sono un errore da
+      arbitrare: sono la prova che l'oggetto ha più di un comportamento** — e possono
+      essere più di due (qui erano tre: eccezione-per-file, path non normalizzato, e le
+      forme già curate). *Se una delle due avesse ceduto per cortesia, il buco sarebbe
+      ancora lì.* Postilla di b82df434, pagata nello stesso giro: **quando una spiegazione
+      unifica due misure divergenti, la cosa da fare è rifare la propria** — la
+      spiegazione elegante ferma la ricerca, e due cause distinte con lo stesso sintomo si
+      coprono a vicenda.
+      ⭐ E LA CURA HA RIPRODOTTO LA PROPRIA CLASSE UN ANELLO PIÙ IN LÀ, trovato da
+      71d540e6 e b82df434 sabotando la PR (non rileggendola): passata la chiave al
+      basename, restava scoperto `- /run:/host-run:ro` — **stesso accesso, e la riga non
+      nomina mai `docker.sock`**. Chi monta il contenitore non nomina il contenuto.
+      ⇒ la classe non si chiude allargando ancora la stringa (`path → basename →
+      directory → symlink → …`, un anello per volta, ognuno vero e nessuno ultimo). Il
+      predicato è diventato una REGIONE del filesystem, enunciabile in una riga e senza
+      varianti: **nessun bind con sorgente `/`, `/var`, o dentro `/run` / `/var/run`**.
+      Prende anche `/run/alias.sock`, un symlink dal nome arbitrario che nessun elenco di
+      basename avrebbe catturato.
+      RESTA FUORI, e con il criterio deciso quel giorno — *«si sfrutta OGGI, senza che
+      nessuno cambi niente?»* — sono FRAGILITÀ e non buchi: un socket esposto sotto un
+      path arbitrario FUORI da `/run` (serve un symlink creato apposta sull'host), e
+      `DOCKER_HOST` per i servizi diversi dal gateway (serve che qualcuno ce lo metta).
+      Non è una svista: è il confine fra un controllo statico sul testo e uno che
+      interroga il sistema, e questo repo ha il primo.

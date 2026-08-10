@@ -39,6 +39,19 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 # di NON agire, con una motivazione. È un esito legittimo (risk acceptance): non
 # è "chiuso" (niente è stato fatto) né "aperto" (non è dimenticato, è una scelta).
 VALID_STATUS = {"closed", "partial", "open", "accepted"}
+# ⚖️ QUANDO UNA VOCE È `closed` MA HA UN `residuo:` — il criterio, in forma di domanda,
+# perché `residuo:` stava coprendo due cose diverse (b82df434 e 71d540e6, 10/08, sulla
+# revisione di H67; scritto qui e non sul bus perché è qui che lo legge chi apre una voce):
+#
+#     «si sfrutta OGGI, senza che nessuno cambi niente?»
+#
+#   SÌ  → è un BUCO: la voce non è `closed`. Un finding chiuso smette di essere cercato.
+#   NO  → è una FRAGILITÀ: il presidio oggi tiene, e il `residuo:` descrive come
+#         potrebbe smettere di tenere. `closed` + `residuo:` è la forma giusta.
+#
+# Le due si somigliano scritte, e si separano solo provando: il 10/08 H67 è passata da
+# buco a fragilità in un commit, e la differenza l'ha decisa un sabotaggio, non una
+# rilettura. ⇒ prima di scegliere lo stato, prova a sfruttare il residuo.
 VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # Quante voci il registro DEVE avere per fascia: se non le rispetta, qualcuno
 # ha aggiunto o perso un rilievo per strada. L'àncora si muove SOLO con un
@@ -90,8 +103,15 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # insegna a ignorare gli allarmi. Le 8 sono coperte altrove (4 hanno un `build:`
 # accanto, 4 sono le nostre da GHCR con images.lock), e il test lo dichiara invece di
 # allargare la regex: ⇒ *una lista di esenzioni è sicura quando il default urla.*
-EXPECTED_TOTAL = 66
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 36, "low": 18}
+# + 1 (H67 medium, 10/08) = 67. H67 nasce dallo stesso metodo di H65 e H66 ma con un
+# esito che i primi due non avevano: la garanzia «Il gateway non tocca mai Docker»
+# (SECURITY.md) era vera E già presidiata — solo che il presidio riconosceva il socket
+# da UN path, e lo stesso socket montato come `/run/docker.sock` (stesso inode: /var/run
+# è un symlink a /run) lo lasciava passare uscendo 0. ⇒ il terzo stato del metodo:
+# «regge, è presidiato, e il presidio non copre tutte le forme dell'oggetto» — dove
+# aggiungere solo l'id avrebbe fatto sembrare chiusa una garanzia scavalcabile.
+EXPECTED_TOTAL = 67
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 37, "low": 18}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
