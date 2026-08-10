@@ -22,7 +22,14 @@
    vera. Su tutti i `compose*.yaml` (più i `plugins/*/`) è falsa. Il test parte dal
    glob, non dal file — se domani un overlay nuovo monta quel volume, qui è rosso.
 
-Solo stdlib + PyYAML (già dipendenza dei gate del repo). Nessun docker, nessuna rete.
+🔴 SOLO STDLIB, e l'ho imparato dalla CI: la prima versione importava PyYAML — che il
+   repo usa davvero, ma in un ALTRO job (`uv run --with pyyaml security/check_findings.py`).
+   `tools/tests/` gira con `uvx pytest`, stdlib-only: in locale passava, in CI
+   `ModuleNotFoundError: No module named 'yaml'` e la suite si fermava in COLLECT — cioè
+   il mio test non falliva: impediva agli altri 267 di partire.
+   ⇒ «la libreria è già una dipendenza del repo» non vuol dire «è disponibile in questo
+   job». Qui i compose si leggono con un parser minimo, e il suo limite sta scritto
+   in `_montaggi()`.
 """
 from __future__ import annotations
 
@@ -31,7 +38,6 @@ import re
 from pathlib import Path
 
 import pytest
-import yaml
 
 _ROOT = Path(__file__).resolve().parents[2]
 _VOLUME = "nlm-auth"
@@ -63,6 +69,12 @@ _FILE_CHE_LO_NOMINANO = {
     "tools/tests/test_vps1777.py": "test della CLI: nomina il volume fra i DATA_VOLUMES",
 }
 
+# 📌 I file che affermano l'ESCLUSIVITÀ, .md e codice insieme. Sono sette e le forme
+#    sono tre: le prime cinque le ho trovate cercando la frase nei documenti, la sesta
+#    @b82df434 cercando il NOME DEL VOLUME fuori dai .md, la settima @71d540e6 cercando
+#    il LESSICO dell'esclusività nel codice. Tre sonde, tre raccolti diversi — e il
+#    numero si è fermato solo quando le sonde hanno smesso di guardare lo stesso posto.
+
 
 def _compose_files() -> list[Path]:
     files = [Path(p) for p in glob.glob(str(_ROOT / "compose*.yaml"))]
@@ -71,19 +83,55 @@ def _compose_files() -> list[Path]:
 
 
 def _montaggi() -> dict[str, list[str]]:
-    """servizio → [file:mount] per ogni servizio che monta il volume, ovunque."""
+    """servizio → [file:mount] per ogni servizio che monta il volume, ovunque.
+
+    Parser minimo, stdlib-only (vedi la testa del file: qui PyYAML non c'è). Regge sulla
+    forma dei nostri compose — `services:` a colonna 0, il nome del servizio a 2 spazi,
+    i volumi come `      - <volume>:<path>[:ro|rw]`. **Il limite è dichiarato e presidiato**:
+    una riga che monta il volume ma non è attribuibile a un servizio non viene ignorata,
+    fa fallire il test — un parser che non capisce deve dirlo, non rispondere zero.
+    """
     out: dict[str, list[str]] = {}
     for f in _compose_files():
-        try:
-            d = yaml.safe_load(f.read_text()) or {}
-        except yaml.YAMLError as exc:  # un compose illeggibile è un rosso, non uno zero
-            pytest.fail(f"{f.name}: YAML non parsabile ({exc})")
-        for nome, svc in (d.get("services") or {}).items():
-            for v in ((svc or {}).get("volumes") or []):
-                riga = v if isinstance(v, str) else str(v)
-                if riga.split(":")[0] == _VOLUME:
-                    out.setdefault(nome, []).append(f"{f.name}:{riga}")
+        righe = f.read_text().splitlines()
+        dentro_services = False
+        servizio: str | None = None
+        for riga in righe:
+            if re.match(r"^services:\s*$", riga):
+                dentro_services = True
+                servizio = None
+                continue
+            if re.match(r"^\S", riga):           # un'altra chiave di primo livello
+                dentro_services = riga.startswith("services:")
+                servizio = None
+                continue
+            m = re.match(r"^  ([A-Za-z0-9][\w.-]*):\s*$", riga)
+            if m and dentro_services:
+                servizio = m.group(1)
+                continue
+            mv = re.match(r"^\s+-\s+" + re.escape(_VOLUME) + r":(\S+)", riga)
+            if mv:
+                assert servizio and dentro_services, (
+                    f"{f.name}: monta `{_VOLUME}` in una riga che questo parser non sa "
+                    f"attribuire a un servizio ({riga.strip()!r}). Il compose ha cambiato "
+                    f"forma: aggiorna il parser invece di lasciarlo rispondere zero."
+                )
+                out.setdefault(servizio, []).append(f"{f.name}:{_VOLUME}:{mv.group(1)}")
     return out
+
+
+def test_il_parser_vede_i_servizi_che_esistono():
+    """Controprova sullo STRUMENTO: se il parser smettesse di riconoscere i servizi,
+    `_montaggi()` tornerebbe vuoto e gli altri test direbbero «nessun montaggio» —
+    uno zero che somiglia a una buona notizia. Qui si verifica che sappia ancora
+    leggere il compose principale."""
+    principale = _ROOT / "compose.yaml"
+    righe = principale.read_text().splitlines()
+    attesi = {m.group(1) for r in righe
+              if (m := re.match(r"^  ([A-Za-z0-9][\w.-]*):\s*$", r))}
+    assert "nb1777-mcp" in attesi and "gateway" in attesi, (
+        f"il parser non riconosce più i servizi di compose.yaml: {sorted(attesi)}"
+    )
 
 
 def test_i_montaggi_sono_quelli_dichiarati():
@@ -119,7 +167,30 @@ def test_la_doc_nomina_tutti_quelli_che_montano(doc):
         )
 
 
-@pytest.mark.parametrize("doc", ["SECURITY.md", "docs/ARCHITECTURE.md", "README.md"])
+# 🔎 La SESTA copia della frase non era in un .md: stava nella docstring di
+#    `services/nb1777-mcp/app/nlm_profile.py` — «nb1777-mcp è l'UNICO servizio che monta»
+#    — e l'ha trovata @b82df434 cercando il nome del volume FUORI dai .md, cioè
+#    esattamente dove una sonda sulla documentazione non guarda. Una docstring sbagliata
+#    non fa sbagliare chi legge la doc: fa sbagliare chi SCRIVE il codice.
+#    ⇒ le forme dell'esclusività sono due, e vanno cercate entrambe: «solo nb1777-mcp»
+#      e «nb1777-mcp è l'unico».
+_ESCLUSIVITA = (
+    re.compile(r"\bsolo\W{0,4}`?nb1777-mcp`?", re.IGNORECASE),
+    re.compile(r"nb1777-mcp\W{0,24}(?:è|e')\W{0,8}l['’]?\s?unico", re.IGNORECASE),
+    # la SETTIMA copia (@71d540e6, services/gateway/app/settings.py): «nb1777-mcp,
+    # l'unico servizio che monta quel volume» — nessun verbo fra il nome e «unico».
+    re.compile(r"nb1777-mcp\W{0,6}l['’]\s?unico", re.IGNORECASE),
+)
+_QUALIFICA = re.compile(r"in esercizio|fra i servizi|dei servizi", re.IGNORECASE)
+
+
+@pytest.mark.parametrize("doc", [
+    "SECURITY.md",
+    "docs/ARCHITECTURE.md",
+    "README.md",
+    "services/nb1777-mcp/app/nlm_profile.py",
+    "services/gateway/app/settings.py",
+])
 def test_il_solo_e_qualificato(doc):
     """«solo nb1777-mcp» resta dicibile — ma solo se la frase dice DI COSA è il solo.
 
@@ -130,9 +201,10 @@ def test_il_solo_e_qualificato(doc):
     dal modello di minaccia.
     """
     testo = (_ROOT / doc).read_text()
-    for m in re.finditer(r"\bsolo\W{0,4}`?nb1777-mcp`?", testo, re.IGNORECASE):
+    for pattern in _ESCLUSIVITA:
+      for m in pattern.finditer(testo):
         intorno = testo[max(0, m.start() - 260): m.end() + 260]
-        assert re.search(r"in esercizio|fra i servizi|dei servizi", intorno, re.IGNORECASE), (
+        assert _QUALIFICA.search(intorno), (
             f"{doc}: «{m.group(0)}» senza qualifica. Fra i SERVIZI è vero; senza dirlo, "
             f"esclude il backup (che li cifra) e il check scadenze (che ne legge la data) "
             f"— e con loro la parte di superficie che quei due portano."
@@ -165,4 +237,51 @@ def test_i_riferimenti_nel_codice_sono_quelli_dichiarati():
         f"in meno: {sorted(set(_FILE_CHE_LO_NOMINANO) - trovati)}\n"
         "Se il punto nuovo MONTA il volume, va anche nella doc (SECURITY.md, "
         "docs/ARCHITECTURE.md, README.md); se lo nomina soltanto, basta dichiararlo qui."
+    )
+
+
+# 🔎 LA SONDA CHE MANCAVA, e l'ha scritta @b82df434 revisionando la #140: l'elenco
+#    `_FILE_CHE_LO_NOMINANO` verifica CHE un file nomini il volume, mai COSA DICE su di
+#    esso. Cercando l'AFFERMAZIONE invece del termine sono uscite altre cinque copie —
+#    tutte in commenti e docstring, cioè nel posto peggiore: *una frase falsa in un
+#    README fa sbagliare chi legge; in un commento accanto al codice fa sbagliare chi
+#    scrive.* Qui la classe è presidiata alla radice: qualunque file del repo può dire
+#    «unico/solo … monta» dei cookie, ma deve dire di cosa è il solo.
+# ⚠️ Il verbo è al PRESENTE apposta: `\b(monta|montano|montare|mount)\b` non prende
+#    «montava». Una frase storica — «prima il gateway montava in scrittura…» — non
+#    promette niente su oggi, e chiederle una qualifica sarebbe rumore: il primo giro di
+#    questa sonda l'aveva presa (`nlm_client.py:4`) e il falso positivo era suo, non del
+#    file. Il prezzo dichiarato: un'esclusività scritta con un verbo che non è qui
+#    («ad accedere», «a leggere») non la vede — se ne compare una, si allarga questa riga.
+_AFFERMAZIONE = re.compile(
+    r"(unic\w+|solo|soltanto)[^.\n]{0,80}\b(monta|montano|montare|mount)\b",
+    re.IGNORECASE)
+_PARLA_DEI_COOKIE = re.compile(r"nlm-auth|cookie", re.IGNORECASE)
+
+
+def test_nessuna_esclusivita_nuda_sui_cookie_in_tutto_il_repo():
+    """Nessun file — codice, compose, unit — può dire «l'unico che monta» dei cookie
+    senza dire *di cosa* è l'unico. Il perimetro è il repo, non la documentazione."""
+    fuori = []
+    for pattern in ("**/*.py", "**/*.yaml", "**/*.sh", "**/*.service"):
+        for f in _ROOT.glob(pattern):
+            rel = f.relative_to(_ROOT).as_posix()
+            if rel.startswith(".git/") or rel == "tools/tests/test_nlm_auth_montaggi.py":
+                continue
+            try:
+                testo = f.read_text(errors="ignore")
+            except OSError:
+                continue
+            for m in _AFFERMAZIONE.finditer(testo):
+                intorno = testo[max(0, m.start() - 200): m.end() + 200]
+                if not _PARLA_DEI_COOKIE.search(intorno):
+                    continue          # parla di un altro volume: non è affar nostro
+                if _QUALIFICA.search(intorno):
+                    continue
+                riga = testo[: m.start()].count("\n") + 1
+                fuori.append(f"{rel}:{riga}  «{m.group(0).strip()}»")
+    assert not fuori, (
+        "affermazioni di esclusività NUDE sui cookie (dicono «l'unico che monta» senza "
+        "dire di cosa è l'unico — e sui servizi è falsa: anche il container `backup` "
+        "monta quel volume):\n  " + "\n  ".join(fuori)
     )

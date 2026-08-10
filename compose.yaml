@@ -212,7 +212,9 @@ services:
     secrets:
       - gateway_secret
     volumes:
-      # UNICO servizio a montare il volume dei cookie Google (H6): li possiede lui.
+      # Fra i servizi in esercizio, l'unico a montare il volume dei cookie Google
+      # (H6): li possiede lui. In sola lettura lo montano anche il backup (che li
+      # cifra) e il check scadenze (che ne legge la data) — vedi SECURITY.md.
       - nlm-auth:/var/lib/nlm:rw
       # Artefatti scaricati da NotebookLM: volume PROPRIO, senza segreti dentro.
       - nlm-artifacts:/var/lib/nlm-artifacts:rw

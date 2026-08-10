@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # Segreto condiviso col gateway (e col bot) per gli endpoint INTERNI
-    # /internal/nlm/*: nb1777-mcp è l'unico a montare il volume dei cookie
-    # Google (H6), gli altri chiedono qui. Si riusa il `gateway_secret` — che
+    # /internal/nlm/*: fra i servizi in esercizio nb1777-mcp è l'unico a montare il
+    # volume dei cookie Google (H6), gli altri chiedono qui. Si riusa il `gateway_secret` — che
     # esiste già su ogni installazione — invece di introdurre un secret nuovo,
     # che mancherebbe agli update esistenti (compose non parte se il file non
     # c'è). Fail-closed: senza segreto, gli endpoint interni negano tutti.

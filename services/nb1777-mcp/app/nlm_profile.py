@@ -1,9 +1,14 @@
 """
 Il profilo NotebookLM (i cookie di sessione Google) — chi lo possiede lo scrive.
 
-nb1777-mcp è l'UNICO servizio che monta il volume `nlm-auth`: il gateway (che è
-l'unico esposto su Internet) e il bot non ci arrivano più, né in lettura né in
-scrittura (finding H6). Loro chiedono qui, via endpoint interno.
+Fra i servizi in esercizio, nb1777-mcp è l'unico che monta il volume `nlm-auth`:
+il gateway (che è l'unico esposto su Internet) e il bot non ci arrivano più, né in
+lettura né in scrittura (finding H6). Loro chiedono qui, via endpoint interno.
+Lo montano in sola lettura anche due lavori a tempo, che non sono servizi: il
+backup (lo cifra con la chiave pubblica `age`) e il check settimanale delle
+scadenze (`busybox --network none`, legge solo l'mtime dei cookie). Vedi
+SECURITY.md — e `tools/tests/test_nlm_auth_montaggi.py`, che tiene insieme
+questa frase e i montaggi veri.
 
 Formato: la CLI `nlm` 0.7.x salva l'auth come cartella `profiles/default/`
 (`cookies.json` + `metadata.json`), non come un singolo `auth.json`. Si carica un

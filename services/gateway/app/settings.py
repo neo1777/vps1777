@@ -186,9 +186,11 @@ class Settings(BaseSettings):
     # limite). Personalizzabile via AUDIT_RETENTION_DAYS.
     audit_retention_days: int = 90
     # Il profilo NotebookLM (cookie Google) NON è più montato qui (H6): lo
-    # possiede nb1777-mcp, l'unico servizio che monta quel volume. Il gateway —
-    # l'unico esposto su Internet — glielo chiede su rete interna con un segreto
-    # condiviso. Vedi app/nlm_client.py.
+    # possiede nb1777-mcp, che fra i servizi in esercizio è l'unico a montare quel
+    # volume (in sola lettura lo montano anche il backup, che lo cifra, e il check
+    # settimanale delle scadenze, che ne legge solo la data — SECURITY.md). Il
+    # gateway — l'unico esposto su Internet — glielo chiede su rete interna con un
+    # segreto condiviso. Vedi app/nlm_client.py.
     nlm_internal_base: str = "http://nb1777-mcp:8003"
     onboarding_dir: str = "/var/lib/onboarding"  # bind-mount condiviso col PC (deploy.sh --apply)
     # dir dei DB di archive-mcp: il gateway scrive qui i .db indicizzati da

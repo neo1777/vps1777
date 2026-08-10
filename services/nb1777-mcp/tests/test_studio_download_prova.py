@@ -62,9 +62,11 @@ def test_tipo_sconosciuto_alza_PRIMA_di_lanciare_nlm(monkeypatch) -> None:
 
 # ── H6-bis: la destinazione non la sceglie il chiamante ──────────────────────
 #
-# Perché è una guardia e non un dettaglio: questo container è l'UNICO che monta il
-# volume dei cookie Google (H6 lo ha tolto al gateway apposta). Un `output_path`
-# libero è una scrittura arbitraria proprio là dentro.
+# Perché è una guardia e non un dettaglio: fra i servizi in esercizio questo
+# container è l'unico che monta il volume dei cookie Google (H6 lo ha tolto al
+# gateway apposta), ed è l'unico che ci SCRIVE — il backup e il check scadenze lo
+# montano in sola lettura. Un `output_path` libero è una scrittura arbitraria
+# proprio là dentro.
 
 def test_un_path_ASSOLUTO_del_chiamante_NON_e_una_destinazione(
         monkeypatch, artefatti_in_tmp, tmp_path) -> None:
