@@ -149,8 +149,9 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   chiave **pubblica** (recipient); la privata vive sul PC dell'owner e serve solo
   al restore. `backup.sh` non genera più la coppia sulla VPS (che avrebbe messo
   la privata sullo stesso disco dei backup). Vedi [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md).
-- **Secrets sempre file-mounted** (baseline): password, signing key, token via
-  Docker `secrets:` in `tmpfs /run/secrets/`, **mai** in env var. Vedi [docs/SECRETS.md](docs/SECRETS.md).
+- **Secrets sempre file-mounted** (baseline, `H68`): password, signing key, token via
+  Docker `secrets:` in `tmpfs /run/secrets/`, **mai** in env var — un env var lo mostra
+  `docker inspect` e lo ereditano tutti i processi figli. Vedi [docs/SECRETS.md](docs/SECRETS.md).
 - **Il repo è pubblico, e un gate lo tratta come tale** (`security/check_no_leaks.py`,
   in CI a ogni PR). Fa fallire la build se entra un **export di sessione** (il `.txt`
   di `/export`: nome innocuo, dentro il detto-e-fatto di una sessione di lavoro) o del
@@ -290,13 +291,13 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **67 voci** (2 critiche, 10 alte, 37 medie, 18 basse): 43 dalla
+Il registro conta **68 voci** (2 critiche, 10 alte, 38 medie, 18 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
 produzione, `H52` e `H54` da un'analisi esterna, `H53` dall'aver misurato la
 copertura dei controlli invece di leggerla) — 10 (`H55`-`H64`) dal loop di audit
-in corso, che è la fonte più produttiva delle quattro, e 3 (`H65`-`H67`) da una
+in corso, che è la fonte più produttiva delle quattro, e 4 (`H65`-`H68`) da una
 quinta fonte aperta il 10/08: **rileggere le garanzie scritte in prosa in questi
 documenti e chiedersi chi le tiene**. Le prime due erano vere e senza alcun presidio;
 la terza era vera, presidiata, e il presidio non copriva tutte le forme
@@ -305,7 +306,7 @@ Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 54 |
+| **chiusi** | 55 |
 | **parziali** | 12 |
 | **accettati** | 1 |
 | **aperti** | 0 |

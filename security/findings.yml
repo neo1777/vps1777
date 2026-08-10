@@ -3092,3 +3092,82 @@ findings:
       `DOCKER_HOST` per i servizi diversi dal gateway (serve che qualcuno ce lo metta).
       Non è una svista: è il confine fra un controllo statico sul testo e uno che
       interroga il sistema, e questo repo ha il primo.
+
+  - id: H68
+    severity: medium
+    title: "«Secrets sempre file-mounted … mai in env var» era una garanzia VERA e non presidiata: 7 segreti su 7 consegnati come path in /run/secrets/, e nessun test lo teneva — sarebbe diventata falsa al primo `SECRET: valore` senza che nessun file cambiasse il proprio testo"
+    status: closed
+    scoperta:
+      quando: "2026-08-10"
+      come: lettura
+      nota: >
+        abdd732a, quarta garanzia presa dalla voce `a80025f1` sulla mappa di coordinate
+        di 71d540e6 (`r.152`). Il codice REGGEVA — 7 secret dichiarati, 7 montati via
+        `secrets:` e consegnati come `<NOME>_FILE: /run/secrets/<nome>` — e proprio per
+        questo mancava il presidio: una promessa vera non ha sintomi finché non smette
+        di esserlo, e allora non li ha comunque.
+        PERCHÉ UN ENV VAR NON È UN FILE MOUNT, che è il motivo per cui la garanzia
+        esiste: le variabili d'ambiente si leggono da `docker inspect` (chiunque nel
+        gruppo `docker` può chiamarlo), finiscono nei crash-reporter e sono ereditate da
+        OGNI processo figlio. Un file in `tmpfs /run/secrets/` no.
+    natura: comportamento
+    since: unreleased
+    prova:
+      - comando: "python3 tools/tests/test_secrets_file_mounted.py"
+        dove: "worktree su origin/main (afe40a3), il 10/08/2026"
+        output: "12 compose · 7 secret dichiarati · tutti montati e consegnati come path in /run/secrets/, nessuno per valore — la garanzia REGGEVA gia' prima del test"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "sostituito `GATEWAY_SECRET_FILE: /run/secrets/gateway_secret` con `GATEWAY_SECRET: \"valore-in-chiaro\"` e rilanciato"
+        dove: "PROVA A CONTRARIO nel worktree, compose ripristinato (git status pulito)"
+        output: "exit 1 — nomina file, riga, variabile e la forma corretta"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "puntato `GATEWAY_SECRET_FILE` a /tmp/mio_secret invece che a /run/secrets/"
+        dove: "PROVA A CONTRARIO sul secondo verso: il suffisso _FILE dice «e' un path», la garanzia e' il TMPFS"
+        output: "exit 1 — un path qualunque non e' /run/secrets/, e il test lo separa dal caso precedente"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "aggiunto un secret dichiarato e mai montato da nessun servizio"
+        dove: "PROVA A CONTRARIO sul terzo verso"
+        output: "exit 1 — «o e' morto, o arriva in un altro modo», e il secondo caso e' quello che la garanzia esclude"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "uvx pytest tools/tests/ -q"
+        dove: "suite intera come la CI, STDLIB-ONLY"
+        output: "320 passed, 4 skipped"
+        exit: 0
+        quando: "2026-08-10"
+    evidence:
+      - file: tools/tests/test_secrets_file_mounted.py
+        contains:
+          - "def test_i_segreti_non_passano_per_valore("
+          - "def test_la_sonda_distingue_il_segreto_dalla_sua_omonimia("
+          - "def secrets_dichiarati("
+      - file: SECURITY.md
+        contains:
+          - "Secrets sempre file-mounted"
+    fix: >
+      Un test che prende l'insieme dei segreti dalla DICHIARAZIONE (`secrets:` top-level
+      dei compose) e non dai nomi che sembrano segreti. La differenza non e' stilistica:
+      `OAUTH_ACCESS_TOKEN_LIFETIME: "900"` contiene TOKEN ed e' una durata — un presidio
+      costruito su `*TOKEN*|*SECRET*|*PASSWORD*` griderebbe su di lei, e *un guardiano
+      che grida viene disattivato*. Con l'insieme preso dall'oggetto i falsi positivi
+      non esistono per costruzione.
+      ⭐ E' la lezione che questo repo ha pagato NOVE volte il 10/08 — un insieme
+      definito da una STRINGA invece che dall'oggetto (il socket per path, i volumi
+      enumerati a mano, gli script per estensione) — applicata prima invece che dopo.
+      Misura due proprieta' e non una: ogni segreto dichiarato e' CONSUMATO da almeno un
+      servizio (uno dichiarato e mai montato non e' protetto: e' inutilizzato, e la
+      differenza va detta), e nessuno passa per VALORE — la sola forma ammessa e'
+      `<NOME>_FILE: /run/secrets/<nome>`, cioe' un path, non il contenuto.
+      Guardia della guardia: se non trova nessun secret dichiarato, FALLISCE invece di
+      dare verde su un insieme vuoto.
+    residuo: >
+      Resta fuori, dichiarato: un segreto passato a un servizio via `env_file:` da un
+      file `.env` non dichiarato in `secrets:` non ha un nome da confrontare, e questo
+      presidio non lo vede. Col criterio del 10/08 — «si sfrutta OGGI, senza che nessuno
+      cambi niente?» — e' una FRAGILITA' e non un buco: nessun compose del repo usa
+      `env_file` per un segreto, e i permessi del `.env` sono presidiati altrove (H15,
+      H38, `test_env_perm_verificato.py`). Il confine e' fra cio' che il repo DICHIARA e
+      cio' che l'ambiente porta: questo presidio sta di qua.
