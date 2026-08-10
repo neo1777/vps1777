@@ -212,7 +212,7 @@ def controlla_codice() -> tuple[int, int]:
 
 
 def main() -> int:
-    print(f"garanzia presidiata: «Il gateway non tocca mai Docker» (SECURITY.md)")
+    print("garanzia presidiata: «Il gateway non tocca mai Docker» (SECURITY.md)")
     e1, _ = controlla_compose()
     e2, _ = controlla_codice()
     totale = e1 + e2
