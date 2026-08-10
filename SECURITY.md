@@ -233,7 +233,8 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
 
 - **Collect→apply disaccoppiato**: il pulsante admin scrive solo un *intent file*
   in `onboarding/` (bind-mount); l'update vero lo esegue la CLI host via systemd
-  path unit. Il gateway non tocca mai Docker.
+  path unit. Il gateway non tocca mai Docker (`H67`) — né montandone il socket, né
+  parlandogli via `DOCKER_HOST`, né con una SDK nel proprio codice.
 - **Intent validato e consumato**: schema, SemVer, TTL 10 min, nonce anti-replay,
   e cancellazione **prima** di agire (nessun loop di ri-trigger).
 - **Anti-downgrade**: dal pulsante il target non può essere una versione più
@@ -289,18 +290,22 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **66 voci** (2 critiche, 10 alte, 36 medie, 18 basse): 43 dalla
+Il registro conta **67 voci** (2 critiche, 10 alte, 37 medie, 18 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
 produzione, `H52` e `H54` da un'analisi esterna, `H53` dall'aver misurato la
-copertura dei controlli invece di leggerla) — e 10 (`H55`-`H64`) dal loop di audit
-in corso, che è la fonte più produttiva delle quattro. Nessuna è aperta. Il
-conteggio, verificato contro il codice dal gate in CI:
+copertura dei controlli invece di leggerla) — 10 (`H55`-`H64`) dal loop di audit
+in corso, che è la fonte più produttiva delle quattro, e 3 (`H65`-`H67`) da una
+quinta fonte aperta il 10/08: **rileggere le garanzie scritte in prosa in questi
+documenti e chiedersi chi le tiene**. Le prime due erano vere e senza alcun presidio;
+la terza era vera, presidiata, e il presidio non copriva tutte le forme
+dell'oggetto — che è l'esito meno visibile dei tre, perché somiglia a un verde.
+Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 53 |
+| **chiusi** | 54 |
 | **parziali** | 12 |
 | **accettati** | 1 |
 | **aperti** | 0 |

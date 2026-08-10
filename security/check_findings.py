@@ -90,8 +90,15 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # insegna a ignorare gli allarmi. Le 8 sono coperte altrove (4 hanno un `build:`
 # accanto, 4 sono le nostre da GHCR con images.lock), e il test lo dichiara invece di
 # allargare la regex: ⇒ *una lista di esenzioni è sicura quando il default urla.*
-EXPECTED_TOTAL = 66
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 36, "low": 18}
+# + 1 (H67 medium, 10/08) = 67. H67 nasce dallo stesso metodo di H65 e H66 ma con un
+# esito che i primi due non avevano: la garanzia «Il gateway non tocca mai Docker»
+# (SECURITY.md) era vera E già presidiata — solo che il presidio riconosceva il socket
+# da UN path, e lo stesso socket montato come `/run/docker.sock` (stesso inode: /var/run
+# è un symlink a /run) lo lasciava passare uscendo 0. ⇒ il terzo stato del metodo:
+# «regge, è presidiato, e il presidio non copre tutte le forme dell'oggetto» — dove
+# aggiungere solo l'id avrebbe fatto sembrare chiusa una garanzia scavalcabile.
+EXPECTED_TOTAL = 67
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 37, "low": 18}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
