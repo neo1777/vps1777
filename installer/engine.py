@@ -518,7 +518,9 @@ set_kv CADDY_EMAIL {shlex.quote(p.get('caddy_email',''))}
 set_kv VPS1777_TAG {shlex.quote(p.get('_vps1777_version') or 'dev')}
 set_kv VPS1777_IMAGE_BASE {shlex.quote(p.get('_image_base') or 'ghcr.io/neo1777')}
 # H15/H38 — .env contiene TS_AUTHKEY e altri valori: 600. E via l'orfano.
+# Il permesso si chiede al FILE: `2>/dev/null || true` sopprime l'esito due volte (#66).
 chmod 600 .env 2>/dev/null || true
+if [ "$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
 rm -f secrets/ts_authkey.txt
 echo CONFIG_OK
 """
@@ -717,6 +719,7 @@ if grep -q "^TS_AUTHKEY=" .env 2>/dev/null; then
   { [ -n "$rest" ] && printf "%s\n" "$rest"; printf "%s\n" "TS_AUTHKEY="; } > .env
 fi
 chmod 600 .env 2>/dev/null || true
+if [ "$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
 rm -f secrets/ts_authkey.txt
 '''
         self._run_capture(self._sudo(script))

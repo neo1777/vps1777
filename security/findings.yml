@@ -351,13 +351,27 @@ findings:
     since: v0.32.0
     evidence:
       - file: deploy.sh
-        contains: ["ts_wipe_authkey", "chmod 600 .env", "rm -f secrets/ts_authkey.txt"]
+        contains: ["ts_wipe_authkey", "chmod 600 .env", "rm -f secrets/ts_authkey.txt",
+                   "ENV_PERM_FALLITO"]
+      - file: setup.sh
+        contains: ["chmod 600 .env", "ENV_PERM_FALLITO"]
       - file: installer/engine.py
-        contains: ["_wipe_ts_authkey"]
+        contains: ["_wipe_ts_authkey", "ENV_PERM_FALLITO"]
+      - file: tools/tests/test_env_perm_verificato.py
+        contains: ["chmod_sabotato"]
     note: >
       Wipe della authkey (monouso) da .env dopo un tailscale up riuscito; .env a 600;
       file orfano rimosso (verificato: nessun compose lo consumava). Bonus: engine usa
       --authkey=file: invece di argv (H7).
+      #66 (10/08): il chmod c'era in SEI punti (deploy.sh ×3, setup.sh, engine.py ×2)
+      e in tutti sopprimeva il proprio esito (`2>/dev/null || true`), mentre la riga
+      dopo dichiarava il successo — ENV_OK compreso, che è la sonda su cui il PC
+      decide se proseguire. Ora ogni punto rilegge il permesso dal FILE e si ferma
+      con ENV_PERM_FALLITO. La prova NON è la presenza della stringa: è
+      tools/tests/test_env_perm_verificato.py, che estrae i sei frammenti dai
+      sorgenti veri e li ESEGUE con un chmod sabotato che finge di riuscire.
+      Questa evidence resta comunque un `contains`: presidia che i punti non
+      tornino muti, non che l'effetto ci sia — quello lo fa il test.
 
   - id: H16
     severity: medium

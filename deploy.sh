@@ -203,6 +203,7 @@ if grep -q "^TS_AUTHKEY=" .env 2>/dev/null; then
   { [ -n "$rest" ] && printf "%s\n" "$rest"; printf "%s\n" "TS_AUTHKEY="; } > .env
 fi
 chmod 600 .env 2>/dev/null || true
+if [ "$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
 rm -f secrets/ts_authkey.txt'
   if printf '%s\n' "$script" | SSH "sudo -u $OPERATOR_USER bash -s" >/dev/null 2>&1; then
     ok "TS_AUTHKEY azzerata in .env (key monouso, ormai consumata) · .env 600"
@@ -276,8 +277,11 @@ set_kv TELEGRAM_OWNER_ID '$TG_OWNER'"
 set_kv PUBLIC_BASE '$PUB'"
   # .env contiene segreti (TS_AUTHKEY, e i valori che ci scrive il pannello):
   # 600, non 644 (H15). E ripulisce l'orfano se un deploy precedente l'ha creato.
+  # La riga dopo il chmod NON è ridondante: `2>/dev/null || true` sopprime
+  # l'esito due volte, quindi il permesso si chiede al FILE (#66).
   APPLY_SCRIPT="$APPLY_SCRIPT
 chmod 600 .env 2>/dev/null || true
+if [ \"\$(stat -c %a .env 2>/dev/null)\" != \"600\" ]; then echo \"ENV_PERM_FALLITO\"; exit 1; fi
 chmod 700 secrets backups onboarding 2>/dev/null || true
 rm -f secrets/ts_authkey.txt"
   printf '%s\n' "$APPLY_SCRIPT" | SSH "sudo -u $OPERATOR_USER bash -s" || die "Scrittura secret/.env fallita"
@@ -735,7 +739,11 @@ set_kv VPS1777_TAG "${INSTALL_VERSION:-dev}"
 set_kv VPS1777_IMAGE_BASE "${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}"
 # H15 — .env contiene TS_AUTHKEY (e altri valori): 600, non 644. E rimuovi
 # l'eventuale orfano secrets/ts_authkey.txt (nessun compose lo consuma).
+# ENV_OK è la sonda che il PC legge (grep poco sotto): non va stampata se il
+# permesso non c'è davvero — il chmod sopprime il proprio errore due volte,
+# quindi lo stato si chiede al file, non al comando (#66).
 chmod 600 .env 2>/dev/null || true
+if [ "\$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
 rm -f secrets/ts_authkey.txt
 echo "ENV_OK"
 RSETUP
