@@ -23,8 +23,14 @@ set -u
 #   ma perché il processo moriva, non perché il gate decideva — e il messaggio che spiega
 #   cosa fare (`git commit --no-verify`) non è mai comparso a nessuno.
 #   ⭐ Il ramo era stato provato «nei due sensi» il 10/08 e la prova NON l'ha visto:
-#      shellcheck stampa i propri codici SC PRIMA di questo printf, quindi si vedeva
+#      lo strumento stampa i propri codici SC PRIMA di questo printf, quindi si vedeva
 #      l'output atteso e un rc=1 atteso, e il gate moriva subito dopo, in silenzio.
+#      («lo strumento» e non il suo nome, di proposito: un commento che comincia con
+#       quel nome viene letto DA lui come una DIRETTIVA — SC1073/SC1072 — e lo fa
+#       uscire 1. Rilievo di 71d540e6 sulla #150: non è il commento che CONTIENE la
+#       stringa cercata, classe già vista tre volte oggi, è il commento che viene
+#       ESEGUITO. La riga raccontava come funziona lo strumento, e lo strumento l'ha
+#       presa per un ordine.)
 #      *Un verdetto giusto prodotto da un ramo rotto: la prova guardava l'esito, e
 #      l'esito era corretto per la ragione sbagliata.*
 #   ⇒ trovato il 10/08 nel modo più diretto possibile: facendogli bocciare un mio .sh.
@@ -63,6 +69,9 @@ ramo_principale() {
 avvisa_ramo() {
   if [ -z "$ramo" ]; then
     printf '\n%s[!] HEAD STACCATA — questo commit non sta su nessun ramo%s\n' "$G" "$Z" >&2
+    # SC2016: i backtick qui sono TIPOGRAFIA (citano un comando all'umano), non
+    # sostituzione: le virgolette singole sono volute e il warning è un falso positivo.
+    # shellcheck disable=SC2016
     printf '    Si perderà al prossimo checkout. `git switch -c <nome>` per tenerlo.\n\n' >&2
     return 0
   fi
@@ -198,6 +207,10 @@ if [ -n "$_SH_STAGED" ]; then
   else
     _SC=""
   fi
+  # SC2086: `$_SH_STAGED` è una LISTA di file e va espansa in argomenti. La direttiva sta
+  # davanti all'`if` intero e non davanti al suo `elif`: prima di un ramo non vale, e non
+  # viene ignorata — rompe il parsing di tutto ciò che segue (SC1123).
+  # shellcheck disable=SC2086
   if [ -z "$_SC" ]; then
     printf '\n%s[⚪] shellcheck: NON MISURATO%s — né in PATH né via docker\n' "$G" "$Z" >&2
     printf '     %s\n' "$(echo "$_SH_STAGED" | tr '\n' ' ')" >&2
@@ -236,12 +249,17 @@ if [ -n "$_PY_STAGED" ]; then
   else
     _RUFF=""
   fi
+  # SC2086 è disabilitato per l'intero blocco e non davanti al singolo `elif`: una
+  # direttiva vale solo prima di un comando composto COMPLETO, mai di un suo ramo
+  # (SC1123) — e messa nel posto sbagliato non viene ignorata, rompe il parsing di
+  # tutto ciò che segue. Trovato sulla #150, dove questo file era l'unico shell del
+  # repo che il gate CI non guarda: il difetto sarebbe entrato in main senza attriti.
+  # shellcheck disable=SC2086
   if [ -z "$_RUFF" ]; then
     printf '\n%s[⚪] ruff: NON MISURATO%s — né in PATH né via uvx\n' "$G" "$Z" >&2
     printf '     %s\n' "$(echo "$_PY_STAGED" | tr '\n' ' ')" >&2
     printf '     Il commit passa, ma NESSUNO ha letto questi .py prima della CI.\n\n' >&2
-  # shellcheck disable=SC2086  # la lista dei file va espansa in argomenti, non citata
-  elif ! $_RUFF check $_PY_STAGED >&2; then
+  elif ! $_RUFF check $_PY_STAGED >&2; then   # espansione voluta: è una lista di file
     printf '\n%s[✗] ruff: problemi nei .py che stai committando%s\n' "$R" "$Z" >&2
     printf '     Se è voluto: git commit --no-verify\n' >&2
     printf '     (la CI lo rifarebbe comunque: meglio adesso che dopo un push)\n\n' >&2
