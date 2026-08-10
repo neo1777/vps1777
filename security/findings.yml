@@ -351,13 +351,27 @@ findings:
     since: v0.32.0
     evidence:
       - file: deploy.sh
-        contains: ["ts_wipe_authkey", "chmod 600 .env", "rm -f secrets/ts_authkey.txt"]
+        contains: ["ts_wipe_authkey", "chmod 600 .env", "rm -f secrets/ts_authkey.txt",
+                   "ENV_PERM_FALLITO"]
+      - file: setup.sh
+        contains: ["chmod 600 .env", "ENV_PERM_FALLITO"]
       - file: installer/engine.py
-        contains: ["_wipe_ts_authkey"]
+        contains: ["_wipe_ts_authkey", "ENV_PERM_FALLITO"]
+      - file: tools/tests/test_env_perm_verificato.py
+        contains: ["chmod_sabotato"]
     note: >
       Wipe della authkey (monouso) da .env dopo un tailscale up riuscito; .env a 600;
       file orfano rimosso (verificato: nessun compose lo consumava). Bonus: engine usa
       --authkey=file: invece di argv (H7).
+      #66 (10/08): il chmod c'era in SEI punti (deploy.sh ×3, setup.sh, engine.py ×2)
+      e in tutti sopprimeva il proprio esito (`2>/dev/null || true`), mentre la riga
+      dopo dichiarava il successo — ENV_OK compreso, che è la sonda su cui il PC
+      decide se proseguire. Ora ogni punto rilegge il permesso dal FILE e si ferma
+      con ENV_PERM_FALLITO. La prova NON è la presenza della stringa: è
+      tools/tests/test_env_perm_verificato.py, che estrae i sei frammenti dai
+      sorgenti veri e li ESEGUE con un chmod sabotato che finge di riuscire.
+      Questa evidence resta comunque un `contains`: presidia che i punti non
+      tornino muti, non che l'effetto ci sia — quello lo fa il test.
 
   - id: H16
     severity: medium
@@ -746,7 +760,7 @@ findings:
     since: v0.32.0
     evidence:
       - file: deploy.sh
-        contains: ["chmod 700"]
+        contains: ["chmod 700", "DIR_PERM_FALLITO"]
       - file: setup.sh
         contains: ["chmod 700"]
       - file: installer/engine.py
@@ -754,6 +768,13 @@ findings:
     note: >
       secrets/, backups/, onboarding/ ora a 700 nei tre installer (prima solo var/).
       La riga di SECRETS.md che lo dichiarava diventa VERA (era lo scostamento H21).
+      #66 (10/08): dei quattro punti che fanno questo chmod, TRE fallivano già
+      rumorosamente (deploy.sh:690, setup.sh:187, installer/engine.py:491) e uno no
+      — deploy.sh:285, `2>/dev/null || true`, con la riga dopo che dichiara «dir
+      sensibili 700». Ora rilegge il permesso dalle dir e si ferma con
+      DIR_PERM_FALLITO. Stessa prova eseguita di H15
+      (tools/tests/test_env_perm_verificato.py, che cerca la FORMA
+      `chmod … 2>/dev/null || true` e non l'elenco dei punti).
 
   - id: H39
     severity: low

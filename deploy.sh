@@ -203,6 +203,7 @@ if grep -q "^TS_AUTHKEY=" .env 2>/dev/null; then
   { [ -n "$rest" ] && printf "%s\n" "$rest"; printf "%s\n" "TS_AUTHKEY="; } > .env
 fi
 chmod 600 .env 2>/dev/null || true
+if [ "$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
 rm -f secrets/ts_authkey.txt'
   if printf '%s\n' "$script" | SSH "sudo -u $OPERATOR_USER bash -s" >/dev/null 2>&1; then
     ok "TS_AUTHKEY azzerata in .env (key monouso, ormai consumata) · .env 600"
@@ -276,9 +277,24 @@ set_kv TELEGRAM_OWNER_ID '$TG_OWNER'"
 set_kv PUBLIC_BASE '$PUB'"
   # .env contiene segreti (TS_AUTHKEY, e i valori che ci scrive il pannello):
   # 600, non 644 (H15). E ripulisce l'orfano se un deploy precedente l'ha creato.
+  # Le righe di verifica dopo i chmod NON sono ridondanti: `2>/dev/null || true`
+  # sopprime l'esito due volte, e l'`ok` qui sotto dichiara «.env 600, dir
+  # sensibili 700» comunque. Il permesso si chiede all'OGGETTO (#66). Il `700`
+  # sulle dir è H38: stessa forma, e qui era l'unico dei quattro punti che si
+  # zittiva (deploy.sh:690, setup.sh:187, engine.py:491 falliscono rumorosi).
+  # Il `mkdir -p` viene PRIMA per la ragione trovata in revisione (@71d540e6):
+  # questo blocco è «applica la config dal pannello» su una macchina già
+  # installata, e NON passa dal `mkdir -p` di r.689 — una VPS installata prima di
+  # ba87c52 può non avere backups/ o onboarding/. Senza il mkdir, `stat` su una
+  # dir che non esiste dà vuoto e il verdetto sarebbe «permesso sbagliato» su un
+  # oggetto ASSENTE: un rosso che dice la cosa falsa e blocca un flusso utente.
+  # Creare-e-poi-chmoddare è già la sequenza degli altri tre punti (r.689-690).
   APPLY_SCRIPT="$APPLY_SCRIPT
 chmod 600 .env 2>/dev/null || true
+if [ \"\$(stat -c %a .env 2>/dev/null)\" != \"600\" ]; then echo \"ENV_PERM_FALLITO\"; exit 1; fi
+mkdir -p secrets backups onboarding 2>/dev/null || true
 chmod 700 secrets backups onboarding 2>/dev/null || true
+for d in secrets backups onboarding; do if [ \"\$(stat -c %a \"\$d\" 2>/dev/null)\" != \"700\" ]; then echo \"DIR_PERM_FALLITO \$d\"; exit 1; fi; done
 rm -f secrets/ts_authkey.txt"
   printf '%s\n' "$APPLY_SCRIPT" | SSH "sudo -u $OPERATOR_USER bash -s" || die "Scrittura secret/.env fallita"
   ok "Secret + .env aggiornati (.env 600, dir sensibili 700)"
@@ -735,7 +751,11 @@ set_kv VPS1777_TAG "${INSTALL_VERSION:-dev}"
 set_kv VPS1777_IMAGE_BASE "${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}"
 # H15 — .env contiene TS_AUTHKEY (e altri valori): 600, non 644. E rimuovi
 # l'eventuale orfano secrets/ts_authkey.txt (nessun compose lo consuma).
+# ENV_OK è la sonda che il PC legge (grep poco sotto): non va stampata se il
+# permesso non c'è davvero — il chmod sopprime il proprio errore due volte,
+# quindi lo stato si chiede al file, non al comando (#66).
 chmod 600 .env 2>/dev/null || true
+if [ "\$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
 rm -f secrets/ts_authkey.txt
 echo "ENV_OK"
 RSETUP

@@ -170,7 +170,9 @@ else
   ok ".env creato"
 fi
 # .env può contenere TS_AUTHKEY e altri valori sensibili → 600 (H15/H38).
+# Il permesso si chiede al FILE: `2>/dev/null || true` sopprime l'esito due volte (#66).
 chmod 600 .env 2>/dev/null || true
+if [ "$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
 
 # VPS1777_TAG/IMAGE_BASE: versione deployata + registry (scritti sempre, anche
 # se .env preesiste, per allineare il tag da pullare).
