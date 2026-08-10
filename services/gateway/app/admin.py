@@ -472,8 +472,8 @@ async def logout(request: Request) -> Response:
 #
 # H6: il gateway NON possiede più quel volume. È l'unico servizio esposto su
 # Internet, e teneva in scrittura i cookie di sessione Google. Ora il tar lo
-# riceve e lo inoltra a nb1777-mcp — l'unico a montare il volume — che valida e
-# installa. Il gateway non legge né scrive quei cookie: chiede soltanto lo stato.
+# riceve e lo inoltra a nb1777-mcp — fra i servizi in esercizio, l'unico a montare
+# quel volume — che valida e installa. Il gateway non legge né scrive quei cookie: chiede soltanto lo stato.
 
 def _human_bytes(n: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):

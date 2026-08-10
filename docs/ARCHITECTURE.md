@@ -173,7 +173,7 @@ fonte di verità — qui c'è la sintesi, là il registro che la CI verifica.
 | v0.27.0 | **Supply-chain della CI**: GitHub Action pinnate a **SHA pieno** (non più tag mobili — `trivy-action@master` era il caso peggiore), Dependabot perché il pin non invecchi, permessi least-privilege per-job, immagini di terzi pinnate a digest. |
 | v0.28.0 | **`forwarded_allow_ips` ristretto** — vedi sotto. |
 | v0.29.0 | Container di **backup senza `docker.sock`**: volumi montati diretti `:ro`. Segreti fuori dall'argv nel deploy. |
-| v0.30.0 | **Il gateway non tocca i cookie Google**: `nlm-auth` lo monta solo nb1777-mcp; gateway e bot ad accesso-zero, via canale interno. Il proxy rifiuta i sotto-path `internal/`. |
+| v0.30.0 | **Il gateway non tocca i cookie Google**: `nlm-auth` in esercizio lo monta solo nb1777-mcp (rw); in sola lettura il backup (archivio cifrato) e il check scadenze (busybox senza rete, solo mtime); gateway e bot ad accesso-zero, via canale interno. Il proxy rifiuta i sotto-path `internal/`. |
 | v0.31.0 | **Il registro dei rilievi**: `security/findings.yml` (43 rilievi, ognuno con evidenza ancorata al *contenuto* e non al numero di riga) + `security/check_findings.py` in CI. «Dichiarato fatto ma assente» diventa una build rossa: un claim di sicurezza senza coordinate non può marcire rumorosamente. |
 | v0.32.0 | Revoca **reale** della sessione admin (`jti` + revoke-list: prima il logout cancellava solo il cookie, H20); cookie Google fuori dallo snapshot pre-update (H14); tetti sul **decompresso** (H39); **open-redirect** H30 dato per chiuso e invece bypassabile (`startswith` è un match di *prefisso*, non di *origine*) → chiuso davvero con 12 test d'attacco; **tag `v*` immutabili** (H24). |
 | v0.33.0 | **Pagina di consenso OAuth** vera (H8); **rete `egress` separata** (H25); CORS scoped ai soli OAuth+`/app`, `/health` con body minimo e `?deep` interno-only, CSP globale `default-src 'none'` (H31/H33/H34/H36); PKCE constant-time (H32); rootfs `read_only` su gateway/archive-mcp/bot (H43). Dossier chiuso: **0 rilievi aperti**. |
@@ -222,8 +222,14 @@ rate-limit, lockout e audit non sono più evadibili.
 
 ### Il profilo NotebookLM e il canale interno (v0.30.0)
 
-I cookie di sessione Google (volume `nlm-auth`) li monta **solo `nb1777-mcp`** —
-il servizio che li usa. Il gateway (l'unico esposto su Internet) e il bot hanno
+I cookie di sessione Google (volume `nlm-auth`): fra i servizi in esercizio lo
+monta **solo `nb1777-mcp`** (rw), quello che li usa. Fuori dai servizi lo montano
+in **sola lettura** due lavori a tempo: il **backup** (container `backup`, feature
+attiva di default, o `tools/backup.sh` sull'host) che lo mette nell'archivio
+cifrato con la chiave pubblica `age` — ed è il motivo per cui `nlm-auth` è escluso
+dallo snapshot pre-update, che non è cifrato — e il **check scadenze**
+(`vps1777 secrets-status`), che in un `busybox --network none` legge solo l'mtime
+del file dei cookie. Il gateway (l'unico esposto su Internet) e il bot hanno
 **accesso zero**: chiedono a lui.
 
 ```

@@ -166,9 +166,22 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   aperto. Il gateway — l'unico servizio esposto su Internet — montava in
   **scrittura** il volume `nlm-auth` (i cookie di sessione Google di NotebookLM),
   perché `/admin/nlm` ci estraeva dentro il profilo caricato: compromettere il
-  gateway voleva dire leggerli **e** riscriverli. Ora vale un invariante secco:
-  **quel volume lo monta SOLO `nb1777-mcp`**, il servizio che quei cookie li usa
-  davvero. Gateway e bot hanno **accesso zero** — né lettura né scrittura — e gli
+  gateway voleva dire leggerli **e** riscriverli. Ora, **fra i servizi in
+  esercizio, quel volume lo monta solo `nb1777-mcp`** (in lettura-scrittura): è
+  il servizio che quei cookie li usa davvero, e non è esposto. Ma «solo lui» vale
+  per i servizi, non per il sistema: due lavori **a tempo** lo montano in **sola
+  lettura**, e vanno contati nel modello di minaccia —
+  - il **backup** (container `backup` con la feature omonima, attiva per
+    impostazione predefinita, oppure `tools/backup.sh` sull'host): dumpa il
+    volume dentro l'archivio cifrato con la sola chiave pubblica `age`. È anche
+    il motivo per cui `nlm-auth` è **escluso dallo snapshot pre-update**, che
+    invece è in chiaro: nel backup la protezione dei cookie non è l'assenza, è la
+    cifratura — chi ha la chiave privata `age` e accesso agli archivi li vede;
+  - il **check settimanale delle scadenze** (`vps1777 secrets-status`, unit
+    `vps1777-secrets-check`): monta il volume in un `busybox` con `--network
+    none` e ne legge **solo l'mtime** del file dei cookie, mai il contenuto.
+
+  Gateway e bot hanno **accesso zero** — né lettura né scrittura — e gli
   chiedono su rete interna (`/internal/nlm/status` dice solo *se* c'è un profilo,
   mai il contenuto; `/internal/nlm/profile` riceve il tar e lo installa),
   autenticandosi con un segreto condiviso e fail-closed.
