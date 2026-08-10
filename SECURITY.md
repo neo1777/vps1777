@@ -240,7 +240,10 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
   vecchia di quella in esecuzione (version-floor SemVer) — così un gateway
   compromesso non può forzare un downgrade a una release con vuln nota. Il
   downgrade intenzionale resta possibile solo da terminale (chi ha la shell ha
-  già ogni privilegio).
+  già ogni privilegio). **E se la versione in esecuzione non è confrontabile**
+  (`VPS1777_TAG` vuoto o non SemVer) **il pulsante viene rifiutato**: una
+  versione illeggibile non è «più vecchia» né «più nuova», e una guardia che
+  promette *non può* deve negare quando non sa.
 - **Supply-chain**: le immagini si pullano da GHCR e si verificano contro
   `images.lock` (digest immutabili) del runtime bundle di release; il bundle è
   firmato (`cosign sign-blob` keyless) e la verifica è **obbligatoria di default**
