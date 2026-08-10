@@ -561,6 +561,27 @@ def version_key(v: str) -> tuple:
     return (parts, 1, ()) if not pre else (parts, 0, tuple(pre.split(".")))
 
 
+def floor_blocca(target: str, cur: str) -> bool:
+    """True se il canale NON interattivo (`--from-intent`) deve rifiutare `target`.
+
+    🔑 PERCHÉ NON BASTA `version_key(target) < version_key(cur)`: `version_key` mappa al
+    MINIMO qualunque stringa non numerica — è la scelta giusta per ORDINARE e la peggiore
+    per DECIDERE. Con `cur` illeggibile il confronto è sempre falso e il floor non scatta
+    mai: la guardia si spegne invece di fermare, e lo fa in silenzio.
+    ⇒ qui la versione corrente si VALIDA prima di confrontarla, come `consume_intent` fa
+    già col target dell'intent (`valid_semver`, ~800 righe sopra). Un `cur` che non è
+    semver non è «più vecchio» né «più nuovo»: è **non confrontabile**, e una guardia che
+    promette «rifiuto un downgrade» deve negare quando non sa.
+
+    NB: il caso `dev` è già fermato prima, in `cmd_update` (installazione in modalità dev
+    → serve il cutover). Questa funzione copre tutto il resto: campo vuoto, valore
+    troncato, un tag scritto a mano.
+    """
+    if not valid_semver(norm_ver(cur)):
+        return True
+    return version_key(target) < version_key(cur)
+
+
 def current_version(repo: Path) -> str:
     return env_read(repo).get("VPS1777_TAG", "dev")
 
@@ -2439,9 +2460,11 @@ def cmd_update(repo: Path, args) -> int:
     # non basta (è nel bind-mount scrivibile dal gateway). Il downgrade resta
     # possibile SOLO da terminale con --version esplicito (chi ha la shell può
     # già tutto).
-    if args.from_intent and version_key(target) < version_key(cur):
+    if args.from_intent and floor_blocca(target, cur):
+        perche = ("versione in esercizio non confrontabile"
+                  if not valid_semver(norm_ver(cur)) else f"v{target} < v{cur}")
         progress_write(repo, target, 0, "intent", "failed", "downgrade rifiutato")
-        die(f"downgrade rifiutato via pulsante: v{target} < v{cur} "
+        die(f"downgrade rifiutato via pulsante: {perche} "
             "(usa `vps1777 update --version` da terminale se intenzionale)")
     # `latest` naturale più vecchia della corrente = cache GitHub stantia
     # (/releases/latest NON è monotona, visto dal vivo): no-op, mai un
