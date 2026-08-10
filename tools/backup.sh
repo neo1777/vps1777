@@ -175,7 +175,7 @@ else
   #   (e allora non c'è backup da fare, va detto forte), o il prefisso non combacia (e il
   #   backup sarebbe vuoto e silenzioso). In nessuno dei due casi si prosegue.
   if [ -z "$(echo "$VOLUMES" | tr -d ' ')" ]; then
-    die "nessun volume trovato per il progetto «$PROJ»: i compose ne dichiarano $(echo "$VOLS_LOGICI" | wc -w) ($(echo $VOLS_LOGICI | tr '\n' ' ')) e nessuno esiste col prefisso «${PROJ}_». O lo stack non è mai partito, o COMPOSE_PROJECT_NAME non è quello con cui sono stati creati i volumi (\`docker volume ls\` per vederli). Un backup vuoto che esce 0 è peggio di un backup che non parte."
+    die "nessun volume trovato per il progetto «$PROJ»: i compose ne dichiarano $(echo "$VOLS_LOGICI" | wc -w) ($(echo "$VOLS_LOGICI" | tr '\n' ' ')) e nessuno esiste col prefisso «${PROJ}_». O lo stack non è mai partito, o COMPOSE_PROJECT_NAME non è quello con cui sono stati creati i volumi (\`docker volume ls\` per vederli). Un backup vuoto che esce 0 è peggio di un backup che non parte."
   fi
   for vol in $VOLUMES; do
     log "  → $vol"
