@@ -3193,8 +3193,12 @@ findings:
       presidio aggancia la variabile al segreto PER NOME, quindi un segreto messo in
       chiaro sotto un nome che non corrisponde a nessun `secrets:` non lo vede.
       Prova, stesso valore e stessa posizione, cambia solo il nome:
-      `BOT_TOKEN: 123456789:AAH…` → exit 0 (non visto) · `TELEGRAM_BOT_TOKEN:` con lo
-      stesso valore → exit 1 (visto, e nomina il segreto). ⚠️ NON e' curabile senza
+      `BOT_TOKEN: <un valore qualunque>` → exit 0 (non visto) · `TELEGRAM_BOT_TOKEN:`
+      con lo STESSO valore → exit 1 (visto, e nomina il segreto). *Il valore non compare
+      qui apposta: un esempio con la forma di un token vero fa scattare il
+      secret-scanning di GitHub, che e' piu' largo del pattern del prodotto — successo
+      il 10/08 su un placeholder dentro una revisione (voce 405da1c2), e la cura decisa
+      e' dare agli esempi una forma non credibile, non allargare il nostro pattern.* ⚠️ NON e' curabile senza
       pagarlo altrove: rovesciare il criterio significa tornare a giudicare per FORMA
       del nome, cioe' esattamente il presidio `*TOKEN*|*SECRET*` che griderebbe su
       `OAUTH_ACCESS_TOKEN_LIFETIME: "900"` — e un guardiano che grida viene spento.
