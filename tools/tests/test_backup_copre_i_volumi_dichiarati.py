@@ -22,19 +22,20 @@ il backup conteneva. Un backup che non trova una cosa non fallisce: la omette in
    `backup.sh` faceva il contrario sullo stesso oggetto. Qui si verifica che la lista
    venga CHIESTA (`docker compose config --volumes`) e non dichiarata.
 
-⚠️ QUESTO TEST NON USA DOCKER: legge i compose col parser yaml e il sorgente di
-   `backup.sh`. Deve poter girare in CI senza demone, altrimenti è il presidio che si
-   spegne proprio dove serve.
+⚠️ QUESTO TEST NON USA DOCKER **E NON USA PyYAML**: solo stdlib. La prima stesura aveva
+   `pytest.importorskip("yaml")` — e la CI lancia `uvx pytest tools/tests/`, che è
+   stdlib-only: il test veniva SALTATO, e **uno skip si legge come un pass**. Trovato da
+   abdd732a provandolo con `uvx`, non leggendolo.
+   ⭐ La ragione era scritta due righe sopra, da me, in questo stesso docstring («deve
+   poter girare in CI, altrimenti è il presidio che si spegne proprio dove serve») — e
+   subito sotto ho importato una dipendenza che in CI non c'è. *Enunciare il vincolo non
+   è verificarlo: il presidio che si spegne da solo, terza volta in un giorno.*
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
-
-import pytest
-
-yaml = pytest.importorskip("yaml")
 
 _ROOT = Path(__file__).resolve().parents[2]
 _BACKUP = _ROOT / "tools" / "backup.sh"
@@ -48,13 +49,41 @@ ESCLUSI = {
 
 
 def _volumi_dichiarati() -> dict[str, str]:
-    """{nome_volume: file che lo dichiara} su tutti i compose del repo."""
+    """{nome_volume: file che lo dichiara} su tutti i compose del repo — SOLO STDLIB.
+
+    Legge il blocco `volumes:` di primo livello: la riga `volumes:` a colonna 0, poi le
+    chiavi indentate finché non si torna a colonna 0. Non è un parser YAML e non deve
+    esserlo: qui serve UNA struttura nota, e la dipendenza esterna spegneva il test in CI.
+    ⚠️ Se un compose scrivesse i volumi in forma non canonica (flow `{a: null}`), questo
+    li mancherebbe — per questo `test_il_parser_vede_qualcosa` fissa un valore ATTESO:
+    un parser che smette di trovare non deve poter passare come «nessun volume».
+    """
     out: dict[str, str] = {}
     for f in sorted(_ROOT.glob("compose*.yaml")):
-        d = yaml.safe_load(f.read_text()) or {}
-        for v in (d.get("volumes") or {}):
-            out.setdefault(v, f.name)
+        dentro = False
+        for riga in f.read_text().splitlines():
+            if re.match(r"^volumes:\s*$", riga):
+                dentro = True
+                continue
+            if dentro:
+                if riga.strip() == "" or riga.lstrip().startswith("#"):
+                    continue
+                if not riga.startswith((" ", "\t")):   # tornati a colonna 0: blocco finito
+                    dentro = False
+                    continue
+                m = re.match(r"^\s+([A-Za-z0-9_.-]+):", riga)
+                if m:
+                    out.setdefault(m.group(1), f.name)
     return out
+
+
+def test_il_parser_vede_qualcosa():
+    """Il parser stdlib deve trovare i volumi NOTI: se smette di funzionare, gli altri
+    test passerebbero su un insieme vuoto — «nessun volume scoperto» perché nessun volume.
+    ⭐ È la controprova positiva: la sonda sa dire di sì?"""
+    v = _volumi_dichiarati()
+    for atteso in ("gateway-uploads", "nlm-artifacts", "gateway-data", "archive-data"):
+        assert atteso in v, f"il parser non vede più «{atteso}»: sta guardando il vuoto"
 
 
 def test_backup_non_enumera_i_volumi_a_mano():
