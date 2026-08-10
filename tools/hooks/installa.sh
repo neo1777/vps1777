@@ -58,10 +58,22 @@ RADICE="$(git rev-parse --show-toplevel 2>/dev/null)" || {
     echo "✗ non sono in un repository git" >&2; exit 2; }
 cd "$RADICE" || exit 2
 SORGENTE="tools/hooks"
-# il posto CONDIVISO da ogni worktree: si chiede a git, che lo sa in entrambi i casi
-# (in un worktree `.git` è un FILE e `ls .git/hooks` fallisce dicendo «(nessuno)» —
-# cioè il contrario del vero, sull'unica riga per cui esiste la funzione `stato`).
-DESTINAZIONE="$(git rev-parse --git-path hooks)"
+# il posto CONDIVISO da ogni worktree. Si chiede a git — che lo sa anche dentro un
+# worktree, dove `.git` è un FILE e `ls .git/hooks` fallirebbe dicendo «(nessuno)», cioè
+# il contrario del vero — ma NON con `--git-path hooks`:
+#
+# 🔴 `git rev-parse --git-path hooks` RISPETTA `core.hooksPath` (rilievo b82df434 sulla
+#   #154, misurato in isolamento):
+#       senza core.hooksPath : .git/hooks
+#       con  core.hooksPath  : tools/hooks     ← non è una costante, è una FUNZIONE della config
+#   Su un clone dove la v1 di questo script ha impostato `core.hooksPath=tools/hooks`,
+#   DESTINAZIONE diventava la SORGENTE: `cp` copiava un file su sé stesso, lo script
+#   diceva «✓ installato», e `--stato` dava VERDE perché `cmp` confrontava un file con
+#   sé stesso. *Un predicato che non può fallire non è una verifica.*
+#   ⇒ e mordeva esattamente chi la rettifica doveva curare: chi aveva eseguito la v1.
+# ⭐ La forma è quella del giorno, all'ultimo posto possibile: **avevo chiesto il path a
+#   chi lo sta sostituendo.** Qui si chiede il path FISICO, che nessuna config muove.
+DESTINAZIONE="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"
 
 # i nomi che git riconosce: tutto il resto in `tools/hooks/` è corredo (questo script).
 # Enumerati e non dedotti per esclusione, così aggiungerne uno è una decisione scritta.
@@ -81,6 +93,19 @@ stato() {
     echo "  destinazione : $DESTINAZIONE  (condivisa da $(git worktree list | wc -l) worktree)"
     hp="$(git config --get core.hooksPath || true)"
     [ -n "$hp" ] && echo "  ⚠️ core.hooksPath = «$hp»: git NON userà $DESTINAZIONE."
+    # 🟡 i file di `$SORGENTE` che non sono né hook riconosciuti né corredo `.sh` vanno
+    #   NOMINATI: chi aggiunge `tools/hooks/pre-rebase` non riceveva nessun segnale —
+    #   non appariva come ✗, appariva come NIENTE, e `--stato` (il comando che esiste
+    #   per dire com'è messo) taceva su un file versionato che c'era.
+    #   L'enumerazione resta deliberata; smette di essere MUTA. (b82df434, #154)
+    for f in "$SORGENTE"/*; do
+        [ -f "$f" ] || continue
+        n="$(basename "$f")"
+        case "$n" in *.sh) continue ;; esac
+        case " $NOMI_HOOK " in *" $n "*) continue ;; esac
+        echo "  ⓘ $n — versionato ma NON installato: non è fra i nomi che riconosco"
+        echo "     ($NOMI_HOOK). Se è un hook, aggiungilo a NOMI_HOOK: è una riga."
+    done
     for n in $(hook_sorgente); do
         src="$SORGENTE/$n"; dst="$DESTINAZIONE/$n"
         if [ ! -f "$dst" ]; then
@@ -116,7 +141,18 @@ if [ -z "$(hook_sorgente)" ]; then
     exit 1
 fi
 
+# 🔴 chi ha messo `core.hooksPath` è chi deve toglierlo: la v1 di questo script l'ha
+#   impostato dichiarando perché, la v2 lo rimuove dichiarando perché. Senza questo,
+#   copiare in `.git/hooks` non basta — git continuerebbe a NON guardarlo.
+_HP="$(git config --get core.hooksPath || true)"
+if [ -n "$_HP" ]; then
+    echo "  ⓘ tolgo core.hooksPath = «$_HP»: era la v1 di questo script, e puntava a un"
+    echo "    percorso RELATIVO che esiste solo nei worktree aggiornati (3 su 9 il 10/08)."
+    git config --unset core.hooksPath || exit 1
+fi
+
 mkdir -p "$DESTINAZIONE" || exit 1
+_ERRORI=0
 for n in $(hook_sorgente); do
     # il backup si fa UNA volta e non si sovrascrive: al secondo giro conserverebbe la
     # copia già installata da noi invece di quella che c'era prima.
@@ -125,7 +161,22 @@ for n in $(hook_sorgente); do
         cp "$DESTINAZIONE/$n" "$DESTINAZIONE/$n.pre-vps1777"
         echo "  ⓘ il $n precedente è in $n.pre-vps1777 (via d'uscita: rimettilo al suo posto)"
     fi
-    cp "$SORGENTE/$n" "$DESTINAZIONE/$n" && chmod +x "$DESTINAZIONE/$n"
+    # 🔴 la copia si CONTROLLA. `set -uo pipefail` non ha `-e`, e senza questo un `cp`
+    #   fallito (destinazione non scrivibile) lasciava stampare «✓ installato» con rc=0:
+    #   la riga di successo precedeva quella di verità, e un chiamante non se ne
+    #   accorgeva affatto. La regola che lo chiude era GIÀ in questo file sedici righe
+    #   sopra — «un'installazione che non installa niente non deve dire fatto» — e
+    #   copriva un caso solo: zero hook in sorgente, non copia fallita.
+    #   ⭐ *La regola giusta c'era, e valeva per il caso adiacente.* (b82df434, #154)
+    if ! cp "$SORGENTE/$n" "$DESTINAZIONE/$n" || ! chmod +x "$DESTINAZIONE/$n"; then
+        echo "✗ $n NON copiato in $DESTINAZIONE — il presidio non gira." >&2
+        _ERRORI=$((_ERRORI + 1))
+    fi
 done
+if [ "$_ERRORI" -gt 0 ]; then
+    echo "✗ $_ERRORI hook non installati: NON dico «fatto»." >&2
+    stato
+    exit 1
+fi
 echo "✓ installato in $DESTINAZIONE — vale per tutti i worktree di questo repo."
 stato
