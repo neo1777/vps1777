@@ -78,6 +78,50 @@ ROOT = Path(__file__).resolve().parents[2]
 SOCK_RE = re.compile(r"docker\.sock")
 SOCK = "docker.sock"           # per i messaggi all'umano; il confronto usa SOCK_RE
 
+# 🔴 E UN ANELLO PIÙ IN LÀ: LA DIRECTORY CHE LO CONTIENE (rilievo di 71d540e6 sulla PR
+# #147, misurato mentre la cura qui sopra era già scritta). Passata la chiave dal path al
+# basename, restava scoperto `- /run:/host-run:ro`: **stesso accesso, e la riga non
+# nomina mai `docker.sock`**. Chi monta il contenitore non nomina il contenuto.
+# ⭐ È la classe che questa cura cura, riprodotta DALLA cura: l'insieme era definito da
+#    una stringa, e l'oggetto no.
+#
+# 🔑 E LA REGOLA NON È «UN NOME IN PIÙ» (b82df434, stessa revisione): allargando il nome
+#    verrebbe `path → basename → directory → symlink → …`, un anello per volta, ognuno
+#    vero e nessuno ultimo. La chiave che non si aggira, sul piano di un controllo
+#    statico, è **enunciabile in una riga e senza varianti**:
+#
+#        nessun bind con sorgente `/`, `/var`, o dentro `/run` / `/var/run`
+#
+#    Non è una lista di nomi: è la regione del filesystem in cui quel socket vive. Prende
+#    anche `/run/alias.sock` — un symlink dal nome arbitrario — che nessun elenco di
+#    basename avrebbe catturato.
+RADICI = ("/run", "/var/run")
+ESATTE = {"/", "/var"}
+
+
+def sorgente_del_mount(riga: str) -> str | None:
+    """Il lato SORGENTE di un mount, o None se la riga non è un mount.
+
+    Copre le due sintassi di compose: la corta (`- /a:/b:ro`) e la lunga (`source: /a`).
+    Una sorgente relativa o parametrica (`./data`, `${X}`) torna com'è: non è un antenato
+    del socket e non fa scattare nulla.
+    """
+    r = senza_commento(riga)
+    m = re.match(r"\s*-\s*([^:\s]+):", r) or re.match(r"\s*source:\s*(\S+)\s*$", r)
+    return m.group(1) if m else None
+
+
+def sorgente_pericolosa(sorgente: str) -> bool:
+    """La sorgente è il socket, o vive nella regione del filesystem in cui il socket sta.
+
+    `/run/alias.sock` non nomina Docker e non è una directory: è dentro `/run`, e tanto
+    basta. È il caso che ha convinto a scrivere la regola per REGIONE invece che per nome.
+    """
+    p = re.sub(r"/\./", "/", sorgente).rstrip("/") or "/"
+    if SOCK_RE.search(p) or p in ESATTE:
+        return True
+    return any(p == r or p.startswith(r + "/") for r in RADICI)
+
 # L'eccezione, nominata: file → (ragione, aghi che DEVONO restare accanto al mount).
 # Aggiungerne una significa modificare questa riga, cioè dichiararla per iscritto.
 ECCEZIONI: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -127,8 +171,19 @@ def righe_di_mount(testo: str) -> list[str]:
     `compose.ops.backup.yaml`: «NIENTE docker.sock (finding 2.8/H13)») non è un mount —
     ed è la ragione per cui un filtro sui `#` c'era già prima di questa cura. Quello che
     mancava era il commento a fine riga: vedi `senza_commento`.
+
+    Due strade, e servono entrambe: la riga NOMINA il socket, oppure il suo lato sorgente
+    è una directory che lo contiene — quel secondo caso non contiene mai `docker.sock`.
     """
-    return [r for r in testo.splitlines() if SOCK_RE.search(senza_commento(r))]
+    fuori = []
+    for r in testo.splitlines():
+        if SOCK_RE.search(senza_commento(r)):
+            fuori.append(r)
+            continue
+        s = sorgente_del_mount(r)
+        if s and sorgente_pericolosa(s):
+            fuori.append(r)
+    return fuori
 
 
 def main() -> int:
@@ -212,6 +267,21 @@ def test_riconosce_ogni_forma_del_mount() -> None:
         "      - /run/docker.sock:/var/run/docker.sock:ro",
         "      - /home/utente/.docker/run/docker.sock:/var/run/docker.sock",
         "      - /qualunque/prefisso/docker.sock:/var/run/docker.sock",
+        "      - /var/run/./docker.sock:/var/run/docker.sock",
+        "      - /var/run/docker.sock:/tmp/altrove:ro",     # destinazione diversa
+        # ⬇️ le tre che NON nominano il socket: montano la directory che lo contiene.
+        #    Trovate da 71d540e6 revisionando la PR #147, sabotando ciò che io avevo
+        #    appena curato — la cura vedeva il nome e non l'oggetto, un anello più in là.
+        "      - /run:/host-run:ro",
+        "      - /var/run:/hr:ro",
+        "      - /var/run/:/host-run",                       # con lo slash finale
+        "      - /var/run:/var/run",
+        "      - /:/host:ro",
+        "        source: /var/run",                          # sintassi lunga
+        # ⬇️ e il caso che ha deciso la forma della regola: un socket dal nome
+        #    arbitrario dentro /run (un symlink sull'host). Nessun elenco di basename
+        #    lo prende; la REGIONE sì.
+        "      - /run/alias.sock:/tmp/d.sock",
     ]
     for f in forme:
         assert righe_di_mount(f) == [f], f"forma non riconosciuta: {f}"
@@ -226,6 +296,13 @@ def test_riconosce_ogni_forma_del_mount() -> None:
         #    commento a fine riga, in `compose.ops.backup.yaml`. Sta qui perché è il
         #    falso positivo che la cura ha fabbricato, non un'ipotesi di scuola.
         "      BACKUP_VOLUMES_DIR: /volumes   # backup.sh tara da qui → niente docker.sock",
+        # ⬇️ IL VERSO OPPOSTO, e senza queste righe la regola per REGIONE sarebbe un
+        #    guardiano che grida: i mount normali devono restare invisibili, o il
+        #    presidio diventa un rumore che si impara a ignorare.
+        "      - ./onboarding:/onboarding",
+        "      - gateway-uploads:/uploads",          # volume nominato, non un bind
+        "      - /opt/dati:/dati:ro",
+        "      - ${VPS1777_DIR}/secrets:/run/secrets:ro",   # DESTINAZIONE in /run: legittima
     ]
     for r in innocue:
         assert righe_di_mount(r) == [], f"commento scambiato per mount: {r}"

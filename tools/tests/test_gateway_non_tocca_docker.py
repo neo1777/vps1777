@@ -57,8 +57,6 @@ APP = ROOT / "services" / "gateway" / "app"
 # spiega è un elenco che si può discutere, allungare e — soprattutto — capire quando
 # diventa rosso. Ogni voce: (regex sulla riga di compose, perché è un accesso).
 MEZZI_COMPOSE: tuple[tuple[str, re.Pattern[str], str], ...] = (
-    ("socket montato", re.compile(r"docker\.sock"),
-     "chi raggiunge il socket parla con l'API Docker e può creare un container che monta /"),
     ("DOCKER_HOST", re.compile(r"\bDOCKER_HOST\b"),
      "il daemon si raggiunge anche via TCP: nessun mount, stesso potere"),
     ("group_add docker", re.compile(r"group_add|(?<![\w-])docker(?=\s*$)"),
@@ -66,6 +64,29 @@ MEZZI_COMPOSE: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("privileged", re.compile(r"privileged\s*:\s*true"),
      "un container privilegiato ha già tutto, Docker compreso"),
 )
+
+# 🔑 IL MEZZO PRINCIPALE — il mount — NON È QUI DENTRO, ed è una scelta.
+# Riconoscerlo non è «cercare docker.sock»: è la regola per REGIONE del filesystem che
+# `test_docker_sock_perimetro.py` ha pagato in due giri di revisione il 10/08 (path →
+# basename → directory che lo contiene → symlink dal nome arbitrario dentro `/run`).
+# Riscriverla qui significherebbe due definizioni dello stesso oggetto che divergono al
+# primo che ne migliora una — ed è esattamente il difetto che questo repo continua a
+# trovare: **l'insieme definito da una stringa, ripetuta in due posti.**
+# ⇒ la definizione è UNA, e sta nel presidio del perimetro; qui si importa.
+#   La suite non ha helper condivisi (34 file, ognuno autonomo e lanciabile a mano) e non
+#   ne introduco uno: `importlib` su un file di test è un pattern che il repo usa già
+#   (`test_intent_fail_closed.py`, `test_installer_funnel.py`).
+def _perimetro():
+    """Il modulo canonico del socket. Se sparisce o cambia nome, questo test FALLISCE —
+    ed è voluto: un presidio che perde la propria definizione non deve diventare verde."""
+    import importlib.util
+    canonico = Path(__file__).with_name("test_docker_sock_perimetro.py")
+    spec = importlib.util.spec_from_file_location("_perimetro_socket", canonico)
+    if spec is None or spec.loader is None:            # pragma: no cover
+        raise RuntimeError(f"definizione canonica non caricabile: {canonico}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 # Lato codice: i moduli che parlano con Docker o che permettono di invocarlo.
 MODULI_VIETATI = {"docker", "docker.client", "aiodocker", "podman"}
@@ -141,12 +162,23 @@ def controlla_compose() -> tuple[int, int]:
     """Il gateway, in ogni compose che lo definisce, non ha i mezzi per toccare Docker."""
     compose = sorted(p for p in ROOT.rglob("compose*.y*ml")
                      if p.is_file() and ".git" not in p.parts)
+    perimetro = _perimetro()
     errori = trovati = 0
     for p in compose:
         testo = p.read_text(encoding="utf-8")
         for corpo in blocchi_yaml(testo, SERVIZIO):
             trovati += 1
             righe, irrisolti = con_alias_risolti(corpo, testo)
+            # il mount, con la definizione canonica: socket per nome O sorgente nella
+            # regione del filesystem in cui vive (`/`, `/var`, dentro `/run`, `/var/run`)
+            for r in righe:
+                if perimetro.righe_di_mount(r):
+                    errori += 1
+                    print(f"  ✗ {p.name} · servizio `{SERVIZIO}` → via verso il socket\n"
+                          f"      {r.strip()}\n"
+                          f"      chi raggiunge il socket parla con l'API Docker e può\n"
+                          f"      creare un container che monta `/`.\n"
+                          f"      SECURITY.md promette «Il gateway non tocca mai Docker».")
             if irrisolti:
                 errori += 1
                 print(f"  ✗ {p.name}: alias YAML non risolti {irrisolti} — il blocco del\n"
@@ -166,7 +198,7 @@ def controlla_compose() -> tuple[int, int]:
               f"      trova il bersaglio TACE — il silenzio somiglia a un ok.")
         return 1, 0
     print(f"  ✓ compose: {trovati} definizioni del servizio `{SERVIZIO}`, nessun mezzo "
-          f"verso Docker ({len(MEZZI_COMPOSE)} cercati)")
+          f"verso Docker ({len(MEZZI_COMPOSE) + 1} cercati, mount compreso)")
     return errori, trovati
 
 
@@ -256,6 +288,17 @@ def test_la_sonda_sa_diventare_rossa() -> None:
         if nome == "group_add docker":
             continue                      # non è in questo campione: ha il suo caso sotto
         assert any(rx.search(r) for r in righe), f"mezzo non riconosciuto: {nome}"
+
+    # il mount con la definizione canonica, e nelle DUE forme che la revisione della
+    # #147 ha separato: quella che nomina il socket e quella che monta la sua regione
+    perimetro = _perimetro()
+    for riga in ("      - /run/docker.sock:/var/run/docker.sock",
+                 "      - /var/run:/var/run",
+                 "      - /run/alias.sock:/tmp/d.sock"):
+        assert perimetro.righe_di_mount(riga), f"via verso il socket non vista: {riga}"
+    for innocua in ("      - ./onboarding:/onboarding",
+                    "      - gateway-uploads:/uploads"):
+        assert not perimetro.righe_di_mount(innocua), f"falso positivo: {innocua}"
     # il blocco si ferma dove deve: `altro:` non ci finisce dentro
     assert not any("image: y" in r for r in corpo[0]), "il blocco ha sconfinato nel servizio dopo"
 

@@ -2978,9 +2978,24 @@ findings:
         output: "exit 0 — il lato codice si legge con `ast`, e i commenti non entrano nell'albero: la classe «un controllo che cerca una stringa non distingue il codice dal commento che lo racconta» qui non si applica per costruzione"
         exit: 0
         quando: "2026-08-10"
+      - comando: "sette forme di mount sabotate una per volta in compose.dev.yaml: /var/run/docker.sock · /run/docker.sock:/tmp/d.sock · /run:/host-run:ro · /var/run:/var/run · /var/run/:/hr · /:/host:ro · /run/alias.sock:/tmp/d.sock"
+        dove: "DOPO la seconda cura (regola per REGIONE), worktree su origin/main, ripristinato dopo ognuna"
+        output: "exit 1 su tutte e sette. Le ultime cinque NON nominano mai `docker.sock`: sono la revisione di 71d540e6 e b82df434 sulla PR #147, che hanno sabotato la cura appena scritta e trovato che l'oggetto era ancora identificato per NOME"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "quattro mount legittimi provati nel verso opposto: ./onboarding:/onboarding · gateway-uploads:/uploads · /opt/dati:/dati:ro · ${VPS1777_DIR}/secrets:/run/secrets:ro"
+        dove: "PROVA A CONTRARIO: una regola per regione che grida su un mount normale e' un guardiano che si impara a ignorare"
+        output: "nessuno scatta — e l'ultimo e' il caso che lo dimostra: la DESTINAZIONE in /run e' legittima, conta la sorgente"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "mv tools/tests/test_docker_sock_perimetro.py /tmp/ && python3 tools/tests/test_gateway_non_tocca_docker.py"
+        dove: "il legame fra i due presidi provato TOGLIENDO la definizione canonica"
+        output: "exit 1, FileNotFoundError esplicito — se il canonico sparisce il presidio non diventa verde, che e' il punto di importarlo invece di ricopiarlo"
+        exit: 1
+        quando: "2026-08-10"
       - comando: "uvx pytest tools/tests/ -q"
         dove: "suite intera come la CI: in tools/tests/ un import di troppo non fallisce il tuo test, impedisce agli altri di partire (COLLECT)"
-        output: "317 passed, 4 skipped in 64.72s"
+        output: "317 passed, 4 skipped in 66.63s"
         exit: 0
         quando: "2026-08-10"
     evidence:
@@ -2994,6 +3009,8 @@ findings:
           - "SOCK_RE = re.compile(r\"docker\\.sock\")"
           - "def test_riconosce_ogni_forma_del_mount("
           - "def senza_commento("
+          - "def sorgente_pericolosa("
+          - "RADICI = (\"/run\", \"/var/run\")"
       - file: SECURITY.md
         contains:
           - "Il gateway non tocca mai Docker (`H67`)"
@@ -3026,8 +3043,19 @@ findings:
       chiave nuova è giusta?» ma *«quale popolazione entra adesso in ogni filtro a
       valle, e su quale era tarato?»*. Curato con `senza_commento()`, e il caso vero è
       dentro la controprova invece che nella memoria di chi l'ha visto.
-      RESTA FUORI, dichiarato: un socket rinominato deliberatamente alla sorgente
-      (`-v /run/mio.sock:/var/run/docker.sock`) non ha il basename e non viene visto da
-      ①. `DOCKER_HOST` lo copre ②, ma solo per il gateway: per gli altri servizi la
-      variabile non è presidiata. Non è una svista — è il confine fra un controllo
-      statico sul testo e uno che interroga il sistema, e questo repo ha il primo.
+      ⭐ E LA CURA HA RIPRODOTTO LA PROPRIA CLASSE UN ANELLO PIÙ IN LÀ, trovato da
+      71d540e6 e b82df434 sabotando la PR (non rileggendola): passata la chiave al
+      basename, restava scoperto `- /run:/host-run:ro` — **stesso accesso, e la riga non
+      nomina mai `docker.sock`**. Chi monta il contenitore non nomina il contenuto.
+      ⇒ la classe non si chiude allargando ancora la stringa (`path → basename →
+      directory → symlink → …`, un anello per volta, ognuno vero e nessuno ultimo). Il
+      predicato è diventato una REGIONE del filesystem, enunciabile in una riga e senza
+      varianti: **nessun bind con sorgente `/`, `/var`, o dentro `/run` / `/var/run`**.
+      Prende anche `/run/alias.sock`, un symlink dal nome arbitrario che nessun elenco di
+      basename avrebbe catturato.
+      RESTA FUORI, e con il criterio deciso quel giorno — *«si sfrutta OGGI, senza che
+      nessuno cambi niente?»* — sono FRAGILITÀ e non buchi: un socket esposto sotto un
+      path arbitrario FUORI da `/run` (serve un symlink creato apposta sull'host), e
+      `DOCKER_HOST` per i servizi diversi dal gateway (serve che qualcuno ce lo metta).
+      Non è una svista: è il confine fra un controllo statico sul testo e uno che
+      interroga il sistema, e questo repo ha il primo.

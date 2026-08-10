@@ -39,6 +39,19 @@ CHANGELOG = ROOT / "CHANGELOG.md"
 # di NON agire, con una motivazione. È un esito legittimo (risk acceptance): non
 # è "chiuso" (niente è stato fatto) né "aperto" (non è dimenticato, è una scelta).
 VALID_STATUS = {"closed", "partial", "open", "accepted"}
+# ⚖️ QUANDO UNA VOCE È `closed` MA HA UN `residuo:` — il criterio, in forma di domanda,
+# perché `residuo:` stava coprendo due cose diverse (b82df434 e 71d540e6, 10/08, sulla
+# revisione di H67; scritto qui e non sul bus perché è qui che lo legge chi apre una voce):
+#
+#     «si sfrutta OGGI, senza che nessuno cambi niente?»
+#
+#   SÌ  → è un BUCO: la voce non è `closed`. Un finding chiuso smette di essere cercato.
+#   NO  → è una FRAGILITÀ: il presidio oggi tiene, e il `residuo:` descrive come
+#         potrebbe smettere di tenere. `closed` + `residuo:` è la forma giusta.
+#
+# Le due si somigliano scritte, e si separano solo provando: il 10/08 H67 è passata da
+# buco a fragilità in un commit, e la differenza l'ha decisa un sabotaggio, non una
+# rilettura. ⇒ prima di scegliere lo stato, prova a sfruttare il residuo.
 VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # Quante voci il registro DEVE avere per fascia: se non le rispetta, qualcuno
 # ha aggiunto o perso un rilievo per strada. L'àncora si muove SOLO con un
