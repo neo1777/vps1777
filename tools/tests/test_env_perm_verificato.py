@@ -70,14 +70,19 @@ def _blocchi() -> list[tuple[str, int, str]]:
         righe = (_ROOT / nome).read_text().splitlines()
         for i, riga in enumerate(righe):
             if re.search(r"^\s*chmod .*2>/dev/null \|\| true", riga):
-                frammento = "\n".join(righe[i:i + 2])
+                # il `mkdir -p` che PRECEDE fa parte del blocco: senza di lui il
+                # frammento non è quello che gira davvero (rilievo @71d540e6 in
+                # revisione — una dir assente darebbe «permesso sbagliato»).
+                inizio = i - 1 if i and re.search(r"^\s*mkdir -p ", righe[i - 1]) else i
+                frammento = "\n".join(righe[inizio:i + 2])
                 for a, b in _DISESCAPE:
                     frammento = frammento.replace(a, b)
                 out.append((nome, i + 1, frammento))
     return out
 
 
-def _esegui(frammento: str, tmp: Path, *, chmod_sabotato: bool) -> subprocess.CompletedProcess:
+def _esegui(frammento: str, tmp: Path, *, chmod_sabotato: bool,
+            con_oggetti: bool = True) -> subprocess.CompletedProcess:
     """Esegue il frammento in una dir con `.env` a 644.
 
     Con `chmod_sabotato`, un finto `chmod` in testa al PATH esce 0 senza toccare
@@ -88,9 +93,10 @@ def _esegui(frammento: str, tmp: Path, *, chmod_sabotato: bool) -> subprocess.Co
     env_file.write_text("TS_AUTHKEY=segreto\n")
     env_file.chmod(0o644)
     # gli oggetti che i frammenti toccano: il file dei valori e le tre dir sensibili
-    for d in ("secrets", "backups", "onboarding"):
-        (tmp / d).mkdir(exist_ok=True)
-        (tmp / d).chmod(0o755)
+    if con_oggetti:
+        for d in ("secrets", "backups", "onboarding"):
+            (tmp / d).mkdir(exist_ok=True)
+            (tmp / d).chmod(0o755)
     ambiente = dict(os.environ)
     if chmod_sabotato:
         finto = tmp / "bin"
@@ -156,3 +162,34 @@ def test_controprova_di_polarita(tmp_path, indice):
     assert oggetto.stat().st_mode & 0o777 == atteso, (
         f"{nome}:{riga} — il chmod è passato ma {oggetto.name} non ha {oct(atteso)}"
     )
+
+
+def test_le_dir_assenti_non_bloccano_lapply(tmp_path):
+    """Una dir che NON C'È non deve diventare «permesso sbagliato» — @71d540e6, revisione.
+
+    Il blocco vive in `APPLY_SCRIPT` («applica la config dal pannello»), che gira su
+    una macchina GIÀ installata e non passa dal `mkdir -p` di deploy.sh:689. Una VPS
+    installata prima di `ba87c52` può non avere `backups/` o `onboarding/`: senza il
+    `mkdir -p` davanti, `stat` su una dir assente dà vuoto, il confronto con «700»
+    fallisce, e salvare la config dal pannello morirebbe con un messaggio che parla
+    di permessi mentre il problema è un oggetto che manca.
+    """
+    dir_blocchi = [b for b in _blocchi() if "chmod 700" in b[2]]
+    assert dir_blocchi, "nessun blocco sulle dir sensibili: il test non ha oggetto"
+    for nome, riga, frammento in dir_blocchi:
+        assert "mkdir -p" in frammento, (
+            f"{nome}:{riga} — il chmod sulle dir non è preceduto da `mkdir -p`: su una "
+            f"VPS senza backups/ o onboarding/ il controllo direbbe «permesso» per un "
+            f"oggetto assente, e bloccherebbe il flusso --apply"
+        )
+        res = _esegui(frammento, tmp_path / f"nodir{riga}", chmod_sabotato=False,
+                      con_oggetti=False)
+        assert res.returncode == 0, (
+            f"{nome}:{riga} — con le dir assenti il blocco fallisce invece di crearle.\n"
+            f"stdout: {res.stdout!r}"
+        )
+        for d in ("secrets", "backups", "onboarding"):
+            creata = tmp_path / f"nodir{riga}" / d
+            assert creata.is_dir() and creata.stat().st_mode & 0o777 == 0o700, (
+                f"{nome}:{riga} — {d} non è stata creata a 700"
+            )
