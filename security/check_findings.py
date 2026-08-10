@@ -110,8 +110,13 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # è un symlink a /run) lo lasciava passare uscendo 0. ⇒ il terzo stato del metodo:
 # «regge, è presidiato, e il presidio non copre tutte le forme dell'oggetto» — dove
 # aggiungere solo l'id avrebbe fatto sembrare chiusa una garanzia scavalcabile.
-EXPECTED_TOTAL = 67
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 37, "low": 18}
+# + 1 (H68 medium, 10/08) = 68. Quarta garanzia in prosa ancorata dalla voce
+# `a80025f1`: «Secrets sempre file-mounted … mai in env var» era vera (7 su 7) e non la
+# teneva nessun test. Il presidio prende l'insieme dei segreti dalla DICHIARAZIONE
+# (`secrets:` top-level) e non dai nomi che sembrano segreti: `OAUTH_ACCESS_TOKEN_LIFETIME`
+# contiene TOKEN ed è una durata, e un guardiano che grida su di lei viene disattivato.
+EXPECTED_TOTAL = 68
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 38, "low": 18}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

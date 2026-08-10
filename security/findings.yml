@@ -3092,3 +3092,131 @@ findings:
       `DOCKER_HOST` per i servizi diversi dal gateway (serve che qualcuno ce lo metta).
       Non è una svista: è il confine fra un controllo statico sul testo e uno che
       interroga il sistema, e questo repo ha il primo.
+
+  - id: H68
+    severity: medium
+    title: "«Secrets sempre file-mounted … mai in env var» era una garanzia VERA e non presidiata: 7 segreti su 7 consegnati come path in /run/secrets/, e nessun test lo teneva — sarebbe diventata falsa al primo `SECRET: valore` senza che nessun file cambiasse il proprio testo"
+    status: closed
+    scoperta:
+      quando: "2026-08-10"
+      come: lettura
+      nota: >
+        abdd732a, quarta garanzia presa dalla voce `a80025f1` sulla mappa di coordinate
+        di 71d540e6 (`r.152`). Il codice REGGEVA — 7 secret dichiarati, 7 montati via
+        `secrets:` e consegnati come `<NOME>_FILE: /run/secrets/<nome>` — e proprio per
+        questo mancava il presidio: una promessa vera non ha sintomi finché non smette
+        di esserlo, e allora non li ha comunque.
+        PERCHÉ UN ENV VAR NON È UN FILE MOUNT, che è il motivo per cui la garanzia
+        esiste: le variabili d'ambiente si leggono da `docker inspect` (chiunque nel
+        gruppo `docker` può chiamarlo), finiscono nei crash-reporter e sono ereditate da
+        OGNI processo figlio. Un file in `tmpfs /run/secrets/` no.
+    natura: comportamento
+    since: unreleased
+    prova:
+      - comando: "python3 tools/tests/test_secrets_file_mounted.py"
+        dove: "worktree su origin/main (afe40a3), il 10/08/2026"
+        output: "12 compose · 7 secret dichiarati · tutti montati e consegnati come path in /run/secrets/, nessuno per valore — la garanzia REGGEVA gia' prima del test"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "sostituito `GATEWAY_SECRET_FILE: /run/secrets/gateway_secret` con `GATEWAY_SECRET: \"valore-in-chiaro\"` e rilanciato"
+        dove: "PROVA A CONTRARIO nel worktree, compose ripristinato (git status pulito)"
+        output: "exit 1 — nomina file, riga, variabile e la forma corretta"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "puntato `GATEWAY_SECRET_FILE` a /tmp/mio_secret invece che a /run/secrets/"
+        dove: "PROVA A CONTRARIO sul secondo verso: il suffisso _FILE dice «e' un path», la garanzia e' il TMPFS"
+        output: "exit 1 — un path qualunque non e' /run/secrets/, e il test lo separa dal caso precedente"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "aggiunto un secret dichiarato e mai montato da nessun servizio"
+        dove: "PROVA A CONTRARIO sul terzo verso"
+        output: "exit 1 — «o e' morto, o arriva in un altro modo», e il secondo caso e' quello che la garanzia esclude"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "uvx pytest tools/tests/ -q"
+        dove: "suite intera come la CI, STDLIB-ONLY"
+        output: "320 passed, 4 skipped"
+        exit: 0
+        quando: "2026-08-10"
+    evidence:
+      - file: tools/tests/test_secrets_file_mounted.py
+        contains:
+          - "def test_i_segreti_non_passano_per_valore("
+          - "def test_la_sonda_distingue_il_segreto_dalla_sua_omonimia("
+          - "def secrets_dichiarati("
+      - file: SECURITY.md
+        contains:
+          - "Secrets sempre file-mounted"
+    fix: >
+      Un test che prende l'insieme dei segreti dalla DICHIARAZIONE (`secrets:` top-level
+      dei compose) e non dai nomi che sembrano segreti. La differenza non e' stilistica:
+      `OAUTH_ACCESS_TOKEN_LIFETIME: "900"` contiene TOKEN ed e' una durata — un presidio
+      costruito su `*TOKEN*|*SECRET*|*PASSWORD*` griderebbe su di lei, e *un guardiano
+      che grida viene disattivato*. Con l'insieme preso dall'oggetto i falsi positivi
+      non esistono per costruzione — ma SOLO su quella domanda, e la prima stesura di
+      questa riga era piu' larga di cio' che aveva misurato. RETTIFICA del 10/08 (mano
+      non-autrice b82df434): l'insieme preso dall'oggetto risolve «QUALE segreto esiste»
+      e non le altre tre domande che il presidio si fa, che restavano affidate a tre
+      regex — e ne aveva TRE punti ciechi (environment in forma LISTA, dichiarazione in
+      flow map, indentazione diversa da 2), cioe' quattro modi di dare verde su un
+      segreto in chiaro. Curato chiedendo le ASSEGNAZIONI a `docker compose config
+      --format json`: il compose normalizzato non ha forme alternative, docker le ha
+      gia' collassate, e non e' piu' un parser nostro a decidere cosa e' un'assegnazione.
+      ⇒ **la lista si chiede, non si dichiara** — la stessa regola che `restore.sh` aveva
+      e `backup.sh` violava sullo stesso oggetto (#146).
+      🔑 E i DICHIARATI restano presi dal TESTO, non dal normalizzato: `docker compose
+      config` OMETTE i secret che nessun servizio del progetto composto usa, e
+      `cloudflared_token` (dichiarato in un overlay col servizio non attivo) spariva
+      dalla sorveglianza — 7 diventavano 6. Ogni fonte per cio' che sa fare: il testo non
+      omette, il normalizzato non ha forme cieche. *Curare un buco di copertura cambia la
+      superficie, e la domanda «quale popolazione entra ora in ogni filtro a valle» vale
+      anche nel verso opposto: quale ESCE.*
+      ⭐ E' la lezione che questo repo ha pagato NOVE volte il 10/08 — un insieme
+      definito da una STRINGA invece che dall'oggetto (il socket per path, i volumi
+      enumerati a mano, gli script per estensione) — applicata prima invece che dopo.
+      Misura due proprieta' e non una: ogni segreto dichiarato e' CONSUMATO da almeno un
+      servizio (uno dichiarato e mai montato non e' protetto: e' inutilizzato, e la
+      differenza va detta), e nessuno passa per VALORE — la sola forma ammessa e'
+      `<NOME>_FILE: /run/secrets/<nome>`, cioe' un path, non il contenuto.
+      Guardia della guardia: se non trova nessun secret dichiarato, FALLISCE invece di
+      dare verde su un insieme vuoto.
+    residuo: >
+      Resta fuori, dichiarato: un segreto passato a un servizio via `env_file:` da un
+      file `.env` non dichiarato in `secrets:` non ha un nome da confrontare, e questo
+      presidio non lo vede. Col criterio del 10/08 — «si sfrutta OGGI, senza che nessuno
+      cambi niente?» — e' una FRAGILITA' e non un buco: nessun compose del repo usa
+      `env_file` per un segreto, e i permessi del `.env` sono presidiati altrove (H15,
+      H38, `test_env_perm_verificato.py`). Il confine e' fra cio' che il repo DICHIARA e
+      cio' che l'ambiente porta: questo presidio sta di qua.
+      ——
+      SECONDO LIMITE, MISURATO COL GRUPPO DI CONTROLLO il 10/08 e non dedotto: il
+      presidio aggancia la variabile al segreto PER NOME, quindi un segreto messo in
+      chiaro sotto un nome che non corrisponde a nessun `secrets:` non lo vede.
+      Prova, stesso valore e stessa posizione, cambia solo il nome:
+      `BOT_TOKEN: <un valore qualunque>` → exit 0 (non visto) · `TELEGRAM_BOT_TOKEN:`
+      con lo STESSO valore → exit 1 (visto, e nomina il segreto). *Il valore non compare
+      qui apposta: un esempio con la forma di un token vero fa scattare il
+      secret-scanning di GitHub, che e' piu' largo del pattern del prodotto — successo
+      il 10/08 su un placeholder dentro una revisione (voce 405da1c2), e la cura decisa
+      e' dare agli esempi una forma non credibile, non allargare il nostro pattern.* ⚠️ NON e' curabile senza
+      pagarlo altrove: rovesciare il criterio significa tornare a giudicare per FORMA
+      del nome, cioe' esattamente il presidio `*TOKEN*|*SECRET*` che griderebbe su
+      `OAUTH_ACCESS_TOKEN_LIFETIME: "900"` — e un guardiano che grida viene spento.
+      Col criterio del 10/08 e' una FRAGILITA': serve che qualcuno SCRIVA un segreto
+      sotto un nome scollegato, non e' sfruttabile oggi da nessuno senza un commit.
+      ⇒ dichiarato qui invece che curato, che e' la ragione per cui questo campo esiste.
+      ——
+      TERZO, ed e' una dipendenza dell'ambiente, non del repo: le assegnazioni vengono
+      da `docker compose config`, quindi dove docker manca (o un overlay non e'
+      componibile nemmeno insieme al compose base) quel file torna al parser testuale,
+      che ha i tre punti ciechi elencati nel `fix`. Il presidio NON lo deduce e NON
+      tace: STAMPA quanti file ha normalizzato, quanti no e i loro nomi. Misura del
+      10/08 su questa macchina: 11 su 12 normalizzati, fuori `compose.ingress.caddy.yaml`.
+      *Uno skip che si legge come un pass e' il difetto che questo repo ha pagato sulla
+      #146: qui e' scritto accanto al perimetro.*
+      ——
+      QUARTO, minore e vero: quando il difetto e' nel compose BASE, l'errore viene
+      attribuito al file dell'OVERLAY con cui e' stato composto (`compose.dev.yaml:0`
+      invece di `compose.yaml`), e la riga e' `:0` perche' il normalizzato non conserva
+      i numeri di riga. Chi va a curare apre un file che non contiene la riga. Non tocca
+      il verdetto — tocca il tempo di chi lo legge.
