@@ -2832,3 +2832,75 @@ findings:
       né le immagini nei compose — quelle stanno in una garanzia diversa della stessa
       riga di SECURITY.md, verificata a mano il 10/08 (caddy, cloudflared, alpine,
       portainer, watchtower: tutte `@sha256:`) e ancora senza presidio proprio.
+  - id: H66
+    severity: medium
+    title: "«Le immagini di terzi nei compose sono digest-pinnate» era una garanzia VERA e non presidiata: 5 su 5 pinnate e nessun test le teneva, e sarebbe diventata falsa al primo `image: qualcosa:latest` senza che nessun file cambiasse il proprio testo"
+    status: closed
+    scoperta:
+      quando: "2026-08-10"
+      come: lettura
+      nota: >
+        71d540e6, prendendo la gemella che abdd732a aveva dichiarato libera chiudendo
+        H65: quella presidia la prima meta' di SECURITY.md:171-175, questa l'ultima
+        riga dello stesso punto elenco. Il codice REGGEVA — caddy, alpine, cloudflared,
+        watchtower, portainer tutte con @sha256: — e proprio per questo mancava il
+        presidio.
+        LA PAROLA CHE DECIDE E' «TERZI», e sta nella frase: nei compose ci sono 13
+        `image:`, e pretendere il digest da tutte darebbe un rosso permanente su 8
+        righe legittime — il falso allarme che insegna a ignorare gli allarmi. Le 8
+        sono coperte altrove, e le esenzioni lo dicono: 4 `vps1777/...` hanno un
+        `build:` accanto (si costruiscono qui, nessun digest a monte), 4 hanno il tag
+        parametrico `${VPS1777_TAG:-dev}` e sono le nostre da GHCR, coperte da
+        images.lock (release.yml:177-192, verificato da tools/vps1777.py:1199) — che
+        e' il punto successivo di SECURITY.md.
+    natura: comportamento
+    since: unreleased
+    prova:
+      - comando: "grep -rh '^\\s*image:' compose*.y*ml | wc -l ; grep -rh '^\\s*image:' compose*.y*ml | grep -c '@sha256:'"
+        dove: "worktree su origin/main (206abdf), il 10/08/2026"
+        output: "13 `image:` totali · 5 con @sha256: — e le 5 sono esattamente quelle di TERZI: la garanzia REGGEVA gia' prima del test"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "uvx pytest tools/tests/test_immagini_compose_pinnate.py -q"
+        dove: "come la CI (ci.yml gira questa suite con uvx, STDLIB-ONLY)"
+        output: "2 passed in 0.03s"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "printf '\\n  spia:\\n    image: redis:7\\n' >> compose.ops.watchtower.yaml && uvx pytest tools/tests/test_immagini_compose_pinnate.py -q"
+        dove: "PROVA A CONTRARIO nel worktree, poi ripristinato: un presidio che non sa fallire e' un silenzio travestito da verde"
+        output: "1 failed, 1 passed — «compose.ops.watchtower.yaml:67  image: redis:7»: nomina file, riga e valore"
+        exit: 1
+        quando: "2026-08-10"
+      - comando: "printf '\\n  spia:\\n    image: vps1777/finta:dev\\n' >> compose.ops.watchtower.yaml && uvx pytest tools/tests/test_immagini_compose_pinnate.py -q"
+        dove: "PROVA A CONTRARIO NEL VERSO OPPOSTO: un'immagine NOSTRA non pinnata deve restare verde, o l'esenzione non esiste davvero"
+        output: "2 passed — l'esenzione funziona e non e' un buco: il default resta severo per chi non e' in lista"
+        exit: 0
+        quando: "2026-08-10"
+      - comando: "uvx pytest tools/tests/ -q"
+        dove: "suite intera: in tools/tests/ un import di troppo non fallisce il tuo test, impedisce agli altri di partire (COLLECT)"
+        output: "277 passed, 4 skipped in 59.62s"
+        exit: 0
+        quando: "2026-08-10"
+    evidence:
+      - file: tools/tests/test_immagini_compose_pinnate.py
+        contains:
+          - "def test_ogni_immagine_di_terzi_e_digest_pinnata("
+          - "def test_ci_sono_compose_e_immagini_di_terzi_da_controllare("
+      - file: SECURITY.md
+        contains:
+          - "Le immagini di\n  terzi nei compose sono digest-pinnate"
+    fix: >
+      Un test che ENUMERA invece di campionare: legge ogni `image:` dei
+      `compose*.y*ml` e chiede il digest a chi e' di TERZI, escludendo per nome le due
+      classi che un digest non lo possono avere (`vps1777/...` costruite qui,
+      `${...}` a tag parametrico). Il default e' severo: chi non e' in lista e' di
+      terzi e deve essere pinnato — un `redis:7` aggiunto domani prende un rosso, non
+      un'esenzione per silenzio. Provato a contrario nei DUE versi.
+      Porta con se' la guardia della guardia
+      (`test_ci_sono_compose_e_immagini_di_terzi_da_controllare`): se i compose
+      sparissero o cambiassero nome, l'altro test passerebbe su una lista VUOTA.
+    residuo: >
+      UNA LISTA DI ESENZIONI E' SICURA QUANDO IL DEFAULT URLA, ed e' il punto fragile
+      da sorvegliare: se un domani si aggiungesse un'esenzione allargando la regex del
+      digest invece che la funzione `_e_di_terzi()`, sparirebbe dalla vista di chi
+      legge il test. L'esenzione va aggiunta DOVE si vede, col suo perche'.
