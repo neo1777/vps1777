@@ -95,11 +95,22 @@ def test_il_floor_usa_la_funzione_e_non_il_confronto_nudo():
             n.attr for n in ast.walk(nodo) if isinstance(n, ast.Attribute)
         }
 
+    # ⚠️ NON basta che i due nomi ci siano: serve che siano in AND. Con `or` la
+    #   semantica si ROVESCIA (il floor si applicherebbe fuori dal pulsante, e il
+    #   pulsante passerebbe senza floor) e le due garanzie che il blocco documenta
+    #   cadono entrambe — rilievo di abdd732a revisionando questa PR, riprodotto:
+    #   `and` → `or` e il test passava lo stesso.
+    def _e_and_dei_due(test) -> bool:
+        if not (isinstance(test, ast.BoolOp) and isinstance(test.op, ast.And)):
+            return False
+        nomi = set()
+        for v in test.values:
+            nomi |= _nomi(v)
+        return {"floor_blocca", "from_intent"} <= nomi
+
     guardie = [
         n for n in ast.walk(albero)
-        if isinstance(n, ast.If)
-        and "floor_blocca" in _nomi(n.test)
-        and "from_intent" in _nomi(n.test)
+        if isinstance(n, ast.If) and _e_and_dei_due(n.test)
     ]
     assert guardie, (
         "nessun `if` che testi INSIEME `from_intent` e `floor_blocca`: o il "
