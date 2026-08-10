@@ -3,8 +3,17 @@
 IL DIFETTO CHE QUESTO FILE PROTEGGE (trovato il 10/08, prima di una formattazione della
 VPS, mentre si preparava la prova del restore che @Neo aveva chiesto):
 
-    VOLUMES=$(docker volume ls -q | grep -E '^vps1777_(gateway-data|archive-data|nlm-auth|
-                                     tailscale-state|caddy-data|caddy-config)$' || true)
+    VOLUMES=$(docker volume ls -q | grep -E '^vps1777_(sei|nomi|scritti|qui|a|mano)$' || true)
+
+⚠️ La regex qui sopra è PARAFRASATA di proposito: i nomi veri non si citano. Uno dei volumi
+di allora è sorvegliato da `test_nlm_auth_montaggi.py`, che tiene la lista dei file
+autorizzati a nominarlo — e un file di test che citasse la vecchia regex verbatim finirebbe
+dentro quella lista **per una ragione puramente documentale**, allargando un presidio di
+sicurezza per far passare un commento.
+⭐ *Documentare un difetto con la sua stringa esatta accende le sonde che quella stringa
+cercano: la lapide non va scritta con le parole del morto.* (E la prima stesura di QUESTA
+riga nominava il volume mentre spiegava di non nominarlo: il gate è rimasto rosso e aveva
+ragione.)
 
 Una lista di volumi **enumerata a mano**, e con `|| true` in coda. Misurato allora:
 
