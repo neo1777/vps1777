@@ -106,8 +106,39 @@ def sorgente_del_mount(riga: str) -> str | None:
     Copre le due sintassi di compose: la corta (`- /a:/b:ro`) e la lunga (`source: /a`).
     Una sorgente relativa o parametrica (`./data`, `${X}`) torna com'è: non è un antenato
     del socket e non fa scattare nulla.
+
+    🔴 I DUE PUNTI NELLA REGEX NON SONO SINTASSI: SONO IL CONFINE FRA DUE OGGETTI DIVERSI,
+    e vanno lasciati lì. Chiesto a `docker compose config`, che è l'unica fonte che decide
+    (71d540e6, 10/08):
+
+        - /var/./run        → type: volume · target: /var/run · NESSUNA source
+                              docker ci monta sopra un volume ANONIMO E VUOTO:
+                              il container non vede niente dell'host
+        - /var/./run:/x     → type: bind   · source: /var/./run · target: /x
+                              QUESTO è l'accesso
+
+    ⇒ una riga senza destinazione **non è un attacco**, e un presidio che la prendesse
+      sarebbe un falso positivo su un gesto legittimo (montare un volume anonimo su
+      `/var/run` si fa). ⭐ *Il sabotaggio non è un attacco finché il sistema non lo
+      interpreta come tale: se il veleno non è veleno, un presidio che non reagisce non
+      è cieco — ha ragione.*
+    🔑 E il metodo, che il 10/08 è costato quattro ore a tre sessioni: davanti a un dubbio
+      su come un input viene letto, **si chiede al SISTEMA** (`docker compose config`), non
+      al presidio se lo prende. *Abbiamo interrogato il guardiano e nessuna ha chiesto alla
+      serratura.*
     """
-    r = senza_commento(riga)
+    # 🔴 LE VIRGOLETTE SI TOLGONO PRIMA, e sono costate tre ore di divergenza il 10/08
+    # (trovate da b82df434 dopo che la normalizzazione era già stata scagionata):
+    #
+    #     - /var/./run:/x       → preso        - "/var/./run:/x"     → PASSAVA
+    #
+    # `[^:\s]+` accetta la virgoletta come parte del path, e `"/var/./run` non è più un
+    # path: nessuna normalizzazione lo raddrizza, perché il difetto sta PRIMA di lei.
+    # In YAML quotare un valore è legittimo e frequente, e Docker legge lo stesso mount.
+    # ⭐ È la quinta forma della stessa classe in un giorno — l'insieme definito da una
+    #    stringa — e stavolta la stringa era la SINTASSI, non l'oggetto: avevamo
+    #    controllato tre volte *quale path* riconoscere e mai *come è scritto*.
+    r = senza_commento(riga).replace('"', "").replace("'", "")
     m = re.match(r"\s*-\s*([^:\s]+):", r) or re.match(r"\s*source:\s*(\S+)\s*$", r)
     return m.group(1) if m else None
 
@@ -212,7 +243,19 @@ def main() -> int:
     if not compose:
         print("✗ nessun compose trovato: la sonda non sta guardando il repo giusto")
         return 1
-    print(f"perimetro: {len(compose)} file compose*.y*ml")
+    # 🔴 LA RADICE SI STAMPA, e costa una riga: senza, questo presidio rendiconta un
+    # numero senza dire SU QUALE ALBERO l'ha calcolato — e il 10/08 quel silenzio è
+    # costato quattro ore a tre sessioni. Una collega sabotava `compose.yaml` in un
+    # worktree e lanciava `python3 <altro-albero>/tools/tests/test_…py`: `ROOT` dipende
+    # da dove sta il FILE DI TEST, non dalla cwd, quindi il presidio misurava l'albero
+    # PULITO e dichiarava «10/12 compose NON montano il socket». Vero per l'albero che
+    # aveva letto, falso per quello che lei aveva davanti.
+    # ⭐ E il gruppo di controllo non lo intercetta, perché anche il controllo gira lì.
+    #    L'unico indizio era che il CONTEGGIO non cambiava col sabotaggio attivo — un
+    #    dato che si nota solo se si sospetta già.
+    # ⇒ «stesso commit ≠ stesso banco» era una regola di metodo che ognuna doveva
+    #   ricordarsi. Stampata qui diventa un dato sotto gli occhi di chi legge l'output.
+    print(f"perimetro: {len(compose)} file compose*.y*ml · radice: {ROOT}")
 
     errori = 0
     montano = []
@@ -326,6 +369,13 @@ def test_riconosce_ogni_forma_del_mount() -> None:
         # ⬇️ e il caso che nessuna delle tre aveva provato, e che `startswith` da solo
         #    non prende MAI: un path che esce dalla regione e ci rientra.
         "      - /opt/../run:/x",
+        # ⬇️ LE STESSE FORME QUOTATE — il buco che ha diviso tre sessioni per tre ore.
+        #    In YAML quotare è legittimo, Docker legge lo stesso mount, e la virgoletta
+        #    entrava nel path rendendo inutile ogni normalizzazione a valle.
+        '      - "/var/./run:/x"',
+        "      - '/run:/host-run:ro'",
+        '      - "/var/run/docker.sock:/var/run/docker.sock"',
+        '        source: "/var/run"',
     ]
     for f in forme:
         assert righe_di_mount(f) == [f], f"forma non riconosciuta: {f}"
@@ -347,6 +397,16 @@ def test_riconosce_ogni_forma_del_mount() -> None:
         "      - gateway-uploads:/uploads",          # volume nominato, non un bind
         "      - /opt/dati:/dati:ro",
         "      - ${VPS1777_DIR}/secrets:/run/secrets:ro",   # DESTINAZIONE in /run: legittima
+        # ⬇️ I VOLUMI ANONIMI, e queste tre righe esistono per IMPEDIRE UNA CURA.
+        #    Senza destinazione, `docker compose config` dice `type: volume` senza
+        #    `source`: il container vede un volume vuoto, non l'host. Chi guarderà
+        #    questo presidio dopo un incidente avrà la tentazione naturale di allargarlo
+        #    («ma monta /var/run!») e comprerebbe un falso allarme su un gesto legittimo.
+        #    ⭐ L'avvertenza esiste già, detta sul bus il 10/08 — ma un'avvertenza detta
+        #       si viola e un test no: è la ragione per cui sta qui e non in un commento.
+        "      - /var/./run",
+        "      - /var/run",
+        "      - /run",
     ]
     for r in innocue:
         assert righe_di_mount(r) == [], f"commento scambiato per mount: {r}"
