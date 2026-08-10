@@ -43,7 +43,10 @@ Uso:  python3 tools/tests/test_secrets_file_mounted.py     (esce 1 al primo dife
 """
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -111,6 +114,60 @@ def assegnazioni_environment(testo: str) -> list[tuple[int, str, str]]:
     return fuori
 
 
+def via_docker(path: Path) -> tuple[list[str], list[tuple[int, str, str]]] | None:
+    """Chiede a `docker compose config` il compose NORMALIZZATO. None se non si può.
+
+    🔴 PERCHÉ ESISTE, ed è una rettifica: la prima versione di questo file parsava il
+    testo con tre regex, e b82df434 ha misurato che **il presidio aveva quattro modi di
+    dare verde su un segreto in chiaro** — tre erano forme YAML che le mie regex non
+    riconoscevano:
+        environment in forma LISTA   `- GATEWAY_SECRET=valore`     invisibile
+        dichiarazione in flow map    `nome: {file: ./x.txt}`        fuori dall'insieme
+        indentazione diversa da 2    YAML valido                    fuori dall'insieme
+    ⭐ *Il file diceva «con l'insieme preso dall'oggetto i falsi positivi non esistono
+    per costruzione» — vero per QUALE segreto esiste, e falso per le altre tre domande
+    che il presidio si faceva, tutte risolte da una regex.*
+
+    ⇒ **la lista si chiede, non si dichiara.** È la regola che `restore.sh` aveva già e
+    che `backup.sh` violava sullo stesso oggetto (#146), ed è ciò che ha chiuso in due
+    minuti la divergenza sul socket: *avevamo interrogato il guardiano e nessuna aveva
+    chiesto alla serratura.* Il compose normalizzato non ha forme alternative: docker le
+    ha già collassate tutte, e non è più il mio parser a decidere cosa è un'assegnazione.
+    """
+    if not shutil.which("docker"):
+        return None
+    base = ROOT / "compose.yaml"
+    # 🔑 due tentativi, e il secondo copre la maggioranza: un OVERLAY da solo non è un
+    #   progetto valido («refers to undefined network backend») — lo diventa insieme al
+    #   compose base, che è il modo in cui viene usato davvero. Senza questo secondo
+    #   tentativo il parser testuale prendeva 8 file su 12, cioè la copertura piena
+    #   valeva per un terzo del perimetro mentre la riga finale diceva «tutti».
+    tentativi = [["-f", str(path)]]
+    if path != base and base.is_file():
+        tentativi.append(["-f", str(base), "-f", str(path)])
+    r = None
+    for args in tentativi:
+        r = subprocess.run(["docker", "compose", *args, "config", "--format", "json"],
+                           capture_output=True, text=True, check=False, cwd=str(ROOT))
+        if r.returncode == 0:
+            break
+    if r is None or r.returncode != 0:
+        return None                      # né da solo né col base: resta il parser testuale
+    try:
+        d = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return None
+    dichiarati = sorted((d.get("secrets") or {}).keys())
+    assegnazioni: list[tuple[int, str, str]] = []
+    for nome, srv in (d.get("services") or {}).items():
+        env = srv.get("environment") or {}
+        if isinstance(env, list):        # difesa: la normalizzazione dovrebbe dare un dict
+            env = dict(x.split("=", 1) for x in env if "=" in x)
+        for var, val in env.items():
+            assegnazioni.append((0, var, "" if val is None else str(val)))
+    return dichiarati, assegnazioni
+
+
 def main() -> int:
     compose = compose_del_repo()
     print(f"garanzia presidiata: «Secrets sempre file-mounted … mai in env var» "
@@ -121,9 +178,32 @@ def main() -> int:
 
     testi = {p: p.read_text(encoding="utf-8") for p in compose}
     dichiarati: dict[str, Path] = {}
+    assegnazioni: dict[Path, list[tuple[int, str, str]]] = {}
+    normalizzati: list[str] = []
+    a_mano: list[str] = []
     for p, t in testi.items():
+        # 🔴 OGNI FONTE PER CIÒ CHE SA FARE, e questa riga è una rettifica misurata.
+        #   Passando ai secret del compose NORMALIZZATO l'insieme è sceso da 7 a 6:
+        #   `docker compose config` OMETTE i secret che nessun servizio del progetto
+        #   composto usa — `cloudflared_token` è dichiarato in un overlay il cui servizio
+        #   non è attivo, e spariva dalla sorveglianza.
+        #   ⭐ Avevo curato un buco di COPERTURA (le forme YAML che le regex non vedevano)
+        #     e cambiato la SUPERFICIE senza chiedermi **quale popolazione ESCE** — la
+        #     domanda che ho scritto io stamattina in senso opposto («quale popolazione
+        #     ENTRA in ogni filtro a valle»), e che vale nei due versi.
+        #   ⇒ l'insieme dei DICHIARATI lo dà il testo (non omette niente); le
+        #     ASSEGNAZIONI le dà il normalizzato (non ha forme cieche).
         for nome in secrets_dichiarati(t):
             dichiarati.setdefault(nome, p)
+        d = via_docker(p)
+        if d is not None:
+            normalizzati.append(p.name)
+            for nome in d[0]:
+                dichiarati.setdefault(nome, p)
+            assegnazioni[p] = d[1]
+        else:
+            a_mano.append(p.name)
+            assegnazioni[p] = assegnazioni_environment(t)
 
     if not dichiarati:
         # la guardia della guardia: senza, questo test passerebbe a mani vuote il giorno
@@ -135,7 +215,17 @@ def main() -> int:
         return 1
 
     errori = 0
+    # 🔴 LA COPERTURA RIDOTTA SI VEDE, non si deduce. Se docker non c'è, o un overlay non
+    #   è componibile da solo, quel file torna al parser testuale — che b82df434 ha
+    #   misurato avere tre punti ciechi. Uno skip che si legge come un pass è il difetto
+    #   che questo repo si è preso sulla #146: qui è stampato accanto al perimetro.
     print(f"  perimetro: {len(compose)} compose · {len(dichiarati)} secret dichiarati")
+    print(f"  letti da `docker compose config` (normalizzati): {len(normalizzati)}")
+    if a_mano:
+        print(f"  ⚠️ letti col parser TESTUALE, copertura ridotta: {len(a_mano)} — "
+              f"{', '.join(a_mano)}")
+        print("     (docker assente o overlay non componibile da solo: le forme "
+              "lista/flow-map/indentazione non-2 non sono viste in questi file)")
 
     # ① ogni secret dichiarato è montato da almeno un servizio
     for nome, dove in sorted(dichiarati.items()):
@@ -148,8 +238,8 @@ def main() -> int:
                   f"      caso è quello che questa garanzia esclude.")
 
     # ② nessuno di essi passa per VALORE in environment
-    for p, t in testi.items():
-        for n, var, valore in assegnazioni_environment(t):
+    for p in compose:
+        for n, var, valore in assegnazioni.get(p, []):
             base = var[:-5] if var.endswith("_FILE") else var
             corrispondenti = [s for s in dichiarati if s.upper() == base]
             if not corrispondenti:
