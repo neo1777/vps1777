@@ -104,6 +104,29 @@ def test_la_regex_storica_non_e_tornata():
     )
 
 
+def test_zero_volumi_trovati_non_e_un_backup_riuscito():
+    """Il difetto che la PRIMA cura aveva lasciato, spostato di un anello.
+
+    Trovato da 71d540e6 revisionando la PR #146, e provato eseguendo: `docker compose
+    config` dà i nomi LOGICI, il prefisso del progetto lo mette lo script. Col prefisso
+    sbagliato ogni volume risulta «non esiste ancora» — che è un avviso, non un errore —
+    quindi il ciclo salvava ZERO volumi, stampava «✓ Volumi dumpati» e usciva 0.
+
+    ⭐ Una cura può riprodurre la classe che cura, un anello più in là: lì era la lista
+    enumerata, qui il nome costruito. In entrambi i casi l'insieme FINALE non veniva
+    confrontato con niente.
+    """
+    src = _BACKUP.read_text()
+    assert 'if [ -z "$(echo "$VOLUMES"' in src or "nessun volume trovato" in src, (
+        "backup.sh non verifica che almeno un volume sia stato trovato: col prefisso "
+        "sbagliato salverebbe zero volumi e uscirebbe 0"
+    )
+    assert "die" in src.split("nessun volume trovato")[0][-200:], (
+        "zero volumi non fa fallire il backup: un backup vuoto che esce 0 è peggio "
+        "di un backup che non parte"
+    )
+
+
 def test_gli_esclusi_hanno_una_ragione_scritta():
     """Un'esclusione senza motivo è indistinguibile da una dimenticanza."""
     for vol, perche in ESCLUSI.items():

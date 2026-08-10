@@ -161,6 +161,22 @@ else
       warn "  ⚪ $reale dichiarato nei compose ma non esiste ancora: niente da salvare"
     fi
   done
+  # 🔴 10/08, SECONDO GIRO — LA CURA QUI SOPRA AVEVA LASCIATO IL DIFETTO CHE DESCRIVE,
+  #   spostato di un anello (trovato da 71d540e6 revisionando la PR #146, e PROVATO
+  #   eseguendo: col prefisso sbagliato il ciclo salva ZERO volumi, stampa «✓ Volumi
+  #   dumpati» ed esce 0). Il fail-closed copriva «non so QUALI volumi» e non «non ne ho
+  #   trovato NESSUNO»: `docker compose config` dà i nomi LOGICI, il prefisso del progetto
+  #   lo mette questo script — e se sbaglia il prefisso, ogni volume risulta «non esiste
+  #   ancora», che è un avviso, non un errore.
+  # ⭐ La lezione, ed è la stessa forma per la terza volta oggi: **una cura può riprodurre
+  #   la classe che cura, un anello più in là.** Lì era la lista enumerata, qui è il nome
+  #   costruito: in entrambi i casi l'insieme finale non veniva confrontato con nulla.
+  # ⇒ ZERO volumi da salvare è un ESITO, e va deciso: o il progetto non è mai partito
+  #   (e allora non c'è backup da fare, va detto forte), o il prefisso non combacia (e il
+  #   backup sarebbe vuoto e silenzioso). In nessuno dei due casi si prosegue.
+  if [ -z "$(echo "$VOLUMES" | tr -d ' ')" ]; then
+    die "nessun volume trovato per il progetto «$PROJ»: i compose ne dichiarano $(echo "$VOLS_LOGICI" | wc -w) ($(echo $VOLS_LOGICI | tr '\n' ' ')) e nessuno esiste col prefisso «${PROJ}_». O lo stack non è mai partito, o COMPOSE_PROJECT_NAME non è quello con cui sono stati creati i volumi (\`docker volume ls\` per vederli). Un backup vuoto che esce 0 è peggio di un backup che non parte."
+  fi
   for vol in $VOLUMES; do
     log "  → $vol"
     docker run --rm \
