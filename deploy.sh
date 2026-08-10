@@ -277,12 +277,16 @@ set_kv TELEGRAM_OWNER_ID '$TG_OWNER'"
 set_kv PUBLIC_BASE '$PUB'"
   # .env contiene segreti (TS_AUTHKEY, e i valori che ci scrive il pannello):
   # 600, non 644 (H15). E ripulisce l'orfano se un deploy precedente l'ha creato.
-  # La riga dopo il chmod NON è ridondante: `2>/dev/null || true` sopprime
-  # l'esito due volte, quindi il permesso si chiede al FILE (#66).
+  # Le righe di verifica dopo i chmod NON sono ridondanti: `2>/dev/null || true`
+  # sopprime l'esito due volte, e l'`ok` qui sotto dichiara «.env 600, dir
+  # sensibili 700» comunque. Il permesso si chiede all'OGGETTO (#66). Il `700`
+  # sulle dir è H38: stessa forma, e qui era l'unico dei quattro punti che si
+  # zittiva (deploy.sh:690, setup.sh:187, engine.py:491 falliscono rumorosi).
   APPLY_SCRIPT="$APPLY_SCRIPT
 chmod 600 .env 2>/dev/null || true
 if [ \"\$(stat -c %a .env 2>/dev/null)\" != \"600\" ]; then echo \"ENV_PERM_FALLITO\"; exit 1; fi
 chmod 700 secrets backups onboarding 2>/dev/null || true
+for d in secrets backups onboarding; do if [ \"\$(stat -c %a \$d 2>/dev/null)\" != \"700\" ]; then echo \"DIR_PERM_FALLITO \$d\"; exit 1; fi; done
 rm -f secrets/ts_authkey.txt"
   printf '%s\n' "$APPLY_SCRIPT" | SSH "sudo -u $OPERATOR_USER bash -s" || die "Scrittura secret/.env fallita"
   ok "Secret + .env aggiornati (.env 600, dir sensibili 700)"
