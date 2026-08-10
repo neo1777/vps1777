@@ -125,8 +125,42 @@ if [ -n "${BACKUP_VOLUMES_DIR:-}" ] && [ -d "$BACKUP_VOLUMES_DIR" ]; then
   done
 else
   # Contesto HOST: docker disponibile → dump via `docker run` (volume ro).
+  #
+  # 🔴 10/08 — QUI C'ERA UNA LISTA DI VOLUMI ENUMERATA A MANO, e ne perdeva DUE del
+  #   compose PRINCIPALE. Misurato mentre si preparava la prova del restore chiesta da
+  #   Neo, prima di una formattazione della VPS:
+  #     dichiarati nei compose 8 · salvati 6
+  #     🔴 gateway-uploads (compose.yaml, montato da `gateway`)  ← i file degli utenti
+  #     🔴 nlm-artifacts   (compose.yaml, montato da `nb1777-mcp`)
+  #     ⚪ tailscale-state  era nella regex e in NESSUN compose: un nome morto in una
+  #        lista viva — la prova che l'insieme non era più governato da nessuno.
+  #   Col `|| true` in coda, un volume mancante non era un errore: il ciclo girava su una
+  #   lista più corta e stampava «Volumi dumpati». ⭐ Un backup che non trova una cosa non
+  #   fallisce: la OMETTE — e al restore la perdita si legge come «fatto», dicendo il vero.
+  #
+  # 🔑 La regola è già in questo repo, in `restore.sh` (r.~104, per il `down`):
+  #   «Docker sa già cosa appartiene al progetto: glielo si chiede, invece di dirglielo.»
+  #   Qui si faceva il contrario sullo stesso oggetto. Adesso la lista si CHIEDE: segue
+  #   gli overlay ATTIVI (se caddy è su, i suoi volumi ci sono; se non lo è, non servono)
+  #   e non può divergere dai compose.
+  # ⚠️ FAIL-CLOSED, di proposito: se non si riesce a chiedere, il backup NON PARTE. Un
+  #   backup che non sa cosa deve salvare non è un backup ridotto, è un backup falso —
+  #   e la sua bugia si scopre solo il giorno del ripristino.
   log "Dump volumi Docker..."
-  VOLUMES=$(docker volume ls -q | grep -E '^vps1777_(gateway-data|archive-data|nlm-auth|tailscale-state|caddy-data|caddy-config)$' || true)
+  VOLS_LOGICI=$(docker compose config --volumes 2>/dev/null || true)
+  [ -n "$VOLS_LOGICI" ] || die "non riesco a chiedere i volumi a \`docker compose config --volumes\` (variabili .env mancanti?). Un backup che non sa cosa salvare non parte."
+  PROJ="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
+  VOLUMES=""
+  for logico in $VOLS_LOGICI; do
+    reale="${PROJ}_${logico}"
+    if docker volume inspect "$reale" >/dev/null 2>&1; then
+      VOLUMES="$VOLUMES $reale"
+    else
+      # Dichiarato e non ancora creato: NON è un errore (il servizio può non essere mai
+      # partito), ma va DETTO — il silenzio qui è indistinguibile da «l'ho salvato».
+      warn "  ⚪ $reale dichiarato nei compose ma non esiste ancora: niente da salvare"
+    fi
+  done
   for vol in $VOLUMES; do
     log "  → $vol"
     docker run --rm \
