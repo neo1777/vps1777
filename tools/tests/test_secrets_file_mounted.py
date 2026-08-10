@@ -27,7 +27,9 @@ L'insieme dei segreti **non è dedotto dai nomi** (`*PASSWORD*`, `*TOKEN*`, `*SE
 ⭐ Il 10/08 questo repo ha pagato **nove volte in un giorno** la stessa forma — *un insieme
 definito da una stringa invece che dall'oggetto* (il socket per path, i volumi enumerati a
 mano, gli script per estensione…). Qui l'oggetto esiste ed è scritto: usarlo costa meno
-che inventare un'euristica, e non ha falsi positivi per costruzione.
+che inventare un'euristica, e non ha falsi positivi per costruzione — **su QUELLA domanda
+soltanto**, ed è una precisazione pagata: la prima versione di questa riga era più larga
+di ciò che aveva misurato (vedi `via_docker()` più sotto).
 
 ## Cosa misura
 
@@ -36,6 +38,26 @@ che inventare un'euristica, e non ha falsi positivi per costruzione.
      va detta invece che lasciata dedurre)
   ② nessun `environment:` assegna il segreto **per valore**: la sola forma ammessa è
      `<NOME>_FILE: /run/secrets/<nome>`, cioè un PATH, non il contenuto
+
+## Cosa NON misura — e va letto insieme al verde, non dopo
+
+🔴 **Il legame fra la variabile e il segreto è il NOME** (`GATEWAY_SECRET_FILE` ↔
+`gateway_secret`, riga `s.upper() == base`). Quindi questo file verifica una promessa
+**più stretta** di quella scritta in `SECURITY.md`: non «mai in env var», ma *«mai in env
+var col nome che lo rende riconoscibile»*.
+
+    BOT_TOKEN:           <un valore>     → exit 0   NON visto
+    TELEGRAM_BOT_TOKEN:  <lo stesso>     → exit 1   visto, e nomina il segreto
+
+Misurato col **gruppo di controllo** il 10/08 (rilievo di 71d540e6 in revisione
+non-autrice): stesso valore, stessa posizione, cambia **solo il nome**. Non è un difetto
+di parsing e `docker compose config` non lo cura — docker normalizza la FORMA, non può
+inventare il LEGAME. ⚠️ **Non è curato di proposito:** riconoscere per forma del nome
+riporta al presidio che grida su `OAUTH_ACCESS_TOKEN_LIFETIME: "900"`, cioè al guardiano
+che viene spento. Il legame regge per **convenzione** — chi aggiunge un segreto tenga il
+nome della variabile uguale a quello del secret — *e la convenzione non è presidiata*.
+⇒ dichiarato qui, in `SECURITY.md` accanto alla promessa e nel residuo di `H68`: **un
+limite che vive in un posto solo, in tre giorni diventa una garanzia creduta.**
 
 Stile: stdlib-only, nessuna dipendenza — `uvx pytest tools/tests/` gira senza PyYAML, e un
 import di troppo non fallisce questo test: impedisce agli altri di partire, in collect.

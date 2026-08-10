@@ -152,6 +152,17 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
 - **Secrets sempre file-mounted** (baseline, `H68`): password, signing key, token via
   Docker `secrets:` in `tmpfs /run/secrets/`, **mai** in env var — un env var lo mostra
   `docker inspect` e lo ereditano tutti i processi figli. Vedi [docs/SECRETS.md](docs/SECRETS.md).
+  ⚠️ **Quanto ne è PRESIDIATO, perché la promessa è più larga della copertura:**
+  `tools/tests/test_secrets_file_mounted.py` aggancia la variabile al segreto **per
+  nome** (`GATEWAY_SECRET_FILE` ↔ `gateway_secret`), quindi verifica «mai in env var
+  **col nome che lo rende riconoscibile**». Un segreto passato sotto un nome scollegato
+  (`BOT_TOKEN` per `telegram_bot_token`) **esce verde**: misurato col gruppo di
+  controllo il 10/08, stesso valore e stessa posizione, cambia solo il nome.
+  Non è curato di proposito — riconoscere per FORMA del nome (`*TOKEN*`, `*SECRET*`)
+  griderebbe su `OAUTH_ACCESS_TOKEN_LIFETIME: "900"`, che è una durata, *e un guardiano
+  che grida viene spento*. Il legame nome↔segreto regge per **convenzione**, e la
+  convenzione non è presidiata: chi aggiunge un segreto tenga il nome della variabile
+  uguale a quello del secret. Residuo completo in `security/findings.yml`, voce `H68`.
 - **Il repo è pubblico, e un gate lo tratta come tale** (`security/check_no_leaks.py`,
   in CI a ogni PR). Fa fallire la build se entra un **export di sessione** (il `.txt`
   di `/export`: nome innocuo, dentro il detto-e-fatto di una sessione di lavoro) o del
