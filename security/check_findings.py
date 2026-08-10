@@ -82,8 +82,16 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # cambiasse il proprio testo. ⇒ *una promessa vera non ha sintomi finché regge, e
 # quando smette non ne ha comunque.* Trovata lavorando la voce `a80025f1` col suo
 # metodo: per ogni frase-garanzia in prosa, il codice regge? se sì merita un id.
-EXPECTED_TOTAL = 65
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 35, "low": 18}
+# + 1 (H66 medium, 10/08) = 66. H66 è la GEMELLA di H65 e nasce dallo stesso metodo:
+# l'ultima riga dello stesso punto elenco di SECURITY.md — «Le immagini di terzi nei
+# compose sono digest-pinnate» — era vera (5 su 5) e non la teneva nessun test. La
+# parola che decide è «terzi»: nei compose ci sono 13 `image:`, e pretendere il digest
+# da tutte darebbe un rosso permanente su 8 righe legittime — il falso allarme che
+# insegna a ignorare gli allarmi. Le 8 sono coperte altrove (4 hanno un `build:`
+# accanto, 4 sono le nostre da GHCR con images.lock), e il test lo dichiara invece di
+# allargare la regex: ⇒ *una lista di esenzioni è sicura quando il default urla.*
+EXPECTED_TOTAL = 66
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 36, "low": 18}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
