@@ -40,6 +40,7 @@ Uso:  python3 tools/tests/test_docker_sock_perimetro.py     (esce 1 al primo dif
 """
 from __future__ import annotations
 
+import os.path
 import re
 import sys
 from pathlib import Path
@@ -116,8 +117,20 @@ def sorgente_pericolosa(sorgente: str) -> bool:
 
     `/run/alias.sock` non nomina Docker e non è una directory: è dentro `/run`, e tanto
     basta. È il caso che ha convinto a scrivere la regola per REGIONE invece che per nome.
+
+    🔴 E LA REGIONE VA CONFRONTATA SUL PATH NORMALIZZATO, non sulla stringa scritta
+    (b82df434, terza revisione della PR #147): `/opt/../run` è `/run`, e una regione
+    confrontata a mano con `startswith` non lo sa. Terza volta in un giorno che questa
+    forma si sposta di un anello — lista → nome → regione — e ogni volta **l'insieme
+    finale non veniva confrontato con niente**.
+    ⚠️ `normpath` e NON `Path.resolve()`: `resolve()` tocca il filesystem e segue i
+       symlink, e un compose descrive un ALTRO host — i suoi path qui non esistono, e il
+       presidio diventerebbe verde per assenza. *Un test statico non interroga la
+       macchina su cui gira* (stessa ragione per cui questa suite ha perso PyYAML).
+    ⚠️ Due passaggi e non uno: POSIX riserva il doppio slash iniziale, quindi
+       `normpath("//var//run")` resta `//var/run` — il collasso va fatto a mano.
     """
-    p = re.sub(r"/\./", "/", sorgente).rstrip("/") or "/"
+    p = re.sub(r"^//+", "/", os.path.normpath(sorgente))
     if SOCK_RE.search(p) or p in ESATTE:
         return True
     return any(p == r or p.startswith(r + "/") for r in RADICI)
@@ -219,13 +232,34 @@ def main() -> int:
                   f"      decisione scritta, non un controllo che tace.")
             continue
         ragione, aghi = ECCEZIONI[p.name]
+        # 🔴 L'ECCEZIONE VALE PER LA RIGA, NON PER IL FILE — e prima valeva per il file.
+        # Il buco è uscito da una DIVERGENZA fra due revisioni della PR #147, il 10/08:
+        # 71d540e6 misurava `/./:/host` PRESO, b82df434 lo misurava PASSATO, sullo stesso
+        # commit. Nessuna delle due sonde era sbagliata — sabotavano due file diversi, uno
+        # normale e uno d'eccezione. Qui dentro, dopo il primo mount col suo avviso,
+        # nessuna altra riga veniva più esaminata: nei due compose che il socket lo
+        # montano legittimamente si poteva montare `/` e il presidio restava verde.
+        # ⭐ «Questo FILE ha una ragione» era diventato «in questo file non guardo più».
+        # ⇒ e la lezione sta nel modo in cui è saltato fuori: **due misure oneste che
+        #   divergono sullo stesso oggetto non sono un errore da arbitrare, sono la prova
+        #   che l'oggetto ha due comportamenti.** Se una delle due avesse ceduto, questo
+        #   buco sarebbe ancora qui.
+        estranee = [r for r in righe
+                    if not SOCK_RE.search(senza_commento(r))]
+        if estranee:
+            errori += 1
+            print(f"  ✗ {p.name}: è un'eccezione nominata per il MOUNT DEL SOCKET, e qui\n"
+                  f"      c'è un'altra via verso Docker che l'eccezione non copre:\n"
+                  f"      {estranee[0].strip()}\n"
+                  f"      Un file in ECCEZIONI non è una zona franca: la ragione scritta\n"
+                  f"      ({ragione}) vale per quel mount, non per tutto ciò che segue.")
         # «accanto al mount» si MISURA (rilievo 71d540e6): prima era `a not in testo`,
         # cioè in TUTTO il file — spostando l'avviso in fondo il test restava verde e la
         # garanzia dichiarata era più stretta di quella misurata. Ora la finestra sono le
         # 15 righe che precedono la riga del mount: se l'avviso si allontana, si vede.
         tutte = testo.splitlines()
         i_mount = next(i for i, r in enumerate(tutte)
-                       if SOCK_RE.search(r) and not r.lstrip().startswith("#"))
+                       if SOCK_RE.search(senza_commento(r)))
         finestra = "\n".join(tutte[max(0, i_mount - 15):i_mount])
         mancanti = [a for a in aghi if a not in finestra]
         if mancanti:
@@ -282,6 +316,16 @@ def test_riconosce_ogni_forma_del_mount() -> None:
         #    arbitrario dentro /run (un symlink sull'host). Nessun elenco di basename
         #    lo prende; la REGIONE sì.
         "      - /run/alias.sock:/tmp/d.sock",
+        # ⬇️ i path NON NORMALIZZATI (b82df434, terza revisione). Docker li normalizza e
+        #    monta esattamente la regione che il presidio difende; una regione confrontata
+        #    sulla stringa scritta non li vede. Il primo è la ROOT in quattro caratteri.
+        "      - /./:/host",
+        "      - /var/./run:/x",
+        "      - /var/run/../run:/x",
+        "      - //var//run:/x",
+        # ⬇️ e il caso che nessuna delle tre aveva provato, e che `startswith` da solo
+        #    non prende MAI: un path che esce dalla regione e ci rientra.
+        "      - /opt/../run:/x",
     ]
     for f in forme:
         assert righe_di_mount(f) == [f], f"forma non riconosciuta: {f}"

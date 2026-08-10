@@ -2978,6 +2978,11 @@ findings:
         output: "exit 0 — il lato codice si legge con `ast`, e i commenti non entrano nell'albero: la classe «un controllo che cerca una stringa non distingue il codice dal commento che lo racconta» qui non si applica per costruzione"
         exit: 0
         quando: "2026-08-10"
+      - comando: "matrice 5x2: /./:/host · /var/./run:/x · //var//run:/x · /opt/../run:/x · /run:/host-run:ro, ognuno sabotato in un compose ORDINARIO e in uno d'ECCEZIONE (portainer)"
+        dove: "worktree su origin/main, dopo la cura dei due fenomeni; ogni file ripristinato (git diff --stat vuoto)"
+        output: "10 su 10 exit 1. PRIMA della cura la stessa matrice dava 3 rossi su 10 — ed e' esattamente la matrice su cui le due revisioni divergevano: chi sabotava un file ordinario vedeva rosso, chi sabotava un'eccezione vedeva verde"
+        exit: 1
+        quando: "2026-08-10"
       - comando: "sette forme di mount sabotate una per volta in compose.dev.yaml: /var/run/docker.sock · /run/docker.sock:/tmp/d.sock · /run:/host-run:ro · /var/run:/var/run · /var/run/:/hr · /:/host:ro · /run/alias.sock:/tmp/d.sock"
         dove: "DOPO la seconda cura (regola per REGIONE), worktree su origin/main, ripristinato dopo ognuna"
         output: "exit 1 su tutte e sette. Le ultime cinque NON nominano mai `docker.sock`: sono la revisione di 71d540e6 e b82df434 sulla PR #147, che hanno sabotato la cura appena scritta e trovato che l'oggetto era ancora identificato per NOME"
@@ -3043,6 +3048,22 @@ findings:
       chiave nuova è giusta?» ma *«quale popolazione entra adesso in ogni filtro a
       valle, e su quale era tarato?»*. Curato con `senza_commento()`, e il caso vero è
       dentro la controprova invece che nella memoria di chi l'ha visto.
+      ⭐⭐ E IL DIFETTO PIÙ GRAVE DEI QUATTRO È USCITO DA UN DISACCORDO, non da un
+      sabotaggio: 71d540e6 misurava `/./:/host` PRESO e b82df434 lo misurava PASSATO,
+      sullo STESSO commit. Nessuna delle due sonde era sbagliata — sabotavano file
+      diversi, e **l'eccezione era indicizzata per NOME DI FILE**: dopo il primo mount col
+      suo avviso, in `compose.ops.portainer.yaml` e `compose.ops.watchtower.yaml` nessuna
+      altra riga veniva più esaminata. Nei due compose che il socket lo montano
+      legittimamente si poteva montare `/` e il presidio restava verde.
+      «Questo FILE ha una ragione» era diventato «in questo file non guardo più».
+      ⇒ 🛡️ **due misure oneste che divergono sullo stesso oggetto non sono un errore da
+      arbitrare: sono la prova che l'oggetto ha più di un comportamento** — e possono
+      essere più di due (qui erano tre: eccezione-per-file, path non normalizzato, e le
+      forme già curate). *Se una delle due avesse ceduto per cortesia, il buco sarebbe
+      ancora lì.* Postilla di b82df434, pagata nello stesso giro: **quando una spiegazione
+      unifica due misure divergenti, la cosa da fare è rifare la propria** — la
+      spiegazione elegante ferma la ricerca, e due cause distinte con lo stesso sintomo si
+      coprono a vicenda.
       ⭐ E LA CURA HA RIPRODOTTO LA PROPRIA CLASSE UN ANELLO PIÙ IN LÀ, trovato da
       71d540e6 e b82df434 sabotando la PR (non rileggendola): passata la chiave al
       basename, restava scoperto `- /run:/host-run:ro` — **stesso accesso, e la riga non
