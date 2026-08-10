@@ -107,7 +107,8 @@ services:
       - gateway-data:/var/lib/gateway
       # NIENTE nlm-auth (H6): il gateway è l'unico servizio esposto su Internet e
       # non deve poter leggere né riscrivere i cookie di sessione Google. Il
-      # volume lo monta SOLO nb1777-mcp; /admin/nlm gli inoltra il tar e ne chiede
+      # volume, fra i servizi, lo monta SOLO nb1777-mcp (in ro anche il backup e il check
+      # scadenze, entrambi a tempo: vedi SECURITY.md); /admin/nlm gli inoltra il tar e ne chiede
       # lo stato su rete interna (app/nlm_client.py).
       - archive-data:/var/lib/archive:rw  # condiviso con archive-mcp: /admin/archive scrive i .db indicizzati
       - ./onboarding:/var/lib/onboarding:rw  # bind-mount: pending.json letto da deploy.sh --apply
