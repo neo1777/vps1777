@@ -32,6 +32,51 @@ git fetch -q --prune origin 2>/dev/null || true
 elenco() { git ls-remote --heads origin 2>/dev/null | awk '{print $2}' | sed 's#refs/heads/##' | grep -v '^main$'; }
 BRANCHES=("$@"); [ $# -eq 0 ] && mapfile -t BRANCHES < <(elenco)
 
+# ── LE RIGHE FUORI — quante righe il branch aggiunge che main NON ha da nessuna parte.
+#    Imposta `tot` (righe uniche non vuote del branch) e `fuori`.
+#
+#    🔴 PERCHÉ INSIEMISTICO E NON A CAMPIONE (b82df434, 15/08, misurato):
+#      il campione a 20 righe che questo strumento usava dà «20/20 già in main» su
+#      `hook-versionati` — che di righe fuori ne ha CINQUANTA (433 uniche, 50 fuori).
+#      ⭐ Un campione non rappresentativo non è una misura più debole: è una
+#        RASSICURAZIONE FALSA, e su un verdetto «CANCELLABILE» è la direzione peggiore.
+#      Il confronto è `test/proxy-check-bearer`: 206 righe uniche, 0 fuori. Due branch
+#      che il campione dava identici (20/20) e che qui escono 50 contro 0.
+#
+#    COSTO: `git grep -h ''` su main è ~1,6s e si fa UNA volta per invocazione
+#    (39k righe uniche in cache), poi ogni branch costa un `comm`. Il campione
+#    costava 20 `git grep` per branch: sopra i due branch questo è anche più veloce.
+#
+#    ⚠️ SECONDO LIMITE, e va detto perché è quello che inganna di più: IL CRITERIO È
+#    INSENSIBILE AL FILE. Una riga identica che sta in un ALTRO file di main conta come
+#    «presente» — quindi risponde a «questo contenuto è perso?» e NON a «è dentro DOVE
+#    SERVE?». Trovato da abdd732a (15/08) verificando questo metodo prima di cedergli il
+#    passo, e la sua controprova è il pezzo che lo rende usabile lo stesso:
+#      feat/voice-tagging  839 righe uniche, di cui 30 più corte di 12 char (`}`, `#`)
+#      delle 491 righe LUNGHE (>60 char): ZERO mancano da main
+#      ⇒ il verdetto «tutte in main» non è un artefatto delle righe banali.
+#    *Un limite misurato da chi aveva interesse a smentirlo vale più di uno dichiarato
+#    da chi ha scritto il codice.*
+#
+#    ⚠️ LIMITE DICHIARATO: il confronto è per riga NORMALIZZATA (spazi ai bordi tolti).
+#    Una riga riscritta da main — stessa idea, parole diverse — risulta «fuori» pur non
+#    essendo lavoro perso: è il caso di `release/0.41.0` («86 commit in sette giorni» →
+#    «tutto quello che è entrato dopo la 0.40.14»). Il numero dice DOVE guardare, non
+#    cosa concludere.
+_MAINRIGHE=""; _BRRIGHE=$(mktemp); trap 'rm -f "$_MAINRIGHE" "$_BRRIGHE"' EXIT
+righe_fuori() {
+  local br="$1"
+  if [ -z "$_MAINRIGHE" ]; then
+    _MAINRIGHE=$(mktemp)
+    git grep -h '' origin/main 2>/dev/null \
+      | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -vE '^$' | sort -u > "$_MAINRIGHE"
+  fi
+  git diff "origin/main...origin/$br" 2>/dev/null | grep '^+' | grep -v '^+++' \
+    | sed 's/^+//;s/^[[:space:]]*//;s/[[:space:]]*$//' | grep -vE '^$' | sort -u > "$_BRRIGHE"
+  tot=$(wc -l < "$_BRRIGHE")
+  fuori=$(comm -23 "$_BRRIGHE" "$_MAINRIGHE" | wc -l)
+}
+
 for b in "${BRANCHES[@]}"; do
 
   # ── PASSO 0 — ATTACCAMENTI. Un worktree sopra BLOCCA la cancellazione, qualunque sia
@@ -67,7 +112,19 @@ for b in "${BRANCHES[@]}"; do
   #    per TRE SECONDI, su un numero che nessuno aveva misurato.
   dopo=$(git log --oneline --since="$merged" "origin/$b" 2>/dev/null | wc -l)
   if [ "${dopo:-0}" -eq 0 ]; then
-    printf '%-46s %-12s %s\n' "$b" "CANCELLABILE" "PR #${pr%%|*} mergiata, nessun commit dopo"
+    # Il verdetto è già deciso: qui le righe non decidono, DICONO PERCHÉ. Un branch
+    # senza commit dopo il merge può comunque portare righe che main non ha più —
+    # versioni vecchie di righe che main ha evoluto. Cancellarlo resta giusto, ma
+    # chi legge deve saperlo senza rifare la misura: un referto che dice COSA e non
+    # PERCHÉ costringe a rimisurare, e chi rimisura in fretta salta.
+    righe_fuori "$b"
+    if [ "${fuori:-0}" -gt 0 ]; then
+      printf '%-46s %-12s %s\n' "$b" "CANCELLABILE" \
+        "PR #${pr%%|*} mergiata, nessun commit dopo · $fuori/$tot righe non sono in main: main le ha EVOLUTE (non perse)"
+    else
+      printf '%-46s %-12s %s\n' "$b" "CANCELLABILE" \
+        "PR #${pr%%|*} mergiata, nessun commit dopo · tutte le $tot righe sono in main"
+    fi
     continue
   fi
 
@@ -77,15 +134,11 @@ for b in "${BRANCHES[@]}"; do
   #    0 righe su 20 in main, 29 insertions con un test — l'unico su 20 branch).
   #    ⚠️ Il campione salta le righe che ATTRAVERSANO un a capo: `grep` legge una riga
   #    per volta, e una frase spezzata risponde «non c'è» anche quando c'è.
-  tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
-  git diff "origin/main...origin/$b" 2>/dev/null | grep '^+' | grep -v '^+++' \
-    | sed 's/^+//' | grep -vE '^\s*$' | head -20 > "$tmp"
-  tot=$(wc -l < "$tmp"); dentro=0
-  while IFS= read -r r; do git grep -qF -- "$r" origin/main 2>/dev/null && dentro=$((dentro+1)); done < "$tmp"
-  if [ "${tot:-0}" -gt 0 ] && [ "$dentro" -eq "$tot" ]; then
-    printf '%-46s %-12s %s\n' "$b" "SUPERATO" "PR #${pr%%|*} + $dopo commit dopo, ma $dentro/$tot righe già in main"
+  righe_fuori "$b"
+  if [ "${tot:-0}" -gt 0 ] && [ "${fuori:-0}" -eq 0 ]; then
+    printf '%-46s %-12s %s\n' "$b" "SUPERATO" "PR #${pr%%|*} + $dopo commit dopo, ma tutte le $tot righe sono già in main"
   else
-    printf '%-46s %-12s %s\n' "$b" "HA-LAVORO" "PR #${pr%%|*} + $dopo commit dopo · solo $dentro/$tot righe in main ⇒ apri una PR, NON cancellare"
+    printf '%-46s %-12s %s\n' "$b" "HA-LAVORO" "PR #${pr%%|*} + $dopo commit dopo · $fuori/$tot righe NON sono in main ⇒ apri una PR, NON cancellare"
   fi
 done
 
