@@ -125,7 +125,21 @@ def main() -> int:
         return autoprova()
     conteggi, imprecisi, introvabili, n_doc = analizza()
     tot = sum(conteggi.values()) + len(introvabili)
+    # 🔴 IL PERIMETRO SI DICHIARA (rilievo di 71d540e6 sul gemello di questo strumento,
+    #   15/08: «garanzie-senza-coordinata.py guarda 4 file su 76 e non lo dice»).
+    #   Girato addosso a me, il verdetto è DOPPIO e le due metà vanno tenute separate:
+    #   · COPERTURA: regge. Il perimetro è DERIVATO (`git ls-files`), non una lista a
+    #     mano — i 44 .md che stanno sul disco e non qui sono `.venv/` e `.pytest_cache/`,
+    #     cioè dipendenze altrui: escluderli è corretto, e nessuno deve ricordarsene.
+    #   · TRASPARENZA: no. Stampavo «32 documenti vivi» e chi legge non poteva sapere
+    #     né su quanti su quanti, né che 3 sono esclusi apposta.
+    # ⭐ Un perimetro giusto e taciuto dà lo stesso identico output di un perimetro
+    #   sbagliato e taciuto: la differenza la vede solo chi apre il sorgente.
+    esclusi = [f for f in _git("ls-files", "*.md") if any(s in f for s in STORICI)]
     print(f"doc-riferimenti — {n_doc} documenti vivi, {tot} riferimenti fra backtick")
+    print(f"  perimetro: i .md TRACCIATI ({n_doc + len(esclusi)}), meno {len(esclusi)} storici"
+          f" — {' · '.join(esclusi)}")
+    print("             (parlano del passato: un file sparito è ciò che devono nominare)")
     print(f"  esistono a quel path        {conteggi['esatti']:4d}")
     print(f"  path assoluti (runtime VPS) {conteggi['assoluti']:4d}   non giudicabili da qui")
     print(f"  file creati a esecuzione    {conteggi['runtime']:4d}   citarli è corretto")
