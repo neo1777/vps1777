@@ -30,6 +30,28 @@ git fetch -q --prune origin 2>/dev/null || true
 #    namespace (qui 111 `pr/*`, le pull request) e li somma ai branch → 151 invece di 40.
 #    Il prune non li tocca, perché il refspec di origin pota solo refs/remotes/origin/*.
 elenco() { git ls-remote --heads origin 2>/dev/null | awk '{print $2}' | sed 's#refs/heads/##' | grep -v '^main$'; }
+
+# ── IL CAMPIONE DELLE RIGHE, in un posto solo perché lo usano DUE passi (il 3 per
+#    spiegare e il 4 per decidere). Non è pulizia: due copie divergono al primo che ne
+#    migliora una, ed è il difetto che questo repo ha già curato con `importlib` nei test.
+#    Imposta `tot` e `dentro` (globali, come le usava il passo 4).
+#    ⚠️ Il campione salta le righe che ATTRAVERSANO un a capo: `grep` legge una riga per
+#    volta, e una frase spezzata risponde «non c'è» anche quando c'è.
+CAMPIONE_MAX="${CAMPIONE_MAX:-20}"
+campiona() {
+  local br="$1" tmp riga
+  tmp=$(mktemp)
+  git diff "origin/main...origin/$br" 2>/dev/null | grep '^+' | grep -v '^+++' \
+    | sed 's/^+//' | grep -vE '^\s*$' | head -"$CAMPIONE_MAX" > "$tmp"
+  tot=$(wc -l < "$tmp"); dentro=0
+  while IFS= read -r riga; do
+    git grep -qF -- "$riga" origin/main 2>/dev/null && dentro=$((dentro+1))
+  done < "$tmp"
+  # 🔑 rimosso SUBITO e non con un `trap ... EXIT` dentro il ciclo: il trap si
+  #    riscrive a ogni giro e scatta una volta sola, quindi con N branch restavano
+  #    N-1 file temporanei. (Difetto trovato estraendo questa funzione, 15/08.)
+  rm -f "$tmp"
+}
 BRANCHES=("$@"); [ $# -eq 0 ] && mapfile -t BRANCHES < <(elenco)
 
 for b in "${BRANCHES[@]}"; do
@@ -67,7 +89,38 @@ for b in "${BRANCHES[@]}"; do
   #    per TRE SECONDI, su un numero che nessuno aveva misurato.
   dopo=$(git log --oneline --since="$merged" "origin/$b" 2>/dev/null | wc -l)
   if [ "${dopo:-0}" -eq 0 ]; then
-    printf '%-46s %-12s %s\n' "$b" "CANCELLABILE" "PR #${pr%%|*} mergiata, nessun commit dopo"
+    # 🔴 IL REFERTO DICE ANCHE PERCHÉ, non solo COSA (limite dichiarato da 71d540e6 il
+    #    15/08, trovato da abdd732a su `hook-versionati`): qui il verdetto è giusto e si
+    #    ferma, ma tacere le righe nasconde CHE COSA si sta cancellando. Quel branch
+    #    aveva 74 righe che main non ha più — non lavoro perduto: le VECCHIE stesure di
+    #    righe che main ha poi evoluto (`EXPECTED_TOTAL = 67` contro 68, la garanzia
+    #    senza il limite aggiunto dopo). ⇒ il conteggio si stampa ANCHE quando decide:
+    #    non cambia il verdetto, cambia cosa sa chi lo legge.
+    #    ⚠️ QUI NON SI CAMPIONA, e il primo tentativo lo faceva: `campiona` prende le
+    #    prime 20 righe del diff e su `hook-versionati` rispondeva «20/20 già in main»
+    #    — vero sul campione e FUORVIANTE sul branch, perché le righe che contano (i
+    #    contatori del registro) stanno più giù. Un numero rassicurante nel posto dove
+    #    serviva un allarme. ⇒ si conta il TOTALE, che è esatto e costa un comando.
+    #    🔴 DUE PUNTI, non tre — e il primo tentativo usava i tre: `main...b` conta
+    #    tutto ciò che il branch ha aggiunto DALLA MERGE-BASE, cioè anche ciò che è in
+    #    main via lo squash. Dava 541 su `hook-versionati` (il vero è 74) e numeri a
+    #    tre cifre su OGNI branch: un esito uniforme, che è la firma di uno strumento
+    #    cieco e non di un repo pieno di fossili. `main..b` risponde alla domanda vera:
+    #    che cosa ha il branch che main NON ha.
+    agg=$(git diff --numstat "origin/main..origin/$b" 2>/dev/null | awk '{s+=$1} END{print s+0}')
+    if [ "${agg:-0}" -gt 0 ]; then
+      # 🔑 e QUI l'interpretazione è DEDOTTA, non inferita: siamo al passo 3, quindi la
+      #    PR è mergiata E nessun commit è arrivato dopo ⇒ la punta del branch è ciò che
+      #    è stato mergiato. Tutto ciò che il branch ha e main no è per costruzione
+      #    qualcosa che main ha cambiato DOPO: stesure vecchie, non lavoro perduto.
+      # 📌 il comando stampato è a DUE punti come il conteggio: un numero va sempre col
+      #    comando che lo RIPRODUCE, o chi lo lancia vede una cifra diversa e non sa
+      #    quale credere (coi tre punti qui uscirebbero 541 invece di 74).
+      nota="⚠ porta $agg righe che main non ha più: stesure VECCHIE (main le ha evolute dopo il merge) — \`git diff origin/main..origin/$b\` per vederle"
+    else
+      nota="e non porta righe che main non abbia"
+    fi
+    printf '%-46s %-12s %s\n' "$b" "CANCELLABILE" "PR #${pr%%|*} mergiata, nessun commit dopo · $nota"
     continue
   fi
 
@@ -75,13 +128,7 @@ for b in "${BRANCHES[@]}"; do
   #    essere la stessa cosa arrivata per un'altra strada (`presidio-lock`: 6 righe su 6
   #    già in main), oppure lavoro vero mai entrato (`fix/tetto-upload-prima-del-body`:
   #    0 righe su 20 in main, 29 insertions con un test — l'unico su 20 branch).
-  #    ⚠️ Il campione salta le righe che ATTRAVERSANO un a capo: `grep` legge una riga
-  #    per volta, e una frase spezzata risponde «non c'è» anche quando c'è.
-  tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
-  git diff "origin/main...origin/$b" 2>/dev/null | grep '^+' | grep -v '^+++' \
-    | sed 's/^+//' | grep -vE '^\s*$' | head -20 > "$tmp"
-  tot=$(wc -l < "$tmp"); dentro=0
-  while IFS= read -r r; do git grep -qF -- "$r" origin/main 2>/dev/null && dentro=$((dentro+1)); done < "$tmp"
+  campiona "$b"
   if [ "${tot:-0}" -gt 0 ] && [ "$dentro" -eq "$tot" ]; then
     printf '%-46s %-12s %s\n' "$b" "SUPERATO" "PR #${pr%%|*} + $dopo commit dopo, ma $dentro/$tot righe già in main"
   else
