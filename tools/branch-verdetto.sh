@@ -47,6 +47,17 @@ BRANCHES=("$@"); [ $# -eq 0 ] && mapfile -t BRANCHES < <(elenco)
 #    (39k righe uniche in cache), poi ogni branch costa un `comm`. Il campione
 #    costava 20 `git grep` per branch: sopra i due branch questo è anche più veloce.
 #
+#    ⚠️ SECONDO LIMITE, e va detto perché è quello che inganna di più: IL CRITERIO È
+#    INSENSIBILE AL FILE. Una riga identica che sta in un ALTRO file di main conta come
+#    «presente» — quindi risponde a «questo contenuto è perso?» e NON a «è dentro DOVE
+#    SERVE?». Trovato da abdd732a (15/08) verificando questo metodo prima di cedergli il
+#    passo, e la sua controprova è il pezzo che lo rende usabile lo stesso:
+#      feat/voice-tagging  839 righe uniche, di cui 30 più corte di 12 char (`}`, `#`)
+#      delle 491 righe LUNGHE (>60 char): ZERO mancano da main
+#      ⇒ il verdetto «tutte in main» non è un artefatto delle righe banali.
+#    *Un limite misurato da chi aveva interesse a smentirlo vale più di uno dichiarato
+#    da chi ha scritto il codice.*
+#
 #    ⚠️ LIMITE DICHIARATO: il confronto è per riga NORMALIZZATA (spazi ai bordi tolti).
 #    Una riga riscritta da main — stessa idea, parole diverse — risulta «fuori» pur non
 #    essendo lavoro perso: è il caso di `release/0.41.0` («86 commit in sette giorni» →
