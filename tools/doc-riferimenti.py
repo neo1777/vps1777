@@ -137,6 +137,18 @@ def main() -> int:
             print(f"    {p:44s} ← {', '.join(sorted(fs))[:50]}")
         if len(imprecisi) > 10:
             print(f"    … e altri {len(imprecisi)-10}")
+        # 🖐️ QUESTA LISTA NON È UNA LISTA DI COSE DA CORREGGERE, ed è la ragione per cui
+        #   non blocca. Guardati uno per uno i 20 di oggi, sono tutti usi IDIOMATICI e
+        #   giusti: «Dopo `./deploy.sh`» è un COMANDO da lanciare, non un path; «controllo
+        #   in `admin.py`» nomina il file in una frase, e `services/gateway/app/admin.py`
+        #   lì dentro appesantisce senza aggiungere nulla a chi legge.
+        # ⭐ Sostituirli in blocco farebbe tornare un numero PEGGIORANDO la prosa — cioè
+        #   curare il misuratore invece dell'oggetto. Vale la pena toccarne uno solo quando
+        #   il basename è ambiguo (`server.py`, `settings.py`: più candidati nel repo) e
+        #   il lettore non può sapere quale sia.
+        print("    ↑ informativi: quasi sempre sono usi idiomatici corretti (`./deploy.sh`")
+        print("      è un comando). Correggerli in blocco peggiora la prosa per far tornare")
+        print("      un numero — vale solo dove il nome è AMBIGUO nel repo.")
     if introvabili:
         print("\n  🔴 INTROVABILI — il doc manda a cercare un file che non c'è:")
         for p, fs in sorted(introvabili.items()):
