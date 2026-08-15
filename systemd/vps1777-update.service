@@ -47,7 +47,22 @@ WorkingDirectory=@REPO@
 ExecStart=/usr/local/bin/vps1777 update --yes --from-intent @REPO@/onboarding/update_pending_update.json
 # pull + migrazioni + health-gate (180s) + eventuale rollback: margine ampio
 TimeoutStartSec=1800
-# 🔴 ESPLICITO, e non «omesso»: qui sta il difetto che ha rotto l'auto-update il
+# ⚠️ QUESTA RIGA NON RIPARA IL GUASTO — misurato dopo averla scritta, e va detto
+#   prima di tutto il resto perché il commento qui sotto prometteva il contrario.
+#   Sonda: `sudo -n install -m 644 /dev/null /tmp/x` (il comando VERO che fallisce —
+#   `sudo true` no: `true` non è nella whitelist sudoers, e misurerebbe altro).
+#       nessuna direttiva                       sudo=OK
+#       le sei direttive di questa unit         sudo=KO   ← il guasto
+#       le sei + NoNewPrivileges=no  (QUESTA)   sudo=KO   ← NON ripara
+#   ⇒ `NoNewPrivileges=no` esplicito NON vince sull'implicazione: systemd lo forza
+#   comunque e `NoNewPrivs` resta 1. E basta UNA QUALUNQUE delle sei direttive con
+#   `User=` non-root — non la loro combinazione: la misura che diceva «è la
+#   combinazione» girava come root, dove NNP non serve e non viene messo.
+# 🖐️ La riga RESTA perché dichiarare l'intenzione ha valore per chi legge — ma è
+#   una dichiarazione, NON una cura. La cura è una scelta di progetto e non è stata
+#   presa: (A) togliere le direttive seccomp dalle unit che elevano — misurato che
+#   funziona — oppure (B) non usare sudo nel self-update.
+# 🔴 Qui sotto: il difetto che ha rotto l'auto-update il
 # 03/08 alle 04:32 (`sudo: The "no new privileges" flag is set, which prevents
 # sudo from running as root` → il self-update della CLI muore, e l'update con lui).
 #   L'intenzione era gia' scritta nel commento in testa a questo file — «Perciò
