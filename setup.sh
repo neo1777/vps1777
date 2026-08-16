@@ -330,7 +330,14 @@ if [ ! -s secrets/telegram_bot_token.txt ]; then
 fi
 
 # ───── 4. Immagini + start ─────
-INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env | cut -d= -f2)"
+# 🔴 `|| true` + controllo esplicito (71d540e6, review della #165): con `set -e`
+#   (r.13) un `.env` privo della riga `INGRESS_PROFILE=` faceva MORIRE lo script
+#   proprio qui, senza dire perché — e la morte muta è peggio in esecuzione
+#   automatica, dove non c'è nessuno che legga il punto in cui si è fermato.
+#   *La stessa forma curata in `restore.sh` con la #163: un `grep` nudo dentro una
+#   sostituzione di comando è un ramo di uscita che nessuno ha scritto apposta.*
+INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env 2>/dev/null | cut -d= -f2)" || true
+[ -n "$INGRESS_PROFILE" ] || die ".env non contiene INGRESS_PROFILE= — rilancia ./setup.sh (o aggiungi la riga a mano: INGRESS_PROFILE=ingress.tailscale|ingress.caddy|ingress.cloudflared)"
 COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
 # In dev l'overlay di build ri-aggiunge i build context (compose.yaml è pull-only)
 [ "$DEV_BUILD" = "1" ] && COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.build.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")

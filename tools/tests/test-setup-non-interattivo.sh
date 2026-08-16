@@ -110,6 +110,25 @@ else
   echo "✅ ② senza le variabili non completa: il ① misura davvero le variabili"
 fi
 
+# ── ③ un `.env` SENZA `INGRESS_PROFILE=` deve DIRE perché, non morire muto ──────
+#    Con `set -e` (setup.sh:13) il `grep` nudo faceva uscire lo script in quel punto
+#    senza un messaggio: in esecuzione automatica non c'è nessuno che legga DOVE si è
+#    fermato. Trovato da 71d540e6 nella review della #165, stessa forma curata in
+#    restore.sh con la #163. *Il test non prova che "esce": prova che SPIEGA.*
+rm -rf "$BANCO/repo/secrets"
+printf 'ADMIN_EMAIL=test@example.com\nTELEGRAM_OWNER_ID=123456789\n' > "$BANCO/repo/.env"
+u3="$(cd "$BANCO/repo" && SETUP_ADMIN_PWD="$PWD_FORTE" SETUP_YES=n \
+      timeout 120 bash setup.sh < /dev/null 2>&1)"; rc3=$?
+if printf '%s' "$u3" | grep -q "non contiene INGRESS_PROFILE"; then
+  echo "✅ ③ .env incompleto: lo dice invece di morire muto"
+elif [ "$rc3" -ne 0 ]; then
+  echo "🔴 ③ .env incompleto: esce ($rc3) SENZA spiegare — è la morte muta"
+  FALLITI=$((FALLITI+1))
+else
+  echo "🔴 ③ .env incompleto: prosegue come se niente fosse"
+  FALLITI=$((FALLITI+1))
+fi
+
 if [ "$FALLITI" -eq 0 ]; then
   echo "── setup.sh è eseguibile senza una persona, e sa ancora dire di no."
   exit 0
