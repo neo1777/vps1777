@@ -123,6 +123,42 @@ autoprova() {
   esegui_tutti "$d" >/dev/null 2>&1; rc=$?
   segna "rosso seguito da verde" 1 "$rc"
 
+
+  # 🔬 SONDA DIAGNOSTICA — NON È UN TEST (df446a42, 16/08, voce 30b9d346)
+  #    Non tocca $ok, non fa fallire niente, non ha un verdetto: STAMPA e basta.
+  #    Esiste per chiudere UNA domanda che in locale non si chiude, e la storia è
+  #    questa: il gate `contract` ha bocciato la #174 mentre il corpo DICHIARAVA il
+  #    salto, e nel log del job c'era «printf: write error: Broken pipe» su
+  #    ci.yml:341. L'ipotesi era `printf | grep -q` sotto pipefail: grep esce al
+  #    match, printf prende EPIPE, la pipeline RIUSCITA diventa falsa.
+  #    ⚠️ Kilo l'ha cercata in locale con 8 misure (60k → 4 MB): PIPESTATUS (0 0)
+  #       SEMPRE, zero broken pipe, bash 5.2.21. In locale NON si riproduce.
+  #    ⇒ o la causa è nell'AMBIENTE del runner, o il broken pipe è un effetto.
+  #       Questa sonda è l'unico modo di distinguerle: gira DOVE succede.
+  #
+  #    🔑 PERCHÉ RIPRODUCE INVECE DI OSSERVARE: `pipefail` NON è attivo in questo
+  #       file, ma lo è negli step `shell: bash` di GitHub — ed è la condizione
+  #       senza la quale il difetto non può manifestarsi. Osservare una pipeline
+  #       qualunque qui direbbe «tutto bene» misurando un caso che non è quello.
+  #    🔑 E NON FA FALLIRE LA CI DI PROPOSITO: se il difetto c'è, lo dice il log.
+  #       Un rosso su un file che gira per tutte, senza accordo, costa più della
+  #       diagnosi che porta.
+  _sonda_pipestatus() {
+    local big grande rc_pf rc_no ps_no
+    # 65.681 byte: la dimensione MISURATA di $RATIFICA nel job 95135773669
+    big="$(head -c 65681 /dev/zero | tr '\0' 'a')"
+    grande="ago${big}"
+    (
+      set -o pipefail
+      printf '%s' "$grande" | grep -qF -- 'ago'
+    ) 2>/dev/null; rc_pf=$?
+    printf '%s' "$grande" | grep -qF -- 'ago' 2>/dev/null; rc_no=$? ps_no="${PIPESTATUS[*]}"
+    printf '\n[SONDA-PIPESTATUS] byte=%s · con-pipefail rc=%s · senza-pipefail rc=%s PIPESTATUS=(%s) · bash=%s grep=%s\n' \
+      "${#grande}" "$rc_pf" "$rc_no" "$ps_no" "$BASH_VERSION" "$(grep --version | head -1 | awk '{print $NF}')"
+    printf '[SONDA-PIPESTATUS] lettura: rc=0 in ENTRAMBI = il costrutto NON è la causa (cerca altrove); rc≠0 con-pipefail = riprodotto, la cura here-string è quella giusta\n\n'
+  }
+  _sonda_pipestatus
+
   if [ "$ok" -eq 0 ]; then
     printf '\n✅ il runner sa fallire.\n'
   else
