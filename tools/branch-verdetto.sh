@@ -77,6 +77,34 @@ righe_fuori() {
   fuori=$(comm -23 "$_BRRIGHE" "$_MAINRIGHE" | wc -l)
 }
 
+# ⚠️ L'AVVISO PROSA ERA COPERTO A METÀ, e la metà scoperta era la più grossa
+#    (rilievo di abdd732a sulla #175, confermato da b82df434 sugli stessi dati).
+#    Nasceva DENTRO il ramo `else` di HA-LAVORO, raggiungibile solo se il branch ha
+#    una PR mergiata sull'head: i branch senza PR escono prima come DA-LEGGERE e
+#    **non lo ricevevano mai**. Nel run del 16/08 restavano fuori `docs/roadmap`
+#    (5 file, tutti .md — il backlog condiviso, 957 righe) e `docs/8080-stato-di-
+#    esercizio`: cioè i due casi di prosa più grossi che abbiamo.
+# 🔑 La popolazione «è prosa» e la popolazione «ha una PR» non coincidono, e la cura
+#    stava dentro il recinto della seconda. *Una cura giusta può essere messa in un
+#    posto che ne restringe il dominio senza dirlo — e il referto non lo dichiarava.*
+# 📌 SCELTA DICHIARATA: NON su qualunque verdetto. L'avviso serve dove il verdetto si
+#    fonda sul CONTEGGIO DI RIGHE per dire «c'è lavoro da salvare» — HA-LAVORO — e
+#    dove il referto manda un umano a contarle a mano — DA-LEGGERE. Su SUPERATO
+#    («tutte le righe sono già in main») non c'è nulla da salvare e l'avviso sarebbe
+#    rumore; su CANCELLABILE il verdetto non chiede di salvare niente. *Stamparlo
+#    ovunque lo renderebbe più coperto e meno letto.*
+avviso_prosa() {
+  local b="$1" tot_file solo_prosa
+  tot_file=$(git diff --name-only "origin/main...origin/$b" 2>/dev/null | wc -l)
+  solo_prosa=$(git diff --name-only "origin/main...origin/$b" 2>/dev/null | grep -cv '\.md$')
+  # `tot_file` NON è ridondante: su zero file `grep -c` risponde 0, che qui si
+  # leggerebbe come «tutti .md» — uno ZERO PLAUSIBILE. Zero file non è «solo prosa»,
+  # è NESSUN DATO. (Guardia originale di 71d540e6, provata su feat/ledger-anti-amnesia.)
+  [ "${tot_file:-0}" -gt 0 ] && [ "${solo_prosa:-1}" -eq 0 ] || return 0
+  printf '%-46s %-12s %s\n' "" "└─ ⚠️ PROSA" \
+    "tocca SOLO .md: «righe non in main» NON misura lavoro perduto. Cerca in main un DETTAGLIO che il branch non ha — se main ne ha di più, main è il successore"
+}
+
 for b in "${BRANCHES[@]}"; do
 
   # ── PASSO 0 — ATTACCAMENTI. Un worktree sopra BLOCCA la cancellazione, qualunque sia
@@ -103,6 +131,7 @@ for b in "${BRANCHES[@]}"; do
     #    PR sua, ma il fix H6 era in main dalla #130, e in main il test aveva 191 righe
     #    contro le 173 del branch. Mergiarlo sarebbe stata una REGRESSIONE.
     printf '%-46s %-12s %s\n' "$b" "DA-LEGGERE" "nessuna PR su questo head — cerca un branch gemello prima di concludere"
+    avviso_prosa "$b"
     continue
   fi
   merged="${pr#*|}"
@@ -155,12 +184,7 @@ for b in "${BRANCHES[@]}"; do
     #       si leggerebbe come «tutti .md» — uno ZERO PLAUSIBILE. Zero file non è
     #       «solo prosa», è NESSUN DATO. Trovato provando la condizione su tutti i
     #       branch invece che sul mio caso: feat/ledger-anti-amnesia (0 file) dava SÌ.
-    tot_file=$(git diff --name-only "origin/main...origin/$b" 2>/dev/null | wc -l)
-    solo_prosa=$(git diff --name-only "origin/main...origin/$b" 2>/dev/null | grep -cv '\.md$')
-    if [ "${tot_file:-0}" -gt 0 ] && [ "${solo_prosa:-1}" -eq 0 ]; then
-      printf '%-46s %-12s %s\n' "" "└─ ⚠️ PROSA" \
-        "tocca SOLO .md: «righe non in main» NON misura lavoro perduto. Cerca in main un DETTAGLIO che il branch non ha — se main ne ha di più, main è il successore"
-    fi
+    avviso_prosa "$b"
   fi
 done
 
