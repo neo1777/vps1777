@@ -127,8 +127,12 @@ updates:
       # notebooklm-mcp-cli: il pin `==0.7.7` e INTENZIONALE, non pigrizia.
       #   Il formato auth di quella CLI (`profiles/default/cookies.json`) e cablato
       #   in QUATTRO punti che nessun bump automatico tocca - auth.py (il gate di
-      #   auth), admin.py (le istruzioni all utente), il bot e la doc - e la 0.9
-      #   cambia quel formato. La #152 proponeva 0.7.7 -> 0.9.6 SENZA aggiornare il
+      #   auth), admin.py (le istruzioni all utente), il bot e la doc.
+      # ATTENZIONE A COSA NON SAPPIAMO: NON e verificato che la 0.9 conservi
+      #   quel formato - nessuna ha aperto il changelog. La domanda e aperta e
+      #   verificabile: la 0.9.6 salva ancora in profiles/default/cookies.json?
+      #   Chi vorra fare il salto deve rispondere PRIMA, non dopo.
+      #   La #152 proponeva 0.7.7 -> 0.9.6 SENZA aggiornare il
       #   commento accanto al pin, che diceva ancora «0.7.x usa profiles/»: un salto
       #   di MINOR che rompe come un major, quindi l ignore sui major non lo prendeva.
       # NON e «mai piu aggiornarlo»: le PATCH dentro 0.7 entrano ancora, quindi una
