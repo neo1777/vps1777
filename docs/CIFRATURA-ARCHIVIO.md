@@ -104,11 +104,18 @@ ricerca, la toglie.
 🔴 **Ma richiede che il DB stia in RAM**, e l'owner stima «qualche GB»: su una VPS
 affittata non regge.
 
-**(c) SQLCipher — cifratura a pagine** — non richiede il DB in RAM, perché decifra pagina
-per pagina su richiesta. Paga su ogni *cache-miss*, non su ogni query: con una
-`PRAGMA cache_size` generosa le pagine calde restano decifrate in memoria e il costo si
-concentra all'inizio. **È la sola che regge con un archivio da gigabyte** — a patto che il
-numero stimato sopra risulti nella fascia bassa.
+**(c) SQLCipher — cifratura a pagine** — ✅ **la sola che regge con un archivio da
+gigabyte**, perché decifra pagina per pagina su richiesta e non chiede che il DB stia in
+RAM. **Costo per query misurato: 1,75x, cioè 0,15 ms in più a ricerca.**
+
+⚠️ *La prima stesura di questa riga diceva «paga sui cache-miss: con una `cache_size`
+generosa il costo si concentra all'inizio». **Il banco l'ha smentita**: 1,72x con 2 MB di
+cache e 1,80x con 200 MB. La page-cache non sposta niente — il costo per pagina si paga
+comunque.* La tengo scritta perché era il ragionamento che sembrava ovvio, e sapere che è
+falso vale quanto il numero.
+
+🔴 **Il vincolo di questa strada non è il costo per query: è il costo per CONNESSIONE**
+(299 ms, §sopra). Va risolto **prima** di cifrare, e non è un problema di crittografia.
 
 ## Il nodo vero: la chiave
 
