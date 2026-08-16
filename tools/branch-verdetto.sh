@@ -105,6 +105,47 @@ avviso_prosa() {
     "tocca SOLO .md: «righe non in main» NON misura lavoro perduto. Cerca in main un DETTAGLIO che il branch non ha — se main ne ha di più, main è il successore"
 }
 
+# ── L'AVVISO CHE VALE ANCHE SUL CODICE, e copre il caso che «PROSA» lasciava fuori.
+#    🔴 16/08 (71d540e6): l'avviso qui sopra l'ho scritto io la mattina diagnosticando
+#      «su prosa il verdetto non vale». Era vero e TROPPO STRETTO — misurato tre ore
+#      dopo su `presidio-lock`, che è CODICE:
+#        lo strumento   HA-LAVORO · 3/220 righe non in main ⇒ «apri una PR, NON cancellare»
+#        le 3 righe     le pipeline `printf|grep -q` che la #176 aveva tolto 20 min prima
+#        un'ora prima   lo STESSO strumento diceva SUPERATO sullo stesso branch
+#      Aprire quella PR avrebbe RIMESSO IN main il difetto appena curato.
+#    🔑 Una riga del branch assente da main ha DUE spiegazioni opposte e il passo 4 le
+#      equipara: (a) lavoro nuovo mai entrato, (b) la versione VECCHIA di una riga che
+#      main ha CORRETTO — cioè il PASSATO di main, non il suo futuro.
+#    ⭐ E il falso positivo lo fabbrica la NOSTRA cura: ogni riga corretta in main regala
+#      una «riga mancante» a ogni branch vecchio che la contiene. *Più curiamo, più lo
+#      strumento grida al lavoro perduto* — e cresce da solo col tempo, senza che nessuno
+#      tocchi il branch.
+#    ⚠️ Il verdetto sbagliava DALLA PARTE DELLA PRUDENZA, ed è la ragione per cui nessuno
+#      lo rileggeva: «non cancellare» non allarma. *Un consiglio conservativo va verificato
+#      quanto uno distruttivo — sbagliano nella stessa misura, solo il secondo viene riletto.*
+avviso_eta() {
+  local b="$1" bts mts files
+  files=$(git diff --name-only "origin/main...origin/$b" 2>/dev/null)
+  [ -n "$files" ] || return 0
+  bts=$(git log -1 --format=%ct "origin/$b" 2>/dev/null)
+  # shellcheck disable=SC2086
+  mts=$(git log -1 --format=%ct origin/main -- $files 2>/dev/null)
+  if [ -z "$mts" ]; then
+    # ⚠️ TERZO CASO, e la prima versione di questa sonda lo sbagliava IN SILENZIO:
+    #   `git log` su file che main non ha MAI avuto non stampa niente, e un `${mts:-0}`
+    #   lo fa cadere nel ramo «main fermo da allora» — cioè il ramo che NON avvisa.
+    #   Trovato guardando l'output invece del verdetto: la data usciva «01/01 01:00»,
+    #   cioè epoch 0. Caso vero: docs/roadmap, 5 file mai visti da main, fermo da un
+    #   mese, e lo strumento lo dava DA-LEGGERE — il verdetto più muto che ha.
+    printf '%-46s %-12s %s\n' "" "└─ 🆕 FILE NUOVI" \
+      "main non ha MAI avuto questi file: qui «non in main» significa davvero lavoro mai entrato"
+    return 0
+  fi
+  [ "${mts:-0}" -gt "${bts:-0}" ] || return 0
+  printf '%-46s %-12s %s\n' "" "└─ ⏳ main È AVANTI" \
+    "main ha toccato questi file DOPO l'ultimo commit del branch ($(date -d "@$mts" '+%d/%m %H:%M') vs $(date -d "@$bts" '+%d/%m %H:%M')): le righe «fuori» possono essere il PASSATO di main — LEGGILE prima di aprire una PR che le rimette"
+}
+
 for b in "${BRANCHES[@]}"; do
 
   # ── PASSO 0 — ATTACCAMENTI. Un worktree sopra BLOCCA la cancellazione, qualunque sia
@@ -132,6 +173,7 @@ for b in "${BRANCHES[@]}"; do
     #    contro le 173 del branch. Mergiarlo sarebbe stata una REGRESSIONE.
     printf '%-46s %-12s %s\n' "$b" "DA-LEGGERE" "nessuna PR su questo head — cerca un branch gemello prima di concludere"
     avviso_prosa "$b"
+    avviso_eta "$b"
     continue
   fi
   merged="${pr#*|}"
@@ -185,6 +227,7 @@ for b in "${BRANCHES[@]}"; do
     #       «solo prosa», è NESSUN DATO. Trovato provando la condizione su tutti i
     #       branch invece che sul mio caso: feat/ledger-anti-amnesia (0 file) dava SÌ.
     avviso_prosa "$b"
+    avviso_eta "$b"
   fi
 done
 
