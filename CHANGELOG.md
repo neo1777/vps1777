@@ -43,6 +43,12 @@ erano **vere**. Nessuna delle quattro era **tenuta da un test**.
   classe di ripetersi.
 - **Ogni autoprova dichiarata dev'essere eseguita da un workflow** (#188): quattro presìdi
   autoprovanti erano agganciati *perché qualcuno se n'era ricordato quattro volte*.
+- **`setup.sh` viene ESEGUITO, non solo letto** (#191). Cinque test lo nominavano e tutti e
+  cinque lo leggevano come sorgente: **lo script che installa il prodotto era l'unico pezzo
+  del prodotto che nessuno eseguiva**, e il primo a trovarlo rotto sarebbe stato chi installa
+  da zero — cioè chi ha meno modo di capire cos'è andato storto. *La #165 aveva reso `setup.sh`
+  pilotabile da variabili e nessuno era entrato dalla porta che aveva aperto: fra «adesso si
+  può fare» e «adesso è fatto» non c'è nessun automatismo, e la distanza non la segnala niente.*
 - **Il gate `contract` non può più tacere quando non ha potuto guardare** (#184): la #182
   l'aveva reso fail-open. *«Non ho potuto controllare» e «ho controllato ed è a posto» non
   sono lo stesso fatto.*
