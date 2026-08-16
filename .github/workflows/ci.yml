@@ -185,7 +185,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
+      # 🔴 `fetch-depth: 0` NON è ottimizzazione al contrario: senza, il checkout è
+      #    SHALLOW (depth 1) e il passo «la rigenerazione di un lock dichiara i salti»
+      #    non può calcolare il merge-base ⇒ `git diff "$BASE...HEAD"` muore con
+      #    «fatal: … no merge base». Misurato in produzione il 16/08 (job 95159263442),
+      #    e il modo in cui è morto è la ragione per cui questa riga sta qui.
+      #    Il repo pesa < 1 MiB: la storia intera non costa niente che valga un gate cieco.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
@@ -310,7 +318,27 @@ jobs:
           #    HEAD lo contiene già ⇒ `$BASE...HEAD` è esattamente «ciò che questa PR
           #    aggiunge», e nient'altro. (Con `base.sha` invece i tre punti non curavano
           #    niente — vedi il commento in `env:`.)
-          mapfile -t CAMBIATI < <(git diff --name-only "$BASE...HEAD" -- 'services/*/uv.lock')
+          # 🔴 IL DIFF DEVE POTER FALLIRE RUMOROSAMENTE, e questa è la riga che mancava
+          #    quando ho introdotto `$BASE` (#182): `mapfile < <(git diff …)` NON propaga
+          #    l'errore del comando. Un `git diff` MORTO e un repo SENZA lock cambiati
+          #    producono lo stesso identico array vuoto ⇒ il gate diceva
+          #    «nessun uv.lock toccato: niente da verificare» ed usciva 0.
+          #    In produzione (job 95159263442) è successo davvero: «fatal: … no merge base»
+          #    seguito da un verde. **Per un'ora ogni PR sarebbe passata senza controllo,
+          #    comprese quelle che i lock li cambiano.** Un presidio che tace quando non
+          #    ha potuto guardare è peggio di quello che sbagliava a gridare.
+          # 🔑 E il contratto giusto era già scritto in questo file, dodici righe più sotto,
+          #    per il verdetto di `lock-salti.py`: «2 non è "va bene", è NON HO GUARDATO».
+          #    Quella distinzione vale anche per il diff che sceglie COSA guardare.
+          if ! DIFF_LOCK="$(git diff --name-only "$BASE...HEAD" -- 'services/*/uv.lock')"; then
+            echo "::error::il gate NON ha potuto calcolare il diff contro «$BASE_REF» ($BASE): nessun verdetto, e NON è un verde. Se è «no merge base», il checkout è shallow: serve fetch-depth: 0."
+            exit 1
+          fi
+          # ⚠️ `mapfile <<<""` su stringa vuota crea un array di UN elemento vuoto, che
+          #    più sotto diventerebbe un `lock` fantasma da confrontare: l'array si azzera
+          #    a mano e si riempie solo se c'è davvero qualcosa.
+          CAMBIATI=()
+          [ -n "$DIFF_LOCK" ] && mapfile -t CAMBIATI <<<"$DIFF_LOCK"
           if [ "${#CAMBIATI[@]}" -eq 0 ]; then
             echo "nessun uv.lock toccato da questa PR: niente da verificare"
             exit 0
