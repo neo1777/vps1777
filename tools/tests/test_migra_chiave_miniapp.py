@@ -108,9 +108,21 @@ def test_3_overlay_toglie_il_token_e_non_perde_gli_altri(tmp_path):
     assert _lancia(tmp).returncode == 0
 
     base = _secrets_del_gateway(tmp / "compose.yaml")
-    nuovo = _secrets_del_gateway(tmp / "compose.miniapp-secret.yaml")
 
-    assert "telegram_bot_token" in base, "il presupposto del test non regge più"
+    # 🔄 16/08 (#61): il compose BASE monta già la chiave derivata, quindi il presupposto
+    #   di questo test — «il gateway parte col token» — non regge più. La cosa giusta non
+    #   è cancellarlo: è fargli misurare ANCHE il nuovo stato, così continua a proteggere
+    #   il caso vecchio se qualcuno torna indietro, e dichiara quello nuovo se resta.
+    # ⭐ E il controllo che aggiungo vale più di quello che sostituisce: «né il token né
+    #   la chiave» non è lo stato migrato, è uno stato ROTTO in cui la Mini App non può
+    #   autenticare nessuno — e prima nessun test lo distingueva dal successo.
+    if "telegram_bot_token" not in base:
+        assert "telegram_webapp_secret" in base, (
+            "il gateway non ha NÉ il token NÉ la chiave derivata: non è lo stato "
+            "migrato della #61, è uno stato in cui la Mini App rifiuta tutto")
+        return
+
+    nuovo = _secrets_del_gateway(tmp / "compose.miniapp-secret.yaml")
     assert "telegram_bot_token" not in nuovo, "l'overlay NON toglie il token"
     assert "telegram_webapp_secret" in nuovo, "l'overlay non dà la chiave derivata"
     persi = set(base) - set(nuovo) - {"telegram_bot_token"}
