@@ -168,7 +168,7 @@ Scenario: VPS morta, nuova macchina, vuoi ripristinare.
 
 ```bash
 # Su nuova macchina
-git clone https://github.com/<owner>/vps1777.git
+git clone https://github.com/neo1777/vps1777.git
 cd vps1777
 # Copia ~/.config/age/keys.txt dalla tua copia offline
 mkdir -p ~/.config/age && cp /percorso/keys.txt ~/.config/age/
