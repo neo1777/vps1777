@@ -91,7 +91,21 @@ services:
       OAUTH_CORS_ORIGINS: "https://claude.ai,https://web.telegram.org"
       AUDIT_LOG_PATH: /var/lib/gateway/audit.jsonl
       AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-90}   # potatura audit oltre N giorni
-      TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+      # 🔑 IL GATEWAY NON HA PIÙ IL TOKEN — issue #61, e la strada era già scritta nel
+      #   codice dal 27/07 (H54). Per verificare l'`initData` della Mini App serve la
+      #   chiave HMAC_SHA256("WebAppData", token), NON il token: la derivazione è a
+      #   senso unico, chi ha la chiave può verificare e forgiare per QUESTA Mini App
+      #   ma NON può risalire al token, quindi non guadagna la voce del bot.
+      #   (in questo file il grassetto markdown NON si usa: il presidio di SECURITY.md
+      #    cerca i riferimenti YAML, e legge la coppia di asterischi come uno di quelli.
+      #    Questa nota, alla prima stesura, li conteneva a sua volta e faceva scattare
+      #    il presidio che stava spiegando — quindi qui il carattere non compare.)
+      #   `nb1777-bot` il token ce l'ha ancora, e deve: gli serve per PARLARE.
+      # ⚠️ Se questo file manca, `effective_webapp_secret` è vuoto e la Mini App si
+      #   disabilita (settings.py:238 chiede UNA delle due) — non si apre un buco:
+      #   si chiude la porta. Il file lo scrivono deploy.sh e installer/engine.py, e
+      #   `vps1777.py` lo deriva da sé prima di `compose up` se non c'è.
+      TELEGRAM_WEBAPP_SECRET_FILE: /run/secrets/telegram_webapp_secret
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}   # Mini App owner-only (server-side)
       OAUTH_PWD_HASH_FILE: /run/secrets/admin_password_bcrypt
       GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
@@ -101,7 +115,7 @@ services:
       - gateway_secret
       - oauth_signing_secret
       - admin_password_bcrypt
-      - telegram_bot_token
+      - telegram_webapp_secret
       - archive_desc_secret
     volumes:
       - gateway-data:/var/lib/gateway
@@ -322,3 +336,7 @@ secrets:
     file: ./secrets/admin_password_bcrypt.txt
   telegram_bot_token:
     file: ./secrets/telegram_bot_token.txt
+  # la chiave DERIVATA per verificare l'initData: la scrive l'installer, e
+  # `vps1777.py` la ricava dal token se manca (migrazione di chi aggiorna).
+  telegram_webapp_secret:
+    file: ./secrets/telegram_webapp_secret.txt

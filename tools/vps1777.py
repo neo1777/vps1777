@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import hashlib
+import hmac
 import json
 import os
 import pwd
@@ -619,6 +620,54 @@ def enabled_features(repo: Path) -> set[str]:
     if val is None:
         return set(DEFAULT_FEATURES)
     return {f.strip() for f in val.split(",") if f.strip() and f.strip() != "none"}
+
+
+def assicura_webapp_secret(repo: Path) -> None:
+    """Deriva `secrets/telegram_webapp_secret.txt` dal token, se non c'è (issue #61).
+
+    🔴 PERCHÉ ESISTE, ed è una cura alla MIGRAZIONE più che al prodotto. Dalla #61 il
+    gateway non monta più il token ma la chiave derivata, e un secret di compose è un
+    FILE: se manca, `docker compose up` non parte — non degrada, si ferma. Chi aggiorna
+    una macchina installata prima ha `telegram_bot_token.txt` e non l'altro, quindi
+    senza questa riga la cura di sicurezza si presenterebbe come «l'update ha rotto lo
+    stack». *Una cura che rompe l'aggiornamento non è una cura: è un incidente
+    programmato per la prossima persona.*
+
+    🔑 La derivazione è la stessa che il gateway faceva a runtime — HMAC_SHA256 con
+    chiave «WebAppData» sul token — solo che ora avviene UNA volta, fuori dal servizio
+    esposto: il risultato può verificare (e forgiare) una initData per questa Mini App,
+    ma non risale al token e non guadagna la voce del bot.
+
+    Non tocca nulla se il file c'è già, e tace se il token non c'è: senza token non
+    c'è Mini App da verificare, ed è uno stato legittimo (settings.py:238).
+    """
+    dest = repo / "secrets" / "telegram_webapp_secret.txt"
+    src = repo / "secrets" / "telegram_bot_token.txt"
+    try:
+        token = src.read_text(encoding="utf-8").strip()
+    except OSError:
+        return                      # nessun token: nessuna Mini App. Non è un errore.
+    if not token:
+        return
+    try:
+        chiave = hmac.new(b"WebAppData", token.encode("utf-8"), hashlib.sha256).hexdigest()
+        # 🔴 NON «if dest.exists(): return» — rilievo di abdd732a sulla #194, ed era una
+        #    rottura SILENZIOSA: la chiave è una FUNZIONE del token, quindi il file giusto
+        #    ieri diventa quello sbagliato nel momento in cui il token viene ruotato. Con
+        #    l'uscita anticipata il gateway avrebbe continuato a montare la derivata VECCHIA
+        #    e la Mini App avrebbe rifiutato tutto — senza un errore, perché dal punto di
+        #    vista di ogni presidio il file c'è, ha la forma giusta e i permessi giusti.
+        # ⭐ *Un file la cui correttezza dipende da un ALTRO file non si può verificare
+        #    guardando lui: si verifica ricalcolandolo.* Costa un HMAC per `up`.
+        if dest.exists() and dest.read_text(encoding="utf-8").strip() == chiave:
+            return                  # già allineata al token attuale: niente da fare
+        rigenerata = dest.exists()
+        dest.write_text(chiave, encoding="utf-8")
+        dest.chmod(0o600)
+        log(f"{'ri' if rigenerata else ''}derivata {dest.name} dal token"
+            f"{' (il token è cambiato: la chiave era disallineata)' if rigenerata else ' (migrazione #61)'}")
+    except OSError as exc:          # non zittire: se non si può scrivere, `up` fallirà
+        warn(f"non ho potuto scrivere {dest}: {exc} — `compose up` fallirà sul secret mancante")
 
 
 def compose_cmd(repo: Path, *, files: list[Path] | None = None) -> list[str]:
@@ -2163,6 +2212,7 @@ def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
             log("migrazione data-mutating eseguita → restore volumi dallo snapshot")
             snapshot_restore(repo, snap)
     install_systemd_units(repo, enable=False)
+    assicura_webapp_secret(repo)      # #61: il secret derivato deve esistere PRIMA di up
     run([*compose_cmd(repo), "up", "-d"], check=False, env=env)
     healthy, why = health_gate(repo, env=env)
     if healthy:
@@ -2233,6 +2283,14 @@ SEGRETI_NON_GENERABILI = {
     "telegram_bot_token": "token rilasciato da BotFather (Telegram)",
     "cloudflared_token": "token del tunnel, dalla dashboard Cloudflare",
     "admin_password_bcrypt": "hash bcrypt di una password SCELTA (vedi secrets/README.md)",
+    # 🔑 NON GENERABILE, e la ragione è la più importante di tutte e quattro (#61): questo
+    #   è l'unico che a fabbricarlo a caso **sembrerebbe riuscito**. `openssl rand -hex 32`
+    #   produce 64 caratteri esadecimali validissimi — file pieno, permessi giusti,
+    #   preflight verde — e la Mini App rifiuterebbe OGNI initData, perché la chiave deve
+    #   essere ESATTAMENTE HMAC_SHA256("WebAppData", token). *Un segreto derivato messo
+    #   fra i generabili è un guasto che si presenta come una cura.*
+    "telegram_webapp_secret": "DERIVATA dal token del bot, non casuale: "
+                              "cancella il file e `vps1777` la rideriverà da telegram_bot_token.txt",
 }
 SEGRETI_GENERABILI = {"gateway_secret", "archive_desc_secret", "oauth_signing_secret"}
 
@@ -2873,6 +2931,7 @@ def cmd_update(repo: Path, args) -> int:
 
     # 13 — up
     step(13, "up")
+    assicura_webapp_secret(repo)      # #61: senza il file, compose non parte affatto
     res = run([*compose_cmd(repo), "up", "-d"], check=False, env=env_new)
     if res.returncode != 0:
         return _rollback_routine(repo, st, target, cur, bundle, snap,
@@ -3311,6 +3370,22 @@ _SECRET_POLICY = [
     # token si forgia un initData valido per qualunque user id. Fascia massima.
     ("telegram_bot_token", "telegram_bot_token.txt", "Token bot Telegram (radice Mini App)", 90, False,
      "manuale: revoca e rigenera su @BotFather"),
+    # 🆕 #61: la chiave DERIVATA che il gateway monta al posto del token intero.
+    # ⭐ La sua natura è diversa da tutte le altre voci di questo elenco: **non è un
+    #   segreto autonomo, è una funzione di un altro segreto** — HMAC_SHA256 con chiave
+    #   «WebAppData» sul token del bot. Non si ruota da sé: si ruota il token, e questa
+    #   *deve* essere riderivata, o la Mini App smette di autenticare.
+    # 📌 Perciò la scadenza è la STESSA del token (90 giorni) e non una sua: due
+    #   orologi diversi sullo stesso segreto darebbero una finestra in cui uno dei due
+    #   dice «a posto» mentre l'altro è scaduto — e a decidere sarebbe quello sbagliato.
+    # 🔑 Cosa vale, se la prendono: può verificare **e forgiare** una initData per QUESTA
+    #   Mini App, ma NON risale al token ⇒ non guadagna la voce del bot. È esattamente il
+    #   surplus che la #61 toglie al gateway, cioè al solo servizio esposto.
+    ("telegram_webapp_secret", "telegram_webapp_secret.txt",
+     "Chiave verifica initData Mini App (derivata dal token)", 90, False,
+     "manuale: NON si ruota da sola. Ruota il token su @BotFather e basta: al primo "
+     "`vps1777 up`/`update` la chiave viene RIDERIVATA da sola, perché è una funzione "
+     "del token e non un segreto indipendente (assicura_webapp_secret)"),
     # H37: era scoperto. Solo con ingress.cloudflared (altrimenti file assente →
     # saltato). Ruotare = rigenerare il token del tunnel nella dashboard CF.
     ("cloudflared_token", "cloudflared_token.txt", "Token tunnel Cloudflare", 365, False,
