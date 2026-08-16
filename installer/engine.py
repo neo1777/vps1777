@@ -504,6 +504,9 @@ else
 fi
 chmod 600 secrets/admin_password_bcrypt.txt
 printf %s {shlex.quote(p.get('telegram_bot_token', ''))} > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt
+# #61: il gateway monta la chiave DERIVATA, non il token. Derivata qui una volta sola:
+# HMAC_SHA256("WebAppData", token) — a senso unico, non risale al segreto intero.
+python3 -c "import hmac,hashlib,sys;t=sys.argv[1];open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',t.encode(),hashlib.sha256).hexdigest() if t else '')" {shlex.quote(p.get('telegram_bot_token', ''))}; chmod 600 secrets/telegram_webapp_secret.txt
 {("printf %s " + shlex.quote(p.get('cf_token',''))) + " > secrets/cloudflared_token.txt; chmod 600 secrets/cloudflared_token.txt" if p.get('cf_token') else "true"}
 cp -n .env.example .env 2>/dev/null || true
 set_kv() {{ grep -q "^$1=" .env && sed -i "s|^$1=.*|$1=$2|" .env || echo "$1=$2" >> .env; }}

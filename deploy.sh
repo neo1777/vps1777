@@ -270,7 +270,8 @@ RS
   [ -n "$TS_KEY" ]   && APPLY_SCRIPT="$APPLY_SCRIPT
 set_kv TS_AUTHKEY '$TS_KEY'"
   [ -n "$TG_TOKEN" ] && APPLY_SCRIPT="$APPLY_SCRIPT
-printf %s '$TG_TOKEN' > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt"
+printf %s '$TG_TOKEN' > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt
+python3 -c \"import hmac,hashlib,sys;open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',sys.argv[1].encode(),hashlib.sha256).hexdigest())\" '$TG_TOKEN'; chmod 600 secrets/telegram_webapp_secret.txt"
   [ -n "$TG_OWNER" ] && APPLY_SCRIPT="$APPLY_SCRIPT
 set_kv TELEGRAM_OWNER_ID '$TG_OWNER'"
   [ -n "$PUB" ]      && APPLY_SCRIPT="$APPLY_SCRIPT
