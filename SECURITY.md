@@ -406,9 +406,52 @@ prende il gateway le ha già per definizione. Il token del bot no: quello non gl
 per *essere sé stesso*, gli serve per **parlare come il bot**, e chi lo prende può
 impersonarlo anche fuori da qui. *«Cinque» risponde a «cosa vede»; «uno» risponde a
 «cosa si guadagna a prenderlo»*. Resta parziale perché la difesa possibile — un
-processo separato che tenga il token e accetti solo «manda questo messaggio» — costa
-un pezzo in più da mantenere su una macchina piccola: è un baratto vero, e lo decide
-chi possiede la macchina, non un rilievo.
+processo separato che tenga il token e accetti solo «manda questo messaggio» — **non
+copre tutto il segreto: lo stesso token ha DUE usi, e vanno separati prima di ragionare
+sulla difesa — perché uno dei due si toglie di mezzo SENZA aggiungere niente.**
+`nb1777-bot` lo usa per **parlare** come il bot (è il rischio descritto qui sopra); il
+`gateway` lo usa come **chiave di verifica** — `services/gateway/app/miniapp_core.py:43`
+fa `hmac.new(b"WebAppData", bot_token, sha256)`, l'algoritmo con cui Telegram valida
+l'`initData` della Mini App. **Ma per verificare NON serve il token: basta la chiave
+DERIVATA, e il gateway la accetta già** — `settings.py:227` (`effective_webapp_secret`),
+`settings.py:238` (*«serve UNA delle due, non entrambe»*), `miniapp.py:162`
+(`verify_init_data(…, webapp_secret_hex=…)`). È l'esito di **H54, 27/07**, e la
+derivazione è **a senso unico**: chi ha quella chiave può verificare *e forgiare* una
+`initData` per questa Mini App, ma **non può risalire al token, quindi non guadagna la
+voce del bot** — che è il surplus di cui parla tutto questo paragrafo.
+⇒ Le opzioni sono **tre**, e lo decide chi possiede la macchina, non un rilievo:
+**(a)** delegare al processo separato *anche* la verifica; **(b)** accettare che il
+gateway tenga il token e limitare la difesa all'invio; **(c)** — la più economica, e
+**già scritta e collaudata in questo repo** — montare `telegram_webapp_secret` sul
+gateway *al posto di* `telegram_bot_token`: non costa né un container né un canale.
+
+> ⚠️ **PERCHÉ QUESTO PARAGRAFO È STATO RISCRITTO — 16/08/2026, issue #61.**
+> Prima diceva che la difesa «costa un pezzo in più da mantenere su una **macchina
+> piccola**». *Era vero quando fu scritto.* Misurato oggi sul `compose.yaml` di `main`:
+> **4 servizi** (`gateway`, `archive-mcp`, `nb1777-mcp`, `nb1777-bot`), 3 reti, 5 secret
+> — e `nb1777-bot`, cioè **il processo separato, esiste già**. Un processo in più non è
+> più l'eccezione: è la modalità normale del sistema.
+> 🔑 **La decisione non era sbagliata: era la sua motivazione a essere invecchiata** — e
+> una motivazione scaduta non lo dichiara, perché sta nel corpo della decisione e non in
+> un campo che qualcuno rivede. *Chi la rileggeva la valutava su una premessa morta senza
+> avere modo di accorgersene.*
+> ⇒ **Ogni premessa che descrive la FORMA del sistema** — «è piccolo», «è uno solo»,
+> «non c'è ancora X» — **va riletta quando il sistema cresce: a scadere è la premessa,
+> non la scelta.** Se un giorno i servizi tornassero a essere uno, questo paragrafo
+> andrebbe riscritto di nuovo: è la sua natura, non un difetto.
+>
+> 🪞 **E la prova più forte della regola è arrivata da questo stesso paragrafo, in
+> revisione: la premessa NUOVA era a sua volta scaduta.** La prima stesura diceva *«per
+> verificare serve il token stesso»* e ne deduceva **due** opzioni. Falso da venti
+> giorni: H54 (27/07) ha introdotto la chiave derivata, il gateway la accetta già, e
+> l'opzione **(c)** — la più economica delle tre — era **scritta e collaudata in questo
+> repo mentre io scrivevo che non esisteva**. *(rilievo di @b82df434 sulla revisione
+> non-autrice; verificato alla fonte prima di accoglierlo.)*
+> 🔑 **Chi corregge una premessa scaduta la sostituisce con quella che ha in testa — ed è
+> vecchia quanto la sua ultima lettura del codice.** Non c'è una versione definitiva di
+> un paragrafo che descrive il sistema: c'è solo la sua data. ⇒ **il presidio non è
+> scrivere meglio, è farlo leggere a una mano che non l'ha scritto** — qui è costato una
+> revisione e ha trovato l'opzione migliore delle tre.
 
 `H55` **è stato chiuso il 01/08/2026**, e la sua storia vale più del conteggio: non
 l'ha trovato una lettura, è saltato fuori **aggiornando
