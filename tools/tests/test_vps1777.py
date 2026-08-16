@@ -74,8 +74,17 @@ def test_snapshot_prune_with_keep_latest_survives_when_all_are_stale():
     with tempfile.TemporaryDirectory() as d:
         repo = Path(d)
         base = repo / "backups" / "pre-update"
+        # 16/08: il banco ora ha CINQUE versioni, non due. La regola provata qui
+        # (a tempo, con keep) è invariata — ma `snapshot_prune` protegge anche
+        # l'ultimo snapshot delle ultime 3 VERSIONI (voce f9818614), e con due sole
+        # versioni sarebbero state entrambe protette: il test avrebbe smesso di
+        # provare la potatura a tempo *senza dirlo*. Il banco va reso rappresentativo,
+        # NON l'asserzione più debole.
         older = base / "0.40.1-a"
         newer = base / "0.40.2-b"
+        for extra in ("0.40.3-c", "0.40.4-d", "0.40.5-e"):
+            (base / extra).mkdir(parents=True)
+            (base / extra / "gateway-data.tar").write_text("x")
         older.mkdir(parents=True)
         newer.mkdir(parents=True)
         (older / "gateway-data.tar").write_text("x")
@@ -83,9 +92,69 @@ def test_snapshot_prune_with_keep_latest_survives_when_all_are_stale():
         stale_ts = __import__("time").time() - 200 * 3600  # oltre il cutoff di 72h
         os.utime(older, (stale_ts, stale_ts))
         os.utime(newer, (stale_ts + 60, stale_ts + 60))  # più recente, ma comunque stale
+        # gli extra PIÙ VECCHI di `newer`: altrimenti `snapshot_latest` sceglierebbe
+        # uno di loro e il `keep` non proteggerebbe più `newer` — il test passerebbe
+        # o fallirebbe per una ragione diversa da quella che dichiara.
+        for extra in ("0.40.3-c", "0.40.4-d", "0.40.5-e"):
+            os.utime(base / extra, (stale_ts - 60, stale_ts - 60))
         v.snapshot_prune(repo, keep=v.snapshot_latest(repo))
         assert not older.exists()
         assert newer.exists()
+
+
+
+def test_snapshot_prune_tiene_le_ultime_versioni_anche_se_tutte_stale():
+    """Il caso della voce `f9818614`, misurato sulla VPS viva il 27/07.
+
+    OTTO snapshot in dieci ore (0.40.5 → 0.40.14): la finestra di 72h si era
+    riempita in un giorno solo e restava **un solo** punto di ripristino — quello
+    della versione in esecuzione. La garanzia «72 ore di margine» era vera sul TEMPO
+    e falsa sulle VERSIONI: se un difetto era entrato ieri, lo stato pre-ieri non era
+    più raggiungibile.
+
+    ⭐ E il pregio del criterio per versioni è che ha un TETTO NATURALE: protegge al
+      massimo N snapshot **qualunque sia il ritmo di rilascio**, mentre quello a
+      tempo cresce col ritmo — che è il difetto che la voce nominava.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        base = repo / "backups" / "pre-update"
+        stale = __import__("time").time() - 200 * 3600      # tutti oltre il cutoff
+        versioni = [f"0.40.{n}" for n in range(5, 15)]      # 0.40.5 … 0.40.14 = 10
+        for i, ver in enumerate(versioni):
+            dd = base / f"{ver}-2026072{i % 10}-120000"
+            dd.mkdir(parents=True)
+            (dd / "gateway-data.tar").write_text("x")
+            os.utime(dd, (stale + i, stale + i))            # la 14 è la più recente
+
+        v.snapshot_prune(repo, keep=v.snapshot_latest(repo), keep_versioni=3)
+
+        vive = sorted(p.name.split("-")[0] for p in base.iterdir() if p.is_dir())
+        # le ultime TRE versioni (12, 13, 14) — la 14 è anche il `keep`
+        assert vive == ["0.40.12", "0.40.13", "0.40.14"], vive
+        # e il TETTO: dieci versioni non producono dieci snapshot protetti
+        assert len(vive) == 3
+
+
+def test_snapshot_prune_versioni_non_salva_chi_e_fuori_dalle_ultime_n():
+    """Il verso che rende il test precedente una prova: la cura deve ancora POTARE.
+
+    Senza questo, un `snapshot_prune` che non cancellasse più niente passerebbe il
+    test di sopra — e «protegge le ultime 3» sarebbe indistinguibile da «non pota
+    mai». *Il gruppo di controllo di una protezione è ciò che resta cancellabile.*
+    """
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        base = repo / "backups" / "pre-update"
+        stale = __import__("time").time() - 200 * 3600
+        for i, ver in enumerate(["0.40.1", "0.40.2", "0.40.3", "0.40.4"]):
+            dd = base / f"{ver}-x"
+            dd.mkdir(parents=True)
+            os.utime(dd, (stale + i, stale + i))
+        v.snapshot_prune(repo, keep=None, keep_versioni=3)
+        vive = sorted(p.name.split("-")[0] for p in base.iterdir() if p.is_dir())
+        assert "0.40.1" not in vive, f"la più vecchia doveva essere potata: {vive}"
+        assert vive == ["0.40.2", "0.40.3", "0.40.4"], vive
 
 
 # ─────────────────────────────── H43: render_unit ──────────────────────────

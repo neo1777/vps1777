@@ -1378,15 +1378,64 @@ def snapshot_latest(repo: Path) -> Path | None:
     return snaps[0] if snaps else None
 
 
-def snapshot_prune(repo: Path, keep: Path | None) -> None:
+def snapshot_versioni_da_tenere(base: Path, quante: int = 3) -> set[Path]:
+    """Lo snapshot più recente di ciascuna delle ultime `quante` VERSIONI.
+
+    🔴 PERCHÉ ESISTE (voce `f9818614`, misurata sulla VPS viva il 27/07; sì di @Neo
+      il 16/08: «sì penso sia meglio avere tutto»). La retention era tarata **solo
+      sul TEMPO** (72h) — ma il VOLUME dipende dal RITMO DI RILASCIO, e il ritmo non
+      è parametro di nessuno. Misurato: 8 release in 10 ore riempirono la finestra in
+      un giorno solo, e **non esisteva più nessuno snapshot più vecchio di quella
+      notte**. La garanzia che l'utente legge — «72 ore di margine» — era vera sul
+      TEMPO e falsa sulle VERSIONI coperte: se un difetto era entrato ieri, lo stato
+      pre-ieri non era più raggiungibile per rollback.
+    ⭐ Un margine dichiarato in TEMPO viene consumato da un RITMO che nessuno misura.
+      Questa funzione aggiunge l'asse che mancava: *quante versioni indietro posso
+      tornare*, che è la domanda vera quando si fa rollback.
+
+    🛡️ E IL VINCOLO DI SICUREZZA, dichiarato perché questa è l'unica parte di vps1777
+      che CANCELLA dati non rigenerabili: **questa funzione può solo PROTEGGERE DI
+      PIÙ, mai cancellare di più.** Restituisce un insieme che si AGGIUNGE al `keep`
+      esistente; se sbaglia a leggere un nome, quello snapshot ricade nella regola a
+      tempo di prima — cioè il comportamento precedente, non uno peggiore. *Il costo
+      di un errore qui è spazio su disco, non un backup perduto.*
+    """
+    if not base.is_dir():
+        return set()
+    per_versione: dict[str, Path] = {}
+    for d in base.iterdir():
+        if not d.is_dir():
+            continue
+        m = re.match(r"^(\d+\.\d+\.\d+)", d.name)
+        if not m:
+            continue          # nome che non dichiara una versione → regola a tempo
+        ver = m.group(1)
+        pre = per_versione.get(ver)
+        if pre is None or d.stat().st_mtime > pre.stat().st_mtime:
+            per_versione[ver] = d
+    # le ultime N per ORDINE DI VERSIONE, non alfabetico: «0.10.0» < «0.9.0» come
+    # stringhe, e l'ordinamento lessicografico terrebbe la versione sbagliata —
+    # è la stessa trappola già dichiarata in snapshot_latest().
+    def _chiave(v: str) -> tuple[int, ...]:
+        return tuple(int(x) for x in v.split("."))
+    ultime = sorted(per_versione, key=_chiave, reverse=True)[:quante]
+    return {per_versione[v] for v in ultime}
+
+
+def snapshot_prune(repo: Path, keep: Path | None, keep_versioni: int = 3) -> None:
     base = repo / "backups" / "pre-update"
     if not base.is_dir():
         return
     # pota al successivo update riuscito E dopo 72h — il più tardivo dei due:
     # uno snapshot recente resta anche se un nuovo update è già riuscito.
     cutoff = time.time() - 72 * 3600
+    # …e in più: l'ultimo snapshot di ciascuna delle ultime `keep_versioni` versioni,
+    # perché 72h di margine non dicono quante VERSIONI indietro si può tornare.
+    protetti = snapshot_versioni_da_tenere(base, keep_versioni)
     for d in sorted(d for d in base.iterdir() if d.is_dir()):
         if keep and d == keep:
+            continue
+        if d in protetti:
             continue
         if d.stat().st_mtime < cutoff:
             shutil.rmtree(d, ignore_errors=True)
