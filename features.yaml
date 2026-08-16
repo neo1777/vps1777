@@ -1048,13 +1048,20 @@ features:
       dichiarando «non osservabile» proprio sul blocco che può dare FAIL, e
       prova-6 uscendo 0 pur dichiarando di non aver visto il caso silenzioso.
       Curate: adesso su quella macchina è 1 verde, 0 rosse, 8 non eseguite.
-      ⚠️ COSA IL LEDGER NON PROVA DI LORO: che siano LANCIATE. Non sono nel gate
-      di aggiornamento e nessuna CI le esegue — girano dove gira il prodotto, e
-      il loro esito lo produce chi le lancia. È una scelta (misurano il vivo,
-      non il repo), non una dimenticanza — ma va saputa: un verde della CI non
-      dice niente su queste.
+      ⚠️ COSA LA CI PROVA DI LORO — e cosa NO, perché la differenza è tutto (16/08).
+      NON le esegue contro il sistema: servono docker, la rete e systemd VERI, che
+      in un runner non ci sono, e questa resta una scelta (misurano il vivo, non il
+      repo). Esegue UNA proprietà, l'unica che non ha bisogno del sistema:
+      `onesta-a-macchina-nuda.sh` le lancia dove il prodotto NON gira e pretende
+      che tutte e nove escano «2 = non eseguibile». Una verde lì sarebbe il falso
+      PASS del 01/08 tornato; una rossa sarebbe un fallimento dichiarato senza aver
+      guardato niente. È la fase (b) del collaudo FORMAT, ad ogni PR.
+      ⇒ un verde della CI continua a NON dire che il sistema va: dice che gli
+      strumenti che lo misureranno non sanno mentire per assenza. A lanciarle sul
+      vivo resta una persona, e l'esito lo DATA `lancia-tutte.sh`.
     dove:
       - "tools/prove-empiriche/lancia-tutte.sh"
+      - "tools/prove-empiriche/onesta-a-macchina-nuda.sh"
       - "tools/prove-empiriche/prova-1-gateway-non-esce.sh"
       - "tools/prove-empiriche/prova-2-egress-non-entra.sh"
       - "tools/prove-empiriche/prova-3-health-deep-solo-interni.sh"

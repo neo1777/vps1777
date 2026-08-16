@@ -514,6 +514,26 @@ jobs:
       #   PRESIDIO: che sappia ancora dire di no.
       - name: Gate locale — l'autoprova (che sappia ancora dire di no)
         run: python3 tools/gate-locale.py --autoprova
+      # 🔴 LE NOVE PROVE EMPIRICHE SONO L'UNICO STRATO CHE NESSUNO ESEGUE, e sta
+      #   scritto in testa a `lancia-tutte.sh` da settimane: «in CI ci passa
+      #   shellcheck sopra — le CONTROLLA, non le ESEGUE». Vero e inevitabile:
+      #   servono docker, la rete e systemd VERI, che in un runner non ci sono.
+      # ⭐ Ma una proprietà NON ha bisogno del sistema per essere verificata, ed è
+      #   quella su cui poggia tutto il resto: **a macchina nuda nessuna delle nove
+      #   deve dichiarare un PASS.** Lo dice `lancia-tutte.sh` stesso (r.42-44) della
+      #   fase (b) del collaudo FORMAT: «se una desse 0 avremmo trovato un falso PASS
+      #   nel momento esatto in cui serve». Un runner È una macchina nuda ⇒ quella
+      #   fase si esegue qui, ad ogni PR, gratis.
+      # 🔑 Non misura il sistema: misura l'ONESTÀ degli strumenti che lo misureranno.
+      #   *Un attrezzo che dice «tutto bene» quando non ha guardato è peggio che non
+      #   averlo* — ed è la stessa ragione per cui i tre `--autoprova` qui sopra
+      #   girano prima del gate che presidiano.
+      # ⚠️ Il giorno in cui la CI avviasse lo stack, un verde diventerebbe legittimo e
+      #   questo step andrà cambiato: il criterio non è «nessuna verde» in assoluto, è
+      #   «nessuna verde SENZA il sistema sotto». Scritto qui perché il prossimo non lo
+      #   debba dedurre da un rosso.
+      - name: Le nove prove non mentono per assenza (fase b del collaudo FORMAT)
+        run: bash tools/prove-empiriche/onesta-a-macchina-nuda.sh
 
   build:
     runs-on: ubuntu-latest
