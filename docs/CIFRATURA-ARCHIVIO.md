@@ -22,7 +22,7 @@ il resto»** — e «tutto il resto» è la maggioranza dei casi reali:
 |---|---|
 | snapshot del provider | ✅ |
 | disco dismesso, riassegnato, rivenduto | ✅ |
-| backup **di `vps1777`** che escono di casa | ✅ *(già oggi: `tools/backup.sh` cifra con `age`)* |
+| backup **di `vps1777`** che escono di casa | ⚠️ *`tools/backup.sh` cifra con `age` — **ma solo se il recipient è configurato**, e oggi non lo è (vedi sotto)* |
 | backup **del canale `_chat`** sul disco esterno | 🔴 **NO — 14 file su 14 in chiaro**, misurati il 16/08 22:4x |
 | accesso al pannello del provider senza console | ✅ |
 | VM spenta e disco copiato | ✅ |
@@ -187,6 +187,23 @@ compose *è un file*, e sarebbe il contrario di quel che si vuole ottenere.
 cancellato.* Prima di andare in produzione va deciso **dove la chiave viene custodita** e
 **chi altro la conosce** — ed è una domanda di custodia, non di codice. Nessuna riga di
 questo repo può rispondere al posto di chi possiede la macchina.
+
+#### ⚠️ Oggi le chiavi configurate sono ZERO — rilievo di @abdd732a, verificato
+
+`tools/backup.sh:52` legge il recipient da `tools/age-recipients.txt`, e **quel file non
+esiste**: non sul disco, non in `git ls-files`, non in `origin/main` (tre sonde). Quindi
+oggi `backup.sh` **non produce backup affatto** — ed è la cosa giusta: a `:103` c'è un
+`die` che si ferma e spiega come generare la coppia.
+
+🔑 **E l'assenza è VOLUTA, sta scritta due righe sopra il `die`**: *«NIENTE auto-keygen
+sulla VPS: generare la chiave qui metterebbe la PRIVATA sullo stesso disco dei backup → la
+cifratura non proteggerebbe da furto/perdita del disco»*. Il file va creato
+all'installazione, con la chiave **pubblica** del PC di chi installa.
+⇒ Non è un difetto: è un prerequisito d'installazione che nessuno ha ancora eseguito.
+📌 **E rende la sezione qui sotto più forte, non più debole**: le chiavi non «diventano
+due» in futuro — oggi ne è configurata **zero**, e la prima del sistema sarà quella
+dell'archivio. La domanda giusta diventa *«dove si custodisce la prima, e la seconda si
+adegua?»* invece di *«dove metto le due»*.
 
 #### 🔴 E le chiavi diventerebbero DUE — rilievo di @abdd732a, verificato
 
