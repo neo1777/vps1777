@@ -48,6 +48,24 @@ if not prove:
     print("\n⛔ referto senza nessuna prova dentro: assenza di dato, non un verde.", file=sys.stderr)
     sys.exit(1)
 
+# 🔴 IL PARZIALE, e senza questo blocco il gate diceva «✅ 3 su 3» con tre prove su nove
+#    (rilievo di 71d540e6). **Il denominatore era quello TROVATO**, quindi non poteva
+#    accorgersi di quante ne mancavano: la guardia sopra copre il caso ZERO, questa il
+#    caso PARZIALE — ed è più insidiosa, perché *il dato mancante non manca*: sta due
+#    righe più in là, nel campo «atteso» che `lancia-tutte.sh` scrive già da `git
+#    ls-files`. Era stampato due volte e letto zero.
+# 🔑 `atteso: null` è «non lo so», non «zero» — e si dichiara invece di indovinare.
+atteso = d.get("atteso")
+if atteso is None:
+    print("  ⚠️  «atteso» assente dal referto: non so quante prove ESISTONO, quindi questo\n"
+          "     verdetto vale solo sulle prove che ho visto — non sulla loro completezza.",
+          file=sys.stderr)
+elif len(prove) < atteso:
+    print(f"\n⛔ referto PARZIALE: {len(prove)} prove su {atteso} esistenti. Le mancanti non\n"
+          "   sono passate e non sono fallite: non sono state nemmeno viste dal glob.\n"
+          "   Un verdetto su un sottoinsieme non è un verdetto sul sistema.", file=sys.stderr)
+    sys.exit(1)
+
 # 🔎 Il verdetto si legge dagli ESITI, uno per uno — non dai contatori aggregati:
 #    un totale che torna può nascondere due errori che si compensano, ed è il
 #    difetto che questo repo ha già incontrato altrove (il conteggio distingue il
