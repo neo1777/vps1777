@@ -531,6 +531,20 @@ jobs:
       #   TUTTI i job di QUESTO workflow (vedi il suo USO) ⇒ metterlo qui farebbe girare
       #   la CI dentro la CI. Il gate è per il locale — è nel nome. Qui si presidia il
       #   PRESIDIO: che sappia ancora dire di no.
+      # 📍 Le coordinate `file:riga` citate nei documenti invecchiano da sole: il codice
+      #   si sposta, la prosa no. Nasce da un caso vero (voce `a80025f1`): SECURITY.md
+      #   rimandava a `snapshot_prune (tools/vps1777.py:1021-1032)` e a quella riga c'era
+      #   un'altra funzione. Quel caso è già curato — questo gate esiste perché la classe
+      #   è tornata due volte e **non si vede**: una coordinata sbagliata non rompe nulla,
+      #   manda solo la persona sbagliata nel posto sbagliato, mesi dopo.
+      # ⚠️ Sa dire che la riga ESISTE, non che contenga la cosa giusta — il limite è
+      #   scritto in testa allo script e ha un caso nel banco, così chi legge il verde
+      #   non ne deduce più di quel che c'è.
+      # 🛡️ L'autoprova prima, come per gli altri tre gate di questo job.
+      - name: Le coordinate nei doc puntano ancora dentro il file
+        run: |
+          python3 tools/coordinate-nei-doc.py --autoprova
+          python3 tools/coordinate-nei-doc.py
       - name: Gate locale — l'autoprova (che sappia ancora dire di no)
         run: python3 tools/gate-locale.py --autoprova
       # 🔴 LE NOVE PROVE EMPIRICHE SONO L'UNICO STRATO CHE NESSUNO ESEGUE, e sta
