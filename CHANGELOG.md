@@ -2,6 +2,106 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.42.0] — 2026-08-16
+
+**Sessantatré commit in una settimana, e quasi nessuno aggiunge una funzione: quasi tutti
+rendono ESEGUIBILE una garanzia che era già scritta.** La `0.41.2` chiudeva un difetto di
+dipendenze; questa chiude una classe intera, ed è la stessa in quattro travestimenti —
+`H65` «ogni action pinnata a SHA», `H66` sulle immagini di terzi, `H67` «il gateway non
+tocca mai Docker», `H68` «secrets sempre file-mounted, mai in env var». Tutte e quattro
+erano **vere**. Nessuna delle quattro era **tenuta da un test**.
+
+> **Il filo:** *una garanzia scritta e non presidiata non è una garanzia — è una promessa
+> che nessuno ha smesso di mantenere per caso.* E il suo gemello, che è peggio perché
+> somiglia al successo: **un presidio che nessuno esegue non fallisce mai.** Tre test `.py`
+> erano in git e non giravano in CI; il pre-commit con l'anti-leak non era versionato; il
+> gate `contract` era diventato fail-open in una PR precedente e taceva invece di bloccare.
+
+### 🛡️ Sicurezza — le garanzie che ora qualcuno tiene
+
+- **Il gate dei segreti non vedeva i token Telegram VERI** (#185). Il pattern usava una
+  lunghezza **esatta** (`{35}`) su un formato di terze parti, e l'esempio ufficiale della
+  documentazione ne ha 34: rispondeva «pulito» sui token veri e sporco solo su quelli
+  inventati per la prova. *Su una credenziale altrui la lunghezza non si promette.*
+- **`H67` — «il gateway non tocca mai Docker» era presidiata su UN path** (#147), e il
+  socket ha **due nomi per lo stesso inode**. Il perimetro ora è verificato su tutti i
+  compose, non su un file (#131).
+- **`H68` — «secrets sempre file-mounted, mai in env var»** (#153): vera, e nessun test la
+  teneva. Ora sì.
+- **`H65` e `H66`** (#143, #144, #145): action pinnate a SHA e immagini di terzi
+  digest-pinnate, con i test che lo mantengono vero nel tempo.
+- **Tetto assoluto sul body in Caddy** (#122), col margine misurato — 672 MiB, non 1 GB
+  (#123) — e i due tetti che non possono più scavalcarsi.
+- **`H15`/`H38`: i `chmod` dichiaravano riuscito ciò che sopprimevano** (#138), su sette
+  punti e non tre.
+- **Il download da NotebookLM non sceglie più dove scrivere** (#129, #130): era una
+  scrittura arbitraria, ora passa da un endpoint interno e da un ponte admin.
+
+### 🔍 I presìdi che non giravano — e il gate della classe
+
+- **Tre test `.py` erano in git e NON in CI** (#136), più il gate che impedisce alla
+  classe di ripetersi.
+- **Ogni autoprova dichiarata dev'essere eseguita da un workflow** (#188): quattro presìdi
+  autoprovanti erano agganciati *perché qualcuno se n'era ricordato quattro volte*.
+- **Il gate `contract` non può più tacere quando non ha potuto guardare** (#184): la #182
+  l'aveva reso fail-open. *«Non ho potuto controllare» e «ho controllato ed è a posto» non
+  sono lo stesso fatto.*
+- **Il pre-commit con l'anti-leak non era in git** (#150) — e il suo unico ramo d'errore
+  moriva invece di parlare.
+- **Le nove prove empiriche entrano in CI senza il sistema sotto** (#187): un runner *è*
+  una macchina nuda, quindi la fase (b) del collaudo FORMAT — *nessuna prova deve dichiarare
+  un PASS quando non ha guardato niente* — si esegue a ogni PR, gratis.
+- **La whitelist sudoers deve coprire i comandi che la CLI eleva** (#135), che erano due
+  liste in tre file e nessuno le teneva allineate.
+
+### 🛠️ Strumenti che dicono PERCHÉ, invece di un verdetto secco
+
+- **`branch-verdetto`**: dice perché (#161), distingue una riga fuori da `main` che è il suo
+  **passato** (#181), e non dà più il verdetto HA-LAVORO ai branch di sola prosa (#175, #177).
+- **«Questo branch si può cancellare?»** — quattro strumenti che mentivano, sostituiti da uno
+  che non lo fa (#159).
+- **Le prove empiriche dicono perché una prova non è eseguibile** invece di lasciarlo
+  indovinare (#186), e `--fase` tiene separate le tre foto del collaudo del format (#167).
+- **L'indicizzazione distingue letti / scritti / deduplicati** (#180, chiude #55): prima un
+  totale solo, che rispondeva a una domanda diversa da quella che sembrava.
+- **`doc-riferimenti`**: i file che i documenti nominano esistono ancora? (#162, in CI).
+
+### 💾 Backup, restore, aggiornamento
+
+- **La ritenzione ha l'asse VERSIONI accanto a quello a tempo** (#169, #178), via sidecar in
+  chiaro accanto all'archivio cifrato.
+- **I volumi si CHIEDONO a `docker compose`** (#146): due del compose base non erano salvati.
+- **`restore.sh` non esce più 2 su un restore RIUSCITO** quando manca `.env` (#163) — e
+  l'auto-rollback ci si fidava.
+- **La regola polkit per `daemon-reload`** (#125), l'anello mancante della via B.
+- **`setup.sh` ha un contratto non-interattivo, e il primo test che lo ESEGUE** (#165).
+
+### 📄 Documentazione — quando il testo diceva un'altra cosa del codice
+
+- **L'URL del clone in `INSTALL.md` e `BACKUP-RESTORE.md` era un placeholder mai riempito**
+  (#190): chi lo seguiva alla lettera falliva al primo comando.
+- **La premessa del «segreto in chiaro» non descrive più il sistema** (#189, rif #61): era
+  «una macchina piccola», e oggi il compose orchestra quattro servizi. *A scadere è la
+  premessa, non la scelta.*
+- **`«chiude la #N» non chiude la #N`** (#137): GitHub legge solo l'inglese, e tre issue
+  erano rimaste aperte annunciando di essere chiuse.
+- I secret sono **cinque**, `INSTALL.md` ne elencava quattro (#166); «`nlm-auth` lo monta
+  SOLO `nb1777-mcp`» — a montarlo sono in quattro (#140); «byte» scritto per «caratteri»,
+  che sovrastimava l'entropia dichiarata (#168).
+- **`SECURITY.md`: la garanzia «solo la 443 via tunnel» ora nomina il fallback che la
+  sospende** (#133, chiude #70), e `INGRESS.md` dice anche **chi** può raggiungere il
+  servizio (#134, chiude #63).
+
+### ⚠️ Noto e dichiarato
+
+- **`systemd`: la riga della #101 NON ripara il guasto** (#155) — il commento prometteva il
+  contrario. Resta come dichiarazione d'intento, e la cura è una scelta di progetto non
+  ancora presa: togliere le direttive seccomp dalle unit che elevano, oppure non usare
+  `sudo` nel self-update.
+- **La cifratura at-rest dell'archivio non esiste**: il `.db` sta in chiaro sul disco, e
+  `redazione.py` lo dichiara di sé. La redazione è in **uscita** — l'upload carica tutto,
+  come richiesto. Decisione presa il 16/08, implementazione da fare.
+
 ## [0.41.2] — 2026-08-09
 
 **Una patch tagliata per un motivo solo: la `0.41.1` non si avvia.** `archive-mcp` muore
