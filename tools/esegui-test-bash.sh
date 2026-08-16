@@ -144,34 +144,34 @@ autoprova() {
   #       Un rosso su un file che gira per tutte, senza accordo, costa più della
   #       diagnosi che porta.
   _sonda_pipestatus() {
-    local big grande rc_pf rc_no ps_no ps_pf S_TMP_ERR
-    S_TMP_ERR="$(mktemp)"
-    # 65.681 byte: la dimensione MISURATA di $RATIFICA nel job 95135773669
-    big="$(head -c 65681 /dev/zero | tr '\0' 'a')"
-    grande="ago${big}"
-    # 🔴 PIPESTATUS ANCHE NEL RAMO CON PIPEFAIL (rilievo di @b82df434 in ratifica):
-    #    senza, un `rc=1` direbbe «riprodotto» e NON direbbe CHI è morto —
-    #      (1 0)/(141 0) = printf ⇒ EPIPE, ipotesi confermata
-    #      (0 1)         = grep non ha trovato ⇒ tutt'altra storia
-    #    Una sonda che esiste per distinguere due cause deve portare il dato che
-    #    le distingue proprio nel caso in cui scatta. L'array vive solo dentro la
-    #    subshell: si stampa lì e si cattura l'output, non il solo $?.
-    # 🔴 E lo STDERR non si butta: `2>/dev/null` sopprimeva «write error: Broken
-    #    pipe», cioè LA STRINGA ESATTA osservata in CI — l'unica prova diretta che
-    #    l'EPIPE è avvenuto. Ora è catturata e stampata. *Un silenziatore non
-    #    nasconde un errore: lo traveste da misura.*
-    local err_pf out_pf
-    err_pf="$S_TMP_ERR"
+    local grande rc_pf rc_no ps_no ps_pf S_TMP_ERR out_pf err_pf
+    S_TMP_ERR="$(mktemp)"; err_pf="$S_TMP_ERR"
+    # 🔴 LA FORMA, NON SOLO LA TAGLIA (rilievo di @b82df434, 16/08 — il primo giro
+    #    di questa sonda aveva 65.684 byte in UNA riga e ha risposto rc=0 in CI:
+    #    la taglia combaciava, la struttura era l'opposta). `grep` lavora per RIGHE:
+    #    quando chiude la pipe rispetto a quanto printf ha ancora da scrivere dipende
+    #    da DOVE cade il match, non da quanto è grosso l'input.
+    #      corpo vero $RATIFICA   65.681 byte · 568 righe · più lunga 587 · match a 12.170
+    #      sonda giro-1           65.684 byte ·   1 riga  · più lunga 65.684 · match a 0
+    #    Qui si ricostruisce la forma: righe ~115 byte, match in mezzo, e i DUE grep
+    #    in && come nel gate (-qF sulla versione, -qiF sul pacchetto).
+    grande="$(awk 'BEGIN{
+        for(i=1;i<=568;i++){
+          if(i==106) printf "richiede uvicorn==0.52.2 nel lock, e va dichiarato\n";
+          else { s=""; for(j=0;j<110;j++) s=s "x"; printf "%s\n", s }
+        }}')"
     out_pf="$( { set -o pipefail
-      printf '%s' "$grande" | grep -qF -- 'ago'
+      printf '%s' "$grande" | grep -qF -- '0.52.2' && printf '%s' "$grande" | grep -qiF -- 'uvicorn'
       printf '%s|%s' "$?" "${PIPESTATUS[*]}"; } 2>"$err_pf" )"
     rc_pf="${out_pf%%|*}"; ps_pf="${out_pf#*|}"
-    printf '%s' "$grande" | grep -qF -- 'ago'; rc_no=$? ps_no="${PIPESTATUS[*]}"
-    printf '\n[SONDA-PIPESTATUS] byte=%s · con-pipefail rc=%s PIPESTATUS=(%s) · senza-pipefail rc=%s PIPESTATUS=(%s) · bash=%s grep=%s\n' \
-      "${#grande}" "$rc_pf" "$ps_pf" "$rc_no" "$ps_no" "$BASH_VERSION" "$(grep --version | head -1 | awk '{print $NF}')"
+    printf '%s' "$grande" | grep -qF -- '0.52.2' && printf '%s' "$grande" | grep -qiF -- 'uvicorn'
+    rc_no=$?; ps_no="${PIPESTATUS[*]}"
+    printf '\n[SONDA-PIPESTATUS] byte=%s righe=%s match-a-riga=106 · con-pipefail rc=%s PIPESTATUS=(%s) · senza rc=%s PIPESTATUS=(%s) · bash=%s grep=%s\n' \
+      "${#grande}" "$(printf '%s' "$grande" | wc -l)" "$rc_pf" "$ps_pf" "$rc_no" "$ps_no" \
+      "$BASH_VERSION" "$(grep --version | head -1 | awk '{print $NF}')"
     printf '[SONDA-PIPESTATUS] stderr del ramo pipefail: «%s»\n' "$(tr -d '\n' < "$err_pf")"
+    printf '[SONDA-PIPESTATUS] lettura: rc=0 in entrambi = NON riprodotto NEMMENO con la forma vera (il costrutto da solo non basta: guardare il CONTESTO, @abdd732a) · rc!=0 con-pipefail = RIPRODOTTO, e PIPESTATUS dice chi muore\n\n'
     rm -f "$err_pf"
-    printf '[SONDA-PIPESTATUS] lettura: rc=0 in ENTRAMBI = il costrutto NON è la causa (cerca altrove); rc≠0 con-pipefail = riprodotto, la cura here-string è quella giusta\n\n'
   }
   _sonda_pipestatus
 
