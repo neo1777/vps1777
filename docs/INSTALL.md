@@ -38,6 +38,7 @@ Lo stage finale ti stampa gli URL.
 2. Crea `.env` (chiede: email admin, TG_OWNER_ID, ingress)
 3. Genera `secrets/*.txt`:
    - `gateway_secret.txt` (32 byte url-safe)
+   - `archive_desc_secret.txt` (32 byte url-safe)
    - `oauth_signing_secret.txt` (64 byte url-safe)
    - `admin_password_bcrypt.txt` (bcrypt rounds=12 della password che scegli/che genera)
    - `telegram_bot_token.txt` (incolli il token)
