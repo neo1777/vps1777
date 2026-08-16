@@ -144,17 +144,33 @@ autoprova() {
   #       Un rosso su un file che gira per tutte, senza accordo, costa più della
   #       diagnosi che porta.
   _sonda_pipestatus() {
-    local big grande rc_pf rc_no ps_no
+    local big grande rc_pf rc_no ps_no ps_pf S_TMP_ERR
+    S_TMP_ERR="$(mktemp)"
     # 65.681 byte: la dimensione MISURATA di $RATIFICA nel job 95135773669
     big="$(head -c 65681 /dev/zero | tr '\0' 'a')"
     grande="ago${big}"
-    (
-      set -o pipefail
+    # 🔴 PIPESTATUS ANCHE NEL RAMO CON PIPEFAIL (rilievo di @b82df434 in ratifica):
+    #    senza, un `rc=1` direbbe «riprodotto» e NON direbbe CHI è morto —
+    #      (1 0)/(141 0) = printf ⇒ EPIPE, ipotesi confermata
+    #      (0 1)         = grep non ha trovato ⇒ tutt'altra storia
+    #    Una sonda che esiste per distinguere due cause deve portare il dato che
+    #    le distingue proprio nel caso in cui scatta. L'array vive solo dentro la
+    #    subshell: si stampa lì e si cattura l'output, non il solo $?.
+    # 🔴 E lo STDERR non si butta: `2>/dev/null` sopprimeva «write error: Broken
+    #    pipe», cioè LA STRINGA ESATTA osservata in CI — l'unica prova diretta che
+    #    l'EPIPE è avvenuto. Ora è catturata e stampata. *Un silenziatore non
+    #    nasconde un errore: lo traveste da misura.*
+    local err_pf out_pf
+    err_pf="$S_TMP_ERR"
+    out_pf="$( { set -o pipefail
       printf '%s' "$grande" | grep -qF -- 'ago'
-    ) 2>/dev/null; rc_pf=$?
-    printf '%s' "$grande" | grep -qF -- 'ago' 2>/dev/null; rc_no=$? ps_no="${PIPESTATUS[*]}"
-    printf '\n[SONDA-PIPESTATUS] byte=%s · con-pipefail rc=%s · senza-pipefail rc=%s PIPESTATUS=(%s) · bash=%s grep=%s\n' \
-      "${#grande}" "$rc_pf" "$rc_no" "$ps_no" "$BASH_VERSION" "$(grep --version | head -1 | awk '{print $NF}')"
+      printf '%s|%s' "$?" "${PIPESTATUS[*]}"; } 2>"$err_pf" )"
+    rc_pf="${out_pf%%|*}"; ps_pf="${out_pf#*|}"
+    printf '%s' "$grande" | grep -qF -- 'ago'; rc_no=$? ps_no="${PIPESTATUS[*]}"
+    printf '\n[SONDA-PIPESTATUS] byte=%s · con-pipefail rc=%s PIPESTATUS=(%s) · senza-pipefail rc=%s PIPESTATUS=(%s) · bash=%s grep=%s\n' \
+      "${#grande}" "$rc_pf" "$ps_pf" "$rc_no" "$ps_no" "$BASH_VERSION" "$(grep --version | head -1 | awk '{print $NF}')"
+    printf '[SONDA-PIPESTATUS] stderr del ramo pipefail: «%s»\n' "$(tr -d '\n' < "$err_pf")"
+    rm -f "$err_pf"
     printf '[SONDA-PIPESTATUS] lettura: rc=0 in ENTRAMBI = il costrutto NON è la causa (cerca altrove); rc≠0 con-pipefail = riprodotto, la cura here-string è quella giusta\n\n'
   }
   _sonda_pipestatus
