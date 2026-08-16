@@ -25,7 +25,16 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "tools" / "migra-chiave-miniapp.sh"
-TOKEN_FINTO = "1234567890:FINTO-NON-E-UN-TOKEN-VERO-serve-solo-al-collaudo"
+# ⚠️ ACCORCIATO IL 16/08, e la ragione va letta prima di allungarlo di nuovo:
+#   con la regex curata (`\d{5,}:[A-Za-z0-9_-]{30,}`, allineata a `deploy.sh:243`)
+#   il valore precedente — 49 caratteri dopo i due punti — faceva scattare il gate
+#   anti-leak su QUESTO file. Non era un falso positivo: aveva davvero la forma di
+#   un token. ⇒ scelto di accorciare il VALORE invece di esentare il FILE, perché
+#   un'esenzione è una porta che resta aperta anche quando il file cambia.
+# 🔑 Il test non ne risente: il token qui è un valore OPACO — si scrive, se ne deriva
+#   una chiave e si verifica che non trapeli. Nessuna asserzione guarda la sua
+#   lunghezza o il suo formato.
+TOKEN_FINTO = "1234567890:FINTO-NON-UN-TOKEN"
 
 
 def _prepara(tmp: Path) -> Path:
