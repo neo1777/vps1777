@@ -407,7 +407,8 @@ per *essere sé stesso*, gli serve per **parlare come il bot**, e chi lo prende 
 impersonarlo anche fuori da qui. *«Cinque» risponde a «cosa vede»; «uno» risponde a
 «cosa si guadagna a prenderlo»*. Resta parziale perché la difesa possibile — un
 processo separato che tenga il token e accetti solo «manda questo messaggio» — **non
-copre tutto il segreto: lo stesso token ha DUE usi, e uno dei due non si sposta.**
+copre tutto il segreto: lo stesso token ha DUE usi, e vanno separati prima di ragionare
+sulla difesa — perché uno dei due si toglie di mezzo SENZA aggiungere niente.**
 `nb1777-bot` lo usa per **parlare** come il bot (è il rischio descritto qui sopra); il
 `gateway` lo usa come **chiave di verifica** — `services/gateway/app/miniapp_core.py:43`
 fa `hmac.new(b"WebAppData", bot_token, sha256)`, l'algoritmo con cui Telegram valida
