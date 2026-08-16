@@ -95,7 +95,24 @@ AMMESSI_R1 = {
 # non lo fa scattare ma `tskey-auth-kA9f…` sì.
 SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("auth-key Tailscale", re.compile(r"tskey-[a-z]+-[A-Za-z0-9]{8,}")),
-    ("token bot Telegram", re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b")),
+    # 🔴 16/08 — LA LUNGHEZZA ERA FISSA E IL GATE NON VEDEVA I TOKEN VERI.
+    #   Era `\d{8,10}:[A-Za-z0-9_-]{35}` e l'esempio UFFICIALE della doc Telegram ha
+    #   **34** caratteri dopo i due punti: il gate lo dichiarava pulito ed usciva 0.
+    #   Misurato, non dedotto. ⚠️ L'esempio NON è riportato qui di proposito: con la
+    #   regex curata questo stesso file scatterebbe — e un presidio che si segnala
+    #   da sé insegna a esentarlo, che è il primo passo per spegnerlo.
+    # 🔑 E il criterio giusto non è «quanto è lungo un token»: è **ciò che il PRODOTTO
+    #   ACCETTA**. `deploy.sh:243` valida l'input dell'utente con
+    #   `[0-9]{5,}:[A-Za-z0-9_-]{30,}` — due regole per lo stesso oggetto nello stesso
+    #   repo, divergenti in silenzio: tutto ciò che il prodotto accetta e questa riga
+    #   non copriva passava senza rilievo. Ora sono allineate.
+    # ⭐ La lezione dietro: la riga era **robusta a sinistra e fragile a destra** —
+    #   `\d{8,10}` è un RANGE (chi la scrisse sapeva che il bot_id varia) e `{35}` un
+    #   valore ESATTO. *Su un formato di terze parti una lunghezza esatta è fragile per
+    #   costruzione: basta un carattere e il presidio tace, col nome giusto sopra.*
+    # ⚠️ Il verso dell'errore ora è quello sicuro: al massimo un falso positivo
+    #   (rumore, si vede e si dichiara), mai un segreto che passa.
+    ("token bot Telegram", re.compile(r"\b\d{5,}:[A-Za-z0-9_-]{30,}\b")),
     ("chiave age privata", re.compile(r"AGE-SECRET-KEY-1[A-Z0-9]{50,}")),
     (
         "chiave privata PEM",
