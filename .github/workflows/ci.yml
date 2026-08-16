@@ -474,8 +474,17 @@ jobs:
       # niente. Trovato il 20/07 scrivendo i test del pre-flight — cioè stavo per
       # aggiungerne altri dieci allo stesso posto. Un test che non gira non è una
       # verifica: è un commento con le parentesi.
+      # 🔑 `--with bcrypt` E NON UN `pip install` A PARTE: da qui esce anche
+      #   `test_setup_sh_gira_davvero.py`, che ESEGUE setup.sh — e setup.sh, se non trova
+      #   bcrypt, tenta `python3 -m pip install`. Il python che `uvx` mette in testa al
+      #   PATH non ha pip ⇒ senza questa riga il test si SALTEREBBE per sempre in CI, e
+      #   *un presidio che salta sempre è il buco che quel test esiste per chiudere.*
+      # ⚠️ NON cura il buco del PRODOTTO (setup.sh dipende da pip e docs/INSTALL.md:17
+      #   dichiara solo «python3 3.10+»; su Debian sono due pacchetti). Quello si cura in
+      #   setup.sh, in una PR sua: tenerli separati serve a non far dire alla CI verde che
+      #   l'installer non ha più quel requisito.
       - name: Test CLI vps1777 (stdlib-only)
-        run: uvx pytest tools/tests/ -v
+        run: uvx --with bcrypt pytest tools/tests/ -v
       # `pytest tools/tests/` NON vede i file .sh: la suite qui sopra sarebbe
       # rimasta verde con il test della ritenzione fermo sul disco, che è
       # letteralmente il difetto raccontato nel commento qui sopra, ripetuto

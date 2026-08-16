@@ -65,6 +65,17 @@ def _requisiti_presenti() -> str:
         return "docker compose v2 non disponibile"
     if not shutil.which("python3"):
         return "python3 non installato"
+    # 🔴 IL REQUISITO CHE LA DOC NON DICHIARA, e questo test l'ha trovato al primo giro:
+    #   setup.sh:306 fa `python3 -m pip install --user bcrypt` se bcrypt manca, e su
+    #   Debian/Ubuntu `python3` e `python3-pip` sono DUE pacchetti distinti. Il runner
+    #   della CI usa il python di `uv`, che non ha pip: «Impossibile installare bcrypt».
+    #   docs/INSTALL.md riga 17 chiede solo «python3 3.10+».
+    #   ⚠️ e il verso è pessimo: setup.sh muore DOPO aver scritto .env e 3 secret.
+    #   (curato a parte: il requisito va verificato in testa, non a meta' installazione)
+    if subprocess.run(["python3", "-c", "import bcrypt"], capture_output=True).returncode != 0:
+        if subprocess.run(["python3", "-m", "pip", "--version"],
+                          capture_output=True).returncode != 0:
+            return "bcrypt assente e pip non disponibile per questo python3"
     return ""
 
 
