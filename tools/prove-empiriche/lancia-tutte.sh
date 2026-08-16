@@ -104,8 +104,36 @@ for p in "$QUI"/prova-*.sh; do
   else
     esito="ROSSA"; ko=$((ko+1)); segno="🔴"
   fi
+  # ⚪ IL MOTIVO, non un'ipotesi. Quando una prova non è eseguibile, «$out» contiene
+  #    GIÀ la riga che dice perché — e la buttavamo via, lasciando al lettore la
+  #    diagnosi indovinata del riepilogo: «(di solito docker)». Il 16/08 quella frase
+  #    ha mandato me a cercare un docker che c'era e funzionava: mancava il PRODOTTO
+  #    IN ESECUZIONE («il servizio 'gateway' non è in esecuzione»). Vero nel fatto,
+  #    sbagliato nella causa: non tace, INDIRIZZA — e verso il gesto sbagliato.
+  #    Una prova che non gira deve dire PERCHÉ nella riga stessa in cui lo dichiara.
+  motivo=""
+  if [ "$esito" = "NON-ESEGUITA" ]; then
+    # 🔎 la riga DIAGNOSTICA, non l'ultima: al primo collaudo l'ultima riga di tre
+    #    prove su nove era la coda di un consiglio multi-riga («Per completarla:
+    #    lanciala dove i backup esistono»), cioè un proxy — rispondeva a «qual è
+    #    l'ultima cosa che ha detto» invece che a «perché non ha potuto guardare».
+    #    `<<<` e non `printf|grep`: `-m1` chiude l'input e ucciderebbe il monte
+    #    (SIGPIPE sotto pipefail) — è la cura già portata al gate `contract`.
+    #    Due lessici, in quest'ordine, perché le nove prove non parlano la stessa
+    #    lingua: chi dichiara «non eseguibile» va preso in parola; chi no, dichiara
+    #    comunque un'ASSENZA («non esiste», «nessuno snapshot mai creato»). Provato
+    #    a mano su prova-4: col solo primo lessico vinceva il ripiego e tornava la
+    #    coda del consiglio. Il pattern debole resta stretto apposta: uno che
+    #    matcha qualunque riga non misura, afferma.
+    motivo="$(grep -m1 -iE "non eseguibile|non misurato|non visto|prerequisito" <<<"$out" | sed 's/^[[:space:]]*//' | cut -c1-160)"
+    [ -z "$motivo" ] && motivo="$(grep -m1 -iE "non è in esecuzione|non trovat|non esiste|nessun|manca|assenza di dato" <<<"$out" | sed 's/^[[:space:]]*//' | cut -c1-160)"
+    [ -z "$motivo" ] && motivo="$(grep -v '^[[:space:]]*$' <<<"$out" | tail -1 | sed 's/^[[:space:]]*//' | cut -c1-160)"
+    [ -z "$motivo" ] && motivo="nessun output, rc=$rc — la prova non ha detto perché"
+  fi
   printf '  %s %-52s %s (%ss)\n' "$segno" "$nome" "$esito" "$dt"
-  righe+=("$(printf '{"prova":"%s","esito":"%s","rc":%d,"secondi":%d}' "$nome" "$esito" "$rc" "$dt")")
+  [ -n "$motivo" ] && printf '       ↳ %s\n' "$motivo"
+  mj="${motivo//\\/\\\\}"; mj="${mj//\"/\\\"}"
+  righe+=("$(printf '{"prova":"%s","esito":"%s","rc":%d,"secondi":%d,"motivo":"%s"}' "$nome" "$esito" "$rc" "$dt" "$mj")")
 done
 
 # ── Il record, con DOVE oltre che QUANDO ──────────────────────────────────────
@@ -158,7 +186,7 @@ fi
 
 printf '\n  %d verdi · %d rosse · %d non eseguite   →  %s\n' "$ok" "$ko" "$salt" "${FUORI#"$REPO"/}"
 [ -n "$FASE" ] && printf '  📸 fase «%s»: questa foto NON sovrascrive le altre fasi.\n' "$FASE"
-[ $salt -gt 0 ] && printf '  ⚪ le NON ESEGUITE non sono passate: mancava un prerequisito (di solito docker).\n     Sono contate a parte apposta — un verde che include ciò che non hai guardato\n     è esattamente il difetto che queste prove esistono per non commettere.\n'
+[ $salt -gt 0 ] && printf '  ⚪ le NON ESEGUITE non sono passate: mancava un prerequisito, e QUALE lo dice la\n     riga «↳» sotto ciascuna (nel referto: campo "motivo"). Non è più indovinato.\n     Sono contate a parte apposta — un verde che include ciò che non hai guardato\n     è esattamente il difetto che queste prove esistono per non commettere.\n'
 # ─── il verdetto ──────────────────────────────────────────────────────────────
 # 🔴 DIFETTO CURATO IL 02/08 (abdd732a, da un rilievo di un agente, verificato sul
 #   vivo: lanciato su un PC senza docker stampava «0 verdi · 0 rosse · 9 non
