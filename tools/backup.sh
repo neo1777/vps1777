@@ -267,8 +267,35 @@ chmod 600 "$PARZIALE"
 sync "$PARZIALE" 2>/dev/null || true
 mv -f "$PARZIALE" "$OUT"
 INCOMPLETO=""
+
+# ───── 4-bis. il sidecar: la VERSIONE, in chiaro, accanto all'archivio ─────
+# 🔴 PERCHÉ (voce f9818614, metà «b»; scelta di @Neo il 16/08: «b mi sembra ok»).
+#   La ritenzione qui è tarata sul TEMPO (7 giorni + 4 weekly) e il volume dipende
+#   dal RITMO DI RILASCIO, che non è parametro di nessuno. Gli snapshot pre-update
+#   hanno preso l'asse VERSIONI (#169) perché il loro nome LA PORTA:
+#   `backups/pre-update/{versione}-{ts}`. Qui il nome è solo `vps1777-{ts}.tar.age`,
+#   e la versione esiste — in MANIFEST.txt, riga 208 — ma **dentro il tar cifrato**:
+#   leggerla in fase di potatura vorrebbe dire decifrare ~2,58 GB per file a ogni
+#   giro. Non è una cura, è un costo.
+# ⇒ Il sidecar la mette **fuori**, in chiaro, senza toccare il formato cifrato né
+#   il percorso di ripristino (`restore.sh` usa il glob `vps1777-*.tar.age` e
+#   accetta un path: un file `.meta` accanto non lo vede nemmeno).
+# 🛡️ COSA CI VA E COSA NO: solo la versione e il timestamp. **Niente che non sia
+#   già pubblico**: il tag di una release è su GitHub. Il MANIFEST completo resta
+#   dentro il cifrato — host, git sha e versione docker NON escono di lì.
+# ⚠️ E il sidecar NON è una garanzia di esistenza del backup: è un file accanto, e
+#   un accanto si può perdere da solo. Chi legge la retention deve trattare
+#   «manca il .meta» come «versione ignota» e ricadere sulla regola a tempo —
+#   mai come «backup da potare». Vedi la guardia nella sezione 5.
+VERSIONE_TAG="$(grep '^VPS1777_TAG=' .env 2>/dev/null | cut -d= -f2 | head -1 || true)"
+{
+  echo "version: ${VERSIONE_TAG:-sconosciuta}"
+  echo "timestamp: $TIMESTAMP"
+} > "$OUT.meta"
+chmod 644 "$OUT.meta"
+
 SIZE=$(du -h "$OUT" | cut -f1)
-ok "Backup completato: $OUT ($SIZE)"
+ok "Backup completato: $OUT ($SIZE) · versione ${VERSIONE_TAG:-sconosciuta} in $(basename "$OUT").meta"
 
 else
   log "--prune-only: nessun backup nuovo, applico solo la ritenzione"
@@ -381,13 +408,73 @@ declare -A keep
 for f in "${daily[@]}"; do keep[$f]=1; done
 for f in "${weekly_keep[@]}"; do keep[$f]=1; done
 
+# ───── 5-bis. …e l'ultimo backup di ciascuna delle ultime N VERSIONI ─────
+# 🔴 La metà «b» della voce f9818614 (l'altra è snapshot_prune, #169). I due livelli
+#   qui sopra misurano il TEMPO: 7 giorni + 4 settimane. Ma quante VERSIONI indietro
+#   si può tornare non lo dice nessuno dei due, e *un margine dichiarato in tempo
+#   viene consumato da un ritmo che nessuno misura* — è la tesi della voce, misurata
+#   in produzione il 27/07 (8 release in 10 ore).
+# 🛡️ STESSO VINCOLO DELLA #169, e qui pesa di più perché questi file sono l'unica
+#   copia cifrata: **questo blocco può solo AGGIUNGERE a `keep`, mai togliere.**
+#   Se sbaglia a leggere una versione, quel backup ricade sulla regola a tempo di
+#   prima — il comportamento precedente, non uno peggiore. Il costo di un errore
+#   qui è spazio su disco, non un backup perduto.
+# ⚠️ Un `.meta` mancante è «versione IGNOTA», non «da potare»: i backup scritti
+#   prima di questa modifica non ce l'hanno, ed è il caso normale per settimane.
+KEEP_VERSIONI="${KEEP_VERSIONI:-3}"
+declare -A ultimo_per_versione
+# ⚠️ `n_versioni` NON è ridondante con `${#ultimo_per_versione[@]}`: sotto `set -u`
+#   un array associativo DICHIARATO MA VUOTO è «variabile non assegnata», non un
+#   array di zero elementi — verificato isolato su bash 5.2.21. Senza questo
+#   contatore lo script esce 1 su OGNI giro in cui nessun backup ha il sidecar,
+#   che è il caso normale finché i vecchi non ruotano. Preso dal banco esistente
+#   (`test-backup-retention.sh`): 11 su 11 rossi, e il controllo su origin/main
+#   era 11 su 11 verdi — il delta diceva che ero io, non il banco.
+n_versioni=0
+for f in "${all[@]}"; do
+  [ -r "$f.meta" ] || continue                       # niente sidecar → versione ignota
+  v=$(sed -n 's/^version: *//p' "$f.meta" | head -1 | tr -d '[:space:]')
+  v="${v#v}"                                          # il tag è «v0.41.2», la versione «0.41.2»
+  case "$v" in ''|sconosciuta) continue;; esac
+  # `all` è già ordinato per nome DECRESCENTE (sort -r) e il nome inizia col
+  # timestamp: il PRIMO che incontro per una versione è il suo più recente.
+  if [ -z "${ultimo_per_versione[$v]:-}" ]; then
+    ultimo_per_versione[$v]="$f"
+    n_versioni=$((n_versioni + 1))
+  fi
+done
+if [ "$n_versioni" -gt 0 ]; then
+  # per ORDINE DI VERSIONE, non alfabetico: «0.10.0» < «0.9.0» come stringhe, e
+  # l'ordinamento lessicografico proteggerebbe la versione sbagliata. Stessa
+  # trappola dichiarata in vps1777.py:snapshot_versioni_da_tenere.
+  mapfile -t ultime < <(printf '%s\n' "${!ultimo_per_versione[@]}" | sort -t. -k1,1n -k2,2n -k3,3n | tail -n "$KEEP_VERSIONI")
+  for v in "${ultime[@]}"; do
+    f="${ultimo_per_versione[$v]}"
+    [ -n "${keep[$f]:-}" ] || log "  ↳ tengo $f: ultimo della versione $v (regola per VERSIONI)"
+    keep[$f]=1
+  done
+fi
+
 # Cancella il resto
 removed=0
 for f in "${all[@]}"; do
   if [ -z "${keep[$f]:-}" ]; then
     rm -f "$f"
+    # il sidecar segue l'archivio: un `.meta` senza il suo `.tar.age` è un
+    # puntatore a una cosa che non c'è — la stessa classe del `.parziale` qui sopra.
+    rm -f "$f.meta"
     removed=$((removed + 1))
   fi
+done
+
+# I `.meta` rimasti orfani per altre vie (backup cancellato a mano, disco pieno a
+# metà giro): si dicono e si tolgono. Un orfano non fa danno, ma fa CONTARE una
+# versione che non è più ripristinabile — e la regola qui sopra la userebbe.
+for m in *.tar.age.meta; do
+  [ -e "$m" ] || continue
+  [ -e "${m%.meta}" ] && continue
+  warn "sidecar orfano (l'archivio non c'è più), lo rimuovo: $m"
+  rm -f "$m"
 done
 
 if [ "$removed" -gt 0 ]; then

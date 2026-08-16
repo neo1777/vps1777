@@ -202,5 +202,71 @@ verifica "⑪ il resto interrotto viene rimosso, i backup veri no" \
   "$(n 2026-07-26-030000) $(n 2026-07-27-030000)" \
   "$(n 2026-07-25-030000).parziale" "$(n 2026-07-26-030000)" "$(n 2026-07-27-030000)"
 
+# ─────────── la ritenzione per VERSIONI (voce f9818614, metà «b») ───────────
+# Come `verifica`, ma gli argomenti sono coppie `nomefile|versione`: crea anche
+# il sidecar `.meta`. Serve una funzione a parte perché `verifica` scrive file
+# VUOTI, e un `.meta` vuoto è indistinguibile da «versione ignota» — cioè
+# proverebbe il ramo sbagliato senza dirlo.
+verifica_versioni() {
+  local nome="$1"; shift
+  local attesi="$1"; shift
+  local dir; dir="$(mktemp -d)"
+  local coppia file ver
+  for coppia in "$@"; do
+    file="${coppia%%|*}"; ver="${coppia#*|}"
+    : > "$dir/$file"
+    [ "$ver" = "-" ] || printf 'version: %s\ntimestamp: x\n' "$ver" > "$dir/$file.meta"
+  done
+  local out rc
+  out="$(BACKUP_DIR="$dir" bash "$BACKUP_SH" --prune-only 2>&1)"; rc=$?
+  local sopravvissuti="" g
+  for g in "$dir"/*; do
+    [ -e "$g" ] || continue
+    case "$g" in *.meta) continue;; esac      # i sidecar li conto a parte
+    sopravvissuti="$sopravvissuti ${g##*/}"
+  done
+  sopravvissuti="${sopravvissuti# }"
+  rm -rf "$dir"
+  if [ "$rc" -ne 0 ]; then
+    printf '  ✗ %s — lo script è uscito con %d\n%s\n' "$nome" "$rc" "$out"
+    falliti=$((falliti + 1)); return
+  fi
+  if [ "$sopravvissuti" != "$attesi" ]; then
+    printf '  ✗ %s\n      atteso: %s\n     ottenuto: %s\n' "$nome" "$attesi" "$sopravvissuti"
+    falliti=$((falliti + 1)); return
+  fi
+  printf '  ✓ %s\n' "$nome"; passati=$((passati + 1))
+}
+
+# ⑫ RISPOSTA NOTA: tutti stale e nello STESSO giorno (il daily ne tiene 1), ma
+#    tre versioni diverse ⇒ la regola per versioni ne salva 3, non 1.
+#    Senza sidecar questo caso perderebbe 0.40.1 e 0.40.2: è la metà «b».
+verifica_versioni "⑫ tre versioni nello stesso giorno: la regola per VERSIONI le tiene tutte e tre" \
+  "$(n 2026-07-27-010000) $(n 2026-07-27-020000) $(n 2026-07-27-030000)" \
+  "$(n 2026-07-27-010000)|0.40.1" "$(n 2026-07-27-020000)|0.40.2" "$(n 2026-07-27-030000)|0.40.3"
+
+# ⑬ IL VERSO OPPOSTO, e senza questo il ⑫ non prova niente: la protezione deve
+#    ancora POTARE. Quattro versioni, KEEP_VERSIONI=3 ⇒ la più VECCHIA cade.
+#    *Il gruppo di controllo di una protezione è ciò che resta cancellabile.*
+verifica_versioni "⑬ oltre le ultime N versioni si pota ancora (la più vecchia cade)" \
+  "$(n 2026-07-27-020000) $(n 2026-07-27-030000) $(n 2026-07-27-040000)" \
+  "$(n 2026-07-27-010000)|0.40.1" "$(n 2026-07-27-020000)|0.40.2" \
+  "$(n 2026-07-27-030000)|0.40.3" "$(n 2026-07-27-040000)|0.40.4"
+
+# ⑭ RISPOSTA NOTA: l'ordinamento è per VERSIONE, non alfabetico. «0.10.0» viene
+#    DOPO «0.9.0», e come stringhe è il contrario: senza il sort numerico questo
+#    caso tiene le tre sbagliate. È la trappola già dichiarata in vps1777.py.
+verifica_versioni "⑭ 0.10.0 è più recente di 0.9.0 (ordine per versione, non alfabetico)" \
+  "$(n 2026-07-27-020000) $(n 2026-07-27-030000) $(n 2026-07-27-040000)" \
+  "$(n 2026-07-27-010000)|0.8.0" "$(n 2026-07-27-020000)|0.9.0" \
+  "$(n 2026-07-27-030000)|0.10.0" "$(n 2026-07-27-040000)|0.11.0"
+
+# ⑮ RISPOSTA NOTA: un backup SENZA sidecar non è «da potare», è «versione
+#    ignota» e ricade sulla regola a tempo — cioè il comportamento di prima.
+#    È il caso NORMALE per settimane dopo il rilascio di questa modifica.
+verifica_versioni "⑮ senza sidecar vale la regola a tempo di prima (nessuna regressione)" \
+  "$(n 2026-07-26-030000) $(n 2026-07-27-030000)" \
+  "$(n 2026-07-26-030000)|-" "$(n 2026-07-27-030000)|-"
+
 printf '\n%d passati, %d falliti\n' "$passati" "$falliti"
 [ "$falliti" -eq 0 ]
