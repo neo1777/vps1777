@@ -22,7 +22,8 @@ il resto»** — e «tutto il resto» è la maggioranza dei casi reali:
 |---|---|
 | snapshot del provider | ✅ |
 | disco dismesso, riassegnato, rivenduto | ✅ |
-| backup che escono di casa | ✅ *(già oggi: cifrati con `age`)* |
+| backup **di `vps1777`** che escono di casa | ✅ *(già oggi: `tools/backup.sh` cifra con `age`)* |
+| backup **del canale `_chat`** sul disco esterno | 🔴 **NO — 14 file su 14 in chiaro**, misurati il 16/08 22:4x |
 | accesso al pannello del provider senza console | ✅ |
 | VM spenta e disco copiato | ✅ |
 | **provider ostile con VM accesa** | ❌ **no, e non c'è difesa tecnica** |
@@ -50,15 +51,41 @@ MISURATO ✅
   AES-256-GCM sul file intero              291 ms cifra · 330 ms decifra  (~190 MB/s)
   AES-256-GCM su UNA pagina da 4 KB        31,6 µs      (130 MB/s)
 
-STIMATO ⚠️ — NON misurato, e serve per decidere
-  quante pagine tocca una query FTS5 reale
-     10 pagine →  0,50 ms  (3x)
-     50 pagine →  1,76 ms  (10x)
-    200 pagine →  6,50 ms  (36x)
+STIMATO ⚠️ — poi MISURATO, vedi sotto: la stima era alta e guardava la cosa sbagliata
+  quante pagine tocca una query FTS5 reale → 3x / 10x / 36x
 ```
 
-⚠️ **Il numero che manca si ottiene installando SQLCipher e misurando.** Finché non c'è,
-qualunque affermazione sul costo per query è una stima — e va scritta come tale.
+### 🔬 SQLCipher misurato davvero (16/08 22:4x) — e la stima sopra era sbagliata due volte
+
+SQLCipher 4.5.6 installato, DB convertito con `sqlcipher_export`, **stesso motore
+(`sqlcipher3`) per entrambi i lati** così l'unica variabile è la cifratura. Stesse 200
+query, stessi 4.000 hit su entrambi:
+
+```
+  COSTO PER QUERY — stimato 3x-36x, misurato **1,75x**
+    cache 2 MB     chiaro 0,204 ms  ·  cifrato 0,350 ms     1,72x
+    cache 200 MB   chiaro 0,169 ms  ·  cifrato 0,303 ms     1,80x
+    ⇒ 0,15 ms in più per ricerca: impercettibile.
+
+  🔴 COSTO PER CONNESSIONE — non l'avevo considerato, ed è quello che decide
+    apertura       chiaro    56 ms  ·  cifrato   **367 ms**
+    perché: PBKDF2-HMAC-SHA512, **256.000 iterazioni**. È lento apposta (contro il
+    brute-force sulla passphrase) e non va abbassato: è la difesa, non un difetto.
+```
+
+⚠️ **`archive-mcp` apre una connessione PER OGNI RICHIESTA** (`db.py:161`, dentro
+`search()`; sono 10 i punti che chiamano `_open()`). Con SQLCipher così com'è, una ricerca
+passerebbe da 0,2 ms a **310 ms**: non 1,75x, **millecinquecento volte**.
+
+🔑 **Il prerequisito è architetturale, non crittografico: la connessione va tenuta
+aperta** (una cache per-DB in `_open()`, che oggi non esiste perché non serviva). Con una
+connessione persistente si paga 310 ms **una volta all'avvio** e poi 0,35 ms a ricerca.
+⇒ **Cifrare senza toccare questo trasformerebbe un costo trascurabile in uno insostenibile
+— e sembrerebbe «colpa della cifratura».**
+
+📌 *Anche la previsione «con una cache generosa paga poco sui cache-miss» è smentita dal
+banco: 1,72x con 2 MB e 1,80x con 200 MB. La page-cache non c'entra — il costo per pagina
+si paga comunque.*
 
 ## Le tre strade, e perché ne resta una
 
