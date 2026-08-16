@@ -338,8 +338,29 @@ jobs:
               # autoreview, non in produzione). Una versione non ci finisce per caso.
               while IFS= read -r riga; do
                 pkg="${riga%%==*}"; ver="${riga##*==}"
-                if printf '%s' "$RATIFICA" | grep -qF -- "$ver" \
-                   && printf '%s' "$RATIFICA" | grep -qiF -- "$pkg"; then
+                # 🔴 16/08 — LA #174 È STATA BOCCIATA MENTRE DICHIARAVA IL SALTO, e la
+                #    riga qui sotto è l'unica cosa che nel log risulti rotta:
+                #      «line 66: printf: write error: Broken pipe»   (66 = questa riga)
+                #    MISURATO nel job 95135773669: `PR_CORPO` arriva intero (65.681 byte)
+                #    e contiene «0.52.2» ×23 e «uvicorn» ×88 ⇒ i due grep TROVANO. Eppure
+                #    si va in `else`. Con `grep -q`, che esce al PRIMO match, `printf`
+                #    resta con dell'output da scrivere e prende EPIPE — e `pipefail`
+                #    (r.276) fa fallire l'INTERA pipeline benché il match sia RIUSCITO.
+                # ⚠️ ONESTÀ SUL PERIMETRO: quella catena NON è riprodotta in locale —
+                #    provata a 60k/64k/65536/65681/100k/500k/1M/4M, sempre verde,
+                #    PIPESTATUS (0 0), su bash 5.2.21 + grep 3.11 (due banchi
+                #    indipendenti). Quindi: il broken pipe in CI è un FATTO, la catena
+                #    causale è un'IPOTESI. Non la spaccio per misura.
+                # ✅ La here-string è la cura giusta in ENTRAMBI i casi: toglie l'unica
+                #    anomalia osservata, e se la causa fosse un'altra non fa danno —
+                #    stesso identico predicato, un processo in meno, nessuna pipeline
+                #    che `pipefail` possa far fallire per un motivo che non è il match.
+                # 🔎 E IL CAMBIO È DA SÉ IL TEST DIAGNOSTICO: se dopo questo la #174
+                #    passa, era la pipe; se boccia ancora, la causa è altrove e lo
+                #    sappiamo al primo run invece che dopo un'altra indagine.
+                # ⚠️ `-qiF` sul pacchetto resta VOLUTO (case-insensitive): non toccarlo.
+                if grep -qF -- "$ver" <<<"$RATIFICA" \
+                   && grep -qiF -- "$pkg" <<<"$RATIFICA"; then
                   echo "  ✓ «$pkg» → $ver: nominato con la versione, salto dichiarato"
                 else
                   echo "::error::«$pkg» attraversa un confine di regime (verso $ver) e la PR non lo dichiara. Scrivi nome E versione nel titolo o nel corpo — il nome del servizio non conta: un salto che nessuno nomina è un salto che nessuno ha guardato."
