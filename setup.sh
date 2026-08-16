@@ -24,8 +24,31 @@ log()  { printf '%s[*]%s %s\n' "$C_I"  "$C_R" "$*"; }
 ok()   { printf '%s[✓]%s %s\n' "$C_OK" "$C_R" "$*"; }
 warn() { printf '%s[!]%s %s\n' "$C_W"  "$C_R" "$*"; }
 die()  { printf '%s[✗]%s %s\n' "$C_E"  "$C_R" "$*" >&2; exit 1; }
+# ─── CONTRATTO NON-INTERATTIVO (abdd732a, 16/08) ──────────────────────────────
+# 🔴 PERCHÉ: `setup.sh` non è mai stato ESEGUITO da nessun test. Sette test lo
+#   nominano e tutti e sette lo LEGGONO come sorgente (`_SORGENTI = (...)`); la CI
+#   lo cita solo nei commenti. Non era «non testato»: era **non testabile senza una
+#   persona che digita**, perché le risposte arrivano da `read` e il file non aveva
+#   nessuna gestione di argomenti.
+# ⭐ LA FORMA SCELTA, e non è un dettaglio: **una convenzione, non un elenco.**
+#   `ask` riceve già il NOME della variabile da riempire ⇒ `SETUP_<VAR>` copre tutte
+#   e sette le domande di oggi *e quelle che verranno*, senza che nessuno debba
+#   ricordarsi di aggiungerle a una lista. Un elenco di nomi qui dentro sarebbe la
+#   stessa classe che abbiamo smontato in quattro strumenti: chi non è in lista non
+#   dà errore, dà SILENZIO.
+# 🛡️ NON cambia niente per chi lancia a mano: senza le variabili, chiede come prima.
+#   E quando una la usa **lo DICE** (`← da SETUP_…`): un valore che entra in silenzio
+#   in un'installazione è peggio di una domanda in più.
+# 📌 Criterio di riuscita di questa cura — dichiarato perché sia falsificabile:
+#   non «i test passano» ma **«un test ESEGUE setup.sh»**. Oggi: 0 su 7.
 ask()  {
   local var="$1" question="$2" default="${3:-}" response
+  local _env="SETUP_$var"
+  if [ -n "${!_env:-}" ]; then
+    printf -v "$var" '%s' "${!_env}"
+    printf '%s%s%s: %s  %s← da %s%s\n' "$C_B" "$question" "$C_R" "${!_env}" "$C_I" "$_env" "$C_R" >&2
+    return 0
+  fi
   if [ -n "$default" ]; then
     printf '%s%s%s [%s]: ' "$C_B" "$question" "$C_R" "$default" >&2
   else
@@ -35,8 +58,22 @@ ask()  {
   [ -z "$response" ] && response="$default"
   printf -v "$var" '%s' "$response"
 }
+# ⚠️ LIMITE DICHIARATO di `confirm`, e lo scrivo perché non passi per una svista:
+#   qui NON c'è un nome di variabile da cui derivare la convenzione — c'è solo il
+#   testo della domanda. Quindi `SETUP_YES` risponde **a tutte** le conferme, e non
+#   permette di rispondere sì all'una e no all'altra (oggi sono due: «genero io la
+#   password?» e «procedo ora?»). *È una copertura grossolana e la dichiaro tale:
+#   serve a far girare setup.sh senza una persona, non a pilotarlo finemente.*
+#   Il giorno che servisse distinguerle, il gesto giusto è dare un NOME alle
+#   conferme (come l'ha `ask`), non aggiungere una seconda variabile qui.
 confirm() {
   local prompt="$1" response
+  if [ -n "${SETUP_YES:-}" ]; then
+    case "$SETUP_YES" in
+      s|S|si|SI|y|Y|yes|YES|1) printf '%s%s%s [s/N]: s  %s← da SETUP_YES%s\n' "$C_B" "$prompt" "$C_R" "$C_I" "$C_R" >&2; return 0 ;;
+      *)                       printf '%s%s%s [s/N]: n  %s← da SETUP_YES%s\n' "$C_B" "$prompt" "$C_R" "$C_I" "$C_R" >&2; return 1 ;;
+    esac
+  fi
   printf '%s%s%s [s/N]: ' "$C_B" "$prompt" "$C_R" >&2
   IFS= read -r response || true
   case "$response" in s|S|si|SI|y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
@@ -239,6 +276,21 @@ if [ ! -s secrets/admin_password_bcrypt.txt ]; then
     log "  → SALVALA SUBITO in un password manager. Non te la riproporrò."
   else
     # H16 — policy UNICA: min 16, ≥3 classi, niente pattern comuni.
+    # 🔑 NON-INTERATTIVO (abdd732a, 16/08): `SETUP_ADMIN_PWD` entra QUI DENTRO, cioè
+    #   **dentro il ciclo di validazione** — non lo salta. Una password passata da
+    #   variabile è comunque sottoposta a `pw_weak_reason`, e se è debole il comando
+    #   FALLISCE invece di chiedere all'infinito a un terminale che non c'è.
+    #   *Un contratto non-interattivo che aggira il controllo di robustezza sarebbe
+    #   una porta di servizio sulla policy H16: la comodità non deve comprare una
+    #   password più debole di quella che pretendiamo da chi digita.*
+    if [ -n "${SETUP_ADMIN_PWD:-}" ]; then
+      ADMIN_PWD="$SETUP_ADMIN_PWD"
+      if reason="$(pw_weak_reason "$ADMIN_PWD")"; then
+        log "Password admin presa da ${C_I}SETUP_ADMIN_PWD${C_R}"
+      else
+        die "SETUP_ADMIN_PWD non rispetta la policy: $reason (min 16, ≥3 classi)"
+      fi
+    else
     while :; do
       printf '%sPassword admin (min 16, ≥3 classi: minusc/MAIUSC/cifre/simboli):%s ' "$C_B" "$C_R"
       read -rs ADMIN_PWD
@@ -246,6 +298,7 @@ if [ ! -s secrets/admin_password_bcrypt.txt ]; then
       if reason="$(pw_weak_reason "$ADMIN_PWD")"; then break; fi
       warn "Password debole: $reason. Riprova."
     done
+    fi
   fi
   log "Calcolo bcrypt..."
   # Usa python3 di sistema con bcrypt (installato al volo se manca)
