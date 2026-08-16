@@ -127,6 +127,14 @@ jobs:
       # perché dopo non si disfa: resta nella storia, nei diff e in ogni clone.
       - name: Gate anti-leak — online solo ciò che online si può
         run: python3 security/check_no_leaks.py
+      # I doc nominano file: dopo una rinomina restano lì e mandano il lettore a
+      # cercare qualcosa che non c'è. Un documento non si esegue, quindi nessun
+      # altro check lo prende. L'autoprova gira PRIMA: un controllo che non sa
+      # dire di sì non misura, afferma — e passerebbe verde anche da rotto.
+      - name: I doc nominano file che esistono
+        run: |
+          python3 tools/doc-riferimenti.py --autoprova
+          python3 tools/doc-riferimenti.py
       # Entrambe le combinazioni devono restare valide: produzione (solo
       # immagini ghcr) e sviluppo (overlay di build locale).
       - name: Validate compose (production — pull only)
