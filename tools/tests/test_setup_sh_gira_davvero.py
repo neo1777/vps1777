@@ -43,12 +43,14 @@ Stile stdlib-only: la CI esegue `tools/tests/` con `uvx pytest` senza dipendenze
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
 import tempfile
-import unittest
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 # passa la policy H16 (min 16, >=3 classi, niente pattern comuni) senza essere un segreto:
@@ -79,77 +81,70 @@ def _requisiti_presenti() -> str:
     return ""
 
 
-class SetupShGiraDavvero(unittest.TestCase):
-    def setUp(self) -> None:
-        motivo = _requisiti_presenti()
-        if motivo:
-            self.skipTest(f"{motivo} — questo test misura setup.sh, non la macchina")
-        self.tmp = tempfile.mkdtemp(prefix="setup-sh-prova-")
-        # copia usa-e-getta: setup.sh scrive `.env` e `secrets/*` nella CWD, e non deve
-        # toccare il repo di chi lancia i test.
-        self.copia = Path(self.tmp) / "vps1777"
-        subprocess.run(
-            ["git", "-C", str(REPO), "worktree", "add", "--detach", str(self.copia), "HEAD"],
-            capture_output=True, check=True,
-        )
+@contextlib.contextmanager
+def _copia_usa_e_getta():
+    """Un worktree temporaneo: setup.sh scrive `.env` e `secrets/*` nella CWD.
 
-    def tearDown(self) -> None:
-        subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(self.copia)],
+    Non deve toccare il repo di chi lancia i test — ne' lasciare residui se fallisce.
+    """
+    motivo = _requisiti_presenti()
+    if motivo:
+        pytest.skip(f"{motivo} — questo test misura setup.sh, non la macchina")
+    tmp = tempfile.mkdtemp(prefix="setup-sh-prova-")
+    copia = Path(tmp) / "vps1777"
+    subprocess.run(["git", "-C", str(REPO), "worktree", "add", "--detach", str(copia), "HEAD"],
+                   capture_output=True, check=True)
+    try:
+        yield copia
+    finally:
+        subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(copia)],
                        capture_output=True)
-        shutil.rmtree(self.tmp, ignore_errors=True)
+        shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_gira_e_produce_i_file_senza_avviare_niente(self) -> None:
-        env = {
-            **os.environ,
-            "SETUP_ADMIN_EMAIL": "prova@example.com",
-            "SETUP_TG_OWNER_ID": "123456789",
-            "SETUP_INGRESS_NUM": "1",
-            "SETUP_ADMIN_PWD": PWD_DI_PROVA,
-            "SETUP_YES": "n",
-        }
-        res = subprocess.run(["bash", "setup.sh"], cwd=self.copia, env=env,
+
+def _ambiente(pwd: str) -> dict:
+    return {**os.environ, "SETUP_ADMIN_EMAIL": "prova@example.com",
+            "SETUP_TG_OWNER_ID": "123456789", "SETUP_INGRESS_NUM": "1",
+            "SETUP_ADMIN_PWD": pwd, "SETUP_YES": "n"}
+
+
+def test_gira_e_produce_i_file_senza_avviare_niente() -> None:
+    with _copia_usa_e_getta() as copia:
+        res = subprocess.run(["bash", "setup.sh"], cwd=copia, env=_ambiente(PWD_DI_PROVA),
                              capture_output=True, text=True, timeout=600)
-        coda = (res.stdout + res.stderr)[-2500:]
-        self.assertEqual(res.returncode, 0, f"setup.sh e' uscito {res.returncode}:\n{coda}")
+        coda_out = (res.stdout + res.stderr)[-2500:]
+        assert res.returncode == 0, f"setup.sh e' uscito {res.returncode}:\n{coda_out}"
 
-        # ① ha prodotto cio' che serve a una macchina nuova
-        env_file = self.copia / ".env"
-        self.assertTrue(env_file.is_file(), f"nessun .env prodotto:\n{coda}")
+        env_file = copia / ".env"
+        assert env_file.is_file(), f"nessun .env prodotto:\n{coda_out}"
         testo = env_file.read_text(encoding="utf-8")
-        self.assertIn("prova@example.com", testo, "l'email passata non e' finita nel .env")
-        self.assertIn("123456789", testo, "il TELEGRAM_OWNER_ID passato non e' finito nel .env")
+        assert "prova@example.com" in testo, "l'email passata non e' finita nel .env"
+        assert "123456789" in testo, "il TELEGRAM_OWNER_ID passato non e' finito nel .env"
 
         attesi = ["gateway_secret.txt", "oauth_signing_secret.txt", "admin_password_bcrypt.txt"]
-        mancanti = [n for n in attesi if not (self.copia / "secrets" / n).is_file()]
-        self.assertFalse(mancanti, f"secret non generati: {mancanti}\n{coda}")
+        mancanti = [n for n in attesi if not (copia / "secrets" / n).is_file()]
+        assert not mancanti, f"secret non generati: {mancanti}\n{coda_out}"
 
-        # ② e NON ha avviato niente: la conferma finale ha risposto «no»
-        #    (si guarda l'OUTPUT del comando, non `docker ps`: un container di un'altra
-        #     prova sulla stessa macchina renderebbe il controllo un falso allarme)
-        self.assertNotIn("Creating", coda)
-        self.assertNotIn("Container vps1777", coda)
+        # e NON ha avviato niente: la conferma finale ha risposto «no».
+        # Si guarda l'OUTPUT del comando, non `docker ps`: un container di un'altra prova
+        # sulla stessa macchina renderebbe il controllo un falso allarme.
+        assert "Creating" not in coda_out
+        assert "Container vps1777" not in coda_out
 
-    def test_una_password_debole_da_variabile_viene_RIFIUTATA(self) -> None:
-        """L'autoprova di questo test: la porta non-interattiva non aggira la policy H16.
 
-        Se questo passasse in silenzio, il contratto sarebbe una porta di servizio sulla
-        robustezza — e il test sopra darebbe verde comunque. *Un presidio che non sa
-        rifiutare non prova niente.*
-        """
-        env = {
-            **os.environ,
-            "SETUP_ADMIN_EMAIL": "prova@example.com",
-            "SETUP_TG_OWNER_ID": "123456789",
-            "SETUP_INGRESS_NUM": "1",
-            "SETUP_ADMIN_PWD": "password",          # debole di proposito
-            "SETUP_YES": "n",
-        }
-        res = subprocess.run(["bash", "setup.sh"], cwd=self.copia, env=env,
+def test_una_password_debole_da_variabile_viene_RIFIUTATA() -> None:
+    """L'autoprova di questo test: la porta non-interattiva non aggira la policy H16.
+
+    Se questo passasse in silenzio, il contratto sarebbe una porta di servizio sulla
+    robustezza — e il test sopra darebbe verde comunque. *Un presidio che non sa
+    rifiutare non prova niente.*
+    """
+    with _copia_usa_e_getta() as copia:
+        res = subprocess.run(["bash", "setup.sh"], cwd=copia, env=_ambiente("password"),
                              capture_output=True, text=True, timeout=600)
-        self.assertNotEqual(res.returncode, 0,
-                            "una password debole passata da variabile e' stata ACCETTATA: "
-                            "il contratto non-interattivo sta aggirando la policy H16")
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert res.returncode != 0, (
+            "una password debole passata da variabile e' stata ACCETTATA: "
+            "il contratto non-interattivo sta aggirando la policy H16")
+        assert "policy" in (res.stdout + res.stderr), (
+            "e' fallito, ma non per la policy: verificare che fallisca per la RAGIONE "
+            "che questo test dichiara, non per una qualsiasi")
