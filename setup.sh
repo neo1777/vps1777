@@ -158,9 +158,19 @@ _bcrypt_procurabile() {
   return 1
 }
 if ! _bcrypt_procurabile; then
-  die "bcrypt non e' installato e questo python3 non ha pip per procurarlo.
-     Su Debian/Ubuntu:  sudo apt install python3-pip     (oppure: sudo apt install python3-bcrypt)
-     Su Fedora:         sudo dnf install python3-pip
+  # 🔑 IL MESSAGGIO NON NOMINA PIU' LA CAUSA, PERCHE' NE HA DUE E SONO OPPOSTE:
+  #   «pip manca» (Debian minimale) e «pip c'e' ma non puo' installare» (PEP 668).
+  #   La prima versione diceva «non ha pip»: FALSO proprio nel caso piu' probabile, e
+  #   mandava chi legge a installare una cosa che ha gia'. *Un messaggio d'errore che
+  #   nomina la causa sbagliata costa piu' di uno che non la nomina: il primo manda a
+  #   lavorare nella direzione opposta, il secondo lascia guardare l'uscita di pip —
+  #   che sta qui sopra, ed e' l'unica cosa che distingue i due casi.*
+  die "bcrypt non c'e' e non sono riuscito a procurarlo con pip.
+     Debian 12+ / Ubuntu 23.04+ (PEP 668 — il caso PIU' PROBABILE su una VPS):
+                        sudo apt install python3-bcrypt    ← risolve SEMPRE
+     Se manca solo pip: sudo apt install python3-pip       (NON basta su PEP 668:
+                        li' pip c'e' gia', ed e' l'INSTALLAZIONE a essere vietata)
+     Fedora:            sudo dnf install python3-bcrypt
      Serve per calcolare l'hash della password admin; senza, l'installazione si
      fermerebbe piu' avanti, dopo aver gia' scritto .env e i primi secret."
 fi
