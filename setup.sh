@@ -112,6 +112,68 @@ log "Verifico Docker + Compose..."
 command -v docker >/dev/null || die "Docker non installato. Vedi https://docs.docker.com/engine/install/"
 docker compose version >/dev/null 2>&1 || die "docker compose v2 non disponibile. Aggiorna Docker."
 command -v python3 >/dev/null || die "python3 non installato"
+# 🔴 IL REQUISITO VERO NON È «python3», È «python3 CON CUI CALCOLARE bcrypt».
+#   Piu' sotto (r.~306) si fa `python3 -m pip install --user bcrypt` se bcrypt manca —
+#   e su Debian/Ubuntu `python3` e `python3-pip` sono DUE pacchetti distinti, quindi
+#   `command -v python3` puo' passare su una macchina dove quel comando morira'.
+#   ⚠️ E IL VERSO ERA IL PEGGIORE: la morte arrivava DOPO aver scritto `.env` e tre
+#   secret, cioe' a meta' installazione, lasciando stato parziale a chi installa per la
+#   prima volta. Trovato il 16/08 dal primo test che ESEGUE questo script (#191): in CI
+#   il python di `uvx` non ha pip e l'errore era «Impossibile installare bcrypt».
+#   🛡️ Un preflight che verifica il NOME del comando invece della CAPACITA' che serve
+#   controlla la parola, non il fatto. Qui si chiede la capacita': o bcrypt c'e' gia',
+#   oppure c'e' pip per procurarlo — e si fallisce PRIMA di toccare il disco.
+# 🔴 SI PROVA L'INSTALLAZIONE, NON SI CERCA pip — rilievo di 71d540e6, verificato qui:
+#   `python3 -m pip --version` esce 0 anche dove `pip install` e' VIETATO. Da Debian 12 /
+#   Ubuntu 23.04 vale PEP 668: se esiste /usr/lib/pythonX/EXTERNALLY-MANAGED, ogni
+#   `pip install --user` muore con «externally-managed-environment» — e quello e' il parco
+#   macchine di destinazione (VPS affittate: Debian 12 o Ubuntu 24 quasi sempre).
+#   ⭐ Cioe' la prima versione di QUESTO preflight ripeteva il difetto che veniva a curare,
+#   un livello piu' in la': cercava il NOME `pip` invece della CAPACITA' di installare.
+#   *L'unico modo di sapere se un comando funzionera' e' provarlo; un indizio della sua
+#   presenza risponde a un'altra domanda.* `--dry-run` risolve tutto e non scrive niente.
+# 🔴 E LA TERZA INCARNAZIONE DELLO STESSO DIFETTO, trovata da df446a42 sulla review:
+#   `--dry-run` esiste solo da pip 22.2 (2022). Su Ubuntu 22.04 (pip 22.0.2) e Debian 11
+#   (20.3.4) — che sono nel parco di destinazione — pip esce **2** con «no such option»,
+#   e leggerlo come «non ha pip» BLOCCA una macchina che avrebbe installato benissimo.
+#   ⚠️ Verso peggiore del difetto originale: quello lasciava passare chi doveva fermarsi,
+#   questo ferma chi doveva passare, e con un messaggio sicuro di se' che nomina la causa
+#   sbagliata — l'utente va a installare una cosa che ha gia'.
+#   ⭐ LA SEQUENZA, perche' e' la lezione: ① il NOME `python3` ② la CAPACITA', assumendo
+#   che l'OPZIONE esista ③ il MESSAGGIO. *Ogni giro spostava il controllo piu' vicino al
+#   fatto, e ogni volta restava un indizio piu' in la'.*
+#   🛡️ Qui si guarda COSA HA DETTO pip: `no such option` e `externally-managed` sono due
+#   fallimenti opposti con lo stesso exit code, e solo il testo li separa.
+_bcrypt_procurabile() {
+  python3 -c 'import bcrypt' 2>/dev/null && return 0
+  local out rc
+  out=$(python3 -m pip install --user --dry-run --quiet bcrypt 2>&1); rc=$?
+  [ $rc -eq 0 ] && return 0
+  # pip troppo vecchio per --dry-run: NON e' un verdetto sulla capacita' di installare.
+  # Si riprova senza, che e' l'unica cosa che risponde alla domanda vera.
+  if printf '%s' "$out" | grep -qi 'no such option'; then
+    out=$(python3 -m pip install --user --quiet bcrypt 2>&1) && return 0
+  fi
+  printf '%s' "$out" | tail -3 >&2
+  return 1
+}
+if ! _bcrypt_procurabile; then
+  # 🔑 IL MESSAGGIO NON NOMINA PIU' LA CAUSA, PERCHE' NE HA DUE E SONO OPPOSTE:
+  #   «pip manca» (Debian minimale) e «pip c'e' ma non puo' installare» (PEP 668).
+  #   La prima versione diceva «non ha pip»: FALSO proprio nel caso piu' probabile, e
+  #   mandava chi legge a installare una cosa che ha gia'. *Un messaggio d'errore che
+  #   nomina la causa sbagliata costa piu' di uno che non la nomina: il primo manda a
+  #   lavorare nella direzione opposta, il secondo lascia guardare l'uscita di pip —
+  #   che sta qui sopra, ed e' l'unica cosa che distingue i due casi.*
+  die "bcrypt non c'e' e non sono riuscito a procurarlo con pip.
+     Debian 12+ / Ubuntu 23.04+ (PEP 668 — il caso PIU' PROBABILE su una VPS):
+                        sudo apt install python3-bcrypt    ← risolve SEMPRE
+     Se manca solo pip: sudo apt install python3-pip       (NON basta su PEP 668:
+                        li' pip c'e' gia', ed e' l'INSTALLAZIONE a essere vietata)
+     Fedora:            sudo dnf install python3-bcrypt
+     Serve per calcolare l'hash della password admin; senza, l'installazione si
+     fermerebbe piu' avanti, dopo aver gia' scritto .env e i primi secret."
+fi
 ok "Docker $(docker --version | awk '{print $3}' | tr -d ',') + Compose v2 OK"
 
 # Versione da installare (modello pull: immagini ghcr, MAI build sulla VPS 4GB).

@@ -14,7 +14,7 @@ Sequenza passo-passo dall'host vuoto a stack su.
 |---|---|---|
 | Linux x86_64/arm64 | qualsiasi recente | Debian 13 / Ubuntu 24+ / Fedora / Arch testati |
 | Docker Engine | 24+ | con `docker compose` plugin v2 |
-| python3 | 3.10+ | solo per setup.sh (calcola bcrypt) |
+| python3 **+ pip** | 3.10+ | solo per `setup.sh` (calcola bcrypt). Su Debian/Ubuntu `python3` e `python3-pip` sono **due pacchetti**: `sudo apt install python3-pip`. Se `bcrypt` c'è già, pip non serve — il preflight verifica la capacità, non il nome |
 | Account Tailscale **o** Caddy+dominio **o** Cloudflare | uno dei tre | scelta al setup |
 | Bot Telegram + OWNER_ID | da [@BotFather](https://t.me/BotFather) + [@userinfobot](https://t.me/userinfobot) | opzionale per dev, obbligatorio per prod |
 | Account Google con NotebookLM | gratis | il login si fa **dopo l'install** via `/admin/nlm` |
