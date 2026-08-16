@@ -112,6 +112,24 @@ log "Verifico Docker + Compose..."
 command -v docker >/dev/null || die "Docker non installato. Vedi https://docs.docker.com/engine/install/"
 docker compose version >/dev/null 2>&1 || die "docker compose v2 non disponibile. Aggiorna Docker."
 command -v python3 >/dev/null || die "python3 non installato"
+# 🔴 IL REQUISITO VERO NON È «python3», È «python3 CON CUI CALCOLARE bcrypt».
+#   Piu' sotto (r.~306) si fa `python3 -m pip install --user bcrypt` se bcrypt manca —
+#   e su Debian/Ubuntu `python3` e `python3-pip` sono DUE pacchetti distinti, quindi
+#   `command -v python3` puo' passare su una macchina dove quel comando morira'.
+#   ⚠️ E IL VERSO ERA IL PEGGIORE: la morte arrivava DOPO aver scritto `.env` e tre
+#   secret, cioe' a meta' installazione, lasciando stato parziale a chi installa per la
+#   prima volta. Trovato il 16/08 dal primo test che ESEGUE questo script (#191): in CI
+#   il python di `uvx` non ha pip e l'errore era «Impossibile installare bcrypt».
+#   🛡️ Un preflight che verifica il NOME del comando invece della CAPACITA' che serve
+#   controlla la parola, non il fatto. Qui si chiede la capacita': o bcrypt c'e' gia',
+#   oppure c'e' pip per procurarlo — e si fallisce PRIMA di toccare il disco.
+if ! python3 -c 'import bcrypt' 2>/dev/null && ! python3 -m pip --version >/dev/null 2>&1; then
+  die "bcrypt non e' installato e questo python3 non ha pip per procurarlo.
+     Su Debian/Ubuntu:  sudo apt install python3-pip     (oppure: sudo apt install python3-bcrypt)
+     Su Fedora:         sudo dnf install python3-pip
+     Serve per calcolare l'hash della password admin; senza, l'installazione si
+     fermerebbe piu' avanti, dopo aver gia' scritto .env e i primi secret."
+fi
 ok "Docker $(docker --version | awk '{print $3}' | tr -d ',') + Compose v2 OK"
 
 # Versione da installare (modello pull: immagini ghcr, MAI build sulla VPS 4GB).
