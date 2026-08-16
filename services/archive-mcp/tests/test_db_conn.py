@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import sqlite3
 import sys
+import types
 import threading
 from pathlib import Path
 
@@ -62,9 +63,28 @@ def _crea_db(percorso: Path, testo: str = "parliamo di flutter") -> None:
     conn.close()
 
 
+class _SettingsFinte:
+    """Le due sole cose che `db.py` chiede alle settings: la dir e i path espliciti."""
+
+    def __init__(self, dir_db: Path) -> None:
+        self.archive_db_dir = str(dir_db)
+        self.archive_db_paths: dict[str, Path] = {}
+
+
 @pytest.fixture()
 def db(tmp_path, monkeypatch):
-    """Il modulo `db` con due DB veri, importato DOPO che la dir è impostata."""
+    """Il modulo `db` con due DB veri, importato DOPO che la dir è impostata.
+
+    🔴 STDLIB-ONLY, e non è una preferenza: la CI esegue questa cartella con `uvx pytest`,
+    che porta pytest **e basta**. `app.settings` importa pydantic e lì non c'è — la prima
+    versione di questo file importava `app.db` e basta, e ha fatto fallire il job
+    `contract` con sei `ModuleNotFoundError` mentre in locale erano sei verdi.
+    ⚠️ La scorciatoia sarebbe `pytest.importorskip("pydantic")`, e sarebbe **la cosa
+    peggiore**: il file resterebbe verde in CI *senza eseguire niente*. `ci.yml` lo dice
+    a chiare lettere per un altro job — *«NON deve mai fare skip se le deps mancano: gli
+    import stanno nudi in testa apposta»* — e vale identico qui. ⇒ si stubba ciò che
+    manca e si gira davvero.
+    """
     for nome in ("uno", "due"):
         _crea_db(tmp_path / f"{nome}.db")
     monkeypatch.setenv("ARCHIVE_DB_DIR", str(tmp_path))
@@ -81,9 +101,14 @@ def db(tmp_path, monkeypatch):
     #   tua ipotesi va isolato prima di essere creduto: `pytest <file>::<un-test-solo>`.*
     for mod in [m for m in list(sys.modules) if m == "app" or m.startswith("app.")]:
         del sys.modules[mod]
+    # 🖐️ LO STUB VA MESSO *DOPO* LA PULIZIA, e ci sono cascata: messo prima, la riga qui
+    #   sopra lo cancellava insieme al resto — la mia pulizia rimuoveva la mia cura, due
+    #   righe più giù. *Quando un setup fa `del` su un namespace, tutto ciò che ci hai
+    #   messo dentro prima è materiale da cancellare come gli altri.*
+    finte = types.ModuleType("app.settings")
+    finte.get_settings = lambda: _SettingsFinte(tmp_path)   # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "app.settings", finte)
     from app import db as modulo
-    from app.settings import get_settings
-    get_settings.cache_clear()          # le settings sono in lru_cache
     modulo.reload_registry()
     assert modulo.available_dbs() == ["due", "uno"], "la fixture non ha caricato i DB"
     yield modulo, tmp_path
