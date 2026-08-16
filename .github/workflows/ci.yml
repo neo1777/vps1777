@@ -16,21 +16,125 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
       - name: Install uv
-        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       - name: Lint Python (ruff)
         run: |
-          uv tool install ruff
-          ruff check services/ tools/vps1777.py
+          # PINNATO, come tutto il resto (actions per sha, immagini per digest):
+          # era l'unico strumento non pinnato della CI, e il 26/07 ha rotto main
+          # da solo — 0.15.22 verde il 20/07, 0.16.0 rosso il 26/07 su codice
+          # IDENTICO (181 rilievi da regole nuove, es. ISC004). Un linter che si
+          # aggiorna da sé è un gate che cambia contratto senza un commit.
+          # L'aggiornamento di ruff si fa apposta: bump qui + fix nello stesso PR.
+          uv tool install ruff==0.15.22
+          # I percorsi erano `services/ tools/vps1777.py`: fuori restavano
+          # security/ (il guardiano del registro), tools/verify-features.py e
+          # tutta tools/tests/. Misurato il 27/07 estendendo il comando: zero
+          # rilievi — cioè il gate non copriva quel codice e non se ne sarebbe
+          # mai accorto nessuno, perché il non-coperto era anche pulito.
+          ruff check services/ tools/ security/
       - name: ShellCheck bash
         run: |
-          sudo apt-get install -y shellcheck
-          shellcheck setup.sh tools/*.sh || true
+          # PINNATO PER DIGEST, come le immagini e le action di questo repo — e per
+          # una ragione misurata il 27/07, non per simmetria: `apt-get install
+          # shellcheck` dava la 0.9.0 sul runner, io validavo in locale con la
+          # 0.11.0, e le due versioni davano VERDETTI DIVERSI SULLO STESSO CODICE
+          # (4 rilievi SC2015 che solo la 0.9.0 vede). Verde in locale, rosso in CI,
+          # e nessuno dei due sbagliava: erano due strumenti diversi con lo stesso
+          # nome. È il gemello esatto dell'incidente ruff del 26/07, preso
+          # dall'altro capo — là il gate cambiava contratto da solo, qui lo
+          # cambiavo io senza saperlo.
+          SHELLCHECK="koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d"  # v0.11.0
+          # ⚠️ QUI C'ERA `|| true`, e con lui questo step non poteva diventare
+          # rosso: un gate che per costruzione non fallisce non è un gate, è una
+          # riga di log. Misurato il 27/07 togliendolo: shellcheck usciva 1 su
+          # main da chissà quanto, e fra i rilievi c'era un BUG VERO nella
+          # ritenzione dei backup (SC2106 in tools/backup.sh — vedi il commento
+          # là). Nessuno poteva vederlo: lo step era verde per definizione.
+          # SOGLIA AL MINIMO (27/07, stessa giornata): era `--severity=warning`,
+          # che lasciava passare i rilievi `info` senza dire quali. Ora non si
+          # tollera nulla in silenzio — le sette eccezioni residue sono scritte
+          # nel codice come `# shellcheck disable=` CON IL PERCHÉ accanto.
+          # ⭐ La differenza è tutta lì: una soglia alzata nasconde N cose e non
+          # dice quali; un'eccezione dichiarata è UNA cosa, con un nome e una
+          # ragione che il prossimo può contestare.
+          # tools/prove-empiriche/ era fuori dal glob: le otto prove che
+          # verificano il resto non erano verificate da niente.
+          # ⭐ NIENTE PIÙ ELENCO DI PERCORSI — il glob li prende TUTTI da git.
+          # Storia, perché è la terza volta: il perimetro era `setup.sh tools/*.sh`,
+          # poi ci sono state aggiunte `tools/prove-empiriche/` (il 27/07 mattina) e
+          # `tools/tests/` (il 27/07 pomeriggio), ogni volta scoprendo che un pezzo
+          # non era guardato da nessuno. La terza volta, la sera dello stesso giorno:
+          # `deploy.sh` — lo script che INSTALLA SULLA MACCHINA — non c'era mai stato,
+          # con 16 rilievi dentro di cui 5 warning sulle virgolette di un `sudo -u`.
+          # 🔑 Un elenco scritto a mano invecchia in silenzio, e chi lo allarga guarda
+          # ciò che sta aggiungendo, non ciò che manca: l'ho allargato io stessa quel
+          # pomeriggio e non ho visto `deploy.sh`, che era lì da sempre.
+          # `git ls-files` non può dimenticare un file: se è nel repo, è nel gate.
+          # 🔴 E `git ls-files '*.sh'` AVEVA UN ELENCO DENTRO: L'ESTENSIONE (rilievo di
+          #   71d540e6 sulla #150, 10/08). Il glob è nato per non dimenticare un file, e
+          #   dimenticava l'unico shell del repo che non finisce per `.sh` —
+          #   `tools/hooks/pre-commit`, cioè **il gate stesso**. Misurato: 26 file col
+          #   vecchio criterio, 27 con questo, e il ventisettesimo aveva già due errori
+          #   dentro. ⭐ La garanzia scritta qui sopra era vera per i `.sh` e falsa per il
+          #   file che conta di più — un insieme definito da una stringa, di nuovo.
+          # ⇒ il criterio non è più il NOME ma lo SHEBANG: vale per il prossimo file
+          #   senza estensione, che è il punto (aggiungere `tools/hooks/*` alla lista
+          #   avrebbe curato questo caso e ricreato il difetto per il successivo).
+          mapfile -t SCRIPTS < <(
+            { git ls-files '*.sh'
+              git ls-files | while IFS= read -r f; do
+                  [ -f "$f" ] || continue
+                  case "$f" in *.sh) continue ;; esac
+                  head -1 "$f" 2>/dev/null | grep -qaE '^#!.*\b(ba)?sh\b' && printf '%s\n' "$f"
+                done
+            } | sort -u
+          )
+          echo "shellcheck su ${#SCRIPTS[@]} script"
+          docker run --rm -v "$PWD:/mnt" -w /mnt "$SHELLCHECK" "${SCRIPTS[@]}"
+      # Il registro dei rilievi di sicurezza: ogni voce dichiarata `closed` deve
+      # portare un'evidenza, e quell'evidenza deve ESISTERE ANCORA nel codice.
+      # Nasce da un errore vero: SECURITY.md ha dichiarato «dossier applicato per
+      # intero» quando 8 rilievi su 43 erano chiusi, e nessuno se n'è accorto
+      # perché quella frase non puntava a nulla. Ora una dichiarazione falsa è
+      # una build rossa.
+      - name: Registro dei rilievi — nessun claim senza coordinata
+        run: uv run --with pyyaml security/check_findings.py
+      # I TRE INSTALLER devono concordare. Nasce dal round-16 (`bedecdcb`): non
+      # c'era NESSUN job che li confrontasse, e la divergenza è già costata due
+      # volte — il fix #13 (6c764bc) allineò deploy.sh e engine.py e saltò
+      # setup.sh; H55 li trovò con due policy diverse sull'operatore.
+      # ⚠️ È statico: vede i nomi nei file, non ciò che accade a runtime. Un
+      #   verde qui dice «i nomi concordano», non «fanno la stessa cosa» — e il
+      #   docstring lo scrive, così nessuno legge più di quel che c'è.
+      # 🛡️ L'autoprova gira PRIMA: un presidio che non sa scattare darebbe verde
+      #   su tre installer divergenti, ed è il difetto che questo job previene.
+      - name: I tre installer concordano — e il presidio sa scattare
+        run: |
+          python3 security/confronta-installer.py --autoprova
+          python3 security/confronta-installer.py
+      # Anti-leak: niente export di sessione tracciati, niente materiale
+      # credenziale nei file del repo. Nasce da un errore vero: un transcript di
+      # lavoro (.txt dal nome innocuo, ma con dentro tutto il detto-e-fatto della
+      # sessione) è entrato in una PR ed è finito su un repo pubblico. Il
+      # .gitignore da solo non bastava: non ferma `git add -f` e non fa nulla per
+      # un file già tracciato. Questo gira a ogni PR e dice no PRIMA del merge —
+      # perché dopo non si disfa: resta nella storia, nei diff e in ogni clone.
+      - name: Gate anti-leak — online solo ciò che online si può
+        run: python3 security/check_no_leaks.py
+      # I doc nominano file: dopo una rinomina restano lì e mandano il lettore a
+      # cercare qualcosa che non c'è. Un documento non si esegue, quindi nessun
+      # altro check lo prende. L'autoprova gira PRIMA: un controllo che non sa
+      # dire di sì non misura, afferma — e passerebbe verde anche da rotto.
+      - name: I doc nominano file che esistono
+        run: |
+          python3 tools/doc-riferimenti.py --autoprova
+          python3 tools/doc-riferimenti.py
       # Entrambe le combinazioni devono restare valide: produzione (solo
       # immagini ghcr) e sviluppo (overlay di build locale).
       - name: Validate compose (production — pull only)
@@ -42,12 +146,33 @@ jobs:
       - name: Migrations immutability
         if: github.event_name == 'pull_request'
         run: |
-          git fetch origin main --depth=1
+          # `--depth=1` TOLTO QUI per la stessa ragione dell'altro gate (commento lungo
+          # più sotto): in CI è innocuo, ma provando lo step in LOCALE rende shallow un
+          # repo che non lo era — successo il 09/08 sul checkout condiviso, e per venti
+          # minuti i conteggi di storia di tre sessioni hanno dato numeri diversi.
+          # Questo step non l'ho scritto io: la trappola però è identica, e lasciarla
+          # qui vorrebbe dire che la lezione vale per metà del file.
+          git fetch origin main
           # diff two-dot (confronto di TREE, niente merge-base: il checkout PR
           # è il merge commit, che contiene già main → nessun falso positivo).
           # --no-renames: senza, un `git mv` di una migrazione + edit passa come
           # status R (rename) e sfugge al filtro MD → immutabilità bypassata.
-          CHANGED="$(git diff --no-renames --diff-filter=MD --name-only origin/main HEAD -- 'migrations/*/run.py' 'migrations/*/migration.json' || true)"
+          # ⚠️ QUI C'ERA `|| true` in coda alla sostituzione, ed era un falso verde in
+          # agguato: se il `git diff` fosse fallito per un motivo VERO — ref sbagliata,
+          # fetch incompleto, repo in uno stato strano — `CHANGED` sarebbe rimasto
+          # vuoto e questo gate avrebbe approvato una PR che modifica una migrazione
+          # già pubblicata. Il `|| true` serviva solo a non far morire lo step per
+          # `set -e`: adesso l'esito si CATTURA e si distingue.
+          # (Trovato il 27/07 mentre chiudevo H53, cercando altri gate incapaci di
+          #  fallire. Questo poteva fallire — ma non nel caso che conta.)
+          set +e
+          CHANGED="$(git diff --no-renames --diff-filter=MD --name-only origin/main HEAD -- 'migrations/*/run.py' 'migrations/*/migration.json')"
+          RC=$?
+          set -e
+          if [ "$RC" -ne 0 ]; then
+            echo "::error::il confronto con origin/main è FALLITO (exit $RC): non so dire se le migrazioni siano intatte, e «non lo so» non è «vanno bene»."
+            exit 1
+          fi
           if [ -n "$CHANGED" ]; then
             echo "::error::migrazioni esistenti modificate o rimosse: $CHANGED"
             exit 1
@@ -60,11 +185,230 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install uv
-        uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3.2.4
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           python-version: "3.12"
+      # Il vincolo nel `pyproject` e il `uv.lock` devono dire la STESSA cosa.
+      #
+      # 🔴 PERCHÉ SERVE, misurato il 09/08 mettendo il tetto a `httpx`: cambiando il
+      #   vincolo da `>=0.28.0` a `>=0.28,<1`, `uv lock --check` esce **1** (il lock non
+      #   riflette più il pyproject) mentre `uv sync --frozen` esce **0** e la build passa
+      #   liscia. `--frozen` fa quel che promette — «usa il lock com'è» — e NON verifica
+      #   la coerenza: senza questo step si può committare un tetto che non protegge
+      #   niente, con la CI verde, finché qualcuno non rigenera il lock. Un vincolo che
+      #   nessuno confronta col lock è un commento con le virgolette.
+      #
+      # ⭐ E il vincolo conta proprio nell'istante della rigenerazione: `starlette` è
+      #   passata 0.45 → 1.3.1 nel commit che INTRODUCEVA i lock (#96), e `mcp` a 2.0.0
+      #   allo stesso modo (#112) — nessuna delle due da una PR di Dependabot. Il
+      #   `pyproject` è l'unica cosa che parla quando il lock nasce; questo step si
+      #   assicura che quella parola sia ancora quella scritta.
+      #
+      # Copre i QUATTRO servizi. NON i `plugins/`: `example-mcp` e `example-bot` non
+      # hanno lock apposta (risolvono a build-time, per chi li usa come punto di
+      # partenza) — dirlo qui invece di lasciar credere che il gate li guardi.
+      #
+      # ⚠️ E NON VEDE LA DIVERGENZA FRA SERVIZI GEMELLI (rilievo di abdd732a, 09/08).
+      #   Questo confronta ogni lock col SUO pyproject: `archive-mcp` (mcp 1.29.0) e
+      #   `nb1777-mcp` (mcp 1.28.1) hanno lo stesso vincolo e versioni diverse, e sono
+      #   **entrambi verdi per costruzione**. Non è un buco da tappare qui: è un'altra
+      #   domanda («due gemelli concordano fra loro?»), e va detta perché questo è il
+      #   presidio più vicino, quindi quello che verrebbe naturale invocare per quel caso.
+      #   La divergenza nasce da `uv lock` che è MINIMAL-CHANGE: un tetto nuovo muove il
+      #   lock di chi lo VIOLA e lascia dov'è chi era già conforme.
+      - name: pyproject e uv.lock concordano (ovunque ci sia un lock)
+        run: |
+          # ⭐ NIENTE ELENCO A MANO — i servizi li dà git. La prima stesura ciclava su
+          #   `gateway archive-mcp nb1777-mcp nb1777-bot`, e qui è il caso velenoso
+          #   (rilievo di 71d540e6 in review): un servizio nuovo non darebbe errore,
+          #   darebbe SILENZIO. È lo stesso difetto per cui `shellcheck` qui sopra è
+          #   passato a `git ls-files '*.sh'` — «un elenco scritto a mano invecchia in
+          #   silenzio, e chi lo allarga guarda ciò che aggiunge, non ciò che manca».
+          #   Il glob sui LOCK esclude i `plugins/` per COSTRUZIONE (non ne hanno) invece
+          #   che per una nostra ricordanza: la stessa frase che dovevo scrivere in un
+          #   commento diventa il criterio.
+          mapfile -t LOCKS < <(git ls-files 'services/*/uv.lock')
+          # 🛡️ GUARDIA SULLO ZERO (chiesta da 71d540e6 insieme alla cura, perché la cura
+          #   da sola la introdurrebbe): se il glob non trovasse nulla — path rinominati,
+          #   lock spostati — il `for` non girerebbe e lo step uscirebbe VERDE senza aver
+          #   guardato niente. Uno zero non verificato è il modo più elegante di passare.
+          if [ "${#LOCKS[@]}" -eq 0 ]; then
+            echo "::error::nessun services/*/uv.lock trovato: questo gate non ha verificato NULLA"
+            exit 1
+          fi
+          echo "lock da verificare: ${#LOCKS[@]}"
+          for lock in "${LOCKS[@]}"; do
+            servizio="$(dirname "$lock")"
+            echo "── $servizio"
+            (cd "$servizio" && uv lock --check)
+          done
+      # ⭐ IL GATE SULL'**ATTO** DI RIGENERARE UN LOCK (abdd732a, 09/08) — l'altra metà
+      #   del buco che lo step qui sopra dichiara di non coprire.
+      #
+      # 🔴 PERCHÉ: `dependabot.yml` IGNORA le major per `uv` (riga ~126), quindi le major
+      #   non arrivano MAI da una PR automatica — arrivano quando una di noi lancia
+      #   `uv lock`. E lì il salto è **una riga fra centinaia, identica a un salto di
+      #   patch**: `starlette` 0.45 → 1.3.1 (#96) e `mcp` → 2.0.0 (#112) sono passate
+      #   così, e la seconda ha impedito l'avvio della 0.41.1.
+      #   Lo step sopra chiede «il lock concorda col SUO pyproject?»; questo chiede
+      #   «questa rigenerazione ATTRAVERSA un confine di regime?». Due domande diverse.
+      #
+      # 🔑 Sotto la 1.0 il confine è la **MINOR**, non la major: in `0.x` semver non
+      #   promette nulla, e trattarle con indulgenza è il ragionamento che ha lasciato
+      #   `uvicorn` venti minor oltre il proprio vincolo.
+      #
+      # ⚠️ LIMITE DICHIARATO: la ratifica è «il pacchetto è NOMINATO nella PR». Chi vuole
+      #   aggirarlo scrive il nome e passa — il gate non pretende di fermare la malafede,
+      #   pretende di fermare la DISTRAZIONE, che è ciò che ci è costato la 0.41.1.
+      #   E non gira su `push` (serve una base con cui confrontare): lo dice invece di
+      #   uscire verde.
+      - name: la rigenerazione di un lock dichiara i salti di regime
+        if: github.event_name == 'pull_request'
+        env:
+          # Titolo e corpo passano da ENV, MAI interpolati nel `run`: `${{ }}` dentro uno
+          # script è script-injection — il corpo di una PR lo scrive chiunque la apra.
+          PR_TITOLO: ${{ github.event.pull_request.title }}
+          PR_CORPO: ${{ github.event.pull_request.body }}
+          # 🔴 `base.ref` (il NOME del ramo) e NON `base.sha`, e la ragione è un falso
+          #    positivo vero, misurato il 16/08 sulla #179: `base.sha` è una FOTO di
+          #    main scattata quando la PR è nata, mentre `HEAD` in CI è il MERGE-COMMIT
+          #    (branch + main di ADESSO). Fra i due c'è tutto ciò che è entrato in main
+          #    nel frattempo — quel giorno i 4 lock della #174 — e il gate li attribuiva
+          #    alla PR di turno: la #179 tocca UN file e si è vista chiedere la ratifica
+          #    di «uvicorn==0.52.2», che non c'entrava niente con lei.
+          # 🔑 Il pericolo non era il rosso: era la scorciatoia per toglierlo. Scrivere
+          #    quel pacchetto nel corpo per far passare il check è **firmare un salto che
+          #    la PR non fa** — cioè esattamente ciò che questo gate esiste per impedire.
+          #    *Un falso positivo su un presidio di firma non fa perdere tempo: insegna
+          #    a firmare il falso.*
+          # ⚠️ E la cura che sembrava ovvia NON funziona: `A...B` (tre punti) dà lo stesso
+          #    insieme di `A B`, perché `base.sha` è un ANTENATO e il merge-base È lui.
+          #    Misurato: due punti 4, tre punti 4, contro-il-ramo-base 0. Non è il numero
+          #    di punti, è CONTRO CHI ci si confronta.
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+          # ⚠️ NIENTE `--depth=1` QUI, e la ragione l'ho pagata sul campo: in CI sarebbe
+          #   innocuo (il checkout è effimero), ma provando questo step in LOCALE —
+          #   che è il nostro metodo, proviamo tutto prima di proporlo — `fetch --depth=1`
+          #   RENDE SHALLOW un repo che non lo era. Il 09/08 ha troncato il checkout
+          #   condiviso al commit di base del mio test, e per venti minuti i conteggi di
+          #   storia di tutte hanno dato numeri diversi senza che nulla lo dichiarasse.
+          #   🔑 Un comando può essere corretto nel suo ambiente e distruttivo in quello
+          #      in cui lo si prova — e il banco di prova, qui, è condiviso.
+          #   Il repo intero pesa meno di 1 MiB: la profondità non ci fa risparmiare
+          #   niente che valga un effetto collaterale su chi non ha lanciato il comando.
+          git fetch -q origin "$BASE_REF"
+          # `FETCH_HEAD` = la punta del ramo base APPENA scaricata: è lo stato di main
+          # ADESSO, non quello di quando la PR è nata. Lo fisso in uno sha e uso QUELLO
+          # dappertutto: se restasse `FETCH_HEAD` simbolico, un fetch successivo lo
+          # sposterebbe sotto i piedi agli usi più sotto (`git show "$BASE:$lock"`).
+          BASE="$(git rev-parse FETCH_HEAD)"
+          # ⚠️ TRE punti QUI e non due: con `$BASE` che è la punta di main, il merge-commit
+          #    HEAD lo contiene già ⇒ `$BASE...HEAD` è esattamente «ciò che questa PR
+          #    aggiunge», e nient'altro. (Con `base.sha` invece i tre punti non curavano
+          #    niente — vedi il commento in `env:`.)
+          mapfile -t CAMBIATI < <(git diff --name-only "$BASE...HEAD" -- 'services/*/uv.lock')
+          if [ "${#CAMBIATI[@]}" -eq 0 ]; then
+            echo "nessun uv.lock toccato da questa PR: niente da verificare"
+            exit 0
+          fi
+          echo "lock rigenerati in questa PR: ${#CAMBIATI[@]}"
+          RATIFICA="$PR_TITOLO
+          $PR_CORPO"
+          ESITO=0
+          for lock in "${CAMBIATI[@]}"; do
+            echo "── $lock"
+            # 🔴 «il lock NON C'ERA» e «non sono riuscita a leggerlo» NON sono la stessa
+            #   cosa, e la prima stesura li faceva collassare entrambi in un file VUOTO —
+            #   che vuol dire «nessun pacchetto prima» = nessun salto = PASSA.
+            #   Rilievo di 71d540e6 in review, e il caso che colpisce è il PEGGIORE che
+            #   abbiamo: `b29d4f7`, il commit che INTRODUSSE i lock, è quello che ha
+            #   portato dentro `starlette` 1.3.1 e `mcp` 2.0.0. Un lock che NASCE è
+            #   esattamente l'istante in cui le major entrano — se passa in silenzio,
+            #   questo gate manca il proprio caso d'uso storico.
+            # `$BASE` e non più `$BASE_SHA`, e non è cosmesi: il «prima» con cui si
+            # confronta il lock DEVE essere la stessa base con cui si è deciso QUALI
+            # lock guardare. Con due basi diverse il gate confronterebbe il lock di
+            # oggi con quello di quando la PR è nata, e chiamerebbe «salto di questa
+            # PR» un bump entrato in main da un'altra parte.
+            if git cat-file -e "$BASE:$lock" 2>/dev/null; then
+              git show "$BASE:$lock" > /tmp/lock-prima
+            else
+              # Lock NUOVO: non c'è un «prima» con cui confrontarlo. Non è un errore, ma
+              # non è nemmeno un verde: N pacchetti entrano tutti insieme e nessuno è
+              # stato confrontato con niente. Va DICHIARATO, come i salti.
+              N=$(grep -c '^name = ' <(git show "HEAD:$lock") || true)
+              echo "  ⚠️  lock NUOVO ($N pacchetti, nessun confronto possibile)"
+              # ⚠️ STESSO INPUT, STESSO RISCHIO: rilievo di 71d540e6 in ratifica alla
+              #    prima stesura di questa PR, che curava solo le due righe a :341-342.
+              #    Questa è 26 righe sopra, nello STESSO step, e legge lo STESSO
+              #    `$RATIFICA` da 65 KB — *avevo curato la copia e non la classe*, che
+              #    è precisamente il difetto che ci è costato la mattina.
+              #    Il criterio NON è «è una pipeline printf|grep» (nel repo ce ne sono
+              #    ~24, e quelle su password sono decine di byte: mai a rischio): è
+              #    **l'input può superare il buffer della pipe?**. Qui sì, ed è l'unica
+              #    altra che legge $RATIFICA.
+              if grep -qiE 'lock nuovo|nuovo lock|primo lock|introduc' <<<"$RATIFICA"; then
+                echo "  ✓ la PR dichiara di introdurre un lock nuovo"
+              else
+                echo "::error::$lock è un lock NUOVO: $N pacchetti entrano senza essere confrontati con nulla, ed è l'istante in cui le major entrano (b29d4f7: starlette 1.3.1, mcp 2.0.0). Dichiaralo nella PR — basta la frase «lock nuovo»."
+                ESITO=1
+              fi
+              continue
+            fi
+            git show "HEAD:$lock"      > /tmp/lock-dopo
+            set +e
+            REPORT="$(python3 tools/lock-salti.py /tmp/lock-prima /tmp/lock-dopo 2>&1)"
+            CODICE=$?
+            set -e
+            echo "$REPORT"
+            # Contratto a TRE valori: 2 non è «va bene», è «non ho guardato».
+            if [ "$CODICE" -eq 2 ]; then
+              echo "::error::$lock — il gate NON ha potuto misurare: nessun verdetto, non un verde"
+              ESITO=1
+            elif [ "$CODICE" -eq 1 ]; then
+              # Ratifica = il pacchetto E la sua versione di destinazione sono nominati
+              # nella PR. Il nome da solo NON basta: «mcp» sta dentro «nb1777-mcp», cioè
+              # dentro il nome del servizio, che si nomina sempre — il gate sarebbe stato
+              # compiacente proprio nel caso più frequente (falso positivo trovato in
+              # autoreview, non in produzione). Una versione non ci finisce per caso.
+              while IFS= read -r riga; do
+                pkg="${riga%%==*}"; ver="${riga##*==}"
+                # 🔴 16/08 — LA #174 È STATA BOCCIATA MENTRE DICHIARAVA IL SALTO, e la
+                #    riga qui sotto è l'unica cosa che nel log risulti rotta:
+                #      «line 66: printf: write error: Broken pipe»   (66 = questa riga)
+                #    MISURATO nel job 95135773669: `PR_CORPO` arriva intero (65.681 byte)
+                #    e contiene «0.52.2» ×23 e «uvicorn» ×88 ⇒ i due grep TROVANO. Eppure
+                #    si va in `else`. Con `grep -q`, che esce al PRIMO match, `printf`
+                #    resta con dell'output da scrivere e prende EPIPE — e `pipefail`
+                #    (r.276) fa fallire l'INTERA pipeline benché il match sia RIUSCITO.
+                # ⚠️ ONESTÀ SUL PERIMETRO: quella catena NON è riprodotta in locale —
+                #    provata a 60k/64k/65536/65681/100k/500k/1M/4M, sempre verde,
+                #    PIPESTATUS (0 0), su bash 5.2.21 + grep 3.11 (due banchi
+                #    indipendenti). Quindi: il broken pipe in CI è un FATTO, la catena
+                #    causale è un'IPOTESI. Non la spaccio per misura.
+                # ✅ La here-string è la cura giusta in ENTRAMBI i casi: toglie l'unica
+                #    anomalia osservata, e se la causa fosse un'altra non fa danno —
+                #    stesso identico predicato, un processo in meno, nessuna pipeline
+                #    che `pipefail` possa far fallire per un motivo che non è il match.
+                # 🔎 E IL CAMBIO È DA SÉ IL TEST DIAGNOSTICO: se dopo questo la #174
+                #    passa, era la pipe; se boccia ancora, la causa è altrove e lo
+                #    sappiamo al primo run invece che dopo un'altra indagine.
+                # ⚠️ `-qiF` sul pacchetto resta VOLUTO (case-insensitive): non toccarlo.
+                if grep -qF -- "$ver" <<<"$RATIFICA" \
+                   && grep -qiF -- "$pkg" <<<"$RATIFICA"; then
+                  echo "  ✓ «$pkg» → $ver: nominato con la versione, salto dichiarato"
+                else
+                  echo "::error::«$pkg» attraversa un confine di regime (verso $ver) e la PR non lo dichiara. Scrivi nome E versione nel titolo o nel corpo — il nome del servizio non conta: un salto che nessuno nomina è un salto che nessuno ha guardato."
+                  ESITO=1
+                fi
+              done < <(printf '%s\n' "$REPORT" | sed -n 's/^RATIFICA-RICHIESTA: //p')
+            fi
+          done
+          exit "$ESITO"
       - name: Sync nb1777-mcp (installa nlm pinnato + pytest)
         working-directory: services/nb1777-mcp
         run: uv sync
@@ -73,8 +417,75 @@ jobs:
         run: uv run pytest tests/ -v
       - name: Test archive indexer (gateway, stdlib-only)
         run: uvx pytest services/gateway/tests/ -v
+      # GAMBA 2 della garanzia «l'IP client non è spoofabile». `test_xff_trust_list.py`
+      # copre la gamba NOSTRA (la trust-list, letta con `ast`) e dichiara scoperta quella
+      # di TERZI: «uvicorn cammina l'XFF da destra» — un dettaglio interno che è
+      # STORICAMENTE CAMBIATO (le versioni vecchie prendevano il primo elemento da
+      # sinistra, cioè quello che un client può iniettare).
+      #
+      # 🔑 PERCHÉ UN JOB SUO E NON `uvx` COME I DUE QUI SOPRA: `uvx pytest` porta pytest e
+      #   basta — niente uvicorn, niente starlette. Un test che li importa lì darebbe
+      #   *collection error* e romperebbe la suite stdlib-only. Qui si gira con le deps
+      #   DEL LOCK, così misuriamo la uvicorn che l'immagine installa davvero e non una
+      #   presa a parte: un test che si porta la propria copia è verde su un ambiente che
+      #   non è quello che gira (è il buco della #114).
+      #
+      # ⚠️ E NON deve mai fare `skip` se le deps mancano: gli import stanno nudi in testa
+      #   apposta. Misurato: senza deps → exit 2, non una suite verde. *Un presidio
+      #   saltabile in silenzio è verde senza aver guardato.*
+      - name: Sync gateway (deps DEL LOCK, per i test runtime)
+        working-directory: services/gateway
+        run: uv sync --frozen
+      - name: Test gamba-2 XFF — uvicorn del lock, non uvx (garanzia IP client)
+        working-directory: services/gateway
+        run: uv run --with pytest pytest tests_runtime/ -v
       - name: Test archive-mcp FTS (stdlib-only)
         run: uvx pytest services/archive-mcp/tests/ -v
+      # La CLI è il componente che fa gli update in PRODUZIONE, ed era l'unico con
+      # una suite che nessuno lanciava: 10 test verdi che non hanno mai protetto
+      # niente. Trovato il 20/07 scrivendo i test del pre-flight — cioè stavo per
+      # aggiungerne altri dieci allo stesso posto. Un test che non gira non è una
+      # verifica: è un commento con le parentesi.
+      - name: Test CLI vps1777 (stdlib-only)
+        run: uvx pytest tools/tests/ -v
+      # `pytest tools/tests/` NON vede i file .sh: la suite qui sopra sarebbe
+      # rimasta verde con il test della ritenzione fermo sul disco, che è
+      # letteralmente il difetto raccontato nel commento qui sopra, ripetuto
+      # nello stesso file lo stesso giorno. La ritenzione è l'unico pezzo di
+      # vps1777 che CANCELLA dati non rigenerabili: se un gate deve girare, è
+      # questo.
+      #
+      # 🔴 03/08 — E LA RISPOSTA DI ALLORA ERA UNA LISTA, che si è fermata al primo.
+      #   Misurato: 5 file .sh in tools/tests/, 1 eseguito qui, 1 raccolto da un
+      #   test pytest, TRE mai eseguiti da nessuno. Uno dei tre porta scritto
+      #   dentro «una regola che nessuno strumento impone è persa con la faccia di
+      #   essere al sicuro» — cioè il difetto è arrivato dentro la sua stessa cura.
+      #   ⇒ non una voce in più nella lista: VIA la lista. Chi scrive il sesto test
+      #   non deve ricordarsi di niente, il file entra in tools/tests/ e da lì gira.
+      # 🛡️ L'autoprova gira PRIMA: un runner che non sa fallire darebbe verde su
+      #   una suite rotta, cioè risponderebbe al posto dei test. Prova anche il caso
+      #   che un ciclo ingenuo sbaglia — ZERO test trovati → esito 2, non 0.
+      # 📏 Controprova eseguita su copia (03/08): rotto test-onboarding-8080-bind.sh
+      #   in un punto raggiunto → `uvx pytest tools/tests/` resta VERDE (175 passed),
+      #   il runner esce 1 e lo nomina.
+      - name: Test bash di tools/tests — tutti, e il runner sa fallire
+        run: |
+          bash tools/esegui-test-bash.sh --autoprova
+          bash tools/esegui-test-bash.sh
+      # 🔴 QUI MANCAVA, ed è il difetto che questo file predica due volte più sopra
+      #   (r.97 e r.192: «l'autoprova gira PRIMA: un presidio che non sa scattare darebbe
+      #   verde»). `gate-locale.py` è nato con la sua autoprova e NON era agganciato a
+      #   niente: gli altri due --autoprova del repo lo sono, questo no. Rilievo di
+      #   71d540e6 sulla #93, ferma 5 giorni con CI 7/7 — e i 7 verdi non lo vedevano,
+      #   perché un presidio che nessuno esegue non fallisce mai.
+      #   ⭐ *Ho scritto un presidio e non l'ho presidiato: la stessa frase che avevo
+      #     appena usato per H48.*
+      # ⚠️ SOLO `--autoprova`, MAI il gate nudo: `gate-locale.py` senza argomenti esegue
+      #   TUTTI i job di QUESTO workflow (vedi il suo USO) ⇒ metterlo qui farebbe girare
+      #   la CI dentro la CI. Il gate è per il locale — è nel nome. Qui si presidia il
+      #   PRESIDIO: che sappia ancora dire di no.
+      - name: Gate locale — l'autoprova (che sappia ancora dire di no)
+        run: python3 tools/gate-locale.py --autoprova
 
   build:
     runs-on: ubuntu-latest
@@ -83,14 +494,69 @@ jobs:
       matrix:
         service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - name: Build ${{ matrix.service }}
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./services/${{ matrix.service }}
           push: false
+          load: true   # senza questo l'immagine resta nel builder e non si può ESEGUIRE
           tags: ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # 🔴 PERCHÉ ESISTE QUESTO STEP — il 08/08 la v0.41.1 è arrivata sulla macchina con
+      #   SEI check verdi e non è partita: `archive-mcp` moriva all'import
+      #   (`from mcp.server.fastmcp import FastMCP`, path rimosso in mcp 2.0.0) →
+      #   restart-loop → health-gate → auto-rollback.
+      #   Nessun test poteva vederlo: `build` costruiva l'immagine e NON LA AVVIAVA MAI,
+      #   e i test girano con `uvx pytest`, cioè in un ambiente che NON è quello
+      #   dell'immagine (che installa dal lock, con --frozen).
+      #   ⇒ *un container che non parte deve rompere la CI, non l'update.*
+      # 📌 La forma è quella con cui `abdd732a` ha TROVATO il difetto la sera stessa,
+      #   su un container vero: 12 secondi, nessuna suite. Presa com'è invece di una
+      #   mia versione più completa e mai eseguita.
+      # ⚠️ CIÒ CHE QUESTO GATE **NON** FA (scritto qui perché fra sei mesi «la CI avvia
+      #   ciò che costruisce» suonerà più larga di quello che è — rilievo di b82df434):
+      #     · prende le major che SPOSTANO o RINOMINANO un modulo (`mcp.server.fastmcp`
+      #       sparito): quella di stasera.
+      #     · NON prende una major che tiene i moduli e cambia le FIRME dentro:
+      #       l'import passa verde e il crash arriva al primo uso.
+      #     · NON prende i difetti di STATO (un dato sul disco che fa fallire l'avvio):
+      #       quelli si vedono solo con i volumi veri.
+      - name: L'immagine parte davvero (import nell'ambiente REALE dell'immagine)
+        run: |
+          docker run --rm --network none \
+            --entrypoint python \
+            "ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:ci" -c '
+          import importlib, importlib.util, sys
+          # `app.__main__` è il PUNTO DI INGRESSO VERO: l ENTRYPOINT è
+          # ["tini","--","python","-m","app"], quindi è questo il modulo che il container
+          # esegue, ed è dove stanno gli import che decidono se parte (uvicorn nel gateway,
+          # starlette, l SDK). Tutti e quattro hanno il guard `if __name__ == "__main__"`,
+          # quindi importarlo NON avvia il server: misurato prima di scrivere questa riga.
+          #
+          # 🔴 PERCHÉ NON C ERA, e la lezione vale più della riga: la prima versione di
+          #    questo gate importava `app.server`, cioè **il luogo dell ultimo incidente**
+          #    (mcp==2.0.0 in archive-mcp) invece del **punto di ingresso**. Copriva il
+          #    difetto già capitato e lasciava fuori `import uvicorn`, che vive solo in
+          #    `__main__` del gateway — la dipendenza che al momento è la MENO protetta
+          #    (una 0.x: per semver non ha major, e nessun `ignore: semver-major` la copre).
+          #    *Un presidio tarato sul difetto che hai appena visto ha la forma di quel
+          #    difetto, non della classe.*
+          # ⚠️ E LA COPERTURA SU `uvicorn` RESTA 1 SERVIZIO SU 3, non 3 (misura di b82df434):
+          #      gateway      6 moduli lo importano   ✅ coperto
+          #      archive-mcp  0 · nb1777-mcp 0        ❌ CIECO PER COSTRUZIONE
+          #    Lì `uvicorn` è dichiarato nel pyproject e non importato da nessun modulo
+          #    nostro: lo usa `fastmcp` dentro di sé ⇒ se si rompe, si rompe a RUNTIME
+          #    dentro la libreria, e nessun gate d import può vederlo. Non è un buco da
+          #    tappare: è il CONFINE. Scritto qui perché «il gate copre le dipendenze» è
+          #    falso, e fra sei mesi qualcuna ci costruirebbe sopra una garanzia.
+          mods = ["app.__main__"]
+          if importlib.util.find_spec("app.server"):
+              mods.append("app.server")   # dove esiste, resta coperto anche lui
+          for m in mods:
+              importlib.import_module(m)
+          print("import ok:", ", ".join(mods))
+          '

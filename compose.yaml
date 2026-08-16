@@ -6,12 +6,24 @@
 #   - nb1777-mcp:  NotebookLM via CLI nlm + headless Chromium
 #   - nb1777-bot:  Telegram bot (long-poll)
 #
-# Backend su rete `backend` (internal: true) — NIENTE è raggiungibile da fuori
-# tranne il gateway via ingress. L'ingress è in compose.ingress.<provider>.yaml
-# (Tailscale Funnel | Caddy | Cloudflared).
+# Backend su rete `backend` (internal: true) — NIENTE è raggiungibile da fuori,
+# e nessun servizio di questo file può USCIRE su Internet: la rete `ingress` non
+# è dichiarata qui per nessuno, nemmeno per il gateway. La dichiara il profilo
+# che ne ha bisogno (compose.ingress.<provider>.yaml: Caddy e Cloudflared la
+# ri-mettono sul gateway, Tailscale non le serve perché pubblica una porta su
+# loopback). Vedi H50: prima il gateway stava su `ingress` anche col profilo
+# Tailscale, che è un bridge NON internal → aveva un'uscita NAT verso qualunque
+# host, misurata sul vivo il 26/07 (prova-1).
 #
 # Avvio tipico (produzione — immagini pullate da ghcr, MAI build sulla VPS):
-#   docker compose --profile ingress.tailscale up -d
+#   docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+#     --profile ingress.tailscale up -d
+#   ⚠️ gli `-f` non sono facoltativi: senza, l'overlay ingress non entra nel progetto
+#      (il `gateway` resta senza porte pubblicate e la rete `funnel` non viene creata).
+#   📌 «senza porte pubblicate» e non la parola-chiave YAML: il presidio H48 cerca quella
+#      stringa in QUESTO file e la trova anche dentro un commento — scriverla qui fa
+#      diventare rossa la CI. È il difetto «i commenti non contano», e questo commento
+#      è il posto giusto per ricordarlo a chi scriverà il prossimo.
 #
 # Dev (build locale delle immagini):
 #   docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch
@@ -35,13 +47,23 @@ x-security: &security
   security_opt:
     - no-new-privileges:true
 
+# rootfs immutabile (H43): il container non può scriversi addosso. I dati vanno
+# solo nei volumi montati; /tmp è una tmpfs (Starlette vi fa spooling dei
+# multipart). NON applicato a nb1777-mcp: gira Chromium/Playwright, che ha
+# bisogno di scrivere in /tmp, /dev/shm e nella cache del profilo — renderlo
+# read_only senza un giro NotebookLM reale da verificare sarebbe fragile.
+x-readonly: &readonly
+  read_only: true
+  tmpfs:
+    - /tmp
+
 services:
 
   # ──────────────────────────────────────────────────────────────────────
   # Gateway — l'unico servizio esposto all'ingress
   # ──────────────────────────────────────────────────────────────────────
   gateway:
-    <<: [*restart, *logging, *security]
+    <<: [*restart, *logging, *security, *readonly]
     # Immagini pubblicate dalla CI di release (ghcr) — la VPS fa solo pull.
     # Per il build locale in sviluppo: -f compose.yaml -f compose.build.yaml
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-gateway:${VPS1777_TAG:-dev}
@@ -49,6 +71,9 @@ services:
     environment:
       GATEWAY_HOST: 0.0.0.0
       GATEWAY_PORT: 8080
+      # tempfile (e quindi lo spool multipart di Starlette) segue TMPDIR:
+      # gli upload grossi vanno sul volume-disco, non sulla tmpfs in RAM.
+      TMPDIR: /var/lib/uploads
       # Peer fidati per X-Forwarded-* (uvicorn). Default = range privati +
       # loopback, MAI un IP pubblico: il reverse-proxy (tailscale sull'host,
       # o caddy/cloudflared in container) arriva sempre dalla bridge Docker
@@ -71,22 +96,39 @@ services:
       OAUTH_PWD_HASH_FILE: /run/secrets/admin_password_bcrypt
       GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
       OAUTH_SIGNING_SECRET_FILE: /run/secrets/oauth_signing_secret
+      ARCHIVE_DESC_SECRET_FILE: /run/secrets/archive_desc_secret
     secrets:
       - gateway_secret
       - oauth_signing_secret
       - admin_password_bcrypt
       - telegram_bot_token
+      - archive_desc_secret
     volumes:
       - gateway-data:/var/lib/gateway
       # NIENTE nlm-auth (H6): il gateway è l'unico servizio esposto su Internet e
       # non deve poter leggere né riscrivere i cookie di sessione Google. Il
-      # volume lo monta SOLO nb1777-mcp; /admin/nlm gli inoltra il tar e ne chiede
+      # volume, fra i servizi, lo monta SOLO nb1777-mcp (in ro anche il backup e il check
+      # scadenze, entrambi a tempo: vedi SECURITY.md); /admin/nlm gli inoltra il tar e ne chiede
       # lo stato su rete interna (app/nlm_client.py).
       - archive-data:/var/lib/archive:rw  # condiviso con archive-mcp: /admin/archive scrive i .db indicizzati
       - ./onboarding:/var/lib/onboarding:rw  # bind-mount: pending.json letto da deploy.sh --apply
+      # Spool degli upload su DISCO, non in RAM: /tmp è una tmpfs (rootfs
+      # immutabile, H43) e Starlette vi spoola i multipart — un upload da 2,6 GB
+      # (bundle recupero-sessioni) la saturava e la pagina Archive moriva con un
+      # 500 «No space left on device» (2026-07-20, dal vivo; 92 MB passavano).
+      # TMPDIR sposta lo spool qui; il volume è usa-e-getta, fuori dal backup.
+      - gateway-uploads:/var/lib/uploads:rw
     networks:
       - backend
-      - ingress
+      # `ingress` NON qui (H50): la ri-dichiara il profilo che ne ha bisogno —
+      # compose.ingress.caddy.yaml e .cloudflared.yaml lo fanno già da sé, e col
+      # profilo Tailscale il gateway è raggiunto dal port mapping su loopback
+      # (compose.ingress.tailscale.yaml), non dalla rete. Dichiararla qui dava al
+      # gateway — il solo servizio esposto, e quello che monta 5 secret — un'uscita
+      # NAT verso qualunque host: misurata sul vivo, non dedotta (prova-1, 26/07).
+      # Costo accettato: il pulsante «Ricontrolla adesso» non può più interrogare
+      # GitHub; l'AVVISO di aggiornamento resta, lo scrive il timer sull'host in
+      # onboarding/update_status.json e il gateway lo legge dal disco.
     expose:
       - "8080"
     healthcheck:
@@ -100,7 +142,7 @@ services:
   # Archive MCP — FTS5 multi-DB
   # ──────────────────────────────────────────────────────────────────────
   archive-mcp:
-    <<: [*restart, *logging, *security]
+    <<: [*restart, *logging, *security, *readonly]
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}
     init: true
     environment:
@@ -112,8 +154,25 @@ services:
       # errore (i tool tornano risultati vuoti finché non aggiungi un DB).
       ARCHIVE_DB_PATHS: "${ARCHIVE_DB_PATHS:-}"
       FASTMCP_STATELESS_HTTP: "true"
+      # D9 (20/07) — il tool `set_description` NON scrive più qui: inoltra al
+      # gateway, che è l'unico a montare il volume in :rw. Serve il segreto del
+      # canale interno, lo stesso pattern di nb1777-mcp per /internal/nlm/*.
+      # Il mount resta :ro: questo servizio continua a non poter scrivere, e la
+      # scrittura passa da chi ne ha il diritto — invece di essere promessa da
+      # un tool che non poteva mantenerla.
+      ARCHIVE_DESC_SECRET_FILE: /run/secrets/archive_desc_secret
+      GATEWAY_INTERNAL_BASE: http://gateway:8080
+    secrets:
+      - archive_desc_secret
     volumes:
-      - archive-data:/var/lib/archive:rw
+      # SOLA LETTURA (H42): archive-mcp legge e basta — apre SQLite con
+      # `mode=ro` (app/db.py). Prima il :rw glielo permetteva comunque: la
+      # sola-lettura era solo applicativa, cioè una promessa del codice. Ora è
+      # strutturale — il kernel la fa rispettare.
+      # Verificato che i DB sono in journal_mode=delete (non WAL): senza WAL non
+      # servono i file -wal/-shm, che con un mount :ro fallirebbero. A scrivere
+      # i .db è il gateway (che monta :rw, sopra), non questo servizio.
+      - archive-data:/var/lib/archive:ro
     networks:
       - backend
     expose:
@@ -139,6 +198,12 @@ services:
       NB1777_TRANSPORT: streamable-http
       NB1777_ALLOWED_ORIGINS: "https://claude.ai,https://web.telegram.org"
       NLM_HOME: /var/lib/nlm
+      # H6-bis: gli artefatti scaricati (audio/video/pdf…) nascono QUI e solo qui.
+      # Volume SEPARATO da nlm-auth apposta: `studio_download` accettava un
+      # `output_path` scelto dal chiamante, cioè una scrittura arbitraria dentro
+      # l'unico container che possiede i cookie Google. Ora il path del chiamante
+      # vale come nome, e i file finiscono in una directory che NON contiene segreti.
+      NLM_ARTIFACTS: /var/lib/nlm-artifacts
       FASTMCP_STATELESS_HTTP: "true"
       # Segreto condiviso per gli endpoint INTERNI /internal/nlm/* (H6): solo
       # gateway e bot, che lo hanno, possono chiedere lo stato o installare il
@@ -147,11 +212,19 @@ services:
     secrets:
       - gateway_secret
     volumes:
-      # UNICO servizio a montare il volume dei cookie Google (H6): li possiede lui.
+      # Fra i servizi in esercizio, l'unico a montare il volume dei cookie Google
+      # (H6): li possiede lui. In sola lettura lo montano anche il backup (che li
+      # cifra) e il check scadenze (che ne legge la data) — vedi SECURITY.md.
       - nlm-auth:/var/lib/nlm:rw
+      # Artefatti scaricati da NotebookLM: volume PROPRIO, senza segreti dentro.
+      - nlm-artifacts:/var/lib/nlm-artifacts:rw
     networks:
       - backend
-      - ingress   # egress: nlm deve raggiungere NotebookLM su internet
+      # egress, NON ingress (H25): nb1777-mcp deve USCIRE verso NotebookLM, ma non
+      # deve stare sulla stessa rete del proxy internet-facing. `egress` è una
+      # bridge senza porte pubblicate → solo uscita, nessun ingresso. Il gateway
+      # lo raggiunge via `backend`. Così su `ingress` restano solo gateway + proxy.
+      - egress
     expose:
       - "8003"
     # FastMCP espone solo /mcp (no /health) → healthcheck su TCP socket
@@ -166,7 +239,7 @@ services:
   # NotebookLM Telegram bot — long-poll, no porta esposta
   # ──────────────────────────────────────────────────────────────────────
   nb1777-bot:
-    <<: [*restart, *logging, *security]
+    <<: [*restart, *logging, *security, *readonly]
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-bot:${VPS1777_TAG:-dev}
     init: true
     environment:
@@ -186,7 +259,7 @@ services:
     # sapere se l'auth manca chiede lo stato a nb1777-mcp su rete interna.
     networks:
       - backend
-      - ingress   # egress: il bot deve raggiungere api.telegram.org
+      - egress   # (H25) esce verso api.telegram.org, ma fuori dalla rete ingress
     depends_on:
       nb1777-mcp:
         condition: service_healthy
@@ -205,10 +278,20 @@ services:
 #   - ingress: per il proxy davanti (Tailscale/Caddy/Cloudflared)
 # ──────────────────────────────────────────────────────────────────────
 networks:
+  # Comunicazione interna fra i servizi. internal: true → nessuna uscita a
+  # Internet: chi sta SOLO qui (archive-mcp) non può esfiltrare nulla.
   backend:
     driver: bridge
     internal: true
+  # Esposizione pubblica: ci stanno SOLO il gateway (il servizio esposto) e il
+  # proxy d'ingresso (caddy/cloudflared). NON i backend che devono uscire.
   ingress:
+    driver: bridge
+  # Uscita verso Internet per i backend che ne hanno bisogno (nb1777-mcp →
+  # NotebookLM, bot → Telegram), SEPARATA da `ingress` (H25). Bridge senza porte
+  # pubblicate: consente l'uscita (NAT), non l'ingresso. Un proxy d'ingresso
+  # compromesso non si trova sulla stessa rete di questi servizi.
+  egress:
     driver: bridge
 
 # ──────────────────────────────────────────────────────────────────────
@@ -218,6 +301,8 @@ volumes:
   gateway-data:    # /var/lib/gateway: audit log, ecc.
   archive-data:    # /var/lib/archive/{data,db}
   nlm-auth:        # /var/lib/nlm: auth.json + AUTH_PENDING.flag
+  nlm-artifacts:   # /var/lib/nlm-artifacts: artefatti Studio scaricati — NIENTE segreti
+  gateway-uploads: # /var/lib/uploads: spool multipart su disco (TMPDIR) — temp, NO backup
 
 # ──────────────────────────────────────────────────────────────────────
 # Secrets — file-mounted, tmpfs /run/secrets/<name>
@@ -226,6 +311,11 @@ volumes:
 secrets:
   gateway_secret:
     file: ./secrets/gateway_secret.txt
+  # D9 — canale set_description (archive-mcp → gateway). Deliberatamente SEPARATO
+  # da gateway_secret: quello apre anche /internal/nlm/* (profili Google), e una
+  # feature che scrive un campo di testo non deve portarsi dietro quel potere.
+  archive_desc_secret:
+    file: ./secrets/archive_desc_secret.txt
   oauth_signing_secret:
     file: ./secrets/oauth_signing_secret.txt
   admin_password_bcrypt:

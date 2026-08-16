@@ -1,0 +1,36 @@
+{
+  "_perche": [
+    "Le release sono firmate cosign KEYLESS DAL WORKFLOW. La firma prova da quale",
+    "workflow viene un artefatto — NON che qualcuno abbia autorizzato quel rilascio.",
+    "Senza protezione, spostare un tag v* gia' pubblicato su un commit malevolo e",
+    "rifar girare la release produce un artefatto REGOLARMENTE FIRMATO. Questo",
+    "ruleset rende IMMUTABILI i tag v* pubblicati (H24).",
+    "",
+    "LEZIONE, pagata sul campo: la regola `non_fast_forward` NON basta. Spostare un",
+    "tag IN AVANTI sulla stessa storia E' un fast-forward, quindi passa. Serve la",
+    "regola `update`, che blocca qualunque aggiornamento del ref.",
+    "",
+    "Cosa NON copre, dichiarato: creare un tag v* NUOVO resta permesso (altrimenti",
+    "si romperebbe il flusso di rilascio). Chi ha accesso in push puo' ancora coniare",
+    "una release nuova firmata. Per chiudere anche quello servirebbe un environment",
+    "`release` con reviewer.",
+    "",
+    "APPLICARE:   gh api -X POST repos/neo1777/vps1777/rulesets --input security/rulesets/tag-v-immutabili.json",
+    "VERIFICARE:  gh api repos/neo1777/vps1777/rulesets --jq '.[] | \"\\(.name): \\(.enforcement) — \\([.rules[].type]|join(\", \"))\"'",
+    "PROVARE:     spostare o cancellare un tag v* deve essere RIFIUTATO (GH013);",
+    "             crearne uno nuovo deve RIUSCIRE. Verifica lo SHA, non la presenza."
+  ],
+  "name": "tag-v-immutabili",
+  "target": "tag",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/tags/v*"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "update" }
+  ]
+}

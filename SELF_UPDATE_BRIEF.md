@@ -1,5 +1,23 @@
 # vps1777 → Sistema di self-update "da prodotto" — Brief per il Piano
 
+> ## ⚠ DOCUMENTO STORICO — questo piano è stato ESEGUITO
+>
+> Brief del **4 luglio 2026**, quando vps1777 **non aveva** un canale di aggiornamento:
+> build locale sulla VPS, `VPS1777_TAG` fermo a `dev`, niente `VERSION` né `migrations/`,
+> aggiornare = reinstallare. **Quel mondo non esiste più.** Il sistema progettato qui è
+> stato consegnato in **v0.9.0** (4 luglio 2026, *«Canale di self-update gestito»*): la
+> CLI host (`tools/vps1777.py`), `migrations/`, il bundle di release con `images.lock`,
+> l'health-gate 180s, l'auto-rollback, il pulsante admin, il timer di check.
+> Poi **irrobustito** dalla campagna di sicurezza: cosign fail-closed (v0.23.0), tag `v*`
+> immutabili (v0.32.0), unit systemd senza utente hardcodato (v0.33.0).
+>
+> **Il testo qui sotto non descrive il presente** — descrive il punto di partenza.
+> Per come funziona l'update **oggi**: [docs/UPDATE.md](docs/UPDATE.md).
+> Per il piano che ne è uscito: [docs/SELF_UPDATE_PLAN.md](docs/SELF_UPDATE_PLAN.md).
+>
+> *Non è aggiornato di proposito: un brief riscritto a posteriori smette di essere la
+> prova di cosa si sapeva quando si è deciso. Si data, non si corregge.*
+
 > **Scopo del file.** Documento autoconclusivo che dà contesto completo e vincoli per
 > **pianificare** (non implementare) un sistema di aggiornamento delle installazioni vps1777:
 > versioni numerate, opt-in, con backup e rollback, sul modello "come aggiorno un software

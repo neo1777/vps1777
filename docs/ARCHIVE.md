@@ -41,7 +41,7 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 
 | Formato | Cosa indicizza |
 |---|---|
-| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs`) oppure export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/` |
+| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs`) oppure export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/`. **Fallback**: uno zip che non è un export ma contiene documenti `.md`/`.txt` viene indicizzato doc-per-doc (come i `.md`/`.txt` sciolti) |
 | `.jsonl` | sessione **Claude Code** (`~/.claude/projects/<progetto>/<id>.jsonl`) |
 | `.json` | export **Telegram Desktop** (formato *Machine-readable JSON*) |
 | `.pdf` | documento **con testo** (estratto via `pypdf`) |
@@ -57,15 +57,18 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 > riconosciuto, o senza messaggi estraibili, viene **rifiutato con un errore
 > chiaro** — mai un "ok, 0 record".
 
-Campi del form: **nome DB** (vuoto = dal nome file) e **progetto** (etichetta;
-vuoto = dedotta dalla fonte). Ricaricare lo stesso nome DB non duplica (dedup per
-id); fonti diverse sullo stesso nome si accumulano.
+Campi del form: **nome DB** (vuoto = dal nome file), **progetto** (etichetta;
+vuoto = dedotta dalla fonte) e **descrizione** (facoltativa: a cosa serve / cosa
+contiene l'archivio — compare nella scheda e in `describe_databases`, ed è
+aggiornabile dopo col tool MCP `set_description`). Ricaricare lo stesso nome DB
+non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano.
 
 ## Gestire i DB — lista ed eliminazione
 
-La pagina mostra per ogni DB la **scheda completa**: messaggi, etichette
-distinte (le "provenienze": titoli chat, `project:<nome>`, `design:<nome>`…),
-le etichette principali, la dimensione su disco e l'ultimo aggiornamento.
+La pagina mostra per ogni DB la **scheda completa**: descrizione, messaggi,
+etichette distinte (le "provenienze": titoli chat, `project:<nome>`,
+`design:<nome>`…), le etichette principali, la dimensione su disco e l'ultimo
+aggiornamento.
 
 Il bottone **Elimina** (con conferma) rimuove il DB: la ricerca su quell'archivio
 smette subito (archive-mcp se ne accorge da solo, scan-mode) e l'azione finisce
@@ -76,16 +79,27 @@ stesso nome DB. Lista ed eliminazione sono disponibili anche dalla **Mini App**
 
 ## Cercare — i tool MCP
 
-`archive-mcp` espone cinque tool via MCP (usabili dal connettore claude.ai e
+`archive-mcp` espone questi tool via MCP (usabili dal connettore claude.ai e
 dalla Mini App):
 
 | Tool | Cosa fa |
 |---|---|
 | `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}` |
-| `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}` |
-| `get_context(uuid, db_name, before, after)` | i messaggi **attorno** a un risultato, col **contenuto pieno** (supera il troncamento dello snippet) |
+| `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings` |
+| `check_term(term, db_name)` | diagnostica se un termine con `+`/`#` (`C++`, `C#`, `g++`) è ricercabile o **collassa** sul prefisso — chiede all'indice, non alla doc |
+| `get_context(uuid, db_name, before, after)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; se il messaggio è in un thread, i vicini vengono dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale |
+| `get_conversation(uuid, db_name, limit)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N |
+| `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
+| `archive_stats(db_name)` | istogramma dei messaggi per **anno** — *quando* l'archivio è fitto, da sapere prima di cercare |
 | `list_databases()` | i nomi dei DB caricati |
-| `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza) |
+| `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza), **description** |
+| `set_description(db_name, description)` | scrive/aggiorna la **descrizione** dell'archivio — l'**unica scrittura** ammessa via MCP (tocca la scheda, mai i messaggi) |
+
+> **Fonti senza thread.** Sui documenti chunked (pdf/telegram/memory) e sui DB
+> storici `parent_uuid` è vuoto: lì `get_conversation` ripiega sull'ordine
+> lineare dell'archivio e `get_context` sull'adiacenza temporale. La
+> ricostruzione fedele dell'ordine dei chunk (colonna `seq`) è un passo
+> **evolutivo dichiarato**, fuori scope oggi.
 
 **Sintassi della query FTS5** (le stesse regole sono nella docstring che il
 modello legge prima di cercare):
@@ -98,6 +112,7 @@ modello legge prima di cercare):
 - Termini con caratteri speciali (`- . / @ : # '`) **tra virgolette**:
   `"flutter-elinux"`, `"0.7.9"`. In modalità *smart* (default) il server li quota
   da sé; con `raw=true` la query passa intatta (per NEAR/parentesi complesse).
+  **Ma il quoting non basta per il suffisso** — vedi il riquadro sotto.
 - `sort`: `rank` (rilevanza, default), `newest`, `oldest`. Filtri `since`/`until`
   (ISO) e `project` (etichetta esatta). Su più DB il `limit` è **globale**.
 
@@ -106,6 +121,30 @@ modello legge prima di cercare):
 > silenzioso): solleva un errore che spiega come correggerla. Resta valido il
 > *protocollo dello zero*: 0 risultati non prova assenza — riprova quotando il
 > termine prima di concludere che "non c'è".
+
+> **Termini che COLLASSANO (`C++`, `C#`, `g++`) — il difetto dell'11/07.** Il
+> tokenizer `unicode61` tratta `+ #` da **separatori**: un termine come `C++`
+> perde il suffisso e diventa il token `C`, comunissimo (coordinate SVG,
+> copyright, gradi). `count("C++")` non torna vuoto — torna **migliaia di falsi
+> positivi silenziosi**: è così che nacque il falso ricordo «Neo programmatore
+> C++». È il gemello a verso opposto dell'errore parlante: lì lista vuota, qui
+> lista piena della cosa sbagliata. **Il quoting non protegge** — non è la
+> sintassi, è l'indice: nessun apice cerca un carattere che il tokenizer ha
+> buttato. Il difetto morde solo i caratteri **in coda** (`C++`); **in mezzo**
+> (`node.js`) il quoting tiene i due token come frase e funziona.
+>
+> Il fix è su **due strati**, perché indice e query sono piani diversi:
+> - **indice** — l'FTS si crea con `tokenize='unicode61 tokenchars ''+#'''`, così
+>   `C++`/`C#`/`g++` sono token veri e distinti. Vale sui DB **costruiti da qui in
+>   poi**; i DB già caricati vanno ricostruiti (re-ingest): il `tokenize` è
+>   fissato alla creazione, un `rebuild` non lo cambia. Il `.` resta separatore di
+>   proposito (romperebbe `node.js`, `github.com`, `0.7.9`).
+> - **query** — `count` e `check_term` fanno da **canary**: confrontano
+>   `count(term)` con `count(prefisso)`; se coincidono, il termine è collassato e
+>   lo **dicono** (campo `warnings`). Vale **subito** sui DB già vivi senza
+>   re-ingest, e si auto-tara: su un DB ricostruito i conteggi divergono e
+>   l'avviso non scatta. Chiedi `check_term("C++")` quando un conteggio ti sembra
+>   assurdo.
 
 ## Documenti e immagini (PDF-scansione, screenshot) — via NotebookLM
 
@@ -139,9 +178,57 @@ python3 services/gateway/app/archive_indexer.py <input> out.db --project nome
 
 ## Schema di un DB valido
 
-Tabella `messages(uuid PRIMARY KEY, project, ts, content)` + indice FTS5 esterno
-`messages_fts(uuid, project, ts, content)`. È quello che producono `archive_indexer`
-e `archive-ingest`. Un `.db` drop-in deve avere questo schema (validato all'upload).
+Schema corrente (v2, dal PR #23):
+
+```sql
+messages(uuid PRIMARY KEY, project, ts, content,
+         sender, tools, thinking, attachments, parent_uuid)
+messages_fts USING fts5(uuid, project, ts, content, tools, attachments,
+                        content='messages', ...,   -- external-content
+                        tokenize="unicode61 tokenchars '+#'")  -- C++/C# non collassano
+CREATE INDEX idx_parent ON messages(parent_uuid);   -- il thread-walking di get_conversation
+skipped(uid PRIMARY KEY, source, reason, detail, ts, ingest_date)  -- libro-mastro degli scarti
+meta(key PRIMARY KEY, value)                        -- scheda: description, …
+```
+
+È quello che producono `archive_indexer` e `archive-ingest`. In FTS finiscono
+`content`, `tools` (le azioni: `tool_use` + `tool_result`) e `attachments`;
+`thinking` e `parent_uuid` si **conservano** nella tabella (leggibili via SQL /
+`get_context`) ma **non** si indicizzano — vedi la nota sullo schema in
+`archive_indexer.py`.
+
+Cose in più che l'ingest produce:
+
+- le **`summary`** delle conversazioni claude.ai diventano righe attribuite
+  `sender='summary'`, cercabili come tutto il resto;
+- dalle **sessioni Claude Code** (`.jsonl`) l'ingest cattura anche i **titoli**
+  (`ai-title` → riga `sender='title'`: trovi una chat dal suo nome) e gli
+  **allegati** (`attachment` → riga `sender='attachment'` coi nomi-file), a
+  parità col percorso claude.ai. I record che **non sono messaggi** (`mode`,
+  `system`, `last-prompt`, `queue-operation`, …) non vengono indicizzati ma
+  **non spariscono**: lasciano una lapide `reason='non-message'` (vedi sotto);
+- ogni record **scartato** (senza uuid, vuoto, non-messaggio) lascia una
+  **lapide** in `skipped` — con motivo e il record grezzo — invece di sparire in
+  un `continue` muto: il conteggio è in `db_info()["skipped"]` / `count_skipped()`,
+  e i dati raw restano raggiungibili. *(Nota sul contare: la tabella `skipped`
+  deduplica per contenuto — due record identici sono una lapide, come il dedup
+  per `uuid` dei messaggi. Un collaudo che vuole quadrare col numero di **righe
+  lette** deve trattare i doppioni come categoria, non come perdita: vedi
+  `tools/collaudo-quadratura.py`.)*
+- la **descrizione** dell'archivio vive in `meta['description']` (scritta
+  all'upload, aggiornabile via `set_description`).
+
+> **Righe-evento vs righe-stato.** Le chat sono **eventi** (un `ts`, immutabili);
+> `memory:*` e `account:user` sono **stati** (nessuna data, riscritti). `oldest`
+> in `describe_databases` usa `min(NULLIF(ts,''))` così gli stati senza data non
+> fanno vincere la stringa vuota sul minimo — l'archivio non dice più «non so da
+> quando» sapendolo.
+
+Un `.db` drop-in è accettato se è un SQLite con la tabella `messages_fts`
+(controllo in `admin.py`). Anche un DB **v1** (le sole 4 colonne
+`uuid, project, ts, content`) resta valido: `migrate_v1_to_v2()` gli aggiunge le
+colonne nuove e ricostruisce l'FTS: le righe vecchie restano (con `tools`/`thinking`
+vuoti finché non ri-esegui l'ingest sulla fonte, idempotente per `uuid`).
 
 ## Come funziona sotto (confine no-docker.sock)
 

@@ -7,22 +7,35 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from . import admin, miniapp, oauth, onboarding, proxy
-from .settings import get_settings
+import hmac
+import re
+from pathlib import Path
+
+from . import admin, archive_indexer, miniapp, oauth, onboarding, proxy
+from .audit import audit
+from .asgi_security import ip_is_internal
+from .settings import UPSTREAMS_SCARTATI, get_settings
 
 
 async def health(request: Request) -> JSONResponse:
     s = get_settings()
-    body: dict = {
-        "ok": True,
-        "service": "vps1777-gateway",
-        "oauth_required": s.oauth_required,
-        "upstreams": sorted(s.gateway_upstreams),
-    }
-    # ?deep=1: proba TCP gli upstream MCP dalla rete backend. Usato dal
-    # health-gate di `vps1777 update` (via compose exec) — nessuna assunzione
-    # su porte host, funziona con qualunque overlay ingress.
-    if request.query_params.get("deep"):
+    want_deep = bool(request.query_params.get("deep"))
+
+    # ?deep proba i backend MCP via TCP: è un vettore d'abuso (port-scan /
+    # amplificazione) se aperto a chiunque → riservato ai chiamanti interni
+    # (H33). L'updater lo chiama via `compose exec` dentro il gateway → loopback;
+    # un esterno viene risolto al suo IP pubblico via XFF → 403.
+    client_host = request.client.host if request.client else None
+    if want_deep and not ip_is_internal(client_host):
+        return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
+
+    # Body pubblico MINIMO (H33): solo `{"ok": true}`. Niente `oauth_required`
+    # (postura auth), niente banner `service`, e niente `upstreams` — i NOMI dei
+    # servizi interni non li deve elencare un endpoint non autenticato. La Mini
+    # App li prende ora da /app/api/overview (dietro Bearer). L'healthcheck Docker
+    # e l'installer si accontentano di `{"ok": ...}`.
+    body: dict = {"ok": True}
+    if want_deep:
         checks: dict[str, bool] = {}
         for name, hostport in s.gateway_upstreams.items():
             host, _, port = hostport.rpartition(":")
@@ -36,14 +49,118 @@ async def health(request: Request) -> JSONResponse:
             except (OSError, asyncio.TimeoutError, ValueError):
                 checks[name] = False
         body["deep"] = checks
+        # 🔴 `all({})` è True: senza questa guardia un dict VUOTO dava 200 «sano»
+        # avendo sondato ZERO backend — il ciclo su zero elementi.
+        # ⚠️ E chi consuma questo endpoint è il FAIL-CLOSED dell'update:
+        # `deep_health_ok` (tools/vps1777.py:517) esce 0 solo su status 200. Un 200
+        # a vuoto dichiarava sana una release in cui il proxy MCP non instrada più
+        # nulla, e il ramo `if not healthy: rollback` non scattava per un guasto
+        # che gli stava esattamente sotto il naso.
+        # 📌 Zero upstream non è una configurazione possibile: il default di
+        # `compose.yaml:79` ne porta due. Un dict vuoto significa GATEWAY_UPSTREAMS
+        # scritto male — tipicamente i prefissi `nome=` dimenticati — e fino a oggi
+        # il parser scartava le voci in SILENZIO. Ora le riporta.
+        if not checks:
+            body["ok"] = False
+            scartate = list(getattr(s, "upstreams_scartati", None) or UPSTREAMS_SCARTATI)
+            body["errore"] = (
+                "nessun upstream da sondare: GATEWAY_UPSTREAMS è vuoto o tutte le "
+                "sue voci sono malformate. Forma attesa: nome=host:porta, separate "
+                "da virgola."
+            )
+            if scartate:
+                body["scartate"] = scartate
+            return JSONResponse(body, status_code=503)
         if not all(checks.values()):
             body["ok"] = False
             return JSONResponse(body, status_code=503)
     return JSONResponse(body)
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# D9 — set_description inoltrata al gateway (strada C, decisione di Neo 20/07)
+# ═══════════════════════════════════════════════════════════════════════════
+# IL PROBLEMA: `archive-mcp` monta il volume degli archivi in SOLA LETTURA per
+# scelta deliberata (compose.yaml:142), ma il suo tool `set_description` apre il
+# DB in scrittura. Due dichiarazioni entrambe vere che insieme mentono: il tool
+# promette una scrittura che il suo container non può fare. Verificato
+# strutturale, non regressione (test idempotente rieseguito dopo il deploy 0.39.4:
+# fallisce ancora).
+#
+# PERCHÉ QUESTA STRADA e non "monto rw" o "tolgo il tool": la docstring di
+# `set_meta` nel gateway dice già, testuale, «la usano l'upload (admin) E IL TOOL
+# MCP set_description». **L'inoltro non è un design nuovo: è l'architettura che
+# il gateway credeva di avere e che nessuno aveva mai scritto.**
+#
+# D17 DENTRO (Neo: «dentro la D9, non separata») — il rischio vero è LATO USCITA,
+# non lato ingresso: questa description finisce dentro il contesto di un LLM che
+# interroga l'archivio, con l'autorevolezza di un metadato di sistema. Un testo
+# in forma di istruzione lì dentro è un tentativo di dirottare chi legge, e nessuno
+# sospetta del campo "descrizione". Perciò qui sotto: cap di lunghezza, rifiuto dei
+# caratteri di controllo, e AUDIT di ogni scrittura (un canale di scrittura senza
+# log è un canale di cui non sai se è stato usato).
+_MAX_DESCRIZIONE = 4096
+
+
+async def internal_archive_description(request: Request) -> JSONResponse:
+    """Scrive la `description` di un archivio per conto di archive-mcp.
+
+    Difesa in profondità, in quest'ordine — ogni gradino risponde **404**, non 403:
+    un 403 confermerebbe l'esistenza della rotta a chi la sta cercando.
+      1. l'IP del chiamante dev'essere interno (loopback o rete privata). Serve
+         perché Caddy fa `reverse_proxy gateway:8080` CATCH-ALL: questa rotta è
+         raggiungibile dall'esterno per costruzione, e il blocco `internal/` di
+         proxy.py copre i path *proxati verso gli upstream*, non le rotte native
+         del gateway. Un chiamante che passa dall'ingress viene risolto al suo IP
+         pubblico → cade qui, **prima ancora del segreto**.
+      2. segreto condiviso, confronto constant-time, fail-closed.
+      3. il `db` dev'essere in whitelist; il PATH lo costruisce il gateway, mai
+         il chiamante (niente path traversal possibile per costruzione).
+    """
+    s = get_settings()
+    if not ip_is_internal(request.client.host if request.client else None):
+        audit({"event": "archive_desc_denied", "reason": "not_internal"})
+        return JSONResponse({"error": "not_found"}, status_code=404)
+
+    # segreto DEDICATO, non quello del canale nlm: privilegio minimo fra servizi.
+    atteso = s.effective_archive_desc_secret
+    got = request.headers.get("x-vps1777-archive-desc", "")
+    if not atteso or not hmac.compare_digest(got, atteso):
+        audit({"event": "archive_desc_denied", "reason": "secret"})
+        return JSONResponse({"error": "not_found"}, status_code=404)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad_json"}, status_code=400)
+    db = str(body.get("db", ""))
+    desc = str(body.get("description", ""))
+
+    # nome del DB: solo caratteri innocui, e deve ESISTERE fra quelli caricati.
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", db):
+        return JSONResponse({"error": "bad_db"}, status_code=400)
+    db_path = Path(s.archive_db_dir) / f"{db}.db"
+    if not db_path.is_file():
+        return JSONResponse({"error": "unknown_db"}, status_code=404)
+
+    # D17 — la description è DATO NON FIDATO: finirà nel contesto di un LLM.
+    if len(desc) > _MAX_DESCRIZIONE:
+        return JSONResponse({"error": "too_long", "max": _MAX_DESCRIZIONE}, status_code=413)
+    if any(ord(c) < 32 and c not in "\n\t" for c in desc):
+        # i caratteri di controllo non servono a una descrizione e sono il modo
+        # classico di nascondere testo a chi rilegge (e di spezzare un rendering).
+        return JSONResponse({"error": "control_chars"}, status_code=400)
+
+    archive_indexer.set_meta(db_path, "description", desc)
+    audit({"event": "archive_desc_set", "db": db, "len": len(desc)})
+    return JSONResponse({"ok": True, "db": db, "len": len(desc)})
+
+
 routes = [
     Route("/health", health, methods=["GET"]),
+    # D9 — inoltro della set_description da archive-mcp (rete interna + segreto)
+    Route("/internal/archive/description", internal_archive_description, methods=["POST"]),
 
     # OAuth discovery
     Route("/.well-known/oauth-protected-resource", oauth.well_known_protected, methods=["GET"]),
@@ -51,7 +168,8 @@ routes = [
 
     # OAuth core
     Route("/register", oauth.register, methods=["POST"]),
-    Route("/authorize", oauth.authorize, methods=["GET"]),
+    # GET mostra la consent page (H8); POST è l'approvazione/rifiuto dell'admin.
+    Route("/authorize", oauth.authorize, methods=["GET", "POST"]),
     Route("/token", oauth.token, methods=["POST"]),
 
     # Admin
@@ -61,9 +179,12 @@ routes = [
     Route("/admin/logout", admin.logout, methods=["POST"]),
     Route("/admin/setup", onboarding.setup_view, methods=["GET", "POST"]),
     Route("/admin/nlm", admin.nlm_view, methods=["GET", "POST"]),
+    # Il file lo possiede nb1777-mcp (H6): qui si INOLTRA, non si monta nulla.
+    Route("/admin/nlm/artifact/{name}", admin.nlm_artifact, methods=["GET"]),
     Route("/admin/archive", admin.archive_view, methods=["GET", "POST"]),
     Route("/admin/archive/delete", admin.archive_delete, methods=["POST"]),
     Route("/admin/update", admin.update_view, methods=["GET", "POST"]),
+    Route("/admin/update/check", admin.update_check, methods=["POST"]),
     Route("/admin/update/state", admin.update_state, methods=["GET"]),
     Route("/admin/audit", admin.audit_view, methods=["GET"]),
     Route("/admin/secrets", admin.secrets_view, methods=["GET"]),

@@ -36,7 +36,7 @@ Il pannello mostra **lo stato dei componenti** a semafori e i form per:
 
 | Sezione | Cosa inserisci | Dove lo prendi |
 |---|---|---|
-| Tailscale Funnel | OAuth client (Client ID + Secret) — vedi [INGRESS.md](INGRESS.md) per i prerequisiti account | [login.tailscale.com/admin/settings/oauth](https://login.tailscale.com/admin/settings/oauth) |
+| Tailscale Funnel | **Auth-key** (`tskey-auth-…`). La prendi diretta dalle Keys, oppure te la genera un OAuth client (*Modalità B* in [INGRESS.md](INGRESS.md)) — ma nel form va **sempre la key**, non il Client ID | [login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys) |
 | Bot Telegram | token + owner id | [@BotFather](https://t.me/BotFather) + [@userinfobot](https://t.me/userinfobot) |
 | URL pubblico | (opzionale) solo per Caddy/Cloudflared con dominio tuo | — |
 | NotebookLM | upload del **profilo nlm** (tar.gz, bottone dedicato) | `nlm login` sul tuo PC → `tar czf nlm-profile.tgz profiles/default` |

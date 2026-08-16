@@ -57,7 +57,8 @@ da solo (`tailscale status`) e imposta `PUBLIC_BASE`.
 3. Aggiungi a `.env`:
    - `CADDY_DOMAIN=vps.tuosito.com`
    - `CADDY_EMAIL=tu@gmail.com`
-4. Lancia: `docker compose --profile ingress.caddy up -d`
+4. Lancia: `docker compose -f compose.yaml -f compose.ingress.caddy.yaml --profile ingress.caddy up -d`
+   (senza gli `-f` l'overlay non viene montato e Caddy non entra nel progetto)
 
 Caddy fa cert ACME via HTTP-01 al primo avvio.
 
@@ -84,7 +85,8 @@ Aggiungi `secrets/cf_api_token.txt` + modifica `ingress/Caddyfile` con `tls.dns 
 1. Su [one.dash.cloudflare.com → Networks → Tunnels](https://one.dash.cloudflare.com/) → Create Tunnel
 2. Configura **Public Hostname** che punta a `http://gateway:8080`
 3. Copia il **tunnel token** (lungo, base64) in `secrets/cloudflared_token.txt`
-4. Lancia: `docker compose --profile ingress.cloudflared up -d`
+4. Lancia: `docker compose -f compose.yaml -f compose.ingress.cloudflared.yaml --profile ingress.cloudflared up -d`
+   (senza gli `-f` l'overlay non viene montato e il tunnel non entra nel progetto)
 
 CF gestisce HTTPS + DNS automaticamente.
 
@@ -106,6 +108,7 @@ altro host, subnet fuori dai blocchi privati) richiedono un override via env
 
 | Aspetto | Tailscale | Caddy | Cloudflared |
 |---|---|---|---|
+| **Chi può raggiungere il servizio** | **chiunque su Internet** (il profilo attiva il Funnel) | **chiunque su Internet** | **chiunque su Internet** |
 | Costo | gratis (free tier) | gratis | gratis |
 | Dominio tuo | no (*.ts.net) | sì obbligatorio | sì o sub-dominio |
 | Porte aperte | nessuna | 80 + 443 | nessuna |
@@ -113,3 +116,24 @@ altro host, subnet fuori dai blocchi privati) richiedono un override via env
 | Anti-DDoS | no | no | sì |
 | Setup minuti | ~5 | ~10 | ~10 |
 | Vincoli | account Tailscale | account ACME | account Cloudflare |
+
+> ⚠️ **La prima riga è la prima apposta** (issue #63). Le altre pesano costo e minuti di
+> setup; questa dice **chi arriva alla porta** — ed è l'unica in cui i tre profili **non
+> si distinguono: sono pubblici tutti e tre.** [`SECURITY.md`](../SECURITY.md#security-model)
+> lo dichiara già in una riga («espone su Internet **solo** il gateway, porta 443 via
+> Tailscale Funnel / Caddy / Cloudflared»), ma non stava *qui*, dove l'ingress si sceglie.
+>
+> Il punto è **`tailscale`**, perché il nome evoca una rete privata e il profilo non lo è:
+> `setup.sh` propone «1) Tailscale Funnel (consigliato)» **ed è il default**, e `deploy.sh`
+> esegue `tailscale serve reset` seguito da `tailscale funnel --bg --https=443
+> http://127.0.0.1:8080`. **Scegliere `tailscale` attiva il Funnel**, e il servizio esce su
+> `*.ts.net` per chiunque. Un tailnet-only — `serve` senza `funnel` — questo repo non lo
+> installa: sulla VPS il gateway resta sul loopback (`GATEWAY_BIND=127.0.0.1`) e l'unica
+> via d'ingresso è il Funnel.
+>
+> ⇒ **È la condizione che rende possibile la promessa del `README`** (collegare i propri
+> MCP a claude.ai, Claude Code e all'app desktop): un client di terzi arriva solo su un
+> ingress pubblico. E **raggiungere non è entrare** — chi arriva alla porta trova
+> l'autenticazione, che è l'altra metà della domanda:
+> [`SECURITY.md` § Security model](../SECURITY.md#security-model).
+

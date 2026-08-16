@@ -1,17 +1,44 @@
-# compose.onboarding.yaml — espone il gateway su IP:8080 durante il primo setup.
+# compose.onboarding.yaml — pubblica la porta del pannello sull'host.
 #
-# Chicken-egg: il pannello /admin/setup serve PRIMA che Tailscale sia attivo,
-# ma senza Tailscale il gateway non è raggiungibile da fuori. Questo override
-# mappa la porta 8080 sull'host, così puoi aprire:
-#     http://<IP_VPS>:8080/admin/setup
-# fare l'onboarding, e poi (dopo `deploy.sh --apply` che attiva Tailscale)
-# togliere questo override per chiudere la porta in chiaro.
+# 🔴 03/08/2026 — IL DEFAULT È CAMBIATO: `127.0.0.1`, non più tutte le interfacce.
+#   Prima qui c'era `- "8080:8080"`, che in compose significa **0.0.0.0**: la porta in
+#   CHIARO (HTTP) su ogni interfaccia della macchina. E il commento diceva «durante il
+#   primo setup», mentre `deploy.sh` include questo file **in base al PROFILO** e non
+#   allo stato dell'onboarding: con `caddy` o `cloudflared` restava così per sempre.
+#   ⇒ contraddiceva la prima riga del modello di sicurezza: «vps1777 espone su Internet
+#     solo il gateway, porta 443».
 #
-# Uso (incluso automaticamente da deploy.sh finché l'onboarding non è completo):
-#   docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
-#     -f compose.onboarding.yaml --profile ingress.tailscale up -d
+# ⭐ E la porta pubblicata NON SERVE AI DUE PROXY. Verificato:
+#     ingress/Caddyfile                  `reverse_proxy gateway:8080`  ← per NOME
+#     compose.ingress.cloudflared.yaml   cloudflared sta sulla rete `ingress`
+#   Entrambi raggiungono il gateway dalla rete Docker. La porta sull'host serve solo a
+#   CHI VUOLE APRIRE IL PANNELLO DIRETTAMENTE, prima che il proxy funzioni.
+#
+#   E il chicken-and-egg che l'aveva motivata è di TAILSCALE (l'authkey si mette dal
+#   pannello, quindi prima del pannello non c'è tunnel). Con caddy e cloudflared il
+#   dominio è **obbligatorio in `.env` prima dell'avvio** (`CADDY_DOMAIN:?`,
+#   `TUNNEL_TOKEN`): il proxy può servire il pannello su HTTPS dal primo avvio.
+#
+# COSA FA ORA
+#   default            127.0.0.1:8080  → il pannello si apre con un tunnel SSH:
+#                        ssh -L 8080:127.0.0.1:8080 <utente>@<host-vps>
+#                      poi http://127.0.0.1:8080/admin/setup dal PROPRIO computer.
+#   ONBOARDING_BIND=0.0.0.0
+#                      → torna il comportamento di prima. È un TRADEOFF dichiarato, non
+#                        una scorciatoia: il pannello di setup e il login admin viaggiano
+#                        in HTTP su tutte le interfacce, e con `PUBLIC_BASE` non ancora
+#                        https il cookie di sessione non è `Secure` (vedi admin.py) —
+#                        quindi password e sessione passano in chiaro sulla rete.
+#
+# ⚠️ Se il certificato ACME non arriva (DNS non propagato, porta 80 chiusa) il pannello
+#   non è raggiungibile da HTTPS: è il caso in cui `ONBOARDING_BIND=0.0.0.0` serve
+#   davvero. Meglio saperlo prima che scoprirlo con la porta già aperta.
+#
+# Uso (incluso da deploy.sh per i profili caddy/cloudflared):
+#   docker compose -f compose.yaml -f compose.ingress.caddy.yaml \
+#     -f compose.onboarding.yaml --profile ingress.caddy up -d
 
 services:
   gateway:
     ports:
-      - "8080:8080"
+      - "${ONBOARDING_BIND:-127.0.0.1}:8080:8080"

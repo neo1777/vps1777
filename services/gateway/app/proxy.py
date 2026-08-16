@@ -61,8 +61,29 @@ def _check_bearer(request: Request) -> tuple[bool, str | None]:
     # Il proxy non ha un'audience fissa (l'aud dei token è il client_id DCR),
     # ma vps1777 è single-owner: si lega il token al PROPRIETARIO. Un access
     # token il cui `sub` non è un'email ammessa non è per questo gateway.
+    # FAIL-CLOSED sulla lista vuota. Prima era `if allowed and <sub> not in allowed`:
+    # con `oauth_allowed_emails` vuota la condizione era sempre falsa, il ramo di
+    # rifiuto non veniva mai preso e QUALUNQUE access token valido passava. Non è un
+    # caso di laboratorio: `ADMIN_EMAIL` arriva dall'installer, che a `engine.py:494`
+    # la scrive con `p.get('admin_email','')` senza validazione lato server (il
+    # controllo è solo nel JS della pagina di setup).
+    #
+    # Il precedente è in questo stesso repo, sul gemello: `miniapp_core.is_owner`
+    # ritorna False quando l'owner non è configurato — «Se non sappiamo chi è
+    # l'owner, nessuno lo è». Qui la premessa è la stessa e sta due righe sopra:
+    # vps1777 è single-owner e il token si lega al PROPRIETARIO. Senza proprietario
+    # configurato, nessun token è per questo gateway.
+    #
+    # Il motivo è DISTINTO da `subject_not_allowed` di proposito: i due casi si
+    # curano in modo opposto — uno è un accesso da rifiutare, l'altro è un'istanza
+    # da configurare, e nell'audit log devono potersi contare separatamente.
+    # (Il gemello suggerisce un 503 invece di un 401 per questo caso: qui il
+    # chiamante mappa tutto a 401 e cambiarlo tocca il contratto HTTP — passo
+    # successivo, deliberatamente fuori da questa patch.)
     allowed = {e.lower() for e in s.oauth_allowed_emails}
-    if allowed and str(claims.get("sub", "")).lower() not in allowed:
+    if not allowed:
+        return False, "owner_not_configured"
+    if str(claims.get("sub", "")).lower() not in allowed:
         return False, "subject_not_allowed"
     return True, None
 

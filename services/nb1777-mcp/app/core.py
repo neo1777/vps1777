@@ -35,14 +35,75 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Union
+
+# H41 — contenuti personali fuori da argv/errori.
+# Tutto ciò che sta in `argv` è visibile a OGNI utente della VPS via `ps` e
+# `/proc/<pid>/cmdline`. Il corpo di una fonte sono contenuti personali di Neo:
+# non deve MAI passare da lì. Sopra questa soglia il testo va scritto in un file
+# temporaneo 0600 e passato con `--file` (nlm non ha un canale stdin — verificato
+# su `nlm source add --help`). Sotto la soglia (etichette/snippet corti) resta in
+# argv: è la stessa dimensione dei titoli, già inevitabilmente lì.
+TEXT_ARGV_MAX = 256  # caratteri: oltre questo, il testo va su file temporaneo
+# Troncamento dei command-line negli errori: un timeout non deve ri-versare nei
+# log/nella response gli argomenti (domande, prompt, path) che pure stanno in argv.
+_ERR_ARG_MAX = 80
+_ERR_CMD_MAX = 300
 
 # === costanti: NB di lavoro noti ===
 NB_LAB_GDR1777 = "492a2e7b-1e08-4100-89ed-6a13febf1295"   # GDR1777 — laboratorio artefatti (test 9 strumenti)
 NB_VPS_1777 = "489e15bc-ddde-48ef-8c98-ba21bcb0a7da"      # vps-1777 (biblioteca VPS)
 NB_BOT_IMITATORE = "15290c4d-a842-4261-99e5-f7824b197c85" # bot-imitatore (da popolare)
+
+# H40 — prefisso dei notebook scratch usa-e-getta creati dall'OCR
+# (transcribe_document). È l'UNICO segnale per riconoscere e recuperare gli
+# scratch rimasti orfani quando il cleanup fallisce: chi lo cambia deve
+# aggiornare anche sweep_ingest_notebooks() e doctor().
+INGEST_NB_PREFIX = "_ingest_"
+
+# H6-bis — gli artefatti scaricati nascono in UNA directory, e solo in quella.
+#
+# `studio_download` scriveva dove diceva il chiamante, con `mkdir(parents=True)` e
+# nessun vincolo. Dentro QUESTO container non è un dettaglio di comodità: è l'unico
+# che monta il volume dei cookie Google (H6, il gateway ne è stato privato apposta),
+# quindi un `output_path` scelto da chi chiama è una scrittura arbitraria che arriva
+# anche su /var/lib/nlm. Il tool riapriva DALL'INTERNO la superficie che H6 aveva
+# chiuso dall'esterno.
+#
+# Ora il path del chiamante vale solo per il NOME: il file nasce sempre qui. Non è
+# una perdita d'uso — nessun chiamante remoto poteva comunque APRIRE il path che
+# sceglieva, perché sta sul filesystem del SERVER (è la sorpresa documentata più
+# in basso, in studio_download).
+ARTIFACTS_DIR_DEFAULT = "/var/lib/nlm-artifacts"
+_UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def artifacts_dir() -> Path:
+    """La directory degli artefatti (env `NLM_ARTIFACTS`), creata se manca."""
+    p = Path(os.environ.get("NLM_ARTIFACTS") or ARTIFACTS_DIR_DEFAULT)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def safe_artifact_name(raw: Union[str, Path]) -> str:
+    """Riduce un path/nome QUALUNQUE a un nome file innocuo.
+
+    `Path(...).name` butta ogni componente di directory (`../../etc/passwd` → `passwd`),
+    poi restano solo `[A-Za-z0-9._-]` e via i punti iniziali (niente dotfile, niente `..`).
+    Se non resta nulla di utilizzabile si ALZA: un nome inventato al posto di uno vuoto
+    farebbe finire il file da qualche parte senza che nessuno l'abbia chiesto.
+    """
+    name = _UNSAFE_NAME.sub("_", Path(str(raw)).name).lstrip(".")
+    if not name:
+        raise NLMError(
+            f"download: da '{raw}' non si ricava un nome file valido. "
+            "Passa un nome semplice, es. 'round-15-audit.m4a'.")
+    return name[:120]
+
 
 # I 9 tipi di artefatto Studio NotebookLM (nome canonico interno)
 ARTIFACT_TYPES = (
@@ -103,12 +164,24 @@ class NLMError(RuntimeError):
 # helper interno: subprocess di nlm
 # ============================================================
 
+def _safe_cmd(cmd: list[str]) -> str:
+    """Command line per un messaggio d'errore, SENZA versare contenuti (H41).
+
+    In argv finiscono dati personali (domande, prompt, path, titoli). Un errore —
+    che finisce nei log e nella response — non deve ri-esporli: ogni argomento
+    lungo è troncato e il totale è capato. Prima il timeout stampava `' '.join(cmd)`
+    per intero, cioè anche il `--text <tutta la fonte>`."""
+    parts = [a if len(a) <= _ERR_ARG_MAX else a[:_ERR_ARG_MAX] + "…" for a in map(str, cmd)]
+    line = " ".join(parts)
+    return line if len(line) <= _ERR_CMD_MAX else line[:_ERR_CMD_MAX] + "…"
+
+
 def _run(args: list[str], *, timeout: float = 180.0, check: bool = True) -> subprocess.CompletedProcess:
     cmd = [NLM] + args
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
-        raise NLMError(f"timeout {timeout}s su: {' '.join(cmd)}") from e
+        raise NLMError(f"timeout {timeout}s su: {_safe_cmd(cmd)}") from e
     if check and p.returncode != 0:
         msg = (p.stderr or "").strip() or (p.stdout or "").strip()
         raise NLMError(f"nlm exit {p.returncode}: {msg[:400]}")
@@ -253,11 +326,35 @@ def source_add_url(nb_id: str, url: str, *, title: Optional[str] = None,
 
 def source_add_text(nb_id: str, text: str, title: str, *,
                     wait: bool = True, timeout: float = 600.0) -> str:
-    """Aggiunge testo libero come fonte (richiede un titolo)."""
-    args = ["source", "add", nb_id, "--text", text, "--title", title]
-    if wait:
-        args += ["--wait", "--wait-timeout", str(timeout)]
-    return _add_and_resolve_id(nb_id, args, timeout=timeout)
+    """Aggiunge testo libero come fonte (richiede un titolo).
+
+    H41 — il corpo NON va in argv (process list / /proc/<pid>/cmdline, leggibili
+    da ogni utente della VPS: sono contenuti personali). Sopra TEXT_ARGV_MAX lo si
+    scrive in un file temporaneo 0600 e lo si passa con `--file`; `nlm` non ha un
+    canale stdin (verificato su `nlm source add --help`), quindi il file è la via.
+    Il titolo resta in argv: è un'etichetta corta, come per tutte le altre fonti.
+    """
+    if len(text) <= TEXT_ARGV_MAX:
+        args = ["source", "add", nb_id, "--text", text, "--title", title]
+        if wait:
+            args += ["--wait", "--wait-timeout", str(timeout)]
+        return _add_and_resolve_id(nb_id, args, timeout=timeout)
+
+    # mkstemp crea già con permessi 0600 (O_CREAT|O_EXCL): il file col contenuto
+    # personale non è leggibile da altri utenti nemmeno per l'istante in cui esiste.
+    fd, tmp = tempfile.mkstemp(suffix=".txt", prefix="nb1777-src-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        args = ["source", "add", nb_id, "--file", tmp, "--title", title]
+        if wait:
+            args += ["--wait", "--wait-timeout", str(timeout)]
+        return _add_and_resolve_id(nb_id, args, timeout=timeout)
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
 
 
 def source_add_file(nb_id: str, file_path: Union[str, Path], *,
@@ -354,6 +451,36 @@ _VERIFY_PROMPT = (
 )
 
 
+def _delete_notebook_with_retry(nb_id: str, *, attempts: int = 3, backoff: float = 1.0) -> None:
+    """`nb_delete` con qualche tentativo: la cancellazione di un notebook su
+    NotebookLM può fallire per un errore transiente (rete, rate-limit, 5xx). Si
+    riprova `attempts` volte con backoff lineare; se fallisce ancora, si rilancia
+    l'ultima NLMError e decide il chiamante. Usato sia dalla pulizia dell'OCR sia
+    dallo sweep di recupero (H40)."""
+    last: Optional[NLMError] = None
+    for i in range(attempts):
+        try:
+            nb_delete(nb_id)
+            return
+        except NLMError as exc:
+            last = exc
+            if i < attempts - 1:
+                time.sleep(backoff * (i + 1))
+    raise last if last is not None else NLMError(f"delete fallita: {nb_id}")
+
+
+def _parse_iso8601(ts: Optional[str]) -> Optional[float]:
+    """ISO-8601 (es. '2026-07-14T13:44:58Z') → epoch secondi UTC; None se assente
+    o non parsabile. `nlm notebook list --json` espone `updated_at` in questa forma
+    (verificato dal vivo); è il segnale d'età usato dallo sweep."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except (ValueError, TypeError):
+        return None
+
+
 def transcribe_document(file_path: Union[str, Path], *, title: Optional[str] = None,
                         verify: bool = False, timeout: float = 600.0) -> dict:
     """Estrae il testo di un file via NotebookLM (multimodale → legge anche le
@@ -362,29 +489,87 @@ def transcribe_document(file_path: Union[str, Path], *, title: Optional[str] = N
     Crea un notebook scratch usa-e-getta, aggiunge il file (NotebookLM lo
     processa), chiede la trascrizione integrale via query, opzionalmente chiede
     una verifica di fedeltà (NotebookLM controlla il proprio lavoro), poi
-    cancella lo scratch. Ritorna {text, chars, verification?}.
+    cancella lo scratch. Ritorna {text, chars, cleanup_ok, verification?}.
+
+    H40 — `cleanup_ok` dice al chiamante se lo scratch è stato davvero cancellato.
+    Il documento OCR-ato vive dentro quel notebook: se la delete fallisce (anche
+    dopo i retry) resta su Google. In quel caso `cleanup_ok=False` e il notebook
+    (prefisso INGEST_NB_PREFIX) sarà recuperato più tardi da sweep_ingest_notebooks().
+    La pulizia gira SEMPRE, anche se la trascrizione stessa solleva.
 
     NB: la trascrizione è generata da LLM, non è OCR deterministico → su layout
     complessi può omettere/allucinare. La query di verifica (`verify=True`) serve
     a segnalarlo.
     """
-    import os
     path = Path(file_path)
-    nb = nb_create(f"_ingest_{os.urandom(4).hex()}")
+    out: dict = {"text": "", "chars": 0, "cleanup_ok": False}
+    nb = nb_create(f"{INGEST_NB_PREFIX}{os.urandom(4).hex()}")
     try:
         source_add_file(nb, path, title=title or path.name, wait=True, timeout=timeout)
         q = notebook_query(nb, _TRANSCRIBE_PROMPT, timeout=timeout)
         text = (q.get("answer") if isinstance(q, dict) else None) or ""
-        out: dict = {"text": text, "chars": len(text)}
+        out["text"] = text
+        out["chars"] = len(text)
         if verify and text:
             v = notebook_query(nb, _VERIFY_PROMPT, timeout=timeout)
             out["verification"] = (v.get("answer") if isinstance(v, dict) else None) or ""
-        return out
     finally:
         try:
-            nb_delete(nb)
+            _delete_notebook_with_retry(nb)
+            out["cleanup_ok"] = True
         except NLMError as exc:
-            log.warning("transcribe: cleanup scratch nb fallito (%s): %s", nb, exc)
+            log.warning(
+                "transcribe: cleanup scratch nb FALLITO dopo i retry (%s): %s — il "
+                "documento resta su NotebookLM; recuperabile con sweep_ingest_notebooks()",
+                nb, exc)
+    return out
+
+
+def sweep_ingest_notebooks(*, older_than_s: float = 3600.0, max_deletes: int = 50) -> dict:
+    """Recupera i notebook scratch '`_ingest_`*' rimasti orfani (H40).
+
+    Uno scratch dell'OCR (transcribe_document) che non è stato cancellato — perché
+    `nb_delete` ha fallito anche coi retry — resta su NotebookLM col documento
+    dentro. Questo sweep li elimina: prende i notebook col prefisso INGEST_NB_PREFIX
+    la cui ultima attività (`updated_at`) è più vecchia di `older_than_s`, e li
+    cancella (con retry). La soglia PROTEGGE una trascrizione ancora in corso
+    (updated_at recente): non toccare quella. Uno scratch senza timestamp è un
+    orfano non databile → si considera vecchio e si recupera.
+
+    Richiamabile a mano, da `doctor`, o da un timer periodico. Ritorna un
+    resoconto: {candidates, deleted:[id], failed:[{id,error}], skipped_recent,
+    swept_ok}.
+    """
+    now = time.time()
+    candidates: list[str] = []
+    skipped_recent = 0
+    for nb in nb_list():
+        if not (nb.get("title") or "").startswith(INGEST_NB_PREFIX):
+            continue
+        nb_id = nb.get("id") or nb.get("notebook_id") or ""
+        if not nb_id:
+            continue
+        age = _parse_iso8601(nb.get("updated_at") or nb.get("created_at"))
+        if age is not None and (now - age) < older_than_s:
+            skipped_recent += 1
+            continue
+        candidates.append(nb_id)
+
+    deleted: list[str] = []
+    failed: list[dict] = []
+    for nb_id in candidates[:max_deletes]:
+        try:
+            _delete_notebook_with_retry(nb_id)
+            deleted.append(nb_id)
+        except NLMError as exc:
+            failed.append({"id": nb_id, "error": str(exc)})
+    return {
+        "candidates": len(candidates),
+        "deleted": deleted,
+        "failed": failed,
+        "skipped_recent": skipped_recent,
+        "swept_ok": not failed,
+    }
 
 
 # ============================================================
@@ -413,8 +598,7 @@ def studio_create_audio(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=300)
-    return _last_artifact_id(nb_id, "audio")
+    return _create_and_resolve_artifact_id(nb_id, args, "audio", timeout=300)
 
 
 def studio_create_video(nb_id: str, *,
@@ -436,8 +620,7 @@ def studio_create_video(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=300)
-    return _last_artifact_id(nb_id, "video")
+    return _create_and_resolve_artifact_id(nb_id, args, "video", timeout=300)
 
 
 def studio_create_slides(nb_id: str, *,
@@ -455,8 +638,7 @@ def studio_create_slides(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=300)
-    return _last_artifact_id(nb_id, "slides")
+    return _create_and_resolve_artifact_id(nb_id, args, "slides", timeout=300)
 
 
 def studio_create_mindmap(nb_id: str, *,
@@ -467,8 +649,7 @@ def studio_create_mindmap(nb_id: str, *,
     """
     args = ["mindmap", "create", nb_id, "--title", title, "--confirm"]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "mindmap")
+    return _create_and_resolve_artifact_id(nb_id, args, "mindmap", timeout=240)
 
 
 def studio_create_infographic(nb_id: str, *,
@@ -490,8 +671,7 @@ def studio_create_infographic(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=300)
-    return _last_artifact_id(nb_id, "infographic")
+    return _create_and_resolve_artifact_id(nb_id, args, "infographic", timeout=300)
 
 
 def studio_create_data_table(nb_id: str, description: str, *,
@@ -504,8 +684,7 @@ def studio_create_data_table(nb_id: str, description: str, *,
     args = ["data-table", "create", nb_id, description,
             "--language", language, "--confirm"]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "data_table")
+    return _create_and_resolve_artifact_id(nb_id, args, "data_table", timeout=240)
 
 
 def studio_create_report(nb_id: str, *,
@@ -524,8 +703,7 @@ def studio_create_report(nb_id: str, *,
     if prompt:
         args += ["--prompt", prompt]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "report")
+    return _create_and_resolve_artifact_id(nb_id, args, "report", timeout=240)
 
 
 def studio_create_quiz(nb_id: str, *,
@@ -542,8 +720,7 @@ def studio_create_quiz(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "quiz")
+    return _create_and_resolve_artifact_id(nb_id, args, "quiz", timeout=240)
 
 
 def studio_create_flashcards(nb_id: str, *,
@@ -558,39 +735,108 @@ def studio_create_flashcards(nb_id: str, *,
     if focus:
         args += ["--focus", focus]
     _attach_source_ids(args, source_ids)
-    _run(args, timeout=240)
-    return _last_artifact_id(nb_id, "flashcards")
+    return _create_and_resolve_artifact_id(nb_id, args, "flashcards", timeout=240)
 
 
 # ============================================================
 # studio — status / wait
 # ============================================================
 
-def studio_list(nb_id: str) -> list[dict]:
-    """Lista tutti gli artefatti studio di un notebook con stato corrente."""
-    return list(_run_json(["status", "artifacts", nb_id]))
+def _artifact_id_of(a: dict) -> str:
+    return a.get("id") or a.get("artifact_id") or ""
+
+
+def _artifact_compact(a: dict) -> dict:
+    """Proiezione compatta di un artefatto studio: id/type/status + un `label`
+    (i primi 80 char del focus). Il focus intero (`custom_instructions`, 4-6 KB
+    per un podcast) resta FUORI: è ~85:1 di rumore e il risultato di un tool MCP
+    entra inline nel contesto, non paginabile. Il label basta a riconoscerlo —
+    ed è indispensabile, perché senza è l'unico modo di distinguere due artefatti
+    dello stesso tipo."""
+    return {
+        "id": _artifact_id_of(a),
+        "type": a.get("type") or a.get("artifact_type"),
+        "status": a.get("status") or a.get("state"),
+        "label": (a.get("custom_instructions") or a.get("focus") or "")[:80],
+    }
+
+
+def studio_list(nb_id: str, verbose: bool = False) -> list[dict]:
+    """Lista gli artefatti studio di un notebook.
+
+    Default COMPATTO (id/type/status/label): la proiezione la sceglie chi
+    consuma, non chi produce. `verbose=True` restituisce il JSON pieno della CLI
+    (focus incluso) — solo quando serve davvero il dettaglio."""
+    arts = list(_run_json(["status", "artifacts", nb_id]))
+    return arts if verbose else [_artifact_compact(a) for a in arts]
+
+
+def _artifact_ids(nb_id: str) -> set[str]:
+    """Insieme degli id degli artefatti studio attualmente nel notebook."""
+    return {aid for a in studio_list(nb_id, verbose=True) if (aid := _artifact_id_of(a))}
 
 
 def _last_artifact_id(nb_id: str, kind: str) -> str:
-    """Restituisce l'ID dell'ultimo artefatto del tipo dato (assume order=cronologico)."""
-    arts = studio_list(nb_id)
+    """Ripiego best-effort: l'ultimo artefatto del tipo dato in lista. NON è
+    affidabile come identità dell'artefatto appena creato — l'ordine di
+    `status artifacts` non è cronologico (verificato il 14/07: sei create
+    consecutivi tornavano tutti l'id del primo). La via primaria è
+    `_create_and_resolve_artifact_id` (snapshot prima/dopo); questa resta solo
+    come fallback quando la differenza è ambigua (0 o >1 id nuovi)."""
+    arts = studio_list(nb_id, verbose=True)
     if not arts:
         return ""
     target = _norm_type(kind)
-    # mind_map mislabel come 'flashcards' in alcune versioni: se cercavi mindmap e non trovi,
-    # accetta anche le flashcards 'recenti' come fallback debole — meglio prendere l'ultima.
     matching = [a for a in arts
                 if _norm_type(a.get("type") or a.get("artifact_type") or "") == target]
     chosen = matching[-1] if matching else arts[-1]
-    return chosen.get("id") or chosen.get("artifact_id") or ""
+    return _artifact_id_of(chosen)
 
 
-def studio_status(nb_id: str, artifact_id: str) -> dict:
-    """Stato di un singolo artefatto (cerca per ID nella lista del NB)."""
-    for a in studio_list(nb_id):
-        aid = a.get("id") or a.get("artifact_id")
-        if aid == artifact_id:
-            return a
+def _create_and_resolve_artifact_id(nb_id: str, args: list[str], kind: str,
+                                    *, timeout: float) -> str:
+    """Esegue un `studio create` e ritorna l'id dell'artefatto APPENA creato.
+
+    Stessa cura delle fonti (`_add_and_resolve_id`): l'id NON si ricava
+    dall'ordine di `status artifacts` — verificato il 14/07, sei create
+    consecutivi tornavano tutti l'id del PRIMO artefatto. Lo si ricava per
+    DIFFERENZA: si fotografano gli id prima e dopo il create.
+
+    Limite dichiarato — concorrenza: se un'ALTRA sessione crea un artefatto sullo
+    stesso account NotebookLM nella finestra fra i due snapshot, la differenza
+    contiene più di un id. Si tenta di disambiguare col `kind` atteso; se resta
+    ambiguo si ripiega sul best-effort (`_last_artifact_id`) e si logga — non si
+    indovina in silenzio."""
+    before = _artifact_ids(nb_id)
+    _run(args, timeout=timeout)
+    after = _artifact_ids(nb_id)
+    new = after - before
+    if len(new) == 1:
+        return next(iter(new))
+    if not new:
+        log.warning("studio create (%s): nessun id nuovo (nb=%s) — ripiego best-effort",
+                    kind, nb_id)
+        return _last_artifact_id(nb_id, kind)
+    # >1 id nuovo: concorrenza sullo stesso account. Disambigua col tipo atteso.
+    target = _norm_type(kind)
+    typed = [aid for a in studio_list(nb_id, verbose=True)
+             if (aid := _artifact_id_of(a)) in new
+             and _norm_type(a.get("type") or a.get("artifact_type") or "") == target]
+    if len(typed) == 1:
+        return typed[0]
+    log.warning("studio create (%s): %d id nuovi (nb=%s) — concorrenza? ripiego best-effort",
+                kind, len(new), nb_id)
+    return _last_artifact_id(nb_id, kind)
+
+
+def studio_status(nb_id: str, artifact_id: str, verbose: bool = False) -> dict:
+    """Stato di un singolo artefatto (cerca per ID nella lista del NB).
+
+    Default COMPATTO (id/type/status/label): quasi sempre serve solo lo stato.
+    `verbose=True` per l'artefatto pieno col focus."""
+    for a in studio_list(nb_id, verbose=True):
+        if _artifact_id_of(a) == artifact_id:
+            return a if verbose else _artifact_compact(a)
     return {}
 
 
@@ -632,8 +878,9 @@ def studio_download(kind: str, nb_id: str, output_path: Union[str, Path], *,
     cli_kind = _CLI_DOWNLOAD.get(kind)
     if not cli_kind:
         raise NLMError(f"download: tipo non riconosciuto '{kind}'. Validi: {list(_CLI_DOWNLOAD)}")
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Il path del chiamante vale come NOME, non come destinazione (H6-bis, in cima
+    # al file): il file nasce nella directory degli artefatti e da nessun'altra parte.
+    output_path = artifacts_dir() / safe_artifact_name(output_path)
     # nlm 0.7.7: `download <kind> NOTEBOOK_ID [-o PATH] [--id ARTIFACT]`. NON
     # esiste `--no-progress` (era il motivo per cui studio_download falliva a
     # valle: nel test MCP originale il blocco-approvazione lo mascherava).
@@ -641,7 +888,60 @@ def studio_download(kind: str, nb_id: str, output_path: Union[str, Path], *,
     if artifact_id:
         args += ["--id", artifact_id]
     _run(args, timeout=900)
+    # 🔴 SI PROVA CHE IL FILE C'È, non si promette perché il comando è uscito 0.
+    #   Prima qui c'era `return output_path` subito dopo `_run`: il valore di ritorno era
+    #   *il path che il chiamante aveva chiesto*, non un fatto osservato. Un `nlm` che esce
+    #   0 senza scrivere — o che scrive altrove — produceva una funzione che restituisce
+    #   un percorso valido verso il nulla, e l'errore compariva molto più a valle, addosso
+    #   a chi apriva il file.
+    #   ⚠️ E succede davvero: questa funzione scrive sul filesystem del SERVER, non su
+    #   quello di chi la chiama. Un chiamante remoto che passa un suo path locale ottiene
+    #   `[Errno 13]` se la cartella non è scrivibile — ma se il path ESISTE anche sul
+    #   server (es. `/tmp`), il comando riesce, il file finisce là, e il chiamante riceve
+    #   un percorso che sulla SUA macchina non esiste. Il successo era l'exit di `nlm`.
+    if not output_path.exists():
+        raise NLMError(
+            f"download: `nlm` è uscito senza errore ma {output_path} non esiste. "
+            "Nota: il file viene scritto sul filesystem del SERVER, nella directory "
+            "degli artefatti — non sul disco di chi chiama.")
+    if output_path.stat().st_size == 0:
+        # Un file vuoto è peggio di un file assente: ha il nome giusto e passa ogni
+        # controllo di esistenza. Chi lo carica come fonte ottiene un artefatto muto.
+        raise NLMError(f"download: {output_path} esiste ma è VUOTO (0 byte).")
     return output_path
+
+
+def artifact_list() -> list[dict]:
+    """Gli artefatti presenti, dal più recente. Solo file regolari: niente sotto-directory."""
+    out: list[dict] = []
+    for p in artifacts_dir().iterdir():
+        if not p.is_file():
+            continue
+        st = p.stat()
+        out.append({
+            "name": p.name,
+            "bytes": st.st_size,
+            "mtime": datetime.fromtimestamp(
+                st.st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        })
+    return sorted(out, key=lambda d: d["mtime"], reverse=True)
+
+
+def artifact_path(name: str) -> Path:
+    """Path di UN artefatto da servire. Alza se il nome esce dalla directory o non c'è.
+
+    Il nome passa da `safe_artifact_name` (che già toglie ogni componente di directory)
+    e POI si verifica che il risolto stia davvero dentro: due controlli sullo stesso
+    fatto, perché qui l'input arriva da fuori e il primo è una normalizzazione, non
+    una guardia. Se un giorno la normalizzazione cambia, la guardia resta.
+    """
+    base = artifacts_dir().resolve()
+    p = (base / safe_artifact_name(name)).resolve()
+    if p.parent != base:
+        raise NLMError(f"artefatto: nome non ammesso '{name}'.")
+    if not p.is_file():
+        raise NLMError(f"artefatto: '{p.name}' non esiste fra quelli scaricati.")
+    return p
 
 
 def studio_download_audio(nb_id, out, *, artifact_id=None): return studio_download("audio", nb_id, out, artifact_id=artifact_id)
@@ -764,6 +1064,10 @@ def doctor() -> dict:
         nbs = nb_list()
         info["notebooks_count"] = len(nbs)
         info["first_3"] = [{"id": nb.get("id"), "title": nb.get("title")} for nb in nbs[:3]]
+        # H40 — visibilità (NON distruttiva) sugli scratch OCR rimasti orfani.
+        # doctor osserva; a cancellarli è sweep_ingest_notebooks() su richiesta.
+        info["ingest_orphans"] = sum(
+            1 for nb in nbs if (nb.get("title") or "").startswith(INGEST_NB_PREFIX))
     except Exception as e:
         info["list_error"] = str(e)
     return info

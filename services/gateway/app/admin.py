@@ -14,30 +14,59 @@ import html
 import json
 import os
 import re
+import logging
 import secrets as pysecrets
+import shutil
 import sqlite3
 import time
 from pathlib import Path
 
-from . import archive_indexer, nlm_client
+from . import admin_core, archive_indexer, nlm_client
+from .admin_core import safe_next_url
 from .miniapp_core import version_gt
 
+from urllib.parse import quote, quote_plus
+
+import httpx
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from .audit import audit, read_recent
+from .audit import audit, audit_health, read_recent
 from .jwt_helpers import JWTError, issue, verify
 from .security import verify_admin_password
 from .settings import get_settings
+
+log = logging.getLogger(__name__)
 
 
 ADMIN_COOKIE = "vps1777_admin"
 
 
+# ───── revoke-list della sessione admin (H20) ─────
+# Il cookie admin è un JWT verificato stateless: finché la firma regge e `exp`
+# non è passato, VALE. Il logout cancellava il cookie NEL BROWSER e basta → un
+# token rubato restava buono fino a 8h anche dopo che l'admin aveva fatto logout.
+# Ora ogni token porta un `jti` (jwt_helpers.issue) e il logout lo mette in una
+# revoke-list persistente: la revoca è reale e sopravvive ai restart.
+# Stessa filosofia dei refresh OAuth (oauth.py → oauth_revoked.json), stessa dir
+# dati; la logica pura sta in admin_core.py (stdlib-only, testabile).
+
+_admin_revoked: admin_core.RevocationList | None = None
+
+
+def _revocations() -> admin_core.RevocationList:
+    """Singleton lazy: le settings non sono disponibili all'import."""
+    global _admin_revoked
+    if _admin_revoked is None:
+        path = Path(get_settings().audit_log_path).parent / "admin_revoked.json"
+        _admin_revoked = admin_core.RevocationList(path)
+    return _admin_revoked
+
+
 # ───── cookie helpers ─────
 
-def verify_admin_cookie(request: Request) -> str | None:
-    """Ritorna l'email se cookie valido, None altrimenti."""
+def _admin_claims(request: Request) -> dict | None:
+    """Claims del cookie admin se valido, non revocato e dell'admin. Altrimenti None."""
     tok = request.cookies.get(ADMIN_COOKIE)
     if not tok:
         return None
@@ -49,7 +78,21 @@ def verify_admin_cookie(request: Request) -> str | None:
     s = get_settings()
     if email != s.admin_email:
         return None
-    return email
+    # Un token SENZA jti non è revocabile (non sapremmo cosa mettere in lista):
+    # rifiutalo invece di fidartene. In pratica succede una volta sola, ai cookie
+    # emessi prima di questo fix → un re-login, non un bug.
+    jti = str(claims.get("jti") or "")
+    if not jti or _revocations().is_revoked(jti):
+        return None
+    return claims
+
+
+def verify_admin_cookie(request: Request) -> str | None:
+    """Ritorna l'email se cookie valido, None altrimenti."""
+    claims = _admin_claims(request)
+    if claims is None:
+        return None
+    return str(claims.get("sub", "")).lower()
 
 
 def _set_admin_cookie(response: Response, email: str) -> None:
@@ -224,6 +267,8 @@ nav.tabs{display:flex;gap:2px;margin-bottom:28px;border-bottom:1px solid var(--l
 nav.tabs a{padding:9px 16px;color:var(--muted);text-decoration:none;font-size:13px;border-bottom:2px solid transparent;margin-bottom:-1px}
 nav.tabs a:hover{color:var(--fg)}
 nav.tabs a.active{color:var(--fg);border-color:var(--accent)}
+nav.tabs form.logout{margin-left:auto;display:flex;align-items:center;padding-bottom:6px}
+nav.tabs form.logout button{padding:6px 13px;font-size:12px}
 .status-grid{display:grid;gap:12px;margin-bottom:8px}
 .status-row{display:flex;align-items:center;gap:10px;padding:13px 16px;background:var(--bg-soft);border:1px solid var(--line-soft);border-radius:8px}
 .status-row .lbl{font-weight:500}.status-row .val{color:var(--muted);font-size:12px;margin-left:auto;font-family:var(--mono)}
@@ -256,10 +301,35 @@ def _layout(title: str, body: str, current: str = "", flash: str = "",
             f'<a href="/admin/{k}" class="{"active" if current==k else ""}">{label}</a>'
             for k, label in items
         )
-        tabs = f'<nav class="tabs">{rendered}</nav>'
+        # Logout: form POST col token CSRF, reso QUI e non dentro le pagine.
+        # Prima stava ANNIDATO dentro il <form> di upload di /admin/nlm e
+        # /admin/archive — e un <form> dentro un <form> il parser HTML lo BUTTA
+        # VIA: il bottone «Logout» finiva a submittare il form esterno (l'upload).
+        # Nel layout è sempre top-level, porta il suo csrf (ora /admin/logout è
+        # dietro _require_admin) ed è presente su OGNI pagina admin.
+        logout_form = ""
+        if csrf:
+            logout_form = (
+                '<form method="POST" action="/admin/logout" class="logout">'
+                f'<input type="hidden" name="csrf" value="{html.escape(csrf)}">'
+                '<button type="submit">Logout</button></form>'
+            )
+        tabs = f'<nav class="tabs">{rendered}{logout_form}</nav>'
     flash_html = ""
     if flash:
         flash_html = f'<div class="flash {flash_kind}">{html.escape(flash)}</div>'
+    # Banner "sessione NON cifrata" (H10): se il gateway non è dietro HTTPS
+    # (PUBLIC_BASE non https → è attivo il fallback GATEWAY_BIND=0.0.0.0 su
+    # http://IP:8080, o si è ancora in setup), l'operatore DEVE saperlo — sta
+    # mandando la password su un canale in chiaro. Il fallback è comodo per non
+    # restare chiusi fuori, ma è temporaneo: appena il Funnel è su, va richiuso.
+    if not get_settings().gateway_public_base.startswith("https://"):
+        flash_html = (
+            '<div class="flash err">⚠ <b>Sessione NON cifrata</b> — questo gateway '
+            'non è dietro HTTPS (fallback su http). Va bene per il setup, ma non '
+            'esporlo così: attiva il Funnel/HTTPS e chiudi l\'accesso in chiaro.</div>'
+            + flash_html
+        )
     # CSP stretta con nonce: gli script inline (es. polling della card update)
     # portano il nonce; niente 'unsafe-inline' per gli script, niente origini
     # esterne (i Google Fonts sono stati tolti → fallback di sistema).
@@ -359,21 +429,37 @@ async def login(request: Request) -> Response:
         )
 
     _login_record_ok(ip)
-    audit({"event": "admin_login_ok", "email": email, "ip": ip})
-    # anti open-redirect: `next` solo relativo VERO o same-origin (PUBLIC_BASE).
-    # `//host` e `/\host` iniziano con "/" ma sono protocol-relative → redirect
-    # ESTERNO: vanno esclusi esplicitamente.
-    base = s.gateway_public_base
-    same_origin = bool(base) and next_url.startswith(base)
-    relative = next_url.startswith("/") and not next_url.startswith(("//", "/\\"))
-    if not (relative or same_origin):
-        next_url = "/admin/setup"
+    # `insecure` (H10): traccia se il login è avvenuto su canale NON cifrato
+    # (fallback http). Così un accesso in chiaro lascia un segno nell'audit.
+    _https = get_settings().gateway_public_base.startswith("https://")
+    audit({"event": "admin_login_ok", "email": email, "ip": ip, "insecure": not _https})
+    # anti open-redirect (H30): logica pura e TESTATA in admin_core (un bypass di
+    # prefisso-vs-origine è già tornato una volta qui — mai più senza test).
+    next_url = safe_next_url(next_url, s.gateway_public_base)
     resp = RedirectResponse(next_url, status_code=302)
     _set_admin_cookie(resp, email)
     return resp
 
 
-async def logout(_request: Request) -> Response:
+async def logout(request: Request) -> Response:
+    """POST /admin/logout — dietro `_require_admin` (quindi CSRF verificato) e con
+    REVOCA vera del token, non solo la cancellazione del cookie nel browser.
+
+    Perché dietro CSRF: un logout forzabile cross-origin è un DoS di sessione (ti
+    butta fuori a ripetizione) — piccolo, ma è la stessa classe di bug degli altri
+    POST admin, e la verifica è già centralizzata in `_require_admin`: passarci
+    dentro è gratis. Il bottone è reso da `_layout` come form POST col token CSRF.
+    """
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+    claims = _admin_claims(request) or {}
+    jti = str(claims.get("jti") or "")
+    # `exp` del token = fin quando ha senso ricordarsi il jti: dopo, la verifica
+    # JWT lo rifiuta già da sé e la voce viene potata (la lista non cresce).
+    exp = float(claims.get("exp") or (time.time() + get_settings().oauth_admin_cookie_lifetime))
+    persisted = _revocations().revoke(jti, exp) if jti else False
+    audit({"event": "admin_logout", "email": email, "jti": jti, "persisted": persisted})
     resp = RedirectResponse("/admin/login", status_code=303)
     _clear_admin_cookie(resp)
     return resp
@@ -386,8 +472,76 @@ async def logout(_request: Request) -> Response:
 #
 # H6: il gateway NON possiede più quel volume. È l'unico servizio esposto su
 # Internet, e teneva in scrittura i cookie di sessione Google. Ora il tar lo
-# riceve e lo inoltra a nb1777-mcp — l'unico a montare il volume — che valida e
-# installa. Il gateway non legge né scrive quei cookie: chiede soltanto lo stato.
+# riceve e lo inoltra a nb1777-mcp — fra i servizi in esercizio, l'unico a montare
+# quel volume — che valida e installa. Il gateway non legge né scrive quei cookie: chiede soltanto lo stato.
+
+def _human_bytes(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024.0
+    return f"{n:.1f} GB"
+
+
+def _nlm_artifacts_html(items: list[dict] | None) -> str:
+    """La sezione «artefatti scaricati». Tre stati, non due.
+
+    `None` = nb1777-mcp non risponde: si DICE, non si mostra una lista vuota — che
+    si leggerebbe come «non ne hai». È la stessa regola dei tre stati del cruscotto:
+    «assenti», «N», «sconosciuto» — mai un silenzioso zero.
+    """
+    if items is None:
+        return ('<section><div class="kicker"><span class="dot warn"></span>'
+                'Artefatti: nb1777-mcp non raggiungibile — elenco sconosciuto.</div></section>')
+    if not items:
+        return ('<section><div class="kicker">Artefatti scaricati: nessuno. '
+                'Ne nasce uno ogni volta che chiami <code>studio_download</code>.</div></section>')
+    righe = "\n".join(
+        f'<li><a href="/admin/nlm/artifact/{quote(i["name"])}">{html.escape(i["name"])}</a>'
+        f' <span class="who">{_human_bytes(int(i["bytes"]))} · {html.escape(i["mtime"])}</span></li>'
+        for i in items
+    )
+    return f"""
+<section>
+  <div class="kicker">artefatti scaricati da NotebookLM ({len(items)})</div>
+  <ul>{righe}</ul>
+  <div class="who">Stanno sul server, in un volume separato dal profilo Google.
+  Il gateway non li possiede: li chiede a nb1777-mcp e te li inoltra.</div>
+</section>
+"""
+
+
+async def nlm_artifact(request: Request) -> Response:
+    """Scarica UN artefatto. Il gateway inoltra in streaming: non tiene il file in RAM."""
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+
+    name = request.path_params.get("name", "")
+    try:
+        async with nlm_client.artifact_stream(name) as (upstream, _client):
+            if upstream.status_code != 200:
+                audit({"event": "admin_nlm_artifact_err", "by": email,
+                       "name": name, "status": upstream.status_code})
+                return RedirectResponse(
+                    "/admin/nlm?msg=Artefatto+non+disponibile&kind=err", status_code=303)
+            audit({"event": "admin_nlm_artifact", "by": email, "name": name})
+            # Il body si consuma DENTRO il context manager: `aread()` qui sarebbe
+            # bufferare tutto in RAM, quindi si accumula in una risposta di streaming
+            # solo passando i chunk mentre lo stream è ancora aperto.
+            chunks = [c async for c in upstream.aiter_raw()]
+    except httpx.RequestError as exc:
+        log.warning("admin nlm artifact: nb1777-mcp irraggiungibile (%s)", exc)
+        return RedirectResponse(
+            "/admin/nlm?msg=nb1777-mcp+non+raggiungibile&kind=err", status_code=303)
+
+    safe = name.replace('"', "").replace("\\", "")
+    return Response(
+        b"".join(chunks),
+        media_type="application/octet-stream",
+        headers={"content-disposition": f'attachment; filename="{safe}"'},
+    )
+
 
 async def nlm_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
@@ -431,6 +585,7 @@ async def nlm_view(request: Request) -> Response:
 
     flash = request.query_params.get("msg", "").replace("+", " ")
     flash_kind = request.query_params.get("kind", "ok")
+    artifacts_html = _nlm_artifacts_html(await nlm_client.artifacts())
 
     body = f"""
 <header>
@@ -438,6 +593,7 @@ async def nlm_view(request: Request) -> Response:
   <div class="who">{html.escape(email)}</div>
 </header>
 {status_html}
+{artifacts_html}
 <section>
   <div class="kicker">come ottenere il profilo nlm</div>
   <ol>
@@ -461,7 +617,6 @@ tar czf nlm-profile.tgz profiles/default</pre>
     <div class="toolbar">
       <button type="submit" class="primary">Carica</button>
       <a class="btn" href="/admin/audit">Audit →</a>
-      <form method="POST" action="/admin/logout" style="display:inline"><button type="submit">Logout</button></form>
     </div>
   </section>
 </form>
@@ -525,6 +680,59 @@ async def archive_view(request: Request) -> Response:
     db_dir.mkdir(parents=True, exist_ok=True)
 
     if request.method == "POST":
+        # 🔴 IL TETTO SI GUARDA PRIMA DI `request.form()`, e la riga sotto è il punto
+        #   esatto in cui il danno avviene: `form()` legge il body e Starlette ci
+        #   spilla il multipart in `/tmp` (`SpooledTemporaryFile`, rollover a 1 MB).
+        #   ⚠️ E `/tmp` NON è il disco: `compose.yaml:43-52` lo monta come **tmpfs**
+        #   — il commento lo dice a voce — **senza un `size:` dichiarato**, quindi
+        #   vale il default del kernel: metà della RAM.
+        # ⇒ MISURATO il 03/08 (71d540e6, voce `2bd05092`, dalla revisione della #88):
+        #   la guardia sullo spazio disco introdotta lì è GIUSTA e guarda `db_dir` —
+        #   ma un upload da 4 GB, che `MAX_UPLOAD_BYTES` **ammette**, riempie la
+        #   tmpfs prima che quella guardia venga mai valutata. *Lo spazio era protetto
+        #   dove si scrive il risultato, non dove transita il materiale.*
+        # 🛡️ Perché QUESTA cura e non `tmpfs: size=`: quella richiede di sapere quanta
+        #   RAM ha la macchina, che da qui non è misurabile e cambia da VPS a VPS.
+        #   Questa non dipende né dalla RAM né dalla versione di Starlette: rifiuta
+        #   sulla DICHIARAZIONE del client, prima di materializzare un byte.
+        # ⚠️ IL PERIMETRO, e la prima versione di questo commento prometteva di più.
+        #   `Content-Length` LO DICHIARA IL CLIENT. Questa guardia copre il caso
+        #   ONESTO — l'upload troppo grande per errore — e **NON copre quello
+        #   malevolo**: chi vuole riempire la tmpfs apposta omette l'header (chunked)
+        #   o ci scrive un numero piccolo, e passa di qui senza essere visto.
+        #   🔴 Avevo scritto «rete in più sul caso PEGGIORE»: il caso peggiore è
+        #     esattamente quello che non copre. *Rilievo di b82df434 sulla PR #94, e
+        #     non è sul codice — è sulla riga che ne descrive il perimetro.*
+        #   ⭐ E la via che sembrava chiuderlo NON esiste: `Request.form()` espone
+        #     `max_part_size`, ma **misurato** (starlette 1.3.1, prova eseguita) NON è
+        #     un tetto — una parte da 3 MB passa sia col default da 1 MB sia con 2 MB:
+        #     è la dimensione del chunk di parsing, e il nome inganna. *Non dedotto
+        #     dalla firma: provato, perché una firma letta non è un comportamento.*
+        #   ⇒ Il tetto che regge anche contro un client che mente sta PRIMA del
+        #     gateway, nel proxy che conta i byte veri (`request_body max_size` in
+        #     Caddy). Voce aperta: copre 1 ingresso su 3 (Caddy sì, cloudflared e
+        #     tailscale-serve no) — la stessa forma dei tre installer.
+        #   Qui resta ciò che questa riga fa davvero: «non l'ho potuto leggere» ≠ «è
+        #   troppo grande», e a valle restano il tetto sul loop e la guardia sul disco.
+        _dichiarata = request.headers.get("content-length")
+        if _dichiarata is not None:
+            try:
+                _n = int(_dichiarata)
+            except ValueError:
+                _n = -1          # header illeggibile: come se mancasse, non un rifiuto
+            # Margine per l'overhead del multipart (boundary + campi del form): il
+            # file al tetto esatto deve poter passare, o rifiuteremmo un upload che
+            # il loop di scrittura accetterebbe.
+            _tetto = archive_indexer.MAX_UPLOAD_BYTES + 1024 * 1024
+            if _n > _tetto:
+                audit({"event": "admin_archive_upload_rifiutato_dichiarato", "by": email,
+                       "dichiarati_mb": _n // (1024 * 1024)})
+                return RedirectResponse(
+                    "/admin/archive?msg=" + quote_plus(
+                        f"upload rifiutato: dichiarati {_n // (1024 * 1024)} MB, il "
+                        f"tetto è {archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} "
+                        f"MB. Per archivi più grandi usa la CLI sulla VPS."
+                    ) + "&kind=err", status_code=303)
         form = await request.form()
         upload = form.get("jsonl_file")
         if upload is None or not hasattr(upload, "read"):
@@ -534,18 +742,58 @@ async def archive_view(request: Request) -> Response:
             fallback=_safe_db_name(Path(getattr(upload, "filename", "") or "").stem),
         )
         project = str(form.get("project") or "").strip()
+        description = str(form.get("description") or "").strip()
         suffix = Path(str(getattr(upload, "filename", "") or "")).suffix.lower() or ".jsonl"
         tmp = db_dir / f".upload-{db_name}-{os.getpid()}{suffix}"
         db_path = db_dir / f"{db_name}.db"
         try:
-            # stream su disco a chunk (memoria costante anche su file da decine di MB)
+            # stream su disco a chunk (memoria costante anche su file da decine di MB).
+            # TETTO sull'upload (H39): i tetti di decompressione stanno a valle,
+            # nell'indexer — ma un upload da 100 GB riempirebbe il disco PRIMA di
+            # arrivarci. Si conta mentre si scrive e si taglia. È la lezione del
+            # tar-bomb: un limite sul trasporto va messo anche sul trasporto.
+            # 🔴 LO SPAZIO SI GUARDA PRIMA DI SCRIVERE, e fino al 03/08 nessuno lo faceva.
+            #   Il commento di `archive_indexer.py:105` lo prescriveva da tre settimane
+            #   — «Il disco della VPS deve avere spazio per upload + DB: verificare prima
+            #   dei giganti» — e in tutto `services/` c'erano ZERO `statvfs`/`disk_usage`.
+            #   Un difetto scritto come specifica: la riga descrive il rimedio, e nessuno
+            #   l'ha letta come «da fare» perché ha la forma di una cosa già decisa.
+            # ⚠️ IL DANNO che previene non è l'upload fallito: è il DISCO PIENO. Il loop
+            #   qui sotto scrive a chunk e si ferma solo al tetto — su un disco corto
+            #   riempie tutto e muore a metà, e sulla stessa partizione ci sono il DB
+            #   dell'archivio e i suoi journal. `archive-mcp` monta quel volume in `:ro`
+            #   (H46): a disco pieno non potrebbe nemmeno riparare il proprio journal.
+            # 📏 LA SOGLIA NON È INVENTATA: è `MAX_UPLOAD_BYTES`, che esiste già. Non
+            #   conosciamo la dimensione dell'upload in anticipo (è uno stream), quindi
+            #   l'unica soglia onesta è «lo spazio che servirebbe nel caso peggiore
+            #   ammesso». È conservativa di proposito, e lo dice a chi la incontra.
+            try:
+                _libero = shutil.disk_usage(db_dir).free
+            except OSError:
+                _libero = None      # non misurabile ≠ misurato e va bene: si prosegue
+            if _libero is not None and _libero < archive_indexer.MAX_UPLOAD_BYTES:
+                audit({"event": "admin_archive_upload_rifiutato_spazio", "by": email,
+                       "db": db_name, "libero_mb": _libero // (1024 * 1024)})
+                raise ValueError(
+                    f"spazio su disco insufficiente: liberi "
+                    f"{_libero // (1024 * 1024)} MB, ne servono almeno "
+                    f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
+                    f"(il tetto di un upload). Libera spazio, oppure usa la CLI sulla "
+                    f"VPS che scrive direttamente senza il file temporaneo.")
             fh = upload.file  # type: ignore[union-attr]
             fh.seek(0)
+            written = 0
             with open(tmp, "wb") as w:
                 while True:
                     chunk = fh.read(1024 * 1024)
                     if not chunk:
                         break
+                    written += len(chunk)
+                    if written > archive_indexer.MAX_UPLOAD_BYTES:
+                        raise ValueError(
+                            f"upload troppo grande (tetto "
+                            f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB). "
+                            f"Per archivi più grandi usa la CLI sulla VPS.")
                     w.write(chunk)
             if suffix == ".db":
                 # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
@@ -558,6 +806,8 @@ async def archive_view(request: Request) -> Response:
                 # dispatch per estensione: .jsonl/.json → Claude Code; .zip → claude.ai; .md/.txt → testo
                 n = archive_indexer.index_file(str(tmp), str(db_path), project=project)
                 verb = "indicizzati"
+            if description:
+                archive_indexer.set_meta(db_path, "description", description)
             total = archive_indexer.count_rows(db_path)
             audit({"event": "admin_archive_ingest", "by": email, "db": db_name, "fmt": suffix, "rows": n})
             msg = f"{verb}: {n} record in '{db_name}' (totale {total}). Ricerca attiva subito."
@@ -580,6 +830,7 @@ async def archive_view(request: Request) -> Response:
             )
             rows += (
                 f"<tr><td><code>{html.escape(d['name'])}</code></td>"
+                f"<td>{html.escape(d.get('description') or '—')}</td>"
                 f"<td>{d['rows']}</td><td>{d['labels']}</td>"
                 f'<td class="top-labels">{top}</td>'
                 f"<td>{_fmt_size(d['size'])}</td>"
@@ -589,7 +840,7 @@ async def archive_view(request: Request) -> Response:
                 f'<button type="submit" class="danger">Elimina</button></form></td></tr>'
             )
         table = (f'<section><div class="kicker">DB nell\'archivio</div>'
-                 f'<table><thead><tr><th>nome</th><th>messaggi</th><th>etichette</th>'
+                 f'<table><thead><tr><th>nome</th><th>descrizione</th><th>messaggi</th><th>etichette</th>'
                  f'<th>principali</th><th>dimensione</th><th>aggiornato</th><th></th></tr></thead>'
                  f'<tbody>{rows}</tbody></table>'
                  f'<p class="hint">Eliminare un DB toglie subito l\'archivio dalla ricerca. '
@@ -620,15 +871,15 @@ document.querySelectorAll('form.delform').forEach(function(f){{
 {table}
 <section>
   <div class="kicker">carica una fonte da indicizzare</div>
-  <p class="muted">Formati: <code>.zip</code> (export account claude.ai — conversazioni + design chats + docs — oppure export chat Telegram Desktop, <strong>JSON o HTML</strong>: lo zip della cartella <code>ChatExport_*</code> va bene così com'è), <code>.jsonl</code> (sessione Claude Code), <code>.json</code> (export Telegram Desktop, formato JSON), <code>.pdf</code> (documento con testo — non gli screenshot), <code>.md</code>/<code>.txt</code> (testo, es. output di web2md o lettoremd), <code>.db</code> (drop-in già indicizzato). Viene reso cercabile subito. Ricaricare lo stesso <em>nome DB</em> non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano — ma non mischiare HTML e JSON della <em>stessa</em> chat nello stesso DB (chiavi diverse → doppioni).</p>
+  <p class="muted">Formati: <code>.zip</code> (export account claude.ai — conversazioni + design chats + docs — oppure export chat Telegram Desktop, <strong>JSON o HTML</strong>: lo zip della cartella <code>ChatExport_*</code> va bene così com'è — oppure il <strong>bundle di Recupero Sessioni 1777</strong>: sessioni + log MCP + workfiles-testo indicizzati, binari censiti in <code>skipped</code>, copie multiple tracciate in <code>sightings</code>), <code>.jsonl</code> (sessione Claude Code), <code>.json</code> (export Telegram Desktop, formato JSON), <code>.pdf</code> (documento con testo — non gli screenshot), <code>.md</code>/<code>.txt</code> (testo, es. output di web2md o lettoremd), <code>.db</code> (drop-in già indicizzato). Viene reso cercabile subito. Ricaricare lo stesso <em>nome DB</em> non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano — ma non mischiare HTML e JSON della <em>stessa</em> chat nello stesso DB (chiavi diverse → doppioni).</p>
   <form method="POST" action="/admin/archive" enctype="multipart/form-data">
     <div class="row"><label>fonte</label><input type="file" name="jsonl_file" accept=".jsonl,.json,.zip,.md,.txt,.pdf,.db" required></div>
     <div class="row"><label>nome DB</label><input type="text" name="db_name" placeholder="es. cc (vuoto = dal nome file)"></div>
     <div class="row"><label>progetto</label><input type="text" name="project" placeholder="etichetta (vuoto = dedotta dalla fonte)"></div>
+    <div class="row"><label>descrizione</label><input type="text" name="description" placeholder="a cosa serve / cosa contiene questo archivio (facoltativa, editabile dopo dall'MCP)"></div>
     <div class="toolbar">
       <button type="submit" class="primary">Carica e indicizza</button>
       <a class="btn" href="/admin/audit">Audit →</a>
-      <form method="POST" action="/admin/logout" style="display:inline"><button type="submit">Logout</button></form>
     </div>
   </form>
 </section>
@@ -701,6 +952,100 @@ async def update_state(request: Request) -> Response:
     })
 
 
+async def update_check(request: Request) -> Response:
+    """POST /admin/update/check — «Ricontrolla adesso»: rinfresca update_status.json
+    senza aspettare il timer giornaliero della CLI host.
+
+    Nato da un caso vero (2026-07-20): release v0.39.0 pubblicata alle 08:36Z, ultimo
+    check del timer alle 05:43Z → la pagina diceva «sei alla versione più recente» per
+    ore, senza nessun modo di forzare il refresh. Il CHECK è innocuo (un GET a GitHub
+    + un file json: niente Docker, niente privilegi) quindi può farlo il gateway;
+    l'UPDATE vero resta collect→apply della CLI host, invariato."""
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+    ob = Path(get_settings().onboarding_dir)
+    sf = ob / "update_status.json"
+    repo_slug = os.environ.get("VPS1777_GITHUB_REPO", "neo1777/vps1777")
+
+    def _fetch() -> dict:
+        import urllib.request
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{repo_slug}/releases/latest",
+            headers={"User-Agent": "vps1777-gateway-check",
+                     "Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.load(resp)
+
+    prev = _read_json(sf)
+    current = str(os.environ.get("VPS1777_VERSION", "") or prev.get("current") or "")
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    try:
+        rel = await asyncio.to_thread(_fetch)
+    except Exception as exc:  # noqa: BLE001 — URLError/timeout/JSON: dato stantio, dichiarato
+        # Dal fix H50 il gateway non ha più uscita su Internet: questa chiamata
+        # FALLISCE per progetto, e un «Check fallito: <errno>» la farebbe leggere
+        # come un guasto da riparare. Il messaggio dice cosa NON è caduto (l'avviso
+        # lo scrive il timer sull'host, il gateway lo legge dal disco) senza
+        # affermare quale delle due cause sia: il gateway non può distinguere
+        # «non ho la rete» da «GitHub non risponde», e dichiararne una sarebbe
+        # inventare. Il dettaglio tecnico resta, in coda.
+        spiega = ("Refresh non disponibile: il gateway non raggiunge GitHub. "
+                  "Se questa installazione tiene il gateway senza uscita Internet "
+                  "(impostazione predefinita) è atteso, non è un guasto: l'avviso "
+                  "di aggiornamento continua ad aggiornarsi da solo — lo scrive il "
+                  "controllo giornaliero sull'host. Dettaglio: ")
+        prev.update(error=spiega + str(exc)[:200], checked_at=now)
+        sf.write_text(json.dumps(prev, indent=2) + "\n")
+        audit({"event": "admin_update_check_err", "by": email, "error": str(exc)[:200]})
+        return RedirectResponse(
+            f"/admin/update?msg={(spiega + str(exc)[:60]).replace(' ', '+')}&kind=err",
+            status_code=303)
+    latest = str(rel.get("tag_name") or "").lstrip("v")
+    known = str(prev.get("latest") or "")
+    # `tag_name` assente, vuoto o non stringa NON significa «non c'è una release»:
+    # significa che questa risposta non lo dice. Il `or ""` sopra rende le due cose
+    # indistinguibili, e senza questa guardia il blocco in fondo scriverebbe
+    # latest="" sopra la nota buona — cancellandola.
+    #
+    # Perché è la nota, e non un campo qualunque: `update_status.json` è l'UNICO
+    # input dell'anti-downgrade della CLI (tools/vps1777.py, consume_intent), che è
+    # scritto `if known_latest and …`. Con la nota vuota quel controllo non scatta e
+    # non lascia traccia: il dato che manca spegne la guardia invece di fermarla.
+    # La guardia qui sotto non copre questo caso — confronta due versioni, e una
+    # stringa vuota non è una versione: regredire a vuoto è la regressione massima.
+    if not latest:
+        prev.update(current=current,
+                    error="GitHub non ha riportato una versione (tag_name assente)",
+                    checked_at=now)
+        sf.write_text(json.dumps(prev, indent=2) + "\n")
+        # `latest` e non una chiave nuova: audit._CHIAVI_NOTE è un'allowlist, e il
+        # valore da registrare qui È la latest nota — quella che si è TENUTA invece
+        # di sovrascrivere. L'evento e `reason` dicono già in che senso.
+        audit({"event": "admin_update_check_incomplete", "by": email,
+               "reason": "tag_name_vuoto", "latest": known})
+        msg = ("GitHub non ha riportato una versione: tengo la nota"
+               + (f" (v{known})" if known else " (non ce n'era una)"))
+        return RedirectResponse(f"/admin/update?msg={msg.replace(' ', '+')}&kind=err",
+                                status_code=303)
+    # stessa guardia della CLI: /releases/latest può servire risposte stantie dalla
+    # cache di GitHub — la «latest nota» non deve mai regredire (downgrade proposto).
+    if known and latest and version_gt(known, latest):
+        prev.update(current=current, error=None, checked_at=now)
+        sf.write_text(json.dumps(prev, indent=2) + "\n")
+        msg = f"GitHub riporta v{latest} ma la latest nota è v{known} (cache stantia): tengo la nota"
+        return RedirectResponse(f"/admin/update?msg={msg.replace(' ', '+')}&kind=ok",
+                                status_code=303)
+    prev.update(current=current, latest=latest,
+                changelog_excerpt=(rel.get("body") or "")[:800],
+                html_url=rel.get("html_url", ""), error=None, checked_at=now)
+    sf.write_text(json.dumps(prev, indent=2) + "\n")
+    audit({"event": "admin_update_check", "by": email, "latest": latest})
+    return RedirectResponse(
+        f"/admin/update?msg=Check+eseguito:+ultima+release+v{latest}&kind=ok",
+        status_code=303)
+
+
 async def update_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
@@ -734,11 +1079,13 @@ async def update_view(request: Request) -> Response:
         }
         path = ob / "update_pending_update.json"
         path.write_text(json.dumps(intent, indent=2) + "\n")
-        # 0644, non 0600: l'intent NON contiene segreti (target/nonce/email) e
-        # dev'essere LEGGIBILE dalla CLI host, che può girare con un uid diverso
-        # da quello del container gateway (uid 1000). La cancellazione la fa la
-        # CLI grazie alla ownership della dir onboarding/, non del file.
-        path.chmod(0o644)
+        # 0640 (H36): NON world-readable. L'intent porta un nonce che autorizza
+        # l'apply dell'update — non deve essere leggibile da ogni utente locale
+        # dell'host. 0640 (non 0600) per robustezza: il file lo scrive il
+        # container (uid 1000) e lo legge la CLI host, che sul bind-mount vede lo
+        # stesso uid/gid 1000 dell'operator — ma se un giorno divergessero, il
+        # gruppo copre la lettura senza rompere il pulsante update.
+        path.chmod(0o640)
         audit({"event": "admin_update_requested", "by": email, "target": latest})
         return RedirectResponse(
             "/admin/update?msg=Update+richiesto:+l'updater+parte+entro+pochi+secondi&kind=ok",
@@ -755,24 +1102,17 @@ async def update_view(request: Request) -> Response:
     excerpt = status.get("changelog_excerpt", "")
     upgrade = bool(latest) and version_gt(str(latest), current)
 
-    if check_err:
-        head = ('<div class="kicker"><span class="dot warn"></span>'
-                f'Ultimo check fallito ({html.escape(str(check_err))}) — dato stantio.</div>')
-    elif upgrade:
-        head = ('<div class="kicker"><span class="dot warn"></span>'
-                f'Aggiornamento disponibile: <strong>v{html.escape(str(latest))}</strong>'
-                f' (sei alla {html.escape(current)}).</div>')
-    elif latest and str(latest) != current:
-        head = ('<div class="kicker"><span class="dot ok"></span>'
-                f'Sei alla v{html.escape(current)} — l\'ultima release nota '
-                f'(v{html.escape(str(latest))}) è più vecchia: check stantio, '
-                'nessun aggiornamento.</div>')
-    elif latest:
-        head = ('<div class="kicker"><span class="dot ok"></span>'
-                'Sei alla versione più recente.</div>')
-    else:
-        head = ('<div class="kicker"><span class="dot off"></span>'
-                'Nessun check ancora eseguito (il timer gira una volta al giorno).</div>')
+    # DECISIONE e TESTO stanno entrambi in admin_core, dove i test arrivano; qui
+    # resta solo il vestito HTML. L'ordine è quello che l'artefatto del round-6 ha
+    # imposto: prima la copertura, poi l'interfaccia — riscrivere una frase in un
+    # file che i test non attraversano produce una frase corretta e non presidiata.
+    classe, ore = admin_core.classe_verdetto_update(
+        current, latest, checked, check_err, piu_recente=version_gt)
+    testo = admin_core.testo_verdetto_update(classe, ore, current, latest, check_err)
+    dot = "warn" if classe in ("errore-check", "aggiornamento", "timer-fermo") else (
+        "off" if classe == "mai-controllato" else "ok")
+    head = (f'<div class="kicker"><span class="dot {dot}"></span>'
+            f'{html.escape(testo)}</div>')
 
     update_btn = ""
     if upgrade and not check_err:
@@ -809,7 +1149,12 @@ document.getElementById('updform').addEventListener('submit', function(ev) {{
     <div class="status-row"><span class="lbl">ultimo check</span><span class="val">{html.escape(str(checked))}</span></div>
   </div>
   {update_btn}
-  <p class="hint">L'update è eseguito dalla CLI host (backup → pull verificato → migrazioni →
+  <form method="POST" action="/admin/update/check">
+    <div class="toolbar"><button type="submit" class="btn">↻ Ricontrolla adesso</button></div>
+  </form>
+  <p class="hint">Il check automatico gira una volta al giorno (timer host): «ultimo check»
+  può essere più vecchio di una release appena pubblicata — «Ricontrolla adesso» lo rinfresca.
+  L'update è eseguito dalla CLI host (backup → pull verificato → migrazioni →
   health-gate → rollback automatico su fallimento). Da terminale: <code>vps1777 update</code>.</p>
 </section>
 {changelog_html}
@@ -872,12 +1217,23 @@ async def audit_view(request: Request) -> Response:
         extra = {k: v for k, v in e.items() if k not in ("ts", "event")}
         ex = html.escape(json.dumps(extra, ensure_ascii=False))
         rows.append(f'<div class="audit-event"><span class="ts">{ts}</span><span class="ev">{ev}</span><span>{ex}</span></div>')
+    # Salute dell'audit (H17): se la scrittura ha fallito, un elenco che sembra
+    # solo "vuoto" è una bugia per omissione. Va detto a schermo.
+    health = audit_health()
+    health_html = ""
+    if health.get("write_failures"):
+        health_html = (
+            f'<div class="kicker" style="color:var(--err)">⚠ audit degradato: '
+            f'{health["write_failures"]} scritture fallite — gli eventi che vedi '
+            f'potrebbero essere incompleti</div>'
+        )
     body = f"""
 <header>
   <h1>vps1777 <em>admin</em> · audit</h1>
   <div class="who">{html.escape(email)}</div>
 </header>
 <section>
+  {health_html}
   <div class="kicker">ultimi {len(events)} eventi</div>
   {''.join(rows) if rows else '<p style="color:var(--muted)">Nessun evento ancora.</p>'}
 </section>

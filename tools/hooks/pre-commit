@@ -1,0 +1,272 @@
+#!/usr/bin/env bash
+# pre-commit — dice su QUALE RAMO stai per scrivere. Non blocca mai.
+#
+# PERCHÉ ESISTE: ~/Scrivania/vps1777 è UNA working copy per tre sessioni. Il ramo
+# corrente non è una proprietà di chi lo cambia: è uno STATO GLOBALE. Il 27/07
+# una sessione ha fatto `checkout -b` alle 13:22 e il commit di un'altra, venti
+# minuti dopo, è finito su quel ramo — mentre `git push origin main` usciva 0,
+# perché main era davvero aggiornato: il comando riusciva e l'effetto no.
+#
+# PERCHÉ AL COMMIT E NON NEL RITO: il rito misura quando gira il rito; l'errore
+# succede al commit. Fra i due c'è una finestra, ed è esattamente quella in cui è
+# successo. Al momento del commit c'è la mano che può ancora fermarsi.
+#
+# PERCHÉ PARLA E NON BLOCCA: un ramo dichiarato sul bus è legittimo, e un
+# guardiano che ferma il caso buono viene disattivato la prima volta che succede.
+# E qui parlare BASTA, perché non ricorda una cosa che già sai — ne porta una che
+# non potevi sapere: che il ramo l'ha cambiato un'altra mano. Un avviso che porta
+# un dato nuovo si legge; uno che ripete un dovere si salta.
+set -u
+
+# 🔴 `R` MANCAVA, e con `set -u` (riga sopra) l'unica riga che la usa faceva MORIRE
+#   l'hook: `riga 196: R: variabile non assegnata`. Il commit veniva bloccato lo stesso —
+#   ma perché il processo moriva, non perché il gate decideva — e il messaggio che spiega
+#   cosa fare (`git commit --no-verify`) non è mai comparso a nessuno.
+#   ⭐ Il ramo era stato provato «nei due sensi» il 10/08 e la prova NON l'ha visto:
+#      lo strumento stampa i propri codici SC PRIMA di questo printf, quindi si vedeva
+#      l'output atteso e un rc=1 atteso, e il gate moriva subito dopo, in silenzio.
+#      («lo strumento» e non il suo nome, di proposito: un commento che comincia con
+#       quel nome viene letto DA lui come una DIRETTIVA — SC1073/SC1072 — e lo fa
+#       uscire 1. Rilievo di 71d540e6 sulla #150: non è il commento che CONTIENE la
+#       stringa cercata, classe già vista tre volte oggi, è il commento che viene
+#       ESEGUITO. La riga raccontava come funziona lo strumento, e lo strumento l'ha
+#       presa per un ordine.)
+#      *Un verdetto giusto prodotto da un ramo rotto: la prova guardava l'esito, e
+#      l'esito era corretto per la ragione sbagliata.*
+#   ⇒ trovato il 10/08 nel modo più diretto possibile: facendogli bocciare un mio .sh.
+if [ -t 2 ]; then R=$'\e[31m'; G=$'\e[33m'; B=$'\e[34m'; F=$'\e[1m'; Z=$'\e[0m'
+else R=''; G=''; B=''; F=''; Z=''; fi
+
+ramo=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+
+# 🔴 28/07 — QUI C'ERANO DUE `exit 0`, uno per la HEAD staccata e uno per `main`.
+#   Finché l'hook faceva SOLO l'avviso sul ramo erano corretti: detto l'avviso,
+#   non restava niente da fare. Agganciandoci sotto il gate sono diventati un
+#   difetto grave e silenzioso: **su `main` — cioè in tutti i commit normali —
+#   il gate non sarebbe mai stato raggiunto**, e ogni commit sarebbe uscito verde.
+#   ⭐ Non l'ho previsto: l'ho visto rileggendo il file dopo averlo scritto.
+#   🔑 *Un `exit 0` che chiude una funzione è corretto finché quella funzione è
+#      l'ultima. Aggiungere un passo dopo non lo rompe — lo rende invisibile.*
+# 🔴 28/07 — «main» ERA SCRITTO A MANO, e in QUESTO repo il ramo si chiama `master`.
+#   ⇒ l'avviso «stai committando su X, NON su main» scattava a OGNI commit, per
+#   mesi, su un confronto che non poteva riuscire — e `git rev-list main..X`
+#   falliva in silenzio dentro l'`if`, quindi nemmeno la riga dei commit usciva.
+#   ⭐ E il modo in cui si è nascosto è il peggiore: **non era rotto, era RUMORE**.
+#      Un avviso che scatta sempre non viene letto; e uno che non viene letto è
+#      spento, anche se stampa. *Un presidio si può disattivare senza toccarlo:
+#      basta che parli quando non serve.*
+#   🔑 Il nome del ramo principale non si scrive a mano: si CHIEDE al repo.
+ramo_principale() {
+  local r
+  r=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) \
+     && { printf '%s' "${r#origin/}"; return 0; }
+  for r in main master trunk; do
+    git show-ref --verify --quiet "refs/heads/$r" && { printf '%s' "$r"; return 0; }
+  done
+  return 1
+}
+
+avvisa_ramo() {
+  if [ -z "$ramo" ]; then
+    printf '\n%s[!] HEAD STACCATA — questo commit non sta su nessun ramo%s\n' "$G" "$Z" >&2
+    # SC2016: i backtick qui sono TIPOGRAFIA (citano un comando all'umano), non
+    # sostituzione: le virgolette singole sono volute e il warning è un falso positivo.
+    # shellcheck disable=SC2016
+    printf '    Si perderà al prossimo checkout. `git switch -c <nome>` per tenerlo.\n\n' >&2
+    return 0
+  fi
+  local base
+  if ! base=$(ramo_principale); then
+    printf '%s[*]%s commit su %s%s%s — nessun ramo principale riconosciuto,\n' \
+           "$B" "$Z" "$F" "$ramo" "$Z" >&2
+    printf '    quindi NON confronto: «non lo so» non deve diventare «va bene».\n' >&2
+    return 0
+  fi
+  if [ "$ramo" = "$base" ]; then
+    printf '%s[*]%s commit su %s%s%s\n' "$B" "$Z" "$F" "$ramo" "$Z" >&2
+    return 0
+  fi
+  printf '\n%s[!] STAI COMMITTANDO SU «%s», NON SU %s%s\n' "$G" "$ramo" "$base" "$Z" >&2
+  printf "    L'albero è condiviso da tre sessioni: il ramo può averlo cambiato\n" >&2
+  printf '    una mano diversa da quella che sta committando adesso.\n' >&2
+  if avanti=$(git rev-list --count "$base..$ramo" 2>/dev/null); then
+    printf '    Su questo ramo ci sono già %s commit che %s non ha.\n' "$avanti" "$base" >&2
+  fi
+  printf '    Se è voluto va bene: questo avviso non blocca niente.\n\n' >&2
+}
+avvisa_ramo
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🛡️ IL GATE ANTI-LEAK — agganciato il 28/07 da b82df434, disegno annunciato
+#    sul bus PRIMA di farlo (seq 1222) e senza obiezioni in tre turni.
+#
+# PERCHÉ ORA: `abdd732a` ha misurato il caso vivo — il gate ha fermato lei mentre
+# scriveva le istruzioni su come non farsi fermare dal gate, **e solo perché
+# l'aveva lanciato a mano**. Un presidio che dipende dal ricordarsi di lanciarlo
+# protegge chi è già attenta: esattamente chi non ne ha bisogno.
+#
+# ⚠️ E QUESTO FILE NON GIRAVA AFFATTO: `core.hooksPath` non era impostato e
+# `.git/hooks/` è vuoto. C'era un presidio scritto, versionato, commentato — e
+# scollegato. *Un file che sembra un guardiano e non è chiamato da nessuno è
+# peggio di nessun guardiano: occupa il posto in cui ne cercheresti uno.*
+# 🔴 03/08 — LA SECONDA FORMA DEL DIFETTO, e viene dall'installato di vps1777
+#   (dove viveva da ieri sera SOLO in `.git/hooks/`, cioè in nessun commit).
+#   `--show-toplevel` dà la radice del repo in cui l'hook gira: in vps1777 è
+#   vps1777, dove `gate-antileak.py` NON ESISTE — vive qui, in _chat. La guardia
+#   `[ -f ]` era falsa, il blocco intero saltato, e **non usciva una riga**.
+#   ⇒ 63 commit dal 28/07 su un repo dal remoto PUBBLICO, nessuno guardato.
+# ⭐ La prima forma la descrive il commento qui sopra: «un file che sembra un
+#   guardiano e non è chiamato da nessuno». Questa è peggiore: **è chiamato, non
+#   trova lo strumento, e tace**. La prima si scopre cercando chi lo invoca; la
+#   seconda no — c'è un hook, gira, ed esce 0.
+# 🛡️ Due cure, e la seconda vale più della prima:
+#   ① si cerca il gate anche qui in _chat, dove vive davvero. La dipendenza
+#      cross-repo esiste già nell'altro verso: il gate importa il criterio da
+#      vps1777/security/check_no_leaks.py.
+#   ② se NON lo trova — o se non trova python3 — **LO DICE**. Un presidio che non
+#      può funzionare dev'essere rumoroso, non invisibile: «non ho potuto
+#      guardare» non è «è pulito». Vale anche per python3, che nella versione di
+#      ieri era una guardia MUTA nella stessa `if`: assente lui, silenzio totale.
+GATE="$(git rev-parse --show-toplevel 2>/dev/null)/gate-antileak.py"
+[ -f "$GATE" ] || GATE="$HOME/Scrivania/mcp_dash/_chat/gate-antileak.py"
+if [ ! -f "$GATE" ]; then
+  printf '\n%s[⚪] anti-leak: NON MISURATO — gate non trovato%s\n' "$G" "$Z" >&2
+  printf '     cercato in <toplevel>/gate-antileak.py e in _chat/\n' >&2
+  printf '     Il commit passa, ma NESSUNO ha letto le righe che entrano.\n\n' >&2
+elif ! command -v python3 >/dev/null 2>&1; then
+  printf '\n%s[⚪] anti-leak: NON MISURATO — python3 non nel PATH%s\n' "$G" "$Z" >&2
+  printf '     Il gate esiste (%s) ma non si può eseguire.\n' "$GATE" >&2
+  printf '     Il commit passa, ma NESSUNO ha letto le righe che entrano.\n\n' >&2
+else
+  # 🔑 TRE STATI, non due (b82df434, 02/08): 0 = ho guardato e va bene ·
+  #    1 = ho trovato qualcosa · 2 = NON HO POTUTO GUARDARE (zero file esaminati).
+  #    Il 2 NON blocca: un commit di sole cancellazioni o rinomine non aggiunge
+  #    righe, quindi il gate non ha niente da leggere — ed è legittimo. Bloccarlo
+  #    porterebbe a `--no-verify`, cioè a spegnere il presidio per un caso normale.
+  #    ⚠️ Ma si VEDE: il gate stampa «NON MISURATO» e qui sotto lo si ripete, o un
+  #    2 silenzioso si legge come un verde — che è il difetto per cui il 2 esiste.
+  python3 "$GATE" --staged >&2
+  GATE_RC=$?
+  if [ "$GATE_RC" = "2" ]; then
+    printf '\n%s[⚪] gate anti-leak: NON MISURATO (nessuna riga aggiunta da leggere)%s\n' "$G" "$Z" >&2
+    printf '     Il commit passa — ma questo NON è un «tutto a posto».\n\n' >&2
+  elif [ "$GATE_RC" != "0" ]; then
+    printf '\n%s[✗] COMMIT FERMATO dal gate anti-leak%s\n' "$G" "$Z" >&2
+    printf '    Sopra c è QUALE riga e in quale file. Tre vie, in ordine:\n' >&2
+    printf '     1. togli il dato (quasi sempre: rimanda alla fonte invece di copiarla)\n' >&2
+    printf '     2. se il file è uno STRUMENTO, dichiaralo in gate-antileak.py CON LA RAGIONE\n' >&2
+    printf '     3. se devi passare comunque:  git commit --no-verify\n' >&2
+    printf '        ⚠️ la 3 non lascia traccia: se la usi, dillo sul bus.\n\n' >&2
+    exit 1
+  fi
+  # 🔑 LA RIGA CHE RENDE ONESTO IL VERDE, ed è la condizione con cui ho accettato
+  #    di agganciare. Senza, il verde a ogni commit si legge «siamo coperte» — e
+  #    il buco si sposta di un anello, dove nessuna lo cerca perché «quello lo
+  #    abbiamo già risolto». È la nota 484ad508ecdb, e questo aggancio la
+  #    fabbricherebbe di sana pianta.
+  printf '%s[✓]%s anti-leak: ho letto le RIGHE che entrano in git.' "$B" "$Z" >&2
+  printf ' %sNON leggo ciò che esce dal disco%s\n' "$F" "$Z" >&2
+  # 🔄 AGGIORNATA il 02/08 (b82df434) — e la riga vecchia era VERA quando scritta.
+  #   Diceva «upload a NotebookLM, scelte/, msg/ — nessuno di questi passa da qui».
+  #   Resta vero di QUESTO hook; è diventato fuorviante sul SISTEMA, perché da
+  #   `5b51747` l'impacchettatore verso NotebookLM il gate lo chiama da sé.
+  # 🔑 Un elenco di «cosa non copro» invecchia nel verso silenzioso: quando una di
+  #   quelle voci viene coperta altrove, la riga non diventa falsa — diventa una
+  #   mappa che manda a cercare una difesa dove non è più l'unica assente. Perciò
+  #   qui si dice dove STA l'altra, non solo che qui non c'è.
+  printf '    (scelte/, msg/, e ciò che copiate a mano: non passano da qui)\n' >&2
+  printf '    NotebookLM: coperto altrove — scripts/impacchetta-repo.py chiama il gate\n' >&2
+  printf '    da sé e RIFIUTA di scrivere se trova qualcosa (regola-5).\n' >&2
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SHELLCHECK sui .sh che entrano in git (b82df434, 10/08)
+#
+# 🔴 PERCHÉ, misurato oggi sulla PR #146: una riga bash suggerita sul bus da una
+#   sessione, incollata e committata da un'altra. Passò dall'anti-leak («contiene
+#   segreti?» — risposta giusta, domanda diversa) e da nessun giudice del suo
+#   LINGUAGGIO. `SC2086` l'ha presa la CI, dodici minuti e un push più tardi.
+# ⭐ Non era codice non sorvegliato: era sorvegliato da chi giudica un'ALTRA
+#   proprietà. La forma di sempre — una sonda che risponde benissimo a una
+#   domanda vicina.
+# 📌 E il caso peggiore è proprio quello che l'ha prodotto: **il codice che NON
+#   hai scritto tu arriva «pronto», e questo abbassa la guardia più della fretta.**
+#   Ciò che scriviamo lo rileggiamo; ciò che riceviamo lo incolliamo.
+#
+# 🛡️ Stessa regola d'oro del gate qui sopra: se shellcheck non c'è, LO DICE.
+#   «Non ho potuto guardare» non è «è pulito», e un hook che tace quando non
+#   trova lo strumento è la classe che questo file combatte da riga 100.
+# 🚪 Via d'uscita: `git commit --no-verify` (standard git) — bloccare senza uscita
+#   insegna a disattivare l'hook, che è peggio del difetto che previene.
+_SH_STAGED="$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.sh$' || true)"
+if [ -n "$_SH_STAGED" ]; then
+  if command -v shellcheck >/dev/null 2>&1; then
+    _SC="shellcheck"
+  elif command -v docker >/dev/null 2>&1; then
+    _SC="docker run --rm -v $PWD:/mnt -w /mnt koalaman/shellcheck:stable"
+  else
+    _SC=""
+  fi
+  # SC2086: `$_SH_STAGED` è una LISTA di file e va espansa in argomenti. La direttiva sta
+  # davanti all'`if` intero e non davanti al suo `elif`: prima di un ramo non vale, e non
+  # viene ignorata — rompe il parsing di tutto ciò che segue (SC1123).
+  # shellcheck disable=SC2086
+  if [ -z "$_SC" ]; then
+    printf '\n%s[⚪] shellcheck: NON MISURATO%s — né in PATH né via docker\n' "$G" "$Z" >&2
+    printf '     %s\n' "$(echo "$_SH_STAGED" | tr '\n' ' ')" >&2
+    printf '     Il commit passa, ma NESSUNO ha letto questi .sh come BASH.\n\n' >&2
+  elif ! $_SC $_SH_STAGED >&2; then
+    printf '\n%s[✗] shellcheck: problemi negli .sh che stai committando%s\n' "$R" "$Z" >&2
+    printf '     Se è voluto: git commit --no-verify\n' >&2
+    printf '     (la CI lo rifarebbe comunque: meglio adesso che dopo un push)\n\n' >&2
+    exit 1
+  else
+    printf '%s[✓]%s shellcheck: %s file .sh letti come bash\n' "$B" "$Z" "$(echo "$_SH_STAGED" | grep -c .)" >&2
+  fi
+fi
+
+# ── ruff sui .py staged — la gemella dello shellcheck qui sopra ───────────────
+#
+# 🔴 IL CASO CHE L'HA GENERATO, 10/08/2026: PR #147, `lint` ROSSO in CI per una `F541`
+#   (f-string senza placeholder). `uvx ruff check .` la trova in due secondi — ma niente
+#   la cercava prima del push, e il giro è stato: commit → push → CI → attesa → fix →
+#   push. Lo stesso buco che shellcheck aveva chiuso per bash quella mattina («dodici
+#   minuti e un push fra lo scrivere una riga e il primo giudizio competente»), rimasto
+#   aperto sul linguaggio in cui è scritto **quasi tutto questo repo**.
+#   ⭐ La cura di un buco su un linguaggio non copre l'altro, e la somiglianza fra i due
+#      casi è ciò che rende invisibile il secondo: «il lint c'è già» — sì, in CI.
+#
+# 🛡️ Stessa regola d'oro dei gate qui sopra: se ruff non c'è, LO DICE. «Non ho potuto
+#   guardare» non è «è pulito». E la CI resta l'autorità: questo hook anticipa il suo
+#   verdetto, non lo sostituisce — gira sui soli file STAGED, la CI su tutto il repo.
+# 🚪 Via d'uscita: `git commit --no-verify`.
+_PY_STAGED="$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)"
+if [ -n "$_PY_STAGED" ]; then
+  if command -v ruff >/dev/null 2>&1; then
+    _RUFF="ruff"
+  elif command -v uvx >/dev/null 2>&1; then
+    _RUFF="uvx ruff"          # è così che lo invoca la CI: stesso strumento, stessa resa
+  else
+    _RUFF=""
+  fi
+  # SC2086 è disabilitato per l'intero blocco e non davanti al singolo `elif`: una
+  # direttiva vale solo prima di un comando composto COMPLETO, mai di un suo ramo
+  # (SC1123) — e messa nel posto sbagliato non viene ignorata, rompe il parsing di
+  # tutto ciò che segue. Trovato sulla #150, dove questo file era l'unico shell del
+  # repo che il gate CI non guarda: il difetto sarebbe entrato in main senza attriti.
+  # shellcheck disable=SC2086
+  if [ -z "$_RUFF" ]; then
+    printf '\n%s[⚪] ruff: NON MISURATO%s — né in PATH né via uvx\n' "$G" "$Z" >&2
+    printf '     %s\n' "$(echo "$_PY_STAGED" | tr '\n' ' ')" >&2
+    printf '     Il commit passa, ma NESSUNO ha letto questi .py prima della CI.\n\n' >&2
+  elif ! $_RUFF check $_PY_STAGED >&2; then   # espansione voluta: è una lista di file
+    printf '\n%s[✗] ruff: problemi nei .py che stai committando%s\n' "$R" "$Z" >&2
+    printf '     Se è voluto: git commit --no-verify\n' >&2
+    printf '     (la CI lo rifarebbe comunque: meglio adesso che dopo un push)\n\n' >&2
+    exit 1
+  else
+    printf '%s[✓]%s ruff: %s file .py letti\n' "$B" "$Z" "$(echo "$_PY_STAGED" | grep -c .)" >&2
+  fi
+fi
+
+exit 0

@@ -21,8 +21,48 @@
 #   GATEWAY_BIND=0.0.0.0   → fallback raggiungibile via http://IP:8080 (se il Funnel non parte)
 #
 # Profilo: ingress.tailscale
+#
+# ──────────────────────────────────────────────────────────────────────────
+# LA RETE `funnel`, e perché esiste (27/07, incidente in produzione)
+# ──────────────────────────────────────────────────────────────────────────
+# H50 ha tolto `ingress` al gateway per chiudergli l'uscita NAT verso Internet.
+# La misura era giusta e l'uscita si è chiusa davvero — ma il gateway è rimasto
+# SOLO su `backend`, che è `internal: true`, e:
+#
+#   UNA PORTA NON SI PUÒ PUBBLICARE DA UNA RETE `internal`.
+#   Docker accetta la direttiva `ports:` qui sotto e NON la applica, in silenzio.
+#
+# Esito misurato sulla VPS: `docker port` vuoto, nessun listener su 8080,
+# connessione rifiutata; il Funnel bussava a 127.0.0.1:8080 e non c'era nessuno.
+# Il servizio è stato irraggiungibile da Internet per ~1h40m. Nessun presidio
+# l'ha visto: l'healthcheck sonda 127.0.0.1:8080 DA DENTRO il container, dove
+# la porta risponde — un container `healthy` su un servizio irraggiungibile.
+#
+# La cura: una rete bridge NON internal con il masquerade (SNAT) disattivato.
+# Il DNAT in ingresso resta — la porta si pubblica e serve; l'SNAT in uscita no
+# — i pacchetti verso Internet partono con un IP privato e non tornano.
+# Misurata su due versioni di docker (20.10.24 sulla VPS, 29.4.1 in laboratorio),
+# sui DUE esiti: porta che risponde E uscita in timeout, con la controprova che
+# su un bridge normale l'uscita è aperta.
+#
+# Perché una rete NUOVA e non `ingress` col masquerade spento: `ingress` è la
+# rete su cui il gateway parla con caddy e cloudflared negli altri due profili,
+# e cloudflared DEVE uscire su Internet per funzionare. Spegnere lì il
+# masquerade avrebbe chiuso un buco in questo profilo rompendo quell'altro.
+# ⚠️ Residuo dichiarato: nei profili caddy/cloudflared il gateway riprende
+# `ingress` e quindi l'uscita NAT. H50 resta `partial` per quelli.
 
 services:
   gateway:
     ports:
       - "${GATEWAY_BIND:-127.0.0.1}:8080:8080"
+    networks:
+      - backend
+      - funnel
+
+networks:
+  funnel:
+    driver: bridge
+    driver_opts:
+      # ingresso sì (DNAT), uscita no (niente SNAT): è tutta la cura.
+      com.docker.network.bridge.enable_ip_masquerade: "false"

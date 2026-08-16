@@ -26,7 +26,12 @@ services:
       # NIENTE docker.sock (finding 2.8/H13): montare il socket dà al container
       # il controllo root-equivalente dell'host. I volumi dati sono invece
       # montati DIRETTAMENTE in sola lettura e backup.sh li tara da /volumes.
-      - ${PWD}:/vps1777:rw                       # repo (tools/backup.sh + recipient age)
+      # `.` e NON `${PWD}`: il path RELATIVO lo risolve compose rispetto alla
+      # --project-directory (il repo), sempre. `${PWD}` è un'espansione d'ambiente
+      # = la cwd del CHIAMANTE: `vps1777 update` lanciato da /root montava /root
+      # su /vps1777 e il container moriva su "backup-container-setup.sh: no such
+      # file" — con auto-rollback che rifalliva uguale (2026-07-20, dal vivo).
+      - .:/vps1777:rw                            # repo (tools/backup.sh + recipient age)
       - ./backups:/backups:rw
       - gateway-data:/volumes/gateway-data:ro
       - archive-data:/volumes/archive-data:ro

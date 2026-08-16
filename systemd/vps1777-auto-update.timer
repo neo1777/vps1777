@@ -1,0 +1,23 @@
+# vps1777-auto-update.timer — schedula l'auto-update SICURO (opt-in).
+#
+# Gemello di vps1777-check-update.timer, ma questo APPLICA (non solo notifica):
+# fa partire vps1777-auto-update.service = `vps1777 update --yes`, con tutta la
+# rete di sicurezza (backup, firma, migrazioni, health-gate, rollback).
+# Cadenza settimanale di default (l'update è un evento raro e va lasciato
+# assestare); RandomizedDelaySec distribuisce il carico; Persistent recupera i
+# giri persi se la VPS era spenta.
+#
+# ACCESO SOLO SE DICHIARATO: l'install lo abilita solo quando la feature
+# `autoupdate` è nello stato dichiarato (.env: VPS1777_FEATURES). Così un reinstall
+# riproduce ESATTAMENTE la scelta, e l'assenza non è mai silenziosa (referto post-install).
+
+[Unit]
+Description=vps1777 — auto-update programmato (settimanale)
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

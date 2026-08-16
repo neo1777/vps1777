@@ -1,6 +1,7 @@
 """Test dell'indexer archive (stdlib-only, offline)."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -118,6 +119,86 @@ def test_index_file_claude_zip(tmp_path: Path) -> None:
         assert [x[0] for x in r2] == ["project:prog"]
     finally:
         conn.close()
+
+
+def test_conversation_summary_indexed(tmp_path: Path) -> None:
+    """La `summary` di una conversazione claude.ai viene indicizzata come riga
+    attribuita `sender='summary'` — prima era persa (nessun codice la leggeva)."""
+    import json
+    import zipfile
+    zp = tmp_path / "export.zip"
+    convs = [{
+        "uuid": "c1", "name": "Chat lunga", "updated_at": "2026-02-02T00:00:00Z",
+        "summary": "Discussione su ARCHIVISUMMARY e migrazione",
+        "chat_messages": [
+            {"uuid": "m1", "sender": "human", "created_at": "2026-02-02T00:00:00Z", "text": "ciao"},
+        ],
+    }]
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(zp), str(db))
+    assert n == 2  # 1 messaggio + 1 summary
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        r = conn.execute(
+            "SELECT project, sender FROM messages WHERE content LIKE '%ARCHIVISUMMARY%'").fetchall()
+        assert r == [("Chat lunga", "summary")]
+        hits = conn.execute(
+            "SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'ARCHIVISUMMARY'").fetchone()[0]
+        assert hits == 1
+    finally:
+        conn.close()
+
+
+def test_parent_uuid_index_created(tmp_path: Path) -> None:
+    """L'indice su `parent_uuid` (che abilita get_conversation) è creato all'ingest,
+    anche per i DB migrati da v1 (CREATE INDEX IF NOT EXISTS nello schema)."""
+    md = tmp_path / "n.md"
+    md.write_text("# t\n\ncorpo", encoding="utf-8")
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(md), str(db))
+    conn = sqlite3.connect(str(db))
+    try:
+        idx = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_parent'").fetchall()
+        assert idx == [("idx_parent",)]
+    finally:
+        conn.close()
+
+
+def test_skipped_ledger(tmp_path: Path) -> None:
+    """I record scartati dall'ingest (no-uuid, vuoti) finiscono nella tabella
+    `skipped` — reversibili e leggibili — invece di sparire in silenzio (D3/#56).
+    Idempotente: re-indicizzare non duplica le lapidi."""
+    import json
+    import zipfile
+    zp = tmp_path / "export.zip"
+    convs = [{
+        "uuid": "c1", "name": "Chat",
+        "chat_messages": [
+            {"uuid": "ok1", "sender": "human", "created_at": "2026-03-03T00:00:00Z", "text": "valido"},
+            {"sender": "human", "created_at": "2026-03-03T00:00:01Z", "text": "senza uuid"},
+            {"uuid": "empty1", "sender": "human", "created_at": "2026-03-03T00:00:02Z", "text": ""},
+        ],
+    }]
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(zp), str(db))
+    assert n == 1  # solo il messaggio valido finisce in messages
+    assert archive_indexer.count_skipped(db) == 2  # no-uuid + vuoto
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        reasons = sorted(r[0] for r in conn.execute("SELECT reason FROM skipped").fetchall())
+        assert reasons == ["empty", "no-uuid"]
+        d = conn.execute("SELECT detail FROM skipped WHERE reason='no-uuid'").fetchone()[0]
+        assert "senza uuid" in d  # il dato raw è reversibile, leggibile alla bisogna
+    finally:
+        conn.close()
+    assert archive_indexer.db_info(db)["skipped"] == 2  # conteggio superficiato, non muto
+    archive_indexer.index_file(str(zp), str(db))
+    assert archive_indexer.count_skipped(db) == 2  # re-index non duplica le lapidi
 
 
 def test_index_file_design_chats_zip(tmp_path: Path) -> None:
@@ -277,6 +358,116 @@ def test_index_file_zip_non_riconosciuto(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="non riconosciuto"):
         archive_indexer.index_file(str(zp), str(tmp_path / "out.db"))
     assert not (tmp_path / "out.db").exists()
+
+
+# ── contratto dei bucket + classify_cc (canary anti-drift col preflight app) ──
+
+def test_ai_title_senza_sessionId_non_crasha() -> None:
+    """Regression: `_iter_claude_code` referenziava `n_riga` (rimosso) nel ramo
+    ai-title → NameError su un titolo SENZA sessionId = crash dell'ingest del file.
+    Ora l'uid ripiega sul testo del titolo."""
+    import io
+    line = '{"type":"ai-title","aiTitle":"titolo orfano"}\n'
+    rows = list(archive_indexer._iter_claude_code(io.StringIO(line), "test"))
+    assert len(rows) == 1
+    assert rows[0][4] == "title" and rows[0][3] == "titolo orfano"
+
+
+# Il contratto: UN record per bucket. Tenuto INLINE (non un file .jsonl, che il
+# .gitignore esclude → non arriverebbe in CI). La copia condivisa per la corsia app
+# vive in `_chat/contract/cc_buckets.jsonl`; il suo canary confronta il proprio
+# preflight con la mia classify VIVA (`--classify`) sulla stessa fixture, quindi
+# regge anche se le due copie divergono — non si fida di un atteso salvato.
+_CC_BUCKETS = [
+    '{"type":"user","uuid":"u-1","timestamp":"2026-01-01T10:00:00Z","message":{"role":"user","content":"ciao come va"}}',
+    '{"type":"assistant","uuid":"a-1","timestamp":"2026-01-01T10:00:01Z","message":{"role":"assistant","content":"bene, procedo"}}',
+    '{"type":"ai-title","sessionId":"sess-9","aiTitle":"Titolo con sessione"}',
+    '{"type":"ai-title","aiTitle":"Titolo SENZA sessione"}',
+    '{"type":"attachment","uuid":"att-1","attachment":{"addedNames":["schema.sql","note.md"]}}',
+    '{"type":"attachment","uuid":"att-2","attachment":{"addedNames":[]}}',
+    '{"type":"queue-operation","operation":"flush"}',
+    '{"type":"user","message":{"role":"user","content":"senza uuid ne ts"}}',
+    '{"type":"user","uuid":"u-empty","timestamp":"2026-01-01T10:00:02Z","message":{"role":"user","content":[]}}',
+    # ── EMPTY-BLOCK: blocchi PRESENTI ma vuoti (aggiunti 25/07 da abdd732a) ────────
+    # 🔴 Perché non bastava `content: []`: il divario di **+6.919 record** del 17/07 non
+    #   veniva dai messaggi senza contenuto, ma da quelli col contenuto DICHIARATO E VUOTO
+    #   (9.813 casi nel bundle). Il contratto copriva la lista vuota e NON questa classe:
+    #   il canary restava verde su una fixture di 9 righe che non conteneva il caso per cui
+    #   il canary esiste. *Il divario lo trovò un diff full-bundle, non la guardia.*
+    # ⭐ Una guardia va collaudata sul caso che deve PRENDERE — e su quello che deve
+    #   LASCIAR PASSARE: l'ultimo record qui sotto è la controprova (testo vero → keep).
+    #   Senza di lei, «tutto skip» passerebbe il test come fosse un successo.
+    '{"type":"user","uuid":"u-txt0","timestamp":"2026-01-01T10:00:03Z","message":{"role":"user","content":[{"type":"text","text":""}]}}',
+    '{"type":"assistant","uuid":"a-think0","timestamp":"2026-01-01T10:00:04Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":""}]}}',
+    '{"type":"user","uuid":"u-tr0","timestamp":"2026-01-01T10:00:05Z","message":{"role":"user","content":[{"type":"tool_result","content":""}]}}',
+    '{"type":"user","uuid":"u-ok","timestamp":"2026-01-01T10:00:06Z","message":{"role":"user","content":[{"type":"text","text":"vero"}]}}',
+]
+
+
+def test_contratto_bucket_classify_cc() -> None:
+    """Il contratto copre UN record per bucket; `classify_cc` deve dare questa
+    sequenza esatta di verdetti. Se cambio l'ordine/i bucket di `_iter_claude_code`,
+    questo test si spacca — ed è il segnale che il preflight della corsia app (che
+    replica la logica) va ri-verificato. Il canary è una sottrazione: entrambi gli
+    strumenti classificano la stessa fixture e i verdetti devono combaciare."""
+    import io
+    verdicts = archive_indexer.classify_cc(io.StringIO("\n".join(_CC_BUCKETS) + "\n"))
+    assert verdicts == [
+        "keep:user",
+        "keep:assistant",
+        "keep:title",          # ai-title con sessionId
+        "keep:title",          # ai-title senza sessionId (fix n_riga)
+        "keep:attachment",
+        "skip:non-message",    # attachment senza addedNames
+        "skip:non-message",    # queue-operation (type fuori da _CC_TYPES)
+        "skip:no-uuid-o-ts",
+        "skip:empty",          # content: [] — lista vuota
+        "skip:empty",          # text: ""      — blocco presente, vuoto
+        "skip:empty",          # thinking: ""  — idem
+        "skip:empty",          # tool_result vuoto — idem
+        "keep:user",           # CONTROPROVA: testo vero → deve PASSARE
+    ]
+
+
+def test_index_file_zip_di_documenti(tmp_path: Path) -> None:
+    """Zip che NON è un export ma contiene .md/.txt → indicizzato come documenti
+    (fallback 'archive deve indicizzare zip md txt, quel che è'). Ogni membro
+    diventa cercabile, col path del membro come progetto/chiave."""
+    import zipfile
+    zp = tmp_path / "note.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("a.md", "# Primo\n\nParola CHIAVEALFA nel primo doc.")
+        z.writestr("sub/b.txt", "Parola CHIAVEBETA nel secondo, dentro una cartella.")
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(zp), str(db))
+    assert n >= 2
+    conn = sqlite3.connect(str(db))
+    a = conn.execute("SELECT project FROM messages_fts WHERE messages_fts MATCH 'CHIAVEALFA'").fetchall()
+    b = conn.execute("SELECT project FROM messages_fts WHERE messages_fts MATCH 'CHIAVEBETA'").fetchall()
+    conn.close()
+    assert a == [("a.md",)]
+    assert b == [("sub/b.txt",)]
+    # idempotente: re-indicizzare lo stesso zip non duplica (uuid stabile)
+    archive_indexer.index_file(str(zp), str(db))
+    assert archive_indexer.count_rows(db) == n
+
+
+def test_index_file_zip_documenti_ignora_macosx(tmp_path: Path) -> None:
+    """Le resource-fork di macOS (__MACOSX/, ._*) non entrano come documenti
+    -fantasma: si indicizza solo il .md reale."""
+    import zipfile
+    zp = tmp_path / "mac.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("vero.md", "contenuto CHIAVEVERA reale")
+        z.writestr("__MACOSX/._vero.md", b"\x00\x05\x16\x07")  # resource fork binaria
+        z.writestr("._vero.md", b"\x00\x05\x16\x07")
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(zp), str(db))
+    assert n == 1
+    conn = sqlite3.connect(str(db))
+    rows = conn.execute("SELECT project FROM messages").fetchall()
+    conn.close()
+    assert rows == [("vero.md",)]
 
 
 def test_index_file_zip_riconosciuto_ma_vuoto(tmp_path: Path) -> None:
@@ -609,6 +800,33 @@ def test_v2_users_json_indicizzato_lupload_non_filtra(tmp_path: Path) -> None:
 
     La protezione dei dati sensibili è un problema di OUTPUT (mascheramento in
     ricerca, cifratura at-rest, ACL) e va risolta dove si legge.
+
+    ✅ AGGIORNATO 02/08: LA PRIMA DELLE TRE ORA ESISTE — e questa riga va letta con
+    la precisione con cui è stato scritto il buco, perché la frase sopra è ciò che
+    rende accettabile l'indicizzazione verbatim.
+      · `services/archive-mcp/app/redazione.py` + la sostituzione di `mcp.tool` in
+        `server.py`: ogni tool esce redatto, e uno NUOVO lo eredita per costruzione
+        (verificato con l'AST da `test_redazione_copre_tutti_i_tool`)
+      · scelta fra le tre e sua ragione nel docstring di `redazione.py`; decisione
+        di Neo del 02/08 07:09 («la migliore, non la più economica»)
+    🔴 E COSA **NON** COPRE, provato da un test invece che dichiarato
+    (`test_il_limite_dichiarato_e_vero`) — un filtro sui dati sensibili si giudica
+    sui FALSI NEGATIVI, non sui falsi positivi:
+      · escono redatti: email e telefoni OVUNQUE (transcript compresi) e i valori
+        dell'anagrafica anche scritti a mano dentro un messaggio
+      · NON esce redatto: un dato personale senza formato riconoscibile e assente
+        dall'anagrafica — il nome di un terzo dentro una conversazione
+      · il DB su disco resta IN CHIARO: questo è mascheramento in uscita, non
+        cifratura at-rest. Delle tre, le altre due restano da fare.
+    ⇒ la frase difendibile non è «i dati personali non escono in chiaro»: è
+      «gli identificatori in formato riconoscibile e l'anagrafica non escono in
+      chiaro da nessun tool». Più stretta, e vera.
+
+    ⭐ Il ragionamento resta giusto: filtrare all'INGRESSO è la mossa sbagliata.
+    📌 Reperto da non perdere: fino al 02/08 questa docstring prometteva tre
+    protezioni che non esistevano — «va risolta dove si legge» faceva sembrare
+    decisa una zona che nessuno aveva deciso, ed è il compenso citato che rende
+    invisibile il debito. Il difetto non era l'indicizzazione: era la promessa.
     """
     db = tmp_path / "m.db"
     archive_indexer.index_file(str(_claude_zip_memories(tmp_path)), str(db))
@@ -660,3 +878,688 @@ def test_v2_allegato_senza_nome_usa_uuid(tmp_path: Path) -> None:
         assert "5cd72e4f-dead-beef" in att
     finally:
         conn.close()
+
+
+# ── H39: tetti su upload/decompressione (zip-bomb / OOM) ─────────────────────
+# La lezione: un limite su un input COMPRESSO non è un limite. Si conta ciò che
+# l'archivio DIVENTA, byte per byte, non ciò che dichiara.
+
+
+def _small_caps(monkeypatch) -> None:
+    """Abbassa i tetti a valori minuscoli per testare i rami di errore senza
+    dover generare gigabyte. Si patcha il modulo, non si toccano le costanti reali."""
+    monkeypatch.setattr(archive_indexer, "MAX_MEMBER_BYTES", 2000)
+    monkeypatch.setattr(archive_indexer, "MAX_ARCHIVE_BYTES", 4000)
+    monkeypatch.setattr(archive_indexer, "MAX_FILE_BYTES", 2000)
+
+
+def test_zip_member_oltre_il_tetto_fallisce_parlante(tmp_path, monkeypatch) -> None:
+    import json
+    import zipfile
+
+    import pytest
+    _small_caps(monkeypatch)
+    # conversations.json che DECOMPRESSO supera MAX_MEMBER_BYTES (2000): un solo
+    # messaggio con un text enorme. Lo zip compresso resta piccolo (zip-bomb-lite).
+    convs = [{"uuid": "c1", "name": "chat", "chat_messages": [
+        {"uuid": "m1", "sender": "human", "created_at": "2026-01-01", "text": "x" * 50_000},
+    ]}]
+    zp = tmp_path / "bomb.zip"
+    with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    assert zp.stat().st_size < 2000  # il COMPRESSO è sotto il tetto: il pericolo è a valle
+    with pytest.raises(ValueError, match="DECOMPRESSO|tetto"):
+        archive_indexer.index_file(str(zp), str(tmp_path / "o.db"))
+
+
+def test_zip_troppi_membri_fallisce(tmp_path, monkeypatch) -> None:
+    import zipfile
+
+    import pytest
+    monkeypatch.setattr(archive_indexer, "MAX_ZIP_MEMBERS", 5)
+    zp = tmp_path / "many.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", "[]")
+        for i in range(10):
+            z.writestr(f"projects/p{i}.json", "{}")
+    with pytest.raises(ValueError, match="troppi file"):
+        archive_indexer.index_file(str(zp), str(tmp_path / "o.db"))
+
+
+def test_budget_cumulativo_su_piu_membri(tmp_path, monkeypatch) -> None:
+    import json
+    import zipfile
+
+    import pytest
+    # Ogni membro sta sotto MAX_MEMBER_BYTES, ma la SOMMA supera MAX_ARCHIVE_BYTES:
+    # è la zip-bomb "a tanti file medi". Il budget condiviso deve fermarla.
+    monkeypatch.setattr(archive_indexer, "MAX_MEMBER_BYTES", 100_000)
+    monkeypatch.setattr(archive_indexer, "MAX_ARCHIVE_BYTES", 3000)
+    dc = {"uuid": "d", "title": "Chat", "messages": [
+        {"uuid": "m", "role": "user", "created_at": "2026-01-01",
+         "content": {"role": "user", "content": "y" * 2000}}]}
+    zp = tmp_path / "sum.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", "[]")
+        for i in range(5):
+            z.writestr(f"design_chats/d{i}.json", json.dumps(dc))
+    with pytest.raises(ValueError, match="archivio supera"):
+        archive_indexer.index_file(str(zp), str(tmp_path / "o.db"))
+
+
+def test_file_jsonl_oltre_il_tetto(tmp_path, monkeypatch) -> None:
+    import json
+
+    import pytest
+    _small_caps(monkeypatch)
+    big = tmp_path / "big.jsonl"
+    line = json.dumps({"type": "user", "uuid": "u1", "timestamp": "t",
+                       "message": {"content": "z" * 5000}})
+    big.write_text(line + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="troppo grande|MAX_FILE"):
+        archive_indexer.index_file(str(big), str(tmp_path / "o.db"))
+
+
+def test_zip_normale_sotto_i_tetti_passa(tmp_path) -> None:
+    import json
+    import zipfile
+    # Guardia di non-regressione: coi tetti REALI un export piccolo passa liscio.
+    convs = [{"uuid": "c1", "name": "chat", "chat_messages": [
+        {"uuid": "m1", "sender": "human", "created_at": "2026-01-01", "text": "ciao"}]}]
+    zp = tmp_path / "ok.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    assert archive_indexer.index_file(str(zp), str(tmp_path / "o.db")) == 1
+
+
+def test_meta_description(tmp_path: Path) -> None:
+    """La descrizione dell'archivio (D5) vive nella tabella `meta`: scritta con
+    set_meta (upload admin / tool MCP), letta con get_meta, superficiata da
+    db_info. Assente → stringa vuota, mai un errore."""
+    md = tmp_path / "n.md"
+    md.write_text("# t\n\ncorpo", encoding="utf-8")
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(md), str(db))
+    assert archive_indexer.get_meta(db, "description") == ""
+    assert archive_indexer.db_info(db)["description"] == ""
+    archive_indexer.set_meta(db, "description", "note di lavoro 1777")
+    assert archive_indexer.get_meta(db, "description") == "note di lavoro 1777"
+    assert archive_indexer.db_info(db)["description"] == "note di lavoro 1777"
+
+
+def test_skipped_no_collapse(tmp_path: Path) -> None:
+    """Il caso provato da b82df434 (16/07): tre scarti GEMELLI (stesso tipo, niente
+    ts) devono produrre TRE lapidi, non una. L'uid era sha1(source·reason·detail·ts)
+    con detail=tipo e ts vuoto → collassavano via INSERT OR IGNORE: il contatore
+    della perdita perdeva. Ora il detail porta la posizione nel file (unica per riga,
+    stabile fra re-ingest: dedup fra ingest sì, collasso dentro l'ingest no)."""
+    p = tmp_path / "s.jsonl"
+    p.write_text("\n".join([
+        '{"type":"user","uuid":"ok1","timestamp":"2026-01-01T00:00:00Z","message":{"content":"valido"}}',
+        '{"type":"user","message":{"content":"senza ts 1"}}',
+        '{"type":"user","message":{"content":"senza ts 2"}}',
+        '{"type":"user","message":{"content":"senza ts 3"}}',
+    ]), encoding="utf-8")
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(p), str(db))
+    assert n == 1  # solo il valido
+    assert archive_indexer.count_skipped(db) == 3  # TRE lapidi, non una
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        details = [r[0] for r in conn.execute(
+            "SELECT detail FROM skipped WHERE reason='no-uuid-o-ts' ORDER BY detail").fetchall()]
+        assert len(details) == 3 and len(set(details)) == 3  # uniche
+    finally:
+        conn.close()
+    # la proprietà che NON va persa: re-ingest dello stesso file NON duplica le lapidi
+    archive_indexer.index_file(str(p), str(db))
+    assert archive_indexer.count_skipped(db) == 3
+
+
+def test_claude_code_metadati(tmp_path: Path) -> None:
+    """Le righe non-user/assistant NON spariscono più in un continue muto (D3, 17/07):
+    i metadati operativi lasciano una lapide 'non-message' (contata → la quadratura
+    chiude), l'ai-title diventa una riga cercabile e l'attachment coi nomi-file è
+    indicizzato (parità col path claude.ai)."""
+    p = tmp_path / "s.jsonl"
+    p.write_text("\n".join([
+        '{"type":"user","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","message":{"content":"ciao"}}',
+        '{"type":"ai-title","aiTitle":"CHIAVETITOLO configurazione tick","sessionId":"s1"}',
+        '{"type":"attachment","uuid":"att1","timestamp":"2026-01-01T00:00:01Z","cwd":"/x/proj","parentUuid":"u1","attachment":{"addedNames":["CHIAVEFILE.dart"]}}',
+        '{"type":"mode","sessionId":"s1"}',            # metadato operativo → lapide
+        '{"type":"queue-operation","sessionId":"s1"}', # idem
+    ]), encoding="utf-8")
+    db = tmp_path / "out.db"
+    n = archive_indexer.index_file(str(p), str(db))
+    assert n == 3  # user + ai-title + attachment (indicizzati)
+    assert archive_indexer.count_skipped(db) == 2  # mode + queue-operation (contati, non spariti)
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        assert conn.execute("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'CHIAVETITOLO'").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH 'CHIAVEFILE'").fetchone()[0] == 1
+        reasons = sorted(r[0] for r in conn.execute("SELECT reason FROM skipped").fetchall())
+        assert reasons == ["non-message", "non-message"]
+    finally:
+        conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# D10/§1 — SNIFF DEL CONTENUTO e D18 — REVISIONI (20/07/2026)
+# Due decisioni di Neo nello stesso giro. I test stanno insieme perché insieme
+# chiudono la stessa domanda: «cosa fa l'indexer con ciò che non riconosce, e
+# con ciò che cambia sotto lo stesso identificatore?»
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_sniff_riconosce_il_testo_travestito():
+    """Un file fuori whitelist che È testo va letto, non seppellito.
+
+    Sul bundle reale erano 829 su 2.633 «non-testo» (31%): appunti senza
+    estensione, todo, script, Dockerfile, .cjs/.proto/.service/.xsd/.ndjson.
+    La classificazione per estensione è un'ETICHETTA, non una misura.
+    """
+    from archive_indexer import _sniff_e_testo
+    assert _sniff_e_testo(b"#!/bin/sh\necho ciao")            # script senza estensione
+    assert _sniff_e_testo(b'{"a":1}\n{"b":2}')                # ndjson
+    assert _sniff_e_testo("appunti: à è ì ò ù 🔧".encode())    # utf-8 con accenti ed emoji
+
+
+def test_sniff_non_promuove_i_binari():
+    """Il collaudo che conta: i NEGATIVI.
+
+    Un criterio troppo generoso infilerebbe spazzatura binaria nell'indice
+    full-text — peggio del problema che risolve.
+    """
+    from archive_indexer import _sniff_e_testo
+    assert not _sniff_e_testo(b"\x89PNG\r\n\x1a\n\x00\x00")   # NUL ⇒ binario
+    assert not _sniff_e_testo(b"\xff\xd8\xff\xe0JFIF")        # jpeg
+    assert not _sniff_e_testo(b"")                            # vuoto
+    assert not _sniff_e_testo(b"\x00" * 10)
+
+
+def _riga(uuid, contenuto, ts="2026-01-01T00:00:00Z"):
+    return (uuid, "proj:test", ts, contenuto, "human", "", "", "", "")
+
+
+def test_revisioni_non_nascono_su_dati_immutabili(tmp_path):
+    """Il NEGATIVO dichiarato da setaccio prima del merge: re-ingerire dati
+    immutabili deve produrre ZERO revisioni. Anche una sola = c'è un bug,
+    oppure abbiamo scoperto un contenuto che cambia e non lo sapevamo."""
+    from archive_indexer import write_rows
+    db = tmp_path / "a.db"
+    write_rows(db, [_riga("u1", "testo"), _riga("u2", "altro")])
+    write_rows(db, [_riga("u1", "testo"), _riga("u2", "altro")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT count(*) FROM revisions").fetchone()[0] == 0
+
+
+def test_revisioni_conservano_la_versione_uscente(tmp_path):
+    """Il caso `memory:*`: stesso uuid, contenuto diverso fra due export.
+
+    Prima di questa modifica l'INSERT OR REPLACE faceva vincere l'ultimo e il
+    primo spariva senza traccia. Le versioni sopravvivevano solo perché stavano
+    in DB separati — un accidente della topologia, non una proprietà.
+    """
+    from archive_indexer import write_rows
+    db = tmp_path / "b.db"
+    write_rows(db, [_riga("slot", "versione di maggio")])
+    write_rows(db, [_riga("slot", "versione di luglio")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT content FROM messages WHERE uuid='slot'").fetchone()[0] \
+            == "versione di luglio"          # la ricerca vede l'ultima: API invariata
+        assert c.execute("SELECT content FROM revisions WHERE uuid='slot'").fetchone()[0] \
+            == "versione di maggio"          # la storia non si perde
+
+
+def test_revisioni_si_accumulano_e_sono_idempotenti(tmp_path):
+    from archive_indexer import write_rows
+    db = tmp_path / "c.db"
+    for testo in ("prima", "seconda", "terza"):
+        write_rows(db, [_riga("s", testo)])
+    write_rows(db, [_riga("s", "terza")])     # ri-mando la corrente: nulla di nuovo
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT count(*) FROM revisions WHERE uuid='s'").fetchone()[0] == 2
+
+
+def test_ts_source_esiste_e_il_default_e_messaggio(tmp_path):
+    """Il regime del dato promosso da nota a schema: senza questa colonna, un ts
+    sintetico (data-export) sarebbe indistinguibile da un ts vero, e il `newest`
+    dichiarerebbe un istante in cui nessun messaggio è mai esistito."""
+    from archive_indexer import write_rows
+    db = tmp_path / "d.db"
+    write_rows(db, [_riga("x", "y")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT ts_source FROM messages WHERE uuid='x'").fetchone()[0] == "messaggio"
+
+
+def test_migrazione_db_preesistente_non_perde_dati(tmp_path):
+    """I nove archivi vivi sono nati prima di questa versione: la migrazione
+    deve essere trasparente."""
+    from archive_indexer import write_rows
+    db = tmp_path / "vecchio.db"
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT,"
+            " sender TEXT DEFAULT '', tools TEXT DEFAULT '', thinking TEXT DEFAULT '',"
+            " attachments TEXT DEFAULT '', parent_uuid TEXT DEFAULT '');")
+        c.execute("INSERT INTO messages(uuid,project,ts,content) VALUES('old','p','2026-05-01','storico')")
+    write_rows(db, [_riga("new", "nuovo")])
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT content FROM messages WHERE uuid='old'").fetchone()[0] == "storico"
+        # ⚠️ Questa riga asseriva 'messaggio' e PASSAVA: il test codificava il difetto che
+        # b82df434 ha poi trovato in 2ª lettura (una riga migrata NON è un messaggio noto —
+        # può essere una memory). Un test verde che certifica il comportamento sbagliato è
+        # peggio di nessun test: dà la conferma che nessuno andrà a ricontrollare.
+        assert c.execute("SELECT ts_source FROM messages WHERE uuid='old'").fetchone()[0] == "ignoto"
+        c.execute("SELECT count(*) FROM revisions")   # la tabella ora esiste
+
+
+def test_migrazione_non_dichiara_messaggio_cio_che_non_sa(tmp_path):
+    """Finding bloccante di b82df434 (2ª lettura, 20/07), prima del merge.
+
+    `ALTER TABLE … ADD COLUMN ts_source DEFAULT 'messaggio'` assegna 'messaggio'
+    a TUTTE le righe già in tabella — comprese `memory:*` e `account:user`, che
+    NON sono messaggi ma slot riscrivibili: cioè proprio ciò per cui la colonna
+    esiste. Sarebbe stata la bugia opposta, scritta in un colpo solo su nove
+    archivi vivi, e con l'aria di un dato verificato.
+    Il regime di una riga preesistente NON è conoscibile a posteriori: 'ignoto'
+    è l'unica etichetta vera.
+    """
+    from archive_indexer import write_rows
+    db = tmp_path / "mig.db"
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT,"
+            " sender TEXT DEFAULT '', tools TEXT DEFAULT '', thinking TEXT DEFAULT '',"
+            " attachments TEXT DEFAULT '', parent_uuid TEXT DEFAULT '');")
+        c.execute("INSERT INTO messages(uuid,project,ts,content)"
+                  " VALUES('mem','memory:conversations','','slot riscrivibile')")
+        c.execute("INSERT INTO messages(uuid,project,ts,content)"
+                  " VALUES('msg','proj:x','2026-05-01','un messaggio vero')")
+    write_rows(db, [_riga("nuovo", "scritto ora")])
+    with sqlite3.connect(db) as c:
+        reg = dict(c.execute("SELECT uuid, ts_source FROM messages"))
+    # Il discrimine NON è «vecchia o nuova»: è **se un ts c'è**. Ci sono voluti tre giri
+    # (default secco → tutte non-classificate → questa) e due bocciature reciproche:
+    # b82df434 ha bocciato la prima (asserisce un regime mai verificato sulle memory),
+    # setaccio ha bocciato la seconda (errore SIMMETRICO: negare 'messaggio' a righe-evento
+    # vere avrebbe reso NULL il newest di nove DB, rompendo ciò che il requisito proteggeva).
+    # La proposta «ts pieno ⇒ messaggio» è stata scartata da una MISURA: su cc-bundle-200726,
+    # delle 221.514 righe con ts pieno **140.476 (63,4%) non sono conversazioni** — workfile,
+    # mcp-log e documenti, il cui ts è il timestamp del file nello zip. Asserzione falsa su
+    # quasi due terzi dell'archivio.
+    assert reg["mem"] == "ignoto", "una memory migrata NON può risultare 'messaggio'"
+    assert reg["msg"] == "ignoto", "nemmeno una riga con ts: il ts può venire dal filesystem"
+    assert reg["nuovo"] == "messaggio", "ciò che entra ORA dall'ingest ha il regime noto"
+
+
+def test_newest_si_calcola_in_negativo(tmp_path):
+    """Corollario del fix: il filtro per il `newest` va scritto su ciò che si SA
+    (`<> 'data-export'`), non su ciò che si presume (`= 'messaggio'`).
+
+    Con la forma positiva, su un DB migrato le righe 'ignoto' sparirebbero dal
+    calcolo — cioè quasi tutte — e il newest risulterebbe troppo VECCHIO.
+    """
+    from archive_indexer import write_rows
+    db = tmp_path / "new.db"
+    with sqlite3.connect(db) as c:
+        c.executescript(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT, content TEXT,"
+            " sender TEXT DEFAULT '', tools TEXT DEFAULT '', thinking TEXT DEFAULT '',"
+            " attachments TEXT DEFAULT '', parent_uuid TEXT DEFAULT '');")
+        c.execute("INSERT INTO messages(uuid,project,ts,content)"
+                  " VALUES('vecchio','p','2026-07-19T10:00:00Z','recente ma migrato')")
+    write_rows(db, [_riga("nuovo", "meno recente", "2026-01-01T00:00:00Z")])
+    with sqlite3.connect(db) as c:
+        negativo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source <> 'data-export'").fetchone()[0]
+        positivo = c.execute("SELECT MAX(ts) FROM messages WHERE ts_source = 'messaggio'").fetchone()[0]
+    assert negativo == "2026-07-19T10:00:00Z", "la forma negativa vede le righe 'ignoto': corretta"
+    # ⚠️ QUESTO SECONDO ASSERT È IL CUORE DEL TEST, non un di più (b82df434, 20/07).
+    # In un giro di refactoring era stato tolto, lasciando solo la verifica che la forma GIUSTA
+    # funzioni. Ma `= 'messaggio'` è la forma più naturale da scrivere — era la mia prima
+    # versione — e senza questa riga la suite resterebbe VERDE mentre qualcuno la "semplifica",
+    # riportando il difetto. Un test che protegge un comportamento ma non la DECISIONE che c'è
+    # sotto lascia scoperto proprio ciò che è costato tre giri e due bocciature.
+    assert positivo != negativo, "la forma positiva DEVE sbagliare: esclude le righe 'ignoto'"
+    assert positivo == "2026-01-01T00:00:00Z", "…e sbaglia dando un newest troppo VECCHIO"
+
+
+# ═══════════════════════════════════════════ VOICE-TAGGING — Fase 1 (speaker) ══
+
+def test_speaker_da_sender_traduce_solo_cio_che_sa():
+    """`speaker` è un FATTO: ciò che la fonte non dice resta 'unknown'."""
+    f = archive_indexer.speaker_da_sender
+    assert f("user") == "human"
+    assert f("assistant") == "assistant"
+    assert f("USER") == "human", "il case della fonte non deve cambiare il verdetto"
+    assert f("  user  ") == "human", "né gli spazi"
+    # ⚠️ IL CUORE DEL TEST, e la ragione per cui queste colonne esistono (b82df434, 02/08).
+    # `attachment` e `title` sono nature della RIGA, non mittenti — misurato su un DB vivo:
+    # 2.327 + 1.132 righe su 61.100. La tentazione naturale è mapparle su 'human' (un
+    # allegato l'ha caricato un umano, no?) o su 'assistant'. Entrambe fabbricherebbero
+    # un'attribuzione che la fonte NON contiene, che è esattamente il difetto che il
+    # voice-tagging esiste per curare. Se qualcuno "completa" la mappa, questo test cade.
+    assert f("attachment") == "unknown", "un allegato non dice CHI l'ha scritto"
+    assert f("title") == "unknown", "un titolo non è un mittente"
+    assert f("memory") == "unknown"
+    assert f("") == "unknown"
+    assert f(None) == "unknown", "nessun crash sul NULL della colonna"
+    assert f("Mario Rossi") == "unknown", (
+        "un nome sconosciuto NON diventa 'human' per somiglianza: la spec prevede i nomi "
+        "Telegram come umani, ma da qui nome-persona ed etichetta-di-sistema sono "
+        "indistinguibili. Si tara in Fase 2, col golden-set.")
+
+
+def _db_v2(tmp_path: Path, righe) -> Path:
+    """Un DB nello schema v2 (senza le colonne del voice-tagging), come quelli già vivi."""
+    db = tmp_path / "v2.db"
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "CREATE TABLE messages(uuid TEXT PRIMARY KEY, project TEXT, ts TEXT,"
+            " content TEXT, sender TEXT DEFAULT '', tools TEXT DEFAULT '',"
+            " thinking TEXT DEFAULT '', attachments TEXT DEFAULT '',"
+            " parent_uuid TEXT DEFAULT '', ts_source TEXT DEFAULT 'messaggio')")
+        c.executemany("INSERT INTO messages(uuid,project,ts,content,sender)"
+                      " VALUES(?,?,?,?,?)", righe)
+    return db
+
+
+def test_migrate_v3_aggiunge_colonne_e_deriva_speaker(tmp_path: Path):
+    db = _db_v2(tmp_path, [
+        ("u1", "p", "2026-01-01T00:00:00Z", "domanda", "user"),
+        ("a1", "p", "2026-01-01T00:00:01Z", "risposta", "assistant"),
+        ("t1", "p", "2026-01-01T00:00:02Z", "un titolo", "title"),
+        ("f1", "p", "2026-01-01T00:00:03Z", "un allegato", "attachment"),
+    ])
+    assert archive_indexer.migrate_v2_to_v3(db) is True
+    with sqlite3.connect(db) as c:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(messages)")}
+        assert {"speaker", "voice", "quoted_share", "voice_conf", "content_flags"} <= cols
+        got = dict(c.execute("SELECT uuid, speaker FROM messages"))
+        vuoti = c.execute("SELECT count(*) FROM messages WHERE speaker=''").fetchone()[0]
+        # 🔻 AGGIORNATO 02/08 (Fase 3): questa riga asseriva `voice == 0` — «la Fase 1 non
+        #    deve scrivere `voice`, è una stima e la stima arriva in Fase 2». La ragione
+        #    era ed è giusta, ma diceva **una cosa più stretta di quello che voleva dire**:
+        #    proibiva il valore invece di pretendere che fosse CALCOLATO. Ora la migrazione
+        #    chiama `popola_voice`, quindi la stima c'è ed è legittima — e il principio
+        #    resta, girato dalla parte utile: dopo la migrazione **nessuna riga resta senza
+        #    classificazione**, perché una colonna a metà è peggio di una vuota (chi la
+        #    interroga non distingue «non è di quel tipo» da «non è mai stata guardata»).
+        senza_voice = c.execute("SELECT count(*) FROM messages WHERE voice=''").fetchone()[0]
+        voci = c.execute("SELECT count(*) FROM messages WHERE voice<>''").fetchone()[0]
+    assert got == {"u1": "human", "a1": "assistant", "t1": "unknown", "f1": "unknown"}
+    assert vuoti == 0, "dopo la migrazione nessuna riga resta senza asse-mittente"
+    assert senza_voice == 0, (
+        "una riga con `voice=''` dopo la migrazione è una riga che NESSUNO ha guardato, e "
+        "sui filtri della Fase 3 sarebbe indistinguibile da una riga 'di un altro tipo'")
+    assert voci == 4, "e la classificazione dev'essere stata CALCOLATA, non lasciata al default"
+
+
+def test_migrate_v3_e_idempotente(tmp_path: Path):
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "user")])
+    assert archive_indexer.migrate_v2_to_v3(db) is True
+    assert archive_indexer.migrate_v2_to_v3(db) is False, "la seconda volta non migra nulla"
+    with sqlite3.connect(db) as c:
+        assert archive_indexer.popola_speaker(c) == 0, "e non riscrive nessuna riga"
+        assert c.execute("SELECT speaker FROM messages").fetchone()[0] == "human"
+
+
+def test_speaker_non_sovrascrive_un_valore_gia_scritto(tmp_path: Path):
+    """`popola_speaker` tocca SOLO `speaker=''`.
+
+    Serve perché la Fase 2 (e il retag della Fase 4) scriveranno valori più precisi di
+    quelli derivabili da `sender` — es. un nome Telegram riconosciuto come umano. Se la
+    derivazione li riscrivesse a ogni ingest, il lavoro fine verrebbe cancellato dal
+    lavoro grezzo, e in silenzio.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "Mario Rossi")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET speaker='human' WHERE uuid='u1'")
+        assert archive_indexer.popola_speaker(c) == 0
+        assert c.execute("SELECT speaker FROM messages").fetchone()[0] == "human"
+
+
+# ═══════════════════════════ VOICE-TAGGING — Fase 2 (classify_voice) ══
+# Il principio di taratura e' ASIMMETRICO (spec §2): falsi negativi accettabili,
+# falsi positivi CARI. Questi test lo proteggono nei due versi.
+
+def test_classify_il_falso_positivo_e_il_caso_che_conta():
+    """Una frase VERA di chi scrive non deve MAI diventare `pasted`.
+
+    ⚠️ E' il test piu' importante dei cinque, ed e' quello che si e' tentati di
+    non scrivere perche' «tanto non succede». Il caso-C++ e' successo proprio
+    cosi': una frase vera attribuita alla persona sbagliata. Qui la direzione e'
+    l'altra — una frase propria marcata come altrui — e il costo e' lo stesso:
+    l'archivio smette di poter dire di chi sono le parole.
+    """
+    v = archive_indexer.classify_voice(
+        "Io il C++ praticamente non lo conosco. Io sono Dart, e sono un amatoriale. "
+        "Ne parlavamo ieri alle 14:30 e anche stamattina alle 9:15.",
+        sender="user", project="chat qualunque")
+    assert v[0] == "own", f"una frase propria con due ORARI dentro resta own, non {v[0]}"
+    assert v[2] >= 0.5
+
+
+def test_classify_transcript_serve_piu_di_un_segnale():
+    testo = "(0:12) allora vediamo (1:45) come dicevo (2:30) e qui si chiude"
+    # con il titolo-trappola: due segnali indipendenti → transcript
+    v = archive_indexer.classify_voice(testo, sender="user", project="Analisi transcript video")
+    assert v[0] == "pasted_transcript"
+    assert "video_ts" in v[3] and "trap_title" in v[3], "le bandiere sono l'autopsia del verdetto"
+    # ⚠️ SENZA il titolo, TRE timestamp NON bastano — e questo test l'ha scoperto
+    # cadendo: la mia aspettativa era piu' permissiva del codice, e il codice aveva
+    # ragione. Tre orari citati in una chat sono plausibili («alle 9:15, alle 14:30
+    # e alle 18:00»); un transcript vero ne ha decine. Il principio dice falsi
+    # positivi CARI ⇒ da solo, il segnale deve essere molto forte (TS_VIDEO_MIN*3).
+    v2 = archive_indexer.classify_voice(testo, sender="user", project="chat")
+    assert v2[0] != "pasted_transcript", "tre timestamp da soli non bastano"
+    assert "video_ts" in v2[3], "ma la bandiera si alza lo stesso: il segnale c'e', non basta"
+    # con SEI, il segnale e' forte abbastanza da reggere da solo
+    molti = testo + " (3:10) e poi (4:20) e infine (5:00)"
+    v3 = archive_indexer.classify_voice(molti, sender="user", project="chat")
+    assert v3[0] == "pasted_transcript"
+    assert v3[2] < v[2], "ma con UN segnale solo la CONFIDENZA resta sotto quella a due"
+
+
+def test_classify_character_dal_progetto_e_la_regola_piu_solida():
+    """L'unica delle sette che non guarda il testo: il project lo DICHIARA."""
+    v = archive_indexer.classify_voice("Il mago avanza di due caselle.",
+                                       sender="user", project="GDR1777 — il caso graphify")
+    assert v[0] == "character"
+    assert v[2] >= 0.8, "e' la regola piu' affidabile, la confidenza lo dice"
+
+
+def test_classify_blocco_inglese_da_umano_e_MIXED_non_pasted_ai():
+    """Il caso-scuola: l'umano scrive la cornice, l'AI il materiale.
+
+    Fondere i due assi renderebbe questo caso inesprimibile — ed e' il caso che
+    ci ha fatto sbagliare. `speaker=human` E `voice=mixed`: entrambi veri.
+    """
+    testo = ("Guarda cosa mi ha risposto:\n"
+             "The system should be designed with the assumption that the network "
+             "is not reliable, and that any of the components can fail at any time; "
+             "this is the only way to build software that will not surprise you in "
+             "production when it matters the most for the users of the platform.")
+    v = archive_indexer.classify_voice(testo, sender="user", project="chat")
+    assert v[0] == "mixed", f"da umano e' mixed, non pasted_ai (era {v[0]})"
+    assert "en_in_it" in v[3]
+    # lo stesso testo da un assistant non ha una cornice umana davanti
+    v2 = archive_indexer.classify_voice(testo, sender="assistant", project="chat")
+    assert v2[0] == "pasted_ai"
+
+
+def test_classify_non_inventa_su_cio_che_non_sa():
+    """Vuoto e mittente ignoto: `unknown`, non un default comodo."""
+    assert archive_indexer.classify_voice("")[0] == "unknown"
+    assert archive_indexer.classify_voice("   \n  ")[0] == "unknown"
+    v = archive_indexer.classify_voice("testo qualunque senza bandiere",
+                                       sender="attachment", project="doc")
+    assert v[0] == "unknown", "un allegato non dice chi ha scritto: non e' own"
+    assert v[2] == 0.0, "e la confidenza zero lo dichiara"
+
+
+# ════════════════ VOICE-TAGGING — il POPOLAMENTO, che alla Fase 2 mancava ══════
+# 🔴 Il difetto che questi test avrebbero preso e non c'era nessuno a prenderlo:
+#    `classify_voice` esisteva, era testata da nove casi, ed era chiamata SOLO dai
+#    test. Nessun punto del codice di produzione la usava ⇒ la colonna `voice` era
+#    vuota su tutto l'archivio, e i filtri della Fase 3 avrebbero risposto ZERO a
+#    ogni interrogazione, senza un errore e senza un log.
+# ⭐ La Fase 2 SEMBRAVA fatta perché aveva le due cose che si guardano — la funzione
+#    e i suoi test. Mancava l'unica che conta: qualcuno che la chiami.
+
+def test_ingest_classifica_la_voce_delle_righe_che_scrive(tmp_path: Path):
+    """DOPO un ingest, `voice` è popolato. È il test che avrebbe preso il buco.
+
+    Non prova `classify_voice` (ci sono già nove casi per quello): prova che
+    l'indexer LA CHIAMI. Sono due cose diverse, e per una settimana solo la prima
+    era coperta.
+    """
+    src = tmp_path / "c.jsonl"
+    src.write_text(
+        '{"uuid":"u1","sessionId":"s","type":"user",'
+        '"message":{"role":"user","content":"una frase mia qualunque"},'
+        '"timestamp":"2026-01-01T00:00:00Z"}\n', encoding="utf-8")
+    db = tmp_path / "a.db"
+    archive_indexer.index_jsonl(str(src), str(db), project="p")
+
+    with sqlite3.connect(db) as c:
+        vuoti = c.execute("SELECT count(*) FROM messages WHERE voice=''").fetchone()[0]
+        tutte = c.execute("SELECT count(*) FROM messages").fetchone()[0]
+    assert tutte > 0, "l'ingest non ha scritto niente: il test non prova nulla"
+    assert vuoti == 0, (
+        "riga ingerita e MAI classificata: `voice=''` sopravvive all'ingest. È il "
+        "difetto della Fase 2 — la funzione c'era e non la chiamava nessuno")
+
+
+def test_popola_voice_e_idempotente_e_non_ritocca_i_giudizi(tmp_path: Path):
+    """Seconda passata: zero righe. E `unknown` NON viene ri-classificato.
+
+    🔑 `unknown` è un GIUDIZIO («guardata, non riconosciuta»), non un vuoto. Se
+    `popola_voice` lo ripescasse, ogni ritocco delle soglie riscriverebbe in
+    silenzio decisioni già prese — e il retag della Fase 4 non avrebbe più un
+    prima/dopo da confrontare.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "user"),
+                           ("u2", "p", "2026-01-01T00:01:00Z", "y", "attachment")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        assert archive_indexer.popola_voice(c) == 0, "la seconda passata deve scrivere ZERO"
+        unknown = c.execute("SELECT count(*) FROM messages WHERE voice='unknown'").fetchone()[0]
+        assert unknown > 0, "il caso serve: senza righe `unknown` non prova niente"
+        assert archive_indexer.popola_voice(c) == 0, "e `unknown` non è ripescabile"
+
+
+def test_il_vuoto_e_lo_sconosciuto_restano_due_stati(tmp_path: Path):
+    """`voice=''` (nessuno l'ha guardata) ≠ `voice='unknown'` (guardata, non riconosciuta).
+
+    🖐️ Condizione posta da `71d540e6` firmando i nomi delle classi, e la ragione è
+    sua: *se collassassero in un nome solo, chi cerca `voice:unknown` crederebbe di
+    avere «le righe difficili» mentre ha «le righe mai lette» — e stavolta lo
+    crederebbe un utente, non noi che sappiamo com'è fatto.*
+    ⭐ È la regola più ricorrente che abbiamo — `None` = non misurato ≠ `0` = misurato
+    e vuoto — al posto dove costa meno oggi: dopo la Fase 3 separarli richiederebbe
+    un DROP+rebuild dell'indice.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "attachment")])
+    with sqlite3.connect(db) as c:
+        archive_indexer._ensure_v3(c)
+        prima = c.execute("SELECT voice FROM messages").fetchone()[0]
+        assert prima == "", "prima del classificatore la riga NON è 'unknown': è non-guardata"
+        archive_indexer.popola_voice(c)
+        dopo = c.execute("SELECT voice FROM messages").fetchone()[0]
+    assert dopo == "unknown", "dopo, è un giudizio — e ha un nome diverso dal vuoto"
+
+
+def test_popola_voice_non_gira_a_vuoto_se_una_regola_torna_stringa_vuota(monkeypatch,
+                                                                        tmp_path: Path):
+    """La guardia anti-loop, provata invece che dichiarata.
+
+    Il ciclo esce quando `voice=''` non trova più righe: una regola che tornasse `''`
+    lascerebbe la riga eleggibile per sempre. Su un DB da 61k righe sarebbe un blocco
+    silenzioso dell'ingest — non un errore, un processo che non finisce.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "x", "user")])
+    monkeypatch.setattr(archive_indexer, "classify_voice",
+                        lambda *a, **k: ("", 0.0, 0.0, ""))
+    with sqlite3.connect(db) as c:
+        archive_indexer._ensure_v3(c)
+        assert archive_indexer.popola_voice(c) == 1
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "unknown", (
+            "la guardia deve scrivere un valore NON vuoto, o il ciclo non termina")
+
+
+# ═══════════════ VOICE-TAGGING Fase 4 — il retag, e il suo default a secco ════
+
+def test_retag_a_secco_calcola_e_non_scrive(tmp_path: Path):
+    """Il delta è REALE (calcolato riga per riga), ma niente viene salvato.
+
+    🛡️ È la proprietà che rende il comando usabile: un referto che si può chiedere
+    senza conseguenze. Se il dry-run stimasse invece di calcolare, il numero che
+    guida la decisione di scrivere sarebbe diverso da quello che poi succede.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='SEGNAPOSTO'")
+        c.commit()
+        esito = archive_indexer.retag_voice(c, scrivi=False)
+        assert esito["righe"] == 1
+        assert esito["cambiate"] == 1, "il delta dev'essere calcolato, non stimato"
+        assert esito["scritto"] is False
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "SEGNAPOSTO", (
+            "a secco il DB NON deve cambiare: è tutto il senso del default")
+
+
+def test_retag_con_scrivi_applica_e_riporta_lo_stesso_delta(tmp_path: Path):
+    """Ciò che il secco prometteva è ciò che lo scrivi fa. Se divergessero, il
+    referto sarebbe una previsione e non un'anteprima."""
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='SEGNAPOSTO'")
+        c.commit()
+        secco = archive_indexer.retag_voice(c, scrivi=False)
+        vero = archive_indexer.retag_voice(c, scrivi=True)
+        c.commit()
+        assert vero["cambiate"] == secco["cambiate"]
+        assert vero["dopo"] == secco["dopo"]
+        assert vero["scritto"] is True
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] != "SEGNAPOSTO"
+
+
+def test_retag_riscrive_anche_cio_che_popola_voice_non_tocca(tmp_path: Path):
+    """La differenza fra i due, che è la ragione per cui il retag esiste.
+
+    `popola_voice` tocca SOLO `voice=''` — giustamente, o ogni ritocco delle soglie
+    riscriverebbe in silenzio giudizi già presi. `retag_voice` riscrive apposta, ed
+    è per questo che non parte da solo.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='vecchio_giudizio'")
+        c.commit()
+        assert archive_indexer.popola_voice(c) == 0, "popola_voice non tocca i giudizi"
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "vecchio_giudizio"
+        archive_indexer.retag_voice(c, scrivi=True)
+        c.commit()
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] != "vecchio_giudizio"
+
+
+def test_retag_dalla_riga_di_comando_non_scrive_senza_scrivi(tmp_path: Path, capsys):
+    """L'entrypoint CLI ha lo stesso default della funzione.
+
+    🔑 Non è ridondante col test sulla funzione: il default vive in DUE posti (la
+    firma e l'argparse) e possono divergere. Una `store_true` scritta al contrario
+    renderebbe il comando distruttivo per difetto, con la funzione ancora prudente.
+    """
+    db = _db_v2(tmp_path, [("u1", "p", "2026-01-01T00:00:00Z", "testo mio", "user")])
+    archive_indexer.migrate_v2_to_v3(db)
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET voice='SEGNAPOSTO'")
+        c.commit()
+    assert archive_indexer.main([str(db), "--retag"]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["scritto"] is False and out["cambiate"] == 1
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT voice FROM messages").fetchone()[0] == "SEGNAPOSTO"

@@ -33,6 +33,16 @@ services:
     security_opt:
       - no-new-privileges:true
     volumes:
+      # ⚠️ QUESTO È ACCESSO ROOT ALL'HOST, non un volume di servizio: chi raggiunge il
+      # socket parla con l'API Docker e può creare un container che monta `/`. Portainer
+      # senza socket non esiste — è la sua funzione — quindi l'alternativa non è
+      # «montarlo meglio», è non attivare il profilo.
+      # Qui NON c'è `:ro`, ed è più onesto che averlo: su `docker.sock` il `:ro` limita
+      # il nodo del filesystem e NON le richieste sull'API (vedi compose.ops.watchtower).
+      # Accettato perché `profiles: [ops.portainer]` è opt-in, la porta è su loopback
+      # (accesso via tunnel SSH) e il container ha `no-new-privileges`.
+      # 🔒 Presidiato da tools/tests/test_docker_sock_perimetro.py: eccezione NOMINATA,
+      #    valida finché questo avviso resta scritto.
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer-data:/data
     networks:

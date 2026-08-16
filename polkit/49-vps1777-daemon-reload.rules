@@ -1,0 +1,38 @@
+// vps1777 — l'ANELLO MANCANTE della "via B" del self-update (voce a329f659).
+//
+// ⚠️ QUESTO FILE È INERTE FINCHÉ È IN VIGORE LA VIA A, e va detto prima di tutto:
+//    installarlo da solo NON abilita niente e NON serve a niente. Aggiunge un
+//    permesso senza guadagno. Ha senso SOLO nel pacchetto "via B", cioè insieme al
+//    ripristino delle sei direttive di hardening sulle due unit che usano sudo
+//    (vps1777-auto-update.service, vps1777-update.service) + CAP_DAC_OVERRIDE e
+//    CAP_CHOWN. Vedi il blocco di commento in testa a quelle unit.
+//
+// PERCHÉ ESISTE (misurato il 09/08 su polkit 124):
+//    pkcheck --action-id org.freedesktop.systemd1.reload-daemon --process $$
+//      → exit 2 · "Authorization requires authentication"
+//    `systemctl daemon-reload` chiede una password. In un update NON INTERATTIVO
+//    (timer systemd) quella richiesta non ha nessuno che risponda: il self-update
+//    muore lì. Le altre operazioni privilegiate del self-update — 4 `install` e
+//    2 `chown` — si coprono con le capability; `daemon-reload` NON è una
+//    capability, è un'azione D-Bus, e l'unico modo di concederla è una regola qui.
+//
+// PERIMETRO — deliberatamente il più stretto che funziona:
+//    · SOLO `reload-daemon`. NON `manage-units` (che darebbe start/stop/restart di
+//      QUALUNQUE unit) e NON `manage-unit-files` (enable/disable). Rileggere i file
+//      non avvia niente.
+//    · SOLO l'utente operatore. Il nome NON è inventato qui: è `OPERATOR_USER`,
+//      fissato in installer/engine.py:30.
+//    · Nessun `subject.local`/`subject.active`: il timer gira SENZA sessione, e una
+//      condizione su quelle proprietà lo escluderebbe proprio nel caso per cui la
+//      regola esiste. È il difetto "la guardia esclude il caso che deve coprire".
+//
+// RISCHIO RESIDUO, dichiarato: chi controlla l'utente operatore può far rileggere a
+// systemd i file delle unit. Per cambiarne il CONTENUTO serve però scrivere in
+// /etc/systemd/system, che resta root-only — quindi la regola non aggiunge una via
+// per eseguire codice, aggiunge una via per ricaricare ciò che root ha già scritto.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.reload-daemon" &&
+        subject.user == "vps1777") {
+        return polkit.Result.YES;
+    }
+});

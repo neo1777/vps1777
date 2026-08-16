@@ -1,0 +1,1252 @@
+# features.yaml — IL LEDGER DELLE FUNZIONI di vps1777 (e dei suoi MCP).
+#
+# ─ PERCHÉ ESISTE ──────────────────────────────────────────────────────────────
+# Regola d'oro (Neo, 17/07): «vps1777 sarà esteso tantissimo e non deve MAI capitare
+# che ci perdiamo funzioni per strada — anche cambiando sessione o LLM.»
+# Una memoria muore col cambio-sessione/LLM. Questo file NO: vive in git, e una
+# MACCHINA (tools/verify-features.py, in CI) lo controlla contro la realtà. Un LLM
+# nuovo non deve RICORDARE le funzioni: lancia il verificatore e le SCOPRE, e scopre
+# se la realtà combacia.
+#
+# ─ LA REGOLA DI CATTURA (setaccio) ────────────────────────────────────────────
+# Questo file NON registra una decisione: la DEFINISCE. «Abbiamo declassato X» non
+# è vero finché qui non c'è la voce con `status` + `decisione` + `follow_up`. Una
+# decisione senza la sua voce non è presa — è chiacchiera. Il verificatore la fa
+# rispettare: una `deferred` senza `follow_up` = CI ROSSA.
+# Prova storica: sotto questa regola Watchtower sarebbe stato
+#   status: deferred · decisione: 10/06 declassato · follow_up: {verify: exists timer}
+# e la CI sarebbe stata ROSSA dal 10/06 finché il timer non esisteva. Non l'avremmo
+# perso: avrebbe gridato per un mese, invece di svanire in silenzio.
+#
+# ─ IL VERIFICATORE È BIDIREZIONALE (b82df434, la quadratura sulle feature) ─────
+#   dichiarato → reale : ogni voce `active*` deve superare il suo `verify`.
+#                        Voce dichiarata ma REALE-ASSENTE → CI rossa. Cattura la PERDITA.
+#   reale → dichiarato : ogni tool MCP / systemd-unit / profilo compose REALE deve
+#                        avere una voce qui. Reale ma NON dichiarato → CI rossa.
+#                        Cattura ciò che entra senza traccia e POI si dimentica.
+# Solo con ENTRAMBI i versi il conto chiude — come 7.051==5.675 di stamattina.
+#
+# ─ CONFINE (setaccio, ratificato da Neo) ──────────────────────────────────────
+# Questo ledger è PARTE DEL PRODOTTO: protegge le funzioni DI vps1777. Vive nel repo,
+# il verificatore gira in CI (GitHub Actions) o sulla VPS. **MAI un daemon, MAI sul
+# PC utente.** NON copre la nostra infrastruttura di coordinamento (_chat, wait-bus,
+# battiti, ...): quella gira sul PC di sviluppo, non è il prodotto.
+
+# ══════════════════════════════════════════════════════════════════════════════
+# META — lo stato del ledger stesso (letto da verify-features.py)
+# ══════════════════════════════════════════════════════════════════════════════
+_meta:
+  # true = ENFORCING: ogni feature REALE (tool MCP, systemd-unit, profilo compose)
+  #        senza voce qui = CI ROSSA (non più solo segnalata). Il "mai perdere una
+  #        funzione" di Neo diventa meccanico. Si accende SOLO a censimento completo
+  #        e verificatore a 0.
+  # Acceso il 17/07: censimento MCP (46) + timer↔service chiusi → 61 voci, 0/0.
+  # OK enforcing di b82df434 (possiede il verificatore) + concordato da setaccio.
+  baseline_completo: true
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SCHEMA di una voce (i campi che verify-features.py valida su OGNI entry)
+# ══════════════════════════════════════════════════════════════════════════════
+_schema:
+  campi_obbligatori: [id, nome, cosa, dove, status, verify]
+  id: "identificatore stabile e unico. Convenzione: <area>.<feature>
+       (es. archive.search, ops.backup, update.auto-timer, gateway.oauth)."
+  nome: "nome umano breve."
+  cosa: "una riga: cosa fa e perché serve."
+  dove: "lista di coordinate REALI: 'file:riga', 'servizio:nome', 'systemd:unit',
+          'mcp-tool:<server>/<nome>', 'compose-profile:<file>#<profilo>'.
+          È ciò che il verify e il check-inverso usano per trovare la feature."
+  status:
+    active-default: "attiva senza che l'utente faccia nulla (l'installer la accende)."
+    opt-in:         "esiste ma va attivata di proposito. Legittima — ma DICHIARATA."
+    deferred:       "decisa ma non ancora fatta. OBBLIGA `follow_up` (o CI rossa)."
+    removed:        "tolta di proposito. OBBLIGA `decisione`. Resta agli atti perché
+                     lo storico ricordi che ESISTETTE (il codice non lo mostra più)."
+  since: "quando introdotta (versione SemVer o data). Opzionale ma consigliato."
+  decisione: "OBBLIGATORIO per opt-in/deferred/removed: quando + perché, con
+              provenienza [commit <sha>] / [conv <db·uuid·ts>] / [SECURITY.md:<riga>].
+              Un `removed`/`deferred` senza decisione è invisibile allo storico → CI rossa."
+  verify:
+    _nota: "COME la macchina prova che la feature c'è (e, dove possibile, funziona).
+            Una sola di queste chiavi per voce. `manual` è l'ultima spiaggia."
+    path_exists: "<percorso> esiste nel repo."
+    file_contains: "{path, pattern}  — regex presente nel file."
+    python_def: "{path, name} — la funzione/classe e' DEFINITA davvero (albero
+                 sintattico, non testo). Piu' forte di file_contains: una `def` che
+                 sta in un commento o in una stringa NON passa, e un file che non
+                 compila fallisce. NON prova che sia chiamata ne' accesa a runtime."
+    grep_count: "{path, pattern, min} — almeno `min` occorrenze (es. conteggio tool)."
+    systemd_unit: "<nome> — esiste systemd/<nome> (.service/.timer/.path)."
+    compose_profile: "{file, profile} — il profilo è dichiarato nel compose."
+    mcp_tool: "{service, name} — il tool è registrato (@mcp.tool + def <name>)."
+    cmd: "<comando> — exit 0 = presente/funziona. Usare con parsimonia (gira in CI)."
+    manual: "<descrizione> — nessuna macchina può provarlo. Il verificatore NON
+             lo fa passare né fallire: lo SEGNALA per revisione umana periodica."
+  follow_up:
+    _nota: "OBBLIGATORIO se status=deferred. Due specie (b82df434):"
+    verify: "una condizione VERIFICABILE (stessa forma di `verify` sopra): la CI la
+             controlla e AUTO-CHIUDE il deferred quando diventa vera. Es. il timer che
+             chiude Watchtower: {systemd_unit: vps1777-auto-update.timer}."
+    manuale: "{cosa, rivedi_dopo: <data>} — a giudizio umano (la CI non può decidere).
+              NON tiene la CI rossa (non è un bug), ma la SORVEGLIA: se oggi > rivedi_dopo,
+              il verificatore la rimette davanti («rivedi questo rinvio»). rivedi_dopo la
+              stima CHI rinvia — sa quanto lontano sta rinviando meglio di un N globale (setaccio)."
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ESEMPI — 4 voci reali che coprono le categorie e le due specie di follow_up.
+# setaccio semina QUI le voci della caccia (A/B) usando questo schema; ogni penna
+# aggiunge le sue voci, il verificatore valida che conformino allo schema.
+# ══════════════════════════════════════════════════════════════════════════════
+features:
+
+  - id: archive.search
+    nome: "Ricerca full-text archivio"
+    cosa: "Cerca nelle conversazioni indicizzate (FTS5). È il tool MCP centrale di archive-mcp."
+    dove: ["mcp-tool:archive/search", "services/archive-mcp/app/server.py"]
+    status: active-default
+    since: "0.19.0"
+    verify:
+      mcp_tool: {service: archive-mcp, name: search}
+
+  - id: ops.backup
+    nome: "Backup notturno dei volumi (age-encrypted)"
+    cosa: "Container cron 03:00 UTC, cifrati age: UN backup per GIORNO su 7 giorni
+           distinti + 4 settimanali. La rete di sicurezza dati: senza, un guasto perde
+           tutto. «7 giorni», non «7 file»: fino al 27/07 la riga diceva '7 giornalieri'
+           e il codice teneva gli ultimi 7 FILE — con quattro update nella stessa mattina
+           la finestra si era ristretta a 3 giorni (H57). L'ambiguità stava anche qui,
+           in un ledger che esiste per dire cosa fa davvero una funzione."
+    dove: ["compose-profile:compose.ops.backup.yaml#ops.backup", "tools/backup.sh"]
+    status: active-default    # ATTESO dopo il branch installer-autoupdate-backup (default-on via VPS1777_FEATURES)
+    since: "0.26.0 (opt-in) → default-on (branch feat/installer-autoupdate-backup)"
+    decisione: "reso default-on il 17/07: un backup opt-in che il reinstall perde in
+                silenzio è la perdita-tipo che Neo vuole impedire. [conv 17/07 caccia-feature-perdute]"
+    verify:
+      compose_profile: {file: compose.ops.backup.yaml, profile: ops.backup}
+    # NB per il verificatore: 'dichiarato attiva' qui + 'reale spento sulla VPS' è
+    # PROPRIO il divario che il check dichiarato→reale deve poter esporre (sul vivo).
+
+  - id: update.auto-timer
+    nome: "Auto-update sicuro (timer systemd)"
+    cosa: "Timer che lancia `vps1777 update --yes` = backup + firma + migrazioni +
+           health-gate + rollback. È il RIMPIAZZO sicuro di Watchtower (che bypassava tutto)."
+    dove: ["systemd:vps1777-auto-update.timer", "systemd:vps1777-auto-update.service"]
+    status: active-default    # PROMOSSA da deferred: rilasciata in v0.38.0, ora reale su main
+    since: "0.38.0"
+    decisione: "auto-install sicuro di default (Neo, 17/07). NON Watchtower — quello fu
+                declassato il 10/06 perché bypassa le protezioni. [conv 2026-06-10 b82df434]
+                Promossa da deferred quando il timer è atterrato su main [rilascio v0.38.0,
+                il verificatore ha segnalato PROMUOVI]. Acceso solo se 'autoupdate' in VPS1777_FEATURES (default sì)."
+    verify:
+      systemd_unit: vps1777-auto-update.timer
+
+  - id: sec.H24-release-approval
+    nome: "Approvazione manuale dei rilasci (GitHub environment)"
+    cosa: "Gate umano prima di pubblicare un rilascio. Rinviato di proposito."
+    dove: ["SECURITY.md:280"]
+    status: deferred
+    since: "rinviato (postilla SECURITY.md)"
+    decisione: "rimandato di proposito: i tag pubblicati sono già immutabili, il gate
+                serve quando il ritmo dei rilasci sarà regolare. [SECURITY.md:280]"
+    follow_up:
+      manuale: {cosa: "aggiungere il GitHub environment quando il ritmo rilasci è regolare",
+                rivedi_dopo: "2026-08-10"}
+    verify:
+      manual: "verifica umana: esiste un environment con reviewer richiesto sulla release?"
+
+  # ── SEME RUNTIME (71d540e6): il canale-update, l'ingress, lo stato dichiarato ──
+
+  - id: config.declared-features
+    nome: "Stato feature dichiarato (VPS1777_FEATURES)"
+    cosa: "La lista in .env che dice quali feature opzionali sono ON; letta da compose_cmd
+           così install/update/rollback riproducono lo stesso stato. È il fix-radice della
+           perdita silenziosa: senza, gli opt-in cadevano a ogni reinstall."
+    dove: ["tools/vps1777.py:enabled_features", "tools/vps1777.py:compose_cmd"]
+    status: active-default
+    since: "0.38.0"
+    verify:
+      python_def: {path: tools/vps1777.py, name: enabled_features}
+
+  - id: update.check-timer
+    nome: "Check giornaliero release + notifica"
+    cosa: "Timer che interroga GitHub per una release nuova e notifica su Telegram. NON applica."
+    dove: ["systemd:vps1777-check-update.timer", "systemd:vps1777-check-update.service"]  # timer + il suo service (coppia)
+    status: active-default
+    since: "0.9.0"
+    verify:
+      systemd_unit: vps1777-check-update.timer
+
+  - id: update.button
+    nome: "Pulsante Aggiorna del pannello admin (intent → path unit)"
+    cosa: "Il gateway (senza privilegi) scrive un intent-file; una path unit systemd lo
+           raccoglie e lancia `vps1777 update --from-intent`. L'apply manuale sicuro dal web."
+    dove: ["systemd:vps1777-update.path", "systemd:vps1777-update.service"]
+    status: active-default
+    since: "0.9.0"
+    verify:
+      systemd_unit: vps1777-update.path
+
+  - id: update.secrets-timer
+    nome: "Check settimanale scadenza secret"
+    cosa: "Timer che avvisa quando un secret (o il cookie NotebookLM) sta per scadere."
+    dove: ["systemd:vps1777-secrets-check.timer", "systemd:vps1777-secrets-check.service"]  # timer + il suo service (coppia)
+    status: active-default
+    since: "0.9.0"
+    verify:
+      systemd_unit: vps1777-secrets-check.timer
+
+  - id: ingress.tailscale
+    nome: "Ingress Tailscale Funnel (default)"
+    cosa: "Espone il gateway in HTTPS via Tailscale Funnel; gira sull'host, non in container."
+    dove: ["compose-profile:compose.ingress.tailscale.yaml#ingress.tailscale"]
+    status: active-default    # è il default; caddy/cloudflared sono le alternative opt-in
+    since: "0.9.0"
+    verify:
+      compose_profile: {file: compose.ingress.tailscale.yaml, profile: ingress.tailscale}
+
+  - id: ingress.caddy
+    nome: "Ingress Caddy (ACME/Let's Encrypt) — alternativa"
+    cosa: "Reverse-proxy Caddy con certificati ACME. Alternativa a Tailscale (se ne sceglie UNO)."
+    dove: ["compose-profile:compose.ingress.caddy.yaml#ingress.caddy"]
+    status: opt-in
+    since: "0.9.0"
+    decisione: "una delle tre opzioni di ingress mutuamente esclusive; l'utente ne sceglie una all'install. [docs/INSTALL.md]"
+    verify:
+      compose_profile: {file: compose.ingress.caddy.yaml, profile: ingress.caddy}
+
+  - id: ingress.cloudflared
+    nome: "Ingress Cloudflare Tunnel — alternativa"
+    cosa: "Tunnel outbound Cloudflare, nessuna porta aperta. Alternativa a Tailscale/Caddy."
+    dove: ["compose-profile:compose.ingress.cloudflared.yaml#ingress.cloudflared"]
+    status: opt-in
+    since: "0.9.0"
+    decisione: "una delle tre opzioni di ingress mutuamente esclusive; l'utente ne sceglie una all'install. [docs/INSTALL.md]"
+    verify:
+      compose_profile: {file: compose.ingress.cloudflared.yaml, profile: ingress.cloudflared}
+
+  # ── SEME DALLA CACCIA STORICA (setaccio, 17/07) ──────────────────────────────
+  # Le voci qui sotto vengono dal dossier CACCIA-FEATURE-PERDUTE_2026-07-17.md, con
+  # provenienza millimetrica. Completano gli esempi con i casi che il verificatore
+  # DEVE conoscere: la feature RIMOSSA (Watchtower — lo storico deve ricordarla anche
+  # se il codice non la mostra più) e le due rinviate-a-giudizio (H43, H22).
+
+  - id: ops.autoupdate
+    nome: "Watchtower — auto-update d'origine (DECLASSATO, opt-in legacy NON supportato)"
+    cosa: "Auto-update via container Watchtower. Bypassava le protezioni (niente backup,
+           health-gate, rollback): declassato il 10/06. Il RUOLO auto-update è sostituito da
+           update.auto-timer (active-default). Il PROFILO esiste ancora nel repo → opt-in, MA
+           pericoloso: la voce lo tiene VISIBILE come 'disponibile-ma-da-non-riaccendere',
+           così il divieto viaggia col profilo invece di sparire."
+    dove: ["compose-profile:compose.ops.watchtower.yaml#ops.autoupdate"]
+    status: opt-in    # opt-in, NON removed: il file compose.ops.watchtower.yaml ESISTE ancora
+                      # (removed = 'sparito dal repo' → mentirebbe, e il verificatore v2 lo becca:
+                      # removed+file = STATO≠REALTÀ). Se Neo lo vuole VERAMENTE via: cancellare il
+                      # file E mettere removed. Finché il file c'è, opt-in è l'unica forma coerente. [b82df434]
+    since: "declassato 2026-06-10"
+    decisione: "declassato il 10/06 a 'opt-in, NON supportato' perché bypassa backup/health-gate/
+                rollback. NON riaccendere: nessun percorso di default (installer, compose base) deve
+                attivarlo; se rientra nel default è la regressione di giugno. Il sostituto sicuro è
+                update.auto-timer (active-default). [conv 2026-06-10 b82df434 · verbatim: «Watchtower
+                (ops.autoupdate) DECLASSATO — resta opt-in ma dichiarato NON supportato»]"
+    verify:
+      compose_profile: {file: compose.ops.watchtower.yaml, profile: ops.autoupdate}
+
+  - id: ops.portainer
+    nome: "Portainer — UI di gestione container (opt-in)"
+    cosa: "Interfaccia web per gestire i container della VPS. Opt-in di proposito: comoda ma
+           amplia la superficie d'attacco, quindi non default."
+    dove: ["compose-profile:compose.ops.portainer.yaml#ops.portainer"]
+    status: opt-in
+    since: "0.26.0 (con i profili ops.*)"
+    decisione: "opt-in per scelta: un pannello di gestione container esposto è superficie in
+                più; chi lo vuole lo accende. Legittima, ma DICHIARATA (un reinstall non la
+                riaccende — è atteso). [conv 17/07 caccia-feature-perdute · compose.ops.portainer.yaml]"
+    verify:
+      compose_profile: {file: compose.ops.portainer.yaml, profile: ops.portainer}
+
+  - id: sec.H43-rootfs-ro
+    nome: "rootfs read-only su nb1777-mcp (rinviato)"
+    cosa: "Filesystem di root in sola lettura sul servizio con Chromium. Rinviato finché non
+           si verifica un giro NotebookLM reale con tutte le tmpfs necessarie."
+    dove: ["SECURITY.md:285"]
+    status: deferred
+    since: "rinviato (postilla SECURITY.md)"
+    decisione: "rimandato di proposito: il servizio con Chromium è escluso dal read-only finché
+                non è verificato un giro NotebookLM reale con le tmpfs. [SECURITY.md:285]"
+    follow_up:
+      manuale: {cosa: "abilitare read_only su nb1777-mcp dopo aver verificato un giro NotebookLM con le tmpfs",
+                rivedi_dopo: "2026-09-10"}
+    verify:
+      manual: "verifica umana: nb1777-mcp ha read_only:true nel compose, con le tmpfs necessarie?"
+
+  - id: sec.H22-digest-pin
+    nome: "Pinning ai digest delle immagini nel compose (rinviato)"
+    cosa: "L'invariante «gira solo il digest verificato» vive nel file compose (override
+           generato all'up), non solo nella CLI post-pull. Chiuderebbe il caso di un
+           `docker compose pull` lanciato a mano fuori dalla CLI."
+    dove: ["SECURITY.md:288"]
+    status: deferred
+    since: "rinviato (postilla SECURITY.md)"
+    decisione: "rimandato di proposito: oggi l'invariante lo impone la CLI dopo il pull (contro
+                images.lock); farlo vivere nel compose tocca il percorso di update, quindi con
+                un momento dedicato. [SECURITY.md:288]"
+    follow_up:
+      manuale: {cosa: "generare l'override compose coi digest pinnati all'up, in un momento dedicato al percorso update",
+                rivedi_dopo: "2026-09-10"}
+    verify:
+      manual: "verifica umana: il compose (o un override generato) pinna le 4 immagini vps1777 ai digest?"
+
+  # ── CENSIMENTO TOOL MCP (setaccio, 17/07) — una voce per tool, cosa-fa dalla docstring del codice.
+  # Esclusi i tool GIÀ nel ledger (es. archive.search, seminato da b82df434). Lista verificata
+  # contro verify-features.py (i 2 mancati dal regex — source_rename/studio_rename — aggiunti a mano).
+  - id: archive.count
+    nome: "archive-mcp · count"
+    cosa: "Conta quanti messaggi corrispondono alla query (non limitato) — per frequenze e prevalenze."
+    dove: ["mcp-tool:archive-mcp/count"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: count}
+  - id: archive.check_term
+    nome: "archive-mcp · check_term"
+    cosa: "Diagnostica se un TERMINE con caratteri speciali (`C++`, `C#`, `g++`, `.NET`, `F#`) è davvero ricercabile o se l'indice lo fa COLLASSARE su."
+    dove: ["mcp-tool:archive-mcp/check_term"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: check_term}
+  - id: archive.get_context
+    nome: "archive-mcp · get_context"
+    cosa: "Restituisce i messaggi ATTORNO a un risultato (col contenuto pieno, non lo snippet troncato)."
+    dove: ["mcp-tool:archive-mcp/get_context"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: get_context}
+  - id: archive.get_conversation
+    nome: "archive-mcp · get_conversation"
+    cosa: "Il thread di conversazione INTERO che contiene `uuid` — camminando l'albero `parent_uuid` (antenati + discendenti), col contenuto pieno e in."
+    dove: ["mcp-tool:archive-mcp/get_conversation"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: get_conversation}
+  - id: archive.list_projects
+    nome: "archive-mcp · list_projects"
+    cosa: "Le etichette `project` dell'archivio con quanti messaggi ciascuna — per NAVIGARE i contenuti (quali progetti/chat ci sono) invece di solo ce."
+    dove: ["mcp-tool:archive-mcp/list_projects"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: list_projects}
+  - id: archive.archive_stats
+    nome: "archive-mcp · archive_stats"
+    cosa: "Istogramma temporale per ANNO: quanti messaggi per anno in ogni archivio — «quando» l'archivio è fitto, da sapere PRIMA di cercare."
+    dove: ["mcp-tool:archive-mcp/archive_stats"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: archive_stats}
+  - id: archive.list_databases
+    nome: "archive-mcp · list_databases"
+    cosa: "Elenca i nomi dei DB caricati."
+    dove: ["mcp-tool:archive-mcp/list_databases"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: list_databases}
+  - id: archive.describe_databases
+    nome: "archive-mcp · describe_databases"
+    cosa: "Scheda di ogni DB caricato: {name, rows, oldest, newest, labels, snapshot, description}."
+    dove: ["mcp-tool:archive-mcp/describe_databases"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: describe_databases}
+  - id: archive.check_integrity
+    nome: "archive-mcp · check_integrity"
+    cosa: "Integrità degli archivi: ok · sporco (journal caldo, scrittore morto a metà) · corrotto · non_misurabile. Risponde alla domanda che nessun altro tool risponde: sto servendo dati di una transazione mai committata? Nato dal round-16, rilievo bd02ca6f."
+    dove: ["mcp-tool:archive-mcp/check_integrity"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: check_integrity}
+  - id: archive.set_description
+    nome: "archive-mcp · set_description"
+    cosa: "Imposta/aggiorna la DESCRIZIONE di un archivio: a cosa serve, cosa contiene, come va usato."
+    dove: ["mcp-tool:archive-mcp/set_description"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: set_description}
+  - id: nb.nb_list
+    nome: "nb1777-mcp · nb_list"
+    cosa: "Lista tutti i notebook visibili al profilo attivo."
+    dove: ["mcp-tool:nb1777-mcp/nb_list"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_list}
+  - id: nb.nb_get
+    nome: "nb1777-mcp · nb_get"
+    cosa: "Dettagli di un singolo notebook."
+    dove: ["mcp-tool:nb1777-mcp/nb_get"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_get}
+  - id: nb.nb_create
+    nome: "nb1777-mcp · nb_create"
+    cosa: "Crea un nuovo notebook."
+    dove: ["mcp-tool:nb1777-mcp/nb_create"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_create}
+  - id: nb.nb_rename
+    nome: "nb1777-mcp · nb_rename"
+    cosa: "Rinomina un notebook."
+    dove: ["mcp-tool:nb1777-mcp/nb_rename"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_rename}
+  - id: nb.nb_delete
+    nome: "nb1777-mcp · nb_delete"
+    cosa: "Cancella un notebook in modo permanente."
+    dove: ["mcp-tool:nb1777-mcp/nb_delete"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_delete}
+  - id: nb.nb_describe
+    nome: "nb1777-mcp · nb_describe"
+    cosa: "Riassunto AI-generated del notebook (testo)."
+    dove: ["mcp-tool:nb1777-mcp/nb_describe"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_describe}
+  - id: nb.source_list
+    nome: "nb1777-mcp · source_list"
+    cosa: "Lista tutte le fonti di un notebook."
+    dove: ["mcp-tool:nb1777-mcp/source_list"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_list}
+  - id: nb.source_add_url
+    nome: "nb1777-mcp · source_add_url"
+    cosa: "Aggiunge una URL come fonte."
+    dove: ["mcp-tool:nb1777-mcp/source_add_url"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_url}
+  - id: nb.source_add_text
+    nome: "nb1777-mcp · source_add_text"
+    cosa: "Aggiunge testo libero come fonte (richiede titolo)."
+    dove: ["mcp-tool:nb1777-mcp/source_add_text"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_text}
+  - id: nb.source_add_file
+    nome: "nb1777-mcp · source_add_file"
+    cosa: "Carica un file locale come fonte (PDF/txt/md...)."
+    dove: ["mcp-tool:nb1777-mcp/source_add_file"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_file}
+  - id: nb.source_add_youtube
+    nome: "nb1777-mcp · source_add_youtube"
+    cosa: "Aggiunge un video YouTube come fonte."
+    dove: ["mcp-tool:nb1777-mcp/source_add_youtube"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_youtube}
+  - id: nb.source_add_drive
+    nome: "nb1777-mcp · source_add_drive"
+    cosa: "Collega un Google Drive document_id come fonte."
+    dove: ["mcp-tool:nb1777-mcp/source_add_drive"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_add_drive}
+  - id: nb.source_delete
+    nome: "nb1777-mcp · source_delete"
+    cosa: "Elimina una fonte (irreversibile)."
+    dove: ["mcp-tool:nb1777-mcp/source_delete"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_delete}
+  - id: nb.source_get_content
+    nome: "nb1777-mcp · source_get_content"
+    cosa: "Estrae il contenuto raw di una fonte (no AI)."
+    dove: ["mcp-tool:nb1777-mcp/source_get_content"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_get_content}
+  - id: nb.notebook_query
+    nome: "nb1777-mcp · notebook_query"
+    cosa: "Pone una domanda alla chat del notebook."
+    dove: ["mcp-tool:nb1777-mcp/notebook_query"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: notebook_query}
+  - id: nb.studio_create_audio
+    nome: "nb1777-mcp · studio_create_audio"
+    cosa: "Crea Audio Overview (podcast)."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_audio"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_audio}
+  - id: nb.studio_create_video
+    nome: "nb1777-mcp · studio_create_video"
+    cosa: "Crea Video Overview."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_video"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_video}
+  - id: nb.studio_create_slides
+    nome: "nb1777-mcp · studio_create_slides"
+    cosa: "Crea Slide Deck."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_slides"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_slides}
+  - id: nb.studio_create_mindmap
+    nome: "nb1777-mcp · studio_create_mindmap"
+    cosa: "Crea Mind Map."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_mindmap"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_mindmap}
+  - id: nb.studio_create_infographic
+    nome: "nb1777-mcp · studio_create_infographic"
+    cosa: "Crea Infographic (PNG)."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_infographic"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_infographic}
+  - id: nb.studio_create_data_table
+    nome: "nb1777-mcp · studio_create_data_table"
+    cosa: "Crea Data Table."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_data_table"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_data_table}
+  - id: nb.studio_create_report
+    nome: "nb1777-mcp · studio_create_report"
+    cosa: "Crea Report."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_report"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_report}
+  - id: nb.studio_create_quiz
+    nome: "nb1777-mcp · studio_create_quiz"
+    cosa: "Crea Quiz."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_quiz"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_quiz}
+  - id: nb.studio_create_flashcards
+    nome: "nb1777-mcp · studio_create_flashcards"
+    cosa: "Crea Flashcards."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_flashcards"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_flashcards}
+  - id: nb.studio_create_all_9
+    nome: "nb1777-mcp · studio_create_all_9"
+    cosa: "Crea tutti e 9 gli artefatti in sequenza."
+    dove: ["mcp-tool:nb1777-mcp/studio_create_all_9"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_create_all_9}
+  - id: nb.studio_list
+    nome: "nb1777-mcp · studio_list"
+    cosa: "Lista gli artefatti studio di un notebook."
+    dove: ["mcp-tool:nb1777-mcp/studio_list"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_list}
+  - id: nb.studio_status
+    nome: "nb1777-mcp · studio_status"
+    cosa: "Stato di un singolo artefatto (id/type/status/label)."
+    dove: ["mcp-tool:nb1777-mcp/studio_status"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_status}
+  - id: nb.studio_wait
+    nome: "nb1777-mcp · studio_wait"
+    cosa: "Polling fino a stato terminale o timeout."
+    dove: ["mcp-tool:nb1777-mcp/studio_wait"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_wait}
+  - id: nb.studio_delete
+    nome: "nb1777-mcp · studio_delete"
+    cosa: "Cancella un artefatto studio (irreversibile)."
+    dove: ["mcp-tool:nb1777-mcp/studio_delete"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_delete}
+  - id: nb.studio_download
+    nome: "nb1777-mcp · studio_download"
+    cosa: "Scarica un artefatto."
+    dove: ["mcp-tool:nb1777-mcp/studio_download"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_download}
+  - id: nb.studio_export_to_docs
+    nome: "nb1777-mcp · studio_export_to_docs"
+    cosa: "Esporta un Report su Google Docs."
+    dove: ["mcp-tool:nb1777-mcp/studio_export_to_docs"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_export_to_docs}
+  - id: nb.studio_export_to_sheets
+    nome: "nb1777-mcp · studio_export_to_sheets"
+    cosa: "Esporta una Data Table su Google Sheets."
+    dove: ["mcp-tool:nb1777-mcp/studio_export_to_sheets"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_export_to_sheets}
+  - id: nb.doctor
+    nome: "nb1777-mcp · doctor"
+    cosa: "Diagnostica: nlm reachable + count notebook + canonico del blocco memoria."
+    dove: ["mcp-tool:nb1777-mcp/doctor"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: doctor}
+  - id: nb.canonico
+    nome: "nb1777-mcp · canonico"
+    cosa: "MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la versione «buona» con cui una sessione dovrebbe allinearsi, letta da."
+    dove: ["mcp-tool:nb1777-mcp/canonico"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: canonico}
+  - id: nb.memoria_check
+    nome: "nb1777-mcp · memoria_check"
+    cosa: "MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che porti (es."
+    dove: ["mcp-tool:nb1777-mcp/memoria_check"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: memoria_check}
+  - id: nb.source_rename
+    nome: "nb1777-mcp · source_rename"
+    cosa: "Rinomina una fonte (source) di un notebook."
+    dove: ["mcp-tool:nb1777-mcp/source_rename"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_rename}
+  - id: nb.studio_rename
+    nome: "nb1777-mcp · studio_rename"
+    cosa: "Rinomina un artefatto Studio di un notebook."
+    dove: ["mcp-tool:nb1777-mcp/studio_rename"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: studio_rename}
+
+  # ─── 0.40.0 (20/07/2026) — registrate SUBITO, non "poi" ────────────────────
+  # Il ledger esiste perché «non deve MAI capitare che ci perdiamo funzioni per
+  # strada». Queste quattro sono nate oggi e stavano per entrare in una release
+  # SENZA passare di qui: la CI era verde perché il verificatore controlla ciò che
+  # è dichiarato contro la realtà, e una funzione mai dichiarata **non ha nulla
+  # contro cui essere controllata**. Un ledger verde e incompleto è il difetto che
+  # il ledger stesso doveva impedire. Trovato da b82df434 prima del tag.
+  - id: archive.sniff-contenuto
+    nome: "Sniff del contenuto nell'ingest"
+    cosa: "Prima di archiviare un file come «non-testo», l'indexer ne guarda i primi 4 KB:
+           un byte NUL chiude la questione, serve UTF-8 valido e ≥90% di caratteri
+           stampabili. La classificazione per ESTENSIONE era un'etichetta, non una misura:
+           826 file su 2.633 censiti «non-testo» erano testo pieno (appunti senza
+           estensione, todo, script, Dockerfile, .cjs/.proto/.service/.xsd/.ndjson).
+           I promossi sono marcati [testo-sniffato]: chi legge sa COME ci sono arrivati."
+    dove: ["services/gateway/app/archive_indexer.py#_sniff_e_testo"]
+    status: active-default
+    since: "0.40.0"
+    verify:
+      python_def: {path: services/gateway/app/archive_indexer.py, name: _sniff_e_testo}
+
+  - id: archive.revisioni
+    nome: "Revisioni: le versioni sovrascritte non spariscono"
+    cosa: "`messages` ha PK su uuid e si scrive con INSERT OR REPLACE: lo stesso
+           identificatore con contenuto diverso faceva vincere l'ultimo e sparire il primo
+           SENZA traccia. Non è teorico — le voci memory:* sono slot riscrivibili. Prima
+           di ogni REPLACE che cambia il contenuto, la versione uscente va in `revisions`.
+           La ricerca continua a vedere l'ultima: nessuna API cambia."
+    dove: ["services/gateway/app/archive_indexer.py#revisions"]
+    status: active-default
+    since: "0.40.0"
+    verify:
+      file_contains: {path: services/gateway/app/archive_indexer.py, pattern: "CREATE TABLE IF NOT EXISTS revisions"}
+
+  - id: archive.set-description-via-gateway
+    nome: "set_description inoltrata al gateway"
+    cosa: "Il tool MCP non apre più il DB (il suo container lo monta in sola lettura per
+           scelta): inoltra a POST /internal/archive/description. Rete interna, segreto
+           DEDICATO (non gateway_secret: quello apre anche /internal/nlm/*), nome del DB in
+           whitelist col percorso composto dal gateway, cap di lunghezza, rifiuto dei
+           caratteri di controllo, audit di ogni scrittura. Ogni rifiuto risponde 404 e mai
+           403: un 403 confermerebbe l'esistenza della rotta."
+    dove: ["services/gateway/app/routes.py#internal_archive_description",
+           "services/archive-mcp/app/db.py#set_description"]
+    status: active-default
+    since: "0.40.0"
+    verify:
+      file_contains: {path: services/gateway/app/routes.py, pattern: "internal/archive/description"}
+
+  - id: ops.preflight-secrets
+    nome: "Pre-flight dei segreti: la rete di ROLLBACK (avviso, mai fatale)"
+    cosa: "⚠️ QUESTA VOCE DICEVA IL FALSO fino alla 0.40.1, ed è il caso da ricordare:
+           prometteva che l'update «confronta i segreti che il compose PRETENDE e si
+           ferma», mentre leggeva i compose ATTUALI uno step prima che quello della
+           release esistesse sul disco. Ogni parola era vera della riga, e la protezione
+           dichiarata non esisteva. Il 20/07 la 0.40.0 è fallita esattamente lì.
+           Da 0.40.1 questo controllo ha un compito diverso e onesto: guarda i compose
+           ATTUALI per dire che la rete di ROLLBACK è bucata — se l'update fallisse, il
+           ritorno indietro non troverebbe quei segreti. NON è fatale, e non può esserlo:
+           una release che RIMUOVE un segreto già cancellato sarebbe l'unica che non
+           puoi installare. Becca un caso che nessun altro controllo becca: il file
+           cancellato a stack acceso (i container hanno il valore già montato, il disco
+           è vuoto, lo stack è su e non ripartirebbe).
+           Non scrive status nuovi nel progress: `update_progress.json` è letto da due
+           pannelli con una whitelist implicita, e uno status fuori lista dà pallino
+           rosso + polling congelato su un update sano."
+    dove: ["tools/vps1777.py#_secrets_mancanti", "tools/vps1777.py#_compose_sorgenti"]
+    status: active-default
+    since: "0.40.0"
+    decisione: "declassato da fatale ad avviso in 0.40.1 — il `die` sta solo su
+                ops.preflight-secrets-bundle, che guarda il futuro invece del passato"
+    verify:
+      python_def: {path: tools/vps1777.py, name: _secrets_mancanti}
+
+  - id: ops.preflight-secrets-bundle
+    nome: "Pre-flight dei segreti sulla RELEASE che si sta installando (fatale)"
+    cosa: "Step 6-bis: dopo il self-update della CLI e prima del backup, confronta i
+           segreti dichiarati dai compose DEL BUNDLE con i file presenti in secrets/ del
+           repo, e ferma l'update se ne manca uno. È l'unico punto che può fermare
+           l'update, ed è il fix del rosso del 20/07.
+           ⚠️ POSIZIONE VINCOLANTE — dopo il re-exec, e non prima: prima sarebbe il
+           parser della release N a leggere il compose della N+1, e un cambio di formato
+           del blocco `secrets:` impedirebbe di installare proprio la release che
+           contiene il parser capace di leggerlo (LOCK-OUT, se ne esce a mano). Il prezzo
+           è restare con CLI nuova + stack vecchio, che si auto-guarisce rilanciando
+           l'update ed è già l'esito normale di ogni rollback riuscito.
+           Criterio generale: fra due difetti vince quello che si ripara da solo.
+           ⚠️ Va FUORI dal blocco `if not args.skip_self_update`: al 6-bis si arriva per
+           tre rami. Indentarlo di un livello lo renderebbe morto nel ramo normale.
+           I compose si DERIVANO da `_compose_sorgenti` (base + overlay ingress + overlay
+           delle feature attive), mai da una lista scritta a mano: il 20/07 tre difetti
+           avevano tutti la forma «un posto sa che i file sono N, un altro ne guarda M».
+           Un bundle senza compose base SOLLEVA: «non ho trovato il file» non è «non c'è
+           niente da segnalare». Vuoto = vuoto DOPO strip (un file con solo «\\n» è 1 byte
+           e passava per pieno)."
+    dove: ["tools/vps1777.py#cmd_update", "tools/vps1777.py#_compose_sorgenti"]
+    status: active-default
+    since: "0.40.1"
+    decisione_2: "0.40.2 — lo stage-check (step 8) ora DERIVA la lista da
+                  `_compose_sorgenti` invece di riscriverla: validava meno compose di
+                  quanti lo stack ne monta. Resta la doppia derivazione con
+                  `compose_cmd`, che NON è unificabile senza cambiare il comportamento
+                  di docker (produce anche i profili e non filtra i file assenti):
+                  chi tocca una deve toccare l'altra."
+    collaudo_produzione: "21/07/2026 22:38:51→22:38:59Z — PROVATO SULLA MACCHINA VIVA,
+      eseguito da setaccio, fallimento controllato (`mv` di archive_desc_secret) lanciando
+      il SERVICE e non il comando, così da esercitare l'ambiente reale del timer.
+      Il journal mostra la severità differenziata nell'ordine giusto: `la rete di ROLLBACK
+      è bucata … L'update PROSEGUE` (4-bis, avviso, PRIMA del fetch) → scarico + sha256 +
+      firma cosign → `la release v0.40.2 dichiara segreti che mancano … si ferma qui`
+      (6-bis, fatale, DOPO). **`snapshots` 0 → 0: il backup non è mai partito**, che è
+      l'osservabile decisivo della POSIZIONE — un fix messo allo step 8 avrebbe dato lo
+      stesso messaggio avendo già pagato age+snapshot.
+      progress: `step 6 · preflight-secrets-bundle · failed · [ASSENTE · dichiarato in
+      compose.yaml]`; stack 5/5 healthy per tutta la prova, dati intatti, γ identico alla
+      baseline del mattino. Ripristino con `mv` + `trap EXIT INT TERM`: 33 byte, owner e
+      permessi identici alla baseline. Rilancio → `step 15 done ok`, VPS a 0.40.2.
+      ⇒ Da qui la voce NON è più «verificata solo su banco».
+      ⚠️ MA UNA COSA LA PROVA **NON** DIMOSTRA, e va scritta qui o il verbale promette
+      più di quanto ha misurato (b82df434, confermato da setaccio con una riga:
+      `git diff v0.40.1 v0.40.2 -- 'compose*.yaml'` → VUOTO): i due compose sono
+      IDENTICI, quindi il 6-bis leggendo quello del bundle **o** quello installato
+      produce lo stesso risultato. La prova dimostra la POSIZIONE (snapshots 0→0) e
+      l'ORDINE (avviso prima del fetch, fatale dopo) — **non l'INPUT**. Cioè non
+      dimostra la cosa che era il difetto originale: leggere il compose sbagliato.
+      Sarà dimostrata dalla prima release che MODIFICA un compose (aggiungendo un
+      segreto): allora il 6-bis vedrà qualcosa che il 4-bis non può vedere, e i due
+      rami diventeranno distinguibili. Fino ad allora: **provato per posizione e
+      ordine, non per input.** Non si dichiari altrimenti."
+    verify:
+      file_contains: {path: tools/vps1777.py, pattern: "preflight-secrets-bundle"}
+
+  - id: ops.secrets-natura
+    nome: "La natura di un segreto, perché il rimedio non fabbrichi un guasto peggiore"
+    cosa: "I segreti non hanno tutti la stessa natura: alcuni sono valori casuali, uno è
+           l'hash bcrypt di una password scelta, altri sono token rilasciati da un
+           servizio esterno. Un messaggio d'errore che desse un solo comando «genera 32
+           byte casuali» applicato a `telegram_bot_token` o `admin_password_bcrypt`
+           produrrebbe un file PIENO e SBAGLIATO ⇒ il pre-flight tornerebbe verde, lo
+           stack partirebbe, e il guasto si vedrebbe solo all'uso — quando nessun
+           controllo può più accorgersene, perché il file c'è e non è vuoto.
+           Perciò il comando compare SOLO sotto il segreto a cui si applica, e per i non
+           generabili non compare affatto.
+           ⚠️ Sono liste scritte a mano — ciò che questa release toglie di mezzo altrove.
+           Restano solo perché NON POSSONO INVECCHIARE IN SILENZIO: un test le confronta
+           coi segreti realmente dichiarati nei compose e fallisce su uno non
+           classificato. Stesso patto di questo ledger: non «ricordarsi di aggiornare»,
+           ma non poter dimenticare senza che qualcosa diventi rosso."
+    dove: ["tools/vps1777.py#SEGRETI_NON_GENERABILI", "tools/vps1777.py#SEGRETI_GENERABILI"]
+    status: active-default
+    since: "0.40.1"
+    verify:
+      file_contains: {path: tools/vps1777.py, pattern: "SEGRETI_NON_GENERABILI"}
+
+  - id: ci.cli-tests
+    nome: "La suite della CLI gira in CI"
+    cosa: "`tools/tests/` era l'unica suite del repo che nessun workflow lanciava: dieci
+           test verdi sul componente che esegue gli update in PRODUZIONE, che non hanno
+           mai protetto niente. Trovato il 20/07 mentre si stavano per aggiungere altri
+           dieci test allo stesso posto. Un test che non gira non è una verifica: è un
+           commento con le parentesi.
+           Nella stessa release è emerso il gemello: un test che asseriva la STRINGA
+           `st_size == 0` invece della proprietà «un segreto vuoto conta come mancante»
+           rendeva quel difetto permanente — chi avesse corretto la riga avrebbe visto
+           rosso e concluso di aver sbagliato."
+    dove: [".github/workflows/ci.yml", "tools/tests/test_vps1777.py"]
+    status: active-default
+    since: "0.40.1"
+    verify:
+      file_contains: {path: .github/workflows/ci.yml, pattern: "tools/tests/"}
+
+  - id: ops.update-progress-journal
+    nome: "La progress dell'update conserva lo STATO, non la STORIA"
+    cosa: "⚠️ VOCE DI UN DIFETTO NOTO, non di una funzione — registrata perché una release
+           che promette una verifica su un meccanismo che non ne conserva l'evidenza è il
+           modo in cui una promessa onesta diventa falsa da sola.
+           `progress_write` (r.267-273) sovrascrive UN file, `onboarding/update_progress.json`,
+           a ogni step, e `step()` non stampa nulla: niente journal systemd. Quindi a update
+           FINITO il file contiene l'ultimo stato e non la sequenza.
+           ⇒ ASIMMETRIA: un update che RIESCE non lascia prova dell'ordine degli step (che il
+           pre-flight sia girato prima del backup non è più leggibile da nessuna parte); un
+           update che FALLISCE al 6-bis lascia `step 6 · preflight-secrets-bundle · failed`
+           con i segreti nominati — cioè la prova completa, in una riga.
+           ⇒ CONSEGUENZA OPERATIVA: il collaudo end-to-end del pre-flight richiede un update
+           che **fallisce** (segreto rinominato, non cancellato), e la riga va COPIATA subito:
+           il prossimo update la sovrascrive. *Un evento non osservato ma tracciato è
+           verificabile; un evento osservato e non tracciato è un ricordo.*
+           Il CHANGELOG 0.40.1 dichiara «il primo aggiornamento è anche la prima prova
+           end-to-end»: vero, ma il sistema non la registra se l'update riesce. La
+           dichiarazione è più larga di ciò che l'implementazione sostiene — la forma di
+           tutta la giornata del 20/07, comparsa stavolta nella riga scritta apposta per
+           essere onesti."
+    dove: ["tools/vps1777.py#progress_write", "CHANGELOG.md"]
+    status: deferred
+    since: "0.40.1"
+    decisione: "20/07 — trovato da b82df434 subito dopo il tag v0.40.1. NON corretto in
+                0.40.1: un fix per release, e la regola vale anche quando fa comodo romperla."
+    follow_up:
+      manuale:
+        cosa: "`progress_write` APPENDE una riga a un journal (`update_journal.ndjson`)
+               invece di sovrascrivere lo stato, così la sequenza resta leggibile anche
+               dopo un update riuscito. Chiude anche il caso «il timer aggiorna alle 9 del
+               mattino e nessuno vede cos'è successo»."
+        rivedi_dopo: "2026-08-31"
+    verify:
+      # ⚠️ Verifica che il DIFETTO sia ancora lì, non che una funzione ci sia. È l'uso
+      # onesto del ledger per una voce `deferred`: quando qualcuno sostituirà il
+      # `write_text` con un append, questa riga diventerà ROSSA e costringerà a
+      # aggiornare la voce invece di lasciarla a dichiarare un difetto già chiuso.
+      # Una voce che descrive un problema risolto è disinformazione a scoppio ritardato.
+      file_contains: {path: tools/vps1777.py, pattern: "p.write_text(json.dumps({"}
+
+  - id: ops.secrets-assente-vs-illeggibile
+    nome: "«Assente» e «c'è ma non si legge» sono due cose, e il rimedio è opposto"
+    cosa: "⚠️ VOCE DI UN DIFETTO NOTO nel pre-flight 0.40.1, non di una funzione.
+           `_secrets_mancanti_in` calcola
+           `vuoto = not p.is_file() or not p.read_text(...).strip()` — e nell'`or`
+           **butta via l'informazione che aveva già**. Un file esistente ma illeggibile
+           (permessi, ACL, symlink rotto, mount) finisce nello stesso ramo di un file
+           assente: il messaggio dice «manca o è VUOTO» di un segreto **integro**, e
+           suggerisce il comando col `>` che **lo troncherebbe**. Cioè il rimedio
+           distrugge un segreto valido — la forma peggiore, perché il pre-flight esiste
+           per evitare che si perda tempo, non per far perdere un dato.
+           MISURATO: 3 segreti presenti e pieni, `chmod 000` su uno ⇒ 1 su 3 segnalato,
+           e la guardia N9 (radice sbagliata) NON scatta perché scatta solo se mancano
+           TUTTI. Nessuna attenuante.
+           RIMEDIO (per una release sua): separare i due rami invece di enumerare le
+           cause — `not p.is_file()` ⇒ ASSENTE, «crealo», il `>` è sicuro; esiste ma
+           non leggibile/vuoto ⇒ NON UTILIZZABILE, «c'è e non va bene», e il comando
+           col `>` NON si suggerisce. Non serve elencare permessi/ACL/mount: quella
+           lista sarebbe incompleta dal primo giorno.
+           ⭐ FORMA GENERALE: **un `or` fra due condizioni con rimedi diversi è una
+           perdita di informazione, non una semplificazione.** Il codice sapeva
+           distinguere e l'ha dimenticato in una riga.
+           ⚠️ PROCEDURA DI PROVA: il collaudo end-to-end toglie e rimette un segreto.
+           Va fatto con `mv` in entrambi i versi — `mv` preserva owner e permessi.
+           Con `cp` o ricreando il file si **produce** questo difetto sulla macchina
+           viva, dopo un update bloccato. Il modo più probabile in cui morderebbe non
+           è un evento raro: è una procedura scritta senza dire come."
+    dove: ["tools/vps1777.py#_secrets_mancanti_in"]
+    status: active-default
+    since: "0.40.2"
+    decisione: "20/07 trovato da b82df434 dopo il tag e riprodotto da setaccio;
+                CHIUSO in 0.40.2 — tre stati distinti (ASSENTE / VUOTO / NON LEGGIBILE)
+                con tre rimedi diversi, e per l'illeggibile il messaggio non suggerisce
+                nessun comando con `>`: il file c'è, il guasto è l'accesso."
+    follow_up:
+      manuale:
+        cosa: "Separare ASSENTE da NON-UTILIZZABILE in `_secrets_mancanti_in`, con due
+               messaggi distinti, e il comando generativo suggerito SOLO nel primo caso."
+        rivedi_dopo: "2026-08-31"
+    verify:
+      # Come per ops.update-progress-journal: si verifica che il DIFETTO ci sia ancora,
+      # così chi lo ripara trova il ledger rosso e aggiorna la voce invece di lasciarla
+      # a descrivere un problema chiuso.
+      file_contains: {path: tools/vps1777.py, pattern: "NON LEGGIBILE"}
+
+  - id: archive.ts-source
+    nome: "ts_source: il regime del dato, promosso da nota a schema"
+    cosa: "Colonna su `messages` con tre valori: `messaggio` (istante reale), `data-export`
+           (data della FOTOGRAFIA, non del contenuto) e `ignoto` (righe migrate da un DB
+           pre-0.40.0, il cui regime non è ricostruibile a posteriori).
+           ⚠️ CONSEGUENZA VINCOLANTE: il `newest` si calcola in NEGATIVO —
+           `MAX(ts) WHERE ts_source <> 'data-export'` — e MAI `= 'messaggio'`, che
+           escluderebbe le righe `ignoto` restituendo una data troppo vecchia.
+           Esiste perché popolare i `ts` mancanti senza distinguere il regime avrebbe
+           fabbricato la bugia opposta a quella che si stava chiudendo: una memoria di
+           maggio fotografata a luglio NON è successa a luglio. Misurato: sul bundle di
+           riferimento 140.476 righe su 221.514 con ts pieno non sono conversazioni.
+           È l'unica delle quattro voci 0.40.0 che NON protegge una funzione visibile ma
+           una CONVENZIONE: senza questa riga, chi tocca db_info fra sei mesi non ha nulla
+           che gli dica perché il filtro è scritto al contrario, e lo 'semplifica'."
+    dove: ["services/gateway/app/archive_indexer.py#ts_source",
+           "services/gateway/tests/test_archive_indexer.py#test_newest_si_calcola_in_negativo"]
+    status: active-default
+    since: "0.40.0"
+    verify:
+      python_def: {path: services/gateway/tests/test_archive_indexer.py, name: test_newest_si_calcola_in_negativo}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 27/07/2026 — QUATTRO FUNZIONI ENTRATE OGGI SENZA UNA VOCE QUI, e il buco è
+  # istruttivo: il check inverso (reale → dichiarato) enumera tool MCP, unit
+  # systemd e profili compose. Queste quattro NON hanno creato nessuno dei tre —
+  # vivono DENTRO comandi e timer che esistevano già. Il ledger non poteva
+  # vederle, e sono esattamente ciò che esiste per non perdere.
+  # ⇒ Un ledger che si accorge di ciò che NASCE ma non di ciò che CAMBIA copre
+  #   metà del rischio. Le voci qui sotto sono scritte a mano; il residuo — un
+  #   check inverso che enumeri anche i comportamenti — è dichiarato, non chiuso.
+  - id: ops.raggiungibilita-giornaliera
+    nome: "Il servizio è controllato da fuori anche fra un aggiornamento e l'altro"
+    cosa: >
+      Il cancello dell'aggiornamento guarda la porta dall'host, ma solo DURANTE un
+      update: un guasto arrivato in altro modo restava invisibile finché non apriva
+      l'indirizzo una persona — com'è andata il 27/07, per 1h27m50s. Ora `vps1777
+      check` (timer giornaliero, notifica già attiva) fa la stessa domanda ogni
+      giorno, avvisa alla caduta e al ritorno dà la DURATA misurata fra i due
+      istanti. Notifica le transizioni, non lo stato: un avviso che si ripete uguale
+      si impara a ignorare. Limite dichiarato: cadenza giornaliera, quindi una
+      finestra cieca fino a 24 ore — restringe, non chiude.
+    dove:
+      - "tools/vps1777.py#_sorveglia_raggiungibilita"
+      - "systemd:vps1777-check-update.timer"
+    status: active-default
+    since: "0.40.8"
+    verify:
+      python_def:
+        path: tools/vps1777.py
+        name: _sorveglia_raggiungibilita
+
+  - id: ops.funnel-blackbox
+    nome: "La sonda che esce dal server e rientra da Internet"
+    cosa: >
+      La sonda sull'host vede il buco di docker ma non un tunnel caduto, un DNS che
+      non risolve, un instradamento pubblico rotto: con la porta viva e il Funnel
+      giù, per chi apre l'indirizzo il servizio è giù e nessun presidio lo direbbe.
+      `funnel_ok()` chiede al nome PUBBLICO e la richiesta esce davvero (misurato:
+      risolve a indirizzi pubblici dell'ingresso Tailscale, non al tailnet). Due
+      tentativi con pausa, perché un errore di rete isolato è comune. NON è
+      nell'health-gate dell'update, di proposito: quel cancello giudica ciò che
+      l'update può rompere, e un singhiozzo del tunnel farebbe tornare indietro una
+      versione sana.
+    dove:
+      - "tools/vps1777.py#funnel_ok"
+      - "tools/vps1777.py#nome_pubblico_funnel"
+    status: active-default
+    since: "0.40.8"
+    verify:
+      python_def:
+        path: tools/vps1777.py
+        name: funnel_ok
+
+  - id: ops.cosign-bypass-promemoria
+    nome: "La via d'emergenza della firma non si dimentica più da sola"
+    cosa: >
+      `VPS1777_REQUIRE_COSIGN=0` nel .env sblocca una crisi ed è giusto che esista,
+      ma è riletta a ogni update compreso l'automatico: chi la mette e se ne
+      dimentica lascia la verifica firma spenta a tempo indeterminato. Il promemoria
+      settimanale dei segreti ora la mostra con da quanti giorni è aperta, e la voce
+      sparisce da sé appena la si toglie. NON forza il ri-armo: la crisi può durare
+      più di un giorno, e richiudere da soli chiuderebbe fuori chi sta riparando.
+      Era dichiarato nel registro dal 04/07 e non era diventato codice per 23 giorni.
+    dove:
+      - "tools/vps1777.py#cosign_bypass_status"
+      - "systemd:vps1777-secrets-check.timer"
+    status: active-default
+    since: "0.40.7"
+    verify:
+      python_def:
+        path: tools/vps1777.py
+        name: cosign_bypass_status
+
+  - id: ops.telemetria-non-fatale
+    nome: "La telemetria non può far cadere una riparazione"
+    cosa: >
+      I file che i pannelli leggono per disegnare la barra di avanzamento non servono
+      a FARE l'update: servono a mostrarlo. Finché la scrittura era nuda, una
+      PermissionError su di essi uccideva `vps1777 update` con un traceback a metà
+      strada — misurato sulla VPS il 27/07, dove il file era di root perché il timer
+      automatico gira da root. Ora si avvisa e si prosegue, una volta per esecuzione,
+      e da root il file viene riallineato al proprietario della cartella così il
+      comando manuale successivo lo trova scrivibile.
+    dove:
+      - "tools/vps1777.py#_scrivi_telemetria"
+    status: active-default
+    since: "0.40.8"
+    verify:
+      python_def:
+        path: tools/vps1777.py
+        name: _scrivi_telemetria
+
+  - id: ops.quadratura-ingest-manuale
+    nome: "La quadratura di un ingest è uno strumento MANUALE, e deve restarlo"
+    cosa: >
+      `collaudo-quadratura.py` risponde a una domanda sola — «il corpus è entrato
+      tutto, o si è perso qualcosa?» — confrontando ciò che il DB contiene
+      (messaggi + lapidi in `skipped`) con quante righe la SORGENTE aveva. Quel
+      numero si passa a mano (`--sorgente N`) e il docstring lo chiama «dichiarate».
+      È DICHIARATO qui perché il ledger non lo vedeva: `enum_reality` ha guardato
+      `tools/` solo dal 02/08, e fino ad allora questo strumento è esistito per
+      sei giorni senza che nessun presidio sapesse che c'era — e senza che nessuno
+      lo invocasse.
+      ⚠️ NON è un presidio scollegato da agganciare, ed è la parte che conta: il
+      numero della sorgente deve venire da FUORI il DB. Se lo prendesse
+      dall'ingest, la quadratura confronterebbe l'ingest con sé stesso e
+      diventerebbe una tautologia che non può fallire — cioè esattamente il
+      «verde che non ha guardato» che questo progetto insegue. Il costo di
+      automatizzarlo è distruggerlo.
+      Quel che SI PUÒ automatizzare è ricordare che esiste e che per un dato DB
+      non è mai stata eseguita: è un promemoria, non una misura.
+    dove:
+      - "tools/collaudo-quadratura.py#main"
+      - "docs/ARCHIVE.md"
+    status: active-default
+    since: "0.40.x (esistente dal 26/07, dichiarato il 02/08)"
+    verify:
+      python_def:
+        path: tools/collaudo-quadratura.py
+        name: main
+
+  - id: ops.prove-empiriche
+    nome: "Le nove prove empiriche e il loro contratto a TRE stati"
+    cosa: >
+      Nove script che misurano il sistema VIVO — non il codice: la rete che non
+      esce, l'ingresso che non entra, il deep-health chiuso agli esterni, gli
+      snapshot in chiaro, la sandbox della unit di update, il kernel che la
+      regge, la porta davvero pubblicata, le unit che si comportano come
+      dichiarano, il fail-closed che torna indietro davvero. Più
+      `lancia-tutte.sh`, che le esegue tutte e DATA l'esito in
+      `onboarding/prove-empiriche.json` (quando, e su quale host).
+      ⭐ IL CONTRATTO E' LA COSA CHE VALE, ed è dichiarato in testa a `prova-8`:
+      **0 = PASS · 1 = FAIL · 2 = NON ESEGUIBILE**. Il terzo stato esiste perché
+      «non ho potuto guardare» non è «va bene»: senza di lui una prova lanciata
+      dove il sistema non c'è stampa un verde che non ha misurato niente.
+      Misurato il 01-02/08 su un PC senza vps1777: prova-1 e prova-3 davano un
+      falso PASS su una guardia a vuoto (`docker compose ps -q` esce 0 con
+      output VUOTO), prova-2 su un ciclo che iterava su ZERO container, prova-5
+      dichiarando «non osservabile» proprio sul blocco che può dare FAIL, e
+      prova-6 uscendo 0 pur dichiarando di non aver visto il caso silenzioso.
+      Curate: adesso su quella macchina è 1 verde, 0 rosse, 8 non eseguite.
+      ⚠️ COSA IL LEDGER NON PROVA DI LORO: che siano LANCIATE. Non sono nel gate
+      di aggiornamento e nessuna CI le esegue — girano dove gira il prodotto, e
+      il loro esito lo produce chi le lancia. È una scelta (misurano il vivo,
+      non il repo), non una dimenticanza — ma va saputa: un verde della CI non
+      dice niente su queste.
+    dove:
+      - "tools/prove-empiriche/lancia-tutte.sh"
+      - "tools/prove-empiriche/prova-1-gateway-non-esce.sh"
+      - "tools/prove-empiriche/prova-2-egress-non-entra.sh"
+      - "tools/prove-empiriche/prova-3-health-deep-solo-interni.sh"
+      - "tools/prove-empiriche/prova-4-snapshot-in-chiaro.sh"
+      - "tools/prove-empiriche/prova-5-sandbox-update-service.sh"
+      - "tools/prove-empiriche/prova-6-sandbox-strict-regge-sul-kernel.sh"
+      - "tools/prove-empiriche/prova-7-porta-pubblicata-davvero.sh"
+      - "tools/prove-empiriche/prova-8-le-unit-si-comportano-come-dichiarano.sh"
+      - "tools/prove-empiriche/prova-9-il-fail-closed-torna-indietro-davvero.sh"
+    status: active-default
+    since: "esistenti dal 26/07, contratto a tre stati curato il 01-02/08"
+    verify:
+      manual: "verifica umana: le prove misurano il sistema VIVO — una macchina
+               deve lanciarle. Il ledger prova che esistono (i file sono nel
+               `dove`), NON che siano state eseguite: quello lo dice la data in
+               `onboarding/prove-empiriche.json`, che il lanciatore scrive."
+
+  - id: ops.suite-di-test
+    nome: "La suite di test, e cosa NON prova"
+    cosa: >
+      Cinque file di collaudo: `test_vps1777.py` (il grosso, sulla CLI),
+      `test_no_leaks.py` (il gate anti-leak provato sui suoi stessi pattern),
+      `test_migra_chiave_miniapp.py` (H54, la chiave derivata), `test_installer_funnel.py`
+      e `test-backup-retention.sh`. Girano in CI nel job `contract`.
+      📊 CENSITA il 01/08 su richiesta di un audit che parlava di «tanti controlli
+      fittizi»: dei 105 test, **85 importano e chiamano davvero il codice**, 14
+      ispezionano (leggono file o l'albero sintattico) e 6 toccano il sistema
+      reale. «Fittizi» era il 13%, non la maggioranza — il rilievo era gonfiato,
+      ma la misura non esisteva prima che qualcuno lo dicesse.
+      ⚠️ COSA NON PROVA: che il prodotto FUNZIONI sulla macchina dell'utente. La
+      suite gira su un repo, non su una VPS; le nove prove empiriche
+      (`ops.prove-empiriche`) sono l'unico strato che tocca il vivo, e nessuna CI
+      le esegue. Un `contract` verde e un servizio giù convivono benissimo.
+    dove:
+      - "tools/tests/test_vps1777.py"
+      - "tools/tests/test_no_leaks.py"
+      - "tools/tests/test_migra_chiave_miniapp.py"
+      - "tools/tests/test_installer_funnel.py"
+      - "tools/tests/test-backup-retention.sh"
+      - ".github/workflows/ci.yml"
+    status: active-default
+    since: "in CI dal job `contract`; censita il 01/08"
+    verify:
+      python_def:
+        path: tools/tests/test_migra_chiave_miniapp.py
+        name: test_1_la_chiave_e_identica_a_quella_del_gateway
+
+  - id: ops.verificatore-del-ledger
+    nome: "Il verificatore del ledger — che fino al 02/08 non era NEL ledger"
+    cosa: >
+      `verify-features.py` è ciò che tiene onesto questo file: confronta le voci
+      dichiarate col codice reale in DUE versi — dichiarato→reale (una feature
+      dichiarata attiva il cui verify fallisce è una PERDITA) e reale→dichiarato
+      (qualcosa che esiste e nessuna voce nomina).
+      ⭐ E per sei giorni NON ERA DICHIARATO QUI. Il guardiano fuori dal registro
+      che sorveglia: non è ironia, è la stessa classe che sorveglia — «una cosa
+      che c'è e nessun presidio sa che c'è». Se ne è accorto il verso
+      reale→dichiarato il 02/08, il giorno in cui ha imparato a guardare `tools/`.
+      I tipi di verify che conosce: `mcp_tool` · `python_def` · `file_contains` ·
+      `compose_profile` · `systemd_unit` · `path_exists` · `grep_count` · `cmd` ·
+      `manual`. I primi due camminano l'ALBERO SINTATTICO (`ast`), non il testo:
+      una `def` dentro un commento o una stringa NON passa, e un file che non
+      compila FALLISCE invece di sembrare vuoto.
+      ⚠️ COSA NON PROVA: che una feature sia ACCESA a runtime, che il codice sia
+      CHIAMATO, che il servizio parta. Prova che l'artefatto ESISTE nella forma
+      dichiarata. E `_meta.baseline_completo` non è una proprietà del ledger: è
+      una proprietà delle CATEGORIE che l'enumerazione guardava quando fu messo a
+      true — per questo ogni categoria nuova ha la sua semina (`CATEGORIE_IN_SEMINA`).
+    dove:
+      - "tools/verify-features.py"
+      - ".github/workflows/verify-features.yml"
+    status: active-default
+    since: "0.38.0 (dichiarato qui il 02/08)"
+    verify:
+      python_def:
+        path: tools/verify-features.py
+        name: enum_reality
+
+  # ── i COMANDI della riga di comando ────────────────────────────────────────
+  # 🔴 Fino al 02/08 NESSUNO di questi era nel ledger: 9 su 9. Il verso
+  #    reale→dichiarato enumerava tool MCP, unit systemd e profili compose — i
+  #    sottocomandi di `tools/vps1777.py` erano una QUARTA forma, fuori.
+  # ⭐ È la seconda cecità dello stesso presidio in dodici ore: stanotte era
+  #    `tools/` (una CARTELLA intera), adesso i comandi DENTRO un file. La parte
+  #    scoperta non è mai casuale — è quella con la forma diversa dalle altre,
+  #    perché un presidio nasce dove è facile metterlo (@71d540e6, 6ª istanza).
+  # 🔑 E la forma diversa era anche la più esposta: `status`, `check`, `rollback`,
+  #    `update` sono la superficie con cui Neo USA vps1777.
+  # 🛡️ `verify: cli_command` controlla DUE cose, perché divergono: che il comando
+  #    sia accettato dal parser E collegato nel dispatcher. Un `add_parser` senza
+  #    voce nella mappa fa accettare la riga di comando e non esegue niente.
+
+  - id: cli.status
+    nome: "vps1777 status"
+    cosa: "Stato dei servizi, versione, salute — il comando con cui si guarda la macchina."
+    dove: ["cli:status", "tools/vps1777.py"]
+    status: active-default
+    since: "0.1.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: status}
+
+  - id: cli.avvisa_fallimento
+    nome: "vps1777 avvisa-fallimento"
+    cosa: "Dice su Telegram che una unit systemd è fallita, con la coda del journal. Chiamato da OnFailure=, non a mano. Nasce dal 03/08: auto-update fallito alle 04:32 e nessuno l'ha saputo per dieci ore, perché la notifica viveva dentro la routine di rollback e copriva solo il fallimento che ROMPE qualcosa."
+    dove: ["cli:avvisa-fallimento", "tools/vps1777.py"]
+    status: active-default
+    since: "0.42.0 (round-17)"
+    verify: {cli_command: avvisa-fallimento}
+
+  - id: unit.avvisa_fallimento
+    nome: "vps1777-avvisa-fallimento@.service"
+    cosa: "Unit template agganciata a OnFailure= di auto-update, update, check-update e secrets-check. Sta in systemd e non nel flusso perché systemd sa che una unit è fallita QUALUNQUE sia la ragione, incluso un crash che il codice non aveva previsto."
+    dove: ["systemd/vps1777-avvisa-fallimento@.service"]
+    status: active-default
+    since: "0.42.0 (round-17)"
+    verify: {systemd_unit: "vps1777-avvisa-fallimento@.service"}
+
+  - id: cli.check
+    nome: "vps1777 check"
+    cosa: "Diagnostica: preflight e controlli sull'installazione."
+    dove: ["cli:check", "tools/vps1777.py"]
+    status: active-default
+    since: "0.1.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: check}
+
+  - id: cli.update
+    nome: "vps1777 update"
+    cosa: "Aggiornamento con snapshot, health-gate e rollback automatico. È il percorso
+           critico del self-update: se questo comando sparisse, la macchina resterebbe
+           aggiornabile solo a mano."
+    dove: ["cli:update", "tools/vps1777.py"]
+    status: active-default
+    since: "0.9.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: update}
+
+  - id: cli.rollback
+    nome: "vps1777 rollback"
+    cosa: "Ritorno alla versione precedente con ripristino dei dati. La rete di sicurezza
+           dell'update: va dichiarata perché la sua assenza si scoprirebbe nel momento
+           peggiore possibile."
+    dove: ["cli:rollback", "tools/vps1777.py"]
+    status: active-default
+    since: "0.9.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: rollback}
+
+  - id: cli.migrate
+    nome: "vps1777 migrate"
+    cosa: "Migrazioni di schema/installazione fra versioni."
+    dove: ["cli:migrate", "tools/vps1777.py"]
+    status: active-default
+    since: "0.9.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: migrate}
+
+  - id: cli.bootstrap
+    nome: "vps1777 bootstrap"
+    cosa: "Prima installazione da zero su una macchina nuova."
+    dove: ["cli:bootstrap", "tools/vps1777.py"]
+    status: active-default
+    since: "0.1.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: bootstrap}
+
+  - id: cli.version
+    nome: "vps1777 version"
+    cosa: "Versione installata (e attesa) — la coordinata con cui si datano tutti gli altri esiti."
+    dove: ["cli:version", "tools/vps1777.py"]
+    status: active-default
+    since: "0.1.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: version}
+
+  - id: cli.secrets-status
+    nome: "vps1777 secrets-status"
+    cosa: "Età e scadenze dei secret, con notifica Telegram opzionale."
+    dove: ["cli:secrets-status", "tools/vps1777.py"]
+    status: active-default
+    since: "0.13.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: secrets-status}
+
+  - id: cli.archive-ingest
+    nome: "vps1777 archive-ingest"
+    cosa: "Indicizza un file nell'archivio passando da NotebookLM per la lettura
+           multimodale (OCR): è la via per PDF-immagine e scansioni che pypdf non legge."
+    dove: ["cli:archive-ingest", "tools/vps1777.py"]
+    status: active-default
+    since: "0.20.0 (dichiarato qui il 02/08)"
+    verify: {cli_command: archive-ingest}
+
+  - id: cli.archive-retag
+    nome: "vps1777 archive-retag"
+    cosa: "Ri-classifica `voice` sui DB dell'archivio quando le soglie del classificatore
+           cambiano. A SECCO di default: calcola il delta per intero (reale, non stimato)
+           e non scrive finché non arriva `--scrivi`. È l'unico comando che riscrive in
+           blocco una colonna di giudizi, e per questo il suo default è l'opt-in."
+    dove: ["cli:archive-retag", "tools/vps1777.py"]
+    status: active-default
+    since: "0.41.0 (voice-tagging Fase 4)"
+    verify: {cli_command: archive-retag}

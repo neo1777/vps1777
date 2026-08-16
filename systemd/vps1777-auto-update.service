@@ -1,0 +1,98 @@
+# vps1777-auto-update.service — auto-update PROGRAMMATO (opt-in, gestito).
+#
+# È l'alternativa SICURA a Watchtower (profilo ops.autoupdate, declassato): invece
+# di auto-pull+restart crudo, lancia lo STESSO motore del pulsante e del terminale
+# (`vps1777 update --yes`), quindi eredita gratis backup + verifica firma cosign +
+# migrazioni + health-gate 180s + auto-rollback. Il timer gemello lo schedula.
+# `--yes` salta solo la conferma interattiva; se è già alla latest → no-op.
+# NON `--from-intent`: qui non c'è nessun intent-file del pannello, è il canale
+# programmato. Mutuamente esclusivo con Watchtower — la CLI avvisa se lo trova attivo.
+#
+# H43: @OPERATOR_USER@ / @REPO@ non sono hardcodati — la CLI (install_systemd_units
+# → render_unit) e il deploy iniziale li sostituiscono coi valori REALI.
+#
+# Sandboxing filesystem VOLUTAMENTE parziale, identico a vps1777-update.service e
+# per le stesse ragioni verificate: l'updater fa cose da root via `sudo -n`
+# (install in /usr/local/bin + /etc/systemd/system, chown, systemctl), self-update
+# della CLI, cosign (cache TUF in ~/.sigstore), e backup.sh che passa un /tmp come
+# sorgente di bind-mount a `docker run`. Perciò NIENTE NoNewPrivileges (romperebbe
+# sudo/setuid), ProtectSystem (blocca il self-update + le unit), PrivateTmp (rompe
+# il bind-mount del backup → dump vuoto in silenzio), ProtectHome (rischia la cache
+# cosign → verifica firma fail-closed → update abortito). Restano le protezioni che
+# non toccano i path dell'update:
+[Unit]
+Description=vps1777 — auto-update programmato (gestito, sicuro)
+Wants=network-online.target
+After=network-online.target docker.service
+
+# 🔔 Se questa unit fallisce, @Neo lo deve SAPERE. Il 03/08 auto-update è
+# fallito e nessuno l'ha saputo per dieci ore: la notifica viveva dentro la
+# routine di rollback, cioè solo sul fallimento che rompe qualcosa.
+OnFailure=vps1777-avvisa-fallimento@%n.service
+
+[Service]
+Type=oneshot
+User=@OPERATOR_USER@
+Group=@OPERATOR_USER@
+Environment=VPS1777_HOME=@REPO@
+WorkingDirectory=@REPO@
+ExecStart=/usr/local/bin/vps1777 update --yes
+# pull + backup + migrazioni + health-gate (180s) + eventuale rollback: margine ampio
+TimeoutStartSec=1800
+# ⚠️ QUESTA RIGA NON RIPARA IL GUASTO — misurato dopo averla scritta, e va detto
+#   prima di tutto il resto perché il commento qui sotto prometteva il contrario.
+#   Sonda: `sudo -n install -m 644 /dev/null /tmp/x` (il comando VERO che fallisce —
+#   `sudo true` no: `true` non è nella whitelist sudoers, e misurerebbe altro).
+#       nessuna direttiva                       sudo=OK
+#       le sei direttive di questa unit         sudo=KO   ← il guasto
+#       le sei + NoNewPrivileges=no  (QUESTA)   sudo=KO   ← NON ripara
+#   ⇒ `NoNewPrivileges=no` esplicito NON vince sull'implicazione: systemd lo forza
+#   comunque e `NoNewPrivs` resta 1. E basta UNA QUALUNQUE delle sei direttive con
+#   `User=` non-root — non la loro combinazione: la misura che diceva «è la
+#   combinazione» girava come root, dove NNP non serve e non viene messo.
+# 🖐️ La riga RESTA perché dichiarare l'intenzione ha valore per chi legge — ma è
+#   una dichiarazione, NON una cura. La cura è una scelta di progetto e non è stata
+#   presa: (A) togliere le direttive seccomp dalle unit che elevano — misurato che
+#   funziona — oppure (B) non usare sudo nel self-update.
+# 🔴 Qui sotto: il difetto che ha rotto l'auto-update il
+# 03/08 alle 04:32 (`sudo: The "no new privileges" flag is set, which prevents
+# sudo from running as root` → il self-update della CLI muore, e l'update con lui).
+#   L'intenzione era gia' scritta nel commento in testa a questo file — «Perciò
+#   NIENTE NoNewPrivileges (romperebbe sudo/setuid)» — ed era GIUSTA. E' stata
+#   realizzata TOGLIENDO la riga, e l'assenza non e' una scelta: e' uno spazio che
+#   systemd riempie da se'. Con un filtro seccomp (le direttive qui sotto) su un
+#   servizio che gira come utente NON privilegiato, systemd accende NNP di
+#   conseguenza — nessuno l'ha impostato.
+# 📏 Misurato con unit transitorie, il 03/08:
+#     le sei direttive, come root            -> NoNewPrivs: 0
+#     le sei + User=<operator> (questa unit) -> NoNewPrivs: 1
+#     solo User=<operator>, senza hardening  -> NoNewPrivs: 0
+#   => ne' l'hardening da solo ne' l'utente da solo: la COMBINAZIONE.
+# ⚠️ E `systemctl show … -p NoNewPrivileges` rispondeva `no` mentre il processo
+#   aveva `1`: riporta il valore DICHIARATO, non l'effettivo. Chi verificava di li'
+#   archiviava l'ipotesi giusta — il verdetto su una proprieta' di runtime sta nel
+#   processo (`/proc/<pid>/status`), non nella configurazione.
+# 🔑 Le unit che NON usano sudo (`check-update`, `secrets-check`) hanno
+#   `NoNewPrivileges=true` scritto per esteso. Qui serve il contrario, e per la
+#   stessa ragione: detto, non lasciato al default.
+# 🔴 LE SEI DIRETTIVE SECCOMP SONO STATE TOLTE — decisione a tre del 03/08, e la
+#   ragione è che con `User=` non-root systemd accende `NoNewPrivileges` DI
+#   CONSEGUENZA, e NNP blocca `sudo` (che è setuid). È così che l'auto-update si è
+#   rotto il 03/08 alle 04:32, lasciando la macchina alla 0.40.14 col bundle 0.41.0
+#   già scaricato e verificato.
+# 📏 MISURATO, non dedotto — unit transitorie, produzione mai toccata:
+#     con le sei direttive             sudo=KO   NoNewPrivs=1   ← il guasto
+#     SENZA le sei + NoNewPrivileges=no sudo=OK  NoNewPrivs=0   ← ripara
+#   ⚠️ e NON esiste un sottoinsieme: BASTA UNA QUALUNQUE delle sei ad accendere il
+#   flag. O ci sono tutte, o nessuna.
+#   ⚠️ `NoNewPrivileges=no` DA SOLO non basta: non vince sull'implicazione (provato,
+#   e una PR che lo faceva è stata ritirata). Serve togliere le direttive.
+# 💰 IL COSTO, misurato con `systemd-analyze security`:  8.0 EXPOSED → 9.2 UNSAFE.
+#   Non è gratis. È stato accettato perché questa unit era GIÀ a 8.0 CON l'hardening
+#   (le sei valevano 1,2 punti) e perché la via alternativa — capabilities al posto di
+#   sudo — richiede una regola polkit per `daemon-reload`, che è un pezzo nuovo e non
+#   provabile senza una macchina di prova, con l'installer congelato fino al collaudo.
+# 🛠️ LA VIA CHE RESTA APERTA, mappata e non persa: `AmbientCapabilities=CAP_DAC_OVERRIDE`
+#   scrive il file MANTENENDO NoNewPrivs=1 (provato: le ambient non passano da setuid,
+#   quindi NNP non le tocca). Copre 4 install + 2 chown. Manca solo `daemon-reload`.
+NoNewPrivileges=no

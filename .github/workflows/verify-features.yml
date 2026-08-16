@@ -1,0 +1,34 @@
+name: Verify features ledger
+
+# Il verificatore anti-amnesia (design a 3, 17/07: schema+verificatore b82df434 ·
+# metodo+seme setaccio · runtime+questo hook 71d540e6). Controlla `features.yaml` — il
+# LEDGER delle funzioni di vps1777 — contro la REALTÀ del repo, nei DUE versi:
+#   dichiarato → reale : una feature dichiarata ma sparita dal codice = CI ROSSA (la PERDITA).
+#   reale → dichiarato : un tool MCP / systemd-unit / profilo compose reale ma NON dichiarato
+#                        = CI ROSSA (ciò che entra senza traccia e poi si dimentica).
+# In SEMINA (`_meta.baseline_completo` assente/false) SEGNALA i non-dichiarati ma NON rompe
+# la CI (exit 0); a semina completa si mette `_meta: {baseline_completo: true}` e diventa
+# enforcing. Regola di cattura (setaccio): una `deferred` senza `follow_up` = ROSSA — è il
+# buco che perse Watchtower, chiuso. È un CHECK, non un daemon: non gira in produzione né
+# sul PC utente (il ledger è PARTE DEL PRODOTTO, vive nel repo e si verifica in CI).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-features:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: PyYAML (unica dipendenza del verificatore) — versione e hash fissati
+        # `--require-hashes` rifiuta qualunque file che non corrisponda: il verificatore
+        # delle regole di sicurezza non può più installare «l'ultima versione» di ciò che
+        # usa per leggerle. Il perché per esteso, e come si aggiorna, stanno nel file.
+        run: python3 -m pip install --quiet --require-hashes -r .github/requirements-verify-features.txt
+      - name: Verifica il ledger delle feature (features.yaml)
+        run: python3 tools/verify-features.py

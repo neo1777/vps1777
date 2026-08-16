@@ -24,8 +24,8 @@ incollare in claude.ai. Niente Docker da gestire a mano, niente shell sulla VPS.
 │                                                                  │
 │   claude.ai ──┐                                                  │
 │   Claude Code ├──► https://<host>/<SECRET>/<service>/mcp         │
-│   Mini App ───┤        │                                         │
-│   Telegram ───┘        │                                         │
+│   Mini App ───┤        │   la Mini App entra su /app/*,          │
+│   Telegram ───┘        │   non sul path MCP                      │
 │                        ▼                                         │
 │            ┌───────────────────┐                                 │
 │            │  Tailscale Funnel │  (o Caddy, o Cloudflared)       │
@@ -94,7 +94,9 @@ stampa URL e connector.
 ```bash
 git clone https://github.com/neo1777/vps1777.git && cd vps1777
 ./setup.sh                                          # wizard interattivo
-docker compose --profile ingress.tailscale up -d    # o caddy / cloudflared
+# se hai risposto «no» a «Procedo ora?» (setup.sh avvia già lo stack, con gli stessi -f):
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+  --profile ingress.tailscale up -d                 # o caddy / cloudflared
 ```
 
 Per l'HTTPS pubblico (Tailscale / Caddy / Cloudflare) e i prerequisiti, vedi
@@ -107,7 +109,7 @@ caricare l'auth NotebookLM, [docs/INSTALL.md](docs/INSTALL.md).
 |---|---|---|
 | **gateway** | OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*` | 8080 |
 | **archive-mcp** | Ricerca FTS5 su più DB (export web claude.ai, sessioni Claude Code) | 8002 |
-| **nb1777-mcp** | NotebookLM via CLI `nlm` — **35 tool** (notebook, source, chat, 9 artefatti studio, doctor) | 8003 |
+| **nb1777-mcp** | NotebookLM via CLI `nlm` — **37 tool** (notebook, source, chat, 9 artefatti studio, doctor, canonico/memoria). Vedi [docs/NB1777.md](docs/NB1777.md) | 8003 |
 | **nb1777-bot** | Bot Telegram owner-only + launcher Mini App | (long-poll) |
 
 Più i **plugin** che ci aggiungi tu — un MCP o un bot in pochi file, senza
@@ -133,16 +135,20 @@ oppure un click dal **pannello admin → tab Update**. Quando esce una release
 il bot Telegram ti avvisa; se la nuova versione non torna in salute, **rollback
 automatico**. Manuale completo: [docs/UPDATE.md](docs/UPDATE.md).
 
+E di default **fa da sola**: `vps1777-auto-update.timer` applica lo stesso
+update sicuro **una volta a settimana** — feature `autoupdate` in
+`VPS1777_FEATURES`, attiva di default; per spegnerla vedi [docs/OPS.md](docs/OPS.md).
+
 ## Sicurezza per design
 
 - Backend su rete Docker `internal: true` — **solo il gateway** è esposto verso l'esterno
-- Il gateway **non** ha accesso al Docker socket né ai secret dell'host (container non privilegiato), **né ai cookie Google** di NotebookLM: quel volume lo monta solo `nb1777-mcp`, il servizio che li usa
+- Il gateway **non** ha accesso al Docker socket né al filesystem dell'host (container non privilegiato), **né ai cookie Google** di NotebookLM: fra i servizi in esercizio quel volume lo monta solo `nb1777-mcp`, quello che li usa (in sola lettura lo montano anche il backup, che li cifra, e il check scadenze, che ne legge solo la data — vedi [SECURITY.md](SECURITY.md)). Vede però i **5 secret Docker a lui assegnati** — fra cui `telegram_bot_token`, radice di fiducia della Mini App ([docs/SECRETS.md](docs/SECRETS.md)): un gateway compromesso li legge, ed è per questo che il suo perimetro è il più difeso
 - Secrets sensibili (password, signing key, token) via Docker `secrets:` (tmpfs `/run/secrets/`), **mai** in env var; il `GATEWAY_SECRET` è redatto dagli access-log
 - OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12; il proxy verifica anche l'**audience** del token
 - Mini App e bot **owner-only fail-closed**: senza `TELEGRAM_OWNER_ID` negano tutti, non aprono
 - Rate-limit per-IP sugli endpoint auth; `X-Forwarded-For` fidato **solo** dal proxy (IP client non falsificabile)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, healthcheck su ogni servizio
-- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban`
+- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
 - Update firmati **cosign** e verificati **fail-closed di default**; digest immutabili (`images.lock`); backup age + snapshot + **rollback automatico** ([docs/UPDATE.md](docs/UPDATE.md))
 - CI con GitHub Actions **pinnate a SHA** + Dependabot; chiave di backup **fuori dalla VPS** (solo il recipient pubblico sul server)
 - Gestione visuale opzionale (Portainer) **solo su loopback** + tunnel SSH — vedi [docs/OPS.md](docs/OPS.md)
@@ -161,6 +167,7 @@ Tutto questo è passato per una **review difensiva a tappeto** (luglio 2026): la
 | [OPS.md](docs/OPS.md) | Hardening + profili opzionali (Portainer, Watchtower, backup) |
 | [UPDATE.md](docs/UPDATE.md) | Aggiornamenti: `vps1777 update`, pulsante admin, rollback |
 | [ARCHIVE.md](docs/ARCHIVE.md) | Archivio di ricerca: pagina `/admin/archive`, formati, ingest via NotebookLM |
+| [NB1777.md](docs/NB1777.md) | NotebookLM: i 37 tool MCP, lo studio, l'auth, il bot Telegram, il canonico della memoria |
 | [MINIAPP.md](docs/MINIAPP.md) | Mini App Telegram: la plancia mobile — auth initData, endpoint, sicurezza |
 | [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) | Backup/restore volumi age-encrypted |
 | [ONBOARDING.md](docs/ONBOARDING.md) | Setup post-deploy dal pannello web |

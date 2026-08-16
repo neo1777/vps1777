@@ -87,6 +87,27 @@ def test_source_add_takes_notebook_id_positional() -> None:
     assert "NOTEBOOK_ID" in h, h
 
 
+def test_source_add_has_file_and_title_channels() -> None:
+    # H41: source_add_text NON passa più il corpo come `--text` (finiva in argv,
+    # visibile via ps/proc a ogni utente della VPS). Per i testi lunghi scrive un
+    # file temp 0600 e usa `--file` + `--title`. Questo test blocca quel canale:
+    # se un bump di nlm togliesse `--file`/`--title` da `source add`, il fallback
+    # a file si romperebbe in silenzio — meglio farlo fallire QUI.
+    h = _help("add")
+    assert "--file" in h, "source add deve esporre --file (via per il testo lungo, H41)"
+    assert "--title" in h, "source add deve esporre --title"
+
+
+def test_source_add_has_no_stdin_channel() -> None:
+    # Perché file-temp e non stdin: `nlm source add` non ha un canale stdin. Se
+    # un giorno lo aggiungesse, stdin sarebbe preferibile (niente file su disco):
+    # questo test lo segnalerebbe cambiando esito, da rivedere allora.
+    h = _help("add")
+    assert "--stdin" not in h, (
+        "nlm source add ora espone --stdin: valuta di passare il testo da stdin "
+        "invece che da file temporaneo (source_add_text in core.py)")
+
+
 def test_source_list_takes_notebook_id_positional() -> None:
     h = _help("list")
     assert "NOTEBOOK_ID" in h, h

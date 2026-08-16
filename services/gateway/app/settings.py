@@ -55,6 +55,12 @@ def _int_or_zero(value: object) -> int:
 IntOrZero = Annotated[int, BeforeValidator(_int_or_zero)]
 
 
+# Le voci di GATEWAY_UPSTREAMS che il parser ha scartato perché malformate.
+# Esiste perché uno scarto silenzioso rende invisibile un proxy che non instrada:
+# `/health?deep=1` lo legge e lo mostra a chi sta diagnosticando.
+UPSTREAMS_SCARTATI: list[str] = []
+
+
 def _parse_upstreams(value: str | dict[str, str] | None) -> dict[str, str]:
     """
     Parsa "archive=archive-mcp:8002,nb1777=nb1777-mcp:8003" in
@@ -76,7 +82,14 @@ def _parse_upstreams(value: str | dict[str, str] | None) -> dict[str, str]:
             name, host, port = spec.split(":", 2)
             target = f"{host}:{port}"
         else:
-            # malformato — skip
+            # 🔴 PRIMA QUI C'ERA SOLO `continue`, col commento «malformato — skip».
+            # Scartare in silenzio è ciò che rendeva invisibile l'intero difetto:
+            # con `GATEWAY_UPSTREAMS=archive-mcp:8002,nb1777-mcp:8003` (i prefissi
+            # `nome=` dimenticati) il dict usciva VUOTO, il proxy non instradava
+            # più nulla, e nessuno aveva un posto dove leggerlo.
+            # 📌 Non si alza: un avvio che esplode per una virgola è peggio del
+            # difetto. Lo scarto si REGISTRA, e `/health?deep=1` lo mostra.
+            UPSTREAMS_SCARTATI.append(spec)
             continue
         out[name.strip()] = target.strip()
     return out
@@ -123,6 +136,15 @@ class Settings(BaseSettings):
     gateway_secret_file: SecretFromFile = ""
     gateway_secret: str = ""  # override via env in dev
 
+    # D9 — segreto DEDICATO al canale archive-mcp → gateway (set_description).
+    # Perché non si riusa `gateway_secret`: quello apre `/internal/nlm/*`, cioè
+    # stato E INSTALLAZIONE dei profili-cookie Google. Montarlo su archive-mcp
+    # significherebbe che un archive-mcp compromesso eredita QUEI poteri, per una
+    # feature che deve solo scrivere un campo di testo. Il principio del privilegio
+    # minimo vale anche fra i nostri servizi: si riusa il PATTERN, non il segreto.
+    archive_desc_secret_file: SecretFromFile = ""
+    archive_desc_secret: str = ""
+
     # ───── OAuth ─────
     oauth_required: bool = True
     oauth_access_token_lifetime: int = 900
@@ -139,6 +161,18 @@ class Settings(BaseSettings):
     # ───── Telegram (per Mini App) ─────
     telegram_bot_token_file: SecretFromFile = ""
     telegram_bot_token: str = ""
+    # La chiave GIÀ DERIVATA con cui Telegram firma initData (H54, 27/07):
+    # HMAC_SHA256("WebAppData", token), 64 caratteri esadecimali. Se c'è, il gateway
+    # NON ha bisogno del token intero — e non montarlo è tutto il punto del rilievo:
+    # il token intero permette di parlare come il bot fuori dal perimetro del gateway,
+    # la chiave derivata no (la derivazione è a senso unico).
+    # Misurato prima di scriverla: il gateway non chiama MAI l'API di Telegram —
+    # zero occorrenze di api.telegram.org, sendMessage, getUpdates in services/gateway/.
+    # L'unico uso a runtime era derivare questa chiave e verificare una firma.
+    # Facoltativa di proposito: senza, tutto funziona come prima. Migrare è una
+    # decisione di chi possiede la macchina, non un effetto collaterale di un update.
+    telegram_webapp_secret_file: SecretFromFile = ""
+    telegram_webapp_secret: str = ""
     # owner-only: la Mini App emette un token solo per QUESTO utente Telegram
     # (0 = non configurato → nessuna restrizione, come il bot). Difesa in
     # profondità: il bot mostra il bottone solo all'owner, ma il server verifica
@@ -152,9 +186,11 @@ class Settings(BaseSettings):
     # limite). Personalizzabile via AUDIT_RETENTION_DAYS.
     audit_retention_days: int = 90
     # Il profilo NotebookLM (cookie Google) NON è più montato qui (H6): lo
-    # possiede nb1777-mcp, l'unico servizio che monta quel volume. Il gateway —
-    # l'unico esposto su Internet — glielo chiede su rete interna con un segreto
-    # condiviso. Vedi app/nlm_client.py.
+    # possiede nb1777-mcp, che fra i servizi in esercizio è l'unico a montare quel
+    # volume (in sola lettura lo montano anche il backup, che lo cifra, e il check
+    # settimanale delle scadenze, che ne legge solo la data — SECURITY.md). Il
+    # gateway — l'unico esposto su Internet — glielo chiede su rete interna con un
+    # segreto condiviso. Vedi app/nlm_client.py.
     nlm_internal_base: str = "http://nb1777-mcp:8003"
     onboarding_dir: str = "/var/lib/onboarding"  # bind-mount condiviso col PC (deploy.sh --apply)
     # dir dei DB di archive-mcp: il gateway scrive qui i .db indicizzati da
@@ -168,6 +204,14 @@ class Settings(BaseSettings):
         return self.gateway_secret or self.gateway_secret_file
 
     @property
+    def effective_archive_desc_secret(self) -> str:
+        """Il segreto del canale set_description. NESSUN fallback su
+        gateway_secret: se non è configurato, la scrittura non parte (fail-closed).
+        Un fallback silenzioso qui rimetterebbe in piedi proprio l'ampliamento di
+        privilegio che questo campo esiste per evitare."""
+        return self.archive_desc_secret or self.archive_desc_secret_file
+
+    @property
     def effective_signing_secret(self) -> str:
         return self.oauth_signing_secret or self.oauth_signing_secret_file
 
@@ -178,6 +222,20 @@ class Settings(BaseSettings):
     @property
     def effective_bot_token(self) -> str:
         return self.telegram_bot_token or self.telegram_bot_token_file
+
+    @property
+    def effective_webapp_secret(self) -> str:
+        """La chiave derivata, se è stata provisionata. Stringa vuota = non c'è,
+        e il chiamante ricade sul token (H54). NESSUNA derivazione automatica qui:
+        derivarla al volo dal token avrebbe l'aria di risolvere il rilievo mentre
+        il token resta montato — cioè la forma esatta del difetto che il registro
+        chiama «dichiarato ma non applicato»."""
+        return self.telegram_webapp_secret or self.telegram_webapp_secret_file
+
+    @property
+    def miniapp_auth_configurata(self) -> bool:
+        """Se la Mini App può autenticare: serve UNA delle due, non entrambe."""
+        return bool(self.effective_webapp_secret or self.effective_bot_token)
 
     @property
     def admin_email(self) -> str:

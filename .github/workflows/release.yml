@@ -24,13 +24,15 @@ jobs:
   guard:
     runs-on: ubuntu-latest
     # Legge soltanto il repo: nessuna scrittura, nessun token OIDC.
+    # actions:read serve alla guard CI-verde (interroga i run del commit).
     permissions:
       contents: read
+      actions: read
     outputs:
       version: ${{ steps.ver.outputs.VERSION }}
       prerelease: ${{ steps.ver.outputs.PRERELEASE }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Extract version
         id: ver
         run: |
@@ -62,6 +64,39 @@ jobs:
             echo "::error::CHANGELOG.md senza sezione '## [$TAG_VERSION]'"
             exit 1
           }
+      # La firma certifica l'ORIGINE di un artefatto, non che lo stato firmato
+      # abbia superato i propri controlli (H24, seconda metà — imparata il
+      # 26/07: v0.40.3 taggata su un commit la cui CI era rossa, e i fix sono
+      # arrivati DOPO il tag, fuori dalla release). L'ordine giusto è
+      # «CI verde → tag», e questa guard lo rende vero per costruzione:
+      # senza un run CI concluso in success sul commit taggato, niente release.
+      # Il poll copre il caso legittimo di tag e branch pushati insieme
+      # (la CI del commit è ancora in corso: si aspetta, non si boccia).
+      - name: Guard — la CI del commit taggato è VERDE
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 30); do
+            CONCLUSION="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=1" \
+              --jq '.workflow_runs[0].conclusion // "assente"')"
+            case "$CONCLUSION" in
+              success)
+                echo "CI verde sul commit taggato (${GITHUB_SHA}): si procede."
+                exit 0 ;;
+              null|assente|"")
+                echo "CI del commit non ancora conclusa (tentativo $i/30): attendo 30s…"
+                sleep 30 ;;
+              *)
+                echo "::error::La CI sul commit taggato è '${CONCLUSION}', non 'success'."
+                echo "::error::Niente release da uno stato che non passa i propri controlli:"
+                echo "::error::porta la CI al verde su questo commit, poi ri-tagga."
+                exit 1 ;;
+            esac
+          done
+          echo "::error::CI del commit taggato mai conclusa dopo 15 minuti: release fermata."
+          echo "::error::Verifica lo stato della CI e ri-lancia il workflow (o ri-tagga a CI verde)."
+          exit 1
 
   release:
     runs-on: ubuntu-latest
@@ -76,11 +111,11 @@ jobs:
       matrix:
         service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot]
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -99,7 +134,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
       - name: Build & push ${{ matrix.service }}
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./services/${{ matrix.service }}
           push: true
@@ -109,7 +144,12 @@ jobs:
           provenance: true
           sbom: true
       - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+        # HELD a v3: cosign v4 cambia `sign-blob` (crea un bundle di default →
+        # rompe la firma detached SHA256SUMS.sig/.pem su cui si appoggia
+        # `vps1777 update`). Verificato con la rc v0.36.0-rc.1. cosign-installer
+        # NON è una action Node → non c'entra col warning Node 20; il bump a v4
+        # richiederebbe di cambiare anche la verifica (verify-blob) nel CLI.
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
       - name: Sign image (keyless)
         run: |
           cosign sign --yes \
@@ -125,11 +165,11 @@ jobs:
       packages: read
       id-token: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
       - name: Login to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -170,6 +210,14 @@ jobs:
           for f in backup.sh restore.sh rotate-secret.sh backup-container-setup.sh bootstrap.sh vps1777.py; do
             cp "tools/$f" bundle/tools/
           done
+          # H51 (d): le prove empiriche VANNO sulla macchina. Sono l'unico strumento
+          # che misura sul sistema vivo ciò che il resto dei gate verifica leggendo
+          # file — e finora restavano nel repo di sviluppo: sulla VPS andavano
+          # copiate a mano, quindi non c'erano. Un presidio che per essere usato
+          # richiede un gesto manuale è un presidio che nel giorno del guasto non
+          # esiste. 72 KB di shell, nessuna dipendenza: il costo non è un argomento.
+          # (`copy2` lato updater conserva i permessi: arrivano eseguibili.)
+          cp -r tools/prove-empiriche bundle/tools/
           python3 - <<'PY'
           import hashlib, json, os
           root = "bundle"
@@ -188,7 +236,12 @@ jobs:
           sha256sum "vps1777-runtime-v${VERSION}.tar.gz" > SHA256SUMS
           cat SHA256SUMS
       - name: Install cosign
-        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
+        # HELD a v3: cosign v4 cambia `sign-blob` (crea un bundle di default →
+        # rompe la firma detached SHA256SUMS.sig/.pem su cui si appoggia
+        # `vps1777 update`). Verificato con la rc v0.36.0-rc.1. cosign-installer
+        # NON è una action Node → non c'entra col warning Node 20; il bump a v4
+        # richiederebbe di cambiare anche la verifica (verify-blob) nel CLI.
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
       - name: Sign SHA256SUMS (keyless)
         run: |
           cosign sign-blob --yes \
@@ -211,7 +264,7 @@ jobs:
             [ -s release-notes.md ] || printf 'Release v%s (vedi CHANGELOG.md).\n' "$VERSION" > release-notes.md
           fi
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           prerelease: ${{ needs.guard.outputs.prerelease == 'true' }}
           body_path: release-notes.md

@@ -19,6 +19,14 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+    # I salti di MAJOR portano breaking change che rompono la CI: la PR #35
+    # bumpò 9 action ai major (setup-uv v3→v8 in un colpo) e la lint fallì. Qui
+    # il valore di Dependabot è tenere fresche le SHA DENTRO il major corrente
+    # (finding H23); i major si fanno a mano, quando c'è tempo di riparare la
+    # rottura. Minor e patch entrano come prima.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # ── Immagini base dei Dockerfile (python:3.12-slim), un servizio a directory ─
   - package-ecosystem: docker
@@ -34,6 +42,17 @@ updates:
     groups:
       base-images:
         patterns: ["*"]
+    # python:3.12-slim → 3.14 è un salto MINOR in semver-docker (major=3 resta).
+    # Un cambio di runtime Python sull'immagine con Chromium/Playwright (nb1777-mcp)
+    # NON è validato dal solo `docker build` della CI: la PR #34 passava il build
+    # ma nessuno prova Chromium headless + il flusso nlm a runtime. Restiamo sulla
+    # linea 3.12, bump manuale quando la cadenza di release si assesta. `uv` e le
+    # patch di python restano liberi.
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
 
   # ── Immagini di terzi nei compose (alpine, caddy, cloudflared, portainer,
   #    watchtower): bumpa il digest pinnato quando il tag avanza. Le 4 immagini
@@ -51,3 +70,83 @@ updates:
     ignore:
       # Immagini nostre: versionate dal release-flow, non da Dependabot.
       - dependency-name: "ghcr.io/neo1777/vps1777-*"
+
+  # ── LE DIPENDENZE PYTHON DEI QUATTRO SERVIZI ────────────────────────────────
+  # 🔴 PERCHÉ MANCAVANO, ed è il rilievo `23cc4783` (round-16, revisionando la
+  #   #82). Qui c'erano github-actions, docker e docker-compose: **nessun
+  #   ecosystem per Python**. Quindi le dipendenze che il gateway IMPORTA — non
+  #   l'immagine base, quelle dentro — non le guardava nessuno.
+  #
+  # ⚠️ E NON È UN DETTAGLIO DI IGIENE. `docs/ARCHITECTURE.md` fa poggiare una
+  #   delle garanzie più forti del prodotto — *l'IP del client non è
+  #   falsificabile* — sul comportamento di `ProxyHeadersMiddleware`, che è un
+  #   **dettaglio interno di uvicorn**. E `services/gateway/pyproject.toml:11`
+  #   dice `uvicorn[standard]>=0.32.0`: nessun tetto, su un pacchetto in 0.x,
+  #   dove il contratto può cambiare fra due minori. ⇒ una garanzia di sicurezza
+  #   che dipende da un pacchetto non pinnato e non sorvegliato.
+  #   *È la voce `39b5a89d` di 71d540e6, vista dal lato dell'aggiornamento.*
+  #
+  # 🖐️ L'ALTRA METÀ — e questo blocco è stato RISCRITTO perché era invecchiato.
+  #   Al 03/08 12:22 diceva: «`gateway` e `archive-mcp` non hanno `uv.lock` e
+  #   nessun Dockerfile usa `--frozen`». Era vero quando è stato scritto ed è
+  #   FALSO da due ore dopo: `b29d4f7` (PR #96, 14:19) ha portato il lock ai due
+  #   servizi scoperti e `--frozen` in tutti e quattro i Dockerfile.
+  #   ⇒ misurato su `origin/main` prima di riscrivere: uv.lock 4/4 · --frozen 4/4.
+  #
+  #   Il PERCHÉ delle due cose resta, ed è il motivo per cui questo file esiste:
+  #   il lock impedisce di prendere una uvicorn nuova senza accorgersene fra una
+  #   PR di Dependabot e l'altra; Dependabot ti dice che è uscita. Sono due
+  #   presidi diversi e servono entrambi — **ora ci sono entrambi.**
+  #
+  # 🔑 E il rilievo `23cc4783` NON «resta aperto»: è CHIUSO da `b29d4f7`. La
+  #   riga vecchia lo dava per pendente, ed è la parte che fuorviava di più —
+  #   un lettore ci avrebbe cercato dentro un lavoro da fare che non c'è.
+  #   (Lo stesso id è citato in `test_lock_nella_build.py` e in
+  #   `test_dependabot_copre_i_servizi.py`: là descrive l'ORIGINE del test,
+  #   e resta corretto — un rilievo chiuso non smette di essere il motivo
+  #   per cui un presidio esiste.)
+  - package-ecosystem: uv
+    directories:
+      - /services/gateway
+      - /services/archive-mcp
+      - /services/nb1777-mcp
+      - /services/nb1777-bot
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+    groups:
+      python-runtime:
+        patterns: ["*"]
+    ignore:
+      # I major li guardiamo a mano: la stessa scelta già fatta per le action
+      # (#48/#49) e per le immagini. Un major che entra da solo in un servizio
+      # che regge una garanzia di sicurezza è esattamente ciò che non vogliamo.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # notebooklm-mcp-cli: il pin `==0.7.7` e INTENZIONALE, non pigrizia.
+      #   Il formato auth di quella CLI (`profiles/default/cookies.json`) e cablato
+      #   in QUATTRO punti che nessun bump automatico tocca - auth.py (il gate di
+      #   auth), admin.py (le istruzioni all utente), il bot e la doc.
+      #   ⚠️ E NON E' VERIFICATO CHE LA 0.9 CONSERVI quel formato: il changelog non
+      #   l'ha aperto nessuno. Questa riga diceva «e la 0.9 cambia quel formato» —
+      #   era una DOMANDA della review (#152, abdd732a: «la 0.9.6 salva ancora in
+      #   profiles/default/cookies.json? si -> si merga, no -> si esclude») diventata
+      #   un FATTO nel passaggio da un messaggio a un commento. *Un dubbio citato da
+      #   un altro perde i punti interrogativi.*
+      #   ⇒ l'ignore resta GIUSTO anche nel dubbio, e per una ragione piu' solida:
+      #   il pin e' intenzionale e il formato e' cablato in quattro punti, quindi un
+      #   minor CHE POTREBBE romperlo va fatto a mano insieme a quei quattro.
+      #   Chi vorra' fare il salto deve ancora APRIRE IL CHANGELOG: non c'e' una
+      #   risposta qui dentro, c'e' la domanda.
+      #   La #152 proponeva 0.7.7 -> 0.9.6 SENZA aggiornare il
+      #   commento accanto al pin, che diceva ancora «0.7.x usa profiles/»: un salto
+      #   di MINOR che PUO' rompere come un major, quindi l ignore sui major non lo
+      #   prendeva. (Anche questa riga diceva «rompe»: stessa premessa non verificata,
+      #   due righe piu' sotto — l'ho corretta insieme all'altra, perche' curare una
+      #   frase e lasciare la gemella e' curare la copia e non la classe.)
+      # NON e «mai piu aggiornarlo»: le PATCH dentro 0.7 entrano ancora, quindi una
+      #   0.7.8 di sicurezza arriva lo stesso. E il salto di minor che va fatto a
+      #   mano, insieme ai quattro punti. (71d540e6, 16/08 - review abdd732a, #152)
+      - dependency-name: "notebooklm-mcp-cli"
+        update-types: ["version-update:semver-minor"]

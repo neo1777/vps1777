@@ -24,6 +24,7 @@ from telegram import (
 from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
 )
@@ -290,6 +291,79 @@ async def _heartbeat_loop() -> None:
         await asyncio.sleep(30)
 
 
+# ───── notifiche push (issue #30 ③) ─────
+# Il bot ha rootfs read-only e nessun token verso nb1777-mcp: lo stato e la
+# logica stanno nel server. Qui si fa solo trasporto — preleva le notifiche
+# pronte e le manda a Neo, e rimanda l'ack del bottone. Il poll È il tick del
+# promemoria cloud: niente scheduler (sul VPS non c'è cron).
+
+async def _send_notification(app: Application, owner: int, item: dict) -> None:
+    text = item.get("text") or ""
+    if item.get("kind") == "cloud" and item.get("ack_version"):
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+            "✓ Fatto (aggiornate)", callback_data=f"ack:{item['ack_version']}")]])
+        await app.bot.send_message(chat_id=owner, text=text, reply_markup=kb)
+    else:
+        await app.bot.send_message(chat_id=owner, text=text)
+
+
+async def _notify_loop(app: Application) -> None:
+    """Preleva periodicamente le notifiche da nb1777-mcp e le manda all'owner.
+    Fail-safe: se il server non risponde, logga e riprova al giro dopo."""
+    s = get_settings()
+    url = f"{s.nlm_internal_base.rstrip('/')}/internal/notifications"
+    while True:
+        await asyncio.sleep(60)
+        owner = get_settings().telegram_owner_id
+        if not owner:
+            continue
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+                r = await client.get(url, headers={"x-vps1777-internal": s.effective_gateway_secret})
+            if r.status_code != 200:
+                log.warning("notifiche: nb1777-mcp ha risposto %s", r.status_code)
+                continue
+            items = r.json().get("items", [])
+        except (httpx.RequestError, ValueError) as exc:
+            log.warning("notifiche: nb1777-mcp irraggiungibile (%s)", exc)
+            continue
+        for item in items:
+            try:
+                await _send_notification(app, owner, item)
+            except Exception as exc:  # noqa: BLE001 — una notifica rotta non ferma il loop
+                log.warning("notifica non inviata (%s): %s", item.get("kind"), exc)
+
+
+async def cmd_ack(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Tap su «✓ Fatto»: registra l'ack presso nb1777-mcp e conferma. Owner-only
+    anche qui — solo Neo può segnare che le superfici cloud sono aggiornate."""
+    q = update.callback_query
+    if q is None:
+        return
+    s = get_settings()
+    if not s.telegram_owner_id or (q.from_user and q.from_user.id != s.telegram_owner_id):
+        await q.answer("non autorizzato")
+        return
+    version = (q.data or "").split(":", 1)[1] if ":" in (q.data or "") else ""
+    ok = False
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            r = await client.post(
+                f"{s.nlm_internal_base.rstrip('/')}/internal/canonico/ack",
+                headers={"x-vps1777-internal": s.effective_gateway_secret},
+                json={"version": version},
+            )
+        ok = r.status_code == 200
+    except httpx.RequestError as exc:
+        log.warning("ack: nb1777-mcp irraggiungibile (%s)", exc)
+    await q.answer("segnato ✓" if ok else "errore, riprova")
+    if ok:
+        try:
+            await q.edit_message_text(f"✓ Superfici cloud segnate aggiornate a {version}.")
+        except Exception as exc:  # noqa: BLE001 — cosmetico, l'ack è già registrato
+            log.warning("edit ack fallito: %s", exc)
+
+
 # ───── runner ─────
 
 def build_app() -> Application:
@@ -302,6 +376,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("pannello", cmd_pannello))
     app.add_handler(CommandHandler("lista", cmd_lista))
     app.add_handler(CommandHandler("chiedi", cmd_chiedi))
+    app.add_handler(CallbackQueryHandler(cmd_ack, pattern=r"^ack:"))
     app.add_error_handler(_on_error)
     return app
 
@@ -342,11 +417,13 @@ async def run() -> None:
         await _install_menu_button(app)
         await app.updater.start_polling()
         heartbeat = asyncio.create_task(_heartbeat_loop())
+        notify = asyncio.create_task(_notify_loop(app))
         # blocca fino a SIGTERM
         try:
             await asyncio.Event().wait()
         finally:
             heartbeat.cancel()
+            notify.cancel()
             await app.updater.stop()
             await app.stop()
             await app.shutdown()

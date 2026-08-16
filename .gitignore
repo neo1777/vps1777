@@ -6,6 +6,31 @@ secrets/*
 .env.local
 .env.*.local
 
+# ───── Export di sessione — MAI committare ─────
+# `/export` di una sessione di lavoro produce AAAA-MM-GG-HHMMSS-<slug>.txt: è il
+# transcript completo di quello che ci si è detti lavorando — password incollate,
+# IP, path locali, dati personali. Non ha l'aria di un segreto (è un .txt con un
+# nome innocuo) ed è esattamente per questo che è il file più pericoloso del repo.
+# Tienili fuori: se ti serve conservarli, mettili in una cartella fuori dal repo.
+# La rete di sicurezza a valle è `security/check_no_leaks.py`, in CI — perché
+# questa riga non ferma `git add -f` né salva un file già tracciato.
+20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-*.txt
+
+# I transcript di sessione veri e propri: stessa classe, forma diversa. Su una
+# macchina di lavoro ne girano a centinaia — la probabilità che uno finisca in
+# un `add` non è teorica. (Una fixture piccola sotto tests/fixtures/ resta
+# possibile con `add -f`: il gate la ammette sotto i 64 KB.)
+*.jsonl
+
+# Database: un archivio committato per sbaglio non è «un file grosso», è
+# l'intero contenuto di un'installazione in un oggetto solo. I dati non stanno
+# nel repo.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
 # ───── Build / cache ─────
 __pycache__/
 *.py[cod]

@@ -15,24 +15,42 @@ Cosa NON includi: log container (sono in `/var/lib/docker/containers/*/`, gestit
 
 Il `MANIFEST.txt` dentro l'archivio registra anche la versione deployata (`VPS1777_TAG` dal `.env`) e il `VERSION` del bundle.
 
-## Backup automatico (cron)
+## Backup automatico (cron) — attivo di default
 
-Aggiungi profilo `ops.backup`:
+Il backup notturno è **attivo di default**: non devi fare nulla per averlo. L'installer
+lo accende leggendo lo **stato dichiarato** delle feature — `VPS1777_FEATURES` nel `.env`
+(default: `backup,autoupdate`). Il container `backup` esegue ogni notte (cron **03:00 UTC**)
+e tiene **7 backup giornalieri + 4 settimanali** (uno per settimana), tutti cifrati `age`.
 
-```bash
-docker compose --profile ops.backup up -d
+> **Perché "dichiarato" e non "ricordato" — ed è il cuore del non-perdere-funzioni.**
+> Prima (fino a v0.37.x) il backup era un profilo **opt-in**: un reinstall della VPS non lo
+> ri-accendeva, e nessuno se ne accorgeva — la rete di sicurezza spariva in silenzio.
+> Da **v0.38.0** la scelta vive in `VPS1777_FEATURES`: l'installer la legge, e install,
+> update e rollback **riproducono sempre le stesse feature**. Un reinstall non "dimentica"
+> il backup — lo **riproduce per costruzione**. E l'installer chiude col **referto**
+> (`✓ Feature attive: backup=ON · auto-update sicuro=ON · portainer=OFF`): un `OFF` non
+> richiesto **si vede subito nel log**, non si scopre dopo mesi.
+
+### Accendere o spegnere il backup
+
+Non con un comando `docker compose` a mano (quello non sopravvive a un reinstall): si
+cambia lo **stato dichiarato**. Nel `.env` della VPS:
+
+```
+VPS1777_FEATURES=backup,autoupdate    # il default: backup notturno + auto-update sicuro
+# togli 'backup' per disattivarlo; l'installer/update applicheranno la scelta e la
+# riprodurranno a ogni operazione. Il referto post-install ti confermerà backup=OFF.
 ```
 
-Container `backup` esegue ogni notte (cron 03:00). Rotation: mantiene **7 backup giornalieri + 4 settimanali** (uno per settimana).
+> ⚠ **Serve la chiave `age`.** Il backup cifra con la sola chiave pubblica del recipient
+> (la privata sta **fuori dalla VPS**, `v0.26.0`). Se `backup=ON` ma la chiave non è
+> configurata, il referto te lo dice (`⚠ chiave age da configurare per i backup`). Vedi
+> più sotto per generare la coppia e mettere la pubblica sul server.
 
-> **Niente `docker.sock` (H13).** Il container di backup **non monta il Docker
-> socket** e **non installa `docker-cli`**: i volumi dati gli sono montati
-> **direttamente in sola lettura** (`/volumes/<nome>`) e `backup.sh` li archivia da
-> lì (variabile `BACKUP_VOLUMES_DIR`) — così un container di servizio non ha mai il
-> controllo root-equivalente dell'host. Lo stesso `backup.sh` resta *dual-context*:
-> lanciato sull'host dumpa via `docker run` come prima, dentro il container usa i
-> mount diretti. Col profilo `ingress.caddy` decommenta `caddy-data`/`caddy-config`
-> nel compose per includerli.
+> **Niente `docker.sock` (H13).** Il container di backup **non monta il Docker socket** e
+> **non installa `docker-cli`**: i volumi dati gli sono montati **direttamente in sola
+> lettura** (`/volumes/<nome>`) e `backup.sh` li archivia da lì. Montare il socket darebbe
+> a un container di servizio il controllo root-equivalente dell'host.
 
 ## Restore
 
@@ -41,7 +59,9 @@ Container `backup` esegue ogni notte (cron 03:00). Rotation: mantiene **7 backup
 ```
 
 Step:
-1. `docker compose down`
+1. `docker compose down --remove-orphans` — l'`--remove-orphans` serve: senza, il
+   container dell'ingress non è nel modello (sta in un overlay) e **resta acceso**,
+   servendo traffico sopra volumi che si stanno ripristinando
 2. Decifra archivio con la tua chiave age
 3. Ripristina volumi + secrets
 4. `docker compose up -d`
@@ -99,6 +119,48 @@ quella cartella dove preferisci — vps1777 non trasferisce nulla in automatico.
 > ```
 > Il recipient in `tools/age-recipients.txt` resta: i backup esistenti e futuri
 > restano cifrabili, e ora decifrabili **solo** con la tua copia sul PC.
+
+## Rotazione della chiave age (H37)
+
+Ruotare la coppia age serve se sospetti che la **chiave privata** sia stata esposta,
+o come igiene periodica. Regola d'oro: la privata **non deve mai toccare la VPS** —
+si genera e si custodisce sul TUO PC; sulla VPS va solo il nuovo *recipient*.
+
+```bash
+# 1) sul TUO PC — genera la NUOVA coppia (non sovrascrivere subito la vecchia)
+age-keygen -o ~/.config/age/keys-new.txt
+grep 'public key' ~/.config/age/keys-new.txt        # → age1…  (il nuovo recipient)
+
+# 2) sulla VPS — sostituisci il recipient in tools/age-recipients.txt col nuovo age1…
+#    (una riga = un recipient; il commento '# created:'/altri sono ignorati)
+
+# 3) verifica: il prossimo backup si cifra con la chiave nuova
+./tools/backup.sh                                   # → un .tar.age nuovo
+```
+
+**Cosa succede ai backup VECCHI.** `age` cifra un archivio verso i *recipient*
+elencati **al momento della cifratura**: i `.tar.age` già prodotti restano cifrati
+con la **vecchia** chiave e si decifrano **solo con la vecchia privata**. Cambiare
+il recipient **non** li ri-cifra. Quindi:
+
+- **Conserva la vecchia privata** (offline) finché esistono backup cifrati con essa
+  — cioè finché non sono usciti dalla rotazione (7 giornalieri + 4 settimanali,
+  ~un mese) o li hai cancellati/ri-cifrati tu. Solo allora puoi ritirarla.
+- Sul PC promuovi la nuova a chiave attiva quando sei pronto:
+  ```bash
+  mv ~/.config/age/keys.txt ~/.config/age/keys-old.txt   # tienila, non buttarla
+  mv ~/.config/age/keys-new.txt ~/.config/age/keys.txt
+  ```
+- **Transizione morbida (opzionale)**: elenca **entrambi** i recipient (vecchio +
+  nuovo) in `tools/age-recipients.txt` durante il periodo di overlap — così ogni
+  nuovo backup è decifrabile con **una qualsiasi** delle due private. Rimuovi il
+  vecchio recipient a fine transizione.
+- **Ri-cifrare un backup vecchio sotto la chiave nuova** (se ne vuoi uno solo da
+  custodire): `age -d -i keys-old.txt vecchio.tar.age | age -r age1NUOVO… -o vecchio.rekey.tar.age`.
+
+> Gli **snapshot pre-update** (`backups/pre-update/`) **non** sono age-encrypted
+> (sono snapshot locali in chiaro per l'auto-rollback): la rotazione della chiave
+> age non li riguarda.
 
 ## Disaster recovery
 

@@ -16,11 +16,20 @@ COPY --from=ghcr.io/astral-sh/uv:0.5.18 /uv /uvx /usr/local/bin/
 ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /build
-COPY pyproject.toml ./
+# 🔒 IL LOCK ENTRA NELLA BUILD (rilievo `23cc4783`, round-16). Prima qui c'era
+#   solo `pyproject.toml` e `uv sync` senza `--frozen`: **ogni ricostruzione
+#   risolveva le dipendenze da capo** e poteva prendere una minore nuova.
+#   ⚠️ E i lock che c'erano NON servivano a niente: `nb1777-mcp` e `nb1777-bot`
+#   avevano `uv.lock` nel repo e **nessun Dockerfile lo copiava** — versionato e
+#   mai usato. *Il file esisteva, la garanzia no.*
+# 🔑 `--frozen` è la metà che conta: senza, `uv sync` **riscriverebbe** il lock
+#   se non combacia col pyproject, e la build tornerebbe a decidere da sé. Con
+#   `--frozen` fallisce e lo dice — che è ciò che deve fare un lock.
+COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --no-install-project
+    uv sync --frozen --no-dev --no-install-project
 COPY app ./app
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 # ─────────────────────────────────────────── runtime
 FROM python:3.12-slim
@@ -35,7 +44,12 @@ RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
 
 # Mountpoint dei volumi creati con owner 1000 PRIMA del mount: un volume
 # named vuoto eredita questi permessi al primo attach.
-RUN mkdir -p /var/lib/gateway /var/lib/nlm && chown -R app:app /var/lib/gateway /var/lib/nlm
+# /var/lib/uploads: mountpoint del volume gateway-uploads (spool multipart, TMPDIR).
+# DEVE esistere nell'immagine con l'owner giusto: un volume vuoto al primo mount
+# eredita owner/permessi dal path dell'immagine — senza questa riga Docker lo crea
+# root:root, tempfile lo scarta IN SILENZIO (unwritable) e ripiega sulla tmpfs /tmp,
+# che un upload da 2,6 GB satura (visto dal vivo, 2026-07-20).
+RUN mkdir -p /var/lib/gateway /var/lib/nlm /var/lib/uploads && chown -R app:app /var/lib/gateway /var/lib/nlm /var/lib/uploads
 
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build/app /app/app

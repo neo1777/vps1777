@@ -13,11 +13,17 @@ contenuto, non dal nome):
     .zip claude.ai → export account (conversations.json + design_chats/ + projects/docs)
     .zip Telegram  → export Desktop JSON (result.json) o HTML (messages*.html),
                      anche in sottocartella ChatExport_*/
+    .zip bundle    → bundle di Recupero Sessioni 1777 (MANIFEST.json + sessions/):
+                     sessioni come conversazioni, log MCP e workfiles-testo come
+                     documenti, binari censiti in `skipped`, copie in `sightings`
+    .zip generico  → zip di documenti/codice (fallback, whitelist _DOC_ZIP_EXTS):
+                     indicizza ogni doc dentro l'archivio, come un .md/.txt sciolto
     .json         → export Telegram Desktop (result.json) o sessione Claude Code
     .md / .txt    → testo/markdown generico (ponte per output di altri tool), spezzato in chunk
     (.db)         → NON qui: è un drop-in, si copia direttamente nella dir
-Uno zip non riconosciuto — o riconosciuto ma senza messaggi estraibili — è un
-ERRORE esplicito, mai un successo a 0 righe (stesso principio dei PDF-immagine).
+Uno zip senza NÉ un export riconosciuto NÉ un documento .md/.txt — o riconosciuto
+ma senza messaggi estraibili — è un ERRORE esplicito, mai un successo a 0 righe
+(stesso principio dei PDF-immagine).
 
 Indexer CONDIVISO, due usi:
   - server-side: il gateway lo importa e chiama `index_file(...)` in /admin/archive
@@ -32,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import re
 import sqlite3
@@ -45,6 +52,139 @@ Row = tuple[str, str, str, str]  # (uuid, project, ts, content) — forma breve,
 RowFull = tuple[str, str, str, str, str, str, str, str, str]
 # (uuid, project, ts, content, sender, tools, thinking, attachments, parent_uuid)
 
+
+class _Skip(NamedTuple):
+    """Un record che l'ingest ha scartato. Gli estrattori lo emettono nello STESSO
+    stream delle righe; `write_rows` lo instrada alla tabella `skipped` invece che a
+    `messages`. Trasforma un `continue` muto in una lapide reversibile e datata."""
+    source: str
+    reason: str
+    detail: str
+    ts: str
+
+
+class _Sighting(NamedTuple):
+    """Un AVVISTAMENTO: «l'uuid X l'ho visto nella fonte Y». Emesso nello stream
+    come _Skip; `write_rows` lo instrada alla tabella `sightings`. Serve ai formati
+    dove lo stesso record vive in più path (il bundle di recupero-sessioni: la
+    stessa sessione in sessions/ e in un backup dentro workfiles/): la riga in
+    `messages` collassa per uuid, l'avvistamento conserva la topologia."""
+    uuid: str
+    source: str
+
+
+# ── tetti su input e decompressione (H39) ────────────────────────────────────
+#
+# LA LEZIONE, imparata a caro prezzo: **un limite su un input COMPRESSO non è un
+# limite**. La dimensione di uno zip — e pure quella dichiarata nell'header dei
+# suoi membri — la scrive chi lo ha creato. Uno zip da 5 MB può contenere un
+# `conversations.json` da 40 GB: `json.load()` lo caricava per intero in RAM e il
+# gateway moriva di OOM (zip-bomb), senza un messaggio, senza un colpevole.
+#
+# Il tetto va quindi messo su ciò che l'archivio **diventa**: byte contati MENTRE
+# li si legge (`_read_capped`), non byte dichiarati. E quando si sfora si fallisce
+# con un messaggio parlante — un OOM non è un errore, è una sparizione.
+#
+# I numeri sono volutamente LARGHI: un export claude.ai reale è dell'ordine delle
+# centinaia di MB. Sono tetti anti-OOM, non quote di disciplina.
+
+MAX_MEMBER_BYTES = 512 * 1024 * 1024        # 512 MB — singolo file decompresso da uno zip
+# 2 GB → 16 GB (2026-07-20): il bundle di recupero-sessioni-1777 (sessioni + log MCP
+# + workfiles di un disco reale) decomprime a ~5 GB legittimi. Resta un tetto
+# anti-OOM: i membri passano comunque da _read_capped, uno per volta.
+MAX_ARCHIVE_BYTES = 16 * 1024 * 1024 * 1024  # 16 GB — totale decompresso di UNO zip
+MAX_FILE_BYTES = 512 * 1024 * 1024          # 512 MB — singolo .jsonl/.json/.md/.txt su disco
+MAX_PDF_BYTES = 256 * 1024 * 1024           # 256 MB — PDF su disco
+MAX_PDF_PAGES = 10_000                      # pypdf non ha tetti: un PDF può dichiarare milioni di pagine
+MAX_PDF_TEXT_CHARS = 64 * 1024 * 1024       # 64 M caratteri estratti da un PDF
+MAX_ZIP_MEMBERS = 100_000                   # zip-bomb "a tanti file piccoli"
+
+# Cap sull'UPLOAD (byte scritti su disco dall'handler /admin/archive, che LO APPLICA
+# contando i byte mentre li scrive). 1 GB → 4 GB (2026-07-20): il bundle reale con
+# workfiles è 2,6 GB compressi e moriva qui con "upload troppo grande". Il disco
+# della VPS deve avere spazio per upload + DB: verificare prima dei giganti.
+MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024   # 4 GB
+# ⚠️ SE LO ALZI, guarda anche `ingress/Caddyfile` (`request_body max_size`, oggi 5GB):
+#    quello è il tetto ASSOLUTO davanti al gateway, e deve restare SOPRA questo. Se
+#    lo superi, Caddy diventa il primo decisore e risponde 413 su un upload che qui
+#    sarebbe legittimo — il margine è voluto (#122). La regola è scritta qui perché
+#    chi cambia questo numero apre QUESTO file, non il Caddyfile.
+#    (rilievo di b82df434; il controllo automatico è in tests/test_tetti_coerenti.py,
+#     perché una riga si legge quando si rilegge il file, non quando si digita il numero)
+
+_READ_CHUNK = 1024 * 1024  # 1 MB
+
+
+def _mb(n: int) -> str:
+    return f"{n / (1024 * 1024):.0f} MB"
+
+
+def _now_iso() -> str:
+    """Data-ora UTC ISO dell'ingest (per la lapide dello skip)."""
+    import datetime
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class _Budget:
+    """Byte decompressi ancora concessi a UN archivio (condiviso fra i membri)."""
+
+    __slots__ = ("left", "total")
+
+    def __init__(self, total: Union[int, None] = None) -> None:
+        # letto LIVE dal modulo (non come default di firma): così il tetto resta
+        # una costante di modulo davvero tunabile (e monkeypatchabile nei test).
+        self.total = MAX_ARCHIVE_BYTES if total is None else total
+        self.left = self.total
+
+
+def _read_capped(fh: IO[bytes], what: str, budget: _Budget,
+                 *, cap: Union[int, None] = None) -> bytes:
+    """Legge `fh` fino a EOF contando i byte **mentre li legge**.
+
+    Non si fida di `ZipInfo.file_size` (è un numero scritto nell'archivio, cioè
+    dall'attaccante): conta ciò che esce davvero dal decompressore, blocco per
+    blocco. Una zip-bomb muore dopo `cap` byte letti, non dopo aver esaurito la RAM.
+    """
+    if cap is None:
+        cap = MAX_MEMBER_BYTES
+    out = bytearray()
+    while True:
+        chunk = fh.read(_READ_CHUNK)
+        if not chunk:
+            break
+        out += chunk
+        budget.left -= len(chunk)
+        if len(out) > cap:
+            raise ValueError(
+                f"'{what}' supera il tetto di {_mb(cap)} una volta DECOMPRESSO "
+                f"(zip-bomb?). Se l'export è davvero più grande, alza "
+                f"MAX_MEMBER_BYTES in archive_indexer.py.")
+        if budget.left < 0:
+            raise ValueError(
+                f"l'archivio supera il tetto di {_mb(budget.total)} decompressi "
+                f"(zip-bomb?) — fermato mentre leggevo '{what}'. Se l'export è "
+                f"davvero più grande, alza MAX_ARCHIVE_BYTES in archive_indexer.py.")
+    return bytes(out)
+
+
+def _zip_json(z: zipfile.ZipFile, name: str, budget: _Budget) -> object:
+    """`json.load` di un membro di zip, ma con il tetto sul decompresso."""
+    with z.open(name) as f:
+        raw = _read_capped(f, name, budget)
+    return json.loads(raw)
+
+
+def _check_file_size(path: Path, cap: int) -> None:
+    """Tetto su un file NON compresso già su disco: qui st_size è la verità."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return
+    if size > cap:
+        raise ValueError(
+            f"file troppo grande: '{path.name}' è {_mb(size)}, il tetto è {_mb(cap)}. "
+            f"Spezzalo, oppure alza il tetto in archive_indexer.py.")
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS messages(
     uuid        TEXT PRIMARY KEY,
@@ -55,11 +195,128 @@ CREATE TABLE IF NOT EXISTS messages(
     tools       TEXT DEFAULT '',
     thinking    TEXT DEFAULT '',
     attachments TEXT DEFAULT '',
-    parent_uuid TEXT DEFAULT ''
+    parent_uuid TEXT DEFAULT '',
+    -- Il REGIME del dato, promosso da nota a SCHEMA (D10/§2-ter, 20/07).
+    -- 'messaggio'   = ts dell'evento reale (un messaggio detto non cambia più).
+    -- 'data-export' = ts SINTETICO messo da noi, perché la fonte non ne aveva uno:
+    --                 è la data della FOTOGRAFIA, non del contenuto (le voci `memory:*`
+    --                 e `account:user` arrivano senza ts e i filtri temporali le
+    --                 saltavano IN SILENZIO — un namespace intero invisibile a `since=`).
+    -- 'ignoto'      = righe migrate da un DB nato prima di questa colonna: il regime non è
+    --                 ricostruibile a posteriori e NON si indovina (vedi _ensure_v2).
+    -- Serve a non fabbricare la bugia opposta: una memory di maggio fotografata a luglio
+    -- NON "è successa a luglio". Chi calcola il `newest` deve filtrare **in negativo**:
+    --     MAX(ts) WHERE ts_source <> 'data-export'
+    -- La forma negativa esclude solo ciò che sappiamo essere sintetico — l'unica cosa di cui
+    -- siamo certi — e lascia passare il resto (comprese le righe non classificate, che avendo
+    -- `ts` vuoto non spostano comunque il massimo). Regola generale: quando il default è
+    -- l'ignoranza, il filtro si scrive su ciò che si SA, non su ciò che si presume.
+    ts_source   TEXT DEFAULT 'messaggio',
+    -- ─── VOICE-TAGGING, Fase 1 (spec: RICONCILIAZIONE-VOICE-TAGGING, §1 e §4) ───
+    -- Due assi che NON vanno fusi, ed è l'intera ragione di queste colonne:
+    --   speaker = chi INVIA   (un fatto: sta nella fonte)
+    --   voice   = natura del CONTENUTO (una stima: la calcola un'euristica, Fase 2)
+    -- Il caso-scuola che li separa: un messaggio inviato da un umano il cui contenuto è
+    -- un'analisi incollata di un'AI. `speaker=human` E `voice=pasted_ai`: fondere i due
+    -- assi rende quel caso INESPRIMIBILE, ed è il caso che ci ha fatto sbagliare (C++).
+    --
+    -- 🔴 MISURATO PRIMA DI SCRIVERE (02/08, 61.100 messaggi reali di un DB vivo):
+    --      assistant 36.484 · user 21.157 · attachment 2.327 · title 1.132 · zero vuoti
+    --    `sender` è popolato al 100% — ma MESCOLA GIÀ I DUE ASSI: `user`/`assistant` sono
+    --    mittenti, `attachment`/`title` sono NATURE DELLA RIGA. La spec diceva «il dato
+    --    esiste già, va solo PROMOSSO»: la prima metà regge, la seconda no. Non si promuove
+    --    `sender`, si SEPARA ciò che `sender` aveva confuso.
+    --
+    -- ⚠️ E PER LE RIGHE CHE NON DICONO CHI HA SCRITTO (`attachment`, `title`) il valore è
+    --    'unknown', non una scelta comoda. È la lezione già pagata qui sopra con `ts_source`:
+    --    un default che ASSERISCE fabbrica, in un colpo solo e su archivi vivi, esattamente
+    --    la bugia che la colonna doveva impedire — e con l'aria di un dato verificato.
+    speaker       TEXT DEFAULT '',   -- human/assistant/unknown (derivato da `sender`, Fase 1)
+    -- 🔴 `doc` NON è un valore di `voice`, e toglierlo è la cura (obiezione di
+    --   abdd732a, 02/08, accolta). Il criterio che separa i due assi:
+    --     `voice`   = COME SI È FORMATO il testo   (parlato · incollato · recitato)
+    --     `speaker` = CHI/CHE COSA lo ha immesso   (human · assistant · unknown)
+    --   «è un allegato» è una proprietà della RIGA, non del modo in cui il testo è
+    --   nato ⇒ vive in `speaker`. Tenerlo in entrambi avrebbe fatto **rientrare
+    --   dalla finestra, col nome nuovo, il difetto che queste colonne curano**:
+    --   `sender` mescolava già i due assi, ed è la ragione per cui esistono.
+    -- 📊 E il dato lo conferma: i 3.459 `unknown` misurati sul DB vivo sono
+    --   ESATTAMENTE `attachment` + `title` — la natura-documento è già in
+    --   `speaker`, e in `voice` sarebbe un duplicato che si sfalsa col tempo.
+    voice         TEXT DEFAULT '',   -- own/pasted_transcript/pasted_ai/character/mixed/unknown
+    quoted_share  REAL DEFAULT 0,    -- quota 0-1 di materiale incollato (quantifica `mixed`)
+    voice_conf    REAL DEFAULT 0,    -- confidenza dell'euristica
+    content_flags TEXT DEFAULT ''    -- json: l'autopsia del verdetto di `classify_voice`
 );
+-- REVISIONI (D18, scelta di Neo 20/07: «cambio di schema: conservare le revisioni»).
+-- Il difetto: `messages` ha PK su uuid e si scrive con INSERT OR REPLACE → se lo stesso
+-- uuid torna con contenuto DIVERSO, l'ultimo vince e il primo sparisce SENZA TRACCIA.
+-- Non è teorico: le voci `memory:*` sono SLOT RISCRIVIBILI (stesso uuid, testo diverso in
+-- export diversi). Finora le versioni sopravvivevano solo perché stavano in DB separati —
+-- cioè la comparabilità degli snapshot era un ACCIDENTE DELLA TOPOLOGIA, non una proprietà.
+-- Qui diventa struttura: prima di ogni REPLACE che cambierebbe il contenuto, la versione
+-- USCENTE viene conservata. `messages` resta l'ultima versione (ricerca invariata: nessuna
+-- API cambia, nessuna PK si rompe); la storia si interroga a parte, per uuid.
+CREATE TABLE IF NOT EXISTS revisions(
+    uuid            TEXT NOT NULL,
+    ts              TEXT,
+    content         TEXT,
+    sender          TEXT DEFAULT '',
+    project         TEXT DEFAULT '',
+    ts_source       TEXT DEFAULT '',
+    content_sha     TEXT NOT NULL,   -- sha1 del contenuto uscente: dedup delle revisioni
+    superseded_date TEXT NOT NULL,   -- quando è stata soppiantata (data di questo ingest)
+    PRIMARY KEY (uuid, content_sha)  -- re-ingest idempotente: la stessa revisione non si duplica
+);
+CREATE INDEX IF NOT EXISTS idx_rev_uuid ON revisions(uuid);
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     uuid, project, ts, content, tools, attachments,
-    content='messages', content_rowid='rowid'
+    content='messages', content_rowid='rowid',
+    -- tokenchars '+#': senza, unicode61 tratta + e # da SEPARATORI e `C++`, `C#`,
+    -- `g++` perdono il suffisso e COLLASSANO sul token `C`/`g` — comunissimi
+    -- (coordinate SVG, copyright, gradi centigradi). È la causa del falso ricordo
+    -- dell'11/07: count("C++") == count("C"), migliaia di falsi positivi silenziosi.
+    -- Con tokenchars diventano token veri e distinti (verificato: C++→1, C→2, non 4=4).
+    -- Vale sui DB costruiti da qui in poi; i DB già vivi vanno ricostruiti/re-ingeriti
+    -- (il tokenize è fissato alla CREATE: un 'rebuild' NON lo cambia). Il `.` resta
+    -- separatore di proposito (blast-radius: romperebbe node.js/github.com/0.7.9) →
+    -- quel caso lo copre il canary lato query (collapse_warnings_conn in fts.py).
+    tokenize="unicode61 tokenchars '+#'"
+);
+-- Indice per camminare l'albero della conversazione (parent→figli) senza full-scan:
+-- lo usa `get_conversation` nel server MCP (una WITH RECURSIVE su parent_uuid).
+-- Ricreato a ogni ingest (IF NOT EXISTS), copre anche i DB migrati da v1.
+CREATE INDEX IF NOT EXISTS idx_parent ON messages(parent_uuid);
+-- Il "libro-mastro degli scarti" (D3): ogni record che l'ingest NON indicizza
+-- (senza uuid, contenuto vuoto, non-dict) lascia una LAPIDE datata e leggibile,
+-- invece di sparire in un `continue` muto. uid deterministico → re-ingest idempotente.
+-- Rende lo scarto reversibile: "i dati raw devono essere raggiungibili".
+CREATE TABLE IF NOT EXISTS skipped(
+    uid         TEXT PRIMARY KEY,
+    source      TEXT,
+    reason      TEXT,
+    detail      TEXT,
+    ts          TEXT,
+    ingest_date TEXT
+);
+-- Scheda dell'archivio (D5): `description` = a cosa serve / cosa contiene questo DB.
+-- Scritta all'upload (admin) e aggiornabile dal tool MCP `set_description`.
+CREATE TABLE IF NOT EXISTS meta(
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+-- Gli AVVISTAMENTI (2026-07-20): dove ogni uuid è stato visto, una riga per fonte.
+-- I doppioni per uuid collassano in `messages` (giusto: la ricerca non deve
+-- restituire 10 copie della stessa riga) — ma il FATTO che una copia esistesse
+-- anche in un altro path è informazione: "questo file prima era in una cartella,
+-- poi in un'altra" si legge SOLO da qui. Il collasso resta, la topologia no.
+--   SELECT uuid, group_concat(source, ' | ') FROM sightings
+--   GROUP BY uuid HAVING count(*) > 1;   -- gli incroci
+CREATE TABLE IF NOT EXISTS sightings(
+    uuid        TEXT,
+    source      TEXT,
+    ingest_date TEXT,
+    PRIMARY KEY (uuid, source)
 );
 """
 # NOTA sullo schema FTS — perché `tools` sì e `thinking` no.
@@ -95,6 +352,10 @@ def _pad(row: tuple) -> RowFull:
 
 
 def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int = 500) -> int:
+    # ⚠️ `batch` è ACCOPPIATO a _salva_revisioni(), che costruisce `WHERE uuid IN (?,…)` con un
+    # parametro per riga: alzarlo oltre SQLITE_LIMIT_VARIABLE_NUMBER (250.000 qui, misurato)
+    # romperebbe l'ingest **solo sui carichi grossi**, cioè quando serve. Margine attuale 500×.
+    # Segnalato da b82df434 come accoppiamento implicito: chi lo alza deve guardare anche lì.
     """Scrive/aggiorna le righe in db_path e ricostruisce l'FTS. Ritorna #righe.
 
     Riusabile da qualunque estrattore (server-side o locale). `rows` è un
@@ -110,11 +371,52 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
     try:
         conn.executescript(_SCHEMA)
         _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
+        _ensure_v3(conn)  # voice-tagging Fase 1: colonne nuove + `speaker` derivato
         n = 0
         buf: list[RowFull] = []
+        skip_buf: list[tuple] = []
+        sight_buf: list[tuple] = []
+        ingest_date = _now_iso()
+        n_rev = 0          # revisioni conservate in questo ingest (D18)
+
+        def _salva_revisioni() -> int:
+            """Conserva le versioni USCENTI prima che il REPLACE le sovrascriva (D18).
+
+            Va chiamata PRIMA dell'INSERT OR REPLACE: dopo, il vecchio contenuto non
+            esiste più da nessuna parte — è esattamente il difetto che questa funzione
+            chiude. Una sola query per batch (niente N+1): si leggono gli uuid del buf
+            che esistono già, si confrontano gli hash, e si archivia solo ciò che CAMBIA.
+            Uguale → nessuna revisione (il re-ingest di dati immutabili non sporca nulla).
+            """
+            if not buf:
+                return 0
+            by_uuid = {r[0]: r for r in buf}
+            ph = ",".join("?" * len(by_uuid))
+            esistenti = conn.execute(
+                f"SELECT uuid, project, ts, content, sender, ts_source FROM messages"
+                f" WHERE uuid IN ({ph})", tuple(by_uuid)).fetchall()
+            rev: list[tuple] = []
+            for u, proj, ts_old, cont_old, sender_old, tss_old in esistenti:
+                nuovo = by_uuid[u]
+                if (cont_old or "") == (nuovo[3] or ""):
+                    continue                      # stesso contenuto: niente da conservare
+                rev.append((u, ts_old, cont_old, sender_old or "", proj or "",
+                            tss_old or "messaggio",
+                            hashlib.sha1((cont_old or "").encode("utf-8")).hexdigest(),
+                            ingest_date))
+            if rev:
+                # OR IGNORE + PK(uuid, content_sha): la stessa versione non si archivia due
+                # volte, quindi ri-eseguire l'ingest è idempotente anche qui.
+                conn.executemany(
+                    "INSERT OR IGNORE INTO revisions"
+                    "(uuid, ts, content, sender, project, ts_source, content_sha,"
+                    " superseded_date) VALUES (?,?,?,?,?,?,?,?)", rev)
+            return len(rev)
 
         def flush() -> None:
             if buf:
+                nonlocal n_rev
+                n_rev += _salva_revisioni()      # PRIMA del replace, o il vecchio è perso
                 conn.executemany(
                     "INSERT OR REPLACE INTO messages"
                     "(uuid, project, ts, content, sender, tools, thinking, attachments,"
@@ -122,12 +424,48 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
                 )
                 buf.clear()
 
+        def flush_skips() -> None:
+            if skip_buf:
+                # OR IGNORE: la prima ingest_date resta (ledger), il re-ingest non duplica.
+                conn.executemany(
+                    "INSERT OR IGNORE INTO skipped(uid, source, reason, detail, ts, ingest_date)"
+                    " VALUES (?,?,?,?,?,?)", skip_buf,
+                )
+                skip_buf.clear()
+
+        def flush_sightings() -> None:
+            if sight_buf:
+                # OR IGNORE su (uuid, source): rivedere la stessa copia non duplica.
+                conn.executemany(
+                    "INSERT OR IGNORE INTO sightings(uuid, source, ingest_date)"
+                    " VALUES (?,?,?)", sight_buf,
+                )
+                sight_buf.clear()
+
         for row in rows:
+            if isinstance(row, _Skip):
+                skip_buf.append((_uid(row.source, row.reason, row.detail[:200], row.ts),
+                                 row.source, row.reason, row.detail[:2000], row.ts, ingest_date))
+                if len(skip_buf) >= batch:
+                    flush_skips()
+                continue
+            if isinstance(row, _Sighting):
+                sight_buf.append((row.uuid, row.source[:500], ingest_date))
+                if len(sight_buf) >= batch:
+                    flush_sightings()
+                continue
             buf.append(_pad(row))
             n += 1
             if len(buf) >= batch:
                 flush()
         flush()
+        flush_skips()
+        flush_sightings()
+        # Voice-tagging: le righe appena scritte nascono con `voice=''`. Si classificano
+        # QUI e non in `_ensure_v3` perché questa legge il `content` di ogni riga — è il
+        # costo di un ingest, non quello di ogni apertura di DB. Idempotente: al secondo
+        # passaggio non trova più `voice=''` e scrive zero.
+        popola_voice(conn)
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
         conn.commit()
         return n
@@ -145,7 +483,54 @@ def _ensure_v2(conn: sqlite3.Connection) -> bool:
     have = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
     missing = [c for c in ("sender", "tools", "thinking", "attachments", "parent_uuid")
                if c not in have]
+    # ts_source (v2.1, 20/07) è trattata a parte di proposito: NON è indicizzata in FTS,
+    # quindi aggiungerla non richiede di rifare la tabella FTS. Tenerla nella lista sopra
+    # avrebbe forzato un DROP+rebuild dell'FTS su ogni DB già sano — costoso e inutile.
+    # Default 'messaggio': i DB esistenti contengono solo ts veri (nessuno era sintetico
+    # prima di questa versione), quindi il default è corretto per retro-compatibilità e
+    # non "promuove" nessun dato a un regime che non aveva.
+    ts_src_missing = "ts_source" not in have
+    if ts_src_missing:
+        conn.execute("ALTER TABLE messages ADD COLUMN ts_source TEXT DEFAULT 'messaggio'")
+        # ⚠️ E SUBITO DOPO, le righe PREESISTENTI vanno marcate 'ignoto' (b82df434, 2ª lettura
+        # 20/07 — finding bloccante prima del merge). L'ALTER con DEFAULT assegna 'messaggio'
+        # a TUTTO ciò che è già in tabella, comprese le `memory:*` e `account:user` — che NON
+        # sono messaggi: sono gli slot riscrivibili senza ts, cioè **il motivo per cui questa
+        # colonna esiste**. Lasciarlo così avrebbe fabbricato, in un colpo solo e su nove
+        # archivi vivi, esattamente la bugia che il campo doveva impedire — e con l'aria di un
+        # dato verificato, perché un campo popolato sembra sempre popolato apposta.
+        # Di quelle righe NON SAPPIAMO il regime: 'ignoto' è l'unica etichetta vera. Il regime
+        # reale si conosce solo al momento dell'ingest, quindi si assegna quando le righe
+        # vengono ri-scritte da write_rows, non indovinandolo a posteriori con una UPDATE.
+        # ⚠️ RIGHE PREESISTENTI → 'ignoto'. Tre proposte, e la MISURA ha deciso.
+        #  (1) default secco 'messaggio' su tutto → bocciata da b82df434: asserisce un regime
+        #      mai verificato sulle `memory:*` (la bugia che il campo doveva impedire).
+        #  (2) 'ignoto' su tutto il migrato (questa) → sembrava perdere informazione.
+        #  (3) 'messaggio' se `ts` è pieno, '' se vuoto (setaccio) → elegante, e SBAGLIATA:
+        #      poggia su «un ts che c'è non è sintetico, quindi la riga è un messaggio».
+        #      MISURATO su cc-bundle-200726 (cifra RETTIFICATA da b82df434, vedi sotto):
+        #      su 221.514 righe con ts pieno, **140.476 (63,4%) NON sono conversazioni** —
+        #      `workfile:*`, `mcp-log:*`, documenti chunked: il loro ts viene da
+        #      `_zipinfo_ts()`, cioè dal TIMESTAMP DEL FILE nello zip, non da un messaggio.
+        #      La (3) le avrebbe dichiarate tutte 'messaggio' → «ts pieno ⇒ messaggio» è
+        #      falso per quasi due terzi dell'archivio, e lo era già prima di noi.
+        #      ⚠️ La prima stesura di questo commento diceva «221.514 su 222.651»: era la
+        #      MISURA SBAGLIATA, e per un motivo che vale più della cifra — la query filtrava
+        #      `project NOT LIKE 'proj:%'` assumendo un prefisso che in questo DB NON ESISTE
+        #      (i project sono nomi liberi: `_chat`, `vps1777`, `dasboard dart mcp`…), quindi
+        #      contava come «non-conversazione» anche tutte le conversazioni vere. Il numero
+        #      gonfiato *rafforzava* la conclusione giusta, ed è per questo che non stonava.
+        # Resta (2): 'ignoto' è l'unica etichetta vera per un regime che non è più ricostruibile.
+        # Il newest NON si rompe perché il filtro è NEGATIVO (`<> 'data-export'`): le righe
+        # ignote con ts reale restano dentro. Il regime vero si assegnerà quando l'ingest
+        # ri-scriverà le righe — l'unico istante in cui è noto.
+        conn.execute("UPDATE messages SET ts_source='ignoto'")
+    # la tabella `revisions` (D18) è CREATE IF NOT EXISTS nello _SCHEMA: eseguirlo basta
+    # a dotarne anche i DB vecchi, senza toccare `messages`.
     if not missing:
+        if ts_src_missing:
+            conn.executescript(_SCHEMA)   # crea revisions/indici sui DB preesistenti
+            return True
         return False
     for col in missing:
         conn.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT DEFAULT ''")
@@ -153,6 +538,313 @@ def _ensure_v2(conn: sqlite3.Connection) -> bool:
     conn.execute("DROP TABLE IF EXISTS messages_fts")
     conn.executescript(_SCHEMA)
     return True
+
+
+# ══════════════════════════════════════════ VOICE-TAGGING — Fase 1 (speaker) ══
+# Perché una FASE 1 da sola: `speaker` è un FATTO già presente nella fonte, `voice` è una
+# STIMA che richiede euristiche e un golden-set (Fase 2). Separarle vuol dire che il dato
+# certo entra subito e quello incerto entra quando è tarato — invece di aspettarsi a vicenda.
+
+# Solo ciò che SAPPIAMO. Un sender non elencato NON diventa 'human' per somiglianza: la
+# spec prevede anche i nomi Telegram come mittenti umani, ma da qui un nome di persona e
+# un'etichetta di sistema sono indistinguibili — e indovinare è il difetto che queste
+# colonne esistono per curare. Si taranno in Fase 2, col golden-set davanti.
+_SPEAKER_NOTI = {
+    "user": "human",
+    "human": "human",
+    "assistant": "assistant",
+}
+
+
+def speaker_da_sender(sender: str) -> str:
+    """Traduce il `sender` della fonte nell'asse-mittente. Mai indovina: 'unknown'.
+
+    `attachment` e `title` NON sono mittenti — sono nature della riga (misurato: 3.459 righe
+    su 61.100 in un DB vivo). Mapparle su un mittente qualsiasi fabbricherebbe un'attribuzione
+    che la fonte non contiene.
+    """
+    s = (sender or "").strip().lower()
+    return _SPEAKER_NOTI.get(s, "unknown")
+
+
+def popola_speaker(conn: sqlite3.Connection) -> int:
+    """Deriva `speaker` da `sender` per le righe che non ce l'hanno. Ritorna quante ne ha scritte.
+
+    Idempotente per costruzione: tocca **solo** `speaker=''`. Alla seconda esecuzione trova
+    zero righe e scrive zero. Vale anche dopo un ingest nuovo (le righe nuove nascono con
+    `speaker=''` e vengono derivate al passaggio successivo), quindi non serve toccare
+    `write_rows` né la forma a 9 colonne delle tuple.
+    """
+    scritte = 0
+    mittenti = [r[0] for r in conn.execute(
+        "SELECT DISTINCT sender FROM messages WHERE speaker=''")]
+    for snd in mittenti:
+        cur = conn.execute(
+            "UPDATE messages SET speaker=? WHERE speaker='' AND sender IS ?",
+            (speaker_da_sender(snd), snd))
+        scritte += cur.rowcount
+    return scritte
+
+
+# ═══════════════════════════════════ VOICE-TAGGING — Fase 2 (classify_voice) ══
+# `speaker` è un FATTO (sta nella fonte). `voice` è una STIMA: la calcola questa
+# euristica, deterministica e stdlib-only — NIENTE LLM nell'indexer, così un
+# re-ingest sugli stessi dati dà sempre lo stesso risultato.
+#
+# 🔑 IL PRINCIPIO DI TARATURA, vincolante e asimmetrico (spec §2):
+#   FALSI NEGATIVI ACCETTABILI · FALSI POSITIVI CARI.
+#   Meglio un incollato marcato `own` (resta la cintura comportamentale: chi cerca
+#   un'identità apre comunque il contesto) che una frase VERA di Neo marcata
+#   `pasted`. Perciò le regole 2 e 3 esigono segnali FORTI, e in dubbio si tace.
+#
+# ⚠️ IL PERIMETRO, ed è la parte che si dimentica (spec §8): queste soglie sono
+#   tarate sul corpus claude.ai. Su un corpus diverso il tasso di falsi positivi
+#   VA RI-MISURATO prima di fidarsene — misurato allora: il flag «(mm:ss)» dava
+#   50/50 di falsi positivi sui NOSTRI orari, dove i due punti sono un'ora e non
+#   un timestamp video. Una bandiera giusta altrove afferma più di quanto sa qui.
+#
+# 📌 QUESTA FASE NON È AGGANCIATA ALL'INGEST, ed è deliberato: la funzione esiste
+#   ed è provata, ma `voice` resta '' finché la Fase 3 non decide DOVE chiamarla.
+#   Un campo popolato sembra sempre popolato apposta.
+
+# ⚠️ SOGLIE **PROVVISORIE — da tarare sul golden set** (fissate 02/08/2026).
+#   Sono PROPOSTE prese dalla spec, NON valori studiati: nessuna è stata misurata
+#   su un insieme di casi etichettati a mano. Chi le legge fra un mese deve saperlo
+#   dal codice, non da un messaggio.
+# 🔑 PERCHÉ LA DATA E LA PAROLA STANNO QUI e non sul bus (richiesta di abdd732a,
+#   accolta): una decisione che vive solo in un messaggio **decade in silenzio** —
+#   misurato ieri su «findings.yml NON entra nel corpus», che era una misura vera e
+#   due round dopo era dentro senza che nessuno l'avesse revocata.
+# 📌 Si tarano con un campione etichettato a mano; finché non esiste, un valore qui
+#   è un'ipotesi che funziona, non una che è stata scelta.
+TS_VIDEO_MIN = 2          # PROVVISORIA · timestamp «(m:ss)» ravvicinati per sospettare un transcript
+EN_BLOCCO_MIN = 25        # PROVVISORIA · parole di un blocco inglese perché conti come blocco
+EN_RATIO_MIN = 0.18       # PROVVISORIA · quota di stopword inglesi sopra cui il blocco è EN
+PROSA_PROPRIA_MAX = 0.30  # PROVVISORIA · sotto questa quota di prosa propria: cornice, non testo
+QUOTE_FENCE_MIN = 0.50    # PROVVISORIA · quota citata sopra cui si alza il flag `quote_fence`
+
+_RE_TS = re.compile(r"[(\[]?\b\d{1,2}:\d{2}(?::\d{2})?\b[)\]]?")
+_RE_TRAP = re.compile(r"transcript|analyz|analisi|trascriz|pulizia|youtube", re.I)
+_RE_CHARACTER = re.compile(r"gdr|roleplay|agora|simposio|partita", re.I)
+_RE_FENCE = re.compile(r"^\s*(>|```)", re.M)
+_EN_STOP = {"the", "of", "and", "to", "in", "is", "it", "that", "for", "with",
+            "as", "on", "this", "be", "are", "by", "from", "which", "you", "not",
+            "have", "has", "was", "were", "can", "will", "would", "should"}
+
+
+def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
+    """Stima la NATURA del contenuto. Ritorna (voice, quoted_share, conf, flags).
+
+    Ordine di precedenza dalla spec §2. Ogni regola alza le sue bandiere, e le
+    bandiere sono l'AUTOPSIA del verdetto: senza, `voice` sarebbe un'etichetta di
+    cui non si può discutere. In dubbio ritorna `own`/`unknown`, mai `pasted`.
+    """
+    testo = content or ""
+    flags: list[str] = []
+    if not testo.strip():
+        return ("unknown", 0.0, 0.0, [])
+
+    # ① character — il PROGETTO lo dichiara: è la sola regola che non guarda il testo,
+    #    e per questo è la più affidabile delle sette.
+    if project and _RE_CHARACTER.search(project):
+        return ("character", 0.0, 0.85, ["project_gdr"])
+
+    # ② pasted_transcript — timestamp ravvicinati, o un titolo-trappola nel project.
+    #    ⚠️ Il timestamp da solo NON basta: «alle 14:30» è un orario. Serve la
+    #    RIPETIZIONE (≥ TS_VIDEO_MIN), che un orario in prosa non produce.
+    ts = _RE_TS.findall(testo)
+    trap = bool(project and _RE_TRAP.search(project))
+    if trap:
+        flags.append("trap_title")
+    if len(ts) >= TS_VIDEO_MIN:
+        flags.append("video_ts")
+    if (len(ts) >= TS_VIDEO_MIN and trap) or len(ts) >= TS_VIDEO_MIN * 3:
+        # due segnali indipendenti, oppure uno solo ma molto forte
+        conf = 0.8 if trap else 0.6
+        return ("pasted_transcript", _quota_citata(testo), conf, flags)
+
+    # ③ pasted_ai — un blocco inglese lungo dentro un messaggio a dominanza italiana.
+    parole = testo.split()
+    if len(parole) >= EN_BLOCCO_MIN:
+        basse = [p.strip(".,;:!?()[]\"'").lower() for p in parole]
+        ratio = sum(1 for p in basse if p in _EN_STOP) / max(len(basse), 1)
+        if ratio >= EN_RATIO_MIN:
+            flags.append("en_in_it")
+            # su un mittente umano è `mixed` e non `pasted_ai`: l'umano ha scritto
+            # la cornice, l'AI il materiale — ed è il caso-scuola (spec §0).
+            if speaker_da_sender(sender) == "human":
+                return ("mixed", _quota_citata(testo), 0.5, flags)
+            return ("pasted_ai", _quota_citata(testo), 0.6, flags)
+
+    # ⑤ mixed — cornice + materiale: poca prosa propria e molto citato.
+    quota = _quota_citata(testo)
+    if quota >= QUOTE_FENCE_MIN:
+        flags.append("quote_fence")
+    if quota > (1 - PROSA_PROPRIA_MAX):
+        return ("mixed", quota, 0.5, flags)
+
+    # ⑥ own — default per chi scrive di suo, senza bandiere.
+    if speaker_da_sender(sender) in ("human", "assistant"):
+        return ("own", quota, 0.9 if not flags else 0.5, flags)
+
+    # ⑦ unknown — nessuna regola confidente.
+    return ("unknown", quota, 0.0, flags)
+
+
+def popola_voice(conn: sqlite3.Connection, batch: int = 2000) -> int:
+    """Applica `classify_voice` alle righe non ancora classificate. Ritorna quante ne ha scritte.
+
+    🔴 PERCHÉ ESISTE, e perché è un difetto trovato attaccando la Fase 3 (02/08).
+    La Fase 2 ha prodotto `classify_voice` e i suoi test, **e si è fermata lì**: la
+    funzione era chiamata SOLO dai test, da nessun punto del codice di produzione.
+    ⇒ la colonna `voice` era vuota su **tutto** l'archivio, e i filtri `voice:` della
+    Fase 3 avrebbero risposto ZERO a ogni interrogazione — indistinguibile da «non
+    esistono righe di quel tipo». **Un filtro su una colonna mai popolata è il verde
+    che mente nella sua forma più pulita**: nessun errore, nessun log, solo un
+    risultato vuoto e credibile.
+    📌 `popola_speaker` era agganciata (r.706), questa no: la Fase 2 sembrava fatta
+    perché aveva la funzione e i test — le due cose che si guardano.
+
+    ⚠️ NON è agganciata a `_ensure_v3` come `popola_speaker`, ed è deliberato:
+    derivare `speaker` costa una `UPDATE` per mittente distinto (una manciata),
+    mentre questa **legge il `content` di ogni riga**. Farla a ogni apertura di DB
+    sarebbe un costo pagato sempre per un lavoro che serve una volta. Va chiamata
+    dopo un ingest e dalla migrazione.
+
+    🛡️ IL CONFINE FRA I DUE VUOTI (condizione posta da `71d540e6` firmando i nomi, e
+    accolta qui):
+        voice = ''         → NON CLASSIFICATA: nessuno l'ha guardata
+        voice = 'unknown'  → GUARDATA e non riconosciuta: è un giudizio, con la sua
+                             incertezza in `voice_conf`
+    Sono due stati diversi e questa funzione li tiene diversi: filtra su `voice=''`
+    (quindi non ri-classifica mai ciò che è già stato deciso) e non scrive mai `''`.
+    *Se collassassero in un nome solo, chi cerca `voice:unknown` crederebbe di avere
+    «le righe difficili» mentre ha «le righe mai lette».*
+    """
+    scritte = 0
+    while True:
+        righe = conn.execute(
+            "SELECT rowid, content, sender, project FROM messages WHERE voice='' LIMIT ?",
+            (batch,)).fetchall()
+        if not righe:
+            break
+        agg = []
+        for rid, content, sender, project in righe:
+            v, quota, conf, flags = classify_voice(content or "", sender or "", project or "")
+            # 🛡️ GUARDIA ANTI-LOOP, e non è teorica: il `while` esce solo quando
+            # `voice=''` non trova più righe. Se una regola futura tornasse `''`, la
+            # riga resterebbe eleggibile e questo ciclo non finirebbe mai — su un DB
+            # da 61k righe sarebbe un blocco silenzioso dell'ingest, non un errore.
+            # Meglio classificarla `unknown` (che è vero: l'abbiamo guardata) che
+            # girare a vuoto.
+            # `content_flags` è dichiarata «json» nello schema (r.242) e `classify_voice`
+            # torna una LISTA: va serializzata qui. E `[]` NON è `''` — è la stessa
+            # distinzione di `voice`: «calcolato, nessuna bandiera» contro «mai calcolato».
+            agg.append((v or "unknown", quota, conf, json.dumps(flags or []), rid))
+        conn.executemany(
+            "UPDATE messages SET voice=?, quoted_share=?, voice_conf=?, content_flags=? "
+            "WHERE rowid=?", agg)
+        scritte += len(agg)
+    return scritte
+
+
+def retag_voice(conn: sqlite3.Connection, *, scrivi: bool = False,
+                batch: int = 2000) -> dict:
+    """Ri-classifica TUTTE le righe (non solo le non classificate) e riporta il delta.
+
+    Fase 4 della spec. Serve quando le soglie cambiano: `popola_voice` per
+    costruzione non tocca ciò che è già stato deciso — giustamente, o ogni ritocco
+    riscriverebbe in silenzio giudizi presi. Questa invece riscrive apposta, e per
+    questo NON scrive di default.
+
+    🛡️ IL DEFAULT È A SECCO, ed è la scelta che conta qui: un comando che riscrive
+    61.100 righe non deve poter partire per una svista. `scrivi=False` calcola
+    tutto — quindi il delta è reale, non stimato — e non salva niente.
+
+    ⭐ IL DELTA È ESSO STESSO UN DATO (spec §4, [A §6]): «quante voci-terze si
+    nascondono» si legge in `cambiate`, non nella distribuzione finale. Due
+    tarature che producono la stessa distribuzione possono aver spostato righe
+    diverse, e senza il delta le due sono indistinguibili.
+
+    Ritorna {righe, prima:{voice:n}, dopo:{voice:n}, cambiate, scritto:bool}.
+    """
+    prima = {v or "": n for v, n in conn.execute(
+        "SELECT voice, count(*) FROM messages GROUP BY voice")}
+    dopo: dict[str, int] = {}
+    cambiate = 0
+    righe_tot = 0
+    agg_totale: list = []
+    off = 0
+    while True:
+        righe = conn.execute(
+            "SELECT rowid, content, sender, project, voice FROM messages "
+            "ORDER BY rowid LIMIT ? OFFSET ?", (batch, off)).fetchall()
+        if not righe:
+            break
+        off += len(righe)
+        for rid, content, sender, project, vecchio in righe:
+            v, quota, conf, flags = classify_voice(content or "", sender or "", project or "")
+            v = v or "unknown"
+            dopo[v] = dopo.get(v, 0) + 1
+            righe_tot += 1
+            if v != (vecchio or ""):
+                cambiate += 1
+            agg_totale.append((v, quota, conf, json.dumps(flags or []), rid))
+    if scrivi and agg_totale:
+        for i in range(0, len(agg_totale), batch):
+            conn.executemany(
+                "UPDATE messages SET voice=?, quoted_share=?, voice_conf=?, "
+                "content_flags=? WHERE rowid=?", agg_totale[i:i + batch])
+    return {"righe": righe_tot, "prima": prima, "dopo": dopo,
+            "cambiate": cambiate, "scritto": bool(scrivi and agg_totale)}
+
+
+def _quota_citata(testo: str) -> float:
+    """Quota 0-1 di righe citate (`>` o dentro un fence). Quantifica il `mixed`."""
+    righe = [r for r in testo.splitlines() if r.strip()]
+    if not righe:
+        return 0.0
+    citate = sum(1 for r in righe if _RE_FENCE.match(r))
+    return round(citate / len(righe), 3)
+
+
+def _ensure_v3(conn: sqlite3.Connection) -> bool:
+    """Aggiunge le colonne del voice-tagging a un DB v2. Idempotente.
+
+    ⚠️ NESSUNA delle colonne nuove entra nell'FTS in questa fase, ed è deliberato: metterle
+    nell'indice impone un DROP+rebuild della tabella FTS su ogni archivio vivo — costoso, e
+    inutile finché non esistono i filtri che le interrogano (Fase 3). È la stessa scelta già
+    presa qui per `ts_source`, e per la stessa ragione.
+    """
+    have = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+    nuove = (("speaker", "TEXT DEFAULT ''"), ("voice", "TEXT DEFAULT ''"),
+             ("quoted_share", "REAL DEFAULT 0"), ("voice_conf", "REAL DEFAULT 0"),
+             ("content_flags", "TEXT DEFAULT ''"))
+    mancanti = [(c, d) for c, d in nuove if c not in have]
+    for col, decl in mancanti:
+        conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {decl}")
+    popola_speaker(conn)
+    return bool(mancanti)
+
+
+def migrate_v2_to_v3(db_path: Union[str, Path]) -> bool:
+    """Porta un DB allo schema v3 (colonne voice-tagging + `speaker` e `voice` derivati).
+
+    Ritorna True se ha aggiunto colonne. NON ricostruisce l'FTS: le colonne nuove non sono
+    indicizzate (vedi `_ensure_v3`), quindi l'indice esistente resta valido e intatto.
+
+    📌 Classifica anche `voice`, e su un archivio esistente è il grosso del lavoro: qui
+    la si paga una volta sola, che è esattamente il posto giusto. Senza questa chiamata
+    un DB migrato avrebbe le colonne e nessun valore dentro — schema v3 e archivio muto.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        migrato = _ensure_v3(conn)
+        popola_voice(conn)
+        conn.commit()
+        return migrato
+    finally:
+        conn.close()
 
 
 def migrate_v1_to_v2(db_path: Union[str, Path]) -> bool:
@@ -186,13 +878,58 @@ def count_rows(db_path: Union[str, Path]) -> int:
         return 0
 
 
+def set_meta(db_path: Union[str, Path], key: str, value: str) -> None:
+    """Scrive una coppia nella scheda `meta` del DB (es. `description`). Read-write:
+    la usano l'upload (admin) e il tool MCP `set_description`. Crea la tabella se
+    manca (DB precedenti alla feature)."""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                     (str(key), str(value)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_meta(db_path: Union[str, Path], key: str, default: str = "") -> str:
+    """Legge una coppia dalla scheda `meta` (es. `description`). `default` se assente
+    o se il DB è precedente alla tabella."""
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (str(key),)).fetchone()
+            return row[0] if row and row[0] is not None else default
+        except sqlite3.OperationalError:
+            return default  # DB precedente alla tabella meta
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return default
+
+
+def count_skipped(db_path: Union[str, Path]) -> int:
+    """Numero di record nel libro-mastro degli scarti (D3). 0 se assente/vecchio DB
+    senza la tabella. Il conteggio non è più muto: si legge da qui e da `db_info`."""
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            return int(conn.execute("SELECT count(*) FROM skipped").fetchone()[0])
+        except sqlite3.OperationalError:
+            return 0  # DB precedente alla tabella skipped
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return 0
+
+
 def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
     """Scheda di un DB per le UI (admin + Mini App): righe, etichette distinte,
     le `top` etichette più popolose, dimensione file e ultima modifica.
     Robusto: DB assente o illeggibile → scheda a zero, mai un'eccezione."""
     p = Path(db_path)
     out: dict = {"name": p.stem, "rows": 0, "labels": 0, "top": [],
-                 "size": 0, "mtime": ""}
+                 "size": 0, "mtime": "", "skipped": 0, "description": ""}
     try:
         out["size"] = p.stat().st_size
         out["mtime"] = _file_ts(p)
@@ -212,6 +949,19 @@ def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
                     (max(0, top),),
                 )
             ]
+            try:
+                out["skipped"] = int(conn.execute("SELECT count(*) FROM skipped").fetchone()[0])
+            except sqlite3.OperationalError:
+                pass  # DB precedente alla tabella skipped
+            try:
+                out["sightings"] = int(conn.execute("SELECT count(*) FROM sightings").fetchone()[0])
+            except sqlite3.OperationalError:
+                out["sightings"] = 0  # DB precedente alla tabella sightings
+            try:
+                r = conn.execute("SELECT value FROM meta WHERE key = 'description'").fetchone()
+                out["description"] = (r[0] if r and r[0] else "")
+            except sqlite3.OperationalError:
+                pass  # DB precedente alla tabella meta
         finally:
             conn.close()
     except sqlite3.Error:
@@ -327,7 +1077,15 @@ _CC_TYPES = ("user", "assistant")
 
 
 def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
+    # tetto anche qui: `index_jsonl` accetta un file-like (non solo un path), e su
+    # uno stream non c'è nessuno `st_size` da controllare. Si contano i byte letti.
+    read = 0
     for line in fh:
+        read += len(line)
+        if read > MAX_FILE_BYTES:
+            raise ValueError(
+                f"sessione troppo grande: superati {_mb(MAX_FILE_BYTES)} in lettura. "
+                f"Alza MAX_FILE_BYTES in archive_indexer.py se è legittima.")
         line = line.strip()
         if not line:
             continue
@@ -335,10 +1093,42 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             d = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if d.get("type") not in _CC_TYPES:
+        typ = d.get("type")
+        if typ not in _CC_TYPES:
+            # NON un messaggio user/assistant. Prima: `continue` MUTO → 38k righe di
+            # servizio sparivano dal conteggio (né in n né in skipped): la quadratura
+            # non poteva chiudere. Ora ogni riga-non-messaggio è CONTATA, e le due che
+            # portano contenuto utile (titolo, allegati) sono indicizzate — parità col
+            # path claude.ai, che già cattura summary e attachments.
+            if typ == "ai-title" and str(d.get("aiTitle") or "").strip():
+                # uid per sessione se c'è, altrimenti sul TESTO del titolo (garantito
+                # non-vuoto dal guard sopra): titoli distinti → uid distinti, titoli
+                # uguali → una lapide sola. NB: `n_riga` era rimasto qui dopo la sua
+                # rimozione → NameError sui titoli senza sessionId (crash dell'ingest).
+                yield (_uid("cc-title", str(d.get("sessionId") or d["aiTitle"])), "titoli",
+                       "", str(d["aiTitle"]).strip(), "title", "", "", "", "")
+            elif typ == "attachment" and d.get("uuid"):
+                att = d.get("attachment") if isinstance(d.get("attachment"), dict) else {}
+                added = " ".join(str(x) for x in (att.get("addedNames") or []))
+                if added.strip():
+                    yield (str(d["uuid"]),
+                           project or Path(str(d.get("cwd") or "unknown")).name or "unknown",
+                           str(d.get("timestamp") or ""), "", "attachment", "", "",
+                           added.strip(), str(d.get("parentUuid") or ""))
+                else:
+                    yield _Skip("claude-code", "non-message", str(d)[:200], str(d.get("timestamp") or ""))
+            else:
+                # metadati operativi (mode/system/last-prompt/queue-operation/…): non un
+                # messaggio, ma lascia una lapide contata invece di sparire in silenzio.
+                yield _Skip("claude-code", "non-message", str(d)[:200], str(d.get("timestamp") or ""))
             continue
         uuid, ts = d.get("uuid"), d.get("timestamp")
         if not uuid or not ts:
+            # detail = tipo + POSIZIONE nel file: senza l'indice, tutti gli scarti dello
+            # stesso tipo collassavano in UNA lapide (uid identico + OR IGNORE) — il
+            # contatore della perdita perdeva. L'indice è stabile fra re-ingest dello
+            # stesso file: dedup fra ingest sì, collasso dentro l'ingest no.
+            yield _Skip("claude-code", "no-uuid-o-ts", str(d)[:200], str(ts or ""))
             continue
         msg = d.get("message") or {}
         blocks = extract_blocks(msg.get("content"))
@@ -346,10 +1136,33 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
         # sessione agentica ne è piena) spariva senza lasciare traccia. Ora basta che
         # abbia UN contenuto qualsiasi.
         if not (blocks.text or blocks.tools or blocks.thinking):
+            yield _Skip("claude-code", "empty", str(uuid), str(ts))
             continue
         proj = project or Path(str(d.get("cwd") or "unknown")).name or "unknown"
         yield (uuid, proj, ts, blocks.text, str(msg.get("role") or d.get("type") or ""),
                blocks.tools, blocks.thinking, "", str(d.get("parentUuid") or ""))
+
+
+def classify_cc(fh: IO[str]) -> list[str]:
+    """Il VERDETTO per riga (`keep:<sender>` o `skip:<reason>`) che
+    `_iter_claude_code` dà su ogni record Claude Code. NON re-implementa la logica:
+    la ESEGUE — così è impossibile che diverga da ciò che l'ingest fa davvero.
+
+    È l'interfaccia del *contratto dei bucket* (`_chat/contract/cc_buckets.jsonl`):
+    la corsia app (setaccio) tiene un `_preflight` che PREVEDE questi conteggi
+    copiando l'ordine dei filtri di qui. Una copia invecchia in silenzio: se cambio
+    i bucket, il suo metro si stacca e nessun test lo vede. Il canary chiude il buco
+    — si CHIEDE a questa funzione, non alla memoria: entrambi gli strumenti
+    classificano la stessa fixture e i verdetti devono combaciare. Se divergono,
+    qualcuno ha cambiato un lato. (È il gemello, un piano su, del canary del
+    tokenizer: là si chiede all'indice, qui alla logica dei filtri.)"""
+    out: list[str] = []
+    for item in _iter_claude_code(fh, "contract"):
+        if isinstance(item, _Skip):
+            out.append(f"skip:{item.reason}")
+        else:
+            out.append(f"keep:{item[4]}")   # item[4] = sender (title/attachment/role)
+    return out
 
 
 # ── estrattore: export account claude.ai (.zip) ──────────────────────────────
@@ -455,11 +1268,27 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
         if not isinstance(c, dict):
             continue
         name = c.get("name") or c.get("title") or fallback
-        for m in (c.get("chat_messages") or c.get("messages") or []):
+        # La `summary` della conversazione — metadata per-conversazione che
+        # l'estrattore non leggeva mai: persa NON per schema ma per assenza di codice
+        # (~396k char su un export reale). Indicizzata come riga attribuita, cercabile.
+        summary = c.get("summary")
+        if isinstance(summary, str) and summary.strip():
+            yield (_uid("summary", str(c.get("uuid") or name)), name,
+                   str(c.get("updated_at") or ""), summary.strip(),
+                   "summary", "", "", "", "")
+        for i_msg, m in enumerate(c.get("chat_messages") or c.get("messages") or []):
+            # nome-conv + indice nel detail: due scarti gemelli (stesso testo, stesso
+            # tipo) devono restare DUE lapidi — l'uid è sha1 del detail, e il collasso
+            # da OR IGNORE dentro lo stesso ingest falserebbe la quadratura (#56).
             if not isinstance(m, dict):
+                yield _Skip("claude-conversations", "non-dict",
+                            f"{name}[{i_msg}]: {str(m)[:150]}", "")
                 continue
             uuid = m.get("uuid")
             if not uuid:
+                yield _Skip("claude-conversations", "no-uuid",
+                            f"{name}[{i_msg}]: {str(m.get('text') or '')[:150]}",
+                            str(m.get("created_at") or ""))
                 continue
             # PRIMA: `m.get("text") or extract_text(m.get("content"))`.
             # Nell'export claude.ai `text` è SEMPRE valorizzato (misurato: 0 messaggi
@@ -470,6 +1299,8 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
             text = blocks.text or (m.get("text") or "")
             attach = _attachment_names(m)
             if not (text or blocks.tools or blocks.thinking or attach):
+                yield _Skip("claude-conversations", "empty", str(uuid),
+                            str(m.get("created_at") or ""))
                 continue
             sender = m.get("sender") or m.get("role") or ""
             content = f"[{sender}] {text}" if sender and text else text
@@ -478,21 +1309,23 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
                    str(m.get("parent_message_uuid") or ""))
 
 
-def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[RowFull]:
+def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[RowFull]:
     with zipfile.ZipFile(zip_path) as z:
         names = z.namelist()
         if "conversations.json" in names:
-            with z.open("conversations.json") as f:
-                yield from _iter_conversations(json.load(f), "claude-conversations")
+            # ERA: `json.load(f)` sull'intero membro → RAM illimitata (H39).
+            # Il file più grosso dell'export passa ora da _read_capped, che conta
+            # i byte decompressi e abortisce con un messaggio invece di un OOM.
+            yield from _iter_conversations(
+                _zip_json(z, "conversations.json", budget), "claude-conversations")
         # memories.json — la memoria persistente dell'account. Non veniva indicizzata:
         # l'archivio non conteneva la fonte che più di ogni altra determina cosa
         # l'assistente crede dell'utente.
         if "memories.json" in names:
-            with z.open("memories.json") as f:
-                try:
-                    yield from _iter_memories(json.load(f))
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    pass
+            try:
+                yield from _iter_memories(_zip_json(z, "memories.json", budget))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
         # users.json — anagrafica dell'account (nome, email, telefono verificato).
         #
         # SI INDICIZZA. L'ingestione non filtra: se l'utente carica un file,
@@ -506,18 +1339,16 @@ def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[RowFull]:
         # l'archivio va trattato come un contenitore di dati personali — perché lo è,
         # con o senza questo file.
         if "users.json" in names:
-            with z.open("users.json") as f:
-                try:
-                    yield from _iter_users(json.load(f))
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    pass
+            try:
+                yield from _iter_users(_zip_json(z, "users.json", budget))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
         for n in names:
             if n.startswith("design_chats/") and n.endswith(".json"):
-                with z.open(n) as f:
-                    try:
-                        data = json.load(f)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        continue
+                try:
+                    data = _zip_json(z, n, budget)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
                 if isinstance(data, dict):
                     # il title è sempre il generico "Chat": l'etichetta utile è
                     # il progetto di appartenenza. `name` vince su `title` in
@@ -528,11 +1359,10 @@ def _iter_claude_zip(zip_path: Union[str, Path]) -> Iterator[RowFull]:
                 yield from _iter_conversations(data, "claude-design-chats")
         for n in names:
             if n.startswith("projects/") and n.endswith(".json"):
-                with z.open(n) as f:
-                    try:
-                        proj = json.load(f)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        continue
+                try:
+                    proj = _zip_json(z, n, budget)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
                 if not isinstance(proj, dict):
                     continue
                 pname = f"project:{proj.get('name') or 'senza-nome'}"
@@ -583,6 +1413,7 @@ def _iter_text(path: Union[str, Path], project: str) -> Iterator[Row]:
     """Ponte per l'output di altri tool (web2md, lettoremd, pulizia-transcript):
     qualunque .md/.txt diventa messaggi indicizzabili."""
     path = Path(path)
+    _check_file_size(path, MAX_FILE_BYTES)  # `fh.read()` è tutto-in-RAM: prima il tetto
     name = project or path.stem
     with open(path, encoding="utf-8", errors="replace") as fh:
         yield from _chunk_rows(fh.read(), name, _file_ts(path), name)
@@ -592,17 +1423,36 @@ def _iter_text(path: Union[str, Path], project: str) -> Iterator[Row]:
 
 def _iter_pdf(path: Union[str, Path], project: str) -> Iterator[Row]:
     """Estrae il testo da un PDF (pypdf) e lo spezza in chunk. Il PDF è un
-    documento: niente struttura conversazione, solo testo cercabile."""
+    documento: niente struttura conversazione, solo testo cercabile.
+
+    Tetti (H39): il PDF è un formato COMPRESSO — anche qui la dimensione del file
+    non dice quanto diventa. pypdf non ha nessun limite proprio, quindi si tappano
+    i tre assi che possono esplodere: byte del file, numero di pagine, caratteri
+    estratti (che si contano man mano, non alla fine).
+    """
     from pypdf import PdfReader
     path = Path(path)
+    _check_file_size(path, MAX_PDF_BYTES)
     name = project or path.stem
     reader = PdfReader(str(path))
+    n_pages = len(reader.pages)
+    if n_pages > MAX_PDF_PAGES:
+        raise ValueError(
+            f"PDF con troppe pagine: {n_pages} (tetto {MAX_PDF_PAGES}). "
+            f"Spezzalo, oppure alza MAX_PDF_PAGES in archive_indexer.py.")
     pages: list[str] = []
+    chars = 0
     for page in reader.pages:
         try:
-            pages.append(page.extract_text() or "")
+            txt = page.extract_text() or ""
         except Exception:  # noqa: BLE001 — pypdf inciampa su pagine malformate: si salta
             continue
+        chars += len(txt)
+        if chars > MAX_PDF_TEXT_CHARS:
+            raise ValueError(
+                f"PDF: superati {MAX_PDF_TEXT_CHARS} caratteri estratti "
+                f"(bomba di decompressione?). Alza MAX_PDF_TEXT_CHARS se è legittimo.")
+        pages.append(txt)
     yield from _chunk_rows("\n\n".join(pages), name, _file_ts(path), name)
 
 
@@ -644,16 +1494,16 @@ def _iter_telegram(data: dict) -> Iterator[Row]:
                    f"[{sender}] {body}" if sender else body)
 
 
-def _iter_telegram_zip(zip_path: Union[str, Path], members: list[str]) -> Iterator[Row]:
+def _iter_telegram_zip(zip_path: Union[str, Path], members: list[str],
+                       budget: _Budget) -> Iterator[Row]:
     """result.json dentro uno zip (l'export Desktop arriva spesso come cartella
     zippata: ChatExport_.../result.json). Più member = più chat, si accumulano."""
     with zipfile.ZipFile(zip_path) as z:
         for m in members:
-            with z.open(m) as f:
-                try:
-                    data = json.load(f)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    continue
+            try:
+                data = _zip_json(z, m, budget)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
             if isinstance(data, dict):
                 yield from _iter_telegram(data)
 
@@ -676,6 +1526,19 @@ def _tg_html_ts(raw: str) -> str:
     return f"{year}-{mon}-{day}T{hms}" + (f"{oh}:{om or '00'}" if oh else "")
 
 
+def _forma(text: str, sender: str) -> str:
+    """Il `detail` di uno scarto Telegram: la FORMA del record, non il contenuto.
+
+    Gli altri estrattori ci mettono `str(d)[:200]`, cioè il record grezzo. Qui no,
+    ed è una scelta: la tabella `skipped` serve a QUADRARE l'ingest (quanti ne sono
+    entrati, quanti no e perché), e per quello bastano la lunghezza e la presenza
+    del mittente. Copiare il testo di un messaggio personale in una seconda tabella
+    non aggiunge niente alla quadratura e allarga la superficie di ciò che il DB
+    contiene — con una chiave di ricerca in meno per accorgersene.
+    """
+    return f"len={len(text)} sender={'sì' if sender else 'no'}"
+
+
 class _TgHtmlParser(HTMLParser):
     """Estrae (msg_id, sender, ts, text) da un messages*.html di Telegram
     Desktop. Solo stdlib; ignora service message e media senza testo."""
@@ -684,6 +1547,11 @@ class _TgHtmlParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.chat_title = ""
         self.msgs: list[tuple[str, str, str, str]] = []
+        # (motivo, dettaglio, ts) dei messaggi che il parser NON ha potuto emettere.
+        # Un HTMLParser non è un generatore e non può fare `yield _Skip(...)` da sé:
+        # accumula, e il chiamante li instrada come tutti gli altri scarti.
+        self.scartati: list[tuple[str, str, str]] = []
+        self._n_msg = 0            # quanti div.message chiusi finora in QUESTO file
         self._depth = 0            # nesting dei soli <div>
         self._msg_depth = 0        # profondità del div.message aperto (0 = fuori)
         self._msg_id = ""
@@ -751,14 +1619,49 @@ class _TgHtmlParser(HTMLParser):
         if self._sender:
             self._last_sender = self._sender
         text = "\n".join(self._texts).strip()
+        # Progressivo del messaggio DENTRO il documento. Serve a distinguere due
+        # scarti che hanno tutto il resto uguale — vedi il commento sull'uid sotto.
+        # È stabile fra re-ingest perché dipende solo dal contenuto del file: la
+        # stessa passata sullo stesso HTML dà gli stessi numeri, e `INSERT OR IGNORE`
+        # continua a fare da ledger invece di gonfiare la tabella a ogni ricarica.
+        self._n_msg += 1
         if text and self._msg_id:
             self.msgs.append((self._msg_id, sender, self._ts, text))
+        elif text and not self._msg_id:
+            # ⇐ IL CASO CHE SPARIVA. Un div.message senza id — markup cambiato,
+            # export parziale, frammento troncato — portava via CON SÉ il testo, e
+            # nessuno lo contava. `tools/collaudo-quadratura.py` dichiara che «dal
+            # solo DB non si distingue un DOPPIONE COLLASSATO da un MESSAGGIO
+            # PERSO»: un drop non contabilizzato è precisamente ciò che rende cieco
+            # quel confronto. Era l'UNICO estrattore del file a non emettere scarti.
+            #
+            # ⚠️ `n=` NON è decorazione. `_uid` impasta (source, reason, detail, ts) e
+            # qui l'id per definizione non c'è: senza un discriminante due messaggi
+            # persi con la stessa forma e lo stesso secondo — o entrambi senza data —
+            # producono lo STESSO uid, e `INSERT OR IGNORE` ne tiene uno solo.
+            # Sarebbe il difetto che questo blocco cura, spostato di una tabella: e
+            # peggiore, perché un conteggio che sembra una misura tranquillizza chi
+            # quadra. (Rilievo di b82df434 sulla #77, provato eseguendo `_uid`.)
+            self.scartati.append(
+                ("no-msg-id", f"{_forma(text, sender)} n={self._n_msg}", self._ts))
+        elif self._msg_id and not text:
+            # Media e service message: scarto legittimo e previsto dal docstring
+            # della classe — ma contarlo costa nulla e rende il totale quadrabile.
+            # È lo stesso `_Skip(..., "empty", ...)` degli altri due estrattori.
+            # Qui l'id C'È — è la condizione del ramo — e metterlo nel dettaglio
+            # rende l'uid unico a costo zero: senza, un album di foto (stesso
+            # mittente, stesso secondo, e `len` sempre 0 perché è il ramo «not text»)
+            # collasserebbe in UNA riga sola. `id=` è un identificatore, non
+            # contenuto: la scelta di `_forma()` resta intatta.
+            self.scartati.append(
+                ("empty", f"{_forma(text, sender)} id={self._msg_id}", self._ts))
         self._msg_depth = 0
         self._msg_id = self._ts = self._sender = ""
         self._texts = []
 
 
-def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str]) -> Iterator[Row]:
+def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str],
+                            budget: _Budget) -> Iterator[Row]:
     """messages.html, messages2.html, … dentro uno zip export (in ordine
     numerico, così i 'joined' a cavallo dei file ereditano il mittente giusto
     per file — al peggio il primo joined di un file resta senza mittente).
@@ -774,7 +1677,8 @@ def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str]) -> I
     with zipfile.ZipFile(zip_path) as z:
         for member in sorted(members, key=order):
             with z.open(member) as f:
-                html_text = f.read().decode("utf-8", errors="replace")
+                # ERA: `f.read()` — l'intero membro decompresso in RAM, senza tetto.
+                html_text = _read_capped(f, member, budget).decode("utf-8", errors="replace")
             p = _TgHtmlParser()
             p.feed(html_text)
             p.close()
@@ -782,6 +1686,274 @@ def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str]) -> I
             for msg_id, sender, ts, text in p.msgs:
                 yield (_uid("tg", cname, msg_id), cname, ts,
                        f"[{sender}] {text}" if sender else text)
+            # Gli scarti nello STESSO stream delle righe, come fanno tutti gli altri
+            # estrattori: `write_rows` li instrada alla tabella `skipped`.
+            for motivo, dettaglio, ts in p.scartati:
+                yield _Skip("telegram-html", motivo, f"{member} {dettaglio}", ts)
+
+
+# ── estrattore: zip di documenti generici (.md/.txt) ─────────────────────────
+
+# Le estensioni-testo che un "zip di documenti" può contenere: la stessa "porta"
+# di _iter_text (.md/.txt), estesa a uno zip — e ALLARGATA AL CODICE (2026-07-20,
+# richiesta esplicita: «indicizziamo il più possibile, poi decidiamo cosa prunare»).
+# Il codice sorgente È testo cercabile: il nome di una funzione, un TODO, una
+# stringa d'errore. NON i formati-conversazione (.json/.jsonl restano ambigui —
+# Telegram vs Claude Code — e li disambigua index_file sul singolo file; dentro il
+# BUNDLE li tratta _iter_bundle_zip con l'euristica sul contenuto).
+_DOC_ZIP_EXTS = (
+    ".md", ".markdown", ".txt", ".text", ".rst", ".adoc",
+    # codice
+    ".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".ts", ".tsx", ".jsx",
+    ".dart", ".c", ".h", ".cpp", ".hpp", ".cc", ".java", ".kt", ".rs", ".go",
+    ".rb", ".php", ".swift", ".lua", ".pl", ".r", ".sql", ".gd", ".tex",
+    # markup / config / dati leggibili
+    ".html", ".htm", ".css", ".xml", ".svg", ".yaml", ".yml", ".toml",
+    ".ini", ".cfg", ".conf", ".env.example", ".csv", ".tsv", ".log",
+)
+
+
+# Soglia di lettura per lo sniff: bastano pochi KB per decidere se un file è testo.
+_SNIFF_BYTES = 4096
+
+def _sniff_e_testo(raw: bytes) -> bool:
+    """Il contenuto è testo leggibile? (D10/§1, decisione D10 di Neo — 20/07)
+
+    PERCHÉ ESISTE: la classificazione era per ESTENSIONE, cioè un'etichetta, non una
+    misura. Sul bundle reale: dei 2.633 file censiti come «non-testo», **829 (31%) sono
+    testo travestito** — 264 senza estensione (appunti, todo, script, Dockerfile) più
+    estensioni fuori whitelist (.cjs .proto .service .xsd .ndjson). Erano marcati
+    «niente da leggere qui» e nessuno li ha mai letti. Neo, sulla D10: «tutti i file
+    possono contenere testo o metadati utili, dovremo analizzarli molto bene».
+
+    Il criterio è volutamente CONSERVATIVO — meglio una lapide di troppo che spazzatura
+    binaria dentro l'indice full-text:
+      · un solo byte NUL → binario, chiuso (nessun formato testuale lo contiene);
+      · deve decodificarsi in UTF-8 senza errori di sostituzione rilevanti;
+      · ≥ 90% di caratteri stampabili/whitespace sul campione.
+    Legge solo i primi _SNIFF_BYTES: decidere non richiede il file intero.
+    """
+    if not raw:
+        return False
+    if b"\x00" in raw:
+        return False
+    try:
+        txt = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    if not txt.strip():
+        return False
+    ok = sum(1 for ch in txt if ch.isprintable() or ch in "\n\r\t")
+    return ok / len(txt) >= 0.90
+
+
+def _zipinfo_ts(info: zipfile.ZipInfo) -> str:
+    """ts ISO dal `date_time` del membro zip (1980 = 'assente', epoca-zero DOS)."""
+    try:
+        y, mo, d, h, mi, s = info.date_time
+        if y < 1980:
+            return ""
+        return f"{y:04d}-{mo:02d}-{d:02d}T{h:02d}:{mi:02d}:{s:02d}Z"
+    except Exception:  # noqa: BLE001 — date_time malformato: meglio nessun ts
+        return ""
+
+
+def _doc_zip_members(names: list[str]) -> list[str]:
+    """I membri-documento di uno zip generico: .md/.txt reali, saltando le voci
+    di cartella, i dotfile e le resource-fork di macOS (__MACOSX/, ._*) — che
+    altrimenti entrerebbero come documenti-fantasma vuoti."""
+    out: list[str] = []
+    for n in names:
+        if n.endswith("/") or n.startswith("__MACOSX/"):
+            continue
+        base = Path(n).name
+        if base.startswith("._") or base.startswith("."):
+            continue
+        if Path(n).suffix.lower() in _DOC_ZIP_EXTS:
+            out.append(n)
+    return out
+
+
+def _iter_docs_zip(zip_path: Union[str, Path], members: list[str],
+                   budget: _Budget) -> Iterator[Row]:
+    """Fallback 'zip-di-documenti': uno zip che NON è un export riconosciuto ma
+    contiene .md/.txt (output di altri tool, un pacco di note, un dump). Ogni
+    documento diventa messaggi cercabili — stessa logica di _iter_text, ma dentro
+    un archivio, sotto il budget anti-zip-bomb condiviso (_read_capped conta il
+    decompresso). Il path del membro è progetto e chiave insieme: uuid stabile →
+    re-index idempotente."""
+    with zipfile.ZipFile(zip_path) as z:
+        for name in members:
+            info = z.getinfo(name)
+            with z.open(info) as f:
+                raw = _read_capped(f, name, budget)
+            text = raw.decode("utf-8", errors="replace")
+            yield from _chunk_rows(text, name, _zipinfo_ts(info), name)
+
+
+# ── estrattore: bundle recupero-sessioni-1777 (.zip) ─────────────────────────
+# Il «scarica tutto» dell'app locale di recupero sessioni: un solo zip con
+#   sessions/<sid>.jsonl          conversazioni Claude Code (verbatim, dedup, __fN)
+#   mcp-logs/<sid>/<server>/…     log dei server MCP collegati
+#   workfiles/<cwd-encoded>/…     artefatti delle cartelle di lavoro (opzionali)
+#   inventario/ + MANIFEST.json/md
+# Riconoscibile da MANIFEST.json + sessions/. Principi (2026-07-20, con Neo):
+#   - indicizzare IL PIÙ POSSIBILE («poi decidiamo cosa prunare»): sessioni come
+#     conversazioni, log e workfiles-testo come documenti chunked, codice incluso;
+#   - i DOPPIONI collassano in `messages` ma ogni copia lascia un AVVISTAMENTO
+#     (tabella sightings) col path del membro: gli incroci («questo file prima era
+#     in una cartella, poi in un'altra») diventano query-abili;
+#   - i binari (zip/db/dill/so/immagini…) non hanno testo da cercare: NIENTE FTS,
+#     ma una LAPIDE per ciascuno in `skipped` (reason='non-testo', detail=path) —
+#     l'inventario del «materiale nascosto» resta interrogabile, niente sparisce.
+
+
+def _sniff_jsonl_kind(head: str) -> str:
+    """'cc' | 'mcp-log' | 'text' dalle prime righe di un .jsonl trovato nei
+    workfiles (lì l'estensione non basta: backup di sessioni, log e dati veri
+    convivono nella stessa cartella)."""
+    if ('"type":"user"' in head or '"type":"assistant"' in head
+            or '"type": "user"' in head or '"type": "assistant"' in head):
+        return "cc"
+    if '"sessionId"' in head:
+        return "mcp-log"
+    return "text"
+
+
+def _iter_cc_member(z: zipfile.ZipFile, name: str, project: str = "") -> Iterator:
+    """Sessione Claude Code dentro uno zip: streaming per riga (il tetto per-membro
+    è quello interno di _iter_claude_code) + un avvistamento per ogni riga tenuta."""
+    with z.open(name) as f:
+        fh = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
+        for item in _iter_claude_code(fh, project):
+            yield item
+            if not isinstance(item, _Skip):
+                yield _Sighting(str(item[0]), name)
+
+
+def _iter_cc_text(text: str, name: str) -> Iterator:
+    """Come _iter_cc_member, ma da testo già in RAM (i .jsonl dei workfiles
+    passano prima dallo sniff, che li ha già letti)."""
+    for item in _iter_claude_code(io.StringIO(text), ""):
+        yield item
+        if not isinstance(item, _Skip):
+            yield _Sighting(str(item[0]), name)
+
+
+def _workfile_label(name: str) -> str:
+    """Etichetta-progetto per un membro workfiles/: la cartella-cwd (primo livello
+    sotto workfiles/), non il path intero — le etichette devono restare contabili.
+    Il path completo resta cercabile: è la prima riga del contenuto e la fonte
+    dell'avvistamento/lapide."""
+    parts = name.split("/")
+    return f"workfile:{parts[1]}" if len(parts) > 2 else "workfile"
+
+
+def _iter_pdf_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator:
+    """PDF da bytes (membro di zip): stessi tetti di _iter_pdf, stessa resa a chunk.
+    pypdf assente o PDF rotto → lapide, mai un crash dell'intero bundle."""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(raw))
+        if len(reader.pages) > MAX_PDF_PAGES:
+            yield _Skip("bundle-workfiles", "pdf-troppe-pagine", name, ts)
+            return
+        pages: list[str] = []
+        chars = 0
+        for page in reader.pages:
+            try:
+                txt = page.extract_text() or ""
+            except Exception:  # noqa: BLE001 — pagina malformata: si salta
+                continue
+            chars += len(txt)
+            if chars > MAX_PDF_TEXT_CHARS:
+                break
+            pages.append(txt)
+        text = "\n\n".join(pages).strip()
+        if text:
+            yield from _chunk_rows(f"[{name}]\n{text}", label, ts, name)
+        else:
+            yield _Skip("bundle-workfiles", "pdf-senza-testo", name, ts)
+    except Exception as exc:  # noqa: BLE001 — ImportError/PdfReadError/…
+        yield _Skip("bundle-workfiles", "pdf-illeggibile", f"{name}: {exc}", ts)
+
+
+def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
+    with zipfile.ZipFile(zip_path) as z:
+        names = [n for n in z.namelist() if not n.endswith("/")]
+        for name in names:
+            ext = Path(name).suffix.lower()
+            top = name.split("/", 1)[0]
+            if top == "sessions" and ext == ".jsonl":
+                yield from _iter_cc_member(z, name)
+            elif top == "mcp-logs":
+                # log MCP → documento chunked cercabile, col server nell'etichetta.
+                # Chunk larghi (4000): righe JSON dense, meno righe-indice.
+                info = z.getinfo(name)
+                with z.open(info) as f:
+                    raw = _read_capped(f, name, budget)
+                parts = name.split("/")
+                server = parts[2] if len(parts) >= 4 else "mcp"
+                yield from _chunk_rows(raw.decode("utf-8", errors="replace"),
+                                       f"mcp-log:{server}", _zipinfo_ts(info), name,
+                                       chunk_chars=4000)
+            elif top == "workfiles":
+                info = z.getinfo(name)
+                ts = _zipinfo_ts(info)
+                label = _workfile_label(name)
+                if ext in (".jsonl", ".json"):
+                    with z.open(info) as f:
+                        raw = _read_capped(f, name, budget)
+                    text = raw.decode("utf-8", errors="replace")
+                    kind = _sniff_jsonl_kind(text[:20000])
+                    if kind == "cc":
+                        # un backup di sessione dentro i workfiles: si indicizza
+                        # come CONVERSAZIONE (collassa per uuid con la copia di
+                        # sessions/) e l'avvistamento registra il path — l'incrocio.
+                        yield from _iter_cc_text(text, name)
+                    else:
+                        yield from _chunk_rows(text, label, ts, name, chunk_chars=4000)
+                elif ext in _DOC_ZIP_EXTS:
+                    with z.open(info) as f:
+                        raw = _read_capped(f, name, budget)
+                    body = f"[{name}]\n" + raw.decode("utf-8", errors="replace")
+                    yield from _chunk_rows(body, label, ts, name)
+                elif ext == ".pdf":
+                    with z.open(info) as f:
+                        raw = _read_capped(f, name, budget, cap=MAX_PDF_BYTES)
+                    yield from _iter_pdf_bytes(raw, name, label, ts)
+                else:
+                    # PRIMA della lapide: guarda il CONTENUTO, non l'estensione (D10/§1).
+                    # Un file «fuori whitelist» può essere testo pieno — 829 lo erano.
+                    with z.open(info) as f:
+                        campione = f.read(_SNIFF_BYTES)
+                    if _sniff_e_testo(campione):
+                        with z.open(info) as f:
+                            raw = _read_capped(f, name, budget)
+                        # marcato [testo-sniffato] perché sia distinguibile da un file
+                        # entrato per estensione: chi legge deve sapere COME ci è arrivato.
+                        body = f"[{name}] [testo-sniffato]\n" + raw.decode("utf-8", errors="replace")
+                        yield from _chunk_rows(body, label, ts, name)
+                    else:
+                        # binario vero: lapide col path, contata.
+                        yield _Skip("bundle-workfiles", "non-testo", name, ts)
+            elif name == "inventario/inventario-sessioni.tsv":
+                info = z.getinfo(name)
+                with z.open(info) as f:
+                    raw = _read_capped(f, name, budget)
+                yield from _chunk_rows(raw.decode("utf-8", errors="replace"),
+                                       "inventario", _zipinfo_ts(info), name,
+                                       chunk_chars=4000)
+            elif name == "MANIFEST.md":
+                info = z.getinfo(name)
+                with z.open(info) as f:
+                    raw = _read_capped(f, name, budget)
+                yield from _chunk_rows(raw.decode("utf-8", errors="replace"),
+                                       "manifest", _zipinfo_ts(info), name)
+            else:
+                # MANIFEST.json / inventario-sessioni.json: ridondanti con le
+                # versioni leggibili già indicizzate — dichiarati, non spariti.
+                yield _Skip("bundle", "non-indicizzato-ridondante", name, "")
 
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
@@ -795,23 +1967,46 @@ def _index_zip(path: Path, db_path: Union[str, Path]) -> int:
     parlante — un "ok, 0 record" qui è sempre una bugia."""
     with zipfile.ZipFile(path) as z:
         names = z.namelist()
+    if len(names) > MAX_ZIP_MEMBERS:
+        # l'altra faccia della zip-bomb: non un file enorme, ma un milione di file
+        # minuscoli. Costa poco contarli, e il conto è sul REALE (la namelist).
+        raise ValueError(
+            f"zip con troppi file: {len(names)} (tetto {MAX_ZIP_MEMBERS}).")
+    # UN budget per tutto l'archivio: i tetti per-membro non bastano, mille membri
+    # da 500 MB l'uno stanno tutti sotto MAX_MEMBER_BYTES e affondano lo stesso.
+    budget = _Budget()
     telegram_jsons = [n for n in names if Path(n).name == "result.json"]
     telegram_htmls = [n for n in names
                       if re.fullmatch(r"messages\d*\.html", Path(n).name)]
-    if "conversations.json" in names or any(
+    if "MANIFEST.json" in names and any(n.startswith("sessions/") for n in names):
+        # bundle di recupero-sessioni-1777: PRIMA degli altri check — contiene .md
+        # che il fallback docs mangerebbe, ignorando sessioni e log.
+        n, kind = (write_rows(db_path, _iter_bundle_zip(path, budget)),
+                   "bundle recupero-sessioni-1777")
+    elif "conversations.json" in names or any(
             n.startswith(("design_chats/", "projects/")) for n in names):
-        n, kind = write_rows(db_path, _iter_claude_zip(path)), "export claude.ai"
+        n, kind = write_rows(db_path, _iter_claude_zip(path, budget)), "export claude.ai"
     elif telegram_jsons:
         # JSON preferito quando c'è: più fedele (id numerici, entities, service)
-        n, kind = write_rows(db_path, _iter_telegram_zip(path, telegram_jsons)), "export Telegram"
+        n, kind = (write_rows(db_path, _iter_telegram_zip(path, telegram_jsons, budget)),
+                   "export Telegram")
     elif telegram_htmls:
-        n, kind = (write_rows(db_path, _iter_telegram_html_zip(path, telegram_htmls)),
+        n, kind = (write_rows(db_path, _iter_telegram_html_zip(path, telegram_htmls, budget)),
                    "export Telegram HTML")
     else:
-        raise ValueError(
-            "zip non riconosciuto: mi aspetto un export claude.ai "
-            "(conversations.json / design_chats/ / projects/) oppure un export "
-            "Telegram Desktop JSON (result.json).")
+        # Fallback: non è un export, ma può essere uno zip di documenti .md/.txt
+        # ("archive deve indicizzare zip md txt, quel che è"). Se c'è almeno un
+        # documento lo si indicizza; altrimenti resta un errore parlante.
+        docs = _doc_zip_members(names)
+        if docs:
+            n, kind = (write_rows(db_path, _iter_docs_zip(path, docs, budget)),
+                       "zip di documenti (.md/.txt)")
+        else:
+            raise ValueError(
+                "zip non riconosciuto: mi aspetto un export claude.ai "
+                "(conversations.json / design_chats/ / projects/), un export "
+                "Telegram Desktop JSON (result.json), oppure uno zip con almeno "
+                "un documento .md/.txt.")
     if n == 0:
         if count_rows(db_path) == 0:
             Path(db_path).unlink(missing_ok=True)
@@ -840,6 +2035,7 @@ def index_file(path: Union[str, Path], db_path: Union[str, Path], *, project: st
     if suffix == ".json":
         # .json ambiguo: Telegram (oggetto con messages/chats) vs Claude Code
         # (in realtà JSONL → json.load fallisce → ripiego sul lettore a righe).
+        _check_file_size(path, MAX_FILE_BYTES)  # json.load = tutto in RAM
         try:
             with open(path, encoding="utf-8", errors="replace") as fh:
                 data = json.load(fh)
@@ -869,19 +2065,84 @@ def main(argv: list[str] | None = None) -> int:
         prog="archive_indexer",
         description="Indicizza sessioni/export in un DB FTS5 per archive-mcp.",
     )
-    ap.add_argument("input", help="file di input (.jsonl / .zip / .md / .txt)")
-    ap.add_argument("db", help="file .db SQLite di output (creato/aggiornato)")
+    ap.add_argument("input", help="file di input (.jsonl / .zip / .md / .txt), "
+                                  "oppure il .db da ri-taggare con --retag")
+    ap.add_argument("db", nargs="?", help="file .db SQLite di output (creato/aggiornato)")
     ap.add_argument("--project", default="", help="etichetta progetto (default: dedotta dalla fonte)")
+    ap.add_argument("--classify", action="store_true",
+                    help="NON indicizza: stampa il verdetto (keep:<sender>/skip:<reason>) "
+                         "per ogni riga di un .jsonl Claude Code. È l'interfaccia del "
+                         "contratto dei bucket: la corsia app la confronta col suo preflight.")
+    ap.add_argument("--retag", action="store_true",
+                    help="NON indicizza: ri-classifica `voice` su TUTTE le righe del DB "
+                         "passato come `input` e stampa il delta. A SECCO se non c'è "
+                         "--scrivi: il delta è reale (calcolato) ma niente viene salvato.")
+    ap.add_argument("--scrivi", action="store_true",
+                    help="con --retag: applica davvero. Senza, il retag è solo un referto.")
     args = ap.parse_args(argv)
     if not Path(args.input).is_file():
         print(f"input non trovato: {args.input}", file=sys.stderr)
         return 1
+    if args.retag:
+        # 🛡️ `--scrivi` è richiesto ESPLICITAMENTE e non è il default: questo comando
+        # riscrive la classificazione di ogni riga del DB, e un default che scrive
+        # trasforma una svista di battitura in una perdita di giudizi.
+        conn = sqlite3.connect(args.input)
+        try:
+            esito = retag_voice(conn, scrivi=args.scrivi)
+            if args.scrivi:
+                conn.commit()
+        finally:
+            conn.close()
+        print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
+        if not args.scrivi:
+            print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
+                  file=sys.stderr)
+        return 0
+    if args.classify:
+        with open(args.input, encoding="utf-8") as fh:
+            for verdict in classify_cc(fh):
+                print(verdict)
+        return 0
+    if not args.db:
+        print("manca il file .db di output (o usa --classify)", file=sys.stderr)
+        return 1
+    # 🔴 issue #55 — QUESTA RIGA HA FATTO APRIRE UNA CACCIA A DATI PERDUTI CHE NON
+    #   ESISTEVANO, ed è durata dal 15/07 al 16/08. Stampava DUE numeri:
+    #       «indicizzati 50700 record → totale nel DB: 45612»
+    #   e chi legge conclude «ne mancano 5.088». Il delta però NON è perdita: è
+    #   DEDUPLICAZIONE per uid deterministico, e per di più voluta — le 5.089
+    #   occorrenze del titolo di una sessione hanno lo stesso `_uid("cc-title",
+    #   sessionId)` e collassano in una lapide sola (misurato il 09/08 su un jsonl
+    #   vero di 108.570 righe: il delta era ESATTAMENTE `keep:title`).
+    # ⭐ Il difetto non era nel codice che scrive: era nel codice che RACCONTA.
+    #   Due numeri accanto invitano a sottrarli, e la sottrazione di due grandezze
+    #   che non sono «prima» e «dopo» produce un terzo numero che sembra un ammanco.
+    # ⚠️ E il totale NON si può usare come «dopo»: `count_rows` conta il DB INTERO.
+    #   Su un DB già popolato `n - count_rows` è privo di senso — poteva persino
+    #   uscire negativo. Per questo il «dopo» si misura prima e dopo l'ingest.
+    prima = count_rows(args.db)
+    prima_skip = count_skipped(args.db)
     try:
         n = index_file(args.input, args.db, project=args.project)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    print(f"indicizzati {n} record → {args.db} (totale nel DB: {count_rows(args.db)})")
+    dopo, dopo_skip = count_rows(args.db), count_skipped(args.db)
+    scritti, lapidi = dopo - prima, dopo_skip - prima_skip
+    print(f"letti {n} record → scritti {scritti} · deduplicati {n - scritti}"
+          f"  (totale nel DB: {dopo})")
+    # 🛡️ E le lapidi si dicono DEDUPLICATE, che è l'altra metà della issue #55: il
+    #   loro uid è `_uid(source, reason, detail[:200], ts)`, quindi due scarti che
+    #   condividono i primi 200 caratteri e il timestamp ne lasciano UNA sola —
+    #   misurato: 26.000 lapidi per 21.581 `detail` distinti. Non è perdita di dati
+    #   (quei record non erano destinati a `messages`), è perdita di CONTABILITÀ,
+    #   ed era silenziosa: il libro-mastro degli scarti sotto-contava senza dirlo,
+    #   che è esattamente il difetto per cui la tabella `skipped` era stata creata.
+    #   ⇒ finché l'uid non ha un discriminante di posizione, il numero lo DICHIARA.
+    if lapidi:
+        print(f"scartati {lapidi} record (lapidi in `skipped`, DEDUPLICATE per "
+              f"source+reason+detail[:200]+ts: gli scarti veri possono essere di più)")
     return 0
 
 

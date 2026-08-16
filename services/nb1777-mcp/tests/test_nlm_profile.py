@@ -120,6 +120,25 @@ def test_file_vuoto(tmp_path):
         install_profile(b"", tmp_path)
 
 
+# ───── tar-bomb: il cap a monte è sul COMPRESSO, qui si guarda il decompresso ─────
+
+def test_tar_bomb_membro_enorme_rifiutato(tmp_path):
+    # 20 MB di zeri comprimono in pochi KB: il cap dei 5MB sul tar NON scatta.
+    bomb = _targz({**VALID, "profiles/default/bomb.bin": b"\0" * (20 * 1024 * 1024)})
+    assert len(bomb) < 5_000_000            # passerebbe il cap del gateway
+    with pytest.raises(ValueError, match="troppo grande"):
+        install_profile(bomb, tmp_path)
+
+
+def test_tar_bomb_non_lascia_residui_né_distrugge_il_profilo(tmp_path):
+    install_profile(_targz(VALID), tmp_path)          # profilo buono
+    bomb = _targz({**VALID, "profiles/default/bomb.bin": b"\0" * (20 * 1024 * 1024)})
+    with pytest.raises(ValueError):
+        install_profile(bomb, tmp_path)
+    assert profile_status(tmp_path)["ok"] is True     # il buono è intatto
+    assert not (tmp_path / ".upload-staging").exists()   # niente residui su disco
+
+
 def test_nessuna_staging_residua(tmp_path):
     install_profile(_targz(VALID), tmp_path)
     with pytest.raises(ValueError):

@@ -39,13 +39,13 @@ duplicata da mantenere.
    conoscono).
 2. Il frontend la POSTa a `/app/auth`; il server ricalcola l'HMAC
    (`miniapp_core.verify_init_data`, spec Telegram), scarta initData più
-   vecchie di 24h, e verifica che l'utente sia **l'owner**
+   vecchie di 12h (H27), e verifica che l'utente sia **l'owner**
    (`TELEGRAM_OWNER_ID`): chiunque altro riceve 403, anche con initData valida.
    L'endpoint `/app/auth` è **rate-limited** (20 richieste / 5 min per-IP, dal
    v0.25.0): oltre la soglia risponde 429.
 3. Se ok, emette un **JWT `typ=miniapp`** (1h) che il frontend usa come Bearer
    su `/app/api/*`. Alla scadenza la pagina si ri-autentica da sola (initData
-   vale 24h).
+   vale 12h).
 
 Perché è solido:
 - l'HMAC non è forgiabile senza il token del bot; il server non si fida di
@@ -68,7 +68,7 @@ Perché è solido:
 | `/app` | GET | — | la pagina (CSP con nonce per-risposta) |
 | `/app/auth` | POST | initData | valida + emette JWT miniapp |
 | `/app/api/overview` | GET | Bearer | versione, upstreams, riassunto secret |
-| `/app/api/plugins` | GET | Bearer | connettori MCP con URL (contengono il gateway secret → mai pubblici) |
+| `/app/api/plugins` | GET | Bearer | connettori MCP con URL **mascherato** di default; l'URL vero solo con `?reveal=<nome>` e un tap esplicito (H26) |
 | `/app/api/notebooks` | GET | Bearer | lista notebook (via nb1777-mcp) |
 | `/app/api/ask` | POST | Bearer | domanda RAG su un notebook (long-running) |
 | `/app/api/archive/dbs` | GET | Bearer | DB dell'archivio con scheda (righe, etichette, top, dimensione, mtime) |

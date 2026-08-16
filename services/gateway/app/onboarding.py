@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import html
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from starlette.requests import Request
@@ -45,16 +45,37 @@ async def _status() -> dict[str, tuple[str, str]]:
 
     # PUBLIC_BASE / URL
     pb = s.gateway_public_base
+    # 📌 Qui il verde è ONESTO ma va detto cosa promette: `PUBLIC_BASE` è una riga
+    # del `.env`, quindi «ok» significa **«è impostato»**, non «risponde». La
+    # differenza col Funnel qui sotto — dove «attivo» era un'affermazione sul mondo
+    # dedotta dalla stessa stringa — è che lì il verde mentiva, qui è ambiguo: con
+    # caddy giù questa riga resta verde, e questa è la pagina che l'utente apre
+    # PROPRIO per sapere cosa manca. ⇒ il livello resta, la parola lo qualifica.
     if pb and pb.startswith("https://"):
-        out["url"] = ("ok", pb)
+        out["url"] = ("ok", f"{pb} — configurato (non è una prova che risponda)")
     elif pb:
         out["url"] = ("warn", pb)
     else:
         out["url"] = ("off", "non impostato")
 
-    # Tailscale (deduzione: URL .ts.net presente)
+    # Tailscale — è una DEDUZIONE, e adesso lo dice.
+    # 🔴 Qui c'era ("ok", "Funnel attivo") dedotto da `.ts.net` in PUBLIC_BASE:
+    # una stringa del `.env` che NON cambia mai se l'auth-key scade, se il nodo
+    # esce dal tailnet, o se qualcuno spegne il Funnel per manutenzione e non lo
+    # riaccende. ⚠️ Ed è la pagina che l'utente apre proprio per sapere COSA
+    # MANCA: era l'ultimo posto in cui potesse stare un verde non misurato.
+    # ⭐ È il gemello del difetto curato in `90fd647` (l'installer chiudeva la
+    # porta 8080 fidandosi di `tailscale funnel status`): stessa forma, altro
+    # file — la cura non si era propagata.
+    # 📌 La forma giusta è SEI RIGHE PIÙ SOTTO, in questo stesso file:
+    # `nlm_client.status()` risponde `None` quando non sa, «invece di mentire».
+    # 🖐️ Il dato vero esiste e non è collegato: `funnel_ok` (tools/vps1777.py)
+    # esce su Internet e rientra, gira ogni giorno dentro `vps1777 check` e
+    # finisce in `var/state.json`. Portarlo fin qui vuole un canale come
+    # `update_status.json`/`secrets_status.json` — è il passo successivo,
+    # dichiarato e NON fatto qui: meglio un giallo onesto di un verde dedotto.
     if pb and ".ts.net" in pb:
-        out["tailscale"] = ("ok", "Funnel attivo")
+        out["tailscale"] = ("warn", "URL Funnel configurato — non verificato da qui")
     else:
         out["tailscale"] = ("off", "non configurato")
 
@@ -69,7 +90,13 @@ async def _status() -> dict[str, tuple[str, str]]:
         out["nlm"] = ("off", "profilo nlm non caricato")
 
     # Bot Telegram
-    if s.effective_bot_token:
+    # H54: il pannello dice COSA c'è, non «token sì/no». Un'installazione migrata
+    # alla chiave derivata è configurata — meglio di prima — e un pannello che le
+    # dicesse «token non impostato» manderebbe a rimontare proprio il segreto che
+    # si è appena tolto.
+    if s.effective_webapp_secret:
+        out["bot"] = ("ok", "chiave Mini App derivata (il token intero non è montato)")
+    elif s.effective_bot_token:
         out["bot"] = ("ok", "token presente")
     else:
         out["bot"] = ("off", "token non impostato")
@@ -84,6 +111,51 @@ def _pending_path() -> Path:
     return d / "pending.json"
 
 
+# pending.json contiene authkey Tailscale + bot token IN CHIARO finché non parte
+# `deploy.sh --apply` (che lo consuma e lo cancella). Se l'apply non arriva mai,
+# quei segreti resterebbero a marcire su disco → TTL: dopo PENDING_TTL il file è
+# considerato scaduto e cancellato alla prima lettura (auto-wipe) — H36.
+PENDING_TTL = timedelta(hours=24)
+
+
+def _pending_is_stale(submitted_at: str | None, now: datetime) -> bool:
+    """True se il pending è più vecchio di PENDING_TTL. Logica pura (testabile).
+
+    Fail-closed: senza timestamp, o con un timestamp non parsabile, lo si tratta
+    come scaduto (meglio ri-chiedere i dati che tenere segreti di età ignota)."""
+    if not submitted_at:
+        return True
+    try:
+        ts = datetime.fromisoformat(submitted_at)
+    except ValueError:
+        return True
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return now - ts > PENDING_TTL
+
+
+def _read_pending() -> dict:
+    """Legge pending.json applicando il TTL. Se assente/illeggibile → {}. Se
+    scaduto → lo cancella (auto-wipe dei segreti in chiaro) e ritorna {}."""
+    pp = _pending_path()
+    try:
+        data = json.loads(pp.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict) or _pending_is_stale(
+        data.get("submitted_at"), datetime.now(timezone.utc)
+    ):
+        try:
+            pp.unlink()
+        except OSError:
+            pass
+        audit({"event": "onboarding_pending_expired"})
+        return {}
+    return data
+
+
 async def setup_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
@@ -93,13 +165,10 @@ async def setup_view(request: Request) -> Response:
         form = await request.form()
         pending: dict[str, str] = {}
         # Solo i campi compilati finiscono nel pending (merge non distruttivo).
-        existing = {}
+        # _read_pending applica il TTL: se il precedente è scaduto si riparte da
+        # zero (niente merge su segreti vecchi) invece di prolungarne la vita.
+        existing = _read_pending()
         pp = _pending_path()
-        if pp.exists():
-            try:
-                existing = json.loads(pp.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                existing = {}
         for key in ("tailscale_authkey", "telegram_bot_token", "telegram_owner_id", "public_base"):
             val = str(form.get(key, "")).strip()
             if val:
@@ -130,8 +199,9 @@ async def setup_view(request: Request) -> Response:
     def dot(state: str) -> str:
         return f'<span class="dot {state}"></span>'
 
-    pp = _pending_path()
-    has_pending = pp.exists()
+    # _read_pending applica il TTL: un pending scaduto viene cancellato qui (al
+    # semplice caricamento della pagina) e non risulta più "in attesa".
+    has_pending = bool(_read_pending())
 
     body = f"""
 <header>

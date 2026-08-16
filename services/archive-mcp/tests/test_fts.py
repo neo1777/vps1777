@@ -154,6 +154,82 @@ def test_count_syntax_error():
         fts.count_conn(conn, "nonesistecol:foo", raw=True)
 
 
+# ── canary termini collassati (la causa dell'11/07) ──────────────────────────
+
+_SCHEMA_TOK = """
+CREATE TABLE messages(uuid TEXT PRIMARY KEY, project, ts, content);
+CREATE VIRTUAL TABLE messages_fts USING fts5(
+    uuid, project, ts, content, content='messages', content_rowid='rowid',
+    tokenize="unicode61 tokenchars '+#'");
+"""
+
+# righe scelte apposta per il collasso: `C++`/`C#`/`g++` reali + tante `C` isolate
+# (coordinate, gradi, copyright) su cui il termine collassa se `+ #` sono separatori
+_ROWS_CPP = [
+    ("c1", "p", "2026-01-01T10:00:00Z", "adoro programmare in C++ ogni giorno"),
+    ("c2", "p", "2026-01-02T10:00:00Z", "il backend è scritto in C#"),
+    ("c3", "p", "2026-01-03T10:00:00Z", "coordinate del path 219.54 C 106.20"),
+    ("c4", "p", "2026-01-04T10:00:00Z", "16 gradi C sotto quando non ci sei"),
+    ("c5", "p", "2026-01-05T10:00:00Z", "compilo con g++ e ottimizzo"),
+]
+
+
+def _db_tok(rows):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_SCHEMA_TOK)
+    conn.executemany(
+        "INSERT INTO messages(uuid, project, ts, content) VALUES (?,?,?,?)", rows)
+    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+    conn.commit()
+    return conn
+
+
+def test_collapse_candidates_statica():
+    # trovati: il suffisso + # sparisce → un solo token più corto
+    assert fts.collapse_candidates("C++") == [("C++", "C")]
+    assert fts.collapse_candidates("C#") == [("C#", "C")]
+    assert fts.collapse_candidates("g++") == [("g++", "g")]
+    assert fts.collapse_candidates(".NET") == [(".NET", "NET")]
+    # NON candidati: due token veri (frase, la regge il quoting), prefisso, parole
+    assert fts.collapse_candidates("node.js") == []       # separatore IN MEZZO
+    assert fts.collapse_candidates("flutter-elinux") == []
+    assert fts.collapse_candidates("palant*") == []        # prefisso FTS voluto
+    assert fts.collapse_candidates("A*") == []
+    assert fts.collapse_candidates("flutter") == []
+    # query strutturata: non ci mette becco
+    assert fts.collapse_candidates("NEAR(a b, 3)") == []
+
+
+def test_collapse_warning_su_db_default():
+    # DB come i vivi (senza tokenchars): C++ collassa su C → deve AVVISARE
+    conn = _db(_ROWS_CPP)
+    # prova il difetto nudo: per l'indice default C++ == C == C#
+    assert fts.count_conn(conn, "C++") == fts.count_conn(conn, "C")
+    warns = fts.collapse_warnings_conn(conn, "C++")
+    assert len(warns) == 1
+    assert 'collassato su "C"' in warns[0]
+
+
+def test_collapse_no_warning_con_tokenchars():
+    # DB ricostruito col fix: C++ è un token vero → NIENTE avviso (auto-taratura)
+    conn = _db_tok(_ROWS_CPP)
+    assert fts.count_conn(conn, "C++") < fts.count_conn(conn, "C")  # distinti
+    assert fts.collapse_warnings_conn(conn, "C++") == []
+    assert fts.collapse_warnings_conn(conn, "C#") == []
+
+
+def test_tokenchars_separa_i_termini():
+    # il cuore del fix all'INDICE: senza, C++/C#/C sono lo stesso token
+    default = _db(_ROWS_CPP)
+    assert fts.count_conn(default, "C++") == fts.count_conn(default, "C#")  # collassati
+    # con tokenchars, ognuno ha la sua identità
+    tok = _db_tok(_ROWS_CPP)
+    assert fts.count_conn(tok, "C++") == 1     # solo c1
+    assert fts.count_conn(tok, "C#") == 1      # solo c2
+    assert fts.count_conn(tok, "g++") == 1     # solo c5
+
+
 # ── context ─────────────────────────────────────────────────────────────────
 
 def test_context_intorno():
@@ -191,4 +267,194 @@ def test_db_stats():
 def test_db_stats_vuoto():
     conn = _db([])
     st = fts.db_stats_conn(conn)
-    assert st == {"rows": 0, "oldest": "", "newest": "", "labels": 0}
+    # `voci` (distribuzione per `voice`) è entrata con la Fase 3 del voice-tagging.
+    # Su un DB senza le colonne v3 la domanda non ha risposta e la scheda torna `{}`
+    # — non uno zero: «non ho potuto guardare» non è «non c'è niente».
+    assert st == {"rows": 0, "oldest": "", "newest": "", "labels": 0, "voci": {}}
+
+
+# ── thread walk: get_conversation + context via parent_uuid (P2) ────────────
+
+_SCHEMA_FULL = """
+CREATE TABLE messages(uuid TEXT PRIMARY KEY, project, ts, content,
+    sender DEFAULT '', tools DEFAULT '', thinking DEFAULT '',
+    attachments DEFAULT '', parent_uuid DEFAULT '');
+CREATE VIRTUAL TABLE messages_fts USING fts5(
+    uuid, project, ts, content, tools, attachments,
+    content='messages', content_rowid='rowid');
+CREATE INDEX idx_parent ON messages(parent_uuid);
+"""
+
+
+def _db_full(rows):
+    """rows: (uuid, project, ts, content, sender, parent_uuid)."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_SCHEMA_FULL)
+    conn.executemany(
+        "INSERT INTO messages(uuid, project, ts, content, sender, parent_uuid) "
+        "VALUES (?,?,?,?,?,?)", rows)
+    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+    conn.commit()
+    return conn
+
+
+def test_conversation_walks_parent_uuid():
+    conn = _db_full([
+        ("m1", "P", "2026-01-01T00:00:00Z", "primo", "human", ""),
+        ("m2", "P", "2026-01-01T00:00:01Z", "secondo", "assistant", "m1"),
+        ("m3", "P", "2026-01-01T00:00:02Z", "terzo", "human", "m2"),
+        ("x9", "P", "2026-01-01T00:00:03Z", "altra chat", "human", ""),  # non connesso
+    ])
+    conv = fts.conversation_conn(conn, "m2")
+    assert [r["uuid"] for r in conv] == ["m1", "m2", "m3"]  # il thread, non x9
+    assert next(r for r in conv if r["uuid"] == "m2")["is_match"] is True
+
+
+def test_conversation_fallback_linear_senza_arco():
+    conn = _db_full([
+        ("d1", "doc", "2026-05-01T00:00:00Z", "chunk uno", "", ""),
+        ("d2", "doc", "2026-05-01T00:00:01Z", "chunk due", "", ""),
+    ])
+    conv = fts.conversation_conn(conn, "d1")
+    assert [r["uuid"] for r in conv] == ["d1", "d2"]  # ordine lineare dello stesso project
+
+
+def test_context_usa_il_thread_non_solo_ts():
+    # due conversazioni INTERLACCIATE nello stesso project: l'adiacenza per ts
+    # le mischerebbe; il thread parent_uuid no.
+    conn = _db_full([
+        ("a1", "P", "2026-01-01T00:00:01Z", "A uno", "", ""),
+        ("b1", "P", "2026-01-01T00:00:02Z", "B uno", "", ""),
+        ("a2", "P", "2026-01-01T00:00:03Z", "A due", "", "a1"),
+        ("b2", "P", "2026-01-01T00:00:04Z", "B due", "", "b1"),
+        ("a3", "P", "2026-01-01T00:00:05Z", "A tre", "", "a2"),
+    ])
+    ctx = fts.context_conn(conn, "a2", before=1, after=1)
+    assert [r["uuid"] for r in ctx] == ["a1", "a2", "a3"]  # thread A, non [b1,a2,b2]
+
+
+def test_list_projects():
+    conn = _db(_ROWS)
+    ps = fts.projects_conn(conn)
+    assert {p["project"]: p["rows"] for p in ps} == {"chatA": 2, "chatB": 2}
+
+
+def test_stats_by_period():
+    conn = _db(_ROWS)
+    st = fts.stats_by_period_conn(conn)
+    assert st == [{"period": "2026", "rows": 4}]
+
+
+def test_meta_value():
+    """La scheda `meta` (D5): default se la tabella manca (DB pre-feature),
+    il valore quando c'è."""
+    conn = _db(_ROWS)  # schema minimale, senza tabella meta
+    assert fts.meta_value_conn(conn, "description") == ""
+    conn.execute("CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute("INSERT INTO meta VALUES ('description', 'archivio di prova')")
+    assert fts.meta_value_conn(conn, "description") == "archivio di prova"
+
+
+# ═══════════ voice-tagging Fase 3 — i filtri sull'asse-voce, via JOIN ═════════
+# 🔑 Le colonne `speaker`/`voice` NON sono nell'FTS (scelta della Fase 1). Questi
+# test provano che i filtri funzionino comunque, per JOIN su `rowid` — cioè che
+# il DROP+rebuild dell'indice, che la Fase 1 dava per necessario alla Fase 3, non
+# serva. Se qualcuno "ottimizzasse" togliendo la JOIN, cadono.
+
+def _db_v3(rows):
+    """rows: (uuid, project, ts, content, speaker, voice, quoted_share)."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_SCHEMA)
+    for c in ("speaker TEXT DEFAULT ''", "voice TEXT DEFAULT ''",
+              "quoted_share REAL DEFAULT 0"):
+        conn.execute(f"ALTER TABLE messages ADD COLUMN {c}")
+    conn.executemany(
+        "INSERT INTO messages(uuid, project, ts, content, speaker, voice, quoted_share) "
+        "VALUES (?,?,?,?,?,?,?)", rows)
+    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+    conn.commit()
+    return conn
+
+
+_ROWS_V3 = [
+    ("v1", "p", "2026-01-01T10:00:00Z", "memoria e archivio", "human", "own", 0.0),
+    ("v2", "p", "2026-01-02T10:00:00Z", "memoria del gateway", "assistant", "own", 0.0),
+    ("v3", "p", "2026-01-03T10:00:00Z", "memoria incollata", "human", "pasted_ai", 0.8),
+    ("v4", "p", "2026-01-04T10:00:00Z", "memoria mai guardata", "human", "", 0.0),
+]
+
+
+def test_filtro_speaker_e_voice_senza_toccare_l_indice():
+    conn = _db_v3(_ROWS_V3)
+    tutte = fts.count_conn(conn, "memoria")
+    assert tutte == 4, "la query base deve trovarle tutte, o il resto non prova nulla"
+    assert fts.count_conn(conn, "memoria", speaker="human") == 3
+    assert fts.count_conn(conn, "memoria", speaker="assistant") == 1
+    assert fts.count_conn(conn, "memoria", voice="own") == 2
+    assert fts.count_conn(conn, "memoria", voice="pasted_ai") == 1
+
+
+def test_own_da_solo_NON_e_le_parole_di_una_persona():
+    """Il filtro conferma il rilievo invece di nasconderlo.
+
+    ⚠️ `voice='own'` prende anche l'assistente — «chi scriveva parlava di suo».
+    Misurato sul DB reale (02/08): `own` contiene 10.629 messaggi dell'assistente,
+    l'80% del totale. Per le parole di una PERSONA servono due filtri insieme.
+    """
+    conn = _db_v3(_ROWS_V3)
+    assert fts.count_conn(conn, "memoria", voice="own") == 2, "own da solo: 2, non 1"
+    assert fts.count_conn(conn, "memoria", speaker="human", voice="own") == 1, (
+        "speaker+voice insieme isolano la persona: è la coppia che va documentata")
+
+
+def test_none_e_unknown_non_sono_la_stessa_domanda():
+    """`voice='none'` = mai classificata. NON è `unknown`, che è un giudizio.
+
+    🖐️ Condizione di `71d540e6`: chi cerca `unknown` deve avere «le righe guardate
+    e non riconosciute», non «le righe mai lette».
+    """
+    conn = _db_v3(_ROWS_V3)
+    assert fts.count_conn(conn, "memoria", voice="none") == 1, "la riga con voice=''"
+    assert fts.count_conn(conn, "memoria", voice="unknown") == 0, (
+        "nessuna riga è 'unknown' qui: se ne trovasse, starebbe restituendo le "
+        "non-classificate sotto il nome di un giudizio")
+
+
+def test_alias_direct_e_quoted():
+    conn = _db_v3(_ROWS_V3)
+    assert fts.count_conn(conn, "memoria", voice="direct") == 2, "own con poca citazione"
+    assert fts.count_conn(conn, "memoria", voice="quoted") == 1, "quoted_share >= 0.5"
+
+
+def test_search_filtrata_ordina_per_data_senza_ambiguita():
+    """`ORDER BY ts` con la JOIN è ambiguo (entrambe le tabelle hanno `ts`).
+
+    Senza la qualifica `f.` SQLite alza «ambiguous column name» — cioè il filtro
+    e l'ordinamento funzionano ognuno per conto suo e si rompono INSIEME. È il
+    caso che un test per-parametro non prende.
+    """
+    conn = _db_v3(_ROWS_V3)
+    got = fts.search_conn(conn, "memoria", speaker="human", sort="newest")
+    assert [r["uuid"] for r in got] == ["v4", "v3", "v1"]
+
+
+def test_i_filtri_di_count_e_search_sono_gli_stessi():
+    """Se accettassero filtri diversi, il conteggio e la lista che dovrebbe
+    spiegarlo parlerebbero di due popolazioni — il difetto che ci ha già morso."""
+    import inspect
+    p_search = set(inspect.signature(fts.search_conn).parameters)
+    p_count = set(inspect.signature(fts.count_conn).parameters)
+    assert {"speaker", "voice"} <= p_search & p_count
+    assert (p_search - p_count) == {"limit", "sort", "snippet_tokens"}, (
+        f"search e count sono divergenti oltre l'atteso: {p_search ^ p_count}")
+
+
+def test_distribuzione_voce_distingue_il_non_classificato():
+    conn = _db_v3(_ROWS_V3)
+    d = fts.distribuzione_voce_conn(conn)
+    assert d["own"] == 2 and d["pasted_ai"] == 1
+    assert d["(non classificate)"] == 1, (
+        "il vuoto ha un'etichetta SUA: un DB mai classificato non deve leggersi "
+        "come un DB pieno di righe difficili")

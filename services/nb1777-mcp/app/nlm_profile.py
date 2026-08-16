@@ -1,9 +1,14 @@
 """
 Il profilo NotebookLM (i cookie di sessione Google) — chi lo possiede lo scrive.
 
-nb1777-mcp è l'UNICO servizio che monta il volume `nlm-auth`: il gateway (che è
-l'unico esposto su Internet) e il bot non ci arrivano più, né in lettura né in
-scrittura (finding H6). Loro chiedono qui, via endpoint interno.
+Fra i servizi in esercizio, nb1777-mcp è l'unico che monta il volume `nlm-auth`:
+il gateway (che è l'unico esposto su Internet) e il bot non ci arrivano più, né in
+lettura né in scrittura (finding H6). Loro chiedono qui, via endpoint interno.
+Lo montano in sola lettura anche due lavori a tempo, che non sono servizi: il
+backup (lo cifra con la chiave pubblica `age`) e il check settimanale delle
+scadenze (`busybox --network none`, legge solo l'mtime dei cookie). Vedi
+SECURITY.md — e `tools/tests/test_nlm_auth_montaggi.py`, che tiene insieme
+questa frase e i montaggi veri.
 
 Formato: la CLI `nlm` 0.7.x salva l'auth come cartella `profiles/default/`
 (`cookies.json` + `metadata.json`), non come un singolo `auth.json`. Si carica un
@@ -21,6 +26,13 @@ from pathlib import Path
 # Il file che rende il profilo "valido": senza questo, non c'è auth.
 COOKIES_REL = Path("profiles") / "default" / "cookies.json"
 PENDING_FLAG = "AUTH_PENDING.flag"
+
+# Tetti sul DECOMPRESSO. Il gateway limita il tar a 5 MB, ma è il *compresso*:
+# un tar.gz di 5 MB può espandersi in gigabyte (tar-bomb) e riempire il volume.
+# Un profilo nlm vero è qualche decina di KB — questi tetti sono larghissimi.
+MAX_MEMBER_BYTES = 16 * 1024 * 1024   # 16 MB per singolo file
+MAX_TOTAL_BYTES = 64 * 1024 * 1024    # 64 MB in tutto
+_CHUNK = 64 * 1024
 
 
 def profile_status(auth_dir: Path) -> dict:
@@ -42,9 +54,13 @@ def _extract_into(content: bytes, dest: Path) -> int:
     - solo file regolari → niente symlink/hardlink/device (no symlink attack);
     - niente path assoluti né `..` → niente traversal fuori da `dest`;
     - si ignora tutto ciò che non sta sotto `profiles/`;
+    - **tetti sul DECOMPRESSO** (per-file e cumulativo) → una tar-bomb non
+      riempie il disco: il cap a monte è sul tar *compresso* (5 MB), che non dice
+      nulla su quanto quel tar si espande. Si legge a blocchi e si conta;
     - permessi 600 sui file scritti.
     """
     n = 0
+    total = 0
     with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as tar:
         for m in tar.getmembers():
             if not m.isfile():
@@ -55,12 +71,32 @@ def _extract_into(content: bytes, dest: Path) -> int:
                 raise ValueError(f"percorso non sicuro nel tar: {m.name}")
             if not parts or parts[0] != "profiles":
                 continue
+            # la dimensione DICHIARATA nell'header non è fidata: serve a fermare
+            # subito i casi grossolani, ma poi si conta ciò che si legge davvero.
+            if m.size > MAX_MEMBER_BYTES:
+                raise ValueError(
+                    f"file troppo grande nel profilo: {name} "
+                    f"({m.size} byte, max {MAX_MEMBER_BYTES})"
+                )
             f = tar.extractfile(m)
             if f is None:
                 continue
             out = dest / name
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_bytes(f.read())
+            written = 0
+            with open(out, "wb") as fh:
+                while True:
+                    chunk = f.read(_CHUNK)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    total += len(chunk)
+                    if written > MAX_MEMBER_BYTES or total > MAX_TOTAL_BYTES:
+                        raise ValueError(
+                            "profilo troppo grande una volta decompresso "
+                            f"(tetto: {MAX_TOTAL_BYTES} byte) — tar sospetto"
+                        )
+                    fh.write(chunk)
             out.chmod(0o600)
             n += 1
     return n

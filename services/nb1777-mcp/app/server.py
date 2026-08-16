@@ -27,9 +27,9 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse, Response
 
-from . import core, nlm_profile
+from . import canonical, core, memoria, nlm_profile
 from .settings import get_settings
 
 
@@ -45,6 +45,10 @@ mcp = FastMCP(
     host=HOST,
     port=PORT,
     stateless_http=True,
+    # Canale involontario del canonico (issue #30, Veicolo A): le instructions
+    # viaggiano nella risposta di initialize. Testo STATICO → non dipende
+    # dall'auth nlm al boot; il numero di versione vivo lo dà il tool `canonico`.
+    instructions=canonical.declaration_text(),
     transport_security=TransportSecuritySettings(
         # DNS-rebinding protection OFF: il server sta dietro il gateway su rete
         # Docker interna (non esposto ai browser). Il gateway inoltra
@@ -87,10 +91,11 @@ async def _aio(fn, *args, **kwargs):
 # ============================================================
 # ENDPOINT INTERNI — il profilo NotebookLM (H6)
 # ============================================================
-# nb1777-mcp è l'UNICO servizio che monta il volume dei cookie Google. Il
-# gateway (l'unico esposto su Internet) e il bot non lo montano più: chiedono
-# qui. Così un gateway compromesso non può né leggere né riscrivere la
-# sessione Google.
+# Fra i servizi in esercizio, nb1777-mcp è l'unico che monta il volume dei cookie
+# Google — ed è l'unico che ci scrive. Il gateway (l'unico esposto su Internet) e
+# il bot non lo montano più: chiedono qui. Così un gateway compromesso non può né
+# leggere né riscrivere la sessione Google. (Lo montano in sola lettura anche il
+# backup, che li cifra, e il check settimanale delle scadenze: SECURITY.md.)
 #
 # Questi endpoint NON sono raggiungibili dall'esterno: il proxy del gateway
 # rifiuta i sotto-path `internal/` (vedi gateway/app/proxy.py) e la rete
@@ -112,6 +117,39 @@ async def internal_nlm_status(request: "Request") -> "JSONResponse":
     if not _internal_ok(request):
         return JSONResponse({"error": "forbidden"}, status_code=403)
     return JSONResponse(nlm_profile.profile_status(Path(get_settings().nlm_home)))
+
+
+@mcp.custom_route("/internal/nlm/artifacts", methods=["GET"])
+async def internal_nlm_artifacts(request: "Request") -> "JSONResponse":
+    """Elenco degli artefatti scaricati: [{name, bytes, mtime}]. Nessun contenuto."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    return JSONResponse({"artifacts": await asyncio.to_thread(core.artifact_list)})
+
+
+@mcp.custom_route("/internal/nlm/artifact", methods=["GET"])
+async def internal_nlm_artifact(request: "Request") -> "Response":
+    """Serve UN artefatto (`?name=`). È la via che porta il file fuori dal container.
+
+    Sta qui e non nel gateway per la stessa ragione di /internal/nlm/profile (H6): il
+    volume lo monta solo questo servizio. Il gateway INOLTRA — non monta niente, e
+    resta senza accesso al filesystem che contiene i cookie.
+
+    `core.artifact_path` risolve il nome DENTRO la directory artefatti e alza se esce:
+    l'unico input che arriva da fuori è quel nome.
+    """
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    name = request.query_params.get("name", "")
+    if not name:
+        return JSONResponse({"error": "missing_name"}, status_code=400)
+    try:
+        p = await asyncio.to_thread(core.artifact_path, name)
+    except core.NLMError as exc:
+        # 404 e non 400: dall'esterno «nome non ammesso» e «non c'è» non devono
+        # distinguersi, o l'errore diventa un oracolo su cosa esiste nel container.
+        return JSONResponse({"error": "not_found", "reason": str(exc)}, status_code=404)
+    return FileResponse(p, filename=p.name, media_type="application/octet-stream")
 
 
 @mcp.custom_route("/internal/nlm/profile", methods=["POST"])
@@ -374,15 +412,20 @@ async def studio_create_all_9(notebook_id: str,
 # ============================================================
 
 @mcp.tool()
-async def studio_list(notebook_id: str) -> list[dict]:
-    """Lista tutti gli artefatti studio di un notebook con stato."""
-    return await _aio(core.studio_list, notebook_id)
+async def studio_list(notebook_id: str, verbose: bool = False) -> list[dict]:
+    """Lista gli artefatti studio di un notebook.
+
+    Default COMPATTO: per ognuno solo id/type/status/label (i primi 80 char del
+    focus). verbose=True restituisce il JSON pieno col focus intero (4-6 KB per
+    artefatto) — usalo solo se ti serve davvero il dettaglio."""
+    return await _aio(core.studio_list, notebook_id, verbose=verbose)
 
 
 @mcp.tool()
-async def studio_status(notebook_id: str, artifact_id: str) -> dict:
-    """Stato di un singolo artefatto."""
-    return await _aio(core.studio_status, notebook_id, artifact_id)
+async def studio_status(notebook_id: str, artifact_id: str, verbose: bool = False) -> dict:
+    """Stato di un singolo artefatto (id/type/status/label). verbose=True per
+    l'artefatto pieno col focus."""
+    return await _aio(core.studio_status, notebook_id, artifact_id, verbose=verbose)
 
 
 @mcp.tool()
@@ -412,12 +455,26 @@ async def studio_rename(notebook_id: str, artifact_id: str, new_title: str) -> s
 
 @mcp.tool()
 async def studio_download(kind: str, notebook_id: str, output_path: str,
-                          artifact_id: Optional[str] = None) -> str:
+                          artifact_id: Optional[str] = None) -> dict:
     """Scarica un artefatto. kind: audio|video|slides|mindmap|infographic|data_table|report|quiz|flashcards.
-    Ritorna il path effettivo del file scritto."""
+
+    `output_path` vale come NOME del file, non come destinazione: il file nasce sul
+    filesystem del SERVER, nella directory degli artefatti. Ritorna dove prenderlo
+    (`download_url`, dal pannello admin del gateway), non un path da aprire in locale.
+    """
     p = await _aio(core.studio_download, kind, notebook_id, output_path,
                    artifact_id=artifact_id)
-    return str(p)
+    # Prima qui c'era `return str(p)`: un percorso che sul disco di chi chiama NON
+    # ESISTE, restituito come se fosse un risultato utilizzabile. Chi lo riceveva
+    # provava ad aprirlo e trovava il nulla — il valore era vero sul server e falso
+    # per il lettore. Ora il ritorno dice DOVE prenderlo davvero.
+    return {
+        "name": p.name,
+        "bytes": p.stat().st_size,
+        "download_url": f"/admin/nlm/artifact/{p.name}",
+        "nota": "Il file è sul server. Scaricalo dal pannello: /admin/nlm (sezione "
+                "artefatti). Il path del container non è raggiungibile da qui.",
+    }
 
 
 # ============================================================
@@ -444,8 +501,67 @@ async def studio_export_to_sheets(notebook_id: str, artifact_id: str,
 
 @mcp.tool()
 async def doctor() -> dict:
-    """Diagnostica: nlm reachable + count notebook."""
-    return await _aio(core.doctor)
+    """Diagnostica: nlm reachable + count notebook + canonico del blocco memoria."""
+    d = await _aio(core.doctor)
+    # Canonico anche qui: doctor è la chiamata tipica d'avvio sessione, così il
+    # canonico atterra senza un tool dedicato. Fail-open (get_canonical non alza).
+    d["canonico"] = canonical.public_view(await asyncio.to_thread(canonical.get_canonical))
+    return d
+
+
+@mcp.tool()
+async def canonico() -> dict:
+    """MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la
+    versione «buona» con cui una sessione dovrebbe allinearsi, letta dal notebook
+    claudemd1777. Chiamalo all'avvio se la versione in testa al blocco che porti
+    potrebbe essere vecchia, e confrontala: se sei più vecchio sei disallineato.
+    Fail-open: se il notebook non è raggiungibile ritorna `available: false` e la
+    via di fallback (notebook_query)."""
+    # NON via _aio: get_canonical è fail-open per contratto (deve poter dire
+    # "available: false" invece di sollevare se l'auth/notebook manca).
+    return canonical.public_view(await asyncio.to_thread(canonical.get_canonical))
+
+
+@mcp.tool()
+async def memoria_check(versione_portata: str) -> dict:
+    """MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che
+    porti (es. 'v2.2') col canonico attuale. Ritorna `{canonico, data, stale,
+    delta}`. Effetto collaterale che è IL PUNTO: se sei vecchio (`stale:true`),
+    manda a Neo UN ping Telegram (max 1 per versione al giorno) — così anche se la
+    sessione ignora il verdetto, Neo lo sa. Chiamalo all'avvio se la versione in
+    testa al tuo blocco potrebbe essere superata."""
+    verdict = await asyncio.to_thread(memoria.compare, versione_portata)
+    if verdict.get("stale") and verdict.get("canonico"):
+        await asyncio.to_thread(memoria.note_drift, versione_portata, verdict["canonico"])
+    return verdict
+
+
+@mcp.custom_route("/internal/notifications", methods=["GET"])
+async def internal_notifications(request: "Request") -> "JSONResponse":
+    """Il bot preleva qui le notifiche da mandare a Neo (drift + promemoria cloud).
+    Interno (secret condiviso): non è un tool pubblico, così una sessione non può
+    svuotare la coda al posto del bot."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    items = await asyncio.to_thread(memoria.drain)
+    return JSONResponse({"items": items})
+
+
+@mcp.custom_route("/internal/canonico/ack", methods=["POST"])
+async def internal_canonico_ack(request: "Request") -> "JSONResponse":
+    """Il bot registra qui l'ack del bottone «✓ Fatto»: superfici cloud aggiornate
+    a `version`. Spegne il promemoria fino al prossimo bump del canonico."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        body = await request.json()
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "bad_json"}, status_code=400)
+    version = str((body or {}).get("version") or "").strip()
+    if not version:
+        return JSONResponse({"error": "missing_version"}, status_code=400)
+    acked = await asyncio.to_thread(memoria.set_ack, version)
+    return JSONResponse({"ok": True, "acked": acked})
 
 
 # ============================================================

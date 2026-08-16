@@ -40,8 +40,23 @@ TS_API = "https://api.tailscale.com/api/v2"
 GITHUB_REPO = "neo1777/vps1777"
 
 
+class ReleaseNonInterrogabile(RuntimeError):
+    """GitHub non ha risposto: NON sappiamo se una release ci sia o no.
+
+    Diverso da «GitHub ha risposto e non ce n'è nessuna», che è `''`. La
+    differenza conta perché il ramo «nessuna» fa scivolare l'installazione sulla
+    build locale, che non passa dalla verifica della firma.
+    """
+
+
 def latest_release_version(prerelease: bool = False) -> str:
-    """Ultima release pubblicata (dal PC dell'installer). '' se nessuna.
+    """Ultima release pubblicata (dal PC dell'installer).
+
+    Ritorna '' SOLO quando GitHub ha risposto e non c'è nessuna release.
+    Se la domanda non ha avuto risposta (rete, DNS, proxy, rate-limit 403 a 60
+    req/h per IP non autenticato, 5xx, JSON inatteso) solleva
+    `ReleaseNonInterrogabile`: prima anche quel caso tornava '', e il docstring
+    stesso — «'' se nessuna» — dichiarava la conflazione senza vederla.
 
     L'installer produzione installa SEMPRE una release taggata (modello pull,
     mai build sulla VPS 4GB). prerelease=True serve solo ai test rc.
@@ -50,13 +65,14 @@ def latest_release_version(prerelease: bool = False) -> str:
         if prerelease:
             url = f"https://api.github.com/repos/{GITHUB_REPO}/releases?per_page=1"
             obj, _ = _http_json(url, headers={"User-Agent": "vps1777-installer"})
-            return obj[0]["tag_name"].lstrip("v") if obj else ""
+            return str(obj[0]["tag_name"]).lstrip("v") if obj else ""
         url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
         obj, _ = _http_json(url, headers={"User-Agent": "vps1777-installer"})
         return str(obj.get("tag_name", "")).lstrip("v")
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, KeyError,
-            json.JSONDecodeError):
-        return ""
+            IndexError, TypeError, json.JSONDecodeError) as exc:
+        raise ReleaseNonInterrogabile(
+            f"{type(exc).__name__}: {exc}") from exc
 
 
 # ── Provisioning Tailscale via OAuth client (gira sul PC, non sulla VPS) ────
@@ -312,14 +328,42 @@ if ! id {OPERATOR_USER} >/dev/null 2>&1; then
 fi
 usermod -aG docker {OPERATOR_USER}
 getent group sudo >/dev/null && usermod -aG sudo {OPERATOR_USER} || true
-echo "{OPERATOR_USER} ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/90-{OPERATOR_USER}
-chmod 0440 /etc/sudoers.d/90-{OPERATOR_USER}
+# H12 — sudoers WHITELIST invece di NOPASSWD:ALL. Via sudo l'operator esegue SOLO
+# i binari che la CLI vps1777 e gli script di install/update usano: install (CLI,
+# unit, cosign), systemctl (daemon-reload, enable), chown (ownership runtime).
+# Censiti alla fonte: ogni sudo([...]) in tools/vps1777.py usa uno di questi tre.
+# L'operator resta ROOT-EQUIVALENTE via gruppo docker (vedi SECURITY.md): questa
+# è riduzione della superficie sudo, non de-privilegio completo.
+SUDO_CMDS=""
+for _b in install systemctl chown; do
+  for _d in /usr/bin /bin /usr/sbin /sbin; do
+    if [ -x "$_d/$_b" ]; then
+      if [ -z "$SUDO_CMDS" ]; then SUDO_CMDS="$_d/$_b"; else SUDO_CMDS="$SUDO_CMDS, $_d/$_b"; fi
+    fi
+  done
+done
+if [ -n "$SUDO_CMDS" ]; then
+  _tmp_sudo="$(mktemp)"
+  printf '%s ALL=(root) NOPASSWD: %s\\n' "{OPERATOR_USER}" "$SUDO_CMDS" > "$_tmp_sudo"
+  if visudo -cf "$_tmp_sudo" >/dev/null 2>&1; then
+    install -m 0440 "$_tmp_sudo" /etc/sudoers.d/90-{OPERATOR_USER}
+  else
+    echo "SUDOERS_INVALID"
+  fi
+  rm -f "$_tmp_sudo"
+else
+  echo "SUDOERS_EMPTY"
+fi
 docker compose version >/dev/null 2>&1 && echo "COMPOSE_OK" || echo "COMPOSE_MISSING"
 """
         ok = False
         for line in self._stream(script, "prepare"):
             if "COMPOSE_OK" in line:
                 ok = True
+            elif "SUDOERS_INVALID" in line or "SUDOERS_EMPTY" in line:
+                yield ("! sudoers whitelist NON installata — install/systemctl/chown via sudo "
+                       "falliranno per l'operator (canale update). Controlla /etc/sudoers.d a mano.")
+                continue
             yield line
         if not ok:
             raise DeployError("docker compose v2 non disponibile dopo l'install del plugin")
@@ -413,26 +457,51 @@ rm -f /tmp/vps1777.tar.gz
         public_base = p.get("public_base", "")
         if ingress == "caddy" and p.get("caddy_domain"):
             public_base = f"https://{p['caddy_domain']}"
+        # H16 — la password admin NASCE SUL PC (qui, in Python), non più sulla VPS:
+        # così il chiaro non torna indietro sullo stdout SSH (era il leak di H16).
+        # Viaggia solo in AVANTI, base64, dentro lo STDIN del `bash -s` (mai argv →
+        # chiude anche l'H7 del vecchio `python3 -c "…" "$PW"`). Se questo PC ha
+        # bcrypt, l'hash lo calcoliamo QUI e attraversa SSH solo l'hash.
+        import base64 as _b64
+        import secrets as _secrets
+        import string as _string
+        while True:
+            admin_pw = "".join(_secrets.choice(_string.ascii_letters + _string.digits) for _ in range(24))
+            _classes = sum(bool(set(admin_pw) & set(g)) for g in
+                           (_string.ascii_lowercase, _string.ascii_uppercase, _string.digits))
+            if _classes >= 3:  # policy unica: ≥16 char (qui 24) e ≥3 classi
+                break
+        self.result["ADMIN_PWD"] = admin_pw
+        admin_bcrypt = ""
+        try:
+            import bcrypt as _bcrypt
+            admin_bcrypt = _bcrypt.hashpw(admin_pw.encode(), _bcrypt.gensalt(12)).decode()
+        except Exception:  # noqa: BLE001 — bcrypt non c'è sul PC → hash sulla VPS
+            admin_bcrypt = ""
+        admin_pw_b64 = _b64.b64encode(admin_pw.encode()).decode()
+        admin_bcrypt_b64 = _b64.b64encode(admin_bcrypt.encode()).decode()
         # script remoto eseguito come operator
         gen = f"""
 set -e
 cd {REMOTE_DIR}
 # runtime dir create ORA come operatore: se le creasse Docker (bind mount)
-# sarebbero root-owned e gateway/CLI non potrebbero scriverci
+# sarebbero root-owned e gateway/CLI non potrebbero scriverci.
+# H38 — chmod 700 anche su secrets/, backups/, onboarding/ (prima solo var/).
 mkdir -p secrets onboarding var backups releases
-chmod 700 var
+chmod 700 var secrets backups onboarding
 gen() {{ python3 -c "import secrets;print(secrets.token_urlsafe($1))"; }}
-genpwd() {{ python3 -c "import secrets,string;print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))"; }}
 # gateway_secret e oauth_signing restano stabili (il primo è negli URL connector):
 # non li rigeneriamo se già presenti.
 [ -s secrets/gateway_secret.txt ]       || gen 24 > secrets/gateway_secret.txt
 [ -s secrets/oauth_signing_secret.txt ] || gen 48 > secrets/oauth_signing_secret.txt
 chmod 600 secrets/gateway_secret.txt secrets/oauth_signing_secret.txt
-# La password admin è una credenziale per-installazione: la (ri)generiamo SEMPRE
-# fresca e la mostriamo alla fine. Dopo il reboot di STEP 7 il gateway rilegge
-# il bcrypt aggiornato, quindi la password mostrata è quella valida.
-PW="$(genpwd)"; echo "GENERATED_ADMIN_PWD=$PW"
-python3 -c "import bcrypt,sys;print(bcrypt.hashpw(sys.argv[1].encode(),bcrypt.gensalt(12)).decode())" "$PW" > secrets/admin_password_bcrypt.txt
+# La password admin (bcrypt) arriva dal PC: hash già pronto, o chiaro base64 da
+# hashare qui via STDIN (mai argv). Rigenerata SEMPRE fresca per-installazione.
+if [ -n '{admin_bcrypt_b64}' ]; then
+  printf %s '{admin_bcrypt_b64}' | base64 -d > secrets/admin_password_bcrypt.txt
+else
+  printf %s '{admin_pw_b64}' | base64 -d | python3 -c "import bcrypt,sys;print(bcrypt.hashpw(sys.stdin.buffer.read(),bcrypt.gensalt(12)).decode())" > secrets/admin_password_bcrypt.txt
+fi
 chmod 600 secrets/admin_password_bcrypt.txt
 printf %s {shlex.quote(p.get('telegram_bot_token', ''))} > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt
 {("printf %s " + shlex.quote(p.get('cf_token',''))) + " > secrets/cloudflared_token.txt; chmod 600 secrets/cloudflared_token.txt" if p.get('cf_token') else "true"}
@@ -448,19 +517,36 @@ set_kv CADDY_DOMAIN {shlex.quote(p.get('caddy_domain',''))}
 set_kv CADDY_EMAIL {shlex.quote(p.get('caddy_email',''))}
 set_kv VPS1777_TAG {shlex.quote(p.get('_vps1777_version') or 'dev')}
 set_kv VPS1777_IMAGE_BASE {shlex.quote(p.get('_image_base') or 'ghcr.io/neo1777')}
+# H15/H38 — .env contiene TS_AUTHKEY e altri valori: 600. E via l'orfano.
+# Il permesso si chiede al FILE: `2>/dev/null || true` sopprime l'esito due volte (#66).
+chmod 600 .env 2>/dev/null || true
+if [ "$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
+rm -f secrets/ts_authkey.txt
 echo CONFIG_OK
 """
         for line in self._stream(self._sudo(gen), "config"):
-            if line.startswith("GENERATED_ADMIN_PWD="):
-                self.result["ADMIN_PWD"] = line.split("=", 1)[1].strip()
-                yield "  password admin generata (mostrata alla fine)"
-            elif "CONFIG_OK" in line:
-                pass
+            if "CONFIG_OK" in line:
+                yield "  password admin generata sul PC (mostrata alla fine)"
             else:
                 yield line
         self.result["INGRESS"] = ingress
         self.result["ADMIN_EMAIL"] = p.get("admin_email", "")
         yield "✓ .env + secrets pronti"
+
+    # Feature opzionali DICHIARATE (stato voluto). Default: backup + auto-update
+    # SICURO. Le stesse le legge la CLI (vps1777.py) da VPS1777_FEATURES in .env, così
+    # install/update/rollback riproducono SEMPRE le stesse feature — è il fix del
+    # difetto per cui un reinstall/update lasciava cadere gli opt-in ops.* in silenzio.
+    # `watchtower` = auto-update CRUDO (declassato), escluso dal default e in conflitto.
+    # (suffisso FILE, nome PROFILO): per watchtower differiscono (file ops.watchtower,
+    # profilo ops.autoupdate); per backup/portainer coincidono.
+    _OPS_PROFILES = {"backup": ("ops.backup", "ops.backup"),
+                     "portainer": ("ops.portainer", "ops.portainer"),
+                     "watchtower": ("ops.watchtower", "ops.autoupdate")}
+
+    def _features(self) -> list[str]:
+        raw = self.result.get("FEATURES") or "backup,autoupdate"
+        return [f.strip() for f in raw.split(",") if f.strip() and f.strip() != "none"]
 
     def _compose_cmd(self, ingress: str, onboarding: bool = True,
                      build: bool = False) -> str:
@@ -473,7 +559,13 @@ echo CONFIG_OK
         # l'override onboarding (che pubblicherebbe una 2ª porta in conflitto).
         if onboarding and ingress != "tailscale":
             files += " -f compose.onboarding.yaml"
-        return f"docker compose {files} --profile ingress.{ingress}"
+        profiles = f"--profile ingress.{ingress}"
+        feats = self._features()
+        for feat, (file_sfx, prof) in self._OPS_PROFILES.items():
+            if feat in feats:
+                files += f" -f compose.{file_sfx}.yaml"
+                profiles += f" --profile {prof}"
+        return f"docker compose {files} {profiles}"
 
     def step_pull(self, ingress: str, version: str) -> Iterator[str]:
         """Path produzione: pull delle immagini pubblicate (MAI build sulla VPS)."""
@@ -485,6 +577,15 @@ echo CONFIG_OK
                 "pull"):
             yield line
         yield "✓ Stack avviato (immagini pullate, niente build in produzione)"
+        # Referto feature: l'assenza PARLA. Un OFF non richiesto si VEDE nel log web,
+        # non si scopre dopo mesi (è il difetto Watchtower/backup, chiuso alla radice).
+        feats = self._features()
+        yield ("✓ Feature attive: "
+               + f"backup={'ON' if 'backup' in feats else 'OFF'} · "
+               + f"auto-update sicuro={'ON' if 'autoupdate' in feats else 'OFF'} · "
+               + f"portainer={'ON' if 'portainer' in feats else 'OFF'}"
+               + ("  ⚠ chiave age da configurare per i backup"
+                  if 'backup' in feats else ""))
 
     def step_build(self, ingress: str) -> Iterator[str]:
         """Escape hatch dev (--dev-build) o fallback pre-prima-release."""
@@ -497,16 +598,24 @@ echo CONFIG_OK
         yield "✓ Stack avviato (build locale)"
 
     def step_selfupdate_setup(self) -> Iterator[str]:
-        """Installa il canale update: CLI vps1777 + unit systemd. Idempotente."""
+        """Installa il canale update: CLI vps1777 + unit systemd. Idempotente.
+        Le unit auto-update (vps1777-auto-update.{service,timer}) si installano col
+        glob; il timer si ABILITA solo se `autoupdate` è dichiarato (default sì)."""
         yield "── Installo il canale di aggiornamento (CLI + timer)…"
+        enable_units = ("vps1777-check-update.timer vps1777-update.path "
+                        "vps1777-secrets-check.timer")
+        if "autoupdate" in self._features():
+            enable_units += " vps1777-auto-update.timer"
         script = f"""
 set -e
 install -m 755 {REMOTE_DIR}/tools/vps1777.py /usr/local/bin/vps1777
+# H43 — unit templatizzate (@OPERATOR_USER@/@REPO@): RESE prima di install, o
+# systemd non parsa `User=@OPERATOR_USER@` e il fresh install si rompe.
 for u in {REMOTE_DIR}/systemd/vps1777-*; do
-  case "$u" in *.service|*.timer|*.path) install -m 644 "$u" /etc/systemd/system/;; esac
+  case "$u" in *.service|*.timer|*.path) sed -e "s|@OPERATOR_USER@|{OPERATOR_USER}|g" -e "s|@REPO@|{REMOTE_DIR}|g" "$u" | install -m 644 /dev/stdin /etc/systemd/system/"$(basename "$u")";; esac
 done
 systemctl daemon-reload
-systemctl enable --now vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer
+systemctl enable --now {enable_units}
 echo SELFUPDATE_OK
 """
         okf = False
@@ -531,8 +640,58 @@ echo SELFUPDATE_OK
         ).strip()
 
     def _ts_funnel_ok(self) -> bool:
+        """La configurazione DICHIARATA sulla VPS — non il servizio raggiungibile.
+
+        ⚠️ Da sola non basta e non va usata da sola: vedi `_funnel_confermato_da_qui`.
+        """
         f = self._run_capture("tailscale funnel status 2>/dev/null || true")
         return ":443" in f or "funnel on" in f.lower()
+
+    def _funnel_confermato_da_qui(self, url: str, tentativi: int = 2) -> tuple[bool, str]:
+        """H51 (c) portata nell'installer: la conferma la dà una richiesta che ESCE.
+
+        🔴 IL DIFETTO CHE CHIUDE: `_ts_funnel_ok()` legge `tailscale funnel status`
+        SULLA VPS. È la configurazione dichiarata dalla macchina su sé stessa, e da
+        quella si concludeva «✓ Funnel HTTPS attivo» *e si chiudeva la porta 8080*
+        (`step_finalize` guarda `self.production`). Con la configurazione a posto e
+        il tunnel non funzionante, l'utente restava senza HTTPS **e** senza fallback.
+
+        ⭐ E la sonda che esce esiste già nel repo — `tools/vps1777.py:funnel_ok`,
+        docstring verbatim: «una guardia locale NON vedrebbe un tunnel caduto, un DNS
+        che non risolve o un instradamento pubblico rotto». Qui NON la chiamiamo:
+        quella deve uscire dalla VPS e rientrare perché gira SULLA VPS. **L'installer
+        gira sul PC dell'utente, che è già dalla parte giusta della rete** — la
+        richiesta parte da fuori per costruzione, ed è la stessa che farà lui domani.
+
+        📌 Conta come conferma QUALUNQUE risposta HTTP, 401 e 404 compresi: il gateway
+        ha l'autenticazione e su `/` risponde legittimamente 401. Ciò che si sta
+        provando è che il tunnel porta i byte fin lì — non che l'app dica sì. Contare
+        solo i 200 sarebbe un falso rosso garantito, e un gate che grida al lupo
+        viene spento.
+
+        Due tentativi come `funnel_ok`, e per la stessa ragione: un singolo errore di
+        rete è un evento comune, e qui un falso allarme lascia aperta una porta che
+        andava chiusa.
+        """
+        if not url:
+            return False, "nessun URL pubblico da interrogare"
+        ultimo = ""
+        for n in range(tentativi):
+            if n:
+                time.sleep(3)  # il cert appena emesso può non essere ancora servito
+            try:
+                req = urllib.request.Request(
+                    url, method="GET", headers={"User-Agent": "vps1777-installer"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    return True, f"HTTP {r.status} dal tuo PC"
+            except urllib.error.HTTPError as e:
+                # una risposta c'è: il tunnel porta i byte, ed è tutto ciò che qui serve
+                return True, f"HTTP {e.code} dal tuo PC (il gateway richiede auth: atteso)"
+            except urllib.error.URLError as e:
+                ultimo = str(getattr(e, "reason", e))[:120]
+            except Exception as e:  # noqa: BLE001 — timeout, TLS, DNS: tutti «non arriva»
+                ultimo = f"{type(e).__name__}: {e}"[:120]
+        return False, ultimo or "nessuna risposta"
 
     def _warm_ts_cert(self, url: str) -> None:
         """Pre-provisiona il cert del Funnel (LE via Tailscale): senza, la PRIMA
@@ -549,6 +708,22 @@ echo SELFUPDATE_OK
             f"cd {REMOTE_DIR} && (grep -q ^GATEWAY_BIND= .env && sed -i 's|^GATEWAY_BIND=.*|GATEWAY_BIND={bind}|' .env || echo GATEWAY_BIND={bind} >> .env) && {cmd} up -d gateway"
         ))
 
+    def _wipe_ts_authkey(self) -> None:
+        """H15 — la auth-key Tailscale è MONOUSO: dopo che il nodo è entrato nel
+        tailnet non serve più (il login vive in /var/lib/tailscale, non in .env).
+        La azzeriamo in .env, mettiamo .env a 600 e togliamo l'orfano
+        secrets/ts_authkey.txt. Idempotente."""
+        script = r'''cd ~/vps1777 || exit 1
+if grep -q "^TS_AUTHKEY=" .env 2>/dev/null; then
+  rest=$(grep -v "^TS_AUTHKEY=" .env || true)
+  { [ -n "$rest" ] && printf "%s\n" "$rest"; printf "%s\n" "TS_AUTHKEY="; } > .env
+fi
+chmod 600 .env 2>/dev/null || true
+if [ "$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
+rm -f secrets/ts_authkey.txt
+'''
+        self._run_capture(self._sudo(script))
+
     def step_tailscale_host(self, p: dict, ingress: str) -> Iterator[str]:
         """Tailscale SULL'HOST: install + up + serve + funnel + cert.
         Niente container/sidecar → niente bug containerboot, niente netns."""
@@ -562,9 +737,21 @@ echo SELFUPDATE_OK
             yield line
         self._run_capture("systemctl enable --now tailscaled 2>/dev/null || true")
         yield "── Login Tailscale (auth-key) + Funnel…"
+        # H7 — la key via FILE, mai in argv (dove `ps` la mostrerebbe a ogni utente
+        # locale). mktemp crea a 0600; SFTP ci scrive la key; up la legge con
+        # --authkey=file:… e la cancelliamo subito. Come già fa deploy.sh.
+        keyfile = self._run_capture("mktemp /tmp/.vps1777-tskey.XXXXXX").strip()
+        try:
+            sftp = self.client.open_sftp()  # type: ignore[union-attr]
+            with sftp.open(keyfile, "w") as fh:
+                fh.write(key)
+            sftp.chmod(keyfile, 0o600)
+            sftp.close()
+        except Exception:  # noqa: BLE001 — se fallisce, up sotto darà errore chiaro
+            pass
         up = self._run_capture(
-            f"tailscale up --authkey={shlex.quote(key)} --hostname={shlex.quote(hostname)} "
-            "--accept-dns=false --reset 2>&1"
+            f"tailscale up --authkey=file:{shlex.quote(keyfile)} --hostname={shlex.quote(hostname)} "
+            f"--accept-dns=false --reset 2>&1; r=$?; rm -f {shlex.quote(keyfile)}; exit $r"
         )
         # ricavo l'URL .ts.net del nodo
         url = ""
@@ -581,6 +768,8 @@ echo SELFUPDATE_OK
             return
         self.result["URL"] = url
         yield f"✓ Nodo Tailscale: {url}"
+        # Nodo entrato nel tailnet → la key monouso è spesa: via da .env (H15).
+        self._wipe_ts_authkey()
         # Funnel HTTPS:443 → gateway (loopback). UN SOLO comando combinato:
         # `tailscale serve --https=443 <t>` + `tailscale funnel 443` separati
         # fanno interpretare "443" come TARGET (proxy a :443) e sovrascrivono
@@ -595,8 +784,19 @@ echo SELFUPDATE_OK
         ))
         time.sleep(4)
         if self._ts_funnel_ok():
-            self.production = True
-            yield "✓ Funnel HTTPS attivo su :443 (cert pre-provisionato)"
+            # La configurazione dice attivo. Prima di CREDERLE — e soprattutto prima
+            # di chiudere la porta 8080 — si chiede a chi sta fuori: questo PC.
+            confermato, perche = self._funnel_confermato_da_qui(url)
+            if confermato:
+                self.production = True
+                yield f"✓ Funnel HTTPS attivo su :443 — confermato dal tuo PC ({perche})"
+            else:
+                yield "! Funnel CONFIGURATO sulla VPS ma NON raggiungibile da qui: " + perche
+                yield "  → la macchina dichiara il Funnel attivo; una richiesta dal tuo PC non arriva."
+                yield "  → NON chiudo la porta 8080: resta il fallback finché non risponde davvero."
+                yield "  → se il certificato è appena stato emesso può servire qualche minuto;"
+                yield f"    riprova ad aprire {url} fra poco, e se risponde sei a posto."
+                self._set_gateway_bind(ingress, "0.0.0.0")
         else:
             low = (fout + " " + up).lower()
             if "funnel" in low and ("attribute" in low or "not permitted" in low or "denied" in low):
@@ -715,13 +915,30 @@ def run(params: dict) -> Iterator[str]:
         version = ""
         if not dev_build:
             version = (params.get("vps1777_version")
-                       or _os.environ.get("VPS1777_INSTALL_VERSION")
-                       or latest_release_version(
-                           prerelease=_os.environ.get("VPS1777_RELEASE_CHANNEL") == "prerelease"))
+                       or _os.environ.get("VPS1777_INSTALL_VERSION"))
+            if not version:
+                try:
+                    version = latest_release_version(
+                        prerelease=_os.environ.get("VPS1777_RELEASE_CHANNEL") == "prerelease")
+                except ReleaseNonInterrogabile as exc:
+                    # Fermarsi qui è la scelta: il ramo alternativo è la build
+                    # locale, che salta la verifica della firma. Un errore di rete
+                    # non deve poter decidere un downgrade di sicurezza al posto
+                    # di chi installa — che ha due modi espliciti per proseguire.
+                    yield ("✗ Non ho potuto chiedere a GitHub qual è l'ultima release "
+                           f"({exc}). Non vuol dire che non ce ne sia una: vuol dire "
+                           "che non lo so.")
+                    raise RuntimeError(
+                        "Versione da installare non determinabile. Riprova, oppure "
+                        "scegli deliberatamente: indica la versione (campo «versione» "
+                        "o VPS1777_INSTALL_VERSION=X.Y.Z), oppure spunta «build locale» "
+                        "(dev_build), che NON verifica la firma delle immagini."
+                    ) from exc
             if version:
                 yield f"✓ Installerò la release v{version} (immagini ghcr, nessuna build)"
             else:
-                yield "! Nessuna release pubblicata trovata → fallback: build locale (dev)"
+                yield ("! GitHub ha risposto e non riporta nessuna release pubblicata "
+                       "→ fallback: build locale (dev)")
                 dev_build = True
         params["_vps1777_version"] = "" if dev_build else version
         params["_image_base"] = params.get("image_base", "")

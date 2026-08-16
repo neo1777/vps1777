@@ -1,0 +1,13 @@
+# CODEOWNERS — chi deve rivedere una modifica prima che atterri.
+#
+# Nato dalla provocazione dell'audio round-3 (26/07): "check_findings.py gira
+# in CI, ma niente impedisce a una PR di riscriverlo per farlo passare sempre".
+# Misurato da Fucina via `gh api`: vero, e per un motivo più semplice di un
+# attaccante — su main non c'è NESSUN required status check, quindi la CI
+# verde è oggi un commento a margine, non una condizione per il merge.
+#
+# Questo file da solo non basta: serve "Require review from Code Owners"
+# nelle branch protection di main, che va abilitato da chi ha accesso alle
+# impostazioni del repository — è una decisione, non un default.
+
+/security/  @neo1777

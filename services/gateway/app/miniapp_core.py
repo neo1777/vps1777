@@ -14,17 +14,71 @@ import json as _json
 import time
 from urllib.parse import parse_qsl
 
+# Finestra di validità di `initData` (H27). Era 24h.
+# Telegram NON revoca una initData: finché è dentro la finestra, chiunque la
+# ottenga (screenshot, log del client, condivisione schermo, backup della
+# webview) può scambiarla per un JWT typ=miniapp con una sola POST a /app/auth.
+# La finestra è quindi la vita utile di un replay. 12h coprono una giornata di
+# lavoro senza dover riaprire il pannello dal bot, e dimezzano quella vita.
+# Scaduta la finestra, il frontend riceve 401 e chiede di riaprire dal bot.
+INIT_DATA_MAX_AGE_S = 12 * 3600  # 12h
+
+
+def webapp_secret_key(bot_token: str) -> bytes:
+    """La chiave con cui Telegram firma `initData`: HMAC_SHA256("WebAppData", token).
+
+    PERCHÉ ESISTE COME FUNZIONE A SÉ (H54, 27/07). Il gateway non ha mai chiamato
+    l'API di Telegram — misurato: zero occorrenze di `api.telegram.org`,
+    `sendMessage`, `getUpdates` in tutto `services/gateway/`. L'unico uso del token
+    a runtime è calcolare QUESTA chiave e verificare una firma. Ma il token montato
+    è quello INTERO, e col token intero si parla come il bot: si mandano messaggi,
+    si leggono gli aggiornamenti, lo si impersona fuori dal perimetro del gateway.
+
+    🔑 La derivazione è a senso unico. Chi ha questa chiave può verificare (e
+    forgiare) una initData per QUESTA Mini App — cioè può fingersi l'owner davanti
+    a un gateway che, in quello scenario, è già compromesso e già suo. Non può
+    risalire al token, quindi non guadagna la voce del bot. È esattamente il
+    surplus che H54 nomina, tolto senza aggiungere né un container né un canale.
+    """
+    return hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
+
 
 def verify_init_data(
-    init_data: str, bot_token: str, *, max_age_s: int = 86400, now: float | None = None
+    init_data: str,
+    bot_token: str = "",
+    *,
+    webapp_secret_hex: str = "",
+    max_age_s: int = INIT_DATA_MAX_AGE_S,
+    now: float | None = None,
 ) -> dict | None:
     """Valida l'HMAC di `initData`. Ritorna il payload parsato (dict) se valido,
     None altrimenti.
 
     secret_key = HMAC_SHA256("WebAppData", bot_token); il campo `hash` è escluso
     dal data_check_string. Scarta se più vecchio di max_age_s (auth_date).
+
+    `webapp_secret_hex` è la stessa chiave GIÀ DERIVATA (64 hex). Se c'è, VINCE sul
+    token e il token non serve più: è la strada per non montare il token intero sul
+    gateway. Se manca, si deriva dal token — quindi le installazioni esistenti si
+    comportano esattamente come prima, senza toccare niente.
     """
-    if not init_data or not bot_token:
+    if not init_data:
+        return None
+    if webapp_secret_hex:
+        try:
+            secret_key = bytes.fromhex(webapp_secret_hex.strip())
+        except ValueError:
+            return None
+        # Una chiave della lunghezza sbagliata non è una chiave: rifiutare qui
+        # evita che un segreto troncato in provisioning diventi un 401 di firma,
+        # che si legge come «initData scaduta» e manda a cercare dalla parte
+        # opposta. Un errore di configurazione deve somigliare a un errore di
+        # configurazione.
+        if len(secret_key) != hashlib.sha256().digest_size:
+            return None
+    elif bot_token:
+        secret_key = webapp_secret_key(bot_token)
+    else:
         return None
     pairs = list(parse_qsl(init_data, strict_parsing=False, keep_blank_values=True))
     received_hash = None
@@ -40,7 +94,13 @@ def verify_init_data(
     data_pairs.sort(key=lambda kv: kv[0])
     data_check = "\n".join(f"{k}={v}" for k, v in data_pairs)
 
-    secret_key = hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
+    # ⚠️ QUI c'era di nuovo `secret_key = hmac.new(b"WebAppData", bot_token…)`, e per
+    # una manciata di minuti il 27/07 ha SOVRASCRITTO la chiave scelta più in alto:
+    # con `bot_token=""` derivava dalla stringa vuota e la strada nuova rifiutava
+    # tutto. La chiave si sceglie una volta sola, in cima, e qui si usa e basta.
+    # 🔑 Preso dai test e non dalla rilettura: avevo aggiunto un ramo e lasciato in
+    # piedi il calcolo che quel ramo doveva sostituire — il difetto più banale che
+    # esista, invisibile a chi guarda solo il pezzo che ha appena scritto.
     expected = hmac.new(secret_key, data_check.encode("utf-8"), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, received_hash):
         return None
@@ -69,6 +129,32 @@ def is_owner(user_id: object, owner_id: int) -> bool:
         return int(user_id) == int(owner_id)  # type: ignore[arg-type]
     except (ValueError, TypeError):
         return False
+
+
+# ───── URL dei connettori MCP (contengono il gateway_secret) ─────
+# H26: il gateway_secret vive nel PATH dell'URL del connettore
+# (`/<SECRET>/<service>/mcp`). Stamparlo nel DOM della Mini App lo espone a
+# tutto ciò che vede lo schermo di un telefono — screenshot, condivisione
+# schermo, cronologia della webview — e copiarlo in clipboard lo consegna alla
+# sincronizzazione cloud della tastiera/OS. Default = MASCHERATO; l'URL completo
+# è un'azione esplicita e audita, non il contenuto di default della pagina.
+
+SECRET_MASK = "•" * 8      # bullet a lunghezza FISSA: non rivela la lunghezza del segreto
+SECRET_PLACEHOLDER = "<SECRET>"  # segreto non configurato: non c'è niente da mascherare
+
+
+def connector_url(base: str, secret: str, name: str) -> str:
+    """URL completo del connettore MCP — CONTIENE IL SEGRETO.
+    Va servito solo su richiesta esplicita dell'owner (reveal), mai di default."""
+    b = (base or "").rstrip("/")
+    return f"{b}/{secret or SECRET_PLACEHOLDER}/{name}/mcp"
+
+
+def masked_connector_url(base: str, name: str, *, has_secret: bool = True) -> str:
+    """Come `connector_url`, col segreto sostituito da un mask a lunghezza fissa.
+    È questa la forma che può stare nel DOM."""
+    b = (base or "").rstrip("/")
+    return f"{b}/{SECRET_MASK if has_secret else SECRET_PLACEHOLDER}/{name}/mcp"
 
 
 # ───── parsing risposte MCP (streamable-http) ─────

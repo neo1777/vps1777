@@ -4,8 +4,9 @@
 # Cosa fa:
 #   1. Controlla Docker + Compose v2 + python3
 #   2. Crea .env da .env.example (chiedendoti email admin, OWNER_ID, ingress scelto)
-#   3. Genera secrets/* (gateway_secret, oauth_signing, admin_password bcrypt, ts_authkey)
-#   4. Avvia `docker compose --profile ingress.<scelto> up -d`
+#   3. Genera secrets/* (gateway_secret, archive_desc_secret, oauth_signing, admin_password bcrypt)
+#   4. Avvia `docker compose -f compose.yaml -f compose.ingress.<scelto>.yaml
+#      --profile ingress.<scelto> up -d`  (gli -f sono quelli di COMPOSE_FILES, r.278)
 #
 # Idempotente: rilanciabile, salta lo step se già fatto.
 
@@ -23,8 +24,31 @@ log()  { printf '%s[*]%s %s\n' "$C_I"  "$C_R" "$*"; }
 ok()   { printf '%s[✓]%s %s\n' "$C_OK" "$C_R" "$*"; }
 warn() { printf '%s[!]%s %s\n' "$C_W"  "$C_R" "$*"; }
 die()  { printf '%s[✗]%s %s\n' "$C_E"  "$C_R" "$*" >&2; exit 1; }
+# ─── CONTRATTO NON-INTERATTIVO (abdd732a, 16/08) ──────────────────────────────
+# 🔴 PERCHÉ: `setup.sh` non è mai stato ESEGUITO da nessun test. Sette test lo
+#   nominano e tutti e sette lo LEGGONO come sorgente (`_SORGENTI = (...)`); la CI
+#   lo cita solo nei commenti. Non era «non testato»: era **non testabile senza una
+#   persona che digita**, perché le risposte arrivano da `read` e il file non aveva
+#   nessuna gestione di argomenti.
+# ⭐ LA FORMA SCELTA, e non è un dettaglio: **una convenzione, non un elenco.**
+#   `ask` riceve già il NOME della variabile da riempire ⇒ `SETUP_<VAR>` copre tutte
+#   e sette le domande di oggi *e quelle che verranno*, senza che nessuno debba
+#   ricordarsi di aggiungerle a una lista. Un elenco di nomi qui dentro sarebbe la
+#   stessa classe che abbiamo smontato in quattro strumenti: chi non è in lista non
+#   dà errore, dà SILENZIO.
+# 🛡️ NON cambia niente per chi lancia a mano: senza le variabili, chiede come prima.
+#   E quando una la usa **lo DICE** (`← da SETUP_…`): un valore che entra in silenzio
+#   in un'installazione è peggio di una domanda in più.
+# 📌 Criterio di riuscita di questa cura — dichiarato perché sia falsificabile:
+#   non «i test passano» ma **«un test ESEGUE setup.sh»**. Oggi: 0 su 7.
 ask()  {
   local var="$1" question="$2" default="${3:-}" response
+  local _env="SETUP_$var"
+  if [ -n "${!_env:-}" ]; then
+    printf -v "$var" '%s' "${!_env}"
+    printf '%s%s%s: %s  %s← da %s%s\n' "$C_B" "$question" "$C_R" "${!_env}" "$C_I" "$_env" "$C_R" >&2
+    return 0
+  fi
   if [ -n "$default" ]; then
     printf '%s%s%s [%s]: ' "$C_B" "$question" "$C_R" "$default" >&2
   else
@@ -34,11 +58,43 @@ ask()  {
   [ -z "$response" ] && response="$default"
   printf -v "$var" '%s' "$response"
 }
+# ⚠️ LIMITE DICHIARATO di `confirm`, e lo scrivo perché non passi per una svista:
+#   qui NON c'è un nome di variabile da cui derivare la convenzione — c'è solo il
+#   testo della domanda. Quindi `SETUP_YES` risponde **a tutte** le conferme, e non
+#   permette di rispondere sì all'una e no all'altra (oggi sono due: «genero io la
+#   password?» e «procedo ora?»). *È una copertura grossolana e la dichiaro tale:
+#   serve a far girare setup.sh senza una persona, non a pilotarlo finemente.*
+#   Il giorno che servisse distinguerle, il gesto giusto è dare un NOME alle
+#   conferme (come l'ha `ask`), non aggiungere una seconda variabile qui.
 confirm() {
   local prompt="$1" response
+  if [ -n "${SETUP_YES:-}" ]; then
+    case "$SETUP_YES" in
+      s|S|si|SI|y|Y|yes|YES|1) printf '%s%s%s [s/N]: s  %s← da SETUP_YES%s\n' "$C_B" "$prompt" "$C_R" "$C_I" "$C_R" >&2; return 0 ;;
+      *)                       printf '%s%s%s [s/N]: n  %s← da SETUP_YES%s\n' "$C_B" "$prompt" "$C_R" "$C_I" "$C_R" >&2; return 1 ;;
+    esac
+  fi
   printf '%s%s%s [s/N]: ' "$C_B" "$prompt" "$C_R" >&2
   IFS= read -r response || true
   case "$response" in s|S|si|SI|y|Y|yes|YES) return 0 ;; *) return 1 ;; esac
+}
+
+# Policy password UNICA (H16), identica a deploy.sh e tools/rotate-secret.sh:
+# min 16 caratteri, ≥3 classi, niente pattern comuni. Se cambi qui, cambia LÀ.
+pw_weak_reason() {
+  local pw="$1" classes=0
+  if [ "${#pw}" -lt 16 ]; then echo "troppo corta (min 16 caratteri)"; return 1; fi
+  printf '%s' "$pw" | LC_ALL=C grep -q '[a-z]'        && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[A-Z]'        && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[0-9]'        && classes=$((classes+1))
+  printf '%s' "$pw" | LC_ALL=C grep -q '[^a-zA-Z0-9]' && classes=$((classes+1))
+  if [ "$classes" -lt 3 ]; then
+    echo "poca varietà: servono almeno 3 tra minuscole, MAIUSCOLE, cifre e simboli"; return 1
+  fi
+  if printf '%s' "$pw" | LC_ALL=C grep -qiE 'password|12345|qwerty|abcdef|letmein|welcome|admin|vps1777|000000|111111'; then
+    echo "contiene un pattern comune/prevedibile"; return 1
+  fi
+  return 0
 }
 
 cat <<'BANNER'
@@ -63,12 +119,35 @@ ok "Docker $(docker --version | awk '{print $3}' | tr -d ',') + Compose v2 OK"
 DEV_BUILD="${DEV_BUILD:-0}"
 INSTALL_VERSION=""
 if [ "$DEV_BUILD" != "1" ]; then
-  INSTALL_VERSION="${VPS1777_INSTALL_VERSION:-$(curl -fsS -m 10 https://api.github.com/repos/neo1777/vps1777/releases/latest 2>/dev/null \
-    | python3 -c 'import sys,json;print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)}"
+  if [ -n "${VPS1777_INSTALL_VERSION:-}" ]; then
+    INSTALL_VERSION="$VPS1777_INSTALL_VERSION"
+  else
+    # «GitHub non mi ha risposto» e «GitHub dice che non ci sono release» sono due
+    # fatti diversi, e prima finivano nella stessa stringa vuota: `curl … 2>/dev/null`,
+    # `|| true` e il `2>/dev/null` di python sopprimevano tre errori in cascata
+    # (DNS, timeout, rate-limit 403 non autenticato a 60 req/h per IP, 5xx). Il
+    # secondo fatto porta a `DEV_BUILD=1`, cioè a una BUILD LOCALE — che non passa
+    # dalla verifica della firma cosign, valida sul bundle di release e non sul
+    # sorgente compilato in loco. Un blip di rete degradava «immagine firmata» in
+    # «build da quel che c'è sul disco», e il messaggio dava la colpa a GitHub.
+    # L'esito di curl si cattura PRIMA della pipe: dopo, `$?` è l'exit di python.
+    _rel_json=""; _rel_rc=0
+    _rel_json="$(curl -fsS -m 10 https://api.github.com/repos/neo1777/vps1777/releases/latest 2>/dev/null)" || _rel_rc=$?
+    if [ "$_rel_rc" -ne 0 ]; then
+      die "Non ho potuto chiedere a GitHub qual è l'ultima release (curl exit $_rel_rc: rete, DNS, proxy o rate-limit).
+    Questo NON vuol dire che non ci sia una release: vuol dire che non lo so. Installare
+    una build locale al posto di un'immagine firmata sarebbe un downgrade silenzioso.
+    Riprova, oppure scegli deliberatamente:
+      VPS1777_INSTALL_VERSION=X.Y.Z  bash setup.sh    installa quella release
+      DEV_BUILD=1                    bash setup.sh    build locale, SENZA verifica firma"
+    fi
+    INSTALL_VERSION="$(printf '%s' "$_rel_json" \
+      | python3 -c 'import sys,json;print(json.load(sys.stdin).get("tag_name","").lstrip("v"))' 2>/dev/null || true)"
+  fi
   if [ -n "$INSTALL_VERSION" ]; then
     ok "Installerò la release v$INSTALL_VERSION (pull da ghcr, nessuna build)"
   else
-    warn "Nessuna release pubblicata trovata → fallback: build locale (dev)"
+    warn "GitHub ha risposto e non riporta nessuna release pubblicata → fallback: build locale (dev)"
     DEV_BUILD=1
   fi
 fi
@@ -96,7 +175,25 @@ else
        ask CADDY_EMAIL "Email per Let's Encrypt" "$ADMIN_EMAIL"
        PUBLIC_BASE="https://$CADDY_DOMAIN"
        ;;
-    3) INGRESS=cloudflared; PUBLIC_BASE=""; CADDY_DOMAIN=""; CADDY_EMAIL="" ;;
+    # Il tunnel è REMOTELY-MANAGED (`tunnel run` col token, nessun config.yml sul
+    # disco): l'hostname vive nella configurazione su Cloudflare, non qui. Non è
+    # scopribile dalla macchina — ma chi arriva a questo punto lo CONOSCE, perché
+    # ha dovuto configurarlo sul dashboard (passo 2 di compose.ingress.cloudflared.yaml).
+    # ⇒ non si scopre: si CHIEDE. Prima non lo si chiedeva, e il vuoto che ne usciva
+    # lasciava il profilo senza nessuna sonda dall'esterno (voce `070f8844`).
+    3) INGRESS=cloudflared; CADDY_DOMAIN=""; CADDY_EMAIL=""
+       ask CF_HOSTNAME "Hostname pubblico del tunnel (es. vps.miosito.com), quello che hai configurato sul dashboard CF" ""
+       if [ -n "$CF_HOSTNAME" ]; then
+         PUBLIC_BASE="https://${CF_HOSTNAME#https://}"
+       else
+         PUBLIC_BASE=""
+         # Si accetta il vuoto — l'hostname può non essere ancora deciso — ma si
+         # dice COSA COSTA, qui e adesso, che è l'unico momento in cui rimediare
+         # è gratis. Il presidio a valle (`funnel_ok`) lo ripete ogni giorno, ma
+         # a quel punto parla a chi legge i log, non a chi sta installando.
+         warn "Hostname non impostato: questo profilo resterà SENZA sonda dall'esterno. La sorveglianza vedrà il gateway rispondere DENTRO la macchina anche se da Internet il sito è giù. Rimedio in qualsiasi momento: scrivi PUBLIC_BASE=https://tuo-hostname in .env"
+       fi
+       ;;
     *) die "Scelta non valida" ;;
   esac
 
@@ -109,20 +206,46 @@ else
   echo "INGRESS_PROFILE=ingress.$INGRESS" >> .env
   ok ".env creato"
 fi
+# .env può contenere TS_AUTHKEY e altri valori sensibili → 600 (H15/H38).
+# Il permesso si chiede al FILE: `2>/dev/null || true` sopprime l'esito due volte (#66).
+chmod 600 .env 2>/dev/null || true
+if [ "$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; exit 1; fi
 
 # VPS1777_TAG/IMAGE_BASE: versione deployata + registry (scritti sempre, anche
 # se .env preesiste, per allineare il tag da pullare).
 set_kv() { grep -q "^$1=" .env && sed -i "s|^$1=.*|$1=$2|" .env || echo "$1=$2" >> .env; }
 set_kv VPS1777_TAG "${INSTALL_VERSION:-dev}"
 set_kv VPS1777_IMAGE_BASE "${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}"
-# dir runtime create ORA (non da Docker come root): il gateway/CLI ci scrivono
-mkdir -p onboarding var backups releases && chmod 700 var
+# dir runtime create ORA (non da Docker come root): il gateway/CLI ci scrivono.
+# H38 — chmod 700 anche su secrets/, backups/, onboarding/ (prima solo var/).
+# backups/ 700 protegge per traversal anche backups/pre-update/ (creata poi dalla
+# CLI, che imposta 0700 sul singolo snapshot).
+mkdir -p onboarding var backups releases secrets
+chmod 700 var secrets backups onboarding
 
 # ───── 3. secrets ─────
 log "Genero secrets in secrets/..."
-mkdir -p secrets
 
 gen_random() { python3 -c "import secrets; print(secrets.token_urlsafe($1))"; }
+
+# archive_desc_secret — canale set_description (archive-mcp → gateway, D9).
+# DELIBERATAMENTE separato da gateway_secret: quello apre anche /internal/nlm/*
+# (stato e installazione dei profili NotebookLM), e una feature che scrive un
+# campo di testo non deve portarsi dietro quel potere. Privilegio minimo anche
+# fra i nostri servizi.
+# ⚠️ Senza questo file il compose non parte (secret dichiarato ma assente) →
+# health-gate rosso → auto-rollback: la release sembrerebbe rotta quando manca
+# solo un file. E un file VUOTO sarebbe peggio: lo stack partirebbe e il canale
+# resterebbe fail-closed, cioè un difetto di provisioning travestito da bug del
+# codice. Per questo si genera qui, accanto agli altri, con lo stesso `-s` che
+# rende il blocco idempotente sulle installazioni che ce l'hanno già.
+if [ ! -s secrets/archive_desc_secret.txt ]; then
+  gen_random 24 > secrets/archive_desc_secret.txt
+  chmod 600 secrets/archive_desc_secret.txt
+  ok "archive_desc_secret.txt generato"
+else
+  ok "archive_desc_secret.txt già presente"
+fi
 
 if [ ! -s secrets/gateway_secret.txt ]; then
   gen_random 24 > secrets/gateway_secret.txt
@@ -143,14 +266,39 @@ fi
 if [ ! -s secrets/admin_password_bcrypt.txt ]; then
   log ""
   if confirm "Vuoi che generi io una password admin random (24 char)?"; then
-    ADMIN_PWD="$(python3 -c 'import secrets,string; print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))')"
+    # rigenera finché non passa la policy (con ascii_letters+digits passa
+    # praticamente sempre al primo colpo; il loop è una cintura di sicurezza).
+    while :; do
+      ADMIN_PWD="$(python3 -c 'import secrets,string; print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))')"
+      pw_weak_reason "$ADMIN_PWD" >/dev/null && break
+    done
     log "Password admin generata: $C_B$ADMIN_PWD$C_R"
     log "  → SALVALA SUBITO in un password manager. Non te la riproporrò."
   else
-    printf '%sPassword admin (min 12 char):%s ' "$C_B" "$C_R"
-    read -rs ADMIN_PWD
-    echo
-    [ -z "$ADMIN_PWD" ] || [ ${#ADMIN_PWD} -lt 12 ] && die "Password troppo corta"
+    # H16 — policy UNICA: min 16, ≥3 classi, niente pattern comuni.
+    # 🔑 NON-INTERATTIVO (abdd732a, 16/08): `SETUP_ADMIN_PWD` entra QUI DENTRO, cioè
+    #   **dentro il ciclo di validazione** — non lo salta. Una password passata da
+    #   variabile è comunque sottoposta a `pw_weak_reason`, e se è debole il comando
+    #   FALLISCE invece di chiedere all'infinito a un terminale che non c'è.
+    #   *Un contratto non-interattivo che aggira il controllo di robustezza sarebbe
+    #   una porta di servizio sulla policy H16: la comodità non deve comprare una
+    #   password più debole di quella che pretendiamo da chi digita.*
+    if [ -n "${SETUP_ADMIN_PWD:-}" ]; then
+      ADMIN_PWD="$SETUP_ADMIN_PWD"
+      if reason="$(pw_weak_reason "$ADMIN_PWD")"; then
+        log "Password admin presa da ${C_I}SETUP_ADMIN_PWD${C_R}"
+      else
+        die "SETUP_ADMIN_PWD non rispetta la policy: $reason (min 16, ≥3 classi)"
+      fi
+    else
+    while :; do
+      printf '%sPassword admin (min 16, ≥3 classi: minusc/MAIUSC/cifre/simboli):%s ' "$C_B" "$C_R"
+      read -rs ADMIN_PWD
+      echo
+      if reason="$(pw_weak_reason "$ADMIN_PWD")"; then break; fi
+      warn "Password debole: $reason. Riprova."
+    done
+    fi
   fi
   log "Calcolo bcrypt..."
   # Usa python3 di sistema con bcrypt (installato al volo se manca)
@@ -182,7 +330,14 @@ if [ ! -s secrets/telegram_bot_token.txt ]; then
 fi
 
 # ───── 4. Immagini + start ─────
-INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env | cut -d= -f2)"
+# 🔴 `|| true` + controllo esplicito (71d540e6, review della #165): con `set -e`
+#   (r.13) un `.env` privo della riga `INGRESS_PROFILE=` faceva MORIRE lo script
+#   proprio qui, senza dire perché — e la morte muta è peggio in esecuzione
+#   automatica, dove non c'è nessuno che legga il punto in cui si è fermato.
+#   *La stessa forma curata in `restore.sh` con la #163: un `grep` nudo dentro una
+#   sostituzione di comando è un ramo di uscita che nessuno ha scritto apposta.*
+INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env 2>/dev/null | cut -d= -f2)" || true
+[ -n "$INGRESS_PROFILE" ] || die ".env non contiene INGRESS_PROFILE= — rilancia ./setup.sh (o aggiungi la riga a mano: INGRESS_PROFILE=ingress.tailscale|ingress.caddy|ingress.cloudflared)"
 COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
 # In dev l'overlay di build ri-aggiunge i build context (compose.yaml è pull-only)
 [ "$DEV_BUILD" = "1" ] && COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.build.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
@@ -211,13 +366,102 @@ if confirm "Procedo ora?"; then
   if command -v sudo >/dev/null && [ -f tools/vps1777.py ]; then
     log "Installo il canale di aggiornamento (CLI vps1777 + timer)…"
     if sudo install -m755 tools/vps1777.py /usr/local/bin/vps1777 2>/dev/null; then
+      # H43 — le unit sono templatizzate (@OPERATOR_USER@/@REPO@): vanno RESE prima
+      # di install, altrimenti systemd non parsa `User=@OPERATOR_USER@` (fresh
+      # install rotto). Qui l'operatore è chi lancia setup.sh; il repo è SCRIPT_DIR.
+      #
+      # 🔴 H55 — «chi lancia» NON è una policy: è un'assunzione, e qui decide il
+      #   privilegio permanente di quattro unit. Lanciando `sudo bash setup.sh`,
+      #   `id -un` dà **root** e le unit nascono con `User=root`: l'updater
+      #   automatico girerebbe coi privilegi pieni della macchina, a ogni avvio.
+      #   ⚠️ E `git log -S "User=root" -- systemd/` è VUOTO: nel repo c'è solo il
+      #   segnaposto, il valore nasce QUI. Cercarlo nei file non poteva trovarlo.
+      # ⭐ La policy giusta esiste già nel repo, in un installer su tre:
+      #   `installer/engine.py:30` → `OPERATOR_USER = "vps1777"`, costante. Non è una
+      #   decisione nuova: è quella, applicata dove mancava.
+      # 🛡️ L'escape non è inventato: `deploy.sh:218` usa già l'env `OPERATOR_USER`.
+      OP_USER="${OPERATOR_USER:-$(id -un)}"
+      if [ "$OP_USER" = "root" ]; then
+        cat >&2 <<'H55'
+
+🔴 le unit systemd verrebbero installate con User=root.
+
+   L'operatore di vps1777 NON è chi lancia l'installer: è un utente
+   dedicato e non privilegiato (installer/engine.py lo fissa a «vps1777»).
+   Renderizzare le unit come root darebbe all'updater automatico i
+   privilegi pieni della macchina, a ogni avvio, per sempre.
+
+   Dimmi chi è l'operatore e riprovo:
+       OPERATOR_USER=vps1777 <il comando che hai lanciato>
+
+   Oppure lancia l'installer come quell'utente, senza sudo.
+
+H55
+        exit 1
+      fi
       for u in systemd/vps1777-*; do
-        case "$u" in *.service|*.timer|*.path) sudo install -m644 "$u" /etc/systemd/system/ 2>/dev/null || true;; esac
+        case "$u" in *.service|*.timer|*.path)
+          sed -e "s|@OPERATOR_USER@|$OP_USER|g" -e "s|@REPO@|$SCRIPT_DIR|g" "$u" \
+            | sudo install -m644 /dev/stdin "/etc/systemd/system/$(basename "$u")" 2>/dev/null || true;;
+        esac
       done
       sudo systemctl daemon-reload 2>/dev/null || true
-      sudo systemctl enable --now vps1777-check-update.timer vps1777-update.path 2>/dev/null \
-        && ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero" \
-        || warn "Unit systemd non abilitate (systemd assente?) — la CLI è comunque installata"
+      # Le unit di base vanno ABILITATE tutte: il ciclo sopra le installa (glob su
+      # *.timer/*.path), ma un timer installato e non abilitato non gira — e non
+      # lo dice a nessuno. `vps1777-secrets-check.timer` mancava qui: il fix #13
+      # (6c764bc) allineò deploy.sh e installer/engine.py e saltò questo path,
+      # quindi chi installava con setup.sh restava senza il controllo delle
+      # scadenze dei secret, in silenzio. Stessa classe di H43.
+      # RECIDIVA: vps1777-auto-update.timer rifece lo stesso percorso — aggiunto
+      # a deploy.sh (710) ed engine.py (590), saltato qui. Da qui in poi setup.sh
+      # legge la STESSA fonte di verità degli altri due installer: lo stato
+      # dichiarato VPS1777_FEATURES, con lo stesso default (deploy.sh:632).
+      ENABLE_UNITS="vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer"
+      FEATURES="$(sed -n 's/^VPS1777_FEATURES=//p' .env 2>/dev/null | tail -1)"
+      FEATURES="${FEATURES:-backup,autoupdate}"
+      AUTOUPD_MSG=""
+      case ",$FEATURES," in *,autoupdate,*)
+        ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer"
+        AUTOUPD_MSG=" + auto-update sicuro (settimanale)";;
+      esac
+      # SC2086 disabilitata di proposito: $ENABLE_UNITS è una LISTA di nomi di unit
+      # separati da spazi, e la divisione in parole è ciò che serve. Virgolettarla la
+      # passerebbe a systemctl come un unico nome inesistente.
+      # shellcheck disable=SC2086
+      if sudo systemctl enable --now $ENABLE_UNITS 2>/dev/null; then
+        ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + scadenze secret (settimanale)$AUTOUPD_MSG"
+      else
+        # PRIMA: `cmd && ok "…" || warn "…"`. Sembra un if-then-else e non lo è: se
+        # fosse `ok` a fallire, partirebbe ANCHE il ramo d'errore, e l'installer
+        # direbbe insieme «attivo» e «non abilitate». Qui `ok` è un echo e non
+        # fallisce mai — ma la forma è la trappola, non l'occorrenza.
+        warn "Unit systemd non abilitate (systemd assente?) — la CLI è comunque installata"
+      fi
+      # TERZA RECIDIVA della classe documentata qui sopra: l'hardening host
+      # (unattended-upgrades + fail2ban) era in deploy.sh (457) e in engine.py
+      # (284) ma non qui — e SECURITY.md/README lo promettono «automatico
+      # all'install» senza distinguere il percorso. Chi installava con setup.sh
+      # restava senza anti-brute-force SSH credendo di averlo per iscritto.
+      # Stesso perimetro degli altri due installer: sshd_config NON si tocca
+      # (la disabilitazione delle password è un passo manuale, vedi OPS.md).
+      # 🔴 QUARTA DIVERGENZA della stessa classe, misurata il 03/08 (71d540e6): le tre
+      # copie installano e abilitano gli stessi due pacchetti, ma SOLO engine.py:309
+      # scrive /etc/apt/apt.conf.d/20auto-upgrades. Senza quel file la PERIODICITÀ
+      # dipende dal default della distribuzione — su Ubuntu il pacchetto lo porta con
+      # sé, su Debian nasce da `dpkg-reconfigure -plow unattended-upgrades` che qui
+      # nessuno lancia. ⇒ due host su tre potevano avere unattended-upgrades ATTIVO
+      # e mai eseguito, cioè il caso peggiore: il servizio c'è, il presidio no.
+      # ⭐ Non dipendiamo dal default di una distribuzione che non controlliamo: la
+      # scrittura è idempotente e dice a voce quello che prima era un'assunzione.
+      if sudo apt-get install -y -q unattended-upgrades fail2ban >/dev/null 2>&1; then
+        printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
+          | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null 2>&1 || true
+        sudo systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+        sudo systemctl enable --now fail2ban >/dev/null 2>&1 || true
+        ok "Hardening host attivo: unattended-upgrades + fail2ban"
+      else
+        warn "Hardening host non applicato (apt-get non riuscito) — a mano: sudo apt-get install -y unattended-upgrades fail2ban"
+      fi
     else
       warn "Installazione CLI saltata (sudo negato) — installala dopo con: sudo install -m755 tools/vps1777.py /usr/local/bin/vps1777"
     fi

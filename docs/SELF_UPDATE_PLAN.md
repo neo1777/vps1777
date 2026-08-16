@@ -1,5 +1,18 @@
 # Piano: sistema di self-update "da prodotto" per vps1777
 
+> ## ⚠ DOCUMENTO STORICO — piano ESEGUITO, rilasciato in v0.9.0
+>
+> Questo piano è **stato realizzato**. Il "Contesto" qui sotto ("oggi vps1777 non ha un
+> canale di aggiornamento…") era vero **quando il piano è stato scritto** (4 luglio 2026)
+> e non lo è più: la CLI, le migrazioni, il bundle, l'health-gate, l'auto-rollback e il
+> pulsante admin sono usciti in **v0.9.0** lo stesso giorno, validati end-to-end sulla VPS
+> reale (incluso un fallimento forzato → auto-rollback + restore dati). Il documento resta
+> come **traccia del ragionamento** — le decisioni, i bivi, il perché di ogni scelta — non
+> come descrizione dello stato.
+>
+> Per lo stato attuale: [UPDATE.md](UPDATE.md) (uso) e
+> [ARCHITECTURE.md](ARCHITECTURE.md) (*Canale di aggiornamento*).
+
 > Risposta al brief `SELF_UPDATE_BRIEF.md` §9. Rispetta integralmente le decisioni bloccate di §6; valuta e raccomanda tutte le aree aperte di §8. Tutti i fatti citati sono stati verificati alla fonte nel repo.
 
 ## Contesto

@@ -2,6 +2,1390 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.41.2] — 2026-08-09
+
+**Una patch tagliata per un motivo solo: la `0.41.1` non si avvia.** `archive-mcp` muore
+all'import — `from mcp.server.fastmcp import FastMCP`, un path che in `mcp==2.0.0` non
+esiste più — e il processo non arriva a toccare un dato: restart-loop → health-gate →
+auto-rollback. Il vincolo era **identico** nella `0.40.14` (`mcp>=1.2.0`, senza tetto):
+non è cambiato il vincolo, è cambiato **quando viene risolto**. Prima si risolveva a
+build-time e la `2.0.0` non era ancora uscita; dalla `0.41.0` c'è il lock, generato
+quando la `2.0.0` era già fuori — e ora viene riprodotto fedele.
+
+> **Il filo:** *un lock garantisce riproducibilità, non correttezza — riproduce
+> fedelmente anche una major sbagliata.* Prima era una lotteria, e finora aveva vinto.
+> Le voci qui sotto sono la cura, più i presìdi che d'ora in poi guardano l'artefatto
+> invece del suo sostituto.
+
+### 🔴 Corretto — la dipendenza che impediva l'avvio
+
+- **Tetto alla major di `mcp`: `>=1.28,<2`** (#112). Nei due servizi che lo importano
+  (`archive-mcp`, `nb1777-mcp`) e nei lock. `archive-mcp` risale da `2.0.0` a `1.29.0`,
+  e con lui escono `httpx2`, `httpcore2`, `mcp-types`, `opentelemetry-api`, `truststore`.
+- **Lo stesso tetto in `plugins/example-mcp`** (#113), che ne era rimasto fuori — cioè
+  **il posto da cui si copia**. Non ha un lock, quindi risolve a build-time: oggi
+  avrebbe preso la `2.0.0` e sarebbe stato rotto per chiunque lo usi come punto di
+  partenza. Il primo censimento iterava una lista di nomi scritta a mano e aveva curato
+  due su tre; *un insieme enumerato a mano non fallisce quando è incompleto — risponde,
+  e sembra una risposta.*
+
+- **Il tetto sul body conta i byte veri, non quelli dichiarati** (#119). `admin.py`
+  guardava il `Content-Length` — che lo dichiara il client: chi vuole riempire il disco lo
+  omette (chunked) o ci scrive un numero piccolo. Il taglio che contava i byte veri partiva
+  quando `upload.file` era **già pieno**: proteggeva la destinazione, non l'arrivo.
+- **Tetto a `httpx`: `>=0.28,<1`** (#118), su `gateway` e `nb1777-bot` — le sole due che lo
+  dichiarano. Oggi non c'è deriva (lock `0.28.1`, che è l'ultima stabile), ma su PyPI ci
+  sono già le `1.0.dev*`: senza tetto, la prima rigenerazione di lock dopo il rilascio se la
+  porterebbe dentro senza che nessuno lo decida.
+
+### 🛡️ Presìdi — la CI ora guarda l'artefatto, non un suo sostituto
+
+- **La build avvia ciò che costruisce** (#114). Il job `build` costruiva l'immagine e
+  non la eseguiva mai; i test giravano con `uvx pytest`, in un ambiente effimero che non
+  è quello dell'immagine (che installa dal lock, con `--frozen`). CI e artefatto
+  guardavano due mondi diversi, e il verde certificava il primo. Ora un container che non
+  parte rompe la CI.
+- **Il gate importa il punto di ingresso, non il luogo dell'ultimo incidente** (#115).
+  La prima versione importava `app.server` — il modulo dove il difetto si era
+  manifestato — ma l'entrypoint delle quattro immagini è `python -m app`: il modulo che
+  il container **esegue** è `app.__main__`, e nessuno lo importava. Restava scoperto
+  `import uvicorn`, che esiste in un solo posto in tutto il repo.
+- **La garanzia «IP client non spoofabile» ora la misura la CI** (#117), non più solo la
+  documentazione: sei test, incluso il caso in cui l'header arriva già riscritto a monte.
+- **Il verificatore delle regole non installa più «l'ultima versione» di ciò che le
+  legge** (#111). `verify-features.yml` ancorava `actions/checkout` a uno SHA e due righe
+  sotto faceva `pip install pyyaml` senza versione né hash — cioè l'unica dipendenza del
+  programma che valida il ledger delle feature. Ora `--require-hashes`.
+- **Il gate locale esegue gli step della CI leggendoli dal workflow** (#93), invece di
+  riscriverli: due copie di una procedura sono una cache, e una cache scade in silenzio.
+
+- **Un tetto committato senza rigenerare il lock non è più verde** (#118). `uv sync
+  --frozen` fa quel che promette — usa il lock com'è — e **non** verifica la coerenza col
+  `pyproject`: si poteva committare un vincolo puramente cosmetico e vederlo passare. Ora
+  `uv lock --check` gira su tutti i servizi, e la lista dei servizi **la dà `git ls-files`**,
+  non un elenco scritto a mano (un quinto servizio, in quel caso, sarebbe stato silenzio).
+  Il gate **dichiara il proprio limite**: verifica l'accordo lock↔pyproject *dentro* un
+  servizio, quindi due gemelli con lo stesso `pyproject` e lock diversi restano entrambi
+  verdi. *Un limite scritto è un limite che il prossimo non deve riscoprire.*
+
+### 📚 Documentazione
+
+- **Gli `-f` dell'overlay ingress non sono facoltativi** (#116). In nove punti la
+  documentazione scriveva `docker compose --profile ingress.<x> up -d` senza `-f`: misurato
+  col diff delle due config, senza gli `-f` il gateway resta **senza porte pubblicate** e
+  fuori dalla rete `funnel`. Chi seguiva la riga alla lettera otteneva un ingress che non
+  ingressa.
+
+### ⚠️ Note per chi aggiorna
+
+- Se sei sulla `0.41.0` o `0.41.1` e l'aggiornamento è tornato indietro da solo, **è
+  questo il motivo**: l'auto-rollback ha funzionato: non hai perso dati, il servizio è
+  rimasto sulla versione precedente.
+- I lock dei due gemelli restano su versioni `mcp` diverse (`archive-mcp` 1.29.0,
+  `nb1777-mcp` 1.28.1): **entrambe dentro il tetto**, nessuna delle due rotta. È il
+  risultato meccanico della cura — `uv lock` non muove ciò che è già conforme — e
+  l'allineamento è un atto separato, da fare guardando il diff.
+
+## [0.41.1] — 2026-08-03
+
+**Una patch tagliata per un motivo solo: la `0.41.0` non poteva installarsi da sola.**
+Il canale di auto-update era rotto — le unit `update` e `auto-update` giravano con `User=`
+non-root e sei direttive di sandboxing, e systemd in quella combinazione accende
+`NoNewPrivileges` **implicitamente**: `sudo -n install` falliva, e l'aggiornamento moriva
+prima di installarsi. La `0.41.0` conteneva il guasto; questa lo toglie e aggiunge il
+controllo che impedisce a un bundle futuro di rimetterlo.
+
+> **Il filo:** *un presidio che parla si elude — quello che blocca protegge.* Quasi ogni
+> voce qui sotto è un controllo che diceva la cosa giusta con la scala sbagliata.
+
+### 🔴 Corretto — il canale di aggiornamento
+
+- **`update.service` e `auto-update.service` non portano più sandboxing** (#104). Con
+  `User=` non-root basta **una** direttiva seccomp perché systemd accenda `NoNewPrivs`:
+  misurato sulla macchina, non dedotto. Costo dichiarato nella voce `H43`
+  (`systemd-analyze security` 8.0 → 9.2 su ciascuna) — la rinuncia è scritta, non taciuta.
+- **Un bundle non può più annullare una cura già sul disco** (#109). Prima del
+  self-update, `vps1777 update` confronta le unit in arrivo con quelle installate e si
+  ferma se il pacchetto **rimetterebbe** il sandboxing su una unit che dichiara di elevare.
+  *Serviva perché la cura è entrata in `main` dopo che la `0.41.0` era già tagliata: senza
+  questo controllo, premere «aggiorna» avrebbe cancellato la riparazione in silenzio.*
+- **Se una unit fallisce, ora si sa** (#100, #99): `OnFailure=` + `avvisa-fallimento`, e un
+  comando che esce ≠ 0 lo dice invece di tacere. *L'auto-update era fallito alle 04:32 del
+  03/08 e nessuno se n'era accorto fino a sera.*
+
+### 🛡️ Presìdi che prima guardavano la riga sbagliata
+
+- **Le unit che elevano non possono portare sandboxing** (#105) — il test precedente
+  chiedeva che `NoNewPrivileges` fosse *dichiarato*, e dava verde sulla unit con cui la
+  macchina è morta. Ora la regola è sulla **combinazione**, con allowlist vuota (fail-closed).
+- **I tre installer abilitano le stesse unit** (#106) — la lista si **esegue** estraendola
+  dai tre file, non si confronta come testo. Chiude la divergenza che nel fix #13 aveva
+  lasciato `secrets-check.timer` scoperto su un percorso d'installazione su tre.
+- **Tutti i test bash girano** (#91) — via l'elenco a mano, che dimenticava tre file su cinque.
+- **Le dipendenze Python dei quattro servizi sono sorvegliate** (#95) e i lock entrano
+  nella build (#96).
+
+### 🧹 Altro
+
+- Spazio disco verificato **prima** di scrivere l'upload (#88) e tetto controllato prima di
+  leggere il body (#94); journal caldo visibile in `archive-mcp` (#89); cadenza dichiarata
+  per `unattended-upgrades` (#90) e per `secrets-check` (#92); default vuoto dichiarato in
+  `settings` (#98); il 404 dal proxy documentato come scelta (#83, già in 0.41.0).
+
+### ⚠️ Se aggiorni una macchina installata con la `0.41.0` o precedente
+
+L'auto-update **non può portarti qui da solo**: è il guasto che questa versione ripara. Serve
+un aggiornamento manuale una volta sola — da terminale, non dal pulsante del pannello.
+
+## [0.41.0] — 2026-08-03
+
+**Tutto quello che è entrato dopo la `0.40.14` (27/07), e quasi tutto ha la stessa forma:
+un controllo che non guardava, e un verde che lo copriva.** Non è un tema scelto — è quello che è emerso
+auditando, ed è il motivo per cui questa è una `minor` e non una `patch`.
+
+> **Il filo, in una riga:** *l'assenza di un segnale non è un segnale di assenza.* Un gate
+> che esamina zero file e dice «tutto bene»; una prova che non trova l'oggetto da misurare
+> ed esce `0`; un `if <dato> and <condizione>` dove il dato può mancare — e allora il ramo
+> di rifiuto non viene mai preso. In tutti questi casi non c'è niente di rotto da vedere:
+> il risultato è *pieno*, plausibile, e dice il contrario del vero.
+
+### ⚠️ Se aggiorni una macchina già installata con `caddy` o `cloudflared`
+
+**Il pannello smette di rispondere su `http://<IP>:8080`.** La porta si sposta sul loopback
+(vedi sotto), e l'overlay di onboarding si riapplica a **ogni** deploy, non solo al primo:
+quindi il cambio ti arriva col primo aggiornamento, non con una nuova installazione.
+
+```
+  la strada che resta, ed è quella giusta:   https://<il tuo dominio>/admin/setup
+  se ti serve la porta com'era:              ONBOARDING_BIND=0.0.0.0  (col tradeoff sotto)
+  se il pannello non risponde da nessuna
+  delle due:                                 ssh -L 8080:127.0.0.1:8080 <utente>@<vps>
+                                             poi http://127.0.0.1:8080/admin/setup
+```
+
+*Con il profilo `tailscale` non cambia niente: quell'overlay era già escluso, e la porta era
+già sul loopback.*
+
+🔑 **Lo scriviamo qui perché un fail-closed corretto può chiudere fuori chi stava entrando
+dalla porta giusta di ieri.** Il difetto non è la cura: è scoprirla dal sintomo.
+
+### Sicurezza — controlli che non scattavano
+
+- **Il proxy MCP accettava qualunque token quando l'owner non era configurato.**
+  `_check_bearer` era `if allowed and <sub> not in allowed`: con `OAUTH_ALLOWED_EMAILS`
+  vuota la condizione è sempre falsa, il ramo di rifiuto non veniva mai preso e **ogni
+  access token valido attraversava il proxy**. Ora è fail-closed, con `owner_not_configured`
+  distinto da `subject_not_allowed` — due casi che si curano in modo opposto e nell'audit
+  devono contarsi separatamente. Il precedente era già in casa: `miniapp_core.is_owner`
+  ritorna `False` quando l'owner non c'è (*«se non sappiamo chi è l'owner, nessuno lo è»*).
+- **L'anti-downgrade dell'update si spegneva se la nota di versione spariva.** `consume_intent`
+  leggeva `update_status.json` e trattava «file assente», «illeggibile» e «campo vuoto» come
+  un solo stato muto. Ora sono tre e ognuno rifiuta. E **c'era un percorso, dentro il
+  gateway, che quel file se lo cancellava da solo**: `admin_update_check` scriveva
+  `latest: ""` sopra la nota buona quando la risposta di GitHub non portava il `tag_name`.
+- **Un intent senza nonce era riusabile all'infinito.** Non solo il replay non veniva
+  rilevato: `if nonce:` saltava anche la registrazione, quindi non lasciava traccia.
+- **La porta del pannello di setup restava aperta in chiaro, per sempre, su due profili
+  d'ingresso su tre.** Il criterio che includeva l'override di onboarding non era «il setup
+  è finito» ma «quale ingress hai scelto»: con `caddy` o `cloudflared` la `:8080` in HTTP
+  restava su `0.0.0.0` a tempo indeterminato. Ora sta sul **loopback** (`ONBOARDING_BIND`
+  per riaprirla, col tradeoff scritto) — e la porta non serviva ai due proxy, che
+  raggiungono il gateway dalla rete Docker.
+- **L'audit log accetta solo chiavi dichiarate** (allowlist, non rilevamento), e
+  l'anagrafica non esce più verbatim verso un modello terzo (`H64`).
+- **Chiusi**: `H53` (il perimetro del gate non è più un elenco scritto a mano) · `H55` (le
+  unit systemd non si rendono più come root, su entrambi i percorsi) · `H58` · `H62` · `H63`
+  · `H64`.
+- **Avanzati, e restano `partial` — il registro lo dice e questa riga non lo contraddice**:
+  `H5` (il push off-site resta all'owner: è una **scelta**, non un arretrato — ma «chiuso»
+  direbbe che non c'è più niente da sapere) · `H52` (le garanzie di hardening sono
+  certificate **per stringa e non per comportamento**: il gate cerca il testo nel file) ·
+  `H54` (esiste lo **strumento** della migrazione alla chiave derivata; la migrazione no).
+  🔑 *Questa distinzione è la stessa cosa di cui parla la release: `partial` scritto «chiuso»
+  è un verde che non ha guardato — su un registro di sicurezza, e nel documento che qualcuno
+  legge per decidere se fidarsi.*
+
+### Presìdi che dicevano «verde» senza aver guardato
+
+- Il **gate anti-leak** rispondeva «tutto bene» dopo aver esaminato **zero file**; e conosceva
+  le credenziali altrui, non le nostre.
+- **`/health?deep=1`** rispondeva `200` avendo sondato **zero** backend.
+- **`trivy`**: uno scan *saltato* lasciava il workflow verde — e gira schedulato.
+- **`secrets-status`**: verde su zero secret osservati.
+- **Nove prove empiriche non eseguite** uscivano `0`, cioè «tutto a posto»: *il testo era
+  onesto, il codice no*. Ora una corsa parziale non distrugge il quadro delle nove, e
+  `prova-4` senza l'ancoraggio esterno esce `2` (non-eseguita) invece di `0`.
+- **«Funnel HTTPS attivo»** veniva dichiarato senza aver toccato il Funnel — e la porta di
+  fallback si chiudeva su quella dichiarazione.
+
+### Contabilità dell'ingest e del registro
+
+- **L'estrattore HTML di Telegram era l'unico a scartare in silenzio**: un messaggio senza
+  id spariva col suo testo, e nessuno lo contava. Ora emette `_Skip` come gli altri, con
+  gli scarti che non collassano fra loro.
+- **Il ledger**: il matcher era una regex che passava su codice *commentato* (47 voci); il
+  verso reale→dichiarato non guardava `tools/` (20 script su 24 invisibili); le verifiche
+  `def X` ora leggono l'albero invece di cercare una stringa.
+- **`SECURITY.md` dichiarava 56 voci e il registro ne aveva 63** — e il gate era verde.
+
+### Aggiunto
+
+- **voice-tagging**: separa *chi ha scritto* da *di chi è la voce*, e lo rende interrogabile.
+  Quattro stati distinti (`''` non classificato · `unknown` · classificato · `ignoto`
+  pre-migrazione), migrazioni idempotenti, FTS *external content* — nessun rebuild
+  distruttivo sugli archivi vivi.
+- **Presìdi nuovi**: il fail-closed dell'update (`prova-9`), un aggancio di collaudo che
+  *può solo dire no* (health-gate), e i test sulla trust-list dell'`X-Forwarded-For`.
+
+### Dichiarato, non risolto
+
+- **La garanzia sull'`X-Forwarded-For` ha due gambe, e una non è nostra.** *«L'IP client non
+  è più spoofabile»* poggia sul comportamento di `ProxyHeadersMiddleware` di uvicorn
+  («cammina da destra»), che **è storicamente cambiato** — le versioni più vecchie leggevano
+  da sinistra, cioè la parte che un client inietta. Il vincolo è `>=`, e uvicorn è `0.x`.
+  La gamba nostra è presidiata da test; l'altra è **scritta in `docs/ARCHITECTURE.md`**, con
+  la strada da cui ripartire se un giorno l'IP tornasse spoofabile senza che nessuno abbia
+  toccato la configurazione.
+- **L'installer non poteva distinguere «non c'è nessuna release» da «non ho potuto
+  chiedere»**: ora sì, in tutti e tre gli installer, e un errore di rete **ferma**
+  l'installazione invece di degradarla in silenzio a build locale — che non passa dalla
+  verifica della firma.
+
+## [0.40.14] — 2026-07-27
+
+Il rilascio che chiude il **residuo dichiarato** del giro precedente: la copia di sicurezza
+si scrive su un nome provvisorio e prende il nome definitivo solo quando è finita.
+
+> **Perché non era stato fatto subito, ed è la parte che vale**: la modifica precedente
+> toccava la *conservazione* delle copie, e volevo che andasse in produzione **da sola e
+> misurabile**. Ci è andata, è stata misurata sulla macchina, e solo allora si è toccato
+> il secondo pezzo. *Due cambiamenti insieme sullo stesso file avrebbero reso illeggibile
+> quale dei due produceva quale effetto.*
+
+### Corretto
+
+- **Una copia interrotta non lascia più un file col nome giusto.** Prima si scriveva
+  direttamente sul nome definitivo: un processo ucciso o uno spegnimento lasciavano un
+  file **col nome buono e il contenuto a metà**, che la rotazione contava come la copia di
+  quel giorno. Ora si scrive accanto, con un nome provvisorio, e si rinomina alla fine —
+  la rinomina è **istantanea e indivisibile**, quindi il nome definitivo o non esiste o è
+  un file completo. *Sparisce l'istante in cui poteva esistere una copia a metà.*
+- **E i resti delle scritture morte vengono rimossi dicendolo.** Un resto pesa 2,5 GB, e
+  non è spazzatura: è **la traccia di una copia mai completata**, cioè di una notte
+  scoperta. Il messaggio lo dice invece di ripulire in silenzio.
+
+*Residuo che resta, più stretto del precedente: i byte vengono spinti su disco prima della
+rinomina, ma se lo strumento di sistema non accetta quel modo si prosegue senza — una copia
+scritta vale più di una garanzia in più non ottenuta. In quel caso una mancanza di corrente
+lascerebbe un file provvisorio, non una copia monca: il danno peggiora nel modo giusto.*
+
+> ⚠️ **La 0.40.13 esiste come etichetta e non è mai stata pubblicata.** L'avevo marcata su
+> un commit i cui controlli erano rossi — un controllo del registro che avevo lanciato in
+> modo da non vederne l'esito. Il rilascio **si è fermato da solo**: il primo passo del
+> processo verifica che i controlli del commit etichettato siano verdi, e ha rifiutato di
+> pubblicare. Nessun pacchetto rotto è uscito. L'etichetta resta dov'è perché una regola
+> del repository, giustamente, vieta di cancellarla — *questo contenuto è qui, sotto il
+> numero successivo.*
+
+## [0.40.12] — 2026-07-27
+
+Il rilascio in cui **un controllo nato ieri impara a dire «non lo so»**. Una riga sola di
+sostanza, e viene da una rilettura fatta lo stesso giorno in cui quel controllo è nato.
+
+> **La cosa che vale più del fix**: il difetto colpiva esattamente il criterio che quel
+> controllo si era dato da sé. *Un allarme che grida al lupo brucia la fiducia prima della
+> volta in cui è vero* — e gridare «le tue copie di sicurezza sono sparite» per un
+> problema di permessi fa quel danno per un'altra strada.
+
+### Corretto
+
+- **«Non riesco a leggere» non è «non c'è niente».** Il controllo sulla copertura delle
+  copie, se la cartella non era leggibile, otteneva zero e lo trattava come una perdita:
+  avrebbe mandato l'avviso più allarmante che sappia produrre — *«la finestra di
+  ripristino si è accorciata: zero giorni»* — per un problema di permessi. *Su questa
+  macchina non è un caso di scuola: la stessa forma, permessi fra utente e
+  amministratore, ha fermato un aggiornamento vero la mattina del 27 luglio.*
+  Ora distingue **tre** stati: non misurato, misurato e vuoto, N giorni. Sul non misurato
+  non allarma e non tocca la memoria di quanto copriva prima — **dichiara di essere
+  cieco**, che è un'altra cosa e va saputa lo stesso.
+
+## [0.40.11] — 2026-07-27
+
+Il rilascio in cui **due regole scritte diventano controlli**. Nessuna funzione nuova per
+chi usa il servizio: due cose che il progetto prometteva a parole e che nessun controllo
+faceva rispettare.
+
+> **La cosa che vale più dei due fix**: entrambi i controlli, la prima volta che sono
+> stati eseguiti, hanno trovato un difetto **in sé stessi**. Uno era verde per costruzione
+> — non poteva diventare rosso nemmeno volendo. *Un controllo che non si è mai visto
+> fallire non è un controllo: è una riga di log con la faccia seria.*
+
+### Corretto
+
+- **La finestra di ripristino si accorciava in silenzio.** Lo script dei backup chiudeva
+  dicendo «copie totali mantenute: 7» — un **conteggio**, mentre la promessa che quello
+  script mantiene è in **giorni**. Il 27 luglio ha detto «7» quando i giorni erano tre, e
+  poi ancora «7» quando erano due: non ha mai mentito e non ha mai detto niente. Ora dice
+  **quanti giorni distinti** copre e da quando a quando, e avvisa se sono meno di sette
+  spiegando come leggerlo.
+- **E quel numero adesso lo guarda qualcuno.** Anche scritta giusta, quella riga finisce
+  in un file di log dentro un container che nessuno apre. Il controllo giornaliero — lo
+  stesso che già ogni giorno verifica se il servizio risponde — ora guarda anche la
+  copertura e **avvisa su Telegram**. 🔑 Avvisa di una **regressione**, non di una finestra
+  non ancora piena: dopo un'installazione nuova la copertura è 1, poi 2, poi 3, ed è
+  normale — *un allarme che suona quando va tutto bene viene messo a tacere prima di
+  servire davvero*. Quello che non è mai normale è che scenda sotto il massimo già
+  raggiunto, perché a regime le copie si sostituiscono, non si perdono.
+- **Un indirizzo pubblico nel repo, e nessun controllo che lo impedisse.** La regola era
+  scritta — nessun indirizzo o nome della macchina, in nessuna forma, nemmeno in un
+  esempio — e la applicavamo a mano. Un indirizzo è entrato dentro una nota che
+  documentava una misura ed è rimasto visibile per otto ore. *Non è la macchina né la sua
+  rete privata: è un ingresso pubblico e condiviso, e non dà accesso a niente.* Ora
+  indirizzi pubblici e nomi di rete reali **fanno fallire la build**, con le esclusioni
+  giuste: reti private, indirizzi nati apposta per la documentazione, e i bersagli di test
+  dichiarati **uno per uno col perché** — *un controllo che grida al lupo viene spento.*
+
+### Aggiunto
+
+- **Il controllo sui backup ora si può provare**: `bash tools/backup.sh --prune-only`
+  applica la rotazione senza scrivere 2,5 GB. Nove casi a risposta nota, e i tre nuovi
+  presidiano il rendiconto — compreso quello che inganna il conteggio: sette file di un
+  solo giorno.
+- **Undici casi per il controllo sugli indirizzi**, metà dei quali contro i *falsi* rossi:
+  un numero di sezione di una specifica (`§4.1.2.1`) somiglia a un indirizzo, e la
+  dimensione di un file scritta all'italiana pure.
+
+### Verificato
+
+- Il controllo sugli indirizzi ora guarda anche i file **nuovi**, non solo quelli già
+  registrati: prima rispondeva sul repo com'è invece che su come sta per diventare.
+- Le esenzioni sono **per regola** e non più per file: un file esentato perché parla dei
+  segreti non è più esentato anche dal resto. *Era esattamente il motivo per cui
+  l'indirizzo è potuto restare dov'era.*
+
+## [0.40.10] — 2026-07-27
+
+Il rilascio in cui **le copie di sicurezza smettono di perdere giorni**. Nessuna
+funzione nuova per chi usa il servizio: la macchina teneva sette copie e copriva tre
+giorni, e nessuno poteva accorgersene perché il conteggio tornava.
+
+> **La cosa che vale più del fix**: la finestra di ripristino si accorciava proprio nel
+> giorno in cui qualcosa si rompeva. Ogni aggiornamento fa la sua copia; il 27 luglio la
+> macchina è stata aggiornata quattro volte in una mattina perché c'era un guasto, e
+> quelle quattro copie hanno occupato quattro dei sette posti, cancellando le notti dal
+> 20 al 24. *L'evento che consuma i posti è lo stesso che rende quelle copie necessarie.*
+
+### Corretto
+
+- **Sette copie non erano sette giorni.** La rotazione teneva gli ultimi sette *file* e
+  la riga accanto prometteva «7 giornalieri»: due unità di misura con lo stesso nome, che
+  coincidono finché arriva una copia per notte — cioè sempre, tranne nel giorno storto.
+  Ora se ne tiene **una per giorno, la più recente, per sette giorni distinti**. Per il
+  giorno in corso la più recente è quella fatta subito prima dell'ultimo aggiornamento,
+  che è esattamente ciò che serve per tornare indietro. *Il secondo livello — una copia a
+  settimana — non poteva rimediare: ha la stessa larghezza del primo, sette giorni,
+  quindi non lo estende, lo ricopre.*
+  **Il disco non cresce di un byte**: stessi sette posti, stessi ~18 GB. Tenerne di più
+  non era la strada — su quella macchina le copie sono già il 69% del disco occupato.
+
+- **Una copia interrotta restava lì e sembrava buona.** Se la scrittura si fermava a metà
+  — disco pieno, processo ucciso — rimaneva un file col nome giusto e il contenuto
+  troncato, e la rotazione lo contava come la copia di quel giorno. Ora viene rimosso se
+  la scrittura non arriva in fondo. *Residuo dichiarato: contro uno spegnimento brutale
+  servirebbe scrivere su un nome provvisorio e rinominare alla fine.*
+
+- **Una guardia fissa a difesa di dati che crescono.** Prima di aggiornare si controllava
+  di avere 5 GB liberi, e le due copie che quell'aggiornamento scrive ne occupano circa 5.
+  Il difetto non era la cifra: era che fosse **una costante**. Il giorno in cui una copia
+  peserà il doppio, quella soglia direbbe di sì a un'operazione che non ci sta — e
+  sembrerebbe verde fino a quel giorno. Ora si calcola dalla copia più grande presente e
+  cresce da sola. Il vecchio valore resta come minimo assoluto.
+
+- **Il backup notturno non aveva nessuna guardia di spazio.** Ora la stima dalla copia
+  precedente e, se non ci sta, **rifiuta di scrivere invece di fallire a metà**. Al primo
+  giro non c'è nulla da cui stimare e lo dichiara, invece di inventare una soglia.
+
+### Aggiunto
+
+- **Il primo controllo automatico sulla rotazione**, su sei casi costruiti di cui la
+  risposta si conosce prima di eseguirli — compresi quelli che deve *lasciar passare*.
+  Due dei sei hanno trovato difetti che nessuno cercava: su cartella vuota lo script
+  usciva con un codice d'errore *dopo* aver finito il lavoro, e un nome di file
+  illeggibile rubava davvero un posto alle copie vere. La rotazione è l'unico pezzo di
+  vps1777 che cancella dati non rigenerabili, e fino a oggi non aveva una sola prova.
+- `bash tools/backup.sh --prune-only` — applica la rotazione senza fare una copia nuova.
+  È ciò che rende la rotazione provabile senza cifrare 2,5 GB.
+
+### Verificato
+
+- Due controlli non guardavano dove serviva: l'analizzatore degli script di shell non
+  copriva la cartella dei test, e il lanciatore dei test Python non vede i file di shell —
+  il nuovo controllo sulla rotazione sarebbe rimasto fermo sul disco con la build verde.
+  Entrambi estesi.
+
+## [0.40.9] — 2026-07-27
+
+Il rilascio in cui **i controlli hanno controllato sé stessi**. Nessuna funzione nuova
+per chi usa il servizio: quattro difetti nei controlli, e uno dei quattro nascondeva un
+errore vero nella conservazione dei backup.
+
+> **La cosa che vale più dei fix**: lo stesso controllo, eseguito in due posti, dava due
+> verdetti diversi sullo stesso identico codice — verde qui, rosso nella build — perché
+> «lo strumento X» non identifica uno strumento: identifica *una copia* di quello
+> strumento, in *quel* posto, a *quella* versione. Ora è fissato per impronta, come tutto
+> il resto.
+
+### Corretto
+
+- **Un controllo che approvava senza sapere.** Il passo che impedisce di modificare le
+  migrazioni già pubblicate catturava il confronto con un «va bene comunque» in coda: se
+  il confronto fosse fallito per un motivo vero, il risultato sarebbe stato vuoto e il
+  passo avrebbe **approvato la modifica**. Ora, se non riesce a confrontare, si ferma e
+  lo dice: *«non so dire se le migrazioni siano intatte, e "non lo so" non è "vanno
+  bene"»*.
+- **La soglia dell'analisi degli script abbassata al minimo** invece che alzata. Prima
+  ignorava una categoria di segnalazioni *senza dire quali*; ora non tollera niente in
+  silenzio, e le sette eccezioni che restano sono scritte nel codice una per una **col
+  perché accanto**. *Una soglia alzata nasconde N cose e non dice quali; un'eccezione
+  dichiarata è una cosa sola, con un nome e una ragione che il prossimo può contestare.*
+  Fra queste, una era un difetto vero: una forma che *sembra* un se-allora-altrimenti e
+  non lo è, nell'installer.
+- **Lo strumento di analisi fissato per impronta.** Nella build era una versione, in
+  locale un'altra, e le due davano verdetti diversi. Nessuna delle due sbagliava: erano
+  due strumenti diversi con lo stesso nome, e niente lo diceva.
+- **Il registro non si fida più di un commento.** Le sue prove cercano un testo dentro i
+  file: se quel testo sopravviveva *solo in un commento*, la prova restava verde mentre
+  il codice che doveva sorvegliare non c'era più — guardava la spiegazione, non la cosa.
+  Verificato sul caso peggiore: cancellando una riga che protegge i cookie di Google e
+  lasciandone il commento, prima passava, ora si ferma. Le prove che devono *davvero*
+  vivere in un commento — quelle che tengono in vita una **ragione** — ora si dichiarano
+  come tali.
+- **Il ledger delle funzioni si accorgeva di ciò che nasce, non di ciò che cambia.**
+  Quattro funzioni entrate oggi vivono dentro comandi e timer che esistevano già: non
+  creando nulla di nuovo, erano invisibili al controllo automatico — ed è esattamente ciò
+  per cui quel ledger esiste. Aggiunte; il buco resta scritto accanto a loro.
+
+## [0.40.8] — 2026-07-27
+
+Il rilascio che **porta gli strumenti dove servono**. Tre correzioni nate tutte dallo
+stesso gesto — aggiornare davvero la macchina e guardare cosa succede, invece di
+leggere il codice.
+
+> La più istruttiva non è un fix ma una **cosa data per impossibile e misurata lo
+> stesso**: il controllo che esce su Internet e rientra sembrava non potersi fare dalla
+> macchina, perché la richiesta avrebbe girato su sé stessa. Misurata, esce davvero.
+> *Un limite dedotto invece che misurato è un numero senza misura travestito da
+> vincolo tecnico.*
+
+### Dichiarato
+
+- **La seconda metà di un rilievo che risultava chiuso** (`H56`). Prima di ogni
+  aggiornamento la macchina prende una copia di sicurezza locale per poter tornare
+  indietro. Una voce chiusa raccontava che da quella copia erano stati esclusi i cookie
+  di Google: vero, ma era **un archivio su due**, e quello che resta è dodicimila volte
+  più grande — circa 2,58 GB **in chiaro**, mentre gli stessi dati per l'altra strada
+  viaggiano cifrati. *Il chiaro non è il difetto: quella copia serve al ripristino
+  automatico, e cifrarla la renderebbe illeggibile proprio a chi deve usarla.* **Il
+  difetto è che chi leggeva il registro concludeva che il problema fosse chiuso.**
+  Misurato sulla macchina viva, non dedotto. La cura possibile — cifrare il disco — si
+  fa sul disco e non nel codice: è una decisione di chi possiede la macchina.
+
+### Aggiunto
+
+- **Il controllo giornaliero esce su Internet e rientra** (`H51` c). Fino a ieri
+  guardava la porta *sulla macchina*: con la porta viva e il tunnel pubblico caduto,
+  per chi apre l'indirizzo il servizio è giù e nessun controllo lo direbbe. Ora la
+  richiesta parte, esce davvero verso l'esterno e rientra dall'indirizzo pubblico.
+  *Era stata data per impossibile — sembrava che dalla macchina la richiesta girasse
+  su sé stessa: misurata, esce; la stessa richiesta all'indirizzo interno non
+  risponde.* Provata sui tre esiti sulla macchina in produzione. **Non** entra nel
+  cancello dell'aggiornamento, di proposito: quel cancello giudica ciò che
+  l'aggiornamento può rompere, e un singhiozzo del tunnel farebbe tornare indietro
+  una versione sana.
+
+- **Le prove empiriche viaggiano col pacchetto** (`H51` d). Sono l'unico strumento che
+  misura sul **sistema vivo** ciò che gli altri controlli verificano leggendo file — e
+  restavano nel repo di sviluppo: sulla macchina andavano copiate a mano, quindi non
+  c'erano. *Un controllo che per essere usato richiede un gesto manuale, nel giorno del
+  guasto non esiste.* Settantadue kilobyte di script, nessuna dipendenza: il costo non
+  era l'argomento.
+
+### Corretto
+
+- **Un aggiornamento non viene più abortito dal file che serve a raccontarlo**
+  (`H55`). Il comando `vps1777 update` — quello che la documentazione consiglia —
+  moriva a metà strada con un errore di programma se non riusciva a scrivere il file
+  che i pannelli leggono per **disegnare la barra di avanzamento**. Trovato
+  aggiornando davvero la macchina, non leggendo il codice: l'aggiornamento automatico
+  gira con privilegi diversi da chi lancia il comando a mano, e lascia dietro un file
+  che l'altro non può più riscrivere. **Rifiutarsi di installare qualcosa la cui firma
+  non torna è giusto; rifiutarsi di riparare perché non si riesce a scriverne il
+  resoconto non lo è.** Ora avvisa e prosegue — una volta sola, non a ogni passo — e
+  quando può rimette il file nella disponibilità di chi userà il comando dopo.
+
+## [0.40.7] — 2026-07-27
+
+Il rilascio dei **controlli che non controllavano**. La `0.40.6` ha rimesso in piedi
+il servizio; questa guarda i presìdi stessi e trova che alcuni non potevano vedere
+ciò per cui esistevano — uno era verde per costruzione e nascondeva un difetto vero
+nella conservazione dei backup.
+
+> **La cosa più utile della giornata non è un fix, è una misura**: uno dei difetti
+> che l'analisi esterna ha segnalato era **già scritto nel registro dal 4 luglio**,
+> esatto, dentro un file che una pipeline controlla a ogni commit — e non era
+> diventato codice per ventitré giorni, perché *nulla falliva se restava prosa*.
+> Un audit che ri-scopre una tua nota «da fare» non ti dice una cosa nuova: ti
+> misura quanto è vecchia.
+
+### Aggiunto
+
+- **Il servizio è controllato anche quando non si sta aggiornando nulla** (`H51` b).
+  Il controllo che guarda la porta *da fuori* del container esisteva dalla `0.40.6`,
+  ma girava solo durante un aggiornamento: un guasto arrivato in altro modo restava
+  invisibile finché non apriva l'indirizzo una persona — che è precisamente com'è
+  andata il 27 luglio, per un'ora e mezza. Ora la stessa domanda si fa **una volta al
+  giorno**, dentro il controllo che già gira, e arriva un avviso quando il servizio
+  smette di rispondere e un altro quando torna, **con la durata misurata fra i due
+  istanti** — il numero che quel giorno nessuno aveva. Notifica i cambi di stato, non
+  lo stato: un avviso che si ripete ogni giorno uguale si impara a ignorare.
+- **La via d'emergenza `cosign` non si dimentica più da sola** (`H49` ③). Mettere
+  `VPS1777_REQUIRE_COSIGN=0` nel `.env` sblocca una crisi ed è giusto che si possa
+  fare — ma finora restava lì per sempre, riletta a ogni aggiornamento compreso
+  quello automatico settimanale, e nessuno lo diceva. Ora il promemoria settimanale
+  che già segnala i segreti da rinnovare segnala anche questa, con da quanti giorni
+  è aperta, e la voce sparisce da sola appena la si toglie. **Non forza il ripristino
+  della verifica**: la crisi che ti ha fatto aprire la via d'emergenza può durare più
+  di un giorno, e richiuderla da soli ti chiuderebbe fuori mentre stai riparando.
+  Era dichiarato nel registro dal 4 luglio come «da fare, non ancora implementato»:
+  ventitré giorni di prosa esatta che non diventava codice perché nulla falliva se
+  restava prosa.
+
+### Corretto
+
+- **Un difetto vero nella conservazione dei backup** (`H53`). Un file di backup col
+  nome fuori formato non veniva scartato come previsto: si prendeva uno dei quattro
+  posti riservati ai backup settimanali, buttandone fuori uno buono. Presente da
+  sempre, e **segnalato dal primo giorno** dallo strumento di analisi degli script —
+  che però in build girava con un pezzo in coda che ne buttava via il risultato.
+- **Due controlli che non potevano fallire** (`H53`). Il passo che analizza gli script
+  di shell era verde per costruzione; ora può diventare rosso, verificato rimettendo
+  il difetto apposta. Il controllo di stile del Python guardava due percorsi su
+  quattro: esteso a tutti, e fuori non c'era nulla di rotto — che è il motivo per cui
+  la lacuna poteva durare tanto.
+- **Il registro non poteva più dire di venire da una versione che non esiste.** Il
+  campo che dichiara da quale versione vale ogni voce era l'unico che nessun
+  controllo leggeva, e conteneva una versione mai rilasciata. Ora è verificato contro
+  questo file. E ogni residuo dev'essere **nominato** in `SECURITY.md`, non solo
+  contato: la tabella diceva dieci, il testo ne raccontava nove, e i conti tornavano.
+- **Il file di test della CLI eseguiva 32 test su 39 quando lo si lanciava a mano**,
+  uscendo `0`. I sette invisibili erano i più recenti. Corretto, e chiuso con un
+  controllo che rilegge il file: se qualcuno ne aggiunge uno nel punto sbagliato,
+  la build lo dice invece di tacere.
+- **Il contratto dell'indicizzatore d'archivio copre i messaggi con contenuto
+  dichiarato e vuoto**, la classe da cui veniva un divario di quasi settemila record.
+  Il codice era già giusto: mancava il controllo che lo tiene giusto — e la fixture
+  di prima passava verde sulla stessa regressione.
+- **Il documento di sicurezza diceva una cosa non più vera** su sé stesso: sosteneva
+  che il controllo della raggiungibilità «qualcuno deve lanciarlo» e che «lo stesso
+  guasto passerebbe di nuovo». Falso dalla `0.40.6`. Il registro lo sapeva, il
+  documento no, e nessun controllo poteva accorgersene — verifica che un rilievo sia
+  *nominato*, non che la frase dica il vero.
+
+### Dichiarato
+
+- **Un rischio che il registro copriva solo di sponda** (`H54`). Il gateway monta
+  cinque credenziali, e c'era una voce **chiusa** su questo terreno — ma chiudeva una
+  lacuna *nella documentazione*, non il rischio: chi cercava cosa resta scoperto non
+  trovava nulla. Misurato, il numero giusto è **uno, non cinque**: quattro di quelle
+  credenziali sono del gateway stesso, e chi prende il gateway le ha già. Il token del
+  bot no — quello serve a **parlare come il bot**, anche fuori da qui. Non è risolto:
+  è scritto con lo stato che lo dice, perché la difesa possibile costa un pezzo in più
+  da mantenere ed è un baratto che decide chi possiede la macchina.
+
+## [0.40.6] — 2026-07-27
+
+Rilascio di riparazione, e la parte che conta non è la riparazione. La `0.40.5`
+chiudeva un buco reale e **ha reso il servizio irraggiungibile da Internet per
+un'ora e ventotto minuti** — mentre tre controlli indipendenti davano verde.
+
+> **Rettifica interna al rilascio**: la prima stesura di questa voce diceva «un'ora
+> e quaranta». Il numero era **dedotto**, non misurato — preso dall'ora di partenza
+> dell'aggiornamento e dall'ora in cui stavamo scrivendo, che non sono gli estremi
+> del guasto. Gli istanti reali (`05:56:13Z` → `07:24:03Z`) danno **1h27m50s**.
+> Corretto perché un numero senza la sua misura è esattamente il difetto che questa
+> versione documenta.
+
+### Corretto
+
+- **Il servizio torna raggiungibile, senza riaprire il buco che la `0.40.5`
+  aveva chiuso.** Tolta al gateway l'ultima rete non-interna che aveva, era
+  rimasto solo su una rete `internal: true` — e **da una rete interna una porta
+  non si può pubblicare**: Docker accetta l'istruzione `ports:` e non la applica,
+  senza dirlo. Il tunnel bussava a una porta dove non c'era nessun processo in
+  ascolto. Ora il profilo Tailscale usa una rete propria in cui **il traffico in
+  ingresso passa e quello in uscita no** (il `masquerade` è spento: i pacchetti
+  verso Internet partono con un indirizzo privato e non tornano indietro).
+  Misurato sui due esiti, su due versioni di Docker, e poi sul sistema vivo dopo
+  l'applicazione: porta pubblicata, risposta dall'host, risposta da fuori
+  attraverso il tunnel, uscita verso Internet in timeout — e la controprova che
+  da un altro container la stessa uscita riesce, senza la quale un timeout non
+  distingue un blocco mirato da una rete guasta.
+- **Il controllo di salute dell'aggiornamento guarda anche da fuori.** È il
+  motivo per cui il guasto è passato: tutte le sonde interrogavano il gateway
+  **dall'interno del suo container**, dove la porta risponde sempre — anche
+  quando dall'esterno non esiste. Il container risultava sano, il comando che
+  mostra la configurazione mostrava la porta (dice cosa è *dichiarato*, non cosa
+  Docker riesce ad applicare), e il cancello dell'aggiornamento ha dato via
+  libera: **per questo non è scattata la marcia indietro automatica**. Ora c'è
+  anche una sonda che guarda la porta dall'host. Fallisce solo con una prova
+  positiva del guasto — «non ho misurato» non è «è rotto», perché qui un falso
+  allarme provocherebbe un ritorno indietro non necessario — e con Caddy o
+  Cloudflared, dove a ricevere il traffico è il proxy, si dichiara non
+  applicabile invece di accusare.
+
+### Aggiunto
+
+- **Una prova che misura la porta dal lato da cui il guasto si vede**
+  (`tools/prove-empiriche/prova-7`): verifica dall'host che la porta sia
+  pubblicata **e** che risponda, e distingue «non applicabile» da «passata»
+  uscendo con un codice diverso. È stata provata sui due esiti prima di essere
+  dichiarata utile: verde sul servizio vero, **rossa su un container rotto
+  apposta**. Delle sette prove è per ora l'unica di cui si sappia che sa
+  diventare rossa.
+- **Il registro dei rilievi ha una voce nuova, `H51`**, che non nasce da una
+  lettura ma da un guasto: *i controlli di salute sondano dal lato in cui il
+  problema non si vede*. Resta dichiarata parziale, con i tre residui scritti:
+  nessun controllo periodico, la sonda non attraversa il tunnel, e le prove
+  empiriche non entrano ancora nel pacchetto di aggiornamento.
+
+### Nota per chi aggiorna
+
+Nessuna migrazione, nessun segreto nuovo. Chi usa il profilo Tailscale ottiene
+una rete Docker nuova (`funnel`) e il gateway ricreato una volta. Chi usa Caddy
+o Cloudflared non cambia nulla — **e su quei due profili il gateway ha ancora
+l'uscita verso Internet**: `H50` resta parziale per loro, ed è scritto invece che
+taciuto, perché la rete che userebbe la stessa cura è quella su cui Cloudflared
+deve poter uscire per funzionare.
+
+### Rettifica alla nota della `0.40.5`
+
+Quella voce diceva: «Verificato eseguendo `docker compose config` su tutti e tre
+i profili». Era vero e **non bastava**: quel comando riporta ciò che è
+dichiarato, non ciò che Docker riesce ad applicare, e infatti mostrava la porta
+mentre il servizio era giù. Aver eseguito uno strumento non è aver misurato un
+effetto.
+
+## [0.40.5] — 2026-07-26
+
+Chiude il secondo dei due difetti che il ciclo di audit aveva **misurato** sul
+sistema vivo invece di dedurlo dai documenti: il gateway — il solo servizio
+esposto su Internet, e quello che monta i cinque secret — aveva un'uscita
+verso qualunque host. Ora non ce l'ha.
+
+### Corretto
+
+- **Il gateway non esce più su Internet.** Stava sulla rete `ingress`, che è un
+  bridge non-`internal`: aveva quindi una via d'uscita NAT verso qualsiasi
+  destinazione — verificato con un socket aperto dall'interno del container, non
+  dedotto da una lettura. La rete non è più dichiarata nel compose di base: la
+  ri-mette il profilo che ne ha bisogno (Caddy e Cloudflared lo facevano già da
+  sé; col profilo Tailscale il gateway è raggiunto da una porta pubblicata su
+  loopback e non le serve). Verificato eseguendo `docker compose config` su
+  tutti e tre i profili: col profilo Tailscale la rete `ingress` non viene
+  nemmeno creata, perché nessun servizio la usa.
+- **Il pannello non chiama più «guasto» una cosa che è una scelta.** Il pulsante
+  «Ricontrolla adesso» interrogava GitHub dal gateway e ora non può più: senza
+  un rimedio, avrebbe mostrato un errore di rete indistinguibile da un
+  malfunzionamento. Il messaggio dice che non è un guasto e che l'avviso di
+  aggiornamento continua ad aggiornarsi da solo — senza affermare quale delle
+  due cause sia, perché il gateway non può distinguere «non ho rete» da «GitHub
+  non risponde», e sceglierne una sarebbe inventare una diagnosi.
+- **Il verdetto sugli aggiornamenti porta la propria età.** Diceva «Sei alla
+  versione più recente» al presente, con la data dell'ultimo controllo stampata
+  sotto in grigio: le due righe insieme dicevano il vero, la prima da sola no —
+  ed è quella che si legge. Il controllo gira una volta al giorno, quindi quel
+  verdetto poteva avere fino a un giorno. Ora l'età è dentro la frase, e oltre
+  le 26 ore cambia significato: non «dato vecchio» ma «il controllo automatico
+  potrebbe non essere attivo», col comando per verificarlo. Sono due condizioni
+  diverse e finora erano lo stesso verde.
+
+### Aggiunto
+
+- **La logica che decide cosa legge l'amministratore ora ha dei test.** Nessuno
+  dei test del gateway importava `admin.py` — non può, tira dentro starlette e
+  pydantic mentre la CI gira i test senza dipendenze pesanti: tutta quella
+  logica viveva dove nessun controllo la guardava. La decisione è stata estratta
+  nel modulo puro accanto (`admin_core`, che esiste per questo e lo dichiara),
+  con dieci test nuovi e le rispettive controprove — mutando la soglia e il
+  confronto di versione, i test falliscono.
+
+### Nota per chi aggiorna
+
+Nessuna migrazione, nessun segreto nuovo. **Dopo questo aggiornamento il
+pulsante «Ricontrolla adesso» del pannello smette di funzionare**: è
+intenzionale, ed è il prezzo di un gateway che non parla con Internet.
+L'avviso di aggiornamento resta e si rinfresca da sé una volta al giorno dal
+controllo che gira sull'host, che la rete ce l'ha; la pagina ora dice
+esplicitamente quanto è vecchio quel controllo.
+
+## [0.40.4] — 2026-07-26
+
+Rilascio di allineamento: la `0.40.3` è stata taggata su uno stato la cui CI
+non era mai passata al verde, e i tre commit che l'hanno riportata verde sono
+finiti **dopo** il tag, fuori dalla release. Nessun servizio ne era toccato —
+il bundle runtime non contiene nessuno dei file corretti, quindi l'artefatto
+installabile della `0.40.3` è identico a quello che sarebbe uscito dallo stato
+verde — ma il sorgente al tag `v0.40.3` fallisce il proprio controllo del
+registro, e per un progetto il cui valore dichiarato è «il registro presidia
+le garanzie» quella incoerenza vale un rilascio.
+
+### Corretto
+
+- **`SECURITY.md` combacia col registro** (50 rilievi, 41 chiusi, 2 accettati:
+  i numeri erano fermi al dossier originario di 43 mentre il ciclo di audit ne
+  ha aggiunti 7 legittimi). Il gate `check_findings.py` è verde di nuovo, e la
+  sua àncora ora **dichiara la propria provenienza** invece di portare numeri
+  nudi: chi la sposta deve nominare le voci che aggiunge.
+- **`ruff` è pinnato** (`0.15.22`). Era l'unico strumento non pinnato di un
+  repo che pinna le action per sha e le immagini per digest: si è aggiornato
+  da solo a `0.16.0` e ha bocciato con 181 rilievi codice identico a quello
+  verde di sei giorni prima. Un linter che cambia versione da sé è un gate che
+  cambia contratto senza un commit.
+
+### Aggiunto
+
+- **La release non parte più da uno stato che non passa i propri controlli.**
+  Il job `guard` di `release.yml` verifica che la CI del commit taggato sia
+  conclusa in `success` prima di costruire e firmare: fallita → release
+  fermata con un messaggio che dice cosa fare; ancora in corso → attende fino
+  a 15 minuti (il caso legittimo di tag e branch pushati insieme). Chiude la
+  seconda metà di `H24`: la firma cosign certifica **da quale workflow** viene
+  un artefatto, non che quello stato fosse in regola — e finora niente lo
+  verificava. Questo rilascio è la sua prima esecuzione reale.
+
+### Nota per chi aggiorna
+
+Nessuna migrazione, nessun segreto, nessun cambiamento di comportamento nei
+servizi: chi è già sulla `0.40.3` non ha nulla di rotto da riparare. Restano
+valide la nota sulla potatura degli snapshot e il residuo dichiarato in `H50`
+(l'uscita Internet del gateway) della `0.40.3` qui sotto.
+
+## [0.40.3] — 2026-07-26
+
+Prima release nata da un ciclo di audit con misure sulla macchina viva (cinque
+tornate: lettura del codice → verifica indipendente → prova empirica → fix →
+gate incrociato, tre sessioni che si controllano a vicenda). I due difetti che
+corregge non sono stati trovati leggendo: sono stati **misurati** su una
+installazione di produzione, e uno dei due esisteva da sempre senza che nessun
+documento mentisse.
+
+### Corretto
+
+- **La retention degli snapshot pre-update ora scatta davvero.** La potatura a
+  72h viveva solo nello step finale di un update *riuscito*: con update più
+  rari della finestra, non scattava mai — misurato sul vivo: 8 snapshot non
+  cifrati, ~14,5 GB, fermi da 6 giorni. Ora `cmd_check` pota **a ogni giro del
+  timer giornaliero**, prima del fetch da GitHub (funziona anche a rete rotta),
+  e protegge **sempre** lo snapshot più recente (`keep=snapshot_latest`, non
+  `keep=None`): il punto di ripristino della versione in esecuzione sopravvive
+  a qualunque età. Senza quella protezione — trovato al quinto giro di audit,
+  sul diff del fix stesso — il primo check dopo questo rilascio avrebbe potato
+  *tutti* gli snapshot, incluso quello a cui tornare se la versione corrente
+  si rivelasse rotta. Anche la rollback-routine ora passa `keep=snap`: il
+  ripristino non cancella lo snapshot che gli serve.
+- **Il fail-open della firma cosign non è più silenzioso.** Con
+  `VPS1777_REQUIRE_COSIGN=0` e una release senza `.sig`/`.pem`, il bundle
+  veniva installato senza verifica **e senza dirlo**. La scelta resta possibile
+  (è l'ultima spiaggia dichiarata, non un bypass), ma ora produce un avviso
+  esplicito nel log — e la nota va detta intera: quell'interruttore in `.env` è
+  **persistente**, vale per tutti gli update futuri finché non lo si rimuove.
+- **`setup.sh` allinea l'hardening host agli altri due installer.** Installava
+  lo stack senza `unattended-upgrades` né `fail2ban`, che `deploy.sh` e
+  l'installer web applicano da sempre: terza incarnazione dello stesso blocco,
+  ora presente in tutti e tre i percorsi. E abilita `auto-update.timer` dalla
+  feature dichiarata (`VPS1777_FEATURES`), come gli altri.
+
+### Aggiunto
+
+- **`tools/prove-empiriche/` — sei prove eseguibili sul sistema vivo**, con
+  exit code a tre stati (0 regge · 1 non regge · 2 non misurabile, mai
+  confuso con un verde). Nate dal ciclo di audit e già temprate sul campo: le
+  prime tre hanno prodotto un falso PASS (script troncato via stdin di
+  `docker exec`) e un falso FAIL (`expose` scambiato per `ports`), corretti
+  misurando di nuovo. La prova-4 (snapshot) confronta ciò che il codice
+  proteggerebbe con la **versione in esecuzione** letta da una fonte esterna
+  ai dati giudicati: sa dire di no anche al codice che presidia.
+- **`CODEOWNERS`**: le modifiche a `security/` chiedono la review del
+  proprietario. Da solo non impone nulla — lo impone una branch protection, e
+  il registro (`H24`) dichiara esattamente questo limite invece di tacerlo.
+
+### Nota per chi aggiorna
+
+Nessun segreto nuovo, nessuna migrazione. **Al primo check giornaliero dopo
+questo aggiornamento, gli snapshot pre-update più vecchi di 72h vengono potati
+— tranne il più recente, che resta come punto di ripristino.** Sulla macchina
+di riferimento: 7 su 8 rimossi, ~12 GB liberati, **non recuperabili** (erano
+copie di update riusciti del 20/07). Chi vuole conservarne uno come campione
+lo copi fuori da `backups/pre-update/` prima del primo check.
+
+Resta aperto, misurato e dichiarato nel registro (`H50`): il gateway ha
+un'uscita reale verso Internet, che serve al solo «Ricontrolla adesso» del
+pannello (l'avviso di aggiornamento vero lo scrive il timer dell'host, e
+chiudere l'uscita non lo toccherebbe — il costo reale è un refresh manuale
+che smette di funzionare e un avviso che può invecchiare fino a 24h). La
+scelta del proprietario è tenerla aperta **per ora**; le tre soluzioni
+candidate — rete, intent per il bottone col pattern collect→apply già in
+casa, allowlist — sono documentate nella voce di registro, in attesa del
+prossimo round di audit.
+
+## [0.40.2] — 2026-07-21
+
+Due difetti trovati **dopo** aver taggato la 0.40.1, entrambi da chi non aveva
+scritto il codice, entrambi registrati prima di essere corretti.
+
+### Corretto
+
+- **«Manca» e «c'è ma non si legge» non sono più la stessa cosa.** Un segreto
+  integro ma illeggibile (permessi, ACL, mount, symlink rotto) veniva segnalato
+  come «manca o è VUOTO», e il rimedio suggerito — un comando con `>` — lo
+  avrebbe **troncato**: la riparazione distruggeva il segreto che doveva
+  salvare. Ora i casi sono tre (assente / vuoto / non leggibile) con tre rimedi
+  distinti, e per l'illeggibile il messaggio indica `ls -l` e `chmod`, mai una
+  ridirezione. La distinzione usa il dato che il codice aveva già, invece di
+  enumerare le cause: una lista di cause sarebbe stata incompleta dal primo
+  giorno.
+- **Lo `stage-check` valida gli stessi file compose che lo stack monta.** Ne
+  leggeva due (base + ingress) mentre il comando reale ne monta anche uno per
+  ogni feature attiva, e `backup` lo è di default: un controllo verde su un
+  sottoinsieme non dice nulla sull'insieme che verrà usato. Non è un refactor —
+  **cambia cosa viene validato**: un overlay di feature con un errore di
+  sintassi, che prima passava e faceva fallire l'avvio dopo il punto di non
+  ritorno, adesso ferma l'aggiornamento mentre è ancora annullabile.
+
+### Nota per chi aggiorna
+
+Nessuna azione richiesta, nessun segreto nuovo, nessuna migrazione.
+
+**Questo aggiornamento è stato la prima prova reale del pre-flight introdotto
+nella 0.40.1 — ed è avvenuta: 21/07, verde.** Fallimento controllato su una
+macchina viva, lanciando il servizio di aggiornamento automatico (non il comando
+da terminale, che gira in un ambiente diverso da quello reale). Il registro di
+sistema mostra la sequenza nell'ordine che il fix prometteva: l'avviso sulla
+configurazione attuale *prima* del download, il blocco sulla release in arrivo
+*dopo* — e la cartella degli snapshot rimasta a zero, cioè il backup non è mai
+partito. Lo stack è rimasto in salute per tutta la prova e i dati non si sono
+mossi di una riga.
+
+Il testo qui sotto è come era stato scritto prima della prova, e si lascia:
+prometteva una verifica e la verifica c'è stata.
+
+**Questo aggiornamento è la prima prova reale del pre-flight introdotto nella
+0.40.1.** Non lo era la 0.40.1: là a orchestrare era ancora la CLI precedente,
+col controllo vecchio, che si ferma prima di arrivare al nuovo. È solo
+aggiornando *da* una 0.40.1 già installata che il codice nuovo decide davvero —
+e si vede la differenza di severità fra il controllo sulla configurazione
+attuale (avviso) e quello sulla release in arrivo (fatale).
+
+## [0.40.1] — 2026-07-20
+
+Patch, e una sola cosa: **il pre-flight dei segreti guardava la configurazione
+sbagliata**. Il primo aggiornamento alla 0.40.0 è fallito per questo — lo stack
+non è partito, l'health-gate è andato rosso, il rollback automatico ha
+funzionato e nessun dato è stato toccato.
+
+### ⚠️ Rettifica di quanto dichiarato nella 0.40.0
+
+Là sotto si legge: «*l'update ora ha un pre-flight che si ferma se manca*».
+**Non era vero**, ed è il caso più istruttivo di questa release: il controllo
+esisteva, girava, era verde — e leggeva il compose **installato**, mentre quello
+della release arriva col bundle uno step dopo. Quando girava, il file che
+avrebbe dovuto controllare non era ancora sul disco. Ogni parola di quella frase
+era vera della riga di codice; la protezione promessa non esisteva. Il difetto
+non era nella logica ma nella **posizione**, ed è per questo che, letta da sola,
+la funzione sembrava corretta a tutti.
+
+### Cambiato
+
+- **Il controllo fatale ora sta dopo il fetch e dopo il self-update della CLI**
+  (step 6-bis) e legge i compose **del bundle**, cercando i file in `secrets/`
+  del repo. La posizione non è dopo il self-update per comodità: prima, sarebbe
+  il parser della release *N* a leggere il compose della *N+1*, e un cambio di
+  formato del blocco `secrets:` impedirebbe di installare proprio la release che
+  contiene il parser capace di leggerlo. Fallendo dopo, invece, si resta con CLI
+  nuova e stack vecchio — uno stato che si ripara **rilanciando l'update**, e
+  che è comunque l'esito normale di ogni rollback riuscito.
+- **Il controllo sulla configurazione attuale resta, come avviso**: dice che la
+  rete di *rollback* è bucata, e non ferma l'aggiornamento. Se lo fermasse, una
+  release che rimuove un segreto già cancellato sarebbe l'unica installabile.
+- **Il rimedio suggerito non può più fabbricare un guasto peggiore.** Prima
+  consigliava `bash setup.sh`, che su una macchina viva è l'installatore
+  completo. Ma toglierlo non bastava: i segreti non hanno tutti la stessa natura,
+  e un `openssl rand` applicato a un token Telegram o all'hash bcrypt della
+  password admin produce un file **pieno e sbagliato** — il controllo tornerebbe
+  verde, lo stack partirebbe, e il guasto si vedrebbe solo all'uso. Ora il
+  comando compare **solo sotto il segreto a cui si applica**.
+- **Guarda tutti i compose che lo stack monta**, non solo quello base: l'overlay
+  di ingress (`cloudflared` dichiara un segreto) e quelli delle feature attive.
+- **Un file con solo spazi o un a capo conta come vuoto** (prima `st_size == 0`
+  lo lasciava passare: 1 byte è "pieno" per il codice e vuoto per chiunque).
+- **Un bundle senza `compose.yaml` si ferma** invece di rispondere "tutto a
+  posto": «non ho trovato il file» non è «non c'è niente da segnalare».
+- **«Mancano tutti i segreti» viene riconosciuto per quello che quasi sempre è**:
+  non un guasto, ma una radice sbagliata — e lo dice.
+
+### Aggiunto
+
+- La suite `tools/tests/` **gira in CI**. Era l'unica del repo che nessun
+  workflow lanciava: dieci test verdi sul componente che esegue gli
+  aggiornamenti in produzione, che non avevano mai protetto nulla.
+
+### Nota per chi aggiorna
+
+Nessuna azione richiesta, nessun segreto nuovo, nessuna migrazione. Se
+l'aggiornamento alla 0.40.0 era stato completato a mano creando
+`archive_desc_secret`, resta valido.
+
+**Fin dove è stato verificato, e fin dove no.** Questo fix è provato sulla
+funzione (banchi in directory temporanee, tre banchi indipendenti) e in CI —
+**mai su una macchina vera**. Nessuno ha ancora osservato l'ordine reale degli
+step durante un aggiornamento vero, né il fatto che al primo aggiornamento il
+controllo nuovo può scattare solo dopo il riavvio della CLI. Quindi:
+**l'aggiornamento a questa versione è anche la sua prima prova end-to-end.** Se
+fallisce, la rete è il rollback automatico — la stessa che ha funzionato il
+20/07 senza toccare un dato. Lo diciamo perché è precisamente la distanza — fra
+«i test passano» e «la macchina si aggiorna» — in cui era caduta la 0.40.0: una
+release che tace su cosa non ha provato si legge come se avesse provato tutto.
+
+**Difetto noto e non corretto**: lo `stage-check` (step 8) legge due file
+compose, mentre lo stack ne monta anche uno per ogni feature attiva (`backup`
+lo è di default). Stessa forma del difetto riparato qui, superficie diversa;
+sistemarlo avrebbe voluto dire due cose in una release. Registrato con data di
+revisione nel ledger delle funzioni.
+
+## [0.40.0] — 2026-07-20
+
+Minor e non patch: l'indexer cambia *cosa* legge, i DB cambiano *schema*, e nasce
+un canale di scrittura fra due servizi. Chi legge questa storia fra sei mesi deve
+vederlo dal numero.
+
+### ⚠️ Chi aggiorna deve sapere queste quattro cose
+
+1. **Nuovo segreto `archive_desc_secret`.** Il canale `set_description` non riusa
+   `gateway_secret` di proposito: quello apre anche `/internal/nlm/*` (stato e
+   installazione dei profili NotebookLM), e una funzione che scrive un campo di
+   testo non deve portarsi dietro quel potere. `setup.sh` lo genera; l'update ora
+   ha un **pre-flight** che si ferma se manca, invece di lasciar fallire lo stack
+   con un sintomo che sembra una release rotta. Un file **vuoto** conta come
+   mancante: con un segreto vuoto lo stack parte e il canale resta muto, cioè un
+   difetto di provisioning travestito da bug della feature.
+2. **Migrazione di schema al primo ingest** su ogni DB esistente: colonna
+   `ts_source` su `messages` e tabella `revisions`. Trasparente e verificata sul
+   dato preesistente; `ts_source` non è indicizzata in FTS, quindi non comporta un
+   rebuild dell'indice.
+   I valori sono **tre**: `messaggio` (istante reale), `data-export` (data della
+   *fotografia*, non del contenuto) e **`ignoto`** — che riceve tutto ciò che
+   esisteva prima della 0.40.0, perché su un DB precedente **il regime non è
+   ricostruibile a posteriori**. Dichiararlo `messaggio` sarebbe stata
+   un'asserzione mai verificata: misurato sul bundle di riferimento, **140.476
+   righe su 221.514 con `ts` pieno non sono conversazioni** — sono log e documenti,
+   il cui `ts` è il timestamp del file. È anche il motivo del punto 3: gli
+   `ignoto` devono passare il filtro.
+3. **Il `newest` si calcola in NEGATIVO**: `MAX(ts) WHERE ts_source <> 'data-export'`,
+   **non** `= 'messaggio'`. La forma positiva escluderebbe le righe migrate
+   (marcate `ignoto`, perché il loro regime non è ricostruibile a posteriori) e
+   restituirebbe una data troppo vecchia. Chi tocca `db_info` non riscriva la
+   forma positiva: è dimostrata rotta, e c'è un test che lo prova.
+4. **Lo sniff cambia i conteggi dei prossimi ingest** — 826 file promossi da
+   "non-testo" a documenti sul bundle di riferimento. Chi confronta i numeri
+   prima/dopo deve sapere perché ballano: non è una regressione, è che prima non
+   li leggevamo.
+
+### Aggiunto
+- **Sniff del contenuto nell'ingest.** La classificazione dei file era per
+  *estensione*: un'etichetta, non una misura. Sul bundle reale, 826 dei 2.633
+  censiti «non-testo» sono testo pieno — appunti senza estensione, todo, script,
+  Dockerfile, `.cjs/.proto/.service/.xsd/.ndjson`. Ora si guardano i primi 4 KB,
+  con criterio conservativo (un byte NUL chiude la questione, serve UTF-8 valido e
+  ≥90% di caratteri stampabili): meglio una lapide di troppo che spazzatura binaria
+  nell'indice full-text. I promossi sono marcati `[testo-sniffato]`.
+- **Tabella `revisions`.** `messages` ha chiave primaria su `uuid` e si scrive con
+  `INSERT OR REPLACE`: se lo stesso identificatore tornava con contenuto diverso,
+  l'ultimo vinceva e il primo spariva **senza traccia**. Non è teorico — le voci
+  `memory:*` sono slot riscrivibili. Finora le versioni sopravvivevano solo perché
+  stavano in DB separati: la comparabilità degli snapshot era un *accidente della
+  topologia*, non una proprietà. Ora è struttura. La ricerca continua a vedere
+  l'ultima versione: nessuna API cambia.
+- **`POST /internal/archive/description`** — il tool MCP `set_description`
+  inoltra qui invece di aprire il DB. Rete interna, segreto dedicato
+  constant-time, nome del DB in whitelist col percorso composto dal gateway, cap
+  di lunghezza, rifiuto dei caratteri di controllo, audit di ogni scrittura. Ogni
+  rifiuto risponde **404 e mai 403**: un 403 confermerebbe l'esistenza della rotta.
+- **Pre-flight dei segreti nell'update**, che legge l'elenco *dal compose* e non da
+  una lista nel codice — una lista andrebbe aggiornata a ogni segreto nuovo, ed è
+  esattamente la dimenticanza che il controllo previene.
+
+### Corretto
+- **`set_description` non falliva più silenziosamente.** Il tool si dichiarava
+  «l'unica scrittura ammessa da questo layer» mentre il suo container monta il
+  volume in sola lettura per scelta deliberata: due dichiarazioni entrambe vere,
+  ognuna nel suo file, che insieme mentivano. Chi lo chiamava riceveva
+  `attempt to write a readonly database`.
+- **Le voci senza `ts` erano invisibili ai filtri temporali** — un intero namespace
+  saltato in silenzio da `since=`. `ts_source` distingue un istante *reale* da una
+  *data di fotografia*, così chiudere quel buco non ne apre uno opposto: una
+  memoria di maggio fotografata a luglio non «è successa a luglio».
+
+## [0.39.4] — 2026-07-20
+
+### Il volume dello spool nasce con l'owner giusto
+
+Terzo e ultimo anello del caso «upload 2,6 GB»: `TMPDIR=/var/lib/uploads` c'era
+(v0.39.3) ma il volume nuovo, creato da Docker, era `root:root` — e `tempfile`
+scarta IN SILENZIO una tempdir non scrivibile, ripiegando sulla tmpfs `/tmp`
+(che l'upload saturava: stesso 500 di prima, altra causa). Un volume vuoto al
+primo mount eredita owner/permessi dal path dell'IMMAGINE: ora il Dockerfile
+crea `/var/lib/uploads` chown-ato ad `app`, come già `/var/lib/gateway`. Sulle
+installazioni esistenti l'owner è già stato corretto a mano sul volume (persiste);
+questa release rende giusto ogni deploy futuro.
+
+## [0.39.3] — 2026-07-20
+
+### La pagina Archive regge gli upload giganti
+
+L'upload del bundle da 2,6 GB moriva con un 500: `/tmp` del gateway è una tmpfs
+in RAM (rootfs immutabile, H43) e Starlette vi spoola i multipart — 92 MB
+passavano, 2,6 GB la saturavano («No space left on device»). Nuovo volume
+`gateway-uploads` montato su `/var/lib/uploads` + `TMPDIR` puntato lì: lo spool
+va su disco, la tmpfs resta per il resto. Il volume è usa-e-getta e resta fuori
+dal backup. Il tetto applicativo (4 GB, v0.39.0) ora è raggiungibile davvero.
+
+## [0.39.2] — 2026-07-20
+
+### Il container backup non dipende più da DOVE lanci l'update
+
+`compose.ops.backup.yaml` montava `${PWD}:/vps1777` — un'espansione d'ambiente,
+cioè la cwd del CHIAMANTE, non il repo. `vps1777 update` lanciato da `/root`
+montava `/root` sul container: «backup-container-setup.sh: no such file», compose
+up fallito, e l'auto-rollback rifalliva allo stesso modo (visto dal vivo, oggi).
+`--project-directory` non salva le espansioni d'ambiente; salva i path RELATIVI:
+il mount ora è `.:/vps1777` e si risolve sempre rispetto al repo.
+Workaround per chi è su ≤0.39.1: `cd /home/vps1777/vps1777 && vps1777 update`.
+
+## [0.39.1] — 2026-07-20
+
+### La pagina Update sa ricontrollare
+
+Caso vero: release v0.39.0 pubblicata alle 08:36Z, ultimo check del timer alle 05:43Z
+→ la pagina diceva «sei alla versione più recente» per ore, senza modo di forzare il
+refresh (il timer gira una volta al giorno). Nuovo bottone **«↻ Ricontrolla adesso»**
+(`POST /admin/update/check`): il gateway fa il GET a GitHub e rinfresca
+`update_status.json` — con la stessa guardia anti-regressione della CLI (la «latest
+nota» non regredisce mai su una risposta stantia della cache). Il check è innocuo
+(niente Docker, niente privilegi): l'update vero resta collect→apply della CLI host.
+Suite gateway: **155 passed**.
+
+## [0.39.0] — 2026-07-20
+
+### Archive ingerisce il bundle di Recupero Sessioni — e i doppioni raccontano dove sono stati
+
+Il difetto scoperto (upload reale di Neo, 2,6 GB): il bundle «scarica tutto» dell'app
+locale di recupero sessioni moriva sul tetto upload da 1 GB — e anche sotto il tetto
+NON era un formato riconosciuto: cadeva nel fallback zip-di-documenti che indicizza
+solo i `.md/.txt`, ignorando **in silenzio** 1.476 sessioni e 17.851 log MCP.
+
+**Estrattore dedicato** (`_iter_bundle_zip`, riconoscimento `MANIFEST.json`+`sessions/`):
+sessioni → conversazioni; log MCP → documenti chunked (`mcp-log:<server>`); workfiles-testo
+→ documenti col path cercabile; i `.jsonl` dentro workfiles → sniff sul contenuto
+(sessione CC / log / dati). Whitelist `_DOC_ZIP_EXTS` allargata al **codice** (py/sh/js/
+dart/… markup, config) — vale anche per il fallback zip generico.
+
+**Tabella `sightings(uuid, source)`** — i doppioni collassano in `messages` (la ricerca
+non deve restituire dieci copie) ma ogni copia registra DOVE è stata vista: «questo file
+prima era in una cartella, poi in un'altra» diventa un `GROUP BY`, non un ricordo.
+I **binari** dei workfiles (zip/db/dill/so/immagini) non entrano nell'FTS ma lasciano
+una lapide ciascuno in `skipped` (reason=`non-testo`, detail=path): l'inventario del
+materiale non-indicizzato resta interrogabile. Tetti: archivio decompresso 2→16 GB,
+upload 1→4 GB.
+
+Verificato (locale): suite **48 passed**; bundle 254 MB → 111.137 record in 31 s,
+91.461 in tabella (73.612 = previsione esatta del MANIFEST); bundle 2,6 GB con
+workfiles → **376.706 record in 79 s, 61.100 uuid avvistati in 2+ path, 2.633 binari
+censiti, zero crash**; tokenizer sul DB nuovo: `count(C++)=769 ≠ count(C)=7.807`.
+
+## [0.38.0] — 2026-07-17
+
+### L'installer allestisce TUTTO — niente più feature perse in silenzio
+
+Il difetto scoperto: un reinstall (o un update) lasciava cadere gli opt-in `ops.*`
+**in silenzio** — l'auto-install (Watchtower) e persino il backup notturno sparivano
+senza un errore, perché lo "stato voluto" viveva solo nei `--profile` digitati a mano,
+effimeri, mai catturati. Radice: nessun posto che l'installer legge *dichiarava* cosa
+deve girare; il divario fra dichiarato e reale non aveva un guardiano.
+
+**Stato feature dichiarato** (`VPS1777_FEATURES` in `.env`, default `backup,autoupdate`),
+letto dove si costruisce OGNI comando compose (`vps1777.py:compose_cmd`): install, update
+e rollback riproducono SEMPRE le stesse feature. Un update non spegne più il backup; un
+reinstall lo riaccende senza doverlo ricordare. Stato autoritativo: una feature tolta si
+spegne.
+
+**Auto-update SICURO** — le unit `systemd/vps1777-auto-update.{service,timer}` lanciano
+`vps1777 update --yes` (backup + firma cosign + migrazioni + health-gate 180s + auto-rollback),
+timer settimanale. È il rimpiazzo *automatico e gestito* che al declassamento di Watchtower
+(giugno) non fu mai costruito — Watchtower (`ops.autoupdate`) resta opt-in e in conflitto,
+mai il default.
+
+**L'installer fa tutto** (`deploy.sh` + `installer/engine.py`): al primo install accende
+backup + timer, imposta la chiave age del backup (genera la coppia SUL PC, manda alla VPS
+solo il recipient pubblico; oppure `AGE_RECIPIENT=…`), e stampa un **referto post-install**
+(`backup ON · auto-update ON · portainer OFF · age OK/manca`) — l'assenza *parla*, non si
+scopre dopo mesi. Corretta anche una divergenza: `unattended-upgrades`+`fail2ban` erano solo
+nel web-installer, ora anche in `deploy.sh`.
+
+Fix di regressione (preso dai test): `watchtower` ha file (`compose.ops.watchtower.yaml`)
+≠ profilo (`ops.autoupdate`) — derivare il file dal profilo referenziava un file inesistente.
+
+Verificato: `test_vps1777` **10 passed** (+2: stato dichiarato, fix watchtower); `deploy.sh`
+`bash -n` ok; `engine.py`/`vps1777.py` compilano.
+
+## [0.37.4] — 2026-07-17
+
+### Il tokenizer che collassava — `C++` cercava `C` (la causa dell'11/07)
+
+`unicode61` tratta `+ #` da **separatori**: `C++`, `C#`, `g++` perdono il suffisso
+e diventano il token `C`/`g`, comunissimo (coordinate SVG, copyright, gradi della
+caldaia). `count("C++")` non tornava vuoto — tornava **migliaia di falsi positivi
+silenziosi** (7.051 su 13.797, il 51% dell'archivio). È così che nacque il falso
+ricordo «Neo programmatore C++»: la ricerca non ha mentito, **ha risposto a una
+domanda diversa**. Gemello a verso opposto dell'FTS5 muto (PR #20): lì lista vuota,
+qui lista piena della cosa sbagliata — entrambi silenziosi. Trovato dalle tre
+sessioni durante una compattazione, misurato al singolo risultato (`C++`==`C#`==`C`).
+
+Fix su **due strati**, perché l'indice e la query sono piani diversi:
+
+- **indice** (`archive_indexer`) — l'FTS si crea con `tokenize='unicode61
+  tokenchars ''+#'''`: `C++`/`C#`/`g++` diventano token veri e distinti. Vale sui DB
+  costruiti **da qui in poi**; il `tokenize` è cotto nella CREATE (un `rebuild` non
+  lo cambia) → i DB già vivi vanno **re-ingeriti**. Il `.` resta separatore di
+  proposito (romperebbe `node.js`, `github.com`, `0.7.9`).
+- **query** (`fts.collapse_warnings_conn`, `count` → `warnings`, tool `check_term`)
+  — un **canary** che chiede all'INDICE: se `count(term)==count(prefisso)` il termine
+  è collassato e lo **dice**. Vale **subito** sui DB già vivi senza re-ingest, e si
+  auto-tara: su un DB ricostruito i conteggi divergono e l'avviso non scatta.
+
+### Crash `n_riga` sui titoli Claude Code senza `sessionId`
+
+Il ramo `ai-title` di `_iter_claude_code` referenziava `n_riga`, variabile rimossa
+in 0.37.3: un titolo **senza** `sessionId` sollevava `NameError` → moriva l'ingest
+dell'intero file. Invisibile ai test (il loro titolo il sessionId ce l'ha). L'uid
+ora ripiega sul testo del titolo.
+
+### Contratto dei bucket — legare l'indexer al preflight della app senza memoria
+
+`classify_cc()` + CLI `--classify` danno il verdetto per riga (`keep:<sender>` /
+`skip:<reason>`) **eseguendo** `_iter_claude_code`, non re-implementandolo. È
+l'interfaccia con cui la corsia app (standalone) verifica che il suo `_preflight`
+non si sia staccato in silenzio dalla mia logica: due classificatori vivi sulla
+stessa fixture, i verdetti devono combaciare.
+
+Verificato: gateway **48 passed**, archive-mcp **30 passed**; canary provato sul
+`.db` reale (`C++`/`C#`/`g++`/`.NET`/`F#` collassati → catturati, `node.js`/`flutter`
+zero falsi positivi).
+
+## [0.37.3] — 2026-07-16
+
+### Il contatore della perdita non perde più
+
+Tre scarti gemelli (stesso tipo, senza timestamp) collassavano in **una** lapide
+del libro-mastro `skipped`: l'uid è `sha1(source·reason·detail·ts)`, il detail
+era il solo tipo e il ts è vuoto *per definizione* su quel bucket → l'`INSERT
+OR IGNORE` li fondeva. Lo strumento nato per la #56 — trasformare i «271 persi»
+da inferenza in aritmetica — **contava i tipi di scarto, non gli scarti**.
+Trovato eseguendo `write_rows` su un db di prova (6 scarti → 4 registrati),
+**prima** del re-ingest che l'avrebbe usato come metro di collaudo.
+
+Il `detail` ora porta la **posizione** (riga nel file per claude-code; nome
+conversazione + indice per claude.ai): unica per scarto, **stabile fra
+re-ingest** — la proprietà da non perdere: dedup fra ingest sì, collasso dentro
+l'ingest no. Una PK è un'opinione su cosa rende due cose «la stessa cosa»: se
+quell'opinione è sbagliata, il conteggio mente e nessun test lo vede.
+
+Verificato: +1 test (3 gemelli → 3 lapidi uniche + idempotenza al re-ingest);
+suite gateway **45 passed**.
+
+## [0.37.2] — 2026-07-16
+
+### Release pulita post-bonifica (la v0.37.1 spediva ancora il file)
+
+La v0.37.1 è stata taggata **prima** della bonifica del leak (5528267): il suo
+albero sorgente — quindi i tarball che GitHub genera dal tag e il bundle runtime
+allegato — contengono ancora l'export di sessione rimosso da main (verificato
+scaricandolo, non presunto). I tag `v*` sono immutabili (ruleset H24): questa
+release riparte dal main bonificato. **La release v0.37.1 è stata rimossa**
+(asset compresi); il suo tag resta orfano, come lo 0.37.0 — la coppia racconta
+la stessa lezione: ciò che un tag ha spedito non si disfa, si supera con una
+release più nuova. Nessun'altra modifica al codice rispetto alla 0.37.1.
+
+## [0.37.1] — 2026-07-16
+
+> Il numero salta lo 0.37.0: quel tag è nato bruciato (puntava al merge senza il
+> bump — la guard `VERSION == tag` l'ha respinto in 8s, e i tag `v*` sono
+> immutabili per ruleset H24). Nessuna release pubblicata con quel numero:
+> resta un tag orfano innocuo. La guard ha fatto esattamente il suo mestiere.
+
+### archive: il thread, il browse, gli scarti, la scheda — le decisioni del tavolo a 4
+
+L'archivio smette di essere un solo-grep: sa leggere una chat intera, dire cosa
+contiene, contare ciò che scarta, e portare una scheda per ogni DB. Sono le
+decisioni D1–D5 del tavolo a 4 (le 3 sessioni + Neo), implementate e mergiate.
+
+- **Thread vero (D1, #57)** — nuovo tool **`get_conversation`**: il thread intero
+  che contiene un uuid, camminando l'albero `parent_uuid` (antenati + discendenti,
+  due CTE ricorsive; indice `idx_parent` creato all'ingest). E **`get_context`
+  riparato**: i vicini vengono dallo *stesso thread* quando l'arco c'è — prima
+  approssimava con `(project, ts)` e poteva mischiare conversazioni interlacciate
+  («stesso thread» era un over-claim). Sulle fonti senza arco (documenti chunked,
+  DB v1) entrambi ripiegano sul comportamento storico: nessuna regressione.
+- **Browse (D2)** — **`list_projects`** (le etichette con i conteggi) e
+  **`archive_stats`** (istogramma per anno): navigare l'archivio, non solo
+  cercarlo. La ricostruzione fedele dell'ordine dei chunk sulla coda-documenti è
+  dichiarata fuori scope: passo evolutivo.
+- **Il libro-mastro degli scarti (D3, #55/#56)** — ogni record che l'ingest non
+  indicizza (senza uuid, vuoto, malformato) lascia una lapide nella tabella
+  **`skipped`** (motivo, dettaglio, data) invece di sparire in un `continue`
+  muto. Conteggio in `db_info()["skipped"]` / `count_skipped()`; i dati raw
+  restano raggiungibili; il re-ingest non duplica le lapidi.
+- **Le summary non si perdono più (D4)** — l'estrattore legge il campo `summary`
+  delle conversazioni claude.ai (mancava il codice, non lo schema): righe
+  attribuite `sender='summary'`, cercabili (~396k char su un export reale).
+- **La scheda dell'archivio (D5)** — campo **descrizione** all'upload
+  (`/admin/archive`), colonna nella pagina, tabella `meta` nel DB; esposta da
+  `describe_databases` e aggiornabile col nuovo tool **`set_description`** —
+  l'unica scrittura ammessa via MCP (tocca la scheda, mai i messaggi).
+- **Zip di documenti** — uno zip che non è un export riconosciuto ma contiene
+  `.md`/`.txt` ora si indicizza doc-per-doc (budget anti-zip-bomb condiviso,
+  idempotente, resource-fork macOS saltate) invece di essere rifiutato.
+- **Doc allineata** — `ARCHIVE.md` riflette lo schema v2 reale, gli 8 tool e le
+  tabelle nuove; primo giro dell'audit doc: **`NB1777.md` nuovo** (37 tool
+  verificati dal codice, #30/#42 documentate) + fix di freschezza su
+  ARCHITECTURE/README/INSTALL/SECRETS/ONBOARDING/OPS/UPDATE.
+
+Verificato: suite gateway **151 passed** (nuovi: summary, idx_parent,
+skip-ledger, meta/descrizione, zip-di-documenti) + archive-mcp **26 passed**
+(thread-walk, fallback lineare, context-nel-thread, projects, stats, meta).
+
+## [0.36.0] — 2026-07-14
+
+### nb1777: il verdetto e la notifica — chiude la #30 (②③)
+
+Completa la #30: dopo ① (nb1777 *dichiara* il canonico), ora c'è il verdetto e la rete che avvisa Neo.
+
+- **② `memoria_check(versione_portata)`** — il *verdetto*: confronta la versione del blocco che una sessione porta col canonico e ritorna `{canonico, data, stale, delta}`. L'effetto collaterale è il punto: se la sessione è vecchia, mette in coda **un ping Telegram per Neo** — così anche se la sessione ignora il verdetto, Neo lo sa. `app/memoria.py`, stato persistito su `/var/lib/nlm` (il bot ha rootfs read-only → tutto lo stato sta nel server).
+- **③.1 ping drift** — «una sessione gira con memoria v2.2, il canonico è v2.4». Rate-limit **1 per coppia versione/giorno** (persistito), niente spam.
+- **③.2 promemoria cloud** — periodico: «il canonico è cambiato, aggiorna a mano le superfici cloud». L'ack è un **bottone Telegram «✓ Fatto»** *oppure* una fonte `cloud-ack vX.Y` nel notebook (l'automatismo file-simile). Il **poll del bot è il tick** — niente scheduler (sul VPS non c'è cron).
+- **Trasporto** — il bot resta senza stato e senza token verso il server: preleva le notifiche da `/internal/notifications` (secret condiviso, come `/internal/nlm/status`) e le manda; rimanda l'ack del bottone a `/internal/canonico/ack`. Nessuna modifica al compose.
+
+Verificato: `tests/test_memoria.py` (verdetto stale/allineato/assente, rate-limit drift, ack bottone+fonte col max, promemoria dovuto/spento/rate-limitato, drain) + `test_canonical.py` esteso (parser `cloud-ack`). Suite piena nb1777-mcp **70 passed**.
+
+**Il buco resta dichiarato:** un Project claude.ai **senza connettore MCP** non è raggiungibile da nessun canale. La #30 fa il massimo ottenibile: dove l'MCP c'è, la sessione lo sa e Neo viene avvisato; dove non c'è, nessun meccanismo può arrivare.
+
+## [0.35.0] — 2026-07-14
+
+### nb1777 dichiara il canonico del blocco di memoria (#30, parte ①)
+
+Prima, una sessione che partiva con un blocco di memoria vecchio **non aveva modo di accorgersene**: nessuno le diceva qual è il canonico. La regola client v2.4 («se nb1777 dichiara il canonico, confrontalo») presupponeva una dichiarazione che non esisteva. Questa è quella dichiarazione.
+
+- **`canonical.py`** — nb1777 legge il canonico dal notebook `claudemd1777`: le fonti hanno titolo `canonico vX.Y — <data> — <cosa cambia>`, la versione corrente è la `vX.Y` più alta (confronto **numerico**, v2.10 > v2.9). **Cache** 15 min, **fail-open** (se il notebook non risponde, nb1777 funziona e non dichiara nulla — la sessione fa il fallback con `notebook_query`).
+- **Veicolo A** — `FastMCP(instructions=…)`: la risposta di `initialize` dice alla sessione che nb1777 conosce il canonico e come confrontarsi. Testo statico (non dipende dall'auth nlm al boot).
+- **Veicolo B** — nuovo tool **`canonico`**: dichiara la versione canonica viva (`{version, date, note}`), fail-open con `available:false`. Il campo `canonico` è aggiunto anche a **`doctor`** (la chiamata tipica d'avvio sessione), così atterra senza un tool dedicato. Il Veicolo C (campo su ogni risposta) è **scartato**: costoso su 35 tool.
+
+Verificato: `tests/test_canonical.py` (9 casi: versione più alta dai titoli reali, ordinamento numerico, rumore ignorato, titolo senza data, malformati, cache, fail-open).
+
+**Cosa resta (dichiarato, non nascosto):**
+- **②** il tool `memoria_check(versione_portata)` che fa il *verdetto* (stale sì/no + delta) e **③** la notifica Telegram del bot quando una sessione gira vecchia (+ scheduler per il promemoria superfici cloud) — passi successivi.
+- **Il buco che resta aperto:** una chat in un Project claude.ai **senza connettore MCP** non è raggiungibile da nessun canale (l'MCP non c'è). Nessun meccanismo può toccarla — es. il Project del libro col `CLAUDE.md` caricato come file. ③ non lo risolverà: glielo *dirà*. È il massimo ottenibile.
+
+## [0.34.0] — 2026-07-14
+
+### nb1777 studio — id corretto e lista compatta (#42)
+
+Due bug emersi usando davvero il server (6 audio + 1 video in una mattina), che si moltiplicavano a vicenda:
+
+- **`studio_create_*` ritornava l'id sbagliato.** L'id dell'artefatto appena creato veniva preso per posizione in lista (`[-1]`, «assume ordine cronologico») — falso: sei create consecutivi tornavano tutti l'id del *primo*. Ora si ricava per **differenza di snapshot** (id prima/dopo il create), la stessa cura già in repo per le fonti (`_add_and_resolve_id`). Limite di concorrenza dichiarato: se un'altra sessione crea sullo stesso account nella finestra fra i due snapshot, si disambigua col tipo atteso o si ripiega best-effort — senza indovinare in silenzio.
+- **`studio_list` restituiva i focus interi** (`custom_instructions`, 4-6 KB per un podcast): ~85:1 di rumore, e il risultato di un tool MCP entra inline nel contesto, non paginabile. Ora il default è **compatto** (id/type/status/label a 80 char); `verbose=true` per il JSON pieno. Stesso trattamento per `studio_status`.
+
+Regola che li lega: **la proiezione la sceglie chi consuma, non chi produce** — la lista dà poco per default e tutto a richiesta, e il default non è mai irreversibile. Verificato da `tests/test_studio_id.py` (6 casi: compatto/verbose, id per differenza non per ordine, ripiego a 0 id nuovi, disambiguazione col tipo su concorrenza). Chiude #42.
+
+## [0.33.0] — 2026-07-14
+
+### Chiusura del dossier — zero rilievi aperti (35 chiusi · 7 parziali · 1 accettato · 0 aperti)
+
+L'ultima ondata sui residui, dopo le decisioni di Neo sui bivi. Nessun rilievo della review difensiva resta aperto: i 7 parziali sono scelte deliberate o rinvii dichiarati, l'unico accettato è il no-2FA (motivato). Tutto verificato dal gate in CI.
+
+**Costruiti (decisioni di Neo):**
+- **H8** — **pagina di consenso OAuth** vera: `/authorize` da loggato mostra "autorizzi <client>?" con [Autorizza]/[Rifiuta], POST dietro CSRF, valori client html-escaped, Rifiuta → `access_denied`. Chiude anche uno scostamento: `ARCHITECTURE.md` la disegnava già.
+- **H25** — **rete `egress` separata**: `nb1777-mcp` e il bot escono su Internet da una rete dedicata, tolti da `ingress` (dove restano solo gateway + proxy). Bridge senza porte pubblicate → solo uscita. Verificato sul VPS: da `egress` NotebookLM/Telegram = 302, da una rete `internal` = 000.
+
+**Chiusi:**
+- **H9** — `deploy.sh --apply` **valida** la forma dei valori di `pending.json` prima di scriverli (rifiuta le injection: `$(rm)`, `; cat /etc/shadow`, `http://`).
+- **H10** — banner "sessione NON cifrata" nel pannello quando il gateway non è dietro HTTPS + flag `insecure` nell'audit del login.
+- **H31/H33/H34/H36** — CORS scoped ai soli OAuth+/app (non `/admin`); `/health` con body minimo `{"ok":true}` e `?deep` riservato ai chiamanti interni; CSP di default globale (`default-src 'none'`); `pending.json` con TTL 24h + auto-wipe, intent file a `0640` (non più world-readable — porta un nonce che autorizza l'apply).
+- **H32** — confronto PKCE constant-time (`hmac.compare_digest`).
+- **H40** — cleanup OCR con retry + `cleanup_ok` + sweep dei notebook `_ingest_*` + `ingest_orphans` in `doctor`.
+- **H42** — `archive-data` montato `:ro` (verificato: DB in `journal_mode=delete`, non WAL).
+- **H43** — rootfs `read_only` su gateway/archive-mcp/bot con tmpfs `/tmp` (nb1777-mcp escluso: Chromium).
+- **H18** — sezione «Dati a riposo» in `SECURITY.md` (onestà su cosa non è cifrato). **H29** — token bot riclassificato fascia massima, soglia 365→90. **H37** — rotazione chiave age documentata. **H21** — riconciliazione doc↔codice completata (il codice ha raggiunto la doc) + il gate `check_findings.py` in CI.
+
+**Stato `accepted` nel registro** (nuovo): un rischio *deciso di non chiudere* non è né `open` (dimenticato) né `closed` (fatto). Il gate pretende che ogni `accepted` porti la sua motivazione. Primo: **H28** (no 2FA).
+
+**Postilla dichiarata** (`SECURITY.md`): l'approvazione manuale dei rilasci (`H24`), il rootfs read-only su `nb1777-mcp` (`H43`) e il pinning digest delle immagini nostre (`H22`) sono **rinviati di proposito** — li faremo al 100% quando il ritmo dei rilasci sarà più regolare.
+
+## [0.32.0] — 2026-07-14
+
+### Chiusura del dossier residuo — 12 interventi, con la disciplina che li verifica
+
+Dopo il registro dei rilievi (v0.31.0), la campagna che lo svuota. Sei lotti in parallelo, ognuno con quattro regole nel prompt — verifica alla fonte, nessun claim senza coordinata, «un fix è finito quando hai cercato chi hai rotto», ri-verifica anche il già-fatto. Da **8 chiusi** a inizio giornata a **20 chiusi · 16 parziali · 7 aperti** su 43, ogni transizione con l'evidenza che il gate in CI verifica.
+
+**Chiusi in questa release** (con il dettaglio in `security/findings.yml`):
+- **H20** — revoca reale della sessione admin: `jti` su ogni token + revoke-list persistente; il logout ora passa da CSRF e revoca davvero (prima cancellava solo il cookie). *Bonus trovato*: i form di logout erano annidati nei form di upload → il logout era già rotto.
+- **H14** — i cookie Google **fuori** dallo snapshot pre-update (erodeva H6), coi `.tar` in chiaro già scritti da CLI vecchie **cancellati**, non solo evitati d'ora in poi.
+- **H39** — tetti sul **decompresso** anche lato archivio (nlm era già in v0.30.2): byte contati mentre si leggono, non la dimensione dichiarata. *«Un limite su un input compresso non è un limite.»*
+- **H26/H27/H11** — Mini App: il `gateway_secret` non entra più nel DOM (mascherato, reveal esplicito); finestra `initData` 24h→12h + re-check dell'owner sul Bearer; l'IP negli eventi di fallimento.
+- **H17** — audit: lettura dalla coda (non più tutto il file in RAM) e contatore dei fallimenti **mostrato a schermo** (un elenco vuoto per errore di scrittura non è più una bugia per omissione).
+- **H41** — testo delle fonti fuori dall'`argv` (via file temporaneo) e command line troncata negli errori.
+- **H42** — `archive-data` montato `:ro` (verificato che i DB sono `journal_mode=delete`, non WAL).
+- **H38/H15** — `secrets/`·`backups/`·`onboarding/` a `700`; `TS_AUTHKEY` monouso azzerata da `.env` dopo l'uso, `.env` a `600`, file orfano rimosso.
+- **H13** — versioni `apk` pinnate nel container di backup.
+
+**Ri-verifica del già-fatto — la regola ha pagato:**
+- **H30** (open-redirect, dato per chiuso in v0.21.0) aveva un **bypass reale**: `startswith(base)` è un match di *prefisso*, non di *origine* — `https://host.evil.com/` superava il gate. La logica è ora in un modulo puro con 12 test d'attacco.
+- **H24** — i tag `v*` sono **immutabili** (ruleset GitHub `deletion + update`, in `security/rulesets/`). Provato sul campo: spostare o cancellare un tag è rifiutato, crearne uno nuovo no. *La regola `non_fast_forward` non bastava*: spostare un tag in avanti è un fast-forward.
+
+**Portati avanti in parziale, onestamente** (H12 sudo whitelist ma docker resta root-equiv; H16 password nasce sul PC ma il chiaro passa se manca bcrypt; H37, H43, H35, H8, H9, H18, H22, H31, H32, H34): il *cosa manca* di ognuno è nel registro, che la CI verifica sia dichiarato.
+
+Nessun claim senza coordinata: `security/check_findings.py` è verde e i conteggi in `SECURITY.md` combaciano col registro per costruzione.
+
+## [0.31.0] — 2026-07-14
+
+### Il registro dei rilievi — «dichiarato fatto ma assente» ora è una build rossa
+
+La campagna di hardening ha prodotto, oltre ai fix, **tre patologie** che vale la pena nominare perché non sono di questo progetto soltanto: *dichiarato fatto ma assente*, *soluzione scritta ma non applicata*, *fix che introduce un bug altrove*. Sotto le tre c'è **una** causa sola, e viene dall'angolo della provenienza: **una dichiarazione di sicurezza non ha coordinate**. Quando `SECURITY.md` ha scritto «il dossier è applicato per intero», quella frase non puntava a *nulla* — nessun file, nessuna riga, nessun test. Un claim infalsificabile non può marcire rumorosamente: marcisce in silenzio.
+
+- **`security/findings.yml`** — i 43 rilievi del dossier, ciascuno con stato (`closed`/`partial`/`open`) e, se chiuso, l'**evidenza puntuale**: i pattern che devono esistere (o non esistere più) nei file. L'evidenza è ancorata al *contenuto*, non al numero di riga, così regge mentre il codice si muove.
+- **`security/check_findings.py`**, in CI a ogni PR. Fallisce se: una voce `closed` non porta evidenza o la sua evidenza **è sparita dal codice**; un residuo non dichiara **cosa manca**; oppure i conteggi in `SECURITY.md` **non combaciano col registro**. Quest'ultimo controllo chiude il cerchio: il documento di sicurezza non può più dichiarare più di quanto il codice faccia — è lo scostamento doc↔codice che il dossier stesso denuncia in `H21`.
+
+Il gate ha ripagato **prima di entrare in CI**: alla prima esecuzione ha trovato un errore di conteggio introdotto venti minuti prima in `SECURITY.md` (8/17/18 invece di 8/16/19). Il numero corretto è ristabilito.
+
+Stato reale, ora verificato dalla macchina: **8 chiusi · 16 parziali · 19 aperti** su 43. Chiusi entrambi i critici.
+
+## [0.30.2] — 2026-07-14
+
+### Correzione — il dossier NON era applicato per intero (e una tar-bomb che avevo lasciato aperta)
+
+Una verifica voce-per-voce dei 43 interventi del dossier **contro il codice** (non contro il ricordo) ha smentito una dichiarazione fatta nella v0.30.0 e ripetuta in `SECURITY.md`.
+
+- **`SECURITY.md` diceva il falso in pubblico**: *«Nessuno dei rilievi della review è rimasto aperto»*. Il conteggio vero è **8 chiusi, 16 parziali, 19 aperti** su 43. Chiusi sono **entrambi i critici** (owner-gating fail-closed, cosign obbligatorio) e la sostanza della fascia alta — il resto no. La sezione *Residui noti* ora elenca i residui che pesano davvero, con il loro codice: cookie Google in chiaro nello snapshot pre-update (`H14`), tag `v*` non protetti (`H24`), sessione admin non revocabile (`H20`), operator con `sudo NOPASSWD: ALL` (`H12`), nessun 2FA (`H28`). È lo stesso scostamento doc↔codice che il dossier denuncia in `H21`: dichiararlo è l'unico modo di non ripeterlo.
+- **Tetti sul decompresso nell'upload del profilo NotebookLM** (`H39`): il cap di 5 MB imposto dal gateway è sul tar **compresso**, e non dice nulla su quanto quel tar si espande. `nlm_profile.py` estraeva senza guardare né la dimensione dichiarata dei membri né i byte cumulativi: **una tar-bomb da meno di 5 MB compressi poteva riempire il volume**. Ora c'è un tetto per-file (16 MB) e cumulativo (64 MB), la lettura è a blocchi, e il rifiuto non lascia residui né tocca il profilo buono (un profilo `nlm` vero pesa qualche decina di KB). Due test nuovi lo dimostrano.
+
 ## [0.30.1] — 2026-07-14
 
 ### Fix — ruotare `gateway_secret` non rompe più il canale interno
@@ -28,7 +1412,9 @@ Ora vale un invariante semplice: **il volume dei cookie lo monta SOLO `nb1777-mc
 
 Verificato: 12 test nuovi sul modulo che possiede il profilo (traversal, symlink, tar corrotto, non-distruttività) e prova end-to-end del servizio — 403 senza segreto e col segreto sbagliato, upload valido → `{"files":2}`, upload invalido → 400 **col profilo buono intatto**, cookie a 600.
 
-**Con questo il dossier di review difensiva è applicato per intero.**
+**Con questo sono chiusi entrambi i finding CRITICI e la sostanza della fascia alta.**
+
+> **Correzione (v0.30.2).** Questa riga, in origine, diceva *«il dossier è applicato per intero»*. **Era falsa** e va corretta invece che nascosta: il dossier ha 43 interventi, e una verifica voce-per-voce contro il codice ne conta **8 chiusi, 16 parziali, 19 aperti**. Chiusi sono i due critici e il grosso della fascia alta; restano aperte voci reali (i cookie nello snapshot pre-update, la protezione dei tag, la revoca della sessione admin, i sudoers dell'operator). L'elenco onesto sta in [SECURITY.md](SECURITY.md#residui-noti--cosa-non-è-ancora-chiuso).
 
 ### `vps1777 update` — la proprietà degli artefatti non deriva più
 
