@@ -185,7 +185,17 @@ fi
 echo
 ok "Restore completato."
 log "Per riavviare lo stack:"
-INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env 2>/dev/null | cut -d= -f2)"
+# 🔴 `|| true` NON è cosmetico (b82df434, 16/08 — trovato ESEGUENDO il ciclo, mai
+#   fatto prima): con `set -o pipefail` (r.25) un `.env` assente fa uscire `grep` con
+#   2, la pipeline eredita il 2, e **questa assegnazione è l'ULTIMO comando dello
+#   script** prima del trap di cleanup ⇒ `restore.sh` esce **2 a restore RIUSCITO**,
+#   subito dopo aver stampato «[✓] Restore completato».
+# ⚠️ E non è un dettaglio estetico: `tools/vps1777.py:1366` chiama questo script con
+#   `check=True`, quindi **l'auto-rollback solleva un'eccezione su un rollback che ha
+#   funzionato** — cioè fallisce esattamente nel momento in cui era l'ultima rete.
+# ⭐ Nessun test lo prendeva perché nessun test ESEGUE restore.sh: lo leggono soltanto.
+#   Misurato: dati ripristinati identici (6 file, sha256 uguali) ed exit 2.
+INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env 2>/dev/null | cut -d= -f2 || true)"
 if [ -n "$INGRESS_PROFILE" ]; then
   log "  docker compose -f compose.yaml -f compose.${INGRESS_PROFILE}.yaml --profile $INGRESS_PROFILE up -d"
 else
