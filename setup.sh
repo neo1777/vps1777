@@ -132,8 +132,32 @@ command -v python3 >/dev/null || die "python3 non installato"
 #   un livello piu' in la': cercava il NOME `pip` invece della CAPACITA' di installare.
 #   *L'unico modo di sapere se un comando funzionera' e' provarlo; un indizio della sua
 #   presenza risponde a un'altra domanda.* `--dry-run` risolve tutto e non scrive niente.
-if ! python3 -c 'import bcrypt' 2>/dev/null \
-   && ! python3 -m pip install --user --dry-run --quiet bcrypt >/dev/null 2>&1; then
+# 🔴 E LA TERZA INCARNAZIONE DELLO STESSO DIFETTO, trovata da df446a42 sulla review:
+#   `--dry-run` esiste solo da pip 22.2 (2022). Su Ubuntu 22.04 (pip 22.0.2) e Debian 11
+#   (20.3.4) — che sono nel parco di destinazione — pip esce **2** con «no such option»,
+#   e leggerlo come «non ha pip» BLOCCA una macchina che avrebbe installato benissimo.
+#   ⚠️ Verso peggiore del difetto originale: quello lasciava passare chi doveva fermarsi,
+#   questo ferma chi doveva passare, e con un messaggio sicuro di se' che nomina la causa
+#   sbagliata — l'utente va a installare una cosa che ha gia'.
+#   ⭐ LA SEQUENZA, perche' e' la lezione: ① il NOME `python3` ② la CAPACITA', assumendo
+#   che l'OPZIONE esista ③ il MESSAGGIO. *Ogni giro spostava il controllo piu' vicino al
+#   fatto, e ogni volta restava un indizio piu' in la'.*
+#   🛡️ Qui si guarda COSA HA DETTO pip: `no such option` e `externally-managed` sono due
+#   fallimenti opposti con lo stesso exit code, e solo il testo li separa.
+_bcrypt_procurabile() {
+  python3 -c 'import bcrypt' 2>/dev/null && return 0
+  local out rc
+  out=$(python3 -m pip install --user --dry-run --quiet bcrypt 2>&1); rc=$?
+  [ $rc -eq 0 ] && return 0
+  # pip troppo vecchio per --dry-run: NON e' un verdetto sulla capacita' di installare.
+  # Si riprova senza, che e' l'unica cosa che risponde alla domanda vera.
+  if printf '%s' "$out" | grep -qi 'no such option'; then
+    out=$(python3 -m pip install --user --quiet bcrypt 2>&1) && return 0
+  fi
+  printf '%s' "$out" | tail -3 >&2
+  return 1
+}
+if ! _bcrypt_procurabile; then
   die "bcrypt non e' installato e questo python3 non ha pip per procurarlo.
      Su Debian/Ubuntu:  sudo apt install python3-pip     (oppure: sudo apt install python3-bcrypt)
      Su Fedora:         sudo dnf install python3-pip
