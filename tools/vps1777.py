@@ -642,8 +642,6 @@ def assicura_webapp_secret(repo: Path) -> None:
     c'è Mini App da verificare, ed è uno stato legittimo (settings.py:238).
     """
     dest = repo / "secrets" / "telegram_webapp_secret.txt"
-    if dest.exists():
-        return
     src = repo / "secrets" / "telegram_bot_token.txt"
     try:
         token = src.read_text(encoding="utf-8").strip()
@@ -653,9 +651,21 @@ def assicura_webapp_secret(repo: Path) -> None:
         return
     try:
         chiave = hmac.new(b"WebAppData", token.encode("utf-8"), hashlib.sha256).hexdigest()
+        # 🔴 NON «if dest.exists(): return» — rilievo di abdd732a sulla #194, ed era una
+        #    rottura SILENZIOSA: la chiave è una FUNZIONE del token, quindi il file giusto
+        #    ieri diventa quello sbagliato nel momento in cui il token viene ruotato. Con
+        #    l'uscita anticipata il gateway avrebbe continuato a montare la derivata VECCHIA
+        #    e la Mini App avrebbe rifiutato tutto — senza un errore, perché dal punto di
+        #    vista di ogni presidio il file c'è, ha la forma giusta e i permessi giusti.
+        # ⭐ *Un file la cui correttezza dipende da un ALTRO file non si può verificare
+        #    guardando lui: si verifica ricalcolandolo.* Costa un HMAC per `up`.
+        if dest.exists() and dest.read_text(encoding="utf-8").strip() == chiave:
+            return                  # già allineata al token attuale: niente da fare
+        rigenerata = dest.exists()
         dest.write_text(chiave, encoding="utf-8")
         dest.chmod(0o600)
-        log(f"derivata {dest.name} dal token (migrazione #61): il gateway non monta più il segreto intero")
+        log(f"{'ri' if rigenerata else ''}derivata {dest.name} dal token"
+            f"{' (il token è cambiato: la chiave era disallineata)' if rigenerata else ' (migrazione #61)'}")
     except OSError as exc:          # non zittire: se non si può scrivere, `up` fallirà
         warn(f"non ho potuto scrivere {dest}: {exc} — `compose up` fallirà sul secret mancante")
 
@@ -3373,8 +3383,9 @@ _SECRET_POLICY = [
     #   surplus che la #61 toglie al gateway, cioè al solo servizio esposto.
     ("telegram_webapp_secret", "telegram_webapp_secret.txt",
      "Chiave verifica initData Mini App (derivata dal token)", 90, False,
-     "manuale: NON si ruota da sola — ruota il token su @BotFather, poi cancella questo "
-     "file: `vps1777` lo rideriva al prossimo avvio (assicura_webapp_secret)"),
+     "manuale: NON si ruota da sola. Ruota il token su @BotFather e basta: al primo "
+     "`vps1777 up`/`update` la chiave viene RIDERIVATA da sola, perché è una funzione "
+     "del token e non un segreto indipendente (assicura_webapp_secret)"),
     # H37: era scoperto. Solo con ingress.cloudflared (altrimenti file assente →
     # saltato). Ruotare = rigenerare il token del tunnel nella dashboard CF.
     ("cloudflared_token", "cloudflared_token.txt", "Token tunnel Cloudflare", 365, False,
