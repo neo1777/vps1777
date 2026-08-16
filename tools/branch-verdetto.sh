@@ -139,6 +139,28 @@ for b in "${BRANCHES[@]}"; do
     printf '%-46s %-12s %s\n' "$b" "SUPERATO" "PR #${pr%%|*} + $dopo commit dopo, ma tutte le $tot righe sono già in main"
   else
     printf '%-46s %-12s %s\n' "$b" "HA-LAVORO" "PR #${pr%%|*} + $dopo commit dopo · $fuori/$tot righe NON sono in main ⇒ apri una PR, NON cancellare"
+    # 🔴 16/08 (71d540e6, autrice del passo 4): SU PROSA QUESTO VERDETTO NON VALE, e
+    #    l'avviso sta QUI e non solo nel referto in coda perché il momento in cui
+    #    serve è questo — *un guardiano che parla nel momento sbagliato non è un
+    #    guardiano*. Il passo 4 confronta RIGHE: su codice una riga è la cosa, su
+    #    prosa è una FORMULAZIONE. Chi riscrive meglio la stessa affermazione produce
+    #    righe testualmente diverse al 100% ⇒ «$fuori/$tot NON in main» e HA-LAVORO
+    #    con la massima sicurezza **proprio quando qualcuno ha già fatto il lavoro,
+    #    meglio**. Caso vero: docs/finestra-onboarding-8080 → 9/11 «non in main»,
+    #    mentre main SECURITY.md:57-69 aveva la stessa cosa riscritta *e più
+    #    completa* (nomina admin.py:105, il branch no). Peggio: il testo del branch
+    #    era INVECCHIATO (diceva 0.0.0.0, main ha ${ONBOARDING_BIND:-127.0.0.1})
+    #    ⇒ «salvare quel lavoro» avrebbe rimesso in SECURITY.md una garanzia falsa.
+    #    ⚠️ `tot_file` NON è ridondante: su zero file `grep -c` risponde 0, che qui
+    #       si leggerebbe come «tutti .md» — uno ZERO PLAUSIBILE. Zero file non è
+    #       «solo prosa», è NESSUN DATO. Trovato provando la condizione su tutti i
+    #       branch invece che sul mio caso: feat/ledger-anti-amnesia (0 file) dava SÌ.
+    tot_file=$(git diff --name-only "origin/main...origin/$b" 2>/dev/null | wc -l)
+    solo_prosa=$(git diff --name-only "origin/main...origin/$b" 2>/dev/null | grep -cv '\.md$')
+    if [ "${tot_file:-0}" -gt 0 ] && [ "${solo_prosa:-1}" -eq 0 ]; then
+      printf '%-46s %-12s %s\n' "" "└─ ⚠️ PROSA" \
+        "tocca SOLO .md: «righe non in main» NON misura lavoro perduto. Cerca in main un DETTAGLIO che il branch non ha — se main ne ha di più, main è il successore"
+    fi
   fi
 done
 
