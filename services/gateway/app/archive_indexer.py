@@ -2107,12 +2107,42 @@ def main(argv: list[str] | None = None) -> int:
     if not args.db:
         print("manca il file .db di output (o usa --classify)", file=sys.stderr)
         return 1
+    # 🔴 issue #55 — QUESTA RIGA HA FATTO APRIRE UNA CACCIA A DATI PERDUTI CHE NON
+    #   ESISTEVANO, ed è durata dal 15/07 al 16/08. Stampava DUE numeri:
+    #       «indicizzati 50700 record → totale nel DB: 45612»
+    #   e chi legge conclude «ne mancano 5.088». Il delta però NON è perdita: è
+    #   DEDUPLICAZIONE per uid deterministico, e per di più voluta — le 5.089
+    #   occorrenze del titolo di una sessione hanno lo stesso `_uid("cc-title",
+    #   sessionId)` e collassano in una lapide sola (misurato il 09/08 su un jsonl
+    #   vero di 108.570 righe: il delta era ESATTAMENTE `keep:title`).
+    # ⭐ Il difetto non era nel codice che scrive: era nel codice che RACCONTA.
+    #   Due numeri accanto invitano a sottrarli, e la sottrazione di due grandezze
+    #   che non sono «prima» e «dopo» produce un terzo numero che sembra un ammanco.
+    # ⚠️ E il totale NON si può usare come «dopo»: `count_rows` conta il DB INTERO.
+    #   Su un DB già popolato `n - count_rows` è privo di senso — poteva persino
+    #   uscire negativo. Per questo il «dopo» si misura prima e dopo l'ingest.
+    prima = count_rows(args.db)
+    prima_skip = count_skipped(args.db)
     try:
         n = index_file(args.input, args.db, project=args.project)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
-    print(f"indicizzati {n} record → {args.db} (totale nel DB: {count_rows(args.db)})")
+    dopo, dopo_skip = count_rows(args.db), count_skipped(args.db)
+    scritti, lapidi = dopo - prima, dopo_skip - prima_skip
+    print(f"letti {n} record → scritti {scritti} · deduplicati {n - scritti}"
+          f"  (totale nel DB: {dopo})")
+    # 🛡️ E le lapidi si dicono DEDUPLICATE, che è l'altra metà della issue #55: il
+    #   loro uid è `_uid(source, reason, detail[:200], ts)`, quindi due scarti che
+    #   condividono i primi 200 caratteri e il timestamp ne lasciano UNA sola —
+    #   misurato: 26.000 lapidi per 21.581 `detail` distinti. Non è perdita di dati
+    #   (quei record non erano destinati a `messages`), è perdita di CONTABILITÀ,
+    #   ed era silenziosa: il libro-mastro degli scarti sotto-contava senza dirlo,
+    #   che è esattamente il difetto per cui la tabella `skipped` era stata creata.
+    #   ⇒ finché l'uid non ha un discriminante di posizione, il numero lo DICHIARA.
+    if lapidi:
+        print(f"scartati {lapidi} record (lapidi in `skipped`, DEDUPLICATE per "
+              f"source+reason+detail[:200]+ts: gli scarti veri possono essere di più)")
     return 0
 
 
