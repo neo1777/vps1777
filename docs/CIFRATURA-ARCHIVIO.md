@@ -133,9 +133,30 @@ falso vale quanto il numero.
 
 ## Il nodo vero: la chiave
 
-L'owner ha scelto il livello massimo: **la chiave non sta sulla macchina**, arriva
-dall'esterno all'avvio e vive solo in RAM. Da qui discendono tre domande di progetto che
-**non sono ancora decise**:
+> ## ✅ DECISO — 16/08 23:0x, e la decisione è **ENTRAMBE**
+>
+> *«andiamo con la 2 per ora, chiave sulla macchina per riavvio auto che va bene, ma
+> l'utente può scegliere chiave da fuori se vuole essere più sicuro, quindi entrambe»*
+>
+> ```
+>   DEFAULT   ② chiave sulla macchina  → la VPS riparte da sola, nessuna mano
+>             copre: snapshot · disco dismesso · disco rubato · VM spenta
+>   OPZIONE   ③ chiave da fuori        → la sceglie CHI INSTALLA, non noi
+>             copre in più: chi accede alla macchina · costo: ogni riavvio
+>             richiede una persona
+> ```
+> 🔑 **Il default è quello che non rompe niente, l'opzione è quella che costa** — ed è la
+> forma giusta per un prodotto che avrà utenti diversi: *chi paga il costo è chi lo sceglie.*
+> ⚠️ **E la domanda ha risolto un malinteso, non solo un dubbio**: l'owner intendeva
+> «macchina» = *il suo PC*, mentre io leggevo «la VPS». Il suo *«non ci sono segreti
+> importanti»* riguardava i backup del canale sul suo computer, **non l'archivio**. Le due
+> risposte sembravano in contrasto e non lo erano: parlavano di due oggetti.
+> 📌 *Chiedere è costato una riga; non chiedere avrebbe costruito lo strato ③ come unica
+> strada, cioè una VPS che non riparte da sola, su una premessa mai verificata.*
+
+Il livello massimo (③) resta disponibile come opzione: **la chiave non sta sulla macchina**,
+arriva dall'esterno all'avvio e vive solo in RAM. Da qui discendono tre domande di progetto
+che valgono **per il ramo ③** e restano aperte:
 
 ### 1. Cosa fa un servizio che parte senza chiave
 
