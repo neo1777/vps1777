@@ -37,9 +37,9 @@ Lo stage finale ti stampa gli URL.
 1. Verifica Docker + Compose v2 + python3
 2. Crea `.env` (chiede: email admin, TG_OWNER_ID, ingress)
 3. Genera `secrets/*.txt`:
-   - `gateway_secret.txt` (32 byte url-safe)
-   - `archive_desc_secret.txt` (32 byte url-safe)
-   - `oauth_signing_secret.txt` (64 byte url-safe)
+   - `gateway_secret.txt` (32 caratteri url-safe = 24 byte di entropia)
+   - `archive_desc_secret.txt` (32 caratteri url-safe = 24 byte di entropia)
+   - `oauth_signing_secret.txt` (64 caratteri url-safe = 48 byte di entropia)
    - `admin_password_bcrypt.txt` (bcrypt rounds=12 della password che scegli/che genera)
    - `telegram_bot_token.txt` (incolli il token)
 4. Lancia `docker compose -f compose.yaml -f compose.ingress.<scelta>.yaml --profile
