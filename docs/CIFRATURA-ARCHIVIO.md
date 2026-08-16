@@ -68,7 +68,13 @@ query, stessi 4.000 hit su entrambi:
     ⇒ 0,15 ms in più per ricerca: impercettibile.
 
   🔴 COSTO PER CONNESSIONE — non l'avevo considerato, ed è quello che decide
-    apertura       chiaro    56 ms  ·  cifrato   **367 ms**
+    apertura       chiaro   **0,5 ms**  ·  cifrato  **299 ms**   ⇒ **600x**
+    ⚠️ la prima misura diceva «56 → 367»: era gonfiata da un `SELECT count(*)`
+       che avevo messo per «forzare l'apertura vera» e che scansiona 60.000
+       righe. Il DELTA reggeva, la BASE no — e la base è ciò che dice quanto
+       il costo è fuori scala. Separati: il count costa 124 ms in chiaro e
+       285 in cifrato (2,3x, coerente col per-query); l'apertura pura è quella
+       sopra. *Una sonda che «forza» un'operazione ne misura due.*
     perché: PBKDF2-HMAC-SHA512, **256.000 iterazioni**. È lento apposta (contro il
     brute-force sulla passphrase) e non va abbassato: è la difesa, non un difetto.
 ```
