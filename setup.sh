@@ -123,7 +123,17 @@ command -v python3 >/dev/null || die "python3 non installato"
 #   🛡️ Un preflight che verifica il NOME del comando invece della CAPACITA' che serve
 #   controlla la parola, non il fatto. Qui si chiede la capacita': o bcrypt c'e' gia',
 #   oppure c'e' pip per procurarlo — e si fallisce PRIMA di toccare il disco.
-if ! python3 -c 'import bcrypt' 2>/dev/null && ! python3 -m pip --version >/dev/null 2>&1; then
+# 🔴 SI PROVA L'INSTALLAZIONE, NON SI CERCA pip — rilievo di 71d540e6, verificato qui:
+#   `python3 -m pip --version` esce 0 anche dove `pip install` e' VIETATO. Da Debian 12 /
+#   Ubuntu 23.04 vale PEP 668: se esiste /usr/lib/pythonX/EXTERNALLY-MANAGED, ogni
+#   `pip install --user` muore con «externally-managed-environment» — e quello e' il parco
+#   macchine di destinazione (VPS affittate: Debian 12 o Ubuntu 24 quasi sempre).
+#   ⭐ Cioe' la prima versione di QUESTO preflight ripeteva il difetto che veniva a curare,
+#   un livello piu' in la': cercava il NOME `pip` invece della CAPACITA' di installare.
+#   *L'unico modo di sapere se un comando funzionera' e' provarlo; un indizio della sua
+#   presenza risponde a un'altra domanda.* `--dry-run` risolve tutto e non scrive niente.
+if ! python3 -c 'import bcrypt' 2>/dev/null \
+   && ! python3 -m pip install --user --dry-run --quiet bcrypt >/dev/null 2>&1; then
   die "bcrypt non e' installato e questo python3 non ha pip per procurarlo.
      Su Debian/Ubuntu:  sudo apt install python3-pip     (oppure: sudo apt install python3-bcrypt)
      Su Fedora:         sudo dnf install python3-pip
