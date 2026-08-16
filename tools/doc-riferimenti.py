@@ -59,6 +59,19 @@ ATTESI = {
     "aperti.sh": "strumento del tavolo 1777, vive in un altro repo",
     "run.py": "TEMPLATE del contratto migrazioni: 0001-<slug>/run.py va creato, non esiste",
     "plugins/mio-mcp/compose.mio-mcp.yaml": "esempio didattico: è il file che il lettore CREA",
+    # 16/08 — i doc di `docs/roadmap/` parlano di cose FUORI da questo repo, ed è il loro
+    # mestiere: sono prompt di onboarding e cataloghi, non documentazione del prodotto.
+    # Il gate li segnava introvabili e aveva ragione ALLA LETTERA (nel repo non ci sono) e
+    # torto nella sostanza: non sono riferimenti rotti, sono citazioni di altri progetti.
+    # ⭐ La distinzione che al gate manca: «il file non c'è QUI» ≠ «il file non c'è».
+    #    Non correggo la prosa per far tornare un numero — dichiaro l'eccezione, che è
+    #    quello che il gate stesso chiede di fare, e la ragione resta scritta accanto.
+    "CLAUDE.md": "memoria di sessione (~/.claude), citata come CONCETTO in skill-sopra-archivio: non è un link a un file del repo",
+    "MEMORY.md": "idem CLAUDE.md — le due sono nominate insieme nella stessa frase sul fact-checking dei ricordi",
+    "ARCHITETTURA.md": "documento di ~/Scrivania/argus1777/, altro progetto, dichiarato come «Fonte» in prompt-c3-argus1777",
+    "SICUREZZA.md": "idem: docs/ di argus1777, non di vps1777 (che ha SECURITY.md, in inglese)",
+    "CONFINE_DEPLOY_vps1777.md": "idem: docs/ di argus1777 — il nome cita vps1777 ma il file vive là",
+    "baseline_memoria_isolata.md": "artefatto di ricerca citato in skill-sopra-archivio, mai stato nel repo",
 }
 
 
