@@ -33,6 +33,30 @@ FUORI="$REPO/onboarding/prove-empiriche.json"
 SOLO="${2:-}"
 [ "${1:-}" = "--solo" ] || SOLO=""
 
+# ── 🎯 --fase <nome>: TRE FOTOGRAFIE CONFRONTABILI, non tre volte la stessa ────
+# 🔴 PERCHÉ (abdd732a, 16/08, voce 4a5815c3): il collaudo del FORMAT chiede di
+#   lanciare queste prove TRE volte — (a) baseline prima del format, (b) a macchina
+#   formattata PRIMA dell'installer, (c) a installazione finita. Con un solo file di
+#   uscita **la (b) cancella la (a) e la (c) cancella la (b)**: alla fine resti con
+#   l'ultima foto e nessun confronto, cioè esattamente il dato che il collaudo cerca.
+# ⭐ E il caso (b) è quello che vale di più: a macchina nuda devono uscire TUTTE «2 =
+#   non eseguibile». **Se una desse 0 avremmo trovato un falso PASS nel momento esatto
+#   in cui serve** — ma solo se quella foto sopravvive alla successiva.
+# 🛡️ Non è una regola nuova: è la STESSA che c'è già per `--solo`, che scrive su
+#   `-parziale.json` per non contaminare il quadro completo. *Qui il quadro non è
+#   parziale, è di un ALTRO momento — e due momenti diversi non si sovrascrivono
+#   per la stessa ragione per cui non lo fanno due popolazioni diverse.*
+FASE=""
+if [ "${1:-}" = "--fase" ]; then
+  FASE="${2:-}"; SOLO="${3:-}"
+  [ "${3:-}" = "--solo" ] && SOLO="${4:-}" || SOLO=""
+  [ -n "$FASE" ] || { echo "uso: lancia-tutte.sh --fase <nome> [--solo prova-N]" >&2; exit 2; }
+  case "$FASE" in
+    *[!a-zA-Z0-9_-]*) echo "⛔ nome fase non valido: «$FASE» (lettere, cifre, - e _)" >&2; exit 2 ;;
+  esac
+  FUORI="${FUORI%.json}-$FASE.json"
+fi
+
 mkdir -p "$(dirname "$FUORI")"
 
 # ── L'ETÀ DEL DATO PRECEDENTE, prima di qualunque cosa ────────────────────────
@@ -133,6 +157,7 @@ if [ -z "$SOLO" ] && [ -n "$atteso" ] && [ "$tot" -lt "$atteso" ]; then
 fi
 
 printf '\n  %d verdi · %d rosse · %d non eseguite   →  %s\n' "$ok" "$ko" "$salt" "${FUORI#"$REPO"/}"
+[ -n "$FASE" ] && printf '  📸 fase «%s»: questa foto NON sovrascrive le altre fasi.\n' "$FASE"
 [ $salt -gt 0 ] && printf '  ⚪ le NON ESEGUITE non sono passate: mancava un prerequisito (di solito docker).\n     Sono contate a parte apposta — un verde che include ciò che non hai guardato\n     è esattamente il difetto che queste prove esistono per non commettere.\n'
 # ─── il verdetto ──────────────────────────────────────────────────────────────
 # 🔴 DIFETTO CURATO IL 02/08 (abdd732a, da un rilievo di un agente, verificato sul
