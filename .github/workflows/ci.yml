@@ -312,7 +312,16 @@ jobs:
               # stato confrontato con niente. Va DICHIARATO, come i salti.
               N=$(grep -c '^name = ' <(git show "HEAD:$lock") || true)
               echo "  ⚠️  lock NUOVO ($N pacchetti, nessun confronto possibile)"
-              if printf '%s' "$RATIFICA" | grep -qiE 'lock nuovo|nuovo lock|primo lock|introduc'; then
+              # ⚠️ STESSO INPUT, STESSO RISCHIO: rilievo di 71d540e6 in ratifica alla
+              #    prima stesura di questa PR, che curava solo le due righe a :341-342.
+              #    Questa è 26 righe sopra, nello STESSO step, e legge lo STESSO
+              #    `$RATIFICA` da 65 KB — *avevo curato la copia e non la classe*, che
+              #    è precisamente il difetto che ci è costato la mattina.
+              #    Il criterio NON è «è una pipeline printf|grep» (nel repo ce ne sono
+              #    ~24, e quelle su password sono decine di byte: mai a rischio): è
+              #    **l'input può superare il buffer della pipe?**. Qui sì, ed è l'unica
+              #    altra che legge $RATIFICA.
+              if grep -qiE 'lock nuovo|nuovo lock|primo lock|introduc' <<<"$RATIFICA"; then
                 echo "  ✓ la PR dichiara di introdurre un lock nuovo"
               else
                 echo "::error::$lock è un lock NUOVO: $N pacchetti entrano senza essere confrontati con nulla, ed è l'istante in cui le major entrano (b29d4f7: starlette 1.3.1, mcp 2.0.0). Dichiaralo nella PR — basta la frase «lock nuovo»."
