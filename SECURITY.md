@@ -406,9 +406,31 @@ prende il gateway le ha già per definizione. Il token del bot no: quello non gl
 per *essere sé stesso*, gli serve per **parlare come il bot**, e chi lo prende può
 impersonarlo anche fuori da qui. *«Cinque» risponde a «cosa vede»; «uno» risponde a
 «cosa si guadagna a prenderlo»*. Resta parziale perché la difesa possibile — un
-processo separato che tenga il token e accetti solo «manda questo messaggio» — costa
-un pezzo in più da mantenere su una macchina piccola: è un baratto vero, e lo decide
-chi possiede la macchina, non un rilievo.
+processo separato che tenga il token e accetti solo «manda questo messaggio» — **non
+copre tutto il segreto: lo stesso token ha DUE usi, e uno dei due non si sposta.**
+`nb1777-bot` lo usa per **parlare** come il bot (è il rischio descritto qui sopra); il
+`gateway` lo usa come **chiave di verifica** — `services/gateway/app/miniapp_core.py:43`
+fa `hmac.new(b"WebAppData", bot_token, sha256)`, l'algoritmo con cui Telegram valida
+l'`initData` della Mini App. *Per verificare serve il token stesso*: spostare l'invio
+lascerebbe il gateway col segreto in chiaro comunque. ⇒ Le opzioni reali sono due, e
+**lo decide chi possiede la macchina, non un rilievo**: **(a)** delegare al processo
+separato *anche la verifica*, e allora il gateway non ha più bisogno del segreto;
+**(b)** accettare che il gateway lo tenga, e limitare la difesa all'invio.
+
+> ⚠️ **PERCHÉ QUESTO PARAGRAFO È STATO RISCRITTO — 16/08/2026, issue #61.**
+> Prima diceva che la difesa «costa un pezzo in più da mantenere su una **macchina
+> piccola**». *Era vero quando fu scritto.* Misurato oggi sul `compose.yaml` di `main`:
+> **4 servizi** (`gateway`, `archive-mcp`, `nb1777-mcp`, `nb1777-bot`), 3 reti, 5 secret
+> — e `nb1777-bot`, cioè **il processo separato, esiste già**. Un processo in più non è
+> più l'eccezione: è la modalità normale del sistema.
+> 🔑 **La decisione non era sbagliata: era la sua motivazione a essere invecchiata** — e
+> una motivazione scaduta non lo dichiara, perché sta nel corpo della decisione e non in
+> un campo che qualcuno rivede. *Chi la rileggeva la valutava su una premessa morta senza
+> avere modo di accorgersene.*
+> ⇒ **Ogni premessa che descrive la FORMA del sistema** — «è piccolo», «è uno solo»,
+> «non c'è ancora X» — **va riletta quando il sistema cresce: a scadere è la premessa,
+> non la scelta.** Se un giorno i servizi tornassero a essere uno, questo paragrafo
+> andrebbe riscritto di nuovo: è la sua natura, non un difetto.
 
 `H55` **è stato chiuso il 01/08/2026**, e la sua storia vale più del conteggio: non
 l'ha trovato una lettura, è saltato fuori **aggiornando
