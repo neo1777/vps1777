@@ -96,8 +96,10 @@ services:
       #   chiave HMAC_SHA256("WebAppData", token), NON il token: la derivazione è a
       #   senso unico, chi ha la chiave può verificare e forgiare per QUESTA Mini App
       #   ma NON può risalire al token, quindi non guadagna la voce del bot.
-#   (niente asterischi doppi in questo file: il presidio di SECURITY.md cerca
-#    gli alias YAML e leggeva il mio grassetto markdown come un alias «*non»)
+      #   (in questo file il grassetto markdown NON si usa: il presidio di SECURITY.md
+      #    cerca i riferimenti YAML, e legge la coppia di asterischi come uno di quelli.
+      #    Questa nota, alla prima stesura, li conteneva a sua volta e faceva scattare
+      #    il presidio che stava spiegando — quindi qui il carattere non compare.)
       #   `nb1777-bot` il token ce l'ha ancora, e deve: gli serve per PARLARE.
       # ⚠️ Se questo file manca, `effective_webapp_secret` è vuoto e la Mini App si
       #   disabilita (settings.py:238 chiede UNA delle due) — non si apre un buco:
