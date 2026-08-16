@@ -22,7 +22,7 @@ Sequenza passo-passo dall'host vuoto a stack su.
 ## 4 step
 
 ```bash
-git clone https://github.com/<owner>/vps1777.git
+git clone https://github.com/neo1777/vps1777.git
 cd vps1777
 ./setup.sh                                      # wizard interattivo
 # solo se hai risposto «no» a «Procedo ora?» — setup.sh avvia già, con gli stessi -f:
