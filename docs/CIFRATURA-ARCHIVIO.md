@@ -83,6 +83,20 @@ query, stessi 4.000 hit su entrambi:
 `search()`; sono 10 i punti che chiamano `_open()`). Con SQLCipher così com'è, una ricerca
 passerebbe da 0,2 ms a **310 ms**: non 1,75x, **millecinquecento volte**.
 
+🔴 **E il costo si moltiplica per il numero di DB — rilievo di @b82df434, verificato.**
+`_open()` sta **dentro il loop** `for name in _targets(db)` (`db.py:186, 226, 261`), e
+`_targets("")` restituisce **tutti** i database (`db.py`, ramo `if not db`). Una ricerca
+senza filtro apre quindi **una connessione per DB**:
+
+```
+  3 DB oggi   →  3 × 299 ms  ≈  **0,9 s per ricerca**, solo per derivare le chiavi
+```
+
+⚠️ *E il moltiplicatore non è fisso: il registro si popola con `glob("*.db")` in
+auto-discovery, quindi **cresce quando qualcuno aggiunge un file**, senza che nessuno
+decida niente.* Un costo che scala con un numero che nessuno controlla non è un costo: è
+una perdita di controllo.
+
 🔑 **Il prerequisito è architetturale, non crittografico: la connessione va tenuta
 aperta** (una cache per-DB in `_open()`, che oggi non esiste perché non serviva). Con una
 connessione persistente si paga 310 ms **una volta all'avvio** e poi 0,35 ms a ricerca.
@@ -152,6 +166,29 @@ compose *è un file*, e sarebbe il contrario di quel che si vuole ottenere.
 cancellato.* Prima di andare in produzione va deciso **dove la chiave viene custodita** e
 **chi altro la conosce** — ed è una domanda di custodia, non di codice. Nessuna riga di
 questo repo può rispondere al posto di chi possiede la macchina.
+
+#### 🔴 E le chiavi diventerebbero DUE — rilievo di @abdd732a, verificato
+
+Il repo ha già una cifratura, con una chiave **diversa**: `tools/backup.sh:52` usa
+`tools/age-recipients.txt`, e i backup contengono il volume `archive-data`
+(`compose.yaml:127, 189, 316`) — cioè i `.db` stessi.
+
+```
+  OGGI   perdi la chiave age  → i backup sono illeggibili, MA il DB sulla macchina
+                                è in chiaro: si ricomincia da lì
+         perdi il DB          → il backup lo restituisce                    ✅ rete
+  DOPO   perdi la chiave      → il DB è cifrato ANCHE DENTRO il backup:
+         dell'archivio          non c'è nessun posto da cui ripartire       🔴 nessuna rete
+```
+
+🔑 **Cifrare l'archivio non aggiunge solo una chiave da custodire: toglie al backup la
+funzione di rete di sicurezza *per quel dato*.** Oggi le due protezioni sono indipendenti e
+una copre il buco dell'altra; dopo diventano in serie, e **basta perdere l'anello nuovo per
+perdere tutto**.
+⇒ Va deciso insieme al §3: *le due chiavi si custodiscono nello stesso posto o in due?*
+Nello stesso posto, un solo incidente le porta via entrambe. In due posti, la procedura di
+ripristino ne richiede due — e una procedura che nessuno ha mai eseguito non è una
+procedura. **Questa domanda va risposta prima di cifrare, non dopo il primo guasto.**
 
 ## Cosa serve per passare da questo documento al codice
 
