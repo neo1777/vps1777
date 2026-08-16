@@ -505,6 +505,16 @@ jobs:
       # 📏 Controprova eseguita su copia (03/08): rotto test-onboarding-8080-bind.sh
       #   in un punto raggiunto → `uvx pytest tools/tests/` resta VERDE (175 passed),
       #   il runner esce 1 e lo nomina.
+      # 🔑 `age` serve a UN test — quello del ciclo backup → restore, che cifra e decifra
+      #   per davvero — e senza di lui quel test esce 2 («SALTATO»), che il runner conta
+      #   come rosso (esegui-test-bash.sh r.54: verde è SOLO exit 0, di proposito).
+      # ⚠️ La scelta era fra installarlo e far uscire 0 quando manca. La seconda è quella
+      #   che il repo combatte da settimane: *un presidio che salta sempre è il buco che
+      #   quel test esiste per chiudere* — sta scritto venti righe più su, per pip.
+      #   ⇒ si installa, e il ciclo si esegue DAVVERO ad ogni PR. Docker su ubuntu-latest
+      #   c'è (il test fa `docker volume` e `docker run busybox`, non serve systemd).
+      - name: age (per il ciclo backup → restore, che cifra sul serio)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq age
       - name: Test bash di tools/tests — tutti, e il runner sa fallire
         run: |
           bash tools/esegui-test-bash.sh --autoprova
