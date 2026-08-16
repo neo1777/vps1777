@@ -127,10 +127,24 @@ updates:
       # notebooklm-mcp-cli: il pin `==0.7.7` e INTENZIONALE, non pigrizia.
       #   Il formato auth di quella CLI (`profiles/default/cookies.json`) e cablato
       #   in QUATTRO punti che nessun bump automatico tocca - auth.py (il gate di
-      #   auth), admin.py (le istruzioni all utente), il bot e la doc - e la 0.9
-      #   cambia quel formato. La #152 proponeva 0.7.7 -> 0.9.6 SENZA aggiornare il
+      #   auth), admin.py (le istruzioni all utente), il bot e la doc.
+      #   ⚠️ E NON E' VERIFICATO CHE LA 0.9 CONSERVI quel formato: il changelog non
+      #   l'ha aperto nessuno. Questa riga diceva «e la 0.9 cambia quel formato» —
+      #   era una DOMANDA della review (#152, abdd732a: «la 0.9.6 salva ancora in
+      #   profiles/default/cookies.json? si -> si merga, no -> si esclude») diventata
+      #   un FATTO nel passaggio da un messaggio a un commento. *Un dubbio citato da
+      #   un altro perde i punti interrogativi.*
+      #   ⇒ l'ignore resta GIUSTO anche nel dubbio, e per una ragione piu' solida:
+      #   il pin e' intenzionale e il formato e' cablato in quattro punti, quindi un
+      #   minor CHE POTREBBE romperlo va fatto a mano insieme a quei quattro.
+      #   Chi vorra' fare il salto deve ancora APRIRE IL CHANGELOG: non c'e' una
+      #   risposta qui dentro, c'e' la domanda.
+      #   La #152 proponeva 0.7.7 -> 0.9.6 SENZA aggiornare il
       #   commento accanto al pin, che diceva ancora «0.7.x usa profiles/»: un salto
-      #   di MINOR che rompe come un major, quindi l ignore sui major non lo prendeva.
+      #   di MINOR che PUO' rompere come un major, quindi l ignore sui major non lo
+      #   prendeva. (Anche questa riga diceva «rompe»: stessa premessa non verificata,
+      #   due righe piu' sotto — l'ho corretta insieme all'altra, perche' curare una
+      #   frase e lasciare la gemella e' curare la copia e non la classe.)
       # NON e «mai piu aggiornarlo»: le PATCH dentro 0.7 entrano ancora, quindi una
       #   0.7.8 di sicurezza arriva lo stesso. E il salto di minor che va fatto a
       #   mano, insieme ai quattro punti. (71d540e6, 16/08 - review abdd732a, #152)
