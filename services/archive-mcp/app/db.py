@@ -18,6 +18,7 @@ import json
 import urllib.request
 import urllib.error
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -149,17 +150,97 @@ def reload_registry() -> list[str]:
     return sorted(_DBS)
 
 
+class _Persistente(sqlite3.Connection):
+    """Una connessione che IGNORA `close()`, perché vive nella cache di `_open()`.
+
+    🔴 Sembra magia e per questo sta scritto qui, dove uno la cerca. I nove chiamanti di
+    `_open()` fanno tutti `finally: conn.close()`, ed era giusto finché ogni chiamata
+    apriva la sua. Con la cache quel close ucciderebbe la connessione degli altri.
+
+    🔑 **La scelta è fra togliere nove `finally` e rendere innocuo il close, e non è una
+    questione di stile: è a quale errore ci si vuole esporre.** Togliere i nove funziona
+    oggi e si rompe il giorno in cui qualcuna ne riscrive uno e rimette il close che ha
+    visto negli altri otto — *un difetto che non dà errore subito, ma alla richiesta
+    dopo, in un punto lontano da chi l'ha causato.* Qui invece il close resta scritto
+    dove tutti se lo aspettano e semplicemente non fa danno.
+    📌 La cache chiude davvero con `_chiudi_davvero()`. Chi vuole una connessione usa e
+       getta non passa da `_open()`: apre con `sqlite3.connect` (è ciò che fa
+       `integrita.verifica()`, e deve continuare a farlo — vedi `_open`).
+    """
+
+    def close(self) -> None:            # noqa: D102 — no-op VOLUTO, vedi docstring
+        pass
+
+    def _chiudi_davvero(self) -> None:
+        super().close()
+
+
+# 🔑 PER-THREAD, non globale: `sqlite3` rifiuta una connessione usata da un thread diverso
+#   da quello che l'ha creata (`ProgrammingError`, misurato) e i 13 tool di `server.py` sono
+#   SINCRONI — FastMCP li esegue sul thread pool, quindi la stessa `search` arriva ogni volta
+#   su un thread potenzialmente diverso. Una cache globale esploderebbe alla seconda
+#   richiesta. *Il modello di concorrenza del server non è un dettaglio del deploy: qui è la
+#   cosa che sceglie la struttura dati.*
+_LOCALE = threading.local()
+
+
+def _cache_conn() -> dict[str, sqlite3.Connection]:
+    """Le connessioni di QUESTO thread, svuotate se la dir DB è cambiata.
+
+    Invalidare sulla firma non è prudenza: un DB rigenerato (ingest, restore) è un file
+    NUOVO, e una connessione aperta sul vecchio inode continuerebbe a rispondere — con i
+    dati di prima, senza errore. *Sarebbe la peggiore delle risposte: fresca all'aspetto
+    e vecchia nei fatti.* È la stessa firma su cui si invalida `_ANAGRAFICA` poco sopra.
+    """
+    sig = _dir_sig()
+    conns: dict[str, sqlite3.Connection] | None = getattr(_LOCALE, "conns", None)
+    if conns is None or getattr(_LOCALE, "sig", None) != sig:
+        for c in (conns or {}).values():
+            try:
+                c._chiudi_davvero()      # type: ignore[attr-defined]
+            except sqlite3.Error:
+                pass
+        conns = {}
+        _LOCALE.conns = conns
+        _LOCALE.sig = sig
+    return conns
+
+
 def _open(name: str) -> sqlite3.Connection:
+    """La connessione (PERSISTENTE) al DB `name`. Non chiuderla: ci pensa la cache.
+
+    ⚠️ Il guadagno vero non è sul DB in chiaro — lì la riapertura costa 0,265 ms e questa
+    cache vale 7,7x, che da sola non giustificherebbe il codice. Vale **3227x** sul DB
+    cifrato (229 ms per apertura: PBKDF2 a 256.000 iterazioni), dove le nove aperture per
+    richiesta × N DB diventerebbero **oltre un secondo di sola derivazione chiave**.
+    ⇒ è il prerequisito dichiarato in `docs/CIFRATURA-ARCHIVIO.md`, non un'ottimizzazione.
+    """
     if name not in _DBS:
         raise KeyError(f"DB '{name}' non disponibile. Disponibili: {available_dbs()}")
     percorso = Path(_DBS[name])
     # Costa un `exists()`: la ragione per cui può stare sul percorso caldo — e la
     # ragione per cui `verifica()` NON ci sta — è scritta in `integrita.py`.
+    # 🖐️ RESTA A OGNI CHIAMATA, anche col riuso: è un presidio, non un costo di apertura.
+    #    Un journal caldo può comparire mentre la connessione è già aperta — cachearlo
+    #    insieme alla connessione toglierebbe il controllo proprio nel momento che lo
+    #    giustifica.
     sporco = integrita.journal_caldo(percorso)
     if sporco is not None:
         raise ArchivioSporco(integrita.messaggio_sporco(name, sporco))
-    conn = sqlite3.connect(f"file:{percorso}?mode=ro", uri=True)
+    conns = _cache_conn()
+    conn = conns.get(name)
+    if conn is not None:
+        try:
+            conn.execute("select 1")     # è ancora viva? costa microsecondi
+            return conn
+        except sqlite3.Error:
+            # qualcuno l'ha chiusa davvero, o il file è sparito sotto: si riapre.
+            # *Auto-riparante di proposito: il peggio che può fare questa cache è
+            # tornare a costare quanto costava prima, mai far fallire una richiesta.*
+            conns.pop(name, None)
+    conn = sqlite3.connect(f"file:{percorso}?mode=ro", uri=True, factory=_Persistente)
     conn.row_factory = sqlite3.Row
+    conns[name] = conn
     return conn
 
 
