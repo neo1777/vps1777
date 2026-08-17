@@ -292,10 +292,25 @@ def collapse_warnings_conn(conn: sqlite3.Connection, query: str) -> list[str]:
         except (sqlite3.OperationalError, FtsSyntaxError):
             continue
         if n_pref > 0 and n_term == n_pref:
+            # 🔴 17/08 (b82df434) — I CARATTERI SI DERIVANO DAL TERMINE, NON SI
+            #   ELENCANO. Il messaggio diceva «il tokenizer non indicizza i caratteri
+            #   +/#» e il caso che me l'ha fatto leggere era `.NET`, dove a sparire è
+            #   **il punto**: l'avviso era giusto nel verdetto e sbagliato nella causa,
+            #   e mandava a cercare il difetto fra due caratteri che non c'entravano.
+            # ⭐ La logica qui sopra è già generale — `collapse_candidates` spezza su
+            #   `\w+` e prende QUALUNQUE carattere non-word — quindi l'elenco a mano non
+            #   era nemmeno una semplificazione: era la sola parte del meccanismo che
+            #   sapeva meno del meccanismo. *Un messaggio che enumera ciò che il codice
+            #   deriva invecchia da solo, e lo fa nel punto in cui qualcuno si fida.*
+            # ⚠️ NIENTE dedup: la prima stesura faceva `dict.fromkeys(...)` e su `C++`
+            #   stampava «+» invece di «++». Il test l'ha preso subito — *chi legge
+            #   l'avviso cerca nel proprio termine ciò che il messaggio nomina, e «+»
+            #   non si trova in `C++` allo stesso modo in cui ci si trova «++»*.
+            persi = "".join(c for c in term if c not in prefix)
             warns.append(
                 f'"{term}" è collassato su "{prefix}" in questo indice: i {n_term} '
                 f'risultati riguardano "{prefix}", non "{term}" — il tokenizer non '
-                f'indicizza i caratteri +/#, il termine perde il suffisso. Questo DB '
+                f'indicizza «{persi}», e il termine perde quella parte. Questo DB '
                 f'va ricostruito con tokenchars per distinguerli (usa check_term).'
             )
     return warns
