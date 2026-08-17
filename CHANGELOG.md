@@ -2,6 +2,86 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.0] — 2026-08-17
+
+**Nove commit, e cinque toccano ciò che la macchina fa quando NASCE.** Non è una scelta
+editoriale: `setup.sh` installa da `releases/latest`, quindi finché questa release non
+esiste, **una VPS reinstallata riparte con i difetti che sono già curati in `main`** — il
+più grave dei quali è stato misurato sulla macchina viva, non ipotizzato.
+
+> **Il filo:** *un comando che attiva non è la prova che una cosa sia attiva.* `systemctl
+> enable --now fail2ban` esce **0** anche se il servizio muore un istante dopo, e
+> l'installer stampava «Hardening host attivo» mentre ssh era pubblico e senza
+> anti-brute-force. **La prova è rileggere lo stato dell'oggetto** — ed è la stessa forma
+> che in questa release ricompare su tre livelli diversi: un servizio, un preflight, una
+> frase di documentazione.
+
+### 🛡️ Sicurezza — quello che una macchina appena installata si porta dietro
+
+- **`fail2ban` partiva e moriva subito su Debian 12** (#200). Misurato sulla VPS viva:
+  `Have not found any log file for sshd jail`, `status=255`, **al boot di quattro settimane
+  prima** — cioè mai ripartito, mentre `ss -ltn` mostrava `LISTEN 0.0.0.0:22`. La causa non
+  è un guasto: su Debian 12 i log di sshd stanno **solo nel journal**, `/var/log/auth.log`
+  non esiste, e la jail di default cerca un file. *La configurazione non è invecchiata: non
+  è mai stata adatta alla distribuzione che installiamo.* Ora `jail.local` con
+  `backend = systemd` **e** un `is-active --quiet` dopo l'enable, in **tutti e tre** gli
+  installer — perché da sole le due cure non bastano.
+- **Il gateway non monta più il token del bot, ma la chiave derivata** (#194; la issue #61 è stata chiusa dal suo merge il 16/08).
+  Per verificare l'`initData` serve `HMAC_SHA256("WebAppData", token)`, non il token: la
+  strada era nel codice dal 27/07, mancava solo che qualcuno gliela desse. Il bot il token
+  ce l'ha ancora, e deve — *gli serve per parlare*. `assicura_webapp_secret()` deriva il
+  secret prima di ogni `up`, così la migrazione non lascia un compose che non parte.
+
+### 🧱 L'installazione — il verso in cui si muore conta
+
+- **Il preflight verificava il nome `python3`, non la capacità di calcolare bcrypt** (#193).
+  Su Debian/Ubuntu `python3` e `python3-pip` sono **due pacchetti distinti**, quindi
+  `command -v python3` passava su macchine dove quel comando sarebbe morto — e moriva
+  **dopo** aver scritto `.env` e tre secret, cioè **a metà installazione**. *Il requisito
+  vero non era il nome del comando: era ciò che il comando deve saper fare.*
+
+### 🔍 I presìdi che ora girano davvero
+
+- **Il ciclo backup → restore viene ESEGUITO** (#196). Nessun test lo faceva: i tre che
+  nominano `restore.sh` lo leggevano con `read_text()`. Ora il test fa il giro intero —
+  backup, cifratura `age`, svuotamento, restore, **confronto sha256 dei byte ripristinati**
+  — in un albero isolato, perché `restore.sh` fa un `docker compose down` incondizionato.
+  *Una prova a mano non lascia un presidio.*
+- **Le coordinate `file:riga` nei documenti devono puntare dentro il file** (#198). Nasce
+  da un caso vero (`SECURITY.md` mandava a una riga dove c'era un'altra funzione) e su un
+  difetto **già curato**: 27 coordinate, zero fuori. *Una coordinata sbagliata non rompe
+  niente — manda solo la persona sbagliata nel posto sbagliato, e non se ne accorge nessuno.*
+
+### ⚡ Prestazioni
+
+- **Connessioni SQLite persistenti per-thread in `archive-mcp`** (#197). I nove chiamanti di
+  `_open()` aprivano una connessione per chiamata e per DB. Misurato su 300 iterazioni:
+  **0,305 → 0,039 ms** sul DB in chiaro (7,7×) e **229 → 0,071 ms** su quello cifrato
+  (3227×). *Il 7,7× da solo non giustificherebbe il diff: lo giustifica la cifratura* —
+  è il prerequisito, non l'ottimizzazione.
+
+### 📝 Quando è la PROSA a mentire
+
+- **«La cura non è stata presa» era falsa alla nascita** (#199). L'unit dell'auto-update
+  elencava due opzioni «non prese»: **la (A) era stata presa il 03/08**, nello stesso file,
+  dodici giorni prima che la frase venisse scritta. Costo misurato: **due sessioni di fila**
+  hanno concluso «il format non ripara l'auto-update», e la conclusione sbagliata è arrivata
+  a @Neo come decisione da prendere — *quando la decisione era già stata presa*. La frase
+  ora è **datata col commit che l'ha prodotta**; la tabella della misura resta, perché
+  quella non scade.
+- **L'avviso di collasso di `archive-mcp` nominava i caratteri sbagliati** (#201). Su `.NET`
+  diceva «il tokenizer non indicizza `+` e `#`», ma a sparire è **il punto**: *giusto nel
+  verdetto, sbagliato nella causa — e un avviso così manda a cercare il difetto dove non è.*
+  I caratteri ora si **derivano dal termine**, come già faceva il meccanismo sotto:
+  l'elenco a mano era l'unica parte che ne sapeva meno del meccanismo, e stava esattamente
+  nel punto in cui qualcuno si fida.
+
+### 📐 Disegno (proposta, non prodotto)
+
+- **Il disegno della cifratura dell'archivio** (#195): cosa è misurato, cosa è stimato, e le
+  tre domande ancora aperte. Dice per primo il limite che nessuna cifratura supera — *la VPS
+  è affittata, e il provider vede la RAM di una VM accesa.*
+
 ## [0.42.0] — 2026-08-16
 
 **Sessantatré commit in una settimana, e quasi nessuno aggiunge una funzione: quasi tutti
