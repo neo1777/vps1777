@@ -211,6 +211,26 @@ def test_collapse_warning_su_db_default():
     assert 'collassato su "C"' in warns[0]
 
 
+def test_avviso_nomina_i_caratteri_VERI_del_termine():
+    """L'avviso deve dire quali caratteri sono spariti IN QUESTO termine.
+
+    🔴 Nasce da un difetto vero (b82df434, 17/08, misurando sui DB vivi): il messaggio
+       diceva «il tokenizer non indicizza i caratteri +/#» **anche per `.NET`**, dove a
+       sparire è il punto. Giusto nel verdetto, sbagliato nella causa — e un avviso
+       sbagliato nella causa manda a cercare il difetto dove non è.
+    ⭐ La logica era già generale (`collapse_candidates` spezza su `\\w+`): l'elenco a
+       mano era la sola parte del meccanismo che ne sapeva meno del meccanismo.
+    """
+    conn = _db(_ROWS_CPP)
+    w_cpp = fts.collapse_warnings_conn(conn, "C++")
+    assert w_cpp and "«++»" in w_cpp[0], (
+        f"per C++ l'avviso deve nominare «++», invece dice: {w_cpp}")
+    # e NON deve nominare caratteri che in questo termine non ci sono
+    assert "#" not in w_cpp[0], (
+        "l'avviso nomina «#» su un termine che non lo contiene: è l'elenco a memoria "
+        "che questo test esiste per impedire")
+
+
 def test_collapse_no_warning_con_tokenchars():
     # DB ricostruito col fix: C++ è un token vero → NIENTE avviso (auto-taratura)
     conn = _db_tok(_ROWS_CPP)
