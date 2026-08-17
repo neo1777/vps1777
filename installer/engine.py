@@ -308,7 +308,16 @@ systemctl enable --now docker
 printf 'APT::Periodic::Update-Package-Lists "1";\\nAPT::Periodic::Unattended-Upgrade "1";\\n' \
   > /etc/apt/apt.conf.d/20auto-upgrades
 systemctl enable --now unattended-upgrades 2>/dev/null || true
+# backend = systemd: su Debian 12 i log di sshd stanno SOLO nel journal e la jail
+# di default cerca /var/log/auth.log, che non esiste. Misurato sulla VPS viva il
+# 17/08: fail2ban morto da quattro settimane, un secondo dopo il boot, con ssh su
+# 0.0.0.0:22. La configurazione non e' invecchiata: non e' mai stata adatta.
+printf '[sshd]\\nenabled = true\\nbackend = systemd\\n' > /etc/fail2ban/jail.local
 systemctl enable --now fail2ban 2>/dev/null || true
+# `enable --now` esce 0 anche se il servizio muore subito dopo: la prova e' rileggere
+# lo stato dell'oggetto, non l'esito del comando che lo ha attivato.
+systemctl is-active --quiet fail2ban 2>/dev/null \\
+  || echo "  ATTENZIONE: fail2ban NON e' attivo, ssh resta senza anti-brute-force (journalctl -u fail2ban -n 20)"
 if ! docker compose version >/dev/null 2>&1; then
   case "$(uname -m)" in x86_64) A=x86_64;; aarch64|arm64) A=aarch64;; *) A=x86_64;; esac
   mkdir -p /usr/local/lib/docker/cli-plugins

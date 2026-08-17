@@ -606,7 +606,18 @@ if apt-get install -y -q unattended-upgrades fail2ban >/dev/null 2>&1; then
   printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
     > /etc/apt/apt.conf.d/20auto-upgrades
   systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+  # 🔴 `backend = systemd` NON è un dettaglio di gusto — misurato sulla VPS viva il
+  #   17/08 (b82df434): fail2ban era morto **da quattro settimane**, un secondo dopo il
+  #   boot, con `Have not found any log file for sshd jail`, mentre ssh ascoltava su
+  #   `0.0.0.0:22`. Su Debian 12 i log di sshd stanno solo nel journal e la jail di
+  #   default cerca `/var/log/auth.log`. ⇒ *la configurazione non era invecchiata:
+  #   non è mai stata adatta alla distribuzione che installiamo qui.*
+  printf '[sshd]\nenabled = true\nbackend = systemd\n' > /etc/fail2ban/jail.local
   systemctl enable --now fail2ban >/dev/null 2>&1 || true
+  # ⭐ E la verifica, che prima non c'era: `enable --now` esce 0 anche se il servizio
+  #   muore un istante dopo. *Un comando che attiva non è una prova che sia attivo.*
+  systemctl is-active --quiet fail2ban 2>/dev/null \
+    || echo "  ⚠️  fail2ban NON è attivo: ssh resta senza anti-brute-force (journalctl -u fail2ban -n 20)"
 fi
 
 # 3. Utente operatore (nome non collidente con utenti di sistema Debian)
