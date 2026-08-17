@@ -519,8 +519,30 @@ H55
         printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
           | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null 2>&1 || true
         sudo systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+        # 🔴 QUINTA DELLA STESSA CLASSE, e questa volta MISURATA SU UNA MACCHINA VIVA
+        #   (b82df434, 17/08): sulla VPS `fail2ban` era **morto da quattro settimane**,
+        #   un secondo dopo il boot — `ERROR Failed during configuration: Have not found
+        #   any log file for sshd jail`, status 255 — mentre `ss -ltn` mostrava ssh su
+        #   `0.0.0.0:22`. ⇒ *ssh pubblico senza anti-brute-force, e l'installer aveva
+        #   detto «Hardening host attivo».*
+        # 🔑 La causa non è un guasto: su Debian 12 i log di sshd stanno SOLO nel journal,
+        #   `/var/log/auth.log` non esiste, e la jail `sshd` di default cerca un file.
+        #   Serve `backend = systemd`. **La configurazione non è mai stata adatta alla
+        #   distribuzione che installiamo** — non è invecchiata, nasceva così.
+        # ⭐ E il difetto che l'ha reso invisibile è la riga qui sotto, non il pacchetto:
+        #   `enable --now` esce 0 anche se il servizio muore un istante dopo, e `|| true`
+        #   copriva pure quello. *Un comando che ATTIVA non è una prova che sia attivo:
+        #   la prova è ri-leggere lo stato dell'oggetto.*
+        printf '[sshd]\nenabled = true\nbackend = systemd\n' \
+          | sudo tee /etc/fail2ban/jail.local >/dev/null 2>&1 || true
         sudo systemctl enable --now fail2ban >/dev/null 2>&1 || true
-        ok "Hardening host attivo: unattended-upgrades + fail2ban"
+        if sudo systemctl is-active --quiet fail2ban 2>/dev/null; then
+          ok "Hardening host attivo: unattended-upgrades + fail2ban (jail sshd su journal)"
+        else
+          warn "fail2ban NON è attivo (installato ma non in esecuzione): ssh resta senza
+       anti-brute-force. Guarda perché con:  journalctl -u fail2ban -n 20
+       e NON fidarti di 'systemctl enable --now', che esce 0 anche se muore dopo."
+        fi
       else
         warn "Hardening host non applicato (apt-get non riuscito) — a mano: sudo apt-get install -y unattended-upgrades fail2ban"
       fi
