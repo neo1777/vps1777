@@ -26,7 +26,7 @@ più grave dei quali è stato misurato sulla macchina viva, non ipotizzato.
   è mai stata adatta alla distribuzione che installiamo.* Ora `jail.local` con
   `backend = systemd` **e** un `is-active --quiet` dopo l'enable, in **tutti e tre** gli
   installer — perché da sole le due cure non bastano.
-- **Il gateway non monta più il token del bot, ma la chiave derivata** (#194, chiude #61).
+- **Il gateway non monta più il token del bot, ma la chiave derivata** (#194; la issue #61 è stata chiusa dal suo merge il 16/08).
   Per verificare l'`initData` serve `HMAC_SHA256("WebAppData", token)`, non il token: la
   strada era nel codice dal 27/07, mancava solo che qualcuno gliela desse. Il bot il token
   ce l'ha ancora, e deve — *gli serve per parlare*. `assicura_webapp_secret()` deriva il
