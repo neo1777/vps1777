@@ -170,6 +170,7 @@ Tutto questo è passato per una **review difensiva a tappeto** (luglio 2026): la
 | [NB1777.md](docs/NB1777.md) | NotebookLM: i 37 tool MCP, lo studio, l'auth, il bot Telegram, il canonico della memoria |
 | [MINIAPP.md](docs/MINIAPP.md) | Mini App Telegram: la plancia mobile — auth initData, endpoint, sicurezza |
 | [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) | Backup/restore volumi age-encrypted |
+| [COLLAUDO-VERGINE.md](docs/COLLAUDO-VERGINE.md) | Il test definitivo su VPS formattata: install, verifiche mirate per cura, quadratura |
 | [ONBOARDING.md](docs/ONBOARDING.md) | Setup post-deploy dal pannello web |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Quando qualcosa va storto |
 
