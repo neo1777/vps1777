@@ -12,6 +12,7 @@
 | Backup dei dati veri (DB archivio, profilo NotebookLM, secrets) | proprietario | [BACKUP-RESTORE.md](BACKUP-RESTORE.md); i DB rigenerabili dal re-ingest possono anche non essere salvati |
 | Fotografia dello stato della macchina viva | fatta | baseline raccolta il 17/08 in sola lettura (fuori repo, canale operativo) |
 | Credenziali che ruotano col format (password root/utente, chiavi ssh) | proprietario | la rotazione al format è decisa: annotare le nuove fuori dalla macchina |
+| **Decidere la cifratura del disco/volume** (H56) | proprietario | l'unica cura per lo snapshot pre-update in chiaro che non rompe il rollback si fa **sul disco, al format** (es. LUKS sul volume dati): dopo, il treno è passato fino al prossimo format |
 | **Fotografia `pre-format` delle 9 prove empiriche** — sulla VPS VIVA, via ssh | chiunque, PRIMA del format | `bash tools/prove-empiriche/lancia-tutte.sh --fase pre-format` → scrive `onboarding/prove-empiriche-pre-format.json`. **È l'unico gesto di questa tabella che scade col format**: dopo, il comportamento della macchina vecchia non è più misurabile. Copiare il json fuori dalla VPS |
 
 ## 1 · Installazione (host vuoto → stack su)
