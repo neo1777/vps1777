@@ -2,6 +2,35 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.1] — 2026-08-22
+
+**La release che allinea `latest` allo stato dell'arte prima del collaudo su macchina
+vergine.** Nessuna feature nuova: performance, dipendenze e il runbook che mancava.
+
+### ⚡ Performance
+
+- **Connessioni SQLite persistenti per-thread in `_open()`** (#204). Ogni chiamata ai 13
+  tool apriva e chiudeva la propria connessione; ora una cache per-thread la riusa, con
+  due scelte che valgono più del risparmio: la cache si **invalida sulla firma della dir
+  DB** (un DB rigenerato è un file nuovo — una connessione sul vecchio inode risponderebbe
+  con i dati di prima, *senza errore*), e il `close()` dei nove chiamanti resta scritto ma
+  è **no-op documentato** — toglierlo avrebbe funzionato oggi e si sarebbe rotto alla
+  prima riscrittura di un chiamante. 216 righe di test, anche stdlib-only.
+
+### 📦 Dipendenze
+
+- Bump del gruppo python-runtime nei tre servizi (#203, dependabot): `pyproject` +
+  `uv.lock` di gateway, archive-mcp, nb1777-mcp.
+
+### 📖 Documentazione
+
+- **`docs/COLLAUDO-VERGINE.md`**: il runbook del test definitivo su VPS formattata —
+  l'ordine deciso il 02/08 (format → install → verifiche → re-ingest → campione cieco)
+  con una verifica mirata **per cura** (fail2ban #200, unit da `VPS1777_FEATURES`,
+  auto-update #101/#104/#125, self-update CLI, reboot-survival, connector) e l'esito
+  atteso accanto a ogni comando. *Il criterio è quello della 0.43.0: rileggere lo stato
+  dell'oggetto, mai fidarsi dell'exit 0 di chi lo attiva.*
+
 ## [0.43.0] — 2026-08-17
 
 **Nove commit, e cinque toccano ciò che la macchina fa quando NASCE.** Non è una scelta
