@@ -8,7 +8,7 @@ authors = [{ name = "vps1777 contributors" }]
 
 dependencies = [
     "starlette>=1.6.0",
-    "uvicorn[standard]>=0.52.2",
+    "uvicorn[standard]>=0.52.3",
     "httpx>=0.28,<1",
     "pyjwt>=2.10.0",
     "bcrypt>=4.2.0",
@@ -18,7 +18,7 @@ dependencies = [
     "pydantic>=2.10.0",
     "pydantic-settings>=2.15.0",
     "jinja2>=3.1.5",
-    "pypdf>=6.15.0",  # estrazione testo dai PDF caricati in /admin/archive
+    "pypdf>=6.16.1",  # estrazione testo dai PDF caricati in /admin/archive
 ]
 
 [build-system]
