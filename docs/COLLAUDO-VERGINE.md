@@ -13,14 +13,21 @@
 | Fotografia dello stato della macchina viva | fatta | baseline raccolta il 17/08 in sola lettura (fuori repo, canale operativo) |
 | Credenziali che ruotano col format (password root/utente, chiavi ssh) | proprietario | la rotazione al format è decisa: annotare le nuove fuori dalla macchina |
 | **Decidere la cifratura del disco/volume** (H56) | proprietario | l'unica cura per lo snapshot pre-update in chiaro che non rompe il rollback si fa **sul disco, al format** (es. LUKS sul volume dati): dopo, il treno è passato fino al prossimo format |
-| **Fotografia `pre-format` delle 9 prove empiriche** — sulla VPS VIVA, via ssh | chiunque, PRIMA del format | `bash tools/prove-empiriche/lancia-tutte.sh --fase pre-format` → scrive `onboarding/prove-empiriche-pre-format.json`. **È l'unico gesto di questa tabella che scade col format**: dopo, il comportamento della macchina vecchia non è più misurabile. Copiare il json fuori dalla VPS |
+| **Fotografia `pre-format` delle 9 prove empiriche** — sulla VPS VIVA, via ssh | chiunque, PRIMA del format | ⚠️ un'installazione fatta con `deploy.sh`/installer **non ha `.git` né (se vecchia) le prove**: si portano dal PC. Dal PC: `scp -r tools/prove-empiriche <vps>:/root/pf/tools/` poi sulla VPS `cd /root/pf && VPS1777_REPO=/home/vps1777/vps1777 bash tools/prove-empiriche/lancia-tutte.sh --fase pre-format` → copiare fuori `onboarding/prove-empiriche-pre-format.json`. **È l'unico gesto che scade col format** |
 
 ## 1 · Installazione (host vuoto → stack su)
 
-I 4 step di [INSTALL.md](INSTALL.md) — oppure l'installer grafico. Il punto che questo
-collaudo deve provare: `setup.sh` risolve la versione da **releases/latest** e tira
-**immagini firmate** da ghcr — i sorgenti clonati e le immagini scaricate devono
-dichiarare **lo stesso numero**.
+Due vie equivalenti, ed **entrambe devono funzionare** — il collaudo della vergine
+collauda anche la via che si sceglie:
+
+- **installer grafico** (dal PC, zero comandi): `installer/launch.sh` → form → Installa
+  ([installer/README.md](../installer/README.md));
+- **CLI dal PC**: `./deploy.sh` (trasferisce il repo via tar-over-ssh: sulla VPS **non
+  c'è `.git`** — è normale, non un difetto);
+- (la terza, manuale sulla VPS con `git clone` + `setup.sh`, resta per chi fa a mano).
+
+Il punto che il collaudo deve provare, per qualunque via: la versione risolta da
+**releases/latest** e le **immagini firmate** da ghcr dichiarano **lo stesso numero**.
 
 A macchina formattata e **prima** dell'installer, la seconda fotografia:
 
@@ -61,6 +68,10 @@ collaudo non è «post-install è verde»: è il **confronto** — ciò che era 
 (pre-format) e che l'installazione pulita doveva curare, ora è verde? Le 9 prove sono
 l'unico strato che tocca il sistema reale (docker, rete, systemd veri): in CI non possono
 girare per costruzione, e queste tre date sono la risposta a «da quanto non le lanciamo?».
+Un esempio del confronto che conta: una `pre-format` su una versione vecchia può avere
+**rosse attese** (es. prova-8 su 0.40.x: le cure sulle unit sono entrate dopo) — sulla
+vergine quelle stesse prove **devono** diventare verdi: è la misura che il format ha
+comprato le cure, non un dettaglio.
 
 ## 3 · Re-ingest e quadratura dell'archivio
 
