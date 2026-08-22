@@ -12,6 +12,8 @@
 | Backup dei dati veri (DB archivio, profilo NotebookLM, secrets) | proprietario | [BACKUP-RESTORE.md](BACKUP-RESTORE.md); i DB rigenerabili dal re-ingest possono anche non essere salvati |
 | Fotografia dello stato della macchina viva | fatta | baseline raccolta il 17/08 in sola lettura (fuori repo, canale operativo) |
 | Credenziali che ruotano col format (password root/utente, chiavi ssh) | proprietario | la rotazione al format è decisa: annotare le nuove fuori dalla macchina |
+| **Decidere la cifratura del disco/volume** (H56) | proprietario | l'unica cura per lo snapshot pre-update in chiaro che non rompe il rollback si fa **sul disco, al format** (es. LUKS sul volume dati): dopo, il treno è passato fino al prossimo format |
+| **Fotografia `pre-format` delle 9 prove empiriche** — sulla VPS VIVA, via ssh | chiunque, PRIMA del format | `bash tools/prove-empiriche/lancia-tutte.sh --fase pre-format` → scrive `onboarding/prove-empiriche-pre-format.json`. **È l'unico gesto di questa tabella che scade col format**: dopo, il comportamento della macchina vecchia non è più misurabile. Copiare il json fuori dalla VPS |
 
 ## 1 · Installazione (host vuoto → stack su)
 
@@ -19,6 +21,14 @@ I 4 step di [INSTALL.md](INSTALL.md) — oppure l'installer grafico. Il punto ch
 collaudo deve provare: `setup.sh` risolve la versione da **releases/latest** e tira
 **immagini firmate** da ghcr — i sorgenti clonati e le immagini scaricate devono
 dichiarare **lo stesso numero**.
+
+A macchina formattata e **prima** dell'installer, la seconda fotografia:
+
+```bash
+bash tools/prove-empiriche/lancia-tutte.sh --fase macchina-nuda
+```
+
+poi i 4 step:
 
 ```bash
 git clone https://github.com/neo1777/vps1777.git && cd vps1777 && ./setup.sh
@@ -38,6 +48,19 @@ comando che lo attiva (è il filo della release 0.43.0).
 | 4 | self-update CLI | `vps1777 check && vps1777 status` | canale coerente, nessun errore di copia della CLI |
 | 5 | reboot-survival | `sudo reboot` → attendere → `docker compose ps` | tutti i container `Up`, ingress raggiungibile |
 | 6 | connector claude.ai end-to-end | dal client: `list_databases` via MCP | risponde (dopo il re-ingest: i DB nuovi) |
+
+### 2b · La terza fotografia, e il confronto che è il vero verdetto
+
+```bash
+bash tools/prove-empiriche/lancia-tutte.sh --fase post-install
+```
+
+Le tre fasi scrivono **tre file distinti** (`onboarding/prove-empiriche-<fase>.json`) —
+per costruzione: con un file solo la seconda foto cancellerebbe la prima. Il verdetto del
+collaudo non è «post-install è verde»: è il **confronto** — ciò che era rosso sul vivo
+(pre-format) e che l'installazione pulita doveva curare, ora è verde? Le 9 prove sono
+l'unico strato che tocca il sistema reale (docker, rete, systemd veri): in CI non possono
+girare per costruzione, e queste tre date sono la risposta a «da quanto non le lanciamo?».
 
 ## 3 · Re-ingest e quadratura dell'archivio
 

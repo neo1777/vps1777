@@ -1197,6 +1197,9 @@ findings:
         la voce porta la misura: uscita del gateway misurata sul vivo con prova-1 (523aed1). Il commit attesta la MISURA, non chi ha sollevato il tema per primo.
     resta_aperto: >
       Niente sul difetto, che è chiuso e misurato: restano due opzioni SCARTATE (refresh on-demand via path unit, egress ristretto a api.github.com) e la scelta è scritta.
+      [22/08/2026] Il «non ancora in produzione» del titolo si estingue col FORMAT della VPS:
+      la vergine installa ≥0.43.x, dove la cura è nel codice — da chiudere al collaudo
+      (docs/COLLAUDO-VERGINE.md, prova-1).
     since: v0.40.3
     evidence:
       - file: compose.yaml
@@ -1761,8 +1764,8 @@ findings:
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
     status: partial
     resta_aperto: >
-      Eseguire `tools/migra-chiave-miniapp.sh` sulla macchina: finché il compose monta
-      il token, il rilievo è mitigato nel software e non là dove gira.
+      Solo la VPS viva pre-format: in main il gateway non monta più il token (misurato
+      22/08). Col format la vergine nasce giusta — chiudere al collaudo (COLLAUDO-VERGINE).
     prova:
       - comando: "grep -rn 'api.telegram.org\\|sendMessage\\|getUpdates' services/gateway/"
         dove: "repo, a v0.40.14"
@@ -2652,7 +2655,7 @@ findings:
         prima di crederci — eseguendo il checker su un registro rotto in copia, non
         rileggendo la riga.
     natura: comportamento
-    since: unreleased
+    since: v0.43.1
     prova:
       - comando: "cp security/{check_findings.py,findings.yml} $S/security/ && cd $S && uv run --with pyyaml security/check_findings.py  (PRIMA del fix)"
         dove: "copia del solo registro in scratchpad, senza i file d'evidenza attorno: il modo più corto per ottenere un ROSSO vero"
@@ -2720,7 +2723,7 @@ findings:
         con NESSUNA delle tre esistente. Un compenso citato rende invisibile il debito:
         chi legge quella riga smette di cercare.
     natura: comportamento
-    since: unreleased
+    since: v0.43.1
     prova:
       - comando: "grep -riE 'redact|masche|mask|anonim|acl|cifrat|encrypt' services/archive-mcp/**/*.py"
         dove: "il servizio che espone i tool di ricerca"
@@ -2800,7 +2803,7 @@ findings:
         origin/main — e proprio per questo mancava il presidio: una promessa vera
         non ha sintomi finché non smette di esserlo, e allora non li ha comunque.
     natura: comportamento
-    since: unreleased
+    since: v0.43.1
     prova:
       - comando: "for f in .github/workflows/*.yml; do grep -oE 'uses:\\s*\\S+' $f; done | sort -u | grep -cE '@[0-9a-f]{40}'"
         dove: "worktree su origin/main (206abdf), il 10/08/2026"
@@ -2872,7 +2875,7 @@ findings:
         images.lock (release.yml:177-192, verificato da tools/vps1777.py:1199) — che
         e' il punto successivo di SECURITY.md.
     natura: comportamento
-    since: unreleased
+    since: v0.43.1
     prova:
       - comando: "grep -rh '^\\s*image:' compose*.y*ml | wc -l ; grep -rh '^\\s*image:' compose*.y*ml | grep -c '@sha256:'"
         dove: "worktree su origin/main (206abdf), il 10/08/2026"
@@ -2953,7 +2956,7 @@ findings:
         path alternativo, e i due che lo montano (portainer, watchtower) sono profili
         opt-in già nominati come eccezioni. Il difetto era nella capacità di accorgersene.
     natura: comportamento
-    since: unreleased
+    since: v0.43.1
     prova:
       - comando: "stat -c '%i %n' /run/docker.sock /var/run/docker.sock"
         dove: "macchina di sviluppo con Docker attivo, il 10/08/2026"
@@ -3111,7 +3114,7 @@ findings:
         gruppo `docker` può chiamarlo), finiscono nei crash-reporter e sono ereditate da
         OGNI processo figlio. Un file in `tmpfs /run/secrets/` no.
     natura: comportamento
-    since: unreleased
+    since: v0.43.1
     prova:
       - comando: "python3 tools/tests/test_secrets_file_mounted.py"
         dove: "worktree su origin/main (afe40a3), il 10/08/2026"
