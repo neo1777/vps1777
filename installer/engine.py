@@ -503,7 +503,13 @@ gen() {{ python3 -c "import secrets;print(secrets.token_urlsafe($1))"; }}
 # non li rigeneriamo se già presenti.
 [ -s secrets/gateway_secret.txt ]       || gen 24 > secrets/gateway_secret.txt
 [ -s secrets/oauth_signing_secret.txt ] || gen 48 > secrets/oauth_signing_secret.txt
-chmod 600 secrets/gateway_secret.txt secrets/oauth_signing_secret.txt
+# archive_desc_secret (nato 581793f, 20/07): era generato SOLO da setup.sh — le
+# due vie dal PC no, e il compose lo dichiara: prima installazione su macchina
+# vergine dal PC = "bind source path does not exist" e stack mai partito
+# (misurato 23/08 sul primo install post-format). Stessa classe di H45: la
+# cura in UNA via su tre. Lunghezza 24 come in setup.sh (gen_random 24).
+[ -s secrets/archive_desc_secret.txt ]  || gen 24 > secrets/archive_desc_secret.txt
+chmod 600 secrets/gateway_secret.txt secrets/oauth_signing_secret.txt secrets/archive_desc_secret.txt
 # La password admin (bcrypt) arriva dal PC: hash già pronto, o chiaro base64 da
 # hashare qui via STDIN (mai argv). Rigenerata SEMPRE fresca per-installazione.
 if [ -n '{admin_bcrypt_b64}' ]; then
