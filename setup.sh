@@ -391,6 +391,22 @@ if [ ! -s secrets/telegram_bot_token.txt ]; then
   fi
 fi
 
+# telegram_webapp_secret — la chiave DERIVATA che il gateway monta al posto del
+# token (#61/#194): HMAC_SHA256("WebAppData", token), a senso unico. Trovato dal
+# presidio delle tre vie (23/08): il compose la dichiara con `file:` ma questa
+# via non la creava MAI → su una vergine il compose muore come per
+# archive_desc_secret. Si RIGENERA sempre dal file token (non `-s`-guardato):
+# se il token cambia, la derivata deve seguirlo — e con token vuoto il file
+# esiste vuoto, che è ciò che serve al compose per partire (forma di engine.py).
+python3 - <<'PYW'
+import hmac, hashlib
+t = open('secrets/telegram_bot_token.txt').read().strip()
+open('secrets/telegram_webapp_secret.txt', 'w').write(
+    hmac.new(b'WebAppData', t.encode(), hashlib.sha256).hexdigest() if t else '')
+PYW
+chmod 600 secrets/telegram_webapp_secret.txt
+ok "telegram_webapp_secret.txt derivato dal token (vuoto se token assente)"
+
 # ───── 4. Immagini + start ─────
 # 🔴 `|| true` + controllo esplicito (71d540e6, review della #165): con `set -e`
 #   (r.13) un `.env` privo della riga `INGRESS_PROFILE=` faceva MORIRE lo script

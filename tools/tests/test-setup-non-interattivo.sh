@@ -80,10 +80,14 @@ else
   fi
   # i secret: sono CINQUE (INSTALL.md ne elencava 4 — reperto del 16/08)
   n_secret="$(find "$BANCO/repo/secrets" -maxdepth 1 -name '*.txt' 2>/dev/null | wc -l)"
-  if [ "$n_secret" -eq 5 ]; then
-    echo "✅ ① i 5 secret sono stati generati"
+  # 6 dal 23/08: si e' aggiunto telegram_webapp_secret.txt — la chiave derivata
+  # (#194) che setup.sh non creava MAI, trovata dal presidio delle tre vie il
+  # giorno del primo install su macchina vergine. Questo conteggio e' il
+  # CONTRATTO: se un secret nasce o muore, la riga cambia INSIEME al setup.
+  if [ "$n_secret" -eq 6 ]; then
+    echo "✅ ① i 6 secret sono stati generati"
   else
-    echo "🔴 ① secret generati: $n_secret (attesi 5)"
+    echo "🔴 ① secret generati: $n_secret (attesi 6)"
     FALLITI=$((FALLITI+1))
   fi
   # e NON deve aver avviato niente: la conferma finale ha ricevuto «n»
