@@ -104,6 +104,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, (HERE / "ui.html").read_bytes(), "text/html; charset=utf-8")
         elif path == "/api/env":
             self._send(200, json.dumps({"paramiko": _PARAMIKO}).encode(), "application/json")
+        elif path == "/__ping":
+            # Firma per il rilancio: un nuovo installer la legge per sapere che chi
+            # occupa la porta è un SUO predecessore (e non un servizio qualunque)
+            # prima di chiedergli di uscire. Vedi _libera_porta().
+            self._send(200, json.dumps({"vps1777_installer": True, "pid": os.getpid()}).encode(), "application/json")
         elif path == "/api/status":
             # La UI lo interroga al caricamento: se c'è un deploy vivo/finito,
             # si riaggancia invece di ripartire dal form.
@@ -164,6 +169,14 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_POST(self):
+        if self.path == "/__quit":
+            # Un nuovo installer chiede a questo di uscire (porta occupata da un
+            # run precedente mai chiuso — misurato 23/08: il browser non si apriva
+            # e il motivo era il predecessore ancora vivo). Shutdown in un thread:
+            # farlo nel handler bloccherebbe serve_forever su se stesso.
+            self._send(200, json.dumps({"ok": True, "bye": os.getpid()}).encode(), "application/json")
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+            return
         if not _PARAMIKO:
             self._send(200, json.dumps({"ok": False, "error": "paramiko non installato. Riavvia con launch.sh/launch.bat, oppure: pip install paramiko"}).encode(), "application/json")
             return
@@ -194,8 +207,63 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain")
 
 
+def _libera_porta() -> None:
+    """Se sulla porta c'è un NOSTRO installer di un run precedente, lo fa uscire.
+
+    Il caso (23/08, primo collaudo su macchina vergine): il run 1 resta vivo col
+    suo terminale, il run 2 muore sul bind PRIMA del webbrowser.open — per l'utente
+    «non apre più il browser», senza una riga che dica perché. Tre passi:
+      ① /__ping: se risponde la nostra firma → POST /__quit e attesa che esca;
+      ② (solo Linux) un predecessore VECCHIO senza /__quit: si cerca in /proc il
+         processo `installer.py` che non siamo noi e gli si manda SIGTERM;
+      ③ se la porta resta occupata, main() stampa il rimedio invece del traceback.
+    """
+    import urllib.request
+    base = f"http://{HOST}:{PORT}"
+    try:
+        with urllib.request.urlopen(base + "/__ping", timeout=2) as r:
+            firma = json.loads(r.read().decode())
+        if firma.get("vps1777_installer"):
+            print(f"  ↻ un installer precedente è vivo (pid {firma.get('pid')}): lo riavvio")
+            try:
+                urllib.request.urlopen(urllib.request.Request(
+                    base + "/__quit", method="POST"), timeout=2).read()
+            except OSError:
+                pass
+            time.sleep(1.0)
+            return
+    except Exception:
+        pass  # niente ping: o porta libera, o un predecessore vecchio → ②
+    proc = Path("/proc")
+    if proc.is_dir():
+        for p in proc.iterdir():
+            if not p.name.isdigit() or int(p.name) == os.getpid():
+                continue
+            try:
+                cmd = (p / "cmdline").read_bytes().decode(errors="replace")
+            except OSError:
+                continue
+            if "installer.py" in cmd:
+                print(f"  ↻ installer precedente (pid {p.name}, senza /__quit): SIGTERM")
+                try:
+                    os.kill(int(p.name), 15)
+                except OSError:
+                    pass
+                time.sleep(1.0)
+
+
 def main():
-    srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    try:
+        srv = ThreadingHTTPServer((HOST, PORT), Handler)
+    except OSError:
+        _libera_porta()
+        try:
+            srv = ThreadingHTTPServer((HOST, PORT), Handler)
+        except OSError:
+            print(f"\n  ✗ la porta {PORT} resta occupata e chi la tiene non è un nostro"
+                  f"\n    installer. Rimedi: chiudi quel processo, oppure rilancia con"
+                  f"\n    VPS1777_INSTALLER_PORT=8778 (o un'altra porta libera).\n")
+            raise SystemExit(1)
     url = f"http://{HOST}:{PORT}"
     print(f"\n  vps1777 installer → {url}")
     if not _PARAMIKO:
