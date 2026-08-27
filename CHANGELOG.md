@@ -2,6 +2,53 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.4] — 2026-08-27
+
+**La prima release il cui contenuto è stato giudicato da una misura, non da chi
+l'ha scritto**: il campione cieco del collaudo (46 messaggi, giudice l'owner) ha
+bocciato due regole del voice-tagging e la taratura che ne esce porta il gold
+come test di accettazione. Con lei: le tabelle admin che non sfondano più il
+riquadro, e la prova-6 che per la prima volta può dare un PASS pieno.
+
+### 🐛 Fix
+
+- **`classify_voice` tarata sul golden set** (#221). La prima misura vera —
+  campione cieco, 37 giudizi confidenti — dava accordo 20/37 con due difetti
+  strutturali: `character` decisa dal solo NOME del progetto (0/8, con 4 own
+  veri marcati «personaggio»: i falsi che il principio vieta) e `pasted_ai`
+  mai emessa contro 8 casi veri, perché la regola assumeva AI=inglese in un
+  corpus dove le AI scrivono italiano. Ora `character` vuole il progetto **e**
+  la recitazione nel testo; `pasted_ai` riconosce i tick di automazione e i
+  prompt-template italiani («Sei un…», «Ruolo:», heading+elenchi — anche con
+  le newline collassate in doppi spazi da uno degli ingest). Dopo: 30/37,
+  falsi cari 0, own 21/21. Il gold è il test di accettazione
+  (`tools/tests/test_voice_golden.py`, si arma dove l'archivio c'è). ⚠️ Le
+  righe già classificate nei DB vivi restano col verdetto vecchio finché non
+  si esegue `retag_voice` (Fase 4): il retag è un gesto esplicito, non un
+  effetto della release.
+- **Le tabelle larghe dell'admin scorrono nel proprio riquadro invece di
+  sfondarlo** (#218) — il fix UI segnalato dall'owner al collaudo.
+
+### 🧪 Prove
+
+- **La prova-6 §③ misura invece di dichiarare** (#221, #222): dove il prodotto
+  è in esercizio, il caso silenzioso del backup (mktemp + bind-mount sotto la
+  sandbox proposta) viene ESEGUITO e giudicato in **dimensione del dump**, coi
+  due versi — sotto la stretta proposta il dump ha contenuto, sotto
+  `PrivateTmp=yes` esce il vuoto-con-rc-0 che la unit dichiara da mesi: quella
+  riga ora è una misura. Due sonde corrette strada facendo, entrambe beccate
+  da un banco: il mktemp fatto FUORI dalla sandbox rendeva la controprova
+  cieca, e il glob sui volumi prendeva anche i volumi di prova del ciclo
+  backup→restore in CI (la fase-b l'ha marcato «PASS senza il sistema sotto»);
+  ora il volume si sceglie dai Mounts dei container in esecuzione.
+
+### 📖 Documentazione
+
+- Il **verbale del primo collaudo vergine** (#219, #220): quattro fasi con
+  numeri — 6 verifiche/6 verdi, quadratura archivio 10/10 per sha256, campione
+  cieco con esiti per classe — e il golden-set dichiarato fuori dal repo con
+  la ragione (porta giudizi su messaggi privati).
+
 ## [0.43.3] — 2026-08-27
 
 **Il resto del raccolto del collaudo vergine** — la 0.43.2 curava il bottone;
