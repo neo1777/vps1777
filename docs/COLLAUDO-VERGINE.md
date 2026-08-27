@@ -32,6 +32,10 @@ Il punto che il collaudo deve provare, per qualunque via: la versione risolta da
 > **Intoppi visti al primo collaudo reale (23-27/08/2026)** — tutti dopo un'installazione
 > riuscita, nessuno un difetto dell'installazione; i dettagli in
 > [TROUBLESHOOTING.md](TROUBLESHOOTING.md):
+> 0. il **recipient age** non rinasce col format: il primo `vps1777 update` si ferma
+>    fail-safe sul backup finché non ricopi la chiave PUBBLICA dal PC in
+>    `tools/age-recipients.txt` (mai generare la coppia sulla VPS —
+>    [BACKUP-RESTORE.md](BACKUP-RESTORE.md));
 > 1. l'URL `*.ts.net` può non risolvere per decine di minuti se un resolver pubblico ha
 >    **cache negativa** (chiesta prima che il record nascesse) — diagnosi con `dig` su
 >    resolver diversi, cura col purge di 1.1.1.1;

@@ -46,6 +46,15 @@ VPS1777_FEATURES=backup,autoupdate    # il default: backup notturno + auto-updat
 > (la privata sta **fuori dalla VPS**, `v0.26.0`). Se `backup=ON` ma la chiave non è
 > configurata, il referto te lo dice (`⚠ chiave age da configurare per i backup`). Vedi
 > più sotto per generare la coppia e mettere la pubblica sul server.
+>
+> ⚠ **E dopo un format / una reinstallazione va RIMESSA** — il recipient vive sulla VPS
+> (`tools/age-recipients.txt`) e il format lo porta via; la coppia sul PC sopravvive e
+> resta quella giusta (i backup vecchi e nuovi si aprono con la stessa privata). Il punto
+> in cui te ne accorgi è il **primo update**: `vps1777 update` pretende il backup, il
+> backup pretende il recipient, e senza si ferma fail-safe («backup fallito — stack
+> intatto, update annullato» — misurato al collaudo vergine, 27/08/2026). NON generare
+> una coppia nuova sulla VPS: ricopia la pubblica del PC (`grep 'public key'
+> ~/.config/age/keys.txt`).
 
 > **Niente `docker.sock` (H13).** Il container di backup **non monta il Docker socket** e
 > **non installa `docker-cli`**: i volumi dati gli sono montati **direttamente in sola
