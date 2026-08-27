@@ -140,6 +140,39 @@ sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE=https://vps1777.<tuo-tailnet>.ts.net|' .en
 docker compose -f compose.yaml -f compose.ingress.tailscale.yaml --profile ingress.tailscale up -d
 ```
 
+## Connector claude.ai dopo una reinstallazione: i vecchi sono doppiamente morti
+
+Dopo un format/reinstallazione i connector esistenti su claude.ai **non torneranno
+mai a funzionare da soli**, per due ragioni indipendenti: il `GATEWAY_SECRET` è
+rigenerato (l'URL del connector lo contiene) e, se il device Tailscale è stato
+ricreato, anche l'hostname può essere cambiato (es. da `vps1777-1.…` a
+`vps1777.…`). Non basta «riconnettere»: su claude.ai vanno **ricreati** (o
+aggiornati) con l'URL nuovo stampato dall'installazione. Visto al collaudo su
+macchina vergine del 27/08/2026.
+
+## «Autorizza» sulla consent OAuth non fa nulla (Chrome, fino alla 0.43.1)
+
+Sintomo: login ok, la pagina di consenso appare, ma il click su **Autorizza** non
+produce niente — nessun errore visibile (c'è, ma solo in console: *«Refused to
+send form data … form-action 'self'»*). Causa: Chrome applica la direttiva CSP
+`form-action` **anche al redirect che segue il submit**, e quella della pagina
+bloccava il 302 verso il client OAuth. Curato nella **0.43.2** (voce `H69` del
+registro): la consent allarga `form-action` all'origin del `redirect_uri`
+validato. Su una versione precedente il workaround è completare l'autorizzazione
+**da Firefox**, che non applica form-action ai redirect.
+
+## L'URL `*.ts.net` appena creato non risolve dal browser
+
+Sintomo: il Funnel è attivo e `/health` risponde da altri punti della rete, ma il
+tuo browser dice «server non trovato» anche dopo 30+ minuti. Causa possibile
+oltre alla normale propagazione (minuti): un resolver pubblico che ha **cachato
+la risposta negativa** chiesta *prima* che il record nascesse — al collaudo del
+24/08 era Cloudflare (1.1.1.1), che serviva ancora la zona vecchia mentre Google
+(8.8.8.8) già risolveva. Diagnosi: `dig @1.1.1.1 <host>.ts.net` vs
+`dig @8.8.8.8 <host>.ts.net`. Cura: il purge pubblico della cache di 1.1.1.1
+(`https://one.one.one.one/purge-cache/`), poi svuota anche la cache locale
+(`resolvectl flush-caches`).
+
 ## Tailscale: il nodo non è autenticato
 
 Causa: `tailscale up` non è stato eseguito o la key era vuota/non valida.

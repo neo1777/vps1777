@@ -12,7 +12,7 @@
 | Backup dei dati veri (DB archivio, profilo NotebookLM, secrets) | proprietario | [BACKUP-RESTORE.md](BACKUP-RESTORE.md); i DB rigenerabili dal re-ingest possono anche non essere salvati |
 | Fotografia dello stato della macchina viva | fatta | baseline raccolta il 17/08 in sola lettura (fuori repo, canale operativo) |
 | Credenziali che ruotano col format (password root/utente, chiavi ssh) | proprietario | la rotazione al format è decisa: annotare le nuove fuori dalla macchina |
-| **Decidere la cifratura del disco/volume** (H56) | proprietario | l'unica cura per lo snapshot pre-update in chiaro che non rompe il rollback si fa **sul disco, al format** (es. LUKS sul volume dati): dopo, il treno è passato fino al prossimo format |
+| **Decidere la cifratura del disco/volume** (H56) | proprietario | l'unica cura per lo snapshot pre-update in chiaro che non rompe il rollback si fa **sul disco, al format** (es. LUKS sul volume dati): dopo, il treno è passato fino al prossimo format. *Decisione presa al format del 23/08/2026: provato Debian 13 coi volumi cifrati, la VPS era instabile → Debian 12, dischi in chiaro, rischio accettato (voce `H56` del registro)* |
 | **Fotografia `pre-format` delle 9 prove empiriche** — sulla VPS VIVA, via ssh | chiunque, PRIMA del format | ⚠️ un'installazione fatta con `deploy.sh`/installer **non ha `.git` né (se vecchia) le prove**: si portano dal PC. Dal PC: `scp -r tools/prove-empiriche <vps>:/root/pf/tools/` poi sulla VPS `cd /root/pf && VPS1777_REPO=/home/vps1777/vps1777 bash tools/prove-empiriche/lancia-tutte.sh --fase pre-format` → copiare fuori `onboarding/prove-empiriche-pre-format.json`. **È l'unico gesto che scade col format** |
 
 ## 1 · Installazione (host vuoto → stack su)
@@ -28,6 +28,18 @@ collauda anche la via che si sceglie:
 
 Il punto che il collaudo deve provare, per qualunque via: la versione risolta da
 **releases/latest** e le **immagini firmate** da ghcr dichiarano **lo stesso numero**.
+
+> **Intoppi visti al primo collaudo reale (23-27/08/2026)** — tutti dopo un'installazione
+> riuscita, nessuno un difetto dell'installazione; i dettagli in
+> [TROUBLESHOOTING.md](TROUBLESHOOTING.md):
+> 1. l'URL `*.ts.net` può non risolvere per decine di minuti se un resolver pubblico ha
+>    **cache negativa** (chiesta prima che il record nascesse) — diagnosi con `dig` su
+>    resolver diversi, cura col purge di 1.1.1.1;
+> 2. i **connector claude.ai** della macchina precedente sono doppiamente morti (secret
+>    rigenerato + hostname eventualmente cambiato): si ricreano, non si «riconnettono»;
+> 3. ricreandoli, il flusso passa dalla **consent OAuth** — che fino alla `0.43.1` su
+>    Chrome moriva in silenzio al click su Autorizza (`H69`, curato in `0.43.2`): fu il
+>    primo attraversamento reale di quel ramo dalla sua nascita (`0.33.0`).
 
 A macchina formattata e **prima** dell'installer, la seconda fotografia:
 

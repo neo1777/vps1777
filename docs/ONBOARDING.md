@@ -74,6 +74,11 @@ https://<host>.ts.net/<GATEWAY_SECRET>/nb1777/mcp
 ```
 (il `GATEWAY_SECRET` è stampato dal deploy; login OAuth con email+password admin.)
 
+> ⚠️ **Dopo una reinstallazione** questi URL cambiano SEMPRE (il secret è
+> rigenerato; e l'hostname, se il device Tailscale è stato ricreato): i connector
+> esistenti su claude.ai vanno ricreati con l'URL nuovo — non torneranno a
+> funzionare da soli. Vedi [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
 E manda `/start` al tuo bot Telegram.
 
 > **Aggiornamenti già pronti**: l'installer ha attivato il canale di update

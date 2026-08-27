@@ -2002,9 +2002,14 @@ findings:
   - id: H56
     severity: medium
     title: "La seconda metà di H14 — nello snapshot pre-update archive-data resta IN CHIARO: funzionale al rollback, non rimovibile, e finora non scritto da nessuna parte"
-    status: partial
+    status: accepted
     resta_aperto: >
-      La cifratura a livello di volume o di disco — l'unica cura che non rompe il rollback. Si fa sul disco e non nel codice: è una decisione dell'owner.
+      [DECISIONE PRESA — 23/08/2026, owner, al format per il collaudo vergine] La
+      finestra c'era («il treno passa al format») e l'owner l'ha USATA: provato
+      Debian 13 con volumi cifrati, la VPS risultava instabile («fa casino»);
+      rimesso Debian 12 con i dischi in chiaro. Lo snapshot resta in chiaro
+      CONSAPEVOLMENTE: rischio accettato per instabilità della piattaforma col
+      volume cifrato, non per dimenticanza. Il prossimo treno è il prossimo format.
     scoperta:
       quando: "2026-07-27"
       come: misura

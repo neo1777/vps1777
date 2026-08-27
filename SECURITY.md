@@ -321,8 +321,8 @@ Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 | | |
 |---|---|
 | **chiusi** | 56 |
-| **parziali** | 12 |
-| **accettati** | 1 |
+| **parziali** | 11 |
+| **accettati** | 2 |
 | **aperti** | 0 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
