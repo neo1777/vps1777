@@ -161,20 +161,32 @@ else
     non_misurato=1
   else
     echo "      volume reale sotto dump (ro): $VOL"
-    dump_sotto() {  # <descrizione> <proprietà systemd-run extra...> → stampa BYTES o VUOTO/ASSENTE
+    dump_sotto() {  # <descrizione> <proprietà systemd-run extra...> → vero se il dump ha contenuto
       local desc="$1"; shift
-      local tmp size rc
-      tmp="$($SUDO mktemp -d)"
-      # Il gesto è quello di backup.sh:182 — il TMP nasce DENTRO la sandbox come
-      # nella unit vera, e il demone docker risolve il bind-mount per conto suo.
-      $SUDO systemd-run --quiet --wait --collect --pipe "$@" \
-            /bin/sh -c "docker run --rm -v '$VOL':/src:ro -v '$tmp':/dst alpine \
-                        sh -c 'cd /src && tar cf /dst/dump.tar .'" >/dev/null 2>&1
-      rc=$?
-      size="$($SUDO stat -c %s "$tmp/dump.tar" 2>/dev/null || echo 0)"
-      $SUDO rm -rf "$tmp"
-      printf '      %-44s rc=%s dump=%s byte\n' "$desc" "$rc" "$size"
-      [ "$size" -gt 0 ]
+      local out rc size resto
+      # 🪤 TUTTO il gesto — mktemp, docker, stat — vive DENTRO la sandbox, come in
+      #   backup.sh:55+182. La mia prima versione faceva il mktemp FUORI e passava
+      #   il path dentro: così il path esiste sull'HOST, il demone docker lo
+      #   risolve, e il dump arriva PIENO anche sotto PrivateTmp — *la sonda aveva
+      #   il difetto che cercava*, e la controprova usciva rossa su un caso VERO.
+      #   Il caso silenzioso nasce proprio perché il mktemp del SERVIZIO vive nel
+      #   suo /tmp privato, che il demone non vede.
+      out="$($SUDO systemd-run --quiet --wait --collect --pipe "$@" \
+            /bin/sh -c "t=\$(mktemp -d); \
+                        docker run --rm -v '$VOL':/src:ro -v \"\$t\":/dst alpine \
+                          sh -c 'cd /src && tar cf /dst/dump.tar .' >/dev/null 2>&1; \
+                        rc=\$?; \
+                        size=\$(stat -c %s \"\$t/dump.tar\" 2>/dev/null || echo 0); \
+                        rm -rf \"\$t\"; \
+                        echo \"RC=\$rc SIZE=\$size T=\$t\"" 2>/dev/null)"
+      rc="${out#*RC=}"; rc="${rc%% *}"
+      size="${out#*SIZE=}"; size="${size%% *}"
+      resto="${out#*T=}"
+      # Sotto PrivateTmp il demone docker CREA il path sul /tmp dell'host (è il
+      # meccanismo stesso del caso silenzioso): quel residuo va tolto dall'host.
+      case "$resto" in /tmp/tmp.*) $SUDO rm -rf "$resto" 2>/dev/null ;; esac
+      printf '      %-44s rc=%s dump=%s byte\n' "$desc" "${rc:-?}" "${size:-0}"
+      [ "${size:-0}" -gt 0 ] 2>/dev/null
     }
     if dump_sotto "a) sandbox PROPOSTA (strict+RWP)" "${props[@]}"; then
       echo "         ✅ il dump ha CONTENUTO sotto la stretta proposta: il §③ regge"
