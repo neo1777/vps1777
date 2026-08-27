@@ -3288,3 +3288,51 @@ findings:
       La verifica end-to-end col bottone vero su Chrome si chiude al collaudo,
       quando la release col fix arriva sulla VPS via update: e' il passo che
       nessun test da CI puo' fare (serve il browser e il client OAuth reale).
+
+  - id: H70
+    severity: low
+    title: "Il «Ricontrolla adesso» fallito (atteso: gateway senza egress) scriveva `error`+`checked_at=now` sopra il verdetto del check host — la card nascondeva un «aggiornamento disponibile» fresco e valido, e ri-datava un check mai avvenuto"
+    status: closed
+    scoperta:
+      quando: "2026-08-27"
+      come: incidente
+      nota: >
+        Collaudo vergine, sequenza dell'owner: check host manuale → la card mostra
+        «0.43.1 → 0.43.2» col bottone; esce, rientra, un Ricontrolla dal gateway
+        (senza egress dal fix H50: fallisce PER PROGETTO) — e il bottone sparisce,
+        pur avendo il file `latest=0.43.2` corretto. Doppio danno: `checked_at=now`
+        su un check MAI avvenuto azzerava anche l'anti-stantio (timer-fermo non
+        sarebbe mai scattato finché qualcuno premeva Ricontrolla). Il ramo nasce
+        in v0.39.1 quando il gateway AVEVA Internet (fallimento raro e genuino);
+        H50 (v0.40.10) ha reso il fallimento sistematico e la scrittura e' rimasta:
+        la cura di un rilievo che cambia il contratto di un ramo lontano — la
+        classe «la cura sposta il difetto».
+    natura: comportamento
+    since: v0.39.1
+    evidence:
+      - file: services/gateway/app/admin_core.py
+        contains:
+          - "def stato_dopo_refresh_fallito("
+      - file: services/gateway/app/admin.py
+        contains:
+          - "admin_core.stato_dopo_refresh_fallito(prev, spiega"
+      - file: services/gateway/tests/test_admin_core.py
+        contains:
+          - "def test_refresh_fallito_non_inquina_il_verdetto_del_check_host("
+    fix: >
+      Il fallimento del refresh scrive i SUOI campi (`refresh_error`,
+      `refresh_error_at`) e non tocca `error`/`checked_at`/`latest`, che
+      appartengono al check host: un refresh fallito non e' un check avvenuto.
+      La decisione sta in admin_core (testabile stdlib-only), admin.py la chiama.
+      Il flash `?msg=` al click continua a spiegare il fallimento all'operatore.
+    prova:
+      - comando: "uvx pytest tests/test_admin_core.py -q"
+        dove: "services/gateway, col fix"
+        output: "48 passed (47 preesistenti + il caso del collaudo per intero: verdetto intatto, refresh_error separato, card ancora su «aggiornamento»)"
+        exit: 0
+        quando: "2026-08-27"
+      - comando: "journalctl -u vps1777-check-update -n 20 sulla VPS del collaudo"
+        dove: "produzione, 27/08 07:23 fuso VPS (13:23 CEST)"
+        output: "«aggiornamento disponibile: 0.43.1 → 0.43.2» — il check host era sano; il dato che la card nascondeva era questo"
+        exit: 0
+        quando: "2026-08-27"
