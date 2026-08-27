@@ -1188,18 +1188,33 @@ findings:
   - id: H50
     severity: high
     title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa nel codice, non ancora in produzione"
-    status: partial
+    status: closed
     natura: comportamento
     scoperta:
       quando: "2026-07-26"
       come: misura
       nota: >
         la voce porta la misura: uscita del gateway misurata sul vivo con prova-1 (523aed1). Il commit attesta la MISURA, non chi ha sollevato il tema per primo.
-    resta_aperto: >
-      Niente sul difetto, che è chiuso e misurato: restano due opzioni SCARTATE (refresh on-demand via path unit, egress ristretto a api.github.com) e la scelta è scritta.
-      [22/08/2026] Il «non ancora in produzione» del titolo si estingue col FORMAT della VPS:
-      la vergine installa ≥0.43.x, dove la cura è nel codice — da chiudere al collaudo
-      (docs/COLLAUDO-VERGINE.md, prova-1).
+    residuo: >
+      Due opzioni SCARTATE restano scritte (refresh on-demand via path unit, egress
+      ristretto a api.github.com), e la scelta e' documentata.
+      [CHIUSA 27/08/2026, al collaudo sulla vergine — DUE misure in produzione]
+      (1) dal container gateway: urlopen('https://api.github.com') → «Temporary
+      failure in name resolution»: il gateway non risolve nemmeno i DNS esterni;
+      (2) prova-1-gateway-non-esce VERDE nella foto post-install
+      (onboarding/prove-empiriche-post-install.json, v0.43.2). Il «non ancora in
+      produzione» del titolo e' estinto: la produzione E' il codice curato.
+    prova:
+      - comando: "docker exec vps1777-gateway-1 python -c \"import urllib.request;urllib.request.urlopen('https://api.github.com',timeout=5)\""
+        dove: "VPS del collaudo vergine, in produzione (v0.43.2)"
+        output: "urllib.error.URLError: <urlopen error [Errno -3] Temporary failure in name resolution> — il gateway non risolve nemmeno i DNS esterni"
+        exit: 1
+        quando: "2026-08-27"
+      - comando: "bash tools/prove-empiriche/lancia-tutte.sh --fase post-install (prova-1)"
+        dove: "VPS del collaudo vergine"
+        output: "prova-1-gateway-non-esce: verde — foto post-install 7 verdi · 0 rosse"
+        exit: 0
+        quando: "2026-08-27"
     since: v0.40.3
     evidence:
       - file: compose.yaml
@@ -1762,10 +1777,12 @@ findings:
   - id: H54
     severity: medium
     title: "Il gateway monta il token del bot Telegram: una compromissione del gateway porta con sé il controllo del bot, che è più di quanto il gateway sia"
-    status: partial
-    resta_aperto: >
-      Solo la VPS viva pre-format: in main il gateway non monta più il token (misurato
-      22/08). Col format la vergine nasce giusta — chiudere al collaudo (COLLAUDO-VERGINE).
+    status: closed
+    residuo: >
+      [CHIUSA 27/08/2026, al collaudo sulla vergine] docker inspect dei Mounts del
+      gateway in produzione (v0.43.2): telegram_bot_token NON montato,
+      telegram_webapp_secret (la chiave DERIVATA, #61) presente. La VPS pre-format
+      — l'unico posto dove il rischio viveva — non esiste piu'.
     prova:
       - comando: "grep -rn 'api.telegram.org\\|sendMessage\\|getUpdates' services/gateway/"
         dove: "repo, a v0.40.14"
