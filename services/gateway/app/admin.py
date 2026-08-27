@@ -272,6 +272,10 @@ nav.tabs form.logout button{padding:6px 13px;font-size:12px}
 .status-grid{display:grid;gap:12px;margin-bottom:8px}
 .status-row{display:flex;align-items:center;gap:10px;padding:13px 16px;background:var(--bg-soft);border:1px solid var(--line-soft);border-radius:8px}
 .status-row .lbl{font-weight:500}.status-row .val{color:var(--muted);font-size:12px;margin-left:auto;font-family:var(--mono)}
+/* le tabelle larghe scorrono nel proprio riquadro invece di sfondarlo
+   (misurato su /admin/archive col primo archivio vero: 8 colonne piene
+   uscivano dal bordo del pannello — collaudo vergine, 27/08/2026) */
+.tblwrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th{color:var(--faint);text-align:left;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;padding:6px 10px 8px;border-bottom:1px solid var(--line)}
 td{padding:8px 10px;border-bottom:1px solid var(--line-soft);vertical-align:top}
@@ -840,9 +844,9 @@ async def archive_view(request: Request) -> Response:
                 f'<button type="submit" class="danger">Elimina</button></form></td></tr>'
             )
         table = (f'<section><div class="kicker">DB nell\'archivio</div>'
-                 f'<table><thead><tr><th>nome</th><th>descrizione</th><th>messaggi</th><th>etichette</th>'
+                 f'<div class="tblwrap"><table><thead><tr><th>nome</th><th>descrizione</th><th>messaggi</th><th>etichette</th>'
                  f'<th>principali</th><th>dimensione</th><th>aggiornato</th><th></th></tr></thead>'
-                 f'<tbody>{rows}</tbody></table>'
+                 f'<tbody>{rows}</tbody></table></div>'
                  f'<p class="hint">Eliminare un DB toglie subito l\'archivio dalla ricerca. '
                  f'Per <em>resettarlo</em>: elimina e ricarica la fonte con lo stesso nome.</p>'
                  f"""</section>
@@ -1267,8 +1271,8 @@ async def secrets_view(request: Request) -> Response:
                 f'<td>{badge}</td>'
                 f'<td><span class="muted">{html.escape(str(it.get("note", "")))}</span></td></tr>'
             )
-        table = ('<section><table><thead><tr><th>secret</th><th>età</th><th>stato</th>'
-                 f'<th>rotazione</th></tr></thead><tbody>{rows}</tbody></table></section>')
+        table = ('<section><div class="tblwrap"><table><thead><tr><th>secret</th><th>età</th><th>stato</th>'
+                 f'<th>rotazione</th></tr></thead><tbody>{rows}</tbody></table></div></section>')
         checked = html.escape(str(status.get("checked_at", "")))
         status_html = f'<div class="kicker">ultimo check: {checked}</div>'
     else:
