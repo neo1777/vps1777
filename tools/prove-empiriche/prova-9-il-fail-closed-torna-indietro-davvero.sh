@@ -70,16 +70,27 @@ SNAP="$REPO/backups/pre-update"
 N_SNAP=$( (ls -1d "$SNAP"/*/ 2>/dev/null || true) | grep -c . || true)
 [ "${N_SNAP:-0}" -gt 0 ] || non_misurato "nessuno snapshot in $SNAP: senza punto di ritorno questa prova non si lancia"
 
-dice "  ✅ precondizioni: versione corrente v$CORRENTE · $N_SNAP snapshot disponibili"
+# 🔴 La prima stesura passava `--version $CORRENTE` («non si cambia versione:
+# si esercita solo gate + rollback») — ma la CLI corto-circuita PRIMA del gate:
+# `norm_ver(cur) == target → «già aggiornato», exit 0` (vps1777.py, e fa bene:
+# un update inutile non si esegue). Misurato al PRIMO giro vero della prova
+# (collaudo vergine, 27/08/2026): exit 0, nessun gate, nessun rollback — il
+# difetto era QUI, come l'avvertenza in fondo metteva in conto. Il fail-closed
+# si esercita solo su un SALTO vero: serve una release DIVERSA dalla corrente.
+TARGET="$(python3 -c "import json,sys;print((json.load(open(sys.argv[1])).get('latest') or ''))" "$REPO/onboarding/update_status.json" 2>/dev/null || true)"
+[ -n "$TARGET" ] || non_misurato "nessuna 'latest' nota (onboarding/update_status.json): lancia prima vps1777 check"
+[ "$TARGET" != "$CORRENTE" ] || non_misurato "latest ($TARGET) == corrente: il fail-closed si esercita su un salto vero — riprova quando c'è una release nuova"
+
+dice "  ✅ precondizioni: versione corrente v$CORRENTE · target v$TARGET · $N_SNAP snapshot disponibili"
 dice ""
 
 # ── 2. cosa farà, detto PRIMA ─────────────────────────────────────────────────
 dice "  COSA FA, e cosa costa:"
-dice "    · rilancia l'update sulla versione GIÀ IN ESECUZIONE (v$CORRENTE)"
-dice "      ⇒ non si cambia versione: si esercita solo gate + rollback"
+dice "    · lancia l'update VERO v$CORRENTE → v$TARGET col gate di health sabotato"
 dice "    · con VPS1777_COLLAUDO_HEALTH_KO=1 il gate rifiuta"
-dice "    · attesa: parte _rollback_routine, i container SI RIAVVIANO"
+dice "    · attesa: parte _rollback_routine, i container SI RIAVVIANO e si RESTA alla v$CORRENTE"
 dice "    · costo reale: il servizio è indisponibile per la durata del rollback"
+dice "    · dopo il verde: l'update alla v$TARGET si rifà pulito, senza il sabotaggio"
 dice ""
 if [ "$ESEGUI" -eq 0 ]; then
   dice "  ⚪ giro a secco: NON ho toccato niente."
@@ -92,7 +103,7 @@ fi
 LOG="$(mktemp)"
 dice "  ▶ eseguo… (log in $LOG)"
 set +e
-VPS1777_COLLAUDO_HEALTH_KO=1 python3 "$CLI" update --version "$CORRENTE" --yes >"$LOG" 2>&1
+VPS1777_COLLAUDO_HEALTH_KO=1 python3 "$CLI" update --version "$TARGET" --yes >"$LOG" 2>&1
 RC=$?
 set -e
 dice "  ▶ exit dell'update: $RC"
