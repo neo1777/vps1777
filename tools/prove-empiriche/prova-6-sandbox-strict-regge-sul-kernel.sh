@@ -72,26 +72,43 @@ fi
 SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo -n"
 [ -f "$UNIT" ] || { echo "   ✗ unit non trovata: $UNIT (usa VPS1777_REPO=<path>)"; exit 2; }
 
-# ─── ① il DELTA fra le ragioni dichiarate nella unit e i path della proposta ───
+# ─── ① la unit DICHIARA la stretta? (dal 27/08/2026 non è più una proposta) ───
 # Si legge dalla unit, non dalla memoria di chi scrive: se il file cambia, cambia la prova.
+# 🔄 Fino al 27/08 questo blocco confrontava la unit con una PROPOSTA mai applicata
+#   (il round-4 su H43). La stretta ora È nella unit — misurata prima di scriverla —
+#   e il blocco è diventato il suo guardiano: se un domani qualcuno la togliesse o
+#   dimenticasse un path, qui diventa rosso invece di restare un ricordo.
+falliti=0
 echo
-echo "   ① DELTA — cosa la unit dichiara vs cosa la proposta copre"
-for p in /usr/local/bin /etc/systemd/system /tmp "$HOME_DIR/.sigstore"; do
-  if grep -q -- "$p" "$UNIT" 2>/dev/null || { [ "$p" = "$HOME_DIR/.sigstore" ] && grep -q '\.sigstore' "$UNIT"; }; then
-    printf '      %-28s dichiarato nella unit\n' "$p"
-  else
-    printf '      %-28s ⚠️  NON dichiarato nella unit\n' "$p"
-  fi
-done
-if grep -q '/var/lib/gateway' "$UNIT" 2>/dev/null; then
-  echo "      /var/lib/gateway             presente nella unit (⇒ il reperto del round-4 è superato: riverifica)"
+echo "   ① LA UNIT — ProtectSystem=strict e i path necessari sono DICHIARATI?"
+if ! grep -q '^ProtectSystem=strict' "$UNIT"; then
+  echo "      🔴 ProtectSystem=strict ASSENTE dalla unit: la stretta H43 (applicata il"
+  echo "         27/08/2026 dopo misura) non c'è più — o il file è di una versione vecchia."
+  falliti=$((falliti+1))
 else
-  echo "      /var/lib/gateway             🔴 assente dalla unit — proposto dall'audio, mai dichiarato qui"
-  if [ -d /var/lib/gateway ]; then
-    echo "                                   ma ESISTE sull'host ⇒ un ReadWritePaths= non impedirebbe l'avvio"
+  echo "      ProtectSystem=strict         dichiarato ✅"
+  # I quattro terreni di scrittura, ognuno con la sua riga esplicita.
+  for p in /usr/local/bin /etc/systemd/system /tmp; do
+    if grep -q -- "^ReadWritePaths=$p\$" "$UNIT"; then
+      printf '      %-28s dichiarato ✅\n' "$p"
+    else
+      printf '      %-28s 🔴 NON dichiarato — la stretta bloccherebbe questo terreno\n' "$p"
+      falliti=$((falliti+1))
+    fi
+  done
+  # La home dell'operatore: nel repo è il placeholder, su una macchina è resa.
+  if grep -qE '^ReadWritePaths=(@OPERATOR_HOME@|/home/|/root)' "$UNIT"; then
+    echo "      home operatore               dichiarata ✅ (bundle, repo e cache cosign vivono lì)"
   else
-    echo "                                   e NON esiste sull'host ⇒ ReadWritePaths=/var/lib/gateway"
-    echo "                                   IMPEDISCE L'AVVIO della unit (serve il prefisso '-')"
+    echo "      home operatore               🔴 NON dichiarata — cosign e il bundle si romperebbero"
+    falliti=$((falliti+1))
+  fi
+  if grep -q -- '-/var/lib/gateway' "$UNIT"; then
+    echo "      -/var/lib/gateway            dichiarato col prefisso «-» ✅ (assente sull'host ≠ unit che non parte)"
+  elif grep -q -- '/var/lib/gateway' "$UNIT"; then
+    echo "      /var/lib/gateway             ⚠️  dichiarato SENZA «-»: se il path manca sull'host la unit NON PARTE"
+  else
+    echo "      /var/lib/gateway             non dichiarato (accettato: è un mount point del container)"
   fi
 fi
 
@@ -119,7 +136,7 @@ prova_scrittura() {  # <path> <atteso: ok|negato>
   fi
 }
 
-falliti=0
+# `falliti` NON si azzera qui: porta anche i rossi del §① (la unit senza stretta).
 for d in /usr/local/bin /etc/systemd/system /tmp "$HOME_DIR"; do
   [ -d "$d" ] || { printf '      %-28s inesistente sull'\''host — salto\n' "$d"; continue; }
   prova_scrittura "$d" ok || falliti=$((falliti+1))
@@ -220,8 +237,9 @@ fi
 # ─── verdetto ───
 echo
 if [ "$falliti" -gt 0 ]; then
-  echo "🔴 FAIL — $falliti prove non attese. La proposta ②-1 NON si committa così com'è."
-  echo "   Se il negato è /tmp: la stretta rompe il BACKUP, non l'update — e in silenzio."
+  echo "🔴 FAIL — $falliti prove non attese. La stretta H43 è APPLICATA dal 27/08/2026:"
+  echo "   un rosso qui dice che la unit l'ha persa o monca, o che il kernel nega un"
+  echo "   terreno necessario. Se il negato è /tmp: si rompe il BACKUP, in silenzio."
   exit 1
 fi
 # 🔴 IL DIFETTO CHE CHIUDE (abdd732a, 02/08, MISURATO lanciando tutte e nove le prove

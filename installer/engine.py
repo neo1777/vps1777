@@ -769,10 +769,13 @@ echo CONFIG_OK
         script = f"""
 set -e
 install -m 755 {REMOTE_DIR}/tools/vps1777.py /usr/local/bin/vps1777
-# H43 — unit templatizzate (@OPERATOR_USER@/@REPO@): RESE prima di install, o
-# systemd non parsa `User=@OPERATOR_USER@` e il fresh install si rompe.
+# H43 — unit templatizzate (@OPERATOR_USER@/@OPERATOR_HOME@/@REPO@): RESE prima
+# di install, o systemd non parsa `User=@OPERATOR_USER@` e il fresh install si
+# rompe. I TRE placeholder vanno sostituiti in TUTTI e tre gli installer (CLI,
+# deploy.sh, qui): un placeholder che uno solo dimentica arriva a systemd come
+# testo letterale — e con @OPERATOR_HOME@ in ReadWritePaths= la unit non parte.
 for u in {REMOTE_DIR}/systemd/vps1777-*; do
-  case "$u" in *.service|*.timer|*.path) sed -e "s|@OPERATOR_USER@|{OPERATOR_USER}|g" -e "s|@REPO@|{REMOTE_DIR}|g" "$u" | install -m 644 /dev/stdin /etc/systemd/system/"$(basename "$u")";; esac
+  case "$u" in *.service|*.timer|*.path) sed -e "s|@OPERATOR_USER@|{OPERATOR_USER}|g" -e "s|@OPERATOR_HOME@|/home/{OPERATOR_USER}|g" -e "s|@REPO@|{REMOTE_DIR}|g" "$u" | install -m 644 /dev/stdin /etc/systemd/system/"$(basename "$u")";; esac
 done
 systemctl daemon-reload
 systemctl enable --now {enable_units}

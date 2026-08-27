@@ -1520,6 +1520,19 @@ def releases_prune(repo: Path, keep_versions: set[str]) -> None:
 PREFISSI_SANDBOX = ("Protect", "Restrict", "Lock", "Private", "Memory", "System",
                     "Capability", "RemoveIPC", "DynamicUser", "AmbientCapabilities")
 
+# Direttive PROVATE innocue su una unit che eleva — l'unica porta d'ingresso è una
+# MISURA di `NoNewPrivs` in /proc/<pid>/status con la direttiva attiva, mai una
+# deduzione dalla man page.
+# · ProtectSystem — 27/08/2026, unit transitorie sulla macchina in esercizio
+#   (stretta H43): `ProtectSystem=strict` + 5×`ReadWritePaths` + `User=vps1777`
+#   → `NoNewPrivs: 0`, e `sudo -n install`/`chown`/`systemctl daemon-reload`
+#   whitelisted tutti OK; controprova: scrittura fuori dai ReadWritePaths → EROFS.
+#   La ragione è strutturale: ProtectSystem/ReadWritePaths sono MOUNT NAMESPACE,
+#   non seccomp — e solo il filtro seccomp implica NNP. (`ReadWritePaths` non è
+#   nei prefissi sorvegliati: è un'eccezione alla stretta, non una restrizione.)
+# 🔑 Elenco unico del repo, come PREFISSI_SANDBOX: il test lo importa da qui.
+SANDBOX_PROVATE_INNOCUE: frozenset = frozenset({"ProtectSystem"})
+
 
 def _direttive_attive(testo: str) -> list[tuple[str, str]]:
     """(nome, riga) delle direttive che systemd esegue: i commenti no.
@@ -1538,7 +1551,8 @@ def _direttive_attive(testo: str) -> list[tuple[str, str]]:
 
 def _sandbox_attive(testo: str) -> set[str]:
     return {n for n, _ in _direttive_attive(testo)
-            if n != "NoNewPrivileges" and n.startswith(PREFISSI_SANDBOX)}
+            if n != "NoNewPrivileges" and n.startswith(PREFISSI_SANDBOX)
+            and n not in SANDBOX_PROVATE_INNOCUE}
 
 
 def _dichiara_di_elevare(testo: str) -> bool:
