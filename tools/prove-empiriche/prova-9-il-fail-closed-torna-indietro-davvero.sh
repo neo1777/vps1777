@@ -50,8 +50,14 @@ CLI="$REPO/tools/vps1777.py"
 grep -q "VPS1777_COLLAUDO_HEALTH_KO" "$CLI" \
     || non_misurato "l'aggancio di collaudo non è in questa versione del codice: aggiorna prima"
 
-STATO="$REPO/state.json"
-[ -f "$STATO" ] || non_misurato "state.json non trovato: non so quale versione gira"
+# 🔴 Era `$REPO/state.json` — un path scritto A MANO che il file non ha MAI
+# avuto: la CLI lo tiene in `var/state.json` dalla sua nascita (443e7a0,
+# `_state_path`). La prova è nata dopo (b7d7303) col path inventato, quindi
+# «NON MISURATO» a ogni lancio: non ha mai misurato niente in vita sua, e il
+# suo esito grigio sembrava un prerequisito d'ambiente invece di un suo bug.
+# Trovato al collaudo vergine (27/08/2026), col file LÌ, fresco di un minuto.
+STATO="$REPO/var/state.json"
+[ -f "$STATO" ] || non_misurato "var/state.json non trovato: non so quale versione gira"
 CORRENTE="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('current') or '')" "$STATO" 2>/dev/null)"
 [ -n "$CORRENTE" ] || non_misurato "state.json non dichiara una versione corrente"
 
