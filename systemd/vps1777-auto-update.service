@@ -11,15 +11,14 @@
 # H43: @OPERATOR_USER@ / @REPO@ non sono hardcodati — la CLI (install_systemd_units
 # → render_unit) e il deploy iniziale li sostituiscono coi valori REALI.
 #
-# Sandboxing filesystem VOLUTAMENTE parziale, identico a vps1777-update.service e
-# per le stesse ragioni verificate: l'updater fa cose da root via `sudo -n`
-# (install in /usr/local/bin + /etc/systemd/system, chown, systemctl), self-update
-# della CLI, cosign (cache TUF in ~/.sigstore), e backup.sh che passa un /tmp come
-# sorgente di bind-mount a `docker run`. Perciò NIENTE NoNewPrivileges (romperebbe
-# sudo/setuid), ProtectSystem (blocca il self-update + le unit), PrivateTmp (rompe
-# il bind-mount del backup → dump vuoto in silenzio), ProtectHome (rischia la cache
-# cosign → verifica firma fail-closed → update abortito). Restano le protezioni che
-# non toccano i path dell'update:
+# Sandboxing filesystem: APPLICATO (27/08/2026), identico a vps1777-update.service
+# e misurato una volta per entrambe — vedi il blocco H43 in testa a quel file:
+# ProtectSystem=strict + ReadWritePaths sui quattro terreni che l'update tocca
+# (CLI, unit, /tmp del backup, home dell'operatore per bundle e cache cosign).
+# I mount namespace NON accendono NoNewPrivileges, quindi `sudo` sopravvive —
+# la distinzione col guasto seccomp del 03/08, misurata e non dedotta.
+# Resta NIENTE PrivateTmp (il bind-mount del backup → dump vuoto in silenzio,
+# prova-6 §③) e NIENTE direttiva seccomp (NNP romperebbe sudo/setuid).
 [Unit]
 Description=vps1777 — auto-update programmato (gestito, sicuro)
 Wants=network-online.target
@@ -118,3 +117,12 @@ TimeoutStartSec=1800
 #   scrive il file MANTENENDO NoNewPrivs=1 (provato: le ambient non passano da setuid,
 #   quindi NNP non le tocca). Copre 4 install + 2 chown. Manca solo `daemon-reload`.
 NoNewPrivileges=no
+# La stretta H43 — stessa misura e stesse ragioni della gemella
+# vps1777-update.service (il blocco in testa a quel file): stesso motore,
+# stessi quattro terreni di scrittura, stessa regola per chi aggiunge un path.
+ProtectSystem=strict
+ReadWritePaths=/usr/local/bin
+ReadWritePaths=/etc/systemd/system
+ReadWritePaths=/tmp
+ReadWritePaths=@OPERATOR_HOME@
+ReadWritePaths=-/var/lib/gateway

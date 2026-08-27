@@ -155,10 +155,13 @@ _PREFISSI_SANDBOX = _cli.PREFISSI_SANDBOX
 _direttive_attive = _cli._direttive_attive
 _dichiara_di_elevare = _cli._dichiara_di_elevare
 
-# Direttive PROVATE innocue su una unit che eleva: si aggiunge qui SOLO dopo aver
-# misurato `NoNewPrivs` in `/proc/<pid>/status` con la direttiva attiva. Vuota non è
-# una svista: è lo stato di `main` dopo la #104.
-SANDBOX_PROVATE_INNOCUE: frozenset[str] = frozenset()
+# Direttive PROVATE innocue su una unit che eleva: l'elenco vive nella CLI
+# (SANDBOX_PROVATE_INNOCUE in tools/vps1777.py, con la misura accanto) e da lì lo
+# importiamo — due copie che divergono sono il difetto che questo test impedisce
+# per i PREFISSI, e vale identico per l'allowlist: il preflight della CLI e questo
+# test devono assolvere le STESSE direttive, o una release verde qui viene
+# rifiutata là (o viceversa).
+SANDBOX_PROVATE_INNOCUE: frozenset[str] = frozenset(_cli.SANDBOX_PROVATE_INNOCUE)
 
 
 def test_l_elenco_arriva_dal_CLI_e_non_e_vuoto() -> None:

@@ -10,24 +10,33 @@
 # render_unit) sostituisce @OPERATOR_USER@ / @REPO@ con i valori REALI; il deploy
 # iniziale fa lo stesso (vedi note per deploy.sh).
 #
-# H43 — perché il sandboxing filesystem qui è VOLUTAMENTE parziale (verificato,
-# non indovinato). Questo servizio è l'updater e per definizione fa cose da root
-# via `sudo -n` (NOPASSWD): install in /usr/local/bin (self-update + cosign),
-# install in /etc/systemd/system (le unit), chown, systemctl. Perciò:
-#  - NIENTE NoNewPrivileges: `sudo` usa il bit setuid → lo bloccherebbe.
-#  - NIENTE ProtectSystem=strict|full: il self-update e cosign scrivono in
-#    /usr/local/bin e le unit in /etc/systemd/system → li bloccherebbe a metà
-#    update.
-#  - NIENTE PrivateTmp: backup.sh e restore.sh passano un path /tmp (mktemp) come
-#    SORGENTE di un bind-mount `docker run`; il mount lo risolve il DEMONE docker,
-#    che vive fuori dal /tmp privato dell'unit → il dump/restore leggerebbe una
-#    dir vuota e il backup (o l'auto-rollback) si romperebbe in silenzio.
-#  - NIENTE ProtectHome: cosign (keyless, obbligatorio di default) inizializza la
-#    cache TUF sotto ~/.sigstore; renderla read-only rischia di far fallire la
-#    verifica firma, che è fail-closed → update abortito. Non verificabile su
-#    questa macchina, quindi non si azzarda.
-# Restano le protezioni che NON toccano i path dell'update (nessuna delle azioni
-# sopra scrive kernel-tunables, moduli, clock o hostname):
+# H43 — il sandboxing filesystem: da «volutamente parziale» a APPLICATO E MISURATO
+# (27/08/2026, per ordine dell'owner: «più protetti siamo meglio è»). La proposta
+# del round-4 — ProtectSystem=strict + ReadWritePaths espliciti — è stata prima
+# giudicata dalla prova-6 (tools/prove-empiriche/) e poi da quattro unit
+# TRANSITORIE sulla macchina vera, produzione mai toccata:
+#   ① NoNewPrivs resta 0 sotto strict+RWP: sono mount namespace, non seccomp —
+#     NON accendono NNP, quindi `sudo` (setuid) sopravvive. È la distinzione che
+#     il guasto del 03/08 (seccomp → NNP=1 → sudo morto) rendeva obbligatorio
+#     misurare e non dedurre.
+#   ② `sudo -n install` in /usr/local/bin e `sudo -n chown`: OK nei RWP.
+#     ⚠️ Il warning «unable to open /run/sudo/ts: Read-only file system» è
+#     COSMETICO con NOPASSWD: il timestamp serve solo a ricordare la password,
+#     che qui non c'è. Chi lo legge nel journal non deve inseguirlo.
+#   ③ controprova: install FUORI dai RWP (/etc) → EROFS, la sandbox morde.
+#   ④ `sudo systemctl daemon-reload` → OK (parla con PID 1 via socket: connect
+#     non è una scrittura sul filesystem).
+#   ⑤ il dump docker del backup (mktemp in /tmp + bind-mount risolto dal demone)
+#     → OK sotto strict+RWP, misurato dalla prova-6 §③ su un volume reale da
+#     2,7 GB. Con PrivateTmp invece esce VUOTO con rc=0 — perciò:
+#  - NIENTE PrivateTmp, oggi come prima: il caso silenzioso non è un'ipotesi,
+#    è misurato (prova-6 §③, controprova b).
+#  - NIENTE NoNewPrivileges e NIENTE direttive seccomp: `sudo` usa il bit setuid,
+#    e con User= non-root BASTA UNA direttiva seccomp ad accendere NNP (03/08).
+#  - la home dell'operatore è nei RWP per intero: il repo/bundle vive lì e
+#    cosign (keyless, obbligatorio) inizializza la cache TUF sotto ~/.sigstore.
+#  - /var/lib/gateway col prefisso «-»: sull'host può non esistere (è un mount
+#    point DENTRO il container), e senza «-» un path assente impedisce l'avvio.
 [Unit]
 Description=vps1777 — updater (intent dal pannello admin)
 Wants=network-online.target
@@ -47,6 +56,16 @@ WorkingDirectory=@REPO@
 ExecStart=/usr/local/bin/vps1777 update --yes --from-intent @REPO@/onboarding/update_pending_update.json
 # pull + migrazioni + health-gate (180s) + eventuale rollback: margine ampio
 TimeoutStartSec=1800
+# La stretta H43, misurata prima di essere scritta (vedi il blocco in testa):
+# tutto il filesystem read-only tranne i QUATTRO terreni che l'update tocca
+# davvero. Ogni path qui sotto ha la sua ragione lì sopra; chi ne aggiunge uno
+# aggiunge anche la misura che lo giustifica.
+ProtectSystem=strict
+ReadWritePaths=/usr/local/bin
+ReadWritePaths=/etc/systemd/system
+ReadWritePaths=/tmp
+ReadWritePaths=@OPERATOR_HOME@
+ReadWritePaths=-/var/lib/gateway
 # ⚠️ QUESTA RIGA NON RIPARA IL GUASTO — misurato dopo averla scritta, e va detto
 #   prima di tutto il resto perché il commento qui sotto prometteva il contrario.
 #   Sonda: `sudo -n install -m 644 /dev/null /tmp/x` (il comando VERO che fallisce —
