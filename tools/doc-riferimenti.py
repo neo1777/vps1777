@@ -58,6 +58,9 @@ ATTESI = {
     "02-LOOP-SU-CODICE.md": "citazione di un corpus esterno al repo (lezione C9)",
     "aperti.sh": "strumento del tavolo 1777, vive in un altro repo",
     "run.py": "TEMPLATE del contratto migrazioni: 0001-<slug>/run.py va creato, non esiste",
+    "golden-voice-2026-08-27.json": "il golden-set del campione cieco (COLLAUDO-VERGINE, "
+        "fase 4): DELIBERATAMENTE fuori dal repo — porta i giudizi su messaggi "
+        "privati; vive nel volume archive della macchina e nel backup dell'owner",
     "plugins/mio-mcp/compose.mio-mcp.yaml": "esempio didattico: è il file che il lettore CREA",
     # 16/08 — i doc di `docs/roadmap/` parlano di cose FUORI da questo repo, ed è il loro
     # mestiere: sono prompt di onboarding e cataloghi, non documentazione del prodotto.
