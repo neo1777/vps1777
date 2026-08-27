@@ -115,8 +115,12 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # teneva nessun test. Il presidio prende l'insieme dei segreti dalla DICHIARAZIONE
 # (`secrets:` top-level) e non dai nomi che sembrano segreti: `OAUTH_ACCESS_TOKEN_LIFETIME`
 # contiene TOKEN ed è una durata, e un guardiano che grida su di lei viene disattivato.
-EXPECTED_TOTAL = 68
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 38, "low": 18}
+# + 1 (H69 medium, 27/08) = 69. Dal collaudo su macchina vergine: `form-action 'self'`
+# bloccava in Chrome il redirect post-submit della consent OAuth (H8) — il bottone
+# «Autorizza» non faceva nulla. Primo esercizio end-to-end di quel ramo dal 14/07:
+# i client claude.ai preesistenti giravano su token emessi PRIMA della consent.
+EXPECTED_TOTAL = 69
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 39, "low": 18}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

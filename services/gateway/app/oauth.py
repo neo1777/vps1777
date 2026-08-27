@@ -17,7 +17,7 @@ import secrets as pysecrets
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
@@ -232,7 +232,20 @@ def _consent_page(email: str, p: dict[str, str]) -> Response:
 </form>
 """
     # csrf=... → _layout inietta <input name="csrf"> in OGNI form + CSP con nonce.
-    return _layout("consenso", body, csrf=_csrf_token(email))
+    resp = _layout("consenso", body, csrf=_csrf_token(email))
+    # `form-action 'self'` (la CSP di _layout, giusta per l'admin) blocca in
+    # Chrome ANCHE il redirect che segue il submit: il 302 del POST /authorize
+    # verso redirect_uri muore in silenzio e «Autorizza» non fa nulla — l'unico
+    # segno è in console. Si allarga all'ORIGIN del redirect_uri GIÀ validato
+    # contro i client registrati (mai un jolly), solo su questa pagina.
+    # Trovato al collaudo su macchina vergine (27/08): primo esercizio
+    # end-to-end della consent (H8) con un client OAuth reale.
+    o = urlsplit(p["redirect_uri"])
+    csp = resp.headers.get("Content-Security-Policy", "")
+    if o.scheme and o.netloc and "form-action 'self'" in csp:
+        resp.headers["Content-Security-Policy"] = csp.replace(
+            "form-action 'self'", f"form-action 'self' {o.scheme}://{o.netloc}", 1)
+    return resp
 
 
 async def authorize(request: Request) -> Response:
