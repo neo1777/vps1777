@@ -2,6 +2,42 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.5] — 2026-08-27
+
+**La stretta che la prova-6 ha reso possibile, e i documenti che non promettono
+più nulla senza dire dove si rimisura.**
+
+### 🔒 Sicurezza
+
+- **La stretta filesystem sulle unit di update** (#225, `H43`):
+  `ProtectSystem=strict` + `ReadWritePaths` sui quattro terreni che l'update
+  tocca davvero (CLI, unit, `/tmp` del backup, home dell'operatore), su
+  `vps1777-update.service` e `vps1777-auto-update.service`. Misurata PRIMA di
+  essere scritta, con unit transitorie sulla macchina in esercizio — la storia
+  di questa unit lo impone (03/08: il seccomp accese NNP e uccise sudo):
+  `NoNewPrivs` resta 0 sotto strict+RWP (mount namespace, non seccomp), i
+  `sudo` whitelisted funzionano, fuori dai RWP il kernel nega con EROFS, e il
+  dump docker del backup era già misurato dalla prova-6 §③ (2,7 GB reali).
+  Tre guardiani aggiornati nello stesso gesto, o la release si sarebbe
+  rifiutata da sola: `SANDBOX_PROVATE_INNOCUE` nella CLI (elenco unico, con la
+  misura accanto; il preflight-unit assolve `ProtectSystem` e becca ancora il
+  seccomp), il test NNP che ora importa l'allowlist invece di copiarla, e la
+  prova-6 §① che da «delta con la proposta» diventa il guardiano della stretta
+  applicata. Il placeholder `@OPERATOR_HOME@` è reso da tutti e tre gli
+  installer.
+
+### 📖 Documentazione
+
+- **Le garanzie dei 4 documenti misurati sono 107/107 con ancora** (#226,
+  lavoro `a80025f1`): ogni frase che promette qualcosa cita ora il file, il
+  test o la voce di registro che la rimisura — comprese due garanzie che un
+  test non l'avevano e ora ce l'hanno
+  (`services/gateway/tests/test_fail_closed_senza_config.py`,
+  `tools/tests/test_nessun_build_in_place.py`). E i residui superati corretti
+  nel merito: le prove empiriche VIAGGIANO col bundle dal 0.43.x (il doc
+  diceva il contrario), la cifratura del disco porta la traiettoria datata
+  fino alla decisione `H56`, il consiglio di piattaforma è Debian 12 ovunque.
+
 ## [0.43.4] — 2026-08-27
 
 **La prima release il cui contenuto è stato giudicato da una misura, non da chi
