@@ -23,9 +23,9 @@ Mi impegno a:
 ## Security model
 
 vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy /
-Cloudflared) — rimisurabile: `tools/tests/test_porte_con_bind.py` (nessuna porta pubblicata
-nuda nei compose) e `tools/tests/test-onboarding-8080-bind.sh` (la finestra 8080
-dell'onboarding, l'eccezione nota di questa riga).
+Cloudflared) — rimisurabile con `tools/tests/test_porte_con_bind.py` (nessuna porta
+pubblicata nuda nei compose) e con `tools/tests/test-onboarding-8080-bind.sh` (la
+finestra 8080 dell'onboarding, l'eccezione nota di questa riga).
 
 > ⚠️ **QUATTRO PERCORSI CAMBIANO QUESTA RIGA, e NESSUNO chiede il permesso.** Quando il
 > Funnel non risponde, l'installazione scrive `GATEWAY_BIND=0.0.0.0` nel `.env` e il
@@ -100,9 +100,11 @@ Threat model dichiarato:
 ## Rassegna difensiva — l'hardening applicato
 
 Il modello sopra è il design; questa sezione è **cosa è stato reso fail-closed
-per costruzione**, dopo una review difensiva a tappeto (luglio 2026). Il pattern
-ricorrente che la review ha trovato — e chiuso — è *un default o un residuo che
-degrada in silenzio verso l'aperto*: il disegno era già fail-closed, non lo erano
+per costruzione**, dopo una review difensiva a tappeto (luglio 2026) registrata
+voce per voce in `security/findings.yml`. Il pattern ricorrente che la review ha
+trovato — e chiuso, con l'evidenza di ogni chiusura verificata a ogni PR da
+`security/check_findings.py` — è *un default o un residuo che degrada in
+silenzio verso l'aperto*: il disegno era già fail-closed, non lo erano
 tutti i default. Ogni voce cita la versione in cui è entrata.
 
 ### Autenticazione & accesso (i due punti critici)
@@ -258,12 +260,12 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
   FERMANO invece di spegnersi quando il dato manca, provato in
   `tools/tests/test_intent_fail_closed.py`.
 - **Anti-downgrade**: dal pulsante il target non può essere una versione più
-  vecchia di quella in esecuzione (version-floor SemVer;
-  `tools/tests/test_version_floor_non_confrontabile.py` cita questa riga e la
-  prova nei due versi) — così un gateway compromesso non può forzare un
-  downgrade a una release con vuln nota. Il
-  downgrade intenzionale resta possibile solo da terminale (chi ha la shell ha
-  già ogni privilegio). **E se la versione in esecuzione non è confrontabile**
+  vecchia di quella in esecuzione (version-floor SemVer, provato nei due versi
+  da `tools/tests/test_version_floor_non_confrontabile.py` che cita questa
+  riga) — così un gateway compromesso non può forzare un downgrade a una
+  release con vuln nota. Il
+  downgrade intenzionale resta possibile solo da terminale, con
+  `vps1777 update --version` esplicito (chi ha la shell ha già ogni privilegio). **E se la versione in esecuzione non è confrontabile**
   (`VPS1777_TAG` vuoto o non SemVer) **il pulsante viene rifiutato**: una
   versione illeggibile non è «più vecchia» né «più nuova», e una guardia che
   promette *non può* deve negare quando non sa.
@@ -271,13 +273,16 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
   `images.lock` (digest immutabili) del runtime bundle di release; il bundle è
   firmato (`cosign sign-blob` keyless) e la verifica è **obbligatoria di default**
   (`VPS1777_REQUIRE_COSIGN=0` la disattiva solo come via d'emergenza esplicita).
-  Nessun aggiornamento build-in-place.
+  Nessun aggiornamento build-in-place — nessun compose di esercizio porta una
+  chiave `build:`, e `tools/tests/test_nessun_build_in_place.py` lo verifica
+  su tutti i compose del repo, eccezioni dichiarate una per una.
 - **Reversibilità**: backup age + snapshot locale prima di ogni update;
   auto-rollback se lo stack non torna healthy. Nessuna finestra in cui i dati
-  restano senza rete di sicurezza — misurata dal vivo, non dedotta:
-  `tools/prove-empiriche/prova-9-il-fail-closed-torna-indietro-davvero.sh`
-  sabota il health-check di un update reale e verifica che il rollback riporti
-  la versione di partenza (prima esecuzione verde: collaudo del 27/08/2026).
+  restano senza rete di sicurezza — misurata dal vivo da
+  `tools/prove-empiriche/prova-9-il-fail-closed-torna-indietro-davvero.sh`,
+  che sabota il health-check di un update reale e verifica che il rollback
+  riporti la versione di partenza (prima esecuzione verde al collaudo del
+  27/08/2026, sul salto reale 0.43.1→0.43.2).
 - **Zero telemetria di vps1777**: vps1777 non ti traccia; il check versione è una
   GET non autenticata a GitHub. Ma **per funzionare, alcuni dati escono verso
   servizi terzi** — vedi la sezione seguente: non è telemetria, è il servizio che
@@ -288,7 +293,9 @@ Dettaglio completo: [docs/UPDATE.md](docs/UPDATE.md) e [docs/SELF_UPDATE_PLAN.md
 ## Flussi di dati verso terzi
 
 vps1777 non è un'isola: per erogare le sue funzioni fa transitare dati verso due
-servizi esterni. Nessuno è telemetria, ma è bene sapere **cosa esce verso chi**.
+servizi esterni. Nessuno è telemetria, ma è bene sapere **cosa esce verso chi** —
+e il confine che lo applica è la rete `egress` di `compose.yaml`: chi non ci sta
+sopra non esce affatto.
 
 | Quando | Cosa esce | Verso | Note |
 |---|---|---|---|
@@ -349,8 +356,9 @@ su questo profilo. È una decisione, non una dimenticanza.
 L'ottavo **parziale** è `H50`, il primo trovato da una misura invece che da una
 lettura: il gateway — il servizio esposto, quello che monta i secret — aveva
 un'uscita verso qualunque host su Internet. Ora è **chiusa in produzione**, e non
-per un commit: l'aggiornamento automatico ha installato il fix da sé e la prova
-empirica è passata da FAIL a PASS senza che nessuno toccasse la macchina, con la
+per un commit: l'aggiornamento automatico ha installato il fix di `H50` da sé e
+`tools/prove-empiriche/prova-1-gateway-non-esce.sh` è passata da FAIL a PASS
+senza che nessuno toccasse la macchina, con la
 controprova che dallo stesso momento un altro container esce regolarmente (senza
 quella, un timeout non distingue un blocco mirato da una rete guasta). Resta
 parziale perché negli altri due profili d'ingresso (caddy, cloudflared) il gateway
@@ -369,23 +377,26 @@ ad applicare) e il cancello dell'aggiornamento automatico — che per questo **n
 fatto marcia indietro**. Se ne è accorta una persona, aprendo l'indirizzo. Ora esiste
 una prova che guarda la porta **da fuori** del container, ed è stata verificata sui
 due esiti: verde sul servizio sano, rossa su uno rotto apposta. **Il cancello
-dell'aggiornamento ora la esegue** — lo stesso guasto farebbe tornare indietro
-l'aggiornamento da sé — e da oggi la stessa domanda viene fatta anche **una volta al
+dell'aggiornamento ora la esegue** — è `prova-7-porta-pubblicata-davvero.sh`, e lo
+stesso guasto di `H51` farebbe tornare indietro l'aggiornamento da sé — e da oggi la
+stessa domanda viene fatta anche **una volta al
 giorno**, quando non si sta aggiornando niente: se il servizio smette di rispondere
 arriva un avviso, e quando torna su arriva la **durata misurata fra i due istanti**,
 che è precisamente il numero che quel giorno nessuno aveva. E il controllo giornaliero non si ferma
 alla porta sulla macchina: **esce su Internet e rientra dall'indirizzo pubblico**,
 perché con la porta viva e il tunnel caduto, per chi apre l'indirizzo il servizio è
-giù e un controllo interno direbbe che va tutto bene. *Quella sonda l'avevo data per
+giù e un controllo interno direbbe che va tutto bene. *Quella sonda del tunnel
+(`H51`) l'avevo data per
 impossibile — pensavo che dalla macchina la richiesta girasse su sé stessa: misurata,
 esce davvero, e la stessa richiesta fatta all'indirizzo interno non risponde. Un
 limite dedotto invece che misurato è la stessa classe di errore che questo rilievo
 racconta.* Il controllo del tunnel **non** entra nel cancello dell'aggiornamento, ed è
 una scelta: quel cancello giudica ciò che l'aggiornamento può rompere, e un
 singhiozzo del tunnel farebbe tornare indietro una versione sana — nel controllo
-giornaliero, invece, un falso allarme costa un avviso e non un ripristino. Resta
-parziale per un motivo solo, scritto invece che taciuto: le prove empiriche non
-entrano nel pacchetto di rilascio, quindi sulla macchina vanno copiate a mano.
+giornaliero, invece, un falso allarme costa un avviso e non un ripristino. Dal
+`v0.43.4` il bundle di rilascio porta con sé `tools/prove-empiriche/`, quindi sulla
+macchina le prove vanno solo lanciate, non più copiate a mano — e il primo collaudo
+completo sul sistema in esercizio (27/08/2026) le ha viste 8 verdi su 8 eseguibili.
 
 Il decimo è `H52`, e non l'abbiamo trovato noi: l'ha nominato l'analisi esterna del
 round-7. Le garanzie di irrobustimento dei servizi di sistema erano certificate
@@ -413,9 +424,9 @@ perché la ricerca di altri controlli nella stessa condizione non è esaustiva.
 
 Il dodicesimo è `H54`, e ci è arrivato per una strada storta che vale la pena dire:
 l'analisi esterna ha osservato che il gateway monta **cinque credenziali in chiaro**,
-compreso il token del bot Telegram. Il registro copriva quel terreno solo di sponda —
-c'era una voce **chiusa**, ma chiudeva una lacuna *nella documentazione*, non il
-rischio. Chi scorreva l'elenco cercando cosa resta scoperto non trovava nulla.
+compreso il token del bot Telegram. Il registro copriva il terreno di `H54` solo di
+sponda — c'era una voce **chiusa**, ma chiudeva una lacuna *nella documentazione*,
+non il rischio. Chi scorreva l'elenco cercando cosa resta scoperto non trovava nulla.
 Misurato, però, il numero giusto è **uno, non cinque**: quattro di quelle credenziali
 sono del gateway stesso — firma le proprie sessioni, verifica la password — e chi
 prende il gateway le ha già per definizione. Il token del bot no: quello non gli serve
@@ -449,8 +460,8 @@ gateway *al posto di* `telegram_bot_token`: non costa né un container né un ca
 > più l'eccezione: è la modalità normale del sistema.
 > 🔑 **La decisione non era sbagliata: era la sua motivazione a essere invecchiata** — e
 > una motivazione scaduta non lo dichiara, perché sta nel corpo della decisione e non in
-> un campo che qualcuno rivede. *Chi la rileggeva la valutava su una premessa morta senza
-> avere modo di accorgersene.*
+> un campo che qualcuno rivede. *Chi rileggeva la decisione di `H54` la valutava su una
+> premessa morta senza avere modo di accorgersene.*
 > ⇒ **Ogni premessa che descrive la FORMA del sistema** — «è piccolo», «è uno solo»,
 > «non c'è ancora X» — **va riletta quando il sistema cresce: a scadere è la premessa,
 > non la scelta.** Se un giorno i servizi tornassero a essere uno, questo paragrafo
@@ -461,8 +472,8 @@ gateway *al posto di* `telegram_bot_token`: non costa né un container né un ca
 > verificare serve il token stesso»* e ne deduceva **due** opzioni. Falso da venti
 > giorni: H54 (27/07) ha introdotto la chiave derivata, il gateway la accetta già, e
 > l'opzione **(c)** — la più economica delle tre — era **scritta e collaudata in questo
-> repo mentre io scrivevo che non esisteva**. *(rilievo di @b82df434 sulla revisione
-> non-autrice; verificato alla fonte prima di accoglierlo.)*
+> repo mentre io scrivevo che non esisteva**. *(rilievo della revisione non-autrice
+> in issue `#61`; verificato alla fonte prima di accoglierlo.)*
 > 🔑 **Chi corregge una premessa scaduta la sostituisce con quella che ha in testa — ed è
 > vecchia quanto la sua ultima lettura del codice.** Non c'è una versione definitiva di
 > un paragrafo che descrive il sistema: c'è solo la sua data. ⇒ **il presidio non è
@@ -475,10 +486,12 @@ davvero la macchina**. Il comando che questa documentazione consiglia moriva a m
 strada con un errore di programma, perché non riusciva a scrivere il file che i
 pannelli leggono per **disegnare la barra di avanzamento**. Il motivo è
 un'asimmetria: l'aggiornamento automatico gira con privilegi diversi da quelli di chi
-lancia il comando a mano, e lascia dietro un file che l'altro non può più riscrivere.
-**Il punto non è il permesso: è che una riparazione è stata abortita da un file che
-serve solo a raccontarla.** Rifiutarsi di installare qualcosa la cui firma non torna è
-giusto; rifiutarsi di riparare perché non si riesce a scriverne il resoconto non lo è.
+lancia il comando a mano, e lascia dietro un file (`update_progress.json`, quello dei
+pannelli) che l'altro non può più riscrivere.
+**Il punto di `H55` non è il permesso: è che una riparazione è stata abortita da un
+file che serve solo a raccontarla.** Rifiutarsi di installare qualcosa la cui firma
+non torna è giusto; rifiutarsi di riparare perché non si riesce a scriverne il
+resoconto non lo è.
 Ora avvisa e prosegue — una volta sola, non a ogni passo — e quando può rimette il
 file nella disponibilità di chi userà il comando dopo. Il pezzo che riallinea i permessi resta verificato
 leggendolo e non dai test (servirebbero altri privilegi) — ma **la causa a monte è
@@ -501,9 +514,10 @@ chiuso**. Prima di ogni aggiornamento la macchina prende una copia di sicurezza 
 per poter tornare indietro; una voce chiusa raccontava che da quella copia erano stati
 esclusi i cookie di Google. Vero — ma era **un archivio su due**, e quello che resta è
 dodicimila volte più grande: circa 2,58 GB di archivio **in chiaro**, mentre gli stessi
-dati, per l'altra strada, viaggiano cifrati. *Il difetto non è il chiaro: quella copia
-serve al ripristino automatico, che gira sulla macchina e non può dipendere da una
-chiave che sta altrove — cifrarla la renderebbe illeggibile proprio a chi deve usarla.*
+dati, per l'altra strada, viaggiano cifrati. *Il difetto di `H56` non è il chiaro:
+quella copia serve al ripristino automatico, che gira sulla macchina e non può
+dipendere da una chiave che sta altrove — cifrarla la renderebbe illeggibile proprio
+a chi deve usarla.*
 **Il difetto è che chi leggeva il registro concludeva che il problema fosse chiuso.**
 Ora è scritto, col residuo dichiarato: cresce di una copia a ogni aggiornamento e
 ciascuna resta 72 ore, e l'unica cura che non rompe il ripristino è cifrare il disco —
@@ -554,18 +568,20 @@ ha preso un posto e ha cancellato il 25 luglio. Prima dell'aggiornamento tre gio
 subito dopo due. *Era inevitabile, ma andava previsto e scritto, non scoperto guardando
 l'elenco dopo.* ⚠️ **E i giorni già cancellati non tornano**: dal 20 al 25 luglio non
 esiste più una copia giornaliera. La finestra riparte da due giorni e si riempie una
-notte per volta, tornando a sette il 2 agosto. Non è un residuo del rimedio: è il danno
-che il difetto aveva già fatto, e sta scritto perché nessuno legga qui una riparazione
-più completa di quella che è.
+notte per volta, tornando a sette il 2 agosto. Non è un residuo del rimedio di `H57`:
+è il danno che il difetto aveva già fatto, e sta scritto perché nessuno legga qui una
+riparazione più completa di quella che è.
 
 `H59` è **il difetto di `H57` salito di un piano**, ed è chiuso e verificato sulla macchina. Lo script dei
 backup chiudeva dicendo «copie totali mantenute: 7». Un **conteggio**, mentre la promessa
 che quello script mantiene è in **giorni**. Il 27 luglio ha detto «7» quando i giorni
-erano tre, e poi ancora «7» quando erano due: *non ha mai mentito e non ha mai detto
-niente*. ⭐ **Un controllo che rendiconta in un'unità diversa dalla propria promessa tace
+erano tre, e poi ancora «7» quando erano due: *quel «7» di `tools/backup.sh` non ha
+mai mentito e non ha mai detto niente*. ⭐ **Un controllo che rendiconta in un'unità
+diversa dalla propria promessa tace
 nel momento esatto in cui dovrebbe parlare** — e il momento esatto è quello in cui il
-numero torna e la garanzia no. La seconda metà è più grande della prima: anche scritta
-giusta, quella riga finisce in un file di log dentro un container che nessuno apre. La
+numero torna e la garanzia no. La seconda metà di `H59` è più grande della prima:
+anche scritta giusta, quella riga finisce in un file di log dentro un container che
+nessuno apre. La
 finestra si è dimezzata e se n'è accorta una sessione che stava misurando altro.
 
 Ora lo script dice **quanti giorni distinti** copre e da quando a quando, e il controllo
@@ -573,22 +589,23 @@ giornaliero — quello che già ogni giorno verifica se il servizio risponde —
 quel numero e **avvisa su Telegram**. 🔑 **Ma avvisa di una regressione, non di una
 finestra non ancora piena**, ed è la scelta che decide se questo controllo verrà letto o
 messo a tacere: dopo un'installazione nuova la copertura è 1, poi 2, poi 3, ed è normale.
-Quello che non è mai normale è che *scenda* sotto il massimo già raggiunto — a regime le
-copie si sostituiscono, non si perdono. *Residuo dichiarato: quel massimo non scende mai,
-quindi accorciare di proposito la conservazione lascerebbe l'avviso acceso finché
-qualcuno non tocca lo stato.*
+Quello che non è mai normale è che la copertura di `H59` *scenda* sotto il massimo già
+raggiunto — a regime le copie si sostituiscono, non si perdono. *Residuo dichiarato di
+`H59`: quel massimo non scende mai, quindi accorciare di proposito la conservazione
+lascerebbe l'avviso acceso finché qualcuno non tocca lo stato.*
 
 `H60` è **una nostra regola violata da noi**, e il controllo che ora la applica è in produzione. La regola dice:
 nessun indirizzo, nome o URL della macchina, in nessuna forma — nemmeno in un esempio,
 nemmeno nell'output di una prova; oggi la applica la regola R3 del gate, provata caso
-per caso (falsi rossi compresi) in `tools/tests/test_no_leaks.py`. Era scritta, la applicavamo a mano, e **nessun controllo
-la faceva rispettare**. Il 27 luglio un indirizzo pubblico è entrato nel repo dentro una
+per caso (falsi rossi compresi) in `tools/tests/test_no_leaks.py`. La regola di `H60`
+era scritta, la applicavamo a mano, e **nessun controllo la faceva rispettare**. Il 27 luglio un indirizzo pubblico è entrato nel repo dentro una
 nota che documentava una misura, ed è rimasto visibile per otto ore, in `main` e in tre
 versioni pubblicate.
 
 ⚖️ **Quanto è grave, detto senza gonfiarlo — e chi scrive è l'autrice del commit.** Quel
 numero **non è la macchina** e non è la rete privata: è un ingresso pubblico e condiviso
-di Tailscale. Non dà accesso a niente e non identifica la rete di nessuno; che il servizio
+di Tailscale. Il valore uscito con `H60` non dà accesso a niente e non identifica la
+rete di nessuno; che il servizio
 stia dietro quel tipo di ingresso, il repo lo dichiara ovunque per scelta. *Decisione del
 proprietario: resta nella storia, «di monito ai posteri» — riscrivere la storia di un repo
 pubblico costa più di quanto valga il dato.* Lo stato onesto è **«non più in vista»**, non
@@ -601,14 +618,15 @@ pubblici e nomi di rete reali fanno fallire la build, con le esclusioni giuste �
 private, indirizzi che esistono apposta per la documentazione, e i bersagli di test
 dichiarati **uno per uno col perché**, perché un controllo che grida al lupo viene spento.
 
-🔴 **E provandolo ha trovato tre cose su sé stesso**, che è il motivo per cui un controllo
+🔴 **E provando `security/check_no_leaks.py` sono uscite tre cose su di lui**, che è
+il motivo per cui un controllo
 si prova invece di scriverlo: è diventato rosso su un campo dell'installer che aveva come
 esempio un indirizzo pubblico vero; la regola sui nomi di rete **non funzionava affatto**
 per un errore di scrittura, quindi era verde per costruzione; e la prima stesura del suo
 test **riscriveva l'indirizzo dentro il file che esiste per impedirlo** — con il controllo
 che diceva verde, perché guardava solo i file già registrati e quello era nuovo. *Ora
-guarda anche ciò che si sta per aggiungere: un controllo che non vede quello vede solo gli
-errori passati.*
+`check_no_leaks.py` guarda anche ciò che si sta per aggiungere: un controllo che non
+vede quello vede solo gli errori passati.*
 
 `H61` è **un difetto del rimedio di `H59`, trovato il giorno stesso in cui è nato** — e
 lo teniamo come voce separata invece di correggere quella vecchia, perché riscriverla
@@ -659,8 +677,8 @@ soltanto committato. `H57`, `H59` e `H60` sono **chiusi e misurati sulla macchin
 accanto, con un nome provvisorio, e prende il nome definitivo solo quando è finita — la
 rinomina è istantanea e indivisibile, quindi *sparisce l'istante in cui poteva esistere una
 copia a metà*. **Non era stato fatto subito apposta**: la modifica precedente toccava la
-conservazione delle copie e doveva andare in produzione da sola e misurabile. Ci è andata,
-è stata misurata, e solo allora si è toccato il secondo pezzo. *Residuo più stretto,
+conservazione delle copie e doveva andare in produzione da sola e misurabile. La cura di
+`H58` ci è andata, è stata misurata, e solo allora si è toccato il secondo pezzo. *Residuo più stretto,
 dichiarato: se lo strumento di sistema non accetta di spingere su disco quel singolo file,
 si prosegue senza — e lì una mancanza di corrente lascerebbe un file provvisorio, non una
 copia monca. Il danno peggiora nel modo giusto.*
@@ -722,7 +740,8 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
   - 📏 **Quanto resta in chiaro, e per quanto**: `snapshot_prune`
     (`tools/vps1777.py:1021-1032`) pota uno snapshot solo quando è più vecchio di
     **72h** *e* non è quello da conservare — «il più tardivo dei due». Non tiene
-    «l'ultimo»: **ogni aggiornamento aggiunge ~2,6 GB in chiaro che restano 72 ore.**
+    «l'ultimo»: **ogni giro di `vps1777 update` aggiunge ~2,6 GB in chiaro che
+    restano 72 ore.**
     Misurato il 27/07/2026: due snapshot conviventi, 4,9 GB, con la stessa copia
     dell'archivio due volte (dimensione identica al byte — nessuna deduplicazione).
     Con rilasci frequenti il totale è dell'ordine di (aggiornamenti in 72h) × 2,6 GB,
@@ -736,13 +755,18 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
 Alcune protezioni sono state **rimandate di proposito**, non scartate, perché in
 questa fase i rilasci sono frequenti e aggiungerebbero attrito:
 
-- **Cifratura del disco della VPS** (chiude in un colpo archivio, secret e snapshot
-  pre-update, **senza toccare l'auto-rollback**, perché il decifrato è trasparente
-  alla macchina — vedi §Dati a riposo per il perché cifrare il solo snapshot non si
-  può). Decisione dell'owner del **27/07/2026**: *«per ora i backup li lasciamo in
-  chiaro, cripteremo il disco quando lo formatto la prossima volta»*. ⇒ Si fa **sul
-  disco, non nel codice**: `vps1777` non la impone né gestisce un'altra chiave sulla
-  macchina. Stato al 27/07/2026: `vda1 ext4`, nessun `dm-crypt` attivo.
+- **Cifratura del disco della VPS** (voce `H56` del registro: chiuderebbe in un
+  colpo archivio, secret e snapshot pre-update, **senza toccare l'auto-rollback**,
+  perché il decifrato è trasparente alla macchina — vedi §Dati a riposo per il
+  perché cifrare il solo snapshot non si può). La traiettoria, per data, perché ognuna era vera alla sua:
+  **27/07/2026** — decisione dell'owner: *«cripteremo il disco quando lo formatto
+  la prossima volta»*. **22-23/08/2026** — il format è arrivato e la cifratura è
+  stata **provata davvero**: su Debian 13 con volumi cifrati la VPS risultava
+  instabile, ed è stata rimessa Debian 12 coi dischi in chiaro. La decisione è
+  registrata come **rischio accettato** in `security/findings.yml`, voce `H56`:
+  non più un rinvio, una scelta con la sua prova. Se un'immagine cifrata stabile
+  tornerà disponibile per questa macchina, la voce si riapre — sul disco, non nel
+  codice: `vps1777` non la impone né gestisce un'altra chiave.
 - **Approvazione manuale dei rilasci** (parte di `H24`): un GitHub *environment*
   `release` con reviewer richiederebbe una tua approvazione a ogni tag. I tag
   pubblicati sono già **immutabili** (ruleset in `security/rulesets/`); manca solo

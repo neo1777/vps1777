@@ -12,7 +12,7 @@ Sequenza passo-passo dall'host vuoto a stack su.
 
 | Cosa | Versione | Note |
 |---|---|---|
-| Linux x86_64/arm64 | qualsiasi recente | Debian 13 / Ubuntu 24+ / Fedora / Arch testati |
+| Linux x86_64/arm64 | qualsiasi recente | Debian 12 consigliata (collaudo completo su macchina vergine, 27/08/2026 — su Debian 13 con volumi cifrati la VPS era instabile, voce `H56`) / Ubuntu 24+ / Fedora / Arch |
 | Docker Engine | 24+ | con `docker compose` plugin v2 |
 | python3 **+ pip** | 3.10+ | solo per `setup.sh` (calcola bcrypt). Su Debian/Ubuntu `python3` e `python3-pip` sono **due pacchetti**: `sudo apt install python3-pip`. Se `bcrypt` c'è già, pip non serve — il preflight verifica la capacità, non il nome |
 | Account Tailscale **o** Caddy+dominio **o** Cloudflare | uno dei tre | scelta al setup |

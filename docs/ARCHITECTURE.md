@@ -142,7 +142,8 @@ JWT typ è la chiave: `access_token` non funziona dove serve `admin_cookie` e vi
 ## Modello di sicurezza
 
 La postura è **fail-closed**: in assenza di configurazione il gateway nega, non
-apre. Segue la sintesi degli hardening della review difensiva (luglio 2026,
+apre — provato sul caso più semplice (nessun `gateway_secret` → il proxy nega
+tutto) da `services/gateway/tests/test_fail_closed_senza_config.py`. Segue la sintesi degli hardening della review difensiva (luglio 2026,
 `v0.19.1 → v0.33.0`, dossier chiuso: **35 chiusi · 7 parziali · 1 accettato · 0
 aperti**); il dettaglio operativo sta in [SECURITY.md](../SECURITY.md), che è la
 fonte di verità — qui c'è la sintesi, là il registro che la CI verifica.
@@ -267,6 +268,7 @@ Due proprietà da non perdere di vista se tocchi questa zona:
   sotto-path `internal/` con 404 **prima di ogni altro controllo** (secret, bearer),
   per **tutti** gli upstream. È un **prefisso riservato**: un plugin può usarlo per
   i propri endpoint privati sapendo che il proxy non li espone. Vedi [PLUGINS.md](PLUGINS.md).
-- **L'upload è non distruttivo.** Il tar si estrae in staging, si valida, e solo
-  allora sostituisce il profilo buono: un file sbagliato non ti scollega da
-  NotebookLM.
+- **L'upload è non distruttivo** (il flusso staging→valida→sostituisci vive in
+  `services/gateway/app/admin.py`, ramo upload del profilo NLM): il tar si
+  estrae in staging, si valida, e solo allora sostituisce il profilo buono —
+  un file sbagliato non ti scollega da NotebookLM.

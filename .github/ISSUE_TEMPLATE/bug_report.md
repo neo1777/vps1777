@@ -17,7 +17,7 @@ labels: bug
 
 ## Ambiente
 - vps1777 tag: `<v0.x.y>` o `<commit hash>`
-- Sistema operativo: <Debian 13 / Ubuntu 24.04 / ...>
+- Sistema operativo: <Debian 12 / Ubuntu 24.04 / ...>
 - Docker: `docker --version`
 - Compose: `docker compose version`
 - Ingress: <tailscale | caddy | cloudflared>

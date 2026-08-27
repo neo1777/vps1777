@@ -106,7 +106,9 @@ e stato di ogni secret + le istruzioni di rotazione. Scrive `onboarding/secrets_
 > in automatico romperebbe i connettori attivi (token/URL). L'auto-rotazione
 > trasparente richiede un *key-ring con grazia* (roadmap). Il **refresh token
 > OAuth**, invece, **ruota già da solo** a ogni uso, con revoca durevole e
-> rilevamento del riuso (difesa dal furto token).
+> rilevamento del riuso (difesa dal furto token) — il ramo vive in
+> `services/gateway/app/oauth.py`, eventi `oauth_refresh_rotated` e
+> `oauth_refresh_reuse` nell'audit.
 
 ## Backup
 
@@ -129,4 +131,6 @@ vecchi) vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md#rotazione-della-chiave-age-h3
   a valle, non sostituisce la rotazione: smette solo di produrre nuovi leak.
 - **Segreti fuori dall'argv** (v0.29.0): `deploy.sh` passa i segreti via STDIN,
   non nell'argv → non compaiono in `ps`/`/proc/<pid>/cmdline` sull'host remoto.
-- L'audit log NON contiene mai i valori, solo il nome del secret rotato
+- L'audit log NON contiene mai i valori, solo il nome del secret rotato — lo
+  impone l'allowlist `_CHIAVI_NOTE` di `services/gateway/app/audit.py`: una
+  chiave non dichiarata non entra nel log, qualunque cosa contenga
