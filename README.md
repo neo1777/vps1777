@@ -7,8 +7,9 @@
 ![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)
 
 > **Il tuo gateway personale per MCP, bot e servizi LLM** — dietro un solo URL
-> HTTPS pubblico, protetto da OAuth 2.1, in piedi su una VPS Linux in pochi
-> minuti e senza scrivere un comando.
+> HTTPS pubblico, protetto da OAuth 2.1 (l'architettura completa è in
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), in piedi su una VPS Linux in
+> pochi minuti e senza scrivere un comando.
 
 Colleghi i **tuoi** server MCP (e bot Telegram) a [claude.ai](https://claude.ai),
 Claude Code e all'app desktop, da un unico endpoint sicuro. vps1777 mette davanti

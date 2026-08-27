@@ -44,7 +44,12 @@ ho saputo vedere», che è il difetto per cui una guardia muta è peggio di ness
 - 🔴 *(26/07, all'origine)* **Non sono state eseguite sul target.** Di ognuna è verificata la **sintassi**
   (`bash -n`) e la logica è scritta sui meccanismi reali letti nel codice (nomi dei *servizi* compose, non
   dei container: i `container_name` non sono dichiarati, quindi indovinarli sarebbe stato un errore).
-  **Nessuna ha girato su una VPS viva** — chi le lancia la prima volta è il loro primo collaudo, e va saputo.
+  **Nessuna aveva girato su una VPS viva** fino al collaudo su macchina vergine del 22-27/08/2026,
+  che è stato il loro primo collaudo vero: esito finale 8 verdi · 0 rosse · 1 non eseguibile
+  (prova-9, latest==corrente — si esercita solo su un salto di versione reale), fase
+  `post-release-0-43-4` nel referto di `lancia-tutte.sh`. Il collaudo stesso ha trovato e curato
+  tre difetti DELLE prove (prova-8 sui template di unit, prova-9 sul path dello stato, prova-6
+  sonda del §③): *chi le lancia la prima volta collauda anche loro, ed è successo esattamente così.*
 - 🟢 **Arrivano sulla VPS col pacchetto di rilascio** — `release.yml` fa `cp -r tools/prove-empiriche
   bundle/tools/` (commit `87f6391`, 27/07 **12:57**, H51 d).
   🔴 *(27/07 **09:33**, all'origine)* **Non arrivano sulla VPS da sole.** Il pacchetto di rilascio non
