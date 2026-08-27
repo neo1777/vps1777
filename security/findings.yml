@@ -3223,3 +3223,63 @@ findings:
       invece di `compose.yaml`), e la riga e' `:0` perche' il normalizzato non conserva
       i numeri di riga. Chi va a curare apre un file che non contiene la riga. Non tocca
       il verdetto — tocca il tempo di chi lo legge.
+
+  - id: H69
+    severity: medium
+    title: "«Autorizza» sulla consent page non faceva nulla su Chrome: `form-action 'self'` (la CSP di _layout) blocca ANCHE il redirect 302 che segue il submit del POST /authorize verso il redirect_uri del client — il flusso OAuth moriva in silenzio, unico segno in console"
+    status: closed
+    scoperta:
+      quando: "2026-08-27"
+      come: incidente
+      nota: >
+        Collaudo su macchina vergine: il proprietario ricollega il connettore
+        claude.ai, arriva alla consent, preme Autorizza «e non succede nulla»
+        (screenshot delle 12:51). df446a42 risale dal sintomo al codice
+        (admin.py, CSP di `_layout`) e conferma sul vivo: l'header servito da
+        /admin/login porta `form-action 'self'`. Chrome applica form-action
+        anche ai redirect risultanti dalla form submission; Firefox no — per
+        questo il rimedio-ponte del collaudo e' stato «autorizza da Firefox».
+        PERCHE' MAI VISTO PRIMA: la consent (H8) e' nata in v0.33.0 quando la
+        CSP c'era gia' (v0.13.0), ma i client claude.ai esistenti giravano sui
+        token emessi PRIMA della consent — il flusso col bottone non era mai
+        stato esercitato end-to-end fino al primo azzeramento vero (il format).
+        E' la lezione «committato non e' in vigore» al livello del flusso: una
+        pagina puo' stare in produzione settimane senza che NESSUNO ne attraversi
+        il ramo che la qualifica.
+    natura: comportamento
+    since: v0.33.0
+    evidence:
+      - file: services/gateway/app/oauth.py
+        contains:
+          - "form-action 'self' {o.scheme}://{o.netloc}"
+          - "o = urlsplit(p[\"redirect_uri\"])"
+      - file: services/gateway/tests/test_oauth_consent.py
+        contains:
+          - "def test_consent_csp_form_action_allarga_all_origin_del_redirect_uri("
+          - "def test_consent_csp_intatta_se_layout_non_dichiara_form_action("
+    fix: >
+      `_consent_page` allarga form-action all'ORIGIN del redirect_uri GIA'
+      validato contro i client registrati (`form-action 'self' https://claude.ai`
+      nel caso reale) — mai un jolly, solo su questa pagina; le altre pagine
+      admin restano a `form-action 'self'`. Se _layout un domani non portasse
+      la CSP, la consent non ne inventa una (controprova nel test).
+    prova:
+      - comando: "curl -sI https://<PUBLIC_BASE>/admin/login | grep -i content-security-policy"
+        dove: "produzione (VPS del collaudo vergine), 27/08 ~13:00"
+        output: "…; form-action 'self'; object-src 'none' — la CSP che blocca"
+        exit: 0
+        quando: "2026-08-27"
+      - comando: "uvx pytest tests/test_oauth_consent.py -q (con git stash del fix)"
+        dove: "PROVA A CONTRARIO in services/gateway: il test nuovo senza il fix"
+        output: "1 failed, 21 passed — test_consent_csp_form_action_allarga_all_origin_del_redirect_uri"
+        exit: 1
+        quando: "2026-08-27"
+      - comando: "uvx pytest tests/test_oauth_consent.py -q (col fix)"
+        dove: "services/gateway"
+        output: "22 passed (20 preesistenti + verso positivo + controprova header assente)"
+        exit: 0
+        quando: "2026-08-27"
+    resta_aperto: >
+      La verifica end-to-end col bottone vero su Chrome si chiude al collaudo,
+      quando la release col fix arriva sulla VPS via update: e' il passo che
+      nessun test da CI puo' fare (serve il browser e il client OAuth reale).

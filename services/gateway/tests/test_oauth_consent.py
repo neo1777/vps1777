@@ -250,6 +250,38 @@ def test_get_logged_in_shows_consent_not_code():
     assert oauth._codes == {}
 
 
+def test_consent_csp_form_action_allarga_all_origin_del_redirect_uri():
+    """Il difetto trovato al collaudo vergine (27/08): con `form-action 'self'`
+    Chrome blocca in silenzio il 302 post-submit verso redirect_uri e il bottone
+    «Autorizza» non fa nulla. La consent page deve allargare form-action
+    all'ORIGIN del redirect_uri validato — e SOLO a quello."""
+    _CSP_PROD = (
+        "default-src 'self'; script-src 'self' 'nonce-x'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'"
+    )
+
+    def _layout_con_csp(title, body, current="", flash="", flash_kind="ok", csrf=""):
+        r = _LayoutResult(title, body, csrf)
+        r.headers["Content-Security-Policy"] = _CSP_PROD
+        return r
+
+    admin_stub._layout = _layout_con_csp
+    r = run(oauth.authorize(FakeRequest(query=_valid_query())))
+    csp = r.headers["Content-Security-Policy"]
+    assert "form-action 'self' https://claude.ai;" in csp
+    # nessun'altra direttiva toccata, niente jolly
+    assert csp.startswith("default-src 'self';")
+    assert "object-src 'none'" in csp and "https:" not in csp.replace(
+        "https://claude.ai", "")
+
+
+def test_consent_csp_intatta_se_layout_non_dichiara_form_action():
+    """Controprova del verso: se _layout non porta la CSP (o non ha
+    form-action 'self'), la consent page non inventa un header nuovo."""
+    r = run(oauth.authorize(FakeRequest(query=_valid_query())))
+    assert "Content-Security-Policy" not in r.headers
+
+
 def test_consent_page_escapes_client_name_xss():
     oauth._clients["cid"]["client_name"] = '<script>alert(1)</script>'
     r = run(oauth.authorize(FakeRequest(query=_valid_query())))

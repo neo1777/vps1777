@@ -302,7 +302,7 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **68 voci** (2 critiche, 10 alte, 38 medie, 18 basse): 43 dalla
+Il registro conta **69 voci** (2 critiche, 10 alte, 39 medie, 18 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -313,11 +313,14 @@ quinta fonte aperta il 10/08: **rileggere le garanzie scritte in prosa in questi
 documenti e chiedersi chi le tiene**. Le prime due erano vere e senza alcun presidio;
 la terza era vera, presidiata, e il presidio non copriva tutte le forme
 dell'oggetto — che è l'esito meno visibile dei tre, perché somiglia a un verde.
+Una (`H69`) viene dal collaudo su macchina vergine del 27/08: il primo azzeramento
+vero ha esercitato per la prima volta un ramo (la consent OAuth col bottone) che
+stava in produzione da settimane senza che nessun client lo attraversasse.
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 55 |
+| **chiusi** | 56 |
 | **parziali** | 12 |
 | **accettati** | 1 |
 | **aperti** | 0 |
