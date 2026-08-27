@@ -320,8 +320,8 @@ Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 57 |
-| **parziali** | 11 |
+| **chiusi** | 59 |
+| **parziali** | 9 |
 | **accettati** | 2 |
 | **aperti** | 0 |
 
