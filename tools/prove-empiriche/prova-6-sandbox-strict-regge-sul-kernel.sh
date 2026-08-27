@@ -130,21 +130,79 @@ for d in /etc /usr/bin; do
 done
 
 # ─── ③ il caso silenzioso: il bind-mount del backup vede DATI, non un exit code ───
+# 🔄 DA DICHIARATIVO A MISURATO (27/08/2026, per ordine dell'owner: «i 5 punti in
+#   produzione, senza se e senza ma»). Fino a ieri questo ramo DICHIARAVA che la
+#   misura mancava («lanciare un backup reale è una decisione di chi possiede il
+#   server») e usciva 2. Ora il server ha VOLUMI VERI, e la decisione è presa: dove
+#   docker e un volume vps1777_* ci sono, il §③ ESEGUE la misura che chiedeva.
+# COSA MISURA, nei due versi — perché un solo verso è preso in prestito:
+#   a) il gesto ESATTO di backup.sh (mktemp -d sull'host → bind-mount → tar del
+#      volume in SOLA LETTURA) dentro la sandbox PROPOSTA: la DIMENSIONE del dump
+#      deve essere > 0. L'exit code non conta niente, ed è tutto il punto.
+#   b) CONTROPROVA: lo stesso gesto sotto PrivateTmp=yes deve produrre esattamente
+#      il caso silenzioso che la unit dichiara — rc=0 E dump vuoto/assente. Se
+#      invece il dump arriva pieno, la ragione scritta nella unit è da riverificare.
+# Non tocca la produzione: il volume è montato :ro, si scrive solo in un mktemp.
 echo
-echo "   ③ IL CASO SILENZIOSO — mktemp + bind-mount del backup"
+echo "   ③ IL CASO SILENZIOSO — mktemp + bind-mount del backup, MISURATO in dimensione"
 non_misurato=0
-if grep -q 'mktemp -d' "$REPO/tools/backup.sh" 2>/dev/null; then
-  echo "      backup.sh usa mktemp -d          ✅ confermato sul file (la ragione della unit è reale)"
-  echo "      ⚠️  E QUI L'EXIT CODE NON BASTA: sotto PrivateTmp/ProtectSystem il demone docker"
-  echo "         risolve il bind-mount FUORI dal /tmp del servizio ⇒ il dump può risultare VUOTO"
-  echo "         con rc=0. Chi verifica la stretta deve guardare la DIMENSIONE del dump prodotto,"
-  echo "         non il suo codice di uscita. Questa prova non lo fa: lanciare un backup reale"
-  echo "         è una decisione di chi possiede il server."
-  non_misurato=1
-else
+if ! grep -q 'mktemp -d' "$REPO/tools/backup.sh" 2>/dev/null; then
   echo "      ⚠️  'mktemp -d' non trovato in tools/backup.sh — la ragione dichiarata nella unit"
   echo "         va riverificata: o il file è cambiato, o il repo è un altro."
   non_misurato=1
+elif ! $SUDO docker ps >/dev/null 2>&1; then
+  echo "      backup.sh usa mktemp -d          ✅ confermato sul file (la ragione della unit è reale)"
+  echo "      ⚪ docker non disponibile qui ⇒ il dump reale non si può misurare su questa macchina."
+  non_misurato=1
+else
+  VOL="$($SUDO docker volume ls --format '{{.Name}}' | grep '^vps1777_' | head -1)"
+  if [ -z "$VOL" ]; then
+    echo "      ⚪ nessun volume vps1777_* sull'host ⇒ niente dati reali da dumpare qui."
+    non_misurato=1
+  else
+    echo "      volume reale sotto dump (ro): $VOL"
+    dump_sotto() {  # <descrizione> <proprietà systemd-run extra...> → vero se il dump ha contenuto
+      local desc="$1"; shift
+      local out rc size resto
+      # 🪤 TUTTO il gesto — mktemp, docker, stat — vive DENTRO la sandbox, come in
+      #   backup.sh:55+182. La mia prima versione faceva il mktemp FUORI e passava
+      #   il path dentro: così il path esiste sull'HOST, il demone docker lo
+      #   risolve, e il dump arriva PIENO anche sotto PrivateTmp — *la sonda aveva
+      #   il difetto che cercava*, e la controprova usciva rossa su un caso VERO.
+      #   Il caso silenzioso nasce proprio perché il mktemp del SERVIZIO vive nel
+      #   suo /tmp privato, che il demone non vede.
+      out="$($SUDO systemd-run --quiet --wait --collect --pipe "$@" \
+            /bin/sh -c "t=\$(mktemp -d); \
+                        docker run --rm -v '$VOL':/src:ro -v \"\$t\":/dst alpine \
+                          sh -c 'cd /src && tar cf /dst/dump.tar .' >/dev/null 2>&1; \
+                        rc=\$?; \
+                        size=\$(stat -c %s \"\$t/dump.tar\" 2>/dev/null || echo 0); \
+                        rm -rf \"\$t\"; \
+                        echo \"RC=\$rc SIZE=\$size T=\$t\"" 2>/dev/null)"
+      rc="${out#*RC=}"; rc="${rc%% *}"
+      size="${out#*SIZE=}"; size="${size%% *}"
+      resto="${out#*T=}"
+      # Sotto PrivateTmp il demone docker CREA il path sul /tmp dell'host (è il
+      # meccanismo stesso del caso silenzioso): quel residuo va tolto dall'host.
+      case "$resto" in /tmp/tmp.*) $SUDO rm -rf "$resto" 2>/dev/null ;; esac
+      printf '      %-44s rc=%s dump=%s byte\n' "$desc" "${rc:-?}" "${size:-0}"
+      [ "${size:-0}" -gt 0 ] 2>/dev/null
+    }
+    if dump_sotto "a) sandbox PROPOSTA (strict+RWP)" "${props[@]}"; then
+      echo "         ✅ il dump ha CONTENUTO sotto la stretta proposta: il §③ regge"
+    else
+      echo "         🔴 dump VUOTO sotto la sandbox proposta ⇒ la stretta rompe il backup, in silenzio"
+      falliti=$((falliti+1))
+    fi
+    if dump_sotto "b) CONTROPROVA PrivateTmp=yes" --property=PrivateTmp=yes; then
+      echo "         🔴 controprova FALLITA: sotto PrivateTmp il dump è arrivato PIENO —"
+      echo "            la ragione scritta nella unit («si romperebbe in silenzio») è da riverificare"
+      falliti=$((falliti+1))
+    else
+      echo "         ✅ sotto PrivateTmp il dump esce vuoto (e docker non si lamenta):"
+      echo "            il caso silenzioso ESISTE — la riga «NIENTE PrivateTmp» della unit è MISURATA"
+    fi
+  fi
 fi
 
 # ─── verdetto ───
@@ -166,23 +224,23 @@ fi
 #   si è visto; mapparlo su 1 sarebbe un falso rosso su un meccanismo che regge.
 #   ⇒ va su **2**, che nel contratto significa esattamente «non ho potuto guardare
 #     tutto», ed è l'unico esito che non mente in nessuna delle due direzioni.
-# ⚠️ Conseguenza dichiarata, perché è un costo vero: **finché il caso silenzioso non è
-#   misurabile, questa prova non darà MAI 0.** Non è un difetto della cura — è che il
-#   §③ richiede un backup reale sul server, e nessuno l'ha ancora fatto. Il giorno che
-#   qualcuno lo esegue e guarda la DIMENSIONE del dump, questo ramo diventa un PASS
-#   pieno. *Una prova che non può passare finché manca una misura è il modo giusto di
-#   ricordare che la misura manca: un verde se la dimentica.*
+# ⚠️ Il costo che questa scelta aveva («finché il caso silenzioso non è misurabile,
+#   questa prova non darà MAI 0») si è ESTINTO il 27/08/2026: il §③ ora ESEGUE la
+#   misura dove docker e un volume reale ci sono, e lì la prova può dare 0. Dove
+#   mancano (un PC senza lo stack), il ramo qui sotto continua a dire 2 — «misurato
+#   in parte» — che resta l'unico esito che non mente in nessuna delle due direzioni.
 if [ "${non_misurato:-0}" -eq 1 ]; then
   echo "⚪ PASS PARZIALE — non è un verde, ed è un dato preciso su cosa è stato visto:"
   echo "   ✅ MISURATO   la sandbox consente i quattro path necessari (compreso /tmp)"
   echo "                 e nega /etc e /usr/bin: il MECCANISMO regge sul kernel."
-  echo "   ⚪ NON VISTO  il caso silenzioso del §③: sotto PrivateTmp il dump del backup"
-  echo "                 può uscire VUOTO con rc=0, e qui non è stato provato."
-  echo "   ⇒ per completarla serve un backup REALE sul server e la DIMENSIONE del dump."
-  echo "      Finché manca, questa prova esce 2 («non eseguibile per intero»), non 0."
+  echo "   ⚪ NON VISTO  il caso silenzioso del §③: qui mancano docker o un volume"
+  echo "                 vps1777_* reale, e senza un dump vero la dimensione non si misura."
+  echo "   ⇒ su una macchina con lo stack (la VPS), il §③ misura da sé e la prova può dare 0."
   exit 2
 fi
-echo "✅ PASS — la sandbox proposta consente i quattro path necessari (compreso /tmp) e nega /etc e /usr/bin."
+echo "✅ PASS — la sandbox proposta consente i quattro path necessari (compreso /tmp), nega /etc e /usr/bin,"
+echo "   e il §③ è MISURATO: il dump reale ha contenuto sotto la stretta proposta, e la controprova"
+echo "   PrivateTmp produce il vuoto-con-rc-0 che la unit dichiara."
 echo "   ⚠️  NON significa che l'update reale non scriva altrove: questa prova misura il MECCANISMO."
 echo "   Il passo che resta è un update vero sotto tracciamento delle scritture, e lo decide chi ha il server."
 exit 0

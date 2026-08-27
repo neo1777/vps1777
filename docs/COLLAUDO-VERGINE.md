@@ -187,8 +187,28 @@ ragione per cui il campione esisteva:
 **Il golden-set che la Fase 2 aspettava ora esiste**: 46 voci (uuid +
 etichetta macchina + etichetta owner + dubbi dichiarati), SENZA testi — i
 contenuti restano nei DB privati. Depositato in `data/` del volume archive
-sulla macchina e nel backup locale (`golden-voice-2026-08-27.json`). La
-taratura di `classify_voice` su quel gold (character in testa, poi il ramo
-pasted_ai) è il primo lavoro post-collaudo.
+sulla macchina e nel backup locale (`golden-voice-2026-08-27.json`).
 
-**Resta**: la taratura di cui sopra e il completamento della prova-6 §③.
+**La taratura sul gold: FATTA (27/08/2026, sera stessa).** Accordo sui 37
+confidenti da 20/37 a **30/37**, falsi cari (own→pasted/character) da 4 a
+**0**. Le due cure, entrambe dettate dalla misura e non dall'opinione:
+- `character` ora vuole DUE segnali — il project GDR **e** la recitazione nel
+  testo (azione fra asterischi singoli): il nome del progetto dice il dominio,
+  non che quel messaggio è recitato. own passa a 21/21.
+- `pasted_ai` ha imparato l'italiano: tick di automazione (`[… TICK …]`) e
+  prompt-template («Sei un…», «Ruolo:», heading+elenchi+grassetti — anche con
+  le newline collassate in doppi spazi, come fa uno degli ingest). 6/7 sui
+  casi veri del gold; il settimo è un testo emotivo senza segnali formali,
+  falso negativo accettabile per principio.
+- `mixed` ↔ `pasted_transcript` restano com'erano: fuori dall'ordine di
+  taratura, e ogni ritocco lì sposta equilibri misurati.
+
+Il gold è ora il **test di accettazione**: `tools/tests/test_voice_golden.py`
+(skippa dove gold e DB non ci sono — in CI — e si arma con
+`VPS1777_GOLDEN_VOICE` + `VPS1777_GOLDEN_DB_DIR`). Impatto misurato a secco
+su due DB reali: 432 righe su 13.797 e 1.339 su 61.100 cambiano classe, in
+massima parte i CRON TICK ripetuti (1.201) e i prompt-template di ruolo —
+campionati a mano, nessuna voce spontanea fra loro. Il retag degli archivi
+vivi arriva con la release che porta questa taratura in produzione.
+
+**Resta**: il completamento della prova-6 §③.
