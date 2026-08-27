@@ -80,6 +80,19 @@ for f in "$REPO"/systemd/*.service; do
     echo "   ⏭  $unit — non caricata su questo host: NON controllata (non è un PASS)"
     saltate=$((saltate+1)); continue
   fi
+  # 🔴 Una TEMPLATE (nome@.service) passa la guardia qui sopra — `systemctl cat`
+  # legge il FILE, e una template il file ce l'ha — ma `systemctl show` interroga
+  # il RUNTIME, che una template nuda non ha: risponde un errore, il 2>/dev/null
+  # lo mangiava, e il <vuoto> diventava «IL DEMONE APPLICA <vuoto>» → 7 falsi
+  # rossi su un sistema SANO (misurato al collaudo vergine, 27/08/2026, su
+  # avvisa-fallimento@). La domanda giusta si pone a un'ISTANZA: systemd la
+  # carica dalla template anche senza avviarla, e risponde le proprietà vere
+  # (controprova sul vivo: tutte e 7 «yes»). Due comandi, due oggetti: la sonda
+  # chiedeva al file e giudicava il demone.
+  case "$unit" in
+    *@.service) unit_query="${unit%@.service}@prova8.service" ;;
+    *)          unit_query="$unit" ;;
+  esac
   unit_viste=$((unit_viste+1))
   echo "   ── $unit"
   for d in $DIRETTIVE; do
@@ -88,7 +101,7 @@ for f in "$REPO"/systemd/*.service; do
     # leggere una spiegazione come una promessa.
     dichiarato=$(grep -E "^[[:space:]]*${d}=" "$f" | tail -1 | cut -d= -f2- | tr -d '[:space:]')
     [ -n "$dichiarato" ] || continue
-    effettivo=$(systemctl show "$unit" -p "$d" --value 2>/dev/null | tr -d '[:space:]')
+    effettivo=$(systemctl show "$unit_query" -p "$d" --value 2>/dev/null | tr -d '[:space:]')
     controllate=$((controllate+1))
     if [ "$(norm "$dichiarato")" = "$(norm "$effettivo")" ]; then
       printf "      ✅ %-26s file dice %-6s · il demone applica %s\n" "$d" "$dichiarato" "$effettivo"
@@ -109,8 +122,14 @@ for f in "$REPO"/systemd/*.service; do
   [ -f "$f" ] || continue
   unit="$(basename "$f")"
   systemctl cat "$unit" >/dev/null 2>&1 || continue
+  # stesso rimedio del loop principale: a una template si chiede via istanza,
+  # o il `${v:-no}` qui sotto scambierebbe l'errore soppresso per un «no».
+  case "$unit" in
+    *@.service) unit_query="${unit%@.service}@prova8.service" ;;
+    *)          unit_query="$unit" ;;
+  esac
   if ! grep -qE "^[[:space:]]*ProtectSystem=" "$f"; then
-    v=$(systemctl show "$unit" -p ProtectSystem --value 2>/dev/null | tr -d '[:space:]')
+    v=$(systemctl show "$unit_query" -p ProtectSystem --value 2>/dev/null | tr -d '[:space:]')
     if [ "$(norm "${v:-no}")" = "no" ]; then
       echo "      ✅ $unit non dichiara ProtectSystem e il demone risponde «${v:-no}»: sa dire di no"
       cp_ok=1; break
