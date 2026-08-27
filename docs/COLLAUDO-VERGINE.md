@@ -166,5 +166,29 @@ connector doppiamente morti, recipient age da rimettere: #213).
 0 aperte. `H50` e `H54` chiuse con misure in produzione; `H56` accettata con
 decisione datata.
 
-**Resta programmato**: il campione cieco del voice-tagging (fase 4, §sopra) e
-il completamento della prova-6 §③.
+**Fase 4 — il campione cieco del voice-tagging: FATTO (27/08/2026, sera).**
+46 messaggi `speaker=human` (25 random + 21 stratificati sulle classi rare),
+giudice l'owner in cieco, interattivo. Prerequisito scoperto strada facendo: i
+DB drop-in erano di luglio, PRIMA del voice-tagging — `migrate_v2_to_v3` sui 10
+DB (365.763 messaggi classificati, il grande in 118s). L'esito, che è la
+ragione per cui il campione esisteva:
+- **`own` regge: 17/20** — ed è il 93% dell'archivio: l'accuratezza pesata
+  reale è alta;
+- **`character` è rotta: 0/5 (+3 dubbi), a confidenza 0.85** — frasi normali
+  dell'owner classificate «personaggio»: regola sistematicamente troppo larga;
+- **`pasted_ai` non è MAI emessa** (0 su tutto l'archivio human) mentre il
+  giudice l'ha usata 8 volte: il testo-AI incollato finisce in
+  `pasted_transcript`/`mixed`/`own` — la distinzione che più serviva manca;
+- `mixed` ↔ `pasted_transcript` si confondono fra loro (1/5 e 2/7): meno grave,
+  l'informazione «c'è dell'incollato» resta giusta.
+- accordo globale sui 37 giudizi confidenti: 20/37 (54%) — il numero grezzo è
+  basso APPOSTA: il campione sovracampiona le classi dove l'euristica rischia.
+
+**Il golden-set che la Fase 2 aspettava ora esiste**: 46 voci (uuid +
+etichetta macchina + etichetta owner + dubbi dichiarati), SENZA testi — i
+contenuti restano nei DB privati. Depositato in `data/` del volume archive
+sulla macchina e nel backup locale (`golden-voice-2026-08-27.json`). La
+taratura di `classify_voice` su quel gold (character in testa, poi il ramo
+pasted_ai) è il primo lavoro post-collaudo.
+
+**Resta**: la taratura di cui sopra e il completamento della prova-6 §③.
