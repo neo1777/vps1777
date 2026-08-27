@@ -155,9 +155,21 @@ elif ! $SUDO docker ps >/dev/null 2>&1; then
   echo "      ⚪ docker non disponibile qui ⇒ il dump reale non si può misurare su questa macchina."
   non_misurato=1
 else
-  VOL="$($SUDO docker volume ls --format '{{.Name}}' | grep '^vps1777_' | head -1)"
+  # 🪤 Il glob `vps1777_*` su `docker volume ls` NON basta, e l'ha detto la CI:
+  #   il ciclo backup→restore dei test bash crea volumi `vps1777_provaciclo-*`
+  #   sullo stesso runner, e la prima versione di questo ramo ci ha misurato
+  #   sopra — un PASS genuino nel meccanismo ma SENZA il sistema sotto, cioè
+  #   esattamente il falso verde che la fase-b esiste per beccare (contract
+  #   rosso del 27/08 su rc=0). Il sistema «in esercizio» lo dichiara un
+  #   CONTAINER ATTIVO, non un volume: si misura solo su un volume montato in
+  #   un container in esecuzione (stessa via di H54: i Mounts di `inspect`).
+  VOL="$(for c in $($SUDO docker ps -q); do
+           $SUDO docker inspect \
+             --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' "$c"
+         done 2>/dev/null | grep '^vps1777_' | sort -u | head -1)"
   if [ -z "$VOL" ]; then
-    echo "      ⚪ nessun volume vps1777_* sull'host ⇒ niente dati reali da dumpare qui."
+    echo "      ⚪ nessun volume vps1777_* montato in un container IN ESECUZIONE ⇒ il"
+    echo "         prodotto non è in esercizio qui: niente dati reali da dumpare."
     non_misurato=1
   else
     echo "      volume reale sotto dump (ro): $VOL"
