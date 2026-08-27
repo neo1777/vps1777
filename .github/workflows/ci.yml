@@ -484,7 +484,9 @@ jobs:
       #   setup.sh, in una PR sua: tenerli separati serve a non far dire alla CI verde che
       #   l'installer non ha più quel requisito.
       - name: Test CLI vps1777 (stdlib-only)
-        run: uvx --with bcrypt pytest tools/tests/ -v
+        # cryptography: per il fallback age dell'installer (test_installer_age) —
+        # in CI age-keygen non c'è, quindi qui gira proprio il ramo Python.
+        run: uvx --with bcrypt --with cryptography pytest tools/tests/ -v
       # `pytest tools/tests/` NON vede i file .sh: la suite qui sopra sarebbe
       # rimasta verde con il test della ritenzione fermo sul disco, che è
       # letteralmente il difetto raccontato nel commento qui sopra, ripetuto
