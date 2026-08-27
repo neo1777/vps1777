@@ -120,3 +120,51 @@ check_term("C++")   →  collapsed: false     (sui DB vecchi era true)
 
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — e per i fallimenti delle unit di update il
 journal è la fonte: `journalctl -u vps1777-auto-update -n 50`.
+
+---
+
+## Esito del primo collaudo (22-27/08/2026) — COMPLETO, con numeri
+
+**La macchina**: VPS formattata due volte (Debian 13 + volumi LUKS provato e
+scartato per instabilità → Debian 12, dischi in chiaro: decisione H56, rischio
+accettato dall'owner il 23/08). Installazione con l'**installer grafico** dallo
+zip di `main`, STEP 8/8 compreso il reboot test: v0.43.1 → poi **0.43.2 e
+0.43.3 via canale update** (backup age + firma cosign a ogni salto).
+
+**Le sei verifiche mirate: 6/6 verdi.** fail2ban attivo col backend journal
+(643 ban reali al 27/08) · 4 unit enabled coi timer schedulati · canale update
+esercitato due volte sul vivo · CLI coerente (corrente == latest) · reboot
+survival (STEP 8) · connector claude.ai end-to-end col bottone vero.
+
+**Le tre fotografie**: pre-format 5✅·1🔴·3⚪ (22/08, v0.40.x) · macchina-nuda
+0/0/9 (23/08, primo format; il secondo format non ha la sua foto — dichiarato) ·
+**post-install 7✅·0🔴·2⚪** (27/08, v0.43.2). Il confronto che è il verdetto:
+la **prova-8 rossa sul vivo è verde sulla vergine**. La **prova-9** (fail-closed
++ rollback, col consenso dell'owner e il servizio giù per la durata del
+rollback) è passata **alla prima esecuzione della sua storia**: gate sabotato →
+rifiuto → rollback → versione di prima, 5 container su. La prova-6 resta
+parziale by design (§③: aspetta la misura del dump su un backup reale).
+
+**L'archivio**: profilo NotebookLM ripristinato da `/admin/nlm`; 10 DB
+ricaricati (1 upload dal pannello + 9 tar-over-ssh, procedura del backup) e
+**quadratura 10/10 per sha256** contro il MANIFEST del 22/08 — 365.763
+messaggi · 936.749.829 caratteri, identici al byte. I DB drop-in conservano il
+tokenizer vecchio (canary `check_term("C++") → collapsed: true`): il re-ingest
+fresco, quando si farà, va su nomi diversi.
+
+**Il raccolto — otto difetti veri trovati e curati DAL collaudo stesso**, tutti
+mai visti prima perché i rami che li contenevano non erano mai stati attraversati
+da un azzeramento vero: #208 (secret in una via su tre) · #209 (installer e
+porta occupata) · `H69` (consent OAuth muta su Chrome, `form-action`) · `H70`
+(la card update oscurata dal refresh fallito) · #214 (chiave age assente
+dall'installer grafico) · prova-8 (falso rosso sulle unit template) · prova-9
+(path di state.json sbagliato dalla nascita) · #218 (tabella archive che sfonda
+il riquadro). Più gli intoppi d'ambiente documentati (cache DNS negativa,
+connector doppiamente morti, recipient age da rimettere: #213).
+
+**Il registro a fine collaudo**: 70 voci — 59 chiuse, 9 parziali, 2 accettate,
+0 aperte. `H50` e `H54` chiuse con misure in produzione; `H56` accettata con
+decisione datata.
+
+**Resta programmato**: il campione cieco del voice-tagging (fase 4, §sopra) e
+il completamento della prova-6 §③.
