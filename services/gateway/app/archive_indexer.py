@@ -607,26 +607,56 @@ def popola_speaker(conn: sqlite3.Connection) -> int:
 #   ed è provata, ma `voice` resta '' finché la Fase 3 non decide DOVE chiamarla.
 #   Un campo popolato sembra sempre popolato apposta.
 
-# ⚠️ SOGLIE **PROVVISORIE — da tarare sul golden set** (fissate 02/08/2026).
-#   Sono PROPOSTE prese dalla spec, NON valori studiati: nessuna è stata misurata
-#   su un insieme di casi etichettati a mano. Chi le legge fra un mese deve saperlo
-#   dal codice, non da un messaggio.
+# ✅ SOGLIE TARATE SUL GOLDEN SET (27/08/2026 — campione cieco da 46 messaggi,
+#   37 giudizi confidenti dell'owner; il gold vive FUORI dal repo, vedi ATTESI in
+#   tools/doc-riferimenti.py). Prima della taratura erano provvisorie (02/08) e la
+#   misura le ha giudicate: accordo 20/37, con DUE difetti strutturali:
+#   · `character` dal solo nome progetto: 0/8 — il nome dice il DOMINIO («GDR»),
+#     non che QUESTO messaggio è recitato: dentro quel progetto l'owner apre PR e
+#     parla in voce propria. Quattro falsi CARI (own→character), i più vietati.
+#   · `pasted_ai` mai emessa su 8 casi veri — la regola assumeva AI=inglese, ma
+#     le AI di questo corpus scrivono ITALIANO: i casi veri sono prompt-template
+#     («Sei uno scrittore…», «Ruolo:», «# Steps») e tick di automazioni.
+#   Dopo la taratura (stesso gold): accordo 30/37, falsi cari 0. Il gold è ora il
+#   test di accettazione: tools/tests/test_voice_golden.py (skippa dove il gold
+#   non c'è — contiene giudizi su messaggi privati).
 # 🔑 PERCHÉ LA DATA E LA PAROLA STANNO QUI e non sul bus (richiesta di abdd732a,
 #   accolta): una decisione che vive solo in un messaggio **decade in silenzio** —
-#   misurato ieri su «findings.yml NON entra nel corpus», che era una misura vera e
-#   due round dopo era dentro senza che nessuno l'avesse revocata.
-# 📌 Si tarano con un campione etichettato a mano; finché non esiste, un valore qui
-#   è un'ipotesi che funziona, non una che è stata scelta.
-TS_VIDEO_MIN = 2          # PROVVISORIA · timestamp «(m:ss)» ravvicinati per sospettare un transcript
-EN_BLOCCO_MIN = 25        # PROVVISORIA · parole di un blocco inglese perché conti come blocco
-EN_RATIO_MIN = 0.18       # PROVVISORIA · quota di stopword inglesi sopra cui il blocco è EN
-PROSA_PROPRIA_MAX = 0.30  # PROVVISORIA · sotto questa quota di prosa propria: cornice, non testo
-QUOTE_FENCE_MIN = 0.50    # PROVVISORIA · quota citata sopra cui si alza il flag `quote_fence`
+#   misurato allora su «findings.yml NON entra nel corpus», che era una misura vera
+#   e due round dopo era dentro senza che nessuno l'avesse revocata.
+TS_VIDEO_MIN = 2          # timestamp «(m:ss)» ravvicinati per sospettare un transcript
+EN_BLOCCO_MIN = 25        # parole di un blocco inglese perché conti come blocco
+EN_RATIO_MIN = 0.18       # quota di stopword inglesi sopra cui il blocco è EN
+PROSA_PROPRIA_MAX = 0.30  # sotto questa quota di prosa propria: cornice, non testo
+QUOTE_FENCE_MIN = 0.50    # quota citata sopra cui si alza il flag `quote_fence`
+TEMPLATE_SEGNALI_MIN = 3  # segnali strutturali perché un testo SENZA incipit di ruolo conti da template
 
 _RE_TS = re.compile(r"[(\[]?\b\d{1,2}:\d{2}(?::\d{2})?\b[)\]]?")
 _RE_TRAP = re.compile(r"transcript|analyz|analisi|trascriz|pulizia|youtube", re.I)
 _RE_CHARACTER = re.compile(r"gdr|roleplay|agora|simposio|partita", re.I)
 _RE_FENCE = re.compile(r"^\s*(>|```)", re.M)
+# Recitazione NEL TESTO: azione RP fra asterischi SINGOLI (*si siede al tavolo*).
+# Il lookahead/behind esclude i **grassetti**, che sono markdown normale.
+_RE_RECITA = re.compile(r"(?<!\*)\*(?!\*)[^*\n]{2,60}(?<!\*)\*(?!\*)")
+# Tick di automazione: il testo APRE con un header quadro che nomina TICK
+# («[CRON TICK Linux — …]»). È un template macchina re-iniettato, mai voce propria.
+_RE_TICK = re.compile(r"^\[[^\]\n]{0,80}TICK[^\]\n]{0,80}\]")
+# Prompt-template in ITALIANO: incipit di assegnazione di ruolo, con tolleranza per
+# un prefisso quadro dell'ingest («[human] Role: Sei un esperto…»).
+_RE_RUOLO = re.compile(
+    r"^(?:\[[^\]\n]{1,40}\]\s*)?(?:Sei un[oa']?\s|Agisci come\s|(?:Role|Ruolo)\s*:)")
+# Segnali strutturali da template (heading, elenco numerato, grassetti, etichette
+# di sezione): ne servono TEMPLATE_SEGNALI_MIN distinti se manca l'incipit di ruolo.
+# ⚠️ L'ancora non è solo `^`: un ingest di questo corpus COLLASSA le newline in
+#   doppi spazi (misurato sul golden set: 35k char, zero \n) — lì `re.M` non vede
+#   mai un inizio riga. Il confine accettato è «inizio riga O doppio spazio».
+_A = r"(?:^|(?<=\s\s))"  # confine di riga sopravvissuto al collasso delle newline
+_RE_T_HEAD = re.compile(_A + r"#{1,4}\s+\S", re.M)
+_RE_T_NUM = re.compile(_A + r"\d+\.\s+\S", re.M)
+_RE_T_BOLD = re.compile(r"\*\*[^*\n]+\*\*")
+_RE_T_LABEL = re.compile(
+    _A + r"(?:Role|Ruolo|Capacity|Compito|Requirement|Task|Obiettivo|Contesto|Output|Formato|Steps?)\s*:",
+    re.M | re.I)
 _EN_STOP = {"the", "of", "and", "to", "in", "is", "it", "that", "for", "with",
             "as", "on", "this", "be", "are", "by", "from", "which", "you", "not",
             "have", "has", "was", "were", "can", "will", "would", "should"}
@@ -644,10 +674,50 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
     if not testo.strip():
         return ("unknown", 0.0, 0.0, [])
 
-    # ① character — il PROGETTO lo dichiara: è la sola regola che non guarda il testo,
-    #    e per questo è la più affidabile delle sette.
+    # ① character — il project GDR da solo NON basta più: sul golden set (27/08) la
+    #    regola «il PROGETTO lo dichiara» ha fatto 0/8, con 4 own veri marcati
+    #    character — i falsi più CARI che il principio vieta. Il nome del progetto
+    #    dice il DOMINIO, non che QUESTO messaggio è recitato: dentro «GDR» l'owner
+    #    apre PR e dà istruzioni in voce propria. Ora servono DUE segnali: il
+    #    progetto E la recitazione nel testo (azione RP fra asterischi singoli).
+    #    Il dialogo teatrale «Nome: battuta» è stato provato e SCARTATO: i log
+    #    incollati («Error:», «Loaded:») hanno la stessa forma. Falso negativo
+    #    accettabile, come da principio.
     if project and _RE_CHARACTER.search(project):
-        return ("character", 0.0, 0.85, ["project_gdr"])
+        flags.append("project_gdr")
+        if _RE_RECITA.search(testo):
+            return ("character", 0.0, 0.7, flags + ["recita"])
+        # niente recita nel testo → si CONTINUA con le altre regole: il messaggio
+        # è quasi sempre la voce propria di chi lavora SUL progetto.
+
+    # ①b pasted_ai — tick di automazione: un header «[… TICK …]» in apertura è un
+    #    template macchina re-iniettato da un cron, mai la voce di chi scrive.
+    #    (golden set: 2 casi veri, entrambi con questo header, entrambi mancati
+    #    dalla regola vecchia che assumeva AI=inglese.)
+    if _RE_TICK.match(testo):
+        return ("pasted_ai", _quota_citata(testo), 0.8, flags + ["cron_tick"])
+
+    # ①c pasted_ai — prompt-template in ITALIANO. La regola ③ (blocco inglese)
+    #    assumeva AI=inglese, ma le AI di questo corpus scrivono italiano: sul
+    #    golden set `pasted_ai` non è MAI stata emessa contro 8 casi veri, che
+    #    sono prompt-template («Sei uno scrittore…», «Ruolo:», «# Steps»).
+    #    Segnali richiesti, in alternativa: l'incipit di assegnazione di ruolo,
+    #    OPPURE ≥ TEMPLATE_SEGNALI_MIN segnali strutturali distinti (heading +
+    #    elenco numerato + grassetti/etichette). Solo su speaker human/unknown:
+    #    per un assistant heading e grassetti sono la prosa normale, e marcarla
+    #    pasted_ai sarebbe il falso caro. Viene PRIMA della ② perché i template
+    #    veri portano spesso una trascrizione ALLEGATA coi suoi timestamp: è il
+    #    template a qualificare il messaggio, non l'allegato.
+    if speaker_da_sender(sender) != "assistant":
+        incipit = bool(_RE_RUOLO.match(testo))
+        struttura = sum((bool(_RE_T_HEAD.search(testo)),
+                         len(_RE_T_NUM.findall(testo)) >= 3,
+                         len(_RE_T_BOLD.findall(testo)) >= 2,
+                         len(_RE_T_LABEL.findall(testo)) >= 2))
+        if incipit or struttura >= TEMPLATE_SEGNALI_MIN:
+            flags.append("prompt_template")
+            conf = 0.7 if incipit else 0.6
+            return ("pasted_ai", _quota_citata(testo), conf, flags)
 
     # ② pasted_transcript — timestamp ravvicinati, o un titolo-trappola nel project.
     #    ⚠️ Il timestamp da solo NON basta: «alle 14:30» è un orario. Serve la

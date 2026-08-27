@@ -1361,12 +1361,66 @@ def test_classify_transcript_serve_piu_di_un_segnale():
     assert v3[2] < v[2], "ma con UN segnale solo la CONFIDENZA resta sotto quella a due"
 
 
-def test_classify_character_dal_progetto_e_la_regola_piu_solida():
-    """L'unica delle sette che non guarda il testo: il project lo DICHIARA."""
-    v = archive_indexer.classify_voice("Il mago avanza di due caselle.",
+def test_classify_character_vuole_il_progetto_E_la_recita():
+    """Il project da solo NON basta piu' — e lo dice una MISURA, non un'opinione.
+
+    La regola originale («il project lo dichiara, la piu' affidabile delle
+    sette») e' stata giudicata dal golden set del 27/08: 0/8, con 4 own veri
+    marcati character — i falsi CARI che il principio vieta. Il nome del
+    progetto dice il DOMINIO, non che questo messaggio e' recitato: dentro
+    «GDR» l'owner apre PR e da' istruzioni in voce propria.
+    """
+    # progetto GDR + recita nel testo (azione fra asterischi) → character
+    v = archive_indexer.classify_voice("*si siede al tavolo* Il mago avanza di due caselle.",
                                        sender="user", project="GDR1777 — il caso graphify")
     assert v[0] == "character"
-    assert v[2] >= 0.8, "e' la regola piu' affidabile, la confidenza lo dice"
+    assert "project_gdr" in v[3] and "recita" in v[3], "servono ENTRAMBI i segnali"
+    # progetto GDR ma voce propria (il caso 6/7 del gold): own, non character
+    v2 = archive_indexer.classify_voice("Perfetto, se abbiamo tutto procediamo con issue o pr",
+                                        sender="user", project="GDR1777 — il caso graphify")
+    assert v2[0] == "own", f"chi lavora SUL progetto parla in voce propria (era {v2[0]})"
+    assert "project_gdr" in v2[3], "ma la bandiera resta: il segnale c'e', non basta"
+    # il **grassetto** markdown non e' una recita
+    v3 = archive_indexer.classify_voice("questo e' **importante** da capire",
+                                        sender="user", project="GDR1777")
+    assert v3[0] == "own", "gli asterischi doppi sono markdown, non un'azione RP"
+
+
+def test_classify_pasted_ai_parla_anche_italiano():
+    """La regola vecchia assumeva AI=inglese: sul gold `pasted_ai` MAI emessa
+    contro 8 casi veri, tutti in italiano. I segnali veri del corpus sono tre.
+    """
+    # ① il tick di automazione: header [… TICK …] in apertura
+    v = archive_indexer.classify_voice(
+        "[CRON TICK Linux — canale su NotebookLM | interval 10min]\n\n"
+        "Sei in tick automatico headless, nessuna interazione possibile.",
+        sender="user", project="dashboard")
+    assert v[0] == "pasted_ai" and "cron_tick" in v[3]
+    # ② l'incipit di assegnazione di ruolo, anche dietro il prefisso dell'ingest
+    v2 = archive_indexer.classify_voice(
+        "[human] Role: Sei un esperto di NLP e ottimizzazione testuale.",
+        sender="human", project="chat")
+    assert v2[0] == "pasted_ai" and "prompt_template" in v2[3]
+    # ③ struttura da template SENZA incipit — e con le newline COLLASSATE in
+    #   doppi spazi, come fa un ingest di questo corpus (misurato: 35k char, 0 \n)
+    v3 = archive_indexer.classify_voice(
+        "Trasforma la trascrizione seguendo questi passi.  # Steps  "
+        "1. **Analisi**: individua i temi.  2. **Espansione**: arricchisci.  "
+        "3. **Verifica**: rileggi tutto.",
+        sender="human", project="chat")
+    assert v3[0] == "pasted_ai", f"heading+numerato+grassetti = template (era {v3[0]})"
+    # ④ il confine del falso caro: la STESSA struttura da un assistant e' la sua
+    #   prosa normale, non un incollato
+    v4 = archive_indexer.classify_voice(
+        "Ecco il piano.  # Steps  1. **Analisi**: i temi.  2. **Espansione**: "
+        "arricchisci.  3. **Verifica**: rileggi.",
+        sender="assistant", project="chat")
+    assert v4[0] == "own", f"per un assistant heading e grassetti sono prosa (era {v4[0]})"
+    # ⑤ e una frase propria che NOMINA un ruolo non e' un template
+    v5 = archive_indexer.classify_voice(
+        "secondo me il ruolo: quello del revisore, non fa per me",
+        sender="human", project="chat")
+    assert v5[0] == "own", "un'etichetta sola in mezzo alla prosa non basta"
 
 
 def test_classify_blocco_inglese_da_umano_e_MIXED_non_pasted_ai():
