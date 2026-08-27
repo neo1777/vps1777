@@ -995,7 +995,9 @@ async def update_check(request: Request) -> Response:
                   "(impostazione predefinita) è atteso, non è un guasto: l'avviso "
                   "di aggiornamento continua ad aggiornarsi da solo — lo scrive il "
                   "controllo giornaliero sull'host. Dettaglio: ")
-        prev.update(error=spiega + str(exc)[:200], checked_at=now)
+        # NON error/checked_at: il verdetto del check host resta suo (H70) —
+        # la decisione e il perché stanno in admin_core.stato_dopo_refresh_fallito.
+        prev = admin_core.stato_dopo_refresh_fallito(prev, spiega, str(exc)[:200], now)
         sf.write_text(json.dumps(prev, indent=2) + "\n")
         audit({"event": "admin_update_check_err", "by": email, "error": str(exc)[:200]})
         return RedirectResponse(

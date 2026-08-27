@@ -260,6 +260,31 @@ def test_verdetto_errore_vince_su_tutto():
                                              now=now, piu_recente=_vg)[0] == "errore-check"
 
 
+def test_refresh_fallito_non_inquina_il_verdetto_del_check_host():
+    """Il caso del collaudo vergine (27/08, H70): check host riuscito
+    (latest=0.43.2, bottone update visibile), poi un Ricontrolla dal gateway
+    senza egress fallisce — e il bottone spariva, perché il ramo d'errore
+    scriveva `error` + `checked_at=now` sopra il verdetto buono."""
+    prev = {"current": "0.43.1", "latest": "0.43.2",
+            "checked_at": "2026-08-27T11:23:12Z", "error": None}
+    out = admin_core.stato_dopo_refresh_fallito(
+        prev, "Refresh non disponibile: ", "errno -3", "2026-08-27T11:30:00Z")
+    # il verdetto del check host resta INTATTO, tutti e tre i campi:
+    assert out["error"] is None
+    assert out["checked_at"] == "2026-08-27T11:23:12Z"   # nessun check è avvenuto
+    assert out["latest"] == "0.43.2"
+    # il fallimento del refresh c'è, nei SUOI campi:
+    assert out["refresh_error"].startswith("Refresh non disponibile")
+    assert out["refresh_error_at"] == "2026-08-27T11:30:00Z"
+    # e non muta l'input (admin.py riscrive il file dal risultato):
+    assert "refresh_error" not in prev
+    # la card, dopo: mostra ANCORA l'aggiornamento — il sintomo era questo.
+    classe, _ = admin_core.classe_verdetto_update(
+        out["current"], out["latest"], out["checked_at"], out["error"],
+        piu_recente=_vg)
+    assert classe == "aggiornamento"
+
+
 def test_verdetto_latest_piu_vecchia_non_e_un_downgrade():
     # cache stantia di GitHub: latest < current. Non è «aggiornamento disponibile».
     now, checked = _adesso(1)

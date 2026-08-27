@@ -119,8 +119,14 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # bloccava in Chrome il redirect post-submit della consent OAuth (H8) — il bottone
 # «Autorizza» non faceva nulla. Primo esercizio end-to-end di quel ramo dal 14/07:
 # i client claude.ai preesistenti giravano su token emessi PRIMA della consent.
-EXPECTED_TOTAL = 69
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 39, "low": 18}
+# + 1 (H70 low, 27/08) = 70. Sorella di H69, stesso collaudo, un'ora dopo: il
+# «Ricontrolla adesso» fallito (atteso: il gateway è senza egress da H50) scriveva
+# `error`+`checked_at=now` sopra il verdetto del check host e la card nascondeva
+# un «0.43.1 → 0.43.2» fresco e valido. Il ramo nasce in v0.39.1 quando il gateway
+# aveva Internet; H50 ha reso il fallimento sistematico e la scrittura è rimasta:
+# la cura di un rilievo cambia il contratto di un ramo lontano che nessuno rilegge.
+EXPECTED_TOTAL = 70
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 39, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

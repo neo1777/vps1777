@@ -204,6 +204,29 @@ CHECK_TIMER_MAX_H = 28          # daily (24h) + RandomizedDelaySec (4h)
 CHECK_STALE_H = 30
 
 
+def stato_dopo_refresh_fallito(prev: dict, spiega: str, dettaglio: str,
+                               now_iso: str) -> dict:
+    """Cosa scrive il gateway in update_status.json quando il SUO refresh fallisce.
+
+    Il refresh dal gateway è best-effort e dal fix H50 fallisce PER PROGETTO
+    (niente egress): quel fallimento non è un check avvenuto. La prima versione
+    scriveva `error` + `checked_at=now` nello stesso file del check host — e
+    siccome `classe_verdetto_update` fa vincere errore-check su tutto, un
+    «aggiornamento disponibile» fresco e valido spariva dalla card al primo
+    Ricontrolla (misurato al collaudo vergine, 27/08: il bottone update c'era,
+    un refresh dopo non c'era più — H70). Doppio danno: ri-datare `checked_at`
+    su un check MAI avvenuto azzerava anche l'anti-stantio (timer-fermo).
+
+    Qui: campi separati (`refresh_error`/`refresh_error_at`), il verdetto del
+    check host — `error`, `checked_at`, `latest` — resta suo. Sta in admin_core
+    per la stessa ragione di classe_verdetto_update: in admin.py nessun test
+    stdlib-only la guarderebbe."""
+    out = dict(prev)
+    out["refresh_error"] = spiega + dettaglio
+    out["refresh_error_at"] = now_iso
+    return out
+
+
 def classe_verdetto_update(current: str, latest: str | None, checked_at: str,
                            error: str | None, now: float | None = None,
                            piu_recente=None) -> tuple[str, int | None]:
