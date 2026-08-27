@@ -2,6 +2,26 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.2] — 2026-08-27
+
+**Il primo fix nato dal collaudo su macchina vergine che serviva una release per
+arrivare in produzione** (i primi due, #208 e #209, vivevano nei sorgenti che si
+scaricano da `main`; questo vive nell'immagine del gateway).
+
+### 🐛 Fix
+
+- **La consent OAuth non blocca più il redirect post-«Autorizza» su Chrome** (#211,
+  `H69`). `form-action 'self'` — la CSP di `_layout`, giusta per l'admin — viene
+  applicata da Chrome **anche al 302 che segue il submit**: il POST `/authorize`
+  rispondeva col redirect verso il client e Chrome lo uccideva in silenzio; il
+  bottone «non faceva nulla», unico segno in console. La consent page ora allarga
+  `form-action` all'**origin del `redirect_uri` già validato** contro i client
+  registrati — mai un jolly, solo su quella pagina. Il ramo era in produzione dalla
+  `0.33.0` senza che nessun client l'avesse mai attraversato: i connettori
+  esistenti giravano su token emessi *prima* della consent, e solo l'azzeramento
+  vero del format l'ha esercitato. Test con prova a contrario (rosso senza fix);
+  voce `H69` nel registro con evidence verificate dal gate.
+
 ## [0.43.1] — 2026-08-22
 
 **La release che allinea `latest` allo stato dell'arte prima del collaudo su macchina
