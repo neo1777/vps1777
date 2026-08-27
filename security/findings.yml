@@ -3285,9 +3285,11 @@ findings:
         exit: 0
         quando: "2026-08-27"
     resta_aperto: >
-      La verifica end-to-end col bottone vero su Chrome si chiude al collaudo,
-      quando la release col fix arriva sulla VPS via update: e' il passo che
-      nessun test da CI puo' fare (serve il browser e il client OAuth reale).
+      [CHIUSO 27/08/2026 ~14:25] La release 0.43.2 e' arrivata sulla VPS via
+      `vps1777 update` (backup age + firma cosign verificati) e l'owner ha
+      rifatto l'autorizzazione da Chrome: «ora il pulsante ha funzionato»,
+      connector claude.ai collegati. Il passo che nessun test da CI poteva
+      fare e' stato fatto dal browser e dal client OAuth veri.
 
   - id: H70
     severity: low

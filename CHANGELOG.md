@@ -2,6 +2,45 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.3] — 2026-08-27
+
+**Il resto del raccolto del collaudo vergine** — la 0.43.2 curava il bottone;
+qui arrivano la card update che non si fa oscurare, l'installer che allestisce
+da solo la chiave dei backup, e la doc che ha imparato gli intoppi veri.
+
+### 🐛 Fix
+
+- **La card Update non nasconde più un aggiornamento noto quando il «Ricontrolla
+  adesso» fallisce** (#212, `H70`). Il refresh dal gateway fallisce *per
+  progetto* (senza egress da `H50`), ma il suo ramo d'errore scriveva
+  `error`+`checked_at=now` sopra il verdetto del check host: il bottone update
+  spariva con un «0.43.1 → 0.43.2» fresco e valido nel file, e il check mai
+  avvenuto ri-datava l'anti-stantio. Ora il fallimento scrive i SUOI campi
+  (`refresh_error`/`_at`) e il verdetto resta del check host. Il ramo era nato
+  in `v0.39.1` col gateway ancora connesso; `H50` ha reso il fallimento
+  sistematico e nessuno ha riletto quel ramo — misurato dal vivo al collaudo.
+
+### ✨ Installazione
+
+- **L'installer grafico allestisce da solo la chiave `age` dei backup** (#214),
+  come `deploy.sh` già faceva — la classe «la cura in una via» a parti
+  invertite rispetto a `#208`, trovata dal primo `vps1777 update` fermo
+  fail-safe sul backup. La coppia nasce **sul PC** (`age-keygen` se c'è,
+  altrimenti fallback Python X25519+bech32 provato contro un golden vector di
+  `age-keygen` vero), condivide il file di `deploy.sh`, sulla VPS va solo la
+  pubblica — e prima di dichiararla buona la giudica `age` sulla VPS con un
+  round-trip: se rifiutata viene rimossa, rumorosamente.
+
+### 📖 Documentazione
+
+- Gli **intoppi reali del primo collaudo su macchina vergine** (#213, #211,
+  #212): cache DNS negativa sull'URL `ts.net` appena nato, connector claude.ai
+  doppiamente morti dopo un format, «Autorizza» muto su Chrome fino alla
+  0.43.1, recipient age da rimettere — in TROUBLESHOOTING, ONBOARDING e nel
+  runbook `COLLAUDO-VERGINE`. Registro: `H69` chiusa col bottone vero
+  (l'owner, da Chrome, sulla 0.43.2 in produzione), `H56` decisa (rischio
+  accettato: dischi in chiaro, Debian 13+LUKS instabile), `H70` nuova.
+
 ## [0.43.2] — 2026-08-27
 
 **Il primo fix nato dal collaudo su macchina vergine che serviva una release per
