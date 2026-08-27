@@ -163,6 +163,12 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ALLOWLIST_R2 = {
     "security/check_no_leaks.py": "questo gate: i pattern dei segreti li contiene per mestiere",
     "security/findings.yml": "il registro dei rilievi: cita le evidenze dei pattern",
+    "tools/tests/test_installer_age.py":
+        "golden test del fallback age (#214): la AGE-SECRET-KEY nel file è una "
+        "coppia SACRIFICALE generata apposta il 27/08/2026, mai usata per "
+        "proteggere alcunché — il test deriva la pubblica dalla privata e la "
+        "confronta con quella dichiarata da age-keygen vero: con un segnaposto "
+        "non misurerebbe niente. Il commento in testa al test lo ripete.",
 }
 
 # ── R3 — indirizzi dell'AMBIENTE: mai, in nessuna forma ───────────────────────
