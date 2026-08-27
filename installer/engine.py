@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shlex
 import tarfile
 import time
@@ -38,6 +39,105 @@ TS_API = "https://api.tailscale.com/api/v2"
 
 # Repo GitHub delle release (immagini ghcr + runtime bundle)
 GITHUB_REPO = "neo1777/vps1777"
+
+# ── Chiave age per il backup cifrato — la parte che nasce SUL PC ──────────────
+# deploy.sh la allestisce dal 0.4x (genera sul PC, manda SOLO il recipient); il
+# grafico si limitava all'avviso nel referto — la classe «la cura in UNA via»,
+# stavolta a parti invertite rispetto a #208, e trovata come le altre dal
+# collaudo vergine (27/08): primo `vps1777 update` fermo fail-safe sul backup.
+# Qui il grafico raggiunge deploy.sh, con un fallback in più: se `age-keygen`
+# manca sul PC, la coppia nasce in Python (X25519 via cryptography — dipendenza
+# di paramiko, quindi c'è — + bech32 BIP173 qui sotto). La correttezza non è
+# affidata alla speranza: il golden test confronta la derivazione con una coppia
+# generata da age-keygen vero, e step_age fa un round-trip `age -r` SULLA VPS
+# prima di dichiarare il recipient buono.
+_B32 = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+
+
+def _b32_polymod(values: list[int]) -> int:
+    gen = (0x3B6A57B2, 0x26508E6D, 0x1EA119FA, 0x3D4233DD, 0x2A1462B3)
+    chk = 1
+    for v in values:
+        b = chk >> 25
+        chk = (chk & 0x1FFFFFF) << 5 ^ v
+        for i in range(5):
+            chk ^= gen[i] if ((b >> i) & 1) else 0
+    return chk
+
+
+def _b32_hrp_expand(hrp: str) -> list[int]:
+    return [ord(x) >> 5 for x in hrp] + [0] + [ord(x) & 31 for x in hrp]
+
+
+def _b32_convert(data: list[int] | bytes, frombits: int, tobits: int,
+                 pad: bool = True) -> list[int]:
+    acc = bits = 0
+    out: list[int] = []
+    maxv = (1 << tobits) - 1
+    for value in data:
+        acc = (acc << frombits) | value
+        bits += frombits
+        while bits >= tobits:
+            bits -= tobits
+            out.append((acc >> bits) & maxv)
+    if pad and bits:
+        out.append((acc << (tobits - bits)) & maxv)
+    return out
+
+
+def bech32_encode(hrp: str, payload: bytes) -> str:
+    data = _b32_convert(payload, 8, 5)
+    pm = _b32_polymod(_b32_hrp_expand(hrp) + data + [0] * 6) ^ 1
+    chk = [(pm >> 5 * (5 - i)) & 31 for i in range(6)]
+    return hrp + "1" + "".join(_B32[d] for d in data + chk)
+
+
+def age_keypair_python() -> tuple[str, str]:
+    """(privata 'AGE-SECRET-KEY-1…', pubblica 'age1…') — nate QUI, sul PC."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+    priv = X25519PrivateKey.generate()
+    raw_priv = priv.private_bytes(serialization.Encoding.Raw,
+                                  serialization.PrivateFormat.Raw,
+                                  serialization.NoEncryption())
+    raw_pub = priv.public_key().public_bytes(serialization.Encoding.Raw,
+                                             serialization.PublicFormat.Raw)
+    return (bech32_encode("age-secret-key-", raw_priv).upper(),
+            bech32_encode("age", raw_pub))
+
+
+def age_ensure_keypair_on_pc() -> tuple[str, str, str]:
+    """Riusa o crea la coppia age del PC. Ritorna (pubblica, path, come).
+
+    Stesso file di deploy.sh — ~/.config/vps1777/age-key.txt — così le due vie
+    dal PC condividono la chiave invece di seminarne due. `come` è per il log:
+    'riusata' | 'age-keygen' | 'python'."""
+    import re
+    import subprocess
+    key_dir = Path(os.environ.get("XDG_CONFIG_HOME",
+                                  Path.home() / ".config")) / "vps1777"
+    key_file = key_dir / "age-key.txt"
+    if key_file.is_file():
+        m = re.search(r"^# public key: (age1[a-z0-9]+)$",
+                      key_file.read_text(), re.M)
+        if m:
+            return m.group(1), str(key_file), "riusata"
+    key_dir.mkdir(parents=True, exist_ok=True)
+    key_dir.chmod(0o700)
+    try:
+        subprocess.run(["age-keygen", "-o", str(key_file)], check=True,
+                       capture_output=True, timeout=15)
+        key_file.chmod(0o600)
+        pub = subprocess.run(["age-keygen", "-y", str(key_file)], check=True,
+                             capture_output=True, timeout=15,
+                             text=True).stdout.strip()
+        return pub, str(key_file), "age-keygen"
+    except (OSError, subprocess.SubprocessError):
+        sec, pub = age_keypair_python()
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        key_file.write_text(f"# created: {stamp}\n# public key: {pub}\n{sec}\n")
+        key_file.chmod(0o600)
+        return pub, str(key_file), "python"
 
 
 class ReleaseNonInterrogabile(RuntimeError):
@@ -551,6 +651,46 @@ echo CONFIG_OK
         self.result["ADMIN_EMAIL"] = p.get("admin_email", "")
         yield "✓ .env + secrets pronti"
 
+    def step_age(self) -> Iterator[str]:
+        """Recipient age per il backup cifrato — la privata nasce e RESTA sul PC (H26).
+
+        Il gemello del blocco di deploy.sh (829+): riusa il recipient se la VPS
+        l'ha già, altrimenti riusa/crea la coppia del PC (stesso file di
+        deploy.sh) e manda SOLO la pubblica. Il round-trip con `age -r` sulla
+        VPS decide se il recipient è buono: meglio NESSUN recipient (il backup
+        si ferma rumorosamente) di uno rotto scritto in silenzio."""
+        if "backup" not in self._features():
+            self.result["AGE_STATE"] = "n/d (backup non attivo)"
+            return
+        yield "── Chiave age per il backup cifrato…"
+        have = self._run_capture(self._sudo(
+            f"cd {REMOTE_DIR} && grep -c ^age1 tools/age-recipients.txt 2>/dev/null || true"))
+        if have.strip() and have.strip() != "0":
+            self.result["AGE_STATE"] = "ok (già presente sulla VPS)"
+            yield "✓ recipient age già presente sulla VPS (lascio com'è)"
+            return
+        try:
+            pub, key_file, come = age_ensure_keypair_on_pc()
+        except Exception as e:  # noqa: BLE001 — qualunque causa: dichiarata, mai muta
+            self.result["AGE_STATE"] = f"MANCANTE ({e})"
+            yield (f"⚠ chiave age non allestita ({e}) — il primo update/backup si "
+                   "fermerà finché non imposti tools/age-recipients.txt (BACKUP-RESTORE.md)")
+            return
+        esito = self._run_capture(self._sudo(
+            f"cd {REMOTE_DIR} && printf '%s\\n' {shlex.quote(pub)} > tools/age-recipients.txt"
+            f" && echo ok | age -r {shlex.quote(pub)} -o /dev/null && echo AGE_OK"))
+        if "AGE_OK" in esito:
+            self.result["AGE_STATE"] = f"ok (chiave {come} sul PC)"
+            yield f"✓ recipient age sulla VPS — coppia {come} sul PC"
+            yield (f"  → CHIAVE PRIVATA age SOLO qui: {key_file} — SALVALA: "
+                   "senza, i backup non si ripristinano")
+        else:
+            self._run_capture(self._sudo(
+                f"cd {REMOTE_DIR} && rm -f tools/age-recipients.txt"))
+            self.result["AGE_STATE"] = "MANCANTE (recipient rifiutato da age sulla VPS)"
+            yield ("⚠ recipient RIFIUTATO da age sulla VPS: rimosso (meglio nessuno "
+                   "di uno rotto). Imposta tools/age-recipients.txt a mano")
+
     # Feature opzionali DICHIARATE (stato voluto). Default: backup + auto-update
     # SICURO. Le stesse le legge la CLI (vps1777.py) da VPS1777_FEATURES in .env, così
     # install/update/rollback riproducono SEMPRE le stesse feature — è il fix del
@@ -603,7 +743,9 @@ echo CONFIG_OK
                + f"auto-update sicuro={'ON' if 'autoupdate' in feats else 'OFF'} · "
                + f"portainer={'ON' if 'portainer' in feats else 'OFF'}"
                + ("  ⚠ chiave age da configurare per i backup"
-                  if 'backup' in feats else ""))
+                  if 'backup' in feats
+                  and not str(self.result.get("AGE_STATE", "")).startswith("ok")
+                  else ""))
 
     def step_build(self, ingress: str) -> Iterator[str]:
         """Escape hatch dev (--dev-build) o fallback pre-prima-release."""
@@ -969,6 +1111,7 @@ def run(params: dict) -> Iterator[str]:
         if ingress == "tailscale":
             yield from d.step_ts_provision(params)
         yield from d.step_config(params)
+        yield from d.step_age()
         yield "═ STEP 4/8 — Immagini + avvio"
         if dev_build:
             yield from d.step_build(ingress)
