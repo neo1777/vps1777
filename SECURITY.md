@@ -22,7 +22,10 @@ Mi impegno a:
 
 ## Security model
 
-vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy / Cloudflared).
+vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy /
+Cloudflared) — rimisurabile: `tools/tests/test_porte_con_bind.py` (nessuna porta pubblicata
+nuda nei compose) e `tools/tests/test-onboarding-8080-bind.sh` (la finestra 8080
+dell'onboarding, l'eccezione nota di questa riga).
 
 > ⚠️ **QUATTRO PERCORSI CAMBIANO QUESTA RIGA, e NESSUNO chiede il permesso.** Quando il
 > Funnel non risponde, l'installazione scrive `GATEWAY_BIND=0.0.0.0` nel `.env` e il
@@ -146,7 +149,8 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   scrive con builtin (niente valore all'argv di `sed`); bcrypt legge da stdin;
   `tailscale up` usa `--authkey=file:`.
 - **Chiave age fuori dalla VPS** (`v0.26.0`). Il backup si cifra con la sola
-  chiave **pubblica** (recipient); la privata vive sul PC dell'owner e serve solo
+  chiave **pubblica** (recipient, da `tools/age-recipients.txt` — `tools/backup.sh`
+  non nomina mai una chiave privata); la privata vive sul PC dell'owner e serve solo
   al restore. `backup.sh` non genera più la coppia sulla VPS (che avrebbe messo
   la privata sullo stesso disco dei backup). Vedi [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md).
 - **Secrets sempre file-mounted** (baseline, `H68`): password, signing key, token via
@@ -168,7 +172,9 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   di `/export`: nome innocuo, dentro il detto-e-fatto di una sessione di lavoro) o del
   materiale credenziale vero — distinguendolo dai segnaposto della doc, perché un gate
   che grida al lupo viene disattivato e allora non protegge più niente. Riporta *dove*,
-  mai *cosa*: i log della CI di un repo pubblico sono pubblici. Il `.gitignore` da solo
+  mai *cosa* — la promessa è scritta in testa a `security/check_no_leaks.py`,
+  dove chi lo modifica se la ritrova davanti: i log della CI di un repo
+  pubblico sono pubblici. Il `.gitignore` da solo
   non basta — non ferma `git add -f` e non fa nulla per un file già tracciato. Regola
   che il gate ricorda a chi lo incontra: **un segreto passato non si toglie, si ruota.**
 
@@ -248,10 +254,14 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
   path unit. Il gateway non tocca mai Docker (`H67`) — né montandone il socket, né
   parlandogli via `DOCKER_HOST`, né con una SDK nel proprio codice.
 - **Intent validato e consumato**: schema, SemVer, TTL 10 min, nonce anti-replay,
-  e cancellazione **prima** di agire (nessun loop di ri-trigger).
+  e cancellazione **prima** di agire (nessun loop di ri-trigger) — i controlli
+  FERMANO invece di spegnersi quando il dato manca, provato in
+  `tools/tests/test_intent_fail_closed.py`.
 - **Anti-downgrade**: dal pulsante il target non può essere una versione più
-  vecchia di quella in esecuzione (version-floor SemVer) — così un gateway
-  compromesso non può forzare un downgrade a una release con vuln nota. Il
+  vecchia di quella in esecuzione (version-floor SemVer;
+  `tools/tests/test_version_floor_non_confrontabile.py` cita questa riga e la
+  prova nei due versi) — così un gateway compromesso non può forzare un
+  downgrade a una release con vuln nota. Il
   downgrade intenzionale resta possibile solo da terminale (chi ha la shell ha
   già ogni privilegio). **E se la versione in esecuzione non è confrontabile**
   (`VPS1777_TAG` vuoto o non SemVer) **il pulsante viene rifiutato**: una
@@ -264,7 +274,10 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
   Nessun aggiornamento build-in-place.
 - **Reversibilità**: backup age + snapshot locale prima di ogni update;
   auto-rollback se lo stack non torna healthy. Nessuna finestra in cui i dati
-  restano senza rete di sicurezza.
+  restano senza rete di sicurezza — misurata dal vivo, non dedotta:
+  `tools/prove-empiriche/prova-9-il-fail-closed-torna-indietro-davvero.sh`
+  sabota il health-check di un update reale e verifica che il rollback riporti
+  la versione di partenza (prima esecuzione verde: collaudo del 27/08/2026).
 - **Zero telemetria di vps1777**: vps1777 non ti traccia; il check versione è una
   GET non autenticata a GitHub. Ma **per funzionare, alcuni dati escono verso
   servizi terzi** — vedi la sezione seguente: non è telemetria, è il servizio che
@@ -567,7 +580,8 @@ qualcuno non tocca lo stato.*
 
 `H60` è **una nostra regola violata da noi**, e il controllo che ora la applica è in produzione. La regola dice:
 nessun indirizzo, nome o URL della macchina, in nessuna forma — nemmeno in un esempio,
-nemmeno nell'output di una prova. Era scritta, la applicavamo a mano, e **nessun controllo
+nemmeno nell'output di una prova; oggi la applica la regola R3 del gate, provata caso
+per caso (falsi rossi compresi) in `tools/tests/test_no_leaks.py`. Era scritta, la applicavamo a mano, e **nessun controllo
 la faceva rispettare**. Il 27 luglio un indirizzo pubblico è entrato nel repo dentro una
 nota che documentava una misura, ed è rimasto visibile per otto ore, in `main` e in tre
 versioni pubblicate.

@@ -55,8 +55,10 @@ servizio diventa una voce nel routing. Tu pensi al tuo MCP; il resto è già qui
 
 ## Installazione
 
-Ti serve solo una **VPS Linux fresh** (Debian 13 consigliata) con IP e password
-root. Tre modi, dallo stesso repo.
+Ti serve solo una **VPS Linux fresh** (Debian 12 consigliata — è quella su cui è
+stato fatto il collaudo completo su macchina vergine del 27/08/2026; su Debian 13
+con volumi cifrati la stessa VPS risultava instabile, vedi `H56` in
+`security/findings.yml`) con IP e password root. Tre modi, dallo stesso repo.
 
 ### 🖱 Installer grafico — zero comandi (consigliato)
 
