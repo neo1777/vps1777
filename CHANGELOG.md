@@ -2,6 +2,20 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.12] — 2026-08-29
+
+**«Dobbiamo farci stare quel che serve»: la retention impara il peso.**
+
+### ✨ Migliorato
+
+- **Snapshot pre-update: restano n e n-1, il resto si pota subito** (#245,
+  decisione owner del 29/08). La regola precedente (72h + ultime 3 versioni,
+  f9818614) era vera sul tempo e sulle versioni ma cieca sul PESO: 7 release
+  in 36 ore × volumi da 10 GB = 48 GB di snapshot legittimi, disco 24→92 GB.
+  L'ultimo snapshot delle ultime 2 versioni non è mai cancellabile da qui;
+  una dir senza versione nel nome resta sulla vecchia regola a 72h (l'errore
+  di parsing costa spazio, mai un rollback perduto).
+
 ## [0.43.11] — 2026-08-28
 
 **La lapide al posto dell'abort: l'apriscatole incontra il mondo reale.**
