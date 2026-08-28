@@ -2,6 +2,28 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.10] — 2026-08-28
+
+**Occhi e apriscatole — e l'occhio vive nella sua stanza.**
+
+### ✨ Migliorato
+
+- **OCR locale all'ingest, come servizio interno** (#237, #239): le immagini
+  nei bundle (775 scartate come non-testo: molti sono screenshot) passano da
+  tesseract nel nuovo container `ocr` — SOLO rete interna, nessuna porta,
+  nessun volume né segreto. Il gateway lo chiama via HTTP e NON esegue
+  processi: la prima stesura con subprocess nel gateway è stata bocciata dal
+  presidio `test_gateway_non_tocca_docker`, e il rosso aveva ragione — un
+  parser di immagini non vive nel servizio esposto. Servizio assente →
+  lapide `ocr-non-disponibile`; immagine senza testo → `ocr-vuoto`; testo →
+  righe marcate `[ocr]`. Il percorso NotebookLM (`archive-ingest`) resta per
+  il file pregiato singolo. Smoke reale: uno screenshot vero letto fedele.
+- **Zip annidati a profondità 1** (#237): gli archivi dentro i workfiles
+  (71 zip + 52 `.skill`, che SONO zip — le skill ora sono cercabili) si
+  aprono e i membri passano dalla stessa trafila (testo, jsonl, pdf,
+  immagini→OCR, sniff). Zip dentro l'annidato → lapide anti-bomba; tetto
+  2000 membri; il budget globale anti zip-bomb propaga sempre.
+
 ## [0.43.9] — 2026-08-28
 
 **La cornice decide: il confine mixed↔transcript impara il criterio dell'owner.**
