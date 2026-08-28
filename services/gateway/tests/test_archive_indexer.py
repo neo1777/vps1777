@@ -1706,3 +1706,104 @@ def test_confine_mixed_transcript_nei_due_versi() -> None:
     con_parole = "[human] questo il log ora: " + inglese
     voce4, _q, _c, _f4 = archive_indexer.classify_voice(con_parole, "user", "chat")
     assert voce4 == "mixed", "con la cornice dell'owner il blocco inglese resta mixed"
+
+
+# ── B5: occhi (OCR) e apriscatole (zip annidati) — 28/08/2026 ────────────────
+
+def _bundle_con_workfile(tmp_path: Path, membro: str, contenuto: bytes) -> Path:
+    """Un bundle minimo (MANIFEST.json + sessions/) con UN workfile dentro."""
+    import zipfile
+    zp = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("MANIFEST.json", "{}")
+        z.writestr("sessions/vuota.jsonl", "")
+        z.writestr(membro, contenuto)
+    return zp
+
+
+def test_zip_annidato_si_apre_e_la_bomba_no(tmp_path: Path) -> None:
+    """Un livello si apre (il .md dentro lo zip diventa cercabile); il secondo
+    livello NON si apre e lascia una lapide dichiarata — profondità 1, anti-bomba."""
+    import io as _io
+    import sqlite3
+    import zipfile
+    interno = _io.BytesIO()
+    with zipfile.ZipFile(interno, "w") as zi:
+        zi.writestr("appunti/nota.md", "parola-sepolta-nel-livello-uno")
+        zi.writestr("bomba.zip", b"PK\x03\x04finto")
+    zp = _bundle_con_workfile(tmp_path, "workfiles/-home-x-Scrivania/arch.zip",
+                              interno.getvalue())
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    trovato = con.execute(
+        "SELECT count(*) FROM messages WHERE content LIKE '%parola-sepolta-nel-livello-uno%'"
+    ).fetchone()[0]
+    lapide = con.execute(
+        "SELECT count(*) FROM skipped WHERE reason='zip-annidato-oltre-profondita'"
+    ).fetchone()[0]
+    assert trovato >= 1, "il .md dentro lo zip annidato non è stato indicizzato"
+    assert lapide == 1, "lo zip di secondo livello doveva lasciare una lapide, non aprirsi"
+
+
+def test_skill_e_uno_zip_e_si_apre(tmp_path: Path) -> None:
+    """I .skill SONO zip (misurato con file(1)): il loro SKILL.md diventa cercabile."""
+    import io as _io
+    import sqlite3
+    import zipfile
+    interno = _io.BytesIO()
+    with zipfile.ZipFile(interno, "w") as zi:
+        zi.writestr("SKILL.md", "# la-skill-sepolta\nistruzioni preziose")
+    zp = _bundle_con_workfile(tmp_path, "workfiles/-home-x-Scrivania/docs/x.skill",
+                              interno.getvalue())
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT count(*) FROM messages WHERE content LIKE '%la-skill-sepolta%'"
+                       ).fetchone()[0] >= 1
+
+
+def test_ocr_assente_lascia_lapide_dichiarata(tmp_path: Path, monkeypatch) -> None:
+    """Senza tesseract l'immagine NON sparisce in silenzio: lapide col motivo."""
+    import sqlite3
+    monkeypatch.setattr(archive_indexer.shutil, "which", lambda _b: None)
+    import zipfile
+    zp = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("MANIFEST.json", "{}")
+        z.writestr("sessions/vuota.jsonl", "")
+        z.writestr("workfiles/-home-x-Scrivania/shot.png", b"\x89PNG\r\n\x1a\nfinto")
+        z.writestr("workfiles/-home-x-Scrivania/nota.md", "una riga vera")  # n>0
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT count(*) FROM skipped WHERE reason='ocr-non-disponibile'"
+                       ).fetchone()[0] == 1
+
+
+def test_ocr_presente_indicizza_marcato(tmp_path: Path, monkeypatch) -> None:
+    """Col binario presente il testo entra marcato [ocr]; l'immagine muta lascia
+    la lapide 'ocr-vuoto' — i due versi dello stesso occhio."""
+    import sqlite3
+    import types as _types
+    monkeypatch.setattr(archive_indexer.shutil, "which", lambda _b: "/usr/bin/tesseract")
+
+    def finto_tesseract(cmd, input=b"", capture_output=True, timeout=0):
+        testo = b"testo-letto-dallo-screenshot" if input.startswith(b"\x89PNG") else b""
+        return _types.SimpleNamespace(stdout=testo, stderr=b"", returncode=0)
+
+    monkeypatch.setattr(archive_indexer.subprocess, "run", finto_tesseract)
+    import zipfile
+    zp = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("MANIFEST.json", "{}")
+        z.writestr("sessions/vuota.jsonl", "")
+        z.writestr("workfiles/-home-x-Scrivania/shot.png", b"\x89PNG\r\n\x1a\nfinto")
+        z.writestr("workfiles/-home-x-Scrivania/muta.jpg", b"\xff\xd8\xff\xe0finto")
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    riga = con.execute("SELECT content FROM messages WHERE content LIKE '%[ocr]%'").fetchone()
+    assert riga and "testo-letto-dallo-screenshot" in riga[0]
+    assert con.execute("SELECT count(*) FROM skipped WHERE reason='ocr-vuoto'"
+                       ).fetchone()[0] == 1

@@ -36,7 +36,12 @@ FROM python:3.12-slim
 
 # tini per signal handling + ca-certificates per HTTPS uscente
 RUN apt-get update && apt-get install -y --no-install-recommends tini ca-certificates \
+    tesseract-ocr tesseract-ocr-ita \
     && rm -rf /var/lib/apt/lists/*
+# tesseract (B5, 28/08/2026): OCR LOCALE delle immagini all'ingest — i dati non
+# lasciano la macchina (il percorso NotebookLM resta per il file pregiato
+# singolo, ma manda il documento a Google). eng è incluso nel pacchetto base;
+# la ricetta `-l ita+eng` è quella provata su _chat/ocr1777 (562/562, 0 errori).
 
 # Utente non-root condiviso (UID 1000 "app") — STESSO uid di nb1777-mcp/bot
 # così i volumi condivisi (nlm-auth) sono accessibili a tutti.
