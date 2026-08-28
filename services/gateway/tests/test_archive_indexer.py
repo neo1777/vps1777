@@ -1813,3 +1813,29 @@ def test_ocr_presente_indicizza_marcato(tmp_path: Path, monkeypatch) -> None:
     assert riga and "testo-letto-dallo-screenshot" in riga[0]
     assert con.execute("SELECT count(*) FROM skipped WHERE reason='ocr-vuoto'"
                        ).fetchone()[0] == 1
+
+
+def test_membro_oversize_lascia_lapide_e_l_ingest_prosegue(tmp_path: Path, monkeypatch) -> None:
+    """Il bug che ha ucciso il re-ingest del 28/08: un membro-zip oltre il tetto
+    per-membro faceva propagare il ValueError e moriva l'INGEST INTERO. Ora:
+    lapide `membro-oltre-tetto`, e il file accanto viene comunque indicizzato."""
+    import io as _io
+    import sqlite3
+    import zipfile
+    monkeypatch.setattr(archive_indexer, "MAX_MEMBER_BYTES", 64)  # tetto piccolo
+    interno = _io.BytesIO()
+    with zipfile.ZipFile(interno, "w") as zi:
+        zi.writestr("zavorra.txt", "x" * 4096)                    # 4KB >> 64B
+    zp = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("MANIFEST.json", "{}")
+        z.writestr("sessions/vuota.jsonl", "")
+        z.writestr("workfiles/-home-x-Scrivania/grosso.zip", interno.getvalue())
+        z.writestr("workfiles/-home-x-Scrivania/nota.md", "riga-superstite")
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))                  # NON deve alzare
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT count(*) FROM messages WHERE content LIKE '%riga-superstite%'"
+                       ).fetchone()[0] >= 1, "il file accanto è morto col membro oversize"
+    assert con.execute("SELECT count(*) FROM skipped WHERE reason='membro-oltre-tetto'"
+                       ).fetchone()[0] == 1
