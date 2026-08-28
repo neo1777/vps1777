@@ -1,0 +1,6 @@
+[project]
+name = "vps1777-ocr"
+version = "0.1.0"
+description = "OCR interno (tesseract) per l'ingest dell'archivio — nessuna porta pubblicata"
+requires-python = ">=3.12"
+dependencies = []

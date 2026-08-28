@@ -99,6 +99,23 @@ _schema:
 # ══════════════════════════════════════════════════════════════════════════════
 features:
 
+  - id: archive.ocr-ingest
+    nome: "OCR locale delle immagini all'ingest (servizio interno)"
+    cosa: "Le immagini nei bundle (screenshot: 775 scartate come non-testo fino al
+           0.43.9) passano da tesseract nel servizio interno `ocr` — solo rete
+           backend, nessuna porta/volume/segreto — e entrano nell'archivio marcate
+           [ocr]. Il gateway NON esegue processi (invariante presidiata da
+           test_gateway_non_tocca_docker: la prima stesura con subprocess nel
+           gateway è stata bocciata dalla CI, 28/08): chiama l'ocr via HTTP, e se
+           il servizio manca ogni immagine lascia una lapide dichiarata. Il
+           percorso NotebookLM (archive-ingest) resta per il file pregiato
+           singolo: manda il documento a Google, non ci passano i batch privati."
+    dove: ["services/ocr/app/__main__.py", "services/gateway/app/archive_indexer.py", "compose.yaml"]
+    status: active-default
+    since: "0.43.10"
+    verify:
+      file_contains: {path: "compose.yaml", pattern: "vps1777-ocr"}
+
   - id: archive.search
     nome: "Ricerca full-text archivio"
     cosa: "Cerca nelle conversazioni indicizzate (FTS5). È il tool MCP centrale di archive-mcp."

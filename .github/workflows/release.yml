@@ -109,7 +109,7 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot]
+        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Buildx
@@ -174,7 +174,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # images.lock: digest immutabili delle 4 immagini appena pushate.
+      # images.lock: digest immutabili delle immagini appena pushate (una per servizio).
       # È il gate supply-chain di `vps1777 update`: dopo il pull, i RepoDigests
       # locali DEVONO combaciare con questo lock.
       - name: Resolve image digests → images.lock
@@ -183,7 +183,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           lock='{}'
-          for svc in gateway archive-mcp nb1777-mcp nb1777-bot; do
+          for svc in gateway archive-mcp nb1777-mcp nb1777-bot ocr; do
             ref="ghcr.io/${OWNER}/vps1777-${svc}:${VERSION}"
             digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -r '.digest')"
             [ -n "$digest" ] && [ "$digest" != "null" ] || { echo "::error::digest non risolto per $ref"; exit 1; }
