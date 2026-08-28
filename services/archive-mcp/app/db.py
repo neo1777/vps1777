@@ -15,6 +15,7 @@ import datetime
 import logging
 import os
 import json
+import time
 import urllib.request
 import urllib.error
 import sqlite3
@@ -252,9 +253,18 @@ def _targets(db: str) -> list[str]:
     return [db]
 
 
+# Budget della scansione MULTI-DB di check_integrity. Misurato il 28/08/2026:
+# 12 quick_check su ~6 GB = MINUTI, il proxy MCP molla a ~30-60s, e le chiamate
+# scadute restavano IN CODA lato server (cpu occupata, tool bloccati per tutti).
+# Sotto budget si risponde con ciò che si è misurato + 'non_misurato' dichiarato
+# per il resto. La chiamata su UN DB solo non ha budget: è il percorso mirato.
+_INTEGRITA_BUDGET_S = 20.0
+
+
 def integrita_archivi(db: str = "") -> dict[str, Any]:
-    """Integrità (`ok`·`sporco`·`corrotto`·`non_misurabile`) — l'adattatore che
-    risolve i nomi e delega alla logica pura di `integrita.verifica`.
+    """Integrità (`ok`·`sporco`·`corrotto`·`non_misurabile`·`non_misurato`) —
+    l'adattatore che risolve i nomi e delega alla logica pura di
+    `integrita.verifica`, con un budget di tempo sulla forma multi-DB.
 
     🪦 Nato MORTO col tool: `server.py` registrava `check_integrity` e chiamava
        `db.integrita_archivi`, ma questa funzione non è mai stata scritta — i
@@ -265,7 +275,20 @@ def integrita_archivi(db: str = "") -> dict[str, Any]:
        `test_tool_registrato.py::test_la_funzione_chiamata_ESISTE_in_db`.
     """
     _maybe_reload()
-    return {"per_db": integrita.verifica({n: _DBS[n] for n in _targets(db)})}
+    nomi = _targets(db)
+    out: dict[str, Any] = {}
+    t0 = time.monotonic()
+    for i, n in enumerate(nomi):
+        if len(nomi) > 1 and time.monotonic() - t0 > _INTEGRITA_BUDGET_S:
+            # Il resto NON si misura in silenzio: ogni DB saltato lo dichiara,
+            # e dice come ottenerlo (la chiamata mirata non ha budget).
+            for resto in nomi[i:]:
+                out[resto] = {"esito": "non_misurato",
+                              "dettaglio": (f"budget di {_INTEGRITA_BUDGET_S:.0f}s esaurito: "
+                                            f"chiedi questo DB da solo (db_name='{resto}')")}
+            break
+        out.update(integrita.verifica({n: _DBS[n]}))
+    return {"per_db": out}
 
 
 def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
