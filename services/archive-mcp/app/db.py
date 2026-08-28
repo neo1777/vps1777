@@ -467,25 +467,44 @@ def archive_stats(db: str = "") -> list[dict[str, Any]]:
     return out
 
 
+# Le statistiche di describe() sono scansioni COMPLETE (count, min/max ts,
+# etichette DISTINCT) — misurate il 28/08/2026 sul vivo: 74,6 s a freddo e
+# 53,9 s a caldo su 12 DB (5,7 GB), col proxy MCP che molla molto prima →
+# ogni describe_databases rispondeva «connection lost». Ma le statistiche
+# cambiano SOLO quando cambia il file: la chiave giusta è lo snapshot (mtime),
+# che describe già espone. Il memo si invalida da solo a ogni upload o
+# set_description — il gateway riscrive il file, l'mtime cambia.
+_STATS_MEMO: dict[str, tuple[str, dict[str, Any]]] = {}
+
+
 def describe() -> list[dict[str, Any]]:
     """Scheda di ogni DB: righe, intervallo temporale, n. etichette, snapshot
-    (freschezza). Più ricca di list_databases (che resta list[str] per compat)."""
+    (freschezza). Più ricca di list_databases (che resta list[str] per compat).
+
+    Le statistiche sono memoizzate per snapshot: la scansione si paga una volta
+    per versione del file, non a ogni chiamata (vedi _STATS_MEMO qui sopra)."""
     _maybe_reload()
     out: list[dict[str, Any]] = []
     for name in sorted(_DBS):
-        try:
-            conn = _open(name)
-        except KeyError:
-            continue
-        try:
-            info = fts.db_stats_conn(conn)
-            info["description"] = fts.meta_value_conn(conn, "description")
-        except sqlite3.OperationalError:
-            info = {"rows": 0, "oldest": "", "newest": "", "labels": 0, "description": ""}
-        finally:
-            conn.close()
+        snap = _snapshot(_DBS[name])
+        ricordo = _STATS_MEMO.get(name)
+        if ricordo is not None and ricordo[0] == snap:
+            info = dict(ricordo[1])
+        else:
+            try:
+                conn = _open(name)
+            except KeyError:
+                continue
+            try:
+                info = fts.db_stats_conn(conn)
+                info["description"] = fts.meta_value_conn(conn, "description")
+            except sqlite3.OperationalError:
+                info = {"rows": 0, "oldest": "", "newest": "", "labels": 0, "description": ""}
+            finally:
+                conn.close()
+            _STATS_MEMO[name] = (snap, dict(info))
         info["name"] = name
-        info["snapshot"] = _snapshot(_DBS[name])
+        info["snapshot"] = snap
         out.append(info)
     return out
 

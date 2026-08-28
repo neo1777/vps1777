@@ -214,3 +214,51 @@ def test_6_integrita_apre_ancora_per_conto_suo(db):
     assert esiti and all(e["esito"] == "ok" for e in esiti.values()), (
         f"quick_check non passa più: {esiti} — se `verifica()` fosse stata agganciata "
         "alla cache leggerebbe una connessione tenuta aperta invece del file su disco")
+
+
+def test_7_describe_non_riscansiona_se_il_file_non_cambia(db, monkeypatch):
+    """Il memo MORDE: col file immutato, il secondo describe non ricalcola.
+
+    Misurato il 28/08/2026 sul vivo: senza memo ogni describe costava 74,6 s a
+    freddo / 53,9 s a caldo (12 DB, 5,7 GB) e il proxy MCP rispondeva
+    «connection lost» a ogni chiamata. La bomba qui sotto è l'unico modo di
+    provare l'EFFETTO: se il memo non morde, il test esplode, non fallisce
+    un assert generico.
+    """
+    modulo, _tmp = db
+    modulo.describe()                                     # 1º giro: calcola e ricorda
+
+    def bomba(_conn):
+        raise AssertionError("ricalcolo con file immutato: il memo non morde")
+
+    monkeypatch.setattr(modulo.fts, "db_stats_conn", bomba)
+    out = modulo.describe()                               # 2º giro: solo memo
+    assert {r["name"] for r in out} == {"uno", "due"}
+    assert all(r["rows"] == 1 for r in out), "il memo ha perso le statistiche vere"
+
+
+def test_8_describe_riscansiona_QUANDO_il_file_cambia(db, monkeypatch):
+    """Il verso opposto, senza il quale il memo sarebbe una cache di dati vecchi.
+
+    Si tocca l'mtime di UN solo DB: il ricalcolo deve avvenire per quello e
+    SOLO per quello — un memo che invalida tutto o niente fallisce qui.
+    """
+    import os
+    import time as _t
+
+    modulo, tmp = db
+    modulo.describe()
+    conta = {"n": 0}
+    vera = modulo.fts.db_stats_conn
+
+    def spia(conn):
+        conta["n"] += 1
+        return vera(conn)
+
+    monkeypatch.setattr(modulo.fts, "db_stats_conn", spia)
+    dopo = _t.time() + 2
+    os.utime(tmp / "uno.db", (dopo, dopo))               # snapshot di 'uno' cambia
+    modulo.describe()
+    assert conta["n"] == 1, (
+        f"atteso ricalcolo per il SOLO db toccato, misurato {conta['n']} "
+        "(0 = cache di dati vecchi; 2 = invalidazione tutto-o-niente)")
