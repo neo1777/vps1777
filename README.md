@@ -40,7 +40,7 @@ incollare in claude.ai. Niente Docker da gestire a mano, niente shell sulla VPS.
 │                      ▼                                           │
 │      ┌───────────────┼───────────────────────┐                   │
 │      ▼               ▼                       ▼                   │
-│  archive-mcp     nb1777-mcp             your-plugin              │
+│  archive-mcp     nb1777-mcp     ocr     your-plugin              │
 │  (FTS5 multi-DB) (NotebookLM)        (MCP/bot a piacere)         │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
@@ -114,6 +114,7 @@ caricare l'auth NotebookLM, [docs/INSTALL.md](docs/INSTALL.md).
 | **archive-mcp** | Ricerca FTS5 su più DB (export web claude.ai, sessioni Claude Code) | 8002 |
 | **nb1777-mcp** | NotebookLM via CLI `nlm` — **37 tool** (notebook, source, chat, 9 artefatti studio, doctor, canonico/memoria). Vedi [docs/NB1777.md](docs/NB1777.md) | 8003 |
 | **nb1777-bot** | Bot Telegram owner-only + launcher Mini App | (long-poll) |
+| **ocr** | Tesseract in un container interno: gli occhi dell'ingest (immagini → testo `[ocr]`). Il gateway lo chiama via HTTP, non esegue processi | 8004 |
 
 Più i **plugin** che ci aggiungi tu — un MCP o un bot in pochi file, senza
 toccare il core. Vedi [docs/PLUGINS.md](docs/PLUGINS.md).

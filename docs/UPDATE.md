@@ -41,7 +41,7 @@ Garanzie:
   Lo snapshot esiste perché l'auto-rollback **non può dipendere dalla age-key**
   (che spesso vive solo sul tuo PC); viene potato al successivo update riuscito.
 - **Supply-chain**: il bundle di release porta `images.lock` con i digest
-  immutabili delle 4 immagini; dopo il pull, i digest locali DEVONO combaciare.
+  immutabili delle immagini (una per servizio); dopo il pull, i digest locali DEVONO combaciare.
   La firma keyless del bundle è verificata con `cosign` **di default e in
   fail-closed**: se la verifica non passa — o se `cosign` manca e non è
   auto-installabile — l'update si ferma. `cosign` viene auto-installato se

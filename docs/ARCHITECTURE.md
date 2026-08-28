@@ -16,7 +16,7 @@
 │  - Plugin registry: legge GATEWAY_UPSTREAMS da env   │
 └─────────────────┬────────────────────────────────────┘
                   ▼  (rete backend, internal: true)
-┌─── archive-mcp ──┬── nb1777-mcp ──┬── nb1777-bot ──┬─── PLUGIN ───┐
+┌─── archive-mcp ──┬── nb1777-mcp ──┬── nb1777-bot ──┬── ocr ──┬─ PLUGIN ─┐
 │  FTS5 multi-DB   │ nlm + Chromium │ Telegram poll  │  your MCP    │
 │  :8002 /mcp      │ :8003 /mcp     │ no porta       │  your bot    │
 └──────────────────┴────────────────┴────────────────┴──────────────┘
@@ -59,6 +59,7 @@ Vedi [SECRETS.md](SECRETS.md). Tutti file-mounted in `/run/secrets/<name>` (tmpf
 | gateway → nb1777-mcp (profilo nlm) | HTTP interno + segreto condiviso | `/internal/nlm/{status,profile}` |
 | bot → nb1777-mcp (notifiche #30) | HTTP interno + segreto condiviso | `/internal/{notifications,canonico/ack}` |
 | nb1777-bot → nb1777-mcp | MCP client HTTP | `http://nb1777-mcp:8003/mcp` |
+| gateway → ocr (ingest immagini) | HTTP interno, bytes→testo | `http://ocr:8004/ocr` (env `OCR_URL`; il gateway NON esegue processi — presidio `test_gateway_non_tocca_docker`) |
 | Telegram cloud → bot | long-poll outbound HTTPS | `api.telegram.org` |
 | claude.ai → gateway | OAuth 2.1 + MCP streamable-http | `/<SECRET>/<name>/mcp` |
 
@@ -67,8 +68,8 @@ Vedi [SECRETS.md](SECRETS.md). Tutti file-mounted in `/run/secrets/<name>` (tmpf
 Vedi [PLUGINS.md](PLUGINS.md). In sintesi:
 
 1. Crei `plugins/<nome>/` con `Dockerfile` + `compose.<nome>.yaml`
-2. Esponi un endpoint MCP su porta interna (es. `8004`)
-3. Aggiungi a `.env`: `GATEWAY_UPSTREAMS=archive=archive-mcp:8002,nb1777=nb1777-mcp:8003,<nome>=<container>:8004`
+2. Esponi un endpoint MCP su porta interna (es. `8010` — 8002/8003/8004 sono dei servizi base)
+3. Aggiungi a `.env`: `GATEWAY_UPSTREAMS=archive=archive-mcp:8002,nb1777=nb1777-mcp:8003,<nome>=<container>:8010`
 4. Restart gateway: `docker compose restart gateway`
 5. URL del tuo plugin: `<PUBLIC_BASE>/<SECRET>/<nome>/mcp`
 
@@ -111,6 +112,7 @@ Ogni servizio ha un healthcheck compose (usati anche dal health-gate dell'update
 |---|---|
 | gateway | `/health` → body pubblico minimo `{"ok":true}`. Con `?deep=1` proba TCP gli upstream MCP (503 se giù), ma è **riservato ai chiamanti interni**: da fuori risponde 403 (H33). L'updater lo chiama via `compose exec` *dentro* il gateway, quindi da loopback. |
 | archive-mcp / nb1777-mcp | TCP sulla porta MCP |
+| ocr | HTTP `GET /health` interno |
 | nb1777-bot | long-poll, nessuna porta: file heartbeat `/tmp/nb1777-bot.heartbeat` (unhealthy se mtime > 90s) |
 
 ## OAuth flow

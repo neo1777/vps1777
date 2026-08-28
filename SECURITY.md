@@ -457,7 +457,9 @@ gateway *al posto di* `telegram_bot_token`: non costa né un container né un ca
 > piccola**». *Era vero quando fu scritto.* Misurato oggi sul `compose.yaml` di `main`:
 > **4 servizi** (`gateway`, `archive-mcp`, `nb1777-mcp`, `nb1777-bot`), 3 reti, 5 secret
 > — e `nb1777-bot`, cioè **il processo separato, esiste già**. Un processo in più non è
-> più l'eccezione: è la modalità normale del sistema.
+> più l'eccezione: è la modalità normale del sistema. *(E infatti: dal 28/08,
+> v0.43.10, i servizi sono **5** — si è aggiunto `ocr`, il tesseract in una
+> stanza sua proprio per questo principio.)*
 > 🔑 **La decisione non era sbagliata: era la sua motivazione a essere invecchiata** — e
 > una motivazione scaduta non lo dichiara, perché sta nel corpo della decisione e non in
 > un campo che qualcuno rivede. *Chi rileggeva la decisione di `H54` la valutava su una
@@ -704,7 +706,7 @@ il loro *perché* nel registro:
   in `H16` quando il PC non ha bcrypt (per non imporre una dipendenza al PC di deploy);
   `frame-ancestors`/`unsafe-inline` della CSP Mini App in `H35` (servirebbe un client
   Telegram reale per verificare che non rompano la pagina).
-- **Rinviati alla postilla** (sotto): il pinning ai digest delle 4 immagini vps1777
+- **Rinviati alla postilla** (sotto): il pinning ai digest delle immagini vps1777 (una per servizio)
   in `H22` (oggi l'invariante lo impone la CLI post-pull, non il file compose) e
   l'approvazione manuale dei rilasci in `H24` (i tag pubblicati sono già immutabili).
 
@@ -775,7 +777,7 @@ questa fase i rilasci sono frequenti e aggiungerebbero attrito:
 - **rootfs read-only su `nb1777-mcp`** (parte di `H43`): il servizio con Chromium è
   escluso dal read-only finché non verifichiamo un giro NotebookLM reale con tutte le
   tmpfs necessarie.
-- **Pinning ai digest delle 4 immagini vps1777 nel compose** (`H22`): oggi l'invariante
+- **Pinning ai digest delle immagini vps1777 nel compose, una per servizio** (`H22`): oggi l'invariante
   «gira solo il digest verificato» lo impone la CLI *dopo* il pull (contro `images.lock`);
   farlo vivere anche nel file compose (override generato all'`up`) chiuderebbe il caso di
   un `docker compose pull` lanciato a mano fuori dalla CLI. Tocca il percorso di update,
