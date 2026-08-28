@@ -2208,21 +2208,27 @@ def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
                     with z.open(info) as f:
                         raw = _read_capped(f, name, budget, cap=MAX_PDF_BYTES)
                     yield from _iter_pdf_bytes(raw, name, label, ts)
-                elif ext in _IMG_EXTS:
-                    # B5 «occhi»: 775 immagini (547 png + 228 jpg) uscivano come
-                    # non-testo — molti sono screenshot, memoria vera in pixel.
-                    # Cap di default in lettura (non MAX_IMG_BYTES: qui un
-                    # ValueError abortirebbe l'INGEST INTERO); il tetto-immagine
-                    # lo giudica l'helper, che risponde con una lapide.
-                    with z.open(info) as f:
-                        raw = _read_capped(f, name, budget)
-                    yield from _iter_immagine_bytes(raw, name, label, ts)
-                elif ext in _ZIP_ANNIDATI_EXTS:
-                    # B5 «apriscatole»: 71 zip + 52 .skill (che SONO zip) non
-                    # venivano aperti — es. ChatExport_2026-07-10.zip.
-                    with z.open(info) as f:
-                        raw = _read_capped(f, name, budget)
-                    yield from _iter_zip_annidato(raw, name, label, ts, budget)
+                elif ext in _IMG_EXTS or ext in _ZIP_ANNIDATI_EXTS:
+                    # B5 «occhi e apriscatole». La lettura è INTERA (serve il
+                    # file completo per OCR/unzip) e il tetto per-membro qui
+                    # NON può abortire: la prima stesura lasciava propagare il
+                    # ValueError di _read_capped e mcp_dash_bak040826.zip
+                    # (>512MB decompressi) ha UCCISO l'intero re-ingest del
+                    # bundle (28/08 sera, misurato sul vivo). Ora: lapide
+                    # dichiarata e si prosegue — il tetto GLOBALE del budget
+                    # invece propaga sempre, è la difesa anti zip-bomb.
+                    try:
+                        with z.open(info) as f:
+                            raw = _read_capped(f, name, budget)
+                    except ValueError:
+                        if budget.left < 0:
+                            raise
+                        yield _Skip("bundle-workfiles", "membro-oltre-tetto", name, ts)
+                        continue
+                    if ext in _IMG_EXTS:
+                        yield from _iter_immagine_bytes(raw, name, label, ts)
+                    else:
+                        yield from _iter_zip_annidato(raw, name, label, ts, budget)
                 else:
                     # PRIMA della lapide: guarda il CONTENUTO, non l'estensione (D10/§1).
                     # Un file «fuori whitelist» può essere testo pieno — 829 lo erano.
