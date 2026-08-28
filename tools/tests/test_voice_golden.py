@@ -43,7 +43,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 # Minimi misurati alla taratura del 27/08/2026 (46 voci, 37 confidenti).
-ACCORDO_MIN = 30          # accordo totale sui giudizi confidenti
+ACCORDO_MIN = 35          # accordo totale sui giudizi confidenti (30 dalla
+                          # taratura del 27/08; 35 dal 28/08 col confine
+                          # mixed↔transcript: cornice_propria + senza_cornice.
+                          # I 2 mancanti sono DICHIARATI: l'incollato emotivo
+                          # senza segnali formali e il riepilogo-GDR senza
+                          # marcatori — curarli creerebbe falsi cari.)
 OWN_MIN = 21              # own veri riconosciuti (erano 21/21)
 PASTED_AI_MIN = 6         # pasted_ai veri riconosciuti (erano 6/7: il settimo è
                           # un testo emotivo senza alcun segnale formale —
