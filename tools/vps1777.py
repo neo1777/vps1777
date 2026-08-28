@@ -1471,23 +1471,40 @@ def snapshot_versioni_da_tenere(base: Path, quante: int = 3) -> set[Path]:
     return {per_versione[v] for v in ultime}
 
 
-def snapshot_prune(repo: Path, keep: Path | None, keep_versioni: int = 3) -> None:
+def snapshot_prune(repo: Path, keep: Path | None, keep_versioni: int = 2) -> None:
+    """Pota gli snapshot pre-update: restano l'ultimo delle ultime `keep_versioni`
+    VERSIONI (default n e n-1) più l'eventuale `keep` — tutto il resto va via
+    SUBITO, senza finestra a tempo.
+
+    📜 LA STORIA DELLE DUE DECISIONI, perché questa funzione le porta entrambe:
+    · 16/08 (voce f9818614, Neo: «sì penso sia meglio avere tutto»): la regola
+      era 72h ∧ ultime-3-versioni — nata da 8 release in 10 ore che avevano
+      svuotato la finestra a tempo.
+    · 29/08 (Neo, dopo 7 release in 36h × volumi da 10 GB = 48 GB di snapshot
+      legittimi su un disco da 118): «ok che volevo tenere tutto ma se è davvero
+      inutile e basta n, n-1 per paranoia va bene anche così — dobbiamo farci
+      stare quel che serve». La regola a TEMPO è rimossa: il tempo non limita
+      il PESO, il numero di versioni sì (tetto naturale, qualunque sia il ritmo).
+
+    🛡️ Il vincolo di sicurezza, aggiornato e dichiarato: l'ultimo snapshot delle
+      ultime `keep_versioni` versioni NON è mai cancellabile da qui, qualunque
+      cosa dica l'orologio. Una directory il cui nome NON dichiara una versione
+      non è giudicabile per versione: per lei sopravvive la vecchia regola a
+      72h — l'errore di parsing costa spazio, mai un rollback perduto."""
     base = repo / "backups" / "pre-update"
     if not base.is_dir():
         return
-    # pota al successivo update riuscito E dopo 72h — il più tardivo dei due:
-    # uno snapshot recente resta anche se un nuovo update è già riuscito.
-    cutoff = time.time() - 72 * 3600
-    # …e in più: l'ultimo snapshot di ciascuna delle ultime `keep_versioni` versioni,
-    # perché 72h di margine non dicono quante VERSIONI indietro si può tornare.
+    cutoff = time.time() - 72 * 3600      # SOLO per i nomi senza versione
     protetti = snapshot_versioni_da_tenere(base, keep_versioni)
     for d in sorted(d for d in base.iterdir() if d.is_dir()):
         if keep and d == keep:
             continue
         if d in protetti:
             continue
-        if d.stat().st_mtime < cutoff:
-            shutil.rmtree(d, ignore_errors=True)
+        if re.match(r"^\d+\.\d+\.\d+", d.name):
+            shutil.rmtree(d, ignore_errors=True)      # fuori da n/n-1: via subito
+        elif d.stat().st_mtime < cutoff:
+            shutil.rmtree(d, ignore_errors=True)      # senza versione: regola a tempo
 
 
 def releases_prune(repo: Path, keep_versions: set[str]) -> None:
@@ -2124,7 +2141,8 @@ def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
 def cmd_check(repo: Path, args) -> int:
     st = state_load(repo)
     cur = current_version(repo)
-    # La retention 72h dello snapshot pre-update deve valere in OGNI percorso:
+    # La retention dello snapshot pre-update (n/n-1, decisione 29/08; 72h solo
+    # per i nomi senza versione) deve valere in OGNI percorso:
     # l'altra chiamata vive nello step-15 dell'update riuscito, quindi un update
     # fallito e mai ritentato lasciava lo snapshot in chiaro a tempo
     # indeterminato. Qui gira col timer giornaliero, anche a stack rotto — e
@@ -2211,7 +2229,7 @@ def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
     progress_write(repo, target, 90, "rollback", "running", reason)
     # keep=snap, non None: lo snapshot di QUESTO update serve più sotto per il
     # restore dati e resta l'unica via di `rollback --with-data` manuale se il
-    # health-gate fallisce. Si potano solo i residui oltre le 72h.
+    # health-gate fallisce. Gli altri: n/n-1 restano, il resto va (dec. 29/08).
     snapshot_prune(repo, keep=snap)
     env = {"VPS1777_TAG": norm_ver(previous)}
     run([*compose_cmd(repo), "down"], check=False, env=env)

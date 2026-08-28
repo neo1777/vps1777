@@ -100,6 +100,11 @@ def test_snapshot_prune_with_keep_latest_survives_when_all_are_stale():
         v.snapshot_prune(repo, keep=v.snapshot_latest(repo))
         assert not older.exists()
         assert newer.exists()
+        # 29/08: con la regola n/n-1 restano anche le ultime DUE versioni
+        # (0.40.4, 0.40.5) oltre al keep (0.40.2, l'mtime più recente);
+        # 0.40.3 non è protetta da niente e va via anche se dentro le 72h.
+        vive = sorted(p.name.split("-")[0] for p in (repo / "backups" / "pre-update").iterdir())
+        assert vive == ["0.40.2", "0.40.4", "0.40.5"], vive
 
 
 
@@ -1885,6 +1890,37 @@ def test_archive_retag_e_registrato_e_non_scrive_per_difetto():
     assert '"--scrivi", action="store_true"' in blocco, (
         "il default deve NON scrivere: `--scrivi` è l'opt-in, non l'opt-out")
     assert "--secco" not in blocco, "il verso del default è invertito"
+
+
+
+
+def test_snapshot_prune_29_08_n_e_n1_anche_se_freschi():
+    """La decisione del 29/08 (Neo: «basta n, n-1 per paranoia — dobbiamo farci
+    stare quel che serve»): 7 release in 36 ore × volumi da 10 GB = 48 GB di
+    snapshot TUTTI dentro le 72h — la regola a tempo non li toccava e il disco
+    è passato da 24 a 92 GB. Ora: fuori da n/n-1 si pota SUBITO, orologio o no.
+    E il fallback dichiarato: una dir senza versione nel nome resta sulla
+    regola a 72h — fresca sopravvive, stantia va."""
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        base = repo / "backups" / "pre-update"
+        adesso = __import__("time").time()
+        versioni = [f"0.43.{n}" for n in range(2, 12)]      # 0.43.2 … 0.43.11
+        for i, ver in enumerate(versioni):
+            dd = base / f"{ver}-20260828-12000{i % 10}"
+            dd.mkdir(parents=True)
+            os.utime(dd, (adesso - 3600 + i, adesso - 3600 + i))   # tutti FRESCHI
+        senza_ver_fresca = base / "manuale-di-neo"
+        senza_ver_fresca.mkdir()
+        senza_ver_stantia = base / "vecchio-esperimento"
+        senza_ver_stantia.mkdir()
+        os.utime(senza_ver_stantia, (adesso - 200 * 3600,) * 2)
+
+        v.snapshot_prune(repo, keep=v.snapshot_latest(repo))
+
+        vive = sorted(p.name for p in base.iterdir() if p.is_dir())
+        assert vive == ["0.43.10-20260828-120008", "0.43.11-20260828-120009",
+                        "manuale-di-neo"], vive
 
 
 if __name__ == "__main__":

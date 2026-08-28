@@ -171,7 +171,7 @@ inerte. `vps1777 update` ti avvisa se lo trova attivo. Usa il canale gestito.
 | Versione deployata | `.env` → `VPS1777_TAG` (scritta SOLO da update/rollback/bootstrap/installer) |
 | Stato del canale (previous, history, nonce…) | `var/state.json` (chmod 700) |
 | Release staged (bundle + rollback-files) | `releases/vX.Y.Z/` (tenute: corrente + precedente) |
-| Snapshot pre-update | `backups/pre-update/` (tenuto: l'ultimo) |
+| Snapshot pre-update | `backups/pre-update/` (tenuti: l'ultimo delle ultime **2 versioni** — n e n-1; il resto si pota subito. Decisione owner del 29/08: la vecchia regola 72h+3-versioni non guardava il PESO, e 7 release in 36h × volumi da 10 GB hanno riempito il disco) |
 | Stato check / intent / progress (per la card admin) | `onboarding/update_{status,pending_update,progress}.json` |
 | Registro migrazioni | volume `gateway-data` → `state/migrations.json` |
 | Log dell'updater | `journalctl -u vps1777-update -u vps1777-check-update` |
