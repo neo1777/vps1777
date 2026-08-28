@@ -2,6 +2,21 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.7] — 2026-08-28
+
+**Il describe che mollava la linea.**
+
+### 🐛 Corretti
+
+- **`describe_databases` rispondeva «connection lost»** (#230): le statistiche
+  (count, min/max ts, etichette distinte) venivano ricalcolate su TUTTI i DB a
+  ogni chiamata — 74,6 s a freddo e 53,9 s a caldo misurati nel container su
+  12 DB (5,7 GB) — e il proxy MCP molla molto prima. Ora: memo per snapshot
+  (la scansione si paga una volta per versione del file, si invalida da sola
+  a ogni upload o set_description) + warmup in avvio (la prima scansione dopo
+  un riavvio la paga il server, non il primo client). Test sull'effetto nei
+  due versi: il memo morde a file fermo, e invalida il solo DB toccato.
+
 ## [0.43.6] — 2026-08-28
 
 **I bug che si trovano solo usando: la fase USO ripaga al primo giorno.**
