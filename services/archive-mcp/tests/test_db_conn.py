@@ -262,3 +262,29 @@ def test_8_describe_riscansiona_QUANDO_il_file_cambia(db, monkeypatch):
     assert conta["n"] == 1, (
         f"atteso ricalcolo per il SOLO db toccato, misurato {conta['n']} "
         "(0 = cache di dati vecchi; 2 = invalidazione tutto-o-niente)")
+
+
+def test_9_integrita_multi_db_ha_un_budget_e_lo_dichiara(db, monkeypatch):
+    """Misurato il 28/08/2026: check_integrity su tutti i DB = minuti, il proxy
+    molla a ~30-60s e le chiamate scadute restavano in coda a occupare il server.
+    Col budget: si risponde con ciò che si è misurato, e ogni DB saltato lo
+    DICHIARA (non_misurato + come ottenerlo). La chiamata mirata non ha budget."""
+    modulo, _tmp = db
+    orologio = {"t": 0.0}
+    monkeypatch.setattr(modulo.time, "monotonic", lambda: orologio["t"])
+    vera = modulo.integrita.verifica
+
+    def lenta(dbs):
+        orologio["t"] += 30.0          # ogni DB "costa" 30s: il 2° sfora il budget
+        return vera(dbs)
+
+    monkeypatch.setattr(modulo.integrita, "verifica", lenta)
+    esiti = sorted(v["esito"] for v in modulo.integrita_archivi()["per_db"].values())
+    assert esiti == ["non_misurato", "ok"], (
+        f"attesi un misurato e un dichiarato-saltato, ottenuti {esiti}")
+    saltato = [v for v in modulo.integrita_archivi()["per_db"].values()
+               if v["esito"] == "non_misurato"][0]
+    assert "db_name=" in saltato["dettaglio"], "il saltato non dice come ottenerlo"
+    # il percorso mirato NON ha budget: anche 'lento', misura.
+    orologio["t"] = 0.0
+    assert modulo.integrita_archivi("uno")["per_db"]["uno"]["esito"] == "ok"
