@@ -1677,3 +1677,32 @@ def test_mandato_non_e_user(tmp_path: Path) -> None:
     assert sender_per_uuid["a1"] == "assistant"
     assert archive_indexer.speaker_da_sender("mandato") == "assistant"
     assert archive_indexer.speaker_da_sender("user") == "human"
+
+
+def test_confine_mixed_transcript_nei_due_versi() -> None:
+    """Il criterio dell'owner, letto nel gold (28/08/2026): la cornice decide.
+
+    ② con cornice → mixed: «ottengo quanto segue:» + trascrizione piena di
+    timestamp è materiale INCORNICIATO. ③ senza cornice → transcript: il dump
+    che parte col prompt di shell non contiene nessuna parola dell'owner.
+    E i guardiani sono STRETTI: «flutter:» non è una cornice (il downgrade non
+    scatta), la prosa normale non è materiale-da-subito (l'upgrade non scatta).
+    """
+    ts = " ".join(f"({m}:0{s})" for m in range(1, 10) for s in range(0, 9, 2))
+    con_cornice = "[human] ottengo quanto segue: " + ts
+    voce, _q, _c, flags = archive_indexer.classify_voice(con_cornice, "user", "chat")
+    assert voce == "mixed" and "cornice_propria" in flags
+
+    senza = "[human] flutter: Error GET request " + ts
+    voce2, _q, _c, _f = archive_indexer.classify_voice(senza, "user", "chat")
+    assert voce2 == "pasted_transcript", "«flutter:» non è una cornice"
+
+    inglese = ("the process could not complete because the file was not found "
+               "and the system will now retry with the same parameters again " * 3)
+    dump = "neo1777@host:~/proj$ rm -rf build\n" + inglese
+    voce3, _q, _c, flags3 = archive_indexer.classify_voice(dump, "user", "chat")
+    assert voce3 == "pasted_transcript" and "senza_cornice" in flags3
+
+    con_parole = "[human] questo il log ora: " + inglese
+    voce4, _q, _c, _f4 = archive_indexer.classify_voice(con_parole, "user", "chat")
+    assert voce4 == "mixed", "con la cornice dell'owner il blocco inglese resta mixed"

@@ -637,6 +637,45 @@ TEMPLATE_SEGNALI_MIN = 3  # segnali strutturali perché un testo SENZA incipit d
 
 _RE_TS = re.compile(r"[(\[]?\b\d{1,2}:\d{2}(?::\d{2})?\b[)\]]?")
 _RE_TRAP = re.compile(r"transcript|analyz|analisi|trascriz|pulizia|youtube", re.I)
+
+# ── il confine mixed↔pasted_transcript (tarato sul gold il 28/08/2026) ─────────
+# Il criterio dell'owner, letto nei 5 disaccordi del golden-set su questo
+# confine: se PRIMA del materiale c'è una cornice sua («ottengo quanto segue:»,
+# «questo il log ora:», «risposta:») il messaggio è MIXED; se il materiale parte
+# al carattere zero (prompt di shell, <local-command-caveat>) senza una parola
+# sua, è PASTED_TRANSCRIPT. Due guardiani STRETTI, per l'asimmetria della spec
+# (falsi negativi accettabili, falsi positivi cari): il downgrade ②→mixed esige
+# una cornice che PARLI ITALIANO (un log che inizia «flutter:» non è una
+# cornice), l'upgrade ③→transcript esige il marcatore-macchina a inizio testo.
+# Nessuno dei due tocca mai `own`.
+_RE_MAT_INIZIO = re.compile(
+    r"^(?:<local-command-caveat>"          # il blocco-caveat dei comandi locali
+    r"|[\w.-]+@[\w.-]+:[^\n]{0,120}[$#]"   # prompt di shell (user@host:path$)
+    r"|PS [A-Z]:\\"                        # prompt PowerShell
+    r"|\$ |```)")
+_IT_CORNICE = frozenset((
+    "questo", "questa", "ecco", "risposta", "output", "ottengo", "segue",
+    "quanto", "ora", "il", "la", "log", "errore", "succede", "dice", "esce"))
+
+
+def _cornice_propria(testo: str) -> bool:
+    """C'è un incipit dell'owner prima del materiale? Segmento corto che chiude
+    con ':' e contiene almeno una parola italiana della cornice — «risposta:» sì,
+    «flutter:» no. Stretto di proposito: in dubbio, niente cornice."""
+    t = testo[len("[human] "):] if testo.startswith("[human] ") else testo
+    t = t.lstrip()
+    seg = t.split(":", 1)[0]
+    if not (0 < len(seg) <= 60) or ":" not in t:
+        return False
+    parole = [p.strip(".,;!?()[]\"'").lower() for p in seg.split()]
+    return any(p in _IT_CORNICE for p in parole)
+
+
+def _materiale_da_subito(testo: str) -> bool:
+    """Il testo parte col materiale-macchina al carattere zero (nessuna parola
+    dell'owner prima)? Marcatori stretti: shell, PowerShell, caveat, fence."""
+    t = testo[len("[human] "):] if testo.startswith("[human] ") else testo
+    return bool(_RE_MAT_INIZIO.match(t.lstrip()))
 _RE_CHARACTER = re.compile(r"gdr|roleplay|agora|simposio|partita", re.I)
 _RE_FENCE = re.compile(r"^\s*(>|```)", re.M)
 # Recitazione NEL TESTO: azione RP fra asterischi SINGOLI (*si siede al tavolo*).
@@ -733,7 +772,13 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
     if len(ts) >= TS_VIDEO_MIN:
         flags.append("video_ts")
     if (len(ts) >= TS_VIDEO_MIN and trap) or len(ts) >= TS_VIDEO_MIN * 3:
-        # due segnali indipendenti, oppure uno solo ma molto forte
+        # due segnali indipendenti, oppure uno solo ma molto forte.
+        # Ma se PRIMA del materiale c'è la cornice dell'owner («ottengo quanto
+        # segue:») la trascrizione è INCORNICIATA: è il suo mixed, non un puro
+        # incollato — 3 disaccordi su 7 del gold stavano tutti qui (28/08/2026).
+        if speaker_da_sender(sender) == "human" and _cornice_propria(testo):
+            flags.append("cornice_propria")
+            return ("mixed", _quota_citata(testo), 0.6, flags)
         conf = 0.8 if trap else 0.6
         return ("pasted_transcript", _quota_citata(testo), conf, flags)
 
@@ -746,7 +791,14 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
             flags.append("en_in_it")
             # su un mittente umano è `mixed` e non `pasted_ai`: l'umano ha scritto
             # la cornice, l'AI il materiale — ed è il caso-scuola (spec §0).
+            # A meno che la cornice NON esista: se il materiale parte al
+            # carattere zero (prompt di shell, <local-command-caveat>) non c'è
+            # nessuna parola dell'owner — è un dump, e il suo nome è
+            # pasted_transcript (2 disaccordi su 7 del gold, 28/08/2026).
             if speaker_da_sender(sender) == "human":
+                if _materiale_da_subito(testo):
+                    flags.append("senza_cornice")
+                    return ("pasted_transcript", _quota_citata(testo), 0.6, flags)
                 return ("mixed", _quota_citata(testo), 0.5, flags)
             return ("pasted_ai", _quota_citata(testo), 0.6, flags)
 
