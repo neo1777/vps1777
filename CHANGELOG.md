@@ -2,6 +2,19 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.11] — 2026-08-28
+
+**La lapide al posto dell'abort: l'apriscatole incontra il mondo reale.**
+
+### 🐛 Corretti
+
+- **Un membro-zip oltre il tetto uccideva l'ingest intero** (#243): al primo
+  re-ingest vero, `mcp_dash_bak040826.zip` (>512 MB decompressi) dentro i
+  workfiles ha fatto propagare il ValueError di `_read_capped` e l'intero
+  bundle è morto. Ora i rami occhi+apriscatole rispondono con la lapide
+  `membro-oltre-tetto` e proseguono; il tetto globale del budget (anti
+  zip-bomb) propaga sempre. Test col caso reale in miniatura.
+
 ## [0.43.10] — 2026-08-28
 
 **Occhi e apriscatole — e l'occhio vive nella sua stanza.**
