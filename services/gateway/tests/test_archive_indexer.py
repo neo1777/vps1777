@@ -1617,3 +1617,63 @@ def test_retag_dalla_riga_di_comando_non_scrive_senza_scrivi(tmp_path: Path, cap
     assert out["scritto"] is False and out["cambiate"] == 1
     with sqlite3.connect(db) as c:
         assert c.execute("SELECT voice FROM messages").fetchone()[0] == "SEGNAPOSTO"
+
+
+# ── etichette, titoli-ts, mandati (cure del 28/08/2026, bundle 20260811 alla mano) ──
+
+def test_label_da_cwd_windows_local_agent_e_normale() -> None:
+    """I tre difetti misurati: path Windows intero come label, «outputs» che
+    collassa sessioni diverse, e il caso normale che non deve cambiare."""
+    f = archive_indexer._label_da_cwd
+    assert f(r"C:\Users\Administrator\AppData\Roaming\Claude\local-agent-mode-sessions\a4052b44") == "local-agent:a4052b44"
+    assert f("/home/x/.config/Claude/local-agent-mode-sessions/35d8973d-aaaa/d196a35c-bbbb/local_af4e235a-8b8f-43e1/outputs") == "local-agent:af4e235a"
+    assert f("/home/x/Scrivania/vps1777") == "vps1777"
+    assert f("") == "unknown"
+
+
+def test_workfile_label_due_livelli() -> None:
+    """Il secchio unico da 126k righe si spacchetta; i file in radice restano a un livello."""
+    f = archive_indexer._workfile_label
+    assert f("workfiles/-home-x-Scrivania/vps1777-installer/LICENSE") == "workfile:-home-x-Scrivania/vps1777-installer"
+    assert f("workfiles/-home-x-Scrivania/appunto.txt") == "workfile:-home-x-Scrivania"
+    assert f("workfiles") == "workfile"
+
+
+def test_titolo_eredita_ultimo_ts(tmp_path: Path) -> None:
+    """ai-title non porta timestamp (misurato): il titolo eredita l'ultimo ts
+    visto; se arriva PRIMA di ogni messaggio resta '' — onesto, non inventato."""
+    import io as _io
+    righe = "\n".join([
+        '{"type":"ai-title","aiTitle":"Titolo precoce","sessionId":"s0"}',
+        '{"type":"user","uuid":"u1","timestamp":"2026-02-02T10:00:00Z","cwd":"/x/p","message":{"content":"ciao"}}',
+        '{"type":"ai-title","aiTitle":"Titolo maturo","sessionId":"s1"}',
+    ])
+    rows = [r for r in archive_indexer._iter_claude_code(_io.StringIO(righe), "p")
+            if not isinstance(r, archive_indexer._Skip)]
+    per_titolo = {r[3]: r[2] for r in rows if r[4] == "title"}
+    assert per_titolo["Titolo precoce"] == ""
+    assert per_titolo["Titolo maturo"] == "2026-02-02T10:00:00Z"
+
+
+def test_mandato_non_e_user(tmp_path: Path) -> None:
+    """AN-11 modellata: la riga TIPO user scritta dalla macchina (isSidechain nei
+    transcript, parent_tool_use_id negli audit) diventa sender='mandato' →
+    speaker='assistant'. Il verso opposto: lo user vero resta 'user'→'human'.
+    È il difetto B3 della vecchia app — e l'errore del Laboratorio dell'11/07 —
+    chiuso nello schema invece che nella prudenza di chi legge."""
+    import io as _io
+    righe = "\n".join([
+        '{"type":"user","uuid":"m1","timestamp":"2026-02-02T10:00:00Z","isSidechain":true,"cwd":"/x/p","message":{"content":"Sei l\'agente A di un esperimento"}}',
+        '{"type":"user","uuid":"m2","timestamp":"2026-02-02T10:00:01Z","parent_tool_use_id":"toolu_01","message":{"content":"mandato da audit"}}',
+        '{"type":"user","uuid":"v1","timestamp":"2026-02-02T10:00:02Z","cwd":"/x/p","message":{"content":"parola vera di Neo"}}',
+        '{"type":"assistant","uuid":"a1","timestamp":"2026-02-02T10:00:03Z","message":{"content":"risposta"}}',
+    ])
+    rows = [r for r in archive_indexer._iter_claude_code(_io.StringIO(righe), "p")
+            if not isinstance(r, archive_indexer._Skip)]
+    sender_per_uuid = {r[0]: r[4] for r in rows}
+    assert sender_per_uuid["m1"] == "mandato"
+    assert sender_per_uuid["m2"] == "mandato"
+    assert sender_per_uuid["v1"] == "user"
+    assert sender_per_uuid["a1"] == "assistant"
+    assert archive_indexer.speaker_da_sender("mandato") == "assistant"
+    assert archive_indexer.speaker_da_sender("user") == "human"

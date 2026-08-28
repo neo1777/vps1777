@@ -553,6 +553,10 @@ _SPEAKER_NOTI = {
     "user": "human",
     "human": "human",
     "assistant": "assistant",
+    # Il mandato a un subagent è di TIPO user ma l'ha scritto la macchina
+    # (`_iter_claude_code` lo marca dal fatto: parent_tool_use_id/isSidechain).
+    # speaker è «chi INVIA, un fatto»: il fatto è che invia la macchina.
+    "mandato": "assistant",
 }
 
 
@@ -1146,10 +1150,39 @@ def _uid(*parts: str) -> str:
 _CC_TYPES = ("user", "assistant")
 
 
+def _label_da_cwd(cwd: str) -> str:
+    """Etichetta-progetto dalla `cwd` della sessione. Tre difetti misurati sul
+    bundle 20260811 (28/08/2026) che questa funzione cura:
+      · path WINDOWS: `Path(r"C:\\…\\a4052b44").name` non spezza i backslash e
+        l'INTERO path diventava l'etichetta (illeggibile, e diversa per macchina);
+      · sessioni LOCAL-AGENT: la cwd finisce in `…/local_<uuid>/outputs` e
+        l'etichetta era «outputs» — un nome di cartella che non dice niente e
+        collassa sessioni diverse (1.825 righe sotto quel nome);
+      · cwd vuota → 'unknown', come prima.
+    """
+    s = str(cwd or "").replace("\\", "/").rstrip("/")
+    parti = [p for p in s.split("/") if p]
+    if not parti:
+        return "unknown"
+    if "local-agent-mode-sessions" in parti:
+        for p in parti:
+            if p.startswith("local_") and len(p) > len("local_"):
+                return f"local-agent:{p[len('local_'):][:8]}"
+        dopo = parti[parti.index("local-agent-mode-sessions") + 1:]
+        return f"local-agent:{dopo[0][:8]}" if dopo else "local-agent"
+    return parti[-1]
+
+
 def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
     # tetto anche qui: `index_jsonl` accetta un file-like (non solo un path), e su
     # uno stream non c'è nessuno `st_size` da controllare. Si contano i byte letti.
     read = 0
+    # ultimo ts visto: i record `ai-title` NON portano timestamp (misurato sui
+    # jsonl reali) e i titoli entravano con ts='' — 1.147 righe senza data nel
+    # bundle 20260811. Il titolo eredita l'ultimo ts di sessione visto; se
+    # arriva prima di ogni messaggio resta '' (onesto: la fonte non lo dice).
+    # NIENTE riordini: l'ordine di resa è un CONTRATTO (classify_cc/cc_buckets).
+    ultimo_ts = ""
     for line in fh:
         read += len(line)
         if read > MAX_FILE_BYTES:
@@ -1176,13 +1209,13 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
                 # uguali → una lapide sola. NB: `n_riga` era rimasto qui dopo la sua
                 # rimozione → NameError sui titoli senza sessionId (crash dell'ingest).
                 yield (_uid("cc-title", str(d.get("sessionId") or d["aiTitle"])), "titoli",
-                       "", str(d["aiTitle"]).strip(), "title", "", "", "", "")
+                       ultimo_ts, str(d["aiTitle"]).strip(), "title", "", "", "", "")
             elif typ == "attachment" and d.get("uuid"):
                 att = d.get("attachment") if isinstance(d.get("attachment"), dict) else {}
                 added = " ".join(str(x) for x in (att.get("addedNames") or []))
                 if added.strip():
                     yield (str(d["uuid"]),
-                           project or Path(str(d.get("cwd") or "unknown")).name or "unknown",
+                           project or _label_da_cwd(str(d.get("cwd") or "")),
                            str(d.get("timestamp") or ""), "", "attachment", "", "",
                            added.strip(), str(d.get("parentUuid") or ""))
                 else:
@@ -1208,8 +1241,21 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
         if not (blocks.text or blocks.tools or blocks.thinking):
             yield _Skip("claude-code", "empty", str(uuid), str(ts))
             continue
-        proj = project or Path(str(d.get("cwd") or "unknown")).name or "unknown"
-        yield (uuid, proj, ts, blocks.text, str(msg.get("role") or d.get("type") or ""),
+        proj = project or _label_da_cwd(str(d.get("cwd") or ""))
+        sender = str(msg.get("role") or d.get("type") or "")
+        if sender == "user" and (d.get("isSidechain") or d.get("parent_tool_use_id")):
+            # AN-11 modellata (28/08/2026): la riga è di TIPO user ma l'ha scritta
+            # la MACCHINA — il mandato a un subagent (`parent_tool_use_id` negli
+            # audit.jsonl, `isSidechain` nei transcript; i tool_result delle
+            # sidechain cadono qui con lo stesso diritto: nessuna è parola di Neo).
+            # Prima entrava come 'user' → speaker='human': la voce del committente
+            # fabbricata dallo schema — il difetto B3 della vecchia app, risorto in
+            # forma fine, ed è LETTERALMENTE l'errore che il Laboratorio dell'11/07
+            # ha scoperto (frasi dei mandati attribuite a Neo). sender='mandato'
+            # → speaker='assistant' (mappa in _SPEAKER_NOTI).
+            sender = "mandato"
+        ultimo_ts = str(ts)
+        yield (uuid, proj, ts, blocks.text, sender,
                blocks.tools, blocks.thinking, "", str(d.get("parentUuid") or ""))
 
 
@@ -1911,11 +1957,20 @@ def _iter_cc_text(text: str, name: str) -> Iterator:
 
 
 def _workfile_label(name: str) -> str:
-    """Etichetta-progetto per un membro workfiles/: la cartella-cwd (primo livello
-    sotto workfiles/), non il path intero — le etichette devono restare contabili.
-    Il path completo resta cercabile: è la prima riga del contenuto e la fonte
+    """Etichetta-progetto per un membro workfiles/: cartella-cwd + PRIMA
+    sottocartella, non il path intero — le etichette devono restare contabili.
+
+    Perché due livelli e non uno (misurato sul bundle 20260811, 28/08/2026):
+    con un livello solo TUTTA la Scrivania collassava in un secchio unico da
+    126.043 righe («workfile:-home-…-Scrivania») — un'etichetta che non
+    distingue niente non è un'etichetta. Col secondo livello il secchio si
+    spacchetta per progetto (vps1777-installer, Documenti, …); i file sciolti
+    nella radice della cwd restano sull'etichetta a un livello. Il path
+    completo resta cercabile: è la prima riga del contenuto e la fonte
     dell'avvistamento/lapide."""
     parts = name.split("/")
+    if len(parts) > 3:
+        return f"workfile:{parts[1]}/{parts[2]}"
     return f"workfile:{parts[1]}" if len(parts) > 2 else "workfile"
 
 
