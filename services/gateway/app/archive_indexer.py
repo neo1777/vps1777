@@ -41,7 +41,9 @@ import hashlib
 import io
 import json
 import re
+import shutil
 import sqlite3
+import subprocess
 import sys
 import zipfile
 from html.parser import HTMLParser
@@ -2055,6 +2057,96 @@ def _iter_pdf_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator:
         yield _Skip("bundle-workfiles", "pdf-illeggibile", f"{name}: {exc}", ts)
 
 
+# ── occhi e apriscatole (28/08/2026, punto B5 del piano post-format) ──────────
+# OCR LOCALE via tesseract — scelta deliberata con due precedenti misurati:
+# · il percorso NotebookLM (`vps1777 archive-ingest`) RESTA per il file pregiato
+#   singolo con verifica di fedeltà, ma manda il documento INTERO a Google
+#   (registro privacy del 10/08): 775 screenshot privati in batch non ci passano;
+# · il tesseract locale è già stato provato su QUESTO corpus (_chat/ocr1777,
+#   21-22/07: 562/562 immagini, 0 errori, ricetta `-l ita+eng`) — privato,
+#   deterministico, gratis. Binario assente → lapide dichiarata, mai salto muto.
+_IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
+MAX_IMG_BYTES = 12 * 1024 * 1024
+_OCR_LINGUE = "ita+eng"
+_OCR_TIMEOUT_S = 120            # il tetto di ocr1777: sul corpus non è mai scattato
+
+_ZIP_ANNIDATI_EXTS = (".zip", ".skill")   # .skill È uno zip (misurato: file(1))
+MAX_ZIP_ANNIDATO_MEMBRI = 2000            # anti-bomba: oltre, lapide dichiarata
+
+
+def _iter_immagine_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator:
+    """OCR di un'immagine → righe marcate [ocr], o una lapide che dice perché no."""
+    if len(raw) > MAX_IMG_BYTES:
+        yield _Skip("bundle-workfiles", "immagine-troppo-grande", name, ts)
+        return
+    if not shutil.which("tesseract"):
+        yield _Skip("bundle-workfiles", "ocr-non-disponibile", name, ts)
+        return
+    try:
+        r = subprocess.run(["tesseract", "stdin", "stdout", "-l", _OCR_LINGUE],
+                           input=raw, capture_output=True, timeout=_OCR_TIMEOUT_S)
+        testo = r.stdout.decode("utf-8", errors="replace").strip()
+    except Exception as exc:        # timeout, binario rotto: lapide, mai un crash
+        yield _Skip("bundle-workfiles", "ocr-errore", f"{name}: {type(exc).__name__}", ts)
+        return
+    if not testo:
+        yield _Skip("bundle-workfiles", "ocr-vuoto", name, ts)
+        return
+    yield from _chunk_rows(f"[{name}] [ocr]\n{testo}", label, ts, name)
+
+
+def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
+                       budget: _Budget) -> Iterator:
+    """UN livello di archivio dentro i workfiles (zip e .skill): i membri passano
+    dalla stessa trafila (testo, jsonl, pdf, immagini→OCR, sniff). Un archivio
+    dentro l'annidato NON si apre — profondità 1, anti-bomba: lapide dichiarata.
+    Il tetto GLOBALE (budget) propaga sempre; quello per-membro diventa lapide."""
+    try:
+        z = zipfile.ZipFile(io.BytesIO(raw))
+        membri = [m for m in z.namelist() if not m.endswith("/")]
+    except Exception:
+        yield _Skip("bundle-workfiles", "zip-illeggibile", name, ts)
+        return
+    if len(membri) > MAX_ZIP_ANNIDATO_MEMBRI:
+        yield _Skip("bundle-workfiles", "zip-troppi-membri", f"{name}: {len(membri)}", ts)
+        return
+    for m in membri:
+        visibile = f"{name}!{m}"
+        ext = Path(m).suffix.lower()
+        try:
+            with z.open(m) as f:
+                raw_m = _read_capped(f, visibile, budget)
+        except ValueError:
+            if budget.left < 0:
+                raise               # il tetto dell'ARCHIVIO intero non si assorbe
+            yield _Skip("bundle-workfiles", "membro-oltre-tetto", visibile, ts)
+            continue
+        except Exception:
+            yield _Skip("bundle-workfiles", "membro-illeggibile", visibile, ts)
+            continue
+        if ext in _ZIP_ANNIDATI_EXTS:
+            yield _Skip("bundle-workfiles", "zip-annidato-oltre-profondita", visibile, ts)
+        elif ext in _IMG_EXTS:
+            yield from _iter_immagine_bytes(raw_m, visibile, label, ts)
+        elif ext == ".pdf":
+            yield from _iter_pdf_bytes(raw_m, visibile, label, ts)
+        elif ext in (".jsonl", ".json"):
+            text = raw_m.decode("utf-8", errors="replace")
+            if _sniff_jsonl_kind(text[:20000]) == "cc":
+                yield from _iter_cc_text(text, visibile)
+            else:
+                yield from _chunk_rows(text, label, ts, visibile, chunk_chars=4000)
+        elif ext in _DOC_ZIP_EXTS:
+            yield from _chunk_rows(f"[{visibile}]\n" + raw_m.decode("utf-8", errors="replace"),
+                                   label, ts, visibile)
+        elif _sniff_e_testo(raw_m[:_SNIFF_BYTES]):
+            yield from _chunk_rows(f"[{visibile}] [testo-sniffato]\n"
+                                   + raw_m.decode("utf-8", errors="replace"),
+                                   label, ts, visibile)
+        else:
+            yield _Skip("bundle-workfiles", "non-testo", visibile, ts)
+
+
 def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
     with zipfile.ZipFile(zip_path) as z:
         names = [n for n in z.namelist() if not n.endswith("/")]
@@ -2099,6 +2191,21 @@ def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
                     with z.open(info) as f:
                         raw = _read_capped(f, name, budget, cap=MAX_PDF_BYTES)
                     yield from _iter_pdf_bytes(raw, name, label, ts)
+                elif ext in _IMG_EXTS:
+                    # B5 «occhi»: 775 immagini (547 png + 228 jpg) uscivano come
+                    # non-testo — molti sono screenshot, memoria vera in pixel.
+                    # Cap di default in lettura (non MAX_IMG_BYTES: qui un
+                    # ValueError abortirebbe l'INGEST INTERO); il tetto-immagine
+                    # lo giudica l'helper, che risponde con una lapide.
+                    with z.open(info) as f:
+                        raw = _read_capped(f, name, budget)
+                    yield from _iter_immagine_bytes(raw, name, label, ts)
+                elif ext in _ZIP_ANNIDATI_EXTS:
+                    # B5 «apriscatole»: 71 zip + 52 .skill (che SONO zip) non
+                    # venivano aperti — es. ChatExport_2026-07-10.zip.
+                    with z.open(info) as f:
+                        raw = _read_capped(f, name, budget)
+                    yield from _iter_zip_annidato(raw, name, label, ts, budget)
                 else:
                     # PRIMA della lapide: guarda il CONTENUTO, non l'estensione (D10/§1).
                     # Un file «fuori whitelist» può essere testo pieno — 829 lo erano.
