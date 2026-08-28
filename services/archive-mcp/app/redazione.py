@@ -69,6 +69,18 @@ EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]{2,}\b")
 # `+` o almeno 9 cifre, così un anno («2026») o un numero di riga non diventano telefoni.
 TELEFONO = re.compile(r"(?<![\w.])(?:\+\d{1,3}[\s.-]?)?(?:\d[\s.-]?){8,13}\d(?![\w.])")
 
+# La sagoma YYYYMMDD-HHMMSS (nomi di bundle e DB: `20260811-190343`) ha 14 cifre
+# e un separatore: TELEFONO la ingoia e i nomi degli archivi escono «[telefono
+# redatto]» nelle risposte (misurato 28/08/2026 sulle description via MCP).
+# L'esenzione è STRETTA — solo la forma esatta data-ora con secolo plausibile:
+# tutto il resto resta telefono, perché un'esenzione larga qui è un buco nella
+# redazione, non una cortesia.
+_TS_COMPATTO = re.compile(r"^(?:19|20)\d{6}[-T]\d{6}$")
+
+
+def _tel_o_timestamp(m: "re.Match[str]") -> str:
+    return m.group(0) if _TS_COMPATTO.match(m.group(0)) else SEGNAPOSTO_TEL
+
 SEGNAPOSTO_EMAIL = "[email redatta]"
 SEGNAPOSTO_TEL = "[telefono redatto]"
 SEGNAPOSTO_VALORE = "[dato personale redatto]"
@@ -119,7 +131,7 @@ def maschera_testo(s: str, noti: set[str] | None = None) -> str:
         if v in s:
             s = s.replace(v, SEGNAPOSTO_VALORE)
     s = EMAIL.sub(SEGNAPOSTO_EMAIL, s)
-    return TELEFONO.sub(SEGNAPOSTO_TEL, s)
+    return TELEFONO.sub(_tel_o_timestamp, s)
 
 
 def maschera(oggetto: Any, noti: set[str] | None = None) -> Any:

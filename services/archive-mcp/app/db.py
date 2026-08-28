@@ -252,6 +252,22 @@ def _targets(db: str) -> list[str]:
     return [db]
 
 
+def integrita_archivi(db: str = "") -> dict[str, Any]:
+    """Integrità (`ok`·`sporco`·`corrotto`·`non_misurabile`) — l'adattatore che
+    risolve i nomi e delega alla logica pura di `integrita.verifica`.
+
+    🪦 Nato MORTO col tool: `server.py` registrava `check_integrity` e chiamava
+       `db.integrita_archivi`, ma questa funzione non è mai stata scritta — i
+       test guardavano la REGISTRAZIONE e la CHIAMATA, nessuno la DEFINIZIONE.
+       In produzione: `AttributeError: module 'app.db' has no attribute
+       'integrita_archivi'`, trovato dall'uso il 27/08/2026 (prima chiamata
+       vera del tool, fase USO). Il presidio che manca sta ora in
+       `test_tool_registrato.py::test_la_funzione_chiamata_ESISTE_in_db`.
+    """
+    _maybe_reload()
+    return {"per_db": integrita.verifica({n: _DBS[n] for n in _targets(db)})}
+
+
 def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
            sort: str = "rank", since: str = "", until: str = "",
            project: str = "", speaker: str = "", voice: str = "",

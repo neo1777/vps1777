@@ -128,3 +128,25 @@ def test_la_redazione_e_attiva_per_default() -> None:
     sorgente = (Path(redazione.__file__)).read_text(encoding="utf-8")
     assert 'os.getenv("ARCHIVE_REDACT", "1")' in sorgente, \
         "il default deve essere ATTIVA: un presidio che nasce spento non è un presidio"
+
+
+def test_un_timestamp_compatto_non_e_un_telefono() -> None:
+    """`20260811-190343` è il nome di un bundle/DB (YYYYMMDD-HHMMSS), non un numero.
+
+    Misurato il 28/08/2026: le description degli archivi uscivano dai tool con
+    «[telefono redatto]» al posto del nome — chi legge non può più riferirsi al
+    DB per nome, e la redazione perde credibilità proprio dove non protegge nulla.
+    """
+    out = redazione.maschera_testo("il DB recupero-sessioni-1777_20260811-190343 è il più fresco")
+    assert "20260811-190343" in out
+
+
+def test_l_esenzione_timestamp_e_stretta_nei_due_versi() -> None:
+    """L'esenzione copre SOLO la sagoma data-ora con secolo plausibile.
+
+    Verso 1: quattordici cifre col trattino ma secolo implausibile → resta telefono.
+    Verso 2 (il caso noto che deve riuscire): il telefono vero continua a sparire —
+    senza questo, l'esenzione potrebbe essersi mangiata la redazione intera.
+    """
+    assert "12345678-654321" not in redazione.maschera_testo("chiama 12345678-654321 ora")
+    assert "333 1234567" not in redazione.maschera_testo("chiama +39 333 1234567 grazie")
