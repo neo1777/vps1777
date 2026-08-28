@@ -2,6 +2,31 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.8] — 2026-08-28
+
+**L'indexer impara i nomi, le date, e chi parla davvero.**
+
+### ✨ Migliorato
+
+- **Etichette-progetto vere** (#232): i path Windows non si spezzavano coi
+  backslash (l'intero path diventava l'etichetta), le sessioni local-agent
+  collassavano su «outputs», e tutta la Scrivania stava in un secchio unico da
+  126k righe. Ora: `local-agent:<uuid8>`, workfile a due livelli
+  (`workfile:<cwd>/<progetto>`), path Windows normalizzati. Vale dai prossimi
+  ingest; i DB esistenti conservano le etichette di nascita.
+- **I titoli hanno una data** (#232): `ai-title` non porta timestamp — il
+  titolo ora eredita l'ultimo ts di sessione visto (1.147 titoli senza data
+  nel bundle 20260811). Ordine di resa invariato: è un contratto.
+- **Il mandato non è Neo — AN-11 modellata** (#232): la riga di tipo user
+  scritta dalla macchina (isSidechain nei transcript, parent_tool_use_id
+  negli audit) diventa `sender=mandato` → `speaker=assistant`.
+  `speaker=human` torna a voler dire «parole del committente» — l'errore che
+  il Laboratorio dell'11/07 ha scoperto, chiuso nello schema.
+- **`check_integrity` multi-DB con budget** (#233): 20s, poi risponde con ciò
+  che ha misurato e dichiara `non_misurato` il resto (con il come-ottenerlo).
+  La chiamata mirata su un DB non ha budget. Prima: minuti di scansione in
+  coda, proxy in timeout, server occupato per tutti.
+
 ## [0.43.7] — 2026-08-28
 
 **Il describe che mollava la linea.**
