@@ -2,6 +2,27 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.6] — 2026-08-28
+
+**I bug che si trovano solo usando: la fase USO ripaga al primo giorno.**
+
+### 🐛 Corretti
+
+- **`check_integrity` rispondeva `AttributeError` alla prima chiamata vera**
+  (#228): `server.py` registrava il tool e chiamava `db.integrita_archivi`
+  dal giorno della sua nascita, ma l'adattatore non era mai stato scritto —
+  la logica pura aspettava in `integrita.py`, e i due test di presidio
+  guardavano registrazione e chiamata, mai la definizione. Ora l'adattatore
+  esiste (risolve i nomi con `_targets`, delega a `integrita.verifica`,
+  smoke sui tre versi) e il presidio nuovo è DERIVATO: ogni `db.X` chiamata
+  da un tool registrato deve avere `def X` in `db.py` — un tool futuro entra
+  da solo nel controllo.
+- **La redazione mangiava i nomi dei DB** (#228): la sagoma `YYYYMMDD-HHMMSS`
+  (`20260811-190343`) ha 14 cifre e un separatore — il pattern telefono la
+  ingoiava e le description degli archivi uscivano `[telefono redatto]`.
+  Esenzione stretta (solo data-ora con secolo plausibile), provata nei due
+  versi: il timestamp sopravvive, il telefono vero continua a sparire.
+
 ## [0.43.5] — 2026-08-27
 
 **La stretta che la prova-6 ha reso possibile, e i documenti che non promettono
