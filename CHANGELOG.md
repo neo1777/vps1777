@@ -2,6 +2,25 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.10] — 2026-08-28
+
+**Occhi e apriscatole: l'indexer legge i pixel e apre gli archivi.**
+
+### ✨ Migliorato
+
+- **OCR locale all'ingest** (#237): le immagini nei bundle (775 scartate come
+  non-testo: molti sono screenshot, memoria vera in pixel) passano da
+  tesseract DENTRO il gateway — i dati non lasciano la macchina. Il percorso
+  NotebookLM (`vps1777 archive-ingest`) resta per il file pregiato singolo con
+  verifica di fedeltà. Ricetta provata su _chat/ocr1777 (`-l ita+eng`,
+  562/562, 0 errori). Binario assente → lapide `ocr-non-disponibile`;
+  immagine senza testo → `ocr-vuoto`; testo → righe marcate `[ocr]`.
+- **Zip annidati a profondità 1** (#237): gli archivi dentro i workfiles
+  (71 zip + 52 `.skill`, che SONO zip — le skill ora sono cercabili) si
+  aprono e i membri passano dalla stessa trafila (testo, jsonl, pdf,
+  immagini→OCR, sniff). Zip dentro l'annidato → lapide anti-bomba; tetto
+  2000 membri; il budget globale anti zip-bomb propaga sempre.
+
 ## [0.43.9] — 2026-08-28
 
 **La cornice decide: il confine mixed↔transcript impara il criterio dell'owner.**
