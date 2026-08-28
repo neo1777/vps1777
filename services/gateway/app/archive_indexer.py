@@ -40,11 +40,11 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
-import shutil
 import sqlite3
-import subprocess
 import sys
+import urllib.request
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
@@ -2058,35 +2058,52 @@ def _iter_pdf_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator:
 
 
 # ── occhi e apriscatole (28/08/2026, punto B5 del piano post-format) ──────────
-# OCR LOCALE via tesseract — scelta deliberata con due precedenti misurati:
-# · il percorso NotebookLM (`vps1777 archive-ingest`) RESTA per il file pregiato
-#   singolo con verifica di fedeltà, ma manda il documento INTERO a Google
-#   (registro privacy del 10/08): 775 screenshot privati in batch non ci passano;
-# · il tesseract locale è già stato provato su QUESTO corpus (_chat/ocr1777,
-#   21-22/07: 562/562 immagini, 0 errori, ricetta `-l ita+eng`) — privato,
-#   deterministico, gratis. Binario assente → lapide dichiarata, mai salto muto.
+# OCR LOCALE — ma NON in questo processo, ed è un invariante di sicurezza:
+# 🔴 la prima versione importava `subprocess` e lanciava tesseract QUI. Il
+#    presidio test_gateway_non_tocca_docker l'ha bocciata in CI (giustamente:
+#    «il gateway non esegue processi — scrive un intent, non agisce», ed è
+#    doppiamente vero per un parser di immagini con la storia CVE di tesseract
+#    dentro il servizio ESPOSTO). L'OCR vive in un servizio interno dedicato
+#    (`services/ocr`, senza porte pubblicate né volumi) e da qui lo si chiama
+#    via HTTP con la stdlib: se il servizio non c'è, ogni immagine lascia una
+#    lapide dichiarata — mai un salto muto, mai un subprocess nel gateway.
+# La scelta tesseract-locale (vs NotebookLM) resta deliberata: il percorso
+# NotebookLM (`vps1777 archive-ingest`) manda il documento INTERO a Google
+# (registro privacy 10/08) — va bene per il file pregiato singolo, non per
+# 775 screenshot privati in batch. Ricetta `-l ita+eng` provata su
+# _chat/ocr1777 (21-22/07: 562/562 immagini, 0 errori).
 _IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
 MAX_IMG_BYTES = 12 * 1024 * 1024
-_OCR_LINGUE = "ita+eng"
 _OCR_TIMEOUT_S = 120            # il tetto di ocr1777: sul corpus non è mai scattato
+
+
+def _ocr_url() -> str:
+    """L'endpoint del servizio OCR interno ('' = non configurato → lapidi)."""
+    return os.environ.get("OCR_URL", "").strip()
+
 
 _ZIP_ANNIDATI_EXTS = (".zip", ".skill")   # .skill È uno zip (misurato: file(1))
 MAX_ZIP_ANNIDATO_MEMBRI = 2000            # anti-bomba: oltre, lapide dichiarata
 
 
 def _iter_immagine_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator:
-    """OCR di un'immagine → righe marcate [ocr], o una lapide che dice perché no."""
+    """OCR di un'immagine → righe marcate [ocr], o una lapide che dice perché no.
+
+    La chiamata è HTTP verso il servizio interno `ocr` (stdlib urllib): questo
+    processo non esegue niente. POST dei byte nudi, risposta = testo nudo."""
     if len(raw) > MAX_IMG_BYTES:
         yield _Skip("bundle-workfiles", "immagine-troppo-grande", name, ts)
         return
-    if not shutil.which("tesseract"):
+    url = _ocr_url()
+    if not url:
         yield _Skip("bundle-workfiles", "ocr-non-disponibile", name, ts)
         return
     try:
-        r = subprocess.run(["tesseract", "stdin", "stdout", "-l", _OCR_LINGUE],
-                           input=raw, capture_output=True, timeout=_OCR_TIMEOUT_S)
-        testo = r.stdout.decode("utf-8", errors="replace").strip()
-    except Exception as exc:        # timeout, binario rotto: lapide, mai un crash
+        req = urllib.request.Request(url, data=raw, method="POST",
+                                     headers={"Content-Type": "application/octet-stream"})
+        with urllib.request.urlopen(req, timeout=_OCR_TIMEOUT_S) as resp:
+            testo = resp.read().decode("utf-8", errors="replace").strip()
+    except Exception as exc:        # servizio giù, timeout: lapide, mai un crash
         yield _Skip("bundle-workfiles", "ocr-errore", f"{name}: {type(exc).__name__}", ts)
         return
     if not testo:

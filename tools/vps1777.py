@@ -45,7 +45,7 @@ GITHUB_REPO = os.environ.get("VPS1777_GITHUB_REPO", "neo1777/vps1777")
 API_BASE = f"https://api.github.com/repos/{GITHUB_REPO}"
 USER_AGENT = "vps1777-updater"
 
-SERVICES = ["gateway", "archive-mcp", "nb1777-mcp", "nb1777-bot"]
+SERVICES = ["gateway", "archive-mcp", "nb1777-mcp", "nb1777-bot", "ocr"]
 # Volumi dati (nomi corti compose). Prefisso progetto: vps1777_
 NLM_AUTH_VOLUME = "nlm-auth"
 DATA_VOLUMES = ["gateway-data", "archive-data", NLM_AUTH_VOLUME]

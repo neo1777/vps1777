@@ -1766,7 +1766,7 @@ def test_skill_e_uno_zip_e_si_apre(tmp_path: Path) -> None:
 def test_ocr_assente_lascia_lapide_dichiarata(tmp_path: Path, monkeypatch) -> None:
     """Senza tesseract l'immagine NON sparisce in silenzio: lapide col motivo."""
     import sqlite3
-    monkeypatch.setattr(archive_indexer.shutil, "which", lambda _b: None)
+    monkeypatch.delenv("OCR_URL", raising=False)
     import zipfile
     zp = tmp_path / "bundle.zip"
     with zipfile.ZipFile(zp, "w") as z:
@@ -1784,15 +1784,21 @@ def test_ocr_assente_lascia_lapide_dichiarata(tmp_path: Path, monkeypatch) -> No
 def test_ocr_presente_indicizza_marcato(tmp_path: Path, monkeypatch) -> None:
     """Col binario presente il testo entra marcato [ocr]; l'immagine muta lascia
     la lapide 'ocr-vuoto' — i due versi dello stesso occhio."""
+    import io as _io
     import sqlite3
-    import types as _types
-    monkeypatch.setattr(archive_indexer.shutil, "which", lambda _b: "/usr/bin/tesseract")
+    monkeypatch.setenv("OCR_URL", "http://ocr-finto/ocr")
 
-    def finto_tesseract(cmd, input=b"", capture_output=True, timeout=0):
-        testo = b"testo-letto-dallo-screenshot" if input.startswith(b"\x89PNG") else b""
-        return _types.SimpleNamespace(stdout=testo, stderr=b"", returncode=0)
+    class _Risposta(_io.BytesIO):
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
 
-    monkeypatch.setattr(archive_indexer.subprocess, "run", finto_tesseract)
+    def finto_urlopen(req, timeout=0):
+        corpo = req.data or b""
+        testo = b"testo-letto-dallo-screenshot" if corpo.startswith(b"\x89PNG") else b""
+        return _Risposta(testo)
+
+    monkeypatch.setattr(archive_indexer.urllib.request, "urlopen", finto_urlopen)
     import zipfile
     zp = tmp_path / "bundle.zip"
     with zipfile.ZipFile(zp, "w") as z:

@@ -35,6 +35,7 @@ updates:
       - /services/archive-mcp
       - /services/nb1777-mcp
       - /services/nb1777-bot
+      - /services/ocr
     schedule:
       interval: weekly
     commit-message:
@@ -111,6 +112,7 @@ updates:
       - /services/archive-mcp
       - /services/nb1777-mcp
       - /services/nb1777-bot
+      - /services/ocr
     schedule:
       interval: weekly
     commit-message:

@@ -84,6 +84,10 @@ services:
       VPS1777_TAG: ${VPS1777_TAG:-dev}   # versione deployata (mostrata nell'admin)
       GATEWAY_PUBLIC_BASE: ${PUBLIC_BASE:-http://127.0.0.1:8080}
       GATEWAY_UPSTREAMS: ${GATEWAY_UPSTREAMS:-archive=archive-mcp:8002,nb1777=nb1777-mcp:8003}
+      # B5 (28/08): l'indexer manda le immagini al servizio OCR interno via
+      # HTTP — il gateway NON esegue processi (invariante presidiata da
+      # test_gateway_non_tocca_docker). Vuoto = OCR spento, lapidi dichiarate.
+      OCR_URL: ${OCR_URL:-http://ocr:8004/ocr}
       OAUTH_REQUIRED: "true"
       OAUTH_ACCESS_TOKEN_LIFETIME: "900"
       OAUTH_REFRESH_TOKEN_LIFETIME: "2592000"
@@ -291,6 +295,32 @@ services:
 #   - backend: internal, niente ingress/egress
 #   - ingress: per il proxy davanti (Tailscale/Caddy/Cloudflared)
 # ──────────────────────────────────────────────────────────────────────
+  # ──────────────────────────────────────────────────────────────────────
+  # ocr — gli occhi dell'ingest (B5, 28/08/2026). SOLO rete interna.
+  # Il subprocess tesseract vive QUI e non nel gateway (invariante «il
+  # gateway non esegue processi», presidio test_gateway_non_tocca_docker):
+  # nessuna porta pubblicata, nessun volume, nessun segreto — un'immagine
+  # malevola può al più rompere questo container, che non custodisce niente.
+  # ──────────────────────────────────────────────────────────────────────
+  ocr:
+    <<: [*restart, *logging, *security, *readonly]
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-ocr:${VPS1777_TAG:-dev}
+    init: true
+    environment:
+      OCR_HOST: 0.0.0.0
+      OCR_PORT: 8004
+      OCR_LINGUE: "ita+eng"   # la ricetta provata su _chat/ocr1777 (562/562, 0 errori)
+    networks:
+      - backend
+    expose:
+      - "8004"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8004/health',timeout=3).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
 networks:
   # Comunicazione interna fra i servizi. internal: true → nessuna uscita a
   # Internet: chi sta SOLO qui (archive-mcp) non può esfiltrare nulla.

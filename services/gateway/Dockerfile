@@ -36,12 +36,11 @@ FROM python:3.12-slim
 
 # tini per signal handling + ca-certificates per HTTPS uscente
 RUN apt-get update && apt-get install -y --no-install-recommends tini ca-certificates \
-    tesseract-ocr tesseract-ocr-ita \
     && rm -rf /var/lib/apt/lists/*
-# tesseract (B5, 28/08/2026): OCR LOCALE delle immagini all'ingest — i dati non
-# lasciano la macchina (il percorso NotebookLM resta per il file pregiato
-# singolo, ma manda il documento a Google). eng è incluso nel pacchetto base;
-# la ricetta `-l ita+eng` è quella provata su _chat/ocr1777 (562/562, 0 errori).
+# ⚠️ NIENTE tesseract QUI (28/08/2026): la prima versione del B5 lo installava
+# in questa immagine e lanciava subprocess dal gateway — bocciata dal presidio
+# test_gateway_non_tocca_docker («il gateway non esegue processi»). L'OCR vive
+# nel servizio interno dedicato services/ocr; il gateway lo chiama via HTTP.
 
 # Utente non-root condiviso (UID 1000 "app") — STESSO uid di nb1777-mcp/bot
 # così i volumi condivisi (nlm-auth) sono accessibili a tutti.
