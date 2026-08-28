@@ -2,6 +2,20 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.9] — 2026-08-28
+
+**La cornice decide: il confine mixed↔transcript impara il criterio dell'owner.**
+
+### ✨ Migliorato
+
+- **Voice: gold da 30/37 a 35/37** (#235): i 5 disaccordi confidenti sul
+  confine mixed↔pasted_transcript avevano la stessa struttura — con una
+  cornice dell'owner prima del materiale («ottengo quanto segue:») è `mixed`;
+  col materiale al carattere zero (prompt di shell, local-command-caveat) è
+  `pasted_transcript`. Guardiani stretti («flutter:» non è una cornice),
+  `own` mai toccata (21/21, falsi cari 0). I 2 disaccordi residui sono
+  dichiarati e accettati: curarli creerebbe falsi cari. ACCORDO_MIN 30→35.
+
 ## [0.43.8] — 2026-08-28
 
 **L'indexer impara i nomi, le date, e chi parla davvero.**
