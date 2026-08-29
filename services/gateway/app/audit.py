@@ -123,7 +123,7 @@ def _prune(path: Path, retention_days: int) -> None:
 # grep: il grep si ferma a fine riga e sulle chiamate multi-riga ne perdeva sei.
 _CHIAVI_NOTE = frozenset({
     "by", "client_id", "connector", "db", "email", "email_known", "error", "event",
-    "fields", "files", "fmt", "i", "insecure", "ip", "jti", "latest", "len", "method",
+    "fields", "file", "files", "fmt", "i", "insecure", "ip", "jti", "latest", "len", "method",
     "notebook", "owner_configured", "path", "persisted", "reason", "rows", "running",
     "service", "status", "sub", "target", "user_id",
     # scritte dal modulo stesso, non dai chiamanti. `dropped`/`last_error` appartengono al

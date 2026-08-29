@@ -41,12 +41,28 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 
 | Formato | Cosa indicizza |
 |---|---|
-| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs`) oppure export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/`. **Fallback**: uno zip che non è un export ma contiene documenti `.md`/`.txt` viene indicizzato doc-per-doc (come i `.md`/`.txt` sciolti) |
+| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs` + `memories` + `users.json`/`login_history.json` — **unico** oppure **spezzato in 5 zip per categoria**, il formato consegnato da claude.ai dal 29/08/2026: ogni zip è riconosciuto da solo, si caricano tutti sullo stesso *nome DB*, vedi sotto) oppure export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/`. **Fallback**: uno zip che non è un export ma contiene documenti `.md`/`.txt` viene indicizzato doc-per-doc (come i `.md`/`.txt` sciolti) |
 | `.jsonl` | sessione **Claude Code** (`~/.claude/projects/<progetto>/<id>.jsonl`) |
 | `.json` | export **Telegram Desktop** (formato *Machine-readable JSON*) |
 | `.pdf` | documento **con testo** (estratto via `pypdf`) |
 | `.md` / `.txt` | testo/markdown generico (ponte per l'output di altri tool) |
 | `.db` | drop-in di un archivio SQLite già indicizzato (schema validato) |
+
+> **Export claude.ai a 5 zip (dal 29/08/2026).** L'account non consegna più
+> un file unico: dà un `manifest-<id>-<ts>.json` con 5 link **one-shot** e i 5 zip
+> per categoria — `conversations-000.zip`, `projects-000.zip`,
+> `design_chats-000.zip`, `memories-000.zip` (memoria persistente: `conversations_memory`,
+> `project_memories` e i `memory_files` `/areas/*.md`), `light_metadata-000.zip`
+> (`users.json` + `login_history.json`, gli accessi: una riga per evento,
+> `account:login`). Il suffisso `-NNN` è la **parte**: una categoria grande può
+> arrivare in più zip. Il manifest **non** si carica (contiene solo i link).
+> Dall'admin: seleziona i 5 zip insieme (il campo *fonte* accetta più file) con lo
+> stesso *nome DB* — es. `claude-ai-<ggmmaa>`, un DB per export, come da convenzione;
+> dalla CLI: `for z in *-000.zip; do python3 services/gateway/app/archive_indexer.py "$z" claude-ai-<ggmmaa>.db; done`.
+> L'ordine non conta e ricaricare non duplica (idempotente per uuid). Misurato sul
+> primo export di questo formato: 13.920 record in 15 s, 1,2 GB di RAM di picco.
+> ⚠️ `conversations.json` decompresso è al 58% del tetto per membro (297 MB su 512):
+> quando lo supera l'ingest **si ferma parlante** (`MAX_MEMBER_BYTES`), non tronca.
 
 > L'export chat di Telegram Desktop funziona **così com'è**: comprimi la
 > cartella `ChatExport_*` in zip e caricala — sia il formato **HTML** (il

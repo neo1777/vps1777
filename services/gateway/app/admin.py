@@ -738,88 +738,107 @@ async def archive_view(request: Request) -> Response:
                         f"MB. Per archivi più grandi usa la CLI sulla VPS."
                     ) + "&kind=err", status_code=303)
         form = await request.form()
-        upload = form.get("jsonl_file")
-        if upload is None or not hasattr(upload, "read"):
+        # Dal 29/08/2026 l'export claude.ai arriva in 5 zip per categoria: il form
+        # accetta PIÙ file in un gesto solo, tutti sullo stesso `nome DB`, in
+        # ordine — ognuno passa dalle stesse guardie (tetto, spazio) del singolo.
+        uploads = [u for u in form.getlist("jsonl_file") if u is not None and hasattr(u, "read")]
+        if not uploads:
             return RedirectResponse("/admin/archive?msg=Nessun+file+caricato&kind=err", status_code=303)
         db_name = _safe_db_name(
             str(form.get("db_name") or ""),
-            fallback=_safe_db_name(Path(getattr(upload, "filename", "") or "").stem),
+            fallback=_safe_db_name(Path(getattr(uploads[0], "filename", "") or "").stem),
         )
         project = str(form.get("project") or "").strip()
         description = str(form.get("description") or "").strip()
-        suffix = Path(str(getattr(upload, "filename", "") or "")).suffix.lower() or ".jsonl"
-        tmp = db_dir / f".upload-{db_name}-{os.getpid()}{suffix}"
         db_path = db_dir / f"{db_name}.db"
+        esiti: list[str] = []          # un rigo per file, nell'ordine di arrivo
+        tmp = db_dir / f".upload-{db_name}-{os.getpid()}"
         try:
-            # stream su disco a chunk (memoria costante anche su file da decine di MB).
-            # TETTO sull'upload (H39): i tetti di decompressione stanno a valle,
-            # nell'indexer — ma un upload da 100 GB riempirebbe il disco PRIMA di
-            # arrivarci. Si conta mentre si scrive e si taglia. È la lezione del
-            # tar-bomb: un limite sul trasporto va messo anche sul trasporto.
-            # 🔴 LO SPAZIO SI GUARDA PRIMA DI SCRIVERE, e fino al 03/08 nessuno lo faceva.
-            #   Il commento di `archive_indexer.py:105` lo prescriveva da tre settimane
-            #   — «Il disco della VPS deve avere spazio per upload + DB: verificare prima
-            #   dei giganti» — e in tutto `services/` c'erano ZERO `statvfs`/`disk_usage`.
-            #   Un difetto scritto come specifica: la riga descrive il rimedio, e nessuno
-            #   l'ha letta come «da fare» perché ha la forma di una cosa già decisa.
-            # ⚠️ IL DANNO che previene non è l'upload fallito: è il DISCO PIENO. Il loop
-            #   qui sotto scrive a chunk e si ferma solo al tetto — su un disco corto
-            #   riempie tutto e muore a metà, e sulla stessa partizione ci sono il DB
-            #   dell'archivio e i suoi journal. `archive-mcp` monta quel volume in `:ro`
-            #   (H46): a disco pieno non potrebbe nemmeno riparare il proprio journal.
-            # 📏 LA SOGLIA NON È INVENTATA: è `MAX_UPLOAD_BYTES`, che esiste già. Non
-            #   conosciamo la dimensione dell'upload in anticipo (è uno stream), quindi
-            #   l'unica soglia onesta è «lo spazio che servirebbe nel caso peggiore
-            #   ammesso». È conservativa di proposito, e lo dice a chi la incontra.
-            try:
-                _libero = shutil.disk_usage(db_dir).free
-            except OSError:
-                _libero = None      # non misurabile ≠ misurato e va bene: si prosegue
-            if _libero is not None and _libero < archive_indexer.MAX_UPLOAD_BYTES:
-                audit({"event": "admin_archive_upload_rifiutato_spazio", "by": email,
-                       "db": db_name, "libero_mb": _libero // (1024 * 1024)})
-                raise ValueError(
-                    f"spazio su disco insufficiente: liberi "
-                    f"{_libero // (1024 * 1024)} MB, ne servono almeno "
-                    f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
-                    f"(il tetto di un upload). Libera spazio, oppure usa la CLI sulla "
-                    f"VPS che scrive direttamente senza il file temporaneo.")
-            fh = upload.file  # type: ignore[union-attr]
-            fh.seek(0)
-            written = 0
-            with open(tmp, "wb") as w:
-                while True:
-                    chunk = fh.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    written += len(chunk)
-                    if written > archive_indexer.MAX_UPLOAD_BYTES:
+            for upload in uploads:
+                nome_file = Path(str(getattr(upload, "filename", "") or "")).name
+                suffix = Path(nome_file).suffix.lower() or ".jsonl"
+                tmp = db_dir / f".upload-{db_name}-{os.getpid()}{suffix}"
+                try:
+                    # stream su disco a chunk (memoria costante anche su file da decine di MB).
+                    # TETTO sull'upload (H39): i tetti di decompressione stanno a valle,
+                    # nell'indexer — ma un upload da 100 GB riempirebbe il disco PRIMA di
+                    # arrivarci. Si conta mentre si scrive e si taglia. È la lezione del
+                    # tar-bomb: un limite sul trasporto va messo anche sul trasporto.
+                    # 🔴 LO SPAZIO SI GUARDA PRIMA DI SCRIVERE, e fino al 03/08 nessuno lo faceva.
+                    #   Il commento di `archive_indexer.py:105` lo prescriveva da tre settimane
+                    #   — «Il disco della VPS deve avere spazio per upload + DB: verificare prima
+                    #   dei giganti» — e in tutto `services/` c'erano ZERO `statvfs`/`disk_usage`.
+                    #   Un difetto scritto come specifica: la riga descrive il rimedio, e nessuno
+                    #   l'ha letta come «da fare» perché ha la forma di una cosa già decisa.
+                    # ⚠️ IL DANNO che previene non è l'upload fallito: è il DISCO PIENO. Il loop
+                    #   qui sotto scrive a chunk e si ferma solo al tetto — su un disco corto
+                    #   riempie tutto e muore a metà, e sulla stessa partizione ci sono il DB
+                    #   dell'archivio e i suoi journal. `archive-mcp` monta quel volume in `:ro`
+                    #   (H46): a disco pieno non potrebbe nemmeno riparare il proprio journal.
+                    # 📏 LA SOGLIA NON È INVENTATA: è `MAX_UPLOAD_BYTES`, che esiste già. Non
+                    #   conosciamo la dimensione dell'upload in anticipo (è uno stream), quindi
+                    #   l'unica soglia onesta è «lo spazio che servirebbe nel caso peggiore
+                    #   ammesso». È conservativa di proposito, e lo dice a chi la incontra.
+                    try:
+                        _libero = shutil.disk_usage(db_dir).free
+                    except OSError:
+                        _libero = None      # non misurabile ≠ misurato e va bene: si prosegue
+                    if _libero is not None and _libero < archive_indexer.MAX_UPLOAD_BYTES:
+                        audit({"event": "admin_archive_upload_rifiutato_spazio", "by": email,
+                               "db": db_name, "libero_mb": _libero // (1024 * 1024)})
                         raise ValueError(
-                            f"upload troppo grande (tetto "
-                            f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB). "
-                            f"Per archivi più grandi usa la CLI sulla VPS.")
-                    w.write(chunk)
-            if suffix == ".db":
-                # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
-                if not _valid_archive_db(tmp):
-                    raise ValueError("il .db non ha lo schema atteso (messages_fts)")
-                tmp.replace(db_path)
-                n = archive_indexer.count_rows(db_path)
-                verb = "caricato (drop-in)"
-            else:
-                # dispatch per estensione: .jsonl/.json → Claude Code; .zip → claude.ai; .md/.txt → testo
-                n = archive_indexer.index_file(str(tmp), str(db_path), project=project)
-                verb = "indicizzati"
+                            f"spazio su disco insufficiente: liberi "
+                            f"{_libero // (1024 * 1024)} MB, ne servono almeno "
+                            f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
+                            f"(il tetto di un upload). Libera spazio, oppure usa la CLI sulla "
+                            f"VPS che scrive direttamente senza il file temporaneo.")
+                    fh = upload.file  # type: ignore[union-attr]
+                    fh.seek(0)
+                    written = 0
+                    with open(tmp, "wb") as w:
+                        while True:
+                            chunk = fh.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            written += len(chunk)
+                            if written > archive_indexer.MAX_UPLOAD_BYTES:
+                                raise ValueError(
+                                    f"upload troppo grande (tetto "
+                                    f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB). "
+                                    f"Per archivi più grandi usa la CLI sulla VPS.")
+                            w.write(chunk)
+                    if suffix == ".db":
+                        # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
+                        if not _valid_archive_db(tmp):
+                            raise ValueError("il .db non ha lo schema atteso (messages_fts)")
+                        tmp.replace(db_path)
+                        n = archive_indexer.count_rows(db_path)
+                        verb = "caricato (drop-in)"
+                    else:
+                        # dispatch per estensione: .jsonl/.json → Claude Code; .zip → claude.ai; .md/.txt → testo
+                        n = archive_indexer.index_file(str(tmp), str(db_path), project=project)
+                        verb = "indicizzati"
+                    audit({"event": "admin_archive_ingest", "by": email, "db": db_name,
+                           "fmt": suffix, "file": nome_file, "rows": n})
+                    esiti.append(f"{nome_file}: {verb} {n}")
+                finally:
+                    tmp.unlink(missing_ok=True)
             if description:
                 archive_indexer.set_meta(db_path, "description", description)
             total = archive_indexer.count_rows(db_path)
-            audit({"event": "admin_archive_ingest", "by": email, "db": db_name, "fmt": suffix, "rows": n})
-            msg = f"{verb}: {n} record in '{db_name}' (totale {total}). Ricerca attiva subito."
-            return RedirectResponse(f"/admin/archive?msg={msg.replace(' ', '+')}&kind=ok", status_code=303)
+            if len(esiti) == 1:
+                msg = f"{esiti[0]} record in '{db_name}' (totale {total}). Ricerca attiva subito."
+            else:
+                msg = (f"{len(esiti)} file in '{db_name}' (totale {total}): "
+                       + " · ".join(esiti) + ". Ricerca attiva subito.")
+            return RedirectResponse(f"/admin/archive?msg={quote_plus(msg)}&kind=ok", status_code=303)
         except (ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
             audit({"event": "admin_archive_ingest_err", "by": email, "db": db_name, "error": str(exc)})
+            # I file già indicizzati RESTANO nel DB (ogni file è la sua transazione):
+            # lo si dice, perché «Errore» da solo farebbe ricaricare anche quelli.
+            fatti = f" (già indicizzati: {' · '.join(esiti)})" if esiti else ""
             return RedirectResponse(
-                f"/admin/archive?msg=Errore:+{str(exc).replace(' ', '+')}&kind=err", status_code=303)
+                f"/admin/archive?msg={quote_plus('Errore: ' + str(exc) + fatti)}&kind=err", status_code=303)
         finally:
             tmp.unlink(missing_ok=True)
 
@@ -875,9 +894,9 @@ document.querySelectorAll('form.delform').forEach(function(f){{
 {table}
 <section>
   <div class="kicker">carica una fonte da indicizzare</div>
-  <p class="muted">Formati: <code>.zip</code> (export account claude.ai — conversazioni + design chats + docs — oppure export chat Telegram Desktop, <strong>JSON o HTML</strong>: lo zip della cartella <code>ChatExport_*</code> va bene così com'è — oppure il <strong>bundle di Recupero Sessioni 1777</strong>: sessioni + log MCP + workfiles-testo indicizzati, binari censiti in <code>skipped</code>, copie multiple tracciate in <code>sightings</code>), <code>.jsonl</code> (sessione Claude Code), <code>.json</code> (export Telegram Desktop, formato JSON), <code>.pdf</code> (documento con testo — non gli screenshot), <code>.md</code>/<code>.txt</code> (testo, es. output di web2md o lettoremd), <code>.db</code> (drop-in già indicizzato). Viene reso cercabile subito. Ricaricare lo stesso <em>nome DB</em> non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano — ma non mischiare HTML e JSON della <em>stessa</em> chat nello stesso DB (chiavi diverse → doppioni).</p>
+  <p class="muted">Puoi selezionare <strong>più file</strong> in un gesto: vanno tutti nello stesso <em>nome DB</em>, in ordine — è il caso dell'export claude.ai <strong>a 5 zip</strong> (dal 29/08/2026: <code>conversations-000</code>, <code>projects-000</code>, <code>design_chats-000</code>, <code>memories-000</code>, <code>light_metadata-000</code>; il <code>manifest-*.json</code> NON si carica, contiene solo i link one-shot). Formati: <code>.zip</code> (export account claude.ai — conversazioni + design chats + docs + memoria + anagrafica/accessi, unico o spezzato in 5 — oppure export chat Telegram Desktop, <strong>JSON o HTML</strong>: lo zip della cartella <code>ChatExport_*</code> va bene così com'è — oppure il <strong>bundle di Recupero Sessioni 1777</strong>: sessioni + log MCP + workfiles-testo indicizzati, binari censiti in <code>skipped</code>, copie multiple tracciate in <code>sightings</code>), <code>.jsonl</code> (sessione Claude Code), <code>.json</code> (export Telegram Desktop, formato JSON), <code>.pdf</code> (documento con testo — non gli screenshot), <code>.md</code>/<code>.txt</code> (testo, es. output di web2md o lettoremd), <code>.db</code> (drop-in già indicizzato). Viene reso cercabile subito. Ricaricare lo stesso <em>nome DB</em> non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano — ma non mischiare HTML e JSON della <em>stessa</em> chat nello stesso DB (chiavi diverse → doppioni).</p>
   <form method="POST" action="/admin/archive" enctype="multipart/form-data">
-    <div class="row"><label>fonte</label><input type="file" name="jsonl_file" accept=".jsonl,.json,.zip,.md,.txt,.pdf,.db" required></div>
+    <div class="row"><label>fonte</label><input type="file" name="jsonl_file" accept=".jsonl,.json,.zip,.md,.txt,.pdf,.db" multiple required></div>
     <div class="row"><label>nome DB</label><input type="text" name="db_name" placeholder="es. cc (vuoto = dal nome file)"></div>
     <div class="row"><label>progetto</label><input type="text" name="project" placeholder="etichetta (vuoto = dedotta dalla fonte)"></div>
     <div class="row"><label>descrizione</label><input type="text" name="description" placeholder="a cosa serve / cosa contiene questo archivio (facoltativa, editabile dopo dall'MCP)"></div>

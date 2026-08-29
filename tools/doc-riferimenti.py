@@ -75,6 +75,7 @@ ATTESI = {
     "SICUREZZA.md": "idem: docs/ di argus1777, non di vps1777 (che ha SECURITY.md, in inglese)",
     "CONFINE_DEPLOY_vps1777.md": "idem: docs/ di argus1777 — il nome cita vps1777 ma il file vive là",
     "baseline_memoria_isolata.md": "artefatto di ricerca citato in skill-sopra-archivio, mai stato nel repo",
+    "login_history.json": "membro dell'export claude.ai a 5 zip (light_metadata-NNN.zip, dal 29/08/2026): lo produce claude.ai, ARCHIVE.md lo NOMINA per dire che viene indicizzato",
 }
 
 

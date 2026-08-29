@@ -1839,3 +1839,120 @@ def test_membro_oversize_lascia_lapide_e_l_ingest_prosegue(tmp_path: Path, monke
                        ).fetchone()[0] >= 1, "il file accanto è morto col membro oversize"
     assert con.execute("SELECT count(*) FROM skipped WHERE reason='membro-oltre-tetto'"
                        ).fetchone()[0] == 1
+
+
+# ── export claude.ai a 5 zip (dal 29/08/2026) ────────────────────────────────
+
+def _export_a_5_zip(tmp_path: Path) -> dict:
+    """Il formato NUOVO dell'export claude.ai, ricalcato sul primo ricevuto
+    (29/08/2026): un manifest coi link one-shot + 5 zip per categoria. I due
+    piccoli (memories, light_metadata) NON contengono nessuno dei membri che
+    l'indexer usava per riconoscere l'export → prima di 0.43.16 venivano
+    rifiutati come «zip non riconosciuto»."""
+    import json
+    import zipfile
+    d = tmp_path / "export5"
+    d.mkdir()
+    convs = [{"uuid": "c1", "name": "chat vps", "chat_messages": [
+        {"uuid": "m1", "sender": "human", "created_at": "2026-08-29T10:00:00Z",
+         "text": "parliamo del gateway", "content": [{"type": "text", "text": "parliamo del gateway"}]},
+        {"uuid": "m2", "sender": "assistant", "created_at": "2026-08-29T10:00:01Z",
+         "text": "certo", "content": [{"type": "text", "text": "certo"}]},
+    ]}]
+    proj = {"uuid": "p1", "name": "prog", "docs": [
+        {"uuid": "d1", "filename": "note.txt", "created_at": "2026-08-01", "content": "documento sirena"}]}
+    design = {"uuid": "dc1", "title": "Chat", "project": {"uuid": "dp", "name": "Design System"},
+              "messages": [{"uuid": "dm1", "role": "user", "content": "bottone quarzo",
+                            "created_at": "2026-08-02T00:00:00Z"}]}
+    memories = {"account_uuid": "acc",
+                "conversations_memory": "Neo lavora in Dart e Flutter.",
+                "project_memories": {"p1": "Il libro è al capitolo 81."},
+                "memory_files": [
+                    {"path": "/areas/vps1777.md", "updated_at": "2026-08-19T23:12:04+00:00",
+                     "content": "---\nname: vps1777\n---\nArchivio e nb1777 sulla VPS, parola falco."},
+                    {"path": "/areas/vuoto.md", "updated_at": "2026-08-19T23:12:05+00:00",
+                     "content": "   "},
+                ]}
+    users = [{"uuid": "acc", "full_name": "neo", "email_address": "neo@example.org"}]
+    login = {"login_events": [
+        {"account_uuid": "acc", "timestamp": "2026-08-21T10:45:32+00:00", "ip_address": "203.0.113.7",
+         "user_agent": {"browser_family": "Electron", "os_family": "Linux", "os_version": None},
+         "method": "google", "location_info": {"country": "IT", "city": None}},
+        {"account_uuid": "acc", "timestamp": "2026-08-22T08:00:00+00:00", "ip_address": "203.0.113.8",
+         "user_agent": {"browser_family": "Firefox"}, "method": "magic_link", "location_info": {}},
+    ]}
+    def z(name: str, membri: dict) -> Path:
+        p = d / name
+        with zipfile.ZipFile(p, "w") as zf:
+            for k, v in membri.items():
+                zf.writestr(k, json.dumps(v))
+        return p
+    return {
+        "conversations": z("conversations-000.zip", {"conversations.json": convs}),
+        "projects": z("projects-000.zip", {"projects/p1.json": proj}),
+        "design_chats": z("design_chats-000.zip", {"design_chats/dc1.json": design}),
+        "memories": z("memories-000.zip", {"memories/acc.json": memories}),
+        "light_metadata": z("light_metadata-000.zip", {"users.json": users, "login_history.json": login}),
+    }
+
+
+def test_export_a_5_zip_ogni_zip_e_riconosciuto_da_solo(tmp_path: Path) -> None:
+    """La regressione: memories-000 e light_metadata-000 non hanno né
+    conversations.json né design_chats/ né projects/. Ognuno dei 5 deve entrare
+    da solo, in un DB suo, senza «zip non riconosciuto»."""
+    zips = _export_a_5_zip(tmp_path)
+    attesi = {"conversations": 2, "projects": 1, "design_chats": 1,
+              "memories": 3,          # conversations + project + 1 file (il vuoto si salta)
+              "light_metadata": 3}    # 1 utente + 2 accessi
+    for nome, zp in zips.items():
+        db = tmp_path / f"{nome}.db"
+        n = archive_indexer.index_file(str(zp), str(db))
+        assert n == attesi[nome], (nome, n)
+
+
+def test_export_a_5_zip_si_accumula_in_un_db_solo_ed_e_idempotente(tmp_path: Path) -> None:
+    """Il gesto reale: 5 zip, stesso nome DB, ordine qualunque. Tutto cercabile,
+    etichette per categoria, e un secondo giro non duplica nulla."""
+    zips = _export_a_5_zip(tmp_path)
+    db = tmp_path / "claude-ai-290826.db"
+    ordine = ["light_metadata", "memories", "design_chats", "projects", "conversations"]
+    totale = sum(archive_indexer.index_file(str(zips[k]), str(db)) for k in ordine)
+    assert totale == 10
+    assert archive_indexer.count_rows(db) == 10
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        etichette = {r[0] for r in conn.execute("SELECT DISTINCT project FROM messages")}
+        assert {"chat vps", "project:prog", "design:Design System", "memory:conversations",
+                "memory:project:p1", "memory:file:/areas/vps1777.md",
+                "account:user", "account:login"} <= etichette
+        # il memory_file porta il suo updated_at come ts, e il suo testo è cercabile
+        r = conn.execute("SELECT project, ts FROM messages_fts WHERE messages_fts MATCH 'falco'").fetchall()
+        assert r == [("memory:file:/areas/vps1777.md", "2026-08-19T23:12:04+00:00")]
+        # gli accessi: una riga per evento, ts = timestamp, sottodizionari appiattiti,
+        # i None NON finiscono nel testo
+        righe = conn.execute(
+            "SELECT ts, content, sender FROM messages WHERE project='account:login' ORDER BY ts").fetchall()
+        assert [r[0] for r in righe] == ["2026-08-21T10:45:32+00:00", "2026-08-22T08:00:00+00:00"]
+        assert "ip_address: 203.0.113.7" in righe[0][1]
+        assert "browser_family=Electron" in righe[0][1] and "os_version" not in righe[0][1]
+        assert "method: magic_link" in righe[1][1]
+        assert {r[2] for r in righe} == {"account"}
+    finally:
+        conn.close()
+    # secondo giro, stesso DB: 0 nuove righe (dedup per uuid, anche sugli uuid derivati)
+    for k in ordine:
+        archive_indexer.index_file(str(zips[k]), str(db))
+    assert archive_indexer.count_rows(db) == 10
+
+
+def test_export_unico_con_memories_json_alla_radice_resta_valido(tmp_path: Path) -> None:
+    """Il layout VECCHIO (fino ad agosto 2026: `memories.json` alla radice) non
+    si rompe con il nuovo: i due si riconoscono entrambi."""
+    db = tmp_path / "m.db"
+    archive_indexer.index_file(str(_claude_zip_memories(tmp_path)), str(db))
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        assert conn.execute(
+            "SELECT count(*) FROM messages WHERE project='memory:conversations'").fetchone()[0] >= 1
+    finally:
+        conn.close()
