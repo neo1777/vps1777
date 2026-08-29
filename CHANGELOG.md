@@ -2,6 +2,25 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.14] — 2026-08-29
+
+**Il primo update verso la 0.43.13 si è fermato da solo, e aveva ragione.**
+
+### 🐛 Fix
+
+- **Il backup pre-update usa il `backup.sh` della release in arrivo** (misurato
+  sul vivo: update 0.43.12 → 0.43.13 via unit, fail-closed, stack intatto). La
+  CLI si auto-aggiorna dal bundle allo step 4 e chiama `backup.sh` allo step 7,
+  ma lo script nel repo veniva sincronizzato dal bundle solo *dopo*, oltre il
+  punto di non ritorno: la CLI nuova ha passato `--senza-archivio` allo script
+  vecchio, che conosceva solo `--prune-only` — «uso:», exit 2. *Ogni flag nuovo
+  a `backup.sh` rompeva l'update in cui nasceva.* Ora `backup_sh_della_release`
+  copia nel repo lo script del bundle (già verificato cosign — lo stesso che il
+  sync gestito copierebbe comunque) **prima** di lanciarlo; non si lancia dal
+  bundle perché lo script deriva repo, `.env` e recipient dalla propria
+  posizione. Test a risposta nota sui tre casi (bundle con script, senza
+  bundle, bundle senza script).
+
 ## [0.43.13] — 2026-08-29
 
 **Il backup impara cosa vale la pena cifrare.** Misurato sulla VPS: un backup

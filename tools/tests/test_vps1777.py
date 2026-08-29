@@ -1422,6 +1422,33 @@ def test_sorveglia_archivio_avvisa_solo_oltre_il_doppio_del_passo():
         assert "archivio_vecchio_da" not in st, "tornato al passo: si disarma"
 
 
+def test_backup_sh_della_release_copia_dal_bundle_prima_del_backup():
+    # RISPOSTA NOTA (misurata sul vivo, 29/08, update 0.43.12→0.43.13 annullato
+    # fail-closed): la CLI nuova chiamava il backup.sh VECCHIO del repo con un
+    # flag che non conosceva. Con un bundle che porta tools/backup.sh, il file
+    # del repo deve diventare quello del bundle PRIMA del backup; il path
+    # restituito è quello del repo (lo script deriva tutto dalla sua posizione).
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d) / "repo"
+        bundle = Path(d) / "bundle"
+        (repo / "tools").mkdir(parents=True)
+        (bundle / "tools").mkdir(parents=True)
+        (repo / "tools" / "backup.sh").write_text("#!/bin/bash\n# vecchio\n")
+        (bundle / "tools" / "backup.sh").write_text("#!/bin/bash\n# nuovo --senza-archivio\n")
+        (bundle / "tools" / "backup.sh").chmod(0o755)
+        sh = v.backup_sh_della_release(repo, bundle)
+        assert sh == repo / "tools" / "backup.sh", "si lancia dal REPO, mai dal bundle"
+        assert "nuovo" in sh.read_text(), "il repo deve avere lo script della release"
+        # CIÒ CHE NON LA RIGUARDA: senza bundle, o bundle senza lo script, resta il repo com'è
+        (repo / "tools" / "backup.sh").write_text("#!/bin/bash\n# vecchio\n")
+        assert v.backup_sh_della_release(repo, None) == repo / "tools" / "backup.sh"
+        assert "vecchio" in (repo / "tools" / "backup.sh").read_text()
+        vuoto = Path(d) / "bundle-vuoto"
+        (vuoto / "tools").mkdir(parents=True)
+        v.backup_sh_della_release(repo, vuoto)
+        assert "vecchio" in (repo / "tools" / "backup.sh").read_text()
+
+
 # ── H59: la copertura dei backup, e l'allarme che NON deve suonare a vuoto ───
 
 def _repo_con_giorni(d: str, *nomi: str) -> Path:
