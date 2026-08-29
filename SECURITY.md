@@ -726,7 +726,9 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
   `tmpfs /run/secrets/`. Stessa storia: la protezione è nei permessi e nel non
   finire nei log/argv/backup-non-cifrati (vedi sopra), non nella cifratura a riposo.
 - **I backup** (`.tar.age`) invece **sono** cifrati (age), con la chiave privata
-  fuori dalla VPS. **Lo snapshot pre-update no**, ed è una scelta: contiene
+  fuori dalla VPS — dal `0.43.13` su due livelli, core notturno e archivio
+  settimanale compresso, entrambi cifrati allo stesso modo
+  ([docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md)). **Lo snapshot pre-update no**, ed è una scelta: contiene
   `archive-data.tar` (~2,6 GB, l'archivio **in chiaro**) e `gateway-data.tar`, e
   **non** contiene più i cookie Google (`H14`, `H56`). *Dire solo cosa non contiene
   sarebbe la metà comoda della verità: lo stesso contenuto viaggia cifrato per una

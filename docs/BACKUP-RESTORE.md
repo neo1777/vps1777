@@ -1,26 +1,58 @@
 # Backup & Restore — vps1777
 
-Strategia: backup age-encrypted dei volumi + secrets, una directory locale `backups/<timestamp>/`.
+Strategia: backup age-encrypted dei volumi + secrets, in `backups/`, su **due livelli**
+separati per natura del dato — perché il 99,99% del peso è rigenerabile e lo 0,01% no.
+
+## I due livelli (dal `0.43.13`)
+
+| Livello | Cosa contiene | Quando | Ritenzione | Dove |
+|---|---|---|---|---|
+| **core** | tutti i volumi **tranne** l'archivio (`gateway-data`, `gateway-uploads`, `nlm-auth`, `nlm-artifacts`, …), `secrets/`, `.env` + compose + `ingress/`, e **le `description` dei DB dell'archivio** (`descrizioni/<db>.txt`) | **ogni notte** (03:00 UTC) e a ogni `vps1777 update` | 7 giorni distinti + 4 settimanali + ultime 3 versioni | `backups/vps1777-<ts>.tar.age` |
+| **archivio** | i soli volumi dell'archivio (`archive-data`: i DB FTS), **compressi** prima di cifrare | **ogni 7 giorni** (dal cron notturno, quando è dovuto) | le ultime **2** copie — n e n-1 | `backups/archivio/vps1777-archivio-<ts>.tar.age` |
+
+> **Perché due livelli** — misurato il 29/08/2026 sulla VPS: un backup pesava 9,7 GB, e
+> 9,7 GB erano il solo `archive-data`. I DB dell'archivio sono **rigenerabili** dai
+> bundle/export che l'owner conserva fuori dalla VPS (re-ingest ≈ 2h); tutto il resto —
+> utenti, client OAuth, audit, profilo NotebookLM, secret — pesa 250 KB ed è
+> **insostituibile**. Si pagavano 9,7 GB a notte per proteggere 250 KB (≈ 70 GB a regime
+> su un disco da 118). L'unica parte dell'archivio che il re-ingest **non** rigenera sono
+> le schede scritte a mano con `set_description`: per questo viaggiano ogni notte nel
+> core. Decisione dell'owner: *«basta n, n-1 per paranoia… dobbiamo farci stare quel che
+> serve»*. Fra un backup archivio e l'altro la rete è doppia: le fonti fuori dalla VPS +
+> lo snapshot pre-update (`backups/pre-update/`, in chiaro, n e n-1).
+
+Il nome resta `.tar.age` per entrambi anche se dentro c'è **zstd** (o gzip, se zstd
+manca): il suffisso è un contratto letto da ritenzione, CLI, `restore.sh` e test. Il
+formato reale sta nel sidecar `.meta` (`compressione: zstd`) e nei primi 4 byte del
+decifrato — `restore.sh` lo riconosce da lì. A mano:
+`age -d -i ~/.config/age/keys.txt f.tar.age | zstd -dc | tar -x`.
 
 ## Backup manuale
 
 ```bash
-./tools/backup.sh
-# → backups/vps1777-2026-06-23-080000.tar.age
+./tools/backup.sh                    # core + archivio SE dovuto (≥ 7 giorni dall'ultimo)
+./tools/backup.sh --archivio         # core + archivio COMUNQUE
+./tools/backup.sh --senza-archivio   # solo core (è ciò che fa `vps1777 update`)
+# → backups/vps1777-2026-08-29-030000.tar.age
+#   backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age
 ```
 
-Cosa includi: `gateway-data`, `archive-data`, `nlm-auth`, `secrets/*`, `.env`, `compose.*.yaml`.
+Variabili (con i default): `VOLUMI_ARCHIVIO=archive-data` (nomi logici del livello
+archivio), `ARCHIVIO_OGNI_GIORNI=7`, `KEEP_ARCHIVIO=2`, `KEEP_VERSIONI=3`.
 
 Cosa NON includi: log container (sono in `/var/lib/docker/containers/*/`, gestiti dal driver json-file con rotation).
 
-Il `MANIFEST.txt` dentro l'archivio registra anche la versione deployata (`VPS1777_TAG` dal `.env`) e il `VERSION` del bundle.
+Il `MANIFEST.txt` dentro ogni archivio registra il livello (`tier:`), cosa contiene, la
+compressione, la versione deployata (`VPS1777_TAG` dal `.env`) e il `VERSION` del bundle.
 
 ## Backup automatico (cron) — attivo di default
 
 Il backup notturno è **attivo di default**: non devi fare nulla per averlo. L'installer
 lo accende leggendo lo **stato dichiarato** delle feature — `VPS1777_FEATURES` nel `.env`
 (default: `backup,autoupdate`). Il container `backup` esegue ogni notte (cron **03:00 UTC**)
-e tiene **7 backup giornalieri + 4 settimanali** (uno per settimana), tutti cifrati `age`.
+il livello **core** — e il livello **archivio** quando è dovuto (ogni 7 giorni) — e tiene
+**7 core giornalieri + 4 settimanali** più **2 archivio**, tutti cifrati `age`.
+`vps1777 check` (il timer giornaliero) avvisa se l'ultimo archivio ha più di 14 giorni.
 
 > **Perché "dichiarato" e non "ricordato" — ed è il cuore del non-perdere-funzioni.**
 > Prima (fino a v0.37.x) il backup era un profilo **opt-in**: un reinstall della VPS non lo
@@ -63,17 +95,26 @@ VPS1777_FEATURES=backup,autoupdate    # il default: backup notturno + auto-updat
 
 ## Restore
 
+Un ripristino completo è **due restore, uno per livello** (l'ordine non conta: ognuno
+tocca solo i propri volumi):
+
 ```bash
-./tools/restore.sh backups/vps1777-2026-06-23-080000.tar.age
+./tools/restore.sh backups/vps1777-2026-08-29-030000.tar.age                     # core
+./tools/restore.sh backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age   # archivio
 ```
 
 Step:
 1. `docker compose down --remove-orphans` — l'`--remove-orphans` serve: senza, il
    container dell'ingress non è nel modello (sta in un overlay) e **resta acceso**,
    servendo traffico sopra volumi che si stanno ripristinando
-2. Decifra archivio con la tua chiave age
-3. Ripristina volumi + secrets
+2. Decifra l'archivio con la tua chiave age e riconosce il formato dai byte
+   (zstd / gzip / tar nudo — i backup precedenti al `0.43.13` sono tar nudo)
+3. Ripristina volumi + secrets (il core) o i volumi dell'archivio
 4. `docker compose up -d`
+
+Se l'archivio lo **rigeneri dalle fonti** invece di ripristinarlo (re-ingest dei bundle),
+le `description` dei DB le ritrovi nel core in `descrizioni/<db>.txt` — si riapplicano con
+`set_description` dal connector, o dal pannello.
 
 Default: interattivo (chiede conferma). Flag:
 
@@ -83,7 +124,7 @@ Default: interattivo (chiede conferma). Flag:
 
 ## Snapshot pre-update
 
-`vps1777 update` crea in `backups/pre-update/` uno snapshot locale **non cifrato** dei volumi dati prima di ogni update — serve all'auto-rollback, che non può dipendere dalla age-key — e lo pota al successivo update riuscito (tenuto: l'ultimo). Vedi [UPDATE.md](UPDATE.md). Ripristino manuale:
+`vps1777 update` crea in `backups/pre-update/` uno snapshot locale **non cifrato** dei volumi dati prima di ogni update — serve all'auto-rollback, che non può dipendere dalla age-key — e lo pota al successivo update riuscito (tenuti: gli ultimi di n e n-1, decisione owner del 29/08). Vedi [UPDATE.md](UPDATE.md). Ripristino manuale:
 
 ```bash
 ./tools/restore.sh --yes --volumes-only gateway-data,archive-data,nlm-auth backups/pre-update/<dir>
@@ -115,8 +156,18 @@ ha bisogno della chiave **privata**. Quindi:
 > USB in cassetto).
 
 **Dove metti i backup**: `tools/backup.sh` produce i `.tar.age` nella cartella
-`backups/`. **Sei tu a scegliere dove portarli** (NAS, altro disco, cloud): copia
-quella cartella dove preferisci — vps1777 non trasferisce nulla in automatico.
+`backups/`. **Sei tu a scegliere dove portarli** (NAS, altro disco, cloud): vps1777 non
+trasferisce nulla in automatico, ma il gesto è scritto — dal **tuo PC**:
+
+```bash
+bash tools/backup-pull.sh vps1777 /media/tu/HD/vps1777-backups
+#   <host-ssh>  <cartella di destinazione>   (esce 2 se la cartella non c'è: HD non montato)
+```
+
+Tira i due livelli e i sidecar `.meta`, **senza** `pre-update/` (gli snapshot in chiaro
+non lasciano la macchina) e **senza** `--delete`: la VPS pota per spazio, il tuo disco
+tiene la storia. Un timer utente sul PC può lanciarlo ogni giorno: quando l'HD non è
+montato esce 2 e lo dice, invece di copiare nel posto sbagliato.
 
 > ⚠️ **Migrazione (installazioni esistenti)**: se hai una chiave privata in
 > `~/.config/age/keys.txt` **sulla VPS** (le versioni fino alla 0.25.0 la
@@ -181,9 +232,12 @@ git clone https://github.com/neo1777/vps1777.git
 cd vps1777
 # Copia ~/.config/age/keys.txt dalla tua copia offline
 mkdir -p ~/.config/age && cp /percorso/keys.txt ~/.config/age/
-# Copia l'ultimo backup
-scp tuo-backup-server:/percorso/vps1777-*.tar.age backups/
-# Restore
-./tools/restore.sh backups/vps1777-*.tar.age
-# Lo stack riparte uguale alla data del backup.
+# Copia l'ultimo backup di OGNI livello
+scp tuo-backup-server:/percorso/vps1777-2026-08-29-030000.tar.age backups/
+scp tuo-backup-server:/percorso/archivio/vps1777-archivio-2026-08-29-030000.tar.age backups/archivio/
+# Restore, uno per livello
+./tools/restore.sh backups/vps1777-2026-08-29-030000.tar.age
+./tools/restore.sh backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age
+# Lo stack riparte uguale alla data dei backup (l'archivio: alla data del suo, ≤ 7 giorni
+# prima; se hai i bundle sorgente, il re-ingest lo porta a oggi).
 ```

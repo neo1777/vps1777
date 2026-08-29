@@ -1309,12 +1309,34 @@ SPAZIO_MINIMO_UPDATE = 5 * 1024**3
 
 
 def backup_piu_grande(repo: Path) -> int:
-    """Byte del backup cifrato più grande che c'è. 0 se non ce n'è nessuno."""
+    """Byte del backup cifrato più grande che c'è, su ENTRAMBI i livelli
+    (core in `backups/`, archivio in `backups/archivio/` — dal 0.43.13).
+    0 se non ce n'è nessuno."""
     d = repo / "backups"
     if not d.is_dir():
         return 0
     try:
-        return max((f.stat().st_size for f in d.glob("vps1777-*.tar.age")), default=0)
+        core = max((f.stat().st_size for f in d.glob("vps1777-*.tar.age")), default=0)
+        arch = max((f.stat().st_size
+                    for f in (d / "archivio").glob("vps1777-archivio-*.tar.age")), default=0)
+        return max(core, arch)
+    except OSError:
+        return 0
+
+
+def snapshot_piu_recente_bytes(repo: Path) -> int:
+    """Byte dello snapshot pre-update più recente (somma dei suoi file). 0 se
+    non ce n'è. È la miglior previsione di quanto scriverà il PROSSIMO snapshot:
+    dal 0.43.13 il backup cifrato è compresso e diviso in due livelli, quindi
+    non dice più quanto pesa l'archivio in chiaro — lo snapshot sì."""
+    base = repo / "backups" / "pre-update"
+    if not base.is_dir():
+        return 0
+    try:
+        snaps = sorted((d for d in base.iterdir() if d.is_dir()), key=lambda d: d.name)
+        if not snaps:
+            return 0
+        return sum(f.stat().st_size for f in snaps[-1].rglob("*") if f.is_file())
     except OSError:
         return 0
 
@@ -1339,13 +1361,27 @@ def spazio_richiesto_update(repo: Path) -> tuple[int, str]:
     una soglia che non dice come è nata non si può contestare.
     """
     rif = backup_piu_grande(repo)
-    if rif == 0:
+    snap = snapshot_piu_recente_bytes(repo)
+    if rif == 0 and snap == 0:
         return (SPAZIO_MINIMO_UPDATE,
                 "nessun backup da cui stimare: applico il minimo storico di 5 GiB")
-    serve = 2 * rif + 1024**3
-    return (max(serve, SPAZIO_MINIMO_UPDATE),
-            f"il backup più grande pesa {rif / 1024**3:.1f} GiB e un update ne scrive "
-            f"due (l'archivio cifrato + lo snapshot pre-update), più 1 GiB di margine")
+    # ⚠️ 29/08 — dal 0.43.13 il backup cifrato è COMPRESSO e diviso in due livelli:
+    #   il core pesa KB e l'archivio ~metà del volume. «2 × backup» sottostimava
+    #   lo snapshot pre-update, che è il volume IN CHIARO (9,7 GB misurati) —
+    #   e una guardia che sottostima autorizza l'update che riempie il disco a
+    #   metà snapshot. Lo snapshot lo stima l'ULTIMO SNAPSHOT (stessi volumi,
+    #   stesso formato); il backup lo stima il backup più grande. Senza uno
+    #   snapshot precedente si ricade sul backup, come prima.
+    stima_snap = snap if snap else rif
+    serve = stima_snap + rif + 1024**3
+    if snap:
+        perche = (f"l'ultimo snapshot pre-update pesa {snap / 1024**3:.1f} GiB, il backup "
+                  f"più grande {rif / 1024**3:.1f} GiB: un update li scrive entrambi, "
+                  f"più 1 GiB di margine")
+    else:
+        perche = (f"il backup più grande pesa {rif / 1024**3:.1f} GiB e un update ne scrive "
+                  f"due (l'archivio cifrato + lo snapshot pre-update), più 1 GiB di margine")
+    return (max(serve, SPAZIO_MINIMO_UPDATE), perche)
 
 
 # ─────────────────────────────────────────── snapshot volumi (pre-update)
@@ -2063,6 +2099,67 @@ def copertura_backup(repo: Path) -> tuple[int | None, str | None, str | None]:
     return len(ordinati), ordinati[0], ordinati[-1]
 
 
+ARCHIVIO_OGNI_GIORNI_ATTESI = 7   # il passo di backup.sh (ARCHIVIO_OGNI_GIORNI)
+
+
+def eta_backup_archivio(repo: Path) -> int | None:
+    """Giorni dall'ultimo backup del livello ARCHIVIO (`backups/archivio/`), letti
+    dal NOME del file (la data è nel nome; l'mtime la cambia un rsync).
+    `None` = nessun archivio, o cartella non leggibile (non misurato)."""
+    d = repo / "backups" / "archivio"
+    if not d.is_dir():
+        return None
+    try:
+        nomi = [f.name for f in d.iterdir()]
+    except OSError:
+        return None
+    date = []
+    for nome in nomi:
+        m = re.match(r"vps1777-archivio-(\d{4}-\d{2}-\d{2})-.*\.tar\.age$", nome)
+        if m:
+            try:
+                date.append(datetime.strptime(m.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc))
+            except ValueError:
+                continue
+    if not date:
+        return None
+    return max(0, (datetime.now(timezone.utc) - max(date)).days)
+
+
+def _sorveglia_backup_archivio(repo: Path, st: dict, notifica: bool) -> None:
+    """Il livello ARCHIVIO ha un passo (7 giorni), e un passo mancato non fa
+    rumore da solo: il cron scrive nel suo log dentro il container. Qui, dove
+    il timer gira già, si guarda l'età dell'ultima copia e si avvisa quando
+    supera il DOPPIO del passo — la stessa forma della copertura: avviso sempre
+    nel log, notifica solo alla transizione."""
+    eta = eta_backup_archivio(repo)
+    soglia = ARCHIVIO_OGNI_GIORNI_ATTESI * 2
+    if eta is None:
+        # nessun archivio ancora: normale prima del primo giro (o su una
+        # installazione precedente al 0.43.13). Non si arma niente.
+        st.pop("archivio_vecchio_da", None)
+        return
+    if eta > soglia:
+        warn(f"backup archivio: l'ultima copia ha {eta} giorni "
+             f"(ne è dovuta una ogni {ARCHIVIO_OGNI_GIORNI_ATTESI})")
+        if not str(st.get("archivio_vecchio_da") or ""):
+            st["archivio_vecchio_da"] = now_iso()
+            if notifica:
+                telegram_notify(
+                    repo,
+                    f"🟡 vps1777: il backup dell'ARCHIVIO è fermo da {eta} giorni "
+                    f"(ne è dovuto uno ogni {ARCHIVIO_OGNI_GIORNI_ATTESI}).\n"
+                    f"Il core notturno non c'entra: è il livello grande, quello dei "
+                    f"DB. Guarda il log del container backup.")
+        return
+    if str(st.get("archivio_vecchio_da") or ""):
+        st.pop("archivio_vecchio_da", None)
+        ok(f"backup archivio: tornato al passo (ultima copia {eta} giorni fa)")
+        if notifica:
+            telegram_notify(repo, f"🟢 vps1777: il backup dell'archivio è tornato al passo "
+                                  f"(ultima copia {eta} giorni fa).")
+
+
 def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
     """H59 — la finestra di ripristino si accorcia in silenzio, e nessuno lo dice.
 
@@ -2162,6 +2259,7 @@ def cmd_check(repo: Path, args) -> int:
     # la copertura dei backup si legge sul disco e non dipende da GitHub, quindi
     # non deve morire insieme a lui.
     _sorveglia_copertura_backup(repo, st, bool(getattr(args, "notify", False)))
+    _sorveglia_backup_archivio(repo, st, bool(getattr(args, "notify", False)))
     try:
         rel = latest_release(repo)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:
@@ -2882,7 +2980,11 @@ def cmd_update(repo: Path, args) -> int:
     # 7 — backup (age) + snapshot locale
     step(7, "backup")
     try:
-        run(["bash", str(repo / "tools" / "backup.sh")], cwd=repo)
+        # `--senza-archivio` (29/08, backup a due livelli): l'update ha già lo
+        # snapshot pre-update dell'archivio (in chiaro, per il rollback) — pagare
+        # anche il livello cifrato dell'archivio qui allungherebbe ogni update di
+        # minuti per una copia che il cron notturno fa al suo passo.
+        run(["bash", str(repo / "tools" / "backup.sh"), "--senza-archivio"], cwd=repo)
         snap = snapshot_create(repo, cur, target)
     except (subprocess.CalledProcessError, OSError) as exc:
         step(7, "backup", "failed", str(exc))
@@ -3161,7 +3263,9 @@ def cmd_bootstrap(repo: Path, args) -> int:
     backup_script = repo / "tools" / "backup.sh"
     if not backup_script.is_file():
         backup_script = bundle / "tools" / "backup.sh"
-    run(["bash", str(backup_script)], cwd=repo)
+    # `--archivio`: il cutover è l'unico salto senza snapshot pre-update sotto,
+    # quindi qui il livello archivio si scrive COMUNQUE, dovuto o no.
+    run(["bash", str(backup_script), "--archivio"], cwd=repo)
 
     # install CLI + unit
     sudo(["install", "-m", "755", str(bundle / "tools" / "vps1777.py"), INSTALLED_CLI])

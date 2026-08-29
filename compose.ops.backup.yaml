@@ -3,8 +3,9 @@
 # Container Alpine con cron che lancia ogni notte alle 03:00 UTC:
 #   /vps1777/tools/backup.sh
 #
-# Rotation: 7 daily + 4 weekly (gestita dallo stesso backup.sh).
-# Output in `backups/` montato dal host.
+# Due livelli (0.43.13): CORE ogni notte (7 daily + 4 weekly + 3 versioni),
+# ARCHIVIO ogni 7 giorni compresso zstd (ultime 2 copie) — gestiti dallo stesso
+# backup.sh. Output in `backups/` (core) e `backups/archivio/` montati dal host.
 #
 # Requisito host: chiave age + recipient configurati (vedi tools/age-recipients.txt).
 #

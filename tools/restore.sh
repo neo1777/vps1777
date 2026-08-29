@@ -6,7 +6,16 @@
 #   ./tools/restore.sh --yes --volumes-only vol1,vol2 backups/pre-update/<dir>
 #
 # Input:
-#   - archivio .tar.age  → decifrato con la chiave age (~/.config/age/keys.txt)
+#   - archivio .tar.age  → decifrato con la chiave age (~/.config/age/keys.txt).
+#                          Vale per ENTRAMBI i livelli di backup.sh: il CORE
+#                          (`backups/vps1777-<ts>.tar.age`: volumi piccoli, config,
+#                          secrets, descrizioni dei DB) e l'ARCHIVIO
+#                          (`backups/archivio/vps1777-archivio-<ts>.tar.age`: i
+#                          volumi dell'archivio). Un disaster recovery completo
+#                          è DUE restore, uno per livello — vedi BACKUP-RESTORE.md.
+#                          Il decifrato può essere compresso (zstd/gzip) anche se
+#                          il nome dice `.tar.age`: il formato si legge dai primi
+#                          byte, non dal nome (vedi `estrai_cifrato`).
 #   - DIRECTORY          → snapshot locale non cifrato (<vol>.tar dentro);
 #                          usato dall'auto-rollback di `vps1777 update`,
 #                          che NON può dipendere dalla age-key (spesso solo
@@ -59,10 +68,13 @@ die()  { printf '%s[✗]%s %s\n' "$C_E"  "$C_R" "$*" >&2; exit 1; }
 if [ -z "$ARCHIVE" ]; then
   echo "Uso: $0 [--yes] [--volumes-only v1,v2] <backup.tar.age | snapshot-dir>"
   echo
-  echo "Backup disponibili in backups/:"
+  echo "Backup CORE disponibili in backups/:"
   # nomi generati da backup.sh: nessun carattere strano
   # shellcheck disable=SC2012
   ls -1 backups/vps1777-*.tar.age 2>/dev/null | sed 's/^/  /' || echo "  (nessuno)"
+  echo "Backup ARCHIVIO disponibili in backups/archivio/:"
+  # shellcheck disable=SC2012
+  ls -1 backups/archivio/vps1777-archivio-*.tar.age 2>/dev/null | sed 's/^/  /' || echo "  (nessuno)"
   exit 1
 fi
 [ -e "$ARCHIVE" ] || die "input non trovato: $ARCHIVE"
@@ -118,8 +130,30 @@ if [ -d "$ARCHIVE" ]; then
   cp -a "$ARCHIVE"/*.tar "$TMP/volumes/" 2>/dev/null || die "nessun .tar nello snapshot"
   ok "Snapshot caricato"
 else
+  # ── il formato si legge dai BYTE, non dal nome ──
+  # Dal 0.43.13 backup.sh comprime prima di cifrare (zstd, o gzip) e il nome resta
+  # `.tar.age` per contratto (vedi la sua testa). Qui si sbircia il magic number
+  # del decifrato con una prima decifratura tagliata a 4 byte — costa una seconda
+  # passata di age sul file, che è veloce, e non scrive 10 GB in chiaro su disco
+  # solo per guardarne quattro. Poi la pipeline giusta, in streaming.
+  #   28 b5 2f fd → zstd · 1f 8b → gzip · altro → tar nudo (i backup pre-0.43.13)
   log "Decifro archivio..."
-  age -d -i "$AGE_KEY" "$ARCHIVE" | tar -C "$TMP" -xf -
+  magic="$( (age -d -i "$AGE_KEY" "$ARCHIVE" 2>/dev/null || true) | head -c 4 | od -An -tx1 | tr -d ' \n')"
+  case "$magic" in
+    28b52ffd)
+      command -v zstd >/dev/null || die "il backup è compresso con zstd e qui zstd manca (apt install zstd)"
+      log "  formato: tar + zstd"
+      age -d -i "$AGE_KEY" "$ARCHIVE" | zstd -dc | tar -C "$TMP" -xf - ;;
+    1f8b*)
+      command -v gzip >/dev/null || die "il backup è compresso con gzip e qui gzip manca"
+      log "  formato: tar + gzip"
+      age -d -i "$AGE_KEY" "$ARCHIVE" | gzip -dc | tar -C "$TMP" -xf - ;;
+    "")
+      die "decifratura fallita: chiave sbagliata, file troncato o non è un backup age ($ARCHIVE)" ;;
+    *)
+      log "  formato: tar (non compresso)"
+      age -d -i "$AGE_KEY" "$ARCHIVE" | tar -C "$TMP" -xf - ;;
+  esac
   ok "Decifrato"
 fi
 

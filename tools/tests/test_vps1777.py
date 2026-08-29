@@ -1348,6 +1348,80 @@ def test_spazio_ignora_cio_che_non_e_un_backup():
     assert serve == v.SPAZIO_MINIMO_UPDATE, "solo i vps1777-*.tar.age contano"
 
 
+# ── 29/08: backup a DUE LIVELLI — la stima spazio e la sorveglianza dell'archivio ──
+
+def test_spazio_usa_lo_snapshot_pre_update_se_esiste():
+    # RISPOSTA NOTA: dal 0.43.13 il backup cifrato è compresso (~metà) e diviso
+    # in due livelli: «2 × backup» sottostimerebbe lo snapshot pre-update, che è
+    # il volume IN CHIARO. Con uno snapshot da 10 GiB e un backup da 4 GiB la
+    # guardia deve chiedere 10 + 4 + 1, non 2·4 + 1.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_backup(d, 4 * 1024**3)
+        snap = repo / "backups" / "pre-update" / "0.43.12-20260829-000000"
+        snap.mkdir(parents=True)
+        (snap / "archive-data.tar").write_bytes(b"\0" * 10 * 1024**3)
+        serve, perche = v.spazio_richiesto_update(repo)
+    assert serve == 10 * 1024**3 + 4 * 1024**3 + 1024**3
+    assert "snapshot pre-update pesa 10.0 GiB" in perche
+
+
+def test_spazio_senza_snapshot_ricade_sul_backup_come_prima():
+    # CIÒ CHE NON DEVE CAMBIARE: su una macchina mai aggiornata (nessuno
+    # snapshot) vale la formula storica, e il caso di prima resta identico.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_backup(d, 3 * 1024**3)
+        (repo / "backups" / "pre-update").mkdir()          # esiste ma è vuota
+        serve, _ = v.spazio_richiesto_update(repo)
+    assert serve == 2 * 3 * 1024**3 + 1024**3
+
+
+def test_backup_piu_grande_vede_anche_il_livello_archivio():
+    # RISPOSTA NOTA: il core pesa KB, l'archivio GB, e vive in `archivio/`: una
+    # stima che guardasse solo `backups/` direbbe «1 KiB» e autorizzerebbe tutto.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_backup(d, 1024)
+        a = repo / "backups" / "archivio"
+        a.mkdir()
+        (a / "vps1777-archivio-2026-08-29-030000.tar.age").write_bytes(b"\0" * 3 * 1024**3)
+        assert v.backup_piu_grande(repo) == 3 * 1024**3
+
+
+def test_eta_backup_archivio_legge_la_data_dal_nome():
+    # RISPOSTA NOTA: la data è nel NOME (l'mtime lo cambia un rsync). Due copie,
+    # conta la più recente; nessuna copia ⇒ None (non misurato ≠ vecchissimo).
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        assert v.eta_backup_archivio(repo) is None
+        a = repo / "backups" / "archivio"
+        a.mkdir(parents=True)
+        oggi = v.datetime.now(v.timezone.utc).strftime("%Y-%m-%d")
+        (a / "vps1777-archivio-2020-01-01-030000.tar.age").write_bytes(b"x")
+        (a / f"vps1777-archivio-{oggi}-030000.tar.age").write_bytes(b"x")
+        (a / "vps1777-archivio-non-una-data.tar.age").write_bytes(b"x")   # non conta
+        assert v.eta_backup_archivio(repo) == 0
+        (a / f"vps1777-archivio-{oggi}-030000.tar.age").unlink()
+        assert v.eta_backup_archivio(repo) > 2000
+
+
+def test_sorveglia_archivio_avvisa_solo_oltre_il_doppio_del_passo():
+    # RISPOSTA NOTA: 7 giorni è il passo, l'allarme scatta OLTRE 14 — e si arma
+    # una volta sola (transizione), poi si disarma quando torna al passo.
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        a = repo / "backups" / "archivio"
+        a.mkdir(parents=True)
+        st: dict = {}
+        v._sorveglia_backup_archivio(repo, st, notifica=False)      # nessun archivio
+        assert "archivio_vecchio_da" not in st
+        (a / "vps1777-archivio-2020-01-01-030000.tar.age").write_bytes(b"x")
+        v._sorveglia_backup_archivio(repo, st, notifica=False)
+        assert st.get("archivio_vecchio_da"), "oltre il doppio del passo si arma"
+        oggi = v.datetime.now(v.timezone.utc).strftime("%Y-%m-%d")
+        (a / f"vps1777-archivio-{oggi}-030000.tar.age").write_bytes(b"x")
+        v._sorveglia_backup_archivio(repo, st, notifica=False)
+        assert "archivio_vecchio_da" not in st, "tornato al passo: si disarma"
+
+
 # ── H59: la copertura dei backup, e l'allarme che NON deve suonare a vuoto ───
 
 def _repo_con_giorni(d: str, *nomi: str) -> Path:
