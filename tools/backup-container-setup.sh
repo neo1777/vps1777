@@ -28,8 +28,14 @@ set -e
 # si bumpa il pin di proposito. Il fix più robusto (fuori dal mio scope: tocca il
 # Dockerfile/compose) è cuocere questi pacchetti in un'immagine custom a build-time
 # invece di apk-a-runtime. Vedi la nota nel report.
-echo "[backup] installing age + bash (pinned)..."
-apk add --no-cache age=1.2.1-r0 bash=5.2.26-r0 >/dev/null
+# zstd (29/08, backup a due livelli): comprime l'archivio prima di cifrarlo —
+# 2-3× su SQLite+FTS, l'unico livello che pesa. sqlite: esporta le `description`
+# dei DB nel core notturno (la sola parte dell'archivio che il re-ingest non
+# rigenera). Entrambi pinnati come age/bash, stessa ragione e stesso caveat.
+#     zstd   1.5.6-r0   (main)
+#     sqlite 3.45.3-r3  (main)
+echo "[backup] installing age + bash + zstd + sqlite (pinned)..."
+apk add --no-cache age=1.2.1-r0 bash=5.2.26-r0 zstd=1.5.6-r0 sqlite=3.45.3-r3 >/dev/null
 
 echo "[backup] writing crontab..."
 cat > /etc/crontabs/root <<EOF

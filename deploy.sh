@@ -567,6 +567,7 @@ command -v docker >/dev/null 2>&1 || NEED="$NEED docker.io"
 command -v git    >/dev/null 2>&1 || NEED="$NEED git"
 command -v curl   >/dev/null 2>&1 || NEED="$NEED curl"
 command -v age    >/dev/null 2>&1 || NEED="$NEED age"
+command -v zstd   >/dev/null 2>&1 || NEED="$NEED zstd"   # comprime il backup archivio (29/08)
 command -v python3 >/dev/null 2>&1 || NEED="$NEED python3"
 python3 -c "import bcrypt" 2>/dev/null || NEED="$NEED python3-bcrypt"
 if [ -n "$NEED" ]; then

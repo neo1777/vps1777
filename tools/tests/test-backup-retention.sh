@@ -268,5 +268,76 @@ verifica_versioni "⑮ senza sidecar vale la regola a tempo di prima (nessuna re
   "$(n 2026-07-26-030000) $(n 2026-07-27-030000)" \
   "$(n 2026-07-26-030000)|-" "$(n 2026-07-27-030000)|-"
 
+# ─────────── la ritenzione dell'ARCHIVIO (29/08, backup a due livelli) ───────────
+# Come `verifica`, ma popola ANCHE `archivio/` (argomenti dopo `--` ) e confronta i
+# sopravvissuti di entrambe le cartelle: `<core…> / <archivio…>`. Il punto che
+# questi casi presidiano è che i due livelli NON si contano a vicenda — la
+# ritenzione del core non deve vedere dentro `archivio/`, e quella dell'archivio
+# non deve uscire da lì.
+a() { printf 'vps1777-archivio-%s.tar.age' "$1"; }
+verifica_due_livelli() {
+  local nome="$1"; shift
+  local attesi="$1"; shift
+  local dir; dir="$(mktemp -d)"
+  local f in_archivio=0
+  for f in "$@"; do
+    if [ "$f" = "--" ]; then in_archivio=1; mkdir -p "$dir/archivio"; continue; fi
+    if [ "$in_archivio" -eq 1 ]; then : > "$dir/archivio/$f"; else : > "$dir/$f"; fi
+  done
+  local out rc
+  out="$(BACKUP_DIR="$dir" bash "$BACKUP_SH" --prune-only 2>&1)"; rc=$?
+  local sopravvissuti="" g
+  for g in "$dir"/*; do
+    [ -e "$g" ] || continue
+    [ -d "$g" ] && continue                 # la cartella archivio si conta sotto
+    sopravvissuti="$sopravvissuti ${g##*/}"
+  done
+  sopravvissuti="${sopravvissuti# } /"
+  for g in "$dir"/archivio/*; do
+    [ -e "$g" ] || continue
+    case "$g" in *.meta) continue;; esac
+    sopravvissuti="$sopravvissuti ${g##*/}"
+  done
+  rm -rf "$dir"
+  if [ "$rc" -ne 0 ]; then
+    printf '  ✗ %s — lo script è uscito con %d\n%s\n' "$nome" "$rc" "$out"
+    falliti=$((falliti + 1)); return
+  fi
+  if [ "$sopravvissuti" != "$attesi" ]; then
+    printf '  ✗ %s\n      atteso: %s\n     ottenuto: %s\n' "$nome" "$attesi" "$sopravvissuti"
+    falliti=$((falliti + 1)); return
+  fi
+  printf '  ✓ %s\n' "$nome"; passati=$((passati + 1))
+}
+
+# ⑯ RISPOSTA NOTA: quattro archivi, KEEP_ARCHIVIO=2 ⇒ restano i DUE più recenti
+#    (n e n-1, la decisione dell'owner). I core non vengono toccati.
+verifica_due_livelli "⑯ archivio: restano n e n-1, il resto cade; il core non si tocca" \
+  "$(n 2026-08-28-030000) $(n 2026-08-29-030000) / $(a 2026-08-22-030000) $(a 2026-08-29-030000)" \
+  "$(n 2026-08-28-030000)" "$(n 2026-08-29-030000)" -- \
+  "$(a 2026-08-01-030000)" "$(a 2026-08-08-030000)" "$(a 2026-08-22-030000)" "$(a 2026-08-29-030000)"
+
+# ⑰ CIÒ CHE NON LA RIGUARDA, nei due versi: un archivio SOLO non si pota (sotto
+#    KEEP_ARCHIVIO), e la ritenzione a tempo del core — che qui poterebbe l'ottavo
+#    giorno — non deve contare gli archivi come giorni del core né viceversa.
+verifica_due_livelli "⑰ i due livelli non si contano a vicenda" \
+  "$(n 2026-08-23-030000) $(n 2026-08-24-030000) $(n 2026-08-25-030000) $(n 2026-08-26-030000) $(n 2026-08-27-030000) $(n 2026-08-28-030000) $(n 2026-08-29-030000) / $(a 2026-07-01-030000)" \
+  "$(n 2026-08-22-030000)" "$(n 2026-08-23-030000)" "$(n 2026-08-24-030000)" "$(n 2026-08-25-030000)" \
+  "$(n 2026-08-26-030000)" "$(n 2026-08-27-030000)" "$(n 2026-08-28-030000)" "$(n 2026-08-29-030000)" -- \
+  "$(a 2026-07-01-030000)"
+
+# ⑱ RISPOSTA NOTA: il resto interrotto dell'archivio viene rimosso (stessa regola
+#    del `.parziale` del core), e NON conta come copia.
+verifica_due_livelli "⑱ un .parziale nell'archivio viene rimosso e non conta" \
+  "$(n 2026-08-29-030000) / $(a 2026-08-22-030000) $(a 2026-08-29-030000)" \
+  "$(n 2026-08-29-030000)" -- \
+  "$(a 2026-08-15-030000).parziale" "$(a 2026-08-22-030000)" "$(a 2026-08-29-030000)"
+
+# ⑲ IL RENDICONTO DELL'ARCHIVIO parla nella SUA unità — copie e giorni dall'ultima
+#    — e avvisa quando l'ultima copia è più vecchia del doppio del passo.
+verifica_dice "⑲ senza nessun archivio il rendiconto lo dice" \
+  "archivio: NESSUNA copia" \
+  "$(n 2026-08-29-030000)"
+
 printf '\n%d passati, %d falliti\n' "$passati" "$falliti"
 [ "$falliti" -eq 0 ]

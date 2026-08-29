@@ -2,6 +2,41 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.13] — 2026-08-29
+
+**Il backup impara cosa vale la pena cifrare.** Misurato sulla VPS: un backup
+notturno pesava 9,7 GB, e 9,7 GB erano il solo `archive-data` — rigenerabile in
+due ore dai bundle che l'owner tiene fuori dalla macchina. Tutto ciò che è
+insostituibile pesava 250 KB. Si pagavano 9,7 GB a notte per 250 KB.
+
+### ✨ Migliorato
+
+- **Backup su due livelli** (`tools/backup.sh`, decisione owner del 29/08:
+  *«basta n, n-1 per paranoia… dobbiamo farci stare quel che serve»*). Il
+  **core** — tutti i volumi tranne l'archivio, secret, config, e le
+  `description` dei DB (l'unica parte dell'archivio che il re-ingest non
+  rigenera, esportate ogni notte con sqlite3 nel container) — ogni notte, con la
+  ritenzione di sempre. L'**archivio** — i volumi dei DB — ogni 7 giorni, in
+  `backups/archivio/`, **compresso zstd prima di cifrare** (2-3× su SQLite+FTS),
+  ultime 2 copie. `--archivio` lo forza, `--senza-archivio` lo salta: `vps1777
+  update` usa il secondo (ha già lo snapshot pre-update), il bootstrap il primo.
+  Il nome resta `.tar.age` per contratto; il formato sta nel sidecar `.meta` e
+  nei primi byte — `restore.sh` lo riconosce da lì, e un disaster recovery è
+  due restore, uno per livello. Il ciclo backup→restore in CI ora prova i due
+  livelli, la divisione dentro il tar, l'export delle description, il passo
+  settimanale e il forzato; la ritenzione ha quattro casi nuovi (⑯-⑲).
+- **La stima spazio di `vps1777 update` legge lo snapshot, non il backup**: col
+  backup compresso «2 × backup» avrebbe sottostimato lo snapshot pre-update, che
+  è il volume in chiaro. Ora chiede snapshot precedente + backup più grande
+  (su entrambi i livelli) + 1 GiB.
+- **`vps1777 check` sorveglia anche l'archivio**: avvisa (e notifica alla
+  transizione) se l'ultima copia ha più di 14 giorni.
+- **`tools/backup-pull.sh`**: il gesto «porta i backup su un disco tuo» scritto
+  una volta — rsync dei due livelli dal PC, senza `pre-update/`, senza
+  `--delete`; esce 2 se la destinazione non c'è (HD non montato).
+- Il container backup installa `zstd` e `sqlite` (pinnati, come age/bash);
+  `deploy.sh` e l'installer grafico aggiungono `zstd` ai pacchetti host.
+
 ## [0.43.12] — 2026-08-29
 
 **«Dobbiamo farci stare quel che serve»: la retention impara il peso.**

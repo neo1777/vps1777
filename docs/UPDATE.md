@@ -36,8 +36,11 @@ lock → preflight → changelog+conferma → download bundle (sha256 + cosign)
 
 Garanzie:
 
-- **Prima di toccare qualunque cosa**: backup cifrato age (`tools/backup.sh`)
-  + snapshot locale non cifrato dei 3 volumi dati (`backups/pre-update/`).
+- **Prima di toccare qualunque cosa**: backup cifrato age del livello **core**
+  (`tools/backup.sh --senza-archivio`: volumi piccoli, secret, config, description
+  dei DB) + snapshot locale non cifrato dei 3 volumi dati (`backups/pre-update/`).
+  L'archivio cifrato ha il suo passo settimanale dal cron notturno — qui lo copre
+  lo snapshot (vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md), «I due livelli»).
   Lo snapshot esiste perché l'auto-rollback **non può dipendere dalla age-key**
   (che spesso vive solo sul tuo PC); viene potato al successivo update riuscito.
 - **Supply-chain**: il bundle di release porta `images.lock` con i digest
@@ -186,4 +189,5 @@ inerte. `vps1777 update` ti avvisa se lo trova attivo. Usa il canale gestito.
   Controlla la release su GitHub e riprova.
 - **Rollback non healthy (exit 2)** — la CLI si ferma senza thrashing e ti
   scrive su Telegram. Hai: lo snapshot in `backups/pre-update/`, il backup age
-  in `backups/`, e `docs/BACKUP-RESTORE.md` per il disaster recovery.
+  core in `backups/` (e l'archivio in `backups/archivio/`), e
+  `docs/BACKUP-RESTORE.md` per il disaster recovery.
