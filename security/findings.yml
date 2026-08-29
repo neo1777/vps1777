@@ -2260,8 +2260,13 @@ findings:
           # `INCOMPLETO="$OUT"` ed è stata sostituita dalla cura del residuo —
           # il gate se n'è accorto, ed è per questo che l'evidenza è puntuale
           # invece di generica.
-          - "PARZIALE=\"$OUT.parziale\""
-          - "mv -f \"$PARZIALE\" \"$OUT\""
+          # 29/08 (0.43.13, backup a due livelli): la scrittura atomica è
+          # diventata una FUNZIONE (`scrivi_cifrato`) usata per entrambi i
+          # livelli — l'invariante è lo stesso, i nomi sono locali. Il gate se
+          # n'è accorto di nuovo (CI rossa sulla PR #247): evidenza riallineata,
+          # fix mai rimosso.
+          - "local parziale=\"$out.parziale\""
+          - "mv -f \"$parziale\" \"$out\""
           - "meglio nessuno che uno troncato."
       - file: tools/vps1777.py
         contains:
