@@ -1386,6 +1386,40 @@ def spazio_richiesto_update(repo: Path) -> tuple[int, str]:
 
 # ─────────────────────────────────────────── snapshot volumi (pre-update)
 
+def backup_sh_della_release(repo: Path, bundle: Path | None) -> Path:
+    """Il `backup.sh` con cui fare il backup pre-update: quello della RELEASE che
+    sta arrivando, copiato nel repo prima di lanciarlo.
+
+    🔴 MISURATO il 29/08/2026 sull'update 0.43.12 → 0.43.13 (unit auto-update,
+       fail-closed, stack intatto): la CLI si auto-aggiorna dal bundle allo step
+       4 e chiama `backup.sh` allo step 7 — ma `backup.sh` nel repo viene
+       sincronizzato dal bundle solo DOPO, oltre il punto di non ritorno. La CLI
+       nuova ha passato `--senza-archivio` allo script vecchio, che conosceva
+       solo `--prune-only`: «uso: …», exit 2, update annullato. *Ogni flag nuovo
+       a backup.sh rompeva l'update in cui nasceva.*
+    ⭐ La cura non è lanciarlo DAL bundle: backup.sh deriva repo, `.env`,
+       `secrets/` e il recipient dalla PROPRIA posizione (`$SCRIPT_DIR/..`), e dal
+       bundle farebbe il backup del bundle. Si copia nel repo — è lo stesso file,
+       già verificato cosign, che `sync_managed_files` copierà comunque dopo —
+       e si lancia da lì. Se l'update abortisce, nel repo resta lo script nuovo
+       con la CLI vecchia: compatibile (senza flag fa il default), non un buco.
+    Senza bundle (o bundle senza tools/backup.sh) resta quello del repo."""
+    dentro_repo = repo / "tools" / "backup.sh"
+    if bundle is None:
+        return dentro_repo
+    nel_bundle = bundle / "tools" / "backup.sh"
+    if not nel_bundle.is_file():
+        return dentro_repo
+    try:
+        if dentro_repo.is_file() and dentro_repo.read_bytes() == nel_bundle.read_bytes():
+            return dentro_repo
+        shutil.copy2(nel_bundle, dentro_repo)
+        log("backup.sh: uso quello della release in arrivo (copiato dal bundle verificato)")
+    except OSError as exc:
+        warn(f"backup.sh: non riesco a copiare quello della release ({exc}) — uso quello del repo")
+    return dentro_repo
+
+
 def snapshot_stale_excluded(base: Path) -> list[Path]:
     """I .tar di volumi ESCLUSI rimasti negli snapshot già sul disco.
 
@@ -2984,7 +3018,7 @@ def cmd_update(repo: Path, args) -> int:
         # snapshot pre-update dell'archivio (in chiaro, per il rollback) — pagare
         # anche il livello cifrato dell'archivio qui allungherebbe ogni update di
         # minuti per una copia che il cron notturno fa al suo passo.
-        run(["bash", str(repo / "tools" / "backup.sh"), "--senza-archivio"], cwd=repo)
+        run(["bash", str(backup_sh_della_release(repo, bundle)), "--senza-archivio"], cwd=repo)
         snap = snapshot_create(repo, cur, target)
     except (subprocess.CalledProcessError, OSError) as exc:
         step(7, "backup", "failed", str(exc))
