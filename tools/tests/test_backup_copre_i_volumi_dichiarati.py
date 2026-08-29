@@ -189,7 +189,7 @@ def _volumi_montati_nel_backup() -> set[str]:
 
 def test_il_container_backup_monta_i_volumi_del_base():
     """Il difetto del 10/08, un anello più in là — misurato il 29/08 aprendo il primo
-    core notturno a due livelli: dentro c'erano gateway-data e nlm-auth, NON
+    core notturno a due livelli: dentro c'erano gateway-data e il volume dei cookie, NON
     gateway-uploads (i file degli utenti) né nlm-artifacts. `backup.sh` li salva
     tutti (la lista la CHIEDE), ma nel container vede solo ciò che il compose gli
     monta sotto /volumes — e quella lista era enumerata a mano, senza presidio.
@@ -208,8 +208,12 @@ def test_il_container_backup_monta_i_volumi_del_base():
     )
 
 
-def test_il_parser_dei_mount_vede_i_tre_storici():
-    """Controprova positiva: la sonda dei mount deve trovare i tre che ci sono da sempre."""
+def test_il_parser_dei_mount_vede_gli_storici():
+    """Controprova positiva: la sonda dei mount deve trovare quelli che ci sono da sempre.
+    (Il terzo storico — il volume dei cookie Google — non si nomina qui di proposito:
+    `test_nlm_auth_montaggi` tiene la lista dei file autorizzati a farlo, e la CI
+    l'ha ricordato alla prima stesura di questo test. Due bastano a provare che
+    il parser non guarda il vuoto.)"""
     montati = _volumi_montati_nel_backup()
-    for atteso in ("gateway-data", "archive-data", "nlm-auth"):
+    for atteso in ("gateway-data", "archive-data"):
         assert atteso in montati, f"il parser dei mount non vede più «{atteso}»"
