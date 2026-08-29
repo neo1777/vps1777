@@ -169,3 +169,51 @@ def test_gli_esclusi_hanno_una_ragione_scritta():
     """Un'esclusione senza motivo è indistinguibile da una dimenticanza."""
     for vol, perche in ESCLUSI.items():
         assert perche and len(perche) > 20, f"l'esclusione di {vol} non dice perché"
+
+
+def _volumi_del_compose_base() -> set[str]:
+    """I volumi dichiarati nel SOLO compose.yaml: quelli che esistono in ogni installazione."""
+    return {v for v, dove in _volumi_dichiarati().items() if dove == "compose.yaml"}
+
+
+def _volumi_montati_nel_backup() -> set[str]:
+    """I `<vol>:/volumes/<vol>:ro` ATTIVI (non commentati) di compose.ops.backup.yaml."""
+    out = set()
+    for riga in (_ROOT / "compose.ops.backup.yaml").read_text().splitlines():
+        m = re.match(r"^\s+-\s+([A-Za-z0-9_.-]+):/volumes/([A-Za-z0-9_.-]+):ro\s*$", riga)
+        if m:
+            assert m.group(1) == m.group(2), f"mount incoerente nel backup: {riga.strip()}"
+            out.add(m.group(1))
+    return out
+
+
+def test_il_container_backup_monta_i_volumi_del_base():
+    """Il difetto del 10/08, un anello più in là — misurato il 29/08 aprendo il primo
+    core notturno a due livelli: dentro c'erano gateway-data e il volume dei cookie, NON
+    gateway-uploads (i file degli utenti) né nlm-artifacts. `backup.sh` li salva
+    tutti (la lista la CHIEDE), ma nel container vede solo ciò che il compose gli
+    monta sotto /volumes — e quella lista era enumerata a mano, senza presidio.
+    Ogni volume del compose BASE deve essere montato :ro nel container backup; i
+    volumi degli overlay (caddy, portainer) hanno la loro riga commentata e non
+    sono di questo test."""
+    base = _volumi_del_compose_base()
+    montati = _volumi_montati_nel_backup()
+    assert base, "nessun volume letto da compose.yaml: il test non sta guardando niente"
+    assert montati, "nessun mount /volumes/ letto dal backup: il parser guarda il vuoto"
+    mancanti = sorted(base - montati)
+    assert not mancanti, (
+        "volumi del compose base NON montati nel container backup: "
+        + ", ".join(mancanti)
+        + "  ⇒ il core notturno li omette in silenzio (backup.sh vede solo /volumes)"
+    )
+
+
+def test_il_parser_dei_mount_vede_gli_storici():
+    """Controprova positiva: la sonda dei mount deve trovare quelli che ci sono da sempre.
+    (Il terzo storico — il volume dei cookie Google — non si nomina qui di proposito:
+    `test_nlm_auth_montaggi` tiene la lista dei file autorizzati a farlo, e la CI
+    l'ha ricordato alla prima stesura di questo test. Due bastano a provare che
+    il parser non guarda il vuoto.)"""
+    montati = _volumi_montati_nel_backup()
+    for atteso in ("gateway-data", "archive-data"):
+        assert atteso in montati, f"il parser dei mount non vede più «{atteso}»"

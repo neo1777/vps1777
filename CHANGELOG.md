@@ -2,6 +2,19 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.15] — 2026-08-29
+
+### 🐛 Fix
+
+- **Il container backup monta anche `gateway-uploads` e `nlm-artifacts`**
+  (misurato aprendo sul PC il primo core notturno a due livelli: dentro c'erano
+  `gateway-data` e `nlm-auth`, non gli altri due). È il difetto del 10/08 su
+  `backup.sh` — la lista enumerata a mano che perdeva proprio questi due —
+  riapparso un anello più in là: lo script li salva tutti, ma nel container vede
+  solo ciò che il compose gli monta sotto `/volumes`, e quella lista non la
+  governava nessuno. Ora la tiene un test: ogni volume del compose base deve
+  essere montato `:ro` nel backup (`test_il_container_backup_monta_i_volumi_del_base`).
+
 ## [0.43.14] — 2026-08-29
 
 **Il primo update verso la 0.43.13 si è fermato da solo, e aveva ragione.**

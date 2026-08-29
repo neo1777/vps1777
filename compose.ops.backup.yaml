@@ -37,6 +37,15 @@ services:
       - gateway-data:/volumes/gateway-data:ro
       - archive-data:/volumes/archive-data:ro
       - nlm-auth:/volumes/nlm-auth:ro
+      # 🔴 29/08 — MANCAVANO, misurato aprendo il primo core notturno a due livelli:
+      #   dentro c'erano gateway-data e nlm-auth, non gateway-uploads (i file degli
+      #   utenti) né nlm-artifacts. È lo STESSO difetto del 10/08 su backup.sh (lista
+      #   enumerata a mano che perdeva questi due), riapparso un anello più in là:
+      #   backup.sh li salva tutti, ma nel container vede solo ciò che è montato qui
+      #   — e questa lista la governava nessuno. Ora la tiene un test:
+      #   test_backup_copre_i_volumi_dichiarati::test_il_container_backup_monta_i_volumi_del_base
+      - gateway-uploads:/volumes/gateway-uploads:ro
+      - nlm-artifacts:/volumes/nlm-artifacts:ro
       # Col profilo ingress.caddy esistono anche questi — decommentali per includerli:
       #- caddy-data:/volumes/caddy-data:ro
       #- caddy-config:/volumes/caddy-config:ro
