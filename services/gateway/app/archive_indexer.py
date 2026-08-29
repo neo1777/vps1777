@@ -10,7 +10,13 @@ Schema prodotto (compatibile col `search` di archive-mcp):
 Formati (dispatch per estensione in `index_file`; i .zip si riconoscono dal
 contenuto, non dal nome):
     .jsonl        → sessione Claude Code (record user/assistant)
-    .zip claude.ai → export account (conversations.json + design_chats/ + projects/docs)
+    .zip claude.ai → export account (conversations.json + design_chats/ + projects/docs
+                     + memories + users/login_history). Dal 29/08/2026 claude.ai lo
+                     consegna SPEZZATO in 5 zip per categoria (conversations-000.zip,
+                     projects-000.zip, design_chats-000.zip, memories-000.zip,
+                     light_metadata-000.zip) più un manifest coi link one-shot:
+                     OGNI zip è riconosciuto da solo e si carica sullo stesso DB
+                     (idempotente per uuid), in qualunque ordine e anche a parti -NNN
     .zip Telegram  → export Desktop JSON (result.json) o HTML (messages*.html),
                      anche in sottocartella ChatExport_*/
     .zip bundle    → bundle di Recupero Sessioni 1777 (MANIFEST.json + sessions/):
@@ -1400,6 +1406,50 @@ def _iter_memories(data: object) -> Iterator[RowFull]:
             if body.strip():
                 label = f"memory:project:{key}"
                 yield from _chunk_rows_full(body, label, "", label, sender="memory")
+        # `memory_files` — dal 29/08/2026: i FILE di memoria di claude.ai
+        # (`/areas/<progetto>.md`, frontmatter name/description + corpo), uno per
+        # area. Sono la forma nuova della stessa cosa: testo scritto da un
+        # assistente su una persona. Etichetta `memory:file:<path>`, ts = updated_at.
+        for mf in (acc.get("memory_files") or []):
+            if not isinstance(mf, dict):
+                continue
+            path = str(mf.get("path") or mf.get("name") or "")
+            content = mf.get("content")
+            if not path or not isinstance(content, str) or not content.strip():
+                continue
+            label = f"memory:file:{path}"
+            yield from _chunk_rows_full(content, label, str(mf.get("updated_at") or ""),
+                                        label, sender="memory")
+
+
+def _iter_login_history(data: object) -> Iterator[RowFull]:
+    """`login_history.json` (dal 29/08/2026, in `light_metadata-NNN.zip`): gli accessi
+    all'account — timestamp, IP, metodo, user-agent, paese. Una riga per evento,
+    etichetta `account:login`, `sender='account'`, ts = timestamp dell'accesso.
+
+    Stessa regola di `users.json`: l'ingestione non filtra, chi carica sa cosa
+    carica. «Da quale macchina ero collegato il 21/08?» è una domanda legittima.
+    """
+    events = data.get("login_events") if isinstance(data, dict) else data
+    if not isinstance(events, list):
+        return
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        righe: list[str] = []
+        for k, v in ev.items():
+            if isinstance(v, dict):
+                sub = ", ".join(f"{a}={b}" for a, b in v.items() if b not in (None, ""))
+                if sub:
+                    righe.append(f"{k}: {sub}")
+            elif v not in (None, "", []):
+                righe.append(f"{k}: {v}")
+        body = "\n".join(righe)
+        if not body.strip():
+            continue
+        ts = str(ev.get("timestamp") or "")
+        uid = _uid("login", ts, str(ev.get("ip_address") or ""), str(ev.get("method") or ""))
+        yield (uid, "account:login", ts, body, "account", "", "", "", "")
 
 
 def _iter_users(data: object) -> Iterator[RowFull]:
@@ -1479,6 +1529,27 @@ def _iter_conversations(convs: list, fallback: str) -> Iterator[RowFull]:
                    str(m.get("parent_message_uuid") or ""))
 
 
+def _membri_memories(names: list) -> list:
+    """I membri-memoria di un export claude.ai, nei due layout conosciuti."""
+    out = [n for n in names if n == "memories.json"]
+    out += [n for n in names if n.startswith("memories/") and n.endswith(".json")]
+    return out
+
+
+_MEMBRI_CLAUDE_RADICE = ("conversations.json", "memories.json", "users.json",
+                         "login_history.json")
+
+
+def _e_export_claude(names: list) -> bool:
+    """Uno zip è un export claude.ai se contiene ALMENO UNA delle sue parti: dal
+    29/08/2026 l'export arriva in 5 zip per categoria, e i due piccoli
+    (`memories-000.zip`, `light_metadata-000.zip`) non hanno né conversations.json
+    né design_chats/ né projects/ — prima di questa riga venivano rifiutati come
+    «zip non riconosciuto», ed erano proprio la memoria persistente dell'account."""
+    return any(n in _MEMBRI_CLAUDE_RADICE for n in names) or any(
+        n.startswith(("design_chats/", "projects/", "memories/")) for n in names)
+
+
 def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[RowFull]:
     with zipfile.ZipFile(zip_path) as z:
         names = z.namelist()
@@ -1491,9 +1562,11 @@ def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[Ro
         # memories.json — la memoria persistente dell'account. Non veniva indicizzata:
         # l'archivio non conteneva la fonte che più di ogni altra determina cosa
         # l'assistente crede dell'utente.
-        if "memories.json" in names:
+        # Due layout: `memories.json` alla radice (export unico, fino ad agosto 2026)
+        # oppure `memories/<account_uuid>.json` (export a 5 zip, dal 29/08/2026).
+        for n in _membri_memories(names):
             try:
-                yield from _iter_memories(_zip_json(z, "memories.json", budget))
+                yield from _iter_memories(_zip_json(z, n, budget))
             except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
         # users.json — anagrafica dell'account (nome, email, telefono verificato).
@@ -1511,6 +1584,11 @@ def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[Ro
         if "users.json" in names:
             try:
                 yield from _iter_users(_zip_json(z, "users.json", budget))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+        if "login_history.json" in names:
+            try:
+                yield from _iter_login_history(_zip_json(z, "login_history.json", budget))
             except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
         for n in names:
@@ -2290,8 +2368,7 @@ def _index_zip(path: Path, db_path: Union[str, Path]) -> int:
         # che il fallback docs mangerebbe, ignorando sessioni e log.
         n, kind = (write_rows(db_path, _iter_bundle_zip(path, budget)),
                    "bundle recupero-sessioni-1777")
-    elif "conversations.json" in names or any(
-            n.startswith(("design_chats/", "projects/")) for n in names):
+    elif _e_export_claude(names):
         n, kind = write_rows(db_path, _iter_claude_zip(path, budget)), "export claude.ai"
     elif telegram_jsons:
         # JSON preferito quando c'è: più fedele (id numerici, entities, service)
@@ -2311,7 +2388,9 @@ def _index_zip(path: Path, db_path: Union[str, Path]) -> int:
         else:
             raise ValueError(
                 "zip non riconosciuto: mi aspetto un export claude.ai "
-                "(conversations.json / design_chats/ / projects/), un export "
+                "(conversations.json / design_chats/ / projects/ / memories/ / "
+                "users.json / login_history.json — anche uno solo dei 5 zip "
+                "dell'export spezzato), un export "
                 "Telegram Desktop JSON (result.json), oppure uno zip con almeno "
                 "un documento .md/.txt.")
     if n == 0:

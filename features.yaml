@@ -116,6 +116,29 @@ features:
     verify:
       file_contains: {path: "compose.yaml", pattern: "vps1777-ocr"}
 
+  - id: archive.export-claude-5-zip
+    nome: "Export claude.ai a 5 zip (manifest + categorie), multi-upload"
+    cosa: "Dal 29/08/2026 claude.ai consegna l'export come manifest coi link one-shot
+           + 5 zip per categoria (conversations, projects, design_chats, memories,
+           light_metadata), con suffisso -NNN di parte. Ogni zip è riconosciuto da
+           solo (`_e_export_claude`): prima i due piccoli — la memoria persistente
+           e l'anagrafica — venivano rifiutati come «zip non riconosciuto». Entrano
+           due fonti nuove: i memory_files (/areas/*.md, `memory:file:<path>`) e
+           login_history.json (`account:login`, una riga per accesso, verbatim).
+           /admin/archive accetta più file in un gesto sullo stesso nome DB, con
+           guardie e pulizia per file ed esito per file. Misurato sul primo export
+           del formato: 13.920 record in 15 s, 1,2 GB di RAM."
+    dove: ["services/gateway/app/archive_indexer.py#_e_export_claude",
+           "services/gateway/app/archive_indexer.py#_iter_login_history",
+           "services/gateway/app/admin.py#uploads",
+           "services/gateway/tests/test_archive_indexer.py#test_export_a_5_zip_ogni_zip_e_riconosciuto_da_solo",
+           "services/gateway/tests/test_admin_upload_multifile.py",
+           "docs/ARCHIVE.md"]
+    status: active-default
+    since: "0.43.16"
+    verify:
+      file_contains: {path: "services/gateway/app/archive_indexer.py", pattern: "def _e_export_claude"}
+
   - id: archive.search
     nome: "Ricerca full-text archivio"
     cosa: "Cerca nelle conversazioni indicizzate (FTS5). È il tool MCP centrale di archive-mcp."

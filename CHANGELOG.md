@@ -2,6 +2,42 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.43.16] — 2026-08-29
+
+**L'export claude.ai non è più un file: è un manifest e cinque zip.**
+
+### ✨ Nuovo
+
+- **L'indexer riconosce l'export claude.ai spezzato in 5 zip per categoria**
+  (`conversations-000`, `projects-000`, `design_chats-000`, `memories-000`,
+  `light_metadata-000`, più un `manifest-*.json` coi link one-shot che non si
+  carica). Misurato sul primo export di questo formato (29/08): i tre zip grandi
+  entravano già, i due piccoli — proprio la **memoria persistente** dell'account
+  e l'anagrafica — venivano rifiutati come «zip non riconosciuto», perché
+  l'export lo si riconosceva da `conversations.json`/`design_chats/`/`projects/`
+  e loro non ne hanno nessuno. Ora ogni zip è un export da solo
+  (`_e_export_claude`), nel layout nuovo (`memories/<account>.json`) e in
+  quello vecchio (`memories.json` alla radice), e il suffisso `-NNN` (le parti)
+  non conta: si caricano tutti sullo stesso nome DB, in qualunque ordine,
+  idempotenti per uuid. 13.920 record in 15 s, 1,2 GB di RAM di picco.
+- **Due fonti nuove dentro l'export**: i `memory_files` (`/areas/*.md`, la forma
+  nuova della memoria di claude.ai — etichetta `memory:file:<path>`, ts =
+  `updated_at`) e `login_history.json` (gli accessi: una riga per evento,
+  `account:login`, ts = timestamp; IP, metodo, user-agent, paese — verbatim,
+  come `users.json`: l'ingestione non filtra, chi carica sa cosa carica).
+- **`/admin/archive` accetta più file in un gesto** (`<input multiple>`): tutti
+  sullo stesso nome DB, in ordine, ognuno con le sue guardie (spazio disco,
+  tetto) e la sua pulizia del temporaneo; l'esito è per file, e un errore a
+  metà dice cosa è già entrato (ogni file è la sua transazione). Prima erano
+  cinque upload col nome DB ribattuto uguale — o, lasciandolo vuoto, cinque DB.
+
+### 📝 Note
+
+- `conversations.json` decompresso è al 58% del tetto per membro (297 MB su
+  512): quando lo supererà l'ingest si fermerà **parlante** (`MAX_MEMBER_BYTES`),
+  non tronca. Voce da riaprire al prossimo export che lo buca — o che arriva
+  a parti (`conversations-001.zip`), che già passerebbe.
+
 ## [0.43.15] — 2026-08-29
 
 ### 🐛 Fix
