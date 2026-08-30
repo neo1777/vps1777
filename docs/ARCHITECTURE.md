@@ -182,7 +182,9 @@ fonte di verità — qui c'è la sintesi, là il registro che la CI verifica.
 | v0.33.0 | **Pagina di consenso OAuth** vera (H8); **rete `egress` separata** (H25); CORS scoped ai soli OAuth+`/app`, `/health` con body minimo e `?deep` interno-only, CSP globale `default-src 'none'` (H31/H33/H34/H36); PKCE constant-time (H32); rootfs `read_only` su gateway/archive-mcp/bot (H43). Dossier chiuso: **0 rilievi aperti**. |
 
 > Le versioni successive (v0.34.0 → v0.36.0) non sono hardening: sono le funzioni
-> nb1777 (fix studio, canonico, `memoria_check`) — vedi [NB1777.md](NB1777.md).
+> nb1777 (fix studio, canonico, `memoria_check`; da v0.44.0 il canonico è un file del prodotto e
+> `canonico(full=true)` ne serve il testo, `memoria_ack` registra l'ack) — vedi [NB1777.md](NB1777.md)
+> e [MEMORIA-1777.md](MEMORIA-1777.md).
 > Lo stato `accepted` nel registro (v0.33.0) è la terza casella accanto a
 > `closed`/`open`: un rischio **deciso di non chiudere** non è né fatto né
 > dimenticato, e il gate pretende che porti la sua motivazione. Il primo è il

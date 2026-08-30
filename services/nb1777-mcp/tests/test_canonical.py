@@ -1,128 +1,171 @@
-# Issue #30 — il canonico del blocco di memoria 1777.
-# Il parser è PURO (niente I/O): si testa dando la lista che restituirebbe
-# source_list. get_canonical (che chiama nlm) è fail-open, testato a parte col
-# monkeypatch di core.source_list.
+# Issue #30 → 0.44.0: il canonico del blocco di memoria 1777 vive nel PRODOTTO
+# (app/memoria_1777/disciplina.md), non più nel notebook. Il parser è PURO
+# (testo → dict); la lettura dal file e dagli strati locali si testa con
+# monkeypatch dei path. I parser dei titoli del notebook restano (storico).
 from __future__ import annotations
+
+from pathlib import Path
 
 from app import canonical
 
 
-# Titoli reali del notebook claudemd1777 (letti dal vivo il 14/07), più rumore
-# non-canonico da ignorare.
-REAL_SOURCES = [
+DISCIPLINA_MINIMA = """# Disciplina di memoria 1777 — canonico v2.5 · 2026-08-30
+
+<!-- commento per chi legge il file: NON deve uscire dal tool -->
+
+## Storia
+- v2.5 · 2026-08-30 — SEDE nel prodotto; CURA con full=true.
+- v2.4 · 2026-07-13 — regola CANONICO.
+
+## PIENO
+<!-- superfici con MCP -->
+## Memoria 1777 (v2.5 · 2026-08-30 · canonico: vps1777, tool `canonico`)
+riga uno del pieno
+riga due del pieno
+
+## LITE
+## Disciplina di memoria 1777 (lite · v2.5 · 2026-08-30)
+- riga del lite
+
+## MICRO
+- riga del micro
+"""
+
+
+# ── il parser del file ───────────────────────────────────────────────────────
+
+def test_parse_titolo_versione_data_e_nota() -> None:
+    d = canonical.parse_disciplina(DISCIPLINA_MINIMA)
+    assert d and d["version"] == "v2.5" and (d["major"], d["minor"]) == (2, 5)
+    assert d["date"] == "2026-08-30"
+    assert d["note"] == "SEDE nel prodotto; CURA con full=true."
+
+
+def test_parse_tre_tagli_senza_commenti_html() -> None:
+    d = canonical.parse_disciplina(DISCIPLINA_MINIMA)
+    assert d["tagli"]["pieno"].startswith("## Memoria 1777 (v2.5")
+    assert "riga due del pieno" in d["tagli"]["pieno"]
+    assert "<!--" not in d["tagli"]["pieno"], "i commenti del file non sono per la sessione"
+    assert d["tagli"]["lite"].startswith("## Disciplina di memoria 1777 (lite")
+    assert d["tagli"]["micro"] == "- riga del micro"
+    assert "riga del lite" not in d["tagli"]["pieno"], "un taglio non deve inglobare il successivo"
+
+
+def test_parse_senza_titolo_o_senza_data_e_none() -> None:
+    assert canonical.parse_disciplina("") is None
+    assert canonical.parse_disciplina("# Disciplina — canonico v2.5\n## PIENO\nx") is None, (
+        "un canonico senza data è ciò che FRESCHEZZA vieta: non si accetta")
+
+
+def test_il_file_del_prodotto_esiste_e_si_legge() -> None:
+    """Il canonico VERO, quello spedito nell'immagine: deve stare nel package
+    (COPY app → /app/app) e avere titolo con versione e data, e i tre tagli
+    non vuoti — un taglio vuoto sarebbe una sessione che si allinea al nulla."""
+    assert canonical.DISCIPLINA_PATH.is_file(), canonical.DISCIPLINA_PATH
+    assert canonical.DISCIPLINA_PATH.parent.name == "memoria_1777"
+    assert canonical.DISCIPLINA_PATH.parent.parent == Path(canonical.__file__).resolve().parent
+    d = canonical.get_canonical()
+    assert d and d["date"] and d["version"].startswith("v")
+    for t in canonical.TAGLI:
+        assert len(d["tagli"][t]) > 200, f"taglio {t} vuoto o troncato"
+        assert d["version"] in d["tagli"][t], (
+            f"il taglio {t} non porta in testa la versione {d['version']}: "
+            "una superficie che lo incolla non saprebbe cosa porta")
+
+
+def test_il_canonico_del_prodotto_e_neutro() -> None:
+    """NEUTRALITÀ: vps1777 è un prodotto per chiunque. Il file non nomina il suo
+    primo utente né riferimenti locali; i fatti e l'errata stanno negli strati."""
+    d = canonical.get_canonical()
+    # Si giudica ciò che una sessione RICEVE (i tre tagli), non la «Storia», che
+    # può legittimamente dire «la parola X è stata tolta».
+    for t in canonical.TAGLI:
+        for vietato in ("di Neo", "a Neo", "Cowork", "cookbook_query", "marzio", "81/81"):
+            assert vietato not in d["tagli"][t], f"riferimento non neutro nel taglio {t}: {vietato!r}"
+
+
+# ── fail-open e strati locali (path monkeypatchati) ─────────────────────────
+
+def test_get_canonical_fail_open_su_file_mancante(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(canonical, "DISCIPLINA_PATH", tmp_path / "non-c-e.md")
+    assert canonical.get_canonical() is None
+    v = canonical.public_view(None)
+    assert v["available"] is False and "disciplina.md" in v["nota"]
+
+
+def test_public_view_non_espone_i_tagli() -> None:
+    d = canonical.parse_disciplina(DISCIPLINA_MINIMA)
+    v = canonical.public_view(d)
+    assert v == {"available": True, "version": "v2.5", "date": "2026-08-30",
+                 "note": d["note"], "sede": v["sede"]}
+    assert "tagli" not in v and "disciplina" not in v
+
+
+def test_full_view_porta_disciplina_e_strati_con_origine(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(canonical, "dir_strati_locali", lambda: tmp_path / "memoria-1777")
+    (tmp_path / "memoria-1777").mkdir()
+    (tmp_path / "memoria-1777" / "fatti.md").write_text("# fatti\n- dominio: Dart\n")
+    d = canonical.parse_disciplina(DISCIPLINA_MINIMA)
+    v = canonical.full_view(d, taglio="lite")
+    assert v["available"] and v["taglio"] == "lite"
+    assert v["disciplina"] == d["tagli"]["lite"]
+    assert "prodotto" in v["origine_disciplina"]
+    strati = {s["strato"]: s for s in v["strati"]}
+    assert strati["fatti"]["presente"] and "Dart" in strati["fatti"]["testo"]
+    assert strati["errata"]["presente"] is False and strati["errata"]["testo"] is None
+    assert "locale" in strati["fatti"]["origine"] and "non nel prodotto" in strati["fatti"]["origine"]
+
+
+def test_full_view_taglio_sconosciuto_e_un_errore_parlante() -> None:
+    d = canonical.parse_disciplina(DISCIPLINA_MINIMA)
+    v = canonical.full_view(d, taglio="gigante")
+    assert v["available"] and "taglio sconosciuto" in v["errore"]
+
+
+def test_full_view_fail_open() -> None:
+    assert canonical.full_view(None)["available"] is False
+
+
+def test_read_strato_nome_invalido() -> None:
+    import pytest
+    with pytest.raises(ValueError):
+        canonical.read_strato("segreti")
+
+
+# ── i parser dello STORICO (titoli del notebook claudemd1777) ────────────────
+
+STORICO = [
     {"title": "canonico v2.2 — 2026-07-11 — blocco pieno + blocco-lite + identità verificata"},
-    {"title": "canonico v2.3 — 2026-07-13 — asse FRESCHEZZA (il tempo del giudizio)"},
     {"title": "canonico v2.4 — 2026-07-13 — regola CANONICO (la freschezza applicata al blocco stesso)"},
+    {"title": "canonico v2.3 — 2026-07-13 — asse FRESCHEZZA (il tempo del giudizio)"},
+    {"title": "cloud-ack v2.4 — 2026-08-30 — superfici cloud allineate"},
     {"title": "censimento completo filesystem + innesti round 2 — 2026-07-12 00:30"},
-    {"title": "distribuzione completata — 2026-07-12 00:30 — globale innestato"},
 ]
 
 
-def test_prende_la_versione_piu_alta_dai_titoli_reali() -> None:
-    got = canonical.highest_canonical(REAL_SOURCES)
-    assert got is not None
-    assert got["version"] == "v2.4"
-    assert got["date"] == "2026-07-13"
-    assert got["note"].startswith("regola CANONICO")
+def test_storico_versione_piu_alta_numerica() -> None:
+    best = canonical.highest_canonical(STORICO)
+    assert best["version"] == "v2.4" and best["date"] == "2026-07-13"
+    assert canonical.highest_canonical([{"title": "canonico v2.9 — x"},
+                                        {"title": "canonico v2.10 — y"}])["version"] == "v2.10"
+    assert canonical.highest_canonical([]) is None and canonical.highest_canonical(None) is None
 
 
-def test_ignora_le_fonti_non_canoniche() -> None:
-    # Solo rumore → nessun canonico.
-    noise = [
-        {"title": "censimento superfici — 2026-07-11 — 11 file su disco"},
-        {"title": "innesto eseguito — 2026-07-12 notte — 6 file su disco"},
-    ]
-    assert canonical.highest_canonical(noise) is None
+def test_storico_cloud_ack() -> None:
+    assert canonical.highest_cloud_ack(STORICO) == (2, 4)
+    assert canonical.highest_cloud_ack(STORICO[:3]) is None
 
 
-def test_confronto_numerico_non_lessicale() -> None:
-    # v2.10 deve battere v2.9 (10 > 9), non perdere per confronto tra stringhe.
-    srcs = [
-        {"title": "canonico v2.9 — 2026-08-01 — nona"},
-        {"title": "canonico v2.10 — 2026-08-02 — decima"},
-    ]
-    assert canonical.highest_canonical(srcs)["version"] == "v2.10"
+def test_il_prodotto_non_e_indietro_rispetto_allo_storico() -> None:
+    """Il file del prodotto deve essere ≥ dell'ultima versione del notebook
+    storico: se qualcuno riportasse il file a v2.3, il notebook «vincerebbe»
+    e nessuno se ne accorgerebbe."""
+    d = canonical.get_canonical()
+    st = canonical.highest_canonical(STORICO)
+    assert (d["major"], d["minor"]) > (st["major"], st["minor"])
 
 
-def test_titolo_senza_data() -> None:
-    got = canonical.highest_canonical([{"title": "canonico v3.0 — cambio grosso"}])
-    assert got["version"] == "v3.0"
-    assert got["date"] is None
-    assert got["note"] == "cambio grosso"
-
-
-def test_lista_vuota_o_none() -> None:
-    assert canonical.highest_canonical([]) is None
-    assert canonical.highest_canonical(None) is None
-
-
-def test_titolo_malformato_ignorato() -> None:
-    # "canonico" senza versione, o versione non numerica → ignorato.
-    srcs = [
-        {"title": "canonico senza versione"},
-        {"title": "canonico vX.Y — non numerica"},
-        {"title": "canonico v1.5 — 2026-01-01 — buona"},
-    ]
-    assert canonical.highest_canonical(srcs)["version"] == "v1.5"
-
-
-def test_public_view_disponibile_e_non() -> None:
-    view = canonical.public_view({"version": "v2.4", "date": "2026-07-13", "note": "x"})
-    assert view["available"] is True and view["version"] == "v2.4"
-    assert "major" not in view  # niente dettagli interni verso i tool
-    down = canonical.public_view(None)
-    assert down["available"] is False and "notebook_query" in down["nota"]
-
-
-# ── get_canonical: cache + fail-open (monkeypatch di core.source_list) ────────
-
-def test_get_canonical_usa_e_scrive_la_cache(monkeypatch) -> None:
-    calls = {"n": 0}
-
-    def fake_source_list(nb_id):
-        calls["n"] += 1
-        assert nb_id == canonical.CANON_NOTEBOOK_ID
-        return REAL_SOURCES
-
-    monkeypatch.setattr(canonical.core, "source_list", fake_source_list)
-    # cache pulita
-    canonical._cache["data"] = None
-    canonical._cache["ts"] = 0.0
-
-    first = canonical.get_canonical(force=True)
-    assert first["version"] == "v2.4"
-    assert calls["n"] == 1
-    # seconda chiamata entro TTL → cache, niente nuovo fetch
-    second = canonical.get_canonical()
-    assert second["version"] == "v2.4"
-    assert calls["n"] == 1
-
-
-def test_get_canonical_fail_open_tiene_la_cache(monkeypatch) -> None:
-    monkeypatch.setattr(canonical.core, "source_list", lambda nb: REAL_SOURCES)
-    canonical._cache["data"] = None
-    canonical._cache["ts"] = 0.0
-    assert canonical.get_canonical(force=True)["version"] == "v2.4"
-
-    # ora il notebook esplode: get_canonical NON deve sollevare, torna la cache
-    def boom(nb):
-        raise RuntimeError("notebook irraggiungibile")
-
-    monkeypatch.setattr(canonical.core, "source_list", boom)
-    assert canonical.get_canonical(force=True)["version"] == "v2.4"
-
-
-# ── cloud-ack: l'automatismo file-simile per l'ack (issue #30 ③.2) ───────────
-
-def test_cloud_ack_prende_la_piu_alta() -> None:
-    srcs = [
-        {"title": "cloud-ack v2.2 — 2026-07-11"},
-        {"title": "cloud-ack v2.4"},
-        {"title": "canonico v2.4 — 2026-07-13 — nota"},  # non è un cloud-ack
-    ]
-    assert canonical.highest_cloud_ack(srcs) == (2, 4)
-
-
-def test_cloud_ack_assente() -> None:
-    assert canonical.highest_cloud_ack(REAL_SOURCES) is None
-    assert canonical.highest_cloud_ack([]) is None
+def test_declaration_text_non_nomina_il_notebook() -> None:
+    t = canonical.declaration_text()
+    assert "canonico" in t and "full=true" in t
+    assert "notebook_query" not in t and "claudemd1777" not in t

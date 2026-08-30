@@ -644,11 +644,51 @@ features:
       mcp_tool: {service: nb1777-mcp, name: doctor}
   - id: nb.canonico
     nome: "nb1777-mcp · canonico"
-    cosa: "MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la versione «buona» con cui una sessione dovrebbe allinearsi, letta da."
-    dove: ["mcp-tool:nb1777-mcp/canonico"]
+    cosa: "MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la versione
+           «buona» con cui una sessione dovrebbe allinearsi. Da 0.44.0 letta da un FILE del
+           prodotto (app/memoria_1777/disciplina.md, neutro), non più dal notebook; con
+           `full=true` restituisce il TESTO nel taglio chiesto + gli strati locali — la cura,
+           non solo il verdetto."
+    dove: ["mcp-tool:nb1777-mcp/canonico", "services/nb1777-mcp/app/canonical.py",
+           "services/nb1777-mcp/app/memoria_1777/disciplina.md", "docs/MEMORIA-1777.md"]
     status: active-default
     verify:
       mcp_tool: {service: nb1777-mcp, name: canonico}
+  - id: nb.memoria_ack
+    nome: "nb1777-mcp · memoria_ack"
+    cosa: "MEMORIA 1777 — l'ACK da una sessione: «superfici cloud aggiornate a vX.Y», stesso
+           campo di stato del bottone «✓ Fatto» del bot; spegne il promemoria fino al prossimo
+           bump. Va chiamato SOLO su dichiarazione esplicita dell'owner."
+    dove: ["mcp-tool:nb1777-mcp/memoria_ack", "services/nb1777-mcp/app/memoria.py#set_ack"]
+    status: active-default
+    since: "0.44.0"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: memoria_ack}
+  - id: memoria.canonico-nel-prodotto
+    nome: "Il canonico della memoria 1777 è un file del prodotto; fatti/errata nel volume"
+    cosa: "Dal 30/08/2026 la disciplina di memoria 1777 (tre tagli: PIENO/LITE/MICRO) vive in
+           `services/nb1777-mcp/app/memoria_1777/disciplina.md`, spedita nell'immagine, NEUTRA
+           per ogni utente (un test vieta riferimenti non neutri nei tagli; un altro impone
+           versione+data in testa e che il prodotto non sia indietro rispetto allo storico).
+           I due strati dell'installazione, `fatti.md` (chi è l'utente) ed `errata.md` (falsi
+           corretti con la fonte avvelenata), stanno nel volume dati di nb1777-mcp
+           (/var/lib/nlm/memoria-1777/) — fuori dal repo per costruzione, dentro il backup
+           notturno — e si caricano con `vps1777 memoria importa` (exec nel container come
+           utente app, scrittura atomica, byte verificati). Il notebook claudemd1777 resta
+           storico read-only (v2.2→v2.4). Perché: prima una sessione stale sapeva il numero e
+           non il testo; e un notebook Google esponeva dati personali a terzi. Decisione
+           dell'owner (29-30/08): «neutro per tutti gli utenti, sulla mia installazione
+           riempito con le mie cose»."
+    dove: ["services/nb1777-mcp/app/memoria_1777/disciplina.md",
+           "services/nb1777-mcp/app/canonical.py#parse_disciplina",
+           "services/nb1777-mcp/tests/test_canonical.py#test_il_canonico_del_prodotto_e_neutro",
+           "tools/vps1777.py#cmd_memoria",
+           "tools/tests/test_vps1777.py#test_memoria_importa_verifica_i_byte_scritti",
+           "docs/MEMORIA-1777.md"]
+    status: active-default
+    since: "0.44.0"
+    verify:
+      file_contains: {path: "services/nb1777-mcp/app/memoria_1777/disciplina.md", pattern: "canonico v2\\.5"}
   - id: nb.memoria_check
     nome: "nb1777-mcp · memoria_check"
     cosa: "MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che porti (es."
@@ -1299,3 +1339,15 @@ features:
     status: active-default
     since: "0.41.0 (voice-tagging Fase 4)"
     verify: {cli_command: archive-retag}
+  - id: cli.memoria
+    nome: "vps1777 memoria — stato / importa / mostra degli strati locali"
+    cosa: "Gli strati locali della memoria 1777 (fatti.md, errata.md) si amministrano
+           dall'host: `stato` (versione della disciplina nel container, strati presenti,
+           ack cloud), `importa <fatti|errata> <file>` (exec nel container come utente app,
+           .parziale→mv, esito = byte riletti dal volume confrontati col file; vuoto
+           rifiutato), `mostra <disciplina|fatti|errata>`. Le azioni sono sotto-comandi
+           di `memoria`, non comandi di primo livello."
+    dove: ["tools/vps1777.py#cmd_memoria", "docs/MEMORIA-1777.md"]
+    status: active-default
+    since: "0.44.0"
+    verify: {cli_command: memoria}

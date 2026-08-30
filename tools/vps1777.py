@@ -3728,6 +3728,77 @@ def cmd_avvisa_fallimento(repo: Path, args) -> int:
     return 0
 
 
+# ─────────────────────────────────────────── memoria 1777 (canonico nel prodotto)
+
+MEMORIA_STRATI = ("fatti", "errata")
+MEMORIA_DIR_NEL_CONTAINER = "/var/lib/nlm/memoria-1777"
+MEMORIA_DISCIPLINA_NEL_CONTAINER = "/app/app/memoria_1777/disciplina.md"
+MEMORIA_STATO_NEL_CONTAINER = "/var/lib/nlm/nb1777-state/memoria.json"
+
+
+def memoria_exec_cmd(repo: Path, script: str) -> list[str]:
+    """`docker compose exec -T nb1777-mcp sh -c <script>`: gli strati vivono nel
+    volume di nb1777-mcp e si toccano DA DENTRO il container, così il file nasce
+    dell'utente `app` (chi lo legge) e non di root: `docker cp` lo farebbe di root."""
+    return [*compose_cmd(repo), "exec", "-T", "nb1777-mcp", "sh", "-c", script]
+
+
+def cmd_memoria(repo: Path, args) -> int:
+    """Gli strati LOCALI della memoria 1777 (0.44.0): la disciplina è nel prodotto
+    (immagine nb1777-mcp, neutra), `fatti.md` ed `errata.md` sono dell'installazione
+    e vivono nel volume dati di nb1777-mcp (`/var/lib/nlm/memoria-1777/`), dentro il backup
+    notturno. Da qui si caricano, si leggono e si verifica lo stato.
+      vps1777 memoria stato                      versione della disciplina, strati, ack
+      vps1777 memoria importa fatti  <file.md>   carica (sostituisce) uno strato
+      vps1777 memoria importa errata <file.md>
+      vps1777 memoria mostra <disciplina|fatti|errata>
+    """
+    if args.azione == "stato":
+        sh = (f"head -1 {MEMORIA_DISCIPLINA_NEL_CONTAINER}; "
+              f"for s in {' '.join(MEMORIA_STRATI)}; do f={MEMORIA_DIR_NEL_CONTAINER}/$s.md; "
+              f"if [ -f \"$f\" ]; then printf '%s: %s byte, %s\\n' \"$s\" \"$(wc -c < \"$f\")\" "
+              f"\"$(date -r \"$f\" +%Y-%m-%dT%H:%M:%SZ -u 2>/dev/null || echo ?)\"; "
+              f"else echo \"$s: ASSENTE (vps1777 memoria importa $s <file>)\"; fi; done; "
+              f"[ -f {MEMORIA_STATO_NEL_CONTAINER} ] && printf 'ack cloud: ' && "
+              f"cat {MEMORIA_STATO_NEL_CONTAINER} && echo || echo 'ack cloud: nessuno'")
+        res = run(memoria_exec_cmd(repo, sh), capture=True, check=False)
+        if res.returncode != 0:
+            die(f"nb1777-mcp non risponde: {res.stderr.strip() or res.stdout.strip()}")
+        for riga in res.stdout.splitlines():
+            log(riga)
+        return 0
+    if args.azione == "mostra":
+        cosa = args.cosa
+        path = (MEMORIA_DISCIPLINA_NEL_CONTAINER if cosa == "disciplina"
+                else f"{MEMORIA_DIR_NEL_CONTAINER}/{cosa}.md")
+        res = run(memoria_exec_cmd(repo, f"cat {path}"), capture=True, check=False)
+        if res.returncode != 0:
+            die(f"{cosa}: non leggibile ({res.stderr.strip() or 'assente'})")
+        sys.stdout.write(res.stdout)
+        return 0
+    # importa
+    src = Path(args.file)
+    if not src.is_file():
+        die(f"file non trovato: {src}")
+    testo = src.read_text(encoding="utf-8")
+    if not testo.strip():
+        die(f"{src} è vuoto: uno strato vuoto non si carica (per toglierlo, cancellalo nel volume)")
+    dest = f"{MEMORIA_DIR_NEL_CONTAINER}/{args.strato}.md"
+    sh = (f"mkdir -p {MEMORIA_DIR_NEL_CONTAINER} && cat > {dest}.parziale && "
+          f"mv -f {dest}.parziale {dest} && wc -c < {dest}")
+    res = subprocess.run(memoria_exec_cmd(repo, sh), input=testo, capture_output=True,
+                         text=True, check=False)
+    if res.returncode != 0:
+        die(f"importazione fallita: {res.stderr.strip() or res.stdout.strip()}")
+    scritti = int((res.stdout.strip() or "0").split()[-1])
+    attesi = len(testo.encode("utf-8"))
+    if scritti != attesi:
+        die(f"{args.strato}: scritti {scritti} byte, attesi {attesi} — il file nel volume NON è quello")
+    ok(f"{args.strato}.md caricato ({scritti} byte) in {MEMORIA_DIR_NEL_CONTAINER}/ — "
+       f"`canonico(full=true)` lo restituisce da subito; entra nel backup notturno")
+    return 0
+
+
 def cmd_secrets_status(repo: Path, args) -> int:
     """Età e scadenze dei secret. Scrive onboarding/secrets_status.json (letto
     dalla pagina /admin/secrets) e — con --notify — avvisa su Telegram quelli
@@ -3869,6 +3940,14 @@ def main() -> int:
     p.add_argument("--righe", type=int, default=12, help="quante righe di journal allegare")
     p = sub.add_parser("secrets-status", help="età e scadenze dei secret (+ notifica Telegram)")
     p.add_argument("--notify", action="store_true", help="notifica Telegram i secret scaduti")
+    p = sub.add_parser("memoria", help="memoria 1777: strati locali (fatti/errata) e stato del canonico")
+    azioni = p.add_subparsers(dest="azione", required=True)
+    azioni.add_parser("stato", help="versione della disciplina, strati presenti, ack cloud")
+    pi = azioni.add_parser("importa", help="carica (sostituisce) uno strato locale nel volume di nb1777-mcp")
+    pi.add_argument("strato", choices=MEMORIA_STRATI)
+    pi.add_argument("file", help="il .md da caricare (parti da app/memoria_1777/<strato>.esempio.md)")
+    pm = azioni.add_parser("mostra", help="stampa la disciplina o uno strato")
+    pm.add_argument("cosa", choices=("disciplina", *MEMORIA_STRATI))
 
     args = parser.parse_args()
     repo = find_repo(args.home)
@@ -3884,6 +3963,7 @@ def main() -> int:
                 "archive-ingest": cmd_archive_ingest,
                 "archive-retag": cmd_archive_retag,
                 "secrets-status": cmd_secrets_status,
+                "memoria": cmd_memoria,
                 "avvisa-fallimento": cmd_avvisa_fallimento}
     try:
         return handlers[args.cmd](repo, args)

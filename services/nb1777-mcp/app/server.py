@@ -510,16 +510,23 @@ async def doctor() -> dict:
 
 
 @mcp.tool()
-async def canonico() -> dict:
+async def canonico(full: bool = False, taglio: str = "pieno") -> dict:
     """MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la
-    versione «buona» con cui una sessione dovrebbe allinearsi, letta dal notebook
-    claudemd1777. Chiamalo all'avvio se la versione in testa al blocco che porti
-    potrebbe essere vecchia, e confrontala: se sei più vecchio sei disallineato.
-    Fail-open: se il notebook non è raggiungibile ritorna `available: false` e la
-    via di fallback (notebook_query)."""
-    # NON via _aio: get_canonical è fail-open per contratto (deve poter dire
-    # "available: false" invece di sollevare se l'auth/notebook manca).
-    return canonical.public_view(await asyncio.to_thread(canonical.get_canonical))
+    versione «buona» con cui una sessione dovrebbe allinearsi. Da 0.44.0 è un FILE
+    del prodotto (neutro, versionato con vps1777), non più un notebook.
+    Chiamalo all'avvio se la versione in testa al blocco che porti potrebbe essere
+    vecchia, e confrontala: se sei più vecchio sei disallineato.
+    `full=true` è la CURA: restituisce il testo della disciplina nel `taglio`
+    chiesto (`pieno` | `lite` | `micro`) più i due strati LOCALI dell'installazione
+    — `fatti` (chi è l'utente) ed `errata` (falsi corretti) — ognuno con la sua
+    origine, così ti allinei in contesto senza aspettare che le superfici vengano
+    aggiornate a mano. Fail-open: `available: false` se il file non è leggibile."""
+    # NON via _aio: non serve l'auth nlm (è un file locale) ed è fail-open per
+    # contratto (deve poter dire "available: false" invece di sollevare).
+    data = await asyncio.to_thread(canonical.get_canonical)
+    if full:
+        return await asyncio.to_thread(canonical.full_view, data, taglio=taglio)
+    return canonical.public_view(data)
 
 
 @mcp.tool()
@@ -534,6 +541,24 @@ async def memoria_check(versione_portata: str) -> dict:
     if verdict.get("stale") and verdict.get("canonico"):
         await asyncio.to_thread(memoria.note_drift, versione_portata, verdict["canonico"])
     return verdict
+
+
+@mcp.tool()
+async def memoria_ack(versione: str) -> dict:
+    """MEMORIA 1777 — l'ACK: registra che le superfici cloud (claude.ai: preferenze
+    e istruzioni dei Project) sono state aggiornate a `versione`, e spegne il
+    promemoria Telegram fino al prossimo bump del canonico. È la stessa cosa del
+    bottone «✓ Fatto» sul bot. ⚠️ Chiamalo SOLO su dichiarazione esplicita di chi
+    ti parla («ho incollato»): un ack scritto senza il fatto dietro è la
+    dichiarazione senza verifica che la disciplina stessa vieta."""
+    acked = await asyncio.to_thread(memoria.set_ack, versione)
+    canon = await asyncio.to_thread(canonical.get_canonical)
+    return {
+        "ok": True,
+        "acked": acked,
+        "canonico": canon["version"] if canon else None,
+        "allineato": bool(canon and memoria.parse_version(acked) == (canon["major"], canon["minor"])),
+    }
 
 
 @mcp.custom_route("/internal/notifications", methods=["GET"])
