@@ -2024,6 +2024,66 @@ def test_snapshot_prune_29_08_n_e_n1_anche_se_freschi():
                         "manuale-di-neo"], vive
 
 
+
+# ── memoria 1777 (0.44.0): gli strati locali si toccano DA DENTRO il container ──
+
+def test_memoria_exec_passa_dal_container_come_utente_app():
+    """`docker cp` creerebbe il file di root: chi lo legge (l'utente `app` di
+    nb1777-mcp) lo vedrebbe, ma nessun processo del container potrebbe più
+    toccarlo. Si passa da `compose exec -T`: il file nasce di `app`."""
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        cmd = v.memoria_exec_cmd(repo, "echo x")
+        assert cmd[:2] == ["docker", "compose"]
+        i = cmd.index("exec")
+        assert cmd[i:i + 3] == ["exec", "-T", "nb1777-mcp"], cmd
+        assert cmd[-3:] == ["sh", "-c", "echo x"]
+        assert "cp" not in cmd
+
+
+def test_memoria_importa_rifiuta_vuoto_e_assente(monkeypatch, capsys):
+    """Uno strato vuoto caricato per sbaglio cancellerebbe quello buono senza
+    dirlo: si rifiuta PRIMA di toccare il volume (nessun exec)."""
+    import argparse
+    chiamate = []
+    monkeypatch.setattr(v.subprocess, "run", lambda *a, **k: chiamate.append(a) or None)
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        vuoto = repo / "fatti.md"
+        vuoto.write_text("   \n")
+        with pytest.raises(SystemExit):
+            v.cmd_memoria(repo, argparse.Namespace(azione="importa", strato="fatti", file=str(vuoto)))
+        with pytest.raises(SystemExit):
+            v.cmd_memoria(repo, argparse.Namespace(azione="importa", strato="errata",
+                                                   file=str(repo / "non-c-e.md")))
+    assert chiamate == [], "ha toccato il container prima di validare l'input"
+
+
+def test_memoria_importa_verifica_i_byte_scritti(monkeypatch):
+    """L'esito non è l'exit code dell'exec: è il conteggio dei byte riletto dal
+    volume, confrontato con quelli del file. Un `cat` interrotto a metà esce 0."""
+    import argparse
+    class R:
+        def __init__(self, out, rc=0): self.stdout, self.stderr, self.returncode = out, "", rc
+    with tempfile.TemporaryDirectory() as d:
+        repo = Path(d)
+        f = repo / "fatti.md"
+        f.write_text("# fatti\n- dominio: Dart\n", encoding="utf-8")
+        n = len(f.read_bytes())
+        visti = {}
+        def fake_run(cmd, **kw):
+            visti["cmd"], visti["input"] = cmd, kw.get("input")
+            return R(f"{n}\n")
+        monkeypatch.setattr(v.subprocess, "run", fake_run)
+        assert v.cmd_memoria(repo, argparse.Namespace(azione="importa", strato="fatti", file=str(f))) == 0
+        assert visti["input"] == f.read_text(encoding="utf-8")
+        assert ".parziale" in visti["cmd"][-1] and "mv -f" in visti["cmd"][-1], (
+            "scrittura atomica: prima .parziale, poi mv")
+        monkeypatch.setattr(v.subprocess, "run", lambda cmd, **kw: R(f"{n - 3}\n"))
+        with pytest.raises(SystemExit):
+            v.cmd_memoria(repo, argparse.Namespace(azione="importa", strato="fatti", file=str(f)))
+
+
 if __name__ == "__main__":
     # ⚠️ TRE ESITI, NON DUE (b82df434, 02/08). MISURATO prima di toccare:
     #   85 test eseguiti «ok», 10 «FAIL», exit 1 — e i 10 fallivano tutti con

@@ -12,8 +12,9 @@ Tre pezzi:
   vecchia», max 1 per coppia versione/giorno. È ③.1.
 - **promemoria cloud** (`maybe_cloud_reminder`): quando il canonico supera l'ack,
   ricorda a Neo di aggiornare a mano le superfici cloud (claude.ai). L'ack è il
-  bottone Telegram O una fonte `cloud-ack vX.Y` nel notebook. È ③.2. Il poll del
-  bot È il tick: niente scheduler separato (sul VPS non c'è cron).
+  bottone Telegram O il tool MCP `memoria_ack` (da 0.44.0: prima era una fonte
+  `cloud-ack vX.Y` nel notebook, che non è più la sede del canonico). È ③.2.
+  Il poll del bot È il tick: niente scheduler separato (sul VPS non c'è cron).
 """
 from __future__ import annotations
 
@@ -79,7 +80,7 @@ def compare(versione_portata: str) -> dict:
     canon = canonical.get_canonical()
     if not canon:
         return {"canonico": None, "stale": None,
-                "nota": "canonico non disponibile ora — fallback: notebook_query su claudemd1777"}
+                "nota": "canonico non disponibile ora — vedi il tool `canonico` (fail-open)"}
     pv = parse_version(versione_portata)
     cv = (canon["major"], canon["minor"])
     if pv is None:
@@ -125,7 +126,8 @@ def note_drift(versione_portata: str, canonico_version: str) -> bool:
 # ── ③.2 l'ack e il promemoria cloud ──────────────────────────────────────────
 
 def set_ack(version: str) -> str:
-    """Registra l'ack del bottone Telegram: «superfici cloud aggiornate a vX.Y»."""
+    """Registra l'ack: «superfici cloud aggiornate a vX.Y». Due vie, stesso
+    stato: il bottone Telegram (via il bot) e il tool MCP `memoria_ack`."""
     pv = parse_version(version)
     norm = _vstr(pv) if pv else version
     st = _load()
@@ -135,16 +137,11 @@ def set_ack(version: str) -> str:
 
 
 def _effective_ack() -> Optional[tuple[int, int]]:
-    """La versione a cui Neo si è allineato: max fra l'ack del bottone (stato) e
-    una fonte `cloud-ack vX.Y` nel notebook (l'automatismo file-simile)."""
-    acks = []
-    btn = parse_version(_load().get("acked_version") or "")
-    if btn:
-        acks.append(btn)
-    src = canonical.get_cloud_ack()
-    if src:
-        acks.append(src)
-    return max(acks) if acks else None
+    """La versione a cui Neo si è allineato: l'ack registrato nello stato
+    (bottone o tool, è lo stesso campo). Fino a 0.43 contava anche una fonte
+    `cloud-ack vX.Y` nel notebook: con il canonico nel prodotto, il notebook è
+    storico e non si interroga più — l'ack ha una sede sola."""
+    return parse_version(_load().get("acked_version") or "")
 
 
 def maybe_cloud_reminder() -> Optional[dict]:
@@ -168,9 +165,10 @@ def maybe_cloud_reminder() -> Optional[dict]:
         "kind": "cloud",
         "ack_version": canon["version"],
         "text": (f"📌 Il canonico è {canon['version']} ({canon.get('date')}). Le "
-                 f"superfici cloud (claude.ai) vanno aggiornate a mano. Quando fatto, "
-                 f"tocca «✓ Fatto» qui sotto (oppure aggiungi una fonte "
-                 f"'cloud-ack {canon['version']}' al notebook claudemd1777)."),
+                 f"superfici cloud (claude.ai) vanno aggiornate a mano: il testo lo dà "
+                 f"`canonico(full=true)` da qualunque sessione con nb1777. Quando fatto, "
+                 f"tocca «✓ Fatto» qui sotto (oppure, da una sessione, il tool "
+                 f"`memoria_ack('{canon['version']}')`)."),
     }
 
 

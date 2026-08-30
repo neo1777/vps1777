@@ -2,6 +2,55 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.44.0] — 2026-08-30
+
+**Il canonico della memoria 1777 esce dal notebook ed entra nel prodotto.**
+
+### ✨ Nuovo
+
+- **`disciplina.md` è il canonico** (`services/nb1777-mcp/app/memoria_1777/`,
+  spedito nell'immagine): la disciplina di memoria 1777 in tre tagli (PIENO /
+  LITE / MICRO), **v2.5 · 2026-08-30**, NEUTRA per qualunque utente — «di Neo» →
+  «di chi ti parla», via i riferimenti locali; le regole non cambiano. Versione e
+  data stanno nella riga di titolo; lo storico v2.2 → v2.4 resta nel notebook
+  NotebookLM `claudemd1777`, in sola lettura. Guida: `docs/MEMORIA-1777.md`.
+- **`canonico(full=true, taglio=…)` è la cura, non solo il verdetto**: restituisce
+  il testo della disciplina nel taglio chiesto più i due strati LOCALI
+  dell'installazione, ognuno con la sua `origine` — una sessione stale si allinea
+  in contesto, subito. Prima sapeva il numero e non il testo.
+- **Gli strati locali `fatti.md` ed `errata.md`** vivono nel volume `nlm-auth`
+  (`/var/lib/nlm/memoria-1777/`): fuori dal repo per costruzione, dentro il backup
+  notturno cifrato, nessun git richiesto all'utente. Due esempi con le istruzioni
+  dentro (`fatti.esempio.md`, `errata.esempio.md`). Cosa NON metterci — persone
+  terze, il personale, lo stato dei progetti, il passato — è scritto nella guida.
+- **`vps1777 memoria stato | importa <fatti|errata> <file> | mostra <…>`**: gli
+  strati si caricano DA DENTRO il container (`compose exec`, non `docker cp`: il
+  file nasce dell'utente `app`), scrittura atomica, esito = byte riletti dal volume
+  confrontati col file; uno strato vuoto non si carica.
+- **`memoria_ack(versione)`**: l'ack «superfici cloud aggiornate» da una sessione,
+  stesso campo di stato del bottone «✓ Fatto» del bot. Solo su dichiarazione
+  esplicita dell'owner.
+
+### 🔧 Cambia
+
+- L'ack ha **una sede sola** (lo stato in `nb1777-state/memoria.json`): la fonte
+  `cloud-ack vX.Y` nel notebook non conta più. Il testo del promemoria Telegram
+  dice dove prendere il testo nuovo (`canonico(full=true)`) e come chiudere.
+- `canonical.py` non chiama più `nlm`: niente cache, fail-open sul file. I parser
+  dei titoli del notebook restano (storico) con un test che vieta al prodotto di
+  essere indietro rispetto a esso.
+- nb1777-mcp: 38 tool (era 37). Doc allineate: NB1777.md §2/§6/§8/§10, README,
+  ARCHITECTURE, SECURITY §Dati a riposo, BACKUP-RESTORE (il core porta gli strati).
+
+### 📝 Perché adesso, e perché non prima
+
+A luglio il notebook era la scelta giusta: con un format della VPS imminente, un
+canonico su Google sopravviveva alla macchina e un file *sulla* VPS no. La terza
+via — un file *nel repo*, servito dalla VPS — non era sul tavolo. Ricostruito in
+una chat claude.ai del 29/08 con `archive1777`; decisione dell'owner: repo
+pubblico, prodotto per tutti, «neutro per tutti gli utenti, sulla mia installazione
+riempito con le mie cose».
+
 ## [0.43.16] — 2026-08-29
 
 **L'export claude.ai non è più un file: è un manifest e cinque zip.**

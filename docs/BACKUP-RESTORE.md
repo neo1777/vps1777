@@ -7,7 +7,7 @@ separati per natura del dato — perché il 99,99% del peso è rigenerabile e lo
 
 | Livello | Cosa contiene | Quando | Ritenzione | Dove |
 |---|---|---|---|---|
-| **core** | tutti i volumi **tranne** l'archivio (`gateway-data`, `gateway-uploads`, `nlm-auth`, `nlm-artifacts`, …), `secrets/`, `.env` + compose + `ingress/`, e **le `description` dei DB dell'archivio** (`descrizioni/<db>.txt`) | **ogni notte** (03:00 UTC) e a ogni `vps1777 update` | 7 giorni distinti + 4 settimanali + ultime 3 versioni | `backups/vps1777-<ts>.tar.age` |
+| **core** | tutti i volumi **tranne** l'archivio (`gateway-data`, `gateway-uploads`, `nlm-auth` — che da v0.44.0 porta anche gli strati locali della memoria 1777, `memoria-1777/{fatti,errata}.md` —, `nlm-artifacts`, …), `secrets/`, `.env` + compose + `ingress/`, e **le `description` dei DB dell'archivio** (`descrizioni/<db>.txt`) | **ogni notte** (03:00 UTC) e a ogni `vps1777 update` | 7 giorni distinti + 4 settimanali + ultime 3 versioni | `backups/vps1777-<ts>.tar.age` |
 | **archivio** | i soli volumi dell'archivio (`archive-data`: i DB FTS), **compressi** prima di cifrare | **ogni 7 giorni** (dal cron notturno, quando è dovuto) | le ultime **2** copie — n e n-1 | `backups/archivio/vps1777-archivio-<ts>.tar.age` |
 
 > **Perché due livelli** — misurato il 29/08/2026 sulla VPS: un backup pesava 9,7 GB, e

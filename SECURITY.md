@@ -722,6 +722,14 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
   cifratura a riposo, va fatta a livello di disco/volume dall'infrastruttura (LUKS,
   volume cifrato del provider) — vps1777 non la impone per non gestire un'altra
   chiave sulla macchina.
+- **Gli strati locali della memoria 1777** (`fatti.md`, `errata.md` in
+  `/var/lib/nlm/memoria-1777/`, il volume dati di nb1777-mcp, da `0.44.0`) sono
+  dati personali dell'owner **in chiaro sul disco** come tutto il volume; non
+  stanno nel repo per costruzione. Fra i servizi in esercizio li monta solo
+  `nb1777-mcp` — il container di backup li legge in sola lettura per cifrarli — e
+  li restituisce solo il tool `canonico(full=true)` a una sessione autenticata; nel
+  backup notturno viaggiano cifrati. Cosa NON metterci è scritto
+  in [docs/MEMORIA-1777.md](docs/MEMORIA-1777.md): persone terze, famiglia, il personale.
 - **I secret** (`secrets/*.txt`) sono in chiaro sul disco (mode 600), montati in
   `tmpfs /run/secrets/`. Stessa storia: la protezione è nei permessi e nel non
   finire nei log/argv/backup-non-cifrati (vedi sopra), non nella cifratura a riposo.
