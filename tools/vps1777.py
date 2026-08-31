@@ -3886,9 +3886,14 @@ def cmd_secrets_status(repo: Path, args) -> int:
 
 # ─────────────────────────────────────────── main
 
-def main() -> int:
+def build_parser() -> "argparse.ArgumentParser":
+    """Il parser completo della CLI. Estratto da main() perché serve a due
+    chiamanti: main() per eseguire, cmd_help() per stampare l'aiuto di un
+    sotto-comando senza duplicare una riga. La guida con gli esempi è docs/CLI.md
+    (un test la tiene allineata a questo elenco: comando nuovo → doc nuova)."""
     parser = argparse.ArgumentParser(
-        prog="vps1777", description="canale di aggiornamento controllato vps1777")
+        prog="vps1777", description="canale di aggiornamento controllato vps1777",
+        epilog="guida completa con esempi: docs/CLI.md (nel repo) · `vps1777 help <comando>` per il dettaglio")
     parser.add_argument("--home", help="root del repo sulla VPS (default: $VPS1777_HOME o /home/vps1777/vps1777)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -3949,6 +3954,28 @@ def main() -> int:
     pm = azioni.add_parser("mostra", help="stampa la disciplina o uno strato")
     pm.add_argument("cosa", choices=("disciplina", *MEMORIA_STRATI))
 
+    p = sub.add_parser("help", help="quest'aiuto; `vps1777 help <comando>` per il dettaglio di un comando")
+    p.add_argument("comando", nargs="?", help="il comando di cui vuoi l'aiuto")
+    return parser
+
+
+def cmd_help(repo: Path, args) -> int:
+    """`vps1777 help [comando]` — la via lunga di `--help`, per chi non la conosce.
+    Riusa il parser vero (build_parser): l'aiuto stampato è per costruzione quello
+    del codice, non una copia che invecchia. La guida con gli esempi: docs/CLI.md."""
+    parser = build_parser()
+    try:
+        if getattr(args, "comando", None):
+            parser.parse_args([args.comando, "--help"])
+        else:
+            parser.parse_args(["--help"])
+    except SystemExit as e:
+        return int(e.code or 0)
+    return 0
+
+
+def main() -> int:
+    parser = build_parser()
     args = parser.parse_args()
     repo = find_repo(args.home)
     os.chdir(repo)
@@ -3963,7 +3990,7 @@ def main() -> int:
                 "archive-ingest": cmd_archive_ingest,
                 "archive-retag": cmd_archive_retag,
                 "secrets-status": cmd_secrets_status,
-                "memoria": cmd_memoria,
+                "memoria": cmd_memoria, "help": cmd_help,
                 "avvisa-fallimento": cmd_avvisa_fallimento}
     try:
         return handlers[args.cmd](repo, args)

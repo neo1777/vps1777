@@ -14,7 +14,8 @@ DISCIPLINA_MINIMA = """# Disciplina di memoria 1777 — canonico v2.5 · 2026-08
 <!-- commento per chi legge il file: NON deve uscire dal tool -->
 
 ## Storia
-- v2.5 · 2026-08-30 — SEDE nel prodotto; CURA con full=true.
+- v2.5 · 2026-08-30 — SEDE nel prodotto; CURA con full=true,
+  su più righe come nel file vero.
 - v2.4 · 2026-07-13 — regola CANONICO.
 
 ## PIENO
@@ -38,7 +39,9 @@ def test_parse_titolo_versione_data_e_nota() -> None:
     d = canonical.parse_disciplina(DISCIPLINA_MINIMA)
     assert d and d["version"] == "v2.5" and (d["major"], d["minor"]) == (2, 5)
     assert d["date"] == "2026-08-30"
-    assert d["note"] == "SEDE nel prodotto; CURA con full=true."
+    assert d["note"] == "SEDE nel prodotto; CURA con full=true, su più righe come nel file vero.", (
+        "la nota è la voce di Storia INTERA: la prima riga da sola esce troncata "
+        "a metà frase nel verdetto di ogni memoria_check")
 
 
 def test_parse_tre_tagli_senza_commenti_html() -> None:

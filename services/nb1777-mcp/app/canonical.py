@@ -85,7 +85,20 @@ def parse_disciplina(testo: str) -> Optional[dict]:
     major, minor = int(m.group(1)), int(m.group(2))
     sezioni = _spezza_sezioni(testo)
     storia = sezioni.get("Storia", "")
-    prima_voce = next((r.strip()[2:] for r in storia.splitlines() if r.strip().startswith("- ")), "")
+    # La prima voce di «Storia» può continuare su più righe (rientrate): la nota
+    # è la voce INTERA, non la sua prima riga — troncarla a metà frase è quello
+    # che usciva nel verdetto di ogni memoria_check («…servito dal tool»).
+    righe_voce: list[str] = []
+    for r in storia.splitlines():
+        if r.strip().startswith("- "):
+            if righe_voce:
+                break
+            righe_voce.append(r.strip()[2:])
+        elif righe_voce and r.strip():
+            righe_voce.append(r.strip())
+        elif righe_voce:
+            break
+    prima_voce = " ".join(righe_voce)
     note = prima_voce.split(" — ", 1)[1] if " — " in prima_voce else (prima_voce or None)
     tagli = {t: _senza_commenti(sezioni.get(t.upper(), "")).strip() for t in TAGLI}
     return {

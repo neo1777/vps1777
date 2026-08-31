@@ -173,6 +173,8 @@ Tutto questo è passato per una **review difensiva a tappeto** (luglio 2026): la
 | [ARCHIVE.md](docs/ARCHIVE.md) | Archivio di ricerca: pagina `/admin/archive`, formati, ingest via NotebookLM |
 | [NB1777.md](docs/NB1777.md) | NotebookLM: i 38 tool MCP, lo studio, l'auth, il bot Telegram, il canonico della memoria |
 | [MEMORIA-1777.md](docs/MEMORIA-1777.md) | La disciplina di memoria 1777: canonico nel prodotto (neutro), strati locali `fatti`/`errata`, `vps1777 memoria` |
+| [CLI.md](docs/CLI.md) | La CLI `vps1777`: tutti i comandi con esempi (allineata al codice da un test) |
+| [GLOSSARIO.md](docs/GLOSSARIO.md) | Le parole di vps1777 in due righe l'una: container, release, tool MCP, canonico… |
 | [MINIAPP.md](docs/MINIAPP.md) | Mini App Telegram: la plancia mobile — auth initData, endpoint, sicurezza |
 | [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) | Backup/restore volumi age-encrypted |
 | [COLLAUDO-VERGINE.md](docs/COLLAUDO-VERGINE.md) | Il test definitivo su VPS formattata: install, verifiche mirate per cura, quadratura |
