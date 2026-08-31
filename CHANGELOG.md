@@ -2,6 +2,33 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.44.1] — 2026-08-31
+
+**La documentazione per chi arriva ora — e un test che non la lascia invecchiare.**
+
+### ✨ Nuovo
+
+- **`docs/CLI.md`**: tutti i comandi di `vps1777` con descrizione ed esempi, e
+  **`docs/GLOSSARIO.md`**: le parole del prodotto (container, release, tool MCP,
+  canonico…) in due righe l'una. Nate da una richiesta dell'owner che vale come
+  criterio: «non lo capisco io, figurati un utente che arriva ora sul repo».
+- **`vps1777 help [comando]`**: l'aiuto come comando; riusa il parser vero
+  (`build_parser()`, estratto da `main()`), quindi stampa per costruzione ciò
+  che il codice accetta.
+- **Il presidio** (`tools/tests/test_cli_doc.py`): comando senza sezione in
+  CLI.md, sezione su un comando rimosso, o sezione senza esempio → CI rossa.
+  Una pagina di riferimento senza un test è il «35 tool» del README: giusta
+  alla nascita, mai più guardata.
+- **`docs/MEMORIA-1777.md`**: sezione «In parole semplici» in testa (cos'è un
+  tool, chi chiama cosa) e il **pattern del puntatore** per le superfici cloud
+  — le regole in UNA superficie (le preferenze account), nei Project un
+  puntatore fisso senza versione: a ogni bump si aggiorna una superficie sola.
+
+### 🐛 Fix
+
+- La `note` del canonico è la voce di «Storia» **intera**: prima usciva solo la
+  prima riga, troncata a metà frase, nel verdetto di ogni `memoria_check`.
+
 ## [0.44.0] — 2026-08-30
 
 **Il canonico della memoria 1777 esce dal notebook ed entra nel prodotto.**

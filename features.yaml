@@ -1351,3 +1351,14 @@ features:
     status: active-default
     since: "0.44.0"
     verify: {cli_command: memoria}
+  - id: cli.help
+    nome: "vps1777 help — l'aiuto come comando, e la doc che non invecchia"
+    cosa: "`vps1777 help [comando]` stampa l'aiuto riusando il parser vero
+           (build_parser): ciò che mostra è per costruzione ciò che il codice
+           accetta. La guida estesa con gli esempi è docs/CLI.md, tenuta allineata
+           alla CLI da tools/tests/test_cli_doc.py (comando senza sezione → CI
+           rossa, sezione fantasma → CI rossa, sezione senza esempio → CI rossa)."
+    dove: ["tools/vps1777.py#cmd_help", "docs/CLI.md", "tools/tests/test_cli_doc.py"]
+    status: active-default
+    since: "0.44.1"
+    verify: {cli_command: help}

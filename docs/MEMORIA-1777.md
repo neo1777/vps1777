@@ -8,6 +8,24 @@ Vedi anche: [NB1777.md](NB1777.md) §6 (i tool `canonico`, `memoria_check`, `mem
 notifiche) · [BACKUP-RESTORE.md](BACKUP-RESTORE.md) (gli strati locali stanno nel core notturno) ·
 [SECURITY.md](../SECURITY.md) §Dati a riposo.
 
+## In parole semplici, prima di tutto
+
+- La **disciplina** è un blocco di regole di ~50 righe che si incolla nelle
+  istruzioni di ogni assistente (nei `CLAUDE.md`, nelle preferenze cloud). Le
+  regole insegnano a diffidare dei ricordi: chi l'ha detto davvero? era vero
+  quando? come scopro che queste stesse regole sono vecchie?
+- Il **canonico** è il posto unico che risponde a «qual è la versione buona di
+  quel blocco?». È un file dentro vps1777; il tool `canonico` lo dichiara e, con
+  `full=true`, ne consegna il **testo**.
+- Un **tool** non è un comando da terminale: è una funzione che **l'assistente**
+  chiama durante la chat, se ha il connettore MCP di vps1777. Tu puoi scrivergli
+  in linguaggio naturale: «chiama il tool `canonico` con full=true e dammi il
+  testo» — e lui lo fa.
+- **`fatti.md`** ed **`errata.md`** sono i due file *tuoi* (chi sei, quali falsi
+  ricordi correggere): non stanno nel prodotto, li carichi con la CLI
+  (`vps1777 memoria importa`, vedi [CLI.md](CLI.md)) e restano nel backup cifrato.
+- Le parole nuove sono tutte nel [GLOSSARIO.md](GLOSSARIO.md).
+
 ## Il perché, prima del come
 
 Un agente con memoria sbaglia in un modo preciso: non ricorda *poco*, ricorda cose **false** — e più
@@ -62,6 +80,8 @@ il guadagno vero della migrazione, più della privacy.
 
 ## Come lo amministra chi ha la VPS
 
+Il riferimento completo dei comandi, con esempi: [CLI.md](CLI.md).
+
 ```bash
 vps1777 memoria stato                      # versione della disciplina, strati presenti, ack cloud
 vps1777 memoria mostra disciplina          # il canonico che il tool serve (dall'immagine)
@@ -75,6 +95,28 @@ vps1777 memoria mostra fatti
 container, scrittura atomica (`.parziale` → `mv`), e l'esito è il **conteggio dei byte riletto dal
 volume** confrontato col file, non l'exit code. Uno strato vuoto **non si carica** (cancellerebbe
 quello buono in silenzio): per toglierlo, si cancella il file nel volume.
+
+## Il pattern del puntatore (per le superfici cloud)
+
+Le superfici cloud (preferenze dell'account, istruzioni dei Project su claude.ai)
+non hanno API: si aggiornano **solo a mano**. Con molti Project, ogni bump della
+disciplina diventerebbe una raffica di copia-incolla. Il rimedio non è
+automatizzare (impossibile) ma **far sì che non serva**: le regole vere stanno in
+UNA superficie sola — le preferenze dell'account, che valgono in ogni chat,
+Project compresi — e ogni Project porta solo un **puntatore** fisso, senza numero
+di versione:
+
+```
+Disciplina di memoria 1777: vale quella nelle preferenze dell'account.
+Se il connettore nb1777 (vps1777) è collegato: all'avvio chiama il tool `canonico`
+con full=true e allineati a quel testo; se dichiara una versione più nuova di
+quella nelle preferenze, dillo a chi ti parla.
+Se il connettore non è collegato: dichiara che non puoi sapere se sei aggiornato.
+```
+
+Il puntatore non invecchia (non porta versione); a ogni bump l'owner aggiorna
+**una** superficie e dà l'ack. Le chat con connettore si allineano comunque da
+sole con `canonico(full=true)`.
 
 ## Versionare la disciplina
 

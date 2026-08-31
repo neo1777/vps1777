@@ -1294,11 +1294,21 @@ def test_nessun_test_e_definito_sotto_il_blocco_main():
 # Casi costruiti di cui la risposta è nota prima di eseguirli — compresi quelli
 # che la funzione deve lasciar passare e quelli che non la riguardano.
 
+def _file_sparso(path: Path, n: int) -> None:
+    """Un file che DICHIARA n byte senza occuparli (truncate -> sparse).
+    La guardia dello spazio legge st_size, non i blocchi: il banco è identico —
+    e prima, scrivendo 9-10 GiB di zeri VERI in /tmp, questi test morivano di
+    ENOSPC su qualunque disco sotto i ~15 GiB liberi (successo il 31/08 sul PC
+    dell'owner al 97%: tre rossi che parevano una regressione ed erano il banco)."""
+    with open(path, "wb") as f:
+        f.truncate(n)
+
+
 def _repo_con_backup(d: str, *dimensioni: int) -> Path:
     repo = Path(d)
     (repo / "backups").mkdir(parents=True, exist_ok=True)
     for i, n in enumerate(dimensioni):
-        (repo / "backups" / f"vps1777-2026-07-2{i}-030000.tar.age").write_bytes(b"\0" * n)
+        _file_sparso((repo / "backups" / f"vps1777-2026-07-2{i}-030000.tar.age"), n)
     return repo
 
 
@@ -1342,7 +1352,7 @@ def test_spazio_ignora_cio_che_non_e_un_backup():
     # fermo, che è il modo in cui una macchina resta indietro sulle patch.
     with tempfile.TemporaryDirectory() as d:
         repo = _repo_con_backup(d, 1024)
-        (repo / "backups" / "un-file-enorme.tar").write_bytes(b"\0" * 9 * 1024**3)
+        _file_sparso((repo / "backups" / "un-file-enorme.tar"), 9 * 1024**3)
         (repo / "backups" / "pre-update").mkdir()
         serve, _ = v.spazio_richiesto_update(repo)
     assert serve == v.SPAZIO_MINIMO_UPDATE, "solo i vps1777-*.tar.age contano"
@@ -1359,7 +1369,7 @@ def test_spazio_usa_lo_snapshot_pre_update_se_esiste():
         repo = _repo_con_backup(d, 4 * 1024**3)
         snap = repo / "backups" / "pre-update" / "0.43.12-20260829-000000"
         snap.mkdir(parents=True)
-        (snap / "archive-data.tar").write_bytes(b"\0" * 10 * 1024**3)
+        _file_sparso((snap / "archive-data.tar"), 10 * 1024**3)
         serve, perche = v.spazio_richiesto_update(repo)
     assert serve == 10 * 1024**3 + 4 * 1024**3 + 1024**3
     assert "snapshot pre-update pesa 10.0 GiB" in perche
@@ -1382,7 +1392,7 @@ def test_backup_piu_grande_vede_anche_il_livello_archivio():
         repo = _repo_con_backup(d, 1024)
         a = repo / "backups" / "archivio"
         a.mkdir()
-        (a / "vps1777-archivio-2026-08-29-030000.tar.age").write_bytes(b"\0" * 3 * 1024**3)
+        _file_sparso((a / "vps1777-archivio-2026-08-29-030000.tar.age"), 3 * 1024**3)
         assert v.backup_piu_grande(repo) == 3 * 1024**3
 
 
