@@ -59,6 +59,7 @@ uscita="$(cd "$BANCO/repo" && \
   SETUP_TG_TOKEN="" \
   SETUP_ADMIN_PWD="$PWD_FORTE" \
   SETUP_YES=n \
+  VPS1777_INSTALL_VERSION="0.0.0-banco" \
   timeout 180 bash setup.sh < /dev/null 2>&1)"
 rc=$?
 
@@ -105,7 +106,7 @@ fi
 #    farebbero saltare le domande e il ② passerebbe per la ragione sbagliata.
 rm -rf "$BANCO/repo/.env" "$BANCO/repo/secrets"
 # l'uscita del ② non serve: interessa solo SE completa, non cosa stampa
-(cd "$BANCO/repo" && timeout 120 bash setup.sh < /dev/null >/dev/null 2>&1); rc2=$?
+(cd "$BANCO/repo" && VPS1777_INSTALL_VERSION="0.0.0-banco" timeout 120 bash setup.sh < /dev/null >/dev/null 2>&1); rc2=$?
 if [ "$rc2" -eq 0 ] && [ -f "$BANCO/repo/.env" ] && \
    grep -q '^ADMIN_EMAIL=test@example.com$' "$BANCO/repo/.env" 2>/dev/null; then
   echo "🔴 ② SENZA variabili arriva in fondo CON I VALORI DI PRIMA: il ① non prova niente"
@@ -121,7 +122,12 @@ fi
 #    restore.sh con la #163. *Il test non prova che "esce": prova che SPIEGA.*
 rm -rf "$BANCO/repo/secrets"
 printf 'ADMIN_EMAIL=test@example.com\nTELEGRAM_OWNER_ID=123456789\n' > "$BANCO/repo/.env"
+# VPS1777_INSTALL_VERSION: senza, setup.sh chiede a GitHub l'ultima release
+# PRIMA del check sul .env — e sui runner CI il rate-limit (curl exit 22) faceva
+# morire QUI il test con «esce senza spiegare», che era vero alla lettera e
+# falso nella sostanza (spiegava, ma un'altra cosa). Il banco non tocca la rete.
 u3="$(cd "$BANCO/repo" && SETUP_ADMIN_PWD="$PWD_FORTE" SETUP_YES=n \
+      VPS1777_INSTALL_VERSION="0.0.0-banco" \
       timeout 120 bash setup.sh < /dev/null 2>&1)"; rc3=$?
 if printf '%s' "$u3" | grep -q "non contiene INGRESS_PROFILE"; then
   echo "✅ ③ .env incompleto: lo dice invece di morire muto"
