@@ -2,6 +2,18 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.44.3] — 2026-09-01
+
+### 🛡️ Sicurezza
+
+- **`cryptography` 49.0.0 → 50.0.1** nel lock di nb1777-mcp: chiude
+  CVE-2026-69247 (HIGH) — l'unico alert rimasto in pagina Security dopo la
+  0.44.2 (gateway e archive-mcp erano già a 50.x per conto loro: la stessa
+  dipendenza, tre lock, tre età).
+- **Dependabot impara le dipendenze Python** (ecosistema `uv`, un servizio a
+  directory, major a mano come per le action): il prossimo caso come questo
+  arriva come PR settimanale, non come alert Trivy sull'immagine pubblicata.
+
 ## [0.44.2] — 2026-09-01
 
 **La pagina Security dice ciò su cui puoi agire, e le immagini si rinfrescano da sole.**
