@@ -1,0 +1,241 @@
+# vps1777
+
+> 🇬🇧 **English**: [README.md](README.md) — e le pagine chiave in [docs/en/](docs/en/), tenute fresche da un test in CI.
+
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
+![Docker](https://img.shields.io/badge/docker-compose%20v2-2496ED.svg)
+![MCP](https://img.shields.io/badge/MCP-streamable--http-d97757.svg)
+![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)
+
+> **Il tuo gateway personale per MCP, bot e servizi LLM** — dietro un solo URL
+> HTTPS pubblico, protetto da OAuth 2.1 (l'architettura completa è in
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)), in piedi su una VPS Linux in
+> pochi minuti e senza scrivere un comando.
+
+Colleghi i **tuoi** server MCP (e bot Telegram) a [claude.ai](https://claude.ai),
+Claude Code e all'app desktop, da un unico endpoint sicuro. vps1777 mette davanti
+ai tuoi servizi un gateway con autenticazione, reverse proxy, pannello di
+amministrazione e ingress HTTPS — e cresce con i plugin che ci aggiungi tu.
+
+Lo installi da una **UI grafica** sul tuo PC (Windows / Mac / Linux): compili un
+form, clicchi **Installa**, e alla fine hai l'URL HTTPS e i connector pronti da
+incollare in claude.ai. Niente Docker da gestire a mano, niente shell sulla VPS.
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│   claude.ai ──┐                                                  │
+│   Claude Code ├──► https://<host>/<SECRET>/<service>/mcp         │
+│   Mini App ───┤        │   la Mini App entra su /app/*,          │
+│   Telegram ───┘        │   non sul path MCP                      │
+│                        ▼                                         │
+│            ┌───────────────────┐                                 │
+│            │  Tailscale Funnel │  (o Caddy, o Cloudflared)       │
+│            └─────────┬─────────┘                                 │
+│                      ▼                                           │
+│            ┌───────────────────┐    /admin/login · /admin/nlm    │
+│            │     gateway       │    /admin/update · /admin/audit │
+│            │  (OAuth 2.1 + DCR)│    /app/* (Mini App)            │
+│            │     +/app/* UI    │                                 │
+│            └─────────┬─────────┘                                 │
+│                      ▼                                           │
+│      ┌───────────────┼───────────────────────┐                   │
+│      ▼               ▼                       ▼                   │
+│  archive-mcp     nb1777-mcp     ocr     your-plugin              │
+│  (FTS5 multi-DB) (NotebookLM)        (MCP/bot a piacere)         │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+## Perché
+
+Esporre un MCP a claude.ai significa, di solito, mettere mano a TLS, reverse
+proxy, autenticazione, un dominio, e tenere tutto in piedi al reboot. vps1777 fa
+quel lavoro una volta sola, bene: un gateway OAuth 2.1 davanti, un URL HTTPS
+gratuito via Tailscale Funnel (o Caddy/Cloudflare se preferisci), e ogni nuovo
+servizio diventa una voce nel routing. Tu pensi al tuo MCP; il resto è già qui.
+
+## Installazione
+
+Ti serve solo una **VPS Linux fresh** (Debian 12 consigliata — è quella su cui è
+stato fatto il collaudo completo su macchina vergine del 27/08/2026; su Debian 13
+con volumi cifrati la stessa VPS risultava instabile, vedi `H56` in
+`security/findings.yml`) con IP e password root. Tre modi, dallo stesso repo.
+
+### 🖱 Installer grafico — zero comandi (consigliato)
+
+Sul **tuo PC**:
+
+| Sistema | Avvio |
+|---|---|
+| Windows | doppio-click `installer/launch.bat` |
+| Linux / Mac / WSL | doppio-click `installer/launch.sh` |
+
+Si apre una pagina nel browser (`127.0.0.1:8777`): compili il form, premi
+**Verifica connessione**, attendi i semafori verdi, clicchi **Installa**. Segui
+l'avanzamento live; a fine installazione vedi **URL pubblico, password admin e i
+connector** da incollare in claude.ai. Dettagli: [installer/README.md](installer/README.md).
+
+> **Cross-OS vero**: l'engine è Python puro (paramiko via SSH) — gira su
+> **Windows nativo**, Mac e Linux, senza bash né WSL. Le credenziali non lasciano
+> il tuo PC (bind su `127.0.0.1`). Il deploy **sopravvive al refresh** della pagina.
+
+### 🚀 CLI — un comando dal tuo PC
+
+```bash
+git clone https://github.com/neo1777/vps1777.git && cd vps1777
+./deploy.sh        # chiede IP/user/password + config, fa TUTTO via SSH
+```
+
+`deploy.sh` (Linux/Mac/WSL; per auth password serve `sshpass`) prepara la VPS
+(Docker + Compose v2 + hardening), trasferisce il repo, genera `.env` + secrets
+(random + bcrypt), avvia lo stack, **installa Tailscale sull'host e attiva il
+Funnel HTTPS**, riavvia la VPS e verifica che tutto riparta al boot, infine
+stampa URL e connector.
+
+### 🛠 Manuale — sulla VPS
+
+```bash
+git clone https://github.com/neo1777/vps1777.git && cd vps1777
+./setup.sh                                          # wizard interattivo
+# se hai risposto «no» a «Procedo ora?» (setup.sh avvia già lo stack, con gli stessi -f):
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+  --profile ingress.tailscale up -d                 # o caddy / cloudflared
+```
+
+Per l'HTTPS pubblico (Tailscale / Caddy / Cloudflare) e i prerequisiti, vedi
+[docs/INGRESS.md](docs/INGRESS.md). Per collegare i connector a claude.ai e
+caricare l'auth NotebookLM, [docs/INSTALL.md](docs/INSTALL.md).
+
+## Cosa include
+
+| Servizio | Cosa fa | Porta interna |
+|---|---|---|
+| **gateway** | OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*` | 8080 |
+| **archive-mcp** | Ricerca FTS5 su più DB (export web claude.ai, sessioni Claude Code) | 8002 |
+| **nb1777-mcp** | NotebookLM via CLI `nlm` — **38 tool** (notebook, source, chat, 9 artefatti studio, doctor, canonico/memoria). Porta anche il **canonico della memoria 1777** ([docs/MEMORIA-1777.md](docs/MEMORIA-1777.md)). Vedi [docs/NB1777.md](docs/NB1777.md) | 8003 |
+| **nb1777-bot** | Bot Telegram owner-only + launcher Mini App | (long-poll) |
+| **ocr** | Tesseract in un container interno: gli occhi dell'ingest (immagini → testo `[ocr]`). Il gateway lo chiama via HTTP, non esegue processi | 8004 |
+
+Più i **plugin** che ci aggiungi tu — un MCP o un bot in pochi file, senza
+toccare il core. Vedi [docs/PLUGINS.md](docs/PLUGINS.md).
+
+E la **Mini App Telegram** — la plancia mobile: si apre dal bot (bottone
+*Pannello*), senza password (auth via identità Telegram, owner-only lato
+server). Notebook con domande RAG dal telefono, ricerca nell'archivio, URL dei
+connettori copiabili, scadenze secret, update a un tap. Vedi
+[docs/MINIAPP.md](docs/MINIAPP.md).
+
+## Aggiornamenti
+
+Le immagini sono **pubblicate su GHCR dalla CI di release** (firmate cosign,
+con SBOM): la VPS fa solo `docker compose pull`, **mai build** (vincolo 4GB).
+Per aggiornare:
+
+```bash
+vps1777 update      # backup → pull + verifica digest → migrazioni → health-gate
+```
+
+oppure un click dal **pannello admin → tab Update**. Quando esce una release
+il bot Telegram ti avvisa; se la nuova versione non torna in salute, **rollback
+automatico**. Manuale completo: [docs/UPDATE.md](docs/UPDATE.md).
+
+E di default **fa da sola**: `vps1777-auto-update.timer` applica lo stesso
+update sicuro **una volta a settimana** — feature `autoupdate` in
+`VPS1777_FEATURES`, attiva di default; per spegnerla vedi [docs/OPS.md](docs/OPS.md).
+
+## Sicurezza per design
+
+- Backend su rete Docker `internal: true` — **solo il gateway** è esposto verso l'esterno
+- Il gateway **non** ha accesso al Docker socket né al filesystem dell'host (container non privilegiato), **né ai cookie Google** di NotebookLM: fra i servizi in esercizio quel volume lo monta solo `nb1777-mcp`, quello che li usa (in sola lettura lo montano anche il backup, che li cifra, e il check scadenze, che ne legge solo la data — vedi [SECURITY.md](SECURITY.md)). Vede però i **5 secret Docker a lui assegnati** — fra cui `telegram_bot_token`, radice di fiducia della Mini App ([docs/SECRETS.md](docs/SECRETS.md)): un gateway compromesso li legge, ed è per questo che il suo perimetro è il più difeso
+- Secrets sensibili (password, signing key, token) via Docker `secrets:` (tmpfs `/run/secrets/`), **mai** in env var; il `GATEWAY_SECRET` è redatto dagli access-log
+- OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12; il proxy verifica anche l'**audience** del token
+- Mini App e bot **owner-only fail-closed**: senza `TELEGRAM_OWNER_ID` negano tutti, non aprono
+- Rate-limit per-IP sugli endpoint auth; `X-Forwarded-For` fidato **solo** dal proxy (IP client non falsificabile)
+- Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, healthcheck su ogni servizio
+- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
+- Update firmati **cosign** e verificati **fail-closed di default**; digest immutabili (`images.lock`); backup age + snapshot + **rollback automatico** ([docs/UPDATE.md](docs/UPDATE.md))
+- CI con GitHub Actions **pinnate a SHA** + Dependabot; chiave di backup **fuori dalla VPS** (solo il recipient pubblico sul server)
+- Gestione visuale opzionale (Portainer) **solo su loopback** + tunnel SSH — vedi [docs/OPS.md](docs/OPS.md)
+
+Tutto questo è passato per una **review difensiva a tappeto** (luglio 2026): la rassegna completa dell'hardening applicato, il threat model, i flussi di dati verso terzi e i residui noti sono in [SECURITY.md](SECURITY.md).
+
+## La cultura ingegneristica (perché questo repo è diverso)
+
+Il codice si giudica aprendo i file; queste sono le garanzie che non si vedono a
+colpo d'occhio:
+
+- **Il ledger delle feature** ([features.yaml](features.yaml)): ogni funzione del
+  prodotto è dichiarata con la sua *prova* (un tool MCP che risponde, un file che
+  contiene, un comando collegato), e la CI verifica il quadro **nei due versi** —
+  una feature senza prova o una prova senza feature sono un rosso.
+- **La documentazione è sorvegliata da test**: la pagina della CLI fallisce la CI
+  se un comando non ha sezione ed esempio; i riferimenti fra documenti passano da
+  un linter; le traduzioni inglesi portano l'hash del sorgente italiano e la CI
+  segnala quando l'originale si muove ([docs/en/MANIFEST.json](docs/en/MANIFEST.json)).
+- **Oltre 800 test in sei suite**, molti dei quali *presidi strutturali* nati
+  ciascuno da un incidente reale — il [CHANGELOG.md](CHANGELOG.md) racconta la
+  storia di ogni guardia: che cosa ha morso, e come è diventata un test.
+- **Release firmate e update che sa tornare indietro**: bundle cosign fail-closed,
+  immagini per digest, snapshot pre-update n/n-1, health-gate e rollback
+  automatico ([docs/UPDATE.md](docs/UPDATE.md)).
+- **Sicurezza azionabile**: scan Trivy settimanale filtrato su ciò che ha un fix,
+  e un workflow mensile che ricostruisce le immagini quando i fix Debian
+  arrivano — la pagina Security dice ciò su cui si può agire, non il rumore.
+- **La disciplina di memoria 1777** ([docs/MEMORIA-1777.md](docs/MEMORIA-1777.md)):
+  il prodotto spedisce le regole con cui un assistente giudica i propri ricordi,
+  versionate e servite da un tool — con i fatti dell'utente fuori dal repo, per
+  costruzione.
+
+## Documentazione
+
+| Doc | Cosa trovi |
+|---|---|
+| [INSTALL.md](docs/INSTALL.md) | Installazione passo-passo + post-install (connector, NotebookLM) |
+| [INGRESS.md](docs/INGRESS.md) | HTTPS pubblico: Tailscale Funnel / Caddy / Cloudflare |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Flussi, contratti, security model |
+| [PLUGINS.md](docs/PLUGINS.md) | Aggiungere un tuo MCP o bot |
+| [SECRETS.md](docs/SECRETS.md) | Gestione, rotation e backup dei secret |
+| [OPS.md](docs/OPS.md) | Hardening + profili opzionali (Portainer, Watchtower, backup) |
+| [UPDATE.md](docs/UPDATE.md) | Aggiornamenti: `vps1777 update`, pulsante admin, rollback |
+| [ARCHIVE.md](docs/ARCHIVE.md) | Archivio di ricerca: pagina `/admin/archive`, formati, ingest via NotebookLM |
+| [NB1777.md](docs/NB1777.md) | NotebookLM: i 38 tool MCP, lo studio, l'auth, il bot Telegram, il canonico della memoria |
+| [MEMORIA-1777.md](docs/MEMORIA-1777.md) | La disciplina di memoria 1777: canonico nel prodotto (neutro), strati locali `fatti`/`errata`, `vps1777 memoria` |
+| [CLI.md](docs/CLI.md) | La CLI `vps1777`: tutti i comandi con esempi (allineata al codice da un test) |
+| [GLOSSARIO.md](docs/GLOSSARIO.md) | Le parole di vps1777 in due righe l'una: container, release, tool MCP, canonico… |
+| [MINIAPP.md](docs/MINIAPP.md) | Mini App Telegram: la plancia mobile — auth initData, endpoint, sicurezza |
+| [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) | Backup/restore volumi age-encrypted |
+| [COLLAUDO-VERGINE.md](docs/COLLAUDO-VERGINE.md) | Il test definitivo su VPS formattata: install, verifiche mirate per cura, quadratura |
+| [ONBOARDING.md](docs/ONBOARDING.md) | Setup post-deploy dal pannello web |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Quando qualcosa va storto |
+
+> In inglese ([docs/en/](docs/en/)): ARCHITECTURE, INSTALL, UPDATE, BACKUP-RESTORE, CLI, MEMORIA-1777 — freschezza garantita da `tools/tests/test_traduzioni_fresche.py`.
+
+## Sviluppo locale
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch
+```
+
+Hot-reload via Compose Watch. `compose.yaml` referenzia solo immagini
+pubblicate (pull): il build locale esiste solo con l'overlay
+`compose.build.yaml` (dev/CI, mai in produzione). Linee guida in [CONTRIBUTING.md](CONTRIBUTING.md);
+patti della comunità in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+## Stato
+
+Pre-1.0: il cuore è funzionante e **validato end-to-end su VPS reale** —
+installer cross-OS (incluso **Windows nativo**) → Docker + Tailscale Funnel
+HTTPS → reboot-survival → connector OAuth+MCP agganciato da claude.ai. Le
+novità sono tracciate nel [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+[MIT](LICENSE) © neo1777
+
+---
+
+*vps1777 è la seconda generazione dello stack 1777: dopo aver imparato che bash +
+python + sudo + service-user intrecciati esplodono in modo non riproducibile, qui
+è Docker a tenere tutto pulito e immutabile. Costruito da [neo1777](https://github.com/neo1777).*

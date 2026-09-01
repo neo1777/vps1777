@@ -1,5 +1,23 @@
 # Security Policy
 
+> **English overview.** vps1777 is a self-hosted OAuth 2.1 gateway for MCP servers.
+> Security posture in brief: only the gateway faces the network (backend on an
+> `internal:true` Docker network); non-root containers with `cap_drop: ALL`;
+> secrets via Docker `secrets:` on tmpfs, never env vars; releases are
+> cosign-signed and verified **fail-closed**, images pinned by digest; age-encrypted
+> two-tier backups with the private key off the VPS; pre-update snapshots with
+> automatic rollback; per-IP rate limiting and proxy-only `X-Forwarded-For` trust;
+> weekly Trivy scans (actionable-only) plus a monthly image-rebuild workflow;
+> among the running services, the NotebookLM Google-session volume is mounted only
+> by `nb1777-mcp` (the backup job reads it solely to encrypt it).
+> **Reporting a vulnerability**: please open a GitHub Security Advisory (private)
+> on this repository, or a minimal issue asking for a private channel — do not post
+> exploit details publicly. The rest of this document is in Italian (the project's
+> native language — see the README's language policy): it is the full defensive
+> review of July 2026, the threat model, the third-party data flows and the known
+> residuals, and it is kept current release by release.
+
+
 ## Supported Versions
 
 Pre-1.0: solo l'ultima `main` riceve security fix.

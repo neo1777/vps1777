@@ -2,6 +2,28 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.44.4] — 2026-09-01
+
+**Il repo parla al mondo in inglese, senza smettere di pensare in italiano.**
+
+### ✨ Nuovo
+
+- **README.md in inglese** come pagina d'ingresso (l'italiano resta integrale in
+  `README.it.md`), con la sezione nuova «Engineering culture» — presente in
+  entrambe le lingue — e una **Language policy** dichiarata: la doc profonda è
+  italiana per scelta, l'inglese copre le superfici che contano. CONTRIBUTING in
+  inglese (`CONTRIBUTING.it.md` per l'originale), sommario inglese + policy di
+  disclosure in testa a `SECURITY.md`.
+- **`docs/en/`**: ARCHITECTURE, INSTALL, UPDATE, BACKUP-RESTORE, CLI,
+  MEMORIA-1777 tradotte integralmente (parità di sezioni verificata).
+- **Il presidio delle traduzioni** (`docs/en/MANIFEST.json` +
+  `test_traduzioni_fresche.py`): ogni pagina inglese registra lo sha256 del suo
+  sorgente italiano; se l'originale si muove dopo la traduzione la CI è rossa,
+  con l'elenco e la cura (`tools/aggiorna-traduzioni.py`). Una doc bilingue
+  muore per divergenza silenziosa: qui il silenzio non esiste.
+- Nota: questa release ricostruisce le immagini e porta in produzione anche i
+  bump dependabot #257 (action-gh-release) e #258 (pydantic).
+
 ## [0.44.3] — 2026-09-01
 
 ### 🛡️ Sicurezza
