@@ -956,7 +956,13 @@ findings:
         not_contains:
           - "né ai secret host"
           - "né ai secret dell'host"
+      # 01/09/2026: README.md è diventato la traduzione INGLESE (0.44.4) — la frase
+      # italiana vive in README.it.md; sul landing inglese si verifica l'equivalente.
+      # L'evidenza segue la lingua della superficie, il claim resta lo stesso.
+      # (la frase inglese va a capo nel file: si verifica il frammento a riga singola)
       - file: README.md
+        contains: ["secrets assigned to it"]
+      - file: README.it.md
         contains: ["5 secret Docker a lui assegnati"]
       - file: docs/ARCHITECTURE.md
         contains: ["5 secret Docker a lui assegnati"]
