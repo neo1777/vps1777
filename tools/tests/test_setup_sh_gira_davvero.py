@@ -103,9 +103,17 @@ def _copia_usa_e_getta():
 
 
 def _ambiente(pwd: str) -> dict:
+    # VPS1777_INSTALL_VERSION: il banco NON tocca la rete. Senza, setup.sh chiede
+    # a api.github.com l'ultima release e — sui runner condivisi, 60 req/h non
+    # autenticate per IP — muore di rate-limit PRIMA di arrivare a ciò che questo
+    # test misura (curl exit 22, «setup.sh è uscito 1»). Successo il 31/08 (③ del
+    # test bash, aperto 36c2d4cc) e il 01/09 su una PR dependabot: rossi che
+    # parevano regressioni ed erano il METEO della rete. Il valore è finto e va
+    # bene così: qui si misura il funnel non-interattivo, non il download.
     return {**os.environ, "SETUP_ADMIN_EMAIL": "prova@example.com",
             "SETUP_TG_OWNER_ID": "123456789", "SETUP_INGRESS_NUM": "1",
-            "SETUP_ADMIN_PWD": pwd, "SETUP_YES": "n"}
+            "SETUP_ADMIN_PWD": pwd, "SETUP_YES": "n",
+            "VPS1777_INSTALL_VERSION": "0.0.0-banco"}
 
 
 def test_gira_e_produce_i_file_senza_avviare_niente() -> None:
