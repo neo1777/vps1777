@@ -2,6 +2,26 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.44.2] — 2026-09-01
+
+**La pagina Security dice ciò su cui puoi agire, e le immagini si rinfrescano da sole.**
+
+### 🛡️ Sicurezza
+
+- **Trivy con `ignore-unfixed`** (+ `limit-severities-for-sarif`, che prima
+  mancava: il filtro `severity` NON si applicava al SARIF, ed è così che 1.400
+  alert — quasi tutti CVE Debian senza fix, low e note compresi — finivano in
+  pagina). Ora in Security compare solo l'azionabile. E la matrice scandisce
+  **tutte e 5** le immagini: `ocr` era fuori lista dalla 0.43.10 (l'insieme
+  enumerato a mano, di nuovo — ora il commento in testa alla matrice lo dice).
+- **`rebuild-mensile.yml`**: il 3 del mese riconta le CVE con fix sulle immagini
+  pubblicate; se ce ne sono, tagga la patch successiva → release firmata con
+  pacchetti Debian freschi → il check della VPS avvisa l'owner (il deploy resta
+  suo). Senza secret `RELEASE_PAT` non tagga (anti-ricorsione GitHub) e apre
+  una issue con l'elenco: fallback dichiarato.
+- **Questa release è il primo rebuild**: assorbe le CVE con fix note al 01/09
+  (openssl CVE-2026-14456 e minori, pip ×3).
+
 ## [0.44.1] — 2026-08-31
 
 **La documentazione per chi arriva ora — e un test che non la lascia invecchiare.**

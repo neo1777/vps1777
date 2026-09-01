@@ -225,6 +225,18 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
 
 ### Supply-chain & aggiornamenti
 
+- **Scansione vulnerabilità delle immagini** (`v0.44.2`): Trivy ogni lunedì
+  sulle 5 immagini **pubblicate** (ciò che gli utenti eseguono, non un build
+  ad-hoc), con `--ignore-unfixed`: in pagina Security va **solo ciò su cui si
+  può agire** — le CVE con una versione corretta pubblicata. Le CVE senza fix
+  (il rumore di fondo di ogni immagine Debian: al 01/09/2026 erano ~1.400
+  alert, critical comprese, tutte non azionabili) non fanno pagina: si
+  assorbono quando Debian pubblica il fix, alla ricostruzione successiva.
+  E la ricostruzione non dipende dal ritmo delle release: **il 3 di ogni mese**
+  `rebuild-mensile.yml` riconta le CVE con fix e, se ce ne sono, tagga la patch
+  successiva → release firmata con immagini fresche → il check della VPS avvisa
+  l'owner (il deploy resta suo). Senza il secret `RELEASE_PAT` il workflow non
+  tagga: apre una issue con l'elenco — fallback dichiarato, mai silenzioso.
 - **Firma cosign obbligatoria di default** (`v0.23.0`, critico). Il self-update
   verifica la firma keyless del bundle di release **fail-closed**: se la verifica
   non passa (o `cosign` manca e non si installa), l'update si ferma. La via
