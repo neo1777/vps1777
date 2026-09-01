@@ -28,30 +28,6 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
-  # ── Dipendenze Python (uv.lock), un servizio a directory ──────────────────
-  #    Aggiunto in 0.44.3 dopo il caso-scuola: cryptography 49.0.0 con CVE HIGH
-  #    (CVE-2026-69247, fix in 50.0.0) è rimasta nel lock di nb1777-mcp finché
-  #    non l'ha pescata Trivy sull'immagine — gateway e archive-mcp erano già a
-  #    50.0.0 per conto loro. Con l'ecosistema uv il bump arriva come PR, prima
-  #    che diventi un alert. Stessa policy delle action: i MAJOR a mano.
-  - package-ecosystem: uv
-    directories:
-      - /services/gateway
-      - /services/archive-mcp
-      - /services/nb1777-mcp
-      - /services/nb1777-bot
-      - /services/ocr
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: deps
-    groups:
-      python-deps:
-        patterns: ["*"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-
   # ── Immagini base dei Dockerfile (python:3.12-slim), un servizio a directory ─
   - package-ecosystem: docker
     directories:

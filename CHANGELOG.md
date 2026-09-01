@@ -10,9 +10,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   CVE-2026-69247 (HIGH) — l'unico alert rimasto in pagina Security dopo la
   0.44.2 (gateway e archive-mcp erano già a 50.x per conto loro: la stessa
   dipendenza, tre lock, tre età).
-- **Dependabot impara le dipendenze Python** (ecosistema `uv`, un servizio a
-  directory, major a mano come per le action): il prossimo caso come questo
-  arriva come PR settimanale, non come alert Trivy sull'immagine pubblicata.
+- ~~Dependabot impara le dipendenze Python~~ **RETTIFICA (01/09, stesso
+  giorno)**: le sorvegliava GIÀ dalla #95 — il blocco `uv` esisteva in fondo al
+  file, con un'esclusione che il mio duplicato non aveva (il pin intenzionale
+  `notebooklm-mcp-cli==0.7.7`, formato auth cablato in 4 punti). Il duplicato
+  faceva rifiutare l'intero dependabot.yml («overlapping directories»): rimosso,
+  e ora un test impone l'unicità dei blocchi PRIMA del merge — GitHub lo dice
+  solo dopo. Resta vero il bump di `cryptography` (transitiva: dependabot non
+  la toccava comunque).
 
 ## [0.44.2] — 2026-09-01
 
