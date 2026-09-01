@@ -20,7 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot]
+        # ⚠️ INSIEME ENUMERATO A MANO: chi aggiunge un servizio deve aggiungerlo
+        # anche qui, o resta NON scansionato in silenzio (successo con `ocr`,
+        # aggiunto in 0.43.10 e scoperto fuori lista il 01/09).
+        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # 🔴 DIFETTO CURATO IL 02/08 (b82df434, referto di un agente via abdd732a).
@@ -78,6 +81,15 @@ jobs:
           format: sarif
           output: trivy-${{ matrix.service }}.sarif
           severity: CRITICAL,HIGH
+          # POLICY (decisione dell'owner, 01/09/2026): in pagina Security va ciò
+          # su cui SI PUÒ AGIRE. `ignore-unfixed` toglie le CVE senza versione
+          # corretta (il rumore di fondo di ogni immagine Debian: al 01/09 erano
+          # ~1.400 alert, quasi tutti NO-FIX, critical comprese); le assorbiamo
+          # comunque ricostruendo le immagini (rebuild-mensile.yml). E senza
+          # `limit-severities-for-sarif` il filtro `severity` NON si applica al
+          # SARIF: è così che low e note finivano in pagina nonostante il filtro.
+          ignore-unfixed: true
+          limit-severities-for-sarif: true
       - name: Upload Sarif to GitHub Security
         if: always() && steps.exists.outputs.ok == 'true'
         uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4

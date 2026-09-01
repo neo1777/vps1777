@@ -1,0 +1,108 @@
+name: Rebuild mensile (CVE con fix)
+
+# Le immagini si ricostruiscono a ogni release, e i fix dei pacchetti Debian
+# entrano SOLO così (le installazioni tirano per digest dal bundle firmato:
+# ripubblicare :latest non arriverebbe a nessuno). Ma se le release rallentano,
+# i fix restano fermi. Questo workflow, una volta al mese, guarda le immagini
+# PUBBLICATE con gli stessi occhi della pagina Security (--ignore-unfixed) e:
+#   · 0 CVE con fix   → verde, nessuna azione (e lo dice).
+#   · ≥1 CVE con fix  → crea il tag della PATCH successiva (vX.Y.Z+1) sull'HEAD
+#     di main → release.yml costruisce immagini fresche, firmate → il timer
+#     check della VPS avvisa l'owner via Telegram: il DEPLOY resta una sua
+#     azione, come sempre.
+#
+# ⚠️ PERCHÉ SERVE UN PAT (secret `RELEASE_PAT`, classic, scope `repo`): un tag
+#   creato col GITHUB_TOKEN di default NON fa partire altri workflow
+#   (anti-ricorsione di GitHub) — release.yml resterebbe fermo e il tag sarebbe
+#   un orfano. Senza il secret, questo workflow NON tagga: apre/aggiorna una
+#   issue con l'elenco delle CVE, e il tag lo dà l'owner con due comandi.
+#   Fail-open dichiarato, non silenzioso.
+
+on:
+  schedule:
+    - cron: "0 5 3 * *"   # il 3 del mese alle 5:00 UTC (dopo il backup notturno)
+  workflow_dispatch:
+
+permissions:
+  contents: write        # creare il tag (solo col PAT; il default non basta comunque)
+  issues: write          # la via di fallback
+
+jobs:
+  valuta-e-agisci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # servono i tag per calcolare la patch successiva
+
+      # Un solo job, niente matrice: il verdetto è la SOMMA sulle 5 immagini, e
+      # 5 job separati non possono sommarsi senza un sesto che li aspetti.
+      - name: Scan gateway
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: {image-ref: "ghcr.io/${{ github.repository_owner }}/vps1777-gateway:latest", format: json, output: cve-gateway.json, ignore-unfixed: true, severity: "CRITICAL,HIGH,MEDIUM,LOW"}
+      - name: Scan archive-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: {image-ref: "ghcr.io/${{ github.repository_owner }}/vps1777-archive-mcp:latest", format: json, output: cve-archive-mcp.json, ignore-unfixed: true, severity: "CRITICAL,HIGH,MEDIUM,LOW"}
+      - name: Scan nb1777-mcp
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: {image-ref: "ghcr.io/${{ github.repository_owner }}/vps1777-nb1777-mcp:latest", format: json, output: cve-nb1777-mcp.json, ignore-unfixed: true, severity: "CRITICAL,HIGH,MEDIUM,LOW"}
+      - name: Scan nb1777-bot
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: {image-ref: "ghcr.io/${{ github.repository_owner }}/vps1777-nb1777-bot:latest", format: json, output: cve-nb1777-bot.json, ignore-unfixed: true, severity: "CRITICAL,HIGH,MEDIUM,LOW"}
+      - name: Scan ocr
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: {image-ref: "ghcr.io/${{ github.repository_owner }}/vps1777-ocr:latest", format: json, output: cve-ocr.json, ignore-unfixed: true, severity: "CRITICAL,HIGH,MEDIUM,LOW"}
+
+      - name: Conta le CVE con fix (la somma è il verdetto)
+        id: conta
+        run: |
+          set -euo pipefail
+          TOT=0
+          : > elenco.txt
+          for s in gateway archive-mcp nb1777-mcp nb1777-bot ocr; do
+            n="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "cve-$s.json")"
+            jq -r --arg s "$s" '.Results[]?.Vulnerabilities[]? | "\($s): \(.VulnerabilityID) \(.Severity) \(.PkgName) \(.InstalledVersion) → \(.FixedVersion)"' "cve-$s.json" >> elenco.txt
+            echo "· $s: $n"
+            TOT=$((TOT + n))
+          done
+          sort -u elenco.txt -o elenco.txt
+          echo "totale=$TOT" >> "$GITHUB_OUTPUT"
+          echo "── CVE con fix, totale (con doppioni per pacchetto): $TOT"
+          cat elenco.txt
+
+      - name: Tagga la patch successiva (solo col PAT)
+        if: steps.conta.outputs.totale != '0'
+        env:
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "$RELEASE_PAT" ]; then
+            echo "pat=assente" >> "$GITHUB_ENV"
+            echo "::warning::CVE con fix trovate ma RELEASE_PAT non configurato: non taggo (un tag dal GITHUB_TOKEN non farebbe partire release.yml). Apro la issue."
+            exit 0
+          fi
+          ULTIMO="$(git tag -l 'v*' --sort=-v:refname | head -1)"
+          # niente tag = niente release da ricostruire: non si inventa una v0.0.1
+          [ -n "$ULTIMO" ] || { echo "::error::nessun tag v*: niente da ricostruire"; exit 1; }
+          NUOVO="$(printf '%s' "$ULTIMO" | awk -F. -v OFS=. '{$NF=$NF+1; print}')"
+          git config user.name "rebuild-mensile"
+          git config user.email "actions@users.noreply.github.com"
+          git tag -a "$NUOVO" -m "rebuild mensile: immagini ricostruite per assorbire i fix Debian (elenco nel run)" origin/main
+          git push "https://x-access-token:${RELEASE_PAT}@github.com/${{ github.repository }}" "$NUOVO"
+          echo "pat=usato" >> "$GITHUB_ENV"
+          echo "::notice::taggato $NUOVO → release.yml ricostruisce; il check della VPS avviserà l'owner."
+
+      - name: Issue di fallback (senza PAT)
+        if: steps.conta.outputs.totale != '0' && env.pat == 'assente'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TITOLO="Rebuild consigliato: CVE con fix nelle immagini pubblicate"
+          CORPO="$(printf 'Il giro mensile del %s ha trovato **%s** CVE con fix disponibile nelle immagini pubblicate.\n\n```\n%s\n```\n\nPer assorbirle basta una release di patch (immagini ricostruite = pacchetti Debian aggiornati):\n\n    git tag vX.Y.Z+1 && git push origin vX.Y.Z+1\n\nPer automatizzare questo passo: secret `RELEASE_PAT` (PAT classic, scope `repo`) — vedi rebuild-mensile.yml.' "$(date -u +%F)" "${{ steps.conta.outputs.totale }}" "$(cat elenco.txt)")"
+          ESISTENTE="$(gh issue list --state open --search "in:title \"Rebuild consigliato\"" --json number -q '.[0].number' || true)"
+          if [ -n "$ESISTENTE" ]; then
+            gh issue comment "$ESISTENTE" --body "$CORPO"
+          else
+            gh issue create --title "$TITOLO" --body "$CORPO"
+          fi
