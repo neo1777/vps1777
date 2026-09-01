@@ -1,0 +1,37 @@
+{
+  "_nota": "Ogni traduzione inglese registra lo sha256 del suo sorgente italiano al momento della traduzione. tools/tests/test_traduzioni_fresche.py fallisce la CI se il sorgente si muove: si aggiorna la traduzione e poi tools/aggiorna-traduzioni.py. Una copia che puo' mentire non e' una copia.",
+  "traduzioni": {
+    "README.md": {
+      "sorgente": "README.it.md",
+      "sorgente_sha256": "6c18347d72ece3831a5949b0ad6758b754d03520b3b8d93f30d85e34d5ce4e75"
+    },
+    "CONTRIBUTING.md": {
+      "sorgente": "CONTRIBUTING.it.md",
+      "sorgente_sha256": "a77cf38e85462368bd4dd47086fa1124b90528363514fa76a49b18ec1df21928"
+    },
+    "docs/en/ARCHITECTURE.md": {
+      "sorgente": "docs/ARCHITECTURE.md",
+      "sorgente_sha256": "7239d89a66b3de935abd2dda6ad34db923078640ec782747116c591ea56c729b"
+    },
+    "docs/en/INSTALL.md": {
+      "sorgente": "docs/INSTALL.md",
+      "sorgente_sha256": "c784bfe8b9b39c46367c9ff71d954fd4fc2f8c911835a45f829115dfdc791e8e"
+    },
+    "docs/en/UPDATE.md": {
+      "sorgente": "docs/UPDATE.md",
+      "sorgente_sha256": "94674fdf5a791dd80304495ef5a6095b984c01eb95e607a3970d3b441dae9f78"
+    },
+    "docs/en/BACKUP-RESTORE.md": {
+      "sorgente": "docs/BACKUP-RESTORE.md",
+      "sorgente_sha256": "b119867e44d2b4db37ff52d5c47eeb5c084b67f663d45e6055f3303353b22b81"
+    },
+    "docs/en/CLI.md": {
+      "sorgente": "docs/CLI.md",
+      "sorgente_sha256": "bf5f8eb1ce9bea85321772a8ce4cd8882f03d8b0b9426caf460abccd1a001a8d"
+    },
+    "docs/en/MEMORIA-1777.md": {
+      "sorgente": "docs/MEMORIA-1777.md",
+      "sorgente_sha256": "41dd9e89504ce94add9f52ecf09bb6f82ad576b52afb3175fab63783bc184a49"
+    }
+  }
+}

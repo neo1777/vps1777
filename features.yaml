@@ -1362,6 +1362,25 @@ features:
     status: active-default
     since: "0.44.1"
     verify: {cli_command: help}
+  - id: docs.bilingue-con-presidio
+    nome: "Doc bilingue: inglese d'ingresso, italiano nativo, freschezza in CI"
+    cosa: "README.md e CONTRIBUTING.md in inglese (landing per il mondo; gli originali
+           italiani restano integrali come README.it.md / CONTRIBUTING.it.md), sommario
+           inglese in testa a SECURITY.md, e 6 pagine chiave tradotte in docs/en/
+           (ARCHITECTURE, INSTALL, UPDATE, BACKUP-RESTORE, CLI, MEMORIA-1777).
+           LA FIRMA: ogni traduzione registra in docs/en/MANIFEST.json lo sha256 del
+           sorgente italiano; test_traduzioni_fresche.py fallisce la CI se l'originale
+           si muove dopo la traduzione — una doc bilingue muore per divergenza
+           silenziosa, e qui il silenzio non esiste. Cura: aggiornare la pagina EN e
+           poi tools/aggiorna-traduzioni.py. Il resto della doc resta italiano per
+           scelta dichiarata (Language policy nel README)."
+    dove: ["README.md", "docs/en/MANIFEST.json",
+           "tools/tests/test_traduzioni_fresche.py#test_le_traduzioni_sono_fresche",
+           "tools/aggiorna-traduzioni.py"]
+    status: active-default
+    since: "0.44.4"
+    verify:
+      file_contains: {path: "docs/en/MANIFEST.json", pattern: "sorgente_sha256"}
   - id: sec.scan-azionabile-e-rebuild
     nome: "Scan Trivy solo-azionabile + rebuild mensile delle immagini"
     cosa: "Trivy settimanale sulle 5 immagini pubblicate (ocr compresa: fino a 0.44.1
