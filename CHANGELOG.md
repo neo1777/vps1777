@@ -2,6 +2,17 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.44.5] — 2026-09-01
+
+**Release tecnica: è la 0.44.4, pubblicata davvero.** La v0.44.4 non è mai
+uscita: il guard di release.yml («niente release da un commit con CI rossa»)
+l'ha fermata — la CI era rossa perché l'evidenza del rilievo H44 nel registro
+cercava una frase italiana in un README diventato inglese, e chi rilasciava
+(una sessione Claude) aveva mergiato leggendo la CI e mergiando **nella stessa
+invocazione**, senza guardare il verdetto. Il tag v0.44.4 resta orfano (i tag
+sono immutabili); qui dentro: tutto il contenuto della 0.44.4 + l'evidenza H44
+ripuntata sulle due lingue. Il guard ha fatto esattamente il suo mestiere.
+
 ## [0.44.4] — 2026-09-01
 
 **Il repo parla al mondo in inglese, senza smettere di pensare in italiano.**
