@@ -122,3 +122,23 @@ def test_i_major_NON_entrano_da_soli():
         coda = testo[testo.index(f"package-ecosystem: {u['eco']}"):]
         assert "version-update:semver-major" in coda, (
             "l'ecosystem Python non ignora i major: entrerebbero da soli")
+
+
+def test_nessun_blocco_duplicato_stessa_coppia_ecosistema_directory():
+    """GitHub rifiuta l'INTERO dependabot.yml se due blocchi coprono la stessa
+    coppia (ecosystem, directory) — ma lo dice solo DOPO il merge, con un
+    check-run che nessun gate di PR vede. Successo il 01/09/2026 (#255): un
+    secondo blocco `uv` aggiunto in testa senza vedere quello in fondo — e il
+    duplicato era anche PEGGIO dell'originale, perché non portava l'esclusione
+    del pin intenzionale notebooklm-mcp-cli. Con il file rifiutato, dependabot
+    è SPENTO su tutto: azioni, immagini, Python. Questo test lo dice in CI."""
+    blocchi = _blocchi_updates(DEPENDABOT.read_text(encoding="utf-8"))
+    assert blocchi, "parser cieco: non è un verde (stessa regola di _coperte)"
+    viste: set[tuple[str, str]] = set()
+    for b in blocchi:
+        for d in b["dirs"]:
+            chiave = (b["eco"], d.strip("/"))
+            assert chiave not in viste, (
+                f"blocchi duplicati per {chiave}: GitHub rifiuterebbe l'INTERO file "
+                f"e dependabot resterebbe spento su tutto")
+            viste.add(chiave)
