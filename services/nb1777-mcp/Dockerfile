@@ -46,6 +46,12 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # Utente non-root condiviso (UID 1000 "app") — STESSO uid di gateway/bot
 # così il volume nlm-auth è accessibile da tutti i servizi che lo montano.
 RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
+
+# Il pip della BASE è peso morto qui: le dipendenze le installa uv nel builder
+# (/opt/venv) e a runtime nessuno lo chiama — ma è l'unica fonte di CVE
+# ricorrenti sulle immagini (issue #263: 6 CVE con fix che python:3.12-slim
+# non porta ancora). Un tool inutilizzato che accumula CVE si rimuove.
+RUN python -m pip uninstall -y pip
 RUN mkdir -p /var/lib/nlm && chown -R app:app /var/lib/nlm
 
 # Copia venv (già in /opt/venv, shebang corretti) + codice dal builder
