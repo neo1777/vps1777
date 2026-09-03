@@ -42,22 +42,26 @@ def _filter_headers(headers: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP}
 
 
-def _check_bearer(request: Request) -> tuple[bool, str | None]:
+def _check_bearer(request: Request) -> tuple[bool, str | None, dict | None]:
     """
-    Ritorna (ok, error_string).
-    Se OAUTH_REQUIRED=False, ritorna sempre (True, None).
+    Ritorna (ok, error_string, claims).
+    Se OAUTH_REQUIRED=False, ritorna sempre (True, None, None).
+    I claims escono di qui perché l'audit della chiamata proxata deve poter
+    dire CHI (sub) e CON QUALE AGENTE (client_id): prima loggava solo
+    event/service/method/status, e da un accesso sospetto si risaliva
+    all'utente ma non al client che l'aveva fatto (vaglio corso1777, 03/09).
     """
     s = get_settings()
     if not s.oauth_required:
-        return True, None
+        return True, None, None
     auth_header = request.headers.get("authorization", "")
     if not auth_header.lower().startswith("bearer "):
-        return False, "missing_bearer"
+        return False, "missing_bearer", None
     token = auth_header.split(None, 1)[1].strip()
     try:
         claims = verify(token, expected_typ="access")
     except JWTError as exc:
-        return False, str(exc)
+        return False, str(exc), None
     # Il proxy non ha un'audience fissa (l'aud dei token è il client_id DCR),
     # ma vps1777 è single-owner: si lega il token al PROPRIETARIO. Un access
     # token il cui `sub` non è un'email ammessa non è per questo gateway.
@@ -82,10 +86,10 @@ def _check_bearer(request: Request) -> tuple[bool, str | None]:
     # successivo, deliberatamente fuori da questa patch.)
     allowed = {e.lower() for e in s.oauth_allowed_emails}
     if not allowed:
-        return False, "owner_not_configured"
+        return False, "owner_not_configured", None
     if str(claims.get("sub", "")).lower() not in allowed:
-        return False, "subject_not_allowed"
-    return True, None
+        return False, "subject_not_allowed", None
+    return True, None, claims
 
 
 async def proxy(request: Request) -> Response:
@@ -122,7 +126,7 @@ async def proxy(request: Request) -> Response:
         )
 
     # 3. Bearer
-    ok, err = _check_bearer(request)
+    ok, err, claims = _check_bearer(request)
     if not ok:
         audit({"event": "proxy_auth_fail", "service": service, "reason": err})
         return JSONResponse(
@@ -139,6 +143,12 @@ async def proxy(request: Request) -> Response:
     headers = _filter_headers(dict(request.headers))
     # Forza Host = upstream cosicché il backend non confonda l'hostname pubblico
     headers["host"] = upstream
+    # Il bearer si ferma QUI: è già stato verificato tre righe sopra, nessun
+    # backend lo legge, e un token che viaggia dove non serve è solo superficie
+    # d'attacco in più (token passthrough — vaglio corso1777, 03/09). Se un
+    # giorno un backend dovesse autenticare in proprio, gli si emette un token
+    # SUO (audience del servizio), non si inoltra quello del client.
+    headers.pop("authorization", None)
 
     method = request.method
     body = await request.body() if method in {"POST", "PUT", "PATCH"} else None
@@ -165,6 +175,12 @@ async def proxy(request: Request) -> Response:
         "service": service,
         "method": method,
         "status": upstream_resp.status_code,
+        # CHI e CON QUALE AGENTE: sub è l'utente, client_id l'agente registrato
+        # via DCR (nei nostri access token viaggia come `aud`). Con OAuth spento
+        # restano None e la riga lo dice. NB: sub è un identificativo di persona
+        # — la riga d'audit cambia classe di dato (vedi SECURITY.md §Audit).
+        "sub": claims.get("sub") if claims else None,
+        "client_id": claims.get("aud") if claims else None,
     })
 
     # Streaming response: passa attraverso il body byte-per-byte

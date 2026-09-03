@@ -54,8 +54,13 @@ x-security: &security
 # read_only senza un giro NotebookLM reale da verificare sarebbe fragile.
 x-readonly: &readonly
   read_only: true
+  # noexec: un rootfs read-only con una tmpfs eseguibile è un caveau blindato
+  # con la cassaforte aperta — il payload si sposta in RAM e gira da lì.
+  # size: senza tetto, riempire /tmp = OOM-killer sul container (DoS).
+  # Nessuno dei servizi esegue da /tmp (misurato 03/09: solo l'heartbeat del
+  # bot e lo spooling multipart di Starlette, dirottato su volume nel gateway).
   tmpfs:
-    - /tmp
+    - /tmp:rw,noexec,nosuid,size=64m
 
 services:
 
@@ -197,7 +202,9 @@ services:
       - "8002"
     # FastMCP espone solo /mcp (no /health) → healthcheck su TCP socket
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket,sys; s=socket.create_connection(('127.0.0.1',8002),timeout=3); s.close()"]
+      # /health prova il MESTIERE (settings+volume+registry DB), non la porta:
+      # su questo verde si appoggia il health-gate dell'updater (vaglio 03/09).
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/health', timeout=3).status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -247,7 +254,9 @@ services:
       - "8003"
     # FastMCP espone solo /mcp (no /health) → healthcheck su TCP socket
     healthcheck:
-      test: ["CMD", "python", "-c", "import socket,sys; s=socket.create_connection(('127.0.0.1',8003),timeout=3); s.close()"]
+      # /health prova settings+volume dati (mai NotebookLM: un health che dipende
+      # da un esterno riavvia il container per i guasti altrui) — vaglio 03/09.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8003/health', timeout=3).status==200 else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
