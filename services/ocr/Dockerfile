@@ -28,6 +28,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends tini \
 
 RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
 
+# Il pip della BASE è peso morto qui: le dipendenze le installa uv nel builder
+# (/opt/venv) e a runtime nessuno lo chiama — ma è l'unica fonte di CVE
+# ricorrenti sulle immagini (issue #263: 6 CVE con fix che python:3.12-slim
+# non porta ancora). Un tool inutilizzato che accumula CVE si rimuove.
+RUN python -m pip uninstall -y pip
+
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build/app /app/app
 

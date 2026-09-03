@@ -2,6 +2,27 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.44.6] — 2026-09-03
+
+**Il primo giro del rebuild mensile, e la cura che rende inutile il prossimo.**
+Il 03/09 il workflow `rebuild-mensile` ha fatto il suo primo giro reale e ha
+aperto la issue #263: 6 CVE di `pip` con fix disponibile, su tutte e 5 le
+immagini. Verificando la cura è emerso che un rebuild nudo NON le avrebbe
+assorbite: anche l'ultima `python:3.12-slim` (build 01/09) porta ancora
+pip 25.0.1 — la issue sarebbe rispuntata identica ogni mese.
+
+### 🔧 Corretto
+
+- **`pip` rimosso dalle immagini runtime dei 5 servizi.** Era peso morto: le
+  dipendenze le installa `uv` nel builder (`/opt/venv`), a runtime nessuno lo
+  invoca (verificato su script, compose e healthcheck) e il venv non lo
+  contiene. Un tool inutilizzato che accumula CVE non si aggiorna: si rimuove —
+  chiude le 6 CVE della issue #263 e l'intera classe per i mesi a venire.
+  Provato su build locale con controllo: immagine curata senza `pip`,
+  `import app` verde, immagine base non modificata col `pip` vulnerabile.
+- La release stessa è il **rebuild**: tutte le immagini ripartono da basi
+  fresche e assorbono gli aggiornamenti Debian nel frattempo pubblicati.
+
 ## [0.44.5] — 2026-09-01
 
 **Release tecnica: è la 0.44.4, pubblicata davvero.** La v0.44.4 non è mai

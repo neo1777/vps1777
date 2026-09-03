@@ -46,6 +46,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends tini ca-certifi
 # così i volumi condivisi (nlm-auth) sono accessibili a tutti.
 RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
 
+# Il pip della BASE è peso morto qui: le dipendenze le installa uv nel builder
+# (/opt/venv) e a runtime nessuno lo chiama — ma è l'unica fonte di CVE
+# ricorrenti sulle immagini (issue #263: 6 CVE con fix che python:3.12-slim
+# non porta ancora). Un tool inutilizzato che accumula CVE si rimuove.
+RUN python -m pip uninstall -y pip
+
 # Mountpoint dei volumi creati con owner 1000 PRIMA del mount: un volume
 # named vuoto eredita questi permessi al primo attach.
 # /var/lib/uploads: mountpoint del volume gateway-uploads (spool multipart, TMPDIR).
