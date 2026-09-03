@@ -2,6 +2,50 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.45.0] — 2026-09-03
+
+**Il vaglio corso1777: un corso di studio ha auditato vps1777, e aveva ragione
+quattro volte.** Neo ha costruito con un'altra sessione un corso tecnico
+(MCP, OAuth/PKCE, Docker, Python) che usa vps1777 come progetto reale di
+riferimento; dentro c'erano critiche puntuali all'architettura, su una
+fotografia di main al 14/08. Rivagliate una per una sul repo di oggi: alcune
+erano già state curate nel frattempo (images.lock, rotazione refresh, lock SDK
+— vere alla nascita, non più oggi), una non si applicava (il gateway instrada
+per path, non aggrega tool), e quattro erano ancora vere. Questa release le
+chiude, più una scoperta fatta verificandole.
+
+### 🔧 Corretto
+
+- **Healthcheck semantici su archive-mcp e nb1777-mcp**: `GET /health` che
+  prova il mestiere (registry dei DB / volume dati, mai NotebookLM), al posto
+  del TCP-connect che dichiarava sano un processo con la porta aperta e l'app
+  rotta — e su quel verde si appoggia il health-gate dell'updater. Il payload
+  espone `mcp_sdk` e `mcp_protocol_max`: «quale revisione MCP parli?» ora ha
+  una risposta osservabile, non dedotta dal lockfile.
+- **Il bearer si ferma al gateway**: `Authorization` non attraversa più il
+  proxy verso i backend (token passthrough: nessun backend lo legge, ma lo
+  riceveva). Scoperta collaterale del vaglio, non presente nel corso.
+- **L'audit `proxy_request` dice CHI e CON QUALE AGENTE**: `sub` e `client_id`
+  sulla riga della chiamata proxata (prima solo all'emissione del token).
+  Nota di classe del dato in SECURITY.md.
+- **tmpfs con `noexec,nosuid,size=64m`**: un rootfs read-only con una tmpfs
+  eseguibile è un caveau blindato con la cassaforte aperta. Misurato prima:
+  nessun servizio esegue da /tmp.
+- **Il log di avvio di nb1777-mcp dice il bind VERO**: stampava
+  `settings.nb1777_host` (default 0.0.0.0) mentre il server bindava l'env
+  `NB1777_HOST` (default 127.0.0.1) — due default per lo stesso fatto, e il log
+  mentiva. Trovato al banco del /health.
+
+### 📖 Dichiarato
+
+- **Audience restriction (RFC 8707): non implementata, per scelta** — la
+  critique del corso stesso la giudica difendibile nell'assetto attuale
+  (single-owner, rete internal, container blindati) «purché dichiarata». Ora lo
+  è: SECURITY.md §Postilla, con le due condizioni che riaprono la voce e la
+  contromisura a gradi. Rinominata la voce storica «Audience del proxy
+  verificata» (v0.25.0), che prometteva più di ciò che il codice fa: è un
+  legame al proprietario (`sub`), non un confronto d'audience.
+
 ## [0.44.6] — 2026-09-03
 
 **Il primo giro del rebuild mensile, e la cura che rende inutile il prossimo.**

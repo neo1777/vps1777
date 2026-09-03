@@ -178,7 +178,7 @@ def _pulisci():
 def test_lista_vuota_rifiuta_anche_un_token_valido():
     """Il fail-open curato: `verify` riesce, il token è buono, e prima passava."""
     _SETTINGS.oauth_allowed_emails = []
-    ok, err = proxy._check_bearer(_Req("Bearer tok-valido"))
+    ok, err, _ = proxy._check_bearer(_Req("Bearer tok-valido"))
     assert ok is False
     assert err == "owner_not_configured"
 
@@ -189,10 +189,10 @@ def test_il_motivo_e_DISTINTO_da_subject_not_allowed():
     Se collassassero in una stringa sola, chi legge il log non saprebbe se manca
     l'owner o se qualcuno sta bussando."""
     _SETTINGS.oauth_allowed_emails = []
-    _, err_vuota = proxy._check_bearer(_Req("Bearer t"))
+    _, err_vuota, _ = proxy._check_bearer(_Req("Bearer t"))
     _SETTINGS.oauth_allowed_emails = ["neo@example.invalid"]
     _CLAIMS["sub"] = "altro@example.invalid"
-    _, err_estraneo = proxy._check_bearer(_Req("Bearer t"))
+    _, err_estraneo, _ = proxy._check_bearer(_Req("Bearer t"))
     assert err_vuota != err_estraneo
     assert (err_vuota, err_estraneo) == ("owner_not_configured", "subject_not_allowed")
 
@@ -222,8 +222,8 @@ def test_la_lista_di_stringhe_vuote_NON_E_PRODUCIBILE_dalla_config():
 def test_lista_vuota_in_qualunque_forma_vuota_rifiuta():
     """La forma che la config produce davvero."""
     _SETTINGS.oauth_allowed_emails = []
-    ok, err = proxy._check_bearer(_Req("Bearer t"))
-    assert (ok, err) == (False, "owner_not_configured")
+    ok, err, claims = proxy._check_bearer(_Req("Bearer t"))
+    assert (ok, err, claims) == (False, "owner_not_configured", None)
 
 
 # ───────────── polarità: ciò che deve continuare a passare ─────────────
@@ -233,13 +233,13 @@ def test_owner_configurato_e_token_suo_passa():
     finisce per disattivarla."""
     _SETTINGS.oauth_allowed_emails = ["Neo@Example.invalid"]
     _CLAIMS["sub"] = "neo@example.invalid"
-    assert proxy._check_bearer(_Req("Bearer t")) == (True, None)
+    assert proxy._check_bearer(_Req("Bearer t")) == (True, None, _CLAIMS)
 
 
 def test_il_confronto_e_insensibile_al_MAIUSCOLO():
     _SETTINGS.oauth_allowed_emails = ["neo@example.invalid"]
     _CLAIMS["sub"] = "NEO@EXAMPLE.INVALID"
-    assert proxy._check_bearer(_Req("Bearer t")) == (True, None)
+    assert proxy._check_bearer(_Req("Bearer t")) == (True, None, _CLAIMS)
 
 
 def test_oauth_non_richiesto_passa_senza_guardare_niente():
@@ -247,20 +247,20 @@ def test_oauth_non_richiesto_passa_senza_guardare_niente():
     la guardia sopra questa uscita, o romperebbe le istanze che non usano OAuth."""
     _SETTINGS.oauth_required = False
     _SETTINGS.oauth_allowed_emails = []
-    assert proxy._check_bearer(_Req(None)) == (True, None)
+    assert proxy._check_bearer(_Req(None)) == (True, None, None)
 
 
 # ───────────── gli altri rami, che nessuno copriva ─────────────
 
 def test_senza_header_authorization():
-    ok, err = proxy._check_bearer(_Req(None))
-    assert (ok, err) == (False, "missing_bearer")
+    ok, err, claims = proxy._check_bearer(_Req(None))
+    assert (ok, err, claims) == (False, "missing_bearer", None)
 
 
 @pytest.mark.parametrize("header", ["", "Basic abc", "Token abc", "bearer", "Bearerabc"])
 def test_schema_sbagliato_o_malformato(header):
-    ok, err = proxy._check_bearer(_Req(header))
-    assert (ok, err) == (False, "missing_bearer"), header
+    ok, err, claims = proxy._check_bearer(_Req(header))
+    assert (ok, err, claims) == (False, "missing_bearer", None), header
 
 
 def test_bearer_minuscolo_e_accettato():
@@ -268,15 +268,15 @@ def test_bearer_minuscolo_e_accettato():
     lo copre — e questo test lo presidia, così non torna indietro."""
     _SETTINGS.oauth_allowed_emails = ["neo@example.invalid"]
     _CLAIMS["sub"] = "neo@example.invalid"
-    assert proxy._check_bearer(_Req("bearer t")) == (True, None)
+    assert proxy._check_bearer(_Req("bearer t")) == (True, None, _CLAIMS)
 
 
 def test_token_non_verificabile_riporta_il_motivo():
     global _ERRORE_VERIFY
     _ERRORE_VERIFY = _JWTError("scaduto")
     _SETTINGS.oauth_allowed_emails = ["neo@example.invalid"]
-    ok, err = proxy._check_bearer(_Req("Bearer t"))
-    assert ok is False and "scaduto" in str(err)
+    ok, err, claims = proxy._check_bearer(_Req("Bearer t"))
+    assert ok is False and "scaduto" in str(err) and claims is None
 
 
 def test_claims_senza_sub_non_passano():
@@ -285,5 +285,106 @@ def test_claims_senza_sub_non_passano():
     sulle stringhe vuote."""
     _SETTINGS.oauth_allowed_emails = ["neo@example.invalid"]
     _CLAIMS.pop("sub", None)
-    ok, err = proxy._check_bearer(_Req("Bearer t"))
-    assert (ok, err) == (False, "subject_not_allowed")
+    ok, err, claims = proxy._check_bearer(_Req("Bearer t"))
+    assert (ok, err, claims) == (False, "subject_not_allowed", None)
+
+
+# ───────────── vaglio corso1777 (03/09): i claim escono, e servono all'audit ─────────────
+
+def test_i_claims_escono_per_l_audit():
+    """Il terzo valore è il motivo del cambio di contratto: l'audit della chiamata
+    proxata deve poter dire CHI (sub) e CON QUALE AGENTE (client_id = aud).
+    Prima `_check_bearer` li verificava e li BUTTAVA."""
+    _SETTINGS.oauth_allowed_emails = ["neo@example.invalid"]
+    _CLAIMS.update({"sub": "neo@example.invalid", "aud": "client-abc"})
+    ok, _, claims = proxy._check_bearer(_Req("Bearer t"))
+    assert ok and claims["sub"] == "neo@example.invalid" and claims["aud"] == "client-abc"
+
+
+class _FakeUpstreamResp:
+    status_code = 200
+    headers: dict = {"content-type": "application/json"}
+
+    async def aiter_raw(self):  # pragma: no cover — mai consumato nel test
+        yield b""
+
+    async def aclose(self):  # pragma: no cover
+        pass
+
+
+class _FakeAsyncClient:
+    """Cattura la richiesta che il proxy COSTRUISCE verso l'upstream."""
+    catturate: list = []
+
+    def __init__(self, **kw):
+        pass
+
+    def build_request(self, method, target, headers=None, content=None):
+        _FakeAsyncClient.catturate.append(
+            {"method": method, "target": target, "headers": dict(headers or {})})
+        return object()
+
+    async def send(self, req, stream=True):
+        return _FakeUpstreamResp()
+
+    async def aclose(self):  # pragma: no cover
+        pass
+
+
+class _FakeHttpx:
+    AsyncClient = _FakeAsyncClient
+    RequestError = type("RequestError", (Exception,), {})
+
+    @staticmethod
+    def Timeout(*a, **k):
+        return None
+
+
+class _FullReq:
+    """Il minimo che proxy() usa di una Request."""
+    method = "POST"
+
+    def __init__(self, authorization: str):
+        self.path_params = {"secret": "s3gr3t0", "service": "archive", "path": "mcp"}
+        self.headers = {"authorization": authorization, "x-cliente": "resta"}
+        self.url = types.SimpleNamespace(query="")
+
+    async def body(self):
+        return b"{}"
+
+
+def test_il_bearer_si_ferma_al_gateway_e_l_audit_dice_chi():
+    """Le DUE cure del vaglio, misurate insieme sul forward vero:
+    ① `authorization` NON attraversa il proxy (token passthrough: il backend non
+       lo usa, e un token che viaggia dove non serve è superficie in più);
+    ② la riga d'audit `proxy_request` porta sub e client_id (prima: solo
+       event/service/method/status — dall'accesso sospetto risalivi all'utente,
+       non all'agente)."""
+    import asyncio
+
+    _SETTINGS.oauth_required = True
+    _SETTINGS.oauth_allowed_emails = ["neo@example.invalid"]
+    _SETTINGS.effective_gateway_secret = "s3gr3t0"
+    _SETTINGS.gateway_upstreams = {"archive": "archive-mcp:8002"}
+    _CLAIMS.update({"sub": "neo@example.invalid", "aud": "client-abc"})
+    _FakeAsyncClient.catturate.clear()
+    AUDIT.clear()
+
+    httpx_vero = proxy.httpx
+    proxy.httpx = _FakeHttpx
+    try:
+        asyncio.run(proxy.proxy(_FullReq("Bearer t")))
+    finally:
+        proxy.httpx = httpx_vero
+
+    [inoltrata] = _FakeAsyncClient.catturate
+    assert "authorization" not in {k.lower() for k in inoltrata["headers"]}, \
+        "il bearer del client è arrivato al backend: token passthrough"
+    assert inoltrata["headers"].get("x-cliente") == "resta", \
+        "lo strip ha mangiato anche header legittimi"
+    assert inoltrata["headers"].get("host") == "archive-mcp:8002"
+
+    [riga] = [r for r in AUDIT if r.get("event") == "proxy_request"]
+    assert riga["sub"] == "neo@example.invalid"
+    assert riga["client_id"] == "client-abc"
+    assert riga["status"] == 200

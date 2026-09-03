@@ -132,10 +132,26 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   di lasciar passare chiunque apra il bot. `is_owner` ritorna `False` se l'owner
   non è configurato; il bot applica `owner_only` allo stesso modo; warning
   esplicito all'avvio se manca.
-- **Audience del proxy verificata** (`v0.25.0`). Un access token valido non
-  basta: il suo `sub` deve essere fra le email ammesse (`OAUTH_ALLOWED_EMAILS`),
+- **Token del proxy legato al proprietario** (`v0.25.0`; rinominata nel vaglio
+  del 03/09/2026 — prima questa voce diceva «audience verificata», che
+  prometteva più di ciò che il codice fa). Un access token valido non basta: il
+  suo `sub` deve essere fra le email ammesse (`OAUTH_ALLOWED_EMAILS`),
   altrimenti il proxy MCP rifiuta. Un token emesso per un altro soggetto non
-  raggiunge gli upstream.
+  raggiunge gli upstream. L'**audience nel senso di RFC 8707** (aud = singolo
+  resource server, confrontata a ogni chiamata) invece **non è implementata, di
+  proposito**: la scelta e le sue condizioni sono dichiarate in
+  [§Postilla](#postilla--lhardening-che-faremo-al-100-più-avanti).
+- **Audit della chiamata proxata con `sub` e `client_id`** (`v0.45.0`, dal
+  vaglio corso1777). Ogni riga `proxy_request` ora dice CHI (l'utente, `sub`) e
+  CON QUALE AGENTE (`client_id`, l'identità DCR del client): da un accesso
+  sospetto si risale all'agente, non solo all'utente. Nota di classe del dato:
+  un identificativo di persona entra in un log che prima non ne aveva — la
+  retention resta quella dell'audit (`AUDIT_RETENTION_DAYS`, default 90 giorni)
+  e il log vive nel volume dati, dentro il backup cifrato.
+- **Il bearer si ferma al gateway** (`v0.45.0`, dal vaglio corso1777). Prima
+  l'header `Authorization` del client attraversava il proxy fino al backend —
+  che non lo legge, ma lo riceveva (token passthrough). Ora viene rimosso dopo
+  la verifica: un token non viaggia dove non serve.
 - **Rate-limit sugli endpoint auth pubblici** (`v0.25.0`). Finestra scorrevole
   per-IP (in-memory, stdlib): `/register` 10/5min, `/token` 60/min, `/app/auth`
   20/5min — sopra al lockout del login admin. Ferma la raffica da singola sorgente.
@@ -822,6 +838,21 @@ questa fase i rilasci sono frequenti e aggiungerebbero attrito:
   farlo vivere anche nel file compose (override generato all'`up`) chiuderebbe il caso di
   un `docker compose pull` lanciato a mano fuori dalla CLI. Tocca il percorso di update,
   quindi lo faremo con un momento dedicato.
+- **Audience restriction (RFC 8707) non implementata — scelta dichiarata**
+  (vaglio corso1777, 03/09/2026). Oggi l'`aud` dei nostri access token è il
+  `client_id` del client DCR, il proxy verifica il bearer **senza** confrontare
+  l'audience, e i server MCP dietro il gateway non validano il token in proprio:
+  un token buono per un servizio è buono per l'altro. È difendibile **in questo
+  assetto**: installazione single-owner (il token è legato al `sub`
+  dell'owner), backend su rete Docker `internal` non raggiungibile da fuori,
+  container non-root con `cap_drop ALL` e rootfs read-only, path-secret sul
+  gateway. Le condizioni che riaprono la voce sono due, e vanno prese sul
+  serio: **più utenti/tenant** sullo stesso gateway, o **un backend esposto
+  senza il gateway davanti**. La contromisura è nota e piccola per gradi:
+  prima `expected_aud` fisso del gateway nel `verify()` del proxy, poi — se
+  serve davvero — `resource` (RFC 8707) e un token per servizio, con il
+  costo dichiarato (più giri al token endpoint, e il token exchange RFC 8693
+  se un backend dovrà chiamare l'altro).
 
 ## Out of scope
 

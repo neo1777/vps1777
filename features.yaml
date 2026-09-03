@@ -1399,3 +1399,36 @@ features:
     since: "0.44.2"
     verify:
       file_contains: {path: ".github/workflows/trivy.yml", pattern: "ignore-unfixed: true"}
+
+  - id: obs.health-mcp-semantico
+    nome: "Healthcheck semantici sui server MCP + revisione MCP osservabile"
+    cosa: "archive-mcp e nb1777-mcp espongono GET /health e il compose li interroga
+           lì (fino a 0.44.6 la sonda era un TCP-connect: porta aperta = sano anche
+           con l'app rotta — e su quel verde si appoggia il health-gate dell'updater).
+           La sonda prova il mestiere (registry dei DB / volume dati), mai NotebookLM,
+           ed espone mcp_sdk e mcp_protocol_max: la revisione MCP parlata è un fatto
+           osservabile, non una deduzione dal lockfile. Dal vaglio corso1777 (03/09):
+           fotografia del corso su main@14/08, claim verificati sul repo del giorno."
+    dove: ["services/archive-mcp/app/server.py", "services/nb1777-mcp/app/server.py",
+           "compose.yaml", "docs/ARCHITECTURE.md#Healthcheck"]
+    status: active-default
+    since: "0.45.0"
+    verify:
+      file_contains: {path: "compose.yaml", pattern: "127.0.0.1:8002/health"}
+
+  - id: sec.igiene-proxy-bearer-e-audit
+    nome: "Il bearer si ferma al gateway; l'audit dice chi e con quale agente"
+    cosa: "Due cure dal vaglio corso1777 (03/09): l'header Authorization non attraversa
+           più il proxy verso i backend (era token passthrough: nessun backend lo
+           legge, ma lo riceveva), e la riga d'audit proxy_request porta sub e
+           client_id — prima loggava solo event/service/method/status e da un accesso
+           sospetto si risaliva all'utente, non all'agente. tmpfs del compose con
+           noexec,nosuid,size (un rootfs read-only con tmpfs eseguibile è un caveau
+           blindato con la cassaforte aperta). L'audience RFC 8707 resta NON
+           implementata per scelta dichiarata: condizioni e contromisura in
+           SECURITY.md §Postilla."
+    dove: ["services/gateway/app/proxy.py", "compose.yaml", "SECURITY.md#Postilla"]
+    status: active-default
+    since: "0.45.0"
+    verify:
+      file_contains: {path: "services/gateway/app/proxy.py", pattern: 'headers\.pop\("authorization"'}

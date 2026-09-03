@@ -596,3 +596,34 @@ async def internal_canonico_ack(request: "Request") -> "JSONResponse":
 if __name__ == "__main__":
     print(f"[nb1777-mcp] {TRANSPORT} on {HOST}:{PORT}")
     mcp.run(transport=TRANSPORT)
+
+
+# ── /health — la sonda che il compose interroga (vaglio corso1777, 03/09) ────────
+# Come per archive-mcp: il check TCP-only faceva passare per sano un processo
+# con la porta aperta e l'app rotta, e su quel verde si appoggia il HEALTH-GATE
+# dell'updater. Qui la sonda prova settings + volume dati (nlm_home leggibile) —
+# MAI una chiamata a NotebookLM: un health che dipende da un servizio esterno
+# riavvia il container per i guasti degli altri. Espone anche la revisione MCP
+# massima dell'SDK spedito nell'immagine (osservabile, non dedotta dal lock).
+@mcp.custom_route("/health", methods=["GET"])
+async def health(_request: "Request") -> "JSONResponse":
+    import importlib.metadata
+    from pathlib import Path
+
+    try:
+        home = Path(get_settings().nlm_home)
+        home_ok = home.is_dir()
+    except Exception as exc:  # noqa: BLE001 — QUALUNQUE guasto = non healthy
+        return JSONResponse({"status": "error", "reason": str(exc)[:200]}, status_code=503)
+    if not home_ok:
+        return JSONResponse({"status": "error", "reason": "nlm_home assente"}, status_code=503)
+    try:
+        from mcp.types import LATEST_PROTOCOL_VERSION
+        sdk = importlib.metadata.version("mcp")
+    except Exception:  # noqa: BLE001 — la versione è informativa, non gate
+        sdk, LATEST_PROTOCOL_VERSION = None, None
+    return JSONResponse({
+        "status": "ok",
+        "mcp_sdk": sdk,
+        "mcp_protocol_max": LATEST_PROTOCOL_VERSION,
+    })

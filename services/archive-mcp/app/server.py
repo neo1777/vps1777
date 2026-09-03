@@ -247,3 +247,34 @@ def set_description(db_name: str, description: str) -> dict[str, Any]:
     quando la scheda è vuota/stale. È l'unica scrittura ammessa via MCP: tocca
     solo la scheda, mai i messaggi."""
     return db.set_description(db_name, description)
+
+
+# ── /health — la sonda che il compose interroga (vaglio corso1777, 03/09) ────────
+# Prima il healthcheck apriva un socket TCP e lo richiudeva: un processo con la
+# porta aperta e l'app rotta risultava «healthy», e su quel verde si appoggia il
+# HEALTH-GATE dell'updater. La sonda giusta prova il MESTIERE del servizio
+# (settings + volume + registry dei DB), senza costare una ricerca vera.
+# Espone anche quale revisione MCP sa parlare l'SDK spedito nell'immagine:
+# «quale revisione parla il tuo gateway?» deve avere una risposta osservabile,
+# non una deduzione dal lockfile.
+@mcp.custom_route("/health", methods=["GET"])
+async def health(_request):  # noqa: ANN001, ANN202 — firma imposta da custom_route
+    import importlib.metadata
+
+    from starlette.responses import JSONResponse
+
+    try:
+        n_dbs = len(db.available_dbs())
+    except Exception as exc:  # noqa: BLE001 — QUALUNQUE guasto = non healthy
+        return JSONResponse({"status": "error", "reason": str(exc)[:200]}, status_code=503)
+    try:
+        from mcp.types import LATEST_PROTOCOL_VERSION
+        sdk = importlib.metadata.version("mcp")
+    except Exception:  # noqa: BLE001 — la versione è informativa, non gate
+        sdk, LATEST_PROTOCOL_VERSION = None, None
+    return JSONResponse({
+        "status": "ok",
+        "dbs": n_dbs,
+        "mcp_sdk": sdk,
+        "mcp_protocol_max": LATEST_PROTOCOL_VERSION,
+    })

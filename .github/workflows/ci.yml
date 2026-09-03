@@ -469,6 +469,14 @@ jobs:
         run: uv run --with pytest pytest tests_runtime/ -v
       - name: Test archive-mcp FTS (stdlib-only)
         run: uvx pytest services/archive-mcp/tests/ -v
+      # /health importa l'SDK mcp: nello step stdlib-only qui sopra SALTA (importorskip
+      # dichiarato nel test). Questo step lo fa girare con le deps del lock — senza,
+      # il presidio del healthcheck semantico non girerebbe MAI in CI (vaglio 03/09).
+      - name: Test archive-mcp /health (deps del lock)
+        working-directory: services/archive-mcp
+        run: |
+          uv sync --frozen
+          uv run --with pytest pytest tests/test_health.py -v
       # La CLI è il componente che fa gli update in PRODUZIONE, ed era l'unico con
       # una suite che nessuno lanciava: 10 test verdi che non hanno mai protetto
       # niente. Trovato il 20/07 scrivendo i test del pre-flight — cioè stavo per

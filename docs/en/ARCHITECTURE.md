@@ -113,7 +113,7 @@ Every service has a compose healthcheck (also used by the update's health-gate):
 | Service | Probe |
 |---|---|
 | gateway | `/health` → minimal public body `{"ok":true}`. With `?deep=1` it TCP-probes the MCP upstreams (503 if down), but this is **reserved for internal callers**: from outside it answers 403 (H33). The updater calls it via `compose exec` *inside* the gateway, hence from loopback. |
-| archive-mcp / nb1777-mcp | TCP on the MCP port |
+| archive-mcp / nb1777-mcp | HTTP `GET /health` (since `v0.45.0`; previously a TCP-connect, which declared healthy a process with the port open and the app broken). The probe exercises the service's actual job — the DB registry for archive, the data volume for nb1777 — never NotebookLM; it also exposes `mcp_sdk` and `mcp_protocol_max`, so "which MCP revision does your gateway speak?" has an observable answer. |
 | ocr | internal HTTP `GET /health` |
 | nb1777-bot | long-poll, no port: heartbeat file `/tmp/nb1777-bot.heartbeat` (unhealthy if mtime > 90s) |
 

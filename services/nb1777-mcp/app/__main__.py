@@ -4,6 +4,7 @@ import logging
 import sys
 
 from . import auth
+from . import server
 from .server import mcp
 from .settings import get_settings
 
@@ -17,7 +18,11 @@ def main() -> None:
     )
     log = logging.getLogger("nb1777-mcp")
     log.info("vps1777-nb1777-mcp starting")
-    log.info("listen=%s:%s transport=%s", s.nb1777_host, s.nb1777_port, s.nb1777_transport)
+    # Il bind VERO è quello del costruttore FastMCP (server.HOST/PORT, da env
+    # NB1777_HOST/NB1777_PORT): loggare settings.nb1777_host qui stampava
+    # 0.0.0.0 mentre il server bindava 127.0.0.1 — due default diversi per lo
+    # stesso fatto, e il log mentiva (misurato al banco /health, 03/09).
+    log.info("listen=%s:%s transport=%s", server.HOST, server.PORT, s.nb1777_transport)
 
     # Setup HOME per nlm (cerca auth.json in ~/.notebooklm-mcp-cli/)
     auth.ensure_nlm_home_in_env()
