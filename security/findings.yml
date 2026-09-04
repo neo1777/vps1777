@@ -1514,7 +1514,7 @@ findings:
     title: "Le garanzie di hardening sono certificate per STRINGA, non per comportamento: il gate cerca il testo nel file, non chiede al sistema che cosa applica"
     status: partial
     resta_aperto: >
-      Certificare per STRINGA un COMPORTAMENTO: 47 voci su 63 non dichiarano `natura`, e senza quella la regola non le raggiunge. (Il pezzo sui DOCUMENTI è applicato dal 01/08: `check_documento_non_solo_assenza`.)
+      Certificare per STRINGA un COMPORTAMENTO: le voci senza `natura` restano fuori portata della regola — quante sono OGGI lo dice solo il contatore ◍ del guardiano, a ogni giro (alla scrittura, 01/08, erano 47 su 63; un numero cablato qui è marcito una volta ed è stato riscritto così il 04/09). (Il pezzo sui DOCUMENTI è applicato dal 01/08: `check_documento_non_solo_assenza`.)
     rilievo_esterno:
       fonte: "analisi esterna del round-7 (audio 59332893)"
       difetto: vero
