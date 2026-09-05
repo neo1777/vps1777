@@ -2,6 +2,49 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.46.0] — 2026-09-05
+
+**Il collaudo da-utente: quattro agenti hanno usato il sistema come utenti, non
+come sviluppatori — e hanno trovato quello che gli sviluppatori non vedono.**
+Otto rilievi aperti come issue (#268-#275), sette curati qui; la fonte è nuova
+e ha guadagnato il suo posto nell'enumerazione del registro (settima fonte).
+
+### Corretto
+- **La derivazione di `speaker` girava solo nella migrazione** (`H71`, #271):
+  un DB nato già v3 non migra mai, quindi le righe nuove restavano con
+  `speaker=''` e il filtro rispondeva 0 SENZA errore (misurato in produzione:
+  6.606+6.630 righe mute su claude-ai-290826, mentre il DB migrato dalla v2 era
+  popolato al 100%). Ora `popola_speaker` gira dopo il write, accanto a
+  `popola_voice`; test controprovato mordace (rosso senza la chiamata). Il
+  rollout include la derivazione una-tantum sui DB fermi in produzione.
+- **`get_context`/`get_conversation` con `max_chars`** (#268): sui messaggi-hub
+  giganti il payload pieno uccideva la connessione MCP proprio dove il contesto
+  serve di più (2/2 cadute misurate). Il troncamento è per-riga e dichiarato
+  nel testo stesso.
+- **`archive_stats` memoizzata per snapshot** (#269): stesso patto di
+  `describe_databases` (74,6s a freddo, misurati il 28/08) — la scansione si
+  paga una volta per versione del file, e il costo è dichiarato in docstring.
+- **La terza ricerca concorrente aspetta invece di morire** (#270): semaforo a
+  2 sul livello dati (un batch da 4 `search` affossava le richieste in coda),
+  limite dichiarato nelle docstring.
+- **Dedup cross-DB per uuid con `anche_in`** (#272): lo stesso messaggio nei DB
+  di riscontro v1/v2 consumava metà del limit in fotocopie; ora arriva una
+  volta e dice dove altro vive. Nessuna informazione buttata.
+- **`list_databases(schede=true)`** (#274): la scelta del DB è il primo bivio
+  di ogni ricerca e si faceva alla cieca fra 17 sigle — ora ogni voce può
+  portare la sua carta d'identità (righe, intervallo, descrizione), memoizzata.
+- **`notebook_query` in proiezione compatta e col non-citato dichiarato**
+  (#275, nb1777): le `references` portano anteprime (il testo integrale con
+  `verbose=true` — stesso patto del fix #42 sugli studio, dopo una risposta da
+  78k char); i paragrafi dell'answer SENZA marcatori `[n]` vengono contati e
+  anteprimati in `senza_citazioni` con una `nota` esplicita — generazione del
+  modello, non lettura delle fonti. Non si amputa niente: si dichiara.
+
+### Rimandato con motivazione
+- **#273** (le fixture di test inquinano `sort=newest`) resta aperta: marcare
+  il contenuto-codice richiede euristiche da tarare con un golden-set — è
+  territorio della Fase 2 del voice-tagging, non un fix da infilare in coda.
+
 ## [0.45.0] — 2026-09-03
 
 **Il vaglio corso1777: un corso di studio ha auditato vps1777, e aveva ragione

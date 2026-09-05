@@ -281,10 +281,17 @@ async def source_rename(notebook_id: str, source_id: str, new_title: str) -> str
 @mcp.tool()
 async def notebook_query(notebook_id: str, question: str,
                          source_ids: Optional[list[str]] = None,
-                         conversation_id: Optional[str] = None) -> dict:
-    """Pone una domanda alla chat del notebook. Ritorna {answer, citations, ...}."""
+                         conversation_id: Optional[str] = None,
+                         verbose: bool = False) -> dict:
+    """Pone una domanda alla chat del notebook. Ritorna {answer, references,
+    sources_used} in PROIEZIONE COMPATTA (#275): le references portano
+    un'anteprima, il testo citato integrale arriva con verbose=True.
+    Se l'answer contiene paragrafi SENZA marcatori [n], la risposta porta
+    `senza_citazioni` (conteggio + anteprime) e una `nota`: quei paragrafi
+    sono generati dal modello, non letti dalle fonti — ipotesi, non fatti."""
     return await _aio(core.notebook_query, notebook_id, question,
-                      source_ids=source_ids, conversation_id=conversation_id)
+                      source_ids=source_ids, conversation_id=conversation_id,
+                      verbose=verbose)
 
 
 # ============================================================

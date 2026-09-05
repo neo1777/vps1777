@@ -127,6 +127,11 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
 
     Ritorna righe {db, uuid, project, ts, rank, snippet, snapshot}. `snapshot` è
     la data dell'ultima modifica del DB: quanto è fresco ciò che leggi.
+    Sulla ricerca in TUTTI i DB lo stesso uuid presente in più archivi (bundle e
+    riscontri v1/v2) arriva UNA volta, col campo `anche_in` che elenca gli altri
+    DB: il limit non si spreca più in fotocopie (#272).
+    ⚠️ CONCORRENZA: il server serve 2 ricerche alla volta; le altre si mettono
+    in coda da sole (#270). Raggruppa le chiamate a coppie, non a quartetti.
     """
     return db.search(query, db_name, limit, raw=raw, sort=sort, since=since,
                      until=until, project=project, speaker=speaker, voice=voice,
@@ -167,27 +172,35 @@ def check_term(term: str, db_name: str = "") -> dict[str, Any]:
 
 @mcp.tool()
 def get_context(uuid: str, db_name: str = "", before: int = 3,
-                after: int = 3) -> list[dict[str, Any]]:
+                after: int = 3, max_chars: int = 0) -> list[dict[str, Any]]:
     """Restituisce i messaggi ATTORNO a un risultato (col contenuto pieno, non
     lo snippet troncato). Dai a `uuid` uno dei valori tornati da search; `before`
     e `after` sono quanti messaggi prendere prima e dopo. Se il messaggio è in un
     thread (`parent_uuid`), i vicini vengono dallo STESSO thread; sulle fonti senza
     arco (documenti chunked, db storici) è l'adiacenza temporale nello stesso
     archivio. Per la chat INTERA usa `get_conversation`.
+    `max_chars` (0 = intero) tronca OGNI riga a quel numero di caratteri, col
+    troncamento dichiarato nel testo: sui messaggi-hub giganti (workfile/board
+    incollati) il payload pieno uccideva la connessione proprio dove il contesto
+    serve di più (#268) — parti con max_chars=2000 e allarga solo se serve.
     Ogni riga: {db, uuid, project, ts, content, is_match, snapshot}."""
-    return db.get_context(uuid, db_name, before=before, after=after)
+    return db.get_context(uuid, db_name, before=before, after=after,
+                          max_chars=max_chars)
 
 
 @mcp.tool()
-def get_conversation(uuid: str, db_name: str = "", limit: int = 200) -> list[dict[str, Any]]:
+def get_conversation(uuid: str, db_name: str = "", limit: int = 200,
+                     max_chars: int = 0) -> list[dict[str, Any]]:
     """Il thread di conversazione INTERO che contiene `uuid` — camminando l'albero
     `parent_uuid` (antenati + discendenti), col contenuto pieno e in ordine. Per
     LEGGERE una chat dall'inizio alla fine, non solo la finestra ±N di get_context.
 
     Dove l'albero manca — documenti chunked (pdf/telegram/memory) e db storici —
     ricade sull'ordine lineare dello stesso archivio. Ogni riga:
-    {db, uuid, project, ts, content, sender, is_match, snapshot}."""
-    return db.get_conversation(uuid, db_name, limit=limit)
+    {db, uuid, project, ts, content, sender, is_match, snapshot}.
+    `max_chars` come in get_context (#268): su 200 righe piene è la differenza
+    fra una risposta e una connessione morta."""
+    return db.get_conversation(uuid, db_name, limit=limit, max_chars=max_chars)
 
 
 @mcp.tool()
@@ -202,14 +215,23 @@ def list_projects(db_name: str = "", top: int = 1000) -> list[dict[str, Any]]:
 def archive_stats(db_name: str = "") -> list[dict[str, Any]]:
     """Istogramma temporale per ANNO: quanti messaggi per anno in ogni archivio —
     «quando» l'archivio è fitto, da sapere PRIMA di cercare. Ogni riga:
-    {period, rows, db}."""
+    {period, rows, db}.
+    COSTO: la prima chiamata su un DB scandisce tutto il DB (su installazioni
+    grandi può richiedere decine di secondi); le successive sono memoizzate per
+    snapshot e costano zero finché il file non cambia (#269)."""
     return db.archive_stats(db_name)
 
 
 @mcp.tool()
-def list_databases() -> list[str]:
-    """Elenca i nomi dei DB caricati. Per la scheda (righe, date, freschezza)
-    usa describe_databases()."""
+def list_databases(schede: bool = False) -> list[Any]:
+    """Elenca i nomi dei DB caricati. La scelta del DB è il PRIMO bivio di ogni
+    ricerca: con `schede=True` ogni voce arriva con la sua carta d'identità
+    ({name, rows, oldest, newest, description}) invece del solo nome (#274) —
+    è la stessa scheda di describe_databases, memoizzata, quindi costa poco.
+    Default: lista di soli nomi (compatibilità con chi la usa da prima)."""
+    if schede:
+        return [{k: d.get(k) for k in ("name", "rows", "oldest", "newest", "description")}
+                for d in db.describe()]
     return db.available_dbs()
 
 

@@ -3373,3 +3373,57 @@ findings:
         output: "«aggiornamento disponibile: 0.43.1 → 0.43.2» — il check host era sano; il dato che la card nascondeva era questo"
         exit: 0
         quando: "2026-08-27"
+
+  - id: H71
+    severity: medium
+    title: "La derivazione di `speaker` girava solo nella MIGRAZIONE: un DB nato già v3 restava con speaker vuoto, e il filtro rispondeva 0 senza errore"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-09-05"
+      come: misura
+      nota: >
+        Collaudo DA UTENTE (agenti che usano il sistema come utenti, non come
+        sviluppatori): una ricerca con speaker=human su claude-ai-290826 dava 0
+        su un termine che senza filtro contava 194. La misura sul DB in
+        produzione: 6.606 righe sender='human' e 6.630 sender='assistant' con
+        speaker='' — mentre claude-ai-160726, migrato dalla v2, era popolato al
+        100%. Il percorso di MIGRAZIONE curava; il percorso di NASCITA no.
+    since: unreleased
+    why: >
+      `popola_speaker` era agganciata a `_ensure_v3` (la migrazione): un DB nato
+      già con lo schema v3 non migra mai, quindi le righe nuove restavano con
+      speaker='' e ogni filtro speaker rispondeva su un sottoinsieme muto. È uno
+      zero plausibile: nessun errore, «non c'è», e chi non fa la controprova col
+      count porta a casa un falso negativo — sulla domanda «chi ha detto cosa»,
+      che è quella per cui le colonne voice/speaker esistono (AN-11).
+      La classe è la gemella di «la cura sul dato non sopravvive», al contrario:
+      la cura viveva nel percorso VECCHIO e mancava in quello NUOVO.
+    evidence:
+      - file: services/gateway/app/archive_indexer.py
+        ricevute:
+          - "E `speaker` VA DERIVATO QUI, non solo in `_ensure_v3`"
+      - file: services/gateway/tests/test_archive_indexer.py
+        contains:
+          - "def test_speaker_derivato_anche_su_db_nato_v3("
+    fix: >
+      `popola_speaker(conn)` gira dopo il write, accanto a `popola_voice` —
+      idempotente (tocca solo speaker=''), quindi cura anche i DB esistenti al
+      loro prossimo ingest; per i DB fermi il rollout della 0.46.0 include la
+      derivazione una-tantum sul volume in produzione, con misura prima/dopo.
+    prova:
+      - comando: "uvx pytest services/gateway/tests/test_archive_indexer.py::test_speaker_derivato_anche_su_db_nato_v3 -q"
+        dove: "banco locale, col fix"
+        output: "1 passed"
+        exit: 0
+        quando: "2026-09-05"
+      - comando: "lo stesso test con la chiamata a popola_speaker temporaneamente rimossa (controprova mordace)"
+        dove: "banco locale, senza il fix"
+        output: "1 failed — sender='user' ha speaker='': la derivazione non è girata"
+        exit: 1
+        quando: "2026-09-05"
+      - comando: "SELECT sender, speaker, COUNT(*) FROM messages GROUP BY 1,2 su claude-ai-290826 (produzione, sola lettura)"
+        dove: "vps1777-archive-mcp-1, prima della cura"
+        output: "('human','',6606) · ('assistant','',6630) — il difetto misurato dove viveva"
+        exit: 0
+        quando: "2026-09-05"

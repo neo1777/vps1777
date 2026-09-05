@@ -100,16 +100,20 @@ dalla Mini App):
 
 | Tool | Cosa fa |
 |---|---|
-| `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}` |
+| `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}`. Sulla ricerca in **tutti** i DB lo stesso uuid arriva **una volta**, con `anche_in` per gli altri archivi che lo contengono (niente limit sprecato in fotocopie) |
 | `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings` |
 | `check_term(term, db_name)` | diagnostica se un termine con `+`/`#` (`C++`, `C#`, `g++`) è ricercabile o **collassa** sul prefisso — chiede all'indice, non alla doc |
-| `get_context(uuid, db_name, before, after)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; se il messaggio è in un thread, i vicini vengono dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale |
-| `get_conversation(uuid, db_name, limit)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N |
+| `get_context(uuid, db_name, before, after, max_chars)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; se il messaggio è in un thread, i vicini vengono dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale. `max_chars` (0 = intero) tronca ogni riga **dichiarandolo nel testo** — sui messaggi-hub giganti il payload pieno uccideva la connessione |
+| `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` come in `get_context` |
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
-| `archive_stats(db_name)` | istogramma dei messaggi per **anno** — *quando* l'archivio è fitto, da sapere prima di cercare |
-| `list_databases()` | i nomi dei DB caricati |
+| `archive_stats(db_name)` | istogramma dei messaggi per **anno** — *quando* l'archivio è fitto, da sapere prima di cercare. La **prima** chiamata su un DB scandisce tutto (decine di secondi su archivi grandi); le successive sono **memoizzate per snapshot** |
+| `list_databases(schede)` | i nomi dei DB caricati; con `schede=true` ogni voce porta la sua carta d'identità (righe, intervallo date, descrizione) — la scelta del DB è il primo bivio di ogni ricerca |
 | `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza), **description** |
 | `set_description(db_name, description)` | scrive/aggiorna la **descrizione** dell'archivio — l'**unica scrittura** ammessa via MCP (tocca la scheda, mai i messaggi) |
+
+> **Concorrenza.** Il server serve **2 ricerche alla volta**: le richieste in
+> più si mettono in coda da sole invece di morire in timeout. Chi orchestra più
+> chiamate le raggruppi a coppie.
 
 > **Fonti senza thread.** Sui documenti chunked (pdf/telegram/memory) e sui DB
 > storici `parent_uuid` è vuoto: lì `get_conversation` ripiega sull'ordine

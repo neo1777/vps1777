@@ -473,6 +473,13 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         # QUI e non in `_ensure_v3` perché questa legge il `content` di ogni riga — è il
         # costo di un ingest, non quello di ogni apertura di DB. Idempotente: al secondo
         # passaggio non trova più `voice=''` e scrive zero.
+        # ── E `speaker` VA DERIVATO QUI, non solo in `_ensure_v3` (issue #271,
+        # misurato il 05/09): un DB nato già v3 non migra mai, quindi la
+        # derivazione della migrazione non lo tocca — le righe nuove restavano
+        # con speaker='' e il filtro speaker=human rispondeva 0 SENZA errore su
+        # 13k righe che l'etichetta la meritavano (claude-ai-290826: 6.606
+        # sender='human' con speaker vuoto). Idempotente come popola_voice.
+        popola_speaker(conn)
         popola_voice(conn)
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
         conn.commit()

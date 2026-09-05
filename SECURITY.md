@@ -368,7 +368,7 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **70 voci** (2 critiche, 10 alte, 39 medie, 19 basse): 43 dalla
+Il registro conta **71 voci** (2 critiche, 10 alte, 40 medie, 19 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -379,14 +379,18 @@ quinta fonte aperta il 10/08: **rileggere le garanzie scritte in prosa in questi
 documenti e chiedersi chi le tiene**. Le prime due erano vere e senza alcun presidio;
 la terza era vera, presidiata, e il presidio non copriva tutte le forme
 dell'oggetto — che è l'esito meno visibile dei tre, perché somiglia a un verde.
-Una (`H69`) viene dal collaudo su macchina vergine del 27/08: il primo azzeramento
-vero ha esercitato per la prima volta un ramo (la consent OAuth col bottone) che
-stava in produzione da settimane senza che nessun client lo attraversasse.
+Due (`H69`, `H70`) vengono dal collaudo su macchina vergine del 27/08: il primo
+azzeramento vero ha esercitato per la prima volta rami che stavano in produzione
+da settimane senza che nessuno li attraversasse (la consent OAuth col bottone;
+il «Ricontrolla» che sovrascriveva un verdetto sano). E una (`H71`) inaugura la
+settima fonte, il **collaudo da-utente** del 05/09: agenti che usano il sistema
+come utenti, non come sviluppatori — il filtro «chi ha scritto» rispondeva zero,
+senza errore, su un archivio dove la risposta era 194.
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 59 |
+| **chiusi** | 60 |
 | **parziali** | 9 |
 | **accettati** | 2 |
 | **aperti** | 0 |

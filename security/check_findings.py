@@ -125,8 +125,15 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # un «0.43.1 → 0.43.2» fresco e valido. Il ramo nasce in v0.39.1 quando il gateway
 # aveva Internet; H50 ha reso il fallimento sistematico e la scrittura è rimasta:
 # la cura di un rilievo cambia il contratto di un ramo lontano che nessuno rilegge.
-EXPECTED_TOTAL = 70
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 39, "low": 19}
+# + 1 (H71 medium, 05/09) = 71. Settima fonte: il collaudo DA UTENTE — agenti che
+# usano il sistema come utenti, non come sviluppatori. Il filtro speaker=human
+# rispondeva 0 senza errore su un DB dove il termine contava 194: `popola_speaker`
+# girava solo nella MIGRAZIONE (_ensure_v3), mai dopo il write — un DB nato già
+# v3 non migra e restava con speaker='' (misurato: 6.606+6.630 righe). La classe
+# è «la cura sul dato non sopravvive» al contrario: la cura viveva nel percorso
+# vecchio e mancava in quello nuovo.
+EXPECTED_TOTAL = 71
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 40, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

@@ -138,6 +138,24 @@ def valori_anagrafici() -> set[str]:
     return valori
 
 
+# ── Il server regge DUE ricerche concorrenti, non quattro (misurato il 05/09,
+# issue #270: un batch da 4 `search` ha affossato entrambe le richieste in coda).
+# Il semaforo SERIALIZZA l'eccesso invece di lasciarlo morire in timeout: la
+# terza richiesta aspetta il suo turno, non fallisce. Il limite è dichiarato
+# anche nelle docstring dei tool, così chi orchestra sa perché conviene
+# raggruppare le chiamate a coppie.
+_RICERCHE = threading.BoundedSemaphore(2)
+
+
+def _serializzata(fn):
+    def dentro(*a, **k):
+        with _RICERCHE:
+            return fn(*a, **k)
+    dentro.__name__ = fn.__name__
+    dentro.__doc__ = fn.__doc__
+    return dentro
+
+
 def available_dbs() -> list[str]:
     _maybe_reload()
     return sorted(_DBS)
@@ -291,6 +309,7 @@ def integrita_archivi(db: str = "") -> dict[str, Any]:
     return {"per_db": out}
 
 
+@_serializzata
 def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
            sort: str = "rank", since: str = "", until: str = "",
            project: str = "", speaker: str = "", voice: str = "",
@@ -332,9 +351,28 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
         collected.sort(key=lambda r: r.get("ts") or "")
     else:
         collected.sort(key=lambda r: r.get("rank", 0.0))
+    if not db:
+        # ── Lo stesso uuid vive in più DB (bundle primario e riscontri v1/v2) e
+        # consumava il limit in fotocopie (issue #272, misurato il 05/09: metà
+        # dei risultati cross-DB erano duplicati). Si tiene la PRIMA occorrenza
+        # nell'ordinamento scelto; dove altro vive la riga resta visibile in
+        # `anche_in`. Non si decide QUI quale DB sia «primario»: decide
+        # l'ordinamento, e nessuna informazione viene buttata.
+        tenute: dict[str, dict[str, Any]] = {}
+        senza_doppi: list[dict[str, Any]] = []
+        for r in collected:
+            u = r.get("uuid") or ""
+            if u and u in tenute:
+                tenute[u].setdefault("anche_in", []).append(r["db"])
+                continue
+            if u:
+                tenute[u] = r
+            senza_doppi.append(r)
+        collected = senza_doppi
     return collected[:limit]
 
 
+@_serializzata
 def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
           until: str = "", project: str = "", speaker: str = "",
           voice: str = "") -> dict[str, Any]:
@@ -398,8 +436,23 @@ def check_term(term: str, db: str = "") -> dict[str, Any]:
     return {"term": term, "prefix": prefix or None, "per_db": per_db}
 
 
+def _tronca_righe(rows: list[dict[str, Any]], max_chars: int) -> list[dict[str, Any]]:
+    # ── issue #268: sui messaggi-hub (workfile incollati da centinaia di KB) il
+    # payload pieno uccideva la connessione MCP proprio dove il contesto serve
+    # di più. Il troncamento è PER RIGA e dichiarato nel testo stesso: chi legge
+    # sa che manca qualcosa e come chiedere la riga intera.
+    if max_chars and max_chars > 0:
+        for r in rows:
+            c = r.get("content") or ""
+            if len(c) > max_chars:
+                r["content"] = (c[:max_chars]
+                                + f" …‹troncato: {max_chars} di {len(c)} char — "
+                                  f"riga piena con max_chars=0›")
+    return rows
+
+
 def get_context(uuid: str, db: str = "", *, before: int = 3,
-                after: int = 3) -> list[dict[str, Any]]:
+                after: int = 3, max_chars: int = 0) -> list[dict[str, Any]]:
     """I messaggi attorno a uno `uuid` col contenuto PIENO — supera il
     troncamento dello snippet di search. Cerca nel DB indicato o in tutti."""
     _maybe_reload()
@@ -415,7 +468,7 @@ def get_context(uuid: str, db: str = "", *, before: int = 3,
                 for r in ctx:
                     r["db"] = name
                     r["snapshot"] = snap
-                return ctx
+                return _tronca_righe(ctx, max_chars)
         except sqlite3.OperationalError as exc:
             log.warning("DB %s schema error: %s", name, exc)
         finally:
@@ -423,7 +476,8 @@ def get_context(uuid: str, db: str = "", *, before: int = 3,
     return []
 
 
-def get_conversation(uuid: str, db: str = "", *, limit: int = 200) -> list[dict[str, Any]]:
+def get_conversation(uuid: str, db: str = "", *, limit: int = 200,
+                     max_chars: int = 0) -> list[dict[str, Any]]:
     """Il thread INTERO che contiene `uuid` (camminando parent_uuid), col contenuto
     pieno. Cerca il DB che contiene l'uuid, o in tutti."""
     _maybe_reload()
@@ -439,7 +493,7 @@ def get_conversation(uuid: str, db: str = "", *, limit: int = 200) -> list[dict[
                 for r in conv:
                     r["db"] = name
                     r["snapshot"] = snap
-                return conv
+                return _tronca_righe(conv, max_chars)
         except sqlite3.OperationalError as exc:
             log.warning("DB %s schema error: %s", name, exc)
         finally:
@@ -469,20 +523,32 @@ def list_projects(db: str = "", *, top: int = 1000) -> list[dict[str, Any]]:
     return out
 
 
+@_serializzata
 def archive_stats(db: str = "") -> list[dict[str, Any]]:
     """Istogramma temporale per ANNO, per DB — «quando» l'archivio è fitto, prima
     di cercare. Ogni riga porta `db`."""
     _maybe_reload()
     out: list[dict[str, Any]] = []
     for name in _targets(db):
+        snap = _snapshot(_DBS[name]) if name in _DBS else ""
+        ricordo = _PERIODI_MEMO.get(name)
+        if ricordo is not None and ricordo[0] == snap:
+            out.extend(dict(r) for r in ricordo[1])
+            continue
         try:
             conn = _open(name)
         except KeyError:
             continue
         try:
+            righe = []
             for r in fts.stats_by_period_conn(conn):
                 r["db"] = name
-                out.append(r)
+                righe.append(r)
+            # Stesso patto di _STATS_MEMO (issue #269, misurato 05/09: timeout
+            # su 17 DB): l'istogramma cambia solo se cambia il file — la chiave
+            # è lo snapshot, e il memo si invalida da solo al prossimo upload.
+            _PERIODI_MEMO[name] = (snap, [dict(r) for r in righe])
+            out.extend(righe)
         except sqlite3.OperationalError as exc:
             log.warning("DB %s schema error: %s", name, exc)
         finally:
@@ -498,6 +564,7 @@ def archive_stats(db: str = "") -> list[dict[str, Any]]:
 # che describe già espone. Il memo si invalida da solo a ogni upload o
 # set_description — il gateway riscrive il file, l'mtime cambia.
 _STATS_MEMO: dict[str, tuple[str, dict[str, Any]]] = {}
+_PERIODI_MEMO: dict[str, tuple[str, list[dict[str, Any]]]] = {}
 
 
 def describe() -> list[dict[str, Any]]:
