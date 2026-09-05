@@ -394,23 +394,25 @@ Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
 (`H2`) — sono chiusi e verificati in produzione, come tutta la fascia alta.
 
-L'unico **accettato**: niente 2FA sul pannello admin (`H28`) — è un gateway
-mono-utente dietro Tailscale Funnel, con password bcrypt-12 + lockout per-IP + CSRF
-+ revoca reale della sessione; il 2FA aggiungerebbe attrito per un guadagno marginale
-su questo profilo. È una decisione, non una dimenticanza.
+I due **accettati** sono decisioni, non dimenticanze. Niente 2FA sul pannello admin
+(`H28`): è un gateway mono-utente dietro Tailscale Funnel, con password bcrypt-12 +
+lockout per-IP + CSRF + revoca reale della sessione — il 2FA aggiungerebbe attrito per
+un guadagno marginale su questo profilo. E lo snapshot pre-update con l'archivio in
+chiaro (`H56`, deciso il 23/08 al format: la storia più sotto).
 
-L'ottavo **parziale** è `H50`, il primo trovato da una misura invece che da una
-lettura: il gateway — il servizio esposto, quello che monta i secret — aveva
+`H50` è il primo trovato da una **misura** invece che da una lettura: il gateway — il servizio esposto, quello che monta i secret — aveva
 un'uscita verso qualunque host su Internet. Ora è **chiusa in produzione**, e non
 per un commit: l'aggiornamento automatico ha installato il fix di `H50` da sé e
 `tools/prove-empiriche/prova-1-gateway-non-esce.sh` è passata da FAIL a PASS
 senza che nessuno toccasse la macchina, con la
 controprova che dallo stesso momento un altro container esce regolarmente (senza
-quella, un timeout non distingue un blocco mirato da una rete guasta). Resta
-parziale perché negli altri due profili d'ingresso (caddy, cloudflared) il gateway
-riprende la rete condivisa col proxy, e lì l'uscita è ancora aperta.
+quella, un timeout non distingue un blocco mirato da una rete guasta). Chiusa il
+**27/08**, su due misure in produzione (la voce le porta). Negli altri due profili
+d'ingresso (caddy, cloudflared) il gateway riprende la rete condivisa col proxy e lì
+l'uscita resta aperta: sta scritto nella voce, e si chiude quando anche quelli avranno
+una via d'ingresso senza uscita — o quando la si accetterà con una motivazione scritta.
 
-Il nono è `H51`, e non viene da un audit: viene da un **guasto vero**. Quel fix di
+`H51` non viene da un audit: viene da un **guasto vero**. Quel fix di
 `H50`, applicato, ha reso il servizio irraggiungibile da Internet per un'ora e
 ventotto minuti — misurati fra i due istanti, non stimati fra due orari comodi —
 il gateway era rimasto solo su una rete interna, e **da una rete interna
@@ -444,8 +446,7 @@ giornaliero, invece, un falso allarme costa un avviso e non un ripristino. Dal
 macchina le prove vanno solo lanciate, non più copiate a mano — e il primo collaudo
 completo sul sistema in esercizio (27/08/2026) le ha viste 8 verdi su 8 eseguibili.
 
-Il decimo è `H52`, e non l'abbiamo trovato noi: l'ha nominato l'analisi esterna del
-round-7. Le garanzie di irrobustimento dei servizi di sistema erano certificate
+`H52` non l'abbiamo trovato noi: l'ha nominato l'analisi esterna del round-7. Le garanzie di irrobustimento dei servizi di sistema erano certificate
 **leggendo una stringa nel file di configurazione**, non chiedendo al sistema che
 cosa applica davvero: un file può dichiarare una protezione che il sistema ignora, e
 il controllo restava verde lo stesso. Ora una prova interroga il sistema
@@ -454,7 +455,7 @@ controprova dentro — cerca anche una protezione *non* dichiarata e pretende ch
 sistema dica di no, altrimenti la prova starebbe misurando se stessa. Resta parziale
 perché copre i servizi di sistema e non ancora i file dei container né il Python.
 
-L'undicesimo è `H53`, e riguarda i controlli stessi. Il passo che analizza gli script
+`H53` riguarda i controlli stessi. Il passo che analizza gli script
 di shell girava con un `|| true` in coda: qualunque cosa trovasse, il risultato veniva
 buttato via e il passo restava verde. **Un controllo che per costruzione non può
 fallire non è un controllo, è una riga di log.** Tolto quel pezzo, il risultato è
@@ -465,10 +466,12 @@ buono. Presente da quando lo script esiste, visibile allo strumento dal primo gi
 invisibile a chi guardava la build. Corretto, e ora quel passo può diventare rosso
 davvero — verificato rimettendo il difetto apposta. Nella stessa misura è emerso che
 il controllo di stile del Python guardava due percorsi su quattro: esteso, e fuori non
-c'era nulla di rotto — che è il motivo per cui la lacuna poteva durare. Resta parziale
-perché la ricerca di altri controlli nella stessa condizione non è esaustiva.
+c'era nulla di rotto — che è il motivo per cui la lacuna poteva durare. La voce è
+oggi **chiusa**; la caccia ad altri controlli nella stessa condizione è proseguita
+come fonte a sé — la rilettura delle garanzie scritte in prosa, quella da cui
+vengono `H65`-`H68`.
 
-Il dodicesimo è `H54`, e ci è arrivato per una strada storta che vale la pena dire:
+`H54` ci è arrivato per una strada storta che vale la pena dire:
 l'analisi esterna ha osservato che il gateway monta **cinque credenziali in chiaro**,
 compreso il token del bot Telegram. Il registro copriva il terreno di `H54` solo di
 sponda — c'era una voce **chiusa**, ma chiudeva una lacuna *nella documentazione*,
@@ -478,9 +481,9 @@ sono del gateway stesso — firma le proprie sessioni, verifica la password — 
 prende il gateway le ha già per definizione. Il token del bot no: quello non gli serve
 per *essere sé stesso*, gli serve per **parlare come il bot**, e chi lo prende può
 impersonarlo anche fuori da qui. *«Cinque» risponde a «cosa vede»; «uno» risponde a
-«cosa si guadagna a prenderlo»*. Resta parziale perché la difesa possibile — un
-processo separato che tenga il token e accetti solo «manda questo messaggio» — **non
-copre tutto il segreto: lo stesso token ha DUE usi, e vanno separati prima di ragionare
+«cosa si guadagna a prenderlo»*. È rimasta a lungo parziale perché la difesa
+possibile — un processo separato che tenga il token e accetti solo «manda questo
+messaggio» — **non copre tutto il segreto: lo stesso token ha DUE usi, e vanno separati prima di ragionare
 sulla difesa — perché uno dei due si toglie di mezzo SENZA aggiungere niente.**
 `nb1777-bot` lo usa per **parlare** come il bot (è il rischio descritto qui sopra); il
 `gateway` lo usa come **chiave di verifica** — `services/gateway/app/miniapp_core.py:43`
@@ -497,6 +500,10 @@ voce del bot** — che è il surplus di cui parla tutto questo paragrafo.
 gateway tenga il token e limitare la difesa all'invio; **(c)** — la più economica, e
 **già scritta e collaudata in questo repo** — montare `telegram_webapp_secret` sul
 gateway *al posto di* `telegram_bot_token`: non costa né un container né un canale.
+**Chiusa il 27/08 proprio con la (c)**: sulla macchina in produzione il gateway monta
+la chiave derivata, non più il token — misurato con `docker inspect` dei mount, la
+voce porta la prova — e la VPS pre-format, l'unico posto dove il rischio viveva, non
+esiste più.
 
 > ⚠️ **PERCHÉ QUESTO PARAGRAFO È STATO RISCRITTO — 16/08/2026, issue #61.**
 > Prima diceva che la difesa «costa un pezzo in più da mantenere su una **macchina
@@ -557,8 +564,7 @@ Sulla macchina in produzione le quattro unit sono state riportate all'operatore 
 esse **è stata eseguita davvero**, uscendo con successo e senza fermare nessun servizio —
 perché «il file dice la cosa giusta» non è «il servizio funziona».
 
-Il quattordicesimo è `H56`, ed è **la seconda metà di un rilievo che risultava
-chiuso**. Prima di ogni aggiornamento la macchina prende una copia di sicurezza locale
+`H56` è **la seconda metà di un rilievo che risultava chiuso**. Prima di ogni aggiornamento la macchina prende una copia di sicurezza locale
 per poter tornare indietro; una voce chiusa raccontava che da quella copia erano stati
 esclusi i cookie di Google. Vero — ma era **un archivio su due**, e quello che resta è
 dodicimila volte più grande: circa 2,58 GB di archivio **in chiaro**, mentre gli stessi
@@ -570,14 +576,17 @@ a chi deve usarla.*
 Ora è scritto, col residuo dichiarato: cresce di una copia a ogni aggiornamento e
 ciascuna resta 72 ore, e l'unica cura che non rompe il ripristino è cifrare il disco —
 che si fa sul disco e non nel codice, quindi è una decisione di chi possiede la
-macchina. È la **seconda** volta che troviamo questa forma — una voce chiusa
+macchina. E la decisione **è stata presa**, il 23/08, al format per il collaudo
+vergine: provato Debian 13 coi volumi cifrati, la macchina era instabile; rimesso
+Debian 12 coi dischi in chiaro. Rischio **accettato** consapevolmente, non per
+dimenticanza — il prossimo treno è il prossimo format. È la **seconda** volta che troviamo questa forma — una voce chiusa
 il cui titolo nomina un elemento invece della categoria — ed è il motivo per cui vale
 la pena rileggere le altre. *(La prima stesura di questa riga diceva «la terza», e ci
 metteva dentro un caso che ha una forma diversa: là lo stato era vero di un altro
 oggetto, non di un sottoinsieme. Si somigliano nell'effetto sul lettore e si curano in
 modi opposti — contarli insieme faceva un pattern più grosso e un rimedio più confuso.)*
 
-Il quindicesimo è `H58`, e nasce dalla stessa domanda di `H57` — *quanti giorni
+`H58` nasce dalla stessa domanda di `H57` — *quanti giorni
 indietro si può davvero tornare?* — che invece è **chiuso e verificato sulla macchina**.
 Li racconto insieme perché sono lo stesso pomeriggio.
 

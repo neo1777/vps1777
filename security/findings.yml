@@ -219,7 +219,7 @@ findings:
 
   - id: H8
     severity: high
-    title: "OAuth: pagina di consenso, limiti al DCR, verifica dell'audience nel proxy"
+    title: "OAuth: pagina di consenso, limiti al DCR, legame del token al proprietario nel proxy"
     status: closed
     since: v0.33.0
     evidence:
@@ -234,6 +234,13 @@ findings:
       "autorizzi <client>?" [Autorizza]/[Rifiuta], POST con CSRF, valori client
       html-escaped (XSS), Rifiuta → error=access_denied. Audience + limiti DCR già
       c'erano. Chiude anche uno scostamento: ARCHITECTURE.md la disegnava già.
+      ✍️ TITOLO RISCRITTO il 05/09/2026: diceva «verifica dell'audience nel proxy»,
+      che sopra-dichiarava. Il proxy verifica firma/typ/scadenza e lega il token al
+      PROPRIETARIO (sub ∈ allowlist → `subject_not_allowed`); l'audience restriction
+      RFC 8707 NON è implementata, per scelta dichiarata (SECURITY §Postilla, 0.45.0).
+      È la stessa cura del rename della voce v0.25.0 in SECURITY.md — fatta lì in
+      0.45.0, mancava qui: nessuno aveva controllato che la sopra-dichiarazione
+      vivesse anche nel registro.
 
   - id: H9
     severity: high
@@ -1193,7 +1200,7 @@ findings:
         — non sarebbe stato registrato. Verdetti dati il 02/08 da abdd732a (73b8d8ac).
   - id: H50
     severity: high
-    title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa nel codice, non ancora in produzione"
+    title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa nel codice e provata in produzione (27/08)"
     status: closed
     natura: comportamento
     scoperta:
