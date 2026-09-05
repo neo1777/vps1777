@@ -2,7 +2,21 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
-## [0.46.0] — 2026-09-05
+## [0.46.1] — 2026-09-05
+
+### Corretto
+- **`studio_download` moriva in «Download failed» senza diagnosi**: il volume
+  `nlm-artifacts` era nato `root:root` (la dir è stata aggiunta al Dockerfile
+  il 24/08 senza `chown`, e il named volume ne ha copiato l'ownership) mentre
+  il processo gira da `app` — ogni download falliva nel messaggio generico di
+  nlm. Misurato in produzione il 05/09 col caso vivo (audio da 28 MB: KO via
+  MCP, OK via CLI su `/tmp`); dentro il container il chown è impossibile anche
+  da root (`cap_drop: ALL` toglie CAP_CHOWN), quindi l'heal in esercizio è un
+  `chown 1000:1000` dal host sul mountpoint del volume — eseguito, e da lì il
+  caso vivo passa (stesso file, byte identici al download CLI). Qui la cura
+  preventiva: il Dockerfile crea la dir con l'owner giusto e `artifacts_dir()`
+  fallisce PARLANDO (cosa non va + come si cura) invece di lasciare a nlm un
+  errore muto. Due test nuovi, uno per verso (suite nb1777: 100).
 
 **Il collaudo da-utente: quattro agenti hanno usato il sistema come utenti, non
 come sviluppatori — e hanno trovato quello che gli sviluppatori non vedono.**

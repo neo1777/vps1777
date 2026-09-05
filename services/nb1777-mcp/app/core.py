@@ -83,9 +83,21 @@ _UNSAFE_NAME = re.compile(r"[^A-Za-z0-9._-]")
 
 
 def artifacts_dir() -> Path:
-    """La directory degli artefatti (env `NLM_ARTIFACTS`), creata se manca."""
+    """La directory degli artefatti (env `NLM_ARTIFACTS`), creata se manca — e SCRIVIBILE.
+
+    La prova di scrittura non è pignoleria: il 05/09 il volume in produzione era
+    root:root (dir nata nel Dockerfile senza chown → il named volume ne ha copiato
+    l'ownership) e ogni download moriva nel generico «Download failed» di nlm,
+    senza dire il perché. Qui si fallisce PRIMA, e con la diagnosi in mano.
+    """
     p = Path(os.environ.get("NLM_ARTIFACTS") or ARTIFACTS_DIR_DEFAULT)
     p.mkdir(parents=True, exist_ok=True)
+    if not os.access(p, os.W_OK):
+        raise NLMError(
+            f"artefatti: {p} esiste ma NON è scrivibile da questo processo "
+            f"(uid {os.getuid()}). Su un volume Docker il rimedio è dal HOST: "
+            "chown 1000:1000 sul mountpoint del volume nlm-artifacts — dentro "
+            "il container manca CAP_CHOWN, anche da root.")
     return p
 
 
