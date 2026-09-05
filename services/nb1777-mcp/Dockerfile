@@ -52,7 +52,12 @@ RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
 # ricorrenti sulle immagini (issue #263: 6 CVE con fix che python:3.12-slim
 # non porta ancora). Un tool inutilizzato che accumula CVE si rimuove.
 RUN python -m pip uninstall -y pip
-RUN mkdir -p /var/lib/nlm && chown -R app:app /var/lib/nlm
+# ── ANCHE nlm-artifacts, e con l'owner giusto: la dir è nata (24/08) senza chown,
+#    il named volume ne ha copiato l'ownership root e OGNI studio_download moriva
+#    in «Download failed» senza diagnosi (misurato 05/09; dentro il container il
+#    chown è impossibile anche da root: cap_drop ALL toglie CAP_CHOWN).
+RUN mkdir -p /var/lib/nlm /var/lib/nlm-artifacts && \
+    chown -R app:app /var/lib/nlm /var/lib/nlm-artifacts
 
 # Copia venv (già in /opt/venv, shebang corretti) + codice dal builder
 COPY --from=builder /opt/venv /opt/venv
