@@ -1956,3 +1956,23 @@ def test_export_unico_con_memories_json_alla_radice_resta_valido(tmp_path: Path)
             "SELECT count(*) FROM messages WHERE project='memory:conversations'").fetchone()[0] >= 1
     finally:
         conn.close()
+
+
+def test_speaker_derivato_anche_su_db_nato_v3(tmp_path: Path) -> None:
+    """#271 (05/09/2026): un DB nato GIÀ v3 non migra mai, quindi la derivazione
+    di `speaker` agganciata alla migrazione non lo toccava — le righe nuove
+    restavano con speaker='' e il filtro speaker=human rispondeva 0 SENZA
+    errore (misurato in produzione: 6.606 sender='human' con speaker vuoto).
+    Ora `popola_speaker` gira dopo il write, accanto a `popola_voice`.
+    Controprovato mordace: senza quella chiamata questo test è ROSSO."""
+    db = tmp_path / "out.db"
+    archive_indexer.index_jsonl(str(_jsonl(tmp_path)), str(db), project="proj")
+    conn = sqlite3.connect(db)
+    coppie = list(conn.execute(
+        "SELECT sender, speaker FROM messages WHERE sender IN ('user','assistant')"))
+    conn.close()
+    assert coppie, "la fixture doveva scrivere righe user/assistant"
+    attesi = {"user": "human", "assistant": "assistant"}
+    for sender, speaker in coppie:
+        assert speaker == attesi[sender], (
+            f"sender={sender!r} ha speaker={speaker!r}: la derivazione non è girata")

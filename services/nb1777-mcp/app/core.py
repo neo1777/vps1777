@@ -421,18 +421,75 @@ def source_rename(nb_id: str, source_id: str, new_title: str) -> None:
 # chat (notebook_query)
 # ============================================================
 
+_MARCATORE_CITAZIONE = re.compile(r"\[\d+(?:\s*,\s*\d+)*\]")
+
+
+def _proietta_query(data: dict, *, verbose: bool) -> dict:
+    """Proiezione della risposta di NotebookLM — due cure, stessa issue (#275).
+
+    1. COMPATTA di default (stesso patto del fix #42 sugli artefatti studio,
+       misurato il 05/09: una risposta da 78k char, quasi tutta `cited_text`):
+       le `references` portano un'anteprima, il testo citato integrale arriva
+       solo con `verbose=True`.
+    2. IL NON-CITATO SI VEDE: l'`answer` porta i marcatori [n] delle citazioni,
+       quindi i paragrafi SENZA marcatore sono individuabili strutturalmente —
+       generazione del modello a valle, non lettura delle fonti (caso vivo del
+       05/09: una sezione «di ricerca» con dati di enti mai presenti nelle
+       fonti). Non si cancella niente (lo strip sbaglierebbe sul contenuto
+       buono): si conta, si anteprima, si dichiara in `nota`.
+    """
+    out = dict(data)
+    refs = out.get("references")
+    if isinstance(refs, list):
+        if verbose:
+            out["references"] = refs
+        else:
+            out["references"] = [
+                {"citation_number": r.get("citation_number"),
+                 "source_id": r.get("source_id"),
+                 "anteprima": (r.get("cited_text") or "")[:160]}
+                for r in refs if isinstance(r, dict)]
+    su = out.get("sources_used")
+    if isinstance(su, list):
+        visti: list = []
+        for s in su:
+            if s not in visti:
+                visti.append(s)
+        out["sources_used"] = visti
+    answer = out.get("answer")
+    if isinstance(answer, str) and answer.strip():
+        paragrafi = [pz.strip() for pz in answer.split("\n\n") if pz.strip()]
+        scoperti = [pz for pz in paragrafi
+                    if not _MARCATORE_CITAZIONE.search(pz)]
+        if scoperti:
+            out["senza_citazioni"] = {
+                "paragrafi": len(scoperti),
+                "su_totale": len(paragrafi),
+                "anteprime": [pz[:120] for pz in scoperti[:5]],
+            }
+            out["nota"] = ("i paragrafi elencati in `senza_citazioni` non portano "
+                           "marcatori [n]: sono generati dal modello, non letti "
+                           "dalle fonti — trattali come ipotesi, non come fatti")
+    return out
+
+
 def notebook_query(nb_id: str, question: str, *,
                    source_ids: Optional[list[str]] = None,
                    conversation_id: Optional[str] = None,
+                   verbose: bool = False,
                    timeout: float = 240.0) -> dict:  # RAG su notebook grandi può essere lento
-    """Pone una domanda alla chat del notebook. Ritorna {answer, citations, ...}."""
+    """Pone una domanda alla chat del notebook. Ritorna {answer, references,
+    sources_used, senza_citazioni?, nota?} in proiezione compatta (#275);
+    `verbose=True` per il testo citato integrale."""
     args = ["query", "notebook", nb_id, question, "--json", "--timeout", str(timeout)]
     if source_ids:
         args += ["--source-ids", ",".join(source_ids)]
     if conversation_id:
         args += ["--conversation-id", conversation_id]
     data = _run_json(args, timeout=timeout + 30)
-    return data if isinstance(data, dict) else {"raw": data}
+    if not isinstance(data, dict):
+        return {"raw": data}
+    return _proietta_query(data, verbose=verbose)
 
 
 # ============================================================
