@@ -2,6 +2,16 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.47.2] — 2026-09-06
+
+### Corretto
+- **Tre doc sotto lo stesso project: due sparivano nella dedup** (#285 ter):
+  la key dell'uuid dei chunk testuali era il solo project — `sha1(project,
+  indice)` identico fra file DIVERSI — e dal secondo file in poi ogni chunk
+  risultava «duplicato» a zero scritture (misurato: doc2 e doc3 dello standard
+  ingest-video, 5/5 chunk mangiati). La key ora include il nome file; il
+  re-index dello stesso file resta idempotente. Test nei due versi.
+
 ## [0.47.1] — 2026-09-06
 
 ### Corretto
