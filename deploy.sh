@@ -271,7 +271,7 @@ RS
 set_kv TS_AUTHKEY '$TS_KEY'"
   [ -n "$TG_TOKEN" ] && APPLY_SCRIPT="$APPLY_SCRIPT
 printf %s '$TG_TOKEN' > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt
-python3 -c \"import hmac,hashlib,sys;open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',sys.argv[1].encode(),hashlib.sha256).hexdigest())\" '$TG_TOKEN'; chmod 600 secrets/telegram_webapp_secret.txt"
+printf %s '$TG_TOKEN' | python3 -c \"import hmac,hashlib,sys;open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',sys.stdin.buffer.read(),hashlib.sha256).hexdigest())\"; chmod 600 secrets/telegram_webapp_secret.txt"
   [ -n "$TG_OWNER" ] && APPLY_SCRIPT="$APPLY_SCRIPT
 set_kv TELEGRAM_OWNER_ID '$TG_OWNER'"
   [ -n "$PUB" ]      && APPLY_SCRIPT="$APPLY_SCRIPT
@@ -603,9 +603,22 @@ fi
 #     distro (Ubuntu lo porta col pacchetto, Debian lo crea con dpkg-reconfigure, che
 #     nessuno dei tre lancia). ⇒ il servizio attivo e mai eseguito è peggio del servizio
 #     assente: il primo si legge come protezione, il secondo si nota.
+# Il re-run NON butta via la config dell'admin: 20auto-upgrades e jail.local li
+# scriviamo noi alla prima installazione, ma da lì in poi sono terreno dell'admin
+# (fail2ban legge jail.local, e un admin ci aggiunge le jail sue). Sovrascrivere
+# incondizionato — com'era — contraddiceva l'idempotenza dichiarata: idempotente
+# è rilanciare senza distruggere. Si riscrive solo ciò che è assente o ancora
+# nostro; un contenuto diverso resta al suo posto e viene DETTO.
+scrivi_config() { # $1=path · $2=contenuto voluto (il confronto ignora il newline finale)
+  if [ ! -f "$1" ] || [ "$(cat "$1" 2>/dev/null)" = "$2" ]; then
+    printf '%s\n' "$2" > "$1"
+  else
+    echo "  ⚠️  $1 esiste con contenuto diverso (config dell'admin?): NON lo tocco"
+  fi
+}
 if apt-get install -y -q unattended-upgrades fail2ban >/dev/null 2>&1; then
-  printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
-    > /etc/apt/apt.conf.d/20auto-upgrades
+  scrivi_config /etc/apt/apt.conf.d/20auto-upgrades \
+    "$(printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";')"
   systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
   # 🔴 `backend = systemd` NON è un dettaglio di gusto — misurato sulla VPS viva il
   #   17/08 (b82df434): fail2ban era morto **da quattro settimane**, un secondo dopo il
@@ -613,12 +626,20 @@ if apt-get install -y -q unattended-upgrades fail2ban >/dev/null 2>&1; then
   #   `0.0.0.0:22`. Su Debian 12 i log di sshd stanno solo nel journal e la jail di
   #   default cerca `/var/log/auth.log`. ⇒ *la configurazione non era invecchiata:
   #   non è mai stata adatta alla distribuzione che installiamo qui.*
-  printf '[sshd]\nenabled = true\nbackend = systemd\n' > /etc/fail2ban/jail.local
+  scrivi_config /etc/fail2ban/jail.local \
+    "$(printf '[sshd]\nenabled = true\nbackend = systemd')"
   systemctl enable --now fail2ban >/dev/null 2>&1 || true
   # ⭐ E la verifica, che prima non c'era: `enable --now` esce 0 anche se il servizio
   #   muore un istante dopo. *Un comando che attiva non è una prova che sia attivo.*
   systemctl is-active --quiet fail2ban 2>/dev/null \
     || echo "  ⚠️  fail2ban NON è attivo: ssh resta senza anti-brute-force (journalctl -u fail2ban -n 20)"
+else
+  # L'if senza else era un errore SILENZIOSO: apt fallisce (mirror giù, apt lock
+  # tenuto da unattended-upgrades stesso, spazio finito) e l'hardening sparisce
+  # senza una riga — la classe di difetto più costosa di questo repo.
+  echo "  ⚠️  apt-get install unattended-upgrades fail2ban FALLITO: la macchina resta"
+  echo "      SENZA patch automatiche e SENZA anti-brute-force ssh. Cura a mano:"
+  echo "      apt-get update && apt-get install -y unattended-upgrades fail2ban, poi rilancia il deploy."
 fi
 
 # 3. Utente operatore (nome non collidente con utenti di sistema Debian)
@@ -627,6 +648,12 @@ if ! id "$OPERATOR_USER" >/dev/null 2>&1; then
   # bind-mount (onboarding/) e sui file del canale update. Fallback se occupato.
   if getent passwd 1000 >/dev/null; then
     useradd -m -s /bin/bash "$OPERATOR_USER"
+    # Il fallback è NECESSARIO (uid 1000 occupato) ma non è gratis, e prima era
+    # muto: i container girano con uid 1000 fisso, quindi i bind-mount avranno
+    # owner diversi tra host e container. Chi installa deve saperlo ORA, non
+    # scoprirlo da un "permission denied" dentro il gateway.
+    echo "  ⚠️  uid 1000 già occupato da '$(getent passwd 1000 | cut -d: -f1)': $OPERATOR_USER nasce con un altro uid."
+    echo "      I container usano uid 1000: possibili mismatch di ownership sui bind-mount (onboarding/, var/)."
   else
     useradd -m -u 1000 -s /bin/bash "$OPERATOR_USER"
   fi
@@ -685,9 +712,14 @@ log "tar over SSH → $REMOTE_DIR..."
 SSH "rm -rf /tmp/vps1777-xfer && mkdir -p /tmp/vps1777-xfer"
 # onboarding/var/releases = runtime della VPS (pending.json, state del canale
 # update, bundle staged): mai sovrascritti da un re-deploy.
+# `.env` idem: sulla VPS contiene i valori VIVI (TELEGRAM_OWNER_ID, TS_AUTHKEY,
+# le scritture del pannello admin); un .env locale del PC (nato da un giro dev di
+# compose) arriverebbe col tar e il `cp -a` sotto lo sovrascriverebbe SENZA
+# backup. I valori giusti li scrive lo step 5 con set_kv, chiave per chiave.
 tar --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='.venv' --exclude='secrets/*.txt' --exclude='backups' \
     --exclude='onboarding' --exclude='var' --exclude='releases' \
+    --exclude='.env' \
     -cf - . | PIPE_IN "tar -xf - -C /tmp/vps1777-xfer"
 SSH "export OPERATOR_USER='$OPERATOR_USER' REMOTE_DIR='$REMOTE_DIR'; bash -s" <<'PREP2'
 set -e
@@ -747,9 +779,20 @@ if [ ! -s secrets/admin_password_bcrypt.txt ]; then
   chmod 600 secrets/admin_password_bcrypt.txt
 fi
 
-# telegram token
-printf '%s' "$TG_TOKEN" > secrets/telegram_bot_token.txt
-chmod 600 secrets/telegram_bot_token.txt
+# telegram token + chiave DERIVATA — SOLO se il token è stato fornito: un re-run
+# senza TG_TOKEN non deve svuotare un token già installato (gli altri secret hanno
+# la stessa guardia poche righe sopra, lui era l'unico senza). E la derivata (#61:
+# è LEI che il gateway monta, non il token) qui mancava del tutto: il ramo fresh
+# lasciava il file vuoto mentre il commento sopra prometteva «li sovrascrive» al
+# plurale — scriveva solo il token, e la Mini App rifiutava ogni initData.
+# Il token passa a python via STDIN (printf è builtin): mai in argv di processi
+# esterni, dove /proc/*/cmdline lo mostrerebbe a chiunque sulla macchina.
+if [ -n "$TG_TOKEN" ]; then
+  printf '%s' "$TG_TOKEN" > secrets/telegram_bot_token.txt
+  chmod 600 secrets/telegram_bot_token.txt
+  printf '%s' "$TG_TOKEN" | python3 -c "import hmac,hashlib,sys;open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',sys.stdin.buffer.read(),hashlib.sha256).hexdigest())"
+  chmod 600 secrets/telegram_webapp_secret.txt
+fi
 
 # cloudflared token (se serve)
 if [ -n "$CF_TOKEN" ]; then
@@ -808,6 +851,11 @@ step "6/8 — Immagini + avvio stack"
 # così install, update e rollback riproducono SEMPRE le stesse feature — è il fix del
 # difetto per cui un reinstall/update lasciava cadere gli opt-in ops.* in silenzio.
 FEATURES="${VPS1777_FEATURES:-backup,autoupdate}"
+# Gli spazi si tolgono PRIMA dei case-match: la CLI (enabled_features) fa strip di
+# ogni voce, questi `case ",$FEATURES," in *,x,*` no — con "backup, autoupdate"
+# la CLI accendeva l'auto-update e il deploy non abilitava il timer: due letture
+# divergenti dello stesso valore, la peggiore forma di disaccordo.
+FEATURES="$(printf '%s' "$FEATURES" | tr -d '[:blank:]')"
 OPS_FILES=""; OPS_PROFILES=""
 case ",$FEATURES," in *,backup,*)     OPS_FILES="$OPS_FILES -f compose.ops.backup.yaml";    OPS_PROFILES="$OPS_PROFILES --profile ops.backup";;    esac
 case ",$FEATURES," in *,portainer,*)  OPS_FILES="$OPS_FILES -f compose.ops.portainer.yaml"; OPS_PROFILES="$OPS_PROFILES --profile ops.portainer";; esac

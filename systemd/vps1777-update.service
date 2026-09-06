@@ -65,6 +65,12 @@ ReadWritePaths=/usr/local/bin
 ReadWritePaths=/etc/systemd/system
 ReadWritePaths=/tmp
 ReadWritePaths=@OPERATOR_HOME@
+# @REPO@ esplicito (K2, review 05/09): finché il repo sta nella home dell'operator
+# la riga sopra lo copre già — ma REMOTE_DIR è configurabile, e con un repo fuori
+# dalla home l'update scriverebbe su un filesystem che ProtectSystem=strict gli
+# ha reso read-only: fallirebbe A OGNI GIRO, con la unit dichiarata sana. Il `-`
+# lo rende tollerante al path duplicato o assente (systemd deduplica da sé).
+ReadWritePaths=-@REPO@
 ReadWritePaths=-/var/lib/gateway
 # ⚠️ QUESTA RIGA NON RIPARA IL GUASTO — misurato dopo averla scritta, e va detto
 #   prima di tutto il resto perché il commento qui sotto prometteva il contrario.
