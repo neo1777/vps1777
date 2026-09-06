@@ -2,6 +2,18 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.47.1] — 2026-09-06
+
+### Corretto
+- **Il testo entrava nel gateway con `docker cp`, che il gateway stesso vieta**
+  (#285 bis): il rootfs del gateway è read-only per hardening, e `docker cp`
+  rifiuta con «container rootfs is marked read-only» — il percorso diretto
+  della 0.47.0 moriva quindi al primo passo (misurato al primo ingest reale,
+  3/3), e anche il ramo NotebookLM sarebbe morto a valle nello stesso punto.
+  Ora il testo viaggia su stdin (`exec … sh -c 'cat > …'`): scrive il processo
+  interno sulla tmpfs di /tmp, che è scrivibile. Il test comportamentale ora
+  PRETENDE il non-uso di cp verso il gateway, collaudato nei due versi.
+
 ## [0.47.0] — 2026-09-06
 
 ### Aggiunto
