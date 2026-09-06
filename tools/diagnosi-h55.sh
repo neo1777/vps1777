@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # diagnosi-h55.sh — «le unit girano come root?» e cosa serve per ripararlo.
+# ⏳ STATO (2026-09-06): sonda STORICA, migrazione H55 COMPIUTA sulla VPS di
+# riferimento — resta come diagnosi riusabile per installazioni che trovassero
+# unit ancora root. Non è dead code: è storia eseguibile, con la lezione dentro.
 #
 # 🔴 PERCHÉ ESISTE, e la ragione è un errore mio (`abdd732a`, 01/08).
 #   Avevo dato a Neo un `sed -i 's/^User=root/User=vps1777/'` come cura. Sarebbe

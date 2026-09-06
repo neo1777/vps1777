@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # tools/bootstrap.sh — cutover one-shot di un'installazione vps1777 legacy
+# ⏳ STATO (2026-09-06): sonda/cutover STORICA ma VIVA per scopo — serve alle
+# installazioni legacy che non hanno ancora fatto il passaggio al canale update.
+# Non è dead code: è la porta d'ingresso di chi arriva da una build locale.
 # (immagini buildate in locale) al canale di update controllato (pull da ghcr).
 #
 # Come si usa (dalla shell della VPS, come utente operatore vps1777):

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # tools/migra-chiave-miniapp.sh — H54: togli al gateway il token del bot, dagli la chiave.
+# ⏳ STATO (2026-09-06): migrazione H54 COMPIUTA sulla VPS di riferimento —
+# resta per installazioni nate prima della chiave derivata (e --verifica è
+# ancora una sonda valida). Non è dead code: è la scala usata, lasciata al muro.
 #
 # Uso:
 #   ./tools/migra-chiave-miniapp.sh              # prepara la chiave e dice cosa fare
