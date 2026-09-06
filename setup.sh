@@ -477,10 +477,21 @@ if confirm "Procedo ora?"; then
 H55
         exit 1
       fi
+      # @OPERATOR_HOME@ va RESO come gli altri due segnaposto: qui mancava, e le
+      # unit di update (ReadWritePaths=@OPERATOR_HOME@) arrivavano a systemd col
+      # letterale — che non è un path, quindi la unit NON PARTE (engine.py lo
+      # documenta da prima che setup.sh se ne accorgesse: stessa classe di H43,
+      # la cura in due copie su tre). La home si chiede a getent, non si assume.
+      OP_HOME="$(getent passwd "$OP_USER" | cut -d: -f6)"
+      OP_HOME="${OP_HOME:-$HOME}"
       for u in systemd/vps1777-*; do
         case "$u" in *.service|*.timer|*.path)
-          sed -e "s|@OPERATOR_USER@|$OP_USER|g" -e "s|@REPO@|$SCRIPT_DIR|g" "$u" \
-            | sudo install -m644 /dev/stdin "/etc/systemd/system/$(basename "$u")" 2>/dev/null || true;;
+          # Niente `|| true` muto: una unit che non si installa è un canale di
+          # update che non esisterà, e chi installa deve saperlo subito.
+          sed -e "s|@OPERATOR_USER@|$OP_USER|g" -e "s|@OPERATOR_HOME@|$OP_HOME|g" \
+              -e "s|@REPO@|$SCRIPT_DIR|g" "$u" \
+            | sudo install -m644 /dev/stdin "/etc/systemd/system/$(basename "$u")" 2>/dev/null \
+            || warn "unit $(basename "$u") NON installata (sudo install fallito): il canale update sarà monco";;
         esac
       done
       sudo systemctl daemon-reload 2>/dev/null || true
@@ -495,8 +506,13 @@ H55
       # legge la STESSA fonte di verità degli altri due installer: lo stato
       # dichiarato VPS1777_FEATURES, con lo stesso default (deploy.sh:632).
       ENABLE_UNITS="vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer"
-      FEATURES="$(sed -n 's/^VPS1777_FEATURES=//p' .env 2>/dev/null | tail -1)"
-      FEATURES="${FEATURES:-backup,autoupdate}"
+      # Stessa semantica di enabled_features (tools/vps1777.py): il default vale
+      # solo a CHIAVE ASSENTE — un valore esplicito, anche vuoto, vince (così si
+      # può spegnere tutto). E gli spazi si tolgono: la CLI fa strip di ogni voce,
+      # il case qui sotto no — "backup, autoupdate" divergeva tra le due letture.
+      # (Una riga sola di proposito: test_tre_installer_stessa_lista_unit sostituisce
+      # le assegnazioni FEATURES= per provare il calcolo con valori imposti.)
+      FEATURES="$({ grep -q '^VPS1777_FEATURES=' .env 2>/dev/null && sed -n 's/^VPS1777_FEATURES=//p' .env | tail -1 | tr -d '[:blank:]'; } || printf 'backup,autoupdate')"
       AUTOUPD_MSG=""
       case ",$FEATURES," in *,autoupdate,*)
         ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer"
@@ -531,9 +547,21 @@ H55
       # e mai eseguito, cioè il caso peggiore: il servizio c'è, il presidio no.
       # ⭐ Non dipendiamo dal default di una distribuzione che non controlliamo: la
       # scrittura è idempotente e dice a voce quello che prima era un'assunzione.
+      # Il re-run non butta via la config dell'admin: 20auto-upgrades e jail.local
+      # sono nostri alla PRIMA scrittura, poi diventano terreno dell'admin (le sue
+      # jail, le sue cadenze). Si riscrive solo ciò che è assente o ancora nostro;
+      # un contenuto diverso resta al suo posto e viene detto. (Stessa guardia in
+      # deploy.sh e installer/engine.py: tre copie, una regola.)
+      scrivi_config_sudo() { # $1=path · $2=contenuto voluto (confronto senza newline finale)
+        if [ ! -f "$1" ] || [ "$(cat "$1" 2>/dev/null)" = "$2" ]; then
+          printf '%s\n' "$2" | sudo tee "$1" >/dev/null 2>&1 || true
+        else
+          warn "$1 esiste con contenuto diverso (config dell'admin?): NON lo tocco"
+        fi
+      }
       if sudo apt-get install -y -q unattended-upgrades fail2ban >/dev/null 2>&1; then
-        printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' \
-          | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null 2>&1 || true
+        scrivi_config_sudo /etc/apt/apt.conf.d/20auto-upgrades \
+          "$(printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";')"
         sudo systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
         # 🔴 QUINTA DELLA STESSA CLASSE, e questa volta MISURATA SU UNA MACCHINA VIVA
         #   (b82df434, 17/08): sulla VPS `fail2ban` era **morto da quattro settimane**,
@@ -549,8 +577,8 @@ H55
         #   `enable --now` esce 0 anche se il servizio muore un istante dopo, e `|| true`
         #   copriva pure quello. *Un comando che ATTIVA non è una prova che sia attivo:
         #   la prova è ri-leggere lo stato dell'oggetto.*
-        printf '[sshd]\nenabled = true\nbackend = systemd\n' \
-          | sudo tee /etc/fail2ban/jail.local >/dev/null 2>&1 || true
+        scrivi_config_sudo /etc/fail2ban/jail.local \
+          "$(printf '[sshd]\nenabled = true\nbackend = systemd')"
         sudo systemctl enable --now fail2ban >/dev/null 2>&1 || true
         if sudo systemctl is-active --quiet fail2ban 2>/dev/null; then
           ok "Hardening host attivo: unattended-upgrades + fail2ban (jail sshd su journal)"

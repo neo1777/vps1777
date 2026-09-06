@@ -333,10 +333,18 @@ class Deployer:
             data += err.read().decode("utf-8", "replace")
         return data
 
-    def _stream(self, cmd: str, label: str = "") -> Iterator[str]:
+    def _stream(self, cmd: str, label: str = "",
+                stdin_script: str | None = None) -> Iterator[str]:
         """
         Esegue cmd via SSH, yield righe appena arrivano (lettura a chunk,
         non bufferizzata per riga → output più reattivo attraverso WSL2).
+
+        `stdin_script`: se presente, viene scritto sullo stdin del comando e il
+        canale di scrittura viene chiuso. È la via per gli script che portano
+        SEGRETI interpolati: un comando passa per argv, e argv è pubblico
+        (/proc/*/cmdline è leggibile da ogni processo della macchina per tutta
+        la durata dell'esecuzione) — lo stdin no. deploy.sh usa `bash -s <<…`
+        per la stessa ragione; qui è l'equivalente paramiko.
         """
         assert self.client
         chan = self.client.get_transport().open_session()  # type: ignore[union-attr]
@@ -344,8 +352,14 @@ class Deployer:
         # si auto-refreshano → fiume di sequenze di escape che intasano la UI.
         # Senza tty l'output è "plain" (una riga per evento), pulito da streammare.
         chan.set_combine_stderr(True)
-        chan.settimeout(0.0)  # non-bloccante
         chan.exec_command(cmd)
+        if stdin_script is not None:
+            # invio PRIMA di passare al non-bloccante: sendall su canale con
+            # timeout 0 può alzare a buffer pieno, e uno script troncato a metà
+            # è peggio di uno mai partito.
+            chan.sendall(stdin_script.encode("utf-8"))
+            chan.shutdown_write()
+        chan.settimeout(0.0)  # non-bloccante
         buf = b""
         while True:
             got = False
@@ -380,8 +394,25 @@ class Deployer:
             raise DeployError(f"{label or 'comando'} fallito (exit {rc})")
 
     def _sudo(self, inner: str) -> str:
-        """Esegue come operator (o diretto se siamo già root via sudo)."""
+        """Esegue come operator (o diretto se siamo già root via sudo).
+
+        ⚠️ Lo script finisce in ARGV di bash: va bene SOLO per comandi senza
+        segreti. Per gli script che interpolano token/password usare
+        `_sudo_stdin()` + `_stream(..., stdin_script=…)`: argv è visibile in
+        /proc/*/cmdline a chiunque sulla macchina, per tutta l'esecuzione.
+        """
         return f"sudo -u {OPERATOR_USER} bash -lc {shlex.quote(inner)}"
+
+    def _sudo_stdin(self) -> str:
+        """Come _sudo, ma bash legge lo script dallo STDIN (`-s`), non da argv.
+
+        Nato dalla review K3 (06/09/2026): step_config interpolava nel proprio
+        script il token Telegram, la password admin (in base64 del CHIARO, se il
+        PC non ha bcrypt), TS_AUTHKEY e cf_token — e _sudo metteva l'intero
+        script in argv. Il commento dentro lo script diceva «mai argv» per la
+        password: era vero per il python interno, falso per il contenitore.
+        """
+        return f"sudo -u {OPERATOR_USER} bash -ls"
 
     # ───── step ─────
 
@@ -406,14 +437,26 @@ systemctl enable --now docker
 # altrimenti il deploy via password e la riconnessione post-reboot fallirebbero):
 #  - unattended-upgrades: patch di sicurezza automatiche
 #  - fail2ban: blocca i brute-force SSH (non banna chi si autentica bene)
-printf 'APT::Periodic::Update-Package-Lists "1";\\nAPT::Periodic::Unattended-Upgrade "1";\\n' \
-  > /etc/apt/apt.conf.d/20auto-upgrades
+# Il re-run non butta via la config dell'admin: 20auto-upgrades e jail.local sono
+# nostri alla PRIMA scrittura, poi diventano terreno suo (le sue jail, le sue
+# cadenze). Si riscrive solo l'assente o l'identico-al-nostro; il diverso resta
+# e viene detto. (Stessa guardia in deploy.sh e setup.sh: tre copie, una regola.)
+scrivi_config() {{ # $1=path · $2=contenuto voluto (confronto senza newline finale)
+  if [ ! -f "$1" ] || [ "$(cat "$1" 2>/dev/null)" = "$2" ]; then
+    printf '%s\\n' "$2" > "$1"
+  else
+    echo "  ATTENZIONE: $1 esiste con contenuto diverso (config dell'admin?): NON lo tocco"
+  fi
+}}
+scrivi_config /etc/apt/apt.conf.d/20auto-upgrades \
+  "$(printf 'APT::Periodic::Update-Package-Lists "1";\\nAPT::Periodic::Unattended-Upgrade "1";')"
 systemctl enable --now unattended-upgrades 2>/dev/null || true
 # backend = systemd: su Debian 12 i log di sshd stanno SOLO nel journal e la jail
 # di default cerca /var/log/auth.log, che non esiste. Misurato sulla VPS viva il
 # 17/08: fail2ban morto da quattro settimane, un secondo dopo il boot, con ssh su
 # 0.0.0.0:22. La configurazione non e' invecchiata: non e' mai stata adatta.
-printf '[sshd]\\nenabled = true\\nbackend = systemd\\n' > /etc/fail2ban/jail.local
+scrivi_config /etc/fail2ban/jail.local \
+  "$(printf '[sshd]\\nenabled = true\\nbackend = systemd')"
 systemctl enable --now fail2ban 2>/dev/null || true
 # `enable --now` esce 0 anche se il servizio muore subito dopo: la prova e' rileggere
 # lo stato dell'oggetto, non l'esito del comando che lo ha attivato.
@@ -432,6 +475,11 @@ fi
 if ! id {OPERATOR_USER} >/dev/null 2>&1; then
   if getent passwd 1000 >/dev/null; then
     useradd -m -s /bin/bash {OPERATOR_USER}
+    # Il ripiego è necessario ma non gratis, e prima era muto: i container girano
+    # con uid 1000 fisso, quindi i bind-mount avranno owner diversi host-container.
+    # Chi installa lo deve sapere ORA, non da un permission denied nel gateway.
+    echo "  ATTENZIONE: uid 1000 gia' occupato: {OPERATOR_USER} nasce con un altro uid."
+    echo "  I container usano uid 1000: possibili mismatch di ownership sui bind-mount (onboarding/, var/)."
   else
     useradd -m -u 1000 -s /bin/bash {OPERATOR_USER}
   fi
@@ -619,13 +667,32 @@ else
   printf %s '{admin_pw_b64}' | base64 -d | python3 -c "import bcrypt,sys;print(bcrypt.hashpw(sys.stdin.buffer.read(),bcrypt.gensalt(12)).decode())" > secrets/admin_password_bcrypt.txt
 fi
 chmod 600 secrets/admin_password_bcrypt.txt
-printf %s {shlex.quote(p.get('telegram_bot_token', ''))} > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt
+# telegram: i due file devono ESISTERE comunque (il compose li dichiara come
+# secret-file: senza, la macchina vergine muore al bind — misurato 23/08 su
+# archive_desc, stessa classe). Ma si SOVRASCRIVONO solo se il token è stato
+# fornito: un giro del pannello senza token non deve svuotare un token già
+# installato (K5, review 05/09 — la stessa guardia di deploy.sh).
+[ -f secrets/telegram_bot_token.txt ]     || : > secrets/telegram_bot_token.txt
+[ -f secrets/telegram_webapp_secret.txt ] || : > secrets/telegram_webapp_secret.txt
+chmod 600 secrets/telegram_bot_token.txt secrets/telegram_webapp_secret.txt
 # #61: il gateway monta la chiave DERIVATA, non il token. Derivata qui una volta sola:
 # HMAC_SHA256("WebAppData", token) — a senso unico, non risale al segreto intero.
-python3 -c "import hmac,hashlib,sys;t=sys.argv[1];open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',t.encode(),hashlib.sha256).hexdigest() if t else '')" {shlex.quote(p.get('telegram_bot_token', ''))}; chmod 600 secrets/telegram_webapp_secret.txt
+# Il token entra in python via STDIN (printf è builtin), non in argv: sul remoto
+# /proc/*/cmdline è leggibile da chiunque per tutta la durata del processo (K3).
+if [ -n {shlex.quote(p.get('telegram_bot_token', ''))} ]; then
+  printf %s {shlex.quote(p.get('telegram_bot_token', ''))} > secrets/telegram_bot_token.txt
+  printf %s {shlex.quote(p.get('telegram_bot_token', ''))} | python3 -c "import hmac,hashlib,sys;open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',sys.stdin.buffer.read(),hashlib.sha256).hexdigest())"
+fi
 {("printf %s " + shlex.quote(p.get('cf_token',''))) + " > secrets/cloudflared_token.txt; chmod 600 secrets/cloudflared_token.txt" if p.get('cf_token') else "true"}
 cp -n .env.example .env 2>/dev/null || true
-set_kv() {{ grep -q "^$1=" .env && sed -i "s|^$1=.*|$1=$2|" .env || echo "$1=$2" >> .env; }}
+# set_kv senza processi esterni col VALORE in argv: qui passano TS_AUTHKEY e gli
+# altri campi del pannello, e il vecchio `sed -i "…$2…"` metteva il segreto
+# nell'argv di sed (visibile in /proc/*/cmdline). grep riceve solo la CHIAVE;
+# printf è builtin. Stessa forma di deploy.sh, che l'aveva già per questa ragione.
+set_kv() {{ k=$1; v=$2
+  rest=$(grep -v "^${{k}}=" .env 2>/dev/null || true)
+  {{ [ -n "$rest" ] && printf '%s\\n' "$rest"; printf '%s=%s\\n' "$k" "$v"; }} > .env
+}}
 set_kv ADMIN_EMAIL {shlex.quote(p.get('admin_email',''))}
 set_kv TELEGRAM_OWNER_ID {shlex.quote(p.get('telegram_owner_id',''))}
 set_kv PUBLIC_BASE {shlex.quote(public_base)}
@@ -643,7 +710,9 @@ if [ "$(stat -c %a .env 2>/dev/null)" != "600" ]; then echo "ENV_PERM_FALLITO"; 
 rm -f secrets/ts_authkey.txt
 echo CONFIG_OK
 """
-        for line in self._stream(self._sudo(gen), "config"):
+        # via STDIN, non argv: gen interpola token Telegram, password admin,
+        # TS_AUTHKEY e cf_token (K3 — vedi _sudo_stdin).
+        for line in self._stream(self._sudo_stdin(), "config", stdin_script=gen):
             if "CONFIG_OK" in line:
                 yield "  password admin generata sul PC (mostrata alla fine)"
             else:

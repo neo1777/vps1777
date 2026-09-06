@@ -125,4 +125,8 @@ ReadWritePaths=/usr/local/bin
 ReadWritePaths=/etc/systemd/system
 ReadWritePaths=/tmp
 ReadWritePaths=@OPERATOR_HOME@
+# @REPO@ esplicito (K2): come nella gemella vps1777-update.service — con un repo
+# fuori dalla home dell'operator, senza questa riga l'update fallirebbe a ogni
+# giro su un filesystem reso read-only da ProtectSystem=strict.
+ReadWritePaths=-@REPO@
 ReadWritePaths=-/var/lib/gateway
