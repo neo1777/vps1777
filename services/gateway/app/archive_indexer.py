@@ -1671,7 +1671,14 @@ def _iter_text(path: Union[str, Path], project: str) -> Iterator[Row]:
     _check_file_size(path, MAX_FILE_BYTES)  # `fh.read()` è tutto-in-RAM: prima il tetto
     name = project or path.stem
     with open(path, encoding="utf-8", errors="replace") as fh:
-        yield from _chunk_rows(fh.read(), name, _file_ts(path), name)
+        # la KEY dell'uuid include il NOME FILE, non solo il project: tre doc
+        # ingeriti sotto lo stesso project (lo standard ingest-video li vuole
+        # proprio così) collidevano per indice — sha1(project, 0) identico per
+        # tutti — e la dedup mangiava dal secondo file in poi: 2 doc su 3
+        # «deduplicati» a zero scritture, misurato 06/09 su video-1777.
+        # Re-index dello STESSO file resta idempotente (stessa key).
+        yield from _chunk_rows(fh.read(), name, _file_ts(path),
+                               f"{name}\x1f{path.name}")
 
 
 # ── estrattore: PDF (pypdf) ──────────────────────────────────────────────────
