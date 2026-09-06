@@ -257,13 +257,14 @@ def now_iso() -> str:
 
 def run(cmd: list[str], *, env: dict | None = None, check: bool = True,
         capture: bool = False, cwd: str | Path | None = None,
-        timeout: int | None = None) -> subprocess.CompletedProcess:
+        timeout: int | None = None,
+        input: str | None = None) -> subprocess.CompletedProcess:
     full_env = dict(os.environ)
     if env:
         full_env.update(env)
     return subprocess.run(
         cmd, env=full_env, check=check, cwd=str(cwd) if cwd else None,
-        capture_output=capture, text=True, timeout=timeout,
+        capture_output=capture, text=True, timeout=timeout, input=input,
     )
 
 
@@ -3491,10 +3492,20 @@ def cmd_archive_ingest(repo: Path, args) -> int:
     gw_txt = f"/tmp/ing_{rid}{gw_ext}"
     host_txt = Path(f"/tmp/vps1777_ing_{rid}.txt")
     cc = compose_cmd(repo)
+
+    def _porta_nel_gateway(contenuto: str, dest: str) -> None:
+        # NIENTE `docker cp` verso il gateway: il suo rootfs è read-only per
+        # hardening e docker cp rifiuta («container rootfs is marked read-only»,
+        # misurato 06/09 — #285 bis). L'exec invece scrive dal processo INTERNO
+        # sulla tmpfs di /tmp, che è scrivibile: il testo viaggia su stdin.
+        import shlex as _shlex
+        run([*cc, "exec", "-T", "gateway", "sh", "-c",
+             f"cat > {_shlex.quote(dest)}"], input=contenuto, check=True)
+
     try:
         if testuale:
             log(f"«{src.name}» è già testo ({suffix}): indicizzo DIRETTO, niente NotebookLM")
-            run([*cc, "cp", str(src), f"gateway:{gw_txt}"], check=True)
+            _porta_nel_gateway(src.read_text(encoding="utf-8", errors="replace"), gw_txt)
             db_path = f"/var/lib/archive/db/{db_name}.db"
             res2 = run([*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
                         gw_txt, db_path, "--project", project], capture=True, check=False)
@@ -3533,7 +3544,7 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         if data.get("verification"):
             log(f"verifica NotebookLM: {data['verification'][:400]}")
         host_txt.write_text(text, encoding="utf-8")
-        run([*cc, "cp", str(host_txt), f"gateway:{gw_txt}"], check=True)
+        _porta_nel_gateway(text, gw_txt)
         db_path = f"/var/lib/archive/db/{db_name}.db"
         res2 = run([*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
                     gw_txt, db_path, "--project", project], capture=True, check=False)

@@ -65,9 +65,13 @@ def test_md_va_diretto_e_non_tocca_notebooklm(cli, tmp_path):
         f"un file testuale è passato da NotebookLM: {piatto}"
     assert any("gateway" in c and "archive_indexer" in c for c in piatto), \
         f"l'indexer del gateway non è stato invocato: {piatto}"
-    # il file viaggia con la SUA estensione (il parser si sceglie dal suffisso)
-    assert any(".md" in c for c in piatto if "cp" in c), \
+    # il file viaggia con la SUA estensione (il parser si sceglie dal suffisso);
+    # e viaggia via exec+stdin, MAI con `docker cp`: il rootfs del gateway è
+    # read-only per hardening e cp fallirebbe (misurato 06/09, #285 bis)
+    assert any(".md" in c and "cat >" in c for c in piatto), \
         f"l'estensione testuale è andata persa nel viaggio: {piatto}"
+    assert not any(c.startswith("docker compose cp") and "gateway" in c for c in piatto), \
+        f"docker cp verso il gateway read-only: {piatto}"
 
 
 def test_nlm_forza_il_giro_notebooklm_anche_su_testo(cli, tmp_path, monkeypatch):
