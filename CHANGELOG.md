@@ -2,6 +2,25 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.47.0] — 2026-09-06
+
+### Aggiunto
+- **`archive-ingest` ora porta il testo diretto all'indexer, senza NotebookLM**
+  (#285): il comando era nato per scansioni e PDF-immagine e faceva passare
+  TUTTO dal giro di trascrizione nlm — anche un markdown già testuale, con ore
+  di attesa e un punto di rottura in più per contenuto già indicizzabile.
+  Misurato il 06/09 sul primo collaudo dello standard ingest-video: 3 file md
+  su 3 morti in «Could not add file source» dopo ~5 ore di giro a vuoto. Ora
+  i file di testo (md/txt, autodetect) vengono spezzati e scritti nel DB con
+  l'indexer, speaker/voice popolati come da contratto; il giro nlm resta per
+  ciò che davvero va trascritto.
+
+### Corretto
+- **L'errore del canale nlm ora parla**: quando la trascrizione fallisce,
+  l'errore riporta il notebook usato e la risposta di nlm, non il solo
+  «Could not add file source» — era esattamente la classe di errore muto che
+  questo repo dichiara di combattere, in casa propria.
+
 ## [0.46.1] — 2026-09-05
 
 ### Corretto
