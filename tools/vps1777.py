@@ -3450,13 +3450,26 @@ def cmd_archive_retag(repo: Path, args) -> int:
     return uscita
 
 
+# Estensioni che sono GIÀ testo: il giro NotebookLM (OCR/trascrizione) su di loro
+# è puro overhead più un punto di rottura in più — misurato il 2026-09-06 (#285):
+# tre .md hanno girato ORE nel canale nlm per poi fallire, quando l'indexer li
+# avrebbe mangiati in un secondo. Il testo si indicizza DIRETTO; NotebookLM resta
+# per ciò che testo non è (PDF-immagine, scansioni, audio).
+_TESTO_EXTS = {".md", ".txt", ".markdown", ".rst", ".log", ".csv", ".json", ".jsonl"}
+
+
 def cmd_archive_ingest(repo: Path, args) -> int:
-    """Estrae il testo di un file via NotebookLM (OCR/lettura multimodale) e lo
-    indicizza nell'archivio FTS. Per immagini/scansioni che pypdf non sa leggere.
+    """Indicizza un file nell'archivio FTS. Due percorsi, scelti dal TIPO:
+
+    - file GIÀ TESTUALI (.md/.txt/…): DIRETTI all'indexer del gateway — niente
+      NotebookLM (#285: il giro OCR su testo puro è overhead e fragilità gratis).
+      `--nlm` forza comunque il giro NotebookLM (caso raro: un .txt che è in
+      realtà il dump di una scansione da ri-leggere multimodalmente).
+    - tutto il resto (PDF-immagine, scansioni…): via NotebookLM come sempre.
 
     Orchestrazione (l'host ha docker; nb1777-mcp ha l'auth nlm; il gateway ha
     l'indexer + il volume archive):
-      1. copia il file in nb1777-mcp → `app.ingest` trascrive (scratch usa-e-getta)
+      1. [solo non-testo] copia in nb1777-mcp → `app.ingest` trascrive (scratch)
       2. porta il testo nel gateway → `app.archive_indexer` lo indicizza nel .db
       3. archive-mcp lo scopre da solo (scan-mode). Pulizia dei temp inclusa.
     """
@@ -3466,11 +3479,29 @@ def cmd_archive_ingest(repo: Path, args) -> int:
     db_name = _ARCH_NAME_RE.sub("-", (args.db or src.stem).lower()).strip("-") or "archivio"
     project = args.project or db_name
     rid = os.urandom(4).hex()
+    suffix = src.suffix.lower()
+    testuale = suffix in _TESTO_EXTS and not args.nlm
+    if suffix in _TESTO_EXTS and args.nlm:
+        log(f"«{src.name}» è testuale ma --nlm forza il giro NotebookLM")
     nb_in = f"/tmp/ing_{rid}{src.suffix}"
-    gw_txt = f"/tmp/ing_{rid}.txt"
+    # il file testuale viaggia con la SUA estensione: l'indexer sceglie il parser
+    # dal suffisso (un .md rinominato .txt perderebbe solo cosmetica, ma il nome
+    # vero è informazione — non si butta)
+    gw_ext = suffix if testuale else ".txt"
+    gw_txt = f"/tmp/ing_{rid}{gw_ext}"
     host_txt = Path(f"/tmp/vps1777_ing_{rid}.txt")
     cc = compose_cmd(repo)
     try:
+        if testuale:
+            log(f"«{src.name}» è già testo ({suffix}): indicizzo DIRETTO, niente NotebookLM")
+            run([*cc, "cp", str(src), f"gateway:{gw_txt}"], check=True)
+            db_path = f"/var/lib/archive/db/{db_name}.db"
+            res2 = run([*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
+                        gw_txt, db_path, "--project", project], capture=True, check=False)
+            if res2.returncode != 0:
+                die(f"indicizzazione fallita: {(res2.stderr or res2.stdout or '').strip()[:300]}")
+            ok(f"indicizzato nell'archivio → DB «{db_name}»: {(res2.stdout or '').strip()}")
+            return 0
         log(f"NotebookLM: trascrizione di «{src.name}» (può richiedere un minuto)…")
         run([*cc, "cp", str(src), f"nb1777-mcp:{nb_in}"], check=True)
         ecmd = [*cc, "exec", "-T", "nb1777-mcp", "python", "-m", "app.ingest", "--file", nb_in]
@@ -3478,7 +3509,19 @@ def cmd_archive_ingest(repo: Path, args) -> int:
             ecmd.append("--verify")
         res = run(ecmd, capture=True, check=False, timeout=900)
         if res.returncode != 0:
-            die(f"trascrizione fallita: {(res.stderr or res.stdout or '').strip()[:300]}")
+            err_txt = (res.stderr or res.stdout or "").strip()[:300]
+            # ERRORE PARLANTE (#285): «Could not add file source» nudo non dice né
+            # dove né perché. Diagnosi 2026-09-06 sul vivo: nb_create/add_text/delete
+            # funzionavano, add-da-FILE falliva con QUALUNQUE estensione (md e txt)
+            # → regressione dell'upload-file nel client nlm (upstream), non cookie.
+            aiuto = ""
+            if "Could not add" in err_txt:
+                aiuto = ("\n  il canale sessione è probabilmente sano (la creazione del "
+                         "notebook scratch è riuscita): questo errore, misurato, indica "
+                         "l'upload-file del client nlm rotto (regressione upstream, #285). "
+                         "Se il file è testuale, rilancia SENZA --nlm: il percorso diretto "
+                         "non passa da NotebookLM. Cookie: vps1777 secrets-status.")
+            die(f"trascrizione fallita: {err_txt}{aiuto}")
         try:
             data = json.loads((res.stdout or "").strip().splitlines()[-1])
         except (json.JSONDecodeError, IndexError):
@@ -3500,9 +3543,11 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         return 0
     finally:
         # -u root: i temp sono creati da `compose cp` (root); l'utente app (uid
-        # 1000) non li potrebbe rimuovere.
+        # 1000) non li potrebbe rimuovere. Nel percorso testuale nb1777-mcp non è
+        # mai stato toccato: niente rm lì (un exec in meno, e il test lo pretende).
         host_txt.unlink(missing_ok=True)
-        run([*cc, "exec", "-u", "root", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)
+        if not testuale:
+            run([*cc, "exec", "-u", "root", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)
         run([*cc, "exec", "-u", "root", "-T", "gateway", "rm", "-f", gw_txt], check=False)
 
 
@@ -3928,11 +3973,13 @@ def build_parser() -> "argparse.ArgumentParser":
     p.add_argument("--bundle", help="dir del bundle estratto (default: auto-detect)")
     p.add_argument("--yes", action="store_true")
 
-    p = sub.add_parser("archive-ingest", help="indicizza un file nell'archivio via NotebookLM (OCR/lettura multimodale)")
-    p.add_argument("file", help="file da estrarre (PDF-immagine, scansione, doc…)")
+    p = sub.add_parser("archive-ingest", help="indicizza un file nell'archivio (testo: diretto; scansioni: via NotebookLM)")
+    p.add_argument("file", help="file da indicizzare (testo → diretto; PDF-immagine/scansione → NotebookLM)")
     p.add_argument("--db", help="nome del DB archivio (default: dal nome file)")
     p.add_argument("--project", help="etichetta progetto (default: nome DB)")
     p.add_argument("--verify", action="store_true", help="chiedi a NotebookLM di verificare la trascrizione")
+    p.add_argument("--nlm", action="store_true",
+                   help="forza il giro NotebookLM anche su file testuali (default: il testo va diretto, #285)")
 
     p = sub.add_parser("archive-retag", help="ri-classifica `voice` sui DB dell'archivio (a secco di default)")
     p.add_argument("--db", help="un solo DB (nome senza .db); default: tutti")

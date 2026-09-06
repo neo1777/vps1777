@@ -1322,12 +1322,16 @@ features:
 
   - id: cli.archive-ingest
     nome: "vps1777 archive-ingest"
-    cosa: "Indicizza un file nell'archivio passando da NotebookLM per la lettura
-           multimodale (OCR): è la via per PDF-immagine e scansioni che pypdf non legge."
+    cosa: "Indicizza un file nell'archivio. Due percorsi scelti dal tipo (#285):
+           i file GIÀ testuali (.md/.txt/…) vanno DIRETTI all'indexer del gateway
+           — niente NotebookLM (il giro OCR su testo puro è overhead e fragilità:
+           misurato 06/09, 3/3 falliti dopo ore); PDF-immagine e scansioni passano
+           da NotebookLM per la lettura multimodale. `--nlm` forza il giro OCR."
     dove: ["cli:archive-ingest", "tools/vps1777.py"]
     status: active-default
-    since: "0.20.0 (dichiarato qui il 02/08)"
-    verify: {cli_command: archive-ingest}
+    since: "0.20.0 (percorso diretto per testo: 0.47.0, #285)"
+    verify:
+      file_contains: {path: "tools/vps1777.py", pattern: "indicizzo DIRETTO, niente NotebookLM"}
 
   - id: cli.archive-retag
     nome: "vps1777 archive-retag"
