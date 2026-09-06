@@ -1976,3 +1976,44 @@ def test_speaker_derivato_anche_su_db_nato_v3(tmp_path: Path) -> None:
     for sender, speaker in coppie:
         assert speaker == attesi[sender], (
             f"sender={sender!r} ha speaker={speaker!r}: la derivazione non è girata")
+
+
+def test_speaker_popolato_da_ogni_percorso_di_ingest(tmp_path: Path) -> None:
+    """Guard-rail della #279: `speaker` esce POPOLATO da ogni percorso d'ingest.
+
+    La derivazione vive in `write_rows` (`popola_speaker`, dalla cura della #271):
+    questo test inchioda il CONTRATTO dichiarato in REVIEW.md — lo zip claude.ai
+    via `index_file` (il ramo CLI che la #279 denunciava) e il jsonl Claude Code
+    via `index_jsonl` non devono mai più produrre righe con `speaker=''`.
+    Se un percorso d'ingest nuovo salterà `write_rows`, questo test non lo vede:
+    il punto d'aggancio della derivazione è UNO, e chi ne aggiunge un altro
+    deve estendere anche qui.
+    """
+    import zipfile
+    # percorso 1 — zip claude.ai via index_file (il ramo della #279)
+    zp = tmp_path / "export.zip"
+    convs = [{"uuid": "c1", "name": "chat", "chat_messages": [
+        {"uuid": "m1", "sender": "human", "created_at": "2026-01-01T00:00:00Z", "text": "ciao"},
+        {"uuid": "m2", "sender": "assistant", "created_at": "2026-01-01T00:00:01Z",
+         "content": [{"type": "text", "text": "risposta"}]},
+    ]}]
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("conversations.json", json.dumps(convs))
+    db_zip = tmp_path / "zip.db"
+    assert archive_indexer.index_file(str(zp), str(db_zip)) > 0
+    # percorso 2 — jsonl Claude Code via index_jsonl
+    db_cc = tmp_path / "cc.db"
+    assert archive_indexer.index_jsonl(str(_jsonl(tmp_path)), str(db_cc), project="p") > 0
+    for db in (db_zip, db_cc):
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            vuoti = conn.execute(
+                "SELECT count(*) FROM messages WHERE speaker=''").fetchone()[0]
+            assert vuoti == 0, f"{db.name}: {vuoti} righe con speaker='' (contratto #279)"
+            # e la derivazione è GIUSTA, non solo non-vuota
+            for sender, speaker in conn.execute(
+                    "SELECT DISTINCT sender, speaker FROM messages"
+                    " WHERE sender IN ('human','assistant')"):
+                assert speaker == sender, f"{db.name}: sender={sender!r} → speaker={speaker!r}"
+        finally:
+            conn.close()
