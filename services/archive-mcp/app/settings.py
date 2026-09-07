@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # caricato/indicizzato qui compare SENZA restart. ARCHIVE_DB_PATHS resta
     # come override per path espliciti fuori da questa dir.
     archive_db_dir: str = "/var/lib/archive/db"
+    # Modello di embedding per la ricerca ibrida (ONNX + tokenizer): artefatto sul
+    # volume, come i DB e gli indici — non nell'immagine. 449 MB che non pesano su
+    # ogni pull dell'immagine, e che si aggiornano senza rilasciare una versione.
+    archive_model_dir: str = "/var/lib/archive/models/e5-small"
     fastmcp_stateless_http: bool = True
     log_level: str = "INFO"
 

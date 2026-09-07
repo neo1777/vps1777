@@ -25,7 +25,9 @@ from typing import Any
 
 from . import fts
 from . import integrita
+from . import semantica
 from .fts import FtsSyntaxError  # noqa: F401 — riesportato per server.py
+from .semantica import SemanticaNonPronta  # noqa: F401 — riesportato per server.py
 from .integrita import ArchivioSporco  # noqa: F401 — riesportato per server.py
 from .settings import get_settings
 
@@ -370,6 +372,149 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
             senza_doppi.append(r)
         collected = senza_doppi
     return collected[:limit]
+
+
+# ── RICERCA IBRIDA — FTS5 + vettori (issue #281) ─────────────────────────────────
+# Il perché e le tre scelte di design stanno in `semantica.py`. Qui c'è
+# l'orchestrazione multi-DB: quali archivi hanno un indice, come si apre, e la
+# fusione. La regola di confine: `search` NON cambia di una virgola — chi la usa
+# oggi non si accorge di nulla, e chi vuole i vettori chiede un tool diverso.
+
+
+def _indici_disponibili() -> dict[str, Path]:
+    """{nome DB: percorso indice} per i soli DB che un indice ce l'hanno davvero."""
+    _maybe_reload()
+    out: dict[str, Path] = {}
+    for name, p in _DBS.items():
+        idx = semantica.percorso_indice(Path(p))
+        if idx.is_file():
+            out[name] = idx
+    return out
+
+
+def _open_con_indice(name: str, idx: Path) -> sqlite3.Connection:
+    """La connessione del DB con sqlite-vec caricato e l'indice ATTACHato in RO.
+
+    Riusa `_open()` (quindi la cache per-thread e il controllo del journal caldo)
+    e ci aggiunge, UNA SOLA VOLTA per connessione, l'estensione e l'ATTACH: il
+    flag vive sull'oggetto connessione, quindi segue la sua vita — se la cache la
+    butta perché il file è cambiato, il flag se ne va con lei e la prossima
+    riattacca. Un flag tenuto altrove sopravviverebbe alla connessione che
+    descrive: sarebbe una promessa su un oggetto morto.
+    """
+    conn = _open(name)
+    if getattr(conn, "_vec_pronta", False):
+        return conn
+    try:
+        import sqlite_vec
+    except ImportError as exc:                          # pragma: no cover — dipendenza d'immagine
+        raise SemanticaNonPronta(
+            f"estensione sqlite-vec non installata nell'immagine ({exc})") from exc
+    conn.enable_load_extension(True)
+    try:
+        sqlite_vec.load(conn)
+    finally:
+        # Si richiude SEMPRE: lasciare aperto il caricamento di estensioni su una
+        # connessione persistente è una superficie in più per tutta la sua vita.
+        conn.enable_load_extension(False)
+    conn.execute("ATTACH DATABASE ? AS vec", (f"file:{idx}?mode=ro",))
+    conn._vec_pronta = True                             # type: ignore[attr-defined]
+    return conn
+
+
+@_serializzata
+def search_ibrida(query: str, db: str = "", limit: int = 20, *,
+                  query_fts: str = "", since: str = "", until: str = "",
+                  k_rrf: int = semantica.RRF_K,
+                  peso_fts: float = semantica.RRF_PESO_FTS,
+                  snippet_tokens: int = 32) -> dict[str, Any]:
+    """Ricerca ibrida FTS5 + vettoriale con fusione RRF pesata.
+
+    Ritorna {righe, indici, parametri}: le righe come `search`, più `origine`
+    ('fts' | 'vettori' | 'entrambi') per ciascuna — chi legge deve poter vedere
+    *quale* dei due l'ha trovata, altrimenti il guadagno resta invisibile.
+    """
+    s = get_settings()
+    model_dir = Path(s.archive_model_dir)
+    indici = _indici_disponibili()
+    bersagli = [n for n in _targets(db) if n in indici]
+    if not bersagli:
+        disponibili = sorted(indici) or "nessuno"
+        raise SemanticaNonPronta(
+            f"Nessun indice vettoriale per {'i DB richiesti' if db else 'gli archivi caricati'}"
+            f" (DB con indice: {disponibili}).\n"
+            "L'indice è un file `<nome-db>.vec.db` accanto al DB, generato sul PC "
+            "e caricato sul volume come i DB stessi (vedi docs/RICERCA-IBRIDA.md).\n"
+            "Senza indice, `search` (FTS5) resta pienamente funzionante: usa quello."
+        )
+    blob = semantica.embed_query(query, model_dir)      # solleva SemanticaNonPronta se manca il modello
+    righe: list[dict[str, Any]] = []
+    meta_per_db: list[dict[str, Any]] = []
+    for name in bersagli:
+        try:
+            conn = _open_con_indice(name, indici[name])
+        except KeyError:
+            continue
+        snap = _snapshot(_DBS[name])
+        # ① lista FTS5: la query naturale funziona male in FTS5 (è una frase, non
+        #    un'espressione), quindi chi chiama può passare `query_fts` col lessico
+        #    giusto. Se non lo fa, si prova comunque: una lista vuota non è un
+        #    errore, è semplicemente metà fusione.
+        try:
+            rows_fts = fts.search_conn(conn, query_fts or query, limit=limit * 3,
+                                       since=since, until=until,
+                                       snippet_tokens=snippet_tokens)
+        except (FtsSyntaxError, sqlite3.OperationalError) as exc:
+            log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s", name, exc)
+            rows_fts = []
+        per_uuid = {r["uuid"]: r for r in rows_fts}
+        lista_fts = [r["uuid"] for r in rows_fts]
+        # ② lista vettoriale: rowid → uuid (l'indice lavora su rowid, il mondo
+        #    esterno su uuid: la traduzione sta qui e non nell'indice, così un
+        #    re-ingest che cambia i rowid rompe l'indice, non il contratto).
+        lista_vec: list[str] = []
+        try:
+            rowids = semantica.knn_dedup(conn, blob, topn=limit * 3)
+            if rowids:
+                seg = ",".join("?" * len(rowids))
+                cur = conn.execute(
+                    f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip "
+                    f"FROM messages WHERE rowid IN ({seg})", rowids)
+                per_rowid = {r["rowid"]: dict(r) for r in cur}
+                for rid in rowids:                      # l'ordine del knn è il rank
+                    r = per_rowid.get(rid)
+                    if not r:
+                        continue
+                    u = r["uuid"]
+                    lista_vec.append(u)
+                    if u not in per_uuid:
+                        per_uuid[u] = {"uuid": u, "project": r["project"], "ts": r["ts"],
+                                       "rank": None, "snippet": (r["snip"] or "")[:400]}
+        except sqlite3.OperationalError as exc:
+            log.warning("indice di %s non interrogabile: %s", name, exc)
+            continue
+        # ③ fusione
+        fusi = semantica.fondi_rrf(lista_fts, lista_vec, k=k_rrf, peso_fts=peso_fts)
+        in_fts, in_vec = set(lista_fts), set(lista_vec)
+        for u in fusi[:limit]:
+            r = dict(per_uuid[u])
+            r["db"] = name
+            r["snapshot"] = snap
+            r["origine"] = ("entrambi" if u in in_fts and u in in_vec
+                            else "fts" if u in in_fts else "vettori")
+            righe.append(r)
+        m = semantica.meta_indice(conn)
+        meta_per_db.append({"db": name, "indice": str(indici[name].name),
+                            "messaggi_indicizzati": m.get("messaggi", "?"),
+                            "perimetro": m.get("perimetro", "non dichiarato"),
+                            "modello": m.get("modello", "?"),
+                            "generato": m.get("generato", "?")})
+    return {
+        "righe": righe[:limit],
+        "indici": meta_per_db,
+        "parametri": {"k_rrf": k_rrf, "peso_fts": peso_fts,
+                      "modello": semantica.MODELLO_ATTESO},
+    }
 
 
 @_serializzata

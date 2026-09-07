@@ -11,6 +11,14 @@ dependencies = [
     "pydantic-settings>=2.15.0",
     "uvicorn[standard]>=0.52.3",
     "starlette>=1.6.0",
+    # Ricerca ibrida (#281): l'embedding della query gira QUI, l'indicizzazione no.
+    # onnxruntime+tokenizers invece di torch+sentence-transformers: stessi vettori
+    # (cosine 1.000000, misurato), ~35 MB invece di ~1 GB — su una VPS da 3 GB con
+    # sei container la differenza non è estetica.
+    "onnxruntime>=1.20,<2",
+    "tokenizers>=0.20,<1",
+    "sqlite-vec>=0.1.6,<0.2",
+    "numpy>=2.0,<3",
 ]
 
 [build-system]
