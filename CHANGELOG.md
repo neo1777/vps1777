@@ -2,6 +2,37 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.48.0] — 2026-09-07
+
+### Aggiunto
+- **`search_ibrida`: l'archivio cerca per SENSO, non solo per lessico** (#281).
+  `search` (FTS5) risponde bene a chi sa come si chiama ciò che cerca; il caso
+  d'uso che ha fatto nascere l'archivio è l'opposto — *ricordo il senso e non la
+  parola*. Il tool nuovo fonde FTS5 e ricerca vettoriale con RRF pesata.
+  **Misurato** sul banco del POC (9 bersagli fissati prima di misurare): FTS5
+  5/9, vettori 4/9, **ibrido 6/9**. Sulle query esatte non batte `search`: è
+  tarato per non peggiorarle. Il contratto di `search` non cambia.
+  - **ONNX invece di torch**: stesso modello (multilingual-e5-small), vettori
+    IDENTICI (cosine 1.000000 contro sentence-transformers, misurato) con ~35 MB
+    di dipendenze invece di ~1 GB — su una VPS da 3 GB con sei container non è
+    estetica. L'int8 (113 MB invece di 449) è stato misurato e **scartato**:
+    cosine 0.985-0.990, cioè vettori diversi da quelli dell'indice.
+  - **L'indice è un artefatto di volume**, file separato `<db>.vec.db` accanto
+    al suo DB: il DB dell'archivio non si tocca, i backup non si gonfiano,
+    l'indice si rigenera senza rifare il DB. Indicizzare il corpus costa ~60 h
+    di CPU e si fa fuori dalla VPS; nel container gira solo la query.
+  - **Degradazione dichiarata**: senza modello o senza indice il tool non ricade
+    in silenzio su FTS5 — solleva un errore che dice cosa manca e come
+    rimediare, e ogni risposta porta il PERIMETRO dell'indice (un indice
+    parziale che tace produce zeri che sembrano assenze).
+  - Doc: `docs/RICERCA-IBRIDA.md`. Ledger: `archive.search_ibrida`.
+
+### Corretto
+- **Lo scan dei DB ignora i `.vec.db`**: sono indici, non archivi. Senza il
+  filtro sarebbero comparsi come DB fantasma in `list_databases`, con un warning
+  di schema a ogni ricerca su tutti i DB. Trovato caricando il primo indice sul
+  volume, prima del merge — *il nome finisce in `.db`, il ruolo no.*
+
 ## [0.47.2] — 2026-09-06
 
 ### Corretto
