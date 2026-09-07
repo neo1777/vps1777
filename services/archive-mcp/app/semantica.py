@@ -179,6 +179,53 @@ def knn_dedup(conn: Any, blob: bytes, *, topn: int, k_chunk: int = 400,
     return ordine
 
 
+# Parole che in una domanda parlata non portano segnale. Non è una lista di
+# stopword «linguistica»: è la lista di ciò che rovina una query FTS5, misurata
+# sul caso reale (sotto).
+_VUOTE = {
+    "a", "ad", "ai", "al", "alla", "alle", "allo", "anche", "che", "chi", "ci",
+    "coi", "col", "come", "con", "cosa", "cui", "da", "dai", "dal", "dalla",
+    "de", "dei", "del", "della", "delle", "dello", "di", "dove", "e", "ed",
+    "era", "erano", "essere", "gia", "già", "gli", "ho", "i", "il", "in", "io",
+    "la", "le", "lo", "ma", "mi", "mia", "mie", "miei", "mio", "ne", "nei",
+    "nel", "nella", "nelle", "nello", "non", "o", "per", "piu", "più", "qual",
+    "quale", "quando", "quanto", "quella", "quello", "questa", "questo", "sono",
+    "su", "sul", "sulla", "te", "tu", "tuo", "un", "una", "uno", "and", "for",
+    "from", "how", "of", "on", "or", "that", "the", "to", "was", "were", "what",
+    "when", "where", "which", "with",
+}
+
+
+def query_fts_da_naturale(testo: str, *, minimo: int = 2) -> str:
+    """Da una domanda parlata a un'espressione FTS5 utile — o stringa vuota.
+
+    🔴 PERCHÉ ESISTE, misurato in produzione il 07/09 al primo collaudo dal vivo.
+    FTS5 fa **AND implicito** fra tutti i termini: passargli «la dashboard dove i
+    file erano pianeti nello spazio» significa chiedere i documenti che
+    contengono *anche* «la», «dove», «i», «erano» — cioè solo testi lunghissimi
+    dove quelle parole capitano tutte insieme. Il risultato non era zero (che si
+    sarebbe notato): erano **quattro risultati plausibili e inutili**, che la
+    fusione poi promuoveva sopra i veri. *Il rumore che passa il controllo è più
+    dannoso del silenzio.*
+
+    La cura: tenere i termini che portano segnale e unirli con OR, così bm25
+    premia chi ne contiene di più e di più rari. Sotto `minimo` termini utili
+    restituisce "" — e chi chiama salta il ramo full-text invece di inventarselo.
+    """
+    parole = [p.strip(".,;:!?()[]{}«»\"'`").lower()
+              for p in (testo or "").split()]
+    utili = [p for p in parole if len(p) > 2 and p not in _VUOTE and not p.isdigit()]
+    # de-duplica conservando l'ordine: «memoria … memoria» non pesa doppio
+    viste, tenuti = set(), []
+    for p in utili:
+        if p not in viste:
+            viste.add(p)
+            tenuti.append(p)
+    if len(tenuti) < minimo:
+        return ""
+    return " OR ".join(f'"{p}"' for p in tenuti)
+
+
 def fondi_rrf(fts: list, vec: list, *, k: int = RRF_K,
               peso_fts: float = RRF_PESO_FTS) -> list:
     """Reciprocal Rank Fusion PESATA delle due liste (identità qualsiasi hashable).
