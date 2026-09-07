@@ -50,10 +50,19 @@ def _db_dir() -> Path | None:
 
 
 def _scan_dir(db_dir: Path) -> dict[str, Path]:
-    """Tutti i *.db nella dir → {nome-file-senza-estensione: path}."""
+    """Tutti i *.db nella dir → {nome-file-senza-estensione: path}.
+
+    ⚠️ ESCLUDE i `*.vec.db`: sono INDICI vettoriali (#281), non archivi. Vivono
+    apposta accanto al loro DB — `recupero.db` + `recupero.vec.db` — e senza
+    questo filtro la glob li prenderebbe come archivi a sé, con due danni: un DB
+    fantasma «recupero.vec» in `list_databases`, e un warning di schema a ogni
+    ricerca su TUTTI i DB. *Un file che si chiama come un archivio non è un
+    archivio: qui il nome non basta, conta il ruolo.*
+    """
     if not db_dir.is_dir():
         return {}
-    return {p.stem: p for p in sorted(db_dir.glob("*.db")) if p.is_file()}
+    return {p.stem: p for p in sorted(db_dir.glob("*.db"))
+            if p.is_file() and not p.name.endswith(".vec.db")}
 
 
 def load_registry() -> dict[str, Path]:

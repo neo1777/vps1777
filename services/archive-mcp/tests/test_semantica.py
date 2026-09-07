@@ -137,3 +137,36 @@ def test_banco_bersagli_semantici(query, nome):
     blob = semantica.embed_query(query, _MODELLO)
     rowids = semantica.knn_dedup(conn, blob, topn=10)
     assert rowids, f"{nome}: il knn non ha restituito nulla"
+
+
+# ── ① l'indice non deve travestirsi da archivio ──────────────────────────────
+
+def test_scan_ignora_gli_indici_vettoriali(tmp_path, monkeypatch):
+    """`recupero.vec.db` è un INDICE, non un archivio: se lo scan lo prendesse,
+    comparirebbe un DB fantasma «recupero.vec» in `list_databases` e ogni ricerca
+    su tutti i DB emetterebbe un warning di schema. Difetto trovato caricando
+    l'indice sul volume, PRIMA del merge — il nome finisce in `.db`, il ruolo no.
+
+    Stub di `app.settings` invece di `importorskip`, per la regola della casa
+    (vedi test_db_conn.py): la CI gira con `uvx pytest`, che non porta pydantic,
+    e un file che si salta da solo resterebbe verde senza eseguire nulla."""
+    import types
+
+    (tmp_path / "recupero.db").write_bytes(b"")
+    (tmp_path / "recupero.vec.db").write_bytes(b"")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    for mod in [m for m in list(sys.modules) if m == "app" or m.startswith("app.")]:
+        del sys.modules[mod]
+    finte = types.ModuleType("app.settings")
+
+    class _S:
+        archive_db_dir = str(tmp_path)
+        archive_db_paths: dict = {}
+        archive_model_dir = str(tmp_path / "models")
+
+    finte.get_settings = lambda: _S()          # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "app.settings", finte)
+    from app import db as dbmod
+
+    trovati = dbmod._scan_dir(tmp_path)
+    assert set(trovati) == {"recupero"}, f"indice scambiato per archivio: {sorted(trovati)}"
