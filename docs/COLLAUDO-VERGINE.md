@@ -89,6 +89,41 @@ Un esempio del confronto che conta: una `pre-format` su una versione vecchia pu�
 vergine quelle stesse prove **devono** diventare verdi: è la misura che il format ha
 comprato le cure, non un dettaglio.
 
+## 2c · La domanda dell'utente: `tools/collaudo-da-fuori.sh`
+
+Le verifiche qui sopra si fanno **sulla macchina**, e provano cose che dalla macchina si
+vedono. Ne resta una che dalla macchina **non** si può vedere: *da Internet, adesso,
+questa installazione risponde?* Il gateway risponde a `127.0.0.1:8080` anche col Funnel
+caduto o il certificato non emesso — cioè proprio nei casi in cui l'utente non entra.
+
+```bash
+./tools/collaudo-da-fuori.sh https://<url-pubblico>     # DAL TUO PC, non dalla VPS
+./tools/collaudo-da-fuori.sh --help
+```
+
+Quattro controlli, e **tre stati** invece di due:
+
+| esito | significa |
+|---|---|
+| `0` | risponde da Internet, TLS valido, il pannello è quello di vps1777, la 8080 di fallback è richiusa |
+| `1` | non risponde — e dice **quale** dei quattro è caduto, non «errore» |
+| `2` | **non eseguibile qui**: manca l'URL, manca `curl`, o il bersaglio è locale. «Non ho potuto guardare» non ha lo stesso colore di «non funziona» |
+
+⚪ Alcuni controlli sanno dichiararsi **non applicabili** invece di dare un verde comodo:
+se il servizio non risponde, «la 8080 è chiusa» non ha soggetto; se il bersaglio **è** la
+8080, quella domanda la si sta facendo a se stessa; se il bersaglio è `127.0.0.1`, questa
+sonda misura una promessa — *un URL HTTPS pubblico* — che in locale non è in gioco (per la
+prova locale vale [PRIMI-15-MINUTI.md](PRIMI-15-MINUTI.md)).
+
+🔑 **Perché è in `tools/` e perché lo stampano gli installer.** Fino al 07/09/2026 questo
+script viveva in una cartella di lavoro **fuori dal repo**: sano, collaudato nei quattro
+stati, e mai lanciato da nessuno — `git ls-files` non lo conteneva, nessun documento lo
+nominava, la CI non poteva vederlo. *Uno strumento fuori dal perimetro dell'oggetto che
+misura non viene agganciato: non c'è il posto da cui lanciarlo.* Ora `setup.sh` e
+`deploy.sh` lo stampano come **ultima riga**, con l'URL dentro: la fine di
+un'installazione è il solo istante in cui qualcuno ha in mano l'URL e la voglia di sapere
+se ha funzionato.
+
 ## 3 · Re-ingest e quadratura dell'archivio
 
 Upload da `/admin/archive` ([ARCHIVE.md](ARCHIVE.md)) annotando **il numero che l'upload

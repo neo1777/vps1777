@@ -65,6 +65,13 @@ clean-machine acceptance test of 2026-08-27 ran on; on Debian 13 with encrypted
 volumes the same VPS proved unstable, see `H56` in `security/findings.yml`) with an
 IP and a root password. Three ways, same repo.
 
+> 💻 **Before renting one, run it on your own PC.** All three ways below need a real
+> machine with an IP and root; the fourth doesn't. The stack runs locally on Docker —
+> **from `git clone` to the admin panel, with every step timed on a clean box**, and
+> with what you *cannot* see locally written down instead of hidden (public HTTPS,
+> first of all). The page is in Italian:
+> **[docs/PRIMI-15-MINUTI.md](docs/PRIMI-15-MINUTI.md)**.
+
 ### 🖱 Graphical installer — zero commands (recommended)
 
 On **your PC**:
@@ -232,6 +239,7 @@ source, and a moved original turns the build red until the translation catches u
 | Age-encrypted backup & restore, two tiers | [docs/en/BACKUP-RESTORE.md](docs/en/BACKUP-RESTORE.md) | [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) |
 | The `vps1777` CLI, every command with examples | [docs/en/CLI.md](docs/en/CLI.md) | [docs/CLI.md](docs/CLI.md) |
 | The 1777 memory discipline (canon, local layers) | [docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md) | [docs/MEMORIA-1777.md](docs/MEMORIA-1777.md) |
+| Trying it locally, no VPS: timed steps, what you see and what isn't there | — | [docs/PRIMI-15-MINUTI.md](docs/PRIMI-15-MINUTI.md) |
 | Public HTTPS: Tailscale Funnel / Caddy / Cloudflare | — | [docs/INGRESS.md](docs/INGRESS.md) |
 | Adding your own MCP or bot | — | [docs/PLUGINS.md](docs/PLUGINS.md) |
 | Secrets: management, rotation, backup | — | [docs/SECRETS.md](docs/SECRETS.md) |

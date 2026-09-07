@@ -426,6 +426,15 @@ PY
   echo
   ok "Apply completato."
   [ -n "$PUB" ] && log "URL: ${C_B}$PUB${C_R}  →  /admin/login · /admin/nlm · /<SECRET>/<service>/mcp"
+  # ── ULTIMA RIGA: LA VERIFICA DA FUORI ───────────────────────────────────────────────
+  # 🔑 Qui l'installazione FINISCE davvero (l'URL HTTPS esiste, il Funnel ha risposto,
+  #   la 8080 si è chiusa) e — cosa che sulla VPS non è vera — questo script gira già
+  #   sul PC dell'utente, cioè DA FUORI. È l'istante in cui la misura costa un incollaggio
+  #   e dopo il quale non la fa più nessuno: `tools/collaudo-da-fuori.sh` è vissuto fuori
+  #   dal repo, sano e mai lanciato, finché nessun file lo nominava (collaudo del 07/09).
+  log "Verifica DA FUORI — da questo PC, che è già fuori:"
+  log "  ${C_OK}./tools/collaudo-da-fuori.sh ${PUB:-https://<il-tuo-url-pubblico>}${C_R}"
+  log "  Dice QUALE passo è caduto, e non colora «non ho potuto guardare» come «è giù»."
   exit 0
 fi
 
@@ -1132,6 +1141,11 @@ ${C_B}${C_OK}╔═════════════════════�
      porta 8080. Stampa l'URL HTTPS finale.
 
   4. ${C_B}Connector claude.ai${C_R}: <URL>/$GATEWAY_SECRET/archive/mcp  (e /nb1777/mcp)
+
+  5. ${C_B}Verifica DA FUORI${C_R} — da questo PC, che è già fuori (dopo il passo 3,
+     con l'URL HTTPS che \`--apply\` stampa; adesso l'URL è quello qui sotto):
+        ${C_OK}./tools/collaudo-da-fuori.sh ${PUBLIC_BASE:-http://$VPS_IP:8080}${C_R}
+     Quattro domande, e un «non ho potuto guardare» che non è un verde.
 
   ${C_D}Amministrazione: ssh $VPS_USER@$VPS_IP → sudo -u $OPERATOR_USER -i → cd vps1777${C_R}
 

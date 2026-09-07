@@ -63,6 +63,13 @@ stato fatto il collaudo completo su macchina vergine del 27/08/2026; su Debian 1
 con volumi cifrati la stessa VPS risultava instabile, vedi `H56` in
 `security/findings.yml`) con IP e password root. Tre modi, dallo stesso repo.
 
+> 💻 **Prima di affittarne una, provalo sul tuo PC.** Le tre vie qui sotto
+> chiedono tutte una macchina vera con IP e root: la quarta no. Lo stack gira in
+> locale su Docker — **dal clone al pannello admin, coi tempi misurati passo per
+> passo**, e con ciò che in locale *non* si può vedere scritto invece che
+> nascosto (l'HTTPS pubblico, prima di tutto):
+> **[docs/PRIMI-15-MINUTI.md](docs/PRIMI-15-MINUTI.md)**.
+
 ### 🖱 Installer grafico — zero comandi (consigliato)
 
 Sul **tuo PC**:
@@ -203,6 +210,7 @@ colpo d'occhio:
 
 | Doc | Cosa trovi |
 |---|---|
+| [PRIMI-15-MINUTI.md](docs/PRIMI-15-MINUTI.md) | Provarlo in locale senza VPS: i passi misurati, cosa vedi e cosa in locale non c'è |
 | [INSTALL.md](docs/INSTALL.md) | Installazione passo-passo + post-install (connector, NotebookLM) |
 | [INGRESS.md](docs/INGRESS.md) | HTTPS pubblico: Tailscale Funnel / Caddy / Cloudflare |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Flussi, contratti, security model |
