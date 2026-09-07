@@ -47,6 +47,39 @@ def test_search_dichiara_dedup_e_concorrenza() -> None:
     assert "2 ricerche" in doc, "il limite di concorrenza #270 va dichiarato"
 
 
+def test_list_databases_espone_il_ruolo_nelle_schede() -> None:
+    """#278 — il campo su cui si INSTRADA deve stare nella scheda che il client
+    legge per scegliere. Se `ruolo` esistesse solo in describe_databases, chi usa
+    le schede continuerebbe a dedurre il DB dalla prosa, che è la #278 stessa."""
+    fn = getattr(server, "list_databases")
+    sorgente = inspect.getsource(fn)
+    assert '"ruolo"' in sorgente, "le schede non portano il ruolo"
+    assert "#278" in (fn.__doc__ or "")
+
+
+def test_set_ruolo_dichiara_il_vocabolario_e_il_default() -> None:
+    """Il docstring è l'unica cosa che un LLM legge prima di chiamare il tool: se
+    non porta le quattro parole, chi lo usa deve indovinarle — e il tool
+    esisterebbe per togliere gli indovinelli."""
+    sig, doc = _firma("set_ruolo")
+    assert list(sig.parameters) == ["db_name", "ruolo"]
+    for parola in ("primario", "fotografia", "riscontro", "riservato"):
+        assert parola in doc, f"il docstring non dichiara '{parola}'"
+    assert "non dichiarato" in doc, "il default onesto non è dichiarato a chi chiama"
+    assert "#278" in doc
+
+
+def test_describe_dichiara_che_il_ruolo_NON_cambia_i_default() -> None:
+    """La cura A è additiva, e la cosa va detta dove qualcuno potrebbe assumere il
+    contrario. Un campo `ruolo` in vista fa credere che il default sia diventato
+    «cerca sui primari» — se lo diventerà (cura B) sarà un cambio di CONTRATTO,
+    con il suo CHANGELOG e il protocollo dello zero aggiornato. Fino ad allora
+    l'unica difesa contro quell'assunzione è la riga che la smentisce."""
+    _, doc = _firma("describe_databases")
+    assert "#278" in doc
+    assert "tutti i DB" in doc and "cura B" in doc
+
+
 def test_archive_stats_dichiara_il_costo() -> None:
     _, doc = _firma("archive_stats")
     assert "memoizzate" in doc and "#269" in doc

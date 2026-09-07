@@ -34,6 +34,65 @@ from .settings import get_settings
 log = logging.getLogger(__name__)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# #278 — il RUOLO di un archivio diventa un CAMPO, non una frase
+# ══════════════════════════════════════════════════════════════════════════════
+# Con 22 DB caricati (misurato il 07/09/2026) il primo bivio di ogni ricerca è
+# «quale archivio». Fino a oggi la risposta viveva SOLO nella `description`: prosa
+# italiana con dentro «★ PRIMARIO del versante claude.ai» e «⚠️ SUPERATO COME
+# PRIMARIO — usare quello». Un umano la legge; un client che deve SCEGLIERE no.
+# È la stessa classe del «Chiude #N» in italiano che non chiude la issue: una
+# regola scritta per un lettore che non sa leggerla riesce a metà, e in silenzio.
+#
+# ⚠️ ADDITIVO PER COSTRUZIONE — questa è la sola cura A della #278. Nessun tool
+#   cambia comportamento perché il campo esiste: `search`/`count` senza `db_name`
+#   continuano a toccare TUTTI i DB. Il default sui primari è la cura B, che è
+#   un cambio di CONTRATTO e va fatta con la sua dichiarazione (docstring,
+#   CHANGELOG, protocollo dello zero: «0 sui primari ≠ 0 ovunque»). Chi non legge
+#   `ruolo` funziona esattamente come prima di questa PR.
+#
+# IL VOCABOLARIO È RICAVATO DAI DB VERI, non da una tassonomia astratta — le
+# quattro classi qui sotto coprono i 22 archivi in essere:
+#   · `primario`    la fonte CORRENTE del suo versante: se non scegli, è lei che
+#                   risponde. (claude.ai, bus Claude Code, Telegram, voce, video…)
+#   · `fotografia`  versione più VECCHIA dello stesso versante, tenuta per la
+#                   storia: si cerca qui quando interessa com'era, non cos'è.
+#   · `riscontro`   non si interroga per TROVARE, si interroga per VERIFICARE:
+#                   ridondanza voluta (D11), gemelli re-ingeriti con un indexer
+#                   diverso, DB-sonda con un caso-noto-che-deve-riuscire.
+#   · `riservato`   materiale personale: fuori dai compiti tecnici senza richiesta
+#                   esplicita. È un ruolo DICHIARATO, non un permesso: non chiude
+#                   nessuna porta, dice a chi legge che quella porta non va aperta
+#                   di sua iniziativa. Chi vuole un divieto TECNICO deve chiedere
+#                   un'altra cosa, e questo campo non gliela promette.
+RUOLI: tuple[str, ...] = ("primario", "fotografia", "riscontro", "riservato")
+
+# Un DB senza ruolo NON è un DB senza importanza, e nemmeno uno da indovinare dal
+# nome: è un DB su cui **nessuno si è ancora pronunciato**, e questa è a sua volta
+# un'informazione. Perciò il default non è `""` (che sparisce da un rendering e da
+# un `if`) né `primario` (che sarebbe un'ipotesi spacciata per dato): è una parola
+# che si legge, che non appartiene a `RUOLI`, e che quindi nessun filtro
+# `ruolo in RUOLI` può scambiare per una dichiarazione.
+RUOLO_NON_DICHIARATO = "non dichiarato"
+
+
+def normalizza_ruolo(ruolo: str) -> str:
+    """Il valore da scrivere in `meta['ruolo']`, o ValueError con l'elenco.
+
+    La stringa vuota è ammessa e vuol dire **ritira la dichiarazione**: un ruolo
+    sbagliato dev'essere disfacibile senza inventare un quinto valore per dire
+    «non lo so più».
+    """
+    v = str(ruolo).strip().lower()
+    if v and v not in RUOLI:
+        raise ValueError(
+            f"ruolo '{ruolo}' non ammesso. Ammessi: {', '.join(RUOLI)} "
+            f"(oppure stringa vuota per ritirare la dichiarazione → "
+            f"'{RUOLO_NON_DICHIARATO}')."
+        )
+    return v
+
+
 def _snapshot(path: Path) -> str:
     """Data di ultima modifica del file DB (ISO, UTC) — la 'freschezza' del DB:
     ogni risposta la porta, così una sessione sa quanto è vecchio ciò che legge."""
@@ -730,10 +789,15 @@ _PERIODI_MEMO: dict[str, tuple[str, list[dict[str, Any]]]] = {}
 
 def describe() -> list[dict[str, Any]]:
     """Scheda di ogni DB: righe, intervallo temporale, n. etichette, snapshot
-    (freschezza). Più ricca di list_databases (che resta list[str] per compat).
+    (freschezza), `ruolo` (#278). Più ricca di list_databases (che resta
+    list[str] per compat).
 
     Le statistiche sono memoizzate per snapshot: la scansione si paga una volta
-    per versione del file, non a ogni chiamata (vedi _STATS_MEMO qui sopra)."""
+    per versione del file, non a ogni chiamata (vedi _STATS_MEMO qui sopra).
+    Il `ruolo` sta DENTRO il memo insieme alla description e per la stessa
+    ragione: si scrive nella tabella `meta` del file, quindi l'mtime cambia e il
+    memo si invalida da sé — un ruolo appena impostato non resta nascosto dietro
+    una cache finché non riavvia qualcuno."""
     _maybe_reload()
     out: list[dict[str, Any]] = []
     for name in sorted(_DBS):
@@ -749,8 +813,14 @@ def describe() -> list[dict[str, Any]]:
             try:
                 info = fts.db_stats_conn(conn)
                 info["description"] = fts.meta_value_conn(conn, "description")
+                # `or RUOLO_NON_DICHIARATO`: la tabella `meta` può mancare (DB
+                # precedenti), la chiave può mancare, o il valore può essere stato
+                # RITIRATO (stringa vuota). Tre strade, una sola risposta onesta.
+                info["ruolo"] = (fts.meta_value_conn(conn, "ruolo")
+                                 or RUOLO_NON_DICHIARATO)
             except sqlite3.OperationalError:
-                info = {"rows": 0, "oldest": "", "newest": "", "labels": 0, "description": ""}
+                info = {"rows": 0, "oldest": "", "newest": "", "labels": 0,
+                        "description": "", "ruolo": RUOLO_NON_DICHIARATO}
             finally:
                 conn.close()
             _STATS_MEMO[name] = (snap, dict(info))
@@ -781,6 +851,41 @@ def set_description(db: str, description: str) -> dict[str, Any]:
     interna. Gli errori risalgono parlanti: chi chiama deve sapere *perché* non
     ha scritto, non ricevere un silenzio.
     """
+    esito = _scrivi_via_gateway("description", db, {"description": str(description)},
+                                chiamante="set_description")
+    return {"db": db, "description": str(description), "via": "gateway", "esito": esito}
+
+
+def set_ruolo(db: str, ruolo: str) -> dict[str, Any]:
+    """Dichiara il RUOLO di un archivio (#278) — stessa strada di set_description.
+
+    Il valore è a vocabolario CHIUSO (`RUOLI`), e la chiusura non è pedanteria:
+    è la difesa che la `description` non può avere. Quel campo è testo libero che
+    finisce nel contesto di un LLM con l'autorevolezza di un metadato di sistema
+    (D17), e per questo il gateway gli mette cap di lunghezza e filtro dei
+    caratteri di controllo. Qui invece **non passa testo libero**: o è una delle
+    quattro parole, o è un rifiuto. La validazione avviene DUE volte, qui e nel
+    gateway — non per simmetria, ma perché questo lato può essere aggirato
+    (chiunque parli col gateway) e quello no.
+
+    Stringa vuota = ritira la dichiarazione (il DB torna `non dichiarato`).
+    """
+    valore = normalizza_ruolo(ruolo)
+    esito = _scrivi_via_gateway("ruolo", db, {"ruolo": valore}, chiamante="set_ruolo")
+    return {"db": db, "ruolo": valore or RUOLO_NON_DICHIARATO,
+            "via": "gateway", "esito": esito}
+
+
+def _scrivi_via_gateway(rotta: str, db: str, campi: dict[str, Any], *,
+                        chiamante: str) -> Any:
+    """L'unico canale di scrittura di questo servizio: POST /internal/archive/<rotta>.
+
+    Estratta da `set_description` quando la #278 ha aggiunto la seconda scrittura.
+    La ragione non è il risparmio di righe: è che la parte delicata — fail-closed
+    sul segreto, errori PARLANTI invece di un silenzio — deve avere UNA
+    implementazione. Due copie divergono, e a divergere sarebbe la copia che
+    nessuno rilegge, cioè quella nuova.
+    """
     _maybe_reload()
     if db not in _DBS:
         raise KeyError(f"DB '{db}' non disponibile. Disponibili: {available_dbs()}")
@@ -791,24 +896,23 @@ def set_description(db: str, description: str) -> dict[str, Any]:
         # fail-closed e PARLANTE: senza segreto la scrittura non parte, e chi
         # chiama lo scopre subito invece di credere di aver scritto.
         raise RuntimeError(
-            "set_description non configurata: manca il segreto interno "
+            f"{chiamante} non configurata: manca il segreto interno "
             "(ARCHIVE_DESC_SECRET/_FILE) — la scrittura passa dal gateway."
         )
     req = urllib.request.Request(
-        f"{base}/internal/archive/description",
-        data=json.dumps({"db": db, "description": str(description)}).encode("utf-8"),
+        f"{base}/internal/archive/{rotta}",
+        data=json.dumps({"db": db, **campi}).encode("utf-8"),
         headers={"Content-Type": "application/json", "x-vps1777-archive-desc": secret},
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
-            esito = json.loads(r.read().decode("utf-8"))
+            return json.loads(r.read().decode("utf-8"))
     except urllib.error.HTTPError as ex:
         corpo = ex.read().decode("utf-8", "replace")[:200]
         raise RuntimeError(f"il gateway ha rifiutato la scrittura ({ex.code}): {corpo}") from ex
     except urllib.error.URLError as ex:
         raise RuntimeError(f"gateway non raggiungibile per la scrittura: {ex.reason}") from ex
-    return {"db": db, "description": str(description), "via": "gateway", "esito": esito}
 
 
 def _leggi_segreto() -> str:
