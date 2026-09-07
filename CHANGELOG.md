@@ -2,6 +2,21 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [0.48.1] — 2026-09-07
+
+### Corretto
+- **`search_ibrida`: la query naturale non finisce cruda in FTS5** (#281).
+  Trovato al PRIMO collaudo dal vivo di 0.48.0: FTS5 fa AND implicito fra tutti
+  i termini, quindi «la dashboard dove i file erano pianeti nello spazio»
+  chiedeva i documenti che contengono *anche* «la», «dove», «i», «erano» — cioè
+  solo testi lunghissimi dove quelle parole capitano tutte insieme. Il risultato
+  non era zero (uno zero si nota): erano quattro risultati **plausibili e
+  inutili**, che la fusione promuoveva sopra i veri. *Il rumore che passa il
+  controllo è più dannoso del silenzio.* Ora la frase diventa un'espressione con
+  i soli termini che portano segnale, uniti con OR; sotto due termini utili il
+  ramo full-text tace invece di inventarsi una query. Una `query_fts` esplicita
+  continua a vincere su tutto.
+
 ## [0.48.0] — 2026-09-07
 
 ### Aggiunto
