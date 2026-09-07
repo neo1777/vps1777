@@ -530,6 +530,28 @@ H55
         ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer"
         AUTOUPD_MSG=" + auto-update sicuro (settimanale)";;
       esac
+      # ── Backup dichiarato ma MAI armato: il buco che questa via aveva ────────
+      # `backup` è nel default di FEATURES (riga sopra), quindi è ACCESO a meno
+      # che tu non lo spenga. Ma il backup cifra con age, e senza un recipient in
+      # `tools/age-recipients.txt` non può cifrare niente. deploy.sh e engine.py
+      # il recipient lo armano (o almeno lo dicono); questa via non lo nominava
+      # nemmeno: si finiva l'installazione con «backup=ON» e nessuna chiave, cioè
+      # con la protezione più importante dichiarata e assente. Un backup che non
+      # c'è si scopre il giorno in cui serve — e quel giorno non si rimedia.
+      # NON genero la chiave al posto tuo di proposito: la chiave PRIVATA deve
+      # stare sul TUO PC e mai sulla macchina che stiamo installando. Qui si
+      # smette soltanto di tacere. (Presidiato da security/confronta-installer.py,
+      # asse «backup armato»: se una delle tre vie smette di nominarlo, la CI cade.)
+      case ",$FEATURES," in *,backup,*)
+        if grep -q '^age1' tools/age-recipients.txt 2>/dev/null; then
+          ok "Backup: recipient age presente (tools/age-recipients.txt)"
+        else
+          warn "Backup DICHIARATO ma NON ARMATO: manca un recipient age in tools/age-recipients.txt"
+          warn "  → i backup non potranno essere cifrati finché non lo imposti. Genera la chiave"
+          warn "    sul TUO PC con 'age-keygen -o age-key.txt', poi copia qui la sola riga"
+          warn "    pubblica: printf '%s\\n' age1... > tools/age-recipients.txt  (vedi BACKUP-RESTORE.md)"
+        fi;;
+      esac
       # SC2086 disabilitata di proposito: $ENABLE_UNITS è una LISTA di nomi di unit
       # separati da spazi, e la divisione in parole è ciò che serve. Virgolettarla la
       # passerebbe a systemctl come un unico nome inesistente.
