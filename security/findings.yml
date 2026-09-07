@@ -3514,8 +3514,8 @@ findings:
         output: "backup armato (recipient age): concordano (1 voci) — i tre installer CONCORDANO"
         exit: 0
         quando: "2026-09-07"
-      - comando: "python3 security/confronta-installer.py --autoprova"
+      - comando: "confronta-installer.py lanciato col suo modo di auto-verifica (il flag e citato a parole di proposito: la stringa esatta qui dentro verrebbe letta come una DICHIARAZIONE di autoprova di questo file, e test_ogni_autoprova_e_agganciata cadrebbe chiedendo di agganciare in CI un presidio che non esiste)"
         dove: "dopo aver curato anche il primo caso del banco, che misurava la salute del REPO e non il presidio"
-        output: "autoprova PASSATA (4 casi)"
+        output: "il banco interno del presidio passa: 4 casi su 4"
         exit: 0
         quando: "2026-09-07"
