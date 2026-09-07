@@ -170,3 +170,29 @@ def test_scan_ignora_gli_indici_vettoriali(tmp_path, monkeypatch):
 
     trovati = dbmod._scan_dir(tmp_path)
     assert set(trovati) == {"recupero"}, f"indice scambiato per archivio: {sorted(trovati)}"
+
+
+# ── ① la query naturale non deve diventare rumore in FTS5 ────────────────────
+
+def test_query_naturale_diventa_espressione_utile():
+    """Il difetto misurato in produzione: FTS5 fa AND implicito, quindi la frase
+    intera cercava anche «la», «dove», «i», «erano» e restituiva quattro testi
+    lunghissimi, plausibili e inutili — che la fusione poi promuoveva."""
+    e = semantica.query_fts_da_naturale("la dashboard dove i file erano pianeti nello spazio")
+    assert " OR " in e
+    for vuota in ('"la"', '"dove"', '"i"', '"erano"', '"nello"'):
+        assert vuota not in e, f"{vuota} è rumore: non deve entrare nella query FTS"
+    for utile in ('"dashboard"', '"pianeti"', '"spazio"', '"file"'):
+        assert utile in e
+
+
+def test_query_senza_termini_utili_non_inventa_nulla():
+    """Sotto due termini con segnale il ramo full-text TACE. Una query inventata
+    darebbe risultati che sembrano risposte: mezza fusione onesta è meglio."""
+    assert semantica.query_fts_da_naturale("che cosa e' che non va?") == ""
+    assert semantica.query_fts_da_naturale("") == ""
+
+
+def test_termini_ripetuti_non_pesano_due_volte():
+    e = semantica.query_fts_da_naturale("memoria della memoria e ancora memoria archivio")
+    assert e.count('"memoria"') == 1

@@ -469,12 +469,19 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         #    un'espressione), quindi chi chiama può passare `query_fts` col lessico
         #    giusto. Se non lo fa, si prova comunque: una lista vuota non è un
         #    errore, è semplicemente metà fusione.
-        try:
-            rows_fts = fts.search_conn(conn, query_fts or query, limit=limit * 3,
-                                       since=since, until=until,
-                                       snippet_tokens=snippet_tokens)
-        except (FtsSyntaxError, sqlite3.OperationalError) as exc:
-            log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s", name, exc)
+        espressione = query_fts or semantica.query_fts_da_naturale(query)
+        if espressione:
+            try:
+                rows_fts = fts.search_conn(conn, espressione, limit=limit * 3,
+                                           since=since, until=until,
+                                           snippet_tokens=snippet_tokens)
+            except (FtsSyntaxError, sqlite3.OperationalError) as exc:
+                log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s", name, exc)
+                rows_fts = []
+        else:
+            # Meno di due termini con segnale: il ramo full-text tace invece di
+            # inventarsi una query. Mezza fusione onesta > due liste di cui una
+            # è rumore promosso a risultato.
             rows_fts = []
         per_uuid = {r["uuid"]: r for r in rows_fts}
         lista_fts = [r["uuid"] for r in rows_fts]
