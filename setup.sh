@@ -420,6 +420,18 @@ COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
 # In dev l'overlay di build ri-aggiunge i build context (compose.yaml è pull-only)
 [ "$DEV_BUILD" = "1" ] && COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.build.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
 
+# ── L'URL CHE CHI INSTALLA HA IN MANO ADESSO ──────────────────────────────────────────
+# Nelle righe finali c'era il letterale `<PUBLIC_BASE>`, tre volte: un segnaposto che
+# chiede a chi ha appena installato di sostituirlo da sé, nell'unico momento in cui il
+# valore vero ce l'abbiamo noi. Si legge da `.env` e NON dalla variabile: su un re-run
+# il blocco che assegna `PUBLIC_BASE` è saltato («.env esiste già»), e con `set -u`
+# quella variabile lì non esiste nemmeno.
+# 🛡️ Se l'URL non c'è — ingress Tailscale, il Funnel non l'ha ancora emesso — resta il
+#   segnaposto: un `<PUBLIC_BASE>` dichiarato è onesto, un URL inventato no.
+PUB="$(sed -n 's/^PUBLIC_BASE=//p' .env 2>/dev/null | tail -1)"
+URL_MOSTRATO="${PUB:-<PUBLIC_BASE>}"
+URL_COLLAUDO="${PUB:-https://<il-tuo-url-pubblico>}"
+
 log ""
 if [ "$DEV_BUILD" = "1" ]; then
   log "Pronto a buildare in locale (dev) e avviare:"
@@ -595,12 +607,14 @@ H55
     fi
   fi
   echo
+  AVVIATO=1
   log "Prossimi step:"
-  log "  - Apri il pannello admin: <PUBLIC_BASE>/admin/login"
-  log "  - Carica il profilo NotebookLM: <PUBLIC_BASE>/admin/nlm"
-  log "  - Aggiungi connector a claude.ai con URL: <PUBLIC_BASE>/<SECRET>/<service>/mcp"
+  log "  - Apri il pannello admin: $URL_MOSTRATO/admin/login"
+  log "  - Carica il profilo NotebookLM: $URL_MOSTRATO/admin/nlm"
+  log "  - Aggiungi connector a claude.ai con URL: $URL_MOSTRATO/<SECRET>/<service>/mcp"
   log "  - Aggiornamenti: \`vps1777 update\` o tab Update del pannello (vedi docs/UPDATE.md)"
 else
+  AVVIATO=0
   log "OK, avvialo a mano quando vuoi:"
   if [ "$DEV_BUILD" = "1" ]; then
     log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d --build"
@@ -608,3 +622,24 @@ else
     log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE pull && docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d"
   fi
 fi
+
+# ───── ULTIMA RIGA: COME SI VERIFICA, DA FUORI ─────
+# 🔑 IL PRESIDIO VA DOVE IL GESTO GIÀ AVVIENE (collaudo da fuori del 07/09/2026).
+#   `tools/collaudo-da-fuori.sh` era sano e non l'aveva lanciato nessuno: viveva fuori
+#   dal repo e nessun file lo nominava. Non serviva ricordarselo meglio — serviva un
+#   posto da cui parte da sé. La fine di un'installazione è il SOLO istante in cui una
+#   persona ha in mano l'URL e la voglia di sapere se ha funzionato: se la riga non è
+#   qui, per lo sconosciuto quello strumento non esiste.
+# ⚠️ «DA FUORI» è letterale, e non è pignoleria: da QUESTA macchina il gateway risponde
+#   anche quando da Internet è giù (tunnel caduto, cert non emesso, porta non pubblicata)
+#   — cioè proprio il caso che quello script è nato per prendere. Misurarlo da qui
+#   dentro risponde a un'altra domanda, con la stessa faccia.
+echo
+if [ "$AVVIATO" = "1" ]; then
+  log "Verifica DA FUORI — dal TUO PC, non da questa macchina:"
+else
+  log "Quando l'avrai avviato, verifica DA FUORI — dal TUO PC, non da questa macchina:"
+fi
+log "  ./tools/collaudo-da-fuori.sh $URL_COLLAUDO"
+log "  Lo trovi in questo repo (clonalo sul tuo PC, o copiati quel file). Dice QUALE"
+log "  passo è caduto — e «non ho potuto guardare» non ha lo stesso colore di «è giù»."
