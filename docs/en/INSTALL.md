@@ -16,7 +16,7 @@ Step-by-step sequence from an empty host to a running stack.
 |---|---|---|
 | Linux x86_64/arm64 | any recent | Debian 12 recommended (full shakedown on a virgin machine, 27/08/2026 — on Debian 13 with encrypted volumes the VPS was unstable, entry `H56`) / Ubuntu 24+ / Fedora / Arch |
 | Docker Engine | 24+ | with the `docker compose` plugin v2 |
-| python3 **+ pip** | 3.10+ | only for `setup.sh` (computes bcrypt). On Debian/Ubuntu `python3` and `python3-pip` are **two packages**: `sudo apt install python3-pip`. If `bcrypt` is already there, pip is not needed — the preflight checks the capability, not the name |
+| python3 **+ bcrypt** | 3.10+ | only for `setup.sh` (computes the admin password hash). On Debian/Ubuntu `python3` is a package of its own: `sudo apt install python3 python3-bcrypt`. ⚠️ **`python3-pip` is NOT enough on Debian 12+ / Ubuntu 23.04+** — that is, on the very distro we recommend: there pip is already present and it is the *installation* that is forbidden (PEP 668), so `pip install bcrypt` fails. The right package is `python3-bcrypt` (Fedora: `sudo dnf install python3-bcrypt`). If `bcrypt` is already there, nothing else is needed — the preflight checks the capability, not the name |
 | Tailscale account **or** Caddy+domain **or** Cloudflare | one of the three | chosen at setup |
 | Telegram bot + OWNER_ID | from [@BotFather](https://t.me/BotFather) + [@userinfobot](https://t.me/userinfobot) | optional for dev, mandatory for prod |
 | Google account with NotebookLM | free | login happens **after the install** via `/admin/nlm` |
@@ -26,10 +26,10 @@ Step-by-step sequence from an empty host to a running stack.
 ```bash
 git clone https://github.com/neo1777/vps1777.git
 cd vps1777
-./setup.sh                                      # wizard interattivo
-# solo se hai risposto «no» a «Procedo ora?» — setup.sh avvia già, con gli stessi -f:
+./setup.sh                                      # interactive wizard
+# only if you answered "no" to "Procedo ora?" — setup.sh already starts it, same -f:
 docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
-  --profile ingress.tailscale up -d             # o caddy / cloudflared
+  --profile ingress.tailscale up -d             # or caddy / cloudflared
 ```
 
 The final stage prints the URLs for you.
@@ -58,13 +58,13 @@ If you re-run `setup.sh`, it skips the steps already done.
 1. **Admin login**: `<PUBLIC_BASE>/admin/login` → admin email + password
 2. **NotebookLM auth**: on YOUR PC install the `nlm` CLI, log in, then upload the **profile** (tar.gz) to `<PUBLIC_BASE>/admin/nlm`. The `nlm` CLI 0.7.x saves the auth as a `profiles/default/` folder (no longer a single `auth.json`):
    ```bash
-   uv tool install notebooklm-mcp-cli --python 3.12      # serve uv (astral.sh)
-   nlm login                                             # apre il browser → login NotebookLM
+   uv tool install notebooklm-mcp-cli --python 3.12      # needs uv (astral.sh)
+   nlm login                                             # opens the browser → NotebookLM login
    cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default
    ```
    Upload `nlm-profile.tgz` to `<PUBLIC_BASE>/admin/nlm` (admin login). The gateway extracts it onto the volume; `nb1777-mcp` picks it up on the next call.
    If `nlm` comes up "not found": `uv tool update-shell` (puts `~/.local/bin` in the PATH) and reopen the terminal.
-3. **claude.ai connector**: Settings → Integrations → Add → paste the URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (and `/nb1777/mcp`). Authorize → admin login. `archive` exposes the archive search tools (list and details in [ARCHIVE.md](../ARCHIVE.md) (Italian)), `nb1777` exposes **37** of them ([NB1777.md](../NB1777.md) (Italian)). Connectors **persist** across gateway restarts (DCR saved to disk).
+3. **claude.ai connector**: Settings → Integrations → Add → paste the URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (and `/nb1777/mcp`). Authorize → admin login. `archive` exposes the archive search tools (list and details in [ARCHIVE.md](../ARCHIVE.md) (Italian)), `nb1777` exposes **38** of them ([NB1777.md](../NB1777.md) (Italian)). Connectors **persist** across gateway restarts (DCR saved to disk).
 4. **Telegram bot**: `/start` to your bot
 5. **Mini App**: in the bot, the **Pannello** button next to the text field (or
    `/pannello`) → the mobile control deck: notebooks, archive, secrets, update.
@@ -91,10 +91,10 @@ health-gate and rollback) — see [OPS.md](../OPS.md) (Italian).
 ## Uninstalling
 
 ```bash
-# `--remove-orphans` non è opzionale: il container dell'ingress sta in un overlay, non
-# è nel modello che `down` costruisce da solo, e senza RESTA ACCESO. Si usa questo e non
-# gli `-f` perché qui non sappiamo quale ingress hai scelto — e una riga che deve
-# indovinarlo è sbagliata per chi ha scelto l'altro.
-docker compose down -v --remove-orphans               # -v cancella i volumi
-rm -rf secrets/                                       # cancella i secret
+# `--remove-orphans` is not optional: the ingress container lives in an overlay, it is
+# not in the model `down` builds on its own, and without it IT STAYS UP. We use this and
+# not the `-f` flags because here we don't know which ingress you chose — and a line that
+# has to guess is wrong for whoever picked the other one.
+docker compose down -v --remove-orphans               # -v deletes the volumes
+rm -rf secrets/                                       # deletes the secrets
 ```

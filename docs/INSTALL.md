@@ -14,7 +14,7 @@ Sequenza passo-passo dall'host vuoto a stack su.
 |---|---|---|
 | Linux x86_64/arm64 | qualsiasi recente | Debian 12 consigliata (collaudo completo su macchina vergine, 27/08/2026 — su Debian 13 con volumi cifrati la VPS era instabile, voce `H56`) / Ubuntu 24+ / Fedora / Arch |
 | Docker Engine | 24+ | con `docker compose` plugin v2 |
-| python3 **+ pip** | 3.10+ | solo per `setup.sh` (calcola bcrypt). Su Debian/Ubuntu `python3` e `python3-pip` sono **due pacchetti**: `sudo apt install python3-pip`. Se `bcrypt` c'è già, pip non serve — il preflight verifica la capacità, non il nome |
+| python3 **+ bcrypt** | 3.10+ | solo per `setup.sh` (calcola l'hash della password admin). Su Debian/Ubuntu `python3` è un pacchetto a sé: `sudo apt install python3 python3-bcrypt`. ⚠️ **`python3-pip` NON basta su Debian 12+ / Ubuntu 23.04+** — cioè proprio sulla distro consigliata: lì pip c'è già ed è l'*installazione* a essere vietata (PEP 668), quindi `pip install bcrypt` fallisce. Il pacchetto giusto è `python3-bcrypt` (Fedora: `sudo dnf install python3-bcrypt`). Se `bcrypt` c'è già, non serve altro — il preflight verifica la capacità, non il nome |
 | Account Tailscale **o** Caddy+dominio **o** Cloudflare | uno dei tre | scelta al setup |
 | Bot Telegram + OWNER_ID | da [@BotFather](https://t.me/BotFather) + [@userinfobot](https://t.me/userinfobot) | opzionale per dev, obbligatorio per prod |
 | Account Google con NotebookLM | gratis | il login si fa **dopo l'install** via `/admin/nlm` |
@@ -61,7 +61,7 @@ Se rilanci `setup.sh`, salta gli step già fatti.
    ```
    Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm` (login admin). Il gateway lo estrae sul volume; `nb1777-mcp` lo rileva alla prossima call.
    Se `nlm` risulta "not found": `uv tool update-shell` (mette `~/.local/bin` nel PATH) e riapri il terminale.
-3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **37** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
+3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **38** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
 4. **Bot Telegram**: `/start` al tuo bot
 5. **Mini App**: nel bot, bottone **Pannello** accanto al campo di testo (o
    `/pannello`) → la plancia mobile: notebook, archivio, secret, update.

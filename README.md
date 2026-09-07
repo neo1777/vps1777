@@ -99,12 +99,23 @@ URL and the connectors.
 ### 🛠 Manual — on the VPS
 
 ```bash
+sudo apt install python3 python3-bcrypt             # setup.sh prerequisite (NOT python3-pip: PEP 668)
 git clone https://github.com/neo1777/vps1777.git && cd vps1777
 ./setup.sh                                          # interactive wizard
 # if you answered "no" to "Proceed now?" (setup.sh already starts the stack, same -f):
 docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
   --profile ingress.tailscale up -d                 # or caddy / cloudflared
 ```
+
+> ⚠️ **Two things this path hits and the graphical installer does not** (measured on
+> 2026-09-07 on a bare Debian 12):
+> 1. **If you install as root**, `secrets/*.txt` stay `root:root` and the containers —
+>    which run as UID 1000 — cannot read them: `gateway` and `nb1777-mcp` stay in
+>    `Restarting`. Fix with `chown 1000:1000 secrets/*.txt`
+>    ([docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md), Italian).
+> 2. **The `docker compose` line must run after `setup.sh`**, which writes `VPS1777_TAG`
+>    into `.env`: on its own, with no `.env`, the default is `dev` and GHCR answers
+>    `manifest unknown`.
 
 For public HTTPS (Tailscale / Caddy / Cloudflare) and the prerequisites, see
 [docs/INGRESS.md](docs/INGRESS.md) (Italian). To hook the connectors to claude.ai and

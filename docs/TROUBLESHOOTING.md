@@ -4,13 +4,31 @@ Casi reali, diagnosi, fix.
 
 ## `docker compose up` fallisce con "permission denied" sui secret
 
-Causa: i file `secrets/*.txt` hanno owner sbagliato.
+Sintomo: `gateway` e `nb1777-mcp` restano in `Restarting`, e nei log c'è
+`PermissionError: [Errno 13] Permission denied: '/run/secrets/gateway_secret'`.
+
+Causa: i container girano **non-root, come UID 1000** (`app`), mentre i
+`secrets/*.txt` sono `600` e appartengono all'utente che ha lanciato `setup.sh`.
+Se quell'utente non è 1000, l'UID 1000 dentro il container non può leggerli.
 
 Fix:
 ```bash
 chmod 600 secrets/*.txt
-chown $(id -u):$(id -g) secrets/*.txt
+chown 1000:1000 secrets/*.txt        # 1000 = l'utente `app` DENTRO i container
 ```
+
+> ⚠️ **`chown $(id -u):$(id -g)` non basta, ed è la trappola** — misurata il
+> 07/09/2026 su Debian 12 nuda, percorso manuale (`git clone` + `./setup.sh`)
+> eseguito **da root**, che è ciò che i doc mostrano. Da root
+> `$(id -u):$(id -g)` vale `0:0`, cioè **esattamente lo stato che ha causato
+> l'errore**: il comando esce 0, non cambia niente e lo stack resta in
+> `Restarting`. Il numero da scrivere è quello dell'utente **dentro** il
+> container, non di quello fuori. Con `chown 1000:1000` i 4 servizi sono
+> passati `healthy` al primo tentativo.
+>
+> Il percorso `deploy.sh` non incontra il caso perché crea l'utente operatore
+> con `useradd -m -u 1000` e gli fa `chown -R` della dir remota: l'UID
+> combacia già. La trappola è **solo** del percorso manuale da root.
 
 ## Gateway non risponde su `/health`
 

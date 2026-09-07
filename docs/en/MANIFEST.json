@@ -3,7 +3,7 @@
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "6c18347d72ece3831a5949b0ad6758b754d03520b3b8d93f30d85e34d5ce4e75"
+      "sorgente_sha256": "86f96bc961af0b598b21f2f8c8bd00231333d2ae824cc207db3a63da7045e857"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
@@ -15,7 +15,7 @@
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",
-      "sorgente_sha256": "c784bfe8b9b39c46367c9ff71d954fd4fc2f8c911835a45f829115dfdc791e8e"
+      "sorgente_sha256": "12fa73a50f002adf927b6764412af61b2db02c9f10663cdeb6fb30f4cf10b6af"
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
