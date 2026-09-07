@@ -19,7 +19,39 @@ Riserva la severità alta per ciò che in questo repo fa danni veri:
 - **Contratto MCP**: cambi che rompono la forma delle risposte dei tool (`search`,
   `count`, `canonico`, `studio_*`) o il loro comportamento dichiarato nelle docstring.
 - **Colonne derivate dell'archivio**: `speaker`/`voice` devono uscire POPOLATE da ogni
-  percorso d'ingest (issue #279): uno speaker vuoto in uscita è un bug, non un caso.
+  percorso d'ingest: uno speaker vuoto in uscita è un bug, non un caso. (La issue #279
+  che qui era citata come viva è **chiusa dal 06/09**: la riga era vera quando è stata
+  scritta il 05/09, oggi manderebbe a cercare un difetto già curato.)
+
+## ⚠️ Cosa sappiamo GIÀ — non serve ridircelo
+
+Questo repo tiene un registro dei rilievi di sicurezza in **`security/findings.yml`**:
+71 voci, **60 chiuse**, e le **11 qui sotto ancora aperte**, ognuna con data, motivo e
+stato. Sono già state trovate, discusse e classificate: segnalarle di nuovo consuma il
+giro senza aggiungere niente.
+
+| ID | stato | cosa resta aperto |
+|---|---|---|
+| H4 | partial | `forwarded_allow_ips` per profilo + contatore di fallimenti globale |
+| H5 | partial | chiave age fuori dall'host; sulla VPS solo il recipient; push off-site |
+| H12 | partial | sudoers dell'operator: da `NOPASSWD:ALL` a whitelist di comandi |
+| H16 | partial | password admin: nasce sul PC, viaggia solo come hash, policy unica |
+| H22 | partial | compose pinnato ai digest, non solo ai tag |
+| H24 | partial | protezione dei tag `v*` e permessi per-job nei workflow |
+| H28 | **accepted** | secondo fattore (TOTP o passkey) sul pannello admin |
+| H35 | partial | CSP della Mini App raffinata |
+| H51 | partial | il presidio di salute sonda dal lato in cui il guasto non si vede |
+| H52 | partial | le garanzie di hardening sono certificate per STRINGA, non per comportamento |
+| H56 | **accepted** | seconda metà di H14: nello snapshot pre-update `archive-data` resta in chiaro |
+
+`partial` = curata a metà, e il file dice quale metà. `accepted` = rischio **accettato
+consapevolmente**, con la ragione scritta accanto: non è una svista.
+
+**Cosa È utile, invece**: se una di queste è più grave di come l'abbiamo classificata,
+o se la metà «curata» di una `partial` non regge alla prova, dillo — quello è un
+contributo. E leggi `security/findings.yml` prima di aprire un rilievo: se l'ID c'è
+già, il valore sta nel dire *perché la nostra classificazione è sbagliata*, non nel
+riscoprire il fatto.
 
 ## Conoscenze del repo (per non segnalare il voluto come difetto)
 
