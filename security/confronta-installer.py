@@ -60,6 +60,31 @@ ASSI: list[tuple[str, str]] = [
     #   somigliano — e toglierla senza misurare avrebbe lasciato scoperta proprio la
     #   riga che la PR aggiungeva.* ⇒ un presidio solo, completo, invece di due parziali.
     ("hardening host", r"\b(?:fail2ban|unattended-upgrades|20auto-upgrades)\b"),
+    # 🔴 ASSE «backup armato», 07/09/2026 — nato dall'audit determinismo e firmato
+    #   da Neo: «aggiungi l'asse al confronta-installer (lo fa la CI, non io)».
+    #   IL DIFETTO CHE COPRE, misurato prima di scrivere la riga: la feature
+    #   `backup` è ACCESA DI DEFAULT su tutte e tre le vie (`FEATURES` vale
+    #   `backup,autoupdate` quando .env non dice altro — setup.sh:527,
+    #   engine.py:776), ma il backup cifra con age e la cifratura ha bisogno di un
+    #   recipient in `tools/age-recipients.txt`. Chi lo arma:
+    #       deploy.sh 10 occorrenze · engine.py 5 · setup.sh **0**
+    #   ⇒ chi installa con `setup.sh` ha la feature accesa e nessuna chiave: il
+    #     backup non esiste, e nulla glielo dice. È il caso peggiore, come per
+    #     `20auto-upgrades`: una protezione DICHIARATA si legge come una protezione
+    #     attiva, mentre una assente si nota.
+    #   ⚠️ PERCHÉ LA REGEX È UNA SOLA STRINGA E NON L'ALTERNANZA CHE AVEVO SCRITTO.
+    #     Il confronto lavora su INSIEMI di stringhe trovate: due nomi diversi per
+    #     la stessa cosa diventano due elementi diversi, e l'asse segnalava anche
+    #     «AGE_RECIPIENT manca in engine.py» — che NON è un difetto, perché
+    #     engine.py arma il recipient scrivendo il file. Un presidio che nomina
+    #     anche il non-difetto perde autorità: dopo tre falsi allarmi nessuno legge
+    #     più il quarto. `age-recipients` invece è la forma canonica — compare sia
+    #     da sola sia dentro `age-recipients.txt`, quindi i due che lo armano
+    #     danno lo STESSO elemento e resta divergente solo chi non lo arma affatto.
+    #     (Prima misura sbagliata per la ragione opposta: cercando il solo
+    #     `AGE_RECIPIENT` engine.py usciva 0 come setup.sh e le vie scoperte
+    #     sembravano due invece di una.)
+    ("backup armato (recipient age)", r"age-recipients"),
 ]
 
 
@@ -168,10 +193,22 @@ def autoprova() -> int:
         (finta / "installer").mkdir()
         for nome in INSTALLER:
             shutil.copy(RADICE / nome, finta / nome)
-        # ① copia fedele → deve dire «concordano»
+        # ① copia fedele → deve dare LO STESSO VERDETTO del repo vero.
+        #    ⚠️ Prima l'atteso era `0`, cioè «concordano» — e quello non misurava
+        #    il presidio: misurava che il REPO fosse sano. Finché i tre installer
+        #    concordavano davvero le due cose coincidevano; dal 07/09 no, perché
+        #    l'asse «backup armato» trova una divergenza VERA in setup.sh, e questo
+        #    caso ha cominciato a fallire pur essendo il presidio perfettamente
+        #    funzionante. Un banco che si rompe quando trova ciò che cerca fa
+        #    esattamente il danno peggiore: rende indistinguibile «il presidio è
+        #    rotto» da «il repo ha un difetto», e la CI rossa smette di dire quale.
+        #    Ciò che questo caso deve provare è che copiare i file non cambia il
+        #    verdetto — cioè che il confronto guarda il contenuto e non il percorso.
+        atteso, _ = confronta(RADICE)
         esito, _ = confronta(finta)
-        print(f"  {'✅' if esito == 0 else '🔴'} copia fedele → esito {esito} (atteso 0)")
-        ok = ok and esito == 0
+        print(f"  {'✅' if esito == atteso else '🔴'} copia fedele → esito {esito} "
+              f"(atteso {atteso}: lo stesso del repo vero)")
+        ok = ok and esito == atteso
         casi += 1
         # ② tolgo una unit da UN solo installer → deve scattare
         p = finta / "setup.sh"

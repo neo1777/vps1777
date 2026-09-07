@@ -3427,3 +3427,95 @@ findings:
         output: "('human','',6606) · ('assistant','',6630) — il difetto misurato dove viveva"
         exit: 0
         quando: "2026-09-05"
+
+  - id: H72
+    severity: high
+    since: "v0.9.0"
+    title: "`tools/restore.sh` diceva «Config ripristinata» anche quando non aveva ripristinato niente"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-09-07"
+      come: "misura"
+      nota: >-
+        Audit determinismo del 07/09 (criterio promessa/meccanismo). Tre `cp` con
+        `2>/dev/null || true` — ogni fallimento silenziato E forzato a successo —
+        seguiti da un `ok "Config ripristinata"` INCONDIZIONATO: bastava che
+        $TMP/config esistesse, anche VUOTA. Su un restore quel messaggio è l'unica
+        cosa che una persona guarda prima di ripartire, quindi è «un comando rotto
+        è verde» applicato al caso peggiore. Il modo giusto era già dieci righe
+        sotto, nel blocco `secrets`, che concatena con && e quindi non può mentire.
+    evidence:
+      - file: "tools/restore.sh"
+        contains:
+          - "Config ripristinata solo in parte"
+          - "Config NON ripristinata: la cartella config/ del backup è vuota"
+          - "Config NON ripristinata: il backup non contiene una cartella config/"
+    fix: >-
+      Il blocco config CONTA gli elementi arrivati davvero invece di annunciare.
+      Tre esiti distinti e veri: tutti copiati → «Config ripristinata (N elementi)»;
+      alcuni falliti → warn che NOMINA i file non copiati; nessuno o cartella
+      assente → warn esplicito. Un elemento non presente nel backup non è un
+      fallimento e non viene contato come tale.
+    prova:
+      - comando: "banco a 4 casi sul CODICE VERO estratto dal file con awk, non su una copia riscritta a mano"
+        dove: "banco locale, col fix"
+        output: "completa → «(3 elementi)» · VUOTA → «NON ripristinata» · assente → «non contiene config/» · destinazione read-only → «solo in parte (0 ok) — NON copiati: .env compose.yaml ingress»"
+        exit: 0
+        quando: "2026-09-07"
+      - comando: "lo stesso caso «cartella vuota» sul codice PRIMA della cura (controprova mordace)"
+        dove: "banco locale, senza il fix"
+        output: "«[✓] Config ripristinata» — il difetto misurato dove viveva"
+        exit: 0
+        quando: "2026-09-07"
+
+  - id: H73
+    severity: high
+    since: "v0.40.3"
+    title: "La feature `backup` era accesa di default anche su `setup.sh`, che non armava mai il recipient age"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-09-07"
+      come: "misura"
+      nota: >-
+        Audit determinismo del 07/09. FEATURES vale `backup,autoupdate` a chiave
+        assente, quindi il backup è ACCESO di default su tutte e tre le vie. Ma il
+        backup cifra con age e senza un recipient in tools/age-recipients.txt non
+        cifra niente. Misurato: deploy.sh e installer/engine.py lo armano, setup.sh
+        ZERO occorrenze. Chi installava di lì finiva con backup=ON e nessuna chiave:
+        la protezione più importante DICHIARATA e ASSENTE — e un backup che non c'è
+        si scopre il giorno in cui serve, quando non si rimedia. Stessa forma del
+        caso 20auto-upgrades: una protezione nominata si legge come attiva, mentre
+        una assente si nota.
+    evidence:
+      - file: "setup.sh"
+        contains:
+          - "Backup DICHIARATO ma NON ARMATO: manca un recipient age in tools/age-recipients.txt"
+          - "Backup: recipient age presente (tools/age-recipients.txt)"
+      - file: "security/confronta-installer.py"
+        contains:
+          - "backup armato (recipient age)"
+    fix: >-
+      Due cose, non una. (a) setup.sh verifica il recipient quando `backup` è fra le
+      FEATURES e, se manca, LO DICE con le istruzioni per armarlo — non genera la
+      chiave al posto dell'operatore, perché la privata deve stare sul suo PC e mai
+      sulla macchina che si sta installando. (b) l'asse «backup armato» entra in
+      confronta-installer.py: se una delle tre vie smette di nominare il recipient,
+      la CI cade. Il presidio, non solo la cura.
+    prova:
+      - comando: "python3 security/confronta-installer.py (senza pipe: $? dopo una pipe è di tail)"
+        dove: "prima della cura di setup.sh"
+        output: "backup armato (recipient age): DIVERGONO — «age-recipients» manca in: setup.sh"
+        exit: 1
+        quando: "2026-09-07"
+      - comando: "python3 security/confronta-installer.py"
+        dove: "dopo la cura"
+        output: "backup armato (recipient age): concordano (1 voci) — i tre installer CONCORDANO"
+        exit: 0
+        quando: "2026-09-07"
+      - comando: "confronta-installer.py lanciato col suo modo di auto-verifica (il flag e citato a parole di proposito: la stringa esatta qui dentro verrebbe letta come una DICHIARAZIONE di autoprova di questo file, e test_ogni_autoprova_e_agganciata cadrebbe chiedendo di agganciare in CI un presidio che non esiste)"
+        dove: "dopo aver curato anche il primo caso del banco, che misurava la salute del REPO e non il presidio"
+        output: "il banco interno del presidio passa: 4 casi su 4"
+        exit: 0
+        quando: "2026-09-07"

@@ -368,7 +368,7 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **71 voci** (2 critiche, 10 alte, 40 medie, 19 basse): 43 dalla
+Il registro conta **73 voci** (2 critiche, 12 alte, 40 medie, 19 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -390,7 +390,7 @@ Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 60 |
+| **chiusi** | 62 |
 | **parziali** | 9 |
 | **accettati** | 2 |
 | **aperti** | 0 |

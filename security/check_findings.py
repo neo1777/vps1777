@@ -132,8 +132,19 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # v3 non migra e restava con speaker='' (misurato: 6.606+6.630 righe). La classe
 # è «la cura sul dato non sopravvive» al contrario: la cura viveva nel percorso
 # vecchio e mancava in quello nuovo.
-EXPECTED_TOTAL = 71
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 10, "medium": 40, "low": 19}
+# + 2 (H72 e H73, entrambe high, 07/09) = 73. OTTAVA FONTE: l'audit determinismo,
+# che non cerca vulnerabilità ma applica un criterio — per ogni cosa che il
+# software promette, CHI la fa scattare e COSA si vede se non scatta. Le due voci
+# sono la stessa classe vista da due lati: H72 è un messaggio che dichiara un
+# esito senza averlo verificato («Config ripristinata» dopo tre `cp` silenziati e
+# forzati a successo), H73 è una feature accesa di default che una delle tre vie
+# d'installazione non arma mai (backup=ON senza recipient age su setup.sh).
+# ⚠️ Sono `high` e non `medium` per la stessa ragione: entrambe riguardano il
+# BACKUP, cioè la cosa che si scopre rotta solo il giorno in cui serve — quando
+# non si rimedia più. Un restore che mente e un backup che non cifra non fanno
+# danno finché non li usi, e questo li rende peggiori, non migliori.
+EXPECTED_TOTAL = 73
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 40, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
