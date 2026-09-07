@@ -341,6 +341,23 @@ features:
   # ── CENSIMENTO TOOL MCP (setaccio, 17/07) — una voce per tool, cosa-fa dalla docstring del codice.
   # Esclusi i tool GIÀ nel ledger (es. archive.search, seminato da b82df434). Lista verificata
   # contro verify-features.py (i 2 mancati dal regex — source_rename/studio_rename — aggiunti a mano).
+  - id: archive.search_ibrida
+    nome: "archive-mcp · search_ibrida (ricerca per senso)"
+    cosa: "Ricerca IBRIDA FTS5 + vettoriale con fusione RRF pesata: trova ciò che
+           l'utente ricorda per SENSO e non per lessico (issue #281). Misurata sul
+           banco del POC (9 bersagli fissati prima): FTS5 5/9, vettori 4/9, ibrido
+           6/9. L'embedding della query gira nel container (ONNX e5-small, ~25 ms);
+           l'INDICE è un artefatto sul volume — `<db>.vec.db` accanto al DB — perché
+           indicizzare il corpus costa ~60 h di CPU e si fa altrove. Senza modello o
+           senza indice il tool NON ricade in silenzio su FTS5: solleva un errore che
+           dice cosa manca (un risultato dimezzato che sembra intero è il difetto che
+           questo repo combatte). `search` resta invariata: contratto intatto."
+    dove: ["mcp-tool:archive-mcp/search_ibrida", "services/archive-mcp/app/semantica.py",
+           "docs/RICERCA-IBRIDA.md"]
+    status: active-default
+    since: "0.48.0"
+    verify:
+      mcp_tool: {service: archive-mcp, name: search_ibrida}
   - id: archive.count
     nome: "archive-mcp · count"
     cosa: "Conta quanti messaggi corrispondono alla query (non limitato) — per frequenze e prevalenze."

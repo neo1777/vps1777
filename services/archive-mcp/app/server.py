@@ -139,6 +139,63 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
 
 
 @mcp.tool()
+def search_ibrida(query: str, db_name: str = "", limit: int = 20,
+                  query_fts: str = "", since: str = "", until: str = "",
+                  k_rrf: int = 30, peso_fts: float = 1.5,
+                  snippet_tokens: int = 32) -> dict[str, Any]:
+    """Cerca per SENSO, non per lessico: FTS5 + vettori fusi (issue #281).
+
+    ⚖️ QUANDO USARLA — e quando no. `search` (FTS5) resta il tool giusto quando
+    SAI come si chiama ciò che cerchi: un termine esatto, un nome di funzione,
+    una citazione. Questa serve al caso opposto, quello che ha fatto nascere
+    l'archivio: **ricordi il senso e non il lessico** — «l'articolo dove
+    raccontavo quanto avevo speso», «la dashboard dove i file erano pianeti»,
+    «quando abbiamo parlato di dare voce all'assistente». Lì FTS5 tace, perché
+    la parola che useresti tu non è quella che c'è scritta.
+
+    📐 QUANTO VALE, misurato: sul banco del POC (9 bersagli fissati PRIMA di
+    misurare) FTS5 da solo trova 5 casi su 9, i vettori da soli 4, **l'ibrido 6**.
+    Non è magia: è che le due liste sbagliano in modi diversi e la fusione tiene
+    il meglio di entrambe. Sulle query esatte questa non batte `search`: la
+    fusione è tarata per NON peggiorarle (peso FTS 1.5), non per vincerle.
+
+    🔧 COME SI SCRIVE LA QUERY: in linguaggio naturale, come la diresti a voce —
+    è l'opposto della sintassi di `search`. Niente AND/OR/asterischi: la frase
+    intera è il segnale. Se conosci ANCHE il lessico giusto, passalo in
+    `query_fts` (sintassi FTS5 normale): la parte full-text userà quello e la
+    fusione avrà due liste forti invece di una e mezza.
+
+    Args:
+        query: la domanda in linguaggio naturale (il senso).
+        db_name: DB su cui cercare ('' = tutti quelli CON indice).
+        limit: righe restituite (default 20).
+        query_fts: espressione FTS5 opzionale per il ramo full-text.
+        since / until: filtro temporale sul ramo FTS (ISO).
+        k_rrf, peso_fts: parametri di fusione. I default sono quelli misurati
+            (plateau k=20-40, peso 1.2-1.5): cambiarli è un esperimento, non
+            una regolazione — il banco vale per questi.
+        snippet_tokens: lunghezza dello snippet FTS.
+
+    Ritorna {righe, indici, parametri}:
+    - `righe`: come `search`, PIÙ `origine` = 'fts' | 'vettori' | 'entrambi'.
+      Guardala: dice quale dei due motori ha trovato quella riga, cioè se stai
+      raccogliendo il guadagno dei vettori o solo FTS5 travestito.
+    - `indici`: per ogni DB, quanti messaggi sono indicizzati, **con che
+      perimetro** e da quando. ⚠️ Leggilo prima di concludere «non c'è»: un
+      indice parziale (oggi copre mag-giu 2026) produce zeri che sembrano
+      assenze. Fuori dal perimetro, la risposta giusta è `search`.
+
+    ⚠️ Richiede il modello di embedding e almeno un indice `.vec.db` sul volume.
+    Se mancano NON ricade in silenzio su FTS5: solleva un errore che dice cosa
+    manca e come metterlo (un risultato dimezzato che sembra intero è peggio di
+    un errore). Vedi docs/RICERCA-IBRIDA.md.
+    """
+    return db.search_ibrida(query, db_name, limit, query_fts=query_fts,
+                            since=since, until=until, k_rrf=k_rrf,
+                            peso_fts=peso_fts, snippet_tokens=snippet_tokens)
+
+
+@mcp.tool()
 def count(query: str, db_name: str = "", raw: bool = False, since: str = "",
           until: str = "", project: str = "", speaker: str = "",
           voice: str = "") -> dict[str, Any]:
