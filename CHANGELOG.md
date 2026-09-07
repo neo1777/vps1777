@@ -2,6 +2,42 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [Non rilasciato]
+
+### Corretto
+
+- **P0 · Il restore diceva il falso** (PR #297). `tools/restore.sh` aveva tre `cp` con
+  `2>/dev/null || true` — ogni fallimento silenziato **e** forzato a successo — seguiti
+  da un `ok "Config ripristinata"` **incondizionato**: bastava che la cartella `config/`
+  esistesse nel backup, *anche vuota*, perché il restore annunciasse di aver ripristinato.
+  Su un restore quel messaggio è l'unica cosa che una persona guarda prima di ripartire.
+  Il modo giusto era già dieci righe sotto, nel blocco `secrets`, che concatena con `&&`
+  e quindi non può mentire. Ora si conta ciò che è arrivato davvero e lo si dice.
+  Banco a quattro casi sul codice vero: completa → «3 elementi»; **vuota → «NON
+  ripristinata»**; assente → lo dice; destinazione non scrivibile → «solo in parte»
+  con i nomi dei file non copiati.
+- **P0 · Il backup dichiarato e mai armato** (PR #297). La feature `backup` è **accesa
+  di default** su tutte e tre le vie (`FEATURES` vale `backup,autoupdate` a chiave
+  assente), ma il backup cifra con `age` e senza un recipient in
+  `tools/age-recipients.txt` non cifra niente. Misurato: `deploy.sh` e `installer/engine.py`
+  lo armano, **`setup.sh` zero volte** — chi installava di lì finiva con `backup=ON` e
+  nessuna chiave, cioè con la protezione più importante *dichiarata e assente*.
+  `setup.sh` ora lo verifica e, se manca, **lo dice** con le istruzioni per armarlo.
+  Non genera la chiave al posto dell'operatore: la privata deve stare sul suo PC.
+
+### Aggiunto
+
+- **Asse «backup armato» in `security/confronta-installer.py`** (PR #297): se una delle
+  tre vie d'installazione smette di nominare il recipient age, la CI cade. Curata nello
+  stesso giro anche l'autoprova, il cui primo caso («copia fedele → atteso 0») non
+  misurava il presidio ma la *salute del repo*: appena l'asse nuovo ha trovato una
+  divergenza vera, il banco ha iniziato a fallire pur funzionando, rendendo
+  indistinguibile «presidio rotto» da «repo con un difetto». Ora l'atteso è *lo stesso
+  verdetto del repo vero*.
+- **Collaudo da fuori**: il presidio dentro il repo e la pagina della prova locale (#294).
+- **Documentazione** delle tre trappole del percorso manuale, trovate dal collaudo da
+  fuori (#292).
+
 ## [0.48.1] — 2026-09-07
 
 ### Corretto
