@@ -163,6 +163,15 @@ _CHIAVI_NOTE = frozenset({
     # scritto la chiave nuova, esattamente come per `libero_mb` qui sopra. *Due volte lo
     # stesso test ferma due persone diverse allo stesso punto: è quello che deve fare.*
     "name",
+    # 07/09 — `ruolo`: il valore scritto in `meta['ruolo']` di un archivio
+    # (#278, /internal/archive/ruolo). Va nell'audit per intero e non troncato a
+    # un `len`, come si fa per la `description`: lì il valore è testo libero e
+    # nel log serve sapere QUANTO, qui è una parola di un vocabolario chiuso e
+    # serve sapere QUALE — «chi ha promosso quale DB a primario» è l'unica
+    # domanda utile su questo canale, e un conteggio di caratteri non la
+    # risponde. **Terza volta che questo presidio ferma qualcuno alla stessa
+    # riga** (dopo `libero_mb` e `name`): rosso appena scritta la chiave nuova.
+    "ruolo",
 })
 _MAX_VALORE = 500
 

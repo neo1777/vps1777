@@ -428,6 +428,15 @@ features:
     status: active-default
     verify:
       mcp_tool: {service: archive-mcp, name: set_description}
+  - id: archive.set_ruolo
+    nome: "archive-mcp · set_ruolo"
+    cosa: "Dichiara il RUOLO di un archivio a vocabolario chiuso (primario · fotografia ·
+           riscontro · riservato, vuoto = ritira). Il campo che instrada una MACCHINA
+           senza farle leggere la prosa della description (#278)."
+    dove: ["mcp-tool:archive-mcp/set_ruolo"]
+    status: active-default
+    verify:
+      mcp_tool: {service: archive-mcp, name: set_ruolo}
   - id: nb.nb_list
     nome: "nb1777-mcp · nb_list"
     cosa: "Lista tutti i notebook visibili al profilo attivo."
@@ -776,6 +785,23 @@ features:
     since: "0.40.0"
     verify:
       file_contains: {path: services/gateway/app/routes.py, pattern: "internal/archive/description"}
+
+  - id: archive.ruolo-machine-readable
+    nome: "Il ruolo di un archivio è un CAMPO, non una frase (#278, cura A)"
+    cosa: "Ogni DB porta `ruolo` nella scheda (describe_databases, list_databases(schede),
+           pagina admin): primario · fotografia · riscontro · riservato, e `non dichiarato`
+           per chi non l'ha ancora dichiarato — un default che è informazione, non un vuoto
+           né un'ipotesi. Scritto con set_ruolo, che passa dal gateway come set_description
+           (rotta /internal/archive/ruolo, stessa guardia, vocabolario CHIUSO: lì non
+           passa testo libero, quindi la D17 non si applica). ADDITIVO: nessun tool cambia
+           comportamento, search/count senza db_name toccano tutti i DB come prima — il
+           default sui primari è la cura B della #278 e NON è in vigore."
+    dove: ["services/archive-mcp/app/db.py#RUOLI",
+           "services/gateway/app/routes.py#internal_archive_ruolo",
+           "mcp-tool:archive-mcp/set_ruolo"]
+    status: active-default
+    verify:
+      file_contains: {path: services/archive-mcp/app/db.py, pattern: "RUOLO_NON_DICHIARATO"}
 
   - id: ops.preflight-secrets
     nome: "Pre-flight dei segreti: la rete di ROLLBACK (avviso, mai fatale)"

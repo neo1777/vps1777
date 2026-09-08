@@ -853,6 +853,12 @@ async def archive_view(request: Request) -> Response:
             )
             rows += (
                 f"<tr><td><code>{html.escape(d['name'])}</code></td>"
+                # #278 — il ruolo ha una colonna SUA e non una frase dentro la
+                # descrizione: è il punto della issue. Un DB senza ruolo dice
+                # «non dichiarato», non «—»: il trattino si legge come «vuoto,
+                # quindi trascurabile», e non è la stessa cosa di «nessuno si è
+                # ancora pronunciato».
+                f"<td>{html.escape(d.get('ruolo') or 'non dichiarato')}</td>"
                 f"<td>{html.escape(d.get('description') or '—')}</td>"
                 f"<td>{d['rows']}</td><td>{d['labels']}</td>"
                 f'<td class="top-labels">{top}</td>'
@@ -863,7 +869,7 @@ async def archive_view(request: Request) -> Response:
                 f'<button type="submit" class="danger">Elimina</button></form></td></tr>'
             )
         table = (f'<section><div class="kicker">DB nell\'archivio</div>'
-                 f'<div class="tblwrap"><table><thead><tr><th>nome</th><th>descrizione</th><th>messaggi</th><th>etichette</th>'
+                 f'<div class="tblwrap"><table><thead><tr><th>nome</th><th>ruolo</th><th>descrizione</th><th>messaggi</th><th>etichette</th>'
                  f'<th>principali</th><th>dimensione</th><th>aggiornato</th><th></th></tr></thead>'
                  f'<tbody>{rows}</tbody></table></div>'
                  f'<p class="hint">Eliminare un DB toglie subito l\'archivio dalla ricerca. '
