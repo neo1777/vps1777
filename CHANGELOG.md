@@ -2,6 +2,93 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [SemVer](https://semver.org/).
 
+## [Non rilasciato]
+
+<!-- Sezione senza numero DI PROPOSITO: il numero di versione lo decide chi
+     rilascia, insieme al bump di VERSION, ed è un commit suo (vedi 57a4c68 per
+     la 0.48.1). Scrivere qui «0.49.0» sarebbe dichiarare una versione che non
+     esiste ancora: un'affermazione vera solo se qualcun altro la ratifica. -->
+
+### Corretto
+
+- **P0 · Il restore diceva il falso** (PR #297). `tools/restore.sh` aveva tre `cp` con
+  `2>/dev/null || true` — ogni fallimento silenziato **e** forzato a successo — seguiti
+  da un `ok "Config ripristinata"` **incondizionato**: bastava che la cartella `config/`
+  esistesse nel backup, *anche vuota*, perché il restore annunciasse di aver ripristinato.
+  Su un restore quel messaggio è l'unica cosa che una persona guarda prima di ripartire.
+  Il modo giusto era già dieci righe sotto, nel blocco `secrets`, che concatena con `&&`
+  e quindi non può mentire. Ora si conta ciò che è arrivato davvero e lo si dice.
+  Banco a quattro casi sul codice vero: completa → «3 elementi»; **vuota → «NON
+  ripristinata»**; assente → lo dice; destinazione non scrivibile → «solo in parte»
+  con i nomi dei file non copiati.
+- **P0 · Il backup dichiarato e mai armato** (PR #297). La feature `backup` è **accesa
+  di default** su tutte e tre le vie (`FEATURES` vale `backup,autoupdate` a chiave
+  assente), ma il backup cifra con `age` e senza un recipient in
+  `tools/age-recipients.txt` non cifra niente. Misurato: `deploy.sh` e `installer/engine.py`
+  lo armano, **`setup.sh` zero volte** — chi installava di lì finiva con `backup=ON` e
+  nessuna chiave, cioè con la protezione più importante *dichiarata e assente*.
+  `setup.sh` ora lo verifica e, se manca, **lo dice** con le istruzioni per armarlo.
+  Non genera la chiave al posto dell'operatore: la privata deve stare sul suo PC.
+
+### Aggiunto
+
+- **Il ruolo di un archivio è un CAMPO, non una frase** (#278, cura A). Con 22 DB
+  caricati la prima domanda di ogni ricerca è «quale archivio», e fino a oggi la
+  risposta viveva solo dentro la `description`: prosa italiana con dentro
+  «★ PRIMARIO del versante claude.ai» e «⚠️ SUPERATO COME PRIMARIO — usare
+  quello». Un umano la legge; un client che deve *scegliere* no. *È la stessa
+  classe del «Chiude #N» in italiano che non chiude una issue: una regola scritta
+  per un lettore che non sa leggerla riesce a metà, e in silenzio.*
+  - Nuovo campo `ruolo` nella scheda di ogni DB — `describe_databases`,
+    `list_databases(schede=true)`, colonna sua nella pagina admin — a
+    **vocabolario chiuso**: `primario` (la fonte corrente di quel versante) ·
+    `fotografia` (versione più vecchia, tenuta per la storia) · `riscontro` (si
+    interroga per verificare, non per trovare) · `riservato` (materiale
+    personale: una dichiarazione, **non** un lucchetto). I quattro valori sono
+    ricavati dai DB veri in essere, non da una tassonomia scritta a tavolino.
+  - Nuovo tool MCP **`set_ruolo(db_name, ruolo)`**, che passa dal gateway come
+    `set_description` (rotta `/internal/archive/ruolo`, stessa guardia). Prima
+    di questa PR promuovere un primario voleva dire riscrivere a mano due
+    `description` in italiano, e chi non le leggeva entrambe instradava sul DB
+    sbagliato senza accorgersene.
+  - **Il default è `non dichiarato`, ed è una scelta.** Le due scorciatoie erano
+    `""` — che sparisce da un rendering e si legge come «trascurabile» — e
+    dedurlo dal nome, cioè spacciare un'ipotesi per un dato: esattamente il
+    difetto che la issue denuncia, riscritto in codice. `non dichiarato` non
+    appartiene al vocabolario, quindi nessun filtro `ruolo in RUOLI` può
+    scambiare l'assenza di dichiarazione per una dichiarazione. Passare `""` a
+    `set_ruolo` **ritira** la dichiarazione: un ruolo sbagliato dev'essere
+    disfacibile senza inventare un quinto valore.
+  - **Additivo per costruzione, e va detto perché è la cosa che si assume da
+    sé**: nessun tool cambia comportamento. `search`/`count` senza `db_name`
+    toccano tutti i DB come prima, `riservato` compreso — far pescare il default
+    dai soli primari è un cambio di *contratto* (cambierebbe il significato di
+    uno zero: «0 sui primari» ≠ «0 ovunque») e resta nella #278 come cura B.
+    Chi non legge `ruolo` funziona come prima.
+  - La guardia di `/internal/archive/*` (IP interno → segreto dedicato
+    constant-time, ogni rifiuto 404 e mai 403) è stata **estratta** invece che
+    copiata nella rotta nuova, e il test la pretende come proprietà di classe:
+    *due copie di un controllo di sicurezza divergono, e a divergere è quella che
+    nessuno rilegge.* Il vocabolario è invece per forza duplicato — i due servizi
+    hanno contesti di build separati e non possono importarsi — quindi un test
+    legge entrambi i file e li confronta.
+  - **Il campo chiuso non ha bisogno della D17**: `description` è testo libero
+    che arriva nel contesto di un LLM con l'autorevolezza di un metadato di
+    sistema, e per quello ha cap di lunghezza e filtro dei caratteri di
+    controllo; qui non c'è un posto dove infilare un'istruzione. Cap e filtro
+    non ci sono di proposito: metterli suggerirebbe che il campo sia libero.
+
+- **Asse «backup armato» in `security/confronta-installer.py`** (PR #297): se una delle
+  tre vie d'installazione smette di nominare il recipient age, la CI cade. Curata nello
+  stesso giro anche l'autoprova, il cui primo caso («copia fedele → atteso 0») non
+  misurava il presidio ma la *salute del repo*: appena l'asse nuovo ha trovato una
+  divergenza vera, il banco ha iniziato a fallire pur funzionando, rendendo
+  indistinguibile «presidio rotto» da «repo con un difetto». Ora l'atteso è *lo stesso
+  verdetto del repo vero*.
+- **Collaudo da fuori**: il presidio dentro il repo e la pagina della prova locale (#294).
+- **Documentazione** delle tre trappole del percorso manuale, trovate dal collaudo da
+  fuori (#292).
+
 ## [0.48.1] — 2026-09-07
 
 ### Corretto

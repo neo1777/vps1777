@@ -283,22 +283,37 @@ def archive_stats(db_name: str = "") -> list[dict[str, Any]]:
 def list_databases(schede: bool = False) -> list[Any]:
     """Elenca i nomi dei DB caricati. La scelta del DB è il PRIMO bivio di ogni
     ricerca: con `schede=True` ogni voce arriva con la sua carta d'identità
-    ({name, rows, oldest, newest, description}) invece del solo nome (#274) —
-    è la stessa scheda di describe_databases, memoizzata, quindi costa poco.
-    Default: lista di soli nomi (compatibilità con chi la usa da prima)."""
+    ({name, ruolo, rows, oldest, newest, description}) invece del solo nome
+    (#274) — è la stessa scheda di describe_databases, memoizzata, quindi costa
+    poco. Default: lista di soli nomi (compatibilità con chi la usa da prima).
+
+    `ruolo` (#278) è il campo su cui INSTRADARE senza leggere prosa: `primario`
+    = la fonte corrente di quel versante, `fotografia` = versione più vecchia
+    tenuta per la storia, `riscontro` = si interroga per verificare non per
+    trovare, `riservato` = materiale personale, fuori dai compiti tecnici senza
+    richiesta esplicita. `non dichiarato` = nessuno si è pronunciato su quel DB:
+    NON vuol dire «poco importante», e non va indovinato dal nome."""
     if schede:
-        return [{k: d.get(k) for k in ("name", "rows", "oldest", "newest", "description")}
+        return [{k: d.get(k) for k in
+                 ("name", "ruolo", "rows", "oldest", "newest", "description")}
                 for d in db.describe()]
     return db.available_dbs()
 
 
 @mcp.tool()
 def describe_databases() -> list[dict[str, Any]]:
-    """Scheda di ogni DB caricato: {name, rows, oldest, newest, labels,
+    """Scheda di ogni DB caricato: {name, ruolo, rows, oldest, newest, labels,
     snapshot, description}. `oldest`/`newest` = intervallo temporale coperto;
     `snapshot` = data dell'ultima modifica (freschezza); `description` = a cosa
-    serve / cosa contiene l'archivio (scritta all'upload o via set_description).
-    Utile per sapere PRIMA di cercare quanto è ampio e aggiornato l'archivio."""
+    serve / cosa contiene l'archivio (scritta all'upload o via set_description);
+    `ruolo` = a cosa serve QUESTO archivio rispetto agli altri (#278: `primario`
+    · `fotografia` · `riscontro` · `riservato` · `non dichiarato`).
+    Utile per sapere PRIMA di cercare quanto è ampio e aggiornato l'archivio.
+
+    ⚠️ Il `ruolo` è INFORMAZIONE, non ancora comportamento: `search`/`count`
+    senza `db_name` toccano tutti i DB come prima, `riservato` compreso. Chi
+    vuole restringere ai primari lo deve fare LEGGENDO questo campo e passando
+    `db_name` — il default sui primari è la cura B della #278, non è in vigore."""
     return db.describe()
 
 
@@ -323,9 +338,35 @@ def set_description(db_name: str, description: str) -> dict[str, Any]:
     """Imposta/aggiorna la DESCRIZIONE di un archivio: a cosa serve, cosa
     contiene, come va usato. Compare in describe_databases (campo `description`)
     e nella pagina admin. Usala quando carichi o riorganizzi un archivio, o
-    quando la scheda è vuota/stale. È l'unica scrittura ammessa via MCP: tocca
-    solo la scheda, mai i messaggi."""
+    quando la scheda è vuota/stale. Come `set_ruolo`, tocca solo la scheda del
+    DB: i messaggi non si scrivono da qui, mai."""
     return db.set_description(db_name, description)
+
+
+@mcp.tool()
+def set_ruolo(db_name: str, ruolo: str) -> dict[str, Any]:
+    """Dichiara il RUOLO di un archivio (#278) — il campo che dice a una MACCHINA
+    quale DB serve, senza farle leggere la prosa della `description`.
+
+    Valori ammessi (vocabolario chiuso):
+      · `primario`   la fonte CORRENTE di quel versante — se non scegli, è lei
+                     che deve rispondere;
+      · `fotografia` versione più vecchia dello stesso versante, tenuta per la
+                     storia: si cerca qui quando interessa com'ERA;
+      · `riscontro`  non si interroga per trovare ma per VERIFICARE (ridondanza
+                     voluta, gemelli re-ingeriti, DB-sonda con un caso-noto);
+      · `riservato`  materiale personale: fuori dai compiti tecnici senza
+                     richiesta esplicita. È una dichiarazione, non un lucchetto —
+                     nessun tool lo esclude da solo.
+      · `""` (vuoto) ritira la dichiarazione: il DB torna `non dichiarato`.
+
+    Quando usarla: ogni volta che cambia il primario di un versante (arriva un
+    export nuovo, il vecchio retrocede). Prima della #278 quel passaggio era la
+    riscrittura a mano di due `description` in italiano, e chi non le leggeva
+    tutte instradava sul DB sbagliato senza accorgersene.
+
+    Compare in `describe_databases` e in `list_databases(schede=True)`."""
+    return db.set_ruolo(db_name, ruolo)
 
 
 # ── /health — la sonda che il compose interroga (vaglio corso1777, 03/09) ────────

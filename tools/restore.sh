@@ -166,11 +166,34 @@ fi
 # ───── 3. restore config + secrets (saltato con --volumes-only) ─────
 if [ -z "$VOLUMES_ONLY" ]; then
   log "Ripristino config..."
+  # ⚠️ Prima diceva `ok "Config ripristinata"` INCONDIZIONATO dopo tre `cp` con
+  #   `2>/dev/null || true`: ogni fallimento era silenziato E forzato a successo,
+  #   e bastava che `$TMP/config` esistesse — anche VUOTA — perché il restore
+  #   annunciasse di aver ripristinato. Su un restore, quel messaggio è l'unica
+  #   cosa che una persona guarda prima di ripartire.
+  #   Il modo giusto era già dieci righe sotto, nel blocco `secrets`, che concatena
+  #   con `&&` e quindi non può mentire. Qui non basta copiarlo: gli elementi sono
+  #   tre e opzionali, quindi si CONTA ciò che è arrivato davvero e lo si dice.
   if [ -d "$TMP/config" ]; then
-    cp -a "$TMP/config/.env" . 2>/dev/null || true
-    cp -a "$TMP/config/"compose*.yaml . 2>/dev/null || true
-    cp -a "$TMP/config/ingress" . 2>/dev/null || true
-    ok "Config ripristinata"
+    _n=0 _falliti=""
+    for _src in "$TMP/config/.env" "$TMP/config/"compose*.yaml "$TMP/config/ingress"; do
+      [ -e "$_src" ] || continue          # non c'era nel backup: non è un fallimento
+      if cp -a "$_src" . 2>/dev/null; then
+        _n=$((_n + 1))
+      else
+        _falliti="$_falliti $(basename "$_src")"
+      fi
+    done
+    if [ -n "$_falliti" ]; then
+      warn "Config ripristinata solo in parte ($_n ok) — NON copiati:$_falliti"
+    elif [ "$_n" -gt 0 ]; then
+      ok "Config ripristinata ($_n elementi)"
+    else
+      warn "Config NON ripristinata: la cartella config/ del backup è vuota"
+    fi
+    unset _n _falliti _src
+  else
+    warn "Config NON ripristinata: il backup non contiene una cartella config/"
   fi
 
   log "Ripristino secrets..."

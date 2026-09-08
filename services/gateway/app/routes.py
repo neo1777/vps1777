@@ -102,33 +102,68 @@ async def health(request: Request) -> JSONResponse:
 # log è un canale di cui non sai se è stato usato).
 _MAX_DESCRIZIONE = 4096
 
+# #278 — vocabolario CHIUSO del campo `ruolo`. È il gemello di `RUOLI` in
+# `services/archive-mcp/app/db.py`, e i due DEVONO concordare: i servizi hanno
+# contesti di build separati (nessun import possibile fra loro), quindi la
+# coerenza non può venire dal linguaggio e viene da un test che legge entrambi i
+# file (`test_internal_archive_description.py`). Duplicare senza quel test
+# sarebbe la copia che diverge in silenzio.
+_RUOLI_AMMESSI: tuple[str, ...] = ("primario", "fotografia", "riscontro", "riservato")
 
-async def internal_archive_description(request: Request) -> JSONResponse:
-    """Scrive la `description` di un archivio per conto di archive-mcp.
+
+def _guardia_interna(request: Request, evento: str) -> JSONResponse | None:
+    """Il portone di `/internal/archive/*`: `None` se si può passare, un 404 se no.
 
     Difesa in profondità, in quest'ordine — ogni gradino risponde **404**, non 403:
     un 403 confermerebbe l'esistenza della rotta a chi la sta cercando.
       1. l'IP del chiamante dev'essere interno (loopback o rete privata). Serve
-         perché Caddy fa `reverse_proxy gateway:8080` CATCH-ALL: questa rotta è
-         raggiungibile dall'esterno per costruzione, e il blocco `internal/` di
+         perché Caddy fa `reverse_proxy gateway:8080` CATCH-ALL: queste rotte sono
+         raggiungibili dall'esterno per costruzione, e il blocco `internal/` di
          proxy.py copre i path *proxati verso gli upstream*, non le rotte native
          del gateway. Un chiamante che passa dall'ingress viene risolto al suo IP
          pubblico → cade qui, **prima ancora del segreto**.
-      2. segreto condiviso, confronto constant-time, fail-closed.
-      3. il `db` dev'essere in whitelist; il PATH lo costruisce il gateway, mai
-         il chiamante (niente path traversal possibile per costruzione).
+      2. segreto condiviso DEDICATO, confronto constant-time, fail-closed.
+
+    ⚠️ ESTRATTA il 07/09/2026, quando la #278 ha aggiunto la SECONDA rotta interna
+      dell'archivio. Copiare questi due gradini sarebbe stato più breve e più
+      pericoloso: due copie di un controllo di sicurezza divergono, e a divergere
+      è quella che nessuno rilegge. Qui c'è una sola implementazione, e il test
+      pretende che OGNI rotta `internal_archive_*` la chiami come prima istruzione
+      — non che la riscriva bene.
     """
-    s = get_settings()
     if not ip_is_internal(request.client.host if request.client else None):
-        audit({"event": "archive_desc_denied", "reason": "not_internal"})
+        audit({"event": evento, "reason": "not_internal"})
         return JSONResponse({"error": "not_found"}, status_code=404)
 
     # segreto DEDICATO, non quello del canale nlm: privilegio minimo fra servizi.
-    atteso = s.effective_archive_desc_secret
+    atteso = get_settings().effective_archive_desc_secret
     got = request.headers.get("x-vps1777-archive-desc", "")
     if not atteso or not hmac.compare_digest(got, atteso):
-        audit({"event": "archive_desc_denied", "reason": "secret"})
+        audit({"event": evento, "reason": "secret"})
         return JSONResponse({"error": "not_found"}, status_code=404)
+    return None
+
+
+def _path_del_db(db: str) -> tuple[Path | None, JSONResponse | None]:
+    """Il file del DB `db`, o l'errore da restituire.
+
+    Il `db` dev'essere in whitelist di caratteri e deve ESISTERE; il PATH lo
+    costruisce il gateway a partire dalla propria directory, mai il chiamante —
+    niente path traversal possibile per costruzione.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", db):
+        return None, JSONResponse({"error": "bad_db"}, status_code=400)
+    db_path = Path(get_settings().archive_db_dir) / f"{db}.db"
+    if not db_path.is_file():
+        return None, JSONResponse({"error": "unknown_db"}, status_code=404)
+    return db_path, None
+
+
+async def internal_archive_description(request: Request) -> JSONResponse:
+    """Scrive la `description` di un archivio per conto di archive-mcp."""
+    negato = _guardia_interna(request, "archive_desc_denied")
+    if negato is not None:
+        return negato
 
     try:
         body = await request.json()
@@ -137,12 +172,9 @@ async def internal_archive_description(request: Request) -> JSONResponse:
     db = str(body.get("db", ""))
     desc = str(body.get("description", ""))
 
-    # nome del DB: solo caratteri innocui, e deve ESISTERE fra quelli caricati.
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", db):
-        return JSONResponse({"error": "bad_db"}, status_code=400)
-    db_path = Path(s.archive_db_dir) / f"{db}.db"
-    if not db_path.is_file():
-        return JSONResponse({"error": "unknown_db"}, status_code=404)
+    db_path, errore = _path_del_db(db)
+    if errore is not None:
+        return errore
 
     # D17 — la description è DATO NON FIDATO: finirà nel contesto di un LLM.
     if len(desc) > _MAX_DESCRIZIONE:
@@ -157,10 +189,53 @@ async def internal_archive_description(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "db": db, "len": len(desc)})
 
 
+async def internal_archive_ruolo(request: Request) -> JSONResponse:
+    """Scrive il `ruolo` di un archivio per conto di archive-mcp (#278).
+
+    Stessa strada e stesso portone della `description`, con UNA differenza che
+    conta: qui il valore è a **vocabolario chiuso**. La D17 nasceva dal fatto che
+    la description è testo libero che arriva nel contesto di un LLM con
+    l'autorevolezza di un metadato di sistema; un campo che accetta quattro
+    parole non ha quel problema — non perché ci fidiamo del chiamante, ma perché
+    non c'è un posto dove infilare un'istruzione. Il cap di lunghezza e il filtro
+    dei caratteri di controllo qui non servono, e non ci sono: metterli
+    suggerirebbe che il campo sia libero.
+
+    Il valore VUOTO è ammesso e vuol dire «ritira la dichiarazione»: il DB torna
+    `non dichiarato`, che non è la stessa cosa di «primario» né di «cancellato».
+    """
+    negato = _guardia_interna(request, "archive_ruolo_denied")
+    if negato is not None:
+        return negato
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "bad_json"}, status_code=400)
+    db = str(body.get("db", ""))
+    ruolo = str(body.get("ruolo", "")).strip().lower()
+
+    db_path, errore = _path_del_db(db)
+    if errore is not None:
+        return errore
+
+    if ruolo and ruolo not in _RUOLI_AMMESSI:
+        # PARLANTE: chi sbaglia il valore riceve l'elenco, non un «400». Un
+        # vocabolario chiuso che non dice quali sono le parole è un indovinello.
+        return JSONResponse({"error": "bad_ruolo", "ammessi": list(_RUOLI_AMMESSI)},
+                            status_code=400)
+
+    archive_indexer.set_meta(db_path, "ruolo", ruolo)
+    audit({"event": "archive_ruolo_set", "db": db, "ruolo": ruolo or "(ritirato)"})
+    return JSONResponse({"ok": True, "db": db, "ruolo": ruolo})
+
+
 routes = [
     Route("/health", health, methods=["GET"]),
     # D9 — inoltro della set_description da archive-mcp (rete interna + segreto)
     Route("/internal/archive/description", internal_archive_description, methods=["POST"]),
+    # #278 — stessa strada per il campo `ruolo` (vocabolario chiuso)
+    Route("/internal/archive/ruolo", internal_archive_ruolo, methods=["POST"]),
 
     # OAuth discovery
     Route("/.well-known/oauth-protected-resource", oauth.well_known_protected, methods=["GET"]),

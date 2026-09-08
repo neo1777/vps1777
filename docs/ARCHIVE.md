@@ -107,9 +107,32 @@ dalla Mini App):
 | `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` come in `get_context` |
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
 | `archive_stats(db_name)` | istogramma dei messaggi per **anno** — *quando* l'archivio è fitto, da sapere prima di cercare. La **prima** chiamata su un DB scandisce tutto (decine di secondi su archivi grandi); le successive sono **memoizzate per snapshot** |
-| `list_databases(schede)` | i nomi dei DB caricati; con `schede=true` ogni voce porta la sua carta d'identità (righe, intervallo date, descrizione) — la scelta del DB è il primo bivio di ogni ricerca |
-| `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza), **description** |
-| `set_description(db_name, description)` | scrive/aggiorna la **descrizione** dell'archivio — l'**unica scrittura** ammessa via MCP (tocca la scheda, mai i messaggi) |
+| `list_databases(schede)` | i nomi dei DB caricati; con `schede=true` ogni voce porta la sua carta d'identità (**ruolo**, righe, intervallo date, descrizione) — la scelta del DB è il primo bivio di ogni ricerca |
+| `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza), **description**, **ruolo** |
+| `set_description(db_name, description)` | scrive/aggiorna la **descrizione** dell'archivio (tocca la scheda, mai i messaggi) |
+| `set_ruolo(db_name, ruolo)` | dichiara il **ruolo** dell'archivio a vocabolario chiuso — vedi sotto |
+
+### Il `ruolo` di un archivio — instradare senza leggere la prosa
+
+Con molti DB caricati, «quale archivio interrogare» è la prima domanda di ogni
+ricerca. Finché la risposta vive solo dentro la `description` — «★ primario»,
+«⚠️ superato, usare quell'altro» — è scritta in una lingua che un umano legge e
+un client no: **una regola per la macchina scritta in prosa riesce a metà, e in
+silenzio.** Il campo `ruolo` la rende leggibile.
+
+| valore | vuol dire |
+|---|---|
+| `primario` | la fonte **corrente** di quel versante: se non scegli, è lei che deve rispondere |
+| `fotografia` | versione più **vecchia** dello stesso versante, tenuta per la storia: si cerca qui quando interessa com'*era* |
+| `riscontro` | non si interroga per **trovare** ma per **verificare**: ridondanza voluta, gemelli re-ingeriti con un indexer diverso, DB-sonda con un caso-noto-che-deve-riuscire |
+| `riservato` | materiale personale: fuori dai compiti tecnici senza richiesta esplicita. È una **dichiarazione, non un lucchetto** — nessun tool lo esclude da solo |
+| `non dichiarato` | **nessuno si è pronunciato** su quel DB. Non è «poco importante», e non va indovinato dal nome: è il valore che si legge quando `set_ruolo` non è mai stata chiamata (o quando la dichiarazione è stata ritirata passando `""`) |
+
+> **Additivo, e per ora solo informativo.** `search` e `count` senza `db_name`
+> toccano **tutti** i DB come prima, `riservato` compreso: chi vuole restringere
+> ai primari legge il campo e passa `db_name`. Far pescare il default dai soli
+> primari è un **cambio di contratto** — cambierebbe il significato di uno zero
+> («0 sui primari» ≠ «0 ovunque») — e vive in una sua issue.
 
 > **Concorrenza.** Il server serve **2 ricerche alla volta**: le richieste in
 > più si mettono in coda da sole invece di morire in timeout. Chi orchestra più
@@ -208,7 +231,7 @@ messages_fts USING fts5(uuid, project, ts, content, tools, attachments,
                         tokenize="unicode61 tokenchars '+#'")  -- C++/C# non collassano
 CREATE INDEX idx_parent ON messages(parent_uuid);   -- il thread-walking di get_conversation
 skipped(uid PRIMARY KEY, source, reason, detail, ts, ingest_date)  -- libro-mastro degli scarti
-meta(key PRIMARY KEY, value)                        -- scheda: description, …
+meta(key PRIMARY KEY, value)                        -- scheda: description, ruolo, …
 ```
 
 È quello che producono `archive_indexer` e `archive-ingest`. In FTS finiscono
@@ -236,7 +259,11 @@ Cose in più che l'ingest produce:
   lette** deve trattare i doppioni come categoria, non come perdita: vedi
   `tools/collaudo-quadratura.py`.)*
 - la **descrizione** dell'archivio vive in `meta['description']` (scritta
-  all'upload, aggiornabile via `set_description`).
+  all'upload, aggiornabile via `set_description`); il **ruolo** vive accanto in
+  `meta['ruolo']` (scritto da `set_ruolo`, chiave assente = `non dichiarato`).
+  Entrambi viaggiano **dentro il file**: un `.db` spostato o ripristinato da un
+  backup si porta dietro la propria scheda, senza un registro esterno da tenere
+  in sincrono.
 
 > **Righe-evento vs righe-stato.** Le chat sono **eventi** (un `ts`, immutabili);
 > `memory:*` e `account:user` sono **stati** (nessuna data, riscritti). `oldest`

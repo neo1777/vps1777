@@ -1070,7 +1070,8 @@ def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
     Robusto: DB assente o illeggibile → scheda a zero, mai un'eccezione."""
     p = Path(db_path)
     out: dict = {"name": p.stem, "rows": 0, "labels": 0, "top": [],
-                 "size": 0, "mtime": "", "skipped": 0, "description": ""}
+                 "size": 0, "mtime": "", "skipped": 0, "description": "",
+                 "ruolo": ""}
     try:
         out["size"] = p.stat().st_size
         out["mtime"] = _file_ts(p)
@@ -1101,6 +1102,11 @@ def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
             try:
                 r = conn.execute("SELECT value FROM meta WHERE key = 'description'").fetchone()
                 out["description"] = (r[0] if r and r[0] else "")
+                # #278 — il ruolo dichiarato, per la colonna della pagina admin.
+                # Resta "" se nessuno l'ha dichiarato: la UI lo rende come
+                # «non dichiarato», che è un'informazione, non un vuoto.
+                r = conn.execute("SELECT value FROM meta WHERE key = 'ruolo'").fetchone()
+                out["ruolo"] = (r[0] if r and r[0] else "")
             except sqlite3.OperationalError:
                 pass  # DB precedente alla tabella meta
         finally:
