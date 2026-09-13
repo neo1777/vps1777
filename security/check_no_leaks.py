@@ -233,6 +233,147 @@ ALLOWLIST_R3 = {
 }
 
 
+# ── R4 — AVVISI (non bloccano): la password scritta in PROSA e la password NUDA ──
+# 🔴 12/09/2026, MISURATO dall'agora /neo1777 (referto M1 → indagine della sessione
+#   3614bd4b): R2 riconosce i segreti dal FORMATO (auth-key, token bot, chiave age,
+#   PEM, sshpass, stringa di connessione) e dal catalogo dei valori noti. Una password
+#   digitata in prosa — «root <valore>», «Password generata: <valore>», «pwd root:
+#   <valore>», «…'s password: <valore>» — non ha formato: gli passa. Sul corpus dei
+#   messaggi di Neo (1.481, giu→set 2026): 31 valori su 37 dopo password/token/chiave
+#   NON presi, 5 password nude «root <valore>» non prese; 8 documenti «passati dal
+#   gate» sono usciti verso NotebookLM con dentro una password viva per ~8 ore.
+# ⚖️ Perché AVVISO e non blocco. La prosa non ha un formato, quindi ogni regola qui
+#   grida anche sul rumore. Misurato il 12/09 sugli stessi 8 documenti (3,6 MB):
+#   senza esclusioni 2.225 hit (prompt di shell, email, path, blob JSON); con le
+#   esclusioni sotto e la cifra obbligatoria nella regola di forma, 150 — e i casi
+#   noti (22/06, 24/06 ×2, 09/07) tutti presi. Un blocco con quel residuo di rumore
+#   verrebbe esentato in un giorno (è scritto venti righe più su cosa succede a un
+#   gate che grida al lupo); un avviso si legge e non si spegne. La cura in USCITA
+#   (sostituzione con segnaposto tipizzati) sta in _chat/scripts/redigi-per-uscita.py,
+#   che importa questi criteri invece di riscriverli.
+# 📌 Due regole, complementari, prese da _chat/scripts/entropia_segreti.py (10/08):
+#   R4a PROSA — parola-spia + finestra di 60 caratteri sulla stessa riga: ogni
+#       valore con lettere E (cifre o simboli forti) è un candidato. «Password
+#       generata: <valore>» si prende guardando TUTTA la finestra, non la prima
+#       parola dopo la spia (la prima versione si fermava su «generata» e lasciava
+#       passare il valore: misurato).
+#   R4b FORMA — la password NUDA, senza parola-spia: simbolo raro DENTRO un token
+#       lungo, con classi ed entropia alte e UNA CIFRA obbligatoria (senza la cifra
+#       gridava su parole col simbolo dentro e sui blob JSON).
+# ⚠️ Mai stampare il valore: la riga, non il token. Questo output va in un log pubblico.
+PAROLA_SPIA = re.compile(   # niente \b: «DB_PASSWORD=» ha l'underscore attaccato, e \b non lo vede
+    r"(?i)(?<![A-Za-z$])(password|passwd|passwort|pwd|parola d'ordine|passphrase|token|"
+    r"api[ _-]?key|chiave|secret|segreto|credenzial\w*|root)(?![A-Za-z_])"   # ROOT_DIR, password_hash: identificatori
+)
+SPIE_FORTI = {"password", "passwd", "passwort", "pwd", "parola d'ordine", "passphrase", "root"}
+PACCHETTO = re.compile(r"^[a-z]+\d{1,3}([-_.][a-z][a-z0-9]*)*$", re.I)   # python3, sha256, python3-passlib, utf8
+FINESTRA_PROSA = 60
+TOKEN_PROSA = re.compile(r"[^\s`'\"()\[\]{}<>,;]+")
+LUNGHEZZA_MINIMA_PROSA = {"token": 10, "chiave": 8}  # parole comuni nella prosa: soglia più alta
+INVOLUCRO = "*`_\"'()[]{}<>.,;:!?«»+"                 # markdown e punteggiatura ATTORNO a un valore
+SIMBOLI_FORTI = re.compile(r"[@#%^&+=~$!?]")           # niente '*' (grassetto) né - _ . / :
+PROMPT_SHELL = re.compile(r"^[\w.-]*@?[\w.-]*:~?[\w/.-]*[#$]$|^@[\w.-]+:")   # root@vps:~#, @host:~$, host:/path#
+NOMI_DI_CASA = re.compile(r"^[a-z]+1777$", re.I)
+_RARI_FORMA = set("@$!%^&?")                           # simboli che un NOME non ha in mezzo, una password sì ('+' e '=' no: crypto e pin)
+CODICE = set("(){}[]|;&\\")                             # un token con questi dentro è codice, non un valore digitato ('$' no: sta nelle password)
+VARIABILE = re.compile(r"^\$|\$\{|\$\(")                 # $pw, ${X}, $(cmd): sintassi di shell, non un valore
+HANDLE = re.compile(r"^@[A-Za-z]\w*$")                     # @BotFather: una menzione, non un segreto
+_SCARTA_FORMA = (
+    re.compile(r"^[0-9a-f]{7,}$", re.I),               # sha, hash nudi
+    re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-"),          # uuid
+    re.compile(r"^v?\d+[._]\d+"),                      # versioni
+    re.compile(r"^-{1,2}[a-z]"),                       # flag
+)
+
+
+def _valore_innocuo(spia: str, tok: str) -> bool:
+    """True se il candidato NON è una password: URL, email, path, nome di casa, orario, file, prompt."""
+    tok = tok.lstrip("=:→")                                # il separatore incollato al valore (DB_PASSWORD=x)
+    if len(tok) < LUNGHEZZA_MINIMA_PROSA.get(spia.lower(), 6):
+        return True
+    if "=" in tok or CODICE & set(tok) or "://" in tok or VARIABILE.search(tok) or HANDLE.match(tok):
+        return True                                        # assegnazioni, chiamate, variabili, menzioni: non valori
+    if not re.search(r"[A-Za-z]", tok):
+        return True
+    if not (re.search(r"[0-9]", tok) or SIMBOLI_FORTI.search(tok)):
+        return True
+    if tok.lower().startswith(("http", "www.", "/", "~", "./", "../", "[redatto", "--", "<")):
+        return True
+    if "@" in tok[1:] and "." in tok.split("@", 1)[1]:
+        return True
+    if PROMPT_SHELL.match(tok) or NOMI_DI_CASA.match(tok) or re.match(r"^\d{1,2}[:.]\d{2}", tok):
+        return True
+    if "/" in tok and not SIMBOLI_FORTI.search(tok):
+        return True
+    if re.search(r"\.(md|py|sh|json|jsonl|txt|html|yml|yaml|toml|ndjson|log|csv|tsv|png|pdf)$", tok, re.I):
+        return True
+    if re.match(r"^[a-z0-9]+(-[a-z0-9]+){2,}$", tok, re.I) and not re.search(r"[A-Z]", tok[1:]):
+        return True
+    if PACCHETTO.match(tok) or ("_" in tok and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", tok)):
+        return True   # python3-passlib, sha256, admin_password_hash: nomi, non valori
+    forte = bool(SIMBOLI_FORTI.search(tok))
+    cifre = sum(ch.isdigit() for ch in tok)
+    misto = bool(re.search(r"[a-z]", tok)) and bool(re.search(r"[A-Z]", tok))
+    if spia.lower() not in SPIE_FORTI:
+        # «token», «chiave», «secret»… sono parole comuni nella prosa: il valore deve avere
+        # la forma di un segreto, non di un identificatore (misurato: 52 → pochi).
+        return not (forte or (cifre >= 2 and misto and len(tok) >= 12))
+    return not (forte or cifre >= 2 or (cifre == 1 and misto))
+
+
+def righe_password_in_prosa(text: str) -> list[int]:
+    """R4a — le righe (1-based) con una parola-spia seguita, entro la finestra, da un valore non innocuo."""
+    righe: list[int] = []
+    for m in PAROLA_SPIA.finditer(text):
+        fine = text.find("\n", m.end())
+        fine = len(text) if fine == -1 else fine
+        for tm in TOKEN_PROSA.finditer(text, m.end(), min(fine, m.end() + FINESTRA_PROSA)):
+            core = tm.group().strip(INVOLUCRO)
+            if core and not _valore_innocuo(m.group(1), core):
+                riga = text.count("\n", 0, m.start()) + 1
+                if riga not in righe:
+                    righe.append(riga)
+                break
+    return righe
+
+
+def _entropia(s: str) -> float:
+    import math
+    n = len(s)
+    return -sum((c / n) * math.log2(c / n) for c in {ch: s.count(ch) for ch in set(s)}.values()) if n else 0.0
+
+
+def _classi(s: str) -> int:
+    return sum(bool(re.search(r, s)) for r in (r"[a-z]", r"[A-Z]", r"[0-9]", r"[^A-Za-z0-9]"))
+
+
+def righe_password_nuda(text: str) -> list[int]:
+    """R4b — le righe con un token che ha la FORMA di una password: simbolo raro dentro, classi ≥3,
+    entropia ≥3.0, lunghezza ≥10 e almeno una cifra. Nessuna parola-spia richiesta."""
+    righe: list[int] = []
+    for i, riga in enumerate(text.splitlines(), 1):
+        for tok in riga.split():
+            tok = tok.strip(INVOLUCRO)
+            if len(tok) < 10 or not re.search(r"[0-9]", tok) or "[REDATTO" in tok:
+                continue
+            if "@" in tok[1:] and "." in tok.split("@", 1)[1]:
+                continue
+            if "/" in tok or VARIABILE.search(tok) or tok.startswith("#") or HANDLE.match(tok):
+                continue
+            if "=" in tok or "://" in tok or re.search(r"sha\d+:", tok) or CODICE & set(tok) or "," in tok:
+                continue   # assegnazioni, pin (==), digest di immagini, URL, codice: non sono password nude
+            if re.search(r"%[-0-9.]*[sdfxg]", tok) or PACCHETTO.match(tok):
+                continue   # stringhe di formato, nomi di pacchetto
+            if PROMPT_SHELL.match(tok) or tok.lower().startswith(("http", "www.")):
+                continue
+            if any(rx.match(tok) for rx in _SCARTA_FORMA):
+                continue
+            if _RARI_FORMA & set(tok[1:-1]) and _classi(tok) >= 3 and _entropia(tok) >= 3.0:
+                righe.append(i)
+                break
+    return righe
+
+
 def tsnet_da_ignorare(nome: str) -> bool:
     """True se il nome combaciato usa il segnaposto dichiarato del repo.
 
@@ -286,6 +427,7 @@ def tracked_files() -> list[str]:
 
 def main() -> int:
     problems: list[str] = []
+    avvisi: list[str] = []  # R4: si stampano, non bocciano
 
     for path in tracked_files():
         # R1 — la forma del nome basta a bocciarlo: non serve guardarci dentro.
@@ -398,6 +540,13 @@ def main() -> int:
         if path in ALLOWLIST_R2:
             continue
 
+        # R4 — avvisi: una password in prosa (R4a) o nuda (R4b). Una riga per file e per regola,
+        # la POSIZIONE e mai il valore; non entra in `problems`: non boccia (vedi il perché sopra).
+        for riga in righe_password_in_prosa(text)[:1]:
+            avvisi.append(f"  [R4a] {path}:{riga} → possibile password scritta in prosa (valore non stampato).")
+        for riga in righe_password_nuda(text)[:1]:
+            avvisi.append(f"  [R4b] {path}:{riga} → token con la forma di una password nuda (valore non stampato).")
+
         for label, pattern in SECRET_PATTERNS:
             for m in pattern.finditer(text):
                 line = text.count("\n", 0, m.start()) + 1
@@ -421,6 +570,17 @@ def main() -> int:
         )
         return 1
 
+    if avvisi:
+        print(f"⚠ gate anti-leak, R4 — {len(avvisi)} avvisi (NON bloccano; aprili uno per uno, non a lotti):")
+        if "--r4" in sys.argv:
+            print("\n".join(avvisi))
+        else:
+            print("  (elenco con `python3 security/check_no_leaks.py --r4`; qui solo il conto, per non gridare in CI)")
+        print(
+            "  → una password scritta in prosa non ha formato e R2 non la vede: se una di queste\n"
+            "    righe porta un valore vero, NON basta toglierlo — va ruotato. Se è un esempio,\n"
+            "    rendilo evidente (<password>, segnaposto RFC): l'avviso sparisce da sé.\n"
+        )
     print("✓ gate anti-leak: nessun export di sessione tracciato, nessun materiale credenziale.")
     return 0
 

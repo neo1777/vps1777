@@ -285,3 +285,63 @@ if __name__ == "__main__":
                 fails += 1
                 print(f"FAIL {name}: {exc}")
     raise SystemExit(1 if fails else 0)
+
+
+# ── R4 — avvisi: la password in PROSA e la password NUDA ─────────────────────
+# I valori «veri» sono gemelli per FORMA dei casi del 10/08 e del 12/09 (stessa
+# lunghezza, stesse classi), costruiti per concatenazione: il file tracciato non
+# deve contenere la forma, altrimenti l'avviso scatterebbe su questo stesso test.
+
+def _p(*pezzi: str) -> str:
+    return "".join(pezzi)
+
+
+def test_r4a_prende_la_password_scritta_in_prosa_nelle_quattro_forme_misurate():
+    casi = [
+        "ti passo la pwd di root, pwd: " + _p("7@*ztt", "SqqxMb"),          # 10/08, accodata
+        "root " + _p("Km1vQ6", "$uKlqF"),                                   # 24/06, nuda dopo «root»
+        "Password generata: " + _p("x8Kd", "Q2mLp9v", "Tz4WqRn7", "HsYbQ"),  # 22/06: il valore NON è la prima parola
+        "root@203.0.113.7's password: " + _p("P4ss", "w0rdXn1"),            # 23/06, incollato di ssh
+        "DB_PASSWORD=" + _p("hunt3r", "!Xq"),                               # assegnazione: la spia ha l'underscore attaccato
+    ]
+    for caso in casi:
+        assert g.righe_password_in_prosa(caso) == [1], caso[:24]
+
+
+def test_r4b_prende_la_password_nuda_senza_parola_spia():
+    assert g.righe_password_nuda(_p("5SevOL", "QVa!qI", "9")) == [1]
+
+
+def test_r4_tace_su_cio_che_ne_ha_solo_la_forma():
+    # Ognuno di questi è un falso positivo VERO, visto sul repo il 13/09/2026 (255 avvisi
+    # alla prima misura, 18 dopo le esclusioni): codice, pin, digest, prompt, menzioni.
+    innocui = [
+        'ROOT_DIR=$(cd "$(dirname "$0")" && pwd)',
+        "image: caddy@sha256:" + "a" * 64,
+        "uv tool install ruff==0.15.22",
+        "sudo apt install python3 python3-passlib.",
+        '<input type="password" name="admin_password">',
+        "root@vps1777:~# ls -la",
+        "neo1777@mint1777-desktop:~$ git status",
+        "il token bot va da @BotFather (24-32 char)",
+        "DB_PASSWORD=<cambiami>",
+        "il segreto sta in «un file a parte»",
+    ]
+    for riga in innocui:
+        assert g.righe_password_in_prosa(riga) == [], riga
+        assert g.righe_password_nuda(riga) == [], riga
+
+
+def test_r4_non_boccia_mai_e_non_stampa_il_valore(tmp_path, monkeypatch, capsys):
+    # Un avviso R4 non cambia il codice di uscita: il gate resta verde. E la riga
+    # stampata porta la POSIZIONE, mai il valore (questo output finisce in un log pubblico).
+    valore = _p("Km1vQ6", "$uKlqF")
+    f = tmp_path / "NOTE.md"
+    f.write_text("appunti\nroot " + valore + "\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(g, "tracked_files", lambda: ["NOTE.md"])
+    monkeypatch.setattr(g.sys, "argv", ["check_no_leaks.py", "--r4"])
+    assert g.main() == 0
+    out = capsys.readouterr().out
+    assert "[R4a] NOTE.md:2" in out
+    assert valore not in out
