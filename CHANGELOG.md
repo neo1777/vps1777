@@ -9,6 +9,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
      la 0.48.1). Scrivere qui «0.49.0» sarebbe dichiarare una versione che non
      esiste ancora: un'affermazione vera solo se qualcun altro la ratifica. -->
 
+## [0.49.0] — 2026-09-16
+
 ### Corretto
 
 - **P0 · Il restore diceva il falso** (PR #297). `tools/restore.sh` aveva tre `cp` con
