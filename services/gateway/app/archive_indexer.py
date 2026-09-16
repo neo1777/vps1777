@@ -20,8 +20,10 @@ contenuto, non dal nome):
     .zip Telegram  → export Desktop JSON (result.json) o HTML (messages*.html),
                      anche in sottocartella ChatExport_*/
     .zip bundle    → bundle di Recupero Sessioni 1777 (MANIFEST.json + sessions/):
-                     sessioni come conversazioni, log MCP e workfiles-testo come
-                     documenti, binari censiti in `skipped`, copie in `sightings`
+                     sessioni e transcript dei sub-agenti come conversazioni
+                     (subagents/<sid>/, etichetta `subagent:…`), log MCP e
+                     workfiles-testo come documenti, binari censiti in `skipped`,
+                     copie in `sightings`
     .zip generico  → zip di documenti/codice (fallback, whitelist _DOC_ZIP_EXTS):
                      indicizza ogni doc dentro l'archivio, come un .md/.txt sciolto
     .json         → export Telegram Desktop (result.json) o sessione Claude Code
@@ -2062,6 +2064,8 @@ def _iter_docs_zip(zip_path: Union[str, Path], members: list[str],
 # ── estrattore: bundle recupero-sessioni-1777 (.zip) ─────────────────────────
 # Il «scarica tutto» dell'app locale di recupero sessioni: un solo zip con
 #   sessions/<sid>.jsonl          conversazioni Claude Code (verbatim, dedup, __fN)
+#   subagents/<sid>/agent-*.jsonl transcript dei sub-agenti (tool Agent) della
+#                                 sessione madre <sid> — dal 16/09/2026 (v. sotto)
 #   mcp-logs/<sid>/<server>/…     log dei server MCP collegati
 #   workfiles/<cwd-encoded>/…     artefatti delle cartelle di lavoro (opzionali)
 #   inventario/ + MANIFEST.json/md
@@ -2262,6 +2266,62 @@ def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
             yield _Skip("bundle-workfiles", "non-testo", visibile, ts)
 
 
+# I membri top-level del bundle che questo indexer SA leggere. È la mappa del
+# dispatch di `_iter_bundle_zip` scritta come DATO, perché il bundle è prodotto da
+# un'altra app (recupero-sessioni-1777, fuori da questo repo) e quando aggiunge
+# una cartella nuova qui non si rompe niente: il ramo `else` la dichiarava
+# «non-indicizzato-ridondante» (oggi «membro-sconosciuto») e andava avanti. È
+# successo il 16/09/2026 con
+# `subagents/`: 662 transcript (356 MB) usciti dal bundle, elencati nel MANIFEST,
+# e mai entrati nell'archivio — un `_Skip` corretto per MANIFEST.json era una
+# sparizione per una cartella intera. Il canary in test_archive_indexer.py
+# verifica che questa tupla e il dispatch dicano la stessa cosa (una costante
+# che nessuno confronta col codice invecchia in silenzio) e che ogni prefisso qui
+# venga indicizzato davvero; il lato-bundle può leggere la stessa tupla per il
+# suo test speculare.
+BUNDLE_PREFISSI_INDICIZZATI = ("sessions", "subagents", "mcp-logs", "workfiles")
+BUNDLE_FILE_INDICIZZATI = ("inventario/inventario-sessioni.tsv", "MANIFEST.md")
+BUNDLE_FILE_RIDONDANTI = ("MANIFEST.json", "inventario/inventario-sessioni.json")
+
+
+def _iter_subagent_member(z: zipfile.ZipFile, name: str) -> Iterator:
+    """Transcript di un SUB-AGENTE (`subagents/<sid>/agent-<hash>.jsonl`): una
+    conversazione Claude Code a tutti gli effetti, letta con lo stesso
+    estrattore delle sessioni (`_iter_claude_code`: uuid nativi per riga, il
+    `isSidechain` che marca le righe di tipo user come `mandato`). Tre
+    differenze, tutte per non confondersi con la MADRE:
+
+      · l'etichetta-progetto è `subagent:<etichetta-cwd>` (stessa grammatica
+        `kind:dettaglio` di `mcp-log:`/`workfile:`): una ricerca sul progetto
+        della madre non pesca i 356 MB di output degli agenti, e un filtro
+        `project LIKE 'subagent:%'` li prende tutti;
+      · l'avvistamento porta il path del membro, che contiene il sid della madre
+        e l'hash dell'agente: il legame madre→agente si legge da `sightings`
+        (`WHERE source LIKE 'subagents/<sid>/%'`), come per i backup nei workfiles;
+      · un eventuale titolo (`ai-title`) NON si aggancia al sid — collasserebbe
+        col titolo della madre (uid = sha del sessionId) e lo sovrascriverebbe —
+        ma al path del membro.
+
+    Le righe-messaggio NON collidono con la madre: gli uuid sono per messaggio,
+    non per sessione (misurato il 16/09/2026 su una coppia reale: 39.701 uuid
+    nella madre, 101 nell'agente, intersezione 0; su 219 transcript locali
+    nessun `ai-title`). Se un giorno un uuid comparisse in entrambi, il
+    collasso per uuid + i due avvistamenti sono esattamente il regime
+    previsto per le copie."""
+    with z.open(name) as f:
+        fh = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
+        for item in _iter_claude_code(fh, ""):
+            if isinstance(item, _Skip):
+                yield item          # stesse lapidi delle sessioni (source 'claude-code')
+                continue
+            riga = list(item)
+            if riga[4] == "title":
+                riga[0] = _uid("cc-title", name)
+            riga[1] = f"subagent:{riga[1]}"
+            yield tuple(riga)
+            yield _Sighting(str(riga[0]), name)
+
+
 def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
     with zipfile.ZipFile(zip_path) as z:
         names = [n for n in z.namelist() if not n.endswith("/")]
@@ -2270,6 +2330,11 @@ def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
             top = name.split("/", 1)[0]
             if top == "sessions" and ext == ".jsonl":
                 yield from _iter_cc_member(z, name)
+            elif top == "subagents" and ext == ".jsonl":
+                # transcript di sub-agente: conversazione, legata alla madre dal
+                # path (sid) nell'avvistamento, etichetta `subagent:…`. Prima del
+                # 16/09/2026 cadeva nell'`else` come «ridondante» — non lo era.
+                yield from _iter_subagent_member(z, name)
             elif top == "mcp-logs":
                 # log MCP → documento chunked cercabile, col server nell'etichetta.
                 # Chunk larghi (4000): righe JSON dense, meno righe-indice.
@@ -2355,10 +2420,17 @@ def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
                     raw = _read_capped(f, name, budget)
                 yield from _chunk_rows(raw.decode("utf-8", errors="replace"),
                                        "manifest", _zipinfo_ts(info), name)
-            else:
+            elif name in BUNDLE_FILE_RIDONDANTI:
                 # MANIFEST.json / inventario-sessioni.json: ridondanti con le
                 # versioni leggibili già indicizzate — dichiarati, non spariti.
                 yield _Skip("bundle", "non-indicizzato-ridondante", name, "")
+            else:
+                # Un membro che NESSUN ramo conosce: cartella nuova del bundle
+                # (il caso `subagents/` del 16/09) o file inatteso. Lapide con un
+                # motivo SUO, distinto da «ridondante»: ridondante è un verdetto,
+                # questo è un'ammissione — e un `count(*)` su questo motivo dopo
+                # un ingest dice subito se il bundle è cresciuto più dell'indexer.
+                yield _Skip("bundle", "membro-sconosciuto", name, "")
 
 
 # ── dispatch ─────────────────────────────────────────────────────────────────
