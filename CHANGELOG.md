@@ -32,6 +32,21 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ### Aggiunto
 
+- **I sub-agenti del bundle entrano nell'archivio.** Il bundle di Recupero Sessioni 1777
+  dal 16/09 consegna anche `subagents/<sid>/agent-*.jsonl` — i transcript dei sub-agenti
+  (tool Agent), che portano lo **stesso** `sessionId` della sessione madre. L'indexer
+  conosceva quattro cartelle e metteva tutto il resto in una lapide «ridondante»: 662
+  transcript (356 MB) uscivano dichiarati nel MANIFEST e non entravano mai. Ora si
+  indicizzano come conversazioni (stesso estrattore delle sessioni: uuid nativi, il
+  mandato marcato `mandato`), con etichetta `subagent:<cwd>` — così una ricerca sul
+  progetto della madre non pesca l'output degli agenti — e l'avvistamento col path (sid
+  della madre + hash dell'agente) è il legame madre→agente in `sightings`. Nessuna
+  collisione con la madre: gli uuid sono per messaggio, non per sessione (misurato su
+  una coppia reale: 39.701 contro 101, intersezione 0), e il titolo di un agente si
+  aggancia al file, non al sid. Un membro che nessun ramo conosce lascia ora la lapide
+  `membro-sconosciuto` (non più «ridondante»: era un verdetto sbagliato), e un canary
+  fissa l'insieme dei prefissi che l'indexer accetta (`BUNDLE_PREFISSI_INDICIZZATI`),
+  perché il bundle lo produce un'altra app e la prossima cartella nuova si deve vedere.
 - **Il ruolo di un archivio è un CAMPO, non una frase** (#278, cura A). Con 22 DB
   caricati la prima domanda di ogni ricerca è «quale archivio», e fino a oggi la
   risposta viveva solo dentro la `description`: prosa italiana con dentro

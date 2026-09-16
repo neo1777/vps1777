@@ -2017,3 +2017,131 @@ def test_speaker_popolato_da_ogni_percorso_di_ingest(tmp_path: Path) -> None:
                 assert speaker == sender, f"{db.name}: sender={sender!r} → speaker={speaker!r}"
         finally:
             conn.close()
+
+
+# ── subagents/ nel bundle (16/09/2026): 662 transcript, 356 MB, mai entrati ──
+
+_SID = "35a3364f-fa89-4c01-ba1a-fc73b66beec5"
+
+
+def _bundle_con_subagente(tmp_path: Path) -> Path:
+    """Un mini-bundle in memoria: la sessione MADRE in sessions/ e UN transcript
+    di sub-agente in subagents/<sid>/, ricalcato su uno reale (stesso sessionId
+    della madre, `isSidechain: true`, `agentId`, uuid PROPRI per riga). La madre
+    porta anche il titolo (`ai-title` sul sid): è la riga che un agente col
+    titolo avrebbe sovrascritto."""
+    import zipfile
+    madre = "\n".join([
+        f'{{"type":"ai-title","aiTitle":"Titolo della madre","sessionId":"{_SID}"}}',
+        f'{{"type":"user","uuid":"m-u1","timestamp":"2026-09-16T10:00:00Z","sessionId":"{_SID}","cwd":"/home/x/Scrivania/vps1777","message":{{"role":"user","content":"parola-della-madre"}}}}',
+        f'{{"type":"assistant","uuid":"m-a1","timestamp":"2026-09-16T10:00:01Z","sessionId":"{_SID}","cwd":"/home/x/Scrivania/vps1777","message":{{"role":"assistant","content":[{{"type":"tool_use","id":"toolu_1","name":"Agent","input":{{"prompt":"vai"}}}}]}}}}',
+    ])
+    agente = "\n".join([
+        f'{{"parentUuid":null,"isSidechain":true,"agentId":"a5cfecb82923cb1ec","type":"user","uuid":"s-u1","timestamp":"2026-09-16T10:00:02Z","sessionId":"{_SID}","cwd":"/home/x/Scrivania/vps1777","message":{{"role":"user","content":"mandato-per-l-agente parola-dell-agente"}}}}',
+        f'{{"parentUuid":"s-u1","isSidechain":true,"agentId":"a5cfecb82923cb1ec","type":"assistant","uuid":"s-a1","timestamp":"2026-09-16T10:00:03Z","sessionId":"{_SID}","cwd":"/home/x/Scrivania/vps1777","message":{{"role":"assistant","content":[{{"type":"text","text":"referto-dell-agente"}}]}}}}',
+        f'{{"type":"ai-title","aiTitle":"Titolo dell agente","sessionId":"{_SID}"}}',
+        '{"type":"fork-context-ref","ref":"x"}',
+    ])
+    zp = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("MANIFEST.json", json.dumps({"subagenti": {"file": 1, "bytes": len(agente), "dove": "subagents/<sid>/"}}))
+        z.writestr(f"sessions/{_SID}.jsonl", madre)
+        z.writestr(f"subagents/{_SID}/agent-a5cfecb82923cb1ec.jsonl", agente)
+    return zp
+
+
+def test_subagente_indicizzato_legato_alla_madre_senza_collisione(tmp_path: Path) -> None:
+    """Il transcript in subagents/<sid>/ entra come CONVERSAZIONE (non più
+    «non-indicizzato-ridondante»), con etichetta `subagent:<cwd>`, mandato →
+    sender='mandato', avvistamento col path (sid della madre + hash dell'agente);
+    e la madre resta intatta: righe, etichetta e titolo."""
+    zp = _bundle_con_subagente(tmp_path)
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    # nessuna lapide sul membro: né «ridondante» né «sconosciuto»
+    assert con.execute(
+        "SELECT count(*) FROM skipped WHERE source='bundle' AND detail LIKE 'subagents/%'"
+    ).fetchone()[0] == 0
+    righe = {u: (p, s) for u, p, s in con.execute(
+        "SELECT uuid, project, sender FROM messages WHERE uuid IN ('m-u1','m-a1','s-u1','s-a1')")}
+    assert righe["s-u1"] == ("subagent:vps1777", "mandato"), righe
+    assert righe["s-a1"] == ("subagent:vps1777", "assistant"), righe
+    assert righe["m-u1"] == ("vps1777", "user"), "la madre ha cambiato etichetta o mittente"
+    assert con.execute("SELECT count(*) FROM messages WHERE content LIKE '%referto-dell-agente%'"
+                       ).fetchone()[0] == 1
+    # il legame madre→agente: dall'avvistamento, che porta sid e hash
+    fonti = [r[0] for r in con.execute(
+        "SELECT source FROM sightings WHERE uuid='s-a1'")]
+    assert fonti == [f"subagents/{_SID}/agent-a5cfecb82923cb1ec.jsonl"], fonti
+    assert con.execute(
+        "SELECT count(*) FROM sightings WHERE source LIKE ?", (f"subagents/{_SID}/%",)
+    ).fetchone()[0] == 3, "due messaggi + il titolo, ognuno col suo avvistamento"
+    # i due titoli convivono: quello dell'agente NON sovrascrive quello della madre
+    titoli = sorted(r[0] for r in con.execute("SELECT content FROM messages WHERE sender='title'"))
+    assert titoli == ["Titolo dell agente", "Titolo della madre"], titoli
+    assert con.execute("SELECT count(*) FROM revisions").fetchone()[0] == 0, \
+        "una revisione qui = una riga della madre sovrascritta dall'agente"
+
+
+def test_subagente_reingest_idempotente(tmp_path: Path) -> None:
+    """Due ingest dello stesso bundle: stesse righe, stessi avvistamenti, zero revisioni."""
+    zp = _bundle_con_subagente(tmp_path)
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT count(*) FROM messages WHERE project LIKE 'subagent:%'").fetchone()[0] == 3
+    assert con.execute("SELECT count(*) FROM sightings WHERE source LIKE 'subagents/%'").fetchone()[0] == 3
+    assert con.execute("SELECT count(*) FROM revisions").fetchone()[0] == 0
+
+
+def test_canary_prefissi_del_bundle_che_l_indexer_conosce(tmp_path: Path) -> None:
+    """CANARY. Il bundle lo produce un'altra app: quando aggiunge una cartella
+    top-level, qui nessun test si rompe da solo — il membro cade nell'`else` con
+    una lapide e sparisce dall'archivio (è successo con subagents/: 662 file).
+    Questo test fissa l'insieme in TRE modi che devono concordare:
+      1. la tupla dichiarata (BUNDLE_PREFISSI_INDICIZZATI + i file);
+      2. il COMPORTAMENTO: un membro per ogni prefisso dichiarato entra in
+         `messages` e non lascia lapidi `bundle`;
+      3. un prefisso INVENTATO lascia la lapide `membro-sconosciuto`, non
+         «ridondante» — così l'assenza di un ramo si legge nel ledger.
+    Se il lato-bundle aggiunge un prefisso, aggiornare la tupla E il dispatch,
+    e questo elenco è ciò che il test speculare del bundle deve leggere."""
+    import zipfile
+    assert archive_indexer.BUNDLE_PREFISSI_INDICIZZATI == ("sessions", "subagents", "mcp-logs", "workfiles")
+    assert archive_indexer.BUNDLE_FILE_INDICIZZATI == ("inventario/inventario-sessioni.tsv", "MANIFEST.md")
+    assert archive_indexer.BUNDLE_FILE_RIDONDANTI == ("MANIFEST.json", "inventario/inventario-sessioni.json")
+
+    cc = ('{"type":"user","uuid":"%s","timestamp":"2026-09-16T10:00:00Z","cwd":"/x/p",'
+          '"message":{"role":"user","content":"segno-%s"}}')
+    membri = {
+        f"sessions/{_SID}.jsonl": cc % ("c-sess", "sessions"),
+        f"subagents/{_SID}/agent-0.jsonl": cc % ("c-sub", "subagents"),
+        f"mcp-logs/{_SID}/nb1777/1.jsonl": '{"sessionId":"%s","msg":"segno-mcp-logs"}' % _SID,
+        "workfiles/-home-x/nota.md": "segno-workfiles",
+        "inventario/inventario-sessioni.tsv": "sid\tsegno-inventario",
+        "MANIFEST.md": "# segno-manifest-md",
+        "MANIFEST.json": "{}",
+        "inventario/inventario-sessioni.json": "{}",
+        "cartella-inventata/x.jsonl": cc % ("c-inv", "inventata"),
+    }
+    assert {m.split("/", 1)[0] for m in membri if "/" in m} >= set(archive_indexer.BUNDLE_PREFISSI_INDICIZZATI)
+    zp = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        for nome, corpo in membri.items():
+            z.writestr(nome, corpo)
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    for segno in ("sessions", "subagents", "mcp-logs", "workfiles", "inventario", "manifest-md"):
+        assert con.execute("SELECT count(*) FROM messages WHERE content LIKE ?",
+                           (f"%segno-{segno}%",)).fetchone()[0] >= 1, f"prefisso {segno} non indicizzato"
+    lapidi = {d: r for r, d in con.execute("SELECT reason, detail FROM skipped WHERE source='bundle'")}
+    assert lapidi == {
+        "MANIFEST.json": "non-indicizzato-ridondante",
+        "inventario/inventario-sessioni.json": "non-indicizzato-ridondante",
+        "cartella-inventata/x.jsonl": "membro-sconosciuto",
+    }, lapidi
+    assert con.execute("SELECT count(*) FROM messages WHERE content LIKE '%segno-inventata%'"
+                       ).fetchone()[0] == 0
