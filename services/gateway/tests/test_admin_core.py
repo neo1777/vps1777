@@ -419,3 +419,60 @@ def test_ogni_classe_produce_un_testo_non_vuoto():
               "timer-fermo", "aggiornato", "mai-controllato", "classe-inventata"):
         t = admin_core.testo_verdetto_update(c, 3, "0.40.5", "0.40.5", "boom")
         assert t and len(t) > 20, f"la classe «{c}» produce un testo vuoto o troppo corto"
+
+
+# ── /admin/audit: il filtro (20/09/2026) ─────────────────────────────────────
+# 198 dei 200 eventi mostrati erano `proxy_request`: la pagina non serviva a
+# trovare un login o un errore. La selezione è qui perché admin.py non è
+# testabile stdlib-only.
+
+def _ev(*tipi):
+    return [{"ts": f"t{i}", "event": t} for i, t in enumerate(tipi)]
+
+
+def test_filtra_audit_nasconde_il_rumore_di_default_e_lo_conta():
+    ev = _ev("proxy_request", "admin_login_ok", "proxy_request", "proxy_auth_fail")
+    sel, conteggi, nascosti = admin_core.filtra_audit(ev)
+    assert [e["event"] for e in sel] == ["admin_login_ok", "proxy_auth_fail"]
+    assert conteggi == {"proxy_request": 2, "admin_login_ok": 1, "proxy_auth_fail": 1}
+    assert nascosti == 2
+
+
+def test_filtra_audit_tutti_e_per_tipo():
+    ev = _ev("proxy_request", "admin_login_ok", "proxy_request")
+    assert len(admin_core.filtra_audit(ev, "tutti")[0]) == 3
+    sel, _, nascosti = admin_core.filtra_audit(ev, "proxy_request")
+    assert len(sel) == 2 and nascosti == 0  # chiesto esplicitamente: niente è nascosto
+    assert admin_core.filtra_audit(ev, "inesistente")[0] == []
+
+
+def test_filtra_audit_tiene_gli_ULTIMI_e_tollera_eventi_senza_tipo():
+    ev = _ev(*(["x"] * 5)) + [{"ts": "z"}]
+    sel, conteggi, _ = admin_core.filtra_audit(ev, "tutti", mostra=3)
+    assert [e["ts"] for e in sel] == ["t3", "t4", "z"]
+    assert conteggi["?"] == 1
+
+
+# ── /admin/update: il changelog a fine paragrafo, reso ───────────────────────
+
+def test_taglia_a_paragrafo_lascia_stare_un_testo_compiuto():
+    assert admin_core.taglia_a_paragrafo("### Corretto\n\n- uno.\n- due!") == ("### Corretto\n\n- uno.\n- due!", False)
+    assert admin_core.taglia_a_paragrafo("") == ("", False)
+
+
+def test_taglia_a_paragrafo_toglie_la_voce_o_il_paragrafo_a_meta():
+    t = "### Corretto\n\n- **P0** intero.\n- **P1** solo in parte\n  con"
+    assert admin_core.taglia_a_paragrafo(t) == ("### Corretto\n\n- **P0** intero.", True)
+    t2 = "Primo paragrafo.\n\nSecondo paragrafo che finisce a met"
+    assert admin_core.taglia_a_paragrafo(t2) == ("Primo paragrafo.", True)
+    # nessun confine a cui tornare: si tiene il testo e si dichiara il taglio
+    assert admin_core.taglia_a_paragrafo("una riga a met") == ("una riga a met", True)
+
+
+def test_md_minimo_rende_titoli_liste_grassetto_codice_e_scappa_l_html():
+    out = admin_core.md_minimo("### Corretto\n\n- **P0 · x** con `cp` <b>no</b>\n  seconda riga\n- due\n\nParagrafo [doc](https://esempio.it/x) e [no](javascript:alert(1)).")
+    assert "<h3>Corretto</h3>" in out
+    assert "<ul>\n<li><strong>P0 · x</strong> con <code>cp</code> &lt;b&gt;no&lt;/b&gt; seconda riga</li>\n<li>due</li>\n</ul>" in out
+    assert '<a href="https://esempio.it/x" target="_blank" rel="noopener">doc</a>' in out
+    assert "javascript:" in out and "<a href=\"javascript" not in out  # solo https diventa link
+    assert out.count("<p>") == 1

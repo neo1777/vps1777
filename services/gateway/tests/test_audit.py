@@ -164,7 +164,11 @@ def test_OGNI_chiave_usata_nel_repo_e_dichiarata(monkeypatch) -> None:
     radice = Path(__file__).resolve().parents[3]
     usate, non_letterali = set(), 0
     for p in radice.rglob("*.py"):
-        if ".git" in p.parts or "test_" in p.name:
+        # `.venv`/site-packages: in locale c'è (services/archive-mcp/.venv) e dentro
+        # `filelock/_windows.py` chiama una funzione che si chiama `audit` — 4 falsi
+        # «non letterali» che in CI non esistono (uvx, niente venv). 20/09/2026.
+        if (".git" in p.parts or ".venv" in p.parts or "site-packages" in p.parts
+                or "__pycache__" in p.parts or "test_" in p.name):
             continue
         try:
             albero = ast.parse(p.read_text(encoding="utf-8"))

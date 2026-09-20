@@ -284,6 +284,8 @@ button.danger{border-color:var(--err);color:var(--err)}
 button.danger:hover{background:rgba(196,113,88,.12);border-color:var(--err)}
 .audit-event{padding:7px 0;border-bottom:1px solid var(--line-soft);font-family:var(--mono);font-size:11px;display:flex;gap:14px}
 .audit-event .ts{color:var(--faint);min-width:170px}.audit-event .ev{color:var(--accent-dim);min-width:180px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px}.chips a{font-family:var(--mono);font-size:11px;padding:3px 8px;border:1px solid var(--line-soft);border-radius:4px;color:var(--muted);text-decoration:none}.chips a.on{color:var(--accent);border-color:var(--accent-dim)}
+.md h3{font-size:13px;margin:12px 0 6px}.md p,.md li{font-size:13px;line-height:1.5}.md ul{padding-left:18px;margin:4px 0}.md code{font-family:var(--mono);font-size:12px}
 .foot{color:var(--faint);font-size:11px;text-align:center;margin-top:40px;font-family:var(--mono);letter-spacing:.04em}
 </style>
 """
@@ -1067,7 +1069,7 @@ async def update_check(request: Request) -> Response:
         return RedirectResponse(f"/admin/update?msg={msg.replace(' ', '+')}&kind=ok",
                                 status_code=303)
     prev.update(current=current, latest=latest,
-                changelog_excerpt=(rel.get("body") or "")[:800],
+                changelog_excerpt=(rel.get("body") or "")[:1600],  # il lettore taglia a fine paragrafo
                 html_url=rel.get("html_url", ""), error=None, checked_at=now)
     sf.write_text(json.dumps(prev, indent=2) + "\n")
     audit({"event": "admin_update_check", "by": email, "latest": latest})
@@ -1161,7 +1163,18 @@ document.getElementById('updform').addEventListener('submit', function(ev) {{
 
     changelog_html = ""
     if excerpt:
-        changelog_html = f'<section><div class="kicker">changelog</div><pre>{html.escape(excerpt)}</pre></section>'
+        # L'estratto è troncato dal writer a N caratteri: qui si torna all'ultimo
+        # confine di paragrafo e si rende il markdown (prima finiva in un <pre>
+        # con gli asterischi in vista e l'ultima riga a metà: «…solo in parte / con»).
+        testo, tagliato = admin_core.taglia_a_paragrafo(excerpt)
+        link = str(status.get("html_url") or "")
+        coda = ""
+        if tagliato:
+            coda = ('<p class="hint">estratto — ' + (
+                f'<a href="{html.escape(link)}" target="_blank" rel="noopener">changelog completo ↗</a>'
+                if link.startswith("https://") else "il resto è nella release su GitHub") + "</p>")
+        changelog_html = (f'<section><div class="kicker">changelog</div>'
+                          f'<div class="md">{admin_core.md_minimo(testo)}</div>{coda}</section>')
 
     flash = request.query_params.get("msg", "").replace("+", " ")
     flash_kind = request.query_params.get("kind", "ok")
@@ -1239,7 +1252,13 @@ async def audit_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
         return redirect
-    events = read_recent(200)
+    # 20/09/2026: 198 dei 200 eventi mostrati erano `proxy_request` (uno per
+    # chiamata MCP) — login, errori e mismatch sparivano nel rumore. La selezione
+    # sta in admin_core (stdlib-only, testata); qui il vestito: le chips per tipo
+    # con il conto, il rumore nascosto di default e dichiarato.
+    tipo = request.query_params.get("tipo", "").strip()[:64]
+    tutti = read_recent(admin_core.AUDIT_LETTURA)
+    events, conteggi, nascosti = admin_core.filtra_audit(tutti, tipo)
     rows: list[str] = []
     for e in reversed(events):
         ts = html.escape(e.get("ts", "?"))
@@ -1247,6 +1266,14 @@ async def audit_view(request: Request) -> Response:
         extra = {k: v for k, v in e.items() if k not in ("ts", "event")}
         ex = html.escape(json.dumps(extra, ensure_ascii=False))
         rows.append(f'<div class="audit-event"><span class="ts">{ts}</span><span class="ev">{ev}</span><span>{ex}</span></div>')
+    chips = [f'<a href="/admin/audit" class="{"on" if not tipo else ""}">senza {admin_core.AUDIT_RUMORE}</a>',
+             f'<a href="/admin/audit?tipo=tutti" class="{"on" if tipo == "tutti" else ""}">tutti ({len(tutti)})</a>']
+    for ev, n in sorted(conteggi.items(), key=lambda kv: (-kv[1], kv[0])):
+        q = quote_plus(ev)
+        chips.append(f'<a href="/admin/audit?tipo={q}" class="{"on" if tipo == ev else ""}">{html.escape(ev)} ({n})</a>')
+    nascosti_html = (f'<p class="hint">{nascosti} eventi <code>{admin_core.AUDIT_RUMORE}</code> nascosti '
+                     f'(uno per chiamata MCP): <a href="/admin/audit?tipo={admin_core.AUDIT_RUMORE}">mostrali</a>.</p>'
+                     if nascosti else "")
     # Salute dell'audit (H17): se la scrittura ha fallito, un elenco che sembra
     # solo "vuoto" è una bugia per omissione. Va detto a schermo.
     health = audit_health()
@@ -1264,8 +1291,10 @@ async def audit_view(request: Request) -> Response:
 </header>
 <section>
   {health_html}
-  <div class="kicker">ultimi {len(events)} eventi</div>
-  {''.join(rows) if rows else '<p style="color:var(--muted)">Nessun evento ancora.</p>'}
+  <div class="kicker">{len(events)} eventi mostrati · letti gli ultimi {len(tutti)} del log</div>
+  <div class="chips">{''.join(chips)}</div>
+  {nascosti_html}
+  {''.join(rows) if rows else '<p style="color:var(--muted)">Nessun evento di questo tipo.</p>'}
 </section>
 """
     return _layout("audit", body, current="audit", csrf=_csrf_token(email))

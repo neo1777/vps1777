@@ -23,6 +23,7 @@ from __future__ import annotations
 import calendar
 import json
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -319,3 +320,109 @@ def testo_verdetto_update(classe: str, ore: int | None, current: str,
     if classe == "aggiornato":
         return f"Al controllo di {ore} ore fa eri alla versione più recente."
     return "Nessun check ancora eseguito (il timer gira una volta al giorno)."
+
+
+# ─────────────────────────────────────────── /admin/audit — il filtro
+# 20/09/2026: la pagina mostrava gli ultimi 200 eventi e 198 su 200 erano
+# `proxy_request` (uno per chiamata MCP). Login, errori, mismatch: sepolti.
+# La selezione sta qui (stdlib-only, testata); admin.py la veste.
+AUDIT_LETTURA = 1000          # quanti eventi si leggono dal log (≤ audit.MAX_READ_LIMIT)
+AUDIT_MOSTRA = 200            # quanti se ne mostrano dopo il filtro
+AUDIT_RUMORE = "proxy_request"
+
+
+def filtra_audit(eventi: list[dict], tipo: str = "",
+                 mostra: int = AUDIT_MOSTRA) -> tuple[list[dict], dict[str, int], int]:
+    """(selezionati in ordine cronologico, conteggi per tipo, quanti `proxy_request`
+    sono nascosti). `tipo` vuoto = tutto tranne il rumore; «tutti» = tutto;
+    altrimenti solo quel tipo. Un evento senza `event` conta come «?»."""
+    def _t(e: dict) -> str:
+        return str(e.get("event") or "?")
+    conteggi: dict[str, int] = {}
+    for e in eventi:
+        conteggi[_t(e)] = conteggi.get(_t(e), 0) + 1
+    if tipo == "tutti":
+        sel, nascosti = list(eventi), 0
+    elif tipo:
+        sel, nascosti = [e for e in eventi if _t(e) == tipo], 0
+    else:
+        sel = [e for e in eventi if _t(e) != AUDIT_RUMORE]
+        nascosti = conteggi.get(AUDIT_RUMORE, 0)
+    return sel[-max(0, mostra):], conteggi, nascosti
+
+
+# ─────────────────────────────────────────── /admin/update — il changelog
+# L'estratto arriva TRONCATO a un numero di caratteri (writer: cmd_check sull'host
+# e update_check nel gateway): finiva a metà frase («…solo in parte\ncon»). Qui si
+# torna all'ultimo confine di paragrafo, e si dice che è un estratto.
+_FINE_FRASE = ".!?…)»\"'`"
+
+
+def taglia_a_paragrafo(testo: str) -> tuple[str, bool]:
+    """(testo, tagliato). Se l'estratto non finisce con una frase compiuta, toglie
+    l'ultimo paragrafo o l'ultima voce di lista incompleti. Se non c'è un confine
+    a cui tornare, lascia il testo e segnala il taglio."""
+    t = (testo or "").rstrip()
+    if not t:
+        return "", False
+    if t[-1] in _FINE_FRASE or t.endswith("```"):
+        return t, False
+    confine = max(t.rfind("\n\n"), t.rfind("\n- "), t.rfind("\n* "), t.rfind("\n#"))
+    if confine <= 0:
+        return t, True
+    return t[:confine].rstrip(), True
+
+
+def md_minimo(testo: str) -> str:
+    """Il markdown di un changelog reso in HTML SICURO (tutto passa da html.escape
+    PRIMA dei tag): titoli, liste, grassetto, codice, link https. Niente di più:
+    un changelog non ha bisogno di un renderer, ha bisogno di non finire in un
+    <pre> con gli asterischi in vista."""
+    import html as _h
+
+    def inline(s: str) -> str:
+        s = _h.escape(s)
+        s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+        s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
+        s = re.sub(r"\[([^\]]+)\]\((https://[^)\s]+)\)",
+                   r'<a href="\2" target="_blank" rel="noopener">\1</a>', s)
+        return s
+
+    out: list[str] = []
+    para: list[str] = []
+    in_ul = False
+
+    def chiudi_para() -> None:
+        if para:
+            out.append("<p>" + " ".join(para) + "</p>")
+            para.clear()
+
+    def chiudi_ul() -> None:
+        nonlocal in_ul
+        if in_ul:
+            out.append("</ul>")
+            in_ul = False
+
+    for riga in (testo or "").splitlines():
+        r = riga.rstrip()
+        s = r.strip()
+        if s.startswith("#"):
+            chiudi_para()
+            chiudi_ul()
+            out.append(f"<h3>{inline(s.lstrip('#').strip())}</h3>")
+        elif s.startswith(("- ", "* ")):
+            chiudi_para()
+            if not in_ul:
+                out.append("<ul>")
+                in_ul = True
+            out.append(f"<li>{inline(s[2:])}</li>")
+        elif not s:
+            chiudi_para()
+            chiudi_ul()
+        elif in_ul and out and out[-1].endswith("</li>"):
+            out[-1] = out[-1][:-5] + " " + inline(s) + "</li>"   # voce su più righe
+        else:
+            para.append(inline(s))
+    chiudi_para()
+    chiudi_ul()
+    return "\n".join(out)
