@@ -1066,11 +1066,63 @@ def count_skipped(db_path: Union[str, Path]) -> int:
         return 0
 
 
-def db_info(db_path: Union[str, Path], *, top: int = 5) -> dict:
+# ── La scheda costa: count(*) e GROUP BY su tabelle da centinaia di migliaia di
+# righe, 11,5 GB di SQLite in tutto su una macchina con 4 GB di RAM (misurato il
+# 20/09/2026 sulla VPS: 17-20 s per ogni DB di recupero, 2-4 MINUTI per il
+# listato intero). Chiamata dentro un handler async senza thread, bloccava
+# l'event loop del gateway: /health muto, container «unhealthy», la pagina
+# /admin/archive «impallata» per chi la apriva. La scheda dipende SOLO dal file:
+# la chiave (dimensione, mtime_ns) la invalida da sé a ogni re-index, upload o
+# set_description (tutti scrivono il file). Niente TTL: un TTL mentirebbe in
+# entrambi i versi.
+_DB_INFO_CACHE: dict[str, tuple[tuple[int, int, int], dict]] = {}
+
+
+def _sidecar(p: Path) -> bool:
+    """`*.vec.db` è l'indice vettoriale a fianco di un archivio, non un archivio:
+    senza `messages`, senza ruolo, non si cerca e non si elimina da qui."""
+    return p.name.endswith(".vec.db")
+
+
+def list_db_infos(db_dir: Union[str, Path], *, top: int = 5) -> list[dict]:
+    """Le schede di tutti gli archivi di `db_dir` (ordinate per nome), sidecar
+    esclusi. Unica fonte per /admin/archive e per la Mini App. Chiamarla da un
+    thread (`asyncio.to_thread`): al primo giro paga il costo pieno."""
+    d = Path(db_dir)
+    if not d.is_dir():
+        return []
+    paths = [p for p in sorted(d.glob("*.db")) if p.is_file() and not _sidecar(p)]
+    vivi = {str(p) for p in paths}
+    for k in [k for k in _DB_INFO_CACHE if k not in vivi]:
+        _DB_INFO_CACHE.pop(k, None)  # DB eliminato: la sua scheda non resta in memoria
+    return [db_info(p, top=top) for p in paths]
+
+
+def db_info(db_path: Union[str, Path], *, top: int = 5, cache: bool = True) -> dict:
     """Scheda di un DB per le UI (admin + Mini App): righe, etichette distinte,
     le `top` etichette più popolose, dimensione file e ultima modifica.
-    Robusto: DB assente o illeggibile → scheda a zero, mai un'eccezione."""
+    Robusto: DB assente o illeggibile → scheda a zero, mai un'eccezione.
+    Con `cache` (default) la scheda si ricalcola solo se il file è cambiato."""
+    import copy
     p = Path(db_path)
+    key = None
+    try:
+        st = p.stat()
+        key = (st.st_size, st.st_mtime_ns, top)
+    except OSError:
+        pass
+    if cache and key is not None:
+        hit = _DB_INFO_CACHE.get(str(p))
+        if hit is not None and hit[0] == key:
+            return copy.deepcopy(hit[1])
+    out = _db_info_calcola(p, top=top)
+    if cache and key is not None:
+        _DB_INFO_CACHE[str(p)] = (key, copy.deepcopy(out))
+    return out
+
+
+def _db_info_calcola(p: Path, *, top: int) -> dict:
+    """Il calcolo vero (le query). Vedi `db_info` per la cache."""
     out: dict = {"name": p.stem, "rows": 0, "labels": 0, "top": [],
                  "size": 0, "mtime": "", "skipped": 0, "description": "",
                  "ruolo": ""}

@@ -9,6 +9,27 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
      la 0.48.1). Scrivere qui «0.49.0» sarebbe dichiarare una versione che non
      esiste ancora: un'affermazione vera solo se qualcun altro la ratifica. -->
 
+### Corretto
+
+- **P1 · `/admin/archive` «impallata», e con lei tutto il gateway.** La scheda di
+  ogni DB (`db_info`: `count(*)`, `count(DISTINCT project)`, `GROUP BY project`) girava
+  dentro l'handler `async`, nel loop, per tutti i DB a ogni apertura della pagina — e
+  per la Mini App (`/app/api/archive/dbs`). Misurato il 20/09/2026 sulla VPS (23 DB,
+  11,5 GB di SQLite, 4 GB di RAM): 17-38 s per ogni DB di recupero, **152 s il listato
+  intero**. Nel log: i `/health` spariscono per 2-4 minuti e vengono serviti tutti insieme
+  nell'istante in cui esce il `GET /admin/archive 200`; il container risulta
+  `unhealthy`; ogni altra richiesta (MCP compresi) aspetta. Due cure, entrambe misurabili:
+  la scheda si calcola **una volta per (dimensione, mtime) del file** (`_DB_INFO_CACHE`:
+  re-index, upload e `set_description` scrivono il file e la invalidano da sé; niente
+  TTL, che mentirebbe in entrambi i versi) e il listato gira in **`asyncio.to_thread`**,
+  così il primo giro freddo costa ancora minuti ma **a quella richiesta sola**. Unica
+  fonte per admin e Mini App: `archive_indexer.list_db_infos`. Test: cache che non
+  rifà le query finché il file non cambia (sqlite «vietato» dal monkeypatch), copia
+  che non sporca la cache, `cache=False`, invalidazione su mtime.
+- **Il sidecar `*.vec.db` compariva come un archivio** — 0 messaggi, «non dichiarato»,
+  col bottone *Elimina* accanto. È l'indice vettoriale a fianco di un DB, non un DB:
+  `list_db_infos` lo salta (e dimentica dalla cache le schede dei DB cancellati).
+
 ## [0.49.0] — 2026-09-16
 
 ### Corretto

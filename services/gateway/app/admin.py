@@ -644,12 +644,9 @@ def _safe_db_name(raw: str, fallback: str = "archivio") -> str:
 
 
 def _archive_dbs() -> list[dict]:
-    """Scheda (db_info) di ogni .db nella dir archive."""
-    db_dir = Path(get_settings().archive_db_dir)
-    if not db_dir.is_dir():
-        return []
-    return [archive_indexer.db_info(p)
-            for p in sorted(db_dir.glob("*.db")) if p.is_file()]
+    """Scheda (db_info) di ogni archivio nella dir (sidecar `.vec.db` esclusi).
+    SINCRONA e cara al primo giro: si chiama con `asyncio.to_thread`."""
+    return archive_indexer.list_db_infos(get_settings().archive_db_dir)
 
 
 def _fmt_size(n: float) -> str:
@@ -842,8 +839,10 @@ async def archive_view(request: Request) -> Response:
         finally:
             tmp.unlink(missing_ok=True)
 
-    # GET
-    dbs = _archive_dbs()
+    # GET — in un thread: il listato è cheap se in cache e costa MINUTI se no
+    # (20/09/2026: 2-4 min sui 23 DB della VPS). Nel loop bloccava /health e
+    # ogni altra richiesta: era questo il «si è impallato» della pagina.
+    dbs = await asyncio.to_thread(_archive_dbs)
     if dbs:
         rows = ""
         for d in dbs:
