@@ -28,6 +28,8 @@ testati); le chiamate tool agli upstream in mcp_client.
 """
 from __future__ import annotations
 
+import asyncio
+
 import json
 import os
 import secrets as pysecrets
@@ -37,7 +39,7 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
-from .archive_indexer import count_rows, db_info, find_db
+from .archive_indexer import count_rows, find_db, list_db_infos
 from .audit import audit, read_recent
 from .jwt_helpers import JWTError, issue, verify
 from .mcp_client import MCPCallError, call_tool
@@ -316,9 +318,9 @@ async def api_archive_dbs(request: Request) -> Response:
     dipende dall'upstream per un dato che il gateway ha in casa."""
     if not _bearer_claims(request):
         return _unauthorized()
-    db_dir = Path(get_settings().archive_db_dir)
-    infos = ([db_info(p) for p in sorted(db_dir.glob("*.db")) if p.is_file()]
-             if db_dir.is_dir() else [])
+    # Stessa fonte e stessa cache di /admin/archive, e fuori dal loop: il
+    # listato freddo costa minuti (misurato 20/09/2026) e qui passa la Mini App.
+    infos = await asyncio.to_thread(list_db_infos, get_settings().archive_db_dir)
     return JSONResponse({"databases": infos})
 
 

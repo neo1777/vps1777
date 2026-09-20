@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+
+import pytest
 from pathlib import Path
 
 # archive_indexer è stdlib-only: lo importo come modulo singolo, senza tirare
@@ -2145,3 +2147,48 @@ def test_canary_prefissi_del_bundle_che_l_indexer_conosce(tmp_path: Path) -> Non
     }, lapidi
     assert con.execute("SELECT count(*) FROM messages WHERE content LIKE '%segno-inventata%'"
                        ).fetchone()[0] == 0
+
+
+# ── La scheda in cache (20/09/2026) ──────────────────────────────────────────
+# /admin/archive «impallata»: db_info fa count(*) + GROUP BY su ogni DB (2-4 min
+# sui 23 DB della VPS) dentro il loop async. La cura: scheda calcolata una volta
+# per (dimensione, mtime) del file, e chiamata in un thread.
+
+def test_db_info_cache_non_riquery_finche_il_file_non_cambia(tmp_path: Path, monkeypatch) -> None:
+    import os
+    db = tmp_path / "c.db"
+    archive_indexer.write_rows(db, [("u1", "alpha", "2026-01-01", "uno")])
+    archive_indexer._DB_INFO_CACHE.clear()
+    assert archive_indexer.db_info(db)["rows"] == 1
+    # da qui sqlite è VIETATO: se la cache regge, nessuno lo chiama
+    def _no(*a, **k):
+        raise AssertionError("query rifatta con file invariato")
+    monkeypatch.setattr(archive_indexer.sqlite3, "connect", _no)
+    info = archive_indexer.db_info(db)
+    assert info["rows"] == 1
+    info["top"].append("sporco")  # chi modifica la copia non sporca la cache
+    assert archive_indexer.db_info(db)["top"] == [{"label": "alpha", "rows": 1}]
+    # `cache=False` ignora la cache e quindi interroga davvero
+    with pytest.raises(AssertionError):
+        archive_indexer.db_info(db, cache=False)
+    # il file cambia (mtime) → la scheda si ricalcola
+    monkeypatch.undo()
+    archive_indexer.write_rows(db, [("u2", "beta", "2026-01-02", "due")])
+    st = db.stat()
+    os.utime(db, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+    assert archive_indexer.db_info(db)["rows"] == 2
+
+
+def test_list_db_infos_salta_i_sidecar_vec_e_dimentica_i_cancellati(tmp_path: Path) -> None:
+    a = tmp_path / "a.db"
+    archive_indexer.write_rows(a, [("u1", "p", "t", "x")])
+    (tmp_path / "a.vec.db").write_bytes(b"non un archivio")
+    (tmp_path / "nota.txt").write_text("no")
+    archive_indexer._DB_INFO_CACHE.clear()
+    infos = archive_indexer.list_db_infos(tmp_path)
+    assert [i["name"] for i in infos] == ["a"]
+    assert str(a) in archive_indexer._DB_INFO_CACHE
+    a.unlink()
+    assert archive_indexer.list_db_infos(tmp_path) == []
+    assert str(a) not in archive_indexer._DB_INFO_CACHE
+    assert archive_indexer.list_db_infos(tmp_path / "manca") == []
