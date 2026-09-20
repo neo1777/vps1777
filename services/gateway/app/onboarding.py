@@ -29,8 +29,8 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .admin import _csrf_token, _layout, _require_admin
-from . import nlm_client
+from .admin import _csrf_token, _layout, _read_json, _require_admin
+from . import admin_core, nlm_client
 from .audit import audit
 from .settings import get_settings
 
@@ -74,8 +74,15 @@ async def _status() -> dict[str, tuple[str, str]]:
     # finisce in `var/state.json`. Portarlo fin qui vuole un canale come
     # `update_status.json`/`secrets_status.json` — è il passo successivo,
     # dichiarato e NON fatto qui: meglio un giallo onesto di un verde dedotto.
+    # 20/09/2026 — il passo «dichiarato e NON fatto» qui sopra è fatto: `vps1777
+    # check` (timer giornaliero sull'host) scrive l'esito di `funnel_ok` in
+    # onboarding/raggiungibilita.json e questa pagina lo legge. Il gateway resta
+    # senza uscita su Internet (H50): la sonda è dell'host, e qui si dice di chi è
+    # e di quando. Senza il file (release vecchia sull'host, timer mai girato) la
+    # riga resta quella onesta di prima.
     if pb and ".ts.net" in pb:
-        out["tailscale"] = ("warn", "URL Funnel configurato — non verificato da qui")
+        out["tailscale"] = (_sonda_dell_host(s)
+                            or ("warn", "URL Funnel configurato — non verificato da qui"))
     else:
         out["tailscale"] = ("off", "non configurato")
 
@@ -102,6 +109,24 @@ async def _status() -> dict[str, tuple[str, str]]:
         out["bot"] = ("off", "token non impostato")
 
     return out
+
+
+def _sonda_dell_host(s) -> tuple[str, str] | None:
+    """Legge onboarding/raggiungibilita.json (scritto da `vps1777 check`, che esce
+    su Internet e rientra). None = nessuna sonda mai scritta. Stantia oltre
+    CHECK_STALE_H: il dato c'è ma non vale più — e lo si dice, senza colore verde."""
+    st = _read_json(Path(s.onboarding_dir) / "raggiungibilita.json")
+    if not isinstance(st, dict) or "ok" not in st:
+        return None
+    quando = str(st.get("checked_at") or "")
+    dettaglio = str(st.get("dettaglio") or "")
+    ore = admin_core.ore_da(quando)
+    if ore is None or ore > admin_core.CHECK_STALE_H:
+        return ("warn", f"ultima sonda dall'host: {quando or 'senza data'} — stantia "
+                        f"(oltre {admin_core.CHECK_STALE_H}h): il timer vps1777-check-update non gira?")
+    if st.get("ok"):
+        return ("ok", f"{dettaglio or 'risponde da Internet'} — sonda dall'host di {ore}h fa ({quando})")
+    return ("off", f"NON risponde da Internet: {dettaglio} — sonda dall'host di {ore}h fa ({quando})")
 
 
 def _pending_path() -> Path:

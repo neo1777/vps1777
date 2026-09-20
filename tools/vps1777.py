@@ -2066,6 +2066,13 @@ def _sorveglia_raggiungibilita(repo: Path, st: dict, notifica: bool) -> None:
         # singhiozzo del tunnel farebbe tornare indietro una versione sana. Qui
         # invece un falso allarme costa una notifica, non un rollback.
         raggiungibile, perche = funnel_ok(repo)
+    # Il pannello /admin/setup legge questo file (20/09/2026): il gateway non ha
+    # uscita su Internet (H50) e non può sondare da sé — «non verificato da qui»
+    # era la riga onesta finché questo dato, che esiste da luglio, non arrivava lì.
+    # Telemetria: non può far cadere il check (H55).
+    _scrivi_telemetria(repo, "raggiungibilita.json", json.dumps({
+        "ok": bool(raggiungibile), "dettaglio": perche, "checked_at": now_iso(),
+    }, indent=2) + "\n")
     caduta_da = str(st.get("irraggiungibile_da") or "")
     if not raggiungibile:
         warn(f"il servizio non risponde dall'host — {perche}")
@@ -2330,7 +2337,7 @@ def cmd_check(repo: Path, args) -> int:
         st["last_check"] = now_iso()
         state_save(repo, st)
         return 0
-    excerpt = (rel.get("body") or "")[:800]
+    excerpt = (rel.get("body") or "")[:1600]  # il pannello taglia a fine paragrafo
     status_write(repo, current=cur, latest=latest,
                  changelog_excerpt=excerpt, error=None,
                  html_url=rel.get("html_url", ""))

@@ -9,6 +9,30 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
      la 0.48.1). Scrivere qui «0.49.0» sarebbe dichiarare una versione che non
      esiste ancora: un'affermazione vera solo se qualcun altro la ratifica. -->
 
+### Modificato
+
+- **`/admin/audit` — filtro per tipo di evento, rumore nascosto e dichiarato.** Misurato
+  il 20/09/2026: 198 dei 200 eventi mostrati erano `proxy_request` (uno per chiamata MCP);
+  login, `proxy_auth_fail`, `proxy_secret_mismatch` sparivano nel rumore. Ora si leggono
+  gli ultimi 1000 eventi, `proxy_request` è nascosto di default con il conto e il link per
+  mostrarlo, e ogni tipo ha la sua chip `?tipo=…` col conto. La selezione sta in
+  `admin_core.filtra_audit` (stdlib-only, testata).
+- **`/admin/update` — il changelog reso, e tagliato a fine paragrafo.** L'estratto arrivava
+  come markdown grezzo in un `<pre>` e finiva a metà frase («…solo in parte / con»): il
+  writer (host e gateway) tronca a N caratteri. Ora il cap è 1600, il lettore torna
+  all'ultimo confine di paragrafo (`taglia_a_paragrafo`), dichiara «estratto» col link
+  alla release, e rende titoli/liste/grassetto/codice/link https con `md_minimo` — tutto
+  passa da `html.escape` prima dei tag, `javascript:` non diventa link (testato).
+- **`/admin/setup` — la sonda dall'esterno arriva al pannello.** Il commento in
+  `onboarding.py` lo chiamava «il passo successivo, dichiarato e NON fatto»: il dato vero
+  (`funnel_ok`, che esce su Internet e rientra, ogni giorno dentro `vps1777 check`) non
+  arrivava alla riga «URL Funnel configurato — non verificato da qui». Ora `check` scrive
+  `onboarding/raggiungibilita.json` (telemetria H55: non può far cadere il check) e la
+  pagina dice **di chi** è la misura e **di quando**: verde con l'età della sonda, rosso
+  «NON risponde da Internet» col dettaglio, giallo «stantia» oltre `CHECK_STALE_H` (30h, la
+  soglia del timer). Senza il file la riga resta quella onesta di prima. Il gateway resta
+  senza uscita su Internet (H50). Test: i due lati del canale nominano lo stesso file.
+
 ### Corretto
 
 - **P1 · `/admin/archive` «impallata», e con lei tutto il gateway.** La scheda di
@@ -29,6 +53,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **Il sidecar `*.vec.db` compariva come un archivio** — 0 messaggi, «non dichiarato»,
   col bottone *Elimina* accanto. È l'indice vettoriale a fianco di un DB, non un DB:
   `list_db_infos` lo salta (e dimentica dalla cache le schede dei DB cancellati).
+
+- **`test_audit::test_OGNI_chiave_usata_nel_repo_e_dichiarata` rosso in locale, verde in
+  CI.** Il test percorre il repo con `rglob("*.py")` ed entrava in
+  `services/archive-mcp/.venv`, dove `filelock/_windows.py` chiama una funzione che si
+  chiama `audit` con 4 argomenti non-dict → «4 chiamate ad audit() con un dict non
+  letterale». In CI la `.venv` non esiste (`uvx`). Ora salta `.venv`, `site-packages`,
+  `__pycache__`.
 
 ## [0.49.0] — 2026-09-16
 

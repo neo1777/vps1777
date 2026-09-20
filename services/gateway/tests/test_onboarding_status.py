@@ -54,3 +54,23 @@ def test_il_ramo_negativo_resta_distinto_dal_dubbio():
     assert '("off", "non configurato")' in _corpo(), (
         "senza URL .ts.net lo stato deve restare «non configurato», non «dubbio»"
     )
+
+
+def test_la_sonda_dell_host_arriva_al_pannello_ma_il_dubbio_resta_quando_manca():
+    # 20/09/2026: il «passo successivo, dichiarato e NON fatto» del commento è fatto.
+    # Il file lo scrive `vps1777 check` sull'host (funnel_ok esce su Internet e
+    # rientra); il gateway lo legge e dice DI CHI è la misura e DI QUANDO. Senza il
+    # file la riga resta «non verificato»: la cura non trasforma l'assenza in verde.
+    corpo = _corpo()
+    assert "raggiungibilita.json" in corpo
+    assert "CHECK_STALE_H" in corpo, "una sonda vecchia deve smettere di valere, con la soglia del timer"
+    assert "non verificato" in corpo.lower()
+
+
+def test_i_due_lati_del_canale_nominano_lo_stesso_file():
+    # Il writer (tools/vps1777.py) e il reader (onboarding.py) sono in due pacchetti
+    # che non si importano: l'unico contratto è il NOME del file. Se uno lo cambia
+    # e l'altro no, la pagina torna gialla in silenzio.
+    cli = (Path(__file__).resolve().parents[3] / "tools" / "vps1777.py").read_text(encoding="utf-8")
+    assert '_scrivi_telemetria(repo, "raggiungibilita.json"' in cli
+    assert '"raggiungibilita.json"' in _corpo()
