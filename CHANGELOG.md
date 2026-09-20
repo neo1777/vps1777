@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.50.0] — 2026-09-20
+
 <!-- Sezione senza numero DI PROPOSITO: il numero di versione lo decide chi
      rilascia, insieme al bump di VERSION, ed è un commit suo (vedi 57a4c68 per
      la 0.48.1). Scrivere qui «0.49.0» sarebbe dichiarare una versione che non
