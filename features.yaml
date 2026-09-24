@@ -358,6 +358,25 @@ features:
     since: "0.48.0"
     verify:
       mcp_tool: {service: archive-mcp, name: search_ibrida}
+  - id: archive.indice-vettoriale
+    nome: "archive-mcp · costruttore dell'indice vettoriale (<db>.vec.db)"
+    cosa: "Scrive l'indice che search_ibrida legge: perimetro dichiarato (finestra di
+           ts, etichette project anche per prefisso, o tutto; le righe senza ts non
+           restano fuori in silenzio), indice_meta scritta dal costruttore, e un
+           registro rowid/uuid/impronta che rende l'aggiornamento incrementale sicuro
+           dopo un re-ingest (rowid orfani, riusati, testi cambiati: tolti e detti coi
+           numeri). Stesso metro del server, importato da semantica.py. Gira sul PC,
+           nell'ambiente del lock di archive-mcp: non è nell'immagine."
+    dove: ["services/archive-mcp/tools/costruisci_indice.py",
+           "services/archive-mcp/tests/test_costruisci_indice.py",
+           "docs/RICERCA-IBRIDA.md"]
+    status: opt-in
+    since: "non rilasciato (24/09/2026)"
+    decisione: "si lancia a mano sul PC: indicizzare il corpus costa decine di ore di
+                CPU e sulla VPS non si fa (#281, docs/RICERCA-IBRIDA.md). Prima era
+                un prototipo fuori dal repo. [docs/RICERCA-IBRIDA.md]"
+    verify:
+      python_def: {path: "services/archive-mcp/tools/costruisci_indice.py", name: costruisci}
   - id: archive.count
     nome: "archive-mcp · count"
     cosa: "Conta quanti messaggi corrispondono alla query (non limitato) — per frequenze e prevalenze."

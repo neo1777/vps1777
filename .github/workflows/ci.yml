@@ -472,11 +472,16 @@ jobs:
       # /health importa l'SDK mcp: nello step stdlib-only qui sopra SALTA (importorskip
       # dichiarato nel test). Questo step lo fa girare con le deps del lock — senza,
       # il presidio del healthcheck semantico non girerebbe MAI in CI (vaglio 03/09).
+      # `test_costruisci_indice.py` sta qui per la stessa ragione: la sua metà che
+      # scrive la tabella vec0 vuole sqlite-vec, e nello step stdlib-only SALTA
+      # (14 test, dichiarato). Qui gira col sqlite-vec DEL LOCK, cioè quello con cui
+      # il server legge l'indice che il costruttore scrive. `test_ibrida_verifica.py`
+      # idem: la ricerca vera (knn sulla vec0) che scarta i rowid disallineati.
       - name: Test archive-mcp /health (deps del lock)
         working-directory: services/archive-mcp
         run: |
           uv sync --frozen
-          uv run --with pytest pytest tests/test_health.py tests/test_superficie_tool.py -v
+          uv run --with pytest pytest tests/test_health.py tests/test_superficie_tool.py tests/test_costruisci_indice.py tests/test_ibrida_verifica.py -v
       # La CLI è il componente che fa gli update in PRODUZIONE, ed era l'unico con
       # una suite che nessuno lanciava: 10 test verdi che non hanno mai protetto
       # niente. Trovato il 20/07 scrivendo i test del pre-flight — cioè stavo per

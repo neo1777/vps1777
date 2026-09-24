@@ -389,7 +389,7 @@ above.
 | Tool | What it does |
 |---|---|
 | `search(query, db_name, limit, …)` | FTS5 search; returns `{db, uuid, project, ts, rank, snippet, snapshot}`. When searching **all** DBs the same uuid arrives **once**, with `anche_in` listing the other archives that contain it (no limit wasted on copies). Filters `since`/`until`, `project`, `speaker`, `voice` |
-| `search_ibrida(query, db_name, limit, query_fts, …)` | search **by meaning**: FTS5 + vectors fused (RRF). For when you remember the meaning and not the wording; it needs the embedding model and a `<db>.vec.db` index on the volume, and if they are missing **it says so** instead of falling back to FTS5. See [RICERCA-IBRIDA.md](../RICERCA-IBRIDA.md) (Italian) |
+| `search_ibrida(query, db_name, limit, query_fts, …)` | search **by meaning**: FTS5 + vectors fused (RRF). For when you remember the meaning and not the wording; it needs the embedding model and a `<db>.vec.db` index on the volume, and if they are missing **it says so** instead of falling back to FTS5. See [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
 | `count(query, db_name, …)` | how many messages match (not limited): `{total, per_db}`; if a term **collapses** it adds `warnings` |
 | `check_term(term, db_name)` | diagnoses whether a term with `+`/`#` (`C++`, `C#`, `g++`) is searchable or **collapses** onto its prefix — it asks the index, not the docs |
 | `get_context(uuid, db_name, before, after, max_chars)` | the messages **around** a result, with the **full content**; if the message is in a thread, the neighbours come from the **same thread** (`parent_uuid` edge), not from mere closeness in time. `max_chars` (0 = whole) truncates each row **saying so in the text** — on giant hub messages the full payload killed the connection |

@@ -184,6 +184,10 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
       perimetro** e da quando. ⚠️ Leggilo prima di concludere «non c'è»: un
       indice parziale (oggi copre mag-giu 2026) produce zeri che sembrano
       assenze. Fuori dal perimetro, la risposta giusta è `search`.
+      `indici[].verifica` dice se i risultati vettoriali combaciano col DB:
+      `scartati` > 0 = l'indice è disallineato (dopo un re-ingest) e quei
+      risultati sono stati TOLTI, non restituiti sbagliati; `registro: false` =
+      indice vecchio, non verificabile. Lo `stato` dice cosa fare.
 
     ⚠️ Richiede il modello di embedding e almeno un indice `.vec.db` sul volume.
     Se mancano NON ricade in silenzio su FTS5: solleva un errore che dice cosa

@@ -54,6 +54,36 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **`write_rows` accetta `ts_source` come decima colonna facoltativa.** Il valore
   `data-export` era nello schema dal 20/07 e nessun codice poteva scriverlo; senza la
   colonna il regime resta `messaggio` come prima, un valore fuori elenco ferma l'ingest.
+- **Il costruttore dell'indice della ricerca ibrida entra nel repo**
+  (`services/archive-mcp/tools/costruisci_indice.py`, #281). Fino a qui il server leggeva
+  `<db>.vec.db` ma nessun codice del repo lo scriveva: c'era uno script del POC, fuori,
+  con il DB sorgente scritto nel codice, il perimetro per sola finestra di ts (le righe
+  senza ts non entravano mai, in silenzio) e `indice_meta` aggiunta a mano. Ora:
+  - **perimetro dichiarato e parametrico**: finestra di ts, etichette `project` (anche
+    per prefisso, `recupero:*`) o tutto; se la finestra lascerebbe fuori righe senza ts
+    il costruttore si ferma, dice quante sono e chiede `--senza-ts includi|escludi`;
+  - **`indice_meta` scritta dal costruttore**: perimetro (leggibile e JSON), modello e
+    impronta del file, conteggi, data, versione del costruttore, esito dell'ultimo
+    passaggio;
+  - **incrementale sicuro rispetto al rowid**: un registro `indice_righe` (rowid, uuid,
+    impronta del testo, vettori) accanto alla tabella vec0 fa vedere cosa un re-ingest
+    ha cambiato — rowid spariti, rowid riusati da un altro messaggio, testi cambiati,
+    righe uscite dal perimetro — e lo dice coi numeri. Prima di pubblicare, registro e
+    tabella devono quadrare: nessun vettore orfano servito in silenzio;
+  - `--controlla` confronta indice e DB senza scrivere (esce 1 se non sono in pari);
+    il lavoro passa da un `.parziale` riprendibile e rinominato solo a fine lavoro.
+  Il metro è quello del server, importato e non ricopiato: `semantica.apri_modello` e
+  `semantica.codifica` servono ora sia `embed_query` sia il costruttore (vettori della
+  query identici byte per byte a prima), il prefisso `passage: ` sta accanto a `query: `.
+  Misurato contro l'indice del POC (60 messaggi, 127 pezzi): coseno 1.000000. Un indice
+  del POC, senza registro, va ricostruito una volta (`--ricostruisci`). Il costruttore gira
+  sul PC nell'ambiente del lock di archive-mcp: nessuna dipendenza nuova, immagine invariata.
+- **`docs/en/RICERCA-IBRIDA.md`**: la ricerca ibrida in inglese, traduzione completa e
+  registrata in `docs/en/MANIFEST.json` (la CI la tiene fresca). La pagina italiana ora
+  racconta tutto il giro: costruttore, perimetro, `indice_meta`, incrementale,
+  `--controlla`/`--ricostruisci`, la verifica nel server, i costi misurati e cosa fare
+  sulla VPS la prima volta (~17 h di `--ricostruisci` per maggio–giugno). I due README
+  la elencano e dicono che archive-mcp fa anche ricerca per senso.
 
 ### 📖 Documentazione
 
@@ -102,6 +132,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **`voice` delle schede di recupero: `unknown` con la bandiera `scheda_recupero`.** Una
   scheda cita parola per parola le ultime frasi dell'utente; con heading, elenco numerato e
   grassetti la regola dei prompt-template la marcava `pasted_ai` (controprovato nel test).
+
+### Corretto
+
+- **`search_ibrida` non restituisce più il messaggio sbagliato dopo un re-ingest.**
+  L'indice lavora sul rowid e l'indexer fa `INSERT OR REPLACE` sull'uuid: un rowid
+  dell'indice poteva non esistere più (il risultato spariva in silenzio) o essere stato
+  riusato da un altro messaggio (restituito per il senso di un altro, come fosse giusto).
+  Se l'indice ha il registro del costruttore, ogni risultato vettoriale si confronta ora
+  con l'uuid registrato e chi non combacia si scarta. La risposta lo dichiara in un campo
+  in più, `indici[].verifica` (`registro`, `candidati`, `scartati`, `rowid_assenti`,
+  `uuid_diversi`, `stato` con la cura); i campi esistenti non cambiano forma. Un indice
+  senza registro (quello del POC) si comporta come prima ma lo dice, e conta i rowid
+  spariti che prima si scartavano senza dirlo.
 
 ## [0.50.0] — 2026-09-20
 

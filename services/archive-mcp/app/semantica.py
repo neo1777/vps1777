@@ -55,7 +55,16 @@ log = logging.getLogger(__name__)
 MODELLO_ATTESO = "intfloat/multilingual-e5-small"
 DIM = 384
 PREFISSO_QUERY = "query: "          # e5 vuole il prefisso: senza, la qualità cala
+# L'ALTRA METÀ DEL CONTRATTO e5: i testi indicizzati portano `passage: `, le
+# domande `query: `. Le due costanti stanno qui, una accanto all'altra, perché
+# il costruttore dell'indice (`tools/costruisci_indice.py` di questo servizio)
+# le importa da QUI: un prefisso ricopiato altrove è un prefisso che un giorno
+# diverge in silenzio.
+PREFISSO_PASSAGGIO = "passage: "
 MAX_TOKEN = 512
+# La tabella vec0 dentro `<db>.vec.db`: la legge `knn_dedup`, la scrive il
+# costruttore. Un nome solo, per la stessa ragione dei prefissi.
+TABELLA = "vec_chunk_small"
 
 # Fusione RRF: i parametri VINCENTI del banco (plateau k=20-40, peso FTS 1.2-1.5:
 # dentro quella finestra il risultato non cambia, quindi non è taratura fortunata).
@@ -72,6 +81,45 @@ _SESSIONE: Any = None                # onnxruntime.InferenceSession (lazy, condi
 _TOKENIZER: Any = None
 
 
+def apri_modello(model_dir: Path, *, thread: int = 2) -> tuple[Any, Any]:
+    """Sessione ONNX + tokenizer, SENZA cache: la usano il server (tramite
+    `_carica_modello`, che la tiene una volta per processo) e il costruttore
+    dell'indice. Una funzione sola per i due lati è la garanzia che query e
+    passaggi passino dallo STESSO tokenizer con la STESSA troncatura: due
+    caricatori scritti due volte sono due metri.
+    """
+    onnx = model_dir / "model.onnx"
+    tok = model_dir / "tokenizer.json"
+    mancanti = [str(p) for p in (onnx, tok) if not p.is_file()]
+    if mancanti:
+        raise SemanticaNonPronta(
+            f"Modello di embedding assente: mancano {', '.join(mancanti)}.\n"
+            f"La ricerca ibrida ha bisogno di {MODELLO_ATTESO} esportato in ONNX "
+            f"(model.onnx + tokenizer.json) in {model_dir}.\n"
+            "Si genera sul PC e si copia sul volume dell'archivio "
+            "(vedi docs/RICERCA-IBRIDA.md). Nel frattempo `search` (FTS5) "
+            "funziona normalmente: nessun'altra capacità è compromessa."
+        )
+    try:
+        import onnxruntime as ort
+        from tokenizers import Tokenizer
+    except ImportError as exc:                      # pragma: no cover — dipendenza d'immagine
+        raise SemanticaNonPronta(
+            f"Runtime di embedding non installato nell'immagine ({exc}). "
+            "Attese: onnxruntime, tokenizers."
+        ) from exc
+    opts = ort.SessionOptions()
+    # Il server ne usa 2 (vedi `_carica_modello`); il costruttore, sul PC, tutti.
+    opts.intra_op_num_threads = thread
+    opts.inter_op_num_threads = 1
+    sess = ort.InferenceSession(str(onnx), opts, providers=["CPUExecutionProvider"])
+    tk = Tokenizer.from_file(str(tok))
+    tk.enable_truncation(MAX_TOKEN)
+    tk.enable_padding()
+    log.info("modello di embedding caricato da %s", model_dir)
+    return sess, tk
+
+
 def _carica_modello(model_dir: Path) -> tuple[Any, Any]:
     """Sessione ONNX + tokenizer, una volta sola per processo.
 
@@ -85,37 +133,9 @@ def _carica_modello(model_dir: Path) -> tuple[Any, Any]:
     with _LOCK:
         if _SESSIONE is not None:                       # qualcuno l'ha caricato mentre aspettavo
             return _SESSIONE, _TOKENIZER
-        onnx = model_dir / "model.onnx"
-        tok = model_dir / "tokenizer.json"
-        mancanti = [str(p) for p in (onnx, tok) if not p.is_file()]
-        if mancanti:
-            raise SemanticaNonPronta(
-                f"Modello di embedding assente: mancano {', '.join(mancanti)}.\n"
-                f"La ricerca ibrida ha bisogno di {MODELLO_ATTESO} esportato in ONNX "
-                f"(model.onnx + tokenizer.json) in {model_dir}.\n"
-                "Si genera sul PC e si copia sul volume dell'archivio "
-                "(vedi docs/RICERCA-IBRIDA.md). Nel frattempo `search` (FTS5) "
-                "funziona normalmente: nessun'altra capacità è compromessa."
-            )
-        try:
-            import onnxruntime as ort
-            from tokenizers import Tokenizer
-        except ImportError as exc:                      # pragma: no cover — dipendenza d'immagine
-            raise SemanticaNonPronta(
-                f"Runtime di embedding non installato nell'immagine ({exc}). "
-                "Attese: onnxruntime, tokenizers."
-            ) from exc
-        opts = ort.SessionOptions()
         # 2 thread: la VPS ha 4 core e sei container. Un embedding da 25 ms non
         # vale la fame di CPU degli altri servizi.
-        opts.intra_op_num_threads = 2
-        opts.inter_op_num_threads = 1
-        sess = ort.InferenceSession(str(onnx), opts, providers=["CPUExecutionProvider"])
-        tk = Tokenizer.from_file(str(tok))
-        tk.enable_truncation(MAX_TOKEN)
-        tk.enable_padding()
-        _SESSIONE, _TOKENIZER = sess, tk
-        log.info("modello di embedding caricato da %s", model_dir)
+        _SESSIONE, _TOKENIZER = apri_modello(model_dir, thread=2)
         return _SESSIONE, _TOKENIZER
 
 
@@ -127,12 +147,25 @@ def embed_query(testo: str, model_dir: Path) -> bytes:
     diverso da chi ha costruito l'indice.
     """
     sess, tk = _carica_modello(model_dir)   # PRIMA il controllo: se manca il modello,
-    import numpy as np                      # l'errore parlante non deve dipendere da un import
-    enc = tk.encode_batch([PREFISSO_QUERY + (testo or "").strip()])
+    return codifica(sess, tk, [PREFISSO_QUERY + (testo or "").strip()])[0]
+
+
+def codifica(sess: Any, tk: Any, testi: list[str]) -> list[bytes]:
+    """Testi GIÀ prefissati → vettori impacchettati per sqlite-vec, in un lotto.
+
+    È il punto unico da cui passano la query (`embed_query`, un testo) e i
+    passaggi dell'indice (il costruttore, lotti da decine): stessa tokenizzazione,
+    stesso grafo, stesso impacchettamento. Il padding del lotto non entra nel
+    vettore, perché il pooling nel grafo pesa con `attention_mask` (misurato
+    contro l'indice del POC: coseno 1.000000 anche a lotti misti).
+    """
+    import numpy as np                      # qui e non in testa: l'errore parlante sul
+                                            # modello mancante non deve dipendere da un import
+    enc = tk.encode_batch(testi)
     ids = np.array([e.ids for e in enc], dtype=np.int64)
     mask = np.array([e.attention_mask for e in enc], dtype=np.int64)
-    vec = sess.run(None, {"input_ids": ids, "attention_mask": mask})[0][0]
-    return struct.pack(f"{DIM}f", *vec.astype("float32"))
+    out = sess.run(None, {"input_ids": ids, "attention_mask": mask})[0]
+    return [struct.pack(f"{DIM}f", *vec.astype("float32")) for vec in out]
 
 
 def percorso_indice(db_path: Path) -> Path:
@@ -155,7 +188,7 @@ def meta_indice(conn: Any, alias: str = "vec") -> dict[str, str]:
 
 
 def knn_dedup(conn: Any, blob: bytes, *, topn: int, k_chunk: int = 400,
-              alias: str = "vec", tabella: str = "vec_chunk_small") -> list[int]:
+              alias: str = "vec", tabella: str = TABELLA) -> list[int]:
     """I `topn` MESSAGGI più vicini, dedotti dai chunk più vicini.
 
     L'indice è per CHUNK (un messaggio lungo produce più vettori: è la cura che
@@ -177,6 +210,62 @@ def knn_dedup(conn: Any, blob: bytes, *, topn: int, k_chunk: int = 400,
         if len(ordine) >= topn:
             break
     return ordine
+
+
+def uuid_registrati(conn: Any, rowids: list[int], alias: str = "vec") -> dict[int, str] | None:
+    """Per i rowid dati, l'uuid che il costruttore ha REGISTRATO accanto al vettore.
+
+    `None` = l'indice non ha il registro `indice_righe` (un indice del POC, o
+    illeggibile): i risultati non sono verificabili, e chi chiama lo DICHIARA.
+    Un rowid assente dal dizionario = un vettore che il registro non spiega.
+
+    PERCHÉ ESISTE: l'indice lavora sul rowid, e l'indexer fa `INSERT OR REPLACE`
+    sull'uuid. Dopo un re-ingest un rowid dell'indice può non esistere più, o
+    appartenere a un ALTRO messaggio: senza questo confronto il server
+    restituirebbe quel messaggio per il senso di un altro, con l'aria di un
+    risultato giusto.
+    """
+    try:
+        c = conn.execute(f"SELECT 1 FROM {alias}.sqlite_master "
+                         "WHERE type = 'table' AND name = 'indice_righe'").fetchone()
+    except Exception:                                   # noqa: BLE001 — dichiarato come non verificabile
+        return None
+    if c is None:
+        return None
+    if not rowids:
+        return {}
+    seg = ",".join("?" * len(rowids))
+    return {r: u for r, u in conn.execute(
+        f"SELECT msg_rowid, uuid FROM {alias}.indice_righe WHERE msg_rowid IN ({seg})",
+        [int(x) for x in rowids])}
+
+
+def verdetto_registro(verificabile: bool, *, candidati: int, assenti: int,
+                      uuid_diversi: int) -> dict[str, Any]:
+    """Il campo `verifica` di `indici[]`: quanti risultati vettoriali sono stati
+    scartati perché l'indice non combacia più col DB, e cosa fare.
+
+    Il conto è sui CANDIDATI esaminati (i vicini del knn, non l'intero indice):
+    zero scarti qui non certifica tutto l'indice — lo fa `costruisci_indice.py
+    --controlla`.
+    """
+    scartati = assenti + uuid_diversi
+    cura = ("lancia `services/archive-mcp/tools/costruisci_indice.py --controlla` "
+            "su una copia del DB e aggiorna l'indice (docs/RICERCA-IBRIDA.md)")
+    if not verificabile:
+        stato = ("indice senza registro: l'uuid dei risultati vettoriali non è "
+                 "verificabile (indice costruito prima del costruttore; si cura con "
+                 "`--ricostruisci`)")
+        if assenti:
+            stato += f"; {assenti} rowid assenti dal DB scartati — {cura}"
+    elif scartati:
+        stato = (f"indice disallineato col DB: {scartati} risultati vettoriali scartati "
+                 f"({assenti} rowid spariti, {uuid_diversi} rowid ora di un altro "
+                 f"messaggio) — {cura}")
+    else:
+        stato = "verificato: ogni risultato vettoriale combacia col DB (uuid per rowid)"
+    return {"registro": verificabile, "candidati": candidati, "scartati": scartati,
+            "rowid_assenti": assenti, "uuid_diversi": uuid_diversi, "stato": stato}
 
 
 # Parole che in una domanda parlata non portano segnale. Non è una lista di

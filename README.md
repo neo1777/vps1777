@@ -133,7 +133,7 @@ load the NotebookLM auth, [docs/en/INSTALL.md](docs/en/INSTALL.md).
 | Service | What it does | Internal port |
 |---|---|---|
 | **gateway** | OAuth 2.1 + DCR + MCP reverse proxy + `/admin/*` panel + `/app/*` Mini App | 8080 |
-| **archive-mcp** | Search across multiple DBs — FTS5 and hybrid — of claude.ai exports, Claude Code sessions and Session Recovery bundles, with session cards and lineages (`get_session`, `get_stirpe`): **15 tools**. See [docs/en/ARCHIVE.md](docs/en/ARCHIVE.md) | 8002 |
+| **archive-mcp** | Search across multiple DBs — FTS5 and hybrid by meaning, FTS5 + vectors — of claude.ai exports, Claude Code sessions and Session Recovery bundles, with session cards and lineages (`get_session`, `get_stirpe`): **15 tools**. See [docs/en/ARCHIVE.md](docs/en/ARCHIVE.md) and [docs/en/RICERCA-IBRIDA.md](docs/en/RICERCA-IBRIDA.md) | 8002 |
 | **nb1777-mcp** | NotebookLM via the `nlm` CLI — **38 tools** (notebooks, sources, chat, 9 studio artifacts, doctor, canonico/memory). Also serves the **1777 memory canon** ([docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md)). See [docs/NB1777.md](docs/NB1777.md) (Italian) | 8003 |
 | **nb1777-bot** | Owner-only Telegram bot + Mini App launcher | (long-poll) |
 | **ocr** | Tesseract in an internal container: the ingest's eyes (images → `[ocr]` text). The gateway calls it over HTTP, it never spawns processes | 8004 |
@@ -240,6 +240,7 @@ source, and a moved original turns the build red until the translation catches u
 | The `vps1777` CLI, every command with examples | [docs/en/CLI.md](docs/en/CLI.md) | [docs/CLI.md](docs/CLI.md) |
 | The 1777 memory discipline (canon, local layers) | [docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md) | [docs/MEMORIA-1777.md](docs/MEMORIA-1777.md) |
 | Search archive: `/admin/archive`, formats, the Session Recovery bundle (`recupero/`, `sessioni`/`archi`/`memorie` tables), the 15 MCP tools, sessions and lineages, NotebookLM ingest | [docs/en/ARCHIVE.md](docs/en/ARCHIVE.md) | [docs/ARCHIVE.md](docs/ARCHIVE.md) |
+| Hybrid search by meaning: the model, the vector index, its builder, incremental updates | [docs/en/RICERCA-IBRIDA.md](docs/en/RICERCA-IBRIDA.md) | [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md) |
 | Trying it locally, no VPS: timed steps, what you see and what isn't there | — | [docs/PRIMI-15-MINUTI.md](docs/PRIMI-15-MINUTI.md) |
 | Public HTTPS: Tailscale Funnel / Caddy / Cloudflare | — | [docs/INGRESS.md](docs/INGRESS.md) |
 | Adding your own MCP or bot | — | [docs/PLUGINS.md](docs/PLUGINS.md) |
