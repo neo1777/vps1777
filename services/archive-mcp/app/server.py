@@ -382,14 +382,19 @@ def get_session(sessionId: str, db_name: str = "", limit: int = 200,
     dal 24/09/2026). `sessionId`: l'uuid intero o un PREFISSO di almeno 8
     caratteri, se univoco — se è ambiguo l'errore elenca i candidati coi loro DB.
 
-    Ritorna {sessionId, db, snapshot, sessione, scheda, conversazione, archi,
-    archi_totali, stirpe, note, anche_in?}:
+    Ritorna {sessionId, db, snapshot, sessione, filoni, scheda, conversazione,
+    archi, archi_totali, stirpe, note, anche_in?}:
     - `sessione`: la riga di `sessioni` (titolo, cwd, first_ts/last_ts,
       last_uuid, file, stato, stirpe, n_commit, n_fili…); null se la sessione è
-      nota solo come estremo di un arco;
-    - `scheda`: il testo della scheda (stato, ultime parole [verbatim], fili
-      aperti, commit, memorie scritte, stirpe). ⚠️ Le «ultime parole» sono
-      CITAZIONI: chi parla lo dice la scheda, non il fatto che siano qui;
+      nota solo come estremo di un arco. Se la sessione ha più FILONI (file
+      distinti con lo stesso id: `sessions/<sid>.jsonl`, `…__f2.jsonl`), è la
+      riga del principale — il file senza `__fN`, o il primo;
+    - `filoni`: tutte le righe di `sessioni` per quel sessionId, il principale
+      per primo ([] se non c'è riga);
+    - `scheda`: il testo della scheda del principale (stato, ultime parole
+      [verbatim], fili aperti, commit, memorie scritte, stirpe). ⚠️ Le «ultime
+      parole» sono CITAZIONI: chi parla lo dice la scheda, non il fatto che
+      siano qui;
     - `conversazione`: {messaggi, per_sender, primo_ts, ultimo_ts, fonti} —
       le righe avvistate in `sessions/<sid>…` (tutti i filoni). Per LEGGERLA:
       `get_conversation` con `sessione.last_uuid`;
@@ -418,7 +423,9 @@ def get_stirpe(sessionId: str, db_name: str = "", limit: int = 200,
     - `membri`: ogni sessione della stirpe coi suoi dati da `sessioni`, in
       ordine di first_ts; chi NON ha una riga in `sessioni` (nota solo come
       estremo di un arco) resta nell'elenco con `in_sessioni: false` ed è
-      elencato in `senza_riga` — incompleto, non sparito;
+      elencato in `senza_riga` — incompleto, non sparito; ognuno porta
+      `filoni` (tutte le sue righe di `sessioni`, il principale per primo: i
+      dati del membro sono i suoi);
     - `archi`: gli archi con chiusura=1 fra i membri;
     - `stirpi_dichiarate` / `schede_stirpe`: gli id di stirpe scritti nelle
       righe dei membri e le loro schede.

@@ -4,6 +4,46 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+
+- **La tabella `sessioni` tiene tutti i filoni di una sessione.** Misurato il 24/09/2026
+  sul primo DB vero caricato con `recupero/`: 1.300 righe per 1.303 schede.
+  `recupero/sessioni.tsv` ha una riga per FILE consegnato, e una sessione in collisione ha
+  più filoni con lo stesso sessionId (`sessions/<sid>.jsonl`, `sessions/<sid>__f2.jsonl`…).
+  La chiave primaria era il solo `sessionId`, quindi l'`INSERT OR REPLACE` ne teneva uno
+  senza lasciare lapide. Ora la chiave è `(sessionId, file)`, e una riga con `file` vuoto
+  lascia la lapide `recupero-tsv-fuori-contratto`. I DB che hanno già la tabella con la
+  chiave vecchia vengono migrati al primo ingest (`_ensure_sessioni_filoni`, accanto a
+  `_ensure_v2`/`_ensure_v3`): la tabella viene ricreata e le righe ricopiate tutte in un
+  `SAVEPOINT`. È idempotente, e se fallisce la tabella resta com'era. I filoni già
+  schiacciati tornano solo **re-ingerendo il bundle**. In archive-mcp `get_session`
+  restituisce in `sessione` la riga del filone principale (il file senza `__fN`, o quello
+  col N più basso) e la sua scheda. Prima era la riga che l'ingest aveva scritto per
+  ultima. `get_stirpe` dà per ogni membro i dati del principale; il `last_ts` con cui si
+  sceglie il DB è il più recente fra i filoni. La forma dei campi esistenti non cambia.
+  Test: due filoni con lo stesso sid danno due righe; la migrazione di una tabella
+  costruita a mano con la chiave vecchia conserva le righe, e se fallisce non lascia
+  niente a metà.
+- **`documents/` nel bundle non finisce più in `membro-sconosciuto`.** L'`export` dell'app
+  di Recupero Sessioni scrive i documenti (non conversazioni) in `documents/`, accanto a
+  `MANIFEST.json` e `sessions/`: uno zip di quella cartella viene riconosciuto come bundle,
+  e ogni documento lasciava la lapide del membro ignoto. Ora `documents` è in
+  `BUNDLE_PREFISSI_INDICIZZATI` e segue la trafila dei `workfiles/`: testo a chunk, sniff
+  del contenuto, PDF, immagini via OCR, zip annidati. Il ramo è stato estratto in
+  `_iter_documento_bundle`, che le due cartelle condividono, e non è copiato. L'etichetta è
+  `document:<prima sottocartella>`, o `document` per i file sciolti (l'app oggi scrive la
+  cartella piatta). Le lapidi hanno `source` `bundle-documents`. Il canary dei prefissi è
+  aggiornato.
+
+### Aggiunto
+
+- **Il campo `filoni` in `get_session` e in ogni membro di `get_stirpe`**: tutte le righe
+  di `sessioni` per quel sessionId, il principale per primo (`[]` se non c'è riga). Una
+  sessione con più filoni lo dice anche in `note`. Nel ledger `features.yaml` entrano
+  `archive.sessioni-filoni` e `archive.bundle-documents`. `docs/ARCHIVE.md` e la traduzione
+  inglese sono aggiornati: bundle, tabelle, schema e migrazione, `get_session`/`get_stirpe`,
+  lapidi e limiti noti.
+
 ## [0.51.1] — 2026-09-24
 
 ### Corretto

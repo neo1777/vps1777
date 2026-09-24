@@ -83,3 +83,13 @@ def test_describe_dichiara_che_il_ruolo_NON_cambia_i_default() -> None:
 def test_archive_stats_dichiara_il_costo() -> None:
     _, doc = _firma("archive_stats")
     assert "memoizzate" in doc and "#269" in doc
+
+
+def test_get_session_e_get_stirpe_dichiarano_i_filoni() -> None:
+    """Una sessione in collisione ha più file con lo stesso id: il client deve sapere
+    che `sessione` è il PRINCIPALE e che le righe tutte stanno in `filoni`."""
+    for nome in ("get_session", "get_stirpe"):
+        _, doc = _firma(nome)
+        assert "`filoni`" in doc, f"{nome} non dichiara `filoni`"
+    _, doc = _firma("get_session")
+    assert "principale" in doc and "__fN" in doc

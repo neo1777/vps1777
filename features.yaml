@@ -462,7 +462,9 @@ features:
            la riga di `sessioni`, la scheda, i messaggi avvistati in sessions/<sid>…, gli
            archi, la stirpe. Id intero o prefisso ≥ 8 univoco (ambiguo → errore coi
            candidati); risponde il DB col last_ts più recente, gli altri in anche_in; un
-           DB nato prima del contratto lo dice, mai uno zero muto."
+           DB nato prima del contratto lo dice, mai uno zero muto. Una sessione con più
+           filoni (sessions/<sid>__fN.jsonl) dà la riga del principale in `sessione` e
+           tutte in `filoni` (25/09/2026)."
     dove: ["mcp-tool:archive-mcp/get_session",
            "services/archive-mcp/tests/test_sessioni.py",
            "docs/ARCHIVE.md"]
@@ -498,6 +500,35 @@ features:
     since: "non rilasciato (24/09/2026)"
     verify:
       python_def: {path: services/gateway/app/archive_indexer.py, name: _normalizza_recupero}
+  - id: archive.sessioni-filoni
+    nome: "Indexer · la tabella sessioni ha una riga per filone, chiave (sessionId, file)"
+    cosa: "recupero/sessioni.tsv ha una riga per FILE: una sessione in collisione ha più
+           filoni con lo stesso sessionId, e con la chiave sul solo id ne restava uno
+           (misurato: 1.300 righe per 1.303 schede). Chiave (sessionId, file), e i DB con
+           la tabella vecchia migrati all'apertura (ricreata e ricopiata in un SAVEPOINT,
+           idempotente); i filoni già schiacciati tornano col re-ingest del bundle."
+    dove: ["services/gateway/app/archive_indexer.py#_ensure_sessioni_filoni",
+           "services/gateway/tests/test_archive_indexer.py#test_migrazione_sessioni_alla_chiave_con_file",
+           "docs/ARCHIVE.md"]
+    status: active-default
+    since: "non rilasciato (25/09/2026)"
+    verify:
+      python_def: {path: services/gateway/app/archive_indexer.py, name: _ensure_sessioni_filoni}
+  - id: archive.bundle-documents
+    nome: "Indexer · documents/ del bundle (i documenti dell'export) con la trafila dei workfiles"
+    cosa: "L'export dell'app di recupero scrive documents/ accanto a MANIFEST.json e
+           sessions/: uno zip di quella cartella è un bundle, e ogni documento finiva nella
+           lapide membro-sconosciuto. Ora documents/ è un prefisso indicizzato: testo a
+           chunk, sniff del contenuto, PDF, immagini via OCR, zip annidati — la stessa
+           funzione dei workfiles — etichetta document[:<prima sottocartella>], lapidi
+           con source bundle-documents."
+    dove: ["services/gateway/app/archive_indexer.py#_iter_documento_bundle",
+           "services/gateway/tests/test_archive_indexer.py#test_documents_del_bundle_entrano_come_i_workfiles",
+           "docs/ARCHIVE.md"]
+    status: active-default
+    since: "non rilasciato (25/09/2026)"
+    verify:
+      python_def: {path: services/gateway/app/archive_indexer.py, name: _iter_documento_bundle}
   - id: nb.nb_list
     nome: "nb1777-mcp · nb_list"
     cosa: "Lista tutti i notebook visibili al profilo attivo."

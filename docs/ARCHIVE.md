@@ -124,6 +124,7 @@ documenti» mangerebbe, ignorando sessioni e log).
 | `subagents/<sessionId>/agent-<hash>.jsonl` (dal 16/09/2026) | conversazioni dei sub-agenti; le righe user di un sub-agente sono `sender='mandato'` (le ha scritte la macchina) | `subagent:<etichetta-cwd>` |
 | `mcp-logs/<sessionId>/<server>/…` | log dei server MCP, a pezzi da 4000 caratteri | `mcp-log:<server>` |
 | `workfiles/<cwd-codificata>/…` | artefatti delle cartelle di lavoro: testo e codice a pezzi, PDF con testo, immagini via OCR, zip annidati (un livello); un backup di sessione (`.jsonl` di Claude Code) diventa conversazione; i binari lasciano una lapide `non-testo` | `workfile:<cwd-codificata>/<prima sottocartella>` |
+| `documents/…` (dal 25/09/2026) | i **documenti** che l'`export` dell'app consegna accanto alle sessioni (non conversazioni): la stessa trafila di `workfiles/` — testo e codice a pezzi, PDF, immagini via OCR, zip annidati, sniff del contenuto; i binari lasciano una lapide `non-testo` con `source` `bundle-documents`. Uno zip della cartella dell'export ha `MANIFEST.json` e `sessions/`, quindi è un bundle: prima ogni documento finiva in `membro-sconosciuto` | `document:<prima sottocartella>`, o `document` per un file nella radice di `documents/` (oggi l'app la scrive piatta, `<md5-corto-del-path>__<nome>`: tutti prendono `document`) |
 | `recupero/…` (dal 24/09/2026) — o il ponte `workfiles/_recupero-1777/…` | schede di sessione, di stirpe e di memoria come righe; tre `.tsv` come tabelle — vedi [il prefisso `recupero/`](#il-prefisso-recupero--contratto-r1) | `recupero:sessioni` · `recupero:stirpi` · `recupero:memorie` |
 | `inventario/inventario-sessioni.tsv` | l'indice delle sessioni come testo, a pezzi da 4000 | `inventario` |
 | `inventario/inventario-sessioni.json` | **non** si indicizza: lapide che dice se i suoi dati sono entrati da un'altra parte — vedi [le lapidi](#lapidi-cosa-non-entra-e-perché) | — |
@@ -277,7 +278,12 @@ I tre `.tsv` **non** diventano testo: riempiono tre tabelle, una riga per riga d
 file (`INSERT OR REPLACE` sulla chiave, con la data d'ingest). Le colonne sono quelle
 del contratto, nello stesso ordine:
 
-**`sessioni`** — chiave `sessionId`. Una riga per sessione consegnata.
+**`sessioni`** — chiave `(sessionId, file)`. Una riga per **file** consegnato: una
+sessione in collisione ha più **filoni** con lo stesso `sessionId`
+(`sessions/<sid>.jsonl`, `sessions/<sid>__f2.jsonl`…), e ciascuno ha la sua riga. Fino
+alla 0.51.1 la chiave era il solo `sessionId` e ne restava uno (misurato sul primo
+bundle vero: 1.300 righe per 1.303 schede). Una riga con `file` vuoto lascia la lapide
+`recupero-tsv-fuori-contratto`, come una con `sessionId` vuoto.
 
 | colonna | cosa contiene |
 |---|---|
@@ -356,6 +362,7 @@ dice il perché.
 | `bundle-recupero` | `recupero-fuori-contratto` | `tipo` incoerente con la cartella, o manca il campo che identifica la scheda |
 | `bundle-recupero` | `recupero-tsv-fuori-contratto` | un `.tsv` la cui intestazione non ha una colonna del contratto (il file intero non entra: niente tabelle riempite a metà), oppure una sua riga con un numero di campi sbagliato o con la chiave vuota (salta solo quella riga, col numero di riga) |
 | `bundle-workfiles` | `non-testo`, `pdf-*`, `ocr-*`, `zip-*`, `membro-oltre-tetto`, … | un file di lavoro che non ha testo da leggere, o che l'OCR / l'apertura non ha potuto leggere |
+| `bundle-documents` | gli stessi di `bundle-workfiles` | lo stesso, per un membro di `documents/` |
 | `claude-code` | `non-message`, `no-uuid-o-ts`, `empty` | un record di una sessione che non è un messaggio, non ha uuid o ts, o è vuoto |
 
 ```sql
@@ -507,8 +514,9 @@ Risponde con un oggetto:
 |---|---|
 | `sessionId` | l'uuid intero (risolto dal prefisso) |
 | `db` · `snapshot` | il DB che ha risposto e la data dell'ultima modifica del suo file |
-| `sessione` | la riga di `sessioni` (tutte le colonne); `null` se la sessione è nota solo come estremo di un arco |
-| `scheda` | il testo della scheda di sessione (stato, ultime parole, fili aperti, commit, memorie scritte, stirpe), ricomposto dai suoi pezzi; `null` se non c'è. ⚠️ Le «ultime parole» sono **citazioni**: chi parla lo dice la scheda, non il fatto che siano lì |
+| `sessione` | la riga di `sessioni` (tutte le colonne); `null` se la sessione è nota solo come estremo di un arco. Se la sessione ha più **filoni**, è la riga del **principale**: il file senza `__fN` (`sessions/<sid>.jsonl`), o, se manca, quello col N più basso |
+| `filoni` | **tutte** le righe di `sessioni` per quel `sessionId`, il principale per primo: una sola per una sessione senza collisioni, `[]` se non c'è riga. Con più filoni lo dice anche `note` |
+| `scheda` | il testo della scheda di sessione del principale (`recupero/sessioni/<sid>.md`, o `<sid>__fN.md` se il principale è un filone) (stato, ultime parole, fili aperti, commit, memorie scritte, stirpe), ricomposto dai suoi pezzi; `null` se non c'è. ⚠️ Le «ultime parole» sono **citazioni**: chi parla lo dice la scheda, non il fatto che siano lì |
 | `conversazione` | `{messaggi, per_sender, primo_ts, ultimo_ts, fonti}`: le righe dell'archivio avvistate in `sessions/<sessionId>…` (tutti i filoni; titolo e allegati compresi, distinti in `per_sender`), il primo e l'ultimo ts, i file d'origine |
 | `archi` · `archi_totali` | gli archi che toccano la sessione (da o a), fino a `limit`, e quanti sono in tutto |
 | `stirpe` | `{id, posizione, scheda}` della stirpe dichiarata nella riga; `null` se la sessione è sola |
@@ -528,8 +536,10 @@ Un esempio di risposta (dati inventati, testo accorciato):
   "snapshot": "2026-09-24T19:42:50Z",
   "sessione": {"sessionId": "0f1e2d3c-…", "titolo": "sessione di prova",
                "last_ts": "2026-09-10T10:05:00.000Z", "last_uuid": "…",
+               "file": "sessions/0f1e2d3c-….jsonl",
                "stato": "turno-chiuso", "stirpe": "9a8b7c6d-…", "stirpe_pos": 1,
                "n_commit": 2, "n_fili": 1, "…": "…"},
+  "filoni": [{"sessionId": "0f1e2d3c-…", "file": "sessions/0f1e2d3c-….jsonl", "…": "…"}],
   "scheda": "[recupero/sessioni/0f1e2d3c-….md]\n# sessione di prova\n\n## Stato\n…",
   "conversazione": {"messaggi": 3, "per_sender": {"user": 1, "assistant": 1, "title": 1},
                     "primo_ts": "2026-09-10T10:00:00.000Z",
@@ -552,7 +562,7 @@ nell'altra.
 | campo | cosa contiene |
 |---|---|
 | `sessionId` · `db` · `snapshot` · `anche_in` | come in `get_session` |
-| `membri` | ogni sessione della stirpe coi suoi dati da `sessioni`, in ordine di `first_ts`; ognuna con `in_sessioni: true/false` |
+| `membri` | ogni sessione della stirpe coi suoi dati da `sessioni`, in ordine di `first_ts`; ognuna con `in_sessioni: true/false` e `filoni` (le sue righe di `sessioni`, il principale per primo — i dati del membro sono i suoi; `[]` per un membro senza riga) |
 | `senza_riga` | i membri **senza** riga in `sessioni` (noti solo come estremi di un arco): restano nell'elenco — incompleti, non spariti |
 | `archi` | gli archi con `chiusura=1` fra i membri |
 | `stirpi_dichiarate` · `schede_stirpe` | gli id di stirpe scritti nelle righe dei membri, e le loro schede |
@@ -677,9 +687,9 @@ skipped(uid PRIMARY KEY, source, reason, detail, ts, ingest_date)  -- libro-mast
 sightings(uuid, source, ingest_date, PRIMARY KEY(uuid, source))    -- dove ogni uuid è stato visto
 meta(key PRIMARY KEY, value)                        -- scheda: description, ruolo, bundle_*
 -- dal bundle di Recupero Sessioni (contratto recupero/ R1, 24/09/2026); vuote altrove
-sessioni(sessionId PRIMARY KEY, titolo, cwd, first_ts, last_ts, last_uuid, file,
+sessioni(sessionId, titolo, cwd, first_ts, last_ts, last_uuid, file,
          stato, stato_fonte, stirpe, stirpe_pos INTEGER, n_commit INTEGER,
-         n_fili INTEGER, ingest_date)
+         n_fili INTEGER, ingest_date, PRIMARY KEY(sessionId, file))  -- una riga per filone
 archi(da, a, relazione, via, livello, prova, voce, peso REAL, chiusura INTEGER,
       bundle_scan, ingest_date, PRIMARY KEY(da, a, relazione, via))
 memorie(path PRIMARY KEY, sistema, livello, md5, mtime, scritta_da, membro, ingest_date)
@@ -688,6 +698,17 @@ memorie(path PRIMARY KEY, sistema, livello, md5, mtime, scritta_da, membro, inge
 Le tabelle `revisions`, `sightings`, `meta` e le tre del bundle sono `CREATE TABLE
 IF NOT EXISTS`: un DB esistente le riceve al primo ingest, e resta leggibile dalle
 versioni precedenti.
+
+**La chiave di `sessioni` è cambiata (dal 25/09/2026).** Un DB creato dalla 0.51.x ha
+`sessioni` con la chiave `sessionId`. Al primo ingest l'indexer la porta alla chiave
+`(sessionId, file)` (`_ensure_sessioni_filoni`): SQLite non cambia la chiave di una
+tabella con un `ALTER`, quindi la tabella viene ricreata e le righe ricopiate tutte,
+in un `SAVEPOINT` (o tutto o niente). Se fallisce, la tabella resta com'era e l'errore
+esce. Una seconda volta non fa niente. Nessuna riga si perde: la chiave vecchia era
+unica su `sessionId`, quindi lo è anche su `(sessionId, file)`. Un `file` NULL diventa
+`''`. I filoni che la chiave vecchia aveva già schiacciato **non** tornano da soli:
+**re-ingerisci il bundle**, e ora entrano tutti. archive-mcp legge anche la tabella
+vecchia: su un DB non ancora migrato `filoni` ha una riga sola.
 
 È quello che producono `archive_indexer` e `archive-ingest`. In FTS finiscono
 `content`, `tools` (le azioni: `tool_use` + `tool_result`) e `attachments`;
@@ -781,6 +802,11 @@ Dichiarati, non scoperti per caso:
   all'alias ha righe `workfile:_recupero-1777/…`; re-ingerire con questo indexer
   aggiunge le righe `recupero:*` ma non toglie quelle.
 - **`memorie` senza tool.** Si legge via SQL o con `search`.
+- **`documents/` non dice da dove viene un documento.** L'app scrive la cartella
+  piatta (`<md5-corto-del-path>__<nome>`), quindi l'etichetta è `document` per tutti.
+  Il nome del file è cercabile, perché è la prima riga del testo. La cartella
+  d'origine sta solo in `MANIFEST.json` (`documenti.consegnati[].src`), che l'indexer
+  non legge per questo.
 - **`last_ts` e l'ultimo messaggio.** Su un bundle reale il `last_ts` della scheda è
   risultato più recente del ts del messaggio `last_uuid` (l'ultimo record con quel
   timestamp non era un messaggio). L'ordine regge — la scheda esce dopo — ma
