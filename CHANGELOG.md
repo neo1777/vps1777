@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.51.1] — 2026-09-24
+
 ### Corretto
 
 - **La redazione in uscita di archive-mcp non guasta più uuid e date.** Misurato il
