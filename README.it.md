@@ -229,7 +229,7 @@ colpo d'occhio:
 | [ONBOARDING.md](docs/ONBOARDING.md) | Setup post-deploy dal pannello web |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Quando qualcosa va storto |
 
-> In inglese ([docs/en/](docs/en/)): ARCHITECTURE, INSTALL, UPDATE, BACKUP-RESTORE, CLI, MEMORIA-1777 — freschezza garantita da `tools/tests/test_traduzioni_fresche.py`.
+> In inglese ([docs/en/](docs/en/)): ARCHITECTURE, INSTALL, UPDATE, BACKUP-RESTORE, CLI, MEMORIA-1777, ARCHIVE — freschezza garantita da `tools/tests/test_traduzioni_fresche.py`.
 
 ## Sviluppo locale
 
