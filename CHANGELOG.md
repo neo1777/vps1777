@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.51.0] — 2026-09-24
+
 ### Aggiunto
 
 - **archive-mcp: i tool `get_session` e `get_stirpe`** (Livello 2 del contratto
