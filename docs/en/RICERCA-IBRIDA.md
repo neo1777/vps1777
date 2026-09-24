@@ -461,17 +461,24 @@ it is not in step, update it there and upload that one.
 
 ## Current perimeter
 
-The primary's index covers **May–June 2026** (58,322 messages, 139,011
-vectors): the rest of the corpus is indexed in stages. Outside the perimeter
-hybrid search has no vectors to fuse — `indici[].perimetro` in the response
-declares it at every call, and it is the first thing to read before concluding
-"it's not there".
+`[state of the installation on 25/09/2026]`
 
-📌 That index (generated on 07/09/2026) comes from the POC prototype: its
-`indice_meta` was written by hand and it has no `indice_righe` ledger. The
-vectors are the same the builder writes (cosine 1.000000, above), but the first
-incremental update requires a rebuild (`--ricostruisci`, see "The first time on
-the VPS").
+- **The primary for Claude Code is `recupero-20260924`** (since 24/09: the first bundle
+  with the `recupero/` R1 contract, see [ARCHIVE.md](ARCHIVE.md)). Its index is being
+  built with the repo's builder over the **whole** DB (`--tutto`: 266,219 messages,
+  logs included, with the `indice_righe` ledger), on the PC; at ~1.9 vectors/s it is
+  more than two days of compute. Until it is uploaded, `search_ibrida` on that DB has
+  no vectors to fuse and declares it in `indici[]`: keyword search (`search`) already
+  works on everything.
+- **`recupero-20260905`** (the primary until 24/09, now a cross-check) keeps the
+  prototype's index: **May–June 2026** (58,322 messages, 139,011 vectors, generated on
+  07/09/2026), with a hand-written `indice_meta` and **no** ledger — `verifica.registro:
+  false`; updating it requires a rebuild (`--ricostruisci`, see "The first time on the
+  VPS", whose examples use exactly this DB).
+
+Outside the perimeter hybrid search has no vectors to fuse — `indici[].perimetro` in
+the response declares it at every call, and it is the first thing to read before
+concluding "it's not there".
 
 ## Known limits
 

@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### 📖 Documentazione
+
+- **`docs/RICERCA-IBRIDA.md` (IT/EN), «Perimetro attuale» al 25/09/2026.** Diceva che l'indice
+  del primario copre maggio–giugno: dal 24/09 il primario è `recupero-20260924`, il cui indice
+  si sta costruendo sull'intero DB col costruttore del repo; l'indice del prototipo resta su
+  `recupero-20260905`, ora riscontro. La sezione dice entrambe le cose, con la data.
+
 ## [0.51.2] — 2026-09-25
 
 ### Corretto

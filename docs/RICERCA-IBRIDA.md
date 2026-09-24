@@ -431,17 +431,24 @@ DB: se non è in pari, aggiornalo lì e carica quello.
 
 ## Perimetro attuale
 
-L'indice del primario copre **maggio–giugno 2026** (58.322 messaggi, 139.011
-vettori): il resto del corpus si indicizza a scaglioni. Fuori dal perimetro la
-ricerca ibrida non ha vettori da fondere — `indici[].perimetro` nella risposta
-lo dichiara a ogni chiamata, ed è la prima cosa da leggere prima di concludere
-«non c'è».
+`[stato dell'installazione al 25/09/2026]`
 
-📌 Quell'indice (generato il 07/09/2026) viene dal prototipo del POC: il suo
-`indice_meta` è stato scritto a mano e non ha il registro `indice_righe`. I
-vettori sono gli stessi che scrive il costruttore (coseno 1.000000, sopra), ma
-per il primo aggiornamento incrementale serve una ricostruzione (`--ricostruisci`,
-vedi «La prima volta sulla VPS»).
+- **Il primario per Claude Code è `recupero-20260924`** (dal 24/09: il primo bundle
+  col contratto `recupero/` R1, vedi [ARCHIVE.md](ARCHIVE.md)). Il suo indice si sta
+  costruendo col costruttore del repo su **tutto** il DB (`--tutto`: 266.219 messaggi,
+  log compresi, con il registro `indice_righe`), sul PC; a ~1,9 vettori/s sono più di
+  due giorni di calcolo. Finché non è caricato, `search_ibrida` su quel DB non ha
+  vettori da fondere e lo dichiara in `indici[]`: la ricerca per parole (`search`)
+  funziona già su tutto.
+- **`recupero-20260905`** (il primario fino al 24/09, ora riscontro) tiene l'indice del
+  prototipo: **maggio–giugno 2026** (58.322 messaggi, 139.011 vettori, generato il
+  07/09/2026), con `indice_meta` scritta a mano e **senza** registro — `verifica.registro:
+  false`; per aggiornarlo serve una ricostruzione (`--ricostruisci`, vedi «La prima volta
+  sulla VPS», i cui esempi usano proprio questo DB).
+
+Fuori dal perimetro la ricerca ibrida non ha vettori da fondere — `indici[].perimetro`
+nella risposta lo dichiara a ogni chiamata, ed è la prima cosa da leggere prima di
+concludere «non c'è».
 
 ## Limiti noti
 
