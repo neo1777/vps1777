@@ -843,7 +843,7 @@ class EmbedderOnnx:
 
 # ── riga di comando ──────────────────────────────────────────────────────────
 
-def _stampa(esito: Esito, out=sys.stdout) -> None:
+def _stampa(esito: Esito, out: Any = None) -> None:
     d = esito.differenza
     righe = [
         f"indice: {esito.indice}  ({esito.modo})",
@@ -874,7 +874,7 @@ def _stampa(esito: Esito, out=sys.stdout) -> None:
                      else "NON verificabile per intero")
     for n in esito.note:
         righe.append(f"⚠️  {n}")
-    print("\n".join(righe), file=out)
+    print("\n".join(righe), file=out or sys.stdout)
 
 
 def _parser() -> argparse.ArgumentParser:
