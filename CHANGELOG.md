@@ -30,6 +30,25 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   Misurato contro l'indice del POC (60 messaggi, 127 pezzi): coseno 1.000000. Un indice
   del POC, senza registro, va ricostruito una volta (`--ricostruisci`). Il costruttore gira
   sul PC nell'ambiente del lock di archive-mcp: nessuna dipendenza nuova, immagine invariata.
+- **`docs/en/RICERCA-IBRIDA.md`**: la ricerca ibrida in inglese, traduzione completa e
+  registrata in `docs/en/MANIFEST.json` (la CI la tiene fresca). La pagina italiana ora
+  racconta tutto il giro: costruttore, perimetro, `indice_meta`, incrementale,
+  `--controlla`/`--ricostruisci`, la verifica nel server, i costi misurati e cosa fare
+  sulla VPS la prima volta (~17 h di `--ricostruisci` per maggio–giugno). I due README
+  la elencano e dicono che archive-mcp fa anche ricerca per senso.
+
+### Corretto
+
+- **`search_ibrida` non restituisce più il messaggio sbagliato dopo un re-ingest.**
+  L'indice lavora sul rowid e l'indexer fa `INSERT OR REPLACE` sull'uuid: un rowid
+  dell'indice poteva non esistere più (il risultato spariva in silenzio) o essere stato
+  riusato da un altro messaggio (restituito per il senso di un altro, come fosse giusto).
+  Se l'indice ha il registro del costruttore, ogni risultato vettoriale si confronta ora
+  con l'uuid registrato e chi non combacia si scarta. La risposta lo dichiara in un campo
+  in più, `indici[].verifica` (`registro`, `candidati`, `scartati`, `rowid_assenti`,
+  `uuid_diversi`, `stato` con la cura); i campi esistenti non cambiano forma. Un indice
+  senza registro (quello del POC) si comporta come prima ma lo dice, e conta i rowid
+  spariti che prima si scartavano senza dirlo.
 
 ## [0.50.0] — 2026-09-20
 

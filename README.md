@@ -133,7 +133,7 @@ load the NotebookLM auth, [docs/en/INSTALL.md](docs/en/INSTALL.md).
 | Service | What it does | Internal port |
 |---|---|---|
 | **gateway** | OAuth 2.1 + DCR + MCP reverse proxy + `/admin/*` panel + `/app/*` Mini App | 8080 |
-| **archive-mcp** | FTS5 search across multiple DBs (claude.ai web exports, Claude Code sessions) | 8002 |
+| **archive-mcp** | FTS5 search across multiple DBs (claude.ai web exports, Claude Code sessions) plus hybrid search by meaning, FTS5 + vectors ([docs/en/RICERCA-IBRIDA.md](docs/en/RICERCA-IBRIDA.md)) | 8002 |
 | **nb1777-mcp** | NotebookLM via the `nlm` CLI — **38 tools** (notebooks, sources, chat, 9 studio artifacts, doctor, canonico/memory). Also serves the **1777 memory canon** ([docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md)). See [docs/NB1777.md](docs/NB1777.md) (Italian) | 8003 |
 | **nb1777-bot** | Owner-only Telegram bot + Mini App launcher | (long-poll) |
 | **ocr** | Tesseract in an internal container: the ingest's eyes (images → `[ocr]` text). The gateway calls it over HTTP, it never spawns processes | 8004 |
@@ -239,6 +239,7 @@ source, and a moved original turns the build red until the translation catches u
 | Age-encrypted backup & restore, two tiers | [docs/en/BACKUP-RESTORE.md](docs/en/BACKUP-RESTORE.md) | [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) |
 | The `vps1777` CLI, every command with examples | [docs/en/CLI.md](docs/en/CLI.md) | [docs/CLI.md](docs/CLI.md) |
 | The 1777 memory discipline (canon, local layers) | [docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md) | [docs/MEMORIA-1777.md](docs/MEMORIA-1777.md) |
+| Hybrid search by meaning: the model, the vector index, its builder, incremental updates | [docs/en/RICERCA-IBRIDA.md](docs/en/RICERCA-IBRIDA.md) | [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md) |
 | Trying it locally, no VPS: timed steps, what you see and what isn't there | — | [docs/PRIMI-15-MINUTI.md](docs/PRIMI-15-MINUTI.md) |
 | Public HTTPS: Tailscale Funnel / Caddy / Cloudflare | — | [docs/INGRESS.md](docs/INGRESS.md) |
 | Adding your own MCP or bot | — | [docs/PLUGINS.md](docs/PLUGINS.md) |

@@ -3,7 +3,7 @@
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "e9df8d62726646821a48cc464ed810f95d43365d5338ef1c632c5c79dfa54f5f"
+      "sorgente_sha256": "c9f8c45fc25314e97487c2c0254bc9f524224a8ace3da286d339c08df2cd779a"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
@@ -32,6 +32,10 @@
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",
       "sorgente_sha256": "41dd9e89504ce94add9f52ecf09bb6f82ad576b52afb3175fab63783bc184a49"
+    },
+    "docs/en/RICERCA-IBRIDA.md": {
+      "sorgente": "docs/RICERCA-IBRIDA.md",
+      "sorgente_sha256": "2b9e7bce3a19a3e4d4c1c1bb7206ca56c3bf7bbb40544f770273d8b4cd297a61"
     }
   }
 }
