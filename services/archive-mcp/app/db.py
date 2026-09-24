@@ -547,9 +547,16 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         # ② lista vettoriale: rowid → uuid (l'indice lavora su rowid, il mondo
         #    esterno su uuid: la traduzione sta qui e non nell'indice, così un
         #    re-ingest che cambia i rowid rompe l'indice, non il contratto).
+        #    ⚠️ E il rowid può MENTIRE: dopo un re-ingest (INSERT OR REPLACE) un
+        #    rowid dell'indice può non esistere più o essere di un altro messaggio.
+        #    Se l'indice ha il registro del costruttore, ogni risultato si confronta
+        #    con l'uuid registrato e chi non combacia si SCARTA — e si dichiara in
+        #    `indici[].verifica`, mai restituito come se fosse giusto.
         lista_vec: list[str] = []
         try:
             rowids = semantica.knn_dedup(conn, blob, topn=limit * 3)
+            registro = semantica.uuid_registrati(conn, rowids)
+            assenti = uuid_diversi = 0
             if rowids:
                 seg = ",".join("?" * len(rowids))
                 cur = conn.execute(
@@ -559,8 +566,12 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                 for rid in rowids:                      # l'ordine del knn è il rank
                     r = per_rowid.get(rid)
                     if not r:
+                        assenti += 1
                         continue
                     u = r["uuid"]
+                    if registro is not None and registro.get(rid) != u:
+                        uuid_diversi += 1
+                        continue
                     lista_vec.append(u)
                     if u not in per_uuid:
                         per_uuid[u] = {"uuid": u, "project": r["project"], "ts": r["ts"],
@@ -583,7 +594,14 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                             "messaggi_indicizzati": m.get("messaggi", "?"),
                             "perimetro": m.get("perimetro", "non dichiarato"),
                             "modello": m.get("modello", "?"),
-                            "generato": m.get("generato", "?")})
+                            "generato": m.get("generato", "?"),
+                            # campo IN PIÙ: gli altri non cambiano forma
+                            "verifica": semantica.verdetto_registro(
+                                registro is not None, candidati=len(rowids),
+                                assenti=assenti, uuid_diversi=uuid_diversi)})
+        if assenti or uuid_diversi:
+            log.warning("indice di %s disallineato: %d rowid assenti, %d uuid diversi "
+                        "su %d candidati", name, assenti, uuid_diversi, len(rowids))
     return {
         "righe": righe[:limit],
         "indici": meta_per_db,

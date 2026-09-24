@@ -212,6 +212,62 @@ def knn_dedup(conn: Any, blob: bytes, *, topn: int, k_chunk: int = 400,
     return ordine
 
 
+def uuid_registrati(conn: Any, rowids: list[int], alias: str = "vec") -> dict[int, str] | None:
+    """Per i rowid dati, l'uuid che il costruttore ha REGISTRATO accanto al vettore.
+
+    `None` = l'indice non ha il registro `indice_righe` (un indice del POC, o
+    illeggibile): i risultati non sono verificabili, e chi chiama lo DICHIARA.
+    Un rowid assente dal dizionario = un vettore che il registro non spiega.
+
+    PERCHÉ ESISTE: l'indice lavora sul rowid, e l'indexer fa `INSERT OR REPLACE`
+    sull'uuid. Dopo un re-ingest un rowid dell'indice può non esistere più, o
+    appartenere a un ALTRO messaggio: senza questo confronto il server
+    restituirebbe quel messaggio per il senso di un altro, con l'aria di un
+    risultato giusto.
+    """
+    try:
+        c = conn.execute(f"SELECT 1 FROM {alias}.sqlite_master "
+                         "WHERE type = 'table' AND name = 'indice_righe'").fetchone()
+    except Exception:                                   # noqa: BLE001 — dichiarato come non verificabile
+        return None
+    if c is None:
+        return None
+    if not rowids:
+        return {}
+    seg = ",".join("?" * len(rowids))
+    return {r: u for r, u in conn.execute(
+        f"SELECT msg_rowid, uuid FROM {alias}.indice_righe WHERE msg_rowid IN ({seg})",
+        [int(x) for x in rowids])}
+
+
+def verdetto_registro(verificabile: bool, *, candidati: int, assenti: int,
+                      uuid_diversi: int) -> dict[str, Any]:
+    """Il campo `verifica` di `indici[]`: quanti risultati vettoriali sono stati
+    scartati perché l'indice non combacia più col DB, e cosa fare.
+
+    Il conto è sui CANDIDATI esaminati (i vicini del knn, non l'intero indice):
+    zero scarti qui non certifica tutto l'indice — lo fa `costruisci_indice.py
+    --controlla`.
+    """
+    scartati = assenti + uuid_diversi
+    cura = ("lancia `services/archive-mcp/tools/costruisci_indice.py --controlla` "
+            "su una copia del DB e aggiorna l'indice (docs/RICERCA-IBRIDA.md)")
+    if not verificabile:
+        stato = ("indice senza registro: l'uuid dei risultati vettoriali non è "
+                 "verificabile (indice costruito prima del costruttore; si cura con "
+                 "`--ricostruisci`)")
+        if assenti:
+            stato += f"; {assenti} rowid assenti dal DB scartati — {cura}"
+    elif scartati:
+        stato = (f"indice disallineato col DB: {scartati} risultati vettoriali scartati "
+                 f"({assenti} rowid spariti, {uuid_diversi} rowid ora di un altro "
+                 f"messaggio) — {cura}")
+    else:
+        stato = "verificato: ogni risultato vettoriale combacia col DB (uuid per rowid)"
+    return {"registro": verificabile, "candidati": candidati, "scartati": scartati,
+            "rowid_assenti": assenti, "uuid_diversi": uuid_diversi, "stato": stato}
+
+
 # Parole che in una domanda parlata non portano segnale. Non è una lista di
 # stopword «linguistica»: è la lista di ciò che rovina una query FTS5, misurata
 # sul caso reale (sotto).
