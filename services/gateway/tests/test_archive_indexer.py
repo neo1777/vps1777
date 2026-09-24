@@ -2295,7 +2295,10 @@ def _bundle_recupero(tmp_path: Path, *, nome: str = "bundle.zip", recupero: dict
     zp = tmp_path / nome
     with zipfile.ZipFile(zp, "w") as z:
         for n, corpo in membri.items():
-            z.writestr(n, corpo)
+            # data del membro FISSA: `writestr(nome, …)` userebbe l'ora corrente, e la
+            # stirpe (che nel front-matter non ha un ts) la prende come suo ts — due zip
+            # nati a cavallo di un secondo davano DB diversi (test del ponte, 1 su 10).
+            z.writestr(zipfile.ZipInfo(n, date_time=(2026, 9, 24, 12, 0, 0)), corpo)
     return zp
 
 
