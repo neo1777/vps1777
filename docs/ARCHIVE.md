@@ -40,8 +40,11 @@ copre:
 
 **Non copre**: token, chiavi, password, IP, indirizzi postali, nomi di terzi mai
 comparsi nell'anagrafica. *Chiunque abbia accesso all'archivio trova quei segreti
-con una query.* E ha un difetto noto, descritto in [Limiti noti](#limiti-noti): il
-pattern dei telefoni può mascherare pezzi di un uuid fatto di sole cifre.
+con una query.* Il pattern dei telefoni **non** si applica dentro un uuid canonico
+(8-4-4-4-12 esadecimali) e lascia intatte le date ISO valide con l'ora
+(`2026-09-05 13:10`) e la sagoma `AAAAMMGG-HHMMSS` dei nomi di bundle: tre esenzioni
+strette, dalla 0.51.1 (prima un uuid coi gruppi di sole cifre e una data con l'ora
+uscivano come «[telefono redatto]»; misurato il 24/09/2026 dal vivo).
 
 **La regola pratica** (finché l'archivio resta tuo e dei modelli a cui dai *tu* il
 connettore, questa è una scelta difendibile):
@@ -766,15 +769,13 @@ Dichiarati, non scoperti per caso:
   vale solo quando lo stesso membro ritorna).
 - **`meta` dice l'ultimo bundle.** Se nello stesso DB entrano più bundle, le chiavi
   `bundle_*` descrivono solo l'ultimo; `bundle_generated` lo data.
-- **La redazione in uscita può guastare un uuid.** Il pattern dei numeri di telefono
-  prende anche i gruppi di sole cifre separati da trattini: un uuid come
-  `12345678-1234-4123-8123-123456789012` esce come
-  `[telefono redatto]-4123-8123-[telefono redatto]`. È un difetto **preesistente** e
-  vale per ogni tool che restituisce uuid; colpisce solo gli uuid con gruppi di sole
-  cifre abbastanza lunghi — stimati sotto l'1% (stima, non misura). Un id guastato
-  così nella risposta non si può riusare nella chiamata successiva: in quel caso
-  basta il prefisso di 8 caratteri, se è quello a restare intatto, o la ricerca per
-  contenuto.
+- **La redazione in uscita guastava uuid e date — curato nella 0.51.1.** Fino alla 0.51.0
+  il pattern dei telefoni prendeva i gruppi di sole cifre di un uuid
+  (`12345678-1234-4123-8123-123456789012` usciva `[telefono redatto]-4123-8123-[telefono
+  redatto]`) e le date con l'ora separata da uno spazio (`2026-09-05 13:10` usciva
+  `[telefono redatto]:10`). Ora gli uuid canonici non si toccano e le date valide con l'ora
+  restano; le esenzioni sono strette (un mese 13, un giorno 32, un'ora 24 restano telefono) e
+  i telefoni veri continuano a sparire (test in `test_redazione.py`, nei due versi).
 - **Le righe vecchie del ponte non si tolgono da sole.** Un DB che aveva ingerito
   bundle col ponte `workfiles/_recupero-1777/` con un indexer **precedente**
   all'alias ha righe `workfile:_recupero-1777/…`; re-ingerire con questo indexer

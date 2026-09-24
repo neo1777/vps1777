@@ -150,3 +150,35 @@ def test_l_esenzione_timestamp_e_stretta_nei_due_versi() -> None:
     """
     assert "12345678-654321" not in redazione.maschera_testo("chiama 12345678-654321 ora")
     assert "333 1234567" not in redazione.maschera_testo("chiama +39 333 1234567 grazie")
+
+
+# ── 24/09/2026: date con l'ora e uuid (misurato dal vivo via MCP) ─────────────────────
+def test_una_data_con_l_ora_non_e_un_telefono() -> None:
+    """«2026-09-05 13:10» usciva «[telefono redatto]:10» (TELEFONO si ferma ai due punti e il
+    match «2026-09-05 13» ha 10 cifre). Una data valida con l'ora resta com'è."""
+    for innocuo in ("quota tornata il 2026-09-05 13:10 UTC", "alle 2026-12-31 23:59",
+                    "il 1999-01-01 00:00", "2026-09-24T20:32 e basta"):
+        assert redazione.maschera_testo(innocuo) == innocuo, innocuo
+
+
+def test_un_uuid_non_e_un_telefono() -> None:
+    """Un uuid coi gruppi di sole cifre usciva spezzato («[telefono redatto]-4123-…»): la
+    navigazione (`get_context`, `get_session`) si rompe proprio dove non si protegge nulla."""
+    for u in ("12345678-1234-4123-8123-123456789012", "b3326245-7246-4cbb-ad80-267e5650544b",
+              "ABCDEF12-3456-7890-ABCD-EF1234567890"):
+        s = f"la riga {u} del thread"
+        assert redazione.maschera_testo(s) == s, u
+
+
+def test_le_esenzioni_nuove_sono_strette() -> None:
+    """Il caso noto che deve riuscire: i telefoni veri spariscono ancora — accanto a un uuid,
+    dopo una data, e con una «data» impossibile (mese 13, giorno 32) che resta telefono."""
+    u = "123e4567-e89b-12d3-a456-426614174000"
+    out = redazione.maschera_testo(f"chiama 333 1234567 per l'uuid {u}")
+    assert "333 1234567" not in out and u in out
+    out = redazione.maschera_testo("il 2026-09-05 chiama +39 333 1234567")
+    assert "333 1234567" not in out and "2026-09-05" in out
+    for falso in ("2026-13-05 13", "2026-09-32 13", "2026-09-05 24", "3026-09-05 13"):
+        assert redazione.SEGNAPOSTO_TEL in redazione.maschera_testo(f"x {falso} y"), falso
+    # un uuid con un gruppo di troppo non è un uuid: resta soggetto al pattern
+    assert redazione.SEGNAPOSTO_TEL in redazione.maschera_testo("12345678-1234-4123-8123")

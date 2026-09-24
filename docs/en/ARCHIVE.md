@@ -43,9 +43,11 @@ step that covers:
 
 **It does not cover**: tokens, keys, passwords, IPs, postal addresses, names of
 third parties that never appeared in the account data. *Anyone with access to the
-archive finds those secrets with a query.* And it has a known defect, described in
-[Known limits](#known-limits): the phone-number pattern can mask parts of a uuid
-made of digits only.
+archive finds those secrets with a query.* The phone-number pattern does **not** apply
+inside a canonical uuid (8-4-4-4-12 hex) and leaves valid ISO dates with the time
+(`2026-09-05 13:10`) and the `YYYYMMDD-HHMMSS` shape of bundle names intact: three strict
+exemptions, since 0.51.1 (before, a uuid with digit-only groups and a date with the time
+came out as "[telefono redatto]", "[phone redacted]"; measured live on 24/09/2026).
 
 **The practical rule** (as long as the archive stays yours and the models *you*
 give the connector to, this is a defensible choice):
@@ -778,15 +780,13 @@ Declared, not discovered by chance:
   comes back).
 - **`meta` tells the last bundle.** If several bundles go into the same DB, the
   `bundle_*` keys describe only the last one; `bundle_generated` dates it.
-- **Output redaction can spoil a uuid.** The phone-number pattern also catches
-  digit-only groups separated by hyphens: a uuid like
-  `12345678-1234-4123-8123-123456789012` comes out as
-  `[telefono redatto]-4123-8123-[telefono redatto]` ("[phone redacted]"). It is a
-  **pre-existing** defect and applies to every tool returning uuids; it hits only
-  uuids with long enough digit-only groups — estimated below 1% (an estimate, not a
-  measurement). An id spoiled like that in a response can't be reused in the next
-  call: in that case the 8-character prefix is enough, if that is the part left
-  intact, or a search by content.
+- **Output redaction used to spoil uuids and dates — fixed in 0.51.1.** Up to 0.51.0 the
+  phone-number pattern caught the digit-only groups of a uuid
+  (`12345678-1234-4123-8123-123456789012` came out as `[telefono redatto]-4123-8123-[telefono
+  redatto]`, "[phone redacted]") and dates with the time after a space (`2026-09-05 13:10`
+  came out as `[telefono redatto]:10`). Now canonical uuids are left alone and valid dates
+  with the time stay; the exemptions are strict (month 13, day 32, hour 24 are still phone
+  numbers) and real phone numbers still disappear (tests in `test_redazione.py`, both ways).
 - **The bridge's old rows don't go away by themselves.** A DB that had ingested
   bundles with the `workfiles/_recupero-1777/` bridge using an indexer **predating**
   the alias has `workfile:_recupero-1777/…` rows; re-ingesting with this indexer adds

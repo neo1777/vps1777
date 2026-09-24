@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+
+- **La redazione in uscita di archive-mcp non guasta più uuid e date.** Misurato il
+  24/09/2026 dal vivo, sulle schede di Recupero Sessioni appena caricate: il pattern dei
+  telefoni prendeva i gruppi di sole cifre di un uuid (`12345678-1234-4123-8123-…` usciva
+  `[telefono redatto]-4123-8123-…`, e l'id non si poteva più riusare nella chiamata dopo) e
+  le date con l'ora separata da uno spazio (`2026-09-05 13:10` usciva `[telefono
+  redatto]:10`). Ora il pattern si applica FUORI dagli uuid canonici (8-4-4-4-12
+  esadecimali, che un telefono non può essere) e lascia intatta una data ISO valida con
+  l'ora 00-23. Esenzioni strette come quella del 28/08 sui nomi di bundle: un mese 13, un
+  giorno 32, un'ora 24 restano telefono; i telefoni veri spariscono ancora anche accanto a
+  un uuid o dopo una data (test nei due versi in `test_redazione.py`). `docs/ARCHIVE.md` e
+  la traduzione inglese aggiornati: il difetto esce dai limiti noti.
+
 ## [0.51.0] — 2026-09-24
 
 ### Aggiunto
