@@ -77,9 +77,37 @@ TELEFONO = re.compile(r"(?<![\w.])(?:\+\d{1,3}[\s.-]?)?(?:\d[\s.-]?){8,13}\d(?![
 # redazione, non una cortesia.
 _TS_COMPATTO = re.compile(r"^(?:19|20)\d{6}[-T]\d{6}$")
 
+# Due sagome che TELEFONO ingoiava e che un telefono non può avere (misurato il 24/09/2026 dal
+# vivo, via MCP, sulle schede di Recupero Sessioni: «quota tornata il [telefono redatto]:10 UTC»
+# al posto di «2026-09-05 13:10», e gli uuid coi gruppi di sole cifre che uscivano spezzati):
+# · una DATA ISO valida (secolo plausibile, mese 01-12, giorno 01-31) con l'ora 00-23 separata
+#   da uno spazio o da `T` — TELEFONO si ferma ai due punti, quindi il match è «AAAA-MM-GG HH».
+#   STRETTA come `_TS_COMPATTO`: un mese 13 o un giorno 32 restano telefono.
+# · un UUID canonico (8-4-4-4-12 esadecimali): non si cerca un telefono DENTRO un uuid. Un
+#   uuid è un identificatore tecnico — `CAMPI_ANAGRAFICI` già lo esclude di proposito, perché
+#   serve a `get_context` — e la sua forma esatta non è quella di un numero di telefono.
+_DATA_ORA = re.compile(r"^(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:[ T](?:[01]\d|2[0-3]))?$")
+_UUID = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z])")
+
 
 def _tel_o_timestamp(m: "re.Match[str]") -> str:
-    return m.group(0) if _TS_COMPATTO.match(m.group(0)) else SEGNAPOSTO_TEL
+    t = m.group(0)
+    return t if _TS_COMPATTO.match(t) or _DATA_ORA.match(t) else SEGNAPOSTO_TEL
+
+
+def _telefoni(s: str) -> str:
+    """TELEFONO applicato FUORI dagli uuid canonici: il testo si spezza agli uuid, ogni pezzo
+    passa dal pattern, gli uuid tornano al loro posto intatti. Un telefono attaccato a un uuid
+    senza separatore non esiste (il pattern vuole un confine prima e dopo)."""
+    if "-" not in s:
+        return TELEFONO.sub(_tel_o_timestamp, s)
+    parti, i = [], 0
+    for u in _UUID.finditer(s):
+        parti.append(TELEFONO.sub(_tel_o_timestamp, s[i:u.start()]))
+        parti.append(u.group(0))
+        i = u.end()
+    parti.append(TELEFONO.sub(_tel_o_timestamp, s[i:]))
+    return "".join(parti)
 
 SEGNAPOSTO_EMAIL = "[email redatta]"
 SEGNAPOSTO_TEL = "[telefono redatto]"
@@ -131,7 +159,7 @@ def maschera_testo(s: str, noti: set[str] | None = None) -> str:
         if v in s:
             s = s.replace(v, SEGNAPOSTO_VALORE)
     s = EMAIL.sub(SEGNAPOSTO_EMAIL, s)
-    return TELEFONO.sub(_tel_o_timestamp, s)
+    return _telefoni(s)
 
 
 def maschera(oggetto: Any, noti: set[str] | None = None) -> Any:
