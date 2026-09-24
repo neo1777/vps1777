@@ -85,6 +85,8 @@ ATTESI = {
     "inventario/inventario-sessioni.json": "membro del bundle di Recupero Sessioni (lo produce "
         "l'app, fuori da questo repo): ARCHIVE.md lo NOMINA per dire cosa dice la sua lapide "
         "(24/09/2026, contratto recupero/ R1)",
+    "MANIFEST.md": "membro del bundle di Recupero Sessioni (lo produce l'app, fuori da questo "
+        "repo): ARCHIVE.md lo NOMINA per dire che diventa testo con etichetta `manifest`",
 }
 
 

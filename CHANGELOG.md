@@ -19,7 +19,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   lettura, redazione in uscita ereditata dal decoratore, semaforo delle ricerche (#270). Le
   funzioni sono aggiunte in coda a `db.py` e `fts.py`, senza toccare quelle esistenti. I test
   usano un DB prodotto dall'indexer vero del gateway: il contratto fra le due parti è provato
-  da un lato all'altro.
+  da un lato all'altro. I due tool, e la lettura di `recupero/` nell'indexer, hanno la loro
+  voce nel ledger `features.yaml` (senza, `verify-features` era rosso: 2 fallimenti duri).
 - **archive1777 legge `recupero/` nel bundle di Recupero Sessioni (contratto R1).**
   Stirpi, archi e memorie arrivavano sulla VPS solo dentro `inventario-sessioni.json`,
   scartato come «ridondante», e sparivano con lo zip cancellato dopo l'ingest; il
@@ -53,6 +54,42 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **`write_rows` accetta `ts_source` come decima colonna facoltativa.** Il valore
   `data-export` era nello schema dal 20/07 e nessun codice poteva scriverlo; senza la
   colonna il regime resta `messaggio` come prima, un valore fuori elenco ferma l'ingest.
+
+### 📖 Documentazione
+
+- **`docs/ARCHIVE.md` riscritto sul bundle e sulle sessioni, e tradotto per intero in
+  inglese (`docs/en/ARCHIVE.md`, registrato in `docs/en/MANIFEST.json`, quindi sorvegliato
+  dal test delle traduzioni fresche).** Il documento ora copre:
+  - il bundle di Recupero Sessioni membro per membro: che cosa diventa ogni cartella, con
+    quale etichetta, e chi lascia un avvistamento;
+  - il contratto `recupero/` R1: front-matter con un esempio, i `.tsv`, le versioni, e il
+    ponte `workfiles/_recupero-1777/` come alias;
+  - come le schede diventano righe: uuid, ts a +1 ms, `parent_uuid`, `ts_source`,
+    speaker/voice, pezzi vecchi tolti;
+  - le tabelle `sessioni`/`archi`/`memorie` colonna per colonna, il manifest in `meta`, e la
+    tabella di tutte le lapidi coi loro motivi;
+  - i **15** tool (all'elenco mancavano `search_ibrida` e `check_integrity`);
+  - `get_session` e `get_stirpe` in dettaglio: parametri, risposta con un esempio, prefisso di
+    8 caratteri, `anche_in`, errori sui DB nati prima del contratto R1;
+  - come si interrogano sessioni e stirpi, anche via SQL;
+  - lo schema completo del DB, con `revisions`, `sightings`, `ts_source` e speaker/voice;
+  - una sezione **Limiti noti**: le tabelle non dimenticano, `meta` descrive solo l'ultimo
+    bundle, la redazione in uscita guasta gli uuid con gruppi di sole cifre (difetto
+    preesistente, dichiarato), le righe vecchie del ponte, `memorie` senza tool, `last_ts`
+    rispetto all'ultimo messaggio.
+
+  La sezione privacy diceva «non c'è mascheramento in output». Era vero quando è stata
+  scritta, ma dal 02/08/2026 la redazione di email, telefoni e anagrafica esiste: ora il
+  documento la descrive con quello che copre e quello che non copre.
+- **README (IT/EN), `docs/ARCHITECTURE.md` (IT/EN), `docs/en/INSTALL.md`,
+  `installer/README.md` allineati:**
+  - la riga di archive-mcp dice cosa fa oggi, e che espone 15 tool;
+  - il README inglese rimanda alla traduzione inglese di ARCHIVE;
+  - ARCHITECTURE descrive il volume `archive-data` (tabelle del bundle, montato in sola
+    lettura da archive-mcp) e il contratto `archive-mcp → gateway /internal/archive/*`,
+    che mancava;
+  - l'installer diceva «`archive` espone 2 tool» e «`nb1777` ne espone 35»: ora 15 e 38,
+    contati sui `@mcp.tool()`.
 
 ### Modificato
 
