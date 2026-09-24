@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.51.2] — 2026-09-25
+
 ### Corretto
 
 - **La tabella `sessioni` tiene tutti i filoni di una sessione.** Misurato il 24/09/2026
