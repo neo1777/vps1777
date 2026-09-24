@@ -4,6 +4,33 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+
+- **Il costruttore dell'indice della ricerca ibrida entra nel repo**
+  (`services/archive-mcp/tools/costruisci_indice.py`, #281). Fino a qui il server leggeva
+  `<db>.vec.db` ma nessun codice del repo lo scriveva: c'era uno script del POC, fuori,
+  con il DB sorgente scritto nel codice, il perimetro per sola finestra di ts (le righe
+  senza ts non entravano mai, in silenzio) e `indice_meta` aggiunta a mano. Ora:
+  - **perimetro dichiarato e parametrico**: finestra di ts, etichette `project` (anche
+    per prefisso, `recupero:*`) o tutto; se la finestra lascerebbe fuori righe senza ts
+    il costruttore si ferma, dice quante sono e chiede `--senza-ts includi|escludi`;
+  - **`indice_meta` scritta dal costruttore**: perimetro (leggibile e JSON), modello e
+    impronta del file, conteggi, data, versione del costruttore, esito dell'ultimo
+    passaggio;
+  - **incrementale sicuro rispetto al rowid**: un registro `indice_righe` (rowid, uuid,
+    impronta del testo, vettori) accanto alla tabella vec0 fa vedere cosa un re-ingest
+    ha cambiato — rowid spariti, rowid riusati da un altro messaggio, testi cambiati,
+    righe uscite dal perimetro — e lo dice coi numeri. Prima di pubblicare, registro e
+    tabella devono quadrare: nessun vettore orfano servito in silenzio;
+  - `--controlla` confronta indice e DB senza scrivere (esce 1 se non sono in pari);
+    il lavoro passa da un `.parziale` riprendibile e rinominato solo a fine lavoro.
+  Il metro è quello del server, importato e non ricopiato: `semantica.apri_modello` e
+  `semantica.codifica` servono ora sia `embed_query` sia il costruttore (vettori della
+  query identici byte per byte a prima), il prefisso `passage: ` sta accanto a `query: `.
+  Misurato contro l'indice del POC (60 messaggi, 127 pezzi): coseno 1.000000. Un indice
+  del POC, senza registro, va ricostruito una volta (`--ricostruisci`). Il costruttore gira
+  sul PC nell'ambiente del lock di archive-mcp: nessuna dipendenza nuova, immagine invariata.
+
 ## [0.50.0] — 2026-09-20
 
 <!-- Sezione senza numero DI PROPOSITO: il numero di versione lo decide chi

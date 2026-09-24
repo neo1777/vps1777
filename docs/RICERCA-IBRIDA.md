@@ -77,18 +77,105 @@ torch.onnx.export(E5(base).eval(), (enc["input_ids"], enc["attention_mask"]),
     output_names=["embedding"], opset_version=17, dynamo=False,
     dynamic_axes={"input_ids": {0:"b",1:"s"}, "attention_mask": {0:"b",1:"s"}, "embedding": {0:"b"}})
 PY
-
-# 2. indice: chunking (1400 char, overlap 200, max 12 per messaggio) su
-#    content + attachments + tools SPOGLIATI dei payload binari, poi
-#    tabella vec0 in un file separato con la sua scheda `indice_meta`.
-#    ⚠️ Il testo utile vive anche nei tool-call: un indice sul solo `content`
-#    è cieco proprio dove la scoperta proattiva serve (misurato nel POC).
 ```
 
-L'indice **deve** dichiarare in `indice_meta`: `modello`, `dim`, `tabella`,
-`chunk`, `perimetro`, `db_sorgente`, `generato`. Il tool li restituisce a ogni
-ricerca: senza il perimetro, un indice parziale produce zeri che sembrano
-assenze.
+### L'indice: `services/archive-mcp/tools/costruisci_indice.py`
+
+Il costruttore sta nel repo, accanto al server che legge ciò che scrive, e gira
+**nell'ambiente del lock di archive-mcp**: le stesse versioni di onnxruntime,
+tokenizers e sqlite-vec del server, nessuna dipendenza in più. Non entra
+nell'immagine (il Dockerfile copia solo `app/`).
+
+```bash
+cd services/archive-mcp
+uv sync --frozen
+uv run python tools/costruisci_indice.py \
+    --db /percorso/copia-archivio.db --modello /percorso/e5-small \
+    --dal 2026-05 --al 2026-07 --senza-ts escludi
+```
+
+Il DB si apre in **sola lettura**; l'indice esce accanto al DB
+(`<nome-db>.vec.db`, o `--out`). Cosa entra in ciascun vettore: content +
+attachments + tools **spogliati** dei payload binari, a pezzi di 1400 caratteri
+con overlap 200, al più 12 per messaggio, sotto i 40 caratteri niente.
+⚠️ Il testo utile vive anche nei tool-call: un indice sul solo `content` è
+cieco proprio dove la scoperta proattiva serve (misurato nel POC).
+
+**Il metro è quello del server, importato e non ricopiato.** Il modello si apre
+con `semantica.apri_modello` e si interroga con `semantica.codifica`, le stesse
+funzioni di `embed_query`; il prefisso dei testi è `semantica.PREFISSO_PASSAGGIO`
+(`passage: `), gemello di `PREFISSO_QUERY` (`query: `). Misurato contro l'indice
+del POC, costruito con sentence-transformers: 60 messaggi, 127 pezzi, coseno
+**1.000000** su tutti.
+
+**Il perimetro si dichiara sempre**, in uno di tre modi:
+
+| parametro | cosa entra |
+|---|---|
+| `--tutto` | tutto il DB |
+| `--dal X --al Y` | `ts >= X AND ts < Y` (stringhe ISO, `al` escluso) |
+| `--project ETICHETTA` | etichetta esatta, o prefisso se finisce in `*` (`recupero:*`); ripetibile, in OR |
+
+Finestra ed etichette si combinano (in AND). Se la finestra lascerebbe fuori
+righe **senza ts**, il costruttore si ferma, dice quante sono e chiede di
+scegliere: `--senza-ts includi` oppure `--senza-ts escludi`. Il prototipo le
+escludeva sempre, senza dirlo. Senza parametri di perimetro, un indice
+esistente si aggiorna col perimetro che dichiara lui.
+
+**`indice_meta` la scrive il costruttore**, a ogni passaggio. Il server
+restituisce `perimetro`, `messaggi`, `modello` e `generato` a ogni ricerca: senza
+il perimetro, un indice parziale produce zeri che sembrano assenze.
+
+| chiave | cosa dice |
+|---|---|
+| `perimetro`, `perimetro_json` | il perimetro, leggibile e ripetibile |
+| `modello`, `modello_impronta` | il nome e lo sha256 di `model.onnx` + `tokenizer.json` |
+| `dim`, `tabella`, `chunk`, `prefisso` | il metro |
+| `messaggi`, `vettori`, `messaggi_perimetro`, `messaggi_corti`, `righe_senza_ts` | i conteggi |
+| `db_sorgente`, `db_righe`, `db_max_rowid` | il DB da cui è nato |
+| `generato`, `costruttore`, `ultimo_passaggio`, `stato` | quando, con cosa, cosa ha fatto |
+
+### Aggiornare l'indice: l'incrementale e il rowid
+
+L'indice lavora sul `rowid` di `messages`, e l'indexer fa `INSERT OR REPLACE`
+sull'uuid: un re-ingest dà **rowid nuovi** alle righe rimpiazzate. Un indice
+vecchio ha allora vettori appesi a rowid che non esistono più (il server li
+scarta e il risultato sparisce senza errori) o a rowid **riusati** da un altro
+messaggio (il server restituisce il messaggio sbagliato).
+
+Per questo accanto alla tabella vec0 c'è un registro, `indice_righe`: per ogni
+messaggio il rowid, l'uuid, l'impronta del testo indicizzato e l'intervallo dei
+suoi vettori. Il server non lo legge: per lui l'indice è identico. Rilanciare il
+costruttore su un indice esistente lo confronta col DB e dice, coi numeri:
+
+| categoria | cosa è successo | cosa fa |
+|---|---|---|
+| invariati | stesso rowid, uuid e testo | niente |
+| nuovi | nel perimetro, non ancora indicizzati | li indicizza |
+| testo cambiato | stesso rowid e uuid, testo diverso | toglie e ricalcola |
+| rowid riassegnato | allo stesso rowid ora c'è un altro uuid | toglie e, se nel perimetro, ricalcola |
+| orfani | il rowid non esiste più nel DB | toglie |
+| usciti dal perimetro | ancora nel DB, ma fuori dal perimetro (o ora troppo corti) | toglie |
+
+Prima di pubblicare, il numero di vettori nella tabella vec0 deve essere uguale a
+quello del registro. Se non lo è, l'indice non viene pubblicato: nessun vettore
+orfano viene servito senza che nessuno lo sappia.
+
+- **`--controlla`** fa lo stesso confronto **senza scrivere niente** ed esce 1 se
+  l'indice non è in pari. Serve dopo un re-ingest e prima di caricare un indice
+  sulla VPS.
+- **Un cambio di metro** (un altro export del modello, per l'impronta; un altro
+  chunking) rifiuta l'incrementale e chiede `--ricostruisci`: vettori di due
+  metri nello stesso indice danno vicini insensati senza errori.
+- **Un indice del POC** non ha registro: l'incrementale lo rifiuta e chiede una
+  ricostruzione, una volta sola. `--controlla` su di lui dice solo gli orfani e
+  dichiara che il resto non è verificabile (esce 2 se non ne trova).
+- **Il lavoro passa da `<indice>.parziale`**, un lotto per transazione: se si
+  interrompe, rilanciando lo stesso comando si riprende. L'indice servito viene
+  sostituito solo alla fine, a conti quadrati.
+
+Esito: 0 fatto (o in pari), 1 non in pari (solo `--controlla`), 2 rifiutato o
+non misurabile, 130 interrotto. `--json` stampa l'esito per le macchine.
 
 ## Caricare gli artefatti sulla VPS
 
@@ -108,6 +195,10 @@ ssh vps1777 'docker cp /tmp/model.onnx vps1777-gateway-1:/var/lib/archive/models
 Nessun riavvio: la registry dei DB si ricarica da sola quando la dir cambia, e
 il modello si carica alla prima ricerca ibrida.
 
+⚠️ L'indice vale per il DB da cui è nato. Se sulla VPS il DB è stato
+re-ingerito dopo, prima di caricarlo lancia `--controlla` su una copia di quel
+DB: se non è in pari, aggiornalo lì e carica quello.
+
 ## Perimetro attuale
 
 L'indice del primario copre **maggio–giugno 2026** (58.322 messaggi, 139.011
@@ -115,3 +206,8 @@ vettori): il resto del corpus si indicizza a scaglioni. Fuori dal perimetro la
 ricerca ibrida non ha vettori da fondere — `indici[].perimetro` nella risposta
 lo dichiara a ogni chiamata, ed è la prima cosa da leggere prima di concludere
 «non c'è».
+
+📌 Quell'indice (generato il 07/09/2026) viene dal prototipo del POC: il suo
+`indice_meta` è stato scritto a mano e non ha il registro `indice_righe`. I
+vettori sono gli stessi che scrive il costruttore (coseno 1.000000, sopra), ma
+per il primo aggiornamento incrementale serve una ricostruzione (`--ricostruisci`).
