@@ -177,6 +177,13 @@ orfano viene servito senza che nessuno lo sappia.
 Esito: 0 fatto (o in pari), 1 non in pari (solo `--controlla`), 2 rifiutato o
 non misurabile, 130 interrotto. `--json` stampa l'esito per le macchine.
 
+Quanto costa, misurato il 24/09/2026 su un PC a 8 core: ~2,3 vettori al secondo,
+1,9 GB di RAM al massimo. Su una finestra di due giorni lo stesso perimetro del
+prototipo ha dato gli stessi messaggi e lo stesso numero di vettori per
+messaggio. I testi di un lotto vanno al modello ordinati per lunghezza, a
+gruppi di 16 (`EmbedderOnnx`): mandarli tutti insieme, 96 alla volta, aveva
+portato la RAM a ~12 GB.
+
 ## Caricare gli artefatti sulla VPS
 
 Il volume `archive-data` è montato **read-only** su `archive-mcp` (che legge) e
