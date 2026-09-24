@@ -18,8 +18,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `archi` e `memorie` (`CREATE TABLE IF NOT EXISTS`, innocue sui DB esistenti) e non
   diventano testo. Un membro fuori contratto (front-matter assente, `contratto` diverso da
   R1, tipo incoerente, colonna mancante) lascia una lapide che dice cosa gli manca. Dati
-  veri: un bundle reale piccolo, rimappato su `recupero/`, entra con 3 schede e 1/15/1 righe
-  nelle tabelle, zero speaker o voice vuoti. Doc: `docs/ARCHIVE.md`.
+  veri: un bundle reale piccolo entra con 3 schede e 1/15/1 righe nelle tabelle, zero
+  speaker o voice vuoti. Doc: `docs/ARCHIVE.md`.
+  - **La scheda viene dopo l'ultimo messaggio**: `ts` = ultimo della sessione + 1 ms (+1 ms
+    per pezzo). `get_conversation` ordina per `(ts, uuid)`, e a ts uguale decideva lo sha1.
+    Senza millesimi nella fonte si parte dal secondo dopo: `…00.001Z` ordinerebbe prima di
+    `…00Z`.
+  - **Il ponte `workfiles/_recupero-1777/` è un alias di `recupero/`**, tabelle comprese: l'app
+    lo sceglie quando la sua copia dell'indexer è più vecchia di quella sul server, e senza
+    alias quei bundle perdevano le tabelle. Le righe escono identiche (uuid e avvistamenti
+    sulla forma canonica `recupero/…`): stesso bundle dalle due radici → stesso DB, misurato
+    anche sul bundle reale.
+  - **Una scheda (o memoria) riscritta con meno pezzi toglie quelli in più** da `messages`,
+    FTS e avvistamenti; la loro ultima versione resta in `revisions`.
 - **`MANIFEST.json` del bundle nella scheda `meta`.** `generated`, `previsione_ingest` e
   `recupero` vanno in `meta` (`bundle_generated`, `bundle_previsione_ingest`,
   `bundle_recupero`): il metro che l'app scrive per collaudare l'ingest non si perde più.
@@ -33,9 +44,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 - **La lapide di `inventario-sessioni.json` dice se i suoi dati sono entrati.** Era
   «ridondante» senza condizioni, ed era falso. Ora `non-indicizzato-ridondante` solo se il
-  bundle ha `recupero/`; `non-indicizzato-solo-ponte` col solo ponte di livello 0
-  (`workfiles/_recupero-1777/`); `non-indicizzato-senza-recupero` altrimenti, col perché e
-  la cura. `BUNDLE_FILE_RIDONDANTI` perde `MANIFEST.json` (ora `BUNDLE_FILE_IN_META`) e
+  bundle ha `recupero/` (o il ponte); `non-indicizzato-senza-recupero` altrimenti, col
+  perché e la cura. `BUNDLE_FILE_RIDONDANTI` perde `MANIFEST.json` (ora `BUNDLE_FILE_IN_META`) e
   `BUNDLE_PREFISSI_INDICIZZATI` guadagna `recupero`: chi ne tiene una copia (il test
   speculare dell'app) va allineato.
 - **`voice` delle schede di recupero: `unknown` con la bandiera `scheda_recupero`.** Una

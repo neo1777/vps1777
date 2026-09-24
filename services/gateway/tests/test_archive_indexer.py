@@ -2314,7 +2314,8 @@ def test_recupero_le_schede_entrano_come_righe(tmp_path: Path) -> None:
          " content FROM messages WHERE uuid=?")
     sess = con.execute(q, (_uid_scheda(f"recupero/sessioni/{_SID_A}.md"),)).fetchone()
     assert sess is not None, "la scheda di sessione non è entrata"
-    assert sess[:5] == ("recupero:sessioni", "recupero", "2026-09-10T10:05:00.000Z", "rc-a1",
+    # ts = last_ts + 1 ms: la scheda viene DOPO l'ultimo messaggio (vedi il test sull'ordine)
+    assert sess[:5] == ("recupero:sessioni", "recupero", "2026-09-10T10:05:00.001Z", "rc-a1",
                         "data-export"), sess[:5]
     assert sess[8].startswith(f"[recupero/sessioni/{_SID_A}.md]\n# sessione di prova")
     assert "segno-ultime-parole" in sess[8]
@@ -2561,8 +2562,8 @@ def test_manifest_json_va_in_meta_e_non_diventa_testo(tmp_path: Path) -> None:
 def test_inventario_json_il_motivo_dice_se_i_dati_sono_entrati(tmp_path: Path) -> None:
     """La lapide del json dell'inventario diceva «ridondante» SENZA CONDIZIONI, ed
     era falso: stirpi, archi e memorie stavano solo lì. Ora dipende dal bundle:
-    con recupero/ è ridondante davvero; col solo ponte di livello 0 le tabelle
-    restano vuote e lo dice; senza nessuno dei due, dice che i dati NON entrano."""
+    con recupero/ — o col ponte workfiles/_recupero-1777/, che è un alias — è
+    ridondante davvero; senza nessuno dei due, dice che i dati NON entrano."""
     import zipfile
 
     def motivo(nome: str, extra: dict) -> tuple:
@@ -2584,8 +2585,9 @@ def test_inventario_json_il_motivo_dice_se_i_dati_sono_entrati(tmp_path: Path) -
     r, _d = motivo("con", {f"recupero/stirpi/{_STIRPE}.md": _membri_recupero()[
         f"recupero/stirpi/{_STIRPE}.md"]})
     assert r == "non-indicizzato-ridondante"
-    r, d = motivo("ponte", {"workfiles/_recupero-1777/archi.tsv": "da\ta\n"})
-    assert r == "non-indicizzato-solo-ponte" and "NON sono popolate" in d, (r, d)
+    r, _d = motivo("ponte", {f"workfiles/_recupero-1777/stirpi/{_STIRPE}.md": _membri_recupero()[
+        f"recupero/stirpi/{_STIRPE}.md"]})
+    assert r == "non-indicizzato-ridondante", "il ponte è un alias: i dati entrano"
     r, d = motivo("senza", {})
     assert r == "non-indicizzato-senza-recupero" and "NON entrano" in d, (r, d)
 
@@ -2625,3 +2627,125 @@ def test_tabelle_record_coincidono_con_lo_schema(tmp_path: Path) -> None:
     assert con.execute("SELECT count(*) FROM messages").fetchone()[0] == 2
     with pytest.raises(ValueError, match="tabella sconosciuta"):
         archive_indexer.write_rows(db, [archive_indexer._Record("messages", {"uuid": "x"})])
+
+
+
+# ── correzioni di revisione (24/09/2026): ordine, pezzi vecchi, ponte ─────────
+
+def test_recupero_la_scheda_viene_dopo_l_ultimo_messaggio(tmp_path: Path) -> None:
+    """`get_conversation` ordina per (ts, uuid). Con lo stesso ts dell'ultimo
+    messaggio l'ordine lo decideva lo sha1: qui l'ultimo messaggio ha un uuid che
+    ogni sha1 esadecimale precede ('z' > 'f'), cioè il caso in cui la scheda
+    usciva PRIMA. Con +1 ms esce in coda; i pezzi di una scheda lunga a +1 ms
+    l'uno dall'altro, nell'ordine del testo. E senza millesimi nella fonte si
+    parte dal secondo dopo: `…00.001Z` ordinerebbe prima di `…00Z`."""
+    import zipfile
+    membri = _membri_recupero()
+    lungo = "\n\n".join(f"paragrafo-{i:02d} " + "x" * 900 for i in range(20))
+    membri[f"recupero/sessioni/{_SID_A}.md"] = _scheda(
+        {"contratto": "R1", "tipo": "sessione", "sessionId": _SID_A,
+         "last_ts": "2026-09-10T10:05:00.000Z", "last_uuid": "zzzz-ultimo"}, lungo)
+    zp = _bundle_recupero(tmp_path, recupero=membri)
+    with zipfile.ZipFile(zp, "a") as z:   # l'ultimo messaggio, con l'uuid «alto»
+        z.writestr(f"sessions/{_SID_A}__f2.jsonl", json.dumps(
+            {"type": "assistant", "uuid": "zzzz-ultimo", "parentUuid": "rc-a1",
+             "timestamp": "2026-09-10T10:05:00.000Z", "sessionId": _SID_A,
+             "message": {"role": "assistant", "content": [{"type": "text", "text": "fine"}]}}))
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    scheda0 = _uid_scheda(f"recupero/sessioni/{_SID_A}.md")
+    assert scheda0 < "zzzz-ultimo", "il caso deve essere quello in cui lo sha1 perdeva"
+    ordine = [r[0] for r in con.execute(
+        "SELECT uuid FROM messages WHERE uuid IN ('rc-u1','rc-a1','zzzz-ultimo')"
+        " OR project='recupero:sessioni' ORDER BY ts ASC, uuid ASC")]
+    assert ordine[:3] == ["rc-u1", "rc-a1", "zzzz-ultimo"], ordine
+    pezzi = [_uid_scheda(f"recupero/sessioni/{_SID_A}.md", i) for i in range(len(ordine) - 3)]
+    assert len(pezzi) >= 2 and ordine[3:] == pezzi, "la scheda in coda, pezzi nell'ordine del testo"
+    ts = [r[0] for r in con.execute(
+        "SELECT ts FROM messages WHERE project='recupero:sessioni' ORDER BY ts")]
+    assert ts[:2] == ["2026-09-10T10:05:00.001Z", "2026-09-10T10:05:00.002Z"], ts
+    assert archive_indexer._ts_dopo("2026-09-10T10:05:00Z", 1) == "2026-09-10T10:05:01.000Z"
+    assert archive_indexer._ts_dopo("2026-09-10T10:05:00Z", 1) > "2026-09-10T10:05:00Z"
+    assert archive_indexer._ts_dopo("formato-ignoto", 1) == "formato-ignoto"
+
+
+def test_recupero_scheda_con_meno_pezzi_toglie_quelli_in_piu(tmp_path: Path) -> None:
+    """Una scheda di 2 pezzi riscritta in 1: il pezzo 2 NON resta orfano in
+    `messages` (né in FTS, né negli avvistamenti) a fingersi corrente; la sua
+    versione esce in `revisions`, come farebbe un REPLACE (D18)."""
+    membro = f"recupero/sessioni/{_SID_A}.md"
+    campi = {"contratto": "R1", "tipo": "sessione", "sessionId": _SID_A,
+             "last_ts": "2026-09-10T10:05:00.000Z", "last_uuid": "rc-a1"}
+    # il primo paragrafo supera da solo il pezzo da 8000: il secondo fa il pezzo 2
+    lungo = "\n\n".join(["inizio-scheda " + "x" * 8100, "coda-da-togliere " + "y" * 100])
+    uno = _membri_recupero()
+    uno[membro] = _scheda(campi, lungo)
+    due = _membri_recupero()
+    due[membro] = _scheda(campi, "scheda-corta-nuova")
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, nome="uno.zip", recupero=uno)), str(db))
+    p0, p1 = _uid_scheda(membro, 0), _uid_scheda(membro, 1)
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT count(*) FROM messages WHERE uuid IN (?,?)",
+                       (p0, p1)).fetchone()[0] == 2, "la fixture doveva fare due pezzi"
+    con.close()
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, nome="due.zip", recupero=due)), str(db))
+    con = sqlite3.connect(db)
+    assert [r[0] for r in con.execute(
+        "SELECT uuid FROM messages WHERE project='recupero:sessioni'")] == [p0]
+    assert con.execute("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH"
+                       " '\"coda-da-togliere\"'").fetchone()[0] == 0, "l'FTS vede ancora il pezzo tolto"
+    assert [r[0] for r in con.execute("SELECT uuid FROM sightings WHERE source=?",
+                                      (membro,))] == [p0]
+    rev = {u: c for u, c in con.execute("SELECT uuid, content FROM revisions")}
+    assert "coda-da-togliere" in rev.get(p1, ""), "il pezzo tolto non è in revisions"
+    assert "inizio-scheda" in rev.get(p0, ""), "il pezzo riscritto non è in revisions"
+    assert set(rev) == {p0, p1}, rev
+    # e rifare lo stesso ingest non tocca più niente
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, nome="due.zip", recupero=due)), str(db))
+    assert con.execute("SELECT count(*) FROM revisions").fetchone()[0] == 2
+
+
+def _dump_db(db: Path) -> dict:
+    """Il contenuto di un DB tabella per tabella, senza le date d'ingest."""
+    con = sqlite3.connect(db)
+    out = {}
+    for t in ("messages", "sightings", "skipped", "meta", "revisions",
+              "sessioni", "archi", "memorie"):
+        cols = [r[1] for r in con.execute(f"PRAGMA table_info({t})")
+                if r[1] not in ("ingest_date", "superseded_date")]
+        out[t] = sorted(con.execute(f"SELECT {', '.join(cols)} FROM {t}").fetchall(),
+                        key=repr)
+    con.close()
+    return out
+
+
+def test_ponte_workfiles_e_un_alias_di_recupero(tmp_path: Path) -> None:
+    """L'app usa il ponte `workfiles/_recupero-1777/` quando la SUA copia
+    dell'indexer non conosce ancora `recupero/`. Lo stesso contenuto dalle due
+    radici deve dare lo STESSO DB (a parte le date d'ingest): etichette, uuid,
+    testo, avvistamenti, tabelle, lapidi. E nessuna riga `workfile:`."""
+    membri = _membri_recupero()
+    ponte = {"workfiles/_recupero-1777/" + n[len("recupero/"):]: c for n, c in membri.items()}
+    db_r, db_p = tmp_path / "r.db", tmp_path / "p.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, nome="r.zip", recupero=membri)), str(db_r))
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, nome="p.zip", recupero=ponte)), str(db_p))
+    a, b = _dump_db(db_r), _dump_db(db_p)
+    for t in a:
+        assert a[t] == b[t], f"la tabella {t} differisce fra recupero/ e il ponte"
+    con = sqlite3.connect(db_p)
+    assert con.execute("SELECT count(*) FROM messages WHERE project LIKE 'workfile:%'"
+                       ).fetchone()[0] == 0, "il ponte è finito anche fra i workfiles"
+    assert con.execute("SELECT count(*) FROM archi").fetchone()[0] == 1
+    # e i due insieme nello stesso DB non raddoppiano
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, nome="r.zip", recupero=membri)), str(db_p))
+    assert _dump_db(db_p)["messages"] == a["messages"]
+    # un membro sbagliato sotto il ponte: la lapide cita il nome VERO nello zip
+    db_x = tmp_path / "x.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, nome="x.zip", recupero={
+        "workfiles/_recupero-1777/sessioni/rotta.md": "senza front-matter"})), str(db_x))
+    with sqlite3.connect(db_x) as c:
+        assert c.execute("SELECT reason FROM skipped WHERE detail LIKE"
+                         " 'workfiles/_recupero-1777/sessioni/rotta.md:%'").fetchall() == [
+            ("recupero-senza-front-matter",)]

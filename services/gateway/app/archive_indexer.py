@@ -101,6 +101,23 @@ class _Record(NamedTuple):
     riga: dict
 
 
+class _Potatura(NamedTuple):
+    """«Del membro `source` restano SOLO queste righe» (24/09/2026). Emesso in coda
+    alle righe di una scheda `recupero/`: `write_rows` toglie le righe che quel
+    membro aveva lasciato in un ingest precedente e che la versione nuova non ha
+    più — il pezzo 2 di una scheda che ora ne ha uno. Senza, restavano in
+    `messages` a fingersi correnti, con un padre e un avvistamento veri.
+
+    Si trovano dagli AVVISTAMENTI (`sightings.source = membro`), non ricostruendo
+    gli uuid: l'avvistamento è il registro di ciò che quel membro ha scritto.
+    Prudenza: si toglie solo una riga con la STESSA etichetta (`project`), e la
+    sua versione uscente va in `revisions` come per un REPLACE (D18) — togliere
+    non vuol dire dimenticare."""
+    source: str
+    project: str
+    tenere: tuple
+
+
 # ── tetti su input e decompressione (H39) ────────────────────────────────────
 #
 # LA LEZIONE, imparata a caro prezzo: **un limite su un input COMPRESSO non è un
@@ -476,8 +493,9 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
     sender/tools/thinking/attachments/parent_uuid) o a 10 (più `ts_source`): le
     prime vengono completate con stringhe vuote, così un estrattore di terze parti
     continua a funzionare. Nello stesso stream passano anche `_Skip` (→ `skipped`),
-    `_Sighting` (→ `sightings`) e `_Record` (→ `sessioni`/`archi`/`memorie`/`meta`):
-    nessuno dei tre conta nel numero ritornato, che resta quello delle righe-messaggio.
+    `_Sighting` (→ `sightings`), `_Record` (→ `sessioni`/`archi`/`memorie`/`meta`) e
+    `_Potatura` (toglie i pezzi che un membro non ha più, applicata in fondo): nessuno
+    dei quattro conta nel numero ritornato, che resta quello delle righe-messaggio.
     """
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -491,6 +509,7 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         skip_buf: list[tuple] = []
         sight_buf: list[tuple] = []
         rec_buf: dict[str, list[tuple]] = {}
+        potature: list[_Potatura] = []
         ingest_date = _now_iso()
         n_rev = 0          # revisioni conservate in questo ingest (D18)
 
@@ -591,6 +610,9 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
                 if len(sight_buf) >= batch:
                     flush_sightings()
                 continue
+            if isinstance(row, _Potatura):
+                potature.append(row)       # si applicano in fondo, a righe scritte
+                continue
             if isinstance(row, _Record):
                 tupla: tuple
                 if row.tabella == "meta":
@@ -617,6 +639,8 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         flush_skips()
         flush_sightings()
         flush_records()
+        for pot in potature:
+            _applica_potatura(conn, pot, ingest_date)
         # Voice-tagging: le righe appena scritte nascono con `voice=''`. Si classificano
         # QUI e non in `_ensure_v3` perché questa legge il `content` di ogni riga — è il
         # costo di un ingest, non quello di ogni apertura di DB. Idempotente: al secondo
@@ -634,6 +658,32 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         return n
     finally:
         conn.close()
+
+
+def _applica_potatura(conn: sqlite3.Connection, pot: _Potatura, ingest_date: str) -> int:
+    """Toglie le righe che il membro `pot.source` aveva scritto e che non sono più in
+    `pot.tenere`. Ritorna quante righe di `messages` ha tolto. L'FTS resta coerente
+    perché `write_rows` lo ricostruisce ('rebuild') dopo; gli avvistamenti di quelle
+    righe da QUEL membro se ne vanno con loro."""
+    tenere = set(pot.tenere)
+    vecchi = [u for (u,) in conn.execute(
+        "SELECT uuid FROM sightings WHERE source=?", (pot.source,)) if u not in tenere]
+    tolte = 0
+    for u in vecchi:
+        r = conn.execute("SELECT ts, content, sender, project, ts_source FROM messages"
+                         " WHERE uuid=?", (u,)).fetchone()
+        if r is not None:
+            if (r[3] or "") != pot.project:
+                continue    # un'altra etichetta: non è un pezzo di questa scheda, non si tocca
+            conn.execute(
+                "INSERT OR IGNORE INTO revisions(uuid, ts, content, sender, project,"
+                " ts_source, content_sha, superseded_date) VALUES (?,?,?,?,?,?,?,?)",
+                (u, r[0], r[1], r[2] or "", r[3] or "", r[4] or "messaggio",
+                 hashlib.sha1((r[1] or "").encode("utf-8")).hexdigest(), ingest_date))
+            conn.execute("DELETE FROM messages WHERE uuid=?", (u,))
+            tolte += 1
+        conn.execute("DELETE FROM sightings WHERE uuid=? AND source=?", (u, pot.source))
+    return tolte
 
 
 def _ensure_v2(conn: sqlite3.Connection) -> bool:
@@ -2498,6 +2548,11 @@ BUNDLE_FILE_INDICIZZATI = ("inventario/inventario-sessioni.tsv", "MANIFEST.md")
 # spariva `previsione_ingest`, il metro che l'app scrive apposta per l'ingest.
 BUNDLE_FILE_IN_META = ("MANIFEST.json",)
 BUNDLE_FILE_RIDONDANTI = ("inventario/inventario-sessioni.json",)
+# Le radici da cui si legge il contratto `recupero/`: la prima è la sua, la seconda il
+# PONTE di livello 0 (sotto `workfiles/`, già indicizzato), che l'app usa quando la sua
+# copia dell'indexer non conosce ancora `recupero`. Il ponte è un ALIAS: stessa lettura,
+# tabelle comprese, righe identiche (vedi `_normalizza_recupero`).
+BUNDLE_RADICI_RECUPERO = ("recupero/", "workfiles/_recupero-1777/")
 
 # ── il contratto `recupero/` (R1, 24/09/2026) ─────────────────────────────────
 # Specifica: CONTRATTO-RECUPERO.md dell'app che produce il bundle (fuori da questo
@@ -2557,18 +2612,73 @@ def _leggi_front_matter(testo: str) -> tuple[Union[dict, None], str, str, str]:
         "il front-matter si apre con '---' e non si chiude mai")
 
 
-def _iter_recupero_scheda(z: zipfile.ZipFile, info: zipfile.ZipInfo,
+_RE_TS_ISO_Z = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?Z$")
+
+
+def _ts_dopo(ts: str, ms: int) -> str:
+    """`ts` + `ms` millisecondi, nello stesso formato ISO con `Z` e i millesimi.
+
+    Serve a mettere la scheda di sessione DOPO l'ultimo messaggio: `get_conversation`
+    ordina per (ts, uuid), e a ts uguale deciderebbe lo sha1 dell'uuid — la scheda
+    usciva prima o dopo l'ultima riga a caso. Tre casi:
+      · con la frazione (`…25.834Z`, la forma di Claude Code): si somma, e si
+        riscrive con 3 cifre (6 se la fonte ne aveva più di 3);
+      · SENZA frazione (`…25Z`): `…25.001Z` ordinerebbe PRIMA di `…25Z` come
+        stringa ('.' < 'Z'), cioè il contrario di ciò che serve — si parte dal
+        secondo dopo (`…26.000Z` per il primo pezzo, `…26.001Z` per il secondo);
+      · formato non riconosciuto (o vuoto): resta com'è. Non si inventa un tempo
+        da una stringa che non si capisce; l'ordine in quel caso non è garantito.
+    """
+    import datetime
+    m = _RE_TS_ISO_Z.match(ts or "")
+    if not m:
+        return ts
+    base = datetime.datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S")
+    frac = m.group(2)
+    if frac is None:
+        t = base + datetime.timedelta(seconds=1, milliseconds=ms - 1)
+        cifre = 3
+    else:
+        t = base + datetime.timedelta(microseconds=int(frac[:6].ljust(6, "0")),
+                                      milliseconds=ms)
+        cifre = 3 if len(frac) <= 3 else 6
+    out = t.strftime("%Y-%m-%dT%H:%M:%S.%f")[:20 + cifre] + "Z"
+    return out if out > ts else ts
+
+
+def _normalizza_recupero(name: str) -> Union[str, None]:
+    """Il nome di un membro del contratto nella forma CANONICA `recupero/…`, o None.
+
+    `workfiles/_recupero-1777/` è il PONTE (livello 0): l'app lo sceglie quando la
+    SUA copia dell'indexer non dichiara ancora `recupero` — cioè proprio quando è
+    più vecchia di quella che riceverà il bundle. Senza alias quei bundle
+    perdevano le tabelle. Le righe devono essere le stesse da una radice o
+    dall'altra: uuid, testo e avvistamenti usano la forma canonica, così lo stesso
+    contenuto arrivato dalle due strade non raddoppia. La radice usata resta
+    scritta nel manifest (`meta.bundle_recupero.radice`)."""
+    for radice in BUNDLE_RADICI_RECUPERO:
+        if name.startswith(radice):
+            return "recupero/" + name[len(radice):]
+    return None
+
+
+def _iter_recupero_scheda(z: zipfile.ZipFile, info: zipfile.ZipInfo, name: str,
                           budget: _Budget) -> Iterator:
     """Una scheda `recupero/{sessioni,stirpi,memorie}/*.md` → righe di `messages`.
+    `name` è la forma canonica `recupero/…` (vedi `_normalizza_recupero`); le
+    lapidi citano il nome VERO nello zip, che è quello che chi le legge cerca.
 
-    · sessione: `sender='recupero'`, etichetta `recupero:sessioni`, ts = `last_ts`,
+    · sessione: `sender='recupero'`, etichetta `recupero:sessioni`,
       uuid = `_uid("recupero", membro, idx)`. Il chunk 0 ha **`parent_uuid` =
       `last_uuid`**: la scheda diventa una FOGLIA della conversazione, e il cammino
       `parent_uuid` di `get_conversation` la trova senza toccare archive-mcp; i
-      chunk successivi pendono dal precedente.
-    · stirpe: come la sessione, ma il chunk 0 non ha padre (non c'è UNA
-      conversazione a cui appartiene). Il front-matter del contratto non porta un
-      ts: si usa `last_ts` se c'è, altrimenti la data del membro nello zip.
+      chunk successivi pendono dal precedente. **La scheda viene dopo l'ultimo
+      messaggio: 1 ms in più, perché get_conversation ordina per (ts, uuid)** — a
+      ts uguale l'ordine lo deciderebbe lo sha1. Il chunk k ha `last_ts` + (k+1) ms.
+    · stirpe: come la sessione (stessi ts a passi di 1 ms), ma il chunk 0 non ha
+      padre (non c'è UNA conversazione a cui appartiene). Il front-matter del
+      contratto non porta un ts: si usa `last_ts` se c'è, altrimenti la data del
+      membro nello zip.
     · memoria: `sender='memory'` (lo stesso regime delle memorie claude.ai),
       etichetta `recupero:memorie`, UNA riga con uuid stabile sul `path` d'origine
       → una memoria cambiata fra due bundle lascia la versione vecchia in
@@ -2578,38 +2688,38 @@ def _iter_recupero_scheda(z: zipfile.ZipFile, info: zipfile.ZipInfo,
     un bundle e l'altro, e la versione uscente va in `revisions`), non un evento
     detto una volta. Il testo indicizzato è il corpo preceduto da `[<membro>]`,
     come i documenti del bundle: il membro porta il sessionId, che così si trova
-    con FTS anche quando il corpo non lo ripete. Ogni riga lascia un avvistamento.
+    con FTS anche quando il corpo non lo ripete. Ogni riga lascia un avvistamento,
+    e in coda una `_Potatura`: se la versione precedente dello stesso membro aveva
+    PIÙ pezzi, quelli in più non restano orfani a fingersi correnti.
     Chunk da 8000 caratteri: una scheda di sessione (~4 KB per contratto, 4,5 KB
-    misurati su una vera il 24/09) resta in una riga sola. Non è estetica: i pezzi
-    di una scheda hanno lo STESSO ts, e `get_conversation` ordina per (ts, uuid) —
-    due pezzi uscirebbero in un ordine deciso dallo sha1, non dal testo."""
-    name = info.filename
+    misurati su una vera il 24/09) resta in una riga sola."""
+    nome_zip = info.filename
     tipo_atteso, project, sender, chiave = _RECUPERO_SCHEDE[name.split("/")[1]]
     ts_zip = _zipinfo_ts(info)
     with z.open(info) as f:
-        testo = _read_capped(f, name, budget).decode("utf-8", errors="replace")
+        testo = _read_capped(f, nome_zip, budget).decode("utf-8", errors="replace")
     campi, corpo, motivo, perche = _leggi_front_matter(testo)
     if campi is None:
-        yield _Skip("bundle-recupero", motivo, f"{name}: {perche} (contratto "
+        yield _Skip("bundle-recupero", motivo, f"{nome_zip}: {perche} (contratto "
                     f"{RECUPERO_CONTRATTO}: '---', righe 'chiave: valore', '---', corpo)",
                     ts_zip)
         return
     contratto = campi.get("contratto", "")
     if contratto != RECUPERO_CONTRATTO:
         yield _Skip("bundle-recupero", "recupero-contratto-ignoto",
-                    f"{name}: contratto {contratto or '(assente)'!r}, questo indexer "
+                    f"{nome_zip}: contratto {contratto or '(assente)'!r}, questo indexer "
                     f"legge solo {RECUPERO_CONTRATTO} — la scheda NON entra. Se l'app è "
                     f"passata a una versione nuova del contratto, va aggiornato l'indexer "
                     f"(archive_indexer.py, RECUPERO_CONTRATTO)", ts_zip)
         return
     if campi.get("tipo", "") != tipo_atteso:
         yield _Skip("bundle-recupero", "recupero-fuori-contratto",
-                    f"{name}: tipo {campi.get('tipo', '')!r} dentro "
+                    f"{nome_zip}: tipo {campi.get('tipo', '')!r} dentro "
                     f"recupero/{name.split('/')[1]}/, atteso {tipo_atteso!r}", ts_zip)
         return
     if not campi.get(chiave, ""):
         yield _Skip("bundle-recupero", "recupero-fuori-contratto",
-                    f"{name}: il front-matter di una scheda '{tipo_atteso}' non porta "
+                    f"{nome_zip}: il front-matter di una scheda '{tipo_atteso}' non porta "
                     f"'{chiave}' (obbligatorio: è ciò che la identifica)", ts_zip)
         return
     testo_idx = f"[{name}]\n{corpo.strip()}"
@@ -2618,21 +2728,27 @@ def _iter_recupero_scheda(z: zipfile.ZipFile, info: zipfile.ZipInfo,
         yield (uuid, project, campi.get("mtime") or ts_zip, testo_idx, sender,
                "", "", "", "", "data-export")
         yield _Sighting(uuid, name)
+        yield _Potatura(name, project, (uuid,))
         return
     ts = campi.get("last_ts") or ts_zip
     padre = campi.get("last_uuid", "") if tipo_atteso == "sessione" else ""
+    tenuti: list[str] = []
     for idx, (_u, _p, _t, pezzo) in enumerate(
             _chunk_rows(testo_idx, project, ts, name, chunk_chars=8000)):
         uuid = _uid("recupero", name, str(idx))
-        yield (uuid, project, ts, pezzo, sender, "", "", "", padre, "data-export")
+        yield (uuid, project, _ts_dopo(ts, idx + 1), pezzo, sender, "", "", "", padre,
+               "data-export")
         yield _Sighting(uuid, name)
+        tenuti.append(uuid)
         padre = uuid
+    yield _Potatura(name, project, tuple(tenuti))
 
 
-def _iter_recupero_tsv(z: zipfile.ZipFile, info: zipfile.ZipInfo,
+def _iter_recupero_tsv(z: zipfile.ZipFile, info: zipfile.ZipInfo, name: str,
                        budget: _Budget) -> Iterator:
     """Un `.tsv` di `recupero/` → `_Record` per la sua tabella, MAI righe di
-    `messages`: sono relazioni da interrogare, non testo da cercare.
+    `messages`: sono relazioni da interrogare, non testo da cercare. `name` è la
+    forma canonica; le lapidi citano il nome vero nello zip.
 
     Prima riga = intestazione, campi separati da TAB. Le colonne si prendono per
     NOME: una colonna in più (in coda, contratto «non cambia versione») si ignora;
@@ -2640,12 +2756,12 @@ def _iter_recupero_tsv(z: zipfile.ZipFile, info: zipfile.ZipInfo,
     intero lascia una lapide invece di riempire la tabella a metà. Una riga col
     numero di campi sbagliato (un TAB dentro un valore) o con la chiave vuota
     lascia la SUA lapide, col numero di riga, e le altre entrano."""
-    name = info.filename
+    nome_zip = info.filename
     tabella, chiavi = _RECUPERO_TSV[name]
     colonne = _TABELLE_RECORD[tabella]
     ts_zip = _zipinfo_ts(info)
     with z.open(info) as f:
-        testo = _read_capped(f, name, budget).decode("utf-8", errors="replace")
+        testo = _read_capped(f, nome_zip, budget).decode("utf-8", errors="replace")
     righe = [r.rstrip("\r") for r in testo.lstrip("﻿").split("\n")]
     while righe and not righe[-1].strip():
         righe.pop()
@@ -2653,7 +2769,7 @@ def _iter_recupero_tsv(z: zipfile.ZipFile, info: zipfile.ZipInfo,
     mancanti = [c for c in colonne if c not in intest]
     if mancanti:
         yield _Skip("bundle-recupero", "recupero-tsv-fuori-contratto",
-                    f"{name}: l'intestazione non ha {', '.join(mancanti)} (contratto "
+                    f"{nome_zip}: l'intestazione non ha {', '.join(mancanti)} (contratto "
                     f"{RECUPERO_CONTRATTO}: {' '.join(colonne)}) — nessuna riga di "
                     f"`{tabella}` entra da questo file", ts_zip)
         return
@@ -2664,7 +2780,7 @@ def _iter_recupero_tsv(z: zipfile.ZipFile, info: zipfile.ZipInfo,
         campi = riga.split("\t")
         if len(campi) != len(intest):
             yield _Skip("bundle-recupero", "recupero-tsv-fuori-contratto",
-                        f"{name} riga {n_riga}: {len(campi)} campi, l'intestazione ne "
+                        f"{nome_zip} riga {n_riga}: {len(campi)} campi, l'intestazione ne "
                         f"ha {len(intest)} (un TAB dentro un valore?) — riga saltata",
                         ts_zip)
             continue
@@ -2672,26 +2788,28 @@ def _iter_recupero_tsv(z: zipfile.ZipFile, info: zipfile.ZipInfo,
         vuote = [c for c in chiavi if not valori[c].strip()]
         if vuote:
             yield _Skip("bundle-recupero", "recupero-tsv-fuori-contratto",
-                        f"{name} riga {n_riga}: chiave vuota ({', '.join(vuote)}) — "
+                        f"{nome_zip} riga {n_riga}: chiave vuota ({', '.join(vuote)}) — "
                         f"riga saltata", ts_zip)
             continue
         yield _Record(tabella, valori)
 
 
-def _iter_recupero_member(z: zipfile.ZipFile, name: str, budget: _Budget) -> Iterator:
-    """Dispatch dentro `recupero/`: le schede, i tre .tsv, e per tutto il resto la
+def _iter_recupero_member(z: zipfile.ZipFile, nome_zip: str, name: str,
+                          budget: _Budget) -> Iterator:
+    """Dispatch dentro `recupero/` (o il ponte): `nome_zip` è il nome vero, `name`
+    la forma canonica `recupero/…`. Le schede, i tre .tsv, e per tutto il resto la
     lapide `membro-sconosciuto` — la stessa di un prefisso che l'indexer non
     conosce, così un `count(*)` su quel motivo dice anche qui se il bundle è
     cresciuto più dell'indexer."""
-    info = z.getinfo(name)
+    info = z.getinfo(nome_zip)
     parti = name.split("/")
     if name in _RECUPERO_TSV:
-        yield from _iter_recupero_tsv(z, info, budget)
+        yield from _iter_recupero_tsv(z, info, name, budget)
     elif (len(parti) == 3 and parti[1] in _RECUPERO_SCHEDE
           and Path(name).suffix.lower() == ".md"):
-        yield from _iter_recupero_scheda(z, info, budget)
+        yield from _iter_recupero_scheda(z, info, name, budget)
     else:
-        yield _Skip("bundle", "membro-sconosciuto", name, "")
+        yield _Skip("bundle", "membro-sconosciuto", nome_zip, "")
 
 
 def _iter_manifest_json(z: zipfile.ZipFile, name: str, budget: _Budget) -> Iterator:
@@ -2726,27 +2844,24 @@ def _iter_manifest_json(z: zipfile.ZipFile, name: str, budget: _Budget) -> Itera
                 f"indicizza, MANIFEST.md ne porta la prosa", "")
 
 
-def _motivo_inventario_json(ha_recupero: bool, ha_ponte: bool) -> tuple[str, str]:
+def _motivo_inventario_json(ha_recupero: bool) -> tuple[str, str]:
     """Il motivo della lapide di `inventario-sessioni.json`, che fino al 24/09/2026
     diceva «ridondante» SENZA CONDIZIONI — ed era falso: stirpi, archi e memorie
     stavano solo lì, e con lo zip cancellato dopo l'ingest sparivano sotto un
     verdetto che diceva «niente di perso». Ora il motivo dipende da cosa il bundle
-    porta davvero."""
+    porta davvero. Le due radici del contratto contano allo stesso modo (il ponte
+    è un alias), e il testo non nomina quale: la lapide è la stessa per lo stesso
+    contenuto."""
     if ha_recupero:
         return ("non-indicizzato-ridondante",
-                "stirpi, archi e memorie di questo bundle entrano da recupero/ "
-                f"(contratto {RECUPERO_CONTRATTO})")
-    if ha_ponte:
-        return ("non-indicizzato-solo-ponte",
-                "stirpi e memorie di questo bundle sono entrate SOLO come testo dal ponte "
-                "workfiles/_recupero-1777/: le tabelle sessioni/archi/memorie NON sono "
-                "popolate da questo bundle. Cura: rifare il bundle con un'app che legge "
-                "'recupero' in BUNDLE_PREFISSI_INDICIZZATI")
+                "stirpi, archi e memorie di questo bundle entrano dalle schede e dai .tsv "
+                f"del contratto {RECUPERO_CONTRATTO} (recupero/ o il ponte "
+                "workfiles/_recupero-1777/)")
     return ("non-indicizzato-senza-recupero",
-            "il bundle non ha recupero/: stirpi, archi e memorie che porta SOLO in questo "
-            "json NON entrano nell'archivio (e il gateway cancella lo zip dopo l'ingest). "
-            f"Cura: rifare il bundle con un'app che produce recupero/ (contratto "
-            f"{RECUPERO_CONTRATTO})")
+            "il bundle non ha recupero/ (né il ponte workfiles/_recupero-1777/): stirpi, "
+            "archi e memorie che porta SOLO in questo json NON entrano nell'archivio (e il "
+            "gateway cancella lo zip dopo l'ingest). Cura: rifare il bundle con un'app che "
+            f"produce recupero/ (contratto {RECUPERO_CONTRATTO})")
 
 
 def _iter_subagent_member(z: zipfile.ZipFile, name: str) -> Iterator:
@@ -2790,16 +2905,18 @@ def _iter_subagent_member(z: zipfile.ZipFile, name: str) -> Iterator:
 def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
     with zipfile.ZipFile(zip_path) as z:
         names = [n for n in z.namelist() if not n.endswith("/")]
-        ha_recupero = any(n.startswith("recupero/") for n in names)
-        ha_ponte = any(n.startswith("workfiles/_recupero-1777/") for n in names)
+        ha_recupero = any(_normalizza_recupero(n) is not None for n in names)
         for name in names:
             ext = Path(name).suffix.lower()
             top = name.split("/", 1)[0]
-            if top == "recupero":
-                # contratto `recupero/` R1 (24/09/2026): schede → messages,
-                # .tsv → tabelle sessioni/archi/memorie. Un membro fuori contratto
-                # lascia una lapide che dice cosa gli manca.
-                yield from _iter_recupero_member(z, name, budget)
+            canonico = _normalizza_recupero(name)
+            if canonico is not None:
+                # contratto `recupero/` R1 (24/09/2026), dalla sua radice o dal ponte
+                # workfiles/_recupero-1777/ (PRIMA del ramo workfiles, che altrimenti
+                # lo leggerebbe come testo): schede → messages, .tsv → tabelle
+                # sessioni/archi/memorie. Un membro fuori contratto lascia una lapide
+                # che dice cosa gli manca.
+                yield from _iter_recupero_member(z, name, canonico, budget)
             elif top == "sessions" and ext == ".jsonl":
                 yield from _iter_cc_member(z, name)
             elif top == "subagents" and ext == ".jsonl":
@@ -2898,7 +3015,7 @@ def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
                 # inventario-sessioni.json: non si indicizza (la parte leggibile è
                 # il .tsv), e il motivo dice se ciò che porta di suo è entrato da
                 # un'altra parte — dichiarato, non sparito.
-                motivo, perche = _motivo_inventario_json(ha_recupero, ha_ponte)
+                motivo, perche = _motivo_inventario_json(ha_recupero)
                 yield _Skip("bundle", motivo, f"{name}: {perche}", "")
             else:
                 # Un membro che NESSUN ramo conosce: cartella nuova del bundle

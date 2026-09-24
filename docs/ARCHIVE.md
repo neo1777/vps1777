@@ -85,7 +85,7 @@ versionato (**R1**) scritto dalla parte che li produce:
 
 | membro | cosa diventa |
 |---|---|
-| `recupero/sessioni/<sessionId>.md` | righe di `messages`: `project='recupero:sessioni'`, `sender='recupero'`, `ts` = ultimo messaggio della sessione. Il primo pezzo della scheda ha **`parent_uuid` = l'ultimo messaggio** della conversazione: la scheda è una **foglia del thread**, e `get_conversation` / `get_context` la trovano camminando `parent_uuid` come ogni altra riga |
+| `recupero/sessioni/<sessionId>.md` | righe di `messages`: `project='recupero:sessioni'`, `sender='recupero'`. Il primo pezzo della scheda ha **`parent_uuid` = l'ultimo messaggio** della conversazione: la scheda è una **foglia del thread**, e `get_conversation` / `get_context` la trovano camminando `parent_uuid` come ogni altra riga. Il suo `ts` è l'ultimo della sessione **più 1 ms** (e +1 ms per ogni pezzo successivo): `get_conversation` ordina per `(ts, uuid)`, e a ts uguale la scheda sarebbe uscita prima o dopo l'ultimo messaggio a caso |
 | `recupero/stirpi/<id>.md` | righe di `messages`: `project='recupero:stirpi'`, senza padre (una stirpe non appartiene a una conversazione sola); il corpo porta i sessionId interi, cercabili |
 | `recupero/memorie/<k10>__<nome>.md` | **una** riga di `messages`: `project='recupero:memorie'`, `sender='memory'`, uuid stabile sul **percorso d'origine** della memoria, `ts` = sua data di modifica. Una memoria cambiata fra due bundle è la stessa riga con testo nuovo: la versione vecchia resta in `revisions` |
 | `recupero/sessioni.tsv` · `archi.tsv` · `memorie.tsv` | **non** diventano testo: riempiono le tabelle `sessioni` (chiave `sessionId`), `archi` (chiave `da, a, relazione, via`) e `memorie` (chiave `path`) |
@@ -111,10 +111,21 @@ la chiave vuota: salta solo quella riga). Un campo in più nel front-matter o un
 colonna in più in coda a un `.tsv` si ignorano: il contratto dice che non cambiano
 versione.
 
+**Il ponte `workfiles/_recupero-1777/` è un alias di `recupero/`.** L'app lo usa
+quando la *sua* copia dell'indexer non conosce ancora `recupero/` — cioè quando è
+più vecchia di quella che riceve il bundle. Si legge allo stesso modo, tabelle
+comprese, e le righe escono **identiche**: etichette `recupero:*`, uuid, testo e
+avvistamenti usano la forma canonica `recupero/…`, così lo stesso contenuto
+arrivato dalle due strade non raddoppia (la radice usata resta scritta in
+`meta.bundle_recupero`). Le lapidi citano invece il nome vero nello zip.
+
+**Una scheda riscritta con meno pezzi non lascia orfani.** Se la versione nuova di
+una scheda (o di una memoria) ha meno pezzi della precedente, le righe in più di
+quello stesso membro escono da `messages`, dall'FTS e dagli avvistamenti; la loro
+ultima versione resta in `revisions`, come per ogni riga riscritta.
+
 La lapide dell'inventario json dice ora **se i suoi dati sono entrati**:
-`non-indicizzato-ridondante` se il bundle ha `recupero/`,
-`non-indicizzato-solo-ponte` se ha solo il ponte di livello 0
-(`workfiles/_recupero-1777/`, entrato come testo: tabelle vuote),
+`non-indicizzato-ridondante` se il bundle ha `recupero/` (o il ponte),
 `non-indicizzato-senza-recupero` se non ha nessuno dei due — e allora stirpi, archi
 e memorie di quel bundle **non** sono nell'archivio.
 
