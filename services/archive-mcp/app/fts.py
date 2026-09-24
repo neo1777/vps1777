@@ -542,12 +542,43 @@ def candidati_sessione_conn(conn: sqlite3.Connection, chiave: str) -> list[str]:
 
 def ultimo_ts_sessione_conn(conn: sqlite3.Connection, sid: str) -> str:
     """`last_ts` della sessione in questo DB ('' se non ha una riga in `sessioni`):
-    serve a scegliere, fra più archivi che la conoscono, quello più aggiornato."""
+    serve a scegliere, fra più archivi che la conoscono, quello più aggiornato. Con
+    più filoni vale il più recente fra i loro."""
     try:
-        r = conn.execute("SELECT last_ts FROM sessioni WHERE sessionId=?", (sid,)).fetchone()
+        r = conn.execute("SELECT max(last_ts) FROM sessioni WHERE sessionId=?",
+                         (sid,)).fetchone()
     except sqlite3.OperationalError:
         return ""
     return (r[0] or "") if r else ""
+
+
+# Un FILONE è un file consegnato con lo stesso sessionId di un altro: la sessione in
+# collisione esce dal bundle come `sessions/<sid>.jsonl` più `sessions/<sid>__fN.jsonl`,
+# e dal 25/09/2026 la tabella `sessioni` ne tiene una riga ciascuno (chiave
+# `(sessionId, file)`). Il PRINCIPALE è il file senza `__fN`; se manca, il primo per N.
+_FILONE_RE = re.compile(r"__f(\d+)\.jsonl$")
+
+
+def _ordine_filone(riga: dict[str, Any]) -> tuple[int, int, str]:
+    """Chiave d'ordine dei filoni: prima il file senza `__fN`, poi per N, poi per nome."""
+    f = str(riga.get("file") or "")
+    m = _FILONE_RE.search(f)
+    return (1, int(m.group(1)), f) if m else (0, 0, f)
+
+
+def _filoni(righe: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Le righe di UNA sessione in ordine di filone: la prima è il principale."""
+    return sorted(righe, key=_ordine_filone)
+
+
+def _membro_scheda(sid: str, riga: dict[str, Any] | None) -> str:
+    """Il membro della scheda di un filone: stesso nome del file della conversazione
+    (`sessions/<sid>__f2.jsonl` → `recupero/sessioni/<sid>__f2.md`, contratto R1).
+    Senza riga, o con un `file` che non ha quella forma, la scheda è `<sid>.md`."""
+    f = str((riga or {}).get("file") or "")
+    if f.startswith("sessions/") and f.endswith(".jsonl") and "/" not in f[len("sessions/"):]:
+        return "recupero/sessioni/" + f[len("sessions/"):-len(".jsonl")] + ".md"
+    return f"recupero/sessioni/{sid}.md"
 
 
 def avvistamenti_sessione_conn(conn: sqlite3.Connection, chiave: str) -> int:
@@ -581,9 +612,12 @@ def sessione_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
                   max_chars: int = 0) -> dict[str, Any]:
     """Tutto ciò che QUESTO DB sa della sessione `sid` (id intero, già risolto).
 
-    - `sessione`: la riga di `sessioni` (None se la sessione è nota solo dagli archi);
-    - `scheda`: il testo della scheda `recupero:sessioni` (stato, ultime parole,
-      fili aperti, commit…), ricomposto dai pezzi;
+    - `sessione`: la riga di `sessioni` del filone PRINCIPALE (il file senza
+      `__fN`, o il primo) — None se la sessione è nota solo dagli archi;
+    - `filoni`: TUTTE le righe di `sessioni` per quel sessionId, il principale per
+      primo (una sola per una sessione senza collisioni, [] senza riga);
+    - `scheda`: il testo della scheda `recupero:sessioni` del principale (stato,
+      ultime parole, fili aperti, commit…), ricomposto dai pezzi;
     - `conversazione`: le righe avvistate in `sessions/<sid>…` (tutti i filoni),
       per mittente, con primo e ultimo ts e i file d'origine;
     - `archi`: gli archi che la toccano (da o a), fino a `limit`;
@@ -592,14 +626,21 @@ def sessione_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
     """
     note: list[str] = []
     riga = None
-    r = _righe_dict(conn.execute("SELECT * FROM sessioni WHERE sessionId=?", (sid,)))
-    if r:
-        riga = {k: v for k, v in r[0].items() if k != "ingest_date"}
-        riga["ingest_date"] = r[0].get("ingest_date")
+    filoni = []
+    for r in _filoni(_righe_dict(conn.execute("SELECT * FROM sessioni WHERE sessionId=?",
+                                              (sid,)))):
+        f = {k: v for k, v in r.items() if k != "ingest_date"}
+        f["ingest_date"] = r.get("ingest_date")
+        filoni.append(f)
+    if filoni:
+        riga = filoni[0]
+        if len(filoni) > 1:
+            note.append(f"{len(filoni)} filoni (file distinti con lo stesso sessionId): "
+                        f"`sessione` è il principale ({riga.get('file')}), tutti in `filoni`")
     else:
         note.append("nessuna riga in `sessioni`: la sessione è nota solo come estremo "
                     "di un arco (non è stata consegnata in un bundle di questo DB)")
-    scheda = _scheda_da_avvistamenti(conn, f"recupero/sessioni/{sid}.md")
+    scheda = _scheda_da_avvistamenti(conn, _membro_scheda(sid, riga))
     if scheda is None:
         note.append("nessuna scheda `recupero:sessioni` per questa sessione in questo DB")
     pref = f"sessions/{sid}"
@@ -643,7 +684,8 @@ def sessione_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
         if scheda_stirpe is None:
             note.append(f"la stirpe {sid_stirpe} è dichiarata ma la sua scheda non è in "
                         f"questo DB (la chiusura sugli archi la dà get_stirpe)")
-    return {"sessionId": sid, "sessione": riga, "scheda": _tronca_testo(scheda, max_chars),
+    return {"sessionId": sid, "sessione": riga, "filoni": filoni,
+            "scheda": _tronca_testo(scheda, max_chars),
             "conversazione": conversazione, "archi": archi, "archi_totali": archi_tot,
             "stirpe": stirpe, "note": note}
 
@@ -657,6 +699,8 @@ def stirpe_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
     verso (da↔a), a partire da `sid`. Ogni membro porta i suoi dati da `sessioni`;
     un membro SENZA riga in `sessioni` resta nella stirpe e lo dice (`in_sessioni:
     false`, e l'elenco `senza_riga`) — sparire sarebbe peggio che essere incompleto.
+    Un membro con più filoni porta i dati del principale e tutte le righe in
+    `filoni` ([] per chi non ha riga).
     Oltre `limit` membri la visita si ferma e lo dichiara."""
     note: list[str] = []
     visti: list[str] = [sid]
@@ -688,16 +732,22 @@ def stirpe_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
         archi = {k: v for k, v in archi.items() if v["da"] in insieme and v["a"] in insieme}
         note.append(f"stirpe troncata a {len(insieme)} membri (alza `limit`)")
     seg = ",".join("?" * len(visti))
-    dati = {r["sessionId"]: r for r in _righe_dict(conn.execute(
-        "SELECT sessionId, titolo, cwd, first_ts, last_ts, last_uuid, file, stato, "
-        f"stato_fonte, stirpe, stirpe_pos, n_commit, n_fili FROM sessioni "
-        f"WHERE sessionId IN ({seg})", tuple(visti)))}
+    per_sid: dict[str, list[dict[str, Any]]] = {}
+    for r in _righe_dict(conn.execute(
+            "SELECT sessionId, titolo, cwd, first_ts, last_ts, last_uuid, file, stato, "
+            f"stato_fonte, stirpe, stirpe_pos, n_commit, n_fili FROM sessioni "
+            f"WHERE sessionId IN ({seg})", tuple(visti))):
+        per_sid.setdefault(r["sessionId"], []).append(r)
+    # un membro con più filoni: i suoi dati sono quelli del PRINCIPALE, e `filoni`
+    # li porta tutti (come in get_session) — prima ne restava uno a caso
+    filoni_di = {k: _filoni(v) for k, v in per_sid.items()}
+    dati = {k: v[0] for k, v in filoni_di.items()}
     membri = []
     for m in visti:
         if m in dati:
-            membri.append({**dati[m], "in_sessioni": True})
+            membri.append({**dati[m], "in_sessioni": True, "filoni": filoni_di[m]})
         else:
-            membri.append({"sessionId": m, "in_sessioni": False})
+            membri.append({"sessionId": m, "in_sessioni": False, "filoni": []})
     membri.sort(key=lambda d: (not d["in_sessioni"], d.get("first_ts") or "", d["sessionId"]))
     senza_riga = [m["sessionId"] for m in membri if not m["in_sessioni"]]
     if senza_riga:
@@ -708,7 +758,8 @@ def stirpe_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
                                  (sid, sid)).fetchone()[0])
         note.append("nessun arco con chiusura=1: la sessione è sola nella sua stirpe"
                     + (f" ({altri} archi senza chiusura: vedi get_session)" if altri else ""))
-    dichiarate = sorted({str(d["stirpe"]) for d in dati.values() if d.get("stirpe")})
+    dichiarate = sorted({str(d["stirpe"]) for righe in filoni_di.values() for d in righe
+                         if d.get("stirpe")})
     schede = {s: _tronca_testo(_scheda_da_avvistamenti(conn, f"recupero/stirpi/{s}.md"),
                                max_chars) for s in dichiarate}
     if len(dichiarate) > 1:

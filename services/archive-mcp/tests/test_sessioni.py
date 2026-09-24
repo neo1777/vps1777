@@ -55,9 +55,12 @@ def _riga_sessione(sid: str, first: str, last: str, last_uuid: str, pos: str,
             f"sessions/{sid}.jsonl", "turno-chiuso", "transcript", stirpe, pos, "1", "0")
 
 
-def _bundle(percorso: Path, *, last_ts_a: str = "2026-09-10T10:05:00.000Z") -> Path:
+def _bundle(percorso: Path, *, last_ts_a: str = "2026-09-10T10:05:00.000Z",
+            filone_a: bool = False) -> Path:
     """Un bundle con la conversazione di A, le schede di A, B, E e della stirpe, e i
-    tre .tsv (archi A→B, B→C con chiusura=1, A→D senza)."""
+    tre .tsv (archi A→B, B→C con chiusura=1, A→D senza). Con `filone_a` A ha anche
+    un secondo FILONE (`sessions/<A>__f2.jsonl`, la sua scheda e la sua riga, messa
+    PRIMA di quella del principale nel .tsv)."""
     msg = [
         {"type": "user", "uuid": "a-u1", "timestamp": "2026-09-10T10:00:00.000Z",
          "sessionId": A, "cwd": "/percorso/sintetico/progetto",
@@ -97,6 +100,20 @@ def _bundle(percorso: Path, *, last_ts_a: str = "2026-09-10T10:05:00.000Z") -> P
             (B, C, "continua", "clear", "forte", "p2", "app", "0.8", "1", "x"),
             (A, D, "cita", "testo", "debole", "p3", "app", "0.1", "0", "x")),
     }
+    if filone_a:
+        f2 = {"type": "user", "uuid": "a2-u1", "timestamp": "2026-09-13T10:00:00.000Z",
+              "sessionId": A, "cwd": "/percorso/sintetico/altro",
+              "message": {"role": "user", "content": "domanda del secondo filone"}}
+        membri[f"sessions/{A}__f2.jsonl"] = json.dumps(f2)
+        membri[f"recupero/sessioni/{A}__f2.md"] = _scheda({
+            "contratto": "R1", "tipo": "sessione", "sessionId": A,
+            "last_ts": "2026-09-13T10:00:00.000Z", "last_uuid": "a2-u1",
+        }, "# titolo A filone 2\n\nsegno-scheda-A-f2\n")
+        riga_f2 = (A, "titolo del filone 2", "/percorso/sintetico/altro",
+                   "2026-09-13T10:00:00.000Z", "2026-09-13T10:00:00.000Z", "a2-u1",
+                   f"sessions/{A}__f2.jsonl", "turno-chiuso", "transcript", "", "", "0", "0")
+        righe = membri["recupero/sessioni.tsv"].split("\n")
+        membri["recupero/sessioni.tsv"] = "\n".join([righe[0], "\t".join(riga_f2), *righe[1:]])
     zp = percorso.with_suffix(".zip")
     with zipfile.ZipFile(zp, "w") as z:
         for n, c in membri.items():   # data fissa: il DB non dipende dall'ora del test
@@ -157,6 +174,56 @@ def test_sessione_porta_riga_scheda_conversazione_archi_stirpe(conn) -> None:
     assert s["archi_totali"] == 2
     assert s["stirpe"]["id"] == S and A in s["stirpe"]["scheda"]
     assert s["note"] == [], s["note"]
+    assert s["filoni"] == [s["sessione"]], "una sessione senza collisioni ha un filone"
+
+
+# ── filoni: più file con lo stesso sessionId (25/09/2026) ─────────────────────
+
+def test_sessione_con_due_filoni_da_il_principale_e_li_elenca(tmp_path) -> None:
+    """La riga del principale (il file senza `__fN`) resta in `sessione`, con la SUA
+    scheda; `filoni` le porta tutte, il principale per primo. Prima la tabella ne
+    teneva una e `sessione` era quella che l'ingest aveva scritto per ultima."""
+    c = sqlite3.connect(_bundle(tmp_path / "filoni.db", filone_a=True))
+    try:
+        s = fts.sessione_conn(c, A)
+    finally:
+        c.close()
+    assert s["sessione"]["file"] == f"sessions/{A}.jsonl"
+    assert s["sessione"]["titolo"] == f"titolo {A[:8]}"
+    assert [f["file"] for f in s["filoni"]] == [f"sessions/{A}.jsonl",
+                                                f"sessions/{A}__f2.jsonl"]
+    assert s["filoni"][0] == s["sessione"]
+    assert s["filoni"][1]["last_uuid"] == "a2-u1"
+    assert "segno-scheda-A" in s["scheda"] and "segno-scheda-A-f2" not in s["scheda"]
+    assert s["conversazione"]["fonti"] == [f"sessions/{A}.jsonl", f"sessions/{A}__f2.jsonl"]
+    assert any("2 filoni" in n for n in s["note"]), s["note"]
+    # la forma dei campi esistenti non cambia: `sessione` è UNA riga, non una lista
+    assert isinstance(s["sessione"], dict)
+
+
+def test_stirpe_membro_con_due_filoni(tmp_path) -> None:
+    c = sqlite3.connect(_bundle(tmp_path / "filoni.db", filone_a=True))
+    try:
+        st = fts.stirpe_conn(c, B)
+        ultimo = fts.ultimo_ts_sessione_conn(c, A)
+    finally:
+        c.close()
+    a = next(m for m in st["membri"] if m["sessionId"] == A)
+    assert a["file"] == f"sessions/{A}.jsonl" and a["titolo"] == f"titolo {A[:8]}"
+    assert [f["file"] for f in a["filoni"]] == [f"sessions/{A}.jsonl", f"sessions/{A}__f2.jsonl"]
+    assert [m["sessionId"] for m in st["membri"]] == [A, B, C], "un membro, non due"
+    assert next(m for m in st["membri"] if m["sessionId"] == C)["filoni"] == []
+    assert ultimo == "2026-09-13T10:00:00.000Z", "il last_ts più recente fra i filoni"
+
+
+def test_principale_senza_file_base_e_il_primo_per_numero() -> None:
+    """Senza `<sid>.jsonl` il principale è il filone col N più basso — per NUMERO:
+    in ordine di stringa `__f10` verrebbe prima di `__f2`."""
+    righe = [{"file": f"sessions/{A}__f10.jsonl"}, {"file": f"sessions/{A}__f2.jsonl"}]
+    assert [r["file"] for r in fts._filoni(righe)] == [f"sessions/{A}__f2.jsonl",
+                                                       f"sessions/{A}__f10.jsonl"]
+    assert fts._membro_scheda(A, righe[0]) == f"recupero/sessioni/{A}__f10.md"
+    assert fts._membro_scheda(A, None) == f"recupero/sessioni/{A}.md"
 
 
 def test_sessione_nota_solo_dagli_archi_lo_dice(conn) -> None:

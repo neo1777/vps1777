@@ -26,7 +26,9 @@ contenuto, non dal nome):
                      copie in `sightings`; dal 24/09/2026 anche `recupero/`
                      (contratto R1): schede di sessione/stirpe/memoria come righe,
                      .tsv nelle tabelle `sessioni`/`archi`/`memorie`, e le chiavi
-                     di MANIFEST.json che servono al collaudo in `meta`
+                     di MANIFEST.json che servono al collaudo in `meta`; dal
+                     25/09/2026 anche `documents/` (i documenti dell'`export`,
+                     stessa trafila dei workfiles, etichetta `document…`)
     .zip generico  → zip di documenti/codice (fallback, whitelist _DOC_ZIP_EXTS):
                      indicizza ogni doc dentro l'archivio, come un .md/.txt sciolto
     .json         → export Telegram Desktop (result.json) o sessione Claude Code
@@ -372,21 +374,27 @@ CREATE TABLE IF NOT EXISTS sightings(
 -- le ricevono vuote al primo ingest e restano leggibili dalle versioni precedenti.
 -- Le affinità numeriche servono alle query del Livello 2: senza, `chiusura=1`
 -- confronterebbe il TESTO '1' con l'intero 1 e risponderebbe zero righe.
+-- ⚠️ La chiave è (sessionId, file), NON sessionId (dal 25/09/2026): `sessioni.tsv` ha una
+-- riga per FILE consegnato, e una sessione in collisione ha più filoni con lo stesso id
+-- (`sessions/<sid>.jsonl`, `sessions/<sid>__f2.jsonl`…). Con la chiave sul solo id ne
+-- restava uno: misurato sul primo bundle vero, 1.300 righe per 1.303 schede. I DB nati
+-- con la chiave vecchia li porta alla nuova `_ensure_sessioni_filoni`.
 CREATE TABLE IF NOT EXISTS sessioni(
-    sessionId   TEXT PRIMARY KEY,
+    sessionId   TEXT NOT NULL,
     titolo      TEXT,
     cwd         TEXT,
     first_ts    TEXT,
     last_ts     TEXT,
     last_uuid   TEXT,     -- l'ultimo messaggio della copia consegnata: il padre della scheda
-    file        TEXT,     -- il membro dello zip con la conversazione (sessions/<sid>[__fN].jsonl)
+    file        TEXT NOT NULL DEFAULT '',  -- il membro con la conversazione (sessions/<sid>[__fN].jsonl)
     stato       TEXT,
     stato_fonte TEXT,
     stirpe      TEXT,
     stirpe_pos  INTEGER,
     n_commit    INTEGER,
     n_fili      INTEGER,
-    ingest_date TEXT
+    ingest_date TEXT,
+    PRIMARY KEY (sessionId, file)
 );
 -- La chiave è la stessa della tabella `archi` dell'inventario dell'app che produce il
 -- bundle: lo stesso arco visto da due bundle è UNA riga, aggiornata.
@@ -504,6 +512,7 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         conn.executescript(_SCHEMA)
         _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
         _ensure_v3(conn)  # voice-tagging Fase 1: colonne nuove + `speaker` derivato
+        _ensure_sessioni_filoni(conn)  # `sessioni` con la chiave vecchia → (sessionId, file)
         n = 0
         buf: list[tuple] = []
         skip_buf: list[tuple] = []
@@ -1174,6 +1183,49 @@ def _ensure_v3(conn: sqlite3.Connection) -> bool:
         conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {decl}")
     popola_speaker(conn)
     return bool(mancanti)
+
+
+def _ensure_sessioni_filoni(conn: sqlite3.Connection) -> bool:
+    """Porta la tabella `sessioni` dalla chiave `sessionId` alla chiave
+    `(sessionId, file)`. Idempotente: su una tabella che ha già la chiave nuova (o
+    che non esiste) non fa niente e ritorna False; True se ha migrato.
+
+    PERCHÉ (25/09/2026, misurato sul primo DB vero): `recupero/sessioni.tsv` ha una
+    riga per FILE, e una sessione in collisione ne ha più d'uno (i filoni
+    `sessions/<sid>__fN.jsonl`). Con la chiave sul solo id l'INSERT OR REPLACE ne
+    teneva l'ultimo: 1.300 righe per 1.303 schede, tre filoni spariti SENZA lapide.
+
+    COME: SQLite non cambia la chiave primaria di una tabella con un ALTER, quindi
+    la si RICREA — rinomina della vecchia, CREATE con la chiave nuova (la stessa
+    dello _SCHEMA, non una copia), ricopia di TUTTE le righe, DROP della vecchia —
+    dentro un SAVEPOINT: o tutto o niente. Nessuna riga si perde: la chiave vecchia
+    era unica su `sessionId`, quindi lo è a maggior ragione su `(sessionId, file)`
+    (un `file` NULL diventa '' perché la colonna ora è NOT NULL). I filoni che la
+    chiave vecchia aveva già schiacciato NON tornano da soli: li riporta un
+    re-ingest del bundle, che ora li tiene tutti."""
+    pk = tuple(r[1] for r in sorted(conn.execute("PRAGMA table_info(sessioni)"),
+                                    key=lambda r: r[5]) if r[5])
+    if pk != ("sessionId",):
+        return False              # tabella assente (la crea lo _SCHEMA) o già migrata
+    nomi = _TABELLE_RECORD["sessioni"] + ("ingest_date",)
+    cols = ", ".join(nomi)
+    sel = ", ".join("COALESCE(file, '')" if c == "file" else c for c in nomi)
+    crea = re.search(r"CREATE TABLE IF NOT EXISTS sessioni\(.*?\n\);", _SCHEMA, re.S)
+    if crea is None:              # lo _SCHEMA e questa funzione devono parlarsi
+        raise RuntimeError("_SCHEMA senza la CREATE di `sessioni`: migrazione impossibile")
+    conn.execute("SAVEPOINT migra_sessioni_filoni")
+    try:
+        conn.execute("DROP TABLE IF EXISTS _sessioni_chiave_vecchia")
+        conn.execute("ALTER TABLE sessioni RENAME TO _sessioni_chiave_vecchia")
+        conn.execute(crea.group(0))
+        conn.execute(f"INSERT INTO sessioni({cols}) SELECT {sel} FROM _sessioni_chiave_vecchia")
+        conn.execute("DROP TABLE _sessioni_chiave_vecchia")
+    except BaseException:
+        conn.execute("ROLLBACK TO migra_sessioni_filoni")
+        conn.execute("RELEASE migra_sessioni_filoni")
+        raise
+    conn.execute("RELEASE migra_sessioni_filoni")
+    return True
 
 
 def migrate_v2_to_v3(db_path: Union[str, Path]) -> bool:
@@ -2327,6 +2379,8 @@ def _iter_docs_zip(zip_path: Union[str, Path], members: list[str],
 #   mcp-logs/<sid>/<server>/…     log dei server MCP collegati
 #   workfiles/<cwd-encoded>/…     artefatti delle cartelle di lavoro (opzionali)
 #   recupero/…                    schede e .tsv del contratto R1 — dal 24/09/2026
+#   documents/…                   i documenti dell'`export` (non conversazioni) — dal
+#                                 25/09/2026, stessa trafila dei workfiles
 #   inventario/ + MANIFEST.json/md
 # Riconoscibile da MANIFEST.json + sessions/. Principi (2026-07-20, con Neo):
 #   - indicizzare IL PIÙ POSSIBILE («poi decidiamo cosa prunare»): sessioni come
@@ -2389,14 +2443,30 @@ def _workfile_label(name: str) -> str:
     return f"workfile:{parts[1]}" if len(parts) > 2 else "workfile"
 
 
-def _iter_pdf_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator:
+def _document_label(name: str) -> str:
+    """Etichetta-progetto per un membro `documents/` (i DOCUMENTI che l'`export`
+    dell'app consegna accanto alle sessioni, 25/09/2026): `document:<prima
+    sottocartella>`, o `document` per un file sciolto nella radice — la stessa
+    regola del primo livello di `_workfile_label`.
+
+    ⚠️ Oggi l'app scrive `documents/` PIATTA (`<md5-corto-del-path>__<basename>`):
+    tutti i documenti prendono l'etichetta `document`. Il nome d'origine resta
+    cercabile (è la prima riga del contenuto); la cartella d'origine sta solo nel
+    MANIFEST.json dell'export (`documenti.consegnati[].src`), che qui non si legge."""
+    parts = name.split("/")
+    return f"document:{parts[1]}" if len(parts) > 2 else "document"
+
+
+def _iter_pdf_bytes(raw: bytes, name: str, label: str, ts: str, *,
+                    fonte: str = "bundle-workfiles") -> Iterator:
     """PDF da bytes (membro di zip): stessi tetti di _iter_pdf, stessa resa a chunk.
-    pypdf assente o PDF rotto → lapide, mai un crash dell'intero bundle."""
+    pypdf assente o PDF rotto → lapide, mai un crash dell'intero bundle. `fonte` è
+    il `source` delle lapidi (la cartella del bundle da cui viene il membro)."""
     try:
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(raw))
         if len(reader.pages) > MAX_PDF_PAGES:
-            yield _Skip("bundle-workfiles", "pdf-troppe-pagine", name, ts)
+            yield _Skip(fonte, "pdf-troppe-pagine", name, ts)
             return
         pages: list[str] = []
         chars = 0
@@ -2413,9 +2483,9 @@ def _iter_pdf_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator:
         if text:
             yield from _chunk_rows(f"[{name}]\n{text}", label, ts, name)
         else:
-            yield _Skip("bundle-workfiles", "pdf-senza-testo", name, ts)
+            yield _Skip(fonte, "pdf-senza-testo", name, ts)
     except Exception as exc:  # noqa: BLE001 — ImportError/PdfReadError/…
-        yield _Skip("bundle-workfiles", "pdf-illeggibile", f"{name}: {exc}", ts)
+        yield _Skip(fonte, "pdf-illeggibile", f"{name}: {exc}", ts)
 
 
 # ── occhi e apriscatole (28/08/2026, punto B5 del piano post-format) ──────────
@@ -2447,17 +2517,18 @@ _ZIP_ANNIDATI_EXTS = (".zip", ".skill")   # .skill È uno zip (misurato: file(1)
 MAX_ZIP_ANNIDATO_MEMBRI = 2000            # anti-bomba: oltre, lapide dichiarata
 
 
-def _iter_immagine_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator:
+def _iter_immagine_bytes(raw: bytes, name: str, label: str, ts: str, *,
+                         fonte: str = "bundle-workfiles") -> Iterator:
     """OCR di un'immagine → righe marcate [ocr], o una lapide che dice perché no.
 
     La chiamata è HTTP verso il servizio interno `ocr` (stdlib urllib): questo
     processo non esegue niente. POST dei byte nudi, risposta = testo nudo."""
     if len(raw) > MAX_IMG_BYTES:
-        yield _Skip("bundle-workfiles", "immagine-troppo-grande", name, ts)
+        yield _Skip(fonte, "immagine-troppo-grande", name, ts)
         return
     url = _ocr_url()
     if not url:
-        yield _Skip("bundle-workfiles", "ocr-non-disponibile", name, ts)
+        yield _Skip(fonte, "ocr-non-disponibile", name, ts)
         return
     try:
         req = urllib.request.Request(url, data=raw, method="POST",
@@ -2465,16 +2536,16 @@ def _iter_immagine_bytes(raw: bytes, name: str, label: str, ts: str) -> Iterator
         with urllib.request.urlopen(req, timeout=_OCR_TIMEOUT_S) as resp:
             testo = resp.read().decode("utf-8", errors="replace").strip()
     except Exception as exc:        # servizio giù, timeout: lapide, mai un crash
-        yield _Skip("bundle-workfiles", "ocr-errore", f"{name}: {type(exc).__name__}", ts)
+        yield _Skip(fonte, "ocr-errore", f"{name}: {type(exc).__name__}", ts)
         return
     if not testo:
-        yield _Skip("bundle-workfiles", "ocr-vuoto", name, ts)
+        yield _Skip(fonte, "ocr-vuoto", name, ts)
         return
     yield from _chunk_rows(f"[{name}] [ocr]\n{testo}", label, ts, name)
 
 
 def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
-                       budget: _Budget) -> Iterator:
+                       budget: _Budget, *, fonte: str = "bundle-workfiles") -> Iterator:
     """UN livello di archivio dentro i workfiles (zip e .skill): i membri passano
     dalla stessa trafila (testo, jsonl, pdf, immagini→OCR, sniff). Un archivio
     dentro l'annidato NON si apre — profondità 1, anti-bomba: lapide dichiarata.
@@ -2483,10 +2554,10 @@ def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
         z = zipfile.ZipFile(io.BytesIO(raw))
         membri = [m for m in z.namelist() if not m.endswith("/")]
     except Exception:
-        yield _Skip("bundle-workfiles", "zip-illeggibile", name, ts)
+        yield _Skip(fonte, "zip-illeggibile", name, ts)
         return
     if len(membri) > MAX_ZIP_ANNIDATO_MEMBRI:
-        yield _Skip("bundle-workfiles", "zip-troppi-membri", f"{name}: {len(membri)}", ts)
+        yield _Skip(fonte, "zip-troppi-membri", f"{name}: {len(membri)}", ts)
         return
     for m in membri:
         visibile = f"{name}!{m}"
@@ -2497,17 +2568,17 @@ def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
         except ValueError:
             if budget.left < 0:
                 raise               # il tetto dell'ARCHIVIO intero non si assorbe
-            yield _Skip("bundle-workfiles", "membro-oltre-tetto", visibile, ts)
+            yield _Skip(fonte, "membro-oltre-tetto", visibile, ts)
             continue
         except Exception:
-            yield _Skip("bundle-workfiles", "membro-illeggibile", visibile, ts)
+            yield _Skip(fonte, "membro-illeggibile", visibile, ts)
             continue
         if ext in _ZIP_ANNIDATI_EXTS:
-            yield _Skip("bundle-workfiles", "zip-annidato-oltre-profondita", visibile, ts)
+            yield _Skip(fonte, "zip-annidato-oltre-profondita", visibile, ts)
         elif ext in _IMG_EXTS:
-            yield from _iter_immagine_bytes(raw_m, visibile, label, ts)
+            yield from _iter_immagine_bytes(raw_m, visibile, label, ts, fonte=fonte)
         elif ext == ".pdf":
-            yield from _iter_pdf_bytes(raw_m, visibile, label, ts)
+            yield from _iter_pdf_bytes(raw_m, visibile, label, ts, fonte=fonte)
         elif ext in (".jsonl", ".json"):
             text = raw_m.decode("utf-8", errors="replace")
             if _sniff_jsonl_kind(text[:20000]) == "cc":
@@ -2522,7 +2593,7 @@ def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
                                    + raw_m.decode("utf-8", errors="replace"),
                                    label, ts, visibile)
         else:
-            yield _Skip("bundle-workfiles", "non-testo", visibile, ts)
+            yield _Skip(fonte, "non-testo", visibile, ts)
 
 
 # I membri top-level del bundle che questo indexer SA leggere. È la mappa del
@@ -2541,7 +2612,16 @@ def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
 # ⚠️ La tupla dei prefissi resta su UNA riga e letterale: l'app che produce il bundle
 # la legge da questo file con una regex (`^BUNDLE_PREFISSI_INDICIZZATI\s*=\s*\(…\)`)
 # e decide da lì se usare `recupero/` o il ponte `workfiles/_recupero-1777/`.
-BUNDLE_PREFISSI_INDICIZZATI = ("sessions", "subagents", "mcp-logs", "workfiles", "recupero")
+BUNDLE_PREFISSI_INDICIZZATI = ("sessions", "subagents", "mcp-logs", "workfiles", "recupero", "documents")
+# Le cartelle-documento del bundle: stessa trafila (`_iter_documento_bundle`), cambia
+# il `source` delle lapidi e l'etichetta. `documents/` dal 25/09/2026: la scrive
+# l'`export` dell'app accanto a MANIFEST.json e sessions/, e uno zip di quella cartella
+# è riconosciuto come bundle — prima ogni documento finiva nella lapide
+# `membro-sconosciuto`.
+_BUNDLE_CARTELLE_DOCUMENTI = {
+    "workfiles": ("bundle-workfiles", _workfile_label),
+    "documents": ("bundle-documents", _document_label),
+}
 BUNDLE_FILE_INDICIZZATI = ("inventario/inventario-sessioni.tsv", "MANIFEST.md")
 # Letto ma NON come testo (dal 24/09/2026): le chiavi del manifest che servono a
 # collaudare l'ingest vanno nella scheda `meta`. Prima era «ridondante» — e con lui
@@ -2567,9 +2647,10 @@ _RECUPERO_SCHEDE = {
     "stirpi": ("stirpe", "recupero:stirpi", "recupero", "id"),
     "memorie": ("memoria", "recupero:memorie", "memory", "path"),
 }
-# .tsv → (tabella, colonne che non possono essere vuote: la chiave primaria)
+# .tsv → (tabella, colonne che non possono essere vuote: la chiave primaria). Per
+# `sessioni` la chiave è (sessionId, file) dal 25/09/2026: una riga per filone.
 _RECUPERO_TSV = {
-    "recupero/sessioni.tsv": ("sessioni", ("sessionId",)),
+    "recupero/sessioni.tsv": ("sessioni", ("sessionId", "file")),
     "recupero/archi.tsv": ("archi", ("da", "a", "relazione")),
     "recupero/memorie.tsv": ("memorie", ("path",)),
 }
@@ -2902,6 +2983,76 @@ def _iter_subagent_member(z: zipfile.ZipFile, name: str) -> Iterator:
             yield _Sighting(str(riga[0]), name)
 
 
+def _iter_documento_bundle(z: zipfile.ZipFile, info: zipfile.ZipInfo, label: str,
+                           budget: _Budget, *, fonte: str) -> Iterator:
+    """Un membro-documento del bundle (`workfiles/…` o `documents/…`) → righe, o una
+    lapide che dice perché no. Estratta il 25/09/2026 dal ramo `workfiles` di
+    `_iter_bundle_zip` perché `documents/` ne avesse la stessa trafila senza una
+    copia: .jsonl/.json sniffati (un backup di sessione diventa CONVERSAZIONE), testo
+    a chunk, PDF, immagini → OCR, zip annidati a un livello, e per il resto lo sniff
+    del contenuto prima della lapide `non-testo`. `fonte` è il `source` delle lapidi."""
+    name = info.filename
+    ext = Path(name).suffix.lower()
+    ts = _zipinfo_ts(info)
+    if ext in (".jsonl", ".json"):
+        with z.open(info) as f:
+            raw = _read_capped(f, name, budget)
+        text = raw.decode("utf-8", errors="replace")
+        kind = _sniff_jsonl_kind(text[:20000])
+        if kind == "cc":
+            # un backup di sessione dentro i workfiles: si indicizza
+            # come CONVERSAZIONE (collassa per uuid con la copia di
+            # sessions/) e l'avvistamento registra il path — l'incrocio.
+            yield from _iter_cc_text(text, name)
+        else:
+            yield from _chunk_rows(text, label, ts, name, chunk_chars=4000)
+    elif ext in _DOC_ZIP_EXTS:
+        with z.open(info) as f:
+            raw = _read_capped(f, name, budget)
+        body = f"[{name}]\n" + raw.decode("utf-8", errors="replace")
+        yield from _chunk_rows(body, label, ts, name)
+    elif ext == ".pdf":
+        with z.open(info) as f:
+            raw = _read_capped(f, name, budget, cap=MAX_PDF_BYTES)
+        yield from _iter_pdf_bytes(raw, name, label, ts, fonte=fonte)
+    elif ext in _IMG_EXTS or ext in _ZIP_ANNIDATI_EXTS:
+        # B5 «occhi e apriscatole». La lettura è INTERA (serve il
+        # file completo per OCR/unzip) e il tetto per-membro qui
+        # NON può abortire: la prima stesura lasciava propagare il
+        # ValueError di _read_capped e mcp_dash_bak040826.zip
+        # (>512MB decompressi) ha UCCISO l'intero re-ingest del
+        # bundle (28/08 sera, misurato sul vivo). Ora: lapide
+        # dichiarata e si prosegue — il tetto GLOBALE del budget
+        # invece propaga sempre, è la difesa anti zip-bomb.
+        try:
+            with z.open(info) as f:
+                raw = _read_capped(f, name, budget)
+        except ValueError:
+            if budget.left < 0:
+                raise
+            yield _Skip(fonte, "membro-oltre-tetto", name, ts)
+            return
+        if ext in _IMG_EXTS:
+            yield from _iter_immagine_bytes(raw, name, label, ts, fonte=fonte)
+        else:
+            yield from _iter_zip_annidato(raw, name, label, ts, budget, fonte=fonte)
+    else:
+        # PRIMA della lapide: guarda il CONTENUTO, non l'estensione (D10/§1).
+        # Un file «fuori whitelist» può essere testo pieno — 829 lo erano.
+        with z.open(info) as f:
+            campione = f.read(_SNIFF_BYTES)
+        if _sniff_e_testo(campione):
+            with z.open(info) as f:
+                raw = _read_capped(f, name, budget)
+            # marcato [testo-sniffato] perché sia distinguibile da un file
+            # entrato per estensione: chi legge deve sapere COME ci è arrivato.
+            body = f"[{name}] [testo-sniffato]\n" + raw.decode("utf-8", errors="replace")
+            yield from _chunk_rows(body, label, ts, name)
+        else:
+            # binario vero: lapide col path, contata.
+            yield _Skip(fonte, "non-testo", name, ts)
+
+
 def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
     with zipfile.ZipFile(zip_path) as z:
         names = [n for n in z.namelist() if not n.endswith("/")]
@@ -2935,67 +3086,13 @@ def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
                 yield from _chunk_rows(raw.decode("utf-8", errors="replace"),
                                        f"mcp-log:{server}", _zipinfo_ts(info), name,
                                        chunk_chars=4000)
-            elif top == "workfiles":
-                info = z.getinfo(name)
-                ts = _zipinfo_ts(info)
-                label = _workfile_label(name)
-                if ext in (".jsonl", ".json"):
-                    with z.open(info) as f:
-                        raw = _read_capped(f, name, budget)
-                    text = raw.decode("utf-8", errors="replace")
-                    kind = _sniff_jsonl_kind(text[:20000])
-                    if kind == "cc":
-                        # un backup di sessione dentro i workfiles: si indicizza
-                        # come CONVERSAZIONE (collassa per uuid con la copia di
-                        # sessions/) e l'avvistamento registra il path — l'incrocio.
-                        yield from _iter_cc_text(text, name)
-                    else:
-                        yield from _chunk_rows(text, label, ts, name, chunk_chars=4000)
-                elif ext in _DOC_ZIP_EXTS:
-                    with z.open(info) as f:
-                        raw = _read_capped(f, name, budget)
-                    body = f"[{name}]\n" + raw.decode("utf-8", errors="replace")
-                    yield from _chunk_rows(body, label, ts, name)
-                elif ext == ".pdf":
-                    with z.open(info) as f:
-                        raw = _read_capped(f, name, budget, cap=MAX_PDF_BYTES)
-                    yield from _iter_pdf_bytes(raw, name, label, ts)
-                elif ext in _IMG_EXTS or ext in _ZIP_ANNIDATI_EXTS:
-                    # B5 «occhi e apriscatole». La lettura è INTERA (serve il
-                    # file completo per OCR/unzip) e il tetto per-membro qui
-                    # NON può abortire: la prima stesura lasciava propagare il
-                    # ValueError di _read_capped e mcp_dash_bak040826.zip
-                    # (>512MB decompressi) ha UCCISO l'intero re-ingest del
-                    # bundle (28/08 sera, misurato sul vivo). Ora: lapide
-                    # dichiarata e si prosegue — il tetto GLOBALE del budget
-                    # invece propaga sempre, è la difesa anti zip-bomb.
-                    try:
-                        with z.open(info) as f:
-                            raw = _read_capped(f, name, budget)
-                    except ValueError:
-                        if budget.left < 0:
-                            raise
-                        yield _Skip("bundle-workfiles", "membro-oltre-tetto", name, ts)
-                        continue
-                    if ext in _IMG_EXTS:
-                        yield from _iter_immagine_bytes(raw, name, label, ts)
-                    else:
-                        yield from _iter_zip_annidato(raw, name, label, ts, budget)
-                else:
-                    # PRIMA della lapide: guarda il CONTENUTO, non l'estensione (D10/§1).
-                    # Un file «fuori whitelist» può essere testo pieno — 829 lo erano.
-                    with z.open(info) as f:
-                        campione = f.read(_SNIFF_BYTES)
-                    if _sniff_e_testo(campione):
-                        with z.open(info) as f:
-                            raw = _read_capped(f, name, budget)
-                        # marcato [testo-sniffato] perché sia distinguibile da un file
-                        # entrato per estensione: chi legge deve sapere COME ci è arrivato.
-                        body = f"[{name}] [testo-sniffato]\n" + raw.decode("utf-8", errors="replace")
-                        yield from _chunk_rows(body, label, ts, name)
-                    else:
-                        # binario vero: lapide col path, contata.
-                        yield _Skip("bundle-workfiles", "non-testo", name, ts)
+            elif top in _BUNDLE_CARTELLE_DOCUMENTI:
+                # workfiles/ (artefatti delle cwd) e documents/ (i documenti che
+                # l'`export` consegna, dal 25/09/2026): la STESSA trafila, cambia
+                # solo l'etichetta e il `source` delle lapidi.
+                fonte, etichetta = _BUNDLE_CARTELLE_DOCUMENTI[top]
+                yield from _iter_documento_bundle(z, z.getinfo(name), etichetta(name),
+                                                  budget, fonte=fonte)
             elif name == "inventario/inventario-sessioni.tsv":
                 info = z.getinfo(name)
                 with z.open(info) as f:

@@ -1633,6 +1633,14 @@ def test_label_da_cwd_windows_local_agent_e_normale() -> None:
     assert f("") == "unknown"
 
 
+def test_document_label_un_livello() -> None:
+    """`documents/` dell'export: la prima sottocartella se c'è, `document` per i file
+    sciolti (oggi l'app la scrive piatta)."""
+    f = archive_indexer._document_label
+    assert f("documents/0123456789__nota.md") == "document"
+    assert f("documents/appunti/sotto/nota.md") == "document:appunti"
+
+
 def test_workfile_label_due_livelli() -> None:
     """Il secchio unico da 126k righe si spacchetta; i file in radice restano a un livello."""
     f = archive_indexer._workfile_label
@@ -2112,7 +2120,7 @@ def test_canary_prefissi_del_bundle_che_l_indexer_conosce(tmp_path: Path) -> Non
     e questo elenco è ciò che il test speculare del bundle deve leggere."""
     import zipfile
     assert archive_indexer.BUNDLE_PREFISSI_INDICIZZATI == (
-        "sessions", "subagents", "mcp-logs", "workfiles", "recupero")
+        "sessions", "subagents", "mcp-logs", "workfiles", "recupero", "documents")
     assert archive_indexer.BUNDLE_FILE_INDICIZZATI == ("inventario/inventario-sessioni.tsv", "MANIFEST.md")
     assert archive_indexer.BUNDLE_FILE_IN_META == ("MANIFEST.json",)
     assert archive_indexer.BUNDLE_FILE_RIDONDANTI == ("inventario/inventario-sessioni.json",)
@@ -2124,6 +2132,7 @@ def test_canary_prefissi_del_bundle_che_l_indexer_conosce(tmp_path: Path) -> Non
         f"subagents/{_SID}/agent-0.jsonl": cc % ("c-sub", "subagents"),
         f"mcp-logs/{_SID}/nb1777/1.jsonl": '{"sessionId":"%s","msg":"segno-mcp-logs"}' % _SID,
         "workfiles/-home-x/nota.md": "segno-workfiles",
+        "documents/0123456789__nota.md": "segno-documents",
         f"recupero/sessioni/{_SID}.md": (f"---\ncontratto: R1\ntipo: sessione\n"
                                          f"sessionId: {_SID}\n---\nsegno-recupero"),
         "inventario/inventario-sessioni.tsv": "sid\tsegno-inventario",
@@ -2140,8 +2149,8 @@ def test_canary_prefissi_del_bundle_che_l_indexer_conosce(tmp_path: Path) -> Non
     db = tmp_path / "out.db"
     archive_indexer.index_file(str(zp), str(db))
     con = sqlite3.connect(db)
-    for segno in ("sessions", "subagents", "mcp-logs", "workfiles", "recupero", "inventario",
-                  "manifest-md"):
+    for segno in ("sessions", "subagents", "mcp-logs", "workfiles", "recupero", "documents",
+                  "inventario", "manifest-md"):
         assert con.execute("SELECT count(*) FROM messages WHERE content LIKE ?",
                            (f"%segno-{segno}%",)).fetchone()[0] >= 1, f"prefisso {segno} non indicizzato"
     # il detail comincia col nome del membro; dopo i «:» c'è il perché
@@ -2625,7 +2634,7 @@ def test_tabelle_record_coincidono_con_lo_schema(tmp_path: Path) -> None:
         assert tuple(r[1] for r in info) == colonne + ("ingest_date",), tabella
     pk = {t: tuple(r[1] for r in sorted(con.execute(f"PRAGMA table_info({t})"), key=lambda r: r[5])
                    if r[5]) for t in archive_indexer._TABELLE_RECORD}
-    assert pk == {"sessioni": ("sessionId",), "archi": ("da", "a", "relazione", "via"),
+    assert pk == {"sessioni": ("sessionId", "file"), "archi": ("da", "a", "relazione", "via"),
                   "memorie": ("path",)}, pk
     assert con.execute("SELECT count(*) FROM messages").fetchone()[0] == 2
     with pytest.raises(ValueError, match="tabella sconosciuta"):
@@ -2752,3 +2761,158 @@ def test_ponte_workfiles_e_un_alias_di_recupero(tmp_path: Path) -> None:
         assert c.execute("SELECT reason FROM skipped WHERE detail LIKE"
                          " 'workfiles/_recupero-1777/sessioni/rotta.md:%'").fetchall() == [
             ("recupero-senza-front-matter",)]
+
+
+
+# ── filoni in `sessioni` e `documents/` nel bundle (25/09/2026) ───────────────
+# Due difetti misurati sul primo DB vero: la chiave sul solo sessionId teneva un
+# filone per sessione (1.300 righe per 1.303 schede), e i documenti dell'`export`
+# finivano tutti in `membro-sconosciuto`. Dati sintetici.
+
+_RIGA_A = (_SID_A, "sessione di prova", "/percorso/sintetico/progetto",
+           "2026-09-10T10:00:00.000Z", "2026-09-10T10:05:00.000Z", "rc-a1",
+           f"sessions/{_SID_A}.jsonl", "turno-chiuso", "transcript", _STIRPE, "1", "2", "1")
+_RIGA_A_F2 = (_SID_A, "secondo filone", "/percorso/sintetico/altro",
+              "2026-09-11T10:00:00.000Z", "2026-09-11T10:05:00.000Z", "rc-f2",
+              f"sessions/{_SID_A}__f2.jsonl", "turno-chiuso", "transcript", "", "", "0", "0")
+
+
+def test_sessioni_due_filoni_dello_stesso_sid_sono_due_righe(tmp_path: Path) -> None:
+    """Il filone `__f2` e il principale hanno lo stesso sessionId: due righe, una per
+    file. Con la chiave vecchia l'INSERT OR REPLACE ne teneva una sola."""
+    membri = _membri_recupero()
+    membri["recupero/sessioni.tsv"] = _tsv(archive_indexer._TABELLE_RECORD["sessioni"],
+                                           _RIGA_A_F2, _RIGA_A)
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, recupero=membri)), str(db))
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT file, titolo FROM sessioni WHERE sessionId=? ORDER BY file",
+                       (_SID_A,)).fetchall() == [
+        (f"sessions/{_SID_A}.jsonl", "sessione di prova"),
+        (f"sessions/{_SID_A}__f2.jsonl", "secondo filone")]
+    # re-ingest: le stesse due righe, non quattro
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, recupero=membri)), str(db))
+    assert con.execute("SELECT count(*) FROM sessioni").fetchone()[0] == 2
+
+
+def test_sessioni_riga_senza_file_lascia_la_lapide(tmp_path: Path) -> None:
+    """`file` è parte della chiave: una riga senza non è un filone, e lo dice."""
+    membri = _membri_recupero()
+    senza = _RIGA_A[:6] + ("",) + _RIGA_A[7:]
+    membri["recupero/sessioni.tsv"] = _tsv(archive_indexer._TABELLE_RECORD["sessioni"],
+                                           senza, _RIGA_A_F2)
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, recupero=membri)), str(db))
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT file FROM sessioni").fetchall() == [
+        (f"sessions/{_SID_A}__f2.jsonl",)]
+    assert con.execute("SELECT count(*) FROM skipped WHERE reason='recupero-tsv-fuori-contratto'"
+                       " AND detail LIKE '%riga 2: chiave vuota (file)%'").fetchone()[0] == 1
+
+
+def _db_sessioni_chiave_vecchia(tmp_path: Path) -> Path:
+    """Un DB come quelli caricati con la v0.51.x: `sessioni` con PRIMARY KEY sessionId,
+    costruita A MANO (non dallo _SCHEMA di oggi), con due righe — una col `file` NULL."""
+    db = _db_v2(tmp_path, [("vecchia", "p", "2026-01-01", "riga di prima", "user")])
+    with sqlite3.connect(db) as c:
+        c.execute("""CREATE TABLE sessioni(
+            sessionId TEXT PRIMARY KEY, titolo TEXT, cwd TEXT, first_ts TEXT,
+            last_ts TEXT, last_uuid TEXT, file TEXT, stato TEXT, stato_fonte TEXT,
+            stirpe TEXT, stirpe_pos INTEGER, n_commit INTEGER, n_fili INTEGER,
+            ingest_date TEXT)""")
+        c.execute("INSERT INTO sessioni VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  _RIGA_A_F2 + ("2026-09-24T20:00:00Z",))
+        c.execute("INSERT INTO sessioni VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  (_SID_B, "senza file", "", "", "", "", None, "", "", "", None, 0, 0,
+                   "2026-09-24T20:00:00Z"))
+    return db
+
+
+def _pk(con: sqlite3.Connection, tabella: str) -> tuple:
+    return tuple(r[1] for r in sorted(con.execute(f"PRAGMA table_info({tabella})"),
+                                      key=lambda r: r[5]) if r[5])
+
+
+def test_migrazione_sessioni_alla_chiave_con_file(tmp_path: Path) -> None:
+    """Un DB con la tabella vecchia si apre per un ingest: la tabella è ricreata con
+    la chiave (sessionId, file), le righe ci sono tutte (il `file` NULL diventa ''),
+    e il filone che la chiave vecchia aveva schiacciato torna col re-ingest."""
+    db = _db_sessioni_chiave_vecchia(tmp_path)
+    prima = sqlite3.connect(db).execute(
+        "SELECT sessionId, titolo, last_uuid, stirpe_pos, n_commit, ingest_date FROM sessioni"
+        " ORDER BY sessionId").fetchall()
+    archive_indexer.write_rows(db, [("nuova", "p", "2026-01-02", "riga di dopo")])
+    con = sqlite3.connect(db)
+    assert _pk(con, "sessioni") == ("sessionId", "file")
+    assert con.execute(
+        "SELECT sessionId, titolo, last_uuid, stirpe_pos, n_commit, ingest_date FROM sessioni"
+        " ORDER BY sessionId").fetchall() == prima, "una riga persa o cambiata"
+    assert con.execute("SELECT file FROM sessioni WHERE sessionId=?",
+                       (_SID_B,)).fetchone() == ("",)
+    assert con.execute("SELECT count(*) FROM sqlite_master WHERE name LIKE '%chiave_vecchia%'"
+                       ).fetchone()[0] == 0, "la tabella d'appoggio è rimasta"
+    assert con.execute("SELECT count(*) FROM messages").fetchone()[0] == 2
+    # idempotente: la seconda volta non c'è niente da migrare
+    assert archive_indexer._ensure_sessioni_filoni(con) is False
+    con.close()
+    membri = _membri_recupero()
+    membri["recupero/sessioni.tsv"] = _tsv(archive_indexer._TABELLE_RECORD["sessioni"],
+                                           _RIGA_A, _RIGA_A_F2)
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, recupero=membri)), str(db))
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT count(*) FROM sessioni WHERE sessionId=?",
+                       (_SID_A,)).fetchone()[0] == 2, "il filone schiacciato non è tornato"
+
+
+def test_migrazione_sessioni_fallita_non_tocca_niente(tmp_path: Path, monkeypatch) -> None:
+    """In transazione: se la ricopia fallisce, la tabella vecchia resta com'era (stessa
+    chiave, stesse righe) e l'errore esce — mai una tabella a metà."""
+    db = _db_sessioni_chiave_vecchia(tmp_path)
+    monkeypatch.setattr(archive_indexer, "_SCHEMA",
+                        archive_indexer._SCHEMA.replace("n_fili      INTEGER,",
+                                                        "n_fili      INTEGER CHECK(0),", 1))
+    con = sqlite3.connect(db)
+    with pytest.raises(sqlite3.IntegrityError):
+        archive_indexer._ensure_sessioni_filoni(con)
+    assert _pk(con, "sessioni") == ("sessionId",)
+    assert con.execute("SELECT count(*) FROM sessioni").fetchone()[0] == 2
+    assert con.execute("SELECT count(*) FROM sqlite_master WHERE name LIKE '%chiave_vecchia%'"
+                       ).fetchone()[0] == 0
+
+
+def test_documents_del_bundle_entrano_come_i_workfiles(tmp_path: Path, monkeypatch) -> None:
+    """Uno zip della cartella dell'`export` (MANIFEST.json + sessions/ + documents/) è
+    un bundle: i documenti diventano righe `document…` con la stessa trafila dei
+    workfiles (testo a chunk, sniff del contenuto, lapidi per binari e immagini senza
+    OCR, col `source` loro) — non più `membro-sconosciuto`."""
+    import zipfile
+    zp = tmp_path / "export.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("MANIFEST.json", "{}")
+        z.writestr(f"sessions/{_SID_A}.jsonl", json.dumps(
+            {"type": "user", "uuid": "d-u1", "timestamp": "2026-09-10T10:00:00.000Z",
+             "cwd": "/percorso/sintetico", "message": {"role": "user", "content": "ciao"}}))
+        z.writestr("documents/0123456789__nota.md", "# nota\n\nsegno-documento-piatto")
+        z.writestr("documents/appunti/lista.txt", "segno-documento-in-cartella")
+        z.writestr("documents/abcdef0123__Dockerfile", "FROM scratch\nsegno-sniffato")
+        z.writestr("documents/fedcba9876__dati.bin", b"\x00\x01binario")
+        z.writestr("documents/1111111111__foto.png", b"\x89PNG\r\n\x1a\nfinto")
+    monkeypatch.delenv("OCR_URL", raising=False)     # niente servizio OCR: lapide dichiarata
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    righe = dict(con.execute(
+        "SELECT substr(content, 1, instr(content, ']')), project FROM messages"
+        " WHERE project LIKE 'document%'"))
+    assert righe == {"[documents/0123456789__nota.md]": "document",
+                     "[documents/appunti/lista.txt]": "document:appunti",
+                     "[documents/abcdef0123__Dockerfile]": "document"}, righe
+    assert con.execute("SELECT count(*) FROM messages WHERE content LIKE"
+                       " '%[testo-sniffato]%segno-sniffato%'").fetchone()[0] == 1
+    lapidi = set(con.execute("SELECT source, reason, detail FROM skipped"
+                             " WHERE detail LIKE 'documents/%'"))
+    assert lapidi == {("bundle-documents", "non-testo", "documents/fedcba9876__dati.bin"),
+                      ("bundle-documents", "ocr-non-disponibile",
+                       "documents/1111111111__foto.png")}, lapidi
+    assert con.execute("SELECT count(*) FROM skipped WHERE reason='membro-sconosciuto'"
+                       ).fetchone()[0] == 0

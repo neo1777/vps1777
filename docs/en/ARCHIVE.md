@@ -130,6 +130,7 @@ would swallow, ignoring sessions and logs).
 | `subagents/<sessionId>/agent-<hash>.jsonl` (since 16/09/2026) | sub-agent conversations; a sub-agent's user rows are `sender='mandato'` (the machine wrote them) | `subagent:<cwd-label>` |
 | `mcp-logs/<sessionId>/<server>/…` | MCP server logs, in 4000-character chunks | `mcp-log:<server>` |
 | `workfiles/<encoded-cwd>/…` | artefacts of the working folders: text and code in chunks, PDFs with text, images via OCR, nested zips (one level); a session backup (a Claude Code `.jsonl`) becomes a conversation; binaries leave a `non-testo` tombstone | `workfile:<encoded-cwd>/<first subfolder>` |
+| `documents/…` (since 25/09/2026) | the **documents** that the app's `export` delivers next to the sessions (not conversations): the same pipeline as `workfiles/` — text and code in chunks, PDFs, images via OCR, nested zips, content sniffing; binaries leave a `non-testo` tombstone with `source` `bundle-documents`. A zip of the export folder has `MANIFEST.json` and `sessions/`, so it is a bundle: before, every document ended up in `membro-sconosciuto` | `document:<first subfolder>`, or `document` for a file in the root of `documents/`. The app (since 25/09/2026) writes `documents/<family>/<short-md5-of-the-path>__<name>`: the label is the family — `document:testo`, `document:codice`, `document:config`… —, never the original path |
 | `recupero/…` (since 24/09/2026) — or the bridge `workfiles/_recupero-1777/…` | session, lineage and memory cards as rows; three `.tsv` files as tables — see [the `recupero/` prefix](#the-recupero-prefix--contract-r1) | `recupero:sessioni` · `recupero:stirpi` · `recupero:memorie` |
 | `inventario/inventario-sessioni.tsv` | the session index as text, in 4000-character chunks | `inventario` |
 | `inventario/inventario-sessioni.json` | **not** indexed: a tombstone saying whether its data came in another way — see [the tombstones](#tombstones-what-doesnt-get-in-and-why) | — |
@@ -282,7 +283,12 @@ The three `.tsv` files do **not** become text: they fill three tables, one row p
 file row (`INSERT OR REPLACE` on the key, with the ingest date). The columns are the
 contract's, in the same order:
 
-**`sessioni`** (sessions) — key `sessionId`. One row per delivered session.
+**`sessioni`** (sessions) — key `(sessionId, file)`. One row per delivered **file**: a
+session in a collision has several **strands** (*filoni*) with the same `sessionId`
+(`sessions/<sid>.jsonl`, `sessions/<sid>__f2.jsonl`…), and each one has its own row.
+Up to 0.51.1 the key was `sessionId` alone and only one survived (measured on the
+first real bundle: 1,300 rows for 1,303 cards). A row with an empty `file` leaves the
+`recupero-tsv-fuori-contratto` tombstone, like one with an empty `sessionId`.
 
 | column | content |
 |---|---|
@@ -362,6 +368,7 @@ the member's name and says why.
 | `bundle-recupero` | `recupero-fuori-contratto` | `tipo` inconsistent with the folder, or the field identifying the card is missing |
 | `bundle-recupero` | `recupero-tsv-fuori-contratto` | a `.tsv` whose header lacks a contract column (the whole file doesn't get in: no half-filled tables), or one of its rows with the wrong number of fields or an empty key (only that row is skipped, with its line number) |
 | `bundle-workfiles` | `non-testo`, `pdf-*`, `ocr-*`, `zip-*`, `membro-oltre-tetto`, … | a working file with no text to read, or that OCR / opening couldn't read |
+| `bundle-documents` | the same as `bundle-workfiles` | the same, for a member of `documents/` |
 | `claude-code` | `non-message`, `no-uuid-o-ts`, `empty` | a session record that isn't a message, has no uuid or ts, or is empty |
 
 ```sql
@@ -514,8 +521,9 @@ It answers with an object:
 |---|---|
 | `sessionId` | the full uuid (resolved from the prefix) |
 | `db` · `snapshot` | the DB that answered and the last modification date of its file |
-| `sessione` | the `sessioni` row (all columns); `null` if the session is known only as an edge endpoint |
-| `scheda` | the text of the session card (state, last words, open threads, commits, memories written, lineage), rebuilt from its chunks; `null` if there is none. ⚠️ The "last words" are **quotations**: who speaks is said by the card, not by the fact that they are there |
+| `sessione` | the `sessioni` row (all columns); `null` if the session is known only as an edge endpoint. If the session has several **strands**, it is the row of the **main** one: the file without `__fN` (`sessions/<sid>.jsonl`) or, if missing, the one with the lowest N |
+| `filoni` | **all** the `sessioni` rows for that `sessionId`, the main one first: just one for a session without collisions, `[]` if there is no row. With several strands `note` says so too |
+| `scheda` | the text of the main strand's session card (`recupero/sessioni/<sid>.md`, or `<sid>__fN.md` if the main one is a strand) (state, last words, open threads, commits, memories written, lineage), rebuilt from its chunks; `null` if there is none. ⚠️ The "last words" are **quotations**: who speaks is said by the card, not by the fact that they are there |
 | `conversazione` | `{messaggi, per_sender, primo_ts, ultimo_ts, fonti}`: the archive rows sighted in `sessions/<sessionId>…` (all strands; title and attachments included, told apart in `per_sender`), the first and last ts, the origin files |
 | `archi` · `archi_totali` | the edges touching the session (from or to), up to `limit`, and how many there are in all |
 | `stirpe` | `{id, posizione, scheda}` of the lineage declared in the row; `null` if the session is alone |
@@ -535,8 +543,10 @@ An example response (made-up data, shortened text):
   "snapshot": "2026-09-24T19:42:50Z",
   "sessione": {"sessionId": "0f1e2d3c-…", "titolo": "sessione di prova",
                "last_ts": "2026-09-10T10:05:00.000Z", "last_uuid": "…",
+               "file": "sessions/0f1e2d3c-….jsonl",
                "stato": "turno-chiuso", "stirpe": "9a8b7c6d-…", "stirpe_pos": 1,
                "n_commit": 2, "n_fili": 1, "…": "…"},
+  "filoni": [{"sessionId": "0f1e2d3c-…", "file": "sessions/0f1e2d3c-….jsonl", "…": "…"}],
   "scheda": "[recupero/sessioni/0f1e2d3c-….md]\n# sessione di prova\n\n## Stato\n…",
   "conversazione": {"messaggi": 3, "per_sender": {"user": 1, "assistant": 1, "title": 1},
                     "primo_ts": "2026-09-10T10:00:00.000Z",
@@ -559,7 +569,7 @@ continue into one another.
 | field | content |
 |---|---|
 | `sessionId` · `db` · `snapshot` · `anche_in` | as in `get_session` |
-| `membri` | each session of the lineage with its data from `sessioni`, in `first_ts` order; each with `in_sessioni: true/false` |
+| `membri` | each session of the lineage with its data from `sessioni`, in `first_ts` order; each with `in_sessioni: true/false` and `filoni` (its `sessioni` rows, the main one first — the member's data are the main one's; `[]` for a member without a row) |
 | `senza_riga` | the members **without** a row in `sessioni` (known only as edge endpoints): they stay in the list — incomplete, not vanished |
 | `archi` | the edges with `chiusura=1` between members |
 | `stirpi_dichiarate` · `schede_stirpe` | the lineage ids written in the members' rows, and their cards |
@@ -690,9 +700,9 @@ skipped(uid PRIMARY KEY, source, reason, detail, ts, ingest_date)  -- the ledger
 sightings(uuid, source, ingest_date, PRIMARY KEY(uuid, source))    -- where each uuid was seen
 meta(key PRIMARY KEY, value)                        -- card: description, ruolo, bundle_*
 -- from the Session Recovery bundle (contract recupero/ R1, 24/09/2026); empty elsewhere
-sessioni(sessionId PRIMARY KEY, titolo, cwd, first_ts, last_ts, last_uuid, file,
+sessioni(sessionId, titolo, cwd, first_ts, last_ts, last_uuid, file,
          stato, stato_fonte, stirpe, stirpe_pos INTEGER, n_commit INTEGER,
-         n_fili INTEGER, ingest_date)
+         n_fili INTEGER, ingest_date, PRIMARY KEY(sessionId, file))  -- one row per strand
 archi(da, a, relazione, via, livello, prova, voce, peso REAL, chiusura INTEGER,
       bundle_scan, ingest_date, PRIMARY KEY(da, a, relazione, via))
 memorie(path PRIMARY KEY, sistema, livello, md5, mtime, scritta_da, membro, ingest_date)
@@ -701,6 +711,17 @@ memorie(path PRIMARY KEY, sistema, livello, md5, mtime, scritta_da, membro, inge
 The `revisions`, `sightings`, `meta` tables and the three bundle ones are `CREATE
 TABLE IF NOT EXISTS`: an existing DB receives them at its first ingest, and stays
 readable by earlier versions.
+
+**The `sessioni` key has changed (since 25/09/2026).** A DB created by 0.51.x has
+`sessioni` keyed on `sessionId`. At the first ingest the indexer moves it to the key
+`(sessionId, file)` (`_ensure_sessioni_filoni`): SQLite does not change a table's key
+with an `ALTER`, so the table is recreated and every row copied over, inside a
+`SAVEPOINT` (all or nothing). If it fails, the table stays as it was and the error
+surfaces. A second run does nothing. No row is lost: the old key was unique on
+`sessionId`, so it is unique on `(sessionId, file)` as well. A NULL `file` becomes
+`''`. The strands the old key had already squashed do **not** come back on their own:
+**re-ingest the bundle**, and now they all go in. archive-mcp also reads the old
+table: on a DB not yet migrated `filoni` has a single row.
 
 This is what `archive_indexer` and `archive-ingest` produce. FTS gets `content`,
 `tools` (the actions: `tool_use` + `tool_result`) and `attachments`; `thinking` and
@@ -792,6 +813,12 @@ Declared, not discovered by chance:
   the alias has `workfile:_recupero-1777/…` rows; re-ingesting with this indexer adds
   the `recupero:*` rows but doesn't remove those.
 - **`memorie` without a tool.** It is read via SQL or with `search`.
+- **`documents/` says what kind a document is, not where it comes from.** The app
+  (since 25/09/2026) writes `documents/<family>/…`: the label is the family
+  (`document:testo`, `document:codice`…). The file name is searchable, because it is
+  the first line of the text; the folder of origin is only in `MANIFEST.json`
+  (`documenti.consegnati[].src`), on purpose: a path in the label would carry the
+  disk layout into every answer.
 - **`last_ts` and the last message.** On a real bundle the card's `last_ts` turned
   out more recent than the ts of the `last_uuid` message (the last record with that
   timestamp wasn't a message). The order holds — the card comes after — but
