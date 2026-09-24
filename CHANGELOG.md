@@ -6,6 +6,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ### Aggiunto
 
+- **archive-mcp: i tool `get_session` e `get_stirpe`** (Livello 2 del contratto
+  `recupero/` R1). `get_session(sessionId)` accetta l'uuid intero o un prefisso di almeno 8
+  caratteri se univoco; se è ambiguo, l'errore elenca i candidati coi loro DB. Restituisce la
+  riga di `sessioni`, la scheda, i messaggi della conversazione avvistati in
+  `sessions/<sid>…` (per mittente, con primo e ultimo ts), gli archi che la toccano e la
+  stirpe. `get_stirpe(sessionId)` restituisce la chiusura sugli archi con `chiusura=1`, coi
+  dati dei membri; i nodi senza riga in `sessioni` sono dichiarati, non tolti. Se più DB
+  conoscono la sessione risponde quello col `last_ts` più recente, e gli altri vanno in
+  `anche_in`. Un DB indicizzato prima del contratto lo dice con un errore parlante («non ha
+  la tabella sessioni…», più dove sta comunque la conversazione), mai con uno zero muto. Sola
+  lettura, redazione in uscita ereditata dal decoratore, semaforo delle ricerche (#270). Le
+  funzioni sono aggiunte in coda a `db.py` e `fts.py`, senza toccare quelle esistenti. I test
+  usano un DB prodotto dall'indexer vero del gateway: il contratto fra le due parti è provato
+  da un lato all'altro.
 - **archive1777 legge `recupero/` nel bundle di Recupero Sessioni (contratto R1).**
   Stirpi, archi e memorie arrivavano sulla VPS solo dentro `inventario-sessioni.json`,
   scartato come «ridondante», e sparivano con lo zip cancellato dopo l'ingest; il

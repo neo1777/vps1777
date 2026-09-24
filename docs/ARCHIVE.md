@@ -129,8 +129,12 @@ La lapide dell'inventario json dice ora **se i suoi dati sono entrati**:
 `non-indicizzato-senza-recupero` se non ha nessuno dei due — e allora stirpi, archi
 e memorie di quel bundle **non** sono nell'archivio.
 
-> Le tabelle `sessioni`, `archi` e `memorie` oggi si interrogano via SQL sul DB;
-> i tool MCP che le leggono (`get_session`, `get_stirpe`) sono il passo successivo.
+> Le tabelle `sessioni` e `archi` si leggono coi tool MCP `get_session` e
+> `get_stirpe` (vedi [i tool](#cercare--i-tool-mcp)); `memorie` per ora solo via SQL.
+> Su un DB indicizzato **prima** del contratto R1 le tabelle non ci sono, e i due
+> tool lo dicono con un errore — «non ha la tabella sessioni: è stato indicizzato
+> prima del contratto R1», più dove si trova comunque la conversazione — invece di
+> una risposta vuota.
 
 Campi del form: **nome DB** (vuoto = dal nome file), **progetto** (etichetta;
 vuoto = dedotta dalla fonte) e **descrizione** (facoltativa: a cosa serve / cosa
@@ -164,6 +168,8 @@ dalla Mini App):
 | `check_term(term, db_name)` | diagnostica se un termine con `+`/`#` (`C++`, `C#`, `g++`) è ricercabile o **collassa** sul prefisso — chiede all'indice, non alla doc |
 | `get_context(uuid, db_name, before, after, max_chars)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; se il messaggio è in un thread, i vicini vengono dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale. `max_chars` (0 = intero) tronca ogni riga **dichiarandolo nel testo** — sui messaggi-hub giganti il payload pieno uccideva la connessione |
 | `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` come in `get_context` |
+| `get_session(sessionId, db_name, limit, max_chars)` | tutto ciò che l'archivio sa di **una sessione** Claude Code (contratto `recupero/` R1): la riga di `sessioni`, la **scheda** (stato, ultime parole, fili aperti, commit), quanti messaggi della conversazione sono avvistati in `sessions/<sid>…` con primo/ultimo ts, gli archi che la toccano e la stirpe. `sessionId` intero o **prefisso di almeno 8 caratteri**, se univoco (ambiguo → errore coi candidati). Se più DB la conoscono risponde quello col `last_ts` più recente, gli altri in `anche_in` |
+| `get_stirpe(sessionId, db_name, limit, max_chars)` | la **stirpe** di una sessione: la chiusura sugli archi con `chiusura=1` (presi senza verso), coi dati di ogni membro da `sessioni`; i membri senza riga in `sessioni` restano nell'elenco, dichiarati (`in_sessioni: false`, `senza_riga`) |
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
 | `archive_stats(db_name)` | istogramma dei messaggi per **anno** — *quando* l'archivio è fitto, da sapere prima di cercare. La **prima** chiamata su un DB scandisce tutto (decine di secondi su archivi grandi); le successive sono **memoizzate per snapshot** |
 | `list_databases(schede)` | i nomi dei DB caricati; con `schede=true` ogni voce porta la sua carta d'identità (**ruolo**, righe, intervallo date, descrizione) — la scelta del DB è il primo bivio di ogni ricerca |

@@ -479,3 +479,242 @@ def distribuzione_voce_conn(conn: sqlite3.Connection) -> dict[str, int]:
             "SELECT voice, count(*) FROM messages GROUP BY voice ORDER BY 2 DESC")}
     except sqlite3.OperationalError:
         return {}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SESSIONI E STIRPI — il Livello 2 del contratto `recupero/` R1 (24/09/2026)
+# ══════════════════════════════════════════════════════════════════════════════
+# Dal contratto R1 l'indexer scrive, oltre ai messaggi, le tabelle `sessioni`
+# (una riga per sessione consegnata in un bundle), `archi` (le relazioni fra
+# sessioni: continua, clone, …) e le schede `recupero:sessioni`/`recupero:stirpi`
+# come righe di `messages`, ognuna con l'avvistamento del suo membro. Fino a qui
+# l'archivio non aveva un'entità «sessione»: il sessionId non era una colonna.
+# Queste funzioni leggono quelle tabelle su UNA connessione; il multi-DB, la
+# scelta del DB e gli errori sui DB vecchi stanno in db.py. Sola lettura.
+
+
+class SessioneNonRisolta(ValueError):
+    """Il sessionId chiesto non porta a UNA sessione: troppo corto, ambiguo, assente,
+    o l'archivio non ha le tabelle del contratto R1. Sollevata con il perché e la
+    cura invece di restituire una scheda vuota: un `{}` qui direbbe «la sessione non
+    ha niente» quando la verità è «non l'ho trovata» — o «non potevo cercarla»."""
+
+
+def tabelle_conn(conn: sqlite3.Connection) -> set[str]:
+    """I nomi delle tabelle del DB (per sapere se è nato prima del contratto R1)."""
+    return {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+
+def _righe_dict(cur: sqlite3.Cursor) -> list[dict[str, Any]]:
+    """Righe come dict, con qualunque row_factory (i test aprono senza sqlite3.Row)."""
+    cols = [d[0] for d in cur.description]
+    return [dict(zip(cols, tuple(r))) for r in cur.fetchall()]
+
+
+def _tronca_testo(testo: str | None, max_chars: int) -> str | None:
+    """Stesso patto di `_tronca_righe` in db.py (#268): il troncamento si DICHIARA."""
+    if testo is None or not max_chars or max_chars <= 0 or len(testo) <= max_chars:
+        return testo
+    return (testo[:max_chars] + f" …‹troncato: {max_chars} di {len(testo)} char — "
+            f"testo pieno con max_chars=0›")
+
+
+def candidati_sessione_conn(conn: sqlite3.Connection, chiave: str) -> list[str]:
+    """I sessionId di questo DB che cominciano con `chiave`, presi da `sessioni` E
+    dagli estremi degli `archi` (una sessione può essere nota solo come estremo di un
+    arco: la madre non consegnata di un clone). Se `chiave` è un id presente per
+    intero, torna solo quello. `substr` e non `LIKE`: `%` e `_` nell'input restano
+    caratteri, non diventano jolly."""
+    tab = tabelle_conn(conn)
+    n = len(chiave)
+    trovati: set[str] = set()
+    if "sessioni" in tab:
+        trovati |= {r[0] for r in conn.execute(
+            "SELECT sessionId FROM sessioni WHERE substr(sessionId, 1, ?) = ?", (n, chiave))}
+    if "archi" in tab:
+        trovati |= {r[0] for r in conn.execute(
+            "SELECT da FROM archi WHERE substr(da, 1, ?) = ? "
+            "UNION SELECT a FROM archi WHERE substr(a, 1, ?) = ?", (n, chiave, n, chiave))}
+    if chiave in trovati:
+        return [chiave]
+    return sorted(trovati)
+
+
+def ultimo_ts_sessione_conn(conn: sqlite3.Connection, sid: str) -> str:
+    """`last_ts` della sessione in questo DB ('' se non ha una riga in `sessioni`):
+    serve a scegliere, fra più archivi che la conoscono, quello più aggiornato."""
+    try:
+        r = conn.execute("SELECT last_ts FROM sessioni WHERE sessionId=?", (sid,)).fetchone()
+    except sqlite3.OperationalError:
+        return ""
+    return (r[0] or "") if r else ""
+
+
+def avvistamenti_sessione_conn(conn: sqlite3.Connection, chiave: str) -> int:
+    """Quante righe dell'archivio vengono da `sessions/<chiave>…` (anche un prefisso).
+    Sui DB nati prima del contratto R1 dice se la CONVERSAZIONE c'è anche se la
+    scheda no. -1 se il DB non ha nemmeno gli avvistamenti (non misurabile ≠ zero)."""
+    pref = f"sessions/{chiave}"
+    try:
+        return int(conn.execute(
+            "SELECT count(DISTINCT uuid) FROM sightings WHERE substr(source, 1, ?) = ?",
+            (len(pref), pref)).fetchone()[0])
+    except sqlite3.OperationalError:
+        return -1
+
+
+def _scheda_da_avvistamenti(conn: sqlite3.Connection, membro: str) -> str | None:
+    """Il testo di una scheda `recupero/…` ricomposto dai suoi pezzi, in ordine.
+    Si trovano dall'avvistamento del membro (è il registro di ciò che il membro ha
+    scritto), non ricostruendo gli uuid dell'indexer: il modo in cui l'indexer li
+    calcola è affar suo."""
+    try:
+        pezzi = conn.execute(
+            "SELECT m.content FROM sightings s JOIN messages m ON m.uuid = s.uuid "
+            "WHERE s.source = ? ORDER BY m.ts, m.uuid", (membro,)).fetchall()
+    except sqlite3.OperationalError:
+        return None
+    return "\n".join((p[0] or "") for p in pezzi) if pezzi else None
+
+
+def sessione_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
+                  max_chars: int = 0) -> dict[str, Any]:
+    """Tutto ciò che QUESTO DB sa della sessione `sid` (id intero, già risolto).
+
+    - `sessione`: la riga di `sessioni` (None se la sessione è nota solo dagli archi);
+    - `scheda`: il testo della scheda `recupero:sessioni` (stato, ultime parole,
+      fili aperti, commit…), ricomposto dai pezzi;
+    - `conversazione`: le righe avvistate in `sessions/<sid>…` (tutti i filoni),
+      per mittente, con primo e ultimo ts e i file d'origine;
+    - `archi`: gli archi che la toccano (da o a), fino a `limit`;
+    - `stirpe`: id e posizione dichiarati nella riga, più la scheda della stirpe;
+    - `note`: ciò che manca, detto — mai un campo vuoto che finge di essere un dato.
+    """
+    note: list[str] = []
+    riga = None
+    r = _righe_dict(conn.execute("SELECT * FROM sessioni WHERE sessionId=?", (sid,)))
+    if r:
+        riga = {k: v for k, v in r[0].items() if k != "ingest_date"}
+        riga["ingest_date"] = r[0].get("ingest_date")
+    else:
+        note.append("nessuna riga in `sessioni`: la sessione è nota solo come estremo "
+                    "di un arco (non è stata consegnata in un bundle di questo DB)")
+    scheda = _scheda_da_avvistamenti(conn, f"recupero/sessioni/{sid}.md")
+    if scheda is None:
+        note.append("nessuna scheda `recupero:sessioni` per questa sessione in questo DB")
+    pref = f"sessions/{sid}"
+    conversazione: dict[str, Any]
+    try:
+        per_sender = {(s or "(vuoto)"): int(n) for s, n in conn.execute(
+            "SELECT m.sender, count(DISTINCT m.uuid) FROM sightings s "
+            "JOIN messages m ON m.uuid = s.uuid WHERE substr(s.source, 1, ?) = ? "
+            "GROUP BY m.sender ORDER BY 2 DESC", (len(pref), pref))}
+        tot, primo, ultimo = conn.execute(
+            "SELECT count(DISTINCT m.uuid), min(NULLIF(m.ts,'')), max(NULLIF(m.ts,'')) "
+            "FROM sightings s JOIN messages m ON m.uuid = s.uuid "
+            "WHERE substr(s.source, 1, ?) = ?", (len(pref), pref)).fetchone()
+        fonti = [f for (f,) in conn.execute(
+            "SELECT DISTINCT source FROM sightings WHERE substr(source, 1, ?) = ? "
+            "ORDER BY source", (len(pref), pref))]
+        conversazione = {"messaggi": int(tot or 0), "per_sender": per_sender,
+                         "primo_ts": primo or "", "ultimo_ts": ultimo or "", "fonti": fonti}
+        if not tot:
+            note.append(f"nessuna riga avvistata in {pref}…: la conversazione non è in "
+                        f"questo DB (o ci è entrata da un'altra strada)")
+    except sqlite3.OperationalError:
+        conversazione = {"messaggi": None, "per_sender": {}, "primo_ts": "",
+                         "ultimo_ts": "", "fonti": []}
+        note.append("questo DB non ha la tabella `sightings`: i messaggi della "
+                    "conversazione non si possono contare da qui")
+    archi_tot = int(conn.execute("SELECT count(*) FROM archi WHERE da=? OR a=?",
+                                 (sid, sid)).fetchone()[0])
+    archi = _righe_dict(conn.execute(
+        "SELECT da, a, relazione, via, livello, prova, voce, peso, chiusura, bundle_scan "
+        "FROM archi WHERE da=? OR a=? ORDER BY da, a, relazione, via LIMIT ?",
+        (sid, sid, max(0, int(limit)))))
+    if archi_tot > len(archi):
+        note.append(f"archi troncati: {len(archi)} di {archi_tot} (alza `limit`)")
+    stirpe = None
+    if riga and riga.get("stirpe"):
+        sid_stirpe = str(riga["stirpe"])
+        scheda_stirpe = _scheda_da_avvistamenti(conn, f"recupero/stirpi/{sid_stirpe}.md")
+        stirpe = {"id": sid_stirpe, "posizione": riga.get("stirpe_pos"),
+                  "scheda": _tronca_testo(scheda_stirpe, max_chars)}
+        if scheda_stirpe is None:
+            note.append(f"la stirpe {sid_stirpe} è dichiarata ma la sua scheda non è in "
+                        f"questo DB (la chiusura sugli archi la dà get_stirpe)")
+    return {"sessionId": sid, "sessione": riga, "scheda": _tronca_testo(scheda, max_chars),
+            "conversazione": conversazione, "archi": archi, "archi_totali": archi_tot,
+            "stirpe": stirpe, "note": note}
+
+
+_CHIUSURA = "(chiusura = 1 OR chiusura = '1')"
+
+
+def stirpe_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
+                max_chars: int = 0) -> dict[str, Any]:
+    """La STIRPE di `sid`: la chiusura sugli archi con `chiusura=1`, presi senza
+    verso (da↔a), a partire da `sid`. Ogni membro porta i suoi dati da `sessioni`;
+    un membro SENZA riga in `sessioni` resta nella stirpe e lo dice (`in_sessioni:
+    false`, e l'elenco `senza_riga`) — sparire sarebbe peggio che essere incompleto.
+    Oltre `limit` membri la visita si ferma e lo dichiara."""
+    note: list[str] = []
+    visti: list[str] = [sid]
+    insieme = {sid}
+    fronte = [sid]
+    archi: dict[tuple, dict[str, Any]] = {}
+    troncata = False
+    while fronte and not troncata:
+        seg = ",".join("?" * len(fronte))
+        righe = _righe_dict(conn.execute(
+            "SELECT da, a, relazione, via, livello, prova, voce, peso, chiusura, bundle_scan "
+            f"FROM archi WHERE {_CHIUSURA} AND (da IN ({seg}) OR a IN ({seg}))",
+            (*fronte, *fronte)))
+        nuovo: list[str] = []
+        for arco in righe:
+            archi[(arco["da"], arco["a"], arco["relazione"], arco["via"])] = arco
+            for estremo in (arco["da"], arco["a"]):
+                if estremo not in insieme:
+                    if len(insieme) >= max(1, int(limit)):
+                        troncata = True
+                        break
+                    insieme.add(estremo)
+                    visti.append(estremo)
+                    nuovo.append(estremo)
+        fronte = nuovo
+    if troncata:
+        # gli archi verso i nodi rimasti fuori non si danno: nominerebbero membri
+        # che l'elenco non contiene
+        archi = {k: v for k, v in archi.items() if v["da"] in insieme and v["a"] in insieme}
+        note.append(f"stirpe troncata a {len(insieme)} membri (alza `limit`)")
+    seg = ",".join("?" * len(visti))
+    dati = {r["sessionId"]: r for r in _righe_dict(conn.execute(
+        "SELECT sessionId, titolo, cwd, first_ts, last_ts, last_uuid, file, stato, "
+        f"stato_fonte, stirpe, stirpe_pos, n_commit, n_fili FROM sessioni "
+        f"WHERE sessionId IN ({seg})", tuple(visti)))}
+    membri = []
+    for m in visti:
+        if m in dati:
+            membri.append({**dati[m], "in_sessioni": True})
+        else:
+            membri.append({"sessionId": m, "in_sessioni": False})
+    membri.sort(key=lambda d: (not d["in_sessioni"], d.get("first_ts") or "", d["sessionId"]))
+    senza_riga = [m["sessionId"] for m in membri if not m["in_sessioni"]]
+    if senza_riga:
+        note.append(f"{len(senza_riga)} membri senza riga in `sessioni`: noti solo come "
+                    f"estremi di un arco (non consegnati in un bundle di questo DB)")
+    if len(visti) == 1:
+        altri = int(conn.execute("SELECT count(*) FROM archi WHERE da=? OR a=?",
+                                 (sid, sid)).fetchone()[0])
+        note.append("nessun arco con chiusura=1: la sessione è sola nella sua stirpe"
+                    + (f" ({altri} archi senza chiusura: vedi get_session)" if altri else ""))
+    dichiarate = sorted({str(d["stirpe"]) for d in dati.values() if d.get("stirpe")})
+    schede = {s: _tronca_testo(_scheda_da_avvistamenti(conn, f"recupero/stirpi/{s}.md"),
+                               max_chars) for s in dichiarate}
+    if len(dichiarate) > 1:
+        note.append(f"i membri dichiarano {len(dichiarate)} stirpi diverse: la chiusura "
+                    f"sugli archi le unisce, le righe di `sessioni` no")
+    return {"sessionId": sid, "membri": membri, "senza_riga": senza_riga,
+            "archi": sorted(archi.values(), key=lambda a: (a["da"], a["a"], a["relazione"],
+                                                           a["via"])),
+            "stirpi_dichiarate": dichiarate, "schede_stirpe": schede, "note": note}
