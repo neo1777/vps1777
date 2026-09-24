@@ -130,7 +130,7 @@ would swallow, ignoring sessions and logs).
 | `subagents/<sessionId>/agent-<hash>.jsonl` (since 16/09/2026) | sub-agent conversations; a sub-agent's user rows are `sender='mandato'` (the machine wrote them) | `subagent:<cwd-label>` |
 | `mcp-logs/<sessionId>/<server>/…` | MCP server logs, in 4000-character chunks | `mcp-log:<server>` |
 | `workfiles/<encoded-cwd>/…` | artefacts of the working folders: text and code in chunks, PDFs with text, images via OCR, nested zips (one level); a session backup (a Claude Code `.jsonl`) becomes a conversation; binaries leave a `non-testo` tombstone | `workfile:<encoded-cwd>/<first subfolder>` |
-| `documents/…` (since 25/09/2026) | the **documents** that the app's `export` delivers next to the sessions (not conversations): the same pipeline as `workfiles/` — text and code in chunks, PDFs, images via OCR, nested zips, content sniffing; binaries leave a `non-testo` tombstone with `source` `bundle-documents`. A zip of the export folder has `MANIFEST.json` and `sessions/`, so it is a bundle: before, every document ended up in `membro-sconosciuto` | `document:<first subfolder>`, or `document` for a file in the root of `documents/` (today the app writes it flat, `<short-md5-of-the-path>__<name>`: they all get `document`) |
+| `documents/…` (since 25/09/2026) | the **documents** that the app's `export` delivers next to the sessions (not conversations): the same pipeline as `workfiles/` — text and code in chunks, PDFs, images via OCR, nested zips, content sniffing; binaries leave a `non-testo` tombstone with `source` `bundle-documents`. A zip of the export folder has `MANIFEST.json` and `sessions/`, so it is a bundle: before, every document ended up in `membro-sconosciuto` | `document:<first subfolder>`, or `document` for a file in the root of `documents/`. The app (since 25/09/2026) writes `documents/<family>/<short-md5-of-the-path>__<name>`: the label is the family — `document:testo`, `document:codice`, `document:config`… —, never the original path |
 | `recupero/…` (since 24/09/2026) — or the bridge `workfiles/_recupero-1777/…` | session, lineage and memory cards as rows; three `.tsv` files as tables — see [the `recupero/` prefix](#the-recupero-prefix--contract-r1) | `recupero:sessioni` · `recupero:stirpi` · `recupero:memorie` |
 | `inventario/inventario-sessioni.tsv` | the session index as text, in 4000-character chunks | `inventario` |
 | `inventario/inventario-sessioni.json` | **not** indexed: a tombstone saying whether its data came in another way — see [the tombstones](#tombstones-what-doesnt-get-in-and-why) | — |
@@ -813,11 +813,12 @@ Declared, not discovered by chance:
   the alias has `workfile:_recupero-1777/…` rows; re-ingesting with this indexer adds
   the `recupero:*` rows but doesn't remove those.
 - **`memorie` without a tool.** It is read via SQL or with `search`.
-- **`documents/` does not say where a document comes from.** The app writes the
-  folder flat (`<short-md5-of-the-path>__<name>`), so the label is `document` for
-  all of them. The file name is searchable, because it is the first line of the text.
-  The folder of origin is only in `MANIFEST.json` (`documenti.consegnati[].src`),
-  which the indexer does not read for this.
+- **`documents/` says what kind a document is, not where it comes from.** The app
+  (since 25/09/2026) writes `documents/<family>/…`: the label is the family
+  (`document:testo`, `document:codice`…). The file name is searchable, because it is
+  the first line of the text; the folder of origin is only in `MANIFEST.json`
+  (`documenti.consegnati[].src`), on purpose: a path in the label would carry the
+  disk layout into every answer.
 - **`last_ts` and the last message.** On a real bundle the card's `last_ts` turned
   out more recent than the ts of the `last_uuid` message (the last record with that
   timestamp wasn't a message). The order holds — the card comes after — but

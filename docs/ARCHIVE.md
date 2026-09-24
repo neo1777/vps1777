@@ -124,7 +124,7 @@ documenti» mangerebbe, ignorando sessioni e log).
 | `subagents/<sessionId>/agent-<hash>.jsonl` (dal 16/09/2026) | conversazioni dei sub-agenti; le righe user di un sub-agente sono `sender='mandato'` (le ha scritte la macchina) | `subagent:<etichetta-cwd>` |
 | `mcp-logs/<sessionId>/<server>/…` | log dei server MCP, a pezzi da 4000 caratteri | `mcp-log:<server>` |
 | `workfiles/<cwd-codificata>/…` | artefatti delle cartelle di lavoro: testo e codice a pezzi, PDF con testo, immagini via OCR, zip annidati (un livello); un backup di sessione (`.jsonl` di Claude Code) diventa conversazione; i binari lasciano una lapide `non-testo` | `workfile:<cwd-codificata>/<prima sottocartella>` |
-| `documents/…` (dal 25/09/2026) | i **documenti** che l'`export` dell'app consegna accanto alle sessioni (non conversazioni): la stessa trafila di `workfiles/` — testo e codice a pezzi, PDF, immagini via OCR, zip annidati, sniff del contenuto; i binari lasciano una lapide `non-testo` con `source` `bundle-documents`. Uno zip della cartella dell'export ha `MANIFEST.json` e `sessions/`, quindi è un bundle: prima ogni documento finiva in `membro-sconosciuto` | `document:<prima sottocartella>`, o `document` per un file nella radice di `documents/` (oggi l'app la scrive piatta, `<md5-corto-del-path>__<nome>`: tutti prendono `document`) |
+| `documents/…` (dal 25/09/2026) | i **documenti** che l'`export` dell'app consegna accanto alle sessioni (non conversazioni): la stessa trafila di `workfiles/` — testo e codice a pezzi, PDF, immagini via OCR, zip annidati, sniff del contenuto; i binari lasciano una lapide `non-testo` con `source` `bundle-documents`. Uno zip della cartella dell'export ha `MANIFEST.json` e `sessions/`, quindi è un bundle: prima ogni documento finiva in `membro-sconosciuto` | `document:<prima sottocartella>`, o `document` per un file nella radice di `documents/`. L'app (dal 25/09/2026) scrive `documents/<famiglia>/<md5-corto-del-path>__<nome>`: l'etichetta è la famiglia — `document:testo`, `document:codice`, `document:config`… —, mai il percorso d'origine |
 | `recupero/…` (dal 24/09/2026) — o il ponte `workfiles/_recupero-1777/…` | schede di sessione, di stirpe e di memoria come righe; tre `.tsv` come tabelle — vedi [il prefisso `recupero/`](#il-prefisso-recupero--contratto-r1) | `recupero:sessioni` · `recupero:stirpi` · `recupero:memorie` |
 | `inventario/inventario-sessioni.tsv` | l'indice delle sessioni come testo, a pezzi da 4000 | `inventario` |
 | `inventario/inventario-sessioni.json` | **non** si indicizza: lapide che dice se i suoi dati sono entrati da un'altra parte — vedi [le lapidi](#lapidi-cosa-non-entra-e-perché) | — |
@@ -802,11 +802,12 @@ Dichiarati, non scoperti per caso:
   all'alias ha righe `workfile:_recupero-1777/…`; re-ingerire con questo indexer
   aggiunge le righe `recupero:*` ma non toglie quelle.
 - **`memorie` senza tool.** Si legge via SQL o con `search`.
-- **`documents/` non dice da dove viene un documento.** L'app scrive la cartella
-  piatta (`<md5-corto-del-path>__<nome>`), quindi l'etichetta è `document` per tutti.
-  Il nome del file è cercabile, perché è la prima riga del testo. La cartella
-  d'origine sta solo in `MANIFEST.json` (`documenti.consegnati[].src`), che l'indexer
-  non legge per questo.
+- **`documents/` dice di che specie è un documento, non da dove viene.** L'app (dal
+  25/09/2026) scrive `documents/<famiglia>/…`: l'etichetta è la famiglia
+  (`document:testo`, `document:codice`…). Il nome del file è cercabile, perché è la
+  prima riga del testo; la cartella d'origine sta solo in `MANIFEST.json`
+  (`documenti.consegnati[].src`), di proposito: un percorso nell'etichetta porterebbe
+  la struttura del disco in ogni risposta.
 - **`last_ts` e l'ultimo messaggio.** Su un bundle reale il `last_ts` della scheda è
   risultato più recente del ts del messaggio `last_uuid` (l'ultimo record con quel
   timestamp non era un messaggio). L'ordine regge — la scheda esce dopo — ma
