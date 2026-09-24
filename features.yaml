@@ -358,6 +358,25 @@ features:
     since: "0.48.0"
     verify:
       mcp_tool: {service: archive-mcp, name: search_ibrida}
+  - id: archive.indice-vettoriale
+    nome: "archive-mcp · costruttore dell'indice vettoriale (<db>.vec.db)"
+    cosa: "Scrive l'indice che search_ibrida legge: perimetro dichiarato (finestra di
+           ts, etichette project anche per prefisso, o tutto; le righe senza ts non
+           restano fuori in silenzio), indice_meta scritta dal costruttore, e un
+           registro rowid/uuid/impronta che rende l'aggiornamento incrementale sicuro
+           dopo un re-ingest (rowid orfani, riusati, testi cambiati: tolti e detti coi
+           numeri). Stesso metro del server, importato da semantica.py. Gira sul PC,
+           nell'ambiente del lock di archive-mcp: non è nell'immagine."
+    dove: ["services/archive-mcp/tools/costruisci_indice.py",
+           "services/archive-mcp/tests/test_costruisci_indice.py",
+           "docs/RICERCA-IBRIDA.md"]
+    status: opt-in
+    since: "non rilasciato (24/09/2026)"
+    decisione: "si lancia a mano sul PC: indicizzare il corpus costa decine di ore di
+                CPU e sulla VPS non si fa (#281, docs/RICERCA-IBRIDA.md). Prima era
+                un prototipo fuori dal repo. [docs/RICERCA-IBRIDA.md]"
+    verify:
+      python_def: {path: "services/archive-mcp/tools/costruisci_indice.py", name: costruisci}
   - id: archive.count
     nome: "archive-mcp · count"
     cosa: "Conta quanti messaggi corrispondono alla query (non limitato) — per frequenze e prevalenze."
@@ -437,6 +456,48 @@ features:
     status: active-default
     verify:
       mcp_tool: {service: archive-mcp, name: set_ruolo}
+  - id: archive.get_session
+    nome: "archive-mcp · get_session"
+    cosa: "Tutto ciò che l'archivio sa di UNA sessione Claude Code (contratto recupero/ R1):
+           la riga di `sessioni`, la scheda, i messaggi avvistati in sessions/<sid>…, gli
+           archi, la stirpe. Id intero o prefisso ≥ 8 univoco (ambiguo → errore coi
+           candidati); risponde il DB col last_ts più recente, gli altri in anche_in; un
+           DB nato prima del contratto lo dice, mai uno zero muto."
+    dove: ["mcp-tool:archive-mcp/get_session",
+           "services/archive-mcp/tests/test_sessioni.py",
+           "docs/ARCHIVE.md"]
+    status: active-default
+    since: "non rilasciato (24/09/2026)"
+    verify:
+      mcp_tool: {service: archive-mcp, name: get_session}
+  - id: archive.get_stirpe
+    nome: "archive-mcp · get_stirpe"
+    cosa: "La stirpe di una sessione: chiusura sugli archi con chiusura=1 (senza verso),
+           coi dati dei membri da `sessioni`; i nodi senza riga restano, dichiarati
+           (in_sessioni: false, senza_riga). Oltre `limit` la visita si ferma e lo dice."
+    dove: ["mcp-tool:archive-mcp/get_stirpe",
+           "services/archive-mcp/tests/test_sessioni.py",
+           "docs/ARCHIVE.md"]
+    status: active-default
+    since: "non rilasciato (24/09/2026)"
+    verify:
+      mcp_tool: {service: archive-mcp, name: get_stirpe}
+  - id: archive.bundle-recupero
+    nome: "Indexer · il prefisso recupero/ del bundle (contratto R1) e il ponte come alias"
+    cosa: "Stirpi, archi e memorie arrivavano solo nell'inventario json, scartato come
+           «ridondante», e sparivano con lo zip. Ora: schede di sessione/stirpe/memoria
+           come righe recupero:* (la scheda di sessione è una foglia del thread, a
+           last_ts + 1 ms), i tre .tsv nelle tabelle sessioni/archi/memorie, il MANIFEST
+           in meta, lapidi parlanti per ciò che è fuori contratto, pezzi vecchi tolti, e
+           workfiles/_recupero-1777/ letto come alias di recupero/ (stesse righe)."
+    dove: ["services/gateway/app/archive_indexer.py#_iter_recupero_scheda",
+           "services/gateway/app/archive_indexer.py#_normalizza_recupero",
+           "services/gateway/tests/test_archive_indexer.py#test_ponte_workfiles_e_un_alias_di_recupero",
+           "docs/ARCHIVE.md"]
+    status: active-default
+    since: "non rilasciato (24/09/2026)"
+    verify:
+      python_def: {path: services/gateway/app/archive_indexer.py, name: _normalizza_recupero}
   - id: nb.nb_list
     nome: "nb1777-mcp · nb_list"
     cosa: "Lista tutti i notebook visibili al profilo attivo."

@@ -547,9 +547,16 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         # ② lista vettoriale: rowid → uuid (l'indice lavora su rowid, il mondo
         #    esterno su uuid: la traduzione sta qui e non nell'indice, così un
         #    re-ingest che cambia i rowid rompe l'indice, non il contratto).
+        #    ⚠️ E il rowid può MENTIRE: dopo un re-ingest (INSERT OR REPLACE) un
+        #    rowid dell'indice può non esistere più o essere di un altro messaggio.
+        #    Se l'indice ha il registro del costruttore, ogni risultato si confronta
+        #    con l'uuid registrato e chi non combacia si SCARTA — e si dichiara in
+        #    `indici[].verifica`, mai restituito come se fosse giusto.
         lista_vec: list[str] = []
         try:
             rowids = semantica.knn_dedup(conn, blob, topn=limit * 3)
+            registro = semantica.uuid_registrati(conn, rowids)
+            assenti = uuid_diversi = 0
             if rowids:
                 seg = ",".join("?" * len(rowids))
                 cur = conn.execute(
@@ -559,8 +566,12 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                 for rid in rowids:                      # l'ordine del knn è il rank
                     r = per_rowid.get(rid)
                     if not r:
+                        assenti += 1
                         continue
                     u = r["uuid"]
+                    if registro is not None and registro.get(rid) != u:
+                        uuid_diversi += 1
+                        continue
                     lista_vec.append(u)
                     if u not in per_uuid:
                         per_uuid[u] = {"uuid": u, "project": r["project"], "ts": r["ts"],
@@ -583,7 +594,14 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                             "messaggi_indicizzati": m.get("messaggi", "?"),
                             "perimetro": m.get("perimetro", "non dichiarato"),
                             "modello": m.get("modello", "?"),
-                            "generato": m.get("generato", "?")})
+                            "generato": m.get("generato", "?"),
+                            # campo IN PIÙ: gli altri non cambiano forma
+                            "verifica": semantica.verdetto_registro(
+                                registro is not None, candidati=len(rowids),
+                                assenti=assenti, uuid_diversi=uuid_diversi)})
+        if assenti or uuid_diversi:
+            log.warning("indice di %s disallineato: %d rowid assenti, %d uuid diversi "
+                        "su %d candidati", name, assenti, uuid_diversi, len(rowids))
     return {
         "righe": righe[:limit],
         "indici": meta_per_db,
@@ -928,3 +946,149 @@ def _leggi_segreto() -> str:
             return ""
     return ""
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SESSIONI E STIRPI — Livello 2 del contratto `recupero/` R1 (24/09/2026)
+# ══════════════════════════════════════════════════════════════════════════════
+# La logica su una connessione sta in fts.py (`sessione_conn`, `stirpe_conn`); qui
+# c'è ciò che serve al multi-DB: risolvere un id o un prefisso su TUTTI gli archivi,
+# scegliere quale risponde, e dire perché quando nessuno può rispondere. Aggiunte in
+# coda, senza toccare le funzioni sopra.
+SessioneNonRisolta = fts.SessioneNonRisolta
+
+_SID_MIN = 8                    # un prefisso di 8 caratteri è la forma breve in uso
+_TABELLE_R1 = ("sessioni", "archi")
+_CANDIDATI_MAX = 20             # oltre, l'elenco dei candidati si taglia (dichiarato)
+
+
+def _risolvi_sessione(chiave: str, db: str) -> tuple[str, str, list[str]]:
+    """(sessionId intero, DB che risponde, altri DB che lo conoscono) — o
+    SessioneNonRisolta con il perché.
+
+    Il DB che risponde è quello col `last_ts` più recente per quella sessione (la
+    fotografia più aggiornata); a parità, il primo per nome. Gli altri vanno in
+    `anche_in`, come per il dedup di `search` (#272): nessuna informazione buttata.
+    """
+    _maybe_reload()
+    k = (chiave or "").strip()
+    if len(k) < _SID_MIN:
+        raise SessioneNonRisolta(
+            f"sessionId '{k}' troppo corto: serve l'id intero o un prefisso di almeno "
+            f"{_SID_MIN} caratteri (la forma breve in uso, es. i primi 8 dell'uuid).")
+    trovati: dict[str, list[tuple[str, str]]] = {}
+    senza_tabelle: list[str] = []
+    vuoti: list[str] = []
+    avvistata_in: dict[str, int] = {}
+    for name in _targets(db):
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            tab = fts.tabelle_conn(conn)
+            if not set(_TABELLE_R1) <= tab:
+                senza_tabelle.append(name)
+                n = fts.avvistamenti_sessione_conn(conn, k)
+                if n > 0:
+                    avvistata_in[name] = n
+                continue
+            if conn.execute("SELECT count(*) FROM sessioni").fetchone()[0] == 0:
+                vuoti.append(name)
+            candidati = fts.candidati_sessione_conn(conn, k)
+            for sid in candidati:
+                trovati.setdefault(sid, []).append(
+                    (name, fts.ultimo_ts_sessione_conn(conn, sid)))
+            if not candidati:
+                n = fts.avvistamenti_sessione_conn(conn, k)
+                if n > 0:
+                    avvistata_in[name] = n
+        except sqlite3.OperationalError as exc:
+            log.warning("DB %s schema error: %s", name, exc)
+        finally:
+            conn.close()
+    if len(trovati) > 1:
+        elenco = sorted(trovati)
+        righe = "; ".join(f"{s} ({', '.join(n for n, _ in trovati[s])})"
+                          for s in elenco[:_CANDIDATI_MAX])
+        altro = (f" … e altri {len(elenco) - _CANDIDATI_MAX}"
+                 if len(elenco) > _CANDIDATI_MAX else "")
+        raise SessioneNonRisolta(
+            f"il prefisso '{k}' è ambiguo: {len(elenco)} sessioni. Candidati: {righe}{altro}. "
+            f"Passa più caratteri o l'id intero.")
+    if not trovati:
+        raise SessioneNonRisolta(_perche_non_trovata(k, db, senza_tabelle, vuoti,
+                                                     avvistata_in))
+    sid, dove = next(iter(trovati.items()))
+    dove = sorted(dove)                          # per nome: la parità la vince il primo
+    scelto = max(dove, key=lambda d: d[1])[0]
+    return sid, scelto, [n for n, _ in dove if n != scelto]
+
+
+def _perche_non_trovata(k: str, db: str, senza_tabelle: list[str], vuoti: list[str],
+                        avvistata_in: dict[str, int]) -> str:
+    """Il messaggio quando nessun DB risolve `k`: distingue «non c'è» da «non potevo
+    cercarla». Un DB indicizzato prima del contratto R1 non ha le tabelle, e lì una
+    risposta vuota direbbe il falso."""
+    prima_r1 = ("è stato indicizzato prima del contratto R1 (recupero/, 24/09/2026): "
+                "re-ingerisci il bundle con un indexer che legge recupero/")
+    if db and senza_tabelle == [db]:
+        msg = f"questo DB ('{db}') non ha la tabella sessioni: {prima_r1}."
+    elif db and vuoti == [db]:
+        msg = (f"il DB '{db}' ha la tabella sessioni ma è VUOTA: nessun bundle con "
+               f"recupero/ è mai entrato qui. Nessuna sessione '{k}'.")
+    elif db:
+        msg = f"nessuna sessione '{k}' nel DB '{db}' (né in `sessioni` né negli archi)."
+    else:
+        parti = [f"nessuna sessione '{k}' negli archivi"]
+        con_dati = [n for n in available_dbs() if n not in senza_tabelle and n not in vuoti]
+        if con_dati:
+            parti.append(f"cercata in: {', '.join(con_dati)}")
+        if vuoti:
+            parti.append(f"tabella sessioni vuota in: {', '.join(vuoti)}")
+        if senza_tabelle:
+            parti.append(f"SENZA tabella sessioni (indicizzati prima del contratto R1, "
+                         f"lì non si può cercare): {', '.join(senza_tabelle)}")
+        msg = "; ".join(parti) + "."
+    if avvistata_in:
+        dove = ", ".join(f"{n} ({c} righe)" for n, c in sorted(avvistata_in.items()))
+        msg += (f" La CONVERSAZIONE però c'è, avvistata in sessions/{k}… di: {dove} — "
+                f"leggila con search / get_conversation.")
+    return msg
+
+
+@_serializzata
+def get_session(session_id: str, db: str = "", *, limit: int = 200,
+                max_chars: int = 0) -> dict[str, Any]:
+    """La scheda di una sessione (id intero o prefisso ≥ 8 univoco) dal DB più
+    aggiornato che la conosce. Serializzata col semaforo delle ricerche (#270): il
+    conteggio passa dagli avvistamenti, che si scandiscono."""
+    sid, scelto, altri = _risolvi_sessione(session_id, db)
+    conn = _open(scelto)
+    try:
+        out = fts.sessione_conn(conn, sid, limit=limit, max_chars=max_chars)
+    finally:
+        conn.close()
+    out["db"] = scelto
+    out["snapshot"] = _snapshot(_DBS[scelto])
+    if altri:
+        out["anche_in"] = altri
+    return out
+
+
+@_serializzata
+def get_stirpe(session_id: str, db: str = "", *, limit: int = 200,
+               max_chars: int = 0) -> dict[str, Any]:
+    """La stirpe di una sessione (chiusura sugli archi con chiusura=1) dal DB più
+    aggiornato che la conosce."""
+    sid, scelto, altri = _risolvi_sessione(session_id, db)
+    conn = _open(scelto)
+    try:
+        out = fts.stirpe_conn(conn, sid, limit=limit, max_chars=max_chars)
+    finally:
+        conn.close()
+    out["db"] = scelto
+    out["snapshot"] = _snapshot(_DBS[scelto])
+    if altri:
+        out["anche_in"] = altri
+    return out

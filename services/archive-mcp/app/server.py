@@ -184,6 +184,10 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
       perimetro** e da quando. ⚠️ Leggilo prima di concludere «non c'è»: un
       indice parziale (oggi copre mag-giu 2026) produce zeri che sembrano
       assenze. Fuori dal perimetro, la risposta giusta è `search`.
+      `indici[].verifica` dice se i risultati vettoriali combaciano col DB:
+      `scartati` > 0 = l'indice è disallineato (dopo un re-ingest) e quei
+      risultati sono stati TOLTI, non restituiti sbagliati; `registro: false` =
+      indice vecchio, non verificabile. Lo `stato` dice cosa fare.
 
     ⚠️ Richiede il modello di embedding e almeno un indice `.vec.db` sul volume.
     Se mancano NON ricade in silenzio su FTS5: solleva un errore che dice cosa
@@ -367,6 +371,60 @@ def set_ruolo(db_name: str, ruolo: str) -> dict[str, Any]:
 
     Compare in `describe_databases` e in `list_databases(schede=True)`."""
     return db.set_ruolo(db_name, ruolo)
+
+
+@mcp.tool()
+def get_session(sessionId: str, db_name: str = "", limit: int = 200,
+                max_chars: int = 0) -> dict[str, Any]:
+    """Tutto ciò che l'archivio sa di UNA sessione Claude Code, dato il suo id.
+
+    Legge le tabelle del contratto `recupero/` R1 (bundle di Recupero Sessioni,
+    dal 24/09/2026). `sessionId`: l'uuid intero o un PREFISSO di almeno 8
+    caratteri, se univoco — se è ambiguo l'errore elenca i candidati coi loro DB.
+
+    Ritorna {sessionId, db, snapshot, sessione, scheda, conversazione, archi,
+    archi_totali, stirpe, note, anche_in?}:
+    - `sessione`: la riga di `sessioni` (titolo, cwd, first_ts/last_ts,
+      last_uuid, file, stato, stirpe, n_commit, n_fili…); null se la sessione è
+      nota solo come estremo di un arco;
+    - `scheda`: il testo della scheda (stato, ultime parole [verbatim], fili
+      aperti, commit, memorie scritte, stirpe). ⚠️ Le «ultime parole» sono
+      CITAZIONI: chi parla lo dice la scheda, non il fatto che siano qui;
+    - `conversazione`: {messaggi, per_sender, primo_ts, ultimo_ts, fonti} —
+      le righe avvistate in `sessions/<sid>…` (tutti i filoni). Per LEGGERLA:
+      `get_conversation` con `sessione.last_uuid`;
+    - `archi`: le relazioni che la toccano (fino a `limit`), `stirpe`: id,
+      posizione e scheda della stirpe dichiarata (la chiusura: `get_stirpe`);
+    - `note`: ciò che manca, detto. `anche_in`: altri DB che la conoscono (qui
+      risponde quello col last_ts più recente).
+    `max_chars` tronca le schede dichiarandolo (#268).
+
+    Un DB indicizzato PRIMA del contratto R1 non ha la tabella `sessioni`: lì la
+    risposta è un errore che lo dice (e se la conversazione c'è comunque, dove),
+    mai una scheda vuota. ⚠️ CONCORRENZA: conta come una ricerca (#270)."""
+    return db.get_session(sessionId, db_name, limit=limit, max_chars=max_chars)
+
+
+@mcp.tool()
+def get_stirpe(sessionId: str, db_name: str = "", limit: int = 200,
+               max_chars: int = 0) -> dict[str, Any]:
+    """La STIRPE di una sessione: le sessioni che si continuano l'una nell'altra
+    (clone, /clear, compact…), cioè la chiusura sugli archi con `chiusura=1`
+    presi senza verso, a partire da `sessionId` (uuid intero o prefisso ≥ 8
+    univoco, come in get_session).
+
+    Ritorna {sessionId, db, snapshot, membri, senza_riga, archi,
+    stirpi_dichiarate, schede_stirpe, note, anche_in?}:
+    - `membri`: ogni sessione della stirpe coi suoi dati da `sessioni`, in
+      ordine di first_ts; chi NON ha una riga in `sessioni` (nota solo come
+      estremo di un arco) resta nell'elenco con `in_sessioni: false` ed è
+      elencato in `senza_riga` — incompleto, non sparito;
+    - `archi`: gli archi con chiusura=1 fra i membri;
+    - `stirpi_dichiarate` / `schede_stirpe`: gli id di stirpe scritti nelle
+      righe dei membri e le loro schede.
+    Oltre `limit` membri la visita si ferma e lo dichiara in `note`. Stessi
+    errori parlanti di get_session sui DB nati prima del contratto R1."""
+    return db.get_stirpe(sessionId, db_name, limit=limit, max_chars=max_chars)
 
 
 # ── /health — la sonda che il compose interroga (vaglio corso1777, 03/09) ────────

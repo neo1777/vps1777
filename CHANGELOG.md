@@ -4,6 +4,148 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+
+- **archive-mcp: i tool `get_session` e `get_stirpe`** (Livello 2 del contratto
+  `recupero/` R1). `get_session(sessionId)` accetta l'uuid intero o un prefisso di almeno 8
+  caratteri se univoco; se è ambiguo, l'errore elenca i candidati coi loro DB. Restituisce la
+  riga di `sessioni`, la scheda, i messaggi della conversazione avvistati in
+  `sessions/<sid>…` (per mittente, con primo e ultimo ts), gli archi che la toccano e la
+  stirpe. `get_stirpe(sessionId)` restituisce la chiusura sugli archi con `chiusura=1`, coi
+  dati dei membri; i nodi senza riga in `sessioni` sono dichiarati, non tolti. Se più DB
+  conoscono la sessione risponde quello col `last_ts` più recente, e gli altri vanno in
+  `anche_in`. Un DB indicizzato prima del contratto lo dice con un errore parlante («non ha
+  la tabella sessioni…», più dove sta comunque la conversazione), mai con uno zero muto. Sola
+  lettura, redazione in uscita ereditata dal decoratore, semaforo delle ricerche (#270). Le
+  funzioni sono aggiunte in coda a `db.py` e `fts.py`, senza toccare quelle esistenti. I test
+  usano un DB prodotto dall'indexer vero del gateway: il contratto fra le due parti è provato
+  da un lato all'altro. I due tool, e la lettura di `recupero/` nell'indexer, hanno la loro
+  voce nel ledger `features.yaml` (senza, `verify-features` era rosso: 2 fallimenti duri).
+- **archive1777 legge `recupero/` nel bundle di Recupero Sessioni (contratto R1).**
+  Stirpi, archi e memorie arrivavano sulla VPS solo dentro `inventario-sessioni.json`,
+  scartato come «ridondante», e sparivano con lo zip cancellato dopo l'ingest; il
+  sessionId non era una colonna. Ora: le schede `recupero/sessioni/*.md` entrano come
+  righe `recupero:sessioni` con **`parent_uuid` = l'ultimo messaggio** della sessione (la
+  scheda è una foglia del thread: `get_conversation` la trova senza cambiare archive-mcp);
+  `recupero/stirpi/*.md` come `recupero:stirpi`; `recupero/memorie/*.md` come **una** riga
+  `recupero:memorie` con uuid stabile sul percorso d'origine (una memoria cambiata lascia la
+  versione vecchia in `revisions`); i tre `.tsv` riempiono le tabelle nuove `sessioni`,
+  `archi` e `memorie` (`CREATE TABLE IF NOT EXISTS`, innocue sui DB esistenti) e non
+  diventano testo. Un membro fuori contratto (front-matter assente, `contratto` diverso da
+  R1, tipo incoerente, colonna mancante) lascia una lapide che dice cosa gli manca. Dati
+  veri: un bundle reale piccolo entra con 3 schede e 1/15/1 righe nelle tabelle, zero
+  speaker o voice vuoti. Doc: `docs/ARCHIVE.md`.
+  - **La scheda viene dopo l'ultimo messaggio**: `ts` = ultimo della sessione + 1 ms (+1 ms
+    per pezzo). `get_conversation` ordina per `(ts, uuid)`, e a ts uguale decideva lo sha1.
+    Senza millesimi nella fonte si parte dal secondo dopo: `…00.001Z` ordinerebbe prima di
+    `…00Z`.
+  - **Il ponte `workfiles/_recupero-1777/` è un alias di `recupero/`**, tabelle comprese: l'app
+    lo sceglie quando la sua copia dell'indexer è più vecchia di quella sul server, e senza
+    alias quei bundle perdevano le tabelle. Le righe escono identiche (uuid e avvistamenti
+    sulla forma canonica `recupero/…`): stesso bundle dalle due radici → stesso DB, misurato
+    anche sul bundle reale.
+  - **Una scheda (o memoria) riscritta con meno pezzi toglie quelli in più** da `messages`,
+    FTS e avvistamenti; la loro ultima versione resta in `revisions`.
+- **`MANIFEST.json` del bundle nella scheda `meta`.** `generated`, `previsione_ingest` e
+  `recupero` vanno in `meta` (`bundle_generated`, `bundle_previsione_ingest`,
+  `bundle_recupero`): il metro che l'app scrive per collaudare l'ingest non si perde più.
+  Il membro non diventa testo e lascia la lapide `manifest-in-meta`; un manifest
+  illeggibile lascia `manifest-illeggibile`.
+- **`write_rows` accetta `ts_source` come decima colonna facoltativa.** Il valore
+  `data-export` era nello schema dal 20/07 e nessun codice poteva scriverlo; senza la
+  colonna il regime resta `messaggio` come prima, un valore fuori elenco ferma l'ingest.
+- **Il costruttore dell'indice della ricerca ibrida entra nel repo**
+  (`services/archive-mcp/tools/costruisci_indice.py`, #281). Fino a qui il server leggeva
+  `<db>.vec.db` ma nessun codice del repo lo scriveva: c'era uno script del POC, fuori,
+  con il DB sorgente scritto nel codice, il perimetro per sola finestra di ts (le righe
+  senza ts non entravano mai, in silenzio) e `indice_meta` aggiunta a mano. Ora:
+  - **perimetro dichiarato e parametrico**: finestra di ts, etichette `project` (anche
+    per prefisso, `recupero:*`) o tutto; se la finestra lascerebbe fuori righe senza ts
+    il costruttore si ferma, dice quante sono e chiede `--senza-ts includi|escludi`;
+  - **`indice_meta` scritta dal costruttore**: perimetro (leggibile e JSON), modello e
+    impronta del file, conteggi, data, versione del costruttore, esito dell'ultimo
+    passaggio;
+  - **incrementale sicuro rispetto al rowid**: un registro `indice_righe` (rowid, uuid,
+    impronta del testo, vettori) accanto alla tabella vec0 fa vedere cosa un re-ingest
+    ha cambiato — rowid spariti, rowid riusati da un altro messaggio, testi cambiati,
+    righe uscite dal perimetro — e lo dice coi numeri. Prima di pubblicare, registro e
+    tabella devono quadrare: nessun vettore orfano servito in silenzio;
+  - `--controlla` confronta indice e DB senza scrivere (esce 1 se non sono in pari);
+    il lavoro passa da un `.parziale` riprendibile e rinominato solo a fine lavoro.
+  Il metro è quello del server, importato e non ricopiato: `semantica.apri_modello` e
+  `semantica.codifica` servono ora sia `embed_query` sia il costruttore (vettori della
+  query identici byte per byte a prima), il prefisso `passage: ` sta accanto a `query: `.
+  Misurato contro l'indice del POC (60 messaggi, 127 pezzi): coseno 1.000000. Un indice
+  del POC, senza registro, va ricostruito una volta (`--ricostruisci`). Il costruttore gira
+  sul PC nell'ambiente del lock di archive-mcp: nessuna dipendenza nuova, immagine invariata.
+- **`docs/en/RICERCA-IBRIDA.md`**: la ricerca ibrida in inglese, traduzione completa e
+  registrata in `docs/en/MANIFEST.json` (la CI la tiene fresca). La pagina italiana ora
+  racconta tutto il giro: costruttore, perimetro, `indice_meta`, incrementale,
+  `--controlla`/`--ricostruisci`, la verifica nel server, i costi misurati e cosa fare
+  sulla VPS la prima volta (~17 h di `--ricostruisci` per maggio–giugno). I due README
+  la elencano e dicono che archive-mcp fa anche ricerca per senso.
+
+### 📖 Documentazione
+
+- **`docs/ARCHIVE.md` riscritto sul bundle e sulle sessioni, e tradotto per intero in
+  inglese (`docs/en/ARCHIVE.md`, registrato in `docs/en/MANIFEST.json`, quindi sorvegliato
+  dal test delle traduzioni fresche).** Il documento ora copre:
+  - il bundle di Recupero Sessioni membro per membro: che cosa diventa ogni cartella, con
+    quale etichetta, e chi lascia un avvistamento;
+  - il contratto `recupero/` R1: front-matter con un esempio, i `.tsv`, le versioni, e il
+    ponte `workfiles/_recupero-1777/` come alias;
+  - come le schede diventano righe: uuid, ts a +1 ms, `parent_uuid`, `ts_source`,
+    speaker/voice, pezzi vecchi tolti;
+  - le tabelle `sessioni`/`archi`/`memorie` colonna per colonna, il manifest in `meta`, e la
+    tabella di tutte le lapidi coi loro motivi;
+  - i **15** tool (all'elenco mancavano `search_ibrida` e `check_integrity`);
+  - `get_session` e `get_stirpe` in dettaglio: parametri, risposta con un esempio, prefisso di
+    8 caratteri, `anche_in`, errori sui DB nati prima del contratto R1;
+  - come si interrogano sessioni e stirpi, anche via SQL;
+  - lo schema completo del DB, con `revisions`, `sightings`, `ts_source` e speaker/voice;
+  - una sezione **Limiti noti**: le tabelle non dimenticano, `meta` descrive solo l'ultimo
+    bundle, la redazione in uscita guasta gli uuid con gruppi di sole cifre (difetto
+    preesistente, dichiarato), le righe vecchie del ponte, `memorie` senza tool, `last_ts`
+    rispetto all'ultimo messaggio.
+
+  La sezione privacy diceva «non c'è mascheramento in output». Era vero quando è stata
+  scritta, ma dal 02/08/2026 la redazione di email, telefoni e anagrafica esiste: ora il
+  documento la descrive con quello che copre e quello che non copre.
+- **README (IT/EN), `docs/ARCHITECTURE.md` (IT/EN), `docs/en/INSTALL.md`,
+  `installer/README.md` allineati:**
+  - la riga di archive-mcp dice cosa fa oggi, e che espone 15 tool;
+  - il README inglese rimanda alla traduzione inglese di ARCHIVE;
+  - ARCHITECTURE descrive il volume `archive-data` (tabelle del bundle, montato in sola
+    lettura da archive-mcp) e il contratto `archive-mcp → gateway /internal/archive/*`,
+    che mancava;
+  - l'installer diceva «`archive` espone 2 tool» e «`nb1777` ne espone 35»: ora 15 e 38,
+    contati sui `@mcp.tool()`.
+
+### Modificato
+
+- **La lapide di `inventario-sessioni.json` dice se i suoi dati sono entrati.** Era
+  «ridondante» senza condizioni, ed era falso. Ora `non-indicizzato-ridondante` solo se il
+  bundle ha `recupero/` (o il ponte); `non-indicizzato-senza-recupero` altrimenti, col
+  perché e la cura. `BUNDLE_FILE_RIDONDANTI` perde `MANIFEST.json` (ora `BUNDLE_FILE_IN_META`) e
+  `BUNDLE_PREFISSI_INDICIZZATI` guadagna `recupero`: chi ne tiene una copia (il test
+  speculare dell'app) va allineato.
+- **`voice` delle schede di recupero: `unknown` con la bandiera `scheda_recupero`.** Una
+  scheda cita parola per parola le ultime frasi dell'utente; con heading, elenco numerato e
+  grassetti la regola dei prompt-template la marcava `pasted_ai` (controprovato nel test).
+
+### Corretto
+
+- **`search_ibrida` non restituisce più il messaggio sbagliato dopo un re-ingest.**
+  L'indice lavora sul rowid e l'indexer fa `INSERT OR REPLACE` sull'uuid: un rowid
+  dell'indice poteva non esistere più (il risultato spariva in silenzio) o essere stato
+  riusato da un altro messaggio (restituito per il senso di un altro, come fosse giusto).
+  Se l'indice ha il registro del costruttore, ogni risultato vettoriale si confronta ora
+  con l'uuid registrato e chi non combacia si scarta. La risposta lo dichiara in un campo
+  in più, `indici[].verifica` (`registro`, `candidati`, `scartati`, `rowid_assenti`,
+  `uuid_diversi`, `stato` con la cura); i campi esistenti non cambiano forma. Un indice
+  senza registro (quello del POC) si comporta come prima ma lo dice, e conta i rowid
+  spariti che prima si scartavano senza dirlo.
+
 ## [0.50.0] — 2026-09-20
 
 <!-- Sezione senza numero DI PROPOSITO: il numero di versione lo decide chi

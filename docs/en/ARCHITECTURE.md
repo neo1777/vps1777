@@ -42,7 +42,7 @@ Three networks, three distinct roles (H25):
 | Volume | Container path | Contents |
 |---|---|---|
 | `gateway-data` | `/var/lib/gateway` | audit log, audit.jsonl |
-| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5) |
+| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5: the messages and, from Session Recovery bundles, the `sessioni`/`archi`/`memorie` tables — see [ARCHIVE.md](ARCHIVE.md)). Written by the gateway; `archive-mcp` mounts it read-only |
 | `nlm-auth` | `/var/lib/nlm` | NotebookLM profile `profiles/default/` + `AUTH_PENDING.flag` |
 | Tailscale (host) | `/var/lib/tailscale` on the **host** | node state (not in a container; see INGRESS.md) |
 | `caddy-data` (if Caddy) | `/data` | ACME certificates |
@@ -61,6 +61,7 @@ See [SECRETS.md](../SECRETS.md) (Italian). All file-mounted at `/run/secrets/<na
 | gateway → nb1777-mcp (nlm profile) | internal HTTP + shared secret | `/internal/nlm/{status,profile}` |
 | bot → nb1777-mcp (notifications #30) | internal HTTP + shared secret | `/internal/{notifications,canonico/ack}` |
 | nb1777-bot → nb1777-mcp | MCP client HTTP | `http://nb1777-mcp:8003/mcp` |
+| archive-mcp → gateway (DB card: `set_description`, `set_ruolo`) | internal HTTP + shared secret | `/internal/archive/{description,ruolo}` — archive-mcp's only writes, since it has the volume read-only |
 | gateway → ocr (image ingest) | internal HTTP, bytes→text | `http://ocr:8004/ocr` (env `OCR_URL`; the gateway does NOT run processes — guarded by `test_gateway_non_tocca_docker`) |
 | Telegram cloud → bot | long-poll outbound HTTPS | `api.telegram.org` |
 | claude.ai → gateway | OAuth 2.1 + MCP streamable-http | `/<SECRET>/<name>/mcp` |

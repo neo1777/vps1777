@@ -82,6 +82,11 @@ ATTESI = {
     "fatti.md": "strato LOCALE della memoria 1777 (0.44.0): vive nel volume dati di nb1777-mcp, /var/lib/nlm/memoria-1777/ — fuori dal repo PER COSTRUZIONE; nel repo c'è solo fatti.esempio.md",
     "errata.md": "idem fatti.md: strato locale, nel volume; nel repo solo errata.esempio.md",
     "login_history.json": "membro dell'export claude.ai a 5 zip (light_metadata-NNN.zip, dal 29/08/2026): lo produce claude.ai, ARCHIVE.md lo NOMINA per dire che viene indicizzato",
+    "inventario/inventario-sessioni.json": "membro del bundle di Recupero Sessioni (lo produce "
+        "l'app, fuori da questo repo): ARCHIVE.md lo NOMINA per dire cosa dice la sua lapide "
+        "(24/09/2026, contratto recupero/ R1)",
+    "MANIFEST.md": "membro del bundle di Recupero Sessioni (lo produce l'app, fuori da questo "
+        "repo): ARCHIVE.md lo NOMINA per dire che diventa testo con etichetta `manifest`",
 }
 
 

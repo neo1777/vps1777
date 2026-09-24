@@ -64,7 +64,7 @@ If you re-run `setup.sh`, it skips the steps already done.
    ```
    Upload `nlm-profile.tgz` to `<PUBLIC_BASE>/admin/nlm` (admin login). The gateway extracts it onto the volume; `nb1777-mcp` picks it up on the next call.
    If `nlm` comes up "not found": `uv tool update-shell` (puts `~/.local/bin` in the PATH) and reopen the terminal.
-3. **claude.ai connector**: Settings → Integrations → Add → paste the URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (and `/nb1777/mcp`). Authorize → admin login. `archive` exposes the archive search tools (list and details in [ARCHIVE.md](../ARCHIVE.md) (Italian)), `nb1777` exposes **38** of them ([NB1777.md](../NB1777.md) (Italian)). Connectors **persist** across gateway restarts (DCR saved to disk).
+3. **claude.ai connector**: Settings → Integrations → Add → paste the URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (and `/nb1777/mcp`). Authorize → admin login. `archive` exposes the archive search tools (list and details in [ARCHIVE.md](ARCHIVE.md)), `nb1777` exposes **38** of them ([NB1777.md](../NB1777.md) (Italian)). Connectors **persist** across gateway restarts (DCR saved to disk).
 4. **Telegram bot**: `/start` to your bot
 5. **Mini App**: in the bot, the **Pannello** button next to the text field (or
    `/pannello`) → the mobile control deck: notebooks, archive, secrets, update.
