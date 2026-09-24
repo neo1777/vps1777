@@ -2111,9 +2111,11 @@ def test_canary_prefissi_del_bundle_che_l_indexer_conosce(tmp_path: Path) -> Non
     Se il lato-bundle aggiunge un prefisso, aggiornare la tupla E il dispatch,
     e questo elenco è ciò che il test speculare del bundle deve leggere."""
     import zipfile
-    assert archive_indexer.BUNDLE_PREFISSI_INDICIZZATI == ("sessions", "subagents", "mcp-logs", "workfiles")
+    assert archive_indexer.BUNDLE_PREFISSI_INDICIZZATI == (
+        "sessions", "subagents", "mcp-logs", "workfiles", "recupero")
     assert archive_indexer.BUNDLE_FILE_INDICIZZATI == ("inventario/inventario-sessioni.tsv", "MANIFEST.md")
-    assert archive_indexer.BUNDLE_FILE_RIDONDANTI == ("MANIFEST.json", "inventario/inventario-sessioni.json")
+    assert archive_indexer.BUNDLE_FILE_IN_META == ("MANIFEST.json",)
+    assert archive_indexer.BUNDLE_FILE_RIDONDANTI == ("inventario/inventario-sessioni.json",)
 
     cc = ('{"type":"user","uuid":"%s","timestamp":"2026-09-16T10:00:00Z","cwd":"/x/p",'
           '"message":{"role":"user","content":"segno-%s"}}')
@@ -2122,6 +2124,8 @@ def test_canary_prefissi_del_bundle_che_l_indexer_conosce(tmp_path: Path) -> Non
         f"subagents/{_SID}/agent-0.jsonl": cc % ("c-sub", "subagents"),
         f"mcp-logs/{_SID}/nb1777/1.jsonl": '{"sessionId":"%s","msg":"segno-mcp-logs"}' % _SID,
         "workfiles/-home-x/nota.md": "segno-workfiles",
+        f"recupero/sessioni/{_SID}.md": (f"---\ncontratto: R1\ntipo: sessione\n"
+                                         f"sessionId: {_SID}\n---\nsegno-recupero"),
         "inventario/inventario-sessioni.tsv": "sid\tsegno-inventario",
         "MANIFEST.md": "# segno-manifest-md",
         "MANIFEST.json": "{}",
@@ -2136,12 +2140,16 @@ def test_canary_prefissi_del_bundle_che_l_indexer_conosce(tmp_path: Path) -> Non
     db = tmp_path / "out.db"
     archive_indexer.index_file(str(zp), str(db))
     con = sqlite3.connect(db)
-    for segno in ("sessions", "subagents", "mcp-logs", "workfiles", "inventario", "manifest-md"):
+    for segno in ("sessions", "subagents", "mcp-logs", "workfiles", "recupero", "inventario",
+                  "manifest-md"):
         assert con.execute("SELECT count(*) FROM messages WHERE content LIKE ?",
                            (f"%segno-{segno}%",)).fetchone()[0] >= 1, f"prefisso {segno} non indicizzato"
-    lapidi = {d: r for r, d in con.execute("SELECT reason, detail FROM skipped WHERE source='bundle'")}
+    # il detail comincia col nome del membro; dopo i «:» c'è il perché
+    lapidi = {d.split(":", 1)[0]: r for r, d in con.execute(
+        "SELECT reason, detail FROM skipped WHERE source LIKE 'bundle%'")}
     assert lapidi == {
-        "MANIFEST.json": "non-indicizzato-ridondante",
+        "MANIFEST.json": "manifest-in-meta",
+        # il bundle ha recupero/: il json è ridondante DAVVERO (vedi il test sul motivo)
         "inventario/inventario-sessioni.json": "non-indicizzato-ridondante",
         "cartella-inventata/x.jsonl": "membro-sconosciuto",
     }, lapidi
@@ -2192,3 +2200,428 @@ def test_list_db_infos_salta_i_sidecar_vec_e_dimentica_i_cancellati(tmp_path: Pa
     assert archive_indexer.list_db_infos(tmp_path) == []
     assert str(a) not in archive_indexer._DB_INFO_CACHE
     assert archive_indexer.list_db_infos(tmp_path / "manca") == []
+
+
+# ── recupero/ nel bundle (contratto R1, 24/09/2026): stirpi, archi e memorie ──
+# Fino a qui arrivavano sulla VPS solo dentro inventario-sessioni.json, scartato
+# come «ridondante», e sparivano con lo zip. Dati TUTTI sintetici: sid inventati,
+# percorsi finti, testi di prova.
+
+_SID_A = "0f1e2d3c-4b5a-4968-8776-a5b4c3d2e1f0"
+_SID_B = "1a2b3c4d-5e6f-4a0b-9c8d-7e6f5a4b3c2d"
+_STIRPE = "2b3c4d5e-6f70-4b1c-8d9e-0f1a2b3c4d5e"
+_MEM_PATH = "/percorso/sintetico/progetto/memory/nota-di-prova.md"
+_MEM_MEMBRO = "recupero/memorie/abcdef0123__nota-di-prova.md"
+
+
+def _scheda(campi: dict, corpo: str) -> str:
+    """Una scheda nel formato del contratto: front-matter fra due `---`, poi il corpo."""
+    return "---\n" + "".join(f"{k}: {v}\n" for k, v in campi.items()) + "---\n" + corpo
+
+
+def _tsv(intestazione: tuple, *righe: tuple) -> str:
+    return "\n".join("\t".join(r) for r in (intestazione, *righe)) + "\n"
+
+
+def _membri_recupero(memoria: str = "testo-memoria versione uno") -> dict:
+    """I membri `recupero/` di un bundle minimo ma completo: una scheda per tipo e i
+    tre .tsv. La scheda di sessione porta heading e grassetti come quelle vere: è
+    ciò che, senza la regola ⓪ di classify_voice, la farebbe uscire `pasted_ai`."""
+    return {
+        f"recupero/sessioni/{_SID_A}.md": _scheda({
+            "contratto": "R1", "tipo": "sessione", "sessionId": _SID_A,
+            "titolo": "sessione di prova", "cwd": "/percorso/sintetico/progetto",
+            "first_ts": "2026-09-10T10:00:00.000Z", "last_ts": "2026-09-10T10:05:00.000Z",
+            "last_uuid": "rc-a1", "file": f"sessions/{_SID_A}.jsonl",
+            "stato": "turno-chiuso", "stato_fonte": "transcript",
+            "stirpe": _STIRPE, "stirpe_pos": "1", "stirpe_n": "2",
+            "n_commit": "2", "n_fili": "1", "n_memorie_scritte": "1",
+            "campo-futuro": "ignorato",   # un campo in più NON cambia versione
+        }, "# sessione di prova\n\n## Stato\n\n**turno-chiuso** · transcript\n\n"
+           "## Ultime parole\n\n- umano [verbatim]: segno-ultime-parole\n\n"
+           "## Fili aperti\n\n1. filo di prova\n2. altro filo\n3. terzo filo\n\n"
+           "## Commit\n\n**abc1234** · commit di prova\n"),
+        f"recupero/stirpi/{_STIRPE}.md": _scheda({
+            "contratto": "R1", "tipo": "stirpe", "id": _STIRPE,
+            "membri": f"{_SID_A},{_SID_B}", "n": "2",
+        }, f"# Stirpe\n\n{_SID_A} → continua → {_SID_B} · clone · forte · prova-sintetica\n"),
+        _MEM_MEMBRO: _scheda({
+            "contratto": "R1", "tipo": "memoria", "path": _MEM_PATH,
+            "sistema": "claude-code", "livello": "strutturale", "md5": "0" * 32,
+            "mtime": "2026-09-09T08:00:00Z", "cartella": "/percorso/sintetico/progetto/memory",
+            "scritta_da": _SID_A, "omonimi": "0", "doppioni": "0",
+        }, memoria + "\n"),
+        "recupero/sessioni.tsv": _tsv(
+            archive_indexer._TABELLE_RECORD["sessioni"] + ("colonna-futura",),
+            (_SID_A, "sessione di prova", "/percorso/sintetico/progetto",
+             "2026-09-10T10:00:00.000Z", "2026-09-10T10:05:00.000Z", "rc-a1",
+             f"sessions/{_SID_A}.jsonl", "turno-chiuso", "transcript", _STIRPE, "1", "2", "1",
+             "ignorata")),
+        "recupero/archi.tsv": _tsv(
+            archive_indexer._TABELLE_RECORD["archi"],
+            (_SID_A, _SID_B, "continua", "clone", "forte", "prova-sintetica", "app",
+             "0.9", "1", "2026-09-10T11:00:00Z")),
+        "recupero/memorie.tsv": _tsv(
+            archive_indexer._TABELLE_RECORD["memorie"],
+            (_MEM_PATH, "claude-code", "strutturale", "0" * 32, "2026-09-09T08:00:00Z",
+             _SID_A, _MEM_MEMBRO)),
+    }
+
+
+def _bundle_recupero(tmp_path: Path, *, nome: str = "bundle.zip", recupero: dict | None = None,
+                     manifest: dict | None = None, extra: dict | None = None) -> Path:
+    """Un bundle con la sessione madre in sessions/ (due messaggi, rc-u1 → rc-a1),
+    l'inventario json, il MANIFEST e i membri `recupero/` passati (default: completi)."""
+    import zipfile
+    sessione = "\n".join([
+        json.dumps({"type": "user", "uuid": "rc-u1", "timestamp": "2026-09-10T10:00:00.000Z",
+                    "sessionId": _SID_A, "cwd": "/percorso/sintetico/progetto",
+                    "message": {"role": "user", "content": "domanda di prova"}}),
+        json.dumps({"type": "assistant", "uuid": "rc-a1", "parentUuid": "rc-u1",
+                    "timestamp": "2026-09-10T10:05:00.000Z", "sessionId": _SID_A,
+                    "cwd": "/percorso/sintetico/progetto",
+                    "message": {"role": "assistant", "content": [{"type": "text", "text": "risposta"}]}}),
+    ])
+    if manifest is None:
+        manifest = {"generated": "2026-09-24T20:00:00",
+                    "previsione_ingest": {"righe_in_tabella": 2, "per_prefisso": {"sessions": 2}},
+                    "recupero": {"contratto": "R1", "radice": "recupero/",
+                                 "schede": {"sessioni": 1, "stirpi": 1, "memorie": 1}}}
+    membri = {"MANIFEST.json": json.dumps(manifest),
+              f"sessions/{_SID_A}.jsonl": sessione,
+              "inventario/inventario-sessioni.json": "{}",
+              **(_membri_recupero() if recupero is None else recupero),
+              **(extra or {})}
+    zp = tmp_path / nome
+    with zipfile.ZipFile(zp, "w") as z:
+        for n, corpo in membri.items():
+            z.writestr(n, corpo)
+    return zp
+
+
+def _uid_scheda(membro: str, idx: int = 0) -> str:
+    return archive_indexer._uid("recupero", membro, str(idx))
+
+
+def test_recupero_le_schede_entrano_come_righe(tmp_path: Path) -> None:
+    """Le tre schede diventano righe di `messages` con la forma del contratto:
+    etichetta, sender, ts, uuid stabile, `ts_source='data-export'`, un avvistamento
+    ciascuna — e speaker/voice POPOLATI (REVIEW.md: uno speaker vuoto è un bug)."""
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path)), str(db))
+    con = sqlite3.connect(db)
+    q = ("SELECT project, sender, ts, parent_uuid, ts_source, speaker, voice, content_flags,"
+         " content FROM messages WHERE uuid=?")
+    sess = con.execute(q, (_uid_scheda(f"recupero/sessioni/{_SID_A}.md"),)).fetchone()
+    assert sess is not None, "la scheda di sessione non è entrata"
+    assert sess[:5] == ("recupero:sessioni", "recupero", "2026-09-10T10:05:00.000Z", "rc-a1",
+                        "data-export"), sess[:5]
+    assert sess[8].startswith(f"[recupero/sessioni/{_SID_A}.md]\n# sessione di prova")
+    assert "segno-ultime-parole" in sess[8]
+    # la voce: la scheda ha heading, grassetti e un elenco numerato — senza la regola ⓪
+    # uscirebbe pasted_ai, cioè le parole vere dell'owner marcate «incollate da un'AI»
+    assert (sess[5], sess[6]) == ("unknown", "unknown"), sess[5:7]
+    assert "scheda_recupero" in json.loads(sess[7])
+
+    stirpe = con.execute(q, (_uid_scheda(f"recupero/stirpi/{_STIRPE}.md"),)).fetchone()
+    assert stirpe is not None and stirpe[:2] == ("recupero:stirpi", "recupero")
+    assert stirpe[3] == "", "la stirpe non appartiene a UNA conversazione"
+    assert _SID_B in stirpe[8], "i sid interi nel corpo: l'arco si trova con FTS"
+
+    mem = con.execute(q, (archive_indexer._uid("recupero-memoria", _MEM_PATH),)).fetchone()
+    assert mem is not None, "la memoria non è entrata con l'uuid del suo PATH d'origine"
+    assert mem[:5] == ("recupero:memorie", "memory", "2026-09-09T08:00:00Z", "", "data-export")
+    assert "testo-memoria versione uno" in mem[8]
+
+    assert con.execute("SELECT count(*) FROM messages WHERE speaker='' OR voice=''"
+                       ).fetchone()[0] == 0, "speaker/voice vuoti in uscita"
+    # un avvistamento per ogni riga-scheda, col nome del membro
+    fonti = sorted(r[0] for r in con.execute(
+        "SELECT source FROM sightings WHERE source LIKE 'recupero/%'"))
+    assert fonti == sorted([f"recupero/sessioni/{_SID_A}.md", f"recupero/stirpi/{_STIRPE}.md",
+                            _MEM_MEMBRO]), fonti
+    # e nessuna lapide: il bundle rispetta il contratto
+    assert con.execute("SELECT count(*) FROM skipped WHERE source='bundle-recupero'"
+                       ).fetchone()[0] == 0
+    # FTS: il sessionId (che il corpo della scheda non ripete) si trova dal membro
+    assert con.execute("SELECT count(*) FROM messages_fts WHERE messages_fts MATCH ?",
+                       (f'"{_SID_A}" AND "sessione di prova"',)).fetchone()[0] >= 1
+
+
+def test_recupero_la_scheda_e_una_foglia_della_conversazione(tmp_path: Path) -> None:
+    """Il chunk 0 della scheda pende dall'ultimo messaggio (`last_uuid`): camminando
+    `parent_uuid` come fa `get_conversation` di archive-mcp (stessa CTE), dal primo
+    messaggio si arriva alla scheda e dalla scheda si risale alla chat intera."""
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path)), str(db))
+    scheda = _uid_scheda(f"recupero/sessioni/{_SID_A}.md")
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT parent_uuid FROM messages WHERE uuid=?",
+                       (scheda,)).fetchone()[0] == "rc-a1"
+
+    def thread(uuid: str) -> set:
+        return {r[0] for r in con.execute(
+            "WITH RECURSIVE "
+            " up(u) AS (SELECT ? UNION SELECT m.parent_uuid FROM messages m JOIN up"
+            "   ON m.uuid = up.u WHERE m.parent_uuid <> ''), "
+            " down(u) AS (SELECT ? UNION SELECT m.uuid FROM messages m JOIN down"
+            "   ON m.parent_uuid = down.u) "
+            "SELECT u FROM up UNION SELECT u FROM down", (uuid, uuid)) if r[0]}
+
+    assert thread("rc-u1") == {"rc-u1", "rc-a1", scheda}, "dal primo messaggio"
+    assert thread(scheda) == {"rc-u1", "rc-a1", scheda}, "dalla scheda"
+
+
+def test_recupero_i_pezzi_di_una_scheda_lunga_sono_in_catena(tmp_path: Path) -> None:
+    """Una scheda che supera un chunk: il chunk 0 pende da `last_uuid`, ogni altro
+    dal precedente — la scheda resta UN ramo, non N foglie sorelle."""
+    membri = _membri_recupero()
+    lungo = "\n\n".join(f"paragrafo {i} " + "x" * 900 for i in range(20))
+    membri[f"recupero/sessioni/{_SID_A}.md"] = _scheda(
+        {"contratto": "R1", "tipo": "sessione", "sessionId": _SID_A,
+         "last_ts": "2026-09-10T10:05:00.000Z", "last_uuid": "rc-a1"}, lungo)
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, recupero=membri)), str(db))
+    con = sqlite3.connect(db)
+    membro = f"recupero/sessioni/{_SID_A}.md"
+    pezzi = [_uid_scheda(membro, i) for i in range(3)]
+    padri = [con.execute("SELECT parent_uuid FROM messages WHERE uuid=?", (u,)).fetchone()
+             for u in pezzi]
+    assert padri[0] == ("rc-a1",) and padri[1] == (pezzi[0],) and padri[2] == (pezzi[1],), padri
+
+
+def test_recupero_i_tsv_riempiono_le_tabelle_e_non_messages(tmp_path: Path) -> None:
+    """I .tsv sono relazioni: vanno in `sessioni`/`archi`/`memorie`, per NOME di
+    colonna (la colonna in più si ignora), con le affinità che servono alle query
+    del Livello 2 (`chiusura=1` deve trovare l'arco). Nessuno diventa testo."""
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path)), str(db))
+    con = sqlite3.connect(db)
+    s = con.execute("SELECT titolo, last_uuid, file, stirpe, stirpe_pos, n_commit, ingest_date"
+                    " FROM sessioni WHERE sessionId=?", (_SID_A,)).fetchone()
+    assert s[:6] == ("sessione di prova", "rc-a1", f"sessions/{_SID_A}.jsonl", _STIRPE, 1, 2), s
+    assert s[6], "ingest_date vuota"
+    assert con.execute("SELECT relazione, via, peso FROM archi WHERE chiusura=1 AND da=?",
+                       (_SID_A,)).fetchall() == [("continua", "clone", 0.9)]
+    assert con.execute("SELECT membro, scritta_da FROM memorie WHERE path=?",
+                       (_MEM_PATH,)).fetchone() == (_MEM_MEMBRO, _SID_A)
+    assert con.execute("SELECT count(*) FROM messages WHERE content LIKE '%sessionId%titolo%'"
+                       " OR content LIKE '%prova-sintetica%app%'").fetchone()[0] == 0, \
+        "un .tsv è finito in messages"
+    assert con.execute("SELECT count(*) FROM sightings WHERE source LIKE 'recupero/%.tsv'"
+                       ).fetchone()[0] == 0
+
+
+def test_recupero_reingest_idempotente(tmp_path: Path) -> None:
+    """Lo stesso bundle due volte: stesse righe, stesse tabelle, zero revisioni."""
+    zp = _bundle_recupero(tmp_path)
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    prima = [con.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
+             for t in ("messages", "sessioni", "archi", "memorie", "sightings", "skipped")]
+    con.close()
+    archive_indexer.index_file(str(zp), str(db))
+    con = sqlite3.connect(db)
+    dopo = [con.execute(f"SELECT count(*) FROM {t}").fetchone()[0]
+            for t in ("messages", "sessioni", "archi", "memorie", "sightings", "skipped")]
+    assert dopo == prima, (prima, dopo)
+    assert con.execute("SELECT count(*) FROM revisions").fetchone()[0] == 0
+
+
+def test_recupero_memoria_cambiata_lascia_una_revisione(tmp_path: Path) -> None:
+    """Il nome del membro e l'uuid dipendono dal PERCORSO d'origine, non dal testo:
+    una memoria cambiata fra due bundle è la STESSA riga con testo nuovo, e la
+    versione uscente va in `revisions` — non un doppione, non una sparizione."""
+    db = tmp_path / "out.db"
+    uno = _bundle_recupero(tmp_path, nome="uno.zip")
+    due = _bundle_recupero(tmp_path, nome="due.zip",
+                           recupero=_membri_recupero(memoria="testo-memoria versione DUE"))
+    archive_indexer.index_file(str(uno), str(db))
+    archive_indexer.index_file(str(due), str(db))
+    con = sqlite3.connect(db)
+    uid = archive_indexer._uid("recupero-memoria", _MEM_PATH)
+    assert con.execute("SELECT count(*) FROM messages WHERE project='recupero:memorie'"
+                       ).fetchone()[0] == 1, "la memoria cambiata ha fatto un doppione"
+    assert "versione DUE" in con.execute("SELECT content FROM messages WHERE uuid=?",
+                                         (uid,)).fetchone()[0]
+    rev = con.execute("SELECT content, ts_source FROM revisions WHERE uuid=?", (uid,)).fetchall()
+    assert len(rev) == 1 and "versione uno" in rev[0][0], rev
+    assert rev[0][1] == "data-export", "la revisione conserva il regime della versione uscente"
+    assert con.execute("SELECT count(*) FROM revisions").fetchone()[0] == 1, \
+        "solo la memoria è cambiata: nessun'altra revisione"
+
+
+def test_recupero_membro_fuori_contratto_lascia_la_sua_lapide(tmp_path: Path) -> None:
+    """Un membro `recupero/` che non rispetta il contratto NON entra e NON sparisce:
+    lascia una lapide col motivo e il perché. I membri sani accanto entrano lo stesso."""
+    ok = {"contratto": "R1", "tipo": "sessione", "sessionId": _SID_B,
+          "last_ts": "2026-09-11T09:00:00Z", "last_uuid": ""}
+    cattivi = {
+        "recupero/sessioni/senza-fm.md": "# niente front-matter\n\ntesto-perso-1",
+        "recupero/sessioni/aperto.md": "---\ncontratto: R1\ntipo: sessione\ntitolo: testo-perso-2\n",
+        "recupero/sessioni/riga-storta.md": "---\ncontratto: R1\nriga senza due punti\n---\ntesto-perso-3",
+        "recupero/sessioni/r2.md": _scheda({**ok, "contratto": "R2"}, "testo-perso-4"),
+        "recupero/sessioni/senza-contratto.md": _scheda(
+            {k: v for k, v in ok.items() if k != "contratto"}, "testo-perso-5"),
+        "recupero/stirpi/tipo-sbagliato.md": _scheda({**ok}, "testo-perso-6"),
+        "recupero/memorie/senza-path.md": _scheda(
+            {"contratto": "R1", "tipo": "memoria", "mtime": "2026-09-09T08:00:00Z"}, "testo-perso-7"),
+        "recupero/altro/x.md": "---\ncontratto: R1\n---\ntesto-perso-8",
+        "recupero/sessioni/x.json": '{"type": "user"}',
+    }
+    membri = {**_membri_recupero(), **cattivi,
+              f"recupero/sessioni/{_SID_B}.md": _scheda(ok, "scheda-sana-accanto"),
+              "recupero/archi.tsv": _tsv(("da", "a", "relazione", "via"), (_SID_A, _SID_B, "x", "y")),
+              "recupero/sessioni.tsv": _tsv(
+                  archive_indexer._TABELLE_RECORD["sessioni"],
+                  (_SID_A,) + ("v",) * 12,
+                  (_SID_B, "con\tun tab in più") + ("v",) * 11,
+                  ("",) + ("v",) * 12)}
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path, recupero=membri)), str(db))
+    con = sqlite3.connect(db)
+    lapidi = {}
+    for src, reason, detail in con.execute(
+            "SELECT source, reason, detail FROM skipped WHERE source IN ('bundle','bundle-recupero')"):
+        chiave = detail.split(":", 1)[0]
+        lapidi.setdefault(chiave, []).append((src, reason))
+    atteso = {
+        "recupero/sessioni/senza-fm.md": "recupero-senza-front-matter",
+        "recupero/sessioni/aperto.md": "recupero-senza-front-matter",
+        "recupero/sessioni/riga-storta.md": "recupero-front-matter-malformato",
+        "recupero/sessioni/r2.md": "recupero-contratto-ignoto",
+        "recupero/sessioni/senza-contratto.md": "recupero-contratto-ignoto",
+        "recupero/stirpi/tipo-sbagliato.md": "recupero-fuori-contratto",
+        "recupero/memorie/senza-path.md": "recupero-fuori-contratto",
+        "recupero/archi.tsv": "recupero-tsv-fuori-contratto",
+        "recupero/sessioni.tsv riga 3": "recupero-tsv-fuori-contratto",
+        "recupero/sessioni.tsv riga 4": "recupero-tsv-fuori-contratto",
+    }
+    for membro, motivo in atteso.items():
+        assert lapidi.get(membro) == [("bundle-recupero", motivo)], (membro, lapidi.get(membro))
+    # fuori dalle forme del contratto: la lapide di sempre, `membro-sconosciuto`
+    for membro in ("recupero/altro/x.md", "recupero/sessioni/x.json"):
+        assert lapidi.get(membro) == [("bundle", "membro-sconosciuto")], (membro, lapidi.get(membro))
+    # il perché è scritto: chi legge la lapide sa cosa fare
+    r2 = con.execute("SELECT detail FROM skipped WHERE detail LIKE 'recupero/sessioni/r2.md%'"
+                     ).fetchone()[0]
+    assert "'R2'" in r2 and "R1" in r2 and "RECUPERO_CONTRATTO" in r2, r2
+    assert "relazione" not in con.execute(
+        "SELECT detail FROM skipped WHERE detail LIKE 'recupero/archi.tsv%'").fetchone()[0].split(
+        "(contratto")[0].split("non ha")[1], "la lapide deve nominare le colonne MANCANTI"
+    # niente del materiale cattivo è entrato; il sano accanto sì
+    assert con.execute("SELECT count(*) FROM messages WHERE content LIKE '%testo-perso-%'"
+                       ).fetchone()[0] == 0
+    assert con.execute("SELECT count(*) FROM messages WHERE content LIKE '%scheda-sana-accanto%'"
+                       ).fetchone()[0] == 1
+    assert con.execute("SELECT count(*) FROM archi").fetchone()[0] == 0, \
+        "un .tsv con l'intestazione incompleta ha riempito la tabella a metà"
+    assert [r[0] for r in con.execute("SELECT sessionId FROM sessioni")] == [_SID_A], \
+        "solo la riga sana di sessioni.tsv doveva entrare"
+
+
+def test_manifest_json_va_in_meta_e_non_diventa_testo(tmp_path: Path) -> None:
+    """`previsione_ingest` e `recupero` del manifest arrivano nella scheda `meta`
+    (json), il membro non diventa testo e lascia una lapide che dice dov'è finito.
+    Un bundle successivo senza `recupero` TOGLIE la chiave: la scheda parla
+    dell'ultimo bundle, non di uno precedente."""
+    db = tmp_path / "out.db"
+    archive_indexer.index_file(str(_bundle_recupero(tmp_path)), str(db))
+    prev = json.loads(archive_indexer.get_meta(db, "bundle_previsione_ingest"))
+    assert prev["per_prefisso"] == {"sessions": 2}
+    assert json.loads(archive_indexer.get_meta(db, "bundle_recupero"))["radice"] == "recupero/"
+    assert archive_indexer.get_meta(db, "bundle_generated") == "2026-09-24T20:00:00"
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT count(*) FROM messages WHERE content LIKE '%righe_in_tabella%'"
+                       ).fetchone()[0] == 0
+    assert con.execute("SELECT reason FROM skipped WHERE detail LIKE 'MANIFEST.json:%'"
+                       ).fetchall() == [("manifest-in-meta",)]
+    con.close()
+    archive_indexer.index_file(str(_bundle_recupero(
+        tmp_path, nome="dopo.zip", manifest={"generated": "2026-09-25T08:00:00",
+                                             "previsione_ingest": {"righe_in_tabella": 2}})), str(db))
+    assert archive_indexer.get_meta(db, "bundle_recupero", "ASSENTE") == "ASSENTE"
+    assert archive_indexer.get_meta(db, "bundle_generated") == "2026-09-25T08:00:00"
+    # un manifest illeggibile lo dice, e l'ingest delle sessioni prosegue
+    db2 = tmp_path / "rotto.db"
+    import zipfile
+    zp = tmp_path / "rotto.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("MANIFEST.json", "{non json")
+        z.writestr(f"sessions/{_SID_A}.jsonl", json.dumps(
+            {"type": "user", "uuid": "x1", "timestamp": "2026-09-10T10:00:00Z",
+             "message": {"role": "user", "content": "c"}}))
+    assert archive_indexer.index_file(str(zp), str(db2)) == 1
+    con = sqlite3.connect(db2)
+    assert con.execute("SELECT reason FROM skipped WHERE detail LIKE 'MANIFEST.json:%'"
+                       ).fetchall() == [("manifest-illeggibile",)]
+
+
+def test_inventario_json_il_motivo_dice_se_i_dati_sono_entrati(tmp_path: Path) -> None:
+    """La lapide del json dell'inventario diceva «ridondante» SENZA CONDIZIONI, ed
+    era falso: stirpi, archi e memorie stavano solo lì. Ora dipende dal bundle:
+    con recupero/ è ridondante davvero; col solo ponte di livello 0 le tabelle
+    restano vuote e lo dice; senza nessuno dei due, dice che i dati NON entrano."""
+    import zipfile
+
+    def motivo(nome: str, extra: dict) -> tuple:
+        zp = tmp_path / f"{nome}.zip"
+        with zipfile.ZipFile(zp, "w") as z:
+            z.writestr("MANIFEST.json", "{}")
+            z.writestr(f"sessions/{_SID_A}.jsonl", json.dumps(
+                {"type": "user", "uuid": f"{nome}-1", "timestamp": "2026-09-10T10:00:00Z",
+                 "message": {"role": "user", "content": "c"}}))
+            z.writestr("inventario/inventario-sessioni.json", "{}")
+            for n, c in extra.items():
+                z.writestr(n, c)
+        db = tmp_path / f"{nome}.db"
+        archive_indexer.index_file(str(zp), str(db))
+        with sqlite3.connect(db) as con:
+            return con.execute("SELECT reason, detail FROM skipped WHERE detail LIKE"
+                               " 'inventario/inventario-sessioni.json:%'").fetchone()
+
+    r, _d = motivo("con", {f"recupero/stirpi/{_STIRPE}.md": _membri_recupero()[
+        f"recupero/stirpi/{_STIRPE}.md"]})
+    assert r == "non-indicizzato-ridondante"
+    r, d = motivo("ponte", {"workfiles/_recupero-1777/archi.tsv": "da\ta\n"})
+    assert r == "non-indicizzato-solo-ponte" and "NON sono popolate" in d, (r, d)
+    r, d = motivo("senza", {})
+    assert r == "non-indicizzato-senza-recupero" and "NON entrano" in d, (r, d)
+
+
+def test_write_rows_accetta_ts_source_come_decima_colonna(tmp_path: Path) -> None:
+    """`ts_source='data-export'` era nello schema dal 20/07 e nessun codice poteva
+    scriverlo. La decima colonna è facoltativa: senza, il regime resta 'messaggio'
+    (come prima); con un valore fuori elenco l'ingest si ferma parlante."""
+    db = tmp_path / "t.db"
+    archive_indexer.write_rows(db, [
+        ("u9", "p", "2026-01-01T00:00:00Z", "nove campi", "user", "", "", "", ""),
+        ("u10", "p", "2026-01-01T00:00:00Z", "dieci campi", "memory", "", "", "", "", "data-export"),
+        ("u4", "p", "2026-01-01T00:00:00Z", "quattro campi"),
+    ])
+    with sqlite3.connect(db) as con:
+        assert dict(con.execute("SELECT uuid, ts_source FROM messages")) == {
+            "u9": "messaggio", "u10": "data-export", "u4": "messaggio"}
+    with pytest.raises(ValueError, match="ts_source 'ignoto'"):
+        archive_indexer.write_rows(db, [("u11", "p", "", "x", "", "", "", "", "", "ignoto")])
+
+
+def test_tabelle_record_coincidono_con_lo_schema(tmp_path: Path) -> None:
+    """Le colonne che `write_rows` scrive (`_TABELLE_RECORD`) e quelle dello schema
+    sono due elenchi: se divergono, una colonna del .tsv non entra mai — o l'INSERT
+    fallisce solo sui bundle veri. E le tabelle nascono anche su un DB che esisteva
+    prima di loro, senza toccare i messaggi."""
+    db = _db_v2(tmp_path, [("vecchia", "p", "2026-01-01", "riga di prima", "user")])
+    archive_indexer.write_rows(db, [("nuova", "p", "2026-01-02", "riga di dopo")])
+    con = sqlite3.connect(db)
+    for tabella, colonne in archive_indexer._TABELLE_RECORD.items():
+        info = con.execute(f"PRAGMA table_info({tabella})").fetchall()
+        assert tuple(r[1] for r in info) == colonne + ("ingest_date",), tabella
+    pk = {t: tuple(r[1] for r in sorted(con.execute(f"PRAGMA table_info({t})"), key=lambda r: r[5])
+                   if r[5]) for t in archive_indexer._TABELLE_RECORD}
+    assert pk == {"sessioni": ("sessionId",), "archi": ("da", "a", "relazione", "via"),
+                  "memorie": ("path",)}, pk
+    assert con.execute("SELECT count(*) FROM messages").fetchone()[0] == 2
+    with pytest.raises(ValueError, match="tabella sconosciuta"):
+        archive_indexer.write_rows(db, [archive_indexer._Record("messages", {"uuid": "x"})])

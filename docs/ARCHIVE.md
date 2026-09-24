@@ -41,7 +41,7 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 
 | Formato | Cosa indicizza |
 |---|---|
-| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs` + `memories` + `users.json`/`login_history.json` — **unico** oppure **spezzato in 5 zip per categoria**, il formato consegnato da claude.ai dal 29/08/2026: ogni zip è riconosciuto da solo, si caricano tutti sullo stesso *nome DB*, vedi sotto) oppure export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/`. oppure il **bundle di Recupero Sessioni 1777** (riconosciuto da `MANIFEST.json` + `sessions/`): `sessions/` e `subagents/<sid>/` (dal 16/09/2026, progetto `subagent:<cwd>`) come conversazioni, `mcp-logs/` come log, `workfiles/` solo testo; i membri che l'indexer non conosce restano in `skipped` come `membro-sconosciuto`. **Fallback**: uno zip che non è un export ma contiene documenti `.md`/`.txt` viene indicizzato doc-per-doc (come i `.md`/`.txt` sciolti) |
+| `.zip` | riconosciuto dal **contenuto**: export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs` + `memories` + `users.json`/`login_history.json` — **unico** oppure **spezzato in 5 zip per categoria**, il formato consegnato da claude.ai dal 29/08/2026: ogni zip è riconosciuto da solo, si caricano tutti sullo stesso *nome DB*, vedi sotto) oppure export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/`. oppure il **bundle di Recupero Sessioni 1777** (riconosciuto da `MANIFEST.json` + `sessions/`): `sessions/` e `subagents/<sid>/` (dal 16/09/2026, progetto `subagent:<cwd>`) come conversazioni, `mcp-logs/` come log, `workfiles/` solo testo, `recupero/` (dal 24/09/2026) come schede e tabelle — vedi [sotto](#il-bundle-di-recupero-sessioni--il-prefisso-recupero); i membri che l'indexer non conosce restano in `skipped` come `membro-sconosciuto`. **Fallback**: uno zip che non è un export ma contiene documenti `.md`/`.txt` viene indicizzato doc-per-doc (come i `.md`/`.txt` sciolti) |
 | `.jsonl` | sessione **Claude Code** (`~/.claude/projects/<progetto>/<id>.jsonl`) |
 | `.json` | export **Telegram Desktop** (formato *Machine-readable JSON*) |
 | `.pdf` | documento **con testo** (estratto via `pypdf`) |
@@ -72,6 +72,54 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 > le chiavi di dedup sono diverse e i messaggi si duplicherebbero. Uno zip non
 > riconosciuto, o senza messaggi estraibili, viene **rifiutato con un errore
 > chiaro** — mai un "ok, 0 record".
+
+### Il bundle di Recupero Sessioni — il prefisso `recupero/`
+
+Il bundle porta, oltre alle conversazioni, ciò che nell'archivio non aveva una
+forma: lo **stato** di ogni sessione, le **stirpi** (le sessioni che si continuano
+l'una nell'altra), gli **archi** fra sessioni e le **memorie** scritte durante il
+lavoro. Fino al 24/09/2026 viaggiavano solo dentro `inventario/inventario-sessioni.json`,
+che l'indexer scartava come «ridondante» — e con lo zip cancellato dopo l'ingest
+sparivano. Dal 24/09/2026 l'app li mette in `recupero/`, secondo un contratto
+versionato (**R1**) scritto dalla parte che li produce:
+
+| membro | cosa diventa |
+|---|---|
+| `recupero/sessioni/<sessionId>.md` | righe di `messages`: `project='recupero:sessioni'`, `sender='recupero'`, `ts` = ultimo messaggio della sessione. Il primo pezzo della scheda ha **`parent_uuid` = l'ultimo messaggio** della conversazione: la scheda è una **foglia del thread**, e `get_conversation` / `get_context` la trovano camminando `parent_uuid` come ogni altra riga |
+| `recupero/stirpi/<id>.md` | righe di `messages`: `project='recupero:stirpi'`, senza padre (una stirpe non appartiene a una conversazione sola); il corpo porta i sessionId interi, cercabili |
+| `recupero/memorie/<k10>__<nome>.md` | **una** riga di `messages`: `project='recupero:memorie'`, `sender='memory'`, uuid stabile sul **percorso d'origine** della memoria, `ts` = sua data di modifica. Una memoria cambiata fra due bundle è la stessa riga con testo nuovo: la versione vecchia resta in `revisions` |
+| `recupero/sessioni.tsv` · `archi.tsv` · `memorie.tsv` | **non** diventano testo: riempiono le tabelle `sessioni` (chiave `sessionId`), `archi` (chiave `da, a, relazione, via`) e `memorie` (chiave `path`) |
+| `MANIFEST.json` | non diventa testo: `generated`, `previsione_ingest` e `recupero` vanno nella scheda `meta` (chiavi `bundle_generated`, `bundle_previsione_ingest`, `bundle_recupero`, in json). La scheda parla dell'**ultimo** bundle letto: una chiave che il manifest nuovo non porta viene tolta |
+
+Le righe delle schede hanno `ts_source='data-export'`: una scheda è una
+**fotografia** (cambia fra un bundle e l'altro, e la versione uscente va in
+`revisions`), non un evento. `speaker` è `unknown` (nessuna scheda ha un mittente)
+e `voice` è `unknown` con la bandiera `scheda_recupero`: la scheda di sessione cita
+parola per parola le ultime frasi dell'utente e dell'assistente, e classificarla
+come testo incollato sarebbe il falso positivo più caro. Il testo indicizzato di
+ogni scheda comincia con `[<membro>]`, così il sessionId si trova con FTS anche
+quando il corpo non lo ripete.
+
+**Un membro fuori contratto non entra e non sparisce**: lascia una lapide in
+`skipped` (`source='bundle-recupero'`) che dice cosa gli manca —
+`recupero-senza-front-matter`, `recupero-front-matter-malformato`,
+`recupero-contratto-ignoto` (per esempio un `contratto: R2` che questo indexer non
+legge ancora), `recupero-fuori-contratto` (tipo incoerente con la cartella, campo
+identificativo assente), `recupero-tsv-fuori-contratto` (intestazione senza una
+colonna del contratto: il file intero non entra; una riga con un campo in più o con
+la chiave vuota: salta solo quella riga). Un campo in più nel front-matter o una
+colonna in più in coda a un `.tsv` si ignorano: il contratto dice che non cambiano
+versione.
+
+La lapide dell'inventario json dice ora **se i suoi dati sono entrati**:
+`non-indicizzato-ridondante` se il bundle ha `recupero/`,
+`non-indicizzato-solo-ponte` se ha solo il ponte di livello 0
+(`workfiles/_recupero-1777/`, entrato come testo: tabelle vuote),
+`non-indicizzato-senza-recupero` se non ha nessuno dei due — e allora stirpi, archi
+e memorie di quel bundle **non** sono nell'archivio.
+
+> Le tabelle `sessioni`, `archi` e `memorie` oggi si interrogano via SQL sul DB;
+> i tool MCP che le leggono (`get_session`, `get_stirpe`) sono il passo successivo.
 
 Campi del form: **nome DB** (vuoto = dal nome file), **progetto** (etichetta;
 vuoto = dedotta dalla fonte) e **descrizione** (facoltativa: a cosa serve / cosa
@@ -232,7 +280,16 @@ messages_fts USING fts5(uuid, project, ts, content, tools, attachments,
 CREATE INDEX idx_parent ON messages(parent_uuid);   -- il thread-walking di get_conversation
 skipped(uid PRIMARY KEY, source, reason, detail, ts, ingest_date)  -- libro-mastro degli scarti
 meta(key PRIMARY KEY, value)                        -- scheda: description, ruolo, …
+-- dal bundle di Recupero Sessioni (contratto recupero/ R1, 24/09/2026); vuote altrove
+sessioni(sessionId PRIMARY KEY, titolo, cwd, first_ts, last_ts, last_uuid, file,
+         stato, stato_fonte, stirpe, stirpe_pos, n_commit, n_fili, ingest_date)
+archi(da, a, relazione, via, livello, prova, voce, peso, chiusura, bundle_scan,
+      ingest_date, PRIMARY KEY(da, a, relazione, via))
+memorie(path PRIMARY KEY, sistema, livello, md5, mtime, scritta_da, membro, ingest_date)
 ```
+
+Le tre tabelle del bundle sono `CREATE TABLE IF NOT EXISTS`: un DB esistente le
+riceve vuote al primo ingest, e resta leggibile dalle versioni precedenti.
 
 È quello che producono `archive_indexer` e `archive-ingest`. In FTS finiscono
 `content`, `tools` (le azioni: `tool_use` + `tool_result`) e `attachments`;

@@ -23,7 +23,10 @@ contenuto, non dal nome):
                      sessioni e transcript dei sub-agenti come conversazioni
                      (subagents/<sid>/, etichetta `subagent:…`), log MCP e
                      workfiles-testo come documenti, binari censiti in `skipped`,
-                     copie in `sightings`
+                     copie in `sightings`; dal 24/09/2026 anche `recupero/`
+                     (contratto R1): schede di sessione/stirpe/memoria come righe,
+                     .tsv nelle tabelle `sessioni`/`archi`/`memorie`, e le chiavi
+                     di MANIFEST.json che servono al collaudo in `meta`
     .zip generico  → zip di documenti/codice (fallback, whitelist _DOC_ZIP_EXTS):
                      indicizza ogni doc dentro l'archivio, come un .md/.txt sciolto
     .json         → export Telegram Desktop (result.json) o sessione Claude Code
@@ -81,6 +84,21 @@ class _Sighting(NamedTuple):
     `messages` collassa per uuid, l'avvistamento conserva la topologia."""
     uuid: str
     source: str
+
+
+class _Record(NamedTuple):
+    """Una riga STRUTTURATA destinata a una tabella che non è `messages` (dal
+    24/09/2026, contratto `recupero/` R1): le tabelle `sessioni`, `archi`,
+    `memorie` e la scheda `meta`. Emesso nello stream come _Skip e _Sighting;
+    `write_rows` lo instrada alla sua tabella con un buffer suo. Il terzo tipo
+    esiste perché un .tsv di relazioni NON è testo da cercare: farlo diventare
+    righe di `messages` lo renderebbe cercabile e inutilizzabile come dato.
+
+    `tabella` è confrontata con un elenco chiuso (`_TABELLE_RECORD`, più `meta`):
+    un nome sconosciuto è un errore di programmazione e ferma l'ingest, non una
+    riga scritta a caso. In `meta`, `value=None` vuol dire «togli la chiave»."""
+    tabella: str
+    riga: dict
 
 
 # ── tetti su input e decompressione (H39) ────────────────────────────────────
@@ -328,6 +346,57 @@ CREATE TABLE IF NOT EXISTS sightings(
     ingest_date TEXT,
     PRIMARY KEY (uuid, source)
 );
+-- LE TABELLE DEL CONTRATTO `recupero/` R1 (24/09/2026). Fino a qui nell'archivio non
+-- esisteva un'entità «sessione»: il sessionId non era una colonna, la cwd non era
+-- salvata, e stirpi, archi e memorie arrivavano sulla VPS dentro un json scartato
+-- come «ridondante» — e sparivano con lo zip. Le colonne sono quelle dei `.tsv` del
+-- contratto, nello STESSO ordine (lo verifica un test: una colonna qui e non là è un
+-- dato che non entra mai, in silenzio). IF NOT EXISTS: innocue sui DB esistenti, che
+-- le ricevono vuote al primo ingest e restano leggibili dalle versioni precedenti.
+-- Le affinità numeriche servono alle query del Livello 2: senza, `chiusura=1`
+-- confronterebbe il TESTO '1' con l'intero 1 e risponderebbe zero righe.
+CREATE TABLE IF NOT EXISTS sessioni(
+    sessionId   TEXT PRIMARY KEY,
+    titolo      TEXT,
+    cwd         TEXT,
+    first_ts    TEXT,
+    last_ts     TEXT,
+    last_uuid   TEXT,     -- l'ultimo messaggio della copia consegnata: il padre della scheda
+    file        TEXT,     -- il membro dello zip con la conversazione (sessions/<sid>[__fN].jsonl)
+    stato       TEXT,
+    stato_fonte TEXT,
+    stirpe      TEXT,
+    stirpe_pos  INTEGER,
+    n_commit    INTEGER,
+    n_fili      INTEGER,
+    ingest_date TEXT
+);
+-- La chiave è la stessa della tabella `archi` dell'inventario dell'app che produce il
+-- bundle: lo stesso arco visto da due bundle è UNA riga, aggiornata.
+CREATE TABLE IF NOT EXISTS archi(
+    da          TEXT NOT NULL,
+    a           TEXT NOT NULL,
+    relazione   TEXT NOT NULL,
+    via         TEXT NOT NULL DEFAULT '',
+    livello     TEXT,
+    prova       TEXT,
+    voce        TEXT,
+    peso        REAL,
+    chiusura    INTEGER,
+    bundle_scan TEXT,
+    ingest_date TEXT,
+    PRIMARY KEY (da, a, relazione, via)
+);
+CREATE TABLE IF NOT EXISTS memorie(
+    path        TEXT PRIMARY KEY,  -- il percorso d'ORIGINE della memoria (non il membro)
+    sistema     TEXT,
+    livello     TEXT,
+    md5         TEXT,
+    mtime       TEXT,              -- ISO UTC con 'Z', come tutte le date del contratto
+    scritta_da  TEXT,              -- sessionId separati da virgola
+    membro      TEXT,              -- recupero/memorie/<k10>__<nome>.md: la riga in `messages`
+    ingest_date TEXT
+);
 """
 # NOTA sullo schema FTS — perché `tools` sì e `thinking` no.
 #
@@ -354,11 +423,43 @@ CREATE TABLE IF NOT EXISTS sightings(
 
 _NCOLS = 9  # uuid, project, ts, content, sender, tools, thinking, attachments, parent_uuid
 
+# I regimi del `ts` che un estrattore può DICHIARARE (la decima colonna, facoltativa).
+# 'ignoto' non c'è di proposito: è l'etichetta della migrazione per le righe nate
+# prima della colonna, non una cosa che un estrattore sappia dire di una riga nuova.
+_TS_SOURCE_DICHIARABILI = ("messaggio", "data-export")
 
-def _pad(row: tuple) -> RowFull:
-    """Normalizza una riga alla forma piena. Accetta ancora le righe a 4 campi
-    (uuid, project, ts, content): gli estrattori esterni non si rompono."""
-    return tuple(row) + ("",) * (_NCOLS - len(row))  # type: ignore[return-value]
+
+def _pad(row: tuple) -> tuple:
+    """Normalizza una riga alla forma piena a 10 campi (i 9 di RowFull + `ts_source`).
+
+    Accetta ancora le righe a 4 campi (uuid, project, ts, content) e a 9: gli
+    estrattori esterni non si rompono, e senza decima colonna il regime resta
+    'messaggio' — il default dello schema, cioè esattamente ciò che l'INSERT a 9
+    colonne produceva prima. Il decimo campo esiste perché `ts_source='data-export'`
+    era dichiarato nello schema dal 20/07 e **nessun codice poteva scriverlo**: un
+    estrattore non aveva modo di dire «questo ts è la data della fotografia».
+    Un valore fuori elenco è un errore di programmazione: si ferma l'ingest invece
+    di scrivere un regime inventato con l'aria di un dato."""
+    base = tuple(row[:_NCOLS]) + ("",) * (_NCOLS - len(row[:_NCOLS]))
+    tss = (row[_NCOLS] if len(row) > _NCOLS else "") or "messaggio"
+    if tss not in _TS_SOURCE_DICHIARABILI:
+        raise ValueError(
+            f"ts_source {tss!r} non dichiarabile da un estrattore (riga {row[0]!r}): "
+            f"i valori ammessi sono {', '.join(_TS_SOURCE_DICHIARABILI)}. "
+            f"'ignoto' lo assegna solo la migrazione dei DB vecchi.")
+    return base + (tss,)
+
+
+# Le tabelle che un `_Record` può riempire, con le colonne nell'ordine dei `.tsv` del
+# contratto `recupero/` R1 (la chiave primaria è nello _SCHEMA). `ingest_date` la
+# aggiunge `write_rows`. Un test confronta queste tuple con lo schema vero.
+_TABELLE_RECORD: dict[str, tuple[str, ...]] = {
+    "sessioni": ("sessionId", "titolo", "cwd", "first_ts", "last_ts", "last_uuid", "file",
+                 "stato", "stato_fonte", "stirpe", "stirpe_pos", "n_commit", "n_fili"),
+    "archi": ("da", "a", "relazione", "via", "livello", "prova", "voce", "peso",
+              "chiusura", "bundle_scan"),
+    "memorie": ("path", "sistema", "livello", "md5", "mtime", "scritta_da", "membro"),
+}
 
 
 def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int = 500) -> int:
@@ -371,9 +472,12 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
     Riusabile da qualunque estrattore (server-side o locale). `rows` è un
     iterabile/generatore → streaming, memoria costante.
 
-    Accetta righe a 4 campi (forma storica) o a 8 (forma piena, con
-    sender/tools/thinking/attachments): le prime vengono completate con stringhe
-    vuote, così un estrattore di terze parti continua a funzionare.
+    Accetta righe a 4 campi (forma storica), a 9 (forma piena, con
+    sender/tools/thinking/attachments/parent_uuid) o a 10 (più `ts_source`): le
+    prime vengono completate con stringhe vuote, così un estrattore di terze parti
+    continua a funzionare. Nello stesso stream passano anche `_Skip` (→ `skipped`),
+    `_Sighting` (→ `sightings`) e `_Record` (→ `sessioni`/`archi`/`memorie`/`meta`):
+    nessuno dei tre conta nel numero ritornato, che resta quello delle righe-messaggio.
     """
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -383,9 +487,10 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
         _ensure_v3(conn)  # voice-tagging Fase 1: colonne nuove + `speaker` derivato
         n = 0
-        buf: list[RowFull] = []
+        buf: list[tuple] = []
         skip_buf: list[tuple] = []
         sight_buf: list[tuple] = []
+        rec_buf: dict[str, list[tuple]] = {}
         ingest_date = _now_iso()
         n_rev = 0          # revisioni conservate in questo ingest (D18)
 
@@ -430,9 +535,31 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
                 conn.executemany(
                     "INSERT OR REPLACE INTO messages"
                     "(uuid, project, ts, content, sender, tools, thinking, attachments,"
-                    " parent_uuid) VALUES (?,?,?,?,?,?,?,?,?)", buf,
+                    " parent_uuid, ts_source) VALUES (?,?,?,?,?,?,?,?,?,?)", buf,
                 )
                 buf.clear()
+
+        def flush_records() -> None:
+            for tabella, righe in rec_buf.items():
+                if not righe:
+                    continue
+                if tabella == "meta":
+                    # value None = togli la chiave: la scheda dice l'ULTIMO manifest
+                    # letto, e una chiave di un bundle precedente che quello nuovo non
+                    # porta affermerebbe di lui una cosa che non ha detto.
+                    for key, value in righe:
+                        if value is None:
+                            conn.execute("DELETE FROM meta WHERE key=?", (key,))
+                        else:
+                            conn.execute("INSERT OR REPLACE INTO meta(key, value)"
+                                         " VALUES (?,?)", (key, value))
+                else:
+                    cols = _TABELLE_RECORD[tabella]
+                    # il nome della tabella viene dall'elenco chiuso, mai dall'input
+                    conn.executemany(
+                        f"INSERT OR REPLACE INTO {tabella}({', '.join(cols)}, ingest_date)"
+                        f" VALUES ({','.join('?' * (len(cols) + 1))})", righe)
+                righe.clear()
 
         def flush_skips() -> None:
             if skip_buf:
@@ -464,6 +591,24 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
                 if len(sight_buf) >= batch:
                     flush_sightings()
                 continue
+            if isinstance(row, _Record):
+                tupla: tuple
+                if row.tabella == "meta":
+                    valore = row.riga.get("value")
+                    tupla = (str(row.riga["key"]), None if valore is None else str(valore))
+                elif row.tabella in _TABELLE_RECORD:
+                    tupla = tuple(str(row.riga.get(c, "") or "")
+                                  for c in _TABELLE_RECORD[row.tabella]) + (ingest_date,)
+                else:
+                    raise ValueError(
+                        f"_Record per una tabella sconosciuta: {row.tabella!r} (note: "
+                        f"{', '.join(sorted(_TABELLE_RECORD))}, meta). È un errore "
+                        f"dell'estrattore, non del file: nessuna riga scritta a caso.")
+                coda = rec_buf.setdefault(row.tabella, [])
+                coda.append(tupla)
+                if len(coda) >= batch:
+                    flush_records()
+                continue
             buf.append(_pad(row))
             n += 1
             if len(buf) >= batch:
@@ -471,6 +616,7 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         flush()
         flush_skips()
         flush_sightings()
+        flush_records()
         # Voice-tagging: le righe appena scritte nascono con `voice=''`. Si classificano
         # QUI e non in `_ensure_v3` perché questa legge il `content` di ogni riga — è il
         # costo di un ingest, non quello di ogni apertura di DB. Idempotente: al secondo
@@ -733,6 +879,16 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
     flags: list[str] = []
     if not testo.strip():
         return ("unknown", 0.0, 0.0, [])
+
+    # ⓪ scheda di Recupero Sessioni (contratto `recupero/` R1, 24/09/2026): un record
+    #    COMPOSTO da una macchina, che però cita [verbatim] le ultime parole dell'owner
+    #    e dell'assistente. Nessuna voce è sua: lasciata alle regole sotto, heading e
+    #    grassetti della scheda la farebbero uscire `pasted_ai` (①c) — cioè una riga
+    #    che contiene frasi VERE dell'owner marcata «incollata da un'AI», il falso
+    #    positivo più caro che il principio vieta. 'unknown' è il giudizio onesto
+    #    («guardata, non è una voce»), e la bandiera dice perché.
+    if (sender or "").strip().lower() == "recupero":
+        return ("unknown", _quota_citata(testo), 0.0, ["scheda_recupero"])
 
     # ① character — il project GDR da solo NON basta più: sul golden set (27/08) la
     #    regola «il PROGETTO lo dichiara» ha fatto 0/8, con 4 own veri marcati
@@ -2120,6 +2276,7 @@ def _iter_docs_zip(zip_path: Union[str, Path], members: list[str],
 #                                 sessione madre <sid> — dal 16/09/2026 (v. sotto)
 #   mcp-logs/<sid>/<server>/…     log dei server MCP collegati
 #   workfiles/<cwd-encoded>/…     artefatti delle cartelle di lavoro (opzionali)
+#   recupero/…                    schede e .tsv del contratto R1 — dal 24/09/2026
 #   inventario/ + MANIFEST.json/md
 # Riconoscibile da MANIFEST.json + sessions/. Principi (2026-07-20, con Neo):
 #   - indicizzare IL PIÙ POSSIBILE («poi decidiamo cosa prunare»): sessioni come
@@ -2331,9 +2488,265 @@ def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
 # che nessuno confronta col codice invecchia in silenzio) e che ogni prefisso qui
 # venga indicizzato davvero; il lato-bundle può leggere la stessa tupla per il
 # suo test speculare.
-BUNDLE_PREFISSI_INDICIZZATI = ("sessions", "subagents", "mcp-logs", "workfiles")
+# ⚠️ La tupla dei prefissi resta su UNA riga e letterale: l'app che produce il bundle
+# la legge da questo file con una regex (`^BUNDLE_PREFISSI_INDICIZZATI\s*=\s*\(…\)`)
+# e decide da lì se usare `recupero/` o il ponte `workfiles/_recupero-1777/`.
+BUNDLE_PREFISSI_INDICIZZATI = ("sessions", "subagents", "mcp-logs", "workfiles", "recupero")
 BUNDLE_FILE_INDICIZZATI = ("inventario/inventario-sessioni.tsv", "MANIFEST.md")
-BUNDLE_FILE_RIDONDANTI = ("MANIFEST.json", "inventario/inventario-sessioni.json")
+# Letto ma NON come testo (dal 24/09/2026): le chiavi del manifest che servono a
+# collaudare l'ingest vanno nella scheda `meta`. Prima era «ridondante» — e con lui
+# spariva `previsione_ingest`, il metro che l'app scrive apposta per l'ingest.
+BUNDLE_FILE_IN_META = ("MANIFEST.json",)
+BUNDLE_FILE_RIDONDANTI = ("inventario/inventario-sessioni.json",)
+
+# ── il contratto `recupero/` (R1, 24/09/2026) ─────────────────────────────────
+# Specifica: CONTRATTO-RECUPERO.md dell'app che produce il bundle (fuori da questo
+# repo). Il bundle porta, oltre alle conversazioni, ciò che nell'archivio non aveva
+# una forma: le schede di sessione (stato, ultime parole, fili, commit), le stirpi,
+# le memorie e tre .tsv di dati strutturati. Tutto `.md` e `.tsv`, mai json: sotto
+# `workfiles/` un .json con `"type": "user"` verrebbe letto come conversazione.
+RECUPERO_CONTRATTO = "R1"
+# sottocartella → (tipo atteso nel front-matter, etichetta, sender, campo obbligatorio)
+_RECUPERO_SCHEDE = {
+    "sessioni": ("sessione", "recupero:sessioni", "recupero", "sessionId"),
+    "stirpi": ("stirpe", "recupero:stirpi", "recupero", "id"),
+    "memorie": ("memoria", "recupero:memorie", "memory", "path"),
+}
+# .tsv → (tabella, colonne che non possono essere vuote: la chiave primaria)
+_RECUPERO_TSV = {
+    "recupero/sessioni.tsv": ("sessioni", ("sessionId",)),
+    "recupero/archi.tsv": ("archi", ("da", "a", "relazione")),
+    "recupero/memorie.tsv": ("memorie", ("path",)),
+}
+# le chiavi del MANIFEST.json che vanno in `meta`: (chiave in meta, chiave nel manifest)
+_MANIFEST_IN_META = (
+    ("bundle_generated", "generated"),
+    ("bundle_previsione_ingest", "previsione_ingest"),
+    ("bundle_recupero", "recupero"),
+)
+
+
+def _leggi_front_matter(testo: str) -> tuple[Union[dict, None], str, str, str]:
+    """(campi, corpo, motivo, perché) di una scheda `recupero/*.md`.
+
+    Il formato del contratto: prima riga `---`, righe `chiave: valore` (un valore
+    su una riga, niente YAML annidato), una seconda riga `---`, poi il corpo. Se il
+    front-matter non c'è o non si chiude, `campi` è None e `motivo`/`perché` dicono
+    cosa manca — chi chiama ne fa una lapide, mai un salto muto. Una riga senza `:`
+    dentro il front-matter NON si ignora: il formato è rigido apposta, e una riga
+    che non si capisce vuol dire che chi scrive e chi legge non parlano la stessa
+    versione."""
+    t = testo[1:] if testo.startswith("﻿") else testo
+    righe = t.split("\n")
+    if righe[0].rstrip("\r").strip() != "---":
+        return None, "", "recupero-senza-front-matter", (
+            "la prima riga non è '---': manca il front-matter del contratto")
+    campi: dict = {}
+    for i, riga in enumerate(righe[1:], start=1):
+        r = riga.rstrip("\r")
+        if r.strip() == "---":
+            return campi, "\n".join(righe[i + 1:]), "", ""
+        if not r.strip():
+            continue
+        if ":" not in r:
+            return None, "", "recupero-front-matter-malformato", (
+                f"riga {i + 1} del front-matter senza ':' ({r[:60]!r})")
+        k, v = r.split(":", 1)
+        campi[k.strip()] = v.strip()
+    return None, "", "recupero-senza-front-matter", (
+        "il front-matter si apre con '---' e non si chiude mai")
+
+
+def _iter_recupero_scheda(z: zipfile.ZipFile, info: zipfile.ZipInfo,
+                          budget: _Budget) -> Iterator:
+    """Una scheda `recupero/{sessioni,stirpi,memorie}/*.md` → righe di `messages`.
+
+    · sessione: `sender='recupero'`, etichetta `recupero:sessioni`, ts = `last_ts`,
+      uuid = `_uid("recupero", membro, idx)`. Il chunk 0 ha **`parent_uuid` =
+      `last_uuid`**: la scheda diventa una FOGLIA della conversazione, e il cammino
+      `parent_uuid` di `get_conversation` la trova senza toccare archive-mcp; i
+      chunk successivi pendono dal precedente.
+    · stirpe: come la sessione, ma il chunk 0 non ha padre (non c'è UNA
+      conversazione a cui appartiene). Il front-matter del contratto non porta un
+      ts: si usa `last_ts` se c'è, altrimenti la data del membro nello zip.
+    · memoria: `sender='memory'` (lo stesso regime delle memorie claude.ai),
+      etichetta `recupero:memorie`, UNA riga con uuid stabile sul `path` d'origine
+      → una memoria cambiata fra due bundle lascia la versione vecchia in
+      `revisions` invece di un doppione; ts = `mtime`.
+
+    Tutte con `ts_source='data-export'`: una scheda è una FOTOGRAFIA (cambia fra
+    un bundle e l'altro, e la versione uscente va in `revisions`), non un evento
+    detto una volta. Il testo indicizzato è il corpo preceduto da `[<membro>]`,
+    come i documenti del bundle: il membro porta il sessionId, che così si trova
+    con FTS anche quando il corpo non lo ripete. Ogni riga lascia un avvistamento.
+    Chunk da 8000 caratteri: una scheda di sessione (~4 KB per contratto, 4,5 KB
+    misurati su una vera il 24/09) resta in una riga sola. Non è estetica: i pezzi
+    di una scheda hanno lo STESSO ts, e `get_conversation` ordina per (ts, uuid) —
+    due pezzi uscirebbero in un ordine deciso dallo sha1, non dal testo."""
+    name = info.filename
+    tipo_atteso, project, sender, chiave = _RECUPERO_SCHEDE[name.split("/")[1]]
+    ts_zip = _zipinfo_ts(info)
+    with z.open(info) as f:
+        testo = _read_capped(f, name, budget).decode("utf-8", errors="replace")
+    campi, corpo, motivo, perche = _leggi_front_matter(testo)
+    if campi is None:
+        yield _Skip("bundle-recupero", motivo, f"{name}: {perche} (contratto "
+                    f"{RECUPERO_CONTRATTO}: '---', righe 'chiave: valore', '---', corpo)",
+                    ts_zip)
+        return
+    contratto = campi.get("contratto", "")
+    if contratto != RECUPERO_CONTRATTO:
+        yield _Skip("bundle-recupero", "recupero-contratto-ignoto",
+                    f"{name}: contratto {contratto or '(assente)'!r}, questo indexer "
+                    f"legge solo {RECUPERO_CONTRATTO} — la scheda NON entra. Se l'app è "
+                    f"passata a una versione nuova del contratto, va aggiornato l'indexer "
+                    f"(archive_indexer.py, RECUPERO_CONTRATTO)", ts_zip)
+        return
+    if campi.get("tipo", "") != tipo_atteso:
+        yield _Skip("bundle-recupero", "recupero-fuori-contratto",
+                    f"{name}: tipo {campi.get('tipo', '')!r} dentro "
+                    f"recupero/{name.split('/')[1]}/, atteso {tipo_atteso!r}", ts_zip)
+        return
+    if not campi.get(chiave, ""):
+        yield _Skip("bundle-recupero", "recupero-fuori-contratto",
+                    f"{name}: il front-matter di una scheda '{tipo_atteso}' non porta "
+                    f"'{chiave}' (obbligatorio: è ciò che la identifica)", ts_zip)
+        return
+    testo_idx = f"[{name}]\n{corpo.strip()}"
+    if tipo_atteso == "memoria":
+        uuid = _uid("recupero-memoria", campi["path"])
+        yield (uuid, project, campi.get("mtime") or ts_zip, testo_idx, sender,
+               "", "", "", "", "data-export")
+        yield _Sighting(uuid, name)
+        return
+    ts = campi.get("last_ts") or ts_zip
+    padre = campi.get("last_uuid", "") if tipo_atteso == "sessione" else ""
+    for idx, (_u, _p, _t, pezzo) in enumerate(
+            _chunk_rows(testo_idx, project, ts, name, chunk_chars=8000)):
+        uuid = _uid("recupero", name, str(idx))
+        yield (uuid, project, ts, pezzo, sender, "", "", "", padre, "data-export")
+        yield _Sighting(uuid, name)
+        padre = uuid
+
+
+def _iter_recupero_tsv(z: zipfile.ZipFile, info: zipfile.ZipInfo,
+                       budget: _Budget) -> Iterator:
+    """Un `.tsv` di `recupero/` → `_Record` per la sua tabella, MAI righe di
+    `messages`: sono relazioni da interrogare, non testo da cercare.
+
+    Prima riga = intestazione, campi separati da TAB. Le colonne si prendono per
+    NOME: una colonna in più (in coda, contratto «non cambia versione») si ignora;
+    una colonna del contratto che manca vuol dire un'altra versione, e il file
+    intero lascia una lapide invece di riempire la tabella a metà. Una riga col
+    numero di campi sbagliato (un TAB dentro un valore) o con la chiave vuota
+    lascia la SUA lapide, col numero di riga, e le altre entrano."""
+    name = info.filename
+    tabella, chiavi = _RECUPERO_TSV[name]
+    colonne = _TABELLE_RECORD[tabella]
+    ts_zip = _zipinfo_ts(info)
+    with z.open(info) as f:
+        testo = _read_capped(f, name, budget).decode("utf-8", errors="replace")
+    righe = [r.rstrip("\r") for r in testo.lstrip("﻿").split("\n")]
+    while righe and not righe[-1].strip():
+        righe.pop()
+    intest = righe[0].split("\t") if righe else []
+    mancanti = [c for c in colonne if c not in intest]
+    if mancanti:
+        yield _Skip("bundle-recupero", "recupero-tsv-fuori-contratto",
+                    f"{name}: l'intestazione non ha {', '.join(mancanti)} (contratto "
+                    f"{RECUPERO_CONTRATTO}: {' '.join(colonne)}) — nessuna riga di "
+                    f"`{tabella}` entra da questo file", ts_zip)
+        return
+    pos = {c: intest.index(c) for c in colonne}
+    for n_riga, riga in enumerate(righe[1:], start=2):
+        if not riga.strip():
+            continue
+        campi = riga.split("\t")
+        if len(campi) != len(intest):
+            yield _Skip("bundle-recupero", "recupero-tsv-fuori-contratto",
+                        f"{name} riga {n_riga}: {len(campi)} campi, l'intestazione ne "
+                        f"ha {len(intest)} (un TAB dentro un valore?) — riga saltata",
+                        ts_zip)
+            continue
+        valori = {c: campi[pos[c]] for c in colonne}
+        vuote = [c for c in chiavi if not valori[c].strip()]
+        if vuote:
+            yield _Skip("bundle-recupero", "recupero-tsv-fuori-contratto",
+                        f"{name} riga {n_riga}: chiave vuota ({', '.join(vuote)}) — "
+                        f"riga saltata", ts_zip)
+            continue
+        yield _Record(tabella, valori)
+
+
+def _iter_recupero_member(z: zipfile.ZipFile, name: str, budget: _Budget) -> Iterator:
+    """Dispatch dentro `recupero/`: le schede, i tre .tsv, e per tutto il resto la
+    lapide `membro-sconosciuto` — la stessa di un prefisso che l'indexer non
+    conosce, così un `count(*)` su quel motivo dice anche qui se il bundle è
+    cresciuto più dell'indexer."""
+    info = z.getinfo(name)
+    parti = name.split("/")
+    if name in _RECUPERO_TSV:
+        yield from _iter_recupero_tsv(z, info, budget)
+    elif (len(parti) == 3 and parti[1] in _RECUPERO_SCHEDE
+          and Path(name).suffix.lower() == ".md"):
+        yield from _iter_recupero_scheda(z, info, budget)
+    else:
+        yield _Skip("bundle", "membro-sconosciuto", name, "")
+
+
+def _iter_manifest_json(z: zipfile.ZipFile, name: str, budget: _Budget) -> Iterator:
+    """`MANIFEST.json` → le chiavi che servono (`generated`, `previsione_ingest`,
+    `recupero`) nella scheda `meta`, come json; il membro NON diventa testo (la sua
+    prosa la porta già MANIFEST.md). Una chiave che il manifest non ha viene TOLTA
+    da `meta`: la scheda dice l'ultimo bundle letto, e una chiave rimasta da un
+    bundle precedente parlerebbe per lui. Il membro lascia comunque una lapide che
+    dice dov'è finito — «letto a metà» detto, non taciuto."""
+    info = z.getinfo(name)
+    try:
+        with z.open(info) as f:
+            dati = json.loads(_read_capped(f, name, budget))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        yield _Skip("bundle", "manifest-illeggibile",
+                    f"{name}: non è json ({exc}) — previsione_ingest e recupero NON "
+                    f"arrivano in meta", "")
+        return
+    if not isinstance(dati, dict):
+        yield _Skip("bundle", "manifest-illeggibile",
+                    f"{name}: è json ma non un oggetto — previsione_ingest e recupero "
+                    f"NON arrivano in meta", "")
+        return
+    for chiave_meta, chiave in _MANIFEST_IN_META:
+        v = dati.get(chiave)
+        if v is not None and not isinstance(v, str):
+            v = json.dumps(v, ensure_ascii=False, sort_keys=True)
+        yield _Record("meta", {"key": chiave_meta, "value": v})
+    yield _Skip("bundle", "manifest-in-meta",
+                f"{name}: {', '.join(c for _m, c in _MANIFEST_IN_META)} → meta "
+                f"({', '.join(m for m, _c in _MANIFEST_IN_META)}); il resto non si "
+                f"indicizza, MANIFEST.md ne porta la prosa", "")
+
+
+def _motivo_inventario_json(ha_recupero: bool, ha_ponte: bool) -> tuple[str, str]:
+    """Il motivo della lapide di `inventario-sessioni.json`, che fino al 24/09/2026
+    diceva «ridondante» SENZA CONDIZIONI — ed era falso: stirpi, archi e memorie
+    stavano solo lì, e con lo zip cancellato dopo l'ingest sparivano sotto un
+    verdetto che diceva «niente di perso». Ora il motivo dipende da cosa il bundle
+    porta davvero."""
+    if ha_recupero:
+        return ("non-indicizzato-ridondante",
+                "stirpi, archi e memorie di questo bundle entrano da recupero/ "
+                f"(contratto {RECUPERO_CONTRATTO})")
+    if ha_ponte:
+        return ("non-indicizzato-solo-ponte",
+                "stirpi e memorie di questo bundle sono entrate SOLO come testo dal ponte "
+                "workfiles/_recupero-1777/: le tabelle sessioni/archi/memorie NON sono "
+                "popolate da questo bundle. Cura: rifare il bundle con un'app che legge "
+                "'recupero' in BUNDLE_PREFISSI_INDICIZZATI")
+    return ("non-indicizzato-senza-recupero",
+            "il bundle non ha recupero/: stirpi, archi e memorie che porta SOLO in questo "
+            "json NON entrano nell'archivio (e il gateway cancella lo zip dopo l'ingest). "
+            f"Cura: rifare il bundle con un'app che produce recupero/ (contratto "
+            f"{RECUPERO_CONTRATTO})")
 
 
 def _iter_subagent_member(z: zipfile.ZipFile, name: str) -> Iterator:
@@ -2377,10 +2790,17 @@ def _iter_subagent_member(z: zipfile.ZipFile, name: str) -> Iterator:
 def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
     with zipfile.ZipFile(zip_path) as z:
         names = [n for n in z.namelist() if not n.endswith("/")]
+        ha_recupero = any(n.startswith("recupero/") for n in names)
+        ha_ponte = any(n.startswith("workfiles/_recupero-1777/") for n in names)
         for name in names:
             ext = Path(name).suffix.lower()
             top = name.split("/", 1)[0]
-            if top == "sessions" and ext == ".jsonl":
+            if top == "recupero":
+                # contratto `recupero/` R1 (24/09/2026): schede → messages,
+                # .tsv → tabelle sessioni/archi/memorie. Un membro fuori contratto
+                # lascia una lapide che dice cosa gli manca.
+                yield from _iter_recupero_member(z, name, budget)
+            elif top == "sessions" and ext == ".jsonl":
                 yield from _iter_cc_member(z, name)
             elif top == "subagents" and ext == ".jsonl":
                 # transcript di sub-agente: conversazione, legata alla madre dal
@@ -2472,10 +2892,14 @@ def _iter_bundle_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator:
                     raw = _read_capped(f, name, budget)
                 yield from _chunk_rows(raw.decode("utf-8", errors="replace"),
                                        "manifest", _zipinfo_ts(info), name)
+            elif name in BUNDLE_FILE_IN_META:
+                yield from _iter_manifest_json(z, name, budget)
             elif name in BUNDLE_FILE_RIDONDANTI:
-                # MANIFEST.json / inventario-sessioni.json: ridondanti con le
-                # versioni leggibili già indicizzate — dichiarati, non spariti.
-                yield _Skip("bundle", "non-indicizzato-ridondante", name, "")
+                # inventario-sessioni.json: non si indicizza (la parte leggibile è
+                # il .tsv), e il motivo dice se ciò che porta di suo è entrato da
+                # un'altra parte — dichiarato, non sparito.
+                motivo, perche = _motivo_inventario_json(ha_recupero, ha_ponte)
+                yield _Skip("bundle", motivo, f"{name}: {perche}", "")
             else:
                 # Un membro che NESSUN ramo conosce: cartella nuova del bundle
                 # (il caso `subagents/` del 16/09) o file inatteso. Lapide con un

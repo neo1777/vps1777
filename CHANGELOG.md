@@ -4,6 +4,44 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+
+- **archive1777 legge `recupero/` nel bundle di Recupero Sessioni (contratto R1).**
+  Stirpi, archi e memorie arrivavano sulla VPS solo dentro `inventario-sessioni.json`,
+  scartato come «ridondante», e sparivano con lo zip cancellato dopo l'ingest; il
+  sessionId non era una colonna. Ora: le schede `recupero/sessioni/*.md` entrano come
+  righe `recupero:sessioni` con **`parent_uuid` = l'ultimo messaggio** della sessione (la
+  scheda è una foglia del thread: `get_conversation` la trova senza cambiare archive-mcp);
+  `recupero/stirpi/*.md` come `recupero:stirpi`; `recupero/memorie/*.md` come **una** riga
+  `recupero:memorie` con uuid stabile sul percorso d'origine (una memoria cambiata lascia la
+  versione vecchia in `revisions`); i tre `.tsv` riempiono le tabelle nuove `sessioni`,
+  `archi` e `memorie` (`CREATE TABLE IF NOT EXISTS`, innocue sui DB esistenti) e non
+  diventano testo. Un membro fuori contratto (front-matter assente, `contratto` diverso da
+  R1, tipo incoerente, colonna mancante) lascia una lapide che dice cosa gli manca. Dati
+  veri: un bundle reale piccolo, rimappato su `recupero/`, entra con 3 schede e 1/15/1 righe
+  nelle tabelle, zero speaker o voice vuoti. Doc: `docs/ARCHIVE.md`.
+- **`MANIFEST.json` del bundle nella scheda `meta`.** `generated`, `previsione_ingest` e
+  `recupero` vanno in `meta` (`bundle_generated`, `bundle_previsione_ingest`,
+  `bundle_recupero`): il metro che l'app scrive per collaudare l'ingest non si perde più.
+  Il membro non diventa testo e lascia la lapide `manifest-in-meta`; un manifest
+  illeggibile lascia `manifest-illeggibile`.
+- **`write_rows` accetta `ts_source` come decima colonna facoltativa.** Il valore
+  `data-export` era nello schema dal 20/07 e nessun codice poteva scriverlo; senza la
+  colonna il regime resta `messaggio` come prima, un valore fuori elenco ferma l'ingest.
+
+### Modificato
+
+- **La lapide di `inventario-sessioni.json` dice se i suoi dati sono entrati.** Era
+  «ridondante» senza condizioni, ed era falso. Ora `non-indicizzato-ridondante` solo se il
+  bundle ha `recupero/`; `non-indicizzato-solo-ponte` col solo ponte di livello 0
+  (`workfiles/_recupero-1777/`); `non-indicizzato-senza-recupero` altrimenti, col perché e
+  la cura. `BUNDLE_FILE_RIDONDANTI` perde `MANIFEST.json` (ora `BUNDLE_FILE_IN_META`) e
+  `BUNDLE_PREFISSI_INDICIZZATI` guadagna `recupero`: chi ne tiene una copia (il test
+  speculare dell'app) va allineato.
+- **`voice` delle schede di recupero: `unknown` con la bandiera `scheda_recupero`.** Una
+  scheda cita parola per parola le ultime frasi dell'utente; con heading, elenco numerato e
+  grassetti la regola dei prompt-template la marcava `pasted_ai` (controprovato nel test).
+
 ## [0.50.0] — 2026-09-20
 
 <!-- Sezione senza numero DI PROPOSITO: il numero di versione lo decide chi
