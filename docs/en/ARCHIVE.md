@@ -906,7 +906,7 @@ Declared, not discovered by chance:
   came out as `[telefono redatto]:10`). Now canonical uuids are left alone and valid dates
   with the time stay; the exemptions are strict (month 13, day 32, hour 24 are still phone
   numbers) and real phone numbers still disappear (tests in `test_redazione.py`, both ways).
-- **"MCP server connection lost" on the first call after a pause — cured in 0.55.1.**
+- **"MCP server connection lost" on the first call after a pause — cured in 0.56.0.**
   Three times between 24 and 26/09 the connector's first call after an update, an ingest
   or an index upload broke off, and the second one worked. Reproduced on 26/09: after an
   archive-mcp restart the first `search_ibrida` answered in **64.9 s**, beyond the 60 s

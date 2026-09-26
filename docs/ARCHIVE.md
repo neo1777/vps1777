@@ -898,7 +898,7 @@ Dichiarati, non scoperti per caso:
   restano; le esenzioni sono strette (un mese 13, un giorno 32, un'ora 24 restano telefono) e
   i telefoni veri continuano a sparire (test in `test_redazione.py`, nei due versi).
 - **«MCP server connection lost» alla prima chiamata dopo una pausa — curato nella
-  0.55.1.** Tre volte fra il 24 e il 26/09 la prima chiamata del connettore dopo un
+  0.56.0.** Tre volte fra il 24 e il 26/09 la prima chiamata del connettore dopo un
   update, un ingest o il caricamento di un indice si interrompeva, e la seconda andava.
   Riprodotto il 26/09: dopo un riavvio di archive-mcp la prima `search_ibrida` rispondeva
   in **64,9 s**, oltre i 60 s di lettura del proxy del gateway (`httpx.ReadTimeout` nei
