@@ -3426,7 +3426,9 @@ def cmd_archive_migra(repo: Path, args) -> int:
     e mostra il delta di `speaker`. A SECCO di default, come `archive-retag`.
 
     Oggi: gli output degli strumenti (tool_result di Claude Code) scritti `human` da
-    un indexer precedente alla 0.52.0 diventano `speaker='tool'`. L'ingest la applica
+    un indexer precedente alla 0.52.0 diventano `speaker='tool'`, i turni del
+    programma (notifiche, output di comandi locali, compattazioni…) scritti `human`
+    prima della 0.53.0 diventano `speaker='system'`. L'ingest la applica
     da solo al DB in cui scrive; questo comando serve per quelli in cui non si scrive
     più. Il testo non cambia: FTS e indice semantico restano validi.
 
@@ -3463,13 +3465,14 @@ def cmd_archive_migra(repo: Path, args) -> int:
             warn(f"«{nome}»: output non interpretabile — {(r.stdout or '')[:160]}")
             uscita = 1
             continue
-        if not esito.get("strumenti"):
+        if not (esito.get("strumenti") or esito.get("sistema")):
             log(f"  {nome}: niente da migrare")
             continue
         verbo = "diventerebbero" if not esito.get("scritto") else "diventate"
         prima = esito.get("speaker_prima", {}).get("human", 0)
         dopo = esito.get("speaker_dopo", {}).get("human", 0)
-        log(f"  {nome}: {esito['strumenti']} righe {verbo} 'tool' · human {prima} → {dopo}")
+        log(f"  {nome}: {esito.get('strumenti', 0)} righe {verbo} 'tool', "
+            f"{esito.get('sistema', 0)} 'system' · human {prima} → {dopo}")
     if not args.scrivi:
         log("niente è stato scritto. Ripeti con --scrivi per applicare.")
     return uscita

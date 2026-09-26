@@ -4,6 +4,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### 🐛 Correzioni
+
+- **archive: i turni che inietta il programma non sono più parole dell'utente —
+  `speaker='system'` (#293).** Dopo la cura degli strumenti (0.52.0) restavano sul
+  primario 14.878 righe `human`, e il 75% le aveva scritte Claude Code: 9.643
+  `<task-notification>`, 1.115 output di comandi locali, 151 riassunti di compattazione,
+  testi delle skill, messaggi di altre sessioni. Ora entrano `sender='sistema'` →
+  `speaker='system'` (quinto valore, additivo). All'ingest decide il fatto del record
+  (`origin.kind`, `isMeta`, `isCompactSummary`); dove manca, le forme del testo ancorate
+  all'inizio. Slash command e `!comandi` restano `human`. Retroattiva con lo stesso
+  `vps1777 archive-migra`: sul primario `human` da 15.132 a 3.967. Doc: ARCHIVE.md e CLI.md
+  (IT/EN), docstring di `search`.
+
 ## [0.52.0] — 2026-09-26
 
 ### 🐛 Correzioni
