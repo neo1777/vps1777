@@ -355,7 +355,7 @@ features:
     dove: ["compose.yaml", "tools/vps1777.py#versione_env", "tools/vps1777.py#versione_set",
            "tools/tests/test_digest_nel_compose.py"]
     status: active-default
-    since: "unreleased"
+    since: "0.59.0"
     decisione: "27/09/2026, rinvio scaduto il 10/09 («in un momento dedicato al percorso
                 update») fatto come PR a sé, dopo la 0.58.0. Disegno: digest nel .env invece
                 di un override generato — il .env lo legge ogni comando compose nella

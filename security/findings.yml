@@ -502,7 +502,7 @@ findings:
       digest, quindi non hanno digest verificati da scrivere. Da chiudere con una prova
       eseguita sulla VPS (pull a mano nella cartella → digest verificato).
     # dal 0.59.0 il pin c'è sul percorso gestito; prima era partial dalla v0.27.0
-    since: unreleased
+    since: v0.59.0
     evidence:
       - file: compose.ops.backup.yaml
         contains: ["@sha256:"]

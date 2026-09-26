@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.59.0] — 2026-09-27
+
+**L'ultimo rinvio scaduto, e due difetti che la prova dal vivo della 0.58.0 ha trovato
+subito.** `H22` porta il digest verificato dentro il compose. Il timer diventato giornaliero
+ha acceso un falso allarme al primo `daemon-reload`, e il primo ingest col rootfs in sola
+lettura ha lasciato un file che root non poteva più cancellare.
+
 ### Sicurezza
 - **Il digest verificato vive anche nel compose** (`H22`, l'ultimo dei rinvii scaduti).
   Dopo `verify_digests` la CLI scrive nel `.env`, insieme a `VPS1777_TAG` e in una sola
