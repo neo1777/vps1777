@@ -2916,3 +2916,125 @@ def test_documents_del_bundle_entrano_come_i_workfiles(tmp_path: Path, monkeypat
                        "documents/1111111111__foto.png")}, lapidi
     assert con.execute("SELECT count(*) FROM skipped WHERE reason='membro-sconosciuto'"
                        ).fetchone()[0] == 0
+
+
+# ═══════════════════ SPEAKER degli output degli strumenti (26/09/2026) ══
+# Misurato sul primario Claude Code: 75.072 delle 89.950 righe `speaker='human'`
+# (83%) erano tool_result — in Claude Code l'output di un comando viaggia in un
+# record di tipo `user`. Il filtro «le parole di chi scrive» restituiva soprattutto
+# `ls`, referti di script, file letti. Le eccezioni sono parole vere dell'utente
+# dentro un tool_result: le risposte alle domande a opzioni e i rifiuti motivati.
+
+_TR_OUTPUT = ('{"type":"user","uuid":"t1","timestamp":"2026-02-02T10:00:00Z","message":'
+              '{"role":"user","content":[{"type":"tool_result","tool_use_id":"x",'
+              '"content":"total 8\\ndrwxr-xr-x 2 a a 4096 ."}]}}')
+_TR_RISPOSTA_1 = ('{"type":"user","uuid":"t2","timestamp":"2026-02-02T10:00:01Z","message":'
+                  '{"role":"user","content":[{"type":"tool_result","tool_use_id":"y","content":'
+                  '"Your questions have been answered: \\"Da dove parto?\\"=\\"parti da A\\"."}]}}')
+_TR_RISPOSTA_2 = ('{"type":"user","uuid":"t3","timestamp":"2026-02-02T10:00:02Z","message":'
+                  '{"role":"user","content":[{"type":"tool_result","tool_use_id":"z","content":'
+                  '[{"type":"text","text":"The user answered: \\"Quale?\\"=\\"la prima\\""}]}]}}')
+_TR_RIFIUTO_PAROLE = ('{"type":"user","uuid":"t4","timestamp":"2026-02-02T10:00:03Z","message":'
+                      '{"role":"user","content":[{"type":"tool_result","tool_use_id":"w","content":'
+                      '"The user doesn\'t want to proceed with this tool use. The tool use was '
+                      'rejected. To tell you how to proceed, the user said:\\nprima leggi il file"}]}}')
+_TR_RIFIUTO_MUTO = ('{"type":"user","uuid":"t5","timestamp":"2026-02-02T10:00:04Z","message":'
+                    '{"role":"user","content":[{"type":"tool_result","tool_use_id":"v","content":'
+                    '"The user doesn\'t want to proceed with this tool use. The tool use was rejected."}]}}')
+_TR_CITA_RISPOSTA = ('{"type":"user","uuid":"t6","timestamp":"2026-02-02T10:00:05Z","message":'
+                     '{"role":"user","content":[{"type":"tool_result","tool_use_id":"u","content":'
+                     '"grep: 12: Your questions have been answered: ..."}]}}')
+
+
+def test_tool_result_non_e_parola_dell_utente() -> None:
+    """Un record `user` fatto SOLO di output di strumenti diventa `sender='strumento'`
+    → `speaker='tool'`; le parole vere dell'utente dentro un tool_result restano
+    `user` → `human`. Il riconoscimento è ANCORATO all'inizio del testo: una forma
+    citata dentro l'output di un grep (t6) non è una risposta."""
+    import io as _io
+    righe = "\n".join([_TR_OUTPUT, _TR_RISPOSTA_1, _TR_RISPOSTA_2, _TR_RIFIUTO_PAROLE,
+                       _TR_RIFIUTO_MUTO, _TR_CITA_RISPOSTA])
+    rows = [r for r in archive_indexer._iter_claude_code(_io.StringIO(righe), "p")
+            if not isinstance(r, archive_indexer._Skip)]
+    sender = {r[0]: r[4] for r in rows}
+    assert sender == {"t1": "strumento", "t2": "user", "t3": "user", "t4": "user",
+                      "t5": "strumento", "t6": "strumento"}
+    assert archive_indexer.speaker_da_sender("strumento") == "tool"
+
+
+def test_tool_result_di_sidechain_resta_mandato() -> None:
+    """L'ordine conta: un tool_result in una sidechain è della macchina come il
+    mandato (AN-11, 28/08), e non deve cambiare categoria con questa cura."""
+    import io as _io
+    riga = ('{"type":"user","uuid":"s1","timestamp":"2026-02-02T10:00:00Z","isSidechain":true,'
+            '"message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}')
+    rows = [r for r in archive_indexer._iter_claude_code(_io.StringIO(riga), "p")
+            if not isinstance(r, archive_indexer._Skip)]
+    assert rows[0][4] == "mandato"
+
+
+def test_contratto_bucket_strumento() -> None:
+    """Il verdetto del contratto dei bucket per i tre casi nuovi: la corsia app
+    confronta solo keep/skip, ma il mittente è parte del verdetto e va inchiodato."""
+    import io as _io
+    verdicts = archive_indexer.classify_cc(
+        _io.StringIO("\n".join([_TR_OUTPUT, _TR_RISPOSTA_1, _TR_RIFIUTO_PAROLE]) + "\n"))
+    assert verdicts == ["keep:strumento", "keep:user", "keep:user"]
+
+
+def _db_cc_vecchio(tmp_path: Path) -> Path:
+    """Un DB scritto dall'indexer di PRIMA: i tool_result come `user`/`human`."""
+    db = tmp_path / "vecchio.db"
+    righe = "\n".join([_TR_OUTPUT, _TR_RISPOSTA_1, _TR_RIFIUTO_PAROLE, _TR_RIFIUTO_MUTO,
+                       '{"type":"user","uuid":"p1","timestamp":"2026-02-02T10:00:09Z",'
+                       '"message":{"role":"user","content":"parola vera"}}'])
+    archive_indexer.write_rows(
+        db, archive_indexer._iter_claude_code(_io_mod().StringIO(righe), "p"))
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE messages SET sender='user', speaker='human' WHERE uuid LIKE 't%'")
+    return db
+
+
+def _io_mod():
+    import io
+    return io
+
+
+def test_migrazione_strumenti_retroattiva_e_idempotente(tmp_path: Path) -> None:
+    """Sui DB già caricati la cura è una migrazione, non un re-ingest: il testo non
+    cambia, quindi FTS e indice semantico restano validi. Tocca solo le righe
+    `user` con `content=''` e `tools` pieni che NON sono parole dell'utente."""
+    db = _db_cc_vecchio(tmp_path)
+    with sqlite3.connect(db) as c:
+        assert archive_indexer._ensure_speaker_strumenti(c) == 2
+        stato = dict(c.execute("SELECT uuid, sender || '/' || speaker FROM messages"
+                               " WHERE uuid IN ('t1','t2','t4','t5','p1')"))
+        assert stato == {"t1": "strumento/tool", "t2": "user/human", "t4": "user/human",
+                         "t5": "strumento/tool", "p1": "user/human"}
+        assert archive_indexer._ensure_speaker_strumenti(c) == 0, "idempotente"
+
+
+def test_migrazione_agganciata_all_ingest(tmp_path: Path) -> None:
+    """Un ingest in un DB vecchio lo migra: l'aggancio è in `write_rows`, come per
+    le altre colonne derivate (#271)."""
+    db = _db_cc_vecchio(tmp_path)
+    archive_indexer.write_rows(db, iter(()))
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT count(*) FROM messages WHERE speaker='tool'").fetchone()[0] == 2
+
+
+def test_cli_migra_a_secco_poi_scrive(tmp_path: Path, capsys) -> None:
+    """`--migra` senza `--scrivi` calcola il delta VERO e non salva niente (lo stesso
+    patto di `--retag`); con `--scrivi` applica."""
+    db = _db_cc_vecchio(tmp_path)
+    assert archive_indexer.main([str(db), "--migra"]) == 0
+    esito = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert esito["strumenti"] == 2 and esito["scritto"] is False
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT count(*) FROM messages WHERE speaker='tool'").fetchone()[0] == 0
+    assert archive_indexer.main([str(db), "--migra", "--scrivi"]) == 0
+    esito = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert esito["scritto"] is True
+    assert esito["speaker_prima"]["human"] == 5 and esito["speaker_dopo"]["tool"] == 2
+    with sqlite3.connect(db) as c:
+        assert c.execute("SELECT count(*) FROM messages WHERE speaker='tool'").fetchone()[0] == 2

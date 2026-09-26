@@ -116,6 +116,20 @@ vps1777 archive-retag                     # anteprima su tutti i DB
 vps1777 archive-retag --db cc --scrivi    # applica su un DB solo
 ```
 
+## vps1777 archive-migra
+
+Porta ai DB **già caricati** le migrazioni delle colonne derivate, senza ingest:
+oggi gli output degli strumenti di Claude Code scritti `human` da un indexer
+precedente alla 0.52.0 diventano `speaker='tool'` ([ARCHIVE.md](ARCHIVE.md)). Il
+testo non cambia: FTS e indice semantico restano validi. **A secco di default**:
+misura il delta su una transazione vera, la annulla e non tocca i dati; scrive solo
+con `--scrivi`. I `.vec.db` (indici semantici) non sono archivi e vengono saltati.
+
+```bash
+vps1777 archive-migra                                  # anteprima su tutti i DB
+vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
+```
+
 ## vps1777 secrets-status
 
 Età e scadenze dei secret (chiavi, token, cookie NotebookLM): elenca cosa è da

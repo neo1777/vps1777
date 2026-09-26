@@ -756,12 +756,44 @@ passando a `write_rows` una **decima colonna** facoltativa (`messaggio` o
 `data-export`; senza, resta `messaggio`; un altro valore ferma l'ingest).
 
 **`speaker` e `voice`** — due assi che non vanno fusi. `speaker` è **chi ha inviato**
-la riga, un fatto preso dalla fonte (`human` · `assistant` · `unknown`: allegati,
-titoli, memorie e schede sono `unknown`, perché non dicono chi le ha scritte).
+la riga, un fatto preso dalla fonte (`human` · `assistant` · `tool` · `unknown`:
+allegati, titoli, memorie e schede sono `unknown`, perché non dicono chi le ha scritte).
 `voice` è **di chi è la voce** nel contenuto, una stima euristica (`own` ·
 `pasted_transcript` · `pasted_ai` · `character` · `mixed` · `unknown`), con la sua
 confidenza e le bandiere che la spiegano. Escono **popolate** da ogni percorso
 d'ingest.
+
+**Gli output degli strumenti sono `tool`, non `human` (dalla 0.52.0).** In Claude Code
+l'output di un comando (il `tool_result`) viaggia in un record di tipo `user`: fino alla
+0.51.4 entrava come `sender='user'` → `speaker='human'`, e sul primario erano **74.818
+delle 89.950** righe `human` (83%, misurato il 26/09/2026). Ora un record `user` fatto di
+soli tool_result entra come `sender='strumento'` → `speaker='tool'`, e `speaker='human'`
+torna a voler dire «parole di chi scrive». Due eccezioni restano `human`, perché sono
+parole dell'utente consegnate dentro un tool_result: le **risposte alle domande a
+opzioni** (il testo comincia con «Your questions have been answered» o «The user
+answered»: la forma cambia con la versione di Claude Code) e i **rifiuti motivati**
+(«The user doesn't want to proceed with this tool use… the user said:» seguito dalle sue
+parole). Il riconoscimento è ancorato all'inizio del testo: la stessa frase dentro
+l'output di un `grep` resta `tool`. Un tool_result dentro una sidechain resta
+`mandato`, come prima.
+
+I DB **già caricati** non vanno ri-ingeriti: la cura è una migrazione, perché il testo
+non cambia (`sender` e `speaker` non stanno nell'FTS né nei vettori, e l'indice
+semantico è legato ai rowid, che la migrazione non tocca). Parte da sola al primo
+ingest in un DB vecchio; per i DB in cui non si scrive più c'è
+[`vps1777 archive-migra`](CLI.md) (a secco di default, `--scrivi` per applicare), che
+per ogni DB chiama nel gateway:
+
+```bash
+python -m app.archive_indexer /var/lib/archive/db/<nome>.db --migra [--scrivi]
+```
+
+e stampa `{"strumenti": N, "speaker_prima": {…}, "speaker_dopo": {…}, "scritto": …}`. Sul
+primario: 74.818 righe, `human` da 89.950 a 15.132, 6 secondi. ⚠️ Anche a secco il file
+può cambiare **sha** senza cambiare dati: SQLite non mette nel journal le pagine libere
+che riusa, e dopo il ROLLBACK quelle restano libere ma con byte diversi (misurato: 638
+pagine libere, dati e `integrity_check` identici). Chi confronta un DB per sha, come uno
+script che carica l'indice solo se il DB non è cambiato, lo faccia prima del `--migra`.
 
 **`revisions`** conserva la versione **uscente** quando lo stesso uuid ritorna con un
 contenuto diverso (una memoria riscritta, una scheda aggiornata, un pezzo tolto):

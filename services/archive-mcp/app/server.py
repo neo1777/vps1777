@@ -100,8 +100,9 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
         sort: 'rank' (rilevanza, default), 'newest' o 'oldest' (per data).
         since / until: filtro temporale sul ts (ISO, confronto lessicografico).
         project: filtra per etichetta esatta (titolo chat, project:*, design:*).
-        speaker: CHI HA SCRITTO la riga — 'human', 'assistant', 'unknown'. È un
-            FATTO preso dalla fonte, non una stima.
+        speaker: CHI HA SCRITTO la riga — 'human', 'assistant', 'tool', 'unknown'.
+            È un FATTO preso dalla fonte, non una stima. 'tool' = l'output di un
+            comando (tool_result di Claude Code, dalla 0.52.0: prima era 'human').
         voice: DI CHI È LA VOCE nel contenuto — è una STIMA euristica, con la sua
             confidenza. Valori: 'own', 'pasted_transcript', 'pasted_ai',
             'character', 'mixed', 'unknown', più due alias e un terzo stato:

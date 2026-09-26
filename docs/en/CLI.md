@@ -118,6 +118,21 @@ vps1777 archive-retag                     # anteprima su tutti i DB
 vps1777 archive-retag --db cc --scrivi    # applica su un DB solo
 ```
 
+## vps1777 archive-migra
+
+Brings the migrations of the derived columns to the DBs **already loaded**, without
+an ingest: today, Claude Code tool outputs written as `human` by an indexer older
+than 0.52.0 become `speaker='tool'` ([ARCHIVE.md](ARCHIVE.md)). The text doesn't
+change: FTS and semantic index stay valid. **Dry-run by default**: it measures the
+delta on a real transaction, rolls it back and doesn't touch the data; it writes
+only with `--scrivi`. The `.vec.db` files (semantic indexes) are not archives and
+are skipped.
+
+```bash
+vps1777 archive-migra                                  # anteprima su tutti i DB
+vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
+```
+
 ## vps1777 secrets-status
 
 Age and expiry of the secrets (keys, tokens, NotebookLM cookies): it lists what

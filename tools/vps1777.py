@@ -3395,6 +3395,86 @@ def cmd_bootstrap(repo: Path, args) -> int:
 _ARCH_NAME_RE = re.compile(r"[^a-z0-9_-]+")
 
 
+def _filtra_db_archivio(righe: list[str], solo: str | None) -> list[str]:
+    """Dall'elenco dei file `.db` del volume, i DB dell'ARCHIVIO: senza i `.vec.db`,
+    che sono l'indice semantico accanto a un archivio (0.48.0) e non hanno la tabella
+    `messages` — passati all'indexer, ogni comando falliva su di loro e chiudeva con
+    esito 1 anche quando sugli archivi veri era andato tutto bene. Con `solo` tiene il
+    DB con quel nome (senza `.db`)."""
+    trovati = [r.strip() for r in righe if r.strip() and not r.strip().endswith(".vec.db")]
+    if solo:
+        trovati = [d for d in trovati if d == f"/var/lib/archive/db/{solo}.db"]
+    return trovati
+
+
+def _db_archivio(repo: Path, cc: list[str], solo: str | None) -> list[str]:
+    """I DB dell'archivio visti dal gateway, o `die` se non si può guardare."""
+    res = run([*cc, "exec", "-T", "gateway", "sh", "-lc",
+               "ls /var/lib/archive/db/*.db 2>/dev/null"], capture=True, check=False)
+    righe = (res.stdout or "").splitlines()
+    if res.returncode != 0 and not [r for r in righe if r.strip()]:
+        # 🔴 Tre stati, non due: «non ho potuto guardare» non è «non ci sono DB».
+        die("non ho potuto elencare i DB dell'archivio (il gateway risponde?)")
+    trovati = _filtra_db_archivio(righe, solo)
+    if solo and not trovati:
+        die(f"DB «{solo}» non trovato nell'archivio")
+    return trovati
+
+
+def cmd_archive_migra(repo: Path, args) -> int:
+    """Applica ai DB già caricati le migrazioni delle colonne derivate, senza ingest,
+    e mostra il delta di `speaker`. A SECCO di default, come `archive-retag`.
+
+    Oggi: gli output degli strumenti (tool_result di Claude Code) scritti `human` da
+    un indexer precedente alla 0.52.0 diventano `speaker='tool'`. L'ingest la applica
+    da solo al DB in cui scrive; questo comando serve per quelli in cui non si scrive
+    più. Il testo non cambia: FTS e indice semantico restano validi.
+
+    🛡️ Il referto a secco è misurato su una transazione vera e poi annullata. Anche a
+    secco lo sha del file può cambiare (pagine libere riusate): i dati no.
+    """
+    cc = compose_cmd(repo)
+    trovati = _db_archivio(repo, cc, args.db)
+    if not trovati:
+        log("nessun DB nell'archivio: niente da migrare")
+        return 0
+    if not args.scrivi:
+        log("modalità A SECCO: misuro il delta e non scrivo nulla (--scrivi per applicare)")
+    uscita = 0
+    for db_path in trovati:
+        nome = Path(db_path).stem
+        cmd = [*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
+               db_path, "--migra"]
+        if args.scrivi:
+            cmd.append("--scrivi")
+        r = run(cmd, capture=True, check=False, timeout=1800)
+        if r.returncode == 2:
+            # schema precedente al voice-tagging, o un file che non è un archivio: lo
+            # dice l'indexer, e non è un fallimento di questo comando.
+            log(f"  {nome}: saltato — {(r.stderr or '').strip()[:160]}")
+            continue
+        if r.returncode != 0:
+            warn(f"«{nome}»: migrazione fallita — {(r.stderr or r.stdout or '').strip()[:200]}")
+            uscita = 1
+            continue
+        try:
+            esito = json.loads((r.stdout or "").strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            warn(f"«{nome}»: output non interpretabile — {(r.stdout or '')[:160]}")
+            uscita = 1
+            continue
+        if not esito.get("strumenti"):
+            log(f"  {nome}: niente da migrare")
+            continue
+        verbo = "diventerebbero" if not esito.get("scritto") else "diventate"
+        prima = esito.get("speaker_prima", {}).get("human", 0)
+        dopo = esito.get("speaker_dopo", {}).get("human", 0)
+        log(f"  {nome}: {esito['strumenti']} righe {verbo} 'tool' · human {prima} → {dopo}")
+    if not args.scrivi:
+        log("niente è stato scritto. Ripeti con --scrivi per applicare.")
+    return uscita
+
+
 def cmd_archive_retag(repo: Path, args) -> int:
     """Ri-classifica `voice` sui DB dell'archivio e mostra il delta. A SECCO di default.
 
@@ -3412,17 +3492,7 @@ def cmd_archive_retag(repo: Path, args) -> int:
     distribuzione muovendo righe diverse — senza il delta sono indistinguibili.
     """
     cc = compose_cmd(repo)
-    res = run([*cc, "exec", "-T", "gateway", "sh", "-lc",
-               "ls /var/lib/archive/db/*.db 2>/dev/null"], capture=True, check=False)
-    trovati = [r.strip() for r in (res.stdout or "").splitlines() if r.strip()]
-    if res.returncode != 0 and not trovati:
-        # 🔴 Tre stati, non due: «non ho potuto guardare» non è «non ci sono DB».
-        die("non ho potuto elencare i DB dell'archivio (il gateway risponde?)")
-    if args.db:
-        voluto = f"/var/lib/archive/db/{args.db}.db"
-        trovati = [d for d in trovati if d == voluto]
-        if not trovati:
-            die(f"DB «{args.db}» non trovato nell'archivio")
+    trovati = _db_archivio(repo, cc, args.db)
     if not trovati:
         log("nessun DB nell'archivio: niente da ri-taggare")
         return 0
@@ -4004,6 +4074,12 @@ def build_parser() -> "argparse.ArgumentParser":
     p.add_argument("--scrivi", action="store_true",
                    help="applica davvero. Senza, stampa solo il delta e non tocca nulla.")
 
+    p = sub.add_parser("archive-migra",
+                       help="migra le colonne derivate dei DB già caricati (a secco di default)")
+    p.add_argument("--db", help="un solo DB (nome senza .db); default: tutti")
+    p.add_argument("--scrivi", action="store_true",
+                   help="applica davvero. Senza, stampa solo il delta e non tocca nulla.")
+
     p = sub.add_parser("avvisa-fallimento",
                        help="dice su Telegram che una unit systemd è fallita (usato da OnFailure=)")
     p.add_argument("--unit", required=True, help="nome della unit fallita (il segnaposto %%n di systemd)")
@@ -4054,6 +4130,7 @@ def main() -> int:
                 "migrate": cmd_migrate, "bootstrap": cmd_bootstrap,
                 "archive-ingest": cmd_archive_ingest,
                 "archive-retag": cmd_archive_retag,
+                "archive-migra": cmd_archive_migra,
                 "secrets-status": cmd_secrets_status,
                 "memoria": cmd_memoria, "help": cmd_help,
                 "avvisa-fallimento": cmd_avvisa_fallimento}
