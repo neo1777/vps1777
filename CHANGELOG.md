@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.56.0] — 2026-09-26
+
 ### ✨ Nuovo
 
 - **`tools/indice_semantico.py aggiorna`: l'indice della ricerca per senso, dal PC alla
@@ -29,6 +31,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `vps1777 archive-migra --scrivi` lo crea sui DB già caricati (4,6 s e +7 MB sul
   primario). Serve anche a `list_projects` e ai filtri per etichetta. Doc: ARCHIVE.md
   (IT/EN), «Limiti noti».
+
+### Nota per chi aggiorna
+
+`vps1777 archive-migra --scrivi` crea l'indice per etichetta sui DB già caricati (pochi
+secondi per DB): finché un DB non ce l'ha, la prima chiamata dopo un avvio resta lenta.
 
 ## [0.55.0] — 2026-09-26
 
