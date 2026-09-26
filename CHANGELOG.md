@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### ✨ Nuovo
+
+- **`tools/indice_semantico.py aggiorna`: l'indice della ricerca per senso, dal PC alla
+  VPS, in un gesto** (gradino 2). Prima erano sei passi a mano: copia del DB,
+  costruzione, controllo, confronto col DB sulla VPS, caricamento, prova. Ora uno
+  strumento solo stdlib li mette in fila con le loro guardie: copia in streaming via
+  ssh (`docker cp … -`, niente file temporanei sulla VPS) con `PRAGMA quick_check`;
+  indice di partenza preso dal lavoro precedente o dalla VPS (costruzione incrementale;
+  il perimetro serve solo la prima volta); costruzione e `--controlla` col costruttore
+  del repo; **nessun caricamento** se il DB sulla VPS è cambiato dopo la copia; carico
+  su un nome d'attesa e rinomina atomica. Provato dal vivo su un DB dell'archivio: 13
+  s, `search_ibrida` con `registro: true` e `scartati: 0`. Doc: RICERCA-IBRIDA.md
+  (IT/EN).
+
 ### 🐛 Correzioni
 
 - **archive: «MCP server connection lost» alla prima chiamata dopo una pausa — un indice

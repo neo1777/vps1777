@@ -431,6 +431,26 @@ Su un'installazione nuova `search_ibrida` risponde con un errore che dice cosa m
 1. **Il modello sulla VPS**, una volta: `vps1777 indice-modello` (vedi sopra).
 2. **Il modello sul PC**, nella cartella che userai col costruttore:
    `python3 tools/vps1777.py indice-modello --dest ~/e5-small`.
+**L'indice, in un gesto** (dalla 0.56.0), dal checkout del repo sul PC:
+
+```bash
+python3 tools/indice_semantico.py aggiorna --host <vps> --db <nome-db> \
+    --modello ~/e5-small --tutto
+```
+
+Fa i passi 3-6 qui sotto con le loro guardie: copia il DB in streaming (senza file
+temporanei sulla VPS) e ne controlla la coerenza (`PRAGMA quick_check`); parte
+dall'indice che c'è già, nella cartella di lavoro (`--lavoro`, default
+`~/archivio-indice`) o sulla VPS, così la costruzione è incrementale; costruisce,
+controlla, e **non carica** se nel frattempo il DB sulla VPS è cambiato; carica su un
+nome d'attesa e rinomina, così archive-mcp non legge mai un file a metà. Il perimetro
+(`--tutto`, `--dal/--al`, `--project`) serve solo la prima volta. Una costruzione
+interrotta si riprende rilanciando con `--senza-copia`; `--non-caricare` si ferma
+prima del caricamento. Esce 0 a indice caricato, 1 se un passo fallisce, 2 se
+rifiuta (DB cambiato, perimetro mancante).
+
+Oppure a mano, un passo per volta:
+
 3. **Una copia del DB sul PC**, presa mentre non c'è un ingest in corso:
 
    ```bash

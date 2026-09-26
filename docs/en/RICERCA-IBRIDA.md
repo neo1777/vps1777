@@ -457,6 +457,26 @@ On a new installation `search_ibrida` answers with an error that says what is mi
 1. **The model on the VPS**, once: `vps1777 indice-modello` (see above).
 2. **The model on the PC**, in the folder you will use with the builder:
    `python3 tools/vps1777.py indice-modello --dest ~/e5-small`.
+**The index, in one gesture** (since 0.56.0), from the repo checkout on the PC:
+
+```bash
+python3 tools/indice_semantico.py aggiorna --host <vps> --db <nome-db> \
+    --modello ~/e5-small --tutto
+```
+
+It does steps 3-6 below with their guards: it copies the DB in streaming (no temporary
+files on the VPS) and checks its consistency (`PRAGMA quick_check`); it starts from the
+index already there, in the working folder (`--lavoro`, default `~/archivio-indice`)
+or on the VPS, so the build is incremental; it builds, checks, and **does not upload**
+if the DB on the VPS has changed in the meantime; it uploads under a waiting name and
+renames, so archive-mcp never reads a half-written file. The perimeter (`--tutto`,
+`--dal/--al`, `--project`) is needed only the first time. An interrupted build is
+resumed by running it again with `--senza-copia`; `--non-caricare` stops before the
+upload. It exits 0 with the index uploaded, 1 if a step fails, 2 if it refuses (DB
+changed, missing perimeter).
+
+Or by hand, one step at a time:
+
 3. **A copy of the DB on the PC**, taken while no ingest is running:
 
    ```bash
