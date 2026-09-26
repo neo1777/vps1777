@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.55.0] — 2026-09-26
+
 ### ✨ Nuovo
 
 - **La ricerca per senso entra nel prodotto: `vps1777 indice-modello`.** Fino a qui il
@@ -20,6 +22,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   salto di qualità si misura col banco»). Doc: RICERCA-IBRIDA.md (il modello, la prima
   attivazione scritta per qualunque DB e con il costo, «8 core» corretto in 4 core / 8
   thread), INSTALL.md e CLI.md, IT/EN.
+
+### Nota per chi aggiorna
+
+Niente da fare: il server legge il modello che c'è. Chi ha già un modello esportato a
+mano lo tiene (l'indice è legato a quel file); `vps1777 indice-modello` lo lascia dov'è e
+lo dice. Chi non ha ancora la ricerca per senso: `vps1777 indice-modello`, poi
+RICERCA-IBRIDA.md, «Attivare la ricerca per senso».
 
 ## [0.54.0] — 2026-09-26
 
