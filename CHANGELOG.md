@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### 🐛 Correzioni
+
+- **Costruttore dell'indice: il modello si apre solo se c'è qualcosa da calcolare.** Il
+  job notturno della 0.57.0, sul primario, ha un picco di 1.007 MiB contro un tetto di
+  1.300 MB (misurato sulla VPS il 26/09, giro senza niente da ricalcolare): quasi tutto
+  era il modello caricato per niente. Ora `EmbedderOnnx` lo apre alla prima chiamata,
+  mentre l'errore parlante del modello mancante resta alla partenza. E il riassunto di
+  `vps1777 indice-notturno` non riporta più l'avviso di telemetria di onnxruntime.
+
 ## [0.57.0] — 2026-09-26
 
 ### ✨ Nuovo
