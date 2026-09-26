@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.57.0] — 2026-09-26
+
 ### ✨ Nuovo
 
 - **L'indice semantico si aggiorna da solo, di notte, sulla VPS: `vps1777
@@ -16,6 +18,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   sotto-lotti da 4 (nuova opzione `--sotto-lotto` del costruttore: ~0,9 GB di picco
   contro ~1,2 a 16, misurato). Unit con `OnFailure=`, `Nice=15`, I/O idle. Doc:
   RICERCA-IBRIDA.md e CLI.md (IT/EN).
+
+### Nota per chi aggiorna
+
+Il job è spento: si accende con `vps1777 indice-notturno --abilita`, e ha senso solo se
+un indice c'è già. L'immagine di archive-mcp porta ora anche il costruttore dell'indice.
 
 ## [0.56.0] — 2026-09-26
 
