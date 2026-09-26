@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.51.3] — 2026-09-26
+
 ### 🐛 Correzioni
 
 - **archive-mcp: `get_context` e `get_conversation` sulle sessioni Claude Code leggono il
