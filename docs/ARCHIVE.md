@@ -405,9 +405,9 @@ dalla Mini App). Tutti passano dalla redazione in uscita descritta sopra.
 
 | Tool | Cosa fa |
 |---|---|
-| `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}`. Sulla ricerca in **tutti** i DB lo stesso uuid arriva **una volta**, con `anche_in` per gli altri archivi che lo contengono (niente limit sprecato in fotocopie). Filtri `since`/`until`, `project`, `speaker`, `voice` |
-| `search_ibrida(query, db_name, limit, query_fts, …)` | ricerca **per senso**: FTS5 + vettori fusi (RRF). Serve quando ricordi il senso e non il lessico; richiede il modello di embedding e un indice `<db>.vec.db` sul volume, e se mancano **lo dice** invece di ricadere su FTS5. Vedi [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
-| `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings` |
+| `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}`. Sulla ricerca in **tutti** i DB lo stesso uuid arriva **una volta**, con `anche_in` per gli altri archivi che lo contengono (niente limit sprecato in fotocopie). Filtri `since`/`until`, `project`, `speaker`, `voice`, `campi` (sotto) |
+| `search_ibrida(query, db_name, limit, query_fts, …)` | ricerca **per senso**: FTS5 + vettori fusi (RRF). Serve quando ricordi il senso e non il lessico; richiede il modello di embedding e un indice `<db>.vec.db` sul volume, e se mancano **lo dice** invece di ricadere su FTS5. Accetta `campi` come `search`. Vedi [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
+| `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings`. Stessi filtri di `search`, `campi` compreso |
 | `check_term(term, db_name)` | diagnostica se un termine con `+`/`#` (`C++`, `C#`, `g++`) è ricercabile o **collassa** sul prefisso — chiede all'indice, non alla doc |
 | `get_context(uuid, db_name, before, after, max_chars)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; sulle sessioni Claude Code i vicini vengono dal **file di sessione** (la riga cercata lo dice in `vicini_da`); altrove, se il messaggio è in un thread, dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale. `max_chars` (0 = intero) tronca ogni riga **dichiarandolo nel testo** — sui messaggi-hub giganti il payload pieno uccideva la connessione. Una riga **senza testo** (un tool_use, l'output di un comando) porta anche **`tools`**, le azioni che sono il suo contenuto (dalla 0.52.0: prima arrivava vuota), troncato da `max_chars` come il testo |
 | `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine `(ts, uuid)`) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` e `tools` come in `get_context`. Sulle sessioni Claude Code è il **file di sessione** intero (`conversazione_da`), e coi bundle con `recupero/` la scheda della sessione esce **in coda** |
@@ -420,6 +420,20 @@ dalla Mini App). Tutti passano dalla redazione in uscita descritta sopra.
 | `check_integrity(db_name)` | integrità degli archivi: `ok` · `sporco` (journal caldo: lo scrittore è morto a metà) · `corrotto` · `non_misurabile`. Costa una scansione per DB: da chiamare quando un risultato sembra strano, non a ogni ricerca |
 | `set_description(db_name, description)` | scrive/aggiorna la **descrizione** dell'archivio (tocca la scheda, mai i messaggi) |
 | `set_ruolo(db_name, ruolo)` | dichiara il **ruolo** dell'archivio a vocabolario chiuso — vedi sotto |
+
+**`campi` — cercare nelle parole o anche nelle azioni (dalla 0.54.0, #273).** Per
+default `search`, `count` e `search_ibrida` cercano **ovunque**: nel testo, nelle azioni
+(`tools`: il comando lanciato, il file scritto da un Edit, l'output di un Read) e negli
+allegati. È voluto, perché le azioni sono contenuto: è lì che si trova il file toccato o
+il comando dato. Ma con `sort='newest'` il codice diventa rumore in prima posizione. Il
+05/09 una ricerca sul «libro» restituiva per prima una fixture di test dell'indexer («il
+libro è al capitolo 81»): un dato finto e plausibile. Misurato il 26/09 sul primario: su
+14 righe con quella frase, 12 hanno il testo vuoto e la frase nelle azioni. Con
+**`campi='testo'`** la ricerca guarda solo le parole (la colonna `content`): è il filtro
+per il «più recente» e per «chi ha detto cosa». In `search_ibrida` il ramo vettoriale
+tiene allora solo le righe che hanno parole, perché un vettore non dice se ha colpito il
+testo o le azioni. Un valore diverso da `tutto`/`testo` è un errore, non un ritorno
+silenzioso al default.
 
 ### Il `ruolo` di un archivio — instradare senza leggere la prosa
 

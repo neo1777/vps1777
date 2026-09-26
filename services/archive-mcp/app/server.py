@@ -71,6 +71,7 @@ mcp.tool = _tool_con_redazione                            # type: ignore[method-
 def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
            sort: str = "rank", since: str = "", until: str = "",
            project: str = "", speaker: str = "", voice: str = "",
+           campi: str = "tutto",
            snippet_tokens: int = 32) -> list[dict[str, Any]]:
     """Cerca nell'archivio full-text (SQLite FTS5) delle conversazioni.
 
@@ -113,6 +114,11 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
               'none'    = MAI CLASSIFICATA — nessuno l'ha guardata. NON è
                           'unknown', che invece è un giudizio: «guardata e non
                           riconosciuta». Chiederli insieme è chiedere due cose.
+        campi: DOVE cercare. 'tutto' (default) = testo, azioni e allegati; 'testo' =
+            solo le parole, senza le azioni (comandi, file scritti o letti, output).
+            Usalo con sort='newest' e per «chi ha detto cosa»: il codice scritto da
+            un Edit o letto da un Read si presenta come il dato più recente (#273: una
+            fixture di test in prima posizione). Un altro valore è un errore.
         snippet_tokens: lunghezza dello snippet (default 32). Per il testo pieno
             attorno a un risultato usa get_context(uuid).
 
@@ -138,13 +144,13 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
     """
     return db.search(query, db_name, limit, raw=raw, sort=sort, since=since,
                      until=until, project=project, speaker=speaker, voice=voice,
-                     snippet_tokens=snippet_tokens)
+                     campi=campi, snippet_tokens=snippet_tokens)
 
 
 @mcp.tool()
 def search_ibrida(query: str, db_name: str = "", limit: int = 20,
                   query_fts: str = "", since: str = "", until: str = "",
-                  k_rrf: int = 30, peso_fts: float = 1.5,
+                  campi: str = "tutto", k_rrf: int = 30, peso_fts: float = 1.5,
                   snippet_tokens: int = 32) -> dict[str, Any]:
     """Cerca per SENSO, non per lessico: FTS5 + vettori fusi (issue #281).
 
@@ -174,6 +180,9 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
         limit: righe restituite (default 20).
         query_fts: espressione FTS5 opzionale per il ramo full-text.
         since / until: filtro temporale sul ramo FTS (ISO).
+        campi: 'tutto' (default) o 'testo' come in `search`. Col 'testo' il ramo
+            vettoriale tiene solo le righe che HANNO parole: un vettore non dice se
+            ha colpito il testo o le azioni.
         k_rrf, peso_fts: parametri di fusione. I default sono quelli misurati
             (plateau k=20-40, peso 1.2-1.5): cambiarli è un esperimento, non
             una regolazione — il banco vale per questi.
@@ -198,20 +207,21 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
     un errore). Vedi docs/RICERCA-IBRIDA.md.
     """
     return db.search_ibrida(query, db_name, limit, query_fts=query_fts,
-                            since=since, until=until, k_rrf=k_rrf,
+                            since=since, until=until, campi=campi, k_rrf=k_rrf,
                             peso_fts=peso_fts, snippet_tokens=snippet_tokens)
 
 
 @mcp.tool()
 def count(query: str, db_name: str = "", raw: bool = False, since: str = "",
           until: str = "", project: str = "", speaker: str = "",
-          voice: str = "") -> dict[str, Any]:
+          voice: str = "", campi: str = "tutto") -> dict[str, Any]:
     """Conta quanti messaggi corrispondono alla query (non limitato) — per
-    frequenze e prevalenze. Stessa sintassi di search. Ritorna
+    frequenze e prevalenze. Stessa sintassi e stessi filtri di search, `campi`
+    compreso ('testo' = solo le parole, senza le azioni). Ritorna
     {total, per_db:{nome: n}}. Query malformata → errore parlante, non 0.
     Se un termine COLLASSA (`C++`→`C`, vedi check_term) aggiunge `warnings`."""
     return db.count(query, db_name, raw=raw, since=since, until=until, project=project,
-                    speaker=speaker, voice=voice)
+                    speaker=speaker, voice=voice, campi=campi)
 
 
 @mcp.tool()

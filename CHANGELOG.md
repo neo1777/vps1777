@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### ✨ Nuovo
+
+- **archive-mcp: `campi='testo'` in `search`, `count` e `search_ibrida` — cercare solo
+  nelle parole, senza le azioni (#273).** Il codice ingerito (un Edit che scrive una
+  fixture, un Read che la legge) sta nella colonna `tools` e con `sort='newest'` si
+  presentava come il dato più recente: il 05/09 una fixture di test in prima posizione;
+  il 26/09 sul primario 12 righe su 14 con quella frase avevano il testo vuoto. Il nuovo
+  parametro restringe la MATCH alla colonna `content`; il default resta `tutto` (scelta
+  di Neo: opt-in, nessun comportamento cambia di nascosto). In `search_ibrida` il ramo
+  vettoriale tiene solo le righe con parole. Un valore sconosciuto è un errore parlante.
+  Doc: ARCHIVE.md (IT/EN), docstring dei tre tool.
+
 ## [0.53.0] — 2026-09-26
 
 ### 🐛 Correzioni
