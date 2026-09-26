@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.57.1] — 2026-09-26
+
 ### 🐛 Correzioni
 
 - **Costruttore dell'indice: il modello si apre solo se c'è qualcosa da calcolare.** Il
