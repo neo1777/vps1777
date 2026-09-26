@@ -4,6 +4,24 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Il CHANGELOG aveva perso l'intestazione `## [0.46.0]`**: il commit della 0.46.1
+  l'aveva sostituita con la propria, e la sezione della 0.46.0 era finita dentro la
+  0.46.1. Il tag `v0.46.0` c'era, la sezione no, quindi `check_findings.py` non poteva
+  ancorare una voce alla 0.46.0. Rimessa: la sezione è identica a quella del tag.
+- **`H71` dichiarava `since: unreleased`** da tre settimane: la cura è uscita nella
+  0.46.0 (#276). Il checker lo contava fra i lavori in attesa di rilascio.
+- **Il ledger segnalava da quasi un mese un rinvio scaduto su un lavoro già fatto**:
+  `ops.secrets-assente-vs-illeggibile` è chiuso dalla 0.40.2 (tre stati, tre rimedi),
+  ma il suo `follow_up` era rimasto e `verify-features.py` lo mostrava come
+  `[RIVEDI]` a ogni giro. Tolto; il `verify` resta come presidio della cura.
+- **La docstring del bot diceva «MVP con 4 comandi» ed «estendiamo a ~60»**: i
+  comandi sono 5, e l'estensione è una decisione aperta della roadmap, non un lavoro in
+  corso. Ora lo dice.
+- **`docs/roadmap/strati-memoria.md`, parte B2**: il match semantico che chiedeva c'è
+  (la ricerca ibrida di archive1777). La bozza resta, con una nota datata in testa
+  che dice cosa è coperto e cosa resta aperto.
+
 ## [0.57.1] — 2026-09-26
 
 ### 🐛 Correzioni
@@ -669,6 +687,8 @@ un ingest. Per curarli subito: `vps1777 archive-migra` (a secco, mostra il delta
   preventiva: il Dockerfile crea la dir con l'owner giusto e `artifacts_dir()`
   fallisce PARLANDO (cosa non va + come si cura) invece di lasciare a nlm un
   errore muto. Due test nuovi, uno per verso (suite nb1777: 100).
+
+## [0.46.0] — 2026-09-05
 
 **Il collaudo da-utente: quattro agenti hanno usato il sistema come utenti, non
 come sviluppatori — e hanno trovato quello che gli sviluppatori non vedono.**

@@ -1092,15 +1092,12 @@ features:
                 CHIUSO in 0.40.2 — tre stati distinti (ASSENTE / VUOTO / NON LEGGIBILE)
                 con tre rimedi diversi, e per l'illeggibile il messaggio non suggerisce
                 nessun comando con `>`: il file c'è, il guasto è l'accesso."
-    follow_up:
-      manuale:
-        cosa: "Separare ASSENTE da NON-UTILIZZABILE in `_secrets_mancanti_in`, con due
-               messaggi distinti, e il comando generativo suggerito SOLO nel primo caso."
-        rivedi_dopo: "2026-08-31"
+    # Il follow_up («separare ASSENTE da NON-UTILIZZABILE», rivedi 2026-08-31) è stato
+    # tolto il 26/09/2026: era già soddisfatto dalla 0.40.2, e sopravvissuto alla
+    # chiusura continuava ad accendere un [RIVEDI] su un lavoro fatto.
     verify:
-      # Come per ops.update-progress-journal: si verifica che il DIFETTO ci sia ancora,
-      # così chi lo ripara trova il ledger rosso e aggiorna la voce invece di lasciarla
-      # a descrivere un problema chiuso.
+      # Presidio della CURA (la voce è active-default dalla 0.40.2): il terzo stato,
+      # quello che non suggerisce il `>`, deve restare distinto.
       file_contains: {path: tools/vps1777.py, pattern: "NON LEGGIBILE"}
 
   - id: archive.ts-source

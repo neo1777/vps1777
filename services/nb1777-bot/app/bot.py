@@ -1,7 +1,9 @@
 """
-Telegram bot — owner-only, MVP con 4 comandi.
+Telegram bot — owner-only, 5 comandi: /start, /aiuto, /pannello, /lista, /chiedi.
 
-In F8 estendiamo a tutti i ~60 del vecchio nb1777/bot.py.
+Il resto passa dalla Mini App (/pannello). Estendere il bot verso i ~60 comandi del
+vecchio nb1777/bot.py è una decisione aperta (docs/roadmap/prompt-c2-bot-expansion.md),
+non un lavoro in corso.
 """
 from __future__ import annotations
 
