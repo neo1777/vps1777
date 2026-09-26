@@ -258,13 +258,16 @@ def now_iso() -> str:
 def run(cmd: list[str], *, env: dict | None = None, check: bool = True,
         capture: bool = False, cwd: str | Path | None = None,
         timeout: int | None = None,
-        input: str | None = None) -> subprocess.CompletedProcess:
+        input: str | None = None, stdin=None) -> subprocess.CompletedProcess:
+    # `stdin`: un file aperto in binario da passare così com'è (un PDF non è testo:
+    # `input` passa da `text=True`). Il file descriptor va al processo figlio intero.
     full_env = dict(os.environ)
     if env:
         full_env.update(env)
     return subprocess.run(
         cmd, env=full_env, check=check, cwd=str(cwd) if cwd else None,
         capture_output=capture, text=True, timeout=timeout, input=input,
+        stdin=stdin,
     )
 
 
@@ -3810,7 +3813,10 @@ def cmd_archive_ingest(repo: Path, args) -> int:
     testuale = suffix in _TESTO_EXTS and not args.nlm
     if suffix in _TESTO_EXTS and args.nlm:
         log(f"«{src.name}» è testuale ma --nlm forza il giro NotebookLM")
-    nb_in = f"/tmp/ing_{rid}{src.suffix}"
+    # Nel volume degli artefatti, non in /tmp (H43, 27/09/2026): con il rootfs read-only
+    # /tmp è una tmpfs da 64 MB, e un audio o un PDF la superano. La sotto-cartella
+    # non compare in `artifact_list` (elenca solo i file della radice).
+    nb_in = f"/var/lib/nlm-artifacts/ingest/ing_{rid}{src.suffix}"
     # il file testuale viaggia con la SUA estensione: l'indexer sceglie il parser
     # dal suffisso (un .md rinominato .txt perderebbe solo cosmetica, ma il nome
     # vero è informazione — non si butta)
@@ -3840,7 +3846,14 @@ def cmd_archive_ingest(repo: Path, args) -> int:
             ok(f"indicizzato nell'archivio → DB «{db_name}»: {(res2.stdout or '').strip()}")
             return 0
         log(f"NotebookLM: trascrizione di «{src.name}» (può richiedere un minuto)…")
-        run([*cc, "cp", str(src), f"nb1777-mcp:{nb_in}"], check=True)
+        # NIENTE `docker cp`: il rootfs di nb1777-mcp è read-only (H43) e docker cp
+        # rifiuta, come per il gateway (#285 bis). Il file viaggia su stdin di un exec,
+        # scritto dall'utente `app` dentro il volume.
+        import shlex as _shlex
+        with open(src, "rb") as fh:
+            run([*cc, "exec", "-T", "nb1777-mcp", "sh", "-c",
+                 f"mkdir -p /var/lib/nlm-artifacts/ingest && cat > {_shlex.quote(nb_in)}"],
+                stdin=fh, check=True)
         ecmd = [*cc, "exec", "-T", "nb1777-mcp", "python", "-m", "app.ingest", "--file", nb_in]
         if args.verify:
             ecmd.append("--verify")
@@ -3879,9 +3892,10 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         ok(f"indicizzato nell'archivio → DB «{db_name}»: {(res2.stdout or '').strip()}")
         return 0
     finally:
-        # -u root: i temp sono creati da `compose cp` (root); l'utente app (uid
-        # 1000) non li potrebbe rimuovere. Nel percorso testuale nb1777-mcp non è
-        # mai stato toccato: niente rm lì (un exec in meno, e il test lo pretende).
+        # -u root: sul gateway il temp lo crea l'exec come `app`, ma resta per i file
+        # lasciati da versioni vecchie (`compose cp` scriveva da root). Nel percorso
+        # testuale nb1777-mcp non è mai stato toccato: niente rm lì (un exec in meno,
+        # e il test lo pretende).
         host_txt.unlink(missing_ok=True)
         if not testuale:
             run([*cc, "exec", "-u", "root", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)

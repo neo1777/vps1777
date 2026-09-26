@@ -118,3 +118,31 @@ def test_errore_nlm_parla_e_indica_la_via(monkeypatch, tmp_path, capsys):
     assert "Could not add" in err
     assert "upstream" in err and "diretto" in err, \
         f"l'errore non spiega la causa misurata né la via d'uscita: {err[:300]}"
+
+
+def test_il_file_non_testuale_entra_in_nb1777_senza_docker_cp(cli, tmp_path):
+    """H43 (27/09/2026): nb1777-mcp ha il rootfs read-only, e `docker cp` verso un
+    container così rifiuta («container rootfs is marked read-only», misurato sul gateway
+    il 06/09, #285 bis). Il file viaggia su stdin di un `exec`, e atterra nel volume
+    degli artefatti (sotto-cartella `ingest/`, che `artifact_list` non elenca), non in
+    /tmp: la tmpfs ha un tetto di 64 MB, un audio o un PDF lo superano."""
+    mod, chiamate = cli
+    f = tmp_path / "scan.pdf"
+    f.write_bytes(b"%PDF finto")
+
+    def run_con_esito(cmd, **kw):
+        chiamate.append(list(cmd))
+        if "app.ingest" in cmd:
+            return SimpleNamespace(returncode=0, stdout='{"text": "testo trascritto"}', stderr="")
+        return SimpleNamespace(returncode=0, stdout='{"indicizzate": 1}', stderr="")
+
+    mod.run = run_con_esito
+    assert mod.cmd_archive_ingest(tmp_path, _args(str(f))) == 0
+    assert not any(c[:3] == ["docker", "compose", "cp"] for c in chiamate), chiamate
+    ingresso = next(c for c in chiamate if "nb1777-mcp" in c and "cat >" in " ".join(c))
+    dest = next(c for c in chiamate if "app.ingest" in c)
+    percorso = dest[dest.index("--file") + 1]
+    assert percorso.startswith("/var/lib/nlm-artifacts/ingest/"), percorso
+    assert percorso in " ".join(ingresso)
+    assert any("nb1777-mcp" in c and "rm" in c and percorso in c for c in chiamate), \
+        "il file in ingresso va tolto alla fine"

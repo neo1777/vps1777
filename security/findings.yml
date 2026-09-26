@@ -945,10 +945,18 @@ findings:
         contains: ["def render_unit"]
       - file: compose.yaml
         contains: ["x-readonly:", "read_only: true"]
+      # 27/09/2026: il presidio che tutti i servizi abbiano *readonly, senza eccezioni.
+      - file: tools/tests/test_rootfs_readonly_ovunque.py
+        contains: ["ECCEZIONI: dict[str, str] = {}"]
     note: >
       Sandbox unit + templatizzazione (v0.32.0) + rootfs read_only (v0.33.0) su gateway,
-      archive-mcp, bot con tmpfs /tmp. nb1777-mcp ESCLUSO di proposito (Chromium/Playwright
-      scrive /tmp, /dev/shm, cache profilo). Scelta dichiarata.
+      archive-mcp, bot con tmpfs /tmp. nb1777-mcp era ESCLUSO di proposito (si temeva che
+      Chromium/Playwright scrivesse /tmp, /dev/shm, cache profilo), in attesa di un giro
+      NotebookLM reale. MISURATO il 27/09/2026 sulla VPS alla 0.57.1: dopo un giro vero
+      `docker diff` mostra solo /run/secrets e /usr/sbin/docker-init; nlm vive in
+      $HOME=/var/lib/nlm (volume) e il server non lancia Chromium. Da allora anche
+      nb1777-mcp ha *readonly; archive-ingest non usa più docker cp (rifiutato su un
+      rootfs ro) ma exec + stdin nel volume degli artefatti.
 
   - id: H44
     severity: medium

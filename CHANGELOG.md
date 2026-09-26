@@ -21,10 +21,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   rischio che copriva lo copre la quarantena. Il ragionamento completo è in `SECURITY.md`
   e nel registro.
 
-### Nota per chi aggiorna
-- Il timer e la unit dell'auto-update si riscrivono da soli con questo update. Da qui in
-  poi l'auto-update installa una release solo dopo 48 ore: se ne vuoi una subito, lancia
-  `vps1777 update` a mano.
+### Sicurezza
+- **Anche nb1777-mcp gira col rootfs in sola lettura** (`H43`, rinvio scaduto il 10/09).
+  Il rinvio aspettava un giro NotebookLM reale, e la misura c'è: sulla VPS alla 0.57.1,
+  dopo un giro vero, `docker diff` mostra solo `/run/secrets` e `/usr/sbin/docker-init`.
+  nlm tiene tutto nel volume (`$HOME=/var/lib/nlm`) e il server non lancia Chromium.
+  Adesso tutti i servizi di `compose.yaml` hanno `*readonly`, e un test nuovo lo
+  pretende, senza eccezioni.
+- **`vps1777 archive-ingest` non usa più `docker cp` verso nb1777-mcp**: su un rootfs in
+  sola lettura `docker cp` rifiuta (come sul gateway, #285 bis). Il file viaggia su stdin
+  di un `exec` e atterra nel volume degli artefatti (`ingest/`, che `artifact_list` non
+  elenca), non in `/tmp`: la tmpfs ha un tetto di 64 MB, e un audio o un PDF lo superano.
 
 ### Corretto
 - **Il CHANGELOG aveva perso l'intestazione `## [0.46.0]`**: il commit della 0.46.1
@@ -43,6 +50,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **`docs/roadmap/strati-memoria.md`, parte B2**: il match semantico che chiedeva c'è
   (la ricerca ibrida di archive1777). La bozza resta, con una nota datata in testa
   che dice cosa è coperto e cosa resta aperto.
+
+### Nota per chi aggiorna
+- Il timer e la unit dell'auto-update si riscrivono da soli con questo update. Da qui in
+  poi l'auto-update installa una release solo dopo 48 ore: se ne vuoi una subito, lancia
+  `vps1777 update` a mano.
 
 ## [0.57.1] — 2026-09-26
 
