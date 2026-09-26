@@ -3968,13 +3968,16 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         ok(f"indicizzato nell'archivio → DB «{db_name}»: {(res2.stdout or '').strip()}")
         return 0
     finally:
-        # -u root: sul gateway il temp lo crea l'exec come `app`, ma resta per i file
-        # lasciati da versioni vecchie (`compose cp` scriveva da root). Nel percorso
-        # testuale nb1777-mcp non è mai stato toccato: niente rm lì (un exec in meno,
-        # e il test lo pretende).
+        # In nb1777-mcp il file lo crea l'exec come `app` (nel volume, cartella di `app`)
+        # e lo toglie `app`: con cap_drop ALL root non ha CAP_DAC_OVERRIDE, e `-u root`
+        # falliva con «Permission denied» (misurato sulla VPS il 27/09, 0.58.0). Sul
+        # gateway resta `-u root` per i file lasciati da versioni vecchie (`compose cp`
+        # scriveva da root in /tmp, dove root è proprietario). Nel percorso testuale
+        # nb1777-mcp non è mai stato toccato: niente rm lì (un exec in meno, e il test
+        # lo pretende).
         host_txt.unlink(missing_ok=True)
         if not testuale:
-            run([*cc, "exec", "-u", "root", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)
+            run([*cc, "exec", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)
         run([*cc, "exec", "-u", "root", "-T", "gateway", "rm", "-f", gw_txt], check=False)
 
 

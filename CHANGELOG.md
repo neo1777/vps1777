@@ -26,6 +26,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   con `Persistent=true`, è scattato al `daemon-reload` fatto dall'update stesso, ha
   trovato il lock ed è uscito con 1. `OnFailure` ha mandato su Telegram «auto-update
   fallito» mentre l'update stava riuscendo. Vale anche per rollback e bootstrap.
+- **`archive-ingest` lasciava il file in ingresso dentro nb1777-mcp**: la pulizia finale
+  faceva `exec -u root … rm`, ma con `cap_drop: ALL` root non ha `CAP_DAC_OVERRIDE`, e il
+  file (e la cartella `ingest/`) sono dell'utente `app` che li crea dalla 0.58.0 (`H43`).
+  Misurato sulla VPS alla 0.58.0 col primo ingest di un PDF: ingest riuscito, e poi
+  «Permission denied» sul `rm`. Ora il file lo toglie `app`.
 
 ### Nota per chi aggiorna
 - Dopo questo update il `.env` ha cinque righe `VPS1777_DIGEST_*`: non modificarle a mano.

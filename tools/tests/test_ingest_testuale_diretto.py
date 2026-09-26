@@ -144,5 +144,9 @@ def test_il_file_non_testuale_entra_in_nb1777_senza_docker_cp(cli, tmp_path):
     percorso = dest[dest.index("--file") + 1]
     assert percorso.startswith("/var/lib/nlm-artifacts/ingest/"), percorso
     assert percorso in " ".join(ingresso)
-    assert any("nb1777-mcp" in c and "rm" in c and percorso in c for c in chiamate), \
-        "il file in ingresso va tolto alla fine"
+    rm = [c for c in chiamate if "nb1777-mcp" in c and "rm" in c and percorso in c]
+    assert rm, "il file in ingresso va tolto alla fine"
+    # Misurato sulla VPS il 27/09 (0.58.0): `exec -u root … rm` falliva con «Permission
+    # denied». Con cap_drop ALL root non ha CAP_DAC_OVERRIDE, e il file (e la cartella)
+    # sono di `app`: lo crea l'exec come `app`, lo deve togliere `app`.
+    assert all("-u" not in c for c in rm), rm
