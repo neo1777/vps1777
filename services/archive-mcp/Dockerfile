@@ -34,6 +34,11 @@ RUN python -m pip uninstall -y pip
 RUN mkdir -p /var/lib/archive/db /var/lib/archive/data && chown -R app:app /var/lib/archive
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /build/app /app/app
+# Il costruttore dell'indice semantico (26/09/2026): il job notturno sulla VPS
+# (`vps1777 indice-notturno`, servizio compose `indice-notturno`) gira in QUESTA
+# immagine perché è l'ambiente in cui il server legge l'indice — stesse versioni
+# di onnxruntime, tokenizers e sqlite-vec. Un file, stdlib più `app.semantica`.
+COPY tools/costruisci_indice.py /app/tools/costruisci_indice.py
 # Versione iniettata dalla CI di release (build-arg); nei build locali resta dev.
 ARG VPS1777_VERSION=0.0.0-dev
 ENV PATH="/opt/venv/bin:$PATH" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \

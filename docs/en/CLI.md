@@ -134,6 +134,20 @@ vps1777 indice-modello                                         # sulla VPS, nel 
 python3 tools/vps1777.py indice-modello --dest ~/e5-small      # sul PC, dal checkout
 ```
 
+## vps1777 indice-notturno
+
+Incrementally updates the search-by-meaning indexes that **already exist**, only for the
+DBs more recent than their index. The nightly timer runs it; by hand it is for trying it
+or turning it on and off. The builder runs in the `indice-notturno` compose service
+(memory limit 1300m, one CPU, no network). It never does a first build. Details and
+costs: [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md).
+
+```bash
+vps1777 indice-notturno --abilita          # accende il timer (opt-in)
+vps1777 indice-notturno                    # un giro adesso
+vps1777 indice-notturno --db X --tutti     # un DB solo, anche se già allineato
+```
+
 ## vps1777 archive-migra
 
 Brings the migrations of the derived columns to the DBs **already loaded**, without

@@ -3520,6 +3520,80 @@ def cmd_indice_modello(repo: Path, args) -> int:
     return 0
 
 
+# ── indice-notturno: l'aggiornamento automatico dell'indice (26/09/2026) ──────
+# Scelta di Neo (scelte `2026-09-26-vps1777-gradino3`): il job gira SULLA VPS, di notte.
+# Le guardie stanno nel servizio compose `indice-notturno` (mem_limit, una CPU, nessuna
+# rete) e qui: si aggiornano SOLO gli indici che esistono già, e solo se il DB è più
+# recente del suo indice. Una prima costruzione non parte mai da sola — sulla VPS, con
+# una CPU, sarebbero giorni: si fa sul PC (`tools/indice_semantico.py aggiorna`).
+TIMER_INDICE = "vps1777-indice-notturno.timer"
+
+
+def _indici_da_aggiornare(righe: list[str], tutti: bool) -> list[tuple[str, str]]:
+    """Da righe `<mtime-db> <mtime-vec> <nome>` ai DB da aggiornare: (nome, perché).
+    Logica pura: il lavoro di guardare i file lo fa il gateway."""
+    out: list[tuple[str, str]] = []
+    for r in righe:
+        parti = r.split()
+        if len(parti) != 3:
+            continue
+        m_db, m_vec, nome = parti
+        if not m_db.isdigit():
+            continue                                  # un indice senza il suo DB: non tocca a noi
+        if tutti or int(m_db) > int(m_vec):
+            out.append((nome, "richiesto" if tutti and int(m_db) <= int(m_vec)
+                        else "il DB è più recente del suo indice"))
+    return out
+
+
+def cmd_indice_notturno(repo: Path, args) -> int:
+    """Aggiorna gli indici della ricerca per senso dei DB cambiati dopo l'ultima
+    costruzione. Lo lancia il timer; a mano serve a provarlo (`--tutti`) o ad
+    accenderlo e spegnerlo (`--abilita`, `--disabilita`)."""
+    if args.abilita or args.disabilita:
+        verbo = "enable" if args.abilita else "disable"
+        sudo(["systemctl", verbo, "--now", TIMER_INDICE])
+        ok(f"{TIMER_INDICE}: {'acceso' if args.abilita else 'spento'}")
+        return 0
+    cc = compose_cmd(repo)
+    elenco = run([*cc, "exec", "-T", "gateway", "sh", "-c",
+                  "for v in /var/lib/archive/db/*.vec.db; do [ -f \"$v\" ] || continue; "
+                  "d=\"${v%.vec.db}.db\"; n=$(basename \"${v%.vec.db}\"); "
+                  "if [ -f \"$d\" ]; then echo \"$(stat -c %Y \"$d\") $(stat -c %Y \"$v\") $n\"; "
+                  "else echo \"- $(stat -c %Y \"$v\") $n\"; fi; done"],
+                 capture=True, check=False)
+    if elenco.returncode != 0:
+        die("non ho potuto guardare gli indici nel volume (il gateway risponde?)")
+    da_fare = _indici_da_aggiornare((elenco.stdout or "").splitlines(), args.tutti)
+    if args.db:
+        da_fare = [(n, p) for n, p in da_fare if n == args.db]
+    if not da_fare:
+        log("nessun indice da aggiornare: ogni DB con un indice è fermo da prima della sua costruzione")
+        return 0
+    uscita = 0
+    for nome, perche in da_fare:
+        db = f"/var/lib/archive/db/{nome}.db"
+        log(f"{nome}: {perche} → aggiornamento incrementale")
+        r = run([*cc, "--profile", "indice", "run", "--rm", "-T", "indice-notturno",
+                 "--db", db, "--modello", DIR_MODELLO_VOLUME, "--thread", "1",
+                 "--sotto-lotto", "4"], check=False, capture=True, timeout=6 * 3600)
+        coda = (r.stdout or "").strip().splitlines()[-3:] + (r.stderr or "").strip().splitlines()[-2:]
+        if r.returncode == 0:
+            ok(f"{nome}: aggiornato — " + " · ".join(c.strip() for c in coda if c.strip())[:240])
+        elif r.returncode == 2:
+            # rifiuto parlante del costruttore (un indice senza registro, un metro diverso):
+            # non è un guasto del job, è un indice che va ricostruito sul PC.
+            warn(f"{nome}: il costruttore rifiuta — {' '.join(coda)[:300]}")
+        elif r.returncode == 137:
+            warn(f"{nome}: ucciso dal tetto di memoria del job (1300m): l'indice servito "
+                 "resta quello di prima, il lavoro fatto è nel .parziale")
+            uscita = 1
+        else:
+            warn(f"{nome}: fallito (esito {r.returncode}) — {' '.join(coda)[:300]}")
+            uscita = 1
+    return uscita
+
+
 def _filtra_db_archivio(righe: list[str], solo: str | None) -> list[str]:
     """Dall'elenco dei file `.db` del volume, i DB dell'ARCHIVIO: senza i `.vec.db`,
     che sono l'indice semantico accanto a un archivio (0.48.0) e non hanno la tabella
@@ -4212,6 +4286,14 @@ def build_parser() -> "argparse.ArgumentParser":
     p.add_argument("--sostituisci", action="store_true",
                    help="sostituisce un modello diverso già presente (l'indice legato a quello andrà ricostruito)")
 
+    p = sub.add_parser("indice-notturno",
+                       help="aggiorna gli indici della ricerca per senso dei DB cambiati (lo lancia il timer)")
+    p.add_argument("--db", help="un solo DB (nome senza .db)")
+    p.add_argument("--tutti", action="store_true",
+                   help="anche gli indici già allineati (per provarlo: il costruttore non ricalcola niente)")
+    p.add_argument("--abilita", action="store_true", help=f"accende {TIMER_INDICE}")
+    p.add_argument("--disabilita", action="store_true", help=f"spegne {TIMER_INDICE}")
+
     p = sub.add_parser("archive-migra",
                        help="migra le colonne derivate dei DB già caricati (a secco di default)")
     p.add_argument("--db", help="un solo DB (nome senza .db); default: tutti")
@@ -4270,6 +4352,7 @@ def main() -> int:
                 "archive-retag": cmd_archive_retag,
                 "archive-migra": cmd_archive_migra,
                 "indice-modello": cmd_indice_modello,
+                "indice-notturno": cmd_indice_notturno,
                 "secrets-status": cmd_secrets_status,
                 "memoria": cmd_memoria, "help": cmd_help,
                 "avvisa-fallimento": cmd_avvisa_fallimento}

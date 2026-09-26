@@ -259,6 +259,7 @@ parziale produce zeri che sembrano assenze.
 | `--controlla` | confronta indice e DB senza scrivere niente |
 | `--lotto N` | pezzi per lotto e per transazione (default 96) |
 | `--thread N` | thread di onnxruntime (default: tutti i core) |
+| `--sotto-lotto N` | pezzi per chiamata al modello (default 16): più piccolo, meno RAM (~0,9 GB di picco a 1-4 pezzi, ~1,2 GB a 16, misurato il 26/09) |
 | `--json` | l'esito in JSON su stdout, per le macchine |
 
 ### Cosa stampa, e come esce
@@ -335,6 +336,44 @@ servirebbe.
   «ripresa»). Per l'incrementale l'indice esistente si copia prima in un file a
   parte, rinominato in `.parziale` solo a copia finita. L'indice servito viene
   sostituito solo alla fine, a conti quadrati.
+
+## L'aggiornamento notturno sulla VPS (`vps1777 indice-notturno`)
+
+Dalla 0.57.0, dopo un ingest, l'indice si può aggiornare da solo, sulla VPS, di notte.
+Il timer `vps1777-indice-notturno.timer` (03:30, con un ritardo casuale fino a 30')
+lancia `vps1777 indice-notturno`, che:
+
+- guarda nel volume gli indici che **esistono già** e, per ognuno, se il suo DB è
+  **più recente** dell'indice. Nelle notti senza ingest esce in un secondo;
+- per quei DB fa girare il costruttore **in modo incrementale** (senza perimetro: vale
+  quello dichiarato dall'indice) nel servizio compose `indice-notturno`: stessa immagine
+  di archive-mcp, **limite di memoria 1300m**, una CPU, **nessuna rete**, 1 thread,
+  sotto-lotti da 4. Se sfora la memoria, l'OOM killer del container uccide il job e non
+  archive-mcp: l'indice servito resta quello di prima e il lavoro fatto sta nel
+  `.parziale`;
+- **non fa mai una prima costruzione**: sulla VPS, con una CPU, sarebbero giorni. Quella
+  si fa sul PC («Attivare la ricerca per senso»). Un indice che il costruttore rifiuta
+  (del prototipo, senza registro, o costruito con un altro modello) resta com'è, e il
+  comando lo dice.
+
+Il timer **non lo accende l'installer**: ha senso solo quando un indice c'è già.
+
+```bash
+vps1777 indice-notturno --abilita       # accende il timer
+vps1777 indice-notturno                 # un giro subito (quello che fa il timer)
+vps1777 indice-notturno --disabilita    # lo spegne
+```
+
+**Quanto costa, e il compromesso.** La scelta di farlo sulla VPS è del 26/09/2026: tutto
+automatico, niente PC. Il costo è la RAM. Il costruttore porta in memoria il modello,
+circa 0,9 GB di picco con sotto-lotti piccoli, accanto ad archive-mcp, che ne tiene
+~1,6 su 3,8. Il tempo: con una CPU ~1-1,5 vettori al secondo, quindi un ingest di
+10.000 messaggi nuovi (~17.000 vettori) chiede ~3-5 ore di notte (stima dal banco del PC
+a 1 thread, da rimisurare sulla VPS). Il servizio gira a `Nice=15` e I/O `idle`.
+
+⚠️ Il costruttore legge il DB mentre esiste. Se nella stessa notte parte un ingest, può
+vedere due stati: il `--controlla` di un giro successivo lo dice, e la notte dopo
+l'incrementale lo rimette in pari.
 
 ## La verifica nel server: `indici[].verifica`
 

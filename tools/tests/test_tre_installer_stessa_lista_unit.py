@@ -166,7 +166,12 @@ def test_i_tre_installer_abilitano_le_STESSE_unit(features: str, con_autoupdate:
 # spenta in silenzio. ⇒ chi aggiunge una riga scriva ACCANTO perché.
 # (Fail-closed, come `SANDBOX_PROVATE_INNOCUE` in test_unit_dichiarano_nonewprivileges.py:
 #  non si indovina cosa è innocuo omettere — si dichiara ciò che è stato deciso.)
-ATTIVABILI_NON_ABILITATE: dict[str, str] = {}
+ATTIVABILI_NON_ABILITATE: dict[str, str] = {
+    # 26/09/2026: ha senso solo su un'installazione che ha già un indice semantico
+    # (costruito sul PC); acceso a un'installazione nuova non avrebbe niente da fare.
+    # Si accende con `vps1777 indice-notturno --abilita` (docs/RICERCA-IBRIDA.md).
+    "vps1777-indice-notturno.timer": "opt-in: si accende con `vps1777 indice-notturno --abilita`",
+}
 
 
 def test_ogni_unit_attivabile_e_nella_lista_ENABLE() -> None:

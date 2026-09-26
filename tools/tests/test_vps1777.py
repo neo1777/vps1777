@@ -2084,6 +2084,37 @@ def test_indice_modello_e_registrato():
     assert 'sub.add_parser("indice-modello"' in src
 
 
+def test_indice_notturno_sceglie_solo_i_db_cambiati():
+    """Solo gli indici che esistono, e solo se il DB è più recente del suo indice.
+    Un indice senza il suo DB non si tocca; `--tutti` prende anche gli allineati."""
+    righe = ["200 100 cambiato", "100 200 fermo", "- 300 senza-db", "", "rotta"]
+    assert v._indici_da_aggiornare(righe, False) == [
+        ("cambiato", "il DB è più recente del suo indice")]
+    assert [n for n, _ in v._indici_da_aggiornare(righe, True)] == ["cambiato", "fermo"]
+
+
+def test_indice_notturno_registrato_e_timer_non_acceso_dagli_installer():
+    src = (_ROOT / "tools" / "vps1777.py").read_text()
+    assert '"indice-notturno": cmd_indice_notturno' in src
+    unit = (_ROOT / "systemd" / "vps1777-indice-notturno.service").read_text()
+    assert "ExecStart=/usr/local/bin/vps1777 indice-notturno" in unit
+    assert "OnFailure=vps1777-avvisa-fallimento@%n.service" in unit
+    for f in ("setup.sh", "deploy.sh", "installer/engine.py"):
+        assert "indice-notturno" not in (_ROOT / f).read_text(), f"{f}: opt-in, non acceso"
+
+
+def test_servizio_indice_notturno_ha_le_sue_guardie():
+    """Il job gira sulla VPS con poca RAM: tetto di memoria, una CPU, nessuna rete,
+    fuori da `up` (profilo), e l'hardening degli altri servizi."""
+    compose = (_ROOT / "compose.yaml").read_text()
+    blocco = compose[compose.index("  indice-notturno:"):]
+    blocco = blocco[:blocco.index("\n\n  #")]
+    for atteso in ('profiles: [indice]', "network_mode: none", "mem_limit: 1300m",
+                   "cpus: 1.0", "*security", "*readonly", 'restart: "no"'):
+        assert atteso in blocco, atteso
+    assert "archive-data:/var/lib/archive:rw" in blocco
+
+
 def test_db_archivio_esclude_gli_indici_semantici():
     """I `.vec.db` stanno nello stesso volume ma non sono archivi: passati all'indexer
     fallivano, e `archive-retag` chiudeva con esito 1 anche a lavoro riuscito."""
