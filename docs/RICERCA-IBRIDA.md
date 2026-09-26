@@ -364,6 +364,26 @@ Stime, dalla velocità misurata (sono stime, non misure):
 | maggio–giugno 2026 (l'indice di oggi) | ~139.000 | **~17 h** |
 | luglio–settembre 2026 (pezzi contati dal prototipo sulla copia del 08/09) | ~282.000 | ~34 h |
 
+**La corsa intera, misurata** (25-26/09/2026, stesso PC a 8 core, in uso normale, a
+`nice` 15): il primario `recupero-20260924` con `--tutto` — 266.219 messaggi, **452.311
+vettori in 31 h 13'**, cioè **~4,0 vettori/s di media** (da ~2 all'avvio a 4,7 a
+regime), 1,70 vettori per messaggio, indice di 735 MB. La finestra di due giorni qui
+sopra sottostimava la velocità: era corta e comprendeva il riscaldamento.
+
+Quanto pesa ciascuna famiglia di righe (dal registro `indice_righe`, stesso indice):
+
+| righe | messaggi | vettori | vettori per messaggio |
+|---|---|---|---|
+| conversazioni | 213.259 | 306.317 | 1,4 |
+| sotto-agenti (`subagent:*`) | 33.002 | 75.844 | 2,3 |
+| log dei server MCP (`mcp-log:*`) | 18.250 | 66.536 | 3,6 |
+| schede e memorie (`recupero:*`) | 1.708 | 3.614 | 2,1 |
+
+I log MCP sono il 7% dei messaggi e il 15% dei vettori: righe lunghe (in media fino a
+~21 KB per un server). Stanno in fondo al DB perché l'indexer li inserisce per ultimi,
+e per questo l'ultimo tratto di una corsa `--tutto` va più piano dei primi: una stima
+del tempo che resta fatta con la media dei vettori per messaggio sbaglia per difetto.
+
 ## La prima volta sulla VPS
 
 L'indice che oggi sta sulla VPS è quello del prototipo: senza registro. La
@@ -431,15 +451,17 @@ DB: se non è in pari, aggiornalo lì e carica quello.
 
 ## Perimetro attuale
 
-`[stato dell'installazione al 25/09/2026]`
+`[stato dell'installazione al 26/09/2026]`
 
 - **Il primario per Claude Code è `recupero-20260924`** (dal 24/09: il primo bundle
-  col contratto `recupero/` R1, vedi [ARCHIVE.md](ARCHIVE.md)). Il suo indice si sta
-  costruendo col costruttore del repo su **tutto** il DB (`--tutto`: 266.219 messaggi,
-  log compresi, con il registro `indice_righe`), sul PC; a ~1,9 vettori/s sono più di
-  due giorni di calcolo. Finché non è caricato, `search_ibrida` su quel DB non ha
-  vettori da fondere e lo dichiara in `indici[]`: la ricerca per parole (`search`)
-  funziona già su tutto.
+  col contratto `recupero/` R1, vedi [ARCHIVE.md](ARCHIVE.md)), e il suo indice copre
+  **tutto il DB**: 266.219 messaggi con testo indicizzabile (16.826 troppo corti restano
+  fuori), **452.311 vettori**, log e sotto-agenti compresi, col registro `indice_righe`.
+  Costruito col costruttore del repo (`--tutto`), `--controlla` in pari, caricato il
+  26/09/2026: `search_ibrida` risponde con `verifica.registro: true` e `scartati: 0`.
+  Dopo un re-ingest di questo DB l'indice va aggiornato su una copia nuova (vedi «La
+  prima volta sulla VPS», ultimo capoverso): finché non lo si fa, i risultati vettoriali
+  che non combaciano più vengono scartati e dichiarati.
 - **`recupero-20260905`** (il primario fino al 24/09, ora riscontro) tiene l'indice del
   prototipo: **maggio–giugno 2026** (58.322 messaggi, 139.011 vettori, generato il
   07/09/2026), con `indice_meta` scritta a mano e **senza** registro — `verifica.registro:
@@ -458,7 +480,8 @@ concludere «non c'è».
 - **La verifica del server guarda i candidati**, non l'intero indice; e non vede
   un testo cambiato con lo stesso uuid (vedi sopra). Il controllo completo è
   `--controlla`.
-- **Velocità.** ~2,3 vettori/s contro i ~3,0 del prototipo: `--thread` e la
-  dimensione dei gruppi non sono ancora stati tarati.
-- **Etichette `recupero:*`.** Il filtro per prefisso è provato su dati
-  sintetici; le etichette vere arrivano da un altro ramo dell'indexer.
+- **Velocità.** ~4,0 vettori/s di media sulla corsa intera (misurato il 25-26/09,
+  vedi «Quanto costa»): un DB di 450.000 vettori chiede più di un giorno di PC.
+  `--thread` e la dimensione dei gruppi non sono ancora stati tarati.
+- **Etichette `recupero:*`.** Dalla v0.51.0 sono vere (1.708 righe nell'indice del
+  primario); il filtro per prefisso era stato provato prima su dati sintetici.

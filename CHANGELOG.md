@@ -6,6 +6,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ### 📖 Documentazione
 
+- **`docs/RICERCA-IBRIDA.md` (IT/EN): l'indice del primario è caricato (26/09/2026).**
+  «Perimetro attuale» diceva «in costruzione»: l'indice di `recupero-20260924` copre
+  tutto il DB (452.311 vettori, registro verificato, `scartati: 0`). «Quanto costa» ha
+  la corsa intera misurata (~4,0 vettori/s di media, 31 h) e il peso di ciascuna
+  famiglia di righe: i log MCP sono il 7% dei messaggi e il 15% dei vettori, e stanno
+  in fondo al DB. «Limiti noti» aggiornati (velocità, etichette `recupero:*` vere).
 - **`docs/RICERCA-IBRIDA.md` (IT/EN), «Perimetro attuale» al 25/09/2026.** Diceva che l'indice
   del primario copre maggio–giugno: dal 24/09 il primario è `recupero-20260924`, il cui indice
   si sta costruendo sull'intero DB col costruttore del repo; l'indice del prototipo resta su
