@@ -4,6 +4,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### ✨ Nuovo
+
+- **L'indice semantico si aggiorna da solo, di notte, sulla VPS: `vps1777
+  indice-notturno`** (gradino 3; scelta di Neo del 26/09). Un timer opt-in (03:30,
+  `--abilita`) aggiorna in modo incrementale gli indici che esistono già, solo per i DB
+  più recenti del loro indice; non fa mai una prima costruzione. Il costruttore entra
+  nell'immagine di archive-mcp e gira nel servizio compose `indice-notturno` (profilo
+  `indice`, fuori da `up`), con le guardie per la RAM stretta della VPS: `mem_limit`
+  1300m (se sfora muore il job, non archive-mcp), una CPU, nessuna rete, 1 thread,
+  sotto-lotti da 4 (nuova opzione `--sotto-lotto` del costruttore: ~0,9 GB di picco
+  contro ~1,2 a 16, misurato). Unit con `OnFailure=`, `Nice=15`, I/O idle. Doc:
+  RICERCA-IBRIDA.md e CLI.md (IT/EN).
+
 ## [0.56.0] — 2026-09-26
 
 ### ✨ Nuovo

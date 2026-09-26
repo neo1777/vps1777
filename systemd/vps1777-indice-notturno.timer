@@ -1,0 +1,21 @@
+# vps1777-indice-notturno.timer — l'aggiornamento notturno dell'indice semantico.
+#
+# Scelta di Neo del 26/09/2026: dopo un ingest l'indice della ricerca per senso si
+# aggiorna da solo, sulla VPS, di notte. Il servizio aggiorna SOLO gli indici che
+# esistono già e solo per i DB cambiati dopo la loro costruzione: nelle notti senza
+# ingest esce in un secondo.
+#
+# NON è acceso dall'installer: si accende con `vps1777 indice-notturno --abilita`,
+# perché ha senso solo su un'installazione che ha già un indice (vedi
+# docs/RICERCA-IBRIDA.md). Persistent recupera la notte persa a VPS spenta.
+
+[Unit]
+Description=vps1777 — aggiornamento notturno dell'indice semantico
+
+[Timer]
+OnCalendar=*-*-* 03:30
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -31,7 +31,7 @@
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "5c4b1efa132d4496b0f8ed135883005513d25edfcd66aa31a32912eaeccfb70c"
+      "sorgente_sha256": "cb488094da2366c1b3bae89307151b1e378a2a4c06a663fd4e5d54a59485d02c"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",
@@ -39,7 +39,7 @@
     },
     "docs/en/RICERCA-IBRIDA.md": {
       "sorgente": "docs/RICERCA-IBRIDA.md",
-      "sorgente_sha256": "64073a8f31038b8646d614d8180237324e44c48ee43fd4fdeafecdc2ed8059fe"
+      "sorgente_sha256": "d6d74b6bcd1e18b67c54efca5079d5ee12442757dd19c53aefc4dcba48af4d21"
     }
   }
 }

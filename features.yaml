@@ -1489,6 +1489,20 @@ features:
     status: active-default
     since: "0.55.0"
     verify: {cli_command: indice-modello}
+  - id: cli.indice-notturno
+    nome: "vps1777 indice-notturno (+ timer vps1777-indice-notturno, opt-in)"
+    cosa: "Aggiorna in modo incrementale, sulla VPS, gli indici semantici che esistono già
+           per i DB più recenti del loro indice. Il costruttore gira nel servizio compose
+           `indice-notturno` (profilo `indice`, mem_limit 1300m, una CPU, nessuna rete).
+           Mai una prima costruzione. Timer acceso da `--abilita`, non dagli installer."
+    dove: ["cli:indice-notturno", "tools/vps1777.py", "systemd:vps1777-indice-notturno.timer",
+           "systemd:vps1777-indice-notturno.service", "compose-profile:compose.yaml#indice"]
+    status: opt-in
+    since: "0.57.0"
+    decisione: "sulla VPS e non sul PC, scelta di Neo del 26/09/2026 contro la raccomandazione
+                (timer sul PC) — il compromesso è la RAM, chiuso da mem_limit. Opt-in perché
+                ha senso solo con un indice già costruito. [scelte 2026-09-26-vps1777-gradino3]"
+    verify: {cli_command: indice-notturno}
   - id: cli.archive-migra
     nome: "vps1777 archive-migra"
     cosa: "Porta ai DB già caricati le migrazioni delle colonne derivate senza re-ingest

@@ -273,6 +273,7 @@ partial index produces zeros that look like absences.
 | `--controlla` | compares index and DB without writing anything |
 | `--lotto N` | chunks per batch and per transaction (default 96) |
 | `--thread N` | onnxruntime threads (default: all cores) |
+| `--sotto-lotto N` | pieces per model call (default 16): smaller means less RAM (~0.9 GB peak at 1-4 pieces, ~1.2 GB at 16, measured on 26/09) |
 | `--json` | the outcome as JSON on stdout, for machines |
 
 ### What it prints, and how it exits
@@ -356,6 +357,44 @@ the ledger does not explain is an orphan the server would serve.
   is first copied to a separate file, renamed to `.parziale` only once the copy
   is finished. The served index is replaced only at the end, once the counts
   reconcile.
+
+## The nightly update on the VPS (`vps1777 indice-notturno`)
+
+Since 0.57.0, after an ingest, the index can update itself, on the VPS, at night. The
+`vps1777-indice-notturno.timer` timer (03:30, with a random delay up to 30') runs
+`vps1777 indice-notturno`, which:
+
+- looks in the volume for the indexes that **already exist** and, for each one, whether
+  its DB is **more recent** than the index. On nights without an ingest it exits in a
+  second;
+- for those DBs runs the builder **incrementally** (no perimeter: the one declared by the
+  index holds) in the `indice-notturno` compose service: same image as archive-mcp,
+  **memory limit 1300m**, one CPU, **no network**, 1 thread, sub-batches of 4. If it
+  exceeds memory, the container's OOM killer kills the job and not archive-mcp: the
+  served index stays the previous one and the work done is in the `.parziale`;
+- **never does a first build**: on the VPS, with one CPU, it would take days. That is
+  done on the PC ("Turning on search by meaning"). An index the builder refuses (the
+  prototype's, without a ledger, or built with another model) stays as it is, and the
+  command says so.
+
+The timer is **not turned on by the installer**: it only makes sense once an index exists.
+
+```bash
+vps1777 indice-notturno --abilita       # turns the timer on
+vps1777 indice-notturno                 # one round now (what the timer does)
+vps1777 indice-notturno --disabilita    # turns it off
+```
+
+**What it costs, and the trade-off.** Running it on the VPS was chosen on 26/09/2026:
+fully automatic, no PC. The cost is RAM. The builder brings the model into memory, about
+0.9 GB peak with small sub-batches, next to archive-mcp, which holds ~1.6 of 3.8. Time:
+with one CPU ~1-1.5 vectors per second, so an ingest of 10,000 new messages (~17,000
+vectors) takes ~3-5 hours of night (estimate from the PC bench at 1 thread, to be
+measured again on the VPS). The service runs at `Nice=15` and `idle` I/O.
+
+⚠️ The builder reads the DB as it is. If an ingest starts the same night it may see two
+states: a later round's `--controlla` says so, and the next night's incremental run
+brings it back in step.
 
 ## Verification in the server: `indici[].verifica`
 

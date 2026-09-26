@@ -900,6 +900,10 @@ def _parser() -> argparse.ArgumentParser:
                    help="confronta indice e DB senza scrivere: esce 1 se non sono in pari")
     p.add_argument("--lotto", type=int, default=LOTTO, help=f"pezzi per lotto (default {LOTTO})")
     p.add_argument("--thread", type=int, default=0, help="thread di onnxruntime (default: tutti)")
+    p.add_argument("--sotto-lotto", type=int, default=16,
+                   help="pezzi per chiamata al modello (default 16). Più piccolo = meno RAM: "
+                        "misurato il 26/09, ~0,9 GB di picco a 1-4 pezzi contro ~1,2 GB a 16 "
+                        "(il job notturno sulla VPS usa 4)")
     p.add_argument("--json", action="store_true", help="esito in JSON su stdout")
     return p
 
@@ -929,7 +933,8 @@ def main(argv: list[str] | None = None,
             if a.modello is None and fabbrica is None:
                 raise ErroreCostruttore("--modello è obbligatorio per costruire (non per --controlla)")
             try:
-                embed = (fabbrica or (lambda m, t: EmbedderOnnx(m, thread=t or None)))(a.modello, a.thread)
+                embed = (fabbrica or (lambda m, t: EmbedderOnnx(
+                    m, thread=t or None, sotto_lotto=a.sotto_lotto)))(a.modello, a.thread)
             except semantica.SemanticaNonPronta as exc:
                 raise ErroreCostruttore(str(exc)) from exc
             esito = costruisci(a.db, embed, perim, out=a.out, ricostruisci=a.ricostruisci,

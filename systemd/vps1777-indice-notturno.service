@@ -1,0 +1,37 @@
+# vps1777-indice-notturno.service — aggiorna gli indici semantici dei DB cambiati.
+#
+# Lancia `vps1777 indice-notturno`, che per ogni `<db>.vec.db` più vecchio del suo DB
+# fa girare il costruttore nel servizio compose `indice-notturno` (profilo `indice`):
+# mem_limit 1300m, una CPU, nessuna rete, 1 thread e sotto-lotti da 4. Se sfora la
+# memoria muore il job, non archive-mcp; l'indice servito resta quello di prima.
+# Utente e path come le altre unit (H43): li rende la CLI a ogni update.
+
+[Unit]
+Description=vps1777 — aggiornamento dell'indice semantico
+Wants=network-online.target
+After=network-online.target docker.service
+
+# 🔔 Un fallimento si deve SAPERE (come le altre unit dal 03/08).
+OnFailure=vps1777-avvisa-fallimento@%n.service
+
+[Service]
+Type=oneshot
+User=@OPERATOR_USER@
+Group=@OPERATOR_USER@
+Environment=VPS1777_HOME=@REPO@
+WorkingDirectory=@REPO@
+ExecStart=/usr/local/bin/vps1777 indice-notturno
+# un DB grande con molte righe nuove, a una CPU, può chiedere ore
+TimeoutStartSec=6h
+Nice=15
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectHome=read-only
+ReadWritePaths=@REPO@
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+LockPersonality=true

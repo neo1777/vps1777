@@ -213,6 +213,27 @@ services:
       retries: 3
       start_period: 10s
 
+  # Il job notturno dell'indice semantico (26/09/2026, `vps1777 indice-notturno`):
+  # aggiorna in modo INCREMENTALE i `<db>.vec.db` che esistono già, dopo un ingest.
+  # Non parte con `up` (profilo `indice`): lo lancia il timer con `compose run --rm`.
+  # Le guardie contano più del lavoro, perché la VPS ha poca RAM (archive-mcp ~1,6 GB
+  # su 3,8): `mem_limit` chiude la bolla — se il costruttore sfora, l'OOM killer del
+  # cgroup uccide LUI e non archive-mcp; una CPU sola; NESSUNA rete (lavora su file);
+  # stesso hardening degli altri. Picco misurato con 1 thread e sotto-lotti da 4:
+  # ~0,9 GB (il modello), da cui il tetto di 1300m.
+  indice-notturno:
+    <<: [*logging, *security, *readonly]
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}
+    profiles: [indice]
+    init: true
+    restart: "no"
+    network_mode: none
+    mem_limit: 1300m
+    cpus: 1.0
+    entrypoint: ["python", "tools/costruisci_indice.py"]
+    volumes:
+      - archive-data:/var/lib/archive:rw
+
   # ──────────────────────────────────────────────────────────────────────
   # NotebookLM MCP — nlm CLI + Chromium headless
   # ──────────────────────────────────────────────────────────────────────

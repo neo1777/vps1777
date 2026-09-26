@@ -132,6 +132,20 @@ vps1777 indice-modello                                         # sulla VPS, nel 
 python3 tools/vps1777.py indice-modello --dest ~/e5-small      # sul PC, dal checkout
 ```
 
+## vps1777 indice-notturno
+
+Aggiorna in modo incrementale gli indici della ricerca per senso che **esistono già**,
+solo per i DB più recenti del loro indice. Lo lancia il timer notturno; a mano serve a
+provarlo o ad accenderlo e spegnerlo. Il costruttore gira nel servizio compose
+`indice-notturno` (limite di memoria 1300m, una CPU, nessuna rete). Non fa mai una prima
+costruzione. Dettagli e costi: [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md).
+
+```bash
+vps1777 indice-notturno --abilita          # accende il timer (opt-in)
+vps1777 indice-notturno                    # un giro adesso
+vps1777 indice-notturno --db X --tutti     # un DB solo, anche se già allineato
+```
+
 ## vps1777 archive-migra
 
 Porta ai DB **già caricati** le migrazioni delle colonne derivate, senza ingest:
