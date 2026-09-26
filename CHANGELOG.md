@@ -22,6 +22,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `*.db`, che prende anche i `.vec.db` (dalla 0.48.0): su quelli l'indexer non trova
   `messages` e il comando chiudeva con esito 1 anche a lavoro riuscito. Ora i due comandi
   condividono l'elenco dei DB, senza i `.vec.db`.
+- **archive-mcp: `get_context` e `get_conversation` mostrano le azioni delle righe senza
+  testo.** Un tool_use dell'assistente o l'output di un comando hanno `content=''` e tutto
+  il contenuto in `tools`: le due funzioni restituivano solo `content`, e una sessione
+  Claude Code letta dal connettore aveva buchi proprio dove lavorava (misurato il 26/09
+  ricostruendo il 24/09). Ora quelle righe portano anche `tools`, troncato da `max_chars`
+  come il testo e redatto come ogni campo; sulle righe col testo il payload non cambia.
+  Doc: ARCHIVE.md (IT/EN), docstring dei due tool.
 
 ## [0.51.4] — 2026-09-26
 
