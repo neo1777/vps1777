@@ -236,8 +236,10 @@ def get_context(uuid: str, db_name: str = "", before: int = 3,
                 after: int = 3, max_chars: int = 0) -> list[dict[str, Any]]:
     """Restituisce i messaggi ATTORNO a un risultato (col contenuto pieno, non
     lo snippet troncato). Dai a `uuid` uno dei valori tornati da search; `before`
-    e `after` sono quanti messaggi prendere prima e dopo. Se il messaggio è in un
-    thread (`parent_uuid`), i vicini vengono dallo STESSO thread; sulle fonti senza
+    e `after` sono quanti messaggi prendere prima e dopo. Sulle sessioni Claude Code
+    i vicini vengono dal FILE DI SESSIONE (la riga cercata lo dice in `vicini_da`):
+    la catena `parent_uuid` lì è spezzata in un terzo delle righe. Altrove, se il
+    messaggio è in un thread (`parent_uuid`), dallo STESSO thread; sulle fonti senza
     arco (documenti chunked, db storici) è l'adiacenza temporale nello stesso
     archivio. Per la chat INTERA usa `get_conversation`.
     `max_chars` (0 = intero) tronca OGNI riga a quel numero di caratteri, col
@@ -255,6 +257,10 @@ def get_conversation(uuid: str, db_name: str = "", limit: int = 200,
     """Il thread di conversazione INTERO che contiene `uuid` — camminando l'albero
     `parent_uuid` (antenati + discendenti), col contenuto pieno e in ordine. Per
     LEGGERE una chat dall'inizio alla fine, non solo la finestra ±N di get_context.
+
+    Sulle sessioni Claude Code è il FILE DI SESSIONE intero (`conversazione_da` sulla
+    riga cercata), con la scheda R1 della sessione in coda; dall'uuid della scheda
+    si arriva alla stessa chat.
 
     Dove l'albero manca — documenti chunked (pdf/telegram/memory) e db storici —
     ricade sull'ordine lineare dello stesso archivio. Ogni riga:

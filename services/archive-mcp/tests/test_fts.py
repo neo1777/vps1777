@@ -354,6 +354,93 @@ def test_context_usa_il_thread_non_solo_ts():
     assert [r["uuid"] for r in ctx] == ["a1", "a2", "a3"]  # thread A, non [b1,a2,b2]
 
 
+
+# ── Claude Code: il file di sessione batte la catena parent_uuid (26/09/2026) ──
+
+def _db_sessioni(rows, sightings):
+    """rows: (uuid, project, ts, content, sender, parent_uuid); sightings: (uuid, source)."""
+    conn = _db_full(rows)
+    conn.execute("CREATE TABLE sightings(uuid TEXT, source TEXT, ingest_date TEXT, "
+                 "PRIMARY KEY (uuid, source))")
+    conn.executemany("INSERT INTO sightings VALUES (?, ?, '')", sightings)
+    conn.commit()
+    return conn
+
+
+# due sessioni INTERLACCIATE nello stesso project, e la catena di A spezzata: il
+# genitore di a3 è un record che l'indexer non tiene (una durata di turno).
+_S_A, _S_B = "sessions/aaaa.jsonl", "sessions/bbbb.jsonl"
+_RIGHE_CC = [
+    ("a1", "P", "2026-01-01T00:00:01Z", "A uno", "user", ""),
+    ("b1", "P", "2026-01-01T00:00:02Z", "B uno", "user", ""),
+    ("a2", "P", "2026-01-01T00:00:03Z", "A due", "assistant", "a1"),
+    ("b2", "P", "2026-01-01T00:00:04Z", "B due", "assistant", "b1"),
+    ("a3", "P", "2026-01-01T00:00:05Z", "A tre", "user", "record-non-tenuto"),
+    ("a4", "P", "2026-01-01T00:00:06Z", "A quattro", "assistant", "altro-buco"),
+]
+_VISTI_CC = [("a1", _S_A), ("a2", _S_A), ("a3", _S_A), ("a4", _S_A),
+             ("b1", _S_B), ("b2", _S_B)]
+
+
+def test_context_cc_attraversa_il_buco_della_catena():
+    # prima: a3 aveva un genitore assente → thread = {a3, genitore fantasma} → la
+    # finestra conteneva solo a3 (misurato sul primario: il 32% dei genitori manca)
+    conn = _db_sessioni(_RIGHE_CC, _VISTI_CC)
+    ctx = fts.context_conn(conn, "a3", before=2, after=1)
+    assert [r["uuid"] for r in ctx] == ["a1", "a2", "a3", "a4"]  # la sessione A, senza B
+    assert ctx[2]["vicini_da"] == f"file di sessione {_S_A}"
+
+
+def test_conversation_cc_e_il_file_di_sessione():
+    conn = _db_sessioni(_RIGHE_CC, _VISTI_CC)
+    conv = fts.conversation_conn(conn, "a2")
+    assert [r["uuid"] for r in conv] == ["a1", "a2", "a3", "a4"]
+    assert next(r for r in conv if r["is_match"])["conversazione_da"] == f"file di sessione {_S_A}"
+
+
+def test_conversation_cc_scheda_per_nome_non_per_genitore():
+    # la scheda R1 di A è in coda; quella di un CLONE (stesso uuid a4 come ultimo
+    # messaggio, sessione diversa) no, anche se il suo parent_uuid è a4
+    righe = _RIGHE_CC + [
+        ("sch-a", "recupero:sessioni", "2026-01-01T00:00:07Z", "scheda di A", "recupero", "a4"),
+        ("sch-c", "recupero:sessioni", "2026-01-01T00:00:07Z", "scheda del clone", "recupero", "a4"),
+    ]
+    visti = _VISTI_CC + [("sch-a", "recupero/sessioni/aaaa.md"),
+                         ("sch-c", "recupero/sessioni/cccc.md")]
+    conn = _db_sessioni(righe, visti)
+    conv = fts.conversation_conn(conn, "a1")
+    assert [r["uuid"] for r in conv] == ["a1", "a2", "a3", "a4", "sch-a"]
+
+
+
+def test_dalla_scheda_alla_chat_intera():
+    # l'uuid di una scheda porta alla conversazione della SUA sessione, scheda in coda
+    righe = _RIGHE_CC + [
+        ("sch-a", "recupero:sessioni", "2026-01-01T00:00:07Z", "scheda di A", "recupero", "a4")]
+    conn = _db_sessioni(righe, _VISTI_CC + [("sch-a", "recupero/sessioni/aaaa.md")])
+    conv = fts.conversation_conn(conn, "sch-a")
+    assert [r["uuid"] for r in conv] == ["a1", "a2", "a3", "a4", "sch-a"]
+
+
+def test_filone_principale_prima_dei_filoni():
+    # lo stesso uuid visto nel file principale e in un filone: vince il principale
+    righe = [("x1", "P", "2026-01-01T00:00:01Z", "uno", "user", ""),
+             ("x2", "P", "2026-01-01T00:00:02Z", "due", "assistant", "x1"),
+             ("y9", "P", "2026-01-01T00:00:03Z", "solo nel filone", "user", "")]
+    visti = [("x1", "sessions/xx.jsonl"), ("x2", "sessions/xx.jsonl"),
+             ("x1", "sessions/xx__f2.jsonl"), ("y9", "sessions/xx__f2.jsonl")]
+    conn = _db_sessioni(righe, visti)
+    assert [r["uuid"] for r in fts.context_conn(conn, "x1", before=3, after=3)] == ["x1", "x2"]
+
+
+def test_senza_sightings_resta_il_thread():
+    # DB senza la tabella (claude.ai, prototipo): il comportamento di prima
+    conn = _db_full(_RIGHE_CC)
+    ctx = fts.context_conn(conn, "a2", before=1, after=1)
+    assert [r["uuid"] for r in ctx] == ["a1", "a2"]
+    assert "vicini_da" not in ctx[1]
+
+
 def test_list_projects():
     conn = _db(_ROWS)
     ps = fts.projects_conn(conn)
