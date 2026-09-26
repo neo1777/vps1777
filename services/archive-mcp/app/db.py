@@ -678,15 +678,39 @@ def _tronca_righe(rows: list[dict[str, Any]], max_chars: int) -> list[dict[str, 
     # ── issue #268: sui messaggi-hub (workfile incollati da centinaia di KB) il
     # payload pieno uccideva la connessione MCP proprio dove il contesto serve
     # di più. Il troncamento è PER RIGA e dichiarato nel testo stesso: chi legge
-    # sa che manca qualcosa e come chiedere la riga intera.
+    # sa che manca qualcosa e come chiedere la riga intera. Vale anche per `tools`
+    # (26/09): l'output di un comando è spesso la riga più lunga della finestra.
     if max_chars and max_chars > 0:
         for r in rows:
-            c = r.get("content") or ""
-            if len(c) > max_chars:
-                r["content"] = (c[:max_chars]
+            for campo in ("content", "tools"):
+                c = r.get(campo) or ""
+                if len(c) > max_chars:
+                    r[campo] = (c[:max_chars]
                                 + f" …‹troncato: {max_chars} di {len(c)} char — "
                                   f"riga piena con max_chars=0›")
     return rows
+
+
+def _con_azioni(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
+    """Alle righe SENZA testo aggiunge `tools` — le azioni che sono il loro contenuto.
+
+    Un tool_use dell'assistente o l'output di un comando hanno `content=''`: la riga
+    arrivava vuota, e una sessione Claude Code letta da qui aveva buchi proprio dove
+    lavorava (misurato il 26/09/2026). Il campo compare solo dove il testo manca: sulle
+    righe col testo il payload resta quello di prima. Un DB senza la colonna (v1) non
+    ha azioni da mostrare, e resta com'era."""
+    vuote = [r["uuid"] for r in rows if not (r.get("content") or "").strip()]
+    if not vuote:
+        return
+    try:
+        azioni = dict(conn.execute(
+            "SELECT uuid, tools FROM messages WHERE uuid IN (%s) AND tools <> ''"
+            % ",".join("?" * len(vuote)), vuote).fetchall())
+    except sqlite3.OperationalError:
+        return                    # DB v1: niente colonna `tools`
+    for r in rows:
+        if r["uuid"] in azioni:
+            r["tools"] = azioni[r["uuid"]]
 
 
 def get_context(uuid: str, db: str = "", *, before: int = 3,
@@ -702,6 +726,7 @@ def get_context(uuid: str, db: str = "", *, before: int = 3,
         try:
             ctx = fts.context_conn(conn, uuid, before=before, after=after)
             if ctx:
+                _con_azioni(conn, ctx)
                 snap = _snapshot(_DBS[name])
                 for r in ctx:
                     r["db"] = name
@@ -727,6 +752,7 @@ def get_conversation(uuid: str, db: str = "", *, limit: int = 200,
         try:
             conv = fts.conversation_conn(conn, uuid, limit=limit)
             if conv:
+                _con_azioni(conn, conv)
                 snap = _snapshot(_DBS[name])
                 for r in conv:
                     r["db"] = name

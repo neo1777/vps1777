@@ -247,7 +247,8 @@ def get_context(uuid: str, db_name: str = "", before: int = 3,
     troncamento dichiarato nel testo: sui messaggi-hub giganti (workfile/board
     incollati) il payload pieno uccideva la connessione proprio dove il contesto
     serve di più (#268) — parti con max_chars=2000 e allarga solo se serve.
-    Ogni riga: {db, uuid, project, ts, content, is_match, snapshot}."""
+    Ogni riga: {db, uuid, project, ts, content, is_match, snapshot}; una riga SENZA
+    testo (un tool_use, l'output di un comando) porta anche `tools`, le sue azioni."""
     return db.get_context(uuid, db_name, before=before, after=after,
                           max_chars=max_chars)
 
@@ -265,7 +266,8 @@ def get_conversation(uuid: str, db_name: str = "", limit: int = 200,
 
     Dove l'albero manca — documenti chunked (pdf/telegram/memory) e db storici —
     ricade sull'ordine lineare dello stesso archivio. Ogni riga:
-    {db, uuid, project, ts, content, sender, is_match, snapshot}.
+    {db, uuid, project, ts, content, sender, is_match, snapshot}, più `tools` sulle
+    righe senza testo, come in get_context.
     `max_chars` come in get_context (#268): su 200 righe piene è la differenza
     fra una risposta e una connessione morta."""
     return db.get_conversation(uuid, db_name, limit=limit, max_chars=max_chars)
