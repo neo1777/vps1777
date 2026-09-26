@@ -160,7 +160,7 @@ Telegram bot notifies you; if the new version doesn't come up healthy, **automat
 rollback**. Full manual: [docs/en/UPDATE.md](docs/en/UPDATE.md).
 
 And by default **it takes care of itself**: `vps1777-auto-update.timer` applies the
-same safe update **once a week** — feature `autoupdate` in `VPS1777_FEATURES`, on by
+same safe update on its own, **as soon as a release is 48 hours old** (it looks every day) — feature `autoupdate` in `VPS1777_FEATURES`, on by
 default; to turn it off see [docs/OPS.md](docs/OPS.md) (Italian).
 
 ## Security by design

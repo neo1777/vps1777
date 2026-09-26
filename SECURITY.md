@@ -391,18 +391,20 @@ Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 | | |
 |---|---|
 | **chiusi** | 62 |
-| **parziali** | 9 |
-| **accettati** | 2 |
+| **parziali** | 8 |
+| **accettati** | 3 |
 | **aperti** | 0 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
 (`H2`) — sono chiusi e verificati in produzione, come tutta la fascia alta.
 
-I due **accettati** sono decisioni, non dimenticanze. Niente 2FA sul pannello admin
+I tre **accettati** sono decisioni, non dimenticanze. Niente 2FA sul pannello admin
 (`H28`): è un gateway mono-utente dietro Tailscale Funnel, con password bcrypt-12 +
 lockout per-IP + CSRF + revoca reale della sessione — il 2FA aggiungerebbe attrito per
 un guadagno marginale su questo profilo. E lo snapshot pre-update con l'archivio in
-chiaro (`H56`, deciso il 23/08 al format: la storia più sotto).
+chiaro (`H56`, deciso il 23/08 al format: la storia più sotto). E il gate umano sulla
+creazione dei tag (`H24`, 27/09): con un solo account non sarebbe un confine, e il rischio
+lo copre la quarantena di 48 ore dell'auto-update (la postilla più sotto).
 
 `H50` è il primo trovato da una **misura** invece che da una lettura: il gateway — il servizio esposto, quello che monta i secret — aveva
 un'uscita verso qualunque host su Internet. Ora è **chiusa in produzione**, e non
@@ -755,7 +757,7 @@ a ogni giro** invece di lasciarlo dedurre, che è tutto quello che poteva fare.
 📌 E su `H60`, «chiuso» significa **il controllo**, non il dato: l'indirizzo resta nella
 storia del repo e nelle tre versioni, per decisione del proprietario.
 
-Gli altri **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
+Gli altri **6 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
 il loro *perché* nel registro:
 
 - **Scelte deliberate** (resteranno tali): il *contatore globale* di `H4` (auto-lockout
@@ -765,9 +767,11 @@ il loro *perché* nel registro:
   in `H16` quando il PC non ha bcrypt (per non imporre una dipendenza al PC di deploy);
   `frame-ancestors`/`unsafe-inline` della CSP Mini App in `H35` (servirebbe un client
   Telegram reale per verificare che non rompano la pagina).
-- **Rinviati alla postilla** (sotto): il pinning ai digest delle immagini vps1777 (una per servizio)
-  in `H22` (oggi l'invariante lo impone la CLI post-pull, non il file compose) e
-  l'approvazione manuale dei rilasci in `H24` (i tag pubblicati sono già immutabili).
+- **Rinviato alla postilla** (sotto): il pinning ai digest delle immagini vps1777 (una per servizio)
+  in `H22` (oggi l'invariante lo impone la CLI post-pull, non il file compose).
+- **Rischio accettato, con data di revisione**: l'approvazione manuale dei rilasci in
+  `H24`. Con un solo account non sarebbe un confine; il rischio che copriva lo copre la
+  **quarantena di 48 ore** dell'auto-update (postilla sotto).
 
 L'hardening è difesa in profondità, non una garanzia, e il progetto è **pre-1.0**.
 Se trovi qualcosa, [scrivimi](#reporting-a-vulnerability).
@@ -838,11 +842,21 @@ questa fase i rilasci sono frequenti e aggiungerebbero attrito:
   non più un rinvio, una scelta con la sua prova. Se un'immagine cifrata stabile
   tornerà disponibile per questa macchina, la voce si riapre — sul disco, non nel
   codice: `vps1777` non la impone né gestisce un'altra chiave.
-- **Approvazione manuale dei rilasci** (parte di `H24`): un GitHub *environment*
-  `release` con reviewer richiederebbe una tua approvazione a ogni tag. I tag
-  pubblicati sono già **immutabili** (ruleset in `security/rulesets/`); manca solo
-  l'approvazione sulla *creazione* di un tag nuovo. Lo attiveremo quando il ritmo dei
-  rilasci sarà più regolare.
+- **Approvazione manuale dei rilasci** (parte di `H24`) — **rischio accettato il
+  27/09/2026, da rivedere entro il 27/12/2026**. Un GitHub *environment* `release` con
+  reviewer chiederebbe un'approvazione a ogni tag. Rivalutato con le misure: i tag
+  pubblicati sono già **immutabili** (ruleset in `security/rulesets/`), `main` rifiuta
+  force-push e cancellazioni anche all'admin, la Release parte solo col commit verde in
+  CI e firma le immagini, e il repo non ha secret con cui un workflow possa coniare un
+  tag da solo. Il punto che decide: con **un solo account** il revisore è lo stesso
+  token che crea il tag, e un token può approvare anche via API. Il gate fermerebbe un
+  tag creato per sbaglio, non una mano che sbaglia con quel token; e costerebbe un clic
+  a ogni rilascio. Il rischio vero stava a valle: l'auto-update installava l'ultima
+  release appena usciva. Da qui la cura adottata al suo posto, la **quarantena**:
+  l'auto-update installa da solo solo una release pubblicata da almeno 48 ore, così una
+  sbagliata si ritira in tempo segnandola *prerelease* (dettagli in
+  [docs/UPDATE.md](docs/UPDATE.md)). Il gate torna in discussione se entra un secondo
+  account con accesso in scrittura, o se un workflow ottiene il potere di creare tag.
 - **rootfs read-only su `nb1777-mcp`** (parte di `H43`): il servizio con Chromium è
   escluso dal read-only finché non verifichiamo un giro NotebookLM reale con tutte le
   tmpfs necessarie.

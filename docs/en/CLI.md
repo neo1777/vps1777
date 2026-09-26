@@ -39,9 +39,13 @@ pull by digest, restart, health gate — and automatic rollback if anything
 doesn't check out. This is the command the `vps1777-auto-update.service` unit
 runs: from the host you normally start **that one**, not this by hand.
 
+The unit passes `--eta-minima 48`: it installs the latest release only if it was
+published at least 48 hours ago (the quarantine, see [UPDATE.md](UPDATE.md)). To install
+one that just came out, `--version` skips the quarantine.
+
 ```bash
-sudo systemctl start vps1777-auto-update.service   # la via normale
-vps1777 update --version v0.44.0 --yes             # target esplicito (es. una rc)
+sudo systemctl start vps1777-auto-update.service   # the normal way (with the quarantine)
+vps1777 update --version v0.44.0 --yes             # explicit target, right away (e.g. an rc)
 ```
 
 ## vps1777 rollback

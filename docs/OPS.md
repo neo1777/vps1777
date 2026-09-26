@@ -64,7 +64,7 @@ firma/digest + migrazioni + health-gate 180s + **rollback automatico**):
 
 | quando | chi lo fa | cosa fa |
 |---|---|---|
-| **settimanale, da solo** | `vps1777-auto-update.timer` → `.service` | applica l'update sicuro **senza che tu faccia nulla** — ma solo se la feature `autoupdate` è nello stato dichiarato (`VPS1777_FEATURES`, default sì) |
+| **ogni giorno, da solo** | `vps1777-auto-update.timer` → `.service` | applica l'update sicuro **senza che tu faccia nulla**, ma solo una release pubblicata da **almeno 48 ore** (quarantena, vedi [UPDATE.md](UPDATE.md)) e solo se la feature `autoupdate` è nello stato dichiarato (`VPS1777_FEATURES`, default sì) |
 | **ogni giorno, avvisa** | `vps1777-check-update.timer` | **controlla e notifica** su Telegram («aggiornamento disponibile»), non applica |
 | **quando vuoi tu** | CLI `vps1777 update` o pulsante admin → tab **Update** | applica **on-demand**, stessa rete di sicurezza |
 

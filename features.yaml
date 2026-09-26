@@ -182,17 +182,39 @@ features:
     verify:
       systemd_unit: vps1777-auto-update.timer
 
+  - id: update.auto-quarantena
+    nome: "Quarantena di 48 ore dell'auto-update"
+    cosa: "Il timer installa da solo solo una release pubblicata da almeno 48 ore
+           (`--eta-minima 48`); un giro con una release più giovane non fa niente e lo
+           scrive nel journal. Una release sbagliata si ritira segnandola prerelease.
+           Solo il percorso automatico: a mano, --version e il pulsante restano immediati.
+           Timer giornaliero invece che settimanale. Data illeggibile = troppo giovane."
+    dove: ["tools/vps1777.py#quarantena_blocca", "systemd:vps1777-auto-update.service",
+           "systemd:vps1777-auto-update.timer"]
+    status: active-default
+    since: "unreleased"
+    decisione: "27/09/2026, Neo: «48h + timer giornaliero» — la cura di H24 al posto del
+                gate sui tag. Gemelli: Renovate minimumReleaseAge, Dependabot cooldown."
+    verify:
+      python_def: {path: tools/vps1777.py, name: quarantena_blocca}
+
   - id: sec.H24-release-approval
-    nome: "Approvazione manuale dei rilasci (GitHub environment)"
-    cosa: "Gate umano prima di pubblicare un rilascio. Rinviato di proposito."
-    dove: ["SECURITY.md:280"]
+    nome: "Approvazione manuale dei rilasci (GitHub environment) — rischio accettato"
+    cosa: "Gate umano prima di pubblicare un rilascio. NON attivato: con un solo account il
+           revisore è lo stesso token che crea il tag. Al suo posto la quarantena
+           dell'auto-update (update.auto-quarantena)."
+    dove: ["SECURITY.md:845", "security/findings.yml#H24"]
     status: deferred
     since: "rinviato (postilla SECURITY.md)"
-    decisione: "rimandato di proposito: i tag pubblicati sono già immutabili, il gate
-                serve quando il ritmo dei rilasci sarà regolare. [SECURITY.md:280]"
+    decisione: "27/09/2026, Neo: «chiudiamo con rischio accettato […] registrato ma solo fino
+                a nuova data […] rivalutiamo se è davvero sicura così». Rivalutato: il rischio
+                vero era l'auto-update che installava un tag appena uscito → quarantena 48h
+                (scelta di Neo, stessa data). Prima: rimandato «quando il ritmo dei rilasci
+                sarà regolare» (rivedi 2026-08-10). [SECURITY.md:845]"
     follow_up:
-      manuale: {cosa: "aggiungere il GitHub environment quando il ritmo rilasci è regolare",
-                rivedi_dopo: "2026-08-10"}
+      manuale: {cosa: "rivedere il rischio accettato: resta vero che c'è un solo account con
+                       scrittura e nessun secret che permetta a un workflow di creare tag?",
+                rivedi_dopo: "2026-12-27"}
     verify:
       manual: "verifica umana: esiste un environment con reviewer richiesto sulla release?"
 

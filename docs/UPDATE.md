@@ -21,8 +21,9 @@ vps1777 rollback        # torna alla versione precedente
 Oppure dal **pannello admin → tab Update**: stessa cosa, un click.
 Quando esce una release il bot Telegram ti avvisa (una volta sola).
 E se non fai niente, **fa da sola**: di default `vps1777-auto-update.timer`
-applica l'update sicuro una volta a settimana (feature `autoupdate`,
-spegnibile da `VPS1777_FEATURES` — vedi [OPS.md](OPS.md)).
+applica l'update sicuro da sola: guarda ogni giorno e installa una release solo
+quando ha **almeno 48 ore di vita** (feature `autoupdate`, spegnibile da
+`VPS1777_FEATURES` — vedi [OPS.md](OPS.md)).
 
 ## Cosa succede durante `vps1777 update`
 
@@ -98,13 +99,23 @@ vps1777 secrets-status          # a schermo
 vps1777 secrets-status --notify # + notifica Telegram se qualcosa è oltre soglia
 ```
 
-**3. Auto-update sicuro** — `vps1777-auto-update.timer`, **settimanale**.
+**3. Auto-update sicuro** — `vps1777-auto-update.timer`, **giornaliero, con quarantena di 48 ore**.
 Questo non sorveglia: **applica** `vps1777 update --yes`, con l'intera rete di
 sicurezza del canale gestito (backup, verifica digest, migrazioni, health-gate,
 rollback) — e solo se la feature `autoupdate` è nello stato dichiarato
 (`VPS1777_FEATURES`, default sì). È il motivo per cui il check quotidiano può
 limitarsi ad avvisare: l'applicazione ha già un suo canale sicuro. Dettagli e
 spegnimento: [OPS.md](OPS.md).
+
+**La quarantena di 48 ore** (dal 27/09/2026). La unit lancia
+`vps1777 update --yes --eta-minima 48`: se l'ultima release è stata pubblicata da meno
+di 48 ore, il giro non fa niente e lo scrive nel journal («in quarantena… riprovo al
+prossimo giro»). Serve a dare a un rilascio sbagliato il tempo di essere **ritirato**
+prima che una macchina lo installi da sola: basta segnarlo come *prerelease* su GitHub,
+perché l'update legge `/releases/latest`, che le prerelease le esclude. Vale **solo**
+per il percorso automatico: `vps1777 update` a mano, `--version` e il pulsante admin
+installano subito, e sono la via per una correzione urgente. Una data di pubblicazione
+illeggibile vale come «troppo giovane»: in dubbio, da sola non installa.
 
 > Le unit non hanno utente né path hardcodati: la CLI sostituisce
 > `@OPERATOR_USER@` / `@REPO@` coi valori reali a ogni update (H43). Era un bug
