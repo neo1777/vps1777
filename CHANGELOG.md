@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.53.0] — 2026-09-26
+
 ### 🐛 Correzioni
 
 - **archive: i turni che inietta il programma non sono più parole dell'utente —
@@ -16,6 +18,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   all'inizio. Slash command e `!comandi` restano `human`. Retroattiva con lo stesso
   `vps1777 archive-migra`: sul primario `human` da 15.132 a 3.967. Doc: ARCHIVE.md e CLI.md
   (IT/EN), docstring di `search`.
+
+### Nota per chi aggiorna
+
+Come per la 0.52.0: i DB già caricati si curano con `vps1777 archive-migra` (a secco) e
+poi `--scrivi`, che applica insieme le due migrazioni (strumenti → `tool`, turni del
+programma → `system`). Nessun re-ingest, nessun indice da ricostruire.
 
 ## [0.52.0] — 2026-09-26
 
