@@ -590,3 +590,33 @@ def test_codifica_col_grafo_ufficiale_fa_il_pooling_e_la_norma():
     v = np.array(struct.unpack("384f", out[1]), dtype="float32")
     assert np.allclose(v, atteso, atol=1e-5)
     assert abs(float(np.linalg.norm(v)) - 1.0) < 1e-5
+
+
+def test_il_modello_si_apre_solo_se_c_e_da_calcolare(tmp_path, monkeypatch):
+    """Il job notturno sulla VPS gira anche nelle notti in cui il testo non è cambiato:
+    lì il modello (~0,5 GB) non deve entrare in memoria. Misurato sul primario: picco
+    1.007 MiB contro un tetto di 1.300 MB, quasi tutto modello caricato per niente."""
+    aperture: list[int] = []
+
+    def apri(d, thread):
+        aperture.append(thread)
+        return object(), object()
+
+    (tmp_path / "model.onnx").write_bytes(b"x")
+    (tmp_path / "tokenizer.json").write_bytes(b"x")
+    monkeypatch.setattr(ci.semantica, "apri_modello", apri)
+    monkeypatch.setattr(ci.semantica, "codifica", lambda s, t, testi: [b"v"] * len(testi))
+    e = ci.EmbedderOnnx(tmp_path, thread=3)
+    assert aperture == [], "costruito l'embedder, il modello è ancora chiuso"
+    e(["uno", "due"])
+    e(["tre"])
+    assert aperture == [3], "aperto una volta sola, alla prima chiamata"
+
+
+def test_modello_mancante_si_dice_subito(tmp_path, monkeypatch):
+    """Pigro sì, muto no: se i file del modello mancano l'errore arriva alla partenza."""
+    def apri(d, thread):
+        raise semantica.SemanticaNonPronta("manca il modello")
+    monkeypatch.setattr(ci.semantica, "apri_modello", apri)
+    with pytest.raises(semantica.SemanticaNonPronta):
+        ci.EmbedderOnnx(tmp_path)

@@ -3577,7 +3577,11 @@ def cmd_indice_notturno(repo: Path, args) -> int:
         r = run([*cc, "--profile", "indice", "run", "--rm", "-T", "indice-notturno",
                  "--db", db, "--modello", DIR_MODELLO_VOLUME, "--thread", "1",
                  "--sotto-lotto", "4"], check=False, capture=True, timeout=6 * 3600)
-        coda = (r.stdout or "").strip().splitlines()[-3:] + (r.stderr or "").strip().splitlines()[-2:]
+        # la telemetria di onnxruntime scrive un avviso a ogni avvio: non è un esito, e
+        # finiva nel riassunto (e nelle notifiche di OnFailure)
+        righe = [x for x in ((r.stdout or "") + "\n" + (r.stderr or "")).splitlines()
+                 if x.strip() and "onnxruntime" not in x]
+        coda = righe[-4:]
         if r.returncode == 0:
             ok(f"{nome}: aggiornato — " + " · ".join(c.strip() for c in coda if c.strip())[:240])
         elif r.returncode == 2:

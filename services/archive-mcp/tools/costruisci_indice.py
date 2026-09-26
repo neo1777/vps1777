@@ -825,12 +825,25 @@ class EmbedderOnnx:
 
     def __init__(self, model_dir: Path, *, thread: int | None = None,
                  sotto_lotto: int = 16) -> None:
-        self.sess, self.tk = semantica.apri_modello(model_dir, thread=thread or os.cpu_count() or 2)
+        # Il modello si apre alla PRIMA chiamata, non qui (26/09/2026): nome e impronta
+        # bastano al controllo del metro, e un giro incrementale senza niente da calcolare
+        # (le notti senza ingest del job sulla VPS) non deve pagare i ~0,5 GB del modello.
+        # Misurato sulla VPS sul primario: picco 1.007 MiB con il modello caricato per
+        # niente, contro un tetto di 1.300 MB.
+        self.model_dir, self.thread = model_dir, thread or os.cpu_count() or 2
+        self.sess: Any = None
+        self.tk: Any = None
+        if not (model_dir / "model.onnx").is_file() or not (model_dir / "tokenizer.json").is_file():
+            # l'errore parlante del modello mancante resta all'avvio, non a metà lavoro
+            # (e prima dell'impronta, che su un file assente cadrebbe muta)
+            semantica.apri_modello(model_dir, thread=1)
         self.nome = semantica.MODELLO_ATTESO
         self.impronta = impronta_modello(model_dir)
         self.sotto_lotto = max(1, sotto_lotto)
 
     def __call__(self, testi: list[str]) -> list[bytes]:
+        if self.sess is None:
+            self.sess, self.tk = semantica.apri_modello(self.model_dir, thread=self.thread)
         ordine = sorted(range(len(testi)), key=lambda i: len(testi[i]))
         out: list[bytes] = [b""] * len(testi)
         for k in range(0, len(ordine), self.sotto_lotto):
