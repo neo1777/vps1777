@@ -176,6 +176,9 @@ services:
       # "nome:/var/lib/archive/db/<file>.db,...". Vuoto = stato normale, non un
       # errore (i tool tornano risultati vuoti finché non aggiungi un DB).
       ARCHIVE_DB_PATHS: "${ARCHIVE_DB_PATHS:-}"
+      # Valori dell'anagrafica che dichiari PUBBLICI (es. il tuo handle): la redazione in
+      # uscita non li maschera. CSV, vuoto = tutto redatto come prima (docs/ARCHIVE.md).
+      ARCHIVE_REDACT_ESENTI: "${ARCHIVE_REDACT_ESENTI:-}"
       FASTMCP_STATELESS_HTTP: "true"
       # D9 (20/07) — il tool `set_description` NON scrive più qui: inoltra al
       # gateway, che è l'unico a montare il volume in :rw. Serve il segreto del

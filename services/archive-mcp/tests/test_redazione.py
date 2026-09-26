@@ -182,3 +182,53 @@ def test_le_esenzioni_nuove_sono_strette() -> None:
         assert redazione.SEGNAPOSTO_TEL in redazione.maschera_testo(f"x {falso} y"), falso
     # un uuid con un gruppo di troppo non è un uuid: resta soggetto al pattern
     assert redazione.SEGNAPOSTO_TEL in redazione.maschera_testo("12345678-1234-4123-8123")
+
+
+# ── 26/09/2026: l'handle pubblico e le date degli screenshot (misurato dal vivo via MCP) ──
+def test_una_data_ora_coi_trattini_non_e_un_telefono() -> None:
+    """«Schermata del 2026-09-24 18-41-38.png» usciva «Schermata del [telefono redatto]-38.png»:
+    TELEFONO prendeva «2026-09-24 18-41». Una data valida con ore e minuti (e secondi) scritti
+    coi trattini o coi punti resta com'è."""
+    for innocuo in ("Schermata del 2026-09-24 18-41-38.png", "Screenshot 2026-09-24 18.41.38",
+                    "alle 2026-12-31 23-59", "il 1999-01-01 00-00-00"):
+        assert redazione.maschera_testo(innocuo) == innocuo, innocuo
+
+
+def test_l_esenzione_coi_trattini_e_stretta() -> None:
+    """Minuti o secondi impossibili (60, 99) non sono un'ora: restano telefono. E un telefono
+    vero accanto a una data-ora coi trattini sparisce ancora."""
+    for falso in ("2026-09-24 18-60", "2026-09-24 18-41-99", "2026-09-24 24-41"):
+        assert redazione.SEGNAPOSTO_TEL in redazione.maschera_testo(f"x {falso} y"), falso
+    out = redazione.maschera_testo("Schermata del 2026-09-24 18-41-38.png, chiama 333 1234567")
+    assert "333 1234567" not in out and "2026-09-24 18-41-38" in out
+
+
+def _anagrafica(valori: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE messages (project TEXT, content TEXT)")
+    conn.execute("INSERT INTO messages VALUES ('account:user', ?)", (valori,))
+    return conn
+
+
+def test_un_valore_esente_non_si_maschera(monkeypatch) -> None:
+    """Un valore dell'anagrafica dichiarato pubblico dall'operatore (l'handle, che è anche il
+    nome del repository) resta leggibile nei percorsi; gli altri valori restano redatti."""
+    monkeypatch.setattr(redazione, "ESENTI", {"autore1777"})
+    noti = redazione.valori_noti(_anagrafica("full_name: Autore1777\nemail_address: a@b.it\n"))
+    assert "Autore1777" not in noti, "il confronto è senza maiuscole"
+    assert "a@b.it" in noti
+    s = "_chat/corpus-Autore1777/banco-lavoro e -home-Autore1777-Scrivania"
+    assert redazione.maschera_testo(s, noti) == s
+
+
+def test_senza_esenti_la_politica_non_cambia(monkeypatch) -> None:
+    """Il default è vuoto: senza `ARCHIVE_REDACT_ESENTI` l'handle si maschera come prima. E
+    un'email esentata per nome resta redatta dal pattern: non si esenta un pattern."""
+    monkeypatch.setattr(redazione, "ESENTI", set())
+    noti = redazione.valori_noti(_anagrafica("full_name: Autore1777\n"))
+    assert redazione.SEGNAPOSTO_VALORE in redazione.maschera_testo("ciao Autore1777", noti)
+    monkeypatch.setattr(redazione, "ESENTI", {"a@b.it"})
+    noti = redazione.valori_noti(_anagrafica("email_address: a@b.it\n"))
+    assert "a@b.it" not in redazione.maschera_testo("scrivi a a@b.it", noti)
+    sorgente = Path(redazione.__file__).read_text(encoding="utf-8")
+    assert 'os.getenv("ARCHIVE_REDACT_ESENTI", "")' in sorgente, "il default deve essere vuoto"
