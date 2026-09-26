@@ -1481,7 +1481,8 @@ features:
   - id: cli.archive-migra
     nome: "vps1777 archive-migra"
     cosa: "Porta ai DB già caricati le migrazioni delle colonne derivate senza re-ingest
-           (0.52.0: gli output degli strumenti di Claude Code da `human` a `tool`). A SECCO
+           (0.52.0: gli output degli strumenti di Claude Code da `human` a `tool`; 0.53.0:
+           i turni del programma da `human` a `system`). A SECCO
            di default: il delta è misurato su una transazione vera e annullata; scrive
            solo con `--scrivi`. Salta i `.vec.db`, che non sono archivi."
     dove: ["cli:archive-migra", "tools/vps1777.py"]

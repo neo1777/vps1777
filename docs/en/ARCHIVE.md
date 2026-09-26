@@ -769,7 +769,7 @@ without it, it stays `messaggio`; any other value stops the ingest).
 
 **`speaker` and `voice`** — two axes that must not be merged. `speaker` is **who
 sent** the row, a fact taken from the source (`human` · `assistant` · `tool` ·
-`unknown`: attachments, titles, memories and cards are `unknown`, because they don't
+`system` · `unknown`: attachments, titles, memories and cards are `unknown`, because they don't
 say who wrote them). `voice` is **whose voice** is in the content, a heuristic estimate
 (`own` · `pasted_transcript` · `pasted_ai` · `character` · `mixed` · `unknown`),
 with its confidence and the flags that explain it. They come out **populated** from
@@ -800,11 +800,38 @@ python -m app.archive_indexer /var/lib/archive/db/<name>.db --migra [--scrivi]
 ```
 
 and prints `{"strumenti": N, "speaker_prima": {…}, "speaker_dopo": {…}, "scritto": …}`. On
-the primary: 74,818 rows, `human` from 89,950 to 15,132, 6 seconds. ⚠️ Even a dry run can
+the primary: 74,818 rows, `human` from 89,950 to 15,132, 6 seconds (and, with the
+program's turns below, to 3,967). ⚠️ Even a dry run can
 change the file's **sha** without changing data: SQLite doesn't journal the free pages it
 reuses, and after the ROLLBACK they stay free but with different bytes (measured: 638
 free pages, data and `integrity_check` identical). Whoever compares a DB by sha, like a
 script that loads the index only if the DB hasn't changed, should do it before `--migra`.
+
+**The program's turns are `system` (since 0.53.0, #293).** After the tools, 14,878
+`human` rows were left on the primary, and 75% of them had been written by no one: 9,643
+`<task-notification>` (a sub-agent or a background command that finished), 1,115 outputs
+of local commands, 151 compaction summaries, skill texts, messages from other sessions.
+Claude Code injects them in a record of type `user`. Now they go in as `sender='sistema'`
+→ `speaker='system'`. How it is decided:
+
+1. **the record's fact**, where there is one: recent versions write `origin.kind`
+   (`human` = whoever writes; `task-notification`, `peer`, `coordinator`… = the
+   program), `isMeta` and `isCompactSummary`. `origin.kind='human'` wins over the rest;
+2. **the form of the text**, only if the record says nothing: the forms only the program
+   writes (`<task-notification`, `<local-command-…`, "This session is being
+   continued…", "Base directory for this skill:", "Another Claude session sent a
+   message", `<system-reminder>`…; the list is `_FORME_DEL_PROGRAMMA` in the indexer),
+   anchored at the start of the text.
+
+**Slash commands** (`<command-name>`) and commands run with `!` (`<bash-input>`) stay
+`human`: they are gestures of whoever writes. Prompts that a script sends to a headless
+session (a cron calling `claude -p`) stay `human` too: the record doesn't tell them apart
+from a prompt typed by hand, and the text is the script's.
+
+On DBs already loaded `origin` and `isMeta` were not kept: `vps1777 archive-migra`
+decides by the form of the text only. A turn the program marked only with the field, with
+a text of no recognizable form, stays `human` until a re-ingest reads it again from the
+source. On the primary: 11,165 rows to `system`, `human` from 15,132 to 3,967.
 
 **`revisions`** keeps the **outgoing** version when the same uuid comes back with a
 different content (a rewritten memory, an updated card, a removed chunk): `messages`

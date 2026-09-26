@@ -756,7 +756,7 @@ passando a `write_rows` una **decima colonna** facoltativa (`messaggio` o
 `data-export`; senza, resta `messaggio`; un altro valore ferma l'ingest).
 
 **`speaker` e `voice`** — due assi che non vanno fusi. `speaker` è **chi ha inviato**
-la riga, un fatto preso dalla fonte (`human` · `assistant` · `tool` · `unknown`:
+la riga, un fatto preso dalla fonte (`human` · `assistant` · `tool` · `system` · `unknown`:
 allegati, titoli, memorie e schede sono `unknown`, perché non dicono chi le ha scritte).
 `voice` è **di chi è la voce** nel contenuto, una stima euristica (`own` ·
 `pasted_transcript` · `pasted_ai` · `character` · `mixed` · `unknown`), con la sua
@@ -789,11 +789,39 @@ python -m app.archive_indexer /var/lib/archive/db/<nome>.db --migra [--scrivi]
 ```
 
 e stampa `{"strumenti": N, "speaker_prima": {…}, "speaker_dopo": {…}, "scritto": …}`. Sul
-primario: 74.818 righe, `human` da 89.950 a 15.132, 6 secondi. ⚠️ Anche a secco il file
+primario: 74.818 righe, `human` da 89.950 a 15.132, 6 secondi (e con i turni del
+programma, sotto, a 3.967). ⚠️ Anche a secco il file
 può cambiare **sha** senza cambiare dati: SQLite non mette nel journal le pagine libere
 che riusa, e dopo il ROLLBACK quelle restano libere ma con byte diversi (misurato: 638
 pagine libere, dati e `integrity_check` identici). Chi confronta un DB per sha, come uno
 script che carica l'indice solo se il DB non è cambiato, lo faccia prima del `--migra`.
+
+**I turni del programma sono `system` (dalla 0.53.0, #293).** Dopo gli strumenti, sul
+primario restavano 14.878 righe `human`, e il 75% non l'aveva scritto nessuno: 9.643
+`<task-notification>` (un sotto-agente o un comando in background che ha finito), 1.115
+output di comandi locali, 151 riassunti di compattazione, i testi delle skill, i messaggi
+di altre sessioni. Li inietta Claude Code in un record di tipo `user`. Ora entrano come
+`sender='sistema'` → `speaker='system'`. Come si decide:
+
+1. **il fatto del record**, dove c'è: le versioni recenti scrivono `origin.kind`
+   (`human` = chi scrive; `task-notification`, `peer`, `coordinator`… = il programma),
+   `isMeta` e `isCompactSummary`. `origin.kind='human'` vince su tutto il resto;
+2. **la forma del testo**, solo se il record non dice niente: le forme che solo il
+   programma scrive (`<task-notification`, `<local-command-…`, «This session is being
+   continued…», «Base directory for this skill:», «Another Claude session sent a
+   message», `<system-reminder>`…; l'elenco è `_FORME_DEL_PROGRAMMA` nell'indexer),
+   ancorate all'inizio del testo.
+
+Restano `human` gli **slash command** (`<command-name>`) e i comandi lanciati con `!`
+(`<bash-input>`): sono gesti di chi scrive. Restano `human` anche i prompt che uno
+script manda a una sessione senza testa (un cron che chiama `claude -p`): il record non
+lo distingue da un prompt scritto a mano, e il testo è quello dello script.
+
+Sui DB già caricati `origin` e `isMeta` non sono stati conservati: `vps1777
+archive-migra` decide solo con la forma del testo. Un turno che il programma marcava
+solo col campo, con un testo senza forma riconoscibile, resta `human` finché un
+re-ingest non lo rilegge dalla fonte. Sul primario: 11.165 righe a `system`, `human` da
+15.132 a 3.967.
 
 **`revisions`** conserva la versione **uscente** quando lo stesso uuid ritorna con un
 contenuto diverso (una memoria riscritta, una scheda aggiornata, un pezzo tolto):

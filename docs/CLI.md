@@ -120,7 +120,9 @@ vps1777 archive-retag --db cc --scrivi    # applica su un DB solo
 
 Porta ai DB **già caricati** le migrazioni delle colonne derivate, senza ingest:
 oggi gli output degli strumenti di Claude Code scritti `human` da un indexer
-precedente alla 0.52.0 diventano `speaker='tool'` ([ARCHIVE.md](ARCHIVE.md)). Il
+precedente alla 0.52.0 diventano `speaker='tool'`, e i turni del programma
+(notifiche, output di comandi locali, compattazioni) scritti `human` prima della
+0.53.0 diventano `speaker='system'` ([ARCHIVE.md](ARCHIVE.md)). Il
 testo non cambia: FTS e indice semantico restano validi. **A secco di default**:
 misura il delta su una transazione vera, la annulla e non tocca i dati; scrive solo
 con `--scrivi`. I `.vec.db` (indici semantici) non sono archivi e vengono saltati.

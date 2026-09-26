@@ -122,7 +122,9 @@ vps1777 archive-retag --db cc --scrivi    # applica su un DB solo
 
 Brings the migrations of the derived columns to the DBs **already loaded**, without
 an ingest: today, Claude Code tool outputs written as `human` by an indexer older
-than 0.52.0 become `speaker='tool'` ([ARCHIVE.md](ARCHIVE.md)). The text doesn't
+than 0.52.0 become `speaker='tool'`, and the program's turns (notifications,
+local command outputs, compactions) written as `human` before 0.53.0 become
+`speaker='system'` ([ARCHIVE.md](ARCHIVE.md)). The text doesn't
 change: FTS and semantic index stay valid. **Dry-run by default**: it measures the
 delta on a real transaction, rolls it back and doesn't touch the data; it writes
 only with `--scrivi`. The `.vec.db` files (semantic indexes) are not archives and
