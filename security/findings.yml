@@ -3389,7 +3389,7 @@ findings:
         produzione: 6.606 righe sender='human' e 6.630 sender='assistant' con
         speaker='' — mentre claude-ai-160726, migrato dalla v2, era popolato al
         100%. Il percorso di MIGRAZIONE curava; il percorso di NASCITA no.
-    since: unreleased
+    since: v0.46.0
     why: >
       `popola_speaker` era agganciata a `_ensure_v3` (la migrazione): un DB nato
       già con lo schema v3 non migra mai, quindi le righe nuove restavano con

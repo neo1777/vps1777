@@ -76,6 +76,16 @@ catalogo dovrebbe mappare).
 
 ## B2 — Stregatto v2 come quarto strato (memoria vettoriale)
 
+> **Stato al 26/09/2026 — il bisogno è coperto nel prodotto, il resto di B2 no.**
+> Il *match semantico* che B2 voleva aggiungere accanto a FTS5 c'è: è la **ricerca
+> ibrida** di archive1777 (`search_ibrida`, modello `multilingual-e5-small` in ONNX,
+> indice `sqlite-vec` accanto a ogni DB, aggiornamento notturno opt-in) — vedi
+> [RICERCA-IBRIDA](../RICERCA-IBRIDA.md). La disciplina di freschezza che qui era
+> «da decidere» ha preso questa forma: l'indice è legato all'impronta del modello e
+> sa quali righe non ha ancora. Resta aperto solo ciò che riguarda **Stregatto come
+> progetto a sé** (un agente con memoria, non un indice): non è più la strada per il
+> match semantico dell'archivio. Il testo sotto è la bozza dell'11/07, lasciata com'era.
+
 **Cosa fa.** Aggiunge una **memoria semantica/vettoriale** accanto agli strati
 esistenti — archivio (episodico verbatim), NotebookLM (curato), skill
 descriptions (indice) — basata su **Stregatto** (Cheshire Cat AI), nella sua
