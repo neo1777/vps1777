@@ -142,6 +142,27 @@ def _filtri_voce(speaker: str = "", voice: str = "") -> tuple[str, list]:
     return where, extra
 
 
+# `campi` — DOVE cercare (#273, 26/09/2026). Il default resta TUTTO (testo, azioni,
+# allegati), perché le azioni sono contenuto informativo: il file aperto, il comando
+# lanciato. `testo` restringe la MATCH alla colonna `content`, le parole: è il filtro
+# giusto per `sort=newest` e per «chi ha detto cosa», dove il codice scritto da un Edit
+# o letto da un Read si presentava come il dato più recente (il caso della issue: una
+# fixture di test in prima posizione, 12 righe su 14 col testo vuoto).
+CAMPI = ("tutto", "testo")
+
+
+def con_campi(match: str, campi: str) -> str:
+    """L'espressione MATCH ristretta ai campi chiesti. Un valore sconosciuto è un
+    errore parlante, non un ritorno silenzioso al default: una ricerca che ignora un
+    filtro scritto male sembra filtrata, ed è la forma di difetto più cara qui."""
+    if campi in ("", "tutto"):
+        return match
+    if campi == "testo":
+        return f"content : ({match})"
+    raise ValueError(f"campi={campi!r} non esiste: i valori sono {', '.join(CAMPI)} "
+                     "('testo' = solo le parole, senza le azioni: comandi, file, output).")
+
+
 def _run_match(conn: sqlite3.Connection, match: str, *, where_extra: str,
                params_extra: list, order: str, limit: int,
                snippet_tokens: int, join: str = "") -> list[dict[str, Any]]:
@@ -158,7 +179,7 @@ def _run_match(conn: sqlite3.Connection, match: str, *, where_extra: str,
 def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
                 raw: bool = False, sort: str = "rank",
                 since: str = "", until: str = "", project: str = "",
-                speaker: str = "", voice: str = "",
+                speaker: str = "", voice: str = "", campi: str = "tutto",
                 snippet_tokens: int = 32) -> list[dict[str, Any]]:
     """Cerca su UNA connessione. Distingue 0-risultati da errore di sintassi
     (solleva FtsSyntaxError). In modalità smart (default) prova la query
@@ -181,9 +202,11 @@ def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
     extra += e_voce
     join = _JOIN_MSG if w_voce else ""
 
+    con_campi(query, campi)          # un valore sbagliato si dice PRIMA di cercare
     candidates = [query] if raw else [sanitize_query(query), query]
     last_exc: sqlite3.OperationalError | None = None
     for match in candidates:
+        match = con_campi(match, campi)
         try:
             rows = _run_match(conn, match, where_extra=where, params_extra=extra,
                               order=order, limit=limit, snippet_tokens=snippet_tokens,
@@ -199,7 +222,7 @@ def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
 
 def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
                since: str = "", until: str = "", project: str = "",
-               speaker: str = "", voice: str = "") -> int:
+               speaker: str = "", voice: str = "", campi: str = "tutto") -> int:
     """Numero di match (non limitato). Stessa disciplina d'errore di search.
 
     Gli stessi filtri di `search_conn`, e non è un dettaglio: se `count` e `search`
@@ -224,11 +247,12 @@ def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
     join = _JOIN_MSG if w_voce else ""
     sql = (f"SELECT count(*) FROM messages_fts f{join} "
            f"WHERE messages_fts MATCH ?{where}")
+    con_campi(query, campi)
     candidates = [query] if raw else [sanitize_query(query), query]
     last_exc: sqlite3.OperationalError | None = None
     for match in candidates:
         try:
-            return int(conn.execute(sql, [match, *extra]).fetchone()[0])
+            return int(conn.execute(sql, [con_campi(match, campi), *extra]).fetchone()[0])
         except sqlite3.OperationalError as exc:
             last_exc = exc
     raise FtsSyntaxError(f"{_SYNTAX_HINT} (dettaglio: {last_exc})")

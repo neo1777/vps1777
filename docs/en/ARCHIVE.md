@@ -411,9 +411,9 @@ above.
 
 | Tool | What it does |
 |---|---|
-| `search(query, db_name, limit, …)` | FTS5 search; returns `{db, uuid, project, ts, rank, snippet, snapshot}`. When searching **all** DBs the same uuid arrives **once**, with `anche_in` listing the other archives that contain it (no limit wasted on copies). Filters `since`/`until`, `project`, `speaker`, `voice` |
-| `search_ibrida(query, db_name, limit, query_fts, …)` | search **by meaning**: FTS5 + vectors fused (RRF). For when you remember the meaning and not the wording; it needs the embedding model and a `<db>.vec.db` index on the volume, and if they are missing **it says so** instead of falling back to FTS5. See [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
-| `count(query, db_name, …)` | how many messages match (not limited): `{total, per_db}`; if a term **collapses** it adds `warnings` |
+| `search(query, db_name, limit, …)` | FTS5 search; returns `{db, uuid, project, ts, rank, snippet, snapshot}`. When searching **all** DBs the same uuid arrives **once**, with `anche_in` listing the other archives that contain it (no limit wasted on copies). Filters `since`/`until`, `project`, `speaker`, `voice`, `campi` (below) |
+| `search_ibrida(query, db_name, limit, query_fts, …)` | search **by meaning**: FTS5 + vectors fused (RRF). For when you remember the meaning and not the wording; it needs the embedding model and a `<db>.vec.db` index on the volume, and if they are missing **it says so** instead of falling back to FTS5. Takes `campi` like `search`. See [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
+| `count(query, db_name, …)` | how many messages match (not limited): `{total, per_db}`; if a term **collapses** it adds `warnings`. Same filters as `search`, `campi` included |
 | `check_term(term, db_name)` | diagnoses whether a term with `+`/`#` (`C++`, `C#`, `g++`) is searchable or **collapses** onto its prefix — it asks the index, not the docs |
 | `get_context(uuid, db_name, before, after, max_chars)` | the messages **around** a result, with the **full content**; on Claude Code sessions the neighbours come from the **session file** (the matched row says so in `vicini_da`); elsewhere, if the message is in a thread, from the **same thread** (`parent_uuid` edge), not from mere closeness in time. `max_chars` (0 = whole) truncates each row **saying so in the text** — on giant hub messages the full payload killed the connection. A row **without text** (a tool_use, the output of a command) also carries **`tools`**, the actions that are its content (since 0.52.0: before, it came out empty), truncated by `max_chars` like the text |
 | `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` and `tools` as in `get_context`. On Claude Code sessions it is the whole **session file** (`conversazione_da`), and with bundles carrying `recupero/` the session's card comes **last** |
@@ -426,6 +426,20 @@ above.
 | `check_integrity(db_name)` | integrity of the archives: `ok` · `sporco` (dirty: hot journal, the writer died halfway) · `corrotto` (corrupt) · `non_misurabile` (not measurable). It costs a scan per DB: call it when a result looks odd, not on every search |
 | `set_description(db_name, description)` | writes/updates the archive's **description** (touches the card, never the messages) |
 | `set_ruolo(db_name, ruolo)` | declares the archive's **role** from a closed vocabulary — see below |
+
+**`campi` — searching the words, or the actions too (since 0.54.0, #273).** By default
+`search`, `count` and `search_ibrida` search **everywhere**: in the text, in the actions
+(`tools`: the command run, the file written by an Edit, the output of a Read) and in the
+attachments. That's on purpose, because actions are content: that's where you find the
+file touched or the command given. But with `sort='newest'` code becomes noise in first
+position. On 05/09 a search about the "book" returned first a test fixture of the indexer
+("the book is at chapter 81"): fake, plausible data. Measured on 26/09 on the primary: of
+14 rows with that sentence, 12 have empty text and the sentence in the actions. With
+**`campi='testo'`** the search looks only at the words (the `content` column): it is the
+filter for "most recent" and for "who said what". In `search_ibrida` the vector branch
+then keeps only rows that have words, because a vector doesn't say whether it hit the
+text or the actions. A value other than `tutto`/`testo` is an error, not a silent return
+to the default.
 
 ### An archive's `ruolo` — routing without reading prose
 

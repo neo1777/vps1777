@@ -383,7 +383,7 @@ def integrita_archivi(db: str = "") -> dict[str, Any]:
 def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
            sort: str = "rank", since: str = "", until: str = "",
            project: str = "", speaker: str = "", voice: str = "",
-           snippet_tokens: int = 32) -> list[dict[str, Any]]:
+           campi: str = "tutto", snippet_tokens: int = 32) -> list[dict[str, Any]]:
     """Search FTS5 nel DB indicato (o in TUTTI se db == "").
 
     Su più DB il `limit` è GLOBALE (non più per-DB) e i risultati sono fusi e
@@ -402,7 +402,7 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
             rows = fts.search_conn(
                 conn, query, limit=limit, raw=raw, sort=sort, since=since,
                 until=until, project=project, speaker=speaker, voice=voice,
-                snippet_tokens=snippet_tokens)
+                campi=campi, snippet_tokens=snippet_tokens)
             for r in rows:
                 r["db"] = name
                 r["snapshot"] = snap
@@ -493,6 +493,7 @@ def _open_con_indice(name: str, idx: Path) -> sqlite3.Connection:
 @_serializzata
 def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                   query_fts: str = "", since: str = "", until: str = "",
+                  campi: str = "tutto",
                   k_rrf: int = semantica.RRF_K,
                   peso_fts: float = semantica.RRF_PESO_FTS,
                   snippet_tokens: int = 32) -> dict[str, Any]:
@@ -502,6 +503,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     ('fts' | 'vettori' | 'entrambi') per ciascuna — chi legge deve poter vedere
     *quale* dei due l'ha trovata, altrimenti il guadagno resta invisibile.
     """
+    fts.con_campi("", campi)        # un valore sbagliato si dice prima di tutto
     s = get_settings()
     model_dir = Path(s.archive_model_dir)
     indici = _indici_disponibili()
@@ -532,7 +534,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         if espressione:
             try:
                 rows_fts = fts.search_conn(conn, espressione, limit=limit * 3,
-                                           since=since, until=until,
+                                           since=since, until=until, campi=campi,
                                            snippet_tokens=snippet_tokens)
             except (FtsSyntaxError, sqlite3.OperationalError) as exc:
                 log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s", name, exc)
@@ -560,8 +562,9 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             if rowids:
                 seg = ",".join("?" * len(rowids))
                 cur = conn.execute(
-                    f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip "
-                    f"FROM messages WHERE rowid IN ({seg})", rowids)
+                    f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip, "
+                    f"content <> '' AS ha_testo FROM messages WHERE rowid IN ({seg})",
+                    rowids)
                 per_rowid = {r["rowid"]: dict(r) for r in cur}
                 for rid in rowids:                      # l'ordine del knn è il rank
                     r = per_rowid.get(rid)
@@ -571,6 +574,10 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                     u = r["uuid"]
                     if registro is not None and registro.get(rid) != u:
                         uuid_diversi += 1
+                        continue
+                    if campi == "testo" and not r["ha_testo"]:
+                        # il vettore non dice se ha colpito le parole o le azioni: con
+                        # `campi='testo'` si tengono solo le righe che HANNO parole.
                         continue
                     lista_vec.append(u)
                     if u not in per_uuid:
@@ -613,7 +620,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
 @_serializzata
 def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
           until: str = "", project: str = "", speaker: str = "",
-          voice: str = "") -> dict[str, Any]:
+          voice: str = "", campi: str = "tutto") -> dict[str, Any]:
     """Numero di match per DB e totale (non limitato) — abilita frequenze e
     prevalenze, impossibili con la sola `search` limitata."""
     _maybe_reload()
@@ -627,7 +634,7 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
         try:
             per_db[name] = fts.count_conn(
                 conn, query, raw=raw, since=since, until=until, project=project,
-                speaker=speaker, voice=voice)
+                speaker=speaker, voice=voice, campi=campi)
             # canary: se un termine è collassato sul suo prefisso (`C++`→`C`), il
             # numero appena letto è un falso positivo — dillo, non lasciarlo muto.
             if not raw:

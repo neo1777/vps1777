@@ -202,3 +202,22 @@ def test_indice_senza_registro_dichiarato(archivio, monkeypatch):
     assert r["righe"][0]["uuid"] == "u4"
     v = r["indici"][0]["verifica"]
     assert v["registro"] is False and "senza registro" in v["stato"]
+
+
+@vec
+def test_campi_testo_toglie_dal_ramo_vettoriale_le_righe_senza_parole(archivio, monkeypatch):
+    """#273: un vettore non dice se ha colpito il testo o le azioni. Con
+    `campi='testo'` il ramo vettoriale tiene solo le righe che HANNO parole; col
+    default la riga di sole azioni resta (il comportamento di prima)."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    _rw(db, ("UPDATE messages SET content = '' WHERE uuid = 'u2'",))
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    tutti = modulo.search_ibrida("x", db="arch", limit=3)
+    assert tutti["righe"][0]["uuid"] == "u2"
+    parole = modulo.search_ibrida("x", db="arch", limit=3, campi="testo")
+    assert "u2" not in [r["uuid"] for r in parole["righe"]]
+    assert parole["righe"], "le altre righe, che hanno parole, restano"
