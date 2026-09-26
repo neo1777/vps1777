@@ -4,6 +4,23 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.51.4] — 2026-09-26
+
+### 🐛 Correzioni
+
+- **archive-mcp: la redazione in uscita non toglie più dai percorsi un valore pubblico
+  dell'anagrafica, se l'operatore lo dichiara (`ARCHIVE_REDACT_ESENTI`).** Il `full_name`
+  dell'account claude.ai era l'handle pubblico dell'autore, lo stesso nome dei suoi
+  repository, e la redazione per valore noto lo mascherava in ogni percorso e in ogni
+  etichetta (`corpus-<handle>/…` → «corpus-[dato personale redatto]/…», misurato il 26/09).
+  Nuova variabile nel `.env` (CSV, senza maiuscole), **vuota per default**: la politica non
+  cambia finché non la scrivi. Vale solo per i valori noti: email e telefoni in formato
+  riconoscibile restano redatti anche se esentati. Doc: ARCHIVE.md (IT/EN), `.env.example`.
+- **archive-mcp: le date-ora coi trattini dei nomi degli screenshot non escono più come
+  telefoni.** «Schermata del 2026-09-24 18-41-38.png» usciva «Schermata del [telefono
+  redatto]-38.png»: l'esenzione della data con l'ora (0.51.1) ora accetta minuti e secondi
+  separati da trattini o punti, con valori 00-59 (stretta come prima: 18-60 resta telefono).
+
 ## [0.51.3] — 2026-09-26
 
 ### 🐛 Correzioni
