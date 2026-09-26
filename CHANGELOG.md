@@ -4,6 +4,24 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Il digest verificato vive anche nel compose** (`H22`, l'ultimo dei rinvii scaduti).
+  Dopo `verify_digests` la CLI scrive nel `.env`, insieme a `VPS1777_TAG` e in una sola
+  sostituzione atomica, un digest per servizio (`VPS1777_DIGEST_GATEWAY`, …), e ogni
+  immagine vps1777 in `compose.yaml` diventa
+  `…:${VPS1777_TAG}${VPS1777_DIGEST_<SVC>:+@${VPS1777_DIGEST_<SVC>}}`. Un
+  `docker compose pull && up` lanciato a mano nella cartella gira il digest verificato,
+  non quello che il registro serve per il tag in quel momento. Due trappole misurate,
+  ciascuna con un test: `docker pull nome:tag@digest` lascia l'immagine **senza tag**,
+  quindi il pull della CLI resta per tag e il pin si accende dopo la verifica; e un
+  `env=` col solo tag, in un rollback, farebbe girare il tag vecchio coi digest nuovi
+  rimasti nel `.env`, quindi ogni env di versione nasce da `versione_env`. Rollback e
+  bootstrap scrivono i digest della versione a cui tornano.
+
+### Nota per chi aggiorna
+- Dopo questo update il `.env` ha cinque righe `VPS1777_DIGEST_*`: non modificarle a mano.
+  Su un'installazione nuova sono vuote (pin spento) fino al primo update.
+
 ## [0.58.0] — 2026-09-27
 
 **Il blocco d'igiene: i cinque rinvii scaduti del ledger, chiusi uno per uno.** Uno era

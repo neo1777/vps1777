@@ -282,7 +282,10 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   digest. Permessi `least-privilege` per-job in `release.yml`. Le immagini di
   terzi nei compose sono digest-pinnate (`H66`).
 - **Digest immutabili** (baseline): le immagini si pullano da GHCR e si verificano
-  contro `images.lock` del bundle; nessun build-in-place.
+  contro `images.lock` del bundle; nessun build-in-place. Dalla `v0.59.0` il digest
+  verificato vive anche nel compose (`H22`): la CLI lo scrive nel `.env` insieme al tag, e
+  ogni immagine vps1777 è `…:${VPS1777_TAG}@${VPS1777_DIGEST_<SVC>}`. Anche un
+  `docker compose pull && up` lanciato a mano gira il digest verificato.
 
 ### Privacy & osservabilità
 
@@ -767,8 +770,9 @@ il loro *perché* nel registro:
   in `H16` quando il PC non ha bcrypt (per non imporre una dipendenza al PC di deploy);
   `frame-ancestors`/`unsafe-inline` della CSP Mini App in `H35` (servirebbe un client
   Telegram reale per verificare che non rompano la pagina).
-- **Rinviato alla postilla** (sotto): il pinning ai digest delle immagini vps1777 (una per servizio)
-  in `H22` (oggi l'invariante lo impone la CLI post-pull, non il file compose).
+- **Parziale, col residuo scritto**: il pinning ai digest nel compose (`H22`) c'è dalla
+  `v0.59.0`, ma un'installazione nuova lo accende al primo update (gli installer
+  scaricano per tag e non verificano digest).
 - **Rischio accettato, con data di revisione**: l'approvazione manuale dei rilasci in
   `H24`. Con un solo account non sarebbe un confine; il rischio che copriva lo copre la
   **quarantena di 48 ore** dell'auto-update (postilla sotto).
@@ -857,11 +861,6 @@ questa fase i rilasci sono frequenti e aggiungerebbero attrito:
   sbagliata si ritira in tempo segnandola *prerelease* (dettagli in
   [docs/UPDATE.md](docs/UPDATE.md)). Il gate torna in discussione se entra un secondo
   account con accesso in scrittura, o se un workflow ottiene il potere di creare tag.
-- **Pinning ai digest delle immagini vps1777 nel compose, una per servizio** (`H22`): oggi l'invariante
-  «gira solo il digest verificato» lo impone la CLI *dopo* il pull (contro `images.lock`);
-  farlo vivere anche nel file compose (override generato all'`up`) chiuderebbe il caso di
-  un `docker compose pull` lanciato a mano fuori dalla CLI. Tocca il percorso di update,
-  quindi lo faremo con un momento dedicato.
 - **Audience restriction (RFC 8707) non implementata — scelta dichiarata**
   (vaglio corso1777, 03/09/2026). Oggi l'`aud` dei nostri access token è il
   `client_id` del client DCR, il proxy verifica il bearer **senza** confrontare

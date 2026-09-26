@@ -497,17 +497,35 @@ findings:
     status: partial
     natura: comportamento
     resta_aperto: >
-      Le 4 immagini vps1777 restano a tag mobile in compose.yaml: un `docker compose pull` lanciato fuori dalla CLI ri-risolve il tag senza controlli.
-    since: v0.27.0
+      Un'installazione NUOVA non ha il pin finché non fa il primo update: gli installer
+      (setup.sh, deploy.sh, installer/engine.py) scaricano per tag e non verificano i
+      digest, quindi non hanno digest verificati da scrivere. Da chiudere con una prova
+      eseguita sulla VPS (pull a mano nella cartella → digest verificato).
+    # dal 0.59.0 il pin c'è sul percorso gestito; prima era partial dalla v0.27.0
+    since: unreleased
     evidence:
       - file: compose.ops.backup.yaml
         contains: ["@sha256:"]
       - file: compose.ingress.caddy.yaml
         contains: ["@sha256:"]
+      # le immagini vps1777: tag + digest dal .env, scritti solo dalla CLI
+      - file: compose.yaml
+        contains: ["${VPS1777_DIGEST_GATEWAY:+@${VPS1777_DIGEST_GATEWAY}}"]
+      - file: tools/vps1777.py
+        contains: ["def versione_env("]
+      - file: tools/tests/test_digest_nel_compose.py
+        contains: ["def test_il_pull_della_cli_va_per_tag"]
     missing: >
-      Le 4 immagini vps1777 restano a tag mobile in compose.yaml; il pinning ai digest
-      vive solo POST-pull dentro la CLI (verify_digests contro images.lock). Un
-      `docker compose pull` lanciato fuori dalla CLI ri-risolve il tag senza controlli.
+      FINO ALLA 0.58.0: le immagini vps1777 restavano a tag mobile in compose.yaml; il
+      pinning ai digest viveva solo POST-pull dentro la CLI (verify_digests contro
+      images.lock), e un `docker compose pull` lanciato fuori dalla CLI ri-risolveva il
+      tag senza controlli. DALLA 0.59.0 la CLI scrive nel .env i digest verificati
+      insieme al tag (una sola sostituzione atomica), e compose.yaml li usa
+      (`…:${VPS1777_TAG}${VPS1777_DIGEST_<SVC>:+@…}`). Due trappole misurate e presidiate:
+      `docker pull nome:tag@digest` lascia l'immagine senza tag, quindi il pull della CLI
+      resta per tag e il pin si accende dopo la verifica; e un env= col solo tag, in un
+      rollback, farebbe girare il tag vecchio coi digest nuovi del .env — ogni env di
+      versione nasce da `versione_env`.
 
   - id: H23
     severity: medium

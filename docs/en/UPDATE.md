@@ -50,6 +50,13 @@ Guarantees:
   (which often lives only on your PC); it is pruned on the next successful update.
 - **Supply chain**: the release bundle carries `images.lock` with the immutable
   image digests (one per service); after the pull, the local digests MUST match.
+  Then the CLI writes those digests into `.env` (`VPS1777_DIGEST_GATEWAY`, `…_ARCHIVE_MCP`,
+  `…_NB1777_MCP`, `…_NB1777_BOT`, `…_OCR`) together with `VPS1777_TAG`, in a single
+  write, and `compose.yaml` uses them: `…/vps1777-gateway:${VPS1777_TAG}@${VPS1777_DIGEST_GATEWAY}`.
+  So even a `docker compose pull` or `up` run **by hand** in the folder runs the verified
+  digest, not whatever the registry serves for the tag at that moment (`H22`). Don't edit
+  them by hand: update, rollback and bootstrap write them. Empty = pin off (the tag
+  remains): that's the case on a fresh install until the first update.
   The bundle's keyless signature is verified with `cosign` **by default and in
   fail-closed mode**: if verification doesn't pass — or if `cosign` is missing
   and cannot be auto-installed — the update stops. `cosign` is auto-installed

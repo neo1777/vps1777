@@ -71,7 +71,7 @@ services:
     <<: [*restart, *logging, *security, *readonly]
     # Immagini pubblicate dalla CI di release (ghcr) — la VPS fa solo pull.
     # Per il build locale in sviluppo: -f compose.yaml -f compose.build.yaml
-    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-gateway:${VPS1777_TAG:-dev}
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-gateway:${VPS1777_TAG:-dev}${VPS1777_DIGEST_GATEWAY:+@${VPS1777_DIGEST_GATEWAY}}
     init: true
     environment:
       GATEWAY_HOST: 0.0.0.0
@@ -166,7 +166,7 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   archive-mcp:
     <<: [*restart, *logging, *security, *readonly]
-    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}${VPS1777_DIGEST_ARCHIVE_MCP:+@${VPS1777_DIGEST_ARCHIVE_MCP}}
     init: true
     environment:
       ARCHIVE_HTTP_HOST: 0.0.0.0
@@ -223,7 +223,7 @@ services:
   # ~0,9 GB (il modello), da cui il tetto di 1300m.
   indice-notturno:
     <<: [*logging, *security, *readonly]
-    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}${VPS1777_DIGEST_ARCHIVE_MCP:+@${VPS1777_DIGEST_ARCHIVE_MCP}}
     profiles: [indice]
     init: true
     restart: "no"
@@ -243,7 +243,7 @@ services:
     # Chromium); /tmp è la tmpfs dell'ancora. I file di archive-ingest arrivano via exec
     # nel volume degli artefatti, non con docker cp (che su un rootfs ro rifiuta).
     <<: [*restart, *logging, *security, *readonly]
-    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-mcp:${VPS1777_TAG:-dev}
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-mcp:${VPS1777_TAG:-dev}${VPS1777_DIGEST_NB1777_MCP:+@${VPS1777_DIGEST_NB1777_MCP}}
     init: true
     environment:
       NB1777_HOST: 0.0.0.0
@@ -295,7 +295,7 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   nb1777-bot:
     <<: [*restart, *logging, *security, *readonly]
-    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-bot:${VPS1777_TAG:-dev}
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-bot:${VPS1777_TAG:-dev}${VPS1777_DIGEST_NB1777_BOT:+@${VPS1777_DIGEST_NB1777_BOT}}
     init: true
     environment:
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
@@ -341,7 +341,7 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   ocr:
     <<: [*restart, *logging, *security, *readonly]
-    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-ocr:${VPS1777_TAG:-dev}
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-ocr:${VPS1777_TAG:-dev}${VPS1777_DIGEST_OCR:+@${VPS1777_DIGEST_OCR}}
     init: true
     environment:
       OCR_HOST: 0.0.0.0
