@@ -529,3 +529,64 @@ def test_vettore_che_il_registro_non_spiega_blocca_la_pubblicazione(tmp_path):
     with pytest.raises(ci.ErroreCostruttore, match="non quadra"):
         ci.costruisci(db, Finto())
     assert idx.read_bytes() == prima, "l'indice servito non si tocca"
+
+
+# ── i due grafi del modello (26/09/2026) ─────────────────────────────────────
+# Il nostro export ha pooling e normalizzazione DENTRO il grafo e restituisce il
+# vettore. L'ONNX ufficiale del repo del modello su Hugging Face (quello che il
+# prodotto fa scaricare, `vps1777 indice-modello`) restituisce l'hidden state
+# (lotto × token × 384) e chiede anche `token_type_ids`: il pooling lo fa
+# `codifica`. Misurato contro l'indice del primario: coseno ≥ 0,9997.
+
+class _Io:
+    def __init__(self, name: str, shape: list) -> None:
+        self.name, self.shape = name, shape
+
+
+class _Tk:
+    def encode_batch(self, testi):
+        # due testi, il secondo più corto: il padding (mask 0) non deve entrare
+        class E:
+            def __init__(self, ids, mask):
+                self.ids, self.attention_mask = ids, mask
+        return [E([5, 6, 7], [1, 1, 1]), E([8, 9, 0], [1, 1, 0])][:len(testi)]
+
+
+class _SessGrafo:
+    def __init__(self, ingressi, uscita, funz):
+        self._in, self._out, self._f, self.visti = ingressi, uscita, funz, None
+
+    def get_inputs(self):
+        return [_Io(n, []) for n in self._in]
+
+    def get_outputs(self):
+        return [_Io("out", self._out)]
+
+    def run(self, _, feed):
+        self.visti = feed
+        return [self._f(feed)]
+
+
+def test_codifica_col_grafo_che_fa_gia_il_pooling():
+    np = pytest.importorskip("numpy")
+    vett = np.zeros((2, 384), dtype="float32")
+    vett[:, 0] = 1.0
+    sess = _SessGrafo(["input_ids", "attention_mask"], ["batch", 384], lambda f: vett)
+    out = semantica.codifica(sess, _Tk(), ["a", "b"])
+    assert set(sess.visti) == {"input_ids", "attention_mask"}
+    assert struct.unpack("384f", out[0])[0] == 1.0
+
+
+def test_codifica_col_grafo_ufficiale_fa_il_pooling_e_la_norma():
+    np = pytest.importorskip("numpy")
+    rng = np.random.default_rng(7)
+    hidden = rng.normal(size=(2, 3, 384)).astype("float32")
+    sess = _SessGrafo(["input_ids", "attention_mask", "token_type_ids"],
+                      ["batch", "seq", 384], lambda f: hidden)
+    out = semantica.codifica(sess, _Tk(), ["a", "b"])
+    assert (sess.visti["token_type_ids"] == 0).all(), "token_type_ids a zero, come il modello si aspetta"
+    atteso = hidden[1, :2].mean(axis=0)                  # il padding del secondo NON entra
+    atteso = atteso / np.linalg.norm(atteso)
+    v = np.array(struct.unpack("384f", out[1]), dtype="float32")
+    assert np.allclose(v, atteso, atol=1e-5)
+    assert abs(float(np.linalg.norm(v)) - 1.0) < 1e-5

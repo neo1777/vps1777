@@ -30,7 +30,7 @@ peggiorarle, non per vincerle. Se cerchi un termine preciso, usa `search`.
 | pezzo | dove vive | perché lì |
 |---|---|---|
 | il **codice di ricerca** (embedding della query + knn + fusione) | immagine `archive-mcp` | ~35 MB di dipendenze: onnxruntime, tokenizers, sqlite-vec, numpy |
-| il **modello** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/` | 449 MB: nell'immagine peserebbero su ogni pull, e si aggiornano senza rilasciare una versione |
+| il **modello** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; lo mette lì `vps1777 indice-modello` | 449 MB: nell'immagine peserebbero su ogni pull, e si aggiornano senza rilasciare una versione |
 | l'**indice** (`<nome-db>.vec.db`) | volume, accanto al suo DB | indicizzare il corpus costa decine di ore di CPU: si fa **fuori** e l'indice viaggia come artefatto |
 | il **costruttore** dell'indice | repo, `services/archive-mcp/tools/costruisci_indice.py` | gira sul PC, nell'ambiente del lock di archive-mcp; non entra nell'immagine |
 
@@ -61,7 +61,48 @@ La quantizzazione int8 (113 MB invece di 449) è stata misurata e **scartata**:
 costruito. Risparmiare 336 MB cambiando il metro a metà esperimento non è
 un'ottimizzazione.
 
-## Il modello: l'export (sul PC, una volta)
+## Il modello: scaricarlo (`vps1777 indice-modello`)
+
+Il repo del modello su Hugging Face contiene un **ONNX ufficiale**
+(`intfloat/multilingual-e5-small`, `onnx/model.onnx`, dal 08/09/2023, licenza MIT).
+Dalla 0.55.0 il prodotto usa quello, **a revisione fissa** e verificato byte per
+byte: revisione, dimensioni e sha256 dei due file stanno in `MODELLO_INDICE`
+(`tools/vps1777.py`), e un file che non combacia non prende mai il posto di quello
+buono.
+
+```bash
+# sulla VPS: nel volume, dove lo legge archive-mcp
+vps1777 indice-modello
+# sul PC, dal checkout del repo: in una cartella, per il costruttore
+python3 tools/vps1777.py indice-modello --dest ~/e5-small
+```
+
+Il grafo ufficiale restituisce l'hidden state del modello, non il vettore: il
+**mean-pooling** pesato con `attention_mask` e la **norma L2** li fa
+`semantica.codifica`, lo stesso punto da cui passano la query del server e i testi
+del costruttore (così i due lati non possono divergere). Il grafo chiede anche
+`token_type_ids`, che vanno a zero.
+
+**È lo stesso metro dell'export fatto a mano?** Lo stesso spazio, non gli stessi
+byte. Misurato il 26/09/2026 contro l'indice del primario (costruito con l'export
+a mano): su 40 righe prese a caso, **coseno minimo 0,9999996**. Ma l'impronta del
+modello (`modello_impronta`, lo sha dei due file) è diversa, e il costruttore la
+controlla: un indice costruito con un file si aggiorna solo con lo stesso file. Per
+questo il comando **non sostituisce** un modello diverso già presente (un export a
+mano) senza `--sostituisci`, e lo dice. Dopo una sostituzione, l'indice legato al
+file vecchio va ricostruito per poterlo aggiornare (le ricerche intanto funzionano:
+lo spazio è quello).
+
+Perché questo file e non un export nostro pubblicato: la qualità è identica (è lo
+stesso modello), la **provenienza** è verificabile da chiunque contro il repo
+dell'autore, e non c'è un file da 449 MB da ospitare e mantenere. È anche la strada
+per il giorno in cui un modello migliore passerà il banco dei 9 bersagli.
+
+### Com'era: l'export a mano (fino alla 0.54.0)
+
+Fino alla 0.54.0 il modello si esportava sul PC con torch, con pooling e norma
+**dentro** il grafo. L'installazione dell'autore gira ancora con quel file (e il suo
+indice è legato a quell'impronta). Lo script, per chi deve rifarlo identico:
 
 ```bash
 # export ONNX con pooling e normalizzazione DENTRO il grafo
@@ -87,8 +128,6 @@ torch.onnx.export(E5(base).eval(), (enc["input_ids"], enc["attention_mask"]),
 PY
 ```
 
-La stessa cartella (`model.onnx` + `tokenizer.json`) serve due volte: al
-costruttore sul PC (`--modello`) e al server sul volume.
 
 ## L'indice: il costruttore
 
@@ -340,7 +379,7 @@ Il server scrive anche un avviso nel log quando scarta qualcosa.
 
 ## Quanto costa — misurato
 
-Misurato il 24/09/2026 su un PC a 8 core, sulla copia del primario, per una
+Misurato il 24/09/2026 su un PC a 4 core e 8 thread (Ryzen 5 2400G, solo AVX2), sulla copia del primario, per una
 finestra di due giorni (1.618 messaggi, 4.366 vettori):
 
 | | |
@@ -364,7 +403,7 @@ Stime, dalla velocità misurata (sono stime, non misure):
 | maggio–giugno 2026 (l'indice di oggi) | ~139.000 | **~17 h** |
 | luglio–settembre 2026 (pezzi contati dal prototipo sulla copia del 08/09) | ~282.000 | ~34 h |
 
-**La corsa intera, misurata** (25-26/09/2026, stesso PC a 8 core, in uso normale, a
+**La corsa intera, misurata** (25-26/09/2026, stesso PC a 4 core / 8 thread, in uso normale, a
 `nice` 15): il primario `recupero-20260924` con `--tutto` — 266.219 messaggi, **452.311
 vettori in 31 h 13'**, cioè **~4,0 vettori/s di media** (da ~2 all'avvio a 4,7 a
 regime), 1,70 vettori per messaggio, indice di 735 MB. La finestra di due giorni qui
@@ -384,40 +423,42 @@ I log MCP sono il 7% dei messaggi e il 15% dei vettori: righe lunghe (in media f
 e per questo l'ultimo tratto di una corsa `--tutto` va più piano dei primi: una stima
 del tempo che resta fatta con la media dei vettori per messaggio sbaglia per difetto.
 
-## La prima volta sulla VPS
+## Attivare la ricerca per senso (la prima volta)
 
-L'indice che oggi sta sulla VPS è quello del prototipo: senza registro. La
-ricerca funziona, ma `indici[].verifica` dirà `registro: false`, e il primo
-aggiornamento chiede una ricostruzione. I passi, una volta:
+Su un'installazione nuova `search_ibrida` risponde con un errore che dice cosa manca
+(modello, indice): `search` funziona comunque. Per attivarla, su un DB `<nome-db>`:
 
-1. **Una copia del DB sul PC**, presa mentre non c'è un ingest in corso:
+1. **Il modello sulla VPS**, una volta: `vps1777 indice-modello` (vedi sopra).
+2. **Il modello sul PC**, nella cartella che userai col costruttore:
+   `python3 tools/vps1777.py indice-modello --dest ~/e5-small`.
+3. **Una copia del DB sul PC**, presa mentre non c'è un ingest in corso:
 
    ```bash
-   ssh vps1777 'docker cp vps1777-gateway-1:/var/lib/archive/db/recupero-20260905.db /tmp/'
-   scp vps1777:/tmp/recupero-20260905.db ./ && ssh vps1777 'rm /tmp/recupero-20260905.db'
+   ssh <vps> 'docker cp vps1777-gateway-1:/var/lib/archive/db/<nome-db>.db /tmp/'
+   scp <vps>:/tmp/<nome-db>.db ./ && ssh <vps> 'rm /tmp/<nome-db>.db'
    ```
 
-2. **La ricostruzione** col perimetro di oggi (maggio–giugno). Sono **~17 ore**:
-   si può interrompere e riprendere rilanciando lo stesso comando.
+4. **La costruzione**, sul PC, nell'ambiente del lock di archive-mcp. Si può
+   interrompere e riprendere rilanciando lo stesso comando.
 
    ```bash
    cd services/archive-mcp
-   uv run python tools/costruisci_indice.py --db /percorso/recupero-20260905.db \
-       --modello /percorso/e5-small --dal 2026-05 --al 2026-07 \
-       --senza-ts escludi --ricostruisci
+   uv run python tools/costruisci_indice.py --db /percorso/<nome-db>.db \
+       --modello ~/e5-small --tutto
    ```
 
-   `--senza-ts escludi` tiene il perimetro del prototipo; `includi` fa entrare
-   anche le righe senza ts (1.147 sulla copia del 08/09/2026).
+   **Quanto costa**: su un PC a 4 core / 8 thread ~4 vettori al secondo, cioè
+   **~7 ore ogni 100.000 vettori** (in media 1,7 vettori per messaggio; vedi
+   «Quanto costa»). `--dal/--al` o `--project` costruiscono un pezzo alla volta.
 
-3. **Il controllo**: `--controlla` deve uscire 0 («in pari col DB»).
+5. **Il controllo**: `--controlla` deve uscire 0 («in pari col DB»).
 
    ```bash
-   uv run python tools/costruisci_indice.py --db /percorso/recupero-20260905.db --controlla
+   uv run python tools/costruisci_indice.py --db /percorso/<nome-db>.db --controlla
    ```
 
-4. **Il caricamento**, come sotto.
-5. **La prova**: una `search_ibrida` qualunque deve rispondere con
+6. **Il caricamento**, come sotto.
+7. **La prova**: una `search_ibrida` qualunque deve rispondere con
    `indici[].verifica.registro: true` e `scartati: 0`.
 
 **Dopo ogni re-ingest** di quel DB: una copia nuova sul PC, il costruttore
@@ -425,20 +466,22 @@ aggiornamento chiede una ricostruzione. I passi, una volta:
 che l'indice dichiara), `--controlla`, caricamento. Se `search_ibrida` dichiara
 scarti, è questo il segnale che il giro va rifatto.
 
+Un indice del prototipo (senza il registro `indice_righe`) funziona, ma
+`indici[].verifica` dice `registro: false` e il primo aggiornamento chiede
+`--ricostruisci`.
+
 ## Caricare gli artefatti sulla VPS
 
 Il volume `archive-data` è montato **read-only** su `archive-mcp` (che legge) e
 **read-write** sul gateway (che scrive): gli artefatti passano da lì.
 
 ```bash
-scp recupero-20260905.vec.db vps1777:/tmp/
-ssh vps1777 'docker cp /tmp/recupero-20260905.vec.db \
-    vps1777-gateway-1:/var/lib/archive/db/ && rm /tmp/recupero-20260905.vec.db'
-
-# il modello (una volta sola)
-ssh vps1777 'docker exec vps1777-gateway-1 mkdir -p /var/lib/archive/models/e5-small'
-ssh vps1777 'docker cp /tmp/model.onnx vps1777-gateway-1:/var/lib/archive/models/e5-small/'
+scp <nome-db>.vec.db <vps>:/tmp/
+ssh <vps> 'docker cp /tmp/<nome-db>.vec.db \
+    vps1777-gateway-1:/var/lib/archive/db/ && rm /tmp/<nome-db>.vec.db'
 ```
+
+Il modello non passa di qui: lo mette nel volume `vps1777 indice-modello`.
 
 Nessun riavvio: la registry dei DB si ricarica da sola quando la dir cambia (un
 `.vec.db` nuovo cambia la firma della dir, quindi anche le connessioni con
@@ -459,14 +502,16 @@ DB: se non è in pari, aggiornalo lì e carica quello.
   fuori), **452.311 vettori**, log e sotto-agenti compresi, col registro `indice_righe`.
   Costruito col costruttore del repo (`--tutto`), `--controlla` in pari, caricato il
   26/09/2026: `search_ibrida` risponde con `verifica.registro: true` e `scartati: 0`.
-  Dopo un re-ingest di questo DB l'indice va aggiornato su una copia nuova (vedi «La
-  prima volta sulla VPS», ultimo capoverso): finché non lo si fa, i risultati vettoriali
+  Dopo un re-ingest di questo DB l'indice va aggiornato su una copia nuova (vedi
+  «Attivare la ricerca per senso», il capoverso sul re-ingest): finché non lo si fa, i risultati vettoriali
   che non combaciano più vengono scartati e dichiarati.
 - **`recupero-20260905`** (il primario fino al 24/09, ora riscontro) tiene l'indice del
   prototipo: **maggio–giugno 2026** (58.322 messaggi, 139.011 vettori, generato il
   07/09/2026), con `indice_meta` scritta a mano e **senza** registro — `verifica.registro:
-  false`; per aggiornarlo serve una ricostruzione (`--ricostruisci`, vedi «La prima volta
-  sulla VPS», i cui esempi usano proprio questo DB).
+  false`; per aggiornarlo serve una ricostruzione (`--ricostruisci`).
+- **Il modello** sulla VPS dell'autore è ancora l'export fatto a mano (vedi «Com'era»):
+  gli indici qui sopra sono legati a quell'impronta, e `vps1777 indice-modello` senza
+  `--sostituisci` lo lascia dov'è.
 
 Fuori dal perimetro la ricerca ibrida non ha vettori da fondere — `indici[].perimetro`
 nella risposta lo dichiara a ogni chiamata, ed è la prima cosa da leggere prima di

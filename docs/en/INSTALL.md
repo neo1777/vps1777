@@ -69,6 +69,12 @@ If you re-run `setup.sh`, it skips the steps already done.
 5. **Mini App**: in the bot, the **Pannello** button next to the text field (or
    `/pannello`) → the mobile control deck: notebooks, archive, secrets, update.
    Requires an https `PUBLIC_BASE`. See [MINIAPP.md](../MINIAPP.md) (Italian).
+6. **Search by meaning** (optional): `search_ibrida` finds what you remember the
+   meaning of and not the word. It needs the model (`vps1777 indice-modello`, which
+   downloads and verifies it by itself) and one index per DB, built on the PC: ~7
+   hours per 100,000 vectors on a 4-core PC. Until they are there, `search` works as
+   before and `search_ibrida` says what is missing. Steps:
+   [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md), "Turning on search by meaning".
 
 ## Optional ops
 

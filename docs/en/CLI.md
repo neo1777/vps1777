@@ -118,6 +118,22 @@ vps1777 archive-retag                     # anteprima su tutti i DB
 vps1777 archive-retag --db cc --scrivi    # applica su un DB solo
 ```
 
+## vps1777 indice-modello
+
+Downloads the model for search by meaning (`intfloat/multilingual-e5-small`, the
+official ONNX) **at a pinned revision**, verifies bytes and sha256 of each file and
+puts it into the archive volume, where archive-mcp reads it. Idempotent: if the
+right model is already there, it downloads nothing. A **different** model already
+present (a hand-made export) is not replaced without `--sostituisci`, because the
+index built with that one is tied to its fingerprint. With `--dest FOLDER` it
+downloads only there: that's how you get it on the PC for the index builder
+([RICERCA-IBRIDA.md](RICERCA-IBRIDA.md)).
+
+```bash
+vps1777 indice-modello                                         # sulla VPS, nel volume
+python3 tools/vps1777.py indice-modello --dest ~/e5-small      # sul PC, dal checkout
+```
+
 ## vps1777 archive-migra
 
 Brings the migrations of the derived columns to the DBs **already loaded**, without

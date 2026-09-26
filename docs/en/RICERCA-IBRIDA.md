@@ -35,7 +35,7 @@ them worse, not to win them. If you are looking for a precise term, use
 | piece | where it lives | why there |
 |---|---|---|
 | the **search code** (query embedding + knn + fusion) | the `archive-mcp` image | ~35 MB of dependencies: onnxruntime, tokenizers, sqlite-vec, numpy |
-| the **model** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/` | 449 MB: in the image they would weigh on every pull, and they get updated without releasing a version |
+| the **model** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; `vps1777 indice-modello` puts it there | 449 MB: in the image they would weigh on every pull, and they get updated without releasing a version |
 | the **index** (`<nome-db>.vec.db`) | volume, next to its DB | indexing the corpus costs tens of hours of CPU: it is done **elsewhere** and the index travels as an artifact |
 | the index **builder** | repo, `services/archive-mcp/tools/costruisci_indice.py` | runs on the PC, in archive-mcp's lock environment; it does not go into the image |
 
@@ -67,7 +67,50 @@ int8 quantization (113 MB instead of 449) was measured and **discarded**:
 with. Saving 336 MB by changing the yardstick halfway through the experiment is
 not an optimization.
 
-## The model: the export (on the PC, once)
+## The model: downloading it (`vps1777 indice-modello`)
+
+The model's repository on Hugging Face contains an **official ONNX**
+(`intfloat/multilingual-e5-small`, `onnx/model.onnx`, since 08/09/2023, MIT license).
+Since 0.55.0 the product uses that one, **at a pinned revision** and verified byte by
+byte: revision, sizes and sha256 of the two files live in `MODELLO_INDICE`
+(`tools/vps1777.py`), and a file that doesn't match never takes the place of the good
+one.
+
+```bash
+# on the VPS: into the volume, where archive-mcp reads it
+vps1777 indice-modello
+# on the PC, from the repo checkout: into a folder, for the builder
+python3 tools/vps1777.py indice-modello --dest ~/e5-small
+```
+
+The official graph returns the model's hidden state, not the vector: the
+**mean pooling** weighted by `attention_mask` and the **L2 norm** are done by
+`semantica.codifica`, the same point the server's query and the builder's texts go
+through (so the two sides cannot diverge). The graph also asks for `token_type_ids`,
+which are set to zero.
+
+**Is it the same yardstick as the hand-made export?** The same space, not the same
+bytes. Measured on 26/09/2026 against the primary's index (built with the hand-made
+export): on 40 random rows, **minimum cosine 0.9999996**. But the model's fingerprint
+(`modello_impronta`, the sha of the two files) differs, and the builder checks it: an
+index built with one file can only be updated with the same file. That's why the
+command **does not replace** a different model already present (a hand-made export)
+without `--sostituisci`, and says so. After a replacement, the index tied to the old
+file has to be rebuilt before it can be updated (searches keep working meanwhile: the
+space is the same).
+
+Why this file and not an export of ours, published: the quality is identical (it is
+the same model), the **provenance** can be checked by anyone against the author's
+repository, and there is no 449 MB file to host and maintain. It is also the road for
+the day a better model passes the 9-target bench.
+
+### How it was: the hand-made export (up to 0.54.0)
+
+Up to 0.54.0 the model was exported on the PC with torch, with pooling and norm
+**inside** the graph. The author's installation still runs with that file (and its
+index is tied to that fingerprint). The script, for whoever needs to redo it
+identically (its comment says: ONNX export with pooling and normalization INSIDE the
+graph):
 
 ```bash
 # export ONNX con pooling e normalizzazione DENTRO il grafo
@@ -93,12 +136,6 @@ torch.onnx.export(E5(base).eval(), (enc["input_ids"], enc["attention_mask"]),
 PY
 ```
 
-(The comment in the script says: ONNX export with pooling and normalization
-INSIDE the graph, so the runtime does not replicate them and cannot get them
-wrong in a different way.)
-
-The same folder (`model.onnx` + `tokenizer.json`) is used twice: by the builder
-on the PC (`--modello`) and by the server on the volume.
 
 ## The index: the builder
 
@@ -367,7 +404,7 @@ The server also writes a warning to the log when it discards something.
 
 ## What it costs — measured
 
-Measured on 24/09/2026 on an 8-core PC, on the copy of the primary DB, for a
+Measured on 24/09/2026 on a PC with 4 cores and 8 threads (Ryzen 5 2400G, AVX2 only), on the copy of the primary DB, for a
 two-day window (1,618 messages, 4,366 vectors):
 
 | | |
@@ -391,7 +428,7 @@ Estimates, from the measured speed (they are estimates, not measurements):
 | May–June 2026 (today's index) | ~139,000 | **~17 h** |
 | July–September 2026 (chunks counted by the prototype on the 08/09 copy) | ~282,000 | ~34 h |
 
-**The full run, measured** (25-26/09/2026, same 8-core PC, in normal use, at `nice`
+**The full run, measured** (25-26/09/2026, same 4-core / 8-thread PC, in normal use, at `nice`
 15): the primary `recupero-20260924` with `--tutto` — 266,219 messages, **452,311
 vectors in 31 h 13'**, i.e. **~4.0 vectors/s on average** (from ~2 at start-up to 4.7
 at cruise speed), 1.70 vectors per message, a 735 MB index. The two-day window above
@@ -412,47 +449,52 @@ last, which is why the last stretch of a `--tutto` run is slower than the first 
 an estimate of the remaining time based on the average vectors per message errs on the
 low side.
 
-## The first time on the VPS
+## Turning on search by meaning (the first time)
 
-The index on the VPS today is the prototype's: without a ledger. Search works,
-but `indici[].verifica` will say `registro: false`, and the first update asks
-for a rebuild. The steps, once:
+On a new installation `search_ibrida` answers with an error that says what is missing
+(model, index): `search` works anyway. To turn it on, for a DB `<nome-db>`:
 
-1. **A copy of the DB on the PC**, taken while no ingest is running:
+1. **The model on the VPS**, once: `vps1777 indice-modello` (see above).
+2. **The model on the PC**, in the folder you will use with the builder:
+   `python3 tools/vps1777.py indice-modello --dest ~/e5-small`.
+3. **A copy of the DB on the PC**, taken while no ingest is running:
 
    ```bash
-   ssh vps1777 'docker cp vps1777-gateway-1:/var/lib/archive/db/recupero-20260905.db /tmp/'
-   scp vps1777:/tmp/recupero-20260905.db ./ && ssh vps1777 'rm /tmp/recupero-20260905.db'
+   ssh <vps> 'docker cp vps1777-gateway-1:/var/lib/archive/db/<nome-db>.db /tmp/'
+   scp <vps>:/tmp/<nome-db>.db ./ && ssh <vps> 'rm /tmp/<nome-db>.db'
    ```
 
-2. **The rebuild** with today's perimeter (May–June). It takes **~17 hours**: it
-   can be interrupted and resumed by running the same command again.
+4. **The build**, on the PC, in archive-mcp's lock environment. It can be interrupted
+   and resumed by running the same command again.
 
    ```bash
    cd services/archive-mcp
-   uv run python tools/costruisci_indice.py --db /percorso/recupero-20260905.db \
-       --modello /percorso/e5-small --dal 2026-05 --al 2026-07 \
-       --senza-ts escludi --ricostruisci
+   uv run python tools/costruisci_indice.py --db /path/<nome-db>.db \
+       --modello ~/e5-small --tutto
    ```
 
-   `--senza-ts escludi` keeps the prototype's perimeter; `includi` lets in the
-   rows without a ts as well (1,147 on the 08/09/2026 copy).
+   **What it costs**: on a 4-core / 8-thread PC ~4 vectors per second, i.e. **~7
+   hours per 100,000 vectors** (1.7 vectors per message on average; see "What it
+   costs"). `--dal/--al` or `--project` build one piece at a time.
 
-3. **The check**: `--controlla` must exit 0 ("in pari col DB", in step with the
-   DB).
+5. **The check**: `--controlla` must exit 0 ("in step with the DB").
 
    ```bash
-   uv run python tools/costruisci_indice.py --db /percorso/recupero-20260905.db --controlla
+   uv run python tools/costruisci_indice.py --db /path/<nome-db>.db --controlla
    ```
 
-4. **The upload**, as below.
-5. **The proof**: any `search_ibrida` must answer with
+6. **The upload**, as below.
+7. **The proof**: any `search_ibrida` must answer with
    `indici[].verifica.registro: true` and `scartati: 0`.
 
 **After every re-ingest** of that DB: a fresh copy on the PC, the builder
 **without perimeter parameters** (incremental update with the perimeter the
 index declares), `--controlla`, upload. If `search_ibrida` declares discards,
 that is the signal that the round has to be done again.
+
+A prototype index (without the `indice_righe` ledger) works, but
+`indici[].verifica` says `registro: false` and the first update asks for
+`--ricostruisci`.
 
 ## Uploading the artifacts to the VPS
 
@@ -461,16 +503,12 @@ reads) and **read-write** on the gateway (which writes): the artifacts go
 through there.
 
 ```bash
-scp recupero-20260905.vec.db vps1777:/tmp/
-ssh vps1777 'docker cp /tmp/recupero-20260905.vec.db \
-    vps1777-gateway-1:/var/lib/archive/db/ && rm /tmp/recupero-20260905.vec.db'
-
-# il modello (una volta sola)
-ssh vps1777 'docker exec vps1777-gateway-1 mkdir -p /var/lib/archive/models/e5-small'
-ssh vps1777 'docker cp /tmp/model.onnx vps1777-gateway-1:/var/lib/archive/models/e5-small/'
+scp <nome-db>.vec.db <vps>:/tmp/
+ssh <vps> 'docker cp /tmp/<nome-db>.vec.db \
+    vps1777-gateway-1:/var/lib/archive/db/ && rm /tmp/<nome-db>.vec.db'
 ```
 
-(The comment says: the model, once only.)
+The model doesn't go through here: `vps1777 indice-modello` puts it into the volume.
 
 No restart: the DB registry reloads by itself when the directory changes (a new
 `.vec.db` changes the directory signature, so connections with the index
@@ -490,14 +528,16 @@ it is not in step, update it there and upload that one.
   **452,311 vectors**, logs and sub-agents included, with the `indice_righe` ledger.
   Built with the repo's builder (`--tutto`), `--controlla` in step, uploaded on
   26/09/2026: `search_ibrida` answers with `verifica.registro: true` and `scartati: 0`.
-  After a re-ingest of this DB the index has to be updated on a fresh copy (see "The
-  first time on the VPS", last paragraph): until then, vector results that no longer
+  After a re-ingest of this DB the index has to be updated on a fresh copy (see "Turning
+  on search by meaning", the paragraph on re-ingest): until then, vector results that no longer
   match are discarded and declared.
 - **`recupero-20260905`** (the primary until 24/09, now a cross-check) keeps the
   prototype's index: **May–June 2026** (58,322 messages, 139,011 vectors, generated on
   07/09/2026), with a hand-written `indice_meta` and **no** ledger — `verifica.registro:
-  false`; updating it requires a rebuild (`--ricostruisci`, see "The first time on the
-  VPS", whose examples use exactly this DB).
+  false`; updating it requires a rebuild (`--ricostruisci`).
+- **The model** on the author's VPS is still the hand-made export (see "How it was"):
+  the indexes above are tied to that fingerprint, and `vps1777 indice-modello` without
+  `--sostituisci` leaves it where it is.
 
 Outside the perimeter hybrid search has no vectors to fuse — `indici[].perimetro` in
 the response declares it at every call, and it is the first thing to read before

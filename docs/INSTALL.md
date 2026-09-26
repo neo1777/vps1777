@@ -66,6 +66,12 @@ Se rilanci `setup.sh`, salta gli step già fatti.
 5. **Mini App**: nel bot, bottone **Pannello** accanto al campo di testo (o
    `/pannello`) → la plancia mobile: notebook, archivio, secret, update.
    Richiede `PUBLIC_BASE` https. Vedi [MINIAPP.md](MINIAPP.md).
+6. **Ricerca per senso** (facoltativa): `search_ibrida` trova ciò di cui ricordi il
+   senso e non la parola. Servono il modello (`vps1777 indice-modello`, scarica e
+   verifica da solo) e un indice per ogni DB, costruito sul PC: ~7 ore ogni 100.000
+   vettori su un PC a 4 core. Finché mancano, `search` funziona come prima e
+   `search_ibrida` dice cosa manca. Passi: [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md),
+   «Attivare la ricerca per senso».
 
 ## Ops opzionali
 

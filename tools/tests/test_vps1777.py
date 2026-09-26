@@ -2015,6 +2015,75 @@ def test_archive_migra_e_registrato_e_non_scrive_per_difetto():
     assert "--secco" not in blocco
 
 
+def _modello_finto(monkeypatch, contenuti: dict[str, bytes]) -> list[str]:
+    """MODELLO_INDICE con file piccoli e uno `urlopen` finto che li serve; ritorna
+    gli URL chiesti, per contare i download."""
+    import hashlib
+    import io
+    file = tuple((n, f"onnx/{n}", len(b), hashlib.sha256(b).hexdigest())
+                 for n, b in contenuti.items())
+    monkeypatch.setitem(v.MODELLO_INDICE, "file", file)
+    chiesti: list[str] = []
+
+    class _Risposta(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def apri(url, timeout=0):
+        chiesti.append(url)
+        return _Risposta(serviti.get(url.rsplit("/", 1)[-1], b""))
+    serviti = dict(contenuti)
+    monkeypatch.setattr(v, "_apri_modello_test", apri, raising=False)
+    return chiesti
+
+
+def test_scarica_modello_verifica_e_non_riscarica(tmp_path, monkeypatch):
+    chiesti = _modello_finto(monkeypatch, {"model.onnx": b"grafo", "tokenizer.json": b"tok"})
+    scritti = v.scarica_modello(tmp_path, apri=v._apri_modello_test)
+    assert scritti == ["model.onnx", "tokenizer.json"]
+    assert (tmp_path / "model.onnx").read_bytes() == b"grafo"
+    assert all(v.MODELLO_INDICE["revisione"] in u for u in chiesti), "sempre a revisione fissa"
+    assert v.scarica_modello(tmp_path, apri=v._apri_modello_test) == [], "idempotente"
+    assert len(chiesti) == 2
+
+
+def test_scarica_modello_rifiuta_un_file_diverso_senza_toccare_niente(tmp_path, monkeypatch):
+    _modello_finto(monkeypatch, {"model.onnx": b"grafo", "tokenizer.json": b"tok"})
+    def apri_sbagliato(url, timeout=0):
+        import io
+
+        class R(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        return R(b"GRAFO-MANOMESSO")
+    with pytest.raises(SystemExit):
+        v.scarica_modello(tmp_path, apri=apri_sbagliato)
+    assert not (tmp_path / "model.onnx").exists()
+    assert not list(tmp_path.glob("*.parziale")), "il parziale non resta in giro"
+
+
+def test_scarica_modello_non_sovrascrive_un_export_a_mano(tmp_path, monkeypatch):
+    _modello_finto(monkeypatch, {"model.onnx": b"grafo", "tokenizer.json": b"tok"})
+    (tmp_path / "model.onnx").write_bytes(b"export-fatto-a-mano")
+    with pytest.raises(SystemExit):
+        v.scarica_modello(tmp_path, apri=v._apri_modello_test)
+    assert (tmp_path / "model.onnx").read_bytes() == b"export-fatto-a-mano"
+    assert v.scarica_modello(tmp_path, sostituisci=True, apri=v._apri_modello_test)
+    assert (tmp_path / "model.onnx").read_bytes() == b"grafo"
+
+
+def test_indice_modello_e_registrato():
+    src = (_ROOT / "tools" / "vps1777.py").read_text()
+    assert '"indice-modello": cmd_indice_modello' in src
+    assert 'sub.add_parser("indice-modello"' in src
+
+
 def test_db_archivio_esclude_gli_indici_semantici():
     """I `.vec.db` stanno nello stesso volume ma non sono archivi: passati all'indexer
     fallivano, e `archive-retag` chiudeva con esito 1 anche a lavoro riuscito."""

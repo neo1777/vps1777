@@ -1478,6 +1478,17 @@ features:
     status: active-default
     since: "0.41.0 (voice-tagging Fase 4)"
     verify: {cli_command: archive-retag}
+  - id: cli.indice-modello
+    nome: "vps1777 indice-modello"
+    cosa: "Scarica il modello della ricerca per senso (ONNX ufficiale di
+           intfloat/multilingual-e5-small) a revisione fissa, verifica byte e sha256 e lo
+           mette nel volume (o in --dest, sul PC). Idempotente; non sostituisce un modello
+           diverso già presente senza --sostituisci. Il pooling che il grafo ufficiale non
+           ha lo fa semantica.codifica."
+    dove: ["cli:indice-modello", "tools/vps1777.py"]
+    status: active-default
+    since: "0.55.0"
+    verify: {cli_command: indice-modello}
   - id: cli.archive-migra
     nome: "vps1777 archive-migra"
     cosa: "Porta ai DB già caricati le migrazioni delle colonne derivate senza re-ingest
