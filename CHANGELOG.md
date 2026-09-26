@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.52.0] — 2026-09-26
+
 ### 🐛 Correzioni
 
 - **archive: gli output degli strumenti non sono più parole dell'utente —
@@ -29,6 +31,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   ricostruendo il 24/09). Ora quelle righe portano anche `tools`, troncato da `max_chars`
   come il testo e redatto come ogni campo; sulle righe col testo il payload non cambia.
   Doc: ARCHIVE.md (IT/EN), docstring dei due tool.
+- Nota: questa release porta in produzione anche i bump dependabot #307 (azioni di build
+  e di CodeQL) e #316 (`pyjwt` 2.14.0, `pypdf` 6.19.0, `starlette` 1.7.0).
+
+### Nota per chi aggiorna
+
+Dopo l'update i DB già caricati tengono i tool_result come `human` finché non ci entra
+un ingest. Per curarli subito: `vps1777 archive-migra` (a secco, mostra il delta), poi
+`vps1777 archive-migra --scrivi`. Nessun re-ingest, nessun indice da ricostruire.
 
 ## [0.51.4] — 2026-09-26
 
