@@ -244,6 +244,14 @@ def warn(msg: str) -> None:
     print(f"{_c('33')}[!]{_c('0')} {_redigi(msg)}", flush=True)
 
 
+# EX_TEMPFAIL (sysexits.h): «riprova più tardi». È l'esito di un update/rollback che
+# trova il lock di un altro: non è fallito, c'è già chi sta lavorando. Le unit che
+# lanciano un update lo contano come successo (`SuccessExitStatus=75`): il 27/09/2026
+# alle 01:48 un giro del timer, partito durante un update, è uscito con 1 e OnFailure
+# ha mandato all'owner «auto-update fallito» mentre l'update stava riuscendo.
+ESITO_LOCK_OCCUPATO = 75
+
+
 def die(msg: str, code: int = 1) -> None:
     print(f"{_c('31')}[✗]{_c('0')} {_redigi(msg)}", file=sys.stderr, flush=True)
     sys.exit(code)
@@ -2787,7 +2795,7 @@ def cmd_update(repo: Path, args) -> int:
     if lock is None:
         if args.from_intent:
             Path(args.from_intent).unlink(missing_ok=True)
-        die("update già in corso (lock attivo)")
+        die("update già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
     st = state_load(repo)
 
     target_req = args.version
@@ -3250,7 +3258,7 @@ def cmd_update(repo: Path, args) -> int:
 def cmd_rollback(repo: Path, args) -> int:
     lock = acquire_lock(repo)
     if lock is None:
-        die("update/rollback già in corso (lock attivo)")
+        die("update/rollback già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
     st = state_load(repo)
     cur = current_version(repo)
     prev = st.get("previous")
@@ -3383,7 +3391,7 @@ def cmd_bootstrap(repo: Path, args) -> int:
     """Cutover one-shot: installazione legacy (build locale) → modello pull."""
     lock = acquire_lock(repo)
     if lock is None:
-        die("update/bootstrap già in corso (lock attivo)")
+        die("update/bootstrap già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
     st = state_load(repo)
     if st.get("current"):
         ok(f"già a regime (v{st['current']}) — bootstrap non necessario")

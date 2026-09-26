@@ -18,6 +18,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   rimasti nel `.env`, quindi ogni env di versione nasce da `versione_env`. Rollback e
   bootstrap scrivono i digest della versione a cui tornano.
 
+### Corretto
+- **Un update che trova il lock di un altro update non è più un fallimento**: esce con 75
+  (EX_TEMPFAIL, «riprova più tardi») e le unit `vps1777-auto-update.service` e
+  `vps1777-update.service` lo contano come successo (`SuccessExitStatus=75`). Misurato
+  il 27/09 alle 01:48, installando la 0.58.0: il timer passato da `weekly` a `daily`,
+  con `Persistent=true`, è scattato al `daemon-reload` fatto dall'update stesso, ha
+  trovato il lock ed è uscito con 1. `OnFailure` ha mandato su Telegram «auto-update
+  fallito» mentre l'update stava riuscendo. Vale anche per rollback e bootstrap.
+
 ### Nota per chi aggiorna
 - Dopo questo update il `.env` ha cinque righe `VPS1777_DIGEST_*`: non modificarle a mano.
   Su un'installazione nuova sono vuote (pin spento) fino al primo update.

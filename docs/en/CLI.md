@@ -41,7 +41,9 @@ runs: from the host you normally start **that one**, not this by hand.
 
 The unit passes `--eta-minima 48`: it installs the latest release only if it was
 published at least 48 hours ago (the quarantine, see [UPDATE.md](UPDATE.md)). To install
-one that just came out, `--version` skips the quarantine.
+one that just came out, `--version` skips the quarantine. If another update (or a
+rollback) is already running it exits with **75** ("try again later"), which the units
+count as success: it isn't a fault and doesn't send the failure alert.
 
 ```bash
 sudo systemctl start vps1777-auto-update.service   # the normal way (with the quarantine)
