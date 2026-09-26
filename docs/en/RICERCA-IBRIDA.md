@@ -391,6 +391,27 @@ Estimates, from the measured speed (they are estimates, not measurements):
 | May–June 2026 (today's index) | ~139,000 | **~17 h** |
 | July–September 2026 (chunks counted by the prototype on the 08/09 copy) | ~282,000 | ~34 h |
 
+**The full run, measured** (25-26/09/2026, same 8-core PC, in normal use, at `nice`
+15): the primary `recupero-20260924` with `--tutto` — 266,219 messages, **452,311
+vectors in 31 h 13'**, i.e. **~4.0 vectors/s on average** (from ~2 at start-up to 4.7
+at cruise speed), 1.70 vectors per message, a 735 MB index. The two-day window above
+underestimated the speed: it was short and included the warm-up.
+
+How much each family of rows weighs (from the `indice_righe` ledger, same index):
+
+| rows | messages | vectors | vectors per message |
+|---|---|---|---|
+| conversations | 213,259 | 306,317 | 1.4 |
+| sub-agents (`subagent:*`) | 33,002 | 75,844 | 2.3 |
+| MCP server logs (`mcp-log:*`) | 18,250 | 66,536 | 3.6 |
+| cards and memories (`recupero:*`) | 1,708 | 3,614 | 2.1 |
+
+MCP logs are 7% of the messages and 15% of the vectors: long rows (on average up to
+~21 KB for one server). They sit at the end of the DB because the indexer inserts them
+last, which is why the last stretch of a `--tutto` run is slower than the first ones:
+an estimate of the remaining time based on the average vectors per message errs on the
+low side.
+
 ## The first time on the VPS
 
 The index on the VPS today is the prototype's: without a ledger. Search works,
@@ -461,15 +482,17 @@ it is not in step, update it there and upload that one.
 
 ## Current perimeter
 
-`[state of the installation on 25/09/2026]`
+`[state of the installation on 26/09/2026]`
 
 - **The primary for Claude Code is `recupero-20260924`** (since 24/09: the first bundle
-  with the `recupero/` R1 contract, see [ARCHIVE.md](ARCHIVE.md)). Its index is being
-  built with the repo's builder over the **whole** DB (`--tutto`: 266,219 messages,
-  logs included, with the `indice_righe` ledger), on the PC; at ~1.9 vectors/s it is
-  more than two days of compute. Until it is uploaded, `search_ibrida` on that DB has
-  no vectors to fuse and declares it in `indici[]`: keyword search (`search`) already
-  works on everything.
+  with the `recupero/` R1 contract, see [ARCHIVE.md](ARCHIVE.md)), and its index covers
+  **the whole DB**: 266,219 messages with indexable text (16,826 too short stay out),
+  **452,311 vectors**, logs and sub-agents included, with the `indice_righe` ledger.
+  Built with the repo's builder (`--tutto`), `--controlla` in step, uploaded on
+  26/09/2026: `search_ibrida` answers with `verifica.registro: true` and `scartati: 0`.
+  After a re-ingest of this DB the index has to be updated on a fresh copy (see "The
+  first time on the VPS", last paragraph): until then, vector results that no longer
+  match are discarded and declared.
 - **`recupero-20260905`** (the primary until 24/09, now a cross-check) keeps the
   prototype's index: **May–June 2026** (58,322 messages, 139,011 vectors, generated on
   07/09/2026), with a hand-written `indice_meta` and **no** ledger — `verifica.registro:
@@ -488,7 +511,8 @@ concluding "it's not there".
 - **The server's verification looks at the candidates**, not at the whole
   index; and it does not see a changed text with the same uuid (see above). The
   full check is `--controlla`.
-- **Speed.** ~2.3 vectors/s against the prototype's ~3.0: `--thread` and the
-  group size have not been tuned yet.
-- **`recupero:*` labels.** The prefix filter has been tried on synthetic data;
-  the real labels come from another branch of the indexer.
+- **Speed.** ~4.0 vectors/s on average over the full run (measured on 25-26/09,
+  see "What it costs"): a 450,000-vector DB takes more than a day of PC time.
+  `--thread` and the group size have not been tuned yet.
+- **`recupero:*` labels.** Since v0.51.0 they are real (1,708 rows in the primary's
+  index); the prefix filter had been tried on synthetic data before that.
