@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **L'update lascia la storia degli step, non solo l'ultimo stato**
+  (`ops.update-progress-journal`, rinvio scaduto il 31/08). Ogni step aggiunge una riga a
+  `onboarding/update_journal.ndjson`, accanto a `update_progress.json` che resta lo stato
+  per la barra dei pannelli. Prima un update riuscito non lasciava l'ordine in cui erano
+  girati gli step, e un auto-update notturno non raccontava niente la mattina dopo. Il file
+  tiene le ultime 2.000 righe (oltre cento update) e, come il resto della telemetria, non
+  può far cadere l'update. Da leggere con `tail -n 20 onboarding/update_journal.ndjson`.
+
 ### Cambiato
 - **L'auto-update ha una quarantena di 48 ore, e guarda ogni giorno invece che ogni
   settimana** (`H24`). `vps1777-auto-update.service` lancia

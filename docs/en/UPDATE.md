@@ -193,6 +193,7 @@ channel.
 | Staged releases (bundle + rollback-files) | `releases/vX.Y.Z/` (kept: current + previous) |
 | Pre-update snapshots | `backups/pre-update/` (kept: the latest of the last **2 versions** — n and n-1; the rest is pruned immediately. Owner decision of 29/08: the old 72h+3-versions rule didn't look at the WEIGHT, and 7 releases in 36h × 10 GB volumes filled the disk) |
 | Check / intent / progress state (for the admin card) | `onboarding/update_{status,pending_update,progress}.json` |
+| Step history (one line per step, successful and overnight updates included; last 2,000 lines) | `onboarding/update_journal.ndjson` — `tail -n 20 onboarding/update_journal.ndjson` |
 | Migration registry | volume `gateway-data` → `state/migrations.json` |
 | Updater logs | `journalctl -u vps1777-update -u vps1777-check-update` |
 
