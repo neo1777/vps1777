@@ -542,7 +542,7 @@ findings:
       riapre se entra un secondo account con scrittura o un secret che permetta a un
       workflow di creare tag.
     # accettato con la release che porta la quarantena (prima era `partial` dalla v0.27.0)
-    since: unreleased
+    since: v0.58.0
     why: >
       Le release sono firmate cosign KEYLESS DAL WORKFLOW. Senza protezione sui tag,
       chiunque possa pushare un tag `v*` conia una release REGOLARMENTE FIRMATA.

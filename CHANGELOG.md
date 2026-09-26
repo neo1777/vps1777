@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.58.0] — 2026-09-27
+
+**Il blocco d'igiene: i cinque rinvii scaduti del ledger, chiusi uno per uno.** Uno era
+una decisione di Neo (`H24`, rischio accettato), e la rivalutazione chiesta ha spostato la
+cura dove stava il rischio: la quarantena dell'auto-update. Due sono stati chiusi con la
+misura che aspettavano (`H43`, il journal). Uno era chiuso da tempo e segnalato per sbaglio.
+L'ultimo, `H22`, arriva nella prossima release.
+
 ### Aggiunto
 - **L'update lascia la storia degli step, non solo l'ultimo stato**
   (`ops.update-progress-journal`, rinvio scaduto il 31/08). Ogni step aggiunge una riga a
