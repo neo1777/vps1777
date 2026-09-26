@@ -39,7 +39,9 @@ esegue: dall'host di solito si avvia **quella**, non questo a mano.
 
 La unit passa `--eta-minima 48`: installa l'ultima release solo se è stata pubblicata
 da almeno 48 ore (la quarantena, vedi [UPDATE.md](UPDATE.md)). Per installarne subito
-una appena uscita, `--version` salta la quarantena.
+una appena uscita, `--version` salta la quarantena. Se un altro update (o un rollback)
+è già in corso esce con **75** («riprova più tardi»), che le unit contano come successo:
+non è un guasto e non manda l'avviso di fallimento.
 
 ```bash
 sudo systemctl start vps1777-auto-update.service   # la via normale (con la quarantena)

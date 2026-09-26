@@ -33,6 +33,10 @@ OnFailure=vps1777-avvisa-fallimento@%n.service
 
 [Service]
 Type=oneshot
+# 75 = EX_TEMPFAIL: il lock di un altro update è occupato. Non è un fallimento (c'è
+# già chi aggiorna), e non deve accendere OnFailure: il 27/09/2026 un giro partito
+# durante un update ha mandato un falso «auto-update fallito» su Telegram.
+SuccessExitStatus=75
 User=@OPERATOR_USER@
 Group=@OPERATOR_USER@
 Environment=VPS1777_HOME=@REPO@
