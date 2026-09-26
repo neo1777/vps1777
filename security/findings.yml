@@ -529,11 +529,20 @@ findings:
   - id: H24
     severity: medium
     title: "Protezione dei tag v* e permessi per-job nei workflow"
-    status: partial
+    status: accepted
     natura: decisione
     resta_aperto: >
-      `main` non ha branch protection e il CODEOWNERS non impone review a nessuno: serve un environment `release` con reviewer.
-    since: v0.27.0
+      [RISCHIO ACCETTATO — 27/09/2026, owner, da rivedere entro il 27/12/2026] Il gate
+      umano sulla creazione dei tag (environment `release` con reviewer) NON si attiva:
+      con un solo account il revisore è lo stesso token che crea il tag, e un token può
+      approvare via API. Il rischio che il gate copriva (un tag sbagliato che arriva sulle
+      macchine) è coperto a valle dalla QUARANTENA dell'auto-update: il timer installa da
+      solo solo una release pubblicata da almeno 48 ore (`quarantena_blocca`,
+      `--eta-minima 48`), e una release sbagliata si ritira segnandola prerelease. Si
+      riapre se entra un secondo account con scrittura o un secret che permetta a un
+      workflow di creare tag.
+    # accettato con la release che porta la quarantena (prima era `partial` dalla v0.27.0)
+    since: unreleased
     why: >
       Le release sono firmate cosign KEYLESS DAL WORKFLOW. Senza protezione sui tag,
       chiunque possa pushare un tag `v*` conia una release REGOLARMENTE FIRMATA.
@@ -542,6 +551,11 @@ findings:
     evidence:
       - file: .github/workflows/release.yml
         contains: ["permissions:", "id-token: write"]
+      # La cura adottata al posto del gate: la quarantena dell'auto-update.
+      - file: tools/vps1777.py
+        contains: ["def quarantena_blocca("]
+      - file: systemd/vps1777-auto-update.service
+        contains: ["--eta-minima 48"]
     evidence_external:
       - kind: github-ruleset
         file: security/rulesets/tag-v-immutabili.json
@@ -553,11 +567,11 @@ findings:
         target: main
         verify: "gh api repos/neo1777/vps1777/branches/main/protection"
         note: >
-          Assente (404 «Branch not protected», misurato 26/07). Senza di essa il
-          `CODEOWNERS` di security/ non impone review a nessuno: chi ha accesso in
-          push entra su main senza passare da una PR, e da lì può coniare un tag
-          v* nuovo regolarmente firmato — la stessa strada che «chi ha accesso in
-          push» già descrive sotto, ma senza il gate del CODEOWNERS a fermarla.
+          Assente il 26/07 (404 «Branch not protected»). Il 27/09/2026 c'è: niente
+          force-push, niente cancellazione, `enforce_admins` acceso; nessuna review
+          obbligatoria (single-owner: la review richiesta bloccherebbe l'unico
+          autore). Quindi il CODEOWNERS continua a non imporre review a nessuno: vero,
+          ed è parte del rischio accettato sopra.
     missing: >
       I tag v* pubblicati sono ora IMMUTABILI (ruleset `tag-v-immutabili`: deletion +
       update; provato sul campo che spostare o cancellare un tag è rifiutato, e che

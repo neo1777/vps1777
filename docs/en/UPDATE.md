@@ -23,7 +23,8 @@ vps1777 rollback        # torna alla versione precedente
 Or from the **admin panel → Update tab**: same thing, one click.
 When a release comes out the Telegram bot notifies you (once only).
 And if you do nothing, **it takes care of itself**: by default
-`vps1777-auto-update.timer` applies the safe update once a week (feature
+`vps1777-auto-update.timer` applies the safe update on its own: it looks every
+day and installs a release only once it is **at least 48 hours old** (feature
 `autoupdate`, can be turned off via `VPS1777_FEATURES` — see
 [OPS.md](../OPS.md) (Italian)).
 
@@ -102,13 +103,23 @@ vps1777 secrets-status          # a schermo
 vps1777 secrets-status --notify # + notifica Telegram se qualcosa è oltre soglia
 ```
 
-**3. Safe auto-update** — `vps1777-auto-update.timer`, **weekly**.
+**3. Safe auto-update** — `vps1777-auto-update.timer`, **daily, with a 48-hour quarantine**.
 This one doesn't watch: it **applies** `vps1777 update --yes`, with the entire
 safety net of the managed channel (backup, digest verification, migrations,
 health-gate, rollback) — and only if the `autoupdate` feature is in the
 declared state (`VPS1777_FEATURES`, default yes). It's the reason the daily
 check can limit itself to notifying: application already has its own safe
 channel. Details and how to turn it off: [OPS.md](../OPS.md) (Italian).
+
+**The 48-hour quarantine** (since 27/09/2026). The unit runs
+`vps1777 update --yes --eta-minima 48`: if the latest release was published less than
+48 hours ago, the run does nothing and says so in the journal ("in quarantena… riprovo
+al prossimo giro"). It gives a bad release time to be **withdrawn** before a machine
+installs it on its own: marking it as a *prerelease* on GitHub is enough, because the
+update reads `/releases/latest`, which excludes prereleases. It applies **only** to the
+automatic path: `vps1777 update` by hand, `--version` and the admin button install
+right away, and they are the way for an urgent fix. An unreadable publication date
+counts as "too young": when in doubt, it does not install on its own.
 
 > The units have no hardcoded user or path: the CLI substitutes
 > `@OPERATOR_USER@` / `@REPO@` with the real values at every update (H43). It

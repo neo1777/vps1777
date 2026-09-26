@@ -528,7 +528,7 @@ H55
       AUTOUPD_MSG=""
       case ",$FEATURES," in *,autoupdate,*)
         ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer"
-        AUTOUPD_MSG=" + auto-update sicuro (settimanale)";;
+        AUTOUPD_MSG=" + auto-update sicuro (giornaliero, quarantena 48h)";;
       esac
       # ── Backup dichiarato ma MAI armato: il buco che questa via aveva ────────
       # `backup` è nel default di FEATURES (riga sopra), quindi è ACCESO a meno

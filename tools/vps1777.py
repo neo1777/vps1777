@@ -2683,6 +2683,37 @@ def _secrets_mancanti_in(compose: Path, radice_repo: Path,
             fuori.append(f"{nome} → {percorso}   [{stato} · dichiarato in {compose.name}]")
     return fuori
 
+# QUARANTENA DELL'AUTO-UPDATE (H24, Neo 27/09/2026). Il gate umano sulla CREAZIONE dei
+# tag non è un confine in un repo con un solo account: il token che crea il tag può anche
+# approvarlo via API. Il rischio vero stava a valle — il timer installava l'ultimo
+# rilascio appena usciva. Con un'età minima un rilascio sbagliato ha una finestra per
+# essere ritirato (segnato «prerelease»: `/releases/latest` lo esclude) prima che una
+# macchina lo installi da sola. Vale SOLO sul percorso automatico: `vps1777 update` a
+# mano, `--version` e il pulsante admin restano immediati. Gemelli: `minimumReleaseAge`
+# di Renovate, `cooldown` di Dependabot.
+def quarantena_blocca(rel: dict, ore_minime: float | None,
+                      adesso: datetime | None = None) -> str | None:
+    """Perché NON installare `rel` da soli adesso, o None se ha l'età per passare.
+
+    Promette «non installo», quindi quando non sa NEGA: data assente, senza fuso o nel
+    futuro (orologio sfasato, risposta strana) valgono come «troppo giovane».
+    """
+    if not ore_minime or ore_minime <= 0:
+        return None
+    raw = str(rel.get("published_at") or "")
+    try:
+        pub = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        pub = None
+    if pub is None or pub.tzinfo is None:
+        return (f"data di pubblicazione illeggibile ({raw!r}): senza un'età certa non "
+                f"si installa da soli")
+    ore = ((adesso or datetime.now(timezone.utc)) - pub).total_seconds() / 3600
+    if ore < ore_minime:
+        return f"pubblicata da {ore:.0f} h, la quarantena ne chiede {ore_minime:g}"
+    return None
+
+
 def cmd_update(repo: Path, args) -> int:
     # 0 — lock
     lock = acquire_lock(repo)
@@ -2752,6 +2783,14 @@ def cmd_update(repo: Path, args) -> int:
         ok(f"la release più recente nota a GitHub (v{target}) è più vecchia "
            f"della v{cur} in esecuzione — risposta stantia, niente da fare")
         return 0
+    # Quarantena: solo sul percorso automatico (il timer passa --eta-minima e nessun
+    # target). Un target esplicito è una scelta umana e passa subito.
+    if getattr(args, "eta_minima", None) and not target_req:
+        motivo = quarantena_blocca(rel, args.eta_minima)
+        if motivo:
+            log(f"v{target} in quarantena: {motivo} — riprovo al prossimo giro "
+                f"(per installarla subito: `vps1777 update`)")
+            return 0
     log(f"update: {cur} → {target}")
 
     # 3 — changelog
@@ -3948,7 +3987,7 @@ def nlm_cookie_status(repo: Path) -> dict | None:
 # H49 ③ — la via d'emergenza cosign è PERSISTENTE, e nessuno la ricorda.
 # `VPS1777_REQUIRE_COSIGN=0` nel `.env` sblocca una crisi (release senza firma,
 # sigstore irraggiungibile) ed è giusto che esista. Ma è riletta a OGNI update,
-# incluso l'auto-update settimanale che gira da solo: chi la mette per sbloccarsi
+# incluso l'auto-update quotidiano che gira da solo: chi la mette per sbloccarsi
 # e si dimentica di toglierla lascia la verifica della firma spenta a tempo
 # indeterminato, e non c'è niente che glielo dica. La voce H49 lo dichiarava già
 # ("resta [da-tarare]: un avviso periodico se REQUIRE_COSIGN=0 resta nel .env
@@ -4247,6 +4286,9 @@ def build_parser() -> "argparse.ArgumentParser":
     p.add_argument("--version", help="target esplicito (vX.Y.Z), es. per le rc")
     p.add_argument("--yes", action="store_true", help="nessuna conferma")
     p.add_argument("--from-intent", help="path dell'intent file scritto dal pulsante admin")
+    p.add_argument("--eta-minima", type=float, metavar="ORE",
+                   help="installa l'ultima release solo se pubblicata da almeno ORE ore "
+                        "(la usa il timer dell'auto-update: 48); ignorato con --version")
     p.add_argument("--require-cosign", action="store_true",
                    help="(ridondante: la verifica cosign è già obbligatoria di default)")
     p.add_argument("--no-require-cosign", action="store_true",

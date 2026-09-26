@@ -5,6 +5,8 @@
 # (`vps1777 update --yes`), quindi eredita gratis backup + verifica firma cosign +
 # migrazioni + health-gate 180s + auto-rollback. Il timer gemello lo schedula.
 # `--yes` salta solo la conferma interattiva; se è già alla latest → no-op.
+# `--eta-minima 48`: installa da solo solo una release pubblicata da almeno 48 ore
+# (quarantena, H24 — vedi quarantena_blocca in tools/vps1777.py).
 # NON `--from-intent`: qui non c'è nessun intent-file del pannello, è il canale
 # programmato. Mutuamente esclusivo con Watchtower — la CLI avvisa se lo trova attivo.
 #
@@ -35,7 +37,7 @@ User=@OPERATOR_USER@
 Group=@OPERATOR_USER@
 Environment=VPS1777_HOME=@REPO@
 WorkingDirectory=@REPO@
-ExecStart=/usr/local/bin/vps1777 update --yes
+ExecStart=/usr/local/bin/vps1777 update --yes --eta-minima 48
 # pull + backup + migrazioni + health-gate (180s) + eventuale rollback: margine ampio
 TimeoutStartSec=1800
 # ⚠️ QUESTA RIGA NON RIPARA IL GUASTO — misurato dopo averla scritta, e va detto

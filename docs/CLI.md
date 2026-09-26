@@ -37,9 +37,13 @@ delle immagini per digest, riavvio, health-gate — e rollback automatico se
 qualcosa non torna. È il comando che la unit `vps1777-auto-update.service`
 esegue: dall'host di solito si avvia **quella**, non questo a mano.
 
+La unit passa `--eta-minima 48`: installa l'ultima release solo se è stata pubblicata
+da almeno 48 ore (la quarantena, vedi [UPDATE.md](UPDATE.md)). Per installarne subito
+una appena uscita, `--version` salta la quarantena.
+
 ```bash
-sudo systemctl start vps1777-auto-update.service   # la via normale
-vps1777 update --version v0.44.0 --yes             # target esplicito (es. una rc)
+sudo systemctl start vps1777-auto-update.service   # la via normale (con la quarantena)
+vps1777 update --version v0.44.0 --yes             # target esplicito, subito (es. una rc)
 ```
 
 ## vps1777 rollback

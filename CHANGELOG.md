@@ -4,6 +4,28 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **L'auto-update ha una quarantena di 48 ore, e guarda ogni giorno invece che ogni
+  settimana** (`H24`). `vps1777-auto-update.service` lancia
+  `vps1777 update --yes --eta-minima 48`: una release pubblicata da meno di 48 ore non
+  si installa da sola, e il giro lo scrive nel journal. Nelle 48 ore una release
+  sbagliata si ritira segnandola *prerelease* su GitHub (`/releases/latest` la esclude).
+  Vale solo per il percorso automatico: `vps1777 update` a mano, `--version` e il
+  pulsante admin installano subito. Una data di pubblicazione illeggibile o nel futuro
+  vale come «troppo giovane». Il timer diventa giornaliero, altrimenti una release ancora
+  giovane al momento del giro avrebbe aspettato fino a 9 giorni. Gemelli: Renovate
+  `minimumReleaseAge`, Dependabot `cooldown`.
+- **`H24` passa a rischio accettato, da rivedere entro il 27/12/2026**. Il gate umano sulla
+  creazione dei tag (GitHub environment con revisore) non si attiva: con un solo account
+  il revisore è lo stesso token che crea il tag, e un token può approvare via API. Il
+  rischio che copriva lo copre la quarantena. Il ragionamento completo è in `SECURITY.md`
+  e nel registro.
+
+### Nota per chi aggiorna
+- Il timer e la unit dell'auto-update si riscrivono da soli con questo update. Da qui in
+  poi l'auto-update installa una release solo dopo 48 ore: se ne vuoi una subito, lancia
+  `vps1777 update` a mano.
+
 ### Corretto
 - **Il CHANGELOG aveva perso l'intestazione `## [0.46.0]`**: il commit della 0.46.1
   l'aveva sostituita con la propria, e la sezione della 0.46.0 era finita dentro la

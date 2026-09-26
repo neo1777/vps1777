@@ -3,7 +3,7 @@
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "49233baae51b6eeddddfaf4cbe36f5eb7facdd37c096bf0ca4c2cc28a1e66fba"
+      "sorgente_sha256": "78a9e84194467079da76da9e147b6c345a741d02cd7df103c13c95c2eda3412e"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
@@ -23,7 +23,7 @@
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
-      "sorgente_sha256": "94674fdf5a791dd80304495ef5a6095b984c01eb95e607a3970d3b441dae9f78"
+      "sorgente_sha256": "bf55fb80d069589a4800f21de4ff38ad3ff1811d9cd45f53bfae03ca31bf57a1"
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
@@ -31,7 +31,7 @@
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "cb488094da2366c1b3bae89307151b1e378a2a4c06a663fd4e5d54a59485d02c"
+      "sorgente_sha256": "1f545570cbcf00076b7b119a88e367ba11d29d050367c0eec642efe740dcd144"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",

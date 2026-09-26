@@ -3,19 +3,23 @@
 # Gemello di vps1777-check-update.timer, ma questo APPLICA (non solo notifica):
 # fa partire vps1777-auto-update.service = `vps1777 update --yes`, con tutta la
 # rete di sicurezza (backup, firma, migrazioni, health-gate, rollback).
-# Cadenza settimanale di default (l'update è un evento raro e va lasciato
-# assestare); RandomizedDelaySec distribuisce il carico; Persistent recupera i
-# giri persi se la VPS era spenta.
+# Cadenza GIORNALIERA dal 27/09/2026 (era settimanale), insieme alla quarantena
+# `--eta-minima 48` della unit: un rilascio si installa da solo solo dopo 48 ore di
+# vita, così uno sbagliato ha il tempo di essere ritirato (H24, decisione di Neo).
+# Il giro quotidiano è un no-op quando non c'è niente di maturo; con la cadenza
+# settimanale un rilascio ancora giovane al momento del giro avrebbe aspettato fino
+# a 9 giorni. RandomizedDelaySec distribuisce il carico; Persistent recupera i giri
+# persi se la VPS era spenta.
 #
 # ACCESO SOLO SE DICHIARATO: l'install lo abilita solo quando la feature
 # `autoupdate` è nello stato dichiarato (.env: VPS1777_FEATURES). Così un reinstall
 # riproduce ESATTAMENTE la scelta, e l'assenza non è mai silenziosa (referto post-install).
 
 [Unit]
-Description=vps1777 — auto-update programmato (settimanale)
+Description=vps1777 — auto-update programmato (giornaliero, con quarantena 48h)
 
 [Timer]
-OnCalendar=weekly
+OnCalendar=daily
 RandomizedDelaySec=6h
 Persistent=true
 
