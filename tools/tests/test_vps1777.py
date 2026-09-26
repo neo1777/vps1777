@@ -2005,6 +2005,27 @@ def test_archive_retag_e_registrato_e_non_scrive_per_difetto():
 
 
 
+def test_archive_migra_e_registrato_e_non_scrive_per_difetto():
+    """Lo stesso patto di `archive-retag`: collegato al dispatcher, a secco per difetto."""
+    src = (_ROOT / "tools" / "vps1777.py").read_text()
+    assert '"archive-migra": cmd_archive_migra' in src
+    blocco = src[src.index('sub.add_parser("archive-migra"'):]
+    blocco = blocco[:blocco.index("sub.add_parser", 10)]
+    assert '"--scrivi", action="store_true"' in blocco
+    assert "--secco" not in blocco
+
+
+def test_db_archivio_esclude_gli_indici_semantici():
+    """I `.vec.db` stanno nello stesso volume ma non sono archivi: passati all'indexer
+    fallivano, e `archive-retag` chiudeva con esito 1 anche a lavoro riuscito."""
+    righe = ["/var/lib/archive/db/primario.db", "/var/lib/archive/db/primario.vec.db",
+             "", "/var/lib/archive/db/altro.db"]
+    assert v._filtra_db_archivio(righe, None) == [
+        "/var/lib/archive/db/primario.db", "/var/lib/archive/db/altro.db"]
+    assert v._filtra_db_archivio(righe, "primario") == ["/var/lib/archive/db/primario.db"]
+    assert v._filtra_db_archivio(righe, "primario.vec") == []
+
+
 def test_snapshot_prune_29_08_n_e_n1_anche_se_freschi():
     """La decisione del 29/08 (Neo: «basta n, n-1 per paranoia — dobbiamo farci
     stare quel che serve»): 7 release in 36 ore × volumi da 10 GB = 48 GB di

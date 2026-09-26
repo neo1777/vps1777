@@ -4,6 +4,25 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### 🐛 Correzioni
+
+- **archive: gli output degli strumenti non sono più parole dell'utente —
+  `speaker='tool'`.** In Claude Code l'output di un comando (`tool_result`) viaggia in un
+  record di tipo `user`, e l'indexer lo scriveva `sender='user'` → `speaker='human'`: sul
+  primario erano **74.818 delle 89.950** righe `human` (83%, misurato il 26/09), e il
+  filtro «le parole di chi scrive» restituiva soprattutto `ls` e referti di script. Ora un
+  record `user` di soli tool_result entra `sender='strumento'` → `speaker='tool'` (quarto
+  valore dell'asse, additivo). Restano `human` le parole dell'utente consegnate in un
+  tool_result: le risposte alle domande a opzioni e i rifiuti motivati (riconosciuti
+  all'inizio del testo, non ovunque). **Retroattiva senza re-ingest**: migrazione
+  idempotente in `write_rows` e il comando nuovo **`vps1777 archive-migra [--db X]
+  [--scrivi]`** (sopra `archive_indexer <db> --migra`), a secco per default; FTS e
+  indice semantico restano validi. Doc: ARCHIVE.md e CLI.md (IT/EN), docstring di `search`.
+- **`vps1777 archive-retag` non fallisce più sugli indici semantici.** Elencava i DB con
+  `*.db`, che prende anche i `.vec.db` (dalla 0.48.0): su quelli l'indexer non trova
+  `messages` e il comando chiudeva con esito 1 anche a lavoro riuscito. Ora i due comandi
+  condividono l'elenco dei DB, senza i `.vec.db`.
+
 ## [0.51.4] — 2026-09-26
 
 ### 🐛 Correzioni

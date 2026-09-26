@@ -768,12 +768,43 @@ passing `write_rows` an optional **tenth column** (`messaggio` or `data-export`;
 without it, it stays `messaggio`; any other value stops the ingest).
 
 **`speaker` and `voice`** — two axes that must not be merged. `speaker` is **who
-sent** the row, a fact taken from the source (`human` · `assistant` · `unknown`:
-attachments, titles, memories and cards are `unknown`, because they don't say who
-wrote them). `voice` is **whose voice** is in the content, a heuristic estimate
+sent** the row, a fact taken from the source (`human` · `assistant` · `tool` ·
+`unknown`: attachments, titles, memories and cards are `unknown`, because they don't
+say who wrote them). `voice` is **whose voice** is in the content, a heuristic estimate
 (`own` · `pasted_transcript` · `pasted_ai` · `character` · `mixed` · `unknown`),
 with its confidence and the flags that explain it. They come out **populated** from
 every ingest path.
+
+**Tool outputs are `tool`, not `human` (since 0.52.0).** In Claude Code the output of a
+command (the `tool_result`) travels in a record of type `user`: up to 0.51.4 it went in
+as `sender='user'` → `speaker='human'`, and on the primary DB they were **74,818 of the
+89,950** `human` rows (83%, measured on 26/09/2026). Now a `user` record made only of
+tool_results goes in as `sender='strumento'` → `speaker='tool'`, and `speaker='human'`
+means "words of whoever writes" again. Two exceptions stay `human`, because they are the
+user's words delivered inside a tool_result: the **answers to multiple-choice questions**
+(the text starts with "Your questions have been answered" or "The user answered": the
+form changes with the Claude Code version) and **reasoned rejections** ("The user doesn't
+want to proceed with this tool use… the user said:" followed by their words). Recognition
+is anchored at the start of the text: the same sentence inside the output of a `grep`
+stays `tool`. A tool_result inside a sidechain stays `mandato`, as before.
+
+DBs **already loaded** don't need a re-ingest: the cure is a migration, because the text
+doesn't change (`sender` and `speaker` are neither in the FTS nor in the vectors, and the
+semantic index is tied to rowids, which the migration doesn't touch). It runs by itself
+at the first ingest into an old DB; for DBs nobody writes to anymore there is
+[`vps1777 archive-migra`](CLI.md) (dry-run by default, `--scrivi` to apply), which for
+each DB runs inside the gateway:
+
+```bash
+python -m app.archive_indexer /var/lib/archive/db/<name>.db --migra [--scrivi]
+```
+
+and prints `{"strumenti": N, "speaker_prima": {…}, "speaker_dopo": {…}, "scritto": …}`. On
+the primary: 74,818 rows, `human` from 89,950 to 15,132, 6 seconds. ⚠️ Even a dry run can
+change the file's **sha** without changing data: SQLite doesn't journal the free pages it
+reuses, and after the ROLLBACK they stay free but with different bytes (measured: 638
+free pages, data and `integrity_check` identical). Whoever compares a DB by sha, like a
+script that loads the index only if the DB hasn't changed, should do it before `--migra`.
 
 **`revisions`** keeps the **outgoing** version when the same uuid comes back with a
 different content (a rewritten memory, an updated card, a removed chunk): `messages`

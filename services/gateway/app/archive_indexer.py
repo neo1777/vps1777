@@ -278,11 +278,11 @@ CREATE TABLE IF NOT EXISTS messages(
     --    'unknown', non una scelta comoda. È la lezione già pagata qui sopra con `ts_source`:
     --    un default che ASSERISCE fabbrica, in un colpo solo e su archivi vivi, esattamente
     --    la bugia che la colonna doveva impedire — e con l'aria di un dato verificato.
-    speaker       TEXT DEFAULT '',   -- human/assistant/unknown (derivato da `sender`, Fase 1)
+    speaker       TEXT DEFAULT '',   -- human/assistant/tool/unknown (derivato da `sender`, Fase 1)
     -- 🔴 `doc` NON è un valore di `voice`, e toglierlo è la cura (obiezione di
     --   abdd732a, 02/08, accolta). Il criterio che separa i due assi:
     --     `voice`   = COME SI È FORMATO il testo   (parlato · incollato · recitato)
-    --     `speaker` = CHI/CHE COSA lo ha immesso   (human · assistant · unknown)
+    --     `speaker` = CHI/CHE COSA lo ha immesso   (human · assistant · tool · unknown)
     --   «è un allegato» è una proprietà della RIGA, non del modo in cui il testo è
     --   nato ⇒ vive in `speaker`. Tenerlo in entrambi avrebbe fatto **rientrare
     --   dalla finestra, col nome nuovo, il difetto che queste colonne curano**:
@@ -513,6 +513,7 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
         _ensure_v3(conn)  # voice-tagging Fase 1: colonne nuove + `speaker` derivato
         _ensure_sessioni_filoni(conn)  # `sessioni` con la chiave vecchia → (sessionId, file)
+        _ensure_speaker_strumenti(conn)  # tool_result scritti `user` da un indexer di prima
         n = 0
         buf: list[tuple] = []
         skip_buf: list[tuple] = []
@@ -779,6 +780,11 @@ _SPEAKER_NOTI = {
     # (`_iter_claude_code` lo marca dal fatto: parent_tool_use_id/isSidechain).
     # speaker è «chi INVIA, un fatto»: il fatto è che invia la macchina.
     "mandato": "assistant",
+    # L'output di uno strumento (tool_result) viaggia in Claude Code in un record di
+    # TIPO user, ma non l'ha scritto né l'utente né il modello: l'ha prodotto il comando
+    # (26/09/2026, misurato sul primario: l'83% delle righe `human` erano questo).
+    # `_iter_claude_code` lo marca `strumento`; qui diventa il quarto valore dell'asse.
+    "strumento": "tool",
 }
 
 
@@ -1228,6 +1234,68 @@ def _ensure_sessioni_filoni(conn: sqlite3.Connection) -> bool:
     return True
 
 
+def _ensure_speaker_strumenti(conn: sqlite3.Connection) -> int:
+    """Porta ai DB già caricati la cura del 26/09/2026: le righe `user` fatte di soli
+    tool_result diventano `sender='strumento'`, `speaker='tool'`. Ritorna quante ne ha
+    cambiate. Idempotente: alla seconda passata restano candidate solo le parole vere
+    dell'utente, che il criterio lascia dove sono.
+
+    È una MIGRAZIONE e non un re-ingest perché il testo non cambia: `sender` e
+    `speaker` non stanno nell'FTS né nei vettori, quindi l'indice lessicale e quello
+    semantico restano validi. Il criterio è lo stesso dell'ingest
+    (`_parola_utente_in_tool_result`), in Python e non in SQL: una copia della regola
+    in un altro linguaggio invecchierebbe da sola. `content=''` è la stessa condizione
+    di `not blocks.text`. Sui DB senza la colonna `speaker` non fa niente: la
+    derivazione la farà `popola_speaker` dopo `_ensure_v3`."""
+    have = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+    if not {"speaker", "tools", "sender"} <= have:
+        return 0
+    da_cambiare = [
+        rid for rid, tools in conn.execute(
+            "SELECT rowid, tools FROM messages"
+            " WHERE sender='user' AND content='' AND tools<>''")
+        if not _parola_utente_in_tool_result(tools or "")]
+    for i in range(0, len(da_cambiare), 500):
+        pezzo = da_cambiare[i:i + 500]
+        conn.execute(
+            "UPDATE messages SET sender='strumento', speaker=? WHERE rowid IN (%s)"
+            % ",".join("?" * len(pezzo)), (speaker_da_sender("strumento"), *pezzo))
+    return len(da_cambiare)
+
+
+def migra_derivate(db_path: Union[str, Path], *, scrivi: bool = False) -> dict:
+    """Applica a un DB esistente, SENZA ingest, le migrazioni delle colonne derivate
+    (oggi: gli output degli strumenti) e riporta il delta di `speaker`.
+
+    Serve per i DB che nessun ingest riaprirà: l'aggancio in `write_rows` cura solo
+    quelli in cui si scrive ancora. 🛡️ A SECCO per default, come `--retag`: il delta
+    è misurato su una transazione vera e poi annullata, quindi non è una stima."""
+    conn = sqlite3.connect(str(db_path), isolation_level=None)
+    try:
+        have = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+        if "speaker" not in have:
+            raise ValueError(
+                f"{db_path}: il DB non ha la colonna `speaker` (schema precedente al "
+                "voice-tagging). Lo porta avanti il prossimo ingest, oppure "
+                "`migrate_v2_to_v3` e poi di nuovo `--migra`.")
+        def _conta() -> dict:
+            return {sp or "": n for sp, n in conn.execute(
+                "SELECT speaker, count(*) FROM messages GROUP BY speaker")}
+        prima = _conta()
+        conn.execute("BEGIN")
+        try:
+            n = _ensure_speaker_strumenti(conn)
+            dopo = _conta()
+            conn.execute("COMMIT" if scrivi else "ROLLBACK")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+        return {"strumenti": n, "speaker_prima": prima, "speaker_dopo": dopo,
+                "scritto": bool(scrivi)}
+    finally:
+        conn.close()
+
+
 def migrate_v2_to_v3(db_path: Union[str, Path]) -> bool:
     """Porta un DB allo schema v3 (colonne voice-tagging + `speaker` e `voice` derivati).
 
@@ -1558,6 +1626,28 @@ def _label_da_cwd(cwd: str) -> str:
     return parti[-1]
 
 
+# Le PAROLE DELL'UTENTE che Claude Code consegna dentro un tool_result. Sono le uniche
+# eccezioni alla regola «un record user di soli tool_result è output di uno strumento».
+# Misurate il 26/09/2026 sul primario (75.072 righe di soli tool_result): 198 «Your
+# questions have been answered», 51 «The user answered» (la forma cambia con la versione
+# di Claude Code: sono le risposte alle domande a opzioni) e 5 rifiuti motivati. Il
+# riconoscimento è ANCORATO all'inizio: la stessa frase dentro l'output di un grep (4
+# casi nel primario) è output, non una risposta.
+_RISPOSTE_UTENTE = ("Your questions have been answered", "The user answered")
+_RIFIUTO = "The user doesn't want to proceed with this tool use"
+_RIFIUTO_PAROLE = "the user said:"
+
+
+def _parola_utente_in_tool_result(tools: str) -> bool:
+    """True se il testo di un tool_result porta parole dell'utente: la risposta a una
+    domanda a opzioni, o un rifiuto accompagnato da quello che l'utente ha detto. Un
+    rifiuto senza parole è un modulo del programma, non una frase di nessuno."""
+    t = tools.lstrip()
+    if t.startswith(_RISPOSTE_UTENTE):
+        return True
+    return t.startswith(_RIFIUTO) and _RIFIUTO_PAROLE in t
+
+
 def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
     # tetto anche qui: `index_jsonl` accetta un file-like (non solo un path), e su
     # uno stream non c'è nessuno `st_size` da controllare. Si contano i byte letti.
@@ -1639,6 +1729,13 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             # ha scoperto (frasi dei mandati attribuite a Neo). sender='mandato'
             # → speaker='assistant' (mappa in _SPEAKER_NOTI).
             sender = "mandato"
+        elif (sender == "user" and not blocks.text and blocks.tools
+              and not _parola_utente_in_tool_result(blocks.tools)):
+            # Un record user fatto SOLO di tool_result: l'output di un comando, non una
+            # parola dell'utente (26/09/2026). Prima entrava `user` → speaker='human', e
+            # il filtro «le parole di chi scrive» restituiva soprattutto `ls` e referti
+            # di script. Viene DOPO il mandato: in una sidechain resta della macchina.
+            sender = "strumento"
         ultimo_ts = str(ts)
         yield (uuid, proj, ts, blocks.text, sender,
                blocks.tools, blocks.thinking, "", str(d.get("parentUuid") or ""))
@@ -3245,12 +3342,27 @@ def main(argv: list[str] | None = None) -> int:
                     help="NON indicizza: ri-classifica `voice` su TUTTE le righe del DB "
                          "passato come `input` e stampa il delta. A SECCO se non c'è "
                          "--scrivi: il delta è reale (calcolato) ma niente viene salvato.")
+    ap.add_argument("--migra", action="store_true",
+                    help="NON indicizza: applica al DB passato come `input` le migrazioni "
+                         "delle colonne derivate (oggi: gli output degli strumenti → "
+                         "speaker='tool') e stampa il delta. A SECCO se non c'è --scrivi.")
     ap.add_argument("--scrivi", action="store_true",
-                    help="con --retag: applica davvero. Senza, il retag è solo un referto.")
+                    help="con --retag o --migra: applica davvero. Senza, è solo un referto.")
     args = ap.parse_args(argv)
     if not Path(args.input).is_file():
         print(f"input non trovato: {args.input}", file=sys.stderr)
         return 1
+    if args.migra:
+        try:
+            esito = migra_derivate(args.input, scrivi=args.scrivi)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
+        if not args.scrivi:
+            print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
+                  file=sys.stderr)
+        return 0
     if args.retag:
         # 🛡️ `--scrivi` è richiesto ESPLICITAMENTE e non è il default: questo comando
         # riscrive la classificazione di ogni riga del DB, e un default che scrive
