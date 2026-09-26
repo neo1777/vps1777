@@ -44,7 +44,19 @@ con una query.* Il pattern dei telefoni **non** si applica dentro un uuid canoni
 (8-4-4-4-12 esadecimali) e lascia intatte le date ISO valide con l'ora
 (`2026-09-05 13:10`) e la sagoma `AAAAMMGG-HHMMSS` dei nomi di bundle: tre esenzioni
 strette, dalla 0.51.1 (prima un uuid coi gruppi di sole cifre e una data con l'ora
-uscivano come «[telefono redatto]»; misurato il 24/09/2026 dal vivo).
+uscivano come «[telefono redatto]»; misurato il 24/09/2026 dal vivo). Dalla 0.51.4 la
+data con l'ora vale anche con minuti e secondi scritti coi trattini o coi punti, come nei
+nomi degli screenshot (`Schermata del 2026-09-24 18-41-38.png` usciva
+«Schermata del [telefono redatto]-38.png»); minuti e secondi devono essere 00-59.
+
+**Un valore dell'anagrafica che è pubblico per tua scelta** si esenta per nome, con
+`ARCHIVE_REDACT_ESENTI` nel `.env` (valori separati da virgola, senza maiuscole; dalla
+0.51.4). Il caso che l'ha fatto nascere: il `full_name` dell'account claude.ai era
+l'handle pubblico dell'autore, lo stesso nome dei suoi repository, e la redazione lo
+toglieva da ogni percorso e da ogni etichetta (`corpus-<handle>/…` usciva
+«corpus-[dato personale redatto]/…»). Vuota per default: la politica non cambia finché non
+la scrivi. Vale solo per i valori noti: un'email o un telefono in formato riconoscibile
+restano redatti anche se li esenti.
 
 **La regola pratica** (finché l'archivio resta tuo e dei modelli a cui dai *tu* il
 connettore, questa è una scelta difendibile):

@@ -86,7 +86,12 @@ _TS_COMPATTO = re.compile(r"^(?:19|20)\d{6}[-T]\d{6}$")
 # · un UUID canonico (8-4-4-4-12 esadecimali): non si cerca un telefono DENTRO un uuid. Un
 #   uuid è un identificatore tecnico — `CAMPI_ANAGRAFICI` già lo esclude di proposito, perché
 #   serve a `get_context` — e la sua forma esatta non è quella di un numero di telefono.
-_DATA_ORA = re.compile(r"^(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])(?:[ T](?:[01]\d|2[0-3]))?$")
+# · (26/09/2026) la stessa data con l'ora scritta coi TRATTINI o coi punti, come nei nomi degli
+#   screenshot: «Schermata del 2026-09-24 18-41-38.png» usciva «[telefono redatto]-38.png»
+#   (TELEFONO prende «2026-09-24 18-41» e si ferma prima di «-38.png»). Minuti e secondi 00-59,
+#   stessa strettezza dell'ora.
+_DATA_ORA = re.compile(r"^(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])"
+                       r"(?:[ T](?:[01]\d|2[0-3])(?:[-.][0-5]\d(?:[-.][0-5]\d)?)?)?$")
 _UUID = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z])")
 
 
@@ -118,6 +123,17 @@ SEGNAPOSTO_VALORE = "[dato personale redatto]"
 CAMPI_ANAGRAFICI = ("full_name", "display_name", "name", "email_address", "email",
                     "phone_number", "phone", "verified_phone_number")
 
+# Valori dell'anagrafica che l'operatore ha dichiarato PUBBLICI e che quindi non si mascherano
+# (26/09/2026). Il caso che l'ha fatto nascere: il `full_name` dell'account claude.ai era
+# l'handle pubblico dell'autore — lo stesso nome del repository — e la redazione per valore
+# noto lo toglieva da ogni percorso e da ogni etichetta («_chat/corpus-<handle>/…»,
+# «-home-<handle>-Scrivania»), rendendo illeggibili i riferimenti che le sessioni si
+# scambiano. Vuoto per default: la politica del prodotto non cambia finché l'operatore non
+# scrive `ARCHIVE_REDACT_ESENTI` (valori separati da virgola, confronto senza maiuscole).
+# Vale SOLO per i valori noti: email e telefoni in formato riconoscibile restano redatti
+# comunque, anche se l'operatore ne esentasse uno (non si esenta un pattern per nome).
+ESENTI = {v.strip().lower() for v in os.getenv("ARCHIVE_REDACT_ESENTI", "").split(",") if v.strip()}
+
 _MIN_VALORE = 4        # sotto questa lunghezza un valore è troppo generico per essere
                        # mascherato senza falsare i risultati (un nome di 2 lettere
                        # comparirebbe ovunque). Limite dichiarato, non nascosto.
@@ -142,7 +158,7 @@ def valori_noti(conn: sqlite3.Connection) -> set[str]:
             chiave, _, valore = riga.partition(":")
             if chiave.strip().lower() in CAMPI_ANAGRAFICI:
                 v = valore.strip()
-                if len(v) >= _MIN_VALORE:
+                if len(v) >= _MIN_VALORE and v.lower() not in ESENTI:
                     out.add(v)
     return out
 

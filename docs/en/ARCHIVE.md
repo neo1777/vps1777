@@ -47,7 +47,19 @@ archive finds those secrets with a query.* The phone-number pattern does **not**
 inside a canonical uuid (8-4-4-4-12 hex) and leaves valid ISO dates with the time
 (`2026-09-05 13:10`) and the `YYYYMMDD-HHMMSS` shape of bundle names intact: three strict
 exemptions, since 0.51.1 (before, a uuid with digit-only groups and a date with the time
-came out as "[telefono redatto]", "[phone redacted]"; measured live on 24/09/2026).
+came out as "[telefono redatto]", "[phone redacted]"; measured live on 24/09/2026). Since
+0.51.4 the date with the time also holds with minutes and seconds written with dashes or
+dots, as in screenshot names (`Schermata del 2026-09-24 18-41-38.png` came out as
+"Schermata del [telefono redatto]-38.png"); minutes and seconds must be 00-59.
+
+**An account-data value that is public by your choice** is exempted by name, with
+`ARCHIVE_REDACT_ESENTI` in `.env` (comma-separated values, case-insensitive; since
+0.51.4). The case that gave rise to it: the claude.ai account's `full_name` was the
+author's public handle, the same name as their repositories, and the redaction removed it
+from every path and every label (`corpus-<handle>/…` came out as
+"corpus-[dato personale redatto]/…", "[personal data redacted]"). Empty by default: the
+policy does not change until you write it. It applies only to known values: an email or a
+phone number in a recognisable format stays redacted even if you exempt it.
 
 **The practical rule** (as long as the archive stays yours and the models *you*
 give the connector to, this is a defensible choice):
