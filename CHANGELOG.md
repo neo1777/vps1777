@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.54.0] — 2026-09-26
+
 ### ✨ Nuovo
 
 - **archive-mcp: `campi='testo'` in `search`, `count` e `search_ibrida` — cercare solo
