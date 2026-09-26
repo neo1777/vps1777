@@ -339,6 +339,41 @@ def _thread_ids(conn: sqlite3.Connection, uuid: str) -> set[str]:
     return {r[0] for r in rows if r[0]}
 
 
+def _fonte_sessione(conn: sqlite3.Connection, uuid: str) -> str:
+    """Il file di sessione Claude Code (`sessions/…` o `subagents/…`) in cui l'ingest ha
+    visto `uuid`, dalla tabella `sightings`; '' se non c'è (fonti claude.ai, documenti,
+    DB senza la tabella). Per una scheda di sessione R1, il file della sessione che
+    descrive. Più copie dello stesso uuid: vince la prima in ordine di nome,
+    cioè il file principale prima dei filoni `__fN` («.» < «_»)."""
+    try:
+        r = conn.execute(
+            "SELECT source FROM sightings WHERE uuid = ? AND (substr(source, 1, 9) = "
+            "'sessions/' OR substr(source, 1, 10) = 'subagents/') ORDER BY source LIMIT 1",
+            (uuid,)).fetchone()
+        if r is None:
+            # una SCHEDA R1 (`recupero/sessioni/<sid>.md`, o il ponte) porta al file
+            # della sua sessione: dalla scheda si legge la chat intera
+            m = conn.execute(
+                "SELECT source FROM sightings WHERE uuid = ? AND (source LIKE "
+                "'recupero/sessioni/%.md' OR source LIKE 'workfiles/_recupero-1777/sessioni/%.md') "
+                "LIMIT 1", (uuid,)).fetchone()
+            if m:
+                sid = m[0].rsplit("/", 1)[1][: -len(".md")]
+                r = conn.execute("SELECT source FROM sightings WHERE source = ? LIMIT 1",
+                                 (f"sessions/{sid}.jsonl",)).fetchone()
+    except sqlite3.OperationalError:
+        return ""  # DB senza `sightings`
+    return r[0] if r else ""
+
+
+def _righe_sessione(conn: sqlite3.Connection, fonte: str) -> list[dict[str, Any]]:
+    """Le righe viste nel file di sessione `fonte`, in ordine (ts, uuid)."""
+    return [dict(r) for r in conn.execute(
+        "SELECT m.uuid, m.project, m.ts, m.content, m.sender FROM sightings s "
+        "CROSS JOIN messages m ON m.uuid = s.uuid WHERE s.source = ? "
+        "ORDER BY m.ts ASC, m.uuid ASC", (fonte,)).fetchall()]
+
+
 def context_conn(conn: sqlite3.Connection, uuid: str, *, before: int = 3,
                  after: int = 3) -> list[dict[str, Any]]:
     """I messaggi attorno a `uuid`, col CONTENUTO PIENO (non lo snippet troncato).
@@ -347,12 +382,33 @@ def context_conn(conn: sqlite3.Connection, uuid: str, *, before: int = 3,
     STESSO thread — non più dalla sola vicinanza temporale nello stesso project, che
     poteva mischiare conversazioni diverse (era l'over-claim di «stesso thread»).
     Sulle fonti senza arco (chunked / db storici) ricade sull'adiacenza per
-    (ts, uuid) dello stesso project — il comportamento storico. Vuoto se l'uuid non c'è."""
+    (ts, uuid) dello stesso project — il comportamento storico. Vuoto se l'uuid non c'è.
+
+    Sulle righe di Claude Code la finestra si prende PRIMA nel file di sessione in
+    cui l'ingest le ha viste (`sightings`): la catena `parent_uuid` di Claude Code
+    passa per record che l'indexer non tiene (durate dei turni, allegati vuoti,
+    messaggi di soli metadati), e sul primario del 24/09 il genitore mancava in
+    82.876 righe su 260.072 — il 32%. Lì il thread si riduceva al messaggio stesso e
+    `get_context` restituiva solo lui (misurato il 26/09 su un messaggio di Neo). Il
+    file di sessione è la conversazione vera, senza buchi e senza le sessioni
+    parallele dello stesso project. La riga cercata porta `vicini_da`."""
     row = conn.execute(
         "SELECT project, ts FROM messages WHERE uuid = ?", (uuid,)).fetchone()
     if row is None:
         return []
     project, ts = row["project"], row["ts"]
+    fonte = _fonte_sessione(conn, uuid)
+    if fonte:
+        seq = _righe_sessione(conn, fonte)
+        pos = next((i for i, r in enumerate(seq) if r["uuid"] == uuid), None)
+        if pos is not None and len(seq) > 1:
+            out = seq[max(0, pos - int(before)): pos + int(after) + 1]
+            for r in out:
+                r.pop("sender", None)
+                r["is_match"] = (r["uuid"] == uuid)
+                if r["is_match"]:
+                    r["vicini_da"] = f"file di sessione {fonte}"
+            return out
     ids = _thread_ids(conn, uuid)
     if len(ids) > 1:
         # threaded: la finestra ±N si prende DENTRO il thread, ordinato (ts, uuid).
@@ -394,11 +450,41 @@ def conversation_conn(conn: sqlite3.Connection, uuid: str, *,
     Dove l'arco manca — fonti chunked (pdf/telegram/memory) e db storici — ricade
     sull'ordine lineare dello stesso archivio (`project`). La ricostruzione FEDELE
     dell'ordine sulla coda-documenti (colonna `seq`) è un passo evolutivo DICHIARATO
-    fuori scope oggi. Vuoto se l'uuid non c'è."""
+    fuori scope oggi. Vuoto se l'uuid non c'è.
+
+    Sulle righe di Claude Code la conversazione è il FILE DI SESSIONE in cui l'ingest
+    le ha viste (`sightings`), non l'albero `parent_uuid`: quello passa per record che
+    l'indexer non tiene e sul primario del 24/09 era spezzato nel 32% delle righe
+    (vedi `context_conn`), quindi restituiva frammenti. In coda vengono le schede
+    `recupero:sessioni` appese all'ultimo messaggio (il loro `parent_uuid`)."""
     anchor = conn.execute(
         "SELECT project FROM messages WHERE uuid = ?", (uuid,)).fetchone()
     if anchor is None:
         return []
+    fonte = _fonte_sessione(conn, uuid)
+    if fonte:
+        seq = _righe_sessione(conn, fonte)
+        if len(seq) > 1:
+            # le schede del contratto R1 della STESSA sessione, per nome del membro (non
+            # risalendo `parent_uuid`: i cloni condividono gli uuid, e la scheda di un
+            # clone appesa a un messaggio comune finiva in coda alla conversazione
+            # sbagliata — misurato il 26/09). Solo per i file `sessions/`.
+            coda: list[dict[str, Any]] = []
+            if fonte.startswith("sessions/"):
+                sid = fonte[len("sessions/"):].rsplit(".jsonl", 1)[0].split("__f", 1)[0]
+                membri = (f"recupero/sessioni/{sid}.md",
+                          f"workfiles/_recupero-1777/sessioni/{sid}.md")
+                coda = [dict(r) for r in conn.execute(
+                    "SELECT m.uuid, m.project, m.ts, m.content, m.sender FROM sightings s "
+                    "CROSS JOIN messages m ON m.uuid = s.uuid WHERE s.source IN (?, ?) "
+                    "ORDER BY m.rowid", membri).fetchall()]  # CROSS: prima i pochi sightings
+                # (senza, il planner scorreva `messages` in ordine di rowid: 1,2 s misurati)
+            out = (seq + coda)[: int(limit)]
+            for r in out:
+                r["is_match"] = (r["uuid"] == uuid)
+                if r["is_match"]:
+                    r["conversazione_da"] = f"file di sessione {fonte}"
+            return out
     ids = _thread_ids(conn, uuid)
     if len(ids) > 1:
         qmarks = ",".join("?" * len(ids))

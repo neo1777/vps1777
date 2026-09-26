@@ -243,9 +243,11 @@ name in the zip, which is what whoever reads them looks for.
 `member` is always the canonical form `recupero/…`. Four properties follow:
 
 - **The card is a leaf of the thread.** Chunk 0 of a session card hangs from the
-  conversation's last message: `get_conversation` and `get_context` find it by
-  walking `parent_uuid` like any other row, and from any message of the session you
-  reach the card (and from the card, the whole chat).
+  conversation's last message. `get_conversation`, though, finds it **by member
+  name** (`recupero/sessioni/<sid>.md`), not by walking up `parent_uuid`: clones share
+  uuids, and a clone's card hanging from a shared message ended up at the end of the
+  wrong chat (measured on 26/09/2026). From any message of the session you reach the
+  card, and from the card the whole chat.
 - **The card comes after the last message.** `get_conversation` orders by
   `(ts, uuid)`: with the same ts as the last message, the sha1 would decide the
   order. So chunk `idx` has `last_ts` + (idx+1) milliseconds, written in ISO with
@@ -401,8 +403,8 @@ above.
 | `search_ibrida(query, db_name, limit, query_fts, …)` | search **by meaning**: FTS5 + vectors fused (RRF). For when you remember the meaning and not the wording; it needs the embedding model and a `<db>.vec.db` index on the volume, and if they are missing **it says so** instead of falling back to FTS5. See [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
 | `count(query, db_name, …)` | how many messages match (not limited): `{total, per_db}`; if a term **collapses** it adds `warnings` |
 | `check_term(term, db_name)` | diagnoses whether a term with `+`/`#` (`C++`, `C#`, `g++`) is searchable or **collapses** onto its prefix — it asks the index, not the docs |
-| `get_context(uuid, db_name, before, after, max_chars)` | the messages **around** a result, with the **full content**; if the message is in a thread, the neighbours come from the **same thread** (`parent_uuid` edge), not from mere closeness in time. `max_chars` (0 = whole) truncates each row **saying so in the text** — on giant hub messages the full payload killed the connection |
-| `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` as in `get_context`. On the sessions of bundles with `recupero/` the session card comes **last** |
+| `get_context(uuid, db_name, before, after, max_chars)` | the messages **around** a result, with the **full content**; on Claude Code sessions the neighbours come from the **session file** (the matched row says so in `vicini_da`); elsewhere, if the message is in a thread, from the **same thread** (`parent_uuid` edge), not from mere closeness in time. `max_chars` (0 = whole) truncates each row **saying so in the text** — on giant hub messages the full payload killed the connection |
+| `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` as in `get_context`. On Claude Code sessions it is the whole **session file** (`conversazione_da`), and with bundles carrying `recupero/` the session's card comes **last** |
 | `get_session(sessionId, db_name, limit, max_chars)` | everything the archive knows about **one** Claude Code **session**: the `sessioni` row, the **card**, the conversation's messages, the edges, the lineage — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | a session's **lineage**: the closure over the edges with `chiusura=1`, with each member's data — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
 | `list_projects(db_name, top)` | the `project` labels with their counts — to **browse** the archive, not just search it |
@@ -445,6 +447,18 @@ The `ruolo` (role) field makes it readable.
 > archive's linear order and `get_context` to closeness in time. A faithful
 > reconstruction of the chunk order (a `seq` column) is a **declared evolutionary
 > step**, out of scope today.
+
+> **Claude Code sessions: the file, not the chain.** In Claude Code transcripts
+> every record points to the previous one, even when the previous one is a record
+> the indexer does not keep (a turn's duration, an empty attachment, a
+> metadata-only message). In the DB that parent is missing: on the primary of
+> 24/09/2026 it was missing for **82,876 rows out of 260,072 (32%)**, and a
+> message's thread often shrank to the message itself — `get_context` returned just
+> it. Since 26/09 the two tools, for rows seen in a `sessions/` or `subagents/` file
+> (`sightings` table), use **that file**: the real conversation, with no gaps and
+> without the other parallel sessions of the same project. Several copies of the
+> same uuid (the `__fN` strands): the main file wins. Re-linking the chain at
+> ingest (skipping the records not kept) remains a **declared** step, not done.
 
 **FTS5 query syntax** (the same rules are in the docstring the model reads before
 searching):

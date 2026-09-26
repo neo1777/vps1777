@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### 🐛 Correzioni
+
+- **archive-mcp: `get_context` e `get_conversation` sulle sessioni Claude Code leggono il
+  file di sessione, non la catena `parent_uuid`.** La catena passa per record che l'indexer
+  non tiene: sul primario del 24/09 il genitore mancava nel 32% delle righe, e
+  `get_context` su un messaggio di Neo restituiva solo il messaggio (misurato il 26/09).
+  Ora i vicini e la chat intera vengono dal file in cui l'ingest ha visto la riga
+  (`sightings`), il file principale prima dei filoni; la scheda R1 in coda si prende per
+  nome del membro (la scheda di un clone finiva in coda alla chat sbagliata), e
+  dall'uuid di una scheda si arriva alla sua chat. Nessun re-ingest: vale subito su
+  tutti i DB che hanno `sightings`. Doc: ARCHIVE.md (IT/EN).
+
 ### 📖 Documentazione
 
 - **`docs/RICERCA-IBRIDA.md` (IT/EN): l'indice del primario è caricato (26/09/2026).**

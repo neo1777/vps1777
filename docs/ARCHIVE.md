@@ -237,9 +237,11 @@ invece, citano il nome vero nello zip, che è quello che chi le legge cerca.
 è sempre la forma canonica `recupero/…`. Ne seguono quattro proprietà:
 
 - **La scheda è una foglia del thread.** Il pezzo 0 di una scheda di sessione pende
-  dall'ultimo messaggio della conversazione: `get_conversation` e `get_context` la
-  trovano camminando `parent_uuid` come ogni altra riga, e da qualunque messaggio
-  della sessione si arriva alla scheda (e dalla scheda a tutta la chat).
+  dall'ultimo messaggio della conversazione. `get_conversation` però la trova **per
+  nome del membro** (`recupero/sessioni/<sid>.md`), non risalendo `parent_uuid`: i
+  cloni condividono gli uuid, e la scheda di un clone appesa a un messaggio comune
+  finiva in coda alla chat sbagliata (misurato il 26/09/2026). Da qualunque messaggio
+  della sessione si arriva alla scheda, e dalla scheda a tutta la chat.
 - **La scheda viene dopo l'ultimo messaggio.** `get_conversation` ordina per
   `(ts, uuid)`: con lo stesso ts dell'ultimo messaggio, l'ordine lo deciderebbe lo
   sha1. Per questo il pezzo `idx` ha `last_ts` + (idx+1) millisecondi, scritto in ISO
@@ -395,8 +397,8 @@ dalla Mini App). Tutti passano dalla redazione in uscita descritta sopra.
 | `search_ibrida(query, db_name, limit, query_fts, …)` | ricerca **per senso**: FTS5 + vettori fusi (RRF). Serve quando ricordi il senso e non il lessico; richiede il modello di embedding e un indice `<db>.vec.db` sul volume, e se mancano **lo dice** invece di ricadere su FTS5. Vedi [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
 | `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings` |
 | `check_term(term, db_name)` | diagnostica se un termine con `+`/`#` (`C++`, `C#`, `g++`) è ricercabile o **collassa** sul prefisso — chiede all'indice, non alla doc |
-| `get_context(uuid, db_name, before, after, max_chars)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; se il messaggio è in un thread, i vicini vengono dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale. `max_chars` (0 = intero) tronca ogni riga **dichiarandolo nel testo** — sui messaggi-hub giganti il payload pieno uccideva la connessione |
-| `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine `(ts, uuid)`) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` come in `get_context`. Sulle sessioni dei bundle con `recupero/` la scheda di sessione esce **in coda** |
+| `get_context(uuid, db_name, before, after, max_chars)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; sulle sessioni Claude Code i vicini vengono dal **file di sessione** (la riga cercata lo dice in `vicini_da`); altrove, se il messaggio è in un thread, dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale. `max_chars` (0 = intero) tronca ogni riga **dichiarandolo nel testo** — sui messaggi-hub giganti il payload pieno uccideva la connessione |
+| `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine `(ts, uuid)`) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` come in `get_context`. Sulle sessioni Claude Code è il **file di sessione** intero (`conversazione_da`), e coi bundle con `recupero/` la scheda della sessione esce **in coda** |
 | `get_session(sessionId, db_name, limit, max_chars)` | tutto ciò che l'archivio sa di **una sessione** Claude Code: la riga di `sessioni`, la **scheda**, i messaggi della conversazione, gli archi, la stirpe — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | la **stirpe** di una sessione: la chiusura sugli archi con `chiusura=1`, coi dati di ogni membro — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
@@ -439,6 +441,18 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 > lineare dell'archivio e `get_context` sull'adiacenza temporale. La
 > ricostruzione fedele dell'ordine dei chunk (colonna `seq`) è un passo
 > **evolutivo dichiarato**, fuori scope oggi.
+
+> **Sessioni Claude Code: il file, non la catena.** Nei transcript di Claude Code
+> ogni record punta al precedente, anche quando il precedente è un record che
+> l'indexer non tiene (la durata di un turno, un allegato vuoto, un messaggio di
+> soli metadati). Nel DB quel genitore manca: sul primario del 24/09/2026 mancava
+> per **82.876 righe su 260.072 (32%)**, e il thread di un messaggio si riduceva
+> spesso al messaggio stesso — `get_context` restituiva solo lui. Dal 26/09 i due
+> tool, per le righe viste in un file `sessions/` o `subagents/` (tabella
+> `sightings`), usano **quel file**: la conversazione vera, senza buchi e senza le
+> altre sessioni parallele dello stesso project. Più copie dello stesso uuid (i
+> filoni `__fN`): vince il file principale. Riallacciare la catena all'ingest
+> (saltando i record non tenuti) resta un passo **dichiarato**, non fatto.
 
 **Sintassi della query FTS5** (le stesse regole sono nella docstring che il
 modello legge prima di cercare):
