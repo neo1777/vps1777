@@ -3590,8 +3590,12 @@ def cmd_archive_migra(repo: Path, args) -> int:
             warn(f"«{nome}»: output non interpretabile — {(r.stdout or '')[:160]}")
             uscita = 1
             continue
+        if esito.get("indice_project"):
+            verbo_i = "creerei" if not esito.get("scritto") else "creato"
+            log(f"  {nome}: indice per etichetta {verbo_i} (idx_project)")
         if not (esito.get("strumenti") or esito.get("sistema")):
-            log(f"  {nome}: niente da migrare")
+            if not esito.get("indice_project"):
+                log(f"  {nome}: niente da migrare")
             continue
         verbo = "diventerebbero" if not esito.get("scritto") else "diventate"
         prima = esito.get("speaker_prima", {}).get("human", 0)

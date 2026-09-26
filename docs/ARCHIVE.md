@@ -897,6 +897,17 @@ Dichiarati, non scoperti per caso:
   `[telefono redatto]:10`). Ora gli uuid canonici non si toccano e le date valide con l'ora
   restano; le esenzioni sono strette (un mese 13, un giorno 32, un'ora 24 restano telefono) e
   i telefoni veri continuano a sparire (test in `test_redazione.py`, nei due versi).
+- **«MCP server connection lost» alla prima chiamata dopo una pausa — curato nella
+  0.56.0.** Tre volte fra il 24 e il 26/09 la prima chiamata del connettore dopo un
+  update, un ingest o il caricamento di un indice si interrompeva, e la seconda andava.
+  Riprodotto il 26/09: dopo un riavvio di archive-mcp la prima `search_ibrida` rispondeva
+  in **64,9 s**, oltre i 60 s di lettura del proxy del gateway (`httpx.ReadTimeout` nei
+  log). La causa era la redazione in uscita: alla prima chiamata dopo un avvio o un
+  cambio della dir raccoglie l'anagrafica (`project='account:user'`) da ogni DB, e senza
+  un indice su `project` li leggeva per intero, **46,7 s** a cache fredda su 29 DB. Ora
+  i DB hanno `idx_project`: lo crea l'ingest, e sui DB già caricati `vps1777
+  archive-migra --scrivi` (4,6 s sul primario, +7 MB). Finché un DB non ce l'ha, la
+  prima chiamata resta lenta.
 - **Le righe vecchie del ponte non si tolgono da sole.** Un DB che aveva ingerito
   bundle col ponte `workfiles/_recupero-1777/` con un indexer **precedente**
   all'alias ha righe `workfile:_recupero-1777/…`; re-ingerire con questo indexer

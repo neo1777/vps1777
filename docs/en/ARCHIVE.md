@@ -906,6 +906,17 @@ Declared, not discovered by chance:
   came out as `[telefono redatto]:10`). Now canonical uuids are left alone and valid dates
   with the time stay; the exemptions are strict (month 13, day 32, hour 24 are still phone
   numbers) and real phone numbers still disappear (tests in `test_redazione.py`, both ways).
+- **"MCP server connection lost" on the first call after a pause — cured in 0.56.0.**
+  Three times between 24 and 26/09 the connector's first call after an update, an ingest
+  or an index upload broke off, and the second one worked. Reproduced on 26/09: after an
+  archive-mcp restart the first `search_ibrida` answered in **64.9 s**, beyond the 60 s
+  read timeout of the gateway's proxy (`httpx.ReadTimeout` in the logs). The cause was the
+  outgoing redaction: on the first call after a start or a directory change it collects
+  the personal data (`project='account:user'`) from every DB, and without an index on
+  `project` it read them whole, **46.7 s** with a cold cache over 29 DBs. Now the DBs have
+  `idx_project`: the ingest creates it, and on DBs already loaded `vps1777 archive-migra
+  --scrivi` does (4.6 s on the primary, +7 MB). Until a DB has it, the first call stays
+  slow.
 - **The bridge's old rows don't go away by themselves.** A DB that had ingested
   bundles with the `workfiles/_recupero-1777/` bridge using an indexer **predating**
   the alias has `workfile:_recupero-1777/…` rows; re-ingesting with this indexer adds

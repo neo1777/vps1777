@@ -3117,3 +3117,28 @@ def test_migrazione_sistema_retroattiva_e_idempotente(tmp_path: Path) -> None:
         assert archive_indexer._ensure_speaker_sistema(c) == 0, "idempotente"
     esito = archive_indexer.migra_derivate(db)
     assert esito["sistema"] == 0 and esito["strumenti"] == 0
+
+
+def test_indice_per_etichetta_e_migrazione(tmp_path: Path) -> None:
+    """`WHERE project = …` deve usare un indice: la redazione di archive-mcp cerca
+    l'anagrafica in ogni DB, e senza indice leggeva tutto (46,7 s su 29 DB a cache
+    fredda, oltre il timeout del proxy). I DB nuovi lo hanno dallo _SCHEMA; i vecchi
+    lo prendono da `migra_derivate`, a secco no."""
+    import io as _io
+    db = tmp_path / "vecchio.db"
+    archive_indexer.write_rows(db, archive_indexer._iter_claude_code(
+        _io.StringIO(_cc_user("u1", "parola vera")), "p"))
+
+    def piano(c: sqlite3.Connection) -> str:
+        return " ".join(r[-1] for r in c.execute(
+            "EXPLAIN QUERY PLAN SELECT content FROM messages WHERE project='account:user'"))
+    with sqlite3.connect(db) as c:
+        assert "idx_project" in piano(c), "un DB nuovo nasce con l'indice"
+        c.execute("DROP INDEX idx_project")                 # un DB nato prima
+    assert archive_indexer.migra_derivate(db)["indice_project"] is True
+    with sqlite3.connect(db) as c:
+        assert "idx_project" not in piano(c), "a secco non resta niente"
+    assert archive_indexer.migra_derivate(db, scrivi=True)["indice_project"] is True
+    with sqlite3.connect(db) as c:
+        assert "idx_project" in piano(c)
+    assert archive_indexer.migra_derivate(db, scrivi=True)["indice_project"] is False

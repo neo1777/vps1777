@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### 🐛 Correzioni
+
+- **archive: «MCP server connection lost» alla prima chiamata dopo una pausa — un indice
+  su `project`.** Riprodotto il 26/09: dopo un riavvio di archive-mcp la prima chiamata
+  rispondeva in 64,9 s, oltre i 60 s di lettura del proxy del gateway. La redazione in
+  uscita, alla prima chiamata dopo un avvio o un cambio della dir, cerca l'anagrafica
+  (`project='account:user'`) in ogni DB, e senza indice li leggeva interi: 46,7 s a cache
+  fredda su 29 DB. Ora `idx_project` nasce dallo _SCHEMA a ogni ingest, e
+  `vps1777 archive-migra --scrivi` lo crea sui DB già caricati (4,6 s e +7 MB sul
+  primario). Serve anche a `list_projects` e ai filtri per etichetta. Doc: ARCHIVE.md
+  (IT/EN), «Limiti noti».
+
 ## [0.55.0] — 2026-09-26
 
 ### ✨ Nuovo

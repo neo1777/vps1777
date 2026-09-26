@@ -334,6 +334,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
 -- lo usa `get_conversation` nel server MCP (una WITH RECURSIVE su parent_uuid).
 -- Ricreato a ogni ingest (IF NOT EXISTS), copre anche i DB migrati da v1.
 CREATE INDEX IF NOT EXISTS idx_parent ON messages(parent_uuid);
+-- Indice per etichetta (26/09/2026). Senza, `WHERE project = …` leggeva TUTTO il DB:
+-- la redazione in uscita di archive-mcp cerca l'anagrafica (`project='account:user'`) in
+-- ogni DB alla prima chiamata dopo un avvio o un cambio della dir, e a cache fredda erano
+-- 46,7 s su 29 DB (12,9 s il più grande): con il modello e la registry si superavano i
+-- 60 s del proxy del gateway, e il connettore rispondeva «MCP server connection lost».
+-- Serve anche a `list_projects` e ai filtri per etichetta.
+CREATE INDEX IF NOT EXISTS idx_project ON messages(project);
 -- Il "libro-mastro degli scarti" (D3): ogni record che l'ingest NON indicizza
 -- (senza uuid, contenuto vuoto, non-dict) lascia una LAPIDE datata e leggibile,
 -- invece di sparire in un `continue` muto. uid deterministico → re-ingest idempotente.
@@ -1293,10 +1300,21 @@ def _ensure_speaker_sistema(conn: sqlite3.Connection) -> int:
     return len(da_cambiare)
 
 
+def _ensure_indice_project(conn: sqlite3.Connection) -> bool:
+    """Crea `idx_project` sui DB nati prima che lo _SCHEMA lo dichiarasse. True se l'ha
+    creato. (Un ingest lo crea da sé, perché esegue lo _SCHEMA; questo serve ai DB in cui
+    non si scrive più, via `archive-migra`.)"""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_project'"
+                    ).fetchone():
+        return False
+    conn.execute("CREATE INDEX idx_project ON messages(project)")
+    return True
+
+
 def migra_derivate(db_path: Union[str, Path], *, scrivi: bool = False) -> dict:
     """Applica a un DB esistente, SENZA ingest, le migrazioni delle colonne derivate
-    (oggi: gli output degli strumenti e i turni del programma) e riporta il delta di
-    `speaker`.
+    (oggi: gli output degli strumenti e i turni del programma), crea l'indice per
+    etichetta se manca, e riporta il delta di `speaker`.
 
     Serve per i DB che nessun ingest riaprirà: l'aggancio in `write_rows` cura solo
     quelli in cui si scrive ancora. 🛡️ A SECCO per default, come `--retag`: il delta
@@ -1317,13 +1335,14 @@ def migra_derivate(db_path: Union[str, Path], *, scrivi: bool = False) -> dict:
         try:
             n = _ensure_speaker_strumenti(conn)
             n_sistema = _ensure_speaker_sistema(conn)
+            indice = _ensure_indice_project(conn)
             dopo = _conta()
             conn.execute("COMMIT" if scrivi else "ROLLBACK")
         except BaseException:
             conn.execute("ROLLBACK")
             raise
-        return {"strumenti": n, "sistema": n_sistema, "speaker_prima": prima,
-                "speaker_dopo": dopo, "scritto": bool(scrivi)}
+        return {"strumenti": n, "sistema": n_sistema, "indice_project": indice,
+                "speaker_prima": prima, "speaker_dopo": dopo, "scritto": bool(scrivi)}
     finally:
         conn.close()
 
