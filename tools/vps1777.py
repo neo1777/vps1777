@@ -424,15 +424,34 @@ def onboarding_dir(repo: Path) -> Path:
 # di RIPARARE perché non si riesce a raccontarlo. Ora si avvisa e si prosegue.
 _TELEMETRIA_MUTA = False
 
+# Il journal dell'update (ops.update-progress-journal, 27/09/2026): `update_progress.json`
+# tiene lo STATO (l'ultimo step, per la barra dei pannelli), `update_journal.ndjson` la
+# STORIA — una riga per step, così un update RIUSCITO lascia l'ordine in cui sono girati
+# gli step, e un auto-update notturno si legge la mattina dopo. Un update fa ~15 righe:
+# 2.000 sono oltre cento update.
+_JOURNAL_MAX_RIGHE = 2000
 
-def _scrivi_telemetria(repo: Path, nome: str, testo: str) -> None:
+
+def _scrivi_telemetria(repo: Path, nome: str, testo: str, *,
+                       aggiungi: bool = False) -> None:
     """Scrive un file di stato per i pannelli. Non solleva MAI: al massimo avvisa,
     e lo fa UNA volta per esecuzione — un update ha quindici step, e quindici righe
-    identiche seppelliscono il resto dell'output proprio quando serve leggerlo."""
+    identiche seppelliscono il resto dell'output proprio quando serve leggerlo.
+    Con `aggiungi` il testo va in coda (il journal), e il file tiene solo le ultime
+    `_JOURNAL_MAX_RIGHE` righe."""
     global _TELEMETRIA_MUTA
     try:
         p = onboarding_dir(repo) / nome
-        p.write_text(testo)
+        if aggiungi:
+            with open(p, "a", encoding="utf-8") as fh:
+                fh.write(testo)
+            righe = p.read_text(encoding="utf-8").splitlines(keepends=True)
+            if len(righe) > _JOURNAL_MAX_RIGHE:
+                tmp = p.with_name(p.name + ".tmp")
+                tmp.write_text("".join(righe[-_JOURNAL_MAX_RIGHE:]), encoding="utf-8")
+                tmp.replace(p)
+        else:
+            p.write_text(testo)
         # Scritto da root (le unit girano come root), il file resta di root e il
         # comando manuale — che la documentazione consiglia — non può più
         # riscriverlo. Si riallinea al proprietario della cartella: è lui l'utente
@@ -454,10 +473,11 @@ def _scrivi_telemetria(repo: Path, nome: str, testo: str) -> None:
 
 def progress_write(repo: Path, target: str, step: int, name: str,
                    status: str, detail: str = "") -> None:
-    _scrivi_telemetria(repo, "update_progress.json", json.dumps({
-        "target": target, "step": step, "step_name": name,
-        "status": status, "detail": detail, "updated_at": now_iso(),
-    }, indent=2) + "\n")
+    riga = {"target": target, "step": step, "step_name": name,
+            "status": status, "detail": detail, "updated_at": now_iso()}
+    _scrivi_telemetria(repo, "update_progress.json", json.dumps(riga, indent=2) + "\n")
+    _scrivi_telemetria(repo, "update_journal.ndjson",
+                       json.dumps(riga, ensure_ascii=False) + "\n", aggiungi=True)
 
 
 def status_write(repo: Path, **fields) -> None:

@@ -187,6 +187,7 @@ inerte. `vps1777 update` ti avvisa se lo trova attivo. Usa il canale gestito.
 | Release staged (bundle + rollback-files) | `releases/vX.Y.Z/` (tenute: corrente + precedente) |
 | Snapshot pre-update | `backups/pre-update/` (tenuti: l'ultimo delle ultime **2 versioni** — n e n-1; il resto si pota subito. Decisione owner del 29/08: la vecchia regola 72h+3-versioni non guardava il PESO, e 7 release in 36h × volumi da 10 GB hanno riempito il disco) |
 | Stato check / intent / progress (per la card admin) | `onboarding/update_{status,pending_update,progress}.json` |
+| Storia degli step (una riga per step, anche degli update riusciti e di quelli notturni; ultime 2.000 righe) | `onboarding/update_journal.ndjson` — `tail -n 20 onboarding/update_journal.ndjson` |
 | Registro migrazioni | volume `gateway-data` → `state/migrations.json` |
 | Log dell'updater | `journalctl -u vps1777-update -u vps1777-check-update` |
 
