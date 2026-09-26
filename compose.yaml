@@ -238,7 +238,11 @@ services:
   # NotebookLM MCP — nlm CLI + Chromium headless
   # ──────────────────────────────────────────────────────────────────────
   nb1777-mcp:
-    <<: [*restart, *logging, *security]
+    # rootfs read-only dal 27/09/2026 (H43): misurato che un giro NotebookLM reale non
+    # scrive niente fuori dai volumi (nlm vive in $HOME=/var/lib/nlm, il server non lancia
+    # Chromium); /tmp è la tmpfs dell'ancora. I file di archive-ingest arrivano via exec
+    # nel volume degli artefatti, non con docker cp (che su un rootfs ro rifiuta).
+    <<: [*restart, *logging, *security, *readonly]
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-mcp:${VPS1777_TAG:-dev}
     init: true
     environment:

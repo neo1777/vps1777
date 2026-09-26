@@ -857,9 +857,6 @@ questa fase i rilasci sono frequenti e aggiungerebbero attrito:
   sbagliata si ritira in tempo segnandola *prerelease* (dettagli in
   [docs/UPDATE.md](docs/UPDATE.md)). Il gate torna in discussione se entra un secondo
   account con accesso in scrittura, o se un workflow ottiene il potere di creare tag.
-- **rootfs read-only su `nb1777-mcp`** (parte di `H43`): il servizio con Chromium è
-  escluso dal read-only finché non verifichiamo un giro NotebookLM reale con tutte le
-  tmpfs necessarie.
 - **Pinning ai digest delle immagini vps1777 nel compose, una per servizio** (`H22`): oggi l'invariante
   «gira solo il digest verificato» lo impone la CLI *dopo* il pull (contro `images.lock`);
   farlo vivere anche nel file compose (override generato all'`up`) chiuderebbe il caso di

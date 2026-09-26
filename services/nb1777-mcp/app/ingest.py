@@ -2,7 +2,7 @@
 app.ingest — entrypoint CLI: estrae il testo di un file via NotebookLM.
 
 Chiamato dal comando host `vps1777 archive-ingest`:
-    docker compose exec -T nb1777-mcp python -m app.ingest --file /tmp/x.pdf [--verify]
+    docker compose exec -T nb1777-mcp python -m app.ingest --file /var/lib/nlm-artifacts/ingest/x.pdf [--verify]
 
 Stampa su stdout un JSON {text, chars, verification?}. NotebookLM fa la lettura
 multimodale (anche immagini/scansioni); qui si orchestra soltanto (scratch

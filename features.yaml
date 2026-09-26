@@ -329,19 +329,22 @@ features:
       compose_profile: {file: compose.ops.portainer.yaml, profile: ops.portainer}
 
   - id: sec.H43-rootfs-ro
-    nome: "rootfs read-only su nb1777-mcp (rinviato)"
-    cosa: "Filesystem di root in sola lettura sul servizio con Chromium. Rinviato finché non
-           si verifica un giro NotebookLM reale con tutte le tmpfs necessarie."
-    dove: ["SECURITY.md:285"]
-    status: deferred
-    since: "rinviato (postilla SECURITY.md)"
-    decisione: "rimandato di proposito: il servizio con Chromium è escluso dal read-only finché
-                non è verificato un giro NotebookLM reale con le tmpfs. [SECURITY.md:285]"
-    follow_up:
-      manuale: {cosa: "abilitare read_only su nb1777-mcp dopo aver verificato un giro NotebookLM con le tmpfs",
-                rivedi_dopo: "2026-09-10"}
+    nome: "rootfs read-only su nb1777-mcp"
+    cosa: "Filesystem di root in sola lettura anche sul servizio con Chromium: ora tutti i
+           servizi di compose.yaml hanno `*readonly` (/tmp tmpfs noexec 64m). I file di
+           archive-ingest entrano via exec + stdin nel volume degli artefatti
+           (`ingest/`), perché `docker cp` su un rootfs read-only rifiuta."
+    dove: ["compose.yaml#nb1777-mcp", "tools/vps1777.py#cmd_archive_ingest",
+           "tools/tests/test_rootfs_readonly_ovunque.py"]
+    status: active-default
+    since: "unreleased"
+    decisione: "27/09/2026, rinvio scaduto il 10/09 chiuso con la misura che chiedeva: sulla
+                VPS alla 0.57.1, dopo un giro NotebookLM reale (doctor, 142 notebook),
+                `docker diff` mostra solo /run/secrets e /usr/sbin/docker-init; nlm vive in
+                $HOME=/var/lib/nlm (volume), il server non lancia Chromium. Prima:
+                rimandato «finché non si verifica un giro reale con le tmpfs»."
     verify:
-      manual: "verifica umana: nb1777-mcp ha read_only:true nel compose, con le tmpfs necessarie?"
+      path_exists: tools/tests/test_rootfs_readonly_ovunque.py
 
   - id: sec.H22-digest-pin
     nome: "Pinning ai digest delle immagini nel compose (rinviato)"
