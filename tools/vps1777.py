@@ -344,15 +344,22 @@ def env_read(repo: Path) -> dict[str, str]:
 
 
 def env_set(repo: Path, key: str, value: str) -> None:
+    env_set_molti(repo, {key: value})
+
+
+def env_set_molti(repo: Path, valori: dict[str, str]) -> None:
+    """Scrive più chiavi del `.env` in UNA sostituzione atomica (H22: il tag e i
+    digest della versione devono cambiare insieme, o nessuno)."""
     envf = repo / ".env"
     lines = envf.read_text().splitlines() if envf.is_file() else []
-    prefix = f"{key}="
-    for i, line in enumerate(lines):
-        if line.startswith(prefix):
-            lines[i] = f"{key}={value}"
-            break
-    else:
-        lines.append(f"{key}={value}")
+    for key, value in valori.items():
+        prefix = f"{key}="
+        for i, line in enumerate(lines):
+            if line.startswith(prefix):
+                lines[i] = f"{key}={value}"
+                break
+        else:
+            lines.append(f"{key}={value}")
 
     # 🔴 SCRITTURA ATOMICA (02/08, b82df434) — PRIMA ERA `envf.write_text(...)`, cioè
     #   TRONCA-E-RISCRIVI. Un kill o un disco pieno a metà lasciava `.env` mutilato, e
@@ -1276,6 +1283,41 @@ def image_base(repo: Path) -> str:
 
 def image_ref(repo: Path, svc: str, version: str) -> str:
     return f"{image_base(repo)}/vps1777-{svc}:{norm_ver(version)}"
+
+
+# H22 (27/09/2026) — «gira solo il digest verificato» vive anche nel compose. Ogni
+# immagine vps1777 in compose.yaml è `…:${VPS1777_TAG}${VPS1777_DIGEST_<SVC>:+@…}`, e i
+# digest li scrive nel `.env` solo la CLI, col tag, dopo `verify_digests`. Così anche un
+# `docker compose pull && up` lanciato a mano gira il digest verificato.
+# Due regole che reggono tutto:
+#   · il PULL della CLI va per tag (digest spenti: `versione_env(x, None)`). Misurato:
+#     `docker pull nome:tag@digest` lascia l'immagine SENZA tag, e verify_digests la
+#     cerca per tag. Si scarica per tag, si verifica, poi si accende il pin;
+#   · ogni env di versione nasce da `versione_env`: le variabili in env= vincono sul
+#     `.env`, e un env col solo tag, in un rollback, farebbe girare il tag vecchio coi
+#     digest nuovi rimasti nel `.env` — cioè le immagini nuove.
+def digest_var(svc: str) -> str:
+    return "VPS1777_DIGEST_" + svc.upper().replace("-", "_")
+
+
+def versione_env(tag: str, rif: dict[str, str] | None) -> dict[str, str]:
+    """Le variabili di una versione: il tag e un digest per servizio.
+
+    `rif` mappa servizio → `nome@sha256:…` (images.lock o `previous_images`). Senza
+    riferimento, o con uno malformato, il digest è VUOTO: il pin si spegne e resta il
+    tag, cioè il comportamento di prima. Vuoto e presente, non assente: in env= deve
+    coprire un valore pieno rimasto nel `.env`."""
+    env = {"VPS1777_TAG": tag}
+    for svc in SERVICES:
+        ref = (rif or {}).get(svc) or ""
+        dig = ref.rpartition("@")[2] if "@" in ref else ""
+        env[digest_var(svc)] = dig if re.fullmatch(r"sha256:[0-9a-f]{64}", dig) else ""
+    return env
+
+
+def versione_set(repo: Path, tag: str, rif: dict[str, str] | None) -> None:
+    """Scrive nel `.env` tag e digest di una versione, in una sola sostituzione."""
+    env_set_molti(repo, versione_env(tag, rif))
 
 
 def verify_digests(repo: Path, lock: dict[str, str], version: str) -> None:
@@ -2394,12 +2436,14 @@ def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
     # restore dati e resta l'unica via di `rollback --with-data` manuale se il
     # health-gate fallisce. Gli altri: n/n-1 restano, il resto va (dec. 29/08).
     snapshot_prune(repo, keep=snap)
-    env = {"VPS1777_TAG": norm_ver(previous)}
+    # i digest della versione precedente: catturati allo step 10 di QUESTO update
+    prev_img = st.get("previous_images")
+    env = versione_env(norm_ver(previous), prev_img)
     run([*compose_cmd(repo), "down"], check=False, env=env)
     rollback_dir = staging_dir(repo, previous) / "rollback-files"
     if rollback_dir.is_dir():
         restore_rollback_files(repo, rollback_dir, bundle)
-    env_set(repo, "VPS1777_TAG", norm_ver(previous))
+    versione_set(repo, norm_ver(previous), prev_img)
     if need_data_restore:
         if snap is None:
             warn("nessuno snapshot per il restore dati — proseguo senza")
@@ -3113,7 +3157,7 @@ def cmd_update(repo: Path, args) -> int:
     except FileNotFoundError as exc:
         step(8, "stage-check", "failed", str(exc))
         die(f"bundle v{target} incompleto: {exc}")
-    env_new = {"VPS1777_TAG": target}
+    env_new = versione_env(target, lockfile)
     res = run([*compose_cmd(repo, files=staged), "config", "-q"],
               check=False, capture=True, env=env_new)
     if res.returncode != 0:
@@ -3122,7 +3166,9 @@ def cmd_update(repo: Path, args) -> int:
 
     # 9 — pull + verifica digest (ultimo step abort-safe)
     step(9, "pull")
-    res = run([*compose_cmd(repo, files=staged), "pull"], check=False, env=env_new)
+    # per TAG (digest spenti): per digest l'immagine arriverebbe senza tag (H22)
+    res = run([*compose_cmd(repo, files=staged), "pull"], check=False,
+              env=versione_env(target, None))
     if res.returncode != 0:
         step(9, "pull", "failed")
         die("pull fallito — stack intatto sulla vecchia versione")
@@ -3145,7 +3191,7 @@ def cmd_update(repo: Path, args) -> int:
     save_rollback_files(repo, cur, bundle)
     sync_managed_files(repo, bundle)
     install_systemd_units(repo, enable=False)
-    env_set(repo, "VPS1777_TAG", target)
+    versione_set(repo, target, lockfile)          # tag + digest verificati, insieme
 
     # 11 — stop
     step(11, "stop")
@@ -3215,7 +3261,8 @@ def cmd_rollback(repo: Path, args) -> int:
         ack = input(f"Rollback {cur} → {prev}{extra}? [s/N]: ").strip().lower()
         if ack not in ("s", "si", "y", "yes"):
             die("annullato")
-    env = {"VPS1777_TAG": norm_ver(prev)}
+    prev_img = st.get("previous_images")        # digest di `prev`, dall'ultimo update
+    env = versione_env(norm_ver(prev), prev_img)
     run([*compose_cmd(repo), "down"], check=False, env=env)
     rollback_dir = staging_dir(repo, prev) / "rollback-files"
     bundle = staging_dir(repo, cur) / "bundle"
@@ -3229,7 +3276,7 @@ def cmd_rollback(repo: Path, args) -> int:
                 shutil.copy2(p, repo / rel)
     else:
         warn("rollback-files assenti: ripristino solo il tag immagine")
-    env_set(repo, "VPS1777_TAG", norm_ver(prev))
+    versione_set(repo, norm_ver(prev), prev_img)
     if args.with_data:
         snap = snapshot_latest(repo)
         if snap is None:
@@ -3403,14 +3450,15 @@ def cmd_bootstrap(repo: Path, args) -> int:
         first_ref = next(iter(lockfile.values()))
         base = first_ref.split("/vps1777-", 1)[0]
         env_set(repo, "VPS1777_IMAGE_BASE", base)
-    env_set(repo, "VPS1777_TAG", target)
+    versione_set(repo, target, None)
 
-    # pull + digest check
-    env_new = {"VPS1777_TAG": target}
-    res = run([*compose_cmd(repo), "pull"], check=False, env=env_new)
+    # pull (per tag, H22) + digest check; poi il pin acceso per `up`
+    res = run([*compose_cmd(repo), "pull"], check=False, env=versione_env(target, None))
     if res.returncode != 0:
         die("pull fallito — nulla è stato fermato, lo stack legacy gira ancora")
     verify_digests(repo, lockfile, target)
+    versione_set(repo, target, lockfile)
+    env_new = versione_env(target, lockfile)
 
     # cutover: up ricrea i container dalle immagini ghcr; i volumi named
     # non vengono MAI rimossi/ricreati da `up` → zero perdita dati.
@@ -3421,9 +3469,9 @@ def cmd_bootstrap(repo: Path, args) -> int:
         run([*compose_cmd(repo), "down"], check=False)
         for f in pre.glob("compose*.yaml"):
             shutil.copy2(f, repo / f.name)
-        env_set(repo, "VPS1777_TAG", old_tag)
+        versione_set(repo, old_tag, None)
         run([*compose_cmd(repo), "up", "-d"], check=False,
-            env={"VPS1777_TAG": old_tag})
+            env=versione_env(old_tag, None))
         telegram_notify(repo, f"🆘 vps1777: bootstrap a v{target} fallito ({why}) "
                               "— ripristinato lo stack precedente")
         die(f"bootstrap fallito ({why}) — stack precedente ripristinato", 2)
