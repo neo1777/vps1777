@@ -4,6 +4,23 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### ✨ Nuovo
+
+- **La ricerca per senso entra nel prodotto: `vps1777 indice-modello`.** Fino a qui il
+  modello di `search_ibrida` si esportava a mano con torch, e nessuna guida
+  d'installazione nominava la ricerca ibrida. Ora il comando scarica l'ONNX
+  **ufficiale** di `intfloat/multilingual-e5-small` a revisione fissa, verifica byte e
+  sha256 e lo mette nel volume (con `--dest`, in una cartella sul PC per il
+  costruttore). Idempotente; un modello diverso già presente (un export a mano) non si
+  sostituisce senza `--sostituisci`, perché l'indice costruito con quello è legato alla
+  sua impronta. `semantica.codifica` accetta i due grafi: fa lei mean-pooling e norma L2
+  quando il grafo restituisce l'hidden state, e passa `token_type_ids`. Misurato contro
+  l'indice del primario, costruito col vecchio export: coseno minimo 0,9999996 su 40
+  righe. Scelta del 26/09 (ricerca su modelli e metodi alternativi, strada «A ora, il
+  salto di qualità si misura col banco»). Doc: RICERCA-IBRIDA.md (il modello, la prima
+  attivazione scritta per qualunque DB e con il costo, «8 core» corretto in 4 core / 8
+  thread), INSTALL.md e CLI.md, IT/EN.
+
 ## [0.54.0] — 2026-09-26
 
 ### ✨ Nuovo

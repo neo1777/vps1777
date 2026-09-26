@@ -116,6 +116,22 @@ vps1777 archive-retag                     # anteprima su tutti i DB
 vps1777 archive-retag --db cc --scrivi    # applica su un DB solo
 ```
 
+## vps1777 indice-modello
+
+Scarica il modello della ricerca per senso (`intfloat/multilingual-e5-small`,
+l'ONNX ufficiale) **a revisione fissa**, verifica byte e sha256 di ogni file e lo
+mette nel volume dell'archivio, dove lo legge archive-mcp. Idempotente: se il
+modello giusto c'è già, non scarica niente. Un modello **diverso** già presente (un
+export fatto a mano) non lo sostituisce senza `--sostituisci`, perché l'indice
+costruito con quello è legato alla sua impronta. Con `--dest CARTELLA` scarica solo
+lì: è il modo di averlo sul PC per il costruttore dell'indice
+([RICERCA-IBRIDA.md](RICERCA-IBRIDA.md)).
+
+```bash
+vps1777 indice-modello                                         # sulla VPS, nel volume
+python3 tools/vps1777.py indice-modello --dest ~/e5-small      # sul PC, dal checkout
+```
+
 ## vps1777 archive-migra
 
 Porta ai DB **già caricati** le migrazioni delle colonne derivate, senza ingest:

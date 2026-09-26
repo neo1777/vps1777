@@ -3395,6 +3395,131 @@ def cmd_bootstrap(repo: Path, args) -> int:
 _ARCH_NAME_RE = re.compile(r"[^a-z0-9_-]+")
 
 
+# ── indice-modello: il modello della ricerca per senso (26/09/2026) ──────────
+# Fino alla 0.54.0 il modello si ESPORTAVA a mano sul PC con torch: chi scaricava il
+# repo non aveva la ricerca ibrida se non rifacendo quel passo. Il repo del modello su
+# Hugging Face ha un ONNX UFFICIALE (dal 08/09/2023): lo si scarica a revisione fissa e
+# si verifica byte per byte. Il pooling che il grafo ufficiale non contiene lo fa
+# `semantica.codifica` (archive-mcp). Misurato contro l'indice del primario costruito
+# col vecchio export: coseno minimo 0,9999996 su 40 righe (stesso spazio, non stessi
+# byte). La scelta fra questo file e pubblicare il nostro export è del 26/09 (scelte
+# `2026-09-26-vps1777-file-modello`): provenienza verificabile, niente da ospitare.
+MODELLO_INDICE = {
+    "nome": "intfloat/multilingual-e5-small",
+    "revisione": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+    "licenza": "MIT",
+    # (nome nella cartella, percorso nel repo del modello, byte, sha256 LFS)
+    "file": (
+        ("model.onnx", "onnx/model.onnx", 470268510,
+         "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665"),
+        ("tokenizer.json", "onnx/tokenizer.json", 17082730,
+         "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39"),
+    ),
+}
+DIR_MODELLO_VOLUME = "/var/lib/archive/models/e5-small"
+
+
+def _sha256_file(p: Path) -> str:
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while blocco := f.read(1 << 20):
+            h.update(blocco)
+    return h.hexdigest()
+
+
+def _file_modello_a_posto(p: Path, byte: int, sha: str) -> bool:
+    return p.is_file() and p.stat().st_size == byte and _sha256_file(p) == sha
+
+
+def scarica_modello(dest: Path, *, sostituisci: bool = False,
+                    apri=urllib.request.urlopen) -> list[str]:
+    """Scarica in `dest` i file del modello fissati in MODELLO_INDICE, verificando
+    byte e sha256. Ritorna i nomi dei file scritti ([] = era già tutto a posto).
+
+    🛡️ Si scrive su `<file>.parziale` e si rinomina solo a verifica passata: un file
+    troncato o diverso non prende mai il posto di quello buono. E un file GIÀ
+    presente ma diverso (un export fatto a mano) non si sovrascrive senza
+    `sostituisci`: l'indice costruito con quello è legato alla sua impronta."""
+    dest.mkdir(parents=True, exist_ok=True)
+    nome_modello, rev = MODELLO_INDICE["nome"], MODELLO_INDICE["revisione"]
+    diversi = [nome for nome, _, byte, sha in MODELLO_INDICE["file"]
+               if (dest / nome).exists() and not _file_modello_a_posto(dest / nome, byte, sha)]
+    if diversi and not sostituisci:
+        die(f"in {dest} c'è già un modello DIVERSO da quello fissato ({', '.join(diversi)}): "
+            "probabilmente un export fatto a mano. Un indice costruito con quel file è legato "
+            "alla sua impronta. Lo sostituisco solo con --sostituisci: lo spazio è lo stesso "
+            "(coseno ≥ 0,9999 misurato), ma il costruttore vedrà un'impronta diversa e per "
+            "aggiornare quell'indice chiederà --ricostruisci.")
+    scritti: list[str] = []
+    for nome, sorgente, byte, sha in MODELLO_INDICE["file"]:
+        finale = dest / nome
+        if _file_modello_a_posto(finale, byte, sha):
+            continue
+        url = f"https://huggingface.co/{nome_modello}/resolve/{rev}/{sorgente}"
+        parz = dest / f"{nome}.parziale"
+        h, n = hashlib.sha256(), 0
+        log(f"scarico {nome} ({byte / 1e6:.0f} MB) da {nome_modello}@{rev[:8]}")
+        try:
+            with apri(url, timeout=60) as r, open(parz, "wb") as f:
+                while blocco := r.read(1 << 20):
+                    f.write(blocco)
+                    h.update(blocco)
+                    n += len(blocco)
+        except (OSError, urllib.error.URLError) as exc:
+            parz.unlink(missing_ok=True)
+            die(f"{nome}: download fallito ({exc}). Niente è stato sostituito; riprova.")
+        if n != byte or h.hexdigest() != sha:
+            parz.unlink(missing_ok=True)
+            die(f"{nome}: arrivati {n} byte con sha256 {h.hexdigest()[:16]}…, attesi {byte} "
+                f"e {sha[:16]}…: NON è il file fissato. Niente è stato sostituito.")
+        os.chmod(parz, 0o644)
+        os.replace(parz, finale)
+        scritti.append(nome)
+    return scritti
+
+
+def cmd_indice_modello(repo: Path, args) -> int:
+    """Mette al suo posto il modello della ricerca per senso, scaricato dal repo
+    ufficiale a revisione fissa e verificato. Senza `--dest`: nel volume
+    dell'archivio, dove lo legge archive-mcp. Con `--dest CARTELLA`: solo lì (sul
+    PC, per costruire l'indice con `costruisci_indice.py --modello CARTELLA`)."""
+    if args.dest:
+        scritti = scarica_modello(Path(args.dest).expanduser(), sostituisci=args.sostituisci)
+        ok(f"modello in {args.dest}: " + (f"scritti {', '.join(scritti)}" if scritti
+                                           else "già a posto, niente da scaricare"))
+        return 0
+    import tempfile
+    cc = compose_cmd(repo)
+    presenti = run([*cc, "exec", "-T", "gateway", "sh", "-lc",
+                    f"cd {DIR_MODELLO_VOLUME} 2>/dev/null && sha256sum model.onnx tokenizer.json"],
+                   capture=True, check=False)
+    sha_volume = {r.split()[1]: r.split()[0] for r in (presenti.stdout or "").splitlines()
+                  if len(r.split()) == 2}
+    attesi = {nome: sha for nome, _, _, sha in MODELLO_INDICE["file"]}
+    if sha_volume == attesi:
+        ok(f"modello già a posto in {DIR_MODELLO_VOLUME} ({MODELLO_INDICE['nome']}"
+           f"@{MODELLO_INDICE['revisione'][:8]})")
+        return 0
+    if sha_volume and not args.sostituisci:
+        die(f"in {DIR_MODELLO_VOLUME} c'è già un modello diverso da quello fissato "
+            "(probabilmente un export fatto a mano, legato all'indice che c'è). Lo sostituisco "
+            "solo con --sostituisci: stesso spazio (coseno ≥ 0,9999 misurato), ma gli "
+            "aggiornamenti di quell'indice chiederanno --ricostruisci.")
+    with tempfile.TemporaryDirectory(prefix="vps1777-modello-") as tmp:
+        scarica_modello(Path(tmp))
+        run([*cc, "exec", "-T", "gateway", "mkdir", "-p", DIR_MODELLO_VOLUME])
+        for nome, *_ in MODELLO_INDICE["file"]:
+            run([*cc, "cp", str(Path(tmp) / nome), f"gateway:{DIR_MODELLO_VOLUME}/{nome}"])
+    if sha_volume:
+        # un modello era già lì e archive-mcp potrebbe averlo in memoria: lo si riavvia
+        # perché la prossima domanda usi il file nuovo, non la sessione vecchia.
+        run([*cc, "restart", "archive-mcp"])
+        log("archive-mcp riavviato: aveva in memoria il modello di prima")
+    ok(f"modello in {DIR_MODELLO_VOLUME}: {MODELLO_INDICE['nome']}@{MODELLO_INDICE['revisione'][:8]} "
+       "(verificato). Ora serve l'indice: docs/RICERCA-IBRIDA.md, «Attivare la ricerca per senso».")
+    return 0
+
+
 def _filtra_db_archivio(righe: list[str], solo: str | None) -> list[str]:
     """Dall'elenco dei file `.db` del volume, i DB dell'ARCHIVIO: senza i `.vec.db`,
     che sono l'indice semantico accanto a un archivio (0.48.0) e non hanno la tabella
@@ -4077,6 +4202,12 @@ def build_parser() -> "argparse.ArgumentParser":
     p.add_argument("--scrivi", action="store_true",
                    help="applica davvero. Senza, stampa solo il delta e non tocca nulla.")
 
+    p = sub.add_parser("indice-modello",
+                       help="scarica e verifica il modello della ricerca per senso (nel volume o in --dest)")
+    p.add_argument("--dest", help="scarica in questa cartella invece che nel volume (sul PC, per costruire l'indice)")
+    p.add_argument("--sostituisci", action="store_true",
+                   help="sostituisce un modello diverso già presente (l'indice legato a quello andrà ricostruito)")
+
     p = sub.add_parser("archive-migra",
                        help="migra le colonne derivate dei DB già caricati (a secco di default)")
     p.add_argument("--db", help="un solo DB (nome senza .db); default: tutti")
@@ -4134,6 +4265,7 @@ def main() -> int:
                 "archive-ingest": cmd_archive_ingest,
                 "archive-retag": cmd_archive_retag,
                 "archive-migra": cmd_archive_migra,
+                "indice-modello": cmd_indice_modello,
                 "secrets-status": cmd_secrets_status,
                 "memoria": cmd_memoria, "help": cmd_help,
                 "avvisa-fallimento": cmd_avvisa_fallimento}

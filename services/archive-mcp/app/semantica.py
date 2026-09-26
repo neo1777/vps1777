@@ -142,9 +142,9 @@ def _carica_modello(model_dir: Path) -> tuple[Any, Any]:
 def embed_query(testo: str, model_dir: Path) -> bytes:
     """La query come vettore già impacchettato per sqlite-vec (float32 little-endian).
 
-    Il pooling e la normalizzazione L2 sono DENTRO il grafo ONNX (esportati col
-    modello): il runtime non li replica, quindi non può sbagliarli in modo
-    diverso da chi ha costruito l'indice.
+    Passa da `codifica`, lo stesso punto del costruttore dell'indice: pooling e
+    normalizzazione (nel grafo, o qui se il grafo non li ha) non possono divergere
+    fra chi costruisce e chi interroga.
     """
     sess, tk = _carica_modello(model_dir)   # PRIMA il controllo: se manca il modello,
     return codifica(sess, tk, [PREFISSO_QUERY + (testo or "").strip()])[0]
@@ -156,15 +156,31 @@ def codifica(sess: Any, tk: Any, testi: list[str]) -> list[bytes]:
     È il punto unico da cui passano la query (`embed_query`, un testo) e i
     passaggi dell'indice (il costruttore, lotti da decine): stessa tokenizzazione,
     stesso grafo, stesso impacchettamento. Il padding del lotto non entra nel
-    vettore, perché il pooling nel grafo pesa con `attention_mask` (misurato
-    contro l'indice del POC: coseno 1.000000 anche a lotti misti).
+    vettore, perché il pooling pesa con `attention_mask` (misurato contro l'indice
+    del POC: coseno 1.000000 anche a lotti misti).
+
+    Due grafi accettati: il nostro export (pooling e norma dentro il grafo, esce il
+    vettore) e l'ONNX ufficiale del repo del modello (esce l'hidden state 3D: il
+    pooling lo fa questa funzione, e il grafo chiede anche `token_type_ids`).
     """
     import numpy as np                      # qui e non in testa: l'errore parlante sul
                                             # modello mancante non deve dipendere da un import
     enc = tk.encode_batch(testi)
     ids = np.array([e.ids for e in enc], dtype=np.int64)
     mask = np.array([e.attention_mask for e in enc], dtype=np.int64)
-    out = sess.run(None, {"input_ids": ids, "attention_mask": mask})[0]
+    feed = {"input_ids": ids, "attention_mask": mask}
+    if "token_type_ids" in {i.name for i in sess.get_inputs()}:
+        feed["token_type_ids"] = np.zeros_like(ids)    # un solo segmento, come nel training
+    out = sess.run(None, feed)[0]
+    if out.ndim == 3:
+        # L'ONNX UFFICIALE del modello (26/09/2026, `vps1777 indice-modello`) restituisce
+        # l'hidden state: il mean-pooling pesato con `attention_mask` e la norma L2 si
+        # fanno qui, come li fa il grafo del nostro export. Il padding resta fuori dalla
+        # media. Misurato contro l'indice del primario: coseno ≥ 0,9997 (stesso spazio,
+        # non stessi byte: l'impronta del modello nell'indice è diversa).
+        peso = mask[..., None].astype(out.dtype)
+        out = (out * peso).sum(axis=1) / np.clip(peso.sum(axis=1), 1e-9, None)
+        out = out / np.clip(np.linalg.norm(out, axis=1, keepdims=True), 1e-12, None)
     return [struct.pack(f"{DIM}f", *vec.astype("float32")) for vec in out]
 
 
