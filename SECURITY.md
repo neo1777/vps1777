@@ -290,6 +290,11 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   Dependabot legge solo i `FROM`, e il digest di un tag di versione non ha ragioni di
   cambiare. I plugin di esempio restano col tag, perché sono punti di partenza fuori da
   Dependabot.
+- **CI obbligatoria su `main`** (27/09/2026, decisione dell'owner): i 9 job della CI
+  (lint, contract, verify-features, chiusura-issue, le 5 build) sono *required status
+  checks* con `enforce_admins`, quindi nessun commit entra in `main` senza CI verde,
+  nemmeno quelli dell'owner: anche il commit che apre una versione passa da una PR.
+  Prima «merge solo dopo la CI verde» era tenuta dalla disciplina, non da un blocco.
 - **Immutable releases accese** (27/09/2026, impostazione del repo, decisione dell'owner):
   gli asset di una release pubblicata (bundle, `SHA256SUMS`, firma e certificato cosign) e
   il suo tag non si possono più cambiare né togliere. Restano modificabili titolo, note e il
