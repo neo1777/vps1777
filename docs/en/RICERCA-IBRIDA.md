@@ -30,6 +30,44 @@ The two engines fail in different ways: fusion keeps the best of both. On
 them worse, not to win them. If you are looking for a precise term, use
 `search`.
 
+**And a bigger model?** On 27/09/2026 the bench was repeated with two newer
+models, EmbeddingGemma-300m and snowflake-arctic-embed-m-v2.0, against e5-small.
+Rebuilding the whole index with each would have taken days of computing, so the
+comparison ran on a fixed set, the same for all: the targets, the first 50
+results of FTS5 and of e5-small for each query, and 1,500 random messages (5,546
+pieces). The perimeter differs from the table above, and the numbers are to be
+read against each other:
+
+| | e5-small | EmbeddingGemma-300m | arctic-embed-m-v2.0 |
+|---|---|---|---|
+| vectors only (first 10) | **4/9** | 3/9 | 3/9 |
+| hybrid (first 10) | 5/9 | **6/9** | 5/9 |
+| pieces per second on the PC | **2.6** | 0.8 | 0.7 |
+
+None beats e5-small on vectors alone. Gemma gains one query in the hybrid, on a
+bench that favours it (the set holds e5-small's neighbours, not its own), at 3.4
+times the computing. **e5-small stays**: the comparison reopens for a model that
+wins on vectors alone.
+
+## The parameters
+
+| parameter | default | what it does |
+|---|---|---|
+| `query` | — | the question in natural language, as you would say it. It is the signal for the vectors |
+| `query_fts` | `""` | an FTS5 expression (the syntax of `search`) for the full-text branch. If missing, the FTS branch derives one from the words of `query` |
+| `db_name` | `""` | one DB; empty = all those that have an index |
+| `limit` | 20 | rows returned, from 1 to 200: above 200 it keeps 200, below 1 it is an error |
+| `since` / `until` | `""` | time window (ISO, `ts >= since`, `ts <= until`), as in `search`. It applies to **both** lists; rows without a ts stay out |
+| `campi` | `tutto` | `testo` keeps only the rows that have words, in the vector branch too (a vector does not say whether it hit the words or the actions) |
+| `speaker` | `""` | who wrote the row (`human`, `assistant`, `tool`, `system`, `unknown`), as in `search`. It filters both lists |
+| `k_rrf`, `peso_fts` | 30, 1.5 | the fusion: the measured values. Changing them is an experiment, not a tuning |
+| `snippet_tokens` | 32 | length of the FTS snippet |
+
+With a filter (`speaker`, `since`, `until`) the vector branch asks the knn for more
+neighbours (10 times `limit` instead of 3), so that after the discards a real list
+is left to fuse. The filter applies **after** the knn: if nothing in the window is
+close to the question, the vector branch comes back empty and the answer is FTS5's.
+
 ## The four pieces
 
 | piece | where it lives | why there |
@@ -464,7 +502,7 @@ Estimates, from the measured speed (they are estimates, not measurements):
 
 | perimeter | vectors | time at ~2.3 v/s |
 |---|---|---|
-| May–June 2026 (today's index) | ~139,000 | **~17 h** |
+| May–June 2026 (the prototype's index) | ~139,000 | **~17 h** |
 | July–September 2026 (chunks counted by the prototype on the 08/09 copy) | ~282,000 | ~34 h |
 
 **The full run, measured** (25-26/09/2026, same 4-core / 8-thread PC, in normal use, at `nice`
@@ -579,7 +617,7 @@ it is not in step, update it there and upload that one.
 
 ## Current perimeter
 
-`[state of the installation on 26/09/2026]`
+`[state of the installation on 27/09/2026]`
 
 - **The primary for Claude Code is `recupero-20260924`** (since 24/09: the first bundle
   with the `recupero/` R1 contract, see [ARCHIVE.md](ARCHIVE.md)), and its index covers
@@ -590,6 +628,8 @@ it is not in step, update it there and upload that one.
   After a re-ingest of this DB the index has to be updated on a fresh copy (see "Turning
   on search by meaning", the paragraph on re-ingest): until then, vector results that no longer
   match are discarded and declared.
+- **`memoria-claudeai-20260926`** (the claude.ai memories) has an index of its own on
+  **the whole DB**: 61 messages, with the ledger, generated on 26/09/2026.
 - **`recupero-20260905`** (the primary until 24/09, now a cross-check) keeps the
   prototype's index: **May–June 2026** (58,322 messages, 139,011 vectors, generated on
   07/09/2026), with a hand-written `indice_meta` and **no** ledger — `verifica.registro:

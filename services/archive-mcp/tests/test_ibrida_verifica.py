@@ -243,3 +243,23 @@ def test_speaker_filtra_anche_il_ramo_vettoriale(archivio, monkeypatch):
     umani = modulo.search_ibrida("x", db="arch", limit=3, speaker="human")
     assert umani["righe"] and "u2" not in [r["uuid"] for r in umani["righe"]]
     assert modulo.search_ibrida("x", db="arch", limit=3, speaker="assistant")["righe"][0]["uuid"] == "u2"
+
+
+@vec
+def test_since_until_filtrano_anche_il_ramo_vettoriale(archivio, monkeypatch):
+    """Audit della doc (27/09): `since`/`until` filtravano solo il ramo FTS, e il ramo
+    vettoriale restituiva righe FUORI dalla finestra chiesta — chi cerca «a settembre»
+    si vedeva tornare maggio. Ora la finestra vale per tutte e due le liste, con la
+    stessa regola di `search` (`ts >= since`, `ts <= until`)."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    assert modulo.search_ibrida("x", db="arch", limit=3)["righe"][0]["uuid"] == "u2"
+    dopo = modulo.search_ibrida("x", db="arch", limit=3, since="2026-05-13")
+    assert dopo["righe"], "le righe dentro la finestra restano"
+    assert all(r["ts"] >= "2026-05-13" for r in dopo["righe"])
+    prima = modulo.search_ibrida("x", db="arch", limit=3, until="2026-05-11")
+    assert [r["uuid"] for r in prima["righe"]] == ["u1"]

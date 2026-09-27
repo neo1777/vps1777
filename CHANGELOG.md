@@ -11,6 +11,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   aspetta solo una condizione non scatta mai, se la condizione non arriva: è la lezione del
   gemello todo_or_die, portata dalla curatrice dei rimandi (27/09). Oggi nessuna voce era
   in questo caso: la regola è preventiva.
+- **`search_ibrida`: `since` e `until` valgono anche per il ramo vettoriale.** Prima
+  filtravano solo la lista FTS5, e i vettori restituivano righe fuori dalla finestra:
+  chi chiedeva settembre si vedeva tornare maggio. Ora la finestra vale per tutte e due
+  le liste, con la regola di `search` (`ts >= since`, `ts <= until`, righe senza ts
+  fuori), e col filtro il knn chiede più vicini come già per `speaker`. Trovato
+  dall'audit della documentazione (27/09).
+
+### Documentazione
+- **RICERCA-IBRIDA IT/EN**: la tabella dei parametri (`speaker`, `limit` da 1 a 200,
+  la finestra temporale), l'esito del banco dei modelli del 27/09 (resta e5-small:
+  nessun candidato lo batte sui soli vettori), l'indice di `memoria-claudeai-20260926`
+  nel perimetro attuale, «l'indice di oggi» corretto in «l'indice del prototipo».
+  Nel docstring di `search_ibrida`, «oggi copre mag-giu 2026» valeva solo per l'indice
+  del prototipo: tolto.
 
 ## [0.62.2] — 2026-09-27
 

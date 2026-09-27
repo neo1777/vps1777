@@ -572,9 +572,10 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         #    `indici[].verifica`, mai restituito come se fosse giusto.
         lista_vec: list[str] = []
         try:
-            # con un filtro di speaker il ramo vettoriale ne scarta molti: si chiedono
-            # più vicini, perché la fusione abbia ancora una lista vera
-            rowids = semantica.knn_dedup(conn, blob, topn=limit * (10 if speaker else 3))
+            # con un filtro (speaker, finestra temporale) il ramo vettoriale ne scarta
+            # molti: si chiedono più vicini, perché la fusione abbia ancora una lista vera
+            filtrato = bool(speaker or since or until)
+            rowids = semantica.knn_dedup(conn, blob, topn=limit * (10 if filtrato else 3))
             registro = semantica.uuid_registrati(conn, rowids)
             assenti = uuid_diversi = 0
             if rowids:
@@ -595,6 +596,12 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                         uuid_diversi += 1
                         continue
                     if speaker and r["speaker"] != speaker:
+                        continue
+                    # la finestra vale anche qui, con la regola di `search`: il vettore
+                    # non sa di date, e senza questo filtro tornava maggio a chi chiedeva
+                    # settembre. Una riga senza ts resta fuori, come in FTS (NULL >= x).
+                    if (since and not (r["ts"] and r["ts"] >= since)) or \
+                            (until and not (r["ts"] and r["ts"] <= until)):
                         continue
                     if campi == "testo" and not r["ha_testo"]:
                         # il vettore non dice se ha colpito le parole o le azioni: con

@@ -164,10 +164,12 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
     la parola che useresti tu non è quella che c'è scritta.
 
     📐 QUANTO VALE, misurato: sul banco del POC (9 bersagli fissati PRIMA di
-    misurare) FTS5 da solo trova 5 casi su 9, i vettori da soli 4, **l'ibrido 6**.
-    Non è magia: è che le due liste sbagliano in modi diversi e la fusione tiene
-    il meglio di entrambe. Sulle query esatte questa non batte `search`: la
-    fusione è tarata per NON peggiorarle (peso FTS 1.5), non per vincerle.
+    misurare, settembre 2026) FTS5 da solo trova 5 casi su 9, i vettori da soli 4,
+    **l'ibrido 6**. Non è magia: è che le due liste sbagliano in modi diversi e la
+    fusione tiene il meglio di entrambe. Sulle query esatte questa non batte
+    `search`: la fusione è tarata per NON peggiorarle (peso FTS 1.5), non per
+    vincerle. Il modello (e5-small) è stato rimesso alla prova il 27/09/2026 contro
+    due candidati più grandi: nessuno lo batte sui soli vettori.
 
     🔧 COME SI SCRIVE LA QUERY: in linguaggio naturale, come la diresti a voce —
     è l'opposto della sintassi di `search`. Niente AND/OR/asterischi: la frase
@@ -180,7 +182,9 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
         db_name: DB su cui cercare ('' = tutti quelli CON indice).
         limit: righe restituite (default 20, massimo 200; sotto 1 è un errore).
         query_fts: espressione FTS5 opzionale per il ramo full-text.
-        since / until: filtro temporale sul ramo FTS (ISO).
+        since / until: finestra temporale (ISO, `ts >= since`, `ts <= until`),
+            come in `search`. Vale per TUTTE e due le liste; le righe senza ts
+            restano fuori.
         campi: 'tutto' (default) o 'testo' come in `search`. Col 'testo' il ramo
             vettoriale tiene solo le righe che HANNO parole: un vettore non dice se
             ha colpito il testo o le azioni.
@@ -199,8 +203,9 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
       raccogliendo il guadagno dei vettori o solo FTS5 travestito.
     - `indici`: per ogni DB, quanti messaggi sono indicizzati, **con che
       perimetro** e da quando. ⚠️ Leggilo prima di concludere «non c'è»: un
-      indice parziale (oggi copre mag-giu 2026) produce zeri che sembrano
-      assenze. Fuori dal perimetro, la risposta giusta è `search`.
+      indice parziale (un perimetro come `ts >= 2026-05 AND ts < 2026-07`)
+      produce zeri che sembrano assenze. Fuori dal perimetro, la risposta
+      giusta è `search`.
       `indici[].verifica` dice se i risultati vettoriali combaciano col DB:
       `scartati` > 0 = l'indice è disallineato (dopo un re-ingest) e quei
       risultati sono stati TOLTI, non restituiti sbagliati; `registro: false` =

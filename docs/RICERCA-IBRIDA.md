@@ -25,6 +25,44 @@ I due motori sbagliano in modi diversi: la fusione tiene il meglio di entrambi.
 Sulle query **esatte** l'ibrido non batte `search` — è tarato per non
 peggiorarle, non per vincerle. Se cerchi un termine preciso, usa `search`.
 
+**E un modello più grande?** Il 27/09/2026 il banco è stato ripetuto con due
+modelli più recenti, EmbeddingGemma-300m e snowflake-arctic-embed-m-v2.0, contro
+e5-small. Ricostruire l'indice intero con ciascuno voleva dire giorni di calcolo,
+quindi il confronto è avvenuto su un insieme fisso, uguale per tutti: i bersagli,
+i primi 50 risultati di FTS5 e di e5-small per ogni query, e 1.500 messaggi
+casuali (5.546 pezzi). Il perimetro è diverso da quello della tabella sopra, e i
+numeri vanno letti tra loro:
+
+| | e5-small | EmbeddingGemma-300m | arctic-embed-m-v2.0 |
+|---|---|---|---|
+| solo vettori (primi 10) | **4/9** | 3/9 | 3/9 |
+| ibrido (primi 10) | 5/9 | **6/9** | 5/9 |
+| pezzi al secondo sul PC | **2,6** | 0,8 | 0,7 |
+
+Nessuno batte e5-small sui soli vettori. Gemma guadagna una query nell'ibrido, in
+un banco che la favorisce (l'insieme contiene i vicini di e5-small, non i suoi), al
+prezzo di 3,4 volte il calcolo. **Resta e5-small**: il confronto si riapre per un
+modello che vinca sui soli vettori.
+
+## I parametri
+
+| parametro | default | cosa fa |
+|---|---|---|
+| `query` | — | la domanda in linguaggio naturale, come la diresti a voce. È il segnale per i vettori |
+| `query_fts` | `""` | un'espressione FTS5 (la sintassi di `search`) per il ramo full-text. Se manca, il ramo FTS ne ricava una dalle parole di `query` |
+| `db_name` | `""` | un DB; vuoto = tutti quelli che hanno un indice |
+| `limit` | 20 | righe restituite, da 1 a 200: oltre 200 si tiene 200, sotto 1 è un errore |
+| `since` / `until` | `""` | finestra temporale (ISO, `ts >= since`, `ts <= until`), come in `search`. Vale per **tutte e due** le liste; le righe senza ts restano fuori |
+| `campi` | `tutto` | `testo` tiene solo le righe che hanno parole, anche nel ramo vettoriale (un vettore non dice se ha colpito le parole o le azioni) |
+| `speaker` | `""` | chi ha scritto la riga (`human`, `assistant`, `tool`, `system`, `unknown`), come in `search`. Filtra tutte e due le liste |
+| `k_rrf`, `peso_fts` | 30, 1.5 | la fusione: i valori misurati. Cambiarli è un esperimento, non una regolazione |
+| `snippet_tokens` | 32 | lunghezza dello snippet FTS |
+
+Con un filtro (`speaker`, `since`, `until`) il ramo vettoriale chiede al knn più
+vicini (10 volte `limit` invece di 3), perché dopo gli scarti resti una lista vera
+da fondere. Il filtro si applica **dopo** il knn: se nella finestra non c'è niente
+di vicino alla domanda, il ramo vettoriale torna vuoto e la risposta è quella di FTS5.
+
 ## I quattro pezzi
 
 | pezzo | dove vive | perché lì |
@@ -439,7 +477,7 @@ Stime, dalla velocità misurata (sono stime, non misure):
 
 | perimetro | vettori | tempo a ~2,3 v/s |
 |---|---|---|
-| maggio–giugno 2026 (l'indice di oggi) | ~139.000 | **~17 h** |
+| maggio–giugno 2026 (l'indice del prototipo) | ~139.000 | **~17 h** |
 | luglio–settembre 2026 (pezzi contati dal prototipo sulla copia del 08/09) | ~282.000 | ~34 h |
 
 **La corsa intera, misurata** (25-26/09/2026, stesso PC a 4 core / 8 thread, in uso normale, a
@@ -553,7 +591,7 @@ DB: se non è in pari, aggiornalo lì e carica quello.
 
 ## Perimetro attuale
 
-`[stato dell'installazione al 26/09/2026]`
+`[stato dell'installazione al 27/09/2026]`
 
 - **Il primario per Claude Code è `recupero-20260924`** (dal 24/09: il primo bundle
   col contratto `recupero/` R1, vedi [ARCHIVE.md](ARCHIVE.md)), e il suo indice copre
@@ -564,6 +602,8 @@ DB: se non è in pari, aggiornalo lì e carica quello.
   Dopo un re-ingest di questo DB l'indice va aggiornato su una copia nuova (vedi
   «Attivare la ricerca per senso», il capoverso sul re-ingest): finché non lo si fa, i risultati vettoriali
   che non combaciano più vengono scartati e dichiarati.
+- **`memoria-claudeai-20260926`** (le memorie di claude.ai) ha un indice suo su **tutto
+  il DB**: 61 messaggi, col registro, generato il 26/09/2026.
 - **`recupero-20260905`** (il primario fino al 24/09, ora riscontro) tiene l'indice del
   prototipo: **maggio–giugno 2026** (58.322 messaggi, 139.011 vettori, generato il
   07/09/2026), con `indice_meta` scritta a mano e **senza** registro — `verifica.registro:
