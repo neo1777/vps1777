@@ -18,23 +18,32 @@
 │  - Plugin registry: legge GATEWAY_UPSTREAMS da env   │
 └─────────────────┬────────────────────────────────────┘
                   ▼  (rete backend, internal: true)
-┌─── archive-mcp ──┬── nb1777-mcp ──┬── nb1777-bot ──┬── ocr ──┬─ PLUGIN ─┐
-│  FTS5 multi-DB   │ nlm (CLI)      │ Telegram poll  │  your MCP    │
-│  :8002 /mcp      │ :8003 /mcp     │ no porta       │  your bot    │
-└──────────────────┴────────────────┴────────────────┴──────────────┘
+┌─ archive-mcp ─┬─ nb1777-mcp ──┬─ nb1777-bot ──┬─ ocr ────────┬─ PLUGIN ──┐
+│ FTS5 multi-DB │ nlm (CLI)     │ Telegram poll │ images →     │ your MCP  │
+│ + vectors     │ no browser    │ no port       │ text         │ or bot    │
+│ :8002 /mcp    │ :8003 /mcp    │               │ :8004 /ocr   │ :8010…    │
+└───────────────┴───────────────┴───────────────┴──────────────┴───────────┘
 ```
 
 ## Network
 
 | Network | Driver | `internal` | Connected services |
 |---|---|---|---|
-| `backend` | bridge | ✅ true | all services (internal communication) |
-| `ingress` | bridge | ❌ false | **only** gateway + ingress proxy (caddy/cloudflared) |
+| `backend` | bridge | ✅ true | all services (internal communication), except the `indice-notturno` job, which has no network |
+| `ingress` | bridge | ❌ false | **only** the ingress proxy (caddy/cloudflared) and, with its profile, the gateway |
 | `egress` | bridge | ❌ false | nb1777-mcp, bot — they go out to the Internet, **outside** of `ingress` |
+| `funnel` | bridge without masquerade | ❌ false | only with the Tailscale profile: the gateway. Ingress yes, egress no (H50) |
 
-Three networks, three distinct roles (H25):
+In `compose.yaml` the gateway sits **only** on `backend` (H50): declaring `ingress` for it
+gave it a NAT exit towards any host, measured live on 26/07. The ingress network is given
+back by the overlay of the chosen profile (`compose.ingress.caddy.yaml`,
+`compose.ingress.cloudflared.yaml`); with the Tailscale profile the gateway publishes a
+port on the host's loopback and sits on the `funnel` network, which accepts incoming
+connections and lets nothing out.
+
+Three base networks, three distinct roles (H25):
 - **`backend`** is `internal: true` → world-isolated: whoever lives only here (`archive-mcp`) cannot exfiltrate anything.
-- **`ingress`** hosts **only** the exposed service (gateway) and the proxy that publishes it. Nothing else.
+- **`ingress`** hosts **only** the proxy that publishes the gateway and, with the caddy or cloudflared profile, the gateway itself. Nothing else.
 - **`egress`** provides the Internet exit for the backends that need one (`nb1777-mcp` → NotebookLM, `bot` → Telegram) while **separating** them from the ingress network: a compromised ingress proxy does not sit on the same network as these services. It is a bridge with no published ports → it allows egress (NAT), not ingress.
 
 ## Persistent volumes
@@ -42,23 +51,33 @@ Three networks, three distinct roles (H25):
 | Volume | Container path | Contents |
 |---|---|---|
 | `gateway-data` | `/var/lib/gateway` | audit log, audit.jsonl |
-| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5: the messages and, from Session Recovery bundles, the `sessioni`/`archi`/`memorie` tables — see [ARCHIVE.md](ARCHIVE.md)). Written by the gateway; `archive-mcp` mounts it read-only |
+| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5: the messages and, from Session Recovery bundles, the `sessioni`/`archi`/`memorie` tables — see [ARCHIVE.md](ARCHIVE.md)) + `models/` and the `<db>.vec.db` indexes of search by meaning ([RICERCA-IBRIDA.md](RICERCA-IBRIDA.md)). Written by the gateway (ingest) and by the `indice-notturno` job (the indexes); `archive-mcp` mounts it read-only |
 | `nlm-auth` | `/var/lib/nlm` | NotebookLM profile `profiles/default/` + `AUTH_PENDING.flag` |
+| `nlm-artifacts` | `/var/lib/nlm-artifacts` | the Studio artifacts downloaded by nb1777-mcp and the in-transit files of `archive-ingest`. No secrets |
+| `gateway-uploads` | `/var/lib/uploads` | the gateway's upload spool (`TMPDIR`): on disk and not in the `/tmp` tmpfs, which a 2.6 GB bundle used to fill |
 | Tailscale (host) | `/var/lib/tailscale` on the **host** | node state (not in a container; see INGRESS.md) |
-| `caddy-data` (if Caddy) | `/data` | ACME certificates |
-| `cf-data` (if CF) | (none) | ephemeral token cred |
+| `caddy-data`, `caddy-config` (if Caddy) | `/data`, `/config` | ACME certificates and Caddy's configuration |
+| `portainer-data` (opt-in profile) | `/data` | Portainer's state |
+
+Cloudflared has no volumes: the tunnel token is the `cloudflared_token` secret.
 
 ## Secrets
 
-See [SECRETS.md](../SECRETS.md) (Italian). All file-mounted at `/run/secrets/<name>` (tmpfs RO). No env vars for anything sensitive.
+See [SECRETS.md](../SECRETS.md) (Italian). All file-mounted at `/run/secrets/<name>`: with Docker
+Compose (not Swarm) a `file:` secret is a read-only bind-mount of the file on the host,
+not a tmpfs. No env vars for anything sensitive. Each service sees only its own: the
+gateway has five (`gateway_secret`, `oauth_signing_secret`, `admin_password_bcrypt`,
+`telegram_webapp_secret`, `archive_desc_secret`), and the Telegram bot token is mounted
+only by `nb1777-bot`.
 
 ## Contracts between services
 
 | Caller → Callee | Protocol | Path |
 |---|---|---|
 | Internet → gateway | HTTPS (ingress) | `/<SECRET>/<name>/mcp` |
-| gateway → MCP servers | HTTP container loopback | `http://<service>:<port>/mcp` |
-| gateway → nb1777-mcp (nlm profile) | internal HTTP + shared secret | `/internal/nlm/{status,profile}` |
+| gateway → MCP servers | HTTP on the `backend` network | `http://<service>:<port>/mcp` |
+| gateway → nb1777-mcp (nlm profile, Studio artifacts) | internal HTTP + shared secret | `/internal/nlm/{status,profile,artifacts,artifact}` |
+| bot → nb1777-mcp (profile status) | internal HTTP + shared secret | `/internal/nlm/status` |
 | bot → nb1777-mcp (notifications #30) | internal HTTP + shared secret | `/internal/{notifications,canonico/ack}` |
 | nb1777-bot → nb1777-mcp | MCP client HTTP | `http://nb1777-mcp:8003/mcp` |
 | archive-mcp → gateway (DB card: `set_description`, `set_ruolo`) | internal HTTP + shared secret | `/internal/archive/{description,ruolo}` — archive-mcp's only writes, since it has the volume read-only |
@@ -73,7 +92,7 @@ See [PLUGINS.md](../PLUGINS.md) (Italian). In short:
 1. Create `plugins/<nome>/` with `Dockerfile` + `compose.<nome>.yaml`
 2. Expose an MCP endpoint on an internal port (e.g. `8010` — 8002/8003/8004 belong to the base services)
 3. Add to `.env`: `GATEWAY_UPSTREAMS=archive=archive-mcp:8002,nb1777=nb1777-mcp:8003,<nome>=<container>:8010`
-4. Restart the gateway: `docker compose restart gateway`
+4. Recreate the gateway: `docker compose up -d gateway` (`restart` does not re-read `.env`, and the new `GATEWAY_UPSTREAMS` would not get in)
 5. Your plugin's URL: `<PUBLIC_BASE>/<SECRET>/<nome>/mcp`
 
 ## Update channel
@@ -85,7 +104,11 @@ place that touches images and stack. The gateway stays **unprivileged**: the
 (validated: schema, semver, TTL, anti-replay nonce); a systemd **path unit**
 (`vps1777-update.path` → `vps1777-update.service`) sees it and launches the same
 `vps1777 update`. A daily timer (`vps1777-check-update.timer`) performs the
-release check + Telegram notification to the owner.
+release check + Telegram notification to the owner. A second daily timer
+(`vps1777-auto-update.timer`) installs the latest release by itself, but only once it
+has been published for at least 48 hours (`vps1777 auto-update --eta-minima 48`): a
+bad release has two days to be withdrawn before it arrives. A third
+(`vps1777-secrets-check.timer`) checks the secrets' expiry dates.
 
 ```
 admin UI ──intent──► onboarding/update_pending_update.json
@@ -104,7 +127,10 @@ instead of proceeding — the only *deliberate* emergency escape is setting
 `VPS1777_REQUIRE_COSIGN=0` in the `.env`.
 
 Images come **only from GHCR** (`compose.yaml` is pull-only; local builds exist
-only in the `compose.build.yaml` overlay, dev/CI). Full user manual:
+only in the `compose.build.yaml` overlay, dev/CI). After an update the `.env` carries,
+next to the tag, the digest of every image (`VPS1777_DIGEST_<SERVICE>`, H22): even a
+hand-made `docker compose up` runs the verified images. A fresh installation does not
+have them until its first update. Full user manual:
 [UPDATE.md](UPDATE.md).
 
 ## Healthcheck
@@ -148,10 +174,12 @@ JWT typ is the key: an `access_token` does not work where an `admin_cookie` is r
 
 The posture is **fail-closed**: in the absence of configuration the gateway denies,
 it does not open — proven on the simplest case (no `gateway_secret` → the proxy denies
-everything) by `services/gateway/tests/test_fail_closed_senza_config.py`. What follows is the summary of the hardening from the defensive review (July 2026,
-`v0.19.1 → v0.33.0`, dossier closed: **35 closed · 7 partial · 1 accepted · 0
-open**); the operational detail lives in [../../SECURITY.md](../../SECURITY.md), which is the
-source of truth — here is the summary, there the register that CI verifies.
+everything) by `services/gateway/tests/test_fail_closed_senza_config.py`. What follows is the summary of the hardening: first the defensive review (July 2026,
+`v0.19.1 → v0.33.0`, which at the closing of the dossier counted **35 closed · 7
+partial · 1 accepted · 0 open** out of 43), then what came after. Today the register
+holds 73 findings: 62 closed, 8 partial, 3 accepted, 0 open. The operational detail
+lives in [../../SECURITY.md](../../SECURITY.md), which is the source of truth — here is
+the summary, there the register that CI verifies.
 
 ### Baseline (from the beginning)
 
@@ -161,13 +189,20 @@ source of truth — here is the summary, there the register that CI verifies.
   cannot exfiltrate anything: that is the point, and for it this still holds to the letter.)*
 - OAuth 2.1 + DCR + PKCE; JWTs with separate `typ` values (`access` ≠ `admin_cookie` ≠ miniapp).
 - `GATEWAY_SECRET` as the path-namespace of the MCP proxy.
-- Non-root containers, `cap_drop: ALL`, `no-new-privileges`.
-- Gateway **without** `docker.sock` or access to the host filesystem; it does however see
-  the 5 Docker secrets assigned to it (`telegram_bot_token` included: compromise the
-  gateway, and the Mini App's `initData` becomes forgeable — see `SECRETS.md`); images
-  pinned to digest (`images.lock`).
+- Stack services non-root, `cap_drop: ALL`, `no-new-privileges`. The operational
+  overlays are exceptions and say so: `backup` and `watchtower` run without these
+  options, `portainer` has only `no-new-privileges` (and the Docker socket: it is root
+  access to the host, which is why it is an opt-in profile on loopback).
+- Gateway **without** `docker.sock`; of the host it sees only the `onboarding/` folder
+  (bind-mount, where the update's intent and status go through). It sees the 5 Docker
+  secrets assigned to it: not the bot token, but the derived key `telegram_webapp_secret`
+  (H54): compromise the gateway, and the Mini App's `initData` becomes forgeable, but
+  you cannot speak as the bot — see `SECRETS.md`. Images pinned to digest (`images.lock`).
 
-### Hardening (v0.22.0 → v0.33.0)
+### Hardening from the defensive review (v0.22.0 → v0.33.0)
+
+This table is the history of the July dossier: each row says what went into that
+version, not today's state (for that, the table after it and SECURITY.md).
 
 | Version | Hardening |
 |---|---|
@@ -184,7 +219,18 @@ source of truth — here is the summary, there the register that CI verifies.
 | v0.32.0 | **Real** admin session revocation (`jti` + revoke-list: before, logout only deleted the cookie, H20); Google cookies out of the pre-update snapshot (H14); caps on the **decompressed** size (H39); **open-redirect** H30 marked closed yet actually bypassable (`startswith` is a *prefix* match, not an *origin* match) → truly closed with 12 attack tests; **immutable `v*` tags** (H24). |
 | v0.33.0 | A real **OAuth consent page** (H8); **separate `egress` network** (H25); CORS scoped to OAuth+`/app` only, `/health` with a minimal body and `?deep` internal-only, global CSP `default-src 'none'` (H31/H33/H34/H36); constant-time PKCE (H32); `read_only` rootfs on gateway/archive-mcp/bot (H43). Dossier closed: **0 open findings**. |
 
-> The subsequent versions (v0.34.0 → v0.36.0) are not hardening: they are the nb1777
+### After the dossier (v0.34.0 → today)
+
+| Version | Hardening |
+|---|---|
+| v0.40.x | The gateway **loses its Internet exit** (H50, measured live); the gateway no longer mounts the bot token (H54, fully closed with #61); no service publishes ports in `compose.yaml` (H48); Portainer only on loopback and opt-in (H47); host hardening in all three installers (H45); backup retention counted in days (H57-H59). |
+| v0.43.1 | Four true but unguarded guarantees become tests (actions pinned to SHA H65, third-party images to digest H66, gateway without Docker H67, secrets only as files H68); the account's personal details leave the archive tools redacted (H64). |
+| v0.58.0 | `read_only` rootfs on nb1777-mcp too: now on **all** services (H43); a **48-hour quarantine** for auto-update; H24 (tag protection) becomes an **accepted risk** until 27/12/2026. |
+| v0.59.0 | Image **digests** in the `.env` and in the compose (H22, partial: a fresh installation gets them from its first update). |
+| v0.61.x | nb1777-mcp **without Chromium** (902 → 221 MB); base images of the Dockerfiles pinned to digest; workflow permissions inside the jobs; **immutable releases** on GitHub. |
+| v0.62.x | **Required CI on main** (9 checks, for administrators too); the archive's redaction covers credentials in a recognisable format and the path of trycloudflare tunnels, even inside the snippet's highlights. |
+
+> Versions v0.34.0 → v0.36.0 are the nb1777
 > features (studio fix, canonico, `memoria_check`; since v0.44.0 the canonico is a file
 > of the product and `canonico(full=true)` serves its text, while `memoria_ack` records
 > the ack) — see [NB1777.md](../NB1777.md) (Italian)
@@ -224,8 +270,8 @@ rate-limit, lockout and audit are no longer evadable.
 > `uv sync --frozen`, so what gets measured is the `uvicorn` the image actually installs and
 > not one grabbed on the side. This closes register entry `39b5a89d`.
 > ⚠️ *The test measures the BEHAVIOR, it does not ratify the VERSION: the constraint remains `>=`
-> and majors keep coming in without anyone deciding them (`starlette>=0.45.0` reached
-> 1.3.1 crossing 1.0 in silence). If one day the client IP becomes spoofable again,
+> and majors keep coming in without anyone deciding them (`starlette>=0.45.0` had reached
+> 1.3.1 crossing 1.0 in silence; today the constraint is `>=1.6.0`). If one day the client IP becomes spoofable again,
 > CI will now tell you; if a dependency's versioning regime changes,
 > **no** — that remains a decision to be made by hand.*
 
@@ -249,12 +295,14 @@ bot               ──┘   X-Vps1777-Internal (constant-time)   (unico mount)
 
 | Endpoint (`backend` network only) | Caller | What it does |
 |---|---|---|
-| `GET /internal/nlm/status` | gateway | says **whether** a valid profile exists (`{ok, has_cookies, pending}`) — never the content |
+| `GET /internal/nlm/status` | gateway, bot | says **whether** a valid profile exists (`{ok, has_cookies, pending}`) — never the content |
 | `POST /internal/nlm/profile` | gateway | receives the tar.gz, **validates**, installs (staging → swap with rollback) |
+| `GET /internal/nlm/artifacts` | gateway | the list of downloaded Studio artifacts (`nlm-artifacts`) |
+| `GET /internal/nlm/artifact?name=` | gateway | one artifact, for `/admin/nlm/artifact/{name}` |
 | `GET /internal/notifications` | bot | fetches the notification queue (memory drift + canonico reminders, v0.36.0) |
 | `POST /internal/canonico/ack` | bot | records the ack of the «✓ Fatto» button (v0.36.0) |
 
-Without a configured `gateway_secret` → **403**: fail-closed here too. *These four
+Without a configured `gateway_secret` → **403**: fail-closed here too. *These six
 endpoints are served by `nb1777-mcp`, and the guard is `_internal_ok` (`server.py`): "with no
 secret configured, everything is denied".* The detail of the two memory endpoints and why
 they exist lives in [NB1777.md](../NB1777.md) (Italian) §6-§7.
@@ -277,6 +325,7 @@ Two properties to keep in sight if you touch this area:
   for **all** upstreams. It is a **reserved prefix**: a plugin can use it for
   its own private endpoints knowing the proxy will not expose them. See [PLUGINS.md](../PLUGINS.md) (Italian).
 - **The upload is non-destructive** (the staging→validate→replace flow lives in
-  `services/gateway/app/admin.py`, the NLM profile upload branch): the tar is
+  `services/nb1777-mcp/app/nlm_profile.py`, `install_profile`; the gateway only
+  forwards): the tar is
   extracted into staging, validated, and only then does it replace the good profile —
   a wrong file does not disconnect you from NotebookLM.
