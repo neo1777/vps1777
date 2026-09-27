@@ -501,6 +501,16 @@ findings:
       (setup.sh, deploy.sh, installer/engine.py) scaricano per tag e non verificano i
       digest, quindi non hanno digest verificati da scrivere. Da chiudere con una prova
       eseguita sulla VPS (pull a mano nella cartella → digest verificato).
+    prova:
+      - comando: "docker inspect vps1777-gateway-1 --format {{.Config.Image}}; e, come operatore nella cartella del repo, `docker compose … pull gateway`"
+        dove: "sulla VPS in produzione (v0.59.0, subito dopo l'update)"
+        output: "Config.Image=ghcr.io/neo1777/vps1777-gateway:0.59.0@sha256:8651d088… (uguale a images.lock); i cinque VPS1777_DIGEST_* del .env uguali uno per uno a images.lock; il pull a mano prende il digest fissato."
+        exit: 0
+        quando: "2026-09-27"
+        nota: >
+          Prova del percorso gestito. Resta aperto il solo caso dell'installazione
+          nuova prima del primo update (resta_aperto sopra): per questo la voce è
+          ancora partial.
     # dal 0.59.0 il pin c'è sul percorso gestito; prima era partial dalla v0.27.0
     since: v0.59.0
     evidence:
