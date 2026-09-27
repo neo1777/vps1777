@@ -3142,3 +3142,46 @@ def test_indice_per_etichetta_e_migrazione(tmp_path: Path) -> None:
     with sqlite3.connect(db) as c:
         assert "idx_project" in piano(c)
     assert archive_indexer.migra_derivate(db, scrivi=True)["indice_project"] is False
+
+
+# ── A5: la catena parent_uuid salta i record non tenuti (27/09/2026) ─────────
+# Misurato sul PC il 27/09: in 47 sessioni Claude Code il genitore mancava nel 40,3% delle
+# righe tenute (sul primario della VPS il 32%). Il genitore di un messaggio è spesso un
+# record che l'indexer NON tiene (una riga di servizio, un allegato vuoto, un messaggio
+# vuoto): la riga restava appesa a un uuid che nel DB non esiste.
+
+def _cc_riga(uuid, parent, typ="user", testo="ciao", **extra):
+    d = {"type": typ, "uuid": uuid, "parentUuid": parent,
+         "timestamp": "2026-09-27T01:00:00Z", "sessionId": "s1", **extra}
+    if typ in ("user", "assistant"):
+        d["message"] = {"role": typ, "content": testo}
+    return json.dumps(d)
+
+
+def test_catena_parent_salta_i_record_non_tenuti(tmp_path: Path) -> None:
+    righe = [
+        _cc_riga("u1", None, "user", "prima domanda"),
+        _cc_riga("s1", "u1", "system", subtype="info"),              # servizio: scartato
+        _cc_riga("s2", "s1", "progress"),                            # servizio: scartato
+        _cc_riga("a1", "s2", "assistant", "risposta"),               # → deve puntare a u1
+        _cc_riga("v1", "a1", "assistant", ""),                       # vuoto: scartato
+        _cc_riga("u2", "v1", "user", "seconda domanda"),             # → deve puntare a a1
+        _cc_riga("at", "u2", "attachment", attachment={"addedNames": []}),  # allegato vuoto
+        _cc_riga("a2", "at", "assistant", "seconda risposta"),       # → deve puntare a u2
+        _cc_riga("a3", "x-fuori", "assistant", "genitore mai visto"),  # resta com'è
+    ]
+    src = tmp_path / "s.jsonl"
+    src.write_text("\n".join(righe) + "\n")
+    tenute = {r[0]: r[8] for r in archive_indexer._iter_claude_code(open(src), "p")
+              if isinstance(r, tuple) and len(r) == 9}
+    assert tenute == {"u1": "", "a1": "u1", "u2": "a1", "a2": "u2", "a3": "x-fuori"}
+
+
+def test_catena_parent_non_gira_in_tondo(tmp_path: Path) -> None:
+    righe = [_cc_riga("s1", "s2", "system"), _cc_riga("s2", "s1", "system"),
+             _cc_riga("a1", "s1", "assistant", "ok")]
+    src = tmp_path / "s.jsonl"
+    src.write_text("\n".join(righe) + "\n")
+    tenute = [r for r in archive_indexer._iter_claude_code(open(src), "p")
+              if isinstance(r, tuple) and len(r) == 9]
+    assert len(tenute) == 1 and tenute[0][0] == "a1"

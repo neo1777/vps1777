@@ -477,8 +477,16 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 > tool, per le righe viste in un file `sessions/` o `subagents/` (tabella
 > `sightings`), usano **quel file**: la conversazione vera, senza buchi e senza le
 > altre sessioni parallele dello stesso project. Più copie dello stesso uuid (i
-> filoni `__fN`): vince il file principale. Riallacciare la catena all'ingest
-> (saltando i record non tenuti) resta un passo **dichiarato**, non fatto.
+> filoni `__fN`): vince il file principale.
+>
+> **Dalla 0.62.0 la catena si riallaccia all'ingest**: una riga il cui genitore è un
+> record non tenuto risale fino al primo antenato tenuto (o alla radice). Misurato su 47
+> sessioni di un PC: il genitore mancante è sceso dal **40,3%** delle righe a **5 righe
+> su 132.912**. Vale per ciò che si ingerisce da qui in avanti. I DB già scritti restano
+> com'erano, perché la tabella `skipped` non conserva i genitori degli scarti: li cura
+> solo un nuovo ingest del bundle. I due tool continuano a leggere il file di sessione,
+> quindi per chi cerca non cambia niente; cambia per chi legge il DB a mano o cammina
+> `parent_uuid`.
 
 **Sintassi della query FTS5** (le stesse regole sono nella docstring che il
 modello legge prima di cercare):

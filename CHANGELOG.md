@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **La catena `parent_uuid` di Claude Code si riallaccia all'ingest** (A5). Il genitore di
+  un messaggio è spesso un record che l'indexer non tiene (una riga di servizio, un
+  allegato senza nomi, un messaggio vuoto). La riga restava appesa a un uuid che nel DB non
+  esiste: sul primario il 32% delle righe, su 47 sessioni del PC il 40,3%. Ora risale fino
+  al primo antenato tenuto, con una guardia sui cicli: sulle stesse 47 sessioni restano 5
+  righe su 132.912. Vale per i nuovi ingest. I DB già scritti li cura solo un nuovo ingest
+  del bundle, perché `skipped` non conserva i genitori. `get_context` e `get_conversation`
+  leggevano già il file di sessione, quindi per chi cerca non cambia niente.
+
 ### Sicurezza
 - **CI obbligatoria su `main`**: i 9 job della CI sono *required status checks*, con
   `enforce_admins`. Nessun commit entra in main senza CI verde, nemmeno quelli dell'owner;
