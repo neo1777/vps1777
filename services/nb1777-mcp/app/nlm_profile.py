@@ -10,7 +10,8 @@ scadenze (`busybox --network none`, legge solo l'mtime dei cookie). Vedi
 SECURITY.md — e `tools/tests/test_nlm_auth_montaggi.py`, che tiene insieme
 questa frase e i montaggi veri.
 
-Formato: la CLI `nlm` 0.7.x salva l'auth come cartella `profiles/default/`
+Formato: la CLI `nlm` (dalla 0.7; verificato fino alla 0.12, che aggiunge solo chiavi in
+`metadata.json`) salva l'auth come cartella `profiles/default/`
 (`cookies.json` + `metadata.json`), non come un singolo `auth.json`. Si carica un
 tar.gz di quella cartella.
 

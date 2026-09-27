@@ -83,7 +83,7 @@ Se dopo l'install resta "not found": `uv` mette i binari in `~/.local/bin` →
 
 ## `/admin/nlm` — "il tar non contiene profiles/default/cookies.json"
 
-Causa: hai caricato l'archivio sbagliato. La CLI `nlm` 0.7.x salva l'auth come
+Causa: hai caricato l'archivio sbagliato. La CLI `nlm` (dalla 0.7) salva l'auth come
 **cartella** `~/.notebooklm-mcp-cli/profiles/default/` (con `cookies.json` +
 `metadata.json`), non come `auth.json`. Crea il tar.gz dalla dir giusta:
 ```bash

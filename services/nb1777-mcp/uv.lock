@@ -691,7 +691,7 @@ wheels = [
 
 [[package]]
 name = "notebooklm-mcp-cli"
-version = "0.7.7"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "fastmcp" },
@@ -703,9 +703,9 @@ dependencies = [
     { name = "typer" },
     { name = "websocket-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/50/79/bf7ea838af269733d7abdda1b7be64ebb4a1495440079fb74783de60d0cd/notebooklm_mcp_cli-0.7.7.tar.gz", hash = "sha256:678a5ef9bf2b489614e75a5b10316f65ecf6d09363792e06d6c6874b3a841f22", size = 721441, upload-time = "2026-06-19T21:16:01.706Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d1/e2/8efb598ce8b79660aea368696dddab8e5a44003cff38ecf08ce367b31dfc/notebooklm_mcp_cli-0.12.0.tar.gz", hash = "sha256:6e44981cb25e1a86484071cfa26fb17f9867197f370e5fc7e69a0a6284c13f21", size = 941932, upload-time = "2026-09-24T21:54:09.835Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/83/29/1c0c78c50c6af5a5181b095132b14167b7eb05d494877dfa9ef27e65b76a/notebooklm_mcp_cli-0.7.7-py3-none-any.whl", hash = "sha256:51b94ef71684c2d46700774863a4e7eff7772d3df3fbd0ad0f6dfa6824f8c0a0", size = 342424, upload-time = "2026-06-19T21:15:59.89Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/88/d15ad0621c4f562d249480c9f83889c617eeb284d77b9725b74e7c78a7a6/notebooklm_mcp_cli-0.12.0-py3-none-any.whl", hash = "sha256:e7c5a421599a977a27ded5ed3dc6b91392dcec2d5d143986e02fa8e10b107b99", size = 461630, upload-time = "2026-09-24T21:54:07.925Z" },
 ]
 
 [[package]]
@@ -1192,8 +1192,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography" },
-    { name = "jeepney" },
+    { name = "cryptography", marker = "sys_platform != 'win32'" },
+    { name = "jeepney", marker = "sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
@@ -1365,7 +1365,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "mcp", specifier = ">=1.28,<2" },
-    { name = "notebooklm-mcp-cli", specifier = "==0.7.7" },
+    { name = "notebooklm-mcp-cli", specifier = "==0.12.0" },
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
     { name = "starlette", specifier = ">=1.6.0" },

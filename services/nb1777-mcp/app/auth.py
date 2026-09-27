@@ -15,7 +15,7 @@ from .settings import get_settings
 
 def _paths() -> tuple[Path, Path]:
     home = Path(get_settings().nlm_home)
-    # nlm 0.7.x: l'auth è il profilo profiles/default/cookies.json (non auth.json)
+    # nlm (dalla 0.7, verificato fino alla 0.12): l'auth è il profilo profiles/default/cookies.json (non auth.json)
     return home / "profiles" / "default" / "cookies.json", home / "AUTH_PENDING.flag"
 
 

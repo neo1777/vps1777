@@ -4,6 +4,29 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **Il client NotebookLM passa da `notebooklm-mcp-cli` 0.7.7 a 0.12.0.** Il salto è fatto
+  a mano, col metodo che il commento di dependabot chiedeva da agosto:
+  - changelog a monte letto dalla 0.8.0 alla 0.12.0: il formato del profilo
+    (`profiles/default/cookies.json`) **non cambia**, la 0.9.3 aggiunge solo chiavi in
+    `metadata.json`;
+  - `--help` di tutti i comandi che usiamo, confrontati fra le due versioni: solo aggiunte;
+  - chiavi dei JSON (`notebook list/get`, `source list`, `status artifacts`, `query`) sull'account
+    vero: solo aggiunte.
+
+  Cosa ci guadagniamo: la 0.11.0 corregge le sessioni che morivano dopo circa 8 ore (il
+  recupero dell'autenticazione azzerava il token CSRF), e arrivano le correzioni di
+  sicurezza e di affidabilità di tre mesi.
+- **Il contract-test copre ogni comando**: legge da `app/core.py` ogni flag di ogni comando
+  `nlm <gruppo> <verbo>` e pretende che il `--help` vero lo esponga (25 comandi). Prima
+  guardava solo `source`, `download report` e `studio`.
+- **Il refresh «headless» di nlm è spento** (`NOTEBOOKLM_DISABLE_HEADLESS_REFRESH=1` su
+  nb1777-mcp). Dalla 0.11 nlm prova da sé a rilanciare un profilo di browser salvato, che
+  nel container non c'è; e a monte è documentato che su alcuni account il rilancio fa
+  revocare la sessione. Il rinnovo resta quello dichiarato: un profilo nuovo da `/admin/nlm`.
+- La state card e `doctor` dicono la versione di nlm **installata** invece di un «0.7.7» /
+  «0.7.x» scritto a mano, che al primo salto sarebbe diventato falso.
+
 ## [0.59.0] — 2026-09-27
 
 **L'ultimo rinvio scaduto, e due difetti che la prova dal vivo della 0.58.0 ha trovato

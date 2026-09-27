@@ -400,7 +400,7 @@ def source_add_drive(nb_id: str, document_id: str, *,
 def source_delete(nb_id: str, source_id: str) -> None:  # noqa: ARG001 (nb_id tenuto per firma MCP)
     """Elimina una fonte (irreversibile).
 
-    nlm 0.7.7: `source delete SOURCE_IDS... [--confirm]` — la fonte è
+    nlm (0.7.7 → 0.12.0): `source delete SOURCE_IDS... [--confirm]` — la fonte è
     identificata dal solo source_id (globale), NON dal notebook. Passare nb_id
     come primo posizionale lo farebbe interpretare come un source_id da
     cancellare → "Failed to delete sources".
@@ -411,7 +411,7 @@ def source_delete(nb_id: str, source_id: str) -> None:  # noqa: ARG001 (nb_id te
 def source_get_content(nb_id: str, source_id: str) -> str:  # noqa: ARG001 (nb_id tenuto per firma MCP)
     """Estrae il contenuto raw di una fonte (no elaborazione AI).
 
-    nlm 0.7.7: `source content SOURCE_ID` — un solo posizionale. Il notebook
+    nlm (0.7.7 → 0.12.0): `source content SOURCE_ID` — un solo posizionale. Il notebook
     non serve (source_id è globale). Passare nb_id → "Got unexpected extra
     argument(s)".
     """
@@ -422,7 +422,7 @@ def source_get_content(nb_id: str, source_id: str) -> str:  # noqa: ARG001 (nb_i
 def source_rename(nb_id: str, source_id: str, new_title: str) -> None:
     """Rinomina una fonte.
 
-    nlm 0.7.7: `source rename -n NOTEBOOK SOURCE_ID TITLE` — il notebook è
+    nlm (0.7.7 → 0.12.0): `source rename -n NOTEBOOK SOURCE_ID TITLE` — il notebook è
     un'opzione OBBLIGATORIA `-n/--notebook`, non un posizionale. Passarlo
     posizionale → "Missing option --notebook".
     """
@@ -929,7 +929,7 @@ def studio_delete(nb_id: str, artifact_id: str) -> None:
 
 
 def studio_rename(nb_id: str, artifact_id: str, new_title: str) -> None:  # noqa: ARG001 (nb_id tenuto per firma MCP)
-    # nlm 0.7.x: `studio rename ARTIFACT_ID NEW_TITLE` — l'artifact id è globale,
+    # nlm (0.7 → 0.12): `studio rename ARTIFACT_ID NEW_TITLE` — l'artifact id è globale,
     # niente notebook (a differenza di `studio delete`, che invece lo vuole).
     # nb_id resta nella firma MCP per coerenza ma NON si inoltra alla CLI: prima
     # veniva passato come posizionale e slittava gli argomenti (studio_rename era
@@ -950,7 +950,7 @@ def studio_download(kind: str, nb_id: str, output_path: Union[str, Path], *,
     # Il path del chiamante vale come NOME, non come destinazione (H6-bis, in cima
     # al file): il file nasce nella directory degli artefatti e da nessun'altra parte.
     output_path = artifacts_dir() / safe_artifact_name(output_path)
-    # nlm 0.7.7: `download <kind> NOTEBOOK_ID [-o PATH] [--id ARTIFACT]`. NON
+    # nlm (0.7.7 → 0.12.0): `download <kind> NOTEBOOK_ID [-o PATH] [--id ARTIFACT]`. NON
     # esiste `--no-progress` (era il motivo per cui studio_download falliva a
     # valle: nel test MCP originale il blocco-approvazione lo mascherava).
     args = ["download", cli_kind, nb_id, "--output", str(output_path)]
@@ -1118,8 +1118,8 @@ def doctor() -> dict:
         "vps1777_version": os.environ.get("VPS1777_VERSION", "0.0.0-dev"),
         "nlm_path": NLM,
         "contract_note": (
-            "Tool source/studio contratti su nlm 0.7.x e verificati da un "
-            "contract-test in CI. Verifica le firme dal vivo (doctor + schemi "
+            "Tool source/studio contratti sul client nlm installato (vedi `version`) "
+            "e verificati da un contract-test in CI. Verifica le firme dal vivo (doctor + schemi "
             "dei tool), non da memoria: i quirk cambiano fra versioni di nlm."
         ),
     }

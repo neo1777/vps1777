@@ -257,6 +257,12 @@ services:
       # l'unico container che possiede i cookie Google. Ora il path del chiamante
       # vale come nome, e i file finiscono in una directory che NON contiene segreti.
       NLM_ARTIFACTS: /var/lib/nlm-artifacts
+      # nlm ≥ 0.11 prova da sé un refresh «headless»: rilancia un profilo di browser
+      # salvato per farsi riemettere i cookie. Qui quel profilo non c'è (dal PC arriva
+      # solo profiles/default/, i cookie), quindi il tentativo può solo fallire, e a
+      # monte (0.11.5) è documentato che su alcuni account il rilancio fa revocare la
+      # sessione. Spento: il rinnovo resta quello dichiarato, un profilo nuovo da /admin/nlm.
+      NOTEBOOKLM_DISABLE_HEADLESS_REFRESH: "1"
       FASTMCP_STATELESS_HTTP: "true"
       # Segreto condiviso per gli endpoint INTERNI /internal/nlm/* (H6): solo
       # gateway e bot, che lo hanno, possono chiedere lo stato o installare il

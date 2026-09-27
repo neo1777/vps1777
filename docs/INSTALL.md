@@ -53,7 +53,7 @@ Se rilanci `setup.sh`, salta gli step già fatti.
 ## Post-install
 
 1. **Login admin**: `<PUBLIC_BASE>/admin/login` → email + password admin
-2. **Auth NotebookLM**: sul TUO PC installa il CLI `nlm`, fai login, poi carica il **profilo** (tar.gz) su `<PUBLIC_BASE>/admin/nlm`. La CLI `nlm` 0.7.x salva l'auth come cartella `profiles/default/` (non più un singolo `auth.json`):
+2. **Auth NotebookLM**: sul TUO PC installa il CLI `nlm`, fai login, poi carica il **profilo** (tar.gz) su `<PUBLIC_BASE>/admin/nlm`. La CLI `nlm` (dalla 0.7) salva l'auth come cartella `profiles/default/` (non più un singolo `auth.json`):
    ```bash
    uv tool install notebooklm-mcp-cli --python 3.12      # serve uv (astral.sh)
    nlm login                                             # apre il browser → login NotebookLM
