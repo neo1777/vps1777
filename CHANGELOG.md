@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **`doctor` riporta solo la versione di nlm**: dalla 0.9 `nlm --version` aggiunge una
+  seconda riga («You are on the latest version.», da un controllo su PyPI con cache di 24
+  ore che nlm fa solo per `--version`, non per ogni comando), e finiva nel campo `version`.
+
+### Documentazione
+- **TROUBLESHOOTING: `docker cp` verso un container rifiutato** («container rootfs is
+  marked read-only»), con la cura `docker exec -i … sh -c 'cat > …'`. Dalla 0.58.0 vale
+  anche per nb1777-mcp (`H43`): uno script operativo esterno al repo che faceva `docker cp`
+  in `/tmp` di nb1777-mcp si è rotto così, e l'ha segnalato chi lo usava.
+- **TROUBLESHOOTING: «update già in corso» esce con 75** dalla 0.59.0, e non è un fallimento.
+
 ## [0.60.0] — 2026-09-27
 
 **Il client NotebookLM fa un salto di tre mesi, 0.7.7 → 0.12.0, dopo averlo misurato**:
