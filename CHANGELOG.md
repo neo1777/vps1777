@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.61.1] — 2026-09-27
+
+**La prima release pubblicata con le immutable releases accese**, più `pyjwt` 2.15.
+
 ### Sicurezza
 - **Immutable releases accese sul repo** (impostazione di GitHub, 27/09): asset e tag di una
   release pubblicata non si cambiano più. Titolo, note e flag prerelease restano modificabili,
