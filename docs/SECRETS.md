@@ -65,17 +65,19 @@ docker compose restart gateway
 ### Rota `telegram_bot_token` (e la chiave derivata)
 
 ```bash
-./tools/rotate-secret.sh telegram_bot_token   # revoca su @BotFather, incolla il nuovo, riavvia bot e gateway
-# poi RIDERIVA la chiave della Mini App — rotate-secret.sh oggi non lo fa:
-python3 -c "import hmac,hashlib;t=open('secrets/telegram_bot_token.txt').read().strip();open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',t.encode(),hashlib.sha256).hexdigest())"
-docker compose restart gateway
+./tools/rotate-secret.sh telegram_bot_token   # revoca su @BotFather, incolla il nuovo:
+                                              # scrive il token, RIDERIVA la chiave, riavvia bot e gateway
 ```
 
-> ⚠️ **Il secondo passo non è facoltativo.** La chiave derivata è una funzione del token:
-> col token nuovo e la chiave vecchia il bot risponde e la Mini App **rifiuta tutti**,
-> senza un errore che nomini la chiave. Oggi la chiave si ricalcola da sola solo dentro
-> un `vps1777 update` che installa davvero una versione, e nell'auto-rollback — non con
-> un `restart`, non con `rotate-secret.sh`, non con un `vps1777 rollback` manuale.
+Dalla 0.62.3 `rotate-secret.sh` rideriva da sé la chiave della Mini App; prima scriveva
+solo il token, e il secondo passo andava fatto a mano.
+
+> ⚠️ **Perché conta.** La chiave derivata è una funzione del token: col token nuovo e la
+> chiave vecchia il bot risponde e la Mini App **rifiuta tutti**, senza un errore che
+> nomini la chiave. Si ricalcola da sola con `rotate-secret.sh`, con un `vps1777 update`
+> che installa davvero una versione, con `vps1777 rollback` e nell'auto-rollback — non
+> con un `docker compose restart`. Se hai riscritto il token a mano nel file, rilancia
+> `rotate-secret.sh telegram_bot_token` (o vedi [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
 
 ### Rota `admin_password_bcrypt`
 
@@ -133,8 +135,8 @@ Cosa notifica e cosa no:
 - **scaduti** → una notifica con l'elenco (niente scaduto, niente messaggio: la cadenza
   giornaliera non aggiunge rumore);
 - **secret attesi e non trovati** in `secrets/` → solo nel log e nel campo `mancanti` del
-  JSON, **nessuna notifica**. L'elenco è quello della tabella: su un'installazione senza
-  Cloudflare `cloudflared_token` compare sempre fra i mancanti;
+  JSON, **nessuna notifica**. L'elenco è quello della tabella; `cloudflared_token` è
+  atteso solo col profilo Cloudflare (fino alla 0.62.2 compariva sempre fra i mancanti);
 - **nessun secret trovato** → esce **2** (la unit risulta fallita) e, con `--notify`,
   lo dice su Telegram: non è «tutto a posto», è «non ho potuto guardare» (percorso o
   permessi sbagliati).

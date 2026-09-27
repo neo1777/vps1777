@@ -93,6 +93,12 @@ PROTECTED_PREFIXES = (
     "tools/age-recipients.txt",
 )
 
+# busybox per le operazioni sui volumi (snapshot, backup, restore, check scadenze):
+# pinnata a digest come ogni immagine di terzi (H66), e non `:latest` — un tag mobile
+# che gira con i volumi dei dati montati è la supply-chain che H66 chiude nei compose
+# (27/09, audit della doc: qui era rimasta fuori). Stessa stringa in backup.sh e restore.sh.
+BUSYBOX = "busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
+
 SEMVER_RE = re.compile(r"^v?\d+\.\d+\.\d+(-[A-Za-z0-9.]+)?$")
 INTENT_TTL_S = 600
 HEALTH_WINDOW_S = 180
@@ -993,7 +999,7 @@ REGISTRY_PATH = "state/migrations.json"  # dentro il volume
 
 def registry_read() -> dict:
     res = run(["docker", "run", "--rm", "-v", f"{REGISTRY_VOLUME}:/state:ro",
-               "--entrypoint", "sh", "busybox:latest",
+               "--entrypoint", "sh", BUSYBOX,
                "-c", f"cat /state/{REGISTRY_PATH} 2>/dev/null || echo '{{}}'"],
               capture=True, check=False)
     try:
@@ -1009,7 +1015,7 @@ def _registry_write(data: dict) -> None:
     payload = json.dumps(data, indent=2, sort_keys=True)
     subprocess.run(
         ["docker", "run", "--rm", "-i", "-v", f"{REGISTRY_VOLUME}:/state",
-         "--entrypoint", "sh", "busybox:latest",
+         "--entrypoint", "sh", BUSYBOX,
          "-c", f"mkdir -p /state/$(dirname {REGISTRY_PATH}) && cat > /state/{REGISTRY_PATH}"],
         input=payload, text=True, check=True)
 
@@ -1540,7 +1546,7 @@ def snapshot_create(repo: Path, from_version: str, to_version: str) -> Path:
         log(f"snapshot volume {vol}…")
         run(["docker", "run", "--rm",
              "-v", f"vps1777_{vol}:/src:ro", "-v", f"{snap}:/dst",
-             "--entrypoint", "sh", "busybox:latest",
+             "--entrypoint", "sh", BUSYBOX,
              "-c", f"cd /src && tar cf /dst/{vol}.tar ."], check=True)
     for vol in SNAPSHOT_EXCLUDED_VOLUMES:
         log(f"snapshot volume {vol}: ESCLUSO — {SNAPSHOT_EXCLUDED_REASON}")
@@ -2536,8 +2542,9 @@ SEGRETI_NON_GENERABILI = {
     #   preflight verde — e la Mini App rifiuterebbe OGNI initData, perché la chiave deve
     #   essere ESATTAMENTE HMAC_SHA256("WebAppData", token). *Un segreto derivato messo
     #   fra i generabili è un guasto che si presenta come una cura.*
-    "telegram_webapp_secret": "DERIVATA dal token del bot, non casuale: "
-                              "cancella il file e `vps1777` la rideriverà da telegram_bot_token.txt",
+    "telegram_webapp_secret": "DERIVATA dal token del bot, non casuale: la riallineano da "
+                              "sole `vps1777 update`, `vps1777 rollback` e "
+                              "`tools/rotate-secret.sh telegram_bot_token`",
 }
 SEGRETI_GENERABILI = {"gateway_secret", "archive_desc_secret", "oauth_signing_secret"}
 
@@ -3291,6 +3298,10 @@ def cmd_rollback(repo: Path, args) -> int:
             die("--with-data ma nessuno snapshot pre-update disponibile")
         snapshot_restore(repo, snap)
     install_systemd_units(repo, enable=False)
+    # 27/09 (audit della doc): come l'update e l'auto-rollback. I secret non tornano indietro
+    # col rollback, ma se il token è cambiato dopo l'ultimo update la chiave derivata va
+    # riallineata qui, o la Mini App rifiuta tutto dopo `up`.
+    assicura_webapp_secret(repo)
     run([*compose_cmd(repo), "up", "-d"], check=False, env=env)
     healthy, why = health_gate(repo, env=env)
     st["history"].append({"event": "manual_rollback", "from": cur, "to": prev,
@@ -4028,9 +4039,10 @@ _SECRET_POLICY = [
     #   surplus che la #61 toglie al gateway, cioè al solo servizio esposto.
     ("telegram_webapp_secret", "telegram_webapp_secret.txt",
      "Chiave verifica initData Mini App (derivata dal token)", 90, False,
-     "manuale: NON si ruota da sola. Ruota il token su @BotFather e basta: al primo "
-     "`vps1777 up`/`update` la chiave viene RIDERIVATA da sola, perché è una funzione "
-     "del token e non un segreto indipendente (assicura_webapp_secret)"),
+     "manuale: NON si ruota da sola. Ruota il token con `tools/rotate-secret.sh "
+     "telegram_bot_token`, che la rideriva; la riallineano al token anche `vps1777 update` "
+     "(quando installa una versione) e `vps1777 rollback`, perché è una funzione del "
+     "token e non un segreto indipendente (assicura_webapp_secret)"),
     # H37: era scoperto. Solo con ingress.cloudflared (altrimenti file assente →
     # saltato). Ruotare = rigenerare il token del tunnel nella dashboard CF.
     ("cloudflared_token", "cloudflared_token.txt", "Token tunnel Cloudflare", 365, False,
@@ -4054,7 +4066,7 @@ def nlm_cookie_status(repo: Path) -> dict | None:
     vol = f"vps1777_{NLM_AUTH_VOLUME}"
     try:
         res = run(["docker", "run", "--rm", "--network", "none",
-                   "-v", f"{vol}:/src:ro", "--entrypoint", "sh", "busybox:latest",
+                   "-v", f"{vol}:/src:ro", "--entrypoint", "sh", BUSYBOX,
                    "-c", f"stat -c %Y /src/{_NLM_COOKIE_REL}"],
                   check=False, capture=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
@@ -4285,6 +4297,12 @@ def cmd_secrets_status(repo: Path, args) -> int:
     mancanti: list[str] = []
     for name, fname, label, max_days, auto, note in _SECRET_POLICY:
         p = repo / "secrets" / fname
+        if not p.is_file() and name == "cloudflared_token" \
+                and ingress_profile(repo) != "ingress.cloudflared":
+            # 27/09 (audit della doc): è ATTESO solo col profilo Cloudflare. Prima finiva
+            # fra i mancanti su ogni altra installazione: un avviso che scatta sempre non
+            # si legge più, e copre quello vero.
+            continue
         if not p.is_file():
             # 🔴 PRIMA QUI C'ERA SOLO `continue`. Un secret ATTESO e ASSENTE è peggio
             # di uno vecchio — quello vecchio almeno esiste — e spariva in silenzio:
@@ -4310,7 +4328,7 @@ def cmd_secrets_status(repo: Path, args) -> int:
             overdue.append(f"{nlm['label']} ({nlm['age_days']}g)")
     # H49 ③: non è un secret in secrets/ — è un interruttore di sicurezza lasciato
     # aperto. Sta QUI e non in un check nuovo perché questa è già la pagina delle
-    # cose che scadono e vanno rimesse a posto, ha già il suo timer settimanale e
+    # cose che scadono e vanno rimesse a posto, ha già il suo timer (giornaliero dalla 0.41.1, prima settimanale) e
     # il suo canale Telegram: un promemoria in più non merita un timer in più.
     cosign = cosign_bypass_status(repo)
     if cosign is not None:

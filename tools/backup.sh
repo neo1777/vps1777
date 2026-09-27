@@ -299,7 +299,7 @@ else
       -v "$vol:/src:ro" \
       -v "$dst:/dst" \
       --entrypoint sh \
-      busybox:latest \
+      busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e \
       -c "cd /src && tar cf /dst/${vol}.tar ." 2>/dev/null || warn "    dump $vol fallito (volume vuoto?)"
   done
 fi

@@ -954,7 +954,7 @@ if SSH "install -m755 $REMOTE_DIR/tools/vps1777.py /usr/local/bin/vps1777 \
   && for u in $REMOTE_DIR/systemd/vps1777-*; do case \"\$u\" in *.service|*.timer|*.path) sed -e \"s|@OPERATOR_USER@|$OPERATOR_USER|g\" -e \"s|@OPERATOR_HOME@|/home/$OPERATOR_USER|g\" -e \"s|@REPO@|$REMOTE_DIR|g\" \"\$u\" | install -m644 /dev/stdin /etc/systemd/system/\$(basename \"\$u\");; esac; done \
   && systemctl daemon-reload \
   && systemctl enable --now $ENABLE_UNITS"; then
-  ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + check settimanale secret"
+  ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + check giornaliero scadenze secret"
 else
   warn "Setup canale update fallito — installalo dopo con tools/bootstrap.sh"
 fi

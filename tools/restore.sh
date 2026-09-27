@@ -6,7 +6,10 @@
 #   ./tools/restore.sh --yes --volumes-only vol1,vol2 backups/pre-update/<dir>
 #
 # Input:
-#   - archivio .tar.age  → decifrato con la chiave age (~/.config/age/keys.txt).
+#   - archivio .tar.age  → decifrato con la chiave age: AGE_KEY se la dai, altrimenti
+#                          ~/.config/vps1777/age-key.txt (dove la creano deploy.sh e
+#                          l'installer grafico), poi ~/.config/age/keys.txt.
+#   --chiave             → stampa la chiave che userebbe ed esce (non tocca niente)
 #                          Vale per ENTRAMBI i livelli di backup.sh: il CORE
 #                          (`backups/vps1777-<ts>.tar.age`: volumi piccoli, config,
 #                          secrets, descrizioni dei DB) e l'ARCHIVIO
@@ -37,14 +40,31 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-AGE_KEY="${AGE_KEY:-$HOME/.config/age/keys.txt}"
+# 🔴 27/09 (audit della doc): qui c'era solo ~/.config/age/keys.txt, mentre deploy.sh e
+#   l'installer grafico creano la chiave in ~/.config/vps1777/age-key.txt. Con i default
+#   il ripristino si fermava con «chiave age non trovata»: il giorno in cui serve.
+_CHIAVI_CANDIDATE=("${XDG_CONFIG_HOME:-$HOME/.config}/vps1777/age-key.txt"
+                   "$HOME/.config/age/keys.txt")
+if [ -z "${AGE_KEY:-}" ]; then
+  for _k in "${_CHIAVI_CANDIDATE[@]}"; do
+    if [ -f "$_k" ]; then AGE_KEY="$_k"; break; fi
+  done
+fi
+AGE_KEY="${AGE_KEY:-${_CHIAVI_CANDIDATE[0]}}"
 
 ARCHIVE=""
 ASSUME_YES=0
+SOLO_COMANDO=0
 VOLUMES_ONLY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --yes) ASSUME_YES=1 ;;
+    --comando-riavvio) SOLO_COMANDO=1 ;;
+    --chiave)
+      if [ -f "$AGE_KEY" ]; then printf '%s\n' "$AGE_KEY"; exit 0; fi
+      printf '[✗] chiave age non trovata. Cercata in: %s. Passa AGE_KEY=<file>.\n' \
+        "${_CHIAVI_CANDIDATE[*]}" >&2
+      exit 1 ;;
     --volumes-only) shift; VOLUMES_ONLY="${1:-}" ;;
     --volumes-only=*) VOLUMES_ONLY="${1#*=}" ;;
     -*) printf '[✗] flag sconosciuta: %s\n' "$1" >&2; exit 1 ;;
@@ -63,6 +83,44 @@ log()  { printf '%s[*]%s %s\n' "$C_I"  "$C_R" "$*"; }
 ok()   { printf '%s[✓]%s %s\n' "$C_OK" "$C_R" "$*"; }
 warn() { printf '%s[!]%s %s\n' "$C_W"  "$C_R" "$*"; }
 die()  { printf '%s[✗]%s %s\n' "$C_E"  "$C_R" "$*" >&2; exit 1; }
+
+
+# ───── il comando per riavviare lo stack ─────
+# 🔴 27/09 (audit della doc): stampava solo compose.yaml + l'ingress. Il restore fa
+#   `down --remove-orphans`, che toglie anche il container del backup notturno, e con
+#   quel comando il backup restava spento fino al prossimo update — in silenzio, subito
+#   dopo aver dimostrato che i backup servono. Ora entrano anche le feature dichiarate
+#   in VPS1777_FEATURES, con la stessa mappa di vps1777.py (OPS_COMPOSE_FEATURES).
+# 🔴 `|| true` NON è cosmetico (b82df434, 16/08 — trovato ESEGUENDO il ciclo, mai
+#   fatto prima): con `set -o pipefail` un `.env` assente fa uscire `grep` con 2, e
+#   questa funzione è l'ULTIMO comando dello script prima del trap di cleanup ⇒
+#   `restore.sh` usciva **2 a restore RIUSCITO**. `tools/vps1777.py` lo chiama con
+#   `check=True`: l'auto-rollback falliva esattamente quando era l'ultima rete.
+comando_riavvio() {
+  local ingress feat f file prof flag=""
+  ingress="$(grep ^INGRESS_PROFILE= .env 2>/dev/null | cut -d= -f2 | tr -d '"' || true)"
+  feat="$(grep ^VPS1777_FEATURES= .env 2>/dev/null | cut -d= -f2 | tr -d '"' || true)"
+  [ -n "$feat" ] || feat="backup,autoupdate"          # DEFAULT_FEATURES di vps1777.py
+  for f in ${feat//,/ }; do
+    case "$f" in
+      backup)     file=ops.backup;     prof=ops.backup ;;
+      portainer)  file=ops.portainer;  prof=ops.portainer ;;
+      watchtower) file=ops.watchtower; prof=ops.autoupdate ;;
+      *) continue ;;
+    esac
+    flag="$flag -f compose.$file.yaml --profile $prof"
+  done
+  if [ -n "$ingress" ]; then
+    log "  docker compose -f compose.yaml -f compose.${ingress}.yaml --profile $ingress$flag up -d"
+  else
+    # Gli `-f` dell'ingress non sono facoltativi: senza, l'overlay non entra nel progetto
+    # (gateway senza `ports:`, rete `funnel` assente) e lo stack riparte irraggiungibile.
+    # Qui il profilo non si sa (.env illeggibile): si mostra il default, ma completo.
+    log "  docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \\"
+    log "    --profile ingress.tailscale$flag up -d   # o caddy / cloudflared"
+  fi
+}
+if [ "$SOLO_COMANDO" = "1" ]; then comando_riavvio; exit 0; fi
 
 # ───── arg ─────
 if [ -z "$ARCHIVE" ]; then
@@ -84,7 +142,7 @@ command -v docker >/dev/null || die "docker non trovato"
 command -v tar    >/dev/null || die "tar non trovato"
 if [ -f "$ARCHIVE" ]; then
   command -v age >/dev/null || die "age non installato"
-  [ -f "$AGE_KEY" ] || die "chiave age non trovata: $AGE_KEY"
+  [ -f "$AGE_KEY" ] || die "chiave age non trovata: $AGE_KEY (cercata in: ${_CHIAVI_CANDIDATE[*]}; passa AGE_KEY=<file>)"
 fi
 
 # ───── conferma ─────
@@ -232,7 +290,7 @@ if [ -d "$TMP/volumes" ]; then
       -v "$vol_name:/dst" \
       -v "$tar_file:/src.tar:ro" \
       --entrypoint sh \
-      busybox:latest \
+      busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e \
       -c "rm -rf /dst/* /dst/..?* /dst/.[!.]* 2>/dev/null; tar -C /dst -xf /src.tar"
   done
   ok "Volumi ripristinati"
@@ -242,24 +300,4 @@ fi
 echo
 ok "Restore completato."
 log "Per riavviare lo stack:"
-# 🔴 `|| true` NON è cosmetico (b82df434, 16/08 — trovato ESEGUENDO il ciclo, mai
-#   fatto prima): con `set -o pipefail` (r.25) un `.env` assente fa uscire `grep` con
-#   2, la pipeline eredita il 2, e **questa assegnazione è l'ULTIMO comando dello
-#   script** prima del trap di cleanup ⇒ `restore.sh` esce **2 a restore RIUSCITO**,
-#   subito dopo aver stampato «[✓] Restore completato».
-# ⚠️ E non è un dettaglio estetico: `tools/vps1777.py:1366` chiama questo script con
-#   `check=True`, quindi **l'auto-rollback solleva un'eccezione su un rollback che ha
-#   funzionato** — cioè fallisce esattamente nel momento in cui era l'ultima rete.
-# ⭐ Nessun test lo prendeva perché nessun test ESEGUE restore.sh: lo leggono soltanto.
-#   Misurato: dati ripristinati identici (6 file, sha256 uguali) ed exit 2.
-INGRESS_PROFILE="$(grep ^INGRESS_PROFILE= .env 2>/dev/null | cut -d= -f2 || true)"
-if [ -n "$INGRESS_PROFILE" ]; then
-  log "  docker compose -f compose.yaml -f compose.${INGRESS_PROFILE}.yaml --profile $INGRESS_PROFILE up -d"
-else
-  # Stessa forma del ramo sopra: gli `-f` non sono facoltativi. Senza, l'overlay
-  # ingress non entra nel progetto (gateway senza `ports:`, rete `funnel` assente)
-  # ⇒ lo stack riparte e NON è raggiungibile. Qui il profilo non si sa (.env
-  # illeggibile): si mostra il default, ma completo.
-  log "  docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \\"
-  log "    --profile ingress.tailscale up -d   # o caddy / cloudflared"
-fi
+comando_riavvio

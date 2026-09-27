@@ -249,8 +249,8 @@ vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
 Età e scadenze dei secret (chiavi, token, cookie NotebookLM): elenca cosa è da
 ruotare. Nella stessa lista compare la **via d'emergenza cosign** se è aperta
 (`VPS1777_REQUIRE_COSIGN=0` nel `.env`), con una soglia di un giorno. Elenca a parte i
-**secret attesi e non trovati** in `secrets/` — fra questi anche `cloudflared_token`,
-che serve solo con l'ingress Cloudflare. Con `--notify` avvisa su Telegram gli scaduti. Il
+**secret attesi e non trovati** in `secrets/` — `cloudflared_token` solo col profilo
+Cloudflare (fino alla 0.62.2 compariva fra i mancanti su ogni installazione). Con `--notify` avvisa su Telegram gli scaduti. Il
 risultato compare anche in `/admin/secrets` (dal file `onboarding/secrets_status.json`).
 
 Se non trova **nessun** secret da misurare esce **2**: non è «tutto a posto», è «non ho

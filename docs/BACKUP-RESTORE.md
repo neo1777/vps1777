@@ -129,21 +129,14 @@ tocca solo i propri volumi):
 ./tools/restore.sh backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age   # archivio
 ```
 
-> ⚠️ **La chiave privata, `restore.sh` la cerca in `~/.config/age/keys.txt`** — oppure
-> dove dice la variabile `AGE_KEY`. Gli installer dal PC (`deploy.sh` e l'installer
-> grafico) la generano invece in **`~/.config/vps1777/age-key.txt`**: con i default,
-> un restore fatto con quella chiave **si ferma** con `chiave age non trovata:
-> …/.config/age/keys.txt` (prima di toccare lo stack). Il restore gira sulla macchina che
-> ha i volumi Docker, quindi la privata va portata lì per il tempo del restore — e poi
-> tolta (`shred -u`). Il gesto che funziona oggi:
->
-> ```bash
-> # la privata copiata sulla VPS, per esempio in ~/.config/vps1777/age-key.txt:
-> AGE_KEY=~/.config/vps1777/age-key.txt ./tools/restore.sh backups/vps1777-2026-08-29-030000.tar.age
-> ```
->
-> (in alternativa, copiala proprio come `~/.config/age/keys.txt` e lancia `restore.sh`
-> senza variabili). Uno snapshot pre-update in chiaro non chiede nessuna chiave.
+> 🔑 **La chiave privata, `restore.sh` la cerca da sé**, in quest'ordine: la variabile
+> `AGE_KEY` se la dai; `~/.config/vps1777/age-key.txt`, dove la generano `deploy.sh` e
+> l'installer grafico; `~/.config/age/keys.txt`, il posto di `age-keygen` fatto a mano.
+> `./tools/restore.sh --chiave` dice quale userebbe, senza toccare niente. Fino alla
+> 0.62.2 cercava solo l'ultimo, e con la chiave degli installer il restore si fermava
+> («chiave age non trovata», prima di toccare lo stack). Il restore gira sulla macchina
+> che ha i volumi Docker, quindi la privata va portata lì per il tempo del restore — e
+> poi tolta (`shred -u`). Uno snapshot pre-update in chiaro non chiede nessuna chiave.
 
 Step:
 1. `docker compose down --remove-orphans` — l'`--remove-orphans` serve: senza, il
@@ -155,10 +148,11 @@ Step:
 3. Ripristina volumi + secrets + **configurazione** (il core: sovrascrive anche `.env`,
    `compose*.yaml` e `ingress/` con quelli del backup) o i volumi dell'archivio
 4. **Non riavvia lo stack**: stampa il comando da lanciare, con gli `-f` dell'ingress
-   letti da `INGRESS_PROFILE` nel `.env` ripristinato. Quel comando **non** comprende gli
-   overlay delle feature (`VPS1777_FEATURES`): se il backup notturno è acceso, aggiungi
-   tu `-f compose.ops.backup.yaml --profile ops.backup`, o il container `backup` resta
-   spento fino al prossimo `vps1777 update`. Col profilo di default:
+   letti da `INGRESS_PROFILE` nel `.env` ripristinato e, dalla 0.62.3, quelli delle
+   feature dichiarate in `VPS1777_FEATURES` (il backup notturno compreso: prima restava
+   fuori, e il container `backup` restava spento fino al prossimo update).
+   `./tools/restore.sh --comando-riavvio` lo stampa senza fare il restore. Col profilo e
+   le feature di default:
 
    ```bash
    docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
@@ -174,7 +168,9 @@ Default: interattivo (chiede conferma). Flag:
 - `--yes` — nessuna conferma (per script/automazioni)
 - `--volumes-only vol1,vol2` — ripristina SOLO i volumi elencati (CSV, nomi corti o completi), saltando secrets/config
 - come input accetta anche una **directory snapshot non cifrata** (`backups/pre-update/<dir>`), oltre al `.tar.age`
-- la variabile `AGE_KEY=<file>` indica la chiave privata (default `~/.config/age/keys.txt`)
+- `--chiave` — stampa la chiave privata che userebbe ed esce, senza toccare niente
+- `--comando-riavvio` — stampa il comando per riavviare lo stack (ingress + feature) ed esce
+- la variabile `AGE_KEY=<file>` indica la chiave privata (senza, `~/.config/vps1777/age-key.txt`, poi `~/.config/age/keys.txt`)
 
 ## Snapshot pre-update
 
@@ -292,9 +288,9 @@ Scenario: VPS morta, nuova macchina, vuoi ripristinare.
 # Su nuova macchina
 git clone https://github.com/neo1777/vps1777.git
 cd vps1777
-# La chiave privata dalla tua copia offline, nel posto dove restore.sh la cerca
-# (se è quella dell'installer, age-key.txt, va bene lo stesso: cambia solo il nome)
-mkdir -p ~/.config/age && cp /percorso/age-key.txt ~/.config/age/keys.txt
+# La chiave privata dalla tua copia offline, dove restore.sh la cerca da sé
+# (./tools/restore.sh --chiave per controllare)
+mkdir -p ~/.config/vps1777 && cp /percorso/age-key.txt ~/.config/vps1777/age-key.txt
 # backups/ non è nel repo (è ignorata da git): va creata, con la sottocartella dell'archivio
 mkdir -p backups/archivio
 # Copia l'ultimo backup di OGNI livello
@@ -303,9 +299,9 @@ scp tuo-backup-server:/percorso/archivio/vps1777-archivio-2026-08-29-030000.tar.
 # Restore, uno per livello (il core rimette anche .env, compose*.yaml, ingress/ e secrets/)
 ./tools/restore.sh backups/vps1777-2026-08-29-030000.tar.age
 ./tools/restore.sh backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age
-# restore.sh NON riavvia: lancia il comando che stampa, più gli overlay delle feature
-# (vedi «Restore» sopra). Poi togli la chiave privata dalla macchina:
-shred -u ~/.config/age/keys.txt
+# restore.sh NON riavvia: lancia il comando che stampa (ingress + feature, vedi
+# «Restore» sopra). Poi togli la chiave privata dalla macchina:
+shred -u ~/.config/vps1777/age-key.txt
 # Lo stack riparte uguale alla data dei backup (l'archivio: alla data del suo, ≤ 7 giorni
 # prima; se hai i bundle sorgente, il re-ingest lo porta a oggi).
 ```

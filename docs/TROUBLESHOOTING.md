@@ -76,22 +76,21 @@ Il token lo legge solo `nb1777-bot`. Il gateway monta un'altra cosa:
 Se cambi il token e la chiave resta quella vecchia, il bot riparte giusto e la Mini
 App **rifiuta tutti** — senza un errore che nomini la chiave.
 
-Oggi la chiave si riallinea da sola **solo** dentro un `vps1777 update` che installa
-davvero una versione (allo step 13) e nell'auto-rollback. **Non** la riallineano:
-`tools/rotate-secret.sh telegram_bot_token` (scrive il token e riavvia bot e gateway,
-nient'altro), un `docker compose restart`, un `vps1777 rollback` manuale, e nemmeno
-`vps1777 update --version <quella installata>`, che esce subito con «già aggiornato».
-
-Il gesto che funziona oggi, dalla radice del repo sulla VPS, dopo aver scritto il
-token nuovo:
+La chiave si riallinea da sola al token in quattro posti: `tools/rotate-secret.sh
+telegram_bot_token` (dalla 0.62.3: scrive il token, **rideriva la chiave** e riavvia bot
+e gateway), un `vps1777 update` che installa davvero una versione (allo step 13),
+`vps1777 rollback` (dalla 0.62.3) e l'auto-rollback. **Non** la riallineano un
+`docker compose restart` né un token riscritto a mano nel file: se hai fatto così, la
+via è rilanciare `tools/rotate-secret.sh telegram_bot_token` col token nuovo. In
+alternativa, dalla radice del repo sulla VPS, la stessa derivazione degli installer:
 
 ```bash
 python3 -c "import hmac,hashlib;t=open('secrets/telegram_bot_token.txt').read().strip();open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',t.encode(),hashlib.sha256).hexdigest())"
 docker compose restart gateway
 ```
 
-È la stessa derivazione degli installer. Il file viene riscritto sul posto (stesso
-file, stessi permessi), quindi il riavvio del gateway basta.
+Il file viene riscritto sul posto (stesso file, stessi permessi), quindi il riavvio del
+gateway basta.
 
 ## `nlm: command not found` (sul tuo PC)
 

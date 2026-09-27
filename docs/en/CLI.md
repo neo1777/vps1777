@@ -256,8 +256,8 @@ vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
 Age and expiry of the secrets (keys, tokens, NotebookLM cookies): it lists what
 is due for rotation. The same list shows the **cosign emergency route** when it is open
 (`VPS1777_REQUIRE_COSIGN=0` in `.env`), with a one-day threshold. It lists separately the
-**expected secrets not found** in `secrets/` — among them also `cloudflared_token`, which
-is needed only with the Cloudflare ingress. With `--notify` it alerts about the expired
+**expected secrets not found** in `secrets/` — `cloudflared_token` only with the
+Cloudflare profile (up to 0.62.2 it showed up among the missing ones on every install). With `--notify` it alerts about the expired
 ones on Telegram. The result also appears in `/admin/secrets` (from the file
 `onboarding/secrets_status.json`).
 

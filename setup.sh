@@ -557,7 +557,7 @@ H55
       # passerebbe a systemctl come un unico nome inesistente.
       # shellcheck disable=SC2086
       if sudo systemctl enable --now $ENABLE_UNITS 2>/dev/null; then
-        ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + scadenze secret (settimanale)$AUTOUPD_MSG"
+        ok "Canale update attivo: \`vps1777 update\` + pulsante admin + check giornaliero + scadenze secret (giornaliero)$AUTOUPD_MSG"
       else
         # PRIMA: `cmd && ok "…" || warn "…"`. Sembra un if-then-else e non lo è: se
         # fosse `ok` a fallire, partirebbe ANCHE il ramo d'errore, e l'installer

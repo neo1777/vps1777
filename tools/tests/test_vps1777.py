@@ -2215,6 +2215,29 @@ def test_memoria_importa_verifica_i_byte_scritti(monkeypatch):
             v.cmd_memoria(repo, argparse.Namespace(azione="importa", strato="fatti", file=str(f)))
 
 
+
+def test_secrets_status_non_chiede_il_token_cloudflare_a_chi_non_lo_usa():
+    """Audit della doc (27/09): `cloudflared_token` finiva fra i «secret ATTESI e NON
+    trovati» su ogni installazione senza Cloudflare — un avviso che scatta sempre non
+    viene letto, e copre quello vero. È atteso solo col profilo cloudflared."""
+    import types
+    repo = Path(tempfile.mkdtemp())
+    (repo / "secrets").mkdir()
+    (repo / "onboarding").mkdir()
+    for nome in ("gateway_secret", "oauth_signing_secret", "admin_password_bcrypt",
+                 "telegram_bot_token", "telegram_webapp_secret", "archive_desc_secret"):
+        (repo / "secrets" / f"{nome}.txt").write_text("x")
+    args = types.SimpleNamespace(notify=False, json=False)
+    (repo / ".env").write_text("INGRESS_PROFILE=ingress.tailscale\n")
+    v.cmd_secrets_status(repo, args)
+    stato = json.loads((repo / "onboarding" / "secrets_status.json").read_text())
+    assert not any("Cloudflare" in m for m in stato["mancanti"]), stato["mancanti"]
+    (repo / ".env").write_text("INGRESS_PROFILE=ingress.cloudflared\n")
+    v.cmd_secrets_status(repo, args)
+    stato = json.loads((repo / "onboarding" / "secrets_status.json").read_text())
+    assert any("Cloudflare" in m for m in stato["mancanti"]), stato["mancanti"]
+
+
 if __name__ == "__main__":
     # ⚠️ TRE ESITI, NON DUE (b82df434, 02/08). MISURATO prima di toccare:
     #   85 test eseguiti «ok», 10 «FAIL», exit 1 — e i 10 fallivano tutti con
@@ -2253,3 +2276,4 @@ if __name__ == "__main__":
               f"pytest). Questo esito NON copre quelli: per la copertura piena serve\n"
               f"    python3 -m pytest {Path(__file__).name}")
     raise SystemExit(1 if fails else 0)
+

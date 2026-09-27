@@ -27,11 +27,11 @@
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
-      "sorgente_sha256": "aeb539db78ab922c17593920913185665c30534ec72afb2d81ffda6593167531"
+      "sorgente_sha256": "83a566d3c7ad15b37eafa013ea077181c1ce145e35ea656a0606fc6e3408403d"
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "becaa7afc2cfbb297a379cbca2a9ee4905efa2c77ee78196f5487326c5b5d582"
+      "sorgente_sha256": "ab2059bcfd99631c25f89e50aba5c6eeea4b07ceeb601612c036ef9ac93f072d"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",
