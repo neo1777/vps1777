@@ -10,9 +10,9 @@
 > weekly Trivy scans (actionable-only) plus a monthly image-rebuild workflow;
 > among the running services, the NotebookLM Google-session volume is mounted only
 > by `nb1777-mcp` (the backup job reads it solely to encrypt it).
-> **Reporting a vulnerability**: please open a GitHub Security Advisory (private)
-> on this repository, or a minimal issue asking for a private channel — do not post
-> exploit details publicly. The rest of this document is in Italian (the project's
+> **Reporting a vulnerability**: please do **not** open a public issue. Open a private
+> GitHub Security Advisory on this repository, or write to `antigravity1777@gmail.com`
+> (see *Reporting a Vulnerability* below) — never post exploit details publicly. The rest of this document is in Italian (the project's
 > native language — see the README's language policy): it is the full defensive
 > review of July 2026, the threat model, the third-party data flows and the known
 > residuals, and it is kept current release by release.
@@ -87,7 +87,7 @@ finestra 8080 dell'onboarding, l'eccezione nota di questa riga).
 >
 > Il ramo è in [`deploy.sh`](deploy.sh) (`if [ "$INGRESS" = "tailscale" ]`): per tailscale l'esposizione la gestisce `GATEWAY_BIND` e l'overlay pubblicherebbe una seconda porta in conflitto; per gli altri due l'overlay resta nel comando di avvio. **Il risultato è lo stesso — loopback — ma per due vie diverse: chi tocca una delle due non ha toccato l'altra.**
 >
-> **`ONBOARDING_BIND=0.0.0.0` rimette la porta su tutte le interfacce**, ed è un tradeoff dichiarato, non una scorciatoia: il form di primo setup chiede `tailscale_authkey`, `telegram_bot_token`, `telegram_owner_id`, `public_base` ([`onboarding.py`](services/gateway/app/onboarding.py)), e il login admin viaggia in HTTP — con `PUBLIC_BASE` non ancora `https` il cookie di sessione **non è `Secure`** ([`admin.py:105`](services/gateway/app/admin.py)), quindi password e sessione passano in chiaro sulla rete. Serve davvero in un caso: **il certificato ACME che non arriva** (DNS non propagato, porta 80 chiusa), in cui il pannello non è raggiungibile via HTTPS. Chi lo usa richiude rilanciando senza quella variabile.
+> **`ONBOARDING_BIND=0.0.0.0` rimette la porta su tutte le interfacce**, ed è un tradeoff dichiarato, non una scorciatoia: il form di primo setup chiede `tailscale_authkey`, `telegram_bot_token`, `telegram_owner_id`, `public_base` ([`onboarding.py`](services/gateway/app/onboarding.py)), e il login admin viaggia in HTTP — con `PUBLIC_BASE` non ancora `https` il cookie di sessione **non è `Secure`** ([`admin.py`](services/gateway/app/admin.py), il `secure=` del cookie admin), quindi password e sessione passano in chiaro sulla rete. Serve davvero in un caso: **il certificato ACME che non arriva** (DNS non propagato, porta 80 chiusa), in cui il pannello non è raggiungibile via HTTPS. Chi lo usa richiude rilanciando senza quella variabile.
 >
 > 🔴 **Questa garanzia vale dalla `0.41.0` in avanti, e non è retroattiva.** Una macchina installata con una versione precedente e **non ancora aggiornata** ha la 8080 su `0.0.0.0` come prima: il default sta nel `compose.onboarding.yaml` che ha sul disco, non in questo documento. Chi vuole sapere se la propria è esposta guarda lì, non qui. *E chi aggiorna deve saperlo prima: se accedeva al pannello via `http://<IP>:8080`, dopo l'aggiornamento non ci arriva più — serve l'HTTPS del proxy o il tunnel SSH (vedi [`CHANGELOG.md`](CHANGELOG.md), 0.41.0).*
 >
@@ -103,8 +103,9 @@ Threat model dichiarato:
 - Bcrypt rounds=12 per password admin (file `secrets/admin_password_bcrypt.txt`)
 - Pannello admin: token **CSRF** (synchronizer, verificato centralmente su ogni POST),
   **CSP** con nonce per-risposta, lockout per-IP sul login, `Cache-Control: no-store`
-- Mini App: `initData` Telegram **verificata server-side** (HMAC col token bot,
-  scadenza 24h) + **owner-only** (`TELEGRAM_OWNER_ID`); API dietro Bearer `typ=miniapp`
+- Mini App: `initData` Telegram **verificata server-side** (HMAC con la chiave derivata
+  dal token, `telegram_webapp_secret` — `H54` —, finestra di 12 ore) + **owner-only**
+  (`TELEGRAM_OWNER_ID`); API dietro Bearer `typ=miniapp`
   — vedi [docs/MINIAPP.md](docs/MINIAPP.md)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`
 - Il gateway (unico servizio esposto) non ha accesso al Docker socket né al filesystem dell'host (`H44`);
@@ -112,7 +113,9 @@ Threat model dichiarato:
   verifica la Mini App: dal 27/08 il token del bot lo monta solo `nb1777-bot` — vedi
   [docs/SECRETS.md](docs/SECRETS.md))
 - `archive-data` è condiviso: `archive-mcp` lo monta `:ro` (`H46`), il gateway `:rw` — privilegio
-  funzionale (`/admin/archive` scrive i `.db` indicizzati), tracciato invece di taciuto
+  funzionale (`/admin/archive` scrive i `.db` indicizzati), tracciato invece di taciuto — e
+  `:rw` anche il job `indice-notturno`, che aggiorna gli indici `.vec.db` (senza rete, con un
+  tetto di memoria; vedi [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md))
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
 - Strumenti di management (Portainer) mai esposti: solo loopback + tunnel SSH (vedi [docs/OPS.md](docs/OPS.md)) (`H47`)
 
@@ -274,6 +277,9 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   successiva → release firmata con immagini fresche → il check della VPS avvisa
   l'owner (il deploy resta suo). Senza il secret `RELEASE_PAT` il workflow non
   tagga: apre una issue con l'elenco — fallback dichiarato, mai silenzioso.
+  ⚠️ Configurare `RELEASE_PAT` dà a un workflow il potere di creare tag, cioè release
+  firmate: è la condizione che **riapre `H24`** (rischio accettato perché oggi nessun
+  workflow può farlo — vedi la postilla).
 - **Firma cosign obbligatoria di default** (`v0.23.0`, critico). Il self-update
   verifica la firma keyless del bundle di release **fail-closed**: se la verifica
   non passa (o `cosign` manca e non si installa), l'update si ferma. La via
@@ -281,8 +287,8 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   `--no-require-cosign`. (Prima la verifica era opt-in e saltata in silenzio.)
 - **GitHub Actions pinnate a SHA** (`v0.27.0`). Ogni action è pinnata al commit
   SHA (non al tag mobile): un tag ripuntato a monte non può iniettare codice (`H65`).
-  `Dependabot` (github-actions + docker + docker-compose) tiene freschi gli SHA/i
-  digest. Permessi `least-privilege` per-job in `release.yml`. Le immagini di
+  `Dependabot` (github-actions + docker + docker-compose, e `uv` per i lock dei cinque
+  servizi) tiene freschi gli SHA, i digest e le dipendenze. Permessi `least-privilege` per-job in `release.yml`. Le immagini di
   terzi nei compose sono digest-pinnate (`H66`).
 - **Immagini base fissate col digest** (`v0.61.0`, Scorecard Pinned-Dependencies):
   `FROM python:3.12-slim@sha256:…` e `COPY --from=ghcr.io/astral-sh/uv:0.5.18@sha256:…`
@@ -312,8 +318,10 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
 - **Digest immutabili** (baseline): le immagini si pullano da GHCR e si verificano
   contro `images.lock` del bundle; nessun build-in-place. Dalla `v0.59.0` il digest
   verificato vive anche nel compose (`H22`): la CLI lo scrive nel `.env` insieme al tag, e
-  ogni immagine vps1777 è `…:${VPS1777_TAG}@${VPS1777_DIGEST_<SVC>}`. Anche un
-  `docker compose pull && up` lanciato a mano gira il digest verificato.
+  ogni immagine vps1777 è `…:${VPS1777_TAG:-dev}${VPS1777_DIGEST_<SVC>:+@…}`: dopo il primo
+  update anche un `docker compose pull && up` lanciato a mano gira il digest verificato.
+  Il digest è **facoltativo** nella forma: un'installazione nuova non lo ha finché non fa
+  il primo update (è il residuo di `H22`, sotto).
 
 ### Privacy & osservabilità
 
@@ -432,7 +440,8 @@ Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 | **aperti** | 0 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
-(`H2`) — sono chiusi e verificati in produzione, come tutta la fascia alta.
+(`H2`) — sono chiusi e verificati in produzione. Della fascia alta restano **parziali**
+`H4`, `H5` e `H51`, ognuno col suo residuo scritto nel registro.
 
 I tre **accettati** sono decisioni, non dimenticanze. Niente 2FA sul pannello admin
 (`H28`): è un gateway mono-utente dietro Tailscale Funnel, con password bcrypt-12 +
@@ -532,7 +541,7 @@ sulla difesa — perché uno dei due si toglie di mezzo SENZA aggiungere niente.
 fa `hmac.new(b"WebAppData", bot_token, sha256)`, l'algoritmo con cui Telegram valida
 l'`initData` della Mini App. **Ma per verificare NON serve il token: basta la chiave
 DERIVATA, e il gateway la accetta già** — `settings.py:227` (`effective_webapp_secret`),
-`settings.py:238` (*«serve UNA delle due, non entrambe»*), `miniapp.py:162`
+`settings.py:238` (*«serve UNA delle due, non entrambe»*), `miniapp.py`
 (`verify_init_data(…, webapp_secret_hex=…)`). È l'esito di **H54, 27/07**, e la
 derivazione è **a senso unico**: chi ha quella chiave può verificare *e forgiare* una
 `initData` per questa Mini App, ma **non può risalire al token, quindi non guadagna la
@@ -807,8 +816,8 @@ il loro *perché* nel registro:
 - **Parziale, col residuo scritto**: il pinning ai digest nel compose (`H22`) c'è dalla
   `v0.59.0`, ma un'installazione nuova lo accende al primo update (gli installer
   scaricano per tag e non verificano digest).
-- **Rischio accettato, con data di revisione**: l'approvazione manuale dei rilasci in
-  `H24`. Con un solo account non sarebbe un confine; il rischio che copriva lo copre la
+- E, fuori dai parziali, un **rischio accettato con data di revisione**: l'approvazione
+  manuale dei rilasci in `H24`. Con un solo account non sarebbe un confine; il rischio che copriva lo copre la
   **quarantena di 48 ore** dell'auto-update (postilla sotto).
 
 L'hardening è difesa in profondità, non una garanzia, e il progetto è **pre-1.0**.
