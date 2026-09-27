@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.61.0] — 2026-09-27
+
+**nb1777-mcp senza browser (902 → 331 MB), immagini base fissate col digest, permessi dei
+workflow nel job.** Più una riga di `doctor` e due voci di TROUBLESHOOTING nate dalla prova
+dal vivo della 0.58.0.
+
 ### Sicurezza
 - **Immagini base fissate col digest** nei cinque servizi (`python:3.12-slim@sha256:…`,
   `ghcr.io/astral-sh/uv:0.5.18@sha256:…`), e **permessi dei workflow dichiarati nel job**
