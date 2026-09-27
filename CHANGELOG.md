@@ -4,11 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
-### Sicurezza
-- **`anyio` 4.14.1 → 4.14.2 in nb1777-mcp**: chiude tre avvisi Dependabot aperti dal 18/09
-  (GHSA-82r6-8w77-94w6 critico, GHSA-3w57-8xmc-8v26 alto, GHSA-5p39-cfhj-2xmp medio). Gli
-  altri servizi erano già a 4.14.2. Nessuno li aveva nominati: li ha trovati la curatrice
-  dei rimandi, leggendo gli avvisi aperti.
+## [0.62.0] — 2026-09-27
+
+**La catena `parent_uuid` di Claude Code si riallaccia all'ingest** (A5: da 40,3% di
+genitori mancanti a 5 righe su 132.912), e **main ha la CI obbligatoria**: questa è la
+prima versione aperta con una PR invece che con un commit diretto. Più `anyio` 4.14.2 in
+nb1777-mcp, che chiude tre avvisi Dependabot (uno critico).
 
 ### Corretto
 - **La catena `parent_uuid` di Claude Code si riallaccia all'ingest** (A5). Il genitore di
@@ -21,6 +22,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   leggevano già il file di sessione, quindi per chi cerca non cambia niente.
 
 ### Sicurezza
+- **`anyio` 4.14.1 → 4.14.2 in nb1777-mcp**: chiude tre avvisi Dependabot aperti dal 18/09
+  (GHSA-82r6-8w77-94w6 critico, GHSA-3w57-8xmc-8v26 alto, GHSA-5p39-cfhj-2xmp medio). Gli
+  altri servizi erano già a 4.14.2. Nessuno li aveva nominati: li ha trovati la curatrice
+  dei rimandi, leggendo gli avvisi aperti.
 - **CI obbligatoria su `main`**: i 9 job della CI sono *required status checks*, con
   `enforce_admins`. Nessun commit entra in main senza CI verde, nemmeno quelli dell'owner;
   il commit che apre una versione passa da una PR. Rilievo della sessione template,
