@@ -549,7 +549,8 @@ jobs:
       # 📍 Le coordinate `file:riga` citate nei documenti invecchiano da sole: il codice
       #   si sposta, la prosa no. Nasce da un caso vero (voce `a80025f1`): SECURITY.md
       #   rimandava a `snapshot_prune (tools/vps1777.py:1021-1032)` e a quella riga c'era
-      #   un'altra funzione. Quel caso è già curato — questo gate esiste perché la classe
+      #   un'altra funzione. Quel caso si credeva curato e non lo era fino al 27/09: era IN
+      #   RANGE, e questo gate i casi in range non li vede. Esiste perché la classe
       #   è tornata due volte e **non si vede**: una coordinata sbagliata non rompe nulla,
       #   manda solo la persona sbagliata nel posto sbagliato, mesi dopo.
       # ⚠️ Sa dire che la riga ESISTE, non che contenga la cosa giusta — il limite è

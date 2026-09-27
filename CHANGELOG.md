@@ -100,6 +100,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   client `notebooklm-mcp-cli==0.12.0`; le sei schede del pannello; il glossario con ruolo,
   speaker/voice e stirpe; CONTRIBUTING senza `mypy` (non gira da nessuna parte), con i
   test, gli hook (`tools/hooks/installa.sh`) e il rilascio.
+- **Metodo, registro e intestazioni allineati al codice** (audit della documentazione,
+  27/09): la coordinata `tools/vps1777.py:1021-1032` per `snapshot_prune` è rimasta in
+  SECURITY.md dal 27/07 puntando a un'altra funzione, e il presidio delle coordinate la
+  dava per curata dal 17/08 (era in range: il caso che dichiara di non vedere); corretta,
+  con la potatura vera (versioni n e n-1 dal 29/08, non 72 ore). `features.yaml` senza
+  coordinate `file:riga` (nessuno le verifica) e con lo schema di `dove` che lo dice;
+  REVIEW.md coi conteggi di oggi e H24 accettato; FEATURES-METODO (cosa enumera il
+  verificatore, la quarantena, H24); H24 e H56 nel registro con le note datate; le
+  intestazioni ferme a quattro immagini (release, dependabot, gate, compose.yaml);
+  `compose.build.yaml` senza `ocr`, che un build locale pullava invece di costruire.
 - **CLI IT/EN, TROUBLESHOOTING, BACKUP-RESTORE IT/EN, SECRETS, CIFRATURA-ARCHIVIO,
   INGRESS allineate al codice** (audit della documentazione, 27/09): le opzioni che
   mancavano (`--home`, `--from-intent`, `--require-cosign`, `bootstrap --bundle`,

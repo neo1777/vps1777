@@ -618,6 +618,11 @@ findings:
       appena aggiunto (914de9e) non impone review a nessuno finché non lo fa una
       regola GitHub. Il rimedio (environment `release` con reviewer) chiuderebbe
       anche questo, non solo il caso tag.
+      📅 (27/09) «main non ha branch protection» non è più vero: dal 27/09 main è
+      protetto con la CI obbligatoria (vedi `evidence_external` qui sopra). Resta vero
+      che nessuna review è imposta, ed è la parte del rischio accettato. E resta la
+      condizione di revisione: se un workflow ottiene un secret capace di creare tag
+      (per esempio `RELEASE_PAT` nel rebuild mensile), questa voce si riapre.
 
   - id: H25
     severity: medium
@@ -2167,6 +2172,9 @@ findings:
       (>72h) e non per numero, quindi ogni update aggiunge ~2,58 GB in chiaro che restano
       72 ore. Misurato: 2 snapshot conviventi = 4,9 GB, con la stessa copia dell'archivio
       due volte, identica al byte, senza deduplicazione.
+      📅 (27/09, audit della doc) Due cose di questo paragrafo sono cambiate dopo: dal
+      29/08 snapshot_prune pota per VERSIONE (tiene n e n-1), non per età; e la decisione
+      sul disco è stata presa il 23/08, per questo la voce è `accepted` e non `partial`.
 
       PERIMETRO DELLA MISURA, perché senza non è un dato: una macchina, un profilo di
       ingresso, immagini 0.40.5, ore 12:3x del 27/07. La chiave pubblica age non è stata

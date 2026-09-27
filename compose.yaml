@@ -5,6 +5,8 @@
 #   - archive-mcp: FTS5 multi-DB (claude.ai web + Claude Code sessions)
 #   - nb1777-mcp:  NotebookLM via CLI nlm (senza browser dalla 0.61.0)
 #   - nb1777-bot:  Telegram bot (long-poll)
+#   - ocr:         testo dalle immagini per l'ingest (tesseract, solo rete interna)
+#   - indice-notturno: job del profilo `indice`, lanciato dal timer (nessuna rete)
 #
 # Backend su rete `backend` (internal: true) — NIENTE è raggiungibile da fuori,
 # e nessun servizio di questo file può USCIRE su Internet: la rete `ingress` non

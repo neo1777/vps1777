@@ -53,7 +53,7 @@ Il verificatore è **bidirezionale**:
 | verso | cosa cattura |
 |---|---|
 | **ledger → realtà** | ogni feature `attiva` deve avere il suo `verify` che passa. Feature dichiarata ma **sparita** → CI rossa. *Cattura la PERDITA.* |
-| **realtà → ledger** | ogni tool MCP / endpoint / systemd-unit **reale** deve avere una voce. Feature reale **non dichiarata** → CI rossa. *Cattura ciò che poi si DIMENTICA.* |
+| **realtà → ledger** | ogni tool MCP, unit systemd, profilo compose, script di `tools/` e comando della CLI **reale** deve avere una voce (gli endpoint HTTP no: il verificatore non li enumera). Feature reale **non dichiarata** → CI rossa. *Cattura ciò che poi si DIMENTICA.* |
 
 Una feature **non può sparire in silenzio** (il suo verify fallirebbe) **né entrare senza traccia**
 (il check inverso la pretende nel ledger). Servono entrambi i versi: uno solo lascia metà del buco.
@@ -66,7 +66,8 @@ rossa. Ce ne sono due specie, e vanno trattate all'opposto:
 1. **Verificabile** — es. *«esiste `systemd/vps1777-auto-update.timer`»*. La CI lo controlla da sé:
    **rossa finché è falso, verde quando è vero. Auto-chiude.** (L'auto-update era di questa specie:
    la CI avrebbe controllato «esiste il timer?» ogni giorno.)
-2. **A giudizio umano** — es. *«quando il ritmo dei rilasci sarà regolare»* (H24). La CI **non può
+2. **A giudizio umano** — es. *«quando il ritmo dei rilasci sarà regolare»* (H24 fino al 27/09;
+   oggi è un rischio accettato con una data, `rivedi_dopo: 2026-12-27`). La CI **non può
    deciderlo**, quindi non lo chiude — ma **lo sorveglia**: lo rimette davanti a intervalli
    (*«3 rinviati-a-giudizio da rivedere»*). Non grida (non è un bug), ma **non sparisce**.
 
@@ -97,7 +98,8 @@ Questo doc è nato da una perdita. Oggi quella perdita è **chiusa e sorvegliata
 migliore che il metodo tiene, non una postilla di comodo:
 
 - Il **rimpiazzo sicuro esiste**: `systemd/vps1777-auto-update.timer` + `.service` lanciano
-  `vps1777 update --yes` (backup + firma + migrazioni + health-gate + rollback) — tutto ciò che
+  `vps1777 update --yes` (backup + firma + migrazioni + health-gate + rollback; dalla 0.58.0
+  con `--eta-minima 48`, la quarantena: installa solo una release uscita da 48 ore) — tutto ciò che
   Watchtower bypassava. Rilasciato in **v0.38.0**.
 - **È nel ledger, non a voce**: `update.auto-timer · status: active-default · since 0.38.0`,
   dichiarato *«il RIMPIAZZO sicuro di Watchtower»*. Il vecchio meccanismo non è cancellato ma

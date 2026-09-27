@@ -38,3 +38,14 @@ services:
       context: ./services/nb1777-bot
       dockerfile: Dockerfile
     image: vps1777/nb1777-bot:dev
+
+  # (27/09, audit della doc) ocr mancava da quando è nato (28/08): un build locale lo
+  # pullava da ghcr invece di costruirlo. indice-notturno usa l'immagine di archive-mcp.
+  ocr:
+    build:
+      context: ./services/ocr
+      dockerfile: Dockerfile
+    image: vps1777/ocr:dev
+
+  indice-notturno:
+    image: vps1777/archive-mcp:dev

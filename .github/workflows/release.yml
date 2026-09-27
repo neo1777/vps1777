@@ -2,7 +2,7 @@ name: Release
 
 # Su tag v* (da qualunque branch):
 #   guard   → VERSION file == tag (e CHANGELOG ha la sezione, per le stable)
-#   release → build+push delle 4 immagini su ghcr, firmate cosign keyless
+#   release → build+push delle 5 immagini su ghcr, firmate cosign keyless
 #   bundle  → runtime bundle (file non-immagine + images.lock) allegato a una
 #             GitHub Release; la Release è endpoint di check (/releases/latest),
 #             sorgente changelog e host del bundle per `vps1777 update`.
