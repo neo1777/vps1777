@@ -108,6 +108,21 @@ _SORTS = {
 _JOIN_MSG = " JOIN messages m ON m.rowid = f.rowid"
 
 
+SPEAKER_VALIDI = ("human", "assistant", "tool", "system", "unknown")
+VOICE_VALIDE = ("own", "pasted_transcript", "pasted_ai", "character", "mixed", "unknown",
+                "direct", "quoted", "none")
+
+
+def valida_filtri(*, speaker: str = "", voice: str = "", sort: str = "",
+                  campi: str = "") -> None:
+    """Tutti i filtri scritti male si dicono PRIMA di cercare, anche quando non c'è
+    nessun DB su cui la ricerca li avrebbe incontrati."""
+    _filtri_voce(speaker, voice)
+    con_campi("", campi)
+    if sort and sort not in _SORTS:
+        raise ValueError(f"sort={sort!r} non esiste: i valori sono {', '.join(_SORTS)}.")
+
+
 def _filtri_voce(speaker: str = "", voice: str = "") -> tuple[str, list]:
     """Traduce i filtri dell'asse-voce in `WHERE` + parametri. Alias inclusi.
 
@@ -135,6 +150,13 @@ def _filtri_voce(speaker: str = "", voice: str = "") -> tuple[str, list]:
     `71d540e6`: chi cerca `unknown` deve avere «le righe guardate e non
     riconosciute», non «le righe mai lette».
     """
+    # Un valore che non esiste è un ERRORE, come per `campi` (27/09): prima rispondeva
+    # 0 righe, e «speaker='neo'» si leggeva «Neo non l'ha mai detto».
+    if speaker and speaker not in SPEAKER_VALIDI:
+        raise ValueError(f"speaker={speaker!r} non esiste: i valori sono "
+                         f"{', '.join(SPEAKER_VALIDI)} (minuscoli).")
+    if voice and voice not in VOICE_VALIDE:
+        raise ValueError(f"voice={voice!r} non esiste: i valori sono {', '.join(VOICE_VALIDE)}.")
     where, extra = "", []
     if speaker:
         where += " AND m.speaker = ?"
@@ -194,6 +216,8 @@ def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
     (solleva FtsSyntaxError). In modalità smart (default) prova la query
     sanitizzata e, se il parser la rifiuta, ricade sulla query originale così da
     non rompere mai ciò che 'raw' avrebbe accettato."""
+    if sort and sort not in _SORTS:
+        raise ValueError(f"sort={sort!r} non esiste: i valori sono {', '.join(_SORTS)}.")
     order = _SORTS.get(sort, _SORTS["rank"])
     where = ""
     extra: list = []

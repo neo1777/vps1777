@@ -30,8 +30,8 @@ mcp = FastMCP(
 
 
 # ── REDAZIONE IN USCITA: si avvolge `mcp.tool` STESSO, non i singoli tool ────────────
-# I tool che restituiscono testo sono 3 su 9. Avvolgerne 3 significa che **il quarto
-# nasce cieco** — la forma di difetto che abbiamo misurato sette volte in una notte: il
+# I tool che restituivano testo erano 3 su 9 (oggi i tool sono 15). Avvolgerne 3
+# significa che **il quarto nasce cieco** — la forma di difetto che abbiamo misurato sette volte in una notte: il
 # presidio segue la forma del dato invece del rischio. Sostituendo il decoratore, un tool
 # nuovo scritto con `@mcp.tool()` eredita la redazione **per costruzione**, e chi lo
 # scrive non deve saperlo.
@@ -107,6 +107,10 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
             di un comando (tool_result di Claude Code, dalla 0.52.0: prima era
             'human'); 'system' = un turno che il programma inietta (notifiche di task,
             output di comandi locali, compattazioni, dalla 0.53.0: prima 'human').
+            'unknown' = la fonte non dichiara un mittente noto: allegati, titoli,
+            memorie, schede, documenti, log MCP e i messaggi TELEGRAM (il nome del
+            mittente sta nel testo, «[Nome] …»: lì speaker='human' dà 0, cerca il
+            nome). Un valore che non esiste è un errore, non uno zero.
         voice: DI CHI È LA VOCE nel contenuto — è una STIMA euristica, con la sua
             confidenza. Valori: 'own', 'pasted_transcript', 'pasted_ai',
             'character', 'mixed', 'unknown', più due alias e un terzo stato:

@@ -95,7 +95,7 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 |---|---|
 | `.zip` | riconosciuto dal **contenuto**, non dal nome. Nell'ordine: il **bundle di Recupero Sessioni 1777** (se ha `MANIFEST.json` **e** almeno un membro `sessions/…` — vedi [il bundle](#il-bundle-di-recupero-sessioni)); l'export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs` + `memories` + `users.json`/`login_history.json` — **unico** oppure **spezzato in 5 zip per categoria**, il formato consegnato da claude.ai dal 29/08/2026: ogni zip è riconosciuto da solo, si caricano tutti sullo stesso *nome DB*, vedi sotto); l'export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/`. **Fallback**: uno zip che non è niente di questo ma contiene documenti `.md`/`.txt` (e codice, config, testo leggibile) viene indicizzato doc-per-doc, come i file sciolti |
 | `.jsonl` | sessione **Claude Code** (`~/.claude/projects/<progetto>/<id>.jsonl`) |
-| `.json` | export **Telegram Desktop** (formato *Machine-readable JSON*) |
+| `.json` | export **Telegram Desktop** (formato *Machine-readable JSON*). Un `.json` che non ha le chiavi `messages`/`chats` di Telegram si legge come una sessione Claude Code (JSONL) |
 | `.pdf` | documento **con testo** (estratto via `pypdf`) |
 | `.md` / `.txt` | testo/markdown generico (ponte per l'output di altri tool) |
 | `.db` | drop-in di un archivio SQLite già indicizzato (schema validato) |
@@ -424,7 +424,7 @@ dalla Mini App). Tutti passano dalla redazione in uscita descritta sopra.
 | `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}`. Sulla ricerca in **tutti** i DB lo stesso uuid arriva **una volta**, con `anche_in` per gli altri archivi che lo contengono (niente limit sprecato in fotocopie). Filtri `since`/`until`, `project`, `speaker`, `voice`, `campi` (sotto). `limit` va da 1 a 200: sotto 1 è un errore che lo dice (prima `-1` perdeva in silenzio l'ultimo risultato), sopra 200 si taglia |
 | `search_ibrida(query, db_name, limit, query_fts, …)` | ricerca **per senso**: FTS5 + vettori fusi (RRF). Serve quando ricordi il senso e non il lessico; richiede il modello di embedding e un indice `<db>.vec.db` sul volume, e se mancano **lo dice** invece di ricadere su FTS5. Accetta `campi` e, dalla 0.62.1, `speaker` come `search` (il filtro vale per tutte e due le liste). Vedi [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
 | `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings`. Stessi filtri di `search`, `campi` compreso |
-| `check_term(term, db_name)` | diagnostica se un termine con `+`/`#` (`C++`, `C#`, `g++`) è ricercabile o **collassa** sul prefisso — chiede all'indice, non alla doc |
+| `check_term(term, db_name)` | diagnostica se un termine con un carattere non alfanumerico in testa o in coda (`C++`, `C#`, `g++`, `.NET`) è ricercabile o **collassa** su un token più corto — chiede all'indice, non alla doc |
 | `get_context(uuid, db_name, before, after, max_chars)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; sulle sessioni Claude Code i vicini vengono dal **file di sessione** (la riga cercata lo dice in `vicini_da`); altrove, se il messaggio è in un thread, dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale. `max_chars` (0 = intero) tronca ogni riga **dichiarandolo nel testo** — sui messaggi-hub giganti il payload pieno uccideva la connessione. Una riga **senza testo** (un tool_use, l'output di un comando) porta anche **`tools`**, le azioni che sono il suo contenuto (dalla 0.52.0: prima arrivava vuota), troncato da `max_chars` come il testo |
 | `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine `(ts, uuid)`) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` e `tools` come in `get_context`. Sulle sessioni Claude Code è il **file di sessione** intero (`conversazione_da`), e coi bundle con `recupero/` la scheda della sessione esce **in coda**. Oltre `limit` righe (200) torna una finestra che contiene sempre l'uuid chiesto e la scheda, dichiarata nel campo `finestra` della riga del match |
 | `get_session(sessionId, db_name, limit, max_chars)` | tutto ciò che l'archivio sa di **una sessione** Claude Code: la riga di `sessioni`, la **scheda**, i messaggi della conversazione, gli archi, la stirpe — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
@@ -432,8 +432,8 @@ dalla Mini App). Tutti passano dalla redazione in uscita descritta sopra.
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
 | `archive_stats(db_name)` | istogramma dei messaggi per **anno** — *quando* l'archivio è fitto, da sapere prima di cercare. La **prima** chiamata su un DB scandisce tutto (decine di secondi su archivi grandi); le successive sono **memoizzate per snapshot** |
 | `list_databases(schede)` | i nomi dei DB caricati; con `schede=true` ogni voce porta la sua carta d'identità (**ruolo**, righe, intervallo date, descrizione) — la scelta del DB è il primo bivio di ogni ricerca |
-| `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza), **description**, **ruolo** |
-| `check_integrity(db_name)` | integrità degli archivi: `ok` · `sporco` (journal caldo: lo scrittore è morto a metà) · `corrotto` · `non_misurabile`. Costa una scansione per DB: da chiamare quando un risultato sembra strano, non a ogni ricerca |
+| `describe_databases()` | scheda per DB: righe, intervallo date, etichette, **snapshot** (freschezza), **description**, **ruolo**, **voci** (quante righe per `voice`) |
+| `check_integrity(db_name)` | integrità degli archivi, `{per_db: {nome: {esito, dettaglio}}}`: `ok` · `sporco` (un `-journal` o un `-wal` caldo: lo scrittore è morto a metà) · `corrotto` · `non_misurabile` · `non_misurato` (su tutti i DB c'è un budget di 20 s: quelli oltre lo dichiarano invece di far morire la chiamata). Costa una scansione per DB: da chiamare quando un risultato sembra strano, non a ogni ricerca |
 | `set_description(db_name, description)` | scrive/aggiorna la **descrizione** dell'archivio (tocca la scheda, mai i messaggi) |
 | `set_ruolo(db_name, ruolo)` | dichiara il **ruolo** dell'archivio a vocabolario chiuso — vedi sotto |
 
@@ -478,9 +478,11 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 > richieste in più si mettono in coda da sole invece di morire in timeout. Chi
 > orchestra più chiamate le raggruppi a coppie.
 
-> **Fonti senza thread.** Sui documenti chunked (pdf/telegram/memory) e sui DB
-> storici `parent_uuid` è vuoto: lì `get_conversation` ripiega sull'ordine
-> lineare dell'archivio e `get_context` sull'adiacenza temporale. La
+> **Fonti senza thread.** Sui documenti chunked (pdf/memory), sui messaggi Telegram
+> (una riga per messaggio, senza catena) e sui DB storici `parent_uuid` è vuoto: lì
+> `get_conversation` ripiega sull'ordine lineare dello stesso `project` (una finestra
+> attorno all'uuid chiesto, se il project supera `limit`) e `get_context`
+> sull'adiacenza temporale. La
 > ricostruzione fedele dell'ordine dei chunk (colonna `seq`) è un passo
 > **evolutivo dichiarato**, fuori scope oggi.
 
@@ -535,8 +537,9 @@ modello legge prima di cercare):
 > C++». È il gemello a verso opposto dell'errore parlante: lì lista vuota, qui
 > lista piena della cosa sbagliata. **Il quoting non protegge** — non è la
 > sintassi, è l'indice: nessun apice cerca un carattere che il tokenizer ha
-> buttato. Il difetto morde solo i caratteri **in coda** (`C++`); **in mezzo**
-> (`node.js`) il quoting tiene i due token come frase e funziona.
+> buttato. Il difetto morde i caratteri **in testa o in coda** (`C++`, `.NET`), che
+> lasciano un solo token più corto; **in mezzo** (`node.js`) il quoting tiene i due
+> token come frase e funziona.
 >
 > Il fix è su **due strati**, perché indice e query sono piani diversi:
 > - **indice** — l'FTS si crea con `tokenize='unicode61 tokenchars ''+#'''`, così
@@ -628,7 +631,7 @@ nell'altra.
 | campo | cosa contiene |
 |---|---|
 | `sessionId` · `db` · `snapshot` · `anche_in` | come in `get_session` |
-| `membri` | ogni sessione della stirpe coi suoi dati da `sessioni`, in ordine di `first_ts`; ognuna con `in_sessioni: true/false` e `filoni` (le sue righe di `sessioni`, il principale per primo — i dati del membro sono i suoi; `[]` per un membro senza riga) |
+| `membri` | ogni sessione della stirpe coi suoi dati da `sessioni`, in ordine di `first_ts` (chi non ha una riga in `sessioni` viene in fondo); ognuna con `in_sessioni: true/false` e `filoni` (le sue righe di `sessioni`, il principale per primo — i dati del membro sono i suoi; `[]` per un membro senza riga) |
 | `senza_riga` | i membri **senza** riga in `sessioni` (noti solo come estremi di un arco): restano nell'elenco — incompleti, non spariti |
 | `archi` | gli archi con `chiusura=1` fra i membri |
 | `stirpi_dichiarate` · `schede_stirpe` | gli id di stirpe scritti nelle righe dei membri, e le loro schede |
@@ -748,6 +751,8 @@ messages_fts USING fts5(uuid, project, ts, content, tools, attachments,
                         content='messages', ...,   -- external-content
                         tokenize="unicode61 tokenchars '+#'")  -- C++/C# non collassano
 CREATE INDEX idx_parent ON messages(parent_uuid);   -- il thread-walking di get_conversation
+CREATE INDEX idx_project ON messages(project);      -- filtri e navigazione per etichetta
+CREATE INDEX idx_rev_uuid ON revisions(uuid);       -- la storia di un uuid
 revisions(uuid, ts, content, sender, project, ts_source, content_sha, superseded_date,
           PRIMARY KEY(uuid, content_sha))           -- le versioni uscenti di una riga riscritta
 skipped(uid PRIMARY KEY, source, reason, detail, ts, ingest_date)  -- libro-mastro degli scarti
@@ -797,8 +802,15 @@ passando a `write_rows` una **decima colonna** facoltativa (`messaggio` o
 `data-export`; senza, resta `messaggio`; un altro valore ferma l'ingest).
 
 **`speaker` e `voice`** — due assi che non vanno fusi. `speaker` è **chi ha inviato**
-la riga, un fatto preso dalla fonte (`human` · `assistant` · `tool` · `system` · `unknown`:
-allegati, titoli, memorie e schede sono `unknown`, perché non dicono chi le ha scritte).
+la riga, preso dalla fonte (`human` · `assistant` · `tool` · `system` · `unknown`).
+`unknown` è tutto ciò che non dichiara un mittente noto: allegati, titoli, memorie e
+schede, documenti, log dei server MCP, e i **messaggi Telegram** — lì il nome del
+mittente sta nel testo (`[Nome] …`) e non diventa `speaker`, quindi su un DB Telegram
+`speaker='human'` oggi risponde 0: il mittente si cerca per nome, col testo. `system`
+viene dal campo del record (`origin`, `isMeta`) quando c'è; sulle versioni che non lo
+scrivevano lo decide la forma del testo, ed è una stima.
+Un valore di `speaker` o di `voice` che non esiste è un **errore** (dalla 0.62.3), come
+per `campi`: prima rispondeva 0 righe, e «speaker='neo'» si leggeva «non l'ha mai detto».
 `voice` è **di chi è la voce** nel contenuto, una stima euristica (`own` ·
 `pasted_transcript` · `pasted_ai` · `character` · `mixed` · `unknown`), con la sua
 confidenza e le bandiere che la spiegano. Escono **popolate** da ogni percorso
@@ -829,7 +841,8 @@ per ogni DB chiama nel gateway:
 python -m app.archive_indexer /var/lib/archive/db/<nome>.db --migra [--scrivi]
 ```
 
-e stampa `{"strumenti": N, "speaker_prima": {…}, "speaker_dopo": {…}, "scritto": …}`. Sul
+e stampa `{"strumenti": N, "sistema": N, "indice_project": …, "speaker_prima": {…},
+"speaker_dopo": {…}, "scritto": …}`. Sul
 primario: 74.818 righe, `human` da 89.950 a 15.132, 6 secondi (e con i turni del
 programma, sotto, a 3.967). ⚠️ Anche a secco il file
 può cambiare **sha** senza cambiare dati: SQLite non mette nel journal le pagine libere

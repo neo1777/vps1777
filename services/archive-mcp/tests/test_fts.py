@@ -633,3 +633,23 @@ def test_conversation_cc_lunga_tiene_la_scheda():
     assert [r["uuid"] for r in conv] == ["a3", "a4", "sch-a"]
     conv = fts.conversation_conn(conn, "a1", limit=3)
     assert [r["uuid"] for r in conv][-1] == "sch-a" and "a1" in [r["uuid"] for r in conv]
+
+
+def test_un_filtro_scritto_male_e_un_errore_non_uno_zero():
+    """Audit della doc (27/09): `campi` sbagliato era già un errore parlante, ma
+    `speaker`, `voice` e `sort` sbagliati rispondevano 0 righe (o l'ordine di default)
+    senza dirlo — «speaker='neo'» sembrava «Neo non l'ha mai detto». Stessa regola per
+    tutti: un filtro che non esiste si dice."""
+    conn = _db(_ROWS)
+    for kw in ({"speaker": "neo"}, {"voice": "propria"}, {"sort": "recenti"}):
+        with pytest.raises(ValueError):
+            fts.search_conn(conn, "flutter", **kw)
+    with pytest.raises(ValueError):
+        fts.count_conn(conn, "flutter", speaker="Human")
+    # i valori veri e gli alias restano validi (la tabella di test non ha le colonne
+    # dell'asse-voce: qui si prova solo che il controllo li lascia passare)
+    for s in ("human", "assistant", "tool", "system", "unknown"):
+        assert fts._filtri_voce(s, "")[1] == [s]
+    for v in ("own", "pasted_transcript", "pasted_ai", "character", "mixed", "unknown",
+              "direct", "quoted", "none"):
+        fts._filtri_voce("", v)

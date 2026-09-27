@@ -265,7 +265,7 @@ class _Persistente(sqlite3.Connection):
 
 
 # 🔑 PER-THREAD, non globale: `sqlite3` rifiuta una connessione usata da un thread diverso
-#   da quello che l'ha creata (`ProgrammingError`, misurato) e i 13 tool di `server.py` sono
+#   da quello che l'ha creata (`ProgrammingError`, misurato) e i tool di `server.py` sono
 #   SINCRONI — FastMCP li esegue sul thread pool, quindi la stessa `search` arriva ogni volta
 #   su un thread potenzialmente diverso. Una cache globale esploderebbe alla seconda
 #   richiesta. *Il modello di concorrenza del server non è un dettaglio del deploy: qui è la
@@ -404,6 +404,7 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
     Ogni riga porta `db` e `snapshot` (freschezza del DB). Un errore di sintassi
     FTS5 solleva FtsSyntaxError (non restituisce lista vuota muta)."""
     limit = _limite(limit)
+    fts.valida_filtri(speaker=speaker, voice=voice, sort=sort, campi=campi)
     _maybe_reload()  # pesca eventuali DB caricati/indicizzati dopo l'avvio
     collected: list[dict[str, Any]] = []
     for name in _targets(db):
@@ -517,7 +518,9 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     ('fts' | 'vettori' | 'entrambi') per ciascuna — chi legge deve poter vedere
     *quale* dei due l'ha trovata, altrimenti il guadagno resta invisibile.
     """
-    fts.con_campi("", campi)        # un valore sbagliato si dice prima di tutto
+    # un valore sbagliato si dice prima di tutto (anche lo speaker: il ramo vettoriale
+    # lo usa da sé, senza passare da FTS)
+    fts.valida_filtri(speaker=speaker, campi=campi)
     limit = _limite(limit)
     s = get_settings()
     model_dir = Path(s.archive_model_dir)
@@ -651,6 +654,7 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
           voice: str = "", campi: str = "tutto") -> dict[str, Any]:
     """Numero di match per DB e totale (non limitato) — abilita frequenze e
     prevalenze, impossibili con la sola `search` limitata."""
+    fts.valida_filtri(speaker=speaker, voice=voice, campi=campi)
     _maybe_reload()
     per_db: dict[str, int] = {}
     warnings: list[str] = []

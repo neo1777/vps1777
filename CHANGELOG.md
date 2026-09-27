@@ -5,6 +5,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **archive1777: un filtro scritto male è un errore, non uno zero.** `campi` sbagliato
+  lo era già; `speaker`, `voice` e `sort` sbagliati rispondevano 0 righe (o l'ordine di
+  default) senza dirlo, e «speaker='neo'» si leggeva «non l'ha mai detto». Ora tutti si
+  controllano all'ingresso di `search`, `count` e `search_ibrida`, anche quando non c'è
+  nessun DB su cui la ricerca li avrebbe incontrati. ARCHIVE IT/EN allineata al codice
+  anche su `check_integrity` (`non_misurato`, `-wal`, la forma della risposta), `voci` in
+  `describe_databases`, gli indici dello schema, l'output di `--migra`, `check_term` sui
+  caratteri in testa (`.NET`), l'ordine della stirpe, i `.json` che non sono Telegram, e
+  lo `speaker` dei messaggi Telegram (oggi `unknown`: il mittente sta nel testo).
+
 - **archive1777: tre promesse della documentazione che il codice non teneva** (audit
   della documentazione, 27/09):
   - `get_conversation` prendeva le **prime** `limit` righe: su una chat più lunga di 200
