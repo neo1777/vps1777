@@ -40,6 +40,11 @@ DUE MECCANISMI, e la differenza conta:
                       nome: maschero i nomi che SO essere nomi** — zero falsi positivi per
                       costruzione, che è la ragione per cui non uso un riconoscitore.
 
+TERZO MECCANISMO (27/09/2026): le CREDENZIALI in formato riconoscibile (prefissi dei
+fornitori: GitHub, Anthropic/OpenAI, AWS, Google, Slack, Telegram, Tailscale, age, JWT,
+blocchi di chiave privata) e il percorso degli URL trycloudflare. Stesso limite dei
+pattern: un segreto senza formato (una password scritta a mano) resta scoperto.
+
 COSA NON COPRE, dichiarato invece che taciuto — è precisamente l'errore che questo file
 ripara, e ripeterlo qui sarebbe grottesco:
     · nomi di persona di TERZI mai comparsi nell'anagrafica: non c'è modo di saperli senza
@@ -117,6 +122,33 @@ def _telefoni(s: str) -> str:
 SEGNAPOSTO_EMAIL = "[email redatta]"
 SEGNAPOSTO_TEL = "[telefono redatto]"
 SEGNAPOSTO_VALORE = "[dato personale redatto]"
+SEGNAPOSTO_CREDENZIALE = "[credenziale redatta]"
+
+# CREDENZIALI IN FORMATO RICONOSCIBILE (27/09/2026). Rilievo della curatrice dei rimandi:
+# su un DB claude.ai una ricerca restituiva in chiaro un token GitHub e un URL
+# trycloudflare col suo percorso segreto. Stessa filosofia di email e telefoni: si
+# maschera ciò che ha un FORMATO; un segreto senza formato (una password scritta a mano)
+# resta scoperto, e questo va detto invece di promettere di più.
+# I prefissi sono quelli dei fornitori; le lunghezze minime tengono fuori «sk-learn»,
+# «AIza.txt» e simili. Si applicano PRIMA dei telefoni: un token Telegram comincia con
+# nove cifre, e il pattern del telefono ne mangerebbe metà lasciando in chiaro il resto.
+CREDENZIALI = re.compile(
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----"
+    r"|\bgh[pousr]_[A-Za-z0-9]{36,}\b"
+    r"|\bgithub_pat_[A-Za-z0-9_]{40,}"
+    r"|\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{32,}"
+    r"|\bAKIA[0-9A-Z]{16}\b"
+    r"|\bAIza[0-9A-Za-z_-]{35}\b"
+    r"|\bxox[abprs]-[A-Za-z0-9-]{10,}"
+    r"|\b\d{8,10}:[A-Za-z0-9_-]{35}\b"
+    r"|\btskey-[a-z]+-[A-Za-z0-9-]{8,}"
+    r"|AGE-SECRET-KEY-1[A-Z0-9]{50,}"
+    r"|\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}",
+    re.S)
+# Un tunnel rapido di Cloudflare è segreto per URL: chi conosce il percorso entra.
+# L'host resta (dice DOVE era il servizio), il percorso no.
+TRYCLOUDFLARE = re.compile(r"(\bhttps?://[a-z0-9-]+\.trycloudflare\.com)(/[^\s\"'<>)\]]+)")
+SEGNAPOSTO_PERCORSO = "/[percorso redatto]"
 
 # Campi dell'anagrafica i cui VALORI vanno mascherati ovunque compaiano. `uuid` no: è un
 # identificatore tecnico che serve a `get_context`, e mascherarlo romperebbe la navigazione.
@@ -164,7 +196,7 @@ def valori_noti(conn: sqlite3.Connection) -> set[str]:
 
 
 def maschera_testo(s: str, noti: set[str] | None = None) -> str:
-    """Redige email, telefoni e i valori noti dentro una stringa."""
+    """Redige credenziali, email, telefoni e i valori noti dentro una stringa."""
     if not s:
         return s
     # I valori noti PRIMA dei pattern: così un'email dell'anagrafica esce come
@@ -174,6 +206,8 @@ def maschera_testo(s: str, noti: set[str] | None = None) -> str:
     for v in sorted(noti or (), key=len, reverse=True):
         if v in s:
             s = s.replace(v, SEGNAPOSTO_VALORE)
+    s = CREDENZIALI.sub(SEGNAPOSTO_CREDENZIALE, s)
+    s = TRYCLOUDFLARE.sub(lambda m: m.group(1) + SEGNAPOSTO_PERCORSO, s)
     s = EMAIL.sub(SEGNAPOSTO_EMAIL, s)
     return _telefoni(s)
 

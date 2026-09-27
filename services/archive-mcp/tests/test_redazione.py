@@ -232,3 +232,56 @@ def test_senza_esenti_la_politica_non_cambia(monkeypatch) -> None:
     assert "a@b.it" not in redazione.maschera_testo("scrivi a a@b.it", noti)
     sorgente = Path(redazione.__file__).read_text(encoding="utf-8")
     assert 'os.getenv("ARCHIVE_REDACT_ESENTI", "")' in sorgente, "il default deve essere vuoto"
+
+
+# ── credenziali (27/09/2026) ─────────────────────────────────────────────────────────
+# Rilievo della curatrice dei rimandi (agente F0-C4): su claude-ai-290826 una ricerca
+# restituiva in chiaro un token GitHub (chat del 02/06) e un URL trycloudflare col suo
+# percorso segreto (03/06). La redazione copriva email e telefoni, non le credenziali.
+# I token finti si COSTRUISCONO a pezzi: scritti interi nel sorgente li scambierebbe per
+# veri uno scanner di segreti (e il push protection di GitHub).
+
+def _finti() -> dict[str, str]:
+    a36 = "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    return {
+        "github": "gh" + "p_" + a36,
+        "github-pat": "github" + "_pat_" + "11ABCDEFG0" + "x" * 50,
+        "anthropic": "sk" + "-ant-" + "api03-" + "Z" * 40,
+        "openai": "sk" + "-proj-" + "Y" * 40,
+        "aws": "AK" + "IA" + "ABCDEFGHIJKLMNOP",
+        "google": "AI" + "za" + "S" * 35,
+        "slack": "xo" + "xb-" + "1234567890-abcdefghij",
+        "telegram": "123456789" + ":" + "AAH" + "q" * 32,
+        "tailscale": "tsk" + "ey-auth-" + "kAbCdEf1234567",
+        "jwt": "ey" + "J" + "hbGciOiJIUzI1NiJ9" + ".ey" + "J" + "zdWIiOiIxMjM0In0" + "." + "s" * 30,
+    }
+
+
+def test_le_credenziali_in_formato_riconoscibile_non_escono() -> None:
+    for nome, tok in _finti().items():
+        out = redazione.maschera_testo(f"ecco il token {tok} usalo")
+        assert tok not in out, f"{nome}: uscito in chiaro"
+        assert redazione.SEGNAPOSTO_CREDENZIALE in out, nome
+        assert out.startswith("ecco il token ") and out.endswith(" usalo"), (nome, out)
+
+
+def test_blocco_di_chiave_privata_redatto_intero() -> None:
+    blocco = ("-----BEGIN OPENSSH " + "PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA\n"
+              "QUJDREVGR0g=\n-----END OPENSSH " + "PRIVATE KEY-----")
+    out = redazione.maschera_testo("prima\n" + blocco + "\ndopo")
+    assert "b3BlbnNzaC1rZXktdjEAAAA" not in out and "QUJDREVGR0g" not in out
+    assert out.startswith("prima\n") and out.endswith("\ndopo")
+
+
+def test_trycloudflare_perde_il_percorso_non_l_host() -> None:
+    url = "https://fuzzy-cat-abc.trycloudflare.com/" + "s3gr3t0" + "Percorso/mcp"
+    out = redazione.maschera_testo(f"apri {url} poi")
+    assert "s3gr3t0Percorso" not in out
+    assert "fuzzy-cat-abc.trycloudflare.com" in out          # l'host resta: dice DOVE
+    assert out.endswith(" poi")
+
+
+def test_le_credenziali_non_mangiano_il_testo_normale() -> None:
+    for s in ("sk-learn è una libreria", "il file AIza.txt", "ghp_ da solo non è un token",
+              "https://example.com/percorso/normale", "ore 12:30 riunione"):
+        assert redazione.maschera_testo(s) == s, s
