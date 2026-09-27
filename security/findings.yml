@@ -596,10 +596,13 @@ findings:
         verify: "gh api repos/neo1777/vps1777/branches/main/protection"
         note: >
           Assente il 26/07 (404 «Branch not protected»). Il 27/09/2026 c'è: niente
-          force-push, niente cancellazione, `enforce_admins` acceso; nessuna review
-          obbligatoria (single-owner: la review richiesta bloccherebbe l'unico
-          autore). Quindi il CODEOWNERS continua a non imporre review a nessuno: vero,
-          ed è parte del rischio accettato sopra.
+          force-push, niente cancellazione, `enforce_admins` acceso, e — dalla stessa
+          data, decisione dell'owner su rilievo della sessione template — i 9 job della
+          CI sono **required status checks**: nessun commit entra in main senza CI verde,
+          nemmeno quelli dell'owner (anche il commit di versione passa da una PR).
+          Nessuna review obbligatoria (single-owner: bloccherebbe l'unico autore), quindi
+          il CODEOWNERS continua a non imporre review a nessuno: vero, ed è parte del
+          rischio accettato sopra.
     missing: >
       I tag v* pubblicati sono ora IMMUTABILI (ruleset `tag-v-immutabili`: deletion +
       update; provato sul campo che spostare o cancellare un tag è rifiutato, e che

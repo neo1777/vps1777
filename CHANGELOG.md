@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **CI obbligatoria su `main`**: i 9 job della CI sono *required status checks*, con
+  `enforce_admins`. Nessun commit entra in main senza CI verde, nemmeno quelli dell'owner;
+  il commit che apre una versione passa da una PR. Rilievo della sessione template,
+  decisione dell'owner (27/09).
+
 ## [0.61.1] — 2026-09-27
 
 **La prima release pubblicata con le immutable releases accese**, più `pyjwt` 2.15.
