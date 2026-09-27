@@ -97,7 +97,7 @@ and becomes searchable. Automatic dispatch by extension:
 |---|---|
 | `.zip` | recognised by its **content**, not its name. In order: the **Session Recovery 1777 bundle** (if it has `MANIFEST.json` **and** at least one `sessions/…` member — see [the bundle](#the-session-recovery-bundle)); the **claude.ai** account export (`conversations.json` + `design_chats/` + `projects/docs` + `memories` + `users.json`/`login_history.json` — **single** or **split into 5 zips by category**, the format claude.ai has delivered since 29/08/2026: each zip is recognised on its own, all of them go to the same *DB name*, see below); the **Telegram Desktop** chat export — `result.json` *or* `messages*.html`, also zipped as a `ChatExport_*/` folder. **Fallback**: a zip that is none of these but contains `.md`/`.txt` documents (and code, config, readable text) is indexed document by document, like loose files |
 | `.jsonl` | **Claude Code** session (`~/.claude/projects/<project>/<id>.jsonl`) |
-| `.json` | **Telegram Desktop** export (*Machine-readable JSON* format) |
+| `.json` | **Telegram Desktop** export (*Machine-readable JSON* format). A `.json` without Telegram's `messages`/`chats` keys is read as a Claude Code session (JSONL) |
 | `.pdf` | document **with text** (extracted via `pypdf`) |
 | `.md` / `.txt` | generic text/markdown (a bridge for the output of other tools) |
 | `.db` | drop-in of an already indexed SQLite archive (schema validated) |
@@ -430,7 +430,7 @@ above.
 | `search(query, db_name, limit, …)` | FTS5 search; returns `{db, uuid, project, ts, rank, snippet, snapshot}`. When searching **all** DBs the same uuid arrives **once**, with `anche_in` listing the other archives that contain it (no limit wasted on copies). Filters `since`/`until`, `project`, `speaker`, `voice`, `campi` (below). `limit` goes from 1 to 200: below 1 it is an error that says so (before, `-1` silently lost the last result), above 200 it is cut |
 | `search_ibrida(query, db_name, limit, query_fts, …)` | search **by meaning**: FTS5 + vectors fused (RRF). For when you remember the meaning and not the wording; it needs the embedding model and a `<db>.vec.db` index on the volume, and if they are missing **it says so** instead of falling back to FTS5. Takes `campi` and, since 0.62.1, `speaker` like `search` (the filter applies to both lists). See [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
 | `count(query, db_name, …)` | how many messages match (not limited): `{total, per_db}`; if a term **collapses** it adds `warnings`. Same filters as `search`, `campi` included |
-| `check_term(term, db_name)` | diagnoses whether a term with `+`/`#` (`C++`, `C#`, `g++`) is searchable or **collapses** onto its prefix — it asks the index, not the docs |
+| `check_term(term, db_name)` | diagnoses whether a term with a non-alphanumeric character at its start or end (`C++`, `C#`, `g++`, `.NET`) is searchable or **collapses** onto a shorter token — it asks the index, not the docs |
 | `get_context(uuid, db_name, before, after, max_chars)` | the messages **around** a result, with the **full content**; on Claude Code sessions the neighbours come from the **session file** (the matched row says so in `vicini_da`); elsewhere, if the message is in a thread, from the **same thread** (`parent_uuid` edge), not from mere closeness in time. `max_chars` (0 = whole) truncates each row **saying so in the text** — on giant hub messages the full payload killed the connection. A row **without text** (a tool_use, the output of a command) also carries **`tools`**, the actions that are its content (since 0.52.0: before, it came out empty), truncated by `max_chars` like the text |
 | `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` and `tools` as in `get_context`. On Claude Code sessions it is the whole **session file** (`conversazione_da`), and with bundles carrying `recupero/` the session's card comes **last**. Beyond `limit` rows (200) it returns a window that always contains the requested uuid and the card, declared in the `finestra` field of the match row |
 | `get_session(sessionId, db_name, limit, max_chars)` | everything the archive knows about **one** Claude Code **session**: the `sessioni` row, the **card**, the conversation's messages, the edges, the lineage — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
@@ -438,8 +438,8 @@ above.
 | `list_projects(db_name, top)` | the `project` labels with their counts — to **browse** the archive, not just search it |
 | `archive_stats(db_name)` | histogram of messages per **year** — *when* the archive is dense, worth knowing before searching. The **first** call on a DB scans everything (tens of seconds on large archives); later ones are **memoised per snapshot** |
 | `list_databases(schede)` | the names of the loaded DBs; with `schede=true` each entry carries its identity card (**role**, rows, date range, description) — choosing the DB is the first fork of every search |
-| `describe_databases()` | card per DB: rows, date range, labels, **snapshot** (freshness), **description**, **ruolo** (role) |
-| `check_integrity(db_name)` | integrity of the archives: `ok` · `sporco` (dirty: hot journal, the writer died halfway) · `corrotto` (corrupt) · `non_misurabile` (not measurable). It costs a scan per DB: call it when a result looks odd, not on every search |
+| `describe_databases()` | card per DB: rows, date range, labels, **snapshot** (freshness), **description**, **ruolo** (role), **voci** (rows per `voice`) |
+| `check_integrity(db_name)` | integrity of the archives, `{per_db: {name: {esito, dettaglio}}}`: `ok` · `sporco` (dirty: a hot `-journal` or `-wal`, the writer died halfway) · `corrotto` (corrupt) · `non_misurabile` (not measurable) · `non_misurato` (not measured: across all DBs there is a 20 s budget, and those beyond it say so instead of killing the call). It costs a scan per DB: call it when a result looks odd, not on every search |
 | `set_description(db_name, description)` | writes/updates the archive's **description** (touches the card, never the messages) |
 | `set_ruolo(db_name, ruolo)` | declares the archive's **role** from a closed vocabulary — see below |
 
@@ -484,9 +484,11 @@ The `ruolo` (role) field makes it readable.
 > requests queue by themselves instead of dying in a timeout. Whoever orchestrates
 > several calls should group them in pairs.
 
-> **Sources without a thread.** On chunked documents (pdf/telegram/memory) and on
-> historical DBs `parent_uuid` is empty: there `get_conversation` falls back to the
-> archive's linear order and `get_context` to closeness in time. A faithful
+> **Sources without a thread.** On chunked documents (pdf/memory), on Telegram
+> messages (one row per message, no chain) and on historical DBs `parent_uuid` is
+> empty: there `get_conversation` falls back to the linear order of the same `project`
+> (a window around the requested uuid, if the project exceeds `limit`) and
+> `get_context` to closeness in time. A faithful
 > reconstruction of the chunk order (a `seq` column) is a **declared evolutionary
 > step**, out of scope today.
 
@@ -541,8 +543,9 @@ searching):
 > is the opposite twin of the talking error: there an empty list, here a list full
 > of the wrong thing. **Quoting doesn't protect** — it's not the syntax, it's the
 > index: no quote searches for a character the tokenizer threw away. The defect
-> bites only **trailing** characters (`C++`); **in the middle** (`node.js`) quoting
-> keeps the two tokens as a phrase and works.
+> bites characters **at the start or the end** (`C++`, `.NET`), which leave a single
+> shorter token; **in the middle** (`node.js`) quoting keeps the two tokens as a phrase
+> and works.
 >
 > The fix is on **two layers**, because index and query are different planes:
 > - **index** — FTS is created with `tokenize='unicode61 tokenchars ''+#'''`, so
@@ -635,7 +638,7 @@ continue into one another.
 | field | content |
 |---|---|
 | `sessionId` · `db` · `snapshot` · `anche_in` | as in `get_session` |
-| `membri` | each session of the lineage with its data from `sessioni`, in `first_ts` order; each with `in_sessioni: true/false` and `filoni` (its `sessioni` rows, the main one first — the member's data are the main one's; `[]` for a member without a row) |
+| `membri` | each session of the lineage with its data from `sessioni`, in `first_ts` order (those without a row in `sessioni` come last); each with `in_sessioni: true/false` and `filoni` (its `sessioni` rows, the main one first — the member's data are the main one's; `[]` for a member without a row) |
 | `senza_riga` | the members **without** a row in `sessioni` (known only as edge endpoints): they stay in the list — incomplete, not vanished |
 | `archi` | the edges with `chiusura=1` between members |
 | `stirpi_dichiarate` · `schede_stirpe` | the lineage ids written in the members' rows, and their cards |
@@ -762,6 +765,8 @@ messages_fts USING fts5(uuid, project, ts, content, tools, attachments,
                         content='messages', ...,   -- external-content
                         tokenize="unicode61 tokenchars '+#'")  -- C++/C# don't collapse
 CREATE INDEX idx_parent ON messages(parent_uuid);   -- get_conversation's thread walking
+CREATE INDEX idx_project ON messages(project);      -- filters and browsing by label
+CREATE INDEX idx_rev_uuid ON revisions(uuid);       -- the history of a uuid
 revisions(uuid, ts, content, sender, project, ts_source, content_sha, superseded_date,
           PRIMARY KEY(uuid, content_sha))           -- the outgoing versions of a rewritten row
 skipped(uid PRIMARY KEY, source, reason, detail, ts, ingest_date)  -- the ledger of discards
@@ -810,9 +815,15 @@ passing `write_rows` an optional **tenth column** (`messaggio` or `data-export`;
 without it, it stays `messaggio`; any other value stops the ingest).
 
 **`speaker` and `voice`** — two axes that must not be merged. `speaker` is **who
-sent** the row, a fact taken from the source (`human` · `assistant` · `tool` ·
-`system` · `unknown`: attachments, titles, memories and cards are `unknown`, because they don't
-say who wrote them). `voice` is **whose voice** is in the content, a heuristic estimate
+sent** the row, taken from the source (`human` · `assistant` · `tool` · `system` ·
+`unknown`). `unknown` is everything that does not declare a known sender: attachments,
+titles, memories and cards, documents, MCP server logs, and **Telegram messages** —
+there the sender's name is in the text (`[Name] …`) and does not become `speaker`, so on
+a Telegram DB `speaker='human'` returns 0 today: search the sender by name, in the text.
+`system` comes from the record's field (`origin`, `isMeta`) when there is one; on the
+versions that did not write it, the shape of the text decides, and it is an estimate.
+A `speaker` or `voice` value that does not exist is an **error** (since 0.62.3), as for
+`campi`: it used to return 0 rows, and «speaker='neo'» read as «never said it». `voice` is **whose voice** is in the content, a heuristic estimate
 (`own` · `pasted_transcript` · `pasted_ai` · `character` · `mixed` · `unknown`),
 with its confidence and the flags that explain it. They come out **populated** from
 every ingest path.
@@ -841,7 +852,8 @@ each DB runs inside the gateway:
 python -m app.archive_indexer /var/lib/archive/db/<name>.db --migra [--scrivi]
 ```
 
-and prints `{"strumenti": N, "speaker_prima": {…}, "speaker_dopo": {…}, "scritto": …}`. On
+and prints `{"strumenti": N, "sistema": N, "indice_project": …, "speaker_prima": {…},
+"speaker_dopo": {…}, "scritto": …}`. On
 the primary: 74,818 rows, `human` from 89,950 to 15,132, 6 seconds (and, with the
 program's turns below, to 3,967). ⚠️ Even a dry run can
 change the file's **sha** without changing data: SQLite doesn't journal the free pages it

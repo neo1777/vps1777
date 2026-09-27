@@ -278,11 +278,11 @@ CREATE TABLE IF NOT EXISTS messages(
     --    'unknown', non una scelta comoda. È la lezione già pagata qui sopra con `ts_source`:
     --    un default che ASSERISCE fabbrica, in un colpo solo e su archivi vivi, esattamente
     --    la bugia che la colonna doveva impedire — e con l'aria di un dato verificato.
-    speaker       TEXT DEFAULT '',   -- human/assistant/tool/unknown (derivato da `sender`, Fase 1)
+    speaker       TEXT DEFAULT '',   -- human/assistant/tool/system/unknown (derivato da `sender`)
     -- 🔴 `doc` NON è un valore di `voice`, e toglierlo è la cura (obiezione di
     --   abdd732a, 02/08, accolta). Il criterio che separa i due assi:
     --     `voice`   = COME SI È FORMATO il testo   (parlato · incollato · recitato)
-    --     `speaker` = CHI/CHE COSA lo ha immesso   (human · assistant · tool · unknown)
+    --     `speaker` = CHI/CHE COSA lo ha immesso   (human · assistant · tool · system · unknown)
     --   «è un allegato» è una proprietà della RIGA, non del modo in cui il testo è
     --   nato ⇒ vive in `speaker`. Tenerlo in entrambi avrebbe fatto **rientrare
     --   dalla finestra, col nome nuovo, il difetto che queste colonne curano**:
