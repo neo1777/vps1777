@@ -18,6 +18,7 @@ ignora il fallimento perché l'update è già riuscito.
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import sys
 from datetime import datetime, timezone
 
@@ -26,15 +27,27 @@ from . import core
 CARD_TITLE = "vps1777-state-card"
 
 
-def render_card(version: str, *, nlm_pin: str = "0.7.7", date: str | None = None) -> str:
-    """Markdown della card. Puro (nessun I/O) → testabile offline."""
+def nlm_installato() -> str:
+    """La versione del client nlm installato, letta dai metadati del pacchetto.
+
+    Era scritta a mano («0.7.7») in tre default: al primo salto di versione la card
+    avrebbe dichiarato il client vecchio. Letta da qui, non può restare indietro."""
+    try:
+        return importlib.metadata.version("notebooklm-mcp-cli")
+    except importlib.metadata.PackageNotFoundError:
+        return "?"
+
+
+def render_card(version: str, *, nlm_pin: str | None = None, date: str | None = None) -> str:
+    """Markdown della card. Puro (nessun I/O di rete) → testabile offline."""
+    nlm_pin = nlm_pin or nlm_installato()
     date = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return (
         "# vps1777 — state card (auto-generata, NON modificare a mano)\n"
         f"versione: {version} · nlm pin: {nlm_pin} · aggiornata: {date}\n"
         "\n"
         "Verità viva: chiama il tool `doctor` (nb1777) → `vps1777_version` + `contract_note`.\n"
-        "I contratti dei tool source/studio sono pinnati a nlm 0.7.x e verificati da un\n"
+        f"I contratti dei tool source/studio sono pinnati a nlm {nlm_pin} e verificati da un\n"
         "contract-test in CI.\n"
         "\n"
         "- `nb_get` ritorna title + url + fonti.\n"
@@ -46,7 +59,7 @@ def render_card(version: str, *, nlm_pin: str = "0.7.7", date: str | None = None
     )
 
 
-def upsert(notebook_id: str, version: str, *, nlm_pin: str = "0.7.7") -> str:
+def upsert(notebook_id: str, version: str, *, nlm_pin: str | None = None) -> str:
     """Rimpiazza la card nel notebook. Ritorna l'id della nuova fonte.
 
     Rimuove prima tutte le fonti col titolo della card (idempotenza: mai
@@ -67,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="app.statecard")
     ap.add_argument("--notebook", required=True, help="id del notebook target")
     ap.add_argument("--version", required=True, help="versione vps1777 corrente")
-    ap.add_argument("--nlm-pin", default="0.7.7")
+    ap.add_argument("--nlm-pin", default=None, help="default: la versione installata")
     args = ap.parse_args(argv)
     try:
         sid = upsert(args.notebook, args.version, nlm_pin=args.nlm_pin)

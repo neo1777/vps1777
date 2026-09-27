@@ -1,14 +1,16 @@
 """Smoke-test del rendering della state card — offline, senza nlm."""
 from __future__ import annotations
 
-from app.statecard import CARD_TITLE, render_card
+from app.statecard import CARD_TITLE, nlm_installato, render_card
 
 
 def test_render_card_contiene_versione_data_e_rimando_a_doctor() -> None:
     md = render_card("1.2.3", date="2026-07-05")
     assert "1.2.3" in md
     assert "2026-07-05" in md
-    assert "nlm pin: 0.7.7" in md
+    # il pin è quello INSTALLATO, non un numero scritto a mano (era «0.7.7» fisso)
+    assert f"nlm pin: {nlm_installato()}" in md
+    assert f"pinnati a nlm {nlm_installato()}" in md
     # il principio anti-staleness: la card rimanda alla verità viva
     assert "doctor" in md
     # i tre fatti che erano ricordi stale

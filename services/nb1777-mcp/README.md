@@ -16,7 +16,7 @@ NotebookLM MCP wrapper — espone i tool del CLI `nlm` come MCP streamable-http.
 
 ## Auth NotebookLM (post-install)
 
-`nlm` 0.7.x salva l'auth come profilo `${NLM_HOME}/profiles/default/cookies.json`. Se manca (o esiste `${NLM_HOME}/AUTH_PENDING.flag`), ogni tool MCP ritorna `RuntimeError` con le istruzioni.
+`nlm` (dalla 0.7 alla 0.12) salva l'auth come profilo `${NLM_HOME}/profiles/default/cookies.json`. Se manca (o esiste `${NLM_HOME}/AUTH_PENDING.flag`), ogni tool MCP ritorna `RuntimeError` con le istruzioni.
 
 Sul tuo PC: `nlm login` → `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` → carica il tar.gz dal pannello `<PUBLIC_BASE>/admin/nlm`.
 

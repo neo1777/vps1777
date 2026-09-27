@@ -178,7 +178,7 @@ jobs:
             exit 1
           fi
 
-  # Contract-test wrapper ↔ CLI nlm: installa il pin reale (0.7.7) e verifica
+  # Contract-test wrapper ↔ CLI nlm: installa il pin reale (dal lock) e verifica
   # che le firme dei sottocomandi `source` siano quelle su cui core.py si
   # appoggia. Un bump di nlm che cambia una firma fallisce QUI, non in prod.
   contract:

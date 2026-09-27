@@ -144,3 +144,54 @@ def test_studio_delete_takes_notebook_positional() -> None:
     h = _help_of("studio", "delete")
     assert "NOTEBOOK_ID" in h, h
     assert "ARTIFACT_ID" in h, h
+
+
+# ── ogni flag che il core passa, per ogni comando, esiste nel `--help` vero ──
+# Aggiunto al salto 0.7.7 → 0.12.0 (27/09/2026). I test sopra fotografano le firme
+# che hanno già morso; questo copre il resto in automatico: legge `app/core.py`, e per
+# ogni funzione che costruisce UN solo comando `nlm <gruppo> <verbo> …` raccoglie i
+# flag `--x` che vi compaiono, poi pretende che `nlm <gruppo> <verbo> --help` li
+# nomini. Un bump che toglie o rinomina un flag usato fallisce qui, non in produzione.
+
+import ast  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+_CORE = Path(__file__).resolve().parents[1] / "app" / "core.py"
+
+
+def _comandi_e_flag() -> dict[tuple[str, str], set[str]]:
+    albero = ast.parse(_CORE.read_text())
+    out: dict[tuple[str, str], set[str]] = {}
+    for f in ast.walk(albero):
+        if not isinstance(f, ast.FunctionDef):
+            continue
+        comandi = set()
+        for n in ast.walk(f):
+            if (isinstance(n, ast.List) and len(n.elts) >= 2
+                    and all(isinstance(e, ast.Constant) and isinstance(e.value, str)
+                            for e in n.elts[:2])
+                    and not n.elts[0].value.startswith("-")
+                    and not n.elts[1].value.startswith("-")):
+                comandi.add((n.elts[0].value, n.elts[1].value))
+        if len(comandi) != 1:
+            continue
+        flag = {n.value for n in ast.walk(f)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                and re.fullmatch(r"--[a-z][a-z-]*", n.value)}
+        out.setdefault(comandi.pop(), set()).update(flag)
+    return out
+
+
+def test_la_lettura_del_core_trova_i_comandi() -> None:
+    trovati = _comandi_e_flag()
+    for atteso in [("notebook", "list"), ("source", "add"), ("query", "notebook"),
+                   ("audio", "create"), ("status", "artifacts")]:
+        assert atteso in trovati, sorted(trovati)
+
+
+@pytest.mark.parametrize("comando", sorted(_comandi_e_flag()), ids=lambda c: " ".join(c))
+def test_ogni_flag_del_core_esiste_nel_help(comando: tuple[str, str]) -> None:
+    h = _help_of(*comando)
+    assert "Usage" in h or "USAGE" in h.upper(), f"`nlm {' '.join(comando)}` non esiste: {h[:200]}"
+    mancanti = sorted(f for f in _comandi_e_flag()[comando] if f not in h)
+    assert not mancanti, f"`nlm {' '.join(comando)}` non espone {mancanti}"
