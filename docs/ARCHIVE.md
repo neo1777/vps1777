@@ -132,7 +132,7 @@ documenti» mangerebbe, ignorando sessioni e log).
 
 | membro | cosa diventa | etichetta `project` |
 |---|---|---|
-| `sessions/<sessionId>.jsonl` (e `<sessionId>__fN.jsonl` per i filoni) | conversazioni: una riga per messaggio user/assistant, uuid nativi, `parent_uuid` nativo; più i titoli (`sender='title'`) e gli allegati (`sender='attachment'`) | ultima cartella della cwd della sessione |
+| `sessions/<sessionId>.jsonl` (e `<sessionId>__fN.jsonl` per i filoni) | conversazioni: una riga per messaggio user/assistant, uuid nativi, `parent_uuid` nativo; più i titoli (`sender='title'`), gli allegati (`sender='attachment'`) e, dalla 0.62.1, i messaggi che l'utente **accoda** mentre la sessione lavora (`sender='user'`, cioè `speaker='human'`: Claude Code li scrive come allegati `queued_command`, e prima erano scartati) | ultima cartella della cwd della sessione |
 | `subagents/<sessionId>/agent-<hash>.jsonl` (dal 16/09/2026) | conversazioni dei sub-agenti; le righe user di un sub-agente sono `sender='mandato'` (le ha scritte la macchina) | `subagent:<etichetta-cwd>` |
 | `mcp-logs/<sessionId>/<server>/…` | log dei server MCP, a pezzi da 4000 caratteri | `mcp-log:<server>` |
 | `workfiles/<cwd-codificata>/…` | artefatti delle cartelle di lavoro: testo e codice a pezzi, PDF con testo, immagini via OCR, zip annidati (un livello); un backup di sessione (`.jsonl` di Claude Code) diventa conversazione; i binari lasciano una lapide `non-testo` | `workfile:<cwd-codificata>/<prima sottocartella>` |

@@ -3185,3 +3185,45 @@ def test_catena_parent_non_gira_in_tondo(tmp_path: Path) -> None:
     tenute = [r for r in archive_indexer._iter_claude_code(open(src), "p")
               if isinstance(r, tuple) and len(r) == 9]
     assert len(tenute) == 1 and tenute[0][0] == "a1"
+
+
+# ── i messaggi che Neo ACCODA mentre una sessione lavora (27/09/2026) ────────────────
+# Claude Code li scrive come record `attachment` di tipo `queued_command`, col testo in
+# `attachment.prompt`, `commandMode='prompt'` e `origin.kind='human'` (nelle versioni
+# vecchie senza origin). L'indexer teneva un attachment solo se aveva `addedNames`: le
+# parole accodate erano scartate. Misurato: 478 accodati umani nei transcript di un PC, e
+# sul primario due di queste frasi contavano 0 con speaker=human (rilievo della
+# curatrice dei rimandi). Le notifiche e i messaggi di altre sessioni accodati restano
+# fuori: quando il programma li consegna li scrive come turni suoi.
+
+def _accodato(uuid, parent, prompt, modo="prompt", kind="human"):
+    att = {"type": "queued_command", "prompt": prompt, "commandMode": modo}
+    if kind is not None:
+        att["origin"] = {"kind": kind}
+    return json.dumps({"type": "attachment", "uuid": uuid, "parentUuid": parent,
+                       "timestamp": "2026-09-27T02:00:00Z", "attachment": att})
+
+
+def test_gli_accodati_di_neo_sono_parole_sue(tmp_path: Path) -> None:
+    righe = [
+        _cc_riga("a1", None, "assistant", "sto lavorando"),
+        _accodato("q1", "a1", "intanto controlla anche il backup"),
+        _accodato("q2", "q1", "e senza origin (versione vecchia)", kind=None),
+        _accodato("q3", "q2", "<task-notification>fatto</task-notification>",
+                  modo="task-notification", kind=None),
+        _accodato("q4", "q3", "<cross-session-message>ciao</cross-session-message>", kind="peer"),
+        _cc_riga("a2", "q4", "assistant", "ricevuto"),
+    ]
+    src = tmp_path / "s.jsonl"
+    src.write_text("\n".join(righe) + "\n")
+    tenute = {r[0]: r for r in archive_indexer._iter_claude_code(open(src), "p")
+              if isinstance(r, tuple) and len(r) == 9}
+    assert set(tenute) == {"a1", "q1", "q2", "a2"}
+    assert tenute["q1"][3] == "intanto controlla anche il backup" and tenute["q1"][4] == "user"
+    assert tenute["q2"][4] == "user"
+    assert tenute["q1"][8] == "a1" and tenute["q2"][8] == "q1"
+    assert tenute["a2"][8] == "q2", "la catena salta notifica e peer scartati (A5)"
+    db = tmp_path / "a.db"
+    archive_indexer.index_jsonl(str(src), str(db), project="p")
+    con = sqlite3.connect(db)
+    assert con.execute("SELECT speaker FROM messages WHERE uuid='q1'").fetchone() == ("human",)
