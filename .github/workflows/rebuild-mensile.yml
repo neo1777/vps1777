@@ -23,13 +23,16 @@ on:
     - cron: "0 5 3 * *"   # il 3 del mese alle 5:00 UTC (dopo il backup notturno)
   workflow_dispatch:
 
-permissions:
-  contents: write        # creare il tag (solo col PAT; il default non basta comunque)
-  issues: write          # la via di fallback
+# Niente a livello di workflow: le scritture le dichiara il job che le usa
+# (Scorecard, Token-Permissions — test_scorecard_permessi_e_digest.py).
+permissions: {}
 
 jobs:
   valuta-e-agisci:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # creare il tag (solo col PAT; il default non basta comunque)
+      issues: write          # la via di fallback
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -9,15 +9,18 @@ on:
     - cron: "0 6 * * 1"  # ogni lunedì alle 6:00 UTC
   workflow_dispatch:
 
-# upload-sarif richiede security-events: write. Senza, col default read-only
-# del GITHUB_TOKEN (standard dei repo nuovi) l'upload fallisce 403 ogni run.
-permissions:
-  contents: read
-  security-events: write
+# Niente a livello di workflow: le scritture le dichiara il job che le usa
+# (Scorecard, Token-Permissions — test_scorecard_permessi_e_digest.py).
+permissions: {}
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    # upload-sarif richiede security-events: write. Senza, col default read-only
+    # del GITHUB_TOKEN (standard dei repo nuovi) l'upload fallisce 403 ogni run.
+    permissions:
+      contents: read
+      security-events: write
     strategy:
       matrix:
         # ⚠️ INSIEME ENUMERATO A MANO: chi aggiunge un servizio deve aggiungerlo

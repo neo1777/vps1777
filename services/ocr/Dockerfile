@@ -6,8 +6,8 @@
 # repo (rilievo 23cc4783), non un'usanza da applicare solo quando pesa.
 
 # ─────────────────────────────────────────── builder
-FROM python:3.12-slim AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.5.18 /uv /uvx /usr/local/bin/
+FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.5.18@sha256:e2101b9e627153b8fe4e8a1249cc4194f1b38ece7f28a5a9b8f958e3b560e69c /uv /uvx /usr/local/bin/
 ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /build
@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY app ./app
 
 # ─────────────────────────────────────────── runtime
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 
 # tini per i segnali; tesseract è IL mestiere di questo container (eng è nel
 # pacchetto base, ita si aggiunge: la ricetta `-l ita+eng` è quella provata

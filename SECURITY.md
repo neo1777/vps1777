@@ -281,6 +281,18 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   `Dependabot` (github-actions + docker + docker-compose) tiene freschi gli SHA/i
   digest. Permessi `least-privilege` per-job in `release.yml`. Le immagini di
   terzi nei compose sono digest-pinnate (`H66`).
+- **Immagini base fissate col digest** (`v0.61.0`, Scorecard Pinned-Dependencies):
+  `FROM python:3.12-slim@sha256:…` e `COPY --from=ghcr.io/astral-sh/uv:0.5.18@sha256:…`
+  nei cinque servizi. La base fresca non arriva più «da sola» a ogni build: arriva con la
+  PR settimanale di Dependabot (ecosistema `docker`, una cartella per servizio), che si
+  guarda. Anche il rebuild mensile ricostruisce sulla base fissata, quindi le correzioni
+  delle CVE della base passano da quella PR. `uv` è fissato alla sua versione (0.5.18):
+  Dependabot legge solo i `FROM`, e il digest di un tag di versione non ha ragioni di
+  cambiare. I plugin di esempio restano col tag, perché sono punti di partenza fuori da
+  Dependabot.
+- **Permessi dei workflow nel job** (`v0.61.0`, Scorecard Token-Permissions): nessun
+  workflow dichiara scritture a livello di workflow. `rebuild-mensile.yml` e `trivy.yml`
+  le avevano in cima, e ora le dichiara il job che le usa.
 - **Digest immutabili** (baseline): le immagini si pullano da GHCR e si verificano
   contro `images.lock` del bundle; nessun build-in-place. Dalla `v0.59.0` il digest
   verificato vive anche nel compose (`H22`): la CLI lo scrive nel `.env` insieme al tag, e
