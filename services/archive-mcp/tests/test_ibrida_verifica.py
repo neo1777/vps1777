@@ -221,3 +221,25 @@ def test_campi_testo_toglie_dal_ramo_vettoriale_le_righe_senza_parole(archivio, 
     parole = modulo.search_ibrida("x", db="arch", limit=3, campi="testo")
     assert "u2" not in [r["uuid"] for r in parole["righe"]]
     assert parole["righe"], "le altre righe, che hanno parole, restano"
+
+
+@vec
+def test_speaker_filtra_anche_il_ramo_vettoriale(archivio, monkeypatch):
+    """Rilievo della curatrice (F0-C3, 27/09): `search_ibrida` non aveva `speaker`, e per
+    «cosa ha detto Neo» su 20 risultati le sue parole erano da 0 a 8. Il filtro vale per
+    tutte e due le liste: nel ramo FTS lo fa la query, in quello vettoriale si scartano le
+    righe di un altro speaker."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    _rw(db, ("ALTER TABLE messages ADD COLUMN speaker TEXT DEFAULT ''",),
+        ("UPDATE messages SET speaker = 'human'",),
+        ("UPDATE messages SET speaker = 'assistant' WHERE uuid = 'u2'",))
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    tutti = modulo.search_ibrida("x", db="arch", limit=3)
+    assert tutti["righe"][0]["uuid"] == "u2"
+    umani = modulo.search_ibrida("x", db="arch", limit=3, speaker="human")
+    assert umani["righe"] and "u2" not in [r["uuid"] for r in umani["righe"]]
+    assert modulo.search_ibrida("x", db="arch", limit=3, speaker="assistant")["righe"][0]["uuid"] == "u2"

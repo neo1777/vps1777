@@ -379,6 +379,19 @@ def integrita_archivi(db: str = "") -> dict[str, Any]:
     return {"per_db": out}
 
 
+# `limit` ha un pavimento e un tetto (rimando s3-2026-07-12-clamp-limit-archive, rilievo
+# F0-C3 del 27/09): con -1 `collected[:-1]` perdeva IN SILENZIO l'ultimo risultato, con 0
+# non tornava niente senza dire perché, con un numero enorme la risposta non aveva misura.
+LIMITE_MASSIMO = 200
+
+
+def _limite(limit: int, massimo: int = LIMITE_MASSIMO) -> int:
+    n = int(limit)
+    if n < 1:
+        raise ValueError(f"limit deve essere almeno 1 (ricevuto {limit}): quanti risultati vuoi?")
+    return min(n, massimo)
+
+
 @_serializzata
 def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
            sort: str = "rank", since: str = "", until: str = "",
@@ -390,6 +403,7 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
     ri-ordinati per `sort` prima del taglio — niente più concatenamento cieco.
     Ogni riga porta `db` e `snapshot` (freschezza del DB). Un errore di sintassi
     FTS5 solleva FtsSyntaxError (non restituisce lista vuota muta)."""
+    limit = _limite(limit)
     _maybe_reload()  # pesca eventuali DB caricati/indicizzati dopo l'avvio
     collected: list[dict[str, Any]] = []
     for name in _targets(db):
@@ -493,7 +507,7 @@ def _open_con_indice(name: str, idx: Path) -> sqlite3.Connection:
 @_serializzata
 def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                   query_fts: str = "", since: str = "", until: str = "",
-                  campi: str = "tutto",
+                  campi: str = "tutto", speaker: str = "",
                   k_rrf: int = semantica.RRF_K,
                   peso_fts: float = semantica.RRF_PESO_FTS,
                   snippet_tokens: int = 32) -> dict[str, Any]:
@@ -504,6 +518,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     *quale* dei due l'ha trovata, altrimenti il guadagno resta invisibile.
     """
     fts.con_campi("", campi)        # un valore sbagliato si dice prima di tutto
+    limit = _limite(limit)
     s = get_settings()
     model_dir = Path(s.archive_model_dir)
     indici = _indici_disponibili()
@@ -535,6 +550,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             try:
                 rows_fts = fts.search_conn(conn, espressione, limit=limit * 3,
                                            since=since, until=until, campi=campi,
+                                           speaker=speaker,
                                            snippet_tokens=snippet_tokens)
             except (FtsSyntaxError, sqlite3.OperationalError) as exc:
                 log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s", name, exc)
@@ -556,14 +572,17 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         #    `indici[].verifica`, mai restituito come se fosse giusto.
         lista_vec: list[str] = []
         try:
-            rowids = semantica.knn_dedup(conn, blob, topn=limit * 3)
+            # con un filtro di speaker il ramo vettoriale ne scarta molti: si chiedono
+            # più vicini, perché la fusione abbia ancora una lista vera
+            rowids = semantica.knn_dedup(conn, blob, topn=limit * (10 if speaker else 3))
             registro = semantica.uuid_registrati(conn, rowids)
             assenti = uuid_diversi = 0
             if rowids:
                 seg = ",".join("?" * len(rowids))
                 cur = conn.execute(
                     f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip, "
-                    f"content <> '' AS ha_testo FROM messages WHERE rowid IN ({seg})",
+                    f"content <> '' AS ha_testo"
+                    f"{', speaker' if speaker else ''} FROM messages WHERE rowid IN ({seg})",
                     rowids)
                 per_rowid = {r["rowid"]: dict(r) for r in cur}
                 for rid in rowids:                      # l'ordine del knn è il rank
@@ -574,6 +593,8 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                     u = r["uuid"]
                     if registro is not None and registro.get(rid) != u:
                         uuid_diversi += 1
+                        continue
+                    if speaker and r["speaker"] != speaker:
                         continue
                     if campi == "testo" and not r["ha_testo"]:
                         # il vettore non dice se ha colpito le parole o le azioni: con
