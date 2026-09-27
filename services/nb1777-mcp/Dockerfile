@@ -10,8 +10,8 @@
 # cookie. Chromium pesava 376 MB su 902 MB. Presidio: tools/tests/test_nb1777_senza_browser.py.
 
 # ─────────────────────────────────────── builder
-FROM python:3.12-slim AS builder
-COPY --from=ghcr.io/astral-sh/uv:0.5.18 /uv /uvx /usr/local/bin/
+FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.5.18@sha256:e2101b9e627153b8fe4e8a1249cc4194f1b38ece7f28a5a9b8f958e3b560e69c /uv /uvx /usr/local/bin/
 # UV_PROJECT_ENVIRONMENT=/opt/venv: costruisce il venv direttamente nel path
 # finale, così gli shebang dei console-script (es. `nlm`) puntano a
 # /opt/venv/bin/python (esistente nel runtime). Senza, il venv nasce in
@@ -35,7 +35,7 @@ COPY app ./app
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 # ─────────────────────────────────────── runtime
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         tini ca-certificates \

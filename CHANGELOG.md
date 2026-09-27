@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Immagini base fissate col digest** nei cinque servizi (`python:3.12-slim@sha256:…`,
+  `ghcr.io/astral-sh/uv:0.5.18@sha256:…`), e **permessi dei workflow dichiarati nel job**
+  (`rebuild-mensile.yml`, `trivy.yml`: `permissions: {}` in cima). Sono due controlli dello
+  Scorecard OpenSSF (Pinned-Dependencies, Token-Permissions), segnalati dalla sessione
+  template che l'ha lanciato in sola lettura. La base fresca arriva con la PR settimanale di
+  Dependabot (ecosistema `docker`, già attivo per ogni servizio). Un test nuovo tiene
+  fermi tutti e due (`tools/tests/test_scorecard_permessi_e_digest.py`).
+
 ### Cambiato
 - **L'immagine di nb1777-mcp non contiene più un browser: 331 MB invece di 902 MB.**
   Chromium e le librerie di Playwright erano lì «per nlm headless», ma il server non lancia
