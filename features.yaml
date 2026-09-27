@@ -86,7 +86,9 @@ _schema:
     _nota: "OBBLIGATORIO se status=deferred. Due specie (b82df434):"
     verify: "una condizione VERIFICABILE (stessa forma di `verify` sopra): la CI la
              controlla e AUTO-CHIUDE il deferred quando diventa vera. Es. il timer che
-             chiude Watchtower: {systemd_unit: vps1777-auto-update.timer}."
+             chiude Watchtower: {systemd_unit: vps1777-auto-update.timer}. Dal 27/09/2026
+             va con `rivedi_dopo: <data>` accanto (CONDIZIONE O DATA): una condizione che
+             non si avvera non deve tenere il rinvio fermo per sempre."
     manuale: "{cosa, rivedi_dopo: <data>} — a giudizio umano (la CI non può decidere).
               NON tiene la CI rossa (non è un bug), ma la SORVEGLIA: se oggi > rivedi_dopo,
               il verificatore la rimette davanti («rivedi questo rinvio»). rivedi_dopo la
