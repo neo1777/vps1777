@@ -1806,7 +1806,24 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             elif typ == "attachment" and d.get("uuid"):
                 att = d.get("attachment") if isinstance(d.get("attachment"), dict) else {}
                 added = " ".join(str(x) for x in (att.get("addedNames") or []))
-                if added.strip():
+                origine = att.get("origin") if isinstance(att.get("origin"), dict) else {}
+                accodato = (att.get("type") == "queued_command"
+                            and att.get("commandMode") == "prompt"
+                            and origine.get("kind") in (None, "human"))
+                testo_accodato = extract_blocks(att.get("prompt")).text if accodato else ""
+                if testo_accodato.strip():
+                    # Un messaggio che l'utente ACCODA mentre la sessione lavora (27/09/2026):
+                    # è parola sua, ma Claude Code lo scrive come attachment `queued_command`
+                    # col testo in `prompt`, e qui veniva scartato (0 righe speaker=human su
+                    # frasi accodate misurate sul primario). Notifiche e messaggi di altre
+                    # sessioni accodati restano fuori: consegnati, il programma li scrive
+                    # come turni suoi, già indicizzati come `sistema`.
+                    ultimo_ts = str(d.get("timestamp") or ultimo_ts)
+                    yield (str(d["uuid"]),
+                           project or _label_da_cwd(str(d.get("cwd") or "")),
+                           str(d.get("timestamp") or ""), testo_accodato.strip(), "user",
+                           "", "", "", _genitore(str(d.get("parentUuid") or "")))
+                elif added.strip():
                     yield (str(d["uuid"]),
                            project or _label_da_cwd(str(d.get("cwd") or "")),
                            str(d.get("timestamp") or ""), "", "attachment", "", "",

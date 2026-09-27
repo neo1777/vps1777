@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **I messaggi che l'utente accoda mentre una sessione lavora entrano nell'archivio come
+  sue parole.** Claude Code li scrive come allegati `queued_command` (testo in
+  `attachment.prompt`), e l'indexer li scartava: sul primario due frasi accodate da Neo
+  contavano 0 con `speaker=human`, mentre sui transcript di un PC ce ne sono 478. Ora
+  entrano con `sender='user'` (`speaker='human'`) e il loro posto nella catena. Le notifiche e
+  i messaggi di altre sessioni accodati restano fuori: quando il programma li consegna, li
+  scrive come turni suoi. Vale per i nuovi ingest. Rilievo della curatrice dei rimandi (27/09).
+
 ## [0.62.0] — 2026-09-27
 
 **La catena `parent_uuid` di Claude Code si riallaccia all'ingest** (A5: da 40,3% di

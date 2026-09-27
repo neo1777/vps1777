@@ -138,7 +138,7 @@ would swallow, ignoring sessions and logs).
 
 | member | what it becomes | `project` label |
 |---|---|---|
-| `sessions/<sessionId>.jsonl` (and `<sessionId>__fN.jsonl` for the strands) | conversations: one row per user/assistant message, native uuids, native `parent_uuid`; plus the titles (`sender='title'`) and attachments (`sender='attachment'`) | last folder of the session's cwd |
+| `sessions/<sessionId>.jsonl` (and `<sessionId>__fN.jsonl` for the strands) | conversations: one row per user/assistant message, native uuids, native `parent_uuid`; plus the titles (`sender='title'`), the attachments (`sender='attachment'`) and, since 0.62.1, the messages the user **queues** while the session is working (`sender='user'`, i.e. `speaker='human'`: Claude Code writes them as `queued_command` attachments, and before they were discarded) | last folder of the session's cwd |
 | `subagents/<sessionId>/agent-<hash>.jsonl` (since 16/09/2026) | sub-agent conversations; a sub-agent's user rows are `sender='mandato'` (the machine wrote them) | `subagent:<cwd-label>` |
 | `mcp-logs/<sessionId>/<server>/…` | MCP server logs, in 4000-character chunks | `mcp-log:<server>` |
 | `workfiles/<encoded-cwd>/…` | artefacts of the working folders: text and code in chunks, PDFs with text, images via OCR, nested zips (one level); a session backup (a Claude Code `.jsonl`) becomes a conversation; binaries leave a `non-testo` tombstone | `workfile:<encoded-cwd>/<first subfolder>` |
