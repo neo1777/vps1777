@@ -53,9 +53,11 @@ _schema:
        (es. archive.search, ops.backup, update.auto-timer, gateway.oauth)."
   nome: "nome umano breve."
   cosa: "una riga: cosa fa e perché serve."
-  dove: "lista di coordinate REALI: 'file:riga', 'servizio:nome', 'systemd:unit',
-          'mcp-tool:<server>/<nome>', 'compose-profile:<file>#<profilo>'.
-          È ciò che il verify e il check-inverso usano per trovare la feature."
+  dove: "lista di coordinate REALI: 'servizio:nome', 'systemd:unit', 'cli:<comando>',
+          'mcp-tool:<server>/<nome>', 'compose-profile:<file>#<profilo>', 'tools/<file>'.
+          Quelle con un prefisso le usa il check-inverso per trovare la feature; un
+          'file:riga' NON lo verifica nessuno (il codice si sposta, la riga no): meglio
+          un nome di funzione o di sezione (27/09, SECURITY.md:845 puntava altrove)."
   status:
     active-default: "attiva senza che l'utente faccia nulla (l'installer la accende)."
     opt-in:         "esiste ma va attivata di proposito. Legittima — ma DICHIARATA."
@@ -205,14 +207,14 @@ features:
     cosa: "Gate umano prima di pubblicare un rilascio. NON attivato: con un solo account il
            revisore è lo stesso token che crea il tag. Al suo posto la quarantena
            dell'auto-update (update.auto-quarantena)."
-    dove: ["SECURITY.md:845", "security/findings.yml#H24"]
+    dove: ["SECURITY.md «Postilla» (Approvazione manuale dei rilasci)", "security/findings.yml#H24"]
     status: deferred
     since: "rinviato (postilla SECURITY.md)"
     decisione: "27/09/2026, Neo: «chiudiamo con rischio accettato […] registrato ma solo fino
                 a nuova data […] rivalutiamo se è davvero sicura così». Rivalutato: il rischio
                 vero era l'auto-update che installava un tag appena uscito → quarantena 48h
                 (scelta di Neo, stessa data). Prima: rimandato «quando il ritmo dei rilasci
-                sarà regolare» (rivedi 2026-08-10). [SECURITY.md:845]"
+                sarà regolare» (rivedi 2026-08-10). [SECURITY.md, «Postilla»]"
     follow_up:
       manuale: {cosa: "rivedere il rischio accettato: resta vero che c'è un solo account con
                        scrittura e nessun secret che permetta a un workflow di creare tag?",
@@ -1053,7 +1055,7 @@ features:
            ⚠️ VOCE DI UN DIFETTO NOTO, non di una funzione — registrata perché una release
            che promette una verifica su un meccanismo che non ne conserva l'evidenza è il
            modo in cui una promessa onesta diventa falsa da sola.
-           `progress_write` (r.267-273) sovrascrive UN file, `onboarding/update_progress.json`,
+           `progress_write` (tools/vps1777.py) sovrascriveva UN file, `onboarding/update_progress.json`,
            a ogni step, e `step()` non stampa nulla: niente journal systemd. Quindi a update
            FINITO il file contiene l'ultimo stato e non la sequenza.
            ⇒ ASIMMETRIA: un update che RIESCE non lascia prova dell'ordine degli step (che il

@@ -615,8 +615,9 @@ quella copia serve al ripristino automatico, che gira sulla macchina e non può
 dipendere da una chiave che sta altrove — cifrarla la renderebbe illeggibile proprio
 a chi deve usarla.*
 **Il difetto è che chi leggeva il registro concludeva che il problema fosse chiuso.**
-Ora è scritto, col residuo dichiarato: cresce di una copia a ogni aggiornamento e
-ciascuna resta 72 ore, e l'unica cura che non rompe il ripristino è cifrare il disco —
+Ora è scritto, col residuo dichiarato: restano in chiaro le copie delle ultime due
+versioni (dal 29/08; prima ne nasceva una a ogni aggiornamento e ciascuna restava 72
+ore), e l'unica cura che non rompe il ripristino è cifrare il disco —
 che si fa sul disco e non nel codice, quindi è una decisione di chi possiede la
 macchina. E la decisione **è stata presa**, il 23/08, al format per il collaudo
 vergine: provato Debian 13 coi volumi cifrati, la macchina era instabile; rimesso
@@ -845,19 +846,22 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
     snapshot serve all'**auto-rollback** di `vps1777 update`, che gira **sulla VPS**,
     mentre la chiave privata age vive sul PC dell'owner e deve restarci. Cifrarlo
     renderebbe il rollback incapace di leggere ciò che gli serve **proprio nel momento
-    in cui serve** — durante un aggiornamento andato male. Vedi `tools/restore.sh:9-13`
-    e il blocco `H14` in `tools/vps1777.py:58-82`. ⚠️ Vale anche per la variante
+    in cui serve** — durante un aggiornamento andato male. Vedi l'intestazione di
+    `tools/restore.sh` (la riga sullo snapshot «che NON può dipendere dalla age-key») e il
+    blocco `H14` in testa a `tools/vps1777.py` (`SNAPSHOT_EXCLUDED_VOLUMES`). ⚠️ Vale anche per la variante
     «escludiamo `archive-data` dallo snapshot»: l'archivio **è** il dato che il
     rollback deve poter ripristinare.
-  - 📏 **Quanto resta in chiaro, e per quanto**: `snapshot_prune`
-    (`tools/vps1777.py:1021-1032`) pota uno snapshot solo quando è più vecchio di
-    **72h** *e* non è quello da conservare — «il più tardivo dei due». Non tiene
-    «l'ultimo»: **ogni giro di `vps1777 update` aggiunge ~2,6 GB in chiaro che
-    restano 72 ore.**
-    Misurato il 27/07/2026: due snapshot conviventi, 4,9 GB, con la stessa copia
-    dell'archivio due volte (dimensione identica al byte — nessuna deduplicazione).
-    Con rilasci frequenti il totale è dell'ordine di (aggiornamenti in 72h) × 2,6 GB,
-    e pesa sul disco oltre che sulla riservatezza.
+  - 📏 **Quanto resta in chiaro, e per quanto**: `snapshot_prune` (in
+    `tools/vps1777.py`) tiene l'ultimo snapshot di ognuna delle **ultime due versioni**
+    (n e n-1, decisione del 29/08) più quello in uso come punto di ritorno, e cancella
+    subito il resto; la soglia delle 72 ore vale solo per le cartelle senza versione nel
+    nome. Gira a ogni update riuscito, a ogni auto-rollback e a ogni `vps1777 check`.
+    Quindi sul disco restano in chiaro **al più due o tre copie** dei volumi dati.
+    📜 Com'era fino al 29/08: si potava solo oltre 72h, e ogni update aggiungeva ~2,6 GB
+    in chiaro per tre giorni (misurato il 27/07: due snapshot conviventi, 4,9 GB, la
+    stessa copia dell'archivio due volte). Qui la coordinata `tools/vps1777.py:1021-1032`
+    è sopravvissuta fino al 27/09 puntando a un'altra funzione: nessun presidio vede una
+    riga che esiste e contiene altro (`tools/coordinate-nei-doc.py` lo dichiara).
 - **Cancellazione**: l'archivio si cancella per **DB intero** (`/admin/archive`,
   con conferma e audit). La cancellazione per singola conversazione non c'è: è una
   scelta, non una dimenticanza.

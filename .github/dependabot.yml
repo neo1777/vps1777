@@ -56,7 +56,7 @@ updates:
           - "version-update:semver-minor"
 
   # ── Immagini di terzi nei compose (alpine, caddy, cloudflared, portainer,
-  #    watchtower): bumpa il digest pinnato quando il tag avanza. Le 4 immagini
+  #    watchtower): bumpa il digest pinnato quando il tag avanza. Le 5 immagini
   #    vps1777 usano un tag-variabile ${VPS1777_TAG} → Dependabot le salta da sé,
   #    e comunque `vps1777 update` le verifica contro images.lock. ────────────
   - package-ecosystem: docker-compose

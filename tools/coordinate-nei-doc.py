@@ -8,9 +8,11 @@
    al posto sbagliato — e non è un refuso: **il codice si sposta, la prosa no**.
 
 📏 RIMISURATO IL 17/08, prima di scrivere una riga: 27 coordinate nei `.md`, **zero**
-   oltre la fine del file, e il caso di `snapshot_prune` non c'è più (la citazione è
-   stata riscritta senza numero di riga). ⇒ questo presidio nasce su un difetto CURATO,
-   non su uno vivo. Serve perché la classe è tornata due volte e **non si vede**: una
+   oltre la fine del file, e il caso di `snapshot_prune` si credeva curato («la citazione
+   è stata riscritta senza numero di riga»). ⚠️ NON lo era (audit della doc, 27/09): la
+   coordinata `tools/vps1777.py:1021-1032` è rimasta in SECURITY.md dal 27/07 al 27/09,
+   IN RANGE e sbagliata — esattamente il caso che il limite qui sotto dichiara di non
+   vedere. La prova del limite, trovata dal limite stesso. Serve perché la classe è tornata due volte e **non si vede**: una
    coordinata sbagliata non rompe niente, manda solo la persona sbagliata nel posto
    sbagliato, sei mesi dopo.
 

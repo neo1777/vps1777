@@ -26,7 +26,7 @@ Riserva la severità alta per ciò che in questo repo fa danni veri:
 ## ⚠️ Cosa sappiamo GIÀ — non serve ridircelo
 
 Questo repo tiene un registro dei rilievi di sicurezza in **`security/findings.yml`**:
-71 voci, **60 chiuse**, e le **11 qui sotto ancora aperte**, ognuna con data, motivo e
+74 voci, **63 chiuse**, e le **11 qui sotto non chiuse** (8 parziali, 3 accettate), ognuna con data, motivo e
 stato. Sono già state trovate, discusse e classificate: segnalarle di nuovo consuma il
 giro senza aggiungere niente.
 
@@ -37,7 +37,7 @@ giro senza aggiungere niente.
 | H12 | partial | sudoers dell'operator: da `NOPASSWD:ALL` a whitelist di comandi |
 | H16 | partial | password admin: nasce sul PC, viaggia solo come hash, policy unica |
 | H22 | partial | compose pinnato ai digest, non solo ai tag |
-| H24 | partial | protezione dei tag `v*` e permessi per-job nei workflow |
+| H24 | **accepted** | approvazione manuale dei rilasci: con un solo account non sarebbe un confine; la copre la quarantena di 48 ore dell'auto-update (fino al 27/12/2026) |
 | H28 | **accepted** | secondo fattore (TOTP o passkey) sul pannello admin |
 | H35 | partial | CSP della Mini App raffinata |
 | H51 | partial | il presidio di salute sonda dal lato in cui il guasto non si vede |
