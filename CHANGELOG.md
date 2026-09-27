@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **La redazione non si fa più spezzare dall'evidenziatore dello snippet.** FTS5 evidenzia
+  la parola cercata con «», e una ricerca `ghp*` restituiva `«ghp»_<resto del token>` in
+  chiaro, perché i marcatori spezzavano il pattern appena aggiunto nella 0.62.1. Misurato
+  dal vivo, sulla VPS alla 0.62.1, subito dopo il rilascio. Ora credenziali, email,
+  telefoni e percorsi trycloudflare si riconoscono sul testo senza marcatori, e si
+  sostituisce il tratto corrispondente dell'originale, marcatori compresi.
+
 ## [0.62.1] — 2026-09-27
 
 **Quattro rilievi della curatrice dei rimandi, curati in giornata.** Le credenziali non

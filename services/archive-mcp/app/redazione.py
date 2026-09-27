@@ -110,13 +110,13 @@ def _telefoni(s: str) -> str:
     passa dal pattern, gli uuid tornano al loro posto intatti. Un telefono attaccato a un uuid
     senza separatore non esiste (il pattern vuole un confine prima e dopo)."""
     if "-" not in s:
-        return TELEFONO.sub(_tel_o_timestamp, s)
+        return _senza_evidenziatori(TELEFONO, s, _tel_o_timestamp)
     parti, i = [], 0
     for u in _UUID.finditer(s):
-        parti.append(TELEFONO.sub(_tel_o_timestamp, s[i:u.start()]))
+        parti.append(_senza_evidenziatori(TELEFONO, s[i:u.start()], _tel_o_timestamp))
         parti.append(u.group(0))
         i = u.end()
-    parti.append(TELEFONO.sub(_tel_o_timestamp, s[i:]))
+    parti.append(_senza_evidenziatori(TELEFONO, s[i:], _tel_o_timestamp))
     return "".join(parti)
 
 SEGNAPOSTO_EMAIL = "[email redatta]"
@@ -195,6 +195,33 @@ def valori_noti(conn: sqlite3.Connection) -> set[str]:
     return out
 
 
+# Lo snippet di FTS5 evidenzia la parola cercata con «»: su una ricerca `ghp*` il token
+# usciva «ghp»_<resto> e il pattern, spezzato dai marcatori, non lo riconosceva (misurato
+# dal vivo sulla 0.62.1, 27/09). Si cerca sul testo SENZA marcatori e si sostituisce il
+# tratto corrispondente del testo originale, marcatori compresi.
+_EVIDENZIATORI = "«»"
+
+
+def _senza_evidenziatori(pattern: "re.Pattern[str]", s: str, sostituto) -> str:
+    if not any(c in s for c in _EVIDENZIATORI):
+        return pattern.sub(sostituto, s)
+    indici = [i for i, c in enumerate(s) if c not in _EVIDENZIATORI]
+    pulito = "".join(s[i] for i in indici)
+    pezzi, fine_prec = [], 0
+    for m in pattern.finditer(pulito):
+        inizio, fine = indici[m.start()], indici[m.end() - 1] + 1
+        # un marcatore che apre subito prima o chiude subito dopo fa parte del tratto
+        if inizio > 0 and s[inizio - 1] in _EVIDENZIATORI:
+            inizio -= 1
+        if fine < len(s) and s[fine] in _EVIDENZIATORI:
+            fine += 1
+        pezzi.append(s[fine_prec:inizio])
+        pezzi.append(sostituto(m))
+        fine_prec = fine
+    pezzi.append(s[fine_prec:])
+    return "".join(pezzi)
+
+
 def maschera_testo(s: str, noti: set[str] | None = None) -> str:
     """Redige credenziali, email, telefoni e i valori noti dentro una stringa."""
     if not s:
@@ -206,9 +233,10 @@ def maschera_testo(s: str, noti: set[str] | None = None) -> str:
     for v in sorted(noti or (), key=len, reverse=True):
         if v in s:
             s = s.replace(v, SEGNAPOSTO_VALORE)
-    s = CREDENZIALI.sub(SEGNAPOSTO_CREDENZIALE, s)
-    s = TRYCLOUDFLARE.sub(lambda m: m.group(1) + SEGNAPOSTO_PERCORSO, s)
-    s = EMAIL.sub(SEGNAPOSTO_EMAIL, s)
+    s = _senza_evidenziatori(CREDENZIALI, s, lambda m: SEGNAPOSTO_CREDENZIALE)
+    s = _senza_evidenziatori(TRYCLOUDFLARE, s,
+                             lambda m: m.group(1) + SEGNAPOSTO_PERCORSO)
+    s = _senza_evidenziatori(EMAIL, s, lambda m: SEGNAPOSTO_EMAIL)
     return _telefoni(s)
 
 
