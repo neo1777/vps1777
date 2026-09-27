@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.62.2] — 2026-09-27
+
+**La redazione delle credenziali regge anche sugli snippet evidenziati** (`«ghp»_…`): il
+buco l'ha trovato la prova dal vivo della 0.62.1, un'ora dopo il rilascio.
+
 ### Sicurezza
 - **La redazione non si fa più spezzare dall'evidenziatore dello snippet.** FTS5 evidenzia
   la parola cercata con «», e una ricerca `ghp*` restituiva `«ghp»_<resto del token>` in
