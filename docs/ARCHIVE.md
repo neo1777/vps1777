@@ -43,6 +43,17 @@ copre:
   chiave privata → «[credenziale redatta]»; e il **percorso** degli URL
   `*.trycloudflare.com` (un tunnel rapido è segreto per URL): l'host resta.
 
+Tutto questo vale anche dentro gli **snippet**, che sono il punto delicato. Lo snippet di
+FTS5 evidenzia il termine cercato con `«»` (dalla 0.62.2 la redazione guarda il testo come
+se i marcatori non ci fossero: una ricerca `ghp*` restituiva `«ghp»_<resto>` in chiaro). Ed
+è una **finestra** che comincia e finisce dove capita, anche a metà di un segreto, segnata
+da `…`; il ramo vettoriale di `search_ibrida` taglia il testo a 400 caratteri. Per questo,
+dalla 0.62.3, si maschera anche un segreto **tagliato dal bordo**: un prefisso noto seguito
+da almeno 8 caratteri in fondo al testo, una corsa di almeno 20 caratteri con maiuscole,
+minuscole e cifre subito dopo il `…` iniziale, un blocco di chiave privata di cui si vede
+solo l'inizio o solo la fine. I valori dell'anagrafica si cercano senza badare alle
+maiuscole e attraverso i marcatori (`«Mario» Rossi`).
+
 **Non copre**: password e segreti senza un formato riconoscibile, IP, indirizzi postali,
 nomi di terzi mai comparsi nell'anagrafica. *Chiunque abbia accesso all'archivio trova
 quei segreti con una query.* Il pattern dei telefoni **non** si applica dentro un uuid canonico

@@ -307,3 +307,65 @@ def test_email_e_telefono_spezzati_dall_evidenziatore() -> None:
     out = redazione.maschera_testo("scrivi a «mario».rossi@example.com o al +39 «333» 1234567")
     assert "rossi@example.com" not in out and "1234567" not in out, out
     assert redazione.SEGNAPOSTO_EMAIL in out and redazione.SEGNAPOSTO_TEL in out
+
+
+# ── i bordi dello snippet (audit della doc, 27/09) ───────────────────────────────────
+# Lo snippet di FTS5 è una FINESTRA di token: comincia e finisce dove vuole, anche a metà
+# di una credenziale, e la segna con «…». Il ramo vettoriale di search_ibrida taglia il
+# contenuto a 400 caratteri, senza segno. In entrambi i casi il pattern completo non c'è
+# più, e il pezzo che resta usciva in chiaro.
+def test_valore_noto_spezzato_dall_evidenziatore() -> None:
+    noti = {"Mario Rossi"}
+    for s in ("scritto da «Mario» Rossi ieri", "scritto da Mario «Rossi» ieri",
+              "scritto da mario rossi ieri", "scritto da MARIO ROSSI ieri"):
+        out = redazione.maschera_testo(s, noti)
+        pulito = out.replace("«", "").replace("»", "").lower()
+        assert "mario rossi" not in pulito, (s, out)
+        assert redazione.SEGNAPOSTO_VALORE in out, (s, out)
+        assert out.startswith("scritto da ") and out.endswith(" ieri"), out
+
+
+def test_snippet_che_taglia_il_prefisso_del_token() -> None:
+    corpo = _finti()["github"][4:]                 # la finestra comincia dopo «ghp_»
+    out = redazione.maschera_testo("…" + corpo + " e poi «parola» cercata…")
+    assert corpo not in out, out
+    assert redazione.SEGNAPOSTO_CREDENZIALE in out
+    assert out.endswith(" e poi «parola» cercata…")
+
+
+def test_snippet_che_taglia_la_coda_del_token() -> None:
+    tok = _finti()["github"]
+    for s in ("la «parola» e poi " + tok[:16] + "…",      # snippet FTS
+              "la parola e poi " + tok[:16]):              # substr del ramo vettoriale
+        out = redazione.maschera_testo(s)
+        assert tok[4:16] not in out, (s, out)
+        assert redazione.SEGNAPOSTO_CREDENZIALE in out
+
+
+def test_chiave_privata_tagliata_dalla_finestra() -> None:
+    testa = ("-----BEGIN OPENSSH " + "PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAA\nQUJD…")
+    coda = ("…REVGR0gxMjM0NTY3\n-----END OPENSSH " + "PRIVATE KEY----- poi il resto")
+    out = redazione.maschera_testo("prima " + testa)
+    assert "b3BlbnNzaC1rZXktdjEAAAA" not in out and out.startswith("prima "), out
+    out = redazione.maschera_testo(coda)
+    assert "REVGR0gxMjM0NTY3" not in out and out.endswith(" poi il resto"), out
+
+
+def test_i_bordi_non_mangiano_il_testo_tecnico() -> None:
+    """Hash esadecimali, identificatori e percorsi in testa a uno snippet restano: la
+    regola del bordo vuole maiuscole, minuscole e cifre insieme, come i token base62."""
+    for s in ("…a3f9c2e1b4d5a3f9c2e1b4d5a3f9c2e1b4d5a3f9 è il commit",
+              "…ProxyHeadersMiddleware cammina da destra",
+              "…/home/utente/Scrivania/progetto1777/tools è il percorso",
+              "…test_since_until_filtrano_anche_il_ramo_vettoriale passa",
+              "fine con una parola normale…", "sk-learn…"):
+        assert redazione.maschera_testo(s) == s, s
+
+
+def test_i_bordi_lasciano_gli_evidenziatori_e_i_percorsi_coi_trattini() -> None:
+    """Misurati sugli snippet veri (27/09): la prima stesura toglieva i «» dove non
+    mascherava niente, e prendeva i nomi di cartella di Claude Code («-home-…»)."""
+    for s in ("…test_migra_«chiave»_miniapp.py e poi",
+              "…neo1777-Scrivania-setaccio-recupero-sessioni-2026-07-14/memory/x.md",
+              "…MCP__create_or_update_«file» e altro"):
+        assert redazione.maschera_testo(s) == s, s

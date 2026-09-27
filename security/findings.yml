@@ -3572,3 +3572,54 @@ findings:
         output: "il banco interno del presidio passa: 4 casi su 4"
         exit: 0
         quando: "2026-09-07"
+
+  - id: H74
+    severity: medium
+    title: "La redazione dell'archivio cercava il pattern COMPLETO, ma lo snippet è una finestra: un token tagliato dal bordo, o un nome spezzato dall'evidenziatore, usciva in chiaro"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-09-27"
+      come: lettura
+      nota: >
+        Audit della documentazione «con la stessa cura del codice»: un revisore ha
+        confrontato la promessa di ARCHIVE.md («ogni risposta di ogni tool passa da un
+        mascheramento che copre… i valori dell'anagrafica… le credenziali») con
+        redazione.py, e ha riprodotto due buchi: i valori noti si cercavano con un
+        replace esatto (niente evidenziatori, maiuscole contate) e un token il cui
+        prefisso restava fuori dalla finestra dello snippet non aveva più il formato
+        che il pattern riconosce.
+    since: unreleased
+    why: >
+      Lo snippet di FTS5 comincia e finisce dove capita, anche a metà di un segreto, e il
+      ramo vettoriale di search_ibrida taglia a 400 caratteri. I pattern delle credenziali
+      vogliono il prefisso (ghp_, sk-, …) e una lunghezza minima: una finestra che comincia
+      dopo il prefisso, o finisce prima della lunghezza, lascia il corpo del segreto in
+      chiaro a un modello di terze parti. È la stessa classe di H64 e della 0.62.2 (i «»):
+      la redazione guardava il dato intero, e il dato che esce è un ritaglio.
+    evidence:
+      - file: services/archive-mcp/app/redazione.py
+        ricevute:
+          - "I BORDI DELLA FINESTRA"
+      - file: services/archive-mcp/tests/test_redazione.py
+        contains:
+          - "def test_snippet_che_taglia_il_prefisso_del_token("
+          - "def test_valore_noto_spezzato_dall_evidenziatore("
+    fix: >
+      Tre regole di bordo dopo i pattern completi (prefisso noto con almeno 8 caratteri in
+      fondo al testo; corsa base62 di almeno 20 caratteri con maiuscole, minuscole e cifre
+      dopo il «…» iniziale; blocco di chiave privata di cui si vede solo l'inizio o solo la
+      fine) e i valori noti in un pattern senza maiuscole passato da _senza_evidenziatori.
+      Resta scoperto ciò che non ha formato: una password scritta a mano, o un segreto
+      tagliato a meno di 8 caratteri dopo il prefisso.
+    prova:
+      - comando: "uvx pytest services/archive-mcp/tests/test_redazione.py -q"
+        dove: "banco locale, senza la cura"
+        output: "4 failed, 25 passed — prefisso tagliato, coda tagliata, chiave a metà, «Mario» Rossi"
+        exit: 1
+        quando: "2026-09-27"
+      - comando: "uvx pytest services/archive-mcp/tests/test_redazione.py -q"
+        dove: "banco locale, con la cura"
+        output: "29 passed (compreso il test che hash, identificatori e percorsi in testa restano)"
+        exit: 0
+        quando: "2026-09-27"

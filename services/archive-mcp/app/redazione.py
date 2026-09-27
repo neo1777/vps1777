@@ -56,6 +56,7 @@ ripara, e ripeterlo qui sarebbe grottesco:
 """
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
@@ -222,6 +223,36 @@ def _senza_evidenziatori(pattern: "re.Pattern[str]", s: str, sostituto) -> str:
     return "".join(pezzi)
 
 
+# I BORDI DELLA FINESTRA (audit della doc, 27/09/2026). Lo snippet di FTS5 è una finestra
+# di token che comincia e finisce dove capita, anche a metà di una credenziale, e lo segna
+# con «…»; il ramo vettoriale di search_ibrida taglia il contenuto a 400 caratteri senza
+# segno. Il pattern completo non c'è più e il pezzo restava in chiaro. Tre regole:
+# - CODA: un prefisso noto seguito da almeno 8 caratteri e poi dalla fine del testo;
+# - TESTA: dopo il «…» iniziale, una corsa di almeno 20 caratteri base62 con maiuscole,
+#   minuscole e cifre insieme (un hash esadecimale, un identificatore o un percorso no);
+# - CHIAVE PRIVATA a metà: dal BEGIN senza END alla fine, dall'inizio all'END senza BEGIN.
+_CODA = re.compile(
+    r"(?<![A-Za-z0-9])(?:gh[pousr]_|github_pat_|sk-(?:ant-|proj-)?|xox[abprs]-|AIza|AKIA"
+    r"|tskey-|AGE-SECRET-KEY-1|eyJ|\d{8,10}:)[A-Za-z0-9_.-]{8,}…?\Z")
+# La finestra di FTS5 comincia sempre a un confine di token (unicode61: una corsa
+# alfanumerica), quindi basta guardare la PRIMA corsa: deve avere 20 caratteri o più e
+# maiuscole, minuscole e cifre insieme. Un percorso con i trattini («-home-…-Scrivania-»)
+# comincia con una corsa corta e resta. Presa la corsa, si prende anche la coda del
+# token (`_`/`-` e altro alfanumerico), che è ancora segreto.
+_TESTA = re.compile(r"\A…(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[0-9])"
+                    r"[A-Za-z0-9]{20,}(?![A-Za-z0-9])[A-Za-z0-9_-]*")
+_CHIAVE_SENZA_FINE = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*\Z", re.S)
+_CHIAVE_SENZA_INIZIO = re.compile(r"\A.*?-----END [A-Z ]*PRIVATE KEY-----", re.S)
+
+
+@functools.lru_cache(maxsize=32)
+def _pattern_noti(noti: frozenset[str]) -> "re.Pattern[str]":
+    """Un pattern solo per i valori noti: senza maiuscole (un nome si scrive come capita)
+    e passato da `_senza_evidenziatori` come gli altri — «Mario» Rossi usciva in chiaro."""
+    return re.compile("|".join(re.escape(v) for v in sorted(noti, key=len, reverse=True)),
+                      re.I)
+
+
 def maschera_testo(s: str, noti: set[str] | None = None) -> str:
     """Redige credenziali, email, telefoni e i valori noti dentro una stringa."""
     if not s:
@@ -230,10 +261,13 @@ def maschera_testo(s: str, noti: set[str] | None = None) -> str:
     # «[dato personale redatto]» e non come «[email redatta]» — due segnaposti diversi
     # direbbero a chi legge quale dei due meccanismi l'ha presa, che è un'informazione
     # sull'anagrafica. Uniformare qui costa nulla e non lascia quell'indizio.
-    for v in sorted(noti or (), key=len, reverse=True):
-        if v in s:
-            s = s.replace(v, SEGNAPOSTO_VALORE)
+    if noti:
+        s = _senza_evidenziatori(_pattern_noti(frozenset(noti)), s,
+                                 lambda m: SEGNAPOSTO_VALORE)
     s = _senza_evidenziatori(CREDENZIALI, s, lambda m: SEGNAPOSTO_CREDENZIALE)
+    for bordo in (_CHIAVE_SENZA_FINE, _CHIAVE_SENZA_INIZIO, _CODA):
+        s = _senza_evidenziatori(bordo, s, lambda m: SEGNAPOSTO_CREDENZIALE)
+    s = _senza_evidenziatori(_TESTA, s, lambda m: "…" + SEGNAPOSTO_CREDENZIALE)
     s = _senza_evidenziatori(TRYCLOUDFLARE, s,
                              lambda m: m.group(1) + SEGNAPOSTO_PERCORSO)
     s = _senza_evidenziatori(EMAIL, s, lambda m: SEGNAPOSTO_EMAIL)

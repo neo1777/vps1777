@@ -5,6 +5,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **Sicurezza — la redazione dell'archivio regge anche ai bordi dello snippet.** Lo
+  snippet di FTS5 è una finestra che comincia e finisce dove capita, anche a metà di un
+  token, e il ramo vettoriale di `search_ibrida` taglia il testo a 400 caratteri: il
+  pattern completo non c'era più e il pezzo restava in chiaro (una finestra che comincia
+  dopo `ghp_` lasciava uscire il corpo del token). Ora si maschera anche un segreto
+  tagliato: prefisso noto in fondo al testo, corsa base62 in testa dopo `…`, blocco di
+  chiave privata a metà. E i valori dell'anagrafica si cercano senza maiuscole e
+  attraverso gli evidenziatori `«»` (`«Mario» Rossi` usciva). Trovato dall'audit della
+  documentazione (27/09), che confrontava la promessa di ARCHIVE.md col codice.
 - **Il ledger vuole «condizione O data»**: una voce `deferred` con `follow_up.verify` deve
   portare anche `follow_up.rivedi_dopo`. La macchina la promuove quando la condizione si
   avvera ([PROMUOVI]) e la rimette davanti quando la data passa ([RIVEDI]). Un rinvio che
@@ -29,7 +38,7 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   per un plugin; auto-update con quarantena e digest nel `.env`; i secret sono bind-mount,
   non tmpfs; gli overlay operativi senza `cap_drop` dichiarati. La tabella degli hardening
   della review diventa storia dichiarata, con una tabella «dopo il dossier» (v0.40 →
-  v0.62) e i conteggi del registro di oggi (73: 62 chiusi, 8 parziali, 3 accettati).
+  v0.62) e i conteggi del registro di oggi (74: 63 chiusi, 8 parziali, 3 accettati, con H74 di questa stessa versione).
   Nel riquadro, le colonne allineate e la porta di ocr. In `compose.yaml` i commenti
   stantii: «FastMCP senza /health» sopra un healthcheck HTTP, `auth.json`,
   `gateway-uploads` «fuori dal backup», secret «tmpfs», l'intestazione delle reti fuori posto.

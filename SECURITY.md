@@ -396,7 +396,7 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **73 voci** (2 critiche, 12 alte, 40 medie, 19 basse): 43 dalla
+Il registro conta **74 voci** (2 critiche, 12 alte, 41 medie, 19 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -413,12 +413,17 @@ da settimane senza che nessuno li attraversasse (la consent OAuth col bottone;
 il «Ricontrolla» che sovrascriveva un verdetto sano). E una (`H71`) inaugura la
 settima fonte, il **collaudo da-utente** del 05/09: agenti che usano il sistema
 come utenti, non come sviluppatori — il filtro «chi ha scritto» rispondeva zero,
-senza errore, su un archivio dove la risposta era 194.
+senza errore, su un archivio dove la risposta era 194. Due (`H72`, `H73`) vengono
+dall'**audit del determinismo** del 07/09, che per ogni promessa chiede chi la fa scattare
+e cosa si vede se non scatta: un restore che dichiarava un esito senza averlo verificato, e
+un backup acceso di default su un'installazione che non armava mai la chiave. E una
+(`H74`, 27/09) dall'**audit della documentazione**: la redazione prometteva di coprire le
+credenziali in ogni risposta, ma guardava il testo intero, e lo snippet è un ritaglio.
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 62 |
+| **chiusi** | 63 |
 | **parziali** | 8 |
 | **accettati** | 3 |
 | **aperti** | 0 |
