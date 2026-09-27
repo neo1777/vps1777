@@ -285,3 +285,25 @@ def test_le_credenziali_non_mangiano_il_testo_normale() -> None:
     for s in ("sk-learn è una libreria", "il file AIza.txt", "ghp_ da solo non è un token",
               "https://example.com/percorso/normale", "ore 12:30 riunione"):
         assert redazione.maschera_testo(s) == s, s
+
+
+def test_credenziale_spezzata_dall_evidenziatore_dello_snippet() -> None:
+    """Misurato dal vivo sulla 0.62.1 (27/09): lo snippet di FTS5 evidenzia la parola
+    cercata con «», e una ricerca `ghp*` restituiva «ghp»_<resto del token> in chiaro: i
+    marcatori spezzavano il pattern. La redazione guarda il testo come se non ci fossero."""
+    tok = _finti()["github"]
+    for evidenziato in ("«" + tok[:3] + "»" + tok[3:], "«" + tok + "»",
+                        tok[:10] + "«" + tok[10:14] + "»" + tok[14:]):
+        out = redazione.maschera_testo(f"token {evidenziato} fine")
+        resto = tok[4:]
+        assert resto not in out.replace("«", "").replace("»", ""), evidenziato
+        assert redazione.SEGNAPOSTO_CREDENZIALE in out
+        assert out.startswith("token ") and out.endswith(" fine"), out
+    # e gli evidenziatori sul testo normale restano dove sono
+    assert redazione.maschera_testo("il «backup» notturno") == "il «backup» notturno"
+
+
+def test_email_e_telefono_spezzati_dall_evidenziatore() -> None:
+    out = redazione.maschera_testo("scrivi a «mario».rossi@example.com o al +39 «333» 1234567")
+    assert "rossi@example.com" not in out and "1234567" not in out, out
+    assert redazione.SEGNAPOSTO_EMAIL in out and redazione.SEGNAPOSTO_TEL in out
