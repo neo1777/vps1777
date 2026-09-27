@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.62.1] — 2026-09-27
+
+**Quattro rilievi della curatrice dei rimandi, curati in giornata.** Le credenziali non
+escono più in chiaro dall'archivio; i messaggi che Neo accoda mentre una sessione lavora
+sono parole sue; `search_ibrida` filtra per chi ha scritto; `limit` ha un pavimento e un
+tetto.
+
 ### Corretto
 - **I messaggi che l'utente accoda mentre una sessione lavora entrano nell'archivio come
   sue parole.** Claude Code li scrive come allegati `queued_command` (testo in
