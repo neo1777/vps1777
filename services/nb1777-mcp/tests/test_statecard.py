@@ -26,3 +26,19 @@ def test_render_card_nlm_pin_override() -> None:
 def test_card_title_stabile() -> None:
     # l'upsert idempotente dipende da un titolo stabile
     assert CARD_TITLE == "vps1777-state-card"
+
+
+def test_doctor_version_e_una_riga_sola(monkeypatch) -> None:
+    """Dalla 0.9 `nlm --version` stampa anche «You are on the latest version.»."""
+    import subprocess
+
+    from app import core
+
+    def finto(args, **kw):
+        if args == ["--version"]:
+            return subprocess.CompletedProcess(args, 0, "nlm version 0.12.0\nYou are on the latest version.\n", "")
+        raise RuntimeError("niente rete nel test")
+
+    monkeypatch.setattr(core, "_run", finto)
+    monkeypatch.setattr(core, "_run_json", lambda *a, **k: [])
+    assert core.doctor()["version"] == "nlm version 0.12.0"

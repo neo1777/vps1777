@@ -1125,7 +1125,9 @@ def doctor() -> dict:
     }
     try:
         p = _run(["--version"], check=True)
-        info["version"] = (p.stdout or "").strip()
+        # solo la prima riga: dalla 0.9 nlm aggiunge «You are on the latest version.»
+        # (un controllo su PyPI con cache di 24 ore, fatto solo da --version)
+        info["version"] = ((p.stdout or "").strip().splitlines() or [""])[0]
     except Exception as e:
         info["error"] = str(e)
         return info

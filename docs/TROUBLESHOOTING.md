@@ -216,6 +216,27 @@ journalctl -u vps1777-update --no-pager | tail -30  # log dell'ultimo run
 Se nessun processo è attivo, riprova: il lock è per-processo. Dettagli in
 [UPDATE.md](UPDATE.md).
 
+Dalla 0.59.0 questo caso esce con **75** («riprova più tardi») e non con 1: le unit
+`vps1777-auto-update.service` e `vps1777-update.service` lo contano come riuscito, e non
+arriva l'avviso di fallimento su Telegram. Se lo vedi in uno script tuo, 75 vuol dire
+«c'era già un update in corso», non «l'update è fallito».
+
+## `docker cp` verso un container: "container rootfs is marked read-only"
+
+Causa: tutti i servizi di vps1777 girano col rootfs in sola lettura. nb1777-mcp dalla
+0.58.0 (`H43`), gli altri da prima. `docker cp` rifiuta di scrivere dentro un container
+così, anche in `/tmp`, che è una tmpfs. Scrive solo dentro un volume montato (per esempio
+`/var/lib/archive/db` del gateway).
+
+Cura: porta il file con un `exec` che scrive dall'interno, su stdin:
+```bash
+docker exec -i vps1777-nb1777-mcp-1 sh -c 'cat > /tmp/NOME' < file-locale
+```
+Il file nasce dell'utente del servizio (`app`), che è anche chi potrà toglierlo: con
+`cap_drop: ALL` root, dentro il container, non ha `CAP_DAC_OVERRIDE`. Leggere fuori
+(`docker cp <container>:<percorso> -`) funziona come sempre. `vps1777 archive-ingest` fa
+già così dalla 0.58.0.
+
 ## Update: digest mismatch al pull
 
 Causa: i digest delle immagini pullate non combaciano con `images.lock` del
