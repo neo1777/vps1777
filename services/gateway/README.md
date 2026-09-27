@@ -17,8 +17,7 @@ OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*`.
 | `OAUTH_ACCESS_TOKEN_LIFETIME` | `900` | sec |
 | `OAUTH_REFRESH_TOKEN_LIFETIME` | `2592000` | sec |
 | `OAUTH_CORS_ORIGINS` | `https://claude.ai` | CSV |
-| `TELEGRAM_BOT_TOKEN_FILE` | `/run/secrets/telegram_bot_token` | per Mini App initData HMAC |
-| `NLM_AUTH_DIR` | `/var/lib/nlm` | volume condiviso con nb1777-mcp |
+| `TELEGRAM_WEBAPP_SECRET_FILE` | `/run/secrets/telegram_webapp_secret` | chiave derivata dal token del bot, per verificare l'`initData` della Mini App (il token intero il gateway non lo monta: `TELEGRAM_BOT_TOKEN_FILE` resta solo come ricaduta, H54) |
 | `AUDIT_LOG_PATH` | `/var/lib/gateway/audit.jsonl` | path scrittura audit |
 | `VPS1777_TAG` | `dev` | versione deployata (mostrata nel footer + card Update) |
 | `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI di release) |

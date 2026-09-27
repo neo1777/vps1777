@@ -108,8 +108,9 @@ Threat model dichiarato:
   — vedi [docs/MINIAPP.md](docs/MINIAPP.md)
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`
 - Il gateway (unico servizio esposto) non ha accesso al Docker socket né al filesystem dell'host (`H44`);
-  vede i 5 secret Docker a lui assegnati (`telegram_bot_token` incluso — la radice di fiducia della Mini
-  App, vedi [docs/SECRETS.md](docs/SECRETS.md))
+  vede i 5 secret Docker a lui assegnati (fra cui `telegram_webapp_secret`, la chiave derivata con cui
+  verifica la Mini App: dal 27/08 il token del bot lo monta solo `nb1777-bot` — vedi
+  [docs/SECRETS.md](docs/SECRETS.md))
 - `archive-data` è condiviso: `archive-mcp` lo monta `:ro` (`H46`), il gateway `:rw` — privilegio
   funzionale (`/admin/archive` scrive i `.db` indicizzati), tracciato invece di taciuto
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
@@ -254,8 +255,10 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
 - Container **non-root** (UID 1000), `cap_drop: ALL`, `no-new-privileges`,
   backend su rete `internal: true`, gateway senza accesso al socket Docker né al
   filesystem dell'host (baseline). I 5 secret Docker assegnati al gateway, però,
-  lui li **vede** — `telegram_bot_token` incluso, la radice di fiducia della
-  Mini App: la superficie reale di un gateway compromesso è quella (`docs/SECRETS.md`).
+  lui li **vede** — fra cui `telegram_webapp_secret`, la chiave derivata che verifica
+  (e quindi può forgiare) l'`initData` della Mini App; il token del bot non più, dal
+  27/08 lo monta solo `nb1777-bot` (H54): la superficie reale di un gateway
+  compromesso è quella (`docs/SECRETS.md`).
 
 ### Supply-chain & aggiornamenti
 

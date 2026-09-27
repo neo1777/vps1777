@@ -89,6 +89,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   dall'audit della documentazione (27/09).
 
 ### Documentazione
+- **README IT/EN, INSTALL IT/EN, UPDATE IT/EN, OPS, PRIMI-15-MINUTI, GLOSSARIO,
+  CONTRIBUTING IT/EN allineati al codice** (audit della documentazione, 27/09): i cinque
+  secret del gateway (non il token del bot); lo snapshot pre-update ha due volumi; la
+  forma vera dell'immagine con il digest facoltativo; il controllo delle scadenze è
+  giornaliero; il quarto timer, facoltativo (`indice-notturno`); l'esito 75 del lock
+  occupato; update e rollback non accendono né spengono il timer dell'auto-update, e i
+  gesti che servono per cambiare una feature; le immagini sono solo amd64; cosa fa davvero
+  il `sudo` di `setup.sh` sul PC di chi prova (unit, unattended-upgrades, fail2ban); il
+  client `notebooklm-mcp-cli==0.12.0`; le sei schede del pannello; il glossario con ruolo,
+  speaker/voice e stirpe; CONTRIBUTING senza `mypy` (non gira da nessuna parte), con i
+  test, gli hook (`tools/hooks/installa.sh`) e il rilascio.
 - **CLI IT/EN, TROUBLESHOOTING, BACKUP-RESTORE IT/EN, SECRETS, CIFRATURA-ARCHIVIO,
   INGRESS allineate al codice** (audit della documentazione, 27/09): le opzioni che
   mancavano (`--home`, `--from-intent`, `--require-cosign`, `bootstrap --bundle`,

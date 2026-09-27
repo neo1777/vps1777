@@ -25,8 +25,7 @@ When a release comes out the Telegram bot notifies you (once only).
 And if you do nothing, **it takes care of itself**: by default
 `vps1777-auto-update.timer` applies the safe update on its own: it looks every
 day and installs a release only once it is **at least 48 hours old** (feature
-`autoupdate`, can be turned off via `VPS1777_FEATURES` — see
-[OPS.md](../OPS.md) (Italian)).
+`autoupdate`, on by default; how to turn it off is in [OPS.md](../OPS.md) (Italian)).
 
 ## What happens during `vps1777 update`
 
@@ -42,8 +41,11 @@ Guarantees:
 
 - **Before touching anything**: an age-encrypted backup of the **core** tier
   (`tools/backup.sh --senza-archivio`: small volumes, secrets, config, the DB
-  `description` files) + an unencrypted local snapshot of the 3 data volumes
-  (`backups/pre-update/`). The encrypted archive has its own weekly pass from
+  `description` files) + an unencrypted local snapshot of 2 data volumes,
+  `gateway-data` and `archive-data` (`backups/pre-update/`). The third, `nlm-auth`, is
+  left out on purpose (`H14`): it holds the Google session cookies, and an unencrypted
+  snapshot would copy them onto the host's disk — they are in the age backup,
+  encrypted, and the profile can be reloaded from `/admin/nlm`. The encrypted archive has its own weekly pass from
   the nightly cron — here the snapshot covers it (see
   [BACKUP-RESTORE.md](BACKUP-RESTORE.md), "The two tiers").
   The snapshot exists because auto-rollback **cannot depend on the age key**
@@ -52,7 +54,9 @@ Guarantees:
   image digests (one per service); after the pull, the local digests MUST match.
   Then the CLI writes those digests into `.env` (`VPS1777_DIGEST_GATEWAY`, `…_ARCHIVE_MCP`,
   `…_NB1777_MCP`, `…_NB1777_BOT`, `…_OCR`) together with `VPS1777_TAG`, in a single
-  write, and `compose.yaml` uses them: `…/vps1777-gateway:${VPS1777_TAG}@${VPS1777_DIGEST_GATEWAY}`.
+  write, and `compose.yaml` uses them:
+  `…/vps1777-gateway:${VPS1777_TAG:-dev}${VPS1777_DIGEST_GATEWAY:+@${VPS1777_DIGEST_GATEWAY}}`
+  — the `@digest` is appended only if the variable is set.
   So even a `docker compose pull` or `up` run **by hand** in the folder runs the verified
   digest, not whatever the registry serves for the tag at that moment (`H22`). Don't edit
   them by hand: update, rollback and bootstrap write them. Empty = pin off (the tag
@@ -87,8 +91,9 @@ itself restarting mid-update); the outcome arrives on Telegram either way.
 
 ## Notifications and checks
 
-**Three** systemd timers run on the VPS, at different cadences: two **watch**
-things that age at different speeds, the third **applies**.
+**Three** systemd timers run on the VPS out of the box, at different cadences: two
+**watch** things that age at different speeds, the third **applies**. A fourth,
+optional one has nothing to do with updates and is switched on by hand (below, item 4).
 
 **1. New releases** — `vps1777-check-update.timer`, **once a day**. It makes an
 **unauthenticated** GET to `api.github.com/repos/neo1777/vps1777/releases/latest`
@@ -96,10 +101,12 @@ things that age at different speeds, the third **applies**.
 Telegram message to the owner (once per release) and a badge in the admin card.
 If GitHub is unreachable: no noise, just a "stale check" badge.
 
-**2. Secret expirations** — `vps1777-secrets-check.timer`, **weekly**
-(secrets age slowly: one nudge a week is enough; `RandomizedDelaySec`
-spreads the load, `Persistent=true` catches up on checks missed while the VPS
-was off). It runs `vps1777 secrets-status --notify`: reads the mtime of the
+**2. Secret expirations** — `vps1777-secrets-check.timer`, **daily**
+(it used to be weekly: secrets age slowly, but among the entries it checks is the
+cosign emergency bypass, which expires in **one day** — and a check cannot run slower
+than its tightest threshold; in the normal case the noise doesn't change, because it
+only notifies what is past its threshold. `RandomizedDelaySec` spreads the load,
+`Persistent=true` catches up on checks missed while the VPS was off). It runs `vps1777 secrets-status --notify`: reads the mtime of the
 files in `secrets/`, writes `onboarding/secrets_status.json` (which feeds
 `/admin/secrets`) and notifies on Telegram any secrets past their threshold.
 The thresholds and the *why* behind each one are in
@@ -113,10 +120,11 @@ vps1777 secrets-status --notify # + notifica Telegram se qualcosa è oltre sogli
 **3. Safe auto-update** — `vps1777-auto-update.timer`, **daily, with a 48-hour quarantine**.
 This one doesn't watch: it **applies** `vps1777 update --yes`, with the entire
 safety net of the managed channel (backup, digest verification, migrations,
-health-gate, rollback) — and only if the `autoupdate` feature is in the
-declared state (`VPS1777_FEATURES`, default yes). It's the reason the daily
-check can limit itself to notifying: application already has its own safe
-channel. Details and how to turn it off: [OPS.md](../OPS.md) (Italian).
+health-gate, rollback). The installation switches the timer on if the `autoupdate`
+feature is declared in `VPS1777_FEATURES` (default yes); update and rollback don't
+touch whether it is on. It's the reason the daily check can limit itself to notifying:
+application already has its own safe channel. Details and how to turn it off:
+[OPS.md](../OPS.md) (Italian).
 
 **The 48-hour quarantine** (since 27/09/2026). The unit runs
 `vps1777 update --yes --eta-minima 48`: if the latest release was published less than
@@ -127,6 +135,15 @@ update reads `/releases/latest`, which excludes prereleases. It applies **only**
 automatic path: `vps1777 update` by hand, `--version` and the admin button install
 right away, and they are the way for an urgent fix. An unreadable publication date
 counts as "too young": when in doubt, it does not install on its own.
+
+**4. Nightly index (optional)** — `vps1777-indice-notturno.timer`, **every night at
+03:30** (with up to 30 minutes of random delay). The installer does not switch it on:
+you turn it on with `vps1777 indice-notturno --abilita` (and off with `--disabilita`),
+because it only makes sense for whoever has already built the search-by-meaning index.
+It updates the indexes **that already exist**, and only for the DBs that changed after
+they were built, in the compose service `indice-notturno` (profile `indice`: no
+network, one CPU, a 1300 MB ceiling); a first build never starts on its own. See
+[RICERCA-IBRIDA.md](RICERCA-IBRIDA.md).
 
 > The units have no hardcoded user or path: the CLI substitutes
 > `@OPERATOR_USER@` / `@REPO@` with the real values at every update (H43). It
@@ -140,8 +157,9 @@ vps1777 rollback              # torna alla versione precedente (solo immagini+fi
 vps1777 rollback --with-data  # anche i volumi dallo snapshot pre-update
 ```
 
-The default does NOT touch the data. `--with-data` restores the 3 volumes from
-the pre-update snapshot: data written after that update is lost — it's the
+The default does NOT touch the data. `--with-data` restores from the pre-update
+snapshot the 2 volumes it contains (`gateway-data`, `archive-data`; the NotebookLM
+profile isn't there, see above): data written after that update is lost — it's the
 right choice only if the update corrupted the data.
 
 ## Migrations
@@ -202,13 +220,16 @@ channel.
 | Check / intent / progress state (for the admin card) | `onboarding/update_{status,pending_update,progress}.json` |
 | Step history (one line per step, successful and overnight updates included; last 2,000 lines) | `onboarding/update_journal.ndjson` — `tail -n 20 onboarding/update_journal.ndjson` |
 | Migration registry | volume `gateway-data` → `state/migrations.json` |
-| Updater logs | `journalctl -u vps1777-update -u vps1777-check-update` |
+| Updater logs | `journalctl -u vps1777-auto-update -u vps1777-update -u vps1777-check-update` (the timer's automatic run writes to the first one) |
 
 ## Quick troubleshooting
 
-- **"update già in corso"** — there's a lock (`var/update.lock`). If it's a
-  leftover from a crash: `vps1777 status` shows `update_in_progress`; no active
-  process → retry, the lock is per-process.
+- **"update già in corso"** — there's a lock (`var/update.lock`): another update,
+  rollback or bootstrap is at work. The CLI exits with **75** (`EX_TEMPFAIL`, "try
+  again later"), which the update units count as success (`SuccessExitStatus=75`): a
+  timer run that runs into an update in progress doesn't send a false "failed" on
+  Telegram. If it's a leftover from a crash: `vps1777 status` shows
+  `update_in_progress`; no active process → retry, the lock is per-process.
 - **Digest mismatch on pull** — something doesn't add up between the registry
   and the release (attack or corrupted release): the update aborts BEFORE
   touching the stack. Check the release on GitHub and retry.

@@ -16,9 +16,9 @@ sotto sono quelli **misurati lì**. Dove il tuo risultato può essere diverso, �
 | ✅ In locale vedi | ❌ In locale NON vedi |
 |---|---|
 | I **5 servizi** in piedi e `healthy` | L'**ingress HTTPS pubblico** (Tailscale Funnel / Caddy / Cloudflare) |
-| Il **pannello admin** e le sue quattro schede (NotebookLM, update, audit, archive) | I **connector su claude.ai**: per collegarli, claude.ai deve raggiungerti da Internet |
+| Il **pannello admin** e le sue sei schede (Setup, NotebookLM, Archive, Update, Secrets, Audit) | I **connector su claude.ai**: per collegarli, claude.ai deve raggiungerti da Internet |
 | I **due endpoint MCP** che rispondono `401` (ci sono, e chiedono l'autenticazione) | Il **bot Telegram** (serve un token da @BotFather) |
-| Che un segreto sbagliato dà `404` e non `401` (non conferma il percorso) | **NotebookLM** (serve il profilo `auth.json`) |
+| Che un segreto sbagliato dà `404` e non `401` (non conferma il percorso) | **NotebookLM** (serve il profilo `profiles/default/` della CLI `nlm`, caricato come tar.gz da `/admin/nlm`) |
 
 🔑 **La differenza in una frase**: in locale monti e accendi il **motore**; la
 **promessa** del README — *un solo URL HTTPS pubblico da incollare in claude.ai* — è
@@ -93,11 +93,24 @@ salvato una `s` come token del bot.* Non fa danni permanenti — si svuota il fi
 > essere molto di più, ed è l'unico passo che non posso promettere.)*
 
 > ⚠️ **Alla fine ti chiede la password di `sudo`** («Installo il canale di aggiornamento
-> (CLI vps1777 + timer)…»): serve a installare il comando `vps1777` in `/usr/local/bin`
-> e quattro unit systemd. **Su una VPS vera è il pezzo che tiene aggiornata la macchina;
-> per una prova sul tuo PC non serve.** Puoi dargliela, oppure premere **Ctrl-C**:
-> *misurato — `setup.sh` esce (codice 130), **lo stack resta su** e il pannello risponde
-> `200`.* Lo stack è già avviato quando quel prompt arriva.
+> (CLI vps1777 + timer)…»). **Prima di dargliela, sappi cosa fa sul tuo PC**, perché è
+> scritto per una VPS e non distingue:
+> - installa il comando `vps1777` in `/usr/local/bin`;
+> - installa in `/etc/systemd/system` **tutte** le unit `vps1777-*` del repo e ne
+>   **accende** quattro: il check giornaliero delle release, quello delle scadenze dei
+>   secret, la path unit del pulsante di update e l'**auto-update**, che ogni giorno
+>   aggiornerebbe da solo questa installazione di prova;
+> - installa con `apt-get` **`unattended-upgrades`** e **`fail2ban`**, scrive
+>   `/etc/apt/apt.conf.d/20auto-upgrades` e `/etc/fail2ban/jail.local` e li accende: gli
+>   aggiornamenti di sicurezza automatici e il blocco dei brute-force SSH valgono per
+>   **tutto il tuo sistema**, non per vps1777.
+>
+> **Su una VPS vera è il pezzo che tiene aggiornata e difesa la macchina; per una prova
+> sul tuo PC non serve.** Puoi premere **Ctrl-C**: *misurato — `setup.sh` esce (codice
+> 130), **lo stack resta su** e il pannello risponde `200`.* Lo stack è già avviato quando
+> quel prompt arriva. Se gliel'hai data e vuoi tornare indietro:
+> `sudo systemctl disable --now vps1777-check-update.timer vps1777-secrets-check.timer vps1777-update.path vps1777-auto-update.timer`
+> (e `fail2ban`/`unattended-upgrades` si tolgono come qualunque pacchetto).
 
 ### 4 · Guarda che è vivo — `immediato`
 
@@ -118,11 +131,13 @@ Se uno dei container resta `Restarting`, salta a *[Se non torna](#se-non-torna)*
 Apri **`http://127.0.0.1:8080/admin/login`** e accedi con l'email che hai dato e la
 password che il wizard ha stampato.
 
-> **Deve apparire**: il login riesce (redirect), e le quattro schede rispondono —
-> `/admin/nlm`, `/admin/update`, `/admin/audit`, `/admin/archive`.
-> *(misurato: `GET /admin/login` → `200`; `POST` col login vero → `302`; le quattro
-> pagine, con la sessione, → `200`, coi titoli `vps1777 · NotebookLM`, `· update`,
-> `· audit`, `· Archive`)*
+> **Deve apparire**: il login riesce (redirect), e le schede rispondono — sono sei:
+> `/admin/setup`, `/admin/nlm`, `/admin/archive`, `/admin/update`, `/admin/secrets`,
+> `/admin/audit`.
+> *(misurato il 07/09 su quattro di loro: `GET /admin/login` → `200`; `POST` col login
+> vero → `302`; `/admin/nlm`, `/admin/update`, `/admin/audit`, `/admin/archive`, con la
+> sessione, → `200`, coi titoli `vps1777 · NotebookLM`, `· update`, `· audit`,
+> `· Archive`. Setup e Secrets c'erano già, e non erano nella misura)*
 
 E i due connettori MCP, che sono il cuore del prodotto:
 

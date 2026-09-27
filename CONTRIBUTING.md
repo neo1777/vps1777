@@ -27,11 +27,57 @@ The `compose.build.yaml` overlay exists because `compose.yaml` is pull-only
 
 ## Code style
 
-- Python: `ruff` + `mypy` (lint passes in CI)
-- Bash: `shellcheck` (clean)
+- Python: `ruff` (version pinned in CI, currently `ruff==0.15.22`; `ruff check services/ tools/ security/`). No `mypy`: no type checking runs anywhere, neither in CI nor in the hooks
+- Bash: `shellcheck` (clean, minimum severity threshold as in CI)
 - Yaml: 2-space indent, no `version:` key in compose files (deprecated)
-- Commit messages: [Conventional Commits](https://www.conventionalcommits.org/)
-  - `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`, `chore:`
+- Commit messages: a prefix that says **what** is touched, then the sentence in Italian.
+  The ones in use: `fix:`, `feat:`, `docs:`, `ci:`, `build:` (Dependabot bumps), `test:`,
+  `changelog:` (the PR that opens a version), or the area touched (`installer:`,
+  `gateway:`, `indexer:`…); a scope in parentheses is welcome (`docs(architettura):`)
+
+## Tests and checks locally
+
+The suites run **one at a time**, as in CI:
+
+```bash
+uvx --with bcrypt --with cryptography pytest tools/tests/   # CLI, installers, repo guards
+uvx pytest services/archive-mcp/tests/                         # archive-mcp (stdlib)
+uvx pytest services/gateway/tests/                             # gateway (stdlib)
+(cd services/nb1777-mcp && uv sync && uv run pytest tests/)    # nb1777-mcp, with the pinned nlm
+bash tools/esegui-test-bash.sh                                 # the .sh tests in tools/tests/
+```
+
+⚠️ **Don't put `tools/tests/` and `services/archive-mcp/tests/` in the same pytest
+invocation**: both import a package named `app` (the gateway's and archive-mcp's), and
+the second one finds the first — measured: `ModuleNotFoundError: No module named
+'app.miniapp_core'`. Some archive-mcp and gateway tests skip without the locked
+dependencies: CI re-runs them after `uv sync --frozen` (see
+`.github/workflows/ci.yml`).
+
+Before opening the PR, the checks CI will run again:
+
+- `python3 tools/gate-locale.py` — runs the steps of `ci.yml` **reading them from the
+  workflow**, not rewritten by hand (`--elenco` says what it would do, `--job lint` runs
+  just one). It skips and names the `uses:` steps and those with `${{ … }}`; it needs
+  `pyyaml` (`uv run --with pyyaml python3 tools/gate-locale.py`), and some steps touch
+  the environment (the ruff one does `uv tool install`)
+- `python3 security/check_no_leaks.py` (no secrets), `python3 security/check_findings.py`
+  (the security register holds up against its evidence), `python3 tools/verify-features.py`
+  (the feature ledger), `python3 tools/doc-riferimenti.py` (the files the docs name exist)
+- if you touched a document that has a translation (`README.it.md`, `CONTRIBUTING.it.md`,
+  the pages with a copy in `docs/en/`): update **the translation too**, then
+  `python3 tools/aggiorna-traduzioni.py` — never the other way round: the hash without
+  the translation is a rubber stamp
+
+**The git hooks are versioned** in `tools/hooks/`. You install them with
+`bash tools/hooks/installa.sh`, which copies them into `.git/hooks/` (the place every
+worktree of the repo sees); `bash tools/hooks/installa.sh --stato` says whether the
+installed copy is identical to the versioned one. The `pre-commit` warns if you are not
+committing on the main branch (it doesn't block), runs `shellcheck` on the `.sh` and
+`ruff` on the `.py` files you are committing (it blocks if they find problems), and runs
+the anti-leak gate (the `gate-antileak` script) **if it finds it** — it isn't in this repo: without
+it, it prints "NON MISURATO" and the net remains `security/check_no_leaks.py` in CI.
+Deliberate way out: `--no-verify`.
 
 ## What never enters the repo
 
@@ -67,6 +113,24 @@ removing it isn't enough: rotate it.** Git history doesn't forget.
 3. Open a PR describing: what, why, how it was tested
 4. Wait for review — usually within 48h
 5. Squash merge
+
+`main` is protected: changes get in **only through a PR**, with CI's required checks
+green — for everyone, the owner included.
+
+## Releasing (for maintainers)
+
+1. The version lives in the `VERSION` file. It is bumped with a PR on `main` that also
+   carries the `## [X.Y.Z]` section of `CHANGELOG.md` (commit `changelog: sezione X.Y.Z …`).
+2. The `vX.Y.Z` tag on the `main` commit triggers `.github/workflows/release.yml`, which
+   first checks: `VERSION` equal to the tag, the section in the CHANGELOG (stable
+   releases only), CI **green** on the tagged commit. Then it builds the images (amd64
+   only), signs them with keyless cosign, publishes them to GHCR and creates the release
+   with the signed runtime bundle that `vps1777 update` downloads.
+3. **Tags and releases are immutable**: `v*` tags through a ruleset, release assets
+   through the *immutable releases* setting. A mistake isn't fixed by re-tagging: you ship
+   a new version. A bad release is **withdrawn** by marking it as a *prerelease* on
+   GitHub, within the auto-update's 48-hour quarantine
+   ([docs/en/UPDATE.md](docs/en/UPDATE.md)).
 
 ## Code of Conduct
 
