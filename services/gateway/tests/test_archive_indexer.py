@@ -3227,3 +3227,82 @@ def test_gli_accodati_di_neo_sono_parole_sue(tmp_path: Path) -> None:
     archive_indexer.index_jsonl(str(src), str(db), project="p")
     con = sqlite3.connect(db)
     assert con.execute("SELECT speaker FROM messages WHERE uuid='q1'").fetchone() == ("human",)
+
+
+# ── speaker dei gruppi Telegram (27/09/2026, scelta di Neo: «Tu=human, altri=other») ──
+# Rilievo della curatrice: nei DB dei gruppi Telegram lo speaker era sempre 'unknown' (il
+# mittente sta solo nel testo «[Nome] …»), e speaker='human' rispondeva 0 anche sui
+# messaggi del proprietario. Ora il proprietario è 'human' come negli altri archivi, gli
+# altri membri 'other'. Chi è il proprietario lo dice la configurazione, MAI una stima:
+# `TELEGRAM_OWNER_ID` (l'id che il gateway ha già) contro il `from_id` del JSON, e/o i nomi
+# in `ARCHIVE_TELEGRAM_PROPRIETARIO`. Senza nessuna delle due resta tutto 'unknown'.
+def _speaker(db: Path) -> dict[str, str]:
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        return {c.split("]")[0] + "]": s for c, s in
+                conn.execute("SELECT content, speaker FROM messages")}
+    finally:
+        conn.close()
+
+
+def _json_gruppo(tmp_path: Path) -> Path:
+    j = tmp_path / "result.json"
+    j.write_text(json.dumps({"name": "Gruppo", "id": 9, "type": "private_group", "messages": [
+        {"id": 1, "type": "message", "date": "2026-01-01T00:00:00", "from": "Neo1777",
+         "from_id": "user111", "text": "scrivo io"},
+        {"id": 2, "type": "message", "date": "2026-01-01T00:01:00", "from": "Ema",
+         "from_id": "user222", "text": "scrive un altro"},
+    ]}), encoding="utf-8")
+    return j
+
+
+def test_telegram_json_il_proprietario_e_human_gli_altri_other(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TELEGRAM_OWNER_ID", "111")
+    monkeypatch.delenv("ARCHIVE_TELEGRAM_PROPRIETARIO", raising=False)
+    db = tmp_path / "tg.db"
+    archive_indexer.index_file(str(_json_gruppo(tmp_path)), str(db))
+    assert _speaker(db) == {"[Neo1777]": "human", "[Ema]": "other"}
+
+
+def test_telegram_senza_proprietario_dichiarato_resta_unknown(tmp_path, monkeypatch) -> None:
+    """Senza configurazione non si indovina: 'other' per tutti metterebbe il proprietario
+    fra gli altri, cioè la bugia opposta."""
+    monkeypatch.delenv("TELEGRAM_OWNER_ID", raising=False)
+    monkeypatch.delenv("ARCHIVE_TELEGRAM_PROPRIETARIO", raising=False)
+    db = tmp_path / "tg.db"
+    archive_indexer.index_file(str(_json_gruppo(tmp_path)), str(db))
+    assert set(_speaker(db).values()) == {"unknown"}
+
+
+def test_telegram_html_il_proprietario_si_riconosce_dal_nome(tmp_path, monkeypatch) -> None:
+    """L'HTML non ha il from_id: il proprietario lo dicono i nomi. Con il solo
+    TELEGRAM_OWNER_ID l'HTML resta 'unknown' (non si sa chi è chi)."""
+    import zipfile
+    zp = tmp_path / "ChatExport.zip"
+    with zipfile.ZipFile(zp, "w") as z:
+        z.writestr("ChatExport_2026-07-10/messages.html", _TG_HTML)
+    monkeypatch.setenv("TELEGRAM_OWNER_ID", "111")
+    monkeypatch.delenv("ARCHIVE_TELEGRAM_PROPRIETARIO", raising=False)
+    db = tmp_path / "solo-id.db"
+    archive_indexer.index_file(str(zp), str(db))
+    assert set(_speaker(db).values()) == {"unknown"}
+    monkeypatch.setenv("ARCHIVE_TELEGRAM_PROPRIETARIO", "neo1777, altro nome")
+    db = tmp_path / "nomi.db"
+    archive_indexer.index_file(str(zp), str(db))
+    assert set(_speaker(db).values()) == {"human"}      # testo + joined, entrambi di Neo1777
+
+
+def test_telegram_migra_i_db_gia_caricati(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("TELEGRAM_OWNER_ID", raising=False)
+    monkeypatch.delenv("ARCHIVE_TELEGRAM_PROPRIETARIO", raising=False)
+    db = tmp_path / "tg.db"
+    archive_indexer.index_file(str(_json_gruppo(tmp_path)), str(db))
+    assert set(_speaker(db).values()) == {"unknown"}
+    with pytest.raises(ValueError):                    # senza nomi non si migra
+        archive_indexer.migra_telegram(str(db), scrivi=True)
+    monkeypatch.setenv("ARCHIVE_TELEGRAM_PROPRIETARIO", "Neo1777")
+    secco = archive_indexer.migra_telegram(str(db), scrivi=False)
+    assert secco["human"] == 1 and secco["other"] == 1 and not secco["scritto"]
+    assert set(_speaker(db).values()) == {"unknown"}   # a secco non scrive
+    archive_indexer.migra_telegram(str(db), scrivi=True)
+    assert _speaker(db) == {"[Neo1777]": "human", "[Ema]": "other"}
