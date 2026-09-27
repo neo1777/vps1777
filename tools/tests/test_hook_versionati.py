@@ -27,8 +27,9 @@ Misura che gli hook siano **versionati, sintatticamente validi e col bit di esec
 un hook non eseguibile git lo salta **in silenzio**, che è il modo peggiore di non avere
 un presidio — sembra installato.
 
-NON misura che siano ATTIVI su questa macchina: `core.hooksPath` è configurazione locale
-per-clone, e in CI non c'è alcun clone da configurare. Un test che pretendesse
+NON misura che siano ATTIVI su questa macchina: l'installazione (`tools/hooks/installa.sh`
+copia gli hook in `.git/hooks`, dalla v2, e toglie `core.hooksPath` se c'era) è uno stato
+locale per-clone, e in CI non c'è alcun clone da configurare. Un test che pretendesse
 l'attivazione sarebbe rosso in CI per sempre, cioè spento. *Il confine fra ciò che sta
 nel repo e ciò che sta nella macchina è reale, e questo file sta di qua* — di là ci pensa
 `tools/hooks/installa.sh --stato`, che lo dice a chi ha la macchina davanti.
@@ -128,6 +129,43 @@ def test_gli_hook_sono_versionati_ed_eseguibili() -> None:
     niente: nessuna funzione `test_*`, nessun errore, verde.
     """
     assert main() == 0
+
+
+def _ci() -> str:
+    return (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+
+def test_installatore_e_test_riconoscono_gli_stessi_hook() -> None:
+    """Audit della doc (27/09): il test ne riconosceva 8, l'installatore 6. Un
+    `pre-rebase` versionato passava qui e non veniva installato."""
+    import re
+    testo = (HOOKS / "installa.sh").read_text(encoding="utf-8")
+    m = re.search(r'^NOMI_HOOK="([^"]+)"', testo, re.M)
+    assert m, "NOMI_HOOK non trovato in installa.sh"
+    assert set(m.group(1).split()) == NOMI_HOOK
+
+
+def test_il_pre_commit_usa_gli_strumenti_della_ci() -> None:
+    """Il pre-commit anticipa il verdetto della CI: se usa un'altra versione dello
+    strumento, anticipa un altro verdetto (è l'incidente raccontato in ci.yml per
+    shellcheck, 0.9.0 contro 0.11.0). Stessa versione di ruff, stesso digest di
+    shellcheck."""
+    import re
+    hook = (HOOKS / "pre-commit").read_text(encoding="utf-8")
+    ci = _ci()
+    ruff_ci = re.search(r"ruff==([0-9.]+)", ci).group(1)
+    assert f"ruff@{ruff_ci}" in hook, f"il pre-commit non usa ruff {ruff_ci} come la CI"
+    sc_ci = re.search(r"koalaman/shellcheck@(sha256:[0-9a-f]{64})", ci).group(1)
+    assert sc_ci in hook, "il pre-commit non usa lo shellcheck della CI (digest)"
+    assert "shellcheck:stable" not in hook
+
+
+def test_il_pre_commit_non_dice_di_non_bloccare_mai() -> None:
+    """L'intestazione diceva «Non blocca mai» e il corpo blocca su tre gate: chi legge
+    l'intestazione per sapere cosa aspettarsi riceveva il contrario (rilievo di Sagoma,
+    27/09)."""
+    testa = "\n".join((HOOKS / "pre-commit").read_text(encoding="utf-8").splitlines()[:5])
+    assert "Non blocca mai" not in testa
 
 
 if __name__ == "__main__":

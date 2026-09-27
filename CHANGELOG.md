@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Hook git
+- **Il `pre-commit` versionato dice cosa fa, e usa gli strumenti della CI** (rilievi di
+  Sagoma e dell'audit della documentazione, 27/09). L'intestazione diceva «Non blocca
+  mai» e il corpo blocca su tre gate (anti-leak, shellcheck, ruff): ora lo dice. Su un
+  clone qualunque il gate anti-leak era sempre «NON MISURATO» (cercava lo strumento in
+  una cartella che esiste solo sulla macchina dell'autore): ora ripiega su
+  `security/check_no_leaks.py`, il criterio della CI, e ferma il commit se trova
+  materiale credenziale (provato su un clone pulito). ruff alla versione della CI
+  (`0.15.22`) e shellcheck allo stesso digest della CI invece di `:stable`, tenuti da un
+  test. `installa.sh` e il test riconoscono gli stessi nomi di hook (erano 6 contro 8), e
+  `installa.sh --stato` nomina gli hook installati che non vengono dal repo.
+
 ### Corretto
 - **archive1777: tre promesse della documentazione che il codice non teneva** (audit
   della documentazione, 27/09):
