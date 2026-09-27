@@ -142,6 +142,16 @@ print(bcrypt.hashpw(os.environ["ADMIN_PWD_RAW"].encode(), bcrypt.gensalt(12)).de
     echo -n "$TOK" > "$FILE"
     chmod 600 "$FILE"
     ok "TOKEN salvato"
+    # 🔴 27/09 (audit della doc): il gateway verifica la Mini App con la chiave DERIVATA
+    #   dal token (HMAC_SHA256 «WebAppData», H54), non col token. Senza riderivarla qui la
+    #   Mini App rifiutava ogni accesso col bot che rispondeva: il guasto si cercava altrove.
+    #   Stessa derivazione di `assicura_webapp_secret` in vps1777.py e degli installer.
+    TELEGRAM_BOT_TOKEN="$TOK" python3 -c '
+import hashlib, hmac, os
+print(hmac.new(b"WebAppData", os.environ["TELEGRAM_BOT_TOKEN"].encode(), hashlib.sha256).hexdigest(), end="")
+' > secrets/telegram_webapp_secret.txt
+    chmod 600 secrets/telegram_webapp_secret.txt
+    ok "Chiave della Mini App (telegram_webapp_secret) riderivata dal token nuovo"
     docker compose restart nb1777-bot gateway
     ok "Fatto"
     ;;

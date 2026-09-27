@@ -27,6 +27,22 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   caratteri in testa (`.NET`), l'ordine della stirpe, i `.json` che non sono Telegram, e
   lo `speaker` dei messaggi Telegram (oggi `unknown`: il mittente sta nel testo).
 
+- **Il restore trova da solo la chiave age degli installer.** `deploy.sh` e l'installer
+  grafico la creano in `~/.config/vps1777/age-key.txt`; `restore.sh` la cercava solo in
+  `~/.config/age/keys.txt`, e con i default si fermava con «chiave age non trovata» — il
+  giorno in cui serve. Ora cerca `AGE_KEY`, poi il posto degli installer, poi quello di
+  `age-keygen`; `--chiave` dice quale userebbe. Il comando di riavvio che stampa comprende
+  anche gli overlay delle feature (`VPS1777_FEATURES`): prima il backup notturno restava
+  spento dopo un restore. Provato col ciclo vero backup → restore.
+- **La chiave della Mini App segue il token anche fuori dall'update.** `rotate-secret.sh
+  telegram_bot_token` e `vps1777 rollback` non la riderivavano: col token nuovo il bot
+  rispondeva e la Mini App rifiutava tutti. La nota in `/admin/secrets` citava un comando
+  `vps1777 up` che non esiste.
+- **`secrets-status`** non mette più `cloudflared_token` fra i mancanti su chi non usa
+  Cloudflare (un avviso che scatta sempre copre quello vero); il timer delle scadenze e i
+  messaggi degli installer dicevano «settimanale», e gira ogni giorno dalla 0.41.1.
+- **`busybox` pinnata a digest** (`1.37.0@sha256:…`) in snapshot, backup, restore e check
+  delle scadenze: era `:latest`, fuori dal presidio H66 che tiene le immagini dei compose.
 - **archive1777: tre promesse della documentazione che il codice non teneva** (audit
   della documentazione, 27/09):
   - `get_conversation` prendeva le **prime** `limit` righe: su una chat più lunga di 200
@@ -63,6 +79,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   dall'audit della documentazione (27/09).
 
 ### Documentazione
+- **CLI IT/EN, TROUBLESHOOTING, BACKUP-RESTORE IT/EN, SECRETS, CIFRATURA-ARCHIVIO,
+  INGRESS allineate al codice** (audit della documentazione, 27/09): le opzioni che
+  mancavano (`--home`, `--from-intent`, `--require-cosign`, `bootstrap --bundle`,
+  `archive-ingest --project/--nlm`, `indice-notturno --disabilita`), cosa fanno davvero
+  `check`, `status`, `rollback` (conferma sempre, esiti 75 e 2) e `archive-ingest` (i file
+  di testo vanno diretti all'indexer); la quarantena scatta solo con `--eta-minima`; lo
+  snapshot ha due volumi; il restore non riavvia e sovrascrive anche `.env` e i compose;
+  l'inventario dei secret con la chiave derivata e `archive_desc_secret`; DNS-01 con
+  Caddy dichiarato non predisposto; `INGRESS_PROFILE` nel `.env`.
 - **NB1777, MINIAPP, PLUGINS, ONBOARDING e i docstring di nb1777-mcp allineati al
   codice** (audit della documentazione, 27/09): sei endpoint interni e non quattro;
   in compose nb1777-mcp ascolta su `0.0.0.0` della rete interna; il bot lo chiama

@@ -11,6 +11,14 @@ Where to run it: **on the VPS host**, as the operator user (never as bare root:
 if you are root, `sudo -u <operatore> vps1777 …`). Glossary terms:
 [GLOSSARIO.md](../GLOSSARIO.md) (Italian).
 
+One option applies to every command and goes **before** the command: `--home FOLDER`, the
+root of the repo on the VPS. Without it, the CLI uses `$VPS1777_HOME` and, if that is
+missing too, `/home/vps1777/vps1777`.
+
+```bash
+vps1777 --home /srv/vps1777 status
+```
+
 ## vps1777 help
 
 The help, in full or for a single command. It reuses the real parser: what it
@@ -23,13 +31,33 @@ vps1777 help memoria      # opzioni e sotto-comandi di `memoria`
 
 ## vps1777 check
 
-Checks whether a release newer than the installed one exists (it asks GitHub,
-touches nothing).
+Checks whether a release newer than the installed one exists (it asks GitHub). It is
+the command of the daily timer `vps1777-check-update.timer`, and it is **not read-only**:
+before asking GitHub it also does the maintenance and the watches that live on its round.
+
+- **It prunes the pre-update snapshots** (`backups/pre-update/`): what stays is the latest
+  of each of versions n and n-1, plus the most recent one overall — the return point of
+  the running version ([BACKUP-RESTORE.md](BACKUP-RESTORE.md)).
+- **Three watches**, always, with the outcome in the log: whether the service is
+  reachable from outside (the port on the host, then the public address — the Funnel or
+  `PUBLIC_BASE`; the outcome also goes into `onboarding/raggiungibilita.json`, read by
+  `/admin/setup`), the backup **coverage** (distinct days; it warns if it drops below the
+  maximum already reached) and the **age** of the latest archive backup (it warns past 14
+  days; if no archive exists yet, it stays silent).
+- **It writes the state**: `onboarding/update_status.json` (the admin card and the Mini
+  App read it) and `last_check` in `var/state.json`.
+
+With GitHub unreachable it still exits 0: the error ends up in `update_status.json`, not
+in a notification.
 
 ```bash
 vps1777 check             # stampa: installata vs ultima release
 vps1777 check --notify    # in più: messaggio Telegram all'owner se c'è una nuova
 ```
+
+`--notify` sends the new release to Telegram (once per version) and the **state changes**
+of the three watches — the fall and the recovery, not the state every day. Without
+`--notify` the watches run anyway and only write to the log.
 
 ## vps1777 update
 
@@ -39,22 +67,54 @@ pull by digest, restart, health gate — and automatic rollback if anything
 doesn't check out. This is the command the `vps1777-auto-update.service` unit
 runs: from the host you normally start **that one**, not this by hand.
 
-The unit passes `--eta-minima 48`: it installs the latest release only if it was
-published at least 48 hours ago (the quarantine, see [UPDATE.md](UPDATE.md)). To install
-one that just came out, `--version` skips the quarantine. If another update (or a
-rollback) is already running it exits with **75** ("try again later"), which the units
-count as success: it isn't a fault and doesn't send the failure alert.
+**The quarantine kicks in only with `--eta-minima HOURS`**, and it is the unit that
+passes it (`--eta-minima 48`): it installs the latest release only if it was published at
+least 48 hours ago, otherwise it does nothing and tries again on the next round (see
+[UPDATE.md](UPDATE.md)). A `vps1777 update` run by hand **with no options has no
+quarantine**: it installs the latest release right away, after asking for confirmation.
+With `--version` the quarantine is ignored even if you pass `--eta-minima`, and the
+explicit target may also be **older** than the installed one (it is the only way to
+downgrade; from the admin button it is refused).
+
+The options:
+
+- `--version vX.Y.Z` — explicit target (e.g. an rc).
+- `--yes` — no confirmation.
+- `--eta-minima HOURS` — the quarantine, only on the path without `--version`.
+- `--from-intent FILE` — the intent file written by the admin button: the
+  `vps1777-update.service` unit uses it, it is not run by hand. With it there is no
+  confirmation.
+- `--no-require-cosign` — **emergency route**: skips the bundle signature check (same as
+  `VPS1777_REQUIRE_COSIGN=0` in `.env`). `secrets-status` flags it for as long as it stays
+  open.
+- `--require-cosign` — redundant: the check is already mandatory by default.
+
+What it leaves on disk: in `.env` the tag (`VPS1777_TAG`) and one digest per service
+(`VPS1777_DIGEST_<SERVICE>`, e.g. `VPS1777_DIGEST_ARCHIVE_MCP`), written together at step
+10; in `onboarding/update_progress.json` the last step (the panels' progress bar) and in
+`onboarding/update_journal.ndjson` **one line per step**, even for a successful update —
+that is where you read, the morning after, what the nightly auto-update did.
+
+If another update (or a rollback) is already running it exits with **75** ("try again
+later"), which the units count as success: it isn't a fault and doesn't send the failure
+alert.
 
 ```bash
 sudo systemctl start vps1777-auto-update.service   # the normal way (with the quarantine)
+vps1777 update                                     # by hand: the latest release, right away (asks for confirmation)
 vps1777 update --version v0.44.0 --yes             # explicit target, right away (e.g. an rc)
 ```
 
 ## vps1777 rollback
 
-Goes back to the previous version (images + managed files). With `--with-data`
-it also restores the volumes from the pre-update snapshot — that is the invasive
-option, and it asks for confirmation.
+Goes back to the previous version (images + managed files, and in `.env` the tag and
+digests of the previous version). With `--with-data` it also restores the volumes from
+the pre-update snapshot — that is the invasive option. **It always asks for
+confirmation**, with or without `--with-data`: only `--yes` skips it.
+
+It exits **75** if an update or another rollback is running (the same lock as `update`),
+and **2** if the rollback is applied but the health gate doesn't turn green (alert on
+Telegram).
 
 ```bash
 vps1777 rollback
@@ -63,8 +123,13 @@ vps1777 rollback --with-data --yes
 
 ## vps1777 status
 
-The state of the update channel: installed version, latest known release,
-snapshots, outcome of the last update.
+The state of the update channel: current version, previous one, latest known release
+(`latest_known`), time of the last check, the check error if any, and the update in
+progress (`update_in_progress`: present from step 10 on, and it stays if an update dies
+after that point of no return). With `--json` there is also the release channel
+(`channel`); with `--probe` the state of each container and the deep health. It does not
+show snapshots or the outcome of the last update: they live in `backups/pre-update/` and
+in `onboarding/update_journal.ndjson`.
 
 ```bash
 vps1777 status
@@ -95,22 +160,35 @@ vps1777 migrate --run       # applica
 
 One-shot cutover from a legacy installation (pre-update-channel) to the managed
 channel: it imports the state, takes the first full backup, hooks up the units.
-It is used exactly once, following [INSTALL.md](INSTALL.md).
+It is used exactly once, following [INSTALL.md](INSTALL.md). It finds the bundle on its
+own when the CLI runs from the extracted bundle; otherwise you point it there with
+`--bundle`.
 
 ```bash
 vps1777 bootstrap --yes
+vps1777 bootstrap --bundle /tmp/vps1777-bundle --yes   # bundle estratto altrove
 ```
 
 ## vps1777 archive-ingest
 
-Indexes a file into the search archive **going through NotebookLM**
-(multimodal/OCR reading): it is the route for the valuable document the normal
-ingest can't read — scanned PDFs, photos of documents. ⚠️ The file is sent to
-Google. For normal formats (zip/jsonl/md/pdf-with-text) use the gateway's
-`/admin/archive` page ([ARCHIVE.md](../ARCHIVE.md) (Italian)).
+Indexes a file into the search archive. The extension picks the route:
+
+- **text files** (`.md` `.txt` `.markdown` `.rst` `.log` `.csv` `.json` `.jsonl`) →
+  **straight to the gateway's indexer**, without NotebookLM;
+- **everything else** (scanned PDFs, photos of documents…) → **going through NotebookLM**
+  (multimodal/OCR reading). ⚠️ The file is sent to Google.
+
+For the normal formats uploaded from the browser (zip/jsonl/md/pdf-with-text) there is
+also the gateway's `/admin/archive` page ([ARCHIVE.md](ARCHIVE.md)).
+
+The options: `--db NAME` (the target DB; default from the file name), `--project LABEL`
+(the project label; default the DB name), `--verify` (asks NotebookLM to verify the
+transcription), `--nlm` (forces the NotebookLM round even on a text file — for instance a
+`.txt` that is the dump of a scan).
 
 ```bash
 vps1777 archive-ingest scansione.pdf --db documenti --verify
+vps1777 archive-ingest note.md --db documenti --project studio   # testo: diretto
 ```
 
 ## vps1777 archive-retag
@@ -150,6 +228,7 @@ costs: [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md).
 
 ```bash
 vps1777 indice-notturno --abilita          # accende il timer (opt-in)
+vps1777 indice-notturno --disabilita       # lo spegne
 vps1777 indice-notturno                    # un giro adesso
 vps1777 indice-notturno --db X --tutti     # un DB solo, anche se già allineato
 ```
@@ -160,7 +239,8 @@ Brings the migrations of the derived columns to the DBs **already loaded**, with
 an ingest: today, Claude Code tool outputs written as `human` by an indexer older
 than 0.52.0 become `speaker='tool'`, and the program's turns (notifications,
 local command outputs, compactions) written as `human` before 0.53.0 become
-`speaker='system'` ([ARCHIVE.md](ARCHIVE.md)). The text doesn't
+`speaker='system'` ([ARCHIVE.md](ARCHIVE.md)). Where it is missing, it also creates
+the project-label index (`idx_project`). The text doesn't
 change: FTS and semantic index stay valid. **Dry-run by default**: it measures the
 delta on a real transaction, rolls it back and doesn't touch the data; it writes
 only with `--scrivi`. The `.vec.db` files (semantic indexes) are not archives and
@@ -174,8 +254,15 @@ vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
 ## vps1777 secrets-status
 
 Age and expiry of the secrets (keys, tokens, NotebookLM cookies): it lists what
-is due for rotation. With `--notify` it alerts about the expired ones on
-Telegram. The result also appears in `/admin/secrets`.
+is due for rotation. The same list shows the **cosign emergency route** when it is open
+(`VPS1777_REQUIRE_COSIGN=0` in `.env`), with a one-day threshold. It lists separately the
+**expected secrets not found** in `secrets/` — `cloudflared_token` only with the
+Cloudflare profile (up to 0.62.2 it showed up among the missing ones on every install). With `--notify` it alerts about the expired
+ones on Telegram. The result also appears in `/admin/secrets` (from the file
+`onboarding/secrets_status.json`).
+
+If it finds **no** secret to measure it exits **2**: that is not "all good", it is "I
+couldn't look" (wrong path or permissions), and with `--notify` it says so on Telegram.
 
 ```bash
 vps1777 secrets-status

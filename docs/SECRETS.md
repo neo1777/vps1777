@@ -1,6 +1,6 @@
 # Secrets — vps1777
 
-Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei container in `/run/secrets/<name>` (tmpfs read-only).
+Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei container in `/run/secrets/<name>`, in sola lettura. Con Docker Compose fuori da Swarm un secret `file:` è un **bind mount del file dell'host**: dentro il container ha gli stessi permessi e lo stesso proprietario che ha fuori (gli installer lo lasciano `600`, dell'utente che l'ha generato — per questo quell'utente deve essere l'UID 1000 dei container, vedi [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
 
 ## Inventario
 
@@ -9,8 +9,15 @@ Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei cont
 | `gateway_secret` | `secrets/gateway_secret.txt` | namespace nelle URL `/<SECRET>/<service>/mcp` (24-32 char) **e** segreto del canale interno verso nb1777-mcp (v0.30.0) | gateway, nb1777-mcp, nb1777-bot |
 | `oauth_signing_secret` | `secrets/oauth_signing_secret.txt` | firma JWT HS256 (≥32 byte) | gateway |
 | `admin_password_bcrypt` | `secrets/admin_password_bcrypt.txt` | hash bcrypt della password admin (rounds=12) | gateway |
-| `telegram_bot_token` | `secrets/telegram_bot_token.txt` | TOKEN bot da BotFather | gateway, nb1777-bot |
+| `archive_desc_secret` | `secrets/archive_desc_secret.txt` | segreto del canale interno con cui archive-mcp inoltra al gateway le `set_description` (separato da `gateway_secret` di proposito) | gateway, archive-mcp |
+| `telegram_bot_token` | `secrets/telegram_bot_token.txt` | TOKEN bot da BotFather | nb1777-bot |
+| `telegram_webapp_secret` | `secrets/telegram_webapp_secret.txt` | chiave **derivata** dal token (HMAC_SHA256 con chiave «WebAppData», 64 hex) con cui si verifica l'`initData` della Mini App — non risale al token | gateway |
 | `cloudflared_token` | `secrets/cloudflared_token.txt` | (opz) CF Tunnel token | cloudflared sidecar |
+
+> Il gateway **non** monta il token del bot: gli basta la chiave derivata. Chi buca il
+> gateway può al massimo forgiare un `initData` per la Mini App di quel gateway, non
+> parlare come il bot. La chiave la scrivono gli installer; `vps1777 update` la ricalcola
+> dal token a ogni avvio dello stack che fa (vedi la rotazione del token, sotto).
 
 > **Tailscale**: `TS_AUTHKEY` **non** è un Docker secret — passa da `.env` solo il
 > tempo del provisioning. Tailscale gira **sull'host** (non più in un sidecar), e la
@@ -55,6 +62,23 @@ docker compose restart gateway
 # se il refresh era ancora valido. Altrimenti devi rifare il connector.
 ```
 
+### Rota `telegram_bot_token` (e la chiave derivata)
+
+```bash
+./tools/rotate-secret.sh telegram_bot_token   # revoca su @BotFather, incolla il nuovo:
+                                              # scrive il token, RIDERIVA la chiave, riavvia bot e gateway
+```
+
+Dalla 0.62.3 `rotate-secret.sh` rideriva da sé la chiave della Mini App; prima scriveva
+solo il token, e il secondo passo andava fatto a mano.
+
+> ⚠️ **Perché conta.** La chiave derivata è una funzione del token: col token nuovo e la
+> chiave vecchia il bot risponde e la Mini App **rifiuta tutti**, senza un errore che
+> nomini la chiave. Si ricalcola da sola con `rotate-secret.sh`, con un `vps1777 update`
+> che installa davvero una versione, con `vps1777 rollback` e nell'auto-rollback — non
+> con un `docker compose restart`. Se hai riscritto il token a mano nel file, rilancia
+> `rotate-secret.sh telegram_bot_token` (o vedi [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
+
 ### Rota `admin_password_bcrypt`
 
 ```bash
@@ -73,8 +97,9 @@ immagini: nessuna build, nessun pull.
 
 ## Scadenze e monitoraggio
 
-Un check host — `vps1777 secrets-status` (timer systemd **settimanale**
-`vps1777-secrets-check.timer`) — calcola l'**età** di ogni secret (dall'mtime del
+Un check host — `vps1777 secrets-status` (timer systemd **giornaliero**
+`vps1777-secrets-check.timer`, `OnCalendar=daily`: era settimanale, ma la soglia più
+stretta qui dentro è di un giorno) — calcola l'**età** di ogni secret (dall'mtime del
 file, riscritto a ogni rotazione) e la confronta con una soglia:
 
 | Secret | Fascia | Soglia consigliata | Rotazione |
@@ -82,9 +107,12 @@ file, riscritto a ogni rotazione) e la confronta con una soglia:
 | `telegram_bot_token` | **massima** (radice di fiducia Mini App) | **90 giorni** | manuale (revoca e rigenera su @BotFather) |
 | `oauth_signing_secret` | alta | 90 giorni | manuale (invalida i token) |
 | `admin_password_bcrypt` | alta | 90 giorni | manuale |
+| `telegram_webapp_secret` | segue il token | 90 giorni | non si ruota a parte: si ricalcola dal token (sopra) |
 | `gateway_secret` | media | 180 giorni | manuale (cambia le URL MCP) |
+| `archive_desc_secret` | media | 180 giorni | manuale: rigenera il file e ricrea il gateway (e archive-mcp) — `rotate-secret.sh` non lo copre |
 | `cloudflared_token` | bassa | 365 giorni | manuale (se usi l'ingress Cloudflare) |
 | cookie NotebookLM | — | 14 giorni | ricarica da `/admin/nlm` — scadono da soli |
+| via d'emergenza cosign aperta | — | **1 giorno** | togli `VPS1777_REQUIRE_COSIGN=0` dal `.env` (compare solo mentre è aperta) |
 
 > **Perché `telegram_bot_token` è fascia massima (H29).** Non è un segreto
 > "ordinario": è la **radice di fiducia della Mini App**. L'autenticazione della
@@ -101,6 +129,17 @@ Se un secret supera la soglia, il check **notifica il owner su Telegram** (`--no
 e lo segna nella pagina admin **`/admin/secrets`**, che mostra età, ultima rotazione
 e stato di ogni secret + le istruzioni di rotazione. Scrive `onboarding/secrets_status.json`
 (letto dal gateway). Manuale: `vps1777 secrets-status` in qualunque momento.
+
+Cosa notifica e cosa no:
+
+- **scaduti** → una notifica con l'elenco (niente scaduto, niente messaggio: la cadenza
+  giornaliera non aggiunge rumore);
+- **secret attesi e non trovati** in `secrets/` → solo nel log e nel campo `mancanti` del
+  JSON, **nessuna notifica**. L'elenco è quello della tabella; `cloudflared_token` è
+  atteso solo col profilo Cloudflare (fino alla 0.62.2 compariva sempre fra i mancanti);
+- **nessun secret trovato** → esce **2** (la unit risulta fallita) e, con `--notify`,
+  lo dice su Telegram: non è «tutto a posto», è «non ho potuto guardare» (percorso o
+  permessi sbagliati).
 
 > Perché quasi tutto è **manuale**: ruotare `oauth_signing_secret`/`gateway_secret`
 > in automatico romperebbe i connettori attivi (token/URL). L'auto-rotazione
@@ -122,7 +161,8 @@ vecchi) vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md#rotazione-della-chiave-age-h3
 ## Threat model
 
 - `secrets/`, `backups/`, `onboarding/` a mode 700 + file 600 (impostato dagli installer, H38)
-- Container vede solo `/run/secrets/<name>` con mode 400, owner root
+- Container vede solo i propri `/run/secrets/<name>`, montati in sola lettura con i
+  permessi e il proprietario del file sull'host (`600`, UID 1000)
 - **Log redatti** (v0.24.0): un filtro di logging (`app/logredact.py`) sostituisce
   ogni secret con `***` in ogni riga *prima* che venga scritta. In particolare il
   `gateway_secret` vive nel PATH del proxy MCP (`/<SECRET>/<service>/mcp`) e

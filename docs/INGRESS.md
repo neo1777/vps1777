@@ -2,6 +2,13 @@
 
 3 modi per esporre il gateway su HTTPS pubblico. Scegli uno.
 
+> **Il profilo scelto sta nel `.env`: `INGRESS_PROFILE=ingress.<nome>`** (`tailscale`,
+> `caddy` o `cloudflared`). Lo scrivono gli installer, ed è da lì che `vps1777 update` e
+> `vps1777 rollback` (e le unit che li lanciano) ricavano quale overlay montare. **Se manca, vale
+> `ingress.tailscale`.** Quindi un cambio d'ingress fatto a mano solo con gli `-f` di
+> `docker compose` dura fino al primo update: se nel `.env` non cambi anche
+> `INGRESS_PROFILE`, l'update riporta su Tailscale.
+
 ## 1. Tailscale Funnel (raccomandato)
 
 **Quando**: vuoi un URL HTTPS gratis con cert auto-rinnovato, sub-dominio `*.ts.net`, no DNS proprio.
@@ -57,14 +64,26 @@ da solo (`tailscale status`) e imposta `PUBLIC_BASE`.
 3. Aggiungi a `.env`:
    - `CADDY_DOMAIN=vps.tuosito.com`
    - `CADDY_EMAIL=tu@gmail.com`
+   - `INGRESS_PROFILE=ingress.caddy` (vedi in cima: senza, il primo update torna a Tailscale)
 4. Lancia: `docker compose -f compose.yaml -f compose.ingress.caddy.yaml --profile ingress.caddy up -d`
    (senza gli `-f` l'overlay non viene montato e Caddy non entra nel progetto)
 
 Caddy fa cert ACME via HTTP-01 al primo avvio.
 
-**Setup DNS-01 (senza porta 80)**:
+**Setup DNS-01 (senza porta 80) — oggi NON è predisposto.**
 
-Richiede immagine Caddy custom con plugin DNS provider. Esempio Cloudflare:
+Il repo ne ha solo gli accenni, e nessuno dei pezzi è collegato:
+
+- `ingress/Caddyfile` porta la riga `acme_dns cloudflare {env.CF_API_TOKEN}`, **commentata**;
+- `compose.ingress.caddy.yaml` usa l'immagine `caddy:2.8-alpine` di serie (senza plugin
+  DNS) e al container passa **solo** `CADDY_DOMAIN` e `CADDY_EMAIL`: `CF_API_TOKEN` **non
+  arriva** a Caddy, e nessun file lo legge da `secrets/`;
+- l'override «compose.ingress.caddy-dns01.yaml» che il commento in testa a quel file
+  nomina **non esiste**.
+
+Per farlo a mano servono tre cose: un'immagine Caddy con il plugin del provider (esempio
+Cloudflare sotto), un override compose che la usi e passi `CF_API_TOKEN` nell'ambiente
+del servizio `caddy`, e la riga `acme_dns` scommentata nel `Caddyfile`.
 
 ```Dockerfile
 FROM caddy:2.8-builder AS builder
@@ -74,7 +93,11 @@ FROM caddy:2.8-alpine
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 ```
 
-Aggiungi `secrets/cf_api_token.txt` + modifica `ingress/Caddyfile` con `tls.dns cloudflare`.
+⚠️ **E non sopravvive al canale di aggiornamento**: `ingress/Caddyfile` e
+`compose*.yaml` sono file gestiti, che ogni `vps1777 update` riscrive dal bundle, e il
+comando compose della CLI monta solo `compose.yaml`, l'overlay di `INGRESS_PROFILE` e
+quelli delle feature — non un override tuo. Oggi DNS-01 regge solo su una macchina che
+non usa `vps1777 update`.
 
 ## 3. Cloudflare Tunnel
 
@@ -84,7 +107,8 @@ Aggiungi `secrets/cf_api_token.txt` + modifica `ingress/Caddyfile` con `tls.dns 
 
 1. Su [one.dash.cloudflare.com → Networks → Tunnels](https://one.dash.cloudflare.com/) → Create Tunnel
 2. Configura **Public Hostname** che punta a `http://gateway:8080`
-3. Copia il **tunnel token** (lungo, base64) in `secrets/cloudflared_token.txt`
+3. Copia il **tunnel token** (lungo, base64) in `secrets/cloudflared_token.txt`, e metti
+   `INGRESS_PROFILE=ingress.cloudflared` nel `.env` (vedi in cima)
 4. Lancia: `docker compose -f compose.yaml -f compose.ingress.cloudflared.yaml --profile ingress.cloudflared up -d`
    (senza gli `-f` l'overlay non viene montato e il tunnel non entra nel progetto)
 
@@ -102,7 +126,8 @@ Per gli ingress **in container** (Caddy, Cloudflared) il proxy arriva da una
 bridge Docker privata (es. `172.x.0.1`): il default **la copre già**, quindi di
 norma **non serve configurare nulla**. Solo topologie esotiche (proxy su un
 altro host, subnet fuori dai blocchi privati) richiedono un override via env
-**`GATEWAY_FORWARDED_ALLOW_IPS`** (uvicorn 0.51 accetta anche la notazione CIDR).
+**`GATEWAY_FORWARDED_ALLOW_IPS`** (uvicorn — il gateway chiede `>=0.52.3` — accetta anche
+la notazione CIDR).
 
 ## Confronto rapido
 

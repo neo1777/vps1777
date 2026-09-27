@@ -23,8 +23,9 @@ chown 1000:1000 secrets/*.txt        # 1000 = l'utente `app` DENTRO i container
 > `$(id -u):$(id -g)` vale `0:0`, cioè **esattamente lo stato che ha causato
 > l'errore**: il comando esce 0, non cambia niente e lo stack resta in
 > `Restarting`. Il numero da scrivere è quello dell'utente **dentro** il
-> container, non di quello fuori. Con `chown 1000:1000` i 4 servizi sono
-> passati `healthy` al primo tentativo.
+> container, non di quello fuori. Con `chown 1000:1000` i 4 servizi che montano
+> dei secret (gateway, archive-mcp, nb1777-mcp, nb1777-bot) sono passati `healthy`
+> al primo tentativo; il quinto, `ocr`, non ne monta e questo errore non lo riguarda.
 >
 > Il percorso `deploy.sh` non incontra il caso perché crea l'utente operatore
 > con `useradd -m -u 1000` e gli fa `chown -R` della dir remota: l'UID
@@ -65,6 +66,31 @@ Casi:
 - `TELEGRAM_BOT_TOKEN` vuoto → riempi `secrets/telegram_bot_token.txt` + `docker compose restart nb1777-bot`
 - `TELEGRAM_OWNER_ID` sbagliato → controlla `.env`, deve essere il TUO numero (non `0`)
 - TOKEN revocato su BotFather → genera uno nuovo, aggiorna `secrets/telegram_bot_token.txt`
+  **e riallinea la chiave della Mini App** (sotto)
+
+### Token del bot cambiato: il bot risponde, la Mini App no
+
+Il token lo legge solo `nb1777-bot`. Il gateway monta un'altra cosa:
+`secrets/telegram_webapp_secret.txt`, la chiave **derivata** dal token
+(HMAC_SHA256 con chiave «WebAppData») con cui verifica l'`initData` della Mini App.
+Se cambi il token e la chiave resta quella vecchia, il bot riparte giusto e la Mini
+App **rifiuta tutti** — senza un errore che nomini la chiave.
+
+La chiave si riallinea da sola al token in quattro posti: `tools/rotate-secret.sh
+telegram_bot_token` (dalla 0.62.3: scrive il token, **rideriva la chiave** e riavvia bot
+e gateway), un `vps1777 update` che installa davvero una versione (allo step 13),
+`vps1777 rollback` (dalla 0.62.3) e l'auto-rollback. **Non** la riallineano un
+`docker compose restart` né un token riscritto a mano nel file: se hai fatto così, la
+via è rilanciare `tools/rotate-secret.sh telegram_bot_token` col token nuovo. In
+alternativa, dalla radice del repo sulla VPS, la stessa derivazione degli installer:
+
+```bash
+python3 -c "import hmac,hashlib;t=open('secrets/telegram_bot_token.txt').read().strip();open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',t.encode(),hashlib.sha256).hexdigest())"
+docker compose restart gateway
+```
+
+Il file viene riscritto sul posto (stesso file, stessi permessi), quindi il riavvio del
+gateway basta.
 
 ## `nlm: command not found` (sul tuo PC)
 
@@ -134,15 +160,19 @@ Se serve, riattiva a mano: `tailscale serve --bg --https=443 http://127.0.0.1:80
 
 ## Archive MCP non trova niente (`search` ritorna vuoto)
 
-Causa: i DB sono vuoti (degraded mode).
+Causa: l'archivio nasce vuoto — nessun DB caricato, oppure nessuno nel posto dove
+archive-mcp li cerca.
 
-Soluzione: popola i dati:
+Diagnosi: i DB SQLite stanno in `/var/lib/archive/db/` (volume `archive-data`),
+un `<nome>.db` per archivio; archive-mcp li scopre da solo lì dentro.
 ```bash
-docker compose exec archive-mcp ls /var/lib/archive/data/
-# Devono esistere claude-web/, claude-cli/, claude-cli-dash/ con file di export
+docker compose exec archive-mcp ls -l /var/lib/archive/db/
+# vuoto = nessun DB caricato: i tool rispondono vuoto, ed è lo stato normale all'inizio
 ```
 
-Vedi [docs/ARCHITECTURE.md](ARCHITECTURE.md) §archive-mcp per i formati attesi.
+Soluzione: carica i dati dalla pagina `/admin/archive` del gateway o con
+`vps1777 archive-ingest` ([CLI.md](CLI.md)). Formati e percorsi:
+[ARCHIVE.md](ARCHIVE.md).
 
 ## Connector claude.ai non si autentica (Tailscale)
 
@@ -205,16 +235,23 @@ sudo tailscale up --authkey=tskey-auth-... --hostname=vps1777
 
 ## Update: "update già in corso"
 
-Causa: c'è un lock (`var/update.lock`) — un altro update sta girando, oppure è
-il residuo di un crash.
+Causa: un altro update (o un rollback) sta girando **adesso**. Il lock su
+`var/update.lock` è un `flock` del kernel: muore col processo che lo tiene, quindi
+un crash non lo lascia indietro. Il file resta sul disco, ma non è lui il lock —
+non va cancellato.
 
 Diagnosi:
 ```bash
-vps1777 status                                      # mostra update_in_progress
-journalctl -u vps1777-update --no-pager | tail -30  # log dell'ultimo run
+vps1777 status                                                  # update_in_progress, se c'è
+journalctl -u vps1777-auto-update --no-pager | tail -30         # l'auto-update del timer
+journalctl -u vps1777-update --no-pager | tail -30              # quello del pulsante admin
+tail -20 onboarding/update_journal.ndjson                       # una riga per step, di ogni update
 ```
-Se nessun processo è attivo, riprova: il lock è per-processo. Dettagli in
-[UPDATE.md](UPDATE.md).
+`update_in_progress` in `vps1777 status` si accende solo dallo step 10 (il punto di
+non ritorno): un update ancora nei primi step tiene il lock ma lì non compare. E se
+l'update è morto dopo lo step 10, `update_in_progress` resta scritto anche senza
+lock: è il segno di un update interrotto a metà, non di uno in corso. Quando nessun
+processo è attivo, riprova. Dettagli in [UPDATE.md](UPDATE.md).
 
 Dalla 0.59.0 questo caso esce con **75** («riprova più tardi») e non con 1: le unit
 `vps1777-auto-update.service` e `vps1777-update.service` lo contano come riuscito, e non
@@ -223,10 +260,12 @@ arriva l'avviso di fallimento su Telegram. Se lo vedi in uno script tuo, 75 vuol
 
 ## `docker cp` verso un container: "container rootfs is marked read-only"
 
-Causa: tutti i servizi di vps1777 girano col rootfs in sola lettura. nb1777-mcp dalla
-0.58.0 (`H43`), gli altri da prima. `docker cp` rifiuta di scrivere dentro un container
-così, anche in `/tmp`, che è una tmpfs. Scrive solo dentro un volume montato (per esempio
-`/var/lib/archive/db` del gateway).
+Causa: i servizi di `compose.yaml` (gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr,
+e il job `indice-notturno`) girano col rootfs in sola lettura. nb1777-mcp dalla
+0.58.0 (`H43`), gli altri da prima. I container degli overlay — caddy, cloudflared,
+backup, portainer, watchtower — **no**: lì `docker cp` funziona. Verso un container in
+sola lettura `docker cp` rifiuta di scrivere, anche in `/tmp`, che è una tmpfs. Scrive
+solo dentro un volume montato (per esempio `/var/lib/archive/db` del gateway).
 
 Cura: porta il file con un `exec` che scrive dall'interno, su stdin:
 ```bash

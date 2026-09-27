@@ -3,6 +3,14 @@
 > **Stato: PROPOSTA, non implementata.** Serve l'approvazione di chi possiede la macchina
 > prima di scrivere una riga di prodotto. Scritto il 2026-08-16 da `71d540e6`, dopo la
 > decisione dell'owner («cifriamo se è possibile e se non deteriora l'utilizzo»).
+>
+> **Aggiornato il 27/09/2026** — la cifratura resta non implementata, ma due premesse di
+> questo documento sono cambiate dopo la stesura, e il testo sotto le segna dove
+> compaiono: ① la **cache delle connessioni** che qui si chiede come prerequisito esiste
+> dal 17/08 (#197: `_open()` in `services/archive-mcp/app/db.py`, una connessione
+> persistente per DB **e per thread**); ② il **recipient age** non è più «zero»: gli
+> installer dal PC lo configurano da soli. I riferimenti al codice citano ora le
+> funzioni, non i numeri di riga, che si spostano.
 
 ## Il problema, e da chi ci si difende
 
@@ -22,7 +30,7 @@ il resto»** — e «tutto il resto» è la maggioranza dei casi reali:
 |---|---|
 | snapshot del provider | ✅ |
 | disco dismesso, riassegnato, rivenduto | ✅ |
-| backup **di `vps1777`** che escono di casa | ⚠️ *`tools/backup.sh` cifra con `age` — **ma solo se il recipient è configurato**, e oggi non lo è (vedi sotto)* |
+| backup **di `vps1777`** che escono di casa | ⚠️ *`tools/backup.sh` cifra con `age` — **ma solo se il recipient è configurato**: al 16/08 non lo era; oggi lo configurano `deploy.sh` e l'installer grafico (vedi sotto)* |
 | backup **del canale `_chat`** sul disco esterno | 🔴 **NO — 14 file su 14 in chiaro**, misurati il 16/08 22:4x |
 | accesso al pannello del provider senza console | ✅ |
 | VM spenta e disco copiato | ✅ |
@@ -79,14 +87,15 @@ query, stessi 4.000 hit su entrambi:
     brute-force sulla passphrase) e non va abbassato: è la difesa, non un difetto.
 ```
 
-⚠️ **`archive-mcp` apre una connessione PER OGNI RICHIESTA** (`db.py:161`, dentro
-`search()`; sono 10 i punti che chiamano `_open()`). Con SQLCipher così com'è, una ricerca
-passerebbe da 0,2 ms a **310 ms**: non 1,75x, **millecinquecento volte**.
+⚠️ **Al 16/08 `archive-mcp` apriva una connessione PER OGNI RICHIESTA** (dentro
+`search()`; erano 10 i punti che chiamavano `_open()`). Con SQLCipher così com'era, una
+ricerca sarebbe passata da 0,2 ms a **310 ms**: non 1,75x, **millecinquecento volte**.
+*(Curato il 17/08, #197: vedi sotto.)*
 
 🔴 **E il costo si moltiplica per il numero di DB — rilievo di @b82df434, verificato.**
-`_open()` sta **dentro il loop** `for name in _targets(db)` (`db.py:186, 226, 261`), e
-`_targets("")` restituisce **tutti** i database (`db.py`, ramo `if not db`). Una ricerca
-senza filtro apre quindi **una connessione per DB**:
+`_open()` sta **dentro il loop** `for name in _targets(db)` (in `search()` e negli altri
+tool che attraversano i DB), e `_targets("")` restituisce **tutti** i database (ramo
+`if not db`). Una ricerca senza filtro apre quindi **una connessione per DB**:
 
 ```
   3 DB oggi   →  3 × 299 ms  ≈  **0,9 s per ricerca**, solo per derivare le chiavi
@@ -98,10 +107,19 @@ decida niente.* Un costo che scala con un numero che nessuno controlla non è un
 una perdita di controllo.
 
 🔑 **Il prerequisito è architetturale, non crittografico: la connessione va tenuta
-aperta** (una cache per-DB in `_open()`, che oggi non esiste perché non serviva). Con una
-connessione persistente si paga 310 ms **una volta all'avvio** e poi 0,35 ms a ricerca.
+aperta** (una cache per-DB in `_open()`, che al 16/08 non esisteva perché non serviva).
+Con una connessione persistente si paga 310 ms **una volta all'avvio** e poi 0,35 ms a
+ricerca.
 ⇒ **Cifrare senza toccare questo trasformerebbe un costo trascurabile in uno insostenibile
 — e sembrerebbe «colpa della cifratura».**
+
+✅ **Fatto il 17/08 (#197).** `_open()` oggi restituisce una connessione **persistente**,
+tenuta in una cache **per thread** (`threading.local`: i tool di `server.py` sono sincroni
+e girano sul thread pool, e `sqlite3` rifiuta una connessione usata da un thread diverso
+da quello che l'ha aperta) e invalidata quando cambia la cartella dei DB. Quindi
+l'apertura si paga **una volta per DB e per thread**, non a ogni richiesta — non «una
+volta all'avvio». Il `close()` dei chiamanti è reso innocuo (`_Persistente`). Presidio:
+`services/archive-mcp/tests/test_db_conn.py`.
 
 📌 *Anche la previsione «con una cache generosa paga poco sui cache-miss» è smentita dal
 banco: 1,72x con 2 MB e 1,80x con 200 MB. La page-cache non c'entra — il costo per pagina
@@ -162,7 +180,8 @@ che valgono **per il ramo ③** e restano aperte:
 
 Tre comportamenti possibili, e due sono sbagliati:
 
-- ❌ **muore** — con `restart: unless-stopped` (che è la policy attuale, `compose.yaml:36`)
+- ❌ **muore** — con `restart: unless-stopped` (che è la policy attuale: l'ancora
+  `x-restart` in testa a `compose.yaml`)
   entra in un loop di riavvii che brucia CPU e riempie i log;
 - ❌ **parte in chiaro** — fail-open: il difetto peggiore, perché la protezione sembra
   attiva e non lo è;
@@ -188,12 +207,19 @@ cancellato.* Prima di andare in produzione va deciso **dove la chiave viene cust
 **chi altro la conosce** — ed è una domanda di custodia, non di codice. Nessuna riga di
 questo repo può rispondere al posto di chi possiede la macchina.
 
-#### ⚠️ Oggi le chiavi configurate sono ZERO — rilievo di @abdd732a, verificato
+#### ⚠️ Al 16/08 le chiavi configurate erano ZERO — rilievo di @abdd732a, verificato
 
-`tools/backup.sh:52` legge il recipient da `tools/age-recipients.txt`, e **quel file non
-esiste**: non sul disco, non in `git ls-files`, non in `origin/main` (tre sonde). Quindi
-oggi `backup.sh` **non produce backup affatto** — ed è la cosa giusta: a `:103` c'è un
-`die` che si ferma e spiega come generare la coppia.
+`tools/backup.sh` legge il recipient da `tools/age-recipients.txt` (`RECIPIENTS_FILE`), e
+**quel file non esisteva**: non sul disco, non in `git ls-files`, non in `origin/main` (tre
+sonde). Quindi allora `backup.sh` **non produceva backup affatto** — ed era la cosa giusta:
+nella sezione «recipients» c'è un `die` che si ferma e spiega come generare la coppia.
+
+> **Oggi (27/09/2026)** il file resta fuori da git — è per installazione, non del repo —
+> ma non è più un passo che nessuno esegue: `deploy.sh` e l'installer grafico generano la
+> coppia **sul PC** (`~/.config/vps1777/age-key.txt`) e scrivono sulla VPS il solo
+> recipient; `setup.sh` non genera niente e dice `Backup DICHIARATO ma NON ARMATO` finché
+> il recipient manca. Il ragionamento qui sotto sulle due chiavi resta valido: la chiave
+> age oggi di norma **c'è**, e quella dell'archivio sarebbe la seconda.
 
 🔑 **E l'assenza è VOLUTA, sta scritta due righe sopra il `die`**: *«NIENTE auto-keygen
 sulla VPS: generare la chiave qui metterebbe la PRIVATA sullo stesso disco dei backup → la
@@ -207,9 +233,12 @@ adegua?»* invece di *«dove metto le due»*.
 
 #### 🔴 E le chiavi diventerebbero DUE — rilievo di @abdd732a, verificato
 
-Il repo ha già una cifratura, con una chiave **diversa**: `tools/backup.sh:52` usa
-`tools/age-recipients.txt`, e i backup contengono il volume `archive-data`
-(`compose.yaml:127, 189, 316`) — cioè i `.db` stessi.
+Il repo ha già una cifratura, con una chiave **diversa**: `tools/backup.sh` usa
+`tools/age-recipients.txt`, e i backup contengono il volume `archive-data` — cioè i `.db`
+stessi. Dal `0.43.13` (29/08) lo contengono nel **livello archivio**: una copia ogni 7
+giorni (o quando si lancia `backup.sh --archivio`), le ultime 2 tenute; il core notturno
+porta solo le `description` dei DB ([BACKUP-RESTORE.md](BACKUP-RESTORE.md)). La rete
+descritta qui sotto c'è ancora, ma con un passo di 7 giorni invece che di uno.
 
 ```
   OGGI   perdi la chiave age  → i backup sono illeggibili, MA il DB sulla macchina

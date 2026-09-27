@@ -21,11 +21,25 @@ separati per natura del dato — perché il 99,99% del peso è rigenerabile e lo
 > serve»*. Fra un backup archivio e l'altro la rete è doppia: le fonti fuori dalla VPS +
 > lo snapshot pre-update (`backups/pre-update/`, in chiaro, n e n-1).
 
+> **«Tutti i volumi» dipende da DOVE gira `backup.sh`**, e i due contesti non salvano
+> la stessa cosa:
+>
+> - **nel container `backup`** (il cron notturno) salva i volumi **montati** in
+>   `compose.ops.backup.yaml`: `gateway-data`, `gateway-uploads`, `nlm-auth`,
+>   `nlm-artifacts` (più `archive-data` per il livello archivio). `caddy-data` e
+>   `caddy-config` ci sono **commentati**: con l'ingress Caddy i certificati non entrano
+>   nel backup notturno finché non li decommenti a mano (e il file è gestito: un update
+>   lo riscrive). È **solo qui** che si esportano le `descrizioni/<db>.txt`;
+> - **sull'host** (`./tools/backup.sh` a mano, e il backup che fa `vps1777 update`)
+>   chiede i volumi a `docker compose config --volumes`, quindi segue gli overlay attivi;
+>   ma il volume dell'archivio non è leggibile da lì e le **`descrizioni/` non vengono
+>   esportate** — lo dice nel log, e restano quelle dell'ultimo backup archivio.
+
 Il nome resta `.tar.age` per entrambi anche se dentro c'è **zstd** (o gzip, se zstd
 manca): il suffisso è un contratto letto da ritenzione, CLI, `restore.sh` e test. Il
 formato reale sta nel sidecar `.meta` (`compressione: zstd`) e nei primi 4 byte del
-decifrato — `restore.sh` lo riconosce da lì. A mano:
-`age -d -i ~/.config/age/keys.txt f.tar.age | zstd -dc | tar -x`.
+decifrato — `restore.sh` lo riconosce da lì. A mano, con la tua chiave privata:
+`age -d -i <chiave privata> f.tar.age | zstd -dc | tar -x`.
 
 ## Backup manuale
 
@@ -33,12 +47,16 @@ decifrato — `restore.sh` lo riconosce da lì. A mano:
 ./tools/backup.sh                    # core + archivio SE dovuto (≥ 7 giorni dall'ultimo)
 ./tools/backup.sh --archivio         # core + archivio COMUNQUE
 ./tools/backup.sh --senza-archivio   # solo core (è ciò che fa `vps1777 update`)
+./tools/backup.sh --prune-only       # SOLO la ritenzione: nessun backup nuovo
 # → backups/vps1777-2026-08-29-030000.tar.age
 #   backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age
 ```
 
-Variabili (con i default): `VOLUMI_ARCHIVIO=archive-data` (nomi logici del livello
-archivio), `ARCHIVIO_OGNI_GIORNI=7`, `KEEP_ARCHIVIO=2`, `KEEP_VERSIONI=3`.
+Un flag alla volta: con due flag, o con uno sconosciuto, stampa l'uso ed esce **2**.
+
+Variabili (con i default): `BACKUP_DIR=backups/` (dove scrive e pota),
+`VOLUMI_ARCHIVIO=archive-data` (nomi logici del livello archivio),
+`ARCHIVIO_OGNI_GIORNI=7`, `KEEP_ARCHIVIO=2`, `KEEP_VERSIONI=3`.
 
 Cosa NON includi: log container (sono in `/var/lib/docker/containers/*/`, gestiti dal driver json-file con rotation).
 
@@ -51,17 +69,22 @@ Il backup notturno è **attivo di default**: non devi fare nulla per averlo. L'i
 lo accende leggendo lo **stato dichiarato** delle feature — `VPS1777_FEATURES` nel `.env`
 (default: `backup,autoupdate`). Il container `backup` esegue ogni notte (cron **03:00 UTC**)
 il livello **core** — e il livello **archivio** quando è dovuto (ogni 7 giorni) — e tiene
-**7 core giornalieri + 4 settimanali** più **2 archivio**, tutti cifrati `age`.
-`vps1777 check` (il timer giornaliero) avvisa se l'ultimo archivio ha più di 14 giorni.
+**7 core giornalieri + 4 settimanali**, più **l'ultimo core di ciascuna delle ultime 3
+versioni** (letta dal sidecar `.meta`), più **2 archivio**, tutti cifrati `age`.
+`vps1777 check` (il timer giornaliero) avvisa se l'ultimo archivio ha più di 14 giorni;
+finché non esiste nessun backup archivio, quell'avviso non parte.
 
 > **Perché "dichiarato" e non "ricordato" — ed è il cuore del non-perdere-funzioni.**
 > Prima (fino a v0.37.x) il backup era un profilo **opt-in**: un reinstall della VPS non lo
 > ri-accendeva, e nessuno se ne accorgeva — la rete di sicurezza spariva in silenzio.
 > Da **v0.38.0** la scelta vive in `VPS1777_FEATURES`: l'installer la legge, e install,
 > update e rollback **riproducono sempre le stesse feature**. Un reinstall non "dimentica"
-> il backup — lo **riproduce per costruzione**. E l'installer chiude col **referto**
-> (`✓ Feature attive: backup=ON · auto-update sicuro=ON · portainer=OFF`): un `OFF` non
-> richiesto **si vede subito nel log**, non si scopre dopo mesi.
+> il backup — lo **riproduce per costruzione**. E l'installer chiude col **referto**: un
+> `OFF` non richiesto **si vede subito nel log**, non si scopre dopo mesi. La riga non è
+> la stessa nelle tre vie: l'installer grafico scrive
+> `✓ Feature attive: backup=ON · auto-update sicuro=ON · portainer=OFF`, `deploy.sh`
+> chiude con `chiave age (backup): <stato>`, e `setup.sh` dice
+> `Backup: recipient age presente` oppure `Backup DICHIARATO ma NON ARMATO`.
 
 ### Accendere o spegnere il backup
 
@@ -76,8 +99,10 @@ VPS1777_FEATURES=backup,autoupdate    # il default: backup notturno + auto-updat
 
 > ⚠ **Serve la chiave `age`.** Il backup cifra con la sola chiave pubblica del recipient
 > (la privata sta **fuori dalla VPS**, `v0.26.0`). Se `backup=ON` ma la chiave non è
-> configurata, il referto te lo dice (`⚠ chiave age da configurare per i backup`). Vedi
-> più sotto per generare la coppia e mettere la pubblica sul server.
+> configurata, il referto te lo dice (nell'installer grafico
+> `⚠ chiave age da configurare per i backup`, in `deploy.sh` uno stato `MANCANTE`, in
+> `setup.sh` `Backup DICHIARATO ma NON ARMATO`). Vedi più sotto per generare la coppia e
+> mettere la pubblica sul server.
 >
 > ⚠ **E dopo un format / una reinstallazione va RIMESSA** — il recipient vive sulla VPS
 > (`tools/age-recipients.txt`) e il format lo porta via; la coppia sul PC sopravvive e
@@ -85,8 +110,9 @@ VPS1777_FEATURES=backup,autoupdate    # il default: backup notturno + auto-updat
 > in cui te ne accorgi è il **primo update**: `vps1777 update` pretende il backup, il
 > backup pretende il recipient, e senza si ferma fail-safe («backup fallito — stack
 > intatto, update annullato» — misurato al collaudo vergine, 27/08/2026). NON generare
-> una coppia nuova sulla VPS: ricopia la pubblica del PC (`grep 'public key'
-> ~/.config/age/keys.txt`).
+> una coppia nuova sulla VPS: ricopia la pubblica del PC (`grep 'public key'` sul file
+> della chiave: `~/.config/vps1777/age-key.txt` se l'ha generata l'installer,
+> `~/.config/age/keys.txt` se l'hai generata tu come qui sotto).
 
 > **Niente `docker.sock` (H13).** Il container di backup **non monta il Docker socket** e
 > **non installa `docker-cli`**: i volumi dati gli sono montati **direttamente in sola
@@ -103,14 +129,35 @@ tocca solo i propri volumi):
 ./tools/restore.sh backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age   # archivio
 ```
 
+> 🔑 **La chiave privata, `restore.sh` la cerca da sé**, in quest'ordine: la variabile
+> `AGE_KEY` se la dai; `~/.config/vps1777/age-key.txt`, dove la generano `deploy.sh` e
+> l'installer grafico; `~/.config/age/keys.txt`, il posto di `age-keygen` fatto a mano.
+> `./tools/restore.sh --chiave` dice quale userebbe, senza toccare niente. Fino alla
+> 0.62.2 cercava solo l'ultimo, e con la chiave degli installer il restore si fermava
+> («chiave age non trovata», prima di toccare lo stack). Il restore gira sulla macchina
+> che ha i volumi Docker, quindi la privata va portata lì per il tempo del restore — e
+> poi tolta (`shred -u`). Uno snapshot pre-update in chiaro non chiede nessuna chiave.
+
 Step:
 1. `docker compose down --remove-orphans` — l'`--remove-orphans` serve: senza, il
    container dell'ingress non è nel modello (sta in un overlay) e **resta acceso**,
-   servendo traffico sopra volumi che si stanno ripristinando
+   servendo traffico sopra volumi che si stanno ripristinando. Si ferma anche il
+   container `backup` (è in un overlay anche lui)
 2. Decifra l'archivio con la tua chiave age e riconosce il formato dai byte
    (zstd / gzip / tar nudo — i backup precedenti al `0.43.13` sono tar nudo)
-3. Ripristina volumi + secrets (il core) o i volumi dell'archivio
-4. `docker compose up -d`
+3. Ripristina volumi + secrets + **configurazione** (il core: sovrascrive anche `.env`,
+   `compose*.yaml` e `ingress/` con quelli del backup) o i volumi dell'archivio
+4. **Non riavvia lo stack**: stampa il comando da lanciare, con gli `-f` dell'ingress
+   letti da `INGRESS_PROFILE` nel `.env` ripristinato e, dalla 0.62.3, quelli delle
+   feature dichiarate in `VPS1777_FEATURES` (il backup notturno compreso: prima restava
+   fuori, e il container `backup` restava spento fino al prossimo update).
+   `./tools/restore.sh --comando-riavvio` lo stampa senza fare il restore. Col profilo e
+   le feature di default:
+
+   ```bash
+   docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
+     --profile ingress.tailscale --profile ops.backup up -d
+   ```
 
 Se l'archivio lo **rigeneri dalle fonti** invece di ripristinarlo (re-ingest dei bundle),
 le `description` dei DB le ritrovi nel core in `descrizioni/<db>.txt` — si riapplicano con
@@ -121,13 +168,16 @@ Default: interattivo (chiede conferma). Flag:
 - `--yes` — nessuna conferma (per script/automazioni)
 - `--volumes-only vol1,vol2` — ripristina SOLO i volumi elencati (CSV, nomi corti o completi), saltando secrets/config
 - come input accetta anche una **directory snapshot non cifrata** (`backups/pre-update/<dir>`), oltre al `.tar.age`
+- `--chiave` — stampa la chiave privata che userebbe ed esce, senza toccare niente
+- `--comando-riavvio` — stampa il comando per riavviare lo stack (ingress + feature) ed esce
+- la variabile `AGE_KEY=<file>` indica la chiave privata (senza, `~/.config/vps1777/age-key.txt`, poi `~/.config/age/keys.txt`)
 
 ## Snapshot pre-update
 
-`vps1777 update` crea in `backups/pre-update/` uno snapshot locale **non cifrato** dei volumi dati prima di ogni update — serve all'auto-rollback, che non può dipendere dalla age-key — e lo pota al successivo update riuscito (tenuti: gli ultimi di n e n-1, decisione owner del 29/08). Vedi [UPDATE.md](UPDATE.md). Ripristino manuale:
+`vps1777 update` crea in `backups/pre-update/` uno snapshot locale **non cifrato** dei volumi dati prima di ogni update — serve all'auto-rollback, che non può dipendere dalla age-key. Dentro ci sono `gateway-data` e `archive-data`; **`nlm-auth` è escluso di proposito**: contiene i cookie di sessione Google, e lo snapshot è in chiaro (il profilo NotebookLM si ricarica da `/admin/nlm`, e sta comunque nel backup age). Gli snapshot si potano a ogni update riuscito, a ogni auto-rollback e a ogni `vps1777 check` (il timer giornaliero): restano l'ultimo di n e n-1 (decisione owner del 29/08) più quello in uso come punto di ritorno. Vedi [UPDATE.md](UPDATE.md). Ripristino manuale:
 
 ```bash
-./tools/restore.sh --yes --volumes-only gateway-data,archive-data,nlm-auth backups/pre-update/<dir>
+./tools/restore.sh --yes --volumes-only gateway-data,archive-data backups/pre-update/<dir>
 ```
 
 ## Chiave age — dove sta cosa (importante)
@@ -135,7 +185,10 @@ Default: interattivo (chiede conferma). Flag:
 Il backup si cifra con la chiave **pubblica** (il *recipient*); solo il **restore**
 ha bisogno della chiave **privata**. Quindi:
 
-- **La chiave PRIVATA vive sul TUO PC**, mai sulla VPS. Genera la coppia lì:
+- **La chiave PRIVATA vive sul TUO PC**, mai sulla VPS. Se installi con `deploy.sh` o con
+  l'installer grafico, la coppia la genera lui sul PC, in
+  `~/.config/vps1777/age-key.txt`, e manda alla VPS solo il recipient. A mano, generala
+  lì:
   ```bash
   age-keygen -o ~/.config/age/keys.txt    # sul TUO computer, non sul server
   ```
@@ -162,6 +215,8 @@ trasferisce nulla in automatico, ma il gesto è scritto — dal **tuo PC**:
 ```bash
 bash tools/backup-pull.sh vps1777 /media/tu/HD/vps1777-backups
 #   <host-ssh>  <cartella di destinazione>   (esce 2 se la cartella non c'è: HD non montato)
+bash tools/backup-pull.sh vps1777 /media/tu/HD/vps1777-backups /srv/vps1777
+#   terzo argomento facoltativo: il repo sulla VPS (default /home/vps1777/vps1777)
 ```
 
 Tira i due livelli e i sidecar `.meta`, **senza** `pre-update/` (gli snapshot in chiaro
@@ -204,8 +259,11 @@ con la **vecchia** chiave e si decifrano **solo con la vecchia privata**. Cambia
 il recipient **non** li ri-cifra. Quindi:
 
 - **Conserva la vecchia privata** (offline) finché esistono backup cifrati con essa
-  — cioè finché non sono usciti dalla rotazione (7 giornalieri + 4 settimanali,
-  ~un mese) o li hai cancellati/ri-cifrati tu. Solo allora puoi ritirarla.
+  — cioè finché non sono usciti dalla rotazione o li hai cancellati/ri-cifrati tu. La
+  rotazione non ha una durata fissa: 7 giornalieri + 4 settimanali sono circa un mese,
+  ma l'ultimo backup di ciascuna delle ultime 3 versioni resta finché non escono tre
+  versioni più nuove, e i 2 archivio restano fino ai due giri successivi. Prima di
+  ritirarla, guarda cosa c'è ancora in `backups/` (e nelle copie sul tuo disco).
 - Sul PC promuovi la nuova a chiave attiva quando sei pronto:
   ```bash
   mv ~/.config/age/keys.txt ~/.config/age/keys-old.txt   # tienila, non buttarla
@@ -230,14 +288,20 @@ Scenario: VPS morta, nuova macchina, vuoi ripristinare.
 # Su nuova macchina
 git clone https://github.com/neo1777/vps1777.git
 cd vps1777
-# Copia ~/.config/age/keys.txt dalla tua copia offline
-mkdir -p ~/.config/age && cp /percorso/keys.txt ~/.config/age/
+# La chiave privata dalla tua copia offline, dove restore.sh la cerca da sé
+# (./tools/restore.sh --chiave per controllare)
+mkdir -p ~/.config/vps1777 && cp /percorso/age-key.txt ~/.config/vps1777/age-key.txt
+# backups/ non è nel repo (è ignorata da git): va creata, con la sottocartella dell'archivio
+mkdir -p backups/archivio
 # Copia l'ultimo backup di OGNI livello
 scp tuo-backup-server:/percorso/vps1777-2026-08-29-030000.tar.age backups/
 scp tuo-backup-server:/percorso/archivio/vps1777-archivio-2026-08-29-030000.tar.age backups/archivio/
-# Restore, uno per livello
+# Restore, uno per livello (il core rimette anche .env, compose*.yaml, ingress/ e secrets/)
 ./tools/restore.sh backups/vps1777-2026-08-29-030000.tar.age
 ./tools/restore.sh backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age
+# restore.sh NON riavvia: lancia il comando che stampa (ingress + feature, vedi
+# «Restore» sopra). Poi togli la chiave privata dalla macchina:
+shred -u ~/.config/vps1777/age-key.txt
 # Lo stack riparte uguale alla data dei backup (l'archivio: alla data del suo, ≤ 7 giorni
 # prima; se hai i bundle sorgente, il re-ingest lo porta a oggi).
 ```
