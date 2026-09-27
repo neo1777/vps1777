@@ -10,12 +10,13 @@ Dopo `./deploy.sh`, lo stack gira ma è "dormiente": mancano le credenziali
 ┌─────────────────────────────────────────────────────────────────┐
 │  1. ./deploy.sh           (dal PC, ~6 domande, pull + avvio)     │
 │         ↓                                                        │
-│  2. http://<IP_VPS>:8080/admin/setup   (browser, login admin)   │
+│  2. <pannello>/admin/setup   (browser, login admin)             │
+│     via Funnel, dominio HTTPS o tunnel SSH (vedi §2)            │
 │     inserisci: Tailscale key · bot token · profilo nlm (tgz)    │
 │     → Salva                                                     │
 │         ↓                                                        │
 │  3. ./deploy.sh --apply   (dal PC, applica tutto via SSH)       │
-│     tailscale up · URL · restart · chiude la porta 8080         │
+│     tailscale up · verifica Funnel · URL · restart              │
 │         ↓                                                        │
 │  4. https://<host>.ts.net/admin/setup   (tutto verde)          │
 │     + connector claude.ai                                       │
@@ -24,13 +25,31 @@ Dopo `./deploy.sh`, lo stack gira ma è "dormiente": mancano le credenziali
 
 ## 1. Deploy
 
-Vedi [INSTALL.md](INSTALL.md). Al termine, lo stack è su e la porta 8080
-è aperta sull'host per il pannello di setup.
+Vedi [INSTALL.md](INSTALL.md). Al termine, lo stack è su. La porta 8080 del
+gateway è pubblicata **solo sul loopback** della VPS (`127.0.0.1`): la governa
+`GATEWAY_BIND` col profilo Tailscale (`compose.ingress.tailscale.yaml`) e
+`ONBOARDING_BIND` con Caddy e Cloudflared (`compose.onboarding.yaml`). Da
+Internet la 8080 non si raggiunge; alla fine `deploy.sh` stampa come aprire il
+pannello nel tuo caso.
 
 ## 2. Pannello /admin/setup
 
-Apri `http://<IP_VPS>:8080/admin/setup`, login con l'email admin e la
-password (stampata dal deploy o nel tuo password manager).
+Come ci arrivi dipende dal profilo:
+
+| Caso | Indirizzo |
+|---|---|
+| Tailscale, auth-key data al deploy | `https://<host>.ts.net/admin/setup` — il Funnel è già attivo |
+| Caddy o Cloudflared | `https://<tuo-dominio>/admin/setup` — il proxy serve HTTPS dal primo avvio |
+| HTTPS non ancora pronto (Tailscale senza key, certificato non emesso) | tunnel SSH dal tuo computer: `ssh -L 8080:127.0.0.1:8080 <utente>@<IP_VPS>`, poi `http://127.0.0.1:8080/admin/setup` |
+
+> Con Caddy o Cloudflared, `ONBOARDING_BIND=0.0.0.0` nel `.env` della VPS
+> rimette la porta su tutte le interfacce (`http://<IP_VPS>:8080/admin/setup`).
+> È un compromesso dichiarato: pannello e login viaggiano in HTTP, quindi
+> password e sessione admin passano in chiaro finché non c'è HTTPS. Toglila
+> appena il pannello risponde in HTTPS.
+
+Login con l'email admin e la password (stampata dal deploy o nel tuo password
+manager).
 
 Il pannello mostra **lo stato dei componenti** a semafori e i form per:
 
@@ -56,10 +75,22 @@ Dal tuo PC, nella cartella del repo:
 ```
 
 Cosa fa (via SSH):
-- scrive `TS_AUTHKEY` in `.env` (dall'OAuth client o dalla key) + il Docker secret `telegram_bot_token`
-- `tailscale up` con la key → ricava l'URL `*.ts.net`
-- imposta `PUBLIC_BASE` con quell'URL
-- riavvia i servizi **senza** la porta 8080 (la chiude)
+- valida la forma di ogni valore di `pending.json`, poi scrive `TS_AUTHKEY` e
+  `TELEGRAM_OWNER_ID` in `.env`, il Docker secret `telegram_bot_token` e la
+  chiave derivata `secrets/telegram_webapp_secret.txt`, con cui il gateway
+  verifica la Mini App senza avere il token ([MINIAPP.md](MINIAPP.md))
+- `tailscale up` con la key → ricava l'URL `*.ts.net`, attiva il Funnel e
+  controlla **da questo PC** che risponda davvero
+- dopo un `tailscale up` riuscito azzera `TS_AUTHKEY` in `.env`: la key è
+  monouso, e il nodo resta nel tailnet senza di lei (H15)
+- imposta `PUBLIC_BASE` con quell'URL (o con quello che hai dato nel pannello)
+- riavvia i servizi (`docker compose up -d`). Con Caddy o Cloudflared il
+  riavvio è senza `compose.onboarding.yaml`, quindi la 8080 sull'host si chiude
+  del tutto. Col profilo Tailscale il gateway resta su `127.0.0.1:8080`,
+  raggiunto solo dal Funnel. Se il Funnel **non** risponde, come ripiego scrive
+  `GATEWAY_BIND=0.0.0.0` e la 8080 si apre in HTTP su tutte le interfacce,
+  perché la macchina resti raggiungibile: quando il Funnel risponde, riporta
+  `GATEWAY_BIND=127.0.0.1` nel `.env` e ricrea il gateway
 - cancella `pending.json`
 - stampa l'URL HTTPS finale
 

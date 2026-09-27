@@ -1132,13 +1132,13 @@ ${C_B}${C_OK}╔═════════════════════�
   2. ${C_B}Nel pannello inserisci${C_R}:
         • Tailscale auth-key  (da login.tailscale.com/admin/settings/keys)
         • Token bot Telegram + Owner ID  (opzionale)
-        • Carica auth.json NotebookLM  (bottone dedicato)
+        • Carica il profilo NotebookLM  (tar.gz di profiles/default/, bottone dedicato)
      Clicca ${C_B}Salva configurazione${C_R}.
 
   3. ${C_B}Applica${C_R} — da questo PC, nella cartella del repo:
         ${C_OK}./deploy.sh --apply${C_R}
-     Attiva Tailscale, imposta l'URL, riavvia i servizi, chiude la
-     porta 8080. Stampa l'URL HTTPS finale.
+     Attiva Tailscale e verifica il Funnel, imposta l'URL, riavvia i
+     servizi. Stampa l'URL HTTPS finale.
 
   4. ${C_B}Connector claude.ai${C_R}: <URL>/$GATEWAY_SECRET/archive/mcp  (e /nb1777/mcp)
 

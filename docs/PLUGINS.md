@@ -11,7 +11,8 @@ cp -r plugins/example-mcp plugins/mio-mcp
 cd plugins/mio-mcp
 ```
 
-Apri `app/server.py`, modifica i tool. Lo scheletro è FastMCP streamable-http.
+Apri `app/__main__.py`, modifica i tool. Lo scheletro è FastMCP streamable-http; legge
+`PLUGIN_HOST` e `PLUGIN_PORT` (default `0.0.0.0:8010`).
 
 ### Step 2: compose
 
@@ -25,18 +26,25 @@ services:
     image: vps1777/mio-mcp:${VPS1777_TAG:-dev}
     init: true
     environment:
-      HOST: 0.0.0.0
-      PORT: 8010                   # scegli una porta libera ≥ 8010
+      PLUGIN_HOST: 0.0.0.0
+      PLUGIN_PORT: 8010            # scegli una porta libera ≥ 8010
       FASTMCP_STATELESS_HTTP: "true"
     networks: [backend]
     expose: ["8010"]
     restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=3).status==200 else 1)"]
+      test: ["CMD", "python", "-c", "import socket,sys; s=socket.create_connection(('127.0.0.1',8010),timeout=3); s.close()"]
       interval: 30s
       timeout: 5s
       retries: 3
 ```
+
+Il check è TCP perché lo scheletro non ha una rotta `/health`: dice solo che la porta è aperta.
+Se aggiungi una rotta di salute (in FastMCP, con `@mcp.custom_route("/health", methods=["GET"])`,
+come fanno `archive-mcp` e `nb1777-mcp`), puoi passare a un check HTTP che provi anche l'app.
 
 ### Step 3: registra al gateway
 
@@ -89,9 +97,14 @@ Stesso pattern, ma il bot **non espone porte** (è long-poll outbound).
 
 ```bash
 cp -r plugins/example-bot plugins/mio-bot
-# edita app/bot.py
+# edita app/__main__.py
 # crea plugins/mio-bot/compose.mio-bot.yaml senza `expose:` né `networks: ingress`
 ```
+
+Il bot deve però **uscire** verso `api.telegram.org`, e la rete `backend` è `internal: true`: da lì
+non si esce. Mettilo anche sulla rete `egress`, come `nb1777-bot` in `compose.yaml` e come fa già
+`plugins/example-bot/compose.example-bot.yaml` (`networks: [backend, egress]`). Con il solo
+`backend` il container parte ma il long-poll non raggiunge mai Telegram.
 
 Token in `secrets/mio-bot-token.txt`, montato come `secrets: [mio_bot_token]` nel compose plugin.
 

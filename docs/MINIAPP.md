@@ -19,8 +19,10 @@ duplicata da mantenere.
 ## Cosa fa
 
 - **Stato** — gateway online, versione in esecuzione (badge se c'è una release
-  più nuova), connettori MCP con **URL completo copiabile** (quello da incollare
-  in claude.ai → Settings → Connectors), riassunto scadenze secret.
+  più nuova), connettori MCP con l'URL **mascherato** di default: quello vero
+  (da incollare in claude.ai → Settings → Connectors) contiene il
+  `gateway_secret`, e si scopre o si copia con un tap esplicito, un connettore
+  per volta, che resta nell'audit (H26); riassunto scadenze secret.
 - **Notebook** — lista dei notebook NotebookLM; tap su uno → domanda RAG
   direttamente dal telefono (le query lunghe mostrano il tempo trascorso).
 - **Archivio** — ricerca FTS5 nell'archivio personale (tutti i DB o uno
@@ -35,23 +37,35 @@ duplicata da mantenere.
 ## Autenticazione — initData HMAC + owner-only
 
 1. Telegram inietta nella webview `initData`: i dati dell'utente **firmati
-   HMAC-SHA256 col token del bot** (chiave che solo Telegram e il gateway
-   conoscono).
+   HMAC-SHA256** con una chiave derivata dal token del bot,
+   `HMAC_SHA256("WebAppData", token)`.
 2. Il frontend la POSTa a `/app/auth`; il server ricalcola l'HMAC
    (`miniapp_core.verify_init_data`, spec Telegram), scarta initData più
    vecchie di 12h (H27), e verifica che l'utente sia **l'owner**
    (`TELEGRAM_OWNER_ID`): chiunque altro riceve 403, anche con initData valida.
+   Il gateway **non ha il token** (H54): ha solo la chiave derivata, dal secret
+   `telegram_webapp_secret` (`TELEGRAM_WEBAPP_SECRET_FILE`). La derivazione è a
+   senso unico — chi ha la chiave può verificare le firme di questa Mini App ma
+   non risalire al token, quindi non può parlare come il bot. Se non c'è né la
+   chiave né il token, `/app/auth` risponde **503 `bot_token_not_configured`**.
    L'endpoint `/app/auth` è **rate-limited** (20 richieste / 5 min per-IP, dal
    v0.25.0): oltre la soglia risponde 429.
 3. Se ok, emette un **JWT `typ=miniapp`** (1h) che il frontend usa come Bearer
    su `/app/api/*`. Alla scadenza la pagina si ri-autentica da sola (initData
-   vale 12h).
+   vale 12h; oltre, bisogna riaprire il pannello dal bot).
+4. Su **ogni** richiesta `/app/api/*` il server riverifica che il `sub` del
+   token sia ancora l'owner configurato (H27): la firma prova solo che il token
+   è stato emesso, non che l'owner sia lo stesso. Se l'owner cambia o viene
+   tolto dal `.env`, i token già emessi smettono di valere subito (401, con un
+   evento `miniapp_bearer_not_owner` nell'audit), senza aspettare la scadenza.
 
 Perché è solido:
-- l'HMAC non è forgiabile senza il token del bot; il server non si fida di
-  `initDataUnsafe` (dati lato client) ma solo della firma verificata;
-- l'owner-check è **server-side**: il bot mostra il bottone solo all'owner, ma
-  non ci si fida del client (difesa in profondità);
+- l'HMAC non è forgiabile senza la chiave derivata dal token del bot; il
+  server non si fida di `initDataUnsafe` (dati lato client) ma solo della firma
+  verificata;
+- l'owner-check è **server-side**, all'emissione e a ogni richiesta: il bot
+  mostra il bottone solo all'owner, ma non ci si fida del client (difesa in
+  profondità);
 - l'owner-gating è **fail-closed** (dal v0.22.0): se `TELEGRAM_OWNER_ID` manca o
   è malformato (→ 0), `/app/auth` risponde **503 `owner_not_configured`** e NEGA
   tutti — non lascia più passare chiunque abbia una initData valida
@@ -92,6 +106,12 @@ messaggio chiaro.
   malformato) la Mini App **non si apre a nessuno**: `/app/auth` risponde 503
   (`owner_not_configured`) e nega tutti — fail-closed dal v0.22.0. Configuralo
   comunque sempre in produzione, o il pannello resta inaccessibile.
+- **`secrets/telegram_webapp_secret.txt`**: la chiave derivata dal token con
+  cui il gateway verifica `initData`. La scrivono `deploy.sh` (anche con
+  `--apply`, quando il pannello gli passa il token) e l'installer; la CLI
+  `vps1777` la ricalcola dal token prima dei suoi `compose up`, così segue
+  anche una rotazione del token. Senza, `/app/auth` risponde 503
+  `bot_token_not_configured`.
 - **HTTPS obbligatorio**: Telegram apre le Mini App solo su URL https con
   certificato valido. Con `PUBLIC_BASE` non-https il bot non mostra il bottone
   (e `/pannello` spiega il perché).

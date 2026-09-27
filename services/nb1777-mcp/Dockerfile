@@ -41,8 +41,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         tini ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Utente non-root condiviso (UID 1000 "app") — STESSO uid di gateway/bot
-# così il volume nlm-auth è accessibile da tutti i servizi che lo montano.
+# Utente non-root (UID 1000 "app"), lo stesso uid degli altri servizi. Il volume
+# nlm-auth, fra i servizi, lo monta solo questo (H6): gateway e bot chiedono lo
+# stato su /internal/nlm/*. In sola lettura lo montano anche backup e check scadenze.
 RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
 
 # Il pip della BASE è peso morto qui: le dipendenze le installa uv nel builder

@@ -14,7 +14,10 @@ services:
       OWNER_ID: ${EXAMPLE_BOT_OWNER_ID:-0}
     secrets:
       - example_bot_token
-    networks: [backend]
+    # egress: il long-poll deve USCIRE verso api.telegram.org, e `backend` è
+    # internal (nessuna uscita). Come nb1777-bot in compose.yaml (H25): egress,
+    # mai ingress.
+    networks: [backend, egress]
     restart: unless-stopped
     labels:
       - "vps1777.role=bot"
