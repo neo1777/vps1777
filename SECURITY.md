@@ -290,6 +290,14 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   Dependabot legge solo i `FROM`, e il digest di un tag di versione non ha ragioni di
   cambiare. I plugin di esempio restano col tag, perché sono punti di partenza fuori da
   Dependabot.
+- **Immutable releases accese** (27/09/2026, impostazione del repo, decisione dell'owner):
+  gli asset di una release pubblicata (bundle, `SHA256SUMS`, firma e certificato cosign) e
+  il suo tag non si possono più cambiare né togliere. Restano modificabili titolo, note e il
+  flag prerelease: il ritiro di una release sbagliata durante la quarantena dell'auto-update
+  funziona come prima. `release.yml` pubblica con `action-gh-release` 3.x, che crea la
+  release in bozza, carica gli asset e solo dopo la pubblica. **I tag git non si firmano**
+  (decisione dello stesso giorno): la firma che protegge chi installa è quella cosign del
+  bundle, legata al workflow.
 - **Permessi dei workflow nel job** (`v0.61.0`, Scorecard Token-Permissions): nessun
   workflow dichiara scritture a livello di workflow. `rebuild-mensile.yml` e `trivy.yml`
   le avevano in cima, e ora le dichiara il job che le usa.
