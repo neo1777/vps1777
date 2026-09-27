@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Immutable releases accese sul repo** (impostazione di GitHub, 27/09): asset e tag di una
+  release pubblicata non si cambiano più. Titolo, note e flag prerelease restano modificabili,
+  quindi la quarantena dell'auto-update può ancora ritirare una release. I tag git non si
+  firmano: basta la firma cosign del bundle (decisione dell'owner, 27/09).
+- Dipendenze: `pyjwt` 2.14 → 2.15 (#335), `codeql-action/upload-sarif` 4.38.1 → 4.38.2 (#334).
+
 ## [0.61.0] — 2026-09-27
 
 **nb1777-mcp senza browser (902 → 331 MB), immagini base fissate col digest, permessi dei
