@@ -24,6 +24,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   curatrice dei rimandi, 27/09).
 
 
+### Sicurezza
+- **La redazione in uscita di archive1777 copre le credenziali in formato riconoscibile**:
+  token GitHub, chiavi Anthropic/OpenAI, AWS, Google, Slack, token di bot Telegram,
+  auth-key Tailscale, chiavi age, JWT, blocchi di chiave privata («[credenziale
+  redatta]»), e il percorso degli URL `*.trycloudflare.com`. Prima copriva solo email,
+  telefoni e anagrafica: una ricerca su un DB claude.ai restituiva in chiaro un token
+  GitHub e l'URL segreto di un tunnel (rilievo della curatrice dei rimandi, 27/09). I segreti
+  senza un formato riconoscibile restano scoperti, e ARCHIVE lo dice.
+
 ## [0.62.0] — 2026-09-27
 
 **La catena `parent_uuid` di Claude Code si riallaccia all'ingest** (A5: da 40,3% di

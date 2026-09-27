@@ -39,11 +39,16 @@ step that covers:
 - **identifiers in a recognisable format** — emails and phone numbers — wherever
   they appear, transcripts included;
 - the **account's personal-data values** (the `account:user` rows of the claude.ai
-  export), even when they are typed by hand inside a message.
+  export), even when they are typed by hand inside a message;
+- since 0.62.1, **credentials in a recognisable format**: GitHub tokens (`ghp_…`,
+  `github_pat_…`), Anthropic and OpenAI keys (`sk-…`), AWS (`AKIA…`), Google (`AIza…`),
+  Slack (`xox…`), Telegram bot tokens, Tailscale auth keys, age keys, JWTs, private-key
+  blocks → "[credenziale redatta]"; and the **path** of `*.trycloudflare.com` URLs (a quick
+  tunnel is secret by URL): the host stays.
 
-**It does not cover**: tokens, keys, passwords, IPs, postal addresses, names of
-third parties that never appeared in the account data. *Anyone with access to the
-archive finds those secrets with a query.* The phone-number pattern does **not** apply
+**It does not cover**: passwords and secrets with no recognisable format, IPs, postal
+addresses, names of third parties that never appeared in the account data. *Anyone with
+access to the archive finds those secrets with a query.* The phone-number pattern does **not** apply
 inside a canonical uuid (8-4-4-4-12 hex) and leaves valid ISO dates with the time
 (`2026-09-05 13:10`) and the `YYYYMMDD-HHMMSS` shape of bundle names intact: three strict
 exemptions, since 0.51.1 (before, a uuid with digit-only groups and a date with the time

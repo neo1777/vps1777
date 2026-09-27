@@ -36,11 +36,16 @@ copre:
 - gli **identificatori in formato riconoscibile** — email e numeri di telefono —
   ovunque compaiano, transcript compresi;
 - i **valori dell'anagrafica dell'account** (le righe `account:user` dell'export
-  claude.ai), anche quando sono scritti a mano dentro un messaggio.
+  claude.ai), anche quando sono scritti a mano dentro un messaggio;
+- dalla 0.62.1, le **credenziali in formato riconoscibile**: token GitHub (`ghp_…`,
+  `github_pat_…`), chiavi Anthropic e OpenAI (`sk-…`), AWS (`AKIA…`), Google (`AIza…`),
+  Slack (`xox…`), token di bot Telegram, auth-key Tailscale, chiavi age, JWT, blocchi di
+  chiave privata → «[credenziale redatta]»; e il **percorso** degli URL
+  `*.trycloudflare.com` (un tunnel rapido è segreto per URL): l'host resta.
 
-**Non copre**: token, chiavi, password, IP, indirizzi postali, nomi di terzi mai
-comparsi nell'anagrafica. *Chiunque abbia accesso all'archivio trova quei segreti
-con una query.* Il pattern dei telefoni **non** si applica dentro un uuid canonico
+**Non copre**: password e segreti senza un formato riconoscibile, IP, indirizzi postali,
+nomi di terzi mai comparsi nell'anagrafica. *Chiunque abbia accesso all'archivio trova
+quei segreti con una query.* Il pattern dei telefoni **non** si applica dentro un uuid canonico
 (8-4-4-4-12 esadecimali) e lascia intatte le date ISO valide con l'ora
 (`2026-09-05 13:10`) e la sagoma `AAAAMMGG-HHMMSS` dei nomi di bundle: tre esenzioni
 strette, dalla 0.51.1 (prima un uuid coi gruppi di sole cifre e una data con l'ora
