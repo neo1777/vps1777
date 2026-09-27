@@ -10,8 +10,8 @@ Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei cont
 | `oauth_signing_secret` | `secrets/oauth_signing_secret.txt` | firma JWT HS256 (≥32 byte) | gateway |
 | `admin_password_bcrypt` | `secrets/admin_password_bcrypt.txt` | hash bcrypt della password admin (rounds=12) | gateway |
 | `archive_desc_secret` | `secrets/archive_desc_secret.txt` | segreto del canale interno con cui archive-mcp inoltra al gateway le `set_description` (separato da `gateway_secret` di proposito) | gateway, archive-mcp |
-| `telegram_bot_token` | `secrets/telegram_bot_token.txt` | TOKEN bot da BotFather | nb1777-bot |
-| `telegram_webapp_secret` | `secrets/telegram_webapp_secret.txt` | chiave **derivata** dal token (HMAC_SHA256 con chiave «WebAppData», 64 hex) con cui si verifica l'`initData` della Mini App — non risale al token | gateway |
+| `telegram_bot_token` | `secrets/telegram_bot_token.txt` | TOKEN bot da BotFather | nb1777-bot (e la CLI sull'host, per le notifiche) |
+| `telegram_webapp_secret` | `secrets/telegram_webapp_secret.txt` | chiave **derivata** dal token (HMAC_SHA256 con chiave «WebAppData», 64 hex) con cui si verifica l'`initData` della Mini App — non risale al token. La scrive l'installer; la riallineano al token `rotate-secret.sh`, `vps1777 update` e `vps1777 rollback` | gateway |
 | `cloudflared_token` | `secrets/cloudflared_token.txt` | (opz) CF Tunnel token | cloudflared sidecar |
 
 > Il gateway **non** monta il token del bot: gli basta la chiave derivata. Chi buca il

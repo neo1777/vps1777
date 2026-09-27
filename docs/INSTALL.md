@@ -12,7 +12,7 @@ Sequenza passo-passo dall'host vuoto a stack su.
 
 | Cosa | Versione | Note |
 |---|---|---|
-| Linux x86_64/arm64 | qualsiasi recente | Debian 12 consigliata (collaudo completo su macchina vergine, 27/08/2026 — su Debian 13 con volumi cifrati la VPS era instabile, voce `H56`) / Ubuntu 24+ / Fedora / Arch |
+| Linux x86_64 (amd64) | qualsiasi recente | Le immagini di release sono pubblicate **solo per amd64**: su arm64 (Raspberry, VPS Ampere) il pull non trova un'immagine per l'architettura. Debian 12 consigliata (collaudo completo su macchina vergine, 27/08/2026 — su Debian 13 con volumi cifrati la VPS era instabile, voce `H56`) / Ubuntu 24+ / Fedora / Arch |
 | Docker Engine | 24+ | con `docker compose` plugin v2 |
 | python3 **+ bcrypt** | 3.10+ | solo per `setup.sh` (calcola l'hash della password admin). Su Debian/Ubuntu `python3` è un pacchetto a sé: `sudo apt install python3 python3-bcrypt`. ⚠️ **`python3-pip` NON basta su Debian 12+ / Ubuntu 23.04+** — cioè proprio sulla distro consigliata: lì pip c'è già ed è l'*installazione* a essere vietata (PEP 668), quindi `pip install bcrypt` fallisce. Il pacchetto giusto è `python3-bcrypt` (Fedora: `sudo dnf install python3-bcrypt`). Se `bcrypt` c'è già, non serve altro — il preflight verifica la capacità, non il nome |
 | Account Tailscale **o** Caddy+dominio **o** Cloudflare | uno dei tre | scelta al setup |
@@ -42,11 +42,28 @@ Lo stage finale ti stampa gli URL.
    - `oauth_signing_secret.txt` (64 caratteri url-safe = 48 byte di entropia)
    - `admin_password_bcrypt.txt` (bcrypt rounds=12 della password che scegli/che genera)
    - `telegram_bot_token.txt` (incolli il token)
+   - `telegram_webapp_secret.txt` — la chiave **derivata** dal token
+     (HMAC-SHA256 con chiave `WebAppData`), l'unica che il gateway monta: la
+     rigenera a ogni lancio, così segue il token se cambia (vuota se il token è vuoto)
 4. Lancia `docker compose -f compose.yaml -f compose.ingress.<scelta>.yaml --profile
    ingress.<scelta> up -d` — gli `-f` non sono decorativi: senza, l'overlay ingress non
    viene montato (il `gateway` resta senza `ports:` e manca la rete `funnel`) — le immagini
    vengono **pullate da GHCR** (`compose.yaml` è pull-only: sulla VPS non si
    builda mai; il build locale è solo dev, con l'overlay `compose.build.yaml`)
+5. Se hai risposto «sì» a «Procedo ora?», **con `sudo`** (ti chiede la password):
+   installa la CLI `vps1777` in `/usr/local/bin`; installa **tutte** le unit
+   `systemd/vps1777-*` in `/etc/systemd/system` e ne **abilita** tre —
+   `vps1777-check-update.timer`, `vps1777-update.path`, `vps1777-secrets-check.timer`
+   — più `vps1777-auto-update.timer` se `autoupdate` è in `VPS1777_FEATURES` (lo è di
+   default); applica l'**hardening dell'host**: `apt-get install` di
+   `unattended-upgrades` e `fail2ban`, con `/etc/apt/apt.conf.d/20auto-upgrades` e una
+   jail `sshd` in `/etc/fail2ban/jail.local` (se quei file ci sono già con un contenuto
+   diverso non li tocca, e lo dice; senza `apt-get` avvisa e salta). Le unit girano
+   come l'utente che lancia lo script: se è `root` (`sudo ./setup.sh`) qui si ferma,
+   perché l'updater automatico avrebbe i privilegi pieni della macchina (`H55`) — lancialo
+   come l'operatore, oppure digli chi è con `OPERATOR_USER=<utente>`
+6. Stampa come ultima riga il comando per verificare l'installazione **da fuori**,
+   dal tuo PC: `./tools/collaudo-da-fuori.sh <url-pubblico>`
 
 Se rilanci `setup.sh`, salta gli step già fatti.
 
@@ -55,11 +72,11 @@ Se rilanci `setup.sh`, salta gli step già fatti.
 1. **Login admin**: `<PUBLIC_BASE>/admin/login` → email + password admin
 2. **Auth NotebookLM**: sul TUO PC installa il CLI `nlm`, fai login, poi carica il **profilo** (tar.gz) su `<PUBLIC_BASE>/admin/nlm`. La CLI `nlm` (dalla 0.7) salva l'auth come cartella `profiles/default/` (non più un singolo `auth.json`):
    ```bash
-   uv tool install notebooklm-mcp-cli --python 3.12      # serve uv (astral.sh)
+   uv tool install notebooklm-mcp-cli==0.12.0 --python 3.12   # serve uv (astral.sh)
    nlm login                                             # apre il browser → login NotebookLM
    cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default
    ```
-   Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm` (login admin). Il gateway lo estrae sul volume; `nb1777-mcp` lo rileva alla prossima call.
+   La versione è quella con cui gira il server (`services/nb1777-mcp/pyproject.toml`): una CLI diversa può salvare il profilo in un'altra forma. Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm` (login admin). Il gateway lo inoltra a `nb1777-mcp` sul canale interno (il gateway non monta i cookie), che lo estrae sul suo volume e lo usa dalla call successiva.
    Se `nlm` risulta "not found": `uv tool update-shell` (mette `~/.local/bin` nel PATH) e riapri il terminale.
 3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **38** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
 4. **Bot Telegram**: `/start` al tuo bot
@@ -81,8 +98,8 @@ sono documentati in [OPS.md](OPS.md).
 
 ## Aggiornamento
 
-Canale primario: la CLI host **`vps1777 update`** (installata da `deploy.sh`,
-nella radice del repo) o il pulsante nel **pannello admin → tab Update** —
+Canale primario: la CLI host **`vps1777 update`** (la installano `setup.sh`,
+`deploy.sh` e l'installer grafico) o il pulsante nel **pannello admin → tab Update** —
 backup automatico prima, pull con verifica digest, migrazioni, health-gate,
 rollback automatico se la nuova versione non torna in salute. Manuale
 completo: [UPDATE.md](UPDATE.md).

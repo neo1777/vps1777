@@ -33,9 +33,14 @@ una riga del `.env` della VPS:
 VPS1777_FEATURES=backup,autoupdate        # il default: backup + auto-update sicuro
 ```
 
-L'installer legge questa riga e accende le feature corrispondenti; **install, update e
-rollback la rileggono sempre**. Quindi un reinstall della VPS non riparte "nudo": riproduce
-**esattamente** le feature dichiarate. E l'installer chiude con un **referto** che le elenca:
+L'installazione legge questa riga e accende le feature corrispondenti — l'installer
+grafico, `deploy.sh` e il bootstrap tutte; `setup.sh` accende il timer dell'auto-update ma
+non avvia il profilo `backup`, che parte al primo update che installa una versione nuova
+(la CLI lo aggiunge al suo `docker compose`). Quindi un reinstall della VPS non riparte
+"nudo": riproduce le feature dichiarate. Update e rollback la rileggono **a metà**: ne ricavano i profili compose (`backup`, `portainer`) per
+lo `up` che fanno, ma non accendono né spengono il timer dell'auto-update — reinstallano le
+unit e ne lasciano l'abilitazione com'è. L'installer grafico chiude con un **referto** che
+le elenca (e `deploy.sh` con un blocco equivalente):
 
 ```
 ✓ Feature attive: backup=ON · auto-update sicuro=ON · portainer=OFF
@@ -53,8 +58,30 @@ rollback la rileggono sempre**. Quindi un reinstall della VPS non riparte "nudo"
 > "ci siamo dimenticati". `VPS1777_FEATURES` è alla VPS ciò che il **ledger delle feature**
 > (`features.yaml`, verificato in CI) è al repo: la memoria che sopravvive a chi la scrive.
 
-Per cambiare le feature: modifica `VPS1777_FEATURES` e rilancia l'update (o il prossimo
-install le applicherà). Il referto ti confermerà il nuovo stato — **l'assenza parla.**
+Per cambiare le feature, oggi, i gesti sono due e servono entrambi:
+
+1. **Modifica `VPS1777_FEATURES`** nel `.env`: è ciò che il prossimo reinstall riprodurrà.
+2. **Applica il cambio adesso**, perché nessun comando lo fa al posto tuo:
+   - `autoupdate` — `sudo systemctl enable --now vps1777-auto-update.timer` per
+     accenderlo, `sudo systemctl disable --now vps1777-auto-update.timer` per spegnerlo
+     (l'operatore ha `systemctl` nella whitelist sudo). Senza questo passo la riga del
+     `.env` cambia e il timer resta com'era.
+   - `backup`, `portainer` — sono profili compose: la CLI li aggiunge ai `docker compose`
+     di update e rollback, quindi entrano al prossimo update **che installa davvero** (a
+     versione già corrente `vps1777 update` risponde «già aggiornato» e non tocca lo
+     stack). Per accenderli subito, il comando della sezione [Profili
+     opzionali](#profili-opzionali); per spegnerne uno, `docker rm -f vps1777-backup` (o
+     `vps1777-portainer`): togliere il file dal comando non ferma un container già acceso,
+     lo lascia lì come orfano.
+
+Il referto lo stampa solo l'installazione: dopo un cambio a mano, lo stato vero lo dicono
+`systemctl list-unit-files 'vps1777-*' --state=enabled` e `docker ps` — **l'assenza parla**
+anche lì.
+
+> ⚠️ **Non è una feature dichiarata: `vps1777-indice-notturno.timer`.** L'aggiornamento
+> notturno dell'indice della ricerca per senso si accende a mano
+> (`vps1777 indice-notturno --abilita`, vedi [UPDATE.md](UPDATE.md)) e non sta in
+> `VPS1777_FEATURES`: un reinstall **non** lo riaccende. Dopo un reinstall va riacceso.
 
 ## Aggiornamenti — auto-update sicuro (di default) + on-demand
 
@@ -64,7 +91,7 @@ firma/digest + migrazioni + health-gate 180s + **rollback automatico**):
 
 | quando | chi lo fa | cosa fa |
 |---|---|---|
-| **ogni giorno, da solo** | `vps1777-auto-update.timer` → `.service` | applica l'update sicuro **senza che tu faccia nulla**, ma solo una release pubblicata da **almeno 48 ore** (quarantena, vedi [UPDATE.md](UPDATE.md)) e solo se la feature `autoupdate` è nello stato dichiarato (`VPS1777_FEATURES`, default sì) |
+| **ogni giorno, da solo** | `vps1777-auto-update.timer` → `.service` | applica l'update sicuro **senza che tu faccia nulla**, ma solo una release pubblicata da **almeno 48 ore** (quarantena, vedi [UPDATE.md](UPDATE.md)); il timer lo accende l'installazione se la feature `autoupdate` è dichiarata (`VPS1777_FEATURES`, default sì) |
 | **ogni giorno, avvisa** | `vps1777-check-update.timer` | **controlla e notifica** su Telegram («aggiornamento disponibile»), non applica |
 | **quando vuoi tu** | CLI `vps1777 update` o pulsante admin → tab **Update** | applica **on-demand**, stessa rete di sicurezza |
 
@@ -75,8 +102,11 @@ firma/digest + migrazioni + health-gate 180s + **rollback automatico**):
 
 > **Default dichiarato, non ricordato.** L'auto-update sicuro è ON di default perché
 > `autoupdate` è in `VPS1777_FEATURES` (`.env`). Un reinstall lo **riproduce** — non
-> sparisce in silenzio. Per spegnerlo: togli `autoupdate` da `VPS1777_FEATURES`; il referto
-> post-install ti confermerà `auto-update sicuro=OFF`.
+> sparisce in silenzio. Per spegnerlo servono i due gesti di sopra: togli `autoupdate` da
+> `VPS1777_FEATURES` (così il prossimo reinstall non lo riaccende) **e**
+> `sudo systemctl disable --now vps1777-auto-update.timer` (così si spegne adesso: update
+> e rollback non lo fanno). Verifica: `systemctl is-enabled vps1777-auto-update.timer` →
+> `disabled`.
 
 Log: `journalctl -u vps1777-auto-update -u vps1777-update -u vps1777-check-update`.
 

@@ -35,8 +35,9 @@ migrations/
   one-off che esegue `run.py`. Ha già le librerie giuste e l'utente giusto.
 - `volumes` — i soli volumi montati nel container one-off. Niente altro.
 - `data_mutating` — `true` se tocca i dati nei volumi. **Dichiaralo onestamente**:
-  pilota il restore-da-snapshot nell'auto-rollback (all-or-nothing sui 3 volumi
-  dati, così registro e dati restano coerenti per costruzione).
+  pilota il restore-da-snapshot nell'auto-rollback (all-or-nothing sui 2 volumi
+  dello snapshot, `gateway-data` e `archive-data`, così registro e dati restano
+  coerenti per costruzione; `nlm-auth` non c'è, `H14`).
 - `reversible` — `true` | `false` | `"restore-only"`. `false`/`restore-only` è
   lecito ma va dichiarato: il rollback di quell'update passa dallo snapshot.
 

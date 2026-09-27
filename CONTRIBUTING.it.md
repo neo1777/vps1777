@@ -24,11 +24,57 @@ L'overlay `compose.build.yaml` serve perché `compose.yaml` è pull-only
 
 ## Stile codice
 
-- Python: `ruff` + `mypy` (lint pass nel CI)
-- Bash: `shellcheck` (pulito)
+- Python: `ruff` (versione pinnata nella CI, oggi `ruff==0.15.22`; `ruff check services/ tools/ security/`). Niente `mypy`: nessun controllo di tipi gira, né in CI né negli hook
+- Bash: `shellcheck` (pulito, soglia al minimo come in CI)
 - Yaml: 2 spazi indent, no `version:` in compose (deprecato)
-- Commit message: convenzione [Conventional Commits](https://www.conventionalcommits.org/)
-  - `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`, `chore:`
+- Commit message: un prefisso che dice **cosa** tocca, poi la frase in italiano. Quelli
+  in uso: `fix:`, `feat:`, `docs:`, `ci:`, `build:` (i bump di Dependabot), `test:`,
+  `changelog:` (la PR che apre una versione), oppure l'area toccata (`installer:`,
+  `gateway:`, `indexer:`…); uno scope fra parentesi è benvenuto (`docs(architettura):`)
+
+## Test e controlli in locale
+
+Le suite girano **una alla volta**, come in CI:
+
+```bash
+uvx --with bcrypt --with cryptography pytest tools/tests/   # CLI, installer, presìdi del repo
+uvx pytest services/archive-mcp/tests/                         # archive-mcp (stdlib)
+uvx pytest services/gateway/tests/                             # gateway (stdlib)
+(cd services/nb1777-mcp && uv sync && uv run pytest tests/)    # nb1777-mcp, col nlm pinnato
+bash tools/esegui-test-bash.sh                                 # i test .sh di tools/tests/
+```
+
+⚠️ **Non mettere `tools/tests/` e `services/archive-mcp/tests/` nella stessa invocazione
+di pytest**: tutte e due importano un package che si chiama `app` (quello del gateway e
+quello di archive-mcp), e la seconda trova il primo — misurato: `ModuleNotFoundError: No
+module named 'app.miniapp_core'`. Alcuni test di archive-mcp e del gateway saltano senza
+le dipendenze del lock: la CI li rilancia dopo `uv sync --frozen` (vedi
+`.github/workflows/ci.yml`).
+
+Prima di aprire la PR, i controlli che la CI rifarà:
+
+- `python3 tools/gate-locale.py` — esegue gli step di `ci.yml` **leggendoli dal workflow**,
+  non riscritti a mano (`--elenco` dice cosa farebbe, `--job lint` ne esegue uno). Salta e
+  nomina gli step `uses:` e quelli con `${{ … }}`; vuole `pyyaml`
+  (`uv run --with pyyaml python3 tools/gate-locale.py`), e qualche step tocca l'ambiente
+  (quello di ruff fa `uv tool install`)
+- `python3 security/check_no_leaks.py` (niente segreti), `python3 security/check_findings.py`
+  (il registro di sicurezza regge sulle sue evidenze), `python3 tools/verify-features.py`
+  (il ledger delle feature), `python3 tools/doc-riferimenti.py` (i file che i doc nominano
+  esistono)
+- se hai toccato un documento che ha una traduzione (`README.it.md`, `CONTRIBUTING.it.md`,
+  le pagine con una copia in `docs/en/`): aggiorna **anche la traduzione**, poi
+  `python3 tools/aggiorna-traduzioni.py` — mai il contrario: l'hash senza la traduzione è
+  un timbro
+
+**Gli hook git sono versionati** in `tools/hooks/`. Si installano con
+`bash tools/hooks/installa.sh`, che li copia in `.git/hooks/` (il posto che vedono tutti i
+worktree del repo); `bash tools/hooks/installa.sh --stato` dice se la copia installata è
+identica a quella versionata. Il `pre-commit` avvisa se non stai committando sul ramo
+principale (non blocca), passa `shellcheck` sui `.sh` e `ruff` sui `.py` che stai
+committando (blocca se trovano problemi), e lancia il gate anti-leak (lo script `gate-antileak`)
+**se lo trova** — non è in questo repo: senza, stampa «NON MISURATO» e la rete resta
+`security/check_no_leaks.py` in CI. Via d'uscita consapevole: `--no-verify`.
 
 ## Cosa non entra mai nel repo
 
@@ -64,6 +110,24 @@ ruotato.** La storia di git non dimentica.
 3. Apri PR con descrizione: cosa, perché, come testato
 4. Aspetta review — di norma 48h
 5. Squash merge
+
+`main` è protetto: si entra **solo da PR**, con i controlli obbligatori della CI verdi —
+per tutti, owner compreso.
+
+## Rilascio (per chi mantiene)
+
+1. La versione sta nel file `VERSION`. La si alza con una PR su `main` che porta anche la
+   sezione `## [X.Y.Z]` di `CHANGELOG.md` (commit `changelog: sezione X.Y.Z …`).
+2. Il tag `vX.Y.Z` sul commit di `main` fa partire `.github/workflows/release.yml`, che
+   prima controlla: `VERSION` uguale al tag, la sezione nel CHANGELOG (solo per le
+   stable), la CI **verde** sul commit taggato. Poi builda le immagini (solo amd64), le
+   firma con cosign keyless, le pubblica su GHCR e crea la release con il bundle runtime
+   firmato che `vps1777 update` scarica.
+3. **Tag e release sono immutabili**: i tag `v*` per un ruleset, gli asset delle release
+   per l'impostazione *immutable releases*. Un errore non si ripara ritaggando: si esce
+   con una versione nuova. Una release sbagliata si **ritira** segnandola *prerelease* su
+   GitHub, entro le 48 ore di quarantena dell'auto-update
+   ([docs/UPDATE.md](docs/UPDATE.md)).
 
 ## Codice di Condotta
 

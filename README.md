@@ -171,25 +171,32 @@ default; to turn it off see [docs/OPS.md](docs/OPS.md) (Italian).
   running services, that volume is mounted only by `nb1777-mcp`, the one that uses
   them (the backup job also mounts it read-only to encrypt them, and the expiry check
   reads only their date — see [SECURITY.md](SECURITY.md)). It does see the **5 Docker
-  secrets assigned to it** — including `telegram_bot_token`, the Mini App's root of
-  trust ([docs/SECRETS.md](docs/SECRETS.md), Italian): a compromised gateway can read
-  them, which is why its perimeter is the most defended
-- Sensitive secrets (passwords, signing keys, tokens) via Docker `secrets:` (tmpfs
-  `/run/secrets/`), **never** in env vars; the `GATEWAY_SECRET` is redacted from access logs
+  secrets assigned to it** — `gateway_secret`, `oauth_signing_secret`,
+  `admin_password_bcrypt`, `archive_desc_secret` and `telegram_webapp_secret`, the key
+  *derived* from the token that it uses to verify the Mini App
+  ([docs/SECRETS.md](docs/SECRETS.md), Italian); the bot token, `telegram_bot_token`, is
+  mounted only by `nb1777-bot`: a compromised gateway can read them (and with the derived
+  key it can forge an `initData` for the Mini App, not speak with the bot's voice), which
+  is why its perimeter is the most defended
+- Sensitive secrets (passwords, signing keys, tokens) via Docker `secrets:` (files
+  mounted read-only in `/run/secrets/`: with compose it's a bind-mount of the host file,
+  not a tmpfs), **never** in env vars; the `GATEWAY_SECRET` is redacted from access logs
 - OAuth 2.1 with PKCE + refresh; JWTs with separate `typ` (no cross-token use); bcrypt
   rounds=12; the proxy also verifies the token **audience**
 - Mini App and bot are **owner-only fail-closed**: without `TELEGRAM_OWNER_ID` they deny
   everyone rather than open up
 - Per-IP rate limiting on auth endpoints; `X-Forwarded-For` trusted **only** from the
   proxy (client IP can't be spoofed)
-- Non-root containers (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`,
-  healthchecks on every service
+- Non-root containers (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, a
+  **read-only rootfs** on every service in `compose.yaml` (`/tmp` is a 64 MB `noexec`
+  tmpfs), healthchecks on every running service (the `indice-notturno` job, which starts
+  and finishes, has none)
 - Automatic host hardening at install: `unattended-upgrades` + `fail2ban` (`H45`)
 - Updates **cosign-signed** and verified **fail-closed by default**; immutable digests
   (`images.lock`); age-encrypted backups + snapshots + **automatic rollback**
   ([docs/en/UPDATE.md](docs/en/UPDATE.md))
-- CI with GitHub Actions **pinned to SHAs** + Dependabot across actions, base images,
-  compose images and Python dependencies; the backup key lives **off the VPS** (only
+- CI with GitHub Actions **pinned to SHAs** + Dependabot on four fronts: actions, base
+  images, compose images and Python dependencies; the backup key lives **off the VPS** (only
   the public recipient on the server)
 - Optional visual management (Portainer) **loopback-only** + SSH tunnel — see
   [docs/OPS.md](docs/OPS.md) (Italian)

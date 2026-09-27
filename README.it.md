@@ -166,15 +166,15 @@ update sicuro da sola, **appena una release ha 48 ore di vita** (la guarda ogni 
 ## Sicurezza per design
 
 - Backend su rete Docker `internal: true` — **solo il gateway** è esposto verso l'esterno
-- Il gateway **non** ha accesso al Docker socket né al filesystem dell'host (container non privilegiato), **né ai cookie Google** di NotebookLM: fra i servizi in esercizio quel volume lo monta solo `nb1777-mcp`, quello che li usa (in sola lettura lo montano anche il backup, che li cifra, e il check scadenze, che ne legge solo la data — vedi [SECURITY.md](SECURITY.md)). Vede però i **5 secret Docker a lui assegnati** — fra cui `telegram_bot_token`, radice di fiducia della Mini App ([docs/SECRETS.md](docs/SECRETS.md)): un gateway compromesso li legge, ed è per questo che il suo perimetro è il più difeso
-- Secrets sensibili (password, signing key, token) via Docker `secrets:` (tmpfs `/run/secrets/`), **mai** in env var; il `GATEWAY_SECRET` è redatto dagli access-log
+- Il gateway **non** ha accesso al Docker socket né al filesystem dell'host (container non privilegiato), **né ai cookie Google** di NotebookLM: fra i servizi in esercizio quel volume lo monta solo `nb1777-mcp`, quello che li usa (in sola lettura lo montano anche il backup, che li cifra, e il check scadenze, che ne legge solo la data — vedi [SECURITY.md](SECURITY.md)). Vede però i **5 secret Docker a lui assegnati** — `gateway_secret`, `oauth_signing_secret`, `admin_password_bcrypt`, `archive_desc_secret` e `telegram_webapp_secret`, la chiave *derivata* dal token con cui verifica la Mini App ([docs/SECRETS.md](docs/SECRETS.md)); il token del bot, `telegram_bot_token`, lo monta solo `nb1777-bot`: un gateway compromesso li legge (e con la chiave derivata può forgiare un `initData` per la Mini App, non parlare con la voce del bot), ed è per questo che il suo perimetro è il più difeso
+- Secrets sensibili (password, signing key, token) via Docker `secrets:` (file montati in sola lettura in `/run/secrets/`: con compose è un bind-mount del file dell'host, non una tmpfs), **mai** in env var; il `GATEWAY_SECRET` è redatto dagli access-log
 - OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12; il proxy verifica anche l'**audience** del token
 - Mini App e bot **owner-only fail-closed**: senza `TELEGRAM_OWNER_ID` negano tutti, non aprono
 - Rate-limit per-IP sugli endpoint auth; `X-Forwarded-For` fidato **solo** dal proxy (IP client non falsificabile)
-- Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, healthcheck su ogni servizio
+- Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, **rootfs in sola lettura** su tutti i servizi di `compose.yaml` (`/tmp` è una tmpfs `noexec` da 64 MB), healthcheck su ogni servizio in esercizio (il job `indice-notturno`, che parte e finisce, non ne ha)
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
 - Update firmati **cosign** e verificati **fail-closed di default**; digest immutabili (`images.lock`); backup age + snapshot + **rollback automatico** ([docs/UPDATE.md](docs/UPDATE.md))
-- CI con GitHub Actions **pinnate a SHA** + Dependabot; chiave di backup **fuori dalla VPS** (solo il recipient pubblico sul server)
+- CI con GitHub Actions **pinnate a SHA** + Dependabot su quattro fronti: action, immagini base, immagini dei compose e dipendenze Python; chiave di backup **fuori dalla VPS** (solo il recipient pubblico sul server)
 - Gestione visuale opzionale (Portainer) **solo su loopback** + tunnel SSH — vedi [docs/OPS.md](docs/OPS.md)
 
 Tutto questo è passato per una **review difensiva a tappeto** (luglio 2026): la rassegna completa dell'hardening applicato, il threat model, i flussi di dati verso terzi e i residui noti sono in [SECURITY.md](SECURITY.md).
@@ -240,7 +240,7 @@ docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --wa
 
 Hot-reload via Compose Watch. `compose.yaml` referenzia solo immagini
 pubblicate (pull): il build locale esiste solo con l'overlay
-`compose.build.yaml` (dev/CI, mai in produzione). Linee guida in [CONTRIBUTING.md](CONTRIBUTING.md);
+`compose.build.yaml` (dev/CI, mai in produzione). Linee guida in [CONTRIBUTING.it.md](CONTRIBUTING.it.md);
 patti della comunità in [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Stato

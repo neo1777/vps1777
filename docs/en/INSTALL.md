@@ -14,7 +14,7 @@ Step-by-step sequence from an empty host to a running stack.
 
 | What | Version | Notes |
 |---|---|---|
-| Linux x86_64/arm64 | any recent | Debian 12 recommended (full shakedown on a virgin machine, 27/08/2026 — on Debian 13 with encrypted volumes the VPS was unstable, entry `H56`) / Ubuntu 24+ / Fedora / Arch |
+| Linux x86_64 (amd64) | any recent | Release images are published **for amd64 only**: on arm64 (Raspberry Pi, Ampere VPSes) the pull finds no image for the architecture. Debian 12 recommended (full shakedown on a virgin machine, 27/08/2026 — on Debian 13 with encrypted volumes the VPS was unstable, entry `H56`) / Ubuntu 24+ / Fedora / Arch |
 | Docker Engine | 24+ | with the `docker compose` plugin v2 |
 | python3 **+ bcrypt** | 3.10+ | only for `setup.sh` (computes the admin password hash). On Debian/Ubuntu `python3` is a package of its own: `sudo apt install python3 python3-bcrypt`. ⚠️ **`python3-pip` is NOT enough on Debian 12+ / Ubuntu 23.04+** — that is, on the very distro we recommend: there pip is already present and it is the *installation* that is forbidden (PEP 668), so `pip install bcrypt` fails. The right package is `python3-bcrypt` (Fedora: `sudo dnf install python3-bcrypt`). If `bcrypt` is already there, nothing else is needed — the preflight checks the capability, not the name |
 | Tailscale account **or** Caddy+domain **or** Cloudflare | one of the three | chosen at setup |
@@ -44,12 +44,31 @@ The final stage prints the URLs for you.
    - `oauth_signing_secret.txt` (64 url-safe characters = 48 bytes of entropy)
    - `admin_password_bcrypt.txt` (bcrypt rounds=12 of the password you choose/it generates)
    - `telegram_bot_token.txt` (you paste the token)
+   - `telegram_webapp_secret.txt` — the key **derived** from the token
+     (HMAC-SHA256 keyed with `WebAppData`), the only one the gateway mounts: it is
+     regenerated on every run, so it follows the token if that changes (empty if the
+     token is empty)
 4. Runs `docker compose -f compose.yaml -f compose.ingress.<scelta>.yaml --profile
    ingress.<scelta> up -d` — the `-f` flags are not decorative: without them, the ingress
    overlay is not mounted (the `gateway` is left with no `ports:` and the `funnel` network
    is missing) — the images are **pulled from GHCR** (`compose.yaml` is pull-only: on the
    VPS nothing ever gets built; the local build is dev-only, with the
    `compose.build.yaml` overlay)
+5. If you answered "yes" to "Procedo ora?", **with `sudo`** (it asks for the password):
+   installs the `vps1777` CLI in `/usr/local/bin`; installs **all** the
+   `systemd/vps1777-*` units in `/etc/systemd/system` and **enables** three of them —
+   `vps1777-check-update.timer`, `vps1777-update.path`, `vps1777-secrets-check.timer`
+   — plus `vps1777-auto-update.timer` if `autoupdate` is in `VPS1777_FEATURES` (it is
+   by default); applies the **host hardening**: `apt-get install` of
+   `unattended-upgrades` and `fail2ban`, with `/etc/apt/apt.conf.d/20auto-upgrades` and
+   an `sshd` jail in `/etc/fail2ban/jail.local` (if those files already exist with
+   different contents it leaves them alone, and says so; without `apt-get` it warns and
+   skips). The units run as the user who launches the script: if that is `root`
+   (`sudo ./setup.sh`) it stops here, because the automatic updater would get the
+   machine's full privileges (`H55`) — run it as the operator, or tell it who that is
+   with `OPERATOR_USER=<user>`
+6. Prints, as its last line, the command to verify the installation **from outside**,
+   from your PC: `./tools/collaudo-da-fuori.sh <public-url>`
 
 If you re-run `setup.sh`, it skips the steps already done.
 
@@ -58,11 +77,11 @@ If you re-run `setup.sh`, it skips the steps already done.
 1. **Admin login**: `<PUBLIC_BASE>/admin/login` → admin email + password
 2. **NotebookLM auth**: on YOUR PC install the `nlm` CLI, log in, then upload the **profile** (tar.gz) to `<PUBLIC_BASE>/admin/nlm`. The `nlm` CLI (0.7 and later) saves the auth as a `profiles/default/` folder (no longer a single `auth.json`):
    ```bash
-   uv tool install notebooklm-mcp-cli --python 3.12      # needs uv (astral.sh)
+   uv tool install notebooklm-mcp-cli==0.12.0 --python 3.12   # needs uv (astral.sh)
    nlm login                                             # opens the browser → NotebookLM login
    cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default
    ```
-   Upload `nlm-profile.tgz` to `<PUBLIC_BASE>/admin/nlm` (admin login). The gateway extracts it onto the volume; `nb1777-mcp` picks it up on the next call.
+   The version is the one the server runs with (`services/nb1777-mcp/pyproject.toml`): a different CLI may save the profile in another shape. Upload `nlm-profile.tgz` to `<PUBLIC_BASE>/admin/nlm` (admin login). The gateway forwards it to `nb1777-mcp` over the internal channel (the gateway doesn't mount the cookies), which extracts it onto its volume and uses it from the next call.
    If `nlm` comes up "not found": `uv tool update-shell` (puts `~/.local/bin` in the PATH) and reopen the terminal.
 3. **claude.ai connector**: Settings → Integrations → Add → paste the URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (and `/nb1777/mcp`). Authorize → admin login. `archive` exposes the archive search tools (list and details in [ARCHIVE.md](ARCHIVE.md)), `nb1777` exposes **38** of them ([NB1777.md](../NB1777.md) (Italian)). Connectors **persist** across gateway restarts (DCR saved to disk).
 4. **Telegram bot**: `/start` to your bot
@@ -84,8 +103,8 @@ are documented in [OPS.md](../OPS.md) (Italian).
 
 ## Updating
 
-Primary channel: the host CLI **`vps1777 update`** (installed by `deploy.sh`,
-in the repo root) or the button in the **admin panel → Update tab** —
+Primary channel: the host CLI **`vps1777 update`** (installed by `setup.sh`,
+`deploy.sh` and the graphical installer) or the button in the **admin panel → Update tab** —
 automatic backup first, pull with digest verification, migrations, health-gate,
 automatic rollback if the new version does not come back healthy. Full
 manual: [UPDATE.md](UPDATE.md).

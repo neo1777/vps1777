@@ -7,7 +7,11 @@
 
 - **VPS** — il server (tuo o in affitto) su cui vps1777 gira.
 - **Container** — una "scatola" isolata in cui gira un servizio (Docker). vps1777
-  ne usa sei: gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr, backup.
+  ne tiene accesi cinque: gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr. Altri
+  stanno dietro un **profilo** compose e girano solo se accesi: `backup` (profilo
+  `ops.backup`, acceso di default), `indice-notturno` (profilo `indice`, un job che
+  parte di notte e finisce), `portainer`, e il container dell'ingress se scegli
+  Caddy o Cloudflare (Tailscale gira sull'host).
 - **Immagine** — il contenuto pronto e versionato di un container: aggiornare
   vuol dire sostituire l'immagine, non modificare la scatola.
 - **Volume** — il disco dati di un container: sopravvive quando il container
@@ -52,6 +56,18 @@
   dell'account claude.ai, o di Telegram Desktop).
 - **description** — la scheda di ogni DB (cosa contiene, come va usato),
   leggibile e aggiornabile dai tool.
+- **ruolo** — a cosa serve un DB rispetto agli altri, a vocabolario chiuso:
+  `primario` (la fonte corrente), `fotografia` (una versione più vecchia, tenuta per la
+  storia), `riscontro` (per verificare, non per trovare), `riservato` (materiale
+  personale: una dichiarazione, non un lucchetto). Si dichiara col tool `set_ruolo`;
+  senza, vale `non dichiarato`. Vedi [ARCHIVE.md](ARCHIVE.md).
+- **speaker** / **voice** — due assi di ogni messaggio. `speaker` è **chi l'ha
+  inviato**, un fatto preso dalla fonte (`human`, `assistant`, `tool`…); `voice` è **di
+  chi è la voce** nel testo, una stima (`own`, `pasted_ai`, `character`…): un messaggio
+  inviato da te può contenere parole di un'altra AI incollate.
+- **Sessione / stirpe** — una sessione è una conversazione di Claude Code; la stirpe è
+  la catena delle sessioni che si continuano l'una nell'altra (tool `get_session`,
+  `get_stirpe`).
 
 ## MCP e tool
 
