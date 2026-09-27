@@ -46,9 +46,11 @@ tecnica: dove si può, si fa; dove il rischio è irriducibile, **lo dici**.
 
 Gateway MCP personale (Docker, HTTPS via Tailscale Funnel): OAuth 2.1 + reverse
 proxy MCP + `/admin/*` + Mini App `/app/*`; upstream su rete `internal`:
-archive-mcp, nb1777-mcp, nb1777-bot. **`nb1777-mcp` usa già Chromium+Playwright
-headless in container** → è il modello architetturale di riferimento per questo
-nuovo MCP. Rilascio: branch → PR → CI → tag → GHCR → `vps1777 update` → E2E.
+archive-mcp, nb1777-mcp, nb1777-bot. **`nb1777-mcp` è il modello architetturale di
+riferimento per questo nuovo MCP** (container, FastMCP, rete). ⚠️ Aggiornato il
+27/09/2026: fino alla 0.60.0 nb1777-mcp portava Chromium+Playwright headless; dalla
+0.61.0 non più (non lo usava). Un MCP con browser il suo Chromium lo porta da sé, e
+deve fare i conti col rootfs in sola lettura che ogni servizio ha dalla 0.58.0. Rilascio: branch → PR → CI → tag → GHCR → `vps1777 update` → E2E.
 
 ## 2. Stato attuale di argus1777 (verificato — RI-VERIFICA)
 
@@ -179,8 +181,8 @@ sessioni/credenziali di **ogni account loggato**. Da qui si progetta per
    **per intero** — soprattutto `SICUREZZA.md`, `CONFINE_DEPLOY_vps1777.md`,
    `ARCHITETTURA.md`. Capisci **perché** era local-only: quelle ragioni sono i
    rischi che ora devi mitigare, non ignorare.
-2. **Modello vps1777 per un MCP:** come è fatto `nb1777-mcp` (Chromium headless in
-   container, FastMCP streamable-http, healthcheck, `GATEWAY_UPSTREAMS`, rete);
+2. **Modello vps1777 per un MCP:** come è fatto `nb1777-mcp` (container senza browser
+   dalla 0.61.0, FastMCP streamable-http, healthcheck, `GATEWAY_UPSTREAMS`, rete);
    `docs/PLUGINS.md` (il contratto plugin — **incluso il prefisso riservato
    `internal/`**); i confini di sicurezza in `SECURITY.md`, che ora contiene la
    **Rassegna difensiva** completa (l'esito della review a tappeto di luglio 2026:

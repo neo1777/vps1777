@@ -11,7 +11,7 @@
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
-      "sorgente_sha256": "0bb16ba352c53b1bec98457cb79adb29eaa6e41b66c9616f27dc0241c3ed2393"
+      "sorgente_sha256": "beb2dd42c5766d9a66049fec974b4e31785eab1808122d3c540bd5ae7d706a60"
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
@@ -23,7 +23,7 @@
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
-      "sorgente_sha256": "b958318c9c179585ca2c98657850f4b67a598d312bfbfadb7debd88273ac1948"
+      "sorgente_sha256": "f796a8de955c7ad7a4452e9ebd33f4b1ef3feb01d69e2526cd2e7f0f50c238d8"
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",

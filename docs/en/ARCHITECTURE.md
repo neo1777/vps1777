@@ -19,7 +19,7 @@
 └─────────────────┬────────────────────────────────────┘
                   ▼  (rete backend, internal: true)
 ┌─── archive-mcp ──┬── nb1777-mcp ──┬── nb1777-bot ──┬── ocr ──┬─ PLUGIN ─┐
-│  FTS5 multi-DB   │ nlm + Chromium │ Telegram poll  │  your MCP    │
+│  FTS5 multi-DB   │ nlm (CLI)      │ Telegram poll  │  your MCP    │
 │  :8002 /mcp      │ :8003 /mcp     │ no porta       │  your bot    │
 └──────────────────┴────────────────┴────────────────┴──────────────┘
 ```
