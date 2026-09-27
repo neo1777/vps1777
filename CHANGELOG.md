@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.60.0] — 2026-09-27
+
+**Il client NotebookLM fa un salto di tre mesi, 0.7.7 → 0.12.0, dopo averlo misurato**:
+changelog a monte, `--help` di ogni comando usato e JSON sull'account vero dicono tutti
+«solo aggiunte». Il contract-test ora lo pretende per ogni flag.
+
 ### Cambiato
 - **Il client NotebookLM passa da `notebooklm-mcp-cli` 0.7.7 a 0.12.0.** Il salto è fatto
   a mano, col metodo che il commento di dependabot chiedeva da agosto:
