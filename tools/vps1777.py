@@ -3768,12 +3768,19 @@ def cmd_archive_migra(repo: Path, args) -> int:
     secco lo sha del file può cambiare (pagine libere riusate): i dati no.
     """
     cc = compose_cmd(repo)
+    if getattr(args, "telegram", False) and not args.db:
+        # solo su un DB nominato: la forma «[Nome] …» su un archivio che non è un export
+        # Telegram può essere testo qualunque, e diventerebbe un mittente inventato.
+        warn("--telegram vuole --db <nome>: si lancia solo sui DB che sono export Telegram")
+        return 2
     trovati = _db_archivio(repo, cc, args.db)
     if not trovati:
         log("nessun DB nell'archivio: niente da migrare")
         return 0
     if not args.scrivi:
         log("modalità A SECCO: misuro il delta e non scrivo nulla (--scrivi per applicare)")
+    if getattr(args, "telegram", False):
+        return _archive_migra_telegram(cc, trovati, args.scrivi)
     uscita = 0
     for db_path in trovati:
         nome = Path(db_path).stem
@@ -3810,6 +3817,36 @@ def cmd_archive_migra(repo: Path, args) -> int:
         log(f"  {nome}: {esito.get('strumenti', 0)} righe {verbo} 'tool', "
             f"{esito.get('sistema', 0)} 'system' · human {prima} → {dopo}")
     if not args.scrivi:
+        log("niente è stato scritto. Ripeti con --scrivi per applicare.")
+    return uscita
+
+
+def _archive_migra_telegram(cc: list[str], trovati: list[str], scrivi: bool) -> int:
+    """`archive-migra --telegram`: lo speaker dei messaggi di un gruppo Telegram già
+    caricato (27/09/2026). Il proprietario lo dice ARCHIVE_TELEGRAM_PROPRIETARIO nel .env
+    (i nomi Telegram, separati da virgola): senza, l'indexer rifiuta ed esce 2."""
+    uscita = 0
+    for db_path in trovati:
+        nome = Path(db_path).stem
+        cmd = [*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
+               db_path, "--migra-telegram"]
+        if scrivi:
+            cmd.append("--scrivi")
+        r = run(cmd, capture=True, check=False, timeout=1800)
+        if r.returncode != 0:
+            warn(f"«{nome}»: {(r.stderr or r.stdout or '').strip()[:240]}")
+            uscita = 1 if r.returncode != 2 else 2
+            continue
+        try:
+            esito = json.loads((r.stdout or "").strip().splitlines()[-1])
+        except (json.JSONDecodeError, IndexError):
+            warn(f"«{nome}»: output non interpretabile — {(r.stdout or '')[:160]}")
+            uscita = 1
+            continue
+        verbo = "diventerebbero" if not esito.get("scritto") else "diventate"
+        log(f"  {nome}: {esito.get('human', 0)} righe {verbo} 'human' (il proprietario), "
+            f"{esito.get('other', 0)} 'other' (gli altri membri)")
+    if not scrivi:
         log("niente è stato scritto. Ripeti con --scrivi per applicare.")
     return uscita
 
@@ -4456,6 +4493,10 @@ def build_parser() -> "argparse.ArgumentParser":
     p.add_argument("--db", help="un solo DB (nome senza .db); default: tutti")
     p.add_argument("--scrivi", action="store_true",
                    help="applica davvero. Senza, stampa solo il delta e non tocca nulla.")
+    p.add_argument("--telegram", action="store_true",
+                   help="lo speaker di un gruppo Telegram già caricato: il proprietario "
+                        "(ARCHIVE_TELEGRAM_PROPRIETARIO nel .env) 'human', gli altri "
+                        "'other'. Vuole --db.")
 
     p = sub.add_parser("avvisa-fallimento",
                        help="dice su Telegram che una unit systemd è fallita (usato da OnFailure=)")

@@ -816,11 +816,19 @@ without it, it stays `messaggio`; any other value stops the ingest).
 
 **`speaker` and `voice`** — two axes that must not be merged. `speaker` is **who
 sent** the row, taken from the source (`human` · `assistant` · `tool` · `system` ·
-`unknown`). `unknown` is everything that does not declare a known sender: attachments,
-titles, memories and cards, documents, MCP server logs, and **Telegram messages** —
-there the sender's name is in the text (`[Name] …`) and does not become `speaker`, so on
-a Telegram DB `speaker='human'` returns 0 today: search the sender by name, in the text.
-`system` comes from the record's field (`origin`, `isMeta`) when there is one; on the
+`other` · `unknown`). `unknown` is everything that does not declare a known sender:
+attachments, titles, memories and cards, documents, MCP server logs.
+
+In **Telegram groups** the sender's name is in the text (`[Name] …`). Since 0.62.3 the
+archive's owner is `human`, as in the other archives, and the other members `other`, but
+only if the installation declares who the owner is: `TELEGRAM_OWNER_ID` (the same as the
+Mini App's) is enough for the JSON export, which carries the sender's id; the HTML export
+and the DBs already loaded need the owner's Telegram names in `ARCHIVE_TELEGRAM_PROPRIETARIO`
+in the `.env` (comma-separated, case-insensitive). With neither of the two the messages
+stay `unknown`: marking everyone `other` would put the owner among the others. A Telegram
+DB loaded earlier is fixed with `vps1777 archive-migra --db <name> --telegram` (dry run,
+then `--scrivi`): it uses the name at the head of the text, and must be run only on DBs
+that are Telegram exports. `system` comes from the record's field (`origin`, `isMeta`) when there is one; on the
 versions that did not write it, the shape of the text decides, and it is an estimate.
 A `speaker` or `voice` value that does not exist is an **error** (since 0.62.3), as for
 `campi`: it used to return 0 rows, and «speaker='neo'» read as «never said it». `voice` is **whose voice** is in the content, a heuristic estimate

@@ -108,7 +108,7 @@ _SORTS = {
 _JOIN_MSG = " JOIN messages m ON m.rowid = f.rowid"
 
 
-SPEAKER_VALIDI = ("human", "assistant", "tool", "system", "unknown")
+SPEAKER_VALIDI = ("human", "assistant", "tool", "system", "other", "unknown")
 VOICE_VALIDE = ("own", "pasted_transcript", "pasted_ai", "character", "mixed", "unknown",
                 "direct", "quoted", "none")
 

@@ -798,6 +798,10 @@ _SPEAKER_NOTI = {
     # di altre sessioni (#293, 26/09/2026: 65% delle righe `human` rimaste dopo la cura
     # degli strumenti erano <task-notification>). `_iter_claude_code` lo marca `sistema`.
     "sistema": "system",
+    # Un altro membro di un gruppo Telegram (27/09/2026, scelta di Neo): una persona, ma
+    # non chi possiede l'archivio. `_tg_sender` lo marca `altro` SOLO quando il
+    # proprietario è dichiarato; senza, nessuno viene marcato e resta 'unknown'.
+    "altro": "other",
 }
 
 
@@ -2288,6 +2292,71 @@ def _tg_text(text: object) -> str:
     return ""
 
 
+# ── chi scrive in un gruppo Telegram (27/09/2026, scelta di Neo) ─────────────
+# Il mittente sta nel testo («[Nome] …») e lo speaker restava 'unknown': in un gruppo
+# speaker='human' rispondeva 0 anche sui messaggi del proprietario. Ora il proprietario è
+# 'human' come negli altri archivi e gli altri membri 'other' — ma chi è il proprietario
+# lo dice la CONFIGURAZIONE, mai una stima: `TELEGRAM_OWNER_ID` (l'id che il gateway ha già
+# per la Mini App) contro il `from_id` del JSON, e i nomi in `ARCHIVE_TELEGRAM_PROPRIETARIO`
+# (separati da virgola, senza maiuscole) dove l'id non c'è, cioè nell'export HTML e nei DB
+# già caricati. Senza nessuna delle due il mittente resta non dichiarato: marcare tutti
+# 'altro' metterebbe il proprietario fra gli altri, la bugia opposta.
+def _tg_nomi_proprietario() -> set[str]:
+    return {n.strip().casefold()
+            for n in os.environ.get("ARCHIVE_TELEGRAM_PROPRIETARIO", "").split(",") if n.strip()}
+
+
+def _tg_sender(nome: str, from_id: str | None = None) -> str:
+    """'user' (il proprietario), 'altro' (un altro membro) o '' (non si sa)."""
+    nome = (nome or "").strip()
+    if not nome:
+        return ""
+    nomi = _tg_nomi_proprietario()
+    oid = (os.environ.get("TELEGRAM_OWNER_ID") or "").strip()
+    per_id = bool(oid) and from_id is not None
+    if not nomi and not per_id:
+        return ""
+    if nome.casefold() in nomi or (per_id and from_id == f"user{oid}"):
+        return "user"
+    return "altro"
+
+
+_TG_TESTA = re.compile(r"^\[([^\]\n]{1,128})\] ")
+
+
+def migra_telegram(db_path: Union[str, Path], *, scrivi: bool = False) -> dict:
+    """Dà lo speaker ai messaggi di un DB Telegram già caricato, dal nome in testa al
+    testo. Solo per nome (l'id non è nel DB): senza `ARCHIVE_TELEGRAM_PROPRIETARIO` si
+    rifiuta. Tocca solo le righe col `sender` vuoto e la forma «[Nome] …»: va lanciata sui
+    DB che sono export Telegram, perché su altri archivi quella forma può essere testo."""
+    nomi = _tg_nomi_proprietario()
+    if not nomi:
+        raise ValueError("ARCHIVE_TELEGRAM_PROPRIETARIO è vuota: senza il nome del "
+                         "proprietario non si sa chi è 'human' e chi 'other'.")
+    conn = sqlite3.connect(str(db_path), timeout=30)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conto = {"human": 0, "other": 0}
+        righe = conn.execute("SELECT rowid, content FROM messages WHERE sender = ''").fetchall()
+        for rowid, testo in righe:
+            m = _TG_TESTA.match(testo or "")
+            if not m:
+                continue
+            sender = "user" if m.group(1).strip().casefold() in nomi else "altro"
+            speaker = speaker_da_sender(sender)
+            conto[speaker] += 1
+            conn.execute("UPDATE messages SET sender = ?, speaker = ? WHERE rowid = ?",
+                         (sender, speaker, rowid))
+        conn.execute("COMMIT" if scrivi else "ROLLBACK")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+    return {**conto, "scritto": bool(scrivi)}
+
+
 def _iter_telegram(data: dict) -> Iterator[Row]:
     """Export Telegram Desktop JSON: singola chat ({name,id,messages}) o full
     ({chats:{list:[...]}}). Ogni messaggio 'message' → riga."""
@@ -2310,7 +2379,9 @@ def _iter_telegram(data: dict) -> Iterator[Row]:
                 continue
             sender = m.get("from") or ""
             yield (_uid("tg", cid, str(m.get("id"))), cname, m.get("date") or "",
-                   f"[{sender}] {body}" if sender else body)
+                   f"[{sender}] {body}" if sender else body,
+                   _tg_sender(sender, str(m["from_id"]) if m.get("from_id") else None),
+                   "", "", "", "")
 
 
 def _iter_telegram_zip(zip_path: Union[str, Path], members: list[str],
@@ -2504,7 +2575,8 @@ def _iter_telegram_html_zip(zip_path: Union[str, Path], members: list[str],
             cname = p.chat_title or "telegram-chat"
             for msg_id, sender, ts, text in p.msgs:
                 yield (_uid("tg", cname, msg_id), cname, ts,
-                       f"[{sender}] {text}" if sender else text)
+                       f"[{sender}] {text}" if sender else text,
+                       _tg_sender(sender), "", "", "", "")
             # Gli scarti nello STESSO stream delle righe, come fanno tutti gli altri
             # estrattori: `write_rows` li instrada alla tabella `skipped`.
             for motivo, dettaglio, ts in p.scartati:
@@ -3489,12 +3561,29 @@ def main(argv: list[str] | None = None) -> int:
                          "delle colonne derivate (oggi: output degli strumenti → "
                          "speaker='tool', turni del programma → speaker='system') e "
                          "stampa il delta. A SECCO se non c'è --scrivi.")
+    ap.add_argument("--migra-telegram", action="store_true",
+                    help="NON indicizza: dà lo speaker ai messaggi di un DB Telegram già "
+                         "caricato (il proprietario, da ARCHIVE_TELEGRAM_PROPRIETARIO → "
+                         "'human', gli altri → 'other'). Solo su DB che sono export "
+                         "Telegram. A SECCO se non c'è --scrivi.")
     ap.add_argument("--scrivi", action="store_true",
-                    help="con --retag o --migra: applica davvero. Senza, è solo un referto.")
+                    help="con --retag, --migra o --migra-telegram: applica davvero. "
+                         "Senza, è solo un referto.")
     args = ap.parse_args(argv)
     if not Path(args.input).is_file():
         print(f"input non trovato: {args.input}", file=sys.stderr)
         return 1
+    if args.migra_telegram:
+        try:
+            esito = migra_telegram(args.input, scrivi=args.scrivi)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
+        if not args.scrivi:
+            print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
+                  file=sys.stderr)
+        return 0
     if args.migra:
         try:
             esito = migra_derivate(args.input, scrivi=args.scrivi)

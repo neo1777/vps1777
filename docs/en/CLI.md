@@ -251,6 +251,16 @@ vps1777 archive-migra                                  # anteprima su tutti i DB
 vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
 ```
 
+With `--telegram` (and `--db`, required) it gives `speaker` to the messages of a
+**Telegram group** already loaded: the owner `human`, the other members `other`. The owner
+is given by their Telegram names in `ARCHIVE_TELEGRAM_PROPRIETARIO` in the `.env` (without
+it, exit 2); run it only on DBs that are Telegram exports ([ARCHIVE.md](ARCHIVE.md)).
+
+```bash
+vps1777 archive-migra --db gruppo-telegram --telegram           # anteprima
+vps1777 archive-migra --db gruppo-telegram --telegram --scrivi  # applica
+```
+
 ## vps1777 secrets-status
 
 Age and expiry of the secrets (keys, tokens, NotebookLM cookies): it lists what

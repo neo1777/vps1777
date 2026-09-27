@@ -102,15 +102,16 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
         sort: 'rank' (rilevanza, default), 'newest' o 'oldest' (per data).
         since / until: filtro temporale sul ts (ISO, confronto lessicografico).
         project: filtra per etichetta esatta (titolo chat, project:*, design:*).
-        speaker: CHI HA SCRITTO la riga — 'human', 'assistant', 'tool', 'system',
+        speaker: CHI HA SCRITTO la riga — 'human', 'assistant', 'tool', 'system', 'other',
             'unknown'. È un FATTO preso dalla fonte, non una stima. 'tool' = l'output
             di un comando (tool_result di Claude Code, dalla 0.52.0: prima era
             'human'); 'system' = un turno che il programma inietta (notifiche di task,
             output di comandi locali, compattazioni, dalla 0.53.0: prima 'human').
+            'other' = un altro membro di un gruppo Telegram (non il proprietario, che
+            è 'human'), se l'installazione dichiara il proprietario.
             'unknown' = la fonte non dichiara un mittente noto: allegati, titoli,
-            memorie, schede, documenti, log MCP e i messaggi TELEGRAM (il nome del
-            mittente sta nel testo, «[Nome] …»: lì speaker='human' dà 0, cerca il
-            nome). Un valore che non esiste è un errore, non uno zero.
+            memorie, schede, documenti, log MCP, e i gruppi Telegram quando il
+            proprietario non è dichiarato. Un valore che non esiste è un errore.
         voice: DI CHI È LA VOCE nel contenuto — è una STIMA euristica, con la sua
             confidenza. Valori: 'own', 'pasted_transcript', 'pasted_ai',
             'character', 'mixed', 'unknown', più due alias e un terzo stato:
@@ -197,7 +198,7 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
             una regolazione — il banco vale per questi.
         snippet_tokens: lunghezza dello snippet FTS.
         speaker: CHI HA SCRITTO, come in `search` ('human', 'assistant', 'tool',
-            'system', 'unknown'). Filtra TUTTE e due le liste: per «cosa ha detto
+            'system', 'other', 'unknown'). Filtra TUTTE e due le liste: per «cosa ha detto
             Neo» usa speaker='human' — senza, su 20 risultati le sue parole erano
             da 0 a 8 (misurato il 27/09).
 

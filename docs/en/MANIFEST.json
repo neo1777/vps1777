@@ -15,7 +15,7 @@
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
-      "sorgente_sha256": "8f5740ff65420b3ecc344e7300691fa6a8deef4bac0f5de589575f63edee2ce7"
+      "sorgente_sha256": "65d6822c476bc7d5ac4b83f5699d3f7ba5b3bf4c175e92a8f4617d7e311d2024"
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",
@@ -31,7 +31,7 @@
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "ab2059bcfd99631c25f89e50aba5c6eeea4b07ceeb601612c036ef9ac93f072d"
+      "sorgente_sha256": "aa67a7a1df274e8ade23ed30b78b2c81b8d2ab0818f7d7796ecb9e8502a515c2"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",

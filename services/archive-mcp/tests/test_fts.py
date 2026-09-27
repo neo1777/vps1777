@@ -648,7 +648,7 @@ def test_un_filtro_scritto_male_e_un_errore_non_uno_zero():
         fts.count_conn(conn, "flutter", speaker="Human")
     # i valori veri e gli alias restano validi (la tabella di test non ha le colonne
     # dell'asse-voce: qui si prova solo che il controllo li lascia passare)
-    for s in ("human", "assistant", "tool", "system", "unknown"):
+    for s in ("human", "assistant", "tool", "system", "other", "unknown"):
         assert fts._filtri_voce(s, "")[1] == [s]
     for v in ("own", "pasted_transcript", "pasted_ai", "character", "mixed", "unknown",
               "direct", "quoted", "none"):

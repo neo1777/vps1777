@@ -116,6 +116,11 @@ services:
       #   `vps1777.py` lo deriva da sé prima di `compose up` se non c'è.
       TELEGRAM_WEBAPP_SECRET_FILE: /run/secrets/telegram_webapp_secret
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}   # Mini App owner-only (server-side)
+      # chi è il proprietario nei gruppi Telegram dell'archivio (i suoi nomi Telegram,
+      # separati da virgola): i suoi messaggi hanno speaker 'human', gli altri 'other'.
+      # Nel JSON basta TELEGRAM_OWNER_ID (il from_id); l'HTML e i DB già caricati
+      # vogliono il nome. Vuota: il mittente dei gruppi resta 'unknown'.
+      ARCHIVE_TELEGRAM_PROPRIETARIO: ${ARCHIVE_TELEGRAM_PROPRIETARIO:-}
       OAUTH_PWD_HASH_FILE: /run/secrets/admin_password_bcrypt
       GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
       OAUTH_SIGNING_SECRET_FILE: /run/secrets/oauth_signing_secret

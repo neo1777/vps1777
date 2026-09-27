@@ -802,11 +802,20 @@ passando a `write_rows` una **decima colonna** facoltativa (`messaggio` o
 `data-export`; senza, resta `messaggio`; un altro valore ferma l'ingest).
 
 **`speaker` e `voice`** — due assi che non vanno fusi. `speaker` è **chi ha inviato**
-la riga, preso dalla fonte (`human` · `assistant` · `tool` · `system` · `unknown`).
-`unknown` è tutto ciò che non dichiara un mittente noto: allegati, titoli, memorie e
-schede, documenti, log dei server MCP, e i **messaggi Telegram** — lì il nome del
-mittente sta nel testo (`[Nome] …`) e non diventa `speaker`, quindi su un DB Telegram
-`speaker='human'` oggi risponde 0: il mittente si cerca per nome, col testo. `system`
+la riga, preso dalla fonte (`human` · `assistant` · `tool` · `system` · `other` ·
+`unknown`). `unknown` è tutto ciò che non dichiara un mittente noto: allegati, titoli,
+memorie e schede, documenti, log dei server MCP.
+
+Nei **gruppi Telegram** il nome del mittente sta nel testo (`[Nome] …`). Dalla 0.62.3 il
+proprietario dell'archivio è `human`, come negli altri archivi, e gli altri membri
+`other`, ma solo se l'installazione dichiara chi è il proprietario: `TELEGRAM_OWNER_ID`
+(lo stesso della Mini App) basta per l'export JSON, che porta l'id del mittente; per
+l'export HTML e per i DB già caricati servono i suoi nomi Telegram in
+`ARCHIVE_TELEGRAM_PROPRIETARIO` nel `.env` (separati da virgola, senza badare alle
+maiuscole). Senza nessuno dei due i messaggi restano `unknown`: marcare tutti `other`
+metterebbe il proprietario fra gli altri. Un DB Telegram caricato prima si sistema con
+`vps1777 archive-migra --db <nome> --telegram` (a secco, poi `--scrivi`): usa il nome in
+testa al testo, e va lanciato solo sui DB che sono export Telegram. `system`
 viene dal campo del record (`origin`, `isMeta`) quando c'è; sulle versioni che non lo
 scrivevano lo decide la forma del testo, ed è una stima.
 Un valore di `speaker` o di `voice` che non esiste è un **errore** (dalla 0.62.3), come
