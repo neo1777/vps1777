@@ -4,16 +4,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BeforeValidator, Field
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
-
-
-def _csv(value: str | list[str] | None) -> list[str]:
-    if not value:
-        return []
-    if isinstance(value, list):
-        return value
-    return [x.strip() for x in value.split(",") if x.strip()]
+from pydantic import BeforeValidator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def _read_secret_file(value: str | None) -> str:
@@ -26,8 +18,10 @@ def _read_secret_file(value: str | None) -> str:
     return p.read_text(encoding="utf-8").strip()
 
 
-# NoDecode: niente json.loads sul valore env prima del validator (è CSV).
-CSVList = Annotated[list[str], NoDecode, BeforeValidator(_csv)]
+# (27/09, audit della doc: tolta `nb1777_allowed_origins`, con il suo tipo CSV. Era
+#  dichiarata qui, in compose.yaml e nel README, e nessun codice la leggeva: una CORS
+#  che sembra configurata e non lo è. Il servizio non è mai esposto: da fuori si
+#  passa dal gateway, che ha la sua CORS scoped, H31.)
 SecretFromFile = Annotated[str, BeforeValidator(_read_secret_file)]
 
 
@@ -37,9 +31,6 @@ class Settings(BaseSettings):
     nb1777_host: str = "0.0.0.0"
     nb1777_port: int = 8003
     nb1777_transport: str = "streamable-http"
-    nb1777_allowed_origins: CSVList = Field(
-        default_factory=lambda: ["https://claude.ai", "https://web.telegram.org"],
-    )
     nlm_home: str = "/var/lib/nlm"
     fastmcp_stateless_http: bool = True
     log_level: str = "INFO"

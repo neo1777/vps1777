@@ -1081,7 +1081,10 @@ echo "RESULT_REBOOT=${REBOOT_TEST:-n/d (passo 7 non raggiunto)}"
 #    feature dichiarata è stampata ON/OFF; un OFF non richiesto lo VEDI, non lo scopri
 #    dopo mesi. È il canary del tokenizer applicato all'installer.
 _feat() { case ",${FEATURES:-}," in *",$1,"*) printf ON;; *) printf OFF;; esac; }
-printf '\n%b\n' "${C_B}  ═══ FEATURE (stato dichiarato — riprodotto a ogni update e reinstall) ═══${C_R}"
+# (27/09, audit della doc) Qui c'era «riprodotto a ogni update e reinstall»: vero per il
+#   reinstall e per i profili compose (backup, portainer), che ogni update rimette; NON
+#   per il timer dell'auto-update, che update e rollback lasciano com'è (docs/OPS.md).
+printf '\n%b\n' "${C_B}  ═══ FEATURE (stato dichiarato — riprodotto da ogni reinstall; backup e portainer anche da ogni update) ═══${C_R}"
 printf '    backup notturno    : %s\n' "$(_feat backup)"
 printf '    auto-update sicuro : %s%s\n' "$(_feat autoupdate)" \
   "$(case ",${FEATURES:-}," in *,watchtower,*) printf '  (⚠ watchtower CRUDO anche attivo — CONFLITTO)';; esac)"

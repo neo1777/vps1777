@@ -9,7 +9,6 @@ NotebookLM MCP wrapper — espone i tool del CLI `nlm` come MCP streamable-http.
 | `NB1777_HOST` | `127.0.0.1` | bind (in `compose.yaml` è `0.0.0.0`, sulla rete interna `backend`) |
 | `NB1777_PORT` | `8003` | porta |
 | `NB1777_TRANSPORT` | `streamable-http` | `streamable-http`, `stdio`, `sse` |
-| `NB1777_ALLOWED_ORIGINS` | `https://claude.ai,https://web.telegram.org` | CSV |
 | `NLM_HOME` | `/var/lib/nlm` | volume col profilo `profiles/default/` + `AUTH_PENDING.flag` |
 | `NLM_ARTIFACTS` | `/var/lib/nlm-artifacts` | dove nascono gli artefatti di `studio_download` (volume separato, senza segreti) |
 | `GATEWAY_SECRET_FILE` | — | segreto condiviso per gli endpoint `/internal/*`; senza, negano tutto |
