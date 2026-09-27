@@ -173,10 +173,11 @@ class Settings(BaseSettings):
     # decisione di chi possiede la macchina, non un effetto collaterale di un update.
     telegram_webapp_secret_file: SecretFromFile = ""
     telegram_webapp_secret: str = ""
-    # owner-only: la Mini App emette un token solo per QUESTO utente Telegram
-    # (0 = non configurato → nessuna restrizione, come il bot). Difesa in
-    # profondità: il bot mostra il bottone solo all'owner, ma il server verifica
-    # comunque l'id — non ci si fida del solo client.
+    # owner-only: la Mini App emette un token solo per QUESTO utente Telegram.
+    # 0 = non configurato → la Mini App NEGA A TUTTI (503 `owner_not_configured`,
+    # fail-closed, H1): qui c'era scritto «nessuna restrizione», l'opposto di ciò che
+    # miniapp.py fa dalla v0.22.0 (audit della doc, 27/09). Difesa in profondità: il
+    # bot mostra il bottone solo all'owner, ma il server verifica comunque l'id.
     telegram_owner_id: IntOrZero = 0
 
     # ───── Storage ─────

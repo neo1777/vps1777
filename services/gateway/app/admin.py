@@ -1,11 +1,12 @@
 """
-Pannello admin — /admin/{login,logout,nlm,audit,secrets}.
+Pannello admin — /admin/{login,logout,setup,nlm,archive,update,secrets,audit}.
 
 Tutto dietro `admin_cookie` (JWT typ=admin) settato dopo bcrypt verify.
 
-`/admin/nlm` è il punto chiave: GET = form upload, POST = salva auth.json,
-rimuove AUTH_PENDING.flag, restart non necessario (nb1777-mcp legge file on
-demand, vedi nb1777-mcp/app/auth.py).
+`/admin/nlm` è il punto chiave: GET = form upload, POST = inoltra il tar.gz del
+profilo NotebookLM (`profiles/default/`) a nb1777-mcp sul canale interno
+(`/internal/nlm/profile`, H6): il gateway non tocca i cookie, li valida e li
+installa nb1777-mcp (nlm_profile.py), senza riavvii.
 """
 from __future__ import annotations
 

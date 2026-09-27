@@ -27,6 +27,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `installa.sh --stato` nomina gli hook installati che non vengono dal repo.
 
 ### Corretto
+- **Residui dell'audit della documentazione** (27/09): il commento di
+  `TELEGRAM_OWNER_ID` nel gateway diceva «0 = nessuna restrizione», l'opposto del
+  comportamento (senza owner la Mini App nega a tutti, H1); `NB1777_ALLOWED_ORIGINS` era
+  dichiarata in settings, compose e README e nessun codice la leggeva (tolta: una CORS
+  che sembra configurata e non lo è); il referto di `deploy.sh` prometteva le feature
+  «riprodotte a ogni update», e il timer dell'auto-update un update non lo tocca; la
+  verifica 3 del collaudo vergine lanciava il servizio del check, che non esercita
+  l'auto-update; `admin.py` e `onboarding.py` parlavano ancora di `auth.json`.
 - **archive1777: un filtro scritto male è un errore, non uno zero.** `campi` sbagliato
   lo era già; `speaker`, `voice` e `sort` sbagliati rispondevano 0 righe (o l'ordine di
   default) senza dirlo, e «speaker='neo'» si leggeva «non l'ha mai detto». Ora tutti si

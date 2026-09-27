@@ -255,7 +255,6 @@ services:
       NB1777_HOST: 0.0.0.0
       NB1777_PORT: 8003
       NB1777_TRANSPORT: streamable-http
-      NB1777_ALLOWED_ORIGINS: "https://claude.ai,https://web.telegram.org"
       NLM_HOME: /var/lib/nlm
       # H6-bis: gli artefatti scaricati (audio/video/pdf…) nascono QUI e solo qui.
       # Volume SEPARATO da nlm-auth apposta: `studio_download` accettava un

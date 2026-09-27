@@ -67,7 +67,7 @@ comando che lo attiva (è il filo della release 0.43.0).
 |---|---|---|---|
 | 1 | fail2ban vivo su Debian 12 (jail sshd `backend=systemd`, #200) | `systemctl is-active fail2ban && sudo fail2ban-client status sshd` | `active` + jail con `Currently banned` leggibile — **non** «Have not found any log file» |
 | 2 | unit abilitate secondo `VPS1777_FEATURES` (setup = deploy = engine) | `systemctl list-unit-files 'vps1777-*' --state=enabled` | `check-update.timer`, `update.path`, `secrets-check.timer` (+ `auto-update.timer` se feature attiva) |
-| 3 | auto-update ripara (catena #101 #104 #125 #155) | `sudo systemctl start vps1777-check-update.service && journalctl -u vps1777-check-update -n 20` | exit 0; nessun `Failed … sudo -n install` |
+| 3 | auto-update ripara (catena #101 #104 #125 #155) | `sudo systemctl start vps1777-auto-update.service && journalctl -u vps1777-auto-update -n 30` | exit 0 (o 75, lock occupato); nessun `Failed … sudo -n install`. ⚠️ Prova il percorso solo se c'è una release più nuova uscita da almeno 48 ore: altrimenti esce «già aggiornato» senza arrivare a `sudo`. Qui c'era `vps1777-check-update.service`, che fa solo il check (`NoNewPrivileges=true`, niente sudo) e non esercitava affatto l'auto-update (audit della doc, 27/09) |
 | 4 | self-update CLI | `vps1777 check && vps1777 status` | canale coerente, nessun errore di copia della CLI |
 | 5 | reboot-survival | `sudo reboot` → attendere → `docker compose ps` | tutti i container `Up`, ingress raggiungibile |
 | 6 | connector claude.ai end-to-end | dal client: `list_databases` via MCP | risponde (dopo il re-ingest: i DB nuovi) |

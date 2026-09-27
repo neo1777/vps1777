@@ -6,7 +6,7 @@ Raccoglie i dati che mancano per rendere lo stack pienamente operativo:
   - Telegram bot token + owner id
   - PUBLIC_BASE (URL pubblico, opzionale: di norma lo ricava deploy.sh dopo
     il login Tailscale)
-  - NotebookLM auth.json (gestito dalla pagina dedicata /admin/nlm)
+  - il profilo NotebookLM (tar.gz di profiles/default/, dalla pagina dedicata /admin/nlm)
 
 Il gateway NON ha privilegi Docker né accesso ai secret host (montati ro):
 quindi NON applica le azioni. Scrive i valori in
