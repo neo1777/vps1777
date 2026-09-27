@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Il ledger vuole «condizione O data»**: una voce `deferred` con `follow_up.verify` deve
+  portare anche `follow_up.rivedi_dopo`. La macchina la promuove quando la condizione si
+  avvera ([PROMUOVI]) e la rimette davanti quando la data passa ([RIVEDI]). Un rinvio che
+  aspetta solo una condizione non scatta mai, se la condizione non arriva: è la lezione del
+  gemello todo_or_die, portata dalla curatrice dei rimandi (27/09). Oggi nessuna voce era
+  in questo caso: la regola è preventiva.
+
 ## [0.62.2] — 2026-09-27
 
 **La redazione delle credenziali regge anche sugli snippet evidenziati** (`«ghp»_…`): il

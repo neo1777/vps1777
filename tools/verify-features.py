@@ -388,6 +388,17 @@ def main() -> int:
         if e.get("status") == "deferred" and not e.get("follow_up"):
             hard_fail.append(f"[cattura] {eid}: 'deferred' senza follow_up — decisione a metà "
                              "(è ESATTAMENTE il buco che ha perso Watchtower per un mese)")
+        # «CONDIZIONE O DATA» (27/09/2026, lezione dei gemelli dei rinvii — todo_or_die,
+        # curatrice F1-Gbis): un rinvio che aspetta SOLO una condizione non scatta mai se
+        # la condizione non arriva (Graphiti, «dopo il test» cinque volte, e il test abolito).
+        # Una condizione verificabile porta anche la sua data di riserva.
+        fu_ = e.get("follow_up") or {}
+        if (e.get("status") == "deferred" and isinstance(fu_.get("verify"), dict)
+                and not fu_.get("rivedi_dopo")
+                and not (fu_.get("manuale") or {}).get("rivedi_dopo")):
+            hard_fail.append(f"[cattura] {eid}: follow_up.verify senza data — aggiungi "
+                             "follow_up.rivedi_dopo: la condizione può non avverarsi mai "
+                             "(condizione O data, non condizione E data)")
         if e.get("status") in ("deferred", "removed", "opt-in") and not e.get("decisione"):
             hard_fail.append(f"[cattura] {eid}: '{e['status']}' senza 'decisione' — invisibile "
                              "allo storico (perché/quando fu deciso?)")
@@ -449,6 +460,11 @@ def main() -> int:
             if oggi > due:
                 surveil.append(f"[RIVEDI] {e['id']}: rinvio-a-giudizio scaduto il {due} "
                                f"(«{man.get('cosa', '')}») — rimettilo in discussione")
+        if fu.get("rivedi_dopo"):
+            due = datetime.date.fromisoformat(str(fu["rivedi_dopo"]))
+            if oggi > due:
+                surveil.append(f"[RIVEDI] {e['id']}: la condizione non si è avverata e la data "
+                               f"di riserva ({due}) è passata — rimettilo in discussione")
         if e.get("status") == "deferred" and isinstance(fu.get("verify"), dict):
             ok, det = run_check(fu["verify"], repo)
             if ok:
