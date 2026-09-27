@@ -1107,8 +1107,9 @@ def doctor() -> dict:
 
     `vps1777_version` è iniettata a build-time dalla CI di release (env
     VPS1777_VERSION), quindi si aggiorna DA SOLA a ogni update del gateway: una
-    sessione che chiama doctor vede sempre la build corrente. `nlm_pinned` è la
-    versione del CLI su cui i tool sono contratti (verificata dal contract-test).
+    sessione che chiama doctor vede sempre la build corrente. `version` è la prima
+    riga di `nlm --version`: il CLI installato, su cui i tool sono contratti
+    (verificati dal contract-test in CI; il pin sta in pyproject.toml).
 
     `contract_note` esiste per rompere la dipendenza dalla memoria: i quirk dei
     sottocomandi cambiano fra versioni di nlm, quindi vanno LETTI qui/dagli schemi

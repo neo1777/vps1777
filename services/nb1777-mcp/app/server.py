@@ -1,18 +1,22 @@
 """
-nb1777/mcp_server.py — FastMCP wrapper sopra core.py.
+app/server.py — FastMCP wrapper sopra core.py (servizio nb1777-mcp).
 
-Espone tutte le funzioni di `core.py` come tool MCP, in ascolto su loopback
-(default 127.0.0.1:8003). Davanti gli mettiamo il gateway OAuth sulla VPS.
+Espone le funzioni di `core.py` come tool MCP (38), più le rotte custom:
+gli endpoint `/internal/*` (H6) e `/health`. In compose ascolta su
+0.0.0.0:8003 sulla rete interna `backend`, mai pubblicata: da Internet si
+arriva solo attraverso il gateway (OAuth + path-secret), che rifiuta i
+sotto-path `internal/`. Il bot lo chiama direttamente sulla rete interna.
 
-NIENTE chiave/secret qui: l'autenticazione è del gateway. Questo server è
-loopback-only e si aspetta di NON essere mai esposto direttamente.
+L'autenticazione dei TOOL è del gateway. Gli endpoint `/internal/*` invece
+vogliono il segreto condiviso (`GATEWAY_SECRET_FILE`, header
+`x-vps1777-internal`): senza segreto configurato negano tutto (fail-closed).
 
-Avvio standalone:
-    python3 -m nb1777.mcp_server                  # streamable-http su :8003
-    NB1777_TRANSPORT=stdio python3 -m nb1777.mcp_server   # mode stdio (per dev)
+Avvio (è l'ENTRYPOINT dell'immagine, via app/__main__.py):
+    python -m app                           # streamable-http su :8003
+    NB1777_TRANSPORT=stdio python -m app    # stdio (per dev)
 
 Variabili d'ambiente:
-    NB1777_HOST       (default 127.0.0.1)
+    NB1777_HOST       (default 127.0.0.1; compose.yaml mette 0.0.0.0)
     NB1777_PORT       (default 8003)
     NB1777_TRANSPORT  (default streamable-http; alt: stdio, sse)
 """
@@ -237,7 +241,12 @@ async def source_add_text(notebook_id: str, text: str, title: str, wait: bool = 
 @mcp.tool()
 async def source_add_file(notebook_id: str, file_path: str,
                           title: Optional[str] = None, wait: bool = True) -> str:
-    """Carica un file locale come fonte (PDF/txt/md...)."""
+    """Carica un file come fonte (PDF/txt/md...).
+
+    `file_path` è un path del filesystem del SERVER (il container nb1777-mcp),
+    non di chi chiama: un file che sta solo sul tuo disco qui non esiste (è la
+    stessa sorpresa di studio_download, al contrario). Per testo che hai già in
+    mano usa source_add_text."""
     return await _aio(core.source_add_file, notebook_id, file_path, title=title, wait=wait)
 
 
@@ -270,6 +279,8 @@ async def source_get_content(notebook_id: str, source_id: str) -> str:
 
 @mcp.tool()
 async def source_rename(notebook_id: str, source_id: str, new_title: str) -> str:
+    """Rinomina una fonte. Qui il notebook_id serve davvero (la CLI lo vuole
+    come opzione obbligatoria). Ritorna "ok"."""
     await _aio(core.source_rename, notebook_id, source_id, new_title)
     return "ok"
 
@@ -407,7 +418,14 @@ async def studio_create_all_9(notebook_id: str,
                               report_format: str = "Study Guide",
                               wait: bool = False,
                               skip: Optional[list[str]] = None) -> dict:
-    """Crea tutti e 9 gli artefatti in sequenza. Ritorna {tipo: id_o_errore}."""
+    """Crea tutti e 9 gli artefatti in sequenza. Ritorna {tipo: esito}, dove
+    esito è l'artifact_id, "ERROR: <motivo>" se quel tipo è fallito (gli altri
+    proseguono) o "SKIPPED" se era in `skip`.
+
+    skip: tipi da saltare, es. ["audio"] per evitare il rate-limit.
+    wait: False (default) lancia e ritorna subito gli id, la generazione
+          continua su NotebookLM; True attende ogni artefatto (fino a 900s)
+          prima di lanciare il successivo."""
     return await _aio(core.studio_create_all_9, notebook_id, source_ids=source_ids,
                       language=language, data_table_description=data_table_description,
                       report_format=report_format, wait=wait,
@@ -452,6 +470,9 @@ async def studio_delete(notebook_id: str, artifact_id: str) -> str:
 
 @mcp.tool()
 async def studio_rename(notebook_id: str, artifact_id: str, new_title: str) -> str:
+    """Rinomina un artefatto studio. L'artifact_id è globale: notebook_id resta
+    nella firma per coerenza con gli altri tool ma viene IGNORATO (non arriva
+    alla CLI). Ritorna "ok"."""
     await _aio(core.studio_rename, notebook_id, artifact_id, new_title)
     return "ok"
 
@@ -540,10 +561,13 @@ async def canonico(full: bool = False, taglio: str = "pieno") -> dict:
 async def memoria_check(versione_portata: str) -> dict:
     """MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che
     porti (es. 'v2.2') col canonico attuale. Ritorna `{canonico, data, stale,
-    delta}`. Effetto collaterale che è IL PUNTO: se sei vecchio (`stale:true`),
-    manda a Neo UN ping Telegram (max 1 per versione al giorno) — così anche se la
-    sessione ignora il verdetto, Neo lo sa. Chiamalo all'avvio se la versione in
-    testa al tuo blocco potrebbe essere superata."""
+    delta}`, più `portata` (la tua versione normalizzata) e, se sei vecchio, le
+    `note` del canonico. Fail-open: se il canonico non è leggibile, o la versione
+    passata non si riconosce, `stale: null` con una `nota` che lo dice.
+    Effetto collaterale che è IL PUNTO: se sei vecchio (`stale:true`), manda a
+    Neo UN ping Telegram (max 1 al giorno per coppia portata→canonico) — così
+    anche se la sessione ignora il verdetto, Neo lo sa. Chiamalo all'avvio se la
+    versione in testa al tuo blocco potrebbe essere superata."""
     verdict = await asyncio.to_thread(memoria.compare, versione_portata)
     if verdict.get("stale") and verdict.get("canonico"):
         await asyncio.to_thread(memoria.note_drift, versione_portata, verdict["canonico"])

@@ -32,8 +32,8 @@ def check_or_raise() -> None:
 
 def ensure_nlm_home_in_env() -> None:
     """
-    Sia server.py (legacy) sia nlm CLI cercano auth.json in
-    `Path.home() / ".notebooklm-mcp-cli"`. Forziamo HOME=NLM_HOME e creiamo
+    Sia server.py sia nlm CLI cercano il profilo (profiles/default/cookies.json)
+    in `Path.home() / ".notebooklm-mcp-cli"`. Forziamo HOME=NLM_HOME e creiamo
     il symlink interno per allineare entrambi al volume montato.
     """
     home = get_settings().nlm_home

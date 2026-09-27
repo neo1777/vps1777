@@ -24,7 +24,7 @@ def main() -> None:
     # stesso fatto, e il log mentiva (misurato al banco /health, 03/09).
     log.info("listen=%s:%s transport=%s", server.HOST, server.PORT, s.nb1777_transport)
 
-    # Setup HOME per nlm (cerca auth.json in ~/.notebooklm-mcp-cli/)
+    # Setup HOME per nlm (cerca il profilo in ~/.notebooklm-mcp-cli/profiles/default/)
     auth.ensure_nlm_home_in_env()
 
     # FastMCP run senza ridichiarare host/port — già nel costruttore.
