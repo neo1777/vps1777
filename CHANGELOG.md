@@ -5,6 +5,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **archive1777: tre promesse della documentazione che il codice non teneva** (audit
+  della documentazione, 27/09):
+  - `get_conversation` prendeva le **prime** `limit` righe: su una chat più lunga di 200
+    l'uuid chiesto e la scheda della sessione restavano fuori, in silenzio. Ora torna una
+    finestra che li contiene sempre, e la riga del match dichiara `finestra` (quante
+    righe ha la chat, quali sono queste). Il ramo lineare ritaglia in SQL, senza leggere
+    un project intero (61.211 righe: 0,4 s sul primario).
+  - `describe_databases`: `newest` usava `max(ts)` senza la regola dello schema
+    (`ts_source <> 'data-export'`), e le schede e le memorie di `recupero/` lo spostavano
+    alla data della fotografia.
+  - `search`: una `parola:` qualunque era presa per un filtro di colonna e la query
+    passava intatta al parser — `errore:grave` o un URL morivano con «no such column».
+    Ora resta un filtro solo `colonna:` di una colonna vera; il resto si quota.
 - **Sicurezza — la redazione dell'archivio regge anche ai bordi dello snippet.** Lo
   snippet di FTS5 è una finestra che comincia e finisce dove capita, anche a metà di un
   token, e il ramo vettoriale di `search_ibrida` taglia il testo a 400 caratteri: il

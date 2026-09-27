@@ -565,3 +565,71 @@ def test_distribuzione_voce_distingue_il_non_classificato():
     assert d["(non classificate)"] == 1, (
         "il vuoto ha un'etichetta SUA: un DB mai classificato non deve leggersi "
         "come un DB pieno di righe difficili")
+
+
+# ── audit della doc (27/09): due promesse di ARCHIVE.md che il codice non teneva ──────
+def test_i_due_punti_si_quotano_se_prima_non_c_e_una_colonna():
+    """ARCHIVE.md dice che i termini coi `:` il server li quota da sé. Il codice trattava
+    OGNI `parola:` come un column filter e lasciava la query intatta: `errore:grave` e un
+    URL morivano con «no such column». Resta filtro solo `colonna:` di una colonna vera."""
+    assert fts.sanitize_query("errore:grave") == '"errore:grave"'
+    assert fts.sanitize_query("apri http://x.it subito") == 'apri "http://x.it" subito'
+    assert fts.sanitize_query("project:chatA") == "project:chatA"
+    assert fts.sanitize_query("content: flutter") == "content: flutter"
+    conn = _db(_ROWS + [("u5", "chatC", "2026-03-03T10:00:00Z", "errore:grave nel log")])
+    assert [r["uuid"] for r in fts.search_conn(conn, "errore:grave")] == ["u5"]
+
+
+def test_newest_ignora_le_righe_della_fotografia():
+    """ARCHIVE.md e lo schema dicono: il «più recente» è `MAX(ts) WHERE ts_source <>
+    'data-export'`. `describe_databases` usava `max(ts)` senza filtro, e una scheda di
+    sessione (ts della fotografia) spostava `newest` in avanti."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE messages(uuid TEXT PRIMARY KEY, project, ts, content, "
+                 "ts_source TEXT DEFAULT 'messaggio', voice TEXT DEFAULT '')")
+    conn.executemany("INSERT INTO messages(uuid, project, ts, content, ts_source) "
+                     "VALUES (?,?,?,?,?)", [
+                         ("m1", "chat", "2026-05-01T10:00:00Z", "detto", "messaggio"),
+                         ("s1", "sessione:x", "2026-09-10T10:00:00Z", "scheda", "data-export"),
+                         ("v1", "chat", "2026-04-01T10:00:00Z", "vecchio", "ignoto")])
+    assert fts.db_stats_conn(conn)["newest"] == "2026-05-01T10:00:00Z"
+    # un DB nato prima della colonna non si rompe: si torna a max(ts)
+    vecchio = sqlite3.connect(":memory:")
+    vecchio.execute("CREATE TABLE messages(uuid TEXT PRIMARY KEY, project, ts, content)")
+    vecchio.execute("INSERT INTO messages VALUES ('a','p','2026-01-01Z','x')")
+    assert fts.db_stats_conn(vecchio)["newest"] == "2026-01-01Z"
+
+
+# ── get_conversation e il limit (audit della doc, 27/09) ─────────────────────────────
+# ARCHIVE.md e il docstring promettono «la chat intera, con la scheda in coda». Il codice
+# prendeva le PRIME `limit` righe: su una chat più lunga, l'uuid chiesto e la scheda
+# potevano restare fuori, e niente lo diceva. Ora la finestra contiene sempre l'uuid
+# chiesto (e la scheda), e se la chat è più lunga la riga del match lo dichiara.
+def test_conversation_lunga_tiene_il_match_e_lo_dichiara():
+    righe = [(f"m{i}", "P", f"2026-01-01T00:00:{i:02d}Z", f"testo {i}", "human",
+              f"m{i - 1}" if i > 1 else "") for i in range(1, 11)]
+    conv = fts.conversation_conn(_db_full(righe), "m8", limit=4)
+    uuids = [r["uuid"] for r in conv]
+    assert "m8" in uuids and len(uuids) == 4, uuids
+    fin = next(r for r in conv if r["is_match"])["finestra"]
+    assert fin["righe"] == 10 and fin["da"] <= 8 <= fin["a"], fin
+    # sotto il limit niente finestra: la chat è intera
+    assert "finestra" not in next(r for r in fts.conversation_conn(_db_full(righe), "m8")
+                                  if r["is_match"])
+
+
+def test_conversation_lineare_lunga_tiene_il_match():
+    righe = [(f"d{i}", "doc", f"2026-05-01T00:00:{i:02d}Z", f"chunk {i}", "", "")
+             for i in range(1, 11)]
+    conv = fts.conversation_conn(_db_full(righe), "d9", limit=3)
+    assert "d9" in [r["uuid"] for r in conv] and len(conv) == 3
+
+
+def test_conversation_cc_lunga_tiene_la_scheda():
+    righe = _RIGHE_CC + [
+        ("sch-a", "recupero:sessioni", "2026-01-01T00:00:07Z", "scheda di A", "recupero", "a4")]
+    conn = _db_sessioni(righe, _VISTI_CC + [("sch-a", "recupero/sessioni/aaaa.md")])
+    conv = fts.conversation_conn(conn, "sch-a", limit=3)
+    assert [r["uuid"] for r in conv] == ["a3", "a4", "sch-a"]
+    conv = fts.conversation_conn(conn, "a1", limit=3)
+    assert [r["uuid"] for r in conv][-1] == "sch-a" and "a1" in [r["uuid"] for r in conv]

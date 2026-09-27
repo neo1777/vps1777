@@ -288,9 +288,15 @@ def get_conversation(uuid: str, db_name: str = "", limit: int = 200,
     si arriva alla stessa chat.
 
     Dove l'albero manca — documenti chunked (pdf/telegram/memory) e db storici —
-    ricade sull'ordine lineare dello stesso archivio. Ogni riga:
-    {db, uuid, project, ts, content, sender, is_match, snapshot}, più `tools` sulle
-    righe senza testo, come in get_context.
+    ricade sull'ordine lineare dello stesso `project` (di solito dalla prima riga).
+    Ogni riga: {db, uuid, project, ts, content, sender, is_match, snapshot}, più
+    `tools` sulle righe senza testo, come in get_context.
+
+    📏 `limit` (default 200) è quante righe tornano. Se la chat è più lunga non torna
+    l'inizio: torna una FINESTRA che contiene sempre `uuid` (più la scheda, se c'è), e
+    la riga del match porta `finestra` = {righe, da, a, nota} — quante righe ha la chat
+    e quali sono queste. Senza `finestra` la chat è intera. Per averla tutta alza
+    `limit` (e usa `max_chars`).
     `max_chars` come in get_context (#268): su 200 righe piene è la differenza
     fra una risposta e una connessione morta."""
     return db.get_conversation(uuid, db_name, limit=limit, max_chars=max_chars)

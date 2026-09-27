@@ -432,7 +432,7 @@ above.
 | `count(query, db_name, …)` | how many messages match (not limited): `{total, per_db}`; if a term **collapses** it adds `warnings`. Same filters as `search`, `campi` included |
 | `check_term(term, db_name)` | diagnoses whether a term with `+`/`#` (`C++`, `C#`, `g++`) is searchable or **collapses** onto its prefix — it asks the index, not the docs |
 | `get_context(uuid, db_name, before, after, max_chars)` | the messages **around** a result, with the **full content**; on Claude Code sessions the neighbours come from the **session file** (the matched row says so in `vicini_da`); elsewhere, if the message is in a thread, from the **same thread** (`parent_uuid` edge), not from mere closeness in time. `max_chars` (0 = whole) truncates each row **saying so in the text** — on giant hub messages the full payload killed the connection. A row **without text** (a tool_use, the output of a command) also carries **`tools`**, the actions that are its content (since 0.52.0: before, it came out empty), truncated by `max_chars` like the text |
-| `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` and `tools` as in `get_context`. On Claude Code sessions it is the whole **session file** (`conversazione_da`), and with bundles carrying `recupero/` the session's card comes **last** |
+| `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` and `tools` as in `get_context`. On Claude Code sessions it is the whole **session file** (`conversazione_da`), and with bundles carrying `recupero/` the session's card comes **last**. Beyond `limit` rows (200) it returns a window that always contains the requested uuid and the card, declared in the `finestra` field of the match row |
 | `get_session(sessionId, db_name, limit, max_chars)` | everything the archive knows about **one** Claude Code **session**: the `sessioni` row, the **card**, the conversation's messages, the edges, the lineage — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | a session's **lineage**: the closure over the edges with `chiusura=1`, with each member's data — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
 | `list_projects(db_name, top)` | the `project` labels with their counts — to **browse** the archive, not just search it |
@@ -520,7 +520,9 @@ searching):
   `1777` doesn't find `N1777`).
 - Terms with special characters (`- . / @ : # '`) **in double quotes**:
   `"flutter-elinux"`, `"0.7.9"`. In *smart* mode (the default) the server quotes
-  them itself; with `raw=true` the query passes untouched (for NEAR/complex
+  them itself, colons included (`errore:grave`, a URL): since 0.62.3 `word:` stays a
+  column filter only if the word is a real column (`project:`, `content:`, `ts:`,
+  `uuid:`, `tools:`, `attachments:`); with `raw=true` the query passes untouched (for NEAR/complex
   parentheses). **But quoting isn't enough for the suffix** — see the box below.
 - `sort`: `rank` (relevance, default), `newest`, `oldest`. Filters `since`/`until`
   (ISO) and `project` (exact label). Across several DBs the `limit` is **global**.
@@ -675,7 +677,9 @@ possible. "It isn't there" and "I couldn't look" stay two different answers.
 2. **Know where it stopped.** `get_session(...)`: `sessione.stato`, the `scheda`
    (last words, open threads, commits).
 3. **Read it.** `get_conversation(sessione.last_uuid)` — the whole chat, with the
-   card at the end.
+   card at the end. If the chat exceeds `limit` (200) it returns the window around
+   `last_uuid`, that is the end, and the `finestra` field says so: for the whole of it,
+   raise `limit`.
 4. **Rebuild the family.** `get_stirpe(...)`: the members in order, and for each
    one `get_session` again.
 5. **Lineages from the text.** `search('"0f1e2d3c"', project="recupero:stirpi")`
