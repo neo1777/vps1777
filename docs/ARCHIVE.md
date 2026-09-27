@@ -426,7 +426,7 @@ dalla Mini App). Tutti passano dalla redazione in uscita descritta sopra.
 | `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings`. Stessi filtri di `search`, `campi` compreso |
 | `check_term(term, db_name)` | diagnostica se un termine con `+`/`#` (`C++`, `C#`, `g++`) è ricercabile o **collassa** sul prefisso — chiede all'indice, non alla doc |
 | `get_context(uuid, db_name, before, after, max_chars)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; sulle sessioni Claude Code i vicini vengono dal **file di sessione** (la riga cercata lo dice in `vicini_da`); altrove, se il messaggio è in un thread, dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale. `max_chars` (0 = intero) tronca ogni riga **dichiarandolo nel testo** — sui messaggi-hub giganti il payload pieno uccideva la connessione. Una riga **senza testo** (un tool_use, l'output di un comando) porta anche **`tools`**, le azioni che sono il suo contenuto (dalla 0.52.0: prima arrivava vuota), troncato da `max_chars` come il testo |
-| `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine `(ts, uuid)`) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` e `tools` come in `get_context`. Sulle sessioni Claude Code è il **file di sessione** intero (`conversazione_da`), e coi bundle con `recupero/` la scheda della sessione esce **in coda** |
+| `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine `(ts, uuid)`) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` e `tools` come in `get_context`. Sulle sessioni Claude Code è il **file di sessione** intero (`conversazione_da`), e coi bundle con `recupero/` la scheda della sessione esce **in coda**. Oltre `limit` righe (200) torna una finestra che contiene sempre l'uuid chiesto e la scheda, dichiarata nel campo `finestra` della riga del match |
 | `get_session(sessionId, db_name, limit, max_chars)` | tutto ciò che l'archivio sa di **una sessione** Claude Code: la riga di `sessioni`, la **scheda**, i messaggi della conversazione, gli archi, la stirpe — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | la **stirpe** di una sessione: la chiusura sugli archi con `chiusura=1`, coi dati di ogni membro — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
@@ -514,7 +514,9 @@ modello legge prima di cercare):
   separano: `1777` non trova `N1777`).
 - Termini con caratteri speciali (`- . / @ : # '`) **tra virgolette**:
   `"flutter-elinux"`, `"0.7.9"`. In modalità *smart* (default) il server li quota
-  da sé; con `raw=true` la query passa intatta (per NEAR/parentesi complesse).
+  da sé, compresi i due punti (`errore:grave`, un URL): dalla 0.62.3 `parola:` resta
+  un filtro di colonna solo se la parola è una colonna vera (`project:`, `content:`,
+  `ts:`, `uuid:`, `tools:`, `attachments:`); con `raw=true` la query passa intatta (per NEAR/parentesi complesse).
   **Ma il quoting non basta per il suffisso** — vedi il riquadro sotto.
 - `sort`: `rank` (rilevanza, default), `newest`, `oldest`. Filtri `since`/`until`
   (ISO) e `project` (etichetta esatta). Su più DB il `limit` è **globale**.
@@ -662,7 +664,8 @@ in cui è stata **cercata**, quelli con la tabella **vuota** (nessun bundle con
 2. **Sapere dove si era fermata.** `get_session(...)`: `sessione.stato`, la
    `scheda` (ultime parole, fili aperti, commit).
 3. **Leggerla.** `get_conversation(sessione.last_uuid)` — la chat intera, con la
-   scheda in coda.
+   scheda in coda. Se la chat supera `limit` (200) torna la finestra attorno a
+   `last_uuid`, cioè la fine, e il campo `finestra` lo dice: per l'intera, alza `limit`.
 4. **Ricostruire la famiglia.** `get_stirpe(...)`: i membri in ordine, e per
    ciascuno di nuovo `get_session`.
 5. **Le stirpi dal testo.** `search('"0f1e2d3c"', project="recupero:stirpi")`

@@ -43,7 +43,16 @@ _FTS_OPERATORS = {"AND", "OR", "NOT", "NEAR"}
 _SPLIT = re.compile(r'"[^"]*"|\S+')
 # costrutti FTS "strutturali": se la query li usa, NON la si tocca (quotare
 # spezzerebbe la semantica). NEAR, parentesi di gruppo, column filter `col:term`.
-_ADVANCED = re.compile(r"\bNEAR\b|[()]|\w+\s*:", re.UNICODE)
+# Il column filter vale solo per le colonne VERE di messages_fts: prima bastava una
+# `parola:` qualunque, e `errore:grave` o un URL passavano intatti al parser e morivano
+# con «no such column» — mentre la doc prometteva che il server li quotasse (27/09).
+_COLONNE_FTS = {"uuid", "project", "ts", "content", "tools", "attachments"}
+_ADVANCED = re.compile(r"\bNEAR\b|[()]", re.UNICODE)
+_COLONNA = re.compile(r"(?<![\w\-./:])(\w+)\s*:(?!//)", re.UNICODE)
+
+
+def _usa_colonna(q: str) -> bool:
+    return any(m.group(1).lower() in _COLONNE_FTS for m in _COLONNA.finditer(q))
 
 
 def sanitize_query(query: str) -> str:
@@ -57,7 +66,7 @@ def sanitize_query(query: str) -> str:
     la rifiuta, ricade sull'originale prima di dichiarare l'errore.
     """
     q = query or ""
-    if _ADVANCED.search(q):
+    if _ADVANCED.search(q) or _usa_colonna(q):
         return q
     out: list[str] = []
     for tok in _SPLIT.findall(q):
@@ -465,6 +474,35 @@ def context_conn(conn: sqlite3.Connection, uuid: str, *, before: int = 3,
     return out
 
 
+def _finestra(righe: list[dict[str, Any]], uuid: str, limit: int,
+              coda: list[dict[str, Any]] | None = None, *,
+              totale: int | None = None, inizio: int = 0) -> list[dict[str, Any]]:
+    """Le righe da restituire quando la chat è più lunga di `limit` (27/09): una
+    finestra che CONTIENE l'uuid chiesto, più la coda (le schede) — prima si prendevano
+    le prime `limit` e il match poteva restare fuori. Se si taglia, la riga del match
+    porta `finestra`: quante righe ha la chat e quali sono queste. `totale`/`inizio`
+    servono quando le righe arrivano già ritagliate da SQL (il fallback lineare)."""
+    coda = (coda or [])[: max(0, limit - 1)]
+    spazio = max(1, limit - len(coda))
+    n = totale if totale is not None else len(righe)
+    if totale is None and len(righe) > spazio:
+        i = next((k for k, r in enumerate(righe) if r["uuid"] == uuid), len(righe) - 1)
+        inizio = min(max(0, i - spazio // 2), len(righe) - spazio)
+        righe = righe[inizio: inizio + spazio]
+    out = righe + coda
+    for r in out:
+        r["is_match"] = (r["uuid"] == uuid)
+    if n > len(righe):
+        match = next((r for r in out if r["is_match"]), None)
+        if match is not None:
+            match["finestra"] = {
+                "righe": n + len(coda), "da": inizio + 1, "a": inizio + len(righe),
+                "nota": f"la chat ha {n + len(coda)} righe: queste sono {inizio + 1}-"
+                        f"{inizio + len(righe)}" + (" più la scheda" if coda else "")
+                        + "; alza `limit` per averla intera"}
+    return out
+
+
 def conversation_conn(conn: sqlite3.Connection, uuid: str, *,
                       limit: int = 200) -> list[dict[str, Any]]:
     """Il thread di conversazione che CONTIENE `uuid` — camminando l'albero
@@ -503,9 +541,8 @@ def conversation_conn(conn: sqlite3.Connection, uuid: str, *,
                     "CROSS JOIN messages m ON m.uuid = s.uuid WHERE s.source IN (?, ?) "
                     "ORDER BY m.rowid", membri).fetchall()]  # CROSS: prima i pochi sightings
                 # (senza, il planner scorreva `messages` in ordine di rowid: 1,2 s misurati)
-            out = (seq + coda)[: int(limit)]
+            out = _finestra(seq, uuid, int(limit), coda)
             for r in out:
-                r["is_match"] = (r["uuid"] == uuid)
                 if r["is_match"]:
                     r["conversazione_da"] = f"file di sessione {fonte}"
             return out
@@ -514,18 +551,26 @@ def conversation_conn(conn: sqlite3.Connection, uuid: str, *,
         qmarks = ",".join("?" * len(ids))
         rows = conn.execute(
             f"SELECT uuid, project, ts, content, sender FROM messages "
-            f"WHERE uuid IN ({qmarks}) ORDER BY ts ASC, uuid ASC LIMIT ?",
-            (*ids, int(limit))).fetchall()
-    else:
-        # fallback lineare (coda-documenti / db storici senza arco)
-        rows = conn.execute(
-            "SELECT uuid, project, ts, content, sender FROM messages "
-            "WHERE project = ? ORDER BY ts ASC, uuid ASC LIMIT ?",
-            (anchor["project"], int(limit))).fetchall()
-    out = [dict(r) for r in rows]
-    for r in out:
-        r["is_match"] = (r["uuid"] == uuid)
-    return out
+            f"WHERE uuid IN ({qmarks}) ORDER BY ts ASC, uuid ASC",
+            tuple(ids)).fetchall()
+        return _finestra([dict(r) for r in rows], uuid, int(limit))
+    # fallback lineare (coda-documenti / db storici senza arco): un project può avere
+    # decine di migliaia di righe, quindi la finestra si ritaglia in SQL attorno alla
+    # posizione dell'uuid, senza leggere il resto.
+    pos = conn.execute(
+        "SELECT count(*) FROM messages m, messages a WHERE a.uuid = ? "
+        "AND m.project = a.project AND (coalesce(m.ts, '') < coalesce(a.ts, '') OR "
+        "(coalesce(m.ts, '') = coalesce(a.ts, '') AND m.uuid < a.uuid))",
+        (uuid,)).fetchone()[0]
+    totale = conn.execute("SELECT count(*) FROM messages WHERE project = ?",
+                          (anchor["project"],)).fetchone()[0]
+    spazio = max(1, int(limit))
+    inizio = min(max(0, pos - spazio // 2), max(0, totale - spazio))
+    rows = conn.execute(
+        "SELECT uuid, project, ts, content, sender FROM messages "
+        "WHERE project = ? ORDER BY coalesce(ts, '') ASC, uuid ASC LIMIT ? OFFSET ?",
+        (anchor["project"], spazio, inizio)).fetchall()
+    return _finestra([dict(r) for r in rows], uuid, spazio, totale=totale, inizio=inizio)
 
 
 def projects_conn(conn: sqlite3.Connection, *, top: int = 1000) -> list[dict[str, Any]]:
@@ -565,8 +610,15 @@ def db_stats_conn(conn: sqlite3.Connection) -> dict[str, Any]:
         # non sono EVENTI, non hanno una data di nascita. Senza NULLIF la stringa vuota
         # vince su min() e `oldest` diventa "" — il tool direbbe «non so da quando»
         # sapendolo. NULLIF le esclude dal minimo; max() le ignora già (vuoto ordina prima).
+        # `newest` con la regola dello schema: MAX(ts) WHERE ts_source <> 'data-export'.
+        # Le schede e le memorie di `recupero/` portano il ts della FOTOGRAFIA, e senza
+        # il filtro spostavano il «più recente» in avanti (audit della doc, 27/09). Un DB
+        # nato prima della colonna non ha righe-fotografia dichiarate: max(ts) e basta.
+        colonne = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
+        massimo = ("max(CASE WHEN ts_source IS NOT 'data-export' THEN ts END)"
+                   if "ts_source" in colonne else "max(ts)")
         lo, hi = conn.execute(
-            "SELECT min(NULLIF(ts,'')), max(ts) FROM messages").fetchone()
+            f"SELECT min(NULLIF(ts,'')), {massimo} FROM messages").fetchone()
         oldest, newest = lo or "", hi or ""
         labels = int(conn.execute(
             "SELECT count(DISTINCT project) FROM messages").fetchone()[0])
