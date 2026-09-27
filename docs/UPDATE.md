@@ -7,7 +7,7 @@ versione non torna in salute.
 
 Modello: **registry-pull**. Le immagini vengono buildate e firmate dalla CI
 a ogni release e pubblicate su GHCR; la tua VPS fa solo `docker compose pull`.
-**Niente build in produzione** — su una VPS 4GB compilare Chromium durante un
+**Niente build in produzione** — su una VPS 4GB compilare le immagini durante un
 update è il momento migliore per un OOM, quindi non succede mai.
 
 ## TL;DR

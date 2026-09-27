@@ -44,9 +44,9 @@ updates:
       base-images:
         patterns: ["*"]
     # python:3.12-slim → 3.14 è un salto MINOR in semver-docker (major=3 resta).
-    # Un cambio di runtime Python sull'immagine con Chromium/Playwright (nb1777-mcp)
-    # NON è validato dal solo `docker build` della CI: la PR #34 passava il build
-    # ma nessuno prova Chromium headless + il flusso nlm a runtime. Restiamo sulla
+    # Un cambio di runtime Python sull'immagine di nb1777-mcp NON è validato dal
+    # solo `docker build` della CI: la PR #34 passava il build ma nessuno provava il
+    # flusso nlm a runtime (allora c'era anche Chromium headless, tolto nella 0.61.0). Restiamo sulla
     # linea 3.12, bump manuale quando la cadenza di release si assesta. `uv` e le
     # patch di python restano liberi.
     ignore:

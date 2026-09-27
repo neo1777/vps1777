@@ -9,7 +9,7 @@ version doesn't come back healthy.
 
 Model: **registry-pull**. Images are built and signed by CI at every release
 and published to GHCR; your VPS only runs `docker compose pull`.
-**No builds in production** — on a 4GB VPS, compiling Chromium in the middle of
+**No builds in production** — on a 4GB VPS, compiling the images in the middle of
 an update is the perfect moment for an OOM, so it never happens.
 
 ## TL;DR

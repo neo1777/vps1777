@@ -2,9 +2,12 @@
 #
 # vps1777 nb1777-mcp — NotebookLM via CLI `nlm`.
 #
-# Chromium headless serve a nlm per le sessioni di scraping del frontend
-# NotebookLM. Non possiamo usare distroless (no Chromium). Runtime è
-# python:3.12-slim + chromium + libs Playwright.
+# Runtime: python:3.12-slim + tini. NIENTE browser dalla 0.61.0: fino alla 0.60.0 qui
+# c'erano `chromium` e le librerie di Playwright «per nlm headless», ma il server non
+# lancia mai il browser. nlm lo userebbe solo per il refresh headless, che è spento
+# (NOTEBOOKLM_DISABLE_HEADLESS_REFRESH=1 in compose.yaml) e che in ogni caso vuole un
+# profilo di browser salvato che nel container non c'è: da /admin/nlm arrivano solo i
+# cookie. Chromium pesava 376 MB su 902 MB. Presidio: tools/tests/test_nb1777_senza_browser.py.
 
 # ─────────────────────────────────────── builder
 FROM python:3.12-slim AS builder
@@ -34,12 +37,7 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 # ─────────────────────────────────────── runtime
 FROM python:3.12-slim
 
-# Chromium + dipendenze Playwright (per nlm headless)
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        chromium \
-        libgbm1 libasound2 libnss3 libxshmfence1 libxss1 libxtst6 \
-        libxrandr2 libxcomposite1 libxdamage1 libxfixes3 \
-        libgtk-3-0 libpangocairo-1.0-0 fonts-liberation \
         tini ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -70,7 +68,6 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     NLM_HOME=/var/lib/nlm \
     HOME=/var/lib/nlm \
-    CHROME_BIN=/usr/bin/chromium \
     VPS1777_VERSION=${VPS1777_VERSION}
 
 WORKDIR /app

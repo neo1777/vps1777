@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **L'immagine di nb1777-mcp non contiene più un browser: 331 MB invece di 902 MB.**
+  Chromium e le librerie di Playwright erano lì «per nlm headless», ma il server non lancia
+  mai il browser. nlm lo userebbe solo per il refresh headless, spento dalla 0.60.0, che
+  comunque vuole un profilo di browser salvato: nel container non c'è, perché da
+  `/admin/nlm` arrivano solo i cookie. Chromium da solo pesava 376 MB, ed era superficie
+  d'attacco senza uso. Un test nuovo (`tools/tests/test_nb1777_senza_browser.py`) impedisce
+  che rientri senza una ragione.
+- **Commenti allineati**: in `compose.yaml` il commento dell'ancora `x-readonly` diceva
+  ancora «NON applicato a nb1777-mcp». Era vero fino alla 0.58.0, ed è rimasto indietro
+  quando H43 è stato chiuso. Aggiornati anche ARCHITECTURE (IT/EN), UPDATE (IT/EN),
+  `dependabot.yml` e il prompt della roadmap di argus1777, che indicava nb1777-mcp come
+  modello «con Chromium headless».
+
 ### Corretto
 - **`doctor` riporta solo la versione di nlm**: dalla 0.9 `nlm --version` aggiunge una
   seconda riga («You are on the latest version.», da un controllo su PyPI con cache di 24
