@@ -89,6 +89,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   dall'audit della documentazione (27/09).
 
 ### Documentazione
+- **SECURITY.md allineata al codice** (audit della documentazione, 27/09): la Mini App si
+  verifica con la chiave derivata e una finestra di 12 ore (non col token, non 24 ore);
+  `archive-data` lo scrive anche il job `indice-notturno`; `RELEASE_PAT` riaprirebbe H24;
+  Dependabot copre anche `uv`; il digest nel compose è facoltativo finché un'installazione
+  nuova non fa il primo update; della fascia alta restano parziali H4, H5 e H51 (non «tutta
+  chiusa»); H24 fuori dall'elenco dei parziali; la sintesi inglese dice come segnalare una
+  vulnerabilità come la parte italiana (niente issue pubbliche, l'email).
 - **README IT/EN, INSTALL IT/EN, UPDATE IT/EN, OPS, PRIMI-15-MINUTI, GLOSSARIO,
   CONTRIBUTING IT/EN allineati al codice** (audit della documentazione, 27/09): i cinque
   secret del gateway (non il token del bot); lo snapshot pre-update ha due volumi; la
