@@ -1756,6 +1756,26 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
     # arriva prima di ogni messaggio resta '' (onesto: la fonte non lo dice).
     # NIENTE riordini: l'ordine di resa è un CONTRATTO (classify_cc/cc_buckets).
     ultimo_ts = ""
+    # A5 (27/09/2026) — LA CATENA SALTA I RECORD NON TENUTI. Il genitore di un messaggio
+    # è spesso un record che qui non si tiene (una riga di servizio, un allegato senza
+    # nomi, un messaggio vuoto): la riga restava appesa a un uuid che nel DB non esiste —
+    # misurato: 40,3% delle righe con genitore in 47 sessioni del PC, 32% sul primario.
+    # `ponte` ricorda, per ogni scartato con uuid, il SUO genitore; una riga tenuta risale
+    # il ponte finché il genitore è un record tenuto (o la radice). Guardia sui cicli.
+    # I DB già scritti non si curano da qui: `skipped` non conserva i genitori.
+    ponte: dict[str, str] = {}
+
+    def _genitore(p: str) -> str:
+        visti: set[str] = set()
+        while p in ponte and p not in visti:
+            visti.add(p)
+            p = ponte[p]
+        return p
+
+    def _ricorda(rec: dict) -> None:
+        if rec.get("uuid"):
+            ponte[str(rec["uuid"])] = str(rec.get("parentUuid") or "")
+
     for line in fh:
         read += len(line)
         if read > MAX_FILE_BYTES:
@@ -1790,12 +1810,14 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
                     yield (str(d["uuid"]),
                            project or _label_da_cwd(str(d.get("cwd") or "")),
                            str(d.get("timestamp") or ""), "", "attachment", "", "",
-                           added.strip(), str(d.get("parentUuid") or ""))
+                           added.strip(), _genitore(str(d.get("parentUuid") or "")))
                 else:
+                    _ricorda(d)
                     yield _Skip("claude-code", "non-message", str(d)[:200], str(d.get("timestamp") or ""))
             else:
                 # metadati operativi (mode/system/last-prompt/queue-operation/…): non un
                 # messaggio, ma lascia una lapide contata invece di sparire in silenzio.
+                _ricorda(d)
                 yield _Skip("claude-code", "non-message", str(d)[:200], str(d.get("timestamp") or ""))
             continue
         uuid, ts = d.get("uuid"), d.get("timestamp")
@@ -1812,6 +1834,7 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
         # sessione agentica ne è piena) spariva senza lasciare traccia. Ora basta che
         # abbia UN contenuto qualsiasi.
         if not (blocks.text or blocks.tools or blocks.thinking):
+            _ricorda(d)
             yield _Skip("claude-code", "empty", str(uuid), str(ts))
             continue
         proj = project or _label_da_cwd(str(d.get("cwd") or ""))
@@ -1840,7 +1863,7 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             sender = "sistema"
         ultimo_ts = str(ts)
         yield (uuid, proj, ts, blocks.text, sender,
-               blocks.tools, blocks.thinking, "", str(d.get("parentUuid") or ""))
+               blocks.tools, blocks.thinking, "", _genitore(str(d.get("parentUuid") or "")))
 
 
 def classify_cc(fh: IO[str]) -> list[str]:

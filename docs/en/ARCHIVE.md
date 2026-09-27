@@ -483,8 +483,16 @@ The `ruolo` (role) field makes it readable.
 > it. Since 26/09 the two tools, for rows seen in a `sessions/` or `subagents/` file
 > (`sightings` table), use **that file**: the real conversation, with no gaps and
 > without the other parallel sessions of the same project. Several copies of the
-> same uuid (the `__fN` strands): the main file wins. Re-linking the chain at
-> ingest (skipping the records not kept) remains a **declared** step, not done.
+> same uuid (the `__fN` strands): the main file wins.
+>
+> **Since 0.62.0 the chain is re-linked at ingest**: a row whose parent is a record not
+> kept climbs up to the first kept ancestor (or to the root). Measured on 47 sessions of
+> a PC: the missing parent went from **40.3%** of rows to **5 rows out of 132,912**. It
+> applies to what is ingested from now on. DBs already written stay as they were, because
+> the `skipped` table does not keep the parents of discarded records: only a new ingest of
+> the bundle fixes them. The two tools keep reading the session file, so nothing changes
+> for whoever searches; it changes for whoever reads the DB by hand or walks
+> `parent_uuid`.
 
 **FTS5 query syntax** (the same rules are in the docstring the model reads before
 searching):
