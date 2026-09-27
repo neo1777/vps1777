@@ -143,8 +143,12 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # BACKUP, cioè la cosa che si scopre rotta solo il giorno in cui serve — quando
 # non si rimedia più. Un restore che mente e un backup che non cifra non fanno
 # danno finché non li usi, e questo li rende peggiori, non migliori.
-EXPECTED_TOTAL = 73
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 40, "low": 19}
+# + 1 (H74, medium, 27/09) = 74. NONA FONTE: l'audit della documentazione «con la
+# stessa cura del codice» — rileggere ogni promessa dei doc contro il codice di oggi.
+# La redazione prometteva di coprire le credenziali e l'anagrafica in OGNI risposta, e
+# lo faceva sul testo intero: lo snippet è un ritaglio, e il ritaglio usciva.
+EXPECTED_TOTAL = 74
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 41, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

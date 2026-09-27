@@ -46,6 +46,17 @@ step that covers:
   blocks → "[credenziale redatta]"; and the **path** of `*.trycloudflare.com` URLs (a quick
   tunnel is secret by URL): the host stays.
 
+All of this also holds inside **snippets**, which are the delicate spot. The FTS5 snippet
+highlights the searched term with `«»` (since 0.62.2 the redaction reads the text as if the
+markers were not there: a `ghp*` search returned `«ghp»_<rest>` in clear). And it is a
+**window** that starts and ends wherever it happens to, even halfway through a secret,
+marked with `…`; the vector branch of `search_ibrida` cuts the text at 400 characters. That
+is why, since 0.62.3, a secret **cut by the edge** is masked too: a known prefix followed by
+at least 8 characters at the end of the text, a run of at least 20 characters with upper
+case, lower case and digits right after the opening `…`, a private-key block of which only
+the start or only the end shows. The account's values are matched regardless of case and
+across the markers (`«Mario» Rossi`).
+
 **It does not cover**: passwords and secrets with no recognisable format, IPs, postal
 addresses, names of third parties that never appeared in the account data. *Anyone with
 access to the archive finds those secrets with a query.* The phone-number pattern does **not** apply
