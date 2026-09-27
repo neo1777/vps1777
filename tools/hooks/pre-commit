@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# pre-commit — dice su QUALE RAMO stai per scrivere. Non blocca mai.
+# pre-commit — dice su QUALE RAMO stai per scrivere (un avviso, non blocca), poi
+# tre gate che BLOCCANO: anti-leak sulle righe che entrano, shellcheck sui .sh, ruff sui .py.
 #
 # PERCHÉ ESISTE: ~/Scrivania/vps1777 è UNA working copy per tre sessioni. Il ramo
 # corrente non è una proprietà di chi lo cambia: è uno STATO GLOBALE. Il 27/07
@@ -11,7 +12,7 @@
 # succede al commit. Fra i due c'è una finestra, ed è esattamente quella in cui è
 # successo. Al momento del commit c'è la mano che può ancora fermarsi.
 #
-# PERCHÉ PARLA E NON BLOCCA: un ramo dichiarato sul bus è legittimo, e un
+# PERCHÉ L'AVVISO SUL RAMO PARLA E NON BLOCCA: un ramo dichiarato sul bus è legittimo, e un
 # guardiano che ferma il caso buono viene disattivato la prima volta che succede.
 # E qui parlare BASTA, perché non ricorda una cosa che già sai — ne porta una che
 # non potevi sapere: che il ramo l'ha cambiato un'altra mano. Un avviso che porta
@@ -47,7 +48,8 @@ ramo=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
 #   ⭐ Non l'ho previsto: l'ho visto rileggendo il file dopo averlo scritto.
 #   🔑 *Un `exit 0` che chiude una funzione è corretto finché quella funzione è
 #      l'ultima. Aggiungere un passo dopo non lo rompe — lo rende invisibile.*
-# 🔴 28/07 — «main» ERA SCRITTO A MANO, e in QUESTO repo il ramo si chiama `master`.
+# 🔴 28/07 — «main» ERA SCRITTO A MANO, e in _chat (il repo dove questo file è nato,
+#   che lo usa ancora) il ramo si chiama `master`.
 #   ⇒ l'avviso «stai committando su X, NON su main» scattava a OGNI commit, per
 #   mesi, su un confronto che non poteva riuscire — e `git rev-list main..X`
 #   falliva in silenzio dentro l'`if`, quindi nemmeno la riga dei commit usciva.
@@ -127,11 +129,22 @@ avvisa_ramo
 #      può funzionare dev'essere rumoroso, non invisibile: «non ho potuto
 #      guardare» non è «è pulito». Vale anche per python3, che nella versione di
 #      ieri era una guardia MUTA nella stessa `if`: assente lui, silenzio totale.
+# ③ (27/09, audit della doc) su un clone qualunque di vps1777 né il primo né il secondo
+#   esistono, e il gate era sempre «NON MISURATO». C'è però il criterio della CI,
+#   `security/check_no_leaks.py`: guarda tutti i file tracciati e non le sole righe
+#   aggiunte, ma è lo stesso verdetto che la CI darebbe dopo il push.
 GATE="$(git rev-parse --show-toplevel 2>/dev/null)/gate-antileak.py"
 [ -f "$GATE" ] || GATE="$HOME/Scrivania/mcp_dash/_chat/gate-antileak.py"
-if [ ! -f "$GATE" ]; then
+_GATE_CI="$(git rev-parse --show-toplevel 2>/dev/null)/security/check_no_leaks.py"
+if [ ! -f "$GATE" ] && [ -f "$_GATE_CI" ] && command -v python3 >/dev/null 2>&1; then
+  if ! python3 "$_GATE_CI" >&2; then
+    printf '\n%s[✗] COMMIT FERMATO dal gate anti-leak della CI%s (security/check_no_leaks.py)\n' "$G" "$Z" >&2
+    printf '    Sopra c è DOVE. Se devi passare comunque:  git commit --no-verify\n\n' >&2
+    exit 1
+  fi
+elif [ ! -f "$GATE" ]; then
   printf '\n%s[⚪] anti-leak: NON MISURATO — gate non trovato%s\n' "$G" "$Z" >&2
-  printf '     cercato in <toplevel>/gate-antileak.py e in _chat/\n' >&2
+  printf '     cercato in <toplevel>/gate-antileak.py, in _chat/ e in security/check_no_leaks.py\n' >&2
   printf '     Il commit passa, ma NESSUNO ha letto le righe che entrano.\n\n' >&2
 elif ! command -v python3 >/dev/null 2>&1; then
   printf '\n%s[⚪] anti-leak: NON MISURATO — python3 non nel PATH%s\n' "$G" "$Z" >&2
@@ -203,7 +216,9 @@ if [ -n "$_SH_STAGED" ]; then
   if command -v shellcheck >/dev/null 2>&1; then
     _SC="shellcheck"
   elif command -v docker >/dev/null 2>&1; then
-    _SC="docker run --rm -v $PWD:/mnt -w /mnt koalaman/shellcheck:stable"
+    # la stessa immagine della CI, per digest (ci.yml): con `:stable` si validava in
+    # locale con una versione e la CI giudicava con un'altra (lì raccontato)
+    _SC="docker run --rm -v $PWD:/mnt -w /mnt koalaman/shellcheck@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d"
   else
     _SC=""
   fi
@@ -245,7 +260,7 @@ if [ -n "$_PY_STAGED" ]; then
   if command -v ruff >/dev/null 2>&1; then
     _RUFF="ruff"
   elif command -v uvx >/dev/null 2>&1; then
-    _RUFF="uvx ruff"          # è così che lo invoca la CI: stesso strumento, stessa resa
+    _RUFF="uvx ruff@0.15.22"  # la versione della CI (ci.yml): stesso strumento, stessa resa
   else
     _RUFF=""
   fi

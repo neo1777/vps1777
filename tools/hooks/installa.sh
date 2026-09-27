@@ -77,7 +77,7 @@ DESTINAZIONE="$(git rev-parse --path-format=absolute --git-common-dir)/hooks"
 
 # i nomi che git riconosce: tutto il resto in `tools/hooks/` è corredo (questo script).
 # Enumerati e non dedotti per esclusione, così aggiungerne uno è una decisione scritta.
-NOMI_HOOK="pre-commit pre-push commit-msg prepare-commit-msg post-commit post-merge"
+NOMI_HOOK="pre-commit pre-push commit-msg prepare-commit-msg post-commit post-merge pre-rebase post-checkout"
 
 hook_sorgente() {
     local n
@@ -105,6 +105,16 @@ stato() {
         case " $NOMI_HOOK " in *" $n "*) continue ;; esac
         echo "  ⓘ $n — versionato ma NON installato: non è fra i nomi che riconosco"
         echo "     ($NOMI_HOOK). Se è un hook, aggiungilo a NOMI_HOOK: è una riga."
+    done
+    # ⓘ gli hook installati che NON vengono da qui (27/09, rilievo di Sagoma): su una
+    #   macchina con altri strumenti (es. un `commit-msg` messo da uno script esterno)
+    #   `--stato` taceva, e chi guardava pensava che in .git/hooks ci fosse solo il repo.
+    for f in "$DESTINAZIONE"/*; do
+        [ -f "$f" ] && [ -x "$f" ] || continue
+        n="$(basename "$f")"
+        case " $NOMI_HOOK " in *" $n "*) ;; *) continue ;; esac
+        [ -f "$SORGENTE/$n" ] && continue
+        echo "  ⓘ $n — installato su questa macchina ma NON versionato qui: viene da altro"
     done
     for n in $(hook_sorgente); do
         src="$SORGENTE/$n"; dst="$DESTINAZIONE/$n"
