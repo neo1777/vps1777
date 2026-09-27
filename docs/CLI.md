@@ -244,6 +244,17 @@ vps1777 archive-migra                                  # anteprima su tutti i DB
 vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
 ```
 
+Con `--telegram` (e `--db`, obbligatorio) dà lo `speaker` ai messaggi di un **gruppo
+Telegram** già caricato: il proprietario `human`, gli altri membri `other`. Il
+proprietario lo dicono i suoi nomi Telegram in `ARCHIVE_TELEGRAM_PROPRIETARIO` nel `.env`
+(senza, esce 2); si lancia solo sui DB che sono export Telegram
+([ARCHIVE.md](ARCHIVE.md)).
+
+```bash
+vps1777 archive-migra --db gruppo-telegram --telegram           # anteprima
+vps1777 archive-migra --db gruppo-telegram --telegram --scrivi  # applica
+```
+
 ## vps1777 secrets-status
 
 Età e scadenze dei secret (chiavi, token, cookie NotebookLM): elenca cosa è da

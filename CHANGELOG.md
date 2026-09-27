@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Nei gruppi Telegram dell'archivio il proprietario è `human` e gli altri membri
+  `other`** (scelta di Neo, 27/09, su rilievo della curatrice): prima lo speaker era
+  sempre `unknown` e `speaker='human'` rispondeva 0 anche sui messaggi del proprietario.
+  Chi è il proprietario lo dice la configurazione, mai una stima: `TELEGRAM_OWNER_ID`
+  contro il `from_id` dell'export JSON, i nomi in `ARCHIVE_TELEGRAM_PROPRIETARIO` per
+  l'export HTML e per i DB già caricati (`vps1777 archive-migra --db <nome> --telegram`,
+  a secco di default). Senza configurazione resta tutto `unknown`. `other` è un valore
+  nuovo di `speaker`, accettato da `search`, `count` e `search_ibrida`.
+
 ### Hook git
 - **Il `pre-commit` versionato dice cosa fa, e usa gli strumenti della CI** (rilievi di
   Sagoma e dell'audit della documentazione, 27/09). L'intestazione diceva «Non blocca
