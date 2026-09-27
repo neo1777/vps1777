@@ -28,6 +28,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   dall'audit della documentazione (27/09).
 
 ### Documentazione
+- **NB1777, MINIAPP, PLUGINS, ONBOARDING e i docstring di nb1777-mcp allineati al
+  codice** (audit della documentazione, 27/09): sei endpoint interni e non quattro;
+  in compose nb1777-mcp ascolta su `0.0.0.0` della rete interna; il bot lo chiama
+  direttamente; il container senza browser, col rootfs in sola lettura e il client
+  0.12.0; `studio_download` restituisce un `download_url`; la Mini App verificata con
+  la chiave derivata (H54), l'URL mascherato (H26) e l'owner ricontrollato a ogni
+  richiesta (H27); il plugin d'esempio si configura con `PLUGIN_HOST`/`PLUGIN_PORT` in
+  `__main__.py`, e il bot d'esempio sta anche su `egress` (senza, non raggiungeva
+  Telegram: curato anche il file d'esempio); il pannello di setup si apre dal
+  loopback (Funnel, dominio HTTPS o tunnel SSH), non da `http://<IP>:8080`; `--apply`
+  scrive la chiave derivata e azzera `TS_AUTHKEY`. Docstring nuovi o corretti per
+  `source_add_file` (il path è del container), `source_rename`, `studio_rename`,
+  `studio_create_all_9`, `memoria_check`.
 - **ARCHITECTURE IT/EN allineata al codice** (audit della documentazione, 27/09):
   il gateway non ha più il token del bot ma la chiave derivata (H54) e vede la cartella
   `onboarding/` dell'host; la rete `funnel` del profilo Tailscale e il gateway fuori da
