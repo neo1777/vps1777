@@ -19,6 +19,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   dall'audit della documentazione (27/09).
 
 ### Documentazione
+- **ARCHITECTURE IT/EN allineata al codice** (audit della documentazione, 27/09):
+  il gateway non ha più il token del bot ma la chiave derivata (H54) e vede la cartella
+  `onboarding/` dell'host; la rete `funnel` del profilo Tailscale e il gateway fuori da
+  `ingress` in `compose.yaml` (H50); i volumi `nlm-artifacts`, `gateway-uploads`,
+  `caddy-config`, `portainer-data` (`cf-data` non esisteva); il job `indice-notturno`;
+  i sei endpoint interni di nb1777-mcp (mancavano i due degli artefatti); il flusso di
+  installazione del profilo sta in nb1777-mcp, non nel gateway; `up -d` e non `restart`
+  per un plugin; auto-update con quarantena e digest nel `.env`; i secret sono bind-mount,
+  non tmpfs; gli overlay operativi senza `cap_drop` dichiarati. La tabella degli hardening
+  della review diventa storia dichiarata, con una tabella «dopo il dossier» (v0.40 →
+  v0.62) e i conteggi del registro di oggi (73: 62 chiusi, 8 parziali, 3 accettati).
+  Nel riquadro, le colonne allineate e la porta di ocr. In `compose.yaml` i commenti
+  stantii: «FastMCP senza /health» sopra un healthcheck HTTP, `auth.json`,
+  `gateway-uploads` «fuori dal backup», secret «tmpfs», l'intestazione delle reti fuori posto.
 - **RICERCA-IBRIDA IT/EN**: la tabella dei parametri (`speaker`, `limit` da 1 a 200,
   la finestra temporale), l'esito del banco dei modelli del 27/09 (resta e5-small:
   nessun candidato lo batte sui soli vettori), l'indice di `memoria-claudeai-20260926`

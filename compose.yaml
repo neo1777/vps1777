@@ -139,7 +139,7 @@ services:
       # immutabile, H43) e Starlette vi spoola i multipart — un upload da 2,6 GB
       # (bundle recupero-sessioni) la saturava e la pagina Archive moriva con un
       # 500 «No space left on device» (2026-07-20, dal vivo; 92 MB passavano).
-      # TMPDIR sposta lo spool qui; il volume è usa-e-getta, fuori dal backup.
+      # TMPDIR sposta lo spool qui. Il backup lo copre dal 29/08 (compose.ops.backup.yaml).
       - gateway-uploads:/var/lib/uploads:rw
     networks:
       - backend
@@ -203,7 +203,6 @@ services:
       - backend
     expose:
       - "8002"
-    # FastMCP espone solo /mcp (no /health) → healthcheck su TCP socket
     healthcheck:
       # /health prova il MESTIERE (settings+volume+registry DB), non la porta:
       # su questo verde si appoggia il health-gate dell'updater (vaglio 03/09).
@@ -286,7 +285,6 @@ services:
       - egress
     expose:
       - "8003"
-    # FastMCP espone solo /mcp (no /health) → healthcheck su TCP socket
     healthcheck:
       # /health prova settings+volume dati (mai NotebookLM: un health che dipende
       # da un esterno riavvia il container per i guasti altrui) — vaglio 03/09.
@@ -333,11 +331,6 @@ services:
       retries: 3
       start_period: 20s
 
-# ──────────────────────────────────────────────────────────────────────
-# Reti
-#   - backend: internal, niente ingress/egress
-#   - ingress: per il proxy davanti (Tailscale/Caddy/Cloudflared)
-# ──────────────────────────────────────────────────────────────────────
   # ──────────────────────────────────────────────────────────────────────
   # ocr — gli occhi dell'ingest (B5, 28/08/2026). SOLO rete interna.
   # Il subprocess tesseract vive QUI e non nel gateway (invariante «il
@@ -364,6 +357,11 @@ services:
       retries: 3
       start_period: 10s
 
+# ──────────────────────────────────────────────────────────────────────
+# Reti — backend (interna), ingress (il proxy davanti), egress (l'uscita dei
+# backend che ne hanno bisogno). Col profilo Tailscale c'è anche `funnel`
+# (compose.ingress.tailscale.yaml). Vedi docs/ARCHITECTURE.md, «Rete».
+# ──────────────────────────────────────────────────────────────────────
 networks:
   # Comunicazione interna fra i servizi. internal: true → nessuna uscita a
   # Internet: chi sta SOLO qui (archive-mcp) non può esfiltrare nulla.
@@ -387,12 +385,13 @@ networks:
 volumes:
   gateway-data:    # /var/lib/gateway: audit log, ecc.
   archive-data:    # /var/lib/archive/{data,db}
-  nlm-auth:        # /var/lib/nlm: auth.json + AUTH_PENDING.flag
+  nlm-auth:        # /var/lib/nlm: profilo profiles/default/ (cookies.json) + AUTH_PENDING.flag
   nlm-artifacts:   # /var/lib/nlm-artifacts: artefatti Studio scaricati — NIENTE segreti
-  gateway-uploads: # /var/lib/uploads: spool multipart su disco (TMPDIR) — temp, NO backup
+  gateway-uploads: # /var/lib/uploads: spool multipart su disco (TMPDIR); nel backup dal 29/08
 
 # ──────────────────────────────────────────────────────────────────────
-# Secrets — file-mounted, tmpfs /run/secrets/<name>
+# Secrets — file-mounted in /run/secrets/<name> (con compose, non Swarm, è un
+# bind-mount in sola lettura del file sull'host, non una tmpfs)
 # Generati da setup.sh, mai committati (.gitignore copre secrets/*)
 # ──────────────────────────────────────────────────────────────────────
 secrets:
