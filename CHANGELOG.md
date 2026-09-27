@@ -12,6 +12,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   entrano con `sender='user'` (`speaker='human'`) e il loro posto nella catena. Le notifiche e
   i messaggi di altre sessioni accodati restano fuori: quando il programma li consegna, li
   scrive come turni suoi. Vale per i nuovi ingest. Rilievo della curatrice dei rimandi (27/09).
+- **`limit` ha un pavimento e un tetto** in `search` e `search_ibrida`: sotto 1 è un errore
+  che lo dice, sopra 200 si taglia. Prima `limit=-1` perdeva in silenzio l'ultimo risultato
+  (`[:-1]`), e un numero enorme non aveva misura (rimando aperto dal 12/07).
+
+### Aggiunto
+- **`search_ibrida` accetta `speaker`**, come `search`, e il filtro vale per tutte e due le
+  liste: nella parte full-text lo fa la query, nella parte vettoriale si scartano le righe
+  di un altro speaker (chiedendo più vicini, perché la fusione abbia ancora una lista
+  vera). Per «cosa ha detto Neo» su 20 risultati le sue parole erano da 0 a 8 (rilievo della
+  curatrice dei rimandi, 27/09).
+
 
 ## [0.62.0] — 2026-09-27
 

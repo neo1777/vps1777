@@ -96,7 +96,8 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
     Args:
         query: espressione FTS5.
         db_name: nome DB ('' = tutti; vedi list_databases / describe_databases).
-        limit: massimo risultati, GLOBALE anche su più DB (default 20).
+        limit: massimo risultati, GLOBALE anche su più DB (default 20, massimo 200;
+            sotto 1 è un errore).
         raw: se True passa la query intatta senza auto-quoting (default False).
         sort: 'rank' (rilevanza, default), 'newest' o 'oldest' (per data).
         since / until: filtro temporale sul ts (ISO, confronto lessicografico).
@@ -151,7 +152,7 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
 def search_ibrida(query: str, db_name: str = "", limit: int = 20,
                   query_fts: str = "", since: str = "", until: str = "",
                   campi: str = "tutto", k_rrf: int = 30, peso_fts: float = 1.5,
-                  snippet_tokens: int = 32) -> dict[str, Any]:
+                  snippet_tokens: int = 32, speaker: str = "") -> dict[str, Any]:
     """Cerca per SENSO, non per lessico: FTS5 + vettori fusi (issue #281).
 
     ⚖️ QUANDO USARLA — e quando no. `search` (FTS5) resta il tool giusto quando
@@ -177,7 +178,7 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
     Args:
         query: la domanda in linguaggio naturale (il senso).
         db_name: DB su cui cercare ('' = tutti quelli CON indice).
-        limit: righe restituite (default 20).
+        limit: righe restituite (default 20, massimo 200; sotto 1 è un errore).
         query_fts: espressione FTS5 opzionale per il ramo full-text.
         since / until: filtro temporale sul ramo FTS (ISO).
         campi: 'tutto' (default) o 'testo' come in `search`. Col 'testo' il ramo
@@ -187,6 +188,10 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
             (plateau k=20-40, peso 1.2-1.5): cambiarli è un esperimento, non
             una regolazione — il banco vale per questi.
         snippet_tokens: lunghezza dello snippet FTS.
+        speaker: CHI HA SCRITTO, come in `search` ('human', 'assistant', 'tool',
+            'system', 'unknown'). Filtra TUTTE e due le liste: per «cosa ha detto
+            Neo» usa speaker='human' — senza, su 20 risultati le sue parole erano
+            da 0 a 8 (misurato il 27/09).
 
     Ritorna {righe, indici, parametri}:
     - `righe`: come `search`, PIÙ `origine` = 'fts' | 'vettori' | 'entrambi'.
@@ -208,7 +213,8 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
     """
     return db.search_ibrida(query, db_name, limit, query_fts=query_fts,
                             since=since, until=until, campi=campi, k_rrf=k_rrf,
-                            peso_fts=peso_fts, snippet_tokens=snippet_tokens)
+                            peso_fts=peso_fts, snippet_tokens=snippet_tokens,
+                            speaker=speaker)
 
 
 @mcp.tool()
