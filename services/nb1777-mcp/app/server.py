@@ -321,6 +321,10 @@ async def source_rename(notebook_id: str, source_id: str, new_title: str) -> str
 # Le query lasciate indietro dal client: query_id → (task, nascita). Vivono nel processo
 # (stateless_http tiene un solo event loop); un riavvio le perde, e l'esito lo dice.
 _QUERY_IN_CORSO: dict[str, tuple["asyncio.Task", float]] = {}
+# La stessa domanda sullo stesso notebook → la stessa query (28/09). Un client con lo schema
+# vecchio dei tool non vede notebook_query_esito: rilanciare la domanda è il suo modo di
+# ritirarla, e senza questo indice ne farebbe partire un'altra (e ripartirebbe da zero).
+_QUERY_PER_DOMANDA: dict[tuple, str] = {}
 _QUERY_TTL = 1800.0           # una risposta non ritirata in 30 minuti si butta
 ATTESA_MAX_TETTO = 270.0      # come il timeout del subprocess di core.notebook_query
 
@@ -334,6 +338,9 @@ def _pulisci_query() -> None:
     for qid, (task, nata) in list(_QUERY_IN_CORSO.items()):
         if task.done() and ora - nata > _QUERY_TTL:
             _QUERY_IN_CORSO.pop(qid, None)
+    for chiave, qid in list(_QUERY_PER_DOMANDA.items()):
+        if qid not in _QUERY_IN_CORSO:
+            _QUERY_PER_DOMANDA.pop(chiave, None)
 
 
 async def _aspetta_query(qid: str, task: "asyncio.Task", attesa_max: float) -> dict:
@@ -344,9 +351,13 @@ async def _aspetta_query(qid: str, task: "asyncio.Task", attesa_max: float) -> d
         return {"stato": "in_corso", "query_id": qid,
                 "nota": (f"NotebookLM non ha ancora risposto dopo {_attesa(attesa_max):.0f} s: "
                          "la query continua sul server. Chiama notebook_query_esito(query_id) "
-                         "per ritirarla (può servire più di un giro: su un notebook grande "
-                         "NotebookLM arriva a qualche minuto).")}
+                         "per ritirarla, oppure rilancia notebook_query con la STESSA domanda "
+                         "sullo stesso notebook: si aggancia a questa invece di ripartire (è la "
+                         "via per i client che non vedono ancora notebook_query_esito). Può "
+                         "servire più di un giro: su un notebook grande NotebookLM arriva a "
+                         "qualche minuto.")}
     _QUERY_IN_CORSO.pop(qid, None)
+    _pulisci_query()
     return r
 
 
@@ -367,16 +378,28 @@ async def notebook_query(notebook_id: str, question: str,
     chiamata verso i 30 s («MCP tool call failed»). Perciò si aspetta al massimo
     `attesa_max` secondi (default 25, tetto 270): se la risposta non c'è ancora, torna
     {stato: "in_corso", query_id, nota} e la query CONTINUA sul server. Ritirala con
-    notebook_query_esito(query_id). Un client che sa aspettare passa attesa_max=270."""
+    notebook_query_esito(query_id), oppure RILANCIA la stessa domanda sullo stesso notebook:
+    si aggancia alla query in corso (o finita e non ritirata) invece di farne partire
+    un'altra. Un client che sa aspettare passa attesa_max=270."""
     async def _corpo():
         _check_auth_or_raise()
         _pulisci_query()
-        task = asyncio.create_task(asyncio.to_thread(
-            core.notebook_query, notebook_id, question, source_ids=source_ids,
-            conversation_id=conversation_id, verbose=verbose))
-        qid = uuid.uuid4().hex[:12]
-        _QUERY_IN_CORSO[qid] = (task, time.monotonic())
-        return await _aspetta_query(qid, task, attesa_max)
+        chiave = (notebook_id, question, tuple(source_ids or ()), conversation_id or "",
+                  bool(verbose))
+        qid = _QUERY_PER_DOMANDA.get(chiave)
+        if qid is None or qid not in _QUERY_IN_CORSO:
+            task = asyncio.create_task(asyncio.to_thread(
+                core.notebook_query, notebook_id, question, source_ids=source_ids,
+                conversation_id=conversation_id, verbose=verbose))
+            qid = uuid.uuid4().hex[:12]
+            _QUERY_IN_CORSO[qid] = (task, time.monotonic())
+            _QUERY_PER_DOMANDA[chiave] = qid
+        try:
+            return await _aspetta_query(qid, _QUERY_IN_CORSO[qid][0], attesa_max)
+        except Exception:
+            _QUERY_IN_CORSO.pop(qid, None)
+            _pulisci_query()
+            raise
     return await _esito("notebook_query", _corpo())
 
 
