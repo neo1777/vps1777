@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **La nota di `finestra` in `get_conversation` usciva redatta.** «queste sono 27718-27722»
+  ha la sagoma di un telefono (due gruppi di cifre col trattino), e la redazione in uscita
+  la mascherava: dal vivo sulla 0.63.0, «queste sono [telefono redatto] più la scheda». Ora
+  «queste vanno dalla 27718 alla 27722»; `da` e `a` restano campi numerici. Trovato dalla
+  prova dal vivo della release, il giorno stesso.
+
 ## [0.63.0] — 2026-09-28
 
 **L'audit della documentazione «con la stessa cura del codice»** (#351-#363): ogni doc
