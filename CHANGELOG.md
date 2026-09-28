@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.63.2] — 2026-09-28
+
+**nb1777-mcp scrive nel log i tool che falliscono**: un guasto visto dal client lascia la
+sua causa sulla VPS anche quando, un'ora dopo, tutto risponde di nuovo.
+
 ### Corretto
 - **nb1777-mcp scrive nel suo log i tool che falliscono** (nome, durata, errore senza
   contenuti e troncato). Il 28/09 una chat su claude.ai ha visto `notebook_query` fallire
