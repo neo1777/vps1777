@@ -618,6 +618,19 @@ def test_conversation_lunga_tiene_il_match_e_lo_dichiara():
                                   if r["is_match"])
 
 
+# La nota della finestra passa dalla redazione come ogni risposta. Scritta «27718-27722»
+# era la sagoma di un telefono (due gruppi di cifre col trattino): dal vivo, il 28/09 sulla
+# 0.63.0, usciva «queste sono [telefono redatto] più la scheda». Le cifre non vanno scritte
+# attaccate da un trattino: «dalla 27718 alla 27722».
+def test_nota_della_finestra_sopravvive_alla_redazione():
+    import redazione
+    righe = [{"uuid": f"m{i}"} for i in range(4)]
+    out = fts._finestra(righe, "m2", 4, [{"uuid": "scheda"}], totale=39615, inizio=27717)
+    nota = next(r for r in out if r["is_match"])["finestra"]["nota"]
+    assert "27718" in nota and "27721" in nota, nota
+    assert redazione.maschera_testo(nota) == nota, redazione.maschera_testo(nota)
+
+
 def test_conversation_lineare_lunga_tiene_il_match():
     righe = [(f"d{i}", "doc", f"2026-05-01T00:00:{i:02d}Z", f"chunk {i}", "", "")
              for i in range(1, 11)]

@@ -521,8 +521,10 @@ def _finestra(righe: list[dict[str, Any]], uuid: str, limit: int,
         if match is not None:
             match["finestra"] = {
                 "righe": n + len(coda), "da": inizio + 1, "a": inizio + len(righe),
-                "nota": f"la chat ha {n + len(coda)} righe: queste sono {inizio + 1}-"
-                        f"{inizio + len(righe)}" + (" più la scheda" if coda else "")
+                # «dalla X alla Y» e non «X-Y»: due numeri lunghi attaccati da un trattino
+                # sono la sagoma di un telefono, e la redazione li mascherava (28/09).
+                "nota": f"la chat ha {n + len(coda)} righe: queste vanno dalla {inizio + 1} "
+                        f"alla {inizio + len(righe)}" + (" più la scheda" if coda else "")
                         + "; alza `limit` per averla intera"}
     return out
 
