@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.63.0] — 2026-09-28
+
+**L'audit della documentazione «con la stessa cura del codice»** (#351-#363): ogni doc
+IT/EN riletta contro il codice, e i difetti che la rilettura ha fatto emergere curati nel
+codice prima che nella prosa — la redazione ai bordi dello snippet (H74), `since/until`
+anche sul ramo vettoriale di `search_ibrida`, i filtri scritti male che ora sono errori,
+`restore.sh` che trova la chiave age degli installer, lo speaker dei gruppi Telegram.
+
 ### Aggiunto
 - **Nei gruppi Telegram dell'archivio il proprietario è `human` e gli altri membri
   `other`** (scelta di Neo, 27/09, su rilievo della curatrice): prima lo speaker era

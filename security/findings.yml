@@ -3597,7 +3597,7 @@ findings:
         replace esatto (niente evidenziatori, maiuscole contate) e un token il cui
         prefisso restava fuori dalla finestra dello snippet non aveva più il formato
         che il pattern riconosce.
-    since: unreleased
+    since: v0.63.0
     why: >
       Lo snippet di FTS5 comincia e finisce dove capita, anche a metà di un segreto, e il
       ramo vettoriale di search_ibrida taglia a 400 caratteri. I pattern delle credenziali
