@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.63.3] — 2026-09-28
+
+**`notebook_query` non fa più scadere il client di claude.ai**: oltre i 25 s torna un
+`query_id` da ritirare con `notebook_query_esito`, e il log dice per ogni chiamata se è
+andata, fallita o è stata chiusa dal client.
+
 ### Corretto
 - **`notebook_query` non fa più scadere il client** (28/09). Da claude.ai la query dava
   «MCP tool call failed» a ~30 s, anche su un notebook da cinque fonti, mentre NotebookLM
