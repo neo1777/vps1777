@@ -253,7 +253,9 @@ async def cmd_chiedi(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:  # noqa: BLE001 — il chat action è solo cosmetico
         pass
     try:
-        result = await _mcp_call("notebook_query", {"notebook_id": nb_id, "question": question})
+        # attesa_max al tetto: il bot sa aspettare (timeout 300 s), la risposta arriva intera
+        result = await _mcp_call("notebook_query", {"notebook_id": nb_id, "question": question,
+                                                    "attesa_max": 270})
     except (httpx.RequestError, httpx.HTTPStatusError) as exc:
         await msg.reply_text(f"Errore MCP: {exc}")
         return

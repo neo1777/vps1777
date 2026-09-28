@@ -38,3 +38,29 @@ def test_anche_l_auth_mancante_si_scrive(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING), pytest.raises(RuntimeError):
         asyncio.run(server._aio(lambda: None))
     assert any("Auth NotebookLM mancante" in r.getMessage() for r in caplog.records)
+
+
+# La chat che ha segnalato il guasto ha chiesto di distinguere le chiamate riuscite da
+# quelle fallite. Gli esiti sono tre: il suo «MCP tool call failed» era il terzo — il
+# client che chiude a ~30 s — e il log di prima non lo vedeva, perché non è un'eccezione
+# del tool ma un CancelledError.
+def test_tre_esiti_tre_righe(monkeypatch, caplog):
+    monkeypatch.setattr(server, "_check_auth_or_raise", lambda: None)
+
+    def nb_list():
+        return []
+
+    async def interrotta():
+        t = asyncio.create_task(server._aio(__import__("time").sleep, 2))
+        await asyncio.sleep(0.1)
+        t.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await t
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(server._aio(nb_list))
+        asyncio.run(interrotta())
+    righe = [r.getMessage() for r in caplog.records]
+    assert any(r.startswith("tool nb_list ok in") for r in righe), righe
+    assert any("tool sleep interrotto dopo" in r and "il client ha chiuso" in r
+               for r in righe), righe

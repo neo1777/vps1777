@@ -663,6 +663,13 @@ features:
     status: active-default
     verify:
       mcp_tool: {service: nb1777-mcp, name: notebook_query}
+  - id: nb.notebook_query_esito
+    nome: "nb1777-mcp · notebook_query_esito"
+    cosa: "Ritira una notebook_query tornata in_corso (il client non aspetta oltre attesa_max)."
+    dove: ["mcp-tool:nb1777-mcp/notebook_query_esito"]
+    status: active-default
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: notebook_query_esito}
   - id: nb.studio_create_audio
     nome: "nb1777-mcp · studio_create_audio"
     cosa: "Crea Audio Overview (podcast)."
