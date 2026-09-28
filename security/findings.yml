@@ -3645,7 +3645,7 @@ findings:
         un buco della redazione: lo script l'aveva scritta sull'output, l'output l'aveva
         letto un agente, e il transcript dell'agente era stato ingerito. Il 28/09 Neo ha
         scelto di ruotare la password del pannello.
-    since: unreleased
+    since: v0.63.1
     why: >
       Mostrare la password generata una volta sola va bene a un umano davanti al
       terminale. Quando l'output va altrove (un agente che lancia lo script, una pipe, un
