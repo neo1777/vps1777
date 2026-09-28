@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.63.4] — 2026-09-28
+
+**Una `notebook_query` in corso si ritira rilanciando la stessa domanda**: serve ai client
+che non vedono ancora `notebook_query_esito`.
+
 ### Corretto
 - **Una `notebook_query` in corso si ritira anche senza `notebook_query_esito`.** La
   chat su claude.ai che ha provato la 0.63.3 riceveva il `query_id` ma non vedeva il tool
