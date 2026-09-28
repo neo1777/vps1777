@@ -25,6 +25,7 @@ from app import core, server
 def _senza_auth(monkeypatch):
     monkeypatch.setattr(server, "_check_auth_or_raise", lambda: None)
     server._QUERY_IN_CORSO.clear()
+    server._QUERY_PER_DOMANDA.clear()
 
 
 def test_risposta_veloce_arriva_come_prima(monkeypatch):
@@ -74,3 +75,36 @@ def test_attesa_max_fuori_misura_e_limitata(monkeypatch):
     monkeypatch.setattr(core, "notebook_query", lambda nb, q, **k: {"answer": "ok"})
     # 0 o negativo non vuol dire «non aspettare mai»: si aspetta almeno 1 s
     assert asyncio.run(server.notebook_query("nb", "d", attesa_max=0)) == {"answer": "ok"}
+
+
+# Un client con lo schema vecchio dei tool (claude.ai finché non riconnette il connettore)
+# non vede notebook_query_esito: la chat che l'ha provato riceveva il query_id e non aveva
+# niente con cui ritirarlo. Rilanciare la STESSA domanda sullo stesso notebook si aggancia
+# alla query in corso invece di farne partire un'altra: funziona con qualunque schema.
+def test_rilanciare_la_stessa_domanda_si_aggancia(monkeypatch):
+    via = threading.Event()
+    partenze = []
+
+    def lenta(nb, q, **k):
+        partenze.append(q)
+        via.wait(5)
+        return {"answer": "una sola"}
+    monkeypatch.setattr(core, "notebook_query", lenta)
+
+    async def giro():
+        primo = await server.notebook_query("nb", "domanda", attesa_max=0.2)
+        assert primo["stato"] == "in_corso"
+        secondo = await server.notebook_query("nb", "domanda", attesa_max=0.2)
+        assert secondo["query_id"] == primo["query_id"], secondo
+        via.set()
+        return await server.notebook_query("nb", "domanda", attesa_max=5)
+    assert asyncio.run(giro()) == {"answer": "una sola"}
+    assert partenze == ["domanda"], "la query deve partire una volta sola"
+
+
+def test_una_domanda_diversa_parte_da_capo(monkeypatch):
+    monkeypatch.setattr(core, "notebook_query", lambda nb, q, **k: {"answer": q})
+
+    async def giro():
+        return (await server.notebook_query("nb", "una"), await server.notebook_query("nb", "due"))
+    assert asyncio.run(giro()) == ({"answer": "una"}, {"answer": "due"})

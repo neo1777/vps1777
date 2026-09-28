@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Una `notebook_query` in corso si ritira anche senza `notebook_query_esito`.** La
+  chat su claude.ai che ha provato la 0.63.3 riceveva il `query_id` ma non vedeva il tool
+  per ritirarlo (il client tiene lo schema dei tool finché il connettore non riconnette),
+  e rilanciando la domanda ne faceva partire un'altra da zero. Ora la stessa domanda sullo
+  stesso notebook (stesse fonti, stessa conversazione) si aggancia alla query in corso, o
+  finita e non ritirata: funziona con qualunque schema.
+
 ## [0.63.3] — 2026-09-28
 
 **`notebook_query` non fa più scadere il client di claude.ai**: oltre i 25 s torna un
