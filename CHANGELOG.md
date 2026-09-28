@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **nb1777-mcp scrive nel suo log i tool che falliscono** (nome, durata, errore senza
+  contenuti e troncato). Il 28/09 una chat su claude.ai ha visto `notebook_query` fallire
+  per qualche minuto anche su un notebook da cinque fonti, mentre `nb_list` rispondeva;
+  sulla VPS non restava traccia (il gateway vede solo il `200` dello streaming), e un'ora
+  dopo, quando la query rispondeva di nuovo, anche in 2 minuti su 99 fonti, la causa non
+  si leggeva più. TROUBLESHOOTING dice come cercarli.
+
 ## [0.63.1] — 2026-09-28
 
 **Due residui dell'audit, curati il giorno stesso della 0.63.0**: la nota di `finestra`

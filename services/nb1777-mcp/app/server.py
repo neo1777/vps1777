@@ -24,7 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import logging
 import os
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -35,6 +37,8 @@ from starlette.responses import FileResponse, JSONResponse, Response
 
 from . import canonical, core, memoria, nlm_profile
 from .settings import get_settings
+
+log = logging.getLogger("nb1777-mcp.server")
 
 
 HOST = os.environ.get("NB1777_HOST", "127.0.0.1")
@@ -88,8 +92,19 @@ def _check_auth_or_raise() -> None:
 # l'event loop di FastMCP (nlm può prendere decine di secondi).
 # Verifica auth nlm prima di lanciare il thread → fail-fast con messaggio chiaro.
 async def _aio(fn, *args, **kwargs):
-    _check_auth_or_raise()
-    return await asyncio.to_thread(fn, *args, **kwargs)
+    # 28/09: un tool che fallisce lascia una riga nel log del container. Prima l'errore
+    # arrivava solo al client: una notebook_query fallita per qualche minuto su claude.ai
+    # non lasciava traccia sulla VPS (il 200 del gateway non lo dice, la risposta è in
+    # streaming), e un'ora dopo la causa non si leggeva più. Gli errori di core sono già
+    # senza contenuti (H41, _safe_cmd); qui si tronca comunque.
+    t0 = time.monotonic()
+    try:
+        _check_auth_or_raise()
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    except Exception as e:
+        log.warning("tool %s fallito dopo %.1fs: %s: %s", getattr(fn, "__name__", "?"),
+                    time.monotonic() - t0, type(e).__name__, str(e)[:300])
+        raise
 
 
 # ============================================================
