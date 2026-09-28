@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.63.1] — 2026-09-28
+
+**Due residui dell'audit, curati il giorno stesso della 0.63.0**: la nota di `finestra`
+che usciva «[telefono redatto]» (trovata dalla prova dal vivo), e la password admin
+generata che gli script stampavano anche davanti a un agente (H75, trovata dalla misura
+della redazione sugli snippet veri).
+
 ### Sicurezza
 - **La password admin generata non si stampa più quando l'output non va a un terminale**
   (H75). `setup.sh`, `deploy.sh` e `tools/rotate-secret.sh` la mostravano sempre: lanciati
