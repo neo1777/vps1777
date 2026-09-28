@@ -132,7 +132,7 @@ caricare l'auth NotebookLM, [docs/INSTALL.md](docs/INSTALL.md).
 |---|---|---|
 | **gateway** | OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*` | 8080 |
 | **archive-mcp** | Ricerca su più DB — FTS5 e ibrida per senso, FTS5 + vettori — di export claude.ai, sessioni Claude Code e bundle di Recupero Sessioni, con le schede di sessione e le stirpi (`get_session`, `get_stirpe`): **15 tool**. Vedi [docs/ARCHIVE.md](docs/ARCHIVE.md) e [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md) | 8002 |
-| **nb1777-mcp** | NotebookLM via CLI `nlm` — **38 tool** (notebook, source, chat, 9 artefatti studio, doctor, canonico/memoria). Porta anche il **canonico della memoria 1777** ([docs/MEMORIA-1777.md](docs/MEMORIA-1777.md)). Vedi [docs/NB1777.md](docs/NB1777.md) | 8003 |
+| **nb1777-mcp** | NotebookLM via CLI `nlm` — **39 tool** (notebook, source, chat, 9 artefatti studio, doctor, canonico/memoria). Porta anche il **canonico della memoria 1777** ([docs/MEMORIA-1777.md](docs/MEMORIA-1777.md)). Vedi [docs/NB1777.md](docs/NB1777.md) | 8003 |
 | **nb1777-bot** | Bot Telegram owner-only + launcher Mini App | (long-poll) |
 | **ocr** | Tesseract in un container interno: gli occhi dell'ingest (immagini → testo `[ocr]`). Il gateway lo chiama via HTTP, non esegue processi | 8004 |
 
@@ -220,7 +220,7 @@ colpo d'occhio:
 | [UPDATE.md](docs/UPDATE.md) | Aggiornamenti: `vps1777 update`, pulsante admin, rollback |
 | [ARCHIVE.md](docs/ARCHIVE.md) | Archivio di ricerca: pagina `/admin/archive`, formati, il bundle di Recupero Sessioni (`recupero/`, tabelle `sessioni`/`archi`/`memorie`), i 15 tool MCP, sessioni e stirpi, ingest via NotebookLM |
 | [RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md) | Ricerca ibrida per senso: il modello, l'indice vettoriale, il suo costruttore, l'aggiornamento incrementale |
-| [NB1777.md](docs/NB1777.md) | NotebookLM: i 38 tool MCP, lo studio, l'auth, il bot Telegram, il canonico della memoria |
+| [NB1777.md](docs/NB1777.md) | NotebookLM: i 39 tool MCP, lo studio, l'auth, il bot Telegram, il canonico della memoria |
 | [MEMORIA-1777.md](docs/MEMORIA-1777.md) | La disciplina di memoria 1777: canonico nel prodotto (neutro), strati locali `fatti`/`errata`, `vps1777 memoria` |
 | [CLI.md](docs/CLI.md) | La CLI `vps1777`: tutti i comandi con esempi (allineata al codice da un test) |
 | [GLOSSARIO.md](docs/GLOSSARIO.md) | Le parole di vps1777 in due righe l'una: container, release, tool MCP, canonico… |

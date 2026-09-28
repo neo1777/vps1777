@@ -4,6 +4,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **`notebook_query` non fa più scadere il client** (28/09). Da claude.ai la query dava
+  «MCP tool call failed» a ~30 s, anche su un notebook da cinque fonti, mentre NotebookLM
+  quel giorno rispondeva in 19-124 s; dal server la chiamata risultava chiusa dal client,
+  senza errori. Ora si aspetta al massimo `attesa_max` (default 25 s, tetto 270): se la
+  risposta non c'è ancora torna `{stato: "in_corso", query_id}` e la query continua sul
+  server; il tool nuovo `notebook_query_esito(query_id)` la ritira. Il bot e la Mini App
+  passano `attesa_max=270` e ricevono la risposta intera come prima. nb1777 ha 39 tool.
+- **Il log di nb1777-mcp distingue tre esiti**: `ok`, `fallito` e `interrotto` (il client
+  ha chiuso la richiesta). La 0.63.2 scriveva solo i fallimenti, e la chiusura dal client
+  (un `CancelledError`, non un'eccezione del tool) non lasciava traccia: la chat che ha
+  segnalato il guasto ha chiesto di contare a parte riuscite e fallimenti.
+
 ## [0.63.2] — 2026-09-28
 
 **nb1777-mcp scrive nel log i tool che falliscono**: un guasto visto dal client lascia la

@@ -304,7 +304,8 @@ async def api_ask(request: Request) -> Response:
     try:
         texts = await call_tool(
             NB_SERVICE, "notebook_query",
-            {"notebook_id": nb_id, "question": question}, timeout=290.0,
+            # attesa_max al tetto: la Mini App aspetta 290 s, la risposta arriva intera
+            {"notebook_id": nb_id, "question": question, "attesa_max": 270}, timeout=290.0,
         )
     except MCPCallError as exc:
         return _mcp_error(exc)

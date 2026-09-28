@@ -27,6 +27,7 @@ import hmac
 import logging
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -91,20 +92,33 @@ def _check_auth_or_raise() -> None:
 # Helper: incapsula chiamate sync di core.py in un thread per non bloccare
 # l'event loop di FastMCP (nlm può prendere decine di secondi).
 # Verifica auth nlm prima di lanciare il thread → fail-fast con messaggio chiaro.
-async def _aio(fn, *args, **kwargs):
-    # 28/09: un tool che fallisce lascia una riga nel log del container. Prima l'errore
-    # arrivava solo al client: una notebook_query fallita per qualche minuto su claude.ai
-    # non lasciava traccia sulla VPS (il 200 del gateway non lo dice, la risposta è in
-    # streaming), e un'ora dopo la causa non si leggeva più. Gli errori di core sono già
-    # senza contenuti (H41, _safe_cmd); qui si tronca comunque.
+async def _esito(nome: str, coro):
+    """Tre esiti, tre righe di log — non due (28/09). `ok`: il tool ha risposto.
+    `fallito`: il tool ha sollevato un errore (già senza contenuti, H41; qui troncato).
+    `interrotto`: il CLIENT ha chiuso la richiesta prima della risposta. Il terzo è quello
+    che ha fatto nascere tutto: da claude.ai `notebook_query` dava «MCP tool call failed» a
+    ~30 s e il server non registrava niente, perché la chiusura non è un'eccezione del tool
+    (è un CancelledError) e il gateway vede solo il 200 dello streaming."""
     t0 = time.monotonic()
     try:
-        _check_auth_or_raise()
-        return await asyncio.to_thread(fn, *args, **kwargs)
+        r = await coro
+    except asyncio.CancelledError:
+        log.warning("tool %s interrotto dopo %.1fs: il client ha chiuso la richiesta",
+                    nome, time.monotonic() - t0)
+        raise
     except Exception as e:
-        log.warning("tool %s fallito dopo %.1fs: %s: %s", getattr(fn, "__name__", "?"),
+        log.warning("tool %s fallito dopo %.1fs: %s: %s", nome,
                     time.monotonic() - t0, type(e).__name__, str(e)[:300])
         raise
+    log.info("tool %s ok in %.1fs", nome, time.monotonic() - t0)
+    return r
+
+
+async def _aio(fn, *args, **kwargs):
+    async def _corpo():
+        _check_auth_or_raise()
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    return await _esito(getattr(fn, "__name__", "?"), _corpo())
 
 
 # ============================================================
@@ -304,20 +318,86 @@ async def source_rename(notebook_id: str, source_id: str, new_title: str) -> str
 # CHAT
 # ============================================================
 
+# Le query lasciate indietro dal client: query_id → (task, nascita). Vivono nel processo
+# (stateless_http tiene un solo event loop); un riavvio le perde, e l'esito lo dice.
+_QUERY_IN_CORSO: dict[str, tuple["asyncio.Task", float]] = {}
+_QUERY_TTL = 1800.0           # una risposta non ritirata in 30 minuti si butta
+ATTESA_MAX_TETTO = 270.0      # come il timeout del subprocess di core.notebook_query
+
+
+def _attesa(attesa_max: float) -> float:
+    return min(max(float(attesa_max), 1.0), ATTESA_MAX_TETTO)
+
+
+def _pulisci_query() -> None:
+    ora = time.monotonic()
+    for qid, (task, nata) in list(_QUERY_IN_CORSO.items()):
+        if task.done() and ora - nata > _QUERY_TTL:
+            _QUERY_IN_CORSO.pop(qid, None)
+
+
+async def _aspetta_query(qid: str, task: "asyncio.Task", attesa_max: float) -> dict:
+    try:
+        r = await asyncio.wait_for(asyncio.shield(task), _attesa(attesa_max))
+    except asyncio.TimeoutError:
+        _QUERY_IN_CORSO[qid] = (task, _QUERY_IN_CORSO.get(qid, (task, time.monotonic()))[1])
+        return {"stato": "in_corso", "query_id": qid,
+                "nota": (f"NotebookLM non ha ancora risposto dopo {_attesa(attesa_max):.0f} s: "
+                         "la query continua sul server. Chiama notebook_query_esito(query_id) "
+                         "per ritirarla (può servire più di un giro: su un notebook grande "
+                         "NotebookLM arriva a qualche minuto).")}
+    _QUERY_IN_CORSO.pop(qid, None)
+    return r
+
+
 @mcp.tool()
 async def notebook_query(notebook_id: str, question: str,
                          source_ids: Optional[list[str]] = None,
                          conversation_id: Optional[str] = None,
-                         verbose: bool = False) -> dict:
+                         verbose: bool = False,
+                         attesa_max: float = 25.0) -> dict:
     """Pone una domanda alla chat del notebook. Ritorna {answer, references,
     sources_used} in PROIEZIONE COMPATTA (#275): le references portano
     un'anteprima, il testo citato integrale arriva con verbose=True.
     Se l'answer contiene paragrafi SENZA marcatori [n], la risposta porta
     `senza_citazioni` (conteggio + anteprime) e una `nota`: quei paragrafi
-    sono generati dal modello, non letti dalle fonti — ipotesi, non fatti."""
-    return await _aio(core.notebook_query, notebook_id, question,
-                      source_ids=source_ids, conversation_id=conversation_id,
-                      verbose=verbose)
+    sono generati dal modello, non letti dalle fonti — ipotesi, non fatti.
+
+    ⏱️ NotebookLM risponde in 20 s come in 2 minuti, e alcuni client chiudono la
+    chiamata verso i 30 s («MCP tool call failed»). Perciò si aspetta al massimo
+    `attesa_max` secondi (default 25, tetto 270): se la risposta non c'è ancora, torna
+    {stato: "in_corso", query_id, nota} e la query CONTINUA sul server. Ritirala con
+    notebook_query_esito(query_id). Un client che sa aspettare passa attesa_max=270."""
+    async def _corpo():
+        _check_auth_or_raise()
+        _pulisci_query()
+        task = asyncio.create_task(asyncio.to_thread(
+            core.notebook_query, notebook_id, question, source_ids=source_ids,
+            conversation_id=conversation_id, verbose=verbose))
+        qid = uuid.uuid4().hex[:12]
+        _QUERY_IN_CORSO[qid] = (task, time.monotonic())
+        return await _aspetta_query(qid, task, attesa_max)
+    return await _esito("notebook_query", _corpo())
+
+
+@mcp.tool()
+async def notebook_query_esito(query_id: str, attesa_max: float = 25.0) -> dict:
+    """Ritira una notebook_query che era tornata `in_corso`. Aspetta al massimo
+    `attesa_max` secondi (default 25): ritorna la risposta (stessa forma di
+    notebook_query), di nuovo {stato: "in_corso", …} se NotebookLM non ha ancora finito,
+    o l'errore della query. Un query_id sconosciuto è un errore: già ritirato, scaduto
+    (30 minuti) o perso a un riavvio del servizio — rilancia la domanda."""
+    async def _corpo():
+        voce = _QUERY_IN_CORSO.get(query_id)
+        if voce is None:
+            raise ValueError(f"query_id {query_id!r} sconosciuto: già ritirato, scaduto "
+                             "(30 minuti) o perso a un riavvio del servizio. Rilancia notebook_query.")
+        try:
+            return await _aspetta_query(query_id, voce[0], attesa_max)
+        except Exception:
+            _QUERY_IN_CORSO.pop(query_id, None)
+            raise
+    return await _esito("notebook_query_esito", _corpo())
 
 
 # ============================================================

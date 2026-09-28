@@ -110,16 +110,20 @@ Se dopo l'install resta "not found": `uv` mette i binari in `~/.local/bin` →
 ## Un tool di nb1777 fallisce sul client, ma la VPS sembra sana
 
 Il `200` nei log del gateway non dice niente: la risposta MCP viaggia in streaming, e
-l'errore del tool sta dentro. Dalla 0.63.2 nb1777-mcp scrive ogni fallimento nel suo log,
-con nome del tool, durata ed errore (senza contenuti, H41):
+l'esito del tool sta dentro. nb1777-mcp scrive una riga per ogni chiamata (dalla 0.63.3
+anche le riuscite e le interrotte), senza contenuti (H41):
 
 ```bash
-docker logs --since 2h vps1777-nb1777-mcp-1 2>&1 | grep "fallito dopo"
+docker logs --since 2h vps1777-nb1777-mcp-1 2>&1 | grep -E "tool .* (ok in|fallito dopo|interrotto dopo)"
 ```
 
-Se non c'è nessuna riga, il server ha risposto: il guasto sta fra il client e il
-gateway, o nella latenza di NotebookLM (una `notebook_query` su un notebook grande può
-metterci più di due minuti, e alcuni client smettono di aspettare prima).
+- `ok in Ns`: il server ha risposto. Se il client dice comunque errore, il guasto sta dopo
+  (il client, la rete).
+- `fallito dopo Ns: <errore>`: è l'errore del tool (NotebookLM, auth, notebook inesistente…).
+- `interrotto dopo Ns: il client ha chiuso la richiesta`: il client ha smesso di aspettare.
+  Da claude.ai succede verso i 30 s («MCP tool call failed»), ed è per questo che
+  `notebook_query` dalla 0.63.3 non tiene il client oltre `attesa_max` (default 25 s):
+  torna `in_corso` con un `query_id` da ritirare con `notebook_query_esito`.
 
 ## `/admin/nlm` — "il tar non contiene profiles/default/cookies.json"
 
