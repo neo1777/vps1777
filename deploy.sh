@@ -100,6 +100,25 @@ pw_weak_reason() {
 # `bash -s` remoto (canale cifrato, mai argv), dove diventa un bcrypt.
 # python3 se c'è (è già un requisito di fatto: lo usiamo per la release), /dev/urandom
 # altrimenti. In entrambi i casi il risultato passa dal gate pw_weak_reason.
+# H75 (28/09) — la password generata si mostra SOLO a un terminale. Se l'output va altrove
+# (un agente, una pipe, un log) finisce nei transcript e da lì nell'archivio: una password
+# stampata da setup.sh è ricomparsa così, in chiaro, cercando nell'archivio. Fuori da un
+# terminale va in un file 600 e si stampa il percorso. Stessa funzione in setup.sh,
+# deploy.sh e tools/rotate-secret.sh: tools/tests/test_password_generata_non_stampata.py
+# la tiene identica.
+consegna_password() {
+  if [ -t 1 ]; then
+    warn "PASSWORD ADMIN GENERATA: ${C_B}$1${C_R}"
+    warn "  → SALVALA SUBITO in un password manager. Non la rivedrai."
+    return 0
+  fi
+  local dir="${XDG_CONFIG_HOME:-$HOME/.config}/vps1777" f
+  f="$dir/admin-password-$(date +%Y%m%d-%H%M%S).txt"
+  ( umask 077 && mkdir -p "$dir" && printf '%s\n' "$1" > "$f" )
+  warn "PASSWORD ADMIN GENERATA: non la stampo, l'output non va a un terminale (H75)."
+  warn "  → è in $f (la legge solo il tuo utente): copiala in un password manager, poi cancella il file."
+}
+
 gen_pwd_local() {
   local p="" i=0
   while [ "$i" -lt 20 ]; do
@@ -848,8 +867,7 @@ GENERATED_PWD=""
 [ "$GEN_PWD" = "auto" ] && GENERATED_PWD="$ADMIN_PWD_PLAIN"
 ok ".env + secrets generati (.env 600, dir sensibili 700)"
 if [ -n "$GENERATED_PWD" ]; then
-  warn "PASSWORD ADMIN GENERATA: ${C_B}$GENERATED_PWD${C_R}"
-  warn "  → SALVALA SUBITO in un password manager. Non la rivedrai."
+  consegna_password "$GENERATED_PWD"
 fi
 
 # ═══════════════════════════════════════════ 6. IMMAGINI + UP
@@ -1066,11 +1084,12 @@ step "8/8 — Fatto"
 
 GATEWAY_SECRET=$(SSH "sudo -u $OPERATOR_USER cat $REMOTE_DIR/secrets/gateway_secret.txt" 2>/dev/null || echo "<SECRET>")
 
-# Righe machine-readable per l'installer web (le parsa per la schermata finale).
+# Righe machine-readable. L'installer grafico di oggi non le legge (passa da
+# installer/engine.py); restano per chi automatizza deploy.sh. La password admin NON c'è
+# più (H75): chi legge questo output è spesso un programma, e il chiaro finiva nei log.
 echo "RESULT_URL=${PUBLIC_BASE:-http://$VPS_IP:8080}"
 echo "RESULT_SECRET=$GATEWAY_SECRET"
 echo "RESULT_ADMIN_EMAIL=$ADMIN_EMAIL"
-[ -n "${GENERATED_PWD:-}" ] && echo "RESULT_ADMIN_PWD=$GENERATED_PWD"
 echo "RESULT_SETUP_URL=${PUBLIC_BASE:-http://$VPS_IP:8080}/admin/setup"
 echo "RESULT_INGRESS=$INGRESS"
 echo "RESULT_FEATURES=${FEATURES:-}"

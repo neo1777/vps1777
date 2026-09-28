@@ -89,6 +89,11 @@ print(bcrypt.hashpw(os.environ["ADMIN_PWD_RAW"].encode(), bcrypt.gensalt(12)).de
 docker compose restart gateway
 ```
 
+Oppure `./tools/rotate-secret.sh admin_password`: con Invio vuoto la genera lui (24
+caratteri) e la mostra solo se l'output va a un terminale; altrimenti la scrive in
+`~/.config/vps1777/admin-password-<data>.txt` (600) e stampa il percorso (H75: una
+password stampata davanti a un agente finisce nel suo transcript, e da lì nell'archivio).
+
 Il pannello `/admin/secrets` documenta la procedura ma non la esegue: il
 gateway non ha privilegi per riscrivere i secret host né per riavviarsi
 (stesso design del canale update, vedi [ARCHITECTURE.md](ARCHITECTURE.md)) —

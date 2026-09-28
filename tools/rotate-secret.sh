@@ -33,6 +33,25 @@ gen_pass()   { python3 -c "import secrets,string; print(''.join(secrets.choice(s
 # Gate di robustezza password: 0 = forte; altrimenti stampa il motivo e ritorna 1.
 # Policy: min 16 caratteri, almeno 3 classi (minuscole/MAIUSCOLE/cifre/simboli),
 # niente pattern comuni/prevedibili. Non permettiamo password deboli, punto.
+# H75 (28/09) — la password generata si mostra SOLO a un terminale. Se l'output va altrove
+# (un agente, una pipe, un log) finisce nei transcript e da lì nell'archivio: una password
+# stampata da setup.sh è ricomparsa così, in chiaro, cercando nell'archivio. Fuori da un
+# terminale va in un file 600 e si stampa il percorso. Stessa funzione in setup.sh,
+# deploy.sh e tools/rotate-secret.sh: tools/tests/test_password_generata_non_stampata.py
+# la tiene identica.
+consegna_password() {
+  if [ -t 1 ]; then
+    warn "PASSWORD ADMIN GENERATA: ${C_B}$1${C_R}"
+    warn "  → SALVALA SUBITO in un password manager. Non la rivedrai."
+    return 0
+  fi
+  local dir="${XDG_CONFIG_HOME:-$HOME/.config}/vps1777" f
+  f="$dir/admin-password-$(date +%Y%m%d-%H%M%S).txt"
+  ( umask 077 && mkdir -p "$dir" && printf '%s\n' "$1" > "$f" )
+  warn "PASSWORD ADMIN GENERATA: non la stampo, l'output non va a un terminale (H75)."
+  warn "  → è in $f (la legge solo il tuo utente): copiala in un password manager, poi cancella il file."
+}
+
 pw_weak_reason() {
   local pw="$1" classes=0
   if [ "${#pw}" -lt 16 ]; then echo "troppo corta (min 16 caratteri)"; return 1; fi
@@ -114,8 +133,7 @@ case "$WHICH" in
     fi
     if [ -z "${PWD:-}" ]; then
       PWD=$(gen_pass 24)
-      log "Password generata (forte, 24 char): ${C_B}$PWD${C_R}"
-      log "  → SALVALA SUBITO in password manager. Non te la riproporrò."
+      consegna_password "$PWD"
     elif ! reason="$(pw_weak_reason "$PWD")"; then
       die "Password troppo debole: $reason. Rifiutata (policy: min 16, ≥3 classi, niente pattern comuni)."
     fi

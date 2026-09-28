@@ -73,7 +73,7 @@ Ti fa **sei domande**, in quest'ordine. Per una prova in locale:
 | 1 | `Email admin OAuth (il TUO Gmail)` | una email qualsiasi: in locale non c'è nessun OAuth di Google da soddisfare |
 | 2 | `TELEGRAM_OWNER_ID` | **vuoto** — ti avvisa che bot e Mini App restano **negati a tutti**, ed è giusto così |
 | 3 | `Quale ingress? [1/2/3]` | **1** (Tailscale): è l'unico che in locale **non aggiunge nessun container** — Tailscale girerebbe sull'host, e qui non lo installiamo |
-| 4 | `Vuoi che generi io una password admin random?` | **s** — la stampa a schermo: **copiala adesso**, non te la ripropone |
+| 4 | `Vuoi che generi io una password admin random?` | **s** — la stampa a schermo (se l'output non è un terminale la scrive in `~/.config/vps1777/admin-password-<data>.txt` e ti dice dove, H75): **copiala adesso**, non te la ripropone |
 | 5 | `TELEGRAM_BOT_TOKEN` | **vuoto** |
 | 6 | `Procedo ora?` | **s** |
 
@@ -129,7 +129,7 @@ Se uno dei container resta `Restarting`, salta a *[Se non torna](#se-non-torna)*
 ### 5 · Entra nel pannello — `~1 minuto`
 
 Apri **`http://127.0.0.1:8080/admin/login`** e accedi con l'email che hai dato e la
-password che il wizard ha stampato.
+password che il wizard ha stampato (o messo nel file che ti ha indicato).
 
 > **Deve apparire**: il login riesce (redirect), e le schede rispondono — sono sei:
 > `/admin/setup`, `/admin/nlm`, `/admin/archive`, `/admin/update`, `/admin/secrets`,
