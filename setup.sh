@@ -81,6 +81,25 @@ confirm() {
 
 # Policy password UNICA (H16), identica a deploy.sh e tools/rotate-secret.sh:
 # min 16 caratteri, ≥3 classi, niente pattern comuni. Se cambi qui, cambia LÀ.
+# H75 (28/09) — la password generata si mostra SOLO a un terminale. Se l'output va altrove
+# (un agente, una pipe, un log) finisce nei transcript e da lì nell'archivio: una password
+# stampata da setup.sh è ricomparsa così, in chiaro, cercando nell'archivio. Fuori da un
+# terminale va in un file 600 e si stampa il percorso. Stessa funzione in setup.sh,
+# deploy.sh e tools/rotate-secret.sh: tools/tests/test_password_generata_non_stampata.py
+# la tiene identica.
+consegna_password() {
+  if [ -t 1 ]; then
+    warn "PASSWORD ADMIN GENERATA: ${C_B}$1${C_R}"
+    warn "  → SALVALA SUBITO in un password manager. Non la rivedrai."
+    return 0
+  fi
+  local dir="${XDG_CONFIG_HOME:-$HOME/.config}/vps1777" f
+  f="$dir/admin-password-$(date +%Y%m%d-%H%M%S).txt"
+  ( umask 077 && mkdir -p "$dir" && printf '%s\n' "$1" > "$f" )
+  warn "PASSWORD ADMIN GENERATA: non la stampo, l'output non va a un terminale (H75)."
+  warn "  → è in $f (la legge solo il tuo utente): copiala in un password manager, poi cancella il file."
+}
+
 pw_weak_reason() {
   local pw="$1" classes=0
   if [ "${#pw}" -lt 16 ]; then echo "troppo corta (min 16 caratteri)"; return 1; fi
@@ -334,8 +353,7 @@ if [ ! -s secrets/admin_password_bcrypt.txt ]; then
       ADMIN_PWD="$(python3 -c 'import secrets,string; print("".join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)))')"
       pw_weak_reason "$ADMIN_PWD" >/dev/null && break
     done
-    log "Password admin generata: $C_B$ADMIN_PWD$C_R"
-    log "  → SALVALA SUBITO in un password manager. Non te la riproporrò."
+    consegna_password "$ADMIN_PWD"
   else
     # H16 — policy UNICA: min 16, ≥3 classi, niente pattern comuni.
     # 🔑 NON-INTERATTIVO (abdd732a, 16/08): `SETUP_ADMIN_PWD` entra QUI DENTRO, cioè

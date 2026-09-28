@@ -3631,3 +3631,58 @@ findings:
         output: "29 passed (compreso il test che hash, identificatori e percorsi in testa restano)"
         exit: 0
         quando: "2026-09-27"
+  - id: H75
+    severity: medium
+    title: "Gli installer e rotate-secret.sh stampavano la password admin generata anche quando l'output non andava a un terminale: davanti a un agente finiva nel transcript, e da lì nell'archivio"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-09-27"
+      come: misura
+      nota: >
+        Misurando la redazione di H74 su 58.886 snippet veri dell'archivio, fra i 12 testi
+        toccati dalle regole nuove c'era una password admin stampata da setup.sh. Non era
+        un buco della redazione: lo script l'aveva scritta sull'output, l'output l'aveva
+        letto un agente, e il transcript dell'agente era stato ingerito. Il 28/09 Neo ha
+        scelto di ruotare la password del pannello.
+    since: unreleased
+    why: >
+      Mostrare la password generata una volta sola va bene a un umano davanti al
+      terminale. Quando l'output va altrove (un agente che lancia lo script, una pipe, un
+      log) la stessa riga diventa una copia in chiaro che nessuno ricorda di avere: nei
+      transcript, nei bundle di Recupero Sessioni, nell'archivio. Era la stessa riga in
+      tre script (setup.sh, deploy.sh, tools/rotate-secret.sh), più una RESULT_ADMIN_PWD
+      in fondo a deploy.sh che l'installer grafico non legge più da quando passa da
+      installer/engine.py.
+    evidence:
+      - file: tools/tests/test_password_generata_non_stampata.py
+        contains:
+          - "def test_fuori_dal_terminale_la_password_va_in_un_file_600("
+          - "def test_nessuno_script_stampa_la_password_fuori_dalla_funzione("
+      - file: setup.sh
+        contains:
+          - "consegna_password() {"
+      - file: tools/rotate-secret.sh
+        contains:
+          - "consegna_password() {"
+      - file: deploy.sh
+        contains:
+          - "consegna_password() {"
+    fix: >
+      Una funzione consegna_password, identica nei tre script (un test la tiene
+      identica): se lo stdout è un terminale stampa come prima; altrimenti scrive la
+      password in ~/.config/vps1777/admin-password-<data>.txt con permessi 600 e stampa
+      solo il percorso. Tolta la riga RESULT_ADMIN_PWD di deploy.sh. Resta fuori da questa
+      voce l'installer grafico, che la mostra nella sua pagina a chi l'ha lanciato: lì
+      l'output è la pagina, non un terminale che un agente legge.
+    prova:
+      - comando: "uvx pytest tools/tests/test_password_generata_non_stampata.py -q"
+        dove: "banco locale, senza la cura"
+        output: "3 failed — sulle versioni di main il controllo statico trova le 4 stampe (setup.sh 1, deploy.sh 2, rotate-secret.sh 1)"
+        exit: 1
+        quando: "2026-09-28"
+      - comando: "uvx pytest tools/tests/test_password_generata_non_stampata.py -q"
+        dove: "banco locale, con la cura"
+        output: "3 passed"
+        exit: 0
+        quando: "2026-09-28"

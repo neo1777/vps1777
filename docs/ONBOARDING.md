@@ -48,8 +48,10 @@ Come ci arrivi dipende dal profilo:
 > password e sessione admin passano in chiaro finché non c'è HTTPS. Toglila
 > appena il pannello risponde in HTTPS.
 
-Login con l'email admin e la password (stampata dal deploy o nel tuo password
-manager).
+Login con l'email admin e la password: il deploy la stampa se lo lanci da un terminale;
+se l'output va altrove (una pipe, un log, un agente) la scrive in
+`~/.config/vps1777/admin-password-<data>.txt`, leggibile solo dal tuo utente, e ti dice
+dove (H75). Copiala nel password manager e cancella il file.
 
 Il pannello mostra **lo stato dei componenti** a semafori e i form per:
 

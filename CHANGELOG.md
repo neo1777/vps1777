@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **La password admin generata non si stampa più quando l'output non va a un terminale**
+  (H75). `setup.sh`, `deploy.sh` e `tools/rotate-secret.sh` la mostravano sempre: lanciati
+  da un agente, la password finiva nel transcript e da lì nell'archivio. La misura della
+  redazione sugli snippet veri ne ha trovata una, e Neo ha ruotato quella del pannello.
+  Ora `consegna_password` (identica nei tre script, un test lo controlla) stampa solo a un
+  terminale; altrimenti scrive la password in `~/.config/vps1777/admin-password-<data>.txt`
+  (600) e dice dove. Tolta la riga `RESULT_ADMIN_PWD` di `deploy.sh`, che l'installer
+  grafico non legge più. Doc: ONBOARDING, PRIMI-15-MINUTI, SECRETS.
+
 ### Corretto
 - **La nota di `finestra` in `get_conversation` usciva redatta.** «queste sono 27718-27722»
   ha la sagoma di un telefono (due gruppi di cifre col trattino), e la redazione in uscita
