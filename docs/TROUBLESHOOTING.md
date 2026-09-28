@@ -107,6 +107,20 @@ Se dopo l'install resta "not found": `uv` mette i binari in `~/.local/bin` →
 
 È atteso al primo avvio. Carica il **profilo nlm** (tar.gz) da `<PUBLIC_BASE>/admin/nlm` (vedi sotto).
 
+## Un tool di nb1777 fallisce sul client, ma la VPS sembra sana
+
+Il `200` nei log del gateway non dice niente: la risposta MCP viaggia in streaming, e
+l'errore del tool sta dentro. Dalla 0.63.2 nb1777-mcp scrive ogni fallimento nel suo log,
+con nome del tool, durata ed errore (senza contenuti, H41):
+
+```bash
+docker logs --since 2h vps1777-nb1777-mcp-1 2>&1 | grep "fallito dopo"
+```
+
+Se non c'è nessuna riga, il server ha risposto: il guasto sta fra il client e il
+gateway, o nella latenza di NotebookLM (una `notebook_query` su un notebook grande può
+metterci più di due minuti, e alcuni client smettono di aspettare prima).
+
 ## `/admin/nlm` — "il tar non contiene profiles/default/cookies.json"
 
 Causa: hai caricato l'archivio sbagliato. La CLI `nlm` (dalla 0.7) salva l'auth come
