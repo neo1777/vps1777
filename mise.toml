@@ -27,40 +27,60 @@ min_version = { hard = "2026.9.15" }
 [tools]
 # python NON è fissato qui (python_da_mise = no, il retrofit): uv usa UV_PYTHON di [env].
 uv = "0.12.19"
+# vps1777: il ciclo backup → restore (tools/tests/test-ciclo-backup-restore.sh) cifra sul serio
+# con age, e senza esce 2 («SALTATO»), che esegui-test-bash.sh conta come rosso. In ci.yml sta
+# in uno step apt; qui è in [tools] (regola 2), così `mise run test` lo trova uguale in locale e in CI.
+age = "1.3.2"
 
 [env]
 # Il python di uv, fissato senza metterlo nel PATH (F2.4). Lo stesso della CI del repo.
 UV_PYTHON = "3.12"
 
+# I comandi DELEGANO alle facce che vps1777 ha già (Ka.7): CONTRIBUTING, ci.yml, compose.
+# Dove serve logica, il `run` chiama uno script di tools/comandi/ (regola 1).
+
 [tasks.setup]
-description = "Prepara questa copia del repo: toolchain, dipendenze, hook di git. Idempotente: si rilancia dopo ogni pull. NON installa né configura la produzione e NON crea .env"
+description = "Prepara questa copia del repo: le dipendenze dei test dei tre servizi con un lock (senza riscriverlo) e l'hook di git di vps1777 (tools/hooks/installa.sh). Idempotente: si rilancia dopo ogni pull. NON è ./setup.sh (il wizard del deploy), NON configura la produzione e NON crea .env"
 run = [
-  "uv sync",
+  "uv sync --locked --directory services/nb1777-mcp",
+  "uv sync --locked --directory services/gateway",
+  "uv sync --locked --directory services/archive-mcp",
   "bash tools/hooks/installa.sh",
 ]
 
 [tasks.dev]
-description = "Avvia il programma in locale per provarlo a mano. NON è il deploy e NON gira i test"
-run = "uv run python -m vps1777"
+description = "Avvia lo stack in locale con le immagini costruite qui e Compose Watch (CONTRIBUTING, «Dev setup»). Serve un .env: lo crea ./setup.sh, non questo comando. NON è il deploy e NON gira i test"
+run = "docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch"
 
 [tasks.test]
-description = "Gira i test, con un filtro facoltativo sul nome. Esce ≠0 se il filtro non trova nessun test (K-b). NON fa lint né controlli di conformità"
-usage = 'arg "[filtro]" help="Solo i test il cui nome contiene questo testo; se non ne trova nessuno esce ≠0"'
-# pytest esce 5 da solo quando nessun test è raccolto o selezionato (Kb.1: già conforme)
-run = 'uv run pytest -q ${usage_filtro:+-k "$usage_filtro"}'
+description = "Gira le suite una alla volta come il job contract della CI (nb1777-mcp, gateway e i suoi test runtime, archive-mcp e il suo /health, tools/tests, poi i test bash), con un filtro facoltativo sul nome. Esce ≠0 se il filtro non trova nessun test in nessuna suite (K-b). NON fa lint né controlli di conformità"
+usage = 'arg "[filtro]" help="Solo i test il cui nome contiene questo testo (pytest -k); se nessuna suite ne trova esce ≠0. Col filtro i test bash non girano"'
+run = 'bash tools/comandi/test.sh "${usage_filtro:-}"'
 
 [tasks.lint]
-description = "Stile ed errori statici veloci (ruff). NON è un typecheck. NON gira i test"
-run = "uv run ruff check . && uv run ruff format --check ."
+description = "Stile ed errori statici veloci, come le prime righe del job lint della CI: ruff 0.15.22 su services/ tools/ security/ e shellcheck (immagine per digest) su ogni script tracciato. NON è un typecheck. NON gira i test"
+run = "bash tools/comandi/lint.sh"
 
 [tasks.build]
-description = "Costruisce l'artefatto in locale. NON pubblica e NON fa il deploy"
-run = "uv build"
+description = "Costruisce in locale le immagini dei servizi (vps1777/<servizio>:dev, overlay compose.build.yaml). NON pubblica su GHCR (lo fa release.yml al tag) e NON fa il deploy"
+run = "docker compose -f compose.yaml -f compose.build.yaml build"
 
 [tasks.check]
-description = "Quello che fa la CI (il cibuild di STRTA, non il `check` GNU): lint, test, conformità, segreti, asserzioni, conto dei rilievi. Si lancia prima di dire «fatto». NON prova i controlli sui guasti costruiti: quello è tools/1777/prova-controlli.sh"
+description = "Quello che fanno i job lint e contract della CI, in locale: lint, test, i guardiani di vps1777 (rilievi, installer, anti-leak, doc, coordinate, gate locale, feature, compose, onestà delle prove) e i controlli del contratto 1777. Si lancia prima di dire «fatto». NON costruisce le immagini (build) e NON prova i controlli sui guasti costruiti (tools/1777/prova-controlli.sh)"
 depends = ["lint", "test"]
+# pyyaml con `uv run --with`: nel runner di check.yml non c'è setup-python, e il python3 di
+# sistema non è detto che abbia pyyaml (lo porta uv, col python di UV_PYTHON)
 run = [
+  "uv run --with pyyaml security/check_findings.py",
+  "python3 security/confronta-installer.py --autoprova && python3 security/confronta-installer.py",
+  "python3 security/check_no_leaks.py",
+  "python3 tools/doc-riferimenti.py --autoprova && python3 tools/doc-riferimenti.py",
+  "bash tools/esegui-test-bash.sh --autoprova",
+  "python3 tools/coordinate-nei-doc.py --autoprova && python3 tools/coordinate-nei-doc.py",
+  "uv run --with pyyaml python3 tools/gate-locale.py --autoprova",
+  "uv run --with pyyaml python3 tools/verify-features.py",
+  "docker compose -f compose.yaml config -q && docker compose -f compose.yaml -f compose.build.yaml config -q",
+  "bash tools/prove-empiriche/onesta-a-macchina-nuda.sh",
   "python3 tools/1777/conformita.py",
   "bash tools/1777/segreti.sh",
   "python3 tools/1777/asserzioni.py",
@@ -68,6 +88,6 @@ run = [
 ]
 
 [tasks.release]
-description = "Prepara un rilascio in locale: albero pulito, check verde, tag annotato. NON fa push, NON pubblica, NON fa il deploy"
-usage = 'arg "<versione>" help="La versione da taggare, per esempio 0.2.0"'
-run = 'bash tools/1777/rilascio.sh "$usage_versione"'
+description = "Prepara in locale il tag vX.Y.Z di una versione già aperta su main: VERSION uguale, sezione nel CHANGELOG, albero pulito, check verde, tag annotato. NON fa push: il tag lo spinge chi mantiene il repo, e release.yml costruisce, firma e pubblica. Tag e release sono immutabili"
+usage = 'arg "<versione>" help="La versione da taggare, uguale al file VERSION, per esempio 0.63.5"'
+run = 'bash tools/comandi/release.sh "$usage_versione"'
