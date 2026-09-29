@@ -509,6 +509,7 @@ def _open_con_indice(name: str, idx: Path) -> sqlite3.Connection:
 def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                   query_fts: str = "", since: str = "", until: str = "",
                   campi: str = "tutto", speaker: str = "",
+                  riformulazioni: list[str] | None = None,
                   k_rrf: int = semantica.RRF_K,
                   peso_fts: float = semantica.RRF_PESO_FTS,
                   snippet_tokens: int = 32) -> dict[str, Any]:
@@ -517,10 +518,16 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     Ritorna {righe, indici, parametri}: le righe come `search`, più `origine`
     ('fts' | 'vettori' | 'entrambi') per ciascuna — chi legge deve poter vedere
     *quale* dei due l'ha trovata, altrimenti il guadagno resta invisibile.
+
+    Con `riformulazioni` ogni testo (la domanda e le sue riformulazioni) porta
+    le sue due liste, e la fusione è UNA sola su tutte: stesso `limit`, niente
+    righe in più — il guadagno si misura a parità di risultati (vedi
+    `semantica.testi_della_ricerca`).
     """
     # un valore sbagliato si dice prima di tutto (anche lo speaker: il ramo vettoriale
     # lo usa da sé, senza passare da FTS)
     fts.valida_filtri(speaker=speaker, campi=campi)
+    testi = semantica.testi_della_ricerca(query, riformulazioni)
     limit = _limite(limit)
     s = get_settings()
     model_dir = Path(s.archive_model_dir)
@@ -535,91 +542,115 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             "e caricato sul volume come i DB stessi (vedi docs/RICERCA-IBRIDA.md).\n"
             "Senza indice, `search` (FTS5) resta pienamente funzionante: usa quello."
         )
-    blob = semantica.embed_query(query, model_dir)      # solleva SemanticaNonPronta se manca il modello
+    # solleva SemanticaNonPronta se manca il modello
+    blobs = [semantica.embed_query(t, model_dir) for t in testi]
     righe: list[dict[str, Any]] = []
     meta_per_db: list[dict[str, Any]] = []
+    # con un filtro (speaker, finestra temporale) il ramo vettoriale ne scarta
+    # molti: si chiedono più vicini, perché la fusione abbia ancora una lista vera
+    filtrato = bool(speaker or since or until)
     for name in bersagli:
         try:
             conn = _open_con_indice(name, indici[name])
         except KeyError:
             continue
         snap = _snapshot(_DBS[name])
-        # ① lista FTS5: la query naturale funziona male in FTS5 (è una frase, non
-        #    un'espressione), quindi chi chiama può passare `query_fts` col lessico
-        #    giusto. Se non lo fa, si prova comunque: una lista vuota non è un
-        #    errore, è semplicemente metà fusione.
-        espressione = query_fts or semantica.query_fts_da_naturale(query)
-        if espressione:
-            try:
-                rows_fts = fts.search_conn(conn, espressione, limit=limit * 3,
-                                           since=since, until=until, campi=campi,
-                                           speaker=speaker,
-                                           snippet_tokens=snippet_tokens)
-            except (FtsSyntaxError, sqlite3.OperationalError) as exc:
-                log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s", name, exc)
-                rows_fts = []
-        else:
+        per_uuid: dict[str, dict[str, Any]] = {}
+        liste: list[tuple[list[str], float]] = []
+        in_fts: set[str] = set()
+        in_vec: set[str] = set()
+        candidati: set[int] = set()
+        assenti: set[int] = set()
+        uuid_diversi: set[int] = set()
+        registro_ok = True
+        interrogabile = True
+        for i, (testo, blob) in enumerate(zip(testi, blobs)):
+            # ① lista FTS5: la query naturale funziona male in FTS5 (è una frase, non
+            #    un'espressione), quindi chi chiama può passare `query_fts` col lessico
+            #    giusto — vale per la domanda, le riformulazioni vanno da sé. Se non lo
+            #    fa, si prova comunque: una lista vuota non è un errore, è
+            #    semplicemente metà fusione.
+            espressione = (query_fts if i == 0 else "") or \
+                semantica.query_fts_da_naturale(testo)
+            rows_fts: list[dict[str, Any]] = []
+            if espressione:
+                try:
+                    rows_fts = fts.search_conn(conn, espressione, limit=limit * 3,
+                                               since=since, until=until, campi=campi,
+                                               speaker=speaker,
+                                               snippet_tokens=snippet_tokens)
+                except (FtsSyntaxError, sqlite3.OperationalError) as exc:
+                    log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s",
+                             name, exc)
             # Meno di due termini con segnale: il ramo full-text tace invece di
             # inventarsi una query. Mezza fusione onesta > due liste di cui una
             # è rumore promosso a risultato.
-            rows_fts = []
-        per_uuid = {r["uuid"]: r for r in rows_fts}
-        lista_fts = [r["uuid"] for r in rows_fts]
-        # ② lista vettoriale: rowid → uuid (l'indice lavora su rowid, il mondo
-        #    esterno su uuid: la traduzione sta qui e non nell'indice, così un
-        #    re-ingest che cambia i rowid rompe l'indice, non il contratto).
-        #    ⚠️ E il rowid può MENTIRE: dopo un re-ingest (INSERT OR REPLACE) un
-        #    rowid dell'indice può non esistere più o essere di un altro messaggio.
-        #    Se l'indice ha il registro del costruttore, ogni risultato si confronta
-        #    con l'uuid registrato e chi non combacia si SCARTA — e si dichiara in
-        #    `indici[].verifica`, mai restituito come se fosse giusto.
-        lista_vec: list[str] = []
-        try:
-            # con un filtro (speaker, finestra temporale) il ramo vettoriale ne scarta
-            # molti: si chiedono più vicini, perché la fusione abbia ancora una lista vera
-            filtrato = bool(speaker or since or until)
-            rowids = semantica.knn_dedup(conn, blob, topn=limit * (10 if filtrato else 3))
-            registro = semantica.uuid_registrati(conn, rowids)
-            assenti = uuid_diversi = 0
-            if rowids:
-                seg = ",".join("?" * len(rowids))
-                cur = conn.execute(
-                    f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip, "
-                    f"content <> '' AS ha_testo"
-                    f"{', speaker' if speaker else ''} FROM messages WHERE rowid IN ({seg})",
-                    rowids)
-                per_rowid = {r["rowid"]: dict(r) for r in cur}
-                for rid in rowids:                      # l'ordine del knn è il rank
-                    r = per_rowid.get(rid)
-                    if not r:
-                        assenti += 1
-                        continue
-                    u = r["uuid"]
-                    if registro is not None and registro.get(rid) != u:
-                        uuid_diversi += 1
-                        continue
-                    if speaker and r["speaker"] != speaker:
-                        continue
-                    # la finestra vale anche qui, con la regola di `search`: il vettore
-                    # non sa di date, e senza questo filtro tornava maggio a chi chiedeva
-                    # settembre. Una riga senza ts resta fuori, come in FTS (NULL >= x).
-                    if (since and not (r["ts"] and r["ts"] >= since)) or \
-                            (until and not (r["ts"] and r["ts"] <= until)):
-                        continue
-                    if campi == "testo" and not r["ha_testo"]:
-                        # il vettore non dice se ha colpito le parole o le azioni: con
-                        # `campi='testo'` si tengono solo le righe che HANNO parole.
-                        continue
-                    lista_vec.append(u)
-                    if u not in per_uuid:
-                        per_uuid[u] = {"uuid": u, "project": r["project"], "ts": r["ts"],
-                                       "rank": None, "snippet": (r["snip"] or "")[:400]}
-        except sqlite3.OperationalError as exc:
-            log.warning("indice di %s non interrogabile: %s", name, exc)
+            for r in rows_fts:
+                per_uuid.setdefault(r["uuid"], r)
+            lista_fts = [r["uuid"] for r in rows_fts]
+            # ② lista vettoriale: rowid → uuid (l'indice lavora su rowid, il mondo
+            #    esterno su uuid: la traduzione sta qui e non nell'indice, così un
+            #    re-ingest che cambia i rowid rompe l'indice, non il contratto).
+            #    ⚠️ E il rowid può MENTIRE: dopo un re-ingest (INSERT OR REPLACE) un
+            #    rowid dell'indice può non esistere più o essere di un altro messaggio.
+            #    Se l'indice ha il registro del costruttore, ogni risultato si confronta
+            #    con l'uuid registrato e chi non combacia si SCARTA — e si dichiara in
+            #    `indici[].verifica`, mai restituito come se fosse giusto.
+            lista_vec: list[str] = []
+            try:
+                rowids = semantica.knn_dedup(conn, blob,
+                                             topn=limit * (10 if filtrato else 3))
+                registro = semantica.uuid_registrati(conn, rowids)
+                registro_ok = registro_ok and registro is not None
+                candidati.update(rowids)
+                if rowids:
+                    seg = ",".join("?" * len(rowids))
+                    cur = conn.execute(
+                        f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip, "
+                        f"content <> '' AS ha_testo"
+                        f"{', speaker' if speaker else ''} FROM messages "
+                        f"WHERE rowid IN ({seg})",
+                        rowids)
+                    per_rowid = {r["rowid"]: dict(r) for r in cur}
+                    for rid in rowids:                      # l'ordine del knn è il rank
+                        r = per_rowid.get(rid)
+                        if not r:
+                            assenti.add(rid)
+                            continue
+                        u = r["uuid"]
+                        if registro is not None and registro.get(rid) != u:
+                            uuid_diversi.add(rid)
+                            continue
+                        if speaker and r["speaker"] != speaker:
+                            continue
+                        # la finestra vale anche qui, con la regola di `search`: il
+                        # vettore non sa di date, e senza questo filtro tornava maggio
+                        # a chi chiedeva settembre. Una riga senza ts resta fuori, come
+                        # in FTS (NULL >= x).
+                        if (since and not (r["ts"] and r["ts"] >= since)) or \
+                                (until and not (r["ts"] and r["ts"] <= until)):
+                            continue
+                        if campi == "testo" and not r["ha_testo"]:
+                            # il vettore non dice se ha colpito le parole o le azioni:
+                            # con `campi='testo'` si tengono solo le righe che HANNO
+                            # parole.
+                            continue
+                        lista_vec.append(u)
+                        if u not in per_uuid:
+                            per_uuid[u] = {"uuid": u, "project": r["project"],
+                                           "ts": r["ts"], "rank": None,
+                                           "snippet": (r["snip"] or "")[:400]}
+            except sqlite3.OperationalError as exc:
+                log.warning("indice di %s non interrogabile: %s", name, exc)
+                interrogabile = False
+                break
+            liste += [(lista_fts, peso_fts), (lista_vec, 1.0)]
+            in_fts.update(lista_fts)
+            in_vec.update(lista_vec)
+        if not interrogabile:
             continue
-        # ③ fusione
-        fusi = semantica.fondi_rrf(lista_fts, lista_vec, k=k_rrf, peso_fts=peso_fts)
-        in_fts, in_vec = set(lista_fts), set(lista_vec)
+        # ③ fusione: una sola, su tutte le liste di tutti i testi
+        fusi = semantica.fondi_rrf_liste(liste, k=k_rrf)
         for u in fusi[:limit]:
             r = dict(per_uuid[u])
             r["db"] = name
@@ -635,18 +666,19 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                             "generato": m.get("generato", "?"),
                             # campo IN PIÙ: gli altri non cambiano forma
                             "verifica": semantica.verdetto_registro(
-                                registro is not None, candidati=len(rowids),
-                                assenti=assenti, uuid_diversi=uuid_diversi)})
+                                registro_ok, candidati=len(candidati),
+                                assenti=len(assenti), uuid_diversi=len(uuid_diversi))})
         if assenti or uuid_diversi:
             log.warning("indice di %s disallineato: %d rowid assenti, %d uuid diversi "
-                        "su %d candidati", name, assenti, uuid_diversi, len(rowids))
+                        "su %d candidati", name, len(assenti), len(uuid_diversi),
+                        len(candidati))
     return {
         "righe": righe[:limit],
         "indici": meta_per_db,
         "parametri": {"k_rrf": k_rrf, "peso_fts": peso_fts,
-                      "modello": semantica.MODELLO_ATTESO},
+                      "modello": semantica.MODELLO_ATTESO,
+                      "testi": len(testi)},
     }
-
 
 @_serializzata
 def count(query: str, db: str = "", *, raw: bool = False, since: str = "",

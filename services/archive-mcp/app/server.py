@@ -157,7 +157,8 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
 def search_ibrida(query: str, db_name: str = "", limit: int = 20,
                   query_fts: str = "", since: str = "", until: str = "",
                   campi: str = "tutto", k_rrf: int = 30, peso_fts: float = 1.5,
-                  snippet_tokens: int = 32, speaker: str = "") -> dict[str, Any]:
+                  snippet_tokens: int = 32, speaker: str = "",
+                  riformulazioni: list[str] | None = None) -> dict[str, Any]:
     """Cerca per SENSO, non per lessico: FTS5 + vettori fusi (issue #281).
 
     ⚖️ QUANDO USARLA — e quando no. `search` (FTS5) resta il tool giusto quando
@@ -182,6 +183,13 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
     `query_fts` (sintassi FTS5 normale): la parte full-text userà quello e la
     fusione avrà due liste forti invece di una e mezza.
 
+    🔁 RIFORMULAZIONI: se la domanda si può dire in modi davvero diversi,
+    passane fino a 3 in `riformulazioni`. Ognuna porta le sue due liste e la
+    fusione resta UNA, con lo stesso `limit`: una riga trovata da più
+    formulazioni sale. Misurato il 30/09 su 10 domande con criterio cieco: +1 e
+    +3 elementi su 30 nelle prime 10 righe, nessun guadagno a 20. Serve quando
+    leggi pochi risultati; con un `limit` largo la domanda da sola basta.
+
     Args:
         query: la domanda in linguaggio naturale (il senso).
         db_name: DB su cui cercare ('' = tutti quelli CON indice).
@@ -197,6 +205,9 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
             (plateau k=20-40, peso 1.2-1.5): cambiarli è un esperimento, non
             una regolazione — il banco vale per questi.
         snippet_tokens: lunghezza dello snippet FTS.
+        riformulazioni: fino a 3 altri modi di dire la domanda (vuote e
+            doppioni si scartano; più di 3 è un errore). Il `query_fts` vale
+            solo per la domanda.
         speaker: CHI HA SCRITTO, come in `search` ('human', 'assistant', 'tool',
             'system', 'other', 'unknown'). Filtra TUTTE e due le liste: per «cosa ha detto
             Neo» usa speaker='human' — senza, su 20 risultati le sue parole erano
@@ -224,7 +235,7 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
     return db.search_ibrida(query, db_name, limit, query_fts=query_fts,
                             since=since, until=until, campi=campi, k_rrf=k_rrf,
                             peso_fts=peso_fts, snippet_tokens=snippet_tokens,
-                            speaker=speaker)
+                            speaker=speaker, riformulazioni=riformulazioni)
 
 
 @mcp.tool()

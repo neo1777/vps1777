@@ -263,3 +263,36 @@ def test_since_until_filtrano_anche_il_ramo_vettoriale(archivio, monkeypatch):
     assert all(r["ts"] >= "2026-05-13" for r in dopo["righe"])
     prima = modulo.search_ibrida("x", db="arch", limit=3, until="2026-05-11")
     assert [r["uuid"] for r in prima["righe"]] == ["u1"]
+
+
+@vec
+def test_riformulazioni_entrano_nella_stessa_fusione(archivio, monkeypatch):
+    """Banco del 30/09 (le lezioni di graphify): una riformulazione porta righe che la
+    domanda da sola non mette in cima, ma dentro UNA fusione e lo stesso `limit` — non
+    righe in più. La verifica dell'indice conta i candidati una volta sola."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    vettori = {"x": tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2"),
+               "y": tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 5")}
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: vettori[q])
+    modulo._maybe_reload()
+    da_sola = modulo.search_ibrida("x", db="arch", limit=2)
+    assert da_sola["righe"][0]["uuid"] == "u2"
+    assert da_sola["parametri"]["testi"] == 1
+    fuse = modulo.search_ibrida("x", db="arch", limit=2, riformulazioni=["y", " ", "X"])
+    assert fuse["parametri"]["testi"] == 2, "la vuota e il doppione della domanda si scartano"
+    assert len(fuse["righe"]) == 2
+    # con limit 3: la domanda da sola non porta u5, la fusione sì — e u4, che sta in
+    # alto in tutte e due le liste, sale al secondo posto (l'accordo somma)
+    assert "u5" not in [r["uuid"] for r in modulo.search_ibrida("x", db="arch", limit=3)["righe"]]
+    fuse3 = modulo.search_ibrida("x", db="arch", limit=3, riformulazioni=["y"])
+    assert [r["uuid"] for r in fuse3["righe"]] == ["u2", "u4", "u5"]
+    verifica = fuse["indici"][0]["verifica"]
+    assert verifica["candidati"] <= 6 and verifica["scartati"] == 0
+
+
+def test_troppe_riformulazioni_sono_un_errore_detto(archivio):
+    modulo, _, _ = archivio
+    with pytest.raises(ValueError, match="al massimo 3"):
+        modulo.search_ibrida("x", db="arch", riformulazioni=["a", "b", "c", "d"])

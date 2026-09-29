@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **`search_ibrida` accetta `riformulazioni`**: fino a 3 altri modi di dire la domanda. Ogni
+  testo porta la sua lista FTS e la sua lista vettoriale, e la fusione RRF resta **una**, con lo
+  stesso `limit` (la tecnica è nota come RAG-Fusion). Nasce da una lezione dei test di graphify
+  sull'archivio, «riformulare vale quanto il grafo», rimisurata su un banco a criterio cieco:
+  a parità di righe vale +1 e +3 elementi su 30 nelle prime 10, e niente nelle prime 20. Il
+  confronto di settembre sommava tre top-10 contro una. Serve a chi legge pochi risultati.
+  `semantica.fondi_rrf_liste` generalizza la fusione a N liste (`fondi_rrf` ne è il caso a
+  due, invariato); `parametri.testi` dice quanti testi sono entrati. RICERCA-IBRIDA e ARCHIVE
+  IT/EN aggiornate.
+
 ### Corretto
 - **Il pre-flight dei segreti con Python 3.14 scambiava una cartella `secrets/` illeggibile per
   segreti ASSENTI.** Da 3.14 `Path.is_file()` inghiotte il `PermissionError` e risponde

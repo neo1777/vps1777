@@ -15,7 +15,7 @@
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
-      "sorgente_sha256": "65d6822c476bc7d5ac4b83f5699d3f7ba5b3bf4c175e92a8f4617d7e311d2024"
+      "sorgente_sha256": "d0cee68432440210396b3e84f5adeb7dd1bdc6f21ceb885af2fb9524d5eabd7a"
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",
@@ -39,7 +39,7 @@
     },
     "docs/en/RICERCA-IBRIDA.md": {
       "sorgente": "docs/RICERCA-IBRIDA.md",
-      "sorgente_sha256": "6689ecbe27e97da5c4e88ed15074ffa50c5906b530436793de00cd53284ad60c"
+      "sorgente_sha256": "d1d9c72498bed61c19be9d88afc9765e60ad00a7e8a0e1744e6d28f6b1dab430"
     }
   }
 }
