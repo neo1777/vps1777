@@ -4,6 +4,23 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Sette comandi uguali in ogni repo del contratto 1777: `mise run setup`, `dev`, `test`,
+  `lint`, `build`, `check`, `release`** (retrofit dal template 1777, v0.2). `mise.toml`
+  delega alle facce che il repo ha già: `test` gira le suite del job contract una alla
+  volta, `lint` fa ruff e shellcheck come la CI, `check` è lint e test più i guardiani dei
+  job lint e contract e i controlli del contratto in `tools/1777/` (conformità, segreti,
+  asserzioni, rilievi, lingue). `uv` e `age` sono fissati in `[tools]` col lock, il python
+  di uv da `UV_PYTHON` (3.12, quello della CI); il `python3` di sistema non cambia, e
+  `setup` non crea `.env` né chiama `./setup.sh`. Il workflow nuovo `check.yml` gira
+  `mise run check` e la prova dei controlli (`tools/1777/prova-controlli.sh`: ogni
+  controllo visto rosso sul suo guasto costruito, in un clone fresco); i 9 check
+  obbligatori di `main` restano quelli di `ci.yml`. `AGENTS.md` e `RIGHE.md` in inglese,
+  con le copie italiane `.it.md`. Otto voci nuove in `features.yaml` (`contratto.*`), e
+  `test_ogni_autoprova_e_agganciata` riconosce `mise.toml` come file di comandi (chiama le
+  autoprove, non le implementa), con una guardia che è rossa se lì il flag compare su una
+  riga che non lancia uno script.
+
 ## [0.63.4] — 2026-09-28
 
 **Una `notebook_query` in corso si ritira rilanciando la stessa domanda**: serve ai client
