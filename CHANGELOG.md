@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.64.0] — 2026-09-30
+
+**Una lezione di graphify misurata prima di portarla dentro**: `search_ibrida` accetta
+riformulazioni fuse in una sola top-k, e il guadagno è dichiarato per quello che è (piccolo,
+e solo nelle prime righe). In più il pre-flight dei segreti regge Python 3.14.
+
 ### Aggiunto
 - **`search_ibrida` accetta `riformulazioni`**: fino a 3 altri modi di dire la domanda. Ogni
   testo porta la sua lista FTS e la sua lista vettoriale, e la fusione RRF resta **una**, con lo
