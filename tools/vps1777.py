@@ -1916,6 +1916,30 @@ def install_systemd_units(repo: Path, *, enable: bool) -> None:
         if not auto:
             sudo(["systemctl", "disable", "--now",
                   "vps1777-auto-update.timer"], check=False)
+    else:
+        # update, rollback e auto-rollback (29/09/2026, residuo dell'audit della doc): le
+        # unit base restano come sono — un operatore può averne spenta una di proposito —
+        # ma il timer dell'auto-update segue lo stato dichiarato, come all'install. Prima
+        # togliere `autoupdate` da .env e fare un update lo lasciava acceso, e rimetterlo
+        # non lo riaccendeva: OPS.md lo dichiarava («rileggono a metà»).
+        allinea_timer_autoupdate(repo)
+
+
+def _timer_autoupdate_installato() -> bool:
+    return (Path("/etc/systemd/system") / "vps1777-auto-update.timer").is_file()
+
+
+def allinea_timer_autoupdate(repo: Path) -> None:
+    """Accende o spegne `vps1777-auto-update.timer` secondo VPS1777_FEATURES.
+
+    Stessa regola dell'install: lo stato dichiarato è autoritativo. Se la unit non è
+    installata (un sistema senza systemd, o un'installazione vecchia) non fa niente.
+    Spegnere il timer mentre gira il suo stesso servizio è sicuro: `disable --now` ferma
+    il timer, non l'update in corso."""
+    if not _timer_autoupdate_installato():
+        return
+    verbo = "enable" if "autoupdate" in enabled_features(repo) else "disable"
+    sudo(["systemctl", verbo, "--now", "vps1777-auto-update.timer"], check=False)
 
 
 # ─────────────────────────────────────────── lock

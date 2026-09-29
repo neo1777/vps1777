@@ -85,6 +85,15 @@ ASSI: list[tuple[str, str]] = [
     #     `AGE_RECIPIENT` engine.py usciva 0 come setup.sh e le vie scoperte
     #     sembravano due invece di una.)
     ("backup armato (recipient age)", r"age-recipients"),
+    # 🔴 ASSE «le feature partono davvero», 29/09/2026 — dai residui dell'audit della doc.
+    #   `backup` è acceso di default su tutte e tre le vie, ma la feature vive in un
+    #   OVERLAY (`compose.ops.backup.yaml`, profilo `ops.backup`): chi non lo passa a
+    #   `docker compose` dichiara il backup e non avvia il container. deploy.sh ed
+    #   engine.py lo passano; setup.sh avviava solo il profilo d'ingress, e il backup
+    #   partiva al primo `vps1777 update` (che legge le feature), non al primo giro.
+    #   Un nome per profilo (`ops.backup`, `ops.portainer`, `ops.watchtower` come file,
+    #   `ops.autoupdate` come profilo di watchtower): chi ne perde uno diverge.
+    ("overlay delle feature (ops.*)", r"\bops\.(?:backup|portainer|watchtower|autoupdate)\b"),
 ]
 
 

@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Le feature dichiarate valgono su tutte le vie, fin dal primo giro** (residui dell'audit della
+  doc). `setup.sh` avviava solo il profilo d'ingress: il backup, acceso di default, restava
+  dichiarato e senza container fino al primo `vps1777 update`. Ora passa a `docker compose` gli
+  overlay e i profili delle feature, come `deploy.sh` e l'installer grafico, e il
+  confronta-installer ha un asse nuovo, «overlay delle feature (ops.*)», che diverge se una via
+  li perde. E update, rollback e auto-rollback riallineano il timer dell'auto-update a
+  `VPS1777_FEATURES` come fa l'install: togliere `autoupdate` e aggiornare lo lasciava acceso, e
+  rimetterlo non lo riaccendeva. Le altre unit restano come l'operatore le ha lasciate. OPS.md
+  e il referto di `deploy.sh` allineati.
+
 ## [0.63.4] — 2026-09-28
 
 **Una `notebook_query` in corso si ritira rilanciando la stessa domanda**: serve ai client

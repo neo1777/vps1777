@@ -33,13 +33,15 @@ una riga del `.env` della VPS:
 VPS1777_FEATURES=backup,autoupdate        # il default: backup + auto-update sicuro
 ```
 
-L'installazione legge questa riga e accende le feature corrispondenti — l'installer
-grafico, `deploy.sh` e il bootstrap tutte; `setup.sh` accende il timer dell'auto-update ma
-non avvia il profilo `backup`, che parte al primo update che installa una versione nuova
-(la CLI lo aggiunge al suo `docker compose`). Quindi un reinstall della VPS non riparte
-"nudo": riproduce le feature dichiarate. Update e rollback la rileggono **a metà**: ne ricavano i profili compose (`backup`, `portainer`) per
-lo `up` che fanno, ma non accendono né spengono il timer dell'auto-update — reinstallano le
-unit e ne lasciano l'abilitazione com'è. L'installer grafico chiude con un **referto** che
+L'installazione legge questa riga e accende le feature corrispondenti, su tutte le vie:
+l'installer grafico, `deploy.sh`, il bootstrap e `setup.sh`, che dal 29/09 avvia anche gli
+overlay delle feature (`compose.ops.backup.yaml` col profilo `ops.backup`) al primo giro.
+Prima il backup partiva solo al primo update. Quindi un reinstall della VPS non riparte
+"nudo": riproduce le feature dichiarate. Anche update e rollback la rileggono per intero:
+ne ricavano i profili compose (`backup`, `portainer`) per lo `up` che fanno, e dal 29/09
+accendono o spengono il timer dell'auto-update secondo la riga. Le altre unit le
+reinstallano e ne lasciano l'abilitazione com'è: un operatore può averne spenta una di
+proposito. L'installer grafico chiude con un **referto** che
 le elenca (e `deploy.sh` con un blocco equivalente):
 
 ```
