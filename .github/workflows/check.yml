@@ -1,0 +1,42 @@
+name: check
+# La CI chiama i comandi del contratto e nient'altro (K-a). Due job:
+#  - check: `mise run setup` e `mise run check`, cioè quello che si fa in locale prima di dire «fatto»;
+#  - prova-controlli: i guasti costruiti, hook compreso a tre tempi su un clone fresco (Kc.1, AP.5).
+#    Il suo «visto rosso» (tools/1777/visto-rosso.tsv, con l'id del run) resta come artefatto, e
+#    finisce nel riassunto del run: C3 può dire «in CI, run <id>, data».
+# mise è fissato in tre posti (Ka.5): qui (`version`), mise.toml (`min_version`), mise.lock.
+# Le action sono fissate per sha, non per tag: un tag si sposta, uno sha no. conformita.py lo verifica.
+# NIENTE step apt o simili: uno strumento di sistema sta in [tools] di mise.toml (conformita.py [ci]).
+# Il runner è fissato (ubuntu-24.04, mai `-latest`): cambia immagine solo quando lo alziamo noi, a
+# lotti, come mise e le action (F2.4; conformita.py [ci]).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.15
+      - run: mise run setup
+      - run: mise run check
+  prova-controlli:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          version: 2026.9.15
+      - run: bash tools/1777/prova-controlli.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: visto-rosso
+          path: tools/1777/visto-rosso.tsv
+          retention-days: 30

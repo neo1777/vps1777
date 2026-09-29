@@ -1635,3 +1635,154 @@ features:
     since: "0.45.0"
     verify:
       file_contains: {path: "services/gateway/app/proxy.py", pattern: 'headers\.pop\("authorization"'}
+
+  # ── il CONTRATTO 1777: i 7 comandi e i suoi controlli (retrofit dal template, 29/09) ──
+  # I file di tools/1777/ arrivano da copier (gh:neo1777/template1777, vedi
+  # .copier-answers.yml) e si aggiornano con `copier update`, non a mano; tools/comandi/
+  # è di vps1777: le `run` di mise.toml sulle facce che il repo ha già (CONTRIBUTING, ci.yml).
+  # 📌 Voci uno-per-file perché il ledger dichiara percorsi esatti: `git ls-files 'tools/*.py'`
+  #    senza `:(glob)` fa passare `*` anche attraverso le `/`, e tools/1777/* entra nel verso
+  #    reale→dichiarato come ogni altro script (misurato: 10 «NON DICHIARATO» senza queste voci).
+  # ⚠️ COSA NON PROVANO, detto una volta per tutte: il verify dice che lo script c'è ed è
+  #    agganciato dove serve; che i controlli siano stati VISTI ROSSI lo dice C3 in RIGHE.md,
+  #    scritta da tools/1777/prova-controlli.sh, non questo file.
+
+  - id: contratto.comandi
+    nome: "I 7 comandi del contratto in mise.toml, sulle facce che vps1777 ha già"
+    cosa: "`mise run setup|dev|test|lint|build|check|release`: un nome per ogni gesto, lo
+           stesso in ogni repo nato dal template. Ogni comando DELEGA e non sostituisce:
+           `test` gira le suite del job contract una alla volta (tools/comandi/test.sh,
+           perché tools/tests e archive-mcp importano tutte e due un pacchetto `app`),
+           `lint` fa ruff 0.15.22 e shellcheck con l'immagine per digest della CI
+           (tools/comandi/lint.sh), `dev` e `build` sono le righe compose di CONTRIBUTING,
+           `check` è lint + test + i guardiani dei job lint e contract + i controlli del
+           contratto. La logica sta negli script e non in mise.toml, perché mise passa ogni
+           `run` per Tera e un `${#ARR[@]}` di bash apre un commento: il task non parte, e
+           con lui `check`. Le chiamate alle autoprove restano righe di `check` in
+           mise.toml, mai dentro gli script (test_ogni_autoprova_e_agganciata conta mise.toml
+           come file di comandi, e solo lui). `age` sta in [tools] col lock: il ciclo backup →
+           restore lo trova uguale in locale e in check.yml. NON sostituisce ci.yml: i 9
+           check obbligatori di main restano quelli."
+    dove: ["mise.toml", "mise.lock", "tools/comandi/test.sh", "tools/comandi/lint.sh",
+           ".github/workflows/check.yml#check"]
+    status: active-default
+    since: "non rilasciato (29/09/2026)"
+    verify:
+      grep_count:
+        path: mise.toml
+        pattern: '(?m)^\[tasks\.(setup|dev|test|lint|build|check|release)\]$'
+        min: 7
+
+  - id: contratto.rilascio
+    nome: "`mise run release <versione>`: il tag in locale, dopo i controlli di CONTRIBUTING"
+    cosa: "tools/comandi/release.sh rifiuta un ramo che non è main, una VERSION diversa
+           dalla versione chiesta (il bump passa da una PR) e un CHANGELOG senza la sezione
+           `## [X.Y.Z]`; poi passa la mano a tools/1777/rilascio.sh del contratto: albero
+           pulito, tag che non c'è già, `mise run check` verde, tag annotato. NON fa push:
+           il tag lo spinge chi mantiene il repo, e release.yml costruisce, firma e
+           pubblica. Tag e release sono immutabili, quindi il controllo sta PRIMA del tag."
+    dove: ["tools/comandi/release.sh", "tools/1777/rilascio.sh", "mise.toml#tasks.release",
+           "CONTRIBUTING.md#Releasing"]
+    status: active-default
+    since: "non rilasciato (29/09/2026)"
+    verify:
+      file_contains: {path: tools/comandi/release.sh, pattern: 'exec bash tools/1777/rilascio\.sh'}
+
+  - id: contratto.conformita
+    nome: "conformita.py: il contratto verificato da fonti indipendenti dal file che lo nomina"
+    cosa: "I comandi nominati in AGENTS.md esistono secondo `mise tasks ls --json` (non
+           secondo AGENTS.md) e ci sono tutti e 7; ogni riga di RIGHE.md con un controllo
+           derivato ha il suo guasto costruito in prova-controlli.sh; i file fra backtick
+           esistono. E le righe del contratto che stanno in file condivisi, una per una:
+           description di ogni task, `run` che Tera legge (con `mise run --dry-run`: `mise
+           tasks ls` resta verde anche su un task rotto), `setup` che chiama l'installatore
+           degli hook, .env ignorato, check.yml con action per sha, mise alla versione di
+           min_version, runner fissato e niente step apt, `_src_path` senza cartelle di
+           casa, i documenti in due lingue allineati (lingue.py). Fail-loud: se manca uno
+           strumento esce 2, mai verde senza aver misurato."
+    dove: ["tools/1777/conformita.py", "mise.toml#tasks.check", "AGENTS.md", "RIGHE.md"]
+    status: active-default
+    since: "non rilasciato (29/09/2026)"
+    verify:
+      python_def: {path: tools/1777/conformita.py, name: main}
+
+  - id: contratto.lingue
+    nome: "AGENTS, RIGHE e glossario del contratto in italiano e in inglese, freschi"
+    cosa: "Con il repo pubblico i documenti del contratto esistono nelle due lingue, con
+           la convenzione di vps1777: AGENTS.md e RIGHE.md in inglese, AGENTS.it.md e
+           RIGHE.it.md in italiano, che è il sorgente. tools/1777/traduzioni.json registra
+           l'impronta di ogni sorgente italiano quando è stato tradotto (la stessa firma di
+           docs/en/MANIFEST.json), e lingue.py è rosso se una copia manca, se le due non si
+           rimandano, se non hanno la stessa forma (nomi fra backtick, titoli, righe di
+           tabella) o se l'italiano si è mosso dopo la traduzione; il blocco C3, che scrive
+           la prova, non conta. Rosso anche se una sigla non è nel glossario. Un registro
+           SEPARATO da docs/en/MANIFEST.json: RIGHE.md cambia a ogni prova dei controlli
+           (C3), e il test di vps1777 hasha il file intero."
+    dove: ["tools/1777/lingue.py", "tools/1777/traduzioni.json", "AGENTS.md", "AGENTS.it.md",
+           "RIGHE.md", "RIGHE.it.md", "tools/1777/GLOSSARIO.md", "tools/1777/GLOSSARIO.it.md"]
+    status: active-default
+    since: "non rilasciato (29/09/2026)"
+    verify:
+      python_def: {path: tools/1777/lingue.py, name: controlla}
+
+  - id: contratto.prova-controlli
+    nome: "I guasti costruiti: ogni controllo del contratto visto rosso, e C3 lo scrive"
+    cosa: "prova-controlli.sh rompe il repo apposta in un CLONE FRESCO in una cartella
+           temporanea (mai nel repo vero) e per ogni controllo guarda tre tempi: è agganciato
+           (lo chiama `check`, o `setup` per l'hook), va rosso sul suo guasto e PER LA
+           RAGIONE GIUSTA (la regola attesa compare nel messaggio), torna verde sul clone
+           sano. L'hook di git lo prova col marcatore che il pre-commit di vps1777 stampa
+           quando ferma un commit (`[✗]`, da .copier-answers.yml): un commit fermato da
+           altro non conta. Scrive C3, la cella «visto rosso» di RIGHE.md, e
+           tools/1777/visto-rosso.tsv; in CI dice il run e la tabella va nel riassunto.
+           Gira nel job prova-controlli di check.yml, non nei 9 check obbligatori."
+    dove: ["tools/1777/prova-controlli.sh", ".github/workflows/check.yml#prova-controlli",
+           "RIGHE.md"]
+    status: active-default
+    since: "non rilasciato (29/09/2026)"
+    verify:
+      file_contains: {path: .github/workflows/check.yml, pattern: 'bash tools/1777/prova-controlli\.sh'}
+
+  - id: contratto.segreti
+    nome: "segreti.sh: una chiave non deve poter finire nel codice che va al client"
+    cosa: "Guarda la FORMA e non il valore, leggendo ogni file intero e non una riga alla
+           volta: un `define` di Vite con una chiave, `loadEnv` senza prefisso, una
+           variabile VITE_*KEY letta dal client, `--dart-define` con una chiave, un .env
+           dichiarato come asset, un .env (non .env.example) dentro git; nei TS anche un
+           canarino al build. Stampa file, riga e regola, mai il valore. Le regole di forma
+           girano su ogni file, qualunque sia lo stack (in vps1777, il 29/09: forma pulita);
+           il canarino no, perché senza package.json non c'è un bundle da costruire, e la
+           prova dei controlli lo segna «non si applica». Non sostituisce
+           security/check_no_leaks.py, che cerca materiale credenziale nei file tracciati."
+    dove: ["tools/1777/segreti.sh", "mise.toml#tasks.check"]
+    status: active-default
+    since: "non rilasciato (29/09/2026)"
+    verify:
+      file_contains: {path: mise.toml, pattern: 'bash tools/1777/segreti\.sh'}
+
+  - id: contratto.asserzioni
+    nome: "asserzioni.py: nessun file di test senza asserzioni"
+    cosa: "Un pavimento, non una prova: ogni file di test tracciato (test_*.py, *_test.py,
+           *.test.ts, i test Dart) contiene almeno un'asserzione (`assert`, pytest.raises,
+           `expect(`). Che l'asserzione non sia tautologica lo dice solo un test visto rosso
+           sul codice di prima; qui si guarda che ci sia. Misurato il 29/09 su vps1777: 114
+           file di test, tutti con un'asserzione. Esce 2 se non può misurare."
+    dove: ["tools/1777/asserzioni.py", "mise.toml#tasks.check"]
+    status: active-default
+    since: "non rilasciato (29/09/2026)"
+    verify:
+      python_def: {path: tools/1777/asserzioni.py, name: main}
+
+  - id: contratto.rilievi
+    nome: "rilievi.py: il deposito dei rilievi e il conto di quelli aperti da più di 14 giorni"
+    cosa: "Ogni rito che rileva qualcosa (una retro, una rottura provata, la CI rossa sul
+           ramo di default) chiude con una riga in RILIEVI.ndjson: data, rito, cosa,
+           responsabile, stato. `conta` stampa quanti sono aperti da più di 14 giorni ed esce
+           0 (è un segnale, non un blocco), ma esce 1 se il registro ha una riga malformata.
+           RILIEVI.ndjson è pigro: nasce al primo deposito (al 29/09 in vps1777 non c'è, e
+           `conta` lo dice). Non sostituisce il registro dei finding di security/."
+    dove: ["tools/1777/rilievi.py", "mise.toml#tasks.check"]
+    status: active-default
+    since: "non rilasciato (29/09/2026)"
+    verify:
+      python_def: {path: tools/1777/rilievi.py, name: main}

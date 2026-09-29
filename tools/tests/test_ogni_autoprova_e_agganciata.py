@@ -38,6 +38,17 @@ REPO = Path(__file__).resolve().parents[2]
 # composto, non scritto: vedi 🪦 nel docstring.
 FLAG = "--auto" + "prova"
 
+# 🔑 I FILE DI COMANDI, come i workflow, sono il posto dove si ESEGUE, non dove si dichiara.
+#   `mise.toml` (il contratto dei 7 comandi del template 1777, `mise run check`) CHIAMA le
+#   autoprove dei presìdi: `python3 tools/x.py <flag>`. Contarlo fra i dichiaranti dava un
+#   falso «scoperto» su un file che non implementa niente (retrofit del template 1777, 29/09).
+#   Stretta di proposito: solo quello della radice, per percorso e non per nome; e NON lo conto
+#   fra gli esecutori — che una CI lanci `mise run check` questo test non lo sa, quindi ogni
+#   presidio resta agganciato in ci.yml come prima. L'eccezione non può allargarsi in silenzio:
+#   `test_il_file_dei_comandi_chiama_e_non_dichiara` è rosso se lì il flag compare su una riga
+#   che non lancia uno script.
+FILE_DI_COMANDI = {"mise.toml"}
+
 
 def _basename(s: str) -> str:
     """Il nome nudo: via le virgolette, via il path, via i prefissi di variabile.
@@ -69,6 +80,8 @@ def _dichiarano_autoprova() -> set[str]:
     for f in _file_tracciati():
         # i workflow sono il posto dove si ESEGUE, non dove si dichiara; i .md parlano.
         if f.suffix == ".md" or ".github" in f.parts:
+            continue
+        if f.relative_to(REPO).as_posix() in FILE_DI_COMANDI:
             continue
         try:
             testo = f.read_text(encoding="utf-8")
@@ -150,6 +163,27 @@ def test_questo_file_non_si_segnala_da_se() -> None:
         "questo file nomina il flag per intero: si segnalerebbe da sé come presidio "
         "scoperto. Componi la stringa invece di scriverla, o parafrasa."
     )
+
+
+def test_il_file_dei_comandi_chiama_e_non_dichiara() -> None:
+    """L'eccezione di FILE_DI_COMANDI regge solo finché quei file CHIAMANO e basta.
+
+    Ogni riga non commentata che nomina il flag deve lanciare uno script (`.py`/`.sh` prima
+    del flag). Se un giorno ci finisse un'implementazione, qui è rosso: l'eccezione non si
+    allarga senza che nessuno la veda.
+    """
+    for nome in FILE_DI_COMANDI:
+        f = REPO / nome
+        if not f.is_file():
+            continue
+        for riga in f.read_text(encoding="utf-8").splitlines():
+            nuda = riga.strip()
+            if not nuda or nuda.startswith("#") or FLAG not in nuda:
+                continue
+            assert re.search(r"\.(?:py|sh)\b[^#]*" + re.escape(FLAG), nuda), (
+                f"{nome}: il flag compare su una riga che non lancia uno script: «{nuda[:80]}». "
+                "Un file di comandi chiama le autoprove, non le implementa."
+            )
 
 
 def test_la_sonda_sa_dire_di_no() -> None:
