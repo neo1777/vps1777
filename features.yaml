@@ -400,12 +400,47 @@ features:
            "services/archive-mcp/tests/test_costruisci_indice.py",
            "docs/RICERCA-IBRIDA.md"]
     status: opt-in
-    since: "non rilasciato (24/09/2026)"
-    decisione: "si lancia a mano sul PC: indicizzare il corpus costa decine di ore di
-                CPU e sulla VPS non si fa (#281, docs/RICERCA-IBRIDA.md). Prima era
-                un prototipo fuori dal repo. [docs/RICERCA-IBRIDA.md]"
+    since: "0.51.0"
+    decisione: "la PRIMA costruzione si lancia a mano sul PC: indicizzare il corpus costa
+                decine di ore di CPU e sulla VPS non si fa (#281, docs/RICERCA-IBRIDA.md).
+                Prima era un prototipo fuori dal repo. Dalla 0.57.0 gli aggiornamenti
+                incrementali li fa anche il job archive.indice-notturno, sulla VPS.
+                [docs/RICERCA-IBRIDA.md]"
     verify:
       python_def: {path: "services/archive-mcp/tools/costruisci_indice.py", name: costruisci}
+  - id: archive.indice-dal-pc
+    nome: "tools/indice_semantico.py aggiorna — l'indice dal PC alla VPS"
+    cosa: "Copia il DB dalla VPS in streaming e ne controlla la coerenza, costruisce o
+           aggiorna l'indice sul PC col costruttore del repo (incrementale, dall'indice che
+           c'è già), controlla, e NON carica se nel frattempo il DB sulla VPS è cambiato;
+           carica su un nome d'attesa e rinomina, così archive-mcp non legge mai un file a
+           metà. Esce 0 a indice caricato, 1 se un passo fallisce, 2 se rifiuta."
+    dove: ["tools/indice_semantico.py", "tools/tests/test_indice_semantico.py",
+           "docs/RICERCA-IBRIDA.md"]
+    status: opt-in
+    since: "0.56.0"
+    decisione: "si lancia a mano, quando si vuole l'indice di un DB (#281). Scelta di Neo
+                del 25/09: tutto il primario indicizzato. [docs/RICERCA-IBRIDA.md]"
+    verify:
+      python_def: {path: "tools/indice_semantico.py", name: scarica}
+  - id: archive.indice-notturno
+    nome: "Aggiornamento notturno dell'indice semantico (timer systemd, opt-in)"
+    cosa: "Dopo un ingest l'indice della ricerca per senso si aggiorna da solo, sulla VPS,
+           alle 03:30: solo gli indici che esistono già, e solo per i DB cambiati dopo la
+           loro costruzione (nelle notti senza ingest esce in un secondo). Gira nel servizio
+           compose `indice-notturno` (profilo `indice`): nessuna rete, una CPU, memoria
+           limitata, archive-data in scrittura. Persistent recupera la notte persa."
+    dove: ["systemd:vps1777-indice-notturno.timer", "systemd:vps1777-indice-notturno.service",
+           "cli:indice-notturno", "compose-profile:compose.yaml#indice",
+           "docs/RICERCA-IBRIDA.md"]
+    status: opt-in
+    since: "0.57.0"
+    decisione: "scelta di Neo del 26/09/2026 (gradino 3). NON lo accende l'installer: si
+                accende con `vps1777 indice-notturno --abilita`, perché ha senso solo dove
+                un indice esiste già. Non è in VPS1777_FEATURES: un reinstall non lo
+                riaccende da solo. [CHANGELOG 0.57.0, systemd/vps1777-indice-notturno.timer]"
+    verify:
+      systemd_unit: vps1777-indice-notturno.timer
   - id: archive.count
     nome: "archive-mcp · count"
     cosa: "Conta quanti messaggi corrispondono alla query (non limitato) — per frequenze e prevalenze."

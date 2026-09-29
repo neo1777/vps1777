@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **Il ledger dichiara l'indice notturno e lo strumento dell'indice dal PC** (residuo dell'audit):
+  `archive.indice-notturno` (timer, servizio compose del profilo `indice`, comando
+  `indice-notturno`, opt-in dalla 0.57.0) e `archive.indice-dal-pc` (`tools/indice_semantico.py`)
+  esistevano senza voce. La voce del costruttore diceva «non rilasciato» e «sulla VPS non si fa»:
+  ora `since: 0.51.0`, e gli aggiornamenti incrementali li fa anche il job notturno.
 - **Le feature dichiarate valgono su tutte le vie, fin dal primo giro** (residui dell'audit della
   doc). `setup.sh` avviava solo il profilo d'ingress: il backup, acceso di default, restava
   dichiarato e senza container fino al primo `vps1777 update`. Ora passa a `docker compose` gli
