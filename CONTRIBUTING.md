@@ -37,6 +37,28 @@ The `compose.build.yaml` overlay exists because `compose.yaml` is pull-only
 
 ## Tests and checks locally
 
+### Before opening a PR: `tools/check.sh`
+
+```bash
+bash tools/check.sh              # lint, guards and tests: what CI's lint and contract jobs do
+bash tools/check.sh lint         # just ruff and shellcheck, at the same pins as CI
+bash tools/check.sh guardiani    # the CI checks that aren't tests (the guards)
+bash tools/check.sh test         # the suites, one at a time, and the bash tests
+```
+
+It ends with a summary of what is green and what is red, in about two minutes. It exits 0
+if everything is green, 1 if something is red, 2 if a tool is missing (docker, uv, uvx):
+it says so, and that is not a green. It installs nothing and never rewrites tracked files.
+It doesn't cover the `build` job, nor the ratification of lock jumps, which lives in the
+PR body.
+The source of truth stays `.github/workflows/ci.yml`: if CI gains a check and `check.sh`
+doesn't, `tools/tests/test_check_sh_segue_la_ci.py` turns red. And
+`tools/tests/test_i_guardiani_mordono.py` proves that the guards without a self-test of
+their own (anti-leak, security register, feature ledger, pre-commit, translations) still
+turn red on a constructed fault, for the right reason.
+
+### The commands one by one
+
 The suites run **one at a time**, as in CI:
 
 ```bash
@@ -54,7 +76,7 @@ the second one finds the first — measured: `ModuleNotFoundError: No module nam
 dependencies: CI re-runs them after `uv sync --frozen` (see
 `.github/workflows/ci.yml`).
 
-Before opening the PR, the checks CI will run again:
+The checks CI will run again (`tools/check.sh` runs them all):
 
 - `python3 tools/gate-locale.py` — runs the steps of `ci.yml` **reading them from the
   workflow**, not rewritten by hand (`--elenco` says what it would do, `--job lint` runs
@@ -75,9 +97,8 @@ worktree of the repo sees); `bash tools/hooks/installa.sh --stato` says whether 
 installed copy is identical to the versioned one. The `pre-commit` warns if you are not
 committing on the main branch (it doesn't block), runs `shellcheck` on the `.sh` and
 `ruff` on the `.py` files you are committing (it blocks if they find problems), and runs
-the anti-leak gate (the `gate-antileak` script) **if it finds it** — it isn't in this repo: without
-it, it prints "NON MISURATO" and the net remains `security/check_no_leaks.py` in CI.
-Deliberate way out: `--no-verify`.
+the anti-leak gate: on any clone it is `security/check_no_leaks.py`, the same one CI runs,
+and it stops the commit if it finds credential material. Deliberate way out: `--no-verify`.
 
 ## What never enters the repo
 

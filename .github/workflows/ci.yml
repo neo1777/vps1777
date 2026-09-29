@@ -499,7 +499,10 @@ jobs:
       - name: Test CLI vps1777 (stdlib-only)
         # cryptography: per il fallback age dell'installer (test_installer_age) —
         # in CI age-keygen non c'è, quindi qui gira proprio il ramo Python.
-        run: uvx --with bcrypt --with cryptography pytest tools/tests/ -v
+        # pyyaml (29/09/2026): senza, test_checker_sa_rifiutare saltava PER INTERO in CI
+        # («check_findings.py stesso richiede PyYAML») e altri 6 test non giravano: un
+        # presidio che salta in CI è verde senza aver misurato niente.
+        run: uvx --with bcrypt --with cryptography --with pyyaml pytest tools/tests/ -v
       # `pytest tools/tests/` NON vede i file .sh: la suite qui sopra sarebbe
       # rimasta verde con il test della ritenzione fermo sul disco, che è
       # letteralmente il difetto raccontato nel commento qui sopra, ripetuto

@@ -1088,6 +1088,25 @@ features:
     verify:
       file_contains: {path: .github/workflows/ci.yml, pattern: "tools/tests/"}
 
+  - id: ci.check-locale
+    nome: "Un comando rifà in locale i job lint e contract della CI, e i guardiani provano di mordere"
+    cosa: "`bash tools/check.sh` esegue ciò che fanno i job `lint` e `contract` di ci.yml
+           (e il ledger di verify-features.yml): ruff e shellcheck agli stessi pin, i
+           guardiani che non sono test con le loro autoprove, le suite una alla volta.
+           Chiude con un riepilogo verde/rosso, esce 2 se manca uno strumento (non finge
+           verde) e non riscrive file tracciati. Due test gli stanno accanto:
+           `test_check_sh_segue_la_ci.py` legge i workflow e fallisce se check.sh resta
+           indietro (uno script, una suite o un pin della CI che lì non c'è);
+           `test_i_guardiani_mordono.py` costruisce un guasto per ciascun guardiano senza
+           autoprova propria (anti-leak, registro dei rilievi, ledger, pre-commit,
+           traduzioni) e verifica che sia agganciato, che morda per la ragione giusta e
+           che taccia sul sano."
+    dove: ["tools/check.sh", "tools/tests/test_check_sh_segue_la_ci.py",
+           "tools/tests/test_i_guardiani_mordono.py", "CONTRIBUTING.md"]
+    status: active-default
+    verify:
+      file_contains: {path: tools/check.sh, pattern: "fase_guardiani\\(\\) \\{"}
+
   - id: ops.update-progress-journal
     nome: "La progress dell'update conserva lo STATO e, dal 27/09/2026, anche la STORIA"
     cosa: "✅ CHIUSO il 27/09/2026: ogni `progress_write` aggiunge una riga a
