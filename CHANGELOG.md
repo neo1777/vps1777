@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.63.5] — 2026-09-29
+
+**I residui dell'audit, e i due guadagni del banco del template senza il template**: le feature
+dichiarate valgono su tutte le vie (setup.sh, update, rollback); i volumi di Caddy e Portainer
+entrano nel backup; l'indice notturno nel ledger; `tools/check.sh` rifà la CI in locale, i
+guardiani provano di mordere, e in CI un presidio che saltava ora gira.
+
 ### Corretto
 - **I volumi di Caddy e Portainer non entravano in nessun backup** (residuo dell'audit, misurato
   sulla VPS). Il backup dall'host chiedeva la lista a `docker compose config --volumes` senza
