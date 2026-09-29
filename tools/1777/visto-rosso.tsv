@@ -1,0 +1,48 @@
+controllo	guasto	tempo1	tempo2	tempo3	visto	data	dove
+descrizione	task senza description	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+comandi	AGENTS.md nomina un comando che non c'è	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+comandi	un comando del contratto tolto	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+file-nominati	AGENTS.md nomina un file che non c'è	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+file-nominati	RIGHE.md nomina un file che non c'è (F.2)	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+file-nominati	al contrario: file nominato ma dichiarato pigro (o lazy)	—	verde come deve	—	sì	2026-09-29T09:51:56Z	locale
+claude-import	CLAUDE.md senza @AGENTS.md	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+claude-import	al contrario: CLAUDE.md con @AGENTS.md	—	verde come deve	—	sì	2026-09-29T09:51:56Z	locale
+tera	un run con ${#ARR[@]} (Tera lo legge come commento)	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+filo	setup senza l'installatore (filo tolto)	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+ci-mise	mise-action per tag, non per sha	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+ci-mise	versione di mise diversa da min_version	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+ci-mise	uno step apt nella CI (F.8)	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+ci-mise	actions/checkout per tag	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+ci-mise	mise.lock tolto	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+gitignore-env	.env tolto da .gitignore	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+src-path	repo pubblico nato da una cartella di casa (F.9)	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+ci-mise	runs-on a ubuntu-latest (F2.4)	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+ci-mise	il python di uv non fissato: UV_PYTHON tolto (F2.4)	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+lingua	repo pubblico con una lingua sola	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+lingua	traduzione stantia: l'italiano cambia, l'inglese no	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+lingua	disallineate: una riga di tabella solo nell'inglese	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+lingua	al contrario: tradotto e registrato: l'italiano e l'inglese cambiano insieme, poi registra	—	verde come deve	—	sì	2026-09-29T09:51:56Z	locale
+glossario	una sigla che il glossario non spiega	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+prova	una riga controllo senza prova	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+fail-loud	mise tolto dal PATH	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+prepare	prepare in package.json	—	—	—	non si applica	2026-09-29T09:51:56Z	locale
+env-example-dart	un *_KEY in .env.example	—	—	—	non si applica	2026-09-29T09:51:56Z	locale
+filtro-vuoto	filtro che non trova nessun test	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+asserzioni	file di test senza asserzioni	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+asserzioni	test vitest senza expect	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+asserzioni	al contrario: test Dart con solo expectLater (Pr.4)	—	verde come deve	—	sì	2026-09-29T09:51:56Z	locale
+segreti-forma	define di GEMINI_API_KEY su più righe	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+segreti-forma	loadEnv senza prefisso	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+segreti-forma	il client legge VITE_*KEY	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+segreti-forma	--dart-define con un *_KEY	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+segreti-forma	.env dichiarato come asset	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+segreti-forma	.env dentro git	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+segreti-forma	al contrario: il valore non compare nell'output	—	verde come deve	—	sì	2026-09-29T09:51:56Z	locale
+canarino	chiave nel bundle	—	—	—	non si applica	2026-09-29T09:51:56Z	locale
+rilievi	riga malformata nel registro	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+rilievi	al contrario: il conto col denominatore	—	verde come deve	—	sì	2026-09-29T09:51:56Z	locale
+setup-idempotente	setup che scrive in un file tracciato	sì	sì	sì	sì	2026-09-29T09:51:56Z	locale
+hook	sano: setup, sporco fermato, pulito passa, worktree coperto	sì	sì (worktree sì)	sì	sì	2026-09-29T09:51:56Z	locale
+hook	filo tolto (setup non chiama l'installatore)	no	no	sì	sì	2026-09-29T09:51:56Z	locale
+hook	hook sdentato (esce sempre 0)	sì	no	sì	sì	2026-09-29T09:51:56Z	locale
+hook	hook-muro (esce sempre 1)	sì	fermato, ma senza «[✗]»	no	sì	2026-09-29T09:51:56Z	locale

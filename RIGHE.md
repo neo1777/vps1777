@@ -62,5 +62,30 @@ Reach: local commit · merge (CI) · release · agent.
 «where, when»: «local» if the test ran on a machine, «CI run <id>» if it ran in GitHub Actions.
 
 <!-- C3:inizio — written by tools/1777/prova-controlli.sh, never by hand (AP.1) -->
-No test run yet: every check is **proposed** (AP.5). Run `bash tools/1777/prova-controlli.sh`.
+C3 seen: local, 2026-09-29T09:51:56Z. «seen red» = red on each of its built faults, for the right reason, and green on the healthy repo. The fault names are in Italian, as the script writes them.
+
+| check | C3 seen red | where, when | faults (✓ seen · ✗ no · — not applicable) |
+|---|---|---|---|
+| `descrizione` | yes | local, 2026-09-29 | ✓ task senza description |
+| `comandi` | yes | local, 2026-09-29 | ✓ AGENTS.md nomina un comando che non c'è · ✓ un comando del contratto tolto |
+| `file-nominati` | yes | local, 2026-09-29 | ✓ AGENTS.md nomina un file che non c'è · ✓ RIGHE.md nomina un file che non c'è (F.2) · ✓ al contrario: file nominato ma dichiarato pigro (o lazy) |
+| `claude-import` | yes | local, 2026-09-29 | ✓ CLAUDE.md senza @AGENTS.md · ✓ al contrario: CLAUDE.md con @AGENTS.md |
+| `tera` | yes | local, 2026-09-29 | ✓ un run con ${#ARR[@]} (Tera lo legge come commento) |
+| `filo` | yes | local, 2026-09-29 | ✓ setup senza l'installatore (filo tolto) |
+| `ci-mise` | yes | local, 2026-09-29 | ✓ mise-action per tag, non per sha · ✓ versione di mise diversa da min_version · ✓ uno step apt nella CI (F.8) · ✓ actions/checkout per tag · ✓ mise.lock tolto · ✓ runs-on a ubuntu-latest (F2.4) · ✓ il python di uv non fissato: UV_PYTHON tolto (F2.4) |
+| `gitignore-env` | yes | local, 2026-09-29 | ✓ .env tolto da .gitignore |
+| `src-path` | yes | local, 2026-09-29 | ✓ repo pubblico nato da una cartella di casa (F.9) |
+| `lingua` | yes | local, 2026-09-29 | ✓ repo pubblico con una lingua sola · ✓ traduzione stantia: l'italiano cambia, l'inglese no · ✓ disallineate: una riga di tabella solo nell'inglese · ✓ al contrario: tradotto e registrato: l'italiano e l'inglese cambiano insieme, poi registra |
+| `glossario` | yes | local, 2026-09-29 | ✓ una sigla che il glossario non spiega |
+| `prova` | yes | local, 2026-09-29 | ✓ una riga controllo senza prova |
+| `fail-loud` | yes | local, 2026-09-29 | ✓ mise tolto dal PATH |
+| `prepare` | not applicable | local, 2026-09-29 | — prepare in package.json |
+| `env-example-dart` | not applicable | local, 2026-09-29 | — un *_KEY in .env.example |
+| `filtro-vuoto` | yes | local, 2026-09-29 | ✓ filtro che non trova nessun test |
+| `asserzioni` | yes | local, 2026-09-29 | ✓ file di test senza asserzioni · ✓ test vitest senza expect · ✓ al contrario: test Dart con solo expectLater (Pr.4) |
+| `segreti-forma` | yes | local, 2026-09-29 | ✓ define di GEMINI_API_KEY su più righe · ✓ loadEnv senza prefisso · ✓ il client legge VITE_*KEY · ✓ --dart-define con un *_KEY · ✓ .env dichiarato come asset · ✓ .env dentro git · ✓ al contrario: il valore non compare nell'output |
+| `canarino` | not applicable | local, 2026-09-29 | — chiave nel bundle |
+| `rilievi` | yes | local, 2026-09-29 | ✓ riga malformata nel registro · ✓ al contrario: il conto col denominatore |
+| `setup-idempotente` | yes | local, 2026-09-29 | ✓ setup che scrive in un file tracciato |
+| `hook` | yes | local, 2026-09-29 | ✓ sano: setup, sporco fermato, pulito passa, worktree coperto · ✓ filo tolto (setup non chiama l'installatore) · ✓ hook sdentato (esce sempre 0) · ✓ hook-muro (esce sempre 1) |
 <!-- C3:fine -->
