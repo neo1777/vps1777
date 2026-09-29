@@ -5,6 +5,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **I volumi di Caddy e Portainer non entravano in nessun backup** (residuo dell'audit, misurato
+  sulla VPS). Il backup dall'host chiedeva la lista a `docker compose config --volumes` senza
+  `-f`, cioè al solo `compose.yaml`, mentre il suo commento prometteva «segue gli overlay
+  attivi»; il container notturno monta una lista fissa. Ora `backup.sh` unisce ai volumi
+  dichiarati quelli che Docker conosce per etichetta di progetto: con Caddy i certificati, con
+  Portainer i suoi dati, entrano nel backup dall'host e in quello di ogni `vps1777 update`.
+  Tolta anche una trappola: `compose.ops.backup.yaml` diceva di «decommentare» i volumi di
+  Caddy, ma il file è gestito e il primo update cancella la modifica a mano. BACKUP-RESTORE
+  IT/EN allineate.
 - **Il ledger dichiara l'indice notturno e lo strumento dell'indice dal PC** (residuo dell'audit):
   `archive.indice-notturno` (timer, servizio compose del profilo `indice`, comando
   `indice-notturno`, opt-in dalla 0.57.0) e `archive.indice-dal-pc` (`tools/indice_semantico.py`)

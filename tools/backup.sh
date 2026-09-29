@@ -253,9 +253,21 @@ else
   #   backup che non sa cosa deve salvare non è un backup ridotto, è un backup falso —
   #   e la sua bugia si scopre solo il giorno del ripristino.
   log "Dump volumi Docker..."
+  # >>> volumi-del-progetto (tools/tests/test_backup_volumi_degli_overlay.py esegue questo blocco)
   VOLS_LOGICI=$(docker compose config --volumes 2>/dev/null || true)
   [ -n "$VOLS_LOGICI" ] || die "non riesco a chiedere i volumi a \`docker compose config --volumes\` (variabili .env mancanti?). Un backup che non sa cosa salvare non parte."
   PROJ="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
+  # 🔴 29/09/2026 — IL COMMENTO QUI SOPRA PROMETTEVA PIÙ DI QUANTO FACESSE. `docker compose
+  #   config --volumes` senza `-f` legge solo compose.yaml: gli overlay ATTIVI (caddy,
+  #   portainer) non li vede. Misurato sulla VPS: 5 volumi, gli stessi con o senza il suo
+  #   ingress. ⇒ con l'ingress Caddy i certificati, e con Portainer i suoi dati, non
+  #   entravano in nessun backup, né notturno (il container monta una lista fissa) né
+  #   dall'host. Adesso si fa ciò che la regola dice: si CHIEDE a Docker, per etichetta,
+  #   quali volumi appartengono al progetto, e si uniscono a quelli dichiarati.
+  VOLS_OVERLAY=$(docker volume ls -q --filter "label=com.docker.compose.project=$PROJ" 2>/dev/null \
+                 | sed -n "s/^${PROJ}_//p" || true)
+  VOLS_LOGICI=$(printf '%s\n%s\n' "$VOLS_LOGICI" "$VOLS_OVERLAY" | grep -v '^$' | sort -u)
+  # <<< volumi-del-progetto
   VOLUMES=""
   for logico in $VOLS_LOGICI; do
     reale="${PROJ}_${logico}"
