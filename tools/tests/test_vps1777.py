@@ -607,6 +607,26 @@ def test_directory_secrets_illeggibile_non_fa_crashare():
         (repo / "secrets").chmod(0o700)
 
 
+def test_directory_secrets_illeggibile_anche_se_is_file_tace(monkeypatch):
+    # Python 3.14: `Path.is_file()` inghiotte il PermissionError e risponde False, e la
+    # cartella illeggibile tornava «ASSENTE» (rimedio opposto). La CI gira con 3.12, dove
+    # il difetto non si vede: qui si simula il 3.14, così il presidio vale su ogni versione.
+    import os
+    if os.geteuid() == 0:
+        return
+    vero = Path.is_file
+    monkeypatch.setattr(Path, "is_file",
+                        lambda self, **kw: False if "secrets" in self.parts else vero(self))
+    repo = _installazione(segreti={"a.txt": "v"})
+    (repo / "compose.yaml").write_text(_compose_con("a"))
+    (repo / "secrets").chmod(0o000)
+    try:
+        fuori = v._secrets_mancanti([repo / "compose.yaml"], repo)
+    finally:
+        (repo / "secrets").chmod(0o700)
+    assert fuori and all("DIRECTORY NON LEGGIBILE" in f for f in fuori), fuori
+
+
 def test_il_rimedio_per_directory_illeggibile_non_tocca_i_file():
     src = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
     i = src.index('if "DIRECTORY NON LEGGIBILE" in m:')

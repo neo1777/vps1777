@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Il pre-flight dei segreti con Python 3.14 scambiava una cartella `secrets/` illeggibile per
+  segreti ASSENTI.** Da 3.14 `Path.is_file()` inghiotte il `PermissionError` e risponde
+  `False`, quindi il ramo «DIRECTORY NON LEGGIBILE» non scattava più, e il rimedio suggerito
+  era quello opposto (ricreare i file). Ora si usa `stat()`, che solleva allo stesso modo in
+  ogni versione: «non c'è» è solo `FileNotFoundError`/`NotADirectoryError`. Trovato perché
+  `tools/check.sh` in locale ha preso Python 3.14; la CI gira con 3.12, dove non si vede. Per
+  questo un test nuovo simula il comportamento di 3.14 e presidia il caso su ogni versione.
+
 ## [0.63.5] — 2026-09-29
 
 **I residui dell'audit, e i due guadagni del banco del template senza il template**: le feature

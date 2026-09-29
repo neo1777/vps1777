@@ -29,6 +29,7 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -2766,9 +2767,16 @@ def _secrets_mancanti_in(compose: Path, radice_repo: Path,
         # È la stessa forma che avevo già chiuso per il `FileNotFoundError` del bundle:
         # **avevo protetto la porta che conoscevo**. Separare i casi è giusto; separarli
         # è anche il momento in cui si perde una copertura che l'`or` dava per pigrizia.
+        # ⚠️ `stat()` e non `is_file()`: da Python 3.14 `Path.is_file()` INGHIOTTE il
+        # PermissionError e risponde False, e la cartella illeggibile tornava «ASSENTE»
+        # — col rimedio opposto (trovato il 30/09: il test qui sotto era rosso con 3.14,
+        # verde con 3.12). `stat()` solleva uguale in ogni versione: «non c'è» è solo
+        # FileNotFoundError/NotADirectoryError, tutto il resto è il percorso.
         stato = None                                   # None = a posto
         try:
-            esiste = p.is_file()
+            esiste = stat.S_ISREG(p.stat().st_mode)
+        except (FileNotFoundError, NotADirectoryError):
+            esiste = False
         except OSError as exc:
             # non è il file a non essere leggibile: è il PERCORSO. Rimedio diverso da
             # tutti gli altri tre — si guarda la cartella, non il segreto.
