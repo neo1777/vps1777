@@ -438,6 +438,23 @@ COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
 # In dev l'overlay di build ri-aggiunge i build context (compose.yaml è pull-only)
 [ "$DEV_BUILD" = "1" ] && COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.build.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
 
+# ── Le feature dichiarate partono al PRIMO giro (29/09/2026) ──────────────────────────
+# `backup` è acceso di default, ma vive in un overlay (compose.ops.backup.yaml, profilo
+# ops.backup): senza passarlo qui, setup.sh dichiarava il backup e NON avviava il
+# container, che partiva solo al primo `vps1777 update` (la CLI legge le feature).
+# deploy.sh ed engine.py lo passavano già. Stessa fonte, stesso default e stessa
+# semantica della CLI (enabled_features in tools/vps1777.py): il default vale solo a
+# CHIAVE ASSENTE, un valore esplicito, anche vuoto, vince; gli spazi si tolgono.
+# (Una riga sola di proposito: test_tre_installer_stessa_lista_unit sostituisce
+# le assegnazioni FEATURES= per provare il calcolo con valori imposti.)
+FEATURES="$({ grep -q '^VPS1777_FEATURES=' .env 2>/dev/null && sed -n 's/^VPS1777_FEATURES=//p' .env | tail -1 | tr -d '[:blank:]'; } || printf 'backup,autoupdate')"
+# feature → overlay e profilo: la stessa mappa di deploy.sh e di OPS_COMPOSE_FEATURES
+# (tools/vps1777.py). watchtower ha file e profilo DIVERSI (ops.watchtower / ops.autoupdate).
+OPS_PROFILI=()
+case ",$FEATURES," in *,backup,*)     COMPOSE_FILES+=("-f" "compose.ops.backup.yaml");     OPS_PROFILI+=("--profile" "ops.backup");;     esac
+case ",$FEATURES," in *,portainer,*)  COMPOSE_FILES+=("-f" "compose.ops.portainer.yaml");  OPS_PROFILI+=("--profile" "ops.portainer");;  esac
+case ",$FEATURES," in *,watchtower,*) COMPOSE_FILES+=("-f" "compose.ops.watchtower.yaml"); OPS_PROFILI+=("--profile" "ops.autoupdate");; esac
+
 # ── L'URL CHE CHI INSTALLA HA IN MANO ADESSO ──────────────────────────────────────────
 # Nelle righe finali c'era il letterale `<PUBLIC_BASE>`, tre volte: un segnaposto che
 # chiede a chi ha appena installato di sostituirlo da sé, nell'unico momento in cui il
@@ -453,18 +470,18 @@ URL_COLLAUDO="${PUB:-https://<il-tuo-url-pubblico>}"
 log ""
 if [ "$DEV_BUILD" = "1" ]; then
   log "Pronto a buildare in locale (dev) e avviare:"
-  log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d --build"
+  log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE ${OPS_PROFILI[*]} up -d --build"
 else
   log "Pronto a pullare le immagini v$INSTALL_VERSION da ghcr e avviare (nessuna build):"
-  log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE pull && ... up -d"
+  log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE ${OPS_PROFILI[*]} pull && ... up -d"
 fi
 log ""
 if confirm "Procedo ora?"; then
   if [ "$DEV_BUILD" = "1" ]; then
-    docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" up -d --build
+    docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" "${OPS_PROFILI[@]}" up -d --build
   else
-    docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" pull
-    docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" up -d
+    docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" "${OPS_PROFILI[@]}" pull
+    docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" "${OPS_PROFILI[@]}" up -d
   fi
   echo
   ok "Stack avviato. Stato:"
@@ -540,9 +557,8 @@ H55
       # solo a CHIAVE ASSENTE — un valore esplicito, anche vuoto, vince (così si
       # può spegnere tutto). E gli spazi si tolgono: la CLI fa strip di ogni voce,
       # il case qui sotto no — "backup, autoupdate" divergeva tra le due letture.
-      # (Una riga sola di proposito: test_tre_installer_stessa_lista_unit sostituisce
-      # le assegnazioni FEATURES= per provare il calcolo con valori imposti.)
-      FEATURES="$({ grep -q '^VPS1777_FEATURES=' .env 2>/dev/null && sed -n 's/^VPS1777_FEATURES=//p' .env | tail -1 | tr -d '[:blank:]'; } || printf 'backup,autoupdate')"
+      # FEATURES è letto più su, al passo 4, prima dell'avvio dello stack (29/09): le
+      # feature servono già lì, perché ognuna vive in un overlay compose.
       AUTOUPD_MSG=""
       case ",$FEATURES," in *,autoupdate,*)
         ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer"
@@ -657,9 +673,9 @@ else
   AVVIATO=0
   log "OK, avvialo a mano quando vuoi:"
   if [ "$DEV_BUILD" = "1" ]; then
-    log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d --build"
+    log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE ${OPS_PROFILI[*]} up -d --build"
   else
-    log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE pull && docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE up -d"
+    log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE ${OPS_PROFILI[*]} pull && docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE ${OPS_PROFILI[*]} up -d"
   fi
 fi
 
