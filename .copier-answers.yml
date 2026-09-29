@@ -1,0 +1,15 @@
+# Non modificare a mano: lo scrive copier, e `copier update` lo legge (da quale versione del template è nato il repo)
+_commit: a897a8b
+_src_path: gh:neo1777/template1777
+descrizione: 'Il server self-hosted 1777: gateway, archivio, notebook e bot su una
+    VPS'
+doc_lingua_primaria: en
+hook_marcatore: '[✗]'
+hook_propri: true
+nome: vps1777
+pubblico: true
+python_da_mise: false
+python_uv: '3.12'
+scheletro: false
+setup_crea_env: false
+stack: python

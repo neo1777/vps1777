@@ -1,0 +1,73 @@
+# Il contratto dei 7 comandi 1777 (DD-P8.8 v2: Ka.1-Ka.5, Ka.7, Ka.9, Ka.11, M.1).
+# I nomi vengono da «Scripts to Rule Them All» e dai target GNU, adottati dichiarandolo (Ka.1).
+# Per elencarli: `mise tasks ls --json`. Per gli argomenti di test: `mise tasks info test --json`.
+# Ogni task ha una description di una riga: cosa fa, e cosa NON è (Ka.4). Senza, check è rosso (Ka.11).
+# Ogni task DELEGA alla faccia nativa dello stack e non la sostituisce (Ka.7).
+#
+# La versione di mise è fissata in tre posti (Ka.5): qui (min_version), nella CI
+# (.github/workflows/check.yml, `version:`), e mise.lock. conformita.py controlla che i
+# primi due coincidano. Si alza a lotti (DD-P8.6), mai con `latest`.
+#
+# TRE REGOLE PER CHI SCRIVE QUI (dalla prova del template su vps1777, 29/09; le sigle: tools/1777/GLOSSARIO.md):
+# 1. mise passa ogni `run` per Tera, il motore di template: `{{`, `{%` e `{#` hanno
+#    un significato. In bash `${#ARR[@]}` contiene `{#`, che per Tera apre un commento:
+#    quel task non parte, e con lui chi ne dipende (`check`). `mise tasks ls` non se ne accorge;
+#    conformita.py [tera] sì (con `mise run --dry-run`).
+#    ⇒ un `run` è una riga che chiama; la logica sta in uno script in tools/. Se proprio
+#    serve bash inline, va fra `{% raw %}` e `{% endraw %}`.
+# 2. Ogni strumento di sistema che serve ai comandi (per esempio `age` ai test) sta in [tools],
+#    fissato e nel lock, e NON in uno step apt della CI: così locale e CI coincidono per
+#    contratto. check.yml chiama solo comandi del contratto (conformita.py [ci]).
+#    Dopo averne aggiunto uno: `mise lock` e commit (conformita.py [ci] lo verifica).
+# 3. python NON è in [tools] (il retrofit): python3 resta quello di sistema. Il python di uv
+#    (uv sync, uv run, uvx) è fissato da UV_PYTHON in [env], che non tocca il PATH. Senza,
+#    uv userebbe il python del runner, e cambierebbe con l'immagine (conformita.py [ci]).
+min_version = { hard = "2026.9.15" }
+
+[tools]
+# python NON è fissato qui (python_da_mise = no, il retrofit): uv usa UV_PYTHON di [env].
+uv = "0.12.19"
+
+[env]
+# Il python di uv, fissato senza metterlo nel PATH (F2.4). Lo stesso della CI del repo.
+UV_PYTHON = "3.12"
+
+[tasks.setup]
+description = "Prepara questa copia del repo: toolchain, dipendenze, hook di git. Idempotente: si rilancia dopo ogni pull. NON installa né configura la produzione e NON crea .env"
+run = [
+  "uv sync",
+  "bash tools/hooks/installa.sh",
+]
+
+[tasks.dev]
+description = "Avvia il programma in locale per provarlo a mano. NON è il deploy e NON gira i test"
+run = "uv run python -m vps1777"
+
+[tasks.test]
+description = "Gira i test, con un filtro facoltativo sul nome. Esce ≠0 se il filtro non trova nessun test (K-b). NON fa lint né controlli di conformità"
+usage = 'arg "[filtro]" help="Solo i test il cui nome contiene questo testo; se non ne trova nessuno esce ≠0"'
+# pytest esce 5 da solo quando nessun test è raccolto o selezionato (Kb.1: già conforme)
+run = 'uv run pytest -q ${usage_filtro:+-k "$usage_filtro"}'
+
+[tasks.lint]
+description = "Stile ed errori statici veloci (ruff). NON è un typecheck. NON gira i test"
+run = "uv run ruff check . && uv run ruff format --check ."
+
+[tasks.build]
+description = "Costruisce l'artefatto in locale. NON pubblica e NON fa il deploy"
+run = "uv build"
+
+[tasks.check]
+description = "Quello che fa la CI (il cibuild di STRTA, non il `check` GNU): lint, test, conformità, segreti, asserzioni, conto dei rilievi. Si lancia prima di dire «fatto». NON prova i controlli sui guasti costruiti: quello è tools/1777/prova-controlli.sh"
+depends = ["lint", "test"]
+run = [
+  "python3 tools/1777/conformita.py",
+  "bash tools/1777/segreti.sh",
+  "python3 tools/1777/asserzioni.py",
+  "python3 tools/1777/rilievi.py conta",
+]
+
+[tasks.release]
+description = "Prepara un rilascio in locale: albero pulito, check verde, tag annotato. NON fa push, NON pubblica, NON fa il deploy"
+usage = 'arg "<versione>" help="La versione da taggare, per esempio 0.2.0"'
+run = 'bash tools/1777/rilascio.sh "$usage_versione"'

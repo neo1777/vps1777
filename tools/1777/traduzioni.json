@@ -1,0 +1,17 @@
+{
+  "_nota": "Per ogni traduzione inglese, l'impronta (sha256, senza il blocco C3) del sorgente italiano quando è stata tradotta. conformita.py [lingua] è rosso se il sorgente si muove: si aggiorna la traduzione, POI python3 tools/1777/lingue.py registra.",
+  "traduzioni": {
+    "AGENTS.md": {
+      "sorgente": "AGENTS.it.md",
+      "sorgente_sha256": "66c4144138ed2cbde88766c13152200e1423bddce6edf6fc9dd0f90ae50d5a91"
+    },
+    "RIGHE.md": {
+      "sorgente": "RIGHE.it.md",
+      "sorgente_sha256": "31709bc034706c7f9d21a58819ad3e47e6f72f657e75ca43be3a89ea11f12609"
+    },
+    "tools/1777/GLOSSARIO.md": {
+      "sorgente": "tools/1777/GLOSSARIO.it.md",
+      "sorgente_sha256": "ec0a87f6583ec9396f4e1318ae3c7dd5e8f542878638f015363006727769ecb1"
+    }
+  }
+}

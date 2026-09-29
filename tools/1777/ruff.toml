@@ -1,0 +1,7 @@
+# Gli script del contratto 1777 si formattano e si controllano sempre allo stesso modo,
+# qualunque sia la configurazione di ruff del repo: ruff usa il file di configurazione più
+# vicino a ogni file, e questo è il più vicino per tools/1777/. Si aggiorna con `copier update`.
+# Perché (v0.1, 29/09): senza, uno `copier update` che riformattava questi script ha
+# rotto il `ruff format --check` di un figlio con `line-length = 120` nel suo pyproject.toml,
+# che il template non aggiorna più (_skip_if_exists).
+line-length = 88
