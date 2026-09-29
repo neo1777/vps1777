@@ -380,7 +380,10 @@ features:
            indicizzare il corpus costa ~60 h di CPU e si fa altrove. Senza modello o
            senza indice il tool NON ricade in silenzio su FTS5: solleva un errore che
            dice cosa manca (un risultato dimezzato che sembra intero è il difetto che
-           questo repo combatte). `search` resta invariata: contratto intatto."
+           questo repo combatte). `search` resta invariata: contratto intatto.
+           Dalla 0.64.0 accetta `riformulazioni` (≤3): ogni testo porta le sue due
+           liste e la fusione resta una, stesso limit (RAG-Fusion; banco del 30/09:
+           +1/+3 elementi su 30 nelle prime 10 righe, 0 a 20)."
     dove: ["mcp-tool:archive-mcp/search_ibrida", "services/archive-mcp/app/semantica.py",
            "docs/RICERCA-IBRIDA.md"]
     status: active-default

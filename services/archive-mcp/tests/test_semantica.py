@@ -172,6 +172,27 @@ def test_scan_ignora_gli_indici_vettoriali(tmp_path, monkeypatch):
     assert set(trovati) == {"recupero"}, f"indice scambiato per archivio: {sorted(trovati)}"
 
 
+def test_fondi_rrf_e_il_caso_a_due_di_fondi_rrf_liste():
+    fts, vec = ["a", "b", "c"], ["c", "d"]
+    assert semantica.fondi_rrf(fts, vec) == semantica.fondi_rrf_liste(
+        [(fts, semantica.RRF_PESO_FTS), (vec, 1.0)])
+
+
+def test_l_accordo_fra_formulazioni_fa_salire():
+    """Una riga che torna nelle liste di due formulazioni diverse supera quella
+    che una sola mette prima: è il senso di fondere le riformulazioni."""
+    fusi = semantica.fondi_rrf_liste([(["solo", "comune"], 1.0), (["altro", "comune"], 1.0)])
+    assert fusi[0] == "comune"
+
+
+def test_testi_della_ricerca():
+    assert semantica.testi_della_ricerca("domanda", None) == ["domanda"]
+    assert semantica.testi_della_ricerca(
+        "Domanda", ["", "  domanda ", "altra forma", "altra  forma"]) == ["Domanda", "altra forma"]
+    with pytest.raises(ValueError, match="al massimo"):
+        semantica.testi_della_ricerca("d", ["a", "b", "c", "d"])
+
+
 # ── ① la query naturale non deve diventare rumore in FTS5 ────────────────────
 
 def test_query_naturale_diventa_espressione_utile():

@@ -342,8 +342,49 @@ def fondi_rrf(fts: list, vec: list, *, k: int = RRF_K,
     regressione sparisce e restano i guadagni: è il motivo per cui i default
     stanno scritti qui e non nella firma di chi chiama.
     """
+    return fondi_rrf_liste([(fts, peso_fts), (vec, 1.0)], k=k)
+
+
+def fondi_rrf_liste(liste: list[tuple[list, float]], *, k: int = RRF_K) -> list:
+    """RRF pesata di N liste `(lista, peso)`: la forma generale di `fondi_rrf`.
+
+    Serve alle riformulazioni: ogni testo porta la sua lista FTS (peso
+    `peso_fts`) e la sua vettoriale (peso 1). Una riga che torna in più liste
+    somma, e sale: è l'accordo fra formulazioni diverse della stessa domanda.
+    A parità di punti vince chi è comparso prima (l'ordine delle liste conta:
+    la domanda viene per prima).
+    """
     punti: dict[Any, float] = {}
-    for lista, peso in ((fts, peso_fts), (vec, 1.0)):
+    for lista, peso in liste:
         for i, ident in enumerate(lista, 1):
             punti[ident] = punti.get(ident, 0.0) + peso / (k + i)
     return [ident for ident, _ in sorted(punti.items(), key=lambda kv: -kv[1])]
+
+
+# Quante riformulazioni si accettano oltre alla domanda. Ogni testo costa un
+# embedding e due interrogazioni per DB; tre bastano a coprire i modi in cui una
+# domanda si dice (il banco del 30/09 ne usa due).
+RIFORMULAZIONI_MAX = 3
+
+
+def testi_della_ricerca(query: str, riformulazioni: list[str] | None) -> list[str]:
+    """La domanda più le riformulazioni valide, senza doppioni, nell'ordine dato.
+
+    Una riformulazione vuota o uguale alla domanda si scarta in silenzio (non
+    aggiunge niente); una lista più lunga di `RIFORMULAZIONI_MAX` è un errore
+    detto, non un taglio muto: chi chiama deve sapere che le ultime non
+    sarebbero entrate.
+    """
+    extra = [t.strip() for t in (riformulazioni or []) if t and t.strip()]
+    if len(extra) > RIFORMULAZIONI_MAX:
+        raise ValueError(
+            f"riformulazioni: al massimo {RIFORMULAZIONI_MAX}, ne sono arrivate "
+            f"{len(extra)}. Tieni le più diverse fra loro: due modi davvero "
+            "diversi di dire la domanda valgono più di cinque parafrasi.")
+    testi, visti = [], set()
+    for t in [query.strip(), *extra]:
+        chiave = " ".join(t.lower().split())
+        if chiave and chiave not in visti:
+            visti.add(chiave)
+            testi.append(t)
+    return testi or [query]

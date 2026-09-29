@@ -62,11 +62,34 @@ wins on vectors alone.
 | `speaker` | `""` | who wrote the row (`human`, `assistant`, `tool`, `system`, `unknown`), as in `search`. It filters both lists |
 | `k_rrf`, `peso_fts` | 30, 1.5 | the fusion: the measured values. Changing them is an experiment, not a tuning |
 | `snippet_tokens` | 32 | length of the FTS snippet |
+| `riformulazioni` | none | up to 3 other ways of asking the question. Each one brings its own two lists, the fusion stays single and the `limit` the same (below). Empty ones and duplicates are dropped, more than 3 is an error; `query_fts` applies to the question only |
 
 With a filter (`speaker`, `since`, `until`) the vector branch asks the knn for more
 neighbours (10 times `limit` instead of 3), so that after the discards a real list
 is left to fuse. The filter applies **after** the knn: if nothing in the window is
 close to the question, the vector branch comes back empty and the answer is FTS5's.
+
+### Reformulations, and what they are worth (0.64.0)
+
+This is the technique known as *RAG-Fusion*, or *multi-query retrieval*: the same question
+asked in two or three different ways, with the lists fused by RRF. A row that comes back for
+more than one phrasing adds up its points and rises.
+
+The idea comes from the graphify tests on the archive (late September 2026), where
+"reformulating" seemed worth as much as the graph. Measured again with the same number of
+rows, it is worth less. The bench uses 10 questions with a blind criterion (6 elements each,
+on two corpora: a Telegram group and 21 meeting records) and counts an element when one of its
+proof files is among the first k rows:
+
+| | first 10 rows | first 20 |
+|---|---|---|
+| the question alone | 22 and 21 of 30 | 27 and 29 |
+| question + 2 reformulations, one fusion | **23 and 24** | 27 and 29 |
+
+The gain shows up only when few results are read. The September comparison added up three
+top-10 lists, that is 30 rows against 10. With the default `limit` the question alone already
+finds almost everything: where something is missing, it is usually the snippet that does not
+reach the point, not the file that cannot be found.
 
 ## The four pieces
 

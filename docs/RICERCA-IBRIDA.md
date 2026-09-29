@@ -57,11 +57,33 @@ modello che vinca sui soli vettori.
 | `speaker` | `""` | chi ha scritto la riga (`human`, `assistant`, `tool`, `system`, `unknown`), come in `search`. Filtra tutte e due le liste |
 | `k_rrf`, `peso_fts` | 30, 1.5 | la fusione: i valori misurati. Cambiarli è un esperimento, non una regolazione |
 | `snippet_tokens` | 32 | lunghezza dello snippet FTS |
+| `riformulazioni` | nessuna | fino a 3 altri modi di dire la domanda. Ognuno porta le sue due liste, la fusione resta una e il `limit` lo stesso (sotto). Vuote e doppioni si scartano, più di 3 è un errore; `query_fts` vale solo per la domanda |
 
 Con un filtro (`speaker`, `since`, `until`) il ramo vettoriale chiede al knn più
 vicini (10 volte `limit` invece di 3), perché dopo gli scarti resti una lista vera
 da fondere. Il filtro si applica **dopo** il knn: se nella finestra non c'è niente
 di vicino alla domanda, il ramo vettoriale torna vuoto e la risposta è quella di FTS5.
+
+### Le riformulazioni, e quanto valgono (0.64.0)
+
+È la tecnica nota come *RAG-Fusion*, o *multi-query retrieval*: la stessa domanda detta in due
+o tre modi diversi, le liste fuse con RRF. Una riga che torna in più formulazioni somma i punti
+e sale.
+
+L'idea arriva dai test di graphify sull'archivio (fine settembre 2026), dove «riformulare»
+sembrava valere quanto il grafo. Rimisurata a parità di righe, vale meno. Il banco usa 10
+domande con criterio cieco (6 elementi ciascuna, su due corpus: un gruppo Telegram e 21 verbali)
+e conta un elemento quando un suo file-prova è fra le prime k righe:
+
+| | prime 10 righe | prime 20 |
+|---|---|---|
+| la sola domanda | 22 e 21 su 30 | 27 e 29 |
+| domanda + 2 riformulazioni, una fusione | **23 e 24** | 27 e 29 |
+
+Il guadagno c'è solo quando si leggono pochi risultati. Il confronto di settembre sommava tre
+top-10, cioè 30 righe contro 10. Con il `limit` di default la domanda da sola trova già quasi
+tutto: dove manca qualcosa, di solito è lo snippet che non arriva al punto, non il file che
+non si trova.
 
 ## I quattro pezzi
 
