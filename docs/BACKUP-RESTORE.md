@@ -27,11 +27,14 @@ separati per natura del dato — perché il 99,99% del peso è rigenerabile e lo
 > - **nel container `backup`** (il cron notturno) salva i volumi **montati** in
 >   `compose.ops.backup.yaml`: `gateway-data`, `gateway-uploads`, `nlm-auth`,
 >   `nlm-artifacts` (più `archive-data` per il livello archivio). `caddy-data` e
->   `caddy-config` ci sono **commentati**: con l'ingress Caddy i certificati non entrano
->   nel backup notturno finché non li decommenti a mano (e il file è gestito: un update
->   lo riscrive). È **solo qui** che si esportano le `descrizioni/<db>.txt`;
+>   `caddy-config` **non ci sono**, di proposito: l'overlay vale per tutti gli ingress. Con
+>   Caddy li salva il backup dall'host (sotto), e se mancano Caddy riottiene i certificati
+>   da solo all'avvio. Non modificare a mano `compose.ops.backup.yaml`: è gestito, e il
+>   primo update riscrive la modifica. È **solo qui** che si esportano le `descrizioni/<db>.txt`;
 > - **sull'host** (`./tools/backup.sh` a mano, e il backup che fa `vps1777 update`)
->   chiede i volumi a `docker compose config --volumes`, quindi segue gli overlay attivi;
+>   chiede i volumi a `docker compose config --volumes` e, dal 29/09, anche a Docker per
+>   etichetta di progetto: così segue davvero gli overlay attivi (prima leggeva solo
+>   `compose.yaml`, e i volumi di Caddy e Portainer non entravano in nessun backup);
 >   ma il volume dell'archivio non è leggibile da lì e le **`descrizioni/` non vengono
 >   esportate** — lo dice nel log, e restano quelle dell'ultimo backup archivio.
 

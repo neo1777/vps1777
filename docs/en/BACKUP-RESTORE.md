@@ -31,13 +31,15 @@ separated by the nature of the data — because 99.99% of the weight is regenera
 > - **inside the `backup` container** (the nightly cron) it saves the volumes **mounted**
 >   in `compose.ops.backup.yaml`: `gateway-data`, `gateway-uploads`, `nlm-auth`,
 >   `nlm-artifacts` (plus `archive-data` for the archive tier). `caddy-data` and
->   `caddy-config` are **commented out** there: with the Caddy ingress the certificates
->   don't get into the nightly backup until you uncomment them by hand (and the file is
->   managed: an update rewrites it). It is **only here** that `descrizioni/<db>.txt` are
+>   `caddy-config` are **not there**, on purpose: the overlay applies to every ingress.
+>   With Caddy the host backup (below) saves them, and if they are missing Caddy obtains
+>   the certificates again by itself at startup. Don't edit `compose.ops.backup.yaml` by
+>   hand: it is managed, and the first update rewrites the change. It is **only here** that `descrizioni/<db>.txt` are
 >   exported;
 > - **on the host** (`./tools/backup.sh` by hand, and the backup `vps1777 update` takes)
->   it asks `docker compose config --volumes` for the volumes, so it follows the active
->   overlays; but the archive volume isn't readable from there and **`descrizioni/` are
+>   it asks `docker compose config --volumes` for the volumes and, since 29/09, Docker too,
+>   by project label: that way it really follows the active overlays (before, it read only
+>   `compose.yaml`, and the Caddy and Portainer volumes got into no backup at all); but the archive volume isn't readable from there and **`descrizioni/` are
 >   not exported** — it says so in the log, and the ones in the latest archive backup
 >   remain.
 
