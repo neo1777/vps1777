@@ -249,7 +249,7 @@ fase_test() {
       tests/test_health.py tests/test_superficie_tool.py tests/test_costruisci_indice.py \
       tests/test_ibrida_verifica.py tests/test_sessioni.py
   passo "CLI e presìdi del repo (tools/tests)" \
-    uvx --with bcrypt --with cryptography pytest -q tools/tests/
+    uvx --with bcrypt --with cryptography --with pyyaml pytest -q tools/tests/
   # Il ciclo backup → restore cifra per davvero con `age` e usa docker: senza, esce 2
   # («SALTATO») e il runner lo conta rosso, di proposito. Qui lo si dice PRIMA.
   local nota=""

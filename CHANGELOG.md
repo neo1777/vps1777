@@ -33,6 +33,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   pre-commit ripiega su `security/check_no_leaks.py` e ferma il commit: ora CONTRIBUTING
   lo dice, e il test dei guardiani lo prova con un commit vero.
 
+- **In CI `test_checker_sa_rifiutare` saltava per intero**: al passo di `tools/tests` mancava
+  PyYAML («check_findings.py stesso richiede PyYAML»), e con lui non giravano altri 6 test. Ora
+  `ci.yml` e `tools/check.sh` lo passano: 493 test girano invece di 486.
+
 ### Aggiunto
 - **`bash tools/check.sh` rifà in locale i job `lint` e `contract` della CI, con un
   comando** (29/09). Prima di una PR i controlli erano una dozzina di comandi da
