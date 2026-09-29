@@ -28,6 +28,31 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `VPS1777_FEATURES` come fa l'install: togliere `autoupdate` e aggiornare lo lasciava acceso, e
   rimetterlo non lo riaccendeva. Le altre unit restano come l'operatore le ha lasciate. OPS.md
   e il referto di `deploy.sh` allineati.
+- **CONTRIBUTING descriveva il gate anti-leak del pre-commit com'era prima del 27/09**
+  («non è in questo repo: stampa NON MISURATO»). Da allora, su un clone qualunque, il
+  pre-commit ripiega su `security/check_no_leaks.py` e ferma il commit: ora CONTRIBUTING
+  lo dice, e il test dei guardiani lo prova con un commit vero.
+
+### Aggiunto
+- **`bash tools/check.sh` rifà in locale i job `lint` e `contract` della CI, con un
+  comando** (29/09). Prima di una PR i controlli erano una dozzina di comandi da
+  ricordare, ciascuno con le sue opzioni. Ora sono ruff e shellcheck agli stessi pin della
+  CI, i guardiani che non sono test (con le loro autoprove), le suite una alla volta come
+  nel job `contract`, e alla fine un riepilogo verde/rosso. Se manca uno strumento
+  (docker, uv) esce 2 e lo dice: non finge un verde. Non installa niente e non riscrive
+  file tracciati. Le fasi si lanciano anche da sole (`lint`, `guardiani`, `test`). La
+  fonte di verità resta `ci.yml`: `test_check_sh_segue_la_ci.py` va in rosso se la CI
+  esegue uno script di guardia, una suite o un pin che `check.sh` non ha.
+- **I guardiani senza autoprova dimostrano di mordere ancora**
+  (`tools/tests/test_i_guardiani_mordono.py`). Per l'anti-leak, il registro dei rilievi,
+  il ledger delle feature, il pre-commit e le traduzioni, il test costruisce un guasto in
+  una copia del repo e verifica tre cose: il guardiano è agganciato (lo esegue una riga di
+  codice, non un commento), sul guasto esce ≠0 per la ragione attesa, sulla copia sana
+  esce 0. I guasti sono sette: una credenziale finta in un doc e in un commit, un export
+  di sessione aggiunto con `-f`, un'evidenza sparita dal codice, un tool MCP senza voce
+  nel ledger, una voce il cui tool è sparito, una pagina italiana cambiata dopo la
+  traduzione. Dove serve PyYAML lo chiede a `uv` invece di saltare: in CI
+  `test_checker_sa_rifiutare.py` lo salta, e quindi non gira mai.
 
 ## [0.63.4] — 2026-09-28
 

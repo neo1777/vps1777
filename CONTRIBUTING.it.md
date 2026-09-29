@@ -34,6 +34,27 @@ L'overlay `compose.build.yaml` serve perché `compose.yaml` è pull-only
 
 ## Test e controlli in locale
 
+### Prima di aprire una PR: `tools/check.sh`
+
+```bash
+bash tools/check.sh              # lint, guardiani e test: ciò che fanno i job lint e contract della CI
+bash tools/check.sh lint         # solo ruff e shellcheck, agli stessi pin della CI
+bash tools/check.sh guardiani    # i controlli della CI che non sono test
+bash tools/check.sh test         # le suite, una alla volta, e i test bash
+```
+
+Chiude con un riepilogo di cosa è verde e cosa è rosso, in circa due minuti. Esce 0 se è
+tutto verde, 1 se qualcosa è rosso, 2 se manca uno strumento (docker, uv, uvx): in quel
+caso lo dice, e non è un verde. Non installa niente e non riscrive file tracciati. Non
+copre il job `build` né la ratifica dei salti di lock, che vive nel corpo della PR.
+La fonte di verità resta `.github/workflows/ci.yml`: se la CI aggiunge un controllo e
+`check.sh` no, `tools/tests/test_check_sh_segue_la_ci.py` va in rosso. E
+`tools/tests/test_i_guardiani_mordono.py` prova che i guardiani senza un'autoprova propria
+(anti-leak, registro dei rilievi, ledger delle feature, pre-commit, traduzioni) vanno
+ancora in rosso su un guasto costruito, per la ragione giusta.
+
+### I comandi uno per uno
+
 Le suite girano **una alla volta**, come in CI:
 
 ```bash
@@ -51,7 +72,7 @@ module named 'app.miniapp_core'`. Alcuni test di archive-mcp e del gateway salta
 le dipendenze del lock: la CI li rilancia dopo `uv sync --frozen` (vedi
 `.github/workflows/ci.yml`).
 
-Prima di aprire la PR, i controlli che la CI rifarà:
+I controlli che la CI rifarà (`tools/check.sh` li esegue tutti):
 
 - `python3 tools/gate-locale.py` — esegue gli step di `ci.yml` **leggendoli dal workflow**,
   non riscritti a mano (`--elenco` dice cosa farebbe, `--job lint` ne esegue uno). Salta e
@@ -72,9 +93,9 @@ Prima di aprire la PR, i controlli che la CI rifarà:
 worktree del repo); `bash tools/hooks/installa.sh --stato` dice se la copia installata è
 identica a quella versionata. Il `pre-commit` avvisa se non stai committando sul ramo
 principale (non blocca), passa `shellcheck` sui `.sh` e `ruff` sui `.py` che stai
-committando (blocca se trovano problemi), e lancia il gate anti-leak (lo script `gate-antileak`)
-**se lo trova** — non è in questo repo: senza, stampa «NON MISURATO» e la rete resta
-`security/check_no_leaks.py` in CI. Via d'uscita consapevole: `--no-verify`.
+committando (blocca se trovano problemi), e passa il gate anti-leak: su un clone qualunque è
+`security/check_no_leaks.py`, lo stesso della CI, e ferma il commit se trova materiale
+credenziale. Via d'uscita consapevole: `--no-verify`.
 
 ## Cosa non entra mai nel repo
 
