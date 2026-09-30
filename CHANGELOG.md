@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **`test_i_guardiani_mordono` poteva cadere per una corsa, non per un guardiano.** In CI il
+  30/09 la copia del repo di prova con `copytree` è fallita con «objects/0a: No such
+  file»: le cartelle degli oggetti sparivano durante la copia, e il rosso ha fermato la PR
+  di rilascio. Ora ogni copia è un `git clone --no-hardlinks`, che legge gli oggetti
+  sciolti o impacchettati allo stesso modo, e il gc automatico è spento nelle copie.
+
 ### Sicurezza
 - **La redazione di archive1777 copre due segreti senza prefisso di fornitore (H76).** La
   raccolta degli oggetti della curatrice ha trovato in messaggi di giugno le righe
