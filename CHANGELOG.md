@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.64.1] — 2026-09-30
+
+**Due segreti senza prefisso non escono più dall'archivio**: le righe `RESULT_SECRET=…`
+dell'installer e l'URL del connettore portavano in chiaro il `gateway_secret` in uso.
+
 ### Sicurezza
 - **La redazione di archive1777 copre due segreti senza prefisso di fornitore (H76).** La
   raccolta degli oggetti della curatrice ha trovato in messaggi di giugno le righe
