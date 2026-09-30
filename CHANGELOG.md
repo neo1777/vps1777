@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **La redazione di archive1777 copre due segreti senza prefisso di fornitore (H76).** La
+  raccolta degli oggetti della curatrice ha trovato in messaggi di giugno le righe
+  `RESULT_SECRET=…` che `deploy.sh` stampa a fine installazione, incollate in chat. Misurato
+  sulla VPS con la redazione vera: uscivano in chiaro da 7 DB, e il confronto delle impronte
+  (nessun valore stampato) dice che il valore era il `gateway_secret` in uso. Anche l'URL del
+  connettore, `https://<host>/<segreto>/<servizio>/mcp`, che `deploy.sh` stampa per
+  costruzione, compariva 45 volte su 283.045 righe. Due regole nuove, sul modello di
+  gitleaks: il valore assegnato a un nome da segreto (almeno 16 caratteri con lettere e
+  cifre; il nome resta) e il segmento segreto dell'URL (host e servizio restano). Sulla
+  stessa misura colpiscono 15 assegnazioni, tutte segreti veri. Le chiavi Tailscale del
+  rilievo erano già redatte. Ruotare il segreto trapelato spetta all'operatore
+  (SECRETS, «Rota `gateway_secret`»): cambiano le URL dei connettori.
+
 ## [0.64.0] — 2026-09-30
 
 **Una lezione di graphify misurata prima di portarla dentro**: `search_ibrida` accetta

@@ -151,6 +151,24 @@ CREDENZIALI = re.compile(
 TRYCLOUDFLARE = re.compile(r"(\bhttps?://[a-z0-9-]+\.trycloudflare\.com)(/[^\s\"'<>)\]]+)")
 SEGNAPOSTO_PERCORSO = "/[percorso redatto]"
 
+# SEGRETI SENZA FORMATO, MA ASSEGNATI A UN NOME DA SEGRETO (30/09/2026). Rilievo della
+# curatrice: righe «RESULT_SECRET=<32 caratteri>» — l'output dell'installer incollato in
+# chat — uscivano in chiaro, e il valore era il gateway_secret IN USO. Il valore non ha
+# un prefisso di fornitore, ma l'assegnazione ha una forma: un nome che contiene
+# SECRET/TOKEN/PASSWORD/…KEY, un `=` o `:`, un valore lungo con lettere E cifre. È il
+# criterio di gitleaks (generic-api-key). Il valore deve avere 16 caratteri e almeno una
+# cifra e una lettera: così `OAUTH_ACCESS_TOKEN_LIFETIME: "900"` (una durata) e
+# `password = request.form.get(…)` (codice) restano. Il nome resta: dice cosa era.
+ASSEGNAZIONE = re.compile(
+    r"(?i)(?<![A-Za-z0-9])([A-Za-z0-9_]*(?:secret|token|passw(?:or)?d|pwd|auth_?key"
+    r"|api_?key|private_?key|access_?key)[A-Za-z0-9_]*[`\"']?\s*[=:]\s*[`\"']?)"
+    r"(?=[A-Za-z0-9_+/=.-]*[0-9])(?=[A-Za-z0-9_+/=.-]*[A-Za-z])[A-Za-z0-9_+/=.-]{16,}")
+# Il segreto del gateway sta per costruzione nell'URL del connettore
+# (`https://<host>/<SECRET>/<servizio>/mcp`): chi installa deve riceverlo, e incollato in
+# chat finiva nell'archivio. Resta l'host e il servizio, va via il segmento.
+URL_CONNETTORE = re.compile(r"(\bhttps?://[^\s/\"'<>]+/)[A-Za-z0-9_-]{16,}(/[a-z0-9-]+/mcp\b)")
+
+
 # Campi dell'anagrafica i cui VALORI vanno mascherati ovunque compaiano. `uuid` no: è un
 # identificatore tecnico che serve a `get_context`, e mascherarlo romperebbe la navigazione.
 CAMPI_ANAGRAFICI = ("full_name", "display_name", "name", "email_address", "email",
@@ -265,6 +283,9 @@ def maschera_testo(s: str, noti: set[str] | None = None) -> str:
         s = _senza_evidenziatori(_pattern_noti(frozenset(noti)), s,
                                  lambda m: SEGNAPOSTO_VALORE)
     s = _senza_evidenziatori(CREDENZIALI, s, lambda m: SEGNAPOSTO_CREDENZIALE)
+    s = _senza_evidenziatori(ASSEGNAZIONE, s, lambda m: m.group(1) + SEGNAPOSTO_CREDENZIALE)
+    s = _senza_evidenziatori(URL_CONNETTORE, s,
+                             lambda m: m.group(1) + SEGNAPOSTO_CREDENZIALE + m.group(2))
     for bordo in (_CHIAVE_SENZA_FINE, _CHIAVE_SENZA_INIZIO, _CODA):
         s = _senza_evidenziatori(bordo, s, lambda m: SEGNAPOSTO_CREDENZIALE)
     s = _senza_evidenziatori(_TESTA, s, lambda m: "…" + SEGNAPOSTO_CREDENZIALE)
