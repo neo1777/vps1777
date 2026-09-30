@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Due code di H76 dalla raccolta della curatrice.**
+  - Il segmento segreto dell'URL del connettore restava in chiaro quando l'URL era scritto
+    senza `https://` (`host/<segreto>/archive/mcp`, un messaggio del 21/06). Ora la regola
+    non chiede lo schema, e in cambio vuole un segmento con maiuscole, minuscole e cifre,
+    come un `token_urlsafe`.
+  - Un falso positivo di H74: nelle etichette `memory:legacy-20260926:<nome Project>` la
+    coda `20260926:<nome>` ha la forma di un token Telegram tagliato, e 8 etichette su 15
+    uscivano «[credenziale redatta]». Le cifre attaccate a un trattino o a due punti non
+    aprono più un token.
+  - Misurato sulla VPS: il caso del 21/06 è a 0 su 2 in chiaro, le etichette colpite sono
+    0 su 15, e le URL di connettore trovate sono 46 (le 45 di prima più quella senza
+    schema), tutte segreti veri.
+
 ## [0.64.2] — 2026-09-30
 
 **Due segreti senza prefisso non escono più dall'archivio**: le righe `RESULT_SECRET=…`

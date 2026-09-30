@@ -166,7 +166,13 @@ ASSEGNAZIONE = re.compile(
 # Il segreto del gateway sta per costruzione nell'URL del connettore
 # (`https://<host>/<SECRET>/<servizio>/mcp`): chi installa deve riceverlo, e incollato in
 # chat finiva nell'archivio. Resta l'host e il servizio, va via il segmento.
-URL_CONNETTORE = re.compile(r"(\bhttps?://[^\s/\"'<>]+/)[A-Za-z0-9_-]{16,}(/[a-z0-9-]+/mcp\b)")
+# Senza chiedere lo schema: il 21/06 l'URL era scritto `host/<segreto>/archive/mcp`
+# (rilievo MAPPA-17, 30/09). In cambio il segmento deve avere maiuscole, minuscole e
+# cifre, come un `token_urlsafe`: un percorso lungo ma leggibile
+# («claude-code-sessions/archive/mcp») resta.
+URL_CONNETTORE = re.compile(
+    r"(/)(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*[0-9])"
+    r"[A-Za-z0-9_-]{20,}(/[a-z0-9-]+/mcp\b)")
 
 
 # Campi dell'anagrafica i cui VALORI vanno mascherati ovunque compaiano. `uuid` no: è un
@@ -251,7 +257,10 @@ def _senza_evidenziatori(pattern: "re.Pattern[str]", s: str, sostituto) -> str:
 # - CHIAVE PRIVATA a metà: dal BEGIN senza END alla fine, dall'inizio all'END senza BEGIN.
 _CODA = re.compile(
     r"(?<![A-Za-z0-9])(?:gh[pousr]_|github_pat_|sk-(?:ant-|proj-)?|xox[abprs]-|AIza|AKIA"
-    r"|tskey-|AGE-SECRET-KEY-1|eyJ|\d{8,10}:)[A-Za-z0-9_.-]{8,}…?\Z")
+    r"|tskey-|AGE-SECRET-KEY-1|eyJ|(?<![-:])\d{8,10}:)[A-Za-z0-9_.-]{8,}…?\Z")
+# ⚠️ Le cifre del token Telegram NON valgono attaccate a un trattino o a due punti: in
+# «memory:legacy-20260926:<nome Project>» la coda `20260926:Nome` ha la forma di un token
+# tagliato, e le etichette dei Project uscivano «[credenziale redatta]» (MAPPA-17, 30/09).
 # La finestra di FTS5 comincia sempre a un confine di token (unicode61: una corsa
 # alfanumerica), quindi basta guardare la PRIMA corsa: deve avere 20 caratteri o più e
 # maiuscole, minuscole e cifre insieme. Un percorso con i trattini («-home-…-Scrivania-»)

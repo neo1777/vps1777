@@ -417,3 +417,30 @@ def test_il_segreto_nell_url_del_connettore_e_redatto() -> None:
     assert out.endswith(" fatto")
     # un percorso normale che finisce in /mcp resta
     assert redazione.maschera_testo("https://vps.example.invalid/archive/mcp") == "https://vps.example.invalid/archive/mcp"
+
+
+def test_il_segmento_del_connettore_senza_schema_e_redatto() -> None:
+    """Rilievo della curatrice (MAPPA-17, 30/09): un messaggio del 21/06 scriveva l'URL
+    senza `https://` — `host/<segreto>/archive/mcp` — e il segmento restava in chiaro."""
+    for testo in (f"vps.example.invalid/{_VAL}/archive/mcp", f"`/{_VAL}/nb1777/mcp`"):
+        out = redazione.maschera_testo(testo)
+        assert _VAL not in out, testo
+        assert "/archive/mcp" in out or "/nb1777/mcp" in out
+
+
+def test_un_percorso_lungo_ma_non_segreto_davanti_a_mcp_resta() -> None:
+    for s in ("/home/utente/claude-code-sessions/archive/mcp",
+              "services/archive-mcp-server/archive/mcp", "/<SECRET>/archive/mcp"):
+        assert redazione.maschera_testo(s) == s, s
+
+
+def test_la_data_in_un_etichetta_non_e_la_coda_di_un_token_telegram() -> None:
+    """Rilievo della curatrice (MAPPA-17): «memory:legacy-20260926:<nome Project>» usciva
+    «[credenziale redatta]» — la coda `20260926:Nome2024` ha la forma di un token Telegram
+    tagliato (8-10 cifre, due punti, 8+ caratteri) e la regola di H74 la prendeva. Le
+    cifre attaccate a un trattino o a due punti non aprono un token."""
+    for p in ("memory:legacy-20260926:Progetto2024", "memory:legacy-20260926:Scrivania"):
+        assert redazione.maschera_testo(p) == p, p
+    # il token vero, anche tagliato in coda a uno snippet, resta redatto
+    coda = "…il bot è 123456789:" + "AAHk" + "x9Qz" + "LmNo…"
+    assert "AAHkx9Qz" not in redazione.maschera_testo(coda)
