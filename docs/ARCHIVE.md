@@ -41,7 +41,10 @@ copre:
   `github_pat_…`), chiavi Anthropic e OpenAI (`sk-…`), AWS (`AKIA…`), Google (`AIza…`),
   Slack (`xox…`), token di bot Telegram, auth-key Tailscale, chiavi age, JWT, blocchi di
   chiave privata → «[credenziale redatta]»; e il **percorso** degli URL
-  `*.trycloudflare.com` (un tunnel rapido è segreto per URL): l'host resta.
+  `*.trycloudflare.com` (un tunnel rapido è segreto per URL): l'host resta. Dalla 0.64.1
+  anche due segreti **senza prefisso**: il valore assegnato a un nome da segreto
+  (`RESULT_SECRET=…`, `api_key: …`, almeno 16 caratteri con lettere e cifre; il nome resta)
+  e il segmento segreto nell'URL del connettore (`https://<host>/<segreto>/<servizio>/mcp`).
 
 Tutto questo vale anche dentro gli **snippet**, che sono il punto delicato. Lo snippet di
 FTS5 evidenzia il termine cercato con `«»` (dalla 0.62.2 la redazione guarda il testo come

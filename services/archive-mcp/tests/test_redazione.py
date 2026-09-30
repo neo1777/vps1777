@@ -369,3 +369,51 @@ def test_i_bordi_lasciano_gli_evidenziatori_e_i_percorsi_coi_trattini() -> None:
               "…neo1777-Scrivania-setaccio-recupero-sessioni-2026-07-14/memory/x.md",
               "…MCP__create_or_update_«file» e altro"):
         assert redazione.maschera_testo(s) == s, s
+
+
+# ── Segreti SENZA prefisso di fornitore, riconoscibili dal NOME (30/09/2026) ─────────
+# Rilievo della curatrice: nell'archivio uscivano in chiaro righe «RESULT_SECRET=<32>»,
+# l'output dell'installer incollato in chat, e il segreto era QUELLO IN USO. Il valore
+# non ha formato, ma l'assegnazione sì: un nome da segreto, un `=` o `:`, un valore lungo
+# con lettere e cifre. Stesso criterio di gitleaks (generic-api-key).
+_VAL = "Ab3dE" + "fGh1jK" + "lMn0pQ" + "rSt9uVwX"          # 26 caratteri, costruito a pezzi
+
+
+def test_assegnazione_a_un_nome_da_segreto_e_redatta() -> None:
+    for riga in (f"RESULT_SECRET={_VAL}", f"GATEWAY_SECRET: {_VAL}",
+                 f'"api_key": "{_VAL}"', f"export TS_AUTHKEY='{_VAL}'",
+                 f"password = {_VAL}", f"- `GATEWAY_SECRET` = `{_VAL}`"):
+        out = redazione.maschera_testo(f"prima\n{riga}\ndopo")
+        assert _VAL not in out, riga
+        assert redazione.SEGNAPOSTO_CREDENZIALE in out, riga
+        assert out.startswith("prima\n") and out.endswith("\ndopo")
+
+
+def test_il_nome_resta_e_dice_cosa_era() -> None:
+    out = redazione.maschera_testo(f"RESULT_SECRET={_VAL}\nRESULT_SETUP_URL=https://vps.example.invalid/admin")
+    assert out.startswith("RESULT_SECRET=" + redazione.SEGNAPOSTO_CREDENZIALE)
+    assert "RESULT_SETUP_URL=https://vps.example.invalid/admin" in out
+
+
+def test_l_assegnazione_non_mangia_il_codice_ne_le_durate() -> None:
+    """Il SECURITY.md lo dice del guardiano per nome: `OAUTH_ACCESS_TOKEN_LIFETIME: "900"`
+    è una durata, e un guardiano che grida viene spento. Il valore deve essere lungo e
+    avere lettere E cifre: il codice e le durate restano."""
+    for s in ('OAUTH_ACCESS_TOKEN_LIFETIME: "900"', "password = request.form.get('p')",
+              "api_key=os.environ.get_the_value_please", "GATEWAY_SECRET=${GATEWAY_SECRET}",
+              "token = secrets.token_urlsafe(24)", "sha256: " + "3f" * 32,
+              "TOKEN_URL=https://github.com/login/oauth/access_token"):
+        assert redazione.maschera_testo(s) == s, s
+
+
+def test_il_segreto_nell_url_del_connettore_e_redatto() -> None:
+    """`deploy.sh` stampa l'URL del connettore con il segreto dentro, per costruzione:
+    chi installa deve riceverlo. Incollato in chat finiva nell'archivio. Resta l'host e
+    il servizio, va via il segmento."""
+    url = f"https://vps.example.invalid/{_VAL}/archive/mcp"
+    out = redazione.maschera_testo(f"connettore: {url} fatto")
+    assert _VAL not in out
+    assert "https://vps.example.invalid/" in out and "/archive/mcp" in out
+    assert out.endswith(" fatto")
+    # un percorso normale che finisce in /mcp resta
+    assert redazione.maschera_testo("https://vps.example.invalid/archive/mcp") == "https://vps.example.invalid/archive/mcp"

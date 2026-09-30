@@ -175,7 +175,7 @@ apre — provato sul caso più semplice (nessun `gateway_secret` → il proxy ne
 tutto) da `services/gateway/tests/test_fail_closed_senza_config.py`. Segue la sintesi degli hardening: prima la review difensiva (luglio 2026,
 `v0.19.1 → v0.33.0`, che alla chiusura del dossier contava **35 chiusi · 7 parziali ·
 1 accettato · 0 aperti** su 43), poi quello che è venuto dopo. Oggi il registro ha
-75 rilievi: 64 chiusi, 8 parziali, 3 accettati, 0 aperti. Il dettaglio operativo sta in
+76 rilievi: 65 chiusi, 8 parziali, 3 accettati, 0 aperti. Il dettaglio operativo sta in
 [SECURITY.md](../SECURITY.md), che è la fonte di verità — qui c'è la sintesi, là il
 registro che la CI verifica.
 

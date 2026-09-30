@@ -3686,3 +3686,55 @@ findings:
         output: "3 passed"
         exit: 0
         quando: "2026-09-28"
+  - id: H76
+    severity: medium
+    title: "La redazione di archive1777 non copriva i segreti senza prefisso di fornitore: le righe RESULT_SECRET=… dell'installer e il segmento segreto nell'URL del connettore uscivano in chiaro, e il valore era il gateway_secret in uso"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-09-30"
+      come: misura
+      nota: >
+        La raccolta degli oggetti della curatrice ha trovato, in messaggi di giugno, una
+        chiave Tailscale e un segreto del gateway. Misurato sulla VPS passando i messaggi
+        nella redazione vera: le chiavi Tailscale erano già redatte; le righe
+        RESULT_SECRET=<32 caratteri> uscivano in chiaro da 7 DB. Confrontando le impronte
+        sha256 (nessun valore stampato), uno dei valori trapelati era il gateway_secret in
+        uso. Su un DB da 283.045 righe l'URL del connettore col segreto compariva 45 volte.
+    since: unreleased
+    why: >
+      La redazione maschera ciò che ha un formato riconoscibile (prefissi dei fornitori) e
+      dichiarava scoperto il segreto senza formato. Ma il gateway_secret ha due forme
+      riconoscibili anche senza prefisso: l'assegnazione a un nome da segreto, stampata
+      da deploy.sh (RESULT_SECRET=…), e il segmento dell'URL del connettore
+      (https://<host>/<SECRET>/<servizio>/mcp), che deploy.sh stampa per costruzione
+      perché chi installa deve riceverlo. Incollate in una chat, arrivavano all'archivio.
+    evidence:
+      - file: services/archive-mcp/app/redazione.py
+        contains:
+          - "ASSEGNAZIONE = re.compile("
+          - "URL_CONNETTORE = re.compile("
+      - file: services/archive-mcp/tests/test_redazione.py
+        contains:
+          - "def test_assegnazione_a_un_nome_da_segreto_e_redatta("
+          - "def test_l_assegnazione_non_mangia_il_codice_ne_le_durate("
+          - "def test_il_segreto_nell_url_del_connettore_e_redatto("
+    fix: >
+      Due regole in più, sul modello di gitleaks (generic-api-key): un nome che contiene
+      SECRET/TOKEN/PASSWORD/…KEY seguito da = o : e da un valore di almeno 16 caratteri
+      con lettere e cifre (il nome resta, il valore diventa «[credenziale redatta]»); e il
+      segmento di almeno 16 caratteri davanti a /<servizio>/mcp in un URL (host e servizio
+      restano). Misurate sulla VPS: 15 assegnazioni e 45 URL su 283.045 righe, nessun
+      falso positivo fra i nomi colpiti. La rotazione del gateway_secret trapelato è
+      un'azione dell'operatore (cambia le URL dei connettori): SECRETS.md, «Rota gateway_secret».
+    prova:
+      - comando: "uvx pytest services/archive-mcp/tests/test_redazione.py -q"
+        dove: "banco locale, senza la cura"
+        output: "3 failed, 31 passed"
+        exit: 1
+        quando: "2026-09-30"
+      - comando: "uvx pytest services/archive-mcp/tests/test_redazione.py -q"
+        dove: "banco locale, con la cura"
+        output: "34 passed"
+        exit: 0
+        quando: "2026-09-30"

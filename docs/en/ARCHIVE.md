@@ -44,7 +44,10 @@ step that covers:
   `github_pat_…`), Anthropic and OpenAI keys (`sk-…`), AWS (`AKIA…`), Google (`AIza…`),
   Slack (`xox…`), Telegram bot tokens, Tailscale auth keys, age keys, JWTs, private-key
   blocks → "[credenziale redatta]"; and the **path** of `*.trycloudflare.com` URLs (a quick
-  tunnel is secret by URL): the host stays.
+  tunnel is secret by URL): the host stays. Since 0.64.1 also two secrets **without a
+  prefix**: the value assigned to a secret-like name (`RESULT_SECRET=…`, `api_key: …`, at
+  least 16 characters with letters and digits; the name stays) and the secret segment in the
+  connector URL (`https://<host>/<secret>/<service>/mcp`).
 
 All of this also holds inside **snippets**, which are the delicate spot. The FTS5 snippet
 highlights the searched term with `«»` (since 0.62.2 the redaction reads the text as if the
