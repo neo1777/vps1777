@@ -63,6 +63,14 @@ GIT_ENV = {
     "GIT_COMMITTER_NAME": "guasto-costruito", "GIT_COMMITTER_EMAIL": "guasto@example.invalid",
     "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
     "PYTHONDONTWRITEBYTECODE": "1",
+    # Niente gc né manutenzione automatici nelle copie: un gc staccato in background
+    # impacchetta `.git/objects` mentre qualcuno lo legge. In CI il 30/09 le cartelle
+    # degli oggetti di `pristino` sono sparite durante una copia («objects/0a: No such
+    # file»). La causa esatta non è dimostrata (~400 oggetti, sotto la soglia di gc.auto):
+    # la cura che regge comunque è il `git clone` di `copia`; questo spegne il sospetto.
+    "GIT_CONFIG_COUNT": "2",
+    "GIT_CONFIG_KEY_0": "gc.auto", "GIT_CONFIG_VALUE_0": "0",
+    "GIT_CONFIG_KEY_1": "maintenance.auto", "GIT_CONFIG_VALUE_1": "false",
 }
 
 
@@ -102,9 +110,18 @@ def pristino(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 @pytest.fixture
 def copia(pristino: Path, tmp_path: Path) -> Path:
-    """Una copia usa-e-getta per ogni prova: un guasto non deve sporcare la successiva."""
+    """Una copia usa-e-getta per ogni prova: un guasto non deve sporcare la successiva.
+
+    `git clone` e non `copytree`: in CI il 30/09 `copytree` è caduto con «objects/0a: No
+    such file» — le cartelle degli oggetti sciolti di `pristino` sparivano DURANTE la
+    copia (impacchettate da un gc). git legge gli oggetti sciolti o impacchettati allo
+    stesso modo e regge la corsa; la working tree è identica, perché `pristino` è
+    esattamente il suo commit. Il remote del clone si toglie: `pristino` non ne ha.
+    """
     dst = tmp_path / "repo"
-    shutil.copytree(pristino, dst, symlinks=True)
+    subprocess.run(["git", "clone", "-q", "--no-hardlinks", str(pristino), str(dst)],
+                   env=_env(), check=True)
+    _git(dst, "remote", "remove", "origin")
     return dst
 
 
