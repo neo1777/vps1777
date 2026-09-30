@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.64.2] — 2026-09-30
+
+**Due segreti senza prefisso non escono più dall'archivio**: le righe `RESULT_SECRET=…`
+dell'installer e l'URL del connettore portavano in chiaro il `gateway_secret` in uso.
+
+> **Non esiste una 0.64.1.** Il tag `v0.64.1` è stato spinto per errore sul commit di #383,
+> dove VERSION diceva ancora 0.64.0, mentre la PR di rilascio era ferma per un test
+> instabile (curato qui sotto). La guardia del workflow Release l'ha rifiutato («VERSION non
+> combacia col tag»), quindi nessuna release è uscita. I tag non si riscrivono: il numero si
+> salta.
+
 ### Corretto
 - **`test_i_guardiani_mordono` poteva cadere per una corsa, non per un guardiano.** In CI il
   30/09 la copia del repo di prova con `copytree` è fallita con «objects/0a: No such

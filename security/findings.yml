@@ -3701,7 +3701,7 @@ findings:
         RESULT_SECRET=<32 caratteri> uscivano in chiaro da 7 DB. Confrontando le impronte
         sha256 (nessun valore stampato), uno dei valori trapelati era il gateway_secret in
         uso. Su un DB da 283.045 righe l'URL del connettore col segreto compariva 45 volte.
-    since: unreleased
+    since: v0.64.2
     why: >
       La redazione maschera ciò che ha un formato riconoscibile (prefissi dei fornitori) e
       dichiarava scoperto il segreto senza formato. Ma il gateway_secret ha due forme
