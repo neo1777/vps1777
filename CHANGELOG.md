@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.64.3] — 2026-09-30
+
+**Due code della redazione di H76**: l'URL del connettore senza schema non esce più, e le
+etichette dei Project non vengono più scambiate per un token.
+
 ### Corretto
 - **Due code di H76 dalla raccolta della curatrice.**
   - Il segmento segreto dell'URL del connettore restava in chiaro quando l'URL era scritto
