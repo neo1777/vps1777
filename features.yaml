@@ -1162,6 +1162,7 @@ features:
     dove: ["tools/fatti-nei-doc.py", ".github/workflows/ci.yml",
            "tools/tests/test_fatti_nei_doc.py", "tools/check.sh"]
     status: active-default
+    since: "0.67.0"
     verify:
       file_contains: {path: .github/workflows/ci.yml, pattern: "python3 tools/fatti-nei-doc.py"}
 

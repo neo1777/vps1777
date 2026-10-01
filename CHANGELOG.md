@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.67.0] — 2026-10-01
+
+**La documentazione torna a dire il vero, e un guardiano la tiene lì**: 43 derive corrette
+e `tools/fatti-nei-doc.py`, che conta i fatti dal codice. In più Renovate per le immagini
+di terzi negli overlay (Dependabot non le ha mai viste), Watchtower tolto (immagine
+archiviata a monte) e l'access-log di Caddy senza il gateway_secret (H78).
+
 ### Aggiunto
 - **I numeri che i documenti ripetono li conta il codice: `tools/fatti-nei-doc.py`.** I tool
   MCP di nb1777 e di archive, le immagini pubblicate e quante sono dello stack, i servizi e i

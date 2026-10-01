@@ -3820,7 +3820,7 @@ findings:
         caddy:2.11-alpine: una richiesta a /<segreto>/archive/mcp → una riga di log col
         segreto in chiaro. Sulla VPS di riferimento l'ingresso è Tailscale Funnel, quindi
         lì Caddy non è nel percorso; tocca chi installa con l'ingresso Caddy.
-    since: unreleased
+    since: v0.67.0
     why: >
       Il gateway redigeva il segreto nel suo access-log (uvicorn, v0.24.0), e la frase di
       SECRETS.md estendeva la garanzia a Caddy e Cloudflare senza che nessun codice la
