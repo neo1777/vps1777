@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.67.1] — 2026-10-01
+
+**Un export di sessione resta fuori dal repo qualunque estensione abbia** (#402).
+
 ### Corretto
 - **Un export di sessione resta fuori dal repo qualunque estensione abbia.** Il `.gitignore`
   e la regola R1 del gate anti-leak riconoscevano l'export di `/export` solo come
