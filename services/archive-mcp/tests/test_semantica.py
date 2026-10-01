@@ -217,3 +217,28 @@ def test_query_senza_termini_utili_non_inventa_nulla():
 def test_termini_ripetuti_non_pesano_due_volte():
     e = semantica.query_fts_da_naturale("memoria della memoria e ancora memoria archivio")
     assert e.count('"memoria"') == 1
+
+
+# ── il passaggio: leggere il punto, non l'inizio (banco del 01/10) ───────────────────
+
+def test_passaggio_prende_la_finestra_piu_fitta_di_termini() -> None:
+    """Lo snippet di FTS5 si ferma a 64 token: su un vocale lungo la risposta sta spesso
+    fuori. Il passaggio è la finestra di N parole dove i termini della domanda sono più
+    fitti, presa dal testo intero."""
+    testo = " ".join(["riempitivo"] * 200 + ["graphify", "e", "la", "memoria", "su", "graphify"]
+                     + ["coda"] * 200)
+    p = semantica.passaggio(testo, {"graphify", "memoria"}, 10)
+    assert "graphify" in p and "memoria" in p
+    assert p.startswith("…") and p.endswith("…"), "un taglio si dichiara"
+    assert len(p.strip("…").split()) == 10
+
+
+def test_passaggio_corto_o_senza_termini() -> None:
+    assert semantica.passaggio("tre parole sole", {"sole"}, 50) == "tre parole sole"
+    lungo = " ".join(f"p{i}" for i in range(100))
+    assert semantica.passaggio(lungo, set(), 5) == "p0 p1 p2 p3 p4…"
+
+
+def test_termini_della_query_anche_da_un_espressione_fts() -> None:
+    assert semantica.termini_della_query('"graphify" OR "memoria"') == {"graphify", "memoria"}
+    assert semantica.termini_della_query('grafo* AND NOT "rete neurale"') == {"grafo", "rete", "neurale"}

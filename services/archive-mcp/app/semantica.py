@@ -42,6 +42,7 @@ che questo repo combatte da sempre.
 from __future__ import annotations
 
 import logging
+import re
 import struct
 import threading
 from pathlib import Path
@@ -329,6 +330,40 @@ def query_fts_da_naturale(testo: str, *, minimo: int = 2) -> str:
     if len(tenuti) < minimo:
         return ""
     return " OR ".join(f'"{p}"' for p in tenuti)
+
+
+# Il PASSAGGIO (banco del 01/10/2026). Lo snippet di FTS5 si ferma a 64 token e
+# comincia dove capita: su un vocale o un verbale lungo la risposta sta spesso fuori, e
+# chi legge deve aprire il file. Misurato sui CRITERIO di graphify (S = l'elemento si
+# legge senza aprire niente, prime 10 righe): voce-1777 9 → 13 con 64 token, 14 con una
+# finestra di 120 parole, 17 con 200; i messaggi brevi di Telegram non cambiano.
+PASSAGGIO_MAX = 400
+_OPERATORI_FTS = {"or", "and", "not", "near"}
+
+
+def termini_della_query(espressione: str) -> set[str]:
+    """Le parole di un'espressione FTS5 (o di una query naturale già convertita), senza
+    operatori, virgolette e asterischi: servono a trovare il punto del testo."""
+    return {w for w in re.findall(r"[^\W_]+", (espressione or "").lower())
+            if w not in _OPERATORI_FTS and len(w) > 1}
+
+
+def passaggio(testo: str, termini: set[str], parole: int) -> str:
+    """La finestra di `parole` parole dove i `termini` sono più fitti, dal testo intero.
+    Un taglio si dichiara con «…» ai bordi; senza termini, l'inizio del testo."""
+    w = (testo or "").split()
+    if len(w) <= parole:
+        return " ".join(w)
+    segni = [1 if termini and any(t in termini for t in re.findall(r"[^\W_]+", x.lower()))
+             else 0 for x in w]
+    somma = sum(segni[:parole])
+    meglio, inizio = somma, 0
+    for i in range(1, len(w) - parole + 1):
+        somma += segni[i + parole - 1] - segni[i - 1]
+        if somma > meglio:
+            meglio, inizio = somma, i
+    corpo = " ".join(w[inizio:inizio + parole])
+    return ("…" if inizio > 0 else "") + corpo + ("…" if inizio + parole < len(w) else "")
 
 
 def fondi_rrf(fts: list, vec: list, *, k: int = RRF_K,

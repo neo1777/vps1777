@@ -61,13 +61,31 @@ wins on vectors alone.
 | `campi` | `tutto` | `testo` keeps only the rows that have words, in the vector branch too (a vector does not say whether it hit the words or the actions) |
 | `speaker` | `""` | who wrote the row (`human`, `assistant`, `tool`, `system`, `unknown`), as in `search`. It filters both lists |
 | `k_rrf`, `peso_fts` | 30, 1.5 | the fusion: the measured values. Changing them is an experiment, not a tuning |
-| `snippet_tokens` | 32 | length of the FTS snippet |
+| `snippet_tokens` | 64 | length of the FTS snippet (64 is also the FTS5 ceiling: above it, it truncates silently). It was 32 up to 0.64.4 |
+| `passaggio` | 0 | a number of words, up to 400: replaces the snippet with the window of that many words where the question's terms are densest, taken from the **whole** text (below) |
 | `riformulazioni` | none | up to 3 other ways of asking the question. Each one brings its own two lists, the fusion stays single and the `limit` the same (below). Empty ones and duplicates are dropped, more than 3 is an error; `query_fts` applies to the question only |
 
 With a filter (`speaker`, `since`, `until`) the vector branch asks the knn for more
 neighbours (10 times `limit` instead of 3), so that after the discards a real list
 is left to fuse. The filter applies **after** the knn: if nothing in the window is
 close to the question, the vector branch comes back empty and the answer is FTS5's.
+
+### Reading the point, not the start: snippet and passage (0.65.0)
+
+The same bench, with a second count, S: the element **can be read** in the snippet without
+opening the file (at least four consecutive words of a quote from the expected answer).
+
+| first 10 rows | voice notes (voce-1777) | Telegram group | 21 meeting records |
+|---|---|---|---|
+| 32-token snippet (the default up to 0.64.4) | 9 of 30 | 12 | 9 |
+| 64-token snippet (the default now) | 13 | 12 | 11 |
+| `passaggio=120` | 14 | 12 | 12 |
+| `passaggio=200` | 17 | 12 | 12 |
+| `passaggio=200`, `limit=20` | 20 | 16 | 14 |
+
+The gain is all on long texts: a Telegram message already fits whole in the snippet. The
+passage costs tokens, about 270 per row at 200 words: ask for it when reading voice notes,
+meeting records or long chats, not for every search.
 
 ### Reformulations, and what they are worth (0.64.0)
 
