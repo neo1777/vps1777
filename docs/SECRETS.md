@@ -42,6 +42,12 @@ docker compose restart gateway nb1777-mcp nb1777-bot   # < 2s downtime
 # I tuoi URL connector cambiano: rigenerali da claude.ai
 ```
 
+Più semplice: `./tools/rotate-secret.sh gateway_secret` fa tutto questo. Davanti a un
+terminale stampa il segreto nuovo e le due URL dei connettori; se l'output va altrove (un
+agente, una pipe, un log) li scrive in `~/.config/vps1777/gateway-secret-<data>.txt` (600) e
+stampa solo il percorso (H77): copiali su claude.ai, poi cancella il file. `deploy.sh` fa lo
+stesso a fine installazione (`RESULT_SECRET_FILE=` invece di `RESULT_SECRET=`).
+
 > **Perché tre servizi e non solo il gateway.** Dalla v0.30.0 il `gateway_secret`
 > non è più solo il namespace dell'URL: è **anche** il segreto con cui gateway e
 > bot si autenticano verso gli endpoint interni di `nb1777-mcp` (il profilo

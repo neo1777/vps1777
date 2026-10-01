@@ -119,6 +119,26 @@ consegna_password() {
   warn "  → è in $f (la legge solo il tuo utente): copiala in un password manager, poi cancella il file."
 }
 
+consegna_gateway_secret() {
+  # $1 = il segreto, $2 = l'URL pubblico (può mancare). Imposta GW_SEGRETO_MOSTRATO (il
+  # valore davanti a un terminale, altrimenti un rimando al file) e GW_SEGRETO_FILE.
+  local base="${2:-<URL>}"
+  if [ -t 1 ]; then
+    # shellcheck disable=SC2034  # le legge deploy.sh; rotate-secret.sh no (funzione identica)
+    GW_SEGRETO_MOSTRATO="$1" GW_SEGRETO_FILE=""
+    warn "GATEWAY_SECRET: ${C_B}$1${C_R}"
+    warn "  → connettori claude.ai: $base/$1/archive/mcp  e  $base/$1/nb1777/mcp"
+    return 0
+  fi
+  local dir="${XDG_CONFIG_HOME:-$HOME/.config}/vps1777" f
+  f="$dir/gateway-secret-$(date +%Y%m%d-%H%M%S).txt"
+  ( umask 077 && mkdir -p "$dir" && printf 'gateway_secret: %s\nconnettore archive1777: %s/%s/archive/mcp\nconnettore nb1777: %s/%s/nb1777/mcp\n' "$1" "$base" "$1" "$base" "$1" > "$f" )
+  # shellcheck disable=SC2034  # come sopra
+  GW_SEGRETO_MOSTRATO="<nel file $f>" GW_SEGRETO_FILE="$f"
+  warn "GATEWAY_SECRET: non lo stampo, l'output non va a un terminale (H77)."
+  warn "  → segreto e URL dei connettori sono in $f (lo legge solo il tuo utente)."
+}
+
 gen_pwd_local() {
   local p="" i=0
   while [ "$i" -lt 20 ]; do
@@ -1088,7 +1108,18 @@ GATEWAY_SECRET=$(SSH "sudo -u $OPERATOR_USER cat $REMOTE_DIR/secrets/gateway_sec
 # installer/engine.py); restano per chi automatizza deploy.sh. La password admin NON c'è
 # più (H75): chi legge questo output è spesso un programma, e il chiaro finiva nei log.
 echo "RESULT_URL=${PUBLIC_BASE:-http://$VPS_IP:8080}"
-echo "RESULT_SECRET=$GATEWAY_SECRET"
+# H77: il segreto si consegna come la password di H75. Fuori da un terminale la riga
+# diventa RESULT_SECRET_FILE (il file 600 col segreto e le URL dei connettori).
+if [ "$GATEWAY_SECRET" = "<SECRET>" ]; then
+  GW_SEGRETO_MOSTRATO="<SECRET>"; GW_SEGRETO_FILE=""
+else
+  consegna_gateway_secret "$GATEWAY_SECRET" "${PUBLIC_BASE:-http://$VPS_IP:8080}"
+fi
+if [ -n "$GW_SEGRETO_FILE" ]; then
+  echo "RESULT_SECRET_FILE=$GW_SEGRETO_FILE"
+else
+  echo "RESULT_SECRET=$GW_SEGRETO_MOSTRATO"
+fi
 echo "RESULT_ADMIN_EMAIL=$ADMIN_EMAIL"
 echo "RESULT_SETUP_URL=${PUBLIC_BASE:-http://$VPS_IP:8080}/admin/setup"
 echo "RESULT_INGRESS=$INGRESS"
@@ -1162,7 +1193,7 @@ ${C_B}${C_OK}╔═════════════════════�
      Attiva Tailscale e verifica il Funnel, imposta l'URL, riavvia i
      servizi. Stampa l'URL HTTPS finale.
 
-  4. ${C_B}Connector claude.ai${C_R}: <URL>/$GATEWAY_SECRET/archive/mcp  (e /nb1777/mcp)
+  4. ${C_B}Connector claude.ai${C_R}: <URL>/$GW_SEGRETO_MOSTRATO/archive/mcp  (e /nb1777/mcp)
 
   5. ${C_B}Verifica DA FUORI${C_R} — da questo PC, che è già fuori (dopo il passo 3,
      con l'URL HTTPS che \`--apply\` stampa; adesso l'URL è quello qui sotto):
