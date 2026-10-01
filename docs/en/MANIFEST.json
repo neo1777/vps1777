@@ -3,7 +3,7 @@
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "dd183e81ef165a21712ef34a93781414e8754def555efd990889adb9dc3b6ae2"
+      "sorgente_sha256": "594e9ac73142adea91e2c2e415f3948bc7eeef4390d66ac414cc69f0869ec61e"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
@@ -11,7 +11,7 @@
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
-      "sorgente_sha256": "4502a7d122ccd8fd2afb6b5d4ee77035d998c09b62cd78cdb715ab3c41892aa9"
+      "sorgente_sha256": "661787d259d99bf37c9c90c6edefe65c66a5d9b5aab89f89ee2567a989e467e1"
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
@@ -19,11 +19,11 @@
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",
-      "sorgente_sha256": "6b0002ebe608f79429012ba2217f224c4e4462f04b000767b0b04d7838cd0125"
+      "sorgente_sha256": "976e90e347aa077fbd79d1e891ad161879b8d6edacf38017b5b0ff54b9f01e3e"
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
-      "sorgente_sha256": "5c1915dba3f7ae5c47a7666701ebb35be148996c12dd9aa8640b0a7d44df46b8"
+      "sorgente_sha256": "9c9c25b1a5c4435c06423f15512e9dd5d12f175991f8122897e619e638e5b339"
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",

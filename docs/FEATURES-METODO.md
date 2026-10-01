@@ -104,7 +104,11 @@ migliore che il metodo tiene, non una postilla di comodo:
 - **È nel ledger, non a voce**: `update.auto-timer · status: active-default · since 0.38.0`,
   dichiarato *«il RIMPIAZZO sicuro di Watchtower»*. Il vecchio meccanismo non è cancellato ma
   **tenuto visibile col suo divieto**: `ops.autoupdate · opt-in legacy NON supportato`, così
-  l'avvertimento «non riaccenderlo» viaggia col profilo invece di sparire.
+  l'avvertimento «non riaccenderlo» viaggia col profilo invece di sparire. *(Così fino alla
+  0.66.0. Nella **0.67.0** Watchtower è stato tolto davvero, con le due mosse insieme che la
+  voce stessa chiedeva — file cancellato **e** `status: removed` — perché l'immagine è
+  archiviata a monte. Da lì, se il profilo `ops.autoupdate` ricomparisse in un compose, la
+  CI sarebbe rossa per `[STATO≠REALTÀ]`: il divieto è passato da una scritta a un controllo.)*
 - **Il verificatore ora sorveglia entrambe**: se domani il timer sparisse dal repo la CI
   diventerebbe rossa (ledger→realtà); se Watchtower rientrasse senza voce la CI lo pretenderebbe
   nel ledger (realtà→ledger). Il buco da cui questo doc è nato **non può più riaprirsi in silenzio.**

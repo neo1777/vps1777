@@ -335,13 +335,100 @@ def test_compose_cmd_reflects_declared_state():
     j = " ".join(v.compose_cmd(_repo_env("INGRESS_PROFILE=ingress.tailscale\n")))
     assert "compose.ops.backup.yaml" in j and "--profile ops.backup" in j
     assert "compose.ops.autoupdate.yaml" not in j
-    # watchtower (auto-update CRUDO) → il FILE giusto è ops.watchtower, il PROFILO ops.autoupdate
-    # (regressione: derivare il file dal profilo referenziava compose.ops.autoupdate.yaml, inesistente)
-    j = " ".join(v.compose_cmd(_repo_env("VPS1777_FEATURES=watchtower\n")))
-    assert "compose.ops.watchtower.yaml" in j and "--profile ops.autoupdate" in j
-    assert "compose.ops.autoupdate.yaml" not in j
     # none → nessun overlay ops
     assert not any("ops." in x for x in v.compose_cmd(_repo_env("VPS1777_FEATURES=none\n")))
+
+
+# ──────────── watchtower: feature TOLTA nella 0.67.0 (prima era il CONFLITTO) ─
+#
+# Fino alla 0.66.0 qui si provava che `watchtower` montasse il file giusto
+# (ops.watchtower) col profilo giusto (ops.autoupdate). La feature non c'è più, ma la
+# riga del `.env` sopravvive all'update: il presidio diventa «dichiarata → la CLI lo
+# DICE, la ignora, e non muore» — e il container rimasto lo toglie l'update.
+
+def test_watchtower_dichiarata_avvisa_una_volta_e_non_monta_niente(monkeypatch, capsys):
+    monkeypatch.setattr(v, "_rimosse_gia_dette", set())
+    repo = _repo_env("INGRESS_PROFILE=ingress.tailscale\nVPS1777_FEATURES=backup,watchtower\n")
+    cmd = v.compose_cmd(repo)          # non muore: l'update di quella macchina deve poter girare
+    j = " ".join(cmd)
+    assert "watchtower" not in j and "ops.autoupdate" not in j
+    assert "compose.ops.backup.yaml" in j        # le altre feature dichiarate restano
+    v.compose_cmd(repo)                # seconda costruzione nello stesso comando
+    (repo / "compose.yaml").write_text("services: {}\n")
+    sorgenti = v._compose_sorgenti(repo, repo)    # il pre-flight vede gli stessi file
+    assert not any("watchtower" in s.name for s in sorgenti)
+    out = capsys.readouterr().out
+    avvisi = [r for r in out.splitlines() if "RIMOSSA" in r]
+    assert len(avvisi) == 1, avvisi    # una volta per comando, non a ogni compose_cmd
+    assert "0.67.0" in avvisi[0] and "autoupdate" in avvisi[0] and "VPS1777_FEATURES" in avvisi[0]
+
+
+def test_watchtower_non_e_piu_un_overlay():
+    assert "watchtower" not in v.OPS_COMPOSE_FEATURES
+    assert v.FEATURE_RIMOSSE["watchtower"] == "0.67.0"
+    assert not (_ROOT / "compose.ops.watchtower.yaml").exists()
+    # chi toglie una feature deve dire anche cosa la sostituisce, o l'avviso è a metà
+    assert set(v.RIMPIAZZO_FEATURE) == set(v.FEATURE_RIMOSSE)
+
+
+def _docker_finto(monkeypatch, servizio: str | None, rm_rc: int = 0) -> list[list[str]]:
+    """`run` finto: `docker inspect` risponde col servizio compose del container
+    (None = il container non esiste); `docker rm` esce con `rm_rc`."""
+    fatti: list[list[str]] = []
+
+    class _R:
+        def __init__(self, rc: int, out: str = "", err: str = ""):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+
+    def run(cmd, **_kw):
+        fatti.append(cmd)
+        if cmd[:2] == ["docker", "inspect"]:
+            return _R(1, err="No such object") if servizio is None else _R(0, servizio + "\n")
+        if cmd[:2] == ["docker", "rm"]:
+            return _R(rm_rc, err="" if rm_rc == 0 else "permission denied")
+        raise AssertionError(f"comando inatteso: {cmd}")
+
+    monkeypatch.setattr(v, "run", run)
+    return fatti
+
+
+def test_watchtower_orfano_viene_fermato_e_rimosso(monkeypatch, capsys):
+    fatti = _docker_finto(monkeypatch, "watchtower")
+    assert v.rimuovi_watchtower_orfano() is True
+    assert ["docker", "rm", "-f", "vps1777-watchtower"] in fatti
+    assert "rimosso" in capsys.readouterr().out
+
+
+def test_senza_watchtower_non_si_tocca_niente(monkeypatch):
+    fatti = _docker_finto(monkeypatch, None)
+    assert v.rimuovi_watchtower_orfano() is False
+    assert not any(c[:2] == ["docker", "rm"] for c in fatti)
+
+
+def test_un_container_omonimo_non_nostro_non_si_cancella(monkeypatch, capsys):
+    fatti = _docker_finto(monkeypatch, "qualcos-altro")
+    assert v.rimuovi_watchtower_orfano() is False
+    assert not any(c[:2] == ["docker", "rm"] for c in fatti)
+    assert "non lo tocco" in capsys.readouterr().out
+
+
+def test_rimozione_fallita_non_ferma_l_update_ma_lo_dice(monkeypatch, capsys):
+    _docker_finto(monkeypatch, "watchtower", rm_rc=1)
+    assert v.rimuovi_watchtower_orfano() is False        # niente eccezione, niente die
+    out = capsys.readouterr().out
+    assert "docker rm -f vps1777-watchtower" in out and "permission denied" in out
+
+
+def test_l_update_toglie_watchtower_prima_del_down():
+    """Il punto della chiamata è metà della cura: dopo il punto di non ritorno (prima,
+    un update che abortisce deve poter dire «niente è stato toccato») e PRIMA del
+    `down` (finché il container è sulla rete `backend`, il `down` non la rimuove)."""
+    import inspect
+    src = inspect.getsource(v.cmd_update)
+    i_ritorno = src.index("PUNTO DI NON RITORNO")
+    i_rimuovi = src.index("rimuovi_watchtower_orfano()")
+    i_down = src.index('"down"]')
+    assert i_ritorno < i_rimuovi < i_down
 
 
 # ────────────── pre-flight dei segreti: il ROSSO del 20/07 (release 0.40.1) ──

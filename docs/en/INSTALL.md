@@ -98,8 +98,8 @@ If you re-run `setup.sh`, it skips the steps already done.
 ## Optional ops
 
 Baseline hardening (automatic: `unattended-upgrades` + `fail2ban`) and optional
-profiles — Portainer (visual dashboard), Watchtower (demoted), backup —
-are documented in [OPS.md](../OPS.md) (Italian).
+profiles — Portainer (visual dashboard), backup — are documented in
+[OPS.md](../OPS.md) (Italian).
 
 ## Updating
 
@@ -109,9 +109,10 @@ automatic backup first, pull with digest verification, migrations, health-gate,
 automatic rollback if the new version does not come back healthy. Full
 manual: [UPDATE.md](UPDATE.md).
 
-Watchtower (profile `ops.autoupdate`) is **demoted**: it remains opt-in but is not
-supported alongside the managed channel (it bypasses backup, migrations,
-health-gate and rollback) — see [OPS.md](../OPS.md) (Italian).
+Watchtower (profile `ops.autoupdate`) was **removed in 0.67.0**: it bypassed
+backup, migrations, health-gate and rollback, and its image is archived upstream.
+Automatic updating is the `autoupdate` feature, on by default. If you had it on,
+`vps1777 update` removes its container — see [OPS.md](../OPS.md) (Italian).
 
 ## Uninstalling
 

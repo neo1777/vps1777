@@ -49,8 +49,8 @@ def _esegui(tmp_path: Path, env: str | None, ingresso: str = "ingress.caddy",
     pytest.param("VPS1777_FEATURES=backup,portainer\n",
                  {"compose.ops.backup.yaml", "compose.ops.portainer.yaml"},
                  {"ops.backup", "ops.portainer"}, id="backup e portainer"),
-    pytest.param("VPS1777_FEATURES=watchtower\n", {"compose.ops.watchtower.yaml"}, {"ops.autoupdate"},
-                 id="watchtower: file e profilo diversi"),
+    pytest.param("VPS1777_FEATURES=backup,watchtower\n", {"compose.ops.backup.yaml"}, {"ops.backup"},
+                 id="watchtower (tolta nella 0.67.0): ignorata, le altre restano"),
     pytest.param("VPS1777_FEATURES=\n", set(), set(), id="valore vuoto: tutto spento"),
     pytest.param("VPS1777_FEATURES= backup , autoupdate\n", {"compose.ops.backup.yaml"}, {"ops.backup"},
                  id="spazi tolti come nella CLI"),
@@ -91,3 +91,34 @@ def test_caddy_dns01_fuori_posto_avvisa_e_non_monta(tmp_path, ingresso, con_toke
     files, _ = _esegui(tmp_path, "VPS1777_FEATURES=caddy-dns01\n", ingresso, avvisi)
     assert "compose.ops.caddy-dns01.yaml" not in files
     assert any("caddy-dns01" in a for a in avvisi), avvisi
+
+
+def test_watchtower_dichiarata_avvisa_e_non_monta(tmp_path):
+    """Tolta nella 0.67.0: una riga vecchia del .env la nomina ancora. setup.sh lo DICE
+    (come la CLI) invece di ignorarla in silenzio, e non cerca un overlay che non c'è."""
+    avvisi: list[str] = []
+    files, profili = _esegui(tmp_path, "VPS1777_FEATURES=watchtower\n", avvisi=avvisi)
+    assert not any("watchtower" in f for f in files) and "ops.autoupdate" not in profili
+    assert any("watchtower" in a and "0.67.0" in a and "autoupdate" in a for a in avvisi), avvisi
+
+
+@pytest.mark.parametrize("dichiarate, attese", [
+    ("backup,watchtower,autoupdate", "backup,autoupdate"),
+    ("watchtower,portainer", "portainer"),
+    ("watchtower", "none"),        # vuoto varrebbe «i default» qui e «tutto spento» nella CLI
+    ("backup,autoupdate", "backup,autoupdate"),
+])
+def test_deploy_toglie_watchtower_dal_valore_che_persiste(dichiarate, attese):
+    """deploy.sh SCRIVE $FEATURES nel .env della VPS: lì la feature tolta non deve
+    tornare. Si esegue il blocco vero, estratto dal file."""
+    righe = (RADICE / "deploy.sh").read_text(encoding="utf-8").splitlines()
+    inizio = next(i for i, r in enumerate(righe) if r.startswith("WATCHTOWER_DICHIARATA=0"))
+    fine = next(i for i, r in enumerate(righe[inizio:], inizio) if r.strip() == "esac")
+    script = (f'set -u; FEATURES="{dichiarate}"\nwarn() {{ printf "%s\\n" "$*" >&2; }}\n'
+              + "\n".join(righe[inizio:fine + 1]) + '\nprintf "%s %s" "$FEATURES" "$WATCHTOWER_DICHIARATA"')
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    valore, ricordata = r.stdout.split()
+    assert valore == attese
+    assert ricordata == ("1" if "watchtower" in dichiarate else "0")
+    assert ("0.67.0" in r.stderr) == ("watchtower" in dichiarate)

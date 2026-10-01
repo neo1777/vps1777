@@ -659,22 +659,37 @@ def ingress_profile(repo: Path) -> str:
 # del difetto per cui un reinstall O un update lasciava cadere gli opt-in in silenzio
 # (backup notturno sparito senza un errore). Mappa: feature dichiarata → profilo
 # compose. `autoupdate` NON è qui: è un timer systemd (vps1777-auto-update), non un
-# container. `watchtower` è l'auto-update CRUDO (declassato), alternativa INSICURA ad
-# `autoupdate` — supportato solo se dichiarato esplicitamente, e in conflitto con esso.
-# feature dichiarata → (suffisso del FILE compose, nome del PROFILO). Per watchtower
-# i due DIFFERISCONO: il file è compose.ops.watchtower.yaml ma il profilo è
-# ops.autoupdate — derivare il file dal profilo darebbe compose.ops.autoupdate.yaml
-# (inesistente). Backup/portainer: file e profilo coincidono.
-# `caddy-dns01` (01/10/2026) è il terzo caso: un overlay SENZA profilo proprio. Ridefinisce
+# container. `watchtower` NON è più qui (0.67.0): vedi FEATURE_RIMOSSE sotto.
+# feature dichiarata → (suffisso del FILE compose, nome del PROFILO). Per backup e
+# portainer file e profilo coincidono, ma la tupla resta: il caso in cui DIFFERIVANO
+# (watchtower: file ops.watchtower, profilo ops.autoupdate) ha già prodotto una volta
+# un riferimento a un compose.ops.autoupdate.yaml inesistente, e il prossimo overlay
+# può riaprirlo.
+# `caddy-dns01` (01/10/2026) è il caso senza profilo: un overlay SENZA profilo proprio. Ridefinisce
 # il servizio `caddy` dell'ingresso, che vive nel profilo `ingress.caddy` — già acceso da
 # INGRESS_PROFILE. Da qui il `None`: nessun `--profile` in più. Con un ingresso diverso
 # la combinazione non ha senso e la CLI la RIFIUTA (`_feature_incoerenti`).
 OPS_COMPOSE_FEATURES: dict[str, tuple[str, str | None]] = {
     "backup": ("ops.backup", "ops.backup"),
     "portainer": ("ops.portainer", "ops.portainer"),
-    "watchtower": ("ops.watchtower", "ops.autoupdate"),
     "caddy-dns01": ("ops.caddy-dns01", None),
 }
+# Feature TOLTE dal prodotto → la versione che le ha tolte. Una riga del `.env` scritta
+# quando la feature esisteva sopravvive all'update (il `.env` è preservato), quindi chi
+# la legge deve saperla RICONOSCERE: ignorarla in silenzio è il difetto per cui esiste
+# VPS1777_FEATURES (la riga dichiara una cosa che non succede), rifiutarla come
+# `caddy-dns01` fuori posto sarebbe peggio — fermerebbe ogni comando, compreso l'update
+# che la macchina deve poter continuare a fare. Quindi: si AVVISA e si ignora.
+# `watchtower` (01/10/2026, decisione di Neo): l'immagine containrrr/watchtower è
+# ARCHIVIATA a monte (repo archived dal 2025, ultima release v1.7.1 del 11/11/2023,
+# verificato con `gh api` il 01/10/2026) e la feature era già declassata dal 10/06.
+# Il container eventualmente rimasto acceso lo toglie `rimuovi_watchtower_orfano`.
+FEATURE_RIMOSSE: dict[str, str] = {"watchtower": "0.67.0"}
+# Il rimpiazzo, da dire nell'avviso: chi aveva la feature voleva QUELLA capacità.
+RIMPIAZZO_FEATURE = {"watchtower": "l'aggiornamento automatico sicuro è la feature "
+                                   "`autoupdate` (timer vps1777-auto-update: quarantena, "
+                                   "firme, digest, backup e rollback)"}
+_rimosse_gia_dette: set[str] = set()
 # feature → l'unico INGRESS_PROFILE con cui ha senso. Letta da `_feature_incoerenti`.
 FEATURE_SOLO_CON_INGRESSO = {"caddy-dns01": "ingress.caddy"}
 DEFAULT_FEATURES = {"backup", "autoupdate"}   # backup + auto-update SICURO accesi di default
@@ -723,7 +738,85 @@ def _overlay_feature(repo: Path) -> list[tuple[str, str | None]]:
     if motivo:
         die(motivo)
     feats = enabled_features(repo)
+    _avvisa_feature_rimosse(feats)
     return [v for feat, v in OPS_COMPOSE_FEATURES.items() if feat in feats]
+
+
+def _avvisa_feature_rimosse(feats: set[str]) -> None:
+    """Dice, UNA volta per comando, che una feature dichiarata nel `.env` non esiste più.
+
+    Una volta e non a ogni chiamata: `compose_cmd` si costruisce decine di volte per
+    comando (ps, exec, health-gate, …) e lo stesso avviso ripetuto venti volte si impara
+    a non leggerlo. Una volta per processo vuol dire una volta per `vps1777 <comando>` —
+    compreso ogni giro del timer, che finisce nel journal dove chi cerca lo trova."""
+    for feat in sorted(feats & FEATURE_RIMOSSE.keys() - _rimosse_gia_dette):
+        _rimosse_gia_dette.add(feat)
+        warn(f"VPS1777_FEATURES contiene `{feat}`: feature RIMOSSA nella "
+             f"{FEATURE_RIMOSSE[feat]} (immagine archiviata a monte, niente più patch). "
+             f"La ignoro. Togli `{feat}` da VPS1777_FEATURES nel .env; "
+             f"{RIMPIAZZO_FEATURE[feat]}.")
+
+
+# Il container dell'overlay tolto nella 0.67.0 (`container_name` del vecchio
+# compose.ops.watchtower.yaml) e il nome di servizio compose che lo identifica come nostro.
+WATCHTOWER_CONTAINER = "vps1777-watchtower"
+WATCHTOWER_SERVIZIO = "watchtower"
+
+
+def rimuovi_watchtower_orfano() -> bool:
+    """Ferma e rimuove il container Watchtower rimasto da prima della 0.67.0. True se
+    l'ha tolto.
+
+    🔴 PERCHÉ SERVE: togliere l'overlay dal compose NON spegne il container. Un compose
+    che non conosce più il servizio lo tratta da «orfano»: `up` lo lascia dov'è (stampa
+    solo «Found orphan containers»), e `restart: unless-stopped` lo riporta su a ogni
+    riavvio di dockerd. Resterebbe un container con il docker.sock montato — accesso
+    root all'host — su un'immagine che nessuno patcha più, fuori da qualunque controllo
+    di questo prodotto. Che oggi resti INERTE sui nostri (lavora in label-only, e i
+    container ricreati dalla 0.67.0 la label non l'hanno più) non lo rende innocuo: il
+    rischio è il socket, non quello che ci fa adesso. E finché è attaccato alla rete
+    `backend`, il `down` dell'update non riesce a rimuovere quella rete.
+    📌 MISURATO il 01/10/2026 (Compose v5.5.1, progetto usa-e-getta con un servizio in
+    un overlay tolto): `up` senza l'overlay → «Found orphan containers», container
+    ancora Up; `down` senza l'overlay → rc 0, container ancora Up, rete «Resource is
+    still in use». Nessuno dei due comandi lo tocca.
+
+    ⚠️ PERCHÉ NON `--remove-orphans` sull'`up`, che sembrerebbe la cura generale. Lo è
+    troppo: per compose è orfano OGNI container del progetto il cui servizio non sta
+    nei file passati — e i file li decide il `.env`. Chi ha tolto `backup` o `portainer`
+    da VPS1777_FEATURES, o ha cambiato INGRESS_PROFILE, si vedrebbe cancellare quei
+    container dal primo update senza averlo chiesto (📌 misurato nella stessa prova:
+    `up --remove-orphans` senza un overlay di feature ha rimosso anche quel container,
+    non solo il residuo; i servizi di profili SPENTI ma nei file passati, invece, li
+    lascia). Il prezzo è già stato pagato una
+    volta, al contrario: `tools/restore.sh` usa `down --remove-orphans` e per questo
+    deve ristampare il comando con le feature, o il backup notturno restava spento.
+    Qui serve togliere UN container, con un nome noto: lo si tocca per nome.
+
+    🔑 Si tocca solo se è DAVVERO il nostro: la label `com.docker.compose.service` deve
+    dire `watchtower`. Un container con lo stesso nome creato a mano da qualcun altro
+    non è cosa nostra da cancellare — lo si dice e lo si lascia.
+    Mai fatale: un update non deve morire per un residuo da togliere."""
+    res = run(["docker", "inspect", "--format",
+               '{{index .Config.Labels "com.docker.compose.service"}}', WATCHTOWER_CONTAINER],
+              capture=True, check=False)
+    if res.returncode != 0:
+        return False                       # non c'è: il caso normale
+    if res.stdout.strip() != WATCHTOWER_SERVIZIO:
+        warn(f"c'è un container `{WATCHTOWER_CONTAINER}` ma non è quello del vecchio overlay "
+             f"(servizio compose: {res.stdout.strip() or 'nessuno'}): non lo tocco")
+        return False
+    tolto = run(["docker", "rm", "-f", WATCHTOWER_CONTAINER], capture=True, check=False)
+    if tolto.returncode != 0:
+        warn(f"non sono riuscito a rimuovere `{WATCHTOWER_CONTAINER}` "
+             f"({tolto.stderr.strip()[:200]}): fallo a mano con "
+             f"`docker rm -f {WATCHTOWER_CONTAINER}` — ha il docker.sock montato e "
+             f"un'immagine archiviata a monte")
+        return False
+    log(f"container `{WATCHTOWER_CONTAINER}` fermato e rimosso: la feature watchtower è "
+        f"stata tolta nella {FEATURE_RIMOSSE['watchtower']}, e il container sarebbe "
+        f"rimasto acceso da solo, col docker.sock montato, fuori dal controllo del timer")
+    return True
 
 
 def assicura_webapp_secret(repo: Path) -> None:
@@ -2952,10 +3045,15 @@ def cmd_update(repo: Path, args) -> int:
             "richiede prima il cutover con `vps1777 bootstrap`")
     if not stack_running(repo):
         warn("lo stack non risulta in esecuzione — l'update lo avvierà comunque")
-    if run(["docker", "ps", "--filter", "name=vps1777-watchtower",
-            "--format", "{{.Names}}"], capture=True, check=False).stdout.strip():
-        warn("profilo ops.autoupdate (Watchtower) attivo: NON supportato insieme "
-             "al canale gestito — valuta di disattivarlo")
+    # Watchtower (tolto nella 0.67.0): qui si DICE soltanto. Toglierlo è dello step 11,
+    # dopo il punto di non ritorno: fino a lì l'update deve poter abortire lasciando
+    # «niente è stato toccato», e una rimozione al pre-flight smentirebbe quella frase.
+    # (`inspect` per nome ESATTO e non `ps --filter name=`, che è una regex parziale.)
+    if run(["docker", "inspect", "--format", "{{.Name}}", WATCHTOWER_CONTAINER],
+           capture=True, check=False).returncode == 0:
+        warn(f"container `{WATCHTOWER_CONTAINER}` presente: la feature è stata tolta nella "
+             f"{FEATURE_RIMOSSE['watchtower']} — l'update lo fermerà e lo rimuoverà "
+             f"(step 11)")
     free = shutil.disk_usage(str(repo)).free
     serve, perche = spazio_richiesto_update(repo)
     if free < serve:
@@ -3339,6 +3437,10 @@ def cmd_update(repo: Path, args) -> int:
 
     # 11 — stop
     step(11, "stop")
+    # PRIMA del `down`: finché Watchtower è attaccato alla rete `backend`, il `down` non
+    # può rimuoverla. Qui e non nel rollback: un rollback riporta i file vecchi ma la CLI
+    # resta questa, che la feature non la monta più — rimetterlo su non è un'opzione.
+    rimuovi_watchtower_orfano()
     run([*compose_cmd(repo), "down"], check=False, env=env_new)
 
     # 12 — migrazioni

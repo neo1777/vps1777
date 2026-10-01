@@ -106,7 +106,8 @@ firma/digest + migrazioni + health-gate 180s + **rollback automatico**):
 > **Sicuro** vuol dire una cosa precisa: ogni applicazione fa **backup + snapshot** prima,
 > verifica la **firma cosign** e il **digest**, applica le **migrazioni**, e se lo stack non
 > torna in salute entro 180s fa **rollback automatico** ripristinando i dati. È la differenza
-> con Watchtower (sotto): l'auto-update sicuro NON è "pulla e riavvia e speriamo".
+> con Watchtower (rimosso nella 0.67.0, vedi sotto): l'auto-update sicuro NON è "pulla e
+> riavvia e speriamo".
 
 > **Default dichiarato, non ricordato.** L'auto-update sicuro è ON di default perché
 > `autoupdate` è in `VPS1777_FEATURES` (`.env`). Un reinstall lo **riproduce** — non
@@ -129,7 +130,7 @@ docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
 ```
 
 > **Immagini di terzi — digest-pinnate.** Le immagini non-vps1777 usate nei compose
-> (`alpine` per `ops.backup`, `caddy`, `cloudflared`, `portainer`, `watchtower`)
+> (`alpine` per `ops.backup`, `caddy`, `cloudflared`, `portainer`)
 > sono **pinnate al digest** (`tag@sha256:…`) e tracciate da **Dependabot** (v0.27.0):
 > l'aggiornamento arriva come PR verificabile, non come un `latest` che cambia sotto
 > i piedi.
@@ -153,24 +154,24 @@ container, stack, log e volumi.
   Portainer è un tool admin separato e locale. Sta su rete `backend` (internal,
   nessun egress).
 
-### `ops.autoupdate` — Watchtower (legacy, opt-in, **NON usare**)
+### Watchtower — **rimosso nella 0.67.0**
 
-[Watchtower](https://containrrr.dev/watchtower/) fa auto-pull + restart dei container quando
-cambia un tag (modalità **label-only**: tocca solo i container opt-in — gateway, archive-mcp,
-nb1777-mcp, nb1777-bot). **Fu l'auto-update d'origine, declassato il 10/06/2026** perché
-**bypassa tutta la rete di sicurezza**: niente backup, niente migrazioni, niente health-gate,
-niente rollback, niente changelog. Il suo posto è ora dell'**auto-update sicuro** (il timer sopra).
+Watchtower (profilo `ops.autoupdate`, con un overlay suo) fu l'auto-update d'origine:
+pullava e riavviava i container a ogni tag nuovo, **senza** backup, migrazioni, health-gate
+né rollback. Declassato il 10/06/2026, è stato **tolto nella 0.67.0**: l'immagine
+`containrrr/watchtower` è archiviata a monte (ultima release v1.7.1, novembre 2023) e
+montava il Docker socket, cioè accesso root all'host, su un'immagine che nessuno patcha più.
+Il suo posto è dell'**auto-update sicuro** (il timer sopra), acceso di default.
 
-> ⚠️ **Resta come profilo opt-in solo per compatibilità, ma è NON supportato e sconsigliato.**
-> Se lo attivi, `vps1777 update` ti avvisa che è in esecuzione e che confligge col canale
-> gestito. **Non attivarlo:** riaccenderlo rifà l'errore che il declassamento del 10/06 ha
-> corretto. Se ti serve l'auto-update, è già attivo di default in forma sicura — non serve
-> Watchtower.
+**Se l'avevi attivo:**
 
-```bash
-# solo se sai esattamente perché lo vuoi (e accetti di perdere backup/rollback):
-docker compose ... -f compose.ops.watchtower.yaml --profile ops.autoupdate up -d
-```
+- `vps1777 update` alla 0.67.0 **ferma e rimuove** il container `vps1777-watchtower`
+  (lo dice nel log, allo step 11). Non serve fare niente prima.
+- Se in `.env` c'è ancora `watchtower` dentro `VPS1777_FEATURES`, ogni comando della CLI
+  te lo ricorda e la ignora: **toglila** dalla riga. Se volevi l'aggiornamento automatico,
+  lascia (o metti) `autoupdate`.
+- Hai aggiornato senza la CLI e il container è ancora su? `docker ps -a --filter
+  name=vps1777-watchtower`, poi `docker rm -f vps1777-watchtower`.
 
 ### `ops.backup` — backup volumi age-encrypted
 

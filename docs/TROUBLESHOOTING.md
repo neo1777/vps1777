@@ -281,7 +281,7 @@ arriva l'avviso di fallimento su Telegram. Se lo vedi in uno script tuo, 75 vuol
 Causa: i servizi di `compose.yaml` (gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr,
 e il job `indice-notturno`) girano col rootfs in sola lettura. nb1777-mcp dalla
 0.58.0 (`H43`), gli altri da prima. I container degli overlay — caddy, cloudflared,
-backup, portainer, watchtower — **no**: lì `docker cp` funziona. Verso un container in
+backup, portainer — **no**: lì `docker cp` funziona. Verso un container in
 sola lettura `docker cp` rifiuta di scrivere, anche in `/tmp`, che è una tmpfs. Scrive
 solo dentro un volume montato (per esempio `/var/lib/archive/db` del gateway).
 

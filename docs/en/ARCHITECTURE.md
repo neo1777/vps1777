@@ -193,8 +193,8 @@ the summary, there the register that CI verifies.
 - OAuth 2.1 + DCR + PKCE; JWTs with separate `typ` values (`access` ≠ `admin_cookie` ≠ miniapp).
 - `GATEWAY_SECRET` as the path-namespace of the MCP proxy.
 - Stack services non-root, `cap_drop: ALL`, `no-new-privileges`. The operational
-  overlays are exceptions and say so: `backup` and `watchtower` run without these
-  options, `portainer` has only `no-new-privileges` (and the Docker socket: it is root
+  overlays are exceptions and say so: `backup` runs without these options
+  (`watchtower` was the second case, removed in 0.67.0), `portainer` has only `no-new-privileges` (and the Docker socket: it is root
   access to the host, which is why it is an opt-in profile on loopback).
 - Gateway **without** `docker.sock`; of the host it sees only the `onboarding/` folder
   (bind-mount, where the update's intent and status go through). It sees the 5 Docker

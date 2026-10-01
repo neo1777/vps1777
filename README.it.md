@@ -216,7 +216,7 @@ colpo d'occhio:
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Flussi, contratti, security model |
 | [PLUGINS.md](docs/PLUGINS.md) | Aggiungere un tuo MCP o bot |
 | [SECRETS.md](docs/SECRETS.md) | Gestione, rotation e backup dei secret |
-| [OPS.md](docs/OPS.md) | Hardening + profili opzionali (Portainer, Watchtower, backup) |
+| [OPS.md](docs/OPS.md) | Hardening + profili opzionali (Portainer, backup) |
 | [UPDATE.md](docs/UPDATE.md) | Aggiornamenti: `vps1777 update`, pulsante admin, rollback |
 | [ARCHIVE.md](docs/ARCHIVE.md) | Archivio di ricerca: pagina `/admin/archive`, formati, il bundle di Recupero Sessioni (`recupero/`, tabelle `sessioni`/`archi`/`memorie`), i 15 tool MCP, sessioni e stirpi, ingest via NotebookLM |
 | [RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md) | Ricerca ibrida per senso: il modello, l'indice vettoriale, il suo costruttore, l'aggiornamento incrementale |

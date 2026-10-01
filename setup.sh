@@ -449,11 +449,15 @@ COMPOSE_FILES=("-f" "compose.yaml" "-f" "compose.${INGRESS_PROFILE}.yaml")
 # le assegnazioni FEATURES= per provare il calcolo con valori imposti.)
 FEATURES="$({ grep -q '^VPS1777_FEATURES=' .env 2>/dev/null && sed -n 's/^VPS1777_FEATURES=//p' .env | tail -1 | tr -d '[:blank:]'; } || printf 'backup,autoupdate')"
 # feature → overlay e profilo: la stessa mappa di deploy.sh e di OPS_COMPOSE_FEATURES
-# (tools/vps1777.py). watchtower ha file e profilo DIVERSI (ops.watchtower / ops.autoupdate).
+# (tools/vps1777.py).
 OPS_PROFILI=()
 case ",$FEATURES," in *,backup,*)     COMPOSE_FILES+=("-f" "compose.ops.backup.yaml");     OPS_PROFILI+=("--profile" "ops.backup");;     esac
 case ",$FEATURES," in *,portainer,*)  COMPOSE_FILES+=("-f" "compose.ops.portainer.yaml");  OPS_PROFILI+=("--profile" "ops.portainer");;  esac
-case ",$FEATURES," in *,watchtower,*) COMPOSE_FILES+=("-f" "compose.ops.watchtower.yaml"); OPS_PROFILI+=("--profile" "ops.autoupdate");; esac
+# watchtower: TOLTA nella 0.67.0 (immagine archiviata a monte). Una riga vecchia del .env
+# la può ancora dichiarare: si DICE e si ignora, come fa la CLI (FEATURE_RIMOSSE).
+case ",$FEATURES," in *,watchtower,*)
+  warn "VPS1777_FEATURES contiene watchtower: feature RIMOSSA nella 0.67.0 (immagine archiviata a monte). La ignoro. Toglila dal .env; l'aggiornamento automatico sicuro è la feature autoupdate (timer vps1777-auto-update). Se un container vps1777-watchtower è ancora su: docker rm -f vps1777-watchtower";;
+esac
 # caddy-dns01 (01/10/2026): overlay SENZA profilo proprio — ridefinisce il servizio `caddy`,
 # che vive nel profilo dell'ingresso. Ha senso solo con ingress.caddy: con un altro ingresso
 # si AVVISA e si prosegue senza (la CLI invece rifiuta: lì lo stack esiste già, qui sta

@@ -906,9 +906,19 @@ FEATURES="$(printf '%s' "$FEATURES" | tr -d '[:blank:]')"
 OPS_FILES=""; OPS_PROFILES=""
 case ",$FEATURES," in *,backup,*)     OPS_FILES="$OPS_FILES -f compose.ops.backup.yaml";    OPS_PROFILES="$OPS_PROFILES --profile ops.backup";;    esac
 case ",$FEATURES," in *,portainer,*)  OPS_FILES="$OPS_FILES -f compose.ops.portainer.yaml"; OPS_PROFILES="$OPS_PROFILES --profile ops.portainer";; esac
-# watchtower = auto-update CRUDO (declassato): supportato solo se dichiarato esplicito,
-# ed è in CONFLITTO con l'auto-update sicuro (la CLI avvisa). Il default NON lo include.
-case ",$FEATURES," in *,watchtower,*) OPS_FILES="$OPS_FILES -f compose.ops.watchtower.yaml"; OPS_PROFILES="$OPS_PROFILES --profile ops.autoupdate";; esac
+# watchtower: TOLTA nella 0.67.0 (immagine archiviata a monte). Qui, a differenza di
+# setup.sh, la si toglie anche dal valore: le righe sotto PERSISTONO $FEATURES nel .env
+# della VPS, e scriverci una feature che non esiste più sarebbe dichiarare il falso.
+# WATCHTOWER_DICHIARATA tiene la memoria per il referto finale.
+WATCHTOWER_DICHIARATA=0
+case ",$FEATURES," in *,watchtower,*)
+  WATCHTOWER_DICHIARATA=1
+  FEATURES="$(printf '%s' ",$FEATURES," | sed 's/,watchtower,/,/g; s/^,//; s/,$//')"
+  # Se era l'unica, il valore resta VUOTO — e vuoto qui vale «i default» (`:-` sopra),
+  # nella CLI «tutto spento»: `none` è la forma che i due leggono allo stesso modo.
+  [ -n "$FEATURES" ] || FEATURES=none
+  warn "VPS1777_FEATURES conteneva watchtower: feature RIMOSSA nella 0.67.0 (immagine archiviata a monte). La ignoro e non la riscrivo nel .env della VPS. L'aggiornamento automatico sicuro è la feature autoupdate (timer vps1777-auto-update).";;
+esac
 # caddy-dns01 (01/10/2026): overlay SENZA profilo proprio — ridefinisce il servizio `caddy`
 # del profilo ingress.caddy. Con un altro ingresso si AVVISA e si prosegue senza (la CLI
 # invece rifiuta). Il token questo installer non lo chiede: se sulla VPS non c'è già,
@@ -1152,7 +1162,7 @@ _feat() { case ",${FEATURES:-}," in *",$1,"*) printf ON;; *) printf OFF;; esac; 
 printf '\n%b\n' "${C_B}  ═══ FEATURE (stato dichiarato — riprodotto da ogni reinstall, update e rollback) ═══${C_R}"
 printf '    backup notturno    : %s\n' "$(_feat backup)"
 printf '    auto-update sicuro : %s%s\n' "$(_feat autoupdate)" \
-  "$(case ",${FEATURES:-}," in *,watchtower,*) printf '  (⚠ watchtower CRUDO anche attivo — CONFLITTO)';; esac)"
+  "$([ "${WATCHTOWER_DICHIARATA:-0}" = 1 ] && printf '  (⚠ watchtower era dichiarata: rimossa nella 0.67.0, ignorata)')"
 printf '    portainer          : %s\n' "$(_feat portainer)"
 printf '    chiave age (backup): %s\n' "${AGE_STATE:-n/d}"
 # L'ESITO DEL PASSO 7 STA QUI, accanto alle feature, per la stessa ragione scritta
