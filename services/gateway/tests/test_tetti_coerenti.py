@@ -40,6 +40,10 @@ _CADDYFILE = _RADICE / "ingress" / "Caddyfile"
 #   discriminante invece di crederci sulla parola):
 #       max_size 1KB · body  990 byte → HTTP 200
 #       max_size 1KB · body 1010 byte → HTTP 413    ⇒ 1KB = 1000, non 1024
+#   RIMISURATO il 01/10/2026 passando a caddy:2.11-alpine (2.11.4), stessa prova con un
+#   reverse_proxy davanti (un `respond` non legge il corpo e non fa scattare il tetto),
+#   sulle due immagini fianco a fianco: 990→200 · 1000→200 · 1001→413 · 1010→413 ·
+#   1024→413, identiche. 1KB = 1000 anche su 2.11.
 #   ⇒ `5GB` sono 5·10⁹ = 5.000.000.000, mentre `MAX_UPLOAD_BYTES` è 4·2³⁰ =
 #     4.294.967.296. Il margine REALE è 705.032.704 byte ≈ 672 MiB, non «1 GB» come
 #     verrebbe da leggere. La prima versione di questo file mappava `gb → 1024³` e
@@ -185,7 +189,7 @@ def test_i_valori_letti_sono_quelli_attesi_oggi():
 
 # ─────────────────────── l'ancora della misura ───────────────────────
 # 🔴 RILIEVO DI abdd732a sulla #123, curato qui: `_UNITA` non è una verità di Caddy,
-#   è il risultato di UNA misura fatta su UNA immagine — `caddy:2.8-alpine` al digest
+#   è il risultato di UNA misura fatta su UNA immagine — `caddy:2.11-alpine` al digest
 #   pinnato in compose.ingress.caddy.yaml. Finché quel digest non cambia la tabella non
 #   può invecchiare. Ma i tre test sopra DERIVANO TUTTI da `_UNITA`: se l'immagine cambia
 #   e le unità con lei, restano tutti e tre VERDI dichiarando un margine falso.
@@ -194,7 +198,7 @@ def test_i_valori_letti_sono_quelli_attesi_oggi():
 # ⏰ E non è un rischio remoto: `.github/dependabot.yml` ha `package-ecosystem:
 #   docker-compose` su `/` — quel digest lo bumpa un giro AUTOMATICO, settimanale.
 #   Senza questo test la finestra fra il bump e l'accorgersene è indefinita.
-_DIGEST_MISURATO = "sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17"
+_DIGEST_MISURATO = "sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b"
 _COMPOSE_CADDY = _RADICE / "compose.ingress.caddy.yaml"
 
 

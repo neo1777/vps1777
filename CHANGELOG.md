@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **L'ingresso Caddy passa da 2.8 a 2.11.4** (`caddy:2.11-alpine`, fissata per digest). La
+  linea 2.8 non riceveva più aggiornamenti: Dependabot avanza solo il digest dello stesso
+  tag, e sulle immagini dei compose non ha mai aperto una PR (rilievo a parte). Verificato
+  prima del salto: il Caddyfile del repo è valido su tutte e due le versioni, con gli stessi
+  avvisi; e le unità di `max_size`, su cui `test_tetti_coerenti` ancora il margine
+  dell'upload, sono rimisurate fianco a fianco (1000 byte → 200, 1001 → 413 su entrambe:
+  1KB = 1000). È anche la linea su cui si costruisce il plugin DNS di Cloudflare, che su
+  2.8 non compila.
+
 ## [0.65.0] — 2026-10-01
 
 **`search_ibrida` fa leggere il punto, non l'inizio**: snippet a 64 token e il parametro
