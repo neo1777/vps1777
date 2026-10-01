@@ -4,6 +4,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **Le immagini di terzi negli overlay compose le aggiorna Renovate, non più Dependabot.**
+  Il blocco `docker-compose` di Dependabot non ha mai lavorato: la sua regex dei file
+  (letta sul codice di dependabot-core) ammette un solo segmento dopo «compose.», e le
+  immagini di terzi stanno tutte in `compose.ingress.*.yaml` e `compose.ops.*.yaml`. Per
+  questo Caddy era fermo a 2.8 e cloudflared a una versione che non leggeva il suo token.
+  `.github/renovate.json` abilita il solo gestore `docker-compose`, solo sugli overlay, con
+  i digest fissati e le immagini `vps1777-*` escluse: le PR passano dalla CI obbligatoria
+  e si uniscono a mano. Validato con `renovate-config-validator --strict`.
+  `test_renovate_vede_gli_overlay` fa diventare rossa la CI se un overlay nuovo con
+  un'immagine di terzi resta fuori dal pattern. Il resto (Actions, basi dei Dockerfile,
+  uv) resta a Dependabot. Serve l'app Renovate installata sul repo.
+
 ## [0.66.0] — 2026-10-01
 
 **DNS-01 per Caddy, davvero**: la feature `caddy-dns01` con un'immagine costruita e

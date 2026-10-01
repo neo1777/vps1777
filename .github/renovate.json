@@ -1,0 +1,34 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Renovate qui ha UN solo compito: le immagini di TERZI negli overlay compose (Caddy, cloudflared, alpine del backup, Portainer).",
+    "Perché non Dependabot (verificato il 01/10/2026 sul codice di dependabot-core): la sua regex dei file compose ammette un solo segmento dopo «compose.», quindi non ha MAI visto compose.ingress.*.yaml né compose.ops.*.yaml. Caddy era fermo a 2.8 e cloudflared a 2024.12.0, che non leggeva il suo token.",
+    "Il resto resta a Dependabot (.github/dependabot.yml): Actions, basi dei Dockerfile, uv. Le nostre immagini vps1777-* le versiona il rilascio, non un bot.",
+    "Le PR passano dalla CI obbligatoria e si uniscono a mano. Una PR su Caddy fa diventare rosso test_tetti_coerenti di proposito: le unità di max_size vanno rimisurate sull'immagine nuova (vedi il test)."
+  ],
+  "enabledManagers": [
+    "docker-compose"
+  ],
+  "docker-compose": {
+    "managerFilePatterns": [
+      "/(^|/)compose\\.(ingress|ops)\\.[^/]+\\.ya?ml$/"
+    ]
+  },
+  "pinDigests": true,
+  "dependencyDashboard": false,
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "timezone": "Europe/Rome",
+  "commitMessagePrefix": "build(compose):",
+  "prConcurrentLimit": 5,
+  "packageRules": [
+    {
+      "description": "Le nostre immagini: versionate dal release-flow e verificate contro images.lock, non da un bot.",
+      "matchPackageNames": [
+        "ghcr.io/neo1777/**"
+      ],
+      "enabled": false
+    }
+  ]
+}

@@ -287,9 +287,13 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   `--no-require-cosign`. (Prima la verifica era opt-in e saltata in silenzio.)
 - **GitHub Actions pinnate a SHA** (`v0.27.0`). Ogni action è pinnata al commit
   SHA (non al tag mobile): un tag ripuntato a monte non può iniettare codice (`H65`).
-  `Dependabot` (github-actions + docker + docker-compose, e `uv` per i lock dei cinque
-  servizi) tiene freschi gli SHA, i digest e le dipendenze. Permessi `least-privilege` per-job in `release.yml`. Le immagini di
-  terzi nei compose sono digest-pinnate (`H66`).
+  `Dependabot` (github-actions + docker + `uv` per i lock dei servizi) tiene freschi gli
+  SHA, i digest e le dipendenze. Permessi `least-privilege` per-job in `release.yml`. Le
+  immagini di terzi nei compose sono digest-pinnate (`H66`) e le aggiorna **Renovate**
+  (`.github/renovate.json`, dalla 0.67.0): il blocco `docker-compose` di Dependabot non le
+  ha mai viste, perché la sua regex ammette un solo segmento dopo «compose.» e gli overlay
+  sono `compose.ingress.*`/`compose.ops.*`. Caddy era fermo a 2.8 e cloudflared a una
+  versione che non leggeva il token. Un test tiene coperto ogni overlay.
 - **Immagini base fissate col digest** (`v0.61.0`, Scorecard Pinned-Dependencies):
   `FROM python:3.12-slim@sha256:…` e `COPY --from=ghcr.io/astral-sh/uv:0.5.18@sha256:…`
   nei cinque servizi. La base fresca non arriva più «da sola» a ogni build: arriva con la
