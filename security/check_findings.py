@@ -150,8 +150,8 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 1 (H75, medium, 28/09) = 75. Dalla misura di H74 sugli snippet veri: una password
 # admin stampata da setup.sh era nell'archivio. Non un buco della redazione, ma di chi
 # stampa: l'output di uno script lanciato da un agente è un transcript, e si ingerisce.
-EXPECTED_TOTAL = 76
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 43, "low": 19}
+EXPECTED_TOTAL = 77
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 44, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

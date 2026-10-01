@@ -52,6 +52,26 @@ consegna_password() {
   warn "  → è in $f (la legge solo il tuo utente): copiala in un password manager, poi cancella il file."
 }
 
+consegna_gateway_secret() {
+  # $1 = il segreto, $2 = l'URL pubblico (può mancare). Imposta GW_SEGRETO_MOSTRATO (il
+  # valore davanti a un terminale, altrimenti un rimando al file) e GW_SEGRETO_FILE.
+  local base="${2:-<URL>}"
+  if [ -t 1 ]; then
+    # shellcheck disable=SC2034  # le legge deploy.sh; rotate-secret.sh no (funzione identica)
+    GW_SEGRETO_MOSTRATO="$1" GW_SEGRETO_FILE=""
+    warn "GATEWAY_SECRET: ${C_B}$1${C_R}"
+    warn "  → connettori claude.ai: $base/$1/archive/mcp  e  $base/$1/nb1777/mcp"
+    return 0
+  fi
+  local dir="${XDG_CONFIG_HOME:-$HOME/.config}/vps1777" f
+  f="$dir/gateway-secret-$(date +%Y%m%d-%H%M%S).txt"
+  ( umask 077 && mkdir -p "$dir" && printf 'gateway_secret: %s\nconnettore archive1777: %s/%s/archive/mcp\nconnettore nb1777: %s/%s/nb1777/mcp\n' "$1" "$base" "$1" "$base" "$1" > "$f" )
+  # shellcheck disable=SC2034  # come sopra
+  GW_SEGRETO_MOSTRATO="<nel file $f>" GW_SEGRETO_FILE="$f"
+  warn "GATEWAY_SECRET: non lo stampo, l'output non va a un terminale (H77)."
+  warn "  → segreto e URL dei connettori sono in $f (lo legge solo il tuo utente)."
+}
+
 pw_weak_reason() {
   local pw="$1" classes=0
   if [ "${#pw}" -lt 16 ]; then echo "troppo corta (min 16 caratteri)"; return 1; fi
@@ -95,7 +115,8 @@ case "$WHICH" in
     NEW=$(gen_random 24)
     echo -n "$NEW" > "$FILE"
     chmod 600 "$FILE"
-    ok "Nuovo gateway_secret: $NEW"
+    # H77: mai `ok "Nuovo gateway_secret: …"` — lanciato da un agente finiva nel transcript.
+    consegna_gateway_secret "$NEW" "$(sed -n 's/^PUBLIC_BASE=//p' .env 2>/dev/null | tr -d "\"'")"
     # Il gateway_secret NON è solo il namespace dell'URL: dalla v0.30.0 (H6) è
     # anche il segreto del canale interno gateway/bot → nb1777-mcp (il profilo
     # NotebookLM). Riavviare il solo gateway lascerebbe nb1777-mcp e il bot col

@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Il gateway_secret si consegna come la password admin (H77).** `rotate-secret.sh
+  gateway_secret` stampava `Nuovo gateway_secret: <valore>`, e `deploy.sh` stampava
+  `RESULT_SECRET=<valore>` e l'URL del connettore col segreto dentro: davanti a un agente
+  finivano nel transcript, e da lì nell'archivio (è la radice di H76). Ora una funzione
+  `consegna_gateway_secret`, identica nei due script, stampa davanti a un terminale e
+  altrimenti scrive segreto e URL dei connettori in `~/.config/vps1777/gateway-secret-<data>.txt`
+  (600), stampando solo il percorso. Fuori da un terminale `deploy.sh` emette
+  `RESULT_SECRET_FILE=` invece di `RESULT_SECRET=`: chi automatizza `deploy.sh` legge il file.
+  Misurato sulla VPS: dei 5 segreti in uso solo il gateway_secret compare in chiaro
+  nell'archivio (2 righe in 2 DB).
+
 ## [0.64.3] — 2026-09-30
 
 **Due code della redazione di H76**: l'URL del connettore senza schema non esce più, e le

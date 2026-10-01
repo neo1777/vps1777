@@ -3738,3 +3738,54 @@ findings:
         output: "34 passed"
         exit: 0
         quando: "2026-09-30"
+  - id: H77
+    severity: medium
+    title: "rotate-secret.sh e deploy.sh stampavano il gateway_secret anche quando l'output non andava a un terminale: davanti a un agente il segreto nuovo finiva nel transcript, e da lì nell'archivio"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-10-01"
+      come: misura
+      nota: >
+        Preparando la rotazione del gateway_secret trapelato (H76), lanciata da un agente:
+        `rotate-secret.sh gateway_secret` scriveva `Nuovo gateway_secret: <valore>` sullo
+        stdout, cioè il segreto NUOVO sarebbe finito nel transcript la sera stessa della
+        rotazione. È la stessa radice di H76: le righe RESULT_SECRET e l'URL del connettore
+        di deploy.sh. Sulla VPS, dei 5 segreti in uso solo il gateway_secret compare in
+        chiaro nell'archivio (2 righe in 2 DB; conteggio senza valori).
+    since: unreleased
+    why: >
+      H75 aveva curato la password admin con consegna_password; il gateway_secret ha lo
+      stesso destino (va dato una volta a chi installa o ruota) ma era rimasto alla stampa
+      diretta, in due script. Davanti a un terminale va bene; davanti a un agente diventa
+      una copia in chiaro nei transcript e nell'archivio.
+    evidence:
+      - file: tools/tests/test_gateway_secret_non_stampato.py
+        contains:
+          - "def test_fuori_dal_terminale_il_segreto_va_in_un_file_600_con_le_url("
+          - "def test_nessuno_script_stampa_il_segreto_fuori_dalla_funzione("
+      - file: tools/rotate-secret.sh
+        contains:
+          - "consegna_gateway_secret() {"
+      - file: deploy.sh
+        contains:
+          - "consegna_gateway_secret() {"
+          - "RESULT_SECRET_FILE="
+    fix: >
+      Una funzione consegna_gateway_secret, identica nei due script (un test la tiene
+      identica): davanti a un terminale stampa il segreto e le due URL dei connettori;
+      altrimenti li scrive in ~/.config/vps1777/gateway-secret-<data>.txt (600) e stampa
+      solo il percorso. In deploy.sh la riga machine-readable diventa RESULT_SECRET_FILE
+      fuori da un terminale, e il riepilogo non interpola più il valore. L'installer
+      grafico resta fuori, come in H75: lì l'output è la sua pagina.
+    prova:
+      - comando: "uvx pytest tools/tests/test_gateway_secret_non_stampato.py -q"
+        dove: "banco locale, senza la cura"
+        output: "3 failed"
+        exit: 1
+        quando: "2026-10-01"
+      - comando: "uvx pytest tools/tests/test_gateway_secret_non_stampato.py -q"
+        dove: "banco locale, con la cura"
+        output: "3 passed"
+        exit: 0
+        quando: "2026-10-01"
