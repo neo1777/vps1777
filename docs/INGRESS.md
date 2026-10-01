@@ -70,34 +70,72 @@ da solo (`tailscale status`) e imposta `PUBLIC_BASE`.
 
 Caddy fa cert ACME via HTTP-01 al primo avvio.
 
-**Setup DNS-01 (senza porta 80) — oggi NON è predisposto.**
+**Setup DNS-01 (certificato senza porta 80, o wildcard) — feature `caddy-dns01`**
 
-Il repo ne ha solo gli accenni, e nessuno dei pezzi è collegato:
+Con HTTP-01 Let's Encrypt chiama la tua porta 80. Con DNS-01 Caddy dimostra il possesso del
+dominio scrivendo un record TXT nella zona, via API del provider DNS: la porta 80 non serve
+più al certificato (e diventa possibile un certificato wildcard). Il provider supportato è
+**Cloudflare**: il DNS della zona deve stare lì.
 
-- `ingress/Caddyfile` porta la riga `acme_dns cloudflare {env.CF_API_TOKEN}`, **commentata**;
-- `compose.ingress.caddy.yaml` usa l'immagine `caddy:2.11-alpine` di serie (senza plugin
-  DNS) e al container passa **solo** `CADDY_DOMAIN` e `CADDY_EMAIL`: `CF_API_TOKEN` **non
-  arriva** a Caddy, e nessun file lo legge da `secrets/`;
-- l'override «compose.ingress.caddy-dns01.yaml» che il commento in testa a quel file
-  nomina **non esiste**.
+È una feature dichiarata, spenta di default, e vale **solo con `INGRESS_PROFILE=ingress.caddy`**:
+non è un quarto ingresso, è un altro modo di ottenere il certificato per lo stesso Caddy.
 
-Per farlo a mano servono tre cose: un'immagine Caddy con il plugin del provider (esempio
-Cloudflare sotto), un override compose che la usi e passi `CF_API_TOKEN` nell'ambiente
-del servizio `caddy`, e la riga `acme_dns` scommentata nel `Caddyfile`.
+1. Fai il setup base qui sopra (record DNS, `CADDY_DOMAIN`, `CADDY_EMAIL`,
+   `INGRESS_PROFILE=ingress.caddy`).
+2. Crea un **token API** Cloudflare (dash.cloudflare.com → My Profile → API Tokens →
+   Create Token) con i permessi **Zone · Zone · Read** e **Zone · DNS · Edit**, ristretto
+   alla zona del tuo dominio (*Zone Resources → Include → Specific zone*). I due permessi li
+   chiede il plugin (README di `caddy-dns/cloudflare` v0.2.4): `Read` per trovare la zona,
+   `Edit` per scrivere il TXT. Puoi dargli una scadenza (*TTL*) dalla stessa pagina.
+3. Sulla VPS, nella cartella del repo:
+   ```bash
+   install -m 600 /dev/null secrets/cf_api_token.txt   # file vuoto, già 600
+   nano secrets/cf_api_token.txt                       # incolla il token, una riga
+   ```
+   Il file è dell'utente che fa girare lo stack (UID 1000, come gli altri segreti: vedi
+   [SECRETS.md](SECRETS.md)).
+4. Aggiungi `caddy-dns01` a `VPS1777_FEATURES` nel `.env`, tenendo le feature che hai già:
+   ```
+   VPS1777_FEATURES=backup,autoupdate,caddy-dns01
+   ```
+5. Applica subito (come per gli altri overlay, [OPS.md](OPS.md): nessun comando lo fa al
+   posto tuo, e `vps1777 update` a versione già corrente non tocca lo stack):
+   ```bash
+   docker compose -f compose.yaml -f compose.ingress.caddy.yaml -f compose.ops.backup.yaml \
+     -f compose.ops.caddy-dns01.yaml --profile ingress.caddy --profile ops.backup \
+     up -d --force-recreate caddy
+   ```
+   Da lì in poi update e rollback montano l'overlay da soli, leggendo la riga del `.env`.
+   L'immagine `vps1777-caddy-dns01` esce dalla release come le altre (firmata, nel lock):
+   serve una versione di vps1777 che la contenga.
 
-```Dockerfile
-FROM caddy:2.11-builder AS builder
-RUN xcaddy build --with github.com/caddy-dns/cloudflare
+**Cosa fa.** L'overlay `compose.ops.caddy-dns01.yaml` ridefinisce il servizio `caddy`: usa
+l'immagine `vps1777-caddy-dns01` (Caddy 2.11 + plugin Cloudflare, `services/caddy-dns01/`),
+monta `ingress/Caddyfile.dns01` al posto di `ingress/Caddyfile` — la stessa configurazione
+più `acme_dns cloudflare {file./run/secrets/cf_api_token}` — e il token come secret. Caddy
+lo legge **dal file**: non passa mai da una variabile d'ambiente, che `docker inspect`
+mostrerebbe. Porte, rete e volume dei certificati restano quelli dell'ingresso Caddy.
 
-FROM caddy:2.11-alpine
-COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+**La prova.**
+```bash
+docker logs vps1777-caddy 2>&1 | grep -iE 'dns|certificate obtained|error'
 ```
+Al primo avvio cerca `certificate obtained successfully` per il tuo dominio. Se il token
+manca o non è leggibile, Caddy **non parte**: nei log trovi `placeholder: failed to read
+file` seguito da `API token '' appears invalid` — un rosso esplicito, non un Caddy acceso
+senza certificato.
 
-⚠️ **E non sopravvive al canale di aggiornamento**: `ingress/Caddyfile` e
-`compose*.yaml` sono file gestiti, che ogni `vps1777 update` riscrive dal bundle, e il
-comando compose della CLI monta solo `compose.yaml`, l'overlay di `INGRESS_PROFILE` e
-quelli delle feature — non un override tuo. Oggi DNS-01 regge solo su una macchina che
-non usa `vps1777 update`.
+**Con un altro ingresso la CLI rifiuta.** Se `VPS1777_FEATURES` contiene `caddy-dns01` e
+`INGRESS_PROFILE` non è `ingress.caddy`, ogni comando di `vps1777` che costruisce il compose
+(update, rollback, status…) si ferma e dice perché: una riga del `.env` che dichiara un
+certificato via DNS-01 che non esiste è il difetto che le feature dichiarate esistono per
+impedire. Gli installer, che lavorano su uno stack che sta nascendo, invece **avvisano** e
+proseguono senza l'overlay; e se il token sulla VPS non c'è ancora, avviano Caddy in HTTP-01
+e lo dicono.
+
+**Per tornare a HTTP-01**: togli `caddy-dns01` dal `.env` e ricrea caddy col comando del
+setup base più `--force-recreate caddy`. I certificati già emessi restano nel volume e Caddy
+li rinnova con la sfida HTTP-01 (che vuole la porta 80 aperta).
 
 ## 3. Cloudflare Tunnel
 
@@ -136,7 +174,7 @@ la notazione CIDR).
 | **Chi può raggiungere il servizio** | **chiunque su Internet** (il profilo attiva il Funnel) | **chiunque su Internet** | **chiunque su Internet** |
 | Costo | gratis (free tier) | gratis | gratis |
 | Dominio tuo | no (*.ts.net) | sì obbligatorio | sì o sub-dominio |
-| Porte aperte | nessuna | 80 + 443 | nessuna |
+| Porte aperte | nessuna | 80 + 443 (con `caddy-dns01` il certificato non ha bisogno della 80) | nessuna |
 | Cert auto | sì | sì (LE) | sì (CF) |
 | Anti-DDoS | no | no | sì |
 | Setup minuti | ~5 | ~10 | ~10 |

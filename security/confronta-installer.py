@@ -93,7 +93,10 @@ ASSI: list[tuple[str, str]] = [
     #   partiva al primo `vps1777 update` (che legge le feature), non al primo giro.
     #   Un nome per profilo (`ops.backup`, `ops.portainer`, `ops.watchtower` come file,
     #   `ops.autoupdate` come profilo di watchtower): chi ne perde uno diverge.
-    ("overlay delle feature (ops.*)", r"\bops\.(?:backup|portainer|watchtower|autoupdate)\b"),
+    #   `ops.caddy-dns01` (01/10/2026): il primo overlay senza profilo proprio — c'è solo
+    #   come FILE, e tutte e tre le vie lo montano solo con l'ingresso caddy.
+    ("overlay delle feature (ops.*)",
+     r"\bops\.(?:backup|portainer|watchtower|autoupdate|caddy-dns01)\b"),
 ]
 
 

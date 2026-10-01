@@ -1,0 +1,58 @@
+# compose.ops.caddy-dns01.yaml — Caddy con la sfida ACME DNS-01 (Cloudflare)
+#
+# Feature OPZIONALE `caddy-dns01` (VPS1777_FEATURES), spenta di default. Serve a chi
+# vuole il certificato senza la porta 80 aperta (la sfida HTTP-01 la pretende), o un
+# certificato wildcard. Funziona SOLO con l'ingresso Caddy: non è un ingresso a sé,
+# è un modo diverso di ottenere il certificato per lo stesso ingresso.
+#
+# Cosa fa: si sovrappone a compose.ingress.caddy.yaml e ridefinisce SOLO il servizio
+# `caddy` (stesso nome, quindi compose FONDE le due definizioni, non ne crea due):
+#   · l'immagine diventa vps1777-caddy-dns01 — Caddy 2.11 + il plugin
+#     caddy-dns/cloudflare, costruita, firmata e messa in images.lock dalla release
+#     come le altre immagini del progetto (services/caddy-dns01/Dockerfile);
+#   · il Caddyfile montato è ingress/Caddyfile.dns01 al posto di ingress/Caddyfile
+#     (compose fonde i volumi per PERCORSO DI DESTINAZIONE: stesso target, vince
+#     questo file);
+#   · il token Cloudflare arriva come secret `cf_api_token`, letto da Caddy col
+#     segnaposto {file./run/secrets/cf_api_token}. Mai per valore in un env.
+# Porte, rete, healthcheck, volumi dei certificati: ereditati dal file dell'ingresso.
+#
+# ⚠️ `profiles: [ingress.caddy]` è ripetuto qui APPOSTA, non per scrupolo: se
+#   l'overlay finisse in un comando con un altro ingresso (Tailscale, Cloudflared),
+#   il servizio deve restare SPENTO. Senza la riga, questo frammento da solo
+#   diventerebbe un servizio senza profilo — cioè sempre acceso, senza rete né porte.
+#   La CLI comunque RIFIUTA la combinazione (tools/vps1777.py, `_feature_incoerenti`),
+#   e gli installer la segnalano: questa riga è la seconda cintura, non la prima.
+#
+# Setup: un token API Cloudflare con permesso Zone → DNS → Edit sulla zona del dominio,
+#   in secrets/cf_api_token.txt (chmod 600) — vedi docs/SECRETS.md.
+#
+# Profilo: nessuno nuovo — vive dentro `ingress.caddy`.
+
+services:
+
+  caddy:
+    profiles: [ingress.caddy]
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-caddy-dns01:${VPS1777_TAG:-dev}${VPS1777_DIGEST_CADDY_DNS01:+@${VPS1777_DIGEST_CADDY_DNS01}}
+    # 🔑 DAC_OVERRIDE, e il perché è misurato (01/10/2026), non supposto: il secret è un
+    #   bind mount del file dell'host (compose fuori da Swarm), quindi dentro il container
+    #   ha proprietario e permessi di fuori — 600, dell'utente UID 1000 (docs/SECRETS.md).
+    #   Caddy gira come root, ma con `cap_drop: [ALL]` root NON ha CAP_DAC_OVERRIDE e i
+    #   permessi lo fermano come chiunque. Misurato con un token finto 600 di UID 1000:
+    #     senza  → «placeholder: failed to read file … permission denied», poi
+    #              «API token '' appears invalid» e Caddy non parte;
+    #     con    → «Valid configuration».
+    #   Riaggiungere questa sola capability (che Docker darebbe di default) è la via più
+    #   stretta: allargare il file a 644 lo renderebbe leggibile a ogni utente dell'host,
+    #   e far girare Caddy come UID 1000 vorrebbe porte 80/443 e volumi dei certificati
+    #   già di root. NON è DAC_READ_SEARCH, che apre open_by_handle_at (l'evasione
+    #   «shocker»). Vale solo con questo overlay: l'ingresso Caddy normale resta com'è.
+    cap_add: [NET_BIND_SERVICE, DAC_OVERRIDE]
+    volumes:
+      - ./ingress/Caddyfile.dns01:/etc/caddy/Caddyfile:ro
+    secrets:
+      - cf_api_token
+
+secrets:
+  cf_api_token:
+    file: ./secrets/cf_api_token.txt

@@ -128,7 +128,10 @@ Le immagini arrivano **solo da GHCR** (`compose.yaml` è pull-only; il build
 locale esiste solo nell'overlay `compose.build.yaml`, dev/CI). Dopo un update il `.env`
 porta, accanto al tag, il digest di ogni immagine (`VPS1777_DIGEST_<SERVIZIO>`, H22):
 anche un `docker compose up` fatto a mano gira le immagini verificate. Un'installazione
-nuova non li ha fino al primo update. Manuale utente
+nuova non li ha fino al primo update. Oltre alle cinque dello stack la release pubblica
+un'immagine **opzionale**, `vps1777-caddy-dns01` (Caddy col plugin DNS di Cloudflare, per
+la feature `caddy-dns01`: vedi [INGRESS.md](INGRESS.md)): firmata e nel lock come le altre,
+gira solo su chi ha dichiarato la feature con l'ingresso Caddy. Manuale utente
 completo: [UPDATE.md](UPDATE.md).
 
 ## Healthcheck

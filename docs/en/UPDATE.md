@@ -52,9 +52,15 @@ Guarantees:
   (which often lives only on your PC); it is pruned on the next successful update.
 - **Supply chain**: the release bundle carries `images.lock` with the immutable
   image digests (one per service); after the pull, the local digests MUST match.
+  Since 01/10/2026 the lock also holds `caddy-dns01`, the **optional** image of the
+  feature of the same name ([INGRESS.md](../INGRESS.md) (Italian), DNS-01): verification covers the
+  images the active stack actually uses (it asks `docker compose config --images`), and a
+  lock entry the stack doesn't use is written to the log as «non attivo — non verificato»
+  (not active, not verified) instead of being required. Before, all were required, and
+  with the feature off every update would have failed.
   Then the CLI writes those digests into `.env` (`VPS1777_DIGEST_GATEWAY`, `…_ARCHIVE_MCP`,
-  `…_NB1777_MCP`, `…_NB1777_BOT`, `…_OCR`) together with `VPS1777_TAG`, in a single
-  write, and `compose.yaml` uses them:
+  `…_NB1777_MCP`, `…_NB1777_BOT`, `…_OCR`, `…_CADDY_DNS01`) together with `VPS1777_TAG`, in
+  a single write, and `compose.yaml` (or the feature's overlay) uses them:
   `…/vps1777-gateway:${VPS1777_TAG:-dev}${VPS1777_DIGEST_GATEWAY:+@${VPS1777_DIGEST_GATEWAY}}`
   — the `@digest` is appended only if the variable is set.
   So even a `docker compose pull` or `up` run **by hand** in the folder runs the verified

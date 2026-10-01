@@ -592,7 +592,7 @@ jobs:
     needs: lint
     strategy:
       matrix:
-        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr]
+        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr, caddy-dns01]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Buildx
@@ -626,6 +626,8 @@ jobs:
       #     · NON prende i difetti di STATO (un dato sul disco che fa fallire l'avvio):
       #       quelli si vedono solo con i volumi veri.
       - name: L'immagine parte davvero (import nell'ambiente REALE dell'immagine)
+        # caddy-dns01 non ha Python: per lei la prova equivalente è lo step sotto.
+        if: matrix.service != 'caddy-dns01'
         run: |
           docker run --rm --network none \
             --entrypoint python \
@@ -660,3 +662,18 @@ jobs:
               importlib.import_module(m)
           print("import ok:", ", ".join(mods))
           '
+      # caddy-dns01 (01/10/2026): l'equivalente dello step sopra per un'immagine senza
+      # Python. Ciò che deve esserci perché la feature funzioni è il plugin DENTRO il
+      # binario: un `xcaddy build` che compila senza il modulo (o una base che lo
+      # perde) darebbe un'immagine che parte e poi rifiuta `acme_dns cloudflare` al
+      # primo avvio vero — sulla macchina di chi l'ha accesa, non qui.
+      - name: Il binario di caddy-dns01 contiene il provider DNS Cloudflare
+        if: matrix.service == 'caddy-dns01'
+        run: |
+          moduli="$(docker run --rm --network none \
+            "ghcr.io/${{ github.repository_owner }}/vps1777-caddy-dns01:ci" caddy list-modules)"
+          if ! printf '%s\n' "$moduli" | grep -qx 'dns.providers.cloudflare'; then
+            echo "::error::dns.providers.cloudflare assente da caddy list-modules: il plugin non è nel binario."
+            exit 1
+          fi
+          echo "plugin ok: dns.providers.cloudflare"

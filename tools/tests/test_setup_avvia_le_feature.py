@@ -19,19 +19,27 @@ SETUP = RADICE / "setup.sh"
 
 
 def _blocco() -> str:
+    # Il blocco finisce con il `case` di caddy-dns01 (01/10/2026), l'ultima feature con un
+    # overlay: prima finiva alla riga di watchtower, e il caso nuovo sarebbe rimasto fuori
+    # dal test senza che niente fallisse.
     righe = SETUP.read_text(encoding="utf-8").splitlines()
     inizio = next(i for i, r in enumerate(righe) if r.startswith("COMPOSE_FILES=("))
-    fine = next(i for i, r in enumerate(righe[inizio:], inizio) if "OPS_PROFILI+=(\"--profile\" \"ops.autoupdate\")" in r)
+    dns01 = next(i for i, r in enumerate(righe[inizio:], inizio) if "*,caddy-dns01,*" in r)
+    fine = next(i for i, r in enumerate(righe[dns01:], dns01) if r.strip() == "esac")
     return "\n".join(righe[inizio:fine + 1])
 
 
-def _esegui(tmp_path: Path, env: str | None) -> tuple[list[str], list[str]]:
+def _esegui(tmp_path: Path, env: str | None, ingresso: str = "ingress.caddy",
+            avvisi: list[str] | None = None) -> tuple[list[str], list[str]]:
     if env is not None:
         (tmp_path / ".env").write_text(env)
-    script = ('set -u; INGRESS_PROFILE=ingress.caddy; DEV_BUILD=0\n' + _blocco() +
+    script = (f'set -u; INGRESS_PROFILE={ingresso}; DEV_BUILD=0\n'
+              'warn() { printf "%s\\n" "$*" >&2; }\n' + _blocco() +
               '\nprintf "%s\\n" "${COMPOSE_FILES[*]}"; printf "%s\\n" "${OPS_PROFILI[*]}"')
     r = subprocess.run(["bash", "-c", script], cwd=tmp_path, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+    if avvisi is not None:
+        avvisi.extend(r.stderr.splitlines())
     files, profili = r.stdout.split("\n")[:2]
     return files.split(), profili.split()
 
@@ -61,3 +69,25 @@ def test_ogni_avvio_di_setup_passa_i_profili_delle_feature():
     assert chiamate, "nessuna chiamata a docker compose trovata: il test va aggiornato"
     senza = [c for c in chiamate if '"${OPS_PROFILI[@]}"' not in c]
     assert not senza, senza
+
+
+def test_caddy_dns01_con_caddy_e_token_monta_l_overlay_senza_profilo(tmp_path):
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets" / "cf_api_token.txt").write_text("x" * 40)
+    files, profili = _esegui(tmp_path, "VPS1777_FEATURES=caddy-dns01\n")
+    assert "compose.ops.caddy-dns01.yaml" in files
+    # nessun profilo nuovo: il servizio `caddy` vive in ingress.caddy, già acceso
+    assert {p for p in profili if p != "--profile"} == set(), profili
+
+
+@pytest.mark.parametrize("ingresso, con_token", [
+    ("ingress.tailscale", True), ("ingress.cloudflared", True), ("ingress.caddy", False)])
+def test_caddy_dns01_fuori_posto_avvisa_e_non_monta(tmp_path, ingresso, con_token):
+    """Ingresso diverso, o token assente: l'installer lo DICE e prosegue senza overlay."""
+    if con_token:
+        (tmp_path / "secrets").mkdir()
+        (tmp_path / "secrets" / "cf_api_token.txt").write_text("x" * 40)
+    avvisi: list[str] = []
+    files, _ = _esegui(tmp_path, "VPS1777_FEATURES=caddy-dns01\n", ingresso, avvisi)
+    assert "compose.ops.caddy-dns01.yaml" not in files
+    assert any("caddy-dns01" in a for a in avvisi), avvisi

@@ -106,6 +106,10 @@ comando_riavvio() {
       backup)     file=ops.backup;     prof=ops.backup ;;
       portainer)  file=ops.portainer;  prof=ops.portainer ;;
       watchtower) file=ops.watchtower; prof=ops.autoupdate ;;
+      # caddy-dns01: niente profilo suo (vive in ingress.caddy), e solo con quell'ingresso
+      # — con un altro la CLI rifiuta, qui non si suggerisce un comando che non serve.
+      caddy-dns01) [ "$ingress" = "ingress.caddy" ] && flag="$flag -f compose.ops.caddy-dns01.yaml"
+                   continue ;;
       *) continue ;;
     esac
     flag="$flag -f compose.$file.yaml --profile $prof"

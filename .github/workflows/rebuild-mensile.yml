@@ -38,8 +38,10 @@ jobs:
         with:
           fetch-depth: 0   # servono i tag per calcolare la patch successiva
 
-      # Un solo job, niente matrice: il verdetto è la SOMMA sulle 5 immagini, e
-      # 5 job separati non possono sommarsi senza un sesto che li aspetti.
+      # Un solo job, niente matrice: il verdetto è la SOMMA sulle 6 immagini, e
+      # 6 job separati non possono sommarsi senza un settimo che li aspetti.
+      # (caddy-dns01 entra il 01/10/2026: è opzionale per chi installa, ma è un'immagine
+      # NOSTRA — se la sua base Alpine ha un fix, il rebuild lo deve vedere.)
       - name: Scan gateway
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with: {image-ref: "ghcr.io/${{ github.repository_owner }}/vps1777-gateway:latest", format: json, output: cve-gateway.json, ignore-unfixed: true, severity: "CRITICAL,HIGH,MEDIUM,LOW"}
@@ -55,6 +57,9 @@ jobs:
       - name: Scan ocr
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with: {image-ref: "ghcr.io/${{ github.repository_owner }}/vps1777-ocr:latest", format: json, output: cve-ocr.json, ignore-unfixed: true, severity: "CRITICAL,HIGH,MEDIUM,LOW"}
+      - name: Scan caddy-dns01
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: {image-ref: "ghcr.io/${{ github.repository_owner }}/vps1777-caddy-dns01:latest", format: json, output: cve-caddy-dns01.json, ignore-unfixed: true, severity: "CRITICAL,HIGH,MEDIUM,LOW"}
 
       - name: Conta le CVE con fix (la somma è il verdetto)
         id: conta
@@ -62,7 +67,7 @@ jobs:
           set -euo pipefail
           TOT=0
           : > elenco.txt
-          for s in gateway archive-mcp nb1777-mcp nb1777-bot ocr; do
+          for s in gateway archive-mcp nb1777-mcp nb1777-bot ocr caddy-dns01; do
             n="$(jq '[.Results[]?.Vulnerabilities[]?] | length' "cve-$s.json")"
             jq -r --arg s "$s" '.Results[]?.Vulnerabilities[]? | "\($s): \(.VulnerabilityID) \(.Severity) \(.PkgName) \(.InstalledVersion) → \(.FixedVersion)"' "cve-$s.json" >> elenco.txt
             echo "· $s: $n"

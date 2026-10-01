@@ -50,9 +50,14 @@ Garanzie:
   (che spesso vive solo sul tuo PC); viene potato al successivo update riuscito.
 - **Supply-chain**: il bundle di release porta `images.lock` con i digest
   immutabili delle immagini (una per servizio); dopo il pull, i digest locali DEVONO combaciare.
+  Dal 01/10/2026 il lock contiene anche `caddy-dns01`, l'immagine **opzionale** della
+  feature omonima ([INGRESS.md](INGRESS.md), DNS-01): la verifica riguarda le immagini che
+  lo stack attivo usa davvero (lo chiede a `docker compose config --images`), e una voce
+  del lock che non usa la scrive nel log come «non attivo — non verificato» invece di
+  pretenderla. Prima si pretendevano tutte, e a feature spenta ogni update sarebbe fallito.
   Poi la CLI scrive quei digest nel `.env` (`VPS1777_DIGEST_GATEWAY`, `…_ARCHIVE_MCP`,
-  `…_NB1777_MCP`, `…_NB1777_BOT`, `…_OCR`) insieme a `VPS1777_TAG`, in una sola
-  scrittura, e `compose.yaml` li usa:
+  `…_NB1777_MCP`, `…_NB1777_BOT`, `…_OCR`, `…_CADDY_DNS01`) insieme a `VPS1777_TAG`, in
+  una sola scrittura, e `compose.yaml` (o l'overlay della feature) li usa:
   `…/vps1777-gateway:${VPS1777_TAG:-dev}${VPS1777_DIGEST_GATEWAY:+@${VPS1777_DIGEST_GATEWAY}}`
   — il `@digest` si aggiunge solo se la variabile c'è.
   Così anche un `docker compose pull` o `up` lanciato **a mano** nella cartella gira il

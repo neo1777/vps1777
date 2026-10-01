@@ -1,8 +1,10 @@
 # compose.ingress.caddy.yaml — Caddy reverse proxy + Let's Encrypt
 #
 # Caddy ascolta su 80+443, fa cert auto via ACME (HTTP-01 default).
-# Per DNS-01 (no porta 80), usa override `compose.ingress.caddy-dns01.yaml`
-# (immagine custom con plugin DNS provider + DNS_PROVIDER_TOKEN_FILE).
+# Per DNS-01 (certificati senza porta 80, o wildcard) c'è la feature `caddy-dns01`
+# in VPS1777_FEATURES: l'overlay compose.ops.caddy-dns01.yaml ridefinisce questo
+# stesso servizio con l'immagine vps1777-caddy-dns01 (plugin Cloudflare) e
+# ingress/Caddyfile.dns01. Vedi docs/INGRESS.md §DNS-01.
 #
 # Setup: CADDY_DOMAIN + CADDY_EMAIL in .env
 #

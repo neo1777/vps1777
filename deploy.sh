@@ -909,6 +909,21 @@ case ",$FEATURES," in *,portainer,*)  OPS_FILES="$OPS_FILES -f compose.ops.porta
 # watchtower = auto-update CRUDO (declassato): supportato solo se dichiarato esplicito,
 # ed è in CONFLITTO con l'auto-update sicuro (la CLI avvisa). Il default NON lo include.
 case ",$FEATURES," in *,watchtower,*) OPS_FILES="$OPS_FILES -f compose.ops.watchtower.yaml"; OPS_PROFILES="$OPS_PROFILES --profile ops.autoupdate";; esac
+# caddy-dns01 (01/10/2026): overlay SENZA profilo proprio — ridefinisce il servizio `caddy`
+# del profilo ingress.caddy. Con un altro ingresso si AVVISA e si prosegue senza (la CLI
+# invece rifiuta). Il token questo installer non lo chiede: se sulla VPS non c'è già,
+# Caddy parte in HTTP-01 e lo si dice, invece di far fallire lo `up` su un secret assente.
+case ",$FEATURES," in *,caddy-dns01,*)
+  if [ "$INGRESS" != "caddy" ]; then
+    warn "VPS1777_FEATURES contiene caddy-dns01, che vale solo con l'ingresso caddy (qui: $INGRESS): la ignoro. Toglila dal .env della VPS — vps1777 update la RIFIUTA finché c'è."
+  elif [ "${DEV_BUILD:-0}" = "1" ]; then
+    warn "caddy-dns01 non si costruisce in build locale (compose.build.yaml non la conosce): Caddy parte in HTTP-01."
+  elif ! SSH "sudo -u $OPERATOR_USER bash -lc 'test -s $REMOTE_DIR/secrets/cf_api_token.txt'"; then
+    warn "caddy-dns01 dichiarata ma sulla VPS manca secrets/cf_api_token.txt: Caddy parte in HTTP-01. Mettilo (docs/SECRETS.md) e ricrea caddy: docs/INGRESS.md §DNS-01."
+  else
+    OPS_FILES="$OPS_FILES -f compose.ops.caddy-dns01.yaml"
+  fi;;
+esac
 
 # Persisto lo stato dichiarato in .env: la CLI (vps1777.py enabled_features) lo legge,
 # così `vps1777 update`/`rollback` ricostruiscono lo stack con le STESSE feature — un

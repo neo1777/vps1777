@@ -25,7 +25,8 @@ Durante il deploy, `step_prepare` applica un hardening minimo **sicuro** sull'ho
 
 ## Le feature dichiarate — cosa il reinstall riproduce (e perché non si perde nulla)
 
-Le funzioni operative di vps1777 (backup notturno, auto-update sicuro, Portainer) sono
+Le funzioni operative di vps1777 (backup notturno, auto-update sicuro, Portainer, il
+certificato DNS-01 di Caddy) sono
 **dichiarate**, non attivate a mano una volta e poi dimenticate. La dichiarazione vive in
 una riga del `.env` della VPS:
 
@@ -75,6 +76,11 @@ Per cambiare le feature, oggi, i gesti sono due e servono entrambi:
      opzionali](#profili-opzionali); per spegnerne uno, `docker rm -f vps1777-backup` (o
      `vps1777-portainer`): togliere il file dal comando non ferma un container già acceso,
      lo lascia lì come orfano.
+   - `caddy-dns01` — il certificato di Caddy via DNS-01 (Cloudflare), solo con
+     `INGRESS_PROFILE=ingress.caddy`: con un altro ingresso la CLI **rifiuta** di
+     costruire il compose finché la riga c'è. Non ha un profilo suo — ridefinisce il
+     servizio `caddy` — e vuole il token in `secrets/cf_api_token.txt`. Per applicarla
+     subito, il comando di [INGRESS.md](INGRESS.md) §DNS-01 (`up -d --force-recreate caddy`).
 
 Il referto lo stampa solo l'installazione: dopo un cambio a mano, lo stato vero lo dicono
 `systemctl list-unit-files 'vps1777-*' --state=enabled` e `docker ps` — **l'assenza parla**

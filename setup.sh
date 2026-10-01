@@ -454,6 +454,22 @@ OPS_PROFILI=()
 case ",$FEATURES," in *,backup,*)     COMPOSE_FILES+=("-f" "compose.ops.backup.yaml");     OPS_PROFILI+=("--profile" "ops.backup");;     esac
 case ",$FEATURES," in *,portainer,*)  COMPOSE_FILES+=("-f" "compose.ops.portainer.yaml");  OPS_PROFILI+=("--profile" "ops.portainer");;  esac
 case ",$FEATURES," in *,watchtower,*) COMPOSE_FILES+=("-f" "compose.ops.watchtower.yaml"); OPS_PROFILI+=("--profile" "ops.autoupdate");; esac
+# caddy-dns01 (01/10/2026): overlay SENZA profilo proprio — ridefinisce il servizio `caddy`,
+# che vive nel profilo dell'ingresso. Ha senso solo con ingress.caddy: con un altro ingresso
+# si AVVISA e si prosegue senza (la CLI invece rifiuta: lì lo stack esiste già, qui sta
+# nascendo). Senza il token Caddy non parte, quindi lo si dice qui e non si monta l'overlay:
+# meglio un Caddy in HTTP-01 che uno stack che non si avvia.
+case ",$FEATURES," in *,caddy-dns01,*)
+  if [ "$INGRESS_PROFILE" != "ingress.caddy" ]; then
+    warn "VPS1777_FEATURES contiene caddy-dns01, che vale solo con INGRESS_PROFILE=ingress.caddy (qui: $INGRESS_PROFILE): la ignoro. Toglila dal .env — vps1777 update la RIFIUTA finché c'è."
+  elif [ "$DEV_BUILD" = "1" ]; then
+    warn "caddy-dns01 non si costruisce in build locale (compose.build.yaml non la conosce: definirvi \`caddy\` lo ridefinirebbe anche a feature spenta). Caddy parte in HTTP-01."
+  elif [ ! -s secrets/cf_api_token.txt ]; then
+    warn "caddy-dns01 dichiarata ma secrets/cf_api_token.txt manca o è vuoto: Caddy parte in HTTP-01. Metti il token (docs/SECRETS.md) e rilancia ./setup.sh."
+  else
+    COMPOSE_FILES+=("-f" "compose.ops.caddy-dns01.yaml")
+  fi;;
+esac
 
 # ── L'URL CHE CHI INSTALLA HA IN MANO ADESSO ──────────────────────────────────────────
 # Nelle righe finali c'era il letterale `<PUBLIC_BASE>`, tre volte: un segnaposto che

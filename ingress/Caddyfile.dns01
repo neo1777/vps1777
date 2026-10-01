@@ -13,6 +13,12 @@
 {
 	# Global options
 	email {env.CADDY_EMAIL}
+	# DNS-01 via Cloudflare (feature caddy-dns01). Il token si legge da FILE col
+	# segnaposto {file.…} di Caddy 2.11, mai da una variabile d'ambiente: un env
+	# si vede in `docker inspect`, un secret montato no. Se il file manca, Caddy
+	# non parte («placeholder: failed to read file») invece di partire senza
+	# certificato — misurato il 01/10/2026.
+	acme_dns cloudflare {file./run/secrets/cf_api_token}
 }
 
 {env.CADDY_DOMAIN} {

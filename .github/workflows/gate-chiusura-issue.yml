@@ -10,7 +10,7 @@
 #
 # PERCHÉ UN FILE A PARTE e non `types: [..., edited]` su ci.yml: quel trigger è del
 # WORKFLOW, non del job. Aggiungere `edited` là farebbe ripartire tutti i job
-# (lint, contract e le cinque build delle immagini) — a ogni correzione di refuso nel corpo. Un
+# (lint, contract e le build delle immagini) — a ogni correzione di refuso nel corpo. Un
 # presidio che costa una build per una virgola viene tolto, e viene tolto con ragione.
 name: Gate chiusura issue
 
