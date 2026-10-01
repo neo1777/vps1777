@@ -195,8 +195,9 @@ default; to turn it off see [docs/OPS.md](docs/OPS.md) (Italian).
 - Updates **cosign-signed** and verified **fail-closed by default**; immutable digests
   (`images.lock`); age-encrypted backups + snapshots + **automatic rollback**
   ([docs/en/UPDATE.md](docs/en/UPDATE.md))
-- CI with GitHub Actions **pinned to SHAs** + Dependabot on four fronts: actions, base
-  images, compose images and Python dependencies; the backup key lives **off the VPS** (only
+- CI with GitHub Actions **pinned to SHAs** + Dependabot on three fronts (actions, base
+  images, Python dependencies) and Renovate on the third-party images of the compose
+  overlays; the backup key lives **off the VPS** (only
   the public recipient on the server)
 - Optional visual management (Portainer) **loopback-only** + SSH tunnel — see
   [docs/OPS.md](docs/OPS.md) (Italian)

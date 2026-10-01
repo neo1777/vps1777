@@ -130,8 +130,9 @@ senza certificato.
 (update, rollback, status…) si ferma e dice perché: una riga del `.env` che dichiara un
 certificato via DNS-01 che non esiste è il difetto che le feature dichiarate esistono per
 impedire. Gli installer, che lavorano su uno stack che sta nascendo, invece **avvisano** e
-proseguono senza l'overlay; e se il token sulla VPS non c'è ancora, avviano Caddy in HTTP-01
-e lo dicono.
+proseguono senza l'overlay; e in altri due casi avviano Caddy in HTTP-01 e lo dicono: se il
+token sulla VPS non c'è ancora, e in build locale (`compose.build.yaml` non costruisce
+l'immagine di `caddy-dns01`).
 
 **Per tornare a HTTP-01**: togli `caddy-dns01` dal `.env` e ricrea caddy col comando del
 setup base più `--force-recreate caddy`. I certificati già emessi restano nel volume e Caddy

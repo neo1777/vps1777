@@ -1264,8 +1264,12 @@ findings:
         — non sarebbe stato registrato. Verdetti dati il 02/08 da abdd732a (73b8d8ac).
   - id: H50
     severity: high
-    title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa nel codice e provata in produzione (27/08)"
-    status: closed
+    title: "Uscita Internet del gateway: MISURATA sul vivo, chiusa col profilo Tailscale (27/08), aperta con Caddy e Cloudflared"
+    status: partial
+    resta_aperto: >
+      Con gli ingressi caddy e cloudflared il gateway sta sulla rete `ingress`, un bridge col
+      masquerade attivo: lì può ancora uscire su Internet. Chiusa solo col profilo Tailscale
+      (rete `funnel`, senza masquerade).
     natura: comportamento
     scoperta:
       quando: "2026-07-26"
@@ -1281,6 +1285,12 @@ findings:
       (2) prova-1-gateway-non-esce VERDE nella foto post-install
       (onboarding/prove-empiriche-post-install.json, v0.43.2). Il «non ancora in
       produzione» del titolo e' estinto: la produzione E' il codice curato.
+      [DI NUOVO partial dal 01/10/2026, audit della doc: la chiusura del 27/08 misurava il
+      solo profilo Tailscale, quello in produzione. Negli altri due il gateway riprende
+      `ingress` (compose.ingress.caddy.yaml e .cloudflared.yaml, servizio `gateway`) e
+      l'uscita NAT è aperta senza che nessuno cambi niente: per la regola in testa a
+      check_findings.py è un buco, non una fragilità. Lo dicevano già il «PERCHÉ RESTA
+      `partial`» qui sotto, compose.ingress.tailscale.yaml e SECURITY.md; lo stato no.]
     prova:
       - comando: "docker exec vps1777-gateway-1 python -c \"import urllib.request;urllib.request.urlopen('https://api.github.com',timeout=5)\""
         dove: "VPS del collaudo vergine, in produzione (v0.43.2)"
@@ -1292,7 +1302,7 @@ findings:
         output: "prova-1-gateway-non-esce: verde — foto post-install 7 verdi · 0 rosse"
         exit: 0
         quando: "2026-08-27"
-    since: v0.40.3
+    since: v0.40.6
     evidence:
       - file: compose.yaml
         # RICEVUTE: sono commenti, e devono restare — spiegano perché una rete NON

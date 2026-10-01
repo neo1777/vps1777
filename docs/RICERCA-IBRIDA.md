@@ -54,7 +54,7 @@ modello che vinca sui soli vettori.
 | `limit` | 20 | righe restituite, da 1 a 200: oltre 200 si tiene 200, sotto 1 è un errore |
 | `since` / `until` | `""` | finestra temporale (ISO, `ts >= since`, `ts <= until`), come in `search`. Vale per **tutte e due** le liste; le righe senza ts restano fuori |
 | `campi` | `tutto` | `testo` tiene solo le righe che hanno parole, anche nel ramo vettoriale (un vettore non dice se ha colpito le parole o le azioni) |
-| `speaker` | `""` | chi ha scritto la riga (`human`, `assistant`, `tool`, `system`, `unknown`), come in `search`. Filtra tutte e due le liste |
+| `speaker` | `""` | chi ha scritto la riga (`human`, `assistant`, `tool`, `system`, `other`, `unknown`), come in `search`. Filtra tutte e due le liste |
 | `k_rrf`, `peso_fts` | 30, 1.5 | la fusione: i valori misurati. Cambiarli è un esperimento, non una regolazione |
 | `snippet_tokens` | 64 | lunghezza dello snippet FTS (64 è anche il tetto di FTS5: oltre, tronca in silenzio). Era 32 fino alla 0.64.4 |
 | `passaggio` | 0 | un numero di parole, fino a 400: sostituisce lo snippet con la finestra di quel numero di parole dove i termini della domanda sono più fitti, presa dal testo **intero** (sotto) |

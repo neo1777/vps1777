@@ -4,15 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
-### Sicurezza
-- **L'access-log di Caddy non scrive più il gateway_secret (H78).** Il segreto vive nel
-  path del proxy MCP, e l'access-log JSON di Caddy scriveva `request.uri` intero: misurato
-  con caddy:2.11, una richiesta, una riga col segreto in chiaro. SECRETS.md lo dava per
-  redatto «anche a valle, in Caddy/Cloudflare» senza che nessun codice lo facesse (rilievo
-  di Sagoma). Ora i due Caddyfile filtrano `request>uri`: il primo segmento lungo diventa
-  `/***/`, `/health` resta leggibile. SECRETS dice cosa vale per Cloudflare, che termina il
-  TLS e l'URI lo vede per costruzione. Tocca chi usa l'ingresso Caddy; col Funnel Caddy
-  non è nel percorso.
+### Aggiunto
+- **I numeri che i documenti ripetono li conta il codice: `tools/fatti-nei-doc.py`.** I tool
+  MCP di nb1777 e di archive, le immagini pubblicate e quante sono dello stack, i servizi e i
+  container di default, i rilievi del registro per stato: 50 numeri in 37 frasi di 17 file,
+  ciascuno confrontato col conteggio del codice. Una pagina che dice un altro numero fa
+  fallire il job `lint` con file e riga. In più: la matrice delle immagini deve essere la
+  stessa in release, CI, Trivy e rebuild mensile; la tabella di REVIEW.md deve nominare
+  esattamente le voci non chiuse; le famiglie di tool di docs/NB1777.md devono sommare al
+  totale. Le righe con una versione o una data sono storiche e si saltano, il CHANGELOG non
+  si legge, e una frase che non si trova più è rossa: così il presidio non si stacca in
+  silenzio quando una pagina viene riscritta. Ha la sua autoprova (in CI prima del
+  controllo), un test in `tools/tests/` e un passo in `tools/check.sh`. Non copre i check
+  obbligatori su `main`: la fonte è un'impostazione di GitHub, non un file del repo. Lanciato
+  sul `main` di partenza (0.66.0 più #397 e #398), segna 15 punti fuori posto.
 
 ### Cambiato
 - **Le immagini di terzi negli overlay compose le aggiorna Renovate, non più Dependabot.**
@@ -47,6 +52,49 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
     in un compose, `verify-features` sarebbe rosso. Tolti con lei l'eccezione per il socket
     in `test_docker_sock_perimetro.py` e le due alternative dell'asse «overlay delle
     feature» di `security/confronta-installer.py`.
+
+### Corretto
+- **Le derive della documentazione dopo la 0.63 (audit del 01/10/2026): 43 voci, tutte
+  verificate sul codice di oggi e corrette.** In breve:
+  - nb1777 espone **39** tool, non 38 (INSTALL IT/EN, installer/README, NB1777, il README del
+    servizio, che ora nomina `notebook_query_esito` e `attesa_max`); NB1777 dice quale tool
+    verifica l'auth NotebookLM e quale no, quando una domanda rilanciata si aggancia (stesse
+    fonti, conversazione e `verbose`) e che i tre tool della memoria non scrivono la riga di
+    log; TROUBLESHOOTING aggiunge la via del rilancio per i client con lo schema vecchio.
+  - Redazione dell'archivio (ARCHIVE IT/EN e docstring): le regole senza prefisso sono della
+    0.64.2 (la 0.64.1 non è mai uscita), l'URL del connettore si redige anche senza schema
+    dalla 0.64.3, e le password assegnate a un nome da segreto sono coperte.
+  - Sei immagini pubblicate, non cinque (Trivy in SECURITY e nel ledger); dieci check
+    obbligatori su `main`, non nove; il token Cloudflare di DNS-01 vuole anche Zone·Zone·Read
+    (CLI, overlay, ledger); `secrets-status` e `version` dicono cosa fanno con `caddy-dns01`;
+    INGRESS nomina il terzo caso in cui gli installer avviano Caddy in HTTP-01.
+  - Update e rollback riallineano il timer dell'auto-update alla riga `VPS1777_FEATURES`
+    (UPDATE IT/EN, OPS); i volumi di Caddy entrano nel backup dall'host per etichetta, non
+    decommentando righe (OPS, commento di `compose.ops.backup.yaml`); `setup.sh` avvia anche
+    gli overlay delle feature (INSTALL IT/EN).
+  - PRIMI-15-MINUTI: con il backup di default i container sono **sei**, e per smontare serve
+    anche l'overlay del backup — senza, `down -v` lascia il container acceso come orfano e i
+    suoi volumi (misurato su un progetto di prova).
+  - Renovate, non Dependabot, aggiorna le immagini di terzi degli overlay (README IT/EN, OPS,
+    commento di Portainer); SECURITY conta 77 rilievi; l'hardening dell'host dice cosa non fa
+    (`sshd_config` e firewall); CONTRIBUTING dice che il `pre-commit` ferma un `git add -f`;
+    `speaker` accetta `other`; ONBOARDING dice come arriva il `GATEWAY_SECRET` fuori da un
+    terminale; via `tests/integration/` dal template delle PR; l'intestazione di CODEOWNERS
+    dice che la CI è obbligatoria dal 27/09.
+  - **`H50` torna `partial`** (registro, SECURITY, REVIEW, ARCHITECTURE IT/EN): con gli
+    ingressi caddy e cloudflared il gateway sta sulla rete `ingress`, che esce su Internet.
+    Il testo della voce, l'overlay Tailscale e SECURITY lo dicevano già; lo stato diceva
+    `closed`. Il registro conta ora 65 chiusi e 9 parziali.
+
+### Sicurezza
+- **L'access-log di Caddy non scrive più il gateway_secret (H78).** Il segreto vive nel
+  path del proxy MCP, e l'access-log JSON di Caddy scriveva `request.uri` intero: misurato
+  con caddy:2.11, una richiesta, una riga col segreto in chiaro. SECRETS.md lo dava per
+  redatto «anche a valle, in Caddy/Cloudflare» senza che nessun codice lo facesse (rilievo
+  di Sagoma). Ora i due Caddyfile filtrano `request>uri`: il primo segmento lungo diventa
+  `/***/`, `/health` resta leggibile. SECRETS dice cosa vale per Cloudflare, che termina il
+  TLS e l'URI lo vede per costruzione. Tocca chi usa l'ingresso Caddy; col Funnel Caddy
+  non è nel percorso.
 
 ## [0.66.0] — 2026-10-01
 

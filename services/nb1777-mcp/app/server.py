@@ -378,9 +378,10 @@ async def notebook_query(notebook_id: str, question: str,
     chiamata verso i 30 s («MCP tool call failed»). Perciò si aspetta al massimo
     `attesa_max` secondi (default 25, tetto 270): se la risposta non c'è ancora, torna
     {stato: "in_corso", query_id, nota} e la query CONTINUA sul server. Ritirala con
-    notebook_query_esito(query_id), oppure RILANCIA la stessa domanda sullo stesso notebook:
-    si aggancia alla query in corso (o finita e non ritirata) invece di farne partire
-    un'altra. Un client che sa aspettare passa attesa_max=270."""
+    notebook_query_esito(query_id), oppure RILANCIA la stessa domanda sullo stesso notebook,
+    con gli stessi source_ids, conversation_id e verbose: si aggancia alla query in corso (o
+    finita e non ritirata) invece di farne partire un'altra. Un client che sa aspettare
+    passa attesa_max=270."""
     async def _corpo():
         _check_auth_or_raise()
         _pulisci_query()
@@ -406,7 +407,7 @@ async def notebook_query(notebook_id: str, question: str,
 @mcp.tool()
 async def notebook_query_esito(query_id: str, attesa_max: float = 25.0) -> dict:
     """Ritira una notebook_query che era tornata `in_corso`. Aspetta al massimo
-    `attesa_max` secondi (default 25): ritorna la risposta (stessa forma di
+    `attesa_max` secondi (default 25, minimo 1, tetto 270): ritorna la risposta (stessa forma di
     notebook_query), di nuovo {stato: "in_corso", …} se NotebookLM non ha ancora finito,
     o l'errore della query. Un query_id sconosciuto è un errore: già ritirato, scaduto
     (30 minuti) o perso a un riavvio del servizio — rilancia la domanda."""

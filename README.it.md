@@ -174,7 +174,7 @@ update sicuro da sola, **appena una release ha 48 ore di vita** (la guarda ogni 
 - Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, **rootfs in sola lettura** su tutti i servizi di `compose.yaml` (`/tmp` è una tmpfs `noexec` da 64 MB), healthcheck su ogni servizio in esercizio (il job `indice-notturno`, che parte e finisce, non ne ha)
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
 - Update firmati **cosign** e verificati **fail-closed di default**; digest immutabili (`images.lock`); backup age + snapshot + **rollback automatico** ([docs/UPDATE.md](docs/UPDATE.md))
-- CI con GitHub Actions **pinnate a SHA** + Dependabot su quattro fronti: action, immagini base, immagini dei compose e dipendenze Python; chiave di backup **fuori dalla VPS** (solo il recipient pubblico sul server)
+- CI con GitHub Actions **pinnate a SHA** + Dependabot su tre fronti (action, immagini base, dipendenze Python) e Renovate sulle immagini di terzi degli overlay compose; chiave di backup **fuori dalla VPS** (solo il recipient pubblico sul server)
 - Gestione visuale opzionale (Portainer) **solo su loopback** + tunnel SSH — vedi [docs/OPS.md](docs/OPS.md)
 
 Tutto questo è passato per una **review difensiva a tappeto** (luglio 2026): la rassegna completa dell'hardening applicato, il threat model, i flussi di dati verso terzi e i residui noti sono in [SECURITY.md](SECURITY.md).

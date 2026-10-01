@@ -125,7 +125,8 @@ vps1777 secrets-status --notify # + notifica Telegram se qualcosa è oltre sogli
 Questo non sorveglia: **applica** `vps1777 update --yes`, con l'intera rete di
 sicurezza del canale gestito (backup, verifica digest, migrazioni, health-gate,
 rollback). Il timer lo accende l'installazione se la feature `autoupdate` è dichiarata
-in `VPS1777_FEATURES` (default sì); update e rollback non ne toccano l'accensione. È il
+in `VPS1777_FEATURES` (default sì), e update e rollback lo riallineano alla stessa riga:
+togli `autoupdate` e il primo update o rollback lo spegne, rimettila e lo riaccende. È il
 motivo per cui il check quotidiano può limitarsi ad avvisare: l'applicazione ha già un
 suo canale sicuro. Dettagli e spegnimento: [OPS.md](OPS.md).
 

@@ -44,10 +44,12 @@ step that covers:
   `github_pat_…`), Anthropic and OpenAI keys (`sk-…`), AWS (`AKIA…`), Google (`AIza…`),
   Slack (`xox…`), Telegram bot tokens, Tailscale auth keys, age keys, JWTs, private-key
   blocks → "[credenziale redatta]"; and the **path** of `*.trycloudflare.com` URLs (a quick
-  tunnel is secret by URL): the host stays. Since 0.64.1 also two secrets **without a
+  tunnel is secret by URL): the host stays. Since 0.64.2 also two secrets **without a
   prefix**: the value assigned to a secret-like name (`RESULT_SECRET=…`, `api_key: …`, at
   least 16 characters with letters and digits; the name stays) and the secret segment in the
-  connector URL (`https://<host>/<secret>/<service>/mcp`).
+  connector URL (`https://<host>/<secret>/<service>/mcp`; since 0.64.3 also without the
+  scheme, `<host>/<secret>/<service>/mcp`, as long as the segment has at least 20 characters
+  with upper case, lower case and digits; host and service stay).
 
 All of this also holds inside **snippets**, which are the delicate spot. The FTS5 snippet
 highlights the searched term with `«»` (since 0.62.2 the redaction reads the text as if the
@@ -60,7 +62,8 @@ case, lower case and digits right after the opening `…`, a private-key block o
 the start or only the end shows. The account's values are matched regardless of case and
 across the markers (`«Mario» Rossi`).
 
-**It does not cover**: passwords and secrets with no recognisable format, IPs, postal
+**It does not cover**: passwords and secrets with no recognisable format and not assigned to
+a secret-like name (a password typed by hand inside a sentence), IPs, postal
 addresses, names of third parties that never appeared in the account data. *Anyone with
 access to the archive finds those secrets with a query.* The phone-number pattern does **not** apply
 inside a canonical uuid (8-4-4-4-12 hex) and leaves valid ISO dates with the time

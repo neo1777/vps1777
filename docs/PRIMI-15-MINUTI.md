@@ -15,7 +15,7 @@ sotto sono quelli **misurati lì**. Dove il tuo risultato può essere diverso, �
 
 | ✅ In locale vedi | ❌ In locale NON vedi |
 |---|---|
-| I **5 servizi** in piedi e `healthy` | L'**ingress HTTPS pubblico** (Tailscale Funnel / Caddy / Cloudflare) |
+| I **5 servizi** dello stack in piedi e `healthy`, più il container `backup` (feature accesa di default) | L'**ingress HTTPS pubblico** (Tailscale Funnel / Caddy / Cloudflare) |
 | Il **pannello admin** e le sue sei schede (Setup, NotebookLM, Archive, Update, Secrets, Audit) | I **connector su claude.ai**: per collegarli, claude.ai deve raggiungerti da Internet |
 | I **due endpoint MCP** che rispondono `401` (ci sono, e chiedono l'autenticazione) | Il **bot Telegram** (serve un token da @BotFather) |
 | Che un segreto sbagliato dà `404` e non `401` (non conferma il percorso) | **NotebookLM** (serve il profilo `profiles/default/` della CLI `nlm`, caricato come tar.gz da `/admin/nlm`) |
@@ -29,7 +29,8 @@ dettaglio che ti nascondiamo per farti provare: è il pezzo che costa una VPS.
 
 - **Linux** con **Docker Engine + Compose v2** (`docker compose version` deve rispondere).
 - **~2 GB** di disco per le immagini (misurato: `2.001GB` a stack in piedi; il download è
-  meno, sono compresse) e una connessione: si scaricano 5 immagini da GHCR.
+  meno, sono compresse) e una connessione: si scaricano 5 immagini da GHCR, più `alpine`
+  da Docker Hub per il container del backup.
 - **Il tuo utente normale, non `root`.** Non è una raccomandazione di stile: i container
   girano come **uid 1000**, e se installi da root i secret nascono `root:root 600` e il
   gateway non riesce a leggerli (lo stack resta in `Restarting`). Il primo utente di una
@@ -86,7 +87,8 @@ salvato una `s` come token del bot.* Non fa danni permanenti — si svuota il fi
 
 > **Deve apparire**, in quest'ordine:
 > `Installerò la release v0.48.1 (pull da ghcr, nessuna build)` → i secret generati uno
-> per uno → il pull delle 5 immagini → `[✓] Stack avviato. Stato:` con la tabella dei
+> per uno → il pull delle immagini (le 5 dello stack, più `alpine` per il backup) →
+> `[✓] Stack avviato. Stato:` con la tabella dei
 > container.
 > *(misurato: **47 secondi** dal lancio all'ultimo container avviato, con le risposte
 > date da uno script. Il grosso è lo scaricamento delle 5 immagini: sulla tua rete può
@@ -118,8 +120,10 @@ salvato una `s` come token del bot.* Non fa danni permanenti — si svuota il fi
 docker compose -f compose.yaml -f compose.ingress.tailscale.yaml ps
 ```
 
-> **Deve apparire**: **cinque** container `Up … (healthy)` — `gateway`, `archive-mcp`,
-> `nb1777-mcp`, `nb1777-bot`, `ocr` — e sotto `PORTS`, per il gateway,
+> **Deve apparire**: **sei** container — i cinque dello stack `Up … (healthy)`, `gateway`,
+> `archive-mcp`, `nb1777-mcp`, `nb1777-bot`, `ocr`, e `backup`, la feature accesa di
+> default che dal 29/09 `setup.sh` avvia al primo giro (`ps` lo elenca anche senza il suo
+> overlay nel comando: è dello stesso progetto) — e sotto `PORTS`, per il gateway,
 > **`127.0.0.1:8080->8080/tcp`**: la porta sta sul **loopback**, non su `0.0.0.0`.
 > `nb1777-bot` risulta `healthy` anche col token vuoto *(misurato)*: il container è vivo,
 > e senza `TELEGRAM_OWNER_ID` il bot è comunque negato a tutti — te l'ha detto il wizard.
@@ -158,12 +162,17 @@ curl -s -o /dev/null -w "segreto sbagliato → %{http_code}\n" -X POST http://12
 ## Quando hai visto abbastanza — smontare
 
 ```bash
-docker compose -f compose.yaml -f compose.ingress.tailscale.yaml --profile ingress.tailscale down -v
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
+  --profile ingress.tailscale --profile ops.backup down -v
 ```
 
-> **Deve apparire**: i cinque container rimossi e i volumi cancellati (`-v`: se lo ometti
-> restano i dati). Le immagini restano nella cache di Docker: `docker image prune -a` se
-> vuoi indietro anche quei ~2 GB. *(misurato: 0 container e 0 volumi rimasti)*
+> **Deve apparire**: i sei container rimossi e i volumi cancellati (`-v`: se lo ometti
+> restano i dati). ⚠️ L'overlay del backup e il suo profilo **servono**: senza, `down`
+> non conosce il servizio `backup`, che resta acceso come orfano, e i volumi che monta
+> restano («Resource is still in use»). *Misurato il 01/10 su un progetto di prova con la
+> stessa forma.* Le immagini restano nella cache di Docker: `docker image prune -a` se
+> vuoi indietro anche quei ~2 GB. *(misurato: 0 container e 0 volumi rimasti — il 07/09
+> sullo stack, quando i container erano cinque; il 01/10 sul progetto di prova, con l'overlay)*
 > La cartella `vps1777/` la puoi cancellare — dentro ci sono i tuoi secret di prova.
 
 ---

@@ -6,7 +6,7 @@
 
 ## Come testato
 - [ ] Test locale con `docker compose up`
-- [ ] Test integration `tests/integration/`
+- [ ] `bash tools/check.sh` verde (lint, guardiani e suite, come i job `lint` e `contract` della CI)
 - [ ] Lint pulito (`ruff check`, `shellcheck`)
 - [ ] CI verde
 

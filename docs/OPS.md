@@ -64,11 +64,12 @@ le elenca (e `deploy.sh` con un blocco equivalente):
 Per cambiare le feature, oggi, i gesti sono due e servono entrambi:
 
 1. **Modifica `VPS1777_FEATURES`** nel `.env`: è ciò che il prossimo reinstall riprodurrà.
-2. **Applica il cambio adesso**, perché nessun comando lo fa al posto tuo:
+2. **Applica il cambio adesso**, se non vuoi aspettare il prossimo update:
    - `autoupdate` — `sudo systemctl enable --now vps1777-auto-update.timer` per
      accenderlo, `sudo systemctl disable --now vps1777-auto-update.timer` per spegnerlo
-     (l'operatore ha `systemctl` nella whitelist sudo). Senza questo passo la riga del
-     `.env` cambia e il timer resta com'era.
+     (l'operatore ha `systemctl` nella whitelist sudo). Senza questo passo il timer resta
+     com'era fino al primo update che installa davvero o al primo rollback, che lo
+     riallineano alla riga del `.env`.
    - `backup`, `portainer` — sono profili compose: la CLI li aggiunge ai `docker compose`
      di update e rollback, quindi entrano al prossimo update **che installa davvero** (a
      versione già corrente `vps1777 update` risponde «già aggiornato» e non tocca lo
@@ -131,9 +132,11 @@ docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
 
 > **Immagini di terzi — digest-pinnate.** Le immagini non-vps1777 usate nei compose
 > (`alpine` per `ops.backup`, `caddy`, `cloudflared`, `portainer`)
-> sono **pinnate al digest** (`tag@sha256:…`) e tracciate da **Dependabot** (v0.27.0):
-> l'aggiornamento arriva come PR verificabile, non come un `latest` che cambia sotto
-> i piedi.
+> sono **pinnate al digest** (`tag@sha256:…`) e tracciate da **Renovate**
+> (`.github/renovate.json`): l'aggiornamento arriva come PR verificabile, non come un
+> `latest` che cambia sotto i piedi. Dependabot, che le seguiva dalla v0.27.0, non ha mai
+> letto gli overlay `compose.ingress.*`/`compose.ops.*` (vedi [SECURITY.md](../SECURITY.md),
+> Supply-chain).
 
 ### `ops.portainer` — cruscotto visuale dei container
 
@@ -183,8 +186,11 @@ root-equivalente dell'host. I volumi dati gli sono invece montati **direttamente
 in sola lettura** sotto `/volumes/<nome>` e `backup.sh` li tara da lì
 (`BACKUP_VOLUMES_DIR`). Lo stesso `backup.sh` resta *dual-context*: sull'**host**
 dumpa via `docker run`, **dentro il container** usa i mount diretti. Col profilo
-`ingress.caddy` esistono anche `caddy-data`/`caddy-config`: nel compose ci sono due
-righe commentate da decommentare per includerli.
+`ingress.caddy` esistono anche `caddy-data`/`caddy-config`: il container non li monta
+(l'overlay vale per tutti gli ingressi), ma il backup dall'host — `./tools/backup.sh` a mano
+e quello che fa `vps1777 update` — li prende, perché chiede a Docker i volumi con
+l'etichetta del progetto e li unisce a quelli di `compose.yaml`. Se mancano, Caddy riottiene
+i certificati da solo all'avvio.
 
 ## Combinare i profili
 

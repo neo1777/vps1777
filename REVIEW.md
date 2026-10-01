@@ -26,7 +26,7 @@ Riserva la severità alta per ciò che in questo repo fa danni veri:
 ## ⚠️ Cosa sappiamo GIÀ — non serve ridircelo
 
 Questo repo tiene un registro dei rilievi di sicurezza in **`security/findings.yml`**:
-78 voci, **67 chiuse**, e le **11 qui sotto non chiuse** (8 parziali, 3 accettate), ognuna con data, motivo e
+78 voci, **66 chiuse**, e le **12 qui sotto non chiuse** (9 parziali, 3 accettate), ognuna con data, motivo e
 stato. Sono già state trovate, discusse e classificate: segnalarle di nuovo consuma il
 giro senza aggiungere niente.
 
@@ -40,6 +40,7 @@ giro senza aggiungere niente.
 | H24 | **accepted** | approvazione manuale dei rilasci: con un solo account non sarebbe un confine; la copre la quarantena di 48 ore dell'auto-update (fino al 27/12/2026) |
 | H28 | **accepted** | secondo fattore (TOTP o passkey) sul pannello admin |
 | H35 | partial | CSP della Mini App raffinata |
+| H50 | partial | il gateway esce ancora su Internet con gli ingressi caddy e cloudflared (rete `ingress`); chiuso solo col profilo Tailscale |
 | H51 | partial | il presidio di salute sonda dal lato in cui il guasto non si vede |
 | H52 | partial | le garanzie di hardening sono certificate per STRINGA, non per comportamento |
 | H56 | **accepted** | seconda metà di H14: nello snapshot pre-update `archive-data` resta in chiaro |
