@@ -191,8 +191,8 @@ registro che la CI verifica.
 - OAuth 2.1 + DCR + PKCE; JWT con `typ` separati (`access` ≠ `admin_cookie` ≠ miniapp).
 - `GATEWAY_SECRET` come path-namespace del proxy MCP.
 - Servizi dello stack non-root, `cap_drop: ALL`, `no-new-privileges`. Gli overlay
-  operativi fanno eccezione e lo dichiarano: `backup` e `watchtower` girano senza
-  queste opzioni, `portainer` ha solo `no-new-privileges` (e il socket Docker: è
+  operativi fanno eccezione e lo dichiarano: `backup` gira senza queste opzioni
+  (`watchtower` era il secondo caso, tolto nella 0.67.0), `portainer` ha solo `no-new-privileges` (e il socket Docker: è
   accesso root all'host, per questo è un profilo opt-in su loopback).
 - Gateway **senza** `docker.sock`; dell'host vede solo la cartella `onboarding/`
   (bind-mount, dove passano intent e stato dell'update). Vede i

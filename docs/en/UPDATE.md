@@ -209,11 +209,12 @@ run again, it says "already converged".
 
 ## What about Watchtower?
 
-The `ops.autoupdate` profile (Watchtower) still exists but is **demoted and
-unsupported alongside** the managed channel: it bypasses backups, migrations,
-health-gate, changelog and rollback. With pinned SemVer tags it's nearly inert
-anyway. `vps1777 update` warns you if it finds it active. Use the managed
-channel.
+**Removed in 0.67.0.** The `ops.autoupdate` profile (Watchtower) bypassed backups,
+migrations, health-gate, changelog and rollback, and its image is archived upstream.
+The update to 0.67.0 stops and removes the `vps1777-watchtower` container if it finds
+it (step 11, with a line in the log). If `VPS1777_FEATURES` still names `watchtower`,
+the CLI says so on every command and ignores it: remove it from `.env`. Automatic
+updating is the `autoupdate` feature (the timer, with quarantine and the safety net).
 
 ## Files and state (where everything lives)
 

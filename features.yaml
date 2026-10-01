@@ -324,25 +324,33 @@ features:
   # se il codice non la mostra più) e le due rinviate-a-giudizio (H43, H22).
 
   - id: ops.autoupdate
-    nome: "Watchtower — auto-update d'origine (DECLASSATO, opt-in legacy NON supportato)"
-    cosa: "Auto-update via container Watchtower. Bypassava le protezioni (niente backup,
-           health-gate, rollback): declassato il 10/06. Il RUOLO auto-update è sostituito da
-           update.auto-timer (active-default). Il PROFILO esiste ancora nel repo → opt-in, MA
-           pericoloso: la voce lo tiene VISIBILE come 'disponibile-ma-da-non-riaccendere',
-           così il divieto viaggia col profilo invece di sparire."
+    nome: "Watchtower — auto-update d'origine (RIMOSSO nella 0.67.0)"
+    cosa: "Auto-update via container Watchtower (overlay compose.ops.watchtower.yaml, profilo
+           ops.autoupdate). Bypassava le protezioni (niente backup, health-gate, rollback):
+           declassato il 10/06, tolto nella 0.67.0. Il RUOLO auto-update è di
+           update.auto-timer (active-default). Una riga `watchtower` rimasta in
+           VPS1777_FEATURES viene avvisata e ignorata (FEATURE_RIMOSSE in tools/vps1777.py);
+           il container rimasto da prima lo ferma e rimuove l'update (rimuovi_watchtower_orfano)."
     dove: ["compose-profile:compose.ops.watchtower.yaml#ops.autoupdate"]
-    status: opt-in    # opt-in, NON removed: il file compose.ops.watchtower.yaml ESISTE ancora
-                      # (removed = 'sparito dal repo' → mentirebbe, e il verificatore v2 lo becca:
-                      # removed+file = STATO≠REALTÀ). Se Neo lo vuole VERAMENTE via: cancellare il
-                      # file E mettere removed. Finché il file c'è, opt-in è l'unica forma coerente. [b82df434]
-    since: "declassato 2026-06-10"
+    status: removed   # era opt-in finché il file esisteva: la nota di b82df434 diceva «se Neo
+                      # lo vuole VERAMENTE via: cancellare il file E mettere removed». Fatto,
+                      # le due cose insieme. Il `dove` resta: è la coordinata con cui il verso
+                      # reale→dichiarato riconosce il profilo — se `ops.autoupdate` ricomparisse
+                      # in un compose, removed+reale = [STATO≠REALTÀ], CI rossa.
+    since: "declassato 2026-06-10 · rimosso 0.67.0"
     decisione: "declassato il 10/06 a 'opt-in, NON supportato' perché bypassa backup/health-gate/
-                rollback. NON riaccendere: nessun percorso di default (installer, compose base) deve
-                attivarlo; se rientra nel default è la regressione di giugno. Il sostituto sicuro è
-                update.auto-timer (active-default). [conv 2026-06-10 b82df434 · verbatim: «Watchtower
-                (ops.autoupdate) DECLASSATO — resta opt-in ma dichiarato NON supportato»]"
+                rollback [conv 2026-06-10 b82df434 · verbatim: «Watchtower (ops.autoupdate)
+                DECLASSATO — resta opt-in ma dichiarato NON supportato»]. RIMOSSO il 01/10/2026
+                (decisione di Neo, 0.67.0): l'immagine containrrr/watchtower è archiviata a monte
+                (repo archived, ultima release v1.7.1 del 11/11/2023, verificato con gh api il
+                01/10/2026) — un container col docker.sock montato su un'immagine che nessuno
+                patcha più. Il sostituto sicuro resta update.auto-timer. [CHANGELOG.md, 0.67.0]"
     verify:
-      compose_profile: {file: compose.ops.watchtower.yaml, profile: ops.autoupdate}
+      # `removed` non si controlla contro il reale (verify-features.py, ACTIVE): la prova
+      # della rimozione è l'ASSENZA del profilo, e la fa il verso reale→dichiarato tramite
+      # il `dove`. Un verify «di presenza» qui mentirebbe sulla direzione del controllo.
+      manual: "rimossa: nessun compose dichiara il profilo ops.autoupdate (lo garantisce il
+               check reale→dichiarato sul `dove`, non questo campo)"
 
   - id: ops.portainer
     nome: "Portainer — UI di gestione container (opt-in)"

@@ -105,7 +105,8 @@ comando_riavvio() {
     case "$f" in
       backup)     file=ops.backup;     prof=ops.backup ;;
       portainer)  file=ops.portainer;  prof=ops.portainer ;;
-      watchtower) file=ops.watchtower; prof=ops.autoupdate ;;
+      # watchtower: tolta nella 0.67.0 (overlay cancellato). Una riga vecchia del .env
+      # la può nominare ancora: cade nel `*)` sotto, e non si suggerisce un -f che non c'è.
       # caddy-dns01: niente profilo suo (vive in ingress.caddy), e solo con quell'ingresso
       # — con un altro la CLI rifiuta, qui non si suggerisce un comando che non serve.
       caddy-dns01) [ "$ingress" = "ingress.caddy" ] && flag="$flag -f compose.ops.caddy-dns01.yaml"

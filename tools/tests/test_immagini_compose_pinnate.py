@@ -8,6 +8,7 @@
 
    Verificata il 10/08 su `origin/main` (206abdf): **5 immagini di terzi su 5**
    portano `@sha256:` — caddy · alpine · cloudflared · watchtower · portainer.
+   (Dalla 0.67.0 sono 4: watchtower è uscita col suo overlay, archiviata a monte.)
    La garanzia REGGE, e come la gemella merita un presidio proprio per questo:
    *una promessa vera e non presidiata è una promessa che nessuno saprà quando
    smette di esserlo.*
@@ -92,8 +93,9 @@ def test_ci_sono_compose_e_immagini_di_terzi_da_controllare():
     terzi = [v for _, _, v in _immagini() if _e_di_terzi(v)]
     assert len(terzi) >= 4, (
         f"solo {len(terzi)} immagini di terzi trovate nei compose: erano 5 il "
-        "10/08/2026 (caddy, alpine, cloudflared, watchtower, portainer). Se gli "
-        "overlay si sono spostati, questo test sta guardando nel vuoto."
+        "10/08/2026 (caddy, alpine, cloudflared, watchtower, portainer), 4 dalla "
+        "0.67.0 (watchtower tolta). Se gli overlay si sono spostati, questo test "
+        "sta guardando nel vuoto."
     )
 
 

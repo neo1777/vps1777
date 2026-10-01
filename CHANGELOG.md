@@ -17,6 +17,27 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   un'immagine di terzi resta fuori dal pattern. Il resto (Actions, basi dei Dockerfile,
   uv) resta a Dependabot. Serve l'app Renovate installata sul repo.
 
+### Rimosso
+- **La feature `watchtower` (profilo `ops.autoupdate`, `compose.ops.watchtower.yaml`).** Era
+  l'auto-update d'origine, declassato dal 10/06 perché bypassava backup, migrazioni,
+  health-gate e rollback. Ora l'immagine `containrrr/watchtower` è archiviata a monte (repo
+  archiviato, ultima release v1.7.1 del novembre 2023, verificato il 01/10/2026): restava
+  un container col Docker socket montato, cioè accesso root all'host, su un'immagine che
+  nessuno patcha più. L'aggiornamento automatico sicuro (`autoupdate`, il timer con
+  quarantena, firme e digest) non cambia.
+  - Chi ha ancora `watchtower` in `VPS1777_FEATURES`: la CLI **non si ferma** (l'update di
+    quella macchina deve poter girare), lo dice una volta per comando e la ignora. `setup.sh`
+    avvisa allo stesso modo; `deploy.sh` avvisa e non la riscrive nel `.env` della VPS.
+  - Il container `vps1777-watchtower` rimasto acceso lo **ferma e rimuove `vps1777 update`**,
+    allo step 11, prima del `down`: togliere l'overlay non lo spegne (per compose diventa un
+    orfano, e `restart: unless-stopped` lo riporta su). Lo si tocca per nome e solo se la
+    label di compose dice `watchtower`. Non `--remove-orphans`: misurato, toglierebbe anche
+    i container delle feature che hai spento di proposito.
+  - Nel ledger la voce `ops.autoupdate` passa da `opt-in` a `removed`: se il profilo tornasse
+    in un compose, `verify-features` sarebbe rosso. Tolti con lei l'eccezione per il socket
+    in `test_docker_sock_perimetro.py` e le due alternative dell'asse «overlay delle
+    feature» di `security/confronta-installer.py`.
+
 ## [0.66.0] — 2026-10-01
 
 **DNS-01 per Caddy, davvero**: la feature `caddy-dns01` con un'immagine costruita e

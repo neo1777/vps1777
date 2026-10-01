@@ -25,10 +25,11 @@ domanda VICINA a quella che si ha in testa.
 
 ## Cosa presidia, e perché l'eccezione è dentro il test
 
-`compose.ops.watchtower.yaml` il socket lo monta davvero, e resta: quel profilo è opt-in,
-non attivo di default, e Watchtower è dichiarato declassato. **L'eccezione non si toglie:
-si NOMINA** — così è una decisione scritta invece di un'assenza di controllo, e aggiungerne
-una seconda richiede di modificare questo file, cioè di dichiararla.
+`compose.ops.portainer.yaml` il socket lo monta davvero, e resta: quel profilo è opt-in e
+non attivo di default. **L'eccezione non si toglie: si NOMINA** — così è una decisione
+scritta invece di un'assenza di controllo, e aggiungerne una seconda richiede di modificare
+questo file, cioè di dichiararla. (Fino alla 0.66.0 l'eccezione nominata per prima era
+`compose.ops.watchtower.yaml`: tolta con la feature nella 0.67.0, e con lei la sua voce.)
 
 E l'eccezione è **condizionata**: vale solo finché accanto al mount resta l'avviso che
 `:ro` non limita l'API. *Senza quell'avviso chi attiva il profilo legge `:ro` e ha ogni
@@ -168,11 +169,10 @@ def sorgente_pericolosa(sorgente: str) -> bool:
 
 # L'eccezione, nominata: file → (ragione, aghi che DEVONO restare accanto al mount).
 # Aggiungerne una significa modificare questa riga, cioè dichiararla per iscritto.
+# (Watchtower ne era la prima, fino alla 0.66.0: tolta con la feature nella 0.67.0.
+#  Un'eccezione per un file che non esiste più è un permesso in bianco per chi lo
+#  ricreasse con quel nome — quindi è uscita da qui insieme al file.)
 ECCEZIONI: dict[str, tuple[str, tuple[str, ...]]] = {
-    "compose.ops.watchtower.yaml": (
-        "profilo ops.autoupdate: opt-in, non attivo di default, Watchtower declassato",
-        ("`:ro` NON LIMITA L'API", "accesso root all'host"),
-    ),
     # 🔎 TROVATO DA QUESTO TEST AL PRIMO GIRO (09/08), e non era nella issue #69: quella
     # nominava solo watchtower e diceva «se un domani un ALTRO compose lo montasse, H13
     # resterebbe verde». Non era un domani — c'era già, e nessuno se n'era accorto perché

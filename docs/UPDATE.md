@@ -204,10 +204,12 @@ primo `vps1777 update` riuscito). È idempotente: rieseguito, dice "già a regim
 
 ## E Watchtower?
 
-Il profilo `ops.autoupdate` (Watchtower) esiste ancora ma è **declassato e non
-supportato in concomitanza** col canale gestito: bypassa backup, migrazioni,
-health-gate, changelog e rollback. Con i tag SemVer pinnati è comunque quasi
-inerte. `vps1777 update` ti avvisa se lo trova attivo. Usa il canale gestito.
+**Rimosso nella 0.67.0.** Il profilo `ops.autoupdate` (Watchtower) bypassava backup,
+migrazioni, health-gate, changelog e rollback, e la sua immagine è archiviata a monte.
+L'update alla 0.67.0 ferma e rimuove il container `vps1777-watchtower` se lo trova
+(step 11, con una riga nel log). Se `VPS1777_FEATURES` nomina ancora `watchtower`, la
+CLI lo dice a ogni comando e la ignora: toglila dal `.env`. L'aggiornamento automatico
+è la feature `autoupdate` (il timer, con quarantena e rete di sicurezza).
 
 ## File e stato (dove vive cosa)
 

@@ -38,7 +38,8 @@ services:
       # senza socket non esiste — è la sua funzione — quindi l'alternativa non è
       # «montarlo meglio», è non attivare il profilo.
       # Qui NON c'è `:ro`, ed è più onesto che averlo: su `docker.sock` il `:ro` limita
-      # il nodo del filesystem e NON le richieste sull'API (vedi compose.ops.watchtower).
+      # il nodo del filesystem e NON le richieste sull'API (la spiegazione stava accanto al
+      # mount di Watchtower, overlay tolto nella 0.67.0: ora sta solo qui).
       # Accettato perché `profiles: [ops.portainer]` è opt-in, la porta è su loopback
       # (accesso via tunnel SSH) e il container ha `no-new-privileges`.
       # 🔒 Presidiato da tools/tests/test_docker_sock_perimetro.py: eccezione NOMINATA,

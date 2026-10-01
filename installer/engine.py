@@ -766,14 +766,15 @@ echo CONFIG_OK
     # SICURO. Le stesse le legge la CLI (vps1777.py) da VPS1777_FEATURES in .env, così
     # install/update/rollback riproducono SEMPRE le stesse feature — è il fix del
     # difetto per cui un reinstall/update lasciava cadere gli opt-in ops.* in silenzio.
-    # `watchtower` = auto-update CRUDO (declassato), escluso dal default e in conflitto.
-    # (suffisso FILE, nome PROFILO): per watchtower differiscono (file ops.watchtower,
-    # profilo ops.autoupdate); per backup/portainer coincidono.
+    # (suffisso FILE, nome PROFILO): per backup/portainer coincidono, ma restano due campi
+    # come in OPS_COMPOSE_FEATURES (vps1777.py). `watchtower` è stata TOLTA nella 0.67.0:
+    # qui non serve l'avviso che danno CLI, setup.sh e deploy.sh, perché questa via non
+    # legge il .env della VPS — `FEATURES` non viene mai valorizzato da fuori e vale il
+    # default di `_features`, che watchtower non l'ha mai contenuta.
     # `caddy-dns01` (01/10/2026): profilo None — l'overlay ridefinisce il servizio `caddy`
     # del profilo ingress.caddy, già acceso; vale solo con quell'ingresso (`_dns01_esito`).
     _OPS_PROFILES = {"backup": ("ops.backup", "ops.backup"),
                      "portainer": ("ops.portainer", "ops.portainer"),
-                     "watchtower": ("ops.watchtower", "ops.autoupdate"),
                      "caddy-dns01": ("ops.caddy-dns01", None)}
 
     def _features(self) -> list[str]:

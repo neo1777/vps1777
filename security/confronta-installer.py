@@ -91,12 +91,16 @@ ASSI: list[tuple[str, str]] = [
     #   `docker compose` dichiara il backup e non avvia il container. deploy.sh ed
     #   engine.py lo passano; setup.sh avviava solo il profilo d'ingress, e il backup
     #   partiva al primo `vps1777 update` (che legge le feature), non al primo giro.
-    #   Un nome per profilo (`ops.backup`, `ops.portainer`, `ops.watchtower` come file,
-    #   `ops.autoupdate` come profilo di watchtower): chi ne perde uno diverge.
+    #   Un nome per profilo (`ops.backup`, `ops.portainer`): chi ne perde uno diverge.
+    #   (Fino alla 0.66.0 c'erano anche `ops.watchtower` come file e `ops.autoupdate` come
+    #   PROFILO di watchtower — non la feature `autoupdate`, che è un timer e non ha
+    #   `ops.` davanti. Tolti con la feature nella 0.67.0: un'alternativa che non può più
+    #   comparire è un asse che misura il vuoto. Se il profilo tornasse in un compose,
+    #   lo ferma verify-features: nel ledger è `removed`, e removed+reale = CI rossa.)
     #   `ops.caddy-dns01` (01/10/2026): il primo overlay senza profilo proprio — c'è solo
     #   come FILE, e tutte e tre le vie lo montano solo con l'ingresso caddy.
     ("overlay delle feature (ops.*)",
-     r"\bops\.(?:backup|portainer|watchtower|autoupdate|caddy-dns01)\b"),
+     r"\bops\.(?:backup|portainer|caddy-dns01)\b"),
 ]
 
 

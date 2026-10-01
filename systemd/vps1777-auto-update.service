@@ -1,14 +1,16 @@
 # vps1777-auto-update.service — auto-update PROGRAMMATO (opt-in, gestito).
 #
-# È l'alternativa SICURA a Watchtower (profilo ops.autoupdate, declassato): invece
-# di auto-pull+restart crudo, lancia lo STESSO motore del pulsante e del terminale
+# È l'aggiornamento automatico del prodotto (fino alla 0.66 conviveva con Watchtower,
+# l'auto-pull+restart crudo, tolto nella 0.67.0: immagine archiviata a monte). Invece
+# di un auto-pull+restart crudo, lancia lo STESSO motore del pulsante e del terminale
 # (`vps1777 update --yes`), quindi eredita gratis backup + verifica firma cosign +
 # migrazioni + health-gate 180s + auto-rollback. Il timer gemello lo schedula.
 # `--yes` salta solo la conferma interattiva; se è già alla latest → no-op.
 # `--eta-minima 48`: installa da solo solo una release pubblicata da almeno 48 ore
 # (quarantena, H24 — vedi quarantena_blocca in tools/vps1777.py).
 # NON `--from-intent`: qui non c'è nessun intent-file del pannello, è il canale
-# programmato. Mutuamente esclusivo con Watchtower — la CLI avvisa se lo trova attivo.
+# programmato. Un container Watchtower rimasto da prima della 0.67.0 lo toglie l'update
+# stesso (rimuovi_watchtower_orfano in tools/vps1777.py).
 #
 # H43: @OPERATOR_USER@ / @REPO@ non sono hardcodati — la CLI (install_systemd_units
 # → render_unit) e il deploy iniziale li sostituiscono coi valori REALI.
