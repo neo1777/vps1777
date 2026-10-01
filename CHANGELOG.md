@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.64.4] — 2026-10-01
+
+**Il gateway_secret non si stampa più davanti a un agente (H77)**: la rotazione e
+l'installazione lo consegnano in un file 600 quando l'output non va a un terminale.
+
 ### Sicurezza
 - **Il gateway_secret si consegna come la password admin (H77).** `rotate-secret.sh
   gateway_secret` stampava `Nuovo gateway_secret: <valore>`, e `deploy.sh` stampava
