@@ -14,9 +14,22 @@ services:
 
   cloudflared:
     profiles: [ingress.cloudflared]
-    image: cloudflare/cloudflared:2024.12.0@sha256:1b92a01338a9a310cf5e1c7b77c61cce333e14117398814e4c124e4e9f7bbde2
+    image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
     container_name: vps1777-cloudflared
     restart: unless-stopped
+    # 🔴 DUE DIFETTI, misurati il 01/10/2026, per cui questo ingresso NON poteva partire
+    #   dal 23/06 (nascita dell'ingresso modulare):
+    #   · la 2024.12.0 NON conosce TUNNEL_TOKEN_FILE: lo ignora e si ferma con
+    #     «"cloudflared tunnel run" requires the ID or name of the tunnel» (lo stesso token
+    #     finto passato per valore, invece, viene letto e rifiutato: «token is not valid»);
+    #   · l'immagine gira come `nonroot` (UID 65532) e il token è 600 dell'operatore
+    #     (UID 1000, docs/SECRETS.md): anche una versione che conosce il file risponde
+    #     «Failed to read token file: … permission denied».
+    #   Cura: una versione che legge il file, e lo stesso UID degli altri servizi del
+    #   progetto. Un tunnel in USCITA non vuole né root né porte privilegiate.
+    #   Prova: 2026.9.3 + --user 1000:1000 + token finto 600 → «token is not valid», cioè
+    #   il file è stato letto. (tools/tests/test_cloudflared_legge_il_token.py)
+    user: "1000:1000"
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
