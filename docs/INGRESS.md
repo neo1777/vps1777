@@ -75,7 +75,7 @@ Caddy fa cert ACME via HTTP-01 al primo avvio.
 Il repo ne ha solo gli accenni, e nessuno dei pezzi è collegato:
 
 - `ingress/Caddyfile` porta la riga `acme_dns cloudflare {env.CF_API_TOKEN}`, **commentata**;
-- `compose.ingress.caddy.yaml` usa l'immagine `caddy:2.8-alpine` di serie (senza plugin
+- `compose.ingress.caddy.yaml` usa l'immagine `caddy:2.11-alpine` di serie (senza plugin
   DNS) e al container passa **solo** `CADDY_DOMAIN` e `CADDY_EMAIL`: `CF_API_TOKEN` **non
   arriva** a Caddy, e nessun file lo legge da `secrets/`;
 - l'override «compose.ingress.caddy-dns01.yaml» che il commento in testa a quel file
@@ -86,10 +86,10 @@ Cloudflare sotto), un override compose che la usi e passi `CF_API_TOKEN` nell'am
 del servizio `caddy`, e la riga `acme_dns` scommentata nel `Caddyfile`.
 
 ```Dockerfile
-FROM caddy:2.8-builder AS builder
+FROM caddy:2.11-builder AS builder
 RUN xcaddy build --with github.com/caddy-dns/cloudflare
 
-FROM caddy:2.8-alpine
+FROM caddy:2.11-alpine
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 ```
 
