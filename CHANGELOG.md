@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.65.0] — 2026-10-01
+
+**`search_ibrida` fa leggere il punto, non l'inizio**: snippet a 64 token e il parametro
+`passaggio`. Sui vocali gli elementi che si leggono senza aprire il file passano da 9 a 17
+su 30.
+
 ### Aggiunto
 - **`search_ibrida` fa leggere il punto, non l'inizio.** Il banco delle lezioni di graphify
   aveva mostrato che il vuoto non è trovare il file (a 20 righe la ricerca porta già 27-29
