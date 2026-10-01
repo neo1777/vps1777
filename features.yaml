@@ -309,11 +309,11 @@ features:
            "tools/tests/test_caddy_dns01.py",
            "docs/INGRESS.md"]
     status: opt-in
-    since: "non rilasciato (01/10/2026)"
+    since: "0.66.0"
     decisione: "01/10/2026, scelta di Neo («lo costruisco davvero»): prima docs/INGRESS.md
                 diceva che DNS-01 NON era predisposto (l'override citato nei commenti non
                 esisteva). Opt-in perché serve un account Cloudflare che gestisca il DNS
-                della zona e un token con Zone.DNS:Edit. [CHANGELOG.md, Non rilasciato]"
+                della zona e un token con Zone.DNS:Edit. [CHANGELOG.md, 0.66.0]"
     verify:
       file_contains: {path: "compose.ops.caddy-dns01.yaml", pattern: "vps1777-caddy-dns01:\\$\\{VPS1777_TAG"}
 
@@ -563,7 +563,7 @@ features:
            "services/archive-mcp/tests/test_sessioni.py",
            "docs/ARCHIVE.md"]
     status: active-default
-    since: "non rilasciato (24/09/2026)"
+    since: "0.51.0"
     verify:
       mcp_tool: {service: archive-mcp, name: get_session}
   - id: archive.get_stirpe
@@ -575,7 +575,7 @@ features:
            "services/archive-mcp/tests/test_sessioni.py",
            "docs/ARCHIVE.md"]
     status: active-default
-    since: "non rilasciato (24/09/2026)"
+    since: "0.51.0"
     verify:
       mcp_tool: {service: archive-mcp, name: get_stirpe}
   - id: archive.bundle-recupero
@@ -591,7 +591,7 @@ features:
            "services/gateway/tests/test_archive_indexer.py#test_ponte_workfiles_e_un_alias_di_recupero",
            "docs/ARCHIVE.md"]
     status: active-default
-    since: "non rilasciato (24/09/2026)"
+    since: "0.51.0"
     verify:
       python_def: {path: services/gateway/app/archive_indexer.py, name: _normalizza_recupero}
   - id: archive.sessioni-filoni
@@ -605,7 +605,7 @@ features:
            "services/gateway/tests/test_archive_indexer.py#test_migrazione_sessioni_alla_chiave_con_file",
            "docs/ARCHIVE.md"]
     status: active-default
-    since: "non rilasciato (25/09/2026)"
+    since: "0.51.2"
     verify:
       python_def: {path: services/gateway/app/archive_indexer.py, name: _ensure_sessioni_filoni}
   - id: archive.bundle-documents
@@ -620,7 +620,7 @@ features:
            "services/gateway/tests/test_archive_indexer.py#test_documents_del_bundle_entrano_come_i_workfiles",
            "docs/ARCHIVE.md"]
     status: active-default
-    since: "non rilasciato (25/09/2026)"
+    since: "0.51.2"
     verify:
       python_def: {path: services/gateway/app/archive_indexer.py, name: _iter_documento_bundle}
   - id: nb.nb_list

@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.66.0] — 2026-10-01
+
+**DNS-01 per Caddy, davvero**: la feature `caddy-dns01` con un'immagine costruita e
+firmata dal progetto. In più Caddy passa a 2.11.4, e l'ingresso Cloudflare Tunnel, che
+dal 23/06 non poteva partire, legge finalmente il suo token.
+
 ### Aggiunto
 - **DNS-01 per l'ingresso Caddy, come feature dichiarata `caddy-dns01`.** Certificati senza
   la porta 80 (o wildcard) con la sfida DNS di Cloudflare. Fino a ieri `docs/INGRESS.md`
@@ -40,6 +46,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   2.8 non compila.
 
 ### Corretto
+- **Il ledger dichiarava «non rilasciate» cinque voci uscite il 24/09**: `get_session`,
+  `get_stirpe` e il prefisso `recupero/` del bundle (0.51.0), i filoni della tabella
+  `sessioni` e `documents/` del bundle (0.51.2). Il loro `since` era rimasto quello scritto
+  il giorno della PR.
 - **L'ingresso Cloudflare Tunnel non poteva partire, dal 23/06.** Due difetti misurati il
   01/10, mentre si preparava DNS-01: `cloudflared` 2024.12.0 ignorava `TUNNEL_TOKEN_FILE`
   (si fermava con «requires the ID or name of the tunnel»), e l'immagine gira come
