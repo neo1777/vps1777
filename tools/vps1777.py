@@ -2746,7 +2746,7 @@ def sync_state_card(repo: Path, version: str) -> None:
 SEGRETI_NON_GENERABILI = {
     "telegram_bot_token": "token rilasciato da BotFather (Telegram)",
     "cloudflared_token": "token del tunnel, dalla dashboard Cloudflare",
-    "cf_api_token": "token API Cloudflare con Zone.DNS:Edit, dalla dashboard Cloudflare "
+    "cf_api_token": "token API Cloudflare con Zone.Zone:Read e Zone.DNS:Edit, dalla dashboard Cloudflare "
                     "(feature caddy-dns01)",
     "admin_password_bcrypt": "hash bcrypt di una password SCELTA (vedi secrets/README.md)",
     # 🔑 NON GENERABILE, e la ragione è la più importante di tutte e quattro (#61): questo
@@ -4329,7 +4329,7 @@ _SECRET_POLICY = [
     # chi lo ha RISCRIVE i record della zona — può puntare il dominio altrove e farsi
     # emettere un certificato valido per lui. Vale più del token del tunnel.
     ("cf_api_token", "cf_api_token.txt", "Token API Cloudflare (DNS-01)", 180, False,
-     "manuale: crea un token nuovo (Zone.DNS:Edit sulla zona) su dash.cloudflare.com, "
+     "manuale: crea un token nuovo (Zone.Zone:Read e Zone.DNS:Edit sulla zona) su dash.cloudflare.com, "
      "scrivilo in secrets/cf_api_token.txt, ricrea caddy (`docker compose … up -d "
      "--force-recreate caddy`), poi revoca il vecchio"),
 ]

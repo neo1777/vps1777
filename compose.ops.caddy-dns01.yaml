@@ -24,8 +24,8 @@
 #   La CLI comunque RIFIUTA la combinazione (tools/vps1777.py, `_feature_incoerenti`),
 #   e gli installer la segnalano: questa riga è la seconda cintura, non la prima.
 #
-# Setup: un token API Cloudflare con permesso Zone → DNS → Edit sulla zona del dominio,
-#   in secrets/cf_api_token.txt (chmod 600) — vedi docs/SECRETS.md.
+# Setup: un token API Cloudflare con i permessi Zone → Zone → Read e Zone → DNS → Edit
+#   sulla zona del dominio, in secrets/cf_api_token.txt (chmod 600) — vedi docs/SECRETS.md.
 #
 # Profilo: nessuno nuovo — vive dentro `ingress.caddy`.
 

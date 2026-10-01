@@ -46,7 +46,9 @@ Lo stage finale ti stampa gli URL.
      (HMAC-SHA256 con chiave `WebAppData`), l'unica che il gateway monta: la
      rigenera a ogni lancio, così segue il token se cambia (vuota se il token è vuoto)
 4. Lancia `docker compose -f compose.yaml -f compose.ingress.<scelta>.yaml --profile
-   ingress.<scelta> up -d` — gli `-f` non sono decorativi: senza, l'overlay ingress non
+   ingress.<scelta> up -d`, più l'overlay e il profilo di ogni feature dichiarata in
+   `VPS1777_FEATURES` (di default `backup`: `-f compose.ops.backup.yaml --profile ops.backup`;
+   `portainer` e `caddy-dns01` allo stesso modo, vedi [OPS.md](OPS.md)) — gli `-f` non sono decorativi: senza, l'overlay ingress non
    viene montato (il `gateway` resta senza `ports:` e manca la rete `funnel`) — le immagini
    vengono **pullate da GHCR** (`compose.yaml` è pull-only: sulla VPS non si
    builda mai; il build locale è solo dev, con l'overlay `compose.build.yaml`)
@@ -78,7 +80,7 @@ Se rilanci `setup.sh`, salta gli step già fatti.
    ```
    La versione è quella con cui gira il server (`services/nb1777-mcp/pyproject.toml`): una CLI diversa può salvare il profilo in un'altra forma. Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm` (login admin). Il gateway lo inoltra a `nb1777-mcp` sul canale interno (il gateway non monta i cookie), che lo estrae sul suo volume e lo usa dalla call successiva.
    Se `nlm` risulta "not found": `uv tool update-shell` (mette `~/.local/bin` nel PATH) e riapri il terminale.
-3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **38** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
+3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **39** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
 4. **Bot Telegram**: `/start` al tuo bot
 5. **Mini App**: nel bot, bottone **Pannello** accanto al campo di testo (o
    `/pannello`) → la plancia mobile: notebook, archivio, secret, update.

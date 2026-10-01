@@ -82,7 +82,9 @@ I controlli che la CI rifarà (`tools/check.sh` li esegue tutti):
 - `python3 security/check_no_leaks.py` (niente segreti), `python3 security/check_findings.py`
   (il registro di sicurezza regge sulle sue evidenze), `python3 tools/verify-features.py`
   (il ledger delle feature), `python3 tools/doc-riferimenti.py` (i file che i doc nominano
-  esistono)
+  esistono), `python3 tools/fatti-nei-doc.py` (i numeri che i doc ripetono — tool MCP,
+  immagini, container, rilievi — sono quelli che il codice conta: se cambi uno di quei
+  numeri nel codice, aggiorna le pagine che il presidio ti nomina)
 - se hai toccato un documento che ha una traduzione (`README.it.md`, `CONTRIBUTING.it.md`,
   le pagine con una copia in `docs/en/`): aggiorna **anche la traduzione**, poi
   `python3 tools/aggiorna-traduzioni.py` — mai il contrario: l'hash senza la traduzione è
@@ -119,8 +121,9 @@ Nella doc i segnaposto si scrivono **riconoscibili** (`tskey-auth-...`,
 `<il-tuo-token>`): mai un valore reale "tanto è di prova".
 
 La rete di sicurezza è `security/check_no_leaks.py`, che gira in CI a ogni PR e fa
-fallire la build. È una rete, non un permesso di distrazione: non ferma `git add -f`
-in locale, e per un file **già** tracciato arriva tardi. Vale anche per te la regola
+fallire la build. È una rete, non un permesso di distrazione: in locale ferma un
+`git add -f` solo se hai installato gli hook (il `pre-commit` la passa su ciò che è
+nell'indice, vedi sopra), e per un file **già** pushato arriva tardi. Vale anche per te la regola
 che vale per il codice — **se un segreto è passato, non basta toglierlo: va
 ruotato.** La storia di git non dimentica.
 

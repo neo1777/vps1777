@@ -313,7 +313,7 @@ features:
     decisione: "01/10/2026, scelta di Neo («lo costruisco davvero»): prima docs/INGRESS.md
                 diceva che DNS-01 NON era predisposto (l'override citato nei commenti non
                 esisteva). Opt-in perché serve un account Cloudflare che gestisca il DNS
-                della zona e un token con Zone.DNS:Edit. [CHANGELOG.md, 0.66.0]"
+                della zona e un token con Zone.Zone:Read e Zone.DNS:Edit. [CHANGELOG.md, 0.66.0]"
     verify:
       file_contains: {path: "compose.ops.caddy-dns01.yaml", pattern: "vps1777-caddy-dns01:\\$\\{VPS1777_TAG"}
 
@@ -1145,6 +1145,26 @@ features:
     verify:
       file_contains: {path: tools/check.sh, pattern: "fase_guardiani\\(\\) \\{"}
 
+  - id: ci.fatti-nei-doc
+    nome: "I numeri che i documenti ripetono li conta il codice"
+    cosa: "`tools/fatti-nei-doc.py` conta dal codice i numeri che le pagine ripetono — i tool
+           MCP di nb1777 e di archive, le immagini pubblicate (e quante sono dello stack),
+           i servizi dello stack e i container di default, i rilievi del registro per stato
+           — e fallisce con file:riga se una frase dichiarata ne dice un altro. Controlla
+           anche che la matrice delle immagini sia la stessa in release, CI, Trivy e
+           rebuild mensile, che la tabella di REVIEW.md nomini esattamente le voci non
+           chiuse e che le famiglie di docs/NB1777.md §2 sommino al totale. Righe con una
+           versione o una data sono storiche e si saltano; il CHANGELOG non si legge; una
+           frase che non si trova più è rossa, così il presidio non si stacca in silenzio.
+           Nasce dall'audit della doc del 01/10/2026 (38 tool contro 39, 5 immagini contro
+           6, 64 rilievi contro 77). Non copre i check obbligatori su main: la fonte è
+           un'impostazione di GitHub, non un file del repo."
+    dove: ["tools/fatti-nei-doc.py", ".github/workflows/ci.yml",
+           "tools/tests/test_fatti_nei_doc.py", "tools/check.sh"]
+    status: active-default
+    verify:
+      file_contains: {path: .github/workflows/ci.yml, pattern: "python3 tools/fatti-nei-doc.py"}
+
   - id: ops.update-progress-journal
     nome: "La progress dell'update conserva lo STATO e, dal 27/09/2026, anche la STORIA"
     cosa: "✅ CHIUSO il 27/09/2026: ogni `progress_write` aggiunge una riga a
@@ -1419,10 +1439,12 @@ features:
   - id: ops.suite-di-test
     nome: "La suite di test, e cosa NON prova"
     cosa: >
-      Cinque file di collaudo: `test_vps1777.py` (il grosso, sulla CLI),
+      I file di collaudo stanno in `tools/tests/` e girano tutti in CI nel job `contract`
+      (i `test_*.py` con pytest, i `test-*.sh` con `tools/esegui-test-bash.sh`). I cinque
+      del censimento qui sotto sono i primi: `test_vps1777.py` (il grosso, sulla CLI),
       `test_no_leaks.py` (il gate anti-leak provato sui suoi stessi pattern),
       `test_migra_chiave_miniapp.py` (H54, la chiave derivata), `test_installer_funnel.py`
-      e `test-backup-retention.sh`. Girano in CI nel job `contract`.
+      e `test-backup-retention.sh`.
       📊 CENSITA il 01/08 su richiesta di un audit che parlava di «tanti controlli
       fittizi»: dei 105 test, **85 importano e chiamano davvero il codice**, 14
       ispezionano (leggono file o l'albero sintattico) e 6 toccano il sistema
@@ -1678,8 +1700,9 @@ features:
       file_contains: {path: "docs/en/MANIFEST.json", pattern: "sorgente_sha256"}
   - id: sec.scan-azionabile-e-rebuild
     nome: "Scan Trivy solo-azionabile + rebuild mensile delle immagini"
-    cosa: "Trivy settimanale sulle 5 immagini pubblicate (ocr compresa: fino a 0.44.1
-           la matrice ne scandiva 4 su 5) con ignore-unfixed + limit-severities-for-sarif:
+    cosa: "Trivy settimanale sulle 6 immagini pubblicate, caddy-dns01 compresa
+           (opzionale, dalla 0.66.0; e ocr: fino a 0.44.1 la matrice ne scandiva 4 su 5),
+           con ignore-unfixed + limit-severities-for-sarif:
            in pagina Security solo le CVE con fix disponibile — al 01/09 la pagina
            portava ~1.400 alert quasi tutti NO-FIX, non azionabili. Il 3 del mese
            rebuild-mensile.yml riconta le CVE con fix sulle immagini pubblicate e, se

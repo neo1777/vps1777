@@ -139,7 +139,9 @@ vps1777 status --json     # per gli script
 
 ## vps1777 version
 
-The deployed versions: repo tag and the version inside each container.
+The deployed versions: repo tag and the version inside each container of the stack. An
+optional image the stack does not use (`caddy-dns01` with the feature off) shows as
+"non attivo".
 
 ```bash
 vps1777 version
@@ -267,7 +269,8 @@ Age and expiry of the secrets (keys, tokens, NotebookLM cookies): it lists what
 is due for rotation. The same list shows the **cosign emergency route** when it is open
 (`VPS1777_REQUIRE_COSIGN=0` in `.env`), with a one-day threshold. It lists separately the
 **expected secrets not found** in `secrets/` — `cloudflared_token` only with the
-Cloudflare profile (up to 0.62.2 it showed up among the missing ones on every install). With `--notify` it alerts about the expired
+Cloudflare profile (up to 0.62.2 it showed up among the missing ones on every install),
+`cf_api_token` only with the `caddy-dns01` feature. With `--notify` it alerts about the expired
 ones on Telegram. The result also appears in `/admin/secrets` (from the file
 `onboarding/secrets_status.json`).
 

@@ -134,7 +134,8 @@ vps1777 status --json     # per gli script
 
 ## vps1777 version
 
-Le versioni deployate: tag del repo e versione dentro ogni container.
+Le versioni deployate: tag del repo e versione dentro ogni container dello stack. Un'immagine
+opzionale che lo stack non usa (`caddy-dns01` a feature spenta) compare come «non attivo».
 
 ```bash
 vps1777 version
@@ -261,7 +262,8 @@ Età e scadenze dei secret (chiavi, token, cookie NotebookLM): elenca cosa è da
 ruotare. Nella stessa lista compare la **via d'emergenza cosign** se è aperta
 (`VPS1777_REQUIRE_COSIGN=0` nel `.env`), con una soglia di un giorno. Elenca a parte i
 **secret attesi e non trovati** in `secrets/` — `cloudflared_token` solo col profilo
-Cloudflare (fino alla 0.62.2 compariva fra i mancanti su ogni installazione). Con `--notify` avvisa su Telegram gli scaduti. Il
+Cloudflare (fino alla 0.62.2 compariva fra i mancanti su ogni installazione), `cf_api_token`
+solo con la feature `caddy-dns01`. Con `--notify` avvisa su Telegram gli scaduti. Il
 risultato compare anche in `/admin/secrets` (dal file `onboarding/secrets_status.json`).
 
 Se non trova **nessun** secret da misurare esce **2**: non è «tutto a posto», è «non ho

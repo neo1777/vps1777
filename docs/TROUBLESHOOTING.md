@@ -111,7 +111,9 @@ Se dopo l'install resta "not found": `uv` mette i binari in `~/.local/bin` →
 
 Il `200` nei log del gateway non dice niente: la risposta MCP viaggia in streaming, e
 l'esito del tool sta dentro. nb1777-mcp scrive una riga per ogni chiamata (dalla 0.63.3
-anche le riuscite e le interrotte), senza contenuti (H41):
+anche le riuscite e le interrotte), senza contenuti (H41) — per tutti i tool tranne i tre
+della memoria (`canonico`, `memoria_check`, `memoria_ack`), che leggono file locali e non la
+scrivono:
 
 ```bash
 docker logs --since 2h vps1777-nb1777-mcp-1 2>&1 | grep -E "tool .* (ok in|fallito dopo|interrotto dopo)"
@@ -123,7 +125,11 @@ docker logs --since 2h vps1777-nb1777-mcp-1 2>&1 | grep -E "tool .* (ok in|falli
 - `interrotto dopo Ns: il client ha chiuso la richiesta`: il client ha smesso di aspettare.
   Da claude.ai succede verso i 30 s («MCP tool call failed»), ed è per questo che
   `notebook_query` dalla 0.63.3 non tiene il client oltre `attesa_max` (default 25 s):
-  torna `in_corso` con un `query_id` da ritirare con `notebook_query_esito`.
+  torna `in_corso` con un `query_id` da ritirare con `notebook_query_esito`. Se il client
+  non vede `notebook_query_esito` (lo schema dei tool è quello di prima della 0.63.3, e
+  claude.ai lo tiene finché il connettore non si riconnette), **rilancia la stessa domanda**
+  sullo stesso notebook, con le stesse fonti, conversazione e `verbose`: dalla 0.63.4 si
+  aggancia alla query in corso invece di farne partire un'altra.
 
 ## `/admin/nlm` — "il tar non contiene profiles/default/cookies.json"
 

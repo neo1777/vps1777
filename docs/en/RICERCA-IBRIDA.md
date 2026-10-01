@@ -59,7 +59,7 @@ wins on vectors alone.
 | `limit` | 20 | rows returned, from 1 to 200: above 200 it keeps 200, below 1 it is an error |
 | `since` / `until` | `""` | time window (ISO, `ts >= since`, `ts <= until`), as in `search`. It applies to **both** lists; rows without a ts stay out |
 | `campi` | `tutto` | `testo` keeps only the rows that have words, in the vector branch too (a vector does not say whether it hit the words or the actions) |
-| `speaker` | `""` | who wrote the row (`human`, `assistant`, `tool`, `system`, `unknown`), as in `search`. It filters both lists |
+| `speaker` | `""` | who wrote the row (`human`, `assistant`, `tool`, `system`, `other`, `unknown`), as in `search`. It filters both lists |
 | `k_rrf`, `peso_fts` | 30, 1.5 | the fusion: the measured values. Changing them is an experiment, not a tuning |
 | `snippet_tokens` | 64 | length of the FTS snippet (64 is also the FTS5 ceiling: above it, it truncates silently). It was 32 up to 0.64.4 |
 | `passaggio` | 0 | a number of words, up to 400: replaces the snippet with the window of that many words where the question's terms are densest, taken from the **whole** text (below) |

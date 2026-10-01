@@ -236,6 +236,9 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
       `scartati` > 0 = l'indice è disallineato (dopo un re-ingest) e quei
       risultati sono stati TOLTI, non restituiti sbagliati; `registro: false` =
       indice vecchio, non verificabile. Lo `stato` dice cosa fare.
+    - `parametri`: con che cosa è stata fatta la ricerca — `k_rrf`, `peso_fts`, il
+      `modello` di embedding, `testi` (quante formulazioni: la domanda più le
+      riformulazioni tenute), `snippet_tokens` e `passaggio`.
 
     ⚠️ Richiede il modello di embedding e almeno un indice `.vec.db` sul volume.
     Se mancano NON ricade in silenzio su FTS5: solleva un errore che dice cosa

@@ -127,8 +127,9 @@ vps1777 secrets-status --notify # + notifica Telegram se qualcosa è oltre sogli
 This one doesn't watch: it **applies** `vps1777 update --yes`, with the entire
 safety net of the managed channel (backup, digest verification, migrations,
 health-gate, rollback). The installation switches the timer on if the `autoupdate`
-feature is declared in `VPS1777_FEATURES` (default yes); update and rollback don't
-touch whether it is on. It's the reason the daily check can limit itself to notifying:
+feature is declared in `VPS1777_FEATURES` (default yes), and update and rollback
+realign it to the same line: remove `autoupdate` and the first update or rollback turns
+it off, put it back and it turns it on again. It's the reason the daily check can limit itself to notifying:
 application already has its own safe channel. Details and how to turn it off:
 [OPS.md](../OPS.md) (Italian).
 

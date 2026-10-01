@@ -42,8 +42,11 @@ DUE MECCANISMI, e la differenza conta:
 
 TERZO MECCANISMO (27/09/2026): le CREDENZIALI in formato riconoscibile (prefissi dei
 fornitori: GitHub, Anthropic/OpenAI, AWS, Google, Slack, Telegram, Tailscale, age, JWT,
-blocchi di chiave privata) e il percorso degli URL trycloudflare. Stesso limite dei
-pattern: un segreto senza formato (una password scritta a mano) resta scoperto.
+blocchi di chiave privata) e il percorso degli URL trycloudflare. Dal 30/09/2026 anche
+due segreti senza prefisso: il valore assegnato a un nome da segreto (ASSEGNAZIONE,
+`RESULT_SECRET=…`) e il segmento segreto nell'URL del connettore (URL_CONNETTORE, con o
+senza schema). Stesso limite dei pattern: un segreto senza formato e senza un nome da
+segreto davanti (una password scritta a mano dentro una frase) resta scoperto.
 
 COSA NON COPRE, dichiarato invece che taciuto — è precisamente l'errore che questo file
 ripara, e ripeterlo qui sarebbe grottesco:

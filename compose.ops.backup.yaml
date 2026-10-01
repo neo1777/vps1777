@@ -49,8 +49,9 @@ services:
       # caddy-data e caddy-config (solo col profilo ingress.caddy) NON sono qui, di proposito:
       # questo overlay vale per tutti gli ingress, e montarli dichiarerebbe due volumi vuoti
       # anche a chi non usa Caddy. Non è un buco: il backup dall'host (`./tools/backup.sh` a
-      # mano e quello che fa `vps1777 update`) chiede i volumi a `docker compose config
-      # --volumes` e con Caddy attivo li include; e se mancano, Caddy riottiene i certificati
+      # mano e quello che fa `vps1777 update`) unisce i volumi di `docker compose config
+      # --volumes` a quelli che Docker etichetta come del progetto, e con Caddy attivo i suoi
+      # ci sono (tools/backup.sh, «volumi-del-progetto»); e se mancano, Caddy riottiene i certificati
       # da solo all'avvio (ACME). Prima qui c'era «decommentali»: una trappola, perché questo
       # file è gestito e il primo update cancella la modifica a mano (29/09/2026).
       # NIENTE mount della chiave privata age: il backup CIFRA con la sola chiave

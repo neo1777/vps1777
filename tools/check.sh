@@ -201,6 +201,8 @@ fase_guardiani() {
   passo "gate anti-leak (check_no_leaks)" python3 security/check_no_leaks.py
   passo "i doc nominano file che esistono — autoprova" python3 tools/doc-riferimenti.py "$AUTOPROVA"
   passo "i doc nominano file che esistono" python3 tools/doc-riferimenti.py
+  passo "i numeri nei doc — autoprova" python3 tools/fatti-nei-doc.py "$AUTOPROVA"
+  passo "i numeri nei doc li conta il codice" python3 tools/fatti-nei-doc.py
   if ! manca "compose valido (produzione e sviluppo)" docker; then
     passo "compose valido (produzione)" docker compose -f compose.yaml config -q
     passo "compose valido (sviluppo, overlay di build)" \

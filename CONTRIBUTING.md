@@ -85,7 +85,10 @@ The checks CI will run again (`tools/check.sh` runs them all):
   the environment (the ruff one does `uv tool install`)
 - `python3 security/check_no_leaks.py` (no secrets), `python3 security/check_findings.py`
   (the security register holds up against its evidence), `python3 tools/verify-features.py`
-  (the feature ledger), `python3 tools/doc-riferimenti.py` (the files the docs name exist)
+  (the feature ledger), `python3 tools/doc-riferimenti.py` (the files the docs name exist),
+  `python3 tools/fatti-nei-doc.py` (the numbers the docs repeat — MCP tools, images,
+  containers, findings — are the ones the code counts: if you change one of those numbers
+  in the code, update the pages the guardian names)
 - if you touched a document that has a translation (`README.it.md`, `CONTRIBUTING.it.md`,
   the pages with a copy in `docs/en/`): update **the translation too**, then
   `python3 tools/aggiorna-traduzioni.py` — never the other way round: the hash without
@@ -122,8 +125,9 @@ Placeholders in docs are written to be **recognizable** (`tskey-auth-...`,
 `<your-token>`): never a real value "because it's just a test one".
 
 The safety net is `security/check_no_leaks.py`, which runs in CI on every PR and
-fails the build. It's a net, not a license to be careless: it doesn't stop
-`git add -f` locally, and for a file **already** tracked it comes too late. The
+fails the build. It's a net, not a license to be careless: locally it stops a
+`git add -f` only if you installed the hooks (the `pre-commit` runs it on what is in the
+index, see above), and for a file **already** pushed it comes too late. The
 same rule that applies to code applies to you — **if a secret slipped through,
 removing it isn't enough: rotate it.** Git history doesn't forget.
 

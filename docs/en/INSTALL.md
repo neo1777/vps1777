@@ -49,7 +49,9 @@ The final stage prints the URLs for you.
      regenerated on every run, so it follows the token if that changes (empty if the
      token is empty)
 4. Runs `docker compose -f compose.yaml -f compose.ingress.<scelta>.yaml --profile
-   ingress.<scelta> up -d` — the `-f` flags are not decorative: without them, the ingress
+   ingress.<scelta> up -d`, plus the overlay and profile of every feature declared in
+   `VPS1777_FEATURES` (by default `backup`: `-f compose.ops.backup.yaml --profile ops.backup`;
+   `portainer` and `caddy-dns01` the same way, see [OPS.md](../OPS.md) (Italian)) — the `-f` flags are not decorative: without them, the ingress
    overlay is not mounted (the `gateway` is left with no `ports:` and the `funnel` network
    is missing) — the images are **pulled from GHCR** (`compose.yaml` is pull-only: on the
    VPS nothing ever gets built; the local build is dev-only, with the
@@ -83,7 +85,7 @@ If you re-run `setup.sh`, it skips the steps already done.
    ```
    The version is the one the server runs with (`services/nb1777-mcp/pyproject.toml`): a different CLI may save the profile in another shape. Upload `nlm-profile.tgz` to `<PUBLIC_BASE>/admin/nlm` (admin login). The gateway forwards it to `nb1777-mcp` over the internal channel (the gateway doesn't mount the cookies), which extracts it onto its volume and uses it from the next call.
    If `nlm` comes up "not found": `uv tool update-shell` (puts `~/.local/bin` in the PATH) and reopen the terminal.
-3. **claude.ai connector**: Settings → Integrations → Add → paste the URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (and `/nb1777/mcp`). Authorize → admin login. `archive` exposes the archive search tools (list and details in [ARCHIVE.md](ARCHIVE.md)), `nb1777` exposes **38** of them ([NB1777.md](../NB1777.md) (Italian)). Connectors **persist** across gateway restarts (DCR saved to disk).
+3. **claude.ai connector**: Settings → Integrations → Add → paste the URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (and `/nb1777/mcp`). Authorize → admin login. `archive` exposes the archive search tools (list and details in [ARCHIVE.md](ARCHIVE.md)), `nb1777` exposes **39** of them ([NB1777.md](../NB1777.md) (Italian)). Connectors **persist** across gateway restarts (DCR saved to disk).
 4. **Telegram bot**: `/start` to your bot
 5. **Mini App**: in the bot, the **Pannello** button next to the text field (or
    `/pannello`) → the mobile control deck: notebooks, archive, secrets, update.

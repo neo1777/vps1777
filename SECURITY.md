@@ -75,7 +75,7 @@ finestra 8080 dell'onboarding, l'eccezione nota di questa riga).
 > (`0.0.0.0` = il fallback è attivo) e `ss -tlnp | grep :8080`.
 
 > **La porta del pannello di setup: dalla 0.41.0 è sul loopback su tutti e tre i profili.**
-> `compose.onboarding.yaml` pubblica il pannello su **`${ONBOARDING_BIND:-127.0.0.1}:8080`**: raggiungibile dalla macchina, non dalla rete. **Con `caddy` e `cloudflared` al pannello si arriva dal dominio HTTPS del proxy**, che è servito dal primo avvio perché la destinazione è configurata prima — `CADDY_DOMAIN` è obbligatorio in `.env` ([`compose.ingress.caddy.yaml:26`](compose.ingress.caddy.yaml), `${CADDY_DOMAIN:?…}`), e per cloudflared il tunnel è pre-creato con l'hostname che punta a `http://gateway:8080` e il token in `secrets/cloudflared_token.txt`. **In ogni caso, e per `tailscale` prima che il tunnel esista, resta la via del tunnel SSH**: `ssh -L 8080:127.0.0.1:8080 <utente>@<vps>`, poi `http://127.0.0.1:8080/admin/setup` dal proprio computer.
+> `compose.onboarding.yaml` pubblica il pannello su **`${ONBOARDING_BIND:-127.0.0.1}:8080`**: raggiungibile dalla macchina, non dalla rete. **Con `caddy` e `cloudflared` al pannello si arriva dal dominio HTTPS del proxy**, che è servito dal primo avvio perché la destinazione è configurata prima — `CADDY_DOMAIN` è obbligatorio in `.env` ([`compose.ingress.caddy.yaml:28`](compose.ingress.caddy.yaml), `${CADDY_DOMAIN:?…}`), e per cloudflared il tunnel è pre-creato con l'hostname che punta a `http://gateway:8080` e il token in `secrets/cloudflared_token.txt`. **In ogni caso, e per `tailscale` prima che il tunnel esista, resta la via del tunnel SSH**: `ssh -L 8080:127.0.0.1:8080 <utente>@<vps>`, poi `http://127.0.0.1:8080/admin/setup` dal proprio computer.
 >
 > | profilo | l'overlay onboarding | la 8080, per default | chi la lega al loopback |
 > |---|---|---|---|
@@ -116,7 +116,9 @@ Threat model dichiarato:
   funzionale (`/admin/archive` scrive i `.db` indicizzati), tracciato invece di taciuto — e
   `:rw` anche il job `indice-notturno`, che aggiorna gli indici `.vec.db` (senza rete, con un
   tetto di memoria; vedi [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md))
-- Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
+- Hardening host automatico all'install, nel suo perimetro: `unattended-upgrades` + `fail2ban` con la
+  jail `sshd` (`H45`). I tre installer **non** toccano `sshd_config` (login con password e di root
+  restano come li trovi) e **non** configurano un firewall: quelli restano all'operatore
 - Strumenti di management (Portainer) mai esposti: solo loopback + tunnel SSH (vedi [docs/OPS.md](docs/OPS.md)) (`H47`)
 
 ## Rassegna difensiva — l'hardening applicato
@@ -266,7 +268,8 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
 ### Supply-chain & aggiornamenti
 
 - **Scansione vulnerabilità delle immagini** (`v0.44.2`): Trivy ogni lunedì
-  sulle 5 immagini **pubblicate** (ciò che gli utenti eseguono, non un build
+  sulle 6 immagini **pubblicate** (le 5 dello stack e `caddy-dns01`, opzionale: ciò che
+  gli utenti eseguono, non un build
   ad-hoc), con `--ignore-unfixed`: in pagina Security va **solo ciò su cui si
   può agire** — le CVE con una versione corretta pubblicata. Le CVE senza fix
   (il rumore di fondo di ogni immagine Debian: al 01/09/2026 erano ~1.400
@@ -303,8 +306,8 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   Dependabot legge solo i `FROM`, e il digest di un tag di versione non ha ragioni di
   cambiare. I plugin di esempio restano col tag, perché sono punti di partenza fuori da
   Dependabot.
-- **CI obbligatoria su `main`** (27/09/2026, decisione dell'owner): i 9 job della CI
-  (lint, contract, verify-features, chiusura-issue, le 5 build) sono *required status
+- **CI obbligatoria su `main`** (27/09/2026, decisione dell'owner): i 10 job della CI
+  (lint, contract, verify-features, chiusura-issue, le 6 build) sono *required status
   checks* con `enforce_admins`, quindi nessun commit entra in `main` senza CI verde,
   nemmeno quelli dell'owner: anche il commit che apre una versione passa da una PR.
   Prima «merge solo dopo la CI verde» era tenuta dalla disciplina, non da un blocco.
@@ -400,7 +403,7 @@ interamente sulla VPS.
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** I 64 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 78 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -446,14 +449,14 @@ Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 67 |
-| **parziali** | 8 |
+| **chiusi** | 66 |
+| **parziali** | 9 |
 | **accettati** | 3 |
 | **aperti** | 0 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
 (`H2`) — sono chiusi e verificati in produzione. Della fascia alta restano **parziali**
-`H4`, `H5` e `H51`, ognuno col suo residuo scritto nel registro.
+`H4`, `H5`, `H50` e `H51`, ognuno col suo residuo scritto nel registro.
 
 I tre **accettati** sono decisioni, non dimenticanze. Niente 2FA sul pannello admin
 (`H28`): è un gateway mono-utente dietro Tailscale Funnel, con password bcrypt-12 +
@@ -470,10 +473,12 @@ per un commit: l'aggiornamento automatico ha installato il fix di `H50` da sé e
 senza che nessuno toccasse la macchina, con la
 controprova che dallo stesso momento un altro container esce regolarmente (senza
 quella, un timeout non distingue un blocco mirato da una rete guasta). Chiusa il
-**27/08**, su due misure in produzione (la voce le porta). Negli altri due profili
-d'ingresso (caddy, cloudflared) il gateway riprende la rete condivisa col proxy e lì
-l'uscita resta aperta: sta scritto nella voce, e si chiude quando anche quelli avranno
-una via d'ingresso senza uscita — o quando la si accetterà con una motivazione scritta.
+**27/08** per il profilo Tailscale, su due misure in produzione (la voce le porta). Negli
+altri due profili d'ingresso (caddy, cloudflared) il gateway riprende la rete condivisa col
+proxy e lì l'uscita resta aperta: per questo la voce è **parziale** (lo stato lo dice dal
+01/10; prima diceva `closed` e solo il testo raccontava il residuo), e si chiude quando
+anche quelli avranno una via d'ingresso senza uscita — o quando la si accetterà con una
+motivazione scritta.
 
 `H51` non viene da un audit: viene da un **guasto vero**. Quel fix di
 `H50`, applicato, ha reso il servizio irraggiungibile da Internet per un'ora e

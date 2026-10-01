@@ -135,6 +135,14 @@ jobs:
         run: |
           python3 tools/doc-riferimenti.py --autoprova
           python3 tools/doc-riferimenti.py
+      # I numeri che i doc ripetono (tool MCP, immagini, container, rilievi) li conta il
+      # codice: una pagina che dice un altro numero è rossa. Nasce dall'audit della doc
+      # del 01/10/2026 — «38 tool» in cinque pagine con 39 nel codice, «5 immagini» con
+      # sei, «64 rilievi» con 77. Stdlib, come doc-riferimenti; l'autoprova gira prima.
+      - name: I numeri nei doc li conta il codice
+        run: |
+          python3 tools/fatti-nei-doc.py --autoprova
+          python3 tools/fatti-nei-doc.py
       # Entrambe le combinazioni devono restare valide: produzione (solo
       # immagini ghcr) e sviluppo (overlay di build locale).
       - name: Validate compose (production — pull only)

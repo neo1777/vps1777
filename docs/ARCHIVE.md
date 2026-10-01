@@ -41,10 +41,12 @@ copre:
   `github_pat_…`), chiavi Anthropic e OpenAI (`sk-…`), AWS (`AKIA…`), Google (`AIza…`),
   Slack (`xox…`), token di bot Telegram, auth-key Tailscale, chiavi age, JWT, blocchi di
   chiave privata → «[credenziale redatta]»; e il **percorso** degli URL
-  `*.trycloudflare.com` (un tunnel rapido è segreto per URL): l'host resta. Dalla 0.64.1
+  `*.trycloudflare.com` (un tunnel rapido è segreto per URL): l'host resta. Dalla 0.64.2
   anche due segreti **senza prefisso**: il valore assegnato a un nome da segreto
   (`RESULT_SECRET=…`, `api_key: …`, almeno 16 caratteri con lettere e cifre; il nome resta)
-  e il segmento segreto nell'URL del connettore (`https://<host>/<segreto>/<servizio>/mcp`).
+  e il segmento segreto nell'URL del connettore (`https://<host>/<segreto>/<servizio>/mcp`;
+  dalla 0.64.3 anche senza schema, `<host>/<segreto>/<servizio>/mcp`, purché il segmento
+  abbia almeno 20 caratteri con maiuscole, minuscole e cifre; host e servizio restano).
 
 Tutto questo vale anche dentro gli **snippet**, che sono il punto delicato. Lo snippet di
 FTS5 evidenzia il termine cercato con `«»` (dalla 0.62.2 la redazione guarda il testo come
@@ -57,7 +59,8 @@ minuscole e cifre subito dopo il `…` iniziale, un blocco di chiave privata di 
 solo l'inizio o solo la fine. I valori dell'anagrafica si cercano senza badare alle
 maiuscole e attraverso i marcatori (`«Mario» Rossi`).
 
-**Non copre**: password e segreti senza un formato riconoscibile, IP, indirizzi postali,
+**Non copre**: password e segreti senza un formato riconoscibile e non assegnati a un nome
+da segreto (una password scritta a mano dentro una frase), IP, indirizzi postali,
 nomi di terzi mai comparsi nell'anagrafica. *Chiunque abbia accesso all'archivio trova
 quei segreti con una query.* Il pattern dei telefoni **non** si applica dentro un uuid canonico
 (8-4-4-4-12 esadecimali) e lascia intatte le date ISO valide con l'ora

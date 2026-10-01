@@ -105,7 +105,9 @@ Poi su [claude.ai](https://claude.ai) → Settings → Integrations → Add conn
 https://<host>.ts.net/<GATEWAY_SECRET>/archive/mcp
 https://<host>.ts.net/<GATEWAY_SECRET>/nb1777/mcp
 ```
-(il `GATEWAY_SECRET` è stampato dal deploy; login OAuth con email+password admin.)
+(il `GATEWAY_SECRET` lo consegna il deploy: a schermo se lo lanci da un terminale, altrimenti
+in un file `600` — con le URL dei connettori già composte — che la riga `RESULT_SECRET_FILE=`
+nomina (H77); login OAuth con email+password admin.)
 
 > ⚠️ **Dopo una reinstallazione** questi URL cambiano SEMPRE (il secret è
 > rigenerato; e l'hostname, se il device Tailscale è stato ricreato): i connector

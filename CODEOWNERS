@@ -3,11 +3,15 @@
 # Nato dalla provocazione dell'audio round-3 (26/07): "check_findings.py gira
 # in CI, ma niente impedisce a una PR di riscriverlo per farlo passare sempre".
 # Misurato da Fucina via `gh api`: vero, e per un motivo più semplice di un
-# attaccante — su main non c'è NESSUN required status check, quindi la CI
-# verde è oggi un commento a margine, non una condizione per il merge.
+# attaccante — su main allora non c'era NESSUN required status check, e la CI
+# verde era un commento a margine. Dal 27/09/2026 i job della CI sono required
+# status checks (SECURITY.md, «CI obbligatoria su `main`»): senza CI verde non si
+# entra. Ma la provocazione resta vera: una PR che riscrive il controllo per farlo
+# passare porta con sé anche la sua CI verde.
 #
 # Questo file da solo non basta: serve "Require review from Code Owners"
 # nelle branch protection di main, che va abilitato da chi ha accesso alle
-# impostazioni del repository — è una decisione, non un default.
+# impostazioni del repository — è una decisione, non un default, e oggi non è
+# acceso (la protezione di main non chiede review).
 
 /security/  @neo1777
