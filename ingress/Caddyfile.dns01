@@ -63,9 +63,16 @@
 		header_up X-Forwarded-Proto {scheme}
 	}
 
-	# log
+	# log — con il primo segmento dell'URI REDATTO (H78, 01/10/2026). Il gateway_secret
+	# vive nel path del proxy MCP (/<SECRET>/<servizio>/mcp) e l'access-log JSON di
+	# Caddy scrive `request.uri` così com'è: misurato con caddy:2.11, una richiesta →
+	# una riga col segreto in chiaro. Il filtro lo sostituisce con /***/ (la stessa
+	# forma del filtro di uvicorn nel gateway); /health e i path corti restano leggibili.
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			request>uri regexp "^/[A-Za-z0-9_-]{16,}/" "/***/"
+		}
 	}
 }

@@ -3795,3 +3795,52 @@ findings:
         output: "3 passed"
         exit: 0
         quando: "2026-10-01"
+  - id: H78
+    severity: medium
+    title: "L'access-log di Caddy scriveva il gateway_secret: l'URI del proxy MCP (/<SECRET>/<servizio>/mcp) finiva intero in request.uri"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-10-01"
+      come: lettura
+      nota: >
+        Rilievo di Sagoma dal censimento interno sullo standard: SECRETS.md diceva che il
+        segreto nel path era «redatto anche a valle, in Caddy/Cloudflare», ma il Caddyfile
+        aveva `log { output stdout format json }` senza filtri. Misurato con
+        caddy:2.11-alpine: una richiesta a /<segreto>/archive/mcp → una riga di log col
+        segreto in chiaro. Sulla VPS di riferimento l'ingresso è Tailscale Funnel, quindi
+        lì Caddy non è nel percorso; tocca chi installa con l'ingresso Caddy.
+    since: unreleased
+    why: >
+      Il gateway redigeva il segreto nel suo access-log (uvicorn, v0.24.0), e la frase di
+      SECRETS.md estendeva la garanzia a Caddy e Cloudflare senza che nessun codice la
+      reggesse. Caddy logga l'URI intero; Cloudflare termina il TLS e l'URI lo vede per
+      costruzione. Un log che contiene il namespace del proxy è una copia del segreto in
+      chiaro su disco, ruotata solo dalla ritenzione dei log.
+    evidence:
+      - file: ingress/Caddyfile
+        contains:
+          - "request>uri regexp"
+      - file: ingress/Caddyfile.dns01
+        contains:
+          - "request>uri regexp"
+      - file: tools/tests/test_caddy_log_senza_segreto.py
+        contains:
+          - "def test_il_log_di_caddy_redige_il_primo_segmento("
+    fix: >
+      Il blocco log dei due Caddyfile passa da `format filter` con `wrap json` e
+      `request>uri regexp "^/[A-Za-z0-9_-]{16,}/" "/***/"`: il primo segmento lungo
+      dell'URI diventa /***/ (la stessa forma del filtro di uvicorn), /health e i path
+      corti restano leggibili. SECRETS.md dice ora cosa vale per Caddy e cosa per
+      Cloudflare.
+    prova:
+      - comando: "docker run caddy:2.11-alpine con il blocco log di prima; curl /<segreto>/archive/mcp; docker logs | grep -c <segreto>"
+        dove: "banco locale, senza la cura"
+        output: "1"
+        exit: 0
+        quando: "2026-10-01"
+      - comando: "lo stesso, col blocco log filtrato"
+        dove: "banco locale, con la cura"
+        output: "0 righe col segreto; uri «/***/archive/mcp», «/health» intatto"
+        exit: 0
+        quando: "2026-10-01"
