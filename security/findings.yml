@@ -3753,7 +3753,7 @@ findings:
         rotazione. È la stessa radice di H76: le righe RESULT_SECRET e l'URL del connettore
         di deploy.sh. Sulla VPS, dei 5 segreti in uso solo il gateway_secret compare in
         chiaro nell'archivio (2 righe in 2 DB; conteggio senza valori).
-    since: unreleased
+    since: v0.64.4
     why: >
       H75 aveva curato la password admin con consegna_password; il gateway_secret ha lo
       stesso destino (va dato una volta a chi installa o ruota) ma era rimasto alla stampa
