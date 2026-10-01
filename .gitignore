@@ -7,14 +7,14 @@ secrets/*
 .env.*.local
 
 # ───── Export di sessione — MAI committare ─────
-# `/export` di una sessione di lavoro produce AAAA-MM-GG-HHMMSS-<slug>.txt: è il
-# transcript completo di quello che ci si è detti lavorando — password incollate,
+# `/export` di una sessione di lavoro produce AAAA-MM-GG-HHMMSS-<slug>.txt (e
+# l'estensione la sceglie chi esporta: .md, .html, nessuna): è il transcript completo di quello che ci si è detti lavorando — password incollate,
 # IP, path locali, dati personali. Non ha l'aria di un segreto (è un .txt con un
 # nome innocuo) ed è esattamente per questo che è il file più pericoloso del repo.
 # Tienili fuori: se ti serve conservarli, mettili in una cartella fuori dal repo.
 # La rete di sicurezza a valle è `security/check_no_leaks.py`, in CI — perché
 # questa riga non ferma `git add -f` né salva un file già tracciato.
-20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-*.txt
+20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-*
 
 # I transcript di sessione veri e propri: stessa classe, forma diversa. Su una
 # macchina di lavoro ne girano a centinaia — la probabilità che uno finisca in

@@ -42,7 +42,9 @@ from pathlib import Path
 
 # ── R1 — roba che per natura non appartiene al repo ───────────────────────────
 # a) `/export` di Claude Code produce: 2026-07-14-084038-<slug-della-prima-riga>.txt
-SESSION_EXPORT = re.compile(r"(^|/)\d{4}-\d{2}-\d{2}-\d{6}-.*\.txt$")
+#    La forma è nel NOME, non nell'estensione: lo stesso transcript salvato come .md
+#    o .html è lo stesso file (fino alla 0.67.0 la regola guardava solo .txt).
+SESSION_EXPORT = re.compile(r"(^|/)\d{4}-\d{2}-\d{2}-\d{6}-[^/]+$")
 
 # b) I transcript di sessione veri e propri: stessa classe degli export (la
 #    conversazione integrale, password incollate comprese). Su una macchina di

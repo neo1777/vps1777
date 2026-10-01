@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Un export di sessione resta fuori dal repo qualunque estensione abbia.** Il `.gitignore`
+  e la regola R1 del gate anti-leak riconoscevano l'export di `/export` solo come
+  `AAAA-MM-GG-HHMMSS-<slug>.txt`: lo stesso transcript salvato come `.md` o `.html` passava
+  tutte e due le reti. Ora la forma si legge nel nome e l'estensione non conta. Un test
+  controlla le due reti sugli stessi casi, compresi i nomi datati che NON sono export (una
+  data senza l'ora a sei cifre, o non in testa al nome) e che devono passare.
+
 ## [0.67.0] — 2026-10-01
 
 **La documentazione torna a dire il vero, e un guardiano la tiene lì**: 43 derive corrette
