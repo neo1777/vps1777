@@ -4,6 +4,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **`search_ibrida` fa leggere il punto, non l'inizio.** Il banco delle lezioni di graphify
+  aveva mostrato che il vuoto non è trovare il file (a 20 righe la ricerca porta già 27-29
+  elementi su 30) ma leggerlo: lo snippet si fermava prima della risposta. Con un secondo
+  conteggio (S: l'elemento si legge senza aprire il file) sulle 15 domande dei CRITERIO:
+  - lo snippet passa da 32 a **64 token** di default (64 è anche il tetto di FTS5): vocali
+    da 9 a 13 elementi su 30, verbali da 9 a 11, Telegram invariato;
+  - il parametro nuovo **`passaggio`** (0 = spento, fino a 400 parole) sostituisce lo
+    snippet con la finestra più fitta di termini della domanda, presa dal testo intero:
+    vocali 17 con 200 parole (20 con `limit=20`). Costa token, circa 270 per riga a 200
+    parole, ed è dichiarato.
+  RICERCA-IBRIDA e ARCHIVE IT/EN aggiornate.
+
 ## [0.64.4] — 2026-10-01
 
 **Il gateway_secret non si stampa più davanti a un agente (H77)**: la rotazione e

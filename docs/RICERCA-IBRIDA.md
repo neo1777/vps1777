@@ -56,13 +56,31 @@ modello che vinca sui soli vettori.
 | `campi` | `tutto` | `testo` tiene solo le righe che hanno parole, anche nel ramo vettoriale (un vettore non dice se ha colpito le parole o le azioni) |
 | `speaker` | `""` | chi ha scritto la riga (`human`, `assistant`, `tool`, `system`, `unknown`), come in `search`. Filtra tutte e due le liste |
 | `k_rrf`, `peso_fts` | 30, 1.5 | la fusione: i valori misurati. Cambiarli è un esperimento, non una regolazione |
-| `snippet_tokens` | 32 | lunghezza dello snippet FTS |
+| `snippet_tokens` | 64 | lunghezza dello snippet FTS (64 è anche il tetto di FTS5: oltre, tronca in silenzio). Era 32 fino alla 0.64.4 |
+| `passaggio` | 0 | un numero di parole, fino a 400: sostituisce lo snippet con la finestra di quel numero di parole dove i termini della domanda sono più fitti, presa dal testo **intero** (sotto) |
 | `riformulazioni` | nessuna | fino a 3 altri modi di dire la domanda. Ognuno porta le sue due liste, la fusione resta una e il `limit` lo stesso (sotto). Vuote e doppioni si scartano, più di 3 è un errore; `query_fts` vale solo per la domanda |
 
 Con un filtro (`speaker`, `since`, `until`) il ramo vettoriale chiede al knn più
 vicini (10 volte `limit` invece di 3), perché dopo gli scarti resti una lista vera
 da fondere. Il filtro si applica **dopo** il knn: se nella finestra non c'è niente
 di vicino alla domanda, il ramo vettoriale torna vuoto e la risposta è quella di FTS5.
+
+### Leggere il punto, non l'inizio: snippet e passaggio (0.65.0)
+
+Lo stesso banco, con un secondo conteggio, S: l'elemento **si legge** nello snippet, senza
+aprire il file (almeno quattro parole di fila di una citazione della risposta attesa).
+
+| prime 10 righe | vocali (voce-1777) | gruppo Telegram | 21 verbali |
+|---|---|---|---|
+| snippet di 32 token (il default fino alla 0.64.4) | 9 su 30 | 12 | 9 |
+| snippet di 64 token (il default ora) | 13 | 12 | 11 |
+| `passaggio=120` | 14 | 12 | 12 |
+| `passaggio=200` | 17 | 12 | 12 |
+| `passaggio=200`, `limit=20` | 20 | 16 | 14 |
+
+Il guadagno sta tutto sui testi lunghi: un messaggio di Telegram entra già intero nello
+snippet. Il passaggio costa token, circa 270 per riga a 200 parole: si chiede quando
+si leggono vocali, verbali o chat lunghe, non per ogni ricerca.
 
 ### Le riformulazioni, e quanto valgono (0.64.0)
 

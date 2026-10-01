@@ -512,7 +512,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                   riformulazioni: list[str] | None = None,
                   k_rrf: int = semantica.RRF_K,
                   peso_fts: float = semantica.RRF_PESO_FTS,
-                  snippet_tokens: int = 32) -> dict[str, Any]:
+                  snippet_tokens: int = 64, passaggio: int = 0) -> dict[str, Any]:
     """Ricerca ibrida FTS5 + vettoriale con fusione RRF pesata.
 
     Ritorna {righe, indici, parametri}: le righe come `search`, più `origine`
@@ -528,6 +528,10 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     # lo usa da sé, senza passare da FTS)
     fts.valida_filtri(speaker=speaker, campi=campi)
     testi = semantica.testi_della_ricerca(query, riformulazioni)
+    if not 0 <= passaggio <= semantica.PASSAGGIO_MAX:
+        raise ValueError(f"passaggio={passaggio}: da 0 (spento) a {semantica.PASSAGGIO_MAX} "
+                         "parole. Una finestra più larga è il messaggio intero: per quello "
+                         "c'è get_context.")
     limit = _limite(limit)
     s = get_settings()
     model_dir = Path(s.archive_model_dir)
@@ -572,6 +576,10 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             #    semplicemente metà fusione.
             espressione = (query_fts if i == 0 else "") or \
                 semantica.query_fts_da_naturale(testo)
+            if i == 0:
+                # i termini del passaggio vengono dalla domanda; se il ramo FTS tace
+                # (meno di due termini con segnale) si usano le parole della domanda
+                termini = semantica.termini_della_query(espressione or testo)
             rows_fts: list[dict[str, Any]] = []
             if espressione:
                 try:
@@ -651,8 +659,18 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             continue
         # ③ fusione: una sola, su tutte le liste di tutti i testi
         fusi = semantica.fondi_rrf_liste(liste, k=k_rrf)
+        testi_pieni: dict[str, str] = {}
+        if passaggio and fusi:
+            scelti = fusi[:limit]
+            seg = ",".join("?" * len(scelti))
+            testi_pieni = dict(conn.execute(
+                f"SELECT uuid, content FROM messages WHERE uuid IN ({seg})", scelti))
         for u in fusi[:limit]:
             r = dict(per_uuid[u])
+            if passaggio and u in testi_pieni:
+                # il passo dove i termini sono più fitti, dal testo intero: lo snippet
+                # di FTS5 si ferma a 64 token, quello vettoriale ai primi 400 caratteri
+                r["snippet"] = semantica.passaggio(testi_pieni[u] or "", termini, passaggio)
             r["db"] = name
             r["snapshot"] = snap
             r["origine"] = ("entrambi" if u in in_fts and u in in_vec
@@ -677,7 +695,8 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         "indici": meta_per_db,
         "parametri": {"k_rrf": k_rrf, "peso_fts": peso_fts,
                       "modello": semantica.MODELLO_ATTESO,
-                      "testi": len(testi)},
+                      "testi": len(testi), "snippet_tokens": snippet_tokens,
+                      "passaggio": passaggio},
     }
 
 @_serializzata

@@ -296,3 +296,21 @@ def test_troppe_riformulazioni_sono_un_errore_detto(archivio):
     modulo, _, _ = archivio
     with pytest.raises(ValueError, match="al massimo 3"):
         modulo.search_ibrida("x", db="arch", riformulazioni=["a", "b", "c", "d"])
+
+
+@vec
+def test_passaggio_sostituisce_lo_snippet_e_ha_un_tetto(archivio, monkeypatch) -> None:
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    lungo = " ".join(["riempitivo"] * 300) + " il punto cercato sta qui " + " ".join(["coda"] * 300)
+    _rw(db, ("UPDATE messages SET content = ? WHERE uuid = 'u2'", (lungo,)))
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    r = modulo.search_ibrida("punto cercato", db="arch", limit=3, passaggio=20)
+    riga = next(x for x in r["righe"] if x["uuid"] == "u2")
+    assert "punto cercato" in riga["snippet"]
+    assert r["parametri"]["passaggio"] == 20
+    with pytest.raises(ValueError, match="passaggio"):
+        modulo.search_ibrida("punto cercato", db="arch", passaggio=5000)

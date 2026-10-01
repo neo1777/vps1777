@@ -383,7 +383,9 @@ features:
            questo repo combatte). `search` resta invariata: contratto intatto.
            Dalla 0.64.0 accetta `riformulazioni` (≤3): ogni testo porta le sue due
            liste e la fusione resta una, stesso limit (RAG-Fusion; banco del 30/09:
-           +1/+3 elementi su 30 nelle prime 10 righe, 0 a 20)."
+           +1/+3 elementi su 30 nelle prime 10 righe, 0 a 20). Dalla 0.65.0 snippet a 64
+           token e `passaggio` (≤400 parole, la finestra più fitta del testo intero):
+           sui vocali gli elementi leggibili senza aprire il file passano da 9 a 17."
     dove: ["mcp-tool:archive-mcp/search_ibrida", "services/archive-mcp/app/semantica.py",
            "docs/RICERCA-IBRIDA.md"]
     status: active-default

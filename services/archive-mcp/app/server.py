@@ -157,8 +157,9 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
 def search_ibrida(query: str, db_name: str = "", limit: int = 20,
                   query_fts: str = "", since: str = "", until: str = "",
                   campi: str = "tutto", k_rrf: int = 30, peso_fts: float = 1.5,
-                  snippet_tokens: int = 32, speaker: str = "",
-                  riformulazioni: list[str] | None = None) -> dict[str, Any]:
+                  snippet_tokens: int = 64, speaker: str = "",
+                  riformulazioni: list[str] | None = None,
+                  passaggio: int = 0) -> dict[str, Any]:
     """Cerca per SENSO, non per lessico: FTS5 + vettori fusi (issue #281).
 
     ⚖️ QUANDO USARLA — e quando no. `search` (FTS5) resta il tool giusto quando
@@ -204,7 +205,16 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
         k_rrf, peso_fts: parametri di fusione. I default sono quelli misurati
             (plateau k=20-40, peso 1.2-1.5): cambiarli è un esperimento, non
             una regolazione — il banco vale per questi.
-        snippet_tokens: lunghezza dello snippet FTS.
+        snippet_tokens: lunghezza dello snippet FTS (default 64, che è anche il
+            tetto di FTS5: oltre, tronca in silenzio).
+        passaggio: 0 (default) o un numero di parole, fino a 400. Sostituisce lo
+            snippet con la finestra di quel numero di parole dove i termini della
+            domanda sono più fitti, presa dal testo INTERO. Serve sui testi lunghi
+            (vocali, verbali, chat lunghe), dove lo snippet si ferma prima della
+            risposta: misurato il 01/10 su 30 elementi di vocali, quelli che si
+            leggono senza aprire il file passano da 13 (snippet 64) a 14 con 120
+            parole e 17 con 200 (20 con limit 20). Costa token: 200 parole per riga, su 10 righe, sono
+            circa 2.700 token. Sui messaggi brevi non cambia niente.
         riformulazioni: fino a 3 altri modi di dire la domanda (vuote e
             doppioni si scartano; più di 3 è un errore). Il `query_fts` vale
             solo per la domanda.
@@ -235,7 +245,8 @@ def search_ibrida(query: str, db_name: str = "", limit: int = 20,
     return db.search_ibrida(query, db_name, limit, query_fts=query_fts,
                             since=since, until=until, campi=campi, k_rrf=k_rrf,
                             peso_fts=peso_fts, snippet_tokens=snippet_tokens,
-                            speaker=speaker, riformulazioni=riformulazioni)
+                            speaker=speaker, riformulazioni=riformulazioni,
+                            passaggio=passaggio)
 
 
 @mcp.tool()
