@@ -39,6 +39,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   1KB = 1000). È anche la linea su cui si costruisce il plugin DNS di Cloudflare, che su
   2.8 non compila.
 
+### Corretto
+- **L'ingresso Cloudflare Tunnel non poteva partire, dal 23/06.** Due difetti misurati il
+  01/10, mentre si preparava DNS-01: `cloudflared` 2024.12.0 ignorava `TUNNEL_TOKEN_FILE`
+  (si fermava con «requires the ID or name of the tunnel»), e l'immagine gira come
+  `nonroot` mentre il token è 600 dell'operatore («Failed to read token file: permission
+  denied» anche con una versione che lo conosce). Ora `cloudflared` 2026.9.3, fissato per
+  digest, gira come `1000:1000`, lo stesso UID degli altri servizi e dei segreti. Prova:
+  con un token finto 600 risponde «token is not valid», cioè il file è stato letto. Un
+  test tiene ferme le due condizioni. L'immagine era ferma perché Dependabot non legge gli
+  overlay `compose.*.*.yaml` (rilievo a parte).
+
 ## [0.65.0] — 2026-10-01
 
 **`search_ibrida` fa leggere il punto, non l'inizio**: snippet a 64 token e il parametro
