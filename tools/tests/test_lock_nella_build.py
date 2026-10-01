@@ -20,12 +20,31 @@ from pathlib import Path
 import pytest
 
 RADICE = Path(__file__).resolve().parents[2]
-SERVIZI = sorted(p.parent for p in (RADICE / "services").glob("*/Dockerfile"))
+# Un lock uv ha senso dove ci sono dipendenze Python da risolvere, cioè dove c'è un
+# `pyproject.toml`. Il criterio si DERIVA dal servizio, non da una lista di nomi esenti:
+# `caddy-dns01` (01/10/2026) è un binario Go compilato con xcaddy, senza Python — la sua
+# riproducibilità la tengono i digest @sha256 delle due FROM e la versione esplicita del
+# plugin (`@v0.2.4`), non un uv.lock. Un servizio Python nuovo nasce col pyproject e
+# finisce qui dentro da solo.
+_CON_DOCKERFILE = sorted(p.parent for p in (RADICE / "services").glob("*/Dockerfile"))
+SERVIZI = [s for s in _CON_DOCKERFILE if (s / "pyproject.toml").is_file()]
+SENZA_PYTHON = [s for s in _CON_DOCKERFILE if s not in SERVIZI]
 
 
 def test_ci_sono_servizi_da_guardare():
     """Se questa lista fosse vuota i test sotto passerebbero senza guardare niente."""
     assert SERVIZI, "nessun servizio con Dockerfile: il test non ha misurato nulla"
+
+
+@pytest.mark.parametrize("servizio", SENZA_PYTHON, ids=lambda p: p.name)
+def test_un_servizio_senza_pyproject_non_usa_uv(servizio: Path):
+    """L'esenzione regge solo se il servizio davvero non installa dipendenze Python: un
+    `uv sync` (o un `pip install`) in un Dockerfile senza pyproject vorrebbe dire che le
+    dipendenze arrivano da un posto che questo test non guarda."""
+    righe = [r for r in (servizio / "Dockerfile").read_text(encoding="utf-8").splitlines()
+             if not r.lstrip().startswith("#")
+             and ("uv sync" in r or "pip install" in r or "uv pip" in r)]
+    assert not righe, f"{servizio.name}: installa dipendenze Python senza pyproject: {righe}"
 
 
 @pytest.mark.parametrize("servizio", SERVIZI, ids=lambda p: p.name)

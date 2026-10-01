@@ -2,7 +2,8 @@ name: Release
 
 # Su tag v* (da qualunque branch):
 #   guard   → VERSION file == tag (e CHANGELOG ha la sezione, per le stable)
-#   release → build+push delle 5 immagini su ghcr, firmate cosign keyless
+#   release → build+push delle immagini su ghcr (le 5 dello stack + caddy-dns01,
+#             opzionale), firmate cosign keyless
 #   bundle  → runtime bundle (file non-immagine + images.lock) allegato a una
 #             GitHub Release; la Release è endpoint di check (/releases/latest),
 #             sorgente changelog e host del bundle per `vps1777 update`.
@@ -109,7 +110,12 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr]
+        # caddy-dns01 (01/10/2026): immagine OPZIONALE (feature caddy-dns01), ma esce da
+        # qui come le altre — build, firma, digest in images.lock — perché chi la accende
+        # deve poterla verificare come il resto. `vps1777 update` verifica solo le
+        # immagini che lo stack usa davvero (`immagini_attive`), quindi a feature spenta
+        # questa voce del lock non pesa.
+        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr, caddy-dns01]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Buildx
@@ -183,7 +189,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           lock='{}'
-          for svc in gateway archive-mcp nb1777-mcp nb1777-bot ocr; do
+          for svc in gateway archive-mcp nb1777-mcp nb1777-bot ocr caddy-dns01; do
             ref="ghcr.io/${OWNER}/vps1777-${svc}:${VERSION}"
             digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -r '.digest')"
             [ -n "$digest" ] && [ "$digest" != "null" ] || { echo "::error::digest non risolto per $ref"; exit 1; }

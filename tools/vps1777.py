@@ -46,7 +46,21 @@ GITHUB_REPO = os.environ.get("VPS1777_GITHUB_REPO", "neo1777/vps1777")
 API_BASE = f"https://api.github.com/repos/{GITHUB_REPO}"
 USER_AGENT = "vps1777-updater"
 
-SERVICES = ["gateway", "archive-mcp", "nb1777-mcp", "nb1777-bot", "ocr"]
+SERVICES = ["gateway", "archive-mcp", "nb1777-mcp", "nb1777-bot", "ocr", "caddy-dns01"]
+# ⚠️ `caddy-dns01` è un'immagine del progetto (firmata, in images.lock) ma OPZIONALE: la
+#   usa solo la feature `caddy-dns01`. Stare qui le dà il digest nel `.env` come alle
+#   altre (versione_env); ciò che NON implica più è «dev'essere sul disco dopo ogni
+#   pull»: `verify_digests` verifica le immagini che lo stack attivo usa davvero, e
+#   quelle del lock che non usa le DICE invece di pretenderle (01/10/2026).
+# Il nome è quello dell'IMMAGINE (vps1777-<nome>), non sempre del servizio compose: per
+#   caddy-dns01 il servizio è `caddy` (SERVIZIO_COMPOSE).
+SERVIZIO_COMPOSE = {"caddy-dns01": "caddy"}
+# Le immagini OPZIONALI: le sole che `verify_digests` può non trovare sul disco. Le altre
+#   si verificano SEMPRE, qualunque cosa dica `immagini_attive`: se un giorno il nome che
+#   stampa compose e quello di `image_ref` divergessero (un `v` nel tag, la base), l'insieme
+#   degli attivi uscirebbe vuoto e un verify che salta tutto sarebbe un verde falso su ogni
+#   update. Il condizionale vale solo dove serve.
+SERVICES_OPZIONALI = {"caddy-dns01"}
 # Volumi dati (nomi corti compose). Prefisso progetto: vps1777_
 NLM_AUTH_VOLUME = "nlm-auth"
 DATA_VOLUMES = ["gateway-data", "archive-data", NLM_AUTH_VOLUME]
@@ -651,11 +665,18 @@ def ingress_profile(repo: Path) -> str:
 # i due DIFFERISCONO: il file è compose.ops.watchtower.yaml ma il profilo è
 # ops.autoupdate — derivare il file dal profilo darebbe compose.ops.autoupdate.yaml
 # (inesistente). Backup/portainer: file e profilo coincidono.
-OPS_COMPOSE_FEATURES = {
+# `caddy-dns01` (01/10/2026) è il terzo caso: un overlay SENZA profilo proprio. Ridefinisce
+# il servizio `caddy` dell'ingresso, che vive nel profilo `ingress.caddy` — già acceso da
+# INGRESS_PROFILE. Da qui il `None`: nessun `--profile` in più. Con un ingresso diverso
+# la combinazione non ha senso e la CLI la RIFIUTA (`_feature_incoerenti`).
+OPS_COMPOSE_FEATURES: dict[str, tuple[str, str | None]] = {
     "backup": ("ops.backup", "ops.backup"),
     "portainer": ("ops.portainer", "ops.portainer"),
     "watchtower": ("ops.watchtower", "ops.autoupdate"),
+    "caddy-dns01": ("ops.caddy-dns01", None),
 }
+# feature → l'unico INGRESS_PROFILE con cui ha senso. Letta da `_feature_incoerenti`.
+FEATURE_SOLO_CON_INGRESSO = {"caddy-dns01": "ingress.caddy"}
 DEFAULT_FEATURES = {"backup", "autoupdate"}   # backup + auto-update SICURO accesi di default
 
 
@@ -666,6 +687,43 @@ def enabled_features(repo: Path) -> set[str]:
     if val is None:
         return set(DEFAULT_FEATURES)
     return {f.strip() for f in val.split(",") if f.strip() and f.strip() != "none"}
+
+
+def _feature_incoerenti(repo: Path) -> str | None:
+    """Il messaggio di rifiuto se una feature dichiarata non può stare con l'ingresso
+    dichiarato; None se sono compatibili.
+
+    🔑 PERCHÉ RIFIUTARE e non ignorare (01/10/2026, feature `caddy-dns01`). L'overlay
+    ridefinisce il servizio `caddy`: con Tailscale o Cloudflared resterebbe spento
+    (`profiles: [ingress.caddy]`, verificato con `compose config --services`), quindi
+    ignorarlo sarebbe *innocuo*. Ma innocuo e silenzioso è la forma esatta del difetto
+    che VPS1777_FEATURES esiste per impedire: una riga del `.env` che dichiara una cosa
+    che non succede. Chi l'ha scritta crede di avere il certificato via DNS-01; il
+    rifiuto glielo dice al primo comando invece che alla scadenza del certificato.
+    Gli installer invece AVVISANO e proseguono senza l'overlay: lì lo stack sta nascendo,
+    e fermarlo per una feature che non ha effetto costerebbe più del difetto.
+    """
+    ingresso = ingress_profile(repo)
+    feats = enabled_features(repo)
+    for feat, serve in FEATURE_SOLO_CON_INGRESSO.items():
+        if feat in feats and ingresso != serve:
+            return (f"VPS1777_FEATURES contiene `{feat}`, che funziona solo con "
+                    f"INGRESS_PROFILE={serve}, ma il .env dice INGRESS_PROFILE={ingresso}. "
+                    f"Non applico una feature che non avrebbe effetto: togli `{feat}` da "
+                    f"VPS1777_FEATURES, oppure passa a {serve} (docs/INGRESS.md).")
+    return None
+
+
+def _overlay_feature(repo: Path) -> list[tuple[str, str | None]]:
+    """(suffisso del file, profilo o None) degli overlay delle feature attive — la regola
+    che `compose_cmd` e `_compose_sorgenti` applicano ciascuna per conto suo (vedi la
+    docstring di `_compose_sorgenti`: non sono unificate). Rifiuta prima, se la
+    combinazione feature/ingresso è incoerente."""
+    motivo = _feature_incoerenti(repo)
+    if motivo:
+        die(motivo)
+    feats = enabled_features(repo)
+    return [v for feat, v in OPS_COMPOSE_FEATURES.items() if feat in feats]
 
 
 def assicura_webapp_secret(repo: Path) -> None:
@@ -722,10 +780,9 @@ def compose_cmd(repo: Path, *, files: list[Path] | None = None) -> list[str]:
     extra_profiles: list[str] = []
     if files is None:
         files = [repo / "compose.yaml", repo / f"compose.{profile}.yaml"]
-        feats = enabled_features(repo)
-        for feat, (file_sfx, prof) in OPS_COMPOSE_FEATURES.items():
-            if feat in feats:
-                files.append(repo / f"compose.{file_sfx}.yaml")
+        for file_sfx, prof in _overlay_feature(repo):
+            files.append(repo / f"compose.{file_sfx}.yaml")
+            if prof:            # None = l'overlay vive in un profilo già acceso (caddy-dns01)
                 extra_profiles.append(prof)
     for f in files:
         cmd += ["-f", str(f)]
@@ -1335,8 +1392,44 @@ def versione_set(repo: Path, tag: str, rif: dict[str, str] | None) -> None:
     env_set_molti(repo, versione_env(tag, rif))
 
 
-def verify_digests(repo: Path, lock: dict[str, str], version: str) -> None:
+def immagini_attive(repo: Path, version: str, files: list[Path] | None = None) -> set[str]:
+    """I servizi di SERVICES la cui immagine lo stack attivo usa DAVVERO, alla `version`.
+
+    Si chiede a compose (`config --images`, che rispetta i profili: misurato il 01/10/2026,
+    con Tailscale + overlay caddy-dns01 l'immagine vps1777-caddy-dns01 NON compare, con
+    Caddy sì) invece di dedurlo dalle feature: la lista delle feature è una copia della
+    regola, il compose È la regola. I digest sono spenti (`versione_env(x, None)`) perché
+    la domanda è sul nome per TAG, quello con cui verify_digests cerca.
+    ⚠️ Se compose non risponde, SOLLEVA: «non so quali immagini usa lo stack» non è
+    «nessuna», e un verify che non verifica niente sarebbe un verde falso.
+    """
+    res = run([*compose_cmd(repo, files=files), "config", "--images"],
+              capture=True, check=False, env=versione_env(version, None))
+    if res.returncode != 0:
+        raise RuntimeError("non so quali immagini usa lo stack (compose config --images "
+                           f"fallito: {(res.stderr or '').strip()[:200]})")
+    usate = {r.strip() for r in res.stdout.splitlines() if r.strip()}
+    return {svc for svc in SERVICES if image_ref(repo, svc, version) in usate}
+
+
+def verify_digests(repo: Path, lock: dict[str, str], version: str,
+                   attivi: set[str] | None = None) -> None:
+    """Le immagini scaricate combaciano con images.lock?
+
+    `attivi` = i servizi che lo stack usa (`immagini_attive`). 🔴 PRIMA (fino al
+    01/10/2026) si pretendeva sul disco OGNI servizio di SERVICES: giusto finché tutte
+    le immagini erano obbligatorie. Con `caddy-dns01`, opzionale, ogni update di chi
+    non ha la feature sarebbe morto qui su «immagine non presente dopo il pull» — il
+    pull non la scarica, perché il compose non la usa. Ma saltarla in silenzio
+    sarebbe l'altro difetto: un servizio del lock che non si verifica si DICE.
+    None = tutti (il comportamento di prima, per chi non sa dire quali). Solo le
+    immagini di SERVICES_OPZIONALI possono essere saltate: le obbligatorie si verificano
+    comunque, anche se `attivi` le dimenticasse.
+    """
     for svc in SERVICES:
+        if attivi is not None and svc in SERVICES_OPZIONALI and svc not in attivi:
+            log(f"{svc}: nel lock ma non attivo in questo stack — non verificato")
+            continue
         ref = image_ref(repo, svc, version)
         locked = lock.get(svc, "")
         res = run(["docker", "image", "inspect", "--format",
@@ -2560,6 +2653,8 @@ def sync_state_card(repo: Path, version: str) -> None:
 SEGRETI_NON_GENERABILI = {
     "telegram_bot_token": "token rilasciato da BotFather (Telegram)",
     "cloudflared_token": "token del tunnel, dalla dashboard Cloudflare",
+    "cf_api_token": "token API Cloudflare con Zone.DNS:Edit, dalla dashboard Cloudflare "
+                    "(feature caddy-dns01)",
     "admin_password_bcrypt": "hash bcrypt di una password SCELTA (vedi secrets/README.md)",
     # 🔑 NON GENERABILE, e la ragione è la più importante di tutte e quattro (#61): questo
     #   è l'unico che a fabbricarlo a caso **sembrerebbe riuscito**. `openssl rand -hex 32`
@@ -2592,7 +2687,10 @@ def _compose_sorgenti(root: Path, repo: Path) -> list[Path]:
     `compose_cmd` produce anche `extra_profiles` e NON filtra i file assenti, questa
     li filtra e non ha profili — farle chiamare l'una dall'altra cambierebbe il
     comportamento di docker, che è un secondo fix travestito da refactor. Chi tocca
-    una **deve toccare l'altra**. (Trovato da b82df434 su questa docstring, che nella
+    una **deve toccare l'altra**. (01/10/2026: QUALI overlay montare ora lo decide
+    `_overlay_feature`, chiamata da entrambe — compreso il rifiuto di una feature
+    incompatibile con l'ingresso, che deve valere uguale per il comando e per il
+    pre-flight. Il resto delle differenze, sopra, resta.) (Trovato da b82df434 su questa docstring, che nella
     prima stesura prometteva «da qui, una volta»: un invariante che il codice non
     stabilisce. È la stessa forma del difetto (e) — una dichiarazione più larga della
     sua implementazione — comparsa nella funzione scritta per spiegarla. Non è ironia:
@@ -2620,10 +2718,8 @@ def _compose_sorgenti(root: Path, repo: Path) -> list[Path]:
             f"compose.yaml assente in {root} — il pre-flight dei segreti non può "
             f"dire né sì né no. Bundle incompleto o path errato: NON è un verde.")
     files = [base, root / f"compose.{ingress_profile(repo)}.yaml"]
-    feats = enabled_features(repo)
-    for feat, (file_sfx, _prof) in OPS_COMPOSE_FEATURES.items():
-        if feat in feats:
-            files.append(root / f"compose.{file_sfx}.yaml")
+    for file_sfx, _prof in _overlay_feature(repo):
+        files.append(root / f"compose.{file_sfx}.yaml")
     return [f for f in files if f.is_file()]
 
 
@@ -3220,7 +3316,8 @@ def cmd_update(repo: Path, args) -> int:
         step(9, "pull", "failed")
         die("pull fallito — stack intatto sulla vecchia versione")
     try:
-        verify_digests(repo, lockfile, target)
+        # gli stessi file del pull: si verifica ciò che si è appena scaricato
+        verify_digests(repo, lockfile, target, immagini_attive(repo, target, files=staged))
     except RuntimeError as exc:
         step(9, "pull", "failed", str(exc))
         for svc in SERVICES:
@@ -3402,9 +3499,18 @@ def cmd_version(repo: Path, _args) -> int:
     if vf.is_file():
         bundle_ver = vf.read_text().strip()
     print(f"vps1777 CLI — tag deployato: {cur} (bundle: {bundle_ver})")
+    try:
+        attivi = immagini_attive(repo, cur)
+    except RuntimeError:
+        attivi = set(SERVICES)      # non si sa: si chiede a tutti, come prima
     for svc in SERVICES:
-        res = run([*compose_cmd(repo), "exec", "-T", svc, "printenv",
-                   "VPS1777_VERSION"], capture=True, check=False)
+        if svc not in attivi:
+            # un'immagine opzionale spenta (caddy-dns01): «n/d» direbbe «non so», e
+            # invece lo sappiamo — non fa parte di questo stack.
+            print(f"  {svc:<14} non attivo")
+            continue
+        res = run([*compose_cmd(repo), "exec", "-T", SERVIZIO_COMPOSE.get(svc, svc),
+                   "printenv", "VPS1777_VERSION"], capture=True, check=False)
         ver = res.stdout.strip() if res.returncode == 0 else "n/d"
         drift = "" if ver in (norm_ver(cur), "n/d") else "  ← DRIFT"
         print(f"  {svc:<14} {ver}{drift}")
@@ -3507,7 +3613,7 @@ def cmd_bootstrap(repo: Path, args) -> int:
     res = run([*compose_cmd(repo), "pull"], check=False, env=versione_env(target, None))
     if res.returncode != 0:
         die("pull fallito — nulla è stato fermato, lo stack legacy gira ancora")
-    verify_digests(repo, lockfile, target)
+    verify_digests(repo, lockfile, target, immagini_attive(repo, target))
     versione_set(repo, target, lockfile)
     env_new = versione_env(target, lockfile)
 
@@ -4116,6 +4222,14 @@ _SECRET_POLICY = [
     # saltato). Ruotare = rigenerare il token del tunnel nella dashboard CF.
     ("cloudflared_token", "cloudflared_token.txt", "Token tunnel Cloudflare", 365, False,
      "manuale: rigenera il token del tunnel su dash.cloudflare.com → aggiorna secrets/cloudflared_token.txt"),
+    # 01/10/2026 — feature caddy-dns01. Atteso solo con la feature accesa (altrimenti
+    # file assente → saltato, come cloudflared_token). 180 e non 365: con Zone.DNS:Edit
+    # chi lo ha RISCRIVE i record della zona — può puntare il dominio altrove e farsi
+    # emettere un certificato valido per lui. Vale più del token del tunnel.
+    ("cf_api_token", "cf_api_token.txt", "Token API Cloudflare (DNS-01)", 180, False,
+     "manuale: crea un token nuovo (Zone.DNS:Edit sulla zona) su dash.cloudflare.com, "
+     "scrivilo in secrets/cf_api_token.txt, ricrea caddy (`docker compose … up -d "
+     "--force-recreate caddy`), poi revoca il vecchio"),
 ]
 
 # H37 — freschezza dei cookie NotebookLM. NON è un file in secrets/: vive nel
@@ -4371,6 +4485,10 @@ def cmd_secrets_status(repo: Path, args) -> int:
             # 27/09 (audit della doc): è ATTESO solo col profilo Cloudflare. Prima finiva
             # fra i mancanti su ogni altra installazione: un avviso che scatta sempre non
             # si legge più, e copre quello vero.
+            continue
+        if not p.is_file() and name == "cf_api_token" \
+                and "caddy-dns01" not in enabled_features(repo):
+            # stessa ragione: atteso solo con la feature caddy-dns01 dichiarata.
             continue
         if not p.is_file():
             # 🔴 PRIMA QUI C'ERA SOLO `continue`. Un secret ATTESO e ASSENTE è peggio

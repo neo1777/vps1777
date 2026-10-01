@@ -299,6 +299,7 @@ class Deployer:
         self.client: paramiko.SSHClient | None = None
         self.result: dict[str, str] = {}
         self.production = False
+        self._dns01_token: bool | None = None   # cache del controllo remoto (_dns01_esito)
 
     # ───── connessione ─────
 
@@ -768,9 +769,12 @@ echo CONFIG_OK
     # `watchtower` = auto-update CRUDO (declassato), escluso dal default e in conflitto.
     # (suffisso FILE, nome PROFILO): per watchtower differiscono (file ops.watchtower,
     # profilo ops.autoupdate); per backup/portainer coincidono.
+    # `caddy-dns01` (01/10/2026): profilo None — l'overlay ridefinisce il servizio `caddy`
+    # del profilo ingress.caddy, già acceso; vale solo con quell'ingresso (`_dns01_esito`).
     _OPS_PROFILES = {"backup": ("ops.backup", "ops.backup"),
                      "portainer": ("ops.portainer", "ops.portainer"),
-                     "watchtower": ("ops.watchtower", "ops.autoupdate")}
+                     "watchtower": ("ops.watchtower", "ops.autoupdate"),
+                     "caddy-dns01": ("ops.caddy-dns01", None)}
 
     def _features(self) -> list[str]:
         raw = self.result.get("FEATURES") or "backup,autoupdate"
@@ -791,9 +795,36 @@ echo CONFIG_OK
         feats = self._features()
         for feat, (file_sfx, prof) in self._OPS_PROFILES.items():
             if feat in feats:
+                if feat == "caddy-dns01" and self._dns01_esito(ingress, build)[1]:
+                    continue    # fuori posto o senza token: lo dice il referto, qui si salta
                 files += f" -f compose.{file_sfx}.yaml"
-                profiles += f" --profile {prof}"
+                if prof:
+                    profiles += f" --profile {prof}"
         return f"docker compose {files} {profiles}"
+
+    def _dns01_esito(self, ingress: str, build: bool = False) -> tuple[bool, str]:
+        """(attiva, motivo per cui NON lo è). Gemello del blocco di setup.sh e deploy.sh:
+        con un ingresso diverso da caddy si AVVISA e si prosegue senza overlay (la CLI
+        invece rifiuta); senza il token sulla VPS Caddy non partirebbe, quindi si parte
+        in HTTP-01 e lo si dice. Il controllo remoto si fa UNA volta: `_compose_cmd` è
+        chiamata a ogni passo, e il token non compare fra un passo e l'altro."""
+        if "caddy-dns01" not in self._features():
+            return False, ""
+        if ingress != "caddy":
+            return False, (f"caddy-dns01 vale solo con l'ingresso caddy (qui: {ingress}): "
+                           "ignorata. Toglila dal .env della VPS — vps1777 update la "
+                           "RIFIUTA finché c'è")
+        if build:
+            return False, ("caddy-dns01 non si costruisce in build locale "
+                           "(compose.build.yaml non la conosce): Caddy in HTTP-01")
+        if self._dns01_token is None:
+            self._dns01_token = "TOKEN_OK" in self._run_capture(self._sudo(
+                f"test -s {REMOTE_DIR}/secrets/cf_api_token.txt && echo TOKEN_OK"))
+        if not self._dns01_token:
+            return False, ("caddy-dns01 dichiarata ma sulla VPS manca "
+                           "secrets/cf_api_token.txt: Caddy parte in HTTP-01. Mettilo "
+                           "(docs/SECRETS.md) e ricrea caddy (docs/INGRESS.md §DNS-01)")
+        return True, ""
 
     def step_pull(self, ingress: str, version: str) -> Iterator[str]:
         """Path produzione: pull delle immagini pubblicate (MAI build sulla VPS)."""
@@ -812,10 +843,15 @@ echo CONFIG_OK
                + f"backup={'ON' if 'backup' in feats else 'OFF'} · "
                + f"auto-update sicuro={'ON' if 'autoupdate' in feats else 'OFF'} · "
                + f"portainer={'ON' if 'portainer' in feats else 'OFF'}"
+               + (f" · DNS-01={'ON' if self._dns01_esito(ingress)[0] else 'OFF'}"
+                  if 'caddy-dns01' in feats else "")
                + ("  ⚠ chiave age da configurare per i backup"
                   if 'backup' in feats
                   and not str(self.result.get("AGE_STATE", "")).startswith("ok")
                   else ""))
+        motivo = self._dns01_esito(ingress)[1]
+        if motivo:
+            yield f"⚠ {motivo}"
 
     def step_build(self, ingress: str) -> Iterator[str]:
         """Escape hatch dev (--dev-build) o fallback pre-prima-release."""
@@ -826,6 +862,9 @@ echo CONFIG_OK
         for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && {env} {cmd} up -d --build"), "build"):
             yield line
         yield "✓ Stack avviato (build locale)"
+        motivo = self._dns01_esito(ingress, build=True)[1]
+        if motivo:
+            yield f"⚠ {motivo}"
 
     def step_selfupdate_setup(self) -> Iterator[str]:
         """Installa il canale update: CLI vps1777 + unit systemd. Idempotente.

@@ -292,6 +292,31 @@ features:
     verify:
       compose_profile: {file: compose.ingress.cloudflared.yaml, profile: ingress.cloudflared}
 
+  - id: ingress.caddy-dns01
+    nome: "Caddy con sfida ACME DNS-01 via Cloudflare (feature caddy-dns01)"
+    cosa: "Certificati senza porta 80 (o wildcard) per l'ingresso Caddy. Si dichiara con
+           `caddy-dns01` in VPS1777_FEATURES: l'overlay compose.ops.caddy-dns01.yaml
+           ridefinisce il servizio `caddy` con l'immagine vps1777-caddy-dns01 (Caddy 2.11 +
+           plugin caddy-dns/cloudflare, costruita, firmata e messa in images.lock dalla
+           release) e ingress/Caddyfile.dns01, e monta il token Cloudflare come secret
+           `cf_api_token` (letto da file, mai per valore). Non è un quarto ingresso: vive
+           dentro il profilo ingress.caddy, e con un altro ingresso la CLI rifiuta."
+    dove: ["compose-profile:compose.ops.caddy-dns01.yaml#ingress.caddy",
+           "services/caddy-dns01/Dockerfile",
+           "ingress/Caddyfile.dns01",
+           "tools/vps1777.py#OPS_COMPOSE_FEATURES",
+           "tools/vps1777.py#_feature_incoerenti",
+           "tools/tests/test_caddy_dns01.py",
+           "docs/INGRESS.md"]
+    status: opt-in
+    since: "non rilasciato (01/10/2026)"
+    decisione: "01/10/2026, scelta di Neo («lo costruisco davvero»): prima docs/INGRESS.md
+                diceva che DNS-01 NON era predisposto (l'override citato nei commenti non
+                esisteva). Opt-in perché serve un account Cloudflare che gestisca il DNS
+                della zona e un token con Zone.DNS:Edit. [CHANGELOG.md, Non rilasciato]"
+    verify:
+      file_contains: {path: "compose.ops.caddy-dns01.yaml", pattern: "vps1777-caddy-dns01:\\$\\{VPS1777_TAG"}
+
   # ── SEME DALLA CACCIA STORICA (setaccio, 17/07) ──────────────────────────────
   # Le voci qui sotto vengono dal dossier CACCIA-FEATURE-PERDUTE_2026-07-17.md, con
   # provenienza millimetrica. Completano gli esempi con i casi che il verificatore

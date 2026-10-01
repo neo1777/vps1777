@@ -13,6 +13,7 @@ Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei cont
 | `telegram_bot_token` | `secrets/telegram_bot_token.txt` | TOKEN bot da BotFather | nb1777-bot (e la CLI sull'host, per le notifiche) |
 | `telegram_webapp_secret` | `secrets/telegram_webapp_secret.txt` | chiave **derivata** dal token (HMAC_SHA256 con chiave «WebAppData», 64 hex) con cui si verifica l'`initData` della Mini App — non risale al token. La scrive l'installer; la riallineano al token `rotate-secret.sh`, `vps1777 update` e `vps1777 rollback` | gateway |
 | `cloudflared_token` | `secrets/cloudflared_token.txt` | (opz) CF Tunnel token | cloudflared sidecar |
+| `cf_api_token` | `secrets/cf_api_token.txt` | (opz) token API Cloudflare per la sfida DNS-01, permessi Zone·Zone·Read + Zone·DNS·Edit sulla zona — solo con la feature `caddy-dns01` | caddy (immagine `vps1777-caddy-dns01`) |
 
 > Il gateway **non** monta il token del bot: gli basta la chiave derivata. Chi buca il
 > gateway può al massimo forgiare un `initData` per la Mini App di quel gateway, non
@@ -85,6 +86,40 @@ solo il token, e il secondo passo andava fatto a mano.
 > con un `docker compose restart`. Se hai riscritto il token a mano nel file, rilancia
 > `rotate-secret.sh telegram_bot_token` (o vedi [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
 
+### `cf_api_token` (feature `caddy-dns01`): crearlo e ruotarlo
+
+Non lo genera nessun installer: lo rilascia Cloudflare. Su dash.cloudflare.com → My
+Profile → API Tokens → **Create Token**, permessi **Zone · Zone · Read** e **Zone · DNS ·
+Edit**, *Zone Resources* ristrette alla sola zona del tuo dominio (i due permessi sono
+quelli che il plugin `caddy-dns/cloudflare` v0.2.4 dichiara necessari: `Read` per trovare
+la zona, `Edit` per scrivere il record TXT della sfida). Poi, sulla VPS:
+
+```bash
+install -m 600 /dev/null secrets/cf_api_token.txt   # vuoto, già 600, dell'utente dello stack
+nano secrets/cf_api_token.txt                       # incolla il token
+```
+
+Caddy lo legge da `/run/secrets/cf_api_token` col segnaposto `{file.…}`: il valore non
+passa mai da una variabile d'ambiente (che `docker inspect` mostrerebbe). Il file resta
+`600` dell'UID 1000 come gli altri; per leggerlo il container di Caddy, che gira come root
+con `cap_drop: ALL`, ha in più la sola capability `DAC_OVERRIDE`, e solo con l'overlay
+della feature. Percorso completo e prova: [INGRESS.md](INGRESS.md) §DNS-01.
+
+**Rotazione** (soglia 180 giorni: chi ha questo token riscrive i record della zona, cioè
+può puntare il dominio altrove e farsi emettere un certificato valido):
+
+```bash
+# 1. crea il token NUOVO su dash.cloudflare.com (stessi permessi), poi:
+nano secrets/cf_api_token.txt                 # sostituisci il valore
+docker compose -f compose.yaml -f compose.ingress.caddy.yaml \
+  -f compose.ops.caddy-dns01.yaml --profile ingress.caddy up -d --force-recreate caddy
+#    (aggiungi gli -f/--profile delle altre feature che hai: vedi OPS.md)
+# 2. controlla i log di caddy, poi REVOCA il vecchio token su dash.cloudflare.com
+```
+
+Il certificato già emesso non dipende dal token: il token serve al rinnovo. Se il file
+manca o non è leggibile, Caddy non parte e lo dice (`placeholder: failed to read file`).
+
 ### Rota `admin_password_bcrypt`
 
 ```bash
@@ -122,6 +157,7 @@ file, riscritto a ogni rotazione) e la confronta con una soglia:
 | `gateway_secret` | media | 180 giorni | manuale (cambia le URL MCP) |
 | `archive_desc_secret` | media | 180 giorni | manuale: rigenera il file e ricrea il gateway (e archive-mcp) — `rotate-secret.sh` non lo copre |
 | `cloudflared_token` | bassa | 365 giorni | manuale (se usi l'ingress Cloudflare) |
+| `cf_api_token` | media | 180 giorni | manuale (se usi `caddy-dns01`): vedi sotto |
 | cookie NotebookLM | — | 14 giorni | ricarica da `/admin/nlm` — scadono da soli |
 | via d'emergenza cosign aperta | — | **1 giorno** | togli `VPS1777_REQUIRE_COSIGN=0` dal `.env` (compare solo mentre è aperta) |
 
@@ -147,7 +183,8 @@ Cosa notifica e cosa no:
   giornaliera non aggiunge rumore);
 - **secret attesi e non trovati** in `secrets/` → solo nel log e nel campo `mancanti` del
   JSON, **nessuna notifica**. L'elenco è quello della tabella; `cloudflared_token` è
-  atteso solo col profilo Cloudflare (fino alla 0.62.2 compariva sempre fra i mancanti);
+  atteso solo col profilo Cloudflare (fino alla 0.62.2 compariva sempre fra i mancanti),
+  `cf_api_token` solo con la feature `caddy-dns01` dichiarata;
 - **nessun secret trovato** → esce **2** (la unit risulta fallita) e, con `--notify`,
   lo dice su Telegram: non è «tutto a posto», è «non ho potuto guardare» (percorso o
   permessi sbagliati).

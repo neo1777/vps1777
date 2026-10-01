@@ -4,6 +4,31 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **DNS-01 per l'ingresso Caddy, come feature dichiarata `caddy-dns01`.** Certificati senza
+  la porta 80 (o wildcard) con la sfida DNS di Cloudflare. Fino a ieri `docs/INGRESS.md`
+  diceva che DNS-01 «NON è predisposto», e i commenti rimandavano a un override che non
+  esisteva. Ora: `caddy-dns01` in `VPS1777_FEATURES` monta `compose.ops.caddy-dns01.yaml`,
+  che ridefinisce il servizio `caddy` con l'immagine **`vps1777-caddy-dns01`** (Caddy 2.11
+  + `caddy-dns/cloudflare@v0.2.4`, costruita, firmata, nel lock e scansionata da Trivy come
+  le altre; opzionale) e con `ingress/Caddyfile.dns01`, identico al Caddyfile normale più
+  la riga `acme_dns` (un test lo tiene identico). Il token arriva da un secret-file nuovo,
+  `secrets/cf_api_token.txt` (permessi Zone·Zone·Read e Zone·DNS·Edit sulla zona), letto
+  col segnaposto `{file.…}`: mai in una variabile d'ambiente.
+  - Il container ha `DAC_OVERRIDE` in più, e solo con questo overlay: il secret è un bind
+    mount 600 dell'UID 1000 e Caddy è root senza capability. Misurato: senza, Caddy legge
+    un token vuoto e non parte.
+  - Con un ingresso diverso da Caddy la CLI **rifiuta** di costruire il compose finché la
+    feature è dichiarata; gli installer avvisano e proseguono senza overlay, e se il token
+    sulla VPS non c'è avviano Caddy in HTTP-01 dicendolo.
+  - `verify_digests` verifica le immagini che lo stack attivo usa davvero (da `docker
+    compose config --images`) e dice «non attivo — non verificato» per le altre del lock:
+    prima le pretendeva tutte, e con un'immagine opzionale nel lock ogni update a feature
+    spenta sarebbe fallito. `vps1777 version` scrive «non attivo» per l'immagine spenta.
+  - `secrets-status` conosce `cf_api_token` (soglia 180 giorni: con DNS·Edit si riscrive
+    la zona), atteso solo con la feature accesa.
+  INGRESS, SECRETS, OPS, UPDATE e ARCHITECTURE (IT/EN dove c'è) aggiornate.
+
 ### Cambiato
 - **L'ingresso Caddy passa da 2.8 a 2.11.4** (`caddy:2.11-alpine`, fissata per digest). La
   linea 2.8 non riceveva più aggiornamenti: Dependabot avanza solo il digest dello stesso

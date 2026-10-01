@@ -26,7 +26,11 @@ jobs:
         # ⚠️ INSIEME ENUMERATO A MANO: chi aggiunge un servizio deve aggiungerlo
         # anche qui, o resta NON scansionato in silenzio (successo con `ocr`,
         # aggiunto in 0.43.10 e scoperto fuori lista il 01/09).
-        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr]
+        # caddy-dns01 (01/10/2026): opzionale, ma pubblicata e firmata come le altre —
+        # e chi la accende la espone su 80/443, quindi va scansionata come le altre.
+        # Finché non esce la prima release che la contiene, :latest non esiste e lo
+        # step sotto la salta con il warning «non trovata» (atteso, non un guasto).
+        service: [gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr, caddy-dns01]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # 🔴 DIFETTO CURATO IL 02/08 (b82df434, referto di un agente via abdd732a).

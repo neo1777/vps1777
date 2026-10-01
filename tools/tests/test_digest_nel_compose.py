@@ -47,6 +47,28 @@ def test_ogni_immagine_vps1777_del_compose_porta_il_suo_digest():
         assert r.rstrip().endswith(f"${{VPS1777_TAG:-dev}}${{{var}:+@${{{var}}}}}"), r
 
 
+def test_l_overlay_di_caddy_dns01_porta_il_suo_digest_nella_stessa_forma():
+    """caddy-dns01 (01/10/2026) è un'immagine del progetto che NON sta in compose.yaml ma
+    nel suo overlay: il test sopra legge solo compose.yaml, e senza questo la riga
+    dell'overlay potrebbe perdere il pin del digest senza che niente fallisca."""
+    righe = [r for r in (_ROOT / "compose.ops.caddy-dns01.yaml").read_text().splitlines()
+             if re.search(r"^\s+image: ", r)]
+    assert len(righe) == 1, righe
+    var = v.digest_var("caddy-dns01")
+    assert var == "VPS1777_DIGEST_CADDY_DNS01"
+    assert righe[0].strip() == (
+        "image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-caddy-dns01:"
+        f"${{VPS1777_TAG:-dev}}${{{var}:+@${{{var}}}}}"), righe[0]
+
+
+def test_ogni_servizio_di_SERVICES_ha_la_sua_riga_image():
+    """Un servizio in SERVICES senza riga `image:` avrebbe un digest scritto nel .env che
+    nessun compose legge: la verifica ci sarebbe, il pin no."""
+    testo = "\n".join((_ROOT / f).read_text() for f in ("compose.yaml", "compose.ops.caddy-dns01.yaml"))
+    trovati = set(re.findall(r"/vps1777-([a-z0-9-]+):\$\{VPS1777_TAG", testo))
+    assert trovati == set(v.SERVICES), trovati ^ set(v.SERVICES)
+
+
 def test_versione_env_estrae_i_digest_dal_lock():
     env = v.versione_env("1.2.3", LOCK)
     assert env["VPS1777_TAG"] == "1.2.3"
