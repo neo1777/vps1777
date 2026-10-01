@@ -215,8 +215,12 @@ vecchi) vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md#rotazione-della-chiave-age-h3
   ogni secret con `***` in ogni riga *prima* che venga scritta. In particolare il
   `gateway_secret` vive nel PATH del proxy MCP (`/<SECRET>/<service>/mcp`) e
   finirebbe nella request-line dell'access-log di uvicorn: ora compare come
-  `/***/<service>/mcp` (redatto anche a valle, in Caddy/Cloudflare). È una difesa
-  a valle, non sostituisce la rotazione: smette solo di produrre nuovi leak.
+  `/***/<service>/mcp`. Con l'ingresso Caddy lo stesso vale per il **suo**
+  access-log (`format filter` sul campo `request>uri`, dalla 0.67.0, H78: prima ci
+  finiva in chiaro, misurato). Con Cloudflare Tunnel invece l'URI lo vede Cloudflare
+  per costruzione, perché termina il TLS: se lo registra lo decide la sua configurazione,
+  non questo repo. È una difesa a valle, non sostituisce la rotazione: smette solo di
+  produrre nuovi leak.
 - **Segreti fuori dall'argv** (v0.29.0): `deploy.sh` passa i segreti via STDIN,
   non nell'argv → non compaiono in `ps`/`/proc/<pid>/cmdline` sull'host remoto.
 - L'audit log NON contiene mai i valori, solo il nome del secret rotato — lo

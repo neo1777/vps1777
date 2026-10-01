@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **L'access-log di Caddy non scrive più il gateway_secret (H78).** Il segreto vive nel
+  path del proxy MCP, e l'access-log JSON di Caddy scriveva `request.uri` intero: misurato
+  con caddy:2.11, una richiesta, una riga col segreto in chiaro. SECRETS.md lo dava per
+  redatto «anche a valle, in Caddy/Cloudflare» senza che nessun codice lo facesse (rilievo
+  di Sagoma). Ora i due Caddyfile filtrano `request>uri`: il primo segmento lungo diventa
+  `/***/`, `/health` resta leggibile. SECRETS dice cosa vale per Cloudflare, che termina il
+  TLS e l'URI lo vede per costruzione. Tocca chi usa l'ingresso Caddy; col Funnel Caddy
+  non è nel percorso.
+
 ### Cambiato
 - **Le immagini di terzi negli overlay compose le aggiorna Renovate, non più Dependabot.**
   Il blocco `docker-compose` di Dependabot non ha mai lavorato: la sua regex dei file
