@@ -544,7 +544,13 @@ findings:
     since: v0.27.0
     evidence:
       - file: .github/dependabot.yml
-        contains: ["github-actions", "docker-compose"]
+        contains: ["github-actions"]
+      # le immagini di terzi nei compose: dal 01/10/2026 le aggiorna Renovate (il blocco
+      # docker-compose di Dependabot non vedeva gli overlay compose.*.*.yaml)
+      - file: .github/renovate.json
+        contains: ['"managerFilePatterns"', '"ghcr.io/neo1777/**"']
+      - file: tools/tests/test_renovate_vede_gli_overlay.py
+        contains: ["def test_ogni_compose_con_immagini_di_terzi_e_coperto("]
       - file: .github/workflows/trivy.yml
         not_contains: ["trivy-action@master"]
       # Evidenza robusta ai bump legittimi: checkout c'è ed è pinnata a SHA
@@ -3010,7 +3016,7 @@ findings:
           - "def test_ci_sono_compose_e_immagini_di_terzi_da_controllare("
       - file: SECURITY.md
         contains:
-          - "Le immagini di\n  terzi nei compose sono digest-pinnate"
+          - "immagini di terzi nei compose sono digest-pinnate"
     fix: >
       Un test che ENUMERA invece di campionare: legge ogni `image:` dei
       `compose*.y*ml` e chiede il digest a chi e' di TERZI, escludendo per nome le due

@@ -60,23 +60,11 @@ updates:
           - "version-update:semver-major"
           - "version-update:semver-minor"
 
-  # ── Immagini di terzi nei compose (alpine, caddy, cloudflared, portainer,
-  #    watchtower): bumpa il digest pinnato quando il tag avanza. Le immagini
-  #    vps1777 (le 5 dello stack e caddy-dns01, nel suo overlay) usano un
-  #    tag-variabile ${VPS1777_TAG} → Dependabot le salta da sé,
-  #    e comunque `vps1777 update` le verifica contro images.lock. ────────────
-  - package-ecosystem: docker-compose
-    directory: /
-    schedule:
-      interval: weekly
-    commit-message:
-      prefix: build
-    groups:
-      compose-images:
-        patterns: ["*"]
-    ignore:
-      # Immagini nostre: versionate dal release-flow, non da Dependabot.
-      - dependency-name: "ghcr.io/neo1777/vps1777-*"
+  # ── Immagini di terzi nei compose: NON qui, in .github/renovate.json (01/10/2026).
+  #    Il blocco `docker-compose` che c'era non ha MAI lavorato: la regex dei file di
+  #    Dependabot ammette un solo segmento dopo «compose.», e le immagini di terzi stanno
+  #    tutte negli overlay compose.ingress.*.yaml / compose.ops.*.yaml (verificato sul
+  #    codice di dependabot-core). Renovate li vede; un test lo tiene vero.
 
   # ── LE DIPENDENZE PYTHON DEI QUATTRO SERVIZI ────────────────────────────────
   # 🔴 PERCHÉ MANCAVANO, ed è il rilievo `23cc4783` (round-16, revisionando la
