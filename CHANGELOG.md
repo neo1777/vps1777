@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **`vps1777 campanello`: il conto delle «cose da fare» arriva a Neo su Telegram, una volta
+  per giro.** Lo chiama il PC dopo ogni cottura della pagina «Le cose da fare», via SSH:
+  nessuna porta nuova. Viaggiano solo numeri (pagine e decisioni sulla frontiera, posti
+  rossi) e un link `https://claude.ai/…`; le parole di Neo restano sul PC. Lo stesso conto
+  non suona due volte. Passa da `telegram_notify`, quindi dalla redazione.
+
 ## [0.68.1] — 2026-10-04
 
 **Il nome nuovo di NotebookLM, Gemini Notebook, dove si presenta il servizio (#412).**

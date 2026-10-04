@@ -1530,6 +1530,13 @@ features:
     since: "0.42.0 (round-17)"
     verify: {cli_command: avvisa-fallimento}
 
+  - id: cli.campanello
+    nome: "vps1777 campanello"
+    cosa: "Manda a Neo su Telegram il conto delle «cose da fare» (pagine e decisioni sulla frontiera, posti rossi) col link alla pagina, una volta per giro: lo stesso conto non suona due volte. Lo chiama il PC via SSH dopo ogni cottura della pagina; accetta solo numeri e un link https://claude.ai/…, e passa da telegram_notify (redazione)."
+    dove: ["cli:campanello", "tools/vps1777.py", "tools/tests/test_campanello.py"]
+    status: active-default
+    verify: {cli_command: campanello}
+
   - id: unit.avvisa_fallimento
     nome: "vps1777-avvisa-fallimento@.service"
     cosa: "Unit template agganciata a OnFailure= di auto-update, update, check-update e secrets-check. Sta in systemd e non nel flusso perché systemd sa che una unit è fallita QUALUNQUE sia la ragione, incluso un crash che il codice non aveva previsto."

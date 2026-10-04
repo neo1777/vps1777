@@ -308,3 +308,14 @@ run by hand: the systemd units use it via `OnFailure=`.
 ```bash
 vps1777 avvisa-fallimento --unit vps1777-auto-update.service --righe 12
 ```
+
+## vps1777 campanello
+
+Sends Neo the count of the «things to do» on Telegram (pages and decisions on the frontier,
+red spots) with the link to the page. One message per round: the same count never rings
+twice. It accepts only numbers and an `https://claude.ai/…` link. The PC calls it over SSH
+after every rebuild of the page; `--prova` prints the message without sending it.
+
+```bash
+vps1777 campanello --pagine 3 --decisioni 114 --rossi 0 --url https://claude.ai/artifact/… --prova
+```
