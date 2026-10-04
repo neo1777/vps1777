@@ -4459,6 +4459,39 @@ def cosign_bypass_status(repo: Path) -> dict | None:
     }
 
 
+def cmd_campanello(repo: Path, args) -> int:
+    """Il campanello delle «cose da fare»: un messaggio a Neo su Telegram per giro.
+
+    Lo chiama il PC dopo ogni cottura della porta «Le cose da fare» (riga
+    c-20261004-il-campanello-anche-su-telegram-la-spint, DD-P10.2 ratificata il 04/10):
+    `ssh vps1777 'sudo -iu vps1777 vps1777 campanello --pagine 3 --decisioni 114 …'`.
+    Nessuna porta nuova: passa dall'SSH che c'è già. Viaggiano solo numeri e un link.
+    Le parole di Neo restano sul PC (DD-P10.1).
+
+    Un giro = un conto diverso dall'ultimo notificato. Lo stesso conto non suona due volte:
+    un campanello che suona sempre non lo ascolta nessuno.
+    """
+    if not args.url.startswith("https://claude.ai/"):
+        die("--url deve essere un link https://claude.ai/…: il campanello porta solo la porta, non testo libero")
+    conto = {"pagine": args.pagine, "decisioni": args.decisioni, "rossi": args.rossi}
+    if any(v < 0 for v in conto.values()):
+        die("i conti non possono essere negativi")
+    st = state_load(repo)
+    if st.get("campanello", {}).get("conto") == conto:
+        log("campanello: stesso conto dell'ultima notifica, non suono")
+        return 0
+    testo = (f"🔔 Le cose da fare: {args.pagine} pagine · {args.decisioni} decisioni"
+             + (f" · {args.rossi} rossi" if args.rossi else "") + f"\n{args.url}")
+    if args.prova:
+        print(testo)
+        return 0
+    telegram_notify(repo, testo)
+    st["campanello"] = {"conto": conto, "quando": args.quando or now_iso()}
+    state_save(repo, st)
+    ok("campanello: notifica mandata")
+    return 0
+
+
 def cmd_avvisa_fallimento(repo: Path, args) -> int:
     """Dice a @Neo che una unit è fallita, con la coda del journal.
 
@@ -4750,6 +4783,14 @@ def build_parser() -> "argparse.ArgumentParser":
                         "(ARCHIVE_TELEGRAM_PROPRIETARIO nel .env) 'human', gli altri "
                         "'other'. Vuole --db.")
 
+    p = sub.add_parser("campanello",
+                       help="un messaggio a Neo su Telegram col conto delle «cose da fare» (uno per giro)")
+    p.add_argument("--pagine", type=int, required=True, help="pagine sulla frontiera")
+    p.add_argument("--decisioni", type=int, required=True, help="decisioni sulla frontiera")
+    p.add_argument("--rossi", type=int, default=0, help="posti rossi")
+    p.add_argument("--url", required=True, help="il link della porta (https://claude.ai/…)")
+    p.add_argument("--quando", default="", help="l'ora della cottura (ISO), solo per lo stato")
+    p.add_argument("--prova", action="store_true", help="stampa il messaggio senza mandarlo")
     p = sub.add_parser("avvisa-fallimento",
                        help="dice su Telegram che una unit systemd è fallita (usato da OnFailure=)")
     p.add_argument("--unit", required=True, help="nome della unit fallita (il segnaposto %%n di systemd)")
@@ -4805,7 +4846,8 @@ def main() -> int:
                 "indice-notturno": cmd_indice_notturno,
                 "secrets-status": cmd_secrets_status,
                 "memoria": cmd_memoria, "help": cmd_help,
-                "avvisa-fallimento": cmd_avvisa_fallimento}
+                "avvisa-fallimento": cmd_avvisa_fallimento,
+                "campanello": cmd_campanello}
     try:
         return handlers[args.cmd](repo, args)
     except KeyboardInterrupt:

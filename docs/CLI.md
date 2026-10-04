@@ -299,3 +299,14 @@ lancia a mano: lo usano le unit systemd via `OnFailure=`.
 ```bash
 vps1777 avvisa-fallimento --unit vps1777-auto-update.service --righe 12
 ```
+
+## vps1777 campanello
+
+Manda a Neo su Telegram il conto delle «cose da fare» (pagine e decisioni sulla frontiera,
+posti rossi) con il link alla pagina. Un messaggio per giro: lo stesso conto non suona due
+volte. Accetta solo numeri e un link `https://claude.ai/…`. Lo chiama il PC dopo ogni
+cottura della pagina, via SSH; `--prova` stampa il messaggio senza mandarlo.
+
+```bash
+vps1777 campanello --pagine 3 --decisioni 114 --rossi 0 --url https://claude.ai/artifact/… --prova
+```
