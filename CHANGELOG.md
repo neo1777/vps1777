@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.68.1] — 2026-10-04
+
+**Il nome nuovo di NotebookLM, Gemini Notebook, dove si presenta il servizio (#412).**
+
 ### Cambiato
 - **Il nome nuovo di NotebookLM nei punti dove si presenta il servizio.** Dal 16/07/2026 Google
   lo chiama «Gemini Notebook». Il nome nuovo compare nella tabella dei servizi dei due README e
