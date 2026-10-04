@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **Il nome nuovo di NotebookLM nei punti dove si presenta il servizio.** Dal 16/07/2026 Google
+  lo chiama «Gemini Notebook». Il nome nuovo compare nella tabella dei servizi dei due README e
+  in testa a docs/NB1777.md, con il perché del resto: il CLI `nlm`, le variabili
+  `NOTEBOOKLM_*` e il codice tengono il nome vecchio, perché cambiarli romperebbe le
+  installazioni esistenti senza cambiare cosa fanno.
+
 ## [0.68.0] — 2026-10-04
 
 **I container hanno tetti contro il DoS, e il gateway un limite di concorrenza (OWASP API4, #410).**
