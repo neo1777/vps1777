@@ -10,10 +10,9 @@
 ![MCP](https://img.shields.io/badge/MCP-streamable--http-d97757.svg)
 ![Status](https://img.shields.io/badge/status-pre--1.0-orange.svg)
 
-> **Your personal gateway for MCP servers, bots and LLM services** — behind a single
-> public HTTPS URL, protected by OAuth 2.1 (full architecture in
-> [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md)), up on a Linux VPS in minutes
-> without typing a command.
+> **A self-hosted gateway that puts your own MCP servers behind one HTTPS endpoint on a
+> server you control** — OAuth 2.1 sign-in, signed updates, a graphical installer (full
+> architecture in [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md)).
 
 You connect **your** MCP servers (and Telegram bots) to [claude.ai](https://claude.ai),
 Claude Code and the desktop app, from one secure endpoint. vps1777 puts a gateway in

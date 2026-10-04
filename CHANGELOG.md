@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **La prima riga del README dice cosa fa vps1777 a chi non lo conosce.** «Un gateway
+  self-hosted che mette i tuoi server MCP dietro un solo endpoint HTTPS, su un server che
+  controlli tu: accesso OAuth 2.1, aggiornamenti firmati, installer grafico», in README.md e
+  README.it.md. Ogni parola è verificata sul codice. La riga che era stata proposta per gli
+  annunci («your data never leaves your box») non si poteva usare: nb1777 manda i contenuti
+  a Gemini Notebook e i connettori portano i risultati a claude.ai.
+
 ### Sicurezza
 - **Il log di Caddy non scrive il gateway_secret nemmeno nell'autorizzazione OAuth (H79).**
   Il filtro della 0.67.0 (H78) toglieva il segreto solo quando apriva il path. Ma i
