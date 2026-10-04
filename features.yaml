@@ -1535,6 +1535,7 @@ features:
     cosa: "Manda a Neo su Telegram il conto delle «cose da fare» (pagine e decisioni sulla frontiera, posti rossi) col link alla pagina, una volta per giro: lo stesso conto non suona due volte. Lo chiama il PC via SSH dopo ogni cottura della pagina; accetta solo numeri e un link https://claude.ai/…, e passa da telegram_notify (redazione)."
     dove: ["cli:campanello", "tools/vps1777.py", "tools/tests/test_campanello.py"]
     status: active-default
+    since: "0.69.0"
     verify: {cli_command: campanello}
 
   - id: unit.avvisa_fallimento

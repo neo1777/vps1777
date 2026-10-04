@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.69.0] — 2026-10-04
+
+**`vps1777 campanello`: il conto delle «cose da fare» a Neo su Telegram, uno per giro (#414).**
+
 ### Aggiunto
 - **`vps1777 campanello`: il conto delle «cose da fare» arriva a Neo su Telegram, una volta
   per giro.** Lo chiama il PC dopo ogni cottura della pagina «Le cose da fare», via SSH:
