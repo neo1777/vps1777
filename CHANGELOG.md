@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Due sorveglianze in più nel controllo giornaliero (`vps1777 check`).** La prima riguarda
+  l'età dell'ultimo backup core: oltre i 2 giorni arriva un avviso. Un backup notturno che
+  si ferma non pota più le copie vecchie, quindi la copertura resta piena e l'allarme di H59
+  non scattava mai. La seconda riguarda lo spazio libero sul disco dei backup: sotto il 10%
+  arriva un avviso. Prima c'era solo la guardia sugli upload. Le notifiche Telegram partono
+  una volta, quando lo stato cambia, e di nuovo quando rientra.
+
 ## [0.69.2] — 2026-10-04
 
 **cosign si verifica prima di installarlo; immagini firmate per digest (H80, #418).**

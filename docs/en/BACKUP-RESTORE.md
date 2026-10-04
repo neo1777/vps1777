@@ -82,7 +82,8 @@ every night (cron **03:00 UTC**) the **core** tier — and the **archive** tier 
 of the last 3 versions** (read from the `.meta` sidecar), plus **2 archives**, all
 `age`-encrypted. `vps1777 check` (the daily timer) warns if the latest archive backup is
 more than 14 days old; as long as no archive backup exists at all, that warning doesn't
-fire.
+fire. It also warns if the latest core is more than 2 days old: a backup that stops no
+longer prunes the old copies, so coverage stays full and on its own wouldn't say so.
 
 > **Why "declared" and not "remembered" — and it's the heart of never-losing-features.**
 > Before (up to v0.37.x) the backup was an **opt-in** profile: a reinstall of the VPS

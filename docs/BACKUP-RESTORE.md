@@ -75,7 +75,9 @@ il livello **core** — e il livello **archivio** quando è dovuto (ogni 7 giorn
 **7 core giornalieri + 4 settimanali**, più **l'ultimo core di ciascuna delle ultime 3
 versioni** (letta dal sidecar `.meta`), più **2 archivio**, tutti cifrati `age`.
 `vps1777 check` (il timer giornaliero) avvisa se l'ultimo archivio ha più di 14 giorni;
-finché non esiste nessun backup archivio, quell'avviso non parte.
+finché non esiste nessun backup archivio, quell'avviso non parte. Avvisa anche se l'ultimo
+core ha più di 2 giorni: un backup che si ferma non pota più le copie vecchie, quindi la
+copertura resta piena e da sola non lo direbbe.
 
 > **Perché "dichiarato" e non "ricordato" — ed è il cuore del non-perdere-funzioni.**
 > Prima (fino a v0.37.x) il backup era un profilo **opt-in**: un reinstall della VPS non lo
