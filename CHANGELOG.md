@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.70.1] — 2026-10-04
+
+**Il log del backup notturno sopravvive agli update (#422).**
+
 ### Corretto
 - **Il log del backup notturno sopravvive agli update.** Il cron del container backup lo
   scriveva in `/var/log/backup.log`, dentro il container, e ogni update, che ricrea il
