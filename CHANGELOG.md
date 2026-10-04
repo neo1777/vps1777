@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **archive1777 non scambia più l'id di un task di Cline per un numero di telefono.** Gli id dei
+  task di Cline sono timestamp in millisecondi (13 cifre), e la redazione in uscita li
+  restituiva come «[telefono redatto]». Così `get_session` nascondeva l'id proprio a chi lo
+  aveva chiesto. Misurato dal vivo sul DB di prova delle conversazioni Roo/Cline.
+  L'esenzione è stretta: 13 cifre di fila che cominciano per 1. Con separatori, con un'altra
+  cifra in testa o col `+` davanti resta telefono, e un test lo verifica.
+
 ## [0.67.2] — 2026-10-04
 
 **Il log di Caddy non scrive il gateway_secret nemmeno nell'autorizzazione OAuth (H79, #406),

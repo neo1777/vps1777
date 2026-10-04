@@ -101,12 +101,18 @@ _TS_COMPATTO = re.compile(r"^(?:19|20)\d{6}[-T]\d{6}$")
 #   stessa strettezza dell'ora.
 _DATA_ORA = re.compile(r"^(?:19|20)\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])"
                        r"(?:[ T](?:[01]\d|2[0-3])(?:[-.][0-5]\d(?:[-.][0-5]\d)?)?)?$")
+# · (04/10/2026) un TIMESTAMP IN MILLISECONDI a 13 cifre senza separatori, che comincia per 1
+#   (dal 2001 al 2033): è l'id dei task di Cline (e di altri programmi), e get_session lo
+#   restituiva «[telefono redatto]» proprio a chi lo aveva chiesto (misurato dal vivo via MCP
+#   sul DB di prova Roo/Cline). Nessun telefono ha questa forma: un numero NANP col prefisso
+#   1 ha 11 cifre, gli italiani cominciano per 0 o per 3, e col `+` davanti il match ha un `+`.
+_EPOCH_MS = re.compile(r"^1\d{12}$")
 _UUID = re.compile(r"(?<![0-9A-Za-z])[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z])")
 
 
 def _tel_o_timestamp(m: "re.Match[str]") -> str:
     t = m.group(0)
-    return t if _TS_COMPATTO.match(t) or _DATA_ORA.match(t) else SEGNAPOSTO_TEL
+    return t if _TS_COMPATTO.match(t) or _DATA_ORA.match(t) or _EPOCH_MS.match(t) else SEGNAPOSTO_TEL
 
 
 def _telefoni(s: str) -> str:
