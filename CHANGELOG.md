@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.68.0] — 2026-10-04
+
+**I container hanno tetti contro il DoS, e il gateway un limite di concorrenza (OWASP API4, #410).**
+
 ### Sicurezza
 - **I container hanno tetti contro il DoS (OWASP API4).** Prima nessun servizio di base ne
   aveva: un processo impazzito poteva prendersi la VPS intera.
