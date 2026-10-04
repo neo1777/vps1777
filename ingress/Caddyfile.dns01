@@ -63,16 +63,20 @@
 		header_up X-Forwarded-Proto {scheme}
 	}
 
-	# log — con il primo segmento dell'URI REDATTO (H78, 01/10/2026). Il gateway_secret
-	# vive nel path del proxy MCP (/<SECRET>/<servizio>/mcp) e l'access-log JSON di
-	# Caddy scrive `request.uri` così com'è: misurato con caddy:2.11, una richiesta →
-	# una riga col segreto in chiaro. Il filtro lo sostituisce con /***/ (la stessa
-	# forma del filtro di uvicorn nel gateway); /health e i path corti restano leggibili.
+	# log — con ogni segmento lungo dell'URI REDATTO (H78 01/10, H79 04/10/2026). Il
+	# gateway_secret vive nel path del proxy MCP (/<SECRET>/<servizio>/mcp) e l'access-log
+	# JSON di Caddy scrive `request.uri` così com'è. Il segreto non sta solo all'inizio: i
+	# client OAuth lo portano anche nel `resource` dell'autorizzazione (in query, codificato
+	# %2F) e nei metadati chiesti col path in coda (/.well-known/…/<SECRET>/…). Il filtro
+	# sostituisce con *** ogni segmento di ≥16 caratteri dopo / o %2F, senza consumare il
+	# separatore che segue (così due segmenti lunghi di fila li prende entrambi). Misurato
+	# con caddy:2.11. Costo: anche i nomi lunghi (oauth-authorization-server) diventano ***
+	# qui; il log del gateway li tiene leggibili, perché redige solo il valore del segreto.
 	log {
 		output stdout
 		format filter {
 			wrap json
-			request>uri regexp "^/[A-Za-z0-9_-]{16,}/" "/***/"
+			request>uri regexp "(/|%2[Ff])[A-Za-z0-9_-]{16,}" "${1}***"
 		}
 	}
 }

@@ -217,7 +217,10 @@ vecchi) vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md#rotazione-della-chiave-age-h3
   finirebbe nella request-line dell'access-log di uvicorn: ora compare come
   `/***/<service>/mcp`. Con l'ingresso Caddy lo stesso vale per il **suo**
   access-log (`format filter` sul campo `request>uri`, dalla 0.67.0, H78: prima ci
-  finiva in chiaro, misurato). Con Cloudflare Tunnel invece l'URI lo vede Cloudflare
+  finiva in chiaro, misurato). Il filtro prende il segreto ovunque stia nell'URI, non
+  solo all'inizio del path: anche nel `resource` che i client OAuth mandano
+  all'autorizzazione e nei metadati chiesti col path in coda (H79, prima in chiaro,
+  misurato con caddy:2.11). Con Cloudflare Tunnel invece l'URI lo vede Cloudflare
   per costruzione, perché termina il TLS: se lo registra lo decide la sua configurazione,
   non questo repo. È una difesa a valle, non sostituisce la rotazione: smette solo di
   produrre nuovi leak.

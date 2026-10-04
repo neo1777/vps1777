@@ -1,9 +1,15 @@
-"""H78: l'access-log di Caddy non scrive il gateway_secret (01/10/2026).
+"""H78 e H79: l'access-log di Caddy non scrive il gateway_secret (01/10 e 04/10/2026).
 
 Il segreto vive nel path del proxy MCP (/<SECRET>/<servizio>/mcp). Il gateway lo redige
 nel suo log (uvicorn), ma l'access-log JSON di Caddy scriveva `request.uri` intero:
 misurato con caddy:2.11, una richiesta → una riga col segreto in chiaro. Con il filtro,
 la stessa richiesta scrive /***/archive/mcp.
+
+H79: il segreto non sta solo all'inizio del path. I client OAuth lo portano anche nel
+`resource` dell'autorizzazione (in query, codificato %2F, o in chiaro) e nei metadati
+chiesti col path in coda (/.well-known/oauth-protected-resource/<SECRET>/…). Il filtro di
+H78 era ancorato a `^/` e non li vedeva: misurato con caddy:2.11 il 04/10. I casi qui sotto
+sono gli stessi provati sul Caddy vero.
 """
 from __future__ import annotations
 
@@ -25,7 +31,32 @@ def test_il_log_di_caddy_redige_il_primo_segmento(nome: str) -> None:
     m = re.search(r'request>uri regexp "([^"]+)" "([^"]+)"', b)
     assert m, f"{nome}: manca il filtro su request>uri"
     pat = re.compile(m.group(1))
+    sost = re.sub(r"\$\{(\d+)\}", r"\\g<\1>", m.group(2))  # ${1} di Go → \g<1> di Python
     segreto = "Ab3dE" + "fGh1jK" + "lMn0pQ" + "rSt9uVwXyZ12345"
-    assert pat.sub(m.group(2), f"/{segreto}/archive/mcp") == "/***/archive/mcp"
-    assert pat.sub(m.group(2), "/health") == "/health"
-    assert pat.sub(m.group(2), "/admin/setup") == "/admin/setup"
+    assert pat.sub(sost, f"/{segreto}/archive/mcp") == "/***/archive/mcp"
+    assert pat.sub(sost, "/health") == "/health"
+    assert pat.sub(sost, "/admin/setup") == "/admin/setup"
+
+
+@pytest.mark.parametrize("nome", ["Caddyfile", "Caddyfile.dns01"])
+def test_il_log_di_caddy_redige_il_segreto_ovunque_nell_uri(nome: str) -> None:
+    testo = (RADICE / "ingress" / nome).read_text(encoding="utf-8")
+    m = re.search(r'request>uri regexp "([^"]+)" "([^"]+)"', testo)
+    assert m, f"{nome}: manca il filtro su request>uri"
+    pat = re.compile(m.group(1))
+    sost = re.sub(r"\$\{(\d+)\}", r"\\g<\1>", m.group(2))
+    s = "Ab3dE" + "fGh1jK" + "lMn0pQ" + "rSt9uVwXyZ12345"
+    casi = [
+        f"/.well-known/oauth-protected-resource/{s}/archive/mcp",
+        f"/.well-known/oauth-authorization-server/{s}/nb1777/mcp",
+        f"/oauth/authorize?client_id=x&resource=https%3A%2F%2Fexample.invalid%2F{s}%2Farchive%2Fmcp",
+        f"/oauth/authorize?resource=https%3a%2f%2fexample.invalid%2f{s}%2farchive%2fmcp",
+        f"/oauth/authorize?resource=https://example.invalid/{s}/nb1777/mcp",
+    ]
+    for uri in casi:
+        assert s not in pat.sub(sost, uri), f"{nome}: il segreto resta in chiaro in {uri}"
+    # quello che deve restare leggibile
+    for uri in ("/health", "/admin/setup", "/oauth/token",
+                "/oauth/authorize?redirect_uri=https%3A%2F%2Fexample.invalid%2Fapi%2Fmcp%2Fauth_callback"
+                "&client_id=0f3c2a1b-1111-2222-3333-444455556666"):
+        assert pat.sub(sost, uri) == uri, f"{nome}: redatto per sbaglio {uri}"
