@@ -71,6 +71,13 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   gateway:
     <<: [*restart, *logging, *security, *readonly]
+    # Tetti contro il DoS (OWASP API4, 04/10/2026). pids e CPU sempre: la CPU rallenta,
+    # non uccide. La memoria solo dove il picco è MISURATO (memory.stat del cgroup,
+    # «anon» = il processo; la cache dei file il kernel la libera da sé, e non decide).
+    # Un tetto di memoria messo a occhio uccide il servizio nel mezzo di una chiamata.
+    pids_limit: 256
+    cpus: 2.0
+    # mem_limit: non ancora — il picco vero è l'indicizzazione dei bundle grossi, non misurato
     # Immagini pubblicate dalla CI di release (ghcr) — la VPS fa solo pull.
     # Per il build locale in sviluppo: -f compose.yaml -f compose.build.yaml
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-gateway:${VPS1777_TAG:-dev}${VPS1777_DIGEST_GATEWAY:+@${VPS1777_DIGEST_GATEWAY}}
@@ -173,6 +180,9 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   archive-mcp:
     <<: [*restart, *logging, *security, *readonly]
+    pids_limit: 256
+    cpus: 2.0
+    mem_limit: 2g  # anon misurata 841 MB col modello caricato (04/10); il resto è cache dei DB, che il kernel libera
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}${VPS1777_DIGEST_ARCHIVE_MCP:+@${VPS1777_DIGEST_ARCHIVE_MCP}}
     init: true
     environment:
@@ -235,6 +245,7 @@ services:
     restart: "no"
     network_mode: none
     mem_limit: 1300m
+    pids_limit: 256
     cpus: 1.0
     entrypoint: ["python", "tools/costruisci_indice.py"]
     volumes:
@@ -249,6 +260,9 @@ services:
     # Chromium); /tmp è la tmpfs dell'ancora. I file di archive-ingest arrivano via exec
     # nel volume degli artefatti, non con docker cp (che su un rootfs ro rifiuta).
     <<: [*restart, *logging, *security, *readonly]
+    pids_limit: 256
+    cpus: 1.0
+    mem_limit: 512m  # picco misurato 64 MB (04/10)
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-mcp:${VPS1777_TAG:-dev}${VPS1777_DIGEST_NB1777_MCP:+@${VPS1777_DIGEST_NB1777_MCP}}
     init: true
     environment:
@@ -305,6 +319,9 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   nb1777-bot:
     <<: [*restart, *logging, *security, *readonly]
+    pids_limit: 128
+    cpus: 0.5
+    mem_limit: 256m  # picco misurato 44 MB (04/10)
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-nb1777-bot:${VPS1777_TAG:-dev}${VPS1777_DIGEST_NB1777_BOT:+@${VPS1777_DIGEST_NB1777_BOT}}
     init: true
     environment:
@@ -346,6 +363,9 @@ services:
   # ──────────────────────────────────────────────────────────────────────
   ocr:
     <<: [*restart, *logging, *security, *readonly]
+    pids_limit: 128
+    cpus: 2.0
+    # mem_limit: non ancora — il picco di tesseract su una pagina grossa non è misurato
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-ocr:${VPS1777_TAG:-dev}${VPS1777_DIGEST_OCR:+@${VPS1777_DIGEST_OCR}}
     init: true
     environment:

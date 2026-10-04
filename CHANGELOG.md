@@ -4,6 +4,21 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **I container hanno tetti contro il DoS (OWASP API4).** Prima nessun servizio di base ne
+  aveva: un processo impazzito poteva prendersi la VPS intera.
+  - Tutti hanno un tetto di processi (`pids_limit`, 128-256) e di CPU (`cpus`, da 0,5 a 2 su
+    4): la CPU rallenta, non uccide.
+  - La memoria ha un tetto solo dove il picco è misurato (memory.stat del cgroup, 04/10):
+    archive-mcp 2g (841 MB di processo col modello caricato; il resto è cache dei DB, che
+    il kernel libera da sé), nb1777-mcp 512m (picco 64 MB), nb1777-bot 256m (44 MB).
+  - Gateway e ocr restano senza tetto di memoria finché non si misura il loro picco vero:
+    l'indicizzazione di un bundle grosso, e tesseract su una pagina grande. Il compose lo
+    dichiara riga per riga, e un test chiede quella riga dove il tetto manca.
+  - Il gateway passa a uvicorn `limit_concurrency` (100, `GATEWAY_LIMIT_CONCURRENCY`):
+    oltre quel numero di connessioni contemporanee risponde 503 invece di accodare
+    all'infinito.
+
 ## [0.67.3] — 2026-10-04
 
 **archive1777 non scambia più l'id di un task di Cline per un numero di telefono (#408).**
