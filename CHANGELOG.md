@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.69.1] — 2026-10-04
+
+**Un init solo per container: tini PID 1 (#416).**
+
 ### Corretto
 - **Un init solo per container.** I cinque servizi di base avevano due init: `init: true` nel
   compose metteva docker-init come PID 1, e tini, l'ENTRYPOINT delle immagini, partiva come
