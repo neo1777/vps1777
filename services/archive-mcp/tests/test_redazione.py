@@ -444,3 +444,20 @@ def test_la_data_in_un_etichetta_non_e_la_coda_di_un_token_telegram() -> None:
     # il token vero, anche tagliato in coda a uno snippet, resta redatto
     coda = "…il bot è 123456789:" + "AAHk" + "x9Qz" + "LmNo…"
     assert "AAHkx9Qz" not in redazione.maschera_testo(coda)
+
+
+# ── 04/10/2026: gli id dei task di Cline (timestamp in millisecondi) ──────────────────
+def test_un_timestamp_in_millisecondi_non_e_un_telefono() -> None:
+    """get_session su un task di Cline restituiva «sessionId»: «[telefono redatto]»: l'id è il
+    timestamp in ms della creazione (13 cifre). Misurato dal vivo via MCP il 04/10/2026."""
+    for innocuo in ("sessionId 1724270076001", '{"sessionId": "1724270076001"}',
+                    "task 1758139200000 chiuso"):
+        assert redazione.maschera_testo(innocuo) == innocuo, innocuo
+
+
+def test_l_esenzione_millisecondi_e_stretta() -> None:
+    """Solo 13 cifre di fila che cominciano per 1. Con separatori, con un'altra cifra in testa,
+    o col `+` davanti, resta telefono: l'esenzione non deve mangiarsi la redazione."""
+    for telefono in ("chiama 3331234567890 ora", "chiama 172-427-007-6001 ora",
+                     "chiama +1724270076001 ora", "chiama 0039333123456 ora"):
+        assert "[telefono redatto]" in redazione.maschera_testo(telefono), telefono
