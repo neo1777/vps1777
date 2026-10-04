@@ -3872,7 +3872,7 @@ findings:
         valore del segreto in ogni punto della riga, quindi lì non c'è fuga. Tocca chi
         installa con l'ingresso Caddy, e scatta a ogni nuova autorizzazione (dopo una
         rotazione, per esempio).
-    since: unreleased
+    since: v0.67.2
     why: >
       H78 aveva chiuso il caso del path del proxy, che è il più frequente, ma il segreto
       viaggia anche dentro altri URI: ogni client OAuth conforme lo rimanda al server nel

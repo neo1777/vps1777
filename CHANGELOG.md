@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.67.2] — 2026-10-04
+
+**Il log di Caddy non scrive il gateway_secret nemmeno nell'autorizzazione OAuth (H79, #406),
+e la prima riga del README dice cosa fa vps1777 a chi non lo conosce (#405).**
+
 ### Cambiato
 - **La prima riga del README dice cosa fa vps1777 a chi non lo conosce.** «Un gateway
   self-hosted che mette i tuoi server MCP dietro un solo endpoint HTTPS, su un server che
