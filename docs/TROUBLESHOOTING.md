@@ -318,6 +318,7 @@ stack se la firma non verifica o se cosign è assente e non installabile.
 
 Cause:
 - cosign mancante e non installabile (rete/permessi) → `verifica firma richiesta ma cosign è assente e non installabile`
+- cosign scaricato ma con un'impronta diversa da quella attesa (download alterato, o un'architettura senza impronta) → prima `auto-install di cosign rifiutato: impronta …` (o `nessuna impronta per l'architettura …`), poi lo stesso errore
 - firma `.sig`/`.pem` assente o non valida nel bundle → `cosign verify-blob fallita`
 
 Fix: risolvi la causa (installa cosign da [github.com/sigstore/cosign](https://github.com/sigstore/cosign), o verifica la release su GitHub). Via d'emergenza **consapevole** — accetti una release non verificata, usala solo se sai cosa fai:

@@ -140,6 +140,7 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
       - name: Build & push ${{ matrix.service }}
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ./services/${{ matrix.service }}
@@ -157,9 +158,10 @@ jobs:
         # richiederebbe di cambiare anche la verifica (verify-blob) nel CLI.
         uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
       - name: Sign image (keyless)
+        # Per digest, non per tag (H80): il tag si può spostare fra il push e la firma.
         run: |
           cosign sign --yes \
-            ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}:${{ needs.guard.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/vps1777-${{ matrix.service }}@${{ steps.build.outputs.digest }}
 
   bundle:
     runs-on: ubuntu-latest

@@ -161,7 +161,7 @@ FRASI = [
     Frase("docs/PRIMI-15-MINUTI.md", r"\*\*(?P<container_default>{N})\*\* container —"),
     Frase("docs/PRIMI-15-MINUTI.md", r"i (?P<container_default>{N}) container rimossi"),
     # ── il registro dei rilievi, fuori dalla tabella che controlla check_findings ──
-    Frase("SECURITY.md", r"I (?P<rilievi>{N}) rilievi vivono in"),
+    Frase("SECURITY.md", r"(?:I|Gli) (?P<rilievi>{N}) rilievi vivono in"),
     Frase("REVIEW.md", r"(?P<rilievi>{N}) voci, \*\*(?P<rilievi_chiusi>{N}) chiuse\*\*, e le "
                        r"\*\*(?P<rilievi_non_chiusi>{N}) qui sotto non chiuse\*\* "
                        r"\((?P<rilievi_parziali>{N}) parziali, "

@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **cosign si verifica prima di installarlo (H80).** Quando sulla macchina manca cosign,
+  `vps1777 update` lo scarica da sé. Lo faceva senza controllarne l'impronta, e sempre nella
+  versione amd64. Ora scarica la v2.6.5 per la propria architettura (amd64 o arm64) e la
+  installa solo se l'SHA-256 coincide con quello scritto nel CLI. Se non coincide, l'update
+  si ferma come quando cosign manca. Un cosign già installato non si tocca. In CI le
+  immagini si firmano per digest e non più per tag. Rilievo dal censimento interno di Sagoma.
+
 ## [0.69.1] — 2026-10-04
 
 **Un init solo per container: tini PID 1 (#416).**
