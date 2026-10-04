@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.67.3] — 2026-10-04
+
+**archive1777 non scambia più l'id di un task di Cline per un numero di telefono (#408).**
+
 ### Corretto
 - **archive1777 non scambia più l'id di un task di Cline per un numero di telefono.** Gli id dei
   task di Cline sono timestamp in millisecondi (13 cifre), e la redazione in uscita li
