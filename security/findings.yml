@@ -3906,3 +3906,58 @@ findings:
         output: "0 righe col segreto; /health e l'autorizzazione normale identici"
         exit: 0
         quando: "2026-10-04"
+  - id: H80
+    severity: medium
+    title: "cosign, il verificatore delle firme, si installava sulla parola: `vps1777 update` lo scaricava senza controllarne l'impronta (e sempre amd64), e le immagini erano firmate per tag"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-10-04"
+      come: lettura
+      nota: >
+        Segnalato il 01/10 dal censimento interno di Sagoma sullo standard dei template
+        (L-CENSIMENTO-INTERNO, «Trovato per strada»), che lo collocava in CI. Riletto il
+        04/10: in CI cosign arriva da cosign-installer fissato per SHA; il punto scoperto era
+        `_ensure_cosign` nel CLI, che quando cosign manca scarica `cosign-linux-amd64` v2.4.1
+        e lo installa in /usr/local/bin con sudo, senza confronto con nessuna impronta. Sulla
+        VPS di riferimento cosign c'era già, e il suo SHA-256 coincide con quello ufficiale
+        della v2.4.1 (misurato il 04/10).
+    since: unreleased
+    why: >
+      Ogni aggiornamento si fida del bundle perché cosign ne verifica la firma: se il
+      binario di cosign è preso dalla rete senza controllo, la catena ha un anello che non
+      verifica nessuno, e lo esegue root. Su una macchina arm64 l'auto-installazione
+      metteva un binario che non parte, e l'update si fermava senza dire perché. La firma
+      per tag lasciava una finestra fra il push e la firma in cui il tag poteva puntare
+      altrove.
+    evidence:
+      - file: tools/vps1777.py
+        contains:
+          - '_COSIGN_SHA256 = {'
+          - 'if got != _COSIGN_SHA256[arch]:'
+      - file: .github/workflows/release.yml
+        contains:
+          - 'vps1777-${{ matrix.service }}@${{ steps.build.outputs.digest }}'
+      - file: tools/tests/test_cosign_impronta.py
+        contains:
+          - "def test_un_binario_con_l_impronta_sbagliata_non_arriva_a_sudo("
+          - "def test_le_immagini_si_firmano_per_digest("
+    fix: >
+      L'impronta SHA-256 di cosign v2.6.5 per amd64 e arm64 sta nel CLI, presa da
+      cosign_checksums.txt della release ufficiale; il binario della propria architettura
+      passa da sudo solo se coincide, altrimenti si cancella e l'update si ferma
+      (fail-closed, come prima). Un'architettura senza impronta non scarica niente. In CI
+      `cosign sign` firma `immagine@digest` dall'output del build. La v2.6.5 è provata sulla
+      firma staccata della v0.69.1: buona → OK; SHA256SUMS alterato o identità sbagliata →
+      exit 1. Un cosign già installato non si tocca.
+    prova:
+      - comando: "sha256sum /usr/local/bin/cosign sulla VPS; confronto con cosign_checksums.txt della v2.4.1"
+        dove: "VPS di riferimento"
+        output: "8b24b946…249b = cosign-linux-amd64 ufficiale: il binario installato è quello vero"
+        exit: 0
+        quando: "2026-10-04"
+      - comando: "cosign v2.6.5 verify-blob su SHA256SUMS/.sig/.pem della v0.69.1, poi con SHA256SUMS alterato e con un'identità sbagliata"
+        dove: "PC, scratchpad"
+        output: "Verified OK; exit 1; exit 1"
+        exit: 0
+        quando: "2026-10-04"

@@ -26,6 +26,7 @@ import hashlib
 import hmac
 import json
 import os
+import platform
 import pwd
 import re
 import shutil
@@ -1248,31 +1249,48 @@ def run_migrations(repo: Path, images: dict[str, str],
 
 # ─────────────────────────────────────────── bundle: fetch, verifica, sync
 
-_COSIGN_VERSION = "v2.4.1"
-_COSIGN_URL = (f"https://github.com/sigstore/cosign/releases/download/"
-               f"{_COSIGN_VERSION}/cosign-linux-amd64")
+# H80: il verificatore si verifica. Impronte da cosign_checksums.txt della release
+# ufficiale; la v2.6.5 verifica la firma staccata SHA256SUMS.sig/.pem come la 2.4.1
+# (provato il 04/10 su v0.69.1: buona → OK, alterata o identità sbagliata → exit 1).
+_COSIGN_VERSION = "v2.6.5"
+_COSIGN_SHA256 = {
+    "amd64": "c3b4f5410e608af03a5eb0aaac84a4313d8da131248e08ff1759ac70c79d1644",
+    "arm64": "426193b4c5da4d4d643e822f48fe0cc8a476ca1782a272704831f5a0cef716d7",
+}
+_ARCH = {"x86_64": "amd64", "amd64": "amd64", "aarch64": "arm64", "arm64": "arm64"}
 
 
 def _ensure_cosign(repo: Path) -> str | None:
     """Path di cosign; se manca, prova a installarlo (binario pinnato) in
     /usr/local/bin. Ritorna None se non riesce. Rende la verifica firma
     obbligatoria-di-default sostenibile anche su installazioni che non hanno
-    cosign, senza dipendere dal deploy iniziale."""
+    cosign, senza dipendere dal deploy iniziale. Il binario passa da sudo solo
+    se la sua impronta coincide con quella scritta qui (H80)."""
     c = shutil.which("cosign")
     if c:
         return c
+    arch = _ARCH.get(platform.machine().lower())
+    if arch not in _COSIGN_SHA256:
+        warn(f"auto-install di cosign: nessuna impronta per l'architettura {platform.machine()!r}")
+        return None
+    tmp = repo / ".cosign-dl"
     try:
-        tmp = repo / ".cosign-dl"
-        download(_COSIGN_URL, tmp)
+        download(f"https://github.com/sigstore/cosign/releases/download/"
+                 f"{_COSIGN_VERSION}/cosign-linux-{arch}", tmp)
+        got = hashlib.sha256(tmp.read_bytes()).hexdigest()
+        if got != _COSIGN_SHA256[arch]:
+            warn(f"auto-install di cosign rifiutato: impronta {got}, attesa {_COSIGN_SHA256[arch]}")
+            return None
         sudo(["install", "-m", "755", str(tmp), "/usr/local/bin/cosign"])
-        tmp.unlink(missing_ok=True)
-        got = shutil.which("cosign")
-        if got:
-            ok(f"cosign installato ({_COSIGN_VERSION})")
-        return got
+        installed = shutil.which("cosign")
+        if installed:
+            ok(f"cosign installato ({_COSIGN_VERSION}, impronta verificata)")
+        return installed
     except (OSError, subprocess.CalledProcessError, urllib.error.URLError) as exc:
         warn(f"auto-install di cosign fallito: {exc}")
         return None
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def staging_dir(repo: Path, version: str) -> Path:

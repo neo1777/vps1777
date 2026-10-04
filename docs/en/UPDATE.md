@@ -70,7 +70,8 @@ Guarantees:
   The bundle's keyless signature is verified with `cosign` **by default and in
   fail-closed mode**: if verification doesn't pass — or if `cosign` is missing
   and cannot be auto-installed — the update stops. `cosign` is auto-installed
-  when absent (pinned version). Deliberate emergency escape hatch:
+  when absent (pinned version, the binary for its architecture, installed only if its
+  SHA-256 fingerprint matches the one written in the CLI: `H80`). Deliberate emergency escape hatch:
   `VPS1777_REQUIRE_COSIGN=0` in `.env` or `--no-require-cosign`.
 - **`v*` tags are immutable** (H24, v0.32.0): a GitHub ruleset forbids moving
   or deleting them. This is the piece that makes everything else *trustworthy*:

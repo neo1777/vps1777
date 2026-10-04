@@ -67,7 +67,8 @@ Garanzie:
   La firma keyless del bundle è verificata con `cosign` **di default e in
   fail-closed**: se la verifica non passa — o se `cosign` manca e non è
   auto-installabile — l'update si ferma. `cosign` viene auto-installato se
-  assente (versione pinnata). Via d'emergenza consapevole:
+  assente (versione pinnata, binario della sua architettura, installato solo se la sua
+  impronta SHA-256 coincide con quella scritta nel CLI: `H80`). Via d'emergenza consapevole:
   `VPS1777_REQUIRE_COSIGN=0` in `.env` oppure `--no-require-cosign`.
 - **I tag `v*` sono immutabili** (H24, v0.32.0): un ruleset GitHub vieta di
   spostarli o cancellarli. È il pezzo che rende *fidato* tutto il resto: se un

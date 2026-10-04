@@ -153,8 +153,10 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 1 (H79, medium, 04/10) = 79. La stessa garanzia di H78 su altre forme dell'oggetto:
 # il segreto non sta solo all'inizio del path, i client OAuth lo rimandano nel `resource`
 # e nel path dei metadati. Trovato leggendo la specifica MCP 2026-07-28.
-EXPECTED_TOTAL = 79
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 46, "low": 19}
+# + 1 (H80, medium, 04/10) = 80. Il verificatore preso sulla parola: cosign scaricato senza
+# impronta dal CLI, e le immagini firmate per tag. Dal censimento interno di Sagoma.
+EXPECTED_TOTAL = 80
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 47, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
