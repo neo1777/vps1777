@@ -3922,7 +3922,7 @@ findings:
         e lo installa in /usr/local/bin con sudo, senza confronto con nessuna impronta. Sulla
         VPS di riferimento cosign c'era già, e il suo SHA-256 coincide con quello ufficiale
         della v2.4.1 (misurato il 04/10).
-    since: unreleased
+    since: v0.69.2
     why: >
       Ogni aggiornamento si fida del bundle perché cosign ne verifica la firma: se il
       binario di cosign è preso dalla rete senza controllo, la catena ha un anello che non
