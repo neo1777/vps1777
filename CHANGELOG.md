@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.69.2] — 2026-10-04
+
+**cosign si verifica prima di installarlo; immagini firmate per digest (H80, #418).**
+
 ### Sicurezza
 - **cosign si verifica prima di installarlo (H80).** Quando sulla macchina manca cosign,
   `vps1777 update` lo scarica da sé. Lo faceva senza controllarne l'impronta, e sempre nella
