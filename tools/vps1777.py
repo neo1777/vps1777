@@ -2500,7 +2500,7 @@ def _sorveglia_backup_archivio(repo: Path, st: dict, notifica: bool) -> None:
                     f"🟡 vps1777: il backup dell'ARCHIVIO è fermo da {eta} giorni "
                     f"(ne è dovuto uno ogni {ARCHIVIO_OGNI_GIORNI_ATTESI}).\n"
                     f"Il core notturno non c'entra: è il livello grande, quello dei "
-                    f"DB. Guarda il log del container backup.")
+                    f"DB. Guarda backups/backup.log.")
         return
     if str(st.get("archivio_vecchio_da") or ""):
         st.pop("archivio_vecchio_da", None)
@@ -2619,7 +2619,7 @@ def _sorveglia_backup_notturno(repo: Path, st: dict, notifica: bool) -> None:
                     repo,
                     f"🔴 vps1777: il backup notturno è fermo da {eta} giorni.\n"
                     f"La copertura non lo dice, perché senza backup nessuno pota le "
-                    f"copie vecchie. Guarda il container backup (docker ps, e il suo log).")
+                    f"copie vecchie. Guarda il container backup (docker ps) e backups/backup.log.")
         return
     if str(st.get("notturno_fermo_da") or ""):
         st.pop("notturno_fermo_da", None)
