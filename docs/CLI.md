@@ -37,12 +37,15 @@ giro.
 - **Pota gli snapshot pre-update** (`backups/pre-update/`): restano l'ultimo di ciascuna
   delle versioni n e n-1, più il più recente in assoluto — il punto di ritorno della
   versione in esecuzione ([BACKUP-RESTORE.md](BACKUP-RESTORE.md)).
-- **Tre sorveglianze**, sempre, con l'esito nel log: la raggiungibilità del servizio da
+- **Cinque sorveglianze**, sempre, con l'esito nel log: la raggiungibilità del servizio da
   fuori (la porta sull'host, poi l'indirizzo pubblico — il Funnel o `PUBLIC_BASE`;
   l'esito va anche in `onboarding/raggiungibilita.json`,
   letto da `/admin/setup`), la **copertura** dei backup (giorni distinti, avvisa se scende
-  sotto il massimo già raggiunto) e l'**età** dell'ultimo backup archivio (avvisa oltre i
-  14 giorni; se l'archivio non esiste ancora, tace).
+  sotto il massimo già raggiunto) l'**età** dell'ultimo backup archivio (avvisa oltre i
+  14 giorni; se l'archivio non esiste ancora, tace), l'**età** dell'ultimo backup core
+  (avvisa oltre i 2 giorni: un notturno fermo non pota più, quindi la copertura da sola non
+  lo vede) e lo **spazio libero** sul disco dei backup (avvisa sotto il 10%). Le notifiche
+  partono alla transizione, una volta, e di nuovo quando la cosa rientra.
 - **Scrive lo stato**: `onboarding/update_status.json` (la card admin e la Mini App lo
   leggono) e `last_check` in `var/state.json`.
 

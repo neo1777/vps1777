@@ -2585,6 +2585,84 @@ def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
                               f"a {quanti} giorni distinti{dove}.")
 
 
+BACKUP_NOTTURNO_SOGLIA_GIORNI = 2   # il core è ogni notte: oltre due notti senza copia è un guasto
+
+
+def eta_backup_notturno(repo: Path) -> int | None:
+    """Giorni dall'ultimo backup del core (`backups/vps1777-*.tar.age`), dal nome.
+    `None` = nessun backup, o cartella non leggibile (non misurato)."""
+    _quanti, _primo, ultimo = copertura_backup(repo)
+    if not ultimo:
+        return None
+    giorno = datetime.strptime(ultimo, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    return max(0, (datetime.now(timezone.utc) - giorno).days)
+
+
+def _sorveglia_backup_notturno(repo: Path, st: dict, notifica: bool) -> None:
+    """W5 — il backup notturno che si ferma non accorcia la copertura.
+
+    H59 avvisa quando la copertura SCENDE, ma a potare è backup.sh stesso: se il
+    backup non gira più, non pota più, e i sette giorni restano lì. Un backup morto
+    aveva l'aspetto di uno sano. Qui si guarda l'età dell'ultima copia, con la stessa
+    forma del livello archivio: avviso sempre nel log, notifica alla transizione.
+    Anche il backup di un update conta: è una copia vera, e copre quella notte."""
+    eta = eta_backup_notturno(repo)
+    if eta is None:
+        st.pop("notturno_fermo_da", None)
+        return
+    if eta > BACKUP_NOTTURNO_SOGLIA_GIORNI:
+        warn(f"backup notturno: l'ultima copia ha {eta} giorni (ne è dovuta una ogni notte)")
+        if not str(st.get("notturno_fermo_da") or ""):
+            st["notturno_fermo_da"] = now_iso()
+            if notifica:
+                telegram_notify(
+                    repo,
+                    f"🔴 vps1777: il backup notturno è fermo da {eta} giorni.\n"
+                    f"La copertura non lo dice, perché senza backup nessuno pota le "
+                    f"copie vecchie. Guarda il container backup (docker ps, e il suo log).")
+        return
+    if str(st.get("notturno_fermo_da") or ""):
+        st.pop("notturno_fermo_da", None)
+        ok(f"backup notturno: tornato (ultima copia {eta} giorni fa)")
+        if notifica:
+            telegram_notify(repo, f"🟢 vps1777: il backup notturno è tornato "
+                                  f"(ultima copia {eta} giorni fa).")
+
+
+DISCO_LIBERO_MIN_PCT = 10
+
+
+def _sorveglia_disco(repo: Path, st: dict, notifica: bool) -> None:
+    """W5 — lo spazio libero, ogni giorno. C'era la guardia sugli upload (admin.py),
+    ma il disco si riempie anche di backup, log e immagini, e a disco pieno il primo a
+    fallire è il backup. Misura il filesystem del repo, dove stanno i backup; sulla
+    VPS di riferimento è lo stesso dei volumi Docker. Non leggibile ≠ pieno."""
+    try:
+        u = shutil.disk_usage(repo)
+    except OSError as exc:
+        warn(f"spazio su disco: NON MISURATO ({exc})")
+        return
+    pct = int(u.free * 100 / u.total) if u.total else 0
+    libero_gb = u.free / 1024**3
+    if pct < DISCO_LIBERO_MIN_PCT:
+        warn(f"spazio su disco: libero {pct}% ({libero_gb:.1f} GB), sotto il {DISCO_LIBERO_MIN_PCT}%")
+        if not str(st.get("disco_pieno_da") or ""):
+            st["disco_pieno_da"] = now_iso()
+            if notifica:
+                telegram_notify(
+                    repo,
+                    f"🔴 vps1777: il disco è quasi pieno, libero {pct}% ({libero_gb:.1f} GB).\n"
+                    f"A disco pieno il primo a fallire è il backup. I candidati soliti: "
+                    f"backups/, backups/pre-update/, le immagini Docker vecchie.")
+        return
+    if str(st.get("disco_pieno_da") or ""):
+        st.pop("disco_pieno_da", None)
+        ok(f"spazio su disco: tornato al {pct}% libero")
+        if notifica:
+            telegram_notify(repo, f"🟢 vps1777: spazio su disco tornato al {pct}% libero "
+                                  f"({libero_gb:.1f} GB).")
+
+
 def cmd_check(repo: Path, args) -> int:
     st = state_load(repo)
     cur = current_version(repo)
@@ -2610,6 +2688,9 @@ def cmd_check(repo: Path, args) -> int:
     # non deve morire insieme a lui.
     _sorveglia_copertura_backup(repo, st, bool(getattr(args, "notify", False)))
     _sorveglia_backup_archivio(repo, st, bool(getattr(args, "notify", False)))
+    # W5: il notturno fermo (la copertura non lo vede) e lo spazio su disco.
+    _sorveglia_backup_notturno(repo, st, bool(getattr(args, "notify", False)))
+    _sorveglia_disco(repo, st, bool(getattr(args, "notify", False)))
     try:
         rel = latest_release(repo)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:

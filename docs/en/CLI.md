@@ -38,12 +38,15 @@ before asking GitHub it also does the maintenance and the watches that live on i
 - **It prunes the pre-update snapshots** (`backups/pre-update/`): what stays is the latest
   of each of versions n and n-1, plus the most recent one overall — the return point of
   the running version ([BACKUP-RESTORE.md](BACKUP-RESTORE.md)).
-- **Three watches**, always, with the outcome in the log: whether the service is
+- **Five watches**, always, with the outcome in the log: whether the service is
   reachable from outside (the port on the host, then the public address — the Funnel or
   `PUBLIC_BASE`; the outcome also goes into `onboarding/raggiungibilita.json`, read by
   `/admin/setup`), the backup **coverage** (distinct days; it warns if it drops below the
-  maximum already reached) and the **age** of the latest archive backup (it warns past 14
-  days; if no archive exists yet, it stays silent).
+  maximum already reached) the **age** of the latest archive backup (it warns past 14
+  days; if no archive exists yet, it stays silent), the **age** of the latest core backup
+  (it warns past 2 days: a stopped nightly backup no longer prunes, so coverage alone
+  doesn't see it) and the **free space** on the backups' disk (it warns below 10%).
+  Notifications go out on the transition, once, and again when the thing recovers.
 - **It writes the state**: `onboarding/update_status.json` (the admin card and the Mini
   App read it) and `last_check` in `var/state.json`.
 
