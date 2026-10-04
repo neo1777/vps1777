@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Un init solo per container.** I cinque servizi di base avevano due init: `init: true` nel
+  compose metteva docker-init come PID 1, e tini, l'ENTRYPOINT delle immagini, partiva come
+  suo figlio e lo segnalava a ogni avvio («Tini is not running as PID 1»). Ora tini è PID 1 e
+  il compose non aggiunge niente. L'init resta solo a indice-notturno, che sovrascrive
+  l'entrypoint e quindi salta tini. Un test impedisce di rimetterli doppi.
+
 ## [0.69.0] — 2026-10-04
 
 **`vps1777 campanello`: il conto delle «cose da fare» a Neo su Telegram, uno per giro (#414).**
