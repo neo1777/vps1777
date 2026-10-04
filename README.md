@@ -133,7 +133,7 @@ load the NotebookLM auth, [docs/en/INSTALL.md](docs/en/INSTALL.md).
 |---|---|---|
 | **gateway** | OAuth 2.1 + DCR + MCP reverse proxy + `/admin/*` panel + `/app/*` Mini App | 8080 |
 | **archive-mcp** | Search across multiple DBs — FTS5 and hybrid by meaning, FTS5 + vectors — of claude.ai exports, Claude Code sessions and Session Recovery bundles, with session cards and lineages (`get_session`, `get_stirpe`): **15 tools**. See [docs/en/ARCHIVE.md](docs/en/ARCHIVE.md) and [docs/en/RICERCA-IBRIDA.md](docs/en/RICERCA-IBRIDA.md) | 8002 |
-| **nb1777-mcp** | NotebookLM via the `nlm` CLI — **39 tools** (notebooks, sources, chat, 9 studio artifacts, doctor, canonico/memory). Also serves the **1777 memory canon** ([docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md)). See [docs/NB1777.md](docs/NB1777.md) (Italian) | 8003 |
+| **nb1777-mcp** | Gemini Notebook (formerly NotebookLM) via the `nlm` CLI — **39 tools** (notebooks, sources, chat, 9 studio artifacts, doctor, canonico/memory). Also serves the **1777 memory canon** ([docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md)). See [docs/NB1777.md](docs/NB1777.md) (Italian) | 8003 |
 | **nb1777-bot** | Owner-only Telegram bot + Mini App launcher | (long-poll) |
 | **ocr** | Tesseract in an internal container: the ingest's eyes (images → `[ocr]` text). The gateway calls it over HTTP, it never spawns processes | 8004 |
 
