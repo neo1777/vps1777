@@ -110,6 +110,7 @@ def main() -> None:
         # Ristretto (era "*", che si fidava dell'XFF da chiunque → IP client
         # spoofabile). Default 127.0.0.1: fidati dell'XFF solo dal proxy locale.
         forwarded_allow_ips=s.gateway_forwarded_allow_ips,
+        limit_concurrency=s.gateway_limit_concurrency,
     )
 
 

@@ -129,6 +129,10 @@ class Settings(BaseSettings):
     # l'XFF (verificato: un `X-Forwarded-For: 6.6.6.6` iniettato dal client
     # viene scartato, resta il vero IP). Un client pubblico che colpisse la
     # porta direttamente (peer pubblico) NON è fidato → il suo XFF è ignorato.
+    # DoS (OWASP API4, 04/10/2026): oltre queste connessioni contemporanee uvicorn risponde
+    # 503 invece di accodare all'infinito. Le risposte MCP in streaming tengono aperta una
+    # connessione ciascuna: 100 è largo per un'installazione personale.
+    gateway_limit_concurrency: int = 100
     gateway_forwarded_allow_ips: str = "127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
     # ───── routing ─────
