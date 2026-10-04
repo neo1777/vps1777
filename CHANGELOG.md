@@ -12,6 +12,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   annunci («your data never leaves your box») non si poteva usare: nb1777 manda i contenuti
   a Gemini Notebook e i connettori portano i risultati a claude.ai.
 
+### Sicurezza
+- **Il log di Caddy non scrive il gateway_secret nemmeno nell'autorizzazione OAuth (H79).**
+  Il filtro della 0.67.0 (H78) toglieva il segreto solo quando apriva il path. Ma i
+  client OAuth lo rimandano al server in altre due forme:
+  - nel parametro `resource` di `/oauth/authorize` (RFC 8707), in query e codificato;
+  - nel path dei metadati chiesti con l'URI del server in coda (RFC 9728),
+    `/.well-known/oauth-protected-resource/<segreto>/…`.
+
+  Misurato con caddy:2.11, entrambe finivano nel log in chiaro. Il filtro ora redige ogni
+  segmento lungo dopo `/` o `%2F`, senza consumare il separatore che segue. Costo: nel log
+  di Caddy anche i nomi lunghi come `oauth-authorization-server` diventano `***`; il log
+  del gateway, che redige solo il valore del segreto, li tiene leggibili. Riguarda solo
+  l'ingresso Caddy: il gateway redigeva già il segreto in ogni punto della riga.
+
 ## [0.67.1] — 2026-10-01
 
 **Un export di sessione resta fuori dal repo qualunque estensione abbia** (#402).

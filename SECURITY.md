@@ -403,7 +403,7 @@ interamente sulla VPS.
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** I 78 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 79 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -414,7 +414,7 @@ interamente sulla VPS.
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **78 voci** (2 critiche, 12 alte, 45 medie, 19 basse): 43 dalla
+Il registro conta **79 voci** (2 critiche, 12 alte, 46 medie, 19 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -444,12 +444,14 @@ E una (`H76`, 30/09) dalla raccolta degli oggetti della curatrice: le righe
 `gateway_secret` in uso, perché non hanno un prefisso di fornitore. E una (`H77`, 01/10)
 dalla preparazione della sua rotazione: `rotate-secret.sh` e `deploy.sh` lo stampavano
 anche davanti a un agente, come la password di H75. E una (`H78`, 01/10) dal censimento
-interno di Sagoma: l'access-log di Caddy scriveva l'URI col segreto.
+interno di Sagoma: l'access-log di Caddy scriveva l'URI col segreto. E una (`H79`, 04/10)
+dalla lettura della specifica MCP 2026-07-28: lo stesso log lo scriveva ancora quando il
+segreto non apriva il path, ma stava nel `resource` dell'autorizzazione OAuth.
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 66 |
+| **chiusi** | 67 |
 | **parziali** | 9 |
 | **accettati** | 3 |
 | **aperti** | 0 |

@@ -150,8 +150,11 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 1 (H75, medium, 28/09) = 75. Dalla misura di H74 sugli snippet veri: una password
 # admin stampata da setup.sh era nell'archivio. Non un buco della redazione, ma di chi
 # stampa: l'output di uno script lanciato da un agente è un transcript, e si ingerisce.
-EXPECTED_TOTAL = 78
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 45, "low": 19}
+# + 1 (H79, medium, 04/10) = 79. La stessa garanzia di H78 su altre forme dell'oggetto:
+# il segreto non sta solo all'inizio del path, i client OAuth lo rimandano nel `resource`
+# e nel path dei metadati. Trovato leggendo la specifica MCP 2026-07-28.
+EXPECTED_TOTAL = 79
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 46, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

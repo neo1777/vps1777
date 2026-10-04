@@ -3854,3 +3854,55 @@ findings:
         output: "0 righe col segreto; uri «/***/archive/mcp», «/health» intatto"
         exit: 0
         quando: "2026-10-01"
+  - id: H79
+    severity: medium
+    title: "Il filtro di H78 guardava solo l'inizio del path: il gateway_secret restava in chiaro nel `resource` dell'autorizzazione OAuth e nei metadati chiesti col path in coda"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-10-04"
+      come: lettura
+      nota: >
+        Leggendo la specifica MCP 2026-07-28 e la documentazione dei connettori di claude.ai
+        (che mandano `resource` con l'URI canonico del server, RFC 8707, e chiedono i
+        metadati RFC 9728 col path in coda). Il filtro di H78 era ancorato a `^/`. Misurato
+        con caddy:2.11-alpine e un segreto finto: `/oauth/authorize?resource=…%2F<segreto>%2F…`
+        e `/.well-known/oauth-protected-resource/<segreto>/archive/mcp` finivano nel log in
+        chiaro. Sulla VPS di riferimento l'ingresso è Tailscale Funnel; il gateway redige il
+        valore del segreto in ogni punto della riga, quindi lì non c'è fuga. Tocca chi
+        installa con l'ingresso Caddy, e scatta a ogni nuova autorizzazione (dopo una
+        rotazione, per esempio).
+    since: unreleased
+    why: >
+      H78 aveva chiuso il caso del path del proxy, che è il più frequente, ma il segreto
+      viaggia anche dentro altri URI: ogni client OAuth conforme lo rimanda al server nel
+      parametro `resource` e nel path dei metadati. Una garanzia «il log di Caddy non scrive
+      il segreto» che vale solo per una delle tre forme è la stessa frase senza codice che
+      H78 aveva corretto.
+    evidence:
+      - file: ingress/Caddyfile
+        contains:
+          - 'request>uri regexp "(/|%2[Ff])[A-Za-z0-9_-]{16,}" "${1}***"'
+      - file: ingress/Caddyfile.dns01
+        contains:
+          - 'request>uri regexp "(/|%2[Ff])[A-Za-z0-9_-]{16,}" "${1}***"'
+      - file: tools/tests/test_caddy_log_senza_segreto.py
+        contains:
+          - "def test_il_log_di_caddy_redige_il_segreto_ovunque_nell_uri("
+    fix: >
+      Il filtro sostituisce con *** ogni segmento di 16 o più caratteri dopo `/` o `%2F`
+      (anche minuscolo), senza consumare il separatore che segue: due segmenti lunghi di
+      fila (il nome dei metadati e il segreto) li prende entrambi. Costo dichiarato: nel log
+      di Caddy anche i nomi lunghi come oauth-authorization-server diventano ***; il log del
+      gateway li tiene leggibili.
+    prova:
+      - comando: "docker run caddy:2.11-alpine col filtro di H78; curl su 8 URI (path, resource in query codificato e no, metadati col path in coda, /health, un'autorizzazione normale); docker logs"
+        dove: "banco locale, senza la cura"
+        output: "il segreto finto in chiaro in 4 righe su 8"
+        exit: 0
+        quando: "2026-10-04"
+      - comando: "lo stesso, col filtro nuovo"
+        dove: "banco locale, con la cura"
+        output: "0 righe col segreto; /health e l'autorizzazione normale identici"
+        exit: 0
+        quando: "2026-10-04"
