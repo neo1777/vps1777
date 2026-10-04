@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.70.0] — 2026-10-04
+
+**Il controllo giornaliero sorveglia anche l'età del backup notturno e lo spazio su disco (W5, #420).**
+
 ### Aggiunto
 - **Due sorveglianze in più nel controllo giornaliero (`vps1777 check`).** La prima riguarda
   l'età dell'ultimo backup core: oltre i 2 giorni arriva un avviso. Un backup notturno che
