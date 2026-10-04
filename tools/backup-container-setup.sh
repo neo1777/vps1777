@@ -37,13 +37,16 @@ set -e
 echo "[backup] installing age + bash + zstd + sqlite (pinned)..."
 apk add --no-cache age=1.2.1-r0 bash=5.2.26-r0 zstd=1.5.6-r0 sqlite=3.45.3-r3 >/dev/null
 
+# Il log sta sul volume dei backup (W5, 04/10/2026): in /var/log, dentro il container,
+# moriva a ogni update, che ricrea il container. Ultime 5000 righe, circa un mese di notti.
+# backup-pull.sh non lo porta via: copia solo gli archivi e i loro .meta.
 echo "[backup] writing crontab..."
 cat > /etc/crontabs/root <<EOF
 # vps1777 daily backup at 03:00 UTC
-0 3 * * * cd /vps1777 && bash tools/backup.sh >> /var/log/backup.log 2>&1
+0 3 * * * cd /vps1777 && bash tools/backup.sh >> /backups/backup.log 2>&1; tail -n 5000 /backups/backup.log > /backups/backup.log.tmp && mv /backups/backup.log.tmp /backups/backup.log
 EOF
 
-touch /var/log/backup.log
+touch /backups/backup.log
 echo "[backup] cron schedule:"
 crontab -l
 
