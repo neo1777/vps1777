@@ -172,6 +172,12 @@ _CHIAVI_NOTE = frozenset({
     # risponde. **Terza volta che questo presidio ferma qualcuno alla stessa
     # riga** (dopo `libero_mb` e `name`): rosso appena scritta la chiave nuova.
     "ruolo",
+    # 05/10 — `tool`, `ms`, `esito` della riga `proxy_tool` (S11, proxy.py). `tool` è
+    # `params.name` del JSON-RPC, troncato a 80 caratteri: un nome scelto dal client, non
+    # un argomento (gli argomenti non escono mai dal corpo). `ms` è misurato da noi; `esito`
+    # è di un vocabolario chiuso (ok, errore_tool, timeout, interrotto, errore_stream, 502).
+    # Quarta volta che questo presidio ferma qualcuno alla stessa riga.
+    "tool", "ms", "esito",
 })
 _MAX_VALORE = 500
 
