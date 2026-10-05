@@ -24,7 +24,7 @@ Sul tuo PC: `nlm login` → `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz
 
 ## Tool MCP esposti
 
-39 tool, in sei famiglie: notebook (6), source (9), chat (2: `notebook_query` e `notebook_query_esito`), studio —
+40 tool, in sei famiglie: notebook (6), source (9), chat (2: `notebook_query` e `notebook_query_esito`), studio —
 creazione (10: i 9 artefatti + `studio_create_all_9`), studio — gestione (8), diagnostica e
 memoria (4: `doctor`, `canonico`, `memoria_check`, `memoria_ack`). Firme e comportamento stanno
 nelle docstring di `app/server.py`, che il client MCP mostra ai modelli; la guida è

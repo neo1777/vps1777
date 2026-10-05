@@ -80,7 +80,7 @@ Se rilanci `setup.sh`, salta gli step già fatti.
    ```
    La versione è quella con cui gira il server (`services/nb1777-mcp/pyproject.toml`): una CLI diversa può salvare il profilo in un'altra forma. Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm` (login admin). Il gateway lo inoltra a `nb1777-mcp` sul canale interno (il gateway non monta i cookie), che lo estrae sul suo volume e lo usa dalla call successiva.
    Se `nlm` risulta "not found": `uv tool update-shell` (mette `~/.local/bin` nel PATH) e riapri il terminale.
-3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **39** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
+3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **40** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
 4. **Bot Telegram**: `/start` al tuo bot
 5. **Mini App**: nel bot, bottone **Pannello** accanto al campo di testo (o
    `/pannello`) → la plancia mobile: notebook, archivio, secret, update.

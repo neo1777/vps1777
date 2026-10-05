@@ -1,7 +1,7 @@
 """
 app/server.py — FastMCP wrapper sopra core.py (servizio nb1777-mcp).
 
-Espone le funzioni di `core.py` come tool MCP (39), più le rotte custom:
+Espone le funzioni di `core.py` come tool MCP (40), più le rotte custom:
 gli endpoint `/internal/*` (H6) e `/health`. In compose ascolta su
 0.0.0.0:8003 sulla rete interna `backend`, mai pubblicata: da Internet si
 arriva solo attraverso il gateway (OAuth + path-secret), che rifiuta i
@@ -119,6 +119,7 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     "studio_export_to_docs": ("Esporta in Google Docs", _AGGIUNGE),
     "studio_export_to_sheets": ("Esporta in Google Sheets", _AGGIUNGE),
     "doctor": ("Diagnostica", _LEGGE),
+    "usage_get": ("La quota di Gemini Notebook", _LEGGE),
     "canonico": ("Il canonico della memoria", {"readOnlyHint": True, "openWorldHint": False}),
     # manda un ping su Telegram quando trova un disallineamento: non è sola lettura
     "memoria_check": ("Controlla la versione della memoria",
@@ -729,9 +730,23 @@ async def studio_export_to_sheets(notebook_id: str, artifact_id: str,
 # ============================================================
 
 @mcp.tool()
+async def usage_get() -> dict:
+    """La quota di Gemini Notebook: quanto resta nelle due finestre (una breve che scorre e
+    una settimanale), con l'ora in cui ciascuna si azzera, e il piano. Chiamala quando i
+    tool cominciano a fallire senza un errore di autenticazione: dice se è la quota.
+    Ritorna {windows: [{window, percent_used, percent_remaining, resets_at}], tier}."""
+    return await _aio(core.usage_get)
+
+
+@mcp.tool()
 async def doctor() -> dict:
-    """Diagnostica: nlm reachable + count notebook + canonico del blocco memoria."""
+    """Diagnostica: nlm reachable + count notebook + canonico del blocco memoria + quota
+    (`quota`, come usage_get; un errore lì non fa fallire il resto)."""
     d = await _aio(core.doctor)
+    try:
+        d["quota"] = await _aio(core.usage_get)
+    except Exception as exc:                              # noqa: BLE001 — diagnostica
+        d["quota"] = {"errore": str(exc)[:300]}
     # Canonico anche qui: doctor è la chiamata tipica d'avvio sessione, così il
     # canonico atterra senza un tool dedicato. Fail-open (get_canonical non alza).
     d["canonico"] = canonical.public_view(await asyncio.to_thread(canonical.get_canonical))

@@ -5,6 +5,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Aggiunto
+- **La quota di Gemini Notebook: `usage_get` e il campo `quota` di `doctor`.** Quando nb1777
+  smette di rispondere le cause comuni sono due e si curano in modo opposto: la sessione
+  scaduta (si ricarica il profilo) e la quota finita (si aspetta l'azzeramento). `nlm usage`,
+  che c'è già nella 0.12, le distingue: ora è un tool di sola lettura (40 in tutto) e `doctor`
+  lo porta con sé senza fallire se la quota non si legge. Una delle sette migliorie accettate
+  da Neo il 05/10.
+
+### Aggiunto
 - **Audit per tool nel gateway (S11).** Ogni chiamata a un tool lascia una riga `proxy_tool`
   con nome, durata in millisecondi, esito e status, scritta a fine stream: `ok`,
   `errore_tool` (il tool ha risposto `isError`), `timeout`, `interrotto` (il client ha chiuso
