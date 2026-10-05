@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.72.0] — 2026-10-05
+
+**nb1777 si accorge da solo che la sessione Google è morta, e l'errore dice la cura giusta (#426).**
+
 ### Aggiunto
 - **nb1777 si accorge da solo che la sessione Google è morta (S8).** Ogni 4 ore
   (`NB1777_SONDA_ORE`, `0` la spegne) una chiamata vera e leggera prova la sessione, e se ne
