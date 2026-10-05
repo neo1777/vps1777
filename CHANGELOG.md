@@ -5,6 +5,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Cambiato
+- **Il ruolo di un archivio decide dove si cerca (P1, cura B della #278).** Senza `db_name`,
+  `search`, `search_ibrida`, `count` e `check_term` guardano i DB primari e quelli non
+  dichiarati: fotografie e riscontri si riaprono col parametro `ruoli` (anche `'tutti'`),
+  il riservato si interroga solo nominandolo. Prima toccavano tutti i DB,
+  `voce-1777-personale` compreso. È un cambio di contratto: «0 sui primari» non è «0
+  ovunque», e `count` lo dice con `anche_fuori` (i match nelle fotografie e nei riscontri);
+  `search_ibrida` elenca in `fuori_perimetro` i DB lasciati fuori. Su un'installazione
+  senza ruoli dichiarati non cambia niente.
+
+### Cambiato
 - **`secrets-status` dà l'età vera della sessione NotebookLM (S9).** Era la data del file dei
   cookie, che si azzerava ogni volta che `nlm` lo riscriveva, senza un caricamento. Ora la
   chiede a nb1777-mcp (`python -m app.stato_sessione`, solo date): la nascita della sessione
