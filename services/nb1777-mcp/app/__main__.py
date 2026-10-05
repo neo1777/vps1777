@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from . import auth
+from . import auth, sonda
 from . import server
 from .server import mcp
 from .settings import get_settings
@@ -26,6 +26,9 @@ def main() -> None:
 
     # Setup HOME per nlm (cerca il profilo in ~/.notebooklm-mcp-cli/profiles/default/)
     auth.ensure_nlm_home_in_env()
+
+    # S8: la sonda viva della sessione, in un thread demone (dopo HOME: chiama nlm).
+    sonda.avvia()
 
     # FastMCP run senza ridichiarare host/port — già nel costruttore.
     mcp.run(transport=s.nb1777_transport)

@@ -1,7 +1,7 @@
 """
 app/server.py — FastMCP wrapper sopra core.py (servizio nb1777-mcp).
 
-Espone le funzioni di `core.py` come tool MCP (38), più le rotte custom:
+Espone le funzioni di `core.py` come tool MCP (39), più le rotte custom:
 gli endpoint `/internal/*` (H6) e `/health`. In compose ascolta su
 0.0.0.0:8003 sulla rete interna `backend`, mai pubblicata: da Internet si
 arriva solo attraverso il gateway (OAuth + path-secret), che rifiuta i
@@ -36,7 +36,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 
-from . import canonical, core, memoria, nlm_profile
+from . import canonical, core, memoria, nlm_profile, sonda
 from .settings import get_settings
 
 log = logging.getLogger("nb1777-mcp.server")
@@ -146,10 +146,14 @@ def _internal_ok(request: "Request") -> bool:
 
 @mcp.custom_route("/internal/nlm/status", methods=["GET"])
 async def internal_nlm_status(request: "Request") -> "JSONResponse":
-    """Stato del profilo, senza esporre i cookie: {ok, has_cookies, pending}."""
+    """Stato del profilo, senza esporre i cookie: {ok, has_cookies, pending, sonda}.
+    `ok` dice solo che il file c'è; `sonda` ({quando, esito} o null) dice se l'ultima
+    chiamata vera a Google è riuscita (S8)."""
     if not _internal_ok(request):
         return JSONResponse({"error": "forbidden"}, status_code=403)
-    return JSONResponse(nlm_profile.profile_status(Path(get_settings().nlm_home)))
+    stato = nlm_profile.profile_status(Path(get_settings().nlm_home))
+    stato["sonda"] = await asyncio.to_thread(sonda.ultimo)
+    return JSONResponse(stato)
 
 
 @mcp.custom_route("/internal/nlm/artifacts", methods=["GET"])
@@ -574,10 +578,13 @@ async def studio_status(notebook_id: str, artifact_id: str, verbose: bool = Fals
 
 @mcp.tool()
 async def studio_wait(notebook_id: str, artifact_id: str,
-                      poll_interval: float = 5.0, timeout: float = 600.0) -> dict:
-    """Polling fino a stato terminale o timeout."""
+                      poll_interval: float = 5.0, timeout: float = 25.0) -> dict:
+    """Aspetta che un artefatto studio sia pronto, al massimo `timeout` secondi (tetto 25).
+    Se non è pronto restituisce l'ultimo stato con `in_corso: true`: richiamalo. Il tetto
+    esiste perché da claude.ai una chiamata oltre ~30 s cade."""
     return await _aio(core.studio_wait, notebook_id, artifact_id,
-                      poll_interval=poll_interval, timeout=timeout)
+                      poll_interval=poll_interval, timeout=min(float(timeout), 25.0),
+                      restituisci_al_tetto=True)
 
 
 @mcp.tool()

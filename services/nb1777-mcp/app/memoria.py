@@ -172,6 +172,12 @@ def maybe_cloud_reminder() -> Optional[dict]:
     }
 
 
+def accoda(item: dict) -> None:
+    """Accoda una notifica per il bot (la sonda della sessione, S8). Il bot la preleva
+    al prossimo giro di /internal/notifications, come i ping del canonico."""
+    _outbox.append(item)
+
+
 def drain(*, include_reminder: bool = True) -> list[dict]:
     """Svuota la coda drift; se dovuto, accoda il promemoria cloud. Chiamato dal
     poll del bot."""

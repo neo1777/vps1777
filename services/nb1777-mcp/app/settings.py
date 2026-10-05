@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     nlm_home: str = "/var/lib/nlm"
     fastmcp_stateless_http: bool = True
     log_level: str = "INFO"
+    # S8: ogni quante ore la sonda viva prova la sessione Google (0 = spenta).
+    nb1777_sonda_ore: float = 4.0
 
     # Segreto condiviso col gateway (e col bot) per gli endpoint INTERNI
     # /internal/nlm/*: fra i servizi in esercizio nb1777-mcp è l'unico a montare il

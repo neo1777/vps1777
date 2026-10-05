@@ -54,11 +54,6 @@ TEXT_ARGV_MAX = 256  # caratteri: oltre questo, il testo va su file temporaneo
 _ERR_ARG_MAX = 80
 _ERR_CMD_MAX = 300
 
-# === costanti: NB di lavoro noti ===
-NB_LAB_GDR1777 = "492a2e7b-1e08-4100-89ed-6a13febf1295"   # GDR1777 — laboratorio artefatti (test 9 strumenti)
-NB_VPS_1777 = "489e15bc-ddde-48ef-8c98-ba21bcb0a7da"      # vps-1777 (biblioteca VPS)
-NB_BOT_IMITATORE = "15290c4d-a842-4261-99e5-f7824b197c85" # bot-imitatore (da popolare)
-
 # H40 — prefisso dei notebook scratch usa-e-getta creati dall'OCR
 # (transcribe_document). È l'UNICO segnale per riconoscere e recuperare gli
 # scratch rimasti orfani quando il cleanup fallisce: chi lo cambia deve
@@ -172,6 +167,35 @@ class NLMError(RuntimeError):
     """Errore nel chiamare il CLI nlm o nel parsare il suo output."""
 
 
+class NLMAuthError(NLMError):
+    """La sessione Google del profilo sulla VPS non vale più (S7, 05/10/2026)."""
+
+
+# ── Riconoscere l'auth scaduta (S7) ─────────────────────────────────────────────────
+# Le quattro forme viste nel codice di nlm 0.12-0.15 e nei log del 21/07 e del 02/10.
+# «Could not reach NotebookLM» ha la stessa intestazione ma è RETE, e si esclude per
+# prima. «Could not retrieve studio status» è generico: non si promuove ad auth (il 21/07
+# ha nascosto la causa vera), e a dirlo con certezza è la sonda.
+_AUTH_SCADUTA = ("authentication expired", "rpc error 16", "credentials have expired",
+                 "authentication is no longer valid")
+_RETE = ("could not reach notebooklm",)
+MSG_AUTH_SCADUTA = (
+    "Sessione Gemini Notebook scaduta sulla VPS: ricarica il profilo da /admin/nlm del "
+    "gateway. Sul PC: `nlm login`, poi `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz "
+    "profiles/default`, e carica il file. Il login non si fa qui: rifarlo sul PC senza "
+    "caricare il profilo non sblocca la VPS.")
+
+
+def classifica_errore(testo: str) -> str:
+    """'auth_scaduta' | 'rete' | 'altro', dal testo di errore di nlm."""
+    t = (testo or "").lower()
+    if any(p in t for p in _RETE):
+        return "rete"
+    if any(p in t for p in _AUTH_SCADUTA):
+        return "auth_scaduta"
+    return "altro"
+
+
 # ============================================================
 # helper interno: subprocess di nlm
 # ============================================================
@@ -196,6 +220,10 @@ def _run(args: list[str], *, timeout: float = 180.0, check: bool = True) -> subp
         raise NLMError(f"timeout {timeout}s su: {_safe_cmd(cmd)}") from e
     if check and p.returncode != 0:
         msg = (p.stderr or "").strip() or (p.stdout or "").strip()
+        if classifica_errore(msg) == "auth_scaduta":
+            # Il testo di nlm invita a lanciare `nlm login` «nel terminale»: qui è la
+            # VPS, e l'invito porta fuori strada (21/07). Si dice la cura vera.
+            raise NLMAuthError(MSG_AUTH_SCADUTA)
         raise NLMError(f"nlm exit {p.returncode}: {msg[:400]}")
     return p
 
@@ -910,16 +938,26 @@ def studio_status(nb_id: str, artifact_id: str, verbose: bool = False) -> dict:
 
 
 def studio_wait(nb_id: str, artifact_id: str, *,
-                poll_interval: float = 5.0, timeout: float = 600.0) -> dict:
-    """Polling fino a stato terminale (completed/failed/error/done) o timeout."""
+                poll_interval: float = 5.0, timeout: float = 600.0,
+                restituisci_al_tetto: bool = False) -> dict:
+    """Polling fino a stato terminale (completed/failed/error/done) o timeout.
+
+    Con `restituisci_al_tetto` (il tool MCP, S12) il tetto non è un errore: si restituisce
+    l'ultimo stato con `in_corso: True`, e chi chiama riprova. Da claude.ai una chiamata
+    oltre ~30 s cade, e un «tool call failed» su un'attesa normale è rumore."""
     deadline = time.time() + timeout
-    last = {}
-    while time.time() < deadline:
+    last: dict = {}
+    while True:
         last = studio_status(nb_id, artifact_id)
         state = _norm_type(last.get("status") or last.get("state") or "")
         if state in ("completed", "failed", "error", "done", "ready"):
             return last
+        if time.time() >= deadline:
+            break
         time.sleep(poll_interval)
+    if restituisci_al_tetto:
+        return {**last, "in_corso": True,
+                "nota": "l'artefatto non è ancora pronto: richiama studio_wait (o studio_status)"}
     raise NLMError(f"studio_wait timeout {timeout}s su {artifact_id}; ultimo stato: {last}")
 
 
@@ -1133,6 +1171,11 @@ def doctor() -> dict:
         info["error"] = str(e)
         return info
     try:
+        from . import sonda          # import tardivo: sonda importa core
+        info["sonda"] = sonda.ultimo()
+    except Exception:                # noqa: BLE001 — informativo, non deve rompere doctor
+        info["sonda"] = None
+    try:
         nbs = nb_list()
         info["notebooks_count"] = len(nbs)
         info["first_3"] = [{"id": nb.get("id"), "title": nb.get("title")} for nb in nbs[:3]]
@@ -1140,6 +1183,10 @@ def doctor() -> dict:
         # doctor osserva; a cancellarli è sweep_ingest_notebooks() su richiesta.
         info["ingest_orphans"] = sum(
             1 for nb in nbs if (nb.get("title") or "").startswith(INGEST_NB_PREFIX))
+    except NLMAuthError as e:
+        # S7: doctor mostra lo stato invece di cadere come un errore qualunque
+        info["auth"] = "scaduta"
+        info["list_error"] = str(e)
     except Exception as e:
         info["list_error"] = str(e)
     return info
@@ -1151,10 +1198,6 @@ if __name__ == "__main__":
     d = doctor()
     for k, v in d.items():
         print(f"  {k}: {v}")
-    print("\nNB di lavoro noti:")
-    print(f"  GDR1777 lab : {NB_LAB_GDR1777}")
-    print(f"  vps-1777    : {NB_VPS_1777}")
-    print(f"  bot-imitatore: {NB_BOT_IMITATORE}")
     if "--list" in sys.argv:
         print("\nElenco completo notebook:")
         for nb in nb_list():
