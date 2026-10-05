@@ -425,6 +425,13 @@ stesso nome DB. Lista ed eliminazione sono disponibili anche dalla **Mini App**
 `archive-mcp` espone **15 tool** via MCP (usabili dal connettore claude.ai e
 dalla Mini App). Tutti passano dalla redazione in uscita descritta sopra.
 
+Dalla 0.73.0 ogni tool ha un titolo e le annotazioni MCP: tredici sono di sola lettura,
+`set_description` e `set_ruolo` sovrascrivono i metadati di un DB (distruttivi e
+idempotenti). Le descrizioni stanno sotto i 2048 caratteri che Claude Code legge, le
+spiegazioni dei parametri stanno nello schema, e le regole che contano sono anche nelle
+`instructions` del server. Il primo collegamento dopo l'aggiornamento può chiedere di
+nuovo il permesso sui tool.
+
 | Tool | Cosa fa |
 |---|---|
 | `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}`. Sulla ricerca in **tutti** i DB lo stesso uuid arriva **una volta**, con `anche_in` per gli altri archivi che lo contengono (niente limit sprecato in fotocopie). Filtri `since`/`until`, `project`, `speaker`, `voice`, `campi` (sotto). `limit` va da 1 a 200: sotto 1 è un errore che lo dice (prima `-1` perdeva in silenzio l'ultimo risultato), sopra 200 si taglia |

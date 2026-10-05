@@ -9,10 +9,12 @@ import asyncio
 import functools
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from . import db, redazione
 from .settings import get_settings
@@ -20,8 +22,23 @@ from .settings import get_settings
 log = logging.getLogger(__name__)
 
 _s = get_settings()
+# S4 (05/10/2026): le regole che contano stanno qui, in testa, e non solo in fondo alla
+# descrizione di un tool. Claude Code tronca descrizioni e istruzioni a 2048 caratteri:
+# fino alla 0.72 la guida di `search` arrivava tagliata a metà.
+ISTRUZIONI = """\
+archive1777: l'archivio delle conversazioni passate del proprietario (claude.ai, Claude Code,
+Telegram, vocali). Cinque regole:
+1. Per LESSICO usa `search` (sai come si chiama ciò che cerchi); per SENSO `search_ibrida`.
+2. Zero risultati non prova un'assenza: riprova con altre parole, o con l'altro tool.
+3. Una citazione non è un fatto finché non sai chi parla: `get_context(uuid)`. Le parole del
+   proprietario sono speaker='human'; voice='own' da solo vale anche per l'assistente.
+4. Prima di dire «non c'è» leggi `saltati` e, in search_ibrida, il perimetro degli `indici`.
+5. Il server serve due ricerche alla volta: raggruppa le chiamate a coppie.
+`list_databases(schede=True)` dice cosa c'è in ogni DB e il suo ruolo."""
+
 mcp = FastMCP(
     "archive",
+    instructions=ISTRUZIONI,
     host=_s.archive_http_host,
     port=_s.archive_http_port,
     stateless_http=_s.fastmcp_stateless_http,
@@ -63,10 +80,39 @@ def _fuori_dal_loop(lavoro):
     return coroutine
 
 
-def _tool_con_redazione(*args: Any, **kw: Any) -> Any:
-    decoratore = _tool_originale(*args, **kw)
+# ── S10 (05/10/2026): titolo e annotazioni di OGNI tool, in un posto solo ───────────────
+# Il client li usa per raggruppare i permessi (claude.ai) e per sapere cosa scrive. Tutti
+# leggono un archivio locale (openWorld no), tranne i due che sovrascrivono i metadati di un
+# DB senza storia: distruttivi e idempotenti. Un tool che manca da questa tabella non
+# si registra (KeyError all'import): `test_annotazioni` lo dice prima.
+_LETTURA = {"readOnlyHint": True, "openWorldHint": False}
+_SCRIVE_METADATI = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True,
+                    "openWorldHint": False}
+ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
+    "search": ("Cerca per parole", _LETTURA),
+    "search_ibrida": ("Cerca per senso", _LETTURA),
+    "count": ("Conta le occorrenze", _LETTURA),
+    "check_term": ("Controlla un termine", _LETTURA),
+    "get_context": ("Contesto di un messaggio", _LETTURA),
+    "get_conversation": ("Leggi una conversazione", _LETTURA),
+    "list_projects": ("Elenca le etichette", _LETTURA),
+    "archive_stats": ("Messaggi per anno", _LETTURA),
+    "list_databases": ("Elenca i DB", _LETTURA),
+    "describe_databases": ("Descrivi i DB", _LETTURA),
+    "check_integrity": ("Integrità dei DB", _LETTURA),
+    "set_description": ("Scrivi la descrizione di un DB", _SCRIVE_METADATI),
+    "set_ruolo": ("Scrivi il ruolo di un DB", _SCRIVE_METADATI),
+    "get_session": ("Scheda di una sessione", _LETTURA),
+    "get_stirpe": ("Catena di una sessione", _LETTURA),
+}
 
+
+def _tool_con_redazione(*args: Any, **kw: Any) -> Any:
     def applica(fn):
+        titolo, hint = ANNOTAZIONI[fn.__name__]
+        decoratore = _tool_originale(*args, title=titolo,
+                                     annotations=ToolAnnotations(title=titolo, **hint), **kw)
+
         @functools.wraps(fn)
         def avvolta(*a: Any, **k: Any) -> Any:
             risultato = fn(*a, **k)
@@ -90,85 +136,65 @@ mcp.tool = _tool_con_redazione                            # type: ignore[method-
 
 
 @mcp.tool()
-def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
-           sort: str = "rank", since: str = "", until: str = "",
-           project: str = "", speaker: str = "", voice: str = "",
-           campi: str = "tutto",
-           snippet_tokens: int = 32) -> list[dict[str, Any]]:
-    """Cerca nell'archivio full-text (SQLite FTS5) delle conversazioni.
+def search(
+    query: Annotated[str, Field(description=(
+        "Espressione FTS5. Operatori in MAIUSCOLO (AND OR NOT NEAR(a b, 5)); termini con "
+        "- . / @ : # ' tra doppi apici; famiglie di nomi col prefisso (palant*)."))],
+    db_name: Annotated[str, Field(description=(
+        "Nome del DB; '' = tutti (vedi list_databases)."))] = "",
+    limit: Annotated[int, Field(description=(
+        "Massimo risultati, GLOBALE anche su più DB (default 20, massimo 200)."))] = 20,
+    raw: Annotated[bool, Field(description=(
+        "True = la query passa intatta, senza quotare da sé i caratteri speciali "
+        "(per NEAR e parentesi complesse)."))] = False,
+    sort: Annotated[str, Field(description=(
+        "'rank' (rilevanza, default), 'newest' o 'oldest'."))] = "rank",
+    since: Annotated[str, Field(description=(
+        "Inizio della finestra (ISO, confronto lessicografico sul ts: ts >= since)."))] = "",
+    until: Annotated[str, Field(description=(
+        "Fine della finestra (ts <= until; un giorno senza ora esclude quel giorno: "
+        "usa '2026-09-30T23:59')."))] = "",
+    project: Annotated[str, Field(description=(
+        "Etichetta esatta (titolo chat, project:*, design:*)."))] = "",
+    speaker: Annotated[str, Field(description=(
+        "CHI HA SCRITTO la riga, un fatto preso dalla fonte: 'human', 'assistant', "
+        "'tool' (output di un comando), 'system' (turni iniettati dal programma), "
+        "'other' (un altro membro di un gruppo Telegram), 'unknown' (allegati, titoli, "
+        "memorie, documenti, log MCP). Un valore che non esiste è un errore."))] = "",
+    voice: Annotated[str, Field(description=(
+        "DI CHI È LA VOCE nel contenuto, una STIMA: 'own', 'pasted_transcript', "
+        "'pasted_ai', 'character', 'mixed', 'unknown'; alias 'direct' (own con poca "
+        "citazione) e 'quoted' (soprattutto citato); 'none' = mai classificata, che non "
+        "è 'unknown'."))] = "",
+    campi: Annotated[str, Field(description=(
+        "'tutto' (default: testo, azioni e allegati) o 'testo' (solo le parole, senza "
+        "comandi e file letti o scritti). Usa 'testo' con sort='newest' e per «chi ha "
+        "detto cosa» (#273)."))] = "tutto",
+    snippet_tokens: Annotated[int, Field(description=(
+        "Lunghezza dello snippet (default 32). Per il testo attorno: get_context(uuid)."))] = 32,
+) -> list[dict[str, Any]]:
+    """Cerca nell'archivio full-text (SQLite FTS5) delle conversazioni, per LESSICO: quando
+    sai come si chiama ciò che cerchi. Per il SENSO usa search_ibrida.
 
-    COME SCRIVERE LA QUERY (leggere prima di cercare — evita falsi negativi):
-    - Operatori SEMPRE in MAIUSCOLO: `AND`, `OR`, `NOT`, `NEAR(a b, 5)`. In
-      minuscolo diventano termini di ricerca, non operatori.
-    - Ricerca senza stemming e bilingue: cerca sempre le due lingue,
-      `errore OR error`, `memoria OR memory`.
-    - Famiglie di nomi col PREFISSO: `palant*` trova palantir1777 (i numeri
-      attaccati non si separano: `1777` non trova N1777).
-    - Termini con caratteri speciali (`- . / @ : # '`) vanno tra doppi apici:
-      `"flutter-elinux"`, `"0.7.9"`, `"github.com"`, `"l'archivio"`. In modalità
-      smart (default) il server li quota da sé; con `raw=true` la query passa
-      intatta (per NEAR/parentesi complesse).
-    - Case- e accent-insensitive: `perché` ≡ `perche`.
+    QUERY: senza stemming e bilingue (cerca `errore OR error`); case- e accent-insensitive;
+    `1777` non trova N1777 (usa il prefisso). I dettagli dei parametri stanno nello schema.
 
-    PROTOCOLLO DELLO ZERO: 0 risultati NON prova assenza. Riprova quotando il
-    termine e togliendo i caratteri speciali; solo più tentativi coerenti a zero
-    valgono "non c'è". Una query malformata NON restituisce lista vuota: solleva
-    un errore che spiega come correggerla.
+    PROTOCOLLO DELLO ZERO: 0 risultati NON prova assenza. Riprova quotando il termine e
+    togliendo i caratteri speciali; solo più tentativi coerenti a zero valgono «non c'è».
+    Una query malformata solleva un errore che spiega come correggerla, non una lista vuota.
 
-    Args:
-        query: espressione FTS5.
-        db_name: nome DB ('' = tutti; vedi list_databases / describe_databases).
-        limit: massimo risultati, GLOBALE anche su più DB (default 20, massimo 200;
-            sotto 1 è un errore).
-        raw: se True passa la query intatta senza auto-quoting (default False).
-        sort: 'rank' (rilevanza, default), 'newest' o 'oldest' (per data).
-        since / until: filtro temporale sul ts (ISO, confronto lessicografico).
-        project: filtra per etichetta esatta (titolo chat, project:*, design:*).
-        speaker: CHI HA SCRITTO la riga — 'human', 'assistant', 'tool', 'system', 'other',
-            'unknown'. È un FATTO preso dalla fonte, non una stima. 'tool' = l'output
-            di un comando (tool_result di Claude Code, dalla 0.52.0: prima era
-            'human'); 'system' = un turno che il programma inietta (notifiche di task,
-            output di comandi locali, compattazioni, dalla 0.53.0: prima 'human').
-            'other' = un altro membro di un gruppo Telegram (non il proprietario, che
-            è 'human'), se l'installazione dichiara il proprietario.
-            'unknown' = la fonte non dichiara un mittente noto: allegati, titoli,
-            memorie, schede, documenti, log MCP, e i gruppi Telegram quando il
-            proprietario non è dichiarato. Un valore che non esiste è un errore.
-        voice: DI CHI È LA VOCE nel contenuto — è una STIMA euristica, con la sua
-            confidenza. Valori: 'own', 'pasted_transcript', 'pasted_ai',
-            'character', 'mixed', 'unknown', più due alias e un terzo stato:
-              'direct'  = own con poca citazione (quoted_share < 0.2)
-              'quoted'  = prevalentemente citato (quoted_share >= 0.5)
-              'none'    = MAI CLASSIFICATA — nessuno l'ha guardata. NON è
-                          'unknown', che invece è un giudizio: «guardata e non
-                          riconosciuta». Chiederli insieme è chiedere due cose.
-        campi: DOVE cercare. 'tutto' (default) = testo, azioni e allegati; 'testo' =
-            solo le parole, senza le azioni (comandi, file scritti o letti, output).
-            Usalo con sort='newest' e per «chi ha detto cosa»: il codice scritto da
-            un Edit o letto da un Read si presenta come il dato più recente (#273: una
-            fixture di test in prima posizione). Un altro valore è un errore.
-        snippet_tokens: lunghezza dello snippet (default 32). Per il testo pieno
-            attorno a un risultato usa get_context(uuid).
+    ⚠️ `voice='own'` NON vuol dire «lo ha scritto Neo»: vale anche per l'assistente (l'80%
+    degli `own`, misurato il 02/08). Per le parole di una persona servono DUE filtri:
+    `speaker='human', voice='own'`.
 
-    ⚠️ `voice:own` NON VUOL DIRE «lo ha scritto Neo». Vuol dire «chi ha scritto
-    questo messaggio parlava di suo», e vale anche per l'assistente: misurato il
-    02/08 su 61.100 righe, `own` contiene 10.629 messaggi dell'assistente —
-    l'80% del totale `own`. **Per le parole di una persona servono DUE filtri:**
-    `speaker='human', voice='own'`. Un filtro solo risponde a un'altra domanda.
+    🔑 REGOLA D'ORO: cerchi chi-È-una-cosa («X è Y»)? Aggiungi `voice='direct'`. Un match
+    trovato senza quel filtro può venire da materiale incollato: prima di usarlo come fatto,
+    `get_context(uuid)`.
 
-    🔑 LA REGOLA D'ORO, ora interrogabile: cerchi chi-È-una-cosa (una definizione,
-    un'attribuzione, «X è Y»)? Aggiungi `voice='direct'`. Un match identitario
-    trovato SENZA quel filtro può venire da materiale incollato: prima di usarlo
-    come fatto, `get_context(uuid)` — la citazione non diventa un fatto finché
-    non sai chi parla.
-
-    Ritorna righe {db, uuid, project, ts, rank, snippet, snapshot}. `snapshot` è
-    la data dell'ultima modifica del DB: quanto è fresco ciò che leggi.
-    Sulla ricerca in TUTTI i DB lo stesso uuid presente in più archivi (bundle e
-    riscontri v1/v2) arriva UNA volta, col campo `anche_in` che elenca gli altri
-    DB: il limit non si spreca più in fotocopie (#272).
-    ⚠️ CONCORRENZA: il server serve 2 ricerche alla volta; le altre si mettono
-    in coda da sole (#270). Raggruppa le chiamate a coppie, non a quartetti.
+    Ritorna righe {db, uuid, project, ts, rank, snippet, snapshot}; `snapshot` = quanto è
+    fresco il DB. Su tutti i DB lo stesso uuid arriva UNA volta, con `anche_in` per gli altri
+    DB (#272). ⚠️ Il server serve 2 ricerche alla volta, le altre aspettano in coda (#270):
+    raggruppa le chiamate a coppie.
     """
     return db.search(query, db_name, limit, raw=raw, sort=sort, since=since,
                      until=until, project=project, speaker=speaker, voice=voice,
@@ -176,96 +202,60 @@ def search(query: str, db_name: str = "", limit: int = 20, raw: bool = False,
 
 
 @mcp.tool()
-def search_ibrida(query: str, db_name: str = "", limit: int = 20,
-                  query_fts: str = "", since: str = "", until: str = "",
-                  campi: str = "tutto", k_rrf: int = 30, peso_fts: float = 1.5,
-                  snippet_tokens: int = 64, speaker: str = "",
-                  riformulazioni: list[str] | None = None,
-                  passaggio: int = 0) -> dict[str, Any]:
-    """Cerca per SENSO, non per lessico: FTS5 + vettori fusi (issue #281).
+def search_ibrida(
+    query: Annotated[str, Field(description=(
+        "La domanda in linguaggio naturale, come la diresti a voce: niente AND/OR/asterischi."))],
+    db_name: Annotated[str, Field(description=(
+        "Nome del DB; '' = tutti quelli che hanno un indice vettoriale."))] = "",
+    limit: Annotated[int, Field(description=(
+        "Righe restituite (default 20, massimo 200)."))] = 20,
+    query_fts: Annotated[str, Field(description=(
+        "Facoltativa: un'espressione FTS5 col lessico giusto per il ramo full-text, se lo "
+        "conosci (vale solo per la domanda, non per le riformulazioni)."))] = "",
+    since: Annotated[str, Field(description=(
+        "Inizio della finestra (ts >= since), su tutte e due le liste."))] = "",
+    until: Annotated[str, Field(description=(
+        "Fine della finestra (ts <= until); le righe senza ts restano fuori."))] = "",
+    campi: Annotated[str, Field(description=(
+        "'tutto' (default) o 'testo': con 'testo' il ramo vettoriale tiene solo le righe "
+        "che hanno parole."))] = "tutto",
+    k_rrf: Annotated[int, Field(description=(
+        "Parametro di fusione RRF: il default (30) è quello misurato; cambiarlo è un "
+        "esperimento."))] = 30,
+    peso_fts: Annotated[float, Field(description=(
+        "Peso del ramo full-text nella fusione: il default (1.5) è quello misurato."))] = 1.5,
+    snippet_tokens: Annotated[int, Field(description=(
+        "Lunghezza dello snippet FTS (default 64, che è anche il tetto di FTS5)."))] = 64,
+    speaker: Annotated[str, Field(description=(
+        "CHI HA SCRITTO, come in search ('human', 'assistant', 'tool', 'system', 'other', "
+        "'unknown'). Per «cosa ha detto Neo» usa 'human': senza, su 20 risultati le sue "
+        "parole erano da 0 a 8 (27/09)."))] = "",
+    riformulazioni: Annotated[list[str] | None, Field(description=(
+        "Fino a 3 altri modi di dire la domanda. La fusione resta una, con lo stesso "
+        "limit: serve quando leggi pochi risultati."))] = None,
+    passaggio: Annotated[int, Field(description=(
+        "0 (default) o un numero di parole fino a 400: al posto dello snippet, la finestra "
+        "del testo intero dove i termini sono più fitti. Per vocali, verbali e chat lunghe; "
+        "200 parole su 10 righe sono circa 2.700 token."))] = 0,
+) -> dict[str, Any]:
+    """Cerca per SENSO, non per lessico: FTS5 + vettori fusi in una sola RRF su tutti i DB
+    (#281). Usala quando ricordi il senso e non le parole («l'articolo dove raccontavo quanto
+    avevo speso»). Quando sai il termine esatto usa `search`: qui la fusione è tarata per non
+    peggiorare le query esatte, non per vincerle. Misurato: FTS5 5/9, vettori 4/9, ibrido 6/9.
 
-    ⚖️ QUANDO USARLA — e quando no. `search` (FTS5) resta il tool giusto quando
-    SAI come si chiama ciò che cerchi: un termine esatto, un nome di funzione,
-    una citazione. Questa serve al caso opposto, quello che ha fatto nascere
-    l'archivio: **ricordi il senso e non il lessico** — «l'articolo dove
-    raccontavo quanto avevo speso», «la dashboard dove i file erano pianeti»,
-    «quando abbiamo parlato di dare voce all'assistente». Lì FTS5 tace, perché
-    la parola che useresti tu non è quella che c'è scritta.
+    Ritorna {righe, indici, parametri} e, solo se qualcosa si è perso, `saltati`:
+    - `righe`: come search, più `origine` ('fts' | 'vettori' | 'entrambi'): dice quale
+      motore ha trovato la riga;
+    - `indici`: per ogni DB quanti messaggi sono indicizzati e CON CHE PERIMETRO. ⚠️ Leggilo
+      prima di dire «non c'è»: fuori dal perimetro gli zeri sembrano assenze, e la risposta
+      giusta è `search`. `indici[].verifica` con `scartati` > 0 = indice disallineato, quei
+      risultati sono stati tolti e non restituiti sbagliati;
+    - `saltati`: [{db, ramo, motivo}] per un DB sparito, un ramo full-text inutilizzabile o
+      un indice che non risponde (in quel caso resta la metà full-text);
+    - `parametri`: k_rrf, peso_fts, modello, quante formulazioni.
 
-    📐 QUANTO VALE, misurato: sul banco del POC (9 bersagli fissati PRIMA di
-    misurare, settembre 2026) FTS5 da solo trova 5 casi su 9, i vettori da soli 4,
-    **l'ibrido 6**. Non è magia: è che le due liste sbagliano in modi diversi e la
-    fusione tiene il meglio di entrambe. Sulle query esatte questa non batte
-    `search`: la fusione è tarata per NON peggiorarle (peso FTS 1.5), non per
-    vincerle. Il modello (e5-small) è stato rimesso alla prova il 27/09/2026 contro
-    due candidati più grandi: nessuno lo batte sui soli vettori.
-
-    🔧 COME SI SCRIVE LA QUERY: in linguaggio naturale, come la diresti a voce —
-    è l'opposto della sintassi di `search`. Niente AND/OR/asterischi: la frase
-    intera è il segnale. Se conosci ANCHE il lessico giusto, passalo in
-    `query_fts` (sintassi FTS5 normale): la parte full-text userà quello e la
-    fusione avrà due liste forti invece di una e mezza.
-
-    🔁 RIFORMULAZIONI: se la domanda si può dire in modi davvero diversi,
-    passane fino a 3 in `riformulazioni`. Ognuna porta le sue due liste e la
-    fusione resta UNA, con lo stesso `limit`: una riga trovata da più
-    formulazioni sale. Misurato il 30/09 su 10 domande con criterio cieco: +1 e
-    +3 elementi su 30 nelle prime 10 righe, nessun guadagno a 20. Serve quando
-    leggi pochi risultati; con un `limit` largo la domanda da sola basta.
-
-    Args:
-        query: la domanda in linguaggio naturale (il senso).
-        db_name: DB su cui cercare ('' = tutti quelli CON indice).
-        limit: righe restituite (default 20, massimo 200; sotto 1 è un errore).
-        query_fts: espressione FTS5 opzionale per il ramo full-text.
-        since / until: finestra temporale (ISO, `ts >= since`, `ts <= until`),
-            come in `search`. Vale per TUTTE e due le liste; le righe senza ts
-            restano fuori.
-        campi: 'tutto' (default) o 'testo' come in `search`. Col 'testo' il ramo
-            vettoriale tiene solo le righe che HANNO parole: un vettore non dice se
-            ha colpito il testo o le azioni.
-        k_rrf, peso_fts: parametri di fusione. I default sono quelli misurati
-            (plateau k=20-40, peso 1.2-1.5): cambiarli è un esperimento, non
-            una regolazione — il banco vale per questi.
-        snippet_tokens: lunghezza dello snippet FTS (default 64, che è anche il
-            tetto di FTS5: oltre, tronca in silenzio).
-        passaggio: 0 (default) o un numero di parole, fino a 400. Sostituisce lo
-            snippet con la finestra di quel numero di parole dove i termini della
-            domanda sono più fitti, presa dal testo INTERO. Serve sui testi lunghi
-            (vocali, verbali, chat lunghe), dove lo snippet si ferma prima della
-            risposta: misurato il 01/10 su 30 elementi di vocali, quelli che si
-            leggono senza aprire il file passano da 13 (snippet 64) a 14 con 120
-            parole e 17 con 200 (20 con limit 20). Costa token: 200 parole per riga, su 10 righe, sono
-            circa 2.700 token. Sui messaggi brevi non cambia niente.
-        riformulazioni: fino a 3 altri modi di dire la domanda (vuote e
-            doppioni si scartano; più di 3 è un errore). Il `query_fts` vale
-            solo per la domanda.
-        speaker: CHI HA SCRITTO, come in `search` ('human', 'assistant', 'tool',
-            'system', 'other', 'unknown'). Filtra TUTTE e due le liste: per «cosa ha detto
-            Neo» usa speaker='human' — senza, su 20 risultati le sue parole erano
-            da 0 a 8 (misurato il 27/09).
-
-    Ritorna {righe, indici, parametri}:
-    - `righe`: come `search`, PIÙ `origine` = 'fts' | 'vettori' | 'entrambi'.
-      Guardala: dice quale dei due motori ha trovato quella riga, cioè se stai
-      raccogliendo il guadagno dei vettori o solo FTS5 travestito.
-    - `indici`: per ogni DB, quanti messaggi sono indicizzati, **con che
-      perimetro** e da quando. ⚠️ Leggilo prima di concludere «non c'è»: un
-      indice parziale (un perimetro come `ts >= 2026-05 AND ts < 2026-07`)
-      produce zeri che sembrano assenze. Fuori dal perimetro, la risposta
-      giusta è `search`.
-      `indici[].verifica` dice se i risultati vettoriali combaciano col DB:
-      `scartati` > 0 = l'indice è disallineato (dopo un re-ingest) e quei
-      risultati sono stati TOLTI, non restituiti sbagliati; `registro: false` =
-      indice vecchio, non verificabile. Lo `stato` dice cosa fare.
-    - `parametri`: con che cosa è stata fatta la ricerca — `k_rrf`, `peso_fts`, il
-      `modello` di embedding, `testi` (quante formulazioni: la domanda più le
-      riformulazioni tenute), `snippet_tokens` e `passaggio`.
-
-    ⚠️ Richiede il modello di embedding e almeno un indice `.vec.db` sul volume.
-    Se mancano NON ricade in silenzio su FTS5: solleva un errore che dice cosa
-    manca e come metterlo (un risultato dimezzato che sembra intero è peggio di
-    un errore). Vedi docs/RICERCA-IBRIDA.md.
+    ⚠️ Senza modello di embedding o senza alcun indice `.vec.db` NON ricade in silenzio su
+    FTS5: solleva un errore che dice cosa manca (docs/RICERCA-IBRIDA.md).
     """
     return db.search_ibrida(query, db_name, limit, query_fts=query_fts,
                             since=since, until=until, campi=campi, k_rrf=k_rrf,
