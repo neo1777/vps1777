@@ -11,7 +11,10 @@ MCP streamable-http che usa chunked transfer + SSE).
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -36,6 +39,37 @@ HOP_BY_HOP = {
     "upgrade",
     "host",
 }
+
+
+# S11 (05/10/2026): una riga d'audit per ogni chiamata a un tool, con nome, durata ed
+# esito. Prima `proxy_request` diceva solo servizio e status HTTP, scritto quando partono
+# gli header: un tool che moriva a metà, o un client che chiudeva prima (claude.ai a
+# circa 30 s), restava un 200. Gli ARGOMENTI non si registrano mai: possono essere
+# testo personale; il nome del tool no.
+_ERRORE_TOOL = b'"isError":true'
+
+
+def tool_chiamati(body: bytes | None) -> list[str]:
+    """I nomi dei tool in un corpo JSON-RPC (`tools/call` → `params.name`), anche in un
+    batch. Nient'altro del corpo esce di qui."""
+    if not body:
+        return []
+    try:
+        msg = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return []
+    nomi = []
+    for m in msg if isinstance(msg, list) else [msg]:
+        if isinstance(m, dict) and m.get("method") == "tools/call":
+            nome = (m.get("params") or {}).get("name") if isinstance(m.get("params"), dict) else None
+            nomi.append(str(nome)[:80] if nome else "?")
+    return nomi
+
+
+def _audit_tool(service: str, tools: list[str], t0: float, esito: str, status: int | None) -> None:
+    for nome in tools:
+        audit({"event": "proxy_tool", "service": service, "tool": nome,
+               "ms": int((time.monotonic() - t0) * 1000), "esito": esito, "status": status})
 
 
 def _filter_headers(headers: dict[str, str]) -> dict[str, str]:
@@ -152,6 +186,8 @@ async def proxy(request: Request) -> Response:
 
     method = request.method
     body = await request.body() if method in {"POST", "PUT", "PATCH"} else None
+    tools = tool_chiamati(body)
+    t0 = time.monotonic()
 
     timeout = httpx.Timeout(60.0, connect=5.0)
     client = httpx.AsyncClient(timeout=timeout, follow_redirects=False)
@@ -165,6 +201,7 @@ async def proxy(request: Request) -> Response:
     except httpx.RequestError as exc:
         log.warning("proxy upstream error: %s", exc)
         await client.aclose()
+        _audit_tool(service, tools, t0, "502", 502)
         return JSONResponse(
             {"error": "bad_gateway", "reason": str(exc)},
             status_code=502,
@@ -185,10 +222,27 @@ async def proxy(request: Request) -> Response:
 
     # Streaming response: passa attraverso il body byte-per-byte
     async def _gen() -> Any:
+        esito, coda = "ok", b""
         try:
             async for chunk in upstream_resp.aiter_raw():
+                if tools and esito == "ok":
+                    # il marcatore può cadere a cavallo di due pezzi: si tiene la coda
+                    finestra = coda + chunk.replace(b'": ', b'":')
+                    if _ERRORE_TOOL in finestra:
+                        esito = "errore_tool"
+                    coda = finestra[-len(_ERRORE_TOOL):]
                 yield chunk
+        except httpx.TimeoutException:
+            esito = "timeout"
+            raise
+        except (asyncio.CancelledError, GeneratorExit):
+            esito = "interrotto"        # il client ha chiuso prima della fine
+            raise
+        except Exception:
+            esito = "errore_stream"
+            raise
         finally:
+            _audit_tool(service, tools, t0, esito, upstream_resp.status_code)
             await upstream_resp.aclose()
             await client.aclose()
 

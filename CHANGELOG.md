@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Audit per tool nel gateway (S11).** Ogni chiamata a un tool lascia una riga `proxy_tool`
+  con nome, durata in millisecondi, esito e status, scritta a fine stream: `ok`,
+  `errore_tool` (il tool ha risposto `isError`), `timeout`, `interrotto` (il client ha chiuso
+  prima, come claude.ai verso i 30 s) o `502`. Prima `proxy_request` si scriveva alla
+  partenza degli header e un tool morto a metà restava un 200. Gli argomenti non si
+  registrano. Si vede in `/admin/audit`.
+
 ### Corretto
 - **Un profilo nlm cifrato ha un rifiuto che dice cosa fare (S6).** Dalla 0.15 `nlm login`
   propone di cifrare il login nel portachiavi del PC (modalità «protected»): nella cartella
