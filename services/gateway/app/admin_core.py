@@ -426,3 +426,31 @@ def md_minimo(testo: str) -> str:
     chiudi_para()
     chiudi_ul()
     return "\n".join(out)
+
+
+# ─────────────────────────────────────────── /admin/salute (P11, 05/10/2026)
+# Le righe di `onboarding/salute.json`, scritto da `vps1777 check` una volta al giorno.
+# Il rischio dichiarato è «un verde vecchio»: se il timer smette di girare, le righe
+# restano ok per sempre. Ogni riga porta l'età della SUA misura, e oltre la soglia del
+# timer (la stessa di «il controllo non sta girando») diventa vecchia qualunque stato
+# dica. Una riga senza data è vecchia per definizione; uno stato fuori vocabolario vale
+# «non misurato», mai verde.
+SALUTE_VECCHIA_ORE = CHECK_STALE_H
+SALUTE_STATI = ("ok", "attenzione", "guasto", "non_misurato")
+
+
+def righe_salute(dati: dict, now: float | None = None) -> list[dict]:
+    righe = dati.get("righe") if isinstance(dati, dict) else None
+    if not isinstance(righe, list):
+        return []
+    out = []
+    for r in righe:
+        if not isinstance(r, dict):
+            continue
+        ore = ore_da(r.get("misurato_il") or "", now)
+        stato = r.get("stato") if r.get("stato") in SALUTE_STATI else "non_misurato"
+        out.append({"voce": str(r.get("voce") or "?"), "stato": stato,
+                    "dettaglio": str(r.get("dettaglio") or ""),
+                    "misurato_il": r.get("misurato_il"), "ore": ore,
+                    "vecchia": ore is None or ore > SALUTE_VECCHIA_ORE})
+    return out

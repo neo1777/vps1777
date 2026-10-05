@@ -136,7 +136,7 @@ Apri **`http://127.0.0.1:8080/admin/login`** e accedi con l'email che hai dato e
 password che il wizard ha stampato (o messo nel file che ti ha indicato).
 
 > **Deve apparire**: il login riesce (redirect), e le schede rispondono — sono sei:
-> `/admin/setup`, `/admin/nlm`, `/admin/archive`, `/admin/update`, `/admin/secrets`,
+> `/admin/setup`, `/admin/salute`, `/admin/nlm`, `/admin/archive`, `/admin/update`, `/admin/secrets`,
 > `/admin/audit`.
 > *(misurato il 07/09 su quattro di loro: `GET /admin/login` → `200`; `POST` col login
 > vero → `302`; `/admin/nlm`, `/admin/update`, `/admin/audit`, `/admin/archive`, con la

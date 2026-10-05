@@ -5,6 +5,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Aggiunto
+- **La pagina Salute (`/admin/salute`, P11).** Le sorveglianze del timer giornaliero
+  (raggiungibilità, backup notturno e d'archivio, copertura, disco) vivevano in
+  `var/state.json` e arrivavano solo come messaggi Telegram quando cambiavano. Ora `vps1777
+  check` scrive `onboarding/salute.json` con una riga per voce, stato e data della misura,
+  più la sessione Google (la sonda di nb1777) e la memoria di ogni container (picco e OOM
+  kill dal cgroup). La pagina segna «vecchia» una misura oltre le 30 ore: un timer fermo non
+  lascia un verde.
+
+### Aggiunto
 - **Audit per tool nel gateway (S11).** Ogni chiamata a un tool lascia una riga `proxy_tool`
   con nome, durata in millisecondi, esito e status, scritta a fine stream: `ok`,
   `errore_tool` (il tool ha risposto `isError`), `timeout`, `interrotto` (il client ha chiuso

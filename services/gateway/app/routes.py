@@ -262,6 +262,7 @@ routes = [
     Route("/admin/update/check", admin.update_check, methods=["POST"]),
     Route("/admin/update/state", admin.update_state, methods=["GET"]),
     Route("/admin/audit", admin.audit_view, methods=["GET"]),
+    Route("/admin/salute", admin.salute_view, methods=["GET"]),
     Route("/admin/secrets", admin.secrets_view, methods=["GET"]),
 
     # Mini App (pagina + API dietro Bearer typ=miniapp)

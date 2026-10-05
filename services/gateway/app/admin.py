@@ -298,6 +298,7 @@ def _layout(title: str, body: str, current: str = "", flash: str = "",
     if current:
         items = [
             ("setup", "Setup"),
+            ("salute", "Salute"),
             ("nlm", "NotebookLM"),
             ("archive", "Archive"),
             ("update", "Update"),
@@ -1302,6 +1303,50 @@ async def audit_view(request: Request) -> Response:
 </section>
 """
     return _layout("audit", body, current="audit", csrf=_csrf_token(email))
+
+
+# ───── /admin/salute — ogni sorveglianza in un posto (P11, 05/10/2026) ─────
+# Legge onboarding/salute.json, scritto da `vps1777 check` (timer giornaliero). La
+# logica che decide cosa vede l'utente (stato, età, «vecchia») sta in admin_core.
+_SALUTE_PUNTO = {"ok": "ok", "attenzione": "warn", "guasto": "err", "non_misurato": "off"}
+
+
+async def salute_view(request: Request) -> Response:
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+    dati = _read_json(Path(get_settings().onboarding_dir) / "salute.json")
+    righe = admin_core.righe_salute(dati)
+    if righe:
+        corpo = ""
+        for r in righe:
+            punto = "off" if r["vecchia"] else _SALUTE_PUNTO[r["stato"]]
+            quando = ("mai" if r["ore"] is None else f"{r['ore']} h fa")
+            nota = " · <b>vecchia</b>" if r["vecchia"] else ""
+            corpo += (
+                f'<tr><td><span class="dot {punto}"></span>{html.escape(r["voce"])}</td>'
+                f'<td>{html.escape(r["stato"].replace("_", " "))}</td>'
+                f'<td><span class="muted">{html.escape(r["dettaglio"])}</span></td>'
+                f'<td><span class="muted">{html.escape(quando)}{nota}</span></td></tr>')
+        tabella = ('<section><div class="tblwrap"><table><thead><tr><th>voce</th><th>stato</th>'
+                   f'<th>dettaglio</th><th>misurato</th></tr></thead><tbody>{corpo}</tbody>'
+                   '</table></div></section>')
+        testa = (f'<div class="kicker">scritto da <code>vps1777 check</code> il '
+                 f'{html.escape(str(dati.get("checked_at", "?")))} · una riga è «vecchia» '
+                 f'oltre {admin_core.SALUTE_VECCHIA_ORE} h dalla sua misura</div>')
+    else:
+        tabella = ""
+        testa = ('<div class="kicker"><span class="dot off"></span>nessuna misura ancora — '
+                 'la scrive <code>vps1777 check</code> sull\'host, una volta al giorno</div>')
+    body = f"""
+<header>
+  <h1>vps1777 <em>admin</em> · salute</h1>
+  <div class="who">{html.escape(email)}</div>
+</header>
+{testa}
+{tabella}
+"""
+    return _layout("salute", body, current="salute", csrf=_csrf_token(email))
 
 
 # ───── /admin/secrets — età, scadenze, rotazione ─────
