@@ -431,6 +431,13 @@ the same DB name. List and deletion are also available from the **Mini App**
 and from the Mini App). All of them go through the output redaction described
 above.
 
+Since 0.73.0 every tool has a title and the MCP annotations: thirteen are read-only,
+`set_description` and `set_ruolo` overwrite a DB's metadata (destructive and idempotent).
+The descriptions stay under the 2048 characters Claude Code reads, the parameter
+explanations live in the schema, and the rules that matter are also in the server's
+`instructions`. The first connection after the update may ask for permission on the
+tools again.
+
 | Tool | What it does |
 |---|---|
 | `search(query, db_name, limit, …)` | FTS5 search; returns `{db, uuid, project, ts, rank, snippet, snapshot}`. When searching **all** DBs the same uuid arrives **once**, with `anche_in` listing the other archives that contain it (no limit wasted on copies). Filters `since`/`until`, `project`, `speaker`, `voice`, `campi` (below). `limit` goes from 1 to 200: below 1 it is an error that says so (before, `-1` silently lost the last result), above 200 it is cut |

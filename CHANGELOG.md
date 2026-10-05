@@ -4,6 +4,23 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Ogni tool dei due MCP dichiara cosa fa al mondo (S10).** Titolo e annotazioni MCP
+  (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) sui 54 tool, in
+  una tabella sola per server; un tool nuovo senza riga non si registra. In archive scrivono
+  solo `set_description` e `set_ruolo`; in nb1777 i distruttivi sono le tre cancellazioni.
+  Il client li usa per raggruppare i permessi: il primo collegamento dopo l'aggiornamento
+  può chiederli di nuovo.
+- **archive1777 ha le sue `instructions`**: cinque regole (lessico o senso, il protocollo
+  dello zero, chi parla, `saltati` e perimetro, due ricerche alla volta).
+
+### Corretto
+- **Le guide di `search` e `search_ibrida` arrivano intere (S4).** Erano lunghe 4.974 e 5.527
+  caratteri, e Claude Code tronca a 2048: si perdevano le spiegazioni di `speaker`, `voice`,
+  `campi` e della finestra temporale. Ora le spiegazioni dei parametri stanno nello schema
+  (`Field(description=…)`) e le descrizioni sono sotto i 1.300 caratteri, con le regole in
+  testa. Un test fallisce se una descrizione supera il tetto.
+
 ## [0.72.0] — 2026-10-05
 
 **nb1777 si accorge da solo che la sessione Google è morta, e l'errore dice la cura giusta (#426).**

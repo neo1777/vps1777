@@ -33,6 +33,7 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 
@@ -67,6 +68,77 @@ mcp = FastMCP(
         enable_dns_rebinding_protection=False,
     ),
 )
+
+
+# ── S10 (05/10/2026): titolo e annotazioni di OGNI tool, in un posto solo ───────────────
+# Il client li usa per raggruppare i permessi (claude.ai) e per sapere cosa scrive. Quasi
+# tutto parla con Google (openWorld). `destructiveHint` va scritto anche quando è False:
+# il default della spec è True. Un tool che manca da questa tabella non si registra
+# (KeyError all'import): `test_annotazioni` lo dice prima.
+_LEGGE = {"readOnlyHint": True, "openWorldHint": True}
+_AGGIUNGE = {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True}
+_RINOMINA = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
+             "openWorldHint": True}
+_CANCELLA = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True,
+             "openWorldHint": True}
+ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
+    "nb_list": ("Elenca i notebook", _LEGGE),
+    "nb_get": ("Leggi un notebook", _LEGGE),
+    "nb_create": ("Crea un notebook", _AGGIUNGE),
+    "nb_rename": ("Rinomina un notebook", _RINOMINA),
+    "nb_delete": ("Cancella un notebook", _CANCELLA),
+    "nb_describe": ("Descrivi un notebook", _LEGGE),
+    "source_list": ("Elenca le fonti", _LEGGE),
+    "source_add_url": ("Aggiungi una fonte da URL", _AGGIUNGE),
+    "source_add_text": ("Aggiungi una fonte di testo", _AGGIUNGE),
+    "source_add_file": ("Aggiungi una fonte da file", _AGGIUNGE),
+    "source_add_youtube": ("Aggiungi un video YouTube", _AGGIUNGE),
+    "source_add_drive": ("Aggiungi una fonte da Drive", _AGGIUNGE),
+    "source_delete": ("Cancella una fonte", _CANCELLA),
+    "source_get_content": ("Leggi il testo di una fonte", _LEGGE),
+    "source_rename": ("Rinomina una fonte", _RINOMINA),
+    "notebook_query": ("Chiedi al notebook", _LEGGE),
+    "notebook_query_esito": ("Ritira una risposta in corso", _LEGGE),
+    "studio_create_audio": ("Crea un audio", _AGGIUNGE),
+    "studio_create_video": ("Crea un video", _AGGIUNGE),
+    "studio_create_slides": ("Crea le slide", _AGGIUNGE),
+    "studio_create_mindmap": ("Crea una mappa mentale", _AGGIUNGE),
+    "studio_create_infographic": ("Crea un'infografica", _AGGIUNGE),
+    "studio_create_data_table": ("Crea una tabella", _AGGIUNGE),
+    "studio_create_report": ("Crea un report", _AGGIUNGE),
+    "studio_create_quiz": ("Crea un quiz", _AGGIUNGE),
+    "studio_create_flashcards": ("Crea le flashcard", _AGGIUNGE),
+    "studio_create_all_9": ("Crea tutti e nove gli artefatti", _AGGIUNGE),
+    "studio_list": ("Elenca gli artefatti", _LEGGE),
+    "studio_status": ("Stato di un artefatto", _LEGGE),
+    "studio_wait": ("Aspetta un artefatto", _LEGGE),
+    "studio_delete": ("Cancella un artefatto", _CANCELLA),
+    "studio_rename": ("Rinomina un artefatto", _RINOMINA),
+    # scrive un file sul volume degli artefatti: non è sola lettura
+    "studio_download": ("Scarica un artefatto", _AGGIUNGE),
+    "studio_export_to_docs": ("Esporta in Google Docs", _AGGIUNGE),
+    "studio_export_to_sheets": ("Esporta in Google Sheets", _AGGIUNGE),
+    "doctor": ("Diagnostica", _LEGGE),
+    "canonico": ("Il canonico della memoria", {"readOnlyHint": True, "openWorldHint": False}),
+    # manda un ping su Telegram quando trova un disallineamento: non è sola lettura
+    "memoria_check": ("Controlla la versione della memoria",
+                      {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": True}),
+    "memoria_ack": ("Registra l'aggiornamento della memoria",
+                    {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True,
+                     "openWorldHint": False}),
+}
+_tool_originale = mcp.tool
+
+
+def _tool_annotato(*args, **kw):
+    def applica(fn):
+        titolo, hint = ANNOTAZIONI[fn.__name__]
+        return _tool_originale(*args, title=titolo,
+                               annotations=ToolAnnotations(title=titolo, **hint), **kw)(fn)
+    return applica
+
+
+mcp.tool = _tool_annotato                                # type: ignore[method-assign]
 
 
 # Stato auth NotebookLM.
