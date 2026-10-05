@@ -1,9 +1,8 @@
 """
 AUTH gate — check del profilo nlm (profiles/default/cookies.json) + AUTH_PENDING.flag.
 
-Se auth è assente, ogni tool MCP raise `RuntimeError` con istruzioni per
-l'admin panel /admin/nlm. Il client (claude.ai, Mini App, bot) riceve un
-messaggio di errore leggibile.
+Il controllo vero vive in `server._check_auth_or_raise` (qui c'era un doppione mai
+chiamato, tolto il 05/10/2026). Qui resta l'allineamento di HOME al volume.
 """
 from __future__ import annotations
 
@@ -11,23 +10,6 @@ import os
 from pathlib import Path
 
 from .settings import get_settings
-
-
-def _paths() -> tuple[Path, Path]:
-    home = Path(get_settings().nlm_home)
-    # nlm (dalla 0.7, verificato fino alla 0.12): l'auth è il profilo profiles/default/cookies.json (non auth.json)
-    return home / "profiles" / "default" / "cookies.json", home / "AUTH_PENDING.flag"
-
-
-def check_or_raise() -> None:
-    cookies, pending = _paths()
-    if pending.exists() or not cookies.exists():
-        raise RuntimeError(
-            "Auth NotebookLM mancante. Sul TUO PC: `uv tool install "
-            "notebooklm-mcp-cli --python 3.12 && nlm login`, poi "
-            "`cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` "
-            "e carica il tar.gz su /admin/nlm del gateway."
-        )
 
 
 def ensure_nlm_home_in_env() -> None:

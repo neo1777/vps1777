@@ -281,6 +281,8 @@ services:
       # monte (0.11.5) è documentato che su alcuni account il rilancio fa revocare la
       # sessione. Spento: il rinnovo resta quello dichiarato, un profilo nuovo da /admin/nlm.
       NOTEBOOKLM_DISABLE_HEADLESS_REFRESH: "1"
+      # Ogni quante ore la sonda viva prova la sessione Google (docs/NB1777.md §4); 0 = spenta.
+      NB1777_SONDA_ORE: ${NB1777_SONDA_ORE:-4}
       FASTMCP_STATELESS_HTTP: "true"
       # Segreto condiviso per gli endpoint INTERNI /internal/nlm/* (H6): solo
       # gateway e bot, che lo hanno, possono chiedere lo stato o installare il

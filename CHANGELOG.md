@@ -4,6 +4,27 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **nb1777 si accorge da solo che la sessione Google è morta (S8).** Ogni 4 ore
+  (`NB1777_SONDA_ORE`, `0` la spegne) una chiamata vera e leggera prova la sessione, e se ne
+  registra solo l'ora e l'esito sul volume. Al primo «auth scaduta» parte un messaggio
+  Telegram, e un altro quando la sessione torna. Il 02/10 ce n'eravamo accorti 12,7 ore
+  dopo. L'ultimo esito compare in `doctor` e in `/internal/nlm/status`.
+
+### Cambiato
+- **`studio_wait` aspetta al massimo 25 s** e restituisce lo stato con `in_corso: true`
+  invece di fallire: da claude.ai una chiamata oltre ~30 s cade.
+
+### Corretto
+- **L'errore di sessione scaduta dice la cura giusta (S7).** Quattro forme dell'errore di
+  `nlm` diventano «sessione scaduta sulla VPS: ricarica il profilo da /admin/nlm». Prima
+  passava il testo di `nlm`, che invita a fare login «nel terminale»: il 21/07 ha portato a
+  rifare il login sul PC, che non sblocca la VPS. «Could not reach NotebookLM» resta un
+  errore di rete. `doctor` dice `auth: scaduta` invece di un errore qualunque.
+- **Debiti di nb1777 (S14).** Tolti tre id di notebook personali dal codice pubblico (li
+  usava solo una stampa di prova), un controllo dell'auth doppione mai chiamato, il conto
+  sbagliato dei tool in un commento (38, sono 39).
+
 ## [0.71.0] — 2026-10-05
 
 **archive1777 fuori dall'event loop, fusione su tutti i DB in `search_ibrida`, ciò che si perde dichiarato (#424).**
