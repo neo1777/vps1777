@@ -4,14 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
-### Corretto
-- **Il gateway non tiene più un artefatto intero in RAM e non si ferma mentre indicizza
-  (S13).** Il download da `/admin/nlm` diceva «in streaming» ma raccoglieva tutti i pezzi e
-  poi li univa: un video intero in memoria per ogni download, nel servizio esposto a
-  Internet. Ora passa a pezzi mentre il browser legge. E `index_file`, con la copia
-  dell'upload, girava dentro l'event loop: un archivio grosso caricato da `/admin/archive`
-  fermava per minuti tutto il gateway, OAuth e proxy MCP compresi. Ora gira in un thread,
-  un'indicizzazione alla volta.
+### Aggiunto
+- **Audit per tool nel gateway (S11).** Ogni chiamata a un tool lascia una riga `proxy_tool`
+  con nome, durata in millisecondi, esito e status, scritta a fine stream: `ok`,
+  `errore_tool` (il tool ha risposto `isError`), `timeout`, `interrotto` (il client ha chiuso
+  prima, come claude.ai verso i 30 s) o `502`. Prima `proxy_request` si scriveva alla
+  partenza degli header e un tool morto a metà restava un 200. Gli argomenti non si
+  registrano. Si vede in `/admin/audit`.
 
 ### Cambiato
 - **`secrets-status` dà l'età vera della sessione NotebookLM (S9).** Era la data del file dei
@@ -22,6 +21,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   stato interno di nb1777 (`/internal/nlm/status`) ha il campo `sessione`.
 
 ### Corretto
+- **Il gateway non tiene più un artefatto intero in RAM e non si ferma mentre indicizza
+  (S13).** Il download da `/admin/nlm` diceva «in streaming» ma raccoglieva tutti i pezzi e
+  poi li univa: un video intero in memoria per ogni download, nel servizio esposto a
+  Internet. Ora passa a pezzi mentre il browser legge. E `index_file`, con la copia
+  dell'upload, girava dentro l'event loop: un archivio grosso caricato da `/admin/archive`
+  fermava per minuti tutto il gateway, OAuth e proxy MCP compresi. Ora gira in un thread,
+  un'indicizzazione alla volta.
+
 - **Un profilo nlm cifrato ha un rifiuto che dice cosa fare (S6).** Dalla 0.15 `nlm login`
   propone di cifrare il login nel portachiavi del PC (modalità «protected»): nella cartella
   resta `credentials.enc` senza `cookies.json`, e `/admin/nlm` rispondeva «hai taggato la

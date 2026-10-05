@@ -154,6 +154,11 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   un identificativo di persona entra in un log che prima non ne aveva — la
   retention resta quella dell'audit (`AUDIT_RETENTION_DAYS`, default 90 giorni)
   e il log vive nel volume dati, dentro il backup cifrato.
+- **Una riga per ogni chiamata a un tool** (`proxy_tool`, dalla 0.73.1, S11): nome del
+  tool, millisecondi, esito (`ok`, `errore_tool`, `timeout`, `interrotto` quando il client
+  chiude prima della fine, `502`) e status, scritta a fine stream. Degli argomenti
+  **niente**: possono essere testo personale, e dal corpo JSON-RPC si legge solo
+  `params.name`. Compare in `/admin/audit`.
 - **Il bearer si ferma al gateway** (`v0.45.0`, dal vaglio corso1777). Prima
   l'header `Authorization` del client attraversava il proxy fino al backend —
   che non lo legge, ma lo riceveva (token passthrough). Ora viene rimosso dopo
