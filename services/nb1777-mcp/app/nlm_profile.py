@@ -13,7 +13,8 @@ questa frase e i montaggi veri.
 Formato: la CLI `nlm` (dalla 0.7; verificato fino alla 0.12, che aggiunge solo chiavi in
 `metadata.json`) salva l'auth come cartella `profiles/default/`
 (`cookies.json` + `metadata.json`), non come un singolo `auth.json`. Si carica un
-tar.gz di quella cartella.
+tar.gz di quella cartella. Dalla 0.15 il login può essere cifrato (`credentials.enc`,
+modalità «protected»): quel tar si rifiuta con la ricetta per riaverlo in chiaro.
 
 Modulo stdlib-only e senza dipendenze dal server: si testa da solo.
 """
@@ -27,6 +28,16 @@ from pathlib import Path
 # Il file che rende il profilo "valido": senza questo, non c'è auth.
 COOKIES_REL = Path("profiles") / "default" / "cookies.json"
 PENDING_FLAG = "AUTH_PENDING.flag"
+
+# S6 (05/10/2026): dalla 0.15 `nlm login` propone la modalità «protected», che cifra il
+# login con una chiave nel portachiavi del PC. Nella cartella resta solo questo file, e
+# la VPS non ha la chiave per aprirlo: serve il profilo in chiaro.
+CIFRATO_REL = Path("profiles") / "default" / "credentials.enc"
+MSG_PROTETTO = (
+    "il profilo è cifrato nel portachiavi del PC (modalità «protected» di nlm): la VPS "
+    "non lo può aprire. Sul PC: `nlm auth storage set file`, poi rifai il tar.gz e "
+    "caricalo di nuovo (per un login nuovo: `nlm login --storage file`)."
+)
 
 # Tetti sul DECOMPRESSO. Il gateway limita il tar a 5 MB, ma è il *compresso*:
 # un tar.gz di 5 MB può espandersi in gigabyte (tar-bomb) e riempire il volume.
@@ -130,6 +141,8 @@ def install_profile(content: bytes, auth_dir: Path) -> int:
             raise ValueError(f"non è un tar.gz valido del profilo nlm ({exc})") from exc
 
         if not (staging / COOKIES_REL).is_file():
+            if (staging / CIFRATO_REL).is_file():
+                raise ValueError(MSG_PROTETTO)
             raise ValueError(
                 "il tar non contiene profiles/default/cookies.json — hai taggato la cartella giusta?"
             )

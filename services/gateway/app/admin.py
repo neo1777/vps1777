@@ -610,6 +610,9 @@ async def nlm_view(request: Request) -> Response:
     <li>Login Google (apre il browser):
       <pre>nlm login
 nlm notebook list   # verifica</pre>
+      Se <code>nlm</code> (dalla 0.15) chiede dove tenere il login, scegli <b>file</b>: quello
+      cifrato nel portachiavi del PC («protected») la VPS non lo può aprire. Già cifrato?
+      <code>nlm auth storage set file</code>.
     </li>
     <li>Crea un tar.gz del profilo e caricalo qui sotto:
       <pre>cd ~/.notebooklm-mcp-cli
