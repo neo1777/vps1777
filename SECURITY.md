@@ -239,7 +239,9 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
     cifratura — chi ha la chiave privata `age` e accesso agli archivi li vede;
   - il **check settimanale delle scadenze** (`vps1777 secrets-status`, unit
     `vps1777-secrets-check`): monta il volume in un `busybox` con `--network
-    none` e ne legge **solo l'mtime** del file dei cookie, mai il contenuto.
+    none` e ne legge **solo l'mtime** del file dei cookie, mai il contenuto. Dalla
+    0.73.1 è la via di riserva: prima chiede a nb1777-mcp (`python -m
+    app.stato_sessione`) la nascita della sessione e l'ultimo refresh, solo date.
 
   Gateway e bot hanno **accesso zero** — né lettura né scrittura — e gli
   chiedono su rete interna (`/internal/nlm/status` dice solo *se* c'è un profilo,

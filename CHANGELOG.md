@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **`secrets-status` dà l'età vera della sessione NotebookLM (S9).** Era la data del file dei
+  cookie, che si azzerava ogni volta che `nlm` lo riscriveva, senza un caricamento. Ora la
+  chiede a nb1777-mcp (`python -m app.stato_sessione`, solo date): la nascita della sessione
+  è la scadenza del cookie SID meno 400 giorni, accanto all'ultimo refresh. «Da ricaricare»
+  lo dice la sonda; la soglia di 14 giorni vale solo quando la sonda non ha un esito. Lo
+  stato interno di nb1777 (`/internal/nlm/status`) ha il campo `sessione`.
+
 ### Corretto
 - **Un profilo nlm cifrato ha un rifiuto che dice cosa fare (S6).** Dalla 0.15 `nlm login`
   propone di cifrare il login nel portachiavi del PC (modalità «protected»): nella cartella

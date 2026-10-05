@@ -4433,7 +4433,8 @@ _SECRET_POLICY = [
      "--force-recreate caddy`), poi revoca il vecchio"),
 ]
 
-# H37 — freschezza dei cookie NotebookLM. NON è un file in secrets/: vive nel
+# H37 — freschezza dei cookie NotebookLM (S9, 05/10/2026: l'età vera la dà nb1777-mcp,
+# vedi nlm_cookie_status; l'mtime qui sotto è la via di riserva). NON è un file in secrets/: vive nel
 # volume docker nlm-auth (profiles/default/cookies.json, cfr. nb1777-mcp). Se
 # scadono in silenzio, NotebookLM smette di funzionare senza spiegazione → qui
 # se ne monitora la freschezza (mtime = ultima volta che il profilo è stato
@@ -4443,10 +4444,62 @@ NLM_COOKIE_MAX_DAYS = 14
 _NLM_COOKIE_REL = "profiles/default/cookies.json"
 
 
+def _sessione_da_nb1777(repo: Path) -> dict | None:
+    """S9: {nata_il, ultimo_refresh, sonda} chiesti a nb1777-mcp, che possiede i cookie e
+    stampa solo date. None se il container non risponde o non c'è un profilo."""
+    try:
+        res = run([*compose_cmd(repo), "exec", "-T", "nb1777-mcp",
+                   "python", "-m", "app.stato_sessione"],
+                  check=False, capture=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None
+    try:
+        dati = json.loads((res.stdout or "").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return None
+    return dati if isinstance(dati, dict) and dati.get("nata_il") else None
+
+
+def _ts_iso(s: str) -> float:
+    return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+
+
 def nlm_cookie_status(repo: Path) -> dict | None:
-    """Età (giorni) dei cookie NotebookLM nel volume nlm-auth, o None se non
-    determinabile (docker assente, volume/profilo non ancora caricato). Puro
-    best-effort: non deve MAI far fallire secrets-status."""
+    """Età (giorni) della sessione NotebookLM, o None se non determinabile (docker
+    assente, profilo non ancora caricato). Puro best-effort: non deve MAI far fallire
+    secrets-status.
+
+    S9 (05/10/2026): l'età è quella VERA della sessione (scadenza di SID meno 400
+    giorni), chiesta a nb1777-mcp. L'mtime di `cookies.json` si azzerava ogni volta che
+    `nlm` riscriveva il file, senza un caricamento. «Da ricaricare» lo dice la sonda
+    (S8), che prova Google davvero; la soglia sull'età vale solo quando la sonda tace.
+    Se il container non risponde si ripiega sull'mtime letto dal busybox, come prima."""
+    now = time.time()
+    sess = _sessione_da_nb1777(repo)
+    if sess is not None:
+        try:
+            nata = _ts_iso(sess["nata_il"])
+        except (TypeError, ValueError):
+            sess = None
+    if sess is not None:
+        age_days = int((now - nata) / 86400)
+        esito = (sess.get("sonda") or {}).get("esito")
+        overdue = esito == "auth_scaduta" or (
+            esito != "ok" and age_days > NLM_COOKIE_MAX_DAYS)
+        stato = {"ok": "viva alla sonda", "auth_scaduta": "SCADUTA alla sonda"}.get(
+            esito, "sonda senza esito")
+        refresh = str(sess.get("ultimo_refresh") or "?")[:16].replace("T", " ")
+        return {
+            "name": "nlm_cookies", "label": "Sessione NotebookLM",
+            "age_days": age_days, "max_age_days": NLM_COOKIE_MAX_DAYS,
+            "overdue": overdue, "auto_rotatable": False,
+            "note": (f"sessione nata il {sess['nata_il'][:10]}, ultimo refresh {refresh}, "
+                     f"{stato}; quando scade: `nlm login` sul PC e ricarica il profilo "
+                     "da /admin/nlm"),
+            "last_rotated": sess["nata_il"],
+        }
     vol = f"vps1777_{NLM_AUTH_VOLUME}"
     try:
         res = run(["docker", "run", "--rm", "--network", "none",
@@ -4461,13 +4514,13 @@ def nlm_cookie_status(repo: Path) -> dict | None:
         mtime = int((res.stdout or "").strip())
     except ValueError:
         return None
-    now = time.time()
     age_days = int((now - mtime) / 86400)
     return {
-        "name": "nlm_cookies", "label": "Cookie sessione NotebookLM",
+        "name": "nlm_cookies", "label": "Sessione NotebookLM",
         "age_days": age_days, "max_age_days": NLM_COOKIE_MAX_DAYS,
         "overdue": age_days > NLM_COOKIE_MAX_DAYS, "auto_rotatable": False,
-        "note": "ricarica il profilo NotebookLM da /admin/nlm (i cookie Google scadono)",
+        "note": ("età dalla data del file (nb1777-mcp non ha risposto): ricarica il "
+                 "profilo NotebookLM da /admin/nlm (i cookie Google scadono)"),
         "last_rotated": datetime.fromtimestamp(mtime, timezone.utc)
                         .strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
