@@ -281,6 +281,10 @@ services:
       # monte (0.11.5) è documentato che su alcuni account il rilancio fa revocare la
       # sessione. Spento: il rinnovo resta quello dichiarato, un profilo nuovo da /admin/nlm.
       NOTEBOOKLM_DISABLE_HEADLESS_REFRESH: "1"
+      # S5 (05/10/2026): le sole cartelle da cui `nlm` carica un file in un notebook. Senza,
+      # `source_add_file` accettava qualunque percorso, compresi i cookie in /var/lib/nlm.
+      # Artefatti (anche i file di ingest) e /tmp (il file temporaneo di source_add_text).
+      NOTEBOOKLM_ALLOWED_FILE_DIRS: "/var/lib/nlm-artifacts:/tmp"
       # Ogni quante ore la sonda viva prova la sessione Google (docs/NB1777.md §4); 0 = spenta.
       NB1777_SONDA_ORE: ${NB1777_SONDA_ORE:-4}
       FASTMCP_STATELESS_HTTP: "true"
