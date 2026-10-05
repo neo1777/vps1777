@@ -4,6 +4,24 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **archive1777 non si ferma più dietro una ricerca lenta (S1).** FastMCP eseguiva i tool
+  sincroni DENTRO l'event loop: una ricerca lenta bloccava tutto il server, `/health`
+  compreso (il 04/10 la sonda è rimasta muta fino a 656 s). Dal 07/09 i client avevano
+  visto 92 errori fra «timed out» e «connection lost». Ora ogni tool gira su un executor
+  dedicato di tre thread persistenti, che tengono la cache delle connessioni.
+- **`search_ibrida` su tutti i DB fonde una volta sola (S2).** Prima ogni DB si fondeva da
+  sé e i DB si accodavano in ordine alfabetico: su tutti i DB le prime righe erano del primo
+  nome (misurato: 20 su 20 da `codice-roo-cline-2025`). Ora le liste full-text si ordinano
+  per bm25 e quelle per senso per distanza, su tutti i DB insieme. Con un DB solo l'ordine
+  non cambia. Lo stesso messaggio in più DB compare una volta, con `anche_in`.
+- **Quello che si perde si dice (S3).** `search_ibrida` e `count` hanno un campo `saltati`
+  (`db`, `ramo`, `motivo`) quando un DB non si legge, un ramo full-text non si può usare o
+  un indice non risponde. Prima finiva solo nel log. Un indice che non risponde non toglie
+  più il DB dalla ricerca: resta la sua metà full-text.
+- **Un DB senza tabella FTS non è più un «errore di sintassi».** La ricerca diceva di
+  correggere la query a chi l'aveva scritta giusta. Ora il DB si salta e si dichiara.
+
 ## [0.70.1] — 2026-10-04
 
 **Il log del backup notturno sopravvive agli update (#422).**

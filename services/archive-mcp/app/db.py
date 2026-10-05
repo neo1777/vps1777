@@ -265,9 +265,10 @@ class _Persistente(sqlite3.Connection):
 
 
 # 🔑 PER-THREAD, non globale: `sqlite3` rifiuta una connessione usata da un thread diverso
-#   da quello che l'ha creata (`ProgrammingError`, misurato) e i tool di `server.py` sono
-#   SINCRONI — FastMCP li esegue sul thread pool, quindi la stessa `search` arriva ogni volta
-#   su un thread potenzialmente diverso. Una cache globale esploderebbe alla seconda
+#   da quello che l'ha creata (`ProgrammingError`, misurato) e i tool di `server.py` girano
+#   sull'executor dei tool (tre thread persistenti, dal 05/10: prima FastMCP li eseguiva
+#   DENTRO l'event loop, e una ricerca lenta fermava tutto), quindi la stessa `search` arriva
+#   ogni volta su un thread potenzialmente diverso. Una cache globale esploderebbe alla seconda
 #   richiesta. *Il modello di concorrenza del server non è un dettaglio del deploy: qui è la
 #   cosa che sceglie la struttura dati.*
 _LOCALE = threading.local()
@@ -548,8 +549,24 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         )
     # solleva SemanticaNonPronta se manca il modello
     blobs = [semantica.embed_query(t, model_dir) for t in testi]
-    righe: list[dict[str, Any]] = []
     meta_per_db: list[dict[str, Any]] = []
+    # ── S3 (05/10): ciò che si perde si DICE. Un DB sparito dal registro, un ramo FTS
+    # non utilizzabile, un indice che non risponde finivano solo nel log, e il risultato
+    # aveva l'aria di un «non c'è». Ogni voce: {db, ramo, motivo}.
+    saltati: list[dict[str, str]] = []
+    # ── S2 (05/10): UNA fusione su tutti i DB. Prima ogni DB si fondeva da sé e i DB si
+    # accodavano in ordine alfabetico: su tutti i DB le prime righe erano del primo in
+    # ordine (misurato: 20 su 20 da `codice-roo-cline-2025`). Ora si raccolgono, per ogni
+    # testo, la lista FTS di tutti i DB ordinata per bm25 e quella vettoriale ordinata per
+    # distanza (stesso modello per tutti gli indici: le distanze si confrontano), e la RRF
+    # è una sola. Con un DB solo l'ordine è quello di prima. Le chiavi sono (db, uuid).
+    fts_per_testo: list[list[tuple[float, int, tuple[str, str]]]] = [[] for _ in testi]
+    vec_per_testo: list[list[tuple[float, int, tuple[str, str]]]] = [[] for _ in testi]
+    per_chiave: dict[tuple[str, str], dict[str, Any]] = {}
+    in_fts: set[tuple[str, str]] = set()
+    in_vec: set[tuple[str, str]] = set()
+    connessioni: dict[str, sqlite3.Connection] = {}
+    termini: list[str] = []
     # con un filtro (speaker, finestra temporale) il ramo vettoriale ne scarta
     # molti: si chiedono più vicini, perché la fusione abbia ancora una lista vera
     filtrato = bool(speaker or since or until)
@@ -557,17 +574,15 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         try:
             conn = _open_con_indice(name, indici[name])
         except KeyError:
+            saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
             continue
+        connessioni[name] = conn
         snap = _snapshot(_DBS[name])
-        per_uuid: dict[str, dict[str, Any]] = {}
-        liste: list[tuple[list[str], float]] = []
-        in_fts: set[str] = set()
-        in_vec: set[str] = set()
         candidati: set[int] = set()
         assenti: set[int] = set()
         uuid_diversi: set[int] = set()
         registro_ok = True
-        interrogabile = True
+        vettori_ok = True
         for i, (testo, blob) in enumerate(zip(testi, blobs)):
             # ① lista FTS5: la query naturale funziona male in FTS5 (è una frase, non
             #    un'espressione), quindi chi chiama può passare `query_fts` col lessico
@@ -576,7 +591,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             #    semplicemente metà fusione.
             espressione = (query_fts if i == 0 else "") or \
                 semantica.query_fts_da_naturale(testo)
-            if i == 0:
+            if i == 0 and not termini:
                 # i termini del passaggio vengono dalla domanda; se il ramo FTS tace
                 # (meno di due termini con segnale) si usano le parole della domanda
                 termini = semantica.termini_della_query(espressione or testo)
@@ -590,12 +605,17 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                 except (FtsSyntaxError, sqlite3.OperationalError) as exc:
                     log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s",
                              name, exc)
+                    if not any(s["db"] == name and s["ramo"] == "fts" for s in saltati):
+                        saltati.append({"db": name, "ramo": "fts", "motivo": str(exc)[:200]})
             # Meno di due termini con segnale: il ramo full-text tace invece di
             # inventarsi una query. Mezza fusione onesta > due liste di cui una
             # è rumore promosso a risultato.
-            for r in rows_fts:
-                per_uuid.setdefault(r["uuid"], r)
-            lista_fts = [r["uuid"] for r in rows_fts]
+            for pos, r in enumerate(rows_fts):
+                chiave = (name, r["uuid"])
+                per_chiave.setdefault(chiave, {**r, "db": name, "snapshot": snap})
+                rank = r.get("rank")
+                fts_per_testo[i].append((rank if rank is not None else 0.0, pos, chiave))
+                in_fts.add(chiave)
             # ② lista vettoriale: rowid → uuid (l'indice lavora su rowid, il mondo
             #    esterno su uuid: la traduzione sta qui e non nell'indice, così un
             #    re-ingest che cambia i rowid rompe l'indice, non il contratto).
@@ -604,10 +624,13 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             #    Se l'indice ha il registro del costruttore, ogni risultato si confronta
             #    con l'uuid registrato e chi non combacia si SCARTA — e si dichiara in
             #    `indici[].verifica`, mai restituito come se fosse giusto.
-            lista_vec: list[str] = []
+            if not vettori_ok:
+                continue
             try:
-                rowids = semantica.knn_dedup(conn, blob,
-                                             topn=limit * (10 if filtrato else 3))
+                vicini = semantica.knn_dedup_distanze(
+                    conn, blob, topn=limit * (10 if filtrato else 3))
+                rowids = [rid for rid, _ in vicini]
+                distanza = dict(vicini)
                 registro = semantica.uuid_registrati(conn, rowids)
                 registro_ok = registro_ok and registro is not None
                 candidati.update(rowids)
@@ -620,7 +643,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                         f"WHERE rowid IN ({seg})",
                         rowids)
                     per_rowid = {r["rowid"]: dict(r) for r in cur}
-                    for rid in rowids:                      # l'ordine del knn è il rank
+                    for pos, rid in enumerate(rowids):      # l'ordine del knn è il rank
                         r = per_rowid.get(rid)
                         if not r:
                             assenti.add(rid)
@@ -643,40 +666,24 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                             # con `campi='testo'` si tengono solo le righe che HANNO
                             # parole.
                             continue
-                        lista_vec.append(u)
-                        if u not in per_uuid:
-                            per_uuid[u] = {"uuid": u, "project": r["project"],
-                                           "ts": r["ts"], "rank": None,
-                                           "snippet": (r["snip"] or "")[:400]}
+                        chiave = (name, u)
+                        vec_per_testo[i].append((distanza[rid], pos, chiave))
+                        in_vec.add(chiave)
+                        if chiave not in per_chiave:
+                            per_chiave[chiave] = {"uuid": u, "project": r["project"],
+                                                  "ts": r["ts"], "rank": None,
+                                                  "snippet": (r["snip"] or "")[:400],
+                                                  "db": name, "snapshot": snap}
             except sqlite3.OperationalError as exc:
+                # Prima il DB spariva intero (anche da `indici`) e la risposta era un
+                # falso «non c'è». Ora resta la sua metà full-text, e lo si dice.
                 log.warning("indice di %s non interrogabile: %s", name, exc)
-                interrogabile = False
-                break
-            liste += [(lista_fts, peso_fts), (lista_vec, 1.0)]
-            in_fts.update(lista_fts)
-            in_vec.update(lista_vec)
-        if not interrogabile:
-            continue
-        # ③ fusione: una sola, su tutte le liste di tutti i testi
-        fusi = semantica.fondi_rrf_liste(liste, k=k_rrf)
-        testi_pieni: dict[str, str] = {}
-        if passaggio and fusi:
-            scelti = fusi[:limit]
-            seg = ",".join("?" * len(scelti))
-            testi_pieni = dict(conn.execute(
-                f"SELECT uuid, content FROM messages WHERE uuid IN ({seg})", scelti))
-        for u in fusi[:limit]:
-            r = dict(per_uuid[u])
-            if passaggio and u in testi_pieni:
-                # il passo dove i termini sono più fitti, dal testo intero: lo snippet
-                # di FTS5 si ferma a 64 token, quello vettoriale ai primi 400 caratteri
-                r["snippet"] = semantica.passaggio(testi_pieni[u] or "", termini, passaggio)
-            r["db"] = name
-            r["snapshot"] = snap
-            r["origine"] = ("entrambi" if u in in_fts and u in in_vec
-                            else "fts" if u in in_fts else "vettori")
-            righe.append(r)
-        m = semantica.meta_indice(conn)
+                vettori_ok = False
+                saltati.append({"db": name, "ramo": "vettori", "motivo": str(exc)[:200]})
+        try:
+            m = semantica.meta_indice(conn) if vettori_ok else {}
+        except sqlite3.OperationalError:
+            m = {}
         meta_per_db.append({"db": name, "indice": str(indici[name].name),
                             "messaggi_indicizzati": m.get("messaggi", "?"),
                             "perimetro": m.get("perimetro", "non dichiarato"),
@@ -690,14 +697,56 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             log.warning("indice di %s disallineato: %d rowid assenti, %d uuid diversi "
                         "su %d candidati", name, len(assenti), len(uuid_diversi),
                         len(candidati))
-    return {
-        "righe": righe[:limit],
+    # ③ fusione: UNA sola, su tutte le liste di tutti i testi e di tutti i DB. Dentro
+    # ogni lista l'ordine è quello della misura (bm25 crescente, distanza crescente), a
+    # parità quello di arrivo.
+    liste: list[tuple[list[tuple[str, str]], float]] = []
+    for lf, lv in zip(fts_per_testo, vec_per_testo):
+        liste.append(([c for _, _, c in sorted(lf, key=lambda x: (x[0], x[1]))], peso_fts))
+        liste.append(([c for _, _, c in sorted(lv, key=lambda x: (x[0], x[1]))], 1.0))
+    fusi = semantica.fondi_rrf_liste(liste, k=k_rrf)
+    # Lo stesso uuid vive in più DB (bundle e fotografie): come in `search` (#272) si
+    # tiene la prima occorrenza nell'ordine della fusione, e gli altri DB vanno in
+    # `anche_in`. Con un DB solo non cambia niente.
+    scelti: list[tuple[str, str]] = []
+    primo: dict[str, dict[str, Any]] = {}
+    righe: list[dict[str, Any]] = []
+    for chiave in fusi:
+        name, u = chiave
+        if u in primo:
+            primo[u].setdefault("anche_in", []).append(name)
+            continue
+        if len(righe) >= limit:
+            continue
+        r = dict(per_chiave[chiave])
+        r["origine"] = ("entrambi" if chiave in in_fts and chiave in in_vec
+                        else "fts" if chiave in in_fts else "vettori")
+        primo[u] = r
+        righe.append(r)
+        scelti.append(chiave)
+    if passaggio and scelti:
+        # il passo dove i termini sono più fitti, dal testo intero: lo snippet di FTS5
+        # si ferma a 64 token, quello vettoriale ai primi 400 caratteri
+        for name in {n for n, _ in scelti}:
+            uuids = [u for n, u in scelti if n == name]
+            seg = ",".join("?" * len(uuids))
+            testi_pieni = dict(connessioni[name].execute(
+                f"SELECT uuid, content FROM messages WHERE uuid IN ({seg})", uuids))
+            for r in righe:
+                if r["db"] == name and r["uuid"] in testi_pieni:
+                    r["snippet"] = semantica.passaggio(testi_pieni[r["uuid"]] or "",
+                                                       termini, passaggio)
+    out: dict[str, Any] = {
+        "righe": righe,
         "indici": meta_per_db,
         "parametri": {"k_rrf": k_rrf, "peso_fts": peso_fts,
                       "modello": semantica.MODELLO_ATTESO,
                       "testi": len(testi), "snippet_tokens": snippet_tokens,
                       "passaggio": passaggio},
     }
+    if saltati:
+        out["saltati"] = saltati
+    return out
 
 @_serializzata
 def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
@@ -709,10 +758,14 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
     _maybe_reload()
     per_db: dict[str, int] = {}
     warnings: list[str] = []
+    # S3 (05/10): un DB che non si legge non è uno zero. Prima finiva solo nel log, e il
+    # totale sembrava completo.
+    saltati: list[dict[str, str]] = []
     for name in _targets(db):
         try:
             conn = _open(name)
         except KeyError:
+            saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
             continue
         try:
             per_db[name] = fts.count_conn(
@@ -725,11 +778,14 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
                     f"[{name}] {w}" for w in fts.collapse_warnings_conn(conn, query))
         except sqlite3.OperationalError as exc:
             log.warning("DB %s schema error: %s", name, exc)
+            saltati.append({"db": name, "ramo": "fts", "motivo": str(exc)[:200]})
         finally:
             conn.close()
     out: dict[str, Any] = {"total": sum(per_db.values()), "per_db": per_db}
     if warnings:
         out["warnings"] = warnings
+    if saltati:
+        out["saltati"] = saltati
     return out
 
 

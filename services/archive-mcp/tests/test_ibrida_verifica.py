@@ -314,3 +314,85 @@ def test_passaggio_sostituisce_lo_snippet_e_ha_un_tetto(archivio, monkeypatch) -
     assert r["parametri"]["passaggio"] == 20
     with pytest.raises(ValueError, match="passaggio"):
         modulo.search_ibrida("punto cercato", db="arch", passaggio=5000)
+
+
+# ── S2 e S3 (05/10/2026): fusione su tutti i DB, e ciò che si perde si dice ────────
+
+@pytest.fixture()
+def due_archivi(tmp_path, monkeypatch):
+    """Due DB con indice: «aaa» (primo in ordine alfabetico) parla d'altro, «zzz» ha la
+    frase cercata. Prima della fusione globale i DB si accodavano in ordine alfabetico."""
+    import test_costruisci_indice as tci
+    aaa = tci.nuovo_db(tmp_path / "aaa.db", [
+        (f"a{i}", "claude-code", f"2026-05-{10 + i:02d}", f"Tutt'altro argomento, senza nessun legame con la frase cercata, numero {i}")
+        for i in range(1, 7)])
+    zzz = tci.nuovo_db(tmp_path / "zzz.db", [
+        (f"z{i}", "claude-code", f"2026-05-{10 + i:02d}", f"{FRASE} numero {i}")
+        for i in range(1, 7)])
+    for mod in [m for m in list(sys.modules) if m == "app" or m.startswith("app.")]:
+        del sys.modules[mod]
+    finte = types.ModuleType("app.settings")
+    finte.get_settings = lambda: _SettingsFinte(tmp_path)   # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "app.settings", finte)
+    from app import db as modulo
+    modulo.reload_registry()
+    import costruisci_indice as ci
+    for d in (aaa, zzz):
+        ci.costruisci(d, tci.Finto(), ci.Perimetro(tutto=True))
+    yield modulo, tci
+
+
+@vec
+def test_su_tutti_i_db_vince_il_piu_vicino_non_il_primo_in_ordine(due_archivi, monkeypatch):
+    modulo, tci = due_archivi
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 3")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    r = modulo.search_ibrida("x", limit=4)
+    assert r["righe"][0]["uuid"] == "z3", [x["uuid"] for x in r["righe"]]
+    assert r["righe"][0]["db"] == "zzz"
+    assert {i["db"] for i in r["indici"]} == {"aaa", "zzz"}, "ogni DB resta dichiarato"
+    assert len(r["righe"]) == 4
+
+
+@vec
+def test_un_indice_che_non_risponde_lascia_la_meta_fts_e_lo_dice(archivio, monkeypatch):
+    """Prima il DB spariva intero, anche da `indici`: un falso «non c'è»."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    monkeypatch.setattr(modulo.semantica, "embed_query",
+                        lambda q, d: tci.vettore(semantica.PREFISSO_PASSAGGIO + q))
+
+    def rotto(*a, **k):
+        raise sqlite3.OperationalError("no such table: vec.vettori")
+
+    monkeypatch.setattr(modulo.semantica, "knn_dedup_distanze", rotto)
+    monkeypatch.setattr(modulo.semantica, "knn_dedup", rotto)
+    _rw(db, ("CREATE VIRTUAL TABLE messages_fts USING fts5(uuid, project, ts, content, "
+             "content='messages', content_rowid='rowid')",),
+        ("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')",))
+    modulo._maybe_reload()
+    r = modulo.search_ibrida("messaggio sintetico abbastanza lungo", db="arch", limit=3)
+    assert r["righe"], "la metà full-text c'era e andava restituita"
+    assert all(x["origine"] == "fts" for x in r["righe"])
+    assert r["saltati"] == [{"db": "arch", "ramo": "vettori",
+                             "motivo": "no such table: vec.vettori"}]
+    assert [i["db"] for i in r["indici"]] == ["arch"]
+
+
+@vec
+def test_senza_perdite_il_campo_saltati_non_c_e(archivio, monkeypatch):
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    r = _cerca(modulo, tci, f"{FRASE} numero 2", monkeypatch)
+    assert "saltati" not in r, "la forma della risposta normale non cambia"
+
+
+def test_count_dichiara_il_db_che_non_ha_potuto_leggere(archivio):
+    """Un DB senza tabella FTS contava come assente: il totale sembrava completo."""
+    modulo, db, tci = archivio
+    r = modulo.count("messaggio", db="arch")
+    assert r["total"] == 0 and r["per_db"] == {}
+    assert r["saltati"][0]["db"] == "arch" and r["saltati"][0]["ramo"] == "fts"

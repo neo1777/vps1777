@@ -18,6 +18,15 @@ from typing import Any
 # ── errore parlante ──────────────────────────────────────────────────────────
 
 
+def _di_schema(exc: sqlite3.OperationalError) -> bool:
+    """Un errore del DB, non della query: «no such table» (05/10/2026). Prima diventava
+    FtsSyntaxError e diceva di correggere la sintassi a chi aveva scritto una query giusta
+    su un DB senza indice FTS; ora risale com'è, e chi chiama salta il DB e lo dichiara.
+    «no such column» NO: in FTS5 lo produce la query stessa (`colonna:termine` con una
+    colonna che non esiste), ed è un errore di chi scrive."""
+    return str(exc).startswith("no such table")
+
+
 class FtsSyntaxError(ValueError):
     """Query FTS5 malformata. Sollevata al posto di restituire lista vuota:
     un `[]` da errore di sintassi è indistinguibile da 'nessun match' e produce
@@ -245,6 +254,8 @@ def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
                               order=order, limit=limit, snippet_tokens=snippet_tokens,
                               join=join)
         except sqlite3.OperationalError as exc:
+            if _di_schema(exc):
+                raise
             last_exc = exc
             continue
         for r in rows:
@@ -287,6 +298,8 @@ def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
         try:
             return int(conn.execute(sql, [con_campi(match, campi), *extra]).fetchone()[0])
         except sqlite3.OperationalError as exc:
+            if _di_schema(exc):
+                raise
             last_exc = exc
     raise FtsSyntaxError(f"{_SYNTAX_HINT} (dettaglio: {last_exc})")
 

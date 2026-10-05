@@ -25,8 +25,18 @@ results:
 |---|---|---|---|
 | targets found | 5/9 | 4/9 | **6/9** |
 
-The two engines fail in different ways: fusion keeps the best of both. On
-**exact** queries hybrid search does not beat `search` — it is tuned not to make
+The two engines fail in different ways: fusion keeps the best of both. The
+fusion is **a single one across all DBs** (since 0.71.0): the full-text list of every DB
+sorted by bm25, the meaning list sorted by distance (the model is the same for every
+index, so distances compare). Before, each DB fused on its own and the DBs were queued in
+alphabetical order: across all DBs the first rows came from the first name. The same
+message in several DBs appears once, with the others in `anche_in`. If something is lost
+along the way, a DB gone, a full-text branch that can't be used or an index that doesn't
+answer, the response has a `saltati` field (`db`, `ramo`, `motivo`). With no losses the
+field isn't there. An index that doesn't answer no longer removes the DB: its full-text
+half stays.
+
+On **exact** queries hybrid search does not beat `search` — it is tuned not to make
 them worse, not to win them. If you are looking for a precise term, use
 `search`.
 

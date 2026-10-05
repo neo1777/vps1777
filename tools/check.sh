@@ -249,7 +249,7 @@ fase_test() {
   passo "archive-mcp /health e indice (deps del lock)" \
     uv run --locked --directory services/archive-mcp --with pytest pytest -q \
       tests/test_health.py tests/test_superficie_tool.py tests/test_costruisci_indice.py \
-      tests/test_ibrida_verifica.py tests/test_sessioni.py
+      tests/test_ibrida_verifica.py tests/test_sessioni.py tests/test_fuori_dal_loop.py
   passo "CLI e presìdi del repo (tools/tests)" \
     uvx --with bcrypt --with cryptography --with pyyaml pytest -q tools/tests/
   # Il ciclo backup → restore cifra per davvero con `age` e usa docker: senza, esce 2

@@ -124,7 +124,8 @@ def apri_modello(model_dir: Path, *, thread: int = 2) -> tuple[Any, Any]:
 def _carica_modello(model_dir: Path) -> tuple[Any, Any]:
     """Sessione ONNX + tokenizer, una volta sola per processo.
 
-    Thread-safe con lock: i tool MCP girano sul thread pool di FastMCP e due
+    Thread-safe con lock: i tool MCP girano sull'executor dei tool di `server.py` (tre
+    thread, dal 05/10; prima FastMCP li eseguiva dentro l'event loop) e due
     richieste in parallelo caricherebbero il modello due volte (900 MB di RAM
     invece di 450, per pura sfortuna di timing).
     """
@@ -214,16 +215,27 @@ def knn_dedup(conn: Any, blob: bytes, *, topn: int, k_chunk: int = 400,
     GROUP BY/ORDER BY diversi da `distance` nelle query knn (misurato: solleva
     «Only a single 'ORDER BY distance' clause is allowed»).
     """
+    return [rid for rid, _ in knn_dedup_distanze(conn, blob, topn=topn, k_chunk=k_chunk,
+                                                 alias=alias, tabella=tabella)]
+
+
+def knn_dedup_distanze(conn: Any, blob: bytes, *, topn: int, k_chunk: int = 400,
+                       alias: str = "vec", tabella: str = TABELLA) -> list[tuple[int, float]]:
+    """Come `knn_dedup`, con la distanza del chunk migliore di ogni messaggio.
+
+    La distanza serve alla fusione FRA DB (S2, 05/10): il modello è lo stesso per tutti
+    gli indici, quindi le distanze si confrontano; il rank dentro un DB no, perché il
+    primo di ogni DB sarebbe sempre pari al primo di un altro."""
     cur = conn.execute(
-        f"SELECT msg_rowid FROM {alias}.{tabella} "
+        f"SELECT msg_rowid, distance FROM {alias}.{tabella} "
         "WHERE embedding MATCH ? AND k = ? ORDER BY distance", (blob, int(k_chunk)))
     visti: set[int] = set()
-    ordine: list[int] = []
-    for (rid,) in cur:
+    ordine: list[tuple[int, float]] = []
+    for rid, dist in cur:
         if rid in visti:
             continue
         visti.add(rid)
-        ordine.append(rid)
+        ordine.append((rid, float(dist)))
         if len(ordine) >= topn:
             break
     return ordine

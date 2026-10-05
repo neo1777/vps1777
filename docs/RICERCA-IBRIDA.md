@@ -22,6 +22,15 @@ col lessico giusto. Posizione del bersaglio nei primi 10 risultati:
 | bersagli trovati | 5/9 | 4/9 | **6/9** |
 
 I due motori sbagliano in modi diversi: la fusione tiene il meglio di entrambi.
+La fusione è **una sola su tutti i DB** (dalla 0.71.0): la lista full-text di tutti i DB
+ordinata per bm25, quella per senso ordinata per distanza (il modello è lo stesso per
+ogni indice, quindi le distanze si confrontano). Prima ogni DB si fondeva da sé e i DB si
+accodavano in ordine alfabetico: su tutti i DB le prime righe erano del primo nome. Lo
+stesso messaggio in più DB compare una volta, con gli altri in `anche_in`. Se qualcosa
+si perde per strada, un DB sparito, un ramo full-text inutilizzabile o un indice che non
+risponde, la risposta ha un campo `saltati` (`db`, `ramo`, `motivo`). Senza perdite il
+campo non c'è. Un indice che non risponde non toglie più il DB: resta la sua metà
+full-text.
 Sulle query **esatte** l'ibrido non batte `search` — è tarato per non
 peggiorarle, non per vincerle. Se cerchi un termine preciso, usa `search`.
 
