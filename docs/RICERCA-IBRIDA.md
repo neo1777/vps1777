@@ -91,6 +91,15 @@ Il guadagno sta tutto sui testi lunghi: un messaggio di Telegram entra già inte
 snippet. Il passaggio costa token, circa 270 per riga a 200 parole: si chiede quando
 si leggono vocali, verbali o chat lunghe, non per ogni ricerca.
 
+**Dalla 0.73.1 lo snippet delle righe trovate per senso viene dal pezzo che ha colpito**
+(P4). Prima era l'inizio del messaggio, anche quando il pezzo vicino alla domanda stava
+migliaia di caratteri più in là. L'indice sa quale pezzo ha vinto: il suo rowid meno il
+`primo_chunk` del registro dà la finestra, e lo snippet (60 parole, attorno ai termini
+della domanda se ci sono) si prende da lì. La riga lo dice in `pezzo` (0 = il primo). Vale
+solo se il testo è ancora quello indicizzato: se l'impronta non combacia resta l'inizio.
+Il pezzo può cadere nelle azioni (l'indice legge anche `tools` e `attachments`), e allora
+lo snippet è quello. Le righe trovate anche da FTS5 tengono lo snippet di FTS5.
+
 ### Le riformulazioni, e quanto valgono (0.64.0)
 
 È la tecnica nota come *RAG-Fusion*, o *multi-query retrieval*: la stessa domanda detta in due

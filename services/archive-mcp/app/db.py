@@ -566,6 +566,8 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     in_fts: set[tuple[str, str]] = set()
     in_vec: set[tuple[str, str]] = set()
     connessioni: dict[str, sqlite3.Connection] = {}
+    # P4: per le righe arrivate dai vettori, (rowid del messaggio, rowid del pezzo vinto)
+    pezzo_di: dict[tuple[str, str], tuple[int, int]] = {}
     termini: list[str] = []
     # con un filtro (speaker, finestra temporale) il ramo vettoriale ne scarta
     # molti: si chiedono più vicini, perché la fusione abbia ancora una lista vera
@@ -627,10 +629,11 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             if not vettori_ok:
                 continue
             try:
-                vicini = semantica.knn_dedup_distanze(
+                vicini = semantica.knn_pezzi(
                     conn, blob, topn=limit * (10 if filtrato else 3))
-                rowids = [rid for rid, _ in vicini]
-                distanza = dict(vicini)
+                rowids = [rid for rid, _, _ in vicini]
+                distanza = {rid: d for rid, d, _ in vicini}
+                pezzo_vinto = {rid: pz for rid, _, pz in vicini}
                 registro = semantica.uuid_registrati(conn, rowids)
                 registro_ok = registro_ok and registro is not None
                 candidati.update(rowids)
@@ -674,6 +677,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                                                   "ts": r["ts"], "rank": None,
                                                   "snippet": (r["snip"] or "")[:400],
                                                   "db": name, "snapshot": snap}
+                            pezzo_di[chiave] = (rid, pezzo_vinto[rid])
             except sqlite3.OperationalError as exc:
                 # Prima il DB spariva intero (anche da `indici`) e la risposta era un
                 # falso «non c'è». Ora resta la sua metà full-text, e lo si dice.
@@ -724,6 +728,8 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         primo[u] = r
         righe.append(r)
         scelti.append(chiave)
+    if not passaggio:
+        _snippet_dal_pezzo(righe, connessioni, pezzo_di, termini)
     if passaggio and scelti:
         # il passo dove i termini sono più fitti, dal testo intero: lo snippet di FTS5
         # si ferma a 64 token, quello vettoriale ai primi 400 caratteri
@@ -747,6 +753,50 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     if saltati:
         out["saltati"] = saltati
     return out
+
+# P4 (05/10/2026): per una riga trovata «per senso» lo snippet era l'inizio del messaggio,
+# anche quando il pezzo che aveva colpito stava migliaia di caratteri più in là. L'indice
+# sa quale pezzo ha vinto (rowid del chunk − `primo_chunk` del registro): lo snippet si
+# prende da quella finestra, con i termini della domanda se ci sono. Solo se il testo è
+# ancora quello indicizzato (impronta): se è cambiato, la finestra non è più affidabile e
+# resta l'inizio. La riga dice quale pezzo con `pezzo` (0 = il primo).
+_SNIPPET_PAROLE = 60
+
+
+def _snippet_dal_pezzo(righe: list[dict[str, Any]], connessioni: dict[str, sqlite3.Connection],
+                       pezzo_di: dict[tuple[str, str], tuple[int, int]],
+                       termini: list[str]) -> None:
+    per_db: dict[str, list[dict[str, Any]]] = {}
+    for r in righe:
+        if (r["db"], r["uuid"]) in pezzo_di:
+            per_db.setdefault(r["db"], []).append(r)
+    for name, lista in per_db.items():
+        conn = connessioni[name]
+        rowids = [pezzo_di[(name, r["uuid"])][0] for r in lista]
+        registro = semantica.registro_pezzi(conn, rowids)
+        if not registro:
+            continue
+        seg = ",".join("?" * len(rowids))
+        try:
+            testi = {rid: semantica.testo_indicizzabile(c, a, t) for rid, c, a, t in conn.execute(
+                f"SELECT rowid, content, attachments, tools FROM messages WHERE rowid IN ({seg})",
+                rowids)}
+        except sqlite3.OperationalError:            # DB v1: niente attachments/tools
+            testi = {rid: semantica.testo_indicizzabile(c, None, None) for rid, c in conn.execute(
+                f"SELECT rowid, content FROM messages WHERE rowid IN ({seg})", rowids)}
+        for r in lista:
+            rid, pezzo = pezzo_di[(name, r["uuid"])]
+            voce, testo = registro.get(rid), testi.get(rid)
+            if voce is None or testo is None or semantica.impronta_testo(testo) != voce[1]:
+                continue
+            k = pezzo - voce[0]
+            if not 0 <= k < semantica.CHUNK_MAX:
+                continue
+            finestra = semantica.passaggio(semantica.finestra_del_pezzo(testo, k),
+                                           set(termini), _SNIPPET_PAROLE)
+            r["snippet"] = ("…" if k > 0 and not finestra.startswith("…") else "") + finestra
+            r["pezzo"] = k
+
 
 @_serializzata
 def count(query: str, db: str = "", *, raw: bool = False, since: str = "",

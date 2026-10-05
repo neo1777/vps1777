@@ -41,6 +41,8 @@ che questo repo combatte da sempre.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 import struct
@@ -66,6 +68,79 @@ MAX_TOKEN = 512
 # La tabella vec0 dentro `<db>.vec.db`: la legge `knn_dedup`, la scrive il
 # costruttore. Un nome solo, per la stessa ragione dei prefissi.
 TABELLA = "vec_chunk_small"
+
+# Il chunking del POC, misurato: 1400 caratteri ≈ 400-460 token e5 (dentro i 512),
+# overlap 200, al più 12 pezzi per messaggio. Sta qui e non nel costruttore dal 05/10
+# (P4): il server ricostruisce il pezzo che ha colpito, e due copie della regola
+# potrebbero divergere in silenzio.
+CHUNK_CAR = 1400
+CHUNK_OVERLAP = 200
+CHUNK_MAX = 12
+TESTO_MIN = 40               # sotto, un messaggio non porta senso da cercare
+
+
+# ── il testo di un messaggio (anche per il costruttore) ─────────────────────────────────────────────────
+
+def spoglia(raw: str | None) -> str:
+    """Da un campo JSON (tools, attachments) le sole STRINGHE, senza i payload
+    binari (data-URI, PNG in base64). Il testo utile vive anche nei tool-call:
+    un indice sul solo `content` è cieco proprio dove la scoperta serve (POC).
+    Se il campo non è JSON, è già testo: passa com'è."""
+    if not raw:
+        return ""
+    try:
+        obj = json.loads(raw)
+    except (ValueError, TypeError):
+        return raw
+    out: list[str] = []
+
+    def cammina(o: Any) -> None:
+        if isinstance(o, str):
+            if len(o) > 3 and not o.startswith(("data:", "iVBOR")):
+                out.append(o)
+        elif isinstance(o, dict):
+            for v in o.values():
+                cammina(v)
+        elif isinstance(o, list):
+            for v in o:
+                cammina(v)
+
+    cammina(obj)
+    return "\n".join(out)
+
+
+def testo_indicizzabile(content: str | None, attachments: str | None,
+                        tools: str | None) -> str:
+    """content + attachments + tools spogliati: lo stesso testo del POC, così
+    un indice nuovo e uno del POC sono confrontabili vettore per vettore."""
+    parti = (content or "", spoglia(attachments), spoglia(tools))
+    return "\n".join(x for x in parti if x).strip()
+
+
+def pezzi(testo: str) -> list[str]:
+    """Finestre di CHUNK_CAR caratteri con CHUNK_OVERLAP di sovrapposizione, al
+    più CHUNK_MAX. Un testo lungo almeno TESTO_MIN dà sempre almeno un pezzo."""
+    passo = CHUNK_CAR - CHUNK_OVERLAP
+    out: list[str] = []
+    for k in range(CHUNK_MAX):
+        pezzo = testo[k * passo: k * passo + CHUNK_CAR]
+        if len(pezzo) < TESTO_MIN:
+            break
+        out.append(pezzo)
+        if k * passo + CHUNK_CAR >= len(testo):
+            break
+    return out
+
+
+def impronta_testo(testo: str) -> str:
+    return hashlib.sha256(testo.encode("utf-8", "surrogatepass")).hexdigest()[:32]
+
+
+def finestra_del_pezzo(testo: str, k: int) -> str:
+    """Il `k`-esimo pezzo di `testo`, con la regola di `pezzi`."""
+    passo = CHUNK_CAR - CHUNK_OVERLAP
+    return testo[k * passo: k * passo + CHUNK_CAR]
+
 
 # Fusione RRF: i parametri VINCENTI del banco (plateau k=20-40, peso FTS 1.2-1.5:
 # dentro quella finestra il risultato non cambia, quindi non è taratura fortunata).
@@ -226,19 +301,40 @@ def knn_dedup_distanze(conn: Any, blob: bytes, *, topn: int, k_chunk: int = 400,
     La distanza serve alla fusione FRA DB (S2, 05/10): il modello è lo stesso per tutti
     gli indici, quindi le distanze si confrontano; il rank dentro un DB no, perché il
     primo di ogni DB sarebbe sempre pari al primo di un altro."""
+    return [(rid, dist) for rid, dist, _ in knn_pezzi(
+        conn, blob, topn=topn, k_chunk=k_chunk, alias=alias, tabella=tabella)]
+
+
+def knn_pezzi(conn: Any, blob: bytes, *, topn: int, k_chunk: int = 400,
+              alias: str = "vec", tabella: str = TABELLA) -> list[tuple[int, float, int]]:
+    """Come `knn_dedup_distanze`, con il rowid del PEZZO migliore di ogni messaggio (P4):
+    con `primo_chunk` del registro dice quale finestra del testo ha colpito."""
     cur = conn.execute(
-        f"SELECT msg_rowid, distance FROM {alias}.{tabella} "
+        f"SELECT msg_rowid, distance, rowid FROM {alias}.{tabella} "
         "WHERE embedding MATCH ? AND k = ? ORDER BY distance", (blob, int(k_chunk)))
     visti: set[int] = set()
-    ordine: list[tuple[int, float]] = []
-    for rid, dist in cur:
+    ordine: list[tuple[int, float, int]] = []
+    for rid, dist, pezzo in cur:
         if rid in visti:
             continue
         visti.add(rid)
-        ordine.append((rid, float(dist)))
+        ordine.append((rid, float(dist), int(pezzo)))
         if len(ordine) >= topn:
             break
     return ordine
+
+
+def registro_pezzi(conn: Any, rowids: list[int], alias: str = "vec") -> dict[int, tuple[int, str]]:
+    """{msg_rowid: (primo_chunk, impronta)} dal registro del costruttore; {} se manca."""
+    if not rowids:
+        return {}
+    try:
+        seg = ",".join("?" * len(rowids))
+        return {r: (int(p), str(i)) for r, p, i in conn.execute(
+            f"SELECT msg_rowid, primo_chunk, impronta FROM {alias}.indice_righe "
+            f"WHERE msg_rowid IN ({seg})", rowids)}
+    except Exception:                                   # noqa: BLE001 — indice senza registro
+        return {}
 
 
 def uuid_registrati(conn: Any, rowids: list[int], alias: str = "vec") -> dict[int, str] | None:

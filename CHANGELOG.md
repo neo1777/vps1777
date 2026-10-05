@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **Lo snippet di una riga trovata per senso viene dal pezzo che ha colpito (P4).** Era
+  l'inizio del messaggio anche quando il pezzo vicino alla domanda stava migliaia di
+  caratteri più in là. `search_ibrida` prende la finestra del pezzo vinto (dal registro
+  dell'indice) e, se il testo è ancora quello indicizzato, ne mostra 60 parole attorno ai
+  termini della domanda; la riga dice quale in `pezzo`. Le regole del testo e dei pezzi
+  (`pezzi`, `testo_indicizzabile`, `impronta_testo`) passano dal costruttore a
+  `app/semantica.py`, una copia sola.
+
 ### Aggiunto
 - **Audit per tool nel gateway (S11).** Ogni chiamata a un tool lascia una riga `proxy_tool`
   con nome, durata in millisecondi, esito e status, scritta a fine stream: `ok`,

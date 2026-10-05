@@ -367,6 +367,7 @@ def test_un_indice_che_non_risponde_lascia_la_meta_fts_e_lo_dice(archivio, monke
     def rotto(*a, **k):
         raise sqlite3.OperationalError("no such table: vec.vettori")
 
+    monkeypatch.setattr(modulo.semantica, "knn_pezzi", rotto)          # P4: è lei che si chiama
     monkeypatch.setattr(modulo.semantica, "knn_dedup_distanze", rotto)
     monkeypatch.setattr(modulo.semantica, "knn_dedup", rotto)
     _rw(db, ("CREATE VIRTUAL TABLE messages_fts USING fts5(uuid, project, ts, content, "
@@ -396,3 +397,55 @@ def test_count_dichiara_il_db_che_non_ha_potuto_leggere(archivio):
     r = modulo.count("messaggio", db="arch")
     assert r["total"] == 0 and r["per_db"] == {}
     assert r["saltati"][0]["db"] == "arch" and r["saltati"][0]["ramo"] == "fts"
+
+
+# ── P4 (05/10/2026): lo snippet viene dal pezzo che ha colpito ───────────────
+# Prima, per una riga trovata «per senso», lo snippet era l'inizio del messaggio:
+# su un messaggio lungo il pezzo che aveva colpito poteva stare 5.000 caratteri più
+# in là, e `knn_dedup` buttava via quale fosse. Ora l'indice dice il pezzo (rowid del
+# chunk − primo_chunk del registro) e lo snippet si prende da lì, ma solo se il testo
+# è ancora quello indicizzato (impronta): se è cambiato, l'inizio e basta.
+
+_INIZIO = "Apertura del messaggio che non c'entra niente con la domanda. " * 30
+_CENTRO = "QUI STA IL PEZZO GIUSTO sulla memoria del server e il tetto di RAM. " * 25
+
+
+def _lungo(tmp_path, monkeypatch):
+    import test_costruisci_indice as tci
+    import costruisci_indice as ci
+    testo = _INIZIO + _CENTRO
+    db = tci.nuovo_db(tmp_path / "arch.db", [("lungo", "claude-code", "2026-05-10", testo)])
+    for mod in [m for m in list(sys.modules) if m == "app" or m.startswith("app.")]:
+        del sys.modules[mod]
+    finte = types.ModuleType("app.settings")
+    finte.get_settings = lambda: _SettingsFinte(tmp_path)   # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "app.settings", finte)
+    from app import db as modulo
+    modulo.reload_registry()
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    ps = ci.pezzi(testo)
+    k = next(i for i, p in enumerate(ps) if "PEZZO GIUSTO" in p and i > 0)
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + ps[k])
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    return modulo, db, k
+
+
+@vec
+def test_lo_snippet_viene_dal_pezzo_che_ha_colpito(tmp_path, monkeypatch):
+    modulo, db, k = _lungo(tmp_path, monkeypatch)
+    r = modulo.search_ibrida("memoria del server", db="arch", limit=3)
+    riga = next(x for x in r["righe"] if x["uuid"] == "lungo")
+    assert riga["pezzo"] == k
+    assert "PEZZO GIUSTO" in riga["snippet"]
+    assert not riga["snippet"].startswith("Apertura")
+
+
+@vec
+def test_testo_cambiato_dopo_l_indice_torna_all_inizio(tmp_path, monkeypatch):
+    modulo, db, k = _lungo(tmp_path, monkeypatch)
+    _rw(db, ("UPDATE messages SET content = content || ' aggiunta' WHERE uuid='lungo'",))
+    modulo._maybe_reload()
+    r = modulo.search_ibrida("memoria del server", db="arch", limit=3)
+    riga = next(x for x in r["righe"] if x["uuid"] == "lungo")
+    assert "pezzo" not in riga
+    assert riga["snippet"].startswith("Apertura")

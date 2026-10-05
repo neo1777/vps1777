@@ -84,10 +84,13 @@ VERSIONE = "1.0"
 # Il chunking del POC, misurato: 1400 caratteri ≈ 400-460 token e5 (dentro i
 # 512), overlap 200, al più 12 pezzi per messaggio. È ciò che ha raddoppiato il
 # recall sui messaggi lunghi: il succo oltre gli 800 caratteri torna raggiungibile.
-CHUNK_CAR = 1400
-CHUNK_OVERLAP = 200
-CHUNK_MAX = 12
-TESTO_MIN = 40               # sotto, un messaggio non porta senso da cercare
+# P4 (05/10/2026): le regole del testo e dei pezzi stanno in `app/semantica.py`, perché il
+# server deve poter ricostruire il pezzo che ha colpito: una copia sola, non due che
+# possono divergere. Qui si reimportano coi nomi di sempre.
+CHUNK_CAR = semantica.CHUNK_CAR
+CHUNK_OVERLAP = semantica.CHUNK_OVERLAP
+CHUNK_MAX = semantica.CHUNK_MAX
+TESTO_MIN = semantica.TESTO_MIN
 CHUNK_DICHIARATO = f"{CHUNK_CAR}/overlap {CHUNK_OVERLAP}/cap {CHUNK_MAX}"
 
 LOTTO = 96                   # pezzi per chiamata al modello (e per transazione)
@@ -119,61 +122,11 @@ class Embedder(Protocol):
     def __call__(self, testi: list[str]) -> list[bytes]: ...
 
 
-# ── il testo di un messaggio ─────────────────────────────────────────────────
-
-def spoglia(raw: str | None) -> str:
-    """Da un campo JSON (tools, attachments) le sole STRINGHE, senza i payload
-    binari (data-URI, PNG in base64). Il testo utile vive anche nei tool-call:
-    un indice sul solo `content` è cieco proprio dove la scoperta serve (POC).
-    Se il campo non è JSON, è già testo: passa com'è."""
-    if not raw:
-        return ""
-    try:
-        obj = json.loads(raw)
-    except (ValueError, TypeError):
-        return raw
-    out: list[str] = []
-
-    def cammina(o: Any) -> None:
-        if isinstance(o, str):
-            if len(o) > 3 and not o.startswith(("data:", "iVBOR")):
-                out.append(o)
-        elif isinstance(o, dict):
-            for v in o.values():
-                cammina(v)
-        elif isinstance(o, list):
-            for v in o:
-                cammina(v)
-
-    cammina(obj)
-    return "\n".join(out)
-
-
-def testo_indicizzabile(content: str | None, attachments: str | None,
-                        tools: str | None) -> str:
-    """content + attachments + tools spogliati: lo stesso testo del POC, così
-    un indice nuovo e uno del POC sono confrontabili vettore per vettore."""
-    parti = (content or "", spoglia(attachments), spoglia(tools))
-    return "\n".join(x for x in parti if x).strip()
-
-
-def pezzi(testo: str) -> list[str]:
-    """Finestre di CHUNK_CAR caratteri con CHUNK_OVERLAP di sovrapposizione, al
-    più CHUNK_MAX. Un testo lungo almeno TESTO_MIN dà sempre almeno un pezzo."""
-    passo = CHUNK_CAR - CHUNK_OVERLAP
-    out: list[str] = []
-    for k in range(CHUNK_MAX):
-        pezzo = testo[k * passo: k * passo + CHUNK_CAR]
-        if len(pezzo) < TESTO_MIN:
-            break
-        out.append(pezzo)
-        if k * passo + CHUNK_CAR >= len(testo):
-            break
-    return out
-
-
-def impronta_testo(testo: str) -> str:
-    return hashlib.sha256(testo.encode("utf-8", "surrogatepass")).hexdigest()[:32]
+# ── il testo di un messaggio (in app/semantica.py dal 05/10, P4) ────────────
+spoglia = semantica.spoglia
+testo_indicizzabile = semantica.testo_indicizzabile
+pezzi = semantica.pezzi
+impronta_testo = semantica.impronta_testo
 
 
 # ── il perimetro ─────────────────────────────────────────────────────────────
