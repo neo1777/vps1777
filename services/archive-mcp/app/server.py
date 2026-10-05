@@ -5,8 +5,10 @@ Stateless mode (FASTMCP_STATELESS_HTTP=true) per scalare.
 """
 from __future__ import annotations
 
+import asyncio
 import functools
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -40,6 +42,26 @@ mcp = FastMCP(
 #    fallisce se compare un tool prima della sostituzione.
 _tool_originale = mcp.tool
 
+# ── FUORI DALL'EVENT LOOP (S1, 05/10/2026) ───────────────────────────────────────────
+# FastMCP chiama un tool `def` DENTRO l'event loop: una ricerca lenta fermava tutto il
+# server, `/health` compreso (il 04/10 muta per 311, 536 e 656 s; 92 errori dei client
+# dal 07/09). Ogni tool diventa una coroutine che fa il lavoro, redazione compresa, su
+# questo executor. Thread PERSISTENTI e non `anyio.to_thread`: la cache delle connessioni
+# di `db` è per thread, e un thread che muore dopo 10 s di ozio ripaga l'apertura di ogni
+# DB. Tre thread: le ricerche restano due alla volta (`db._RICERCHE`), il terzo tiene
+# libero il passo agli altri tool (get_context, list_databases…).
+_THREAD_TOOL = 3
+_ESECUTORE = ThreadPoolExecutor(max_workers=_THREAD_TOOL, thread_name_prefix="archive-tool")
+
+
+def _fuori_dal_loop(lavoro):
+    """La coroutine che esegue `lavoro` sull'executor dei tool, con la sua firma."""
+    @functools.wraps(lavoro)
+    async def coroutine(*a: Any, **k: Any) -> Any:
+        return await asyncio.get_running_loop().run_in_executor(
+            _ESECUTORE, functools.partial(lavoro, *a, **k))
+    return coroutine
+
 
 def _tool_con_redazione(*args: Any, **kw: Any) -> Any:
     decoratore = _tool_originale(*args, **kw)
@@ -60,7 +82,7 @@ def _tool_con_redazione(*args: Any, **kw: Any) -> Any:
                 log.warning("valori anagrafici non disponibili (%s): restano i pattern", exc)
                 noti = set()
             return redazione.maschera(risultato, noti)
-        return decoratore(avvolta)
+        return decoratore(_fuori_dal_loop(avvolta))
     return applica
 
 
