@@ -218,13 +218,16 @@ def _internal_ok(request: "Request") -> bool:
 
 @mcp.custom_route("/internal/nlm/status", methods=["GET"])
 async def internal_nlm_status(request: "Request") -> "JSONResponse":
-    """Stato del profilo, senza esporre i cookie: {ok, has_cookies, pending, sonda}.
+    """Stato del profilo, senza esporre i cookie: {ok, has_cookies, pending, sonda, sessione}.
     `ok` dice solo che il file c'è; `sonda` ({quando, esito} o null) dice se l'ultima
-    chiamata vera a Google è riuscita (S8)."""
+    chiamata vera a Google è riuscita (S8); `sessione` ({nata_il, ultimo_refresh} o null)
+    è l'età vera della sessione (S9)."""
     if not _internal_ok(request):
         return JSONResponse({"error": "forbidden"}, status_code=403)
-    stato = nlm_profile.profile_status(Path(get_settings().nlm_home))
+    home = Path(get_settings().nlm_home)
+    stato = nlm_profile.profile_status(home)
     stato["sonda"] = await asyncio.to_thread(sonda.ultimo)
+    stato["sessione"] = await asyncio.to_thread(nlm_profile.eta_sessione, home)
     return JSONResponse(stato)
 
 
