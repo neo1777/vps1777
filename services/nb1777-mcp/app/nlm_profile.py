@@ -20,8 +20,10 @@ Modulo stdlib-only e senza dipendenze dal server: si testa da solo.
 from __future__ import annotations
 
 import io
+import json
 import shutil
 import tarfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Il file che rende il profilo "valido": senza questo, non c'è auth.
@@ -44,6 +46,41 @@ def profile_status(auth_dir: Path) -> dict:
         "ok": has_cookies and not pending,
         "has_cookies": has_cookies,
         "pending": pending,
+    }
+
+
+# S9 (05/10/2026): Google dà a SID (e a __Secure-1PSID) una scadenza di 400 giorni dal
+# login. La scadenza meno 400 giorni è la nascita della sessione: il 05/10 combaciava al
+# secondo col login del 02/10. È un'euristica dichiarata, ma non si azzera quando `nlm`
+# riscrive il file per conto suo, come faceva l'mtime.
+_COOKIE_DI_SESSIONE = ("SID", "__Secure-1PSID")
+_DURATA_SID_S = 400 * 86400
+
+
+def _iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def eta_sessione(auth_dir: Path) -> dict | None:
+    """{nata_il, ultimo_refresh} della sessione Google, o None senza un profilo leggibile.
+
+    `nata_il` = scadenza di SID meno 400 giorni (None se SID manca); `ultimo_refresh` =
+    l'ultima volta che il file è stato scritto, da un caricamento o da `nlm`. Legge solo
+    nomi e scadenze: i valori dei cookie non escono mai da qui."""
+    p = auth_dir / COOKIES_REL
+    try:
+        cookies = json.loads(p.read_text(encoding="utf-8"))
+        mtime = p.stat().st_mtime
+    except (OSError, ValueError):
+        return None
+    if not isinstance(cookies, list):
+        return None
+    scadenze = [c["expires"] for c in cookies
+                if isinstance(c, dict) and c.get("name") in _COOKIE_DI_SESSIONE
+                and isinstance(c.get("expires"), (int, float)) and c["expires"] > 0]
+    return {
+        "nata_il": _iso(max(scadenze) - _DURATA_SID_S) if scadenze else None,
+        "ultimo_refresh": _iso(mtime),
     }
 
 
