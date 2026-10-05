@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **`source_add_file` non può più caricare i cookie in un notebook (S5).** `nlm` accetta un
+  file da qualunque percorso del container se `NOTEBOOKLM_ALLOWED_FILE_DIRS` non è impostata,
+  e non lo era: un `source_add_file` poteva mettere in un notebook anche la sessione Google in
+  `/var/lib/nlm`. Ora sono consentite solo le cartelle dei flussi veri, gli artefatti
+  (dove arrivano anche i file di ingest) e `/tmp` (il file temporaneo di `source_add_text`).
+  Il test usa il controllo vero di `nlm`.
+
 ## [0.73.0] — 2026-10-05
 
 **Annotazioni e titoli sui 54 tool; le guide di archive arrivano intere (#429).**
