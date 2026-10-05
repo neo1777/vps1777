@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.71.0] — 2026-10-05
+
+**archive1777 fuori dall'event loop, fusione su tutti i DB in `search_ibrida`, ciò che si perde dichiarato (#424).**
+
 ### Corretto
 - **archive1777 non si ferma più dietro una ricerca lenta (S1).** FastMCP eseguiva i tool
   sincroni DENTRO l'event loop: una ricerca lenta bloccava tutto il server, `/health`
