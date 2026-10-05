@@ -70,6 +70,17 @@ def _registra(voce: dict) -> None:
     tmp.replace(p)
 
 
+def quota_usata() -> float | None:
+    """La percentuale usata della finestra più piena (`nlm usage`), o None se non si legge."""
+    try:
+        finestre = core.usage_get().get("windows") or []
+        usate = [float(f["percent_used"]) for f in finestre
+                 if isinstance(f, dict) and f.get("percent_used") is not None]
+    except Exception:                              # noqa: BLE001 — la sonda non deve morire
+        return None
+    return max(usate) if usate else None
+
+
 def sonda_una_volta() -> dict:
     """Una sonda: chiamata vera, esito classificato, registro, avviso alla transizione."""
     with _LOCK:
@@ -87,6 +98,12 @@ def sonda_una_volta() -> dict:
             esito = "altro"
         voce = {"quando": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "esito": esito}
+        if esito != "auth_scaduta":
+            # La quota accanto all'esito (05/10/2026): un «altro» con la quota al 100% è
+            # una quota finita, non un guasto. Con la sessione scaduta non si legge.
+            usata = quota_usata()
+            if usata is not None:
+                voce["quota_usata"] = usata
         _registra(voce)
         if esito == "auth_scaduta" and prima != "auth_scaduta":
             log.warning("sonda: sessione Google scaduta (prima: %s)", prima)

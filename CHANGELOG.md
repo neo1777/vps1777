@@ -9,8 +9,9 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   smette di rispondere le cause comuni sono due e si curano in modo opposto: la sessione
   scaduta (si ricarica il profilo) e la quota finita (si aspetta l'azzeramento). `nlm usage`,
   che c'è già nella 0.12, le distingue: ora è un tool di sola lettura (40 in tutto) e `doctor`
-  lo porta con sé senza fallire se la quota non si legge. Una delle sette migliorie accettate
-  da Neo il 05/10.
+  lo porta con sé senza fallire se la quota non si legge. Anche la sonda registra a ogni giro
+  la percentuale usata della finestra più piena (`quota_usata`). Una delle sette migliorie
+  accettate da Neo il 05/10.
 
 ### Aggiunto
 - **Audit per tool nel gateway (S11).** Ogni chiamata a un tool lascia una riga `proxy_tool`

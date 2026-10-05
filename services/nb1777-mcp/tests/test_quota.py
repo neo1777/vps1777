@@ -40,3 +40,20 @@ def test_doctor_porta_la_quota_e_non_cade_se_manca(monkeypatch):
     monkeypatch.setattr(core, "usage_get", rotto)
     d = asyncio.run(server.doctor())
     assert d["version"] == "nlm 0.12.0" and "usage non disponibile" in d["quota"]["errore"]
+
+
+def test_la_sonda_registra_la_quota_accanto_all_esito(monkeypatch, tmp_path):
+    from app import memoria, sonda
+    monkeypatch.setattr(sonda, "_dir_stato", lambda: tmp_path)
+    monkeypatch.setattr(core, "nb_list", lambda: [])
+    monkeypatch.setattr(core, "usage_get", lambda: {"windows": [
+        {"window": "rolling", "percent_used": 12.5},
+        {"window": "weekly", "percent_used": 96.0}]})
+    assert sonda.sonda_una_volta()["quota_usata"] == 96.0
+
+    def rotto():
+        raise core.NLMError("no")
+
+    monkeypatch.setattr(core, "usage_get", rotto)
+    assert "quota_usata" not in sonda.sonda_una_volta()
+    memoria._outbox.clear()
