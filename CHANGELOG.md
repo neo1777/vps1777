@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.73.0] — 2026-10-05
+
+**Annotazioni e titoli sui 54 tool; le guide di archive arrivano intere (#429).**
+
 ### Aggiunto
 - **Ogni tool dei due MCP dichiara cosa fa al mondo (S10).** Titolo e annotazioni MCP
   (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) sui 54 tool, in
