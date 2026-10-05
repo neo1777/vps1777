@@ -22,7 +22,6 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `search_ibrida` elenca in `fuori_perimetro` i DB lasciati fuori. Su un'installazione
   senza ruoli dichiarati non cambia niente.
 
-### Cambiato
 - **`secrets-status` dà l'età vera della sessione NotebookLM (S9).** Era la data del file dei
   cookie, che si azzerava ogni volta che `nlm` lo riscriveva, senza un caricamento. Ora la
   chiede a nb1777-mcp (`python -m app.stato_sessione`, solo date): la nascita della sessione
