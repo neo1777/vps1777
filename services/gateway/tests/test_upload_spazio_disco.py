@@ -43,6 +43,9 @@ def _solo_codice(testo: str) -> str:
 
 
 CODICE = _solo_codice(SRC)
+# S13 (05/10/2026): la scrittura del temporaneo è passata in `_copia_upload`, che gira in
+# un thread; nel ciclo il punto in cui si scrive è la sua chiamata.
+SCRIVE = "asyncio.to_thread(_copia_upload"
 
 
 def test_lo_spazio_si_misura_davvero():
@@ -57,7 +60,7 @@ def test_lo_spazio_si_misura_davvero():
 def test_il_controllo_viene_PRIMA_della_scrittura():
     """Ordine non negoziabile: dopo il primo `open(tmp, "wb")` è troppo tardi —
     il file esiste già e il disco ha già cominciato a riempirsi."""
-    assert CODICE.index("shutil.disk_usage(") < CODICE.index('open(tmp, "wb")'), (
+    assert CODICE.index("shutil.disk_usage(") < CODICE.index(SCRIVE), (
         "il controllo dello spazio deve precedere l'apertura del file temporaneo"
     )
 
@@ -71,7 +74,7 @@ def test_la_soglia_NON_e_un_numero_nuovo():
     giornata a smontare: una costante plausibile che nessuno ha misurato.
     """
     blocco = CODICE[CODICE.index("shutil.disk_usage("):]
-    blocco = blocco[:blocco.index('open(tmp, "wb")')]
+    blocco = blocco[:blocco.index(SCRIVE)]
     assert "MAX_UPLOAD_BYTES" in blocco, "la soglia deve venire dal tetto già definito"
     import re
     numeri = [n for n in re.findall(r"\b\d{4,}\b", blocco) if n not in ("1024",)]
@@ -92,7 +95,7 @@ def test_non_misurabile_NON_diventa_un_rifiuto():
     esattamente il falso positivo che rende gli allarmi inutili.
     """
     blocco = CODICE[CODICE.index("shutil.disk_usage("):]
-    blocco = blocco[:blocco.index('open(tmp, "wb")')]
+    blocco = blocco[:blocco.index(SCRIVE)]
     assert "except OSError" in blocco, "l'errore di misura va catturato"
     assert "is not None" in blocco, (
         "il ramo 'non misurabile' deve essere distinto dal ramo 'spazio insufficiente'"

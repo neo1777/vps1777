@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Il gateway non tiene più un artefatto intero in RAM e non si ferma mentre indicizza
+  (S13).** Il download da `/admin/nlm` diceva «in streaming» ma raccoglieva tutti i pezzi e
+  poi li univa: un video intero in memoria per ogni download, nel servizio esposto a
+  Internet. Ora passa a pezzi mentre il browser legge. E `index_file`, con la copia
+  dell'upload, girava dentro l'event loop: un archivio grosso caricato da `/admin/archive`
+  fermava per minuti tutto il gateway, OAuth e proxy MCP compresi. Ora gira in un thread,
+  un'indicizzazione alla volta.
+
 ### Cambiato
 - **`secrets-status` dà l'età vera della sessione NotebookLM (S9).** Era la data del file dei
   cookie, che si azzerava ogni volta che `nlm` lo riscriveva, senza un caricamento. Ora la
