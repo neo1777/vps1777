@@ -108,6 +108,27 @@ def test_tar_senza_cookies_non_tocca_il_profilo_esistente(tmp_path):
     assert profile_status(tmp_path)["ok"] is True
 
 
+def test_profilo_protected_ha_un_messaggio_che_dice_cosa_fare(tmp_path):
+    """S6: nlm ≥ 0.15 può cifrare il login nel portachiavi del PC (modalità «protected»):
+    nella cartella resta `credentials.enc` e manca `cookies.json`. La VPS non ha la chiave,
+    quindi il tar va rifiutato dicendo come rifarlo, non «hai taggato la cartella giusta?»."""
+    install_profile(_targz(VALID), tmp_path)
+    protetto = {"profiles/default/credentials.enc": b"\x00cifrato",
+                "profiles/default/metadata.json": b"{}"}
+    with pytest.raises(ValueError, match="nlm auth storage set file") as exc:
+        install_profile(_targz(protetto), tmp_path)
+    assert "cartella giusta" not in str(exc.value)
+    assert (tmp_path / "profiles/default/cookies.json").read_bytes() == b'{"c":1}'
+    assert not (tmp_path / "profiles/default/credentials.enc").exists()
+
+
+def test_cookies_e_residuo_cifrato_vale_il_file_in_chiaro(tmp_path):
+    """Un profilo in chiaro con un `credentials.enc` rimasto da prima si installa:
+    nlm, sulla VPS, legge `cookies.json`."""
+    install_profile(_targz({**VALID, "profiles/default/credentials.enc": b"x"}), tmp_path)
+    assert profile_status(tmp_path)["ok"] is True
+
+
 def test_tar_corrotto_non_tocca_il_profilo_esistente(tmp_path):
     install_profile(_targz(VALID), tmp_path)
     with pytest.raises(ValueError, match="tar.gz valido"):

@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Un profilo nlm cifrato ha un rifiuto che dice cosa fare (S6).** Dalla 0.15 `nlm login`
+  propone di cifrare il login nel portachiavi del PC (modalità «protected»): nella cartella
+  resta `credentials.enc` senza `cookies.json`, e `/admin/nlm` rispondeva «hai taggato la
+  cartella giusta?». Ora dice che quel profilo la VPS non lo può aprire e dà il comando per
+  riaverlo in chiaro (`nlm auth storage set file`); la pagina lo avverte prima del login.
+
 ## [0.73.0] — 2026-10-05
 
 **Annotazioni e titoli sui 54 tool; le guide di archive arrivano intere (#429).**
