@@ -84,3 +84,14 @@ def test_un_indice_illeggibile_non_rompe_la_pagina(tmp_path):
     db.with_suffix(".vec.db").write_bytes(b"non sono sqlite")
     s = ai.stato_indice(db, cache=False)
     assert s["stato"] == "illeggibile"
+
+
+def test_db_toccato_senza_righe_nuove_resta_allineato(tmp_path):
+    """Misurato sulla VPS l'11/10: tre DB «da aggiornare» con 0 righe dopo. Il file era
+    cambiato per una scrittura di metadati (ruolo, descrizione), non per messaggi nuovi."""
+    db = _db(tmp_path, "a", 3)
+    v = _indice(db, 3)
+    _invecchia(v, 100)
+    s = ai.stato_indice(db, cache=False)
+    assert s["stato"] == "allineato" and s["dopo"] == 0
+    assert "metadati" in s["nota"]
