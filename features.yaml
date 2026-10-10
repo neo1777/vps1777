@@ -940,7 +940,7 @@ features:
            15 minuti, una volta sola, massimo 200 MB (P15)."
     dove: ["mcp-tool:nb1777-mcp/source_upload_link"]
     status: active-default
-    since: "unreleased"
+    since: "0.77.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: source_upload_link}
   - id: nb.canonico
