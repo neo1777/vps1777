@@ -95,6 +95,13 @@ See [PLUGINS.md](../PLUGINS.md) (Italian). In short:
 4. Recreate the gateway: `docker compose up -d gateway` (`restart` does not re-read `.env`, and the new `GATEWAY_UPSTREAMS` would not get in)
 5. Your plugin's URL: `<PUBLIC_BASE>/<SECRET>/<nome>/mcp`
 
+The upstream **does not have to be MCP**: the proxy forwards any HTTP method and path
+(`/<SECRET>/<name>/<path>`), with query and body intact and the response streamed, behind the
+same secret and the same OAuth. `services/gateway/tests_runtime/test_proxy_upstream_generico.py`
+proves it with an echo upstream (since 10/10/2026): without a Bearer, or with a subject that is
+not allowed, the upstream sees nothing; the Bearer stops at the gateway; `internal/` stays
+closed. In production, today, the upstreams are the two MCP servers.
+
 ## Update channel
 
 The update engine lives **on the host**, not in the containers: the CLI
