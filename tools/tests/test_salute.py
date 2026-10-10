@@ -35,7 +35,8 @@ def _prepara(monkeypatch, tmp_path, **kw):
         "nata_il": "2026-10-02T10:19:07Z", "ultimo_refresh": "2026-10-05T00:34:00Z",
         "sonda": {"quando": "2026-10-05T17:12:13Z", "esito": "ok"}}))
     monkeypatch.setattr(v, "memoria_container", lambda repo: kw.get("memoria", [
-        {"nome": "vps1777-gateway-1", "picco_mb": 180, "tetto_mb": None, "oom_kill": 0}]))
+        {"nome": "vps1777-gateway-1", "picco_mb": 180, "propria_mb": 60, "tetto_mb": None,
+         "oom_kill": 0}]))
 
 
 def _voci(tmp_path) -> dict:
@@ -61,8 +62,8 @@ def test_i_guasti_si_vedono(monkeypatch, tmp_path):
     _prepara(monkeypatch, tmp_path, raggiungibile=False, notturno=5, libero=4,
              sessione={"nata_il": "2026-10-02T10:19:07Z", "ultimo_refresh": "x",
                        "sonda": {"quando": "2026-10-05T17:12:13Z", "esito": "auth_scaduta"}},
-             memoria=[{"nome": "vps1777-archive-mcp-1", "picco_mb": 2040, "tetto_mb": 2048,
-                       "oom_kill": 2}])
+             memoria=[{"nome": "vps1777-archive-mcp-1", "picco_mb": 2040, "propria_mb": 900,
+                       "tetto_mb": 2048, "oom_kill": 2}])
     v.scrivi_salute(tmp_path, {"copertura_scesa_da": "2026-10-04T03:00:00Z"})
     voci = _voci(tmp_path)
     assert voci["raggiungibilità"]["stato"] == "guasto"
@@ -81,3 +82,20 @@ def test_cio_che_non_si_misura_lo_dice(monkeypatch, tmp_path):
     voci = _voci(tmp_path)
     for nome in ("raggiungibilità", "backup notturno", "sessione Google", "memoria dei container"):
         assert voci[nome]["stato"] == "non_misurato", nome
+
+
+def test_la_cache_dei_file_non_e_un_allarme(monkeypatch, tmp_path):
+    """Misurato sulla VPS il 10/10, quattro minuti dopo l'update a 0.74.0: archive-mcp con
+    picco 2048 MB su 2048 (cache dei DB), memoria propria 70 MB, zero OOM kill. La pagina
+    diceva «attenzione»: era la cache, che il kernel libera da sé."""
+    _prepara(monkeypatch, tmp_path, memoria=[
+        {"nome": "vps1777-archive-mcp-1", "picco_mb": 2048, "propria_mb": 70,
+         "tetto_mb": 2048, "oom_kill": 0},
+        {"nome": "vps1777-nb1777-mcp-1", "picco_mb": 480, "propria_mb": 470,
+         "tetto_mb": 512, "oom_kill": 0}])
+    v.scrivi_salute(tmp_path, {})
+    voci = _voci(tmp_path)
+    archivio = voci["memoria vps1777-archive-mcp-1"]
+    assert archivio["stato"] == "ok", archivio
+    assert "propria 70 MB" in archivio["dettaglio"] and "cache" in archivio["dettaglio"]
+    assert voci["memoria vps1777-nb1777-mcp-1"]["stato"] == "attenzione"

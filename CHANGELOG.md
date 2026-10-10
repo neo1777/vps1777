@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **La pagina Salute non scambia più la cache dei file per un pericolo.** Quattro minuti
+  dopo l'update alla 0.74.0 segnava «attenzione» su archive-mcp: picco 2048 MB su 2048.
+  Il picco del cgroup comprende la cache dei DB, che il kernel libera da sé; la memoria
+  propria del processo era 70 MB e gli OOM kill zero. Ora la riga giudica la memoria propria
+  (`anon` di `memory.stat`, oltre il 90% del tetto) e gli OOM kill, e mostra il picco solo
+  come informazione.
+
 ## [0.74.0] — 2026-10-10
 
 **Evoluzione degli MCP, ondata 1 chiusa: età vera della sessione, audit per tool, il ruolo decide dove si cerca, snippet dal pezzo, conferma sui delete, pagina Salute, quota.**

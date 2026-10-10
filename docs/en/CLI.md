@@ -52,8 +52,11 @@ before asking GitHub it also does the maintenance and the watches that live on i
 - **It writes the health** (since 0.74.0): `onboarding/salute.json`, read by
   `/admin/salute`. One row per item, with a state (`ok`, `attenzione`, `guasto`,
   `non_misurato`) and the date of the measurement: the five watches, the Google session
-  (nb1777's latest probe) and each container's memory (peak and OOM kills from the cgroup,
-  `memory.peak` and `memory.events`, and the ceiling if there is one). The page marks a row
+  (nb1777's latest probe) and each container's memory (from the cgroup: its own memory from
+  `memory.stat`, the peak from `memory.peak`, OOM kills from `memory.events`, and the
+  ceiling if there is one). Since 0.74.1 "attenzione" comes from its own memory above 90% of
+  the ceiling or from an OOM kill, not from the peak: the peak includes the file cache,
+  which the kernel frees by itself. The page marks a row
   measured more than 30 hours earlier as "old", whatever state it says: a stopped timer must
   not leave a green behind.
 
