@@ -29,7 +29,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -39,7 +39,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 
 from . import canonical, core, memoria, nlm_profile, sonda
 from . import conferma as _gettoni
-from . import caricamenti, link_firmati
+from . import caricamenti, lavori, link_firmati
 from .settings import get_settings
 
 log = logging.getLogger("nb1777-mcp.server")
@@ -103,6 +103,7 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     "source_rename": ("Rinomina una fonte", _RINOMINA),
     "notebook_query": ("Chiedi al notebook", _LEGGE),
     "notebook_query_esito": ("Ritira una risposta in corso", _LEGGE),
+    "lavoro_esito": ("Ritira un lavoro in corso", _LEGGE),
     "studio_create_audio": ("Crea un audio", _AGGIUNGE),
     "studio_create_video": ("Crea un video", _AGGIUNGE),
     "studio_create_slides": ("Crea le slide", _AGGIUNGE),
@@ -203,6 +204,16 @@ async def _aio(fn, *args, **kwargs):
         _check_auth_or_raise()
         return await asyncio.to_thread(fn, *args, **kwargs)
     return await _esito(getattr(fn, "__name__", "?"), _corpo())
+
+
+async def _lungo(nome: str, chiave: tuple, nb_id: str, attesa_max: float, fn, *args, **kwargs):
+    """Come `_aio`, per i lavori che possono superare i ~30 s di un client (P6): passano dal
+    registro di `lavori` (3 alla volta, uno per notebook) e tornano «in_corso» se serve."""
+    async def _corpo():
+        _check_auth_or_raise()
+        return await lavori.aspetta(lavori.avvia(nome, chiave, nb_id, fn, *args, **kwargs),
+                                    attesa_max)
+    return await _esito(nome, _corpo())
 
 
 # ============================================================
@@ -340,8 +351,11 @@ async def internal_nlm_carica(request: "Request") -> "Response":
         if n == 0:
             return JSONResponse({"error": "vuoto", "reason": "il file è vuoto"}, status_code=400)
         try:
-            sid = await asyncio.to_thread(core.source_add_file, nb_id, dest,
-                                          title=titolo or nome)
+            # stesso lucchetto delle altre scritture del notebook (P6): l'id della fonte
+            # nuova si ricava per differenza, e due aggiunte parallele lo confonderebbero
+            async with lavori.lucchetto(nb_id):
+                sid = await asyncio.to_thread(core.source_add_file, nb_id, dest,
+                                              title=titolo or nome)
         except core.NLMError as exc:
             return JSONResponse({"error": "nlm", "reason": str(exc)[:400]}, status_code=502)
         log.info("caricamento monouso: %s byte in %s → fonte %s", n, nb_id, sid)
@@ -447,41 +461,76 @@ async def source_list(notebook_id: str) -> list[dict]:
 
 @mcp.tool()
 async def source_add_url(notebook_id: str, url: str, title: Optional[str] = None,
-                         wait: bool = True) -> str:
-    """Aggiunge una URL come fonte. Ritorna il source_id."""
-    return await _aio(core.source_add_url, notebook_id, url, title=title, wait=wait)
+                         wait: bool = True, attesa_max: float = 25.0) -> str | dict:
+    """Aggiunge una URL come fonte. Ritorna il source_id.
+
+    ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
+    torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
+    o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
+    return await _lungo("source_add_url", ("source_add_url", notebook_id, url, title, wait),
+                        notebook_id, attesa_max, core.source_add_url, notebook_id, url,
+                        title=title, wait=wait)
 
 
 @mcp.tool()
-async def source_add_text(notebook_id: str, text: str, title: str, wait: bool = True) -> str:
-    """Aggiunge testo libero come fonte (richiede titolo)."""
-    return await _aio(core.source_add_text, notebook_id, text, title, wait=wait)
+async def source_add_text(notebook_id: str, text: str, title: str, wait: bool = True,
+                          attesa_max: float = 25.0) -> str | dict:
+    """Aggiunge testo libero come fonte (richiede titolo). Ritorna il source_id.
+
+    ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
+    torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
+    o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
+    return await _lungo("source_add_text", ("source_add_text", notebook_id, title, hash(text), wait),
+                        notebook_id, attesa_max, core.source_add_text, notebook_id, text, title,
+                        wait=wait)
 
 
 @mcp.tool()
 async def source_add_file(notebook_id: str, file_path: str,
-                          title: Optional[str] = None, wait: bool = True) -> str:
+                          title: Optional[str] = None, wait: bool = True,
+                          attesa_max: float = 25.0) -> str | dict:
     """Carica un file come fonte (PDF/txt/md...).
 
     `file_path` è un path del filesystem del SERVER (il container nb1777-mcp),
     non di chi chiama: un file che sta solo sul tuo disco qui non esiste (è la
     stessa sorpresa di studio_download, al contrario). Per testo che hai già in
-    mano usa source_add_text."""
-    return await _aio(core.source_add_file, notebook_id, file_path, title=title, wait=wait)
+    mano usa source_add_text. Per un file che sta sul tuo dispositivo: source_upload_link.
+
+    ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
+    torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
+    o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
+    return await _lungo("source_add_file", ("source_add_file", notebook_id, file_path, title, wait),
+                        notebook_id, attesa_max, core.source_add_file, notebook_id, file_path,
+                        title=title, wait=wait)
 
 
 @mcp.tool()
-async def source_add_youtube(notebook_id: str, url: str, wait: bool = True) -> str:
-    """Aggiunge un video YouTube come fonte."""
-    return await _aio(core.source_add_youtube, notebook_id, url, wait=wait)
+async def source_add_youtube(notebook_id: str, url: str, wait: bool = True,
+                             attesa_max: float = 25.0) -> str | dict:
+    """Aggiunge un video YouTube come fonte. Ritorna il source_id.
+
+    ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
+    torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
+    o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
+    return await _lungo("source_add_youtube", ("source_add_youtube", notebook_id, url, wait),
+                        notebook_id, attesa_max, core.source_add_youtube, notebook_id, url,
+                        wait=wait)
 
 
 @mcp.tool()
 async def source_add_drive(notebook_id: str, document_id: str,
-                           doc_type: str = "doc", wait: bool = True) -> str:
-    """Collega un Google Drive document_id come fonte. doc_type: doc|slides|sheets|pdf"""
-    return await _aio(core.source_add_drive, notebook_id, document_id,
-                      doc_type=doc_type, wait=wait)
+                           doc_type: str = "doc", wait: bool = True,
+                           attesa_max: float = 25.0) -> str | dict:
+    """Collega un Google Drive document_id come fonte. doc_type: doc|slides|sheets|pdf.
+    Ritorna il source_id.
+
+    ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
+    torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
+    o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
+    return await _lungo("source_add_drive",
+                        ("source_add_drive", notebook_id, document_id, doc_type, wait),
+                        notebook_id, attesa_max, core.source_add_drive, notebook_id,
+                        document_id, doc_type=doc_type, wait=wait)
 
 
 @mcp.tool()
@@ -640,6 +689,15 @@ async def notebook_query_esito(query_id: str, attesa_max: float = 25.0) -> dict:
             _QUERY_IN_CORSO.pop(query_id, None)
             raise
     return await _esito("notebook_query_esito", _corpo())
+
+
+@mcp.tool()
+async def lavoro_esito(job_id: str, attesa_max: float = 25.0) -> Any:
+    """Ritira un lavoro lungo tornato {stato: "in_corso", job_id} (source_add_*,
+    studio_download, studio_create_all_9). Aspetta al massimo `attesa_max` secondi (default 25,
+    tetto 270): ritorna il risultato del tool originale, di nuovo «in_corso», o il suo errore.
+    Un job_id sconosciuto è un errore: già ritirato, scaduto (30 minuti) o perso a un riavvio."""
+    return await _esito("lavoro_esito", lavori.aspetta(job_id, attesa_max))
 
 
 # ============================================================
@@ -840,7 +898,8 @@ async def studio_create_all_9(notebook_id: str,
                               data_table_description: str = "Tabella con: Concetto, Definizione, Citazione dalla fonte.",
                               report_format: str = "Study Guide",
                               wait: bool = False,
-                              skip: Optional[list[str]] = None) -> dict:
+                              skip: Optional[list[str]] = None,
+                              attesa_max: float = 25.0) -> dict:
     """Crea tutti e 9 gli artefatti in sequenza. Ritorna {tipo: esito}, dove
     esito è l'artifact_id, "ERROR: <motivo>" se quel tipo è fallito (gli altri
     proseguono) o "SKIPPED" se era in `skip`.
@@ -848,8 +907,16 @@ async def studio_create_all_9(notebook_id: str,
     skip: tipi da saltare, es. ["audio"] per evitare il rate-limit.
     wait: False (default) lancia e ritorna subito gli id, la generazione
           continua su NotebookLM; True attende ogni artefatto (fino a 900s)
-          prima di lanciare il successivo."""
-    return await _aio(core.studio_create_all_9, notebook_id, source_ids=source_ids,
+          prima di lanciare il successivo.
+
+    ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
+    torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
+    o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
+    return await _lungo("studio_create_all_9",
+                        ("studio_create_all_9", notebook_id, tuple(source_ids or ()), language,
+                         report_format, wait, tuple(skip or ())),
+                        notebook_id, attesa_max, core.studio_create_all_9, notebook_id,
+                        source_ids=source_ids,
                       language=language, data_table_description=data_table_description,
                       report_format=report_format, wait=wait,
                       skip=tuple(skip or ()))
@@ -919,19 +986,9 @@ async def studio_rename(notebook_id: str, artifact_id: str, new_title: str) -> s
 # STUDIO — download (un solo tool, dispatcha per kind)
 # ============================================================
 
-@mcp.tool()
-async def studio_download(kind: str, notebook_id: str, output_path: str,
-                          artifact_id: Optional[str] = None) -> dict:
-    """Scarica un artefatto. kind: audio|video|slides|mindmap|infographic|data_table|report|quiz|flashcards.
-
-    `output_path` vale come NOME del file, non come destinazione: il file nasce sul
-    filesystem del SERVER, nella directory degli artefatti. Ritorna dove prenderlo, non un
-    path da aprire in locale: `link.url` è un link firmato del gateway, apribile da un
-    browser senza password per 30 minuti (scade a `link.scade_il`, e un riavvio di nb1777
-    lo invalida); `download_url` è la stessa cosa dal pannello admin.
-    """
-    p = await _aio(core.studio_download, kind, notebook_id, output_path,
-                   artifact_id=artifact_id)
+def _scarica_e_descrivi(kind: str, notebook_id: str, output_path: str,
+                        artifact_id: Optional[str]) -> dict:
+    p = core.studio_download(kind, notebook_id, output_path, artifact_id=artifact_id)
     # Prima qui c'era `return str(p)`: un percorso che sul disco di chi chiama NON
     # ESISTE, restituito come se fosse un risultato utilizzabile. Chi lo riceveva
     # provava ad aprirlo e trovava il nulla — il valore era vero sul server e falso
@@ -944,6 +1001,26 @@ async def studio_download(kind: str, notebook_id: str, output_path: str,
         "nota": "Il file è sul server: aprilo da `link.url` (30 minuti, senza password) o "
                 "dal pannello /admin/nlm. Il path del container non è raggiungibile da qui.",
     }
+
+
+@mcp.tool()
+async def studio_download(kind: str, notebook_id: str, output_path: str,
+                          artifact_id: Optional[str] = None, attesa_max: float = 25.0) -> dict:
+    """Scarica un artefatto. kind: audio|video|slides|mindmap|infographic|data_table|report|quiz|flashcards.
+
+    `output_path` vale come NOME del file, non come destinazione: il file nasce sul
+    filesystem del SERVER, nella directory degli artefatti. Ritorna dove prenderlo, non un
+    path da aprire in locale: `link.url` è un link firmato del gateway, apribile da un
+    browser senza password per 30 minuti (scade a `link.scade_il`, e un riavvio di nb1777
+    lo invalida); `download_url` è la stessa cosa dal pannello admin.
+
+    ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
+    torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
+    o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
+    return await _lungo("studio_download",
+                        ("studio_download", kind, notebook_id, output_path, artifact_id),
+                        notebook_id, attesa_max, _scarica_e_descrivi, kind, notebook_id,
+                        output_path, artifact_id)
 
 
 # ============================================================
