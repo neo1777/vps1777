@@ -4,15 +4,6 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
-### Cambiato
-- **Lo snippet di una riga trovata per senso viene dal pezzo che ha colpito (P4).** Era
-  l'inizio del messaggio anche quando il pezzo vicino alla domanda stava migliaia di
-  caratteri più in là. `search_ibrida` prende la finestra del pezzo vinto (dal registro
-  dell'indice) e, se il testo è ancora quello indicizzato, ne mostra 60 parole attorno ai
-  termini della domanda; la riga dice quale in `pezzo`. Le regole del testo e dei pezzi
-  (`pezzi`, `testo_indicizzabile`, `impronta_testo`) passano dal costruttore a
-  `app/semantica.py`, una copia sola.
-
 ### Aggiunto
 - **Audit per tool nel gateway (S11).** Ogni chiamata a un tool lascia una riga `proxy_tool`
   con nome, durata in millisecondi, esito e status, scritta a fine stream: `ok`,
@@ -22,6 +13,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   registrano. Si vede in `/admin/audit`.
 
 ### Cambiato
+- **Lo snippet di una riga trovata per senso viene dal pezzo che ha colpito (P4).** Era
+  l'inizio del messaggio anche quando il pezzo vicino alla domanda stava migliaia di
+  caratteri più in là. `search_ibrida` prende la finestra del pezzo vinto (dal registro
+  dell'indice) e, se il testo è ancora quello indicizzato, ne mostra 60 parole attorno ai
+  termini della domanda; la riga dice quale in `pezzo`. Le regole del testo e dei pezzi
+  (`pezzi`, `testo_indicizzabile`, `impronta_testo`) passano dal costruttore a
+  `app/semantica.py`, una copia sola.
+
 - **`secrets-status` dà l'età vera della sessione NotebookLM (S9).** Era la data del file dei
   cookie, che si azzerava ogni volta che `nlm` lo riscriveva, senza un caricamento. Ora la
   chiede a nb1777-mcp (`python -m app.stato_sessione`, solo date): la nascita della sessione
