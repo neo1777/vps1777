@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.79.1] — 2026-10-11
+
+**Lo stato dell'indice per senso guarda le righe nuove, non la data del file.**
+
 ### Corretto
 - **Lo stato dell'indice per senso guarda le righe nuove, non la data del file.** Dal vivo, subito
   dopo la 0.79.0, tre DB risultavano «da aggiornare» con zero righe arrivate dopo l'indice: il
