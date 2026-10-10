@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.74.1] — 2026-10-10
+
+**Due falsi allarmi della pagina Salute, trovati dalle prove dal vivo della 0.74.0.**
+
 ### Corretto
 - **La pagina Salute non scambia più la cache dei file per un pericolo.** Quattro minuti
   dopo l'update alla 0.74.0 segnava «attenzione» su archive-mcp: picco 2048 MB su 2048.
