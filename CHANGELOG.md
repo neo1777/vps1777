@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.78.0] — 2026-10-10
+
+**I lavori lunghi di nb1777 tornano «in corso» invece di cadere: `lavoro_esito`, 49 tool.**
+
 ### Cambiato
 - **I lavori lunghi di nb1777 tornano «in corso» invece di cadere (P6).** `source_add_*` (con
   attesa), `studio_download` e `studio_create_all_9` possono durare minuti, e da claude.ai una
