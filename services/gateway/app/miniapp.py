@@ -45,11 +45,13 @@ from .jwt_helpers import JWTError, issue, verify
 from .mcp_client import MCPCallError, call_tool
 from .ratelimit import RateLimiter
 from .miniapp_core import (
+    RisposteRecenti,
     connector_url,
-    extract_answer,
     is_owner,
     masked_connector_url,
     parse_json_blocks,
+    righe_ricerca,
+    risposta_mini_app,
     summarize_secrets,
     verify_init_data,
     version_gt,
@@ -285,10 +287,33 @@ async def api_notebooks(request: Request) -> Response:
     return JSONResponse({"notebooks": nbs})
 
 
+# P10: le risposte già arrivate, per (utente, notebook, domanda). Una per processo.
+_RISPOSTE = RisposteRecenti()
+# Quanto aspetta ogni giro: sotto i 30 s che chiudono le webview e i proxy mobili. La
+# Mini App rilancia la stessa domanda finché non è pronta; nb1777 si aggancia alla
+# query in corso invece di farne partire un'altra.
+ASK_ATTESA_S = 20
+
+
+async def _titoli_fonti(nb_id: str) -> dict[str, str]:
+    """source_id → titolo, per mostrare le fonti. Best effort: senza, restano numero e
+    anteprima."""
+    try:
+        texts = await call_tool(NB_SERVICE, "source_list", {"notebook_id": nb_id}, timeout=30.0)
+    except MCPCallError:
+        return {}
+    return {str(f.get("id") or f.get("source_id") or ""): str(f.get("title") or "")
+            for f in parse_json_blocks(texts)}
+
+
 async def api_ask(request: Request) -> Response:
-    """POST /app/api/ask {notebook_id, question} — domanda RAG su un notebook.
-    Long-running: una query NotebookLM può richiedere minuti (timeout ~290s,
-    ≥ del timeout subprocess di nb1777-mcp)."""
+    """POST /app/api/ask {notebook_id, question, ripresa?} — domanda RAG su un notebook.
+
+    P10 (10/10/2026): un giro aspetta al massimo ASK_ATTESA_S. Se NotebookLM non ha
+    finito risponde {stato: "in_corso"} e la Mini App rilancia la stessa domanda con
+    `ripresa: true` (non fa un'altra riga d'audit). Pronta: {stato: "pronta", answer,
+    fonti, senza_citazioni?, nota?}, tenuta qui per 30 minuti: se il telefono era in
+    tasca quando è arrivata, riaprendo la Mini App la ritrova."""
     claims = _bearer_claims(request)
     if not claims:
         return _unauthorized()
@@ -300,16 +325,27 @@ async def api_ask(request: Request) -> Response:
     question = str(body.get("question", "")).strip()
     if not nb_id or not question:
         return JSONResponse({"error": "missing_fields"}, status_code=400)
-    audit({"event": "miniapp_ask", "user_id": claims.get("sub", ""), "notebook": nb_id})
+    chiave = (str(claims.get("sub", "")), nb_id, question)
+    pronta = _RISPOSTE.prendi(chiave)
+    if pronta is not None:
+        return JSONResponse(pronta)
+    if not body.get("ripresa"):
+        audit({"event": "miniapp_ask", "user_id": claims.get("sub", ""), "notebook": nb_id})
     try:
         texts = await call_tool(
             NB_SERVICE, "notebook_query",
-            # attesa_max al tetto: la Mini App aspetta 290 s, la risposta arriva intera
-            {"notebook_id": nb_id, "question": question, "attesa_max": 270}, timeout=290.0,
+            {"notebook_id": nb_id, "question": question, "attesa_max": ASK_ATTESA_S},
+            timeout=ASK_ATTESA_S + 25.0,
         )
     except MCPCallError as exc:
         return _mcp_error(exc)
-    return JSONResponse({"answer": extract_answer(texts[0]) if texts else ""})
+    blocchi = parse_json_blocks(texts)
+    payload = blocchi[0] if blocchi else {"answer": texts[0] if texts else ""}
+    if payload.get("stato") == "in_corso":
+        return JSONResponse(risposta_mini_app(payload, {}))
+    risposta = risposta_mini_app(payload, await _titoli_fonti(nb_id))
+    _RISPOSTE.metti(chiave, risposta)
+    return JSONResponse(risposta)
 
 
 async def api_archive_dbs(request: Request) -> Response:
@@ -354,7 +390,10 @@ async def api_archive_db_delete(request: Request) -> Response:
 
 
 async def api_archive_search(request: Request) -> Response:
-    """POST /app/api/archive/search {query, db?, limit?} — ricerca FTS5."""
+    """POST /app/api/archive/search {query, db?, limit?, modo?} — `modo` 'parole' (FTS5,
+    default) o 'senso' (search_ibrida, P10). Senza db cerca nel perimetro di default di
+    archive (primari e non dichiarati: mai i DB riservati, P1). Ritorna {results,
+    saltati?}; le righe per senso portano `origine` e, se il pezzo è noto, `pezzo`."""
     if not _bearer_claims(request):
         return _unauthorized()
     try:
@@ -365,18 +404,54 @@ async def api_archive_search(request: Request) -> Response:
     if not query:
         return JSONResponse({"error": "missing_query"}, status_code=400)
     db = str(body.get("db", "")).strip()
+    modo = "senso" if body.get("modo") == "senso" else "parole"
     try:
         limit = max(1, min(int(body.get("limit", 20)), 50))
     except (ValueError, TypeError):
         limit = 20
     try:
+        if modo == "senso":
+            # il primo giro dopo un riavvio carica il modello di embedding: decine di
+            # secondi, non i 30 della ricerca per parole
+            texts = await call_tool(
+                ARCHIVE_SERVICE, "search_ibrida",
+                {"query": query, "db_name": db, "limit": limit}, timeout=120.0,
+            )
+        else:
+            texts = await call_tool(
+                ARCHIVE_SERVICE, "search",
+                {"query": query, "db_name": db, "limit": limit}, timeout=30.0,
+            )
+    except MCPCallError as exc:
+        return _mcp_error(exc)
+    righe, saltati = righe_ricerca(parse_json_blocks(texts), modo)
+    out: dict = {"results": righe, "modo": modo}
+    if saltati:
+        out["saltati"] = saltati
+    return JSONResponse(out)
+
+
+async def api_archive_context(request: Request) -> Response:
+    """POST /app/api/archive/context {db, uuid} — i messaggi attorno a un risultato
+    (get_context, 3 prima e 3 dopo, ogni riga troncata a 2000 caratteri)."""
+    if not _bearer_claims(request):
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    uuid = str(body.get("uuid", "")).strip()
+    if not uuid:
+        return JSONResponse({"error": "missing_uuid"}, status_code=400)
+    try:
         texts = await call_tool(
-            ARCHIVE_SERVICE, "search",
-            {"query": query, "db_name": db, "limit": limit}, timeout=30.0,
+            ARCHIVE_SERVICE, "get_context",
+            {"uuid": uuid, "db_name": str(body.get("db", "")).strip(),
+             "before": 3, "after": 3, "max_chars": 2000}, timeout=30.0,
         )
     except MCPCallError as exc:
         return _mcp_error(exc)
-    return JSONResponse({"results": parse_json_blocks(texts)})
+    return JSONResponse({"righe": parse_json_blocks(texts)})
 
 
 async def api_secrets(request: Request) -> Response:
@@ -830,10 +905,28 @@ function paintPlugins(){
 }
 
 // ══ TAB: Notebook ══
+// P10 (10/10/2026): la domanda che si ritrova. La domanda in corso e l'ultima risposta
+// stanno in localStorage, solo su questo telefono: se la webview si sospende (telefono
+// in tasca) riaprendo si riprende da lì. Il gateway tiene la risposta pronta 30 minuti.
+var DOM_KEY='vps1777_domanda', RIS_KEY='vps1777_risposta';
+function mem(k, v){
+  try {
+    if (v===undefined) return JSON.parse(localStorage.getItem(k)||'null');
+    if (v===null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v));
+  } catch(e){ return null; }
+}
 function renderNotebook(){
   if (!TG || !TG.initData) return needTelegram();
-  view.innerHTML = '<div class="card"><h2>Notebook <button class="re" id="reNb">↻</button></h2>'+
+  var aperta=mem(DOM_KEY), ultima=mem(RIS_KEY), testa='';
+  if (aperta && aperta.nb) testa='<div class="card"><h2>Domanda in corso</h2>'+
+    '<div class="item tap" id="nbRip"><div class="pn">'+esc(aperta.nb.title)+'</div>'+
+    '<div class="pm">'+esc(aperta.q)+'</div></div></div>';
+  else if (ultima && ultima.nb) testa='<div class="card"><h2>Ultima risposta</h2>'+
+    '<div class="item tap" id="nbRip"><div class="pn">'+esc(ultima.nb.title)+'</div>'+
+    '<div class="pm">'+esc(ultima.q)+' · '+esc(new Date(ultima.ts).toLocaleString())+'</div></div></div>';
+  view.innerHTML = testa+'<div class="card"><h2>Notebook <button class="re" id="reNb">↻</button></h2>'+
     '<div id="nbList">'+spin('carico i notebook…')+'</div></div>';
+  if ($('nbRip')) $('nbRip').onclick=function(){ askView((aperta||ultima).nb); };
   $('reNb').onclick=function(){ S.notebooks=null; renderNotebook(); };
   if (S.notebooks) return paintNbs();
   api('/app/api/notebooks').then(function(d){ S.notebooks=d.notebooks||[]; paintNbs(); })
@@ -851,6 +944,49 @@ function paintNbs(){
     box.appendChild(el);
   });
 }
+function paintAnswer(d){
+  var box=$('ans'); if(!box) return;
+  var h='<div class="answer"></div>';
+  var sc=d.senza_citazioni;
+  if (sc && sc.paragrafi) h+='<div class="pm" style="margin-top:8px">⚠ '+esc(sc.paragrafi)+' paragrafi su '+
+    esc(sc.su_totale)+' senza citazioni: generati dal modello, non letti dalle fonti.</div>';
+  if ((d.fonti||[]).length){
+    h+='<div class="pm" style="margin-top:10px"><b>Fonti</b></div>';
+    d.fonti.forEach(function(f){
+      h+='<div class="item"><div class="pm">['+esc(f.n)+'] '+esc(f.titolo||'fonte')+'</div>'+
+        (f.anteprima?'<div style="font-size:13px;margin-top:4px">'+esc(f.anteprima)+'</div>':'')+'</div>';
+    });
+  }
+  box.innerHTML=h; box.firstChild.textContent=d.answer||'(risposta vuota)';
+}
+function sulNotebook(nb){ return S.tab==='notebook' && S.nb && S.nb.id===nb.id; }
+function chiedi(nb, q, t0, ripresa){
+  S.chiedendo=true;
+  mem(DOM_KEY, {nb:nb, q:q, t0:t0});
+  var tick=setInterval(function(){
+    var w=$('wait'); if (w && sulNotebook(nb)) w.innerHTML='<span class="spin"></span>NotebookLM… '+
+      Math.round((Date.now()-t0)/1000)+'s (può richiedere minuti)';
+  },1000);
+  var fine=function(){ clearInterval(tick); S.chiedendo=false; var g=$('go'); if(g) g.disabled=false; };
+  post('/app/api/ask', {notebook_id:nb.id, question:q, ripresa:!!ripresa}).then(function(d){
+    if (d.stato==='in_corso'){
+      clearInterval(tick);
+      setTimeout(function(){ chiedi(nb, q, t0, true); }, 1500);
+      return;
+    }
+    fine(); mem(DOM_KEY, null); mem(RIS_KEY, {nb:nb, q:q, r:d, ts:Date.now()});
+    if (sulNotebook(nb)){ var w=$('wait'); if(w) w.textContent=Math.round((Date.now()-t0)/1000)+'s'; paintAnswer(d); }
+    else toast('Risposta pronta: '+nb.title);
+  }).catch(function(e){
+    fine();
+    // un errore del tool chiude la domanda; la rete che cade no: riaprendo si riprende
+    if (e && e.data) mem(DOM_KEY, null);
+    if (!sulNotebook(nb)) return;
+    $('wait').textContent='';
+    $('ans').innerHTML='<div class="answer" style="border-color:var(--err)"></div>';
+    $('ans').firstChild.textContent='Errore: '+err(e);
+  });
+}
 function askView(nb){
   S.nb=nb;
   if (TG && TG.BackButton){ TG.BackButton.show(); TG.BackButton.onClick(backToNbs); }
@@ -862,23 +998,17 @@ function askView(nb){
     '<button class="b" id="go">Chiedi</button><span class="pm" id="wait"></span></div>'+
     '<div id="ans"></div></div>';
   $('bk').onclick=backToNbs;
+  var aperta=mem(DOM_KEY), ultima=mem(RIS_KEY);
+  if (aperta && aperta.nb && aperta.nb.id===nb.id){
+    $('q').value=aperta.q; $('go').disabled=true;
+    if (!S.chiedendo) chiedi(nb, aperta.q, aperta.t0||Date.now(), true);
+  } else if (ultima && ultima.nb && ultima.nb.id===nb.id){
+    $('q').value=ultima.q; paintAnswer(ultima.r||{});
+  }
   $('go').onclick=function(){
-    var q=$('q').value.trim(); if(!q) return;
-    var go=$('go'), w=$('wait'), t0=Date.now();
-    go.disabled=true; $('ans').innerHTML='';
-    var tick=setInterval(function(){
-      w.innerHTML='<span class="spin"></span>NotebookLM… '+Math.round((Date.now()-t0)/1000)+'s (può richiedere minuti)';
-    },1000);
-    post('/app/api/ask', {notebook_id:nb.id, question:q}).then(function(d){
-      clearInterval(tick); w.textContent=Math.round((Date.now()-t0)/1000)+'s';
-      go.disabled=false;
-      $('ans').innerHTML='<div class="answer"></div>';
-      $('ans').firstChild.textContent=d.answer||'(risposta vuota)';
-    }).catch(function(e){
-      clearInterval(tick); w.textContent=''; go.disabled=false;
-      $('ans').innerHTML='<div class="answer" style="border-color:var(--err)"></div>';
-      $('ans').firstChild.textContent='Errore: '+err(e);
-    });
+    var q=$('q').value.trim(); if(!q || S.chiedendo) return;
+    $('go').disabled=true; $('ans').innerHTML='';
+    chiedi(nb, q, Date.now(), false);
   };
 }
 function backToNbs(){
@@ -890,8 +1020,10 @@ function backToNbs(){
 function renderArchivio(){
   if (!TG || !TG.initData) return needTelegram();
   view.innerHTML = '<div class="card"><h2>Cerca nell\'archivio</h2>'+
-    '<div class="srow"><input type="text" id="aq" placeholder="parole chiave…">'+
-    '<select id="adb"><option value="">tutti</option></select></div>'+
+    '<div class="srow"><input type="text" id="aq" placeholder="parole chiave, o la domanda a voce…"></div>'+
+    '<div class="srow"><select id="amodo" style="max-width:none;flex:1">'+
+    '<option value="parole">per parole</option><option value="senso">per senso</option></select>'+
+    '<select id="adb" style="max-width:none;flex:1"><option value="">perimetro di default</option></select></div>'+
     '<button class="b" id="ago">Cerca</button>'+
     '<div id="ares" style="margin-top:10px"></div></div>'+
     '<div class="card"><h2>DB caricati <button class="re" id="reDbs">↻</button></h2>'+
@@ -948,21 +1080,58 @@ function confirmDeleteDb(name, rows){
   };
   if (TG && TG.showConfirm) TG.showConfirm(msg, go); else go(window.confirm(msg));
 }
+// P10: per parole (FTS5) o per senso (search_ibrida); tocco su «contesto» per i messaggi
+// attorno; «copia rif.» copia db·uuid·ts, il riferimento che si cita in una chat.
 function archSearch(){
   var q=$('aq').value.trim(); if(!q) return;
-  var box=$('ares'); box.innerHTML=spin('cerco…');
-  post('/app/api/archive/search', {query:q, db:$('adb').value, limit:30}).then(function(d){
+  var modo=$('amodo').value, box=$('ares');
+  box.innerHTML=spin(modo==='senso'?'cerco per senso… (la prima volta carica il modello)':'cerco…');
+  post('/app/api/archive/search', {query:q, db:$('adb').value, limit:30, modo:modo}).then(function(d){
     var rs=d.results||[];
-    if(!rs.length){ box.innerHTML='<div class="empty">Nessun risultato.</div>'; return; }
     box.innerHTML='';
+    (d.saltati||[]).forEach(function(s){
+      var n=document.createElement('div'); n.className='pm';
+      n.textContent='⚠ '+(s.db||'')+': '+(s.motivo||s.ramo||'saltato'); box.appendChild(n);
+    });
+    if(!rs.length){ box.innerHTML+='<div class="empty">Nessun risultato.</div>'; return; }
     rs.forEach(function(r){
       var el=document.createElement('div'); el.className='item';
       var snip=esc(r.snip||r.snippet||'').replace(/«/g,'<mark>').replace(/»/g,'</mark>');
+      var come=r.origine?' · '+esc(r.origine)+(r.pezzo!==undefined?' (pezzo '+esc(r.pezzo)+')':''):'';
       el.innerHTML='<div class="pm">'+esc(r.db||'')+(r.project?' · '+esc(r.project):'')+
-        (r.ts?' · '+esc(String(r.ts).slice(0,16)):'')+'</div>'+
-        '<div style="font-size:14px;margin-top:4px">'+snip+'</div>';
+        (r.ts?' · '+esc(String(r.ts).slice(0,16)):'')+come+'</div>'+
+        '<div style="font-size:14px;margin-top:4px">'+snip+'</div>'+
+        '<div style="display:flex;gap:8px;margin-top:8px">'+
+        '<button class="b sm ghost" data-a="ctx">contesto</button>'+
+        '<button class="b sm ghost" data-a="rif">copia rif.</button></div><div class="ctx"></div>';
+      el.querySelector('[data-a=ctx]').onclick=function(){ archContext(el, r); };
+      el.querySelector('[data-a=rif]').onclick=function(){
+        var rif=(r.db||'')+'·'+(r.uuid||'')+'·'+(r.ts||'');
+        if (navigator.clipboard && navigator.clipboard.writeText)
+          navigator.clipboard.writeText(rif).then(function(){ toast('Copiato ✓'); },
+            function(){ toast(rif); });
+        else toast(rif);
+      };
       box.appendChild(el);
     });
+  }).catch(function(e){ box.innerHTML='<div class="empty">'+esc(err(e))+'</div>'; });
+}
+function archContext(el, r){
+  var box=el.querySelector('.ctx');
+  if (box.innerHTML){ box.innerHTML=''; return; }
+  box.innerHTML=spin('carico il contesto…');
+  post('/app/api/archive/context', {db:r.db||'', uuid:r.uuid||''}).then(function(d){
+    box.innerHTML='';
+    (d.righe||[]).forEach(function(c){
+      var m=document.createElement('div'); m.className='answer';
+      if (c.is_match) m.style.borderColor='var(--accent)';
+      var testa=document.createElement('div'); testa.className='pm';
+      testa.textContent=(c.speaker?c.speaker+' · ':'')+String(c.ts||'').slice(0,16);
+      var corpo=document.createElement('div');
+      corpo.textContent=c.content||(c.tools?'(azioni) '+JSON.stringify(c.tools).slice(0,300):'');
+      m.appendChild(testa); m.appendChild(corpo); box.appendChild(m);
+    });
+    if (!box.innerHTML) box.innerHTML='<div class="empty">Nessun contesto.</div>';
   }).catch(function(e){ box.innerHTML='<div class="empty">'+esc(err(e))+'</div>'; });
 }
 
