@@ -20,6 +20,7 @@ import secrets as pysecrets
 import shutil
 import sqlite3
 import time
+from contextlib import AsyncExitStack
 from pathlib import Path
 
 from . import admin_core, archive_indexer, nlm_client
@@ -30,7 +31,8 @@ from urllib.parse import quote, quote_plus
 
 import httpx
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import (HTMLResponse, JSONResponse, RedirectResponse, Response,
+                                 StreamingResponse)
 
 from .audit import audit, audit_health, read_recent
 from .jwt_helpers import JWTError, issue, verify
@@ -526,29 +528,37 @@ async def nlm_artifact(request: Request) -> Response:
         return redirect
 
     name = request.path_params.get("name", "")
+    # S13 (05/10/2026): prima i pezzi finivano in una lista e poi in un unico `bytes`, cioè
+    # un video intero in RAM per ogni download. Ora lo stream da nb1777-mcp resta aperto
+    # finché il browser legge, e si chiude alla fine della risposta (o se si interrompe).
+    pila = AsyncExitStack()
     try:
-        async with nlm_client.artifact_stream(name) as (upstream, _client):
-            if upstream.status_code != 200:
-                audit({"event": "admin_nlm_artifact_err", "by": email,
-                       "name": name, "status": upstream.status_code})
-                return RedirectResponse(
-                    "/admin/nlm?msg=Artefatto+non+disponibile&kind=err", status_code=303)
-            audit({"event": "admin_nlm_artifact", "by": email, "name": name})
-            # Il body si consuma DENTRO il context manager: `aread()` qui sarebbe
-            # bufferare tutto in RAM, quindi si accumula in una risposta di streaming
-            # solo passando i chunk mentre lo stream è ancora aperto.
-            chunks = [c async for c in upstream.aiter_raw()]
+        upstream, _client = await pila.enter_async_context(nlm_client.artifact_stream(name))
     except httpx.RequestError as exc:
+        await pila.aclose()
         log.warning("admin nlm artifact: nb1777-mcp irraggiungibile (%s)", exc)
         return RedirectResponse(
             "/admin/nlm?msg=nb1777-mcp+non+raggiungibile&kind=err", status_code=303)
+    if upstream.status_code != 200:
+        await pila.aclose()
+        audit({"event": "admin_nlm_artifact_err", "by": email,
+               "name": name, "status": upstream.status_code})
+        return RedirectResponse(
+            "/admin/nlm?msg=Artefatto+non+disponibile&kind=err", status_code=303)
+    audit({"event": "admin_nlm_artifact", "by": email, "name": name})
+
+    async def _pezzi():
+        try:
+            async for pezzo in upstream.aiter_raw():
+                yield pezzo
+        finally:
+            await pila.aclose()
 
     safe = name.replace('"', "").replace("\\", "")
-    return Response(
-        b"".join(chunks),
-        media_type="application/octet-stream",
-        headers={"content-disposition": f'attachment; filename="{safe}"'},
-    )
+    headers = {"content-disposition": f'attachment; filename="{safe}"'}
+    if upstream.headers.get("content-length"):
+        headers["content-length"] = upstream.headers["content-length"]
+    return StreamingResponse(_pezzi(), media_type="application/octet-stream", headers=headers)
 
 
 async def nlm_view(request: Request) -> Response:
@@ -678,6 +688,35 @@ def _valid_archive_db(path: Path) -> bool:
         return False
 
 
+# S13 (05/10/2026): `index_file` è sincrono e su un archivio grosso dura minuti. Chiamato
+# dentro l'handler fermava l'event loop, cioè tutto il gateway: OAuth, proxy MCP, pagine.
+# Ora gira in un thread; il lock tiene un'indicizzazione alla volta, come prima di fatto.
+_INDICIZZA_LOCK = asyncio.Lock()
+
+
+def _copia_upload(fh, tmp: Path) -> None:
+    """L'upload nel file temporaneo, a blocchi da 1 MB e col tetto: in un thread (S13)."""
+    fh.seek(0)
+    written = 0
+    with open(tmp, "wb") as w:
+        while True:
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > archive_indexer.MAX_UPLOAD_BYTES:
+                raise ValueError(
+                    f"upload troppo grande (tetto "
+                    f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB). "
+                    f"Per archivi più grandi usa la CLI sulla VPS.")
+            w.write(chunk)
+
+
+async def _indicizza(path: str, db: str, project: str) -> int:
+    async with _INDICIZZA_LOCK:
+        return await asyncio.to_thread(archive_indexer.index_file, path, db, project=project)
+
+
 async def archive_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
@@ -796,21 +835,7 @@ async def archive_view(request: Request) -> Response:
                             f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
                             f"(il tetto di un upload). Libera spazio, oppure usa la CLI sulla "
                             f"VPS che scrive direttamente senza il file temporaneo.")
-                    fh = upload.file  # type: ignore[union-attr]
-                    fh.seek(0)
-                    written = 0
-                    with open(tmp, "wb") as w:
-                        while True:
-                            chunk = fh.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            written += len(chunk)
-                            if written > archive_indexer.MAX_UPLOAD_BYTES:
-                                raise ValueError(
-                                    f"upload troppo grande (tetto "
-                                    f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB). "
-                                    f"Per archivi più grandi usa la CLI sulla VPS.")
-                            w.write(chunk)
+                    await asyncio.to_thread(_copia_upload, upload.file, tmp)  # type: ignore[union-attr]
                     if suffix == ".db":
                         # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
                         if not _valid_archive_db(tmp):
@@ -820,7 +845,7 @@ async def archive_view(request: Request) -> Response:
                         verb = "caricato (drop-in)"
                     else:
                         # dispatch per estensione: .jsonl/.json → Claude Code; .zip → claude.ai; .md/.txt → testo
-                        n = archive_indexer.index_file(str(tmp), str(db_path), project=project)
+                        n = await _indicizza(str(tmp), str(db_path), project)
                         verb = "indicizzati"
                     audit({"event": "admin_archive_ingest", "by": email, "db": db_name,
                            "fmt": suffix, "file": nome_file, "rows": n})
