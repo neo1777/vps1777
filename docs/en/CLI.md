@@ -284,7 +284,7 @@ Cloudflare profile (up to 0.62.2 it showed up among the missing ones on every in
 ones on Telegram. The result also appears in `/admin/secrets` (from the file
 `onboarding/secrets_status.json`).
 
-The **NotebookLM session** row (since 0.73.1) gives the real age of the Google session: it
+The **NotebookLM session** row (since 0.74.0) gives the real age of the Google session: it
 asks nb1777-mcp, which reads the expiry of the SID cookie and moves it back by 400 days.
 Before, it was the date of the cookie file, which reset every time `nlm` rewrote it. It is
 "due for reload" when the probe (`docs/NB1777.md` §4) finds it expired; the 14-day threshold

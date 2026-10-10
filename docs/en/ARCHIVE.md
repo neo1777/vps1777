@@ -483,10 +483,10 @@ The `ruolo` (role) field makes it readable.
 | `primario` | the **current** source of that side: if you don't choose, it is the one that must answer |
 | `fotografia` | an **older** version of the same side, kept for history: search here when you care about how it *was* |
 | `riscontro` | not queried to **find** but to **verify**: intentional redundancy, twins re-ingested with a different indexer, probe DBs with a known-case-that-must-succeed |
-| `riservato` | personal material: out of technical tasks without an explicit request. Since 0.73.1 a search without `db_name` **skips** it; naming it queries it. It is a **declaration, not a lock**: whoever has access to the server reads it |
+| `riservato` | personal material: out of technical tasks without an explicit request. Since 0.74.0 a search without `db_name` **skips** it; naming it queries it. It is a **declaration, not a lock**: whoever has access to the server reads it |
 | `non dichiarato` | **nobody has said anything** about that DB. It doesn't mean "unimportant", and it must not be guessed from the name: it is the value you read when `set_ruolo` was never called (or when the declaration was withdrawn by passing `""`) |
 
-> **The role decides where to search (since 0.73.1, cure B of #278).** Without
+> **The role decides where to search (since 0.74.0, cure B of #278).** Without
 > `db_name`, `search`, `search_ibrida`, `count` and `check_term` look at the **primary**
 > and **undeclared** DBs: on an install where nobody declared anything, nothing
 > disappears. Snapshots and cross-checks reopen with the `ruoli` parameter

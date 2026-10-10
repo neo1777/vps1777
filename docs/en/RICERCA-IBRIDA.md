@@ -97,7 +97,7 @@ The gain is all on long texts: a Telegram message already fits whole in the snip
 passage costs tokens, about 270 per row at 200 words: ask for it when reading voice notes,
 meeting records or long chats, not for every search.
 
-**Since 0.73.1 the snippet of rows found by meaning comes from the chunk that matched**
+**Since 0.74.0 the snippet of rows found by meaning comes from the chunk that matched**
 (P4). Before, it was the start of the message, even when the chunk close to the question
 was thousands of characters further on. The index knows which chunk won: its rowid minus
 the register's `primo_chunk` gives the window, and the snippet (60 words, around the

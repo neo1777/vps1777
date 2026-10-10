@@ -91,7 +91,7 @@ Il guadagno sta tutto sui testi lunghi: un messaggio di Telegram entra già inte
 snippet. Il passaggio costa token, circa 270 per riga a 200 parole: si chiede quando
 si leggono vocali, verbali o chat lunghe, non per ogni ricerca.
 
-**Dalla 0.73.1 lo snippet delle righe trovate per senso viene dal pezzo che ha colpito**
+**Dalla 0.74.0 lo snippet delle righe trovate per senso viene dal pezzo che ha colpito**
 (P4). Prima era l'inizio del messaggio, anche quando il pezzo vicino alla domanda stava
 migliaia di caratteri più in là. L'indice sa quale pezzo ha vinto: il suo rowid meno il
 `primo_chunk` del registro dà la finestra, e lo snippet (60 parole, attorno ai termini

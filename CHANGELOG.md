@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.74.0] — 2026-10-10
+
+**Evoluzione degli MCP, ondata 1 chiusa: età vera della sessione, audit per tool, il ruolo decide dove si cerca, snippet dal pezzo, conferma sui delete, pagina Salute, quota.**
+
 ### Aggiunto
 - **La quota di Gemini Notebook: `usage_get` e il campo `quota` di `doctor`.** Quando nb1777
   smette di rispondere le cause comuni sono due e si curano in modo opposto: la sessione
