@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.77.0] — 2026-10-10
+
+**Caricare un file come fonte dal proprio dispositivo, con un link monouso.**
+
 ### Aggiunto
 - **Caricare un file come fonte dal proprio dispositivo, con un link monouso (P15, seconda
   metà).** `source_add_file` legge un path sul server: da claude.ai o dal telefono un file non
