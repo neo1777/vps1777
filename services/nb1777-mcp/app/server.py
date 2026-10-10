@@ -39,7 +39,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 
 from . import canonical, core, memoria, nlm_profile, sonda
 from . import conferma as _gettoni
-from . import link_firmati
+from . import caricamenti, link_firmati
 from .settings import get_settings
 
 log = logging.getLogger("nb1777-mcp.server")
@@ -98,6 +98,8 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     "source_add_drive": ("Aggiungi una fonte da Drive", _AGGIUNGE),
     "source_delete": ("Cancella una fonte", _CANCELLA),
     "source_get_content": ("Leggi il testo di una fonte", _LEGGE),
+    # apre una capacità (un link che aggiunge una fonte): non è sola lettura
+    "source_upload_link": ("Link per caricare un file", _AGGIUNGE),
     "source_rename": ("Rinomina una fonte", _RINOMINA),
     "notebook_query": ("Chiedi al notebook", _LEGGE),
     "notebook_query_esito": ("Ritira una risposta in corso", _LEGGE),
@@ -296,6 +298,58 @@ async def internal_nlm_link(request: "Request") -> "Response":
     return FileResponse(p, filename=p.name, media_type="application/octet-stream")
 
 
+@mcp.custom_route("/internal/nlm/carica", methods=["PUT", "POST"])
+async def internal_nlm_carica(request: "Request") -> "Response":
+    """Riceve un file da un link di caricamento monouso (P15) e lo aggiunge come fonte.
+
+    Il gateway passa `?t=<gettone>&nome=<nome del file>` e il corpo in streaming. L'ordine
+    conta: prima il segreto interno, l'auth di Google e il Content-Length dichiarato (un
+    rifiuto qui NON consuma il link: si può riprovare); poi si consuma il gettone, e solo
+    allora si legge il file, a pezzi, con un tetto. Il file temporaneo si cancella sempre."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    try:
+        _check_auth_or_raise()
+    except Exception as exc:                            # noqa: BLE001
+        return JSONResponse({"error": "auth", "reason": str(exc)}, status_code=503)
+    try:
+        dichiarati = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        dichiarati = 0
+    if dichiarati > caricamenti.TETTO_BYTE:
+        return JSONResponse({"error": "troppo_grande", "reason": (
+            f"il file supera {caricamenti.TETTO_BYTE // (1024 * 1024)} MB, il limite di "
+            "NotebookLM per una fonte")}, status_code=413)
+    esito = caricamenti.consuma(request.query_params.get("t", ""))
+    if isinstance(esito, str):
+        return JSONResponse({"error": "link_non_valido", "reason": esito}, status_code=403)
+    nb_id, titolo = esito
+    try:
+        nome = core.safe_artifact_name(request.query_params.get("nome") or "file")
+    except core.NLMError:
+        nome = "file"
+    dest = await asyncio.to_thread(core.artifacts_dir)
+    dest = dest / f"carica-{uuid.uuid4().hex[:8]}-{nome}"
+    try:
+        try:
+            n = await caricamenti.scrivi(request.stream(), dest)
+        except caricamenti.TroppoGrande as exc:
+            return JSONResponse({"error": "troppo_grande", "reason": str(exc)}, status_code=413)
+        except caricamenti.SenzaSpazio as exc:
+            return JSONResponse({"error": "senza_spazio", "reason": str(exc)}, status_code=507)
+        if n == 0:
+            return JSONResponse({"error": "vuoto", "reason": "il file è vuoto"}, status_code=400)
+        try:
+            sid = await asyncio.to_thread(core.source_add_file, nb_id, dest,
+                                          title=titolo or nome)
+        except core.NLMError as exc:
+            return JSONResponse({"error": "nlm", "reason": str(exc)[:400]}, status_code=502)
+        log.info("caricamento monouso: %s byte in %s → fonte %s", n, nb_id, sid)
+        return JSONResponse({"source_id": sid, "notebook_id": nb_id, "nome": nome, "bytes": n})
+    finally:
+        dest.unlink(missing_ok=True)
+
+
 @mcp.custom_route("/internal/nlm/profile", methods=["POST"])
 async def internal_nlm_profile(request: "Request") -> "JSONResponse":
     """Installa il profilo da un tar.gz (body raw). Un tar invalido non tocca quello buono."""
@@ -428,6 +482,21 @@ async def source_add_drive(notebook_id: str, document_id: str,
     """Collega un Google Drive document_id come fonte. doc_type: doc|slides|sheets|pdf"""
     return await _aio(core.source_add_drive, notebook_id, document_id,
                       doc_type=doc_type, wait=wait)
+
+
+@mcp.tool()
+async def source_upload_link(notebook_id: str, title: str = "") -> dict:
+    """Un link per CARICARE un file dal proprio dispositivo come fonte del notebook: da
+    claude.ai o dal telefono, dove `source_add_file` non arriva (legge un path sul server).
+    Vale 15 minuti e UNA volta sola; notebook e titolo li fissi qui (vuoto = il nome del
+    file). Si apre in un browser (pagina per scegliere il file) o con `curl -T <file> <url>`.
+    Massimo 200 MB, il limite di NotebookLM. Ritorna {url, scade_il, notebook, come}."""
+    nb = await _aio(core.nb_get, notebook_id)
+    t = caricamenti.apri(notebook_id, title)
+    return {**caricamenti.link(t, caricamenti.scade_di(t)),
+            "notebook": nb.get("title") if isinstance(nb, dict) else None,
+            "come": ("apri l'url in un browser e scegli il file, oppure: curl -T <file> "
+                     "'<url>'. Vale una volta sola, per 15 minuti.")}
 
 
 @mcp.tool()

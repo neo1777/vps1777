@@ -11,7 +11,7 @@ import hmac
 import re
 from pathlib import Path
 
-from . import admin, archive_indexer, miniapp, oauth, onboarding, proxy, scarica
+from . import admin, archive_indexer, carica, miniapp, oauth, onboarding, proxy, scarica
 from .audit import audit
 from .asgi_security import ip_is_internal
 from .settings import UPSTREAMS_SCARTATI, get_settings
@@ -268,6 +268,8 @@ routes = [
     # P15: link firmati di nb1777 per gli artefatti. Il gettone è l'autorizzazione e lo
     # verifica nb1777-mcp; deve stare PRIMA del catch-all del proxy.
     Route("/scarica/{name}", scarica.scarica, methods=["GET"]),
+    # P15: link di caricamento monouso (GET = la pagina, PUT/POST = il file grezzo)
+    Route("/carica/{t}", carica.carica, methods=["GET", "PUT", "POST"]),
 
     # Mini App (pagina + API dietro Bearer typ=miniapp)
     Route("/app", miniapp.app_index, methods=["GET"]),

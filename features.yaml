@@ -934,6 +934,15 @@ features:
     since: "0.76.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: chat_cronologia}
+  - id: nb.source_upload_link
+    nome: "nb1777-mcp · source_upload_link"
+    cosa: "Un link /carica/<gettone> del gateway per caricare un file dal proprio dispositivo come fonte:
+           15 minuti, una volta sola, massimo 200 MB (P15)."
+    dove: ["mcp-tool:nb1777-mcp/source_upload_link"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_upload_link}
   - id: nb.canonico
     nome: "nb1777-mcp · canonico"
     cosa: "MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la versione
