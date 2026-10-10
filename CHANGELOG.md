@@ -21,6 +21,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   registrano. Si vede in `/admin/audit`.
 
 ### Cambiato
+- **Le tre cancellazioni di nb1777 chiedono conferma in due tempi.** `nb_delete`,
+  `source_delete` e `studio_delete` alla prima chiamata non cancellano: dicono cosa
+  sparirebbe (`anteprima`) e danno un gettone valido 5 minuti, legato a quell'azione e a
+  quegli id; la seconda chiamata, col gettone, cancella. Restituiscono un dizionario
+  (`cancellato`, …) invece della stringa `"deleted"`. Una delle sette migliorie prese dai
+  gemelli (notebooklm-py).
+
 - **Lo snippet di una riga trovata per senso viene dal pezzo che ha colpito (P4).** Era
   l'inizio del messaggio anche quando il pezzo vicino alla domanda stava migliaia di
   caratteri più in là. `search_ibrida` prende la finestra del pezzo vinto (dal registro
