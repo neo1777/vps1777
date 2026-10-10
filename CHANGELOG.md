@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.76.1] — 2026-10-10
+
+**`research_import` dice quando entrano meno fonti di quelle chieste.**
+
 ### Corretto
 - **`research_import` dice quando entrano meno fonti di quelle chieste.** Nella prova dal vivo
   della 0.76.0 erano state chieste due fonti e Google ne ha importata una sola, senza errore (una
