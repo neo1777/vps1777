@@ -248,3 +248,16 @@ def test_i_tool_nuovi_hanno_le_annotazioni_giuste():
     assert a["note_delete"][1]["destructiveHint"] is True
     for nome in ("research_start", "research_import", "note_save"):
         assert a[nome][1]["readOnlyHint"] is False and a[nome][1]["destructiveHint"] is False, nome
+
+
+def test_research_import_dice_quando_ne_entrano_meno(monkeypatch):
+    """Misurato dal vivo il 10/10: chieste le fonti 0 e 1, Google ne ha importata una sola
+    (una pagina GitHub è rimasta fuori), senza errore. Il conteggio era giusto ma muto."""
+    monkeypatch.setattr(core, "_run_ricerca", lambda args, **k: {
+        "imported_count": 1, "imported_sources": [{"id": "s1", "title": "Keycloak"}]})
+    out = core.research_import(NB, "t-1", indices=[0, 1])
+    assert out["richieste"] == 2 and out["imported_count"] == 1
+    assert "1 di 2" in out["nota"]
+    monkeypatch.setattr(core, "_run_ricerca", lambda args, **k: {
+        "imported_count": 2, "imported_sources": [{"id": "s1"}, {"id": "s2"}]})
+    assert "nota" not in core.research_import(NB, "t-1", indices=[0, 1])
