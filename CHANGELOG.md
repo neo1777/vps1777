@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.75.0] — 2026-10-10
+
+**La Mini App cerca per senso e la domanda si ritrova; link firmati per scaricare gli artefatti da claude.ai.**
+
 ### Aggiunto
 - **Link firmati per scaricare gli artefatti (P15).** `studio_download` diceva «scaricalo
   dal pannello»: da claude.ai o dal telefono serviva la password di /admin. Ora ritorna
