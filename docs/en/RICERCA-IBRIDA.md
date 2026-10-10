@@ -97,6 +97,15 @@ The gain is all on long texts: a Telegram message already fits whole in the snip
 passage costs tokens, about 270 per row at 200 words: ask for it when reading voice notes,
 meeting records or long chats, not for every search.
 
+**Since 0.73.1 the snippet of rows found by meaning comes from the chunk that matched**
+(P4). Before, it was the start of the message, even when the chunk close to the question
+was thousands of characters further on. The index knows which chunk won: its rowid minus
+the register's `primo_chunk` gives the window, and the snippet (60 words, around the
+question's terms when there are any) is taken from there. The row says so in `pezzo` (0 =
+the first). It holds only if the text is still the indexed one: if the fingerprint does not
+match, the start stays. The chunk can fall in the actions (the index also reads `tools` and
+`attachments`), and then that is the snippet. Rows also found by FTS5 keep the FTS5 snippet.
+
 ### Reformulations, and what they are worth (0.64.0)
 
 This is the technique known as *RAG-Fusion*, or *multi-query retrieval*: the same question
