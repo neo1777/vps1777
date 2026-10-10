@@ -4,14 +4,6 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
-### Cambiato
-- **Le tre cancellazioni di nb1777 chiedono conferma in due tempi.** `nb_delete`,
-  `source_delete` e `studio_delete` alla prima chiamata non cancellano: dicono cosa
-  sparirebbe (`anteprima`) e danno un gettone valido 5 minuti, legato a quell'azione e a
-  quegli id; la seconda chiamata, col gettone, cancella. Restituiscono un dizionario
-  (`cancellato`, …) invece della stringa `"deleted"`. Una delle sette migliorie prese dai
-  gemelli (notebooklm-py).
-
 ### Aggiunto
 - **Audit per tool nel gateway (S11).** Ogni chiamata a un tool lascia una riga `proxy_tool`
   con nome, durata in millisecondi, esito e status, scritta a fine stream: `ok`,
@@ -21,6 +13,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   registrano. Si vede in `/admin/audit`.
 
 ### Cambiato
+- **Le tre cancellazioni di nb1777 chiedono conferma in due tempi.** `nb_delete`,
+  `source_delete` e `studio_delete` alla prima chiamata non cancellano: dicono cosa
+  sparirebbe (`anteprima`) e danno un gettone valido 5 minuti, legato a quell'azione e a
+  quegli id; la seconda chiamata, col gettone, cancella. Restituiscono un dizionario
+  (`cancellato`, …) invece della stringa `"deleted"`. Una delle sette migliorie prese dai
+  gemelli (notebooklm-py).
+
 - **`secrets-status` dà l'età vera della sessione NotebookLM (S9).** Era la data del file dei
   cookie, che si azzerava ogni volta che `nlm` lo riscriveva, senza un caricamento. Ora la
   chiede a nb1777-mcp (`python -m app.stato_sessione`, solo date): la nascita della sessione
