@@ -949,7 +949,7 @@ features:
            il registro dei lavori di P6, 3 alla volta e uno per notebook."
     dove: ["mcp-tool:nb1777-mcp/lavoro_esito", "services/nb1777-mcp/app/lavori.py"]
     status: active-default
-    since: "unreleased"
+    since: "0.78.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: lavoro_esito}
   - id: nb.canonico
