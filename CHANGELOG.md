@@ -15,6 +15,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   caddy:2.11). Una delle sette migliorie accettate da Neo il 05/10; il caricamento monouso
   da 15 minuti resta a parte (serve prima un endpoint di upload interno in streaming).
 
+- **La Mini App cerca per senso, apre il contesto e copia il riferimento (P10).** Nella scheda
+  Archivio si sceglie «per parole» (FTS5, come prima) o «per senso» (`search_ibrida`); senza
+  un DB scelto la ricerca resta nel perimetro di default (mai i DB riservati). Ogni risultato
+  ha «contesto» (i messaggi attorno, `get_context`) e «copia rif.» (`db·uuid·ts`). Una delle
+  sette migliorie accettate da Neo il 05/10.
+- **La domanda dalla Mini App si ritrova, e le fonti si vedono (P10).** Prima una domanda a
+  NotebookLM teneva aperta una richiesta fino a 290 s: col telefono in tasca la webview si
+  sospendeva e la risposta, arrivata al gateway, si perdeva. Ora ogni giro aspetta 20 s e la
+  pagina rilancia la stessa domanda (nb1777 si aggancia alla query in corso); il gateway
+  tiene la risposta pronta 30 minuti e la pagina ricorda domanda e risposta, quindi riaprendo
+  si riprende. La risposta porta le fonti (numero, titolo, anteprima) e dice quanti paragrafi
+  sono senza citazioni: `extract_answer` li buttava via.
+
 ## [0.74.1] — 2026-10-10
 
 **Due falsi allarmi della pagina Salute, trovati dalle prove dal vivo della 0.74.0.**

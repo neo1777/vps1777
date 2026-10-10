@@ -280,6 +280,7 @@ routes = [
     Route("/app/api/archive/dbs", miniapp.api_archive_dbs, methods=["GET"]),
     Route("/app/api/archive/db/delete", miniapp.api_archive_db_delete, methods=["POST"]),
     Route("/app/api/archive/search", miniapp.api_archive_search, methods=["POST"]),
+    Route("/app/api/archive/context", miniapp.api_archive_context, methods=["POST"]),
     Route("/app/api/secrets", miniapp.api_secrets, methods=["GET"]),
     Route("/app/api/audit", miniapp.api_audit, methods=["GET"]),
     Route("/app/api/update/state", miniapp.api_update_state, methods=["GET"]),

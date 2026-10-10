@@ -266,3 +266,80 @@ def summarize_secrets(status: dict) -> dict:
         "overdue_names": overdue,
         "checked_at": status.get("checked_at", ""),
     }
+
+
+# ───── P10 (10/10/2026): la domanda che si ritrova, l'archivio dal telefono ─────
+# Una domanda a NotebookLM dura da 20 s a qualche minuto, e la Mini App la teneva in una
+# sola richiesta da 290 s: col telefono in tasca la webview si sospende, la risposta
+# arriva al gateway e si perde. Ora la Mini App rilancia la stessa domanda finché non è
+# pronta (nb1777 si aggancia alla query in corso) e il gateway tiene le risposte già
+# arrivate per mezz'ora. Le fonti, che `extract_answer` buttava via, si vedono.
+
+RISPOSTA_TTL_S = 30 * 60   # come il query_id di nb1777: oltre, si rifà la domanda
+RISPOSTE_MAX = 20
+
+
+class RisposteRecenti:
+    """Le risposte già arrivate, per (utente, notebook, domanda), per `ttl_s` secondi.
+
+    In memoria e per processo: un riavvio del gateway le perde, e la Mini App rifà la
+    domanda. Il tetto `massimo` toglie la più vecchia."""
+
+    def __init__(self, ttl_s: float = RISPOSTA_TTL_S, massimo: int = RISPOSTE_MAX,
+                 ora=time.monotonic):
+        self._ttl, self._massimo, self._ora = ttl_s, massimo, ora
+        self._voci: dict[tuple, tuple[float, dict]] = {}
+
+    def _pota(self) -> None:
+        adesso = self._ora()
+        for k in [k for k, (t, _) in self._voci.items() if adesso - t > self._ttl]:
+            del self._voci[k]
+        while len(self._voci) > self._massimo:
+            del self._voci[min(self._voci, key=lambda k: self._voci[k][0])]
+
+    def prendi(self, chiave: tuple) -> dict | None:
+        self._pota()
+        voce = self._voci.get(chiave)
+        return voce[1] if voce else None
+
+    def metti(self, chiave: tuple, risposta: dict) -> None:
+        self._voci[chiave] = (self._ora(), risposta)
+        self._pota()
+
+
+def risposta_mini_app(payload: dict, titoli: dict[str, str]) -> dict:
+    """La risposta di notebook_query nella forma della Mini App.
+
+    {stato: "in_corso"} se NotebookLM non ha finito (il query_id resta sul server: la
+    Mini App rilancia la stessa domanda). Altrimenti {stato: "pronta", answer, fonti:
+    [{n, titolo, anteprima}], senza_citazioni?, nota?}: `titoli` = source_id → titolo,
+    vuoto se la lista delle fonti non si è letta."""
+    if payload.get("stato") == "in_corso":
+        return {"stato": "in_corso"}
+    answer = payload.get("answer")
+    out: dict = {"stato": "pronta",
+                 "answer": extract_answer(answer) if isinstance(answer, str) else "",
+                 "fonti": []}
+    for r in payload.get("references") or []:
+        if isinstance(r, dict):
+            out["fonti"].append({"n": r.get("citation_number"),
+                                 "titolo": titoli.get(str(r.get("source_id") or ""), ""),
+                                 "anteprima": str(r.get("anteprima") or "")})
+    sc = payload.get("senza_citazioni")
+    if isinstance(sc, dict):
+        out["senza_citazioni"] = {"paragrafi": sc.get("paragrafi"),
+                                  "su_totale": sc.get("su_totale")}
+        out["nota"] = str(payload.get("nota") or "")
+    return out
+
+
+def righe_ricerca(blocchi: list[dict], modo: str) -> tuple[list[dict], list[dict]]:
+    """(righe, saltati) dai blocchi di `search` (modo 'parole': ogni blocco è una riga) o
+    di `search_ibrida` (modo 'senso': un oggetto {righe, indici, parametri, saltati?})."""
+    if modo != "senso":
+        return blocchi, []
+    for b in blocchi:
+        if isinstance(b.get("righe"), list):
+            return ([r for r in b["righe"] if isinstance(r, dict)],
+                    [s for s in b.get("saltati") or [] if isinstance(s, dict)])
+    return [], []
