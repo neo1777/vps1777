@@ -183,6 +183,15 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   ogni apertura lascia una riga `link_scarica` nell'audit; ④ l'access-log di Caddy redige
   il gettone (`?t=***`, misurato con caddy:2.11). Chi riceve il link può scaricare quel
   file, e solo quello, finché scade: trattalo come un allegato, non come una pagina.
+- **Caricamento monouso** (`v0.77.0`, P15). `source_upload_link` apre `/carica/<gettone>`:
+  chi ha il link può aggiungere **un** file come fonte di **un** notebook, entro 15 minuti.
+  Il gettone è casuale (192 bit) e il registro sta solo nella memoria di nb1777-mcp, legato
+  al notebook e al titolo scelti da chi apre il link; si consuma prima di leggere il file, e
+  un secondo uso è rifiutato. Il file passa in streaming (il gateway non lo tiene), nb1777
+  lo scrive con un tetto di 200 MB e un margine di disco, e lo cancella dopo averlo
+  aggiunto. La rotta è limitata a 20 richieste ogni 5 minuti per IP, la pagina ha una CSP
+  `default-src 'none'` con nonce, ogni tentativo lascia `link_carica` nell'audit, e il
+  gettone nel path è redatto dall'access-log di Caddy (ramo di H79).
 
 ### Rete — l'IP client non è più falsificabile
 

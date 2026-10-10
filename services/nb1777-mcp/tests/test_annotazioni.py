@@ -17,7 +17,7 @@ def _tools():
 
 def test_ogni_tool_ha_titolo_e_annotazioni() -> None:
     tools = _tools()
-    assert len(tools) == 47   # 40 + i sette di P7 (ricerca, note, cronologia), 10/10
+    assert len(tools) == 48   # 40 + i sette di P7 + source_upload_link (P15), 10/10
     assert set(server.ANNOTAZIONI) == set(tools), "tabella e tool registrati divergono"
     for nome, t in tools.items():
         a = t.annotations

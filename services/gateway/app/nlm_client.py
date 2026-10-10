@@ -86,6 +86,19 @@ async def link_stream(name: str, gettone: str) -> AsyncIterator[tuple[httpx.Resp
         await client.aclose()
 
 
+async def carica(gettone: str, nome: str, corpo, lunghezza: str | None) -> httpx.Response:
+    """Passa a nb1777-mcp il file di un link di caricamento monouso (P15), in streaming:
+    il gateway non tiene il file in memoria né su disco. La risposta è piccola (JSON)."""
+    base, headers = _base_and_headers()
+    if lunghezza:
+        headers = {**headers, "content-length": lunghezza}
+    # 15 minuti: il trasferimento più l'aggiunta della fonte su NotebookLM
+    async with httpx.AsyncClient(timeout=httpx.Timeout(900.0, connect=5.0)) as client:
+        return await client.put(f"{base}/internal/nlm/carica",
+                                params={"t": gettone, "nome": nome}, headers=headers,
+                                content=corpo)
+
+
 @asynccontextmanager
 async def artifact_stream(name: str) -> AsyncIterator[tuple[httpx.Response, httpx.AsyncClient]]:
     """Apre lo STREAM di un artefatto. Il chiamante lo inoltra a valle senza bufferare.

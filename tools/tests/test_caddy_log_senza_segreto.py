@@ -74,5 +74,8 @@ def test_il_log_di_caddy_redige_il_gettone_dei_link_firmati(nome: str) -> None:
     fuori = pat.sub(sost, uri)
     assert firma not in fuori and "1791636435" not in fuori, fuori
     assert fuori == "/scarica/podcast.m4a?t=***"
+    # il gettone del caricamento monouso sta nel path (32 caratteri): lo prende il ramo di H79
+    gettone = "Qx7" + "pL0vZ" * 5 + "Ab1_"
+    assert pat.sub(sost, f"/carica/{gettone}?nome=a.pdf") == "/carica/***?nome=a.pdf"
     # un parametro che si chiama solo per caso come «t» in coda a un altro resta leggibile
     assert pat.sub(sost, "/admin/audit?event=link_scarica") == "/admin/audit?event=link_scarica"

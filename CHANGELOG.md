@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Caricare un file come fonte dal proprio dispositivo, con un link monouso (P15, seconda
+  metà).** `source_add_file` legge un path sul server: da claude.ai o dal telefono un file non
+  aveva strada, se non il pannello. Ora `source_upload_link(notebook_id, title)` (48 tool) dà un
+  link `/carica/<gettone>` valido 15 minuti e una volta sola: si apre in un browser (una pagina
+  per scegliere il file) o si usa con `curl -T`. Il gateway passa il file in streaming a
+  nb1777-mcp, che consuma il gettone prima di leggere, scrive con un tetto di 200 MB (il limite
+  di NotebookLM) e un margine di disco, aggiunge la fonte e cancella il file. La rotta ha un
+  tetto per IP, CSP con nonce, audit `link_carica`; il gettone è redatto dal log di Caddy.
+
 ## [0.76.1] — 2026-10-10
 
 **`research_import` dice quando entrano meno fonti di quelle chieste.**
