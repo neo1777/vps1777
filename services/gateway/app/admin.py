@@ -683,8 +683,9 @@ def _cella_indice(st: dict) -> str:
         righe.append(f"{st['dopo']} righe arrivate dopo")
     if st.get("generato"):
         righe.append(f"costruito il {html.escape(str(st['generato'])[:10])}")
-    if st.get("cura"):
-        righe.append(f'<span class="hint">{html.escape(st["cura"])}</span>')
+    for chiave in ("nota", "cura"):
+        if st.get(chiave):
+            righe.append(f'<span class="hint">{html.escape(st[chiave])}</span>')
     return "<br>".join(righe)
 
 

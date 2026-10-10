@@ -459,11 +459,13 @@ the ledger does not explain is an orphan the server would serve.
 ## The nightly update on the VPS (`vps1777 indice-notturno`)
 
 **The state of every index shows in `/admin/archive`** (since 0.79.0, P13), column «per senso»:
-*allineato* (aligned), *da aggiornare* (the DB changed after the index: how many rows arrived
-after, and the command `vps1777 indice-notturno --db <name>`), *nessun indice* (the first build is
+*allineato* (aligned), *da aggiornare* (rows arrived after the last build: how many, and the
+command `vps1777 indice-notturno --db <name>`), *nessun indice* (the first build is
 done on the PC: § «Turning on search by meaning»), *senza registro* (an old index to rebuild on
 the PC; the timer refuses it). The rows «arrived after» are those beyond the last `msg_rowid` of the
-registry: not all of them will end up in the index, since rows that are too short stay out.
+registry: not all of them will end up in the index, since rows that are too short stay out. A DB
+changed only in its metadata (role, description) stays *allineato*, with a note: the file date alone
+is not enough (0.79.1).
 
 Since 0.57.0, after an ingest, the index can update itself, on the VPS, at night. The
 `vps1777-indice-notturno.timer` timer (03:30, with a random delay up to 30') runs

@@ -1493,7 +1493,7 @@ def stato_indice(db_path: Union[str, Path], *, cache: bool = True) -> dict:
         if hit is not None and hit[0] == chiave:
             return dict(hit[1])
     out: dict = {"stato": "allineato", "messaggi": None, "dopo": None, "generato": None,
-                 "impronta": None, "cura": ""}
+                 "impronta": None, "cura": "", "nota": ""}
     try:
         cv = sqlite3.connect(f"file:{vec}?mode=ro", uri=True)
         try:
@@ -1520,6 +1520,10 @@ def stato_indice(db_path: Union[str, Path], *, cache: bool = True) -> dict:
     if out["stato"] == "senza_registro":
         out["cura"] = ("indice vecchio, senza il registro che verifica i risultati: va "
                        "ricostruito sul PC (il timer lo rifiuta)")
+    elif chiave[0] > chiave[1] and not out["dopo"]:
+        # misurato l'11/10: un DB cambia anche per i metadati (ruolo, descrizione) senza
+        # messaggi nuovi. La data del file da sola diceva «da aggiornare» a vuoto.
+        out["nota"] = "il DB è cambiato dopo l'indice, ma solo nei metadati: nessuna riga nuova"
     elif chiave[0] > chiave[1]:
         out["stato"] = "da_aggiornare"
         out["cura"] = (f"lo aggiorna il timer notturno, o a mano: vps1777 indice-notturno "

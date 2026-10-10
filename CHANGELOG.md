@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Lo stato dell'indice per senso guarda le righe nuove, non la data del file.** Dal vivo, subito
+  dopo la 0.79.0, tre DB risultavano «da aggiornare» con zero righe arrivate dopo l'indice: il
+  file era cambiato per una scrittura di metadati (ruolo, descrizione). Ora «da aggiornare» vuol
+  dire righe nuove; un DB toccato solo nei metadati resta «allineato», con una nota.
+
 ## [0.79.0] — 2026-10-11
 
 **`/admin/archive` dice com'è l'indice per senso di ogni DB.**
