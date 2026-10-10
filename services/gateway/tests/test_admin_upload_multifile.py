@@ -53,9 +53,14 @@ def test_ogni_file_passa_dalle_guardie_e_pulisce_il_suo_temporaneo():
     del primo, non prima del quinto."""
     i_for = CODICE.index("for upload in uploads:")
     i_disk = CODICE.index("shutil.disk_usage(")
-    i_open = CODICE.index('open(tmp, "wb")')
-    i_index = CODICE.index("archive_indexer.index_file(")
+    # S13: scrittura e indicizzazione girano in un thread; nel ciclo ci sono le chiamate
+    i_open = CODICE.index("asyncio.to_thread(_copia_upload")
+    i_index = CODICE.index("await _indicizza(")
     assert i_for < i_disk < i_open < i_index
+    copia = CODICE[CODICE.index("def _copia_upload("):CODICE.index("async def _indicizza(")]
+    assert 'open(tmp, "wb")' in copia and "MAX_UPLOAD_BYTES" in copia, \
+        "il tetto dell'upload deve restare dentro la copia"
+    assert "archive_indexer.index_file" in CODICE[CODICE.index("async def _indicizza("):]
     # il finally per-file: il primo `tmp.unlink` dopo il for sta più dentro del for
     blocco = CODICE[i_for:]
     riga_for = next(r for r in CODICE.splitlines() if "for upload in uploads:" in r)
