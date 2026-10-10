@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Ricerca approfondita, note e cronologia della chat in nb1777 (P7): sette tool nuovi, 47 in
+  tutto.** `research_start`, `research_status` e `research_import` sono la «Discover» di Gemini
+  Notebook: trovano fonti nuove sul web o su Drive (fast ~30 s, deep ~5 min) e le aggiungono
+  solo quando si sceglie. Separati perché da claude.ai una chiamata oltre ~30 s cade:
+  `research_status` legge una volta e si richiama, e nei primi secondi dopo l'avvio spiega il
+  `no_research` di Google (misurato dal vivo il 10/10). `nlm research` della 0.12 stampa solo
+  testo: la ricerca passa dal livello `services.research` di nlm, in un sottoprocesso con
+  timeout (`app/ricerca_nlm.py`). `note_list`, `note_save` (crea o modifica) e `note_delete` (in
+  due tempi, come le altre cancellazioni) lavorano sulle note del notebook; `chat_cronologia`
+  legge le sessioni di chat e le loro trascrizioni. Un contract-test fissa l'help di
+  `nlm note`/`nlm chats` e le firme di `services.research` su cui si appoggiano. Una delle sette
+  migliorie accettate da Neo il 05/10.
+
 ## [0.75.0] — 2026-10-10
 
 **La Mini App cerca per senso e la domanda si ritrova; link firmati per scaricare gli artefatti da claude.ai.**

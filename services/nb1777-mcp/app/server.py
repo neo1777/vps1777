@@ -120,6 +120,13 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     "studio_download": ("Scarica un artefatto", _AGGIUNGE),
     "studio_export_to_docs": ("Esporta in Google Docs", _AGGIUNGE),
     "studio_export_to_sheets": ("Esporta in Google Sheets", _AGGIUNGE),
+    "research_start": ("Avvia una ricerca di fonti", _AGGIUNGE),
+    "research_status": ("Stato di una ricerca", _LEGGE),
+    "research_import": ("Importa le fonti trovate", _AGGIUNGE),
+    "note_list": ("Elenca le note", _LEGGE),
+    "note_save": ("Scrivi una nota", _AGGIUNGE),
+    "note_delete": ("Cancella una nota", _CANCELLA),
+    "chat_cronologia": ("Cronologia della chat", _LEGGE),
     "doctor": ("Diagnostica", _LEGGE),
     "usage_get": ("La quota di Gemini Notebook", _LEGGE),
     "canonico": ("Il canonico della memoria", {"readOnlyHint": True, "openWorldHint": False}),
@@ -564,6 +571,92 @@ async def notebook_query_esito(query_id: str, attesa_max: float = 25.0) -> dict:
             _QUERY_IN_CORSO.pop(query_id, None)
             raise
     return await _esito("notebook_query_esito", _corpo())
+
+
+# ============================================================
+# RICERCA, NOTE, CRONOLOGIA (P7, 10/10/2026)
+# ============================================================
+
+@mcp.tool()
+async def research_start(notebook_id: str, query: str, source: str = "web",
+                         mode: str = "fast") -> dict:
+    """Avvia una ricerca di fonti NUOVE su `query` (la «Discover» di Gemini Notebook). Non
+    aggiunge niente al notebook: trova. source: web|drive; mode: fast (~30 s, ~10 fonti) o
+    deep (~5 min, ~40 fonti e un report, solo web). Poi research_status (a ogni chiamata
+    una lettura), poi research_import per aggiungere le fonti scelte. Ritorna {task_id, …}."""
+    return await _aio(core.research_start, notebook_id, query, source=source, mode=mode)
+
+
+@mcp.tool()
+async def research_status(notebook_id: str, task_id: str = "", verbose: bool = False) -> dict:
+    """Stato di una ricerca: {status, task_id, sources_found, sources: [{index, title, url,
+    tipo, cited}], report?, nota}. Una lettura sola, non aspetta: richiamalo finché status
+    non è 'completed'. Subito dopo research_start può dire 'no_research' per qualche
+    secondo (Google non mostra ancora il compito): la `nota` lo dice. Il report (deep) è
+    troncato a 1500 caratteri, verbose=True lo dà intero con le descrizioni delle fonti."""
+    return await _aio(core.research_status, notebook_id, task_id, verbose=verbose)
+
+
+@mcp.tool()
+async def research_import(notebook_id: str, task_id: str,
+                          indices: Optional[list[int]] = None,
+                          cited_only: bool = False) -> dict:
+    """Aggiunge al notebook le fonti trovate da una ricerca completata: tutte, quelle di
+    `indices` (gli `index` di research_status), o con cited_only=True solo quelle citate
+    dal report. Ritorna {imported_count, imported_sources, message}."""
+    return await _aio(core.research_import, notebook_id, task_id, indices=indices,
+                      cited_only=cited_only)
+
+
+@mcp.tool()
+async def note_list(notebook_id: str, verbose: bool = False) -> list[dict]:
+    """Le note scritte nel notebook (non le fonti): [{id, title, preview}]; verbose=True
+    aggiunge il testo intero (`content`)."""
+    return await _aio(core.note_list, notebook_id, verbose=verbose)
+
+
+@mcp.tool()
+async def note_save(notebook_id: str, content: str = "", title: str = "",
+                    note_id: str = "") -> dict:
+    """Scrive una nota nel notebook. Senza note_id la crea (serve content); con note_id la
+    modifica (cambia content e/o title, quelli lasciati vuoti restano come sono). Ritorna
+    {note_id, creata}."""
+    if note_id:
+        await _aio(core.note_update, notebook_id, note_id, content=content or None,
+                   title=title or None)
+        return {"note_id": note_id, "creata": False}
+    if not content:
+        raise ValueError("note_save senza note_id crea una nota: serve content")
+    return {"note_id": await _aio(core.note_create, notebook_id, content, title=title),
+            "creata": True}
+
+
+@mcp.tool()
+async def note_delete(notebook_id: str, note_id: str, conferma: str = "") -> dict:
+    """Cancella una nota in modo permanente. Due tempi, come le altre cancellazioni: senza
+    `conferma` NON cancella e restituisce `anteprima` e un gettone valido 5 minuti;
+    richiamalo con gli stessi id e `conferma=<gettone>`. Ritorna {cancellato, …}."""
+    if not conferma:
+        note = await _aio(core.note_list, notebook_id, verbose=True)
+        nota = next((n for n in note if n.get("id") == note_id), None)
+        if nota is None:
+            raise ValueError(f"nessuna nota {note_id!r} in questo notebook (vedi note_list)")
+        return _anteprima("note_delete", (notebook_id, note_id), {
+            "notebook_id": notebook_id, "note_id": note_id, "title": nota.get("title"),
+            "preview": str(nota.get("preview") or nota.get("content") or "")[:200]})
+    _conferma_o_errore(conferma, "note_delete", notebook_id, note_id)
+    await _aio(core.note_delete, notebook_id, note_id)
+    return {"cancellato": True, "notebook_id": notebook_id, "note_id": note_id}
+
+
+@mcp.tool()
+async def chat_cronologia(notebook_id: str, conversation_id: str = "",
+                          max_chars: int = 0) -> dict:
+    """La cronologia della chat del notebook (le domande fatte a Gemini Notebook, anche da
+    altri client). Senza conversation_id: {sessions: [{conversation_id, turn_count,
+    preview, is_active}]}. Con l'id: {transcript: [{turn, query, answer}]}; max_chars (0 =
+    intero) tronca ogni testo dichiarandolo."""
+    return await _aio(core.chat_cronologia, notebook_id, conversation_id, max_chars=max_chars)
 
 
 # ============================================================

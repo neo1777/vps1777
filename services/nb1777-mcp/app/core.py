@@ -35,6 +35,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -1139,6 +1140,150 @@ def studio_create_all_9(nb_id: str, *,
 # ============================================================
 # self-check / doctor
 # ============================================================
+
+# ============================================================
+# P7 (10/10/2026): ricerca approfondita, note, cronologia della chat
+# ============================================================
+# Le forme vengono dalla prova dal vivo del 10/10 su un notebook di prova (poi cancellato).
+
+RICERCA_FONTI = ("web", "drive")
+RICERCA_MODI = ("fast", "deep")
+_REPORT_COMPATTO = 1500
+_RADICE_SERVIZIO = Path(__file__).resolve().parents[1]
+
+
+def _run_ricerca(args: list[str], *, timeout: float) -> dict:
+    """Lancia `python -m app.ricerca_nlm` (il livello services di nlm, che dà JSON) come
+    `_run` lancia `nlm`: stesso timeout, stessa classificazione dell'auth scaduta."""
+    cmd = [sys.executable, "-m", "app.ricerca_nlm", *args]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           cwd=str(_RADICE_SERVIZIO))
+    except subprocess.TimeoutExpired as e:
+        raise NLMError(f"timeout {timeout}s sulla ricerca ({args[0]})") from e
+    if p.returncode != 0:
+        msg = (p.stderr or "").strip() or (p.stdout or "").strip()
+        if classifica_errore(msg) == "auth_scaduta":
+            raise NLMAuthError(MSG_AUTH_SCADUTA)
+        raise NLMError(f"ricerca {args[0]}: {msg[-400:]}")
+    try:
+        out = json.loads((p.stdout or "").strip() or "{}")
+    except json.JSONDecodeError as e:
+        raise NLMError(f"ricerca {args[0]}: JSON illeggibile ({e})") from e
+    return out if isinstance(out, dict) else {"risultato": out}
+
+
+def research_start(nb_id: str, query: str, *, source: str = "web", mode: str = "fast") -> dict:
+    """Avvia una ricerca di fonti nuove (web o Drive). Non tocca il notebook: trova."""
+    if source not in RICERCA_FONTI:
+        raise NLMError(f"source {source!r}: vale {' o '.join(RICERCA_FONTI)}")
+    if mode not in RICERCA_MODI:
+        raise NLMError(f"mode {mode!r}: vale fast (~30 s, ~10 fonti) o deep (~5 min, ~40 fonti)")
+    if mode == "deep" and source != "web":
+        raise NLMError("la ricerca deep cerca solo sul web: usa source='web' o mode='fast'")
+    return _run_ricerca(["start", nb_id, query, "--source", source, "--mode", mode], timeout=120)
+
+
+def research_status(nb_id: str, task_id: str = "", *, verbose: bool = False) -> dict:
+    """Lo stato di una ricerca, con le fonti trovate in forma compatta."""
+    d = _run_ricerca(["status", nb_id] + (["--task-id", task_id] if task_id else []), timeout=90)
+    out: dict = {"status": d.get("status"), "task_id": d.get("task_id") or task_id or None,
+                 "sources_found": d.get("sources_found", 0), "sources": []}
+    for f in d.get("sources") or []:
+        if isinstance(f, dict) and "index" in f:
+            voce = {"index": f.get("index"), "title": f.get("title"), "url": f.get("url"),
+                    "tipo": f.get("result_type_name"), "cited": bool(f.get("cited"))}
+            if verbose:
+                voce["description"] = f.get("description")
+            out["sources"].append(voce)
+    report = str(d.get("report") or "")
+    if report:
+        out["report"] = report if verbose or len(report) <= _REPORT_COMPATTO else (
+            report[:_REPORT_COMPATTO] + "…[troncato: verbose=True per il report intero]")
+    stato = out["status"]
+    if stato == "no_research" and task_id:
+        # misurato il 10/10: il primo controllo subito dopo l'avvio dice no_research
+        out["nota"] = ("Google non mostra ancora il compito appena avviato: riprova fra "
+                       "10-20 secondi. Non vuol dire che la ricerca non ci sia.")
+    elif stato == "in_progress":
+        out["nota"] = "ancora in corso (fast ~30 s, deep ~5 min): richiama research_status"
+    elif stato == "completed":
+        out["nota"] = ("le fonti NON sono ancora nel notebook: research_import(notebook_id, "
+                       "task_id, indices=[…]) le aggiunge; cited_only=True solo quelle citate "
+                       "dal report (ricerca deep)")
+    return out
+
+
+def research_import(nb_id: str, task_id: str, *, indices: Optional[list[int]] = None,
+                    cited_only: bool = False) -> dict:
+    """Aggiunge al notebook le fonti trovate da una ricerca completata."""
+    args = ["import", nb_id, task_id]
+    if cited_only:
+        args.append("--cited-only")
+    elif indices:
+        args += ["--indices", ",".join(str(int(i)) for i in indices)]
+    d = _run_ricerca(args, timeout=330)
+    return {"imported_count": d.get("imported_count", 0),
+            "imported_sources": d.get("imported_sources") or [],
+            "message": d.get("message")}
+
+
+def note_list(nb_id: str, *, verbose: bool = False) -> list[dict]:
+    """Le note di un notebook: {id, title, preview}; con verbose anche `content`."""
+    d = _run_json(["note", "list", nb_id])
+    note = d.get("notes", []) if isinstance(d, dict) else list(d)
+    if verbose:
+        return note
+    return [{"id": n.get("id"), "title": n.get("title"),
+             "preview": str(n.get("preview") or n.get("content") or "")[:200]}
+            for n in note if isinstance(n, dict)]
+
+
+def note_create(nb_id: str, content: str, title: str = "") -> str:
+    """Crea una nota e ritorna il suo id (che `nlm note create` dice solo nel testo)."""
+    args = ["note", "create", nb_id, "-c", content]
+    if title:
+        args += ["-t", title]
+    p = _run(args, timeout=60)
+    nid = _extract_uuid(p.stdout or "")
+    if not nid:
+        raise NLMError("nota creata ma senza id nell'uscita di nlm: controlla con note_list")
+    return nid
+
+
+def note_update(nb_id: str, note_id: str, *, content: Optional[str] = None,
+                title: Optional[str] = None) -> None:
+    if content is None and title is None:
+        raise NLMError("note_update: serve content, title o tutti e due")
+    args = ["note", "update", nb_id, note_id]
+    if content is not None:
+        args += ["-c", content]
+    if title is not None:
+        args += ["-t", title]
+    _run(args, timeout=60)
+
+
+def note_delete(nb_id: str, note_id: str) -> None:
+    _run(["note", "delete", nb_id, note_id, "-y"], timeout=60)
+
+
+def _tronca(testo: object, max_chars: int) -> object:
+    if not max_chars or not isinstance(testo, str) or len(testo) <= max_chars:
+        return testo
+    return testo[:max_chars] + f"…[troncato: {len(testo) - max_chars} caratteri in più]"
+
+
+def chat_cronologia(nb_id: str, conversation_id: str = "", *, max_chars: int = 0) -> dict:
+    """Senza conversation_id: le sessioni di chat del notebook. Con l'id: la trascrizione,
+    domanda e risposta per turno (`max_chars` tronca ogni testo, dichiarandolo)."""
+    if not conversation_id:
+        return _run_json(["chats", "list", nb_id], timeout=90)
+    d = _run_json(["chats", "get", nb_id, conversation_id], timeout=90)
+    if max_chars and isinstance(d, dict):
+        d["transcript"] = [{k: _tronca(v, max_chars) for k, v in t.items()}
+                           for t in d.get("transcript") or [] if isinstance(t, dict)]
+    return d
+
 
 def usage_get() -> dict:
     """La quota di Gemini Notebook: {windows: [{window, percent_used, percent_remaining,
