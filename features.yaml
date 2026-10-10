@@ -869,6 +869,15 @@ features:
     status: active-default
     verify:
       mcp_tool: {service: nb1777-mcp, name: doctor}
+  - id: nb.usage_get
+    nome: "nb1777-mcp · usage_get"
+    cosa: "La quota di Gemini Notebook (`nlm usage`): le due finestre, quanto resta e quando si
+           azzerano. Distingue «quota finita» da «sessione scaduta». Anche nel campo `quota` di doctor."
+    dove: ["mcp-tool:nb1777-mcp/usage_get"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: usage_get}
   - id: nb.canonico
     nome: "nb1777-mcp · canonico"
     cosa: "MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la versione

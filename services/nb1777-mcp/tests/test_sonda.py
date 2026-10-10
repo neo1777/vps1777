@@ -95,7 +95,10 @@ def test_il_registro_tiene_solo_l_esito_e_resta_corto(monkeypatch, tmp_path) -> 
         sonda.sonda_una_volta()
     righe = (tmp_path / "sonda-nlm.jsonl").read_text().splitlines()
     assert len(righe) == 5
-    assert set(json.loads(righe[-1])) == {"quando", "esito"}
+    ultima = json.loads(righe[-1])
+    # dal 05/10 anche la quota usata, un numero: nessun contenuto entra nel registro
+    assert set(ultima) <= {"quando", "esito", "quota_usata"}
+    assert isinstance(ultima.get("quota_usata", 0.0), (int, float))
     assert sonda.ultimo()["esito"] == "ok"
 
 

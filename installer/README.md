@@ -76,7 +76,7 @@ Se nessuna release esiste ancora, l'engine ripiega da solo sulla build locale.
 - Su [claude.ai](https://claude.ai) → Settings → Integrations → **Add**, incolla
   gli URL connector (devono essere **HTTPS** — il Funnel li serve così) e fai
   login con email + password admin.
-- **`archive` espone 15 tool** (ricerca, lettura delle conversazioni, schede di sessione e stirpi — elenco in [docs/ARCHIVE.md](../docs/ARCHIVE.md)); **`nb1777` ne espone 39** — aggiungi entrambi i connector se li vuoi tutti. *(Sono i `@mcp.tool()` dei due `server.py`, e `tools/fatti-nei-doc.py` li riconta a ogni PR: qui c'è stato scritto 2 e 35, poi 38, numeri di versioni precedenti.)*
+- **`archive` espone 15 tool** (ricerca, lettura delle conversazioni, schede di sessione e stirpi — elenco in [docs/ARCHIVE.md](../docs/ARCHIVE.md)); **`nb1777` ne espone 40** — aggiungi entrambi i connector se li vuoi tutti. *(Sono i `@mcp.tool()` dei due `server.py`, e `tools/fatti-nei-doc.py` li riconta a ogni PR: qui c'è stato scritto 2 e 35, poi 38, numeri di versioni precedenti.)*
 - I connector **persistono** ai restart del gateway (registrazioni DCR salvate su disco): li aggiungi una volta sola.
 
 ## Sicurezza

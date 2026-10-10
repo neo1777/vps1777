@@ -1140,6 +1140,15 @@ def studio_create_all_9(nb_id: str, *,
 # self-check / doctor
 # ============================================================
 
+def usage_get() -> dict:
+    """La quota di Gemini Notebook: {windows: [{window, percent_used, percent_remaining,
+    resets_at}], tier}. Due finestre, una breve che scorre e una settimanale (`nlm usage`,
+    c'è già nella 0.12). Serve a distinguere «quota finita» da «sessione scaduta» quando
+    nb1777 non risponde (05/10/2026, una delle sette migliorie accettate da Neo)."""
+    data = _run_json(["usage"])
+    return data if isinstance(data, dict) else {"windows": data, "tier": None}
+
+
 def doctor() -> dict:
     """Diagnostica viva: versione vps1777 + nlm + lista NB visibili.
 
