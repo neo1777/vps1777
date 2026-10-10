@@ -435,6 +435,13 @@ servirebbe.
 
 ## L'aggiornamento notturno sulla VPS (`vps1777 indice-notturno`)
 
+**Lo stato di ogni indice si vede in `/admin/archive`** (dalla 0.79.0, P13), colonna «per senso»:
+*allineato*, *da aggiornare* (il DB è cambiato dopo l'indice: quante righe sono arrivate dopo, e il
+comando `vps1777 indice-notturno --db <nome>`), *nessun indice* (la prima costruzione si fa sul PC:
+§ «Attivare la ricerca per senso»), *senza registro* (un indice vecchio da ricostruire sul PC, il
+timer lo rifiuta). Le righe «arrivate dopo» sono quelle oltre l'ultimo `msg_rowid` del registro:
+non tutte finiranno nell'indice, perché le troppo corte restano fuori.
+
 Dalla 0.57.0, dopo un ingest, l'indice si può aggiornare da solo, sulla VPS, di notte.
 Il timer `vps1777-indice-notturno.timer` (03:30, con un ritardo casuale fino a 30')
 lancia `vps1777 indice-notturno`, che:
