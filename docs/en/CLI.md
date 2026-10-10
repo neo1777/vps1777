@@ -49,6 +49,13 @@ before asking GitHub it also does the maintenance and the watches that live on i
   Notifications go out on the transition, once, and again when the thing recovers.
 - **It writes the state**: `onboarding/update_status.json` (the admin card and the Mini
   App read it) and `last_check` in `var/state.json`.
+- **It writes the health** (since 0.74.0): `onboarding/salute.json`, read by
+  `/admin/salute`. One row per item, with a state (`ok`, `attenzione`, `guasto`,
+  `non_misurato`) and the date of the measurement: the five watches, the Google session
+  (nb1777's latest probe) and each container's memory (peak and OOM kills from the cgroup,
+  `memory.peak` and `memory.events`, and the ceiling if there is one). The page marks a row
+  measured more than 30 hours earlier as "old", whatever state it says: a stopped timer must
+  not leave a green behind.
 
 With GitHub unreachable it still exits 0: the error ends up in `update_status.json`, not
 in a notification.

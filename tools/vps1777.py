@@ -2663,6 +2663,112 @@ def _sorveglia_disco(repo: Path, st: dict, notifica: bool) -> None:
                                   f"({libero_gb:.1f} GB).")
 
 
+# ─────────────────────────────────────────── P11: la pagina Salute (05/10/2026)
+# Le sorveglianze qui sopra vivevano in `var/state.json` e arrivavano solo come
+# messaggi Telegram quando cambiavano: lo stato non si vedeva da nessuna parte (dossier
+# sull'evoluzione degli MCP, §5). Ora `check` scrive `onboarding/salute.json`, una riga
+# per voce con stato e data della MISURA (non del file): `/admin/salute` la legge e
+# marca le righe vecchie. Stati: ok · attenzione · guasto · non_misurato.
+MEMORIA_ATTENZIONE_PCT = 90
+
+
+def memoria_container(repo: Path) -> list[dict] | None:
+    """Picco di memoria e OOM kill di ogni container del progetto, dal cgroup v2
+    (`memory.peak`, `memory.events`). Il picco dice quanto ci si è avvicinati al
+    tetto dall'avvio del container; un `docker stats` una volta al giorno no. None se
+    docker o il cgroup non si leggono."""
+    try:
+        res = run(["docker", "ps", "--filter", "label=com.docker.compose.project=vps1777",
+                   "--format", "{{.ID}} {{.Names}}"], check=False, capture=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0:
+        return None
+    out: list[dict] = []
+    for riga in (res.stdout or "").splitlines():
+        try:
+            cid, nome = riga.split(None, 1)
+            pieno = run(["docker", "inspect", "-f", "{{.Id}}", cid], check=False,
+                        capture=True, timeout=30).stdout.strip()
+        except (OSError, subprocess.SubprocessError, ValueError):
+            continue
+        cg = Path(f"/sys/fs/cgroup/system.slice/docker-{pieno}.scope")
+        try:
+            picco = int((cg / "memory.peak").read_text().strip())
+            tetto_txt = (cg / "memory.max").read_text().strip()
+            eventi = dict(r.split() for r in (cg / "memory.events").read_text().splitlines())
+        except (OSError, ValueError):
+            continue
+        out.append({"nome": nome.strip(), "picco_mb": picco // (1024 * 1024),
+                    "tetto_mb": None if tetto_txt == "max" else int(tetto_txt) // (1024 * 1024),
+                    "oom_kill": int(eventi.get("oom_kill", 0))})
+    return out or None
+
+
+def _riga(voce: str, stato: str, dettaglio: str, misurato_il: str | None) -> dict:
+    return {"voce": voce, "stato": stato, "dettaglio": dettaglio, "misurato_il": misurato_il}
+
+
+def scrivi_salute(repo: Path, st: dict) -> None:
+    ora = now_iso()
+    righe: list[dict] = []
+    try:
+        rag = json.loads((onboarding_dir(repo) / "raggiungibilita.json").read_text())
+        righe.append(_riga("raggiungibilità", "ok" if rag.get("ok") else "guasto",
+                           str(rag.get("dettaglio") or ""), rag.get("checked_at")))
+    except (OSError, ValueError):
+        righe.append(_riga("raggiungibilità", "non_misurato", "nessuna misura scritta", None))
+    eta = eta_backup_notturno(repo)
+    righe.append(_riga("backup notturno", "non_misurato", "nessuna copia trovata", ora)
+                 if eta is None else _riga(
+                     "backup notturno", "guasto" if eta > BACKUP_NOTTURNO_SOGLIA_GIORNI else "ok",
+                     f"ultima copia {eta} giorni fa (soglia {BACKUP_NOTTURNO_SOGLIA_GIORNI})", ora))
+    eta = eta_backup_archivio(repo)
+    soglia = ARCHIVIO_OGNI_GIORNI_ATTESI * 2
+    righe.append(_riga("backup archivio", "non_misurato", "nessuna copia d'archivio ancora", ora)
+                 if eta is None else _riga(
+                     "backup archivio", "attenzione" if eta > soglia else "ok",
+                     f"ultima copia {eta} giorni fa (soglia {soglia})", ora))
+    if st.get("copertura_cieca_da") or st.get("copertura_scesa_da"):
+        da = st.get("copertura_cieca_da") or st.get("copertura_scesa_da")
+        righe.append(_riga("copertura dei backup", "attenzione",
+                           f"scesa o non leggibile dal {da}", ora))
+    else:
+        righe.append(_riga("copertura dei backup", "ok",
+                           f"massimo visto: {st.get('copertura_max', '?')} giorni", ora))
+    try:
+        u = shutil.disk_usage(str(repo))
+        pct = int(u.free * 100 / u.total) if u.total else 0
+        righe.append(_riga("disco", "guasto" if pct < DISCO_LIBERO_MIN_PCT else "ok",
+                           f"libero {pct}% ({u.free / 1024 ** 3:.1f} GB)", ora))
+    except OSError as exc:
+        righe.append(_riga("disco", "non_misurato", str(exc), None))
+    sess = _sessione_da_nb1777(repo)
+    sonda = (sess or {}).get("sonda") or {}
+    if not sonda:
+        righe.append(_riga("sessione Google", "non_misurato",
+                           "la sonda di nb1777 non ha un esito (o il servizio non risponde)", None))
+    else:
+        esito = sonda.get("esito")
+        righe.append(_riga(
+            "sessione Google", {"ok": "ok", "auth_scaduta": "guasto"}.get(esito, "attenzione"),
+            f"sonda: {esito}; sessione nata il {str((sess or {}).get('nata_il') or '?')[:10]}",
+            sonda.get("quando")))
+    mem = memoria_container(repo)
+    if not mem:
+        righe.append(_riga("memoria dei container", "non_misurato",
+                           "cgroup o docker non leggibili", None))
+    for m in mem or []:
+        tetto = m.get("tetto_mb")
+        vicino = bool(tetto) and m["picco_mb"] * 100 >= tetto * MEMORIA_ATTENZIONE_PCT
+        stato = "attenzione" if (m.get("oom_kill") or vicino) else "ok"
+        dettaglio = (f"picco {m['picco_mb']} MB" + (f" su {tetto} MB" if tetto else ", senza tetto")
+                     + (f"; OOM kill: {m['oom_kill']}" if m.get("oom_kill") else ""))
+        righe.append(_riga(f"memoria {m['nome']}", stato, dettaglio, ora))
+    _scrivi_telemetria(repo, "salute.json", json.dumps(
+        {"checked_at": ora, "righe": righe}, indent=2, ensure_ascii=False) + "\n")
+
+
 def cmd_check(repo: Path, args) -> int:
     st = state_load(repo)
     cur = current_version(repo)
@@ -2691,6 +2797,12 @@ def cmd_check(repo: Path, args) -> int:
     # W5: il notturno fermo (la copertura non lo vede) e lo spazio su disco.
     _sorveglia_backup_notturno(repo, st, bool(getattr(args, "notify", False)))
     _sorveglia_disco(repo, st, bool(getattr(args, "notify", False)))
+    # P11: la pagina Salute. Dopo le sorveglianze (legge ciò che hanno scritto) e prima
+    # del fetch, per la stessa ragione loro. Telemetria: non fa mai cadere il check.
+    try:
+        scrivi_salute(repo, st)
+    except Exception as exc:                              # noqa: BLE001
+        warn(f"salute.json non scritto: {exc}")
     try:
         rel = latest_release(repo)
     except (urllib.error.URLError, OSError, json.JSONDecodeError) as exc:

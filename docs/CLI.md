@@ -48,6 +48,12 @@ giro.
   partono alla transizione, una volta, e di nuovo quando la cosa rientra.
 - **Scrive lo stato**: `onboarding/update_status.json` (la card admin e la Mini App lo
   leggono) e `last_check` in `var/state.json`.
+- **Scrive la salute** (dalla 0.74.0): `onboarding/salute.json`, letto da `/admin/salute`.
+  Una riga per voce, con stato (`ok`, `attenzione`, `guasto`, `non_misurato`) e la data
+  della misura: le cinque sorveglianze, la sessione Google (l'ultima sonda di nb1777) e la
+  memoria di ogni container (picco e OOM kill dal cgroup, `memory.peak` e
+  `memory.events`, e il tetto se c'è). La pagina segna «vecchia» una riga misurata più di
+  30 ore prima, qualunque stato dica: un timer fermo non deve lasciare un verde.
 
 Con GitHub irraggiungibile esce comunque 0: l'errore finisce in `update_status.json`,
 non in una notifica.
