@@ -38,6 +38,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 
 from . import canonical, core, memoria, nlm_profile, sonda
+from . import conferma as _gettoni
 from .settings import get_settings
 
 log = logging.getLogger("nb1777-mcp.server")
@@ -310,11 +311,37 @@ async def nb_rename(notebook_id: str, new_title: str) -> str:
     return "ok"
 
 
+
+def _anteprima(azione: str, ids: tuple[str, ...], cosa: dict) -> dict:
+    """La prima delle due chiamate di una cancellazione: cosa sparirebbe, e il gettone."""
+    return {"cancellato": False, "anteprima": cosa,
+            "conferma": _gettoni.gettone(azione, *ids), "scade_tra_s": _gettoni.DURATA_S,
+            "come": f"richiama {azione} con gli stessi id e conferma=<il gettone>"}
+
+
+def _conferma_o_errore(valore: str, azione: str, *ids: str) -> None:
+    errore = _gettoni.verifica(valore, azione, *ids)
+    if errore:
+        raise ValueError(errore)
+
+
 @mcp.tool()
-async def nb_delete(notebook_id: str) -> str:
-    """Cancella un notebook in modo permanente."""
+async def nb_delete(notebook_id: str, conferma: str = "") -> dict:
+    """Cancella un notebook in modo permanente, con tutte le sue fonti e gli artefatti.
+
+    Due tempi (05/10/2026): senza `conferma` NON cancella, restituisce `anteprima` (cosa
+    sparirebbe) e un gettone `conferma` valido 5 minuti; richiamalo con gli stessi id e
+    `conferma=<gettone>` per cancellare. Prima di confermare, mostra l'anteprima a chi te
+    l'ha chiesto. Ritorna {cancellato, anteprima?, conferma?, scade_tra_s?}."""
+    if not conferma:
+        nb = await _aio(core.nb_get, notebook_id)
+        sorgenti = nb.get("sources")
+        return _anteprima("nb_delete", (notebook_id,), {
+            "notebook_id": notebook_id, "title": nb.get("title"),
+            "fonti": len(sorgenti) if isinstance(sorgenti, list) else nb.get("source_count")})
+    _conferma_o_errore(conferma, "nb_delete", notebook_id)
     await _aio(core.nb_delete, notebook_id)
-    return "deleted"
+    return {"cancellato": True, "notebook_id": notebook_id}
 
 
 @mcp.tool()
@@ -373,10 +400,22 @@ async def source_add_drive(notebook_id: str, document_id: str,
 
 
 @mcp.tool()
-async def source_delete(notebook_id: str, source_id: str) -> str:
-    """Elimina una fonte (irreversibile)."""
+async def source_delete(notebook_id: str, source_id: str, conferma: str = "") -> dict:
+    """Elimina una fonte (irreversibile).
+
+    Due tempi (05/10/2026): senza `conferma` NON cancella, restituisce `anteprima` (cosa
+    sparirebbe) e un gettone `conferma` valido 5 minuti; richiamalo con gli stessi id e
+    `conferma=<gettone>` per cancellare. Prima di confermare, mostra l'anteprima a chi te
+    l'ha chiesto. Ritorna {cancellato, anteprima?, conferma?, scade_tra_s?}."""
+    if not conferma:
+        fonti = await _aio(core.source_list, notebook_id)
+        voce = next((f for f in fonti if core._source_id_of(f) == source_id), None)
+        if voce is None:
+            raise ValueError(f"la fonte {source_id} non è nel notebook {notebook_id}")
+        return _anteprima("source_delete", (notebook_id, source_id), voce)
+    _conferma_o_errore(conferma, "source_delete", notebook_id, source_id)
     await _aio(core.source_delete, notebook_id, source_id)
-    return "deleted"
+    return {"cancellato": True, "source_id": source_id}
 
 
 @mcp.tool()
@@ -663,10 +702,22 @@ async def studio_wait(notebook_id: str, artifact_id: str,
 
 
 @mcp.tool()
-async def studio_delete(notebook_id: str, artifact_id: str) -> str:
-    """Cancella un artefatto studio (irreversibile)."""
+async def studio_delete(notebook_id: str, artifact_id: str, conferma: str = "") -> dict:
+    """Cancella un artefatto studio (irreversibile).
+
+    Due tempi (05/10/2026): senza `conferma` NON cancella, restituisce `anteprima` (cosa
+    sparirebbe) e un gettone `conferma` valido 5 minuti; richiamalo con gli stessi id e
+    `conferma=<gettone>` per cancellare. Prima di confermare, mostra l'anteprima a chi te
+    l'ha chiesto. Ritorna {cancellato, anteprima?, conferma?, scade_tra_s?}."""
+    if not conferma:
+        arts = await _aio(core.studio_list, notebook_id)
+        voce = next((a for a in arts if a.get("id") == artifact_id), None)
+        if voce is None:
+            raise ValueError(f"l'artefatto {artifact_id} non è nel notebook {notebook_id}")
+        return _anteprima("studio_delete", (notebook_id, artifact_id), voce)
+    _conferma_o_errore(conferma, "studio_delete", notebook_id, artifact_id)
     await _aio(core.studio_delete, notebook_id, artifact_id)
-    return "deleted"
+    return {"cancellato": True, "artifact_id": artifact_id}
 
 
 @mcp.tool()
