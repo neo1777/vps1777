@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **`research_import` dice quando entrano meno fonti di quelle chieste.** Nella prova dal vivo
+  della 0.76.0 erano state chieste due fonti e Google ne ha importata una sola, senza errore (una
+  pagina GitHub è rimasta fuori). `imported_count` era giusto ma nessuno lo faceva notare: ora con
+  `indices` la risposta porta `richieste` e, se ne mancano, una `nota`.
+
 ## [0.76.0] — 2026-10-10
 
 **nb1777 cerca fonti nuove, scrive note e legge la cronologia della chat: 47 tool.**

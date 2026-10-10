@@ -1223,9 +1223,18 @@ def research_import(nb_id: str, task_id: str, *, indices: Optional[list[int]] = 
     elif indices:
         args += ["--indices", ",".join(str(int(i)) for i in indices)]
     d = _run_ricerca(args, timeout=330)
-    return {"imported_count": d.get("imported_count", 0),
-            "imported_sources": d.get("imported_sources") or [],
-            "message": d.get("message")}
+    out = {"imported_count": d.get("imported_count", 0),
+           "imported_sources": d.get("imported_sources") or [],
+           "message": d.get("message")}
+    if indices and not cited_only:
+        # misurato il 10/10: chieste 2, Google ne importa 1 (una pagina GitHub resta fuori)
+        # senza errore. Il conteggio era giusto ma muto: si dice.
+        out["richieste"] = len(indices)
+        if out["imported_count"] < len(indices):
+            out["nota"] = (f"importate {out['imported_count']} di {len(indices)}: Google ne ha "
+                           "lasciate fuori alcune senza errore (succede con pagine che non sa "
+                           "leggere). Confronta imported_sources con le fonti chieste.")
+    return out
 
 
 def note_list(nb_id: str, *, verbose: bool = False) -> list[dict]:
