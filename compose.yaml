@@ -285,6 +285,9 @@ services:
       # `source_add_file` accettava qualunque percorso, compresi i cookie in /var/lib/nlm.
       # Artefatti (anche i file di ingest) e /tmp (il file temporaneo di source_add_text).
       NOTEBOOKLM_ALLOWED_FILE_DIRS: "/var/lib/nlm-artifacts:/tmp"
+      # P15 (10/10/2026): l'indirizzo pubblico del gateway, per i link firmati che
+      # `studio_download` ritorna (`/scarica/<nome>?t=`). Vuoto = link relativo.
+      GATEWAY_PUBLIC_BASE: ${PUBLIC_BASE:-}
       # Ogni quante ore la sonda viva prova la sessione Google (docs/NB1777.md §4); 0 = spenta.
       NB1777_SONDA_ORE: ${NB1777_SONDA_ORE:-4}
       FASTMCP_STATELESS_HTTP: "true"

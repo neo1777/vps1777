@@ -39,6 +39,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 
 from . import canonical, core, memoria, nlm_profile, sonda
 from . import conferma as _gettoni
+from . import link_firmati
 from .settings import get_settings
 
 log = logging.getLogger("nb1777-mcp.server")
@@ -263,6 +264,28 @@ async def internal_nlm_artifact(request: "Request") -> "Response":
         # 404 e non 400: dall'esterno «nome non ammesso» e «non c'è» non devono
         # distinguersi, o l'errore diventa un oracolo su cosa esiste nel container.
         return JSONResponse({"error": "not_found", "reason": str(exc)}, status_code=404)
+    return FileResponse(p, filename=p.name, media_type="application/octet-stream")
+
+
+@mcp.custom_route("/internal/nlm/link", methods=["GET"])
+async def internal_nlm_link(request: "Request") -> "Response":
+    """Serve un artefatto a chi ha un link firmato (`?name=&t=`), P15.
+
+    La rotta pubblica del gateway (`/scarica/<nome>?t=`) non conosce la chiave: inoltra
+    qui nome e gettone, e qui si verifica. Il gettone si controlla PRIMA del file: senza
+    un gettone valido un nome vero e uno inventato danno la stessa risposta, o l'endpoint
+    diventerebbe un oracolo su cosa c'è nel container."""
+    if not _internal_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    name = request.query_params.get("name", "")
+    motivo = link_firmati.verifica(request.query_params.get("t", ""), name)
+    if motivo:
+        return JSONResponse({"error": "link_non_valido", "reason": motivo}, status_code=403)
+    try:
+        p = await asyncio.to_thread(core.artifact_path, name)
+    except core.NLMError:
+        return JSONResponse({"error": "not_found",
+                             "reason": "il file non c'è più sul server"}, status_code=404)
     return FileResponse(p, filename=p.name, media_type="application/octet-stream")
 
 
@@ -740,8 +763,10 @@ async def studio_download(kind: str, notebook_id: str, output_path: str,
     """Scarica un artefatto. kind: audio|video|slides|mindmap|infographic|data_table|report|quiz|flashcards.
 
     `output_path` vale come NOME del file, non come destinazione: il file nasce sul
-    filesystem del SERVER, nella directory degli artefatti. Ritorna dove prenderlo
-    (`download_url`, dal pannello admin del gateway), non un path da aprire in locale.
+    filesystem del SERVER, nella directory degli artefatti. Ritorna dove prenderlo, non un
+    path da aprire in locale: `link.url` è un link firmato del gateway, apribile da un
+    browser senza password per 30 minuti (scade a `link.scade_il`, e un riavvio di nb1777
+    lo invalida); `download_url` è la stessa cosa dal pannello admin.
     """
     p = await _aio(core.studio_download, kind, notebook_id, output_path,
                    artifact_id=artifact_id)
@@ -753,8 +778,9 @@ async def studio_download(kind: str, notebook_id: str, output_path: str,
         "name": p.name,
         "bytes": p.stat().st_size,
         "download_url": f"/admin/nlm/artifact/{p.name}",
-        "nota": "Il file è sul server. Scaricalo dal pannello: /admin/nlm (sezione "
-                "artefatti). Il path del container non è raggiungibile da qui.",
+        "link": link_firmati.link(p.name),
+        "nota": "Il file è sul server: aprilo da `link.url` (30 minuti, senza password) o "
+                "dal pannello /admin/nlm. Il path del container non è raggiungibile da qui.",
     }
 
 

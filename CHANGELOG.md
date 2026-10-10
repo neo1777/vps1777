@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Link firmati per scaricare gli artefatti (P15).** `studio_download` diceva «scaricalo
+  dal pannello»: da claude.ai o dal telefono serviva la password di /admin. Ora ritorna
+  anche `link` = `{url, scade_il}`, un link pubblico del gateway (`/scarica/<nome>?t=`)
+  riusabile per 30 minuti. La chiave della firma nasce col processo di nb1777-mcp e il
+  gateway non la conosce: inoltra nome e gettone a `/internal/nlm/link`, che verifica prima
+  di guardare il file. La rotta ha un tetto per IP, risponde `no-store`/`no-referrer`,
+  scrive `link_scarica` nell'audit, e l'access-log di Caddy redige il gettone (provato con
+  caddy:2.11). Una delle sette migliorie accettate da Neo il 05/10; il caricamento monouso
+  da 15 minuti resta a parte (serve prima un endpoint di upload interno in streaming).
+
 ## [0.74.1] — 2026-10-10
 
 **Due falsi allarmi della pagina Salute, trovati dalle prove dal vivo della 0.74.0.**

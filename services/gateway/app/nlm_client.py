@@ -67,6 +67,26 @@ async def artifacts() -> list[dict] | None:
 
 
 @asynccontextmanager
+async def link_stream(name: str, gettone: str) -> AsyncIterator[tuple[httpx.Response, httpx.AsyncClient]]:
+    """Come `artifact_stream`, per un link firmato (P15): il gateway non conosce la chiave
+    dei link, passa nome e gettone a nb1777-mcp, che verifica prima di aprire il file."""
+    base, headers = _base_and_headers()
+    client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=5.0))
+    try:
+        req = client.build_request("GET", f"{base}/internal/nlm/link",
+                                   params={"name": name, "t": gettone}, headers=headers)
+        resp = await client.send(req, stream=True)
+    except httpx.RequestError:
+        await client.aclose()
+        raise
+    try:
+        yield resp, client
+    finally:
+        await resp.aclose()
+        await client.aclose()
+
+
+@asynccontextmanager
 async def artifact_stream(name: str) -> AsyncIterator[tuple[httpx.Response, httpx.AsyncClient]]:
     """Apre lo STREAM di un artefatto. Il chiamante lo inoltra a valle senza bufferare.
 

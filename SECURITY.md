@@ -171,6 +171,18 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   (no open-redirect); CORS senza wildcard (fail-closed, default `https://claude.ai`,
   non `*`); header `Permissions-Policy` + `Cross-Origin-Opener-Policy`; il login
   fallito logga un booleano `email_known`, non l'email.
+- **Link firmati per gli artefatti** (`v0.75.0`, P15). `studio_download` ritorna anche
+  un link pubblico `/scarica/<nome>?t=<scade>.<firma>`, riusabile per **30 minuti**, che
+  apre il file senza la password del pannello. È una capacità che può trapelare, quindi
+  è stretta da quattro lati: ① la firma è un HMAC su nome e scadenza con una chiave
+  **nata col processo di nb1777-mcp** e che il gateway **non conosce** (un
+  `gateway_secret` trapelato non basta a forgiarla; un riavvio di nb1777 invalida i link
+  aperti); ② nb1777 verifica il gettone **prima** di guardare se il file esiste, quindi
+  senza un gettone valido un nome vero e uno inventato danno lo stesso 403; ③ la rotta
+  è limitata a 30 richieste ogni 5 minuti per IP, risponde `no-store` e `no-referrer`, e
+  ogni apertura lascia una riga `link_scarica` nell'audit; ④ l'access-log di Caddy redige
+  il gettone (`?t=***`, misurato con caddy:2.11). Chi riceve il link può scaricare quel
+  file, e solo quello, finché scade: trattalo come un allegato, non come una pagina.
 
 ### Rete — l'IP client non è più falsificabile
 
