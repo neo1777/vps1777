@@ -30,6 +30,7 @@ def test_usage_get_chiama_nlm_usage_in_json(monkeypatch):
 
 
 def test_doctor_porta_la_quota_e_non_cade_se_manca(monkeypatch):
+    monkeypatch.setattr(server, "_check_auth_or_raise", lambda: None)   # in CI non c'è un profilo
     monkeypatch.setattr(core, "doctor", lambda: {"version": "nlm 0.12.0"})
     monkeypatch.setattr(core, "usage_get", lambda: _USO)
     assert asyncio.run(server.doctor())["quota"] == _USO
