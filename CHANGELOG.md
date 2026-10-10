@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **La pagina Salute non scambia più la cache dei file per un pericolo.** Quattro minuti
+  dopo l'update alla 0.74.0 segnava «attenzione» su archive-mcp: picco 2048 MB su 2048.
+  Il picco del cgroup comprende la cache dei DB, che il kernel libera da sé; la memoria
+  propria del processo era 70 MB e gli OOM kill zero. Ora la riga giudica la memoria propria
+  (`anon` di `memory.stat`, oltre il 90% del tetto) e gli OOM kill, e mostra il picco solo
+  come informazione.
+- **La copertura dei backup non è più «scesa» quando sta sopra la promessa.** La pagina
+  Salute (e lo stato del check) la davano scesa dal 22/09: 9 giorni distinti contro un
+  massimo storico di 11. Ma la ritenzione tiene 7 giorni più 4 settimanali, e i settimanali
+  delle due settimane più recenti cadono dentro i 7 giorni: i giorni distinti oscillano fra
+  9 e 11 col giorno della settimana. Ora la discesa si misura fino ai 7 giorni promessi:
+  da 11 a 3 resta un guasto, da 11 a 9 no.
+
 ## [0.74.0] — 2026-10-10
 
 **Evoluzione degli MCP, ondata 1 chiusa: età vera della sessione, audit per tool, il ruolo decide dove si cerca, snippet dal pezzo, conferma sui delete, pagina Salute, quota.**

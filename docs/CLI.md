@@ -41,7 +41,7 @@ giro.
   fuori (la porta sull'host, poi l'indirizzo pubblico — il Funnel o `PUBLIC_BASE`;
   l'esito va anche in `onboarding/raggiungibilita.json`,
   letto da `/admin/setup`), la **copertura** dei backup (giorni distinti, avvisa se scende
-  sotto il massimo già raggiunto) l'**età** dell'ultimo backup archivio (avvisa oltre i
+  sotto il massimo già raggiunto, contato fino ai 7 giorni promessi) l'**età** dell'ultimo backup archivio (avvisa oltre i
   14 giorni; se l'archivio non esiste ancora, tace), l'**età** dell'ultimo backup core
   (avvisa oltre i 2 giorni: un notturno fermo non pota più, quindi la copertura da sola non
   lo vede) e lo **spazio libero** sul disco dei backup (avvisa sotto il 10%). Le notifiche
@@ -51,8 +51,10 @@ giro.
 - **Scrive la salute** (dalla 0.74.0): `onboarding/salute.json`, letto da `/admin/salute`.
   Una riga per voce, con stato (`ok`, `attenzione`, `guasto`, `non_misurato`) e la data
   della misura: le cinque sorveglianze, la sessione Google (l'ultima sonda di nb1777) e la
-  memoria di ogni container (picco e OOM kill dal cgroup, `memory.peak` e
-  `memory.events`, e il tetto se c'è). La pagina segna «vecchia» una riga misurata più di
+  memoria di ogni container (dal cgroup: memoria propria da `memory.stat`, picco da
+  `memory.peak`, OOM kill da `memory.events`, e il tetto se c'è). Dalla 0.74.1
+  «attenzione» lo dicono la memoria propria oltre il 90% del tetto o un OOM kill, non il
+  picco: il picco comprende la cache dei file, che il kernel libera da sé. La pagina segna «vecchia» una riga misurata più di
   30 ore prima, qualunque stato dica: un timer fermo non deve lasciare un verde.
 
 Con GitHub irraggiungibile esce comunque 0: l'errore finisce in `update_status.json`,

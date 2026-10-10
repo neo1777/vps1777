@@ -2531,6 +2531,9 @@ def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
     giorno che dice sempre la stessa cosa smette di essere letto entro una
     settimana.
 
+    La discesa si misura fino alla promessa (COPERTURA_BACKUP_ATTESA), non oltre: sopra,
+    i settimanali fanno oscillare i giorni distinti col giorno della settimana.
+
     ⚠️ RESIDUO DICHIARATO: `copertura_max` non scende mai. Se un giorno la
     ritenzione venisse volutamente accorciata, questo presidio resterebbe in
     allarme finché qualcuno non tocca lo stato. È il prezzo di non avere una
@@ -2564,7 +2567,11 @@ def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
         warn(f"copertura backup: {quanti} giorni distinti{dove} "
              f"sui {COPERTURA_BACKUP_ATTESA} promessi")
     scesa_da = str(st.get("copertura_scesa_da") or "")
-    if quanti < massimo:
+    # La discesa si misura fino alla promessa, non oltre (10/10/2026): sopra i 7 giorni
+    # i settimanali fanno oscillare i giorni distinti fra 9 e 11 col giorno della
+    # settimana, e il confronto col massimo storico (11) teneva acceso l'allarme da
+    # diciotto giorni con 9 giorni coperti. Da 11 a 3 resta un guasto.
+    if quanti < min(massimo, COPERTURA_BACKUP_ATTESA):
         if not scesa_da:
             st["copertura_scesa_da"] = now_iso()
             if notifica:
@@ -2673,9 +2680,11 @@ MEMORIA_ATTENZIONE_PCT = 90
 
 
 def memoria_container(repo: Path) -> list[dict] | None:
-    """Picco di memoria e OOM kill di ogni container del progetto, dal cgroup v2
-    (`memory.peak`, `memory.events`). Il picco dice quanto ci si è avvicinati al
-    tetto dall'avvio del container; un `docker stats` una volta al giorno no. None se
+    """Memoria di ogni container del progetto, dal cgroup v2: picco (`memory.peak`), memoria
+    propria (`anon` di `memory.stat`) e OOM kill (`memory.events`). Il picco conta anche la
+    cache dei file, che il kernel libera da sé: archive-mcp arriva al tetto leggendo i DB
+    senza essere in pericolo (misurato il 10/10: picco 2048 MB su 2048, propria 70 MB, zero
+    OOM). Il pericolo lo dicono la memoria propria vicina al tetto e gli OOM kill. None se
     docker o il cgroup non si leggono."""
     try:
         res = run(["docker", "ps", "--filter", "label=com.docker.compose.project=vps1777",
@@ -2697,9 +2706,11 @@ def memoria_container(repo: Path) -> list[dict] | None:
             picco = int((cg / "memory.peak").read_text().strip())
             tetto_txt = (cg / "memory.max").read_text().strip()
             eventi = dict(r.split() for r in (cg / "memory.events").read_text().splitlines())
+            stat = dict(r.split() for r in (cg / "memory.stat").read_text().splitlines())
         except (OSError, ValueError):
             continue
         out.append({"nome": nome.strip(), "picco_mb": picco // (1024 * 1024),
+                    "propria_mb": int(stat.get("anon", 0)) // (1024 * 1024),
                     "tetto_mb": None if tetto_txt == "max" else int(tetto_txt) // (1024 * 1024),
                     "oom_kill": int(eventi.get("oom_kill", 0))})
     return out or None
@@ -2760,9 +2771,11 @@ def scrivi_salute(repo: Path, st: dict) -> None:
                            "cgroup o docker non leggibili", None))
     for m in mem or []:
         tetto = m.get("tetto_mb")
-        vicino = bool(tetto) and m["picco_mb"] * 100 >= tetto * MEMORIA_ATTENZIONE_PCT
+        # Si giudica la memoria propria, non il picco: il picco comprende la cache dei file.
+        vicino = bool(tetto) and m.get("propria_mb", 0) * 100 >= tetto * MEMORIA_ATTENZIONE_PCT
         stato = "attenzione" if (m.get("oom_kill") or vicino) else "ok"
-        dettaglio = (f"picco {m['picco_mb']} MB" + (f" su {tetto} MB" if tetto else ", senza tetto")
+        dettaglio = (f"propria {m.get('propria_mb', '?')} MB, picco con la cache dei file "
+                     f"{m['picco_mb']} MB" + (f", tetto {tetto} MB" if tetto else ", senza tetto")
                      + (f"; OOM kill: {m['oom_kill']}" if m.get("oom_kill") else ""))
         righe.append(_riga(f"memoria {m['nome']}", stato, dettaglio, ora))
     _scrivi_telemetria(repo, "salute.json", json.dumps(
