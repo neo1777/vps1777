@@ -32,6 +32,9 @@ def test_il_gettone_scade():
 
 @pytest.fixture
 def finto(monkeypatch):
+    # il cancello dell'auth (cookie sul disco) non è ciò che si misura qui: in CI non c'è
+    # un profilo nlm, sul PC di chi sviluppa sì — senza questa riga il test passava solo lì
+    monkeypatch.setattr(server, "_check_auth_or_raise", lambda: None)
     cancellati: list[tuple] = []
     monkeypatch.setattr(core, "nb_get", lambda nb: {"id": nb, "title": "Prova", "sources": [1, 2]})
     monkeypatch.setattr(core, "nb_delete", lambda nb: cancellati.append(("nb", nb)))
