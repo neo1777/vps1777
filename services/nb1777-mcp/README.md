@@ -24,7 +24,7 @@ Sul tuo PC: `nlm login` → `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz
 
 ## Tool MCP esposti
 
-48 tool, in sette famiglie: notebook (6), source (10), chat (2: `notebook_query` e `notebook_query_esito`), ricerca,
+49 tool, in sette famiglie: notebook (6), source (10), chat e lavori in corso (3: `notebook_query`, `notebook_query_esito`, `lavoro_esito`), ricerca,
 note e cronologia (7: `research_*`, `note_*`, `chat_cronologia`), studio — creazione (10: i 9 artefatti +
 `studio_create_all_9`), studio — gestione (8), diagnostica e memoria (5: `doctor`, `usage_get`, `canonico`,
 `memoria_check`, `memoria_ack`). Firme e comportamento stanno

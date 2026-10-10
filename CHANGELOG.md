@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **I lavori lunghi di nb1777 tornano «in corso» invece di cadere (P6).** `source_add_*` (con
+  attesa), `studio_download` e `studio_create_all_9` possono durare minuti, e da claude.ai una
+  chiamata cade verso i 30 s: il lavoro finiva sul server, ma il risultato si perdeva. Ora
+  aspettano al massimo `attesa_max` (default 25 s) e rispondono `{stato: "in_corso", job_id}`; il
+  tool nuovo `lavoro_esito(job_id)` lo ritira (49 tool), e rilanciare la stessa chiamata si
+  aggancia invece di ripartire. Al più 3 lavori insieme e uno alla volta per notebook, perché
+  `source_add_*` ricava l'id della fonte nuova per differenza fra due liste: due aggiunte
+  parallele sullo stesso notebook potevano scambiarsi gli id. CAMBIO DI CONTRATTO: questi tool
+  possono restituire l'oggetto «in_corso» al posto del risultato.
+
 ## [0.77.0] — 2026-10-10
 
 **Caricare un file come fonte dal proprio dispositivo, con un link monouso.**
