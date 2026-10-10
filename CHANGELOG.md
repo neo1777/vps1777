@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.79.0] — 2026-10-11
+
+**`/admin/archive` dice com'è l'indice per senso di ogni DB.**
+
 ### Aggiunto
 - **`/admin/archive` dice com'è l'indice per senso di ogni DB (P13).** Colonna nuova «per
   senso»: allineato, da aggiornare (con le righe arrivate dopo l'ultima costruzione e il comando
