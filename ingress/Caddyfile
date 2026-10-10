@@ -66,11 +66,13 @@
 	# separatore che segue (così due segmenti lunghi di fila li prende entrambi). Misurato
 	# con caddy:2.11. Costo: anche i nomi lunghi (oauth-authorization-server) diventano ***
 	# qui; il log del gateway li tiene leggibili, perché redige solo il valore del segreto.
+	# P15 (10/10/2026): anche il gettone dei link firmati (`/scarica/<nome>?t=<scade>.<firma>`),
+	# che vale 30 minuti: la seconda alternativa lo redige senza toccare gli altri parametri.
 	log {
 		output stdout
 		format filter {
 			wrap json
-			request>uri regexp "(/|%2[Ff])[A-Za-z0-9_-]{16,}" "${1}***"
+			request>uri regexp "(/|%2[Ff])[A-Za-z0-9_-]{16,}|([?&]t=)[0-9]+\.[0-9a-f]+" "${1}${2}***"
 		}
 	}
 }

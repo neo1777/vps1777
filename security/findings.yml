@@ -3882,10 +3882,10 @@ findings:
     evidence:
       - file: ingress/Caddyfile
         contains:
-          - 'request>uri regexp "(/|%2[Ff])[A-Za-z0-9_-]{16,}" "${1}***"'
+          - 'request>uri regexp "(/|%2[Ff])[A-Za-z0-9_-]{16,}|'
       - file: ingress/Caddyfile.dns01
         contains:
-          - 'request>uri regexp "(/|%2[Ff])[A-Za-z0-9_-]{16,}" "${1}***"'
+          - 'request>uri regexp "(/|%2[Ff])[A-Za-z0-9_-]{16,}|'
       - file: tools/tests/test_caddy_log_senza_segreto.py
         contains:
           - "def test_il_log_di_caddy_redige_il_segreto_ovunque_nell_uri("

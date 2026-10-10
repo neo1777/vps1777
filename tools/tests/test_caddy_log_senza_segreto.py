@@ -60,3 +60,19 @@ def test_il_log_di_caddy_redige_il_segreto_ovunque_nell_uri(nome: str) -> None:
                 "/oauth/authorize?redirect_uri=https%3A%2F%2Fexample.invalid%2Fapi%2Fmcp%2Fauth_callback"
                 "&client_id=0f3c2a1b-1111-2222-3333-444455556666"):
         assert pat.sub(sost, uri) == uri, f"{nome}: redatto per sbaglio {uri}"
+
+
+@pytest.mark.parametrize("nome", ["Caddyfile", "Caddyfile.dns01"])
+def test_il_log_di_caddy_redige_il_gettone_dei_link_firmati(nome: str) -> None:
+    """P15 (10/10/2026): il gettone sta nella query (`?t=<scade>.<firma>`) e vale 30 minuti."""
+    testo = (RADICE / "ingress" / nome).read_text(encoding="utf-8")
+    m = re.search(r'request>uri regexp "([^"]+)" "([^"]+)"', testo)
+    pat = re.compile(m.group(1))
+    sost = re.sub(r"\$\{(\d+)\}", r"\\g<\1>", m.group(2))
+    firma = "135a61797855949a8d5a8580" + "deadbeef"
+    uri = f"/scarica/podcast.m4a?t=1791636435.{firma}"
+    fuori = pat.sub(sost, uri)
+    assert firma not in fuori and "1791636435" not in fuori, fuori
+    assert fuori == "/scarica/podcast.m4a?t=***"
+    # un parametro che si chiama solo per caso come «t» in coda a un altro resta leggibile
+    assert pat.sub(sost, "/admin/audit?event=link_scarica") == "/admin/audit?event=link_scarica"
