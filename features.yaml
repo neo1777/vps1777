@@ -878,6 +878,62 @@ features:
     since: "0.74.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: usage_get}
+  - id: nb.research_start
+    nome: "nb1777-mcp · research_start"
+    cosa: "Avvia una ricerca di fonti nuove (web o Drive, fast o deep): trova, non aggiunge. Passa da `services.research` di nlm (app/ricerca_nlm.py), non dal testo di `nlm research`."
+    dove: ["mcp-tool:nb1777-mcp/research_start"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: research_start}
+  - id: nb.research_status
+    nome: "nb1777-mcp · research_status"
+    cosa: "Lo stato di una ricerca con le fonti trovate in forma compatta; una lettura sola, e una `nota` per il `no_research` dei primi secondi."
+    dove: ["mcp-tool:nb1777-mcp/research_status"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: research_status}
+  - id: nb.research_import
+    nome: "nb1777-mcp · research_import"
+    cosa: "Aggiunge al notebook le fonti trovate da una ricerca: tutte, per indice, o solo quelle citate dal report."
+    dove: ["mcp-tool:nb1777-mcp/research_import"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: research_import}
+  - id: nb.note_list
+    nome: "nb1777-mcp · note_list"
+    cosa: "Le note scritte nel notebook (non le fonti), compatte o intere."
+    dove: ["mcp-tool:nb1777-mcp/note_list"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: note_list}
+  - id: nb.note_save
+    nome: "nb1777-mcp · note_save"
+    cosa: "Crea una nota (senza note_id) o la modifica."
+    dove: ["mcp-tool:nb1777-mcp/note_save"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: note_save}
+  - id: nb.note_delete
+    nome: "nb1777-mcp · note_delete"
+    cosa: "Cancella una nota, in due tempi: anteprima e gettone, poi la cancellazione."
+    dove: ["mcp-tool:nb1777-mcp/note_delete"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: note_delete}
+  - id: nb.chat_cronologia
+    nome: "nb1777-mcp · chat_cronologia"
+    cosa: "Le sessioni di chat del notebook, o la trascrizione di una (domanda e risposta per turno)."
+    dove: ["mcp-tool:nb1777-mcp/chat_cronologia"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: chat_cronologia}
   - id: nb.canonico
     nome: "nb1777-mcp · canonico"
     cosa: "MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la versione

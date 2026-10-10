@@ -135,7 +135,7 @@ FRASI = [
     Frase("docs/NB1777.md", r"rumore su ogni tool \(oggi (?P<nb1777_tool>{N})\)"),
     Frase("docs/NB1777.md", r"tool MCP — l'header dice (?P<nb1777_tool>{N})\b"),
     Frase("docs/NB1777.md", r"Il resto — (?P<nb1777_tool>{N}) tool,"),
-    Frase("services/nb1777-mcp/README.md", r"^(?P<nb1777_tool>{N}) tool, in sei famiglie"),
+    Frase("services/nb1777-mcp/README.md", r"^(?P<nb1777_tool>{N}) tool, in sette famiglie"),
     # ── archive: i tool ───────────────────────────────────────────────────────
     Frase("README.md", r"`get_stirpe`\): \*\*(?P<archive_tool>{N}) tools\*\*"),
     Frase("README.md", r"the (?P<archive_tool>{N}) MCP tools, sessions and lineages"),
