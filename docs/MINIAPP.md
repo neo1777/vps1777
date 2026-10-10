@@ -24,9 +24,17 @@ duplicata da mantenere.
   `gateway_secret`, e si scopre o si copia con un tap esplicito, un connettore
   per volta, che resta nell'audit (H26); riassunto scadenze secret.
 - **Notebook** — lista dei notebook NotebookLM; tap su uno → domanda RAG
-  direttamente dal telefono (le query lunghe mostrano il tempo trascorso).
-- **Archivio** — ricerca FTS5 nell'archivio personale (tutti i DB o uno
-  specifico), snippet evidenziati; **lista dei DB caricati** con scheda
+  direttamente dal telefono (le query lunghe mostrano il tempo trascorso). Dalla
+  0.75.0 la risposta porta le **fonti** (numero, titolo, anteprima del passo citato) e
+  dice quanti paragrafi **non hanno citazioni** (generati dal modello, non letti dalle
+  fonti). La domanda **si ritrova**: se il telefono va in tasca a metà, riaprendo la Mini
+  App la riprende, e l'ultima risposta resta in cima alla lista.
+- **Archivio** — ricerca **per parole** (FTS5) o **per senso** (`search_ibrida`, dalla
+  0.75.0) nell'archivio personale: senza scegliere un DB cerca nel perimetro di default
+  (primari e non dichiarati, mai i riservati), o in un DB specifico; snippet evidenziati,
+  e per le righe trovate per senso il pezzo che ha colpito. Su ogni risultato
+  **contesto** apre i messaggi attorno (`get_context`, tre prima e tre dopo) e **copia
+  rif.** copia `db·uuid·ts`, il riferimento da citare in una chat. **Lista dei DB caricati** con scheda
   (messaggi, etichette principali, dimensione, ultimo aggiornamento) ed
   **eliminazione** con conferma (irreversibile; per resettare un archivio:
   elimina e ricarica la fonte con lo stesso nome).
@@ -84,10 +92,11 @@ Perché è solido:
 | `/app/api/overview` | GET | Bearer | versione, upstreams, riassunto secret |
 | `/app/api/plugins` | GET | Bearer | connettori MCP con URL **mascherato** di default; l'URL vero solo con `?reveal=<nome>` e un tap esplicito (H26) |
 | `/app/api/notebooks` | GET | Bearer | lista notebook (via nb1777-mcp) |
-| `/app/api/ask` | POST | Bearer | domanda RAG su un notebook (long-running) |
+| `/app/api/ask` | POST | Bearer | domanda RAG su un notebook: un giro aspetta al massimo 20 s e risponde `{stato: "in_corso"}` o `{stato: "pronta", answer, fonti, senza_citazioni?, nota?}`; la pagina rilancia con `ripresa: true` (nb1777 si aggancia alla query in corso, nessuna riga d'audit nuova) e il gateway tiene la risposta pronta 30 minuti |
 | `/app/api/archive/dbs` | GET | Bearer | DB dell'archivio con scheda (righe, etichette, top, dimensione, mtime) |
 | `/app/api/archive/db/delete` | POST | Bearer | elimina un DB (irreversibile, con audit) |
-| `/app/api/archive/search` | POST | Bearer | ricerca FTS5 |
+| `/app/api/archive/search` | POST | Bearer | ricerca per parole (`modo: "parole"`, FTS5, default) o per senso (`modo: "senso"`, `search_ibrida`, timeout 120 s per il primo caricamento del modello); `{results, modo, saltati?}` |
+| `/app/api/archive/context` | POST | Bearer | i messaggi attorno a un risultato `{db, uuid}` (`get_context`, 3+3, righe troncate a 2000 caratteri) |
 | `/app/api/secrets` | GET | Bearer | scadenze secret (da `secrets_status.json`) |
 | `/app/api/audit` | GET | Bearer | ultimi eventi audit |
 | `/app/api/update/state` | GET | Bearer | running vs latest + progress updater |
@@ -123,9 +132,10 @@ messaggio chiaro.
 
 ## Limiti noti
 
-- Le query RAG lunghe (fino a ~5 minuti) tengono aperta la richiesta: se la
-  webview va in background su mobile, il sistema può sospenderla — in quel caso
-  ripeti la domanda.
+- La domanda in corso e l'ultima risposta stanno nel `localStorage` della webview, solo
+  su quel telefono; il gateway tiene le risposte pronte in memoria per 30 minuti, quindi
+  un riavvio del gateway le perde (riaprendo, la Mini App rifà la domanda). Oltre i 30
+  minuti anche nb1777 dimentica la query, e la domanda riparte da capo.
 - `Same-Origin Restriction` di Telegram (auto-on da luglio 2026) è già
   rispettata: la pagina chiama solo il proprio origin.
 - Il token miniapp dura 1h e non è revocabile singolarmente prima della
