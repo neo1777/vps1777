@@ -875,7 +875,7 @@ features:
            azzerano. Distingue «quota finita» da «sessione scaduta». Anche nel campo `quota` di doctor."
     dove: ["mcp-tool:nb1777-mcp/usage_get"]
     status: active-default
-    since: "unreleased"
+    since: "0.74.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: usage_get}
   - id: nb.canonico

@@ -477,10 +477,10 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 | `primario` | la fonte **corrente** di quel versante: se non scegli, è lei che deve rispondere |
 | `fotografia` | versione più **vecchia** dello stesso versante, tenuta per la storia: si cerca qui quando interessa com'*era* |
 | `riscontro` | non si interroga per **trovare** ma per **verificare**: ridondanza voluta, gemelli re-ingeriti con un indexer diverso, DB-sonda con un caso-noto-che-deve-riuscire |
-| `riservato` | materiale personale: fuori dai compiti tecnici senza richiesta esplicita. Dalla 0.73.1 la ricerca senza `db_name` lo **salta**; nominandolo si interroga. È una **dichiarazione, non un lucchetto**: chi ha accesso al server lo legge |
+| `riservato` | materiale personale: fuori dai compiti tecnici senza richiesta esplicita. Dalla 0.74.0 la ricerca senza `db_name` lo **salta**; nominandolo si interroga. È una **dichiarazione, non un lucchetto**: chi ha accesso al server lo legge |
 | `non dichiarato` | **nessuno si è pronunciato** su quel DB. Non è «poco importante», e non va indovinato dal nome: è il valore che si legge quando `set_ruolo` non è mai stata chiamata (o quando la dichiarazione è stata ritirata passando `""`) |
 
-> **Il ruolo decide dove si cerca (dalla 0.73.1, cura B della #278).** Senza `db_name`,
+> **Il ruolo decide dove si cerca (dalla 0.74.0, cura B della #278).** Senza `db_name`,
 > `search`, `search_ibrida`, `count` e `check_term` guardano i **primari** e i **non
 > dichiarati**: su un'installazione dove nessuno ha dichiarato niente non sparisce
 > nulla. Fotografie e riscontri si riaprono col parametro `ruoli` (`'fotografia'`,

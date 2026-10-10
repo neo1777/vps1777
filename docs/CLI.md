@@ -275,7 +275,7 @@ Cloudflare (fino alla 0.62.2 compariva fra i mancanti su ogni installazione), `c
 solo con la feature `caddy-dns01`. Con `--notify` avvisa su Telegram gli scaduti. Il
 risultato compare anche in `/admin/secrets` (dal file `onboarding/secrets_status.json`).
 
-La riga della **sessione NotebookLM** (dalla 0.73.1) dà l'età vera della sessione Google: la
+La riga della **sessione NotebookLM** (dalla 0.74.0) dà l'età vera della sessione Google: la
 chiede a nb1777-mcp, che legge la scadenza del cookie SID e la riporta indietro di 400 giorni.
 Prima era la data del file dei cookie, che si azzerava ogni volta che `nlm` lo riscriveva. È
 «da ricaricare» quando la sonda (`docs/NB1777.md` §4) la trova scaduta; la soglia di 14 giorni

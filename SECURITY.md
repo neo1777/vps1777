@@ -154,7 +154,7 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   un identificativo di persona entra in un log che prima non ne aveva — la
   retention resta quella dell'audit (`AUDIT_RETENTION_DAYS`, default 90 giorni)
   e il log vive nel volume dati, dentro il backup cifrato.
-- **Una riga per ogni chiamata a un tool** (`proxy_tool`, dalla 0.73.1, S11): nome del
+- **Una riga per ogni chiamata a un tool** (`proxy_tool`, dalla 0.74.0, S11): nome del
   tool, millisecondi, esito (`ok`, `errore_tool`, `timeout`, `interrotto` quando il client
   chiude prima della fine, `502`) e status, scritta a fine stream. Degli argomenti
   **niente**: possono essere testo personale, e dal corpo JSON-RPC si legge solo
@@ -245,7 +245,7 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   - il **check settimanale delle scadenze** (`vps1777 secrets-status`, unit
     `vps1777-secrets-check`): monta il volume in un `busybox` con `--network
     none` e ne legge **solo l'mtime** del file dei cookie, mai il contenuto. Dalla
-    0.73.1 è la via di riserva: prima chiede a nb1777-mcp (`python -m
+    0.74.0 è la via di riserva: prima chiede a nb1777-mcp (`python -m
     app.stato_sessione`) la nascita della sessione e l'ultimo refresh, solo date.
 
   Gateway e bot hanno **accesso zero** — né lettura né scrittura — e gli
