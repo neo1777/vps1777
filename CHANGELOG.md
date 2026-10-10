@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.76.0] — 2026-10-10
+
+**nb1777 cerca fonti nuove, scrive note e legge la cronologia della chat: 47 tool.**
+
 ### Aggiunto
 - **Ricerca approfondita, note e cronologia della chat in nb1777 (P7): sette tool nuovi, 47 in
   tutto.** `research_start`, `research_status` e `research_import` sono la «Discover» di Gemini
