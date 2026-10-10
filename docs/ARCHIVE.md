@@ -477,14 +477,19 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 | `primario` | la fonte **corrente** di quel versante: se non scegli, è lei che deve rispondere |
 | `fotografia` | versione più **vecchia** dello stesso versante, tenuta per la storia: si cerca qui quando interessa com'*era* |
 | `riscontro` | non si interroga per **trovare** ma per **verificare**: ridondanza voluta, gemelli re-ingeriti con un indexer diverso, DB-sonda con un caso-noto-che-deve-riuscire |
-| `riservato` | materiale personale: fuori dai compiti tecnici senza richiesta esplicita. È una **dichiarazione, non un lucchetto** — nessun tool lo esclude da solo |
+| `riservato` | materiale personale: fuori dai compiti tecnici senza richiesta esplicita. Dalla 0.73.1 la ricerca senza `db_name` lo **salta**; nominandolo si interroga. È una **dichiarazione, non un lucchetto**: chi ha accesso al server lo legge |
 | `non dichiarato` | **nessuno si è pronunciato** su quel DB. Non è «poco importante», e non va indovinato dal nome: è il valore che si legge quando `set_ruolo` non è mai stata chiamata (o quando la dichiarazione è stata ritirata passando `""`) |
 
-> **Additivo, e per ora solo informativo.** `search` e `count` senza `db_name`
-> toccano **tutti** i DB come prima, `riservato` compreso: chi vuole restringere
-> ai primari legge il campo e passa `db_name`. Far pescare il default dai soli
-> primari è un **cambio di contratto** — cambierebbe il significato di uno zero
-> («0 sui primari» ≠ «0 ovunque») — e vive in una sua issue.
+> **Il ruolo decide dove si cerca (dalla 0.73.1, cura B della #278).** Senza `db_name`,
+> `search`, `search_ibrida`, `count` e `check_term` guardano i **primari** e i **non
+> dichiarati**: su un'installazione dove nessuno ha dichiarato niente non sparisce
+> nulla. Fotografie e riscontri si riaprono col parametro `ruoli` (`'fotografia'`,
+> `'riscontro, fotografia'`, o `'tutti'`); il riservato si interroga solo nominandolo.
+> È un **cambio di contratto** e cambia il significato di uno zero: «0 sui primari» non è
+> «0 ovunque». Per questo `count`, col perimetro di default, aggiunge `anche_fuori`
+> (`{db: n}`, i match nelle fotografie e nei riscontri) e `search_ibrida` dice in
+> `fuori_perimetro` quali DB ha lasciato fuori. `get_context` e `get_conversation`
+> cercano un uuid già trovato e guardano ancora tutti i DB.
 
 > **Concorrenza.** Il server serve **2 ricerche alla volta** (`search`,
 > `search_ibrida`, `count`, `archive_stats`, `get_session`, `get_stirpe`): le
