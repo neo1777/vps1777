@@ -172,6 +172,10 @@ def search(
         "detto cosa» (#273)."))] = "tutto",
     snippet_tokens: Annotated[int, Field(description=(
         "Lunghezza dello snippet (default 32). Per il testo attorno: get_context(uuid)."))] = 32,
+    ruoli: Annotated[str, Field(description=(
+        "Dove cercare senza db_name: '' (default) = primari e non dichiarati; 'tutti' = "
+        "ogni DB; oppure ruoli separati da virgole (primario, fotografia, riscontro, "
+        "riservato). Il riservato si interroga solo nominandolo."))] = "",
 ) -> list[dict[str, Any]]:
     """Cerca nell'archivio full-text (SQLite FTS5) delle conversazioni, per LESSICO: quando
     sai come si chiama ciò che cerchi. Per il SENSO usa search_ibrida.
@@ -181,6 +185,8 @@ def search(
 
     PROTOCOLLO DELLO ZERO: 0 risultati NON prova assenza. Riprova quotando il termine e
     togliendo i caratteri speciali; solo più tentativi coerenti a zero valgono «non c'è».
+    Senza db_name cerca nei primari e nei non dichiarati: `count` dice se ce n'è anche
+    nelle fotografie e nei riscontri (`anche_fuori`), `ruoli='tutti'` li riapre.
     Una query malformata solleva un errore che spiega come correggerla, non una lista vuota.
 
     ⚠️ `voice='own'` NON vuol dire «lo ha scritto Neo»: vale anche per l'assistente (l'80%
@@ -198,7 +204,7 @@ def search(
     """
     return db.search(query, db_name, limit, raw=raw, sort=sort, since=since,
                      until=until, project=project, speaker=speaker, voice=voice,
-                     campi=campi, snippet_tokens=snippet_tokens)
+                     campi=campi, snippet_tokens=snippet_tokens, ruoli=ruoli)
 
 
 @mcp.tool()
@@ -237,6 +243,10 @@ def search_ibrida(
         "0 (default) o un numero di parole fino a 400: al posto dello snippet, la finestra "
         "del testo intero dove i termini sono più fitti. Per vocali, verbali e chat lunghe; "
         "200 parole su 10 righe sono circa 2.700 token."))] = 0,
+    ruoli: Annotated[str, Field(description=(
+        "Dove cercare senza db_name: '' (default) = primari e non dichiarati; 'tutti' = "
+        "ogni DB; oppure ruoli separati da virgole (primario, fotografia, riscontro, "
+        "riservato). Il riservato si interroga solo nominandolo."))] = "",
 ) -> dict[str, Any]:
     """Cerca per SENSO, non per lessico: FTS5 + vettori fusi in una sola RRF su tutti i DB
     (#281). Usala quando ricordi il senso e non le parole («l'articolo dove raccontavo quanto
@@ -252,7 +262,8 @@ def search_ibrida(
       risultati sono stati tolti e non restituiti sbagliati;
     - `saltati`: [{db, ramo, motivo}] per un DB sparito, un ramo full-text inutilizzabile o
       un indice che non risponde (in quel caso resta la metà full-text);
-    - `parametri`: k_rrf, peso_fts, modello, quante formulazioni.
+    - `parametri`: k_rrf, peso_fts, modello, quante formulazioni;
+    - `fuori_perimetro`: {ruolo: [db]} lasciati fuori dal filtro `ruoli`.
 
     ⚠️ Senza modello di embedding o senza alcun indice `.vec.db` NON ricade in silenzio su
     FTS5: solleva un errore che dice cosa manca (docs/RICERCA-IBRIDA.md).
@@ -261,24 +272,27 @@ def search_ibrida(
                             since=since, until=until, campi=campi, k_rrf=k_rrf,
                             peso_fts=peso_fts, snippet_tokens=snippet_tokens,
                             speaker=speaker, riformulazioni=riformulazioni,
-                            passaggio=passaggio)
+                            passaggio=passaggio, ruoli=ruoli)
 
 
 @mcp.tool()
 def count(query: str, db_name: str = "", raw: bool = False, since: str = "",
           until: str = "", project: str = "", speaker: str = "",
-          voice: str = "", campi: str = "tutto") -> dict[str, Any]:
+          voice: str = "", campi: str = "tutto", ruoli: str = "") -> dict[str, Any]:
     """Conta quanti messaggi corrispondono alla query (non limitato) — per
     frequenze e prevalenze. Stessa sintassi e stessi filtri di search, `campi`
-    compreso ('testo' = solo le parole, senza le azioni). Ritorna
+    e `ruoli` compresi ('testo' = solo le parole, senza le azioni). Ritorna
     {total, per_db:{nome: n}}. Query malformata → errore parlante, non 0.
-    Se un termine COLLASSA (`C++`→`C`, vedi check_term) aggiunge `warnings`."""
+    Se un termine COLLASSA (`C++`→`C`, vedi check_term) aggiunge `warnings`.
+    Senza db_name e senza `ruoli` aggiunge `anche_fuori` ({db: n}): i match nelle
+    fotografie e nei riscontri, fuori dal perimetro di default. «0 sui primari» non
+    è «0 ovunque»: guardalo prima di dire «non c'è»."""
     return db.count(query, db_name, raw=raw, since=since, until=until, project=project,
-                    speaker=speaker, voice=voice, campi=campi)
+                    speaker=speaker, voice=voice, campi=campi, ruoli=ruoli)
 
 
 @mcp.tool()
-def check_term(term: str, db_name: str = "") -> dict[str, Any]:
+def check_term(term: str, db_name: str = "", ruoli: str = "") -> dict[str, Any]:
     """Diagnostica se un TERMINE con caratteri speciali (`C++`, `C#`, `g++`, `.NET`,
     `F#`) è davvero ricercabile o se l'indice lo fa COLLASSARE su una parola più
     corta e comune. È una sottrazione: confronta count(term) con count(prefisso
@@ -290,11 +304,12 @@ def check_term(term: str, db_name: str = "") -> dict[str, Any]:
 
     Args:
         term: il termine da verificare (es. 'C++').
-        db_name: nome DB ('' = tutti).
+        db_name: nome DB ('' = il perimetro di `ruoli`).
+        ruoli: come in search ('' = primari e non dichiarati; 'tutti' = ogni DB).
     Ritorna {term, prefix, per_db:{nome:{count_term, count_prefix, collapsed}}}.
     `collapsed=true` su un DB = quel DB va ricostruito con tokenchars per
     distinguere il termine dal suo prefisso."""
-    return db.check_term(term, db_name)
+    return db.check_term(term, db_name, ruoli=ruoli)
 
 
 @mcp.tool()

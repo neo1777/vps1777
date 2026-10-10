@@ -483,14 +483,19 @@ The `ruolo` (role) field makes it readable.
 | `primario` | the **current** source of that side: if you don't choose, it is the one that must answer |
 | `fotografia` | an **older** version of the same side, kept for history: search here when you care about how it *was* |
 | `riscontro` | not queried to **find** but to **verify**: intentional redundancy, twins re-ingested with a different indexer, probe DBs with a known-case-that-must-succeed |
-| `riservato` | personal material: out of technical tasks without an explicit request. It is a **declaration, not a lock** — no tool excludes it by itself |
+| `riservato` | personal material: out of technical tasks without an explicit request. Since 0.73.1 a search without `db_name` **skips** it; naming it queries it. It is a **declaration, not a lock**: whoever has access to the server reads it |
 | `non dichiarato` | **nobody has said anything** about that DB. It doesn't mean "unimportant", and it must not be guessed from the name: it is the value you read when `set_ruolo` was never called (or when the declaration was withdrawn by passing `""`) |
 
-> **Additive, and for now only informative.** `search` and `count` without
-> `db_name` touch **all** DBs as before, `riservato` included: whoever wants to
-> restrict to primaries reads the field and passes `db_name`. Making the default
-> draw only from primaries is a **contract change** — it would change the meaning
-> of a zero ("0 on primaries" ≠ "0 everywhere") — and it lives in its own issue.
+> **The role decides where to search (since 0.73.1, cure B of #278).** Without
+> `db_name`, `search`, `search_ibrida`, `count` and `check_term` look at the **primary**
+> and **undeclared** DBs: on an install where nobody declared anything, nothing
+> disappears. Snapshots and cross-checks reopen with the `ruoli` parameter
+> (`'fotografia'`, `'riscontro, fotografia'`, or `'tutti'`); the reserved one is queried
+> only by naming it. It is a **contract change** and it changes the meaning of a zero:
+> "0 on primaries" is not "0 everywhere". That is why `count`, with the default scope,
+> adds `anche_fuori` (`{db: n}`, the matches in snapshots and cross-checks) and
+> `search_ibrida` says in `fuori_perimetro` which DBs it left out. `get_context` and
+> `get_conversation` look up an uuid already found and still look at every DB.
 
 > **Concurrency.** The server serves **2 searches at a time** (`search`,
 > `search_ibrida`, `count`, `archive_stats`, `get_session`, `get_stirpe`): extra

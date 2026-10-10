@@ -342,6 +342,77 @@ def _targets(db: str) -> list[str]:
     return [db]
 
 
+# ── P1 (05/10/2026), la «cura B» della #278: il ruolo decide DOVE si cerca quando non si
+# sceglie un DB. Fino alla 0.73 il ruolo era solo informazione e `search` senza `db_name`
+# toccava tutto, `voce-1777-personale` compreso. Ora i quattro tool di ricerca (search,
+# search_ibrida, count, check_term) guardano di default i primari e i NON DICHIARATI: su
+# un'installazione dove nessuno ha dichiarato niente non sparisce nulla. Fotografie e
+# riscontri si riaprono con `ruoli`; il riservato si interroga solo nominandolo (con
+# `db_name` o in `ruoli`). Non vale per get_context e get_conversation, che cercano
+# un uuid già trovato: lì `_targets` resta com'era.
+RUOLI_DI_DEFAULT: tuple[str, ...] = ("primario", RUOLO_NON_DICHIARATO)
+_RUOLO_MEMO: dict[str, tuple[str, str]] = {}
+
+
+def _ruolo(name: str) -> str:
+    """Il ruolo dichiarato di un DB, memoizzato per snapshot come `describe`."""
+    snap = _snapshot(_DBS[name])
+    ricordo = _RUOLO_MEMO.get(name)
+    if ricordo is not None and ricordo[0] == snap:
+        return ricordo[1]
+    try:
+        conn = _open(name)
+    except KeyError:
+        return RUOLO_NON_DICHIARATO
+    try:
+        ruolo = fts.meta_value_conn(conn, "ruolo") or RUOLO_NON_DICHIARATO
+    except sqlite3.OperationalError:
+        ruolo = RUOLO_NON_DICHIARATO
+    finally:
+        conn.close()
+    _RUOLO_MEMO[name] = (snap, ruolo)
+    return ruolo
+
+
+def _ruoli_voluti(ruoli: str) -> set[str] | None:
+    """`''` → i ruoli di default; `'tutti'` → None (nessun filtro); altrimenti la lista
+    separata da virgole, a vocabolario chiuso (errore parlante su una parola sbagliata)."""
+    testo = str(ruoli or "").strip().lower()
+    if not testo:
+        return set(RUOLI_DI_DEFAULT)
+    if testo == "tutti":
+        return None
+    voluti = {v.strip() for v in testo.split(",") if v.strip()}
+    ammessi = set(RUOLI) | {RUOLO_NON_DICHIARATO}
+    sbagliati = sorted(voluti - ammessi)
+    if sbagliati:
+        raise ValueError(
+            f"ruoli {sbagliati} non ammessi. Ammessi: {', '.join(RUOLI)}, "
+            f"'{RUOLO_NON_DICHIARATO}', separati da virgole, oppure 'tutti'.")
+    return voluti
+
+
+def _perimetro(db: str, ruoli: str = "") -> tuple[list[str], list[str]]:
+    """(DB dove cercare, DB lasciati fuori dal filtro per ruolo). Con `db` vale il DB
+    nominato, qualunque ruolo abbia."""
+    if db:
+        return _targets(db), []
+    voluti = _ruoli_voluti(ruoli)
+    if voluti is None:
+        return list(_DBS), []
+    dentro, fuori = [], []
+    for name in _DBS:
+        (dentro if _ruolo(name) in voluti else fuori).append(name)
+    return dentro, fuori
+
+
+def _fuori_per_ruolo(fuori: list[str]) -> dict[str, list[str]]:
+    per: dict[str, list[str]] = {}
+    for name in fuori:
+        per.setdefault(_ruolo(name), []).append(name)
+    return per
+
+
 # Budget della scansione MULTI-DB di check_integrity. Misurato il 28/08/2026:
 # 12 quick_check su ~6 GB = MINUTI, il proxy MCP molla a ~30-60s, e le chiamate
 # scadute restavano IN CODA lato server (cpu occupata, tool bloccati per tutti).
@@ -397,8 +468,10 @@ def _limite(limit: int, massimo: int = LIMITE_MASSIMO) -> int:
 def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
            sort: str = "rank", since: str = "", until: str = "",
            project: str = "", speaker: str = "", voice: str = "",
-           campi: str = "tutto", snippet_tokens: int = 32) -> list[dict[str, Any]]:
-    """Search FTS5 nel DB indicato (o in TUTTI se db == "").
+           campi: str = "tutto", snippet_tokens: int = 32,
+           ruoli: str = "") -> list[dict[str, Any]]:
+    """Search FTS5 nel DB indicato, o senza `db` nel perimetro dei `ruoli` (P1: di
+    default primari e non dichiarati; 'tutti' = ogni DB).
 
     Su più DB il `limit` è GLOBALE (non più per-DB) e i risultati sono fusi e
     ri-ordinati per `sort` prima del taglio — niente più concatenamento cieco.
@@ -408,7 +481,7 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
     fts.valida_filtri(speaker=speaker, voice=voice, sort=sort, campi=campi)
     _maybe_reload()  # pesca eventuali DB caricati/indicizzati dopo l'avvio
     collected: list[dict[str, Any]] = []
-    for name in _targets(db):
+    for name in _perimetro(db, ruoli)[0]:
         try:
             conn = _open(name)
         except KeyError:
@@ -513,7 +586,8 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                   riformulazioni: list[str] | None = None,
                   k_rrf: int = semantica.RRF_K,
                   peso_fts: float = semantica.RRF_PESO_FTS,
-                  snippet_tokens: int = 64, passaggio: int = 0) -> dict[str, Any]:
+                  snippet_tokens: int = 64, passaggio: int = 0,
+                  ruoli: str = "") -> dict[str, Any]:
     """Ricerca ibrida FTS5 + vettoriale con fusione RRF pesata.
 
     Ritorna {righe, indici, parametri}: le righe come `search`, più `origine`
@@ -537,7 +611,8 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     s = get_settings()
     model_dir = Path(s.archive_model_dir)
     indici = _indici_disponibili()
-    bersagli = [n for n in _targets(db) if n in indici]
+    nel_perimetro, fuori_perimetro = _perimetro(db, ruoli)
+    bersagli = [n for n in nel_perimetro if n in indici]
     if not bersagli:
         disponibili = sorted(indici) or "nessuno"
         raise SemanticaNonPronta(
@@ -746,14 +821,20 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     }
     if saltati:
         out["saltati"] = saltati
+    if fuori_perimetro:
+        out["fuori_perimetro"] = _fuori_per_ruolo(fuori_perimetro)
     return out
 
 @_serializzata
 def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
           until: str = "", project: str = "", speaker: str = "",
-          voice: str = "", campi: str = "tutto") -> dict[str, Any]:
+          voice: str = "", campi: str = "tutto", ruoli: str = "") -> dict[str, Any]:
     """Numero di match per DB e totale (non limitato) — abilita frequenze e
-    prevalenze, impossibili con la sola `search` limitata."""
+    prevalenze, impossibili con la sola `search` limitata.
+
+    P1: senza `db` conta nel perimetro dei `ruoli` e, col perimetro di default, mette in
+    `anche_fuori` i match nelle fotografie e nei riscontri ({db: n}, solo i non zero):
+    «0 sui primari» non deve sembrare «0 ovunque». Il riservato non si conta."""
     fts.valida_filtri(speaker=speaker, voice=voice, campi=campi)
     _maybe_reload()
     per_db: dict[str, int] = {}
@@ -761,7 +842,8 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
     # S3 (05/10): un DB che non si legge non è uno zero. Prima finiva solo nel log, e il
     # totale sembrava completo.
     saltati: list[dict[str, str]] = []
-    for name in _targets(db):
+    dentro, fuori = _perimetro(db, ruoli)
+    for name in dentro:
         try:
             conn = _open(name)
         except KeyError:
@@ -782,6 +864,10 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
         finally:
             conn.close()
     out: dict[str, Any] = {"total": sum(per_db.values()), "per_db": per_db}
+    if fuori and not str(ruoli or "").strip():
+        out["anche_fuori"] = _conta_fuori(
+            [n for n in fuori if _ruolo(n) != "riservato"], query, raw=raw, since=since,
+            until=until, project=project, speaker=speaker, voice=voice, campi=campi)
     if warnings:
         out["warnings"] = warnings
     if saltati:
@@ -789,7 +875,26 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
     return out
 
 
-def check_term(term: str, db: str = "") -> dict[str, Any]:
+def _conta_fuori(nomi: list[str], query: str, **filtri: Any) -> dict[str, int]:
+    """I match nei DB rimasti fuori dal perimetro, solo i non zero: l'avviso di P1."""
+    trovati: dict[str, int] = {}
+    for name in nomi:
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            n = fts.count_conn(conn, query, **filtri)
+        except sqlite3.OperationalError:
+            continue
+        finally:
+            conn.close()
+        if n:
+            trovati[name] = n
+    return trovati
+
+
+def check_term(term: str, db: str = "", *, ruoli: str = "") -> dict[str, Any]:
     """Diagnostica il COLLASSO di un termine con caratteri speciali (`C++`, `C#`,
     `g++`, `.NET`, `F#`) — il canary di setaccio esposto come tool. Per ogni DB
     confronta count(term) con count(prefisso-alfanumerico): se coincidono, per
@@ -800,7 +905,7 @@ def check_term(term: str, db: str = "") -> dict[str, Any]:
     cands = fts.collapse_candidates(term)
     prefix = cands[0][1] if cands else ""
     per_db: dict[str, Any] = {}
-    for name in _targets(db):
+    for name in _perimetro(db, ruoli)[0]:
         try:
             conn = _open(name)
         except KeyError:
