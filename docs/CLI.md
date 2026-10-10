@@ -41,7 +41,7 @@ giro.
   fuori (la porta sull'host, poi l'indirizzo pubblico — il Funnel o `PUBLIC_BASE`;
   l'esito va anche in `onboarding/raggiungibilita.json`,
   letto da `/admin/setup`), la **copertura** dei backup (giorni distinti, avvisa se scende
-  sotto il massimo già raggiunto) l'**età** dell'ultimo backup archivio (avvisa oltre i
+  sotto il massimo già raggiunto, contato fino ai 7 giorni promessi) l'**età** dell'ultimo backup archivio (avvisa oltre i
   14 giorni; se l'archivio non esiste ancora, tace), l'**età** dell'ultimo backup core
   (avvisa oltre i 2 giorni: un notturno fermo non pota più, quindi la copertura da sola non
   lo vede) e lo **spazio libero** sul disco dei backup (avvisa sotto il 10%). Le notifiche

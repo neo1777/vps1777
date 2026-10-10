@@ -1666,6 +1666,29 @@ def test_una_REGRESSIONE_fa_scattare_l_allarme_una_volta_sola():
         assert st["copertura_scesa_da"] == segnata, "la seconda chiamata non deve riarmare"
 
 
+def test_i_settimanali_sopra_la_promessa_non_sono_una_regressione():
+    # RISPOSTA NOTA (misurata sulla VPS il 10/10): la ritenzione tiene 7 giorni + 4
+    # settimanali, e i settimanali delle due settimane più recenti cadono dentro i 7
+    # giorni: i giorni distinti oscillano fra 9 e 11 col giorno della settimana. Il
+    # massimo storico era 11, la copertura 9 (sopra i 7 promessi): la pagina Salute e
+    # lo stato dicevano «scesa» dal 22/09, per diciotto giorni.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_giorni(d, "2026-09-20-075532", "2026-09-27-094224",
+                                *[f"2026-10-{g:02d}-030000" for g in range(4, 11)])
+        st = {"copertura_max": 11, "copertura_scesa_da": "2026-09-22T01:53:09Z"}
+        v._sorveglia_copertura_backup(repo, st, notifica=False)
+    assert "copertura_scesa_da" not in st, "9 giorni su 7 promessi non sono una discesa"
+
+
+def test_sotto_la_promessa_resta_una_regressione_anche_da_un_massimo_alto():
+    # Il caso del 27/07 con un massimo storico sopra la promessa: da 11 a 3 è un guasto.
+    with tempfile.TemporaryDirectory() as d:
+        repo = _repo_con_giorni(d, "2026-10-08-030000", "2026-10-09-030000", "2026-10-10-030000")
+        st = {"copertura_max": 11}
+        v._sorveglia_copertura_backup(repo, st, notifica=False)
+    assert st.get("copertura_scesa_da")
+
+
 def test_il_rientro_pulisce_lo_stato():
     # RISPOSTA NOTA: tornati al massimo, l'allarme si chiude da solo — o resta
     # acceso per sempre e diventa arredamento.

@@ -727,7 +727,9 @@ quel numero e **avvisa su Telegram**. 🔑 **Ma avvisa di una regressione, non d
 finestra non ancora piena**, ed è la scelta che decide se questo controllo verrà letto o
 messo a tacere: dopo un'installazione nuova la copertura è 1, poi 2, poi 3, ed è normale.
 Quello che non è mai normale è che la copertura di `H59` *scenda* sotto il massimo già
-raggiunto — a regime le copie si sostituiscono, non si perdono. *Residuo dichiarato di
+raggiunto, contato fino ai 7 giorni promessi (dalla 0.74.1: sopra, i settimanali fanno
+oscillare i giorni distinti fra 9 e 11 col giorno della settimana) — a regime le copie si
+sostituiscono, non si perdono. *Residuo dichiarato di
 `H59`: quel massimo non scende mai, quindi accorciare di proposito la conservazione
 lascerebbe l'avviso acceso finché qualcuno non tocca lo stato.*
 

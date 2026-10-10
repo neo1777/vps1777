@@ -42,7 +42,7 @@ before asking GitHub it also does the maintenance and the watches that live on i
   reachable from outside (the port on the host, then the public address — the Funnel or
   `PUBLIC_BASE`; the outcome also goes into `onboarding/raggiungibilita.json`, read by
   `/admin/setup`), the backup **coverage** (distinct days; it warns if it drops below the
-  maximum already reached) the **age** of the latest archive backup (it warns past 14
+  maximum already reached, counted up to the 7 promised days) the **age** of the latest archive backup (it warns past 14
   days; if no archive exists yet, it stays silent), the **age** of the latest core backup
   (it warns past 2 days: a stopped nightly backup no longer prunes, so coverage alone
   doesn't see it) and the **free space** on the backups' disk (it warns below 10%).

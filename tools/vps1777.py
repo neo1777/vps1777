@@ -2531,6 +2531,9 @@ def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
     giorno che dice sempre la stessa cosa smette di essere letto entro una
     settimana.
 
+    La discesa si misura fino alla promessa (COPERTURA_BACKUP_ATTESA), non oltre: sopra,
+    i settimanali fanno oscillare i giorni distinti col giorno della settimana.
+
     ⚠️ RESIDUO DICHIARATO: `copertura_max` non scende mai. Se un giorno la
     ritenzione venisse volutamente accorciata, questo presidio resterebbe in
     allarme finché qualcuno non tocca lo stato. È il prezzo di non avere una
@@ -2564,7 +2567,11 @@ def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
         warn(f"copertura backup: {quanti} giorni distinti{dove} "
              f"sui {COPERTURA_BACKUP_ATTESA} promessi")
     scesa_da = str(st.get("copertura_scesa_da") or "")
-    if quanti < massimo:
+    # La discesa si misura fino alla promessa, non oltre (10/10/2026): sopra i 7 giorni
+    # i settimanali fanno oscillare i giorni distinti fra 9 e 11 col giorno della
+    # settimana, e il confronto col massimo storico (11) teneva acceso l'allarme da
+    # diciotto giorni con 9 giorni coperti. Da 11 a 3 resta un guasto.
+    if quanti < min(massimo, COPERTURA_BACKUP_ATTESA):
         if not scesa_da:
             st["copertura_scesa_da"] = now_iso()
             if notifica:
