@@ -1465,6 +1465,70 @@ def _sidecar(p: Path) -> bool:
     return p.name.endswith(".vec.db")
 
 
+# ───── P13 (11/10/2026): lo stato dell'indice per senso di ogni DB ─────
+# Il timer notturno aggiorna solo i DB che un indice lo hanno già; la prima costruzione si
+# fa sul PC (docs/RICERCA-IBRIDA.md, «Attivare la ricerca per senso»). Senza questa colonna
+# un DB senza indice, o cresciuto dopo l'ultima costruzione, spariva in silenzio dalla
+# ricerca per senso. Si leggono solo tabelle normali (indice_meta, indice_righe): niente
+# estensione vec0, e la cache sta sulle date di modifica dei due file.
+_STATO_INDICE_CACHE: dict[str, tuple[tuple[int, int], dict]] = {}
+
+_CURA_PC = ("si costruisce sul PC e si carica il .vec.db (docs/RICERCA-IBRIDA.md, «Attivare "
+            "la ricerca per senso»); il timer notturno non fa la prima costruzione")
+
+
+def stato_indice(db_path: Union[str, Path], *, cache: bool = True) -> dict:
+    """{stato, messaggi, dopo, generato, impronta, cura} dell'indice accanto a `db_path`.
+    stato: assente · allineato · da_aggiornare · senza_registro · illeggibile."""
+    db = Path(db_path)
+    vec = db.with_suffix(".vec.db")
+    if not vec.is_file():
+        return {"stato": "assente", "cura": _CURA_PC}
+    try:
+        chiave = (db.stat().st_mtime_ns, vec.stat().st_mtime_ns)
+    except OSError:
+        return {"stato": "illeggibile", "cura": "il file non si legge"}
+    if cache:
+        hit = _STATO_INDICE_CACHE.get(str(db))
+        if hit is not None and hit[0] == chiave:
+            return dict(hit[1])
+    out: dict = {"stato": "allineato", "messaggi": None, "dopo": None, "generato": None,
+                 "impronta": None, "cura": ""}
+    try:
+        cv = sqlite3.connect(f"file:{vec}?mode=ro", uri=True)
+        try:
+            meta = dict(cv.execute("SELECT chiave, valore FROM indice_meta"))
+            out["generato"] = meta.get("generato")
+            out["impronta"] = (meta.get("modello_impronta") or "")[:8] or None
+            try:
+                n, ultimo = cv.execute("SELECT count(*), max(msg_rowid) FROM indice_righe").fetchone()
+            except sqlite3.OperationalError:
+                n, ultimo = None, None
+                out["stato"] = "senza_registro"
+        finally:
+            cv.close()
+        out["messaggi"] = n if n is not None else (int(meta["messaggi"]) if str(meta.get("messaggi", "")).isdigit() else None)
+        if ultimo is not None:
+            cd = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            try:
+                out["dopo"] = cd.execute("SELECT count(*) FROM messages WHERE rowid > ?",
+                                         (ultimo,)).fetchone()[0]
+            finally:
+                cd.close()
+    except sqlite3.Error as exc:
+        return {"stato": "illeggibile", "cura": f"l'indice non si legge: {exc}"}
+    if out["stato"] == "senza_registro":
+        out["cura"] = ("indice vecchio, senza il registro che verifica i risultati: va "
+                       "ricostruito sul PC (il timer lo rifiuta)")
+    elif chiave[0] > chiave[1]:
+        out["stato"] = "da_aggiornare"
+        out["cura"] = (f"lo aggiorna il timer notturno, o a mano: vps1777 indice-notturno "
+                       f"--db {db.stem}")
+    if cache:
+        _STATO_INDICE_CACHE[str(db)] = (chiave, dict(out))
+    return out
+
+
 def list_db_infos(db_dir: Union[str, Path], *, top: int = 5) -> list[dict]:
     """Le schede di tutti gli archivi di `db_dir` (ordinate per nome), sidecar
     esclusi. Unica fonte per /admin/archive e per la Mini App. Chiamarla da un

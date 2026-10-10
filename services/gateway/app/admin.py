@@ -662,8 +662,30 @@ def _safe_db_name(raw: str, fallback: str = "archivio") -> str:
 
 def _archive_dbs() -> list[dict]:
     """Scheda (db_info) di ogni archivio nella dir (sidecar `.vec.db` esclusi).
-    SINCRONA e cara al primo giro: si chiama con `asyncio.to_thread`."""
-    return archive_indexer.list_db_infos(get_settings().archive_db_dir)
+    SINCRONA e cara al primo giro: si chiama con `asyncio.to_thread`. Con lo stato
+    dell'indice per senso di ognuno (P13)."""
+    cartella = Path(get_settings().archive_db_dir)
+    dbs = archive_indexer.list_db_infos(cartella)
+    for d in dbs:
+        d["indice"] = archive_indexer.stato_indice(cartella / f"{d['name']}.db")
+    return dbs
+
+
+def _cella_indice(st: dict) -> str:
+    """La cella «per senso» di /admin/archive (P13): stato, numeri, e la cura se serve."""
+    etichetta = {"allineato": "allineato", "da_aggiornare": "da aggiornare",
+                 "assente": "nessun indice", "senza_registro": "senza registro",
+                 "illeggibile": "illeggibile"}.get(st.get("stato", ""), st.get("stato", "?"))
+    righe = [f"<strong>{html.escape(etichetta)}</strong>"]
+    if st.get("messaggi") is not None:
+        righe.append(f"{st['messaggi']} indicizzati")
+    if st.get("dopo"):
+        righe.append(f"{st['dopo']} righe arrivate dopo")
+    if st.get("generato"):
+        righe.append(f"costruito il {html.escape(str(st['generato'])[:10])}")
+    if st.get("cura"):
+        righe.append(f'<span class="hint">{html.escape(st["cura"])}</span>')
+    return "<br>".join(righe)
 
 
 def _fmt_size(n: float) -> str:
@@ -895,13 +917,14 @@ async def archive_view(request: Request) -> Response:
                 f'<td class="top-labels">{top}</td>'
                 f"<td>{_fmt_size(d['size'])}</td>"
                 f"<td>{html.escape(str(d['mtime'])[:10])}</td>"
+                f"<td>{_cella_indice(d.get('indice') or {})}</td>"
                 f'<td><form method="POST" action="/admin/archive/delete" class="delform">'
                 f'<input type="hidden" name="db" value="{html.escape(d["name"])}">'
                 f'<button type="submit" class="danger">Elimina</button></form></td></tr>'
             )
         table = (f'<section><div class="kicker">DB nell\'archivio</div>'
                  f'<div class="tblwrap"><table><thead><tr><th>nome</th><th>ruolo</th><th>descrizione</th><th>messaggi</th><th>etichette</th>'
-                 f'<th>principali</th><th>dimensione</th><th>aggiornato</th><th></th></tr></thead>'
+                 f'<th>principali</th><th>dimensione</th><th>aggiornato</th><th>per senso</th><th></th></tr></thead>'
                  f'<tbody>{rows}</tbody></table></div>'
                  f'<p class="hint">Eliminare un DB toglie subito l\'archivio dalla ricerca. '
                  f'Per <em>resettarlo</em>: elimina e ricarica la fonte con lo stesso nome.</p>'

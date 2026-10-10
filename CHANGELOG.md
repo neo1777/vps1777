@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **`/admin/archive` dice com'è l'indice per senso di ogni DB (P13).** Colonna nuova «per
+  senso»: allineato, da aggiornare (con le righe arrivate dopo l'ultima costruzione e il comando
+  `vps1777 indice-notturno --db <nome>`), nessun indice (la prima costruzione si fa sul PC: il
+  timer notturno aggiorna solo gli indici che esistono), senza registro (da ricostruire). Prima un
+  DB fuori dall'indice spariva in silenzio dalla ricerca per senso. Si leggono solo le tabelle
+  normali dell'indice, con una cache sulle date dei due file.
+
 ## [0.78.0] — 2026-10-10
 
 **I lavori lunghi di nb1777 tornano «in corso» invece di cadere: `lavoro_esito`, 49 tool.**
