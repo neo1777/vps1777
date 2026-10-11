@@ -17,8 +17,9 @@ Bot Telegram owner-only — gestione NotebookLM da chat.
 
 - `/start` — saluto + check AUTH (se pending, messaggio guida)
 - `/aiuto` — lista comandi
-- `/lista` — elenca notebook
-- `/chiedi <id> <domanda>` — domanda RAG
+- `/lista` — i notebook come bottoni: un tocco sceglie quello su cui chiedere
+- `/chiedi <domanda>` — domanda RAG sul notebook scelto (o `/chiedi <id> <domanda>`); la
+  risposta arriva formattata, con le fonti, e un errore arriva col suo messaggio
 
 (Il set completo dei ~60 comandi arriverà in una release successiva.)
 

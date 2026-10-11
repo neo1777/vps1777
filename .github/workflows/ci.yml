@@ -477,6 +477,16 @@ jobs:
         run: uv run --with pytest pytest tests_runtime/ -v
       - name: Test archive-mcp FTS (stdlib-only)
         run: uvx pytest services/archive-mcp/tests/ -v
+      # P12 (11/10/2026): il bot non aveva test. Le parti pure (formato.py) girano qui; i
+      # comandi importano python-telegram-bot, saltano qui (importorskip) e girano nello
+      # step dopo, con le deps del lock.
+      - name: Test nb1777-bot formato (stdlib-only)
+        run: uvx pytest services/nb1777-bot/tests/ -v
+      - name: Test nb1777-bot comandi (deps del lock)
+        working-directory: services/nb1777-bot
+        run: |
+          uv sync --frozen
+          uv run --with pytest pytest tests/test_comandi.py -v
       # /health importa l'SDK mcp: nello step stdlib-only qui sopra SALTA (importorskip
       # dichiarato nel test). Questo step lo fa girare con le deps del lock — senza,
       # il presidio del healthcheck semantico non girerebbe MAI in CI (vaglio 03/09).

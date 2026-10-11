@@ -1,6 +1,10 @@
 """
 Telegram bot — owner-only, 5 comandi: /start, /aiuto, /pannello, /lista, /chiedi.
 
+P12 (11/10/2026): /lista mostra i notebook come bottoni e il tocco sceglie quello su cui
+/chiedi interroga; la risposta è formattata con le fonti; un errore arriva col suo messaggio.
+Le parti pure stanno in `formato.py`.
+
 Il resto passa dalla Mini App (/pannello). Estendere il bot verso i ~60 comandi del
 vecchio nb1777/bot.py è una decisione aperta (docs/roadmap/prompt-c2-bot-expansion.md),
 non un lavoro in corso.
@@ -8,7 +12,6 @@ non un lavoro in corso.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 from functools import wraps
@@ -31,6 +34,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
+from . import formato
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -80,8 +84,12 @@ def owner_only(
     return wrapper
 
 
-async def _mcp_call(tool: str, args: dict[str, Any] | None = None) -> Any:
-    """Chiama un tool MCP via streamable-http. MVP: single-shot, no session."""
+async def chiama_tool(tool: str, args: dict[str, Any] | None = None, *,
+                      timeout: float = 300.0) -> list[str]:
+    """Chiama un tool di nb1777 via streamable-http (single-shot, senza sessione) e ritorna
+    i blocchi di testo. Ogni guasto, di rete, HTTP, JSON-RPC o del tool, solleva
+    `formato.ErroreMCP` con un messaggio da mostrare (P12: prima diventava «Risposta
+    vuota.»). Il timeout di default resta sopra il tetto di notebook_query (270 s)."""
     s = get_settings()
     payload = {
         "jsonrpc": "2.0",
@@ -90,25 +98,20 @@ async def _mcp_call(tool: str, args: dict[str, Any] | None = None) -> Any:
         "params": {"name": tool, "arguments": args or {}},
     }
     # MCP streamable-http: l'Accept DEVE includere ENTRAMBI i tipi, altrimenti
-    # il server risponde 406 Not Acceptable. La risposta arriva come SSE
-    # (text/event-stream): va estratto il payload JSON dalla riga `data:`.
+    # il server risponde 406 Not Acceptable.
     headers = {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
     }
-    # timeout ampio: una query RAG su NotebookLM può richiedere qualche minuto
-    # (deve restare ≥ del timeout subprocess di nb1777-mcp, ~270s).
-    async with httpx.AsyncClient(timeout=300.0) as client:
-        resp = await client.post(s.nb1777_mcp_url, json=payload, headers=headers)
-        resp.raise_for_status()
-        if "text/event-stream" in resp.headers.get("content-type", ""):
-            for line in resp.text.splitlines():
-                if line.startswith("data:"):
-                    data = line[5:].strip()
-                    if data:
-                        return json.loads(data)
-            raise RuntimeError("risposta SSE MCP senza payload 'data:'")
-        return resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=5.0)) as client:
+            resp = await client.post(s.nb1777_mcp_url, json=payload, headers=headers)
+    except httpx.RequestError as exc:
+        log.warning("mcp %s: %s", tool, exc)
+        raise formato.ErroreMCP(f"nb1777 non raggiungibile ({type(exc).__name__})") from exc
+    if resp.status_code != 200:
+        raise formato.ErroreMCP(f"nb1777 ha risposto HTTP {resp.status_code} a {tool}")
+    return formato.testi(formato.payload_rpc(resp.headers.get("content-type", ""), resp.text))
 
 
 # ───── comandi ─────
@@ -168,8 +171,8 @@ async def cmd_aiuto(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await msg.reply_text(
         "*Comandi nb1777*\n\n"
         "/pannello — apri il pannello di controllo (Mini App)\n"
-        "/lista — elenca i tuoi notebook\n"
-        "/chiedi `<id> <domanda>` — domanda RAG su un notebook\n"
+        "/lista — i tuoi notebook, tocca per sceglierne uno\n"
+        "/chiedi `<domanda>` — domanda sul notebook scelto (o `<id> <domanda>`)\n"
         "/aiuto — questo messaggio\n"
         "\n_MVP. La versione completa con tutti i comandi arriva in F8._",
         parse_mode=ParseMode.MARKDOWN,
@@ -188,80 +191,156 @@ async def _rag_disabled(msg) -> bool:
     return True
 
 
+def _markup(righe: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(t, callback_data=d) for t, d in riga]
+                                 for riga in righe])
+
+
+async def _elenco(ctx: ContextTypes.DEFAULT_TYPE) -> list[dict[str, str]]:
+    """I notebook da nb_list, tenuti in `user_data` per i bottoni (la pagina successiva
+    e il titolo del notebook scelto non rifanno la chiamata)."""
+    nbs = formato.notebook(await chiama_tool("nb_list", timeout=60.0))
+    ctx.user_data["elenco"] = nbs
+    return nbs
+
+
 @owner_only
-async def cmd_lista(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_lista(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if not msg:
         return
     if await _rag_disabled(msg):
         return
     try:
-        result = await _mcp_call("nb_list")
-    except (httpx.RequestError, httpx.HTTPStatusError) as exc:
-        await msg.reply_text(f"Errore MCP: {exc}")
+        nbs = await _elenco(ctx)
+    except formato.ErroreMCP as exc:
+        await msg.reply_text(f"⚠️ {exc}")
         return
-    content = result.get("result", {}).get("content", [])
-    if not content:
-        await msg.reply_text("Nessun notebook (o auth mancante — /start).")
-        return
-    # nb_list serializza i notebook come blocchi content separati (uno per
-    # notebook, ciascuno un JSON dict); alcune versioni usano un singolo blocco
-    # con un array. Gestiamo entrambi senza assumere la forma.
-    nbs: list[dict[str, Any]] = []
-    for block in content:
-        txt = block.get("text", "") if isinstance(block, dict) else ""
-        try:
-            obj = json.loads(txt)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(obj, list):
-            nbs.extend(x for x in obj if isinstance(x, dict))
-        elif isinstance(obj, dict):
-            nbs.append(obj)
     if not nbs:
-        first = content[0].get("text", "") if isinstance(content[0], dict) else ""
-        await msg.reply_text(first[:3500] or "Risposta vuota.")
+        await msg.reply_text("Nessun notebook su questo account.")
         return
-    out = "\n".join(
-        f"• {n.get('id', '?')}  {n.get('title', '(senza titolo)')}"
-        for n in nbs[:30]
-    )
-    if len(nbs) > 30:
-        out += f"\n… e altri {len(nbs) - 30}"
-    # plain text: i titoli dei notebook sono arbitrari e romperebbero il Markdown
-    await msg.reply_text(out)
+    # testo semplice e titoli nei bottoni: i titoli sono arbitrari e romperebbero il Markdown
+    await msg.reply_text(f"I tuoi notebook ({len(nbs)}). Tocca per sceglierlo:",
+                         reply_markup=_markup(formato.tastiera(nbs)))
 
 
 @owner_only
 async def cmd_chiedi(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """/chiedi <domanda> sul notebook scelto; /chiedi <id> <domanda> come prima. Senza
+    un notebook scelto la domanda resta in attesa e arrivano i bottoni per sceglierlo."""
     msg = update.effective_message
     if not msg:
         return
     if await _rag_disabled(msg):
         return
     args = ctx.args or []
-    if len(args) < 2:
-        await msg.reply_text("Uso: /chiedi <id_notebook> <domanda>")
+    if len(args) >= 2 and formato.e_id_notebook(args[0]):
+        await _rispondi(msg, ctx, {"id": args[0], "title": ""}, " ".join(args[1:]))
         return
-    nb_id = args[0]
-    question = " ".join(args[1:])
-    # feedback immediato: la query RAG può richiedere da decine di secondi a
-    # qualche minuto; senza, l'utente pensa che il bot sia bloccato.
-    await msg.reply_text("⏳ Interrogo NotebookLM… (può richiedere fino a qualche minuto)")
+    domanda = " ".join(args).strip()
+    scelto = ctx.user_data.get("notebook")
+    if scelto and domanda:
+        await _rispondi(msg, ctx, scelto, domanda)
+        return
+    if scelto:
+        await msg.reply_text(f"Notebook: {scelto['title'] or scelto['id']}. "
+                             "Scrivi /chiedi <domanda>, o /lista per cambiarlo.")
+        return
+    try:
+        nbs = await _elenco(ctx)
+    except formato.ErroreMCP as exc:
+        await msg.reply_text(f"⚠️ {exc}")
+        return
+    if not nbs:
+        await msg.reply_text("Nessun notebook su questo account.")
+        return
+    if domanda:
+        ctx.user_data["in_attesa"] = domanda
+    await msg.reply_text("Su quale notebook?" if domanda else
+                         "Scegli il notebook, poi /chiedi <domanda>:",
+                         reply_markup=_markup(formato.tastiera(nbs)))
+
+
+async def cmd_scelta(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Tap su un notebook (`nb:<id>`) o su una pagina (`nbp:<n>`). Owner-only come /ack."""
+    q = update.callback_query
+    if q is None:
+        return
+    s = get_settings()
+    if not s.telegram_owner_id or (q.from_user and q.from_user.id != s.telegram_owner_id):
+        await q.answer("non autorizzato")
+        return
+    tipo, _, valore = (q.data or "").partition(":")
+    nbs = ctx.user_data.get("elenco") or []
+    if tipo == "nbp":
+        try:
+            if not nbs:
+                nbs = await _elenco(ctx)
+        except formato.ErroreMCP as exc:
+            await q.answer(str(exc)[:190])
+            return
+        await q.answer()
+        pagina = int(valore) if valore.isdigit() else 0
+        await q.edit_message_reply_markup(reply_markup=_markup(formato.tastiera(nbs, pagina)))
+        return
+    titolo = next((n["title"] for n in nbs if n["id"] == valore), "")
+    scelto = {"id": valore, "title": titolo}
+    ctx.user_data["notebook"] = scelto
+    await q.answer("scelto")
+    try:
+        await q.edit_message_text(f"Notebook: {titolo or valore}")
+    except Exception as exc:  # noqa: BLE001 — cosmetico, la scelta è già fatta
+        log.warning("edit scelta fallito: %s", exc)
+    domanda = ctx.user_data.pop("in_attesa", "")
+    if domanda and q.message:
+        await _rispondi(q.message, ctx, scelto, domanda)
+
+
+async def _titoli_fonti(nb_id: str) -> dict[str, str]:
+    """source_id → titolo, per le fonti della risposta. Best effort: senza, resta l'id."""
+    try:
+        blocchi = await chiama_tool("source_list", {"notebook_id": nb_id}, timeout=30.0)
+    except formato.ErroreMCP:
+        return {}
+    return {str(f.get("id") or f.get("source_id") or ""): str(f.get("title") or "")
+            for f in formato.blocchi_json(blocchi)}
+
+
+# notebook_query aspetta al massimo 270 s per giro (P6); se torna `in_corso` si ritira
+# con notebook_query_esito, per altri giri fino a questo numero.
+RITIRI = 2
+
+
+async def _rispondi(msg, ctx: ContextTypes.DEFAULT_TYPE, nb: dict[str, str],
+                    domanda: str) -> None:
+    # feedback immediato: la query RAG può richiedere da decine di secondi a minuti
+    await msg.reply_text(f"⏳ Chiedo a «{nb['title'] or nb['id']}»… "
+                         "(può richiedere qualche minuto)")
     try:
         await ctx.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
     except Exception:  # noqa: BLE001 — il chat action è solo cosmetico
         pass
     try:
-        # attesa_max al tetto: il bot sa aspettare (timeout 300 s), la risposta arriva intera
-        result = await _mcp_call("notebook_query", {"notebook_id": nb_id, "question": question,
-                                                    "attesa_max": 270})
-    except (httpx.RequestError, httpx.HTTPStatusError) as exc:
-        await msg.reply_text(f"Errore MCP: {exc}")
+        blocchi = await chiama_tool("notebook_query", {"notebook_id": nb["id"],
+                                                       "question": domanda,
+                                                       "attesa_max": 270})
+        payload = (formato.blocchi_json(blocchi) or [{"answer": blocchi[0] if blocchi else ""}])[0]
+        for _ in range(RITIRI):
+            if payload.get("stato") != "in_corso" or not payload.get("query_id"):
+                break
+            blocchi = await chiama_tool("notebook_query_esito",
+                                        {"query_id": payload["query_id"], "attesa_max": 270})
+            payload = (formato.blocchi_json(blocchi) or [{"answer": ""}])[0]
+    except formato.ErroreMCP as exc:
+        await msg.reply_text(f"⚠️ {exc}")
         return
-    content = result.get("result", {}).get("content", [])
-    text = content[0].get("text", "") if content else ""
-    await msg.reply_text(text[:4000] or "Risposta vuota.")
+    if payload.get("stato") == "in_corso":
+        await msg.reply_text("NotebookLM non ha ancora finito dopo 15 minuti. Riprova più tardi "
+                             "con la stessa domanda, o apri il /pannello.")
+        return
+    testo = formato.risposta_html(payload, await _titoli_fonti(nb["id"]))
+    for pezzo in formato.spezza(testo):
+        await msg.reply_text(pezzo, parse_mode=ParseMode.HTML)
 
 
 # ───── error handler globale ─────
@@ -381,6 +460,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("lista", cmd_lista))
     app.add_handler(CommandHandler("chiedi", cmd_chiedi))
     app.add_handler(CallbackQueryHandler(cmd_ack, pattern=r"^ack:"))
+    app.add_handler(CallbackQueryHandler(cmd_scelta, pattern=r"^nbp?:"))
     app.add_error_handler(_on_error)
     return app
 
