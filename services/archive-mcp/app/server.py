@@ -271,7 +271,7 @@ def search_ibrida(
     - `fuori_perimetro`: {ruolo: [db]} lasciati fuori dal filtro `ruoli`.
     - `senza_indice`: i DB del perimetro che non hanno un indice per senso e quindi non
       sono stati guardati: lì serve `search`;
-    - `parziale: true` se il budget di 40 s è finito: i DB non guardati sono in `saltati`
+    - `parziale: true` se il budget di 30 s è finito: i DB non guardati sono in `saltati`
       col ramo «budget».
 
     ⚠️ Senza modello di embedding o senza alcun indice `.vec.db` NON ricade in silenzio su

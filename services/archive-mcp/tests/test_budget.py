@@ -121,7 +121,7 @@ def test_check_term_oltre_il_budget(db, monkeypatch):
 
 
 def test_search_ibrida_oltre_il_budget_dice_i_db_non_guardati(db, monkeypatch):
-    monkeypatch.setattr(db, "BUDGET_S", 0.0)
+    monkeypatch.setattr(db, "BUDGET_IBRIDA_S", 0.0)
     monkeypatch.setattr(db, "_indici_disponibili",
                         lambda: {"a": Path("/x/a.vec.db"), "b": Path("/x/b.vec.db")})
     monkeypatch.setattr(db.semantica, "embed_query", lambda t, d: b"\x00" * 4)
@@ -146,3 +146,40 @@ def test_il_progress_handler_interrompe_una_query_lunga(db):
     assert budget.finito()
     # la connessione torna senza handler: una query dopo il budget non si interrompe
     assert conn.execute("SELECT 1").fetchone() == (1,)
+
+
+def test_search_ibrida_ha_un_budget_suo_piu_corto():
+    """La ricerca dei vicini di sqlite-vec è codice C in una tabella virtuale: il progress
+    handler non la interrompe a metà (dal vivo, 11/10: 8 s per una sola ricerca su 452.000
+    vettori, e una search_ibrida da 69 s con `parziale: true`). Il budget di search_ibrida
+    lascia spazio a una ricerca che non si ferma e al lavoro dopo la fusione."""
+    sys.path.insert(0, str(_SERVIZIO))
+    from app import db as modulo
+    assert modulo.BUDGET_IBRIDA_S <= 30.0 < modulo.BUDGET_S
+
+
+def test_a_budget_finito_la_ricerca_dei_vicini_non_parte(db, monkeypatch):
+    """Prima il controllo era solo fra un DB e l'altro: un FTS interrotto dal budget
+    lasciava partire lo stesso la ricerca dei vicini, che non si interrompe."""
+    monkeypatch.setattr(db, "BUDGET_IBRIDA_S", 40.0)
+    _orologio(monkeypatch, db, 25.0)     # init 1025 → fine 1065; ogni lettura +25 s
+    monkeypatch.setattr(db, "_indici_disponibili", lambda: {"a": Path("/x/a.vec.db")})
+    monkeypatch.setattr(db.semantica, "embed_query", lambda t, d: b"\x00" * 4)
+
+    class _Conn:
+        def set_progress_handler(self, *a):
+            pass
+
+        def execute(self, *a, **k):
+            raise sqlite3.OperationalError("niente tabelle qui")
+
+        def close(self):
+            pass
+    monkeypatch.setattr(db, "_open_con_indice", lambda name, idx: _Conn())
+    monkeypatch.setattr(db.fts, "search_conn", lambda *a, **k: [])
+    vicini = []
+    monkeypatch.setattr(db.semantica, "knn_pezzi", lambda *a, **k: vicini.append(1) or [])
+    r = db.search_ibrida("memoria piano", "a", limit=5)
+    assert vicini == [], "la ricerca dei vicini è partita a budget finito"
+    assert ("a", "budget") in {(s["db"], s["ramo"]) for s in r["saltati"]}
+    assert r["parziale"] is True
