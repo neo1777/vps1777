@@ -531,13 +531,18 @@ The `ruolo` (role) field makes it readable.
 
 > **The time budget (since 0.81.0, P3).** The gateway's proxy closes the read at 60 s, and
 > on 10/10 `count` took 41 s with a cold cache (0.7 s with a warm cache on the same DBs).
-> `count`, `check_term` and `search_ibrida` stop at **40 s**: an SQLite `progress_handler`
-> interrupts even a single query, the DBs not looked at go into `saltati` with
+> `count` and `check_term` stop at **40 s**, `search_ibrida` at **30 s**: an SQLite
+> `progress_handler` interrupts even a single full-text query, the DBs not looked at go into
+> `saltati` with
 > `ramo: "budget"` and the `db_name` to retry with, and the result carries
 > **`parziale: true`**. In `count` the remaining time goes to `anche_fuori`, and
 > `anche_fuori_non_contati` lists the DBs outside the scope that were not counted, because
 > of the budget or because they cannot be read. `search` has no budget: measured at 3.6 s at
-> most, and its list would have nowhere to say "partial". An unreadable `.db` file in the
+> most, and its list would have nowhere to say "partial". The sqlite-vec nearest-neighbour
+> search, instead, can **not** be interrupted halfway (it is C code in a virtual table: 8 s
+> for one search over 452,000 vectors, measured on 11/10), which is why `search_ibrida` has a
+> shorter budget and checks the clock before every search, not only between DBs (since
+> 0.81.1). An unreadable `.db` file in the
 > folder (SQLite: "file is not a database") no longer breaks the search for everyone: that
 > DB is reported as not read, and the others answer.
 

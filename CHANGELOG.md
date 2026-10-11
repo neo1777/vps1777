@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **archive1777: `search_ibrida` non supera più il budget con la ricerca dei vicini.** Dal vivo,
+  dopo la 0.81.0, una `search_ibrida` ha impiegato 69 s (oltre i 60 del proxy) pur dicendo
+  `parziale: true`. Il budget si controllava solo fra un DB e l'altro, e la ricerca dei vicini
+  di sqlite-vec non si ferma a metà: 8 s per una ricerca sui 452.000 vettori di un indice, anche
+  a cache calda. Ora il controllo c'è prima di ogni ricerca e di ogni riformulazione, e
+  `search_ibrida` ha un budget suo di 30 s. I documenti dicevano che il `progress_handler`
+  interrompe «anche una query sola»: vale per le query full-text, non per i vettori.
+
 ### Sicurezza
 - **Il token del bot Telegram non finisce più nel log (H81).** python-telegram-bot parla con
   Telegram via httpx, e httpx scriveva a INFO l'URL di ogni richiesta, che contiene il token:
