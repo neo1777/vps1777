@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.82.0] — 2026-10-11
+
+**nb1777 dichiara la forma di ogni risposta e il codice di ogni errore, e fa i lavori in blocco senza ssh.**
+
 ### Aggiunto
 - **nb1777: i lavori in blocco senza ssh (P14).** `source_describe` dà il riassunto di Gemini di
   una fonte; `nb_export` scrive un notebook in un file JSON (fonti, testi, a scelta i riassunti) e
