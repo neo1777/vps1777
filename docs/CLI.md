@@ -286,6 +286,14 @@ vale solo se la sonda non ha un esito. Se nb1777-mcp non risponde, torna alla da
 Se non trova **nessun** secret da misurare esce **2**: non è «tutto a posto», è «non ho
 potuto guardare» (percorso sbagliato o permessi), e con `--notify` lo dice su Telegram.
 
+**Il promemoria si può posticipare** (dalla 0.83.0, P18). Con un secret da ruotare il timer
+giornaliero ripeteva lo stesso messaggio ogni giorno. Ora il messaggio porta un bottone che apre la
+Mini App sulla scheda Sistema (`/app?vista=sistema`, solo con `PUBLIC_BASE` in https), e lì
+«Posticipa il promemoria di 7 giorni» scrive `onboarding/secrets_posticipa.json`. Finché la data
+non passa, `secrets-status --notify` aggiorna lo stato ma non manda il messaggio, e lo dice nel suo
+output; «annulla» lo riattiva. Il posticipo vale solo per il messaggio: `/admin/secrets` e la
+scheda Sistema continuano a mostrare cosa è da ruotare.
+
 ```bash
 vps1777 secrets-status
 vps1777 secrets-status --notify

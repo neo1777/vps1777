@@ -97,7 +97,8 @@ Perché è solido:
 | `/app/api/archive/db/delete` | POST | Bearer | elimina un DB (irreversibile, con audit) |
 | `/app/api/archive/search` | POST | Bearer | ricerca per parole (`modo: "parole"`, FTS5, default) o per senso (`modo: "senso"`, `search_ibrida`, timeout 120 s per il primo caricamento del modello); `{results, modo, saltati?}` |
 | `/app/api/archive/context` | POST | Bearer | i messaggi attorno a un risultato `{db, uuid}` (`get_context`, 3+3, righe troncate a 2000 caratteri) |
-| `/app/api/secrets` | GET | Bearer | scadenze secret (da `secrets_status.json`) |
+| `/app/api/secrets` | GET | Bearer | scadenze secret (da `secrets_status.json`) e, dalla 0.83.0, `posticipato_fino_a` |
+| `/app/api/secrets/posticipa` | POST | Bearer | `{giorni}` (1-30, 0 annulla): il promemoria quotidiano di `secrets-status` tace fino a quella data; scrive `onboarding/secrets_posticipa.json`, audit `secrets_posticipa` (P18) |
 | `/app/api/audit` | GET | Bearer | ultimi eventi audit |
 | `/app/api/update/state` | GET | Bearer | running vs latest + progress updater |
 | `/app/api/update` | POST | Bearer | richiede l'update (intent → CLI host); rifiuta i downgrade |

@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Il promemoria dei secret si apre sulla vista giusta e si può posticipare (P18).** Il messaggio
+  quotidiano di `secrets-status --notify` porta un bottone che apre la Mini App sulla scheda
+  Sistema (`?vista=sistema`); lì «Posticipa il promemoria di 7 giorni» lo fa tacere fino a quella
+  data (`POST /app/api/secrets/posticipa`, file `onboarding/secrets_posticipa.json`, che il CLI
+  legge sull'host). Il bot non ha un canale di scrittura verso l'host, per questo passa dalla
+  Mini App. Lo stato dei secret resta visibile.
+
 ### Documentazione
 - **nb1777: la misura di nlm in sottoprocesso contro in-process (P21).** Sulla VPS, `nb_list` costa
   2,14 s lanciando la CLI e 0,48 s chiamando i servizi di nlm dentro il processo, che però tiene

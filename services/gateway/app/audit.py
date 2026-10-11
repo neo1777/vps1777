@@ -178,6 +178,8 @@ _CHIAVI_NOTE = frozenset({
     # è di un vocabolario chiuso (ok, errore_tool, timeout, interrotto, errore_stream, 502).
     # Quarta volta che questo presidio ferma qualcuno alla stessa riga.
     "tool", "ms", "esito",
+    # 11/10 — P18: `giorni` del posticipo del promemoria dei secret (un intero, 0-30).
+    "giorni",
 })
 _MAX_VALORE = 500
 
