@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.81.0] — 2026-10-11
+
+**Il bot sceglie il notebook a bottoni; nlm alla 0.15.4; archive1777 carica il modello all'avvio, ha un budget di tempo e dice cosa non ha guardato.**
+
 ### Aggiunto
 - **archive1777: le ricerche su più DB hanno un budget di 40 s (P3).** Il proxy chiude la lettura
   a 60 s, e `count` aveva impiegato 41 s a cache fredda. `count`, `check_term` e `search_ibrida`
