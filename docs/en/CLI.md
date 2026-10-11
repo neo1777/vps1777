@@ -199,11 +199,14 @@ also the gateway's `/admin/archive` page ([ARCHIVE.md](ARCHIVE.md)).
 The options: `--db NAME` (the target DB; default from the file name), `--project LABEL`
 (the project label; default the DB name), `--verify` (asks NotebookLM to verify the
 transcription), `--nlm` (forces the NotebookLM round even on a text file — for instance a
-`.txt` that is the dump of a scan).
+`.txt` that is the dump of a scan), `--artefatto NAME` (instead of the file: an artifact
+already downloaded into nb1777 with `studio_download`, for instance a Studio podcast; it is
+not copied and stays where it is).
 
 ```bash
 vps1777 archive-ingest scansione.pdf --db documenti --verify
 vps1777 archive-ingest note.md --db documenti --project studio   # testo: diretto
+vps1777 archive-ingest --artefatto podcast.m4a --db podcast-studio  # dallo Studio
 ```
 
 ## vps1777 archive-retag

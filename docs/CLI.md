@@ -190,11 +190,14 @@ Per i formati normali caricati dal browser (zip/jsonl/md/pdf-con-testo) c'è anc
 Le opzioni: `--db NOME` (il DB di destinazione; default dal nome del file), `--project
 ETICHETTA` (l'etichetta progetto; default il nome del DB), `--verify` (chiede a NotebookLM
 di verificare la trascrizione), `--nlm` (forza il giro NotebookLM anche su un file di
-testo — per esempio un `.txt` che è il dump di una scansione).
+testo — per esempio un `.txt` che è il dump di una scansione), `--artefatto NOME` (al
+posto del file: un artefatto già scaricato in nb1777 con `studio_download`, per esempio
+un podcast dello Studio; non si copia e resta dov'è).
 
 ```bash
 vps1777 archive-ingest scansione.pdf --db documenti --verify
 vps1777 archive-ingest note.md --db documenti --project studio   # testo: diretto
+vps1777 archive-ingest --artefatto podcast.m4a --db podcast-studio  # dallo Studio
 ```
 
 ## vps1777 archive-retag
