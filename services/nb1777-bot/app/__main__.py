@@ -2,19 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 
-from . import bot
+from . import bot, registro
 from .settings import get_settings
 
 
 def main() -> None:
     s = get_settings()
-    logging.basicConfig(
-        level=s.log_level.upper(),
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        stream=sys.stdout,
-    )
+    # H81: httpx a WARNING e il token mascherato in ogni riga (registro.py)
+    registro.configura_log(s.log_level)
     log = logging.getLogger("nb1777-bot")
     log.info("vps1777-nb1777-bot starting")
     if not s.effective_token:

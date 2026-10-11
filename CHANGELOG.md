@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Il token del bot Telegram non finisce più nel log (H81).** python-telegram-bot parla con
+  Telegram via httpx, e httpx scriveva a INFO l'URL di ogni richiesta, che contiene il token:
+  una riga ogni 10 secondi nel log del container del bot (trovato dal vivo l'11/10). Ora httpx e
+  httpcore sono a WARNING, e un filtro maschera `bot<id>:<token>` in ogni riga, traceback
+  compresi. L'aggiornamento ricrea il container e il log vecchio sparisce con lui. Chi ha letto
+  quei log può avere il token: ruotalo da BotFather (`/revoke`) e aggiorna
+  `secrets/telegram_bot_token.txt`.
+
 ## [0.81.0] — 2026-10-11
 
 **Il bot sceglie il notebook a bottoni; nlm alla 0.15.4; archive1777 carica il modello all'avvio, ha un budget di tempo e dice cosa non ha guardato.**

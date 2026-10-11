@@ -155,8 +155,12 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # e nel path dei metadati. Trovato leggendo la specifica MCP 2026-07-28.
 # + 1 (H80, medium, 04/10) = 80. Il verificatore preso sulla parola: cosign scaricato senza
 # impronta dal CLI, e le immagini firmate per tag. Dal censimento interno di Sagoma.
-EXPECTED_TOTAL = 80
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 12, "medium": 47, "low": 19}
+# + 1 (H81, high, 11/10) = 81. Il segreto custodito come file e poi ripetuto dal programma:
+# httpx scriveva a INFO l'URL della Bot API, col token, ogni 10 s nel log del bot. Trovato
+# dal vivo leggendo il log dopo un update. `high` perché il token è il canale delle
+# notifiche di sicurezza all'owner.
+EXPECTED_TOTAL = 81
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 13, "medium": 47, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
