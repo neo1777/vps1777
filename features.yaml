@@ -564,7 +564,7 @@ features:
            `mancanti`: dopo una ricerca sostituisce un get_context per risultato (P5)."
     dove: ["mcp-tool:archive-mcp/get_many"]
     status: active-default
-    since: "unreleased"
+    since: "0.80.0"
     verify:
       mcp_tool: {service: archive-mcp, name: get_many}
   - id: archive.precedenti
@@ -573,7 +573,7 @@ features:
            raggruppata per project; il riservato resta fuori dal perimetro di default (P5)."
     dove: ["mcp-tool:archive-mcp/precedenti"]
     status: active-default
-    since: "unreleased"
+    since: "0.80.0"
     verify:
       mcp_tool: {service: archive-mcp, name: precedenti}
   - id: archive.get_session
