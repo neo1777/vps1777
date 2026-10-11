@@ -4,6 +4,28 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **archive1777: `get_many` legge più messaggi in una chiamata (P5).** Dopo una ricerca, leggere
+  interi dieci risultati costava dieci `get_context`. `get_many(uuids)` restituisce le righe intere
+  (fino a 50) nell'ordine chiesto, con `speaker`, `voice` e le azioni sulle righe senza testo, e
+  dice in `mancanti` gli uuid che nessun DB ha. Come `get_context` guarda in ogni DB, prima i
+  primari; `max_chars` vale 4000 di default.
+- **archive1777: `precedenti(tema)`, «l'hai già detto?» (P5, #281).** Cerca per senso cosa ha
+  scritto il proprietario su un tema fino a `giorni` fa (default 7) e lo raggruppa per chat o
+  progetto. È `search_ibrida` con `speaker='human'`, quindi il riservato resta fuori dal
+  perimetro di default. La descrizione avverte che chi ha inviato un messaggio non è sempre la
+  voce che parla (`voice='pasted_ai'`).
+- **archive1777: ogni riga dice chi parla.** `search`, `search_ibrida`, `get_context`,
+  `get_conversation` e `get_many` portano `speaker` e `voice` su ogni riga. Prima, per sapere
+  se un risultato era una parola del proprietario, si rifaceva la ricerca con `speaker='human'`.
+  Un campo che la fonte non dice non compare.
+
+### Corretto
+- **La descrizione di `describe_databases` diceva ancora che il ruolo non cambia il perimetro.**
+  È così fino alla 0.73; dalla 0.74.0 la ricerca senza `db_name` guarda i primari e i non
+  dichiarati, e il riservato si interroga solo nominandolo. Il test che teneva la frase vecchia
+  ora tiene quella giusta.
+
 ## [0.79.1] — 2026-10-11
 
 **Lo stato dell'indice per senso guarda le righe nuove, non la data del file.**

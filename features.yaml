@@ -558,6 +558,24 @@ features:
     status: active-default
     verify:
       mcp_tool: {service: archive-mcp, name: set_ruolo}
+  - id: archive.get_many
+    nome: "archive-mcp · get_many"
+    cosa: "Le righe intere di più messaggi (fino a 50) in una chiamata, con speaker, voice e
+           `mancanti`: dopo una ricerca sostituisce un get_context per risultato (P5)."
+    dove: ["mcp-tool:archive-mcp/get_many"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: archive-mcp, name: get_many}
+  - id: archive.precedenti
+    nome: "archive-mcp · precedenti"
+    cosa: "«L'hai già detto?» (#281): search_ibrida con speaker='human' fino a N giorni fa,
+           raggruppata per project; il riservato resta fuori dal perimetro di default (P5)."
+    dove: ["mcp-tool:archive-mcp/precedenti"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: archive-mcp, name: precedenti}
   - id: archive.get_session
     nome: "archive-mcp · get_session"
     cosa: "Tutto ciò che l'archivio sa di UNA sessione Claude Code (contratto recupero/ R1):

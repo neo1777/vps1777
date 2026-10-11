@@ -34,7 +34,9 @@ Telegram, vocali). Cinque regole:
    proprietario sono speaker='human'; voice='own' da solo vale anche per l'assistente.
 4. Prima di dire «non c'è» leggi `saltati` e, in search_ibrida, il perimetro degli `indici`.
 5. Il server serve due ricerche alla volta: raggruppa le chiamate a coppie.
-`list_databases(schede=True)` dice cosa c'è in ogni DB e il suo ruolo."""
+`list_databases(schede=True)` dice cosa c'è in ogni DB e il suo ruolo. Per leggere interi più
+risultati: `get_many(uuids)`, una chiamata. Prima di aprire un tema: `precedenti(tema)`, cosa
+ne ha già detto il proprietario."""
 
 mcp = FastMCP(
     "archive",
@@ -104,6 +106,8 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     "set_ruolo": ("Scrivi il ruolo di un DB", _SCRIVE_METADATI),
     "get_session": ("Scheda di una sessione", _LETTURA),
     "get_stirpe": ("Catena di una sessione", _LETTURA),
+    "get_many": ("Leggi più messaggi", _LETTURA),
+    "precedenti": ("Cosa ne hai già detto", _LETTURA),
 }
 
 
@@ -197,8 +201,8 @@ def search(
     trovato senza quel filtro può venire da materiale incollato: prima di usarlo come fatto,
     `get_context(uuid)`.
 
-    Ritorna righe {db, uuid, project, ts, rank, snippet, snapshot}; `snapshot` = quanto è
-    fresco il DB. Su tutti i DB lo stesso uuid arriva UNA volta, con `anche_in` per gli altri
+    Ritorna righe {db, uuid, project, ts, rank, snippet, speaker, voice, snapshot}; `snapshot`
+    = quanto è fresco il DB. Su tutti i DB lo stesso uuid arriva UNA volta, con `anche_in` per gli altri
     DB (#272). ⚠️ Il server serve 2 ricerche alla volta, le altre aspettano in coda (#270):
     raggruppa le chiamate a coppie.
     """
@@ -254,8 +258,8 @@ def search_ibrida(
     peggiorare le query esatte, non per vincerle. Misurato: FTS5 5/9, vettori 4/9, ibrido 6/9.
 
     Ritorna {righe, indici, parametri} e, solo se qualcosa si è perso, `saltati`:
-    - `righe`: come search, più `origine` ('fts' | 'vettori' | 'entrambi'): dice quale
-      motore ha trovato la riga;
+    - `righe`: come search (speaker e voice compresi), più `origine` ('fts' | 'vettori' |
+      'entrambi'): dice quale motore ha trovato la riga;
     - `indici`: per ogni DB quanti messaggi sono indicizzati e CON CHE PERIMETRO. ⚠️ Leggilo
       prima di dire «non c'è»: fuori dal perimetro gli zeri sembrano assenze, e la risposta
       giusta è `search`. `indici[].verifica` con `scartati` > 0 = indice disallineato, quei
@@ -327,7 +331,7 @@ def get_context(uuid: str, db_name: str = "", before: int = 3,
     troncamento dichiarato nel testo: sui messaggi-hub giganti (workfile/board
     incollati) il payload pieno uccideva la connessione proprio dove il contesto
     serve di più (#268) — parti con max_chars=2000 e allarga solo se serve.
-    Ogni riga: {db, uuid, project, ts, content, is_match, snapshot}; una riga SENZA
+    Ogni riga: {db, uuid, project, ts, content, speaker, voice, is_match, snapshot}; una riga SENZA
     testo (un tool_use, l'output di un comando) porta anche `tools`, le sue azioni."""
     return db.get_context(uuid, db_name, before=before, after=after,
                           max_chars=max_chars)
@@ -346,7 +350,7 @@ def get_conversation(uuid: str, db_name: str = "", limit: int = 200,
 
     Dove l'albero manca — documenti chunked (pdf/telegram/memory) e db storici —
     ricade sull'ordine lineare dello stesso `project` (di solito dalla prima riga).
-    Ogni riga: {db, uuid, project, ts, content, sender, is_match, snapshot}, più
+    Ogni riga: {db, uuid, project, ts, content, sender, speaker, voice, is_match, snapshot}, più
     `tools` sulle righe senza testo, come in get_context.
 
     📏 `limit` (default 200) è quante righe tornano. Se la chat è più lunga non torna
@@ -357,6 +361,60 @@ def get_conversation(uuid: str, db_name: str = "", limit: int = 200,
     `max_chars` come in get_context (#268): su 200 righe piene è la differenza
     fra una risposta e una connessione morta."""
     return db.get_conversation(uuid, db_name, limit=limit, max_chars=max_chars)
+
+
+@mcp.tool()
+def get_many(
+    uuids: Annotated[list[str], Field(description=(
+        "Gli uuid da leggere, quelli tornati da search o search_ibrida (al massimo 50)."))],
+    db_name: Annotated[str, Field(description=(
+        "Nome del DB; '' = tutti, prima i primari."))] = "",
+    max_chars: Annotated[int, Field(description=(
+        "Tronca OGNI riga a questi caratteri, dichiarandolo (default 4000; 0 = intera)."))
+    ] = 4000,
+) -> dict[str, Any]:
+    """Le righe INTERE di più messaggi in una chiamata sola: dopo una ricerca, invece di
+    un get_context per ogni risultato. Solo i messaggi chiesti, senza i vicini: per il
+    contesto attorno resta get_context.
+
+    Ritorna {righe, mancanti}. Ogni riga: {db, uuid, project, ts, content, speaker,
+    voice, snapshot}, nell'ordine degli uuid chiesti, più `tools` sulle righe senza testo
+    e `anche_in` se lo stesso uuid vive in altri DB. `mancanti` = gli uuid che nessun DB
+    ha. Come get_context guarda in ogni DB, non solo nel perimetro della ricerca."""
+    return db.get_many(uuids, db_name, max_chars=max_chars)
+
+
+@mcp.tool()
+def precedenti(
+    tema: Annotated[str, Field(description=(
+        "Il tema in linguaggio naturale, come per search_ibrida."))],
+    giorni: Annotated[int, Field(description=(
+        "Quanti giorni fa finisce la finestra (default 7: il filone di questi giorni non è "
+        "un precedente); 0 = fino a oggi."))] = 7,
+    limit: Annotated[int, Field(description=(
+        "Righe in tutto, prima del raggruppamento (default 30, massimo 200)."))] = 30,
+    db_name: Annotated[str, Field(description=(
+        "Nome del DB; '' = i DB con un indice nel perimetro di default."))] = "",
+    riformulazioni: Annotated[list[str] | None, Field(description=(
+        "Fino a 3 altri modi di dire il tema, come in search_ibrida."))] = None,
+    ruoli: Annotated[str, Field(description=(
+        "Come in search_ibrida: '' = primari e non dichiarati (il riservato resta fuori)."))
+    ] = "",
+) -> dict[str, Any]:
+    """«L'hai già detto?»: cosa ha già scritto il PROPRIETARIO su un tema, prima di
+    lavorarci (#281). È search_ibrida con speaker='human' e la finestra che finisce
+    `giorni` fa, raggruppata per `project` (chat o progetto).
+
+    Ritorna {tema, fino_a, gruppi, righe_totali, indici, parametri}, più `saltati`,
+    `fuori_perimetro` e `nota` quando servono. Ogni gruppo: {project, db, n, primo_ts,
+    ultimo_ts, righe}, nell'ordine della sua riga migliore; ogni riga: {uuid, db, ts,
+    snippet, origine, voice}.
+
+    ⚠️ speaker='human' dice chi ha INVIATO il messaggio, non di chi è la voce: una riga
+    con voice='pasted_ai' o 'pasted_transcript' è materiale incollato, non una sua
+    parola. Prima di citarla: get_context(uuid). Zero gruppi non prova un'assenza."""
+    return db.precedenti(tema, db_name, limit, giorni=giorni,
+                         riformulazioni=riformulazioni, ruoli=ruoli)
 
 
 @mcp.tool()
@@ -409,10 +467,9 @@ def describe_databases() -> list[dict[str, Any]]:
     · `fotografia` · `riscontro` · `riservato` · `non dichiarato`).
     Utile per sapere PRIMA di cercare quanto è ampio e aggiornato l'archivio.
 
-    ⚠️ Il `ruolo` è INFORMAZIONE, non ancora comportamento: `search`/`count`
-    senza `db_name` toccano tutti i DB come prima, `riservato` compreso. Chi
-    vuole restringere ai primari lo deve fare LEGGENDO questo campo e passando
-    `db_name` — il default sui primari è la cura B della #278, non è in vigore."""
+    Il `ruolo` decide anche dove si cerca: senza `db_name` search, search_ibrida,
+    count, check_term e precedenti guardano i primari e i non dichiarati (dalla
+    0.74.0); il `riservato` si interroga solo nominandolo."""
     return db.describe()
 
 

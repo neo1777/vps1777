@@ -69,15 +69,15 @@ def test_set_ruolo_dichiara_il_vocabolario_e_il_default() -> None:
     assert "#278" in doc
 
 
-def test_describe_dichiara_che_il_ruolo_NON_cambia_i_default() -> None:
-    """La cura A è additiva, e la cosa va detta dove qualcuno potrebbe assumere il
-    contrario. Un campo `ruolo` in vista fa credere che il default sia diventato
-    «cerca sui primari» — se lo diventerà (cura B) sarà un cambio di CONTRATTO,
-    con il suo CHANGELOG e il protocollo dello zero aggiornato. Fino ad allora
-    l'unica difesa contro quell'assunzione è la riga che la smentisce."""
+def test_describe_dichiara_che_il_ruolo_decide_il_perimetro() -> None:
+    """Fino alla 0.73 il ruolo era solo informazione, e questa docstring lo diceva. Con
+    P1 (0.74.0, cura B della #278) è diventato il perimetro di default, ma la frase vecchia
+    è rimasta fino alla 0.80: un client leggeva «tocca tutti i DB, riservato compreso».
+    Ora deve dire il contrario, e come si interroga il riservato."""
     _, doc = _firma("describe_databases")
     assert "#278" in doc
-    assert "tutti i DB" in doc and "cura B" in doc
+    assert "non ancora comportamento" not in doc and "non è in vigore" not in doc
+    assert "primari e i non dichiarati" in doc and "solo nominandolo" in doc
 
 
 def test_archive_stats_dichiara_il_costo() -> None:

@@ -3,10 +3,11 @@
 `archive1777` è un motore di ricerca full-text (SQLite FTS5 + BM25) sui tuoi
 corpora: chat, sessioni, note, documenti. **Nasce vuoto**: lo popoli tu, dal
 pannello admin o da riga di comando. I DB caricati sono cercabili **subito**,
-senza riavvii, attraverso i **15 tool MCP** di `archive-mcp` (vedi
+senza riavvii, attraverso i **17 tool MCP** di `archive-mcp` (vedi
 [Cercare — i tool MCP](#cercare--i-tool-mcp)): dalla ricerca (`search`,
-`search_ibrida`, `count`) alla lettura (`get_context`, `get_conversation`) fino
-alle schede di sessione e alle stirpi (`get_session`, `get_stirpe`).
+`search_ibrida`, `count`, `precedenti`) alla lettura (`get_context`,
+`get_conversation`, `get_many`) fino alle schede di sessione e alle stirpi
+(`get_session`, `get_stirpe`).
 
 > **Traduzione.** Questa pagina ha una traduzione inglese completa in
 > [docs/en/ARCHIVE.md](en/ARCHIVE.md), tenuta allineata da un test della CI: chi
@@ -422,11 +423,11 @@ stesso nome DB. Lista ed eliminazione sono disponibili anche dalla **Mini App**
 
 ## Cercare — i tool MCP
 
-`archive-mcp` espone **15 tool** via MCP (usabili dal connettore claude.ai e
+`archive-mcp` espone **17 tool** via MCP (usabili dal connettore claude.ai e
 dalla Mini App). Tutti passano dalla redazione in uscita descritta sopra.
 
-Dalla 0.73.0 ogni tool ha un titolo e le annotazioni MCP: tredici sono di sola lettura,
-`set_description` e `set_ruolo` sovrascrivono i metadati di un DB (distruttivi e
+Dalla 0.73.0 ogni tool ha un titolo e le annotazioni MCP: sono tutti di sola lettura tranne
+`set_description` e `set_ruolo`, che sovrascrivono i metadati di un DB (distruttivi e
 idempotenti). Le descrizioni stanno sotto i 2048 caratteri che Claude Code legge, le
 spiegazioni dei parametri stanno nello schema, e le regole che contano sono anche nelle
 `instructions` del server. Il primo collegamento dopo l'aggiornamento può chiedere di
@@ -434,12 +435,14 @@ nuovo il permesso sui tool.
 
 | Tool | Cosa fa |
 |---|---|
-| `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, snapshot}`. Sulla ricerca in **tutti** i DB lo stesso uuid arriva **una volta**, con `anche_in` per gli altri archivi che lo contengono (niente limit sprecato in fotocopie). Filtri `since`/`until`, `project`, `speaker`, `voice`, `campi` (sotto). `limit` va da 1 a 200: sotto 1 è un errore che lo dice (prima `-1` perdeva in silenzio l'ultimo risultato), sopra 200 si taglia |
+| `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, speaker, voice, snapshot}` (`speaker` e `voice` dalla 0.80.0: chi ha scritto la riga e di chi è la voce, vedi sotto). Sulla ricerca in **tutti** i DB lo stesso uuid arriva **una volta**, con `anche_in` per gli altri archivi che lo contengono (niente limit sprecato in fotocopie). Filtri `since`/`until`, `project`, `speaker`, `voice`, `campi` (sotto). `limit` va da 1 a 200: sotto 1 è un errore che lo dice (prima `-1` perdeva in silenzio l'ultimo risultato), sopra 200 si taglia |
 | `search_ibrida(query, db_name, limit, query_fts, …)` | ricerca **per senso**: FTS5 + vettori fusi (RRF). Serve quando ricordi il senso e non il lessico; richiede il modello di embedding e un indice `<db>.vec.db` sul volume, e se mancano **lo dice** invece di ricadere su FTS5. Accetta `campi` e, dalla 0.62.1, `speaker` come `search` (il filtro vale per tutte e due le liste). Dalla 0.64.0 accetta fino a 3 `riformulazioni`, fuse nella stessa top-k. Dalla 0.65.0 lo snippet è di 64 token e `passaggio` (fino a 400 parole) dà il punto del testo intero dove la domanda è più fitta. Vedi [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
 | `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings`. Stessi filtri di `search`, `campi` compreso |
 | `check_term(term, db_name)` | diagnostica se un termine con un carattere non alfanumerico in testa o in coda (`C++`, `C#`, `g++`, `.NET`) è ricercabile o **collassa** su un token più corto — chiede all'indice, non alla doc |
 | `get_context(uuid, db_name, before, after, max_chars)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; sulle sessioni Claude Code i vicini vengono dal **file di sessione** (la riga cercata lo dice in `vicini_da`); altrove, se il messaggio è in un thread, dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale. `max_chars` (0 = intero) tronca ogni riga **dichiarandolo nel testo** — sui messaggi-hub giganti il payload pieno uccideva la connessione. Una riga **senza testo** (un tool_use, l'output di un comando) porta anche **`tools`**, le azioni che sono il suo contenuto (dalla 0.52.0: prima arrivava vuota), troncato da `max_chars` come il testo |
 | `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine `(ts, uuid)`) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` e `tools` come in `get_context`. Sulle sessioni Claude Code è il **file di sessione** intero (`conversazione_da`), e coi bundle con `recupero/` la scheda della sessione esce **in coda**. Oltre `limit` righe (200) torna una finestra che contiene sempre l'uuid chiesto e la scheda, dichiarata nel campo `finestra` della riga del match |
+| `get_many(uuids, db_name, max_chars)` | dalla 0.80.0: le righe **intere** di più messaggi (fino a 50) in **una** chiamata, nell'ordine chiesto, con `speaker`, `voice` e `tools`; `mancanti` dice gli uuid che nessun DB ha. Dopo una ricerca sostituisce un `get_context` per ogni risultato. `max_chars` vale 4000 di default (0 = intere). Come `get_context` guarda in ogni DB, prima i primari; lo stesso uuid in più DB torna una volta, con `anche_in` |
+| `precedenti(tema, giorni, limit, …)` | dalla 0.80.0: **«l'hai già detto?»** (#281). Cosa ha scritto il **proprietario** su un tema fino a `giorni` fa (default 7; 0 = fino a oggi): è `search_ibrida` con `speaker='human'`, raggruppata per `project` (`gruppi`: `{project, db, n, primo_ts, ultimo_ts, righe}`). Vedi sotto |
 | `get_session(sessionId, db_name, limit, max_chars)` | tutto ciò che l'archivio sa di **una sessione** Claude Code: la riga di `sessioni`, la **scheda**, i messaggi della conversazione, gli archi, la stirpe — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | la **stirpe** di una sessione: la chiusura sugli archi con `chiusura=1`, coi dati di ogni membro — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
@@ -464,6 +467,27 @@ tiene allora solo le righe che hanno parole, perché un vettore non dice se ha c
 testo o le azioni. Un valore diverso da `tutto`/`testo` è un errore, non un ritorno
 silenzioso al default.
 
+**Chi parla, su ogni riga (dalla 0.80.0, P5).** La regola del server dice che una citazione
+non è un fatto finché non sai chi parla, ma fino alla 0.79 le righe di `search`,
+`search_ibrida` e `get_context` non lo dicevano: per saperlo si rifaceva la ricerca con
+`speaker='human'`. Ora ogni riga porta **`speaker`** (chi l'ha inviata: `human`,
+`assistant`, `tool`, `system`, `other`, `unknown`) e **`voice`** (di chi è la voce, una
+stima: `own`, `pasted_ai`, `pasted_transcript`…), anche in `get_conversation` accanto a
+`sender` e in `get_many`. Un campo che la fonte non dice non compare: una riga mai
+classificata, o un DB v1 senza quelle colonne, non riceve un valore inventato.
+
+**`precedenti` — «l'hai già detto?» (dalla 0.80.0, #281).** L'archivio sa cose che il
+proprietario non ricorda di sapere: il caso che ha fatto nascere la #281 è un piano di
+lavoro rifatto da capo a settembre, che era già scritto a maggio. `precedenti(tema)` cerca
+per senso **le sue parole** su quel tema e le raggruppa per chat o progetto, in ordine
+della riga migliore di ogni gruppo, con il primo e l'ultimo `ts`. La finestra finisce
+`giorni` fa (default 7) perché il filone di questi giorni non è un precedente. Il
+personale resta fuori perché il perimetro di default non tocca il `riservato`. Due cautele,
+dette anche nella descrizione del tool: `speaker='human'` dice chi ha **inviato** il
+messaggio, non di chi è la voce (una riga con `voice='pasted_ai'` è materiale incollato,
+e prima di citarla serve `get_context`), e zero gruppi non provano un'assenza. Senza indice
+vettoriale `precedenti` dà lo stesso errore di `search_ibrida`.
+
 ### Il `ruolo` di un archivio — instradare senza leggere la prosa
 
 Con molti DB caricati, «quale archivio interrogare» è la prima domanda di ogni
@@ -481,18 +505,19 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 | `non dichiarato` | **nessuno si è pronunciato** su quel DB. Non è «poco importante», e non va indovinato dal nome: è il valore che si legge quando `set_ruolo` non è mai stata chiamata (o quando la dichiarazione è stata ritirata passando `""`) |
 
 > **Il ruolo decide dove si cerca (dalla 0.74.0, cura B della #278).** Senza `db_name`,
-> `search`, `search_ibrida`, `count` e `check_term` guardano i **primari** e i **non
-> dichiarati**: su un'installazione dove nessuno ha dichiarato niente non sparisce
+> `search`, `search_ibrida`, `count`, `check_term` e `precedenti` guardano i **primari** e i
+> **non dichiarati**: su un'installazione dove nessuno ha dichiarato niente non sparisce
 > nulla. Fotografie e riscontri si riaprono col parametro `ruoli` (`'fotografia'`,
 > `'riscontro, fotografia'`, o `'tutti'`); il riservato si interroga solo nominandolo.
 > È un **cambio di contratto** e cambia il significato di uno zero: «0 sui primari» non è
 > «0 ovunque». Per questo `count`, col perimetro di default, aggiunge `anche_fuori`
 > (`{db: n}`, i match nelle fotografie e nei riscontri) e `search_ibrida` dice in
-> `fuori_perimetro` quali DB ha lasciato fuori. `get_context` e `get_conversation`
-> cercano un uuid già trovato e guardano ancora tutti i DB.
+> `fuori_perimetro` quali DB ha lasciato fuori. `get_context`, `get_conversation` e
+> `get_many` cercano un uuid già trovato e guardano ancora tutti i DB.
 
 > **Concorrenza.** Il server serve **2 ricerche alla volta** (`search`,
-> `search_ibrida`, `count`, `archive_stats`, `get_session`, `get_stirpe`): le
+> `search_ibrida`, `count`, `archive_stats`, `get_session`, `get_stirpe`; `precedenti`
+> passa da `search_ibrida`): le
 > richieste in più si mettono in coda da sole invece di morire in timeout. Chi
 > orchestra più chiamate le raggruppi a coppie.
 

@@ -5,10 +5,10 @@
 `archive1777` is a full-text search engine (SQLite FTS5 + BM25) over your
 corpora: chats, sessions, notes, documents. **It starts empty**: you fill it,
 from the admin panel or from the command line. Loaded DBs are searchable
-**immediately**, with no restarts, through the **15 MCP tools** of `archive-mcp`
+**immediately**, with no restarts, through the **17 MCP tools** of `archive-mcp`
 (see [Searching — the MCP tools](#searching--the-mcp-tools)): from search
-(`search`, `search_ibrida`, `count`) to reading (`get_context`,
-`get_conversation`) up to session cards and lineages (`get_session`,
+(`search`, `search_ibrida`, `count`, `precedenti`) to reading (`get_context`,
+`get_conversation`, `get_many`) up to session cards and lineages (`get_session`,
 `get_stirpe`).
 
 > **Translation.** This page has a complete English translation in
@@ -427,12 +427,12 @@ the same DB name. List and deletion are also available from the **Mini App**
 
 ## Searching — the MCP tools
 
-`archive-mcp` exposes **15 tools** over MCP (usable from the claude.ai connector
+`archive-mcp` exposes **17 tools** over MCP (usable from the claude.ai connector
 and from the Mini App). All of them go through the output redaction described
 above.
 
-Since 0.73.0 every tool has a title and the MCP annotations: thirteen are read-only,
-`set_description` and `set_ruolo` overwrite a DB's metadata (destructive and idempotent).
+Since 0.73.0 every tool has a title and the MCP annotations: all are read-only except
+`set_description` and `set_ruolo`, which overwrite a DB's metadata (destructive and idempotent).
 The descriptions stay under the 2048 characters Claude Code reads, the parameter
 explanations live in the schema, and the rules that matter are also in the server's
 `instructions`. The first connection after the update may ask for permission on the
@@ -440,12 +440,14 @@ tools again.
 
 | Tool | What it does |
 |---|---|
-| `search(query, db_name, limit, …)` | FTS5 search; returns `{db, uuid, project, ts, rank, snippet, snapshot}`. When searching **all** DBs the same uuid arrives **once**, with `anche_in` listing the other archives that contain it (no limit wasted on copies). Filters `since`/`until`, `project`, `speaker`, `voice`, `campi` (below). `limit` goes from 1 to 200: below 1 it is an error that says so (before, `-1` silently lost the last result), above 200 it is cut |
+| `search(query, db_name, limit, …)` | FTS5 search; returns `{db, uuid, project, ts, rank, snippet, speaker, voice, snapshot}` (`speaker` and `voice` since 0.80.0: who wrote the row and whose voice it is, see below). When searching **all** DBs the same uuid arrives **once**, with `anche_in` listing the other archives that contain it (no limit wasted on copies). Filters `since`/`until`, `project`, `speaker`, `voice`, `campi` (below). `limit` goes from 1 to 200: below 1 it is an error that says so (before, `-1` silently lost the last result), above 200 it is cut |
 | `search_ibrida(query, db_name, limit, query_fts, …)` | search **by meaning**: FTS5 + vectors fused (RRF). For when you remember the meaning and not the wording; it needs the embedding model and a `<db>.vec.db` index on the volume, and if they are missing **it says so** instead of falling back to FTS5. Takes `campi` and, since 0.62.1, `speaker` like `search` (the filter applies to both lists). Since 0.64.0 it takes up to 3 `riformulazioni`, fused into the same top-k. Since 0.65.0 the snippet is 64 tokens and `passaggio` (up to 400 words) gives the spot of the whole text where the question is densest. See [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
 | `count(query, db_name, …)` | how many messages match (not limited): `{total, per_db}`; if a term **collapses** it adds `warnings`. Same filters as `search`, `campi` included |
 | `check_term(term, db_name)` | diagnoses whether a term with a non-alphanumeric character at its start or end (`C++`, `C#`, `g++`, `.NET`) is searchable or **collapses** onto a shorter token — it asks the index, not the docs |
 | `get_context(uuid, db_name, before, after, max_chars)` | the messages **around** a result, with the **full content**; on Claude Code sessions the neighbours come from the **session file** (the matched row says so in `vicini_da`); elsewhere, if the message is in a thread, from the **same thread** (`parent_uuid` edge), not from mere closeness in time. `max_chars` (0 = whole) truncates each row **saying so in the text** — on giant hub messages the full payload killed the connection. A row **without text** (a tool_use, the output of a command) also carries **`tools`**, the actions that are its content (since 0.52.0: before, it came out empty), truncated by `max_chars` like the text |
 | `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` and `tools` as in `get_context`. On Claude Code sessions it is the whole **session file** (`conversazione_da`), and with bundles carrying `recupero/` the session's card comes **last**. Beyond `limit` rows (200) it returns a window that always contains the requested uuid and the card, declared in the `finestra` field of the match row |
+| `get_many(uuids, db_name, max_chars)` | since 0.80.0: the **whole** rows of several messages (up to 50) in **one** call, in the requested order, with `speaker`, `voice` and `tools`; `mancanti` lists the uuids no DB has. After a search it replaces one `get_context` per result. `max_chars` defaults to 4000 (0 = whole). Like `get_context` it looks at every DB, primaries first; the same uuid in several DBs comes back once, with `anche_in` |
+| `precedenti(tema, giorni, limit, …)` | since 0.80.0: **"have you said this before?"** (#281). What the **owner** wrote about a topic up to `giorni` days ago (default 7; 0 = up to today): it is `search_ibrida` with `speaker='human'`, grouped by `project` (`gruppi`: `{project, db, n, primo_ts, ultimo_ts, righe}`). See below |
 | `get_session(sessionId, db_name, limit, max_chars)` | everything the archive knows about **one** Claude Code **session**: the `sessioni` row, the **card**, the conversation's messages, the edges, the lineage — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | a session's **lineage**: the closure over the edges with `chiusura=1`, with each member's data — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
 | `list_projects(db_name, top)` | the `project` labels with their counts — to **browse** the archive, not just search it |
@@ -470,6 +472,27 @@ then keeps only rows that have words, because a vector doesn't say whether it hi
 text or the actions. A value other than `tutto`/`testo` is an error, not a silent return
 to the default.
 
+**Who speaks, on every row (since 0.80.0, P5).** The server's rule says a quote is not a fact
+until you know who is speaking, but up to 0.79 the rows of `search`, `search_ibrida` and
+`get_context` did not say so: to find out you ran the search again with `speaker='human'`.
+Now every row carries **`speaker`** (who sent it: `human`, `assistant`, `tool`, `system`,
+`other`, `unknown`) and **`voice`** (whose voice it is, an estimate: `own`, `pasted_ai`,
+`pasted_transcript`…), also in `get_conversation` next to `sender` and in `get_many`. A
+field the source does not state is left out: a row never classified, or a v1 DB without
+those columns, does not get an invented value.
+
+**`precedenti` — "have you said this before?" (since 0.80.0, #281).** The archive knows
+things its owner no longer remembers knowing: the case behind #281 is a work plan redone
+from scratch in September that had already been written in May. `precedenti(tema)` searches
+by meaning for **the owner's own words** on that topic and groups them by chat or project,
+ordered by each group's best row, with the first and last `ts`. The window ends `giorni`
+days ago (default 7) because the thread of the last few days is not a precedent. Personal
+material stays out because the default scope does not touch the `riservato` DB. Two
+caveats, also stated in the tool description: `speaker='human'` says who **sent** the
+message, not whose voice it is (a row with `voice='pasted_ai'` is pasted material, and
+quoting it needs `get_context` first), and zero groups do not prove an absence. Without a
+vector index `precedenti` raises the same error as `search_ibrida`.
+
 ### An archive's `ruolo` — routing without reading prose
 
 With many DBs loaded, "which archive to query" is the first question of every
@@ -487,18 +510,20 @@ The `ruolo` (role) field makes it readable.
 | `non dichiarato` | **nobody has said anything** about that DB. It doesn't mean "unimportant", and it must not be guessed from the name: it is the value you read when `set_ruolo` was never called (or when the declaration was withdrawn by passing `""`) |
 
 > **The role decides where to search (since 0.74.0, cure B of #278).** Without
-> `db_name`, `search`, `search_ibrida`, `count` and `check_term` look at the **primary**
-> and **undeclared** DBs: on an install where nobody declared anything, nothing
+> `db_name`, `search`, `search_ibrida`, `count`, `check_term` and `precedenti` look at the
+> **primary** and **undeclared** DBs: on an install where nobody declared anything, nothing
 > disappears. Snapshots and cross-checks reopen with the `ruoli` parameter
 > (`'fotografia'`, `'riscontro, fotografia'`, or `'tutti'`); the reserved one is queried
 > only by naming it. It is a **contract change** and it changes the meaning of a zero:
 > "0 on primaries" is not "0 everywhere". That is why `count`, with the default scope,
 > adds `anche_fuori` (`{db: n}`, the matches in snapshots and cross-checks) and
-> `search_ibrida` says in `fuori_perimetro` which DBs it left out. `get_context` and
-> `get_conversation` look up an uuid already found and still look at every DB.
+> `search_ibrida` says in `fuori_perimetro` which DBs it left out. `get_context`,
+> `get_conversation` and `get_many` look up an uuid already found and still look at every
+> DB.
 
 > **Concurrency.** The server serves **2 searches at a time** (`search`,
-> `search_ibrida`, `count`, `archive_stats`, `get_session`, `get_stirpe`): extra
+> `search_ibrida`, `count`, `archive_stats`, `get_session`, `get_stirpe`; `precedenti`
+> goes through `search_ibrida`): extra
 > requests queue by themselves instead of dying in a timeout. Whoever orchestrates
 > several calls should group them in pairs.
 
