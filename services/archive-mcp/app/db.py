@@ -907,6 +907,12 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             out["parziale"] = True
     if fuori_perimetro:
         out["fuori_perimetro"] = _fuori_per_ruolo(fuori_perimetro)
+    # 11/10/2026: i DB del perimetro SENZA indice per senso non entrano nella ricerca, e
+    # prima non lo diceva nessuno: dal vivo `precedenti` cercava in 5 DB su 8, e il
+    # primario di claude.ai non c'era. Uno zero da lì sembrava un'assenza.
+    senza = [n for n in nel_perimetro if n not in indici]
+    if senza:
+        out["senza_indice"] = senza
     return out
 
 # P4 (05/10/2026): per una riga trovata «per senso» lo snippet era l'inizio del messaggio,
@@ -1308,12 +1314,19 @@ def precedenti(tema: str, db: str = "", limit: int = 30, *,
                            "righe_totali": len(trovato["righe"]),
                            "indici": trovato.get("indici", []),
                            "parametri": trovato.get("parametri", {})}
-    for chiave in ("saltati", "fuori_perimetro"):
+    for chiave in ("saltati", "fuori_perimetro", "senza_indice"):
         if trovato.get(chiave):
             out[chiave] = trovato[chiave]
+    note = []
     if not trovato["righe"]:
-        out["nota"] = ("Nessun precedente nel perimetro: zero non prova un'assenza. Prova "
-                       "altre parole (riformulazioni), `search` col lessico, o giorni=0.")
+        note.append("Nessun precedente nel perimetro: zero non prova un'assenza. Prova "
+                    "altre parole (riformulazioni), `search` col lessico, o giorni=0.")
+    if trovato.get("senza_indice"):
+        note.append(f"{len(trovato['senza_indice'])} DB del perimetro senza indice per senso "
+                    "non sono stati guardati (`senza_indice`): lì cerca con `search`, "
+                    "speaker='human'.")
+    if note:
+        out["nota"] = " ".join(note)
     return out
 
 
