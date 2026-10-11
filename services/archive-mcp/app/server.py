@@ -9,6 +9,7 @@ import asyncio
 import functools
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -16,7 +17,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from . import db, redazione
+from . import db, redazione, semantica
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -616,4 +617,6 @@ async def health(_request):  # noqa: ANN001, ANN202 — firma imposta da custom_
         "dbs": n_dbs,
         "mcp_sdk": sdk,
         "mcp_protocol_max": LATEST_PROTOCOL_VERSION,
+        # P2: lo stato del modello di embedding e quanto ha impiegato a caricarsi
+        "modello": semantica.stato_modello(Path(get_settings().archive_model_dir)),
     })

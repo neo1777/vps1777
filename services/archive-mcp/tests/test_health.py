@@ -33,6 +33,9 @@ def test_health_ok_porta_dbs_e_revisione_mcp(monkeypatch):
     # gateway?» non può avere come risposta una deduzione dal lockfile)
     assert body["mcp_protocol_max"], body
     assert body["mcp_sdk"], body
+    # P2: lo stato del modello di embedding (qui non c'è: «assente», non un errore)
+    assert body["modello"]["stato"] in ("assente", "non_caricato", "in_caricamento",
+                                        "caricato", "errore"), body
 
 
 def test_health_guasto_del_registry_e_503_non_verde(monkeypatch):

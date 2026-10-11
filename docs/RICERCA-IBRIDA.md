@@ -651,6 +651,15 @@ Nessun riavvio: la registry dei DB si ricarica da sola quando la dir cambia (un
 l'indice agganciato si riaprono), e il modello si carica alla prima ricerca
 ibrida.
 
+**Il modello caldo (dalla 0.81.0, P2).** Se all'avvio di archive-mcp c'è almeno un indice,
+il modello si carica subito, in un thread, e il log dice quanto ci ha messo («modello di
+embedding caricato in N s (avvio)»); la prima ricerca non lo paga più. Senza indici si carica
+alla prima ricerca ibrida, come prima. `/health` di archive-mcp porta il campo `modello`:
+`{stato, secondi, da}`, con `stato` fra `assente`, `non_caricato`, `in_caricamento`,
+`caricato` ed `errore`. Il container non ha swap (`memswap_limit` uguale a `mem_limit`):
+il 04/10, con 2 GB di swap concessi, il kernel aveva messo in swap 782 MB del modello invece
+di liberare la cache dei DB, e il caricamento era durato 8 min 25 s.
+
 ⚠️ L'indice vale per il DB da cui è nato. Se sulla VPS il DB è stato
 re-ingerito dopo, prima di caricarlo lancia `--controlla` su una copia di quel
 DB: se non è in pari, aggiornalo lì e carica quello.

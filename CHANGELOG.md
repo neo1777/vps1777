@@ -15,6 +15,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   <domanda>` funziona come prima.
 
 ### Cambiato
+- **archive1777: il modello di embedding si carica all'avvio, e niente swap (P2).** Se c'è almeno
+  un indice, archive-mcp carica il modello in un thread appena parte e scrive nel log quanto ci
+  ha messo; `/health` porta lo stato (`modello`). Il container non ha più swap
+  (`memswap_limit: 2g`, come `mem_limit`): il 04/10 il kernel aveva messo in swap il modello
+  invece di liberare la cache dei DB, e la prima ricerca per senso aveva aspettato 8 min 25 s.
 - **nb1777: nlm passa dalla 0.12.0 alla 0.15.4 (P9).** Cinque rilasci a monte, con correzioni sul
   login, sulle ricerche approfondite che sembravano fallite e sulla concorrenza. Il salto è fatto
   a mano col metodo di sempre (changelog, `--help` dei comandi, contract-test: 234 test verdi).

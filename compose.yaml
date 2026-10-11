@@ -182,6 +182,9 @@ services:
     pids_limit: 256
     cpus: 2.0
     mem_limit: 2g  # anon misurata 841 MB col modello caricato (04/10); il resto è cache dei DB, che il kernel libera
+    # P2 (11/10/2026): niente swap. Il 04/10, con 2 GB di swap concessi, il kernel ha messo in
+    # swap 782 MB del modello invece di liberare la cache dei DB (8 min 25 s per caricarlo).
+    memswap_limit: 2g
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}${VPS1777_DIGEST_ARCHIVE_MCP:+@${VPS1777_DIGEST_ARCHIVE_MCP}}
     environment:
       ARCHIVE_HTTP_HOST: 0.0.0.0

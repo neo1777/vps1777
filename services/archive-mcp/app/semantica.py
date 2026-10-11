@@ -47,6 +47,7 @@ import logging
 import re
 import struct
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -155,6 +156,9 @@ class SemanticaNonPronta(RuntimeError):
 _LOCK = threading.Lock()
 _SESSIONE: Any = None                # onnxruntime.InferenceSession (lazy, condivisa)
 _TOKENIZER: Any = None
+# P2 (11/10/2026): com'è andato il caricamento, per /health e per il log. `da` dice chi l'ha
+# chiesto: l'avvio (riscalda_modello) o la prima ricerca.
+_STATO: dict[str, Any] = {"stato": "non_caricato"}
 
 
 def apri_modello(model_dir: Path, *, thread: int = 2) -> tuple[Any, Any]:
@@ -207,13 +211,55 @@ def _carica_modello(model_dir: Path) -> tuple[Any, Any]:
     global _SESSIONE, _TOKENIZER
     if _SESSIONE is not None:
         return _SESSIONE, _TOKENIZER
+    return _carica_e_misura(model_dir, "prima ricerca")
+
+
+def _carica_e_misura(model_dir: Path, da: str) -> tuple[Any, Any]:
+    global _SESSIONE, _TOKENIZER
     with _LOCK:
         if _SESSIONE is not None:                       # qualcuno l'ha caricato mentre aspettavo
             return _SESSIONE, _TOKENIZER
-        # 2 thread: la VPS ha 4 core e sei container. Un embedding da 25 ms non
-        # vale la fame di CPU degli altri servizi.
-        _SESSIONE, _TOKENIZER = apri_modello(model_dir, thread=2)
+        _STATO.clear()
+        _STATO.update(stato="in_caricamento", da=da)
+        inizio = time.monotonic()
+        try:
+            # 2 thread: la VPS ha 4 core e sei container. Un embedding da 25 ms non
+            # vale la fame di CPU degli altri servizi.
+            _SESSIONE, _TOKENIZER = apri_modello(model_dir, thread=2)
+        except Exception as exc:
+            _STATO.update(stato="errore", errore=str(exc)[:300])
+            raise
+        secondi = round(time.monotonic() - inizio, 1)
+        _STATO.update(stato="caricato", secondi=float(secondi))
+        log.info("modello di embedding caricato in %.1f s (%s)", secondi, da)
         return _SESSIONE, _TOKENIZER
+
+
+def stato_modello(model_dir: Path) -> dict[str, Any]:
+    """{stato, secondi?, da?, errore?}: assente (mancano i file), non_caricato,
+    in_caricamento, caricato, errore. Per /health: quanto ha impiegato il caricamento è
+    la misura del tetto di memoria (P2)."""
+    if _SESSIONE is None and _STATO.get("stato") == "non_caricato" and not all(
+            (model_dir / f).is_file() for f in ("model.onnx", "tokenizer.json")):
+        return {"stato": "assente"}
+    return dict(_STATO)
+
+
+def riscalda_modello(model_dir: Path, *, indici: int) -> None:
+    """Carica il modello all'avvio, in un thread, se c'è almeno un indice che lo userà
+    (P2, 11/10/2026). Prima lo pagava la prima search_ibrida, in faccia al client: il
+    04/10, col modello finito in swap, 8 min 25 s. Un errore resta nello stato e nel log
+    e non ferma niente: la prima ricerca riproverà e lo dirà."""
+    if indici <= 0:
+        log.info("nessun indice vettoriale: il modello si carica alla prima search_ibrida")
+        return
+    if not all((model_dir / f).is_file() for f in ("model.onnx", "tokenizer.json")):
+        log.info("modello di embedding assente in %s: niente da riscaldare", model_dir)
+        return
+    try:
+        _carica_e_misura(model_dir, "avvio")
+    except Exception as exc:                            # noqa: BLE001 — thread di avvio
+        log.warning("riscaldamento del modello fallito: %s", exc)
 
 
 def embed_query(testo: str, model_dir: Path) -> bytes:
