@@ -3,7 +3,7 @@
 `archive1777` è un motore di ricerca full-text (SQLite FTS5 + BM25) sui tuoi
 corpora: chat, sessioni, note, documenti. **Nasce vuoto**: lo popoli tu, dal
 pannello admin o da riga di comando. I DB caricati sono cercabili **subito**,
-senza riavvii, attraverso i **17 tool MCP** di `archive-mcp` (vedi
+senza riavvii, attraverso i **18 tool MCP** di `archive-mcp` (vedi
 [Cercare — i tool MCP](#cercare--i-tool-mcp)): dalla ricerca (`search`,
 `search_ibrida`, `count`, `precedenti`) alla lettura (`get_context`,
 `get_conversation`, `get_many`) fino alle schede di sessione e alle stirpi
@@ -433,7 +433,7 @@ stesso nome DB. Lista ed eliminazione sono disponibili anche dalla **Mini App**
 
 ## Cercare — i tool MCP
 
-`archive-mcp` espone **17 tool** via MCP (usabili dal connettore claude.ai e
+`archive-mcp` espone **18 tool** via MCP (usabili dal connettore claude.ai e
 dalla Mini App). Tutti passano dalla redazione in uscita descritta sopra.
 
 Dalla 0.73.0 ogni tool ha un titolo e le annotazioni MCP: sono tutti di sola lettura tranne
@@ -453,6 +453,7 @@ nuovo il permesso sui tool.
 | `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine `(ts, uuid)`) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` e `tools` come in `get_context`. Sulle sessioni Claude Code è il **file di sessione** intero (`conversazione_da`), e coi bundle con `recupero/` la scheda della sessione esce **in coda**. Oltre `limit` righe (200) torna una finestra che contiene sempre l'uuid chiesto e la scheda, dichiarata nel campo `finestra` della riga del match |
 | `get_many(uuids, db_name, max_chars)` | dalla 0.80.0: le righe **intere** di più messaggi (fino a 50) in **una** chiamata, nell'ordine chiesto, con `speaker`, `voice` e `tools`; `mancanti` dice gli uuid che nessun DB ha. Dopo una ricerca sostituisce un `get_context` per ogni risultato. `max_chars` vale 4000 di default (0 = intere). Come `get_context` guarda in ogni DB, prima i primari; lo stesso uuid in più DB torna una volta, con `anche_in` |
 | `precedenti(tema, giorni, limit, …)` | dalla 0.80.0: **«l'hai già detto?»** (#281). Cosa ha scritto il **proprietario** su un tema fino a `giorni` fa (default 7; 0 = fino a oggi): è `search_ibrida` con `speaker='human'`, raggruppata per `project` (`gruppi`: `{project, db, n, primo_ts, ultimo_ts, righe}`). Vedi sotto |
+| `delta(vecchio, nuovo, limit, project)` | dalla 0.84.0: **cosa è cambiato fra due fotografie** dello stesso account (due export claude.ai), per uuid: righe **sparite** (chat cancellate), **nuove** e **cambiate** (stesso uuid, testo diverso), contate per `project`, con gli esempi più recenti di ciascun tipo. `uuid_condivisi` dice quanti uuid i due DB hanno in comune: se è bassa gli uuid non sono stabili fra le due fonti (mvp-100626, workfile) e il delta non vale. Budget di 40 s: oltre torna `parziale`; `project` restringe. Misurato l'11/10 sui canarini del 07/09: fra 080726 e 290826 (8,8 s) `project:bot1777` ha 2 righe sparite e `project:How to use Claude` 3; fra mvp-100626 e 290826 gli uuid condivisi sono lo 0% e la nota lo dice |
 | `get_session(sessionId, db_name, limit, max_chars)` | tutto ciò che l'archivio sa di **una sessione** Claude Code: la riga di `sessioni`, la **scheda**, i messaggi della conversazione, gli archi, la stirpe — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | la **stirpe** di una sessione: la chiusura sugli archi con `chiusura=1`, coi dati di ogni membro — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |

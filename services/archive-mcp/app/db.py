@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import hashlib
+import heapq
 import logging
 import os
 import json
@@ -1341,6 +1343,118 @@ def precedenti(tema: str, db: str = "", limit: int = 30, *,
         note.append(f"{len(trovato['senza_indice'])} DB del perimetro senza indice per senso "
                     "non sono stati guardati (`senza_indice`): lì cerca con `search`, "
                     "speaker='human'.")
+    if note:
+        out["nota"] = " ".join(note)
+    return out
+
+
+# ── P19 (11/10/2026): cosa è cambiato fra due fotografie dello stesso archivio ────────
+# Un export claude.ai è una FOTOGRAFIA dell'account: due export di date diverse dicono cosa
+# l'account ha perso (chat cancellate), guadagnato o riscritto. Prima si ricavava a mano;
+# i canarini del 07/09 (`bot1777`, `How to use Claude`: presenti nel 080726, a zero nel
+# 290826) erano saltati fuori per caso. Il confronto è per `uuid`, che negli export claude.ai
+# è stabile; in `mvp-100626` e nei workfile no, e lì il delta direbbe «tutto sparito, tutto
+# nuovo»: per questo si misura quanti uuid i due DB condividono e lo si dichiara.
+DELTA_ESEMPI = 20
+DELTA_ESEMPI_MASSIMO = 200
+DELTA_CONDIVISI_MINIMO = 0.5     # sotto questa quota il delta per uuid non è affidabile
+
+
+def _impronta(testo: Any) -> bytes:
+    return hashlib.blake2b(str(testo or "").encode("utf-8", "surrogatepass"),
+                           digest_size=16).digest()
+
+
+def _riga_delta(r: sqlite3.Row) -> dict[str, Any]:
+    testo = " ".join(str(r["content"] or "").split())
+    return {"uuid": r["uuid"], "project": r["project"] or "", "ts": r["ts"] or "",
+            "snippet": testo[:200] + ("…" if len(testo) > 200 else "")}
+
+
+@_serializzata
+def delta(vecchio: str, nuovo: str, *, limit: int = DELTA_ESEMPI,
+          project: str = "") -> dict[str, Any]:
+    """Il confronto per uuid fra due DB: righe sparite, nuove e col testo cambiato,
+    contate per progetto, con gli esempi più recenti di ciascun tipo."""
+    _maybe_reload()
+    if vecchio == nuovo:
+        raise ValueError("vecchio e nuovo sono lo stesso DB: dammene due diversi.")
+    n_esempi = _limite(limit, DELTA_ESEMPI_MASSIMO)
+    ca, cb = _open(vecchio), _open(nuovo)
+    budget = _Budget(BUDGET_S)
+    filtro, args = ("WHERE project = ?", (project,)) if project else ("", ())
+    sql = f"SELECT uuid, project, ts, content FROM messages {filtro} ORDER BY uuid"
+    conti = {"in_comune": 0, "spariti": 0, "nuovi": 0, "cambiati": 0}
+    per_progetto: dict[str, dict[str, int]] = {}
+    esempi: dict[str, list] = {"spariti": [], "nuovi": [], "cambiati": []}
+    serie = 0                          # spareggio stabile per heapq
+
+    def conta(tipo: str, r: sqlite3.Row) -> None:
+        nonlocal serie
+        conti[tipo] += 1
+        g = per_progetto.setdefault(r["project"] or "", {"spariti": 0, "nuovi": 0, "cambiati": 0})
+        g[tipo] += 1
+        serie += 1
+        h = esempi[tipo]
+        voce = (r["ts"] or "", serie, r)
+        if len(h) < n_esempi:
+            heapq.heappush(h, voce)
+        elif voce[0] > h[0][0]:
+            heapq.heapreplace(h, voce)
+
+    parziale = False
+    arrivato_a = ""
+    with budget.su(ca), budget.su(cb):
+        try:
+            ia, ib = ca.execute(sql, args), cb.execute(sql, args)
+            a, b = next(ia, None), next(ib, None)
+            while a is not None or b is not None:
+                if b is None or (a is not None and a["uuid"] < b["uuid"]):
+                    conta("spariti", a)
+                    arrivato_a = a["uuid"]
+                    a = next(ia, None)
+                elif a is None or b["uuid"] < a["uuid"]:
+                    conta("nuovi", b)
+                    arrivato_a = b["uuid"]
+                    b = next(ib, None)
+                else:
+                    conti["in_comune"] += 1
+                    if _impronta(a["content"]) != _impronta(b["content"]):
+                        conta("cambiati", b)
+                    arrivato_a = a["uuid"]
+                    a, b = next(ia, None), next(ib, None)
+        except sqlite3.OperationalError as exc:
+            if "interrupt" not in str(exc).lower():
+                raise
+            parziale = True
+    righe_v = conti["in_comune"] + conti["spariti"]
+    righe_n = conti["in_comune"] + conti["nuovi"]
+    piu_piccolo = min(righe_v, righe_n)
+    quota = round(conti["in_comune"] / piu_piccolo, 3) if piu_piccolo else 0.0
+    progetti = sorted(({"project": k, **v} for k, v in per_progetto.items()),
+                      key=lambda g: (g["spariti"] + g["nuovi"] + g["cambiati"]), reverse=True)
+    out: dict[str, Any] = {
+        "vecchio": {"db": vecchio, "righe": righe_v, "snapshot": _snapshot(Path(_DBS[vecchio]))},
+        "nuovo": {"db": nuovo, "righe": righe_n, "snapshot": _snapshot(Path(_DBS[nuovo]))},
+        **conti,
+        "uuid_condivisi": quota,
+        "progetti": progetti[:n_esempi],
+        "progetti_totali": len(progetti),
+        "esempi": {t: [_riga_delta(v[2]) for v in sorted(h, reverse=True)]
+                   for t, h in esempi.items()},
+    }
+    if project:
+        out["project"] = project
+    note = []
+    if parziale:
+        out["parziale"] = True
+        out["arrivato_a"] = arrivato_a
+        note.append(f"Budget di {BUDGET_S:.0f} s finito: i conti valgono fino all'uuid "
+                    f"{arrivato_a!r} (in ordine di uuid). Restringi con project=.")
+    if piu_piccolo and quota < DELTA_CONDIVISI_MINIMO:
+        note.append(f"I due DB condividono solo il {quota:.0%} degli uuid: probabilmente gli "
+                    "uuid non sono stabili fra queste due fonti (succede con mvp-100626 e coi "
+                    "workfile), e allora «spariti» e «nuovi» sono la stessa roba con due nomi.")
     if note:
         out["nota"] = " ".join(note)
     return out

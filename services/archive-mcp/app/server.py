@@ -37,7 +37,8 @@ Telegram, vocali). Cinque regole:
 5. Il server serve due ricerche alla volta: raggruppa le chiamate a coppie.
 `list_databases(schede=True)` dice cosa c'è in ogni DB e il suo ruolo. Per leggere interi più
 risultati: `get_many(uuids)`, una chiamata. Prima di aprire un tema: `precedenti(tema)`, cosa
-ne ha già detto il proprietario."""
+ne ha già detto il proprietario. Fra due fotografie dello stesso account (due export claude.ai):
+`delta(vecchio, nuovo)`, cosa è sparito, arrivato o cambiato."""
 
 mcp = FastMCP(
     "archive",
@@ -109,6 +110,7 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     "get_stirpe": ("Catena di una sessione", _LETTURA),
     "get_many": ("Leggi più messaggi", _LETTURA),
     "precedenti": ("Cosa ne hai già detto", _LETTURA),
+    "delta": ("Cosa è cambiato fra due DB", _LETTURA),
 }
 
 
@@ -424,6 +426,34 @@ def precedenti(
     parola. Prima di citarla: get_context(uuid). Zero gruppi non prova un'assenza."""
     return db.precedenti(tema, db_name, limit, giorni=giorni,
                          riformulazioni=riformulazioni, ruoli=ruoli)
+
+
+@mcp.tool()
+def delta(
+    vecchio: Annotated[str, Field(description=(
+        "Il DB della fotografia più vecchia (vedi list_databases), es. 'claude-ai-080726'."))],
+    nuovo: Annotated[str, Field(description=(
+        "Il DB della fotografia più nuova, es. 'claude-ai-290826'."))],
+    limit: Annotated[int, Field(description=(
+        "Esempi per tipo e progetti elencati (default 20, massimo 200)."))] = 20,
+    project: Annotated[str, Field(description=(
+        "Solo questa etichetta esatta (titolo chat o project:*): più veloce sui DB grandi."))
+    ] = "",
+) -> dict[str, Any]:
+    """Cosa è cambiato fra due fotografie dello stesso archivio, per uuid: le righe
+    SPARITE (nel vecchio, non nel nuovo: chat cancellate dall'account), NUOVE e CAMBIATE
+    (stesso uuid, testo diverso).
+
+    Ritorna {vecchio, nuovo, in_comune, spariti, nuovi, cambiati, uuid_condivisi,
+    progetti, progetti_totali, esempi}; ogni progetto è {project, spariti, nuovi,
+    cambiati}, ordinati per quante differenze hanno; `esempi` ha per ogni tipo le righe
+    più recenti {uuid, project, ts, snippet}. Su DB grandi può tornare `parziale` con
+    `arrivato_a` (budget di 40 s): restringi con `project`.
+
+    ⚠️ `uuid_condivisi` è la quota di uuid in comune sul DB più piccolo. Se è bassa (`nota`)
+    gli uuid non sono stabili fra le due fonti, e «spariti» e «nuovi» sono la stessa roba
+    con due nomi: vale per export claude.ai fra loro, non per mvp-100626 o i workfile."""
+    return db.delta(vecchio, nuovo, limit=limit, project=project)
 
 
 @mcp.tool()

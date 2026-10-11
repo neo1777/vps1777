@@ -5,7 +5,7 @@
 `archive1777` is a full-text search engine (SQLite FTS5 + BM25) over your
 corpora: chats, sessions, notes, documents. **It starts empty**: you fill it,
 from the admin panel or from the command line. Loaded DBs are searchable
-**immediately**, with no restarts, through the **17 MCP tools** of `archive-mcp`
+**immediately**, with no restarts, through the **18 MCP tools** of `archive-mcp`
 (see [Searching — the MCP tools](#searching--the-mcp-tools)): from search
 (`search`, `search_ibrida`, `count`, `precedenti`) to reading (`get_context`,
 `get_conversation`, `get_many`) up to session cards and lineages (`get_session`,
@@ -437,7 +437,7 @@ the same DB name. List and deletion are also available from the **Mini App**
 
 ## Searching — the MCP tools
 
-`archive-mcp` exposes **17 tools** over MCP (usable from the claude.ai connector
+`archive-mcp` exposes **18 tools** over MCP (usable from the claude.ai connector
 and from the Mini App). All of them go through the output redaction described
 above.
 
@@ -458,6 +458,7 @@ tools again.
 | `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` and `tools` as in `get_context`. On Claude Code sessions it is the whole **session file** (`conversazione_da`), and with bundles carrying `recupero/` the session's card comes **last**. Beyond `limit` rows (200) it returns a window that always contains the requested uuid and the card, declared in the `finestra` field of the match row |
 | `get_many(uuids, db_name, max_chars)` | since 0.80.0: the **whole** rows of several messages (up to 50) in **one** call, in the requested order, with `speaker`, `voice` and `tools`; `mancanti` lists the uuids no DB has. After a search it replaces one `get_context` per result. `max_chars` defaults to 4000 (0 = whole). Like `get_context` it looks at every DB, primaries first; the same uuid in several DBs comes back once, with `anche_in` |
 | `precedenti(tema, giorni, limit, …)` | since 0.80.0: **"have you said this before?"** (#281). What the **owner** wrote about a topic up to `giorni` days ago (default 7; 0 = up to today): it is `search_ibrida` with `speaker='human'`, grouped by `project` (`gruppi`: `{project, db, n, primo_ts, ultimo_ts, righe}`). See below |
+| `delta(vecchio, nuovo, limit, project)` | since 0.84.0: **what changed between two snapshots** of the same account (two claude.ai exports), by uuid: rows **gone** (deleted chats), **new** and **changed** (same uuid, different text), counted per `project`, with the most recent examples of each kind. `uuid_condivisi` says how many uuids the two DBs share: if it is low the uuids are not stable between the two sources (mvp-100626, workfiles) and the delta does not hold. 40 s budget: beyond it returns `parziale`; `project` narrows it. Measured on 11/10 on the 07/09 canaries: between 080726 and 290826 (8.8 s) `project:bot1777` has 2 rows gone and `project:How to use Claude` 3; between mvp-100626 and 290826 the shared uuids are 0% and the note says so |
 | `get_session(sessionId, db_name, limit, max_chars)` | everything the archive knows about **one** Claude Code **session**: the `sessioni` row, the **card**, the conversation's messages, the edges, the lineage — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | a session's **lineage**: the closure over the edges with `chiusura=1`, with each member's data — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
 | `list_projects(db_name, top)` | the `project` labels with their counts — to **browse** the archive, not just search it |
