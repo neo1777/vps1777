@@ -491,7 +491,7 @@ features:
            "cli:ingest-coda", "compose-profile:compose.yaml#ingest",
            "services/gateway/app/coda_ingest.py", "services/gateway/app/ingest_worker.py"]
     status: active-default
-    since: "unreleased"
+    since: "0.84.0"
     decisione: "P16 del dossier sull'evoluzione degli MCP (ondata 2, 05/10/2026). Il
                 gateway non esegue processi (test_gateway_non_tocca_docker): scrive un
                 intent, come il pulsante «Aggiorna». Picchi misurati l'11/10: indexer 3,4
@@ -602,7 +602,7 @@ features:
            quota di uuid condivisi (sotto metà il delta non vale) e il budget di 40 s (P19)."
     dove: ["mcp-tool:archive-mcp/delta"]
     status: active-default
-    since: "unreleased"
+    since: "0.84.0"
     verify:
       mcp_tool: {service: archive-mcp, name: delta}
   - id: archive.get_session
@@ -1003,7 +1003,7 @@ features:
     cosa: "Sostituisce una fonte di testo o URL: aggiunge la nuova e poi toglie la vecchia (l'id cambia, e lo dice); due tempi come le cancellazioni (P20)."
     dove: ["mcp-tool:nb1777-mcp/source_replace"]
     status: active-default
-    since: "unreleased"
+    since: "0.84.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: source_replace}
   - id: nb1777.source_drive_stato
@@ -1011,7 +1011,7 @@ features:
     cosa: "Le fonti Drive di un notebook e quali sono indietro rispetto a Drive, da `source list --drive` (P20)."
     dove: ["mcp-tool:nb1777-mcp/source_drive_stato"]
     status: active-default
-    since: "unreleased"
+    since: "0.84.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: source_drive_stato}
   - id: nb1777.source_sync_drive
@@ -1019,7 +1019,7 @@ features:
     cosa: "Riallinea a Drive le fonti indicate o tutte quelle indietro, con lo stesso id (P20)."
     dove: ["mcp-tool:nb1777-mcp/source_sync_drive"]
     status: active-default
-    since: "unreleased"
+    since: "0.84.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: source_sync_drive}
   - id: nb.nb_export
@@ -1804,7 +1804,7 @@ features:
            trascrizione solo se è vuoto; l'esito dice quale dei due."
     dove: ["cli:archive-ingest", "tools/vps1777.py", "services/nb1777-mcp/app/core.py"]
     status: active-default
-    since: "unreleased"
+    since: "0.84.0"
     decisione: "P17 del dossier sull'evoluzione degli MCP (ondata 2). Solo i podcast e gli
                 artefatti: i vocali di Telegram non passano da Google."
     verify:
@@ -1854,7 +1854,7 @@ features:
     dove: ["cli:ingest-coda", "tools/vps1777.py", "systemd:vps1777-ingest.path",
            "systemd:vps1777-ingest.service", "compose-profile:compose.yaml#ingest"]
     status: active-default
-    since: "unreleased"
+    since: "0.84.0"
     decisione: "P16 (11/10/2026). Accesa dagli installer e da `vps1777 update`: senza, i
                 file caricati restano in coda."
     verify: {cli_command: ingest-coda}
