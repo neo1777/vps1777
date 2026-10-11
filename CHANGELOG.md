@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.85.0] — 2026-10-11
+
+**I tool di nb1777 non rispondono più con una stringa sola: ognuno dice cosa ha fatto e su cosa.**
+
 ### Cambiato
 - **nb1777: nessun tool risponde più con una stringa sola.** Erano 17. `nb_create` dava l'id nudo;
   `nb_rename`, `source_rename` e `studio_rename` «ok»; i nove `studio_create_*` l'id
