@@ -311,6 +311,9 @@ def test_search_ibrida_dice_quali_db_del_perimetro_non_hanno_l_indice(db, monkey
             raise sqlite3.OperationalError("niente vec in questo test")
         def close(self):
             pass
+
+        def set_progress_handler(self, *a):
+            pass
     monkeypatch.setattr(db, "_open_con_indice", lambda name, idx: _Finta())
     out = db.search_ibrida("piano", limit=5)
     # nel perimetro di default: prim (primario) e storico (non dichiarato); solo prim ha l'indice

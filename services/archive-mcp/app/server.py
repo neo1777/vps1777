@@ -270,7 +270,9 @@ def search_ibrida(
     - `parametri`: k_rrf, peso_fts, modello, quante formulazioni;
     - `fuori_perimetro`: {ruolo: [db]} lasciati fuori dal filtro `ruoli`.
     - `senza_indice`: i DB del perimetro che non hanno un indice per senso e quindi non
-      sono stati guardati: lì serve `search`.
+      sono stati guardati: lì serve `search`;
+    - `parziale: true` se il budget di 40 s è finito: i DB non guardati sono in `saltati`
+      col ramo «budget».
 
     ⚠️ Senza modello di embedding o senza alcun indice `.vec.db` NON ricade in silenzio su
     FTS5: solleva un errore che dice cosa manca (docs/RICERCA-IBRIDA.md).
@@ -293,7 +295,10 @@ def count(query: str, db_name: str = "", raw: bool = False, since: str = "",
     Se un termine COLLASSA (`C++`→`C`, vedi check_term) aggiunge `warnings`.
     Senza db_name e senza `ruoli` aggiunge `anche_fuori` ({db: n}): i match nelle
     fotografie e nei riscontri, fuori dal perimetro di default. «0 sui primari» non
-    è «0 ovunque»: guardalo prima di dire «non c'è»."""
+    è «0 ovunque»: guardalo prima di dire «non c'è».
+    ⏱ Budget di 40 s (il proxy chiude a 60): i DB non contati vanno in `saltati` (ramo
+    «budget», col db_name per rilanciare) e il risultato porta `parziale: true`;
+    `anche_fuori_non_contati` = i DB fuori dal perimetro non contati."""
     return db.count(query, db_name, raw=raw, since=since, until=until, project=project,
                     speaker=speaker, voice=voice, campi=campi, ruoli=ruoli)
 
@@ -315,7 +320,8 @@ def check_term(term: str, db_name: str = "", ruoli: str = "") -> dict[str, Any]:
         ruoli: come in search ('' = primari e non dichiarati; 'tutti' = ogni DB).
     Ritorna {term, prefix, per_db:{nome:{count_term, count_prefix, collapsed}}}.
     `collapsed=true` su un DB = quel DB va ricostruito con tokenchars per
-    distinguere il termine dal suo prefisso."""
+    distinguere il termine dal suo prefisso. Budget di 40 s, come count: i DB non
+    guardati in `saltati`, e `parziale: true`."""
     return db.check_term(term, db_name, ruoli=ruoli)
 
 

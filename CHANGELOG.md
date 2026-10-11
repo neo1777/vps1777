@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Aggiunto
+- **archive1777: le ricerche su più DB hanno un budget di 40 s (P3).** Il proxy chiude la lettura
+  a 60 s, e `count` aveva impiegato 41 s a cache fredda. `count`, `check_term` e `search_ibrida`
+  si fermano a 40 s (un `progress_handler` di SQLite interrompe anche una query sola): i DB non
+  guardati vanno in `saltati` col ramo «budget» e il risultato porta `parziale: true`. In
+  `count`, `anche_fuori_non_contati` dice i DB fuori dal perimetro non contati.
 - **La cadenza di nlm si misura (P9).** Dependabot ignora i minor di nlm di proposito, e il pin
   era rimasto alla 0.12.0 mentre upstream arrivava alla 0.15.4. Ora `rebuild-mensile.yml`, una
   volta al mese, lancia `tools/nlm-cadenza.py` e apre una issue se il pin è indietro da più di 30
@@ -31,6 +36,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   ha finito in 270 s, il bot la ritira con `notebook_query_esito`.
 
 ### Corretto
+- **archive1777: un file `.db` illeggibile non rompe più la ricerca per tutti.** SQLite solleva
+  «file is not a database» come `DatabaseError`, non `OperationalError`: il perimetro di P1
+  leggeva il ruolo di ogni DB e una ricerca senza `db_name` falliva per intero. Ora quel DB è
+  «non dichiarato», si dice non letto in `saltati`, e gli altri rispondono. Allo stesso modo un
+  DB fuori dal perimetro che non si legge non è più uno zero muto in `anche_fuori`.
 - **archive1777: i DB senza indice per senso si dicono.** `search_ibrida` cercava solo nei DB
   del perimetro che hanno un indice, e la risposta non diceva quali erano rimasti fuori. Dal vivo,
   `precedenti` sui casi della #281 guardava 5 DB su 8, e fra quelli rimasti fuori c'era il
