@@ -3978,7 +3978,7 @@ findings:
         leggibile da chi legge i log Docker sulla VPS (root e gruppo docker). Leggendo il log
         il token è passato anche nel contesto di una sessione di sviluppo: per questo la
         rotazione del token si propone al proprietario.
-    since: unreleased
+    since: v0.81.1
     why: >
       Il token dà il controllo completo del bot: leggere i messaggi che riceve e scrivere a
       nome suo, cioè anche all'owner, con la fiducia di un canale che usa per le notifiche
