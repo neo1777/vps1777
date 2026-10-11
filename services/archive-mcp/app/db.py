@@ -492,6 +492,7 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
                 conn, query, limit=limit, raw=raw, sort=sort, since=since,
                 until=until, project=project, speaker=speaker, voice=voice,
                 campi=campi, snippet_tokens=snippet_tokens)
+            _chi_parla(conn, rows)
             for r in rows:
                 r["db"] = name
                 r["snapshot"] = snap
@@ -805,6 +806,8 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         scelti.append(chiave)
     if not passaggio:
         _snippet_dal_pezzo(righe, connessioni, pezzo_di, termini)
+    for name in {r["db"] for r in righe}:
+        _chi_parla(connessioni[name], [r for r in righe if r["db"] == name])
     if passaggio and scelti:
         # il passo dove i termini sono più fitti, dal testo intero: lo snippet di FTS5
         # si ferma a 64 token, quello vettoriale ai primi 400 caratteri
@@ -1014,6 +1017,30 @@ def _con_azioni(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
             r["tools"] = azioni[r["uuid"]]
 
 
+def _chi_parla(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
+    """Aggiunge `speaker` e `voice` alle righe che li hanno (P5, 11/10/2026).
+
+    La regola 3 del server dice «una citazione non è un fatto finché non sai chi parla»,
+    ma le righe di search, search_ibrida e get_context non lo dicevano: per saperlo si
+    rifaceva la ricerca con `speaker='human'`. Un campo vuoto (riga mai classificata) non
+    si scrive, e un DB v1 senza le colonne resta com'era: niente valore inventato."""
+    uuids = list({r["uuid"] for r in rows if r.get("uuid")})
+    if not uuids:
+        return
+    try:
+        voci = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT uuid, speaker, voice FROM messages WHERE uuid IN (%s)"
+            % ",".join("?" * len(uuids)), uuids)}
+    except sqlite3.OperationalError:
+        return                    # DB v1: niente colonne speaker/voice
+    for r in rows:
+        speaker, voice = voci.get(r.get("uuid"), ("", ""))
+        if speaker:
+            r["speaker"] = speaker
+        if voice:
+            r["voice"] = voice
+
+
 def get_context(uuid: str, db: str = "", *, before: int = 3,
                 after: int = 3, max_chars: int = 0) -> list[dict[str, Any]]:
     """I messaggi attorno a uno `uuid` col contenuto PIENO — supera il
@@ -1028,6 +1055,7 @@ def get_context(uuid: str, db: str = "", *, before: int = 3,
             ctx = fts.context_conn(conn, uuid, before=before, after=after)
             if ctx:
                 _con_azioni(conn, ctx)
+                _chi_parla(conn, ctx)
                 snap = _snapshot(_DBS[name])
                 for r in ctx:
                     r["db"] = name
@@ -1054,6 +1082,7 @@ def get_conversation(uuid: str, db: str = "", *, limit: int = 200,
             conv = fts.conversation_conn(conn, uuid, limit=limit)
             if conv:
                 _con_azioni(conn, conv)
+                _chi_parla(conn, conv)
                 snap = _snapshot(_DBS[name])
                 for r in conv:
                     r["db"] = name
@@ -1064,6 +1093,117 @@ def get_conversation(uuid: str, db: str = "", *, limit: int = 200,
         finally:
             conn.close()
     return []
+
+
+# ── P5 (11/10/2026): N messaggi in UNA chiamata ──────────────────────────────────
+# Dopo una ricerca, leggere i testi pieni di dieci risultati costava dieci get_context
+# (1+N giri, e ognuno porta anche i vicini). get_many prende gli uuid già trovati e
+# restituisce le righe intere, nell'ordine chiesto, e dice quali non ha trovato.
+GET_MANY_MASSIMO = 50
+_ORDINE_RUOLI = {r: i for i, r in enumerate(("primario", RUOLO_NON_DICHIARATO,
+                                              "fotografia", "riscontro", "riservato"))}
+
+
+def get_many(uuids: list[str], db: str = "", *, max_chars: int = 0) -> dict[str, Any]:
+    """Le righe intere di più uuid: {righe, mancanti}. Come get_context guarda in ogni
+    DB (un uuid si chiede perché lo si è già trovato), prima i primari; lo stesso uuid
+    in più DB torna una volta, con gli altri in `anche_in`."""
+    voluti = list(dict.fromkeys(str(u).strip() for u in (uuids or []) if str(u).strip()))
+    if not voluti:
+        raise ValueError("get_many vuole almeno un uuid: quelli tornati da search o "
+                         "search_ibrida.")
+    if len(voluti) > GET_MANY_MASSIMO:
+        raise ValueError(f"get_many legge al massimo {GET_MANY_MASSIMO} uuid per chiamata "
+                         f"(ne sono arrivati {len(voluti)}): dividili in più chiamate.")
+    _maybe_reload()
+    if db:
+        ordine = _targets(db)
+    else:
+        ordine = sorted(_DBS, key=lambda n: _ORDINE_RUOLI.get(_ruolo(n), len(_ORDINE_RUOLI)))
+    trovate: dict[str, dict[str, Any]] = {}
+    for name in ordine:
+        try:
+            conn = _open(name)
+        except KeyError:
+            continue
+        try:
+            righe = [dict(r) for r in conn.execute(
+                "SELECT uuid, project, ts, content FROM messages WHERE uuid IN (%s)"
+                % ",".join("?" * len(voluti)), voluti)]
+            nuove = []
+            for r in righe:
+                if r["uuid"] in trovate:
+                    trovate[r["uuid"]].setdefault("anche_in", []).append(name)
+                else:
+                    nuove.append(r)
+            if nuove:
+                _con_azioni(conn, nuove)
+                _chi_parla(conn, nuove)
+                snap = _snapshot(_DBS[name])
+                for r in nuove:
+                    r["db"] = name
+                    r["snapshot"] = snap
+                    trovate[r["uuid"]] = r
+        except sqlite3.OperationalError as exc:
+            log.warning("DB %s schema error: %s", name, exc)
+        finally:
+            conn.close()
+    righe = [trovate[u] for u in voluti if u in trovate]
+    return {"righe": _tronca_righe(righe, max_chars),
+            "mancanti": [u for u in voluti if u not in trovate]}
+
+
+# ── P5 (11/10/2026): «l'hai già detto?» (#281) ─────────────────────────────────────
+# L'archivio sa cose che il proprietario non ricorda di sapere: un piano rifatto da capo a
+# settembre era già scritto a maggio. `precedenti` cerca per senso le SUE parole su un
+# tema, fino a qualche giorno fa (il filone di oggi non è un precedente), e le raggruppa
+# per chat/progetto. Il personale resta fuori perché il perimetro di default (P1) non
+# tocca il riservato. Non tiene il semaforo: lo prende search_ibrida.
+PRECEDENTI_GIORNI = 7
+PRECEDENTI_GIORNI_MASSIMO = 36500
+
+
+def precedenti(tema: str, db: str = "", limit: int = 30, *,
+               giorni: int = PRECEDENTI_GIORNI, riformulazioni: list[str] | None = None,
+               ruoli: str = "") -> dict[str, Any]:
+    """`search_ibrida(speaker='human', until=oggi-giorni)` raggruppata per `project`."""
+    giorni = int(giorni)
+    if not 0 <= giorni <= PRECEDENTI_GIORNI_MASSIMO:
+        raise ValueError(f"giorni={giorni}: da 0 (fino a oggi) a {PRECEDENTI_GIORNI_MASSIMO}.")
+    fino_a = ""
+    if giorni:
+        giorno = (datetime.datetime.now(datetime.timezone.utc).date()
+                  - datetime.timedelta(days=giorni))
+        # `until` è lessicografico: col solo giorno quel giorno resterebbe fuori
+        fino_a = f"{giorno.isoformat()}T23:59:59.999999Z"
+    trovato = search_ibrida(tema, db, limit, speaker="human", until=fino_a,
+                            riformulazioni=riformulazioni, ruoli=ruoli)
+    gruppi: dict[str, dict[str, Any]] = {}
+    for r in trovato["righe"]:
+        progetto = r.get("project") or ""
+        g = gruppi.setdefault(progetto, {"project": progetto, "db": [], "n": 0,
+                                         "primo_ts": "", "ultimo_ts": "", "righe": []})
+        g["n"] += 1
+        if r["db"] not in g["db"]:
+            g["db"].append(r["db"])
+        ts = r.get("ts") or ""
+        if ts and (not g["primo_ts"] or ts < g["primo_ts"]):
+            g["primo_ts"] = ts
+        if ts > g["ultimo_ts"]:
+            g["ultimo_ts"] = ts
+        g["righe"].append({k: r[k] for k in ("uuid", "db", "ts", "snippet", "origine",
+                                              "voice", "anche_in") if k in r})
+    out: dict[str, Any] = {"tema": tema, "fino_a": fino_a, "gruppi": list(gruppi.values()),
+                           "righe_totali": len(trovato["righe"]),
+                           "indici": trovato.get("indici", []),
+                           "parametri": trovato.get("parametri", {})}
+    for chiave in ("saltati", "fuori_perimetro"):
+        if trovato.get(chiave):
+            out[chiave] = trovato[chiave]
+    if not trovato["righe"]:
+        out["nota"] = ("Nessun precedente nel perimetro: zero non prova un'assenza. Prova "
+                       "altre parole (riformulazioni), `search` col lessico, o giorni=0.")
+    return out
 
 
 def list_projects(db: str = "", *, top: int = 1000) -> list[dict[str, Any]]:
