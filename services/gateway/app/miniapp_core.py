@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json as _json
 import time
+from datetime import datetime, timedelta
 from urllib.parse import parse_qsl
 
 # Finestra di validità di `initData` (H27). Era 24h.
@@ -343,3 +344,30 @@ def righe_ricerca(blocchi: list[dict], modo: str) -> tuple[list[dict], list[dict
             return ([r for r in b["righe"] if isinstance(r, dict)],
                     [s for s in b.get("saltati") or [] if isinstance(s, dict)])
     return [], []
+
+
+# ───── P18 (11/10/2026): il posticipo del promemoria dei secret ─────
+# `vps1777 secrets-status --notify` ripete ogni giorno lo stesso messaggio finché un secret
+# resta da ruotare. Dalla Mini App si posticipa: il gateway scrive
+# onboarding/secrets_posticipa.json (montato in scrittura), il CLI sull'host lo legge e tace
+# fino a `fino_a`. Il bot non ha un canale di scrittura verso l'host, per questo passa di qui.
+POSTICIPO_FILE = "secrets_posticipa.json"
+POSTICIPO_MAX_GIORNI = 30
+
+
+def nuovo_posticipo(giorni: object, ora: datetime, chi: object) -> dict:
+    """Il contenuto del file per un posticipo di `giorni` (intero da 1 a 30)."""
+    if not isinstance(giorni, int) or isinstance(giorni, bool) \
+            or not 1 <= giorni <= POSTICIPO_MAX_GIORNI:
+        raise ValueError(f"giorni: un intero da 1 a {POSTICIPO_MAX_GIORNI} (0 annulla)")
+    return {"fino_a": (ora + timedelta(days=giorni)).isoformat(), "giorni": giorni,
+            "da": str(chi), "scritto_il": ora.isoformat()}
+
+
+def posticipo_attivo(dati: dict, ora: datetime) -> str | None:
+    """`fino_a` se il posticipo vale ancora, altrimenti None."""
+    try:
+        fino = datetime.fromisoformat(str(dati["fino_a"]))
+    except (KeyError, ValueError, TypeError):
+        return None
+    return dati["fino_a"] if fino > ora else None

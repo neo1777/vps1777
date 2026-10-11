@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Il promemoria dei secret si apre sulla vista giusta e si può posticipare (P18).** Il messaggio
+  quotidiano di `secrets-status --notify` porta un bottone che apre la Mini App sulla scheda
+  Sistema (`?vista=sistema`); lì «Posticipa il promemoria di 7 giorni» lo fa tacere fino a quella
+  data (`POST /app/api/secrets/posticipa`, file `onboarding/secrets_posticipa.json`, che il CLI
+  legge sull'host). Il bot non ha un canale di scrittura verso l'host, per questo passa dalla
+  Mini App. Lo stato dei secret resta visibile.
+
 ## [0.82.0] — 2026-10-11
 
 **nb1777 dichiara la forma di ogni risposta e il codice di ogni errore, e fa i lavori in blocco senza ssh.**

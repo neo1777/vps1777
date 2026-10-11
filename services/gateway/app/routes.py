@@ -284,6 +284,7 @@ routes = [
     Route("/app/api/archive/search", miniapp.api_archive_search, methods=["POST"]),
     Route("/app/api/archive/context", miniapp.api_archive_context, methods=["POST"]),
     Route("/app/api/secrets", miniapp.api_secrets, methods=["GET"]),
+    Route("/app/api/secrets/posticipa", miniapp.api_secrets_posticipa, methods=["POST"]),
     Route("/app/api/audit", miniapp.api_audit, methods=["GET"]),
     Route("/app/api/update/state", miniapp.api_update_state, methods=["GET"]),
     Route("/app/api/update", miniapp.api_update_trigger, methods=["POST"]),

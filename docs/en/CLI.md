@@ -297,6 +297,14 @@ file date.
 If it finds **no** secret to measure it exits **2**: that is not "all good", it is "I
 couldn't look" (wrong path or permissions), and with `--notify` it says so on Telegram.
 
+**The reminder can be postponed** (since 0.83.0, P18). With a secret to rotate, the daily timer
+repeated the same message every day. Now the message carries a button that opens the Mini App on
+the System tab (`/app?vista=sistema`, only with an https `PUBLIC_BASE`), where "Posticipa il
+promemoria di 7 giorni" writes `onboarding/secrets_posticipa.json`. Until that date passes,
+`secrets-status --notify` updates the status but does not send the message, and says so in its
+output; "annulla" turns it back on. The postponement only affects the message: `/admin/secrets`
+and the System tab keep showing what needs rotating.
+
 ```bash
 vps1777 secrets-status
 vps1777 secrets-status --notify

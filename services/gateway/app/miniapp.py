@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 
 import json
+from datetime import datetime, timezone
 import os
 import secrets as pysecrets
 import time
@@ -45,11 +46,14 @@ from .jwt_helpers import JWTError, issue, verify
 from .mcp_client import MCPCallError, call_tool
 from .ratelimit import RateLimiter
 from .miniapp_core import (
+    POSTICIPO_FILE,
     RisposteRecenti,
     connector_url,
     is_owner,
     masked_connector_url,
+    nuovo_posticipo,
     parse_json_blocks,
+    posticipo_attivo,
     righe_ricerca,
     risposta_mini_app,
     summarize_secrets,
@@ -459,11 +463,42 @@ async def api_secrets(request: Request) -> Response:
     scritto dal check host settimanale)."""
     if not _bearer_claims(request):
         return _unauthorized()
-    status = _read_json(Path(get_settings().onboarding_dir) / "secrets_status.json")
+    ob = Path(get_settings().onboarding_dir)
+    status = _read_json(ob / "secrets_status.json")
     return JSONResponse({
         "checked_at": status.get("checked_at", ""),
         "secrets": status.get("secrets", []),
+        "posticipato_fino_a": posticipo_attivo(_read_json(ob / POSTICIPO_FILE),
+                                               datetime.now(timezone.utc)),
     })
+
+
+async def api_secrets_posticipa(request: Request) -> Response:
+    """POST /app/api/secrets/posticipa {giorni} — P18: il promemoria quotidiano dei secret
+    tace per `giorni` (1-30; 0 annulla). Scrive onboarding/secrets_posticipa.json, che
+    `vps1777 secrets-status` legge sull'host prima di mandare il messaggio."""
+    claims = _bearer_claims(request)
+    if not claims:
+        return _unauthorized()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    giorni = body.get("giorni") if isinstance(body, dict) else None
+    f = Path(get_settings().onboarding_dir) / POSTICIPO_FILE
+    if giorni == 0:
+        f.unlink(missing_ok=True)
+        audit({"event": "secrets_posticipa", "user_id": claims.get("sub", ""), "giorni": 0})
+        return JSONResponse({"fino_a": None})
+    try:
+        dati = nuovo_posticipo(giorni, datetime.now(timezone.utc), claims.get("sub", ""))
+    except ValueError as exc:
+        return JSONResponse({"error": "invalid_request", "detail": str(exc)}, status_code=400)
+    tmp = f.with_name(f.name + ".tmp")
+    tmp.write_text(json.dumps(dati, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(f)
+    audit({"event": "secrets_posticipa", "user_id": claims.get("sub", ""), "giorni": giorni})
+    return JSONResponse({"fino_a": dati["fino_a"]})
 
 
 async def api_audit(request: Request) -> Response:
@@ -1216,8 +1251,22 @@ function loadSecrets(){
         '<td>'+esc(it.age_days)+'g / '+esc(it.max_age_days)+'g</td>'+
         '<td><span class="dot '+(over?'warn':'ok')+'"></span>'+(over?'da ruotare':'ok')+'</td></tr>';
     }).join('');
+    var daRuotare=list.some(function(it){ return it.overdue; });
+    var rinvio=d.posticipato_fino_a;
     b2.innerHTML='<table><thead><tr><th>secret</th><th>età</th><th>stato</th></tr></thead><tbody>'+rows+'</tbody></table>'+
-      (d.checked_at?'<div class="pm" style="margin-top:8px">ultimo check: '+esc(d.checked_at)+'</div>':'');
+      (d.checked_at?'<div class="pm" style="margin-top:8px">ultimo check: '+esc(d.checked_at)+'</div>':'')+
+      (rinvio?'<div class="pm" style="margin-top:8px">promemoria posticipato fino al '+esc(String(rinvio).slice(0,10))+
+             ' <button class="re" id="secAnn">annulla</button></div>':
+       (daRuotare?'<div style="margin-top:8px"><button class="re" id="secPost">Posticipa il promemoria di 7 giorni</button></div>':''));
+    var bp=$('secPost'), ba=$('secAnn');
+    function posticipa(g){
+      post('/app/api/secrets/posticipa', {giorni:g}).then(function(r){
+        toast(r.fino_a?('Promemoria posticipato al '+String(r.fino_a).slice(0,10)):'Promemoria riattivato');
+        loadSecrets();
+      }).catch(function(e){ toast(err(e)); });
+    }
+    if(bp) bp.addEventListener('click', function(){ posticipa(7); });
+    if(ba) ba.addEventListener('click', function(){ posticipa(0); });
   }).catch(function(e){ var b2=$('sec'); if(b2) b2.innerHTML='<div class="empty">'+esc(err(e))+'</div>'; });
 }
 function loadAudit(){
@@ -1251,14 +1300,20 @@ function err(e){
 }
 
 // ── avvio
+// P18: `?vista=sistema` (dal bottone di una notifica) apre quella scheda. Nella query e non
+// nel fragment: il fragment lo usa Telegram per l'initData.
+var VISTA0 = (function(){
+  var v = ''; try { v = new URLSearchParams(location.search).get('vista') || ''; } catch(e) {}
+  return ({stato:1, notebook:1, archivio:1, sistema:1})[v] ? v : 'stato';
+})();
 if (TG && TG.initData){
-  authenticate().then(function(){ show('stato'); })
+  authenticate().then(function(){ show(VISTA0); })
     .catch(function(e){
       view.innerHTML='<div class="card"><div class="empty">'+esc(err(e))+'</div></div>';
-      if (String(e.message)!=='not_owner') show('stato');
+      if (String(e.message)!=='not_owner') show(VISTA0);
     });
 } else {
-  show('stato');
+  show(VISTA0);
 }
 })();
 </script>

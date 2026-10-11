@@ -534,7 +534,10 @@ def status_write(repo: Path, **fields) -> None:
 
 # ─────────────────────────────────────────── Telegram (notifica, mai fatale)
 
-def telegram_notify(repo: Path, text: str) -> None:
+def telegram_notify(repo: Path, text: str, *, vista: str = "") -> None:
+    """Un messaggio all'owner. Con `vista` (P18, 11/10/2026) porta un bottone che apre la
+    Mini App su quella scheda (`/app?vista=…`: il fragment lo usa Telegram per l'initData),
+    solo se PUBLIC_BASE è https, come chiede Telegram per i bottoni web_app."""
     token_file = repo / "secrets" / "telegram_bot_token.txt"
     envd = env_read(repo)
     owner = envd.get("TELEGRAM_OWNER_ID", "")
@@ -552,7 +555,13 @@ def telegram_notify(repo: Path, text: str) -> None:
     #   dall'ordine delle chiamate è un presidio che un giorno non gira.
     if not _ARMATA:
         arma_redazione(repo)
-    payload = urllib.parse.urlencode({"chat_id": owner, "text": _redigi(text)}).encode()
+    campi = {"chat_id": owner, "text": _redigi(text)}
+    base = (envd.get("PUBLIC_BASE") or "").rstrip("/")
+    if vista and base.startswith("https://"):
+        campi["reply_markup"] = json.dumps({"inline_keyboard": [[{
+            "text": "Apri nel pannello",
+            "web_app": {"url": f"{base}/app?vista={urllib.parse.quote(vista)}"}}]]})
+    payload = urllib.parse.urlencode(campi).encode()
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token}/sendMessage",
         data=payload, headers={"User-Agent": USER_AGENT})
@@ -4881,6 +4890,27 @@ def cmd_memoria(repo: Path, args) -> int:
     return 0
 
 
+# P18 (11/10/2026): il promemoria quotidiano dei secret si può posticipare dalla Mini App
+# (scheda Sistema), che scrive questo file in onboarding/: il gateway monta onboarding in
+# scrittura, il bot no. Finché `fino_a` è nel futuro, secrets-status non manda il messaggio
+# (lo stato si scrive lo stesso, e la pagina /admin/secrets resta vera).
+POSTICIPO_SECRETS = "secrets_posticipa.json"
+
+
+def posticipo_secrets(repo: Path, *, ora: "datetime.datetime | None" = None) -> str | None:
+    """`fino_a` del posticipo se vale ancora, altrimenti None (file assente, rotto o scaduto)."""
+    import datetime as _dt
+    try:
+        dati = json.loads((repo / "onboarding" / POSTICIPO_SECRETS).read_text(encoding="utf-8"))
+        fino = _dt.datetime.fromisoformat(str(dati["fino_a"]))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    adesso = ora or _dt.datetime.now(_dt.timezone.utc)
+    if fino.tzinfo is None:
+        fino = fino.replace(tzinfo=_dt.timezone.utc)
+    return dati["fino_a"] if fino > adesso else None
+
+
 def cmd_secrets_status(repo: Path, args) -> int:
     """Età e scadenze dei secret. Scrive onboarding/secrets_status.json (letto
     dalla pagina /admin/secrets) e — con --notify — avvisa su Telegram quelli
@@ -4969,8 +4999,13 @@ def cmd_secrets_status(repo: Path, args) -> int:
         return 2
     if overdue:
         warn(f"da ruotare: {', '.join(overdue)}")
-        if args.notify:
-            telegram_notify(repo, "🔑 vps1777 — secret da ruotare:\n• " + "\n• ".join(overdue))
+        posticipo = posticipo_secrets(repo) if args.notify else None
+        if posticipo:
+            log(f"promemoria posticipato dalla Mini App fino a {posticipo}: niente Telegram")
+        elif args.notify:
+            telegram_notify(repo, "🔑 vps1777 — secret da ruotare:\n• " + "\n• ".join(overdue)
+                            + "\n\nSe lo farai più avanti: Pannello → Sistema → Posticipa.",
+                            vista="sistema")
     else:
         ok("tutti i secret entro la soglia")
     return 0
