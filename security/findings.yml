@@ -3961,3 +3961,56 @@ findings:
         output: "Verified OK; exit 1; exit 1"
         exit: 0
         quando: "2026-10-04"
+  - id: H81
+    severity: high
+    title: "Il token del bot Telegram finiva nel log del container ogni 10 secondi: httpx scrive a INFO l'URL di ogni richiesta, e l'URL della Bot API contiene il token"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-10-11"
+      come: misura
+      nota: >
+        Trovato dal vivo leggendo la coda del log del bot dopo l'update alla 0.81.0: le righe
+        `HTTP Request: POST https://api.telegram.org/bot<id>:<token>/getUpdates` del logger
+        httpx, una ogni 10 secondi (il long-poll), col token in chiaro. Contato senza
+        stamparlo: solo il container del bot, 15 righe nei primi tre minuti; gli altri cinque
+        container a zero. Il CLI non raccoglie i log dei container, quindi il token era
+        leggibile da chi legge i log Docker sulla VPS (root e gruppo docker). Leggendo il log
+        il token è passato anche nel contesto di una sessione di sviluppo: per questo la
+        rotazione del token si propone al proprietario.
+    since: v0.81.1
+    why: >
+      Il token dà il controllo completo del bot: leggere i messaggi che riceve e scrivere a
+      nome suo, cioè anche all'owner, con la fiducia di un canale che usa per le notifiche
+      di sicurezza. Il segreto stava in secrets/ (montato come file, H6) e poi usciva da solo
+      nel log, a una riga ogni dieci secondi, da sempre: un presidio sul file non vale
+      niente se il programma lo ripete altrove.
+    evidence:
+      - file: services/nb1777-bot/app/registro.py
+        contains:
+          - '_RUMOROSI = ("httpx", "httpcore")'
+          - 'record.msg = _TOKEN.sub("bot<redatto>", testo)'
+      - file: services/nb1777-bot/app/__main__.py
+        contains:
+          - 'registro.configura_log(s.log_level)'
+      - file: services/nb1777-bot/tests/test_log_senza_token.py
+        contains:
+          - "def test_httpx_non_scrive_le_richieste_a_info("
+          - "def test_il_token_si_maschera_anche_negli_altri_log("
+    fix: >
+      `registro.configura_log` mette httpx e httpcore a WARNING (le richieste riuscite non si
+      scrivono più) e aggiunge a ogni gestore un filtro che maschera `bot<id>:<token>` nel
+      messaggio e nel traceback di qualunque riga. L'update ricrea il container del bot, e
+      con lui sparisce il log vecchio. La rotazione del token (BotFather, /revoke) resta una
+      scelta del proprietario.
+    prova:
+      - comando: "docker logs <container> | grep -c 'api.telegram.org/bot' su ognuno dei sei container"
+        dove: "VPS di riferimento, 0.81.0"
+        output: "nb1777-bot 15, gli altri 0"
+        exit: 0
+        quando: "2026-10-11"
+      - comando: "uvx pytest services/nb1777-bot/tests/test_log_senza_token.py"
+        dove: "PC"
+        output: "3 passed: niente righe httpx a INFO, token mascherato anche in un traceback"
+        exit: 0
+        quando: "2026-10-11"

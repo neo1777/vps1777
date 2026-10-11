@@ -18,6 +18,28 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **nb1777: il messaggio di «auth mancante» dice la versione di nlm** (`==0.15.4`) e di scegliere
   il login «in un file» quando `nlm login` chiede se cifrarlo.
 
+## [0.81.1] — 2026-10-11
+
+**Il token del bot non finisce più nel log; search_ibrida resta nel suo budget.**
+
+### Corretto
+- **archive1777: `search_ibrida` non supera più il budget con la ricerca dei vicini.** Dal vivo,
+  dopo la 0.81.0, una `search_ibrida` ha impiegato 69 s (oltre i 60 del proxy) pur dicendo
+  `parziale: true`. Il budget si controllava solo fra un DB e l'altro, e la ricerca dei vicini
+  di sqlite-vec non si ferma a metà: 8 s per una ricerca sui 452.000 vettori di un indice, anche
+  a cache calda. Ora il controllo c'è prima di ogni ricerca e di ogni riformulazione, e
+  `search_ibrida` ha un budget suo di 30 s. I documenti dicevano che il `progress_handler`
+  interrompe «anche una query sola»: vale per le query full-text, non per i vettori.
+
+### Sicurezza
+- **Il token del bot Telegram non finisce più nel log (H81).** python-telegram-bot parla con
+  Telegram via httpx, e httpx scriveva a INFO l'URL di ogni richiesta, che contiene il token:
+  una riga ogni 10 secondi nel log del container del bot (trovato dal vivo l'11/10). Ora httpx e
+  httpcore sono a WARNING, e un filtro maschera `bot<id>:<token>` in ogni riga, traceback
+  compresi. L'aggiornamento ricrea il container e il log vecchio sparisce con lui. Chi ha letto
+  quei log può avere il token: ruotalo da BotFather (`/revoke`) e aggiorna
+  `secrets/telegram_bot_token.txt`.
+
 ## [0.81.0] — 2026-10-11
 
 **Il bot sceglie il notebook a bottoni; nlm alla 0.15.4; archive1777 carica il modello all'avvio, ha un budget di tempo e dice cosa non ha guardato.**

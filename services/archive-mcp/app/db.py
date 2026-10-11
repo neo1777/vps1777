@@ -476,6 +476,11 @@ def _limite(limit: int, massimo: int = LIMITE_MASSIMO) -> int:
 # `parziale: true`. `search` resta senza: misurata al massimo a 3,6 s, e la sua lista non
 # avrebbe dove dirlo.
 BUDGET_S = 40.0
+# search_ibrida ne ha uno più corto: la ricerca dei vicini di sqlite-vec è codice C in una
+# tabella virtuale, e il progress handler non la ferma a metà (dal vivo, 11/10: 8 s per
+# una ricerca sui 452.000 vettori di un indice, e una search_ibrida da 69 s). Il margine
+# serve a una ricerca che non si interrompe e al lavoro dopo la fusione (snippet, voci).
+BUDGET_IBRIDA_S = 30.0
 _PASSI_HANDLER = 20000          # istruzioni della VM di SQLite fra due controlli dell'ora
 
 
@@ -510,9 +515,10 @@ class _Budget:
         finally:
             conn.set_progress_handler(None, 0)
 
-    def saltato(self, name: str) -> dict[str, str]:
+    def saltato(self, name: str, *, a_meta: bool = False) -> dict[str, str]:
+        quando = "a metà di" if a_meta else "prima di"
         return {"db": name, "ramo": "budget",
-                "motivo": f"budget di {self.secondi:.0f} s finito prima di questo DB: "
+                "motivo": f"budget di {self.secondi:.0f} s finito {quando} questo DB: "
                           f"rilancia con db_name='{name}'"}
 
 
@@ -702,7 +708,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     # con un filtro (speaker, finestra temporale) il ramo vettoriale ne scarta
     # molti: si chiedono più vicini, perché la fusione abbia ancora una lista vera
     filtrato = bool(speaker or since or until)
-    budget = _Budget(BUDGET_S)
+    budget = _Budget(BUDGET_IBRIDA_S)
     try:
         for name in bersagli:
             if budget.finito():
@@ -722,6 +728,11 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
             registro_ok = True
             vettori_ok = True
             for i, (testo, blob) in enumerate(zip(testi, blobs)):
+                if i and budget.finito():
+                    # fra un testo e l'altro (le riformulazioni): ciò che c'è resta
+                    if not any(x["db"] == name and x["ramo"] == "budget" for x in saltati):
+                        saltati.append(budget.saltato(name, a_meta=True))
+                    break
                 # ① lista FTS5: la query naturale funziona male in FTS5 (è una frase, non
                 #    un'espressione), quindi chi chiama può passare `query_fts` col lessico
                 #    giusto — vale per la domanda, le riformulazioni vanno da sé. Se non lo
@@ -767,6 +778,11 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                 #    `indici[].verifica`, mai restituito come se fosse giusto.
                 if not vettori_ok:
                     continue
+                if budget.finito():
+                    # la ricerca dei vicini non si ferma a metà: a budget finito non parte
+                    if not any(x["db"] == name and x["ramo"] == "budget" for x in saltati):
+                        saltati.append(budget.saltato(name, a_meta=True))
+                    break
                 try:
                     vicini = semantica.knn_pezzi(
                         conn, blob, topn=limit * (10 if filtrato else 3))

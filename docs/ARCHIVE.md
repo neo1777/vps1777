@@ -525,12 +525,17 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 
 > **Il budget di tempo (dalla 0.81.0, P3).** Il proxy del gateway chiude la lettura a 60 s,
 > e il 10/10 `count` ha impiegato 41 s a cache fredda (0,7 s a cache calda sugli stessi DB).
-> `count`, `check_term` e `search_ibrida` si fermano a **40 s**: un `progress_handler` di
-> SQLite interrompe anche una query sola, i DB non guardati vanno in `saltati` con
+> `count` e `check_term` si fermano a **40 s**, `search_ibrida` a **30 s**: un
+> `progress_handler` di SQLite interrompe anche una query full-text sola, i DB non guardati
+> vanno in `saltati` con
 > `ramo: "budget"` e il `db_name` per rilanciare, e il risultato porta **`parziale: true`**.
 > In `count` il tempo che resta va ad `anche_fuori`, e `anche_fuori_non_contati` elenca i DB
 > fuori dal perimetro non contati, per budget o perché non si leggono. `search` non ha budget:
-> misurata al massimo a 3,6 s, e la sua lista non avrebbe dove dire «parziale». Un file
+> misurata al massimo a 3,6 s, e la sua lista non avrebbe dove dire «parziale». La ricerca
+> dei vicini di sqlite-vec invece **non** si interrompe a metà (è codice C in una tabella
+> virtuale: 8 s per una ricerca su 452.000 vettori, misurato l'11/10), per questo
+> `search_ibrida` ha un budget più corto e controlla l'ora prima di ogni ricerca, non solo
+> fra un DB e l'altro (dalla 0.81.1). Un file
 > `.db` illeggibile nella cartella (SQLite: «file is not a database») non rompe più la
 > ricerca per tutti: quel DB si dice non letto, e gli altri rispondono.
 
