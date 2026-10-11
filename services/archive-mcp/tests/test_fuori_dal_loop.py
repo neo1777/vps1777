@@ -1,7 +1,7 @@
 """I tool di archive girano fuori dall'event loop (S1, 05/10/2026).
 
 🔴 IL DIFETTO. FastMCP (mcp 1.30) chiama un tool `def` DENTRO l'event loop
-(`func_metadata.call_fn_with_arg_validation`: `return fn(**args)`), e i 15 tool di
+(`func_metadata.call_fn_with_arg_validation`: `return fn(**args)`), e i 17 tool di
 archive sono tutti `def`. Una ricerca lenta fermava tutto il server, `/health` compreso:
 il 04/10 la sonda è rimasta muta per 311, 536 e 656 s, e dal 07/09 i client hanno visto
 92 errori fra «timed out» e «connection lost».
