@@ -4,8 +4,9 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+from pathlib import Path
 
-from . import db
+from . import db, semantica
 from .server import mcp
 from .settings import get_settings
 
@@ -25,6 +26,12 @@ def main() -> None:
     # riavvio paga la scansione completa (74,6 s misurati il 28/08/2026) in
     # faccia al primo client, che riceve un timeout. Un thread daemon la paga
     # qui, in avvio, senza bloccare né il server né l'healthcheck.
+    # P2 (11/10/2026): il modello di embedding si carica qui, se c'è un indice che lo userà,
+    # e il log dice quanto ci ha messo. Prima lo pagava la prima search_ibrida.
+    threading.Thread(
+        target=lambda: semantica.riscalda_modello(Path(s.archive_model_dir),
+                                                  indici=len(db._indici_disponibili())),
+        name="modello-warmup", daemon=True).start()
     threading.Thread(target=db.describe, name="describe-warmup", daemon=True).start()
 
     # host/port/stateless sono già nel costruttore FastMCP (server.py)
