@@ -10,8 +10,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   testo cambiato, contate per progetto, con gli esempi più recenti. Dice anche quanti uuid i due
   DB condividono: se sono pochi gli uuid non sono stabili fra le due fonti e il delta non vale.
   Budget di 40 s, poi `parziale`. Ora i tool di archive sono 18.
+- **Un podcast dello Studio entra nell'archivio in un gesto (P17).** `vps1777 archive-ingest
+  --artefatto <nome>` parte da un file già scaricato in nb1777 con `studio_download`: non lo copia
+  e alla fine lo lascia dov'è. Il nome è solo un nome di file, mai un percorso.
 
 ### Cambiato
+- **La trascrizione via NotebookLM prende il testo indicizzato della fonte (P17).**
+  `transcribe_document` usava la risposta a una domanda di trascrizione, cioè un modello che
+  riscrive il testo per rispondere. Ora usa `source content` (per un audio la trascrizione di
+  Google, per una scansione il testo letto), con una chiamata in meno, e torna alla domanda solo
+  se il contenuto è vuoto; l'esito dice quale dei due (`metodo`). Misurato su due audio dello
+  Studio: la lunghezza è quasi la stessa (2.306 parole contro 2.489 su 30 MB), il guadagno non è
+  quello.
 - **L'indicizzazione della pagina Archive è un lavoro a parte, e il gateway ha un limite di
   memoria (P16).** Il gateway non indicizza più da sé: mette il file in coda nel volume
   dell'archivio e scrive un intent in `onboarding/ingest_coda/`. La path unit nuova

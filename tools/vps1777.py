@@ -4575,6 +4575,10 @@ def cmd_archive_retag(repo: Path, args) -> int:
 # avrebbe mangiati in un secondo. Il testo si indicizza DIRETTO; NotebookLM resta
 # per ciò che testo non è (PDF-immagine, scansioni, audio).
 _TESTO_EXTS = {".md", ".txt", ".markdown", ".rst", ".log", ".csv", ".json", ".jsonl"}
+# P17: la cartella degli artefatti di nb1777 (NLM_ARTIFACTS in compose.yaml) e i nomi che
+# `archive-ingest --artefatto` accetta: un nome di file, mai un percorso
+_DIR_ARTEFATTI = "/var/lib/nlm-artifacts"
+_ARTEFATTO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}")
 
 
 def cmd_archive_ingest(repo: Path, args) -> int:
@@ -4592,9 +4596,24 @@ def cmd_archive_ingest(repo: Path, args) -> int:
       2. porta il testo nel gateway → `app.archive_indexer` lo indicizza nel .db
       3. archive-mcp lo scopre da solo (scan-mode). Pulizia dei temp inclusa.
     """
-    src = Path(args.file).expanduser().resolve()
-    if not src.is_file():
-        die(f"file non trovato: {src}")
+    artefatto = getattr(args, "artefatto", None)
+    if bool(artefatto) == bool(args.file):
+        die("dammi un file OPPURE --artefatto <nome>, uno dei due")
+    cc = compose_cmd(repo)
+    if artefatto:
+        # P17: un file che sta già nella cartella degli artefatti di nb1777 (un podcast
+        # dello Studio scaricato con studio_download): niente copia, e alla fine resta lì.
+        if not _ARTEFATTO_RE.fullmatch(artefatto):
+            die(f"nome di artefatto non valido: {artefatto!r} (solo il nome, senza cartelle)")
+        if run([*cc, "exec", "-T", "nb1777-mcp", "test", "-f",
+                f"{_DIR_ARTEFATTI}/{artefatto}"], check=False).returncode != 0:
+            die(f"l'artefatto «{artefatto}» non c'è in {_DIR_ARTEFATTI} "
+                "(scaricalo prima con studio_download)")
+        src = Path(artefatto)
+    else:
+        src = Path(args.file).expanduser().resolve()
+        if not src.is_file():
+            die(f"file non trovato: {src}")
     db_name = _ARCH_NAME_RE.sub("-", (args.db or src.stem).lower()).strip("-") or "archivio"
     project = args.project or db_name
     rid = os.urandom(4).hex()
@@ -4605,14 +4624,14 @@ def cmd_archive_ingest(repo: Path, args) -> int:
     # Nel volume degli artefatti, non in /tmp (H43, 27/09/2026): con il rootfs read-only
     # /tmp è una tmpfs da 64 MB, e un audio o un PDF la superano. La sotto-cartella
     # non compare in `artifact_list` (elenca solo i file della radice).
-    nb_in = f"/var/lib/nlm-artifacts/ingest/ing_{rid}{src.suffix}"
+    nb_in = (f"{_DIR_ARTEFATTI}/{artefatto}" if artefatto
+             else f"{_DIR_ARTEFATTI}/ingest/ing_{rid}{src.suffix}")
     # il file testuale viaggia con la SUA estensione: l'indexer sceglie il parser
     # dal suffisso (un .md rinominato .txt perderebbe solo cosmetica, ma il nome
     # vero è informazione — non si butta)
     gw_ext = suffix if testuale else ".txt"
     gw_txt = f"/tmp/ing_{rid}{gw_ext}"
     host_txt = Path(f"/tmp/vps1777_ing_{rid}.txt")
-    cc = compose_cmd(repo)
 
     def _porta_nel_gateway(contenuto: str, dest: str) -> None:
         # NIENTE `docker cp` verso il gateway: il suo rootfs è read-only per
@@ -4626,7 +4645,13 @@ def cmd_archive_ingest(repo: Path, args) -> int:
     try:
         if testuale:
             log(f"«{src.name}» è già testo ({suffix}): indicizzo DIRETTO, niente NotebookLM")
-            _porta_nel_gateway(src.read_text(encoding="utf-8", errors="replace"), gw_txt)
+            if artefatto:
+                letto = run([*cc, "exec", "-T", "nb1777-mcp", "cat", nb_in],
+                            capture=True, check=True)
+                testo_src = letto.stdout or ""
+            else:
+                testo_src = src.read_text(encoding="utf-8", errors="replace")
+            _porta_nel_gateway(testo_src, gw_txt)
             db_path = f"/var/lib/archive/db/{db_name}.db"
             res2 = run([*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
                         gw_txt, db_path, "--project", project], capture=True, check=False)
@@ -4639,14 +4664,16 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         # rifiuta, come per il gateway (#285 bis). Il file viaggia su stdin di un exec,
         # scritto dall'utente `app` dentro il volume.
         import shlex as _shlex
-        with open(src, "rb") as fh:
-            run([*cc, "exec", "-T", "nb1777-mcp", "sh", "-c",
-                 f"mkdir -p /var/lib/nlm-artifacts/ingest && cat > {_shlex.quote(nb_in)}"],
-                stdin=fh, check=True)
+        if not artefatto:
+            with open(src, "rb") as fh:
+                run([*cc, "exec", "-T", "nb1777-mcp", "sh", "-c",
+                     f"mkdir -p {_DIR_ARTEFATTI}/ingest && cat > {_shlex.quote(nb_in)}"],
+                    stdin=fh, check=True)
         ecmd = [*cc, "exec", "-T", "nb1777-mcp", "python", "-m", "app.ingest", "--file", nb_in]
         if args.verify:
             ecmd.append("--verify")
-        res = run(ecmd, capture=True, check=False, timeout=900)
+        # un podcast di un'ora: caricamento e trascrizione di Google possono superare 15 minuti
+        res = run(ecmd, capture=True, check=False, timeout=1800)
         if res.returncode != 0:
             err_txt = (res.stderr or res.stdout or "").strip()[:300]
             # ERRORE PARLANTE (#285): «Could not add file source» nudo non dice né
@@ -4668,7 +4695,13 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         text = data.get("text") or ""
         if not text.strip():
             die("NotebookLM non ha restituito testo — il file è leggibile?")
-        ok(f"trascritti {len(text)} caratteri da NotebookLM")
+        # P17: «contenuto» = il testo indicizzato da Google; «domanda» = la risposta a una
+        # richiesta di trascrizione, riscritta da un modello (il ripiego)
+        come = {"contenuto": "il testo indicizzato della fonte",
+                "domanda": "la risposta a una domanda di trascrizione, riscritta da un modello"
+                }.get(str(data.get("metodo")), "metodo non dichiarato")
+        tipo = f", fonte {data['fonte_tipo']}" if data.get("fonte_tipo") else ""
+        ok(f"trascritti {len(text)} caratteri da NotebookLM ({come}{tipo})")
         if data.get("verification"):
             log(f"verifica NotebookLM: {data['verification'][:400]}")
         host_txt.write_text(text, encoding="utf-8")
@@ -4689,7 +4722,8 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         # nb1777-mcp non è mai stato toccato: niente rm lì (un exec in meno, e il test
         # lo pretende).
         host_txt.unlink(missing_ok=True)
-        if not testuale:
+        # un artefatto non l'abbiamo copiato noi: è di chi l'ha scaricato, resta
+        if not testuale and not artefatto:
             run([*cc, "exec", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)
         run([*cc, "exec", "-u", "root", "-T", "gateway", "rm", "-f", gw_txt], check=False)
 
@@ -5251,7 +5285,11 @@ def build_parser() -> "argparse.ArgumentParser":
     p.add_argument("--yes", action="store_true")
 
     p = sub.add_parser("archive-ingest", help="indicizza un file nell'archivio (testo: diretto; scansioni: via NotebookLM)")
-    p.add_argument("file", help="file da indicizzare (testo → diretto; PDF-immagine/scansione → NotebookLM)")
+    p.add_argument("file", nargs="?",
+                   help="file da indicizzare (testo → diretto; PDF-immagine/scansione/audio → NotebookLM)")
+    p.add_argument("--artefatto", metavar="NOME",
+                   help="invece di un file: un artefatto già scaricato in nb1777 (studio_download), "
+                        "es. un podcast dello Studio")
     p.add_argument("--db", help="nome del DB archivio (default: dal nome file)")
     p.add_argument("--project", help="etichetta progetto (default: nome DB)")
     p.add_argument("--verify", action="store_true", help="chiedi a NotebookLM di verificare la trascrizione")

@@ -448,6 +448,17 @@ def source_get_content(nb_id: str, source_id: str) -> str:  # noqa: ARG001 (nb_i
     return p.stdout or ""
 
 
+def source_contenuto(source_id: str) -> dict:
+    """Il testo che NotebookLM ha indicizzato per una fonte, già separato dai metadati
+    (P17): {content, title, source_type, char_count}. Per un PDF-immagine è il testo letto
+    da Google, per un audio la sua trascrizione. `source_get_content` dà lo stesso JSON
+    come testo (senza TTY nlm risponde in JSON), e resta così per il contratto del tool."""
+    d = _run_json(["source", "content", source_id], timeout=120)
+    if not isinstance(d, dict):
+        raise NLMError(f"`source content` non ha dato un oggetto: {str(d)[:200]}")
+    return d
+
+
 def source_describe(source_id: str) -> dict:
     """Il riassunto di una fonte con le parole chiave, scritto da Gemini (P14, nlm 0.15:
     `source describe SOURCE_ID --json`). Usa la quota di Gemini Notebook."""
@@ -648,12 +659,20 @@ def _parse_iso8601(ts: Optional[str]) -> Optional[float]:
 def transcribe_document(file_path: Union[str, Path], *, title: Optional[str] = None,
                         verify: bool = False, timeout: float = 600.0) -> dict:
     """Estrae il testo di un file via NotebookLM (multimodale → legge anche le
-    immagini/scansioni che pypdf non sa fare).
+    immagini/scansioni che pypdf non sa fare, e trascrive l'audio).
 
     Crea un notebook scratch usa-e-getta, aggiunge il file (NotebookLM lo
-    processa), chiede la trascrizione integrale via query, opzionalmente chiede
-    una verifica di fedeltà (NotebookLM controlla il proprio lavoro), poi
-    cancella lo scratch. Ritorna {text, chars, cleanup_ok, verification?}.
+    processa), ne prende il testo, opzionalmente chiede una verifica di fedeltà
+    (NotebookLM controlla il proprio lavoro), poi cancella lo scratch.
+    Ritorna {text, chars, metodo, cleanup_ok, fonte_tipo?, verification?}.
+
+    P17 (11/10/2026): il testo viene da `source content` (`metodo: "contenuto"`), cioè ciò
+    che NotebookLM ha indicizzato, senza un modello che lo riscriva per rispondere a una
+    domanda, e con una chiamata in meno. La lunghezza NON è il guadagno: misurato sulla VPS
+    su due audio dello Studio, contenuto e domanda danno quasi le stesse parole (315 contro
+    338 su 3,8 MB, 2.306 contro 2.489 su 30 MB). Se il contenuto è vuoto o la chiamata
+    fallisce si torna alla domanda di trascrizione (`metodo: "domanda"`), che era l'unico
+    modo fino alla 0.84.
 
     H40 — `cleanup_ok` dice al chiamante se lo scratch è stato davvero cancellato.
     Il documento OCR-ato vive dentro quel notebook: se la delete fallisce (anche
@@ -669,9 +688,23 @@ def transcribe_document(file_path: Union[str, Path], *, title: Optional[str] = N
     out: dict = {"text": "", "chars": 0, "cleanup_ok": False}
     nb = nb_create(f"{INGEST_NB_PREFIX}{os.urandom(4).hex()}")
     try:
-        source_add_file(nb, path, title=title or path.name, wait=True, timeout=timeout)
-        q = notebook_query(nb, _TRANSCRIBE_PROMPT, timeout=timeout)
-        text = (q.get("answer") if isinstance(q, dict) else None) or ""
+        sid = source_add_file(nb, path, title=title or path.name, wait=True, timeout=timeout)
+        text = ""
+        if sid:
+            try:
+                c = source_contenuto(sid)
+                text = str(c.get("content") or "").strip()
+                if c.get("source_type"):
+                    out["fonte_tipo"] = str(c["source_type"])
+            except NLMAuthError:
+                raise                   # una sessione scaduta: anche la domanda fallirebbe
+            except NLMError as exc:
+                log.warning("transcribe: `source content` fallito (%s), provo la domanda", exc)
+        out["metodo"] = "contenuto"
+        if not text:
+            q = notebook_query(nb, _TRANSCRIBE_PROMPT, timeout=timeout)
+            text = (q.get("answer") if isinstance(q, dict) else None) or ""
+            out["metodo"] = "domanda"
         out["text"] = text
         out["chars"] = len(text)
         if verify and text:

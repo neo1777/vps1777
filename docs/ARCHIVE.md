@@ -778,14 +778,29 @@ vps1777 archive-ingest <file> --db <nome> --verify
 ```
 
 Cosa fa: crea un notebook usa-e-getta, ci mette il file (NotebookLM lo processa),
-chiede la **trascrizione integrale** via query, con `--verify` chiede a NotebookLM
-di **verificare la fedeltà** della propria trascrizione (doer + checker), poi
-indicizza il testo nell'archivio e pulisce il notebook. Funziona con PDF-immagine,
-scansioni e qualunque file che NotebookLM sappia leggere.
+ne prende il **testo indicizzato** (`source content`), con `--verify` chiede a
+NotebookLM di **verificare la fedeltà** (doer + checker), poi indicizza il testo
+nell'archivio e pulisce il notebook. Funziona con PDF-immagine, scansioni, **audio**
+e qualunque file che NotebookLM sappia leggere.
 
-> ⚠️ La trascrizione è generata da LLM, **non è OCR deterministico**: ottima per
-> ritrovare contenuti, non garantita fedele al 100% su layout complessi. La query
-> di verifica (`--verify`) segnala parti incerte/mancanti.
+Dalla 0.84 (P17) il testo è quello che NotebookLM ha indicizzato per la fonte, non la
+risposta a una domanda di trascrizione: non passa da un modello che lo riformula, e costa
+una chiamata in meno. Misurato su due audio dello Studio, la lunghezza è quasi la stessa
+(2.306 parole contro 2.489 su 30 MB). Se il contenuto è vuoto si torna alla domanda, e
+l'esito lo dice.
+
+**Un podcast dello Studio in un gesto.** Scaricato l'audio con `studio_download`, sta già
+nella cartella degli artefatti di nb1777; non serve copiarlo:
+
+```bash
+vps1777 archive-ingest --artefatto approfondimento-54fde107.m4a --db podcast-studio
+```
+
+L'artefatto resta dov'è. Il nome è solo il nome del file, senza cartelle.
+
+> ⚠️ Il testo lo produce Google (OCR multimodale, trascrizione dell'audio), **non è
+> OCR deterministico**: ottimo per ritrovare contenuti, non garantito fedele al 100%
+> su layout complessi. La verifica (`--verify`) segnala parti incerte o mancanti.
 
 Richiede l'auth NotebookLM configurata (profilo nlm — vedi `/admin/nlm`).
 

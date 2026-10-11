@@ -4,9 +4,11 @@ app.ingest — entrypoint CLI: estrae il testo di un file via NotebookLM.
 Chiamato dal comando host `vps1777 archive-ingest`:
     docker compose exec -T nb1777-mcp python -m app.ingest --file /var/lib/nlm-artifacts/ingest/x.pdf [--verify]
 
-Stampa su stdout un JSON {text, chars, verification?}. NotebookLM fa la lettura
-multimodale (anche immagini/scansioni); qui si orchestra soltanto (scratch
-notebook usa-e-getta con cleanup incluso).
+Stampa su stdout un JSON {text, chars, metodo, cleanup_ok, fonte_tipo?, verification?}.
+NotebookLM fa la lettura multimodale (immagini, scansioni, audio); qui si orchestra
+soltanto (scratch notebook usa-e-getta con cleanup incluso). Dal P17 il testo è quello
+indicizzato della fonte (`metodo: "contenuto"`), non la risposta a una domanda.
+Con `vps1777 archive-ingest --artefatto <nome>` il file è un artefatto già scaricato.
 """
 from __future__ import annotations
 

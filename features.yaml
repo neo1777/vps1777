@@ -1772,6 +1772,19 @@ features:
     since: "0.20.0 (percorso diretto per testo: 0.47.0, #285)"
     verify:
       file_contains: {path: "tools/vps1777.py", pattern: "indicizzo DIRETTO, niente NotebookLM"}
+  - id: cli.archive-ingest-artefatto
+    nome: "vps1777 archive-ingest --artefatto (un podcast dello Studio in un gesto)"
+    cosa: "Indicizza un artefatto già scaricato in nb1777 (studio_download), senza copiarlo e
+           senza cancellarlo. La trascrizione prende il testo indicizzato della fonte
+           (`source content`: per un audio la trascrizione di Google) e torna alla domanda di
+           trascrizione solo se è vuoto; l'esito dice quale dei due."
+    dove: ["cli:archive-ingest", "tools/vps1777.py", "services/nb1777-mcp/app/core.py"]
+    status: active-default
+    since: "unreleased"
+    decisione: "P17 del dossier sull'evoluzione degli MCP (ondata 2). Solo i podcast e gli
+                artefatti: i vocali di Telegram non passano da Google."
+    verify:
+      file_contains: {path: "tools/vps1777.py", pattern: "_ARTEFATTO_RE"}
 
   - id: cli.archive-retag
     nome: "vps1777 archive-retag"
