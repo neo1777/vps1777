@@ -38,6 +38,29 @@ jobs:
         with:
           fetch-depth: 0   # servono i tag per calcolare la patch successiva
 
+      # P9 (11/10/2026): nlm è pinnato a mano (dependabot.yml ne ignora i minor, di proposito).
+      # Una volta al mese si misura quanto è indietro: oltre 30 giorni dal primo rilascio
+      # stabile saltato si apre (o si commenta) una issue. Non aggiorna da sé: il salto si fa
+      # col metodo scritto in dependabot.yml. Sta qui in testa perché non dipende dalle scansioni.
+      - name: nlm è indietro di più di un mese?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RC=0
+          python3 tools/nlm-cadenza.py > nlm.txt || RC=$?   # 1 e 2 non fermano il passo
+          cat nlm.txt
+          if [ "$RC" = 2 ]; then echo "::warning::$(cat nlm.txt)"; exit 0; fi
+          [ "$RC" = 1 ] || exit 0
+          TITOLO="nlm (notebooklm-mcp-cli) indietro di più di un mese"
+          CORPO="$(printf 'Il giro mensile del %s dice:\n\n> %s\n\nIl salto si fa a mano, in una PR, col metodo di `.github/dependabot.yml`: changelog a monte, `--help` dei comandi usati da `core.py`, chiavi dei JSON su un account vero, contract-test (`tools/check.sh`).' "$(date -u +%F)" "$(cat nlm.txt)")"
+          ESISTENTE="$(gh issue list --state open --search "in:title \"nlm (notebooklm-mcp-cli) indietro\"" --json number -q '.[0].number' || true)"
+          if [ -n "$ESISTENTE" ]; then
+            gh issue comment "$ESISTENTE" --body "$CORPO"
+          else
+            gh issue create --title "$TITOLO" --body "$CORPO"
+          fi
+
       # Un solo job, niente matrice: il verdetto è la SOMMA sulle 6 immagini, e
       # 6 job separati non possono sommarsi senza un settimo che li aspetti.
       # (caddy-dns01 entra il 01/10/2026: è opzionale per chi installa, ma è un'immagine

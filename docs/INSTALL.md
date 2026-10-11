@@ -74,8 +74,9 @@ Se rilanci `setup.sh`, salta gli step già fatti.
 1. **Login admin**: `<PUBLIC_BASE>/admin/login` → email + password admin
 2. **Auth NotebookLM**: sul TUO PC installa il CLI `nlm`, fai login, poi carica il **profilo** (tar.gz) su `<PUBLIC_BASE>/admin/nlm`. La CLI `nlm` (dalla 0.7) salva l'auth come cartella `profiles/default/` (non più un singolo `auth.json`):
    ```bash
-   uv tool install notebooklm-mcp-cli==0.12.0 --python 3.12   # serve uv (astral.sh)
+   uv tool install notebooklm-mcp-cli==0.15.4 --python 3.12   # serve uv (astral.sh)
    nlm login                                             # apre il browser → login NotebookLM
+   # se chiede «Protected or plain file?» scegli il FILE: la VPS non apre il login cifrato
    cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default
    ```
    La versione è quella con cui gira il server (`services/nb1777-mcp/pyproject.toml`): una CLI diversa può salvare il profilo in un'altra forma. Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm` (login admin). Il gateway lo inoltra a `nb1777-mcp` sul canale interno (il gateway non monta i cookie), che lo estrae sul suo volume e lo usa dalla call successiva.

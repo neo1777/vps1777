@@ -159,7 +159,7 @@ mcp.tool = _tool_annotato                                # type: ignore[method-a
 # ritorna un errore strutturato con istruzioni per l'admin panel /admin/nlm.
 NLM_CFG = Path.home() / ".notebooklm-mcp-cli"
 AUTH_FLAG = NLM_CFG / "AUTH_PENDING.flag"
-# nlm (dalla 0.7, verificato fino alla 0.12): l'auth è il profilo profiles/default/cookies.json (non auth.json)
+# nlm (dalla 0.7, verificato fino alla 0.15.4): l'auth è il profilo profiles/default/cookies.json (non auth.json)
 AUTH_COOKIES = NLM_CFG / "profiles" / "default" / "cookies.json"
 
 
