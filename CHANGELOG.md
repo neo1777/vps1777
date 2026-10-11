@@ -5,6 +5,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Aggiunto
+- **nb1777: sostituire una fonte e riallineare quelle Drive (P20).** `source_replace` sostituisce
+  una fonte di testo o URL: aggiunge la nuova e poi toglie la vecchia, così un errore non lascia il
+  notebook senza; l'id cambia e l'esito lo dice. Va in due tempi come le cancellazioni.
+  `source_drive_stato` dice quali fonti Drive sono indietro, `source_sync_drive` le riallinea con lo
+  stesso id. La freschezza viene da `nlm source list --drive`: `source stale` e `source sync` senza
+  id, in nlm 0.15.4, non la controllano e non trovano mai niente. I tool di nb1777 sono 55.
 - **archive-mcp: `delta`, cosa è cambiato fra due fotografie (P19).** Fra due DB dello stesso
   account (due export claude.ai) confronta gli uuid: righe sparite (chat cancellate), nuove e col
   testo cambiato, contate per progetto, con gli esempi più recenti. Dice anche quanti uuid i due

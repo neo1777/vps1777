@@ -131,6 +131,9 @@ _RINOMINA = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": 
              "openWorldHint": True}
 _CANCELLA = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True,
              "openWorldHint": True}
+# P20: sostituire toglie la fonte vecchia (distruttivo) e ogni volta ne crea una nuova
+_SOSTITUISCE = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False,
+                "openWorldHint": True}
 ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     "nb_list": ("Elenca i notebook", _LEGGE),
     "nb_get": ("Leggi un notebook", _LEGGE),
@@ -153,6 +156,10 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     # apre una capacità (un link che aggiunge una fonte): non è sola lettura
     "source_upload_link": ("Link per caricare un file", _AGGIUNGE),
     "source_rename": ("Rinomina una fonte", _RINOMINA),
+    "source_replace": ("Sostituisci una fonte", _SOSTITUISCE),
+    "source_drive_stato": ("Fonti Drive da riallineare", _LEGGE),
+    # riscrive il contenuto con quello di Drive, stesso id: rifarlo non cambia niente
+    "source_sync_drive": ("Riallinea le fonti Drive", _RINOMINA),
     "notebook_query": ("Chiedi al notebook", _LEGGE),
     "notebook_query_esito": ("Ritira una risposta in corso", _LEGGE),
     "lavoro_esito": ("Ritira un lavoro in corso", _LEGGE),
@@ -634,6 +641,69 @@ async def source_delete(notebook_id: str, source_id: str, conferma: str = "") ->
     _conferma_o_errore(conferma, "source_delete", notebook_id, source_id)
     await _aio(core.source_delete, notebook_id, source_id)
     return {"cancellato": True, "source_id": source_id}
+
+
+@mcp.tool()
+async def source_replace(notebook_id: str, source_id: str, text: str = "", url: str = "",
+                         title: str = "", conferma: str = "",
+                         attesa_max: float = 25.0) -> esiti.Sostituzione:
+    """Sostituisce una fonte con un testo nuovo (`text`) o un URL nuovo (`url`), uno dei due.
+
+    NotebookLM non modifica una fonte: si aggiunge la nuova e POI si toglie la vecchia, così
+    un errore lascia la vecchia intatta. ⚠️ L'id cambia sempre: chi conserva il vecchio
+    source_id deve prendere quello nuovo. `title` vuoto = il titolo della vecchia (per un
+    URL vale il titolo della pagina). Le fonti Drive non si sostituiscono: si riallineano
+    con source_sync_drive, e l'id resta.
+
+    Due tempi, come source_delete: senza `conferma` NON tocca niente, restituisce
+    `anteprima` (la fonte che sparirebbe) e il gettone `conferma` (5 minuti); richiamalo con
+    gli stessi id, lo stesso testo e `conferma=<gettone>`. ⏱️ Poi aspetta al massimo
+    `attesa_max` secondi: se non ha finito torna {stato: "in_corso", job_id}, da ritirare
+    con lavoro_esito(job_id). Ritorna {source_id, sostituita, id_cambiato,
+    vecchia_cancellata, avviso?}."""
+    if bool(text) == bool(url):
+        raise ValueError("dammi il testo nuovo (text) OPPURE l'url nuovo (url), uno dei due")
+    if not conferma:
+        fonti = await _aio(core.source_list, notebook_id)
+        voce = next((f for f in fonti if core._source_id_of(f) == source_id), None)
+        if voce is None:
+            raise ValueError(f"la fonte {source_id} non è nel notebook {notebook_id}")
+        return {"anteprima": voce, "sostituita": source_id,
+                "conferma": _gettoni.gettone("source_replace", notebook_id, source_id),
+                "scade_tra_s": _gettoni.DURATA_S,
+                "come": "richiama source_replace con gli stessi argomenti e conferma=<il gettone>"}
+    _conferma_o_errore(conferma, "source_replace", notebook_id, source_id)
+    return await _lungo("source_replace",
+                        ("source_replace", notebook_id, source_id, hash(text), url, title),
+                        notebook_id, attesa_max, core.source_replace, notebook_id, source_id,
+                        text=text or None, url=url or None, title=title or None)
+
+
+@mcp.tool()
+async def source_drive_stato(notebook_id: str) -> list[esiti.FonteDrive]:
+    """Le fonti Drive di un notebook e, per ognuna, se il documento su Drive è più nuovo
+    (`indietro`). Le altre fonti non compaiono. Controlla fonte per fonte: su un notebook
+    con molte fonti Drive può chiedere qualche secondo."""
+    return await _aio(core.source_drive_stato, notebook_id)
+
+
+@mcp.tool()
+async def source_sync_drive(notebook_id: str, source_ids: Optional[list[str]] = None,
+                            attesa_max: float = 25.0) -> esiti.SyncDrive:
+    """Riallinea a Drive le fonti Drive di un notebook: stesso id, contenuto nuovo.
+    `source_ids` vuoto = tutte quelle che source_drive_stato dà `indietro`.
+
+    ⏱️ Aspetta al massimo `attesa_max` secondi: se non ha finito torna {stato: "in_corso",
+    job_id}, da ritirare con lavoro_esito(job_id). Ritorna {chieste, sincronizzate,
+    source_ids}."""
+    ids = list(source_ids or [])
+    if not ids:
+        ids = [f["source_id"] for f in await _aio(core.source_drive_stato, notebook_id)
+               if f.get("indietro")]
+        if not ids:
+            return {"chieste": 0, "sincronizzate": 0, "source_ids": []}
+    return await _lungo("source_sync_drive", ("source_sync_drive", notebook_id, tuple(ids)),
+                        notebook_id, attesa_max, core.source_sync_drive, notebook_id, ids)
 
 
 @mcp.tool()

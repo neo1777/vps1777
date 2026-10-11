@@ -998,6 +998,30 @@ features:
     since: "0.82.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: source_describe}
+  - id: nb1777.source_replace
+    nome: "nb1777-mcp · source_replace"
+    cosa: "Sostituisce una fonte di testo o URL: aggiunge la nuova e poi toglie la vecchia (l'id cambia, e lo dice); due tempi come le cancellazioni (P20)."
+    dove: ["mcp-tool:nb1777-mcp/source_replace"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_replace}
+  - id: nb1777.source_drive_stato
+    nome: "nb1777-mcp · source_drive_stato"
+    cosa: "Le fonti Drive di un notebook e quali sono indietro rispetto a Drive, da `source list --drive` (P20)."
+    dove: ["mcp-tool:nb1777-mcp/source_drive_stato"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_drive_stato}
+  - id: nb1777.source_sync_drive
+    nome: "nb1777-mcp · source_sync_drive"
+    cosa: "Riallinea a Drive le fonti indicate o tutte quelle indietro, con lo stesso id (P20)."
+    dove: ["mcp-tool:nb1777-mcp/source_sync_drive"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_sync_drive}
   - id: nb.nb_export
     nome: "nb1777-mcp · nb_export"
     cosa: "Un notebook in un file JSON sul server (fonti, testi, riassunti a scelta), con link firmato: lavoro lungo (P14)."
