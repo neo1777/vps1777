@@ -4,6 +4,22 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **L'indicizzazione della pagina Archive è un lavoro a parte, e il gateway ha un limite di
+  memoria (P16).** Il gateway non indicizza più da sé: mette il file in coda nel volume
+  dell'archivio e scrive un intent in `onboarding/ingest_coda/`. La path unit nuova
+  `vps1777-ingest.path` lancia `vps1777 ingest-coda`, che fa girare il servizio compose `ingest`
+  (profilo `ingest`, immagine del gateway, `mem_limit` 2g, una CPU, solo il volume dell'archivio,
+  nessun secret). La pagina mostra lo stato in «Caricamenti» e si ricarica da sola finché un
+  lavoro è aperto; un `.db` drop-in resta immediato. Il gateway ha ora `mem_limit` 512m (picco
+  misurato senza ingest: 112 MB). Un export troppo grande uccide il lavoro, non OAuth e il proxy.
+  Anche `archive-migra` e `archive-retag` girano nel servizio `ingest`. Gli installer e
+  `vps1777 update` accendono la path unit.
+
+### Corretto
+- **Uno zip rotto caricato da Archive dava un errore 500.** `BadZipFile` non è un `OSError` e non
+  veniva presa; ora è un rifiuto con il motivo, nel gateway e nel lavoro di indicizzazione.
+
 ## [0.83.0] — 2026-10-11
 
 **Il promemoria dei secret apre la vista giusta e si può posticipare.**

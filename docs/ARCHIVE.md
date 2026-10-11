@@ -98,6 +98,13 @@ connettore, questa è una scelta difendibile):
 Pannello admin → tab **Archive**. Carichi una fonte, viene indicizzata in un DB
 FTS5 e diventa cercabile. Dispatch automatico per estensione:
 
+> **Dalla 0.84 l'indicizzazione è un lavoro a parte.** Il gateway mette il file in coda
+> e lo indicizza il servizio compose `ingest`, con un limite di memoria suo (2g),
+> lanciato dalla path unit `vps1777-ingest.path` ([CLI.md](CLI.md#vps1777-ingest-coda)).
+> La pagina mostra lo stato in «Caricamenti» (in coda, in corso, fatto, errore) e si
+> ricarica da sola finché un lavoro è aperto. Un `.db` (drop-in) resta immediato. Se un
+> file supera il limite muore il lavoro, non il gateway: OAuth e connettori restano su.
+
 | Formato | Cosa indicizza |
 |---|---|
 | `.zip` | riconosciuto dal **contenuto**, non dal nome. Nell'ordine: il **bundle di Recupero Sessioni 1777** (se ha `MANIFEST.json` **e** almeno un membro `sessions/…` — vedi [il bundle](#il-bundle-di-recupero-sessioni)); l'export account **claude.ai** (`conversations.json` + `design_chats/` + `projects/docs` + `memories` + `users.json`/`login_history.json` — **unico** oppure **spezzato in 5 zip per categoria**, il formato consegnato da claude.ai dal 29/08/2026: ogni zip è riconosciuto da solo, si caricano tutti sullo stesso *nome DB*, vedi sotto); l'export chat **Telegram Desktop** — `result.json` *o* `messages*.html`, anche zippato come cartella `ChatExport_*/`. **Fallback**: uno zip che non è niente di questo ma contiene documenti `.md`/`.txt` (e codice, config, testo leggibile) viene indicizzato doc-per-doc, come i file sciolti |
@@ -122,6 +129,9 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 > primo export di questo formato: 13.920 record in 15 s, 1,2 GB di RAM di picco.
 > ⚠️ `conversations.json` decompresso è al 58% del tetto per membro (297 MB su 512):
 > quando lo supera l'ingest **si ferma parlante** (`MAX_MEMBER_BYTES`), non tronca.
+> E la memoria arriva prima: circa 4 volte il file (1,2 GB per 297 MB), quindi il
+> limite di 2g del servizio `ingest` scatta verso i 500 MB. Oltre, si indicizza sul PC
+> e si carica il `.db`.
 
 > L'export chat di Telegram Desktop funziona **così com'è**: comprimi la
 > cartella `ChatExport_*` in zip e caricala — sia il formato **HTML** (il

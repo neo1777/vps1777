@@ -2116,9 +2116,10 @@ def install_systemd_units(repo: Path, *, enable: bool) -> None:
             changed = True
     if changed:
         sudo(["systemctl", "daemon-reload"])
+    cartelle_coda_ingest(repo)
     if enable:
         units = ["vps1777-check-update.timer", "vps1777-update.path",
-                 "vps1777-secrets-check.timer"]
+                 "vps1777-secrets-check.timer", INGEST_PATH]
         # auto-update SICURO: acceso solo se dichiarato in VPS1777_FEATURES (default sì).
         # Stato dichiarato AUTORITATIVO: se non è voluto, il timer va spento — una feature
         # tolta dallo stato non deve restare accesa da un install precedente (è il difetto
@@ -2137,6 +2138,29 @@ def install_systemd_units(repo: Path, *, enable: bool) -> None:
         # togliere `autoupdate` da .env e fare un update lo lasciava acceso, e rimetterlo
         # non lo riaccendeva: OPS.md lo dichiarava («rileggono a metà»).
         allinea_timer_autoupdate(repo)
+        # P16: dalla 0.84 /admin/archive mette i file in coda, e senza questa unit
+        # nessuno li indicizza. Non è una feature da scegliere: è il modo di caricare.
+        # Chi aggiorna da prima non l'ha mai avuta, quindi la si accende qui.
+        sudo(["systemctl", "enable", "--now", INGEST_PATH], check=False)
+
+
+INGEST_PATH = "vps1777-ingest.path"
+
+
+def cartelle_coda_ingest(repo: Path) -> None:
+    """Le due cartelle della coda di /admin/archive, di proprietà dell'utente del
+    servizio (lo stesso uid del gateway): una creata da systemd o da Docker sarebbe di
+    root, e il gateway non ci potrebbe scrivere. Best-effort, come la telemetria."""
+    ob = onboarding_dir(repo)
+    for nome in (INGEST_CODA, INGEST_ESITI):
+        d = ob / nome
+        try:
+            d.mkdir(exist_ok=True)
+            if os.geteuid() == 0:
+                st = ob.stat()
+                os.chown(d, st.st_uid, st.st_gid)
+        except OSError as exc:
+            warn(f"cartella della coda d'indicizzazione non creata ({d}: {exc})")
 
 
 def _timer_autoupdate_installato() -> bool:
@@ -4200,6 +4224,174 @@ def cmd_indice_notturno(repo: Path, args) -> int:
     return uscita
 
 
+# ── ingest-coda: l'indicizzazione di /admin/archive come lavoro a parte (P16) ─────
+# Il gateway non esegue processi: mette il file nel volume dell'archivio (coda/) e
+# scrive un intent in onboarding/ingest_coda/. La path unit lancia questo comando, che
+# fa girare il servizio compose `ingest` con il suo tetto di memoria. Le regole sui nomi
+# sono le stesse di services/gateway/app/coda_ingest.py, ricopiate e non importate:
+# la CLI non si fida dell'intent, lo scrive il servizio esposto su Internet (un test
+# controlla che le due copie restino uguali).
+INGEST_CODA = "ingest_coda"
+INGEST_ESITI = "ingest_esiti"
+INGEST_ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
+INGEST_DB_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+INGEST_SUFFISSI = (".jsonl", ".json", ".zip", ".md", ".txt", ".pdf")
+INGEST_TESTO_MAX = 500
+INGEST_ESITI_MAX = 50          # gli esiti più vecchi si potano
+INGEST_TETTO = "2g"            # il mem_limit del servizio `ingest` (compose.yaml)
+# I comandi che riscrivono un DB intero (archive-migra, archive-retag) girano qui e non
+# più con `exec` nel gateway, che dalla 0.84 ha un tetto di 512 MB. archive-ingest resta
+# nel gateway: il testo ci arriva dalla tmpfs di /tmp, che ha già un tetto di 64 MB.
+INGEST_RUN = ["--profile", "ingest", "run", "--rm", "-T", "ingest"]
+
+
+def valida_intent_ingest(nome: str, d: object) -> str:
+    """'' se l'intent si può eseguire, altrimenti il motivo. Logica pura."""
+    stem = nome[:-5] if nome.endswith(".json") else nome
+    if not INGEST_ID_RE.match(stem):
+        return "nome dell'intent non valido"
+    if not isinstance(d, dict):
+        return "intent illeggibile"
+    if d.get("id") != stem:
+        return "l'id dell'intent non corrisponde al nome del file"
+    if not isinstance(d.get("db"), str) or not INGEST_DB_RE.match(d["db"]):
+        return "nome DB non valido"
+    if d.get("suffisso") not in INGEST_SUFFISSI:
+        return "formato non ammesso"
+    for campo in ("project", "description"):
+        v = d.get(campo, "")
+        if not isinstance(v, str) or len(v) > INGEST_TESTO_MAX:
+            return f"campo {campo} non valido"
+    return ""
+
+
+def esito_lavoro_ingest(codice: int, uscita: str) -> dict:
+    """Dall'esito del container al dizionario per la pagina. Logica pura."""
+    dati: dict = {}
+    for riga in reversed((uscita or "").splitlines()):
+        riga = riga.strip()
+        if riga.startswith("{"):
+            try:
+                dati = json.loads(riga)
+            except json.JSONDecodeError:
+                continue
+            break
+    if codice == 0 and "righe" in dati:
+        return {"stato": "fatto", "righe": dati.get("righe"), "totale": dati.get("totale")}
+    if codice == 137:
+        return {"stato": "errore", "errore": f"ucciso dal tetto di memoria del lavoro "
+                f"({INGEST_TETTO}): il file è troppo grande per questa VPS. Dividilo, "
+                f"oppure indicizzalo sul PC e carica il .db"}
+    errore = dati.get("errore") or f"il lavoro è uscito con {codice}"
+    return {"stato": "errore", "errore": str(errore)[:600]}
+
+
+def _scrivi_esito_ingest(repo: Path, jid: str, dati: dict) -> None:
+    d = onboarding_dir(repo) / INGEST_ESITI
+    d.mkdir(exist_ok=True)
+    p = d / f"{jid}.json"
+    tmp = d / f".{jid}.json.tmp"
+    tmp.write_text(json.dumps(dati, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(p)
+
+
+def _pota_esiti_ingest(repo: Path) -> None:
+    d = onboarding_dir(repo) / INGEST_ESITI
+    vecchi = sorted(p for p in d.glob("*.json") if INGEST_ID_RE.match(p.stem))
+    for p in vecchi[:-INGEST_ESITI_MAX]:
+        p.unlink(missing_ok=True)
+
+
+def cmd_ingest_coda(repo: Path, args) -> int:
+    """Indicizza i file che /admin/archive ha messo in coda, uno alla volta, dal più
+    vecchio. Lo lancia vps1777-ingest.path; a mano serve a svuotare una coda ferma."""
+    coda = onboarding_dir(repo) / INGEST_CODA
+    if not coda.is_dir():
+        log("nessuna coda d'indicizzazione")
+        return 0
+    var = repo / "var"
+    var.mkdir(mode=0o700, exist_ok=True)
+    lock = open(var / "ingest-coda.lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("un altro giro della coda è già in corso: ci pensa lui")
+        return 0
+    cc = compose_cmd(repo)
+    uscita = 0
+    fatti = 0
+    # si rilegge la cartella dopo ogni lavoro: un file caricato nel frattempo entra
+    # nello stesso giro, e la path unit non deve ripartire per lui
+    while True:
+        intent = []
+        for p in coda.iterdir():
+            if p.suffix == ".json" and not p.name.startswith("."):
+                intent.append(p)
+            else:
+                # il gateway scrive solo intent completi (il temporaneo sta fuori): altro
+                # qui dentro farebbe ripartire la unit a vuoto, all'infinito
+                warn(f"coda: tolgo {p.name}, non è un intent")
+                if p.is_dir():
+                    shutil.rmtree(p, ignore_errors=True)
+                else:
+                    p.unlink(missing_ok=True)
+        intent.sort()
+        if not intent:
+            break
+        p = intent[0]
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            d = None
+        motivo = valida_intent_ingest(p.name, d)
+        # consumare PRIMA di agire: un intent che resta in coda fa ripartire la unit
+        # all'infinito (DirectoryNotEmpty)
+        p.unlink(missing_ok=True)
+        if motivo:
+            warn(f"intent {p.name} scartato: {motivo}")
+            if INGEST_ID_RE.match(p.stem):
+                _scrivi_esito_ingest(repo, p.stem, {"stato": "errore", "errore": motivo})
+            uscita = 1
+            continue
+        assert isinstance(d, dict)
+        jid = d["id"]
+        base = {k: d.get(k, "") for k in ("db", "file", "by", "accodato")}
+        _scrivi_esito_ingest(repo, jid, {**base, "stato": "in-corso", "iniziato": now_iso()})
+        log(f"{jid}: «{d.get('file', '')}» → DB «{d['db']}»")
+        try:
+            r = run([*cc, *INGEST_RUN, "coda",
+                     "--id", jid, "--db", d["db"], "--suffisso", d["suffisso"],
+                     "--project", d.get("project", ""),
+                     "--description", d.get("description", "")],
+                    check=False, capture=True, timeout=6 * 3600)
+            esito = esito_lavoro_ingest(r.returncode, r.stdout or "")
+            codice = r.returncode
+        except subprocess.TimeoutExpired:
+            esito = {"stato": "errore", "errore": "il lavoro ha superato le 6 ore"}
+            codice = -1
+        if esito["stato"] == "errore" and codice not in (0, 3):
+            # un lavoro ucciso non arriva al suo `finally`: il file lo toglie il
+            # gateway (stesso utente che l'ha scritto); se non ci riesce, lo toglie
+            # il prossimo lavoro dopo due giorni
+            run([*cc, "exec", "-T", "gateway", "rm", "-f",
+                 f"/var/lib/archive/coda/{jid}{d['suffisso']}"], check=False, capture=True)
+        _scrivi_esito_ingest(repo, jid, {**base, **esito, "finito": now_iso()})
+        if esito["stato"] == "fatto":
+            ok(f"{jid}: {esito.get('righe')} record (totale {esito.get('totale')})")
+            fatti += 1
+        elif codice == 3:
+            # rifiuto parlante dell'indexer (formato, PDF senza testo…): l'ha visto chi
+            # ha caricato, sulla pagina; non è un guasto della unit
+            warn(f"{jid}: {esito['errore'][:300]}")
+        else:
+            warn(f"{jid}: {esito['errore'][:300]}")
+            uscita = 1
+    _pota_esiti_ingest(repo)
+    if fatti:
+        log(f"coda svuotata: {fatti} file indicizzati")
+    return uscita
+
+
 def _filtra_db_archivio(righe: list[str], solo: str | None) -> list[str]:
     """Dall'elenco dei file `.db` del volume, i DB dell'ARCHIVIO: senza i `.vec.db`,
     che sono l'indice semantico accanto a un archivio (0.48.0) e non hanno la tabella
@@ -4257,7 +4449,7 @@ def cmd_archive_migra(repo: Path, args) -> int:
     uscita = 0
     for db_path in trovati:
         nome = Path(db_path).stem
-        cmd = [*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
+        cmd = [*cc, *INGEST_RUN, "indexer",
                db_path, "--migra"]
         if args.scrivi:
             cmd.append("--scrivi")
@@ -4301,7 +4493,7 @@ def _archive_migra_telegram(cc: list[str], trovati: list[str], scrivi: bool) -> 
     uscita = 0
     for db_path in trovati:
         nome = Path(db_path).stem
-        cmd = [*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
+        cmd = [*cc, *INGEST_RUN, "indexer",
                db_path, "--migra-telegram"]
         if scrivi:
             cmd.append("--scrivi")
@@ -4351,7 +4543,7 @@ def cmd_archive_retag(repo: Path, args) -> int:
     uscita = 0
     for db_path in trovati:
         nome = Path(db_path).stem
-        cmd = [*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
+        cmd = [*cc, *INGEST_RUN, "indexer",
                db_path, "--retag"]
         if args.scrivi:
             cmd.append("--scrivi")
@@ -5085,6 +5277,9 @@ def build_parser() -> "argparse.ArgumentParser":
     p.add_argument("--abilita", action="store_true", help=f"accende {TIMER_INDICE}")
     p.add_argument("--disabilita", action="store_true", help=f"spegne {TIMER_INDICE}")
 
+    sub.add_parser("ingest-coda",
+                   help="indicizza i file messi in coda da /admin/archive (lo lancia vps1777-ingest.path)")
+
     p = sub.add_parser("archive-migra",
                        help="migra le colonne derivate dei DB già caricati (a secco di default)")
     p.add_argument("--db", help="un solo DB (nome senza .db); default: tutti")
@@ -5156,6 +5351,7 @@ def main() -> int:
                 "archive-migra": cmd_archive_migra,
                 "indice-modello": cmd_indice_modello,
                 "indice-notturno": cmd_indice_notturno,
+                "ingest-coda": cmd_ingest_coda,
                 "secrets-status": cmd_secrets_status,
                 "memoria": cmd_memoria, "help": cmd_help,
                 "avvisa-fallimento": cmd_avvisa_fallimento,

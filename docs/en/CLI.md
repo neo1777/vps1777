@@ -248,6 +248,21 @@ vps1777 indice-notturno                    # un giro adesso
 vps1777 indice-notturno --db X --tutti     # un DB solo, anche se già allineato
 ```
 
+## vps1777 ingest-coda
+
+Indexes the files that the panel's **Archive** page has queued. Since 0.84 the gateway
+no longer indexes by itself: it puts the file in the archive volume and writes an intent
+into `onboarding/ingest_coda/`. The `vps1777-ingest.path` unit launches this command,
+which, for each intent from the oldest, runs the `ingest` compose service (gateway image,
+2g memory limit, one CPU, only the archive volume). The state ends up in
+`onboarding/ingest_esiti/` and the page shows it under «Caricamenti». If a file exceeds
+the limit the job dies, not the gateway. By hand it is for emptying a stuck queue.
+
+```bash
+vps1777 ingest-coda                         # one round now
+systemctl status vps1777-ingest.path        # the unit that launches it by itself
+```
+
 ## vps1777 archive-migra
 
 Brings the migrations of the derived columns to the DBs **already loaded**, without

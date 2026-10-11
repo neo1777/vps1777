@@ -111,7 +111,7 @@ salvato una `s` come token del bot.* Non fa danni permanenti — si svuota il fi
 > sul tuo PC non serve.** Puoi premere **Ctrl-C**: *misurato — `setup.sh` esce (codice
 > 130), **lo stack resta su** e il pannello risponde `200`.* Lo stack è già avviato quando
 > quel prompt arriva. Se gliel'hai data e vuoi tornare indietro:
-> `sudo systemctl disable --now vps1777-check-update.timer vps1777-secrets-check.timer vps1777-update.path vps1777-auto-update.timer`
+> `sudo systemctl disable --now vps1777-check-update.timer vps1777-secrets-check.timer vps1777-update.path vps1777-auto-update.timer vps1777-ingest.path`
 > (e `fail2ban`/`unattended-upgrades` si tolgono come qualunque pacchetto).
 
 ### 4 · Guarda che è vivo — `immediato`

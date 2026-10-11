@@ -201,6 +201,10 @@ class Settings(BaseSettings):
     # dir dei DB di archive-mcp: il gateway scrive qui i .db indicizzati da
     # /admin/archive; archive-mcp li scopre (scan-mode). Volume condiviso.
     archive_db_dir: str = "/var/lib/archive/db"
+    # P16 (11/10/2026): con True /admin/archive non indicizza da sé, mette il file in
+    # coda e lo indicizza il servizio `ingest`, lanciato dall'host (app/coda_ingest.py).
+    # compose.yaml lo accende; False resta per lo sviluppo e per i test.
+    archive_ingest_coda: bool = False
 
     # ───── helpers ─────
 

@@ -99,6 +99,13 @@ give the connector to, this is a defensible choice):
 Admin panel → **Archive** tab. You upload a source, it is indexed into an FTS5 DB
 and becomes searchable. Automatic dispatch by extension:
 
+> **Since 0.84, indexing is a separate job.** The gateway queues the file and the
+> `ingest` compose service indexes it, with its own memory limit (2g), started by the
+> `vps1777-ingest.path` unit ([CLI.md](CLI.md#vps1777-ingest-coda)). The page shows
+> the state under «Caricamenti» (queued, running, done, error) and reloads itself while
+> a job is open. A `.db` (drop-in) is still immediate. If a file exceeds the limit, the
+> job dies, not the gateway: OAuth and connectors stay up.
+
 | Format | What it indexes |
 |---|---|
 | `.zip` | recognised by its **content**, not its name. In order: the **Session Recovery 1777 bundle** (if it has `MANIFEST.json` **and** at least one `sessions/…` member — see [the bundle](#the-session-recovery-bundle)); the **claude.ai** account export (`conversations.json` + `design_chats/` + `projects/docs` + `memories` + `users.json`/`login_history.json` — **single** or **split into 5 zips by category**, the format claude.ai has delivered since 29/08/2026: each zip is recognised on its own, all of them go to the same *DB name*, see below); the **Telegram Desktop** chat export — `result.json` *or* `messages*.html`, also zipped as a `ChatExport_*/` folder. **Fallback**: a zip that is none of these but contains `.md`/`.txt` documents (and code, config, readable text) is indexed document by document, like loose files |
@@ -125,6 +132,9 @@ and becomes searchable. Automatic dispatch by extension:
 > ⚠️ Decompressed, `conversations.json` is at 58% of the per-member cap (297 MB out
 > of 512): when it exceeds it the ingest **stops with an explanation**
 > (`MAX_MEMBER_BYTES`), it doesn't truncate.
+> Memory runs out first: about 4 times the file (1.2 GB for 297 MB), so the 2g limit
+> of the `ingest` service triggers around 500 MB. Beyond that, index on the PC and
+> upload the `.db`.
 
 > The Telegram Desktop chat export works **as is**: compress the `ChatExport_*`
 > folder into a zip and upload it — both the **HTML** format (the default,

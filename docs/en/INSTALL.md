@@ -58,8 +58,9 @@ The final stage prints the URLs for you.
    `compose.build.yaml` overlay)
 5. If you answered "yes" to "Procedo ora?", **with `sudo`** (it asks for the password):
    installs the `vps1777` CLI in `/usr/local/bin`; installs **all** the
-   `systemd/vps1777-*` units in `/etc/systemd/system` and **enables** three of them —
-   `vps1777-check-update.timer`, `vps1777-update.path`, `vps1777-secrets-check.timer`
+   `systemd/vps1777-*` units in `/etc/systemd/system` and **enables** four of them —
+   `vps1777-check-update.timer`, `vps1777-update.path`, `vps1777-secrets-check.timer`,
+   `vps1777-ingest.path` (the indexing queue of the Archive page)
    — plus `vps1777-auto-update.timer` if `autoupdate` is in `VPS1777_FEATURES` (it is
    by default); applies the **host hardening**: `apt-get install` of
    `unattended-upgrades` and `fail2ban`, with `/etc/apt/apt.conf.d/20auto-upgrades` and

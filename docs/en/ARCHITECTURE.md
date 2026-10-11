@@ -51,7 +51,7 @@ Three base networks, three distinct roles (H25):
 | Volume | Container path | Contents |
 |---|---|---|
 | `gateway-data` | `/var/lib/gateway` | audit log, audit.jsonl |
-| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5: the messages and, from Session Recovery bundles, the `sessioni`/`archi`/`memorie` tables — see [ARCHIVE.md](ARCHIVE.md)) + `models/` and the `<db>.vec.db` indexes of search by meaning ([RICERCA-IBRIDA.md](RICERCA-IBRIDA.md)). Written by the gateway (ingest) and by the `indice-notturno` job (the indexes); `archive-mcp` mounts it read-only |
+| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5: the messages and, from Session Recovery bundles, the `sessioni`/`archi`/`memorie` tables — see [ARCHIVE.md](ARCHIVE.md)) + `models/` and the `<db>.vec.db` indexes of search by meaning ([RICERCA-IBRIDA.md](RICERCA-IBRIDA.md)). Written by the `ingest` job (the DBs, since 0.84; the gateway queues files there and writes drop-in `.db`s) and by the `indice-notturno` job (the indexes); `archive-mcp` mounts it read-only |
 | `nlm-auth` | `/var/lib/nlm` | NotebookLM profile `profiles/default/` + `AUTH_PENDING.flag` |
 | `nlm-artifacts` | `/var/lib/nlm-artifacts` | the Studio artifacts downloaded by nb1777-mcp and the in-transit files of `archive-ingest`. No secrets |
 | `gateway-uploads` | `/var/lib/uploads` | the gateway's upload spool (`TMPDIR`): on disk and not in the `/tmp` tmpfs, which a 2.6 GB bundle used to fill |
@@ -116,6 +116,13 @@ release check + Telegram notification to the owner. A second daily timer
 has been published for at least 48 hours (`vps1777 auto-update --eta-minima 48`): a
 bad release has two days to be withdrawn before it arrives. A third
 (`vps1777-secrets-check.timer`) checks the secrets' expiry dates.
+
+The same design applies to archive indexing (since 0.84): the *Archive* page queues
+the file and writes an intent into `onboarding/ingest_coda/`; `vps1777-ingest.path`
+launches `vps1777 ingest-coda`, which runs the `ingest` compose service (`ingest`
+profile, gateway image, 2g memory limit, only the `archive-data` volume). This lets the
+gateway have a limit of its own (512m): an export that is too large kills the job, not
+OAuth and the proxy.
 
 ```
 admin UI ──intent──► onboarding/update_pending_update.json

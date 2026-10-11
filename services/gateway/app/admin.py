@@ -20,10 +20,11 @@ import secrets as pysecrets
 import shutil
 import sqlite3
 import time
+import zipfile
 from contextlib import AsyncExitStack
 from pathlib import Path
 
-from . import admin_core, archive_indexer, nlm_client
+from . import admin_core, archive_indexer, coda_ingest, nlm_client
 from .admin_core import safe_next_url
 from .miniapp_core import version_gt
 
@@ -740,6 +741,42 @@ async def _indicizza(path: str, db: str, project: str) -> int:
         return await asyncio.to_thread(archive_indexer.index_file, path, db, project=project)
 
 
+_STATI_LAVORO = {"in-coda": ("warn", "in coda"), "in-corso": ("warn", "in corso"),
+                 "fatto": ("ok", "fatto"), "errore": ("err", "errore")}
+
+
+def _sezione_caricamenti(lavori: list[dict]) -> str:
+    """P16: i lavori della coda d'indicizzazione, dal più recente. Mentre uno è aperto
+    la pagina si ricarica da sola ogni 10 secondi."""
+    if not lavori:
+        return ""
+    righe = ""
+    for d in lavori:
+        classe, parola = _STATI_LAVORO.get(str(d.get("stato")), ("off", str(d.get("stato"))))
+        if d.get("stato") == "fatto":
+            dettaglio = html.escape(f"{d.get('righe', '?')} record (totale {d.get('totale', '?')})")
+        elif d.get("stato") == "errore":
+            dettaglio = html.escape(str(d.get("errore") or ""))
+        elif d.get("stato") == "in-coda" and d.get("fermo"):
+            dettaglio = ("nessuno l'ha preso: sull'host guarda "
+                         "<code>systemctl status vps1777-ingest.path</code>")
+        else:
+            dettaglio = ""
+        righe += (f"<tr><td>{html.escape(str(d.get('accodato') or d['id'][:15]))}</td>"
+                  f"<td>{html.escape(str(d.get('file') or ''))}</td>"
+                  f"<td><code>{html.escape(str(d.get('db') or ''))}</code></td>"
+                  f'<td><span class="dot {classe}"></span>{html.escape(parola)}</td>'
+                  f"<td>{dettaglio}</td></tr>")
+    ricarica = ("<script>setTimeout(function(){ location.reload(); }, 10000);</script>"
+                if coda_ingest.qualcuno_aperto(lavori) else "")
+    return (f'<section><div class="kicker">Caricamenti</div>'
+            f'<div class="tblwrap"><table><thead><tr><th>accodato</th><th>file</th>'
+            f'<th>DB</th><th>stato</th><th>esito</th></tr></thead><tbody>{righe}</tbody>'
+            f'</table></div><p class="hint">L\'indicizzazione gira nel servizio '
+            f'<code>ingest</code>, con un tetto di memoria suo: se un file è troppo grande '
+            f'muore il lavoro, non il gateway.</p>{ricarica}</section>')
+
+
 async def archive_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
     if redirect:
@@ -818,6 +855,7 @@ async def archive_view(request: Request) -> Response:
         description = str(form.get("description") or "").strip()
         db_path = db_dir / f"{db_name}.db"
         esiti: list[str] = []          # un rigo per file, nell'ordine di arrivo
+        accodati = 0                   # P16: i file passati al servizio `ingest`
         tmp = db_dir / f".upload-{db_name}-{os.getpid()}"
         try:
             for upload in uploads:
@@ -866,6 +904,18 @@ async def archive_view(request: Request) -> Response:
                         tmp.replace(db_path)
                         n = archive_indexer.count_rows(db_path)
                         verb = "caricato (drop-in)"
+                    elif s.archive_ingest_coda:
+                        # P16: l'indicizzazione la fa il servizio `ingest`, con il suo
+                        # tetto di memoria; qui il file passa in coda (un rename).
+                        jid = await asyncio.to_thread(
+                            coda_ingest.accoda, s.onboarding_dir, s.archive_db_dir, tmp,
+                            db=db_name, suffisso=suffix, nome_file=nome_file,
+                            project=project, description=description, by=email)
+                        audit({"event": "admin_archive_accodato", "by": email, "db": db_name,
+                               "fmt": suffix, "file": nome_file, "lavoro": jid})
+                        esiti.append(f"{nome_file}: in coda")
+                        accodati += 1
+                        continue
                     else:
                         # dispatch per estensione: .jsonl/.json → Claude Code; .zip → claude.ai; .md/.txt → testo
                         n = await _indicizza(str(tmp), str(db_path), project)
@@ -875,6 +925,13 @@ async def archive_view(request: Request) -> Response:
                     esiti.append(f"{nome_file}: {verb} {n}")
                 finally:
                     tmp.unlink(missing_ok=True)
+            if accodati:
+                # la descrizione la scrive il lavoro, dopo l'indicizzazione: il DB
+                # può non esistere ancora
+                msg = (f"{' · '.join(esiti)} → '{db_name}'. L'indicizzazione gira a parte, "
+                       f"con un tetto di memoria suo: lo stato è qui sotto, in «Caricamenti».")
+                return RedirectResponse(f"/admin/archive?msg={quote_plus(msg)}&kind=ok",
+                                        status_code=303)
             if description:
                 archive_indexer.set_meta(db_path, "description", description)
             total = archive_indexer.count_rows(db_path)
@@ -884,7 +941,8 @@ async def archive_view(request: Request) -> Response:
                 msg = (f"{len(esiti)} file in '{db_name}' (totale {total}): "
                        + " · ".join(esiti) + ". Ricerca attiva subito.")
             return RedirectResponse(f"/admin/archive?msg={quote_plus(msg)}&kind=ok", status_code=303)
-        except (ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
+        # BadZipFile non è un OSError: senza, uno zip rotto dava un 500 (trovato col P16)
+        except (ValueError, OSError, RuntimeError, sqlite3.Error, zipfile.BadZipFile) as exc:
             audit({"event": "admin_archive_ingest_err", "by": email, "db": db_name, "error": str(exc)})
             # I file già indicizzati RESTANO nel DB (ogni file è la sua transazione):
             # lo si dice, perché «Errore» da solo farebbe ricaricare anche quelli.
@@ -898,6 +956,8 @@ async def archive_view(request: Request) -> Response:
     # (20/09/2026: 2-4 min sui 23 DB della VPS). Nel loop bloccava /health e
     # ogni altra richiesta: era questo il «si è impallato» della pagina.
     dbs = await asyncio.to_thread(_archive_dbs)
+    caricamenti = _sezione_caricamenti(
+        await asyncio.to_thread(coda_ingest.lavori, s.onboarding_dir))
     if dbs:
         rows = ""
         for d in dbs:
@@ -952,10 +1012,11 @@ document.querySelectorAll('form.delform').forEach(function(f){{
   <div class="who">{html.escape(email)}</div>
 </header>
 {status_html}
+{caricamenti}
 {table}
 <section>
   <div class="kicker">carica una fonte da indicizzare</div>
-  <p class="muted">Puoi selezionare <strong>più file</strong> in un gesto: vanno tutti nello stesso <em>nome DB</em>, in ordine — è il caso dell'export claude.ai <strong>a 5 zip</strong> (dal 29/08/2026: <code>conversations-000</code>, <code>projects-000</code>, <code>design_chats-000</code>, <code>memories-000</code>, <code>light_metadata-000</code>; il <code>manifest-*.json</code> NON si carica, contiene solo i link one-shot). Formati: <code>.zip</code> (export account claude.ai — conversazioni + design chats + docs + memoria + anagrafica/accessi, unico o spezzato in 5 — oppure export chat Telegram Desktop, <strong>JSON o HTML</strong>: lo zip della cartella <code>ChatExport_*</code> va bene così com'è — oppure il <strong>bundle di Recupero Sessioni 1777</strong>: sessioni + sub-agenti (dal 16/09/2026, progetto <code>subagent:…</code>) + log MCP + workfiles-testo indicizzati, binari censiti in <code>skipped</code>, copie multiple tracciate in <code>sightings</code>, membri ignoti in <code>skipped</code> come <code>membro-sconosciuto</code>), <code>.jsonl</code> (sessione Claude Code), <code>.json</code> (export Telegram Desktop, formato JSON), <code>.pdf</code> (documento con testo — non gli screenshot), <code>.md</code>/<code>.txt</code> (testo, es. output di web2md o lettoremd), <code>.db</code> (drop-in già indicizzato). Viene reso cercabile subito. Ricaricare lo stesso <em>nome DB</em> non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano — ma non mischiare HTML e JSON della <em>stessa</em> chat nello stesso DB (chiavi diverse → doppioni).</p>
+  <p class="muted">Puoi selezionare <strong>più file</strong> in un gesto: vanno tutti nello stesso <em>nome DB</em>, in ordine — è il caso dell'export claude.ai <strong>a 5 zip</strong> (dal 29/08/2026: <code>conversations-000</code>, <code>projects-000</code>, <code>design_chats-000</code>, <code>memories-000</code>, <code>light_metadata-000</code>; il <code>manifest-*.json</code> NON si carica, contiene solo i link one-shot). Formati: <code>.zip</code> (export account claude.ai — conversazioni + design chats + docs + memoria + anagrafica/accessi, unico o spezzato in 5 — oppure export chat Telegram Desktop, <strong>JSON o HTML</strong>: lo zip della cartella <code>ChatExport_*</code> va bene così com'è — oppure il <strong>bundle di Recupero Sessioni 1777</strong>: sessioni + sub-agenti (dal 16/09/2026, progetto <code>subagent:…</code>) + log MCP + workfiles-testo indicizzati, binari censiti in <code>skipped</code>, copie multiple tracciate in <code>sightings</code>, membri ignoti in <code>skipped</code> come <code>membro-sconosciuto</code>), <code>.jsonl</code> (sessione Claude Code), <code>.json</code> (export Telegram Desktop, formato JSON), <code>.pdf</code> (documento con testo — non gli screenshot), <code>.md</code>/<code>.txt</code> (testo, es. output di web2md o lettoremd), <code>.db</code> (drop-in già indicizzato). Un <code>.db</code> è cercabile subito; le altre fonti appena il loro lavoro è «fatto» in <em>Caricamenti</em>. Ricaricare lo stesso <em>nome DB</em> non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano — ma non mischiare HTML e JSON della <em>stessa</em> chat nello stesso DB (chiavi diverse → doppioni).</p>
   <form method="POST" action="/admin/archive" enctype="multipart/form-data">
     <div class="row"><label>fonte</label><input type="file" name="jsonl_file" accept=".jsonl,.json,.zip,.md,.txt,.pdf,.db" multiple required></div>
     <div class="row"><label>nome DB</label><input type="text" name="db_name" placeholder="es. cc (vuoto = dal nome file)"></div>
