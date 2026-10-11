@@ -120,7 +120,7 @@ updates:
       # che regge una garanzia di sicurezza è esattamente ciò che non vogliamo.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # notebooklm-mcp-cli: il pin (`==0.12.0` dal 27/09/2026) e INTENZIONALE, non pigrizia.
+      # notebooklm-mcp-cli: il pin (`==0.15.4` dall'11/10/2026) e INTENZIONALE, non pigrizia.
       #   Il formato auth di quella CLI (`profiles/default/cookies.json`) e cablato
       #   in QUATTRO punti che nessun bump automatico tocca - auth.py (il gate di
       #   auth), admin.py (le istruzioni all utente), il bot e la doc.
@@ -137,6 +137,9 @@ updates:
       #   va fatto a mano con lo stesso metodo (changelog, --help, JSON, contract-test).
       # NON e «mai piu aggiornarlo»: le PATCH entrano ancora, quindi una 0.12.x di
       #   sicurezza arriva lo stesso. (71d540e6, 16/08 - review abdd732a, #152;
-      #   salto a 0.12.0: 973691b8, 27/09)
+      #   salto a 0.12.0: 973691b8, 27/09; salto a 0.15.4: 973691b8, 11/10, P9)
+      # Il prezzo dell'ignore era un pin fermo senza che nessuno lo vedesse (0.12.0 mentre
+      #   upstream era alla 0.15.4): da P9 rebuild-mensile.yml lancia tools/nlm-cadenza.py e
+      #   apre una issue se il pin è indietro da più di un mese.
       - dependency-name: "notebooklm-mcp-cli"
         update-types: ["version-update:semver-minor"]

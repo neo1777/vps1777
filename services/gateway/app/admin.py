@@ -475,7 +475,7 @@ async def logout(request: Request) -> Response:
     return resp
 
 
-# ───── /admin/nlm — upload del profilo nlm (notebooklm-mcp-cli, dalla 0.7 alla 0.12) ─────
+# ───── /admin/nlm — upload del profilo nlm (notebooklm-mcp-cli, dalla 0.7 alla 0.15) ─────
 # La CLI nlm (dalla 0.7) salva l'auth come CARTELLA profiles/default/{cookies.json,
 # metadata.json} (non più un singolo auth.json). Qui si carica un tar.gz di
 # quella cartella.

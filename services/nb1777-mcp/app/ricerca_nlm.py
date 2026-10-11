@@ -1,6 +1,6 @@
 """La ricerca approfondita di Gemini Notebook, in un sottoprocesso (P7, 10/10/2026).
 
-`nlm research start/status/import` (0.12) stampano solo testo, senza `--json`, e
+`nlm research start/status/import` (0.12, e ancora la 0.15) stampano solo testo, senza `--json`, e
 `--auto-import` sbaglia. Sotto la CLI c'è `notebooklm_tools.services.research`, che
 ritorna dati strutturati (TypedDict): questo modulo lo chiama e stampa JSON, così
 `core` lo lancia come lancia `nlm` — un sottoprocesso con timeout, che si può uccidere
