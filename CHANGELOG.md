@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.80.0] — 2026-10-11
+
+**archive1777 legge più messaggi in una chiamata, trova i precedenti e dice chi parla.**
+
 ### Aggiunto
 - **archive1777: `get_many` legge più messaggi in una chiamata (P5).** Dopo una ricerca, leggere
   interi dieci risultati costava dieci `get_context`. `get_many(uuids)` restituisce le righe intere
