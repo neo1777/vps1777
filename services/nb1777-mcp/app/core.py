@@ -448,6 +448,72 @@ def source_get_content(nb_id: str, source_id: str) -> str:  # noqa: ARG001 (nb_i
     return p.stdout or ""
 
 
+def source_describe(source_id: str) -> dict:
+    """Il riassunto di una fonte con le parole chiave, scritto da Gemini (P14, nlm 0.15:
+    `source describe SOURCE_ID --json`). Usa la quota di Gemini Notebook."""
+    d = _run_json(["source", "describe", source_id], timeout=120)
+    return d if isinstance(d, dict) else {"risultato": d}
+
+
+# ── P14 (11/10/2026): i lavori in blocco, senza ssh ──────────────────────────────────────
+# Il censimento del 21/09 è passato da `ssh + docker exec nlm`: 2.662 chiamate in fila,
+# 2 h 53 min. `censisci` fa lo stesso dentro nb1777, come lavoro lungo (P6), e scrive un file
+# JSON nella cartella degli artefatti, che si scarica col link firmato (P15). Un errore su
+# una fonte si scrive nella fonte e si conta: non ferma il resto.
+def censisci(notebook_ids: Optional[list[str]], *, descrizioni: bool = False,
+             contenuti: bool = False) -> dict:
+    """notebook_ids None = tutti. Ritorna {name, bytes, notebooks, fonti, errori}."""
+    if notebook_ids is None:
+        nbs = [{"id": str(n.get("id")), "title": n.get("title")} for n in nb_list()
+               if isinstance(n, dict) and n.get("id")]
+    else:
+        nbs = [{"id": nb, "title": None} for nb in notebook_ids]
+    errori = n_fonti = 0
+    uscita: list[dict] = []
+    for nb in nbs:
+        voce: dict = {"id": nb["id"], "title": nb["title"], "sources": []}
+        try:
+            fonti = source_list(nb["id"])
+        except NLMAuthError:
+            raise                       # la sessione è scaduta: il resto fallirebbe uguale
+        except NLMError as e:
+            voce["errore"] = str(e)[:300]
+            errori += 1
+            uscita.append(voce)
+            continue
+        for f in fonti:
+            if not isinstance(f, dict):
+                continue
+            sid = _source_id_of(f)
+            fonte = {"id": sid, "title": f.get("title"), "type": f.get("type"),
+                     "url": f.get("url")}
+            try:
+                if contenuti and sid:
+                    fonte["contenuto"] = source_get_content(nb["id"], sid)
+                if descrizioni and sid:
+                    fonte["descrizione"] = source_describe(sid)
+            except NLMAuthError:
+                raise
+            except NLMError as e:
+                fonte["errore"] = str(e)[:300]
+                errori += 1
+            voce["sources"].append(fonte)
+            n_fonti += 1
+        uscita.append(voce)
+    ora = datetime.now(timezone.utc)
+    tipo = "censimento" if notebook_ids is None else f"export-{safe_artifact_name(nbs[0]['id'])[:12]}"
+    nome = f"{tipo}-{ora.strftime('%Y%m%d-%H%M%S')}.json"
+    dest = artifacts_dir() / nome
+    tmp = dest.with_suffix(".parziale")
+    tmp.write_text(json.dumps({"generato": ora.isoformat(timespec="seconds"),
+                               "descrizioni": descrizioni, "contenuti": contenuti,
+                               "errori": errori, "notebooks": uscita},
+                              ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(dest)
+    return {"name": nome, "bytes": dest.stat().st_size, "notebooks": len(uscita),
+            "fonti": n_fonti, "errori": errori}
+
+
 def source_rename(nb_id: str, source_id: str, new_title: str) -> None:
     """Rinomina una fonte.
 

@@ -161,6 +161,19 @@ class Scaricato(Esito):
     job_id: str | None = None
 
 
+class Censimento(Scaricato):
+    """nb_export e censimento (P14): il file JSON sul server e il link per scaricarlo."""
+    notebooks: int | None = None
+    fonti: int | None = None
+    errori: int | None = None
+
+
+class Descrizione(Esito):
+    """source_describe: il riassunto di Gemini e le parole chiave (forma di nlm 0.15)."""
+    summary: Any = None
+    keywords: Any = None
+
+
 # ── salute e memoria ───────────────────────────────────────────────────────────────────
 
 class Quota(Esito):
