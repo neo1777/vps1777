@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.84.0] — 2026-10-11
+
+**L'indicizzazione dell'archivio ha un tetto di memoria suo, un podcast dello Studio entra nell'archivio in un gesto, e due fotografie dell'account si confrontano.**
+
 ### Aggiunto
 - **nb1777: sostituire una fonte e riallineare quelle Drive (P20).** `source_replace` sostituisce
   una fonte di testo o URL: aggiunge la nuova e poi toglie la vecchia, così un errore non lascia il
