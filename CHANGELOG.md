@@ -12,6 +12,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   legge sull'host). Il bot non ha un canale di scrittura verso l'host, per questo passa dalla
   Mini App. Lo stato dei secret resta visibile.
 
+### Documentazione
+- **nb1777: la misura di nlm in sottoprocesso contro in-process (P21).** Sulla VPS, `nb_list` costa
+  2,14 s lanciando la CLI e 0,48 s chiamando i servizi di nlm dentro il processo, che però tiene
+  51 MB in più e perde la possibilità di uccidere una chiamata appesa. NB1777 §8.
+
 ## [0.82.0] — 2026-10-11
 
 **nb1777 dichiara la forma di ogni risposta e il codice di ogni errore, e fa i lavori in blocco senza ssh.**
