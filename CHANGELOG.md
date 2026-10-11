@@ -5,6 +5,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Aggiunto
+- **La cadenza di nlm si misura (P9).** Dependabot ignora i minor di nlm di proposito, e il pin
+  era rimasto alla 0.12.0 mentre upstream arrivava alla 0.15.4. Ora `rebuild-mensile.yml`, una
+  volta al mese, lancia `tools/nlm-cadenza.py` e apre una issue se il pin è indietro da più di 30
+  giorni. Non aggiorna da sé.
 - **Bot: si sceglie il notebook toccandolo (P12).** `/lista` mostra i notebook come bottoni, otto
   per pagina; il tocco sceglie quello su cui `/chiedi <domanda>` interroga. `/chiedi` senza un
   notebook scelto tiene la domanda, mostra i bottoni e la fa appena scegli. `/chiedi <id>
@@ -16,6 +20,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   ha messo; `/health` porta lo stato (`modello`). Il container non ha più swap
   (`memswap_limit: 2g`, come `mem_limit`): il 04/10 il kernel aveva messo in swap il modello
   invece di liberare la cache dei DB, e la prima ricerca per senso aveva aspettato 8 min 25 s.
+- **nb1777: nlm passa dalla 0.12.0 alla 0.15.4 (P9).** Cinque rilasci a monte, con correzioni sul
+  login, sulle ricerche approfondite che sembravano fallite e sulla concorrenza. Il salto è fatto
+  a mano col metodo di sempre (changelog, `--help` dei comandi, contract-test: 234 test verdi).
+  Le istruzioni di installazione dicono di scegliere il login «in un file» quando `nlm login`
+  chiede se cifrarlo: la VPS non può aprire quello cifrato.
 - **Bot: la risposta di `/chiedi` è formattata.** Prima arrivava il JSON di `notebook_query`
   tagliato a 4000 caratteri. Ora c'è il testo, con il grassetto, e le fonti in fondo coi loro
   numeri di citazione e il titolo; una risposta lunga arriva in più messaggi. Se NotebookLM non
