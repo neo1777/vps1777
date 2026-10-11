@@ -11,6 +11,7 @@ diverso.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import logging
 import os
@@ -366,7 +367,9 @@ def _ruolo(name: str) -> str:
         return RUOLO_NON_DICHIARATO
     try:
         ruolo = fts.meta_value_conn(conn, "ruolo") or RUOLO_NON_DICHIARATO
-    except sqlite3.OperationalError:
+    except sqlite3.DatabaseError:
+        # anche «file is not a database»: il DB resta nel perimetro, e lì chi lo legge
+        # lo dichiara non letto (`saltati`) invece di rompere la ricerca per tutti
         ruolo = RUOLO_NON_DICHIARATO
     finally:
         conn.close()
@@ -464,6 +467,55 @@ def _limite(limit: int, massimo: int = LIMITE_MASSIMO) -> int:
     return min(n, massimo)
 
 
+# ── P3 (11/10/2026): il budget delle ricerche su più DB ─────────────────────────────
+# Il proxy del gateway chiude la lettura a 60 s. Dall'audit del 10-11/10 `count` ha
+# impiegato 41 s a cache fredda (0,7 s a cache calda, sugli stessi 25 DB): un DB lento in più
+# e il client vedeva «connection lost» invece di un numero. count, check_term e
+# search_ibrida si fermano a BUDGET_S; il progress handler di SQLite interrompe anche una
+# query sola; i DB non guardati vanno in `saltati` (ramo «budget») e il risultato porta
+# `parziale: true`. `search` resta senza: misurata al massimo a 3,6 s, e la sua lista non
+# avrebbe dove dirlo.
+BUDGET_S = 40.0
+_PASSI_HANDLER = 20000          # istruzioni della VM di SQLite fra due controlli dell'ora
+
+
+def _adesso() -> float:
+    return time.monotonic()
+
+
+class _Budget:
+    def __init__(self, secondi: float) -> None:
+        self.secondi = secondi
+        self.fine = _adesso() + secondi
+        # il progress handler guarda l'ora vera: gira migliaia di volte per query
+        self._fine_vera = time.monotonic() + secondi
+
+    def finito(self) -> bool:
+        return _adesso() >= self.fine
+
+    def _gestore(self) -> int:
+        return 1 if time.monotonic() >= self._fine_vera else 0
+
+    def attacca(self, conn: sqlite3.Connection) -> None:
+        conn.set_progress_handler(self._gestore, _PASSI_HANDLER)
+
+    @contextlib.contextmanager
+    def su(self, conn: sqlite3.Connection):
+        """Le query dentro il blocco si interrompono a budget finito. L'handler si
+        stacca SEMPRE: la connessione è quella persistente del thread, e un handler
+        scaduto interromperebbe le ricerche dopo."""
+        self.attacca(conn)
+        try:
+            yield
+        finally:
+            conn.set_progress_handler(None, 0)
+
+    def saltato(self, name: str) -> dict[str, str]:
+        return {"db": name, "ramo": "budget",
+                "motivo": f"budget di {self.secondi:.0f} s finito prima di questo DB: "
+                          f"rilancia con db_name='{name}'"}
+
+
 @_serializzata
 def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
            sort: str = "rank", since: str = "", until: str = "",
@@ -497,8 +549,10 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
                 r["db"] = name
                 r["snapshot"] = snap
             collected.extend(rows)
-        except sqlite3.OperationalError as exc:
-            # schema non conforme (DB estraneo nella dir): salta, non è fatale
+        except sqlite3.DatabaseError as exc:
+            # schema non conforme o file che non è un DB (DB estraneo nella dir): salta,
+            # non è fatale. DatabaseError e non OperationalError: «file is not a database»
+            # è l'altra sottoclasse, e rompeva la ricerca per tutti.
             log.warning("DB %s schema error: %s", name, exc)
         finally:
             conn.close()
@@ -648,135 +702,154 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     # con un filtro (speaker, finestra temporale) il ramo vettoriale ne scarta
     # molti: si chiedono più vicini, perché la fusione abbia ancora una lista vera
     filtrato = bool(speaker or since or until)
-    for name in bersagli:
-        try:
-            conn = _open_con_indice(name, indici[name])
-        except KeyError:
-            saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
-            continue
-        connessioni[name] = conn
-        snap = _snapshot(_DBS[name])
-        candidati: set[int] = set()
-        assenti: set[int] = set()
-        uuid_diversi: set[int] = set()
-        registro_ok = True
-        vettori_ok = True
-        for i, (testo, blob) in enumerate(zip(testi, blobs)):
-            # ① lista FTS5: la query naturale funziona male in FTS5 (è una frase, non
-            #    un'espressione), quindi chi chiama può passare `query_fts` col lessico
-            #    giusto — vale per la domanda, le riformulazioni vanno da sé. Se non lo
-            #    fa, si prova comunque: una lista vuota non è un errore, è
-            #    semplicemente metà fusione.
-            espressione = (query_fts if i == 0 else "") or \
-                semantica.query_fts_da_naturale(testo)
-            if i == 0 and not termini:
-                # i termini del passaggio vengono dalla domanda; se il ramo FTS tace
-                # (meno di due termini con segnale) si usano le parole della domanda
-                termini = semantica.termini_della_query(espressione or testo)
-            rows_fts: list[dict[str, Any]] = []
-            if espressione:
-                try:
-                    rows_fts = fts.search_conn(conn, espressione, limit=limit * 3,
-                                               since=since, until=until, campi=campi,
-                                               speaker=speaker,
-                                               snippet_tokens=snippet_tokens)
-                except (FtsSyntaxError, sqlite3.OperationalError) as exc:
-                    log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s",
-                             name, exc)
-                    if not any(s["db"] == name and s["ramo"] == "fts" for s in saltati):
-                        saltati.append({"db": name, "ramo": "fts", "motivo": str(exc)[:200]})
-            # Meno di due termini con segnale: il ramo full-text tace invece di
-            # inventarsi una query. Mezza fusione onesta > due liste di cui una
-            # è rumore promosso a risultato.
-            for pos, r in enumerate(rows_fts):
-                chiave = (name, r["uuid"])
-                per_chiave.setdefault(chiave, {**r, "db": name, "snapshot": snap})
-                rank = r.get("rank")
-                fts_per_testo[i].append((rank if rank is not None else 0.0, pos, chiave))
-                in_fts.add(chiave)
-            # ② lista vettoriale: rowid → uuid (l'indice lavora su rowid, il mondo
-            #    esterno su uuid: la traduzione sta qui e non nell'indice, così un
-            #    re-ingest che cambia i rowid rompe l'indice, non il contratto).
-            #    ⚠️ E il rowid può MENTIRE: dopo un re-ingest (INSERT OR REPLACE) un
-            #    rowid dell'indice può non esistere più o essere di un altro messaggio.
-            #    Se l'indice ha il registro del costruttore, ogni risultato si confronta
-            #    con l'uuid registrato e chi non combacia si SCARTA — e si dichiara in
-            #    `indici[].verifica`, mai restituito come se fosse giusto.
-            if not vettori_ok:
+    budget = _Budget(BUDGET_S)
+    try:
+        for name in bersagli:
+            if budget.finito():
+                saltati.append(budget.saltato(name))
                 continue
             try:
-                vicini = semantica.knn_pezzi(
-                    conn, blob, topn=limit * (10 if filtrato else 3))
-                rowids = [rid for rid, _, _ in vicini]
-                distanza = {rid: d for rid, d, _ in vicini}
-                pezzo_vinto = {rid: pz for rid, _, pz in vicini}
-                registro = semantica.uuid_registrati(conn, rowids)
-                registro_ok = registro_ok and registro is not None
-                candidati.update(rowids)
-                if rowids:
-                    seg = ",".join("?" * len(rowids))
-                    cur = conn.execute(
-                        f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip, "
-                        f"content <> '' AS ha_testo"
-                        f"{', speaker' if speaker else ''} FROM messages "
-                        f"WHERE rowid IN ({seg})",
-                        rowids)
-                    per_rowid = {r["rowid"]: dict(r) for r in cur}
-                    for pos, rid in enumerate(rowids):      # l'ordine del knn è il rank
-                        r = per_rowid.get(rid)
-                        if not r:
-                            assenti.add(rid)
-                            continue
-                        u = r["uuid"]
-                        if registro is not None and registro.get(rid) != u:
-                            uuid_diversi.add(rid)
-                            continue
-                        if speaker and r["speaker"] != speaker:
-                            continue
-                        # la finestra vale anche qui, con la regola di `search`: il
-                        # vettore non sa di date, e senza questo filtro tornava maggio
-                        # a chi chiedeva settembre. Una riga senza ts resta fuori, come
-                        # in FTS (NULL >= x).
-                        if (since and not (r["ts"] and r["ts"] >= since)) or \
-                                (until and not (r["ts"] and r["ts"] <= until)):
-                            continue
-                        if campi == "testo" and not r["ha_testo"]:
-                            # il vettore non dice se ha colpito le parole o le azioni:
-                            # con `campi='testo'` si tengono solo le righe che HANNO
-                            # parole.
-                            continue
-                        chiave = (name, u)
-                        vec_per_testo[i].append((distanza[rid], pos, chiave))
-                        in_vec.add(chiave)
-                        if chiave not in per_chiave:
-                            per_chiave[chiave] = {"uuid": u, "project": r["project"],
-                                                  "ts": r["ts"], "rank": None,
-                                                  "snippet": (r["snip"] or "")[:400],
-                                                  "db": name, "snapshot": snap}
-                            pezzo_di[chiave] = (rid, pezzo_vinto[rid])
-            except sqlite3.OperationalError as exc:
-                # Prima il DB spariva intero (anche da `indici`) e la risposta era un
-                # falso «non c'è». Ora resta la sua metà full-text, e lo si dice.
-                log.warning("indice di %s non interrogabile: %s", name, exc)
-                vettori_ok = False
-                saltati.append({"db": name, "ramo": "vettori", "motivo": str(exc)[:200]})
-        try:
-            m = semantica.meta_indice(conn) if vettori_ok else {}
-        except sqlite3.OperationalError:
-            m = {}
-        meta_per_db.append({"db": name, "indice": str(indici[name].name),
-                            "messaggi_indicizzati": m.get("messaggi", "?"),
-                            "perimetro": m.get("perimetro", "non dichiarato"),
-                            "modello": m.get("modello", "?"),
-                            "generato": m.get("generato", "?"),
-                            # campo IN PIÙ: gli altri non cambiano forma
-                            "verifica": semantica.verdetto_registro(
-                                registro_ok, candidati=len(candidati),
-                                assenti=len(assenti), uuid_diversi=len(uuid_diversi))})
-        if assenti or uuid_diversi:
-            log.warning("indice di %s disallineato: %d rowid assenti, %d uuid diversi "
-                        "su %d candidati", name, len(assenti), len(uuid_diversi),
-                        len(candidati))
+                conn = _open_con_indice(name, indici[name])
+            except KeyError:
+                saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
+                continue
+            connessioni[name] = conn
+            budget.attacca(conn)
+            snap = _snapshot(_DBS[name])
+            candidati: set[int] = set()
+            assenti: set[int] = set()
+            uuid_diversi: set[int] = set()
+            registro_ok = True
+            vettori_ok = True
+            for i, (testo, blob) in enumerate(zip(testi, blobs)):
+                # ① lista FTS5: la query naturale funziona male in FTS5 (è una frase, non
+                #    un'espressione), quindi chi chiama può passare `query_fts` col lessico
+                #    giusto — vale per la domanda, le riformulazioni vanno da sé. Se non lo
+                #    fa, si prova comunque: una lista vuota non è un errore, è
+                #    semplicemente metà fusione.
+                espressione = (query_fts if i == 0 else "") or \
+                    semantica.query_fts_da_naturale(testo)
+                if i == 0 and not termini:
+                    # i termini del passaggio vengono dalla domanda; se il ramo FTS tace
+                    # (meno di due termini con segnale) si usano le parole della domanda
+                    termini = semantica.termini_della_query(espressione or testo)
+                rows_fts: list[dict[str, Any]] = []
+                if espressione:
+                    try:
+                        rows_fts = fts.search_conn(conn, espressione, limit=limit * 3,
+                                                   since=since, until=until, campi=campi,
+                                                   speaker=speaker,
+                                                   snippet_tokens=snippet_tokens)
+                    except (FtsSyntaxError, sqlite3.DatabaseError) as exc:
+                        log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s",
+                                 name, exc)
+                        ramo = "budget" if budget.finito() else "fts"
+                        if not any(s["db"] == name and s["ramo"] == ramo for s in saltati):
+                            saltati.append(budget.saltato(name) if ramo == "budget" else
+                                           {"db": name, "ramo": "fts",
+                                            "motivo": str(exc)[:200]})
+                # Meno di due termini con segnale: il ramo full-text tace invece di
+                # inventarsi una query. Mezza fusione onesta > due liste di cui una
+                # è rumore promosso a risultato.
+                for pos, r in enumerate(rows_fts):
+                    chiave = (name, r["uuid"])
+                    per_chiave.setdefault(chiave, {**r, "db": name, "snapshot": snap})
+                    rank = r.get("rank")
+                    fts_per_testo[i].append((rank if rank is not None else 0.0, pos, chiave))
+                    in_fts.add(chiave)
+                # ② lista vettoriale: rowid → uuid (l'indice lavora su rowid, il mondo
+                #    esterno su uuid: la traduzione sta qui e non nell'indice, così un
+                #    re-ingest che cambia i rowid rompe l'indice, non il contratto).
+                #    ⚠️ E il rowid può MENTIRE: dopo un re-ingest (INSERT OR REPLACE) un
+                #    rowid dell'indice può non esistere più o essere di un altro messaggio.
+                #    Se l'indice ha il registro del costruttore, ogni risultato si confronta
+                #    con l'uuid registrato e chi non combacia si SCARTA — e si dichiara in
+                #    `indici[].verifica`, mai restituito come se fosse giusto.
+                if not vettori_ok:
+                    continue
+                try:
+                    vicini = semantica.knn_pezzi(
+                        conn, blob, topn=limit * (10 if filtrato else 3))
+                    rowids = [rid for rid, _, _ in vicini]
+                    distanza = {rid: d for rid, d, _ in vicini}
+                    pezzo_vinto = {rid: pz for rid, _, pz in vicini}
+                    registro = semantica.uuid_registrati(conn, rowids)
+                    registro_ok = registro_ok and registro is not None
+                    candidati.update(rowids)
+                    if rowids:
+                        seg = ",".join("?" * len(rowids))
+                        cur = conn.execute(
+                            f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip, "
+                            f"content <> '' AS ha_testo"
+                            f"{', speaker' if speaker else ''} FROM messages "
+                            f"WHERE rowid IN ({seg})",
+                            rowids)
+                        per_rowid = {r["rowid"]: dict(r) for r in cur}
+                        for pos, rid in enumerate(rowids):      # l'ordine del knn è il rank
+                            r = per_rowid.get(rid)
+                            if not r:
+                                assenti.add(rid)
+                                continue
+                            u = r["uuid"]
+                            if registro is not None and registro.get(rid) != u:
+                                uuid_diversi.add(rid)
+                                continue
+                            if speaker and r["speaker"] != speaker:
+                                continue
+                            # la finestra vale anche qui, con la regola di `search`: il
+                            # vettore non sa di date, e senza questo filtro tornava maggio
+                            # a chi chiedeva settembre. Una riga senza ts resta fuori, come
+                            # in FTS (NULL >= x).
+                            if (since and not (r["ts"] and r["ts"] >= since)) or \
+                                    (until and not (r["ts"] and r["ts"] <= until)):
+                                continue
+                            if campi == "testo" and not r["ha_testo"]:
+                                # il vettore non dice se ha colpito le parole o le azioni:
+                                # con `campi='testo'` si tengono solo le righe che HANNO
+                                # parole.
+                                continue
+                            chiave = (name, u)
+                            vec_per_testo[i].append((distanza[rid], pos, chiave))
+                            in_vec.add(chiave)
+                            if chiave not in per_chiave:
+                                per_chiave[chiave] = {"uuid": u, "project": r["project"],
+                                                      "ts": r["ts"], "rank": None,
+                                                      "snippet": (r["snip"] or "")[:400],
+                                                      "db": name, "snapshot": snap}
+                                pezzo_di[chiave] = (rid, pezzo_vinto[rid])
+                except sqlite3.DatabaseError as exc:
+                    # Prima il DB spariva intero (anche da `indici`) e la risposta era un
+                    # falso «non c'è». Ora resta la sua metà full-text, e lo si dice.
+                    vettori_ok = False
+                    if budget.finito():
+                        if not any(s["db"] == name and s["ramo"] == "budget" for s in saltati):
+                            saltati.append(budget.saltato(name))
+                    else:
+                        log.warning("indice di %s non interrogabile: %s", name, exc)
+                        saltati.append({"db": name, "ramo": "vettori",
+                                        "motivo": str(exc)[:200]})
+            try:
+                m = semantica.meta_indice(conn) if vettori_ok else {}
+            except sqlite3.OperationalError:
+                m = {}
+            meta_per_db.append({"db": name, "indice": str(indici[name].name),
+                                "messaggi_indicizzati": m.get("messaggi", "?"),
+                                "perimetro": m.get("perimetro", "non dichiarato"),
+                                "modello": m.get("modello", "?"),
+                                "generato": m.get("generato", "?"),
+                                # campo IN PIÙ: gli altri non cambiano forma
+                                "verifica": semantica.verdetto_registro(
+                                    registro_ok, candidati=len(candidati),
+                                    assenti=len(assenti), uuid_diversi=len(uuid_diversi))})
+            if assenti or uuid_diversi:
+                log.warning("indice di %s disallineato: %d rowid assenti, %d uuid diversi "
+                            "su %d candidati", name, len(assenti), len(uuid_diversi),
+                            len(candidati))
+    finally:
+        # la connessione è quella persistente del thread: un handler scaduto
+        # interromperebbe le ricerche dopo
+        for c in connessioni.values():
+            c.set_progress_handler(None, 0)
     # ③ fusione: UNA sola, su tutte le liste di tutti i testi e di tutti i DB. Dentro
     # ogni lista l'ordine è quello della misura (bm25 crescente, distanza crescente), a
     # parità quello di arrivo.
@@ -830,6 +903,8 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     }
     if saltati:
         out["saltati"] = saltati
+        if any(x["ramo"] == "budget" for x in saltati):
+            out["parziale"] = True
     if fuori_perimetro:
         out["fuori_perimetro"] = _fuori_per_ruolo(fuori_perimetro)
     return out
@@ -896,55 +971,77 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
     # totale sembrava completo.
     saltati: list[dict[str, str]] = []
     dentro, fuori = _perimetro(db, ruoli)
+    budget = _Budget(BUDGET_S)
     for name in dentro:
+        if budget.finito():
+            saltati.append(budget.saltato(name))
+            continue
         try:
             conn = _open(name)
         except KeyError:
             saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
             continue
         try:
-            per_db[name] = fts.count_conn(
-                conn, query, raw=raw, since=since, until=until, project=project,
-                speaker=speaker, voice=voice, campi=campi)
-            # canary: se un termine è collassato sul suo prefisso (`C++`→`C`), il
-            # numero appena letto è un falso positivo — dillo, non lasciarlo muto.
-            if not raw:
-                warnings.extend(
-                    f"[{name}] {w}" for w in fts.collapse_warnings_conn(conn, query))
-        except sqlite3.OperationalError as exc:
-            log.warning("DB %s schema error: %s", name, exc)
-            saltati.append({"db": name, "ramo": "fts", "motivo": str(exc)[:200]})
+            with budget.su(conn):
+                per_db[name] = fts.count_conn(
+                    conn, query, raw=raw, since=since, until=until, project=project,
+                    speaker=speaker, voice=voice, campi=campi)
+                # canary: se un termine è collassato sul suo prefisso (`C++`→`C`), il
+                # numero appena letto è un falso positivo — dillo, non lasciarlo muto.
+                if not raw:
+                    warnings.extend(
+                        f"[{name}] {w}" for w in fts.collapse_warnings_conn(conn, query))
+        except sqlite3.DatabaseError as exc:
+            per_db.pop(name, None)
+            if budget.finito():
+                saltati.append(budget.saltato(name))
+            else:
+                log.warning("DB %s schema error: %s", name, exc)
+                saltati.append({"db": name, "ramo": "fts", "motivo": str(exc)[:200]})
         finally:
             conn.close()
     out: dict[str, Any] = {"total": sum(per_db.values()), "per_db": per_db}
     if fuori and not str(ruoli or "").strip():
-        out["anche_fuori"] = _conta_fuori(
-            [n for n in fuori if _ruolo(n) != "riservato"], query, raw=raw, since=since,
-            until=until, project=project, speaker=speaker, voice=voice, campi=campi)
+        out["anche_fuori"], non_contati = _conta_fuori(
+            [n for n in fuori if _ruolo(n) != "riservato"], query, budget, raw=raw,
+            since=since, until=until, project=project, speaker=speaker, voice=voice,
+            campi=campi)
+        if non_contati:
+            out["anche_fuori_non_contati"] = non_contati
     if warnings:
         out["warnings"] = warnings
     if saltati:
         out["saltati"] = saltati
+        out["parziale"] = True
     return out
 
 
-def _conta_fuori(nomi: list[str], query: str, **filtri: Any) -> dict[str, int]:
-    """I match nei DB rimasti fuori dal perimetro, solo i non zero: l'avviso di P1."""
+def _conta_fuori(nomi: list[str], query: str, budget: _Budget,
+                 **filtri: Any) -> tuple[dict[str, int], list[str]]:
+    """I match nei DB rimasti fuori dal perimetro, solo i non zero (l'avviso di P1), col
+    tempo che resta del budget. Ritorna anche i DB NON contati, per budget o perché non si
+    leggono: prima un DB illeggibile spariva in silenzio, e il suo zero sembrava vero."""
     trovati: dict[str, int] = {}
+    non_contati: list[str] = []
     for name in nomi:
+        if budget.finito():
+            non_contati.append(name)
+            continue
         try:
             conn = _open(name)
         except KeyError:
             continue
         try:
-            n = fts.count_conn(conn, query, **filtri)
-        except sqlite3.OperationalError:
+            with budget.su(conn):
+                n = fts.count_conn(conn, query, **filtri)
+        except sqlite3.DatabaseError:
+            non_contati.append(name)
             continue
         finally:
             conn.close()
         if n:
             trovati[name] = n
-    return trovati
+    return trovati, non_contati
 
 
 def check_term(term: str, db: str = "", *, ruoli: str = "") -> dict[str, Any]:
@@ -958,24 +1055,38 @@ def check_term(term: str, db: str = "", *, ruoli: str = "") -> dict[str, Any]:
     cands = fts.collapse_candidates(term)
     prefix = cands[0][1] if cands else ""
     per_db: dict[str, Any] = {}
+    saltati: list[dict[str, str]] = []
+    budget = _Budget(BUDGET_S)
     for name in _perimetro(db, ruoli)[0]:
+        if budget.finito():
+            saltati.append(budget.saltato(name))
+            continue
         try:
             conn = _open(name)
         except KeyError:
             continue
         try:
-            n_term = fts.count_conn(conn, term)
-            n_pref = fts.count_conn(conn, prefix) if prefix else n_term
+            with budget.su(conn):
+                n_term = fts.count_conn(conn, term)
+                n_pref = fts.count_conn(conn, prefix) if prefix else n_term
             per_db[name] = {
                 "count_term": n_term,
                 "count_prefix": n_pref if prefix else None,
                 "collapsed": bool(prefix and n_pref > 0 and n_term == n_pref),
             }
-        except (sqlite3.OperationalError, FtsSyntaxError) as exc:
-            log.warning("DB %s check_term error: %s", name, exc)
+        except (sqlite3.DatabaseError, FtsSyntaxError) as exc:
+            if budget.finito():
+                saltati.append(budget.saltato(name))
+            else:
+                log.warning("DB %s check_term error: %s", name, exc)
+                saltati.append({"db": name, "ramo": "fts", "motivo": str(exc)[:200]})
         finally:
             conn.close()
-    return {"term": term, "prefix": prefix or None, "per_db": per_db}
+    out: dict[str, Any] = {"term": term, "prefix": prefix or None, "per_db": per_db}
+    if saltati:
+        out["saltati"] = saltati
+        out["parziale"] = True
+    return out
 
 
 def _tronca_righe(rows: list[dict[str, Any]], max_chars: int) -> list[dict[str, Any]]:
