@@ -680,6 +680,15 @@ No restart: the DB registry reloads by itself when the directory changes (a new
 `.vec.db` changes the directory signature, so connections with the index
 attached are reopened too), and the model is loaded at the first hybrid search.
 
+**The warm model (since 0.81.0, P2).** If there is at least one index when archive-mcp
+starts, the model is loaded right away, in a thread, and the log says how long it took
+("modello di embedding caricato in N s (avvio)"); the first search no longer pays for it.
+Without indexes it is loaded at the first hybrid search, as before. archive-mcp's `/health`
+carries a `modello` field: `{stato, secondi, da}`, with `stato` among `assente`,
+`non_caricato`, `in_caricamento`, `caricato` and `errore`. The container has no swap
+(`memswap_limit` equal to `mem_limit`): on 04/10, with 2 GB of swap allowed, the kernel had
+swapped out 782 MB of the model instead of dropping the DB cache, and loading took 8 min 25 s.
+
 ⚠️ The index is valid for the DB it was born from. If the DB on the VPS has been
 re-ingested since, run `--controlla` on a copy of that DB before uploading: if
 it is not in step, update it there and upload that one.

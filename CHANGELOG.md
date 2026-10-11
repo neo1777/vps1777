@@ -11,6 +11,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   <domanda>` funziona come prima.
 
 ### Cambiato
+- **archive1777: il modello di embedding si carica all'avvio, e niente swap (P2).** Se c'è almeno
+  un indice, archive-mcp carica il modello in un thread appena parte e scrive nel log quanto ci
+  ha messo; `/health` porta lo stato (`modello`). Il container non ha più swap
+  (`memswap_limit: 2g`, come `mem_limit`): il 04/10 il kernel aveva messo in swap il modello
+  invece di liberare la cache dei DB, e la prima ricerca per senso aveva aspettato 8 min 25 s.
 - **Bot: la risposta di `/chiedi` è formattata.** Prima arrivava il JSON di `notebook_query`
   tagliato a 4000 caratteri. Ora c'è il testo, con il grassetto, e le fonti in fondo coi loro
   numeri di citazione e il titolo; una risposta lunga arriva in più messaggi. Se NotebookLM non

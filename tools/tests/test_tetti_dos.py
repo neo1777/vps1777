@@ -38,3 +38,14 @@ def test_un_servizio_senza_tetto_di_memoria_dice_perche() -> None:
 def test_il_gateway_passa_il_limite_di_concorrenza_a_uvicorn() -> None:
     main = (RADICE / "services/gateway/app/__main__.py").read_text(encoding="utf-8")
     assert "limit_concurrency=s.gateway_limit_concurrency" in main
+
+
+def test_archive_non_mette_il_modello_in_swap() -> None:
+    """P2 (11/10/2026). Il 04/10 il kernel ha messo in swap 782 MB del modello di archive-mcp
+    invece di liberare la cache dei DB, e il modello ha impiegato 8 min 25 s a caricarsi. Con
+    `memswap_limit` uguale a `mem_limit` il container non ha swap: sotto pressione il kernel
+    può solo liberare la cache, che si rilegge dal disco."""
+    d = yaml.safe_load((RADICE / "compose.yaml").read_text(encoding="utf-8"))
+    a = d["services"]["archive-mcp"]
+    assert a.get("memswap_limit") == a.get("mem_limit"), \
+        "archive-mcp: memswap_limit deve essere uguale a mem_limit (niente swap per il modello)"
