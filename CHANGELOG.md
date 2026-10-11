@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **nb1777: nessun tool risponde più con una stringa sola.** Erano 17. `nb_create` dava l'id nudo;
+  `nb_rename`, `source_rename` e `studio_rename` «ok»; i nove `studio_create_*` l'id
+  dell'artefatto; gli export a Docs e Sheets l'URL; `source_get_content` e `nb_describe` il JSON di
+  nlm come testo. Ora danno oggetti con i campi (`notebook_id`, `artifact_id`, `url`, `content`,
+  `summary`…). È un cambio di contratto per chi leggeva il testo. Il bot e la Mini App non usano
+  nessuno di questi tool.
+
 ## [0.84.0] — 2026-10-11
 
 **L'indicizzazione dell'archivio ha un tetto di memoria suo, un podcast dello Studio entra nell'archivio in un gesto, e due fotografie dell'account si confrontano.**

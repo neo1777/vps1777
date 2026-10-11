@@ -202,6 +202,51 @@ class SyncDrive(Esito):
     source_ids: list[str] | None = None
 
 
+# ── i tool che rispondevano una stringa (11/10/2026, dopo P20) ─────────────────────────
+# Diciassette tool davano «ok», un id nudo o il JSON di nlm COME TESTO (source_get_content):
+# chi chiama doveva indovinare la forma. Ora dicono cosa hanno fatto e su cosa.
+
+class NotebookCreato(Esito):
+    notebook_id: Any = Field(None, description="l'id del notebook nuovo")
+    title: Any = None
+
+
+class Rinominato(Esito):
+    """nb_rename, source_rename, studio_rename: l'id e il titolo nuovo."""
+    id: Any = None
+    title: Any = None
+    rinominato: bool | None = None
+
+
+class DescrizioneNotebook(Esito):
+    """nb_describe: il riassunto di Gemini (forma di nlm); `testo` se nlm non dà JSON."""
+    summary: Any = None
+    suggested_topics: Any = None
+    testo: str | None = None
+
+
+class Contenuto(Esito):
+    """source_get_content: il testo indicizzato della fonte, senza elaborazione AI."""
+    content: Any = None
+    title: Any = None
+    source_type: Any = None
+    char_count: Any = None
+    url: Any = None
+
+
+class ArtefattoCreato(Esito):
+    """studio_create_*: l'artefatto è partito; lo stato con studio_status o studio_wait."""
+    artifact_id: Any = Field(None, description="l'id dell'artefatto")
+    notebook_id: Any = None
+    tipo: str | None = None
+
+
+class Esportazione(Esito):
+    """studio_export_to_docs / _sheets: il documento creato."""
+    url: Any = Field(None, description="l'indirizzo del documento Google")
+    artifact_id: Any = None
+
+
 # ── salute e memoria ───────────────────────────────────────────────────────────────────
 
 class Quota(Esito):

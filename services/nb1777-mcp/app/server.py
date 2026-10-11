@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import hmac
+import json
 import logging
 import os
 import time
@@ -474,17 +475,31 @@ async def nb_get(notebook_id: str) -> esiti.NotebookDettaglio:
 
 
 @mcp.tool()
-async def nb_create(title: str) -> str:
-    """Crea un nuovo notebook. Ritorna l'ID."""
-    return await _aio(core.nb_create, title)
+async def nb_create(title: str) -> esiti.NotebookCreato:
+    """Crea un nuovo notebook. Ritorna {notebook_id, title}."""
+    return {"notebook_id": await _aio(core.nb_create, title), "title": title}
 
 
 @mcp.tool()
-async def nb_rename(notebook_id: str, new_title: str) -> str:
-    """Rinomina un notebook."""
+async def nb_rename(notebook_id: str, new_title: str) -> esiti.Rinominato:
+    """Rinomina un notebook. Ritorna {id, title, rinominato}."""
     await _aio(core.nb_rename, notebook_id, new_title)
-    return "ok"
+    return {"id": notebook_id, "title": new_title, "rinominato": True}
 
+
+
+def _da_json_o_testo(uscita: str, *, campo: str = "testo") -> dict:
+    """Senza TTY nlm risponde in JSON: lo si restituisce come oggetto. Se non lo è (una
+    versione di nlm che cambia formato), il testo resta, nel campo indicato."""
+    try:
+        d = json.loads(uscita)
+    except (TypeError, ValueError):
+        return {campo: uscita}
+    return d if isinstance(d, dict) else {campo: uscita}
+
+
+def _creato(tipo: str, notebook_id: str, artifact_id: str) -> dict:
+    return {"artifact_id": artifact_id, "notebook_id": notebook_id, "tipo": tipo}
 
 
 def _anteprima(azione: str, ids: tuple[str, ...], cosa: dict) -> dict:
@@ -520,9 +535,10 @@ async def nb_delete(notebook_id: str, conferma: str = "") -> esiti.Cancellazione
 
 
 @mcp.tool()
-async def nb_describe(notebook_id: str) -> str:
-    """Riassunto AI-generated del notebook (testo)."""
-    return await _aio(core.nb_describe, notebook_id)
+async def nb_describe(notebook_id: str) -> esiti.DescrizioneNotebook:
+    """Riassunto del notebook scritto da Gemini: {summary, suggested_topics} come li dà nlm
+    (o `testo`, se nlm non risponde in JSON)."""
+    return _da_json_o_testo(await _aio(core.nb_describe, notebook_id))
 
 
 # ============================================================
@@ -707,17 +723,20 @@ async def source_sync_drive(notebook_id: str, source_ids: Optional[list[str]] = 
 
 
 @mcp.tool()
-async def source_get_content(notebook_id: str, source_id: str) -> str:
-    """Estrae il contenuto raw di una fonte (no AI)."""
-    return await _aio(core.source_get_content, notebook_id, source_id)
+async def source_get_content(notebook_id: str, source_id: str) -> esiti.Contenuto:
+    """Il testo che NotebookLM ha indicizzato per una fonte, senza elaborazione AI (per un
+    audio la trascrizione, per una scansione il testo letto). Ritorna {content, title,
+    source_type, char_count, url}."""
+    return _da_json_o_testo(await _aio(core.source_get_content, notebook_id, source_id),
+                            campo="content")
 
 
 @mcp.tool()
-async def source_rename(notebook_id: str, source_id: str, new_title: str) -> str:
+async def source_rename(notebook_id: str, source_id: str, new_title: str) -> esiti.Rinominato:
     """Rinomina una fonte. Qui il notebook_id serve davvero (la CLI lo vuole
-    come opzione obbligatoria). Ritorna "ok"."""
+    come opzione obbligatoria). Ritorna {id, title, rinominato}."""
     await _aio(core.source_rename, notebook_id, source_id, new_title)
-    return "ok"
+    return {"id": source_id, "title": new_title, "rinominato": True}
 
 
 # ============================================================
@@ -935,10 +954,10 @@ async def studio_create_audio(notebook_id: str,
                               length: str = "default",
                               language: str = "it",
                               focus: Optional[str] = None,
-                              source_ids: Optional[list[str]] = None) -> str:
+                              source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Audio Overview (podcast). format: deep_dive|brief|critique|debate. RATE-LIMIT free tier."""
-    return await _aio(core.studio_create_audio, notebook_id, format=format, length=length,
-                      language=language, focus=focus, source_ids=source_ids)
+    return _creato("audio", notebook_id, await _aio(core.studio_create_audio, notebook_id, format=format, length=length,
+                      language=language, focus=focus, source_ids=source_ids))
 
 
 @mcp.tool()
@@ -948,11 +967,11 @@ async def studio_create_video(notebook_id: str,
                               style_prompt: Optional[str] = None,
                               focus: Optional[str] = None,
                               language: str = "it",
-                              source_ids: Optional[list[str]] = None) -> str:
+                              source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Video Overview. format: explainer|brief|cinematic."""
-    return await _aio(core.studio_create_video, notebook_id, format=format, style=style,
+    return _creato("video", notebook_id, await _aio(core.studio_create_video, notebook_id, format=format, style=style,
                       style_prompt=style_prompt, focus=focus, language=language,
-                      source_ids=source_ids)
+                      source_ids=source_ids))
 
 
 @mcp.tool()
@@ -961,18 +980,18 @@ async def studio_create_slides(notebook_id: str,
                                length: str = "default",
                                focus: Optional[str] = None,
                                language: str = "it",
-                               source_ids: Optional[list[str]] = None) -> str:
+                               source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Slide Deck. format: detailed_deck|presenter_slides. length: short|default."""
-    return await _aio(core.studio_create_slides, notebook_id, format=format, length=length,
-                      focus=focus, language=language, source_ids=source_ids)
+    return _creato("slides", notebook_id, await _aio(core.studio_create_slides, notebook_id, format=format, length=length,
+                      focus=focus, language=language, source_ids=source_ids))
 
 
 @mcp.tool()
 async def studio_create_mindmap(notebook_id: str,
                                 title: str = "Mind Map",
-                                source_ids: Optional[list[str]] = None) -> str:
+                                source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Mind Map. NOTA: titolo/lingua/focus ignorati dal motore."""
-    return await _aio(core.studio_create_mindmap, notebook_id, title=title, source_ids=source_ids)
+    return _creato("mindmap", notebook_id, await _aio(core.studio_create_mindmap, notebook_id, title=title, source_ids=source_ids))
 
 
 @mcp.tool()
@@ -982,20 +1001,20 @@ async def studio_create_infographic(notebook_id: str,
                                     style: str = "auto_select",
                                     focus: Optional[str] = None,
                                     language: str = "it",
-                                    source_ids: Optional[list[str]] = None) -> str:
+                                    source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Infographic (PNG). orientation: landscape|portrait|square."""
-    return await _aio(core.studio_create_infographic, notebook_id,
+    return _creato("infographic", notebook_id, await _aio(core.studio_create_infographic, notebook_id,
                       orientation=orientation, detail=detail, style=style,
-                      focus=focus, language=language, source_ids=source_ids)
+                      focus=focus, language=language, source_ids=source_ids))
 
 
 @mcp.tool()
 async def studio_create_data_table(notebook_id: str, description: str,
                                    language: str = "it",
-                                   source_ids: Optional[list[str]] = None) -> str:
+                                   source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Data Table. `description` OBBLIGATORIA (descrive le colonne)."""
-    return await _aio(core.studio_create_data_table, notebook_id, description,
-                      language=language, source_ids=source_ids)
+    return _creato("data_table", notebook_id, await _aio(core.studio_create_data_table, notebook_id, description,
+                      language=language, source_ids=source_ids))
 
 
 @mcp.tool()
@@ -1003,10 +1022,10 @@ async def studio_create_report(notebook_id: str,
                                format: str = "Briefing Doc",
                                prompt: Optional[str] = None,
                                language: str = "it",
-                               source_ids: Optional[list[str]] = None) -> str:
+                               source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Report. format: 'Briefing Doc'|'Study Guide'|'Blog Post'|'Create Your Own'."""
-    return await _aio(core.studio_create_report, notebook_id, format=format, prompt=prompt,
-                      language=language, source_ids=source_ids)
+    return _creato("report", notebook_id, await _aio(core.studio_create_report, notebook_id, format=format, prompt=prompt,
+                      language=language, source_ids=source_ids))
 
 
 @mcp.tool()
@@ -1014,20 +1033,20 @@ async def studio_create_quiz(notebook_id: str,
                              count: int = 10,
                              difficulty: int = 2,
                              focus: Optional[str] = None,
-                             source_ids: Optional[list[str]] = None) -> str:
+                             source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Quiz. difficulty 1=easy ... 5=hard."""
-    return await _aio(core.studio_create_quiz, notebook_id, count=count, difficulty=difficulty,
-                      focus=focus, source_ids=source_ids)
+    return _creato("quiz", notebook_id, await _aio(core.studio_create_quiz, notebook_id, count=count, difficulty=difficulty,
+                      focus=focus, source_ids=source_ids))
 
 
 @mcp.tool()
 async def studio_create_flashcards(notebook_id: str,
                                    difficulty: str = "medium",
                                    focus: Optional[str] = None,
-                                   source_ids: Optional[list[str]] = None) -> str:
+                                   source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Flashcards. difficulty: easy|medium|hard."""
-    return await _aio(core.studio_create_flashcards, notebook_id, difficulty=difficulty,
-                      focus=focus, source_ids=source_ids)
+    return _creato("flashcards", notebook_id, await _aio(core.studio_create_flashcards, notebook_id, difficulty=difficulty,
+                      focus=focus, source_ids=source_ids))
 
 
 @mcp.tool()
@@ -1113,12 +1132,12 @@ async def studio_delete(notebook_id: str, artifact_id: str, conferma: str = "") 
 
 
 @mcp.tool()
-async def studio_rename(notebook_id: str, artifact_id: str, new_title: str) -> str:
+async def studio_rename(notebook_id: str, artifact_id: str, new_title: str) -> esiti.Rinominato:
     """Rinomina un artefatto studio. L'artifact_id è globale: notebook_id resta
     nella firma per coerenza con gli altri tool ma viene IGNORATO (non arriva
-    alla CLI). Ritorna "ok"."""
+    alla CLI). Ritorna {id, title, rinominato}."""
     await _aio(core.studio_rename, notebook_id, artifact_id, new_title)
-    return "ok"
+    return {"id": artifact_id, "title": new_title, "rinominato": True}
 
 
 # ============================================================
@@ -1216,16 +1235,18 @@ async def censimento(contenuti: bool = False, descrizioni: bool = False,
 
 @mcp.tool()
 async def studio_export_to_docs(notebook_id: str, artifact_id: str,
-                                title: Optional[str] = None) -> str:
-    """Esporta un Report su Google Docs. Ritorna l'URL."""
-    return await _aio(core.studio_export_to_docs, notebook_id, artifact_id, title=title)
+                                title: Optional[str] = None) -> esiti.Esportazione:
+    """Esporta un Report su Google Docs. Ritorna {url, artifact_id}."""
+    url = await _aio(core.studio_export_to_docs, notebook_id, artifact_id, title=title)
+    return {"url": url, "artifact_id": artifact_id}
 
 
 @mcp.tool()
 async def studio_export_to_sheets(notebook_id: str, artifact_id: str,
-                                  title: Optional[str] = None) -> str:
-    """Esporta una Data Table su Google Sheets. Ritorna l'URL."""
-    return await _aio(core.studio_export_to_sheets, notebook_id, artifact_id, title=title)
+                                  title: Optional[str] = None) -> esiti.Esportazione:
+    """Esporta una Data Table su Google Sheets. Ritorna {url, artifact_id}."""
+    url = await _aio(core.studio_export_to_sheets, notebook_id, artifact_id, title=title)
+    return {"url": url, "artifact_id": artifact_id}
 
 
 # ============================================================
