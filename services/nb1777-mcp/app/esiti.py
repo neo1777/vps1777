@@ -174,6 +174,34 @@ class Descrizione(Esito):
     keywords: Any = None
 
 
+class Sostituzione(Esito):
+    """source_replace (P20): la prima chiamata dà l'anteprima e il gettone, la seconda la
+    fonte nuova. L'id cambia sempre: NotebookLM non modifica una fonte, ne aggiunge una."""
+    sostituita: str | None = Field(None, description="l'id della fonte tolta")
+    source_id: Any = Field(None, description="l'id della fonte nuova")
+    id_cambiato: bool | None = None
+    vecchia_cancellata: bool | None = None
+    avviso: str | None = None
+    anteprima: Any = None
+    conferma: str | None = None
+    scade_tra_s: int | None = None
+
+
+class FonteDrive(Esito):
+    """source_drive_stato (P20): una fonte Drive e se il documento su Drive è più nuovo."""
+    source_id: Any = None
+    title: Any = None
+    tipo: Any = None
+    indietro: bool | None = Field(None, description="True = su Drive c'è una versione più nuova")
+
+
+class SyncDrive(Esito):
+    """source_sync_drive (P20): quante fonti si sono riallineate (stesso id)."""
+    chieste: int | None = None
+    sincronizzate: int | None = None
+    source_ids: list[str] | None = None
+
+
 # ── salute e memoria ───────────────────────────────────────────────────────────────────
 
 class Quota(Esito):

@@ -17,8 +17,9 @@ def _tools():
 
 def test_ogni_tool_ha_titolo_e_annotazioni() -> None:
     tools = _tools()
-    assert len(tools) == 52   # 40 + i sette di P7 + source_upload_link (P15) + lavoro_esito (P6), 10/10
+    assert len(tools) == 55   # 40 + i sette di P7 + source_upload_link (P15) + lavoro_esito (P6), 10/10
     #   + source_describe, nb_export, censimento (P14), 11/10
+    #   + source_replace, source_drive_stato, source_sync_drive (P20), 11/10
     assert set(server.ANNOTAZIONI) == set(tools), "tabella e tool registrati divergono"
     for nome, t in tools.items():
         a = t.annotations
@@ -29,8 +30,10 @@ def test_ogni_tool_ha_titolo_e_annotazioni() -> None:
 
 
 def test_distruttivi_sono_solo_le_cancellazioni() -> None:
+    """E la sostituzione (P20), che toglie la fonte vecchia: due tempi anche lei."""
     distruttivi = sorted(n for n, t in _tools().items() if t.annotations.destructiveHint)
-    assert distruttivi == ["nb_delete", "note_delete", "source_delete", "studio_delete"]
+    assert distruttivi == ["nb_delete", "note_delete", "source_delete", "source_replace",
+                           "studio_delete"]
 
 
 def test_chi_scrive_non_si_spaccia_per_sola_lettura() -> None:

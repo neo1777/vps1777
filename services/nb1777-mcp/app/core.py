@@ -535,6 +535,66 @@ def source_rename(nb_id: str, source_id: str, new_title: str) -> None:
     _run(["source", "rename", "-n", nb_id, source_id, new_title])
 
 
+# ── P20 (11/10/2026): la fedeltà delle scritture ─────────────────────────────────────────
+# NotebookLM non ha una «modifica» delle fonti: una fonte di testo o URL si sostituisce
+# aggiungendo la nuova e togliendo la vecchia. L'ordine è la garanzia: prima si aggiunge,
+# e se fallisce la vecchia resta intatta; poi si cancella, e se fallisce restano DUE fonti
+# (lo si dice) invece di nessuna. L'id cambia sempre, e lo si dice.
+# Le fonti Drive invece si aggiornano sul posto (sync), con lo stesso id.
+
+def source_replace(nb_id: str, source_id: str, *, text: Optional[str] = None,
+                   url: Optional[str] = None, title: Optional[str] = None,
+                   wait: bool = True, timeout: float = 600.0) -> dict:
+    """Sostituisce una fonte con un testo nuovo o un URL nuovo (uno dei due)."""
+    if (text is None) == (url is None):
+        raise ValueError("dammi il testo nuovo OPPURE l'url nuovo, uno dei due")
+    vecchia = next((f for f in source_list(nb_id) if _source_id_of(f) == source_id), None)
+    if vecchia is None:
+        raise NLMError(f"la fonte {source_id} non è nel notebook {nb_id}")
+    titolo = title or str(vecchia.get("title") or "") or "fonte"
+    if text is not None:
+        nuovo = source_add_text(nb_id, text, titolo, wait=wait, timeout=timeout)
+    else:
+        nuovo = source_add_url(nb_id, str(url), title=title, wait=wait, timeout=timeout)
+    out: dict = {"source_id": nuovo, "sostituita": source_id, "id_cambiato": True,
+                 "titolo": titolo, "vecchia_cancellata": False}
+    try:
+        source_delete(nb_id, source_id)
+        out["vecchia_cancellata"] = True
+    except NLMError as exc:
+        out["avviso"] = (f"la fonte nuova c'è, ma la vecchia non si è cancellata ({exc}): "
+                         f"ora ci sono tutte e due. Toglila con source_delete({source_id!r}).")
+    return out
+
+
+def source_drive_stato(nb_id: str) -> list[dict]:
+    """Le fonti Drive di un notebook e se sono indietro rispetto al documento su Drive.
+
+    Da `source list --drive --json`, che controlla la freschezza fonte per fonte. NON da
+    `source stale`: in nlm 0.15.4 quel comando (e `source sync` senza id) non chiama il
+    controllo, trova `is_fresh` assente, lo prende per «fresca», e non segnala mai niente."""
+    out = []
+    for f in _run_json(["source", "list", nb_id, "--drive"], timeout=180):
+        if not isinstance(f, dict) or f.get("is_fresh") is None:
+            continue                       # non è una fonte Drive (il controllo non si applica)
+        out.append({"source_id": _source_id_of(f), "title": f.get("title"),
+                    "tipo": f.get("type") or f.get("source_type"),
+                    "indietro": not f.get("is_fresh")})
+    return out
+
+
+def source_sync_drive(nb_id: str, source_ids: list[str]) -> dict:
+    """Riallinea a Drive le fonti indicate (stesso id, contenuto nuovo)."""
+    ids = [i.strip() for i in source_ids if i and i.strip()]
+    if not ids:
+        return {"chieste": 0, "sincronizzate": 0}
+    p = _run(["source", "sync", nb_id, "--source-ids", ",".join(ids), "--confirm"],
+             timeout=300)
+    m = re.search(r"Synced (\d+) source", p.stdout or "")
+    return {"chieste": len(ids), "sincronizzate": int(m.group(1)) if m else None,
+            "source_ids": ids}
+
+
 # ============================================================
 # chat (notebook_query)
 # ============================================================
