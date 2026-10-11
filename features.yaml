@@ -595,6 +595,16 @@ features:
     since: "0.80.0"
     verify:
       mcp_tool: {service: archive-mcp, name: precedenti}
+  - id: archive.delta
+    nome: "archive-mcp · delta"
+    cosa: "Cosa è cambiato fra due fotografie dello stesso account, per uuid: righe sparite,
+           nuove e cambiate, contate per project, con gli esempi più recenti; dichiara la
+           quota di uuid condivisi (sotto metà il delta non vale) e il budget di 40 s (P19)."
+    dove: ["mcp-tool:archive-mcp/delta"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: archive-mcp, name: delta}
   - id: archive.get_session
     nome: "archive-mcp · get_session"
     cosa: "Tutto ciò che l'archivio sa di UNA sessione Claude Code (contratto recupero/ R1):

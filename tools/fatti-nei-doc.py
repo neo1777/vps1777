@@ -137,9 +137,9 @@ FRASI = [
     Frase("docs/NB1777.md", r"Il resto — (?P<nb1777_tool>{N}) tool,"),
     Frase("services/nb1777-mcp/README.md", r"^(?P<nb1777_tool>{N}) tool, in sette famiglie"),
     # ── archive: i tool ───────────────────────────────────────────────────────
-    Frase("README.md", r"`precedenti`\): \*\*(?P<archive_tool>{N}) tools\*\*"),
+    Frase("README.md", r"`delta`\): \*\*(?P<archive_tool>{N}) tools\*\*"),
     Frase("README.md", r"the (?P<archive_tool>{N}) MCP tools, sessions and lineages"),
-    Frase("README.it.md", r"`precedenti`\): \*\*(?P<archive_tool>{N}) tool\*\*"),
+    Frase("README.it.md", r"`delta`\): \*\*(?P<archive_tool>{N}) tool\*\*"),
     Frase("README.it.md", r"i (?P<archive_tool>{N}) tool MCP, sessioni e stirpi"),
     Frase("installer/README.md", r"\*\*`archive` espone (?P<archive_tool>{N}) tool\*\*"),
     Frase("docs/ARCHIVE.md", r"attraverso i \*\*(?P<archive_tool>{N}) tool MCP\*\*"),

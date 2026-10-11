@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Aggiunto
+- **archive-mcp: `delta`, cosa è cambiato fra due fotografie (P19).** Fra due DB dello stesso
+  account (due export claude.ai) confronta gli uuid: righe sparite (chat cancellate), nuove e col
+  testo cambiato, contate per progetto, con gli esempi più recenti. Dice anche quanti uuid i due
+  DB condividono: se sono pochi gli uuid non sono stabili fra le due fonti e il delta non vale.
+  Budget di 40 s, poi `parziale`. Ora i tool di archive sono 18.
 - **Un podcast dello Studio entra nell'archivio in un gesto (P17).** `vps1777 archive-ingest
   --artefatto <nome>` parte da un file già scaricato in nb1777 con `studio_download`: non lo copia
   e alla fine lo lascia dov'è. Il nome è solo un nome di file, mai un percorso.
