@@ -873,7 +873,7 @@ echo CONFIG_OK
         glob; il timer si ABILITA solo se `autoupdate` è dichiarato (default sì)."""
         yield "── Installo il canale di aggiornamento (CLI + timer)…"
         enable_units = ("vps1777-check-update.timer vps1777-update.path "
-                        "vps1777-secrets-check.timer")
+                        "vps1777-secrets-check.timer vps1777-ingest.path")
         if "autoupdate" in self._features():
             enable_units += " vps1777-auto-update.timer"
         script = f"""

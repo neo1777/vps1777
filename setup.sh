@@ -572,7 +572,7 @@ H55
       # a deploy.sh (710) ed engine.py (590), saltato qui. Da qui in poi setup.sh
       # legge la STESSA fonte di verità degli altri due installer: lo stato
       # dichiarato VPS1777_FEATURES, con lo stesso default (deploy.sh:632).
-      ENABLE_UNITS="vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer"
+      ENABLE_UNITS="vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer vps1777-ingest.path"
       # Stessa semantica di enabled_features (tools/vps1777.py): il default vale
       # solo a CHIAVE ASSENTE — un valore esplicito, anche vuoto, vince (così si
       # può spegnere tutto). E gli spazi si tolgono: la CLI fa strip di ogni voce,

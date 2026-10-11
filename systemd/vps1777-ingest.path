@@ -1,0 +1,23 @@
+# vps1777-ingest.path — la coda d'indicizzazione di /admin/archive (P16, 11/10/2026).
+#
+# Il gateway (senza privilegi, e senza poter lanciare processi) mette il file caricato
+# nel volume dell'archivio e scrive un intent in onboarding/ingest_coda/. Questa path
+# unit vede la cartella non vuota e lancia `vps1777 ingest-coda`, che CONSUMA ogni
+# intent prima di agire (lo toglie dalla coda): a lavoro finito la cartella è vuota e
+# la unit non riparte da sola. Stesso disegno di vps1777-update.path.
+#
+# @REPO@ lo sostituisce la CLI (render_unit) col percorso reale del repo.
+# ⚠️ NIENTE MakeDirectory=: la creerebbe PID 1, cioè root con 0755, e il gateway
+#   (uid 1000 nel container) non potrebbe più scriverci. La cartella la crea la CLI
+#   all'install e a ogni update, e il gateway se manca; finché non c'è, systemd guarda
+#   la cartella sopra.
+
+[Unit]
+Description=vps1777 — coda d'indicizzazione dell'archivio (/admin/archive)
+
+[Path]
+DirectoryNotEmpty=@REPO@/onboarding/ingest_coda
+Unit=vps1777-ingest.service
+
+[Install]
+WantedBy=multi-user.target

@@ -49,7 +49,7 @@ Tre reti base, tre ruoli distinti (H25):
 | Volume | Path container | Contenuto |
 |---|---|---|
 | `gateway-data` | `/var/lib/gateway` | audit log, audit.jsonl |
-| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5: i messaggi e, dai bundle di Recupero Sessioni, le tabelle `sessioni`/`archi`/`memorie` — vedi [ARCHIVE.md](ARCHIVE.md)) + `models/` e gli indici `<db>.vec.db` della ricerca per senso ([RICERCA-IBRIDA.md](RICERCA-IBRIDA.md)). Lo scrivono il gateway (ingest) e il job `indice-notturno` (gli indici); `archive-mcp` lo monta in sola lettura |
+| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5: i messaggi e, dai bundle di Recupero Sessioni, le tabelle `sessioni`/`archi`/`memorie` — vedi [ARCHIVE.md](ARCHIVE.md)) + `models/` e gli indici `<db>.vec.db` della ricerca per senso ([RICERCA-IBRIDA.md](RICERCA-IBRIDA.md)). Lo scrivono il job `ingest` (i DB, dalla 0.84; il gateway ci mette in coda i file e i `.db` drop-in) e il job `indice-notturno` (gli indici); `archive-mcp` lo monta in sola lettura |
 | `nlm-auth` | `/var/lib/nlm` | profilo NotebookLM `profiles/default/` + `AUTH_PENDING.flag` |
 | `nlm-artifacts` | `/var/lib/nlm-artifacts` | gli artefatti Studio scaricati da nb1777-mcp e i file in transito di `archive-ingest`. Niente segreti |
 | `gateway-uploads` | `/var/lib/uploads` | lo spool degli upload del gateway (`TMPDIR`): su disco e non nella tmpfs `/tmp`, che un bundle da 2,6 GB saturava |
@@ -114,6 +114,13 @@ check release + notifica Telegram al owner. Un secondo timer giornaliero
 pubblicata da almeno 48 ore (`vps1777 auto-update --eta-minima 48`): una release
 sbagliata ha due giorni per essere ritirata prima di arrivare. Un terzo
 (`vps1777-secrets-check.timer`) controlla le scadenze dei segreti.
+
+Lo stesso disegno vale per l'indicizzazione dell'archivio (dalla 0.84): la pagina
+*Archive* mette il file in coda e scrive un intent in `onboarding/ingest_coda/`;
+`vps1777-ingest.path` lancia `vps1777 ingest-coda`, che fa girare il servizio compose
+`ingest` (profilo `ingest`, immagine del gateway, limite di memoria 2g, solo il volume
+`archive-data`). Così il gateway può avere un limite suo (512m): un export troppo grande
+uccide il lavoro, non OAuth e il proxy.
 
 ```
 admin UI ──intent──► onboarding/update_pending_update.json

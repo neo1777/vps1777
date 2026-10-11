@@ -1,0 +1,36 @@
+# vps1777-ingest.service — indicizza i file in coda da /admin/archive (P16, 11/10/2026).
+#
+# Lancia `vps1777 ingest-coda`: per ogni intent in onboarding/ingest_coda/ (dal più
+# vecchio) fa girare il servizio compose `ingest` (profilo `ingest`): stessa immagine del
+# gateway, mem_limit 2g, una CPU, solo il volume dell'archivio. Se un export sfora la
+# memoria muore il lavoro, non il gateway. Lo stato va in onboarding/ingest_esiti/, che
+# la pagina Archive legge. Utente e path come le altre unit (H43): li rende la CLI.
+
+[Unit]
+Description=vps1777 — indicizzazione dei file in coda
+Wants=network-online.target
+After=network-online.target docker.service
+
+# 🔔 Un fallimento si deve SAPERE (come le altre unit dal 03/08).
+OnFailure=vps1777-avvisa-fallimento@%n.service
+
+[Service]
+Type=oneshot
+User=@OPERATOR_USER@
+Group=@OPERATOR_USER@
+Environment=VPS1777_HOME=@REPO@
+WorkingDirectory=@REPO@
+ExecStart=/usr/local/bin/vps1777 ingest-coda
+# un bundle grosso con l'OCR delle immagini può chiedere più di un'ora
+TimeoutStartSec=6h
+Nice=10
+NoNewPrivileges=true
+ProtectHome=read-only
+ReadWritePaths=@REPO@
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
+LockPersonality=true

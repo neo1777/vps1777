@@ -77,7 +77,11 @@ services:
     # Un tetto di memoria messo a occhio uccide il servizio nel mezzo di una chiamata.
     pids_limit: 256
     cpus: 2.0
-    # mem_limit: non ancora — il picco vero è l'indicizzazione dei bundle grossi, non misurato
+    # P16 (11/10/2026): l'indicizzazione non gira più qui ma nel servizio `ingest`, e il
+    # tetto si può mettere. Picco misurato senza ingest: 112 MB (memory.peak dopo 4 ore
+    # di 0.83.0, anon 39 MB); 512m lascia più di quattro volte il margine.
+    mem_limit: 512m
+    memswap_limit: 512m
     # Immagini pubblicate dalla CI di release (ghcr) — la VPS fa solo pull.
     # Per il build locale in sviluppo: -f compose.yaml -f compose.build.yaml
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-gateway:${VPS1777_TAG:-dev}${VPS1777_DIGEST_GATEWAY:+@${VPS1777_DIGEST_GATEWAY}}
@@ -101,6 +105,8 @@ services:
       # HTTP — il gateway NON esegue processi (invariante presidiata da
       # test_gateway_non_tocca_docker). Vuoto = OCR spento, lapidi dichiarate.
       OCR_URL: ${OCR_URL:-http://ocr:8004/ocr}
+      # P16: /admin/archive mette i file in coda; li indicizza il servizio `ingest`
+      ARCHIVE_INGEST_CODA: "true"
       OAUTH_REQUIRED: "true"
       OAUTH_ACCESS_TOKEN_LIFETIME: "900"
       OAUTH_REFRESH_TOKEN_LIFETIME: "2592000"
@@ -242,8 +248,8 @@ services:
     <<: [*logging, *security, *readonly]
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-archive-mcp:${VPS1777_TAG:-dev}${VPS1777_DIGEST_ARCHIVE_MCP:+@${VPS1777_DIGEST_ARCHIVE_MCP}}
     profiles: [indice]
-    # l'unico init: true del compose. L'entrypoint qui sotto salta il tini dell'immagine,
-    # che negli altri servizi è già PID 1 (test_un_init_solo).
+    # init: true perché l'entrypoint qui sotto salta il tini dell'immagine, che negli
+    # altri servizi è già PID 1 (test_un_init_solo); lo stesso fa `ingest`.
     init: true
     restart: "no"
     network_mode: none
@@ -253,6 +259,37 @@ services:
     entrypoint: ["python", "tools/costruisci_indice.py"]
     volumes:
       - archive-data:/var/lib/archive:rw
+
+  # L'indicizzazione dell'archivio come lavoro a parte (P16, 11/10/2026): lo lancia
+  # `vps1777 ingest-coda` (dalla path unit, quando /admin/archive mette un file in coda)
+  # e i comandi `archive-*` della CLI, con `compose run --rm`. Non parte con `up`.
+  # Stessa immagine del gateway, ma niente secret, niente onboarding, niente porte: monta
+  # solo il volume dell'archivio. Il tetto è il punto: un conversations.json si carica
+  # tutto. Misurato: 3,4 volte il file su uno sintetico (221 MB → 745 MB, 11/10), 4 volte
+  # sull'export vero del 29/08 (297 MB → 1,2 GB, docs/ARCHIVE.md); 2g regge fin verso i
+  # 500 MB, quasi il tetto di un membro (512). Oltre muore questo, non il gateway.
+  # Rete `backend` perché l'OCR delle immagini è un servizio (OCR_URL), come nel gateway.
+  ingest:
+    <<: [*logging, *security, *readonly]
+    image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-gateway:${VPS1777_TAG:-dev}${VPS1777_DIGEST_GATEWAY:+@${VPS1777_DIGEST_GATEWAY}}
+    profiles: [ingest]
+    restart: "no"
+    mem_limit: 2g
+    memswap_limit: 2g
+    pids_limit: 256
+    cpus: 1.0
+    # come indice-notturno: l'entrypoint salta il tini dell'immagine, quindi l'init lo
+    # mette compose (test_un_init_solo)
+    init: true
+    entrypoint: ["python", "-m", "app.ingest_worker"]
+    environment:
+      OCR_URL: ${OCR_URL:-http://ocr:8004/ocr}
+      TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID:-}
+      ARCHIVE_TELEGRAM_PROPRIETARIO: ${ARCHIVE_TELEGRAM_PROPRIETARIO:-}
+    volumes:
+      - archive-data:/var/lib/archive:rw
+    networks:
+      - backend
 
   # ──────────────────────────────────────────────────────────────────────
   # NotebookLM MCP — nlm CLI (senza browser: il profilo arriva dal PC)

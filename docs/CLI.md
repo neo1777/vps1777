@@ -239,6 +239,21 @@ vps1777 indice-notturno                    # un giro adesso
 vps1777 indice-notturno --db X --tutti     # un DB solo, anche se già allineato
 ```
 
+## vps1777 ingest-coda
+
+Indicizza i file che la pagina **Archive** del pannello ha messo in coda. Dalla 0.84 il
+gateway non indicizza più da sé: mette il file nel volume dell'archivio e scrive un intent
+in `onboarding/ingest_coda/`. La path unit `vps1777-ingest.path` lancia questo comando, che
+per ogni intent, dal più vecchio, fa girare il servizio compose `ingest` (immagine del
+gateway, limite di memoria 2g, una CPU, solo il volume dell'archivio). Lo stato finisce in
+`onboarding/ingest_esiti/` e la pagina lo mostra in «Caricamenti». Se un file supera il
+limite muore il lavoro, non il gateway. A mano serve a svuotare una coda ferma.
+
+```bash
+vps1777 ingest-coda                         # un giro adesso
+systemctl status vps1777-ingest.path        # la unit che lo lancia da sola
+```
+
 ## vps1777 archive-migra
 
 Porta ai DB **già caricati** le migrazioni delle colonne derivate, senza ingest:

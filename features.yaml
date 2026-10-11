@@ -479,6 +479,25 @@ features:
                 riaccende da solo. [CHANGELOG 0.57.0, systemd/vps1777-indice-notturno.timer]"
     verify:
       systemd_unit: vps1777-indice-notturno.timer
+  - id: archive.ingest-coda
+    nome: "Indicizzazione di /admin/archive come lavoro a parte (coda + servizio ingest)"
+    cosa: "La pagina Archive non indicizza più dentro il gateway: mette il file in coda nel
+           volume dell'archivio e scrive un intent in onboarding/ingest_coda/. La path unit
+           vps1777-ingest.path lancia `vps1777 ingest-coda`, che fa girare il servizio compose
+           `ingest` (profilo `ingest`, immagine del gateway, mem_limit 2g, una CPU, solo il
+           volume dell'archivio, niente secret). La pagina mostra in coda, in corso, fatto o
+           errore. Il gateway ha ora un tetto di memoria suo (512m)."
+    dove: ["systemd:vps1777-ingest.path", "systemd:vps1777-ingest.service",
+           "cli:ingest-coda", "compose-profile:compose.yaml#ingest",
+           "services/gateway/app/coda_ingest.py", "services/gateway/app/ingest_worker.py"]
+    status: active-default
+    since: "unreleased"
+    decisione: "P16 del dossier sull'evoluzione degli MCP (ondata 2, 05/10/2026). Il
+                gateway non esegue processi (test_gateway_non_tocca_docker): scrive un
+                intent, come il pulsante «Aggiorna». Picchi misurati l'11/10: indexer 3,4
+                volte il conversations.json (221 MB → 745 MB), gateway senza ingest 112 MB."
+    verify:
+      systemd_unit: vps1777-ingest.path
   - id: archive.count
     nome: "archive-mcp · count"
     cosa: "Conta quanti messaggi corrispondono alla query (non limitato) — per frequenze e prevalenze."
@@ -1779,6 +1798,19 @@ features:
                 (timer sul PC) — il compromesso è la RAM, chiuso da mem_limit. Opt-in perché
                 ha senso solo con un indice già costruito. [scelte 2026-09-26-vps1777-gradino3]"
     verify: {cli_command: indice-notturno}
+  - id: cli.ingest-coda
+    nome: "vps1777 ingest-coda (+ path unit vps1777-ingest)"
+    cosa: "Consuma gli intent di onboarding/ingest_coda/ dal più vecchio e per ognuno fa
+           girare il servizio compose `ingest`; scrive lo stato in onboarding/ingest_esiti/
+           (gli ultimi 50). Un intent storto si scarta e si dice; un rifiuto dell'indexer
+           (formato, PDF senza testo) non fa fallire la unit, un lavoro ucciso dal tetto sì."
+    dove: ["cli:ingest-coda", "tools/vps1777.py", "systemd:vps1777-ingest.path",
+           "systemd:vps1777-ingest.service", "compose-profile:compose.yaml#ingest"]
+    status: active-default
+    since: "unreleased"
+    decisione: "P16 (11/10/2026). Accesa dagli installer e da `vps1777 update`: senza, i
+                file caricati restano in coda."
+    verify: {cli_command: ingest-coda}
   - id: cli.archive-migra
     nome: "vps1777 archive-migra"
     cosa: "Porta ai DB già caricati le migrazioni delle colonne derivate senza re-ingest

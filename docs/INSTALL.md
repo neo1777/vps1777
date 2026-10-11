@@ -54,8 +54,9 @@ Lo stage finale ti stampa gli URL.
    builda mai; il build locale è solo dev, con l'overlay `compose.build.yaml`)
 5. Se hai risposto «sì» a «Procedo ora?», **con `sudo`** (ti chiede la password):
    installa la CLI `vps1777` in `/usr/local/bin`; installa **tutte** le unit
-   `systemd/vps1777-*` in `/etc/systemd/system` e ne **abilita** tre —
-   `vps1777-check-update.timer`, `vps1777-update.path`, `vps1777-secrets-check.timer`
+   `systemd/vps1777-*` in `/etc/systemd/system` e ne **abilita** quattro —
+   `vps1777-check-update.timer`, `vps1777-update.path`, `vps1777-secrets-check.timer`,
+   `vps1777-ingest.path` (la coda d'indicizzazione della pagina Archive)
    — più `vps1777-auto-update.timer` se `autoupdate` è in `VPS1777_FEATURES` (lo è di
    default); applica l'**hardening dell'host**: `apt-get install` di
    `unattended-upgrades` e `fail2ban`, con `/etc/apt/apt.conf.d/20auto-upgrades` e una

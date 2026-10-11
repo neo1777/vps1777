@@ -1010,7 +1010,7 @@ fi
 # (vps1777-auto-update.{service,timer}); il timer si ABILITA solo se `autoupdate`
 # è nello stato dichiarato (default sì). È l'alternativa gestita a Watchtower.
 log "Installo il canale di aggiornamento (CLI + timer + path unit)..."
-ENABLE_UNITS="vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer"
+ENABLE_UNITS="vps1777-check-update.timer vps1777-update.path vps1777-secrets-check.timer vps1777-ingest.path"
 case ",$FEATURES," in *,autoupdate,*) ENABLE_UNITS="$ENABLE_UNITS vps1777-auto-update.timer";; esac
 # stessa ragione della riga più su: `A && B || C` non è if-then-else.
 if SSH "install -m755 $REMOTE_DIR/tools/vps1777.py /usr/local/bin/vps1777 \

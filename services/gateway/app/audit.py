@@ -180,6 +180,9 @@ _CHIAVI_NOTE = frozenset({
     "tool", "ms", "esito",
     # 11/10 — P18: `giorni` del posticipo del promemoria dei secret (un intero, 0-30).
     "giorni",
+    # 11/10 — P16: `lavoro`, l'id di un file messo in coda da /admin/archive (data e 8
+    # caratteri esadecimali, app/coda_ingest.py: nessun dato dell'owner).
+    "lavoro",
 })
 _MAX_VALORE = 500
 
