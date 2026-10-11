@@ -4,6 +4,24 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Bot: si sceglie il notebook toccandolo (P12).** `/lista` mostra i notebook come bottoni, otto
+  per pagina; il tocco sceglie quello su cui `/chiedi <domanda>` interroga. `/chiedi` senza un
+  notebook scelto tiene la domanda, mostra i bottoni e la fa appena scegli. `/chiedi <id>
+  <domanda>` funziona come prima.
+
+### Cambiato
+- **Bot: la risposta di `/chiedi` è formattata.** Prima arrivava il JSON di `notebook_query`
+  tagliato a 4000 caratteri. Ora c'è il testo, con il grassetto, e le fonti in fondo coi loro
+  numeri di citazione e il titolo; una risposta lunga arriva in più messaggi. Se NotebookLM non
+  ha finito in 270 s, il bot la ritira con `notebook_query_esito`.
+
+### Corretto
+- **Bot: un errore non diventa più «Risposta vuota.».** Un errore JSON-RPC o un tool fallito
+  (`isError`, per esempio la sessione Google scaduta) arrivava a Neo come «Risposta vuota.», e
+  sembrava che NotebookLM non avesse niente da dire. Ora arriva il messaggio dell'errore, e così
+  quelli di rete e HTTP.
+
 ## [0.80.0] — 2026-10-11
 
 **archive1777 legge più messaggi in una chiamata, trova i precedenti e dice chi parla.**
