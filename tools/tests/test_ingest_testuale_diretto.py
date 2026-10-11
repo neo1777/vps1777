@@ -150,3 +150,66 @@ def test_il_file_non_testuale_entra_in_nb1777_senza_docker_cp(cli, tmp_path):
     # denied». Con cap_drop ALL root non ha CAP_DAC_OVERRIDE, e il file (e la cartella)
     # sono di `app`: lo crea l'exec come `app`, lo deve togliere `app`.
     assert all("-u" not in c for c in rm), rm
+
+
+# ── P17 (11/10/2026): `--artefatto`, un podcast dello Studio in un gesto ──────────────
+
+def _args_artefatto(nome: str, **kw):
+    base = dict(file=None, artefatto=nome, db="podcast", project="studio", verify=False,
+                nlm=False)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_un_artefatto_non_si_copia_e_non_si_cancella(cli, tmp_path):
+    """Il file è già nel volume degli artefatti (studio_download): niente `cat >` in
+    nb1777, la trascrizione legge quel percorso, e alla fine l'artefatto resta lì."""
+    mod, chiamate = cli
+
+    def run_con_esito(cmd, **kw):
+        chiamate.append(list(cmd))
+        if "app.ingest" in cmd:
+            return SimpleNamespace(returncode=0, stderr="", stdout=(
+                '{"text": "trascrizione", "metodo": "contenuto", "fonte_tipo": "audio"}'))
+        return SimpleNamespace(returncode=0, stdout='{"indicizzate": 1}', stderr="")
+
+    mod.run = run_con_esito
+    assert mod.cmd_archive_ingest(tmp_path, _args_artefatto("prova-p15.m4a")) == 0
+    percorso = "/var/lib/nlm-artifacts/prova-p15.m4a"
+    dest = next(c for c in chiamate if "app.ingest" in c)
+    assert dest[dest.index("--file") + 1] == percorso
+    assert not any("nb1777-mcp" in c and "cat >" in " ".join(c) for c in chiamate), chiamate
+    assert not any("nb1777-mcp" in c and "rm" in c for c in chiamate), \
+        "l'artefatto è di chi l'ha scaricato: non si cancella"
+
+
+@pytest.mark.parametrize("nome", ["../nlm/profiles/default/cookies.json", "/etc/passwd",
+                                  "ingest/x.m4a", ".nascosto", ""])
+def test_un_nome_di_artefatto_non_e_un_percorso(cli, tmp_path, nome):
+    mod, chiamate = cli
+    with pytest.raises(SystemExit):
+        mod.cmd_archive_ingest(tmp_path, _args_artefatto(nome))
+    assert not any("app.ingest" in c for c in chiamate)
+
+
+def test_file_e_artefatto_insieme_no(cli, tmp_path):
+    mod, _ = cli
+    f = tmp_path / "a.md"
+    f.write_text("x")
+    with pytest.raises(SystemExit):
+        mod.cmd_archive_ingest(tmp_path, _args_artefatto("a.m4a", file=str(f)))
+
+
+def test_un_artefatto_che_non_c_e_lo_dice(cli, tmp_path, capsys):
+    mod, chiamate = cli
+
+    def run_manca(cmd, **kw):
+        chiamate.append(list(cmd))
+        if "test" in cmd:
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    mod.run = run_manca
+    with pytest.raises(SystemExit):
+        mod.cmd_archive_ingest(tmp_path, _args_artefatto("manca.m4a"))
+    assert "studio_download" in capsys.readouterr().err
