@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.81.1] — 2026-10-11
+
+**Il token del bot non finisce più nel log; search_ibrida resta nel suo budget.**
+
 ### Corretto
 - **archive1777: `search_ibrida` non supera più il budget con la ricerca dei vicini.** Dal vivo,
   dopo la 0.81.0, una `search_ibrida` ha impiegato 69 s (oltre i 60 del proxy) pur dicendo
