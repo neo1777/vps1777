@@ -268,6 +268,8 @@ def search_ibrida(
       un indice che non risponde (in quel caso resta la metà full-text);
     - `parametri`: k_rrf, peso_fts, modello, quante formulazioni;
     - `fuori_perimetro`: {ruolo: [db]} lasciati fuori dal filtro `ruoli`.
+    - `senza_indice`: i DB del perimetro che non hanno un indice per senso e quindi non
+      sono stati guardati: lì serve `search`.
 
     ⚠️ Senza modello di embedding o senza alcun indice `.vec.db` NON ricade in silenzio su
     FTS5: solleva un errore che dice cosa manca (docs/RICERCA-IBRIDA.md).
@@ -406,7 +408,7 @@ def precedenti(
     `giorni` fa, raggruppata per `project` (chat o progetto).
 
     Ritorna {tema, fino_a, gruppi, righe_totali, indici, parametri}, più `saltati`,
-    `fuori_perimetro` e `nota` quando servono. Ogni gruppo: {project, db, n, primo_ts,
+    `fuori_perimetro`, `senza_indice` (DB non guardati: lì serve search) e `nota`. Ogni gruppo: {project, db, n, primo_ts,
     ultimo_ts, righe}, nell'ordine della sua riga migliore; ogni riga: {uuid, db, ts,
     snippet, origine, voice}.
 

@@ -512,7 +512,9 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 > È un **cambio di contratto** e cambia il significato di uno zero: «0 sui primari» non è
 > «0 ovunque». Per questo `count`, col perimetro di default, aggiunge `anche_fuori`
 > (`{db: n}`, i match nelle fotografie e nei riscontri) e `search_ibrida` dice in
-> `fuori_perimetro` quali DB ha lasciato fuori. `get_context`, `get_conversation` e
+> `fuori_perimetro` quali DB ha lasciato fuori. Dalla 0.81.0 `search_ibrida` e `precedenti`
+> dicono anche in `senza_indice` quali DB **del perimetro** non hanno un indice per senso e
+> quindi non sono stati guardati: lì serve `search`. `get_context`, `get_conversation` e
 > `get_many` cercano un uuid già trovato e guardano ancora tutti i DB.
 
 > **Concorrenza.** Il server serve **2 ricerche alla volta** (`search`,

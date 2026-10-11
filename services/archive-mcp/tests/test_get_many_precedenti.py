@@ -295,3 +295,32 @@ def test_search_ibrida_dice_chi_parla(tmp_path, monkeypatch):
     righe = modulo.search_ibrida("x", db="arch", limit=3)["righe"]
     assert righe[0]["uuid"] == "u2" and righe[0]["speaker"] == "human"
     assert {r["speaker"] for r in righe[1:]} == {"assistant"}
+
+
+# ── i DB del perimetro senza indice si dicono ──────────────────────────────────
+
+def test_search_ibrida_dice_quali_db_del_perimetro_non_hanno_l_indice(db, monkeypatch):
+    """Dal vivo, 11/10: `precedenti` sui casi della #281 cercava in 5 DB su 8 del perimetro.
+    Il primario di claude.ai non ha l'indice per senso, e la risposta non lo diceva: zero
+    risultati da lì sembravano un'assenza."""
+    monkeypatch.setattr(db, "_indici_disponibili", lambda: {"prim": Path("/x/prim.vec.db")})
+    monkeypatch.setattr(db.semantica, "embed_query", lambda t, d: b"\x00" * 4)
+
+    class _Finta:
+        def execute(self, *a, **k):
+            raise sqlite3.OperationalError("niente vec in questo test")
+        def close(self):
+            pass
+    monkeypatch.setattr(db, "_open_con_indice", lambda name, idx: _Finta())
+    out = db.search_ibrida("piano", limit=5)
+    # nel perimetro di default: prim (primario) e storico (non dichiarato); solo prim ha l'indice
+    assert out["senza_indice"] == ["storico"]
+
+
+def test_precedenti_porta_senza_indice(db, monkeypatch):
+    def finta(query, db="", limit=20, **k):
+        return {"righe": [], "indici": [], "parametri": {}, "senza_indice": ["claude-ai"]}
+    monkeypatch.setattr(db, "search_ibrida", finta)
+    r = db.precedenti("x")
+    assert r["senza_indice"] == ["claude-ai"]
+    assert "senza indice" in r["nota"]

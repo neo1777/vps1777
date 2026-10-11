@@ -26,6 +26,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   ha finito in 270 s, il bot la ritira con `notebook_query_esito`.
 
 ### Corretto
+- **archive1777: i DB senza indice per senso si dicono.** `search_ibrida` cercava solo nei DB
+  del perimetro che hanno un indice, e la risposta non diceva quali erano rimasti fuori. Dal vivo,
+  `precedenti` sui casi della #281 guardava 5 DB su 8, e fra quelli rimasti fuori c'era il
+  primario di claude.ai: uno zero da lì sembrava un'assenza. Ora c'è `senza_indice`, e in
+  `precedenti` anche una nota che dice di cercarli con `search`.
 - **Bot: un errore non diventa più «Risposta vuota.».** Un errore JSON-RPC o un tool fallito
   (`isError`, per esempio la sessione Google scaduta) arrivava a Neo come «Risposta vuota.», e
   sembrava che NotebookLM non avesse niente da dire. Ora arriva il messaggio dell'errore, e così

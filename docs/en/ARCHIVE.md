@@ -517,7 +517,9 @@ The `ruolo` (role) field makes it readable.
 > only by naming it. It is a **contract change** and it changes the meaning of a zero:
 > "0 on primaries" is not "0 everywhere". That is why `count`, with the default scope,
 > adds `anche_fuori` (`{db: n}`, the matches in snapshots and cross-checks) and
-> `search_ibrida` says in `fuori_perimetro` which DBs it left out. `get_context`,
+> `search_ibrida` says in `fuori_perimetro` which DBs it left out. Since 0.81.0
+> `search_ibrida` and `precedenti` also say in `senza_indice` which DBs **in the scope** have
+> no index by meaning and so were not looked at: there you need `search`. `get_context`,
 > `get_conversation` and `get_many` look up an uuid already found and still look at every
 > DB.
 
