@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.83.0] — 2026-10-11
+
+**Il promemoria dei secret apre la vista giusta e si può posticipare.**
+
 ### Aggiunto
 - **Il promemoria dei secret si apre sulla vista giusta e si può posticipare (P18).** Il messaggio
   quotidiano di `secrets-status --notify` porta un bottone che apre la Mini App sulla scheda
