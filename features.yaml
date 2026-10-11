@@ -961,6 +961,30 @@ features:
     since: "0.77.0"
     verify:
       mcp_tool: {service: nb1777-mcp, name: source_upload_link}
+  - id: nb.source_describe
+    nome: "nb1777-mcp · source_describe"
+    cosa: "Il riassunto di una fonte scritto da Gemini, con le parole chiave (nlm 0.15, P14)."
+    dove: ["mcp-tool:nb1777-mcp/source_describe"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: source_describe}
+  - id: nb.nb_export
+    nome: "nb1777-mcp · nb_export"
+    cosa: "Un notebook in un file JSON sul server (fonti, testi, riassunti a scelta), con link firmato: lavoro lungo (P14)."
+    dove: ["mcp-tool:nb1777-mcp/nb_export", "services/nb1777-mcp/app/core.py"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: nb_export}
+  - id: nb.censimento
+    nome: "nb1777-mcp · censimento"
+    cosa: "Il censimento di tutti i notebook in un file JSON, come lavoro lungo, senza ssh (P14)."
+    dove: ["mcp-tool:nb1777-mcp/censimento", "services/nb1777-mcp/app/core.py"]
+    status: active-default
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: nb1777-mcp, name: censimento}
   - id: nb.lavoro_esito
     nome: "nb1777-mcp · lavoro_esito"
     cosa: "Ritira un lavoro lungo tornato «in_corso» (source_add_*, studio_download, studio_create_all_9):

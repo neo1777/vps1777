@@ -146,6 +146,10 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     "source_add_drive": ("Aggiungi una fonte da Drive", _AGGIUNGE),
     "source_delete": ("Cancella una fonte", _CANCELLA),
     "source_get_content": ("Leggi il testo di una fonte", _LEGGE),
+    "source_describe": ("Riassunto di una fonte", _LEGGE),
+    # P14: leggono da Google e scrivono un file sul server, come studio_download
+    "nb_export": ("Esporta un notebook in un file", _AGGIUNGE),
+    "censimento": ("Censisci tutti i notebook", _AGGIUNGE),
     # apre una capacità (un link che aggiunge una fonte): non è sola lettura
     "source_upload_link": ("Link per caricare un file", _AGGIUNGE),
     "source_rename": ("Rinomina una fonte", _RINOMINA),
@@ -1086,6 +1090,54 @@ async def studio_download(kind: str, notebook_id: str, output_path: str,
                         ("studio_download", kind, notebook_id, output_path, artifact_id),
                         notebook_id, attesa_max, _scarica_e_descrivi, kind, notebook_id,
                         output_path, artifact_id)
+
+
+# ============================================================
+# LAVORI IN BLOCCO (P14, 11/10/2026)
+# ============================================================
+
+@mcp.tool()
+async def source_describe(source_id: str) -> esiti.Descrizione:
+    """Il riassunto di una fonte scritto da Gemini, con le parole chiave. Usa la quota di
+    Gemini Notebook (usage_get). Per il testo della fonte senza elaborazione AI:
+    source_get_content."""
+    return await _aio(core.source_describe, source_id)
+
+
+def _censisci_con_link(notebook_ids: Optional[list[str]], descrizioni: bool,
+                       contenuti: bool) -> dict:
+    r = core.censisci(notebook_ids, descrizioni=descrizioni, contenuti=contenuti)
+    return {**r, "download_url": f"/admin/nlm/artifact/{r['name']}",
+            "link": link_firmati.link(r["name"]),
+            "nota": "Il file JSON è sul server: aprilo da `link.url` (30 minuti, senza "
+                    "password) o dal pannello /admin/nlm."}
+
+
+@mcp.tool()
+async def nb_export(notebook_id: str, contenuti: bool = True, descrizioni: bool = False,
+                    attesa_max: float = 25.0) -> esiti.Censimento:
+    """Un notebook in un file JSON sul server: le fonti con titolo, tipo e url, e a scelta il
+    testo di ognuna (`contenuti`, default sì) e il riassunto di Gemini (`descrizioni`, usa
+    la quota). Ritorna {name, bytes, fonti, errori, link}: `link.url` scarica il file per 30
+    minuti. Un errore su una fonte sta nella fonte (`errore`) e si conta, non ferma il resto.
+
+    ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito torna
+    {stato: "in_corso", job_id}; ritiralo con lavoro_esito(job_id)."""
+    return await _lungo("nb_export", ("nb_export", notebook_id, contenuti, descrizioni),
+                        notebook_id, attesa_max, _censisci_con_link, [notebook_id],
+                        descrizioni, contenuti)
+
+
+@mcp.tool()
+async def censimento(contenuti: bool = False, descrizioni: bool = False,
+                     attesa_max: float = 25.0) -> esiti.Censimento:
+    """Il censimento di TUTTI i notebook in un file JSON sul server: per ognuno le fonti con
+    titolo, tipo e url; a scelta il testo (`contenuti`) e il riassunto di Gemini
+    (`descrizioni`, usa la quota: una chiamata per fonte). Con i testi può durare ore (il
+    21/09, 2.662 fonti, 2 h 53 min): torna subito {stato: "in_corso", job_id} e si ritira con
+    lavoro_esito(job_id). Ritorna {name, bytes, notebooks, fonti, errori, link}."""
+    return await _lungo("censimento", ("censimento", contenuti, descrizioni), "*censimento*",
+                        attesa_max, _censisci_con_link, None, descrizioni, contenuti)
 
 
 # ============================================================

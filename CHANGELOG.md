@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Aggiunto
+- **nb1777: i lavori in blocco senza ssh (P14).** `source_describe` dà il riassunto di Gemini di
+  una fonte; `nb_export` scrive un notebook in un file JSON (fonti, testi, a scelta i riassunti) e
+  `censimento` fa lo stesso su tutti i notebook. Sono lavori lunghi (`lavoro_esito`) e finiscono
+  con un link firmato al file. Il censimento del 21/09 (2.662 fonti) era passato da `ssh +
+  docker exec nlm`. Un errore su una fonte si conta e non ferma il resto. 52 tool.
 - **nb1777: ogni tool dichiara la forma della sua risposta (P8).** 23 tool su 49 non avevano uno
   schema d'uscita e 4 liste davano oggetti generici; i modelli stanno in `app/esiti.py`. Sono
   `BaseModel` con `extra="allow"` e tipi larghi sui campi di nlm, perché un `TypedDict` in FastMCP
