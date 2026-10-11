@@ -23,6 +23,7 @@ Variabili d'ambiente:
 from __future__ import annotations
 
 import asyncio
+import functools
 import hmac
 import logging
 import os
@@ -32,6 +33,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from starlette.requests import Request
@@ -39,7 +41,7 @@ from starlette.responses import FileResponse, JSONResponse, Response
 
 from . import canonical, core, memoria, nlm_profile, sonda
 from . import conferma as _gettoni
-from . import caricamenti, lavori, link_firmati
+from . import caricamenti, esiti, lavori, link_firmati
 from .settings import get_settings
 
 log = logging.getLogger("nb1777-mcp.server")
@@ -52,6 +54,52 @@ TRANSPORT = os.environ.get("NB1777_TRANSPORT", "streamable-http")
 # Stateless HTTP: NO session_id required tra initialize/call.
 # Permette chiamate dirette tools/call senza initialize preventivo
 # (necessario per la Mini App + claude.ai che chiamano tool one-shot).
+# ── P8 (11/10/2026): ogni errore porta un codice stabile ─────────────────────────────────
+# Prima un errore arrivava come testo libero, e il bot, la Mini App o un modello dovevano
+# indovinare se era la sessione Google, la rete o un argomento sbagliato. Ora il testo
+# dell'errore, dopo il prefisso di FastMCP («Error executing tool <nome>: »), comincia con
+# uno di questi codici fra quadre; il messaggio di prima segue.
+CODICI_ERRORE = ("auth_assente", "auth_scaduta", "rete", "timeout", "quota", "argomento",
+                 "nlm", "interno")
+ISTRUZIONI_ERRORI = (
+    "ERRORI — ogni errore di un tool di nb1777 comincia con un codice fra quadre: "
+    "[auth_assente] (nessun profilo Google sulla VPS: va caricato da /admin/nlm), "
+    "[auth_scaduta] (la sessione Google è scaduta: stesso rimedio), [rete], [timeout], "
+    "[quota] (la quota di Gemini Notebook è finita: usage_get), [argomento] (un id, un "
+    "gettone o un valore sbagliato: correggilo e riprova), [nlm] (un altro errore della CLI "
+    "nlm), [interno]. Su [auth_*] e [quota] riprovare non serve.")
+
+
+class AuthAssente(RuntimeError):
+    """Nessun profilo nlm sulla VPS (il flag di attesa, o i cookie che mancano)."""
+
+
+_QUOTA = ("quota", "rate limit", "resource_exhausted", "too many requests")
+
+
+def codice_errore(exc: BaseException) -> str:
+    """Il codice stabile di un'eccezione (P8). L'ordine conta: l'auth scaduta è anche un
+    NLMError, il timeout di `_run` è un NLMError col suo testo."""
+    if isinstance(exc, AuthAssente):
+        return "auth_assente"
+    if isinstance(exc, core.NLMAuthError):
+        return "auth_scaduta"
+    if isinstance(exc, core.NLMError):
+        testo = str(exc).lower()
+        if testo.startswith("timeout "):
+            return "timeout"
+        if core.classifica_errore(testo) == "rete":
+            return "rete"
+        if any(p in testo for p in _QUOTA):
+            return "quota"
+        return "nlm"
+    if isinstance(exc, (ValueError, KeyError, LookupError, TypeError, PermissionError)):
+        return "argomento"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    return "interno"
+
+
 mcp = FastMCP(
     "nb1777",
     host=HOST,
@@ -60,7 +108,7 @@ mcp = FastMCP(
     # Canale involontario del canonico (issue #30, Veicolo A): le instructions
     # viaggiano nella risposta di initialize. Testo STATICO → non dipende
     # dall'auth nlm al boot; il numero di versione vivo lo dà il tool `canonico`.
-    instructions=canonical.declaration_text(),
+    instructions=canonical.declaration_text() + "\n\n" + ISTRUZIONI_ERRORI,
     transport_security=TransportSecuritySettings(
         # DNS-rebinding protection OFF: il server sta dietro il gateway su rete
         # Docker interna (non esposto ai browser). Il gateway inoltra
@@ -143,11 +191,27 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
 _tool_originale = mcp.tool
 
 
+def _con_codice(fn):
+    """L'involucro che FastMCP registra: lo stesso tool, con il codice davanti all'errore.
+    `functools.wraps` tiene firma e annotazioni (schema d'ingresso e d'uscita); il nome
+    nel modulo resta la funzione originale, che chi la chiama in Python usa come prima."""
+    @functools.wraps(fn)
+    async def avvolta(*a: Any, **k: Any) -> Any:
+        try:
+            return await fn(*a, **k)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise ToolError(f"[{codice_errore(exc)}] {exc}") from exc
+    return avvolta
+
+
 def _tool_annotato(*args, **kw):
     def applica(fn):
         titolo, hint = ANNOTAZIONI[fn.__name__]
-        return _tool_originale(*args, title=titolo,
-                               annotations=ToolAnnotations(title=titolo, **hint), **kw)(fn)
+        _tool_originale(*args, title=titolo,
+                        annotations=ToolAnnotations(title=titolo, **hint), **kw)(_con_codice(fn))
+        return fn
     return applica
 
 
@@ -166,9 +230,10 @@ AUTH_COOKIES = NLM_CFG / "profiles" / "default" / "cookies.json"
 def _check_auth_or_raise() -> None:
     """Solleva RuntimeError se auth nlm non disponibile."""
     if AUTH_FLAG.exists() or not AUTH_COOKIES.exists():
-        raise RuntimeError(
+        raise AuthAssente(
             "Auth NotebookLM mancante. Sul TUO PC: `uv tool install "
-            "notebooklm-mcp-cli --python 3.12 && nlm login`, poi "
+            "notebooklm-mcp-cli==0.15.4 --python 3.12 && nlm login` (se chiede «Protected or "
+            "plain file?» scegli il file), poi "
             "`cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` "
             "e carica il tar.gz su /admin/nlm del gateway."
         )
@@ -386,13 +451,13 @@ async def internal_nlm_profile(request: "Request") -> "JSONResponse":
 # ============================================================
 
 @mcp.tool()
-async def nb_list() -> list[dict]:
+async def nb_list() -> list[esiti.Notebook]:
     """Lista tutti i notebook visibili al profilo attivo."""
     return await _aio(core.nb_list)
 
 
 @mcp.tool()
-async def nb_get(notebook_id: str) -> dict:
+async def nb_get(notebook_id: str) -> esiti.NotebookDettaglio:
     """Dettagli di un singolo notebook."""
     return await _aio(core.nb_get, notebook_id)
 
@@ -425,7 +490,7 @@ def _conferma_o_errore(valore: str, azione: str, *ids: str) -> None:
 
 
 @mcp.tool()
-async def nb_delete(notebook_id: str, conferma: str = "") -> dict:
+async def nb_delete(notebook_id: str, conferma: str = "") -> esiti.Cancellazione:
     """Cancella un notebook in modo permanente, con tutte le sue fonti e gli artefatti.
 
     Due tempi (05/10/2026): senza `conferma` NON cancella, restituisce `anteprima` (cosa
@@ -454,7 +519,7 @@ async def nb_describe(notebook_id: str) -> str:
 # ============================================================
 
 @mcp.tool()
-async def source_list(notebook_id: str) -> list[dict]:
+async def source_list(notebook_id: str) -> list[esiti.Fonte]:
     """Lista tutte le fonti di un notebook."""
     return await _aio(core.source_list, notebook_id)
 
@@ -534,7 +599,7 @@ async def source_add_drive(notebook_id: str, document_id: str,
 
 
 @mcp.tool()
-async def source_upload_link(notebook_id: str, title: str = "") -> dict:
+async def source_upload_link(notebook_id: str, title: str = "") -> esiti.LinkCaricamento:
     """Un link per CARICARE un file dal proprio dispositivo come fonte del notebook: da
     claude.ai o dal telefono, dove `source_add_file` non arriva (legge un path sul server).
     Vale 15 minuti e UNA volta sola; notebook e titolo li fissi qui (vuoto = il nome del
@@ -549,7 +614,7 @@ async def source_upload_link(notebook_id: str, title: str = "") -> dict:
 
 
 @mcp.tool()
-async def source_delete(notebook_id: str, source_id: str, conferma: str = "") -> dict:
+async def source_delete(notebook_id: str, source_id: str, conferma: str = "") -> esiti.Cancellazione:
     """Elimina una fonte (irreversibile).
 
     Due tempi (05/10/2026): senza `conferma` NON cancella, restituisce `anteprima` (cosa
@@ -633,7 +698,7 @@ async def notebook_query(notebook_id: str, question: str,
                          source_ids: Optional[list[str]] = None,
                          conversation_id: Optional[str] = None,
                          verbose: bool = False,
-                         attesa_max: float = 25.0) -> dict:
+                         attesa_max: float = 25.0) -> esiti.Risposta:
     """Pone una domanda alla chat del notebook. Ritorna {answer, references,
     sources_used} in PROIEZIONE COMPATTA (#275): le references portano
     un'anteprima, il testo citato integrale arriva con verbose=True.
@@ -672,7 +737,7 @@ async def notebook_query(notebook_id: str, question: str,
 
 
 @mcp.tool()
-async def notebook_query_esito(query_id: str, attesa_max: float = 25.0) -> dict:
+async def notebook_query_esito(query_id: str, attesa_max: float = 25.0) -> esiti.Risposta:
     """Ritira una notebook_query che era tornata `in_corso`. Aspetta al massimo
     `attesa_max` secondi (default 25, minimo 1, tetto 270): ritorna la risposta (stessa forma di
     notebook_query), di nuovo {stato: "in_corso", …} se NotebookLM non ha ancora finito,
@@ -692,7 +757,7 @@ async def notebook_query_esito(query_id: str, attesa_max: float = 25.0) -> dict:
 
 
 @mcp.tool()
-async def lavoro_esito(job_id: str, attesa_max: float = 25.0) -> Any:
+async def lavoro_esito(job_id: str, attesa_max: float = 25.0) -> str | esiti.Lavoro:
     """Ritira un lavoro lungo tornato {stato: "in_corso", job_id} (source_add_*,
     studio_download, studio_create_all_9). Aspetta al massimo `attesa_max` secondi (default 25,
     tetto 270): ritorna il risultato del tool originale, di nuovo «in_corso», o il suo errore.
@@ -706,7 +771,7 @@ async def lavoro_esito(job_id: str, attesa_max: float = 25.0) -> Any:
 
 @mcp.tool()
 async def research_start(notebook_id: str, query: str, source: str = "web",
-                         mode: str = "fast") -> dict:
+                         mode: str = "fast") -> esiti.Ricerca:
     """Avvia una ricerca di fonti NUOVE su `query` (la «Discover» di Gemini Notebook). Non
     aggiunge niente al notebook: trova. source: web|drive; mode: fast (~30 s, ~10 fonti) o
     deep (~5 min, ~40 fonti e un report, solo web). Poi research_status (a ogni chiamata
@@ -715,7 +780,7 @@ async def research_start(notebook_id: str, query: str, source: str = "web",
 
 
 @mcp.tool()
-async def research_status(notebook_id: str, task_id: str = "", verbose: bool = False) -> dict:
+async def research_status(notebook_id: str, task_id: str = "", verbose: bool = False) -> esiti.Ricerca:
     """Stato di una ricerca: {status, task_id, sources_found, sources: [{index, title, url,
     tipo, cited}], report?, nota}. Una lettura sola, non aspetta: richiamalo finché status
     non è 'completed'. Subito dopo research_start può dire 'no_research' per qualche
@@ -727,7 +792,7 @@ async def research_status(notebook_id: str, task_id: str = "", verbose: bool = F
 @mcp.tool()
 async def research_import(notebook_id: str, task_id: str,
                           indices: Optional[list[int]] = None,
-                          cited_only: bool = False) -> dict:
+                          cited_only: bool = False) -> esiti.Ricerca:
     """Aggiunge al notebook le fonti trovate da una ricerca completata: tutte, quelle di
     `indices` (gli `index` di research_status), o con cited_only=True solo quelle citate
     dal report. Ritorna {imported_count, imported_sources, message}."""
@@ -736,7 +801,7 @@ async def research_import(notebook_id: str, task_id: str,
 
 
 @mcp.tool()
-async def note_list(notebook_id: str, verbose: bool = False) -> list[dict]:
+async def note_list(notebook_id: str, verbose: bool = False) -> list[esiti.Nota]:
     """Le note scritte nel notebook (non le fonti): [{id, title, preview}]; verbose=True
     aggiunge il testo intero (`content`)."""
     return await _aio(core.note_list, notebook_id, verbose=verbose)
@@ -744,7 +809,7 @@ async def note_list(notebook_id: str, verbose: bool = False) -> list[dict]:
 
 @mcp.tool()
 async def note_save(notebook_id: str, content: str = "", title: str = "",
-                    note_id: str = "") -> dict:
+                    note_id: str = "") -> esiti.NotaSalvata:
     """Scrive una nota nel notebook. Senza note_id la crea (serve content); con note_id la
     modifica (cambia content e/o title, quelli lasciati vuoti restano come sono). Ritorna
     {note_id, creata}."""
@@ -759,7 +824,7 @@ async def note_save(notebook_id: str, content: str = "", title: str = "",
 
 
 @mcp.tool()
-async def note_delete(notebook_id: str, note_id: str, conferma: str = "") -> dict:
+async def note_delete(notebook_id: str, note_id: str, conferma: str = "") -> esiti.Cancellazione:
     """Cancella una nota in modo permanente. Due tempi, come le altre cancellazioni: senza
     `conferma` NON cancella e restituisce `anteprima` e un gettone valido 5 minuti;
     richiamalo con gli stessi id e `conferma=<gettone>`. Ritorna {cancellato, …}."""
@@ -778,7 +843,7 @@ async def note_delete(notebook_id: str, note_id: str, conferma: str = "") -> dic
 
 @mcp.tool()
 async def chat_cronologia(notebook_id: str, conversation_id: str = "",
-                          max_chars: int = 0) -> dict:
+                          max_chars: int = 0) -> esiti.Cronologia:
     """La cronologia della chat del notebook (le domande fatte a Gemini Notebook, anche da
     altri client). Senza conversation_id: {sessions: [{conversation_id, turn_count,
     preview, is_active}]}. Con l'id: {transcript: [{turn, query, answer}]}; max_chars (0 =
@@ -899,7 +964,7 @@ async def studio_create_all_9(notebook_id: str,
                               report_format: str = "Study Guide",
                               wait: bool = False,
                               skip: Optional[list[str]] = None,
-                              attesa_max: float = 25.0) -> dict:
+                              attesa_max: float = 25.0) -> esiti.StudioTutti:
     """Crea tutti e 9 gli artefatti in sequenza. Ritorna {tipo: esito}, dove
     esito è l'artifact_id, "ERROR: <motivo>" se quel tipo è fallito (gli altri
     proseguono) o "SKIPPED" se era in `skip`.
@@ -927,7 +992,7 @@ async def studio_create_all_9(notebook_id: str,
 # ============================================================
 
 @mcp.tool()
-async def studio_list(notebook_id: str, verbose: bool = False) -> list[dict]:
+async def studio_list(notebook_id: str, verbose: bool = False) -> list[esiti.Artefatto]:
     """Lista gli artefatti studio di un notebook.
 
     Default COMPATTO: per ognuno solo id/type/status/label (i primi 80 char del
@@ -937,7 +1002,7 @@ async def studio_list(notebook_id: str, verbose: bool = False) -> list[dict]:
 
 
 @mcp.tool()
-async def studio_status(notebook_id: str, artifact_id: str, verbose: bool = False) -> dict:
+async def studio_status(notebook_id: str, artifact_id: str, verbose: bool = False) -> esiti.Artefatto:
     """Stato di un singolo artefatto (id/type/status/label). verbose=True per
     l'artefatto pieno col focus."""
     return await _aio(core.studio_status, notebook_id, artifact_id, verbose=verbose)
@@ -945,7 +1010,7 @@ async def studio_status(notebook_id: str, artifact_id: str, verbose: bool = Fals
 
 @mcp.tool()
 async def studio_wait(notebook_id: str, artifact_id: str,
-                      poll_interval: float = 5.0, timeout: float = 25.0) -> dict:
+                      poll_interval: float = 5.0, timeout: float = 25.0) -> esiti.ArtefattoAttesa:
     """Aspetta che un artefatto studio sia pronto, al massimo `timeout` secondi (tetto 25).
     Se non è pronto restituisce l'ultimo stato con `in_corso: true`: richiamalo. Il tetto
     esiste perché da claude.ai una chiamata oltre ~30 s cade."""
@@ -955,7 +1020,7 @@ async def studio_wait(notebook_id: str, artifact_id: str,
 
 
 @mcp.tool()
-async def studio_delete(notebook_id: str, artifact_id: str, conferma: str = "") -> dict:
+async def studio_delete(notebook_id: str, artifact_id: str, conferma: str = "") -> esiti.Cancellazione:
     """Cancella un artefatto studio (irreversibile).
 
     Due tempi (05/10/2026): senza `conferma` NON cancella, restituisce `anteprima` (cosa
@@ -1005,7 +1070,7 @@ def _scarica_e_descrivi(kind: str, notebook_id: str, output_path: str,
 
 @mcp.tool()
 async def studio_download(kind: str, notebook_id: str, output_path: str,
-                          artifact_id: Optional[str] = None, attesa_max: float = 25.0) -> dict:
+                          artifact_id: Optional[str] = None, attesa_max: float = 25.0) -> esiti.Scaricato:
     """Scarica un artefatto. kind: audio|video|slides|mindmap|infographic|data_table|report|quiz|flashcards.
 
     `output_path` vale come NOME del file, non come destinazione: il file nasce sul
@@ -1046,7 +1111,7 @@ async def studio_export_to_sheets(notebook_id: str, artifact_id: str,
 # ============================================================
 
 @mcp.tool()
-async def usage_get() -> dict:
+async def usage_get() -> esiti.Quota:
     """La quota di Gemini Notebook: quanto resta nelle due finestre (una breve che scorre e
     una settimanale), con l'ora in cui ciascuna si azzera, e il piano. Chiamala quando i
     tool cominciano a fallire senza un errore di autenticazione: dice se è la quota.
@@ -1055,7 +1120,7 @@ async def usage_get() -> dict:
 
 
 @mcp.tool()
-async def doctor() -> dict:
+async def doctor() -> esiti.Doctor:
     """Diagnostica: nlm reachable + count notebook + canonico del blocco memoria + quota
     (`quota`, come usage_get; un errore lì non fa fallire il resto)."""
     d = await _aio(core.doctor)
@@ -1070,7 +1135,7 @@ async def doctor() -> dict:
 
 
 @mcp.tool()
-async def canonico(full: bool = False, taglio: str = "pieno") -> dict:
+async def canonico(full: bool = False, taglio: str = "pieno") -> esiti.Canonico:
     """MEMORIA 1777 (canale B) — DICHIARA il canonico del blocco di memoria: la
     versione «buona» con cui una sessione dovrebbe allinearsi. Da 0.44.0 è un FILE
     del prodotto (neutro, versionato con vps1777), non più un notebook.
@@ -1090,7 +1155,7 @@ async def canonico(full: bool = False, taglio: str = "pieno") -> dict:
 
 
 @mcp.tool()
-async def memoria_check(versione_portata: str) -> dict:
+async def memoria_check(versione_portata: str) -> esiti.MemoriaCheck:
     """MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che
     porti (es. 'v2.2') col canonico attuale. Ritorna `{canonico, data, stale,
     delta}`, più `portata` (la tua versione normalizzata) e, se sei vecchio, le
@@ -1107,7 +1172,7 @@ async def memoria_check(versione_portata: str) -> dict:
 
 
 @mcp.tool()
-async def memoria_ack(versione: str) -> dict:
+async def memoria_ack(versione: str) -> esiti.MemoriaAck:
     """MEMORIA 1777 — l'ACK: registra che le superfici cloud (claude.ai: preferenze
     e istruzioni dei Project) sono state aggiornate a `versione`, e spegne il
     promemoria Telegram fino al prossimo bump del canonico. È la stessa cosa del

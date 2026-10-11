@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **nb1777: ogni tool dichiara la forma della sua risposta (P8).** 23 tool su 49 non avevano uno
+  schema d'uscita e 4 liste davano oggetti generici; i modelli stanno in `app/esiti.py`. Sono
+  `BaseModel` con `extra="allow"` e tipi larghi sui campi di nlm, perché un `TypedDict` in FastMCP
+  1.30 butta le chiavi non dichiarate (provato). Il testo delle risposte non cambia.
+- **nb1777: ogni errore porta un codice stabile (P8).** `[auth_assente]`, `[auth_scaduta]`, `[rete]`,
+  `[timeout]`, `[quota]`, `[argomento]`, `[nlm]` o `[interno]`, in testa al messaggio, e
+  l'elenco nelle `instructions` del server: il bot, la Mini App o un modello non devono più
+  indovinare dal testo se è la sessione Google o un id sbagliato.
+
+### Corretto
+- **nb1777: il messaggio di «auth mancante» dice la versione di nlm** (`==0.15.4`) e di scegliere
+  il login «in un file» quando `nlm login` chiede se cifrarlo.
+
 ## [0.81.1] — 2026-10-11
 
 **Il token del bot non finisce più nel log; search_ibrida resta nel suo budget.**
