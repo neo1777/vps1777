@@ -137,3 +137,26 @@ def test_il_caricamento_monouso_rispetta_il_lucchetto_del_notebook():
         async with lock:
             assert lavori.lucchetto("nb-1") is lock
     asyncio.run(go())
+
+
+def test_i_30_minuti_contano_dalla_fine_non_dalla_partenza():
+    """12/10/2026: un lavoro durato più di TTL_S non si butta appena finito. Prima la soglia
+    si contava dalla partenza: il censimento da 40 minuti perdeva il risultato al primo
+    _pulisci di un altro lavoro. (L'orologio non si ferma: è lo stesso di asyncio.)"""
+    async def go():
+        jid = lavori.avvia("lungo", ("lungo",), "nb-a", lambda: "fatto")
+        await asyncio.sleep(0.05)
+        voce = lavori._LAVORI[jid]
+        assert "finito" in voce, "la fine del lavoro va segnata"
+        voce["nato"] -= lavori.TTL_S + 600            # partito 40 minuti fa...
+        voce["finito"] = time.monotonic() - 60         # ...finito un minuto fa
+        lavori.avvia("altro", ("altro",), "nb-b", lambda: "x")   # chiama _pulisci
+        assert jid in lavori._LAVORI, "il risultato di un lavoro appena finito non si butta"
+        assert await lavori.aspetta(jid, 1) == "fatto"
+        jid2 = lavori.avvia("vecchio", ("vecchio",), "nb-c", lambda: "y")
+        await asyncio.sleep(0.05)
+        lavori._LAVORI[jid2]["finito"] = time.monotonic() - lavori.TTL_S - 1
+        lavori.avvia("ancora", ("ancora",), "nb-d", lambda: "z")
+        assert jid2 not in lavori._LAVORI, "finito da più di 30 minuti e mai ritirato: si butta"
+
+    asyncio.run(go())

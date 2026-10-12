@@ -20,7 +20,7 @@ import uuid
 from typing import Any, Callable
 
 POSTI = 3
-TTL_S = 1800.0                 # un risultato non ritirato in 30 minuti si butta
+TTL_S = 1800.0                 # un risultato non ritirato 30 minuti dopo la FINE si butta
 ATTESA_MAX_TETTO = 270.0
 
 _LAVORI: dict[str, dict[str, Any]] = {}       # job_id → {task, nato, nome}
@@ -48,9 +48,13 @@ def _dimentica(jid: str) -> None:
 
 
 def _pulisci() -> None:
+    # I 30 minuti contano da quando il lavoro è FINITO, non da quando è partito (12/10/2026):
+    # contati dalla partenza, un censimento da 40 minuti perdeva il risultato appena un altro
+    # lavoro chiamava _pulisci, e rilanciarlo lo faceva ripartire da capo.
     ora = time.monotonic()
     for jid, voce in list(_LAVORI.items()):
-        if voce["task"].done() and ora - voce["nato"] > TTL_S:
+        finito = voce.get("finito")
+        if voce["task"].done() and finito is not None and ora - finito > TTL_S:
             _dimentica(jid)
 
 
@@ -68,7 +72,13 @@ def avvia(nome: str, chiave: tuple, nb_id: str, fn: Callable[..., Any], *args, *
                 return await asyncio.to_thread(fn, *args, **kw)
 
     jid = uuid.uuid4().hex[:12]
-    _LAVORI[jid] = {"task": asyncio.create_task(corsa()), "nato": time.monotonic(), "nome": nome}
+    task = asyncio.create_task(corsa())
+    _LAVORI[jid] = {"task": task, "nato": time.monotonic(), "nome": nome}
+
+    def segna_fine(_t, voce=_LAVORI[jid]) -> None:
+        voce["finito"] = time.monotonic()
+
+    task.add_done_callback(segna_fine)
     _PER_CHIAVE[chiave] = jid
     return jid
 

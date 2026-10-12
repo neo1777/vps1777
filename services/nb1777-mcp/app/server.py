@@ -865,10 +865,9 @@ async def lavoro_esito(job_id: str, attesa_max: float = 25.0) -> esiti.Lavoro:
     source_sync_drive, studio_download, studio_create_all_9, nb_export, censimento. Aspetta al
     massimo `attesa_max` secondi (default 25, tetto 270): ritorna il risultato del tool
     originale, di nuovo «in_corso», o il suo errore.
-    Un job_id sconosciuto è un errore: già ritirato, perso a un riavvio, o scaduto. I 30
-    minuti contano dall'AVVIO del lavoro, non dalla fine: un lavoro durato più di 30 minuti
-    sparisce alla prima altra chiamata lunga dopo la fine, quindi ritiralo appena finisce.
-    In quel caso rilanciare la stessa chiamata non si aggancia: la fa ripartire."""
+    Un job_id sconosciuto è un errore: già ritirato, perso a un riavvio, o scaduto: un
+    risultato resta ritirabile per 30 minuti dalla FINE del lavoro (dalla 0.87.0; prima
+    contavano dall'avvio, e un lavoro di più di 30 minuti spariva appena finito)."""
     r = await _esito("lavoro_esito", lavori.aspetta(job_id, attesa_max))
     return r if isinstance(r, dict) else {"stato": "fatto", "risultato": r}
 

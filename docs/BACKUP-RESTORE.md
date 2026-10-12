@@ -17,11 +17,10 @@ separati per natura del dato — perché il 99,99% del peso è rigenerabile e lo
 > **insostituibile**. Si pagavano 9,7 GB a notte per proteggere 250 KB (≈ 70 GB a regime
 > su un disco da 118). Quello che il re-ingest **non** rigenera sono
 > le schede scritte a mano. La `description` (`set_description`) viaggia per questo ogni
-> notte nel core, in `descrizioni/<db>.txt`. Il **`ruolo`** (`set_ruolo`, dal #278) no:
-> sta solo dentro il DB, quindi torna con un restore del backup archivio ma non con un
-> re-ingest dalle fonti. Dopo un re-ingest va ridichiarato a mano, e finché non lo fai un
-> DB che era `riservato` torna `non dichiarato` ed entra nel perimetro di default della
-> ricerca. Decisione dell'owner: *«basta n, n-1 per paranoia… dobbiamo farci stare quel che
+> notte nel core, in `descrizioni/<db>.txt`. Dalla 0.87.0 anche il **`ruolo`**
+> (`set_ruolo`, dal #278), in `ruoli/<db>.txt`: prima stava solo dentro il DB, e dopo un
+> re-ingest dalle fonti un DB `riservato` tornava `non dichiarato` ed entrava nel perimetro
+> di default della ricerca. Decisione dell'owner: *«basta n, n-1 per paranoia… dobbiamo farci stare quel che
 > serve»*. Fra un backup archivio e l'altro la rete è doppia: le fonti fuori dalla VPS +
 > lo snapshot pre-update (`backups/pre-update/`, in chiaro, n e n-1).
 
@@ -174,8 +173,10 @@ Step:
 
 Se l'archivio lo **rigeneri dalle fonti** invece di ripristinarlo (re-ingest dei bundle),
 le `description` dei DB le ritrovi nel core in `descrizioni/<db>.txt` — si riapplicano con
-`set_description` dal connector, o dal pannello. Il `ruolo` dei DB invece nel core non
-c'è: va ridichiarato con `set_ruolo` dal connector (il pannello lo mostra, non lo scrive).
+`set_description` dal connector, o dal pannello. Il `ruolo` lo ritrovi in `ruoli/<db>.txt`
+(dalla 0.87.0): si riapplica con `set_ruolo` dal connector (il pannello lo mostra, non lo
+scrive). **Fallo prima di cercare**: finché non è riapplicato, un DB riservato è nel
+perimetro di default.
 
 Default: interattivo (chiede conferma). Flag:
 

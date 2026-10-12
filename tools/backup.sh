@@ -32,6 +32,7 @@
 #   - i volumi Docker del progetto TRANNE $VOLUMI_ARCHIVIO (gateway-data,
 #     gateway-uploads, nlm-auth, nlm-artifacts, caddy-* se attivi…)
 #   - `descrizioni/<db>.txt` — la `description` di ogni DB dell'archivio
+#   - `ruoli/<db>.txt` — il `ruolo` dei DB che ne hanno uno (dal 12/10/2026)
 #   - Cartella `secrets/` (file in chiaro, age cifra l'archivio intero)
 #   - `.env`, `compose.yaml`, `compose.*.yaml`, `ingress/`
 # Cosa include l'ARCHIVIO: i soli volumi $VOLUMI_ARCHIVIO (default: archive-data).
@@ -326,8 +327,12 @@ ok "Volumi dumpati"
 # backup-container-setup.sh). Contesto host: il volume non è leggibile senza
 # root e sqlite3 di norma manca ⇒ si DICE, e restano quelle dentro l'ultimo
 # backup archivio (al più ARCHIVIO_OGNI_GIORNI giorni indietro).
-mkdir -p "$TMP/descrizioni"
+# E il `ruolo` (#278, set_ruolo): scritto a mano come la descrizione, e decide il perimetro
+# delle ricerche di default. Senza export, dopo un restore-da-fonti un DB «riservato» tornava
+# «non dichiarato» ed entrava nelle ricerche (trovato dalla verifica della doc, 12/10/2026).
+mkdir -p "$TMP/descrizioni" "$TMP/ruoli"
 n_descr=0
+n_ruoli=0
 for logico in $VOLUMI_ARCHIVIO; do
   dbdir="${BACKUP_VOLUMES_DIR:-}/$logico/db"
   if [ -z "${BACKUP_VOLUMES_DIR:-}" ] || [ ! -d "$dbdir" ]; then continue; fi
@@ -340,10 +345,18 @@ for logico in $VOLUMI_ARCHIVIO; do
     else
       warn "  description non leggibile: $(basename "$db")"
     fi
+    if sqlite3 -readonly "$db" "SELECT value FROM meta WHERE key='ruolo'" \
+         > "$TMP/ruoli/$(basename "$db" .db).txt" 2>/dev/null; then
+      if [ -s "$TMP/ruoli/$(basename "$db" .db).txt" ]; then
+        n_ruoli=$((n_ruoli + 1))
+      else
+        rm -f "$TMP/ruoli/$(basename "$db" .db).txt"   # nessun ruolo dichiarato: niente file
+      fi
+    fi
   done
 done
 if [ "$n_descr" -gt 0 ]; then
-  ok "description di $n_descr DB esportate (descrizioni/<db>.txt nel core)"
+  ok "description di $n_descr DB esportate (descrizioni/<db>.txt nel core), ruolo di $n_ruoli (ruoli/<db>.txt)"
 else
   warn "description dei DB NON esportate (volume non leggibile in questo contesto o sqlite3 assente): restano quelle dentro l'ultimo backup archivio"
 fi
@@ -373,7 +386,7 @@ manifest() {  # <tier> <cosa contiene> → stdout
   echo "host: $(hostname)"
   echo "docker: $(command -v docker >/dev/null && docker --version || echo 'n/d (contesto container)')"
 }
-manifest core "volumi (tranne $VOLUMI_ARCHIVIO) + descrizioni dei DB + config + secrets" > "$TMP/MANIFEST.txt"
+manifest core "volumi (tranne $VOLUMI_ARCHIVIO) + descrizioni e ruoli dei DB + config + secrets" > "$TMP/MANIFEST.txt"
 if [ "$FA_ARCHIVIO" -eq 1 ]; then
   manifest archivio "volumi: $VOLUMI_ARCHIVIO" > "$TMP_ARCHIVIO/MANIFEST.txt"
 fi

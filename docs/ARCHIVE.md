@@ -30,9 +30,9 @@ i token MCP non entra. Il DB su disco è **in chiaro**: non c'è cifratura del
 contenuto.
 
 **In uscita c'è una redazione parziale, e va detta della dimensione giusta**
-(dal 02/08/2026, attiva di default; si spegne solo con `ARCHIVE_REDACT=0`
-nell'ambiente del servizio `archive-mcp`, che `compose.yaml` non prende dal `.env`: serve
-un override di compose). Ogni risposta di ogni tool passa da un mascheramento che
+(dal 02/08/2026, attiva di default; si spegne solo con `ARCHIVE_REDACT=0` nel `.env`,
+che `compose.yaml` passa ad `archive-mcp` dalla 0.87.0: prima non la passava, e serviva un
+override di compose). Ogni risposta di ogni tool passa da un mascheramento che
 copre:
 
 - gli **identificatori in formato riconoscibile** — email e numeri di telefono —
