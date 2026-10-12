@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.86.0] — 2026-10-12
+
+**Il bot Telegram ha un comando solo, /start: tutto il resto sta nel pannello.**
+
 ### Rimosso
 - **Il bot Telegram ha un comando solo: `/start`.** Per scelta di Neo dopo la prova dal telefono
   (12/10/2026: «col pannello mi pare sia meglio»), via `/aiuto`, `/pannello` (doppione del bottone
