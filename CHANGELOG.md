@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.88.0] — 2026-10-12
+
+**Un lucchetto comune per chi scrive l'archivio, `archive-ingest` fuori dal gateway, l'installer che mostra l'URL vero con Caddy e Cloudflare, e gli errori che dicono di chi è la colpa.**
+
 ### Corretto
 - **Un lucchetto comune per chi scrive l'archivio.** La coda d'indicizzazione e l'aggiornamento
   notturno dell'indice potevano girare insieme sullo stesso DB, sommando i tetti di memoria (2g +
