@@ -474,6 +474,11 @@ lancia `vps1777 indice-notturno`, che:
   sotto-lotti da 4. Se sfora la memoria, l'OOM killer del container uccide il job e non
   archive-mcp: l'indice servito resta quello di prima e il lavoro fatto sta nel
   `.parziale`;
+- aggiorna ogni DB col **lucchetto dell'archivio** in mano (`var/archivio.lock`, lo stesso
+  della coda d'indicizzazione e dei comandi `archive-*`): mai insieme a un ingest, così il
+  costruttore non legge un DB mentre qualcuno ci scrive e i due tetti (1300m e 2g) non si
+  sommano. Se un ingest lo tiene, aspetta; se l'archivio resta occupato più di 2 ore, i DB
+  rimasti li prende la notte dopo (non è un errore);
 - **non fa mai una prima costruzione**: sulla VPS, con una CPU, sarebbero giorni. Quella
   si fa sul PC («Attivare la ricerca per senso»). Un indice che il costruttore rifiuta
   (del prototipo, senza registro, o costruito con un altro modello) resta com'è, e il

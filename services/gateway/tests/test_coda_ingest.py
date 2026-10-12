@@ -145,3 +145,21 @@ def test_main_stampa_una_riga_json(posto, capsys, monkeypatch):
     assert iw.main(["coda", "--id", jid, "--db", "note", "--suffisso", ".md"]) == 0
     ultima = capsys.readouterr().out.strip().splitlines()[-1]
     assert json.loads(ultima)["righe"] >= 1
+
+
+def test_un_lavoro_che_aspetta_l_archivio_non_e_fermo(posto):
+    """La CLI aspetta il lucchetto dell'archivio (l'indice notturno sta lavorando) e lo
+    segna in ESITI/attesa.json: la pagina non deve dire «nessuno l'ha preso, guarda la
+    unit» di un lavoro che aspetta solo il suo turno."""
+    ob, db_dir = posto
+    jid = ci.accoda(ob, db_dir, _tmp(db_dir), db="note", suffisso=".md", nome_file="n.md")
+    (ob / ci.ESITI).mkdir()
+    (ob / ci.ESITI / ci.ATTESA).write_text(json.dumps({"chi": "indice-notturno"}))
+    dopo = time.time() + ci.FERMO_DOPO_S + 5
+    (lav,) = ci.lavori(ob, adesso=dopo)
+    assert lav["id"] == jid and lav["stato"] == "in-coda"
+    assert lav["fermo"] is False and lav["attesa"] == "indice-notturno"
+    assert ci.qualcuno_aperto([lav]), "la pagina continua a ricaricarsi"
+    # un segno vecchio (la CLI interrotta a metà) non copre più niente
+    (lav,) = ci.lavori(ob, adesso=time.time() + ci.ATTESA_VALIDA_S + 5)
+    assert lav["fermo"] is True and "attesa" not in lav

@@ -67,9 +67,9 @@ ISTRUZIONI_ERRORI = (
     "[auth_assente] (nessun profilo Google sulla VPS: va caricato da /admin/nlm), "
     "[auth_scaduta] (la sessione Google è scaduta: stesso rimedio), [rete], [timeout], "
     "[quota] (la quota di Gemini Notebook è finita: usage_get), [argomento] (un id, un "
-    "gettone o un valore sbagliato: correggilo e riprova), [nlm] (un errore della CLI nlm, "
-    "oppure un valore che nb1777 ha rifiutato prima di chiamarla: se il messaggio dice cosa "
-    "vale, correggi e riprova), [interno]. Su [auth_*] e [quota] riprovare non serve.")
+    "gettone o un valore sbagliato, anche rifiutato prima di chiamare NotebookLM: "
+    "correggilo e riprova), [nlm] (un errore della CLI nlm), [interno]. Su [auth_*] e "
+    "[quota] riprovare non serve.")
 
 
 class AuthAssente(RuntimeError):
@@ -81,9 +81,17 @@ _QUOTA = ("quota", "rate limit", "resource_exhausted", "too many requests")
 
 def codice_errore(exc: BaseException) -> str:
     """Il codice stabile di un'eccezione (P8). L'ordine conta: l'auth scaduta è anche un
-    NLMError, il timeout di `_run` è un NLMError col suo testo."""
+    NLMError, il timeout di `_run` è un NLMError col suo testo, e un argomento rifiutato
+    prima di chiamare nlm è un NLMError per chi lo prende così ma non è di NotebookLM (così
+    l'attesa scaduta di studio_wait e il guasto del server: hanno un tipo loro)."""
     if isinstance(exc, AuthAssente):
         return "auth_assente"
+    if isinstance(exc, core.ArgomentoNonValido):
+        return "argomento"
+    if isinstance(exc, core.AttesaScaduta):
+        return "timeout"
+    if isinstance(exc, core.GuastoDelServer):
+        return "interno"
     if isinstance(exc, core.NLMAuthError):
         return "auth_scaduta"
     if isinstance(exc, core.NLMError):
@@ -1043,7 +1051,7 @@ async def studio_create_report(notebook_id: str,
                                language: str = "it",
                                source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
     """Crea Report. format: 'Briefing Doc'|'Study Guide'|'Blog Post'|'Create Your Own'
-    (quest'ultimo vuole `prompt`: senza è un errore [nlm])."""
+    (quest'ultimo vuole `prompt`: senza è un errore [argomento])."""
     return _creato("report", notebook_id, await _aio(core.studio_create_report, notebook_id, format=format, prompt=prompt,
                       language=language, source_ids=source_ids))
 

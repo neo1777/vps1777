@@ -34,6 +34,7 @@ import json
 from datetime import datetime, timezone
 import os
 import secrets as pysecrets
+import sys
 import time
 from pathlib import Path
 
@@ -143,6 +144,15 @@ def _mcp_error(exc: MCPCallError) -> JSONResponse:
 _AUTH_LIMIT = RateLimiter(max_calls=20, window_s=300)  # /app/auth: 20 ogni 5 min
 
 
+def _init_data_solo_scaduta(init_data: str, bot_token: str, webapp_secret: str) -> bool:
+    """Una initData appena rifiutata lo era SOLO per l'età? Si riverifica la firma
+    senza limite d'età: se allora passa, la firma è giusta e auth_date è vecchia.
+    auth_date assente/0 resta un rifiuto anche così → conta come firma, non come
+    scadenza (non c'è nessuna sessione da riaprire, c'è un'initData malformata)."""
+    return verify_init_data(init_data, bot_token, webapp_secret_hex=webapp_secret,
+                            max_age_s=sys.maxsize) is not None
+
+
 async def miniapp_auth(request: Request) -> Response:
     """POST /app/auth — il frontend manda initData, riceve JWT typ=miniapp.
     Owner-only: solo l'utente Telegram configurato ottiene un token."""
@@ -169,9 +179,20 @@ async def miniapp_auth(request: Request) -> Response:
     init_data = body.get("init_data", "")
     parsed = verify_init_data(init_data, bot_token, webapp_secret_hex=webapp_secret)
     if not parsed:
-        # firma non valida O initData più vecchia di INIT_DATA_MAX_AGE_S (12h, H27)
-        audit({"event": "miniapp_auth_fail", "ip": ip})
-        return JSONResponse({"error": "invalid_init_data"}, status_code=401)
+        # firma non valida O initData più vecchia di INIT_DATA_MAX_AGE_S (12h, H27).
+        # 🔴 Le due cause rispondevano con lo stesso 401, e la pagina diceva sempre
+        #   «sessione scaduta»: anche quando la firma non tornava perché la chiave della
+        #   Mini App era rimasta quella del token VECCHIO — e riaprire il pannello, unico
+        #   consiglio dato, non poteva servire. Ora `error` distingue: `init_data_expired`
+        #   (firma giusta, solo vecchia: si riapre dal bot) da `invalid_init_data` (firma
+        #   che non torna con la chiave del gateway). Dire «scaduta» rivela solo che la
+        #   firma è buona, cioè che chi chiede ha già avuto quell'initData da Telegram.
+        scaduta = _init_data_solo_scaduta(init_data, bot_token, webapp_secret)
+        # `reason` e non un campo nuovo: è già nell'allowlist di audit.py (_CHIAVI_NOTE).
+        audit({"event": "miniapp_auth_fail", "ip": ip,
+               "reason": "scaduta" if scaduta else "firma"})
+        return JSONResponse({"error": "init_data_expired" if scaduta else "invalid_init_data"},
+                            status_code=401)
     try:
         user = json.loads(parsed.get("user", "{}"))
     except json.JSONDecodeError:
@@ -761,7 +782,12 @@ function authenticate(){
     body: JSON.stringify({init_data: TG.initData})
   }).then(function(r){
     if (r.status===403) throw new Error('not_owner');
-    if (!r.ok) throw new Error('auth_'+r.status);
+    // La causa è il campo `error` della risposta (codice stabile, vedi miniapp_auth):
+    // 401 e 503 hanno ciascuno due cause con rimedi opposti, e il solo status non le
+    // separa. Se il corpo non si legge (un proxy davanti), resta lo status.
+    if (!r.ok) return r.json().catch(function(){ return {}; }).then(function(d){
+      throw new Error('auth_'+((d && d.error) || r.status));
+    });
     return r.json();
   }).then(function(a){ S.token=a.access_token; S.user=a.user; showWho(); return a; });
 }
@@ -1289,17 +1315,37 @@ function err(e){
   var m=String((e&&e.message)||e);
   if (m==='not_owner') return 'Questo account Telegram non è l\'owner del gateway.';
   if (m==='no_telegram') return 'Apri dal bot Telegram.';
+  // Una voce per ogni causa che /app/auth dichiara in `error` (il presidio è
+  // tests/test_miniapp_auth_cause.py: un codice nuovo lato server senza la sua
+  // frase qui fa diventare rosso il test).
   // initData oltre la finestra di 12h (H27): non è un bug, è la scadenza. La
   // pagina non può rinnovarla da sola — solo Telegram ne emette una nuova.
-  if (m==='auth_401') return 'Sessione Telegram scaduta (12h). Chiudi e riapri il '+
-    'pannello dal bot per rientrare.';
-  // 503 da /app/auth in due casi (owner_not_configured, bot_token_not_configured):
-  // fail-closed (H1/H27), nessun token. Qui si guarda solo lo status, quindi si
-  // nominano entrambe le cause.
-  if (m==='auth_503') return 'Il gateway non può emettere l\'accesso: manca '+
+  if (m==='auth_init_data_expired') return 'Sessione Telegram scaduta (12h). Chiudi e '+
+    'riapri il pannello dal bot per rientrare.';
+  // Firma che non torna: riaprire NON basta se la chiave del gateway è rimasta
+  // quella del token vecchio (token cambiato a mano, senza riderivarla).
+  if (m==='auth_invalid_init_data') return 'Il gateway non riconosce la firma di '+
+    'Telegram. Se hai cambiato il token del bot, riallinea la chiave della Mini App '+
+    'sul server: tools/rotate-secret.sh telegram_bot_token. Altrimenti chiudi e '+
+    'riapri il pannello dal bot.';
+  // 503: fail-closed (H1/H27), nessun token finché la configurazione non c'è.
+  if (m==='auth_owner_not_configured') return 'Il bot non è configurato: manca '+
+    'TELEGRAM_OWNER_ID nel .env del server. Impostalo col tuo id Telegram e ricrea '+
+    'gateway e nb1777-bot (un docker compose restart non rilegge il .env): vedi '+
+    'docs/TROUBLESHOOTING.md, «Ricreare il gateway dopo un cambio del .env».';
+  if (m==='auth_bot_token_not_configured') return 'Il gateway non ha la chiave della '+
+    'Mini App (secrets/telegram_webapp_secret.txt): la rideriva dal token, sul server, '+
+    'tools/rotate-secret.sh telegram_bot_token.';
+  if (m==='auth_rate_limited') return 'Troppi tentativi di accesso: riprova fra '+
+    'qualche minuto.';
+  // Corpo illeggibile (solo lo status) o un codice senza frase: almeno il codice.
+  if (m==='auth_401') return 'Accesso rifiutato (401). Chiudi e riapri il pannello '+
+    'dal bot; se resta, vedi docs/TROUBLESHOOTING.md.';
+  if (m==='auth_503') return 'Il gateway non può emettere l\'accesso (503): manca '+
     'TELEGRAM_OWNER_ID nel .env oppure la chiave della Mini App '+
-    '(secrets/telegram_webapp_secret.txt: la rideriva '+
-    'tools/rotate-secret.sh telegram_bot_token).';
+    '(tools/rotate-secret.sh telegram_bot_token).';
+  if (m.indexOf('auth_')===0) return 'Accesso al pannello non riuscito ('+m.slice(5)+
+    '). Chiudi e riapri il pannello dal bot.';
   return m;
 }
 

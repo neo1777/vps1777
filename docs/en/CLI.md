@@ -191,9 +191,15 @@ vps1777 bootstrap --bundle /tmp/vps1777-bundle --yes   # bundle estratto altrove
 Indexes a file into the search archive. The extension picks the route:
 
 - **text files** (`.md` `.txt` `.markdown` `.rst` `.log` `.csv` `.json` `.jsonl`) →
-  **straight to the gateway's indexer**, without NotebookLM;
+  **straight to the indexer**, without NotebookLM (`.markdown`, `.rst`, `.log` and `.csv`
+  reach the indexer as `.txt`);
 - **everything else** (scanned PDFs, photos of documents…) → **going through NotebookLM**
   (multimodal/OCR reading). ⚠️ The file is sent to Google.
+
+In both cases the indexing is done by the `ingest` compose service (2g memory limit), as
+for the `/admin/archive` queue: the file goes into the archive volume and the gateway only
+passes it along. Up to 0.87.0 the gateway did the indexing, and a large file could get it
+killed by its 512m cap. The job takes the archive lock (see `ingest-coda`).
 
 For the normal formats uploaded from the browser (zip/jsonl/md/pdf-with-text) there is
 also the gateway's `/admin/archive` page ([ARCHIVE.md](ARCHIVE.md)).
@@ -215,7 +221,8 @@ vps1777 archive-ingest --artefatto podcast.m4a --db podcast-studio  # dallo Stud
 
 Re-classifies the `voice` column (whose voice speaks in the content) on the
 archive DBs, using the current heuristic. **Dry-run by default**: it prints the
-delta and touches nothing; it writes only with `--scrivi`.
+delta and touches nothing; it writes only with `--scrivi`. Even in dry-run it takes the
+archive lock, DB by DB: if the queue or the nightly index is working, it waits its turn.
 
 ```bash
 vps1777 archive-retag                     # anteprima su tutti i DB
@@ -246,6 +253,11 @@ or turning it on and off. The builder runs in the `indice-notturno` compose serv
 (memory limit 1300m, one CPU, no network). It never does a first build. Details and
 costs: [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md).
 
+Each DB is updated holding the archive lock (`var/archivio.lock`), so never together with
+an ingest: if a queue job holds it, the round waits. If the archive stays busy for more
+than 2 hours, the remaining DBs are taken by the next night, and the wait does not count
+as an error.
+
 ```bash
 vps1777 indice-notturno --abilita          # accende il timer (opt-in)
 vps1777 indice-notturno --disabilita       # lo spegne
@@ -263,6 +275,12 @@ which, for each intent from the oldest, runs the `ingest` compose service (gatew
 `onboarding/ingest_esiti/` and the page shows it under «Caricamenti». If a file exceeds
 the limit the job dies, not the gateway. By hand it is for emptying a stuck queue.
 
+Each job first takes the archive lock, `var/archivio.lock`: the same one used by
+`indice-notturno`, `archive-ingest`, `archive-migra` and `archive-retag`. So an ingest and
+the nightly index never work on the same volume together, and the two caps (2g and 1300m)
+do not add up. If the lock is taken the job waits its turn, it does not exit; the page
+says so: «aspetta il suo turno: indice-notturno sta lavorando sull'archivio».
+
 ```bash
 vps1777 ingest-coda                         # one round now
 systemctl status vps1777-ingest.path        # the unit that launches it by itself
@@ -279,7 +297,7 @@ the project-label index (`idx_project`). The text doesn't
 change: FTS and semantic index stay valid. **Dry-run by default**: it measures the
 delta on a real transaction, rolls it back and doesn't touch the data; it writes
 only with `--scrivi`. The `.vec.db` files (semantic indexes) are not archives and
-are skipped.
+are skipped. Even in dry-run it takes the archive lock, DB by DB (like `archive-retag`).
 
 ```bash
 vps1777 archive-migra                                  # anteprima su tutti i DB

@@ -56,6 +56,12 @@ bottone della notifica dei secret, che apre **Sistema**.
    (`miniapp_core.verify_init_data`, spec Telegram), scarta initData più
    vecchie di 12h (H27), e verifica che l'utente sia **l'owner**
    (`TELEGRAM_OWNER_ID`): chiunque altro riceve 403, anche con initData valida.
+   Un rifiuto della firma ha due risposte, perché i rimedi sono opposti:
+   **401 `init_data_expired`** se la firma è giusta e l'initData è solo
+   vecchia (si riapre il pannello dal bot), **401 `invalid_init_data`** se la
+   firma non torna con la chiave del gateway (di solito la chiave è rimasta
+   quella di un token vecchio: `tools/rotate-secret.sh telegram_bot_token`).
+   Il pannello legge il campo `error` e dice la causa.
    Il gateway **non ha il token** (H54): ha solo la chiave derivata, dal secret
    `telegram_webapp_secret` (`TELEGRAM_WEBAPP_SECRET_FILE`). La derivazione è a
    senso unico — chi ha la chiave può verificare le firme di questa Mini App ma

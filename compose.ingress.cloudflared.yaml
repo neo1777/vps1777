@@ -6,7 +6,8 @@
 # Setup:
 #   1. Crea il tunnel su https://one.dash.cloudflare.com → Networks → Tunnels
 #   2. Configura hostname che punti a http://gateway:8080
-#   3. Copia il token in secrets/cloudflared_token.txt
+#   3. Il token va in secrets/cloudflared_token.txt (600): setup.sh, deploy.sh e
+#      l'installer guidato lo chiedono e lo scrivono da sé
 #
 # Profilo: ingress.cloudflared
 

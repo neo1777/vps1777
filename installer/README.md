@@ -52,10 +52,13 @@ su `127.0.0.1` — le credenziali non lasciano il tuo PC.
 
 1. **La tua VPS** — IP, utente, password → *Verifica connessione* (semaforo verde)
 2. **Admin** — email (la password è generata e mostrata alla fine)
-3. **Ingress** — Tailscale (**auth-key** semplice *oppure* OAuth client; vedi checklist prerequisiti) / Caddy (dominio) / Cloudflared (token)
+3. **Ingress** — Tailscale (**auth-key** semplice *oppure* OAuth client; vedi checklist prerequisiti) / Caddy (dominio) / Cloudflared (token + hostname pubblico del tunnel, quello configurato sul dashboard Cloudflare)
 4. **Bot Telegram** — opzionale (semaforo verde solo dopo "Verifica bot" reale)
 5. Quando i semafori sono verdi, **Installa** si attiva → avanzamento live →
-   schermata con URL, password admin, URL connector claude.ai. Se il backup è attivo
+   schermata con URL, password admin, URL connector claude.ai. L'URL è quello pubblico
+   in https: l'indirizzo `*.ts.net` con Tailscale (se il Funnel parte), il dominio con
+   Caddy, l'hostname del tunnel con Cloudflare. Con Cloudflare senza hostname resta
+   `http://<IP>:8080`, che da fuori non si raggiunge: la schermata lo dice. Se il backup è attivo
    (lo è di default), la **chiave privata age** che lo cifra sta sul tuo PC in
    `~/.config/vps1777/age-key.txt` (l'installer la crea lì se manca): lo dice la
    console, non la schermata finale. Salvala, senza non si ripristinano i backup.

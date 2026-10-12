@@ -38,6 +38,12 @@ SUFFISSI = (".jsonl", ".json", ".zip", ".md", ".txt", ".pdf")
 TESTO_MAX = 500               # progetto e descrizione: nell'intent non serve di più
 # oltre questa attesa senza che la CLI l'abbia preso, la pagina dice di guardare l'unit
 FERMO_DOPO_S = 180
+# in ESITI/: lo scrive la CLI finché un lavoro aspetta il lucchetto dell'archivio (l'indice
+# notturno sta lavorando sullo stesso volume). Non è un id: lavori() non lo elenca.
+ATTESA = "attesa.json"
+# un segno d'attesa più vecchio di così non vale (la unit della coda ha un tetto di 12 ore):
+# la CLI lo toglie sempre, ma un riavvio a metà lo lascerebbe lì per sempre
+ATTESA_VALIDA_S = 13 * 3600
 
 
 def cartella_file(archive_db_dir: str | Path) -> Path:
@@ -101,14 +107,30 @@ def _leggi(p: Path) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
+def in_attesa(onboarding_dir: str | Path, *, adesso: float | None = None) -> str:
+    """Chi tiene l'archivio mentre la coda aspetta il suo turno, o '' se non aspetta."""
+    p = Path(onboarding_dir) / ESITI / ATTESA
+    ora = time.time() if adesso is None else adesso
+    try:
+        if ora - p.stat().st_mtime > ATTESA_VALIDA_S:
+            return ""
+    except OSError:
+        return ""
+    d = _leggi(p)
+    return str((d or {}).get("chi") or "un altro lavoro")[:80]
+
+
 def lavori(onboarding_dir: str | Path, *, limite: int = 12,
            adesso: float | None = None) -> list[dict]:
     """I lavori più recenti, dal più nuovo: quelli in coda e quelli con un esito.
 
     Ogni voce ha `stato` fra in-coda, in-corso, fatto, errore. Un lavoro in coda da
-    più di FERMO_DOPO_S secondi ha `fermo=True`: la CLI non l'ha preso."""
+    più di FERMO_DOPO_S secondi ha `fermo=True`: la CLI non l'ha preso. Se invece la CLI
+    l'ha visto e aspetta il lucchetto dell'archivio, `fermo` resta False e `attesa` dice
+    chi lo tiene (l'aggiornamento notturno dell'indice, di solito)."""
     ob = Path(onboarding_dir)
     ora = time.time() if adesso is None else adesso
+    aspetta = in_attesa(ob, adesso=ora)
     visti: dict[str, dict] = {}
     for cartella, stato_default in ((ob / ESITI, None), (ob / CODA, "in-coda")):
         if not cartella.is_dir():
@@ -123,9 +145,11 @@ def lavori(onboarding_dir: str | Path, *, limite: int = 12,
             if stato_default:
                 d["stato"] = stato_default
                 try:
-                    d["fermo"] = ora - p.stat().st_mtime > FERMO_DOPO_S
+                    d["fermo"] = not aspetta and ora - p.stat().st_mtime > FERMO_DOPO_S
                 except OSError:
                     d["fermo"] = False
+                if aspetta:
+                    d["attesa"] = aspetta
             visti[p.stem] = d
     return [visti[k] for k in sorted(visti, reverse=True)[:limite]]
 

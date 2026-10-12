@@ -183,9 +183,15 @@ vps1777 bootstrap --bundle /tmp/vps1777-bundle --yes   # bundle estratto altrove
 Indicizza un file nell'archivio di ricerca. La strada la sceglie l'estensione:
 
 - **file di testo** (`.md` `.txt` `.markdown` `.rst` `.log` `.csv` `.json` `.jsonl`) →
-  **diretti all'indexer** del gateway, senza NotebookLM;
+  **diretti all'indexer**, senza NotebookLM (`.markdown`, `.rst`, `.log` e `.csv`
+  arrivano all'indexer come `.txt`);
 - **tutto il resto** (PDF-scansione, foto di documenti…) → **passando da NotebookLM**
   (lettura multimodale/OCR). ⚠️ Il file viene mandato a Google.
+
+In tutti e due i casi indicizza il servizio compose `ingest` (limite di memoria 2g), come
+per la coda di `/admin/archive`: il file va nel volume dell'archivio e il gateway fa solo
+da tramite. Fino alla 0.87.0 indicizzava il gateway, e un file grande poteva farlo uccidere
+dal suo tetto di 512m. Il lavoro prende il lucchetto dell'archivio (vedi `ingest-coda`).
 
 Per i formati normali caricati dal browser (zip/jsonl/md/pdf-con-testo) c'è anche la pagina
 `/admin/archive` del gateway ([ARCHIVE.md](ARCHIVE.md)).
@@ -207,7 +213,8 @@ vps1777 archive-ingest --artefatto podcast.m4a --db podcast-studio  # dallo Stud
 
 Ri-classifica la colonna `voice` (di chi è la voce nel contenuto) sui DB
 dell'archivio, con l'euristica corrente. **A secco di default**: stampa il delta
-e non tocca nulla; scrive solo con `--scrivi`.
+e non tocca nulla; scrive solo con `--scrivi`. Anche a secco prende, DB per DB, il
+lucchetto dell'archivio: se la coda o l'indice notturno lavorano, aspetta il suo turno.
 
 ```bash
 vps1777 archive-retag                     # anteprima su tutti i DB
@@ -238,6 +245,11 @@ provarlo o ad accenderlo e spegnerlo. Il costruttore gira nel servizio compose
 `indice-notturno` (limite di memoria 1300m, una CPU, nessuna rete). Non fa mai una prima
 costruzione. Dettagli e costi: [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md).
 
+Ogni DB si aggiorna col lucchetto dell'archivio in mano (`var/archivio.lock`), quindi mai
+insieme a un ingest: se un lavoro della coda lo tiene, il giro aspetta. Se l'archivio
+resta occupato più di 2 ore, i DB rimasti li prende la notte dopo, e l'attesa non conta
+come errore.
+
 ```bash
 vps1777 indice-notturno --abilita          # accende il timer (opt-in)
 vps1777 indice-notturno --disabilita       # lo spegne
@@ -255,6 +267,12 @@ gateway, limite di memoria 2g, una CPU, solo il volume dell'archivio). Lo stato 
 `onboarding/ingest_esiti/` e la pagina lo mostra in «Caricamenti». Se un file supera il
 limite muore il lavoro, non il gateway. A mano serve a svuotare una coda ferma.
 
+Ogni lavoro prende prima il lucchetto dell'archivio, `var/archivio.lock`: lo stesso di
+`indice-notturno`, `archive-ingest`, `archive-migra` e `archive-retag`. Così un ingest e
+l'indice notturno non lavorano mai sullo stesso volume insieme, e i due tetti (2g e 1300m)
+non si sommano. Se il lucchetto è occupato il lavoro aspetta il suo turno, non esce; la
+pagina lo dice: «aspetta il suo turno: indice-notturno sta lavorando sull'archivio».
+
 ```bash
 vps1777 ingest-coda                         # un giro adesso
 systemctl status vps1777-ingest.path        # la unit che lo lancia da sola
@@ -270,7 +288,8 @@ precedente alla 0.52.0 diventano `speaker='tool'`, e i turni del programma
 manca, l'indice per etichetta di progetto (`idx_project`). Il
 testo non cambia: FTS e indice semantico restano validi. **A secco di default**:
 misura il delta su una transazione vera, la annulla e non tocca i dati; scrive solo
-con `--scrivi`. I `.vec.db` (indici semantici) non sono archivi e vengono saltati.
+con `--scrivi`. I `.vec.db` (indici semantici) non sono archivi e vengono saltati. Anche
+a secco prende, DB per DB, il lucchetto dell'archivio (come `archive-retag`).
 
 ```bash
 vps1777 archive-migra                                  # anteprima su tutti i DB

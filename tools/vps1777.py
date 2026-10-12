@@ -21,6 +21,7 @@ Design: docs/SELF_UPDATE_PLAN.md. Contratto migrazioni: migrations/README.md.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import hashlib
 import hmac
@@ -2195,6 +2196,94 @@ def acquire_lock(repo: Path):
     return fh
 
 
+# ─────────────────────────────────────────── lucchetto dell'archivio
+
+# Chi lavora sui DB dell'archivio nel volume passa da qui: un lavoro della coda
+# d'indicizzazione (ingest-coda), l'aggiornamento notturno dell'indice semantico (legge
+# <db>.db per ore e scrive accanto <db>.vec.db), archive-ingest, archive-migra (anche
+# --telegram) e archive-retag. Due motivi, entrambi misurabili:
+#   - lo stesso DB: il costruttore legge un DB mentre l'ingest ci scrive, e l'indice che
+#     ne esce non corrisponde né al prima né al dopo;
+#   - la memoria: `ingest` (2g) e `indice-notturno` (1300m) insieme sommano i tetti, e
+#     su una VPS piccola quella somma è più della RAM che c'è.
+# Si prende attorno al SINGOLO lavoro (un file della coda, un DB dell'indice), mai attorno
+# al giro intero: fra un lavoro e l'altro entra chi aspetta. Perché entri davvero serve il
+# TURNO: flock non fa la fila, e chi ha appena lasciato il lucchetto lo riprende prima che
+# chi aspetta si svegli. Chi aspetta tiene `archivio.turno` mentre attende `archivio.lock`;
+# chi lo rivuole deve ripassare dal turno, cioè mettersi dietro.
+# ⚠️ Non si annida: due flock dello stesso processo su due open() dello stesso file si
+# escludono, e un lucchetto preso dentro un altro aspetterebbe sé stesso per sempre.
+ARCHIVIO_LOCK = "archivio.lock"
+ARCHIVIO_TURNO = "archivio.turno"
+
+
+class ArchivioOccupato(Exception):
+    """L'attesa del lucchetto dell'archivio ha superato il tetto chiesto."""
+
+
+def _flock_entro(fh, scadenza: float | None, passo: float) -> bool:
+    """flock esclusivo: bloccante senza scadenza, altrimenti a tentativi fino a lei."""
+    if scadenza is None:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        return True
+    while True:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            resta = scadenza - time.monotonic()
+            if resta <= 0:
+                return False
+            time.sleep(min(passo, resta))
+
+
+@contextlib.contextmanager
+def lucchetto_archivio(repo: Path, chi: str, *, attesa_max: float | None = None,
+                       passo: float = 5.0, in_attesa=None):
+    """Il lucchetto comune dei lavori sull'archivio (`var/archivio.lock`).
+
+    Se è libero lo prende e basta. Se no lo DICE («aspetto: … sta lavorando
+    sull'archivio») e aspetta: senza `attesa_max` quanto serve, con `attesa_max` (secondi)
+    al più tanto, poi solleva ArchivioOccupato. `in_attesa(occupante)` si chiama una volta,
+    prima di mettersi ad aspettare. Nel file resta scritto chi lo tiene, per chi arriva."""
+    var = repo / "var"
+    var.mkdir(mode=0o700, exist_ok=True)
+    turno = open(var / ARCHIVIO_TURNO, "a")
+    # "a+" e non "w": aprire con "w" troncherebbe il nome di chi lo tiene adesso
+    fh = open(var / ARCHIVIO_LOCK, "a+", encoding="utf-8")
+    preso = False
+    try:
+        try:
+            fcntl.flock(turno, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            preso = True
+        except BlockingIOError:
+            pass
+        if not preso:
+            fh.seek(0)
+            occupante = fh.read().strip() or "un altro lavoro"
+            log(f"aspetto: {occupante} sta lavorando sull'archivio ({chi} parte dopo)")
+            if in_attesa is not None:
+                in_attesa(occupante)
+            scadenza = None if attesa_max is None else time.monotonic() + attesa_max
+            # il turno si può già avere (il primo tentativo l'ha preso): riprenderlo sullo
+            # stesso file aperto non blocca
+            if not (_flock_entro(turno, scadenza, passo) and _flock_entro(fh, scadenza, passo)):
+                raise ArchivioOccupato(occupante)
+            preso = True
+        fcntl.flock(turno, fcntl.LOCK_UN)
+        fh.seek(0)
+        fh.truncate()
+        fh.write(f"{chi} (pid {os.getpid()}, dal {now_iso()})\n")
+        fh.flush()
+        yield
+    finally:
+        if preso:
+            fh.truncate(0)
+        fh.close()
+        turno.close()
+
+
 # ─────────────────────────────────────────── intent (pulsante admin)
 
 def consume_intent(repo: Path, path: Path, st: dict) -> str:
@@ -4172,6 +4261,10 @@ def _indici_da_aggiornare(righe: list[str], tutti: bool) -> list[tuple[str, str]
     return out
 
 
+# quanto l'aggiornamento notturno aspetta, per ogni DB, che l'archivio si liberi (sec.)
+ATTESA_INDICE_S = 2 * 3600
+
+
 def cmd_indice_notturno(repo: Path, args) -> int:
     """Aggiorna gli indici della ricerca per senso dei DB cambiati dopo l'ultima
     costruzione. Lo lancia il timer; a mano serve a provarlo (`--tutti`) o ad
@@ -4200,9 +4293,23 @@ def cmd_indice_notturno(repo: Path, args) -> int:
     for nome, perche in da_fare:
         db = f"/var/lib/archive/db/{nome}.db"
         log(f"{nome}: {perche} → aggiornamento incrementale")
-        r = run([*cc, "--profile", "indice", "run", "--rm", "-T", "indice-notturno",
-                 "--db", db, "--modello", DIR_MODELLO_VOLUME, "--thread", "1",
-                 "--sotto-lotto", "4"], check=False, capture=True, timeout=6 * 3600)
+        # Il lucchetto dell'archivio attorno al SINGOLO DB: mentre il costruttore legge
+        # <db>.db l'ingest non ci scrive, e i due tetti (1300m + 2g) non si sommano. Se la
+        # coda d'indicizzazione lo tiene, si aspetta il suo turno (lo lancia il timer:
+        # aspettare va bene), ma non più di ATTESA_INDICE_S: la unit ha un tetto di 6 ore in
+        # tutto, e un'attesa senza fine la farebbe uccidere a metà di un DB, con un
+        # fallimento notificato che non è un guasto. Oltre il tetto si lascia la notte: i
+        # DB rimasti restano «più recenti del loro indice», e li prende il prossimo giro.
+        try:
+            with lucchetto_archivio(repo, "indice-notturno", attesa_max=ATTESA_INDICE_S):
+                r = run([*cc, "--profile", "indice", "run", "--rm", "-T", "indice-notturno",
+                         "--db", db, "--modello", DIR_MODELLO_VOLUME, "--thread", "1",
+                         "--sotto-lotto", "4"], check=False, capture=True, timeout=6 * 3600)
+        except ArchivioOccupato as exc:
+            resto = [n for n, _ in da_fare[da_fare.index((nome, perche)):]]
+            warn(f"l'archivio è occupato da più di {ATTESA_INDICE_S // 3600} ore ({exc}): "
+                 f"lascio per stanotte {', '.join(resto)}, li prende il prossimo giro")
+            break
         # la telemetria di onnxruntime scrive un avviso a ogni avvio: non è un esito, e
         # finiva nel riassunto (e nelle notifiche di OnFailure)
         righe = [x for x in ((r.stdout or "") + "\n" + (r.stderr or "")).splitlines()
@@ -4233,15 +4340,19 @@ def cmd_indice_notturno(repo: Path, args) -> int:
 # controlla che le due copie restino uguali).
 INGEST_CODA = "ingest_coda"
 INGEST_ESITI = "ingest_esiti"
+# in ingest_esiti/: c'è finché un lavoro aspetta il lucchetto dell'archivio (non è un id,
+# quindi la pagina non lo elenca come lavoro e la potatura non lo tocca)
+INGEST_ATTESA = "attesa.json"
 INGEST_ID_RE = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")
 INGEST_DB_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 INGEST_SUFFISSI = (".jsonl", ".json", ".zip", ".md", ".txt", ".pdf")
 INGEST_TESTO_MAX = 500
 INGEST_ESITI_MAX = 50          # gli esiti più vecchi si potano
 INGEST_TETTO = "2g"            # il mem_limit del servizio `ingest` (compose.yaml)
-# I comandi che riscrivono un DB intero (archive-migra, archive-retag) girano qui e non
-# più con `exec` nel gateway, che dalla 0.84 ha un tetto di 512 MB. archive-ingest resta
-# nel gateway: il testo ci arriva dalla tmpfs di /tmp, che ha già un tetto di 64 MB.
+# I comandi che scrivono un DB dell'archivio (archive-migra, archive-retag, archive-ingest)
+# girano qui e non più con `exec` nel gateway, che dalla 0.84 ha un tetto di 512 MB: un
+# file grande faceva uccidere il servizio pubblico. archive-ingest, che fino alla 0.87
+# restava nel gateway, mette il file nel volume dell'archivio e usa il modo «coda».
 INGEST_RUN = ["--profile", "ingest", "run", "--rm", "-T", "ingest"]
 
 
@@ -4302,6 +4413,23 @@ def _pota_esiti_ingest(repo: Path) -> None:
         p.unlink(missing_ok=True)
 
 
+def _intent_in_coda(coda: Path) -> list[Path]:
+    """Gli intent in coda, dal più vecchio. Quello che intent non è esce dalla cartella."""
+    intent = []
+    for p in coda.iterdir():
+        if p.suffix == ".json" and not p.name.startswith("."):
+            intent.append(p)
+        else:
+            # il gateway scrive solo intent completi (il temporaneo sta fuori): altro
+            # qui dentro farebbe ripartire la unit a vuoto, all'infinito
+            warn(f"coda: tolgo {p.name}, non è un intent")
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                p.unlink(missing_ok=True)
+    return sorted(intent)
+
+
 def cmd_ingest_coda(repo: Path, args) -> int:
     """Indicizza i file che /admin/archive ha messo in coda, uno alla volta, dal più
     vecchio. Lo lancia vps1777-ingest.path; a mano serve a svuotare una coda ferma."""
@@ -4320,76 +4448,89 @@ def cmd_ingest_coda(repo: Path, args) -> int:
     cc = compose_cmd(repo)
     uscita = 0
     fatti = 0
+    attesa = onboarding_dir(repo) / INGEST_ESITI / INGEST_ATTESA
+
+    def _segna_attesa(occupante: str) -> None:
+        # la pagina Archive, senza questo, dopo tre minuti direbbe «nessuno l'ha preso:
+        # guarda la unit» di un lavoro che sta solo aspettando il suo turno
+        _scrivi_esito_ingest(repo, attesa.stem, {"chi": occupante.split(" (")[0],
+                                                  "dal": now_iso()})
+
     # si rilegge la cartella dopo ogni lavoro: un file caricato nel frattempo entra
     # nello stesso giro, e la path unit non deve ripartire per lui
-    while True:
-        intent = []
-        for p in coda.iterdir():
-            if p.suffix == ".json" and not p.name.startswith("."):
-                intent.append(p)
-            else:
-                # il gateway scrive solo intent completi (il temporaneo sta fuori): altro
-                # qui dentro farebbe ripartire la unit a vuoto, all'infinito
-                warn(f"coda: tolgo {p.name}, non è un intent")
-                if p.is_dir():
-                    shutil.rmtree(p, ignore_errors=True)
-                else:
-                    p.unlink(missing_ok=True)
-        intent.sort()
-        if not intent:
-            break
-        p = intent[0]
-        try:
-            d = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            d = None
-        motivo = valida_intent_ingest(p.name, d)
-        # consumare PRIMA di agire: un intent che resta in coda fa ripartire la unit
-        # all'infinito (DirectoryNotEmpty)
-        p.unlink(missing_ok=True)
-        if motivo:
-            warn(f"intent {p.name} scartato: {motivo}")
-            if INGEST_ID_RE.match(p.stem):
-                _scrivi_esito_ingest(repo, p.stem, {"stato": "errore", "errore": motivo})
-            uscita = 1
-            continue
-        assert isinstance(d, dict)
-        jid = d["id"]
-        base = {k: d.get(k, "") for k in ("db", "file", "by", "accodato")}
-        _scrivi_esito_ingest(repo, jid, {**base, "stato": "in-corso", "iniziato": now_iso()})
-        log(f"{jid}: «{d.get('file', '')}» → DB «{d['db']}»")
-        try:
-            r = run([*cc, *INGEST_RUN, "coda",
-                     "--id", jid, "--db", d["db"], "--suffisso", d["suffisso"],
-                     "--project", d.get("project", ""),
-                     "--description", d.get("description", "")],
-                    check=False, capture=True, timeout=6 * 3600)
-            esito = esito_lavoro_ingest(r.returncode, r.stdout or "")
-            codice = r.returncode
-        except subprocess.TimeoutExpired:
-            esito = {"stato": "errore", "errore": "il lavoro ha superato le 6 ore"}
-            codice = -1
-        if esito["stato"] == "errore" and codice not in (0, 3):
-            # un lavoro ucciso non arriva al suo `finally`: il file lo toglie il
-            # gateway (stesso utente che l'ha scritto); se non ci riesce, lo toglie
-            # il prossimo lavoro dopo due giorni
-            run([*cc, "exec", "-T", "gateway", "rm", "-f",
-                 f"/var/lib/archive/coda/{jid}{d['suffisso']}"], check=False, capture=True)
-        _scrivi_esito_ingest(repo, jid, {**base, **esito, "finito": now_iso()})
-        if esito["stato"] == "fatto":
-            ok(f"{jid}: {esito.get('righe')} record (totale {esito.get('totale')})")
-            fatti += 1
-        elif codice == 3:
-            # rifiuto parlante dell'indexer (formato, PDF senza testo…): l'ha visto chi
-            # ha caricato, sulla pagina; non è un guasto della unit
-            warn(f"{jid}: {esito['errore'][:300]}")
-        else:
-            warn(f"{jid}: {esito['errore'][:300]}")
-            uscita = 1
+    try:
+        while _intent_in_coda(coda):
+            # Il lucchetto dell'archivio attorno al SINGOLO lavoro, e preso PRIMA di
+            # consumare l'intent. Si ASPETTA, non si esce: uscire lasciando intent in coda
+            # farebbe ripartire subito la path unit (DirectoryNotEmpty), in giro continuo
+            # finché l'indice notturno non finisce. E se l'attesa viene interrotta (il tetto
+            # di 12 ore della unit, un riavvio) l'intent è ancora lì, e non c'è un esito
+            # «in corso» rimasto orfano. Fra un lavoro e l'altro il lucchetto si lascia:
+            # l'indice notturno, se aspetta, entra lì.
+            with lucchetto_archivio(repo, "ingest-coda", in_attesa=_segna_attesa):
+                attesa.unlink(missing_ok=True)
+                intent = _intent_in_coda(coda)
+                if not intent:
+                    break
+                esito_giro = _un_lavoro_della_coda(repo, cc, intent[0])
+            if esito_giro == "fatto":
+                fatti += 1
+            elif esito_giro == "guasto":
+                uscita = 1
+    finally:
+        attesa.unlink(missing_ok=True)
     _pota_esiti_ingest(repo)
     if fatti:
         log(f"coda svuotata: {fatti} file indicizzati")
     return uscita
+
+
+def _un_lavoro_della_coda(repo: Path, cc: list[str], p: Path) -> str:
+    """Consuma ed esegue un intent. «fatto», «rifiuto» (parlante, non un guasto della
+    unit) o «guasto»."""
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        d = None
+    motivo = valida_intent_ingest(p.name, d)
+    # consumare PRIMA di agire: un intent che resta in coda fa ripartire la unit
+    # all'infinito (DirectoryNotEmpty)
+    p.unlink(missing_ok=True)
+    if motivo:
+        warn(f"intent {p.name} scartato: {motivo}")
+        if INGEST_ID_RE.match(p.stem):
+            _scrivi_esito_ingest(repo, p.stem, {"stato": "errore", "errore": motivo})
+        return "guasto"
+    assert isinstance(d, dict)
+    jid = d["id"]
+    base = {k: d.get(k, "") for k in ("db", "file", "by", "accodato")}
+    _scrivi_esito_ingest(repo, jid, {**base, "stato": "in-corso", "iniziato": now_iso()})
+    log(f"{jid}: «{d.get('file', '')}» → DB «{d['db']}»")
+    try:
+        r = run([*cc, *INGEST_RUN, "coda",
+                 "--id", jid, "--db", d["db"], "--suffisso", d["suffisso"],
+                 "--project", d.get("project", ""),
+                 "--description", d.get("description", "")],
+                check=False, capture=True, timeout=6 * 3600)
+        esito = esito_lavoro_ingest(r.returncode, r.stdout or "")
+        codice = r.returncode
+    except subprocess.TimeoutExpired:
+        esito = {"stato": "errore", "errore": "il lavoro ha superato le 6 ore"}
+        codice = -1
+    if esito["stato"] == "errore" and codice not in (0, 3):
+        # un lavoro ucciso non arriva al suo `finally`: il file lo toglie il
+        # gateway (stesso utente che l'ha scritto); se non ci riesce, lo toglie
+        # il prossimo lavoro dopo due giorni
+        run([*cc, "exec", "-T", "gateway", "rm", "-f",
+             f"/var/lib/archive/coda/{jid}{d['suffisso']}"], check=False, capture=True)
+    _scrivi_esito_ingest(repo, jid, {**base, **esito, "finito": now_iso()})
+    if esito["stato"] == "fatto":
+        ok(f"{jid}: {esito.get('righe')} record (totale {esito.get('totale')})")
+        return "fatto"
+    # codice 3: rifiuto parlante dell'indexer (formato, PDF senza testo…): l'ha visto
+    # chi ha caricato, sulla pagina; non è un guasto della unit
+    warn(f"{jid}: {esito['errore'][:300]}")
+    return "rifiuto" if codice == 3 else "guasto"
 
 
 def _filtra_db_archivio(righe: list[str], solo: str | None) -> list[str]:
@@ -4445,7 +4586,7 @@ def cmd_archive_migra(repo: Path, args) -> int:
     if not args.scrivi:
         log("modalità A SECCO: misuro il delta e non scrivo nulla (--scrivi per applicare)")
     if getattr(args, "telegram", False):
-        return _archive_migra_telegram(cc, trovati, args.scrivi)
+        return _archive_migra_telegram(repo, cc, trovati, args.scrivi)
     uscita = 0
     for db_path in trovati:
         nome = Path(db_path).stem
@@ -4453,7 +4594,10 @@ def cmd_archive_migra(repo: Path, args) -> int:
                db_path, "--migra"]
         if args.scrivi:
             cmd.append("--scrivi")
-        r = run(cmd, capture=True, check=False, timeout=1800)
+        # anche a secco: il referto si misura su una transazione vera, e il lavoro gira
+        # nel servizio `ingest` col suo tetto, che non si somma a quello dell'indice
+        with lucchetto_archivio(repo, "archive-migra"):
+            r = run(cmd, capture=True, check=False, timeout=1800)
         if r.returncode == 2:
             # schema precedente al voice-tagging, o un file che non è un archivio: lo
             # dice l'indexer, e non è un fallimento di questo comando.
@@ -4486,7 +4630,8 @@ def cmd_archive_migra(repo: Path, args) -> int:
     return uscita
 
 
-def _archive_migra_telegram(cc: list[str], trovati: list[str], scrivi: bool) -> int:
+def _archive_migra_telegram(repo: Path, cc: list[str], trovati: list[str],
+                            scrivi: bool) -> int:
     """`archive-migra --telegram`: lo speaker dei messaggi di un gruppo Telegram già
     caricato (27/09/2026). Il proprietario lo dice ARCHIVE_TELEGRAM_PROPRIETARIO nel .env
     (i nomi Telegram, separati da virgola): senza, l'indexer rifiuta ed esce 2."""
@@ -4497,7 +4642,8 @@ def _archive_migra_telegram(cc: list[str], trovati: list[str], scrivi: bool) -> 
                db_path, "--migra-telegram"]
         if scrivi:
             cmd.append("--scrivi")
-        r = run(cmd, capture=True, check=False, timeout=1800)
+        with lucchetto_archivio(repo, "archive-migra --telegram"):
+            r = run(cmd, capture=True, check=False, timeout=1800)
         if r.returncode != 0:
             warn(f"«{nome}»: {(r.stderr or r.stdout or '').strip()[:240]}")
             uscita = 1 if r.returncode != 2 else 2
@@ -4547,7 +4693,8 @@ def cmd_archive_retag(repo: Path, args) -> int:
                db_path, "--retag"]
         if args.scrivi:
             cmd.append("--scrivi")
-        r = run(cmd, capture=True, check=False, timeout=1800)
+        with lucchetto_archivio(repo, "archive-retag"):
+            r = run(cmd, capture=True, check=False, timeout=1800)
         if r.returncode != 0:
             warn(f"«{nome}»: retag fallito — {(r.stderr or r.stdout or '').strip()[:200]}")
             uscita = 1
@@ -4581,19 +4728,72 @@ _DIR_ARTEFATTI = "/var/lib/nlm-artifacts"
 _ARTEFATTO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}")
 
 
+def _indicizza_nel_lavoro(repo: Path, cc: list[str], *, db_name: str, project: str,
+                          suffisso: str, rid: str, sorgente: Path | None = None,
+                          testo: str | None = None) -> None:
+    """Indicizza un file (o un testo) nel servizio compose `ingest`, non nel gateway.
+
+    Fino alla 0.87 `archive-ingest` indicizzava con `exec` nel gateway, che ha un tetto di
+    512 MB: un file grande faceva uccidere lui, e con lui OAuth, il proxy MCP e le pagine.
+    Ora fa come la coda di /admin/archive: il file va nel volume dell'archivio, in
+    `/var/lib/archive/coda/<id><ext>` (non nella tmpfs da 64 MB del gateway), e lo indicizza
+    `ingest_worker coda` con il tetto di 2g del servizio `ingest`. Lo stesso modo «coda»
+    rifà i controlli su id, DB e suffisso e toglie il file alla fine; se il lavoro viene
+    ucciso prima, lo toglie il `finally` qui sotto (e, mancasse anche quello, il giro della
+    coda dopo due giorni). `die` se non riesce, con l'errore del lavoro."""
+    import shlex as _shlex
+    # l'indexer legge come testo solo .md e .txt: un .rst, un .log, un .csv o un .markdown
+    # viaggiano come .txt (prima arrivavano col loro suffisso e l'indexer li rifiutava)
+    suf = suffisso if suffisso in INGEST_SUFFISSI else ".txt"
+    jid = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + rid
+    dest = f"/var/lib/archive/coda/{jid}{suf}"
+    try:
+        # NIENTE `docker cp`: il rootfs del gateway è read-only per hardening e docker cp
+        # rifiuta («container rootfs is marked read-only», misurato 06/09 — #285 bis). Il
+        # file viaggia su stdin di un exec e lo scrive l'utente del gateway, lo stesso del
+        # servizio `ingest` (stessa immagine): lo può leggere e togliere. `cat` non tiene
+        # il file in memoria, quindi nemmeno qui il gateway ne paga la dimensione.
+        scrivi = [*cc, "exec", "-T", "gateway", "sh", "-c",
+                  f"mkdir -p /var/lib/archive/coda && cat > {_shlex.quote(dest)}"]
+        if sorgente is not None:
+            with open(sorgente, "rb") as fh:
+                run(scrivi, stdin=fh, check=True)
+        else:
+            run(scrivi, input=testo or "", check=True)
+        try:
+            with lucchetto_archivio(repo, "archive-ingest"):
+                r = run([*cc, *INGEST_RUN, "coda", "--id", jid, "--db", db_name,
+                         "--suffisso", suf, "--project", project],
+                        check=False, capture=True, timeout=6 * 3600)
+        except subprocess.TimeoutExpired:
+            die("indicizzazione fallita: il lavoro ha superato le 6 ore")
+        esito = esito_lavoro_ingest(r.returncode, r.stdout or "")
+        if esito["stato"] != "fatto":
+            dettaglio = (r.stderr or "").strip()[-300:] if r.returncode not in (0, 3, 137) else ""
+            die(f"indicizzazione fallita: {esito['errore']}"
+                + (f"\n  {dettaglio}" if dettaglio else ""))
+        ok(f"indicizzato nell'archivio → DB «{db_name}»: {esito.get('righe')} record "
+           f"(totale nel DB: {esito.get('totale')})")
+    finally:
+        # senza `-u root`: con cap_drop ALL root non ha CAP_DAC_OVERRIDE, e la cartella è
+        # dell'utente del gateway (misurato su nb1777-mcp il 27/09, stessa regola)
+        run([*cc, "exec", "-T", "gateway", "rm", "-f", dest], check=False, capture=True)
+
+
 def cmd_archive_ingest(repo: Path, args) -> int:
     """Indicizza un file nell'archivio FTS. Due percorsi, scelti dal TIPO:
 
-    - file GIÀ TESTUALI (.md/.txt/…): DIRETTI all'indexer del gateway — niente
-      NotebookLM (#285: il giro OCR su testo puro è overhead e fragilità gratis).
-      `--nlm` forza comunque il giro NotebookLM (caso raro: un .txt che è in
-      realtà il dump di una scansione da ri-leggere multimodalmente).
-    - tutto il resto (PDF-immagine, scansioni…): via NotebookLM come sempre.
+    - file GIÀ TESTUALI (.md/.txt/…): DIRETTI all'indexer — niente NotebookLM (#285: il
+      giro OCR su testo puro è overhead e fragilità gratis). `--nlm` forza comunque il
+      giro NotebookLM (caso raro: un .txt che è in realtà il dump di una scansione da
+      ri-leggere multimodalmente).
+    - tutto il resto (PDF-immagine, scansioni, audio…): via NotebookLM come sempre.
 
-    Orchestrazione (l'host ha docker; nb1777-mcp ha l'auth nlm; il gateway ha
-    l'indexer + il volume archive):
+    Orchestrazione (l'host ha docker; nb1777-mcp ha l'auth nlm; il volume dell'archivio
+    lo montano il gateway e il servizio `ingest`):
       1. [solo non-testo] copia in nb1777-mcp → `app.ingest` trascrive (scratch)
-      2. porta il testo nel gateway → `app.archive_indexer` lo indicizza nel .db
+      2. il testo va nel volume dell'archivio → il servizio `ingest` lo indicizza nel .db,
+         con il suo tetto di memoria (mai più nel gateway: vedi _indicizza_nel_lavoro)
       3. archive-mcp lo scopre da solo (scan-mode). Pulizia dei temp inclusa.
     """
     artefatto = getattr(args, "artefatto", None)
@@ -4615,6 +4815,9 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         if not src.is_file():
             die(f"file non trovato: {src}")
     db_name = _ARCH_NAME_RE.sub("-", (args.db or src.stem).lower()).strip("-") or "archivio"
+    if not INGEST_DB_RE.match(db_name):
+        die(f"nome del DB troppo lungo ({len(db_name)} caratteri, al più 64): "
+            "scegline uno più corto con --db")
     project = args.project or db_name
     rid = os.urandom(4).hex()
     suffix = src.suffix.lower()
@@ -4626,38 +4829,20 @@ def cmd_archive_ingest(repo: Path, args) -> int:
     # non compare in `artifact_list` (elenca solo i file della radice).
     nb_in = (f"{_DIR_ARTEFATTI}/{artefatto}" if artefatto
              else f"{_DIR_ARTEFATTI}/ingest/ing_{rid}{src.suffix}")
-    # il file testuale viaggia con la SUA estensione: l'indexer sceglie il parser
-    # dal suffisso (un .md rinominato .txt perderebbe solo cosmetica, ma il nome
-    # vero è informazione — non si butta)
-    gw_ext = suffix if testuale else ".txt"
-    gw_txt = f"/tmp/ing_{rid}{gw_ext}"
-    host_txt = Path(f"/tmp/vps1777_ing_{rid}.txt")
-
-    def _porta_nel_gateway(contenuto: str, dest: str) -> None:
-        # NIENTE `docker cp` verso il gateway: il suo rootfs è read-only per
-        # hardening e docker cp rifiuta («container rootfs is marked read-only»,
-        # misurato 06/09 — #285 bis). L'exec invece scrive dal processo INTERNO
-        # sulla tmpfs di /tmp, che è scrivibile: il testo viaggia su stdin.
-        import shlex as _shlex
-        run([*cc, "exec", "-T", "gateway", "sh", "-c",
-             f"cat > {_shlex.quote(dest)}"], input=contenuto, check=True)
+    lavoro = dict(db_name=db_name, project=project, rid=rid)
 
     try:
         if testuale:
             log(f"«{src.name}» è già testo ({suffix}): indicizzo DIRETTO, niente NotebookLM")
+            # il file testuale viaggia con la SUA estensione: l'indexer sceglie il parser
+            # dal suffisso (un .jsonl non è un .txt)
             if artefatto:
                 letto = run([*cc, "exec", "-T", "nb1777-mcp", "cat", nb_in],
                             capture=True, check=True)
-                testo_src = letto.stdout or ""
+                _indicizza_nel_lavoro(repo, cc, suffisso=suffix, testo=letto.stdout or "",
+                                      **lavoro)
             else:
-                testo_src = src.read_text(encoding="utf-8", errors="replace")
-            _porta_nel_gateway(testo_src, gw_txt)
-            db_path = f"/var/lib/archive/db/{db_name}.db"
-            res2 = run([*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
-                        gw_txt, db_path, "--project", project], capture=True, check=False)
-            if res2.returncode != 0:
-                die(f"indicizzazione fallita: {(res2.stderr or res2.stdout or '').strip()[:300]}")
-            ok(f"indicizzato nell'archivio → DB «{db_name}»: {(res2.stdout or '').strip()}")
+                _indicizza_nel_lavoro(repo, cc, suffisso=suffix, sorgente=src, **lavoro)
             return 0
         log(f"NotebookLM: trascrizione di «{src.name}» (può richiedere un minuto)…")
         # NIENTE `docker cp`: il rootfs di nb1777-mcp è read-only (H43) e docker cp
@@ -4704,28 +4889,19 @@ def cmd_archive_ingest(repo: Path, args) -> int:
         ok(f"trascritti {len(text)} caratteri da NotebookLM ({come}{tipo})")
         if data.get("verification"):
             log(f"verifica NotebookLM: {data['verification'][:400]}")
-        host_txt.write_text(text, encoding="utf-8")
-        _porta_nel_gateway(text, gw_txt)
-        db_path = f"/var/lib/archive/db/{db_name}.db"
-        res2 = run([*cc, "exec", "-T", "gateway", "python", "-m", "app.archive_indexer",
-                    gw_txt, db_path, "--project", project], capture=True, check=False)
-        if res2.returncode != 0:
-            die(f"indicizzazione fallita: {(res2.stderr or res2.stdout or '').strip()[:300]}")
-        ok(f"indicizzato nell'archivio → DB «{db_name}»: {(res2.stdout or '').strip()}")
+        # la trascrizione è testo: viaggia come .txt, sullo stesso percorso del testo
+        _indicizza_nel_lavoro(repo, cc, suffisso=".txt", testo=text, **lavoro)
         return 0
     finally:
         # In nb1777-mcp il file lo crea l'exec come `app` (nel volume, cartella di `app`)
         # e lo toglie `app`: con cap_drop ALL root non ha CAP_DAC_OVERRIDE, e `-u root`
-        # falliva con «Permission denied» (misurato sulla VPS il 27/09, 0.58.0). Sul
-        # gateway resta `-u root` per i file lasciati da versioni vecchie (`compose cp`
-        # scriveva da root in /tmp, dove root è proprietario). Nel percorso testuale
-        # nb1777-mcp non è mai stato toccato: niente rm lì (un exec in meno, e il test
-        # lo pretende).
-        host_txt.unlink(missing_ok=True)
+        # falliva con «Permission denied» (misurato sulla VPS il 27/09, 0.58.0). Nel
+        # percorso testuale nb1777-mcp non è mai stato toccato: niente rm lì (un exec in
+        # meno, e il test lo pretende). Il file nel volume dell'archivio lo toglie
+        # _indicizza_nel_lavoro.
         # un artefatto non l'abbiamo copiato noi: è di chi l'ha scaricato, resta
         if not testuale and not artefatto:
             run([*cc, "exec", "-T", "nb1777-mcp", "rm", "-f", nb_in], check=False)
-        run([*cc, "exec", "-u", "root", "-T", "gateway", "rm", "-f", gw_txt], check=False)
 
 
 # ─────────────────────────────────────────── secrets-status (età + scadenze)
@@ -4736,7 +4912,11 @@ def cmd_archive_ingest(repo: Path, args) -> int:
 # ingress.cloudflared) restano nella lista: se il file non c'è, il loop li salta.
 _SECRET_POLICY = [
     ("oauth_signing_secret", "oauth_signing_secret.txt", "Chiave firma JWT", 90, False,
-     "manuale: invalida i token attivi → i connettori si ri-autenticano / re-login admin"),
+     # i refresh token sono JWT firmati con la STESSA chiave (gateway: jwt_helpers.issue,
+     # oauth.py): dopo la rotazione nessuno vale più, e claude.ai non può rinnovarsi da
+     # solo. Il client registrato invece resta: si ri-autorizza, non si ricrea.
+     "manuale: invalida TUTTI i token, refresh compresi → riautorizza i connettori su "
+     "claude.ai (le URL non cambiano) / re-login admin e Mini App"),
     ("admin_password", "admin_password_bcrypt.txt", "Password admin", 90, False,
      "manuale: `tools/rotate-secret.sh admin_password` sull'host (vuoto = la genera forte)"),
     ("gateway_secret", "gateway_secret.txt", "Namespace URL MCP", 180, False,

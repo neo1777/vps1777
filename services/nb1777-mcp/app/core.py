@@ -89,7 +89,7 @@ def artifacts_dir() -> Path:
     p = Path(os.environ.get("NLM_ARTIFACTS") or ARTIFACTS_DIR_DEFAULT)
     p.mkdir(parents=True, exist_ok=True)
     if not os.access(p, os.W_OK):
-        raise NLMError(
+        raise GuastoDelServer(
             f"artefatti: {p} esiste ma NON è scrivibile da questo processo "
             f"(uid {os.getuid()}). Su un volume Docker il rimedio è dal HOST: "
             "chown 1000:1000 sul mountpoint del volume nlm-artifacts — dentro "
@@ -107,7 +107,7 @@ def safe_artifact_name(raw: Union[str, Path]) -> str:
     """
     name = _UNSAFE_NAME.sub("_", Path(str(raw)).name).lstrip(".")
     if not name:
-        raise NLMError(
+        raise ArgomentoNonValido(
             f"download: da '{raw}' non si ricava un nome file valido. "
             "Passa un nome semplice, es. 'round-15-audit.m4a'.")
     return name[:120]
@@ -170,6 +170,29 @@ class NLMError(RuntimeError):
 
 class NLMAuthError(NLMError):
     """La sessione Google del profilo sulla VPS non vale più (S7, 05/10/2026)."""
+
+
+class ArgomentoNonValido(NLMError, ValueError):
+    """Un valore del chiamante che nb1777 rifiuta PRIMA di chiamare nlm: un tipo che non
+    esiste, un formato senza ciò che gli serve, un id che non è nel notebook (12/10/2026).
+
+    Prima questi controlli alzavano un NLMError nudo, e il client leggeva [nlm] — «un
+    errore di NotebookLM» — per un argomento sbagliato suo. Resta un NLMError per chi lo
+    prende già così (le rotte interne degli artefatti, il censimento, studio_create_all_9),
+    ma `server.codice_errore` lo guarda prima e lo dice [argomento]. Gli errori che vengono
+    davvero da nlm (uscita del processo, output illeggibile) restano NLMError."""
+
+
+class AttesaScaduta(NLMError, TimeoutError):
+    """Un'attesa di nb1777 arrivata al suo tetto (studio_wait, 12/10/2026). Il testo
+    comincia col nome dell'attesa, non con «timeout »: senza un tipo suo `codice_errore` la
+    diceva [nlm]. Resta un NLMError per chi lo prende così (studio_create_all_9)."""
+
+
+class GuastoDelServer(NLMError):
+    """Un guasto del server di nb1777, non di nlm né di chi chiama: oggi la directory degli
+    artefatti non scrivibile (12/10/2026). `codice_errore` lo dice [interno]; resta un
+    NLMError per chi lo prende così (le rotte interne degli artefatti)."""
 
 
 # ── Riconoscere l'auth scaduta (S7) ─────────────────────────────────────────────────
@@ -550,7 +573,8 @@ def source_replace(nb_id: str, source_id: str, *, text: Optional[str] = None,
         raise ValueError("dammi il testo nuovo OPPURE l'url nuovo, uno dei due")
     vecchia = next((f for f in source_list(nb_id) if _source_id_of(f) == source_id), None)
     if vecchia is None:
-        raise NLMError(f"la fonte {source_id} non è nel notebook {nb_id}")
+        raise ArgomentoNonValido(f"la fonte {source_id} non è nel notebook {nb_id}: "
+                                 "source_list dà gli id che ci sono")
     titolo = title or str(vecchia.get("title") or "") or "fonte"
     if text is not None:
         nuovo = source_add_text(nb_id, text, titolo, wait=wait, timeout=timeout)
@@ -954,7 +978,8 @@ def studio_create_report(nb_id: str, *,
     Per 'Create Your Own' il parametro `prompt` è OBBLIGATORIO.
     """
     if format == "Create Your Own" and not prompt:
-        raise NLMError("report format='Create Your Own' richiede `prompt` non vuoto")
+        raise ArgomentoNonValido("report format='Create Your Own' richiede `prompt` non vuoto: "
+                                 "scrivi cosa deve contenere il report, o scegli un altro format")
     args = ["report", "create", nb_id,
             "--format", format, "--language", language, "--confirm"]
     if prompt:
@@ -1118,7 +1143,7 @@ def studio_wait(nb_id: str, artifact_id: str, *,
     if restituisci_al_tetto:
         return {**last, "in_corso": True,
                 "nota": "l'artefatto non è ancora pronto: richiama studio_wait (o studio_status)"}
-    raise NLMError(f"studio_wait timeout {timeout}s su {artifact_id}; ultimo stato: {last}")
+    raise AttesaScaduta(f"studio_wait timeout {timeout}s su {artifact_id}; ultimo stato: {last}")
 
 
 def studio_delete(nb_id: str, artifact_id: str) -> None:
@@ -1144,7 +1169,8 @@ def studio_download(kind: str, nb_id: str, output_path: Union[str, Path], *,
     """Scarica un artefatto sul filesystem. `kind` è il nome canonico interno (audio/video/...)."""
     cli_kind = _CLI_DOWNLOAD.get(kind)
     if not cli_kind:
-        raise NLMError(f"download: tipo non riconosciuto '{kind}'. Validi: {list(_CLI_DOWNLOAD)}")
+        raise ArgomentoNonValido(
+            f"download: tipo non riconosciuto '{kind}'. Validi: {list(_CLI_DOWNLOAD)}")
     # Il path del chiamante vale come NOME, non come destinazione (H6-bis, in cima
     # al file): il file nasce nella directory degli artefatti e da nessun'altra parte.
     output_path = artifacts_dir() / safe_artifact_name(output_path)
@@ -1205,9 +1231,9 @@ def artifact_path(name: str) -> Path:
     base = artifacts_dir().resolve()
     p = (base / safe_artifact_name(name)).resolve()
     if p.parent != base:
-        raise NLMError(f"artefatto: nome non ammesso '{name}'.")
+        raise ArgomentoNonValido(f"artefatto: nome non ammesso '{name}'.")
     if not p.is_file():
-        raise NLMError(f"artefatto: '{p.name}' non esiste fra quelli scaricati.")
+        raise ArgomentoNonValido(f"artefatto: '{p.name}' non esiste fra quelli scaricati.")
     return p
 
 
@@ -1335,11 +1361,13 @@ def _run_ricerca(args: list[str], *, timeout: float) -> dict:
 def research_start(nb_id: str, query: str, *, source: str = "web", mode: str = "fast") -> dict:
     """Avvia una ricerca di fonti nuove (web o Drive). Non tocca il notebook: trova."""
     if source not in RICERCA_FONTI:
-        raise NLMError(f"source {source!r}: vale {' o '.join(RICERCA_FONTI)}")
+        raise ArgomentoNonValido(f"source {source!r}: vale {' o '.join(RICERCA_FONTI)}")
     if mode not in RICERCA_MODI:
-        raise NLMError(f"mode {mode!r}: vale fast (~30 s, ~10 fonti) o deep (~5 min, ~40 fonti)")
+        raise ArgomentoNonValido(
+            f"mode {mode!r}: vale fast (~30 s, ~10 fonti) o deep (~5 min, ~40 fonti)")
     if mode == "deep" and source != "web":
-        raise NLMError("la ricerca deep cerca solo sul web: usa source='web' o mode='fast'")
+        raise ArgomentoNonValido(
+            "la ricerca deep cerca solo sul web: usa source='web' o mode='fast'")
     return _run_ricerca(["start", nb_id, query, "--source", source, "--mode", mode], timeout=120)
 
 
@@ -1422,7 +1450,7 @@ def note_create(nb_id: str, content: str, title: str = "") -> str:
 def note_update(nb_id: str, note_id: str, *, content: Optional[str] = None,
                 title: Optional[str] = None) -> None:
     if content is None and title is None:
-        raise NLMError("note_update: serve content, title o tutti e due")
+        raise ArgomentoNonValido("note_update: serve content, title o tutti e due")
     args = ["note", "update", nb_id, note_id]
     if content is not None:
         args += ["-c", content]

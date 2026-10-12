@@ -4,6 +4,48 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Un lucchetto comune per chi scrive l'archivio.** La coda d'indicizzazione e l'aggiornamento
+  notturno dell'indice potevano girare insieme sullo stesso DB, sommando i tetti di memoria (2g +
+  1300m). Ora `ingest-coda`, `indice-notturno`, `archive-ingest`, `archive-migra`,
+  `archive-migra-telegram` e `archive-retag` prendono `var/archivio.lock`, un lavoro o un DB alla
+  volta. Chi aspetta lo dice ed è in fila: chi ha appena lasciato il lucchetto non lo riprende
+  prima di lui. La coda aspetta senza consumare l'intent, e `/admin/archive` scrive «aspetta il suo
+  turno» invece di «nessuno l'ha preso». L'indice notturno aspetta al massimo 2 ore, poi lascia i DB
+  rimasti alla notte dopo. La unit `vps1777-ingest.service` passa da 6 a 12 ore di tetto.
+- **`vps1777 archive-ingest` non indicizza più dentro il gateway.** Il percorso testuale, gli
+  artefatti (`--artefatto`) e le trascrizioni di PDF e immagini passavano dal `/tmp` del gateway
+  (64 MB) e si indicizzavano lì, sotto il suo tetto di 512m. Ora il file va nel volume
+  dell'archivio e lo indicizza il servizio `ingest` (2g), come per i caricamenti dalla pagina.
+  `.markdown`, `.rst`, `.log` e `.csv` viaggiano come testo invece di essere rifiutati.
+- **L'installer guidato mostra l'URL vero con Caddy e Cloudflare.** L'URL finale e quelli dei
+  connettori erano `http://<IP>:8080`, chiuso con quei profili; ora sono `https://<dominio>`. Il
+  pannello e `deploy.sh` chiedono anche l'hostname pubblico del tunnel Cloudflare.
+- **`setup.sh` chiede il token del tunnel Cloudflare** senza mostrarlo e lo scrive in
+  `secrets/cloudflared_token.txt` (600). Senza token, il primo `up` falliva. Con Tailscale stampa
+  alla fine i comandi esatti per accendere il Funnel. Anche il token del bot si digita nascosto.
+- **Al cambio di `PUBLIC_BASE` si ricreano tutti i servizi che lo leggono**: il gateway,
+  nb1777-mcp e nb1777-bot. Prima si ricreava solo il gateway, e il bot apriva la Mini App
+  all'indirizzo vecchio.
+- **nb1777 distingue gli errori dell'utente da quelli di NotebookLM.** Un valore sbagliato che
+  nb1777 controlla da sé esce come `[argomento]` invece di `[nlm]`. I casi: `research_start` con
+  fonte o modo non validi, un report «Create Your Own» senza prompt, `studio_download` con un
+  `kind` sconosciuto, `note_save` senza niente da cambiare, `source_replace` su una fonte che non
+  c'è più. Il tetto di `studio_wait` esce come `[timeout]`, la cartella degli artefatti non
+  scrivibile come `[interno]`.
+- **La Mini App dice perché rifiuta.** La sessione scaduta (`init_data_expired`) e la firma che
+  non torna (`invalid_init_data`, quasi sempre una chiave vecchia dopo un cambio di token) ora
+  sono due errori diversi, con due rimedi diversi. Anche i due 503 hanno ciascuno il suo
+  messaggio: proprietario non configurato e chiave della Mini App assente.
+- **Messaggi che indicavano il rimedio sbagliato.**
+  - Il bot, senza `TELEGRAM_OWNER_ID`, consigliava `restart`, che non rilegge il `.env`: ora dice
+    di ricreare.
+  - `setup.sh` col token vuoto diceva che il bot non sarebbe partito: parte, in attesa.
+  - `rotate-secret.sh oauth_signing_secret` prometteva che claude.ai avrebbe rinnovato i token, ma
+    anche i refresh token sono firmati con quella chiave: i connettori vanno riautorizzati.
+- **`plugins/example-bot`**: il venv nasceva in `/build/.venv` e gli script puntavano lì. Ora segue
+  lo schema di `example-mcp`.
+
 ## [0.87.0] — 2026-10-12
 
 **La documentazione riletta tutta contro il codice, un presidio che fa diventare rosso un nome citato e inesistente, e tre difetti trovati per strada (il ruolo dei DB ora è nel backup).**

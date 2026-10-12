@@ -80,9 +80,9 @@ services:
     pids_limit: 256
     cpus: 2.0
     # P16 (11/10/2026): l'indicizzazione di /admin/archive, archive-migra e archive-retag
-    # non gira più qui ma nel servizio `ingest`, e il tetto si può mettere. ECCEZIONE:
-    # `vps1777 archive-ingest` indicizza ancora con `exec` in QUESTO container
-    # (app.archive_indexer), quindi dentro questi 512m. Picco misurato senza ingest: 112 MB (memory.peak dopo 4 ore
+    # non gira più qui ma nel servizio `ingest`, e il tetto si può mettere. Dal 12/10 anche
+    # `vps1777 archive-ingest`: qui fa solo da tramite (un `cat` che scrive il file nel
+    # volume dell'archivio), indicizza `ingest`. Picco misurato senza ingest: 112 MB (memory.peak dopo 4 ore
     # di 0.83.0, anon 39 MB); 512m lascia più di quattro volte il margine.
     mem_limit: 512m
     memswap_limit: 512m
@@ -230,8 +230,8 @@ services:
       # strutturale — il kernel la fa rispettare.
       # Verificato che i DB sono in journal_mode=delete (non WAL): senza WAL non
       # servono i file -wal/-shm, che con un mount :ro fallirebbero. A scrivere
-      # i .db sono il job `ingest` e il gateway (drop-in, description, ruolo,
-      # `archive-ingest`; monta :rw, sopra), non questo servizio.
+      # i .db sono il job `ingest` (coda, `archive-ingest`, migra, retag) e il gateway
+      # (drop-in, description, ruolo; monta :rw, sopra), non questo servizio.
       - archive-data:/var/lib/archive:ro
     networks:
       - backend
@@ -272,8 +272,10 @@ services:
 
   # L'indicizzazione dell'archivio come lavoro a parte (P16, 11/10/2026): lo lancia
   # `vps1777 ingest-coda` (dalla path unit, quando /admin/archive mette un file in coda)
-  # e i comandi `archive-migra` / `archive-retag` della CLI, con `compose run --rm`
-  # (`archive-ingest` no: indicizza con `exec` nel gateway). Non parte con `up`.
+  # e i comandi `archive-ingest` / `archive-migra` / `archive-retag` della CLI, con
+  # `compose run --rm`. Non parte con `up`. Non gira mai insieme a `indice-notturno`: la
+  # CLI li mette in fila col lucchetto dell'archivio (var/archivio.lock), e i due tetti
+  # (2g + 1300m) non si sommano.
   # Stessa immagine del gateway, ma niente secret, niente onboarding, niente porte: monta
   # solo il volume dell'archivio. Il tetto è il punto: un conversations.json si carica
   # tutto. Misurato: 3,4 volte il file su uno sintetico (221 MB → 745 MB, 11/10), 4 volte

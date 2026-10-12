@@ -21,8 +21,10 @@ Group=@OPERATOR_USER@
 Environment=VPS1777_HOME=@REPO@
 WorkingDirectory=@REPO@
 ExecStart=/usr/local/bin/vps1777 ingest-coda
-# un bundle grosso con l'OCR delle immagini può chiedere più di un'ora
-TimeoutStartSec=6h
+# un bundle grosso con l'OCR delle immagini può chiedere più di un'ora; e ogni lavoro
+# aspetta il lucchetto dell'archivio, che l'indice notturno tiene fino a 6 ore per DB
+# (`vps1777 indice-notturno`): 12 ore coprono un'attesa intera più un lavoro lungo
+TimeoutStartSec=12h
 Nice=10
 NoNewPrivileges=true
 ProtectHome=read-only
