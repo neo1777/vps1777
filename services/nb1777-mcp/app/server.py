@@ -498,6 +498,15 @@ def _da_json_o_testo(uscita: str, *, campo: str = "testo") -> dict:
     return d if isinstance(d, dict) else {campo: uscita}
 
 
+def _con_source_id(fn):
+    """I source_add_* di core danno l'id nudo: il lavoro lo restituisce come oggetto, così è
+    lo stesso sia subito sia quando lo ritira lavoro_esito."""
+    @functools.wraps(fn)
+    def dentro(*a, **k) -> dict:
+        return {"source_id": fn(*a, **k)}
+    return dentro
+
+
 def _creato(tipo: str, notebook_id: str, artifact_id: str) -> dict:
     return {"artifact_id": artifact_id, "notebook_id": notebook_id, "tipo": tipo}
 
@@ -553,34 +562,34 @@ async def source_list(notebook_id: str) -> list[esiti.Fonte]:
 
 @mcp.tool()
 async def source_add_url(notebook_id: str, url: str, title: Optional[str] = None,
-                         wait: bool = True, attesa_max: float = 25.0) -> str | dict:
-    """Aggiunge una URL come fonte. Ritorna il source_id.
+                         wait: bool = True, attesa_max: float = 25.0) -> esiti.FonteAggiunta:
+    """Aggiunge una URL come fonte. Ritorna {source_id}.
 
     ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
     torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
     o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
     return await _lungo("source_add_url", ("source_add_url", notebook_id, url, title, wait),
-                        notebook_id, attesa_max, core.source_add_url, notebook_id, url,
+                        notebook_id, attesa_max, _con_source_id(core.source_add_url), notebook_id, url,
                         title=title, wait=wait)
 
 
 @mcp.tool()
 async def source_add_text(notebook_id: str, text: str, title: str, wait: bool = True,
-                          attesa_max: float = 25.0) -> str | dict:
-    """Aggiunge testo libero come fonte (richiede titolo). Ritorna il source_id.
+                          attesa_max: float = 25.0) -> esiti.FonteAggiunta:
+    """Aggiunge testo libero come fonte (richiede titolo). Ritorna {source_id}.
 
     ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
     torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
     o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
     return await _lungo("source_add_text", ("source_add_text", notebook_id, title, hash(text), wait),
-                        notebook_id, attesa_max, core.source_add_text, notebook_id, text, title,
+                        notebook_id, attesa_max, _con_source_id(core.source_add_text), notebook_id, text, title,
                         wait=wait)
 
 
 @mcp.tool()
 async def source_add_file(notebook_id: str, file_path: str,
                           title: Optional[str] = None, wait: bool = True,
-                          attesa_max: float = 25.0) -> str | dict:
+                          attesa_max: float = 25.0) -> esiti.FonteAggiunta:
     """Carica un file come fonte (PDF/txt/md...).
 
     `file_path` è un path del filesystem del SERVER (il container nb1777-mcp),
@@ -592,36 +601,36 @@ async def source_add_file(notebook_id: str, file_path: str,
     torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
     o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
     return await _lungo("source_add_file", ("source_add_file", notebook_id, file_path, title, wait),
-                        notebook_id, attesa_max, core.source_add_file, notebook_id, file_path,
+                        notebook_id, attesa_max, _con_source_id(core.source_add_file), notebook_id, file_path,
                         title=title, wait=wait)
 
 
 @mcp.tool()
 async def source_add_youtube(notebook_id: str, url: str, wait: bool = True,
-                             attesa_max: float = 25.0) -> str | dict:
-    """Aggiunge un video YouTube come fonte. Ritorna il source_id.
+                             attesa_max: float = 25.0) -> esiti.FonteAggiunta:
+    """Aggiunge un video YouTube come fonte. Ritorna {source_id}.
 
     ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
     torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
     o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
     return await _lungo("source_add_youtube", ("source_add_youtube", notebook_id, url, wait),
-                        notebook_id, attesa_max, core.source_add_youtube, notebook_id, url,
+                        notebook_id, attesa_max, _con_source_id(core.source_add_youtube), notebook_id, url,
                         wait=wait)
 
 
 @mcp.tool()
 async def source_add_drive(notebook_id: str, document_id: str,
                            doc_type: str = "doc", wait: bool = True,
-                           attesa_max: float = 25.0) -> str | dict:
+                           attesa_max: float = 25.0) -> esiti.FonteAggiunta:
     """Collega un Google Drive document_id come fonte. doc_type: doc|slides|sheets|pdf.
-    Ritorna il source_id.
+    Ritorna {source_id}.
 
     ⏱️ Aspetta al massimo `attesa_max` secondi (default 25, tetto 270): se non ha finito
     torna {stato: "in_corso", job_id} e il lavoro continua; ritiralo con lavoro_esito(job_id)
     o rilancia la stessa chiamata. Le scritture su uno stesso notebook vanno una alla volta."""
     return await _lungo("source_add_drive",
                         ("source_add_drive", notebook_id, document_id, doc_type, wait),
-                        notebook_id, attesa_max, core.source_add_drive, notebook_id,
+                        notebook_id, attesa_max, _con_source_id(core.source_add_drive), notebook_id,
                         document_id, doc_type=doc_type, wait=wait)
 
 
@@ -850,12 +859,13 @@ async def notebook_query_esito(query_id: str, attesa_max: float = 25.0) -> esiti
 
 
 @mcp.tool()
-async def lavoro_esito(job_id: str, attesa_max: float = 25.0) -> str | esiti.Lavoro:
+async def lavoro_esito(job_id: str, attesa_max: float = 25.0) -> esiti.Lavoro:
     """Ritira un lavoro lungo tornato {stato: "in_corso", job_id} (source_add_*,
     studio_download, studio_create_all_9). Aspetta al massimo `attesa_max` secondi (default 25,
     tetto 270): ritorna il risultato del tool originale, di nuovo «in_corso», o il suo errore.
     Un job_id sconosciuto è un errore: già ritirato, scaduto (30 minuti) o perso a un riavvio."""
-    return await _esito("lavoro_esito", lavori.aspetta(job_id, attesa_max))
+    r = await _esito("lavoro_esito", lavori.aspetta(job_id, attesa_max))
+    return r if isinstance(r, dict) else {"stato": "fatto", "risultato": r}
 
 
 # ============================================================

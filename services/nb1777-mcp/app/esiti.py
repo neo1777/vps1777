@@ -112,6 +112,12 @@ class Lavoro(Esito):
     job_id: str | None = None
     lavoro: str | None = None
     nota: str | None = None
+    risultato: Any = Field(None, description="il risultato quando non è un oggetto (raro)")
+
+
+class FonteAggiunta(Lavoro):
+    """source_add_*: l'id della fonte nuova, oppure `stato: in_corso` col job_id."""
+    source_id: Any = Field(None, description="l'id della fonte aggiunta")
 
 
 class Ricerca(Esito):

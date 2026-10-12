@@ -79,3 +79,29 @@ def test_se_nlm_non_da_json_il_testo_resta(monkeypatch, finto):
     assert _chiama(server.source_get_content, "nb", "s1") == {"content": "testo nudo"}
     monkeypatch.setattr(core, "nb_describe", lambda nb: "[1, 2]")
     assert _chiama(server.nb_describe, "nb") == {"testo": "[1, 2]"}
+
+
+# ── i source_add_* e lavoro_esito (12/10/2026): l'id dentro un oggetto, anche dopo un ritiro ──
+
+def test_nessuna_uscita_e_un_unione_con_una_stringa():
+    """`str | dict` dava allo schema un `result` con anyOf: chi chiamava riceveva un id nudo
+    o un oggetto a seconda del tempo. Ora i source_add_* e lavoro_esito danno sempre oggetti."""
+    for nome, t in _tools().items():
+        props = (t.output_schema or {}).get("properties", {})
+        varianti = props.get("result", {}).get("anyOf", [])
+        assert not any(v.get("type") == "string" for v in varianti), nome
+
+
+def test_source_add_da_un_oggetto_subito_e_dopo_il_ritiro(monkeypatch):
+    monkeypatch.setattr(server, "_check_auth_or_raise", lambda: None)
+    monkeypatch.setattr(core, "source_add_text", lambda nb, text, title, **k: "src-9")
+    out = _chiama(server.source_add_text, "nb", "testo", "titolo", attesa_max=5)
+    assert out == {"source_id": "src-9"}
+
+
+def test_lavoro_esito_avvolge_un_risultato_che_non_e_un_oggetto(monkeypatch):
+    async def finto(jid, attesa):
+        return "un-id"
+
+    monkeypatch.setattr(server.lavori, "aspetta", finto)
+    assert _chiama(server.lavoro_esito, "j1") == {"stato": "fatto", "risultato": "un-id"}
