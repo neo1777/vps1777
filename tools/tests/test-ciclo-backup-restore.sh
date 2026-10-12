@@ -92,7 +92,7 @@ printf 'dato beta\n'               > "$TMP/volumi/${MARCA}-beta/tre.txt"
 printf 'dato gamma, archivio\n'    > "$TMP/volumi/${VOL_ARCHIVIO}/db/quattro.txt"
 if command -v sqlite3 >/dev/null; then
   sqlite3 "$TMP/volumi/${VOL_ARCHIVIO}/db/prova.db" \
-    "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); INSERT INTO meta VALUES('description','scheda di prova, riga uno');"
+    "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); INSERT INTO meta VALUES('description','scheda di prova, riga uno'); INSERT INTO meta VALUES('ruolo','riservato');"
 fi
 ATTESO="$(cd "$TMP/volumi" && find . -type f -print0 | sort -z \
           | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
@@ -164,6 +164,12 @@ if command -v sqlite3 >/dev/null; then
     ok "la description del DB è nel core (descrizioni/prova.txt): l'unica parte non rigenerabile dell'archivio viaggia ogni notte"
   else
     ko "la description del DB NON è nel core (descrizioni/prova.txt manca o è vuota)"
+  fi
+  # 12/10/2026: anche il ruolo, che decide se un DB entra nelle ricerche di default
+  if grep -qx 'riservato' "$TMP/core-aperto/ruoli/prova.txt" 2>/dev/null; then
+    ok "il ruolo del DB è nel core (ruoli/prova.txt): un riservato resta riservato dopo un restore"
+  else
+    ko "il ruolo del DB NON è nel core (ruoli/prova.txt manca o è diverso)"
   fi
 else
   info "⚪ sqlite3 assente qui: l'export delle description non è provato (backup.sh lo dichiara nel log)"

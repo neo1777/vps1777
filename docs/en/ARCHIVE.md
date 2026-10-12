@@ -32,9 +32,9 @@ nobody gets in. The DB on disk is **in clear text**: there is no content
 encryption.
 
 **On output there is a partial redaction, and it must be stated at its true size**
-(since 02/08/2026, on by default; it is switched off only with `ARCHIVE_REDACT=0`
-in the environment of the `archive-mcp` service, which `compose.yaml` does not take from
-`.env`: it needs a compose override). Every response of every tool goes through a masking
+(since 02/08/2026, on by default; it is switched off only with `ARCHIVE_REDACT=0` in `.env`,
+which `compose.yaml` passes to `archive-mcp` since 0.87.0: before, it did not, and a compose
+override was needed). Every response of every tool goes through a masking
 step that covers:
 
 - **identifiers in a recognisable format** — emails and phone numbers — wherever

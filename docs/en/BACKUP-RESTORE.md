@@ -20,11 +20,10 @@ separated by the nature of the data — because 99.99% of the weight is regenera
 > **irreplaceable**. We were paying 9.7 GB a night to protect 250 KB (≈ 70 GB at steady
 > state on a 118 GB disk). What re-ingest does **not**
 > regenerate is the hand-written DB cards. The `description` (`set_description`) travels
-> every night in the core for this reason, in `descrizioni/<db>.txt`. The **`ruolo`**
-> (`set_ruolo`, since #278) does not: it lives only inside the DB, so it comes back with a
-> restore of the archive backup but not with a re-ingest from the sources. After a
-> re-ingest it has to be declared again by hand, and until you do, a DB that was
-> `riservato` goes back to `non dichiarato` and enters the default search perimeter.
+> every night in the core for this reason, in `descrizioni/<db>.txt`. Since 0.87.0 the
+> **`ruolo`** (`set_ruolo`, since #278) does too, in `ruoli/<db>.txt`: before, it lived only
+> inside the DB, and after a re-ingest from the sources a `riservato` DB went back to
+> `non dichiarato` and entered the default search perimeter.
 > Owner decision: *«basta n, n-1 per paranoia… dobbiamo
 > farci stare quel che serve»* ("n, n-1 is enough for paranoia… we have to fit what we
 > need"). Between one archive backup and the next the net is double: the sources off the
@@ -184,8 +183,9 @@ Steps:
 If you **regenerate the archive from the sources** instead of restoring it (re-ingest of
 the bundles), you'll find the DB `description` files in the core under
 `descrizioni/<db>.txt` — they can be reapplied with `set_description` from the
-connector, or from the panel. The DBs' `ruolo`, instead, is not in the core: declare it
-again with `set_ruolo` from the connector (the panel shows it, it doesn't write it).
+connector, or from the panel. The `ruolo` is in `ruoli/<db>.txt` (since 0.87.0): reapply
+it with `set_ruolo` from the connector (the panel shows it, it doesn't write it). **Do it
+before searching**: until it is reapplied, a reserved DB is in the default perimeter.
 
 Default: interactive (asks for confirmation). Flags:
 

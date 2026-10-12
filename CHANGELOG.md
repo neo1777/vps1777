@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Il ruolo dei DB ora è nel backup.** `tools/backup.sh` esportava ogni notte la `description`
+  dei DB ma non il `ruolo` (#278): dopo un restore-da-fonti un DB `riservato` tornava `non
+  dichiarato` ed entrava nelle ricerche di default. Ora va in `ruoli/<db>.txt` nel core, e il
+  test del ciclo backup/restore lo prova.
+- **I 30 minuti dei lavori lunghi di nb1777 contano dalla fine.** Contati dalla partenza, un
+  lavoro di più di 30 minuti (un censimento) perdeva il risultato appena un altro lavoro partiva.
+- **`ARCHIVE_REDACT=0` nel `.env` non spegneva niente**: `compose.yaml` non lo passava ad
+  archive-mcp. Ora lo passa.
+
 ### Documentazione
 - **Tutta la documentazione riletta contro il codice (12/10/2026).** Quindici verifiche parallele
   hanno controllato ogni affermazione concreta: comandi e flag, tool e parametri, variabili, percorsi,
