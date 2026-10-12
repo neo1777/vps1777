@@ -85,7 +85,7 @@ Se rilanci `setup.sh`, salta gli step già fatti.
 3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **55** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
 4. **Bot Telegram**: `/start` al tuo bot
 5. **Mini App**: nel bot, bottone **Pannello** accanto al campo di testo (o
-   `/pannello`) → la plancia mobile: notebook, archivio, secret, update.
+   `/start`) → la plancia mobile: notebook, archivio, secret, update.
    Richiede `PUBLIC_BASE` https. Vedi [MINIAPP.md](MINIAPP.md).
 6. **Ricerca per senso** (facoltativa): `search_ibrida` trova ciò di cui ricordi il
    senso e non la parola. Servono il modello (`vps1777 indice-modello`, scarica e

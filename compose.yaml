@@ -375,12 +375,10 @@ services:
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
       TELEGRAM_OWNER_ID: ${TELEGRAM_OWNER_ID}
       GATEWAY_PUBLIC_BASE: ${PUBLIC_BASE:-http://gateway:8080}
-      NB1777_MCP_URL: http://nb1777-mcp:8003/mcp
       # Segreto condiviso per chiedere a nb1777-mcp se il profilo nlm c'è (H6).
+      # (Dal 12/10/2026 il bot non chiama più i tool di nb1777: niente NB1777_MCP_URL, e
+      #  BOT_RAG_COMMANDS non c'è più, perché i comandi che passavano da Telegram sono tolti.)
       GATEWAY_SECRET_FILE: /run/secrets/gateway_secret
-      # BOT_RAG_COMMANDS=0 disattiva /lista e /chiedi (che passano da Telegram):
-      # massima privacy = solo Mini App. Default: attivi.
-      BOT_RAG_COMMANDS: ${BOT_RAG_COMMANDS:-true}
     secrets:
       - telegram_bot_token
       - gateway_secret

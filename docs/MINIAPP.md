@@ -1,7 +1,7 @@
 # Mini App Telegram — la plancia mobile
 
 La Mini App è il pannello di controllo di vps1777 **dentro Telegram**: si apre
-dal bot (bottone **Pannello** accanto al campo di testo, o `/pannello`) e non
+dal bot (bottone **Pannello** accanto al campo di testo, o quello che manda `/start`) e non
 chiede password — l'identità arriva da Telegram, verificata dal server.
 
 ## Divisione delle superfici (perché non è un doppione)
@@ -124,7 +124,7 @@ messaggio chiaro.
   `bot_token_not_configured`.
 - **HTTPS obbligatorio**: Telegram apre le Mini App solo su URL https con
   certificato valido. Con `PUBLIC_BASE` non-https il bot non mostra il bottone
-  (e `/pannello` spiega il perché).
+  (e `/start` spiega il perché).
 - Il **menu button** del bot viene impostato automaticamente all'avvio del bot
   (`set_chat_menu_button` → "Pannello" → `PUBLIC_BASE/app`). Non serve
   configurare nulla in BotFather; se in BotFather esiste una *Main Mini App* o

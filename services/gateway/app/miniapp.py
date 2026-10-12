@@ -809,7 +809,7 @@ function show(tab){
 }
 function needTelegram(){
   view.innerHTML = '<div class="card"><div class="empty">Questa sezione richiede '+
-    'l\'apertura <b>dal bot Telegram</b> (bottone “Pannello” o /pannello).</div></div>';
+    'l\'apertura <b>dal bot Telegram</b> (bottone “Pannello” o /start).</div></div>';
 }
 
 // ══ TAB: Stato ══

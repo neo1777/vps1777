@@ -362,9 +362,11 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
 
 - **Retention dell'audit** (`v0.24.0`): `AUDIT_RETENTION_DAYS` (default 90) con
   pruning opportunistico — l'audit non cresce all'infinito.
-- **Comandi RAG del bot disattivabili** (`v0.24.0`): `BOT_RAG_COMMANDS=0` spegne
-  `/lista`·`/chiedi` (che passerebbero da Telegram). Con la sola Mini App i
-  notebook non transitano da terzi — vedi la tabella *Flussi di dati verso terzi*.
+- **Niente comandi RAG nel bot** (dalla `v0.86.0`; prima, dalla `v0.24.0`, erano
+  disattivabili con `BOT_RAG_COMMANDS=0`): `/lista` e `/chiedi`, che facevano passare
+  titoli e risposte dai server di Telegram, sono tolti. Il bot ha solo `/start`; i
+  notebook si interrogano dalla Mini App, che non li fa transitare da terzi — vedi la
+  tabella *Flussi di dati verso terzi*.
 
 ### Canale di aggiornamento
 
@@ -420,13 +422,13 @@ sopra non esce affatto.
 | Quando | Cosa esce | Verso | Note |
 |---|---|---|---|
 | Domanda RAG, aggiunta fonte, OCR (nb1777) | domande, contenuto delle fonti, documenti | **Google (NotebookLM)** | l'OCR manda il documento intero; è il funzionamento di NotebookLM |
-| Comandi **testuali** del bot (`/lista`, `/chiedi`) | titoli notebook, risposte RAG | **Telegram** | la Bot API **non è E2E**; disattivabili con `BOT_RAG_COMMANDS=0` |
+| Comandi **testuali** del bot | — | — | tolti dalla v0.86.0 (prima `/lista` e `/chiedi` facevano passare titoli e risposte da **Telegram**, che non è E2E) |
 | Mini App (`/app/*`) | — | **nessun terzo** | parla solo col tuo gateway: è la superficie più privata |
 | Notifiche update (opzionali) | "v… disponibile" | **Telegram** | solo se `--notify` |
 | Check versione | — | GitHub | GET pubblica, nessun dato personale |
 
-**Massima privacy**: imposta `BOT_RAG_COMMANDS=0` e usa la Mini App per i notebook
-(non fa passare nulla da Telegram); l'archivio (`archive1777`) e il gateway restano
+**Massima privacy** è il default dalla v0.86.0: i notebook si interrogano solo dalla Mini
+App (non fa passare nulla da Telegram); l'archivio (`archive1777`) e il gateway restano
 interamente sulla VPS.
 
 ## Residui noti — cosa NON è ancora chiuso

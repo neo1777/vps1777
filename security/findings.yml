@@ -446,11 +446,12 @@ findings:
     since: v0.24.0
     evidence:
       - file: SECURITY.md
-        contains: ["Flussi di dati verso terzi", "BOT_RAG_COMMANDS"]
-      - file: services/nb1777-bot/app/settings.py
-        contains: ["bot_rag_commands"]
+        contains: ["Flussi di dati verso terzi", "Niente comandi RAG nel bot"]
       - file: services/nb1777-bot/app/bot.py
-        contains: ["_rag_disabled"]
+        contains: ['COMANDI = ("start",)']
+    note: >
+      Dalla v0.86.0 (scelta di Neo del 12/10/2026) il flag non serve più: i comandi /lista e
+      /chiedi sono tolti, il bot ha solo /start e i notebook passano solo dalla Mini App.
 
   - id: H20
     severity: medium

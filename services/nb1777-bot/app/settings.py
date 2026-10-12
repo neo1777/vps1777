@@ -38,7 +38,6 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_owner_id: IntOrZero = 0
     gateway_public_base: str = ""
-    nb1777_mcp_url: str = "http://nb1777-mcp:8003/mcp"
     # Il profilo NotebookLM (cookie Google) NON è più montato qui (H6): lo
     # possiede nb1777-mcp. Il bot chiede solo «c'è un profilo?» su rete interna,
     # autenticandosi col segreto condiviso.
@@ -46,10 +45,6 @@ class Settings(BaseSettings):
     gateway_secret_file: SecretFromFile = ""
     gateway_secret: str = ""   # override via env in dev
     log_level: str = "INFO"
-    # I comandi RAG testuali (/lista, /chiedi) fanno transitare titoli e risposte
-    # dai server Telegram (Bot API non è E2E). Chi vuole la massima privacy li
-    # disabilita e usa la Mini App (che parla solo col gateway). Default: attivi.
-    bot_rag_commands: bool = True
 
     @property
     def effective_token(self) -> str:

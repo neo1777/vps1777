@@ -477,10 +477,10 @@ jobs:
         run: uv run --with pytest pytest tests_runtime/ -v
       - name: Test archive-mcp FTS (stdlib-only)
         run: uvx pytest services/archive-mcp/tests/ -v
-      # P12 (11/10/2026): il bot non aveva test. Le parti pure (formato.py) girano qui; i
-      # comandi importano python-telegram-bot, saltano qui (importorskip) e girano nello
-      # step dopo, con le deps del lock.
-      - name: Test nb1777-bot formato (stdlib-only)
+      # P12 (11/10/2026): il bot non aveva test. Qui girano le parti stdlib (il log senza
+      # token); /start importa python-telegram-bot, salta qui (importorskip) e gira nello
+      # step dopo, con le deps del lock. (formato.py è stato tolto con /lista e /chiedi.)
+      - name: Test nb1777-bot (stdlib-only)
         run: uvx pytest services/nb1777-bot/tests/ -v
       - name: Test nb1777-bot comandi (deps del lock)
         working-directory: services/nb1777-bot

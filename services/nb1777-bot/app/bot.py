@@ -1,13 +1,11 @@
 """
-Telegram bot — owner-only, 5 comandi: /start, /aiuto, /pannello, /lista, /chiedi.
+Telegram bot — owner-only, un comando solo: /start, che risponde col bottone del pannello.
 
-P12 (11/10/2026): /lista mostra i notebook come bottoni e il tocco sceglie quello su cui
-/chiedi interroga; la risposta è formattata con le fonti; un errore arriva col suo messaggio.
-Le parti pure stanno in `formato.py`.
-
-Il resto passa dalla Mini App (/pannello). Estendere il bot verso i ~60 comandi del
-vecchio nb1777/bot.py è una decisione aperta (docs/roadmap/prompt-c2-bot-expansion.md),
-non un lavoro in corso.
+Dal 12/10/2026 (scelta di Neo `2026-10-12-soglia-comandi-bot`) il bot non fa più domande ai
+notebook in chat: /aiuto, /pannello, /lista e /chiedi sono stati tolti. Tutto passa dalla
+Mini App (il bottone «Pannello» accanto al campo di testo, o quello che manda /start), che
+parla solo col gateway: i titoli dei notebook e le risposte non passano più dai server di
+Telegram. Restano il trasporto delle notifiche e il bottone «✓ Fatto» del promemoria cloud.
 """
 from __future__ import annotations
 
@@ -16,7 +14,7 @@ import logging
 import os
 from functools import wraps
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Awaitable, Callable
 
 import httpx
 from telegram import (
@@ -34,7 +32,6 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from . import formato
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -84,36 +81,6 @@ def owner_only(
     return wrapper
 
 
-async def chiama_tool(tool: str, args: dict[str, Any] | None = None, *,
-                      timeout: float = 300.0) -> list[str]:
-    """Chiama un tool di nb1777 via streamable-http (single-shot, senza sessione) e ritorna
-    i blocchi di testo. Ogni guasto, di rete, HTTP, JSON-RPC o del tool, solleva
-    `formato.ErroreMCP` con un messaggio da mostrare (P12: prima diventava «Risposta
-    vuota.»). Il timeout di default resta sopra il tetto di notebook_query (270 s)."""
-    s = get_settings()
-    payload = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {"name": tool, "arguments": args or {}},
-    }
-    # MCP streamable-http: l'Accept DEVE includere ENTRAMBI i tipi, altrimenti
-    # il server risponde 406 Not Acceptable.
-    headers = {
-        "Accept": "application/json, text/event-stream",
-        "Content-Type": "application/json",
-    }
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=5.0)) as client:
-            resp = await client.post(s.nb1777_mcp_url, json=payload, headers=headers)
-    except httpx.RequestError as exc:
-        log.warning("mcp %s: %s", tool, exc)
-        raise formato.ErroreMCP(f"nb1777 non raggiungibile ({type(exc).__name__})") from exc
-    if resp.status_code != 200:
-        raise formato.ErroreMCP(f"nb1777 ha risposto HTTP {resp.status_code} a {tool}")
-    return formato.testi(formato.payload_rpc(resp.headers.get("content-type", ""), resp.text))
-
-
 # ───── comandi ─────
 
 def _miniapp_url() -> str | None:
@@ -123,20 +90,9 @@ def _miniapp_url() -> str | None:
     return f"{base}/app" if base.startswith("https://") else None
 
 
-@owner_only
-async def cmd_pannello(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.effective_message
-    if not msg:
-        return
-    url = _miniapp_url()
-    if not url:
-        await msg.reply_text(
-            "Il pannello richiede il gateway su HTTPS pubblico "
-            "(PUBLIC_BASE non è https). Configuralo e riprova."
-        )
-        return
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎛 Apri il pannello", web_app=WebAppInfo(url=url))]])
-    await msg.reply_text("Il tuo pannello di controllo vps1777:", reply_markup=kb)
+# I comandi del bot: uno. Un test lo controlla contro i gestori registrati.
+COMANDI = ("start",)
+
 
 @owner_only
 async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -157,195 +113,22 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode=ParseMode.MARKDOWN,
         )
         return
+    url = _miniapp_url()
+    if not url:
+        await msg.reply_text(
+            "Ciao. Sono il bot nb1777. Il pannello richiede il gateway su HTTPS pubblico "
+            "(PUBLIC_BASE non è https): configuralo e riprova /start.")
+        return
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎛 Apri il pannello", web_app=WebAppInfo(url=url))]])
     await msg.reply_text(
-        "Ciao. Sono il bot nb1777 — ponte tra te e NotebookLM.\n"
-        "Scrivi /aiuto per l'elenco comandi."
-    )
-
-
-@owner_only
-async def cmd_aiuto(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.effective_message
-    if not msg:
-        return
-    await msg.reply_text(
-        "*Comandi nb1777*\n\n"
-        "/pannello — apri il pannello di controllo (Mini App)\n"
-        "/lista — i tuoi notebook, tocca per sceglierne uno\n"
-        "/chiedi `<domanda>` — domanda sul notebook scelto (o `<id> <domanda>`)\n"
-        "/aiuto — questo messaggio\n"
-        "\n_MVP. La versione completa con tutti i comandi arriva in F8._",
-        parse_mode=ParseMode.MARKDOWN,
-    )
-
-
-async def _rag_disabled(msg) -> bool:
-    """True (e avvisa) se i comandi RAG testuali sono disattivati. Passano dai
-    server Telegram (Bot API non è E2E): chi vuole privacy usa la Mini App."""
-    if get_settings().bot_rag_commands:
-        return False
-    await msg.reply_text(
-        "I comandi RAG testuali sono disattivati per privacy — passerebbero dai "
-        "server Telegram. Usa /pannello (Mini App): parla solo col tuo gateway."
-    )
-    return True
-
-
-def _markup(righe: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton(t, callback_data=d) for t, d in riga]
-                                 for riga in righe])
-
-
-async def _elenco(ctx: ContextTypes.DEFAULT_TYPE) -> list[dict[str, str]]:
-    """I notebook da nb_list, tenuti in `user_data` per i bottoni (la pagina successiva
-    e il titolo del notebook scelto non rifanno la chiamata)."""
-    nbs = formato.notebook(await chiama_tool("nb_list", timeout=60.0))
-    ctx.user_data["elenco"] = nbs
-    return nbs
-
-
-@owner_only
-async def cmd_lista(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    msg = update.effective_message
-    if not msg:
-        return
-    if await _rag_disabled(msg):
-        return
-    try:
-        nbs = await _elenco(ctx)
-    except formato.ErroreMCP as exc:
-        await msg.reply_text(f"⚠️ {exc}")
-        return
-    if not nbs:
-        await msg.reply_text("Nessun notebook su questo account.")
-        return
-    # testo semplice e titoli nei bottoni: i titoli sono arbitrari e romperebbero il Markdown
-    await msg.reply_text(f"I tuoi notebook ({len(nbs)}). Tocca per sceglierlo:",
-                         reply_markup=_markup(formato.tastiera(nbs)))
-
-
-@owner_only
-async def cmd_chiedi(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """/chiedi <domanda> sul notebook scelto; /chiedi <id> <domanda> come prima. Senza
-    un notebook scelto la domanda resta in attesa e arrivano i bottoni per sceglierlo."""
-    msg = update.effective_message
-    if not msg:
-        return
-    if await _rag_disabled(msg):
-        return
-    args = ctx.args or []
-    if len(args) >= 2 and formato.e_id_notebook(args[0]):
-        await _rispondi(msg, ctx, {"id": args[0], "title": ""}, " ".join(args[1:]))
-        return
-    domanda = " ".join(args).strip()
-    scelto = ctx.user_data.get("notebook")
-    if scelto and domanda:
-        await _rispondi(msg, ctx, scelto, domanda)
-        return
-    if scelto:
-        await msg.reply_text(f"Notebook: {scelto['title'] or scelto['id']}. "
-                             "Scrivi /chiedi <domanda>, o /lista per cambiarlo.")
-        return
-    try:
-        nbs = await _elenco(ctx)
-    except formato.ErroreMCP as exc:
-        await msg.reply_text(f"⚠️ {exc}")
-        return
-    if not nbs:
-        await msg.reply_text("Nessun notebook su questo account.")
-        return
-    if domanda:
-        ctx.user_data["in_attesa"] = domanda
-    await msg.reply_text("Su quale notebook?" if domanda else
-                         "Scegli il notebook, poi /chiedi <domanda>:",
-                         reply_markup=_markup(formato.tastiera(nbs)))
-
-
-async def cmd_scelta(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Tap su un notebook (`nb:<id>`) o su una pagina (`nbp:<n>`). Owner-only come /ack."""
-    q = update.callback_query
-    if q is None:
-        return
-    s = get_settings()
-    if not s.telegram_owner_id or (q.from_user and q.from_user.id != s.telegram_owner_id):
-        await q.answer("non autorizzato")
-        return
-    tipo, _, valore = (q.data or "").partition(":")
-    nbs = ctx.user_data.get("elenco") or []
-    if tipo == "nbp":
-        try:
-            if not nbs:
-                nbs = await _elenco(ctx)
-        except formato.ErroreMCP as exc:
-            await q.answer(str(exc)[:190])
-            return
-        await q.answer()
-        pagina = int(valore) if valore.isdigit() else 0
-        await q.edit_message_reply_markup(reply_markup=_markup(formato.tastiera(nbs, pagina)))
-        return
-    titolo = next((n["title"] for n in nbs if n["id"] == valore), "")
-    scelto = {"id": valore, "title": titolo}
-    ctx.user_data["notebook"] = scelto
-    await q.answer("scelto")
-    try:
-        await q.edit_message_text(f"Notebook: {titolo or valore}")
-    except Exception as exc:  # noqa: BLE001 — cosmetico, la scelta è già fatta
-        log.warning("edit scelta fallito: %s", exc)
-    domanda = ctx.user_data.pop("in_attesa", "")
-    if domanda and q.message:
-        await _rispondi(q.message, ctx, scelto, domanda)
-
-
-async def _titoli_fonti(nb_id: str) -> dict[str, str]:
-    """source_id → titolo, per le fonti della risposta. Best effort: senza, resta l'id."""
-    try:
-        blocchi = await chiama_tool("source_list", {"notebook_id": nb_id}, timeout=30.0)
-    except formato.ErroreMCP:
-        return {}
-    return {str(f.get("id") or f.get("source_id") or ""): str(f.get("title") or "")
-            for f in formato.blocchi_json(blocchi)}
-
-
-# notebook_query aspetta al massimo 270 s per giro (P6); se torna `in_corso` si ritira
-# con notebook_query_esito, per altri giri fino a questo numero.
-RITIRI = 2
-
-
-async def _rispondi(msg, ctx: ContextTypes.DEFAULT_TYPE, nb: dict[str, str],
-                    domanda: str) -> None:
-    # feedback immediato: la query RAG può richiedere da decine di secondi a minuti
-    await msg.reply_text(f"⏳ Chiedo a «{nb['title'] or nb['id']}»… "
-                         "(può richiedere qualche minuto)")
-    try:
-        await ctx.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
-    except Exception:  # noqa: BLE001 — il chat action è solo cosmetico
-        pass
-    try:
-        blocchi = await chiama_tool("notebook_query", {"notebook_id": nb["id"],
-                                                       "question": domanda,
-                                                       "attesa_max": 270})
-        payload = (formato.blocchi_json(blocchi) or [{"answer": blocchi[0] if blocchi else ""}])[0]
-        for _ in range(RITIRI):
-            if payload.get("stato") != "in_corso" or not payload.get("query_id"):
-                break
-            blocchi = await chiama_tool("notebook_query_esito",
-                                        {"query_id": payload["query_id"], "attesa_max": 270})
-            payload = (formato.blocchi_json(blocchi) or [{"answer": ""}])[0]
-    except formato.ErroreMCP as exc:
-        await msg.reply_text(f"⚠️ {exc}")
-        return
-    if payload.get("stato") == "in_corso":
-        await msg.reply_text("NotebookLM non ha ancora finito dopo 15 minuti. Riprova più tardi "
-                             "con la stessa domanda, o apri il /pannello.")
-        return
-    testo = formato.risposta_html(payload, await _titoli_fonti(nb["id"]))
-    for pezzo in formato.spezza(testo):
-        await msg.reply_text(pezzo, parse_mode=ParseMode.HTML)
+        "Ciao. Sono il bot nb1777: notebook, archivio, secret e aggiornamenti stanno nel "
+        "pannello (anche dal bottone «Pannello» accanto al campo di testo). Qui ti arrivano "
+        "i promemoria.", reply_markup=kb)
 
 
 # ───── error handler globale ─────
 # Senza questo, un'eccezione in un handler viene solo loggata e l'utente resta
-# in silenzio (è successo con /lista). Qui rispondiamo sempre qualcosa.
+# in silenzio (è successo con /lista, oggi tolto). Qui rispondiamo sempre qualcosa.
 
 async def _on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("errore handler", exc_info=ctx.error)
@@ -455,12 +238,7 @@ def build_app() -> Application:
         raise SystemExit("TELEGRAM_BOT_TOKEN mancante — non posso partire")
     app = Application.builder().token(s.effective_token).build()
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("aiuto", cmd_aiuto))
-    app.add_handler(CommandHandler("pannello", cmd_pannello))
-    app.add_handler(CommandHandler("lista", cmd_lista))
-    app.add_handler(CommandHandler("chiedi", cmd_chiedi))
     app.add_handler(CallbackQueryHandler(cmd_ack, pattern=r"^ack:"))
-    app.add_handler(CallbackQueryHandler(cmd_scelta, pattern=r"^nbp?:"))
     app.add_error_handler(_on_error)
     return app
 
@@ -468,7 +246,7 @@ def build_app() -> Application:
 async def _install_menu_button(app: Application) -> None:
     """Imposta il bottone-menu del bot come launcher della Mini App (accanto al
     campo di testo). Best-effort: se il gateway non è https o Telegram rifiuta,
-    logga e prosegue — il comando /pannello resta comunque disponibile."""
+    logga e prosegue — /start manda comunque il bottone del pannello."""
     url = _miniapp_url()
     owner = get_settings().telegram_owner_id
     if not url or not owner:
