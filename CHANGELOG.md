@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.87.0] — 2026-10-12
+
+**La documentazione riletta tutta contro il codice, un presidio che fa diventare rosso un nome citato e inesistente, e tre difetti trovati per strada (il ruolo dei DB ora è nel backup).**
+
 ### Corretto
 - **Il ruolo dei DB ora è nel backup.** `tools/backup.sh` esportava ogni notte la `description`
   dei DB ma non il `ruolo` (#278): dopo un restore-da-fonti un DB `riservato` tornava `non
