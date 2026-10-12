@@ -32,5 +32,8 @@ verifica (mtime < 90s). Serve anche al health-gate di `vps1777 update`.
 
 Senza token (`secrets/telegram_bot_token.txt` vuoto) il bot **non va in
 crash-loop**: entra in *standby* tenendo vivo l'heartbeat (container healthy),
-così un update non fallisce sulle installazioni senza Telegram. Configura il
-token e `docker compose restart nb1777-bot` per attivarlo.
+così un update non fallisce sulle installazioni senza Telegram. Per attivarlo,
+dalla radice del repo: `./tools/rotate-secret.sh telegram_bot_token`. Scrive il
+token, rideriva la chiave della Mini App e riavvia bot e gateway. Scrivere solo
+il file e riavviare il bot non basta: il bot risponde, ma la Mini App resta
+senza chiave.

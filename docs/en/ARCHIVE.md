@@ -1088,9 +1088,11 @@ Declared, not discovered by chance:
 ## How it works underneath (the no-docker.sock boundary)
 
 The `archive-data` volume is mounted `:rw` by whoever writes: the gateway (`.db`
-drop-ins, the `meta` card, `vps1777 archive-ingest`), the `ingest` service (since 0.84.0:
-the queued jobs of `/admin/archive`, `archive-migra`, `archive-retag`) and
-`indice-notturno` (the `<db>.vec.db` indexes). The `.db` files live in
+drop-ins, the `meta` card), the `ingest` service (since 0.84.0 the queued jobs of
+`/admin/archive`, `archive-migra`, `archive-retag`; after 0.87.0 also `vps1777
+archive-ingest`) and `indice-notturno` (the `<db>.vec.db` indexes). The last two never
+work together: the CLI queues them with the archive lock, `var/archivio.lock`. The `.db`
+files live in
 `/var/lib/archive/db/`; `archive-mcp` mounts it **read-only**, scans that directory
 (**scan-mode**) and discovers new DBs without a restart. The only two writes a tool
 can ask for — `set_description` and `set_ruolo`, which touch only the `meta` card —
@@ -1098,5 +1100,5 @@ go through the gateway (`/internal/archive/description`,
 `/internal/archive/ruolo`, on the internal network with a shared secret). For the
 NotebookLM ingest, orchestration is on the host (`vps1777 archive-ingest`): the
 gateway doesn't talk to Docker or to nlm — the host CLI copies the file into
-`nb1777-mcp` (which has the nlm auth), extracts the text, and hands it to the
-gateway for indexing. See [ARCHITECTURE.md](ARCHITECTURE.md).
+`nb1777-mcp` (which has the nlm auth), extracts the text, writes it into the archive
+volume (the gateway only passes it along) and has the `ingest` service index it. See [ARCHITECTURE.md](ARCHITECTURE.md).

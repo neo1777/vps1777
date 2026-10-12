@@ -146,8 +146,12 @@ li rinnova con la sfida HTTP-01 (che vuole la porta 80 aperta).
 
 1. Su [one.dash.cloudflare.com → Networks → Tunnels](https://one.dash.cloudflare.com/) → Create Tunnel
 2. Configura **Public Hostname** che punta a `http://gateway:8080`
-3. Copia il **tunnel token** (lungo, base64) in `secrets/cloudflared_token.txt`, e metti
-   `INGRESS_PROFILE=ingress.cloudflared` nel `.env` (vedi in cima)
+3. Tieni pronti il **tunnel token** (lungo, base64) e l'hostname pubblico del punto 2.
+   `./setup.sh`, `deploy.sh` e l'installer grafico chiedono tutti e due, scrivono il token
+   in `secrets/cloudflared_token.txt` con permessi 600 e mettono
+   `PUBLIC_BASE=https://<hostname>` nel `.env`. A mano: scrivi il token in quel file
+   (`chmod 600`) e metti `INGRESS_PROFILE=ingress.cloudflared` e `PUBLIC_BASE` nel `.env`
+   (vedi in cima)
 4. Lancia: `docker compose -f compose.yaml -f compose.ingress.cloudflared.yaml --profile ingress.cloudflared up -d`
    (senza gli `-f` l'overlay non viene montato e il tunnel non entra nel progetto)
 

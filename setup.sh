@@ -58,6 +58,23 @@ ask()  {
   [ -z "$response" ] && response="$default"
   printf -v "$var" '%s' "$response"
 }
+# `ask` per i SEGRETI (12/10/2026): stessa convenzione `SETUP_<VAR>`, ma il valore non
+# compare MAI a schermo — né l'eco della tastiera (`read -s`) né la riga «← da SETUP_…»,
+# che per `ask` ristampa il valore. Un token stampato da un installer finisce nei log e
+# nei transcript (la stessa strada di H75 per la password admin).
+ask_secret() {
+  local var="$1" question="$2" response
+  local _env="SETUP_$var"
+  if [ -n "${!_env:-}" ]; then
+    printf -v "$var" '%s' "${!_env}"
+    printf '%s%s%s: (nascosto)  %s← da %s%s\n' "$C_B" "$question" "$C_R" "$C_I" "$_env" "$C_R" >&2
+    return 0
+  fi
+  printf '%s%s%s: ' "$C_B" "$question" "$C_R" >&2
+  IFS= read -rs response || true
+  echo >&2
+  printf -v "$var" '%s' "$response"
+}
 # ⚠️ LIMITE DICHIARATO di `confirm`, e lo scrivo perché non passi per una svista:
 #   qui NON c'è un nome di variabile da cui derivare la convenzione — c'è solo il
 #   testo della domanda. Quindi `SETUP_YES` risponde **a tutte** le conferme, e non
@@ -397,7 +414,7 @@ else
 fi
 
 if [ ! -s secrets/telegram_bot_token.txt ]; then
-  ask TG_TOKEN "TELEGRAM_BOT_TOKEN (da @BotFather, vuoto per configurare dopo)" ""
+  ask_secret TG_TOKEN "TELEGRAM_BOT_TOKEN (da @BotFather, non viene mostrato; vuoto per configurare dopo)"
   if [ -n "$TG_TOKEN" ]; then
     printf '%s' "$TG_TOKEN" > secrets/telegram_bot_token.txt
     chmod 600 secrets/telegram_bot_token.txt
@@ -405,7 +422,38 @@ if [ ! -s secrets/telegram_bot_token.txt ]; then
   else
     : > secrets/telegram_bot_token.txt
     chmod 600 secrets/telegram_bot_token.txt
-    warn "Token Telegram vuoto — il bot non partirà. Per aggiungerlo dopo: ./tools/rotate-secret.sh telegram_bot_token (salva il token, deriva la chiave della Mini App e riavvia bot e gateway)"
+    # Il container del bot PARTE comunque: resta in standby (heartbeat vivo, nessuna
+    # risposta), e la Mini App non ha la chiave. Scrivere solo il file del token non
+    # basta: la chiave derivata (telegram_webapp_secret) resterebbe vuota. Lo script di
+    # rotazione fa le due cose e riavvia i due servizi che le montano.
+    warn "Token Telegram vuoto: il bot resta in standby (il container gira ma non risponde) e la Mini App resta senza chiave."
+    warn "  → Per aggiungerlo dopo, dalla cartella del repo: ./tools/rotate-secret.sh telegram_bot_token"
+    warn "    (salva il token, deriva la chiave della Mini App e riavvia nb1777-bot e gateway)."
+  fi
+fi
+
+# cloudflared_token — solo con l'ingresso Cloudflare (12/10/2026). Il compose lo dichiara
+# come secret-file (compose.ingress.cloudflared.yaml): prima questa via non lo chiedeva e
+# non lo creava, e il primo `up` moriva su «bind source path does not exist» — la stessa
+# classe di archive_desc_secret. L'ingresso si legge dal .env e non dalla variabile: su un
+# re-run il blocco delle domande è saltato. Guardia `-s`: un token già salvato non si
+# richiede; uno vuoto sì, così rilanciare ./setup.sh è il modo di aggiungerlo dopo.
+INGRESSO_SCELTO="$(sed -n 's/^INGRESS_PROFILE=//p' .env 2>/dev/null | tail -1)"
+if [ "$INGRESSO_SCELTO" = "ingress.cloudflared" ] && [ ! -s secrets/cloudflared_token.txt ]; then
+  ask_secret CF_TOKEN "Token del Cloudflare Tunnel (one.dash.cloudflare.com → Networks → Tunnels; non viene mostrato, vuoto per dopo)"
+  # printf è un builtin: il token non passa dall'argv di nessun processo.
+  ( umask 077 && printf '%s' "$CF_TOKEN" > secrets/cloudflared_token.txt )
+  chmod 600 secrets/cloudflared_token.txt
+  if [ -n "$CF_TOKEN" ]; then
+    ok "cloudflared_token.txt salvato"
+  else
+    # Il file esiste VUOTO di proposito: così il resto dello stack parte, e manca solo
+    # il tunnel (cloudflared si riavvia finché il token non c'è). Senza file non
+    # partirebbe niente.
+    warn "Token del tunnel vuoto: lo stack parte, ma il tunnel NO — da Internet il sito non risponde."
+    warn "  → Per aggiungerlo: rilancia ./setup.sh (lo richiede, il resto resta com'è),"
+    warn "    oppure scrivilo in secrets/cloudflared_token.txt (permessi 600) e ricrea cloudflared"
+    warn "    (il comando esatto è in fondo, fra i prossimi passi)."
   fi
 fi
 
@@ -698,6 +746,47 @@ else
     log "  docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE ${OPS_PROFILI[*]} pull && docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE ${OPS_PROFILI[*]} up -d"
   fi
 fi
+
+# ───── L'INGRESSO: QUELLO CHE QUESTA VIA NON FA, DETTO CON I COMANDI ESATTI ─────
+# (12/10/2026) setup.sh non installa Tailscale e non accende il Funnel (lo fanno solo
+# l'installer grafico e deploy.sh), e con Cloudflare può essere partito senza token:
+# in entrambi i casi da Internet non risponde niente, e prima nessuna riga lo diceva.
+# I comandi sono quelli di installer/engine.py, e il Funnel si accende in UN comando:
+# `tailscale serve --https=443 …` seguito da `tailscale funnel 443` fa leggere «443»
+# come destinazione, sovrascrive il mapping e il Funnel risponde 502.
+# Dopo aver cambiato PUBLIC_BASE si ricreano TUTTI i servizi che lo leggono
+# (compose.yaml: gateway, nb1777-mcp, nb1777-bot), non il solo gateway: il bot terrebbe
+# l'URL vecchio della Mini App.
+COMPOSE_STACK="docker compose ${COMPOSE_FILES[*]} --profile $INGRESS_PROFILE${OPS_PROFILI[*]:+ ${OPS_PROFILI[*]}}"
+case "$INGRESS_PROFILE" in
+  ingress.tailscale)
+    case "$PUB" in https://*) ;; *)
+      echo
+      warn "Tailscale: setup.sh NON installa Tailscale e NON accende il Funnel. Finché non lo fai,"
+      warn "  il pannello risponde solo su 127.0.0.1:8080 di questa macchina."
+      log "  Prepara l'account (docs/INGRESS.md §1: MagicDNS, HTTPS Certificates, nodeAttr funnel"
+      log "  nell'ACL), poi su questa macchina:"
+      log "    curl -fsSL https://tailscale.com/install.sh | sh"
+      log "    sudo tailscale up --hostname=vps1777 --accept-dns=false"
+      log "    sudo tailscale serve reset && sudo tailscale funnel --bg --https=443 http://127.0.0.1:8080"
+      log "    tailscale status --json | python3 -c 'import sys,json;print(json.load(sys.stdin)[\"Self\"][\"DNSName\"].rstrip(\".\"))'"
+      log "  Scrivi l'URL ottenuto nel .env (PUBLIC_BASE=https://<nome>.<tailnet>.ts.net), poi"
+      log "  ricrea i servizi che lo leggono:"
+      log "    $COMPOSE_STACK up -d gateway nb1777-mcp nb1777-bot"
+      log "  (Il Funnel si accende in UN comando: serve e funnel separati fanno rispondere 502.)"
+      ;;
+    esac
+    ;;
+  ingress.cloudflared)
+    if [ ! -s secrets/cloudflared_token.txt ]; then
+      echo
+      warn "Cloudflare: manca il token del tunnel, quindi il tunnel non parte. Per aggiungerlo:"
+      log "    ./setup.sh     (lo richiede senza mostrarlo; il resto resta com'è)"
+      log "  oppure scrivilo in secrets/cloudflared_token.txt con permessi 600, e poi:"
+      log "    $COMPOSE_STACK up -d --force-recreate cloudflared"
+    fi
+    ;;
+esac
 
 # ───── ULTIMA RIGA: COME SI VERIFICA, DA FUORI ─────
 # 🔑 IL PRESIDIO VA DOVE IL GESTO GIÀ AVVIENE (collaudo da fuori del 07/09/2026).

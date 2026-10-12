@@ -130,7 +130,8 @@ case "$WHICH" in
     FILE=secrets/oauth_signing_secret.txt
     log "Rotation oauth_signing_secret"
     warn "ATTENZIONE: invalida TUTTI i token attivi (access, refresh, admin cookie, miniapp)."
-    warn "I client OAuth (claude.ai) re-faranno login via refresh; tu re-login admin."
+    warn "Anche i refresh token sono firmati con questa chiave: claude.ai non potrà rinnovarli."
+    warn "Riautorizza i connettori (le URL non cambiano, non serve ricrearli); admin e Mini App: nuovo login."
     read -r -p "Procedo? [s/N]: " ack
     case "$ack" in s|S|si|SI|y|Y|yes|YES) ;; *) die "Annullato" ;; esac
     NEW=$(gen_random 48)

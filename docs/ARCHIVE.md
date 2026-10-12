@@ -1079,9 +1079,10 @@ Dichiarati, non scoperti per caso:
 ## Come funziona sotto (confine no-docker.sock)
 
 Il volume `archive-data` è montato `:rw` da chi scrive: il gateway (drop-in `.db`,
-scheda `meta`, `vps1777 archive-ingest`), il servizio `ingest` (dalla 0.84.0: i lavori in
-coda di `/admin/archive`, `archive-migra`, `archive-retag`) e `indice-notturno` (gli
-indici `<db>.vec.db`). I `.db` stanno in `/var/lib/archive/db/`; `archive-mcp` lo monta
+scheda `meta`), il servizio `ingest` (dalla 0.84.0 i lavori in coda di `/admin/archive`,
+`archive-migra`, `archive-retag`; dopo la 0.87.0 anche `vps1777 archive-ingest`) e
+`indice-notturno` (gli indici `<db>.vec.db`). Gli ultimi due non lavorano mai insieme: la
+CLI li mette in fila col lucchetto dell'archivio, `var/archivio.lock`. I `.db` stanno in `/var/lib/archive/db/`; `archive-mcp` lo monta
 **in sola lettura**, scansiona quella dir (**scan-mode**) e scopre i DB nuovi senza
 riavvio. Le uniche due scritture che un
 tool può chiedere — `set_description` e `set_ruolo`, che toccano solo la scheda
@@ -1089,5 +1090,6 @@ tool può chiedere — `set_description` e `set_ruolo`, che toccano solo la sche
 `/internal/archive/ruolo`, sulla rete interna con un segreto condiviso). Per l'ingest
 via NotebookLM, l'orchestrazione è sull'host (`vps1777 archive-ingest`): il gateway
 non parla a Docker né a nlm — il CLI host copia il file in `nb1777-mcp` (che ha l'auth
-nlm), ne ricava il testo, e lo passa al gateway per l'indicizzazione. Vedi
+nlm), ne ricava il testo, lo scrive nel volume dell'archivio (il gateway fa solo da
+tramite) e lo fa indicizzare al servizio `ingest`. Vedi
 [ARCHITECTURE.md](ARCHITECTURE.md).

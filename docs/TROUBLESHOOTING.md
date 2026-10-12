@@ -76,6 +76,11 @@ le rilegge, serve ricrearlo. Ma **non** con un `docker compose up -d gateway` nu
 gli aggiungono gli overlay (`compose.ingress.*.yaml`). Ricreato col solo `compose.yaml`
 il gateway perde l'ingresso, e Funnel, Caddy o il Tunnel rispondono 502.
 
+Il gateway non è il solo a leggerle. `PUBLIC_BASE` lo leggono anche `nb1777-mcp` (i link
+firmati di `studio_download`) e `nb1777-bot` (l'URL della Mini App); `TELEGRAM_OWNER_ID`
+anche il bot. Si ricreano tutti quelli che leggono la variabile cambiata, nello stesso
+comando: ricreato il solo gateway, il bot resta con l'URL vecchio.
+
 Si ricrea con gli stessi `-f`/`--profile` con cui gira lo stack, dalla radice del repo
 sulla VPS. Per l'ingresso Tailscale con il backup (il default):
 
@@ -83,6 +88,9 @@ sulla VPS. Per l'ingresso Tailscale con il backup (il default):
 docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
   --profile ingress.tailscale --profile ops.backup up -d gateway
 ```
+
+Dopo un cambio di `PUBLIC_BASE` la fine del comando è `up -d gateway nb1777-mcp nb1777-bot`;
+dopo un cambio di `TELEGRAM_OWNER_ID`, `up -d nb1777-bot gateway`.
 
 Adatta a casa tua: il file d'ingresso è `compose.<INGRESS_PROFILE>.yaml` e il profilo è
 `INGRESS_PROFILE` del `.env`; per ogni feature in `VPS1777_FEATURES` che ha un overlay
@@ -101,13 +109,13 @@ Casi:
 - `TELEGRAM_BOT_TOKEN` vuoto (nei log «TELEGRAM_BOT_TOKEN mancante — bot in standby») →
   `./tools/rotate-secret.sh telegram_bot_token`: ti chiede il token, lo scrive, deriva la
   chiave della Mini App e riavvia bot e gateway. Riempire solo il file e riavviare il bot
-  fa rispondere il bot, ma la Mini App resta senza chiave (503, e il pannello dice,
-  sbagliando causa, «owner non configurato»)
+  fa rispondere il bot, ma la Mini App resta senza chiave (`503 bot_token_not_configured`:
+  il pannello dice «Il gateway non ha la chiave della Mini App»)
 - `TELEGRAM_OWNER_ID` sbagliato (il bot risponde «Bot privato.»; con `0` o vuoto nei log
   c'è «TELEGRAM_OWNER_ID=0 — il bot NEGA A TUTTI») → correggi `.env` col TUO id e ricrea
-  il bot con `docker compose up -d nb1777-bot` (un `restart` non rilegge il `.env`; il
-  bot, a differenza del gateway, non ha overlay). Lo stesso id lo legge il gateway per la
-  Mini App: ricrealo come in «Ricreare il gateway dopo un cambio del `.env`»
+  bot e gateway insieme (un `restart` non rilegge il `.env`): lo stesso id lo legge il
+  gateway per la Mini App. Il comando è quello di «Ricreare il gateway dopo un cambio del
+  `.env`», con gli overlay dello stack e `up -d nb1777-bot gateway` in fondo
 - TOKEN revocato su BotFather → genera uno nuovo e passalo a
   `./tools/rotate-secret.sh telegram_bot_token`, che **riallinea anche la chiave della
   Mini App** (sotto)
@@ -118,9 +126,11 @@ Il token lo legge solo `nb1777-bot`. Il gateway monta un'altra cosa:
 `secrets/telegram_webapp_secret.txt`, la chiave **derivata** dal token
 (HMAC_SHA256 con chiave «WebAppData») con cui verifica l'`initData` della Mini App.
 Se cambi il token e la chiave resta quella vecchia, il bot riparte giusto e la Mini
-App **rifiuta tutti**, e lo dice male: «Sessione Telegram scaduta (12h). Chiudi e riapri
-il pannello dal bot», anche appena riaperta. Se quel messaggio resta dopo aver riaperto
-il pannello dal bot, il sospetto è la chiave, non la sessione.
+App **rifiuta tutti**: `/app/auth` risponde `401 invalid_init_data` (la firma non torna
+con la chiave del gateway) e il pannello dice «Il gateway non riconosce la firma di
+Telegram», col rimedio `tools/rotate-secret.sh telegram_bot_token`. La sessione scaduta
+davvero è un'altra risposta, `401 init_data_expired` (firma giusta, `initData` oltre le
+12 ore): il pannello dice «Sessione Telegram scaduta (12h)» e basta riaprirlo dal bot.
 
 La chiave si riallinea da sola al token in cinque posti: `tools/rotate-secret.sh
 telegram_bot_token` (dalla 0.62.3: scrive il token, **rideriva la chiave** e riavvia bot
@@ -261,6 +271,11 @@ Dalla 0.84 `/admin/archive` non indicizza da sé: mette il file in coda
 (`onboarding/ingest_coda/`) e lo lavora sull'host `vps1777-ingest.path`, che lancia
 `vps1777 ingest-coda` (il servizio compose `ingest`). Se dopo tre minuti nessuno l'ha
 preso, la pagina lo dice in «Caricamenti».
+
+Un lavoro che la CLI ha visto ma che aspetta il lucchetto dell'archivio non è fermo, e la
+pagina non lo segnala così: dice «aspetta il suo turno: indice-notturno sta lavorando
+sull'archivio» (o un altro `archive-*`). Parte da solo appena l'archivio si libera; la
+unit della coda ha un tetto di 12 ore, che copre l'attesa e un lavoro lungo.
 
 Diagnosi, sull'host:
 ```bash
@@ -478,9 +493,9 @@ tuo (`@userinfobot`) e che il gateway lo veda:
 docker exec vps1777-gateway-1 printenv TELEGRAM_OWNER_ID
 ```
 Questo messaggio vuol dire che un id configurato c'è, ma non è il tuo (se fosse vuoto
-vedresti «owner non configurato», voce sotto): correggi `TELEGRAM_OWNER_ID` nel `.env` e
-ricrea il gateway con gli overlay dello stack, come in «Ricreare il gateway dopo un
-cambio del `.env`».
+vedresti «manca TELEGRAM_OWNER_ID nel .env del server», voce sotto): correggi
+`TELEGRAM_OWNER_ID` nel `.env` e ricrea gateway e bot con gli overlay dello stack, come in
+«Ricreare il gateway dopo un cambio del `.env`» (con `up -d nb1777-bot gateway` in fondo).
 
 ## Mini App: risponde `503 owner_not_configured`
 
@@ -493,14 +508,15 @@ Fix:
 ```bash
 docker exec vps1777-gateway-1 printenv TELEGRAM_OWNER_ID   # vuoto = non configurato
 ```
-Prendi il tuo id da @userinfobot, mettilo in `.env`, poi ricrea il gateway con gli overlay
-dello stack («Ricreare il gateway dopo un cambio del `.env`») e il bot con
-`docker compose up -d nb1777-bot`.
+Prendi il tuo id da @userinfobot, mettilo in `.env`, poi ricrea gateway e bot con gli
+overlay dello stack («Ricreare il gateway dopo un cambio del `.env`», con
+`up -d nb1777-bot gateway` in fondo).
 
-Attenzione: il pannello scrive «owner non configurato» per **ogni** 503, anche quando a
-mancare è la chiave `telegram_webapp_secret` (token del bot messo a mano dopo
-l'installazione, risposta `503 bot_token_not_configured`). Se `printenv
-TELEGRAM_OWNER_ID` non è vuoto, la cura è `./tools/rotate-secret.sh telegram_bot_token`.
+Il 503 ha una seconda causa, e il pannello le distingue: con `owner_not_configured` dice
+«manca TELEGRAM_OWNER_ID nel .env del server»; con `503 bot_token_not_configured` dice «Il
+gateway non ha la chiave della Mini App». Manca la chiave `telegram_webapp_secret` (di
+solito un token del bot messo a mano dopo l'installazione), e la cura è
+`./tools/rotate-secret.sh telegram_bot_token`.
 
 ## `429` / `rate_limited` su connector o Mini App
 

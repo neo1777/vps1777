@@ -9,8 +9,10 @@ Due modi:
   coda --id <id> --db <nome> --suffisso <.ext> [--project P] [--description D]
       indicizza il file `/var/lib/archive/coda/<id><ext>` nel DB `<nome>` e lo
       cancella; stampa UNA riga JSON con l'esito ({"righe", "totale"} o {"errore"}).
+      Lo usano la coda di /admin/archive e `vps1777 archive-ingest`, che mette il file
+      nella stessa cartella (dal 12/10/2026 non indicizza più dentro il gateway).
   indexer <argomenti di archive_indexer>
-      passa tutto a `archive_indexer.main` (archive-migra, retag, archive-ingest).
+      passa tutto a `archive_indexer.main` (archive-migra, archive-retag).
 
 Il percorso del file e del DB lo ricostruisce QUI da id e nome, con le stesse regole
 del gateway: la CLI li ha già validati, ma un argomento che arriva da un intent scritto

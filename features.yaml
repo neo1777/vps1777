@@ -1805,10 +1805,12 @@ features:
   - id: cli.archive-ingest
     nome: "vps1777 archive-ingest"
     cosa: "Indicizza un file nell'archivio. Due percorsi scelti dal tipo (#285):
-           i file GIÀ testuali (.md/.txt/…) vanno DIRETTI all'indexer del gateway
-           — niente NotebookLM (il giro OCR su testo puro è overhead e fragilità:
-           misurato 06/09, 3/3 falliti dopo ore); PDF-immagine e scansioni passano
-           da NotebookLM per la lettura multimodale. `--nlm` forza il giro OCR."
+           i file GIÀ testuali (.md/.txt/…) vanno DIRETTI all'indexer — niente
+           NotebookLM (il giro OCR su testo puro è overhead e fragilità: misurato
+           06/09, 3/3 falliti dopo ore); PDF-immagine e scansioni passano da
+           NotebookLM per la lettura multimodale. `--nlm` forza il giro OCR. In
+           entrambi i casi indicizza il servizio compose `ingest` (2g, modo «coda»,
+           file nel volume dell'archivio), non più il gateway (512m) con `exec`."
     dove: ["cli:archive-ingest", "tools/vps1777.py"]
     status: active-default
     since: "0.20.0 (percorso diretto per testo: 0.47.0, #285)"
@@ -1854,7 +1856,10 @@ features:
     cosa: "Aggiorna in modo incrementale, sulla VPS, gli indici semantici che esistono già
            per i DB più recenti del loro indice. Il costruttore gira nel servizio compose
            `indice-notturno` (profilo `indice`, mem_limit 1300m, una CPU, nessuna rete).
-           Mai una prima costruzione. Timer acceso da `--abilita`, non dagli installer."
+           Mai una prima costruzione. Timer acceso da `--abilita`, non dagli installer.
+           Ogni DB si aggiorna col lucchetto dell'archivio in mano (var/archivio.lock): mai
+           insieme a un ingest; se l'archivio resta occupato più di due ore, i DB rimasti
+           li prende la notte dopo."
     dove: ["cli:indice-notturno", "tools/vps1777.py", "systemd:vps1777-indice-notturno.timer",
            "systemd:vps1777-indice-notturno.service", "compose-profile:compose.yaml#indice"]
     status: opt-in
@@ -1868,7 +1873,10 @@ features:
     cosa: "Consuma gli intent di onboarding/ingest_coda/ dal più vecchio e per ognuno fa
            girare il servizio compose `ingest`; scrive lo stato in onboarding/ingest_esiti/
            (gli ultimi 50). Un intent storto si scarta e si dice; un rifiuto dell'indexer
-           (formato, PDF senza testo) non fa fallire la unit, un lavoro ucciso dal tetto sì."
+           (formato, PDF senza testo) non fa fallire la unit, un lavoro ucciso dal tetto sì.
+           Ogni lavoro prende il lucchetto dell'archivio (var/archivio.lock, lo stesso di
+           indice-notturno e degli archive-*) prima di consumare l'intent: se è occupato
+           aspetta, non esce."
     dove: ["cli:ingest-coda", "tools/vps1777.py", "systemd:vps1777-ingest.path",
            "systemd:vps1777-ingest.service", "compose-profile:compose.yaml#ingest"]
     status: active-default

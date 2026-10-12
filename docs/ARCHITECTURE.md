@@ -92,7 +92,7 @@ Vedi [PLUGINS.md](PLUGINS.md). In sintesi:
 1. Crei `plugins/<nome>/` con `Dockerfile` + `compose.<nome>.yaml`
 2. Esponi un endpoint MCP su porta interna (es. `8010` — 8002/8003/8004 sono dei servizi base)
 3. Aggiungi a `.env`: `GATEWAY_UPSTREAMS=archive=archive-mcp:8002,nb1777=nb1777-mcp:8003,<nome>=<container>:8010`
-4. Ricrea il gateway: `docker compose up -d gateway` (`restart` non rilegge `.env`, e il nuovo `GATEWAY_UPSTREAMS` non entrerebbe)
+4. Avvia il plugin e ricrea il gateway con gli stessi `-f`/`--profile` dello stack più il `compose.<nome>.yaml` del plugin ([PLUGINS.md](PLUGINS.md), Step 4): `restart` non rilegge `.env`, e il nuovo `GATEWAY_UPSTREAMS` non entrerebbe; un `up -d gateway` col solo `compose.yaml` toglie al gateway il suo ingresso
 5. URL del tuo plugin: `<PUBLIC_BASE>/<SECRET>/<nome>/mcp`
 
 L'upstream **non deve essere per forza MCP**: il proxy inoltra qualunque metodo e percorso
@@ -122,7 +122,9 @@ Lo stesso disegno vale per l'indicizzazione dell'archivio (dalla 0.84): la pagin
 `vps1777-ingest.path` lancia `vps1777 ingest-coda`, che fa girare il servizio compose
 `ingest` (profilo `ingest`, immagine del gateway, limite di memoria 2g, solo il volume
 `archive-data`). Così il gateway può avere un limite suo (512m): un export troppo grande
-uccide il lavoro, non OAuth e il proxy.
+uccide il lavoro, non OAuth e il proxy. Dopo la 0.87.0 passa da `ingest` anche
+`vps1777 archive-ingest`. Questi lavori e l'indice notturno non girano mai insieme: la CLI
+li mette in fila col lucchetto dell'archivio (`var/archivio.lock`), e i tetti non si sommano.
 
 ```
 admin UI ──intent──► onboarding/update_pending_update.json

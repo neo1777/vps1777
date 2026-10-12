@@ -17,7 +17,7 @@ Sequenza passo-passo dall'host vuoto a stack su.
 | python3 **+ bcrypt** | 3.10+ | solo per `setup.sh` (calcola l'hash della password admin). Su Debian/Ubuntu `python3` è un pacchetto a sé: `sudo apt install python3 python3-bcrypt`. ⚠️ **`python3-pip` NON basta su Debian 12+ / Ubuntu 23.04+** — cioè proprio sulla distro consigliata: lì pip c'è già ed è l'*installazione* a essere vietata (PEP 668), quindi `pip install bcrypt` fallisce. Il pacchetto giusto è `python3-bcrypt` (Fedora: `sudo dnf install python3-bcrypt`). Se `bcrypt` c'è già, non serve altro — il preflight verifica la capacità, non il nome |
 | RAM / disco | 4 GB / ~2 GB liberi | il progetto è tarato su una VPS da 4 GB; le immagini occupano ~2 GB |
 | `curl`, `sudo` | — | `setup.sh` chiede a GitHub l'ultima release con `curl`; va lanciato da un utente normale con `sudo`, non da root (vedi il passo 5 qui sotto) |
-| Account Tailscale **o** Caddy+dominio **o** Cloudflare | uno dei tre | scelta al setup. Con **Caddy** servono le porte 80 e 443 aperte in ingresso. Con **Cloudflare**, **prima** di `./setup.sh` crea il tunnel e salva il token: `printf '%s' '<token>' > secrets/cloudflared_token.txt && chmod 600 secrets/cloudflared_token.txt` (`setup.sh` chiede solo l'hostname, non il token, e senza quel file il compose non parte). Con **Tailscale** vedi [più sotto](#se-hai-scelto-tailscale-il-funnel-lo-accendi-tu) |
+| Account Tailscale **o** Caddy+dominio **o** Cloudflare | uno dei tre | scelta al setup. Con **Caddy** servono le porte 80 e 443 aperte in ingresso. Con **Cloudflare**, **prima** di `./setup.sh` crea il tunnel sul dashboard (one.dash.cloudflare.com → Networks → Tunnels): `setup.sh` chiede l'hostname pubblico e il token (senza mostrarlo, lo salva in `secrets/cloudflared_token.txt` con permessi 600). Se lasci il token vuoto lo stack parte senza tunnel, e `setup.sh` dice alla fine come aggiungerlo. Con **Tailscale** vedi [più sotto](#se-hai-scelto-tailscale-il-funnel-lo-accendi-tu) |
 | Bot Telegram + OWNER_ID | da [@BotFather](https://t.me/BotFather) + [@userinfobot](https://t.me/userinfobot) | opzionale per dev, obbligatorio per prod |
 | Account Google con NotebookLM | gratis | il login si fa **dopo l'install** via `/admin/nlm` |
 
@@ -46,13 +46,18 @@ averli, rilancia `./setup.sh` e rispondi «sì»: gli step già fatti vengono sa
 ## Cosa fa `setup.sh`
 
 1. Verifica Docker + Compose v2 + python3
-2. Crea `.env` (chiede: email admin, TG_OWNER_ID, ingress)
+2. Crea `.env` (chiede: email admin, TG_OWNER_ID, ingress; con Caddy il dominio, con
+   Cloudflare l'hostname pubblico del tunnel)
 3. Genera `secrets/*.txt`:
    - `gateway_secret.txt` (32 caratteri url-safe = 24 byte di entropia)
    - `archive_desc_secret.txt` (32 caratteri url-safe = 24 byte di entropia)
    - `oauth_signing_secret.txt` (64 caratteri url-safe = 48 byte di entropia)
    - `admin_password_bcrypt.txt` (bcrypt rounds=12 della password che scegli/che genera)
-   - `telegram_bot_token.txt` (incolli il token)
+   - `telegram_bot_token.txt` (incolli il token, che non viene mostrato; vuoto = bot in
+     standby, da attivare poi con `./tools/rotate-secret.sh telegram_bot_token`)
+   - `cloudflared_token.txt`, solo con Cloudflare (incolli il token del tunnel, che non
+     viene mostrato; vuoto = lo stack parte senza tunnel, e rilanciando `./setup.sh` te lo
+     richiede)
    - `telegram_webapp_secret.txt` — la chiave **derivata** dal token
      (HMAC-SHA256 con chiave `WebAppData`), l'unica che il gateway monta: la
      rigenera a ogni lancio, così segue il token se cambia (vuota se il token è vuoto)
@@ -88,7 +93,8 @@ Se rilanci `setup.sh`, salta gli step già fatti.
 
 `setup.sh` non installa Tailscale e non attiva il Funnel: lo fanno solo l'installer
 grafico e `deploy.sh`. Senza questo passo il pannello risponde solo su `127.0.0.1:8080`
-della VPS e `<PUBLIC_BASE>` resta un segnaposto.
+della VPS e `<PUBLIC_BASE>` resta un segnaposto. Alla fine `setup.sh` stampa questi
+stessi comandi, col tuo comando compose.
 
 Prima prepara l'account come in [INGRESS.md](INGRESS.md) §1 (MagicDNS, HTTPS
 Certificates, `nodeAttr funnel` nell'ACL), poi sulla VPS:
@@ -96,17 +102,20 @@ Certificates, `nodeAttr funnel` nell'ACL), poi sulla VPS:
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
 sudo tailscale up --hostname=vps1777 --accept-dns=false   # o --authkey=file:<file con la tskey-auth-…>
-sudo tailscale funnel --bg --https=443 http://127.0.0.1:8080
+sudo tailscale serve reset && sudo tailscale funnel --bg --https=443 http://127.0.0.1:8080
 tailscale status --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))'
 ```
 
+Il Funnel si accende in un comando solo: `tailscale serve --https=443 …` seguito da
+`tailscale funnel 443` fa rispondere 502.
+
 Scrivi l'URL ottenuto in `.env` (`PUBLIC_BASE=https://<nome>.<tailnet>.ts.net`) e
-ricrea il gateway con gli stessi `-f` e `--profile` che `setup.sh` ha stampato, per
-esempio con le feature di default:
+ricrea i servizi che lo leggono (gateway, `nb1777-mcp` e `nb1777-bot`) con gli stessi
+`-f` e `--profile` che `setup.sh` ha stampato, per esempio con le feature di default:
 
 ```bash
 docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
-  --profile ingress.tailscale --profile ops.backup up -d gateway
+  --profile ingress.tailscale --profile ops.backup up -d gateway nb1777-mcp nb1777-bot
 ```
 
 ## Post-install

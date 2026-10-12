@@ -2,8 +2,17 @@
 #
 # Per attivarlo:
 #   1. Aggiungi a .env: GATEWAY_UPSTREAMS=...,example=example-mcp:8010
-#   2. Lancia: docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
-#              -f plugins/example-mcp/compose.example-mcp.yaml up -d
+#   2. Lancia, con gli stessi -f/--profile con cui gira lo stack (qui l'ingresso di
+#      default, Tailscale, senza feature opzionali):
+#        docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
+#          -f plugins/example-mcp/compose.example-mcp.yaml \
+#          --profile ingress.tailscale up -d
+#      Con Caddy o Cloudflare il file e il profilo sono quelli del tuo ingresso
+#      (compose.ingress.caddy.yaml + --profile ingress.caddy, o .cloudflared), e gli
+#      overlay delle feature accese vanno aggiunti (es. -f compose.ops.backup.yaml
+#      --profile ops.backup): senza, `up -d` ricrea il gateway SENZA il suo ingresso.
+#      Il plugin non si espone da sé: sta solo su `backend` e lo raggiunge il gateway,
+#      qualunque sia l'ingresso. Vedi docs/PLUGINS.md, Step 4.
 
 services:
   example-mcp:

@@ -507,6 +507,20 @@ case "$INGRESS_NUM" in
      ;;
   3) INGRESS=cloudflared
      ask_secret CF_TOKEN "Cloudflare Tunnel token"
+     # Senza token il compose non parte (dichiara secrets/cloudflared_token.txt): si
+     # dice adesso, come il dominio per Caddy, non al primo `up` sulla VPS.
+     [ -z "$CF_TOKEN" ] && die "Token del tunnel obbligatorio per Cloudflare: crealo su one.dash.cloudflare.com → Networks → Tunnels e rilancia"
+     # L'hostname vive nella configurazione del tunnel su Cloudflare, non nel token: lo
+     # sa solo chi l'ha configurato. Si CHIEDE (come setup.sh), così PUBLIC_BASE, l'URL
+     # finale e gli URL connector sono quelli veri e non http://<IP>:8080.
+     CF_HOSTNAME="${CF_HOSTNAME:-}"
+     ask CF_HOSTNAME "Hostname pubblico del tunnel (es. vps.miosito.com), quello configurato sul dashboard CF" ""
+     CF_HOSTNAME="${CF_HOSTNAME#https://}"; CF_HOSTNAME="${CF_HOSTNAME%/}"
+     if [ -n "$CF_HOSTNAME" ]; then
+       PUBLIC_BASE="https://$CF_HOSTNAME"
+     else
+       warn "Hostname del tunnel non impostato: l'URL finale resterà http://<IP>:8080, che con Cloudflare NON è raggiungibile. Rimedio: PUBLIC_BASE=https://<hostname> nel .env della VPS, poi ricrea gateway, nb1777-mcp e nb1777-bot"
+     fi
      ;;
   *) die "Scelta non valida" ;;
 esac
@@ -994,6 +1008,11 @@ if [ "$INGRESS" = "tailscale" ]; then
 else
   COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml -f compose.onboarding.yaml$OPS_FILES --profile ingress.${INGRESS}$OPS_PROFILES"
 fi
+# I servizi che leggono PUBLIC_BASE (compose.yaml, GATEWAY_PUBLIC_BASE): quando cambia
+# vanno ricreati TUTTI, non il solo gateway — il bot teneva l'URL vecchio della Mini
+# App. Stessa lista di SERVIZI_PUBLIC_BASE in installer/engine.py, e
+# tools/tests/test_public_base_ricrea_chi_lo_legge.py la confronta con compose.yaml.
+SERVIZI_PUBLIC_BASE="gateway nb1777-mcp nb1777-bot"
 if [ "$DEV_BUILD" = "1" ]; then
   # build locale: aggiunge l'overlay compose.build.yaml (solo dev/fallback)
   COMPOSE_CMD_BUILD="${COMPOSE_CMD/--profile/-f compose.build.yaml --profile}"
@@ -1042,7 +1061,7 @@ if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
     SSH "tailscale serve reset" >/dev/null 2>&1 || true
     SSH "tailscale funnel --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
     SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
-    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$TS_URL|\" .env || echo PUBLIC_BASE=$TS_URL >> .env) && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1 || true
+    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$TS_URL|\" .env || echo PUBLIC_BASE=$TS_URL >> .env) && $COMPOSE_CMD up -d $SERVIZI_PUBLIC_BASE'" >/dev/null 2>&1 || true
     ok "Funnel HTTPS attivo: $TS_URL"
     ts_wipe_authkey   # up riuscito: la key monouso non serve più (H15)
   else

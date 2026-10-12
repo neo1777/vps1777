@@ -12,6 +12,11 @@
    verifica CHI viene invocato. Un grep sul sorgente direbbe «il ramo c'è»;
    qui si prova che il ramo MORDE — il .md non tocca mai nb1777-mcp, il
    --nlm ce lo rimanda, il .pdf resta sul giro vecchio.
+
+🔴 12/10/2026: «diretto» non vuol più dire «nel gateway». L'indexer girava con `exec`
+   nel gateway, che dalla 0.84 ha un tetto di 512 MB: un file grande faceva uccidere il
+   servizio pubblico. Ora il file va nel volume dell'archivio e lo indicizza il servizio
+   compose `ingest` (2g, modo «coda»), sia il testo sia la trascrizione di NotebookLM.
 """
 from __future__ import annotations
 
@@ -40,12 +45,27 @@ def cli(monkeypatch):
 
     def run_finto(cmd, **kw):
         chiamate.append(list(cmd))
-        # l'exec dell'indexer "riesce" e stampa un esito plausibile
-        return SimpleNamespace(returncode=0, stdout='{"indicizzate": 3}', stderr="")
+        # il lavoro `ingest` "riesce" e stampa la sua riga d'esito
+        return SimpleNamespace(returncode=0, stdout='{"righe": 3, "totale": 3}', stderr="")
 
     monkeypatch.setattr(mod, "run", run_finto)
     monkeypatch.setattr(mod, "compose_cmd", lambda repo: ["docker", "compose"])
     return mod, chiamate
+
+
+INGEST = ["docker", "compose", "--profile", "ingest", "run", "--rm", "-T", "ingest"]
+
+
+def _lavoro(chiamate: list[list[str]]) -> list[str]:
+    """La chiamata che indicizza: il servizio `ingest`, modo «coda». Una sola."""
+    (lavoro,) = [c for c in chiamate if c[:8] == INGEST]
+    assert lavoro[8] == "coda", lavoro
+    return lavoro
+
+
+def _dest(lavoro: list[str]) -> str:
+    jid = lavoro[lavoro.index("--id") + 1]
+    return f"/var/lib/archive/coda/{jid}{lavoro[lavoro.index('--suffisso') + 1]}"
 
 
 def _args(file: str, **kw):
@@ -63,13 +83,14 @@ def test_md_va_diretto_e_non_tocca_notebooklm(cli, tmp_path):
     piatto = [" ".join(c) for c in chiamate]
     assert not any("nb1777-mcp" in c for c in piatto), \
         f"un file testuale è passato da NotebookLM: {piatto}"
-    assert any("gateway" in c and "archive_indexer" in c for c in piatto), \
-        f"l'indexer del gateway non è stato invocato: {piatto}"
+    lavoro = _lavoro(chiamate)
     # il file viaggia con la SUA estensione (il parser si sceglie dal suffisso);
     # e viaggia via exec+stdin, MAI con `docker cp`: il rootfs del gateway è
     # read-only per hardening e cp fallirebbe (misurato 06/09, #285 bis)
-    assert any(".md" in c and "cat >" in c for c in piatto), \
-        f"l'estensione testuale è andata persa nel viaggio: {piatto}"
+    assert lavoro[lavoro.index("--suffisso") + 1] == ".md"
+    dest = _dest(lavoro)
+    assert any(dest in c and "cat >" in c for c in piatto), \
+        f"il file non è arrivato nel volume dell'archivio: {piatto}"
     assert not any(c.startswith("docker compose cp") and "gateway" in c for c in piatto), \
         f"docker cp verso il gateway read-only: {piatto}"
 
@@ -134,7 +155,7 @@ def test_il_file_non_testuale_entra_in_nb1777_senza_docker_cp(cli, tmp_path):
         chiamate.append(list(cmd))
         if "app.ingest" in cmd:
             return SimpleNamespace(returncode=0, stdout='{"text": "testo trascritto"}', stderr="")
-        return SimpleNamespace(returncode=0, stdout='{"indicizzate": 1}', stderr="")
+        return SimpleNamespace(returncode=0, stdout='{"righe": 1, "totale": 1}', stderr="")
 
     mod.run = run_con_esito
     assert mod.cmd_archive_ingest(tmp_path, _args(str(f))) == 0
@@ -150,6 +171,110 @@ def test_il_file_non_testuale_entra_in_nb1777_senza_docker_cp(cli, tmp_path):
     # denied». Con cap_drop ALL root non ha CAP_DAC_OVERRIDE, e il file (e la cartella)
     # sono di `app`: lo crea l'exec come `app`, lo deve togliere `app`.
     assert all("-u" not in c for c in rm), rm
+
+
+def test_il_testo_non_si_indicizza_nel_gateway(cli, tmp_path):
+    """Il gateway ha un tetto di 512 MB: indicizzarci un file grande faceva uccidere il
+    servizio pubblico. Il gateway fa solo da tramite (un `cat`), mai l'indexer."""
+    mod, chiamate = cli
+    f = tmp_path / "grande.jsonl"
+    f.write_text('{"type": "user"}\n', encoding="utf-8")
+    assert mod.cmd_archive_ingest(tmp_path, _args(str(f))) == 0
+    nel_gateway = [c for c in chiamate if "gateway" in c and "exec" in c]
+    assert not [c for c in nel_gateway if "python" in c or "archive_indexer" in " ".join(c)], \
+        nel_gateway
+    lavoro = _lavoro(chiamate)
+    assert lavoro[lavoro.index("--db") + 1] == "prova-285"
+    assert lavoro[lavoro.index("--project") + 1] == "video:prova"
+    # il file NON va nella tmpfs da 64 MB del gateway, ma nel volume dell'archivio
+    assert not any("/tmp/" in " ".join(c) for c in chiamate), chiamate
+
+
+def test_il_file_nel_volume_si_toglie_sempre(cli, tmp_path, capsys):
+    """Un lavoro ucciso dal tetto (137) non arriva al suo `finally`: il file lo toglie la
+    CLI, come utente del gateway (senza `-u root`: con cap_drop ALL root non può)."""
+    mod, chiamate = cli
+
+    def run_ucciso(cmd, **kw):
+        chiamate.append(list(cmd))
+        if cmd[:8] == INGEST:
+            return SimpleNamespace(returncode=137, stdout="", stderr="")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    mod.run = run_ucciso
+    f = tmp_path / "doc.md"
+    f.write_text("testo", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        mod.cmd_archive_ingest(tmp_path, _args(str(f)))
+    dest = _dest(_lavoro(chiamate))
+    rm = [c for c in chiamate if "rm" in c and dest in c]
+    assert rm and "gateway" in rm[0] and "-u" not in rm[0], rm
+    assert "tetto di memoria" in capsys.readouterr().err
+
+
+def test_l_indicizzazione_tiene_il_lucchetto_dell_archivio(cli, tmp_path):
+    import fcntl
+    mod, chiamate = cli
+    preso = []
+
+    def run_guarda(cmd, **kw):
+        chiamate.append(list(cmd))
+        if cmd[:8] == INGEST:
+            with open(tmp_path / "var" / "archivio.lock", "a") as fh:
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    preso.append(False)
+                except BlockingIOError:
+                    preso.append(True)
+        return SimpleNamespace(returncode=0, stdout='{"righe": 1, "totale": 1}', stderr="")
+
+    mod.run = run_guarda
+    f = tmp_path / "doc.md"
+    f.write_text("testo", encoding="utf-8")
+    assert mod.cmd_archive_ingest(tmp_path, _args(str(f))) == 0
+    assert preso == [True]
+
+
+@pytest.mark.parametrize("nome", ["note.rst", "server.log", "tabella.csv", "a.markdown"])
+def test_il_testo_che_l_indexer_non_conosce_viaggia_come_txt(cli, tmp_path, nome):
+    """L'indexer legge come testo solo .md e .txt: questi prima arrivavano col loro
+    suffisso e venivano rifiutati («formato non supportato»)."""
+    mod, chiamate = cli
+    f = tmp_path / nome
+    f.write_text("testo", encoding="utf-8")
+    assert mod.cmd_archive_ingest(tmp_path, _args(str(f))) == 0
+    lavoro = _lavoro(chiamate)
+    assert lavoro[lavoro.index("--suffisso") + 1] == ".txt"
+
+
+def test_un_nome_di_db_troppo_lungo_si_dice_prima(cli, tmp_path, capsys):
+    mod, chiamate = cli
+    f = tmp_path / "doc.md"
+    f.write_text("testo", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        mod.cmd_archive_ingest(tmp_path, _args(str(f), db="x" * 80))
+    assert "--db" in capsys.readouterr().err
+    assert not chiamate
+
+
+def test_la_trascrizione_si_indicizza_nel_servizio_ingest(cli, tmp_path):
+    """Il PDF (o l'audio) passa da NotebookLM, ma il testo che torna si indicizza come
+    tutto il resto: nel servizio `ingest`, come .txt."""
+    mod, chiamate = cli
+
+    def run_con_esito(cmd, **kw):
+        chiamate.append(list(cmd))
+        if "app.ingest" in cmd:
+            return SimpleNamespace(returncode=0, stdout='{"text": "testo trascritto"}', stderr="")
+        return SimpleNamespace(returncode=0, stdout='{"righe": 1, "totale": 1}', stderr="")
+
+    mod.run = run_con_esito
+    f = tmp_path / "scan.pdf"
+    f.write_bytes(b"%PDF finto")
+    assert mod.cmd_archive_ingest(tmp_path, _args(str(f))) == 0
+    lavoro = _lavoro(chiamate)
+    assert lavoro[lavoro.index("--suffisso") + 1] == ".txt"
+    assert not [c for c in chiamate if "gateway" in c and "python" in c]
 
 
 # ── P17 (11/10/2026): `--artefatto`, un podcast dello Studio in un gesto ──────────────
@@ -171,7 +296,7 @@ def test_un_artefatto_non_si_copia_e_non_si_cancella(cli, tmp_path):
         if "app.ingest" in cmd:
             return SimpleNamespace(returncode=0, stderr="", stdout=(
                 '{"text": "trascrizione", "metodo": "contenuto", "fonte_tipo": "audio"}'))
-        return SimpleNamespace(returncode=0, stdout='{"indicizzate": 1}', stderr="")
+        return SimpleNamespace(returncode=0, stdout='{"righe": 1, "totale": 1}', stderr="")
 
     mod.run = run_con_esito
     assert mod.cmd_archive_ingest(tmp_path, _args_artefatto("prova-p15.m4a")) == 0

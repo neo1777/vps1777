@@ -496,6 +496,11 @@ Since 0.57.0, after an ingest, the index can update itself, on the VPS, at night
   **memory limit 1300m**, one CPU, **no network**, 1 thread, sub-batches of 4. If it
   exceeds memory, the container's OOM killer kills the job and not archive-mcp: the
   served index stays the previous one and the work done is in the `.parziale`;
+- updates each DB holding the **archive lock** (`var/archivio.lock`, the same one used by
+  the indexing queue and the `archive-*` commands): never together with an ingest, so the
+  builder does not read a DB while something writes to it and the two caps (1300m and 2g)
+  do not add up. If an ingest holds it, it waits; if the archive stays busy for more than
+  2 hours, the remaining DBs are taken by the next night (it is not an error);
 - **never does a first build**: on the VPS, with one CPU, it would take days. That is
   done on the PC ("Turning on search by meaning"). An index the builder refuses (the
   prototype's, without a ledger, or built with another model) stays as it is, and the

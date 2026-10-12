@@ -94,7 +94,7 @@ See [PLUGINS.md](../PLUGINS.md) (Italian). In short:
 1. Create `plugins/<nome>/` with `Dockerfile` + `compose.<nome>.yaml`
 2. Expose an MCP endpoint on an internal port (e.g. `8010` — 8002/8003/8004 belong to the base services)
 3. Add to `.env`: `GATEWAY_UPSTREAMS=archive=archive-mcp:8002,nb1777=nb1777-mcp:8003,<nome>=<container>:8010`
-4. Recreate the gateway: `docker compose up -d gateway` (`restart` does not re-read `.env`, and the new `GATEWAY_UPSTREAMS` would not get in)
+4. Start the plugin and recreate the gateway with the stack's same `-f`/`--profile` flags plus the plugin's `compose.<nome>.yaml` ([PLUGINS.md](../PLUGINS.md), Step 4): `restart` does not re-read `.env`, and the new `GATEWAY_UPSTREAMS` would not get in; an `up -d gateway` with `compose.yaml` alone strips the gateway of its ingress
 5. Your plugin's URL: `<PUBLIC_BASE>/<SECRET>/<nome>/mcp`
 
 The upstream **does not have to be MCP**: the proxy forwards any HTTP method and path
@@ -124,7 +124,9 @@ the file and writes an intent into `onboarding/ingest_coda/`; `vps1777-ingest.pa
 launches `vps1777 ingest-coda`, which runs the `ingest` compose service (`ingest`
 profile, gateway image, 2g memory limit, only the `archive-data` volume). This lets the
 gateway have a limit of its own (512m): an export that is too large kills the job, not
-OAuth and the proxy.
+OAuth and the proxy. After 0.87.0 `vps1777 archive-ingest` goes through `ingest` too.
+These jobs and the nightly index never run together: the CLI queues them with the archive
+lock (`var/archivio.lock`), and the caps do not add up.
 
 ```
 admin UI ──intent──► onboarding/update_pending_update.json

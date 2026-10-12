@@ -768,6 +768,8 @@ def _sezione_caricamenti(lavori: list[dict]) -> str:
             dettaglio = html.escape(f"{d.get('righe', '?')} record (totale {d.get('totale', '?')})")
         elif d.get("stato") == "errore":
             dettaglio = html.escape(str(d.get("errore") or ""))
+        elif d.get("stato") == "in-coda" and d.get("attesa"):
+            dettaglio = html.escape(f"aspetta il suo turno: {d['attesa']} sta lavorando sull'archivio")
         elif d.get("stato") == "in-coda" and d.get("fermo"):
             dettaglio = ("nessuno l'ha preso: sull'host guarda "
                          "<code>systemctl status vps1777-ingest.path</code>, oppure "
@@ -1517,7 +1519,7 @@ async def secrets_view(request: Request) -> Response:
   <p class="muted">La rotazione è guidata da CLI sull'host (mostra la nuova, la salvi nel password manager). Un check giornaliero avvisa su Telegram i secret oltre soglia (dalla Mini App puoi posticipare il promemoria).</p>
   <pre>cd &lt;cartella del repo&gt; && sudo -u &lt;utente operatore&gt; ./tools/rotate-secret.sh &lt;nome&gt;</pre>
   <p class="muted">Nell'installazione standard: <code>cd /home/vps1777/vps1777 && sudo -u vps1777 ./tools/rotate-secret.sh &lt;nome&gt;</code>.</p>
-  <p class="muted">Attenzione: ruotare <code>oauth_signing_secret</code> invalida i token (i connettori si ri-autenticano); <code>gateway_secret</code> cambia le URL MCP (vanno ri-aggiunti su claude.ai). Nessun secret si ruota da solo: <code>rotate-secret.sh</code> copre <code>gateway_secret</code>, <code>oauth_signing_secret</code>, <code>admin_password</code> (vuoto = la genera forte) e <code>telegram_bot_token</code> (il token nuovo lo generi prima su @BotFather; lo script rideriva la chiave della Mini App); <code>archive_desc_secret</code> e i token Cloudflare si ruotano a mano, come dice la colonna «rotazione». La policy password impone min 16, ≥3 classi, niente pattern comuni.</p>
+  <p class="muted">Attenzione: ruotare <code>oauth_signing_secret</code> invalida tutti i token, anche i refresh token: i connettori claude.ai vanno riautorizzati (le URL non cambiano); <code>gateway_secret</code> cambia le URL MCP (vanno ri-aggiunti su claude.ai). Nessun secret si ruota da solo: <code>rotate-secret.sh</code> copre <code>gateway_secret</code>, <code>oauth_signing_secret</code>, <code>admin_password</code> (vuoto = la genera forte) e <code>telegram_bot_token</code> (il token nuovo lo generi prima su @BotFather; lo script rideriva la chiave della Mini App); <code>archive_desc_secret</code> e i token Cloudflare si ruotano a mano, come dice la colonna «rotazione». La policy password impone min 16, ≥3 classi, niente pattern comuni.</p>
 </section>
 """
     return _layout("secrets", body, current="secrets", csrf=_csrf_token(email))

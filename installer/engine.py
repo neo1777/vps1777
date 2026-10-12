@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shlex
 import tarfile
 import time
@@ -287,6 +288,49 @@ def _make_repo_tar() -> bytes:
 
 class DeployError(Exception):
     pass
+
+
+# ── PUBLIC_BASE: chi lo legge, e da dove nasce ────────────────────────────────
+# I servizi che leggono PUBLIC_BASE (compose.yaml, `GATEWAY_PUBLIC_BASE`): il gateway
+# (link e redirect OAuth), nb1777-mcp (i link firmati di `studio_download`) e
+# nb1777-bot (l'URL della Mini App). Leggono l'ambiente all'avvio del container: quando
+# PUBLIC_BASE cambia vanno RICREATI tutti e tre. Prima si ricreava il solo gateway e il
+# bot restava con l'URL vecchio (il default `http://gateway:8080`), quindi «riprova
+# /start» ridava lo stesso rifiuto anche col Funnel acceso — e il reboot di prova non
+# lo curava, perché un riavvio non rilegge il .env.
+# tools/tests/test_public_base_ricrea_chi_lo_legge.py tiene questa lista uguale
+# all'insieme letto da compose.yaml.
+SERVIZI_PUBLIC_BASE = ("gateway", "nb1777-mcp", "nb1777-bot")
+
+
+def _public_base(p: dict, ingress: str) -> str:
+    """L'URL pubblico che l'installazione CONOSCE prima di partire ("" se non lo sa).
+
+    caddy → https://<dominio> · cloudflared → https://<hostname del tunnel> (il tunnel è
+    gestito dal dashboard Cloudflare: l'hostname non si ricava dal token, lo dice chi
+    installa) · tailscale → "" qui: l'URL *.ts.net nasce dopo, in step_tailscale_host.
+    Il nome si accetta anche con lo schema davanti o la barra in coda, che è come lo si
+    copia dal browser; un nome con spazi o caratteri da URL è un errore detto subito,
+    non un .env che punta altrove.
+    """
+    host = ""
+    if ingress == "caddy":
+        host = p.get("caddy_domain", "")
+    elif ingress == "cloudflared":
+        host = p.get("cf_hostname", "")
+    host = (host or "").strip()
+    for schema in ("https://", "http://"):
+        if host.lower().startswith(schema):
+            host = host[len(schema):]
+    host = host.rstrip("/")
+    if not host:
+        return (p.get("public_base") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?", host) or "." not in host:
+        campo = "Dominio" if ingress == "caddy" else "Hostname del tunnel"
+        raise DeployError(
+            f"{campo} non valido: «{host}». Scrivi solo il nome, per esempio "
+            "vps.example.invalid (senza percorso, porta o spazi), e rilancia.")
+    return f"https://{host}"
 
 
 class Deployer:
@@ -613,9 +657,16 @@ rm -f /tmp/vps1777.tar.gz
     def step_config(self, p: dict) -> Iterator[str]:
         yield "── Genero .env + secrets…"
         ingress = {"1": "tailscale", "2": "caddy", "3": "cloudflared"}.get(p.get("ingress_num", "1"), "tailscale")
-        public_base = p.get("public_base", "")
-        if ingress == "caddy" and p.get("caddy_domain"):
-            public_base = f"https://{p['caddy_domain']}"
+        public_base = _public_base(p, ingress)
+        # L'URL della schermata finale (e degli URL connector costruiti sopra di lui) è
+        # quello pubblico, quando lo si conosce già: con Caddy o Cloudflare non c'è un
+        # passo successivo che lo scopra, e prima la schermata ripiegava su
+        # http://<IP>:8080 — che con quegli ingressi è chiuso su 127.0.0.1.
+        if public_base.startswith("https://"):
+            self.result["URL"] = public_base
+        # Caddy chiede il certificato per CADDY_DOMAIN: il nome normalizzato (senza
+        # schema né barra), lo stesso che sta in PUBLIC_BASE.
+        caddy_domain = public_base[len("https://"):] if ingress == "caddy" and public_base else ""
         # H16 — la password admin NASCE SUL PC (qui, in Python), non più sulla VPS:
         # così il chiaro non torna indietro sullo stdout SSH (era il leak di H16).
         # Viaggia solo in AVANTI, base64, dentro lo STDIN del `bash -s` (mai argv →
@@ -700,7 +751,7 @@ set_kv PUBLIC_BASE {shlex.quote(public_base)}
 set_kv INGRESS_PROFILE ingress.{ingress}
 set_kv TS_HOSTNAME {shlex.quote(p.get('ts_hostname','vps1777'))}
 set_kv TS_AUTHKEY {shlex.quote(p.get('ts_authkey',''))}
-set_kv CADDY_DOMAIN {shlex.quote(p.get('caddy_domain',''))}
+set_kv CADDY_DOMAIN {shlex.quote(caddy_domain)}
 set_kv CADDY_EMAIL {shlex.quote(p.get('caddy_email',''))}
 set_kv VPS1777_TAG {shlex.quote(p.get('_vps1777_version') or 'dev')}
 set_kv VPS1777_IMAGE_BASE {shlex.quote(p.get('_image_base') or 'ghcr.io/neo1777')}
@@ -981,6 +1032,20 @@ echo SELFUPDATE_OK
             f"cd {REMOTE_DIR} && (grep -q ^GATEWAY_BIND= .env && sed -i 's|^GATEWAY_BIND=.*|GATEWAY_BIND={bind}|' .env || echo GATEWAY_BIND={bind} >> .env) && {cmd} up -d gateway"
         ))
 
+    def _scrivi_public_base(self, ingress: str, url: str, onboarding: bool = False) -> None:
+        """Scrive PUBLIC_BASE in .env e RICREA tutti i servizi che lo leggono.
+
+        `up -d <servizi>` li ricrea perché la loro configurazione (l'ambiente) è
+        cambiata; un `restart` non basterebbe, non rilegge il .env. La lista è
+        SERVIZI_PUBLIC_BASE: il solo gateway lasciava il bot con l'URL vecchio
+        della Mini App.
+        """
+        cmd = self._compose_cmd(ingress, onboarding=onboarding)
+        servizi = " ".join(SERVIZI_PUBLIC_BASE)
+        self._run_capture(self._sudo(
+            f"cd {REMOTE_DIR} && (grep -q ^PUBLIC_BASE= .env && sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE={url}|' .env || echo PUBLIC_BASE={url} >> .env) && {cmd} up -d {servizi}"
+        ))
+
     def _wipe_ts_authkey(self) -> None:
         """H15 — la auth-key Tailscale è MONOUSO: dopo che il nodo è entrato nel
         tailnet non serve più (il login vive in /var/lib/tailscale, non in .env).
@@ -1050,11 +1115,8 @@ rm -f secrets/ts_authkey.txt
         self._run_capture("tailscale serve reset >/dev/null 2>&1 || true")
         fout = self._run_capture("tailscale funnel --bg --https=443 http://127.0.0.1:8080 2>&1")
         self._warm_ts_cert(url)
-        # PUBLIC_BASE in .env + ricrea il gateway (resta su 127.0.0.1:8080)
-        cmd = self._compose_cmd(ingress, onboarding=False)
-        self._run_capture(self._sudo(
-            f"cd {REMOTE_DIR} && (grep -q ^PUBLIC_BASE= .env && sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE={url}|' .env || echo PUBLIC_BASE={url} >> .env) && {cmd} up -d gateway"
-        ))
+        # PUBLIC_BASE in .env + ricrea chi lo legge (il gateway resta su 127.0.0.1:8080)
+        self._scrivi_public_base(ingress, url)
         time.sleep(4)
         if self._ts_funnel_ok():
             # La configurazione dice attivo. Prima di CREDERLE — e soprattutto prima
@@ -1139,9 +1201,7 @@ rm -f secrets/ts_authkey.txt
                     u = self._ts_node_url()
                     if u.endswith(".ts.net"):
                         self.result["URL"] = u
-                        self._run_capture(self._sudo(
-                            f"cd {REMOTE_DIR} && (grep -q ^PUBLIC_BASE= .env && sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE={u}|' .env || echo PUBLIC_BASE={u} >> .env) && {cmd} up -d gateway"
-                        ))
+                        self._scrivi_public_base(ingress, u, onboarding=not production)
                         yield f"✓ URL pubblico: {u}"
                         break
                     yield "  ."
@@ -1178,6 +1238,8 @@ def run(params: dict) -> Iterator[str]:
                  params.get("password", ""))
     ingress = {"1": "tailscale", "2": "caddy", "3": "cloudflared"}.get(params.get("ingress_num", "1"), "tailscale")
     try:
+        # Un dominio/hostname malformato si dice PRIMA di toccare la VPS, non al passo 3.
+        _public_base(params, ingress)
         yield "▶ Connessione alla VPS…"
         d.connect()
         yield f"✓ Connesso: {d.detect_os()}"

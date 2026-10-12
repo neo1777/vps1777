@@ -3,8 +3,8 @@
 # Tailscale NON gira più in un container sidecar. Gira come servizio systemd
 # sull'HOST, installato e configurato dall'installer (engine.py) o da deploy.sh:
 #   tailscale up --auth-key=... --hostname=vps1777
-#   tailscale serve  --bg --https=443 http://127.0.0.1:8080
-#   tailscale funnel --bg 443
+#   tailscale serve reset && tailscale funnel --bg --https=443 http://127.0.0.1:8080
+#   (non `serve --https=443` e poi `funnel 443` separati: risponde 502)
 #
 # Perché host e non sidecar (lezione appresa sul campo):
 #   - il container ufficiale tailscale ha avuto un bug di containerboot
