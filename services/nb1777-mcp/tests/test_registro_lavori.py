@@ -103,7 +103,7 @@ def test_uno_alla_volta_per_notebook_e_tre_in_tutto():
 
 def test_source_add_url_passa_dal_registro(monkeypatch):
     monkeypatch.setattr(core, "source_add_url", lambda nb, url, **k: "src-1")
-    assert asyncio.run(server.source_add_url("nb", "https://example.invalid")) == "src-1"
+    assert asyncio.run(server.source_add_url("nb", "https://example.invalid")) == {"source_id": "src-1"}
 
 
 def test_source_add_url_lento_torna_in_corso_e_lavoro_esito_lo_ritira(monkeypatch):
@@ -119,7 +119,7 @@ def test_source_add_url_lento_torna_in_corso_e_lavoro_esito_lo_ritira(monkeypatc
         assert primo["stato"] == "in_corso"
         via.set()
         return await server.lavoro_esito(primo["job_id"], attesa_max=5)
-    assert asyncio.run(go()) == "src-2"
+    assert asyncio.run(go()) == {"source_id": "src-2"}   # anche dopo il ritiro, un oggetto
 
 
 def test_studio_download_passa_dal_registro_e_porta_il_link(monkeypatch, tmp_path):

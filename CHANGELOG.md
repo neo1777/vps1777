@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **nb1777: anche i `source_add_*` e `lavoro_esito` rispondono con un oggetto.** I cinque
+  `source_add_*` davano l'id nudo, oppure `{stato: in_corso, job_id}` se il lavoro durava: due forme
+  a seconda del tempo. Ora danno `{source_id}` (o `in_corso`), e `lavoro_esito` restituisce lo stesso
+  oggetto quando ritira il lavoro. Nessun tool di nb1777 ha più uscite che possono essere una stringa.
+
 ## [0.86.0] — 2026-10-12
 
 **Il bot Telegram ha un comando solo, /start: tutto il resto sta nel pannello.**
