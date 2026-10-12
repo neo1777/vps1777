@@ -182,7 +182,7 @@ def search(
     ruoli: Annotated[str, Field(description=(
         "Dove cercare senza db_name: '' (default) = primari e non dichiarati; 'tutti' = "
         "ogni DB; oppure ruoli separati da virgole (primario, fotografia, riscontro, "
-        "riservato). Il riservato si interroga solo nominandolo."))] = "",
+        "riservato, non dichiarato). Il riservato si interroga solo nominandolo."))] = "",
 ) -> list[dict[str, Any]]:
     """Cerca nell'archivio full-text (SQLite FTS5) delle conversazioni, per LESSICO: quando
     sai come si chiama ciò che cerchi. Per il SENSO usa search_ibrida.
@@ -253,11 +253,11 @@ def search_ibrida(
     ruoli: Annotated[str, Field(description=(
         "Dove cercare senza db_name: '' (default) = primari e non dichiarati; 'tutti' = "
         "ogni DB; oppure ruoli separati da virgole (primario, fotografia, riscontro, "
-        "riservato). Il riservato si interroga solo nominandolo."))] = "",
+        "riservato, non dichiarato). Il riservato si interroga solo nominandolo."))] = "",
 ) -> dict[str, Any]:
-    """Cerca per SENSO, non per lessico: FTS5 + vettori fusi in una sola RRF su tutti i DB
-    (#281). Usala quando ricordi il senso e non le parole («l'articolo dove raccontavo quanto
-    avevo speso»). Quando sai il termine esatto usa `search`: qui la fusione è tarata per non
+    """Cerca per SENSO, non per lessico: FTS5 + vettori fusi in una sola RRF sui DB del
+    perimetro (`ruoli`) che hanno un indice per senso (#281). Usala quando ricordi il
+    senso e non le parole («l'articolo dove raccontavo quanto avevo speso»). Quando sai il termine esatto usa `search`: qui la fusione è tarata per non
     peggiorare le query esatte, non per vincerle. Misurato: FTS5 5/9, vettori 4/9, ibrido 6/9.
 
     Ritorna {righe, indici, parametri} e, solo se qualcosa si è perso, `saltati`:
@@ -337,7 +337,7 @@ def get_context(uuid: str, db_name: str = "", before: int = 3,
     la catena `parent_uuid` lì è spezzata in un terzo delle righe. Altrove, se il
     messaggio è in un thread (`parent_uuid`), dallo STESSO thread; sulle fonti senza
     arco (documenti chunked, db storici) è l'adiacenza temporale nello stesso
-    archivio. Per la chat INTERA usa `get_conversation`.
+    `project`. Per la chat INTERA usa `get_conversation`.
     `max_chars` (0 = intero) tronca OGNI riga a quel numero di caratteri, col
     troncamento dichiarato nel testo: sui messaggi-hub giganti (workfile/board
     incollati) il payload pieno uccideva la connessione proprio dove il contesto
@@ -460,7 +460,9 @@ def delta(
 def list_projects(db_name: str = "", top: int = 1000) -> list[dict[str, Any]]:
     """Le etichette `project` dell'archivio con quanti messaggi ciascuna — per
     NAVIGARE i contenuti (quali progetti/chat ci sono) invece di solo cercarli.
-    Ogni riga: {project, rows, db}. Ordinate per numero di messaggi."""
+    Ogni riga: {project, rows, db}. Ordinate per numero di messaggi. `top`
+    (default 1000) vale per ogni DB: senza db_name le righe possono essere
+    top × numero di DB."""
     return db.list_projects(db_name, top=top)
 
 
@@ -514,7 +516,10 @@ def describe_databases() -> list[dict[str, Any]]:
 
 @mcp.tool()
 def check_integrity(db_name: str = "") -> dict[str, Any]:
-    """Integrità degli archivi: `ok` · `sporco` · `corrotto` · `non_misurabile`.
+    """Integrità degli archivi: ritorna {per_db: {db: {esito, dettaglio}}}, con esito
+    `ok` · `sporco` · `corrotto` · `non_misurabile` · `non_misurato`. Su più DB c'è un
+    budget di 20 s: i DB non guardati tornano `non_misurato` (non vuol dire sani:
+    rilanciali con db_name, che non ha budget).
 
     Serve a rispondere a UNA domanda che nessun altro tool risponde: **questo
     archivio è in uno stato leggibile, o sto servendo dati di una transazione mai
@@ -551,8 +556,11 @@ def set_ruolo(db_name: str, ruolo: str) -> dict[str, Any]:
       · `riscontro`  non si interroga per trovare ma per VERIFICARE (ridondanza
                      voluta, gemelli re-ingeriti, DB-sonda con un caso-noto);
       · `riservato`  materiale personale: fuori dai compiti tecnici senza
-                     richiesta esplicita. È una dichiarazione, non un lucchetto —
-                     nessun tool lo esclude da solo.
+                     richiesta esplicita. Senza db_name le ricerche (search,
+                     search_ibrida, count, check_term, precedenti) lo lasciano
+                     fuori: si interroga solo nominandolo (db_name o ruoli).
+                     get_context, get_conversation e get_many lo leggono
+                     comunque, se gli dai un suo uuid.
       · `""` (vuoto) ritira la dichiarazione: il DB torna `non dichiarato`.
 
     Quando usarla: ogni volta che cambia il primario di un versante (arriva un

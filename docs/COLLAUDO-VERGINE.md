@@ -51,11 +51,11 @@ A macchina formattata e **prima** dell'installer, la seconda fotografia:
 bash tools/prove-empiriche/lancia-tutte.sh --fase macchina-nuda
 ```
 
-poi i 4 step:
+poi l'installazione manuale e il controllo di versione:
 
 ```bash
 git clone https://github.com/neo1777/vps1777.git && cd vps1777 && ./setup.sh
-vps1777 version         # atteso: tag == container == releases/latest
+vps1777 version && vps1777 check   # atteso: tag == container (version), nessuna release più nuova (check)
 ```
 
 ## 2 · Le verifiche mirate — una per cura, con l'esito atteso

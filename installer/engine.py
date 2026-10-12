@@ -745,7 +745,7 @@ echo CONFIG_OK
         except Exception as e:  # noqa: BLE001 — qualunque causa: dichiarata, mai muta
             self.result["AGE_STATE"] = f"MANCANTE ({e})"
             yield (f"⚠ chiave age non allestita ({e}) — il primo update/backup si "
-                   "fermerà finché non imposti tools/age-recipients.txt (BACKUP-RESTORE.md)")
+                   "fermerà finché non imposti tools/age-recipients.txt (docs/BACKUP-RESTORE.md)")
             return
         esito = self._run_capture(self._sudo(
             f"cd {REMOTE_DIR} && printf '%s\\n' {shlex.quote(pub)} > tools/age-recipients.txt"

@@ -29,9 +29,11 @@ spegnerla è in [OPS.md](OPS.md)).
 
 ```
 lock → preflight → changelog+conferma → download bundle (sha256 + cosign)
-  → backup age + snapshot locale volumi → pull immagini → verifica digest
+  → controllo unit del bundle → self-update della CLI (re-exec se cambiata)
+  → controllo segreti della release → backup age + snapshot locale volumi
+  → compose config sui file del bundle → pull immagini → verifica digest
   ── punto di non ritorno ──
-  → sync file gestiti → stop → migrazioni → start → health-gate (180s)
+  → sync file gestiti + unit systemd → stop → migrazioni → start → health-gate (180s)
   → ✅ esito su Telegram        (oppure: AUTO-ROLLBACK alla versione di prima)
 ```
 
@@ -47,7 +49,8 @@ Garanzie:
   L'archivio cifrato ha il suo passo settimanale dal cron notturno — qui lo copre
   lo snapshot (vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md), «I due livelli»).
   Lo snapshot esiste perché l'auto-rollback **non può dipendere dalla age-key**
-  (che spesso vive solo sul tuo PC); viene potato al successivo update riuscito.
+  (che spesso vive solo sul tuo PC); restano l'ultimo snapshot delle versioni n e n-1,
+  potati dall'update riuscito e dal check giornaliero (vedi la tabella in fondo).
 - **Supply-chain**: il bundle di release porta `images.lock` con i digest
   immutabili delle immagini (una per servizio); dopo il pull, i digest locali DEVONO combaciare.
   Dal 01/10/2026 il lock contiene anche `caddy-dns01`, l'immagine **opzionale** della
@@ -77,7 +80,9 @@ Garanzie:
   confrontando la cosa sbagliata con sé stessa. (La regola `non_fast_forward`
   da sola non bastava: spostare un tag *in avanti* è un fast-forward.)
 - **Rollback automatico**: se dopo l'update lo stack non torna healthy entro
-  180s (healthcheck compose + probe `/health?deep=1` del gateway), la VPS torna
+  180s (healthcheck compose, probe `/health?deep=1` del gateway e porta raggiungibile
+  dall'host, per due giri di fila; un container in restart-loop lo fa fallire subito),
+  la VPS torna
   **da sola** alla versione precedente — le immagini vecchie sono ancora locali,
   nessun nuovo download. Se una migrazione ha toccato i dati, i volumi vengono
   ripristinati dallo snapshot (all-or-nothing, così registro e dati restano
@@ -104,7 +109,9 @@ una GET **non autenticata** a `api.github.com/repos/neo1777/vps1777/releases/lat
 — **zero telemetria**: nessun dato lascia la tua VPS. Se c'è una versione
 nuova: messaggio Telegram al owner (una sola volta per release) e badge nella
 card admin. Se GitHub è irraggiungibile: nessun rumore, solo un badge
-"check stantio".
+"check stantio". Sullo stesso giro, e prima di chiedere a GitHub, il check pota gli
+snapshot pre-update, fa le sorveglianze (raggiungibilità, backup, disco: avvisa al cambio
+di stato) e aggiorna `/admin/salute`: dettagli in [CLI.md](CLI.md#vps1777-check).
 
 **2. Scadenze dei secret** — `vps1777-secrets-check.timer`, **giornaliero**
 (era settimanale: i secret invecchiano lentamente, ma fra le voci controllate c'è la
@@ -113,6 +120,8 @@ può essere più lenta della sua soglia più stretta; nel caso normale non cambi
 rumore, perché notifica solo ciò che è oltre soglia. `RandomizedDelaySec` distribuisce
 il carico, `Persistent=true` recupera i check persi a VPS spenta).
 Lancia `vps1777 secrets-status --notify`: legge l'mtime dei file in `secrets/`,
+l'età della sessione NotebookLM (chiesta a nb1777-mcp) e se la via d'emergenza cosign è
+aperta,
 scrive `onboarding/secrets_status.json` (che alimenta `/admin/secrets`) e
 notifica su Telegram i secret oltre soglia. Le soglie e il *perché* di ognuna
 stanno in [SECRETS.md](SECRETS.md). Puoi lanciarlo a mano quando vuoi:
@@ -218,7 +227,7 @@ CLI lo dice a ogni comando e la ignora: toglila dal `.env`. L'aggiornamento auto
 | Cosa | Dove |
 |---|---|
 | Versione deployata | `.env` → `VPS1777_TAG` (scritta SOLO da update/rollback/bootstrap/installer) |
-| Stato del canale (previous, history, nonce…) | `var/state.json` (chmod 700) |
+| Stato del canale (previous, history, nonce…) | `var/state.json` (cartella `var/` in 0700) |
 | Release staged (bundle + rollback-files) | `releases/vX.Y.Z/` (tenute: corrente + precedente) |
 | Snapshot pre-update | `backups/pre-update/` (tenuti: l'ultimo delle ultime **2 versioni** — n e n-1; il resto si pota subito. Decisione owner del 29/08: la vecchia regola 72h+3-versioni non guardava il PESO, e 7 release in 36h × volumi da 10 GB hanno riempito il disco) |
 | Stato check / intent / progress (per la card admin) | `onboarding/update_{status,pending_update,progress}.json` |

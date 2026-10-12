@@ -18,9 +18,14 @@ separated by the nature of the data — because 99.99% of the weight is regenera
 > bundles/exports the owner keeps off the VPS (re-ingest ≈ 2h); everything else —
 > users, OAuth clients, audit, NotebookLM profile, secrets — weighs 250 KB and is
 > **irreplaceable**. We were paying 9.7 GB a night to protect 250 KB (≈ 70 GB at steady
-> state on a 118 GB disk). The only part of the archive that re-ingest does **not**
-> regenerate is the hand-written notes made with `set_description`: that's why they
-> travel every night in the core. Owner decision: *«basta n, n-1 per paranoia… dobbiamo
+> state on a 118 GB disk). What re-ingest does **not**
+> regenerate is the hand-written DB cards. The `description` (`set_description`) travels
+> every night in the core for this reason, in `descrizioni/<db>.txt`. The **`ruolo`**
+> (`set_ruolo`, since #278) does not: it lives only inside the DB, so it comes back with a
+> restore of the archive backup but not with a re-ingest from the sources. After a
+> re-ingest it has to be declared again by hand, and until you do, a DB that was
+> `riservato` goes back to `non dichiarato` and enters the default search perimeter.
+> Owner decision: *«basta n, n-1 per paranoia… dobbiamo
 > farci stare quel che serve»* ("n, n-1 is enough for paranoia… we have to fit what we
 > need"). Between one archive backup and the next the net is double: the sources off the
 > VPS + the pre-update snapshot (`backups/pre-update/`, unencrypted, n and n-1).
@@ -39,9 +44,10 @@ separated by the nature of the data — because 99.99% of the weight is regenera
 > - **on the host** (`./tools/backup.sh` by hand, and the backup `vps1777 update` takes)
 >   it asks `docker compose config --volumes` for the volumes and, since 29/09, Docker too,
 >   by project label: that way it really follows the active overlays (before, it read only
->   `compose.yaml`, and the Caddy and Portainer volumes got into no backup at all); but the archive volume isn't readable from there and **`descrizioni/` are
->   not exported** — it says so in the log, and the ones in the latest archive backup
->   remain.
+>   `compose.yaml`, and the Caddy and Portainer volumes got into no backup at all); but **`descrizioni/` are not exported**: the script reads them only from directly
+>   mounted volumes (`BACKUP_VOLUMES_DIR`, the container context), while on the host the
+>   archive volume is copied by a busybox container. It says so in the log, and the ones
+>   in the latest archive backup remain.
 
 The name stays `.tar.age` for both even though the inside is **zstd** (or gzip, if zstd
 is missing): the suffix is a contract read by retention, the CLI, `restore.sh` and the
@@ -60,8 +66,8 @@ with your private key: `age -d -i <private key> f.tar.age | zstd -dc | tar -x`.
 #   backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age
 ```
 
-One flag at a time: with two flags, or an unknown one, it prints the usage and exits
-**2**.
+One flag at a time: only the first argument counts. An unknown one prints the usage and
+exits **2**; a second flag is **silently ignored** (the first one wins).
 
 Variables (with their defaults): `BACKUP_DIR=backups/` (where it writes and prunes),
 `VOLUMI_ARCHIVIO=archive-data` (logical names of the archive tier),
@@ -178,7 +184,8 @@ Steps:
 If you **regenerate the archive from the sources** instead of restoring it (re-ingest of
 the bundles), you'll find the DB `description` files in the core under
 `descrizioni/<db>.txt` — they can be reapplied with `set_description` from the
-connector, or from the panel.
+connector, or from the panel. The DBs' `ruolo`, instead, is not in the core: declare it
+again with `set_ruolo` from the connector (the panel shows it, it doesn't write it).
 
 Default: interactive (asks for confirmation). Flags:
 

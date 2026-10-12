@@ -33,7 +33,8 @@ encryption.
 
 **On output there is a partial redaction, and it must be stated at its true size**
 (since 02/08/2026, on by default; it is switched off only with `ARCHIVE_REDACT=0`
-on the `archive-mcp` service). Every response of every tool goes through a masking
+in the environment of the `archive-mcp` service, which `compose.yaml` does not take from
+`.env`: it needs a compose override). Every response of every tool goes through a masking
 step that covers:
 
 - **identifiers in a recognisable format** — emails and phone numbers — wherever
@@ -72,7 +73,8 @@ exemptions, since 0.51.1 (before, a uuid with digit-only groups and a date with 
 came out as "[telefono redatto]", "[phone redacted]"; measured live on 24/09/2026). Since
 0.51.4 the date with the time also holds with minutes and seconds written with dashes or
 dots, as in screenshot names (`Schermata del 2026-09-24 18-41-38.png` came out as
-"Schermata del [telefono redatto]-38.png"); minutes and seconds must be 00-59.
+"Schermata del [telefono redatto]-38.png"); minutes and seconds must be 00-59. Since 0.67.3 a fourth: a 13-digit
+millisecond timestamp starting with 1 (the id of a Cline task) is not a phone number.
 
 **An account-data value that is public by your choice** is exempted by name, with
 `ARCHIVE_REDACT_ESENTI` in `.env` (comma-separated values, case-insensitive; since
@@ -125,7 +127,8 @@ and becomes searchable. Automatic dispatch by extension:
 > in several zips. The manifest is **not** uploaded (it only holds the links).
 > From the admin: select the 5 zips together (the *source* field accepts several
 > files) with the same *DB name* — e.g. `claude-ai-<ddmmyy>`, one DB per export, by
-> convention; from the CLI: `for z in *-000.zip; do python3 services/gateway/app/archive_indexer.py "$z" claude-ai-<ddmmyy>.db; done`.
+> convention; from the CLI: `for z in *-[0-9][0-9][0-9].zip; do python3 services/gateway/app/archive_indexer.py "$z" claude-ai-<ddmmyy>.db; done`
+> (every part, not only the `-000` ones).
 > Order doesn't matter and re-uploading doesn't duplicate (idempotent by uuid).
 > Measured on the first export in this format: 13,920 records in 15 s, 1.2 GB of
 > peak RAM.
@@ -151,7 +154,9 @@ updated later with the MCP tool `set_description`). Re-uploading to the same DB
 name doesn't duplicate (dedup by id); different sources on the same name
 accumulate.
 
-> ⚠️ **The gateway deletes the zip after ingest**: on the VPS only what entered the
+> ⚠️ **The zip is deleted after ingest** (since 0.84.0 the job of the `ingest` service
+> deletes it; a file left in the queue by a killed job is removed after two days): on the
+> VPS only what entered the
 > DB remains (rows, tables, tombstones). What the indexer doesn't read cannot be
 > recovered later — that is why every discarded member leaves a tombstone saying
 > why.
@@ -174,7 +179,7 @@ would swallow, ignoring sessions and logs).
 | `subagents/<sessionId>/agent-<hash>.jsonl` (since 16/09/2026) | sub-agent conversations; a sub-agent's user rows are `sender='mandato'` (the machine wrote them) | `subagent:<cwd-label>` |
 | `mcp-logs/<sessionId>/<server>/…` | MCP server logs, in 4000-character chunks | `mcp-log:<server>` |
 | `workfiles/<encoded-cwd>/…` | artefacts of the working folders: text and code in chunks, PDFs with text, images via OCR, nested zips (one level); a session backup (a Claude Code `.jsonl`) becomes a conversation; binaries leave a `non-testo` tombstone | `workfile:<encoded-cwd>/<first subfolder>` |
-| `documents/…` (since 25/09/2026) | the **documents** that the app's `export` delivers next to the sessions (not conversations): the same pipeline as `workfiles/` — text and code in chunks, PDFs, images via OCR, nested zips, content sniffing; binaries leave a `non-testo` tombstone with `source` `bundle-documents`. A zip of the export folder has `MANIFEST.json` and `sessions/`, so it is a bundle: before, every document ended up in `membro-sconosciuto` | `document:<first subfolder>`, or `document` for a file in the root of `documents/`. The app (since 25/09/2026) writes `documents/<family>/<short-md5-of-the-path>__<name>`: the label is the family — `document:testo`, `document:codice`, `document:config`… —, never the original path |
+| `documents/…` (since 25/09/2026) | the **documents** that the app's `export` delivers next to the sessions (not conversations): the same pipeline as `workfiles/` — text and code in chunks, PDFs, images via OCR, nested zips, content sniffing; binaries leave a `non-testo` tombstone with `source` `bundle-documents`. A zip of the export folder has `MANIFEST.json` and `sessions/`, so it is a bundle: before, every document ended up in `membro-sconosciuto` | `document:<first subfolder>`, or `document` for a file in the root of `documents/`. The label depends on how the app lays out `documents/`: in subfolders by family (`documents/<family>/<short-md5-of-the-path>__<name>` → `document:testo`, `document:codice`…) or flat (`documents/<short-md5-of-the-path>__<name>` → `document`); never the original path |
 | `recupero/…` (since 24/09/2026) — or the bridge `workfiles/_recupero-1777/…` | session, lineage and memory cards as rows; three `.tsv` files as tables — see [the `recupero/` prefix](#the-recupero-prefix--contract-r1) | `recupero:sessioni` · `recupero:stirpi` · `recupero:memorie` |
 | `inventario/inventario-sessioni.tsv` | the session index as text, in 4000-character chunks | `inventario` |
 | `inventario/inventario-sessioni.json` | **not** indexed: a tombstone saying whether its data came in another way — see [the tombstones](#tombstones-what-doesnt-get-in-and-why) | — |
@@ -424,11 +429,13 @@ SELECT source, reason, count(*) FROM skipped GROUP BY 1, 2 ORDER BY 3 DESC;
 
 ## Managing DBs — list and deletion
 
-For each DB the page shows the **full card**: description, messages, distinct
+For each DB the page shows the **full card**: role, description, messages, distinct
 labels (the "provenances": chat titles, `project:<name>`, `design:<name>`…), the
-main labels, size on disk and last update.
+main labels, size on disk, last update and the state of the **by meaning** index
+(aligned, to update, no index…, with the fix when one is needed). Above the table,
+«Caricamenti» shows the state of the queued indexing jobs.
 
-The **Delete** button (with confirmation) removes the DB: search on that archive
+The **Elimina** (delete) button (with confirmation) removes the DB: search on that archive
 stops immediately (archive-mcp notices by itself, scan-mode) and the action ends up
 in the audit log. It is **irreversible** — to *reset* an archive (e.g. reload it
 from scratch after the source changed): delete it and upload the source again with
@@ -524,8 +531,9 @@ The `ruolo` (role) field makes it readable.
 > `db_name`, `search`, `search_ibrida`, `count`, `check_term` and `precedenti` look at the
 > **primary** and **undeclared** DBs: on an install where nobody declared anything, nothing
 > disappears. Snapshots and cross-checks reopen with the `ruoli` parameter
-> (`'fotografia'`, `'riscontro, fotografia'`, or `'tutti'`); the reserved one is queried
-> only by naming it. It is a **contract change** and it changes the meaning of a zero:
+> (`'fotografia'`, `'riscontro, fotografia'`); the reserved one only by naming it, with
+> `db_name` or in `ruoli` (`'riservato'`). `ruoli='tutti'` opens every DB, the reserved
+> one included. It is a **contract change** and it changes the meaning of a zero:
 > "0 on primaries" is not "0 everywhere". That is why `count`, with the default scope,
 > adds `anche_fuori` (`{db: n}`, the matches in snapshots and cross-checks) and
 > `search_ibrida` says in `fuori_perimetro` which DBs it left out. Since 0.81.0
@@ -535,7 +543,7 @@ The `ruolo` (role) field makes it readable.
 > DB.
 
 > **Concurrency.** The server serves **2 searches at a time** (`search`,
-> `search_ibrida`, `count`, `archive_stats`, `get_session`, `get_stirpe`; `precedenti`
+> `search_ibrida`, `count`, `archive_stats`, `delta`, `get_session`, `get_stirpe`; `precedenti`
 > goes through `search_ibrida`): extra
 > requests queue by themselves instead of dying in a timeout. Whoever orchestrates
 > several calls should group them in pairs.
@@ -555,7 +563,8 @@ The `ruolo` (role) field makes it readable.
 > shorter budget and checks the clock before every search, not only between DBs (since
 > 0.81.1). An unreadable `.db` file in the
 > folder (SQLite: "file is not a database") no longer breaks the search for everyone: that
-> DB is reported as not read, and the others answer.
+> the others answer. `count`, `check_term` and `search_ibrida` report it in `saltati`;
+> `search` skips it and writes it only to the server log.
 
 > **Sources without a thread.** On chunked documents (pdf/memory), on Telegram
 > messages (one row per message, no chain) and on historical DBs `parent_uuid` is
@@ -792,11 +801,14 @@ A PDF **without text** (scan, screenshot) has nothing to extract with `pypdf`. B
 vps1777 archive-ingest <file> --db <name> --verify
 ```
 
-What it does: it creates a throwaway notebook, puts the file in it (NotebookLM
-processes it), takes its **indexed text** (`source content`), with `--verify` asks
-NotebookLM to **check the faithfulness** (doer + checker), then indexes the text into
-the archive and cleans up the notebook. It works with image PDFs, scans, **audio** and
-any file NotebookLM can read.
+What it does, on a file that is not text: it creates a throwaway notebook, puts the
+file in it (NotebookLM processes it), takes its **indexed text** (`source content`),
+with `--verify` asks NotebookLM to **check the faithfulness** (doer + checker), then
+indexes the text into the archive and cleans up the notebook. It works with image PDFs,
+scans, **audio** and any file NotebookLM can read. A file that is already text (`.md`,
+`.txt`, `.markdown`, `.rst`, `.log`, `.csv`, `.json`, `.jsonl`) goes **straight** to the
+indexer instead, without NotebookLM (#285); `--nlm` forces the NotebookLM round anyway.
+`--project` sets the label (default: the DB name).
 
 Since 0.84 (P17) the text is what NotebookLM indexed for the source, not the answer to
 a transcription question: it does not go through a model that rephrases it, and it costs
@@ -813,9 +825,9 @@ vps1777 archive-ingest --artefatto approfondimento-54fde107.m4a --db podcast-stu
 
 The artifact stays where it is. The name is just the file name, without folders.
 
-> ⚠️ The transcription is generated by an LLM, **it is not deterministic OCR**:
-> excellent for finding content again, not guaranteed 100% faithful on complex
-> layouts. The verification query (`--verify`) flags uncertain/missing parts.
+> ⚠️ The text is produced by Google (multimodal OCR, audio transcription), **it is not
+> deterministic OCR**: excellent for finding content again, not guaranteed 100% faithful
+> on complex layouts. The verification (`--verify`) flags uncertain or missing parts.
 
 It requires NotebookLM auth to be configured (nlm profile — see `/admin/nlm`).
 
@@ -825,8 +837,10 @@ isn't there, each image leaves an `ocr-non-disponibile` tombstone.
 
 ## Building a DB from the command line (local)
 
-The indexer is stdlib-only and also runs standalone (handy for big batches on the
-PC; then you upload the `.db` as a drop-in):
+The indexer is stdlib-only (except `pypdf` for PDFs; the images of a bundle go through
+the OCR service, and without it they leave the `ocr-non-disponibile` tombstone) and also
+runs standalone (handy for big batches on the PC; then you upload the `.db` as a
+drop-in):
 
 ```bash
 python3 services/gateway/app/archive_indexer.py <input> out.db --project name
@@ -942,13 +956,15 @@ doesn't change (`sender` and `speaker` are neither in the FTS nor in the vectors
 semantic index is tied to rowids, which the migration doesn't touch). It runs by itself
 at the first ingest into an old DB; for DBs nobody writes to anymore there is
 [`vps1777 archive-migra`](CLI.md) (dry-run by default, `--scrivi` to apply), which for
-each DB runs inside the gateway:
+each DB runs, in the compose service `ingest` (since 0.84.0, with its own memory cap;
+before, it ran with `exec` in the gateway):
 
 ```bash
-python -m app.archive_indexer /var/lib/archive/db/<name>.db --migra [--scrivi]
+docker compose --profile ingest run --rm -T ingest indexer /var/lib/archive/db/<name>.db --migra [--scrivi]
 ```
 
-and prints `{"strumenti": N, "sistema": N, "indice_project": …, "speaker_prima": {…},
+(`indexer` hands the arguments to `app.archive_indexer`; the same holds for
+`archive-retag`) and prints `{"strumenti": N, "sistema": N, "indice_project": …, "speaker_prima": {…},
 "speaker_dopo": {…}, "scritto": …}`. On
 the primary: 74,818 rows, `human` from 89,950 to 15,132, 6 seconds (and, with the
 program's turns below, to 3,967). ⚠️ Even a dry run can
@@ -1058,10 +1074,10 @@ Declared, not discovered by chance:
   the alias has `workfile:_recupero-1777/…` rows; re-ingesting with this indexer adds
   the `recupero:*` rows but doesn't remove those.
 - **`memorie` without a tool.** It is read via SQL or with `search`.
-- **`documents/` says what kind a document is, not where it comes from.** The app
-  (since 25/09/2026) writes `documents/<family>/…`: the label is the family
-  (`document:testo`, `document:codice`…). The file name is searchable, because it is
-  the first line of the text; the folder of origin is only in `MANIFEST.json`
+- **`documents/` does not say where a document comes from.** If the app writes
+  `documents/<family>/…` the label is the family (`document:testo`,
+  `document:codice`…); if it writes the folder flat, it is `document` for all. The file
+  name is searchable, because it is the first line of the text; the folder of origin is only in `MANIFEST.json`
   (`documenti.consegnati[].src`), on purpose: a path in the label would carry the
   disk layout into every answer.
 - **`last_ts` and the last message.** On a real bundle the card's `last_ts` turned
@@ -1071,7 +1087,10 @@ Declared, not discovered by chance:
 
 ## How it works underneath (the no-docker.sock boundary)
 
-The gateway mounts the `archive-data:rw` volume and writes the `.db` files in
+The `archive-data` volume is mounted `:rw` by whoever writes: the gateway (`.db`
+drop-ins, the `meta` card, `vps1777 archive-ingest`), the `ingest` service (since 0.84.0:
+the queued jobs of `/admin/archive`, `archive-migra`, `archive-retag`) and
+`indice-notturno` (the `<db>.vec.db` indexes). The `.db` files live in
 `/var/lib/archive/db/`; `archive-mcp` mounts it **read-only**, scans that directory
 (**scan-mode**) and discovers new DBs without a restart. The only two writes a tool
 can ask for — `set_description` and `set_ruolo`, which touch only the `meta` card —

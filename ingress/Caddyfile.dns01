@@ -30,8 +30,8 @@
 
 	# Tetto ASSOLUTO sul body — difesa in profondità sopra quello del gateway
 	# (voce 92118d4e). Il taglio FINE, per path, resta nel gateway
-	# (`asgi_security.BodyCapASGI`: 32 MB di default, MAX_UPLOAD_BYTES sui due path
-	# di upload). Qui NON si replica quella lista: due copie della stessa lista in
+	# (`asgi_security.BodyCapASGI`: 32 MB di default, MAX_UPLOAD_BYTES sui prefissi
+	# di upload, UPLOAD_PREFIXES). Qui NON si replica quella lista: due copie della stessa lista in
 	# due linguaggi divergono, e la copia sbagliata sarebbe quella che decide per
 	# prima. Caddy taglia solo l'ASSURDO — ciò che nessun path può mai accettare.
 	#
@@ -42,8 +42,8 @@
 	#   logica per-path del gateway non verrebbe mai raggiunta. Il margine serve a
 	#   restare la seconda linea, non la prima.
 	#
-	# 🔬 MISURATO il 09/08 su caddy:2.8-alpine (lo stesso digest di
-	#   compose.ingress.caddy.yaml), perché la direttiva ha un comportamento che la
+	# 🔬 MISURATO il 09/08 su caddy:2.8-alpine (il digest di allora di
+	#   compose.ingress.caddy.yaml; oggi l'immagine è la 2.11), perché la direttiva ha un comportamento che la
 	#   documentazione non rende ovvio — e la prima prova mi aveva dato un falso OK:
 	#     request_body max_size 1KB + `respond`        → body da 5000 byte: HTTP 200 (!)
 	#     request_body max_size 1KB + `reverse_proxy`  → body da 5000 byte: HTTP 413

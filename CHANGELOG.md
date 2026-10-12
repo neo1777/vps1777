@@ -4,6 +4,32 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Documentazione
+- **Tutta la documentazione riletta contro il codice (12/10/2026).** Quindici verifiche parallele
+  hanno controllato ogni affermazione concreta: comandi e flag, tool e parametri, variabili, percorsi,
+  servizi, comportamenti ed esempi. Le verifiche hanno coperto i 61 file markdown, le istruzioni e le
+  docstring dei 73 tool MCP, i testi del pannello, della Mini App, della CLI e degli installer, il
+  ledger e i commenti di configurazione. Ne sono usciti 332 difetti, quasi tutti corretti con le
+  pagine inglesi allineate. I più gravi:
+  - il Funnel indicato in TROUBLESHOOTING era il comando che il codice vieta (dava 502);
+  - i rimedi `docker compose up -d gateway` senza overlay (gateway senza porta o rete);
+  - il token del bot rifatto a mano lasciava la Mini App senza chiave (ora `rotate-secret.sh`);
+  - i README promettevano la verifica dell'audience del token, che il proxy non fa;
+  - SECURITY.md non diceva che col profilo Cloudflare il traffico è in chiaro per Cloudflare, né
+    che il container di backup gira come root col repo in scrittura;
+  - il percorso manuale con Tailscale non diceva di accendere il Funnel;
+  - FEATURES-METODO descriveva male le voci rinviate;
+  - la pagina Archive indicava la CLI per i file grandi, che non li regge.
+  Sono stati corretti anche testi nel codice, senza cambiarne il comportamento: le docstring dei
+  tool, i messaggi della CLI, del pannello e degli installer, e i commenti di compose e systemd. Il
+  ledger ha una voce `removed` per i comandi del bot tolti nella 0.86.0, e `.env.example` non
+  documenta più `BOT_RAG_COMMANDS`.
+
+### Corretto
+- **Il plugin d'esempio MCP non partiva.** Il Dockerfile preparava l'ambiente con Python 3.12 e lo
+  eseguiva su un'immagine con la 3.11; ora usa `python:3.12-slim` come i servizi principali.
+- **`compose.build.yaml` non ridefiniva `ingest`**: un build locale prendeva il gateway da ghcr.
+
 ### Cambiato
 - **nb1777: anche i `source_add_*` e `lavoro_esito` rispondono con un oggetto.** I cinque
   `source_add_*` davano l'id nudo, oppure `{stato: in_corso, job_id}` se il lavoro durava: due forme

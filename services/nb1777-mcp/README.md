@@ -13,18 +13,23 @@ NotebookLM MCP wrapper — espone i tool del CLI `nlm` come MCP streamable-http.
 | `NLM_ARTIFACTS` | `/var/lib/nlm-artifacts` | dove nascono gli artefatti di `studio_download` (volume separato, senza segreti) |
 | `GATEWAY_SECRET_FILE` | — | segreto condiviso per gli endpoint `/internal/*`; senza, negano tutto |
 | `NOTEBOOKLM_DISABLE_HEADLESS_REFRESH` | — (in `compose.yaml` è `1`) | spegne il refresh headless dei cookie di `nlm`, che nel container non ha il profilo di browser e può solo fallire |
+| `GATEWAY_PUBLIC_BASE` | — (in `compose.yaml` viene da `PUBLIC_BASE`; vuoto = link relativi) | indirizzo pubblico del gateway per i link firmati `/scarica/` e i link di caricamento `/carica/` |
+| `NB1777_SONDA_ORE` | `4` | ogni quante ore la sonda viva prova la sessione Google; `0` la spegne |
+| `NOTEBOOKLM_ALLOWED_FILE_DIRS` | — (in `compose.yaml` `/var/lib/nlm-artifacts:/tmp`) | le sole cartelle da cui `nlm` carica un file (la legge `nlm`) |
+| `LOG_LEVEL` | `INFO` | livello dei log |
 | `FASTMCP_STATELESS_HTTP` | `true` | MCP stateless mode |
 | `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI) |
 
 ## Auth NotebookLM (post-install)
 
-`nlm` (dalla 0.7 alla 0.15) salva l'auth come profilo `${NLM_HOME}/profiles/default/cookies.json`. Se manca (o esiste `${NLM_HOME}/AUTH_PENDING.flag`), ogni tool che parla con NotebookLM ritorna `RuntimeError` con le istruzioni; i tre tool della memoria (`canonico`, `memoria_check`, `memoria_ack`) leggono file locali e funzionano anche senza.
+`nlm` (dalla 0.7 alla 0.15) salva l'auth come profilo `${NLM_HOME}/profiles/default/cookies.json`. Se manca (o esiste `${NLM_HOME}/AUTH_PENDING.flag`), ogni tool che parla con NotebookLM fallisce con un errore `[auth_assente]` e le istruzioni (una sessione scaduta dà `[auth_scaduta]`); i tre tool della memoria (`canonico`, `memoria_check`, `memoria_ack`) leggono file locali e funzionano anche senza.
 
 Sul tuo PC: `nlm login` → `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` → carica il tar.gz dal pannello `<PUBLIC_BASE>/admin/nlm`.
 
 ## Tool MCP esposti
 
-55 tool, in sette famiglie: notebook (6), source (10), chat e lavori in corso (3: `notebook_query`, `notebook_query_esito`, `lavoro_esito`), ricerca,
+55 tool, in sette famiglie: notebook (8: anche `nb_export` e `censimento`), source (14: anche
+`source_upload_link`, `source_describe`, `source_replace`, `source_drive_stato`, `source_sync_drive`), chat e lavori in corso (3: `notebook_query`, `notebook_query_esito`, `lavoro_esito`), ricerca,
 note e cronologia (7: `research_*`, `note_*`, `chat_cronologia`), studio — creazione (10: i 9 artefatti +
 `studio_create_all_9`), studio — gestione (8), diagnostica e memoria (5: `doctor`, `usage_get`, `canonico`,
 `memoria_check`, `memoria_ack`). Firme e comportamento stanno

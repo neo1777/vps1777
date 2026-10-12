@@ -38,8 +38,10 @@ ExecStart=/usr/local/bin/vps1777 avvisa-fallimento --unit %i
 # breve: se non parte in un minuto, non è un avviso — è un secondo problema
 TimeoutStartSec=60
 # 🔒 `yes`, e per questa unit è la risposta GIUSTA — non un compromesso.
-#   Le altre quattro dichiarano `no` perché DEVONO elevare (`sudo install` per il
-#   self-update): lì il flag rompe il lavoro, ed è la causa del guasto del 03/08.
+#   Le due unit che DEVONO elevare (auto-update e update: `sudo install` per il
+#   self-update) dichiarano `no`: lì il flag rompe il lavoro, ed è la causa del
+#   guasto del 03/08. Le altre che la chiamano (check-update, secrets-check,
+#   indice-notturno, ingest) dichiarano `true`.
 #   **Questa non eleva niente**: legge il journal e fa una chiamata HTTPS. Quindi
 #   può permettersi la protezione più forte, e dichiararlo dice a chi legge che
 #   NON è un'esenzione dimenticata ma una misura presa.

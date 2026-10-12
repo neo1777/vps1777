@@ -28,8 +28,8 @@ to paste into claude.ai. No Docker to manage by hand, no shell on the VPS.
 │                                                                  │
 │   claude.ai ──┐                                                  │
 │   Claude Code ├──► https://<host>/<SECRET>/<service>/mcp         │
-│   Mini App ───┤        │   the Mini App enters via /app/*,       │
-│   Telegram ───┘        │   not via the MCP path                  │
+│   Mini App ───┘        │   the Mini App enters via /app/*,       │
+│                        │   not via the MCP path                  │
 │                        ▼                                         │
 │            ┌───────────────────┐                                 │
 │            │  Tailscale Funnel │  (or Caddy, or Cloudflared)     │
@@ -45,6 +45,8 @@ to paste into claude.ai. No Docker to manage by hand, no shell on the VPS.
 │      ▼               ▼                       ▼                   │
 │  archive-mcp     nb1777-mcp     ocr     your-plugin              │
 │  (FTS5 multi-DB) (NotebookLM)        (any MCP/bot)               │
+│                                                                  │
+│  nb1777-bot: long-poll out to Telegram, never via the gateway    │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -105,12 +107,15 @@ URL and the connectors.
 ### 🛠 Manual — on the VPS
 
 ```bash
-sudo apt install python3 python3-bcrypt             # setup.sh prerequisite (NOT python3-pip: PEP 668)
+# setup.sh prerequisites: Docker Engine + Compose v2, which setup.sh does NOT install
+# (https://docs.docker.com/engine/install/), plus:
+sudo apt install git python3 python3-bcrypt         # NOT python3-pip: PEP 668
 git clone https://github.com/neo1777/vps1777.git && cd vps1777
 ./setup.sh                                          # interactive wizard
-# if you answered "no" to "Proceed now?" (setup.sh already starts the stack, same -f):
-docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
-  --profile ingress.tailscale up -d                 # or caddy / cloudflared
+# if you answered "no" to "Proceed now?", run the command setup.sh prints; with the
+# default features (backup, autoupdate) it also loads the backup overlay, e.g.:
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
+  --profile ingress.tailscale --profile ops.backup up -d      # or caddy / cloudflared
 ```
 
 > ⚠️ **Two things this path hits and the graphical installer does not** (measured on
@@ -132,10 +137,11 @@ load the NotebookLM auth, [docs/en/INSTALL.md](docs/en/INSTALL.md).
 | Service | What it does | Internal port |
 |---|---|---|
 | **gateway** | OAuth 2.1 + DCR + MCP reverse proxy + `/admin/*` panel + `/app/*` Mini App | 8080 |
-| **archive-mcp** | Search across multiple DBs — FTS5 and hybrid by meaning, FTS5 + vectors — of claude.ai exports, Claude Code sessions and Session Recovery bundles, with session cards and lineages (`get_session`, `get_stirpe`) and the reading of several messages at once (`get_many`, `precedenti`) and the delta between two snapshots (`delta`): **18 tools**. See [docs/en/ARCHIVE.md](docs/en/ARCHIVE.md) and [docs/en/RICERCA-IBRIDA.md](docs/en/RICERCA-IBRIDA.md) | 8002 |
+| **archive-mcp** | Search across multiple DBs — FTS5 and hybrid by meaning, FTS5 + vectors — of claude.ai exports, Claude Code sessions, Session Recovery bundles, Telegram exports (JSON or HTML) and plain-text documents (images read through OCR), with session cards and lineages (`get_session`, `get_stirpe`) and the reading of several messages at once (`get_many`, `precedenti`) and the delta between two snapshots (`delta`): **18 tools**. See [docs/en/ARCHIVE.md](docs/en/ARCHIVE.md) and [docs/en/RICERCA-IBRIDA.md](docs/en/RICERCA-IBRIDA.md) | 8002 |
 | **nb1777-mcp** | Gemini Notebook (formerly NotebookLM) via the `nlm` CLI — **55 tools** (notebooks, sources, chat, 9 studio artifacts, doctor, canonico/memory). Also serves the **1777 memory canon** ([docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md)). See [docs/NB1777.md](docs/NB1777.md) (Italian) | 8003 |
 | **nb1777-bot** | Owner-only Telegram bot + Mini App launcher | (long-poll) |
-| **ocr** | Tesseract in an internal container: the ingest's eyes (images → `[ocr]` text). The gateway calls it over HTTP, it never spawns processes | 8004 |
+| **ocr** | Tesseract in an internal container: the ingest's eyes (images → `[ocr]` text). The `ingest` job calls it over HTTP; nothing spawns processes | 8004 |
+| **ingest** | On-demand job, not started by `up`: since 0.84.0 it indexes the files that `/admin/archive` puts in a queue, launched by `vps1777-ingest.path` with its own 2 GB memory cap, so a huge export kills the job, not the gateway. Same image as the gateway, no secrets, only the archive volume. Its sibling **indice-notturno** is the nightly incremental update of the semantic index | — |
 
 Plus the **plugins** you add — an MCP server or a bot in a few files, without touching
 the core. See [docs/PLUGINS.md](docs/PLUGINS.md) (Italian).
@@ -166,9 +172,12 @@ default; to turn it off see [docs/OPS.md](docs/OPS.md) (Italian).
 
 - Backend on an `internal: true` Docker network — **only the gateway** faces the outside
 - The gateway has **no** access to the Docker socket or the host filesystem
-  (unprivileged container), **nor to the Google cookies** of NotebookLM: among the
-  running services, that volume is mounted only by `nb1777-mcp`, the one that uses
-  them (the backup job also mounts it read-only to encrypt them, and the expiry check
+  (unprivileged container; the one exception is the bind-mounted `onboarding/` folder,
+  the narrow channel through which it leaves update and indexing requests for the
+  host's systemd units), **nor to the Google cookies** of NotebookLM: among the core
+  services, that volume is mounted only by `nb1777-mcp`, the one that uses them (the
+  backup container, always on with the default `backup` feature, also mounts it
+  read-only to encrypt them, and the expiry check
   reads only their date — see [SECURITY.md](SECURITY.md)). It does see the **5 Docker
   secrets assigned to it** — `gateway_secret`, `oauth_signing_secret`,
   `admin_password_bcrypt`, `archive_desc_secret` and `telegram_webapp_secret`, the key
@@ -181,15 +190,17 @@ default; to turn it off see [docs/OPS.md](docs/OPS.md) (Italian).
   mounted read-only in `/run/secrets/`: with compose it's a bind-mount of the host file,
   not a tmpfs), **never** in env vars; the `GATEWAY_SECRET` is redacted from access logs
 - OAuth 2.1 with PKCE + refresh; JWTs with separate `typ` (no cross-token use); bcrypt
-  rounds=12; the proxy also verifies the token **audience**
+  rounds=12; the proxy also binds the token to the **owner** (its `sub` must be an allowed
+  email); audience restriction per RFC 8707 is deliberately not implemented — see
+  [SECURITY.md](SECURITY.md)
 - Mini App and bot are **owner-only fail-closed**: without `TELEGRAM_OWNER_ID` they deny
   everyone rather than open up
 - Per-IP rate limiting on auth endpoints; `X-Forwarded-For` trusted **only** from the
   proxy (client IP can't be spoofed)
 - Non-root containers (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, a
   **read-only rootfs** on every service in `compose.yaml` (`/tmp` is a 64 MB `noexec`
-  tmpfs), healthchecks on every running service (the `indice-notturno` job, which starts
-  and finishes, has none)
+  tmpfs), healthchecks on every running service (the `indice-notturno` and `ingest` jobs, which
+  start and finish, have none)
 - Automatic host hardening at install: `unattended-upgrades` + `fail2ban` (`H45`)
 - Updates **cosign-signed** and verified **fail-closed by default**; immutable digests
   (`images.lock`); age-encrypted backups + snapshots + **automatic rollback**
@@ -218,7 +229,7 @@ a glance:
   lacks a section and an example; cross-references between docs go through a linter;
   English translations record the hash of their Italian source and CI flags them when
   the original moves ([docs/en/MANIFEST.json](docs/en/MANIFEST.json)).
-- **Over 800 tests across six suites**, many of them *structural guards* — each one
+- **Over 1,400 tests across six suites**, many of them *structural guards* — each one
   born from a real incident. The [CHANGELOG.md](CHANGELOG.md) tells every guard's
   story: what bit us, and how it became a test.
 - **Signed releases and an update that knows how to retreat**: fail-closed cosign

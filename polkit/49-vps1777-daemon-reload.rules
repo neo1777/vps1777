@@ -21,7 +21,7 @@
 //      QUALUNQUE unit) e NON `manage-unit-files` (enable/disable). Rileggere i file
 //      non avvia niente.
 //    · SOLO l'utente operatore. Il nome NON è inventato qui: è `OPERATOR_USER`,
-//      fissato in installer/engine.py:30.
+//      fissato in installer/engine.py (costante OPERATOR_USER).
 //    · Nessun `subject.local`/`subject.active`: il timer gira SENZA sessione, e una
 //      condizione su quelle proprietà lo escluderebbe proprio nel caso per cui la
 //      regola esiste. È il difetto "la guardia esclude il caso che deve coprire".

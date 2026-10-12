@@ -69,15 +69,15 @@ vps1777 check --notify    # in più: messaggio Telegram all'owner se c'è una nu
 ```
 
 `--notify` sends the new release to Telegram (once per version) and the **state changes**
-of the three watches — the fall and the recovery, not the state every day. Without
+of the five watches — the fall and the recovery, not the state every day. Without
 `--notify` the watches run anyway and only write to the log.
 
 ## vps1777 update
 
-Updates to the most recent release (or to an explicit version): backup,
-volume snapshots, download of the **signed** bundle (cosign verification), image
-pull by digest, restart, health gate — and automatic rollback if anything
-doesn't check out. This is the command the `vps1777-auto-update.service` unit
+Updates to the most recent release (or to an explicit version): download of the
+**signed** bundle (sha256 and cosign verification), check of the secrets the release
+requires, backup and volume snapshots, image pull by digest, restart, health gate — and
+automatic rollback if anything doesn't check out. This is the command the `vps1777-auto-update.service` unit
 runs: from the host you normally start **that one**, not this by hand.
 
 **The quarantine kicks in only with `--eta-minima HOURS`**, and it is the unit that
@@ -110,7 +110,9 @@ that is where you read, the morning after, what the nightly auto-update did.
 
 If another update (or a rollback) is already running it exits with **75** ("try again
 later"), which the units count as success: it isn't a fault and doesn't send the failure
-alert.
+alert. It exits **1** if the update fails and the auto-rollback brings back the previous
+version (with a Telegram message), **2** if not even the rollback comes back healthy: that
+needs manual intervention.
 
 ```bash
 sudo systemctl start vps1777-auto-update.service   # the normal way (with the quarantine)
@@ -361,6 +363,8 @@ Sends Neo the count of the «things to do» on Telegram (pages and decisions on 
 red spots) with the link to the page. One message per round: the same count never rings
 twice. It accepts only numbers and an `https://claude.ai/…` link. The PC calls it over SSH
 after every rebuild of the page; `--prova` prints the message without sending it.
+`--rossi` is optional (defaults to 0) and `--quando` (the ISO time of the rebuild) only
+goes into the state.
 
 ```bash
 vps1777 campanello --pagine 3 --decisioni 114 --rossi 0 --url https://claude.ai/artifact/… --prova

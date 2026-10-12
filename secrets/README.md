@@ -2,16 +2,20 @@
 
 Questa cartella contiene i segreti dell'installazione. **I `.txt` sono
 gitignorati e nessun valore è mai entrato nella storia del repo** (verificato).
-`setup.sh` li genera se mancano ed è idempotente: non tocca i file già presenti,
-quindi rilanciarlo non invalida un'installazione viva.
+`setup.sh` li genera se mancano o sono vuoti ed è idempotente: non tocca quelli già
+pieni (tranne `telegram_webapp_secret.txt`, che ricalcola sempre dal token), quindi
+rilanciarlo non invalida un'installazione viva.
 
 | file | a cosa serve | chi lo monta |
 |---|---|---|
-| `gateway_secret.txt` | canale interno gateway ↔ upstream (`/internal/nlm/*`: stato **e installazione** dei profili NotebookLM) | gateway, nb1777-mcp, bot |
+| `gateway_secret.txt` | il segmento segreto delle URL dei connettori (`/<SECRET>/<servizio>/mcp`) **e** il canale interno verso nb1777-mcp (`/internal/*`: stato **e installazione** dei profili NotebookLM, notifiche del bot) | gateway, nb1777-mcp, bot |
 | `archive_desc_secret.txt` | **solo** il canale `set_description` (archive-mcp → gateway) | gateway, archive-mcp |
 | `oauth_signing_secret.txt` | firma dei token OAuth | gateway |
 | `admin_password_bcrypt.txt` | hash della password admin | gateway |
 | `telegram_bot_token.txt` | token del bot | bot |
+| `telegram_webapp_secret.txt` | chiave **derivata** dal token (HMAC_SHA256 con chiave «WebAppData») con cui si verifica la Mini App: non si scrive a mano | gateway |
+| `cloudflared_token.txt` | token del tunnel (solo ingresso Cloudflare) | cloudflared |
+| `cf_api_token.txt` | token API Cloudflare per la sfida DNS-01 (solo feature `caddy-dns01`) | caddy |
 
 ## Perché due segreti e non uno (D9, 20/07/2026)
 
@@ -37,6 +41,14 @@ fail-closed, cioè un difetto di provisioning travestito da bug del codice.
 
 ## Rotazione
 
-Sostituire il contenuto e riavviare i servizi che lo montano (tabella sopra).
-`archive_desc_secret` tocca solo gateway e archive-mcp: ruotarlo non ha
-effetti sul resto — che è, in pratica, il vantaggio di averlo separato.
+Per `gateway_secret`, `oauth_signing_secret`, `admin_password` e `telegram_bot_token`
+usa `./tools/rotate-secret.sh <nome>`: scrive il valore nuovo e riavvia chi lo monta. Per
+il token del bot rideriva anche la chiave della Mini App: cambiare a mano solo il token
+la rompe (il bot risponde, la Mini App rifiuta tutti). Ruotare `gateway_secret` cambia
+le URL dei connettori, che vanno aggiornate in ogni client.
+
+A mano restano `archive_desc_secret` — sostituisci il contenuto e riavvia gateway e
+archive-mcp — e i token Cloudflare, i cui servizi stanno negli overlay (procedura in
+[docs/SECRETS.md](../docs/SECRETS.md)). `archive_desc_secret` tocca solo gateway e
+archive-mcp: ruotarlo non ha effetti sul resto — che è, in pratica, il vantaggio di
+averlo separato.

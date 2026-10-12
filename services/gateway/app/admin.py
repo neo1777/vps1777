@@ -617,7 +617,7 @@ async def nlm_view(request: Request) -> Response:
   <div class="kicker">come ottenere il profilo nlm</div>
   <ol>
     <li>Sul TUO PC, installa <code>nlm</code> (serve <a href="https://astral.sh" target="_blank">uv</a>):
-      <pre>uv tool install notebooklm-mcp-cli --python 3.12</pre>
+      <pre>uv tool install notebooklm-mcp-cli==0.15.4 --python 3.12</pre>
     </li>
     <li>Login Google (apre il browser):
       <pre>nlm login
@@ -718,6 +718,17 @@ def _valid_archive_db(path: Path) -> bool:
 _INDICIZZA_LOCK = asyncio.Lock()
 
 
+# Il consiglio per chi sbatte nel tetto dell'upload. NON «usa la CLI sulla VPS»:
+# `vps1777 archive-ingest` passa il file in RAM e dalla /tmp del gateway (una tmpfs
+# piccola), e .zip/.pdf li manda a NotebookLM, non all'indexer. Le vie vere sono due:
+# spezzare la fonte, o indicizzarla sul PC (l'indexer è solo stdlib) e caricare il .db.
+_PER_FONTI_GRANDI = (
+    "Per una fonte più grande: spezzala in più file e caricali insieme sullo stesso "
+    "nome DB (l'export claude.ai esce già in 5 zip), oppure indicizzala sul tuo PC "
+    "con python3 services/gateway/app/archive_indexer.py <file> <nome>.db (solo "
+    "stdlib) e carica qui il .db (drop-in, anche lui sotto questo tetto).")
+
+
 def _copia_upload(fh, tmp: Path) -> None:
     """L'upload nel file temporaneo, a blocchi da 1 MB e col tetto: in un thread (S13)."""
     fh.seek(0)
@@ -732,7 +743,7 @@ def _copia_upload(fh, tmp: Path) -> None:
                 raise ValueError(
                     f"upload troppo grande (tetto "
                     f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB). "
-                    f"Per archivi più grandi usa la CLI sulla VPS.")
+                    + _PER_FONTI_GRANDI)
             w.write(chunk)
 
 
@@ -759,7 +770,8 @@ def _sezione_caricamenti(lavori: list[dict]) -> str:
             dettaglio = html.escape(str(d.get("errore") or ""))
         elif d.get("stato") == "in-coda" and d.get("fermo"):
             dettaglio = ("nessuno l'ha preso: sull'host guarda "
-                         "<code>systemctl status vps1777-ingest.path</code>")
+                         "<code>systemctl status vps1777-ingest.path</code>, oppure "
+                         "svuota la coda a mano con <code>vps1777 ingest-coda</code>")
         else:
             dettaglio = ""
         righe += (f"<tr><td>{html.escape(str(d.get('accodato') or d['id'][:15]))}</td>"
@@ -838,7 +850,7 @@ async def archive_view(request: Request) -> Response:
                     "/admin/archive?msg=" + quote_plus(
                         f"upload rifiutato: dichiarati {_n // (1024 * 1024)} MB, il "
                         f"tetto è {archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} "
-                        f"MB. Per archivi più grandi usa la CLI sulla VPS."
+                        f"MB. " + _PER_FONTI_GRANDI
                     ) + "&kind=err", status_code=303)
         form = await request.form()
         # Dal 29/08/2026 l'export claude.ai arriva in 5 zip per categoria: il form
@@ -894,8 +906,8 @@ async def archive_view(request: Request) -> Response:
                             f"spazio su disco insufficiente: liberi "
                             f"{_libero // (1024 * 1024)} MB, ne servono almeno "
                             f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
-                            f"(il tetto di un upload). Libera spazio, oppure usa la CLI sulla "
-                            f"VPS che scrive direttamente senza il file temporaneo.")
+                            f"(il tetto di un upload). Libera spazio sul disco della VPS "
+                            f"(backup vecchi, immagini Docker inutilizzate) e riprova.")
                     await asyncio.to_thread(_copia_upload, upload.file, tmp)  # type: ignore[union-attr]
                     if suffix == ".db":
                         # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
@@ -1311,7 +1323,9 @@ document.getElementById('updform').addEventListener('submit', function(ev) {{
     <div class="toolbar"><button type="submit" class="btn">↻ Ricontrolla adesso</button></div>
   </form>
   <p class="hint">Il check automatico gira una volta al giorno (timer host): «ultimo check»
-  può essere più vecchio di una release appena pubblicata — «Ricontrolla adesso» lo rinfresca.
+  può essere più vecchio di una release appena pubblicata. «Ricontrolla adesso» lo rinfresca
+  solo se il gateway ha uscita su Internet (non ce l'ha, nell'impostazione predefinita):
+  altrimenti rinfrescalo dall'host con <code>vps1777 check</code>.
   L'update è eseguito dalla CLI host (backup → pull verificato → migrazioni →
   health-gate → rollback automatico su fallimento). Da terminale: <code>vps1777 update</code>.</p>
 </section>
@@ -1461,7 +1475,7 @@ async def salute_view(request: Request) -> Response:
 
 # ───── /admin/secrets — età, scadenze, rotazione ─────
 # Legge onboarding/secrets_status.json, scritto dal check host (`vps1777
-# secrets-status`, timer settimanale): l'età deriva dall'mtime dei file secret.
+# secrets-status`, timer giornaliero): l'età deriva dall'mtime dei file secret.
 
 async def secrets_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
@@ -1500,9 +1514,10 @@ async def secrets_view(request: Request) -> Response:
 {table}
 <section>
   <div class="kicker">come ruotare</div>
-  <p class="muted">La rotazione è guidata da CLI sull'host (mostra la nuova, la salvi nel password manager). Un check settimanale avvisa su Telegram i secret oltre soglia.</p>
-  <pre>cd /home/vps1777/vps1777 && sudo -u vps1777 ./tools/rotate-secret.sh &lt;nome&gt;</pre>
-  <p class="muted">Attenzione: ruotare <code>oauth_signing_secret</code> invalida i token (i connettori si ri-autenticano); <code>gateway_secret</code> cambia le URL MCP (vanno ri-aggiunti su claude.ai). Password e token bot sono solo manuali. La policy password impone min 16, ≥3 classi, niente pattern comuni.</p>
+  <p class="muted">La rotazione è guidata da CLI sull'host (mostra la nuova, la salvi nel password manager). Un check giornaliero avvisa su Telegram i secret oltre soglia (dalla Mini App puoi posticipare il promemoria).</p>
+  <pre>cd &lt;cartella del repo&gt; && sudo -u &lt;utente operatore&gt; ./tools/rotate-secret.sh &lt;nome&gt;</pre>
+  <p class="muted">Nell'installazione standard: <code>cd /home/vps1777/vps1777 && sudo -u vps1777 ./tools/rotate-secret.sh &lt;nome&gt;</code>.</p>
+  <p class="muted">Attenzione: ruotare <code>oauth_signing_secret</code> invalida i token (i connettori si ri-autenticano); <code>gateway_secret</code> cambia le URL MCP (vanno ri-aggiunti su claude.ai). Nessun secret si ruota da solo: <code>rotate-secret.sh</code> copre <code>gateway_secret</code>, <code>oauth_signing_secret</code>, <code>admin_password</code> (vuoto = la genera forte) e <code>telegram_bot_token</code> (il token nuovo lo generi prima su @BotFather; lo script rideriva la chiave della Mini App); <code>archive_desc_secret</code> e i token Cloudflare si ruotano a mano, come dice la colonna «rotazione». La policy password impone min 16, ≥3 classi, niente pattern comuni.</p>
 </section>
 """
     return _layout("secrets", body, current="secrets", csrf=_csrf_token(email))

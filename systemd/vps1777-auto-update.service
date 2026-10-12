@@ -1,4 +1,5 @@
-# vps1777-auto-update.service — auto-update PROGRAMMATO (opt-in, gestito).
+# vps1777-auto-update.service — auto-update PROGRAMMATO (acceso di default: feature
+# `autoupdate` in VPS1777_FEATURES; gestito).
 #
 # È l'aggiornamento automatico del prodotto (fino alla 0.66 conviveva con Watchtower,
 # l'auto-pull+restart crudo, tolto nella 0.67.0: immagine archiviata a monte). Invece

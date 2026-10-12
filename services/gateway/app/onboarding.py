@@ -293,7 +293,7 @@ async def setup_view(request: Request) -> Response:
     riavvia i servizi. {'<strong style="color:var(--warn)">Config in attesa di applicazione.</strong>' if has_pending else ''}</p>
   <ul>
     <li>Per NotebookLM: usa il bottone sopra (carica il <code>tar.gz</code> del profilo nlm) — è già attivo al volo, senza <code>--apply</code>.</li>
-    <li>I valori sensibili restano cifrati nei Docker secret dopo l'apply; il file <code>pending.json</code> viene cancellato.</li>
+    <li>Dopo l'apply i valori sensibili stanno in file leggibili solo dall'operatore (<code>secrets/*.txt</code> e <code>.env</code>, permessi 600; la auth-key Tailscale viene azzerata dopo l'uso), montati nei container come Docker secret, non cifrati; il file <code>pending.json</code> viene cancellato.</li>
   </ul>
 </section>
 """

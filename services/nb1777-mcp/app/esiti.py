@@ -100,7 +100,7 @@ class Risposta(Esito):
     answer: Any = None
     references: Any = Field(None, description="[{citation_number, source_id, anteprima}]")
     sources_used: Any = None
-    senza_citazioni: Any = Field(None, description="{paragrafi, su_totale}")
+    senza_citazioni: Any = Field(None, description="{paragrafi, su_totale, anteprime}")
     conversation_id: Any = None
     nota: str | None = None
     raw: Any = Field(None, description="la risposta di nlm, se non si è potuta leggere")
@@ -141,7 +141,7 @@ class Cronologia(Esito):
     notebook_id: Any = None
     notebook_title: Any = None
     sessions: Any = Field(None, description="[{conversation_id, turn_count, preview, is_active}]")
-    turns: Any = None
+    transcript: Any = Field(None, description="[{turn, query, answer}], con conversation_id")
 
 
 # ── studio ─────────────────────────────────────────────────────────────────────────────

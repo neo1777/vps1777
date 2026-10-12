@@ -15,9 +15,10 @@
 #   CHI VUOLE APRIRE IL PANNELLO DIRETTAMENTE, prima che il proxy funzioni.
 #
 #   E il chicken-and-egg che l'aveva motivata è di TAILSCALE (l'authkey si mette dal
-#   pannello, quindi prima del pannello non c'è tunnel). Con caddy e cloudflared il
-#   dominio è **obbligatorio in `.env` prima dell'avvio** (`CADDY_DOMAIN:?`,
-#   `TUNNEL_TOKEN`): il proxy può servire il pannello su HTTPS dal primo avvio.
+#   pannello, quindi prima del pannello non c'è tunnel). Con caddy e cloudflared
+#   dominio o tunnel sono **obbligatori prima dell'avvio** (`CADDY_DOMAIN:?` in `.env`,
+#   il token del tunnel in secrets/cloudflared_token.txt): il proxy può servire il
+#   pannello su HTTPS dal primo avvio.
 #
 # COSA FA ORA
 #   default            127.0.0.1:8080  → il pannello si apre con un tunnel SSH:

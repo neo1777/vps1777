@@ -1,5 +1,16 @@
 # Prompt di onboarding — C2: Bot expansion (nb1777-bot)
 
+> **⚠️ Storico — superato dal 0.86.0 (12/10/2026).** Neo ha scelto il contrario di
+> questo prompt: il bot ha un comando solo, `/start`, che risponde col bottone del
+> pannello; `/aiuto`, `/pannello`, `/lista`, `/chiedi` e `BOT_RAG_COMMANDS` sono stati
+> tolti, e le domande ai notebook passano dalla Mini App (CHANGELOG 0.86.0;
+> `services/nb1777-bot/app/bot.py`). Il testo sotto è la fotografia del 14/07, lasciata
+> com'era: i 5 comandi, `_mcp_call`, `nb1777_mcp_url`, `_rag_disabled()` e
+> `bot_rag_commands` che cita non esistono più (il bot parla con `nb1777-mcp` solo via gli
+> endpoint `internal/` su `nlm_internal_base`), il bot ha test propri in
+> `services/nb1777-bot/tests/`, e `nb1777-mcp` espone 55 tool, non ~35. **Non lanciarlo
+> come prompt senza una nuova decisione di Neo.**
+
 > **Come usare questo file.** Prompt per una sessione dedicata (Claude Code, repo
 > `vps1777`) che estende il bot Telegram. Copia il blocco sotto la riga come primo
 > messaggio. Scritto per reggere il tempo: se lo lanci fra settimane, la sessione

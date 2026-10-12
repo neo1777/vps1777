@@ -53,8 +53,15 @@ esattamente il "secondo tempo" (curare, connettere, ricordare) che `agora1777`
 dice che Neo salta sistematicamente — e che rende gratis il primo tempo. Neo
 stesso aveva già chiesto questo sync il 7 giugno. [paper §7; agora1777]
 
+> **Nota:** il prodotto copre già una fetta di B1: dopo ogni update il CLI scrive la
+> *state card* di vps1777 (versione, contratto dei tool, data) nel notebook indicato da
+> `VPS1777_STATECARD_NB` in `.env` (vuoto di default: la funzione è spenta), per chi
+> legge NotebookLM senza chiamare l'MCP (`services/nb1777-mcp/app/statecard.py`). Il
+> sync del catalogo intero resta da fare.
+
 **Come funziona (traccia).** [inferenza — da validare in sessione]
-- `nb_list` / `nb_describe` / `cross_notebook_query` per fotografare lo stato
+- `nb_list` / `nb_describe` / `notebook_query` (una domanda per notebook:
+  `cross_notebook_query` non esiste) per fotografare lo stato
   reale dell'account (contenuto, non titoli — lezione di agora1777).
 - Diff contro il masterIndex corrente → cosa è nuovo, rinominato, sparito.
 - Aggiornamento **incrementale e datato** del catalogo (estende, non riscrive —

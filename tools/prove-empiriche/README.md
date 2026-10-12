@@ -9,7 +9,8 @@ domande a cui **nessuna riga risponde** — servono una misura. Il kit chiama qu
 e le distingue dalle **cartacee**: una cartacea diventa un commit, un'empirica diventa un comando.
 
 **E una prova DESCRITTA la deve tradurre chi ha la macchina; una ESEGUIBILE la lancia.** Questa cartella
-esiste per non far pagare a Neo il lavoro di scriverle (lezione C9 di `02-LOOP-SU-CODICE.md`).
+esiste per non far pagare a Neo il lavoro di scriverle (una lezione di metodo del kit di audit, che non
+è in questo repo).
 
 ## Come si lanciano
 ```bash
@@ -20,17 +21,23 @@ bash tools/prove-empiriche/prova-1-gateway-non-esce.sh
 (prerequisito mancante) — e il 2 è il valore che conta più degli altri: *distingue «non c'è niente» da «non
 ho saputo vedere», che è il difetto per cui una guardia muta è peggio di nessuna guardia.*
 
-## Le otto prove
+## Le nove prove
 | | cosa misura | invasiva? |
 |---|---|---|
 | **1** `gateway-non-esce` | il gateway raggiunge Internet? (se sì, un gateway bucato esfiltra i 5 secret che monta) | no — solo richieste in uscita |
 | **2** `egress-non-entra` | su `egress` si esce ma non si entra? È **la lacuna che l'audio del round-2 ha dichiarato**: *«il vero isolamento NAT di egress non è stato testato dal vivo»* | no |
 | **3** `health-deep-solo-interni` | `/health?deep` è chiuso agli esterni, e un `X-Forwarded-For` iniettato non fa passare per interni | no — due GET |
 | **4** `snapshot-in-chiaro` | quanti snapshot pre-update ci sono, che età, se cifrati. **Osserva, non provoca** | no — sola lettura |
-| **5** `sandbox-update-service` | prima di stringere `vps1777-update.service` con `ProtectSystem=strict`: quali path scrive davvero il codice, se `~/.sigstore` esiste, se l'ultimo backup ha contenuto (dove `PrivateTmp` romperebbe in silenzio). **Nata dal round-4** — dice *cosa serve* | no — solo lettura + `find`/`stat` |
+| **5** `sandbox-update-service` | quali path scrive davvero il codice di `vps1777-update.service`, oggi stretto con `ProtectSystem=strict` (la prova è nata per decidere quella stretta), se `~/.sigstore` esiste, se l'ultimo backup ha contenuto (dove `PrivateTmp` romperebbe in silenzio). **Nata dal round-4** — dice *cosa serve* | no — solo lettura + `find`/`stat` |
 | **6** `sandbox-strict-regge-sul-kernel` | costruisce con `systemd-run` la sandbox proposta dall'audio (`ProtectSystem=strict` + i path) e prova a scrivere: cosa consente il kernel e cosa nega, con una controprova negativa su `/etc` e `/usr/bin`. **Nata dallo stesso round, sullo stesso bersaglio** — dice *se la stretta regge* | sì — richiede `sudo`/root; nessun update reale lanciato |
 | **7** `porta-pubblicata-davvero` | la porta del gateway è pubblicata **e risponde, vista dall'host** — cioè da fuori del container, l'unico lato da cui il guasto si vede. **Nata da un guasto vero** (27/07, 1h28m di irraggiungibilità con tre verdi addosso), non da una lettura | no — un `docker port` e una GET sul loopback |
 | **8** `le-unit-si-comportano-come-dichiarano` | per ogni `systemd/*.service`, le direttive di sandboxing che il file DICHIARA sono davvero APPLICATE dal kernel? Chiede al demone (`systemctl show`) invece di leggere la stringa nel file. **Nata dal round-7**, dall'accusa che «il registro convalida il bugiardino invece del farmaco» | no — `grep` + `systemctl show`, sola lettura |
+| **9** `il-fail-closed-torna-indietro-davvero` | il ramo `health_gate → _rollback_routine` dell'update torna davvero alla versione precedente quando il collaudo fallisce (lo forza `VPS1777_COLLAUDO_HEALTH_KO=1`, che può solo dire no). Si esercita solo su un salto di versione reale | **sì — provoca un rollback vero, con i container che ripartono; senza `--esegui` dice solo cosa farebbe** |
+
+Più due script di servizio: `lancia-tutte.sh` le esegue tutte e scrive l'esito, datato, in
+`onboarding/prove-empiriche.json` (`--solo prova-N` per una sola, `--fase <nome>` per tenere
+separate le fotografie di momenti diversi); `onesta-a-macchina-nuda.sh` controlla, anche in CI,
+che a macchina nuda nessuna prova dichiari un PASS.
 
 ## ⚠️ COSA QUESTE PROVE NON SONO — leggere prima di fidarsi di un verde
 - 🟡 **Quali hanno girato davvero, e quali no** *(la riga qui sotto diceva «nessuna» ed era vera il 26/07:
@@ -40,7 +47,9 @@ ho saputo vedere», che è il difetto per cui una guardia muta è peggio di ness
     di cui si sappia che *sa diventare rossa* — per le altre il rosso non è mai stato osservato.
   - **8** ha girato sui **due esiti** sulla VPS viva: PASS su 23 direttive reali di 4 unit, e FAIL
     su un file che promette due direttive che il demone non applica.
-  - **2**, **3**, **5**, **6** restano non eseguite sul target.
+  - **2**, **3**, **5**, **6** non erano state eseguite sul target fino al collaudo su macchina vergine
+    del 22-27/08/2026 (qui sotto), dove sono uscite verdi; per loro il rosso non è mai stato osservato.
+  - **9** non ha ancora girato su un salto di versione reale (al collaudo era non eseguibile).
 - 🔴 *(26/07, all'origine)* **Non sono state eseguite sul target.** Di ognuna è verificata la **sintassi**
   (`bash -n`) e la logica è scritta sui meccanismi reali letti nel codice (nomi dei *servizi* compose, non
   dei container: i `container_name` non sono dichiarati, quindi indovinarli sarebbe stato un errore).
@@ -66,10 +75,11 @@ ho saputo vedere», che è il difetto per cui una guardia muta è peggio di ness
   invece di far credere il contrario. *Una prova che tace il proprio punto cieco è peggio di una che manca.*
 - 🔴 **La 4 non provoca un update fallito.** Sarebbe la prova più forte del claim-72h, ed è invasiva su una
   macchina in produzione: **provocare un guasto sul server di qualcuno non è una decisione tecnica.** Se
-  Neo la vuole, si progetta insieme con una finestra e un rollback pronto.
+  Neo la vuole, si progetta insieme con una finestra e un rollback pronto. *(Poi è stata progettata:
+  è la prova-9, che non parte senza `--esegui`.)*
 - Nessuna stampa segreti: dove serve un valore si misura **forma, conteggio o codice di stato**.
 
 ## Se una fallisce
 Il FAIL stampa **l'impatto**, non solo l'esito — e il fix candidato quando esiste. Un fallimento qui non è
-un bug dello script: è la risposta che l'audit statico non poteva dare. **Portatelo al round come finding
-con la misura allegata**, che è l'unica prova dello stesso piano del difetto (`aperti.sh`, piano `vivo`).
+un bug dello script: è la risposta che l'audit statico non poteva dare. **Portatelo come issue, con la misura
+allegata**, che è l'unica prova dello stesso piano del difetto.

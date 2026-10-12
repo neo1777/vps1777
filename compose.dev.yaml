@@ -2,7 +2,8 @@
 #
 # Aggiunge:
 #   - Watch sync per hot-reload del codice Python
-#   - Port forward 8080 sul host (no ingress in dev)
+#   - Port forward su ${DEV_BIND:-127.0.0.1}: 8080 (gateway), 8002 (archive-mcp),
+#     8003 (nb1777-mcp) — no ingress in dev
 #   - Debug log level
 #
 # Uso (serve anche compose.build.yaml: compose.yaml è pull-only):

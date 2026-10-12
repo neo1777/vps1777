@@ -2,9 +2,11 @@
 
 > **English overview.** vps1777 is a self-hosted OAuth 2.1 gateway for MCP servers.
 > Security posture in brief: only the gateway faces the network (backend on an
-> `internal:true` Docker network); non-root containers with `cap_drop: ALL`;
+> `internal:true` Docker network); non-root containers with `cap_drop: ALL` (except
+> the backup job, which runs as root);
 > secrets via Docker `secrets:` on tmpfs, never env vars; releases are
-> cosign-signed and verified **fail-closed**, images pinned by digest; age-encrypted
+> cosign-signed and verified **fail-closed**, images pinned by digest from the first
+> update on (a fresh install runs by tag until then, `H22`); age-encrypted
 > two-tier backups with the private key off the VPS; pre-update snapshots with
 > automatic rollback; per-IP rate limiting and proxy-only `X-Forwarded-For` trust;
 > weekly Trivy scans (actionable-only) plus a monthly image-rebuild workflow;
@@ -96,7 +98,7 @@ finestra 8080 dell'onboarding, l'eccezione nota di questa riga).
 > 🖐️ *Il pannello resta dietro autenticazione: `setup_view` chiama `_require_admin` come prima istruzione — non c'è una finestra in cui chiunque arrivi possa configurarlo.*
 
 Threat model dichiarato:
-- Backend (archive-mcp, nb1777-mcp, bot) su rete Docker `internal: true` — non raggiungibili dall'esterno (nb1777-mcp e bot hanno anche l'uscita `egress`, senza porte pubblicate: possono uscire, non essere raggiunti — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)); nessun servizio pubblica `ports` in `compose.yaml` (`H48`)
+- Backend (archive-mcp, nb1777-mcp, bot, ocr e il lavoro a profilo `ingest`) su rete Docker `internal: true` — non raggiungibili dall'esterno; il job `indice-notturno` gira senza rete (`network_mode: none`) (nb1777-mcp e bot hanno anche l'uscita `egress`, senza porte pubblicate: possono uscire, non essere raggiunti — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)); nessun servizio pubblica `ports` in `compose.yaml` (`H48`)
 - OAuth 2.1 + DCR + PKCE per tutti i client OAuth (claude.ai, Mini App, future integrazioni)
 - JWT con `typ` separati: access_token (15min), refresh_token (30gg), admin (8h), miniapp (1h)
 - Path namespacing via `GATEWAY_SECRET`: l'URL contiene un segreto rotabile (se compromesso, rota e cambi URL)
@@ -107,15 +109,25 @@ Threat model dichiarato:
   dal token, `telegram_webapp_secret` — `H54` —, finestra di 12 ore) + **owner-only**
   (`TELEGRAM_OWNER_ID`); API dietro Bearer `typ=miniapp`
   — vedi [docs/MINIAPP.md](docs/MINIAPP.md)
-- Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`
-- Il gateway (unico servizio esposto) non ha accesso al Docker socket né al filesystem dell'host (`H44`);
+- Container dei servizi di `compose.yaml` non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`,
+  rootfs read-only. **Eccezione**: il container `backup` (`compose.ops.backup.yaml`, acceso per
+  default) gira come root nell'immagine alpine, senza `cap_drop`, `no-new-privileges` né rootfs
+  read-only; monta il repo in scrittura (`.:/vps1777:rw`, quindi anche `secrets/` e `.env`) e sta
+  sulla rete di default del progetto, che esce su Internet (l'`apk add` a ogni avvio). Dopo l'host
+  è il container più privilegiato del sistema
+- Il gateway (unico servizio esposto) non ha accesso al Docker socket né al filesystem dell'host,
+  **salvo la cartella `onboarding/`** (bind-mount `:rw`): ci scrive gli intent che le path unit
+  `vps1777-update.path` e `vps1777-ingest.path` portano alla CLI host, che li rivalida (`H44`);
   vede i 5 secret Docker a lui assegnati (fra cui `telegram_webapp_secret`, la chiave derivata con cui
   verifica la Mini App: dal 27/08 il token del bot lo monta solo `nb1777-bot` — vedi
   [docs/SECRETS.md](docs/SECRETS.md))
 - `archive-data` è condiviso: `archive-mcp` lo monta `:ro` (`H46`), il gateway `:rw` — privilegio
-  funzionale (`/admin/archive` scrive i `.db` indicizzati), tracciato invece di taciuto — e
-  `:rw` anche il job `indice-notturno`, che aggiorna gli indici `.vec.db` (senza rete, con un
-  tetto di memoria; vedi [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md))
+  funzionale (`/admin/archive` ci mette in coda i file caricati, in `coda/`, scrive i `.db`
+  drop-in e cancella i DB), tracciato invece di taciuto — e `:rw` anche il job `indice-notturno`,
+  che aggiorna gli indici `.vec.db` (senza rete, con un tetto di memoria; vedi
+  [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md)), e dalla `0.84.0` il lavoro `ingest`, che
+  indicizza i file in coda e scrive i `.db` (rete `backend` solo per l'OCR, nessun secret,
+  `mem_limit` 2g; vedi *Canale di aggiornamento*, la coda d'indicizzazione)
 - Hardening host automatico all'install, nel suo perimetro: `unattended-upgrades` + `fail2ban` con la
   jail `sshd` (`H45`). I tre installer **non** toccano `sshd_config` (login con password e di root
   restano come li trovi) e **non** configurano un firewall: quelli restano all'operatore
@@ -156,7 +168,7 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   e il log vive nel volume dati, dentro il backup cifrato.
 - **Una riga per ogni chiamata a un tool** (`proxy_tool`, dalla 0.74.0, S11): nome del
   tool, millisecondi, esito (`ok`, `errore_tool`, `timeout`, `interrotto` quando il client
-  chiude prima della fine, `502`) e status, scritta a fine stream. Degli argomenti
+  chiude prima della fine, `errore_stream` se si rompe lo stream dall'upstream, `502`) e status, scritta a fine stream. Degli argomenti
   **niente**: possono essere testo personale, e dal corpo JSON-RPC si legge solo
   `params.name`. Compare in `/admin/audit`.
 - **Il bearer si ferma al gateway** (`v0.45.0`, dal vaglio corso1777). Prima
@@ -263,8 +275,8 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
     il motivo per cui `nlm-auth` è **escluso dallo snapshot pre-update**, che
     invece è in chiaro: nel backup la protezione dei cookie non è l'assenza, è la
     cifratura — chi ha la chiave privata `age` e accesso agli archivi li vede;
-  - il **check settimanale delle scadenze** (`vps1777 secrets-status`, unit
-    `vps1777-secrets-check`): monta il volume in un `busybox` con `--network
+  - il **check giornaliero delle scadenze** (`vps1777 secrets-status`, unit
+    `vps1777-secrets-check`, giornaliero dal 03/08, prima settimanale): monta il volume in un `busybox` con `--network
     none` e ne legge **solo l'mtime** del file dei cookie, mai il contenuto. Dalla
     0.74.0 è la via di riserva: prima chiede a nb1777-mcp (`python -m
     app.stato_sessione`) la nascita della sessione e l'ultimo refresh, solo date.
@@ -285,9 +297,10 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   socket dà al container il controllo root-equivalente dell'host. Il container
   `ops.backup` ora monta i volumi dati **direttamente in sola lettura** e li tara
   da lì — niente `docker.sock`, niente `docker-cli`.
-- Container **non-root** (UID 1000), `cap_drop: ALL`, `no-new-privileges`,
-  backend su rete `internal: true`, gateway senza accesso al socket Docker né al
-  filesystem dell'host (baseline). I 5 secret Docker assegnati al gateway, però,
+- Container dei servizi **non-root** (UID 1000), `cap_drop: ALL`, `no-new-privileges`
+  (il container `backup` no: gira come root, vedi *Threat model dichiarato*), backend su rete
+  `internal: true`, gateway senza accesso al socket Docker né al filesystem
+  dell'host salvo `onboarding/`, dove scrive gli intent (baseline). I 5 secret Docker assegnati al gateway, però,
   lui li **vede** — fra cui `telegram_webapp_secret`, la chiave derivata che verifica
   (e quindi può forgiare) l'`initData` della Mini App; il token del bot non più, dal
   27/08 lo monta solo `nb1777-bot` (H54): la superficie reale di un gateway
@@ -381,6 +394,21 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
   e cancellazione **prima** di agire (nessun loop di ri-trigger) — i controlli
   FERMANO invece di spegnersi quando il dato manca, provato in
   `tools/tests/test_intent_fail_closed.py`.
+- **La coda d'indicizzazione usa lo stesso disegno** (dalla `0.84.0`, con
+  `ARCHIVE_INGEST_CODA` acceso in `compose.yaml`): `/admin/archive` non indicizza più
+  dentro il gateway. Mette il file in `archive-data/coda/` e scrive un intent in
+  `onboarding/ingest_coda/` (0640); `vps1777-ingest.path` lancia `vps1777 ingest-coda`
+  sull'host, che **non si fida dell'intent** — lo scrive il servizio esposto: id, nome
+  DB e formato sono rivalidati con regex proprie (`valida_intent_ingest`), progetto e
+  descrizione hanno un tetto di lunghezza — lo consuma prima di agire e fa girare il
+  servizio `ingest` con `docker compose run`: immagine del gateway, `cap_drop: ALL`,
+  rootfs read-only, `mem_limit` 2g, `pids_limit` 256, una CPU, solo rete `backend`,
+  nessun secret, solo il volume dell'archivio. Un gateway compromesso può accodare
+  lavori d'indicizzazione su file suoi, non scegliere il comando. Cosa **non** copre: la
+  unit gira come l'operatore, con `NoNewPrivileges` e `ProtectHome=read-only` ma
+  scrittura sul repo, e l'operatore resta root-equivalente via il gruppo `docker`
+  (`H12`); e il contenuto dei file in coda lo legge l'indicizzatore, quindi un file
+  ostile arriva a lui — chiuso nel suo container, non nel gateway.
 - **Anti-downgrade**: dal pulsante il target non può essere una versione più
   vecchia di quella in esecuzione (version-floor SemVer, provato nei due versi
   da `tools/tests/test_version_floor_non_confrontabile.py` che cita questa
@@ -415,21 +443,28 @@ Dettaglio completo: [docs/UPDATE.md](docs/UPDATE.md) e [docs/SELF_UPDATE_PLAN.md
 ## Flussi di dati verso terzi
 
 vps1777 non è un'isola: per erogare le sue funzioni fa transitare dati verso due
-servizi esterni. Nessuno è telemetria, ma è bene sapere **cosa esce verso chi** —
-e il confine che lo applica è la rete `egress` di `compose.yaml`: chi non ci sta
-sopra non esce affatto.
+servizi esterni (tre, se l'ingresso è `cloudflared`). Nessuno è telemetria, ma è bene
+sapere **cosa esce verso chi** — e il confine che lo applica, fra i servizi di
+`compose.yaml`, è la rete `egress`: fra loro chi non ci sta sopra non esce. Il confine
+non copre tutto: escono anche il container `backup` (rete di default del progetto, per
+l'`apk add` a ogni avvio), i proxy `caddy` e `cloudflared` (rete `ingress`) e, con quei
+due ingressi, il gateway stesso (`H50`, parziale). La tabella dice cosa esce *per
+funzionamento*; quelle uscite sono la superficie di chi riuscisse a prendere uno di
+quei container.
 
 | Quando | Cosa esce | Verso | Note |
 |---|---|---|---|
 | Domanda RAG, aggiunta fonte, OCR (nb1777) | domande, contenuto delle fonti, documenti | **Google (NotebookLM)** | l'OCR manda il documento intero; è il funzionamento di NotebookLM |
 | Comandi **testuali** del bot | — | — | tolti dalla v0.86.0 (prima `/lista` e `/chiedi` facevano passare titoli e risposte da **Telegram**, che non è E2E) |
-| Mini App (`/app/*`) | — | **nessun terzo** | parla solo col tuo gateway: è la superficie più privata |
-| Notifiche update (opzionali) | "v… disponibile" | **Telegram** | solo se `--notify` |
+| Ogni richiesta, solo col profilo `cloudflared` | tutto il traffico del gateway in chiaro: il path col `gateway_secret`, i token OAuth, le risposte MCP (contenuti di archivio e notebook), la Mini App | **Cloudflare** | il tunnel termina il TLS sul bordo di Cloudflare ([docs/SECRETS.md](docs/SECRETS.md)); con `caddy` il TLS termina sulla VPS, e con `tailscale` il Funnel lo inoltra cifrato fino alla VPS |
+| Mini App (`/app/*`) | — | **nessun terzo** (con `cloudflared`: Cloudflare, vedi sopra) | parla solo col tuo gateway: è la superficie più privata |
+| Avvisi operativi (accesi per default se ci sono il token del bot e `TELEGRAM_OWNER_ID`) | nuova versione disponibile (con un estratto delle note di rilascio), esito di update e rollback, servizio giù/su con la durata, copertura dei backup, disco, secret da ruotare (solo i nomi), unit systemd fallite, un comando della CLI uscito in errore (con la sua riga di comando); dal bot: sessione Google scaduta, promemoria del canonico | **Telegram** | i timer spediti passano `--notify` e gli altri avvisi non chiedono flag; il testo della CLI passa dalla redazione dei secret (`_redigi`), che toglie i valori dei secret, non ogni dato: l'esito di un update fallito porta l'uscita del comando. Senza token o owner non parte niente |
 | Check versione | — | GitHub | GET pubblica, nessun dato personale |
 
 **Massima privacy** è il default dalla v0.86.0: i notebook si interrogano solo dalla Mini
 App (non fa passare nulla da Telegram); l'archivio (`archive1777`) e il gateway restano
-interamente sulla VPS.
+interamente sulla VPS. Con l'ingresso `cloudflared` restano sulla VPS i dati, non il
+transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabella).
 
 ## Residui noti — cosa NON è ancora chiuso
 
@@ -495,7 +530,9 @@ I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligat
 `H4`, `H5`, `H50` e `H51`, ognuno col suo residuo scritto nel registro.
 
 I tre **accettati** sono decisioni, non dimenticanze. Niente 2FA sul pannello admin
-(`H28`): è un gateway mono-utente dietro Tailscale Funnel, con password bcrypt-12 +
+(`H28`): è un gateway mono-utente (la decisione è del 14/07, quando l'ingresso era solo
+Tailscale Funnel; con `caddy` e `cloudflared` il pannello sta su un dominio pubblico, e
+questa premessa va riletta alla revisione della voce), con password bcrypt-12 +
 lockout per-IP + CSRF + revoca reale della sessione — il 2FA aggiungerebbe attrito per
 un guadagno marginale su questo profilo. E lo snapshot pre-update con l'archivio in
 chiaro (`H56`, deciso il 23/08 al format: la storia più sotto). E il gate umano sulla
@@ -556,8 +593,11 @@ cosa applica davvero: un file può dichiarare una protezione che il sistema igno
 il controllo restava verde lo stesso. Ora una prova interroga il sistema
 (`systemctl show`) e confronta la risposta con ciò che il file dichiara, con la
 controprova dentro — cerca anche una protezione *non* dichiarata e pretende che il
-sistema dica di no, altrimenti la prova starebbe misurando se stessa. Resta parziale
-perché copre i servizi di sistema e non ancora i file dei container né il Python.
+sistema dica di no, altrimenti la prova starebbe misurando se stessa. Resta parziale:
+la prova comportamentale copre le unit systemd, e le voci del registro senza `natura`
+restano fuori dalla regola «un comportamento si chiude con una prova eseguita»; quante
+sono lo dice il contatore ◍ di `security/check_findings.py` a ogni giro (è il
+`resta_aperto` di `H52`).
 
 `H53` riguarda i controlli stessi. Il passo che analizza gli script
 di shell girava con un `|| true` in coda: qualunque cosa trovasse, il risultato veniva
@@ -590,11 +630,11 @@ possibile — un processo separato che tenga il token e accetti solo «manda que
 messaggio» — **non copre tutto il segreto: lo stesso token ha DUE usi, e vanno separati prima di ragionare
 sulla difesa — perché uno dei due si toglie di mezzo SENZA aggiungere niente.**
 `nb1777-bot` lo usa per **parlare** come il bot (è il rischio descritto qui sopra); il
-`gateway` lo usa come **chiave di verifica** — `services/gateway/app/miniapp_core.py:43`
-fa `hmac.new(b"WebAppData", bot_token, sha256)`, l'algoritmo con cui Telegram valida
+`gateway` lo usa come **chiave di verifica** — `services/gateway/app/miniapp_core.py`
+(la derivazione della chiave) fa `hmac.new(b"WebAppData", bot_token, sha256)`, l'algoritmo con cui Telegram valida
 l'`initData` della Mini App. **Ma per verificare NON serve il token: basta la chiave
-DERIVATA, e il gateway la accetta già** — `settings.py:227` (`effective_webapp_secret`),
-`settings.py:238` (*«serve UNA delle due, non entrambe»*), `miniapp.py`
+DERIVATA, e il gateway la accetta già** — `settings.py` (`Settings.effective_webapp_secret`),
+`settings.py` (`Settings.miniapp_auth_configurata`: *«serve UNA delle due, non entrambe»*), `miniapp.py`
 (`verify_init_data(…, webapp_secret_hex=…)`). È l'esito di **H54, 27/07**, e la
 derivazione è **a senso unico**: chi ha quella chiave può verificare *e forgiare* una
 `initData` per questa Mini App, ma **non può risalire al token, quindi non guadagna la
@@ -616,7 +656,9 @@ esiste più.
 > — e `nb1777-bot`, cioè **il processo separato, esiste già**. Un processo in più non è
 > più l'eccezione: è la modalità normale del sistema. *(E infatti: dal 28/08,
 > v0.43.10, i servizi sono **5** — si è aggiunto `ocr`, il tesseract in una
-> stanza sua proprio per questo principio.)*
+> stanza sua proprio per questo principio. Poi ne sono arrivati due a tempo,
+> `indice-notturno` e, dalla 0.84.0, `ingest`, che toglie l'indicizzazione dal gateway
+> per la stessa ragione.)*
 > 🔑 **La decisione non era sbagliata: era la sua motivazione a essere invecchiata** — e
 > una motivazione scaduta non lo dichiara, perché sta nel corpo della decisione e non in
 > un campo che qualcuno rivede. *Chi rileggeva la decisione di `H54` la valutava su una

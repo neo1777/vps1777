@@ -67,8 +67,9 @@ ISTRUZIONI_ERRORI = (
     "[auth_assente] (nessun profilo Google sulla VPS: va caricato da /admin/nlm), "
     "[auth_scaduta] (la sessione Google è scaduta: stesso rimedio), [rete], [timeout], "
     "[quota] (la quota di Gemini Notebook è finita: usage_get), [argomento] (un id, un "
-    "gettone o un valore sbagliato: correggilo e riprova), [nlm] (un altro errore della CLI "
-    "nlm), [interno]. Su [auth_*] e [quota] riprovare non serve.")
+    "gettone o un valore sbagliato: correggilo e riprova), [nlm] (un errore della CLI nlm, "
+    "oppure un valore che nb1777 ha rifiutato prima di chiamarla: se il messaggio dice cosa "
+    "vale, correggi e riprova), [interno]. Su [auth_*] e [quota] riprovare non serve.")
 
 
 class AuthAssente(RuntimeError):
@@ -860,10 +861,14 @@ async def notebook_query_esito(query_id: str, attesa_max: float = 25.0) -> esiti
 
 @mcp.tool()
 async def lavoro_esito(job_id: str, attesa_max: float = 25.0) -> esiti.Lavoro:
-    """Ritira un lavoro lungo tornato {stato: "in_corso", job_id} (source_add_*,
-    studio_download, studio_create_all_9). Aspetta al massimo `attesa_max` secondi (default 25,
-    tetto 270): ritorna il risultato del tool originale, di nuovo «in_corso», o il suo errore.
-    Un job_id sconosciuto è un errore: già ritirato, scaduto (30 minuti) o perso a un riavvio."""
+    """Ritira un lavoro lungo tornato {stato: "in_corso", job_id}: source_add_*, source_replace,
+    source_sync_drive, studio_download, studio_create_all_9, nb_export, censimento. Aspetta al
+    massimo `attesa_max` secondi (default 25, tetto 270): ritorna il risultato del tool
+    originale, di nuovo «in_corso», o il suo errore.
+    Un job_id sconosciuto è un errore: già ritirato, perso a un riavvio, o scaduto. I 30
+    minuti contano dall'AVVIO del lavoro, non dalla fine: un lavoro durato più di 30 minuti
+    sparisce alla prima altra chiamata lunga dopo la fine, quindi ritiralo appena finisce.
+    In quel caso rilanciare la stessa chiamata non si aggancia: la fa ripartire."""
     r = await _esito("lavoro_esito", lavori.aspetta(job_id, attesa_max))
     return r if isinstance(r, dict) else {"stato": "fatto", "risultato": r}
 
@@ -965,7 +970,8 @@ async def studio_create_audio(notebook_id: str,
                               language: str = "it",
                               focus: Optional[str] = None,
                               source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
-    """Crea Audio Overview (podcast). format: deep_dive|brief|critique|debate. RATE-LIMIT free tier."""
+    """Crea Audio Overview (podcast). format: deep_dive|brief|critique|debate;
+    length: short|default|long. RATE-LIMIT free tier: ~2-3 al giorno."""
     return _creato("audio", notebook_id, await _aio(core.studio_create_audio, notebook_id, format=format, length=length,
                       language=language, focus=focus, source_ids=source_ids))
 
@@ -978,7 +984,9 @@ async def studio_create_video(notebook_id: str,
                               focus: Optional[str] = None,
                               language: str = "it",
                               source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
-    """Crea Video Overview. format: explainer|brief|cinematic."""
+    """Crea Video Overview. format: explainer|brief|cinematic; style: auto_select|custom|
+    classic|whiteboard|kawaii|anime|watercolor|retro_print|heritage|paper_craft (style_prompt
+    per custom). Per cinematic `focus` è il prompt di regia intero."""
     return _creato("video", notebook_id, await _aio(core.studio_create_video, notebook_id, format=format, style=style,
                       style_prompt=style_prompt, focus=focus, language=language,
                       source_ids=source_ids))
@@ -1012,7 +1020,9 @@ async def studio_create_infographic(notebook_id: str,
                                     focus: Optional[str] = None,
                                     language: str = "it",
                                     source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
-    """Crea Infographic (PNG). orientation: landscape|portrait|square."""
+    """Crea Infographic (PNG). orientation: landscape|portrait|square;
+    detail: concise|standard|detailed; style: auto_select|sketch_note|professional|
+    bento_grid|editorial|instructional|bricks|clay|anime|kawaii|scientific."""
     return _creato("infographic", notebook_id, await _aio(core.studio_create_infographic, notebook_id,
                       orientation=orientation, detail=detail, style=style,
                       focus=focus, language=language, source_ids=source_ids))
@@ -1033,7 +1043,8 @@ async def studio_create_report(notebook_id: str,
                                prompt: Optional[str] = None,
                                language: str = "it",
                                source_ids: Optional[list[str]] = None) -> esiti.ArtefattoCreato:
-    """Crea Report. format: 'Briefing Doc'|'Study Guide'|'Blog Post'|'Create Your Own'."""
+    """Crea Report. format: 'Briefing Doc'|'Study Guide'|'Blog Post'|'Create Your Own'
+    (quest'ultimo vuole `prompt`: senza è un errore [nlm])."""
     return _creato("report", notebook_id, await _aio(core.studio_create_report, notebook_id, format=format, prompt=prompt,
                       language=language, source_ids=source_ids))
 
@@ -1106,8 +1117,8 @@ async def studio_list(notebook_id: str, verbose: bool = False) -> list[esiti.Art
 
 @mcp.tool()
 async def studio_status(notebook_id: str, artifact_id: str, verbose: bool = False) -> esiti.Artefatto:
-    """Stato di un singolo artefatto (id/type/status/label). verbose=True per
-    l'artefatto pieno col focus."""
+    """Stato di un singolo artefatto (id/type/status/label); {} se l'artifact_id non è
+    in quel notebook. verbose=True per l'artefatto pieno col focus."""
     return await _aio(core.studio_status, notebook_id, artifact_id, verbose=verbose)
 
 
@@ -1233,8 +1244,9 @@ async def censimento(contenuti: bool = False, descrizioni: bool = False,
     """Il censimento di TUTTI i notebook in un file JSON sul server: per ognuno le fonti con
     titolo, tipo e url; a scelta il testo (`contenuti`) e il riassunto di Gemini
     (`descrizioni`, usa la quota: una chiamata per fonte). Con i testi può durare ore (il
-    21/09, 2.662 fonti, 2 h 53 min): torna subito {stato: "in_corso", job_id} e si ritira con
-    lavoro_esito(job_id). Ritorna {name, bytes, notebooks, fonti, errori, link}."""
+    21/09, 2.662 fonti, 2 h 53 min): dopo `attesa_max` secondi (default 25, tetto 270) torna
+    {stato: "in_corso", job_id} e si ritira con lavoro_esito(job_id); un censimento breve
+    torna direttamente il risultato: {name, bytes, notebooks, fonti, errori, link}."""
     return await _lungo("censimento", ("censimento", contenuti, descrizioni), "*censimento*",
                         attesa_max, _censisci_con_link, None, descrizioni, contenuti)
 

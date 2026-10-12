@@ -205,7 +205,7 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
       <div class="ctimer" id="timer">0s</div>
     </div>
     <div class="console show" id="console"></div>
-    <div class="hint" id="patience" style="margin-top:10px">L'installazione richiede alcuni minuti (build immagini + reboot). Lo spinner gira finché lavora — l'output può apparire a blocchi. <strong>Puoi aggiornare o chiudere la pagina senza interrompere</strong>: il deploy gira sul server locale e, riaprendo <code>127.0.0.1:8777</code>, la console si riaggancia da sola.</div>
+    <div class="hint" id="patience" style="margin-top:10px">L'installazione richiede alcuni minuti (download delle immagini + reboot di prova). Lo spinner gira finché lavora — l'output può apparire a blocchi. <strong>Puoi aggiornare o chiudere la pagina senza interrompere</strong>: il deploy gira sul server locale e, riaprendo <code>127.0.0.1:8777</code>, la console si riaggancia da sola.</div>
   </section>
 
   <!-- result -->
@@ -222,16 +222,18 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
         <div class="k">Password admin — SALVALA</div><div class="v big" id="r-pwd">—</div></div>
       <div id="https-warn" class="warnbox" style="display:none">
         ⚠ L'URL è <strong>HTTP</strong> (IP diretto): claude.ai accetta solo connector <strong>HTTPS</strong>.
-        Il Funnel Tailscale non si è attivato. Cause tipiche: l'OAuth client non ha il tag <code>tag:vps1777</code>,
+        Con <strong>Tailscale</strong> vuol dire che il Funnel non si è attivato. Cause tipiche: l'OAuth client non ha il tag <code>tag:vps1777</code>,
         oppure mancano <strong>MagicDNS</strong> / <strong>HTTPS Certificates</strong> sull'account.
-        Guarda il messaggio d'errore nella console del deploy qui sopra, sistema e rilancia.
-        Il pannello admin su HTTP funziona comunque per il setup locale (login incluso).
+        Guarda il messaggio d'errore nella console del deploy qui sopra, sistema e rilancia;
+        intanto il pannello admin resta raggiungibile su questo indirizzo HTTP (login incluso).
+        Con <strong>Caddy</strong> o <strong>Cloudflare</strong> questo indirizzo non è raggiungibile da fuori:
+        usa <code>https://&lt;tuo-dominio&gt;</code> (o l'hostname del tunnel) al posto della base, anche negli URL connector.
       </div>
       <div class="card connector-card"><span class="copy" onclick="cp(this,'r-arch')">copia</span>
         <div class="k">Connector claude.ai — archive</div><div class="v" id="r-arch">—</div></div>
       <div class="card connector-card"><span class="copy" onclick="cp(this,'r-nb')">copia</span>
         <div class="k">Connector claude.ai — nb1777</div><div class="v" id="r-nb">—</div></div>
-      <div class="hint" style="margin-top:8px">Apri il <strong>Pannello setup</strong> per caricare l'auth NotebookLM (bottone dedicato) e verificare i semafori. Su claude.ai → Settings → Integrations → Add, incolla gli URL connector (HTTPS) e fai login con email+password admin.</div>
+      <div class="hint" style="margin-top:8px">Apri il <strong>Pannello setup</strong> per caricare l'auth NotebookLM (bottone dedicato) e verificare i semafori. Su claude.ai → Settings → Connectors → Add custom connector, incolla gli URL connector (HTTPS) e fai login con email+password admin.</div>
     </section>
   </div>
 

@@ -147,7 +147,9 @@ comunque.* La tengo scritta perché era il ragionamento che sembrava ovvio, e sa
 falso vale quanto il numero.
 
 🔴 **Il vincolo di questa strada non è il costo per query: è il costo per CONNESSIONE**
-(299 ms, §sopra). Va risolto **prima** di cifrare, e non è un problema di crittografia.
+(299 ms, §sopra). Andava risolto **prima** di cifrare, e non è un problema di crittografia.
+✅ *(Aggiornamento)* Lo è dal 17/08 (#197): la connessione è persistente per DB e per thread
+(§sopra), quindi l'apertura si paga una volta per thread, non a ogni richiesta.
 
 ## Il nodo vero: la chiave
 
@@ -225,11 +227,12 @@ nella sezione «recipients» c'è un `die` che si ferma e spiega come generare l
 sulla VPS: generare la chiave qui metterebbe la PRIVATA sullo stesso disco dei backup → la
 cifratura non proteggerebbe da furto/perdita del disco»*. Il file va creato
 all'installazione, con la chiave **pubblica** del PC di chi installa.
-⇒ Non è un difetto: è un prerequisito d'installazione che nessuno ha ancora eseguito.
-📌 **E rende la sezione qui sotto più forte, non più debole**: le chiavi non «diventano
-due» in futuro — oggi ne è configurata **zero**, e la prima del sistema sarà quella
-dell'archivio. La domanda giusta diventa *«dove si custodisce la prima, e la seconda si
-adegua?»* invece di *«dove metto le due»*.
+⇒ Non era un difetto: era un prerequisito d'installazione che al 16/08 nessuno aveva ancora
+eseguito.
+📌 *(Al 16/08)* le chiavi configurate erano **zero**, e la prima del sistema sarebbe stata
+quella dell'archivio: la domanda sembrava *«dove si custodisce la prima, e la seconda si
+adegua?»*. Oggi la chiave age di norma c'è (riquadro sopra), quindi quella dell'archivio
+sarebbe la **seconda**, e la domanda torna a essere *«dove si custodiscono le due»*, sotto.
 
 #### 🔴 E le chiavi diventerebbero DUE — rilievo di @abdd732a, verificato
 
@@ -260,8 +263,10 @@ procedura. **Questa domanda va risposta prima di cifrare, non dopo il primo guas
 ## Cosa serve per passare da questo documento al codice
 
 1. ✅ approvazione del disegno;
-2. ⚠️ **la misura mancante**: installare SQLCipher e contare le pagine per query;
+2. ✅ ~~la misura mancante: installare SQLCipher e contare le pagine per query~~ — fatta il
+   16/08 (§«SQLCipher misurato davvero»: 1,75x per query, ~300 ms per apertura); il
+   prerequisito che ne è uscito, la connessione persistente, c'è dal 17/08 (#197);
 3. ⚠️ la decisione sulla custodia della chiave (§3);
 4. ⚠️ la scelta del comportamento in attesa (§1) e del canale di consegna (§2).
 
-I punti 2–4 sono indipendenti fra loro e si possono chiudere in qualunque ordine.
+I punti 3 e 4 restano aperti, sono indipendenti fra loro e si possono chiudere in qualunque ordine.

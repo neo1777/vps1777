@@ -49,3 +49,9 @@ services:
 
   indice-notturno:
     image: vps1777/archive-mcp:dev
+
+  # (12/10, audit della doc) ingest (P16, 0.84.0) mancava: un build locale col profilo
+  # `ingest` pullava il gateway da ghcr invece di usare quello appena costruito. Usa
+  # l'immagine del gateway, come indice-notturno quella di archive-mcp.
+  ingest:
+    image: vps1777/gateway:dev

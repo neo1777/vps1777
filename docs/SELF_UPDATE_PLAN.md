@@ -67,7 +67,7 @@ Dipende da: F1 (viaggia nel bundle).
 
 ### F4 — CLI `vps1777` (il motore) — percorso critico
 Dipende da: F1+F2 (servono bundle e immagini pullabili), F3 (runner).
-- `tools/vps1777.py` (file unico, python3 stdlib): sottocomandi `check`, `update [--version vX.Y.Z] [--yes] [--from-intent PATH] [--resume]`, `rollback [--with-data] [--yes]`, `status [--json] [--probe]`, `version`, `migrate`, `bootstrap` (la logica F7 vive qui, così viaggia in ogni bundle). Installata in `/usr/local/bin/vps1777` (decisione §6.2).
+- `tools/vps1777.py` (file unico, python3 stdlib): sottocomandi `check`, `update [--version vX.Y.Z] [--yes] [--from-intent PATH] [--resume]` *(`--resume` non è stato fatto: la CLI rilasciata non ha questo flag)*, `rollback [--with-data] [--yes]`, `status [--json] [--probe]`, `version`, `migrate`, `bootstrap` (la logica F7 vive qui, così viaggia in ogni bundle). Installata in `/usr/local/bin/vps1777` (decisione §6.2).
 - Stato: `.env` tiene solo `VPS1777_TAG` (= versione deployata, decisione §6.5); tutto il resto in `var/state.json` (schema-versionato: `current`, `previous`, `previous_images` (digest), `history[]`, `last_check`, `last_notified_version`, `update_in_progress` + step marker). `var/` gitignorata ed esclusa dal bundle, chmod 700. Lock: `flock var/update.lock`.
 - `tools/restore.sh`: aggiungere `--yes` (default resta interattivo — non indebolisce il restore manuale, §7 del brief) e `--volumes-only <lista>` (usato dall'auto-rollback); MANIFEST: sostituire il fallback `no-git` con `VERSION`/`VPS1777_TAG`.
 - Gateway `/health?deep=1`: proba TCP i due upstream MCP dalla rete backend (modifica non privilegiata, vedi §2.e).
@@ -173,7 +173,7 @@ Il problema della age-key è reale: i recipient possono essere la chiave sul PC 
  4 CONFIRM     y/N interattivo salvo --yes / --from-intent
  5 FETCH       scarica bundle+SHA256SUMS+sig → releases/vX.Y.Z/ ; verifica sha256 + cosign (obbligatorio di default, v0.23.0; salta solo con --no-require-cosign)
                └─ fallisce: abort, nulla toccato                                     [nessun rollback necessario]
- 6 SELF-UPDATE CLI nel bundle ≠ CLI in esecuzione → sudo install → exec della nuova CLI con --resume
+ 6 SELF-UPDATE CLI nel bundle ≠ CLI in esecuzione → sudo install → exec della nuova CLI con --resume *(nella CLI rilasciata il re-exec passa `--skip-self-update`, un flag interno; `--resume` non esiste)*
  7 BACKUP      tools/backup.sh (age) + snapshot locale dei 3 volumi dati
                └─ fallisce: abort, stack intatto                                     [nessun rollback necessario]
  8 STAGE-CHECK docker compose config -q sui file staged; parse images.lock
@@ -192,7 +192,7 @@ Il problema della age-key è reale: i recipient possono essere la chiave sul PC 
 15 SUCCESS     state.json{current=nuovo, in_progress=false, history+}; pota immagini della versione N-1 (tiene N);
                pota snapshot vecchio; Telegram "✅ aggiornato a vX.Y.Z"; update_progress.json finale
 ```
-**Routine AUTO-ROLLBACK** (da 12/13/14): `compose down` → ripristina file gestiti da `rollback-files/` → `.env VPS1777_TAG=previous` → *(sse migrazione data-mutating eseguita)* restore dei 3 volumi dallo snapshot locale (`restore.sh --yes --volumes-only`, niente age) → `compose up -d` (immagini vecchie ancora locali, nessun pull) → health-gate di nuovo → **healthy:** state.json annota `rolled_back_from`, Telegram "❌ update fallito, rollback a vN riuscito (motivo: …)" → **ancora unhealthy:** stop, nessun thrashing; Telegram "🆘 rollback non healthy — serve intervento manuale, backup age disponibile: <file>"; lascia lo stack nello stato migliore possibile, exit 2. Crash-safety: `in_progress` + step marker in state.json permettono a `vps1777 update --resume`/`status` di rilevare e completare/rollbackare un update a metà (es. power loss).
+**Routine AUTO-ROLLBACK** (da 12/13/14): `compose down` → ripristina file gestiti da `rollback-files/` → `.env VPS1777_TAG=previous` → *(sse migrazione data-mutating eseguita)* restore dei 3 volumi dallo snapshot locale (`restore.sh --yes --volumes-only`, niente age) → `compose up -d` (immagini vecchie ancora locali, nessun pull) → health-gate di nuovo → **healthy:** state.json annota `rolled_back_from`, Telegram "❌ update fallito, rollback a vN riuscito (motivo: …)" → **ancora unhealthy:** stop, nessun thrashing; Telegram "🆘 rollback non healthy — serve intervento manuale, backup age disponibile: <file>"; lascia lo stack nello stato migliore possibile, exit 2. Crash-safety: `in_progress` + step marker in state.json permettono a `vps1777 update --resume`/`status` di rilevare e completare/rollbackare un update a metà (es. power loss). *(Realizzato solo in parte: `--resume` non è stato fatto; `vps1777 status` segnala l'update rimasto a metà, il recupero è a mano.)*
 
 ### Variante dal pulsante admin
 POST del pulsante → il gateway scrive l'intent → path unit → `vps1777-update.service` esegue gli step 0–15 con `--from-intent` (valida+cancella l'intent per primo; lo step confirm è soddisfatto dal click; rifiuta se il target ≠ latest noto). Progresso in `onboarding/update_progress.json` dopo ogni step; la pagina admin polla e tollera il riavvio del gateway agli step 11–13; l'esito è sempre duplicato su Telegram.

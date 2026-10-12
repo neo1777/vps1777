@@ -174,8 +174,9 @@ for n in $(hook_sorgente); do
     # 🔴 la copia si CONTROLLA. `set -uo pipefail` non ha `-e`, e senza questo un `cp`
     #   fallito (destinazione non scrivibile) lasciava stampare «✓ installato» con rc=0:
     #   la riga di successo precedeva quella di verità, e un chiamante non se ne
-    #   accorgeva affatto. La regola che lo chiude era GIÀ in questo file sedici righe
-    #   sopra — «un'installazione che non installa niente non deve dire fatto» — e
+    #   accorgeva affatto. La regola che lo chiude era GIÀ in questo file, poco sopra
+    #   (il controllo «nessun hook in $SORGENTE»: «un'installazione che non installa
+    #   niente non deve dire fatto») — e
     #   copriva un caso solo: zero hook in sorgente, non copia fallita.
     #   ⭐ *La regola giusta c'era, e valeva per il caso adiacente.* (b82df434, #154)
     if ! cp "$SORGENTE/$n" "$DESTINAZIONE/$n" || ! chmod +x "$DESTINAZIONE/$n"; then
