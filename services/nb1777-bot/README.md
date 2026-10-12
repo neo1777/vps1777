@@ -9,19 +9,16 @@ Bot Telegram owner-only — gestione NotebookLM da chat.
 | `TELEGRAM_BOT_TOKEN_FILE` | `/run/secrets/telegram_bot_token` | path al file con TOKEN BotFather |
 | `TELEGRAM_OWNER_ID` | (none) | il TUO Telegram numeric ID |
 | `GATEWAY_PUBLIC_BASE` | (none) | URL del gateway (per mostrare link /admin/nlm) |
-| `NB1777_MCP_URL` | `http://nb1777-mcp:8003/mcp` | MCP server per chiamate tool |
 | `NLM_HOME` | `/var/lib/nlm` | volume condiviso (legge AUTH_PENDING.flag) |
 | `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI) |
 
-## Comandi MVP
+## Comandi
 
-- `/start` — saluto + check AUTH (se pending, messaggio guida)
-- `/aiuto` — lista comandi
-- `/lista` — i notebook come bottoni: un tocco sceglie quello su cui chiedere
-- `/chiedi <domanda>` — domanda RAG sul notebook scelto (o `/chiedi <id> <domanda>`); la
-  risposta arriva formattata, con le fonti, e un errore arriva col suo messaggio
+- `/start` — il bottone del pannello (la Mini App); se l'auth NotebookLM manca, la guida
 
-(Il set completo dei ~60 comandi arriverà in una release successiva.)
+Dal 12/10/2026 è l'unico: `/aiuto`, `/pannello`, `/lista` e `/chiedi` sono stati tolti, e
+le domande ai notebook passano dalla Mini App (il bottone «Pannello» accanto al campo di
+testo). Il bot porta anche i promemoria e il bottone «✓ Fatto» del canonico.
 
 ## Healthcheck & standby
 

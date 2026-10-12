@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Rimosso
+- **Il bot Telegram ha un comando solo: `/start`.** Per scelta di Neo dopo la prova dal telefono
+  (12/10/2026: «col pannello mi pare sia meglio»), via `/aiuto`, `/pannello` (doppione del bottone
+  «Pannello» del menu), `/lista` e `/chiedi`, con `formato.py` e la variabile `BOT_RAG_COMMANDS`.
+  `/start` ora risponde col bottone del pannello. Le domande ai notebook passano dalla Mini App,
+  che parla solo col gateway: titoli e risposte non transitano più dai server di Telegram (SECURITY.md,
+  H19). Restano i promemoria e il bottone «✓ Fatto».
+
 ## [0.85.0] — 2026-10-11
 
 **I tool di nb1777 non rispondono più con una stringa sola: ognuno dice cosa ha fatto e su cosa.**

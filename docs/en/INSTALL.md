@@ -90,7 +90,7 @@ If you re-run `setup.sh`, it skips the steps already done.
 3. **claude.ai connector**: Settings → Integrations → Add → paste the URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (and `/nb1777/mcp`). Authorize → admin login. `archive` exposes the archive search tools (list and details in [ARCHIVE.md](ARCHIVE.md)), `nb1777` exposes **55** of them ([NB1777.md](../NB1777.md) (Italian)). Connectors **persist** across gateway restarts (DCR saved to disk).
 4. **Telegram bot**: `/start` to your bot
 5. **Mini App**: in the bot, the **Pannello** button next to the text field (or
-   `/pannello`) → the mobile control deck: notebooks, archive, secrets, update.
+   `/start`) → the mobile control deck: notebooks, archive, secrets, update.
    Requires an https `PUBLIC_BASE`. See [MINIAPP.md](../MINIAPP.md) (Italian).
 6. **Search by meaning** (optional): `search_ibrida` finds what you remember the
    meaning of and not the word. It needs the model (`vps1777 indice-modello`, which
