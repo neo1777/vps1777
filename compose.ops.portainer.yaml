@@ -12,6 +12,12 @@
 #     ESATTAMENTE il motivo per cui non lo si espone mai a internet. Il gateway
 #     pubblico resta senza socket; Portainer è un tool admin separato e locale.
 #   • Sta su `backend` (internal: true): nessun egress. Niente "phone home".
+#   ⚠️ DIFETTO APERTO (audit 12/10/2026, non corretto qui): Portainer sta SOLO su
+#     `backend`, e da una rete `internal` Docker accetta `ports:` e NON la applica, in
+#     silenzio (misurato sul gateway il 27/07: compose.ingress.tailscale.yaml, «LA RETE
+#     `funnel`»). Per lo stesso meccanismo 127.0.0.1:9443 non viene pubblicata e il
+#     tunnel SSH qui sopra non trova niente (dedotto, non ancora misurato su Portainer). La cura è quella del gateway: una rete
+#     bridge NON internal col masquerade spento.
 #
 # ── Uso ────────────────────────────────────────────────────────────────────
 #   docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \

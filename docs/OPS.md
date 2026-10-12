@@ -41,8 +41,9 @@ Prima il backup partiva solo al primo update. Quindi un reinstall della VPS non 
 "nudo": riproduce le feature dichiarate. Anche update e rollback la rileggono per intero:
 ne ricavano i profili compose (`backup`, `portainer`) per lo `up` che fanno, e dal 29/09
 accendono o spengono il timer dell'auto-update secondo la riga. Le altre unit le
-reinstallano e ne lasciano l'abilitazione com'è: un operatore può averne spenta una di
-proposito. L'installer grafico chiude con un **referto** che
+reinstallano e ne lasciano l'abilitazione com'è (un operatore può averne spenta una di
+proposito), tranne `vps1777-ingest.path`: dalla 0.84.0 è il modo in cui `/admin/archive`
+indicizza i caricamenti, e update e rollback la riaccendono sempre. L'installer grafico chiude con un **referto** che
 le elenca (e `deploy.sh` con un blocco equivalente):
 
 ```
@@ -106,7 +107,9 @@ firma/digest + migrazioni + health-gate 180s + **rollback automatico**):
 
 > **Sicuro** vuol dire una cosa precisa: ogni applicazione fa **backup + snapshot** prima,
 > verifica la **firma cosign** e il **digest**, applica le **migrazioni**, e se lo stack non
-> torna in salute entro 180s fa **rollback automatico** ripristinando i dati. È la differenza
+> torna in salute entro 180s fa **rollback automatico** alla versione di prima (immagini
+> e file gestiti), e ripristina anche i dati dallo snapshot quando l'update aveva
+> eseguito una migrazione che li modifica. È la differenza
 > con Watchtower (rimosso nella 0.67.0, vedi sotto): l'auto-update sicuro NON è "pulla e
 > riavvia e speriamo".
 
@@ -114,8 +117,8 @@ firma/digest + migrazioni + health-gate 180s + **rollback automatico**):
 > `autoupdate` è in `VPS1777_FEATURES` (`.env`). Un reinstall lo **riproduce** — non
 > sparisce in silenzio. Per spegnerlo servono i due gesti di sopra: togli `autoupdate` da
 > `VPS1777_FEATURES` (così il prossimo reinstall non lo riaccende) **e**
-> `sudo systemctl disable --now vps1777-auto-update.timer` (così si spegne adesso: update
-> e rollback non lo fanno). Verifica: `systemctl is-enabled vps1777-auto-update.timer` →
+> `sudo systemctl disable --now vps1777-auto-update.timer` (così si spegne adesso, senza
+> aspettare il prossimo update o rollback, che lo spegnerebbero comunque leggendo la riga). Verifica: `systemctl is-enabled vps1777-auto-update.timer` →
 > `disabled`.
 
 Log: `journalctl -u vps1777-auto-update -u vps1777-update -u vps1777-check-update`.
@@ -170,8 +173,9 @@ Il suo posto è dell'**auto-update sicuro** (il timer sopra), acceso di default.
 
 - `vps1777 update` alla 0.67.0 **ferma e rimuove** il container `vps1777-watchtower`
   (lo dice nel log, allo step 11). Non serve fare niente prima.
-- Se in `.env` c'è ancora `watchtower` dentro `VPS1777_FEATURES`, ogni comando della CLI
-  te lo ricorda e la ignora: **toglila** dalla riga. Se volevi l'aggiornamento automatico,
+- Se in `.env` c'è ancora `watchtower` dentro `VPS1777_FEATURES`, i comandi della CLI che
+  parlano con lo stack (update, rollback e gli altri che costruiscono un `docker compose`)
+  te lo ricordano e la ignorano: **toglila** dalla riga. Se volevi l'aggiornamento automatico,
   lascia (o metti) `autoupdate`.
 - Hai aggiornato senza la CLI e il container è ancora su? `docker ps -a --filter
   name=vps1777-watchtower`, poi `docker rm -f vps1777-watchtower`.

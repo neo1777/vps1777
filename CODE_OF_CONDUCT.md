@@ -24,7 +24,7 @@ Examples of unacceptable behavior include:
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project team. All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported privately to the project maintainer at `antigravity1777@gmail.com` (the same private channel named in [SECURITY.md](SECURITY.md)). All complaints will be reviewed and investigated promptly and fairly.
 
 ## Attribution
 

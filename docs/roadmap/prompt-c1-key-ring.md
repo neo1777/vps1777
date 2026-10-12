@@ -55,8 +55,8 @@ proxy MCP + pannello `/admin/*` + Mini App Telegram `/app/*`. Dietro, sulla rete
 `vps1777 update` (CLI host + pulsante admin, pattern collect→apply, auto-rollback).
 
 Repo: `~/Scrivania/vps1777` (git). Rilascio: **branch → PR → CI (lint +
-contract + 4 build) → squash-merge → tag `vX.Y.Z` → release workflow (4 immagini
-+ bundle su GHCR) → `vps1777 update` sul VPS → E2E live**. Versione attuale: leggi
+contract + build di ogni immagine) → squash-merge → tag `vX.Y.Z` → release workflow
+(le immagini della matrice di `release.yml` + bundle su GHCR) → `vps1777 update` sul VPS → E2E live**. Versione attuale: leggi
 `VERSION`.
 
 ## 2. Il problema
@@ -96,8 +96,9 @@ e una chiave che non ruota mai è un rischio che cresce nel tempo.
   README; in CI le migrazioni esistenti sono **immutabili** (un `git mv`/edit di
   `migrations/*/run.py` fa fallire la CI). Il key-ring potrebbe essere la **prima
   migrazione reale** (dal file-singolo allo schema anello).
-- **Zero test JWT.** `services/gateway/tests/` non ha test per `jwt_helpers`/
-  `oauth`. Da colmare: la logica del key-ring (selezione per `kid`, finestra di
+- **Nessun test diretto di `jwt_helpers`.** `services/gateway/tests/test_oauth_consent.py`
+  esercita `oauth.py` ma stubba `jwt_helpers`: la firma/verifica non ha test propri.
+  Da colmare: la logica del key-ring (selezione per `kid`, finestra di
   grazia) va in un modulo **testabile** — e la CI gira i test gateway con
   `uvx pytest` **senza deps pesanti**, quindi la logica pura dev'essere
   **stdlib-only** (pattern: `archive_indexer`, `fts.py`, `miniapp_core`,
@@ -150,7 +151,7 @@ Costruire un **anello di chiavi** con **finestra di grazia**:
 - **`rotate-secret.sh`** diventa non-disruptivo (aggiunge una chiave all'anello
   invece di sovrascrivere; ritira le scadute). Valuta se agganciare la
   **rotazione schedulata** all'infrastruttura esistente `vps1777-secrets-check`
-  (timer settimanale + `cmd_secrets_status`): il key-ring rende la rotazione
+  (timer giornaliero + `cmd_secrets_status`): il key-ring rende la rotazione
   automatica finalmente sicura.
 - **Domanda aperta da valutare (non obbligatoria):** restare **HS256 con anello
   di secret simmetrici** (più semplice, coerente con l'esistente) oppure passare
@@ -206,7 +207,7 @@ Costruire un **anello di chiavi** con **finestra di grazia**:
 - **Se tocchi lo schema dei secret:** una **migrazione** vera in `migrations/`
   (la prima), rispettando l'immutabilità di quelle esistenti.
 - **Doc + CHANGELOG + VERSION**; rilascio col flusso standard; verifica live
-  post-deploy con lo stack a 4 container healthy.
+  post-deploy con tutti i container dello stack healthy (`vps1777 status`).
 
 ## 7. Libertà e limiti
 

@@ -29,8 +29,10 @@ L'overlay `compose.build.yaml` serve perché `compose.yaml` è pull-only
 - Yaml: 2 spazi indent, no `version:` in compose (deprecato)
 - Commit message: un prefisso che dice **cosa** tocca, poi la frase in italiano. Quelli
   in uso: `fix:`, `feat:`, `docs:`, `ci:`, `build:` (i bump di Dependabot), `test:`,
-  `changelog:` (la PR che apre una versione), oppure l'area toccata (`installer:`,
-  `gateway:`, `indexer:`…); uno scope fra parentesi è benvenuto (`docs(architettura):`)
+  `chore:`, `release:` (la PR che apre una versione: `release: X.Y.Z`), oppure l'area
+  toccata (`installer:`, `gateway:`, `indexer:`…); uno scope fra parentesi è benvenuto
+  (`docs(architettura):`), e un `!` dopo il prefisso segnala un cambio incompatibile
+  (`feat(bot)!:`)
 
 ## Test e controlli in locale
 
@@ -58,9 +60,12 @@ ancora in rosso su un guasto costruito, per la ragione giusta.
 Le suite girano **una alla volta**, come in CI:
 
 ```bash
-uvx --with bcrypt --with cryptography pytest tools/tests/   # CLI, installer, presìdi del repo
+uvx --with bcrypt --with cryptography --with pyyaml pytest tools/tests/   # CLI, installer, presìdi del repo
 uvx pytest services/archive-mcp/tests/                         # archive-mcp (stdlib)
 uvx pytest services/gateway/tests/                             # gateway (stdlib)
+uv run --locked --directory services/gateway --with pytest pytest tests_runtime/   # gateway gamba-2 XFF, uvicorn del lock
+uvx pytest services/nb1777-bot/tests/                          # nb1777-bot (stdlib)
+uv run --locked --directory services/nb1777-bot --with pytest pytest tests/test_comandi.py   # bot, deps del lock
 (cd services/nb1777-mcp && uv sync && uv run pytest tests/)    # nb1777-mcp, col nlm pinnato
 bash tools/esegui-test-bash.sh                                 # i test .sh di tools/tests/
 ```
@@ -79,9 +84,11 @@ I controlli che la CI rifarà (`tools/check.sh` li esegue tutti):
   nomina gli step `uses:` e quelli con `${{ … }}`; vuole `pyyaml`
   (`uv run --with pyyaml python3 tools/gate-locale.py`), e qualche step tocca l'ambiente
   (quello di ruff fa `uv tool install`)
-- `python3 security/check_no_leaks.py` (niente segreti), `python3 security/check_findings.py`
-  (il registro di sicurezza regge sulle sue evidenze), `python3 tools/verify-features.py`
-  (il ledger delle feature), `python3 tools/doc-riferimenti.py` (i file che i doc nominano
+- `python3 security/check_no_leaks.py` (niente segreti),
+  `uv run --with pyyaml security/check_findings.py` (il registro di sicurezza regge sulle
+  sue evidenze), `uv run --with-requirements .github/requirements-verify-features.txt
+  python3 tools/verify-features.py` (il ledger delle feature; tutti e due vogliono PyYAML,
+  e la CI lo porta così), `python3 tools/doc-riferimenti.py` (i file che i doc nominano
   esistono), `python3 tools/fatti-nei-doc.py` (i numeri che i doc ripetono — tool MCP,
   immagini, container, rilievi — sono quelli che il codice conta: se cambi uno di quei
   numeri nel codice, aggiorna le pagine che il presidio ti nomina)
@@ -130,7 +137,8 @@ ruotato.** La storia di git non dimentica.
 ## Pull Request
 
 1. Forka, branch da `main`
-2. Lavora su feature/<nome-corto>
+2. Lavora su un ramo col prefisso del tipo di modifica: `feat/<nome-corto>`,
+   `fix/<nome-corto>`, `docs/<nome-corto>`
 3. Apri PR con descrizione: cosa, perché, come testato
 4. Aspetta review — di norma 48h
 5. Squash merge
@@ -141,7 +149,8 @@ per tutti, owner compreso.
 ## Rilascio (per chi mantiene)
 
 1. La versione sta nel file `VERSION`. La si alza con una PR su `main` che porta anche la
-   sezione `## [X.Y.Z]` di `CHANGELOG.md` (commit `changelog: sezione X.Y.Z …`).
+   sezione `## [X.Y.Z]` di `CHANGELOG.md` (titolo e commit `release: X.Y.Z`; fino alla
+   0.62.2 era `changelog: sezione X.Y.Z …`).
 2. Il tag `vX.Y.Z` sul commit di `main` fa partire `.github/workflows/release.yml`, che
    prima controlla: `VERSION` uguale al tag, la sezione nel CHANGELOG (solo per le
    stable), la CI **verde** sul commit taggato. Poi builda le immagini (solo amd64), le

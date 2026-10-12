@@ -55,7 +55,10 @@ su `127.0.0.1` — le credenziali non lasciano il tuo PC.
 3. **Ingress** — Tailscale (**auth-key** semplice *oppure* OAuth client; vedi checklist prerequisiti) / Caddy (dominio) / Cloudflared (token)
 4. **Bot Telegram** — opzionale (semaforo verde solo dopo "Verifica bot" reale)
 5. Quando i semafori sono verdi, **Installa** si attiva → avanzamento live →
-   schermata con URL, password admin, URL connector claude.ai.
+   schermata con URL, password admin, URL connector claude.ai. Se il backup è attivo
+   (lo è di default), la **chiave privata age** che lo cifra sta sul tuo PC in
+   `~/.config/vps1777/age-key.txt` (l'installer la crea lì se manca): lo dice la
+   console, non la schermata finale. Salvala, senza non si ripristinano i backup.
 
 ## Quale versione installa
 
@@ -73,7 +76,7 @@ Se nessuna release esiste ancora, l'engine ripiega da solo sulla build locale.
 
 ## Dopo l'installazione
 
-- Su [claude.ai](https://claude.ai) → Settings → Integrations → **Add**, incolla
+- Su [claude.ai](https://claude.ai) → Settings → Connectors → **Add custom connector**, incolla
   gli URL connector (devono essere **HTTPS** — il Funnel li serve così) e fai
   login con email + password admin.
 - **`archive` espone 18 tool** (ricerca, precedenti, il delta fra due fotografie, lettura delle conversazioni e di più messaggi insieme, schede di sessione e stirpi — elenco in [docs/ARCHIVE.md](../docs/ARCHIVE.md)); **`nb1777` ne espone 55** — aggiungi entrambi i connector se li vuoi tutti. *(Sono i `@mcp.tool()` dei due `server.py`, e `tools/fatti-nei-doc.py` li riconta a ogni PR: qui c'è stato scritto 2 e 35, poi 38, numeri di versioni precedenti.)*

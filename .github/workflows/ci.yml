@@ -143,6 +143,13 @@ jobs:
         run: |
           python3 tools/fatti-nei-doc.py --autoprova
           python3 tools/fatti-nei-doc.py
+      # I NOMI che i doc citano (comandi e flag della CLI, variabili, tool, comandi del bot)
+      # devono esistere: nasce dalla verifica della doc del 12/10/2026 (332 difetti, molti
+      # erano nomi tolti o mai esistiti). Una riga che racconta la storia lo dice e passa.
+      - name: I nomi nei doc esistono nel codice
+        run: |
+          python3 tools/nomi-nei-doc.py --autoprova
+          python3 tools/nomi-nei-doc.py
       # Entrambe le combinazioni devono restare valide: produzione (solo
       # immagini ghcr) e sviluppo (overlay di build locale).
       - name: Validate compose (production — pull only)

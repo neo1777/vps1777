@@ -7,6 +7,8 @@
 #   - nb1777-bot:  Telegram bot (long-poll)
 #   - ocr:         testo dalle immagini per l'ingest (tesseract, solo rete interna)
 #   - indice-notturno: job del profilo `indice`, lanciato dal timer (nessuna rete)
+#   - ingest:      job del profilo `ingest`: indicizza i file che /admin/archive mette in
+#                  coda (path unit vps1777-ingest) e quelli di archive-migra/-retag
 #
 # Backend su rete `backend` (internal: true) — NIENTE è raggiungibile da fuori,
 # e nessun servizio di questo file può USCIRE su Internet: la rete `ingress` non
@@ -77,8 +79,10 @@ services:
     # Un tetto di memoria messo a occhio uccide il servizio nel mezzo di una chiamata.
     pids_limit: 256
     cpus: 2.0
-    # P16 (11/10/2026): l'indicizzazione non gira più qui ma nel servizio `ingest`, e il
-    # tetto si può mettere. Picco misurato senza ingest: 112 MB (memory.peak dopo 4 ore
+    # P16 (11/10/2026): l'indicizzazione di /admin/archive, archive-migra e archive-retag
+    # non gira più qui ma nel servizio `ingest`, e il tetto si può mettere. ECCEZIONE:
+    # `vps1777 archive-ingest` indicizza ancora con `exec` in QUESTO container
+    # (app.archive_indexer), quindi dentro questi 512m. Picco misurato senza ingest: 112 MB (memory.peak dopo 4 ore
     # di 0.83.0, anon 39 MB); 512m lascia più di quattro volte il margine.
     mem_limit: 512m
     memswap_limit: 512m
@@ -103,7 +107,8 @@ services:
       GATEWAY_UPSTREAMS: ${GATEWAY_UPSTREAMS:-archive=archive-mcp:8002,nb1777=nb1777-mcp:8003}
       # B5 (28/08): l'indexer manda le immagini al servizio OCR interno via
       # HTTP — il gateway NON esegue processi (invariante presidiata da
-      # test_gateway_non_tocca_docker). Vuoto = OCR spento, lapidi dichiarate.
+      # test_gateway_non_tocca_docker). Senza endpoint l'indexer non fa OCR (lapidi
+      # dichiarate), ma un OCR_URL vuoto nel .env NON ci arriva: `:-` rimette il default.
       OCR_URL: ${OCR_URL:-http://ocr:8004/ocr}
       # P16: /admin/archive mette i file in coda; li indicizza il servizio `ingest`
       ARCHIVE_INGEST_CODA: "true"
@@ -152,7 +157,7 @@ services:
       # volume, fra i servizi, lo monta SOLO nb1777-mcp (in ro anche il backup e il check
       # scadenze, entrambi a tempo: vedi SECURITY.md); /admin/nlm gli inoltra il tar e ne chiede
       # lo stato su rete interna (app/nlm_client.py).
-      - archive-data:/var/lib/archive:rw  # condiviso con archive-mcp: /admin/archive scrive i .db indicizzati
+      - archive-data:/var/lib/archive:rw  # condiviso con archive-mcp e ingest: /admin/archive vi mette i file in coda (li indicizza `ingest`), i .db drop-in, description e ruolo
       - ./onboarding:/var/lib/onboarding:rw  # bind-mount: pending.json letto da deploy.sh --apply
       # Spool degli upload su DISCO, non in RAM: /tmp è una tmpfs (rootfs
       # immutabile, H43) e Starlette vi spoola i multipart — un upload da 2,6 GB
@@ -205,7 +210,8 @@ services:
       ARCHIVE_REDACT_ESENTI: "${ARCHIVE_REDACT_ESENTI:-}"
       FASTMCP_STATELESS_HTTP: "true"
       # D9 (20/07) — il tool `set_description` NON scrive più qui: inoltra al
-      # gateway, che è l'unico a montare il volume in :rw. Serve il segreto del
+      # gateway, l'unico servizio sempre acceso a montare il volume in :rw (lo montano
+      # :rw anche i job `ingest` e `indice-notturno`). Serve il segreto del
       # canale interno, lo stesso pattern di nb1777-mcp per /internal/nlm/*.
       # Il mount resta :ro: questo servizio continua a non poter scrivere, e la
       # scrittura passa da chi ne ha il diritto — invece di essere promessa da
@@ -221,7 +227,8 @@ services:
       # strutturale — il kernel la fa rispettare.
       # Verificato che i DB sono in journal_mode=delete (non WAL): senza WAL non
       # servono i file -wal/-shm, che con un mount :ro fallirebbero. A scrivere
-      # i .db è il gateway (che monta :rw, sopra), non questo servizio.
+      # i .db sono il job `ingest` e il gateway (drop-in, description, ruolo,
+      # `archive-ingest`; monta :rw, sopra), non questo servizio.
       - archive-data:/var/lib/archive:ro
     networks:
       - backend
@@ -262,7 +269,8 @@ services:
 
   # L'indicizzazione dell'archivio come lavoro a parte (P16, 11/10/2026): lo lancia
   # `vps1777 ingest-coda` (dalla path unit, quando /admin/archive mette un file in coda)
-  # e i comandi `archive-*` della CLI, con `compose run --rm`. Non parte con `up`.
+  # e i comandi `archive-migra` / `archive-retag` della CLI, con `compose run --rm`
+  # (`archive-ingest` no: indicizza con `exec` nel gateway). Non parte con `up`.
   # Stessa immagine del gateway, ma niente secret, niente onboarding, niente porte: monta
   # solo il volume dell'archivio. Il tetto è il punto: un conversations.json si carica
   # tutto. Misurato: 3,4 volte il file su uno sintetico (221 MB → 745 MB, 11/10), 4 volte

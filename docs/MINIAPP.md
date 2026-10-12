@@ -10,7 +10,7 @@ chiede password — l'identità arriva da Telegram, verificata dal server.
 |---|---|
 | **`/admin`** (web) | desktop: setup, upload profilo nlm, operazioni pesanti |
 | **Mini App** | mobile: azioni frequenti, auth trasparente, un tap dalla chat |
-| **bot** | notifiche, launcher della Mini App, comandi testuali rapidi |
+| **bot** | notifiche (col bottone «✓ Fatto» del promemoria) e launcher della Mini App: un comando solo, `/start` (dalla 0.86.0) |
 
 La Mini App è *thin*: chiama endpoint JSON del gateway che riusano la stessa
 logica di `/admin` (stessi file di stato, stessi upstream MCP) — zero logica
@@ -38,9 +38,14 @@ duplicata da mantenere.
   (messaggi, etichette principali, dimensione, ultimo aggiornamento) ed
   **eliminazione** con conferma (irreversibile; per resettare un archivio:
   elimina e ricarica la fonte con lo stesso nome).
-- **Sistema** — scadenze secret in dettaglio, **update a un tap** (stesso
-  meccanismo del pulsante admin: intent + CLI host, con conferma e progress in
-  tempo reale), ultimi eventi audit.
+- **Sistema** — scadenze secret in dettaglio, con **«Posticipa il promemoria di 7
+  giorni»** quando un secret è da ruotare (e **annulla** finché il rinvio è attivo; dalla
+  0.83.0), **update a un tap** (stesso meccanismo del pulsante admin: intent + CLI host,
+  con conferma e progress in tempo reale), ultimi eventi audit.
+
+La pagina si può aprire su una scheda precisa con `?vista=stato|notebook|archivio|sistema`
+(nella query, non nel fragment, che Telegram usa per l'`initData`): è quello che fa il
+bottone della notifica dei secret, che apre **Sistema**.
 
 ## Autenticazione — initData HMAC + owner-only
 

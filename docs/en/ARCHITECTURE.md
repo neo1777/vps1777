@@ -12,7 +12,8 @@
 ┌──────────────── GATEWAY (core stabile) ──────────────┐
 │  - OAuth 2.1 + DCR + PKCE                            │
 │  - /admin/*: login, logout, setup, secrets, nlm,     │
-│              audit, archive, update                  │
+│              audit, archive, salute, update          │
+│  - /scarica/<nome>, /carica/<gettone> (link firmati) │
 │  - /app/* (Mini App Telegram)                        │
 │  - Reverse proxy: /<SECRET>/<name>/<path>            │
 │  - Plugin registry: legge GATEWAY_UPSTREAMS da env   │
@@ -23,13 +24,15 @@
 │ + vectors     │ no browser    │ no port       │ text         │ or bot    │
 │ :8002 /mcp    │ :8003 /mcp    │               │ :8004 /ocr   │ :8010…    │
 └───────────────┴───────────────┴───────────────┴──────────────┴───────────┘
+  on-demand or timer jobs (from the host, compose run):
+  ingest (queue of /admin/archive → db/, backend network, 2g) · indice-notturno (vectors, no network)
 ```
 
 ## Network
 
 | Network | Driver | `internal` | Connected services |
 |---|---|---|---|
-| `backend` | bridge | ✅ true | all services (internal communication), except the `indice-notturno` job, which has no network |
+| `backend` | bridge | ✅ true | all the services in `compose.yaml` (internal communication) and Portainer; not the `indice-notturno` job (no network), not the ingress proxies (only `ingress`), not the `backup` container |
 | `ingress` | bridge | ❌ false | **only** the ingress proxy (caddy/cloudflared) and, with its profile, the gateway |
 | `egress` | bridge | ❌ false | nb1777-mcp, bot — they go out to the Internet, **outside** of `ingress` |
 | `funnel` | bridge without masquerade | ❌ false | only with the Tailscale profile: the gateway. Ingress yes, egress no (H50) |
@@ -51,9 +54,9 @@ Three base networks, three distinct roles (H25):
 | Volume | Container path | Contents |
 |---|---|---|
 | `gateway-data` | `/var/lib/gateway` | audit log, audit.jsonl |
-| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5: the messages and, from Session Recovery bundles, the `sessioni`/`archi`/`memorie` tables — see [ARCHIVE.md](ARCHIVE.md)) + `models/` and the `<db>.vec.db` indexes of search by meaning ([RICERCA-IBRIDA.md](RICERCA-IBRIDA.md)). Written by the `ingest` job (the DBs, since 0.84; the gateway queues files there and writes drop-in `.db`s) and by the `indice-notturno` job (the indexes); `archive-mcp` mounts it read-only |
+| `archive-data` | `/var/lib/archive` | `data/` (sources) + `db/` (SQLite FTS5: the messages and, from Session Recovery bundles, the `sessioni`/`archi`/`memorie` tables — see [ARCHIVE.md](ARCHIVE.md)) + `models/` and the `<db>.vec.db` indexes of search by meaning ([RICERCA-IBRIDA.md](RICERCA-IBRIDA.md)). Written by the `ingest` job (the indexed DBs, since 0.84: the gateway hands it the files in `coda/`), by the gateway (drop-in `.db`s, which it puts straight into `db/`, deletions, and the `description`/`ruolo` cards forwarded by archive-mcp) and by the `indice-notturno` job (the indexes); `archive-mcp` mounts it read-only |
 | `nlm-auth` | `/var/lib/nlm` | NotebookLM profile `profiles/default/` + `AUTH_PENDING.flag` |
-| `nlm-artifacts` | `/var/lib/nlm-artifacts` | the Studio artifacts downloaded by nb1777-mcp and the in-transit files of `archive-ingest`. No secrets |
+| `nlm-artifacts` | `/var/lib/nlm-artifacts` | the Studio artifacts downloaded by nb1777-mcp and the in-transit files of `archive-ingest` and of the `/carica` upload links. No secrets |
 | `gateway-uploads` | `/var/lib/uploads` | the gateway's upload spool (`TMPDIR`): on disk and not in the `/tmp` tmpfs, which a 2.6 GB bundle used to fill |
 | Tailscale (host) | `/var/lib/tailscale` on the **host** | node state (not in a container; see INGRESS.md) |
 | `caddy-data`, `caddy-config` (if Caddy) | `/data`, `/config` | ACME certificates and Caddy's configuration |
@@ -76,12 +79,11 @@ only by `nb1777-bot`.
 |---|---|---|
 | Internet → gateway | HTTPS (ingress) | `/<SECRET>/<name>/mcp` |
 | gateway → MCP servers | HTTP on the `backend` network | `http://<service>:<port>/mcp` |
-| gateway → nb1777-mcp (nlm profile, Studio artifacts) | internal HTTP + shared secret | `/internal/nlm/{status,profile,artifacts,artifact}` |
+| gateway → nb1777-mcp (nlm profile, Studio artifacts, signed links) | internal HTTP + shared secret | `/internal/nlm/{status,profile,artifacts,artifact,link,carica}` |
 | bot → nb1777-mcp (profile status) | internal HTTP + shared secret | `/internal/nlm/status` |
 | bot → nb1777-mcp (notifications #30) | internal HTTP + shared secret | `/internal/{notifications,canonico/ack}` |
-| nb1777-bot → nb1777-mcp | MCP client HTTP | `http://nb1777-mcp:8003/mcp` |
 | archive-mcp → gateway (DB card: `set_description`, `set_ruolo`) | internal HTTP + shared secret | `/internal/archive/{description,ruolo}` — archive-mcp's only writes, since it has the volume read-only |
-| gateway → ocr (image ingest) | internal HTTP, bytes→text | `http://ocr:8004/ocr` (env `OCR_URL`; the gateway does NOT run processes — guarded by `test_gateway_non_tocca_docker`) |
+| ingest (job, since 0.84; before that the gateway) → ocr (images to index) | internal HTTP, bytes→text | `http://ocr:8004/ocr` (env `OCR_URL`; neither the gateway nor the job runs processes — guarded by `test_gateway_non_tocca_docker`) |
 | Telegram cloud → bot | long-poll outbound HTTPS | `api.telegram.org` |
 | claude.ai → gateway | OAuth 2.1 + MCP streamable-http | `/<SECRET>/<name>/mcp` |
 
@@ -107,13 +109,13 @@ closed. In production, today, the upstreams are the two MCP servers.
 The update engine lives **on the host**, not in the containers: the CLI
 `/usr/local/bin/vps1777` (installed by `deploy.sh`, in the repo root) is the only
 place that touches images and stack. The gateway stays **unprivileged**: the
-*Update* button in the admin panel only writes an **intent file** into `onboarding/`
+*Aggiorna* (Update) button in the admin panel only writes an **intent file** into `onboarding/`
 (validated: schema, semver, TTL, anti-replay nonce); a systemd **path unit**
 (`vps1777-update.path` → `vps1777-update.service`) sees it and launches the same
 `vps1777 update`. A daily timer (`vps1777-check-update.timer`) performs the
 release check + Telegram notification to the owner. A second daily timer
 (`vps1777-auto-update.timer`) installs the latest release by itself, but only once it
-has been published for at least 48 hours (`vps1777 auto-update --eta-minima 48`): a
+has been published for at least 48 hours (`vps1777 update --yes --eta-minima 48`, from `vps1777-auto-update.service`): a
 bad release has two days to be withdrawn before it arrives. A third
 (`vps1777-secrets-check.timer`) checks the secrets' expiry dates.
 
@@ -152,7 +154,7 @@ others, it runs only where the feature is declared with the Caddy ingress. Full 
 
 ## Healthcheck
 
-Every service has a compose healthcheck (also used by the update's health-gate):
+Every long-running service has a compose healthcheck (the `ingest` and `indice-notturno` jobs do not: they start, work and exit). They are also used by the update's health-gate:
 
 | Service | Probe |
 |---|---|
@@ -169,13 +171,13 @@ claude.ai                     gateway                    user browser
    │ POST /register             │                            │
    │ (Dynamic Client Reg)       │                            │
    │ ◄──────────── client_id ───┤                            │
-   │ POST /authorize ───────────┼──── 302 → /admin/login ───►│
+   │ GET /authorize ────────────┼──── 303 → /admin/login ───►│
    │                            │ ◄────── email+pwd ─────────│
    │                            │  bcrypt verify ↓           │
    │                            │  set admin_cookie          │
    │                            ├──── 302 → consent page ───►│
    │                            │ ◄────── approve ───────────│
-   │                            │  emit access+refresh JWT   │
+   │                            │  emit code (PKCE, TTL 300s)│
    │ ◄─── 302 + code ───────────┤                            │
    │ POST /token                │                            │
    │ ◄─── access + refresh ─────│                            │
@@ -316,10 +318,12 @@ bot               ──┘   X-Vps1777-Internal (constant-time)   (unico mount)
 | `POST /internal/nlm/profile` | gateway | receives the tar.gz, **validates**, installs (staging → swap with rollback) |
 | `GET /internal/nlm/artifacts` | gateway | the list of downloaded Studio artifacts (`nlm-artifacts`) |
 | `GET /internal/nlm/artifact?name=` | gateway | one artifact, for `/admin/nlm/artifact/{name}` |
+| `GET /internal/nlm/link?name=&t=` | gateway | one artifact for `/scarica/{name}`: nb1777-mcp checks the token before looking at the file |
+| `PUT/POST /internal/nlm/carica?t=&nome=` | gateway | the file of `/carica/{t}`, streamed: nb1777-mcp consumes the token and adds it as a source |
 | `GET /internal/notifications` | bot | fetches the notification queue (memory drift + canonico reminders, v0.36.0) |
 | `POST /internal/canonico/ack` | bot | records the ack of the «✓ Fatto» button (v0.36.0) |
 
-Without a configured `gateway_secret` → **403**: fail-closed here too. *These six
+Without a configured `gateway_secret` → **403**: fail-closed here too. *These eight
 endpoints are served by `nb1777-mcp`, and the guard is `_internal_ok` (`server.py`): "with no
 secret configured, everything is denied".* The detail of the two memory endpoints and why
 they exist lives in [NB1777.md](../NB1777.md) (Italian) §6-§7.

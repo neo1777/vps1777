@@ -32,17 +32,17 @@ giro senza aggiungere niente.
 
 | ID | stato | cosa resta aperto |
 |---|---|---|
-| H4 | partial | `forwarded_allow_ips` per profilo + contatore di fallimenti globale |
-| H5 | partial | chiave age fuori dall'host; sulla VPS solo il recipient; push off-site |
-| H12 | partial | sudoers dell'operator: da `NOPASSWD:ALL` a whitelist di comandi |
-| H16 | partial | password admin: nasce sul PC, viaggia solo come hash, policy unica |
-| H22 | partial | compose pinnato ai digest, non solo ai tag |
+| H4 | partial | solo il contatore di fallimenti GLOBALE, scartato per scelta (farebbe l'auto-lockout dell'owner); `forwarded_allow_ips` per profilo è fatto |
+| H5 | partial | solo il push off-site dei backup, lasciato all'owner; chiave age fuori dall'host e solo il recipient sulla VPS sono fatti |
+| H12 | partial | l'operator resta root-equivalente via il gruppo `docker`; la whitelist sudo è fatta, e un ritorno a `NOPASSWD:ALL` è una regressione |
+| H16 | partial | se il PC non ha bcrypt, la password viaggia in chiaro (dentro SSH) invece dell'hash |
+| H22 | partial | un'installazione nuova gira per tag finché non fa il primo update: gli installer non verificano i digest |
 | H24 | **accepted** | approvazione manuale dei rilasci: con un solo account non sarebbe un confine; la copre la quarantena di 48 ore dell'auto-update (fino al 27/12/2026) |
 | H28 | **accepted** | secondo fattore (TOTP o passkey) sul pannello admin |
-| H35 | partial | CSP della Mini App raffinata |
+| H35 | partial | nella CSP della Mini App restano `style-src 'unsafe-inline'` e `frame-ancestors`: chiuderli senza un client Telegram reale romperebbe la Mini App |
 | H50 | partial | il gateway esce ancora su Internet con gli ingressi caddy e cloudflared (rete `ingress`); chiuso solo col profilo Tailscale |
-| H51 | partial | il presidio di salute sonda dal lato in cui il guasto non si vede |
-| H52 | partial | le garanzie di hardening sono certificate per STRINGA, non per comportamento |
+| H51 | partial | la finestra cieca fra due giri del check giornaliero; una sonda continua verso Internet si può fare, non è decisa |
+| H52 | partial | le voci senza `natura` restano fuori dalla regola «un comportamento si chiude con una prova eseguita»: quante sono lo dice il contatore ◍ di `security/check_findings.py` |
 | H56 | **accepted** | seconda metà di H14: nello snapshot pre-update `archive-data` resta in chiaro |
 
 `partial` = curata a metà, e il file dice quale metà. `accepted` = rischio **accettato
@@ -62,8 +62,10 @@ riscoprire il fatto.
   repo, non verbosità da ripulire.
 - I messaggi utente sono in **italiano** per scelta; il codice e gli identificatori in
   inglese.
-- `features.yaml` è un **ledger con prova bidirezionale in CI**: i campi `verify` sono
-  **regex**, non stringhe libere. Una voce senza prova verificabile è un difetto.
+- `features.yaml` è un **ledger con prova bidirezionale in CI**: ogni `verify` è una
+  prova macchina (`path_exists`, `file_contains` con un pattern **regex**, `python_def`,
+  `grep_count`, `mcp_tool`…), non una stringa libera. Una voce senza prova verificabile
+  è un difetto.
 - Nei testi destinati a GitHub, «Chiude #N» in italiano NON chiude la issue: la parola
   che GitHub legge è `Closes`. Segnalalo se lo trovi in template o script.
 - L'update di produzione passa SOLO dalla unit systemd dedicata, mai da root nudo:

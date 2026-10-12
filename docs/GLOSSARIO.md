@@ -10,7 +10,8 @@
   ne tiene accesi cinque: gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr. Altri
   stanno dietro un **profilo** compose e girano solo se accesi: `backup` (profilo
   `ops.backup`, acceso di default), `indice-notturno` (profilo `indice`, un job che
-  parte di notte e finisce), `portainer`, e il container dell'ingress se scegli
+  parte di notte e finisce), `ingest` (profilo `ingest`, un job che indicizza un
+  bundle quando ne arriva uno in coda), `portainer`, e il container dell'ingress se scegli
   Caddy o Cloudflare (Tailscale gira sull'host).
 - **Immagine** — il contenuto pronto e versionato di un container: aggiornare
   vuol dire sostituire l'immagine, non modificare la scatola.

@@ -16,7 +16,7 @@ labels: bug
 <comportamento atteso>
 
 ## Ambiente
-- vps1777 tag: `<v0.x.y>` o `<commit hash>`
+- vps1777: output di `vps1777 version` (oppure il tag `<v0.x.y>` / `<commit hash>` se lavori da sorgente)
 - Sistema operativo: <Debian 12 / Ubuntu 24.04 / ...>
 - Docker: `docker --version`
 - Compose: `docker compose version`

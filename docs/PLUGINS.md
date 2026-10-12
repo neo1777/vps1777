@@ -54,6 +54,14 @@ Edita `.env`:
 GATEWAY_UPSTREAMS=archive=archive-mcp:8002,nb1777=nb1777-mcp:8003,mio-mcp=mio-mcp:8010
 ```
 
+> ⚠️ **Registrarlo qui lo mette nel collaudo dell'update.** L'health-gate di
+> `vps1777 update` chiama `/health?deep=1` del gateway, che sonda via TCP **ogni** voce di
+> `GATEWAY_UPSTREAMS`: se il plugin è fermo risponde 503, e l'update torna indietro con un
+> rollback. La CLI non conosce i file dei plugin, quindi né `update` né `rollback` lo
+> avviano, e `tools/restore.sh` (`down --remove-orphans`) lo rimuove: dopo un restore
+> rilancia il comando dello Step 4, oppure togli la voce da `GATEWAY_UPSTREAMS` prima
+> dell'update.
+
 > **Onestà sulla fiducia.** Un plugin sulla rete `backend` gode di **fiducia piena**
 > verso gli altri servizi interni: il modello di sicurezza isola i backend
 > *dall'esterno* (solo il gateway è esposto), non l'uno dall'altro. Un plugin
@@ -64,13 +72,24 @@ GATEWAY_UPSTREAMS=archive=archive-mcp:8002,nb1777=nb1777-mcp:8003,mio-mcp=mio-mc
 
 ### Step 4: avvia
 
+Usa gli stessi file dell'installazione più il tuo: `compose.yaml`, `compose.<il tuo
+INGRESS_PROFILE>.yaml` e gli overlay delle feature accese, con i loro `--profile` (è la
+lista che costruisce `vps1777`, in `compose_cmd`). Con l'ingresso di default (Tailscale) e il
+backup acceso:
+
 ```bash
 docker compose \
   -f compose.yaml \
   -f compose.ingress.tailscale.yaml \
+  -f compose.ops.backup.yaml \
   -f plugins/mio-mcp/compose.mio-mcp.yaml \
+  --profile ingress.tailscale --profile ops.backup \
   up -d --build
 ```
+
+Con Caddy o Cloudflare sostituisci file e profilo dell'ingresso: l'overlay di un ingresso
+diverso dal tuo ridefinisce porte e reti del gateway e lo ricrea con la configurazione
+sbagliata.
 
 `--build` qui builda **solo il tuo plugin** (l'unico servizio con `build:`):
 il core è pull-only, le immagini vps1777 arrivano da GHCR e non si buildano
@@ -110,7 +129,7 @@ Token in `secrets/mio-bot-token.txt`, montato come `secrets: [mio_bot_token]` ne
 
 ## Auto-discovery (futuro)
 
-Esiste un piano per auto-registrare i container con label `vps1777.role=mcp` senza dover editare `GATEWAY_UPSTREAMS`. Vedi tracker.
+È un piano, non implementato: auto-registrare i container con label `vps1777.role=mcp` senza dover editare `GATEWAY_UPSTREAMS`. Oggi la label che le compose d'esempio mettono non la legge nessuno, e la registrazione resta quella manuale dello Step 3.
 
 ## Plugin community
 

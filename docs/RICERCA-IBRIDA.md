@@ -11,6 +11,11 @@ tu non è quella scritta nel testo.
 `search_ibrida` cerca **anche** per significato: fonde i risultati di FTS5 con
 quelli di una ricerca vettoriale e restituisce una lista sola.
 
+Sopra di lei c'è `precedenti(tema)` (dalla 0.80.0), «l'hai già detto?»: è
+`search_ibrida` con `speaker='human'` e la finestra che finisce `giorni` fa (default
+7), raggruppata per chat o progetto, con gli stessi `saltati`, `fuori_perimetro` e
+`senza_indice`.
+
 ## Quanto vale — misurato, non promesso
 
 Banco del POC (issue #281): 9 bersagli scelti **prima** di misurare, ciascuno
@@ -30,7 +35,10 @@ stesso messaggio in più DB compare una volta, con gli altri in `anche_in`. Se q
 si perde per strada, un DB sparito, un ramo full-text inutilizzabile o un indice che non
 risponde, la risposta ha un campo `saltati` (`db`, `ramo`, `motivo`). Senza perdite il
 campo non c'è. Un indice che non risponde non toglie più il DB: resta la sua metà
-full-text.
+full-text. La ricerca ha anche un budget di tempo (dalla 0.81.0; dalla 0.81.1 è di 30 s,
+perché la ricerca dei vicini di sqlite-vec non si interrompe a metà e il proxy chiude a
+60): i DB non guardati in tempo finiscono in `saltati` col ramo `budget` e la risposta
+porta `parziale: true`. Su quei DB si rilancia con `db_name`.
 Sulle query **esatte** l'ibrido non batte `search` — è tarato per non
 peggiorarle, non per vincerle. Se cerchi un termine preciso, usa `search`.
 
@@ -59,7 +67,8 @@ modello che vinca sui soli vettori.
 |---|---|---|
 | `query` | — | la domanda in linguaggio naturale, come la diresti a voce. È il segnale per i vettori |
 | `query_fts` | `""` | un'espressione FTS5 (la sintassi di `search`) per il ramo full-text. Se manca, il ramo FTS ne ricava una dalle parole di `query` |
-| `db_name` | `""` | un DB; vuoto = tutti quelli che hanno un indice |
+| `db_name` | `""` | un DB (qualunque ruolo abbia); vuoto = i DB del perimetro di `ruoli` che hanno un indice. Quelli del perimetro senza indice finiscono in `senza_indice` |
+| `ruoli` | `""` | dove cercare senza `db_name` (dalla 0.74.0): `""` = primari e non dichiarati; `tutti` = ogni DB; oppure ruoli separati da virgole (`primario`, `fotografia`, `riscontro`, `riservato`). Il riservato si interroga solo nominandolo. I DB lasciati fuori tornano in `fuori_perimetro`, raggruppati per ruolo |
 | `limit` | 20 | righe restituite, da 1 a 200: oltre 200 si tiene 200, sotto 1 è un errore |
 | `since` / `until` | `""` | finestra temporale (ISO, `ts >= since`, `ts <= until`), come in `search`. Vale per **tutte e due** le liste; le righe senza ts restano fuori |
 | `campi` | `tutto` | `testo` tiene solo le righe che hanno parole, anche nel ramo vettoriale (un vettore non dice se ha colpito le parole o le azioni) |
@@ -126,23 +135,25 @@ non si trova.
 | pezzo | dove vive | perché lì |
 |---|---|---|
 | il **codice di ricerca** (embedding della query + knn + fusione) | immagine `archive-mcp` | ~35 MB di dipendenze: onnxruntime, tokenizers, sqlite-vec, numpy |
-| il **modello** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; lo mette lì `vps1777 indice-modello` | 449 MB: nell'immagine peserebbero su ogni pull, e si aggiornano senza rilasciare una versione |
+| il **modello** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; lo mette lì `vps1777 indice-modello` | ~490 MB (`model.onnx` 470 MB, `tokenizer.json` 17 MB): nell'immagine peserebbero su ogni pull, e si aggiornano senza rilasciare una versione |
 | l'**indice** (`<nome-db>.vec.db`) | volume, accanto al suo DB | indicizzare il corpus costa decine di ore di CPU: si fa **fuori** e l'indice viaggia come artefatto |
-| il **costruttore** dell'indice | repo, `services/archive-mcp/tools/costruisci_indice.py` | gira sul PC, nell'ambiente del lock di archive-mcp; non entra nell'immagine |
+| il **costruttore** dell'indice | repo, `services/archive-mcp/tools/costruisci_indice.py`, copiato anche nell'immagine `archive-mcp` | la prima costruzione gira sul PC, nell'ambiente del lock di archive-mcp; gli aggiornamenti notturni girano sulla VPS nella stessa immagine (servizio `indice-notturno`) |
 
 Tre conseguenze volute:
 - il **DB dell'archivio non viene toccato**: la sua firma non cambia, i backup
   non si gonfiano, e un archivio senza indice funziona come prima;
 - l'indice si **rigenera senza rifare il DB** (e viceversa);
-- la ricerca ibrida **degrada dichiarando**: senza modello o senza indice non
-  ricade in silenzio su FTS5 — solleva un errore che dice cosa manca e come
-  rimediare. *Un risultato dimezzato che sembra intero è peggio di un errore.*
+- la ricerca ibrida **degrada dichiarando**: senza modello, o senza nessun indice
+  nel perimetro, non ricade in silenzio su FTS5 — solleva un errore che dice cosa
+  manca e come rimediare. Se l'indice ce l'hanno solo alcuni DB, risponde con quelli
+  e dichiara gli altri in `senza_indice`. *Un risultato dimezzato che sembra intero
+  è peggio di un errore.*
 
 ## Perché ONNX e non torch
 
 Il modello serve al server per una cosa sola: trasformare **la query** in un
 vettore. Con torch + sentence-transformers sarebbero ~1 GB di immagine e ~1,5 GB
-di RAM: su una VPS da 3 GB con sei container è una tassa che non ripaga.
+di RAM: su una VPS da 3,8 GB con sei container è una tassa che non ripaga.
 L'export ONNX dello stesso modello dà vettori **identici** — misurato:
 `cosine = 1.000000` contro sentence-transformers, quindi il verdetto del banco
 resta valido — in ~25 ms per query.
@@ -237,7 +248,9 @@ mai, e nessuno lo diceva) e non scriveva `indice_meta`, che fu aggiunta a mano.
 
 Gira **sul PC**, **nell'ambiente del lock di archive-mcp**: onnxruntime,
 tokenizers e sqlite-vec hanno le stesse versioni del server, e non c'è nessuna
-dipendenza in più. Non entra nell'immagine: il Dockerfile copia solo `app/`.
+dipendenza in più. Dalla 0.57.0 il Dockerfile lo copia anche nell'immagine di
+archive-mcp (`/app/tools/costruisci_indice.py`): lì lo usa il job notturno sulla VPS
+(§ «L'aggiornamento notturno»), con le stesse versioni con cui il server legge l'indice.
 
 ```bash
 cd services/archive-mcp
@@ -284,8 +297,10 @@ Quando queste funzioni sono state estratte dal server (24/09/2026), i vettori
 della query sono rimasti identici byte per byte a quelli di prima.
 
 In più il costruttore controlla ogni lotto: ogni vettore deve avere 384
-dimensioni, e il primo vettore di ogni lotto deve avere norma 1. Un export senza
-normalizzazione L2 nel grafo, o un altro modello, viene rifiutato.
+dimensioni, e il primo vettore di ogni lotto deve avere norma 1 dopo
+`semantica.codifica` (che fa pooling e norma da sé quando il grafo restituisce
+l'hidden state, come l'ONNX ufficiale). Un grafo che restituisce vettori già «finiti»
+ma non normalizzati, o un altro modello, viene rifiutato.
 
 ### Il perimetro: si dichiara sempre
 
@@ -324,9 +339,10 @@ tabella. `impronta` è lo sha256 (32 cifre esadecimali) del testo indicizzato.
 
 ### `indice_meta`: la scheda dell'indice
 
-La scrive il costruttore, a ogni passaggio. Il server restituisce `perimetro`,
-`messaggi`, `modello` e `generato` a ogni ricerca: senza il perimetro, un indice
-parziale produce zeri che sembrano assenze.
+La scrive il costruttore, a ogni passaggio. Il server ne restituisce quattro chiavi a
+ogni ricerca, in `indici[]`: `perimetro`, `messaggi` (come `messaggi_indicizzati`),
+`modello` e `generato`. Senza il perimetro, un indice parziale produce zeri che
+sembrano assenze.
 
 | chiave | cosa dice |
 |---|---|
@@ -439,7 +455,7 @@ servirebbe.
 *allineato*, *da aggiornare* (sono arrivate righe dopo l'ultima costruzione: quante, e il
 comando `vps1777 indice-notturno --db <nome>`), *nessun indice* (la prima costruzione si fa sul PC:
 § «Attivare la ricerca per senso»), *senza registro* (un indice vecchio da ricostruire sul PC, il
-timer lo rifiuta). Le righe «arrivate dopo» sono quelle oltre l'ultimo `msg_rowid` del registro:
+timer lo rifiuta), *illeggibile* (il file dell'indice non si apre: il motivo è nella cella). Le righe «arrivate dopo» sono quelle oltre l'ultimo `msg_rowid` del registro:
 non tutte finiranno nell'indice, perché le troppo corte restano fuori. Un DB cambiato solo nei metadati
 (ruolo, descrizione) resta *allineato*, con una nota: la data del file da sola non basta (0.79.1).
 
@@ -448,7 +464,10 @@ Il timer `vps1777-indice-notturno.timer` (03:30, con un ritardo casuale fino a 3
 lancia `vps1777 indice-notturno`, che:
 
 - guarda nel volume gli indici che **esistono già** e, per ognuno, se il suo DB è
-  **più recente** dell'indice. Nelle notti senza ingest esce in un secondo;
+  **più recente** dell'indice. Conta la data del file: anche un cambio solo di ruolo o
+  descrizione fa partire un giro, che non trova niente da aggiungere ma rilegge il
+  perimetro (il modello non lo carica). Nelle notti in cui nessun DB è cambiato esce in
+  un secondo;
 - per quei DB fa girare il costruttore **in modo incrementale** (senza perimetro: vale
   quello dichiarato dall'indice) nel servizio compose `indice-notturno`: stessa immagine
   di archive-mcp, **limite di memoria 1300m**, una CPU, **nessuna rete**, 1 thread,
@@ -473,11 +492,16 @@ automatico, niente PC. Il costo è la RAM. Il costruttore porta in memoria il mo
 circa 0,9 GB di picco con sotto-lotti piccoli, accanto ad archive-mcp, che ne tiene
 ~1,6 su 3,8. Il tempo: con una CPU ~1-1,5 vettori al secondo, quindi un ingest di
 10.000 messaggi nuovi (~17.000 vettori) chiede ~3-5 ore di notte (stima dal banco del PC
-a 1 thread, da rimisurare sulla VPS). Il servizio gira a `Nice=15` e I/O `idle`.
+a 1 thread, da rimisurare sulla VPS). La unit systemd gira a `Nice=15` e I/O `idle`,
+ma il costruttore vive nel container, che non eredita quella priorità: lo contengono il
+tetto di una CPU (`cpus: 1.0`) e quello di memoria (1300m) del servizio compose.
 
-⚠️ Il costruttore legge il DB mentre esiste. Se nella stessa notte parte un ingest, può
-vedere due stati: il `--controlla` di un giro successivo lo dice, e la notte dopo
-l'incrementale lo rimette in pari.
+⚠️ Il costruttore legge il DB mentre esiste. Dalla 0.84.0 l'ingest di `/admin/archive`
+gira come job a parte (servizio compose `ingest`, tetto 2g) quando arriva un file, anche
+di notte, e non si coordina col giro dell'indice: se si sovrappongono, il costruttore
+può vedere due stati del DB e i due job sommano la loro memoria. Il giro notturno non
+lancia `--controlla`: lo rivela un `--controlla` lanciato a mano, e il giro della notte
+dopo, con l'incrementale, lo rimette in pari.
 
 ## La verifica nel server: `indici[].verifica`
 
@@ -666,7 +690,7 @@ DB: se non è in pari, aggiornalo lì e carica quello.
 
 ## Perimetro attuale
 
-`[stato dell'installazione al 27/09/2026]`
+`[stato dell'installazione al 27/09/2026 — lo stato di oggi di ogni indice è nella colonna «per senso» di /admin/archive]`
 
 - **Il primario per Claude Code è `recupero-20260924`** (dal 24/09: il primo bundle
   col contratto `recupero/` R1, vedi [ARCHIVE.md](ARCHIVE.md)), e il suo indice copre
@@ -687,9 +711,11 @@ DB: se non è in pari, aggiornalo lì e carica quello.
   gli indici qui sopra sono legati a quell'impronta, e `vps1777 indice-modello` senza
   `--sostituisci` lo lascia dov'è.
 
-Fuori dal perimetro la ricerca ibrida non ha vettori da fondere — `indici[].perimetro`
-nella risposta lo dichiara a ogni chiamata, ed è la prima cosa da leggere prima di
-concludere «non c'è».
+Fuori dal perimetro la ricerca ibrida non ha vettori da fondere. Prima di concludere
+«non c'è» leggi tre cose nella risposta: `indici[].perimetro` (cosa copre l'indice di
+ogni DB guardato), `senza_indice` (i DB del perimetro che non hanno un indice per senso
+e quindi non sono stati guardati: lì serve `search`) e `fuori_perimetro` (i DB lasciati
+fuori dal filtro `ruoli`, per ruolo).
 
 ## Limiti noti
 

@@ -42,11 +42,13 @@ indice che la porta resta identico per lui.
 
 DOVE GIRA
 ─────────
-Sul PC, non sulla VPS: indicizzare il corpus costa decine di ore di CPU. Gira
-nell'ambiente DEL LOCK di archive-mcp — stesse versioni di onnxruntime,
-tokenizers e sqlite-vec che il server usa per leggere — e per questo sta in
-questo servizio e non in `tools/` alla radice (stdlib-only). Non entra
-nell'immagine: il Dockerfile copia solo `app/`.
+La prima costruzione sul PC, non sulla VPS: indicizzare il corpus costa decine
+di ore di CPU. Gira nell'ambiente DEL LOCK di archive-mcp — stesse versioni di
+onnxruntime, tokenizers e sqlite-vec che il server usa per leggere — e per
+questo sta in questo servizio e non in `tools/` alla radice (stdlib-only).
+Dalla 0.57.0 il Dockerfile lo copia anche nell'immagine di archive-mcp
+(`/app/tools/costruisci_indice.py`): lì lo fa girare il job notturno sulla VPS
+(servizio compose `indice-notturno`), solo in modo incrementale.
 
     cd services/archive-mcp
     uv sync --frozen

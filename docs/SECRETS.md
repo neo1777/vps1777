@@ -29,7 +29,7 @@ Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei cont
 
 ## Generazione iniziale
 
-`setup.sh` li genera tutti la prima volta. Per rigenerarne uno singolo: cancellalo (`rm secrets/<file>`) e rilancia `./setup.sh`.
+`setup.sh` li genera tutti la prima volta. Per rigenerarne uno singolo: cancellalo (`rm secrets/<file>`), rilancia `./setup.sh` e poi riavvia i servizi che lo montano (`docker compose restart …`, colonna «Chi lo legge» qui sopra): `setup.sh` non ricrea i container, e i servizi leggono i secret all'avvio. Per `gateway_secret`, `oauth_signing_secret`, `admin_password` e `telegram_bot_token` usa piuttosto `tools/rotate-secret.sh` (sotto), che riavvia da sé.
 
 ## Rotation senza downtime
 
@@ -64,9 +64,10 @@ stesso a fine installazione (`RESULT_SECRET_FILE=` invece di `RESULT_SECRET=`).
 NEW=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
 echo -n "$NEW" > secrets/oauth_signing_secret.txt
 docker compose restart gateway
-# ATTENZIONE: invalida TUTTI i token attivi (access, refresh, admin, miniapp).
-# I client OAuth (claude.ai) richiedono nuovo login via refresh_token automatico,
-# se il refresh era ancora valido. Altrimenti devi rifare il connector.
+# ATTENZIONE: invalida TUTTI i token attivi (access, refresh, admin, miniapp):
+# anche il refresh token è firmato con questa chiave, quindi claude.ai non può
+# rinnovarli. Riconnetti i connettori (rifai il login OAuth): le URL non cambiano
+# e il client registrato resta, non serve ricrearli. Admin e Mini App: nuovo login.
 ```
 
 ### Rota `telegram_bot_token` (e la chiave derivata)
@@ -158,7 +159,7 @@ file, riscritto a ogni rotazione) e la confronta con una soglia:
 | `archive_desc_secret` | media | 180 giorni | manuale: rigenera il file e ricrea il gateway (e archive-mcp) — `rotate-secret.sh` non lo copre |
 | `cloudflared_token` | bassa | 365 giorni | manuale (se usi l'ingress Cloudflare) |
 | `cf_api_token` | media | 180 giorni | manuale (se usi `caddy-dns01`): vedi sotto |
-| cookie NotebookLM | — | 14 giorni | ricarica da `/admin/nlm` — scadono da soli |
+| sessione NotebookLM | — | lo decide la sonda di nb1777-mcp (i 14 giorni contano solo se la sonda non ha un esito «ok») | `nlm login` sul PC e ricarica il profilo da `/admin/nlm` |
 | via d'emergenza cosign aperta | — | **1 giorno** | togli `VPS1777_REQUIRE_COSIGN=0` dal `.env` (compare solo mentre è aperta) |
 
 > **Perché `telegram_bot_token` è fascia massima (H29).** Non è un segreto
@@ -176,6 +177,13 @@ Se un secret supera la soglia, il check **notifica il owner su Telegram** (`--no
 e lo segna nella pagina admin **`/admin/secrets`**, che mostra età, ultima rotazione
 e stato di ogni secret + le istruzioni di rotazione. Scrive `onboarding/secrets_status.json`
 (letto dal gateway). Manuale: `vps1777 secrets-status` in qualunque momento.
+
+Il promemoria si può **posticipare** (dalla 0.83): il messaggio porta un bottone che apre
+la Mini App sulla vista Sistema, e lì, se qualcosa è da ruotare, «Posticipa il promemoria
+di 7 giorni» scrive `onboarding/secrets_posticipa.json`; finché quella data non passa
+`secrets-status --notify` non manda niente (lo stato, il JSON e `/admin/secrets` restano
+veri). «annulla», nella stessa vista, lo toglie. Se il promemoria non arriva più, guarda
+prima quel file.
 
 Cosa notifica e cosa no:
 
@@ -212,8 +220,9 @@ vecchi) vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md#rotazione-della-chiave-age-h3
 - Container vede solo i propri `/run/secrets/<name>`, montati in sola lettura con i
   permessi e il proprietario del file sull'host (`600`, UID 1000)
 - **Log redatti** (v0.24.0): un filtro di logging (`app/logredact.py`) sostituisce
-  ogni secret con `***` in ogni riga *prima* che venga scritta. In particolare il
-  `gateway_secret` vive nel PATH del proxy MCP (`/<SECRET>/<service>/mcp`) e
+  il `gateway_secret` con `***` in ogni riga del gateway *prima* che venga scritta (gli
+  altri secret non passano dai log; il token del bot lo maschera a parte il bot, con
+  `app/registro.py`). Il `gateway_secret` vive nel PATH del proxy MCP (`/<SECRET>/<service>/mcp`) e
   finirebbe nella request-line dell'access-log di uvicorn: ora compare come
   `/***/<service>/mcp`. Con l'ingresso Caddy lo stesso vale per il **suo**
   access-log (`format filter` sul campo `request>uri`, dalla 0.67.0, H78: prima ci

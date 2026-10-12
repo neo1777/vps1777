@@ -1,4 +1,5 @@
-# vps1777-auto-update.timer — schedula l'auto-update SICURO (opt-in).
+# vps1777-auto-update.timer — schedula l'auto-update SICURO (acceso di default; si
+# spegne togliendo `autoupdate` da VPS1777_FEATURES).
 #
 # Gemello di vps1777-check-update.timer, ma questo APPLICA (non solo notifica):
 # fa partire vps1777-auto-update.service = `vps1777 update --yes`, con tutta la

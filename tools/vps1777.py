@@ -4738,7 +4738,7 @@ _SECRET_POLICY = [
     ("oauth_signing_secret", "oauth_signing_secret.txt", "Chiave firma JWT", 90, False,
      "manuale: invalida i token attivi → i connettori si ri-autenticano / re-login admin"),
     ("admin_password", "admin_password_bcrypt.txt", "Password admin", 90, False,
-     "manuale: dalla pagina o `rotate-secret.sh admin_password`"),
+     "manuale: `tools/rotate-secret.sh admin_password` sull'host (vuoto = la genera forte)"),
     ("gateway_secret", "gateway_secret.txt", "Namespace URL MCP", 180, False,
      "manuale: cambia le URL dei connettori → vanno ri-aggiunti su claude.ai"),
     # 🔴 ERA L'UNICO DEI SEI SENZA POLITICA (aggiunto il 02/08). Non per una
@@ -4761,7 +4761,8 @@ _SECRET_POLICY = [
     # 90 giorni, non 365 (H29): è la RADICE DI FIDUCIA della Mini App — con questo
     # token si forgia un initData valido per qualunque user id. Fascia massima.
     ("telegram_bot_token", "telegram_bot_token.txt", "Token bot Telegram (radice Mini App)", 90, False,
-     "manuale: revoca e rigenera su @BotFather"),
+     "manuale: revoca e rigenera su @BotFather, poi `tools/rotate-secret.sh "
+     "telegram_bot_token` (salva il token e rideriva la chiave della Mini App)"),
     # 🆕 #61: la chiave DERIVATA che il gateway monta al posto del token intero.
     # ⭐ La sua natura è diversa da tutte le altre voci di questo elenco: **non è un
     #   segreto autonomo, è una funzione di un altro segreto** — HMAC_SHA256 con chiave
@@ -5247,7 +5248,7 @@ def build_parser() -> "argparse.ArgumentParser":
     parser = argparse.ArgumentParser(
         prog="vps1777", description="canale di aggiornamento controllato vps1777",
         epilog="guida completa con esempi: docs/CLI.md (nel repo) · `vps1777 help <comando>` per il dettaglio")
-    parser.add_argument("--home", help="root del repo sulla VPS (default: $VPS1777_HOME o /home/vps1777/vps1777)")
+    parser.add_argument("--home", help="root del repo sulla VPS (default: $VPS1777_HOME, poi /home/vps1777/vps1777, poi la cartella corrente)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("check", help="controlla l'ultima release")
@@ -5347,7 +5348,7 @@ def build_parser() -> "argparse.ArgumentParser":
     azioni.add_parser("stato", help="versione della disciplina, strati presenti, ack cloud")
     pi = azioni.add_parser("importa", help="carica (sostituisce) uno strato locale nel volume di nb1777-mcp")
     pi.add_argument("strato", choices=MEMORIA_STRATI)
-    pi.add_argument("file", help="il .md da caricare (parti da app/memoria_1777/<strato>.esempio.md)")
+    pi.add_argument("file", help="il .md da caricare (parti da services/nb1777-mcp/app/memoria_1777/<strato>.esempio.md)")
     pm = azioni.add_parser("mostra", help="stampa la disciplina o uno strato")
     pm.add_argument("cosa", choices=("disciplina", *MEMORIA_STRATI))
 
@@ -5452,10 +5453,14 @@ def _esci(codice: int) -> None:
                 # arriva DOPO che main() ha già risolto il repo, quindi la stessa
                 # ricerca non può fallire in modo nuovo.
                 find_repo(None),
-                f"🔴 vps1777 — «{cmd}» è USCITO {codice}\n"
-                f"Se era l'auto-update: la macchina NON è stata aggiornata e resta "
+                # Qui si arriva SOLO a mano (sotto systemd avvisa OnFailure=): il
+                # dettaglio sta nel terminale, non nel journal di una unit.
+                f"🔴 vps1777 — «{cmd}» è USCITO {codice} (lanciato a mano).\n"
+                f"Se era un update: la macchina NON è stata aggiornata e resta "
                 f"alla versione precedente.\n"
-                f"Dettaglio: journalctl -u vps1777-auto-update.service -n 50",
+                f"Dettaglio: nell'output del terminale da cui l'hai lanciato (per un "
+                f"update anche onboarding/update_journal.ndjson). Non in journalctl: "
+                f"lanciata a mano, la CLI non scrive nel journal di systemd.",
             )
         except Exception:                                          # noqa: BLE001
             # Volutamente muto e volutamente LARGO: qualunque cosa vada storta

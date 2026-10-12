@@ -3,35 +3,35 @@
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "dcb5cb8a9177a11e8af69bdec213ca4279a3bbcd2f94373895358e37ebb576ea"
+      "sorgente_sha256": "96a4e8155fd1930edd4bca7da5a68afb2c7e6a6773a874bcb1a3ab52c81b5237"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
-      "sorgente_sha256": "b51ed5f7f7df7fcdcd7e0a1352b5a9eec929acdd7328677f073d06a0ae0628e1"
+      "sorgente_sha256": "e804ffe4148b6fa2f7e78aee0a01b15fe6def5ebff17f4e3dba0c894cd6f1af4"
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
-      "sorgente_sha256": "20047d266aedf98592d8525379841a57463281941dde36964975be352674be01"
+      "sorgente_sha256": "6eaf3f6aec2d664671dccfa6106abd29da8f0e16861e38c962178fdc3b3748f9"
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
-      "sorgente_sha256": "09c18c7fcdcb7def417e14201bef3a1c075889ec7e0d1fcfbec47b156e6c57a4"
+      "sorgente_sha256": "8713e0f52cdcdb6503af0c89b06a023302331cbcc2ab5aaa3a153d5784d30042"
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",
-      "sorgente_sha256": "2f5b302cb6385018e0d1d38cec225b28485a8d557bdeab127547e4507f8f29d5"
+      "sorgente_sha256": "02ff990ba288e2dca2c2387d3c09e5707b3dbe83906f6e4470192dce6d1cec77"
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
-      "sorgente_sha256": "7d3aa3d8a2f353d37916989deb03a86d45d8f50b50b629b62d435d62be8bba8c"
+      "sorgente_sha256": "bba0521f5bb3bbb7bcd617b46977ff1f4e21578b279b965c8995543a9c333877"
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
-      "sorgente_sha256": "078c521e2a483d7e96476f93d876f70a91f0f2b014ec535e0da5a1a3ea413211"
+      "sorgente_sha256": "712f947cf376b97d1738d5a2963e540435d2664716e6fc705b8f0472dceff3f6"
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "9d29d8a28635cead06b805be5cd86c01009c687e602f54ed593d5d0538b981da"
+      "sorgente_sha256": "cad6691d188c948ce8d89f7ca66146e67b5b8c9829c9aa8bdb4d904da7733f5b"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",
@@ -39,7 +39,7 @@
     },
     "docs/en/RICERCA-IBRIDA.md": {
       "sorgente": "docs/RICERCA-IBRIDA.md",
-      "sorgente_sha256": "e8fc9e9ba56c87474dca861850a6792c2483ca104ba3503737be603b75ea5b10"
+      "sorgente_sha256": "41989f9d9e393a716a50a5a16e093ad1681e54138263f5d87201ed19ff269adb"
     }
   }
 }

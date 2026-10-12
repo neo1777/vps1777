@@ -29,7 +29,8 @@ che *manca*, e ciò che manca non grida.
 
 > **Il ledger è la DEFINIZIONE-DI-FATTO di una decisione sulle feature.**
 > *«Abbiamo declassato X»* non è vero finché il ledger non ha:
-> `X · stato: rinviata · decisione: <perché + data> · follow-up: <cosa la sostituisce>`.
+> `X · status: deferred · decisione: <perché + data> · follow_up: <cosa la sostituisce>`
+> (i nomi dei campi sono quelli di `features.yaml`; `deferred` = rinviata).
 > **Una decisione senza la sua voce non è presa: è chiacchiera.**
 
 Non è una regola nuova — è un pattern già validato altrove, voltato sulle feature:
@@ -40,9 +41,10 @@ Non è una regola nuova — è un pattern già validato altrove, voltato sulle f
   follow-up, non a parole.
 
 Riscritto sotto questa regola, l'auto-update non si sarebbe perso: il 10/06 la voce sarebbe stata
-`Watchtower · rinviata · follow-up: timer sicuro`, con il follow-up **vuoto** — e (vedi sotto) la CI
-sarebbe stata **rossa dal 10/06** finché il timer non fosse esistito. Il divario avrebbe gridato per
-un mese, invece di tacere.
+`Watchtower · deferred · follow_up: {systemd_unit: vps1777-auto-update.timer}`. Senza follow_up la
+CI è rossa (è la regola di cattura); con il follow_up la CI resta verde ma lo sorveglia, e il giorno
+in cui il timer esiste lo segnala con `[PROMUOVI]` (vedi sotto). La voce aperta sarebbe rimasta
+visibile nel ledger a ogni lettura, invece di sparire.
 
 ## L'enforcement — perché la regola regge (non è solo buona volontà)
 
@@ -52,24 +54,28 @@ Il verificatore è **bidirezionale**:
 
 | verso | cosa cattura |
 |---|---|
-| **ledger → realtà** | ogni feature `attiva` deve avere il suo `verify` che passa. Feature dichiarata ma **sparita** → CI rossa. *Cattura la PERDITA.* |
-| **realtà → ledger** | ogni tool MCP, unit systemd, profilo compose, script di `tools/` e comando della CLI **reale** deve avere una voce (gli endpoint HTTP no: il verificatore non li enumera). Feature reale **non dichiarata** → CI rossa. *Cattura ciò che poi si DIMENTICA.* |
+| **ledger → realtà** | ogni feature `active-default` o `opt-in` deve avere il suo `verify` che passa. Feature dichiarata ma **sparita** → CI rossa. *Cattura la PERDITA.* |
+| **realtà → ledger** | ogni tool MCP, unit systemd, profilo compose e comando della CLI **reale** deve avere una voce (gli endpoint HTTP no: il verificatore non li enumera). Feature reale **non dichiarata** → CI rossa. Gli script di `tools/` (`*.sh`, `*.py`, `prove-empiriche/*.sh`) sono enumerati anche loro, ma la categoria è ancora in semina: se mancano dal ledger vengono segnalati, non fanno fallire. *Cattura ciò che poi si DIMENTICA.* |
 
 Una feature **non può sparire in silenzio** (il suo verify fallirebbe) **né entrare senza traccia**
 (il check inverso la pretende nel ledger). Servono entrambi i versi: uno solo lascia metà del buco.
 
 ## I due tipi di follow-up — o il verificatore diventa rumore
 
-Un follow-up dev'essere una **condizione**, non prosa — o la CI non sa quando smettere di essere
-rossa. Ce ne sono due specie, e vanno trattate all'opposto:
+Un follow-up dev'essere una **condizione**, non prosa — o la CI non sa quando la cosa è fatta. Ce ne sono due specie, e vanno trattate all'opposto:
 
-1. **Verificabile** — es. *«esiste `systemd/vps1777-auto-update.timer`»*. La CI lo controlla da sé:
-   **rossa finché è falso, verde quando è vero. Auto-chiude.** (L'auto-update era di questa specie:
-   la CI avrebbe controllato «esiste il timer?» ogni giorno.)
+1. **Verificabile** — es. *«esiste `systemd/vps1777-auto-update.timer`»*. La CI lo controlla da sé
+   a ogni giro: finché è falso la deferred resta aperta (non fatale); quando diventa vero il
+   verificatore la segnala con `[PROMUOVI]`, e una persona la passa ad `active-default` — lo status
+   non cambia da solo. (L'auto-update era di questa specie: la CI avrebbe controllato «esiste il
+   timer?» a ogni giro.) Dal 27/09/2026 una condizione verificabile porta anche la sua data di
+   riserva, `follow_up.rivedi_dopo` (condizione O data): senza, la CI è rossa; passata la data, il
+   verificatore la rimette davanti con `[RIVEDI]`.
 2. **A giudizio umano** — es. *«quando il ritmo dei rilasci sarà regolare»* (H24 fino al 27/09;
    oggi è un rischio accettato con una data, `rivedi_dopo: 2026-12-27`). La CI **non può
-   deciderlo**, quindi non lo chiude — ma **lo sorveglia**: lo rimette davanti a intervalli
-   (*«3 rinviati-a-giudizio da rivedere»*). Non grida (non è un bug), ma **non sparisce**.
+   deciderlo**, quindi non lo chiude — ma **lo sorveglia**: passata la sua `rivedi_dopo` lo rimette
+   davanti con una riga `[RIVEDI] <id>: rinvio-a-giudizio scaduto il <data>`. Non grida (non è un
+   bug), ma **non sparisce**.
 
 > **Perché la distinzione salva il sistema:** senza, o i follow-up-a-giudizio tengono la CI rossa
 > per sempre (rumore → si ignora → il verificatore muore), o i verificabili restano prosa e nessuno

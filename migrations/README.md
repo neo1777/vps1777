@@ -63,7 +63,8 @@ migrations/
 esiste sempre, è nel set di backup, e il restore all-or-nothing dello snapshot
 lo mantiene automaticamente coerente coi dati. Entry:
 `{id, version, applied_at, checksum}` dove `checksum` è lo sha256 di `run.py`
-al momento dell'applicazione.
+al momento dell'applicazione. Le entry scritte da `vps1777 bootstrap` hanno anche
+`baseline: true`: migrazioni segnate come già riflesse nei dati, non eseguite.
 
 Il runner è `vps1777 migrate` (vedi `tools/vps1777.py`):
 - `vps1777 migrate --pending` — elenca le migrazioni non applicate

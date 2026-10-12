@@ -8,12 +8,12 @@ Dopo `./deploy.sh`, lo stack gira ma è "dormiente": mancano le credenziali
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  1. ./deploy.sh           (dal PC, ~6 domande, pull + avvio)     │
+│  1. ./deploy.sh           (dal PC, ~10 domande, pull + avvio)   │
 │         ↓                                                        │
 │  2. <pannello>/admin/setup   (browser, login admin)             │
 │     via Funnel, dominio HTTPS o tunnel SSH (vedi §2)            │
-│     inserisci: Tailscale key · bot token · profilo nlm (tgz)    │
-│     → Salva                                                     │
+│     inserisci: Tailscale key · bot token + owner id → Salva     │
+│     profilo nlm (tgz): link → /admin/nlm, attivo subito         │
 │         ↓                                                        │
 │  3. ./deploy.sh --apply   (dal PC, applica tutto via SSH)       │
 │     tailscale up · verifica Funnel · URL · restart              │
@@ -25,7 +25,17 @@ Dopo `./deploy.sh`, lo stack gira ma è "dormiente": mancano le credenziali
 
 ## 1. Deploy
 
-Vedi [INSTALL.md](INSTALL.md). Al termine, lo stack è su. La porta 8080 del
+Dal tuo PC, nella cartella del repo clonato:
+
+```bash
+./deploy.sh [IP_VPS]
+```
+
+Chiede IP (se non lo passi), utente e password SSH (vuota = usa la tua chiave; con la
+password serve `sshpass` sul PC), email admin, `TELEGRAM_OWNER_ID`, ingress (per
+Tailscale hostname e auth-key, per Caddy dominio ed email, per Cloudflare il token del
+tunnel), token del bot e se generare la password admin. I requisiti della VPS sono
+quelli di [INSTALL.md](INSTALL.md). Al termine, lo stack è su. La porta 8080 del
 gateway è pubblicata **solo sul loopback** della VPS (`127.0.0.1`): la governa
 `GATEWAY_BIND` col profilo Tailscale (`compose.ingress.tailscale.yaml`) e
 `ONBOARDING_BIND` con Caddy e Cloudflared (`compose.onboarding.yaml`). Da
@@ -60,10 +70,15 @@ Il pannello mostra **lo stato dei componenti** a semafori e i form per:
 | Tailscale Funnel | **Auth-key** (`tskey-auth-…`). La prendi diretta dalle Keys, oppure te la genera un OAuth client (*Modalità B* in [INGRESS.md](INGRESS.md)) — ma nel form va **sempre la key**, non il Client ID | [login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys) |
 | Bot Telegram | token + owner id | [@BotFather](https://t.me/BotFather) + [@userinfobot](https://t.me/userinfobot) |
 | URL pubblico | (opzionale) solo per Caddy/Cloudflared con dominio tuo | — |
-| NotebookLM | upload del **profilo nlm** (tar.gz, bottone dedicato) | `nlm login` sul tuo PC → `tar czf nlm-profile.tgz profiles/default` |
 
 Clicca **Salva configurazione**. I valori vanno in un file temporaneo
 (`onboarding/pending.json`) sulla VPS, in attesa di applicazione.
+
+Il **profilo NotebookLM** non passa da questo form: dalla pagina setup il link
+«Carica profilo NotebookLM →» porta a `/admin/nlm`, dove carichi il tar.gz che
+prepari sul tuo PC (`nlm login`, poi
+`cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default`; i dettagli
+in [INSTALL.md](INSTALL.md), Post-install).
 
 > **NotebookLM è già attivo al volo**: l'upload del profilo da `/admin/nlm`
 > non richiede `--apply`, il servizio lo legge alla prossima chiamata.
@@ -100,7 +115,7 @@ Cosa fa (via SSH):
 
 Apri `https://<host>.ts.net/admin/setup` → tutti i semafori verdi.
 
-Poi su [claude.ai](https://claude.ai) → Settings → Integrations → Add connector:
+Poi su [claude.ai](https://claude.ai) → Settings → Connectors → Add custom connector:
 ```
 https://<host>.ts.net/<GATEWAY_SECRET>/archive/mcp
 https://<host>.ts.net/<GATEWAY_SECRET>/nb1777/mcp

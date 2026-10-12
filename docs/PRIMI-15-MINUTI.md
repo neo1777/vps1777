@@ -16,7 +16,7 @@ sotto sono quelli **misurati lì**. Dove il tuo risultato può essere diverso, �
 | ✅ In locale vedi | ❌ In locale NON vedi |
 |---|---|
 | I **5 servizi** dello stack in piedi e `healthy`, più il container `backup` (feature accesa di default) | L'**ingress HTTPS pubblico** (Tailscale Funnel / Caddy / Cloudflare) |
-| Il **pannello admin** e le sue sei schede (Setup, NotebookLM, Archive, Update, Secrets, Audit) | I **connector su claude.ai**: per collegarli, claude.ai deve raggiungerti da Internet |
+| Il **pannello admin** e le sue sette schede (Setup, Salute, NotebookLM, Archive, Update, Secrets, Audit) | I **connector su claude.ai**: per collegarli, claude.ai deve raggiungerti da Internet |
 | I **due endpoint MCP** che rispondono `401` (ci sono, e chiedono l'autenticazione) | Il **bot Telegram** (serve un token da @BotFather) |
 | Che un segreto sbagliato dà `404` e non `401` (non conferma il percorso) | **NotebookLM** (serve il profilo `profiles/default/` della CLI `nlm`, caricato come tar.gz da `/admin/nlm`) |
 
@@ -86,7 +86,8 @@ salvato una `s` come token del bot.* Non fa danni permanenti — si svuota il fi
 `secrets/telegram_bot_token.txt` — ma è l'inciampo più facile di questa pagina.
 
 > **Deve apparire**, in quest'ordine:
-> `Installerò la release v0.48.1 (pull da ghcr, nessuna build)` → i secret generati uno
+> `Installerò la release vX.Y.Z (pull da ghcr, nessuna build)` (X.Y.Z è l'ultima release
+> pubblicata; il 07/09 era v0.48.1) → i secret generati uno
 > per uno → il pull delle immagini (le 5 dello stack, più `alpine` per il backup) →
 > `[✓] Stack avviato. Stato:` con la tabella dei
 > container.
@@ -99,8 +100,9 @@ salvato una `s` come token del bot.* Non fa danni permanenti — si svuota il fi
 > scritto per una VPS e non distingue:
 > - installa il comando `vps1777` in `/usr/local/bin`;
 > - installa in `/etc/systemd/system` **tutte** le unit `vps1777-*` del repo e ne
->   **accende** quattro: il check giornaliero delle release, quello delle scadenze dei
->   secret, la path unit del pulsante di update e l'**auto-update**, che ogni giorno
+>   **accende** cinque: il check giornaliero delle release, quello delle scadenze dei
+>   secret, la path unit del pulsante di update, quella della coda d'indicizzazione
+>   dell'archivio (`vps1777-ingest.path`) e l'**auto-update**, che ogni giorno
 >   aggiornerebbe da solo questa installazione di prova;
 > - installa con `apt-get` **`unattended-upgrades`** e **`fail2ban`**, scrive
 >   `/etc/apt/apt.conf.d/20auto-upgrades` e `/etc/fail2ban/jail.local` e li accende: gli
@@ -135,7 +137,7 @@ Se uno dei container resta `Restarting`, salta a *[Se non torna](#se-non-torna)*
 Apri **`http://127.0.0.1:8080/admin/login`** e accedi con l'email che hai dato e la
 password che il wizard ha stampato (o messo nel file che ti ha indicato).
 
-> **Deve apparire**: il login riesce (redirect), e le schede rispondono — sono sei:
+> **Deve apparire**: il login riesce (redirect), e le schede rispondono — sono sette:
 > `/admin/setup`, `/admin/salute`, `/admin/nlm`, `/admin/archive`, `/admin/update`, `/admin/secrets`,
 > `/admin/audit`.
 > *(misurato il 07/09 su quattro di loro: `GET /admin/login` → `200`; `POST` col login

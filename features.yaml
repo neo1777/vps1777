@@ -82,6 +82,9 @@ _schema:
     compose_profile: "{file, profile} — il profilo è dichiarato nel compose."
     mcp_tool: "{service, name} — il tool è registrato (@mcp.tool + def <name>)."
     cmd: "<comando> — exit 0 = presente/funziona. Usare con parsimonia (gira in CI)."
+    cli_command: "<sottocomando> — accettato dal parser (sub.add_parser) E collegato nel
+                  dispatcher di tools/vps1777.py: un add_parser senza voce nella mappa fa
+                  passare la riga di comando e non esegue niente."
     manual: "<descrizione> — nessuna macchina può provarlo. Il verificatore NON
              lo fa passare né fallire: lo SEGNALA per revisione umana periodica."
   follow_up:
@@ -163,7 +166,7 @@ features:
            '7 giornalieri' e il codice teneva gli ultimi 7 FILE — con quattro update
            nella stessa mattina la finestra si era ristretta a 3 giorni (H57)."
     dove: ["compose-profile:compose.ops.backup.yaml#ops.backup", "tools/backup.sh"]
-    status: active-default    # ATTESO dopo il branch installer-autoupdate-backup (default-on via VPS1777_FEATURES)
+    status: active-default    # default-on via VPS1777_FEATURES (DEFAULT_FEATURES in tools/vps1777.py)
     since: "0.26.0 (opt-in) → default-on (branch feat/installer-autoupdate-backup)"
     decisione: "reso default-on il 17/07: un backup opt-in che il reinstall perde in
                 silenzio è la perdita-tipo che Neo vuole impedire. [conv 17/07 caccia-feature-perdute]"
@@ -255,8 +258,9 @@ features:
       systemd_unit: vps1777-update.path
 
   - id: update.secrets-timer
-    nome: "Check settimanale scadenza secret"
-    cosa: "Timer che avvisa quando un secret (o il cookie NotebookLM) sta per scadere."
+    nome: "Check giornaliero scadenza secret"
+    cosa: "Timer giornaliero (era settimanale fino al 03/08) che avvisa su Telegram quando un
+           secret, il cookie NotebookLM o la via d'emergenza cosign ha passato la soglia."
     dove: ["systemd:vps1777-secrets-check.timer", "systemd:vps1777-secrets-check.service"]  # timer + il suo service (coppia)
     status: active-default
     since: "0.9.0"
@@ -265,7 +269,10 @@ features:
 
   - id: ingress.tailscale
     nome: "Ingress Tailscale Funnel (default)"
-    cosa: "Espone il gateway in HTTPS via Tailscale Funnel; gira sull'host, non in container."
+    cosa: "Espone il gateway in HTTPS via Tailscale Funnel; gira sull'host, non in container.
+           Il profilo `ingress.tailscale` è solo un nome passato a compose: nessun servizio lo
+           porta. L'overlay pubblica la porta del gateway su loopback (GATEWAY_BIND) e crea la
+           rete `funnel` senza SNAT."
     dove: ["compose-profile:compose.ingress.tailscale.yaml#ingress.tailscale"]
     status: active-default    # è il default; caddy/cloudflared sono le alternative opt-in
     since: "0.9.0"
@@ -507,7 +514,7 @@ features:
       mcp_tool: {service: archive-mcp, name: count}
   - id: archive.check_term
     nome: "archive-mcp · check_term"
-    cosa: "Diagnostica se un TERMINE con caratteri speciali (`C++`, `C#`, `g++`, `.NET`, `F#`) è davvero ricercabile o se l'indice lo fa COLLASSARE su."
+    cosa: "Diagnostica se un TERMINE con caratteri speciali (`C++`, `C#`, `g++`, `.NET`, `F#`) è davvero ricercabile o se l'indice lo fa COLLASSARE su una parola più corta e comune."
     dove: ["mcp-tool:archive-mcp/check_term"]
     status: active-default
     verify:
@@ -521,14 +528,14 @@ features:
       mcp_tool: {service: archive-mcp, name: get_context}
   - id: archive.get_conversation
     nome: "archive-mcp · get_conversation"
-    cosa: "Il thread di conversazione INTERO che contiene `uuid` — camminando l'albero `parent_uuid` (antenati + discendenti), col contenuto pieno e in."
+    cosa: "Il thread di conversazione INTERO che contiene `uuid` — camminando l'albero `parent_uuid` (antenati + discendenti), col contenuto pieno e in ordine."
     dove: ["mcp-tool:archive-mcp/get_conversation"]
     status: active-default
     verify:
       mcp_tool: {service: archive-mcp, name: get_conversation}
   - id: archive.list_projects
     nome: "archive-mcp · list_projects"
-    cosa: "Le etichette `project` dell'archivio con quanti messaggi ciascuna — per NAVIGARE i contenuti (quali progetti/chat ci sono) invece di solo ce."
+    cosa: "Le etichette `project` dell'archivio con quanti messaggi ciascuna — per NAVIGARE i contenuti (quali progetti/chat ci sono) invece di solo cercarli. Ogni riga: {project, rows, db}."
     dove: ["mcp-tool:archive-mcp/list_projects"]
     status: active-default
     verify:
@@ -549,7 +556,7 @@ features:
       mcp_tool: {service: archive-mcp, name: list_databases}
   - id: archive.describe_databases
     nome: "archive-mcp · describe_databases"
-    cosa: "Scheda di ogni DB caricato: {name, rows, oldest, newest, labels, snapshot, description}."
+    cosa: "Scheda di ogni DB caricato: {name, ruolo, rows, oldest, newest, labels, snapshot, description}; il ruolo decide anche il perimetro di default delle ricerche."
     dove: ["mcp-tool:archive-mcp/describe_databases"]
     status: active-default
     verify:
@@ -715,7 +722,7 @@ features:
       mcp_tool: {service: nb1777-mcp, name: nb_delete}
   - id: nb.nb_describe
     nome: "nb1777-mcp · nb_describe"
-    cosa: "Riassunto AI-generated del notebook (testo)."
+    cosa: "Riassunto del notebook scritto da Gemini, come oggetto {summary, suggested_topics} (o `testo` se nlm non risponde in JSON)."
     dove: ["mcp-tool:nb1777-mcp/nb_describe"]
     status: active-default
     verify:
@@ -1096,7 +1103,7 @@ features:
       file_contains: {path: "services/nb1777-mcp/app/memoria_1777/disciplina.md", pattern: "canonico v2\\.5"}
   - id: nb.memoria_check
     nome: "nb1777-mcp · memoria_check"
-    cosa: "MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che porti (es."
+    cosa: "MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che porti (es. 'v2.2') col canonico attuale; ritorna {canonico, data, stale, delta, portata} e, se sei vecchio, le note del canonico. Fail-open."
     dove: ["mcp-tool:nb1777-mcp/memoria_check"]
     status: active-default
     verify:
@@ -1172,9 +1179,11 @@ features:
            per chi non l'ha ancora dichiarato — un default che è informazione, non un vuoto
            né un'ipotesi. Scritto con set_ruolo, che passa dal gateway come set_description
            (rotta /internal/archive/ruolo, stessa guardia, vocabolario CHIUSO: lì non
-           passa testo libero, quindi la D17 non si applica). ADDITIVO: nessun tool cambia
-           comportamento, search/count senza db_name toccano tutti i DB come prima — il
-           default sui primari è la cura B della #278 e NON è in vigore."
+           passa testo libero, quindi la D17 non si applica). Nato ADDITIVO (cura A). Dalla
+           0.74.0 è in vigore anche la cura B della #278: senza db_name search, search_ibrida,
+           count, check_term e precedenti guardano solo i primari e i non dichiarati
+           (RUOLI_DI_DEFAULT in services/archive-mcp/app/db.py); fotografia e riscontro si
+           interrogano con `ruoli` o `db_name`, il riservato solo nominandolo."
     dove: ["services/archive-mcp/app/db.py#RUOLI",
            "services/gateway/app/routes.py#internal_archive_ruolo",
            "mcp-tool:archive-mcp/set_ruolo"]
@@ -1502,7 +1511,8 @@ features:
       `VPS1777_REQUIRE_COSIGN=0` nel .env sblocca una crisi ed è giusto che esista,
       ma è riletta a ogni update compreso l'automatico: chi la mette e se ne
       dimentica lascia la verifica firma spenta a tempo indeterminato. Il promemoria
-      settimanale dei segreti ora la mostra con da quanti giorni è aperta, e la voce
+      giornaliero dei segreti (era settimanale fino al 03/08: la soglia di 1 giorno di
+      questa voce ne ha imposto la cadenza) ora la mostra con da quanti giorni è aperta, e la voce
       sparisce da sé appena la si toglie. NON forza il ri-armo: la crisi può durare
       più di un giorno, e richiudere da soli chiuderebbe fuori chi sta riparando.
       Era dichiarato nel registro dal 04/07 e non era diventato codice per 23 giorni.
@@ -1659,8 +1669,8 @@ features:
       che c'è e nessun presidio sa che c'è». Se ne è accorto il verso
       reale→dichiarato il 02/08, il giorno in cui ha imparato a guardare `tools/`.
       I tipi di verify che conosce: `mcp_tool` · `python_def` · `file_contains` ·
-      `compose_profile` · `systemd_unit` · `path_exists` · `grep_count` · `cmd` ·
-      `manual`. I primi due camminano l'ALBERO SINTATTICO (`ast`), non il testo:
+      `compose_profile` · `systemd_unit` · `cli_command` · `path_exists` ·
+      `grep_count` · `cmd` · `manual`. I primi due camminano l'ALBERO SINTATTICO (`ast`), non il testo:
       una `def` dentro un commento o una stringa NON passa, e un file che non
       compila FALLISCE invece di sembrare vuoto.
       ⚠️ COSA NON PROVA: che una feature sia ACCESA a runtime, che il codice sia
@@ -1694,7 +1704,9 @@ features:
 
   - id: cli.status
     nome: "vps1777 status"
-    cosa: "Stato dei servizi, versione, salute — il comando con cui si guarda la macchina."
+    cosa: "Stato del canale di aggiornamento: versione corrente e precedente, ultima release
+           nota, ultimo check ed eventuale update in corso; con --probe interroga anche i
+           container e il deep health. --json per le macchine."
     dove: ["cli:status", "tools/vps1777.py"]
     status: active-default
     since: "0.1.0 (dichiarato qui il 02/08)"
@@ -1718,7 +1730,7 @@ features:
 
   - id: unit.avvisa_fallimento
     nome: "vps1777-avvisa-fallimento@.service"
-    cosa: "Unit template agganciata a OnFailure= di auto-update, update, check-update e secrets-check. Sta in systemd e non nel flusso perché systemd sa che una unit è fallita QUALUNQUE sia la ragione, incluso un crash che il codice non aveva previsto."
+    cosa: "Unit template agganciata a OnFailure= di auto-update, update, check-update, secrets-check, indice-notturno e ingest. Sta in systemd e non nel flusso perché systemd sa che una unit è fallita QUALUNQUE sia la ragione, incluso un crash che il codice non aveva previsto."
     dove: ["systemd/vps1777-avvisa-fallimento@.service"]
     status: active-default
     since: "0.42.0 (round-17)"
@@ -1726,7 +1738,11 @@ features:
 
   - id: cli.check
     nome: "vps1777 check"
-    cosa: "Diagnostica: preflight e controlli sull'installazione."
+    cosa: "Controlla l'ultima release su GitHub e scrive onboarding/update_status.json (la
+           card admin); con --notify avvisa su Telegram alla prima vista di una versione
+           nuova. Prima del fetch fa le sorveglianze giornaliere (raggiungibilità, copertura e
+           notturno dei backup, archivio, disco), scrive la pagina Salute e applica la
+           retention dello snapshot pre-update. Lo lancia il timer vps1777-check-update."
     dove: ["cli:check", "tools/vps1777.py"]
     status: active-default
     since: "0.1.0 (dichiarato qui il 02/08)"
@@ -1762,7 +1778,9 @@ features:
 
   - id: cli.bootstrap
     nome: "vps1777 bootstrap"
-    cosa: "Prima installazione da zero su una macchina nuova."
+    cosa: "Cutover una tantum da un'installazione legacy (immagini costruite in loco) al
+           modello pull da ghcr; su un'installazione già a regime non fa niente. La prima
+           installazione la fanno setup.sh, deploy.sh e l'installer."
     dove: ["cli:bootstrap", "tools/vps1777.py"]
     status: active-default
     since: "0.1.0 (dichiarato qui il 02/08)"
@@ -1896,8 +1914,9 @@ features:
     nome: "Doc bilingue: inglese d'ingresso, italiano nativo, freschezza in CI"
     cosa: "README.md e CONTRIBUTING.md in inglese (landing per il mondo; gli originali
            italiani restano integrali come README.it.md / CONTRIBUTING.it.md), sommario
-           inglese in testa a SECURITY.md, e 6 pagine chiave tradotte in docs/en/
-           (ARCHITECTURE, INSTALL, UPDATE, BACKUP-RESTORE, CLI, MEMORIA-1777).
+           inglese in testa a SECURITY.md, e 8 pagine chiave tradotte in docs/en/
+           (ARCHITECTURE, ARCHIVE, INSTALL, UPDATE, BACKUP-RESTORE, CLI, MEMORIA-1777,
+           RICERCA-IBRIDA).
            LA FIRMA: ogni traduzione registra in docs/en/MANIFEST.json lo sha256 del
            sorgente italiano; test_traduzioni_fresche.py fallisce la CI se l'originale
            si muove dopo la traduzione — una doc bilingue muore per divergenza
@@ -1963,3 +1982,21 @@ features:
     since: "0.45.0"
     verify:
       file_contains: {path: "services/gateway/app/proxy.py", pattern: 'headers\.pop\("authorization"'}
+
+  # ── il bot Telegram ────────────────────────────────────────────────────────
+  - id: bot.comandi-rag
+    nome: "nb1777-bot · /lista, /chiedi, /aiuto, /pannello e BOT_RAG_COMMANDS (RIMOSSI nella 0.86.0)"
+    cosa: "I comandi testuali del bot: /lista e /chiedi interrogavano i notebook da Telegram
+           (titoli e risposte transitavano dai server di Telegram, la Bot API non è E2E;
+           BOT_RAG_COMMANDS=0 li spegneva), /aiuto e /pannello (doppione del bottone del
+           menu). Tolti con formato.py: il bot ha solo /start, che risponde col bottone del
+           pannello; restano i promemoria e il bottone «✓ Fatto»."
+    dove: ["services/nb1777-bot/app/bot.py"]
+    status: removed
+    since: "rimosso 0.86.0"
+    decisione: "12/10/2026, decisione di Neo dopo la prova dal telefono: «col pannello mi pare
+                sia meglio». Le domande ai notebook passano dalla Mini App, che parla solo col
+                gateway (SECURITY.md, H19). [CHANGELOG.md, 0.86.0]"
+    verify:
+      manual: "rimossa: in services/nb1777-bot/app/bot.py nessun CommandHandler oltre a
+               \"start\", e BOT_RAG_COMMANDS non compare più nel codice dei servizi."

@@ -18,6 +18,7 @@
 # Uso:
 #   ./deploy.sh                 # interattivo (chiede tutto)
 #   ./deploy.sh 1.2.3.4         # IP pre-compilato
+#   ./deploy.sh --apply [IP]    # applica la config salvata nel pannello /admin/setup
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -1202,13 +1203,13 @@ ${C_B}${C_OK}╔═════════════════════�
   ${C_B}Ingress:${C_R} $INGRESS    ${C_B}Repo:${C_R} $REMOTE_DIR
   ${C_B}Admin:${C_R} email $ADMIN_EMAIL  (password: vedi sopra/password manager)
 
-  ${C_B}═══ COMPLETA TUTTO DA QUI — niente terminale ═══${C_R}
+  ${C_B}═══ COMPLETA DAL PANNELLO (più due comandi da questo PC) ═══${C_R}
 
   1. ${C_B}Apri il pannello${C_R}${ISTR_PANNELLO}
      Login con email + password admin.
 
   2. ${C_B}Nel pannello inserisci${C_R}:
-        • Tailscale auth-key  (da login.tailscale.com/admin/settings/keys)
+        • Tailscale auth-key  (solo con ingress Tailscale: da login.tailscale.com/admin/settings/keys)
         • Token bot Telegram + Owner ID  (opzionale)
         • Carica il profilo NotebookLM  (tar.gz di profiles/default/, bottone dedicato)
      Clicca ${C_B}Salva configurazione${C_R}.

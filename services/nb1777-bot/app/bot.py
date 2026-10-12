@@ -108,7 +108,7 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
             "Cosa fare:\n"
             f"1. Apri *{link}* sul browser\n"
             "2. Login con email + password admin\n"
-            "3. Sul PC: `nlm login`, poi `tar czf nlm-profile.tgz profiles/default`\n"
+            "3. Sul PC: `nlm login`, poi `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default`\n"
             "4. Carica il `.tgz` — riparto automaticamente",
             parse_mode=ParseMode.MARKDOWN,
         )
@@ -117,7 +117,9 @@ async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not url:
         await msg.reply_text(
             "Ciao. Sono il bot nb1777. Il pannello richiede il gateway su HTTPS pubblico "
-            "(PUBLIC_BASE non è https): configuralo e riprova /start.")
+            "(PUBLIC_BASE nel .env non è https): impostalo, ricrea il bot "
+            "(`docker compose … up -d nb1777-bot`: il bot legge PUBLIC_BASE solo all'avvio) "
+            "e riprova /start.")
         return
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🎛 Apri il pannello", web_app=WebAppInfo(url=url))]])
     await msg.reply_text(

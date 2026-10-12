@@ -15,9 +15,13 @@ separati per natura del dato — perché il 99,99% del peso è rigenerabile e lo
 > bundle/export che l'owner conserva fuori dalla VPS (re-ingest ≈ 2h); tutto il resto —
 > utenti, client OAuth, audit, profilo NotebookLM, secret — pesa 250 KB ed è
 > **insostituibile**. Si pagavano 9,7 GB a notte per proteggere 250 KB (≈ 70 GB a regime
-> su un disco da 118). L'unica parte dell'archivio che il re-ingest **non** rigenera sono
-> le schede scritte a mano con `set_description`: per questo viaggiano ogni notte nel
-> core. Decisione dell'owner: *«basta n, n-1 per paranoia… dobbiamo farci stare quel che
+> su un disco da 118). Quello che il re-ingest **non** rigenera sono
+> le schede scritte a mano. La `description` (`set_description`) viaggia per questo ogni
+> notte nel core, in `descrizioni/<db>.txt`. Il **`ruolo`** (`set_ruolo`, dal #278) no:
+> sta solo dentro il DB, quindi torna con un restore del backup archivio ma non con un
+> re-ingest dalle fonti. Dopo un re-ingest va ridichiarato a mano, e finché non lo fai un
+> DB che era `riservato` torna `non dichiarato` ed entra nel perimetro di default della
+> ricerca. Decisione dell'owner: *«basta n, n-1 per paranoia… dobbiamo farci stare quel che
 > serve»*. Fra un backup archivio e l'altro la rete è doppia: le fonti fuori dalla VPS +
 > lo snapshot pre-update (`backups/pre-update/`, in chiaro, n e n-1).
 
@@ -35,8 +39,10 @@ separati per natura del dato — perché il 99,99% del peso è rigenerabile e lo
 >   chiede i volumi a `docker compose config --volumes` e, dal 29/09, anche a Docker per
 >   etichetta di progetto: così segue davvero gli overlay attivi (prima leggeva solo
 >   `compose.yaml`, e i volumi di Caddy e Portainer non entravano in nessun backup);
->   ma il volume dell'archivio non è leggibile da lì e le **`descrizioni/` non vengono
->   esportate** — lo dice nel log, e restano quelle dell'ultimo backup archivio.
+>   ma le **`descrizioni/` non vengono esportate**: lo script le legge solo dai volumi
+>   montati direttamente (`BACKUP_VOLUMES_DIR`, il contesto container), mentre sull'host
+>   il volume dell'archivio lo copia un container busybox. Lo dice nel log, e restano
+>   quelle dell'ultimo backup archivio.
 
 Il nome resta `.tar.age` per entrambi anche se dentro c'è **zstd** (o gzip, se zstd
 manca): il suffisso è un contratto letto da ritenzione, CLI, `restore.sh` e test. Il
@@ -55,7 +61,8 @@ decifrato — `restore.sh` lo riconosce da lì. A mano, con la tua chiave privat
 #   backups/archivio/vps1777-archivio-2026-08-29-030000.tar.age
 ```
 
-Un flag alla volta: con due flag, o con uno sconosciuto, stampa l'uso ed esce **2**.
+Un flag alla volta: conta solo il primo argomento. Uno sconosciuto stampa l'uso ed esce
+**2**; un secondo flag viene **ignorato in silenzio** (vale il primo).
 
 Variabili (con i default): `BACKUP_DIR=backups/` (dove scrive e pota),
 `VOLUMI_ARCHIVIO=archive-data` (nomi logici del livello archivio),
@@ -167,7 +174,8 @@ Step:
 
 Se l'archivio lo **rigeneri dalle fonti** invece di ripristinarlo (re-ingest dei bundle),
 le `description` dei DB le ritrovi nel core in `descrizioni/<db>.txt` — si riapplicano con
-`set_description` dal connector, o dal pannello.
+`set_description` dal connector, o dal pannello. Il `ruolo` dei DB invece nel core non
+c'è: va ridichiarato con `set_ruolo` dal connector (il pannello lo mostra, non lo scrive).
 
 Default: interattivo (chiede conferma). Flag:
 

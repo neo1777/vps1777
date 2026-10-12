@@ -15,7 +15,9 @@ Sequenza passo-passo dall'host vuoto a stack su.
 | Linux x86_64 (amd64) | qualsiasi recente | Le immagini di release sono pubblicate **solo per amd64**: su arm64 (Raspberry, VPS Ampere) il pull non trova un'immagine per l'architettura. Debian 12 consigliata (collaudo completo su macchina vergine, 27/08/2026 — su Debian 13 con volumi cifrati la VPS era instabile, voce `H56`) / Ubuntu 24+ / Fedora / Arch |
 | Docker Engine | 24+ | con `docker compose` plugin v2 |
 | python3 **+ bcrypt** | 3.10+ | solo per `setup.sh` (calcola l'hash della password admin). Su Debian/Ubuntu `python3` è un pacchetto a sé: `sudo apt install python3 python3-bcrypt`. ⚠️ **`python3-pip` NON basta su Debian 12+ / Ubuntu 23.04+** — cioè proprio sulla distro consigliata: lì pip c'è già ed è l'*installazione* a essere vietata (PEP 668), quindi `pip install bcrypt` fallisce. Il pacchetto giusto è `python3-bcrypt` (Fedora: `sudo dnf install python3-bcrypt`). Se `bcrypt` c'è già, non serve altro — il preflight verifica la capacità, non il nome |
-| Account Tailscale **o** Caddy+dominio **o** Cloudflare | uno dei tre | scelta al setup |
+| RAM / disco | 4 GB / ~2 GB liberi | il progetto è tarato su una VPS da 4 GB; le immagini occupano ~2 GB |
+| `curl`, `sudo` | — | `setup.sh` chiede a GitHub l'ultima release con `curl`; va lanciato da un utente normale con `sudo`, non da root (vedi il passo 5 qui sotto) |
+| Account Tailscale **o** Caddy+dominio **o** Cloudflare | uno dei tre | scelta al setup. Con **Caddy** servono le porte 80 e 443 aperte in ingresso. Con **Cloudflare**, **prima** di `./setup.sh` crea il tunnel e salva il token: `printf '%s' '<token>' > secrets/cloudflared_token.txt && chmod 600 secrets/cloudflared_token.txt` (`setup.sh` chiede solo l'hostname, non il token, e senza quel file il compose non parte). Con **Tailscale** vedi [più sotto](#se-hai-scelto-tailscale-il-funnel-lo-accendi-tu) |
 | Bot Telegram + OWNER_ID | da [@BotFather](https://t.me/BotFather) + [@userinfobot](https://t.me/userinfobot) | opzionale per dev, obbligatorio per prod |
 | Account Google con NotebookLM | gratis | il login si fa **dopo l'install** via `/admin/nlm` |
 
@@ -25,12 +27,21 @@ Sequenza passo-passo dall'host vuoto a stack su.
 git clone https://github.com/neo1777/vps1777.git
 cd vps1777
 ./setup.sh                                      # wizard interattivo
-# solo se hai risposto «no» a «Procedo ora?» — setup.sh avvia già, con gli stessi -f:
-docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
-  --profile ingress.tailscale up -d             # o caddy / cloudflared
+# solo se hai risposto «no» a «Procedo ora?»: lancia il comando che setup.sh ti ha
+# stampato (contiene anche l'overlay delle feature). Con Tailscale e le feature di default:
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
+  --profile ingress.tailscale --profile ops.backup pull
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
+  --profile ingress.tailscale --profile ops.backup up -d      # o caddy / cloudflared
 ```
 
-Lo stage finale ti stampa gli URL.
+Lo stage finale ti stampa gli URL. Con Tailscale, finché non accendi il Funnel, al
+posto dell'URL trovi il segnaposto `<PUBLIC_BASE>`: vedi
+[più sotto](#se-hai-scelto-tailscale-il-funnel-lo-accendi-tu).
+
+Rispondendo «no» a «Procedo ora?», `setup.sh` salta anche il passo 5 qui sotto (CLI
+`vps1777`, unit systemd, hardening): avviare lo stack a mano non li recupera. Per
+averli, rilancia `./setup.sh` e rispondi «sì»: gli step già fatti vengono saltati.
 
 ## Cosa fa `setup.sh`
 
@@ -48,7 +59,10 @@ Lo stage finale ti stampa gli URL.
 4. Lancia `docker compose -f compose.yaml -f compose.ingress.<scelta>.yaml --profile
    ingress.<scelta> up -d`, più l'overlay e il profilo di ogni feature dichiarata in
    `VPS1777_FEATURES` (di default `backup`: `-f compose.ops.backup.yaml --profile ops.backup`;
-   `portainer` e `caddy-dns01` allo stesso modo, vedi [OPS.md](OPS.md)) — gli `-f` non sono decorativi: senza, l'overlay ingress non
+   `portainer` allo stesso modo; `caddy-dns01` aggiunge solo l'overlay
+   `compose.ops.caddy-dns01.yaml`, e solo con l'ingress Caddy e
+   `secrets/cf_api_token.txt` non vuoto, altrimenti avvisa e Caddy parte in HTTP-01;
+   vedi [OPS.md](OPS.md)) — gli `-f` non sono decorativi: senza, l'overlay ingress non
    viene montato (il `gateway` resta senza `ports:` e manca la rete `funnel`) — le immagini
    vengono **pullate da GHCR** (`compose.yaml` è pull-only: sulla VPS non si
    builda mai; il build locale è solo dev, con l'overlay `compose.build.yaml`)
@@ -70,6 +84,31 @@ Lo stage finale ti stampa gli URL.
 
 Se rilanci `setup.sh`, salta gli step già fatti.
 
+## Se hai scelto Tailscale: il Funnel lo accendi tu
+
+`setup.sh` non installa Tailscale e non attiva il Funnel: lo fanno solo l'installer
+grafico e `deploy.sh`. Senza questo passo il pannello risponde solo su `127.0.0.1:8080`
+della VPS e `<PUBLIC_BASE>` resta un segnaposto.
+
+Prima prepara l'account come in [INGRESS.md](INGRESS.md) §1 (MagicDNS, HTTPS
+Certificates, `nodeAttr funnel` nell'ACL), poi sulla VPS:
+
+```bash
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up --hostname=vps1777 --accept-dns=false   # o --authkey=file:<file con la tskey-auth-…>
+sudo tailscale funnel --bg --https=443 http://127.0.0.1:8080
+tailscale status --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))'
+```
+
+Scrivi l'URL ottenuto in `.env` (`PUBLIC_BASE=https://<nome>.<tailnet>.ts.net`) e
+ricrea il gateway con gli stessi `-f` e `--profile` che `setup.sh` ha stampato, per
+esempio con le feature di default:
+
+```bash
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
+  --profile ingress.tailscale --profile ops.backup up -d gateway
+```
+
 ## Post-install
 
 1. **Login admin**: `<PUBLIC_BASE>/admin/login` → email + password admin
@@ -82,7 +121,7 @@ Se rilanci `setup.sh`, salta gli step già fatti.
    ```
    La versione è quella con cui gira il server (`services/nb1777-mcp/pyproject.toml`): una CLI diversa può salvare il profilo in un'altra forma. Carica `nlm-profile.tgz` su `<PUBLIC_BASE>/admin/nlm` (login admin). Il gateway lo inoltra a `nb1777-mcp` sul canale interno (il gateway non monta i cookie), che lo estrae sul suo volume e lo usa dalla call successiva.
    Se `nlm` risulta "not found": `uv tool update-shell` (mette `~/.local/bin` nel PATH) e riapri il terminale.
-3. **Connector claude.ai**: Settings → Integrations → Add → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **55** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
+3. **Connector claude.ai**: Settings → Connectors → Add custom connector → incolla URL `<PUBLIC_BASE>/<SECRET>/archive/mcp` (e `/nb1777/mcp`); `<SECRET>` è il contenuto di `secrets/gateway_secret.txt` (`cat secrets/gateway_secret.txt`). Autorizza → login admin. `archive` espone i tool di ricerca sull'archivio (elenco e dettaglio in [ARCHIVE.md](ARCHIVE.md)), `nb1777` ne espone **55** ([NB1777.md](NB1777.md)). I connector **persistono** ai restart del gateway (DCR salvata su disco).
 4. **Bot Telegram**: `/start` al tuo bot
 5. **Mini App**: nel bot, bottone **Pannello** accanto al campo di testo (o
    `/start`) → la plancia mobile: notebook, archivio, secret, update.
@@ -114,6 +153,16 @@ L'aggiornamento automatico è la feature `autoupdate`, accesa di default. Se l'a
 attivo, `vps1777 update` ne rimuove il container — vedi [OPS.md](OPS.md).
 
 ## Disinstallazione
+
+Prima spegni le unit systemd e togli la CLI che `setup.sh` ha installato, altrimenti
+l'auto-update e gli altri timer continuano a girare su un'installazione smontata:
+
+```bash
+for u in /etc/systemd/system/vps1777-*; do sudo systemctl disable --now "$(basename "$u")"; done
+sudo rm -f /etc/systemd/system/vps1777-* /usr/local/bin/vps1777 && sudo systemctl daemon-reload
+```
+
+(`fail2ban` e `unattended-upgrades` restano: si tolgono come qualunque pacchetto.) Poi:
 
 ```bash
 # `--remove-orphans` non è opzionale: il container dell'ingress sta in un overlay, non

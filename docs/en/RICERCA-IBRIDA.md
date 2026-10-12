@@ -14,6 +14,11 @@ because the word you would use is not the one written in the text.
 `search_ibrida` searches **also** by meaning: it fuses the FTS5 results with
 those of a vector search and returns a single list.
 
+On top of it sits `precedenti(tema)` (since 0.80.0), «have you already said it?»: it is
+`search_ibrida` with `speaker='human'` and a window that ends `giorni` days ago (default
+7), grouped by chat or project, with the same `saltati`, `fuori_perimetro` and
+`senza_indice`.
+
 ## What it is worth — measured, not promised
 
 The POC bench (issue #281): 9 targets chosen **before** measuring, each with the
@@ -34,7 +39,10 @@ message in several DBs appears once, with the others in `anche_in`. If something
 along the way, a DB gone, a full-text branch that can't be used or an index that doesn't
 answer, the response has a `saltati` field (`db`, `ramo`, `motivo`). With no losses the
 field isn't there. An index that doesn't answer no longer removes the DB: its full-text
-half stays.
+half stays. The search also has a time budget (since 0.81.0; since 0.81.1 it is 30 s,
+because sqlite-vec's neighbour search can't be interrupted halfway and the proxy closes at
+60): the DBs not looked at in time end up in `saltati` with the `budget` branch and the
+response carries `parziale: true`. Run those DBs again with `db_name`.
 
 On **exact** queries hybrid search does not beat `search` — it is tuned not to make
 them worse, not to win them. If you are looking for a precise term, use
@@ -65,7 +73,8 @@ wins on vectors alone.
 |---|---|---|
 | `query` | — | the question in natural language, as you would say it. It is the signal for the vectors |
 | `query_fts` | `""` | an FTS5 expression (the syntax of `search`) for the full-text branch. If missing, the FTS branch derives one from the words of `query` |
-| `db_name` | `""` | one DB; empty = all those that have an index |
+| `db_name` | `""` | one DB (whatever its role); empty = the DBs in the `ruoli` perimeter that have an index. Those in the perimeter without an index end up in `senza_indice` |
+| `ruoli` | `""` | where to search without `db_name` (since 0.74.0): `""` = primaries and undeclared; `tutti` = every DB; or comma-separated roles (`primario`, `fotografia`, `riscontro`, `riservato`). The reserved one is queried only by naming it. The DBs left out come back in `fuori_perimetro`, grouped by role |
 | `limit` | 20 | rows returned, from 1 to 200: above 200 it keeps 200, below 1 it is an error |
 | `since` / `until` | `""` | time window (ISO, `ts >= since`, `ts <= until`), as in `search`. It applies to **both** lists; rows without a ts stay out |
 | `campi` | `tutto` | `testo` keeps only the rows that have words, in the vector branch too (a vector does not say whether it hit the words or the actions) |
@@ -133,24 +142,25 @@ reach the point, not the file that cannot be found.
 | piece | where it lives | why there |
 |---|---|---|
 | the **search code** (query embedding + knn + fusion) | the `archive-mcp` image | ~35 MB of dependencies: onnxruntime, tokenizers, sqlite-vec, numpy |
-| the **model** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; `vps1777 indice-modello` puts it there | 449 MB: in the image they would weigh on every pull, and they get updated without releasing a version |
+| the **model** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; `vps1777 indice-modello` puts it there | ~490 MB (`model.onnx` 470 MB, `tokenizer.json` 17 MB): in the image they would weigh on every pull, and they get updated without releasing a version |
 | the **index** (`<nome-db>.vec.db`) | volume, next to its DB | indexing the corpus costs tens of hours of CPU: it is done **elsewhere** and the index travels as an artifact |
-| the index **builder** | repo, `services/archive-mcp/tools/costruisci_indice.py` | runs on the PC, in archive-mcp's lock environment; it does not go into the image |
+| the index **builder** | repo, `services/archive-mcp/tools/costruisci_indice.py`, also copied into the `archive-mcp` image | the first build runs on the PC, in archive-mcp's lock environment; the nightly updates run on the VPS in that same image (`indice-notturno` service) |
 
 Three intended consequences:
 - the **archive DB is not touched**: its signature does not change, backups do
   not grow, and an archive without an index works as before;
 - the index is **regenerated without rebuilding the DB** (and vice versa);
-- hybrid search **degrades by declaring it**: without a model or without an
-  index it does not silently fall back to FTS5 — it raises an error that says
-  what is missing and how to fix it. *A halved result that looks whole is worse
-  than an error.*
+- hybrid search **degrades by declaring it**: without a model, or without any
+  index in the perimeter, it does not silently fall back to FTS5 — it raises an
+  error that says what is missing and how to fix it. If only some DBs have an
+  index, it answers with those and declares the others in `senza_indice`. *A
+  halved result that looks whole is worse than an error.*
 
 ## Why ONNX and not torch
 
 The server needs the model for one thing only: turning **the query** into a
 vector. With torch + sentence-transformers that would be ~1 GB of image and
-~1.5 GB of RAM: on a 3 GB VPS with six containers it is a tax that does not pay
+~1.5 GB of RAM: on a 3.8 GB VPS with six containers it is a tax that does not pay
 off. The ONNX export of the same model gives **identical** vectors — measured:
 `cosine = 1.000000` against sentence-transformers, so the bench verdict stays
 valid — in ~25 ms per query.
@@ -247,8 +257,9 @@ said so) and it did not write `indice_meta`, which was added by hand.
 
 It runs **on the PC**, **in archive-mcp's lock environment**: onnxruntime,
 tokenizers and sqlite-vec have the same versions as the server, and there is no
-extra dependency. It does not go into the image: the Dockerfile copies only
-`app/`.
+extra dependency. Since 0.57.0 the Dockerfile also copies it into the archive-mcp
+image (`/app/tools/costruisci_indice.py`): the nightly job on the VPS uses it there
+(§ «The nightly update»), with the same versions the server reads the index with.
 
 ```bash
 cd services/archive-mcp
@@ -298,8 +309,10 @@ When these functions were extracted from the server (24/09/2026), the query
 vectors stayed byte-for-byte identical to those of before.
 
 On top of that the builder checks every batch: every vector must have 384
-dimensions, and the first vector of each batch must have norm 1. An export
-without L2 normalization in the graph, or another model, is rejected.
+dimensions, and the first vector of each batch must have norm 1 after
+`semantica.codifica` (which does pooling and norm itself when the graph returns the
+hidden state, like the official ONNX). A graph that returns «finished» vectors that
+are not normalized, or another model, is rejected.
 
 ### The perimeter: always declared
 
@@ -340,9 +353,10 @@ the table. `impronta` is the sha256 (32 hex digits) of the indexed text.
 
 ### `indice_meta`: the index's record card
 
-The builder writes it, at every pass. The server returns `perimetro`,
-`messaggi`, `modello` and `generato` with every search: without the perimeter, a
-partial index produces zeros that look like absences.
+The builder writes it, at every pass. The server returns four of its keys with
+every search, in `indici[]`: `perimetro`, `messaggi` (as `messaggi_indicizzati`),
+`modello` and `generato`. Without the perimeter, a partial index produces zeros that
+look like absences.
 
 | key | what it says |
 |---|---|
@@ -462,7 +476,8 @@ the ledger does not explain is an orphan the server would serve.
 *allineato* (aligned), *da aggiornare* (rows arrived after the last build: how many, and the
 command `vps1777 indice-notturno --db <name>`), *nessun indice* (the first build is
 done on the PC: § «Turning on search by meaning»), *senza registro* (an old index to rebuild on
-the PC; the timer refuses it). The rows «arrived after» are those beyond the last `msg_rowid` of the
+the PC; the timer refuses it), *illeggibile* (unreadable: the index file does not open, the reason
+is in the cell). The rows «arrived after» are those beyond the last `msg_rowid` of the
 registry: not all of them will end up in the index, since rows that are too short stay out. A DB
 changed only in its metadata (role, description) stays *allineato*, with a note: the file date alone
 is not enough (0.79.1).
@@ -472,7 +487,9 @@ Since 0.57.0, after an ingest, the index can update itself, on the VPS, at night
 `vps1777 indice-notturno`, which:
 
 - looks in the volume for the indexes that **already exist** and, for each one, whether
-  its DB is **more recent** than the index. On nights without an ingest it exits in a
+  its DB is **more recent** than the index. What counts is the file date: even a change
+  of role or description alone starts a round, which finds nothing to add but rereads
+  the perimeter (it does not load the model). On nights when no DB changed it exits in a
   second;
 - for those DBs runs the builder **incrementally** (no perimeter: the one declared by the
   index holds) in the `indice-notturno` compose service: same image as archive-mcp,
@@ -497,11 +514,16 @@ fully automatic, no PC. The cost is RAM. The builder brings the model into memor
 0.9 GB peak with small sub-batches, next to archive-mcp, which holds ~1.6 of 3.8. Time:
 with one CPU ~1-1.5 vectors per second, so an ingest of 10,000 new messages (~17,000
 vectors) takes ~3-5 hours of night (estimate from the PC bench at 1 thread, to be
-measured again on the VPS). The service runs at `Nice=15` and `idle` I/O.
+measured again on the VPS). The systemd unit runs at `Nice=15` and `idle` I/O, but the
+builder lives in the container, which does not inherit that priority: what holds it in is
+the compose service's one-CPU cap (`cpus: 1.0`) and its memory cap (1300m).
 
-⚠️ The builder reads the DB as it is. If an ingest starts the same night it may see two
-states: a later round's `--controlla` says so, and the next night's incremental run
-brings it back in step.
+⚠️ The builder reads the DB as it is. Since 0.84.0 the `/admin/archive` ingest runs as a
+separate job (compose service `ingest`, 2g cap) when a file arrives, at night too, and it
+does not coordinate with the index round: if they overlap, the builder may see two states
+of the DB and the two jobs add up their memory. The nightly round does not run
+`--controlla`: a `--controlla` run by hand reveals it, and the next night's round, with
+the incremental run, brings it back in step.
 
 ## Verification in the server: `indici[].verifica`
 
@@ -695,7 +717,7 @@ it is not in step, update it there and upload that one.
 
 ## Current perimeter
 
-`[state of the installation on 27/09/2026]`
+`[state of the installation on 27/09/2026 — today's state of each index is in the «per senso» column of /admin/archive]`
 
 - **The primary for Claude Code is `recupero-20260924`** (since 24/09: the first bundle
   with the `recupero/` R1 contract, see [ARCHIVE.md](ARCHIVE.md)), and its index covers
@@ -716,9 +738,11 @@ it is not in step, update it there and upload that one.
   the indexes above are tied to that fingerprint, and `vps1777 indice-modello` without
   `--sostituisci` leaves it where it is.
 
-Outside the perimeter hybrid search has no vectors to fuse — `indici[].perimetro` in
-the response declares it at every call, and it is the first thing to read before
-concluding "it's not there".
+Outside the perimeter hybrid search has no vectors to fuse. Before concluding "it's
+not there", read three things in the response: `indici[].perimetro` (what the index of
+each DB looked at covers), `senza_indice` (the DBs in the perimeter that have no index
+by meaning and so were not looked at: there you need `search`) and `fuori_perimetro`
+(the DBs left out by the `ruoli` filter, by role).
 
 ## Known limits
 

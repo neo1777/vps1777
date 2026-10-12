@@ -9,7 +9,7 @@ JWT typ=miniapp da usare come Bearer sugli endpoint /app/api/*.
 Divisione delle superfici (per non duplicare):
   - /admin  (web)   → desktop, operazioni pesanti (setup, upload profilo nlm)
   - Mini App        → mobile, azioni frequenti con auth trasparente Telegram
-  - bot             → notifiche + launcher + comandi testuali rapidi
+  - bot             → notifiche + launcher (/start e il bottone «Pannello»)
 
 Sicurezza:
   - /app/auth        → owner-only (telegram_owner_id), initData fresca (12h) e
@@ -460,7 +460,7 @@ async def api_archive_context(request: Request) -> Response:
 
 async def api_secrets(request: Request) -> Response:
     """GET /app/api/secrets — stato scadenze secret (da secrets_status.json,
-    scritto dal check host settimanale)."""
+    scritto dal check host giornaliero)."""
     if not _bearer_claims(request):
         return _unauthorized()
     ob = Path(get_settings().onboarding_dir)
@@ -1293,9 +1293,13 @@ function err(e){
   // pagina non può rinnovarla da sola — solo Telegram ne emette una nuova.
   if (m==='auth_401') return 'Sessione Telegram scaduta (12h). Chiudi e riapri il '+
     'pannello dal bot per rientrare.';
-  // owner non configurato sul gateway → fail-closed (H1/H27): nessun token
-  if (m==='auth_503') return 'Il gateway non ha un owner configurato '+
-    '(TELEGRAM_OWNER_ID): per sicurezza non emette token.';
+  // 503 da /app/auth in due casi (owner_not_configured, bot_token_not_configured):
+  // fail-closed (H1/H27), nessun token. Qui si guarda solo lo status, quindi si
+  // nominano entrambe le cause.
+  if (m==='auth_503') return 'Il gateway non può emettere l\'accesso: manca '+
+    'TELEGRAM_OWNER_ID nel .env oppure la chiave della Mini App '+
+    '(secrets/telegram_webapp_secret.txt: la rideriva '+
+    'tools/rotate-secret.sh telegram_bot_token).';
   return m;
 }
 

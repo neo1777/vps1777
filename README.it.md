@@ -26,8 +26,8 @@ incollare in claude.ai. Niente Docker da gestire a mano, niente shell sulla VPS.
 │                                                                  │
 │   claude.ai ──┐                                                  │
 │   Claude Code ├──► https://<host>/<SECRET>/<service>/mcp         │
-│   Mini App ───┤        │   la Mini App entra su /app/*,          │
-│   Telegram ───┘        │   non sul path MCP                      │
+│   Mini App ───┘        │   la Mini App entra su /app/*,          │
+│                        │   non sul path MCP                      │
 │                        ▼                                         │
 │            ┌───────────────────┐                                 │
 │            │  Tailscale Funnel │  (o Caddy, o Cloudflared)       │
@@ -43,6 +43,8 @@ incollare in claude.ai. Niente Docker da gestire a mano, niente shell sulla VPS.
 │      ▼               ▼                       ▼                   │
 │  archive-mcp     nb1777-mcp     ocr     your-plugin              │
 │  (FTS5 multi-DB) (NotebookLM)        (MCP/bot a piacere)         │
+│                                                                  │
+│  nb1777-bot: long-poll verso Telegram, mai dal gateway           │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -103,12 +105,15 @@ stampa URL e connector.
 ### 🛠 Manuale — sulla VPS
 
 ```bash
-sudo apt install python3 python3-bcrypt             # prerequisito di setup.sh (NON python3-pip: PEP 668)
+# prerequisiti di setup.sh: Docker Engine + Compose v2, che setup.sh NON installa
+# (https://docs.docker.com/engine/install/), più:
+sudo apt install git python3 python3-bcrypt         # NON python3-pip: PEP 668
 git clone https://github.com/neo1777/vps1777.git && cd vps1777
 ./setup.sh                                          # wizard interattivo
-# se hai risposto «no» a «Procedo ora?» (setup.sh avvia già lo stack, con gli stessi -f):
-docker compose -f compose.yaml -f compose.ingress.tailscale.yaml \
-  --profile ingress.tailscale up -d                 # o caddy / cloudflared
+# se hai risposto «no» a «Procedo ora?», lancia il comando che setup.sh stampa; con le
+# feature di default (backup, autoupdate) carica anche l'overlay del backup, per esempio:
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
+  --profile ingress.tailscale --profile ops.backup up -d      # o caddy / cloudflared
 ```
 
 > ⚠️ **Due cose che questo percorso incontra e l'installer grafico no** (misurate il
@@ -130,10 +135,11 @@ caricare l'auth NotebookLM, [docs/INSTALL.md](docs/INSTALL.md).
 | Servizio | Cosa fa | Porta interna |
 |---|---|---|
 | **gateway** | OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*` | 8080 |
-| **archive-mcp** | Ricerca su più DB — FTS5 e ibrida per senso, FTS5 + vettori — di export claude.ai, sessioni Claude Code e bundle di Recupero Sessioni, con le schede di sessione e le stirpi (`get_session`, `get_stirpe`) e la lettura di più messaggi insieme (`get_many`, `precedenti`) e il delta fra due fotografie (`delta`): **18 tool**. Vedi [docs/ARCHIVE.md](docs/ARCHIVE.md) e [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md) | 8002 |
+| **archive-mcp** | Ricerca su più DB — FTS5 e ibrida per senso, FTS5 + vettori — di export claude.ai, sessioni Claude Code, bundle di Recupero Sessioni, export Telegram (JSON o HTML) e documenti di testo (le immagini lette via OCR), con le schede di sessione e le stirpi (`get_session`, `get_stirpe`) e la lettura di più messaggi insieme (`get_many`, `precedenti`) e il delta fra due fotografie (`delta`): **18 tool**. Vedi [docs/ARCHIVE.md](docs/ARCHIVE.md) e [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md) | 8002 |
 | **nb1777-mcp** | Gemini Notebook (prima NotebookLM) via CLI `nlm` — **55 tool** (notebook, source, chat, 9 artefatti studio, doctor, canonico/memoria). Porta anche il **canonico della memoria 1777** ([docs/MEMORIA-1777.md](docs/MEMORIA-1777.md)). Vedi [docs/NB1777.md](docs/NB1777.md) | 8003 |
 | **nb1777-bot** | Bot Telegram owner-only + launcher Mini App | (long-poll) |
-| **ocr** | Tesseract in un container interno: gli occhi dell'ingest (immagini → testo `[ocr]`). Il gateway lo chiama via HTTP, non esegue processi | 8004 |
+| **ocr** | Tesseract in un container interno: gli occhi dell'ingest (immagini → testo `[ocr]`). Lo chiama via HTTP il lavoro `ingest`; nessuno esegue processi | 8004 |
+| **ingest** | Lavoro a richiesta, non parte con `up`: dalla 0.84.0 indicizza i file che `/admin/archive` mette in coda, lanciato da `vps1777-ingest.path` con un tetto di memoria suo (2 GB), così un export enorme fa morire il lavoro e non il gateway. Stessa immagine del gateway, niente secret, solo il volume dell'archivio. Il gemello **indice-notturno** è l'aggiornamento incrementale notturno dell'indice per senso | — |
 
 Più i **plugin** che ci aggiungi tu — un MCP o un bot in pochi file, senza
 toccare il core. Vedi [docs/PLUGINS.md](docs/PLUGINS.md).
@@ -165,12 +171,12 @@ update sicuro da sola, **appena una release ha 48 ore di vita** (la guarda ogni 
 ## Sicurezza per design
 
 - Backend su rete Docker `internal: true` — **solo il gateway** è esposto verso l'esterno
-- Il gateway **non** ha accesso al Docker socket né al filesystem dell'host (container non privilegiato), **né ai cookie Google** di NotebookLM: fra i servizi in esercizio quel volume lo monta solo `nb1777-mcp`, quello che li usa (in sola lettura lo montano anche il backup, che li cifra, e il check scadenze, che ne legge solo la data — vedi [SECURITY.md](SECURITY.md)). Vede però i **5 secret Docker a lui assegnati** — `gateway_secret`, `oauth_signing_secret`, `admin_password_bcrypt`, `archive_desc_secret` e `telegram_webapp_secret`, la chiave *derivata* dal token con cui verifica la Mini App ([docs/SECRETS.md](docs/SECRETS.md)); il token del bot, `telegram_bot_token`, lo monta solo `nb1777-bot`: un gateway compromesso li legge (e con la chiave derivata può forgiare un `initData` per la Mini App, non parlare con la voce del bot), ed è per questo che il suo perimetro è il più difeso
+- Il gateway **non** ha accesso al Docker socket né al filesystem dell'host (container non privilegiato; l'unica eccezione è la cartella `onboarding/` in bind-mount, il canale stretto con cui lascia alle unit systemd dell'host le richieste di update e di indicizzazione), **né ai cookie Google** di NotebookLM: fra i servizi del core quel volume lo monta solo `nb1777-mcp`, quello che li usa (in sola lettura lo montano anche il container di backup, sempre acceso con la feature `backup` di default, che li cifra, e il check scadenze, che ne legge solo la data — vedi [SECURITY.md](SECURITY.md)). Vede però i **5 secret Docker a lui assegnati** — `gateway_secret`, `oauth_signing_secret`, `admin_password_bcrypt`, `archive_desc_secret` e `telegram_webapp_secret`, la chiave *derivata* dal token con cui verifica la Mini App ([docs/SECRETS.md](docs/SECRETS.md)); il token del bot, `telegram_bot_token`, lo monta solo `nb1777-bot`: un gateway compromesso li legge (e con la chiave derivata può forgiare un `initData` per la Mini App, non parlare con la voce del bot), ed è per questo che il suo perimetro è il più difeso
 - Secrets sensibili (password, signing key, token) via Docker `secrets:` (file montati in sola lettura in `/run/secrets/`: con compose è un bind-mount del file dell'host, non una tmpfs), **mai** in env var; il `GATEWAY_SECRET` è redatto dagli access-log
-- OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12; il proxy verifica anche l'**audience** del token
+- OAuth 2.1 con PKCE + refresh; JWT con `typ` separati (no cross-token-use); bcrypt rounds=12; il proxy lega anche il token al **proprietario** (il suo `sub` deve essere fra le email ammesse); l'audience nel senso di RFC 8707 non è implementata, per scelta dichiarata in [SECURITY.md](SECURITY.md)
 - Mini App e bot **owner-only fail-closed**: senza `TELEGRAM_OWNER_ID` negano tutti, non aprono
 - Rate-limit per-IP sugli endpoint auth; `X-Forwarded-For` fidato **solo** dal proxy (IP client non falsificabile)
-- Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, **rootfs in sola lettura** su tutti i servizi di `compose.yaml` (`/tmp` è una tmpfs `noexec` da 64 MB), healthcheck su ogni servizio in esercizio (il job `indice-notturno`, che parte e finisce, non ne ha)
+- Container non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, **rootfs in sola lettura** su tutti i servizi di `compose.yaml` (`/tmp` è una tmpfs `noexec` da 64 MB), healthcheck su ogni servizio in esercizio (i job `indice-notturno` e `ingest`, che partono e finiscono, non ne hanno)
 - Hardening host automatico all'install: `unattended-upgrades` + `fail2ban` (`H45`)
 - Update firmati **cosign** e verificati **fail-closed di default**; digest immutabili (`images.lock`); backup age + snapshot + **rollback automatico** ([docs/UPDATE.md](docs/UPDATE.md))
 - CI con GitHub Actions **pinnate a SHA** + Dependabot su tre fronti (action, immagini base, dipendenze Python) e Renovate sulle immagini di terzi degli overlay compose; chiave di backup **fuori dalla VPS** (solo il recipient pubblico sul server)
@@ -191,7 +197,7 @@ colpo d'occhio:
   se un comando non ha sezione ed esempio; i riferimenti fra documenti passano da
   un linter; le traduzioni inglesi portano l'hash del sorgente italiano e la CI
   segnala quando l'originale si muove ([docs/en/MANIFEST.json](docs/en/MANIFEST.json)).
-- **Oltre 800 test in sei suite**, molti dei quali *presidi strutturali* nati
+- **Oltre 1.400 test in sei suite**, molti dei quali *presidi strutturali* nati
   ciascuno da un incidente reale — il [CHANGELOG.md](CHANGELOG.md) racconta la
   storia di ogni guardia: che cosa ha morso, e come è diventata un test.
 - **Release firmate e update che sa tornare indietro**: bundle cosign fail-closed,

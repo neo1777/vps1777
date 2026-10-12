@@ -203,6 +203,8 @@ fase_guardiani() {
   passo "i doc nominano file che esistono" python3 tools/doc-riferimenti.py
   passo "i numeri nei doc — autoprova" python3 tools/fatti-nei-doc.py "$AUTOPROVA"
   passo "i numeri nei doc li conta il codice" python3 tools/fatti-nei-doc.py
+  passo "i nomi nei doc — autoprova" python3 tools/nomi-nei-doc.py "$AUTOPROVA"
+  passo "i nomi nei doc esistono nel codice" python3 tools/nomi-nei-doc.py
   if ! manca "compose valido (produzione e sviluppo)" docker; then
     passo "compose valido (produzione)" docker compose -f compose.yaml config -q
     passo "compose valido (sviluppo, overlay di build)" \

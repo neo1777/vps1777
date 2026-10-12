@@ -32,8 +32,10 @@ The `compose.build.yaml` overlay exists because `compose.yaml` is pull-only
 - Yaml: 2-space indent, no `version:` key in compose files (deprecated)
 - Commit messages: a prefix that says **what** is touched, then the sentence in Italian.
   The ones in use: `fix:`, `feat:`, `docs:`, `ci:`, `build:` (Dependabot bumps), `test:`,
-  `changelog:` (the PR that opens a version), or the area touched (`installer:`,
-  `gateway:`, `indexer:`…); a scope in parentheses is welcome (`docs(architettura):`)
+  `chore:`, `release:` (the PR that opens a version: `release: X.Y.Z`), or the area
+  touched (`installer:`, `gateway:`, `indexer:`…); a scope in parentheses is welcome
+  (`docs(architettura):`), and a `!` after the prefix marks a breaking change
+  (`feat(bot)!:`)
 
 ## Tests and checks locally
 
@@ -62,9 +64,12 @@ turn red on a constructed fault, for the right reason.
 The suites run **one at a time**, as in CI:
 
 ```bash
-uvx --with bcrypt --with cryptography pytest tools/tests/   # CLI, installers, repo guards
+uvx --with bcrypt --with cryptography --with pyyaml pytest tools/tests/   # CLI, installers, repo guards
 uvx pytest services/archive-mcp/tests/                         # archive-mcp (stdlib)
 uvx pytest services/gateway/tests/                             # gateway (stdlib)
+uv run --locked --directory services/gateway --with pytest pytest tests_runtime/   # gateway leg-2 XFF, uvicorn from the lock
+uvx pytest services/nb1777-bot/tests/                          # nb1777-bot (stdlib)
+uv run --locked --directory services/nb1777-bot --with pytest pytest tests/test_comandi.py   # bot, locked deps
 (cd services/nb1777-mcp && uv sync && uv run pytest tests/)    # nb1777-mcp, with the pinned nlm
 bash tools/esegui-test-bash.sh                                 # the .sh tests in tools/tests/
 ```
@@ -83,9 +88,11 @@ The checks CI will run again (`tools/check.sh` runs them all):
   just one). It skips and names the `uses:` steps and those with `${{ … }}`; it needs
   `pyyaml` (`uv run --with pyyaml python3 tools/gate-locale.py`), and some steps touch
   the environment (the ruff one does `uv tool install`)
-- `python3 security/check_no_leaks.py` (no secrets), `python3 security/check_findings.py`
-  (the security register holds up against its evidence), `python3 tools/verify-features.py`
-  (the feature ledger), `python3 tools/doc-riferimenti.py` (the files the docs name exist),
+- `python3 security/check_no_leaks.py` (no secrets),
+  `uv run --with pyyaml security/check_findings.py` (the security register holds up
+  against its evidence), `uv run --with-requirements .github/requirements-verify-features.txt
+  python3 tools/verify-features.py` (the feature ledger; both need PyYAML, and this is
+  how CI provides it), `python3 tools/doc-riferimenti.py` (the files the docs name exist),
   `python3 tools/fatti-nei-doc.py` (the numbers the docs repeat — MCP tools, images,
   containers, findings — are the ones the code counts: if you change one of those numbers
   in the code, update the pages the guardian names)
@@ -134,7 +141,8 @@ removing it isn't enough: rotate it.** Git history doesn't forget.
 ## Pull Requests
 
 1. Fork, branch off `main`
-2. Work on `feature/<short-name>`
+2. Work on a branch prefixed by the kind of change: `feat/<short-name>`,
+   `fix/<short-name>`, `docs/<short-name>`
 3. Open a PR describing: what, why, how it was tested
 4. Wait for review — usually within 48h
 5. Squash merge
@@ -145,7 +153,8 @@ green — for everyone, the owner included.
 ## Releasing (for maintainers)
 
 1. The version lives in the `VERSION` file. It is bumped with a PR on `main` that also
-   carries the `## [X.Y.Z]` section of `CHANGELOG.md` (commit `changelog: sezione X.Y.Z …`).
+   carries the `## [X.Y.Z]` section of `CHANGELOG.md` (title and commit `release: X.Y.Z`;
+   up to 0.62.2 it was `changelog: sezione X.Y.Z …`).
 2. The `vX.Y.Z` tag on the `main` commit triggers `.github/workflows/release.yml`, which
    first checks: `VERSION` equal to the tag, the section in the CHANGELOG (stable
    releases only), CI **green** on the tagged commit. Then it builds the images (amd64

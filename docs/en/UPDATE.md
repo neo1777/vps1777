@@ -30,11 +30,13 @@ day and installs a release only once it is **at least 48 hours old** (feature
 ## What happens during `vps1777 update`
 
 ```
-lock → preflight → changelog+conferma → download bundle (sha256 + cosign)
-  → backup age + snapshot locale volumi → pull immagini → verifica digest
-  ── punto di non ritorno ──
-  → sync file gestiti → stop → migrazioni → start → health-gate (180s)
-  → ✅ esito su Telegram        (oppure: AUTO-ROLLBACK alla versione di prima)
+lock → preflight → changelog+confirmation → bundle download (sha256 + cosign)
+  → bundle unit check → CLI self-update (re-exec if it changed)
+  → release secrets check → age backup + local volume snapshot
+  → compose config on the bundle files → image pull → digest verification
+  ── point of no return ──
+  → sync managed files + systemd units → stop → migrations → start → health gate (180s)
+  → ✅ outcome on Telegram        (or: AUTO-ROLLBACK to the previous version)
 ```
 
 Guarantees:
@@ -49,7 +51,9 @@ Guarantees:
   the nightly cron — here the snapshot covers it (see
   [BACKUP-RESTORE.md](BACKUP-RESTORE.md), "The two tiers").
   The snapshot exists because auto-rollback **cannot depend on the age key**
-  (which often lives only on your PC); it is pruned on the next successful update.
+  (which often lives only on your PC); the latest snapshot of versions n and n-1 is
+  kept, pruned by the successful update and by the daily check (see the table at the
+  bottom).
 - **Supply chain**: the release bundle carries `images.lock` with the immutable
   image digests (one per service); after the pull, the local digests MUST match.
   Since 01/10/2026 the lock also holds `caddy-dns01`, the **optional** image of the
@@ -80,8 +84,9 @@ Guarantees:
   comparing the wrong thing with itself. (The `non_fast_forward` rule alone
   wasn't enough: moving a tag *forward* is a fast-forward.)
 - **Automatic rollback**: if after the update the stack doesn't come back
-  healthy within 180s (compose healthchecks + the gateway's `/health?deep=1`
-  probe), the VPS goes back **on its own** to the previous version — the old
+  healthy within 180s (compose healthchecks, the gateway's `/health?deep=1` probe
+  and the port reachable from the host, two rounds in a row; a container in a restart
+  loop fails it at once), the VPS goes back **on its own** to the previous version — the old
   images are still local, no new download. If a migration touched the data,
   the volumes are restored from the snapshot (all-or-nothing, so the registry
   and the data stay consistent). Outcome always reported on Telegram.
@@ -89,7 +94,7 @@ Guarantees:
 ## The button in the admin panel
 
 The gateway **has no Docker privileges** (by design — see
-`docs/ARCHITECTURE.md`): the *Update* button only writes an **intent file**
+`docs/ARCHITECTURE.md`): the *Aggiorna* (update) button only writes an **intent file**
 in `onboarding/`; a systemd path unit on the host sees it in <1s and launches
 the very same `vps1777 update`. The intent is validated (schema, semver, 10
 minute TTL, anti-replay nonce, target = latest known release) and **deleted
@@ -106,7 +111,10 @@ optional one has nothing to do with updates and is switched on by hand (below, i
 **unauthenticated** GET to `api.github.com/repos/neo1777/vps1777/releases/latest`
 — **zero telemetry**: no data leaves your VPS. If there's a new version:
 Telegram message to the owner (once per release) and a badge in the admin card.
-If GitHub is unreachable: no noise, just a "stale check" badge.
+If GitHub is unreachable: no noise, just a "stale check" badge. On the same round, and
+before asking GitHub, the check prunes the pre-update snapshots, runs the watches
+(reachability, backups, disk: it alerts on a change of state) and updates
+`/admin/salute`: details in [CLI.md](CLI.md#vps1777-check).
 
 **2. Secret expirations** — `vps1777-secrets-check.timer`, **daily**
 (it used to be weekly: secrets age slowly, but among the entries it checks is the
@@ -114,7 +122,8 @@ cosign emergency bypass, which expires in **one day** — and a check cannot run
 than its tightest threshold; in the normal case the noise doesn't change, because it
 only notifies what is past its threshold. `RandomizedDelaySec` spreads the load,
 `Persistent=true` catches up on checks missed while the VPS was off). It runs `vps1777 secrets-status --notify`: reads the mtime of the
-files in `secrets/`, writes `onboarding/secrets_status.json` (which feeds
+files in `secrets/`, the age of the NotebookLM session (asked of nb1777-mcp) and whether
+the cosign emergency bypass is open, writes `onboarding/secrets_status.json` (which feeds
 `/admin/secrets`) and notifies on Telegram any secrets past their threshold.
 The thresholds and the *why* behind each one are in
 [SECRETS.md](../SECRETS.md) (Italian). You can run it manually any time:
@@ -223,7 +232,7 @@ updating is the `autoupdate` feature (the timer, with quarantine and the safety 
 | What | Where |
 |---|---|
 | Deployed version | `.env` → `VPS1777_TAG` (written ONLY by update/rollback/bootstrap/installer) |
-| Channel state (previous, history, nonce…) | `var/state.json` (chmod 700) |
+| Channel state (previous, history, nonce…) | `var/state.json` (`var/` directory in 0700) |
 | Staged releases (bundle + rollback-files) | `releases/vX.Y.Z/` (kept: current + previous) |
 | Pre-update snapshots | `backups/pre-update/` (kept: the latest of the last **2 versions** — n and n-1; the rest is pruned immediately. Owner decision of 29/08: the old 72h+3-versions rule didn't look at the WEIGHT, and 7 releases in 36h × 10 GB volumes filled the disk) |
 | Check / intent / progress state (for the admin card) | `onboarding/update_{status,pending_update,progress}.json` |

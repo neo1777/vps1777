@@ -30,8 +30,9 @@ i token MCP non entra. Il DB su disco è **in chiaro**: non c'è cifratura del
 contenuto.
 
 **In uscita c'è una redazione parziale, e va detta della dimensione giusta**
-(dal 02/08/2026, attiva di default; si spegne solo con `ARCHIVE_REDACT=0` sul
-servizio `archive-mcp`). Ogni risposta di ogni tool passa da un mascheramento che
+(dal 02/08/2026, attiva di default; si spegne solo con `ARCHIVE_REDACT=0`
+nell'ambiente del servizio `archive-mcp`, che `compose.yaml` non prende dal `.env`: serve
+un override di compose). Ogni risposta di ogni tool passa da un mascheramento che
 copre:
 
 - gli **identificatori in formato riconoscibile** — email e numeri di telefono —
@@ -70,7 +71,9 @@ strette, dalla 0.51.1 (prima un uuid coi gruppi di sole cifre e una data con l'o
 uscivano come «[telefono redatto]»; misurato il 24/09/2026 dal vivo). Dalla 0.51.4 la
 data con l'ora vale anche con minuti e secondi scritti coi trattini o coi punti, come nei
 nomi degli screenshot (`Schermata del 2026-09-24 18-41-38.png` usciva
-«Schermata del [telefono redatto]-38.png»); minuti e secondi devono essere 00-59.
+«Schermata del [telefono redatto]-38.png»); minuti e secondi devono essere 00-59. Dalla 0.67.3 una quarta: un
+timestamp in millisecondi a 13 cifre che comincia per 1 (l'id di un task di Cline) non è
+un telefono.
 
 **Un valore dell'anagrafica che è pubblico per tua scelta** si esenta per nome, con
 `ARCHIVE_REDACT_ESENTI` nel `.env` (valori separati da virgola, senza maiuscole; dalla
@@ -124,7 +127,8 @@ FTS5 e diventa cercabile. Dispatch automatico per estensione:
 > arrivare in più zip. Il manifest **non** si carica (contiene solo i link).
 > Dall'admin: seleziona i 5 zip insieme (il campo *fonte* accetta più file) con lo
 > stesso *nome DB* — es. `claude-ai-<ggmmaa>`, un DB per export, come da convenzione;
-> dalla CLI: `for z in *-000.zip; do python3 services/gateway/app/archive_indexer.py "$z" claude-ai-<ggmmaa>.db; done`.
+> dalla CLI: `for z in *-[0-9][0-9][0-9].zip; do python3 services/gateway/app/archive_indexer.py "$z" claude-ai-<ggmmaa>.db; done`
+> (tutte le parti, non solo le `-000`).
 > L'ordine non conta e ricaricare non duplica (idempotente per uuid). Misurato sul
 > primo export di questo formato: 13.920 record in 15 s, 1,2 GB di RAM di picco.
 > ⚠️ `conversations.json` decompresso è al 58% del tetto per membro (297 MB su 512):
@@ -148,7 +152,9 @@ contiene l'archivio — compare nella scheda e in `describe_databases`, ed è
 aggiornabile dopo col tool MCP `set_description`). Ricaricare lo stesso nome DB
 non duplica (dedup per id); fonti diverse sullo stesso nome si accumulano.
 
-> ⚠️ **Il gateway cancella lo zip dopo l'ingest**: sulla VPS resta solo ciò che è
+> ⚠️ **Lo zip si cancella dopo l'ingest** (dalla 0.84.0 lo cancella il lavoro del
+> servizio `ingest`; un file rimasto in coda per un lavoro ucciso si toglie dopo due
+> giorni): sulla VPS resta solo ciò che è
 > entrato nel DB (righe, tabelle, lapidi). Ciò che l'indexer non legge non si
 > recupera dopo — per questo ogni membro scartato lascia una lapide che dice perché.
 
@@ -169,7 +175,7 @@ documenti» mangerebbe, ignorando sessioni e log).
 | `subagents/<sessionId>/agent-<hash>.jsonl` (dal 16/09/2026) | conversazioni dei sub-agenti; le righe user di un sub-agente sono `sender='mandato'` (le ha scritte la macchina) | `subagent:<etichetta-cwd>` |
 | `mcp-logs/<sessionId>/<server>/…` | log dei server MCP, a pezzi da 4000 caratteri | `mcp-log:<server>` |
 | `workfiles/<cwd-codificata>/…` | artefatti delle cartelle di lavoro: testo e codice a pezzi, PDF con testo, immagini via OCR, zip annidati (un livello); un backup di sessione (`.jsonl` di Claude Code) diventa conversazione; i binari lasciano una lapide `non-testo` | `workfile:<cwd-codificata>/<prima sottocartella>` |
-| `documents/…` (dal 25/09/2026) | i **documenti** che l'`export` dell'app consegna accanto alle sessioni (non conversazioni): la stessa trafila di `workfiles/` — testo e codice a pezzi, PDF, immagini via OCR, zip annidati, sniff del contenuto; i binari lasciano una lapide `non-testo` con `source` `bundle-documents`. Uno zip della cartella dell'export ha `MANIFEST.json` e `sessions/`, quindi è un bundle: prima ogni documento finiva in `membro-sconosciuto` | `document:<prima sottocartella>`, o `document` per un file nella radice di `documents/`. L'app (dal 25/09/2026) scrive `documents/<famiglia>/<md5-corto-del-path>__<nome>`: l'etichetta è la famiglia — `document:testo`, `document:codice`, `document:config`… —, mai il percorso d'origine |
+| `documents/…` (dal 25/09/2026) | i **documenti** che l'`export` dell'app consegna accanto alle sessioni (non conversazioni): la stessa trafila di `workfiles/` — testo e codice a pezzi, PDF, immagini via OCR, zip annidati, sniff del contenuto; i binari lasciano una lapide `non-testo` con `source` `bundle-documents`. Uno zip della cartella dell'export ha `MANIFEST.json` e `sessions/`, quindi è un bundle: prima ogni documento finiva in `membro-sconosciuto` | `document:<prima sottocartella>`, o `document` per un file nella radice di `documents/`. L'etichetta dipende da come l'app organizza `documents/`: in sottocartelle per famiglia (`documents/<famiglia>/<md5-corto-del-path>__<nome>` → `document:testo`, `document:codice`…) o piatta (`documents/<md5-corto-del-path>__<nome>` → `document`); mai il percorso d'origine |
 | `recupero/…` (dal 24/09/2026) — o il ponte `workfiles/_recupero-1777/…` | schede di sessione, di stirpe e di memoria come righe; tre `.tsv` come tabelle — vedi [il prefisso `recupero/`](#il-prefisso-recupero--contratto-r1) | `recupero:sessioni` · `recupero:stirpi` · `recupero:memorie` |
 | `inventario/inventario-sessioni.tsv` | l'indice delle sessioni come testo, a pezzi da 4000 | `inventario` |
 | `inventario/inventario-sessioni.json` | **non** si indicizza: lapide che dice se i suoi dati sono entrati da un'altra parte — vedi [le lapidi](#lapidi-cosa-non-entra-e-perché) | — |
@@ -419,10 +425,12 @@ SELECT source, reason, count(*) FROM skipped GROUP BY 1, 2 ORDER BY 3 DESC;
 
 ## Gestire i DB — lista ed eliminazione
 
-La pagina mostra per ogni DB la **scheda completa**: descrizione, messaggi,
+La pagina mostra per ogni DB la **scheda completa**: ruolo, descrizione, messaggi,
 etichette distinte (le "provenienze": titoli chat, `project:<nome>`,
-`design:<nome>`…), le etichette principali, la dimensione su disco e l'ultimo
-aggiornamento.
+`design:<nome>`…), le etichette principali, la dimensione su disco, l'ultimo
+aggiornamento e lo stato dell'indice **per senso** (allineato, da aggiornare, nessun
+indice…, con la cura se serve). Sopra la tabella, «Caricamenti» dice lo stato dei lavori
+d'indicizzazione in coda.
 
 Il bottone **Elimina** (con conferma) rimuove il DB: la ricerca su quell'archivio
 smette subito (archive-mcp se ne accorge da solo, scan-mode) e l'azione finisce
@@ -519,7 +527,8 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 > `search`, `search_ibrida`, `count`, `check_term` e `precedenti` guardano i **primari** e i
 > **non dichiarati**: su un'installazione dove nessuno ha dichiarato niente non sparisce
 > nulla. Fotografie e riscontri si riaprono col parametro `ruoli` (`'fotografia'`,
-> `'riscontro, fotografia'`, o `'tutti'`); il riservato si interroga solo nominandolo.
+> `'riscontro, fotografia'`); il riservato solo nominandolo, con `db_name` o in `ruoli`
+> (`'riservato'`). `ruoli='tutti'` apre ogni DB, riservato compreso.
 > È un **cambio di contratto** e cambia il significato di uno zero: «0 sui primari» non è
 > «0 ovunque». Per questo `count`, col perimetro di default, aggiunge `anche_fuori`
 > (`{db: n}`, i match nelle fotografie e nei riscontri) e `search_ibrida` dice in
@@ -529,7 +538,7 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 > `get_many` cercano un uuid già trovato e guardano ancora tutti i DB.
 
 > **Concorrenza.** Il server serve **2 ricerche alla volta** (`search`,
-> `search_ibrida`, `count`, `archive_stats`, `get_session`, `get_stirpe`; `precedenti`
+> `search_ibrida`, `count`, `archive_stats`, `delta`, `get_session`, `get_stirpe`; `precedenti`
 > passa da `search_ibrida`): le
 > richieste in più si mettono in coda da sole invece di morire in timeout. Chi
 > orchestra più chiamate le raggruppi a coppie.
@@ -548,7 +557,8 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 > `search_ibrida` ha un budget più corto e controlla l'ora prima di ogni ricerca, non solo
 > fra un DB e l'altro (dalla 0.81.1). Un file
 > `.db` illeggibile nella cartella (SQLite: «file is not a database») non rompe più la
-> ricerca per tutti: quel DB si dice non letto, e gli altri rispondono.
+> ricerca per tutti: gli altri rispondono. `count`, `check_term` e `search_ibrida` lo dicono
+> in `saltati`; `search` lo salta e lo scrive solo nel log del server.
 
 > **Fonti senza thread.** Sui documenti chunked (pdf/memory), sui messaggi Telegram
 > (una riga per messaggio, senza catena) e sui DB storici `parent_uuid` è vuoto: lì
@@ -777,11 +787,14 @@ Un PDF **senza testo** (scansione, screenshot) non ha nulla da estrarre con
 vps1777 archive-ingest <file> --db <nome> --verify
 ```
 
-Cosa fa: crea un notebook usa-e-getta, ci mette il file (NotebookLM lo processa),
-ne prende il **testo indicizzato** (`source content`), con `--verify` chiede a
-NotebookLM di **verificare la fedeltà** (doer + checker), poi indicizza il testo
-nell'archivio e pulisce il notebook. Funziona con PDF-immagine, scansioni, **audio**
-e qualunque file che NotebookLM sappia leggere.
+Cosa fa, su un file che non è testo: crea un notebook usa-e-getta, ci mette il file
+(NotebookLM lo processa), ne prende il **testo indicizzato** (`source content`), con
+`--verify` chiede a NotebookLM di **verificare la fedeltà** (doer + checker), poi
+indicizza il testo nell'archivio e pulisce il notebook. Funziona con PDF-immagine,
+scansioni, **audio** e qualunque file che NotebookLM sappia leggere. Un file già testuale
+(`.md`, `.txt`, `.markdown`, `.rst`, `.log`, `.csv`, `.json`, `.jsonl`) va invece
+**diretto** all'indexer, senza NotebookLM (#285); `--nlm` forza comunque il giro
+NotebookLM. `--project` dà l'etichetta (default: il nome del DB).
 
 Dalla 0.84 (P17) il testo è quello che NotebookLM ha indicizzato per la fonte, non la
 risposta a una domanda di trascrizione: non passa da un modello che lo riformula, e costa
@@ -810,8 +823,9 @@ non c'è, ogni immagine lascia una lapide `ocr-non-disponibile`.
 
 ## Costruire un DB da riga di comando (locale)
 
-L'indexer è stdlib-only e gira anche standalone (utile per batch grossi sul PC,
-poi carichi il `.db` col drop-in):
+L'indexer è stdlib-only (tranne `pypdf` per i PDF; le immagini di un bundle passano dal
+servizio OCR, e senza lasciano la lapide `ocr-non-disponibile`) e gira anche standalone
+(utile per batch grossi sul PC, poi carichi il `.db` col drop-in):
 
 ```bash
 python3 services/gateway/app/archive_indexer.py <input> out.db --project nome
@@ -931,13 +945,15 @@ non cambia (`sender` e `speaker` non stanno nell'FTS né nei vettori, e l'indice
 semantico è legato ai rowid, che la migrazione non tocca). Parte da sola al primo
 ingest in un DB vecchio; per i DB in cui non si scrive più c'è
 [`vps1777 archive-migra`](CLI.md) (a secco di default, `--scrivi` per applicare), che
-per ogni DB chiama nel gateway:
+per ogni DB lancia, nel servizio compose `ingest` (dalla 0.84.0, col suo tetto di
+memoria; prima girava con `exec` nel gateway):
 
 ```bash
-python -m app.archive_indexer /var/lib/archive/db/<nome>.db --migra [--scrivi]
+docker compose --profile ingest run --rm -T ingest indexer /var/lib/archive/db/<nome>.db --migra [--scrivi]
 ```
 
-e stampa `{"strumenti": N, "sistema": N, "indice_project": …, "speaker_prima": {…},
+(`indexer` passa gli argomenti ad `app.archive_indexer`; lo stesso vale per
+`archive-retag`) e stampa `{"strumenti": N, "sistema": N, "indice_project": …, "speaker_prima": {…},
 "speaker_dopo": {…}, "scritto": …}`. Sul
 primario: 74.818 righe, `human` da 89.950 a 15.132, 6 secondi (e con i turni del
 programma, sotto, a 3.967). ⚠️ Anche a secco il file
@@ -1049,10 +1065,10 @@ Dichiarati, non scoperti per caso:
   all'alias ha righe `workfile:_recupero-1777/…`; re-ingerire con questo indexer
   aggiunge le righe `recupero:*` ma non toglie quelle.
 - **`memorie` senza tool.** Si legge via SQL o con `search`.
-- **`documents/` dice di che specie è un documento, non da dove viene.** L'app (dal
-  25/09/2026) scrive `documents/<famiglia>/…`: l'etichetta è la famiglia
-  (`document:testo`, `document:codice`…). Il nome del file è cercabile, perché è la
-  prima riga del testo; la cartella d'origine sta solo in `MANIFEST.json`
+- **`documents/` non dice da dove viene un documento.** Se l'app scrive
+  `documents/<famiglia>/…` l'etichetta è la famiglia (`document:testo`,
+  `document:codice`…); se scrive la cartella piatta è `document` per tutti. Il nome del
+  file è cercabile, perché è la prima riga del testo; la cartella d'origine sta solo in `MANIFEST.json`
   (`documenti.consegnati[].src`), di proposito: un percorso nell'etichetta porterebbe
   la struttura del disco in ogni risposta.
 - **`last_ts` e l'ultimo messaggio.** Su un bundle reale il `last_ts` della scheda è
@@ -1062,9 +1078,12 @@ Dichiarati, non scoperti per caso:
 
 ## Come funziona sotto (confine no-docker.sock)
 
-Il gateway monta il volume `archive-data:rw` e scrive i `.db` in
-`/var/lib/archive/db/`; `archive-mcp` lo monta **in sola lettura**, scansiona quella
-dir (**scan-mode**) e scopre i DB nuovi senza riavvio. Le uniche due scritture che un
+Il volume `archive-data` è montato `:rw` da chi scrive: il gateway (drop-in `.db`,
+scheda `meta`, `vps1777 archive-ingest`), il servizio `ingest` (dalla 0.84.0: i lavori in
+coda di `/admin/archive`, `archive-migra`, `archive-retag`) e `indice-notturno` (gli
+indici `<db>.vec.db`). I `.db` stanno in `/var/lib/archive/db/`; `archive-mcp` lo monta
+**in sola lettura**, scansiona quella dir (**scan-mode**) e scopre i DB nuovi senza
+riavvio. Le uniche due scritture che un
 tool può chiedere — `set_description` e `set_ruolo`, che toccano solo la scheda
 `meta` — passano dal gateway (`/internal/archive/description`,
 `/internal/archive/ruolo`, sulla rete interna con un segreto condiviso). Per l'ingest

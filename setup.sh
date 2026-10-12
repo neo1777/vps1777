@@ -405,7 +405,7 @@ if [ ! -s secrets/telegram_bot_token.txt ]; then
   else
     : > secrets/telegram_bot_token.txt
     chmod 600 secrets/telegram_bot_token.txt
-    warn "Token Telegram vuoto — il bot non partirà. Salvalo dopo in secrets/telegram_bot_token.txt"
+    warn "Token Telegram vuoto — il bot non partirà. Per aggiungerlo dopo: ./tools/rotate-secret.sh telegram_bot_token (salva il token, deriva la chiave della Mini App e riavvia bot e gateway)"
   fi
 fi
 
@@ -603,7 +603,7 @@ H55
           warn "Backup DICHIARATO ma NON ARMATO: manca un recipient age in tools/age-recipients.txt"
           warn "  → i backup non potranno essere cifrati finché non lo imposti. Genera la chiave"
           warn "    sul TUO PC con 'age-keygen -o age-key.txt', poi copia qui la sola riga"
-          warn "    pubblica: printf '%s\\n' age1... > tools/age-recipients.txt  (vedi BACKUP-RESTORE.md)"
+          warn "    pubblica: printf '%s\\n' age1... > tools/age-recipients.txt  (vedi docs/BACKUP-RESTORE.md)"
         fi;;
       esac
       # SC2086 disabilitata di proposito: $ENABLE_UNITS è una LISTA di nomi di unit

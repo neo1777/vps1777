@@ -19,4 +19,9 @@ docker compose \
 # 3. Manda /start al bot
 ```
 
+Il comando vale con l'ingresso di default (Tailscale) e senza feature opzionali. Con
+Caddy o Cloudflare usa il file e il profilo del tuo ingresso, e aggiungi gli overlay delle
+feature accese (es. `-f compose.ops.backup.yaml --profile ops.backup`): vedi
+[docs/PLUGINS.md](../../docs/PLUGINS.md), Step 4.
+
 Vedi [docs/PLUGINS.md](../../docs/PLUGINS.md).

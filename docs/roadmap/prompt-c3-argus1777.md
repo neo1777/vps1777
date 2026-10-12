@@ -229,8 +229,9 @@ modo irriducibile, **portagli il trade-off**, non risolverlo in silenzio.
 
 - argus locale: `~/Scrivania/argus1777/` e `docs/` (SICUREZZA, CONFINE_DEPLOY,
   ARCHITETTURA, RUNBOOK). Zip storici: `~/Scrivania/argus1777{,_v0.2}.zip`.
-- vps1777: `services/nb1777-mcp/app/` (modello browser headless), `docs/PLUGINS.md`,
+- vps1777: `services/nb1777-mcp/app/` (modello di MCP FastMCP in container — senza browser dalla 0.61.0), `docs/PLUGINS.md`,
   `SECURITY.md`, `docs/ARCHITECTURE.md`, `compose.yaml`.
 - Memoria: `argus1777-resta-locale`, `vps1777-security-auth`,
   `feedback-security-build-for-evolution`.
-- MCP: `archive1777` (v0.19.0, 5 tool) per la genesi di argus.
+- MCP: `archive1777` (`search`, `search_ibrida`, `get_context`…; la superficie viva la dice
+  `describe_databases`) per la genesi di argus.

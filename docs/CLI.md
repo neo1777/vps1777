@@ -66,15 +66,15 @@ vps1777 check --notify    # in più: messaggio Telegram all'owner se c'è una nu
 ```
 
 `--notify` manda su Telegram la release nuova (una volta per versione) e i **cambi di
-stato** delle tre sorveglianze — la caduta e il ritorno, non lo stato ogni giorno. Senza
+stato** delle cinque sorveglianze — la caduta e il ritorno, non lo stato ogni giorno. Senza
 `--notify` le sorveglianze girano lo stesso e scrivono solo nel log.
 
 ## vps1777 update
 
-Aggiorna alla release più recente (o a una versione esplicita): backup,
-snapshot dei volumi, download del bundle **firmato** (verifica cosign), pull
-delle immagini per digest, riavvio, health-gate — e rollback automatico se
-qualcosa non torna. È il comando che la unit `vps1777-auto-update.service`
+Aggiorna alla release più recente (o a una versione esplicita): download del
+bundle **firmato** (verifica sha256 e cosign), controllo dei segreti che la release
+pretende, backup e snapshot dei volumi, pull delle immagini per digest, riavvio,
+health-gate — e rollback automatico se qualcosa non torna. È il comando che la unit `vps1777-auto-update.service`
 esegue: dall'host di solito si avvia **quella**, non questo a mano.
 
 **La quarantena scatta solo con `--eta-minima ORE`**, ed è la unit a passarla
@@ -105,6 +105,9 @@ step 10; in `onboarding/update_progress.json` l'ultimo step (la barra dei pannel
 
 Se un altro update (o un rollback) è già in corso esce con **75** («riprova più tardi»),
 che le unit contano come successo: non è un guasto e non manda l'avviso di fallimento.
+Esce **1** se l'update fallisce e l'auto-rollback riporta la versione di prima (con un
+messaggio su Telegram), **2** se nemmeno il rollback torna in salute: lì serve intervento
+manuale.
 
 ```bash
 sudo systemctl start vps1777-auto-update.service   # la via normale (con la quarantena)
@@ -348,7 +351,8 @@ vps1777 avvisa-fallimento --unit vps1777-auto-update.service --righe 12
 Manda a Neo su Telegram il conto delle «cose da fare» (pagine e decisioni sulla frontiera,
 posti rossi) con il link alla pagina. Un messaggio per giro: lo stesso conto non suona due
 volte. Accetta solo numeri e un link `https://claude.ai/…`. Lo chiama il PC dopo ogni
-cottura della pagina, via SSH; `--prova` stampa il messaggio senza mandarlo.
+cottura della pagina, via SSH; `--prova` stampa il messaggio senza mandarlo. `--rossi` è
+facoltativo (vale 0) e `--quando` (ora ISO della cottura) finisce solo nello stato.
 
 ```bash
 vps1777 campanello --pagine 3 --decisioni 114 --rossi 0 --url https://claude.ai/artifact/… --prova

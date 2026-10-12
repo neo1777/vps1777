@@ -27,9 +27,11 @@ chown 1000:1000 secrets/*.txt        # 1000 = l'utente `app` DENTRO i container
 > dei secret (gateway, archive-mcp, nb1777-mcp, nb1777-bot) sono passati `healthy`
 > al primo tentativo; il quinto, `ocr`, non ne monta e questo errore non lo riguarda.
 >
-> Il percorso `deploy.sh` non incontra il caso perché crea l'utente operatore
-> con `useradd -m -u 1000` e gli fa `chown -R` della dir remota: l'UID
-> combacia già. La trappola è **solo** del percorso manuale da root.
+> Il percorso `deploy.sh` di norma non incontra il caso: crea l'utente operatore
+> con `useradd -m -u 1000` e gli fa `chown -R` della dir remota, quindi l'UID
+> combacia già. Ma se l'UID 1000 è già preso (capita sulle immagini cloud, che hanno
+> un utente di default a 1000) l'operatore nasce con un altro UID — `deploy.sh` lo
+> avvisa («uid 1000 già occupato») — e vale lo stesso `chown 1000:1000 secrets/*.txt`.
 
 ## Gateway non risponde su `/health`
 
@@ -40,9 +42,18 @@ docker compose logs gateway --tail 50
 ```
 
 Casi comuni:
-- `bcrypt` hash malformato in `admin_password_bcrypt.txt` → rigenera con `./tools/rotate-secret.sh admin_password`
-- `gateway_secret.txt` vuoto → `./setup.sh` lo rigenera
+- container giù o in crash-loop → la causa è nei log qui sopra (un secret illeggibile:
+  vedi la voce precedente)
 - Porta 8080 occupata sul host (dev) → `lsof -iTCP:8080` e killa il processo
+
+Due guasti del gateway **non** si vedono su `/health`, che risponde `{"ok": true}` senza
+guardare i secret:
+- login admin sempre «Email o password errati» con la password giusta → l'hash in
+  `admin_password_bcrypt.txt` è malformato: `./tools/rotate-secret.sh admin_password`
+- `404` su ogni URL dei connettori, e nei log `GATEWAY_SECRET is EMPTY` →
+  `./tools/rotate-secret.sh gateway_secret` (rigenera e riavvia gateway, nb1777-mcp e
+  nb1777-bot; le URL dei connettori cambiano). `./setup.sh` rigenererebbe il file ma
+  non riavvia i container, che resterebbero col valore vuoto.
 
 ## Login admin: password corretta, nessun errore, ma resta sulla pagina
 
@@ -53,7 +64,31 @@ ma il cookie spariva → redirect di nuovo a `/admin/login`.
 Fix: il gateway ora imposta `Secure` **solo se `PUBLIC_BASE` è https** → su HTTP
 (setup locale) il login funziona, su HTTPS (produzione) il cookie resta sicuro.
 Se ti ricapita, verifica che `PUBLIC_BASE` nel `.env` combaci con lo schema con cui
-accedi davvero (http vs https) e riavvia il gateway.
+accedi davvero (http vs https) e ricrea il gateway (voce sotto: un `restart` non
+rilegge il `.env`).
+
+## Ricreare il gateway dopo un cambio del `.env`
+
+Il gateway legge `PUBLIC_BASE`, `TELEGRAM_OWNER_ID`, `GATEWAY_FORWARDED_ALLOW_IPS` e le
+altre variabili del `.env` quando il container **nasce**: un `docker compose restart` non
+le rilegge, serve ricrearlo. Ma **non** con un `docker compose up -d gateway` nudo: in
+`compose.yaml` il gateway non ha né la porta `127.0.0.1:8080` né la rete d'ingresso, che
+gli aggiungono gli overlay (`compose.ingress.*.yaml`). Ricreato col solo `compose.yaml`
+il gateway perde l'ingresso, e Funnel, Caddy o il Tunnel rispondono 502.
+
+Si ricrea con gli stessi `-f`/`--profile` con cui gira lo stack, dalla radice del repo
+sulla VPS. Per l'ingresso Tailscale con il backup (il default):
+
+```bash
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
+  --profile ingress.tailscale --profile ops.backup up -d gateway
+```
+
+Adatta a casa tua: il file d'ingresso è `compose.<INGRESS_PROFILE>.yaml` e il profilo è
+`INGRESS_PROFILE` del `.env`; per ogni feature in `VPS1777_FEATURES` che ha un overlay
+aggiungi il suo `-f compose.ops.<feature>.yaml` e `--profile ops.<feature>` (`backup`,
+`portainer`; `caddy-dns01` solo il `-f`). Sono gli stessi file che usa la CLI
+(`compose_cmd` in `tools/vps1777.py`).
 
 ## Bot Telegram non risponde a `/start`
 
@@ -63,10 +98,19 @@ docker compose logs nb1777-bot --tail 30
 ```
 
 Casi:
-- `TELEGRAM_BOT_TOKEN` vuoto → riempi `secrets/telegram_bot_token.txt` + `docker compose restart nb1777-bot`
-- `TELEGRAM_OWNER_ID` sbagliato → controlla `.env`, deve essere il TUO numero (non `0`)
-- TOKEN revocato su BotFather → genera uno nuovo, aggiorna `secrets/telegram_bot_token.txt`
-  **e riallinea la chiave della Mini App** (sotto)
+- `TELEGRAM_BOT_TOKEN` vuoto (nei log «TELEGRAM_BOT_TOKEN mancante — bot in standby») →
+  `./tools/rotate-secret.sh telegram_bot_token`: ti chiede il token, lo scrive, deriva la
+  chiave della Mini App e riavvia bot e gateway. Riempire solo il file e riavviare il bot
+  fa rispondere il bot, ma la Mini App resta senza chiave (503, e il pannello dice,
+  sbagliando causa, «owner non configurato»)
+- `TELEGRAM_OWNER_ID` sbagliato (il bot risponde «Bot privato.»; con `0` o vuoto nei log
+  c'è «TELEGRAM_OWNER_ID=0 — il bot NEGA A TUTTI») → correggi `.env` col TUO id e ricrea
+  il bot con `docker compose up -d nb1777-bot` (un `restart` non rilegge il `.env`; il
+  bot, a differenza del gateway, non ha overlay). Lo stesso id lo legge il gateway per la
+  Mini App: ricrealo come in «Ricreare il gateway dopo un cambio del `.env`»
+- TOKEN revocato su BotFather → genera uno nuovo e passalo a
+  `./tools/rotate-secret.sh telegram_bot_token`, che **riallinea anche la chiave della
+  Mini App** (sotto)
 
 ### Token del bot cambiato: il bot risponde, la Mini App no
 
@@ -74,12 +118,15 @@ Il token lo legge solo `nb1777-bot`. Il gateway monta un'altra cosa:
 `secrets/telegram_webapp_secret.txt`, la chiave **derivata** dal token
 (HMAC_SHA256 con chiave «WebAppData») con cui verifica l'`initData` della Mini App.
 Se cambi il token e la chiave resta quella vecchia, il bot riparte giusto e la Mini
-App **rifiuta tutti** — senza un errore che nomini la chiave.
+App **rifiuta tutti**, e lo dice male: «Sessione Telegram scaduta (12h). Chiudi e riapri
+il pannello dal bot», anche appena riaperta. Se quel messaggio resta dopo aver riaperto
+il pannello dal bot, il sospetto è la chiave, non la sessione.
 
-La chiave si riallinea da sola al token in quattro posti: `tools/rotate-secret.sh
+La chiave si riallinea da sola al token in cinque posti: `tools/rotate-secret.sh
 telegram_bot_token` (dalla 0.62.3: scrive il token, **rideriva la chiave** e riavvia bot
 e gateway), un `vps1777 update` che installa davvero una versione (allo step 13),
-`vps1777 rollback` (dalla 0.62.3) e l'auto-rollback. **Non** la riallineano un
+`vps1777 rollback` (dalla 0.62.3), l'auto-rollback e un nuovo giro di `./setup.sh` (che
+però non riavvia il gateway: dopo serve `docker compose restart gateway`). **Non** la riallineano un
 `docker compose restart` né un token riscritto a mano nel file: se hai fatto così, la
 via è rilanciare `tools/rotate-secret.sh telegram_bot_token` col token nuovo. In
 alternativa, dalla radice del repo sulla VPS, la stessa derivazione degli installer:
@@ -177,10 +224,19 @@ tailscale serve status      # mapping serve → 127.0.0.1:8080
 tailscale status            # login / DNSName del nodo
 sudo journalctl -u tailscaled --no-pager | tail -40   # errori cert/funnel
 ```
-Se serve, riattiva a mano: `tailscale serve --bg --https=443 http://127.0.0.1:8080 && tailscale funnel --bg 443`.
+Se serve, riattiva a mano con **un comando solo**, come fa l'installer:
+```bash
+sudo tailscale serve reset && sudo tailscale funnel --bg --https=443 http://127.0.0.1:8080
+```
+Non separare `serve` e `funnel`: `tailscale serve --https=443 …` seguito da
+`tailscale funnel 443` fa leggere «443» come destinazione, sovrascrive il mapping e il
+Funnel risponde 502.
 - `Funnel not available; "funnel" node attribute not set` → manca il nodeAttr nell'ACL.
 - errori su `cert`/`HTTPS` → manca il toggle **HTTPS Certificates** (admin → DNS).
-- `Logged out` + `nessuna TS_AUTHKEY` nei log → la key non è arrivata in `.env` (provisioning fallita allo STEP 3).
+- `tailscale status` dice `Logged out` e l'installer ha stampato «! Login Tailscale non
+  completato» (o lo STEP 5 non ha stampato «✓ Nodo Tailscale») → la auth-key non è
+  arrivata o non vale (provisioning OAuth fallita allo STEP 3): vedi «Tailscale: il nodo
+  non è autenticato».
 
 ## Archive MCP non trova niente (`search` ritorna vuoto)
 
@@ -194,9 +250,47 @@ docker compose exec archive-mcp ls -l /var/lib/archive/db/
 # vuoto = nessun DB caricato: i tool rispondono vuoto, ed è lo stato normale all'inizio
 ```
 
-Soluzione: carica i dati dalla pagina `/admin/archive` del gateway o con
-`vps1777 archive-ingest` ([CLI.md](CLI.md)). Formati e percorsi:
-[ARCHIVE.md](ARCHIVE.md).
+Soluzione: carica i dati dalla pagina `/admin/archive` del gateway (un `.db` entra
+subito; gli altri formati passano in coda, e il DB compare quando il loro lavoro in
+«Caricamenti» è «fatto») o con `vps1777 archive-ingest` ([CLI.md](CLI.md)). Formati e
+percorsi: [ARCHIVE.md](ARCHIVE.md).
+
+## Archivio: il caricamento resta «in coda» («nessuno l'ha preso»)
+
+Dalla 0.84 `/admin/archive` non indicizza da sé: mette il file in coda
+(`onboarding/ingest_coda/`) e lo lavora sull'host `vps1777-ingest.path`, che lancia
+`vps1777 ingest-coda` (il servizio compose `ingest`). Se dopo tre minuti nessuno l'ha
+preso, la pagina lo dice in «Caricamenti».
+
+Diagnosi, sull'host:
+```bash
+systemctl status vps1777-ingest.path
+journalctl -u vps1777-ingest --no-pager | tail -30
+```
+Cura: `sudo systemctl enable --now vps1777-ingest.path`. Per svuotare a mano una coda
+ferma, dalla radice del repo come utente operatore: `vps1777 ingest-coda`. L'esito di
+ogni lavoro resta in «Caricamenti» (`onboarding/ingest_esiti/`).
+
+## Archivio: «ucciso dal tetto di memoria del lavoro (2g)»
+
+Il lavoro `ingest` ha un tetto di 2 GB (`mem_limit` in `compose.yaml`), e un export si
+carica tutto in memoria (da 3,4 a 4 volte il file): oltre i ~500 MB muore il lavoro, non
+il gateway. Cura: dividi l'export, oppure indicizzalo sul PC e carica il `.db` già pronto
+da `/admin/archive` (drop-in, senza coda).
+
+## Un servizio si riavvia da solo (tetto di memoria)
+
+I servizi hanno un tetto di memoria dove il picco è misurato (`mem_limit` in
+`compose.yaml`, dalla 0.68; il gateway dalla 0.84): gateway 512m, archive-mcp 2g senza
+swap, nb1777-mcp 512m, nb1777-bot 256m, il lavoro `indice-notturno` 1300m; `ocr` ancora
+no. Chi lo supera viene ucciso (exit 137) e `restart` lo rialza.
+
+Diagnosi:
+```bash
+docker inspect -f '{{.State.OOMKilled}} {{.State.ExitCode}} {{.RestartCount}}' vps1777-<servizio>-1
+```
+`true 137` vuol dire ucciso dal tetto. I tetti vengono da picchi misurati: uno superato è
+un dato nuovo, segnalalo con una issue.
 
 ## Connector claude.ai non si autentica (Tailscale)
 
@@ -209,7 +303,10 @@ sudo -u vps1777 -i
 cd vps1777
 # Sostituisci con il tuo URL .ts.net reale
 sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE=https://vps1777.<tuo-tailnet>.ts.net|' .env
-docker compose -f compose.yaml -f compose.ingress.tailscale.yaml --profile ingress.tailscale up -d
+docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.backup.yaml \
+  --profile ingress.tailscale --profile ops.backup up -d
+# -f/--profile delle feature: quelli di VPS1777_FEATURES nel .env (backup è il default;
+# se l'hai tolto, togli i suoi due) — vedi «Ricreare il gateway dopo un cambio del .env»
 ```
 
 ## Connector claude.ai dopo una reinstallazione: i vecchi sono doppiamente morti
@@ -254,7 +351,8 @@ Fix (sull'host):
 ssh <user>@<vps>
 sudo tailscale up --authkey=tskey-auth-... --hostname=vps1777
 # Genera la key su https://login.tailscale.com/admin/machines/new-linux
-# Poi: sudo tailscale serve --bg --https=443 http://127.0.0.1:8080 && sudo tailscale funnel --bg 443
+# Poi, un comando solo (serve e funnel separati danno 502, vedi sopra):
+sudo tailscale serve reset && sudo tailscale funnel --bg --https=443 http://127.0.0.1:8080
 ```
 
 ## Update: "update già in corso"
@@ -285,7 +383,7 @@ arriva l'avviso di fallimento su Telegram. Se lo vedi in uno script tuo, 75 vuol
 ## `docker cp` verso un container: "container rootfs is marked read-only"
 
 Causa: i servizi di `compose.yaml` (gateway, archive-mcp, nb1777-mcp, nb1777-bot, ocr,
-e il job `indice-notturno`) girano col rootfs in sola lettura. nb1777-mcp dalla
+e i lavori `indice-notturno` e `ingest`) girano col rootfs in sola lettura. nb1777-mcp dalla
 0.58.0 (`H43`), gli altri da prima. I container degli overlay — caddy, cloudflared,
 backup, portainer — **no**: lì `docker cp` funziona. Verso un container in
 sola lettura `docker cp` rifiuta di scrivere, anche in `/tmp`, che è una tmpfs. Scrive
@@ -299,6 +397,9 @@ Il file nasce dell'utente del servizio (`app`), che è anche chi potrà toglierl
 `cap_drop: ALL` root, dentro il container, non ha `CAP_DAC_OVERRIDE`. Leggere fuori
 (`docker cp <container>:<percorso> -`) funziona come sempre. `vps1777 archive-ingest` fa
 già così dalla 0.58.0.
+
+`/tmp` è una tmpfs da 64 MB: per un file più grande scrivi in un volume del servizio
+(per nb1777-mcp `/var/lib/nlm-artifacts/`), come fa `vps1777 archive-ingest`.
 
 ## Update: digest mismatch al pull
 
@@ -363,8 +464,10 @@ Il menu button corretto lo imposta il bot a ogni avvio (`set_chat_menu_button`
 3. Verifica cosa c'è lato server:
    ```bash
    TOK=$(sudo cat /home/vps1777/vps1777/secrets/telegram_bot_token.txt)
-   curl -s "https://api.telegram.org/bot$TOK/getChatMenuButton"
+   curl -s "https://api.telegram.org/bot$TOK/getChatMenuButton?chat_id=<TELEGRAM_OWNER_ID>"
    ```
+   Il `chat_id` serve: il bot imposta il bottone solo nella chat dell'owner, e senza
+   `chat_id` Telegram risponde col bottone di default di tutte le chat.
 
 ## Mini App: "Questo account Telegram non è l'owner del gateway"
 
@@ -374,21 +477,30 @@ tuo (`@userinfobot`) e che il gateway lo veda:
 ```bash
 docker exec vps1777-gateway-1 printenv TELEGRAM_OWNER_ID
 ```
-Se è vuoto, aggiorna `.env` e ricrea il gateway (`docker compose up -d gateway`).
+Questo messaggio vuol dire che un id configurato c'è, ma non è il tuo (se fosse vuoto
+vedresti «owner non configurato», voce sotto): correggi `TELEGRAM_OWNER_ID` nel `.env` e
+ricrea il gateway con gli overlay dello stack, come in «Ricreare il gateway dopo un
+cambio del `.env`».
 
 ## Mini App: risponde `503 owner_not_configured`
 
 Causa: manca `TELEGRAM_OWNER_ID` nel `.env`. Da **v0.22.0** gli endpoint
 owner-only sono **fail-closed**: finché l'owner non è impostato la Mini App
-nega TUTTI (503) e il bot owner-only non risponde a nessuno. Lasciarlo vuoto
+nega TUTTI (503) e il bot risponde «Bot privato.» a chiunque. Lasciarlo vuoto
 **non** è senza conseguenze.
 
 Fix:
 ```bash
 docker exec vps1777-gateway-1 printenv TELEGRAM_OWNER_ID   # vuoto = non configurato
-# prendi il tuo id da @userinfobot, mettilo in .env, poi ricrea il gateway:
-docker compose up -d gateway
 ```
+Prendi il tuo id da @userinfobot, mettilo in `.env`, poi ricrea il gateway con gli overlay
+dello stack («Ricreare il gateway dopo un cambio del `.env`») e il bot con
+`docker compose up -d nb1777-bot`.
+
+Attenzione: il pannello scrive «owner non configurato» per **ogni** 503, anche quando a
+mancare è la chiave `telegram_webapp_secret` (token del bot messo a mano dopo
+l'installazione, risposta `503 bot_token_not_configured`). Se `printenv
+TELEGRAM_OWNER_ID` non è vuoto, la cura è `./tools/rotate-secret.sh telegram_bot_token`.
 
 ## `429` / `rate_limited` su connector o Mini App
 
@@ -397,6 +509,10 @@ per-IP** (difesa anti-raffica). Le soglie:
 - `/register` (DCR del connector): 10 ogni 5 min
 - `/token` (OAuth del connector): 60 al minuto
 - `/app/auth` (Mini App): 20 ogni 5 min
+- `/carica/<gettone>` (link di caricamento): 20 ogni 5 min
+- `/scarica/<nome>` (link firmati): 30 ogni 5 min
+- login `/admin/login`: 5 errori in 5 min → IP bloccato per 15 min («Troppi tentativi
+  falliti»)
 
 Non è un guasto: hai superato la soglia (retry a raffica, script, o più client
 dietro lo stesso IP). Il contatore è **in-memory** e si azzera al **restart del
@@ -415,7 +531,8 @@ viene ignorato, e in audit/rate-limit compare sempre l'IP del proxy invece di
 quello reale del client.
 
 Fix: aggiungi l'IP/subnet del tuo ingress a `GATEWAY_FORWARDED_ALLOW_IPS` nel
-`.env` e ricrea il gateway (`docker compose up -d gateway`). **NON** impostarlo a
+`.env` e ricrea il gateway con gli overlay dello stack («Ricreare il gateway dopo un
+cambio del `.env`»: un `up -d gateway` nudo lo lascia senza ingresso). **NON** impostarlo a
 `*`: riaprirebbe lo spoofing degli header (rate-limit/lockout/audit
 falsificabili da un client pubblico).
 
@@ -447,6 +564,6 @@ docker exec vps1777-nb1777-mcp-1 sh -c 'test -s /run/secrets/gateway_secret && e
 docker compose down -v --remove-orphans   # -v cancella i volumi; --remove-orphans
                                           # prende anche l'ingress, che sta in un
                                           # overlay e senza resterebbe acceso
-rm -rf secrets/ .env backups/
+rm -f secrets/*.txt .env && rm -rf backups/   # secrets/README.md è del repo: resta
 ./setup.sh                   # ricominci da capo
 ```
