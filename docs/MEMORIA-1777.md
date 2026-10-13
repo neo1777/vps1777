@@ -71,7 +71,7 @@ dentro: [`fatti.esempio.md`](../services/nb1777-mcp/app/memoria_1777/fatti.esemp
    contesto, subito**, senza aspettare che le superfici vengano aggiornate a mano — che restano da
    fare, e va detto a chi parla.
 4. **L'ack**: quando l'owner ha aggiornato a mano le superfici cloud (claude.ai non ha connettori
-   in ogni Project), lo dichiara con il bottone «✓ Fatto» del bot **o** con il tool `memoria_ack("v2.5")`
+   in ogni Project), lo dichiara con il bottone «✓ Fatto» del bot **o** con il tool `memoria_ack("v2.6")`
    da una sessione. ⚠️ Il tool si chiama **solo su dichiarazione esplicita** («ho incollato»): un ack
    scritto senza il fatto dietro è la dichiarazione senza verifica che la disciplina vieta.
 

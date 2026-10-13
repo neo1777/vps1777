@@ -4015,3 +4015,98 @@ findings:
         output: "3 passed: niente righe httpx a INFO, token mascherato anche in un traceback"
         exit: 0
         quando: "2026-10-11"
+  - id: H82
+    severity: medium
+    title: "Il container di backup girava come root senza cap_drop né no-new-privileges, col repo (secrets/ e .env compresi) montato in scrittura"
+    status: partial
+    natura: comportamento
+    resta_aperto: >
+      Resta root, con rootfs scrivibile e la rete di default che esce su Internet: servono
+      all'`apk add` a ogni avvio. Toglierli vuol dire un'immagine di backup del progetto.
+    missing: >
+      Un'immagine di backup del progetto, firmata e in images.lock come le altre, con age,
+      bash, zstd e sqlite già dentro: niente `apk add` all'avvio, quindi rootfs read-only e
+      nessuna uscita su Internet. Oggi non c'è; finché non c'è, root serve ad apk e a crond.
+    scoperta:
+      quando: "2026-10-12"
+      come: lettura
+      nota: >
+        Trovato dalla rilettura della documentazione contro il codice (#489), che lo ha
+        scritto in SECURITY.md com'era. Il 13/10 Neo ha scelto di stringerlo e di registrare
+        il resto qui (scelta `2026-10-13-soglia-backup-root`).
+    since: unreleased
+    why: >
+      Il container legge tutti i volumi dei servizi e, per il core, `secrets/` e `.env`.
+      Con tutte le capability di root e il repo in scrittura, chi lo compromette (un
+      pacchetto di `apk add`, la rete che usa) poteva cambiare i secret e il codice che
+      l'host esegue, non solo leggerli. Dopo l'host era il container più privilegiato.
+    evidence:
+      - file: compose.ops.backup.yaml
+        contains:
+          - 'security_opt: ["no-new-privileges:true"]'
+          - "cap_drop: [ALL]"
+          - "cap_add: [DAC_OVERRIDE, SETUID, SETGID]"
+          - "- .:/vps1777:ro"
+      - file: tools/tests/test_backup_container_stretto.py
+        contains:
+          - "def test_le_capability_sono_esattamente_le_tre_misurate("
+          - "def test_il_repo_si_monta_in_sola_lettura_e_backups_a_parte("
+    fix: >
+      `no-new-privileges`, `cap_drop: ALL` e tre capability: DAC_OVERRIDE (leggere i volumi
+      dell'utente app e scrivere in backups/), SETUID e SETGID (crond cambia identità prima
+      di lanciare un lavoro). Il repo si monta `:ro`: backup.sh scrive solo in /backups. Le
+      capability sono misurate, non indovinate, e un test tiene l'elenco.
+    prova:
+      - comando: "docker compose run del servizio backup con cap_drop ALL + {CHOWN,DAC_OVERRIDE,DAC_READ_SEARCH,FOWNER,SETUID,SETGID}, repo :ro, no-new-privileges: apk add, backup.sh in una cartella temporanea, un lavoro di cron ogni minuto"
+        dove: "VPS di riferimento, 0.88.0"
+        output: "apk ok; backup.sh esito 0, description e ruolo di 27 DB; core di 105 MB come quello della notte; il lavoro di cron parte"
+        exit: 0
+        quando: "2026-10-13"
+      - comando: "lo stesso con DAC_OVERRIDE, SETUID, SETGID"
+        dove: "VPS di riferimento, 0.88.0"
+        output: "identico al primo: backup.sh esito 0, il lavoro di cron parte"
+        exit: 0
+        quando: "2026-10-13"
+      - comando: "lo stesso con la sola DAC_OVERRIDE"
+        dove: "VPS di riferimento, 0.88.0"
+        output: "backup.sh esito 0, ma il lavoro di cron NON parte: per questo SETUID e SETGID restano"
+        exit: 0
+        quando: "2026-10-13"
+  - id: H83
+    severity: medium
+    title: "Col profilo cloudflared Cloudflare termina il TLS e vede in chiaro tutto il traffico del gateway (token OAuth, URL col gateway_secret, contenuti MCP, Mini App)"
+    status: accepted
+    natura: decisione
+    resta_aperto: >
+      [RISCHIO ACCETTATO — 13/10/2026, owner] È il funzionamento di Cloudflare Tunnel e non si
+      cura dentro il prodotto: chi non lo vuole sceglie Caddy (TLS sulla VPS) o Tailscale
+      Funnel (cifrato fino alla VPS). I tre installer lo dicono al momento della scelta.
+    rationale: >
+      Il tunnel di Cloudflare funziona così: il bordo di Cloudflare termina il TLS e inoltra
+      al gateway. Cifrare dentro il tunnel non cambierebbe chi vede i token, perché li vede
+      chi termina il TLS esterno. Il profilo resta per chi vuole un dominio senza porte
+      aperte e accetta Cloudflare come terzo; la scelta va fatta sapendolo.
+    scoperta:
+      quando: "2026-10-12"
+      come: lettura
+      nota: >
+        Trovato dalla rilettura della documentazione contro il codice (#489), che l'ha
+        aggiunto a SECURITY.md. Il 13/10 Neo ha scelto l'avviso negli installer (scelta
+        `2026-10-13-soglia-cloudflare-tls`).
+    why: >
+      Il path MCP contiene il gateway_secret e le richieste portano i token OAuth: chi
+      termina il TLS li vede, insieme a tutte le risposte (archivio, notebook). Con Cloudflare
+      quel qualcuno è un terzo, e chi installa deve saperlo quando sceglie, non dopo.
+    evidence:
+      - file: SECURITY.md
+        contains:
+          - "Rischio accettato per costruzione (`H83`)"
+      - file: setup.sh
+        contains:
+          - "Con Cloudflare Tunnel il TLS termina sui server di Cloudflare"
+      - file: deploy.sh
+        contains:
+          - "Con Cloudflare Tunnel il TLS termina sui server di Cloudflare"
+      - file: installer/ui.html
+        contains:
+          - "Con Cloudflare Tunnel il TLS termina sui server di Cloudflare"

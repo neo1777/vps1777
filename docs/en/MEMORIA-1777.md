@@ -78,7 +78,7 @@ Two examples with the instructions inside:
    remain to be done, and must be said to whoever is talking.
 4. **The ack**: when the owner has updated the cloud surfaces by hand (claude.ai has no connectors
    in every Project), they declare it with the bot's «✓ Fatto» button **or** with the
-   `memoria_ack("v2.5")` tool from a session. ⚠️ The tool is called **only on an explicit
+   `memoria_ack("v2.6")` tool from a session. ⚠️ The tool is called **only on an explicit
    declaration** («I pasted it»): an ack written without the fact behind it is exactly the
    declaration-without-verification that the discipline forbids.
 

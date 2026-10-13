@@ -159,8 +159,12 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # httpx scriveva a INFO l'URL della Bot API, col token, ogni 10 s nel log del bot. Trovato
 # dal vivo leggendo il log dopo un update. `high` perché il token è il canale delle
 # notifiche di sicurezza all'owner.
-EXPECTED_TOTAL = 81
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 13, "medium": 47, "low": 19}
+# + 2 (H82 e H83, medium, 13/10) = 83. Dalla rilettura di tutta la documentazione contro il
+# codice (12/10): il container di backup root con tutte le capability e il repo in scrittura
+# (stretto con capability misurate, il resto scritto), e il TLS terminato da Cloudflare col
+# profilo cloudflared (accettato, detto a chi sceglie). Scelte di Neo del 13/10.
+EXPECTED_TOTAL = 83
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 13, "medium": 49, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

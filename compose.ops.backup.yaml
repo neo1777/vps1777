@@ -21,6 +21,17 @@ services:
     pids_limit: 128  # tetti DoS (OWASP API4): vedi il commento in compose.yaml, servizio gateway
     cpus: 1.0
     command: ["/vps1777/tools/backup-container-setup.sh"]
+    # Stretto il 13/10/2026 (H82, scelta di Neo): resta root, perché `apk add` a ogni avvio
+    # e crond lo vogliono, ma con le sole tre capability che servono, MISURATE sulla VPS di
+    # riferimento con un backup vero e un lavoro di cron vero:
+    #   · DAC_OVERRIDE — leggere i volumi dei servizi (file 0600 dell'utente app, UID 1000)
+    #     e scrivere in backups/ (dell'operatore);
+    #   · SETUID, SETGID — crond cambia identità prima di lanciare un lavoro, anche verso
+    #     root: senza, il backup a mano riesce ma quello delle 03:00 NON PARTE, in silenzio.
+    # CHOWN, FOWNER e DAC_READ_SEARCH non servono (misurato). Un test tiene questo elenco.
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE, SETUID, SETGID]
     environment:
       TZ: ${TZ:-UTC}
       BACKUP_DIR: /backups
@@ -34,7 +45,9 @@ services:
       # = la cwd del CHIAMANTE: `vps1777 update` lanciato da /root montava /root
       # su /vps1777 e il container moriva su "backup-container-setup.sh: no such
       # file" — con auto-rollback che rifalliva uguale (2026-07-20, dal vivo).
-      - .:/vps1777:rw                            # repo (tools/backup.sh + recipient age)
+      # :ro dal 13/10/2026 (H82): backup.sh LEGGE il repo (sé stesso, il recipient age, .env e
+      # secrets/ per il core) e scrive solo in /backups, montato a parte qui sotto
+      - .:/vps1777:ro                            # repo (tools/backup.sh + recipient age)
       - ./backups:/backups:rw
       - gateway-data:/volumes/gateway-data:ro
       - archive-data:/volumes/archive-data:ro

@@ -3,7 +3,7 @@
 > **English overview.** vps1777 is a self-hosted OAuth 2.1 gateway for MCP servers.
 > Security posture in brief: only the gateway faces the network (backend on an
 > `internal:true` Docker network); non-root containers with `cap_drop: ALL` (except
-> the backup job, which runs as root);
+> the backup job, which runs as root with only three capabilities and the repo read-only, `H82`);
 > secrets via Docker `secrets:` on tmpfs, never env vars; releases are
 > cosign-signed and verified **fail-closed**, images pinned by digest from the first
 > update on (a fresh install runs by tag until then, `H22`); age-encrypted
@@ -111,10 +111,12 @@ Threat model dichiarato:
   — vedi [docs/MINIAPP.md](docs/MINIAPP.md)
 - Container dei servizi di `compose.yaml` non-root (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`,
   rootfs read-only. **Eccezione**: il container `backup` (`compose.ops.backup.yaml`, acceso per
-  default) gira come root nell'immagine alpine, senza `cap_drop`, `no-new-privileges` né rootfs
-  read-only; monta il repo in scrittura (`.:/vps1777:rw`, quindi anche `secrets/` e `.env`) e sta
-  sulla rete di default del progetto, che esce su Internet (l'`apk add` a ogni avvio). Dopo l'host
-  è il container più privilegiato del sistema
+  default) gira come root nell'immagine alpine, perché `apk add` a ogni avvio e crond lo vogliono.
+  Dalla 0.89.0 (`H82`) ha `no-new-privileges`, `cap_drop: ALL` e tre sole capability misurate
+  (`DAC_OVERRIDE` per leggere i volumi e scrivere in `backups/`, `SETUID` e `SETGID` per crond), e
+  monta il repo in **sola lettura** (`.:/vps1777:ro`: legge `secrets/` e `.env` per il core, non li
+  può cambiare). Restano: rootfs scrivibile e la rete di default del progetto, che esce su Internet
+  (l'`apk add`). Dopo l'host resta il container più privilegiato del sistema
 - Il gateway (unico servizio esposto) non ha accesso al Docker socket né al filesystem dell'host,
   **salvo la cartella `onboarding/`** (bind-mount `:rw`): ci scrive gli intent che le path unit
   `vps1777-update.path` e `vps1777-ingest.path` portano alla CLI host, che li rivalida (`H44`);
@@ -298,7 +300,7 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   `ops.backup` ora monta i volumi dati **direttamente in sola lettura** e li tara
   da lì — niente `docker.sock`, niente `docker-cli`.
 - Container dei servizi **non-root** (UID 1000), `cap_drop: ALL`, `no-new-privileges`
-  (il container `backup` no: gira come root, vedi *Threat model dichiarato*), backend su rete
+  (il container `backup` gira come root, con `no-new-privileges` e tre sole capability: vedi *Threat model dichiarato*), backend su rete
   `internal: true`, gateway senza accesso al socket Docker né al filesystem
   dell'host salvo `onboarding/`, dove scrive gli intent (baseline). I 5 secret Docker assegnati al gateway, però,
   lui li **vede** — fra cui `telegram_webapp_secret`, la chiave derivata che verifica
@@ -456,7 +458,7 @@ quei container.
 |---|---|---|---|
 | Domanda RAG, aggiunta fonte, OCR (nb1777) | domande, contenuto delle fonti, documenti | **Google (NotebookLM)** | l'OCR manda il documento intero; è il funzionamento di NotebookLM |
 | Comandi **testuali** del bot | — | — | tolti dalla v0.86.0 (prima `/lista` e `/chiedi` facevano passare titoli e risposte da **Telegram**, che non è E2E) |
-| Ogni richiesta, solo col profilo `cloudflared` | tutto il traffico del gateway in chiaro: il path col `gateway_secret`, i token OAuth, le risposte MCP (contenuti di archivio e notebook), la Mini App | **Cloudflare** | il tunnel termina il TLS sul bordo di Cloudflare ([docs/SECRETS.md](docs/SECRETS.md)); con `caddy` il TLS termina sulla VPS, e con `tailscale` il Funnel lo inoltra cifrato fino alla VPS |
+| Ogni richiesta, solo col profilo `cloudflared` | tutto il traffico del gateway in chiaro: il path col `gateway_secret`, i token OAuth, le risposte MCP (contenuti di archivio e notebook), la Mini App | **Cloudflare** | il tunnel termina il TLS sul bordo di Cloudflare ([docs/SECRETS.md](docs/SECRETS.md)); con `caddy` il TLS termina sulla VPS, e con `tailscale` il Funnel lo inoltra cifrato fino alla VPS. Rischio accettato per costruzione (`H83`): i tre installer lo dicono al momento della scelta |
 | Mini App (`/app/*`) | — | **nessun terzo** (con `cloudflared`: Cloudflare, vedi sopra) | parla solo col tuo gateway: è la superficie più privata |
 | Avvisi operativi (accesi per default se ci sono il token del bot e `TELEGRAM_OWNER_ID`) | nuova versione disponibile (con un estratto delle note di rilascio), esito di update e rollback, servizio giù/su con la durata, copertura dei backup, disco, secret da ruotare (solo i nomi), unit systemd fallite, un comando della CLI uscito in errore (con la sua riga di comando); dal bot: sessione Google scaduta, promemoria del canonico | **Telegram** | i timer spediti passano `--notify` e gli altri avvisi non chiedono flag; il testo della CLI passa dalla redazione dei secret (`_redigi`), che toglie i valori dei secret, non ogni dato: l'esito di un update fallito porta l'uscita del comando. Senza token o owner non parte niente |
 | Check versione | — | GitHub | GET pubblica, nessun dato personale |
@@ -468,7 +470,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** Gli 81 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** Gli 83 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -479,7 +481,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **81 voci** (2 critiche, 13 alte, 47 medie, 19 basse): 43 dalla
+Il registro conta **83 voci** (2 critiche, 13 alte, 49 medie, 19 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -515,21 +517,24 @@ segreto non apriva il path, ma stava nel `resource` dell'autorizzazione OAuth. E
 04/10) ancora dal censimento di Sagoma: cosign, che verifica la firma di ogni aggiornamento,
 si installava senza che nessuno ne verificasse l'impronta. E una (`H81`, 11/10, alta) dalla
 lettura del log del bot dopo un aggiornamento: httpx scriveva a ogni richiesta l'URL della Bot
-API, che contiene il token, una riga ogni dieci secondi.
+API, che contiene il token, una riga ogni dieci secondi. E due (`H82`, `H83`, 13/10) dalla
+rilettura di tutta la documentazione contro il codice: il container di backup girava root con
+tutte le capability e il repo in scrittura (ora stretto, e il resto è scritto), e col profilo
+`cloudflared` Cloudflare vede in chiaro tutto il traffico (accettato, e detto a chi sceglie).
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
 | **chiusi** | 69 |
-| **parziali** | 9 |
-| **accettati** | 3 |
+| **parziali** | 10 |
+| **accettati** | 4 |
 | **aperti** | 0 |
 
 I due **critici** — owner-gating fail-closed (`H1`) e verifica cosign obbligatoria
 (`H2`) — sono chiusi e verificati in produzione. Della fascia alta restano **parziali**
 `H4`, `H5`, `H50` e `H51`, ognuno col suo residuo scritto nel registro.
 
-I tre **accettati** sono decisioni, non dimenticanze. Niente 2FA sul pannello admin
+I quattro **accettati** sono decisioni, non dimenticanze. Niente 2FA sul pannello admin
 (`H28`): è un gateway mono-utente (la decisione è del 14/07, quando l'ingresso era solo
 Tailscale Funnel; con `caddy` e `cloudflared` il pannello sta su un dominio pubblico, e
 questa premessa va riletta alla revisione della voce), con password bcrypt-12 +
@@ -537,7 +542,9 @@ lockout per-IP + CSRF + revoca reale della sessione — il 2FA aggiungerebbe att
 un guadagno marginale su questo profilo. E lo snapshot pre-update con l'archivio in
 chiaro (`H56`, deciso il 23/08 al format: la storia più sotto). E il gate umano sulla
 creazione dei tag (`H24`, 27/09): con un solo account non sarebbe un confine, e il rischio
-lo copre la quarantena di 48 ore dell'auto-update (la postilla più sotto).
+lo copre la quarantena di 48 ore dell'auto-update (la postilla più sotto). E il TLS terminato
+da Cloudflare col profilo `cloudflared` (`H83`, 13/10): è il funzionamento del tunnel, e i tre
+installer lo dicono al momento della scelta.
 
 `H50` è il primo trovato da una **misura** invece che da una lettura: il gateway — il servizio esposto, quello che monta i secret — aveva
 un'uscita verso qualunque host su Internet. Ora è **chiusa in produzione**, e non
