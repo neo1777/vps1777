@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.89.0] — 2026-10-13
+
+**Il container di backup stretto con capability misurate, Cloudflare detto a chi lo sceglie, e il canonico della memoria a v2.6.**
+
 ### Sicurezza
 - **Il container di backup gira stretto** (`H82`, scelta di Neo del 13/10). Aveva tutte le
   capability di root e il repo montato in scrittura, `secrets/` e `.env` compresi. Ora ha
