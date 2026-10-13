@@ -4034,7 +4034,7 @@ findings:
         Trovato dalla rilettura della documentazione contro il codice (#489), che lo ha
         scritto in SECURITY.md com'era. Il 13/10 Neo ha scelto di stringerlo e di registrare
         il resto qui (scelta `2026-10-13-soglia-backup-root`).
-    since: unreleased
+    since: v0.89.0
     why: >
       Il container legge tutti i volumi dei servizi e, per il core, `secrets/` e `.env`.
       Con tutte le capability di root e il repo in scrittura, chi lo compromette (un
