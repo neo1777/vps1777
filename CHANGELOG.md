@@ -4,6 +4,27 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Il container di backup gira stretto** (`H82`, scelta di Neo del 13/10). Aveva tutte le
+  capability di root e il repo montato in scrittura, `secrets/` e `.env` compresi. Ora ha
+  `no-new-privileges`, `cap_drop: ALL` e tre sole capability: DAC_OVERRIDE per leggere i volumi e
+  scrivere in `backups/`, SETUID e SETGID per crond. Il repo si monta `:ro`. Le capability sono
+  misurate sulla VPS con un backup vero e un lavoro di cron vero: con la sola DAC_OVERRIDE il backup
+  a mano riesce, ma quello delle 03:00 non parte, in silenzio. Un test tiene l'elenco. Resta root,
+  con rootfs scrivibile e uscita su Internet, per l'`apk add` all'avvio.
+- **Cloudflare e il TLS, detto a chi sceglie** (`H83`, accettato). Col profilo `cloudflared`
+  Cloudflare termina il TLS e vede in chiaro token OAuth, URL col `gateway_secret` e contenuti MCP.
+  Il pannello dell'installer, `setup.sh` e `deploy.sh` ora lo dicono quando si sceglie Cloudflare,
+  e indicano Caddy o Tailscale Funnel a chi non lo vuole.
+
+### Corretto
+- **Il canonico della memoria 1777 passa a v2.6**: il blocco pieno citava `session_info`, un tool
+  che in vps1777 non esiste e non è mai esistito. Al suo posto dice dove finisce l'archivio e cosa
+  vale dopo; le regole non cambiano. Le superfici con il blocco (CLAUDE.md, preferenze di claude.ai)
+  si riallineano a mano, come sempre: `canonico(full=true)` dà il testo.
+- **`backup.sh` non cerca più la description negli indici `.vec.db`**: ogni notte dava un avviso
+  «non leggibile» per indice e lasciava un file vuoto nel core.
+
 ## [0.88.0] — 2026-10-12
 
 **Un lucchetto comune per chi scrive l'archivio, `archive-ingest` fuori dal gateway, l'installer che mostra l'URL vero con Caddy e Cloudflare, e gli errori che dicono di chi è la colpa.**

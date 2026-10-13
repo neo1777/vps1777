@@ -1100,7 +1100,7 @@ features:
     status: active-default
     since: "0.44.0"
     verify:
-      file_contains: {path: "services/nb1777-mcp/app/memoria_1777/disciplina.md", pattern: "canonico v2\\.5"}
+      file_contains: {path: "services/nb1777-mcp/app/memoria_1777/disciplina.md", pattern: "canonico v[0-9]+\\.[0-9]+ · [0-9]{4}-[0-9]{2}-[0-9]{2}"}
   - id: nb.memoria_check
     nome: "nb1777-mcp · memoria_check"
     cosa: "MEMORIA 1777 — il VERDETTO: confronta la versione del blocco di memoria che porti (es. 'v2.2') col canonico attuale; ritorna {canonico, data, stale, delta, portata} e, se sei vecchio, le note del canonico. Fail-open."

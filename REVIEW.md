@@ -26,7 +26,7 @@ Riserva la severità alta per ciò che in questo repo fa danni veri:
 ## ⚠️ Cosa sappiamo GIÀ — non serve ridircelo
 
 Questo repo tiene un registro dei rilievi di sicurezza in **`security/findings.yml`**:
-81 voci, **69 chiuse**, e le **12 qui sotto non chiuse** (9 parziali, 3 accettate), ognuna con data, motivo e
+83 voci, **69 chiuse**, e le **14 qui sotto non chiuse** (10 parziali, 4 accettate), ognuna con data, motivo e
 stato. Sono già state trovate, discusse e classificate: segnalarle di nuovo consuma il
 giro senza aggiungere niente.
 
@@ -44,6 +44,8 @@ giro senza aggiungere niente.
 | H51 | partial | la finestra cieca fra due giri del check giornaliero; una sonda continua verso Internet si può fare, non è decisa |
 | H52 | partial | le voci senza `natura` restano fuori dalla regola «un comportamento si chiude con una prova eseguita»: quante sono lo dice il contatore ◍ di `security/check_findings.py` |
 | H56 | **accepted** | seconda metà di H14: nello snapshot pre-update `archive-data` resta in chiaro |
+| H82 | partial | il container di backup resta root, con rootfs scrivibile e uscita su Internet, per l'`apk add` all'avvio; `no-new-privileges`, tre capability misurate e repo `:ro` sono fatti |
+| H83 | **accepted** | col profilo `cloudflared` Cloudflare termina il TLS e vede tutto in chiaro: è il funzionamento del tunnel, e i tre installer lo dicono al momento della scelta |
 
 `partial` = curata a metà, e il file dice quale metà. `accepted` = rischio **accettato
 consapevolmente**, con la ragione scritta accanto: non è una svista.

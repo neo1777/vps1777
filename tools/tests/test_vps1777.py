@@ -1995,7 +1995,9 @@ def test_cloudflared_chiede_il_proprio_hostname():
     """
     pb, warn = _esegui_case_ingress("3", ["vps.esempio.invalid"])
     assert pb == "https://vps.esempio.invalid", pb
-    assert not warn, f"con l'hostname dato non serve nessun avviso: {warn}"
+    # l'unico avviso che resta è quello sul TLS terminato da Cloudflare (H83, 13/10/2026),
+    # che parla a ogni scelta di questo profilo: nessuno sull'hostname
+    assert not [w for w in warn if "SENZA sonda" in w], f"con l'hostname dato non serve: {warn}"
 
 
 def test_cloudflared_senza_hostname_avvisa_invece_di_tacere():
@@ -2009,7 +2011,18 @@ def test_cloudflared_senza_hostname_avvisa_invece_di_tacere():
     pb, warn = _esegui_case_ingress("3", [""])
     assert pb == "", pb
     assert warn, "il vuoto è passato in SILENZIO: è il difetto, non la cura"
-    assert "SENZA sonda" in warn[0], warn
+    assert any("SENZA sonda" in w for w in warn), warn
+
+
+def test_cloudflared_avvisa_che_cloudflare_vede_in_chiaro():
+    """H83 (13/10/2026, scelta di Neo): chi sceglie Cloudflare deve saperlo quando sceglie.
+    Il TLS termina sul bordo di Cloudflare, che vede token, gateway_secret e contenuti. Gli
+    altri due ingressi non lo dicono, perché non è vero per loro."""
+    for host in (["vps.esempio.invalid"], [""]):
+        _, warn = _esegui_case_ingress("3", host)
+        assert any("TLS termina sui server di Cloudflare" in w and "Caddy" in w for w in warn), warn
+    _, warn = _esegui_case_ingress("2", ["vps.esempio.invalid", "x@example.invalid"])
+    assert not any("Cloudflare" in w for w in warn), warn
 
 
 def test_cloudflared_non_raddoppia_lo_schema():

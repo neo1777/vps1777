@@ -506,6 +506,8 @@ case "$INGRESS_NUM" in
      PUBLIC_BASE="https://$CADDY_DOMAIN"
      ;;
   3) INGRESS=cloudflared
+     # scelta di Neo del 13/10/2026 (H83): chi sceglie Cloudflare lo sa nel momento in cui sceglie
+     warn "Con Cloudflare Tunnel il TLS termina sui server di Cloudflare: Cloudflare vede in chiaro tutto il traffico del gateway (i token OAuth, gli URL con il gateway_secret, i contenuti di archivio e notebook, la Mini App). Se non va bene, scegli Caddy (TLS sulla VPS) o Tailscale Funnel (cifrato fino alla VPS). Dettagli: SECURITY.md."
      ask_secret CF_TOKEN "Cloudflare Tunnel token"
      # Senza token il compose non parte (dichiara secrets/cloudflared_token.txt): si
      # dice adesso, come il dominio per Caddy, non al primo `up` sulla VPS.

@@ -171,6 +171,7 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
         <div class="field"><label>Email Let's Encrypt</label><input type="email" id="caddy_email" placeholder="tu@gmail.com"></div>
       </div>
       <div class="cond" id="cond-cf">
+        <div class="warnbox">⚠ Con Cloudflare Tunnel il TLS termina sui server di Cloudflare: Cloudflare vede <strong>in chiaro</strong> tutto il traffico del gateway (i token OAuth, gli URL con il <code>gateway_secret</code>, i contenuti di archivio e notebook, la Mini App). Se non va bene, scegli Caddy (TLS sulla VPS) o Tailscale Funnel (cifrato fino alla VPS). Dettagli in <code>SECURITY.md</code>.</div>
         <div class="field"><label>Cloudflare Tunnel token</label><input type="password" id="cf_token" placeholder="eyJ..."></div>
         <div class="field"><label>Hostname pubblico del tunnel <span class="opt">(quello configurato sul dashboard Cloudflare)</span></label><input type="text" id="cf_hostname" placeholder="vps.tuosito.com"></div>
         <div class="hint">Serve per l'URL finale e per gli URL connector: il token non lo contiene. Se lo lasci vuoto, alla fine sostituisci tu la base con <code>https://&lt;hostname&gt;</code>.</div>

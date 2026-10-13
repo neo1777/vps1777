@@ -280,6 +280,8 @@ else
     # ⇒ non si scopre: si CHIEDE. Prima non lo si chiedeva, e il vuoto che ne usciva
     # lasciava il profilo senza nessuna sonda dall'esterno (voce `070f8844`).
     3) INGRESS=cloudflared; CADDY_DOMAIN=""; CADDY_EMAIL=""
+       # scelta di Neo del 13/10/2026 (H83): chi sceglie Cloudflare lo sa nel momento in cui sceglie
+       warn "Con Cloudflare Tunnel il TLS termina sui server di Cloudflare: Cloudflare vede in chiaro tutto il traffico del gateway (i token OAuth, gli URL con il gateway_secret, i contenuti di archivio e notebook, la Mini App). Se non va bene, scegli Caddy (TLS sulla VPS) o Tailscale Funnel (cifrato fino alla VPS). Dettagli: SECURITY.md."
        ask CF_HOSTNAME "Hostname pubblico del tunnel (es. vps.miosito.com), quello che hai configurato sul dashboard CF" ""
        if [ -n "$CF_HOSTNAME" ]; then
          PUBLIC_BASE="https://${CF_HOSTNAME#https://}"

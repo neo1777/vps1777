@@ -339,6 +339,10 @@ for logico in $VOLUMI_ARCHIVIO; do
   command -v sqlite3 >/dev/null 2>&1 || continue
   for db in "$dbdir"/*.db; do
     [ -f "$db" ] || continue
+    # `<db>.vec.db` è l'indice della ricerca per senso accanto a un archivio: non ha la
+    # tabella `meta`, e ogni notte dava un avviso «non leggibile» per indice (e un file
+    # vuoto `descrizioni/<db>.vec.txt` nel core). Il suo DB ha già la sua riga.
+    case "$db" in *.vec.db) continue ;; esac
     if sqlite3 -readonly "$db" "SELECT value FROM meta WHERE key='description'" \
          > "$TMP/descrizioni/$(basename "$db" .db).txt" 2>/dev/null; then
       n_descr=$((n_descr + 1))
