@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **`search_ibrida` legge il punto anche senza chiederlo: `passaggio` passa da 0 a 120 parole.** Il banco
+  grande della ricerca (167 domande scritte alla cieca su sette DB, giudicate sulla scala 0-3 di UMBRELA)
+  ha misurato che con 120 parole la risposta si legge nel risultato in 24 domande in più e 5 in meno
+  rispetto allo snippet da 64 token (p = 0,0005). Il prezzo è di ~500 token in più per chiamata (~1.600
+  su 10 righe). `passaggio=0` torna allo snippet corto; 200 non dà un guadagno significativo in più.
+
 ## [0.89.0] — 2026-10-13
 
 **Il container di backup stretto con capability misurate, Cloudflare detto a chi lo sceglie, e il canonico della memoria a v2.6.**

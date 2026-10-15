@@ -75,7 +75,7 @@ modello che vinca sui soli vettori.
 | `speaker` | `""` | chi ha scritto la riga (`human`, `assistant`, `tool`, `system`, `other`, `unknown`), come in `search`. Filtra tutte e due le liste |
 | `k_rrf`, `peso_fts` | 30, 1.5 | la fusione: i valori misurati. Cambiarli è un esperimento, non una regolazione |
 | `snippet_tokens` | 64 | lunghezza dello snippet FTS (64 è anche il tetto di FTS5: oltre, tronca in silenzio). Era 32 fino alla 0.64.4 |
-| `passaggio` | 0 | un numero di parole, fino a 400: sostituisce lo snippet con la finestra di quel numero di parole dove i termini della domanda sono più fitti, presa dal testo **intero** (sotto) |
+| `passaggio` | 120 (dalla 0.90.0; prima 0) | un numero di parole, fino a 400 (0 = lo snippet): sostituisce lo snippet con la finestra di quel numero di parole dove i termini della domanda sono più fitti, presa dal testo **intero** (sotto) |
 | `riformulazioni` | nessuna | fino a 3 altri modi di dire la domanda. Ognuno porta le sue due liste, la fusione resta una e il `limit` lo stesso (sotto). Vuote e doppioni si scartano, più di 3 è un errore; `query_fts` vale solo per la domanda |
 
 Con un filtro (`speaker`, `since`, `until`) il ramo vettoriale chiede al knn più
@@ -99,6 +99,13 @@ aprire il file (almeno quattro parole di fila di una citazione della risposta at
 Il guadagno sta tutto sui testi lunghi: un messaggio di Telegram entra già intero nello
 snippet. Il passaggio costa token, circa 270 per riga a 200 parole: si chiede quando
 si leggono vocali, verbali o chat lunghe, non per ogni ricerca.
+
+**Dalla 0.90.0 il default è 120.** Il banco grande della ricerca (167 domande scritte alla cieca su
+sette DB, giudicate da un LLM sulla scala 0-3 di UMBRELA, 15/10/2026) ha misurato la lettura sulle
+sessioni di claude.ai, Claude Code e Roo, dove i messaggi sono lunghi: con `passaggio=120` la risposta
+si legge nel risultato in 24 domande in più e 5 in meno rispetto allo snippet da 64 token (test del
+segno, p = 0,0005). A 200 parole il guadagno in più non è significativo (+10/−4, p = 0,18). Il prezzo:
+su 10 righe ~1.600 token invece di ~1.100. `passaggio=0` torna allo snippet corto.
 
 **Dalla 0.74.0 lo snippet delle righe trovate per senso viene dal pezzo che ha colpito**
 (P4). Prima era l'inizio del messaggio, anche quando il pezzo vicino alla domanda stava
