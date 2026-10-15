@@ -905,11 +905,17 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         for name in {n for n, _ in scelti}:
             uuids = [u for n, u in scelti if n == name]
             seg = ",".join("?" * len(uuids))
-            testi_pieni = dict(connessioni[name].execute(
-                f"SELECT uuid, content FROM messages WHERE uuid IN ({seg})", uuids))
+            # 0.90.1: il testo è `content` e, se è vuoto, `tools` — le righe di strumenti (i
+            # comandi, e le risposte di Neo alle domande cliccabili) hanno lì tutto il testo.
+            # Prima, col passaggio, il 21% delle righe del banco grande restava senza snippet;
+            # se anche `tools` è vuoto, la riga tiene lo snippet che aveva.
+            testi_pieni = {u: (c or "").strip() or (s or "").strip()
+                           for u, c, s in connessioni[name].execute(
+                               f"SELECT uuid, content, tools FROM messages WHERE uuid IN ({seg})",
+                               uuids)}
             for r in righe:
-                if r["db"] == name and r["uuid"] in testi_pieni:
-                    r["snippet"] = semantica.passaggio(testi_pieni[r["uuid"]] or "",
+                if r["db"] == name and testi_pieni.get(r["uuid"]):
+                    r["snippet"] = semantica.passaggio(testi_pieni[r["uuid"]],
                                                        termini, passaggio)
     out: dict[str, Any] = {
         "righe": righe,

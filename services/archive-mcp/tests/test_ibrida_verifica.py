@@ -316,6 +316,25 @@ def test_passaggio_sostituisce_lo_snippet_e_ha_un_tetto(archivio, monkeypatch) -
         modulo.search_ibrida("punto cercato", db="arch", passaggio=5000)
 
 
+@vec
+def test_passaggio_legge_anche_le_righe_di_strumenti(archivio, monkeypatch) -> None:
+    """0.90.1: una riga con `content` vuoto e il testo in `tools` (un comando, una risposta a
+    una domanda cliccabile) col passaggio restava SENZA snippet: il 21% delle righe del banco
+    grande, appena `passaggio=120` è diventato il default. Ora il testo è `tools`."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    _rw(db, ("UPDATE messages SET content = '', tools = ? WHERE uuid = 'u2'",
+             ("Bash {\"command\": \"echo il punto cercato sta nei parametri\"}",)))
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    r = modulo.search_ibrida("punto cercato", db="arch", limit=5, passaggio=20)
+    riga = next((x for x in r["righe"] if x["uuid"] == "u2"), None)
+    assert riga is not None, "la riga di strumenti deve essere trovata"
+    assert "punto cercato" in riga["snippet"], riga["snippet"]
+
+
 # ── S2 e S3 (05/10/2026): fusione su tutti i DB, e ciò che si perde si dice ────────
 
 @pytest.fixture()

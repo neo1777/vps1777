@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Col passaggio le righe di strumenti restavano senza snippet.** Il passaggio prendeva il testo solo da
+  `content`, e le righe che hanno tutto in `tools` (i comandi, e le risposte di Neo alle domande
+  cliccabili) tornavano con lo snippet vuoto: il 21% delle righe del banco grande, appena la 0.90.0 ha
+  messo `passaggio=120` come default. Ora il testo è `content` e, se è vuoto, `tools`. Sul banco: 0
+  snippet vuoti su 1.670, e la risposta si legge in 89 domande su 167 (erano 87).
+
 ## [0.90.0] — 2026-10-15
 
 **`search_ibrida` legge il punto per default: il passaggio da 120 parole, misurato sul banco grande della ricerca.**
