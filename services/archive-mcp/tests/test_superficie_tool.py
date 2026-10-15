@@ -93,3 +93,11 @@ def test_get_session_e_get_stirpe_dichiarano_i_filoni() -> None:
         assert "`filoni`" in doc, f"{nome} non dichiara `filoni`"
     _, doc = _firma("get_session")
     assert "principale" in doc and "__fN" in doc
+
+
+def test_search_ibrida_legge_il_punto_per_default() -> None:
+    """0.90.0 (scelta di Neo `2026-10-15-soglia-passaggio-120`): col passaggio da 120 parole la
+    risposta si legge nel risultato in 24 domande in più e 5 in meno del banco grande (167 domande,
+    p = 0,0005). Il default torna a 0 solo con una misura nuova, non per risparmiare token a occhio."""
+    sig, _ = _firma("search_ibrida")
+    assert sig.parameters["passaggio"].default == 120

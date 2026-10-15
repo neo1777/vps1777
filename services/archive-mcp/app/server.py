@@ -247,9 +247,10 @@ def search_ibrida(
         "Fino a 3 altri modi di dire la domanda. La fusione resta una, con lo stesso "
         "limit: serve quando leggi pochi risultati."))] = None,
     passaggio: Annotated[int, Field(description=(
-        "0 (default) o un numero di parole fino a 400: al posto dello snippet, la finestra "
-        "del testo intero dove i termini sono più fitti. Per vocali, verbali e chat lunghe; "
-        "200 parole su 10 righe sono circa 2.700 token."))] = 0,
+        "Parole fino a 400 (default 120; 0 = lo snippet corto): al posto dello snippet, la "
+        "finestra del testo intero dove i termini sono più fitti. Con 120 la risposta si legge "
+        "nel risultato molto più spesso (misurato sul banco di 167 domande, 15/10/2026); su 10 "
+        "righe sono ~1.600 token contro ~1.100 dello snippet, a 200 ~2.400."))] = 120,
     ruoli: Annotated[str, Field(description=(
         "Dove cercare senza db_name: '' (default) = primari e non dichiarati; 'tutti' = "
         "ogni DB; oppure ruoli separati da virgole (primario, fotografia, riscontro, "

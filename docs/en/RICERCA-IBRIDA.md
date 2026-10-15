@@ -81,7 +81,7 @@ wins on vectors alone.
 | `speaker` | `""` | who wrote the row (`human`, `assistant`, `tool`, `system`, `other`, `unknown`), as in `search`. It filters both lists |
 | `k_rrf`, `peso_fts` | 30, 1.5 | the fusion: the measured values. Changing them is an experiment, not a tuning |
 | `snippet_tokens` | 64 | length of the FTS snippet (64 is also the FTS5 ceiling: above it, it truncates silently). It was 32 up to 0.64.4 |
-| `passaggio` | 0 | a number of words, up to 400: replaces the snippet with the window of that many words where the question's terms are densest, taken from the **whole** text (below) |
+| `passaggio` | 120 (since 0.90.0; 0 before) | a number of words, up to 400 (0 = the snippet): replaces the snippet with the window of that many words where the question's terms are densest, taken from the **whole** text (below) |
 | `riformulazioni` | none | up to 3 other ways of asking the question. Each one brings its own two lists, the fusion stays single and the `limit` the same (below). Empty ones and duplicates are dropped, more than 3 is an error; `query_fts` applies to the question only |
 
 With a filter (`speaker`, `since`, `until`) the vector branch asks the knn for more
@@ -105,6 +105,13 @@ opening the file (at least four consecutive words of a quote from the expected a
 The gain is all on long texts: a Telegram message already fits whole in the snippet. The
 passage costs tokens, about 270 per row at 200 words: ask for it when reading voice notes,
 meeting records or long chats, not for every search.
+
+**Since 0.90.0 the default is 120.** The large search bench (167 questions written blind over seven
+DBs, judged by an LLM on UMBRELA's 0-3 scale, 15/10/2026) measured reading on claude.ai, Claude Code
+and Roo sessions, where messages are long: with `passaggio=120` the answer can be read in the result
+for 24 more questions and 5 fewer than with the 64-token snippet (sign test, p = 0.0005). At 200 words
+the extra gain is not significant (+10/−4, p = 0.18). The price: ~1,600 tokens on 10 rows instead of
+~1,100. `passaggio=0` goes back to the short snippet.
 
 **Since 0.74.0 the snippet of rows found by meaning comes from the chunk that matched**
 (P4). Before, it was the start of the message, even when the chunk close to the question
