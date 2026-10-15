@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.90.1] — 2026-10-15
+
+**Col passaggio, che dalla 0.90.0 è il default, anche le righe di strumenti hanno lo snippet.**
+
 ### Corretto
 - **Col passaggio le righe di strumenti restavano senza snippet.** Il passaggio prendeva il testo solo da
   `content`, e le righe che hanno tutto in `tools` (i comandi, e le risposte di Neo alle domande
