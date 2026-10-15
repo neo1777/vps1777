@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.90.0] — 2026-10-15
+
+**`search_ibrida` legge il punto per default: il passaggio da 120 parole, misurato sul banco grande della ricerca.**
+
 ### Cambiato
 - **`search_ibrida` legge il punto anche senza chiederlo: `passaggio` passa da 0 a 120 parole.** Il banco
   grande della ricerca (167 domande scritte alla cieca su sette DB, giudicate sulla scala 0-3 di UMBRELA)
