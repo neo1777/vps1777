@@ -26,7 +26,7 @@ Riserva la severità alta per ciò che in questo repo fa danni veri:
 ## ⚠️ Cosa sappiamo GIÀ — non serve ridircelo
 
 Questo repo tiene un registro dei rilievi di sicurezza in **`security/findings.yml`**:
-83 voci, **69 chiuse**, e le **14 qui sotto non chiuse** (10 parziali, 4 accettate), ognuna con data, motivo e
+84 voci, **70 chiuse**, e le **14 qui sotto non chiuse** (10 parziali, 4 accettate), ognuna con data, motivo e
 stato. Sono già state trovate, discusse e classificate: segnalarle di nuovo consuma il
 giro senza aggiungere niente.
 

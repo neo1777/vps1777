@@ -4,6 +4,21 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **La pagina di consenso OAuth dice dove va il permesso, e chiede una conferma se la destinazione non è
+  nota (`H84`).** La registrazione dinamica dei client è aperta, perché claude.ai ne registra uno a ogni
+  connettore: chiunque poteva quindi registrare un client chiamato «Claude» con un indirizzo suo e mandarti
+  un link di consenso già pronto. Ora:
+  - la registrazione accetta solo indirizzi di ritorno https, verso il loopback (un'app sul PC) o con uno
+    schema privato da app (RFC 8252), al massimo 5, senza frammento né credenziali: niente `javascript:` o
+    `data:`; il nome del client si ripulisce dai caratteri di controllo;
+  - la pagina mostra in grassetto l'host che riceve il permesso e dice che il nome lo dichiara l'app;
+  - verso un host che non è claude.ai, claude.com (`OAUTH_TRUSTED_REDIRECT_HOSTS`) o il loopback serve una
+    casella «ho avviato io il collegamento», ricontrollata anche dal server;
+  - le registrazioni mai autorizzate scadono dopo 24 ore e non superano le 50; quelle già in uso non si
+    toccano;
+  - l'audit scrive l'host di destinazione su registrazione, rifiuto e autorizzazione.
+
 ## [0.91.1] — 2026-10-16
 
 **Con molte copie di testo `search_ibrida` torna comunque le righe chieste.**

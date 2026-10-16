@@ -17,6 +17,7 @@ OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*`.
 | `OAUTH_ACCESS_TOKEN_LIFETIME` | `900` | sec |
 | `OAUTH_REFRESH_TOKEN_LIFETIME` | `2592000` | sec |
 | `OAUTH_CORS_ORIGINS` | `https://claude.ai` (compose: `+ https://web.telegram.org`) | CSV |
+| `OAUTH_TRUSTED_REDIRECT_HOSTS` | `claude.ai,claude.com` | CSV degli host di redirect che la pagina di consenso dà per noti; verso gli altri (tranne il loopback) chiede una conferma in più (H84) |
 | `TELEGRAM_WEBAPP_SECRET_FILE` | (none; compose: `/run/secrets/telegram_webapp_secret`) | chiave derivata dal token del bot, per verificare l'`initData` della Mini App (il token intero il gateway non lo monta: `TELEGRAM_BOT_TOKEN_FILE` resta solo come ricaduta, H54) |
 | `TELEGRAM_OWNER_ID` | `0` | owner della Mini App; 0 o vuoto = non entra nessuno (fail-closed) |
 | `ARCHIVE_INGEST_CODA` | `false` (compose: `true`) | `/admin/archive` mette i file in coda per il job `ingest` invece di indicizzarli nel gateway |
@@ -37,7 +38,7 @@ Fuori da compose `GATEWAY_UPSTREAMS` e le variabili `*_FILE` vanno passate: nel 
 - `GET /health` — healthcheck (`?deep=1`: proba anche gli upstream MCP, 503 se giù; solo per i chiamanti interni, da fuori 403)
 - `GET /.well-known/oauth-{protected-resource,authorization-server}` — discovery OAuth
 - `POST /register` — Dynamic Client Registration OAuth
-- `GET|POST /authorize` (pagina di consenso e decisione), `POST /token` — flow OAuth 2.1
+- `GET|POST /authorize` (pagina di consenso e decisione: dice a quale host va il permesso e, se non è noto, chiede una conferma), `POST /token` — flow OAuth 2.1
 - `/admin/{login,setup,nlm,archive,update,salute,secrets,audit}` — pannello admin; in più `POST /admin/logout`, `POST /admin/archive/delete`, `POST /admin/update/check`, `GET /admin/nlm/artifact/{name}`
 - `POST /admin/nlm` — upload del profilo nlm (tar.gz di `profiles/default`)
 - `POST /admin/update` — scrive l'intent di aggiornamento (consumato dalla CLI host)

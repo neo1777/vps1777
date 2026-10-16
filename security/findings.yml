@@ -4110,3 +4110,55 @@ findings:
       - file: installer/ui.html
         contains:
           - "Con Cloudflare Tunnel il TLS termina sui server di Cloudflare"
+  - id: H84
+    severity: medium
+    title: "Consent phishing via DCR aperta: chiunque registrava un client con un redirect_uri qualunque e la pagina di consenso non diceva dove andava il permesso"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-10-16"
+      come: lettura
+      nota: >
+        Dalla decisione D11 del dossier evoluzione-mcp (consenso OAuth dal telefono): il
+        rischio di push-bombing con la registrazione dinamica aperta ha fatto rileggere il
+        consenso di oggi. Il proprietario ha detto no al consenso dal telefono e sì a
+        rafforzare quello che c'è (scelta `2026-10-16-soglia-decisioni-d-consenso-miniapp`).
+        Sulla VPS di riferimento le 8 registrazioni sono tutte di claude.ai: nessun abuso visto.
+    since: unreleased
+    why: >
+      La DCR è aperta per costruzione: claude.ai registra un client a ogni connettore. Chi
+      registrava un client col nome «Claude» e un redirect_uri suo poteva mandare al
+      proprietario un link di consenso già pronto; la pagina mostrava il nome scelto
+      dall'attaccante e l'URI in un campo di sola lettura, e un «Autorizza» dato da loggato
+      consegnava un token per archivio e notebook. Il DCR accettava anche schemi come
+      `javascript:` e `data:` e un numero illimitato di registrazioni mai usate.
+    evidence:
+      - file: services/gateway/app/oauth.py
+        contains:
+          - "def _redirect_uri_ammesso("
+          - "def _destinazione("
+          - "def _sfoltisci_pendenti("
+          - 'if tipo in _DA_CONFERMARE and str(form.get("conferma_destinazione", "")) != "1":'
+      - file: services/gateway/app/settings.py
+        contains:
+          - "oauth_trusted_redirect_hosts: CSVList"
+      - file: services/gateway/tests/test_oauth_consent.py
+        contains:
+          - "def test_dcr_rifiuta_gli_uri_pericolosi("
+          - "def test_autorizza_senza_conferma_non_emette_il_code("
+          - "def test_dcr_toglie_le_pendenti_vecchie_e_tiene_un_tetto("
+    fix: >
+      Il DCR accetta solo redirect_uri https con un host, http verso il loopback e schemi
+      privati a nome di dominio (RFC 8252), senza frammento né credenziali, al massimo 5; il
+      nome del client si ripulisce dai caratteri di controllo. La pagina di consenso dice a
+      chi arriva il permesso (host in grassetto, «il nome lo dichiara lei») e, se la
+      destinazione non è claude.ai, claude.com (OAUTH_TRUSTED_REDIRECT_HOSTS) o il loopback,
+      chiede una casella «ho avviato io il collegamento», ricontrollata dal server. Le
+      registrazioni mai autorizzate scadono dopo 24 h e non superano le 50. L'audit scrive
+      l'host di destinazione su registrazione, rifiuto e code.
+    prova:
+      - comando: "uvx pytest tests/test_oauth_consent.py -q (services/gateway)"
+        dove: "PC"
+        output: "47 passed: 5 URI sensati accettati, 12 pericolosi rifiutati, code negato senza conferma"
+        exit: 0
+        quando: "2026-10-16"

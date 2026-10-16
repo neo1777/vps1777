@@ -68,6 +68,7 @@ class _Settings:
     oauth_access_token_lifetime = 900
     oauth_refresh_token_lifetime = 2_592_000
     gateway_public_base = "https://gw.example"
+    oauth_trusted_redirect_hosts = ["claude.ai", "claude.com"]
 
 
 class _RateLimiter:
@@ -153,6 +154,9 @@ class FakeRequest:
 
     async def form(self):
         return self._form
+
+    async def json(self):
+        return self._json
 
 
 def run(coro):
@@ -457,3 +461,128 @@ def test_token_uses_compare_digest_for_pkce():
     src = inspect.getsource(oauth.token)
     assert "compare_digest" in src, "il confronto PKCE non è constant-time (H32)"
     assert "code_challenge\"] ==" not in src and "== ctx[\"code_challenge\"]" not in src
+
+
+# ─────────────────────────── DCR e destinazione del consenso (H84) ───────────────────────────
+# Il consent phishing: la DCR è aperta, quindi chiunque registra un client col suo
+# redirect_uri e manda al proprietario un link di consenso già pronto. Si accettano solo
+# URI sensati, la pagina dice dove va il permesso, e verso una destinazione non nota
+# serve una conferma in più, ricontrollata anche dal server.
+
+def _registra(body):
+    req = FakeRequest(method="POST")
+    req._json = body
+    return run(oauth.register(req))
+
+
+@pytest.mark.parametrize("uri", [
+    "https://claude.ai/api/mcp/auth_callback",
+    "http://127.0.0.1:33418/callback",
+    "http://localhost:6274/oauth/callback",
+    "http://[::1]:8080/cb",
+    "com.example.app:/oauth2redirect",
+])
+def test_dcr_accetta_gli_uri_sensati(uri):
+    r = _registra({"redirect_uris": [uri], "client_name": "x"})
+    assert r.status_code == 201
+
+
+@pytest.mark.parametrize("uri", [
+    "javascript:alert(1)",
+    "data:text/html,ciao",
+    "file:///etc/passwd",
+    "http://evil.example/cb",              # http solo verso il loopback
+    "http://localhost.evil.example/cb",
+    "https://claude.ai@evil.example/cb",   # credenziali nell'URI
+    "https://claude.ai/cb#frammento",
+    "https:///senza-host",
+    "https://claude.ai/c b",
+    "https://claude.ai/" + "a" * 600,
+    "",
+    42,
+])
+def test_dcr_rifiuta_gli_uri_pericolosi(uri):
+    r = _registra({"redirect_uris": [uri]})
+    assert r.status_code == 400
+    assert r.data["error"] == "invalid_redirect_uri"
+
+
+def test_dcr_rifiuta_troppi_uri_e_un_corpo_non_oggetto():
+    assert _registra({"redirect_uris": ["https://claude.ai/cb"] * 6}).status_code == 400
+    assert _registra(["https://claude.ai/cb"]).status_code == 400
+
+
+def test_dcr_ripulisce_il_nome_e_segna_la_registrazione_pendente():
+    r = _registra({"redirect_uris": ["https://claude.ai/cb"],
+                   "client_name": "Claude\u202e\x00" + "z" * 200})
+    c = oauth._clients[r.data["client_id"]]
+    assert "\x00" not in c["client_name"] and "\u202e" not in c["client_name"]
+    assert len(c["client_name"]) <= 80
+    assert c["pendente"] is True
+
+
+def test_dcr_toglie_le_pendenti_vecchie_e_tiene_un_tetto(monkeypatch):
+    now = 10_000_000
+    monkeypatch.setattr(oauth.time, "time", lambda: now)
+    oauth._clients["vecchia"] = {"redirect_uris": ["https://claude.ai/cb"], "client_name": "v",
+                                 "registered_at": now - 25 * 3600, "pendente": True}
+    for i in range(oauth._PENDENTI_MAX):
+        oauth._clients[f"p{i:02d}"] = {"redirect_uris": ["https://claude.ai/cb"],
+                                       "client_name": "p", "registered_at": now - 100 + i,
+                                       "pendente": True}
+    oauth._clients["autorizzata"] = {"redirect_uris": ["https://claude.ai/cb"],
+                                     "client_name": "a", "registered_at": 0}
+    r = _registra({"redirect_uris": ["https://claude.ai/cb"]})
+    assert r.status_code == 201
+    assert "vecchia" not in oauth._clients and "p00" not in oauth._clients
+    assert "p01" in oauth._clients
+    assert "autorizzata" in oauth._clients and "cid" in oauth._clients   # mai toccate
+    pendenti = [k for k, v in oauth._clients.items() if v.get("pendente")]
+    assert len(pendenti) == oauth._PENDENTI_MAX
+
+
+def test_consenso_verso_claude_dice_la_destinazione_senza_conferma():
+    r = run(oauth.authorize(FakeRequest(query=_valid_query())))
+    assert "<strong>claude.ai</strong>" in r.body
+    assert "non è verificato" in r.body
+    assert "conferma_destinazione" not in r.body
+
+
+def _client_sconosciuto():
+    oauth._clients["ext"] = {"redirect_uris": ["https://evil.example/cb"],
+                             "client_name": "Claude", "registered_at": 0, "pendente": True}
+    return _valid_query(client_id="ext", redirect_uri="https://evil.example/cb")
+
+
+def test_consenso_verso_una_destinazione_sconosciuta_chiede_la_conferma():
+    r = run(oauth.authorize(FakeRequest(query=_client_sconosciuto())))
+    assert "<strong>evil.example</strong>" in r.body
+    assert 'name="conferma_destinazione"' in r.body and "required" in r.body
+
+
+def test_autorizza_senza_conferma_non_emette_il_code():
+    form = _client_sconosciuto()
+    form.update(csrf="valid", decision="allow")
+    r = run(oauth.authorize(FakeRequest(method="POST", form=form)))
+    assert getattr(r, "location", "") == ""
+    assert "Manca la conferma" in r.body
+    assert oauth._codes == {}
+    assert oauth._clients["ext"].get("pendente") is True
+
+
+def test_autorizza_con_conferma_emette_il_code_e_toglie_pendente():
+    form = _client_sconosciuto()
+    form.update(csrf="valid", decision="allow", conferma_destinazione="1")
+    r = run(oauth.authorize(FakeRequest(method="POST", form=form)))
+    assert r.location.startswith("https://evil.example/cb?code=")
+    assert "pendente" not in oauth._clients["ext"]
+    assert oauth._clients["ext"]["autorizzato_il"] > 0
+
+
+def test_la_destinazione_distingue_nota_locale_app_sconosciuta():
+    assert oauth._destinazione("https://claude.ai/cb") == ("claude.ai", "nota")
+    assert oauth._destinazione("https://CLAUDE.com/cb") == ("claude.com", "nota")
+    assert oauth._destinazione("http://127.0.0.1:9/cb") == ("127.0.0.1", "locale")
+    assert oauth._destinazione("com.example.app:/cb") == ("com.example.app", "app")
+    assert oauth._destinazione("https://claude.ai.evil.example/cb")[1] == "sconosciuta"
+    assert oauth._destinazione("https://[::1/cb") == ("?", "sconosciuta")   # client vecchio, URI rotto
