@@ -157,6 +157,10 @@ class Settings(BaseSettings):
     oauth_miniapp_token_lifetime: int = 3600     # 1h
     oauth_allowed_emails: CSVList = Field(default_factory=list)
     oauth_cors_origins: CSVList = Field(default_factory=lambda: ["https://claude.ai"])
+    # gli host di redirect che la pagina di consenso dà per noti; per gli altri chiede
+    # una conferma in più (H84)
+    oauth_trusted_redirect_hosts: CSVList = Field(
+        default_factory=lambda: ["claude.ai", "claude.com"])
     oauth_signing_secret_file: SecretFromFile = ""
     oauth_signing_secret: str = ""
     oauth_pwd_hash_file: SecretFromFile = ""

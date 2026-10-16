@@ -100,6 +100,9 @@ finestra 8080 dell'onboarding, l'eccezione nota di questa riga).
 Threat model dichiarato:
 - Backend (archive-mcp, nb1777-mcp, bot, ocr e il lavoro a profilo `ingest`) su rete Docker `internal: true` — non raggiungibili dall'esterno; il job `indice-notturno` gira senza rete (`network_mode: none`) (nb1777-mcp e bot hanno anche l'uscita `egress`, senza porte pubblicate: possono uscire, non essere raggiunti — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)); nessun servizio pubblica `ports` in `compose.yaml` (`H48`)
 - OAuth 2.1 + DCR + PKCE per tutti i client OAuth (claude.ai, Mini App, future integrazioni)
+- La DCR è aperta (claude.ai registra un client a ogni connettore), quindi il consenso è la difesa: accetta solo
+  redirect_uri https, loopback o schemi privati (RFC 8252), dice a quale host va il permesso e, se non è
+  claude.ai, claude.com o il loopback, chiede una conferma in più; le registrazioni mai autorizzate scadono in 24 h (`H84`)
 - JWT con `typ` separati: access_token (15min), refresh_token (30gg), admin (8h), miniapp (1h)
 - Path namespacing via `GATEWAY_SECRET`: l'URL contiene un segreto rotabile (se compromesso, rota e cambi URL)
 - Bcrypt rounds=12 per password admin (file `secrets/admin_password_bcrypt.txt`)
@@ -470,7 +473,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** Gli 83 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** Gli 84 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -481,7 +484,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **83 voci** (2 critiche, 13 alte, 49 medie, 19 basse): 43 dalla
+Il registro conta **84 voci** (2 critiche, 13 alte, 50 medie, 19 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -521,11 +524,14 @@ API, che contiene il token, una riga ogni dieci secondi. E due (`H82`, `H83`, 13
 rilettura di tutta la documentazione contro il codice: il container di backup girava root con
 tutte le capability e il repo in scrittura (ora stretto, e il resto è scritto), e col profilo
 `cloudflared` Cloudflare vede in chiaro tutto il traffico (accettato, e detto a chi sceglie).
+E una (`H84`, 16/10) dalla decisione sul consenso OAuth dal telefono: con la registrazione
+dinamica aperta, chiunque poteva preparare un link di consenso verso un indirizzo suo, e la
+pagina non diceva dove andava il permesso (ora lo dice, e chiede una conferma in più).
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 69 |
+| **chiusi** | 70 |
 | **parziali** | 10 |
 | **accettati** | 4 |
 | **aperti** | 0 |

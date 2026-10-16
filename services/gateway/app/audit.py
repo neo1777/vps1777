@@ -126,6 +126,9 @@ _CHIAVI_NOTE = frozenset({
     "fields", "file", "files", "fmt", "i", "insecure", "ip", "jti", "latest", "len", "method",
     "notebook", "owner_configured", "path", "persisted", "reason", "rows", "running",
     "service", "status", "sub", "target", "user_id",
+    # H84: dove va il permesso OAuth (l'host, mai l'URI intero) e quante registrazioni
+    # mai autorizzate si sono tolte
+    "destinazione", "pendenti_tolti", "redirect_host",
     # scritte dal modulo stesso, non dai chiamanti. `dropped`/`last_error` appartengono al
     # record di recovery, che oggi si scrive DIRETTO (r.182) e non passa di qui: sono
     # dichiarate perché il giorno che passasse non si rompa in silenzio.

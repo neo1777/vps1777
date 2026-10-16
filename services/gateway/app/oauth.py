@@ -118,6 +118,80 @@ async def well_known_authserver(_request: Request) -> Response:
 
 
 # ───── DCR (Dynamic Client Registration) ─────
+# La DCR è aperta per costruzione (claude.ai registra un client nuovo a ogni connettore),
+# quindi chiunque può registrare un client e mandare al proprietario un link di consenso
+# già pronto verso un redirect_uri suo (consent phishing). Tre difese (H84): cosa si
+# accetta qui, la destinazione in chiaro sulla pagina di consenso con una conferma in più
+# se non è nota, e un tetto alle registrazioni mai autorizzate.
+_MAX_REDIRECT_URIS = 5
+_MAX_URI_LEN = 512
+_MAX_NOME = 80
+_PENDENTI_MAX = 50              # registrazioni mai autorizzate tenute al massimo
+_PENDENTE_TTL_S = 24 * 3600     # e per quanto tempo
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
+def _redirect_uri_ammesso(uri: Any) -> bool:
+    """RFC 6749 §3.1.2 e RFC 8252 §7: https con un host, http solo verso il loopback (un'app
+    sul PC), oppure uno schema privato a nome di dominio rovesciato (`com.example.app:/cb`).
+    Mai frammento, credenziali o spazi nell'URI; quindi mai `javascript:`, `data:`, `file:`."""
+    if not isinstance(uri, str) or not uri or len(uri) > _MAX_URI_LEN:
+        return False
+    if "#" in uri or any(c.isspace() or not c.isprintable() for c in uri):
+        return False
+    try:
+        s = urlsplit(uri)
+        host = s.hostname
+    except ValueError:
+        return False
+    if s.username is not None or s.password is not None:
+        return False
+    if s.scheme == "https":
+        return bool(host)
+    if s.scheme == "http":
+        return host in _LOOPBACK
+    return "." in s.scheme
+
+
+def _nome_client(valore: Any) -> str:
+    """Il nome lo sceglie chi registra: niente caratteri di controllo e al massimo 80."""
+    if not isinstance(valore, str):
+        return "unknown"
+    nome = "".join(c for c in valore if c.isprintable()).strip()[:_MAX_NOME]
+    return nome or "unknown"
+
+
+def _destinazione(redirect_uri: str) -> tuple[str, str]:
+    """(dove, tipo) del redirect_uri: «nota» per gli host di fiducia (claude.ai, claude.com,
+    o quelli di OAUTH_TRUSTED_REDIRECT_HOSTS), «locale» per un'app su questo computer
+    (loopback), «app» per uno schema privato, «sconosciuta» per tutto il resto."""
+    try:
+        s = urlsplit(redirect_uri)
+        host = s.hostname or ""
+    except ValueError:   # un client registrato prima di H84 può avere un URI malformato
+        return "?", "sconosciuta"
+    if s.scheme not in ("http", "https"):
+        return s.scheme, "app"
+    if host in _LOOPBACK:
+        return host, "locale"
+    fidati = {h.strip().lower() for h in get_settings().oauth_trusted_redirect_hosts}
+    return host, "nota" if host in fidati else "sconosciuta"
+
+
+def _sfoltisci_pendenti(now: float) -> int:
+    """Toglie le registrazioni mai autorizzate più vecchie di 24 h e, oltre le 50, le più
+    vecchie. I client autorizzati almeno una volta non si toccano, e nemmeno quelli
+    registrati prima di H84, che il campo `pendente` non ce l'hanno."""
+    pendenti = sorted((int(v.get("registered_at", 0)), k)
+                      for k, v in _clients.items() if v.get("pendente"))
+    via = [k for t, k in pendenti if now - t > _PENDENTE_TTL_S]
+    resto = [k for t, k in pendenti if now - t <= _PENDENTE_TTL_S]
+    if len(resto) >= _PENDENTI_MAX:
+        via += resto[:len(resto) - _PENDENTI_MAX + 1]   # posto per quella che arriva
+    for k in via:
+        _clients.pop(k, None)
+    return len(via)
+
 
 async def register(request: Request) -> Response:
     if not _REGISTER_LIMIT.allow(_ip(request), time.time()):
@@ -126,23 +200,32 @@ async def register(request: Request) -> Response:
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
     redirect_uris = body.get("redirect_uris") or []
-    if not isinstance(redirect_uris, list) or not redirect_uris:
+    if (not isinstance(redirect_uris, list) or not redirect_uris
+            or len(redirect_uris) > _MAX_REDIRECT_URIS
+            or not all(_redirect_uri_ammesso(u) for u in redirect_uris)):
         return JSONResponse(
             {"error": "invalid_redirect_uri"}, status_code=400,
         )
+    now = int(time.time())
+    tolti = _sfoltisci_pendenti(now)
     client_id = pysecrets.token_urlsafe(16)
     _clients[client_id] = {
         "redirect_uris": redirect_uris,
-        "client_name": body.get("client_name", "unknown"),
-        "registered_at": int(time.time()),
+        "client_name": _nome_client(body.get("client_name")),
+        "registered_at": now,
+        "pendente": True,   # fino al primo «Autorizza»
     }
     _save_clients()   # persiste → sopravvive ai restart del gateway
-    audit({"event": "oauth_register", "client_id": client_id})
+    dove, tipo = _destinazione(redirect_uris[0])
+    audit({"event": "oauth_register", "client_id": client_id, "redirect_host": dove,
+           "destinazione": tipo, "pendenti_tolti": tolti})
     return JSONResponse(
         {
             "client_id": client_id,
-            "client_id_issued_at": int(time.time()),
+            "client_id_issued_at": now,
             "redirect_uris": redirect_uris,
             "token_endpoint_auth_method": "none",
         },
@@ -154,6 +237,13 @@ async def register(request: Request) -> Response:
 # Gli scope sono statici in questo single-tenant (l'unica identità è l'admin);
 # li mostriamo nella consent page così l'utente vede COSA sta concedendo.
 _SCOPES = "mcp:read, mcp:write"
+_SPIEGA = {
+    "nota": "una destinazione nota.",
+    "locale": "un'app su questo computer.",
+    "app": "un'app installata, che si presenta con questo schema.",
+    "sconosciuta": "una destinazione che questo gateway non conosce.",
+}
+_DA_CONFERMARE = {"app", "sconosciuta"}
 
 
 def _validate_authorize_params(params: Any) -> tuple[dict[str, str] | None, Response | None]:
@@ -196,7 +286,7 @@ def _validate_authorize_params(params: Any) -> tuple[dict[str, str] | None, Resp
     }, None
 
 
-def _consent_page(email: str, p: dict[str, str]) -> Response:
+def _consent_page(email: str, p: dict[str, str], manca_conferma: bool = False) -> Response:
     """Schermata di consenso (H8): l'admin approva ESPLICITAMENTE l'app prima che
     il code venga emesso. Servita dal gateway → riusa `_layout` di admin.py per la
     CSP-con-nonce e il token CSRF (che `_layout` inietta d'ufficio in ogni <form>).
@@ -211,6 +301,17 @@ def _consent_page(email: str, p: dict[str, str]) -> Response:
         for k in ("client_id", "redirect_uri", "state",
                   "code_challenge", "code_challenge_method", "response_type")
     )
+    dove, tipo = _destinazione(p["redirect_uri"])
+    avviso = ""
+    if tipo in _DA_CONFERMARE:
+        avviso = (
+            f'<div class="flash err">{"Manca la conferma qui sotto. " if manca_conferma else ""}'
+            "Questa destinazione non è fra quelle note. Autorizza solo se il collegamento "
+            "l'hai appena avviato tu da quest'app: chi ti manda un link di consenso già "
+            "pronto riceverebbe l'accesso al tuo archivio e ai tuoi notebook.</div>"
+            '<div class="row"><label><input type="checkbox" name="conferma_destinazione" '
+            f'value="1" required> Ho avviato io il collegamento verso {html.escape(dove)}'
+            "</label></div>")
     body = f"""
 <header>
   <h1>vps1777 <em>consenso</em></h1>
@@ -220,8 +321,10 @@ def _consent_page(email: str, p: dict[str, str]) -> Response:
   {fields}
   <section>
     <div class="kicker">richiesta di accesso</div>
-    <p>L'applicazione <strong>{html.escape(p["client_name"])}</strong> chiede di
-       collegarsi a questo gateway per tuo conto.</p>
+    <p>L'applicazione <strong>{html.escape(p["client_name"])}</strong> (il nome lo
+       dichiara lei, non è verificato) chiede di collegarsi a questo gateway per tuo
+       conto. Il permesso arriva a <strong>{html.escape(dove)}</strong>: {_SPIEGA[tipo]}</p>
+    {avviso}
     <div class="row stack"><label>redirect_uri</label><input type="text" value="{html.escape(p["redirect_uri"])}" readonly></div>
     <div class="row stack"><label>ambiti richiesti</label><input type="text" value="{html.escape(_SCOPES)}" readonly></div>
     <div class="toolbar">
@@ -319,15 +422,28 @@ async def _authorize_decide(request: Request) -> Response:
     # interno spezzerebbe la query di redirect.
     sep = "&" if "?" in redirect_uri else "?"
 
+    dove, tipo = _destinazione(redirect_uri)
     if str(form.get("decision", "")) != "allow":
         # Rifiuto esplicito (o decision assente) → access_denied per spec OAuth.
-        audit({"event": "oauth_consent_denied", "client_id": params["client_id"], "sub": email})
+        audit({"event": "oauth_consent_denied", "client_id": params["client_id"], "sub": email,
+               "redirect_host": dove, "destinazione": tipo})
         return RedirectResponse(
             f"{redirect_uri}{sep}error=access_denied&state={quote(state, safe='')}",
             status_code=302,
         )
 
+    # Verso una destinazione non nota serve la casella spuntata (H84): si ricontrolla qui,
+    # perché `required` nel modulo lo fa solo il browser.
+    if tipo in _DA_CONFERMARE and str(form.get("conferma_destinazione", "")) != "1":
+        audit({"event": "oauth_consent_unconfirmed", "client_id": params["client_id"],
+               "sub": email, "redirect_host": dove, "destinazione": tipo})
+        return _consent_page(email, params, manca_conferma=True)
+
     # Autorizza → emette il code (stessa logica di prima, ora dietro consenso).
+    client = _clients.get(params["client_id"]) or {}
+    if client.pop("pendente", None):
+        client["autorizzato_il"] = int(time.time())
+        _save_clients()
     code = pysecrets.token_urlsafe(32)
     _codes[code] = {
         "client_id": params["client_id"],
@@ -336,7 +452,8 @@ async def _authorize_decide(request: Request) -> Response:
         "code_challenge": params["code_challenge"],
         "expires_at": int(time.time()) + 300,
     }
-    audit({"event": "oauth_code_issued", "client_id": params["client_id"], "sub": email})
+    audit({"event": "oauth_code_issued", "client_id": params["client_id"], "sub": email,
+           "redirect_host": dove, "destinazione": tipo})
     return RedirectResponse(
         f"{redirect_uri}{sep}code={code}&state={quote(state, safe='')}", status_code=302)
 

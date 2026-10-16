@@ -163,8 +163,11 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # codice (12/10): il container di backup root con tutte le capability e il repo in scrittura
 # (stretto con capability misurate, il resto scritto), e il TLS terminato da Cloudflare col
 # profilo cloudflared (accettato, detto a chi sceglie). Scelte di Neo del 13/10.
-EXPECTED_TOTAL = 83
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 13, "medium": 49, "low": 19}
+# + 1 (H84, medium, 16/10) = 84. Il consent phishing via DCR aperta: la pagina di consenso
+# non diceva dove andava il permesso, e il DCR accettava qualunque redirect_uri. Dalla
+# decisione D11 (consenso dal telefono: no; rafforzare il consenso di oggi: sì).
+EXPECTED_TOTAL = 84
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 13, "medium": 50, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():
