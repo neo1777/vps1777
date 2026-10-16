@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.91.1] — 2026-10-16
+
+**Con molte copie di testo `search_ibrida` torna comunque le righe chieste.**
+
 ### Corretto
 - **Con molte copie di testo `search_ibrida` tornava meno righe di quelle chieste.** La 0.91.0 cercava le
   copie in una riserva fissa di 2×`limit`: con 7 copie della stessa routine tornavano 3 righe su 5, anche se
