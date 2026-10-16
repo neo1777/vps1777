@@ -493,7 +493,7 @@ jobs:
         working-directory: services/nb1777-bot
         run: |
           uv sync --frozen
-          uv run --with pytest pytest tests/test_comandi.py -v
+          uv run --with pytest pytest tests/test_comandi.py tests/test_notifiche_due_code.py -v
       # /health importa l'SDK mcp: nello step stdlib-only qui sopra SALTA (importorskip
       # dichiarato nel test). Questo step lo fa girare con le deps del lock — senza,
       # il presidio del healthcheck semantico non girerebbe MAI in CI (vaglio 03/09).

@@ -175,31 +175,42 @@ async def _send_notification(app: Application, owner: int, item: dict) -> None:
         await app.bot.send_message(chat_id=owner, text=text)
 
 
+def _fonti_notifiche(s) -> list[tuple[str, str]]:
+    """Le code da prelevare: nb1777-mcp (canonico, sonda, promemoria) e il gateway (i
+    connettori OAuth autorizzati). Una base vuota spegne la sua coda."""
+    fonti = [("nb1777-mcp", s.nlm_internal_base), ("gateway", s.gateway_internal_base)]
+    return [(nome, f"{base.rstrip('/')}/internal/notifications") for nome, base in fonti if base]
+
+
+async def _preleva(nome: str, url: str, segreto: str) -> list[dict]:
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            r = await client.get(url, headers={"x-vps1777-internal": segreto})
+        if r.status_code != 200:
+            log.warning("notifiche: %s ha risposto %s", nome, r.status_code)
+            return []
+        items = r.json().get("items", [])
+    except (httpx.RequestError, ValueError) as exc:
+        log.warning("notifiche: %s irraggiungibile (%s)", nome, exc)
+        return []
+    return [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
+
+
 async def _notify_loop(app: Application) -> None:
-    """Preleva periodicamente le notifiche da nb1777-mcp e le manda all'owner.
-    Fail-safe: se il server non risponde, logga e riprova al giro dopo."""
+    """Preleva periodicamente le notifiche da nb1777-mcp e dal gateway e le manda
+    all'owner. Fail-safe: se un server non risponde, logga e riprova al giro dopo."""
     s = get_settings()
-    url = f"{s.nlm_internal_base.rstrip('/')}/internal/notifications"
     while True:
         await asyncio.sleep(60)
         owner = get_settings().telegram_owner_id
         if not owner:
             continue
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
-                r = await client.get(url, headers={"x-vps1777-internal": s.effective_gateway_secret})
-            if r.status_code != 200:
-                log.warning("notifiche: nb1777-mcp ha risposto %s", r.status_code)
-                continue
-            items = r.json().get("items", [])
-        except (httpx.RequestError, ValueError) as exc:
-            log.warning("notifiche: nb1777-mcp irraggiungibile (%s)", exc)
-            continue
-        for item in items:
-            try:
-                await _send_notification(app, owner, item)
-            except Exception as exc:  # noqa: BLE001 — una notifica rotta non ferma il loop
-                log.warning("notifica non inviata (%s): %s", item.get("kind"), exc)
+        for nome, url in _fonti_notifiche(s):
+            for item in await _preleva(nome, url, s.effective_gateway_secret):
+                try:
+                    await _send_notification(app, owner, item)
+                except Exception as exc:  # noqa: BLE001 — una notifica rotta non ferma il loop
+                    log.warning("notifica non inviata (%s): %s", item.get("kind"), exc)
 
 
 async def cmd_ack(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:

@@ -22,6 +22,7 @@ from urllib.parse import quote, urlsplit
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse, Response
 
+from . import notifiche
 from .audit import audit
 from .jwt_helpers import JWTError, issue, verify
 from .ratelimit import RateLimiter
@@ -444,6 +445,13 @@ async def _authorize_decide(request: Request) -> Response:
     if client.pop("pendente", None):
         client["autorizzato_il"] = int(time.time())
         _save_clients()
+    # Un consenso dato per sbaglio si vede solo se qualcuno lo dice: l'avviso arriva su
+    # Telegram (il bot preleva la coda) con chi e dove, e dove revocarlo.
+    base = get_settings().gateway_public_base.rstrip("/")
+    notifiche.accoda("oauth", (
+        f"🔐 Nuovo connettore autorizzato: «{params['client_name']}» verso {dove} "
+        f"({_SPIEGA[tipo].rstrip('.')}). Se non sei stato tu, revocalo da "
+        f"{base}/admin/connettori"))
     code = pysecrets.token_urlsafe(32)
     _codes[code] = {
         "client_id": params["client_id"],
@@ -456,6 +464,37 @@ async def _authorize_decide(request: Request) -> Response:
            "redirect_host": dove, "destinazione": tipo})
     return RedirectResponse(
         f"{redirect_uri}{sep}code={code}&state={quote(state, safe='')}", status_code=302)
+
+
+# ───── connettori: elenco e revoca (/admin/connettori) ─────
+
+def elenco_connettori() -> list[dict[str, Any]]:
+    """I client registrati, dal più recente: nome dichiarato, dove va il permesso,
+    quando è stato registrato e autorizzato. L'id si mostra per intero: serve alla revoca,
+    e non è un segreto (il client è pubblico, `token_endpoint_auth_method: none`)."""
+    out = []
+    for cid, c in _clients.items():
+        uris = c.get("redirect_uris") or [""]
+        dove, tipo = _destinazione(str(uris[0]))
+        out.append({"client_id": cid, "nome": str(c.get("client_name", "unknown")),
+                    "dove": dove, "tipo": tipo,
+                    "registrato": int(c.get("registered_at", 0) or 0),
+                    "autorizzato": int(c.get("autorizzato_il", 0) or 0),
+                    "pendente": bool(c.get("pendente"))})
+    return sorted(out, key=lambda x: x["registrato"], reverse=True)
+
+
+def revoca_client(client_id: str, by: str) -> bool:
+    """Toglie il client: da qui il refresh si rifiuta (`invalid_client`), e l'accesso
+    finisce quando scade l'ultimo access token (`OAUTH_ACCESS_TOKEN_LIFETIME`, 15 min)."""
+    c = _clients.pop(client_id, None)
+    if c is None:
+        return False
+    _save_clients()
+    dove, tipo = _destinazione(str((c.get("redirect_uris") or [""])[0]))
+    audit({"event": "oauth_client_revoked", "client_id": client_id, "by": by,
+           "redirect_host": dove, "destinazione": tipo})
+    return True
 
 
 # ───── token ─────
@@ -480,6 +519,8 @@ async def token(request: Request) -> Response:
         ctx = _codes.pop(code, None)
         if not ctx:
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
+        if client_id not in _clients:   # revocato fra il consenso e lo scambio
+            return JSONResponse({"error": "invalid_client"}, status_code=400)
         if ctx["expires_at"] < int(time.time()):
             return JSONResponse({"error": "invalid_grant", "reason": "expired"}, status_code=400)
         if ctx["client_id"] != client_id or ctx["redirect_uri"] != redirect_uri:
@@ -514,6 +555,10 @@ async def token(request: Request) -> Response:
     if grant_type == "refresh_token":
         rt = str(form.get("refresh_token", ""))
         client_id = str(form.get("client_id", ""))
+        if client_id not in _clients:
+            # revocato da /admin/connettori: il refresh muore qui, e con lui il connettore
+            audit({"event": "oauth_refresh_revoked_client", "client_id": client_id})
+            return JSONResponse({"error": "invalid_client"}, status_code=400)
         try:
             claims = verify(rt, expected_typ="refresh", expected_aud=client_id)
         except JWTError:

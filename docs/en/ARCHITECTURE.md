@@ -82,6 +82,7 @@ only by `nb1777-bot`.
 | gateway → nb1777-mcp (nlm profile, Studio artifacts, signed links) | internal HTTP + shared secret | `/internal/nlm/{status,profile,artifacts,artifact,link,carica}` |
 | bot → nb1777-mcp (profile status) | internal HTTP + shared secret | `/internal/nlm/status` |
 | bot → nb1777-mcp (notifications #30) | internal HTTP + shared secret | `/internal/{notifications,canonico/ack}` |
+| bot → gateway (notices of newly authorized OAuth connectors, 0.93.0) | internal HTTP + the same secret | the gateway's `/internal/notifications`: the gateway queues, the bot fetches and sends; the gateway never talks to Telegram |
 | archive-mcp → gateway (DB card: `set_description`, `set_ruolo`) | internal HTTP + shared secret | `/internal/archive/{description,ruolo}` — archive-mcp's only writes, since it has the volume read-only |
 | ingest (job, since 0.84; before that the gateway) → ocr (images to index) | internal HTTP, bytes→text | `http://ocr:8004/ocr` (env `OCR_URL`; neither the gateway nor the job runs processes — guarded by `test_gateway_non_tocca_docker`) |
 | Telegram cloud → bot | long-poll outbound HTTPS | `api.telegram.org` |

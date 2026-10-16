@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # possiede nb1777-mcp. Il bot chiede solo «c'è un profilo?» su rete interna,
     # autenticandosi col segreto condiviso.
     nlm_internal_base: str = "http://nb1777-mcp:8003"
+    # la coda degli avvisi del gateway (un connettore OAuth appena autorizzato): stesso
+    # contratto e stesso segreto di quella di nb1777-mcp. Vuoto = non la si legge.
+    gateway_internal_base: str = "http://gateway:8080"
     gateway_secret_file: SecretFromFile = ""
     gateway_secret: str = ""   # override via env in dev
     log_level: str = "INFO"

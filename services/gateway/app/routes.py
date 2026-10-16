@@ -11,7 +11,7 @@ import hmac
 import re
 from pathlib import Path
 
-from . import admin, archive_indexer, carica, miniapp, oauth, onboarding, proxy, scarica
+from . import admin, archive_indexer, carica, miniapp, notifiche, oauth, onboarding, proxy, scarica
 from .audit import audit
 from .asgi_security import ip_is_internal
 from .settings import UPSTREAMS_SCARTATI, get_settings
@@ -111,7 +111,8 @@ _MAX_DESCRIZIONE = 4096
 _RUOLI_AMMESSI: tuple[str, ...] = ("primario", "fotografia", "riscontro", "riservato")
 
 
-def _guardia_interna(request: Request, evento: str) -> JSONResponse | None:
+def _guardia_interna(request: Request, evento: str, *, header: str = "x-vps1777-archive-desc",
+                     atteso: str | None = None) -> JSONResponse | None:
     """Il portone di `/internal/archive/*`: `None` se si può passare, un 404 se no.
 
     Difesa in profondità, in quest'ordine — ogni gradino risponde **404**, non 403:
@@ -136,12 +137,25 @@ def _guardia_interna(request: Request, evento: str) -> JSONResponse | None:
         return JSONResponse({"error": "not_found"}, status_code=404)
 
     # segreto DEDICATO, non quello del canale nlm: privilegio minimo fra servizi.
-    atteso = get_settings().effective_archive_desc_secret
-    got = request.headers.get("x-vps1777-archive-desc", "")
+    # (/internal/notifications passa il suo: è il bot che legge, col segreto che già ha.)
+    if atteso is None:
+        atteso = get_settings().effective_archive_desc_secret
+    got = request.headers.get(header, "")
     if not atteso or not hmac.compare_digest(got, atteso):
         audit({"event": evento, "reason": "secret"})
         return JSONResponse({"error": "not_found"}, status_code=404)
     return None
+
+
+async def internal_notifications(request: Request) -> JSONResponse:
+    """Gli avvisi del gateway per il proprietario (oggi: un connettore OAuth appena
+    autorizzato), prelevati dal bot ogni minuto. Lo stesso contratto e lo stesso segreto
+    di `/internal/notifications` di nb1777-mcp, che il bot legge già."""
+    negato = _guardia_interna(request, "notifiche_denied", header="x-vps1777-internal",
+                              atteso=get_settings().effective_gateway_secret)
+    if negato is not None:
+        return negato
+    return JSONResponse({"items": notifiche.preleva()})
 
 
 def _path_del_db(db: str) -> tuple[Path | None, JSONResponse | None]:
@@ -236,6 +250,7 @@ routes = [
     Route("/internal/archive/description", internal_archive_description, methods=["POST"]),
     # #278 — stessa strada per il campo `ruolo` (vocabolario chiuso)
     Route("/internal/archive/ruolo", internal_archive_ruolo, methods=["POST"]),
+    Route("/internal/notifications", internal_notifications, methods=["GET"]),
 
     # OAuth discovery
     Route("/.well-known/oauth-protected-resource", oauth.well_known_protected, methods=["GET"]),
@@ -264,6 +279,8 @@ routes = [
     Route("/admin/audit", admin.audit_view, methods=["GET"]),
     Route("/admin/salute", admin.salute_view, methods=["GET"]),
     Route("/admin/secrets", admin.secrets_view, methods=["GET"]),
+    Route("/admin/connettori", admin.connettori_view, methods=["GET"]),
+    Route("/admin/connettori/revoca", admin.connettori_revoca, methods=["POST"]),
 
     # P15: link firmati di nb1777 per gli artefatti. Il gettone è l'autorizzazione e lo
     # verifica nb1777-mcp; deve stare PRIMA del catch-all del proxy.

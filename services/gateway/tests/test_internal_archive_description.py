@@ -265,3 +265,15 @@ def test_update_ha_un_preflight_sui_segreti():
     assert ".strip()" in fn, "un segreto con solo spazi/newline deve contare come VUOTO"
     # il rimedio non deve rimandare all'installatore completo su una macchina viva
     assert "NON lanciare `setup.sh`" in src, "il rimedio non deve consigliare setup.sh"
+
+
+def test_la_coda_degli_avvisi_passa_dalla_stessa_guardia():
+    """`/internal/notifications` (gli avvisi dei connettori OAuth, letti dal bot) non
+    riscrive i gradini: chiama la guardia comune, rete prima del segreto e 404, col
+    segreto che il bot ha già (quello che usa per la coda di nb1777-mcp)."""
+    codice = _solo_codice(_corpo("internal_notifications"))
+    assert "_guardia_interna(request" in codice
+    assert codice.index("_guardia_interna") < codice.index("notifiche.preleva")
+    assert 'header="x-vps1777-internal"' in codice
+    assert '"/internal/notifications"' in SRC
+    assert 'methods=["GET"]' in SRC[SRC.index('"/internal/notifications"'):][:120]
