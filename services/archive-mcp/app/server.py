@@ -263,7 +263,8 @@ def search_ibrida(
 
     Ritorna {righe, indici, parametri} e, solo se qualcosa si è perso, `saltati`:
     - `righe`: come search (speaker e voice compresi), più `origine` ('fts' | 'vettori' |
-      'entrambi'): dice quale motore ha trovato la riga;
+      'entrambi'): dice quale motore ha trovato la riga. Lo stesso TESTO in più righe arriva
+      una volta, con `copie` (quante altre) e `copie_uuid` (fino a 5);
     - `indici`: per ogni DB quanti messaggi sono indicizzati e CON CHE PERIMETRO. ⚠️ Leggilo
       prima di dire «non c'è»: fuori dal perimetro gli zeri sembrano assenze, e la risposta
       giusta è `search`. `indici[].verifica` con `scartati` > 0 = indice disallineato, quei

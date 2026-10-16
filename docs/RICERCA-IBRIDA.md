@@ -107,6 +107,15 @@ si legge nel risultato in 24 domande in più e 5 in meno rispetto allo snippet d
 segno, p = 0,0005). A 200 parole il guadagno in più non è significativo (+10/−4, p = 0,18). Il prezzo:
 su 10 righe ~1.600 token invece di ~1.100. `passaggio=0` torna allo snippet corto.
 
+**Dalla 0.91.0 le copie di testo arrivano una volta, e i candidati non scendono sotto 40×3.** Il
+banco grande (303 domande) ha trovato altre due cose. Il 5% dei posti fra le prime 10 righe ripeteva un
+testo già mostrato (un prompt incollato più volte, una routine che si ripete): ora resta la prima riga,
+con `copie` e `copie_uuid`. E ogni ramo portava candidati in proporzione a `limit` (×3): con 20 righe,
+60 per ramo, e la RRF non vedeva le righe che stanno a metà di tutte e due le liste. Ora i candidati si
+contano da `max(limit, 40)`. Insieme, misurati con la nDCG@10 «con novità» (una copia già mostrata
+vale 0): +0,021, meglio in 94 domande e peggio in 42, p < 0,0001; da sole, le copie +0,006 senza
+nessuna domanda peggiorata, il minimo di candidati +0,014. Nessun token in più nella risposta.
+
 **Dalla 0.74.0 lo snippet delle righe trovate per senso viene dal pezzo che ha colpito**
 (P4). Prima era l'inizio del messaggio, anche quando il pezzo vicino alla domanda stava
 migliaia di caratteri più in là. L'indice sa quale pezzo ha vinto: il suo rowid meno il

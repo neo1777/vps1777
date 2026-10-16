@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **`search_ibrida` dà più righe diverse fra le prime 10.** Il banco grande della ricerca (303 domande) ha
+  misurato due difetti dell'ordine:
+  - il 5% dei posti ripeteva un testo già mostrato (un prompt incollato più volte, una routine che si
+    ripete): ora la copia arriva una volta, con `copie` e `copie_uuid` (fino a 5);
+  - ogni ramo portava candidati in proporzione a `limit` (×3): con 20 righe, 60 per ramo, e la fusione non
+    vedeva le righe che stanno a metà di tutte e due le liste. Ora i candidati si contano da
+    `max(limit, 40)`.
+
+  Insieme: nDCG@10 con novità +0,021, meglio in 94 domande e peggio in 42, p < 0,0001. Nessun token in più
+  nella risposta.
+
 ## [0.90.1] — 2026-10-15
 
 **Col passaggio, che dalla 0.90.0 è il default, anche le righe di strumenti hanno lo snippet.**
