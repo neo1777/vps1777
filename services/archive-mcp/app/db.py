@@ -895,53 +895,59 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     # Lo stesso uuid vive in più DB (bundle e fotografie): come in `search` (#272) si
     # tiene la prima occorrenza nell'ordine della fusione, e gli altri DB vanno in
     # `anche_in`. Con un DB solo non cambia niente.
-    # Una riserva doppia, perché togliendo le copie di testo (sotto) le righe calano.
-    scelti: list[tuple[str, str]] = []
-    primo: dict[str, dict[str, Any]] = {}
-    righe: list[dict[str, Any]] = []
-    for chiave in fusi:
-        name, u = chiave
-        if u in primo:
-            primo[u].setdefault("anche_in", []).append(name)
-            continue
-        if len(righe) >= 2 * limit:
-            continue
-        r = dict(per_chiave[chiave])
-        r["origine"] = ("entrambi" if chiave in in_fts and chiave in in_vec
-                        else "fts" if chiave in in_fts else "vettori")
-        primo[u] = r
-        righe.append(r)
-        scelti.append(chiave)
     # 0.91.0: le COPIE DI TESTO. Lo stesso testo in più righe (un prompt incollato più volte,
     # una routine che si ripete) occupava il 5% dei posti fra i primi 10 del banco grande: a chi
     # legge la seconda copia non dà niente. Resta la prima nell'ordine della fusione, con `copie`
     # (quante altre righe hanno lo stesso testo) e fino a 5 dei loro uuid in `copie_uuid`.
     # Misurato: nDCG@10 con novità +0,006, meglio in 24 domande e peggio in nessuna.
-    testo_di: dict[tuple[str, str], str] = {}
-    for name in {n for n, _ in scelti}:
-        uuids = [u for n, u in scelti if n == name]
-        seg = ",".join("?" * len(uuids))
-        for u, c, s_ in connessioni[name].execute(
-                f"SELECT uuid, content, tools FROM messages WHERE uuid IN ({seg})", uuids):
-            testo_di[(name, u)] = _chiave_di_testo(c, s_)
+    # 0.91.1: si scorre la fusione A BLOCCHI finché ci sono `limit` testi diversi (o la fusione
+    # finisce). La 0.91.0 guardava una riserva fissa di 2×limit: con 7 copie della stessa routine
+    # tornavano 3 righe su 5 chieste, mentre più in basso c'erano testi diversi.
+    scelti: list[tuple[str, str]] = []
+    primo: dict[str, dict[str, Any]] = {}
+    righe: list[dict[str, Any]] = []
     tenute: dict[str, dict[str, Any]] = {}
-    righe_uniche: list[dict[str, Any]] = []
-    scelti_unici: list[tuple[str, str]] = []
-    for r, chiave in zip(righe, scelti):
-        k = testo_di.get(chiave, "")
-        if k and k in tenute:
-            prima = tenute[k]
-            prima["copie"] = prima.get("copie", 0) + 1
-            if len(prima.setdefault("copie_uuid", [])) < 5:
-                prima["copie_uuid"].append(r["uuid"])
+    blocco: list[tuple[tuple[str, str], dict[str, Any]]] = []
+
+    def _smaltisci(blocco):
+        testo_di: dict[tuple[str, str], str] = {}
+        for name in {n for (n, _), _ in blocco}:
+            uuids = [u for (n, u), _ in blocco if n == name]
+            seg = ",".join("?" * len(uuids))
+            for u, c, s_ in connessioni[name].execute(
+                    f"SELECT uuid, content, tools FROM messages WHERE uuid IN ({seg})", uuids):
+                testo_di[(name, u)] = _chiave_di_testo(c, s_)
+        for chiave, r in blocco:
+            k = testo_di.get(chiave, "")
+            if k and k in tenute:
+                prima = tenute[k]
+                prima["copie"] = prima.get("copie", 0) + 1
+                if len(prima.setdefault("copie_uuid", [])) < 5:
+                    prima["copie_uuid"].append(r["uuid"])
+                continue
+            if len(righe) >= limit:
+                continue
+            if k:
+                tenute[k] = r
+            righe.append(r)
+            scelti.append(chiave)
+
+    for chiave in fusi:
+        name, u = chiave
+        if u in primo:
+            primo[u].setdefault("anche_in", []).append(name)
             continue
-        if len(righe_uniche) >= limit:
-            continue
-        if k:
-            tenute[k] = r
-        righe_uniche.append(r)
-        scelti_unici.append(chiave)
-    righe, scelti = righe_uniche, scelti_unici
+        r = dict(per_chiave[chiave])
+        r["origine"] = ("entrambi" if chiave in in_fts and chiave in in_vec
+                        else "fts" if chiave in in_fts else "vettori")
+        primo[u] = r
+        # anche quando le righe ci sono già si continua: si contano le copie di quelle tenute
+        blocco.append((chiave, r))
+        if len(blocco) >= limit:
+            _smaltisci(blocco)
+            blocco = []
+    if blocco:
+        _smaltisci(blocco)
     if not passaggio:
         _snippet_dal_pezzo(righe, connessioni, pezzo_di, termini)
     for name in {r["db"] for r in righe}:
