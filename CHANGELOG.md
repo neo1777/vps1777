@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Con molte copie di testo `search_ibrida` tornava meno righe di quelle chieste.** La 0.91.0 cercava le
+  copie in una riserva fissa di 2×`limit`: con 7 copie della stessa routine tornavano 3 righe su 5, anche se
+  più in basso c'erano testi diversi (visto alla prima ricerca dal vivo). Ora la fusione si scorre a blocchi
+  finché ci sono `limit` testi diversi, e `copie` conta le copie in tutta la fusione. Sul banco grande la
+  qualità resta identica (+0,021 sulla 0.90.1) e le domande con meno righe del dovuto restano una sola, su
+  un DB piccolo.
+
 ## [0.91.0] — 2026-10-16
 
 **`search_ibrida` dà più righe diverse fra le prime 10: niente copie di testo e un minimo di candidati, misurati sul banco grande (303 domande).**

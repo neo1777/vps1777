@@ -505,3 +505,22 @@ def test_i_candidati_non_scendono_sotto_il_minimo(archivio, monkeypatch) -> None
     modulo._maybe_reload()
     modulo.search_ibrida("messaggio sintetico abbastanza lungo", db="arch", limit=3)
     assert chiesti and min(chiesti) >= modulo.CANDIDATI_MIN * 3, chiesti
+
+
+@vec
+def test_con_molte_copie_tornano_comunque_limit_righe(archivio, monkeypatch) -> None:
+    """0.91.1: cinque righe su sei con lo stesso testo e `limit=2`: la 0.91.0 guardava una riserva
+    fissa di 2×limit e tornava UNA riga sola. Si scorre la fusione finché ci sono `limit` testi
+    diversi."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    _rw(db, ("UPDATE messages SET content = ? WHERE uuid IN ('u1', 'u2', 'u3', 'u4', 'u5')",
+             (f"{FRASE} numero 2",)))
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    r = modulo.search_ibrida("x", db="arch", limit=2)
+    assert len(r["righe"]) == 2, [x["uuid"] for x in r["righe"]]
+    assert r["righe"][0].get("copie") == 4
+    assert r["righe"][1]["uuid"] == "u6"
