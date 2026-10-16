@@ -4124,7 +4124,7 @@ findings:
         consenso di oggi. Il proprietario ha detto no al consenso dal telefono e sì a
         rafforzare quello che c'è (scelta `2026-10-16-soglia-decisioni-d-consenso-miniapp`).
         Sulla VPS di riferimento le 8 registrazioni sono tutte di claude.ai: nessun abuso visto.
-    since: unreleased
+    since: v0.92.0
     why: >
       La DCR è aperta per costruzione: claude.ai registra un client a ogni connettore. Chi
       registrava un client col nome «Claude» e un redirect_uri suo poteva mandare al

@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.92.0] — 2026-10-16
+
+**La pagina di consenso OAuth dice dove va il permesso, e la registrazione dei client accetta solo indirizzi sensati.**
+
 ### Sicurezza
 - **La pagina di consenso OAuth dice dove va il permesso, e chiede una conferma se la destinazione non è
   nota (`H84`).** La registrazione dinamica dei client è aperta, perché claude.ai ne registra uno a ogni
