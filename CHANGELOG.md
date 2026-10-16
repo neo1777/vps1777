@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.91.0] — 2026-10-16
+
+**`search_ibrida` dà più righe diverse fra le prime 10: niente copie di testo e un minimo di candidati, misurati sul banco grande (303 domande).**
+
 ### Cambiato
 - **`search_ibrida` dà più righe diverse fra le prime 10.** Il banco grande della ricerca (303 domande) ha
   misurato due difetti dell'ordine:
