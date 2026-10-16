@@ -102,7 +102,9 @@ Threat model dichiarato:
 - OAuth 2.1 + DCR + PKCE per tutti i client OAuth (claude.ai, Mini App, future integrazioni)
 - La DCR è aperta (claude.ai registra un client a ogni connettore), quindi il consenso è la difesa: accetta solo
   redirect_uri https, loopback o schemi privati (RFC 8252), dice a quale host va il permesso e, se non è
-  claude.ai, claude.com o il loopback, chiede una conferma in più; le registrazioni mai autorizzate scadono in 24 h (`H84`)
+  claude.ai, claude.com o il loopback, chiede una conferma in più; le registrazioni mai autorizzate scadono in 24 h (`H84`).
+  A ogni autorizzazione arriva un avviso su Telegram con nome e destinazione, e `/admin/connettori` elenca i client e li
+  revoca: il rinnovo del token si rifiuta subito, l'accesso finisce entro la durata dell'access token (15 min)
 - JWT con `typ` separati: access_token (15min), refresh_token (30gg), admin (8h), miniapp (1h)
 - Path namespacing via `GATEWAY_SECRET`: l'URL contiene un segreto rotabile (se compromesso, rota e cambi URL)
 - Bcrypt rounds=12 per password admin (file `secrets/admin_password_bcrypt.txt`)

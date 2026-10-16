@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Un avviso su Telegram a ogni connettore OAuth autorizzato, e una pagina per revocarli.** Il consenso della
+  0.92.0 rende più difficile autorizzare per sbaglio, ma non dice niente se succede. Ora, a ogni «Autorizza»,
+  arriva un messaggio con il nome dichiarato dall'app, l'host che riceve il permesso e il link alla pagina
+  nuova `/admin/connettori`. La pagina elenca i client registrati (nome, destinazione, quando registrato e
+  autorizzato, mai autorizzato) e ha un bottone **Revoca**: il rinnovo del token si rifiuta subito, e
+  l'accesso finisce entro 15 minuti, quando scade l'ultimo token d'accesso. Il gateway non parla con Telegram
+  (il token del bot non lo monta): mette l'avviso in una coda, e il bot la preleva da
+  `/internal/notifications` del gateway come già fa con quella di nb1777-mcp, con lo stesso segreto.
+
 ## [0.92.0] — 2026-10-16
 
 **La pagina di consenso OAuth dice dove va il permesso, e la registrazione dei client accetta solo indirizzi sensati.**

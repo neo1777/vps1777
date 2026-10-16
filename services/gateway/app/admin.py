@@ -22,6 +22,7 @@ import sqlite3
 import time
 import zipfile
 from contextlib import AsyncExitStack
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import admin_core, archive_indexer, coda_ingest, nlm_client
@@ -306,6 +307,7 @@ def _layout(title: str, body: str, current: str = "", flash: str = "",
             ("archive", "Archive"),
             ("update", "Update"),
             ("secrets", "Secrets"),
+            ("connettori", "Connettori"),
             ("audit", "Audit"),
         ]
         rendered = "".join(
@@ -1478,6 +1480,79 @@ async def salute_view(request: Request) -> Response:
 # ───── /admin/secrets — età, scadenze, rotazione ─────
 # Legge onboarding/secrets_status.json, scritto dal check host (`vps1777
 # secrets-status`, timer giornaliero): l'età deriva dall'mtime dei file secret.
+
+def _quando(ts: int) -> str:
+    if not ts:
+        return "—"
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+
+
+async def connettori_view(request: Request) -> Response:
+    """I connettori OAuth registrati, con la revoca (H84: un consenso dato per sbaglio
+    si toglie qui; l'avviso su Telegram porta a questa pagina)."""
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+    from . import oauth  # import qui: oauth importa admin in modo lazy, evita il circolo
+
+    righe = ""
+    for c in oauth.elenco_connettori():
+        stato = ('<span class="dot warn"></span>mai autorizzato' if c["pendente"]
+                 else '<span class="dot ok"></span>autorizzato')
+        dove = html.escape(c["dove"])
+        if c["tipo"] in ("sconosciuta", "app"):
+            dove += ' <span class="muted">(non nota)</span>'
+        righe += (
+            f'<tr><td>{html.escape(c["nome"])}<br><span class="muted"><code>'
+            f'{html.escape(c["client_id"])}</code></span></td>'
+            f'<td>{dove}</td><td>{stato}<br><span class="muted">registrato '
+            f'{_quando(c["registrato"])}<br>autorizzato {_quando(c["autorizzato"])}</span></td>'
+            '<td><form method="POST" action="/admin/connettori/revoca">'
+            f'<input type="hidden" name="client_id" value="{html.escape(c["client_id"])}">'
+            '<button type="submit" class="danger">Revoca</button></form></td></tr>')
+    if righe:
+        tabella = ('<section><div class="tblwrap"><table><thead><tr><th>nome dichiarato</th>'
+                   '<th>destinazione</th><th>stato</th><th></th></tr></thead>'
+                   f'<tbody>{righe}</tbody></table></div></section>')
+    else:
+        tabella = '<section><p class="muted">Nessun connettore registrato.</p></section>'
+    body = f"""
+<header>
+  <h1>vps1777 <em>admin</em> · connettori</h1>
+  <div class="who">{html.escape(email)}</div>
+</header>
+<section>
+  <div class="kicker">chi può usare questo gateway</div>
+  <p class="muted">Ogni connettore aggiunto su claude.ai registra un client qui. Il nome lo
+  dichiara l'app; la destinazione è dove arriva il permesso. Revocare toglie il client: il
+  rinnovo del token si rifiuta subito, e l'accesso finisce entro 15 minuti, quando scade
+  l'ultimo token d'accesso. Per riusare un connettore revocato lo si ricollega da claude.ai.
+  A ogni autorizzazione nuova arriva un avviso su Telegram.</p>
+</section>
+{tabella}
+"""
+    flash = request.query_params.get("msg", "").replace("+", " ")
+    kind = "err" if request.query_params.get("kind") == "err" else "ok"
+    return _layout("connettori", body, current="connettori", flash=flash, flash_kind=kind,
+                   csrf=_csrf_token(email))
+
+
+async def connettori_revoca(request: Request) -> Response:
+    """POST /admin/connettori/revoca — toglie un client OAuth (CSRF verificato da
+    `_require_admin`)."""
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+    from . import oauth
+
+    form = await request.form()
+    cid = str(form.get("client_id") or "")
+    if oauth.revoca_client(cid, by=email):
+        return RedirectResponse("/admin/connettori?msg=Connettore+revocato&kind=ok",
+                                status_code=303)
+    return RedirectResponse("/admin/connettori?msg=Connettore+non+trovato&kind=err",
+                            status_code=303)
+
 
 async def secrets_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)

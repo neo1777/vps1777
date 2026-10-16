@@ -586,3 +586,70 @@ def test_la_destinazione_distingue_nota_locale_app_sconosciuta():
     assert oauth._destinazione("com.example.app:/cb") == ("com.example.app", "app")
     assert oauth._destinazione("https://claude.ai.evil.example/cb")[1] == "sconosciuta"
     assert oauth._destinazione("https://[::1/cb") == ("?", "sconosciuta")   # client vecchio, URI rotto
+
+
+# ─────────────────────────── avviso e revoca dei connettori ───────────────────────────
+# Un consenso dato per sbaglio si vede solo se qualcuno lo dice: a ogni «Autorizza» il
+# gateway accoda un avviso (il bot lo porta su Telegram), e da /admin/connettori si revoca.
+
+@pytest.fixture
+def coda(tmp_path, monkeypatch):
+    notifiche = sys.modules["app.notifiche"]
+    monkeypatch.setattr(notifiche, "_file", lambda: tmp_path / "notifiche.json")
+    return notifiche
+
+
+def test_autorizza_accoda_l_avviso_con_nome_e_destinazione(coda):
+    form = _valid_query()
+    form.update(csrf="valid", decision="allow")
+    run(oauth.authorize(FakeRequest(method="POST", form=form)))
+    items = coda.preleva()
+    assert len(items) == 1 and items[0]["kind"] == "oauth"
+    assert "«Claude»" in items[0]["text"] and "claude.ai" in items[0]["text"]
+    assert "https://gw.example/admin/connettori" in items[0]["text"]
+    assert coda.preleva() == []          # prelevato = uscito dalla coda
+
+
+def test_rifiuta_non_accoda_niente(coda):
+    form = _valid_query()
+    form.update(csrf="valid", decision="deny")
+    run(oauth.authorize(FakeRequest(method="POST", form=form)))
+    assert coda.preleva() == []
+
+
+def test_la_coda_tiene_gli_ultimi_50(coda):
+    for i in range(60):
+        coda.accoda("oauth", f"n{i}")
+    items = coda.preleva()
+    assert len(items) == 50 and items[0]["text"] == "n10"
+
+
+def test_elenco_connettori_dice_dove_e_se_e_pendente():
+    oauth._clients["nuovo"] = {"redirect_uris": ["https://evil.example/cb"], "client_name": "X",
+                               "registered_at": 5, "pendente": True}
+    el = {c["client_id"]: c for c in oauth.elenco_connettori()}
+    assert el["cid"]["dove"] == "claude.ai" and el["cid"]["pendente"] is False
+    assert el["nuovo"]["tipo"] == "sconosciuta" and el["nuovo"]["pendente"] is True
+    assert [c["client_id"] for c in oauth.elenco_connettori()][0] == "nuovo"   # più recente prima
+
+
+def _token(form):
+    return run(oauth.token(FakeRequest(method="POST", form=form)))
+
+
+def test_revocato_il_refresh_si_rifiuta():
+    assert oauth.revoca_client("cid", by="admin@x.com") is True
+    r = _token({"grant_type": "refresh_token", "refresh_token": "rt", "client_id": "cid"})
+    assert r.status_code == 400 and r.data["error"] == "invalid_client"
+    assert oauth.revoca_client("cid", by="admin@x.com") is False   # già tolto
+
+
+def test_revocato_fra_consenso_e_scambio_il_code_non_vale():
+    form = _valid_query()
+    form.update(csrf="valid", decision="allow")
+    loc = run(oauth.authorize(FakeRequest(method="POST", form=form))).location
+    code = loc.split("code=")[1].split("&")[0]
+    oauth.revoca_client("cid", by="admin@x.com")
+    r = _token({"grant_type": "authorization_code", "code": code, "client_id": "cid",
+                "redirect_uri": "https://claude.ai/cb", "code_verifier": "v"})
+    assert r.data["error"] == "invalid_client"

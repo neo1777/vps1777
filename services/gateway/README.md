@@ -39,7 +39,8 @@ Fuori da compose `GATEWAY_UPSTREAMS` e le variabili `*_FILE` vanno passate: nel 
 - `GET /.well-known/oauth-{protected-resource,authorization-server}` — discovery OAuth
 - `POST /register` — Dynamic Client Registration OAuth
 - `GET|POST /authorize` (pagina di consenso e decisione: dice a quale host va il permesso e, se non è noto, chiede una conferma), `POST /token` — flow OAuth 2.1
-- `/admin/{login,setup,nlm,archive,update,salute,secrets,audit}` — pannello admin; in più `POST /admin/logout`, `POST /admin/archive/delete`, `POST /admin/update/check`, `GET /admin/nlm/artifact/{name}`
+- `/admin/{login,setup,nlm,archive,update,salute,secrets,connettori,audit}` — pannello admin; in più `POST /admin/logout`, `POST /admin/archive/delete`, `POST /admin/connettori/revoca`, `POST /admin/update/check`, `GET /admin/nlm/artifact/{name}`
+- `GET /internal/notifications` — la coda degli avvisi per il proprietario (un connettore OAuth appena autorizzato), che il bot preleva; solo rete interna + `X-Vps1777-Internal`, se no 404
 - `POST /admin/nlm` — upload del profilo nlm (tar.gz di `profiles/default`)
 - `POST /admin/update` — scrive l'intent di aggiornamento (consumato dalla CLI host)
 - `GET /admin/update/state` — JSON stato/progress per il polling della card

@@ -250,7 +250,7 @@ fase_test() {
   passo "archive-mcp (stdlib)" uvx pytest -q services/archive-mcp/tests/
   passo "nb1777-bot (stdlib)" uvx pytest -q services/nb1777-bot/tests/
   passo "nb1777-bot comandi (deps del lock)" \
-    uv run --locked --directory services/nb1777-bot --with pytest pytest -q tests/test_comandi.py
+    uv run --locked --directory services/nb1777-bot --with pytest pytest -q tests/test_comandi.py tests/test_notifiche_due_code.py
   passo "archive-mcp /health e indice (deps del lock)" \
     uv run --locked --directory services/archive-mcp --with pytest pytest -q \
       tests/test_health.py tests/test_superficie_tool.py tests/test_costruisci_indice.py \
