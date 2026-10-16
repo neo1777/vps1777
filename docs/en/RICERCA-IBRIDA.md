@@ -113,6 +113,15 @@ for 24 more questions and 5 fewer than with the 64-token snippet (sign test, p =
 the extra gain is not significant (+10/−4, p = 0.18). The price: ~1,600 tokens on 10 rows instead of
 ~1,100. `passaggio=0` goes back to the short snippet.
 
+**Since 0.91.0 text copies arrive once, and candidates never drop below 40×3.** The large bench
+(303 questions) found two more things. 5% of the slots in the first 10 rows repeated a text already
+shown (a prompt pasted several times, a recurring routine): now the first row stays, with `copie` and
+`copie_uuid`. And each branch brought candidates in proportion to `limit` (×3): with 20 rows, 60 per
+branch, and RRF missed rows sitting mid-way in both lists. Now candidates are counted from
+`max(limit, 40)`. Together, measured with nDCG@10 «with novelty» (a copy already shown counts 0):
++0.021, better on 94 questions and worse on 42, p < 0.0001; alone, copies +0.006 with no question
+worse, the candidate floor +0.014. No extra tokens in the response.
+
 **Since 0.74.0 the snippet of rows found by meaning comes from the chunk that matched**
 (P4). Before, it was the start of the message, even when the chunk close to the question
 was thousands of characters further on. The index knows which chunk won: its rowid minus

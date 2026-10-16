@@ -468,3 +468,40 @@ def test_testo_cambiato_dopo_l_indice_torna_all_inizio(tmp_path, monkeypatch):
     riga = next(x for x in r["righe"] if x["uuid"] == "lungo")
     assert "pezzo" not in riga
     assert riga["snippet"].startswith("Apertura")
+
+
+# ── 0.91.0 (16/10/2026): le copie di testo e il minimo di candidati, dal banco grande ─────
+
+@vec
+def test_le_copie_di_testo_si_contano_e_non_occupano_posti(archivio, monkeypatch) -> None:
+    """Tre righe con lo stesso testo (un prompt incollato tre volte): ne resta una, e dice
+    `copie: 2` con i loro uuid. I posti liberati vanno a righe con un testo diverso."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    _rw(db, ("UPDATE messages SET content = ? WHERE uuid IN ('u2', 'u3', 'u4')",
+             (f"{FRASE} numero 2",)))
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    r = _cerca(modulo, tci, f"{FRASE} numero 2", monkeypatch)
+    uuid = [x["uuid"] for x in r["righe"]]
+    copie = [x for x in r["righe"] if x["uuid"] in ("u2", "u3", "u4")]
+    assert len(copie) == 1, uuid
+    assert copie[0]["copie"] == 2 and len(copie[0]["copie_uuid"]) == 2
+    assert len(r["righe"]) == 3, "i posti liberati vanno ad altre righe"
+
+
+@vec
+def test_i_candidati_non_scendono_sotto_il_minimo(archivio, monkeypatch) -> None:
+    """Con `limit=3` il ramo full-text chiede comunque CANDIDATI_MIN × 3 righe: con pochi
+    candidati la RRF non vede chi sta a metà di tutte e due le liste (banco grande, +0,014)."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    chiesti = []
+    vero = modulo.fts.search_conn
+    monkeypatch.setattr(modulo.fts, "search_conn",
+                        lambda conn, q, **kw: chiesti.append(kw.get("limit")) or vero(conn, q, **kw))
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    modulo.search_ibrida("messaggio sintetico abbastanza lungo", db="arch", limit=3)
+    assert chiesti and min(chiesti) >= modulo.CANDIDATI_MIN * 3, chiesti

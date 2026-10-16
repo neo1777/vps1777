@@ -642,6 +642,21 @@ def _open_con_indice(name: str, idx: Path) -> sqlite3.Connection:
     return conn
 
 
+# 0.91.0, misurato sul banco grande della ricerca (303 domande, 16/10/2026): ogni ramo porta
+# candidati in proporzione a `limit` (×3), e con pochi candidati la RRF non vede le righe che
+# stanno a metà di tutte e due le liste. Chiedere 40 righe invece di 20 migliorava l'ordine delle
+# prime 10 (nDCG@10 con novità +0,014, meglio in 79 domande e peggio in 47, p = 0,0001). Il
+# minimo dà quell'ordine a ogni `limit`, senza un token in più nella risposta.
+CANDIDATI_MIN = 40
+
+
+def _chiave_di_testo(content: str | None, tools: str | None) -> str:
+    """Il testo di una riga per riconoscerne le copie: `content` o, se vuoto, `tools`, con gli
+    spazi normalizzati e tagliato a 2.000 caratteri. Vuoto se la riga non ha testo."""
+    testo = (content or "").strip() or (tools or "").strip()
+    return " ".join(testo.split())[:2000]
+
+
 @_serializzata
 def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                   query_fts: str = "", since: str = "", until: str = "",
@@ -671,6 +686,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                          "parole. Una finestra più larga è il messaggio intero: per quello "
                          "c'è get_context.")
     limit = _limite(limit)
+    quota = max(limit, CANDIDATI_MIN)      # i candidati per ramo si contano da qui
     s = get_settings()
     model_dir = Path(s.archive_model_dir)
     indici = _indici_disponibili()
@@ -749,7 +765,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                 rows_fts: list[dict[str, Any]] = []
                 if espressione:
                     try:
-                        rows_fts = fts.search_conn(conn, espressione, limit=limit * 3,
+                        rows_fts = fts.search_conn(conn, espressione, limit=quota * 3,
                                                    since=since, until=until, campi=campi,
                                                    speaker=speaker,
                                                    snippet_tokens=snippet_tokens)
@@ -787,7 +803,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                     break
                 try:
                     vicini = semantica.knn_pezzi(
-                        conn, blob, topn=limit * (10 if filtrato else 3))
+                        conn, blob, topn=quota * (10 if filtrato else 3))
                     rowids = [rid for rid, _, _ in vicini]
                     distanza = {rid: d for rid, d, _ in vicini}
                     pezzo_vinto = {rid: pz for rid, _, pz in vicini}
@@ -879,6 +895,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     # Lo stesso uuid vive in più DB (bundle e fotografie): come in `search` (#272) si
     # tiene la prima occorrenza nell'ordine della fusione, e gli altri DB vanno in
     # `anche_in`. Con un DB solo non cambia niente.
+    # Una riserva doppia, perché togliendo le copie di testo (sotto) le righe calano.
     scelti: list[tuple[str, str]] = []
     primo: dict[str, dict[str, Any]] = {}
     righe: list[dict[str, Any]] = []
@@ -887,7 +904,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         if u in primo:
             primo[u].setdefault("anche_in", []).append(name)
             continue
-        if len(righe) >= limit:
+        if len(righe) >= 2 * limit:
             continue
         r = dict(per_chiave[chiave])
         r["origine"] = ("entrambi" if chiave in in_fts and chiave in in_vec
@@ -895,6 +912,36 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
         primo[u] = r
         righe.append(r)
         scelti.append(chiave)
+    # 0.91.0: le COPIE DI TESTO. Lo stesso testo in più righe (un prompt incollato più volte,
+    # una routine che si ripete) occupava il 5% dei posti fra i primi 10 del banco grande: a chi
+    # legge la seconda copia non dà niente. Resta la prima nell'ordine della fusione, con `copie`
+    # (quante altre righe hanno lo stesso testo) e fino a 5 dei loro uuid in `copie_uuid`.
+    # Misurato: nDCG@10 con novità +0,006, meglio in 24 domande e peggio in nessuna.
+    testo_di: dict[tuple[str, str], str] = {}
+    for name in {n for n, _ in scelti}:
+        uuids = [u for n, u in scelti if n == name]
+        seg = ",".join("?" * len(uuids))
+        for u, c, s_ in connessioni[name].execute(
+                f"SELECT uuid, content, tools FROM messages WHERE uuid IN ({seg})", uuids):
+            testo_di[(name, u)] = _chiave_di_testo(c, s_)
+    tenute: dict[str, dict[str, Any]] = {}
+    righe_uniche: list[dict[str, Any]] = []
+    scelti_unici: list[tuple[str, str]] = []
+    for r, chiave in zip(righe, scelti):
+        k = testo_di.get(chiave, "")
+        if k and k in tenute:
+            prima = tenute[k]
+            prima["copie"] = prima.get("copie", 0) + 1
+            if len(prima.setdefault("copie_uuid", [])) < 5:
+                prima["copie_uuid"].append(r["uuid"])
+            continue
+        if len(righe_uniche) >= limit:
+            continue
+        if k:
+            tenute[k] = r
+        righe_uniche.append(r)
+        scelti_unici.append(chiave)
+    righe, scelti = righe_uniche, scelti_unici
     if not passaggio:
         _snippet_dal_pezzo(righe, connessioni, pezzo_di, termini)
     for name in {r["db"] for r in righe}:
