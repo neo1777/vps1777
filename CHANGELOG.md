@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.93.0] — 2026-10-16
+
+**A ogni connettore OAuth autorizzato arriva un avviso su Telegram, e `/admin/connettori` li elenca e li revoca.**
+
 ### Aggiunto
 - **Un avviso su Telegram a ogni connettore OAuth autorizzato, e una pagina per revocarli.** Il consenso della
   0.92.0 rende più difficile autorizzare per sbaglio, ma non dice niente se succede. Ora, a ogni «Autorizza»,
