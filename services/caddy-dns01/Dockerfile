@@ -21,11 +21,11 @@
 # /run/secrets/cf_api_token col segnaposto {file.…} (ingress/Caddyfile.dns01).
 
 # ─────────────────────────────────────────── builder
-FROM caddy:2.11-builder-alpine@sha256:0aa610043dab5da82ad0a0268e46bb852785e6f5160f12f1c6fe3f42903d7e1b AS build
+FROM caddy:2.11-builder-alpine@sha256:d6161a2c82fd58b3205048958fb6246d0c5d892beee8a47e90944610c4efd100 AS build
 RUN xcaddy build --with github.com/caddy-dns/cloudflare@v0.2.4
 
 # ─────────────────────────────────────────── runtime
-FROM caddy:2.11-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+FROM caddy:2.11-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
 COPY --from=build /usr/bin/caddy /usr/bin/caddy
 # La versione del rilascio, come nelle altre immagini (release.yml la passa come
 # build-arg): `vps1777 version` la legge dal container per segnalare la deriva.
