@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **nlm passa dalla 0.15.4 alla 0.16.1.** È la cadenza che ci siamo dati (P9): il pin non resta indietro più
+  di un mese. Dentro: `source stale` e `source sync` senza id ora controllano davvero la freschezza delle fonti
+  Drive (noi restiamo su `source list --drive`, che le elenca tutte, non solo quelle indietro); il login scaduto si riconosce anche
+  quando Google risponde 200 con la pagina d'ingresso; niente più file di diagnostica con l'HTML autenticato
+  (i file vecchi non si tolgono da soli); un'operazione di scrittura con una risposta ambigua non si ripete.
+  Sul PC serve la stessa versione per il login: `uv tool install notebooklm-mcp-cli==0.16.1 --python 3.12`.
+
 ## [0.93.1] — 2026-11-07
 
 **`notebook_query` riconosce le citazioni a intervalli, e `studio_list` dà un nome agli artefatti.**

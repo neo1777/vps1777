@@ -619,7 +619,7 @@ async def nlm_view(request: Request) -> Response:
   <div class="kicker">come ottenere il profilo nlm</div>
   <ol>
     <li>Sul TUO PC, installa <code>nlm</code> (serve <a href="https://astral.sh" target="_blank">uv</a>):
-      <pre>uv tool install notebooklm-mcp-cli==0.15.4 --python 3.12</pre>
+      <pre>uv tool install notebooklm-mcp-cli==0.16.1 --python 3.12</pre>
     </li>
     <li>Login Google (apre il browser):
       <pre>nlm login

@@ -595,8 +595,8 @@ def source_drive_stato(nb_id: str) -> list[dict]:
     """Le fonti Drive di un notebook e se sono indietro rispetto al documento su Drive.
 
     Da `source list --drive --json`, che controlla la freschezza fonte per fonte. NON da
-    `source stale`: in nlm 0.15.4 quel comando (e `source sync` senza id) non chiama il
-    controllo, trova `is_fresh` assente, lo prende per «fresca», e non segnala mai niente."""
+    `source stale`, che fino alla 0.15.x non chiamava il controllo (corretto a monte nella
+    0.16.1): qui serve lo stato di tutte le fonti Drive, non solo di quelle indietro."""
     out = []
     for f in _run_json(["source", "list", nb_id, "--drive"], timeout=180):
         if not isinstance(f, dict) or f.get("is_fresh") is None:
