@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.93.2] — 2026-11-07
+
+**nlm passa alla 0.16.1.**
+
 ### Cambiato
 - **nlm passa dalla 0.15.4 alla 0.16.1.** È la cadenza che ci siamo dati (P9): il pin non resta indietro più
   di un mese. Dentro: `source stale` e `source sync` senza id ora controllano davvero la freschezza delle fonti
