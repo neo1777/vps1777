@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.94.1] — 2026-11-07
+
+**La mappa dei temi si può calcolare davvero: l'immagine ha il suo costruttore.**
+
 ### Corretto
 - **La 0.94.0 non conteneva il costruttore della mappa dei temi.** `vps1777 indice-notturno --temi` falliva con
   «can't open file». Il Dockerfile copia gli strumenti per nome, e un test ora controlla che ci siano tutti. Un file
