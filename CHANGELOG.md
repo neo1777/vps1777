@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.93.1] — 2026-11-07
+
+**`notebook_query` riconosce le citazioni a intervalli, e `studio_list` dà un nome agli artefatti.**
+
 ### Corretto
 - **`notebook_query` segnava come «generati dal modello» paragrafi che le citazioni le avevano.**
   `senza_citazioni` non riconosceva gli intervalli che NotebookLM scrive (`[32-34]`, `[7, 48-50]`): un
