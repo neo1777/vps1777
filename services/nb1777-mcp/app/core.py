@@ -623,7 +623,16 @@ def source_sync_drive(nb_id: str, source_ids: list[str]) -> dict:
 # chat (notebook_query)
 # ============================================================
 
-_MARCATORE_CITAZIONE = re.compile(r"\[\d+(?:\s*,\s*\d+)*\]")
+# NotebookLM scrive anche gli intervalli: [32-34], [7, 48-50]. Senza, un paragrafo citato
+# risultava «generato dal modello» (trovato da Trama il 07/11 su un notebook vero).
+_MARCATORE_CITAZIONE = re.compile(r"\[\d+(?:\s*[-–]\s*\d+)?(?:\s*,\s*\d+(?:\s*[-–]\s*\d+)?)*\]")
+# Una riga di sola struttura: titolo, separatore, titoletto in grassetto. Non afferma niente,
+# quindi non è un paragrafo «senza citazioni».
+_RIGA_DI_STRUTTURA = re.compile(r"\s*(?:#{1,6}\s.*|[-*_]{3,}|\*\*[^*]+\*\*:?)\s*")
+
+
+def _solo_struttura(paragrafo: str) -> bool:
+    return all(_RIGA_DI_STRUTTURA.fullmatch(r) for r in paragrafo.splitlines() if r.strip())
 
 
 def _proietta_query(data: dict, *, verbose: bool) -> dict:
@@ -660,7 +669,8 @@ def _proietta_query(data: dict, *, verbose: bool) -> dict:
         out["sources_used"] = visti
     answer = out.get("answer")
     if isinstance(answer, str) and answer.strip():
-        paragrafi = [pz.strip() for pz in answer.split("\n\n") if pz.strip()]
+        paragrafi = [pz.strip() for pz in answer.split("\n\n")
+                     if pz.strip() and not _solo_struttura(pz)]
         scoperti = [pz for pz in paragrafi
                     if not _MARCATORE_CITAZIONE.search(pz)]
         if scoperti:
@@ -1030,7 +1040,9 @@ def _artifact_id_of(a: dict) -> str:
 
 def _artifact_compact(a: dict) -> dict:
     """Proiezione compatta di un artefatto studio: id/type/status + un `label`
-    (i primi 80 char del focus). Il focus intero (`custom_instructions`, 4-6 KB
+    (il titolo o, se manca, i primi 80 char del focus). Gli artefatti creati dalla pagina di
+    NotebookLM il focus non ce l'hanno: col solo focus nove artefatti avevano `label` vuoto
+    (07/11). Il focus intero (`custom_instructions`, 4-6 KB
     per un podcast) resta FUORI: è ~85:1 di rumore e il risultato di un tool MCP
     entra inline nel contesto, non paginabile. Il label basta a riconoscerlo —
     ed è indispensabile, perché senza è l'unico modo di distinguere due artefatti
@@ -1039,7 +1051,7 @@ def _artifact_compact(a: dict) -> dict:
         "id": _artifact_id_of(a),
         "type": a.get("type") or a.get("artifact_type"),
         "status": a.get("status") or a.get("state"),
-        "label": (a.get("custom_instructions") or a.get("focus") or "")[:80],
+        "label": (a.get("title") or a.get("custom_instructions") or a.get("focus") or "")[:80],
     }
 
 
@@ -1048,8 +1060,10 @@ def studio_list(nb_id: str, verbose: bool = False) -> list[dict]:
 
     Default COMPATTO (id/type/status/label): la proiezione la sceglie chi
     consuma, non chi produce. `verbose=True` restituisce il JSON pieno della CLI
-    (focus incluso) — solo quando serve davvero il dettaglio."""
-    arts = list(_run_json(["status", "artifacts", nb_id]))
+    (titolo, focus, date, fonti, indirizzi) — solo quando serve davvero il dettaglio.
+    `--full` perché senza la CLI non dà il titolo: stesso tempo (1,6 s, misurato il 07/11),
+    e la proiezione compatta non cresce."""
+    arts = list(_run_json(["status", "artifacts", nb_id, "--full"]))
     return arts if verbose else [_artifact_compact(a) for a in arts]
 
 

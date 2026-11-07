@@ -26,6 +26,25 @@ def test_studio_list_compatto_nasconde_il_focus(monkeypatch) -> None:
     assert len(compact[0]["label"]) == 80
 
 
+def test_il_label_e_il_titolo_e_la_lista_lo_chiede_alla_cli(monkeypatch) -> None:
+    """Trama, 07/11: nove artefatti creati dalla pagina con `label` vuoto. Il titolo la CLI
+    lo dà solo con --full; senza, due artefatti dello stesso tipo non si distinguono."""
+    chiamate = []
+
+    def finto(args, **kw):
+        chiamate.append(args)
+        return [{"id": "A1", "type": "report", "status": "completed", "title": "T" * 100,
+                 "custom_instructions": None},
+                {"id": "A2", "type": "audio", "status": "completed", "title": "",
+                 "custom_instructions": "focus"}]
+
+    monkeypatch.setattr(core, "_run_json", finto)
+    compact = core.studio_list("nb")
+    assert "--full" in chiamate[0]
+    assert compact[0]["label"] == "T" * 80      # tagliato: resta compatto
+    assert compact[1]["label"] == "focus"       # senza titolo si ripiega sul focus
+
+
 def test_studio_list_verbose_restituisce_il_json_pieno(monkeypatch) -> None:
     big = "F" * 5000
     monkeypatch.setattr(core, "_run_json", lambda args, **kw: [

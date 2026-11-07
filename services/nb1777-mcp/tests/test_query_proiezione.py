@@ -52,3 +52,25 @@ def test_risposta_tutta_citata_non_porta_la_nota() -> None:
     tutta["answer"] = "Solo cose lette [1].\n\nAnche queste [2, 3]."
     out = core._proietta_query(tutta, verbose=False)
     assert "senza_citazioni" not in out and "nota" not in out
+
+
+def test_gli_intervalli_di_citazioni_contano_come_citazioni() -> None:
+    """Trama, 07/11: NotebookLM scrive [32-34] e [7, 48-50], e un blocco con 6 riferimenti
+    veniva dichiarato «generato dal modello»."""
+    for marcatore in ("[32-34]", "[7, 48-50]", "[1-2, 5, 7-9]", "[3–4]", "[1]", "[1, 2]"):
+        risposta = dict(_RISPOSTA, answer=f"Letto dalle fonti {marcatore}.")
+        assert "senza_citazioni" not in core._proietta_query(risposta, verbose=False), marcatore
+    for non_lo_e in ("[a]", "[1-]", "[-2]", "[1,]", "[]"):
+        risposta = dict(_RISPOSTA, answer=f"Non citato {non_lo_e}.")
+        assert "senza_citazioni" in core._proietta_query(risposta, verbose=False), non_lo_e
+
+
+def test_titoli_e_separatori_non_sono_paragrafi_scoperti() -> None:
+    risposta = dict(_RISPOSTA, answer=(
+        "### Limiti e costi\n\nCosta poco [1].\n\n---\n\n**Rischi**\n\n"
+        "## Sezione\n***\n\nAncora letto [2-3]."))
+    assert "senza_citazioni" not in core._proietta_query(risposta, verbose=False)
+    # un titolo col suo testo nello stesso blocco resta un paragrafo: il testo afferma qualcosa
+    risposta = dict(_RISPOSTA, answer="### Titolo\nTesto senza fonti.\n\nLetto [1].")
+    sc = core._proietta_query(risposta, verbose=False)["senza_citazioni"]
+    assert sc["paragrafi"] == 1 and sc["su_totale"] == 2
