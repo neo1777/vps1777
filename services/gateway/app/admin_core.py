@@ -454,3 +454,22 @@ def righe_salute(dati: dict, now: float | None = None) -> list[dict]:
                     "misurato_il": r.get("misurato_il"), "ore": ore,
                     "vecchia": ore is None or ore > SALUTE_VECCHIA_ORE})
     return out
+
+
+# ── la mappa dei temi: cosa mostrare al proprietario ────────────────────────────
+# `stato_del_tema` è il gemello di quello in services/archive-mcp/app/temi.py: i servizi hanno
+# build separate, e un filtro di sicurezza in due copie diverge in silenzio. Le tiene uguali un
+# test che legge entrambi i file (test_temi.py).
+def stato_del_tema(tema: dict, marchi: dict) -> str:
+    m = marchi.get(str(tema.get("id")))
+    if m in ("libero", "riservato"):
+        return m
+    return "da_guardare" if tema.get("da_guardare") else "libero"
+
+
+def temi_da_mostrare(mappa: dict, marchi: dict) -> list[dict]:
+    """Prima quelli da guardare: è per loro che il proprietario apre la pagina."""
+    ordine = {"da_guardare": 0, "riservato": 1, "libero": 2}
+    temi = mappa.get("temi") if isinstance(mappa, dict) else None
+    return sorted([t for t in (temi or []) if isinstance(t, dict)],
+                  key=lambda t: (ordine[stato_del_tema(t, marchi)], -int(t.get("scambi") or 0)))

@@ -23,7 +23,7 @@ separated by the nature of the data — because 99.99% of the weight is regenera
 > every night in the core for this reason, in `descrizioni/<db>.txt`. Since 0.87.0 the
 > **`ruolo`** (`set_ruolo`, since #278) does too, in `ruoli/<db>.txt`: before, it lived only
 > inside the DB, and after a re-ingest from the sources a `riservato` DB went back to
-> `non dichiarato` and entered the default search perimeter.
+> `non dichiarato` and entered the default search perimeter. Since 0.94.0 the topic map's marks do too, in `temi/`.
 > Owner decision: *«basta n, n-1 per paranoia… dobbiamo
 > farci stare quel che serve»* ("n, n-1 is enough for paranoia… we have to fit what we
 > need"). Between one archive backup and the next the net is double: the sources off the
@@ -184,7 +184,8 @@ If you **regenerate the archive from the sources** instead of restoring it (re-i
 the bundles), you'll find the DB `description` files in the core under
 `descrizioni/<db>.txt` — they can be reapplied with `set_description` from the
 connector, or from the panel. The `ruolo` is in `ruoli/<db>.txt` (since 0.87.0): reapply
-it with `set_ruolo` from the connector (the panel shows it, it doesn't write it). **Do it
+it with `set_ruolo` from the connector (the panel shows it, it doesn't write it). The topic map's marks are in `temi/`, with its state: put
+the two files back in `/var/lib/archive/temi/`. **Do it
 before searching**: until it is reapplied, a reserved DB is in the default perimeter.
 
 Default: interactive (asks for confirmation). Flags:

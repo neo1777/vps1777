@@ -255,7 +255,12 @@ vps1777 indice-notturno --abilita          # accende il timer (opt-in)
 vps1777 indice-notturno --disabilita       # lo spegne
 vps1777 indice-notturno                    # un giro adesso
 vps1777 indice-notturno --db X --tutti     # un DB solo, anche se già allineato
+vps1777 indice-notturno --temi             # ricalcola adesso la mappa dei temi
+vps1777 indice-notturno --temi-da-zero     # da zero: i temi cambiano, i marchi vanno riguardati
 ```
+
+Dalla 0.94.0, se nel `.env` c'è `ARCHIVE_TEMI_DB`, dopo gli indici il giro ricalcola anche la
+**mappa dei temi** ([ARCHIVE.md](ARCHIVE.md)). Non serve il modello dal secondo calcolo in poi.
 
 ## vps1777 ingest-coda
 

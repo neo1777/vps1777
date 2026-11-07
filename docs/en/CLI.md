@@ -262,8 +262,13 @@ as an error.
 vps1777 indice-notturno --abilita          # accende il timer (opt-in)
 vps1777 indice-notturno --disabilita       # lo spegne
 vps1777 indice-notturno                    # un giro adesso
-vps1777 indice-notturno --db X --tutti     # un DB solo, anche se già allineato
+vps1777 indice-notturno --db X --tutti     # one DB only, even if already aligned
+vps1777 indice-notturno --temi             # recompute the topic map now
+vps1777 indice-notturno --temi-da-zero     # from scratch: topics change, marks must be reviewed
 ```
+
+Since 0.94.0, if `ARCHIVE_TEMI_DB` is set in `.env`, the run also recomputes the **topic map**
+after the indexes ([ARCHIVE.md](ARCHIVE.md)). From the second run on it does not need the model.
 
 ## vps1777 ingest-coda
 

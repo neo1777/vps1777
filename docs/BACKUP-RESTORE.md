@@ -20,7 +20,7 @@ separati per natura del dato — perché il 99,99% del peso è rigenerabile e lo
 > notte nel core, in `descrizioni/<db>.txt`. Dalla 0.87.0 anche il **`ruolo`**
 > (`set_ruolo`, dal #278), in `ruoli/<db>.txt`: prima stava solo dentro il DB, e dopo un
 > re-ingest dalle fonti un DB `riservato` tornava `non dichiarato` ed entrava nel perimetro
-> di default della ricerca. Decisione dell'owner: *«basta n, n-1 per paranoia… dobbiamo farci stare quel che
+> di default della ricerca. Dalla 0.94.0 anche i marchi della mappa dei temi, in `temi/`. Decisione dell'owner: *«basta n, n-1 per paranoia… dobbiamo farci stare quel che
 > serve»*. Fra un backup archivio e l'altro la rete è doppia: le fonti fuori dalla VPS +
 > lo snapshot pre-update (`backups/pre-update/`, in chiaro, n e n-1).
 
@@ -175,7 +175,8 @@ Se l'archivio lo **rigeneri dalle fonti** invece di ripristinarlo (re-ingest dei
 le `description` dei DB le ritrovi nel core in `descrizioni/<db>.txt` — si riapplicano con
 `set_description` dal connector, o dal pannello. Il `ruolo` lo ritrovi in `ruoli/<db>.txt`
 (dalla 0.87.0): si riapplica con `set_ruolo` dal connector (il pannello lo mostra, non lo
-scrive). **Fallo prima di cercare**: finché non è riapplicato, un DB riservato è nel
+scrive). I marchi della mappa dei temi stanno in `temi/`, con lo stato: rimetti i due file in
+`/var/lib/archive/temi/`. **Fallo prima di cercare**: finché non è riapplicato, un DB riservato è nel
 perimetro di default.
 
 Default: interattivo (chiede conferma). Flag:

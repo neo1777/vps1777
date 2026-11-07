@@ -95,6 +95,9 @@ if command -v sqlite3 >/dev/null; then
     "CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT); INSERT INTO meta VALUES('description','scheda di prova, riga uno'); INSERT INTO meta VALUES('ruolo','riservato');"
   # e accanto il suo indice per senso, che `meta` non ce l'ha (13/10/2026)
   sqlite3 "$TMP/volumi/${VOL_ARCHIVIO}/db/prova.vec.db" "CREATE TABLE vettori(id INTEGER);"
+  mkdir -p "$TMP/volumi/${VOL_ARCHIVIO}/temi"
+  printf '{"7":"riservato"}' > "$TMP/volumi/${VOL_ARCHIVIO}/temi/marchi.json"
+  printf '{"ids":[7]}' > "$TMP/volumi/${VOL_ARCHIVIO}/temi/stato.json"
 fi
 ATTESO="$(cd "$TMP/volumi" && find . -type f -print0 | sort -z \
           | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
@@ -172,6 +175,12 @@ if command -v sqlite3 >/dev/null; then
     ok "il ruolo del DB è nel core (ruoli/prova.txt): un riservato resta riservato dopo un restore"
   else
     ko "il ruolo del DB NON è nel core (ruoli/prova.txt manca o è diverso)"
+  fi
+  # 07/11/2026: i marchi della mappa dei temi, scritti a mano e decisivi come il ruolo
+  if grep -q 'riservato' "$TMP/core-aperto/temi/marchi.json" 2>/dev/null && [ -s "$TMP/core-aperto/temi/stato.json" ]; then
+    ok "i marchi dei temi sono nel core (temi/): un tema riservato resta riservato dopo un restore"
+  else
+    ko "i marchi dei temi NON sono nel core (temi/marchi.json o stato.json mancano)"
   fi
   # 13/10/2026: l'indice `.vec.db` non è un archivio, niente avviso e niente file vuoto per lui
   if grep -q 'description non leggibile' "$TMP/backup.log" || [ -e "$TMP/core-aperto/descrizioni/prova.vec.txt" ]; then

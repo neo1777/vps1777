@@ -253,7 +253,7 @@ fase_test() {
     uv run --locked --directory services/nb1777-bot --with pytest pytest -q tests/test_comandi.py tests/test_notifiche_due_code.py
   passo "archive-mcp /health e indice (deps del lock)" \
     uv run --locked --directory services/archive-mcp --with pytest pytest -q \
-      tests/test_health.py tests/test_superficie_tool.py tests/test_costruisci_indice.py \
+      tests/test_health.py tests/test_superficie_tool.py tests/test_temi.py tests/test_costruisci_indice.py \
       tests/test_ibrida_verifica.py tests/test_sessioni.py tests/test_fuori_dal_loop.py tests/test_annotazioni.py tests/test_get_many_precedenti.py
   passo "CLI e presìdi del repo (tools/tests)" \
     uvx --with bcrypt --with cryptography --with pyyaml pytest -q tools/tests/

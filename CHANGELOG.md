@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **La mappa dei temi: «di cosa si è parlato?», quando non sai cosa cercare.** Un tool nuovo, `temi(dal, al)`, e una
+  pagina, `/admin/temi`. Raggruppa i vettori che l'indice per senso ha già, per scambio (un tuo messaggio più le risposte),
+  e il job notturno la tiene aggiornata sui DB di `ARCHIVE_TEMI_DB`. È spenta finché non la accendi. Misure: un giudice
+  alla cieca trova l'intruso nel 92% dei temi (a caso 17%), e ripartendo dai centri il 97,8% degli scambi resta nel suo tema.
+- **I temi personali non escono da soli.** Un tema che somiglia a vita privata, salute, lavoro cercato o soldi nasce
+  «da guardare», nascosto finché non decidi; qualunque tema si può marcare riservato. Il confronto usa frasi fisse e il
+  modello dell'indice, senza LLM esterni. La mappa dichiara sempre quanti temi ha nascosto, e i marchi stanno nel backup core.
+
 ## [0.93.2] — 2026-11-07
 
 **nlm passa alla 0.16.1.**
