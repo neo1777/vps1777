@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.94.0] — 2026-11-07
+
+**La mappa dei temi: di cosa si è parlato, quando non sai cosa cercare.**
+
 ### Aggiunto
 - **La mappa dei temi: «di cosa si è parlato?», quando non sai cosa cercare.** Un tool nuovo, `temi(dal, al)`, e una
   pagina, `/admin/temi`. Raggruppa i vettori che l'indice per senso ha già, per scambio (un tuo messaggio più le risposte),
