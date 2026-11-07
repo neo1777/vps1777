@@ -241,3 +241,18 @@ def test_ogni_strumento_del_servizio_sta_nell_immagine() -> None:
     dockerfile = (servizio / "Dockerfile").read_text(encoding="utf-8")
     copiati = {w for riga in dockerfile.splitlines() if riga.startswith("COPY") for w in riga.split()}
     assert not [p.name for p in (servizio / "tools").glob("*.py") if f"tools/{p.name}" not in copiati]
+
+
+def test_la_data_e_quella_del_contenuto() -> None:
+    assert temi.data_del_contenuto("voce:20260526-062358", "2026-09-07T11:09:13Z").startswith("2026-05-26")
+    assert temi.data_del_contenuto("roo-x", "2025-02-01T00:00:00Z") == "2025-02-01T00:00:00Z"
+    assert temi.data_del_contenuto("memory:x", "2026-09-07T00:00:00Z", "data-export") == ""
+
+
+def test_i_vocali_finiscono_nel_mese_dell_audio(tmp_path: Path) -> None:
+    db, vec = _db(tmp_path, [("v", "2026-09-07T11:00:00Z", LUNGO, "unknown", "unknown", 0)], sightings=False)
+    c = sqlite3.connect(db)
+    c.execute("UPDATE messages SET project='voce:20260526-062358'")
+    c.commit()
+    c.close()
+    assert temi.scambi_di(db, vec, "x")[0]["ts"].startswith("2026-05")
