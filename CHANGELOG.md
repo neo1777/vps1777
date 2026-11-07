@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.94.2] — 2026-11-07
+
+**La mappa dei temi mette i vocali nel mese dell'audio, non in quello del caricamento.**
+
 ### Corretto
 - **La mappa dei temi metteva tutti i vocali a settembre 2026.** Il loro `ts` è l'ora del caricamento: la domanda «di cosa
   ho parlato a settembre?» riceveva audio di maggio. Ora la data viene dall'etichetta `voce:AAAAMMGG`, e una data messa
