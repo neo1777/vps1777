@@ -123,7 +123,7 @@ docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.
 1. **Login admin**: `<PUBLIC_BASE>/admin/login` → email + password admin
 2. **Auth NotebookLM**: sul TUO PC installa il CLI `nlm`, fai login, poi carica il **profilo** (tar.gz) su `<PUBLIC_BASE>/admin/nlm`. La CLI `nlm` (dalla 0.7) salva l'auth come cartella `profiles/default/` (non più un singolo `auth.json`):
    ```bash
-   uv tool install notebooklm-mcp-cli==0.15.4 --python 3.12   # serve uv (astral.sh)
+   uv tool install notebooklm-mcp-cli==0.16.1 --python 3.12   # serve uv (astral.sh)
    nlm login                                             # apre il browser → login NotebookLM
    # se chiede «Protected or plain file?» scegli il FILE: la VPS non apre il login cifrato
    cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default

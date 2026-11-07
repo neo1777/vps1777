@@ -4,7 +4,7 @@
   la vecchia. Un errore nell'aggiunta lascia la vecchia intatta, uno nella cancellazione
   lascia due fonti e lo dice. L'id cambia sempre. Due tempi, come le cancellazioni.
 - `source_drive_stato` / `source_sync_drive`: le fonti Drive si riallineano sul posto (stesso
-  id). La freschezza viene da `source list --drive`, perché `source stale` di nlm 0.15.4 non
+  id). La freschezza viene da `source list --drive`, perché `source stale` fino a nlm 0.15.x non
   la controlla e non segnala mai niente.
 Si mockano i confini nlm.
 """
