@@ -231,3 +231,13 @@ def test_il_tema_vicino_all_ancora_nasce_da_guardare() -> None:
     guardare = [t for t in m["temi"] if t["da_guardare"]]
     assert len(guardare) == 1 and guardare[0]["ancora"] == "lavoro"
     assert guardare[0]["quota_ancora"] >= temi.SOGLIA_ANCORA
+
+
+def test_ogni_strumento_del_servizio_sta_nell_immagine() -> None:
+    """La 0.94.0 è uscita senza tools/costruisci_temi.py: il Dockerfile copiava i file per nome, la
+    CLI lo lanciava nel container, e tutti i test giravano dal sorgente. L'ha visto la prima
+    prova dal vivo, un giro dopo: python non trovava il file."""
+    servizio = Path(__file__).resolve().parents[1]
+    dockerfile = (servizio / "Dockerfile").read_text(encoding="utf-8")
+    copiati = {w for riga in dockerfile.splitlines() if riga.startswith("COPY") for w in riga.split()}
+    assert not [p.name for p in (servizio / "tools").glob("*.py") if f"tools/{p.name}" not in copiati]
