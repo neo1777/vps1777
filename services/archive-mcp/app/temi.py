@@ -67,12 +67,23 @@ invece anzi infatti comunque proprio davvero almeno meglio peggio grazie ciao sc
 due tre senza vuoi oggi dentro procederò eseguirò inizierò nuovamente""".split())
 _PAROLA = re.compile(r"\b[a-zà-ù]{3,}\b")
 _SPORCO = re.compile(r"https?://\S+|\S*[/\\]\S*|`[^`]*`|\b\w*\d\w*\b")
+_DATA_VOCE = re.compile(r"voce:(\d{4})(\d{2})(\d{2})")
 _LOTTO = 500                     # variabili SQL per query (il limite di SQLite è più alto)
 
 
 def _a_lotti(valori: list, n: int = _LOTTO) -> Iterable[list]:
     for i in range(0, len(valori), n):
         yield valori[i:i + n]
+
+
+def data_del_contenuto(project: str, ts: str, ts_source: str = "") -> str:
+    """La data di cui parla la riga. Nei vocali `ts` è l'ora del caricamento (tutti settembre
+    2026, ma gli audio sono da maggio) e quella vera sta nell'etichetta `voce:AAAAMMGG-…`. Un
+    `ts` messo dall'export non è una data del contenuto: meglio nessuna che una falsa."""
+    m = _DATA_VOCE.match(project or "")
+    if m:
+        return f"{m[1]}-{m[2]}-{m[3]}T00:00:00Z"
+    return "" if ts_source == "data-export" else (ts or "")
 
 
 def _unita(v: np.ndarray) -> np.ndarray:
@@ -97,22 +108,25 @@ def scambi_di(db: Path, indice: Path, nome: str) -> list[dict[str, Any]]:
         if c.execute("SELECT 1 FROM sqlite_master WHERE name='sightings'").fetchone():
             file_di = dict(c.execute("SELECT uuid, MIN(source) FROM sightings GROUP BY uuid"))
         per_file: dict[str, list] = collections.defaultdict(list)
+        colonne = {r[1] for r in c.execute("PRAGMA table_info(messages)")}
+        fonte_ts = "ts_source" if "ts_source" in colonne else "''"
         for riga in c.execute(
-                "SELECT rowid, uuid, project, ts, speaker, voice, length(content), "
-                f"substr(content, 1, 40) FROM messages WHERE {filtro}"):
-            rowid, uuid, project, ts, speaker, voice, lung, testa = riga
+                f"SELECT rowid, uuid, project, ts, speaker, voice, length(content), "
+                f"substr(content, 1, 40), {fonte_ts} FROM messages WHERE {filtro}"):
+            rowid, uuid, project, ts, speaker, voice, lung, testa, fonte = riga
             per_file[file_di.get(uuid) or project or ""].append(
-                (ts or "", rowid, uuid, project or "", speaker, voice, lung or 0, testa or ""))
+                (ts or "", rowid, uuid, project or "", speaker, voice, lung or 0, testa or "", fonte or ""))
         out: list[dict[str, Any]] = []
         for righe in per_file.values():
             righe.sort()
             corrente = None
-            for ts, rowid, uuid, project, speaker, voice, lung, testa in righe:
+            for ts, rowid, uuid, project, speaker, voice, lung, testa, fonte in righe:
                 proprio = speaker != "assistant" and (voice == "own" or not con_assistente)
                 if speaker == "human" and testa.lstrip().startswith(_GESTI):
                     corrente = None
                 elif proprio and lung >= MIN_CARATTERI:
-                    corrente = {"db": nome, "uuid": uuid, "project": project, "ts": ts,
+                    corrente = {"db": nome, "uuid": uuid, "project": project,
+                                "ts": data_del_contenuto(project, ts, fonte),
                                 "righe": [rowid], "neo": rowid}
                     out.append(corrente)
                 elif (speaker == "assistant" and corrente is not None and lung >= MIN_RISPOSTA
