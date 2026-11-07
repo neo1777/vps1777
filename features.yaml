@@ -609,7 +609,7 @@ features:
     dove: ["mcp-tool:archive-mcp/temi"]
     status: opt-in
     decisione: "2026-11-07: spenta finché ARCHIVE_TEMI_DB è vuota, perché quali DB entrano in una mappa è una scelta del proprietario; i temi personali li propone la macchina e li decide lui"
-    since: "unreleased"
+    since: "0.94.0"
     verify:
       mcp_tool: {service: archive-mcp, name: temi}
   - id: archive.delta
