@@ -293,3 +293,17 @@ def test_la_mappa_dei_temi_lancia_il_suo_costruttore(notturno, monkeypatch):
     assert c[c.index("--db") + 1] == "note,diario" and "--da-zero" not in c
     cli._mappa_dei_temi(repo, ["docker", "compose"], True)
     assert "--da-zero" in chiamate[1][0]
+
+
+def test_un_file_che_manca_e_un_guasto_un_db_senza_indice_no(notturno, monkeypatch):
+    cli, repo, _ = notturno
+    monkeypatch.setattr(cli, "env_read", lambda r: {"ARCHIVE_TEMI_DB": "note"})
+
+    class _R:
+        stdout, stderr = "", "python: can't open file"
+        returncode = 2
+
+    monkeypatch.setattr(cli, "run", lambda c, **k: _R())
+    assert cli._mappa_dei_temi(repo, ["docker", "compose"], False) == 1
+    _R.returncode = 3
+    assert cli._mappa_dei_temi(repo, ["docker", "compose"], False) == 0

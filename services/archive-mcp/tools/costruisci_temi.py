@@ -5,7 +5,8 @@ Lo lancia `vps1777 indice-notturno` dopo gli indici, nello stesso job senza rete
 calcolo cerca i temi; i successivi ripartono da centri e media congelati, così i temi e i
 loro marchi restano. `--da-zero` ricomincia (e i marchi vanno riguardati).
 
-Esce 2 se un DB non ha il suo indice per senso: non è un guasto, è una cosa da dire.
+Esce 3 se un DB non ha il suo indice per senso: non è un guasto, è una cosa da dire. Non 2,
+che è l'esito di python quando non trova il file: quello è un guasto, e va notificato.
 """
 from __future__ import annotations
 
@@ -45,14 +46,14 @@ def main() -> int:
         db, indice = a.db_dir / f"{nome}.db", a.db_dir / f"{nome}.vec.db"
         if not db.is_file() or not indice.is_file():
             print(f"{nome}: manca il DB o il suo indice per senso, la mappa non lo copre", file=sys.stderr)
-            return 2
+            return 3
         dal_db = temi.scambi_di(db, indice, nome)
         temi.testi_degli_scambi(dal_db, db)
         print(f"{nome}: {len(dal_db)} scambi")
         scambi += dal_db
     if not scambi:
         print("nessuno scambio: la mappa non cambia", file=sys.stderr)
-        return 2
+        return 3
     mappa, nuovo = temi.calcola(scambi, stato, ancore_da(stato, a.modello))
     mappa["generato"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     temi.scrivi_json(dest / temi.FILE_STATO, nuovo)

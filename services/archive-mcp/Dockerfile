@@ -38,7 +38,7 @@ COPY --from=builder /build/app /app/app
 # (`vps1777 indice-notturno`, servizio compose `indice-notturno`) gira in QUESTA
 # immagine perché è l'ambiente in cui il server legge l'indice — stesse versioni
 # di onnxruntime, tokenizers e sqlite-vec. Un file, stdlib più `app.semantica`.
-COPY tools/costruisci_indice.py /app/tools/costruisci_indice.py
+COPY tools/costruisci_indice.py tools/costruisci_temi.py /app/tools/
 # Versione iniettata dalla CI di release (build-arg); nei build locali resta dev.
 ARG VPS1777_VERSION=0.0.0-dev
 ENV PATH="/opt/venv/bin:$PATH" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \

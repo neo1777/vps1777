@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **La 0.94.0 non conteneva il costruttore della mappa dei temi.** `vps1777 indice-notturno --temi` falliva con
+  «can't open file». Il Dockerfile copia gli strumenti per nome, e un test ora controlla che ci siano tutti. Un file
+  che manca ora conta come guasto: prima l'esito 2 di python si confondeva con «questo DB non ha un indice».
+
 ## [0.94.0] — 2026-11-07
 
 **La mappa dei temi: di cosa si è parlato, quando non sai cosa cercare.**

@@ -4354,7 +4354,7 @@ def _mappa_dei_temi(repo: Path, cc: list[str], da_zero: bool) -> int:
         ok(" · ".join(righe[-4:])[:300])
         return 0
     warn(f"mappa dei temi: esito {r.returncode} — {' '.join(righe[-3:])[:300]}")
-    return 0 if r.returncode == 2 else 1
+    return 0 if r.returncode == 3 else 1
 
 
 # ── ingest-coda: l'indicizzazione di /admin/archive come lavoro a parte (P16) ─────
