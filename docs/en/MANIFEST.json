@@ -3,7 +3,7 @@
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "96a4e8155fd1930edd4bca7da5a68afb2c7e6a6773a874bcb1a3ab52c81b5237"
+      "sorgente_sha256": "39bab74e60ddbc5f4f75d939007a779748cdf0e3be19da07c57d72f2defef663"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
@@ -15,7 +15,7 @@
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
-      "sorgente_sha256": "209cd126cad554237b339122b2877427de06e42f160792ed6ec02bc5c0d74da7"
+      "sorgente_sha256": "ecf6efbb5f4c67acf8ebcb0ce888eadca2701daa2f603bf08419e0983e82faf1"
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",
@@ -27,11 +27,11 @@
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
-      "sorgente_sha256": "f3aa71661ae64abdbbf4a5aa6c9ac0f77350865440e8653b7d137b72335305c7"
+      "sorgente_sha256": "85001c4d5fbc6da4516533168c6370bee4bfa3e43a057fdf081d936b30818f25"
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "8994915113b66675c6f50be399ec1895a5da83f3b3d58b517902f9c007b8c16f"
+      "sorgente_sha256": "3a28df57941d2e3086917c0feaa53ec58aaf94d0d1b360bc3399ac485d244cf0"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",

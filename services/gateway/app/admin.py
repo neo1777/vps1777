@@ -308,6 +308,7 @@ def _layout(title: str, body: str, current: str = "", flash: str = "",
             ("update", "Update"),
             ("secrets", "Secrets"),
             ("connettori", "Connettori"),
+            ("temi", "Temi"),
             ("audit", "Audit"),
         ]
         rendered = "".join(
@@ -1552,6 +1553,88 @@ async def connettori_revoca(request: Request) -> Response:
                                 status_code=303)
     return RedirectResponse("/admin/connettori?msg=Connettore+non+trovato&kind=err",
                             status_code=303)
+
+
+# ── /admin/temi — la mappa dei temi: qui il proprietario decide cosa esce ──────
+# I file li scrive il job notturno di archive-mcp (tools/costruisci_temi.py). Qui si scrive solo
+# marchi.json: archive-mcp ha il volume in sola lettura.
+
+def _cartella_temi() -> Path:
+    return Path(get_settings().archive_db_dir).parent / "temi"
+
+
+def _scrivi_marchi(marchi: dict) -> None:
+    f = _cartella_temi() / "marchi.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    tmp = f.with_suffix(".tmp")
+    tmp.write_text(json.dumps(marchi, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, f)
+
+
+async def temi_view(request: Request) -> Response:
+    """I temi della mappa, con quelli da guardare in testa. GET mostra, POST marca."""
+    email, redirect = await _require_admin(request)
+    if redirect:
+        return redirect
+    cartella = _cartella_temi()
+    marchi = _read_json(cartella / "marchi.json")
+    if request.method == "POST":
+        form = await request.form()
+        tema, stato = str(form.get("tema") or ""), str(form.get("stato") or "")
+        if not tema.isdigit() or stato not in ("libero", "riservato"):
+            return RedirectResponse("/admin/temi?msg=Richiesta+non+valida&kind=err", status_code=303)
+        marchi[tema] = stato
+        _scrivi_marchi(marchi)
+        audit({"event": "temi_marchio", "by": email, "status": stato, "target": tema})
+        return RedirectResponse("/admin/temi?msg=Fatto&kind=ok", status_code=303)
+    mappa = _read_json(cartella / "temi.json")
+    temi = admin_core.temi_da_mostrare(mappa, marchi)
+    righe = ""
+    for t in temi:
+        st = admin_core.stato_del_tema(t, marchi)
+        tema_id = html.escape(str(t.get("id")))
+        mesi = sorted(t.get("mesi", {}))
+        quando = f"{mesi[0]} → {mesi[-1]}" if mesi else "—"
+        etich = {"da_guardare": '<span class="dot warn"></span>da guardare: nascosto',
+                 "riservato": '<span class="dot off"></span>riservato: nascosto',
+                 "libero": '<span class="dot ok"></span>visibile alle sessioni'}[st]
+        perche = ""
+        if st == "da_guardare":
+            perche = (f'<br><span class="muted">somiglia a «{html.escape(str(t.get("ancora", "")))}» '
+                      f'({float(t.get("quota_ancora", 0)):.0%} degli scambi)</span>')
+        bottoni = "".join(
+            f'<form method="POST" action="/admin/temi" class="delform"><input type="hidden" name="tema" '
+            f'value="{tema_id}"><input type="hidden" name="stato" value="{v}">'
+            f'<button type="submit"{" class=danger" if v == "riservato" else ""}>{testo}</button></form>'
+            for v, testo in (("libero", "Libero"), ("riservato", "Riservato")) if v != st)
+        parole = html.escape(", ".join(t.get("parole", [])[:8]))
+        righe += (f'<tr><td>{parole}</td><td>{int(t.get("scambi", 0))}<br><span class="muted">{html.escape(quando)}'
+                  f'</span></td><td>{etich}{perche}</td><td>{bottoni}</td></tr>')
+    if righe:
+        tabella = ('<section><div class="tblwrap"><table><thead><tr><th>parole tipiche</th><th>scambi</th>'
+                   f'<th>stato</th><th></th></tr></thead><tbody>{righe}</tbody></table></div></section>')
+    else:
+        tabella = ('<section><p class="muted">La mappa non è ancora stata calcolata: mettete i DB in '
+                   '<code>ARCHIVE_TEMI_DB</code> nel <code>.env</code> e lanciate '
+                   '<code>vps1777 indice-notturno --temi</code>.</p></section>')
+    perimetro = html.escape(", ".join(mappa.get("perimetro", [])) or "—")
+    body = f"""
+<header>
+  <h1>vps1777 <em>admin</em> · temi</h1>
+  <div class="who">{html.escape(email)}</div>
+</header>
+<section>
+  <div class="kicker">di cosa si è parlato · calcolata {html.escape(str(mappa.get("generato", "—")))}</div>
+  <p class="muted">Su: {perimetro}. Le sessioni vedono solo i temi liberi, col tool <code>temi</code>, e sanno
+  quanti ne sono nascosti. Un tema che somiglia a vita privata, salute, lavoro cercato o soldi nasce «da guardare»,
+  nascosto finché non decidi. Riservato nasconde il tema dalla mappa, non i messaggi: restano nell'archivio e nelle
+  ricerche. Le etichette le calcola la macchina, e i temi restano gli stessi fra un ricalcolo e l'altro.</p>
+</section>
+{tabella}
+"""
+    flash = request.query_params.get("msg", "").replace("+", " ")
+    kind = "err" if request.query_params.get("kind") == "err" else "ok"
+    return _layout("temi", body, current="temi", flash=flash, flash_kind=kind, csrf=_csrf_token(email))
 
 
 async def secrets_view(request: Request) -> Response:

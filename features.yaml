@@ -602,6 +602,16 @@ features:
     since: "0.80.0"
     verify:
       mcp_tool: {service: archive-mcp, name: precedenti}
+  - id: archive.temi
+    nome: "archive-mcp · temi"
+    cosa: "La mappa degli argomenti: di cosa si è parlato, sui DB di ARCHIVE_TEMI_DB, senza i temi
+           riservati o da guardare, e dichiarando quanti ne ha nascosti."
+    dove: ["mcp-tool:archive-mcp/temi"]
+    status: opt-in
+    decisione: "2026-11-07: spenta finché ARCHIVE_TEMI_DB è vuota, perché quali DB entrano in una mappa è una scelta del proprietario; i temi personali li propone la macchina e li decide lui"
+    since: "unreleased"
+    verify:
+      mcp_tool: {service: archive-mcp, name: temi}
   - id: archive.delta
     nome: "archive-mcp · delta"
     cosa: "Cosa è cambiato fra due fotografie dello stesso account, per uuid: righe sparite,

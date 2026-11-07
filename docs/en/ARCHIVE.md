@@ -5,7 +5,7 @@
 `archive1777` is a full-text search engine (SQLite FTS5 + BM25) over your
 corpora: chats, sessions, notes, documents. **It starts empty**: you fill it,
 from the admin panel or from the command line. Loaded DBs are searchable
-**immediately**, with no restarts, through the **18 MCP tools** of `archive-mcp`
+**immediately**, with no restarts, through the **19 MCP tools** of `archive-mcp`
 (see [Searching — the MCP tools](#searching--the-mcp-tools)): from search
 (`search`, `search_ibrida`, `count`, `precedenti`) to reading (`get_context`,
 `get_conversation`, `get_many`) up to session cards and lineages (`get_session`,
@@ -444,7 +444,7 @@ the same DB name. List and deletion are also available from the **Mini App**
 
 ## Searching — the MCP tools
 
-`archive-mcp` exposes **18 tools** over MCP (usable from the claude.ai connector
+`archive-mcp` exposes **19 tools** over MCP (usable from the claude.ai connector
 and from the Mini App). All of them go through the output redaction described
 above.
 
@@ -465,6 +465,7 @@ tools again.
 | `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` and `tools` as in `get_context`. On Claude Code sessions it is the whole **session file** (`conversazione_da`), and with bundles carrying `recupero/` the session's card comes **last**. Beyond `limit` rows (200) it returns a window that always contains the requested uuid and the card, declared in the `finestra` field of the match row |
 | `get_many(uuids, db_name, max_chars)` | since 0.80.0: the **whole** rows of several messages (up to 50) in **one** call, in the requested order, with `speaker`, `voice` and `tools`; `mancanti` lists the uuids no DB has. After a search it replaces one `get_context` per result. `max_chars` defaults to 4000 (0 = whole). Like `get_context` it looks at every DB, primaries first; the same uuid in several DBs comes back once, with `anche_in` |
 | `precedenti(tema, giorni, limit, …)` | since 0.80.0: **"have you said this before?"** (#281). What the **owner** wrote about a topic up to `giorni` days ago (default 7; 0 = up to today): it is `search_ibrida` with `speaker='human'`, grouped by `project` (`gruppi`: `{project, db, n, primo_ts, ultimo_ts, righe}`). See below |
+| `temi(dal, al, limit)` | since 0.94.0: **"what have we talked about?"** when you don't know what to search for. The topic map: typical words, number of exchanges, months, sources, and examples to read with `get_many`. It says which DBs it covers (`perimetro`) and how many topics are hidden (`nascosti`). See below. |
 | `delta(vecchio, nuovo, limit, project)` | since 0.84.0: **what changed between two snapshots** of the same account (two claude.ai exports), by uuid: rows **gone** (deleted chats), **new** and **changed** (same uuid, different text), counted per `project`, with the most recent examples of each kind. `uuid_condivisi` says how many uuids the two DBs share: if it is low the uuids are not stable between the two sources (mvp-100626, workfiles) and the delta does not hold. 40 s budget: beyond it returns `parziale`; `project` narrows it. Measured on 11/10 on the 07/09 canaries: between 080726 and 290826 (8.8 s) `project:bot1777` has 2 rows gone and `project:How to use Claude` 3; between mvp-100626 and 290826 the shared uuids are 0% and the note says so |
 | `get_session(sessionId, db_name, limit, max_chars)` | everything the archive knows about **one** Claude Code **session**: the `sessioni` row, the **card**, the conversation's messages, the edges, the lineage — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | a session's **lineage**: the closure over the edges with `chiusura=1`, with each member's data — see [Sessions and lineages](#sessions-and-lineages--get_session-and-get_stirpe) |
@@ -498,6 +499,19 @@ Now every row carries **`speaker`** (who sent it: `human`, `assistant`, `tool`, 
 `pasted_transcript`…), also in `get_conversation` next to `sender` and in `get_many`. A
 field the source does not state is left out: a row never classified, or a v1 DB without
 those columns, does not get an invented value.
+
+**`temi` — the topic map (since 0.94.0).** Search answers "find X"; the map answers "what did I talk
+about in September?". It computes no vectors: it groups the ones in the meaning index, per **exchange** (one of
+your messages plus the replies that follow), and the nightly job keeps it updated on the DBs you pick in
+`ARCHIVE_TEMI_DB`. Empty means off. Labels are words computed by the machine: they say what a topic is about, not what
+was decided. Each recomputation restarts from the previous centres, so topics stay the same, and a new subject
+with at least 15 exchanges gives birth to a new topic.
+
+**Personal topics** don't come out by themselves. A topic that resembles private life, health, job hunting or money
+(compared with fixed phrases, on the same model, with no external LLM) starts as "to review": it stays hidden until you
+decide in `/admin/temi`, where you can also mark any other topic as reserved. Reserved hides the topic from the map, **not** the
+messages: they stay in the archive and in searches. The signal is a heuristic and can be wrong both ways, which
+is why you decide, and why the map always declares how many topics it hid.
 
 **`precedenti` — "have you said this before?" (since 0.80.0, #281).** The archive knows
 things its owner no longer remembers knowing: the case behind #281 is a work plan redone

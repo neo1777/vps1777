@@ -18,6 +18,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from . import db, redazione, semantica
+from . import temi as mappa_temi
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -38,7 +39,8 @@ Telegram, vocali). Cinque regole:
 `list_databases(schede=True)` dice cosa c'è in ogni DB e il suo ruolo. Per leggere interi più
 risultati: `get_many(uuids)`, una chiamata. Prima di aprire un tema: `precedenti(tema)`, cosa
 ne ha già detto il proprietario. Fra due fotografie dello stesso account (due export claude.ai):
-`delta(vecchio, nuovo)`, cosa è sparito, arrivato o cambiato."""
+`delta(vecchio, nuovo)`, cosa è sparito, arrivato o cambiato. Per «di cosa si è parlato», senza
+sapere cosa cercare: `temi(dal, al)`, la mappa degli argomenti."""
 
 mcp = FastMCP(
     "archive",
@@ -111,6 +113,7 @@ ANNOTAZIONI: dict[str, tuple[str, dict[str, bool]]] = {
     "get_many": ("Leggi più messaggi", _LETTURA),
     "precedenti": ("Cosa ne hai già detto", _LETTURA),
     "delta": ("Cosa è cambiato fra due DB", _LETTURA),
+    "temi": ("Mappa dei temi", _LETTURA),
 }
 
 
@@ -514,6 +517,25 @@ def describe_databases() -> list[dict[str, Any]]:
     count, check_term e precedenti guardano i primari e i non dichiarati (dalla
     0.74.0); il `riservato` si interroga solo nominandolo."""
     return db.describe()
+
+
+@mcp.tool()
+def temi(dal: str = "", al: str = "", limit: int = 40) -> dict[str, Any]:
+    """La mappa degli argomenti: risponde a «di cosa si è parlato?» quando non sai cosa cercare.
+    Per ogni tema: `parole` tipiche, `scambi` (nel periodo, se lo chiedi), `mesi`, `fonti`, ed
+    `esempi` ({db, uuid}) da leggere con get_many. `dal` e `al` sono date o mesi (2026-09).
+
+    Le parole le calcola la macchina: dicono di cosa parla un tema, non cosa è stato deciso. Per
+    i fatti leggi gli esempi. ⚠️ `perimetro` dice su quali DB è calcolata, e `nascosti` quanti temi
+    sono fuori (riservati, o il proprietario deve ancora guardarli): «non è in mappa» non vuol
+    dire «non se n'è parlato», e lì serve search_ibrida. Si aggiorna di notte."""
+    d = db._db_dir()
+    if d is None:
+        return mappa_temi.vista(None, None)
+    cartella = mappa_temi.cartella(d)
+    return mappa_temi.vista(mappa_temi.leggi_json(cartella / mappa_temi.FILE_TEMI),
+                            mappa_temi.leggi_json(cartella / mappa_temi.FILE_MARCHI),
+                            dal=dal, al=al, limit=limit)
 
 
 @mcp.tool()

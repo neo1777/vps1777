@@ -281,6 +281,7 @@ routes = [
     Route("/admin/secrets", admin.secrets_view, methods=["GET"]),
     Route("/admin/connettori", admin.connettori_view, methods=["GET"]),
     Route("/admin/connettori/revoca", admin.connettori_revoca, methods=["POST"]),
+    Route("/admin/temi", admin.temi_view, methods=["GET", "POST"]),
 
     # P15: link firmati di nb1777 per gli artefatti. Il gettone è l'autorizzazione e lo
     # verifica nb1777-mcp; deve stare PRIMA del catch-all del proxy.

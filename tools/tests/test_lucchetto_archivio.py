@@ -173,7 +173,7 @@ def notturno(cli, tmp_path, monkeypatch):
 
 
 def _args_notturno(**kw):
-    base = dict(abilita=False, disabilita=False, tutti=False, db=None)
+    base = dict(abilita=False, disabilita=False, tutti=False, db=None, temi=False, temi_da_zero=False)
     base.update(kw)
     return SimpleNamespace(**base)
 
@@ -262,3 +262,34 @@ def test_il_nome_del_segno_d_attesa_e_lo_stesso_del_gateway(cli):
     # e non ha la forma di un id: la pagina non lo mostra come un lavoro, la potatura lo
     # lascia stare
     assert not re.match(gw.ID_RE, Path(gw.ATTESA).stem)
+
+
+def test_la_mappa_dei_temi_resta_spenta_senza_i_suoi_db(notturno, monkeypatch):
+    cli, repo, lanciati = notturno
+    chiamate = []
+    monkeypatch.setattr(cli, "env_read", lambda r: {})
+    vero = cli.run
+    monkeypatch.setattr(cli, "run", lambda c, **k: chiamate.append(c) or vero(c, **k))
+    assert cli.cmd_indice_notturno(repo, _args_notturno()) == 0
+    assert not any("tools/costruisci_temi.py" in c for c in chiamate)
+
+
+def test_la_mappa_dei_temi_lancia_il_suo_costruttore(notturno, monkeypatch):
+    cli, repo, _ = notturno
+    chiamate = []
+    monkeypatch.setattr(cli, "env_read", lambda r: {"ARCHIVE_TEMI_DB": "note,diario"})
+
+    class _R:
+        returncode, stdout, stderr = 0, "mappa: 3 temi", ""
+
+    def finto(c, **k):
+        chiamate.append((list(c), None))
+        return _R()
+
+    monkeypatch.setattr(cli, "run", finto)
+    assert cli._mappa_dei_temi(repo, ["docker", "compose"], False) == 0
+    c = chiamate[0][0]
+    assert c[c.index("--entrypoint") + 1] == "python" and "tools/costruisci_temi.py" in c
+    assert c[c.index("--db") + 1] == "note,diario" and "--da-zero" not in c
+    cli._mappa_dei_temi(repo, ["docker", "compose"], True)
+    assert "--da-zero" in chiamate[1][0]

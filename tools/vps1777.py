@@ -4286,9 +4286,10 @@ def cmd_indice_notturno(repo: Path, args) -> int:
     da_fare = _indici_da_aggiornare((elenco.stdout or "").splitlines(), args.tutti)
     if args.db:
         da_fare = [(n, p) for n, p in da_fare if n == args.db]
+    voglio_temi = bool(args.temi or args.temi_da_zero)
     if not da_fare:
         log("nessun indice da aggiornare: ogni DB con un indice è fermo da prima della sua costruzione")
-        return 0
+        return _mappa_dei_temi(repo, cc, args.temi_da_zero) if voglio_temi else 0
     uscita = 0
     for nome, perche in da_fare:
         db = f"/var/lib/archive/db/{nome}.db"
@@ -4328,7 +4329,32 @@ def cmd_indice_notturno(repo: Path, args) -> int:
         else:
             warn(f"{nome}: fallito (esito {r.returncode}) — {' '.join(coda)[:300]}")
             uscita = 1
-    return uscita
+    # La mappa dei temi si ricalcola solo se un indice si è mosso, o a comando: legge i vettori.
+    return _mappa_dei_temi(repo, cc, args.temi_da_zero) or uscita
+
+
+def _mappa_dei_temi(repo: Path, cc: list[str], da_zero: bool) -> int:
+    """Ricalcola la mappa dei temi nello stesso job senza rete degli indici. Spenta finché
+    ARCHIVE_TEMI_DB è vuota: quali DB entrano in una mappa è una scelta del proprietario."""
+    dbs = (env_read(repo).get("ARCHIVE_TEMI_DB") or "").strip()
+    if not dbs:
+        return 0
+    try:
+        with lucchetto_archivio(repo, "mappa dei temi", attesa_max=ATTESA_INDICE_S):
+            r = run([*cc, "--profile", "indice", "run", "--rm", "-T", "--entrypoint", "python",
+                     "indice-notturno", "tools/costruisci_temi.py", "--db-dir", "/var/lib/archive/db",
+                     "--db", dbs, "--modello", DIR_MODELLO_VOLUME, *(["--da-zero"] if da_zero else [])],
+                    check=False, capture=True, timeout=3600)
+    except ArchivioOccupato as exc:
+        warn(f"mappa dei temi: l'archivio è occupato ({exc}), la prende il prossimo giro")
+        return 0
+    righe = [x for x in ((r.stdout or "") + "\n" + (r.stderr or "")).splitlines()
+             if x.strip() and "onnxruntime" not in x]
+    if r.returncode == 0:
+        ok(" · ".join(righe[-4:])[:300])
+        return 0
+    warn(f"mappa dei temi: esito {r.returncode} — {' '.join(righe[-3:])[:300]}")
+    return 0 if r.returncode == 2 else 1
 
 
 # ── ingest-coda: l'indicizzazione di /admin/archive come lavoro a parte (P16) ─────
@@ -5493,6 +5519,10 @@ def build_parser() -> "argparse.ArgumentParser":
     p.add_argument("--db", help="un solo DB (nome senza .db)")
     p.add_argument("--tutti", action="store_true",
                    help="anche gli indici già allineati (per provarlo: il costruttore non ricalcola niente)")
+    p.add_argument("--temi", action="store_true",
+                   help="ricalcola adesso la mappa dei temi (ARCHIVE_TEMI_DB nel .env)")
+    p.add_argument("--temi-da-zero", action="store_true",
+                   help="ricalcola la mappa da zero: i temi cambiano, e i marchi vanno riguardati")
     p.add_argument("--abilita", action="store_true", help=f"accende {TIMER_INDICE}")
     p.add_argument("--disabilita", action="store_true", help=f"spegne {TIMER_INDICE}")
 

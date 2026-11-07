@@ -358,6 +358,16 @@ for logico in $VOLUMI_ARCHIVIO; do
       fi
     fi
   done
+  # I marchi della mappa dei temi: scritti a mano come il ruolo, e come il ruolo decidono cosa
+  # esce. Senza, dopo un restore un tema «riservato» tornerebbe visibile. Con lo stato, perché
+  # i marchi valgono per gli id dei temi, e gli id li tiene lui.
+  temidir="${BACKUP_VOLUMES_DIR:-}/$logico/temi"
+  if [ -f "$temidir/marchi.json" ]; then
+    mkdir -p "$TMP/temi"
+    cp -a "$temidir/marchi.json" "$TMP/temi/" 2>/dev/null || warn "marchi dei temi non copiati"
+    cp -a "$temidir/stato.json" "$TMP/temi/" 2>/dev/null || warn "stato della mappa dei temi non copiato"
+    ok "marchi della mappa dei temi nel core (temi/)"
+  fi
 done
 if [ "$n_descr" -gt 0 ]; then
   ok "description di $n_descr DB esportate (descrizioni/<db>.txt nel core), ruolo di $n_ruoli (ruoli/<db>.txt)"
