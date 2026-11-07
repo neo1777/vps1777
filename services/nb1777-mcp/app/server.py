@@ -1116,9 +1116,9 @@ async def studio_create_all_9(notebook_id: str,
 async def studio_list(notebook_id: str, verbose: bool = False) -> list[esiti.Artefatto]:
     """Lista gli artefatti studio di un notebook.
 
-    Default COMPATTO: per ognuno solo id/type/status/label (i primi 80 char del
-    focus). verbose=True restituisce il JSON pieno col focus intero (4-6 KB per
-    artefatto) — usalo solo se ti serve davvero il dettaglio."""
+    Default COMPATTO: per ognuno solo id/type/status/label (il titolo o, se manca, i
+    primi 80 char del focus). verbose=True restituisce il JSON pieno (titolo, focus
+    intero, date, fonti, indirizzi): usalo solo se ti serve davvero il dettaglio."""
     return await _aio(core.studio_list, notebook_id, verbose=verbose)
 
 

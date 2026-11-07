@@ -4,6 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **`notebook_query` segnava come «generati dal modello» paragrafi che le citazioni le avevano.**
+  `senza_citazioni` non riconosceva gli intervalli che NotebookLM scrive (`[32-34]`, `[7, 48-50]`): un
+  blocco con 6 riferimenti risultava da trattare come ipotesi. Ora gli intervalli contano, e titoli,
+  separatori e titoletti in grassetto non si contano più come paragrafi scoperti.
+- **`studio_list` e `studio_status` non distinguevano gli artefatti creati dalla pagina di NotebookLM.**
+  Il `label` veniva solo dal focus, che quegli artefatti non hanno: nove artefatti col `label` vuoto, anche
+  con `verbose=True`. Ora il `label` è il titolo (la CLI lo dà con `--full`, a parità di tempo), e il focus
+  resta il ripiego; `verbose=True` porta anche titolo, date, fonti e indirizzi.
+
 ## [0.93.0] — 2026-10-16
 
 **A ogni connettore OAuth autorizzato arriva un avviso su Telegram, e `/admin/connettori` li elenca e li revoca.**
