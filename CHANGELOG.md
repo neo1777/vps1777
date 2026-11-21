@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.96.0] — 2026-11-21
+
 **I sei rilievi di sicurezza rimasti aperti dal giro di revisione sono chiusi (H88-H93).**
 
 ### Sicurezza

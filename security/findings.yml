@@ -4299,7 +4299,7 @@ findings:
         Giro di revisione dell'intero codice del 21/11 (revisore del gateway), riprodotto in
         locale: 36.378 eventi anonimi portano il file a 42 MB, e a quella dimensione una
         scrittura costa 618 ms. Mai visto sulla VPS di riferimento.
-    since: unreleased
+    since: v0.96.0
     why: >
       La potatura toglieva solo le righe più vecchie della retention (90 giorni): dentro la
       finestra il file non aveva un limite. Ogni richiesta con un segreto sbagliato scriveva una
@@ -4340,7 +4340,7 @@ findings:
       nota: >
         Giro di revisione del 21/11. Il commento nel codice citava la BCP di OAuth 2.1, che
         chiede di revocare la famiglia; il codice rifiutava solo il token ripresentato.
-    since: unreleased
+    since: v0.96.0
     why: >
       Con la rotazione, un refresh rubato e usato dal ladro PRIMA del proprietario produce una
       catena valida in mano al ladro; il proprietario, al suo turno, presenta il token ormai
@@ -4379,7 +4379,7 @@ findings:
         Giro di revisione del 21/11 (revisore di nb1777-mcp). Riprodotto con la CLI vera:
         `nlm notebook describe --profilo-finto=x` risponde «No such option», la stessa
         chiamata dopo `--` arriva all'API.
-    since: unreleased
+    since: v0.96.0
     why: >
       I valori che vengono dal client (id di notebook, fonti e artefatti, titoli, domande,
       descrizioni) erano passati come posizionali senza separatore. Un valore come
@@ -4417,7 +4417,7 @@ findings:
         Giro di revisione del 21/11: la stessa classe di H80 (cosign), rimasta aperta sul
         binario che poi orchestra tutto lo stack. Le impronte sono quelle pubblicate accanto al
         binario, ricalcolate dai file scaricati.
-    since: unreleased
+    since: v0.96.0
     why: >
       `deploy.sh` e l'installer web scaricavano `docker-compose-linux-<arch>` da GitHub e lo
       rendevano eseguibile nella cartella dei plugin di Docker senza confrontarlo con niente:
@@ -4455,7 +4455,7 @@ findings:
       nota: >
         Giro di revisione del 21/11. Nessuna via cancellava un artefatto scaricato, e `nlm
         download` scriveva senza guardare lo spazio.
-    since: unreleased
+    since: v0.96.0
     why: >
       Video, audio e censimenti si accumulavano nel volume `nlm-artifacts` fino a riempire il
       disco; a disco pieno falliscono anche i caricamenti e il backup. Un client autorizzato
@@ -4492,7 +4492,7 @@ findings:
         Giro di revisione del 21/11 (revisore degli strumenti dell'operatore). Mai successo
         sulla VPS di riferimento. `high` perché è la disponibilità di tutto il servizio, senza
         un allarme: la bandierina veniva scritta e mai riletta.
-    since: unreleased
+    since: v0.96.0
     why: >
       Allo step 10 l'update scrive il tag nuovo nel `.env`, allo step 11 ferma lo stack. Se il
       processo muore lì (connessione SSH caduta, timeout della unit systemd, OOM) lo stack resta
