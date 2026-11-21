@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.95.1] — 2026-11-21
+
 **Le immagini assorbono davvero le correzioni di sicurezza: base Debian e librerie aggiornate.**
 
 ### Sicurezza
