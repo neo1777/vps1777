@@ -32,6 +32,10 @@
 services:
 
   caddy:
+    # Tetti (memoria, CPU, processi) come gli altri servizi: gli stessi del Caddy di compose.ingress.caddy.yaml, ripetuti perché questo file ne cambia l'immagine.
+    pids_limit: 256
+    cpus: 1.0
+    mem_limit: 512m
     profiles: [ingress.caddy]
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-caddy-dns01:${VPS1777_TAG:-dev}${VPS1777_DIGEST_CADDY_DNS01:+@${VPS1777_DIGEST_CADDY_DNS01}}
     # 🔑 DAC_OVERRIDE, e il perché è misurato (01/10/2026), non supposto: il secret è un
