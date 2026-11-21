@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.95.3] — 2026-11-21
+
 **Correzioni da una revisione esterna dell'archivio: la mappa dei temi si chiude se le scelte non si leggono.**
 
 ### Sicurezza
