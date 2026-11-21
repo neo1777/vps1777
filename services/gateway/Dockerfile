@@ -35,7 +35,11 @@ RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 # tini per signal handling + ca-certificates per HTTPS uscente
-RUN apt-get update && apt-get install -y --no-install-recommends tini ca-certificates \
+# `apt-get upgrade` (21/11/2026): la base è fissata per digest, e fra la sua costruzione e la
+# nostra Debian pubblica correzioni (zlib1g, nella scansione del 21/11). Senza upgrade restavano
+# fuori fino al digest successivo. La release costruisce senza cache: l'upgrade è sempre fresco.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends tini ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 # ⚠️ NIENTE tesseract QUI (28/08/2026): la prima versione del B5 lo installava
 # in questa immagine e lanciava subprocess dal gateway — bocciata dal presidio

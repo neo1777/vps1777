@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Le immagini applicano gli aggiornamenti Debian usciti dopo la base** (`apt-get upgrade` alla costruzione): dopo la
+  0.95.1 la scansione trovava ancora `zlib1g` in tutte e cinque. L'immagine opzionale `caddy-dns01` passa alla base
+  Caddy corrente (libreria standard di Go, `x/net`, `grpc` e altre).
+
 ## [0.95.1] — 2026-11-21
 
 **Le immagini assorbono davvero le correzioni di sicurezza: base Debian e librerie aggiornate.**

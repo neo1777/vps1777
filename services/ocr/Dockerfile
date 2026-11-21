@@ -22,7 +22,11 @@ FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb
 # tini per i segnali; tesseract è IL mestiere di questo container (eng è nel
 # pacchetto base, ita si aggiunge: la ricetta `-l ita+eng` è quella provata
 # su _chat/ocr1777 — 562/562 immagini, 0 errori).
-RUN apt-get update && apt-get install -y --no-install-recommends tini \
+# `apt-get upgrade` (21/11/2026): la base è fissata per digest, e fra la sua costruzione e la
+# nostra Debian pubblica correzioni (zlib1g, nella scansione del 21/11). Senza upgrade restavano
+# fuori fino al digest successivo. La release costruisce senza cache: l'upgrade è sempre fresco.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends tini \
     tesseract-ocr tesseract-ocr-ita \
     && rm -rf /var/lib/apt/lists/*
 
