@@ -70,6 +70,10 @@ def _pacchetti(percorso: Path) -> dict[str, str]:
         nome, ver = p.get("name"), p.get("version")
         if nome and ver:
             fuori[nome] = ver
+    if not fuori:
+        # zero pacchetti letti non è «nessun salto»: è «non ho guardato» (un cambio di formato
+        # di uv.lock spegneva il gate in silenzio, con un confronto 0 → 0 verde)
+        raise ValueError(f"{percorso}: nessun pacchetto letto (formato di uv.lock cambiato?)")
     return fuori
 
 
@@ -100,6 +104,9 @@ def confronta(f_prima: Path, f_dopo: Path) -> int:
         return 2
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         print(f"⚠️  NON MISURATO: lock illeggibile ({e})", file=sys.stderr)
+        return 2
+    except ValueError as e:
+        print(f"⚠️  NON MISURATO: {e}", file=sys.stderr)
         return 2
 
     confini, minori, ignoti = [], [], []

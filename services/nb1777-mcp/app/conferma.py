@@ -34,7 +34,7 @@ def verifica(valore: str, azione: str, *ids: str, ora: float | None = None) -> s
         scade = int(scade_txt)
     except ValueError:
         return "il gettone di conferma non vale: richiedi l'anteprima senza `conferma`"
-    if not hmac.compare_digest(firma, _firma(azione, ids, scade)):
+    if not hmac.compare_digest(firma.encode(), _firma(azione, ids, scade).encode()):  # byte, non stringhe
         return ("il gettone di conferma non vale per questa cancellazione (altri id, "
                 "altra azione, o il server è ripartito): richiedi l'anteprima senza `conferma`")
     if (time.time() if ora is None else ora) > scade:

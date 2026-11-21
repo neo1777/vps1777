@@ -13,6 +13,13 @@
 services:
 
   caddy:
+    # Il tetto ai log non attraversa i file: l'ancora `x-logging` vive in compose.yaml, e questo
+    # container ne restava senza (json-file senza limite: un log per richiesta fino a disco pieno).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     profiles: [ingress.caddy]
     image: caddy:2.11-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
     container_name: vps1777-caddy

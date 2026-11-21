@@ -50,3 +50,33 @@ async def test_una_coda_che_non_risponde_non_ferma_le_altre(monkeypatch):
     assert await bot._preleva("gateway", "http://gateway:8080/internal/notifications", "s3") == []
     assert await bot._preleva("nb1777-mcp", "http://nb1777-mcp:8003/internal/notifications",
                               "s3") == [{"kind": "x", "text": "t"}]
+
+
+@pytest.mark.anyio
+async def test_una_notifica_non_consegnata_si_riprova_e_non_si_perde(monkeypatch):
+    # giro di revisione del 21/11: il prelievo svuota la coda sul server, quindi un invio
+    # fallito (timeout, flood) perdeva l'avviso; la sonda della sessione avvisa una volta sola
+    inviati: list[str] = []
+    guasto = {"acceso": True}
+
+    async def manda(app, owner, item):
+        if guasto["acceso"] and item["kind"] == "sessione":
+            raise TimeoutError("Telegram non risponde")
+        inviati.append(item["kind"])
+
+    monkeypatch.setattr(bot, "_send_notification", manda)
+    restano = await bot._consegna(None, 1, [{"kind": "sessione"}, {"kind": "oauth"}])
+    assert inviati == ["oauth"] and [r["kind"] for r in restano] == ["sessione"]
+    assert restano[0]["_tentativi"] == 1
+    guasto["acceso"] = False
+    assert await bot._consegna(None, 1, restano) == [] and inviati == ["oauth", "sessione"]
+
+
+@pytest.mark.anyio
+async def test_dopo_troppi_tentativi_la_notifica_si_lascia_andare(monkeypatch):
+    async def manda(app, owner, item):
+        raise TimeoutError("sempre giù")
+
+    monkeypatch.setattr(bot, "_send_notification", manda)
+    quasi = [{"kind": "x", "_tentativi": bot._TENTATIVI_MAX - 1}]
+    assert await bot._consegna(None, 1, quasi) == []

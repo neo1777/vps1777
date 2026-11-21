@@ -362,7 +362,14 @@ def main() -> int:
     doc = yaml.safe_load((repo / a.ledger).read_text()) if not a.ledger.is_absolute() \
         else yaml.safe_load(a.ledger.read_text())
     entries = doc.get("features", [])
-    baseline_completo = (doc.get("_meta") or {}).get("baseline_completo", False)
+    # Il default è SEVERO (21/11/2026). L'interruttore sta nel file che si verifica: se `_meta`
+    # spariva (o il ledger restava senza voci) ogni «non dichiarato» diventava un avviso e la
+    # CI restava verde. Ora «semina» va chiesto per iscritto, e zero voci è un errore.
+    baseline_completo = (doc.get("_meta") or {}).get("baseline_completo", True)
+    if not entries:
+        print("ERRORE: il ledger non ha nessuna voce in `features`: non ho niente da "
+              "verificare, e «niente» non è un verde.", file=sys.stderr)
+        return 2
     oggi = datetime.date.today()
 
     hard_fail: list[str] = []      # fanno uscire != 0

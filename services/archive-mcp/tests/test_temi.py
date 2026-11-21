@@ -256,3 +256,13 @@ def test_i_vocali_finiscono_nel_mese_dell_audio(tmp_path: Path) -> None:
     c.commit()
     c.close()
     assert temi.scambi_di(db, vec, "x")[0]["ts"].startswith("2026-05")
+
+
+def test_al_col_solo_anno_vale_fino_a_dicembre():
+    # giro di revisione del 21/11: "2026-09" <= "2026" è falso, e `temi(al="2026")` dava zero
+    # temi senza errore (mentre `dal="2026"` funzionava)
+    mappa = {"temi": [{"id": 1, "parole": ["x"], "scambi": 3, "mesi": {"2026-09": 3},
+                       "esempi": [], "fonti": {}, "da_guardare": False}], "scambi": 3}
+    piena = temi.vista(mappa, {}, dal="", al="2026-12", limit=10)
+    solo_anno = temi.vista(mappa, {}, dal="", al="2026", limit=10)
+    assert len(solo_anno["temi"]) == len(piena["temi"]) == 1

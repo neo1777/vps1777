@@ -389,6 +389,9 @@ def vista(mappa: dict[str, Any] | None, marchi: dict[str, str] | None, *, dal: s
                         "ARCHIVE_TEMI_DB (vps1777 indice-notturno --temi). Intanto usa search_ibrida."}
     marchi = marchi or {}
     temi, riservati, da_guardare = [], 0, 0
+    # `al` col solo anno («2026») vale fino a dicembre: confrontato com'era, "2026-09" <= "2026"
+    # è falso e la mappa tornava vuota senza errore (mentre `dal="2026"` funzionava)
+    fino = (al[:4] + "-12") if len(al.strip()) == 4 else al[:7]
     for t in mappa.get("temi", []):
         st = stato_del_tema(t, marchi)
         if st == "riservato":
@@ -398,7 +401,7 @@ def vista(mappa: dict[str, Any] | None, marchi: dict[str, str] | None, *, dal: s
             da_guardare += 1
             continue
         mesi = {m: n for m, n in t.get("mesi", {}).items()
-                if (not dal or m >= dal[:7]) and (not al or m <= al[:7])}
+                if (not dal or m >= dal[:7]) and (not al or m <= fino)}
         if (dal or al) and not mesi:
             continue
         temi.append({"id": t["id"], "parole": t["parole"], "scambi": sum(mesi.values()) if (dal or al) else t["scambi"],

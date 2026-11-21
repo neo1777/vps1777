@@ -27,6 +27,19 @@ def _di_schema(exc: sqlite3.OperationalError) -> bool:
     return str(exc).startswith("no such table")
 
 
+_NON_DI_SINTASSI = ("interrupt", "locked", "busy", "disk i/o", "unable to open", "readonly",
+                    "malformed", "not a database", "out of memory")
+
+
+def _non_di_sintassi(exc: sqlite3.OperationalError) -> bool:
+    """Un guasto del DB o della chiamata, non della query (giro di revisione del 21/11/2026):
+    il budget che interrompe a metà («interrupted»), un DB bloccato da chi scrive, un errore di
+    disco. Prima diventavano TUTTI «sintassi FTS5 non valida»: `count` perdeva il suo
+    `parziale: true`, e chi aveva scritto una query giusta veniva mandato a correggerla."""
+    testo = str(exc).lower()
+    return any(x in testo for x in _NON_DI_SINTASSI)
+
+
 class FtsSyntaxError(ValueError):
     """Query FTS5 malformata. Sollevata al posto di restituire lista vuota:
     un `[]` da errore di sintassi è indistinguibile da 'nessun match' e produce
@@ -254,7 +267,7 @@ def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
                               order=order, limit=limit, snippet_tokens=snippet_tokens,
                               join=join)
         except sqlite3.OperationalError as exc:
-            if _di_schema(exc):
+            if _di_schema(exc) or _non_di_sintassi(exc):
                 raise
             last_exc = exc
             continue
@@ -298,7 +311,7 @@ def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
         try:
             return int(conn.execute(sql, [con_campi(match, campi), *extra]).fetchone()[0])
         except sqlite3.OperationalError as exc:
-            if _di_schema(exc):
+            if _di_schema(exc) or _non_di_sintassi(exc):
                 raise
             last_exc = exc
     raise FtsSyntaxError(f"{_SYNTAX_HINT} (dettaglio: {last_exc})")
@@ -493,17 +506,27 @@ def context_conn(conn: sqlite3.Connection, uuid: str, *, before: int = 3,
                 r["is_match"] = (r["uuid"] == uuid)
             return out
     # ancora per (ts, uuid): stabile anche con ts uguali (dedup deterministico)
+    # Una riga con `ts` NULL: `(ts, uuid) < (?, ?)` con NULL dà NULL, e non tornavano né i
+    # precedenti né la riga stessa — «uuid non trovato» su un uuid appena uscito da `search`.
+    # Le righe senza data si ordinano fra loro per uuid (prima di tutte le datate, come fa
+    # SQLite con i NULL).
+    if ts is None:
+        dove_prima, dove_dopo = "ts IS NULL AND uuid < ?", "(ts IS NOT NULL OR uuid >= ?)"
+        ancora: tuple = (uuid,)
+    else:
+        dove_prima, dove_dopo = "(ts IS NULL OR (ts, uuid) < (?, ?))", "(ts, uuid) >= (?, ?)"
+        ancora = (ts, uuid)
     prev = conn.execute(
         "SELECT uuid, project, ts, content FROM messages "
-        "WHERE project = ? AND (ts, uuid) < (?, ?) "
+        f"WHERE project = ? AND {dove_prima} "
         "ORDER BY ts DESC, uuid DESC LIMIT ?",
-        (project, ts, uuid, int(before)),
+        (project, *ancora, int(max(0, before))),
     ).fetchall()
     center_after = conn.execute(
         "SELECT uuid, project, ts, content FROM messages "
-        "WHERE project = ? AND (ts, uuid) >= (?, ?) "
+        f"WHERE project = ? AND {dove_dopo} "
         "ORDER BY ts ASC, uuid ASC LIMIT ?",
-        (project, ts, uuid, int(after) + 1),
+        (project, *ancora, int(max(0, after)) + 1),
     ).fetchall()
     out = [dict(r) for r in reversed(prev)] + [dict(r) for r in center_after]
     for r in out:
