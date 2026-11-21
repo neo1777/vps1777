@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.95.2] — 2026-11-21
+
+**Le immagini applicano gli aggiornamenti Debian alla costruzione.**
+
 ### Sicurezza
 - **Le immagini applicano gli aggiornamenti Debian usciti dopo la base** (`apt-get upgrade` alla costruzione): dopo la
   0.95.1 la scansione trovava ancora `zlib1g` in tutte e cinque. L'immagine opzionale `caddy-dns01` passa alla base
