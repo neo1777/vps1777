@@ -3306,3 +3306,29 @@ def test_telegram_migra_i_db_gia_caricati(tmp_path, monkeypatch) -> None:
     assert set(_speaker(db).values()) == {"unknown"}   # a secco non scrive
     archive_indexer.migra_telegram(str(db), scrivi=True)
     assert _speaker(db) == {"[Neo1777]": "human", "[Ema]": "other"}
+
+
+def test_una_riga_json_che_non_e_un_oggetto_si_salta_e_non_fa_cadere_l_ingest():
+    # giro di revisione del 21/11: `[...]` o `42` su una riga sono JSON validi, e `d.get`
+    # sollevava AttributeError: l'ingest intero cadeva e il file caricato veniva cancellato
+    import io
+    testo = '[{"type": "user"}]\n42\n"solo una stringa"\n'
+    righe = list(archive_indexer._iter_claude_code(io.StringIO(testo), "test"))
+    assert len(righe) == 3
+    assert all(isinstance(r, archive_indexer._Skip) and r.reason == "non-dict" for r in righe)
+
+
+def test_find_db_non_restituisce_un_indice(tmp_path):
+    (tmp_path / "foo.db").write_bytes(b"x")
+    (tmp_path / "foo.vec.db").write_bytes(b"y")
+    assert archive_indexer.find_db(tmp_path, "foo") == tmp_path / "foo.db"
+    assert archive_indexer.find_db(tmp_path, "foo.vec") is None
+
+
+def test_togli_indice_toglie_l_indice_accanto(tmp_path):
+    db = tmp_path / "foo.db"
+    (tmp_path / "foo.vec.db").write_bytes(b"y")
+    (tmp_path / "bar.vec.db").write_bytes(b"z")
+    assert archive_indexer.togli_indice(db) is True
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["bar.vec.db"]
+    assert archive_indexer.togli_indice(db) is False

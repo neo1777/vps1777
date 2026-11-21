@@ -64,11 +64,35 @@ def banco(monkeypatch):
     app = Starlette(routes=[Route("/{secret}/{service}/{path:path}", proxy.proxy,
                                   methods=["GET", "POST", "PUT", "DELETE", "PATCH"])])
 
-    def chiama(metodo, percorso, *, sub=_PROPRIETARIO, bearer=True, corpo=None):
-        intestazioni = {}
+    def chiama(metodo, percorso, *, sub=_PROPRIETARIO, bearer=True, corpo=None, extra=None,
+               grezzo=False):
+        intestazioni = dict(extra or {})
         if bearer:
             tok = jwt_helpers.issue(typ="access", sub=sub, aud="client-di-prova", ttl=300)
             intestazioni["authorization"] = f"Bearer {tok}"
+
+        async def _grezzo():
+            # lo scope ASGI scritto a mano: il percorso arriva all'app com'è sul filo
+            from urllib.parse import unquote
+            crudo = f"/{_SEGRETO}/echo/{percorso}"
+            scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+                     "method": metodo, "scheme": "http", "path": unquote(crudo),
+                     "raw_path": crudo.encode(), "query_string": b"", "root_path": "",
+                     "headers": [(k.encode(), v.encode()) for k, v in intestazioni.items()],
+                     "server": ("gw", 80), "client": ("127.0.0.1", 1)}
+            esito = {}
+
+            async def ricevi():
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+            async def manda(m):
+                if m["type"] == "http.response.start":
+                    esito["status"] = m["status"]
+            await app(scope, ricevi, manda)
+            return SimpleNamespace(status_code=esito["status"])
+
+        if grezzo:
+            return asyncio.run(_grezzo())
 
         async def _go():
             async with vero(transport=httpx.ASGITransport(app=app), base_url="http://gw") as c:
@@ -115,6 +139,31 @@ def test_il_bearer_si_ferma_al_gateway(banco):
 def test_internal_resta_chiuso_anche_per_un_upstream_qualunque(banco):
     chiama, visti = banco
     assert chiama("GET", "internal/admin").status_code == 404
+    assert visti == []
+
+
+@pytest.mark.parametrize("percorso", [
+    "x/../internal/nlm/profile", "x/%2e%2e/internal/nlm/profile", "./internal/nlm/profile",
+    "%2e/internal/nlm/profile", "x/%252e%252e/internal/nlm/profile", "/internal/nlm/profile",
+    "a/b/../../internal", "v1/../risorse"])
+def test_i_segmenti_a_punti_non_passano(banco, percorso):
+    # giro di revisione del 21/11: httpx toglie `.` e `..` DOPO il controllo sul prefisso, e
+    # `x/../internal/…` arrivava all'upstream come `/internal/…`. Si chiama l'app con il
+    # percorso grezzo, perché un client HTTP lo normalizzerebbe prima di spedirlo.
+    chiama, visti = banco
+    assert chiama("GET", percorso, grezzo=True).status_code == 404
+    assert visti == []
+
+
+def test_l_header_interno_del_client_non_arriva_all_upstream(banco):
+    chiama, visti = banco
+    assert chiama("GET", "v1/risorse", extra={"x-vps1777-internal": _SEGRETO}).status_code == 200
+    assert not [k for k in visti[-1].headers if k.lower().startswith("x-vps1777-")]
+
+
+def test_un_percorso_che_non_e_un_url_da_400(banco):
+    chiama, visti = banco
+    assert chiama("GET", "a%00b", grezzo=True).status_code == 400
     assert visti == []
 
 

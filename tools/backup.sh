@@ -120,6 +120,13 @@ log()  { printf '%s[*]%s %s\n' "$C_I"  "$C_R" "$*"; }
 ok()   { printf '%s[✓]%s %s\n' "$C_OK" "$C_R" "$*"; }
 warn() { printf '%s[!]%s %s\n' "$C_W"  "$C_R" "$*"; }
 die()  { printf '%s[✗]%s %s\n' "$C_E"  "$C_R" "$*" >&2; exit 1; }
+DUMP_FALLITI=0
+DUMP_FALLITI_NOMI=""
+_dump_fallito() {   # $1 = volume; l'errore di tar è in $TMP/.tar-err
+  DUMP_FALLITI=$((DUMP_FALLITI + 1))
+  DUMP_FALLITI_NOMI="$DUMP_FALLITI_NOMI $1"
+  warn "    dump $1 FALLITO: $(head -c 300 "$TMP/.tar-err" 2>/dev/null | tr '\n' ' ')"
+}
 
 # ╔═ SOLO SE STIAMO CREANDO UN BACKUP ════════════════════════════════════════╗
 # Le sezioni «prerequisiti», «recipients» e 1-4 restano NON indentate dentro
@@ -221,14 +228,14 @@ if [ -n "${BACKUP_VOLUMES_DIR:-}" ] && [ -d "$BACKUP_VOLUMES_DIR" ]; then
     if _e_volume_archivio "$name"; then
       if [ "$FA_ARCHIVIO" -eq 1 ]; then
         log "  → $name (livello ARCHIVIO)"
-        tar -C "$src" -cf "$TMP_ARCHIVIO/volumes/vps1777_${name}.tar" . 2>/dev/null || warn "    dump $name fallito (vuoto?)"
+        tar -C "$src" -cf "$TMP_ARCHIVIO/volumes/vps1777_${name}.tar" . 2>"$TMP/.tar-err" || _dump_fallito "$name"
       else
         log "  ⚪ $name: livello archivio, non dovuto stanotte"
       fi
       continue
     fi
     log "  → $name"
-    tar -C "$src" -cf "$TMP/volumes/vps1777_${name}.tar" . 2>/dev/null || warn "    dump $name fallito (vuoto?)"
+    tar -C "$src" -cf "$TMP/volumes/vps1777_${name}.tar" . 2>"$TMP/.tar-err" || _dump_fallito "$name"
   done
 else
   # Contesto HOST: docker disponibile → dump via `docker run` (volume ro).
@@ -257,7 +264,10 @@ else
   # >>> volumi-del-progetto (tools/tests/test_backup_volumi_degli_overlay.py esegue questo blocco)
   VOLS_LOGICI=$(docker compose config --volumes 2>/dev/null || true)
   [ -n "$VOLS_LOGICI" ] || die "non riesco a chiedere i volumi a \`docker compose config --volumes\` (variabili .env mancanti?). Un backup che non sa cosa salvare non parte."
-  PROJ="${COMPOSE_PROJECT_NAME:-$(basename "$PWD")}"
+  # `compose.yaml` fissa `name: vps1777`: il prefisso dei volumi è quello, ovunque stia il repo.
+  # (come `restore.sh` e la CLI). Prima era il nome della CARTELLA: in un clone con un altro
+  # nome ogni update si fermava qui, senza trovare nessun volume.
+  PROJ="${COMPOSE_PROJECT_NAME:-vps1777}"
   # 🔴 29/09/2026 — IL COMMENTO QUI SOPRA PROMETTEVA PIÙ DI QUANTO FACESSE. `docker compose
   #   config --volumes` senza `-f` legge solo compose.yaml: gli overlay ATTIVI (caddy,
   #   portainer) non li vede. Misurato sulla VPS: 5 volumi, gli stessi con o senza il suo
@@ -313,9 +323,16 @@ else
       -v "$dst:/dst" \
       --entrypoint sh \
       busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e \
-      -c "cd /src && tar cf /dst/${vol}.tar ." 2>/dev/null || warn "    dump $vol fallito (volume vuoto?)"
+      -c "cd /src && tar cf /dst/${vol}.tar ." 2>"$TMP/.tar-err" || _dump_fallito "$vol"
   done
 fi
+rm -f "$TMP/.tar-err"
+# 🔴 21/11/2026 — UN DUMP FALLITO ERA UN AVVISO («vuoto?»), e il backup usciva 0 con dentro solo
+#   config e segreti: la ritenzione lo contava come la copia della notte, e la perdita si
+#   scopriva al restore. La scusa non reggeva: `tar` su un volume VUOTO esce 0 (provato, GNU e
+#   busybox), quindi un esito ≠ 0 è sempre un guasto vero (disco pieno a metà, I/O, `docker run`
+#   che non parte). Un backup senza un volume non è un backup: si muore qui, prima di cifrare.
+[ "$DUMP_FALLITI" -eq 0 ] || die "$DUMP_FALLITI volumi non salvati:$DUMP_FALLITI_NOMI. Questo backup NON viene scritto: sarebbe una copia incompleta che sembra buona."
 ok "Volumi dumpati"
 
 # ───── 1-bis. le `description` dei DB: la sola parte dell'archivio che NON si rigenera ─────

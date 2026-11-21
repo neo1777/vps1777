@@ -1049,7 +1049,8 @@ Other things the ingest produces:
 > minimum — the archive no longer says "I don't know since when" while knowing it.
 
 A drop-in `.db` is accepted if it is an SQLite file with the `messages_fts` table
-(check in `admin.py`). A **v1** DB (only the 4 columns `uuid, project, ts, content`)
+(check in `admin.py`) and if that name is not already an archive: a `.db` would replace it
+entirely, so on a name already in use it is refused (delete the existing one first, or rename). A **v1** DB (only the 4 columns `uuid, project, ts, content`)
 is still valid too: `migrate_v1_to_v2()` adds the new columns and rebuilds FTS: the
 old rows stay (with `tools`/`thinking` empty until you re-run the ingest on the
 source, idempotent by `uuid`).

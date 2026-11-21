@@ -1627,9 +1627,27 @@ def find_db(db_dir: Union[str, Path], name: str) -> Union[Path, None]:
     if not name or not d.is_dir():
         return None
     for p in d.glob("*.db"):
-        if p.is_file() and p.stem == name:
+        # mai un indice: `foo.vec` combacia con lo stem di `foo.vec.db`, e da «Elimina»
+        # sarebbe sparito l'indice di un altro archivio
+        if p.is_file() and p.stem == name and not _sidecar(p):
             return p
     return None
+
+
+def togli_indice(db: Path) -> bool:
+    """Toglie l'indice per senso accanto a un DB eliminato (e i resti `-wal`/`-shm`). True se
+    l'indice c'era. Restava sul disco coi vettori dei messaggi eliminati, invisibile alle
+    pagine; un DB ricaricato con lo stesso nome veniva giudicato contro quello."""
+    indice = db.with_name(db.stem + ".vec.db")
+    c_era = False
+    for f in (indice, Path(str(db) + "-wal"), Path(str(db) + "-shm"),
+              Path(str(indice) + "-wal"), Path(str(indice) + "-shm")):
+        try:
+            f.unlink()
+            c_era = c_era or f == indice
+        except OSError:
+            pass
+    return c_era
 
 
 # ── helper testo ─────────────────────────────────────────────────────────────
@@ -1860,6 +1878,13 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
         try:
             d = json.loads(line)
         except json.JSONDecodeError:
+            continue
+        if not isinstance(d, dict):
+            # Una riga JSON valida che non è un oggetto (un `conversations.json` sciolto, tutto
+            # su una riga; uno scalare su una riga sua in un file indentato): prima `d.get`
+            # faceva cadere l'ingest INTERO con un AttributeError che il worker non prendeva,
+            # e il file caricato veniva cancellato (giro di revisione del 21/11).
+            yield _Skip("claude-code", "non-dict", line[:200], "")
             continue
         typ = d.get("type")
         if typ not in _CC_TYPES:

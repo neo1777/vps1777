@@ -16,6 +16,7 @@ import json
 import logging
 import time
 from typing import Any
+from urllib.parse import unquote
 
 import httpx
 from starlette.requests import Request
@@ -73,7 +74,21 @@ def _audit_tool(service: str, tools: list[str], t0: float, esito: str, status: i
 
 
 def _filter_headers(headers: dict[str, str]) -> dict[str, str]:
-    return {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP}
+    # `x-vps1777-*` è il canale gateway↔servizio (il segreto degli endpoint interni viaggia lì):
+    # quello che manda il CLIENT non si inoltra mai, lo aggiunge solo il gateway dove serve.
+    return {k: v for k, v in headers.items()
+            if k.lower() not in HOP_BY_HOP and not k.lower().startswith("x-vps1777-")}
+
+
+def _segmenti_a_punti(sub_path: str) -> bool:
+    """Un segmento `.` o `..`, anche con i punti scritti `%2e` (una o più volte codificati)."""
+    for seg in sub_path.replace("\\", "/").split("/"):
+        prima = None
+        while seg != prima and "%" in seg:
+            prima, seg = seg, unquote(seg)
+        if seg in (".", ".."):
+            return True
+    return False
 
 
 def _check_bearer(request: Request) -> tuple[bool, str | None, dict | None]:
@@ -140,7 +155,13 @@ async def proxy(request: Request) -> Response:
     # gateway↔servizio, sulla rete interna. Vale per OGNI upstream, plugin
     # futuri inclusi: chi scrive un plugin ha un prefisso riservato di cui
     # fidarsi. Rifiuto PRIMA di ogni altro check → non rivela nulla.
-    if sub_path == "internal" or sub_path.startswith("internal/"):
+    # Il confronto da solo non bastava (giro di revisione del 21/11): `x/../internal/…` non
+    # comincia per `internal/`, ma httpx toglie i segmenti `.` e `..` quando costruisce l'URL, e
+    # all'upstream arrivava `/internal/…`. Quindi: un percorso con un segmento `.` o `..` (anche
+    # scritto `%2e`) non passa affatto, nemmeno verso un percorso che interno non è.
+    # Idem una barra in testa (`//internal/…`): nessun percorso vero ne ha.
+    interno = sub_path == "internal" or sub_path.startswith("internal/")
+    if interno or sub_path.startswith("/") or _segmenti_a_punti(sub_path):
         audit({"event": "proxy_internal_blocked", "service": service, "path": sub_path})
         return JSONResponse({"error": "not_found"}, status_code=404)
 
@@ -198,6 +219,11 @@ async def proxy(request: Request) -> Response:
         # aiter_raw() solleverebbe httpx.StreamConsumed (rompendo OGNI proxy MCP).
         req = client.build_request(method, target, headers=headers, content=body)
         upstream_resp = await client.send(req, stream=True)
+    except httpx.InvalidURL as exc:
+        # un percorso che non è un URL (`a%00b`): colpa della richiesta, non dell'upstream
+        await client.aclose()
+        _audit_tool(service, tools, t0, "400", 400)
+        return JSONResponse({"error": "bad_request", "reason": str(exc)}, status_code=400)
     except httpx.RequestError as exc:
         log.warning("proxy upstream error: %s", exc)
         await client.aclose()

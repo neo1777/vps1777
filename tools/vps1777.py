@@ -3011,20 +3011,38 @@ def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
     prev_img = st.get("previous_images")
     env = versione_env(norm_ver(previous), prev_img)
     run([*compose_cmd(repo), "down"], check=False, env=env)
+    # 21/11/2026 — OGNI PASSO DEL ROLLBACK È PROTETTO. Prima un `restore.sh` uscito ≠ 0 (o
+    # `sudo install` delle unit) sollevava da qui fino a `main`: lo stack restava GIÙ, senza
+    # `up`, senza health-gate e senza il 🆘 «intervento manuale». Un rollback deve arrivare
+    # in fondo comunque: si annota cosa non è riuscito, si rialza lo stack, e si dice tutto.
+    guasti: list[str] = []
+
+    def _passo(nome: str, fn) -> None:
+        try:
+            fn()
+        except (Exception, SystemExit) as exc:  # noqa: BLE001 — `die` dentro un passo incluso
+            guasti.append(f"{nome}: {str(exc)[:200] or type(exc).__name__}")
+            warn(f"rollback, passo «{nome}» fallito: {exc}")
+
     rollback_dir = staging_dir(repo, previous) / "rollback-files"
     if rollback_dir.is_dir():
-        restore_rollback_files(repo, rollback_dir, bundle)
-    versione_set(repo, norm_ver(previous), prev_img)
+        _passo("file gestiti", lambda: restore_rollback_files(repo, rollback_dir, bundle))
+    _passo("versione nel .env", lambda: versione_set(repo, norm_ver(previous), prev_img))
     if need_data_restore:
         if snap is None:
             warn("nessuno snapshot per il restore dati — proseguo senza")
         else:
             log("migrazione data-mutating eseguita → restore volumi dallo snapshot")
-            snapshot_restore(repo, snap)
-    install_systemd_units(repo, enable=False)
-    assicura_webapp_secret(repo)      # #61: il secret derivato deve esistere PRIMA di up
+            _passo("restore dei dati dallo snapshot", lambda: snapshot_restore(repo, snap))
+    _passo("unit systemd", lambda: install_systemd_units(repo, enable=False))
+    _passo("chiave della Mini App", lambda: assicura_webapp_secret(repo))  # #61: PRIMA di up
     run([*compose_cmd(repo), "up", "-d"], check=False, env=env)
     healthy, why = health_gate(repo, env=env)
+    if guasti:
+        # lo stack può anche essere tornato su, ma un passo saltato (i DATI, soprattutto) non
+        # è un rollback riuscito: va detto come guasto, non come «riuscito»
+        healthy, why = False, ("stack " + ("su" if healthy else f"non healthy ({why})")
+                               + "; passi falliti: " + " | ".join(guasti))
     if healthy:
         st["update_in_progress"] = None
         st["history"].append({"event": "rolled_back", "from": target,
@@ -3776,10 +3794,17 @@ def cmd_update(repo: Path, args) -> int:
     st["previous_images"] = capture_current_images(repo, cur)
     st["update_in_progress"] = {"target": target, "step": 10, "started_at": now_iso()}
     state_save(repo, st)
-    save_rollback_files(repo, cur, bundle)
-    sync_managed_files(repo, bundle)
-    install_systemd_units(repo, enable=False)
-    versione_set(repo, target, lockfile)          # tag + digest verificati, insieme
+    # 21/11/2026: da qui i file gestiti cambiano. Un errore a metà (una copia, `sudo install`
+    # delle unit) usciva senza rollback: file nuovi col tag vecchio, e al rilancio
+    # `save_rollback_files` risalvava come «file della versione corrente» quelli già nuovi.
+    try:
+        save_rollback_files(repo, cur, bundle)
+        sync_managed_files(repo, bundle)
+        install_systemd_units(repo, enable=False)
+        versione_set(repo, target, lockfile)          # tag + digest verificati, insieme
+    except Exception as exc:  # noqa: BLE001
+        return _rollback_routine(repo, st, target, cur, bundle, snap, False,
+                                 f"applicazione dei file fallita: {str(exc)[:200]}")
 
     # 11 — stop
     step(11, "stop")
@@ -3854,6 +3879,12 @@ def cmd_rollback(repo: Path, args) -> int:
         if ack not in ("s", "si", "y", "yes"):
             die("annullato")
     prev_img = st.get("previous_images")        # digest di `prev`, dall'ultimo update
+    # I digest di `cur` si prendono ORA, finché le sue immagini sono quelle in uso: in fondo
+    # `current` e `previous` si scambiano, e `previous_images` deve scambiarsi con loro. Prima
+    # restava quello di `prev`: un secondo rollback (per tornare a `cur`) scriveva nel .env il
+    # tag di `cur` coi digest di `prev`, e il compose (tag@digest) faceva girare la versione
+    # vecchia sotto il nome della nuova, con health-gate verde (giro di revisione del 21/11).
+    cur_img = capture_current_images(repo, cur)
     env = versione_env(norm_ver(prev), prev_img)
     run([*compose_cmd(repo), "down"], check=False, env=env)
     rollback_dir = staging_dir(repo, prev) / "rollback-files"
@@ -3885,6 +3916,7 @@ def cmd_rollback(repo: Path, args) -> int:
                           "at": now_iso(), "with_data": bool(args.with_data)})
     st["current"] = prev
     st["previous"] = cur
+    st["previous_images"] = cur_img
     state_save(repo, st)
     if healthy:
         telegram_notify(repo, f"↩️ vps1777: rollback manuale a v{norm_ver(prev)} riuscito")

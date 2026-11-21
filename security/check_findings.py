@@ -166,8 +166,11 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 1 (H84, medium, 16/10) = 84. Il consent phishing via DCR aperta: la pagina di consenso
 # non diceva dove andava il permesso, e il DCR accettava qualunque redirect_uri. Dalla
 # decisione D11 (consenso dal telefono: no; rafforzare il consenso di oggi: sì).
-EXPECTED_TOTAL = 84
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 13, "medium": 50, "low": 19}
+# + 3 (H85 high, H86 medium, H87 high, 21/11) = 87. Dal giro di revisione dell'intero codice
+# con un modello nuovo: il blocco di `internal/` aggirabile con `..`, il tipo del messaggio
+# delle pagine admin scritto nell'HTML senza escape, il backup che usciva 0 senza i volumi.
+EXPECTED_TOTAL = 87
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 15, "medium": 51, "low": 19}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

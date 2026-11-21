@@ -23,9 +23,15 @@ class RateLimiter:
         self._max = max_calls
         self._window = window_s
         self._hits: dict[str, list[float]] = defaultdict(list)
+        self._chiamate = 0
 
     def allow(self, ip: str, now: float) -> bool:
         """True se la chiamata è ammessa (e la registra); False se oltre soglia."""
+        # `sweep` non la chiamava nessuno: una voce per ogni IP visto, fino al riavvio.
+        # Ogni 256 chiamate si tolgono le voci senza richieste nella finestra.
+        self._chiamate += 1
+        if self._chiamate % 256 == 0:
+            self.sweep(now)
         q = self._hits[ip]
         cutoff = now - self._window
         # pota le vecchie in-place (memoria limitata alla finestra)

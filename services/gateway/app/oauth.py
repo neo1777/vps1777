@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import html
 import json
+import os
 import secrets as pysecrets
 import time
 from pathlib import Path
@@ -48,40 +49,76 @@ def _clients_file() -> Path:
     return Path(get_settings().audit_log_path).parent / "oauth_clients.json"
 
 
-def _load_clients() -> dict[str, dict[str, Any]]:
+def _scrivi_stato(f: Path, dati: Any, evento: str) -> None:
+    """Tutto o niente: temporaneo accanto, poi rinomina. Con `write_text` un arresto a metà (o
+    il disco pieno) lasciava il file troncato, e al riavvio lo stato ripartiva VUOTO: i refresh
+    già ruotati tornavano validi e i connettori sparivano (giro di revisione del 21/11)."""
+    tmp = f.with_name(f".{f.name}.tmp")
     try:
-        return json.loads(_clients_file().read_text())
-    except Exception:
-        return {}
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(json.dumps(dati))
+        os.replace(tmp, f)
+    except Exception as exc:  # non fatale: resta in memoria per questa sessione
+        audit({"event": evento, "error": str(exc)})
+
+
+def _leggi_stato(f: Path) -> tuple[Any, bool]:
+    """(dati, illeggibile). Un file ASSENTE è una prima installazione: (None, False). Un file
+    che c'è ma non si legge NON è la stessa cosa: si dice (audit) e si mette da parte col suo
+    nome più `.illeggibile`, così la prossima scrittura non lo cancella senza traccia."""
+    try:
+        testo = f.read_text()
+    except FileNotFoundError:
+        return None, False
+    except OSError as exc:
+        audit({"event": "oauth_state_unreadable", "file": f.name, "error": str(exc)})
+        return None, True
+    try:
+        return json.loads(testo), False
+    except ValueError as exc:
+        audit({"event": "oauth_state_unreadable", "file": f.name, "error": str(exc)})
+        try:
+            os.replace(f, f.with_name(f.name + ".illeggibile"))
+        except OSError:
+            pass
+        return None, True
+
+
+def _load_clients() -> dict[str, dict[str, Any]]:
+    dati, _ = _leggi_stato(_clients_file())
+    return dati if isinstance(dati, dict) else {}
 
 
 def _save_clients() -> None:
-    try:
-        f = _clients_file()
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps(_clients))
-    except Exception as exc:  # non fatale: resta in memoria per questa sessione
-        audit({"event": "oauth_clients_persist_error", "error": str(exc)})
+    _scrivi_stato(_clients_file(), _clients, "oauth_clients_persist_error")
 
 
 def _revoked_file() -> Path:
     return Path(get_settings().audit_log_path).parent / "oauth_revoked.json"
 
 
+# Se l'elenco dei refresh revocati c'era ma non si legge, non si sa più quali refresh sono già
+# stati usati: da quel momento valgono solo quelli emessi DOPO (fail-closed). I connettori si
+# riautorizzano una volta; un refresh rubato e già ruotato non torna valido.
+_refresh_non_prima_di: float = 0.0
+
+
 def _load_revoked() -> set[str]:
-    try:
-        return set(json.loads(_revoked_file().read_text()))
-    except Exception:
+    global _refresh_non_prima_di
+    dati, illeggibile = _leggi_stato(_revoked_file())
+    if isinstance(dati, dict):                       # forma dal 21/11
+        _refresh_non_prima_di = float(dati.get("non_prima_di") or 0)
+        dati = dati.get("revocati")
+    if illeggibile or (dati is not None and not isinstance(dati, list)):
+        _refresh_non_prima_di = time.time()
         return set()
+    return {str(x) for x in (dati or [])}            # una lista nuda: la forma di prima
 
 
 def _save_revoked() -> None:
-    try:
-        f = _revoked_file()
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps(sorted(_revoked_refresh)))
-    except Exception as exc:  # non fatale: resta in memoria per questa sessione
-        audit({"event": "oauth_revoked_persist_error", "error": str(exc)})
+    _scrivi_stato(_revoked_file(), {"revocati": sorted(_revoked_refresh),
+                                    "non_prima_di": _refresh_non_prima_di},
+                  "oauth_revoked_persist_error")
 
 
 _clients: dict[str, dict[str, Any]] = _load_clients()  # client_id → metadata (persistito)
@@ -90,6 +127,8 @@ _codes: dict[str, dict[str, Any]] = {}       # code → {...} (effimero, in-memo
 # restart: una revoca deve restare tale). Cresce coi refresh; a scala personale
 # resta piccolo (i jti contano solo finché il token non sarebbe scaduto).
 _revoked_refresh: set[str] = _load_revoked()
+if _refresh_non_prima_di and not _revoked_file().exists():
+    _save_revoked()        # la soglia deve sopravvivere al prossimo riavvio
 
 
 # ───── discovery ─────
@@ -564,10 +603,21 @@ async def token(request: Request) -> Response:
         except JWTError:
             return JSONResponse({"error": "invalid_grant"}, status_code=400)
         jti = claims.get("jti", "")
+        if float(claims.get("iat") or 0) < _refresh_non_prima_di:
+            audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
+                   "reason": "prima_della_soglia"})
+            return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
         if jti in _revoked_refresh:
             # REUSE DETECTION (OAuth 2.1 BCP): un refresh già ruotato/revocato
             # ripresentato = segnale di furto → rifiuta e logga.
             audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti})
+            # il proprietario lo deve sapere: è il segnale che un refresh è stato copiato (o
+            # che un client ha riprovato dopo una risposta persa). Decide lui se revocare.
+            nome = _nome_client((_clients.get(client_id) or {}).get("client_name"))
+            notifiche.accoda("oauth_refresh_riuso",
+                             f"⚠️ Un connettore ({nome}) ha ripresentato un refresh token già "
+                             "usato: l'ho rifiutato. Se non te lo aspetti, revocalo in "
+                             "/admin/connettori.")
             return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
         sub = claims.get("sub", "")
         # ROTAZIONE: revoca (durevolmente) il refresh appena usato ed emettine uno
