@@ -103,11 +103,20 @@ def _revoked_file() -> Path:
 _refresh_non_prima_di: float = 0.0
 
 
+# Le FAMIGLIE revocate (OAuth 2.1 BCP, §4.14.2). Ogni refresh porta `fam`, l'id della catena
+# nata da un'autorizzazione; se un refresh già ruotato viene ripresentato, uno dei due che lo
+# hanno in mano è un ladro, e non si può sapere quale: si revoca la catena intera. Prima si
+# rifiutava solo quel token, e chi aveva usato per primo il refresh rubato teneva la catena
+# valida per 30 giorni (giro di revisione del 21/11/2026).
+_famiglie_revocate: set[str] = set()
+
+
 def _load_revoked() -> set[str]:
     global _refresh_non_prima_di
     dati, illeggibile = _leggi_stato(_revoked_file())
     if isinstance(dati, dict):                       # forma dal 21/11
         _refresh_non_prima_di = float(dati.get("non_prima_di") or 0)
+        _famiglie_revocate.update(str(x) for x in (dati.get("famiglie") or []))
         dati = dati.get("revocati")
     if illeggibile or (dati is not None and not isinstance(dati, list)):
         _refresh_non_prima_di = time.time()
@@ -117,6 +126,7 @@ def _load_revoked() -> set[str]:
 
 def _save_revoked() -> None:
     _scrivi_stato(_revoked_file(), {"revocati": sorted(_revoked_refresh),
+                                    "famiglie": sorted(_famiglie_revocate),
                                     "non_prima_di": _refresh_non_prima_di},
                   "oauth_revoked_persist_error")
 
@@ -581,7 +591,8 @@ async def token(request: Request) -> Response:
         refresh_jti = pysecrets.token_urlsafe(16)
         refresh = issue(
             typ="refresh", sub=ctx["sub"], aud=client_id,
-            ttl=s.oauth_refresh_token_lifetime, extra={"jti": refresh_jti},
+            ttl=s.oauth_refresh_token_lifetime,
+            extra={"jti": refresh_jti, "fam": pysecrets.token_urlsafe(12)},
         )
         audit({"event": "oauth_access_issued", "sub": ctx["sub"], "client_id": client_id})
         return JSONResponse({
@@ -607,16 +618,27 @@ async def token(request: Request) -> Response:
             audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
                    "reason": "prima_della_soglia"})
             return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
+        fam = str(claims.get("fam") or "")
+        if fam and fam in _famiglie_revocate:
+            audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
+                   "reason": "famiglia_revocata"})
+            return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
         if jti in _revoked_refresh:
             # REUSE DETECTION (OAuth 2.1 BCP): un refresh già ruotato/revocato
-            # ripresentato = segnale di furto → rifiuta e logga.
-            audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti})
-            # il proprietario lo deve sapere: è il segnale che un refresh è stato copiato (o
-            # che un client ha riprovato dopo una risposta persa). Decide lui se revocare.
+            # ripresentato = segnale di furto → rifiuta, REVOCA LA FAMIGLIA e logga.
+            audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
+                   "reason": "famiglia_revocata" if fam else "riuso"})
+            if fam:
+                _famiglie_revocate.add(fam)
+                _save_revoked()
+            # il proprietario lo deve sapere: o un refresh è stato copiato, o un client ha
+            # riprovato dopo una risposta persa. In tutti e due i casi il connettore va
+            # ricollegato (una nuova autorizzazione): la catena di prima non vale più.
             nome = _nome_client((_clients.get(client_id) or {}).get("client_name"))
             notifiche.accoda("oauth_refresh_riuso",
                              f"⚠️ Un connettore ({nome}) ha ripresentato un refresh token già "
-                             "usato: l'ho rifiutato. Se non te lo aspetti, revocalo in "
+                             "usato: l'ho rifiutato e ho chiuso quella sessione del connettore, "
+                             "che va ricollegato. Se non te lo aspetti, revocalo del tutto in "
                              "/admin/connettori.")
             return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
         sub = claims.get("sub", "")
@@ -626,8 +648,10 @@ async def token(request: Request) -> Response:
         _save_revoked()
         access = issue(typ="access", sub=sub, aud=client_id, ttl=s.oauth_access_token_lifetime)
         new_jti = pysecrets.token_urlsafe(16)
+        # la famiglia segue la catena; un refresh di prima del 21/11 non ne ha una: nasce qui
         new_refresh = issue(typ="refresh", sub=sub, aud=client_id,
-                            ttl=s.oauth_refresh_token_lifetime, extra={"jti": new_jti})
+                            ttl=s.oauth_refresh_token_lifetime,
+                            extra={"jti": new_jti, "fam": fam or pysecrets.token_urlsafe(12)})
         audit({"event": "oauth_refresh_rotated", "sub": sub, "client_id": client_id})
         return JSONResponse({
             "access_token": access,

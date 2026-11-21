@@ -29,6 +29,10 @@ import paramiko
 
 REPO = Path(__file__).resolve().parent.parent
 COMPOSE_VERSION = "v2.32.4"
+# Impronte pubblicate accanto al binario (`docker-compose-linux-<arch>.sha256`): le stesse di
+# deploy.sh. Il plugin si installa da root: senza impronta ci si fidava del trasporto (21/11/2026).
+COMPOSE_SHA256 = {"x86_64": "ed1917fb54db184192ea9d0717bcd59e3662ea79db48bff36d3475516c480a6b",
+                  "aarch64": "0c4591cf3b1ed039adcd803dbbeddf757375fc08c11245b0154135f838495a2f"}
 OPERATOR_USER = "vps1777"
 REMOTE_DIR = f"/home/{OPERATOR_USER}/vps1777"
 
@@ -508,11 +512,19 @@ systemctl enable --now fail2ban 2>/dev/null || true
 systemctl is-active --quiet fail2ban 2>/dev/null \\
   || echo "  ATTENZIONE: fail2ban NON e' attivo, ssh resta senza anti-brute-force (journalctl -u fail2ban -n 20)"
 if ! docker compose version >/dev/null 2>&1; then
-  case "$(uname -m)" in x86_64) A=x86_64;; aarch64|arm64) A=aarch64;; *) A=x86_64;; esac
+  case "$(uname -m)" in
+    x86_64) A=x86_64; H={COMPOSE_SHA256["x86_64"]};;
+    aarch64|arm64) A=aarch64; H={COMPOSE_SHA256["aarch64"]};;
+    *) echo "  ERRORE: architettura senza impronta per docker-compose: installalo a mano e rilancia" >&2; exit 1;;
+  esac
   mkdir -p /usr/local/lib/docker/cli-plugins
-  curl -fsSL "https://github.com/docker/compose/releases/download/{COMPOSE_VERSION}/docker-compose-linux-$A" \
-    -o /usr/local/lib/docker/cli-plugins/docker-compose
-  chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+  T="$(mktemp)"
+  curl -fsSL "https://github.com/docker/compose/releases/download/{COMPOSE_VERSION}/docker-compose-linux-$A" -o "$T"
+  if ! echo "$H  $T" | sha256sum -c - >/dev/null 2>&1; then
+    rm -f "$T"; echo "  ERRORE: docker-compose {COMPOSE_VERSION} non ha l'impronta attesa: NON lo installo" >&2; exit 1
+  fi
+  install -m 0755 "$T" /usr/local/lib/docker/cli-plugins/docker-compose
+  rm -f "$T"
 fi
 # uid 1000 = STESSO uid dei container (tutti "app" uid 1000): così i bind-mount
 # (onboarding/) e i file di scambio del canale update non hanno mismatch di

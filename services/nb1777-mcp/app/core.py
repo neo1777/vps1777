@@ -97,6 +97,64 @@ def artifacts_dir() -> Path:
     return p
 
 
+# ── il volume degli artefatti ha un tetto (giro di revisione del 21/11/2026) ──
+# `nlm download` scriveva senza guardare lo spazio, e niente cancellava mai un artefatto: video
+# e censimenti si accumulavano fino a riempire il disco, e a quel punto cadevano anche i
+# caricamenti e il backup. Un artefatto è una COPIA scaricata (l'originale resta in NotebookLM
+# e si riscarica): prima di ogni download si tolgono i più vecchi di ARTEFATTI_GIORNI, poi i
+# più vecchi finché il totale sta sotto ARTEFATTI_MAX_BYTE, e si pretende spazio libero.
+ARTEFATTI_GIORNI = int(os.environ.get("NLM_ARTIFACTS_GIORNI", "30"))
+ARTEFATTI_MAX_BYTE = int(os.environ.get("NLM_ARTIFACTS_MAX_MB", "5000")) * 1024 * 1024
+ARTEFATTI_LIBERO_MINIMO = 1024 * 1024 * 1024
+
+
+def fai_posto_agli_artefatti(*, ora: float | None = None) -> dict[str, int]:
+    """Toglie gli artefatti scaduti o in eccesso e controlla lo spazio. Solleva NLMError se sul
+    disco non resta ARTEFATTI_LIBERO_MINIMO. Torna quanti file ha tolto e perché."""
+    base = artifacts_dir()
+    adesso = time.time() if ora is None else ora
+    tolti = {"scaduti": 0, "in_eccesso": 0}
+    file = []
+    for f in base.iterdir():
+        try:
+            if f.is_file() and not f.is_symlink():
+                st = f.stat()
+                file.append((st.st_mtime, st.st_size, f))
+        except OSError:
+            continue
+    file.sort()                                  # dal più vecchio
+    restano = []
+    for mtime, dim, f in file:
+        if ARTEFATTI_GIORNI > 0 and adesso - mtime > ARTEFATTI_GIORNI * 86400:
+            try:
+                f.unlink()
+                tolti["scaduti"] += 1
+                continue
+            except OSError:
+                pass
+        restano.append((mtime, dim, f))
+    totale = sum(d for _, d, _ in restano)
+    for _, dim, f in restano:
+        if totale <= ARTEFATTI_MAX_BYTE:
+            break
+        try:
+            f.unlink()
+            totale -= dim
+            tolti["in_eccesso"] += 1
+        except OSError:
+            pass
+    if tolti["scaduti"] or tolti["in_eccesso"]:
+        log.info("artefatti: tolti %d scaduti (oltre %d giorni) e %d in eccesso",
+                 tolti["scaduti"], ARTEFATTI_GIORNI, tolti["in_eccesso"])
+    libero = shutil.disk_usage(base).free
+    if libero < ARTEFATTI_LIBERO_MINIMO:
+        raise NLMError(
+            f"spazio su disco insufficiente sul server per scaricare l'artefatto: liberi "
+            f"{libero // (1024 * 1024)} MB, ne servono almeno {ARTEFATTI_LIBERO_MINIMO // (1024 * 1024)}. "
+            "Va liberato spazio sulla VPS (backup vecchi, immagini Docker inutilizzate).")
+    return tolti
+
+
 def safe_artifact_name(raw: Union[str, Path]) -> str:
     """Riduce un path/nome QUALUNQUE a un nome file innocuo.
 
@@ -236,8 +294,22 @@ def _safe_cmd(cmd: list[str]) -> str:
     return line if len(line) <= _ERR_CMD_MAX else line[:_ERR_CMD_MAX] + "…"
 
 
+class _P(str):
+    """Un argomento POSIZIONALE che viene da fuori (un id, un titolo, una domanda). `_argv` li
+    sposta in fondo, dopo `--`: così un valore che comincia per «-» resta un valore, e non può
+    diventare un'opzione della CLI (`--profile=altro` come id, o una domanda «- qual è il
+    punto?» che faceva uscire nlm con «no such option»). Giro di revisione del 21/11/2026."""
+
+
+def _argv(args: list[str]) -> list[str]:
+    posizionali = [str(a) for a in args if isinstance(a, _P)]
+    if not posizionali:
+        return [str(a) for a in args]
+    return [str(a) for a in args if not isinstance(a, _P)] + ["--", *posizionali]
+
+
 def _run(args: list[str], *, timeout: float = 180.0, check: bool = True) -> subprocess.CompletedProcess:
-    cmd = [NLM] + args
+    cmd = [NLM] + _argv(args)
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
@@ -286,13 +358,13 @@ def nb_list() -> list[dict]:
 
 def nb_get(nb_id: str) -> dict:
     """Dettagli di un singolo notebook."""
-    data = _run_json(["notebook", "get", nb_id])
+    data = _run_json(["notebook", "get", _P(nb_id)])
     return data if isinstance(data, dict) else (data[0] if data else {})
 
 
 def nb_create(title: str) -> str:
     """Crea un nuovo notebook con il titolo dato. Ritorna l'ID (UUID)."""
-    p = _run(["notebook", "create", title])
+    p = _run(["notebook", "create", _P(title)])
     uid = _extract_uuid(p.stdout + "\n" + p.stderr)
     if uid:
         return uid
@@ -305,17 +377,17 @@ def nb_create(title: str) -> str:
 
 def nb_rename(nb_id: str, new_title: str) -> None:
     """Rinomina un notebook."""
-    _run(["notebook", "rename", nb_id, new_title])
+    _run(["notebook", "rename", _P(nb_id), _P(new_title)])
 
 
 def nb_delete(nb_id: str) -> None:
     """Cancella un notebook in modo permanente (passa --confirm)."""
-    _run(["notebook", "delete", nb_id, "--confirm"])
+    _run(["notebook", "delete", _P(nb_id), "--confirm"])
 
 
 def nb_describe(nb_id: str) -> str:
     """Riassunto AI-generated del notebook. Ritorna il testo."""
-    p = _run(["notebook", "describe", nb_id], timeout=120)
+    p = _run(["notebook", "describe", _P(nb_id)], timeout=120)
     return p.stdout or ""
 
 
@@ -325,7 +397,7 @@ def nb_describe(nb_id: str) -> str:
 
 def source_list(nb_id: str) -> list[dict]:
     """Lista tutte le fonti di un notebook."""
-    return list(_run_json(["source", "list", nb_id]))
+    return list(_run_json(["source", "list", _P(nb_id)]))
 
 
 def _source_id_of(s: dict) -> str:
@@ -380,7 +452,7 @@ def _add_and_resolve_id(nb_id: str, args: list[str], *, timeout: float) -> str:
 def source_add_url(nb_id: str, url: str, *, title: Optional[str] = None,
                    wait: bool = True, timeout: float = 600.0) -> str:
     """Aggiunge una URL come fonte. Se wait=True attende l'indicizzazione."""
-    args = ["source", "add", nb_id, "--url", url]
+    args = ["source", "add", _P(nb_id), "--url", url]
     if title:
         args += ["--title", title]
     if wait:
@@ -399,7 +471,7 @@ def source_add_text(nb_id: str, text: str, title: str, *,
     Il titolo resta in argv: è un'etichetta corta, come per tutte le altre fonti.
     """
     if len(text) <= TEXT_ARGV_MAX:
-        args = ["source", "add", nb_id, "--text", text, "--title", title]
+        args = ["source", "add", _P(nb_id), "--text", text, "--title", title]
         if wait:
             args += ["--wait", "--wait-timeout", str(timeout)]
         return _add_and_resolve_id(nb_id, args, timeout=timeout)
@@ -410,7 +482,7 @@ def source_add_text(nb_id: str, text: str, title: str, *,
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(text)
-        args = ["source", "add", nb_id, "--file", tmp, "--title", title]
+        args = ["source", "add", _P(nb_id), "--file", tmp, "--title", title]
         if wait:
             args += ["--wait", "--wait-timeout", str(timeout)]
         return _add_and_resolve_id(nb_id, args, timeout=timeout)
@@ -424,7 +496,7 @@ def source_add_text(nb_id: str, text: str, title: str, *,
 def source_add_file(nb_id: str, file_path: Union[str, Path], *,
                     title: Optional[str] = None, wait: bool = True, timeout: float = 900.0) -> str:
     """Carica un file locale (PDF, txt, md, ...) come fonte."""
-    args = ["source", "add", nb_id, "--file", str(file_path)]
+    args = ["source", "add", _P(nb_id), "--file", str(file_path)]
     if title:
         args += ["--title", title]
     if wait:
@@ -434,7 +506,7 @@ def source_add_file(nb_id: str, file_path: Union[str, Path], *,
 
 def source_add_youtube(nb_id: str, url: str, *, wait: bool = True, timeout: float = 900.0) -> str:
     """Aggiunge un video YouTube come fonte (NotebookLM trascrive automaticamente)."""
-    args = ["source", "add", nb_id, "--youtube", url]
+    args = ["source", "add", _P(nb_id), "--youtube", url]
     if wait:
         args += ["--wait", "--wait-timeout", str(timeout)]
     return _add_and_resolve_id(nb_id, args, timeout=timeout)
@@ -443,7 +515,7 @@ def source_add_youtube(nb_id: str, url: str, *, wait: bool = True, timeout: floa
 def source_add_drive(nb_id: str, document_id: str, *,
                      doc_type: str = "doc", wait: bool = True, timeout: float = 600.0) -> str:
     """Collega un Google Drive doc come fonte (doc/slides/sheets/pdf)."""
-    args = ["source", "add", nb_id, "--drive", document_id, "--type", doc_type]
+    args = ["source", "add", _P(nb_id), "--drive", document_id, "--type", doc_type]
     if wait:
         args += ["--wait", "--wait-timeout", str(timeout)]
     return _add_and_resolve_id(nb_id, args, timeout=timeout)
@@ -457,7 +529,7 @@ def source_delete(nb_id: str, source_id: str) -> None:  # noqa: ARG001 (nb_id te
     come primo posizionale lo farebbe interpretare come un source_id da
     cancellare → "Failed to delete sources".
     """
-    _run(["source", "delete", source_id, "--confirm"])
+    _run(["source", "delete", _P(source_id), "--confirm"])
 
 
 def source_get_content(nb_id: str, source_id: str) -> str:  # noqa: ARG001 (nb_id tenuto per firma MCP)
@@ -467,7 +539,7 @@ def source_get_content(nb_id: str, source_id: str) -> str:  # noqa: ARG001 (nb_i
     non serve (source_id è globale). Passare nb_id → "Got unexpected extra
     argument(s)".
     """
-    p = _run(["source", "content", source_id], timeout=120)
+    p = _run(["source", "content", _P(source_id)], timeout=120)
     return p.stdout or ""
 
 
@@ -476,7 +548,7 @@ def source_contenuto(source_id: str) -> dict:
     (P17): {content, title, source_type, char_count}. Per un PDF-immagine è il testo letto
     da Google, per un audio la sua trascrizione. `source_get_content` dà lo stesso JSON
     come testo (senza TTY nlm risponde in JSON), e resta così per il contratto del tool."""
-    d = _run_json(["source", "content", source_id], timeout=120)
+    d = _run_json(["source", "content", _P(source_id)], timeout=120)
     if not isinstance(d, dict):
         raise NLMError(f"`source content` non ha dato un oggetto: {str(d)[:200]}")
     return d
@@ -485,7 +557,7 @@ def source_contenuto(source_id: str) -> dict:
 def source_describe(source_id: str) -> dict:
     """Il riassunto di una fonte con le parole chiave, scritto da Gemini (P14, nlm 0.15:
     `source describe SOURCE_ID --json`). Usa la quota di Gemini Notebook."""
-    d = _run_json(["source", "describe", source_id], timeout=120)
+    d = _run_json(["source", "describe", _P(source_id)], timeout=120)
     return d if isinstance(d, dict) else {"risultato": d}
 
 
@@ -555,7 +627,7 @@ def source_rename(nb_id: str, source_id: str, new_title: str) -> None:
     un'opzione OBBLIGATORIA `-n/--notebook`, non un posizionale. Passarlo
     posizionale → "Missing option --notebook".
     """
-    _run(["source", "rename", "-n", nb_id, source_id, new_title])
+    _run(["source", "rename", "-n", nb_id, _P(source_id), _P(new_title)])
 
 
 # ── P20 (11/10/2026): la fedeltà delle scritture ─────────────────────────────────────────
@@ -598,7 +670,7 @@ def source_drive_stato(nb_id: str) -> list[dict]:
     `source stale`, che fino alla 0.15.x non chiamava il controllo (corretto a monte nella
     0.16.1): qui serve lo stato di tutte le fonti Drive, non solo di quelle indietro."""
     out = []
-    for f in _run_json(["source", "list", nb_id, "--drive"], timeout=180):
+    for f in _run_json(["source", "list", _P(nb_id), "--drive"], timeout=180):
         if not isinstance(f, dict) or f.get("is_fresh") is None:
             continue                       # non è una fonte Drive (il controllo non si applica)
         out.append({"source_id": _source_id_of(f), "title": f.get("title"),
@@ -612,7 +684,7 @@ def source_sync_drive(nb_id: str, source_ids: list[str]) -> dict:
     ids = [i.strip() for i in source_ids if i and i.strip()]
     if not ids:
         return {"chieste": 0, "sincronizzate": 0}
-    p = _run(["source", "sync", nb_id, "--source-ids", ",".join(ids), "--confirm"],
+    p = _run(["source", "sync", _P(nb_id), "--source-ids", ",".join(ids), "--confirm"],
              timeout=300)
     m = re.search(r"Synced (\d+) source", p.stdout or "")
     return {"chieste": len(ids), "sincronizzate": int(m.group(1)) if m else None,
@@ -693,7 +765,7 @@ def notebook_query(nb_id: str, question: str, *,
     """Pone una domanda alla chat del notebook. Ritorna {answer, references,
     sources_used, senza_citazioni?, nota?} in proiezione compatta (#275);
     `verbose=True` per il testo citato integrale."""
-    args = ["query", "notebook", nb_id, question, "--json", "--timeout", str(timeout)]
+    args = ["query", "notebook", _P(nb_id), _P(question), "--json", "--timeout", str(timeout)]
     if source_ids:
         args += ["--source-ids", ",".join(source_ids)]
     if conversation_id:
@@ -884,7 +956,7 @@ def studio_create_audio(nb_id: str, *,
     length: short | default | long
     ATTENZIONE: rate-limit free tier ~2-3 al giorno.
     """
-    args = ["audio", "create", nb_id,
+    args = ["audio", "create", _P(nb_id),
             "--format", format, "--length", length, "--language", language, "--confirm"]
     if focus:
         args += ["--focus", focus]
@@ -904,7 +976,7 @@ def studio_create_video(nb_id: str, *,
     style: auto_select | custom | classic | whiteboard | kawaii | anime | watercolor | retro_print | heritage | paper_craft
     Per cinematic: usa `focus` come full steering prompt (style_prompt mappa lì).
     """
-    args = ["video", "create", nb_id,
+    args = ["video", "create", _P(nb_id),
             "--format", format, "--style", style, "--language", language, "--confirm"]
     if style_prompt:
         args += ["--style-prompt", style_prompt]
@@ -924,7 +996,7 @@ def studio_create_slides(nb_id: str, *,
     format: detailed_deck | presenter_slides
     length: short | default
     """
-    args = ["slides", "create", nb_id,
+    args = ["slides", "create", _P(nb_id),
             "--format", format, "--length", length, "--language", language, "--confirm"]
     if focus:
         args += ["--focus", focus]
@@ -938,7 +1010,7 @@ def studio_create_mindmap(nb_id: str, *,
     """mindmap (Mind Map).
     NOTA: title/language/focus IGNORATI dal motore — il risultato è sempre in inglese.
     """
-    args = ["mindmap", "create", nb_id, "--title", title, "--confirm"]
+    args = ["mindmap", "create", _P(nb_id), "--title", title, "--confirm"]
     _attach_source_ids(args, source_ids)
     return _create_and_resolve_artifact_id(nb_id, args, "mindmap", timeout=240)
 
@@ -956,7 +1028,7 @@ def studio_create_infographic(nb_id: str, *,
     style: auto_select | sketch_note | professional | bento_grid | editorial | instructional | bricks | clay | anime | kawaii | scientific
     NOTA: testo dentro l'immagine spesso con refusi (limite del modello image-gen).
     """
-    args = ["infographic", "create", nb_id,
+    args = ["infographic", "create", _P(nb_id),
             "--orientation", orientation, "--detail", detail, "--style", style,
             "--language", language, "--confirm"]
     if focus:
@@ -972,7 +1044,7 @@ def studio_create_data_table(nb_id: str, description: str, *,
     `description` è OBBLIGATORIA (descrive le colonne richieste).
     Es: "Tabella con: Nome concetto, Definizione breve, Citazione dalla fonte."
     """
-    args = ["data-table", "create", nb_id, description,
+    args = ["data-table", "create", _P(nb_id), _P(description),
             "--language", language, "--confirm"]
     _attach_source_ids(args, source_ids)
     return _create_and_resolve_artifact_id(nb_id, args, "data_table", timeout=240)
@@ -990,7 +1062,7 @@ def studio_create_report(nb_id: str, *,
     if format == "Create Your Own" and not prompt:
         raise ArgomentoNonValido("report format='Create Your Own' richiede `prompt` non vuoto: "
                                  "scrivi cosa deve contenere il report, o scegli un altro format")
-    args = ["report", "create", nb_id,
+    args = ["report", "create", _P(nb_id),
             "--format", format, "--language", language, "--confirm"]
     if prompt:
         args += ["--prompt", prompt]
@@ -1007,7 +1079,7 @@ def studio_create_quiz(nb_id: str, *,
     count: numero di domande (CLI default 2, qui pushiamo a 10)
     difficulty: 1=easy ... 5=hard
     """
-    args = ["quiz", "create", nb_id,
+    args = ["quiz", "create", _P(nb_id),
             "--count", str(count), "--difficulty", str(difficulty), "--confirm"]
     if focus:
         args += ["--focus", focus]
@@ -1022,7 +1094,7 @@ def studio_create_flashcards(nb_id: str, *,
     """flashcards (Flashcards).
     difficulty: easy | medium | hard
     """
-    args = ["flashcards", "create", nb_id,
+    args = ["flashcards", "create", _P(nb_id),
             "--difficulty", difficulty, "--confirm"]
     if focus:
         args += ["--focus", focus]
@@ -1063,7 +1135,7 @@ def studio_list(nb_id: str, verbose: bool = False) -> list[dict]:
     (titolo, focus, date, fonti, indirizzi) — solo quando serve davvero il dettaglio.
     `--full` perché senza la CLI non dà il titolo: stesso tempo (1,6 s, misurato il 07/11),
     e la proiezione compatta non cresce."""
-    arts = list(_run_json(["status", "artifacts", nb_id, "--full"]))
+    arts = list(_run_json(["status", "artifacts", _P(nb_id), "--full"]))
     return arts if verbose else [_artifact_compact(a) for a in arts]
 
 
@@ -1169,7 +1241,7 @@ def studio_wait(nb_id: str, artifact_id: str, *,
 
 def studio_delete(nb_id: str, artifact_id: str) -> None:
     """Cancella un artefatto studio (irreversibile)."""
-    _run(["studio", "delete", nb_id, artifact_id, "--confirm"])
+    _run(["studio", "delete", _P(nb_id), _P(artifact_id), "--confirm"])
 
 
 def studio_rename(nb_id: str, artifact_id: str, new_title: str) -> None:  # noqa: ARG001 (nb_id tenuto per firma MCP)
@@ -1178,7 +1250,7 @@ def studio_rename(nb_id: str, artifact_id: str, new_title: str) -> None:  # noqa
     # nb_id resta nella firma MCP per coerenza ma NON si inoltra alla CLI: prima
     # veniva passato come posizionale e slittava gli argomenti (studio_rename era
     # inutilizzabile — "unexpected extra argument").
-    _run(["studio", "rename", artifact_id, new_title])
+    _run(["studio", "rename", _P(artifact_id), _P(new_title)])
 
 
 # ============================================================
@@ -1195,10 +1267,11 @@ def studio_download(kind: str, nb_id: str, output_path: Union[str, Path], *,
     # Il path del chiamante vale come NOME, non come destinazione (H6-bis, in cima
     # al file): il file nasce nella directory degli artefatti e da nessun'altra parte.
     output_path = artifacts_dir() / safe_artifact_name(output_path)
+    fai_posto_agli_artefatti()
     # nlm (0.7.7 → 0.12.0): `download <kind> NOTEBOOK_ID [-o PATH] [--id ARTIFACT]`. NON
     # esiste `--no-progress` (era il motivo per cui studio_download falliva a
     # valle: nel test MCP originale il blocco-approvazione lo mascherava).
-    args = ["download", cli_kind, nb_id, "--output", str(output_path)]
+    args = ["download", cli_kind, _P(nb_id), "--output", str(output_path)]
     if artifact_id:
         args += ["--id", artifact_id]
     _run(args, timeout=900)
@@ -1275,7 +1348,7 @@ def studio_download_flashcards(nb_id, out, *, artifact_id=None): return studio_d
 
 def studio_export_to_docs(nb_id: str, artifact_id: str, *, title: Optional[str] = None) -> str:
     """Esporta un Report su Google Docs. Ritorna l'URL del doc (o l'output raw)."""
-    args = ["export", "to-docs", nb_id, artifact_id]
+    args = ["export", "to-docs", _P(nb_id), _P(artifact_id)]
     if title:
         args += ["--title", title]
     p = _run(args, timeout=120)
@@ -1285,7 +1358,7 @@ def studio_export_to_docs(nb_id: str, artifact_id: str, *, title: Optional[str] 
 
 def studio_export_to_sheets(nb_id: str, artifact_id: str, *, title: Optional[str] = None) -> str:
     """Esporta una Data Table su Google Sheets. Ritorna l'URL del foglio."""
-    args = ["export", "to-sheets", nb_id, artifact_id]
+    args = ["export", "to-sheets", _P(nb_id), _P(artifact_id)]
     if title:
         args += ["--title", title]
     p = _run(args, timeout=120)
@@ -1361,7 +1434,7 @@ _RADICE_SERVIZIO = Path(__file__).resolve().parents[1]
 def _run_ricerca(args: list[str], *, timeout: float) -> dict:
     """Lancia `python -m app.ricerca_nlm` (il livello services di nlm, che dà JSON) come
     `_run` lancia `nlm`: stesso timeout, stessa classificazione dell'auth scaduta."""
-    cmd = [sys.executable, "-m", "app.ricerca_nlm", *args]
+    cmd = [sys.executable, "-m", "app.ricerca_nlm", *_argv(args)]
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                            cwd=str(_RADICE_SERVIZIO))
@@ -1389,12 +1462,12 @@ def research_start(nb_id: str, query: str, *, source: str = "web", mode: str = "
     if mode == "deep" and source != "web":
         raise ArgomentoNonValido(
             "la ricerca deep cerca solo sul web: usa source='web' o mode='fast'")
-    return _run_ricerca(["start", nb_id, query, "--source", source, "--mode", mode], timeout=120)
+    return _run_ricerca(["start", _P(nb_id), _P(query), "--source", source, "--mode", mode], timeout=120)
 
 
 def research_status(nb_id: str, task_id: str = "", *, verbose: bool = False) -> dict:
     """Lo stato di una ricerca, con le fonti trovate in forma compatta."""
-    d = _run_ricerca(["status", nb_id] + (["--task-id", task_id] if task_id else []), timeout=90)
+    d = _run_ricerca(["status", _P(nb_id)] + (["--task-id", task_id] if task_id else []), timeout=90)
     out: dict = {"status": d.get("status"), "task_id": d.get("task_id") or task_id or None,
                  "sources_found": d.get("sources_found", 0), "sources": []}
     for f in d.get("sources") or []:
@@ -1425,7 +1498,7 @@ def research_status(nb_id: str, task_id: str = "", *, verbose: bool = False) -> 
 def research_import(nb_id: str, task_id: str, *, indices: Optional[list[int]] = None,
                     cited_only: bool = False) -> dict:
     """Aggiunge al notebook le fonti trovate da una ricerca completata."""
-    args = ["import", nb_id, task_id]
+    args = ["import", _P(nb_id), _P(task_id)]
     if cited_only:
         args.append("--cited-only")
     elif indices:
@@ -1447,7 +1520,7 @@ def research_import(nb_id: str, task_id: str, *, indices: Optional[list[int]] = 
 
 def note_list(nb_id: str, *, verbose: bool = False) -> list[dict]:
     """Le note di un notebook: {id, title, preview}; con verbose anche `content`."""
-    d = _run_json(["note", "list", nb_id])
+    d = _run_json(["note", "list", _P(nb_id)])
     note = d.get("notes", []) if isinstance(d, dict) else list(d)
     if verbose:
         return note
@@ -1458,7 +1531,7 @@ def note_list(nb_id: str, *, verbose: bool = False) -> list[dict]:
 
 def note_create(nb_id: str, content: str, title: str = "") -> str:
     """Crea una nota e ritorna il suo id (che `nlm note create` dice solo nel testo)."""
-    args = ["note", "create", nb_id, "-c", content]
+    args = ["note", "create", _P(nb_id), "-c", content]
     if title:
         args += ["-t", title]
     p = _run(args, timeout=60)
@@ -1472,7 +1545,7 @@ def note_update(nb_id: str, note_id: str, *, content: Optional[str] = None,
                 title: Optional[str] = None) -> None:
     if content is None and title is None:
         raise ArgomentoNonValido("note_update: serve content, title o tutti e due")
-    args = ["note", "update", nb_id, note_id]
+    args = ["note", "update", _P(nb_id), _P(note_id)]
     if content is not None:
         args += ["-c", content]
     if title is not None:
@@ -1481,7 +1554,7 @@ def note_update(nb_id: str, note_id: str, *, content: Optional[str] = None,
 
 
 def note_delete(nb_id: str, note_id: str) -> None:
-    _run(["note", "delete", nb_id, note_id, "-y"], timeout=60)
+    _run(["note", "delete", _P(nb_id), _P(note_id), "-y"], timeout=60)
 
 
 def _tronca(testo: object, max_chars: int) -> object:
@@ -1494,8 +1567,8 @@ def chat_cronologia(nb_id: str, conversation_id: str = "", *, max_chars: int = 0
     """Senza conversation_id: le sessioni di chat del notebook. Con l'id: la trascrizione,
     domanda e risposta per turno (`max_chars` tronca ogni testo, dichiarandolo)."""
     if not conversation_id:
-        return _run_json(["chats", "list", nb_id], timeout=90)
-    d = _run_json(["chats", "get", nb_id, conversation_id], timeout=90)
+        return _run_json(["chats", "list", _P(nb_id)], timeout=90)
+    d = _run_json(["chats", "get", _P(nb_id), _P(conversation_id)], timeout=90)
     if max_chars and isinstance(d, dict):
         d["transcript"] = [{k: _tronca(v, max_chars) for k, v in t.items()}
                            for t in d.get("transcript") or [] if isinstance(t, dict)]

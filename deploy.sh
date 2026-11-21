@@ -576,6 +576,12 @@ REMOTE_DIR="/home/$OPERATOR_USER/vps1777"
 # Versione del plugin compose v2 da installare se manca (Debian docker.io
 # non lo include). Binario ufficiale da GitHub releases.
 COMPOSE_VERSION="v2.32.4"
+# L'impronta del binario per architettura (21/11/2026): il plugin si scarica da GitHub e si
+# installa da root, e orchestra tutto lo stack. Senza impronta ci si fidava del trasporto (la
+# stessa classe di H80, cosign). Cambiando COMPOSE_VERSION vanno cambiate anche queste: sono
+# quelle pubblicate accanto al binario (`docker-compose-linux-<arch>.sha256`).
+COMPOSE_SHA256_X86_64="ed1917fb54db184192ea9d0717bcd59e3662ea79db48bff36d3475516c480a6b"
+COMPOSE_SHA256_AARCH64="0c4591cf3b1ed039adcd803dbbeddf757375fc08c11245b0154135f838495a2f"
 
 # ── Versione vps1777 da installare (modello pull: immagini ghcr, MAI build
 #    sulla VPS 4GB). Override per test rc: VPS1777_INSTALL_VERSION=X.Y.Z-rc.1
@@ -620,7 +626,7 @@ fi
 step "3/8 — Preparo la VPS (Docker + Compose v2 + utente $OPERATOR_USER)"
 
 log "Installo Docker + Compose v2 + git + age (può richiedere 1-2 min)..."
-SSH "export OPERATOR_USER='$OPERATOR_USER' COMPOSE_VERSION='$COMPOSE_VERSION'; bash -s" <<'PREP'
+SSH "export OPERATOR_USER='$OPERATOR_USER' COMPOSE_VERSION='$COMPOSE_VERSION' COMPOSE_SHA256_X86_64='$COMPOSE_SHA256_X86_64' COMPOSE_SHA256_AARCH64='$COMPOSE_SHA256_AARCH64'; bash -s" <<'PREP'
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
@@ -646,14 +652,21 @@ systemctl enable --now docker
 #    Installo il binario ufficiale come cli-plugin (funziona con docker.io 20.10+).
 if ! docker compose version >/dev/null 2>&1; then
   case "$(uname -m)" in
-    x86_64)        CARCH=x86_64 ;;
-    aarch64|arm64) CARCH=aarch64 ;;
-    *)             CARCH=x86_64 ;;
+    x86_64)        CARCH=x86_64;  CSHA="$COMPOSE_SHA256_X86_64" ;;
+    aarch64|arm64) CARCH=aarch64; CSHA="$COMPOSE_SHA256_AARCH64" ;;
+    *) echo "  ERRORE: architettura $(uname -m) senza impronta per docker-compose: installalo a mano e rilancia" >&2; exit 1 ;;
   esac
   mkdir -p /usr/local/lib/docker/cli-plugins
-  curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${CARCH}" \
-    -o /usr/local/lib/docker/cli-plugins/docker-compose
-  chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+  CTMP="$(mktemp)"
+  curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${CARCH}" -o "$CTMP"
+  # si installa SOLO se l'impronta combacia: un binario diverso non diventa eseguibile da root
+  if ! echo "${CSHA}  ${CTMP}" | sha256sum -c - >/dev/null 2>&1; then
+    rm -f "$CTMP"
+    echo "  ERRORE: docker-compose ${COMPOSE_VERSION} (${CARCH}) non ha l'impronta attesa: NON lo installo" >&2
+    exit 1
+  fi
+  install -m 0755 "$CTMP" /usr/local/lib/docker/cli-plugins/docker-compose
+  rm -f "$CTMP"
 fi
 
 # 2b. Hardening host — patch di sicurezza automatiche (unattended-upgrades) +
