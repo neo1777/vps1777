@@ -323,14 +323,13 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   (il rumore di fondo di ogni immagine Debian: al 01/09/2026 erano ~1.400
   alert, critical comprese, tutte non azionabili) non fanno pagina: si
   assorbono quando Debian pubblica il fix, alla ricostruzione successiva.
-  E la ricostruzione non dipende dal ritmo delle release: **il 3 di ogni mese**
-  `rebuild-mensile.yml` riconta le CVE con fix e, se ce ne sono, tagga la patch
-  successiva → release firmata con immagini fresche → il check della VPS avvisa
-  l'owner (il deploy resta suo). Senza il secret `RELEASE_PAT` il workflow non
-  tagga: apre una issue con l'elenco — fallback dichiarato, mai silenzioso.
-  ⚠️ Configurare `RELEASE_PAT` dà a un workflow il potere di creare tag, cioè release
-  firmate: è la condizione che **riapre `H24`** (rischio accettato perché oggi nessun
-  workflow può farlo — vedi la postilla).
+  **Il 3 di ogni mese** `rebuild-mensile.yml` riconta le CVE con fix sulle immagini
+  pubblicate e, se ce ne sono, apre una issue con i pacchetti da aggiornare. Ricostruire
+  non basta: la base è fissata per digest e le librerie dal lock, quindi il rimedio è
+  una PR che sposta il digest della base e rigenera i lock, poi una release (così è
+  stata chiusa la #404 nella `0.95.1`). Il workflow non crea tag e non usa secret: fino
+  al 21/11/2026 prevedeva un tag automatico con `RELEASE_PAT`, tolto perché il tag
+  sarebbe finito su un `main` con `VERSION` ferma (e avrebbe riaperto `H24`).
 - **Firma cosign obbligatoria di default** (`v0.23.0`, critico). Il self-update
   verifica la firma keyless del bundle di release **fail-closed**: se la verifica
   non passa (o `cosign` manca e non si installa), l'update si ferma. La via
