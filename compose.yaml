@@ -426,7 +426,7 @@ services:
     <<: [*restart, *logging, *security, *readonly]
     pids_limit: 128
     cpus: 2.0
-    # mem_limit: non ancora — il picco di tesseract su una pagina grossa non è misurato
+    mem_limit: 1g  # picco misurato 216 MiB sul caso peggiore ammesso (immagine da 15 MiB, appena sotto OCR_MAX_BODY; VPS, 21/11)
     image: ${VPS1777_IMAGE_BASE:-ghcr.io/neo1777}/vps1777-ocr:${VPS1777_TAG:-dev}${VPS1777_DIGEST_OCR:+@${VPS1777_DIGEST_OCR}}
     environment:
       OCR_HOST: 0.0.0.0

@@ -565,6 +565,7 @@ findings:
     severity: medium
     title: "Protezione dei tag v* e permessi per-job nei workflow"
     status: accepted
+    si_sfrutta_oggi: "no. Per spostare un tag o pubblicare una release serve l'account del maintainer (o un secret di workflow capace di creare tag, che oggi non esiste: dal 21/11 il controllo mensile non ne usa). I tag v* sono immutabili per ruleset."
     natura: decisione
     resta_aperto: >
       [RISCHIO ACCETTATO — 27/09/2026, owner, da rivedere entro il 27/12/2026] Il gate
@@ -687,6 +688,7 @@ findings:
     severity: medium
     title: "Secondo fattore (TOTP o passkey) sul pannello admin"
     status: accepted
+    si_sfrutta_oggi: "no, senza la password. Serve la password dell'admin (policy forte, limite di tentativi per IP); con la password in mano sì, ed è il rischio accettato: non c'è un secondo fattore a fermare chi l'ha rubata."
     # si è deciso di NON fare: non c'è niente da eseguire
     natura: decisione
     missing: >
@@ -2108,6 +2110,7 @@ findings:
     severity: medium
     title: "La seconda metà di H14 — nello snapshot pre-update archive-data resta IN CHIARO: funzionale al rollback, non rimovibile, e finora non scritto da nessuna parte"
     status: accepted
+    si_sfrutta_oggi: "no da remoto. Lo snapshot sta sul disco della VPS, leggibile solo dall'operatore e da root: serve già l'accesso alla macchina, che dà comunque i volumi vivi."
     resta_aperto: >
       [DECISIONE PRESA — 23/08/2026, owner, al format per il collaudo vergine] La
       finestra c'era («il treno passa al format») e l'owner l'ha USATA: provato
@@ -4076,6 +4079,7 @@ findings:
     severity: medium
     title: "Col profilo cloudflared Cloudflare termina il TLS e vede in chiaro tutto il traffico del gateway (token OAuth, URL col gateway_secret, contenuti MCP, Mini App)"
     status: accepted
+    si_sfrutta_oggi: "sì, per costruzione e solo da Cloudflare, e solo se si sceglie il profilo cloudflared: chi lo sceglie affida a Cloudflare la terminazione del TLS. Con Tailscale o Caddy la voce non si applica."
     natura: decisione
     resta_aperto: >
       [RISCHIO ACCETTATO — 13/10/2026, owner] È il funzionamento di Cloudflare Tunnel e non si

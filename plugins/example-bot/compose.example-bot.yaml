@@ -5,6 +5,10 @@
 
 services:
   example-bot:
+    # Tetti (memoria, CPU, processi) come gli altri servizi: un plugin parte da qui, e un servizio senza tetti è il primo a far cadere gli altri. Misura il tuo e adegua.
+    pids_limit: 128
+    cpus: 0.5
+    mem_limit: 256m
     build:
       context: ./plugins/example-bot
     image: vps1777/example-bot:${VPS1777_TAG:-dev}

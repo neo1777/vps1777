@@ -14,6 +14,10 @@
 services:
 
   cloudflared:
+    # Tetti (memoria, CPU, processi) come gli altri servizi: non misurati su un'installazione viva, tenuti larghi (a riposo sta in decine di MB).
+    pids_limit: 256
+    cpus: 1.0
+    mem_limit: 256m
     # Il tetto ai log non attraversa i file: l'ancora `x-logging` vive in compose.yaml, e questo
     # container ne restava senza (json-file senza limite: un log per richiesta fino a disco pieno).
     logging:

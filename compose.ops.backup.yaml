@@ -27,6 +27,9 @@ services:
     restart: unless-stopped
     pids_limit: 128  # tetti DoS (OWASP API4): vedi il commento in compose.yaml, servizio gateway
     cpus: 1.0
+    # Misurato il 21/11 sulla VPS con la catena vera (tar | zstd -T0 -3 | age) su 1,5 GB del volume
+    # dell'archivio: picco 938 MiB CONTANDO la cache dei file letti, che sotto un tetto il kernel libera.
+    mem_limit: 1g
     command: ["/vps1777/tools/backup-container-setup.sh"]
     # Stretto il 13/10/2026 (H82, scelta di Neo): resta root, perché `apk add` a ogni avvio
     # e crond lo vogliono, ma con le sole tre capability che servono, MISURATE sulla VPS di

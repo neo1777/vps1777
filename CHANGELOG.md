@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **Ogni container ha i suoi tetti di memoria, CPU e processi**, anche quelli degli overlay: mancavano la memoria
+  dell'OCR (ora 1 GB, picco misurato 216 MiB) e del backup (1 GB), e tutti e tre i tetti di Caddy, cloudflared,
+  Portainer e dei due plugin d'esempio. I valori di Caddy, cloudflared e Portainer sono larghi e non misurati su
+  un'installazione viva: se ti stanno stretti, dillo in una issue.
+- Le quattro voci accettate del registro di sicurezza (H24, H28, H56, H83) dicono per iscritto se il rischio si
+  sfrutta oggi.
+
 ## [0.95.3] — 2026-11-21
 
 **Correzioni da una revisione esterna dell'archivio: la mappa dei temi si chiude se le scelte non si leggono.**
