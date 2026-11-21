@@ -26,7 +26,11 @@ COPY app ./app
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
-RUN apt-get update && apt-get install -y --no-install-recommends tini ca-certificates \
+# `apt-get upgrade` (21/11/2026): la base è fissata per digest, e fra la sua costruzione e la
+# nostra Debian pubblica correzioni (zlib1g, nella scansione del 21/11). Senza upgrade restavano
+# fuori fino al digest successivo. La release costruisce senza cache: l'upgrade è sempre fresco.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --no-install-recommends \
+    && apt-get install -y --no-install-recommends tini ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 RUN groupadd -g 1000 app && useradd -u 1000 -g 1000 -m -s /sbin/nologin app
 
