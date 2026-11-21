@@ -1,22 +1,15 @@
 name: Rebuild mensile (CVE con fix)
 
-# Le immagini si ricostruiscono a ogni release, e i fix dei pacchetti Debian
-# entrano SOLO così (le installazioni tirano per digest dal bundle firmato:
-# ripubblicare :latest non arriverebbe a nessuno). Ma se le release rallentano,
-# i fix restano fermi. Questo workflow, una volta al mese, guarda le immagini
-# PUBBLICATE con gli stessi occhi della pagina Security (--ignore-unfixed) e:
+# Una volta al mese guarda le immagini PUBBLICATE con gli stessi occhi della pagina
+# Security (--ignore-unfixed) e:
 #   · 0 CVE con fix   → verde, nessuna azione (e lo dice).
-#   · ≥1 CVE con fix  → crea il tag della PATCH successiva (vX.Y.Z+1) sull'HEAD
-#     di main → release.yml costruisce immagini fresche, firmate → il timer
-#     check della VPS avvisa l'owner via Telegram: il DEPLOY resta una sua
-#     azione, come sempre.
+#   · ≥1 CVE con fix  → apre (o commenta) una issue con i pacchetti da aggiornare e cosa
+#     serve per farlo: il digest della base nei Dockerfile e i lock delle librerie.
 #
-# ⚠️ PERCHÉ SERVE UN PAT (secret `RELEASE_PAT`, classic, scope `repo`): un tag
-#   creato col GITHUB_TOKEN di default NON fa partire altri workflow
-#   (anti-ricorsione di GitHub) — release.yml resterebbe fermo e il tag sarebbe
-#   un orfano. Senza il secret, questo workflow NON tagga: apre/aggiorna una
-#   issue con l'elenco delle CVE, e il tag lo dà l'owner con due comandi.
-#   Fail-open dichiarato, non silenzioso.
+# Il nome resta «rebuild» per storia: fino al 21/11/2026 il rimedio dichiarato era
+# «ricostruire le immagini» (e, col secret RELEASE_PAT, un tag automatico). Da quando la
+# base è fissata per digest (#338) ricostruire non assorbe più niente: vedi il passo in fondo.
+# Il workflow non crea tag e non usa nessun secret oltre al GITHUB_TOKEN.
 
 on:
   schedule:
@@ -31,7 +24,7 @@ jobs:
   valuta-e-agisci:
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # creare il tag (solo col PAT; il default non basta comunque)
+      contents: read         # dal 21/11 il workflow non tagga più: legge e apre una issue
       issues: write          # la via di fallback
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -101,37 +94,25 @@ jobs:
           echo "── CVE con fix, totale (con doppioni per pacchetto): $TOT"
           cat elenco.txt
 
-      - name: Tagga la patch successiva (solo col PAT)
+      # 21/11/2026 — QUESTO PASSO NON TAGGA PIÙ, e la issue non dice più «basta ricostruire».
+      # Dal 27/09 (#338) la base `python:3.12-slim` è fissata per DIGEST e le librerie Python
+      # vengono dal lock: ricostruire dà le stesse immagini con le stesse CVE (misurato: 216
+      # il 03/10, 368 il 03/11, con una release in mezzo). E col PAT il tag automatico sarebbe
+      # finito su un main con VERSION e CHANGELOG fermi: release.yml lo rifiuta, e il numero
+      # (immutabile) sarebbe andato bruciato. La cura vera è una PR, e la issue dice quale.
+      - name: Apri o aggiorna la issue (cosa serve davvero)
         if: steps.conta.outputs.totale != '0'
         env:
-          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
-        run: |
-          set -euo pipefail
-          if [ -z "$RELEASE_PAT" ]; then
-            echo "pat=assente" >> "$GITHUB_ENV"
-            echo "::warning::CVE con fix trovate ma RELEASE_PAT non configurato: non taggo (un tag dal GITHUB_TOKEN non farebbe partire release.yml). Apro la issue."
-            exit 0
-          fi
-          ULTIMO="$(git tag -l 'v*' --sort=-v:refname | head -1)"
-          # niente tag = niente release da ricostruire: non si inventa una v0.0.1
-          [ -n "$ULTIMO" ] || { echo "::error::nessun tag v*: niente da ricostruire"; exit 1; }
-          NUOVO="$(printf '%s' "$ULTIMO" | awk -F. -v OFS=. '{$NF=$NF+1; print}')"
-          git config user.name "rebuild-mensile"
-          git config user.email "actions@users.noreply.github.com"
-          git tag -a "$NUOVO" -m "rebuild mensile: immagini ricostruite per assorbire i fix Debian (elenco nel run)" origin/main
-          git push "https://x-access-token:${RELEASE_PAT}@github.com/${{ github.repository }}" "$NUOVO"
-          echo "pat=usato" >> "$GITHUB_ENV"
-          echo "::notice::taggato $NUOVO → release.yml ricostruisce; il check della VPS avviserà l'owner."
-
-      - name: Issue di fallback (senza PAT)
-        if: steps.conta.outputs.totale != '0' && env.pat == 'assente'
-        env:
           GH_TOKEN: ${{ github.token }}
+          TOTALE: ${{ steps.conta.outputs.totale }}
         run: |
           set -euo pipefail
-          TITOLO="Rebuild consigliato: CVE con fix nelle immagini pubblicate"
-          CORPO="$(printf 'Il giro mensile del %s ha trovato **%s** CVE con fix disponibile nelle immagini pubblicate.\n\n```\n%s\n```\n\nPer assorbirle basta una release di patch (immagini ricostruite = pacchetti Debian aggiornati):\n\n    git tag vX.Y.Z+1 && git push origin vX.Y.Z+1\n\nPer automatizzare questo passo: secret `RELEASE_PAT` (PAT classic, scope `repo`) — vedi rebuild-mensile.yml.' "$(date -u +%F)" "${{ steps.conta.outputs.totale }}" "$(cat elenco.txt)")"
-          ESISTENTE="$(gh issue list --state open --search "in:title \"Rebuild consigliato\"" --json number -q '.[0].number' || true)"
+          # per pacchetto, non per CVE: l'elenco intero sta nel log del run (centinaia di righe)
+          awk -F': ' '{split($2, a, " "); print $1 ": " a[3] " " a[4] " → " $NF}' elenco.txt \
+            | sed 's/ → .* → / → /' | sort | uniq -c | sort -rn | head -60 > per-pacchetto.txt
+          TITOLO="CVE con fix nelle immagini pubblicate"
+          CORPO="$(printf 'Il giro mensile del %s ha trovato **%s** CVE con fix disponibile nelle immagini pubblicate. Per pacchetto (quante, immagine, pacchetto e versione installata; elenco intero nel log del run):\n\n```\n%s\n```\n\n**Ricostruire non basta**: la base è fissata per digest e le librerie dal lock. Serve una PR che:\n\n1. aggiorni il digest di `python:3.12-slim` (e di `caddy`) nei `Dockerfile`, per i pacchetti Debian/Alpine;\n2. rigeneri i lock per le librerie Python elencate: `uv lock -P <pacchetto>` in ogni servizio che le porta;\n3. passi da `tools/check.sh` e da una release di patch, con la prova dal vivo.' "$(date -u +%F)" "$TOTALE" "$(cat per-pacchetto.txt)")"
+          ESISTENTE="$(gh issue list --state open --search "in:title \"CVE con fix nelle immagini\"" --json number -q '.[0].number' || true)"
           if [ -n "$ESISTENTE" ]; then
             gh issue comment "$ESISTENTE" --body "$CORPO"
           else

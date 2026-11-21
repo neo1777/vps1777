@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+**Le immagini assorbono davvero le correzioni di sicurezza: base Debian e librerie aggiornate.**
+
+### Sicurezza
+- **Le immagini portavano CVE con correzione già pubblicata (#404), e ricostruirle non le toglieva.** La base
+  `python:3.12-slim` è fissata per digest dal 27/09 e le librerie vengono dal lock: il giro mensile contava 216 CVE a
+  ottobre e 368 a novembre. Ora il digest della base è quello corrente (openssl, pcre2, brotli) e nei lock sono
+  aggiornate certifi, joserfc, filelock, dnspython, opentelemetry-api e fastmcp (3.4.4 → 3.4.11), oltre alle undici
+  librerie delle PR automatiche (#523-#525: starlette, pydantic, onnxruntime, Caddy e altre).
+- **Il controllo mensile dice cosa serve davvero.** Non promette più «basta ricostruire» e non crea più tag da solo:
+  apre una issue con i pacchetti da aggiornare e i tre passi per farlo.
+
 ## [0.95.0] — 2026-11-21
 
 **Un giro di revisione di tutto il codice: tre difetti di sicurezza chiusi e una ventina di correzioni.**

@@ -1956,10 +1956,9 @@ features:
            in pagina Security solo le CVE con fix disponibile — al 01/09 la pagina
            portava ~1.400 alert quasi tutti NO-FIX, non azionabili. Il 3 del mese
            rebuild-mensile.yml riconta le CVE con fix sulle immagini pubblicate e, se
-           >0, tagga la patch successiva (release firmata, immagini fresche, deploy
-           sempre in mano all'owner); senza secret RELEASE_PAT non tagga (un tag dal
-           GITHUB_TOKEN non innesca release.yml: anti-ricorsione GitHub) e apre una
-           issue con l'elenco. Decisione dell'owner 01/09: «se è lo standard
+           >0, apre una issue con i pacchetti da aggiornare (dal 21/11/2026 non tagga
+           più: con la base fissata per digest ricostruire non assorbe i fix, serve una
+           PR che sposti il digest e rigeneri i lock). Decisione dell'owner 01/09: «se è lo standard
            industriale, sì a entrambi»."
     dove: [".github/workflows/trivy.yml", ".github/workflows/rebuild-mensile.yml",
            "SECURITY.md#Supply-chain"]
