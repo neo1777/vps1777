@@ -144,25 +144,26 @@ case "$WHICH" in
   admin_password)
     FILE=secrets/admin_password_bcrypt.txt
     log "Rotation password admin"
+    NUOVA_PW=""   # NON `PWD`: in bash è la cartella corrente, e senza terminale diventava la password
     if [ -t 0 ]; then
       while :; do
         printf '%sNuova password (min 16, ≥3 classi; vuoto = la genero forte io):%s ' "$C_B" "$C_R"
-        read -rs PWD; echo
-        [ -z "$PWD" ] && break
-        if reason="$(pw_weak_reason "$PWD")"; then break; fi
+        read -rs NUOVA_PW; echo
+        [ -z "$NUOVA_PW" ] && break
+        if reason="$(pw_weak_reason "$NUOVA_PW")"; then break; fi
         warn "Password debole: $reason. Riprova (o Invio vuoto per generarne una forte)."
       done
     fi
-    if [ -z "${PWD:-}" ]; then
-      PWD=$(gen_pass 24)
-      consegna_password "$PWD"
-    elif ! reason="$(pw_weak_reason "$PWD")"; then
+    if [ -z "${NUOVA_PW:-}" ]; then
+      NUOVA_PW=$(gen_pass 24)
+      consegna_password "$NUOVA_PW"
+    elif ! reason="$(pw_weak_reason "$NUOVA_PW")"; then
       die "Password troppo debole: $reason. Rifiutata (policy: min 16, ≥3 classi, niente pattern comuni)."
     fi
     if ! python3 -c 'import bcrypt' 2>/dev/null; then
       python3 -m pip install --user --quiet bcrypt || die "bcrypt non installabile"
     fi
-    ADMIN_PWD_RAW="$PWD" python3 -c '
+    ADMIN_PWD_RAW="$NUOVA_PW" python3 -c '
 import os, bcrypt
 print(bcrypt.hashpw(os.environ["ADMIN_PWD_RAW"].encode(), bcrypt.gensalt(12)).decode())
 ' > "$FILE"

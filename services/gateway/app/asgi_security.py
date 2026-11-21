@@ -80,7 +80,9 @@ BODY_CAP_DEFAULT = 32 * 1024 * 1024      # 32 MB — largo per form, OAuth, JSON
 #   fallisce RUMOROSAMENTE, al primo upload, invece di aprire un buco muto.
 #   (Prefissi, non path esatti: come il `no_store` qui sotto, vale anche per gli
 #   endpoint futuri sotto lo stesso ramo senza doverlo ricordare handler per handler.)
-UPLOAD_PREFIXES = ("/admin/archive", "/admin/nlm", "/carica")   # /carica: P15, il tetto vero (200 MB) lo mette nb1777
+# `/admin/nlm` NON è più in lista (21/11): il profilo ha un tetto suo di 5 MB, e col tetto alto il
+# parser del form metteva da parte fino a 4 GB prima che la pagina potesse dire «troppo grande».
+UPLOAD_PREFIXES = ("/admin/archive", "/carica")   # /carica: P15, il tetto vero (200 MB) lo mette nb1777
 
 
 def body_cap_for(path: str, *, default: int, upload: int) -> int:

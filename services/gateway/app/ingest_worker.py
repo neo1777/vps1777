@@ -72,6 +72,11 @@ def esegui_coda(jid: str, db: str, suffisso: str, project: str = "",
     # BadZipFile non è un OSError: uno zip rotto è un rifiuto parlante, non un crash
     except (ValueError, OSError, RuntimeError, sqlite3.Error, zipfile.BadZipFile) as exc:
         return 3, {"errore": str(exc)[:600]}
+    except Exception as exc:  # noqa: BLE001 — un difetto nostro: l'esito lo deve dire comunque
+        # Senza questo ramo chi aveva caricato il file non riceveva NESSUN esito (il servizio
+        # moriva col traceback) e il file spariva lo stesso nel `finally`.
+        return 3, {"errore": f"errore imprevisto dell'indicizzatore "
+                             f"({type(exc).__name__}): {str(exc)[:500]}"}
     finally:
         sorgente.unlink(missing_ok=True)
 

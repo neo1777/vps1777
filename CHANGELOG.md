@@ -4,6 +4,46 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+**Un giro di revisione di tutto il codice: tre difetti di sicurezza chiusi e una ventina di correzioni.**
+
+### Sicurezza
+- **Il blocco degli endpoint interni nel proxy si aggirava con `..` (H85).** `…/x/../internal/…` superava il controllo
+  sul prefisso e arrivava al servizio come `/internal/…`; il proxy inoltrava anche l'header interno mandato dal client.
+  Ora un percorso con segmenti `.` o `..` riceve 404 e gli header `x-vps1777-*` del client non passano.
+- **Le pagine admin scrivevano `?kind=` nell'HTML senza escape (H86).** Un link aperto da loggato poteva aprire un form
+  che si portava via il campo csrf. Il tipo ora vale solo «ok» o «err».
+- **Un backup usciva 0 anche se un volume non si era salvato (H87).** Il dump fallito era un avviso; ora il backup
+  muore prima di cifrare, nomina il volume e non lascia archivi incompleti.
+- **Lo stato OAuth su disco si scrive tutto o niente.** Un file troncato faceva ripartire vuoto l'elenco dei refresh
+  già usati (che tornavano validi) o dei connettori. Un file che c'è ma non si legge ora viene messo da parte e detto
+  nell'audit; se è l'elenco delle revoche, valgono solo i refresh emessi dopo.
+- **Un refresh token già usato che viene ripresentato manda un avviso su Telegram**, oltre al rifiuto di prima.
+
+### Corretto
+- **`vps1777 rollback` fatto due volte metteva il tag di una versione coi digest dell'altra.** Ora i digest precedenti
+  seguono lo scambio fra versione corrente e precedente.
+- **Un rollback automatico poteva fermarsi a metà con lo stack giù** (un restore fallito, le unit systemd): ora ogni
+  passo è protetto, lo stack viene rialzato comunque e l'avviso dice quali passi non sono riusciti. Un errore mentre
+  l'update applica i file nuovi ora fa partire il rollback invece di lasciare i file a metà.
+- **`rotate-secret.sh admin_password` leggeva la password nella variabile `PWD`** (in bash è la cartella corrente):
+  senza terminale la password generata non scattava mai.
+- **`restore.sh` fermava lo stack prima di sapere se il backup si poteva leggere** (chiave sbagliata, file troncato,
+  snapshot vuoto), e copiava l'intero snapshot in `/tmp` prima di usarlo. Ora controlla prima e usa i tar dove sono;
+  «Restore completato» non esce più se segreti o volumi non sono stati ripristinati.
+- **`backup.sh` cercava i volumi col nome della cartella del repo** invece di `vps1777`: in un clone con un altro nome
+  ogni update si fermava al backup.
+- **Caricare un `.db` con il nome di un archivio esistente lo sostituiva in silenzio.** Ora viene rifiutato: si
+  sceglie un altro nome o si elimina prima quello che c'è.
+- **Eliminare un archivio lasciava sul disco il suo indice per senso** (dalla pagina e dalla Mini App), e «Elimina»
+  cercava il nome normalizzato invece di quello della riga.
+- **Una riga JSON valida ma non-oggetto faceva cadere un intero ingest** e il file caricato spariva senza esito. Ora la
+  riga si salta e si conta, e un errore imprevisto dell'indicizzatore arriva comunque come esito leggibile.
+- **Lo stato degli aggiornamenti e la richiesta di update si scrivono tutto o niente**: una lettura a metà poteva far
+  perdere la richiesta o la versione nota. Il file dei marchi dei temi, se c'è ma non si legge, non viene riscritto.
+- **Il profilo NotebookLM caricato da `/admin/nlm` veniva letto per intero in memoria** prima del controllo dei 5 MB.
+- **Il limite di richieste per IP non dimenticava mai gli indirizzi visti**: ora le voci scadute si tolgono da sole.
+- Un percorso non valido nel proxy (`a%00b`) riceve 400 invece di un errore interno.
+
 ## [0.94.2] — 2026-11-07
 
 **La mappa dei temi mette i vocali nel mese dell'audio, non in quello del caricamento.**

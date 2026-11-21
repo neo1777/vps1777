@@ -331,7 +331,12 @@ def _layout(title: str, body: str, current: str = "", flash: str = "",
         tabs = f'<nav class="tabs">{rendered}{logout_form}</nav>'
     flash_html = ""
     if flash:
-        flash_html = f'<div class="flash {flash_kind}">{html.escape(flash)}</div>'
+        # Il tipo arriva anche da `?kind=` (lo scrivono i redirect delle pagine): qui, nel punto
+        # unico, vale solo «ok» o «err». Prima entrava com'era nell'attributo `class`, e un link
+        # costruito apposta chiudeva il div e apriva un <form> suo, che si portava via il campo
+        # csrf della pagina (giro di revisione del 21/11).
+        tipo = "err" if flash_kind == "err" else "ok"
+        flash_html = f'<div class="flash {tipo}">{html.escape(flash)}</div>'
     # Banner "sessione NON cifrata" (H10): se il gateway non è dietro HTTPS
     # (PUBLIC_BASE non https → è attivo il fallback GATEWAY_BIND=0.0.0.0 su
     # http://IP:8080, o si è ancora in setup), l'operatore DEVE saperlo — sta
@@ -575,7 +580,8 @@ async def nlm_view(request: Request) -> Response:
         upload = form.get("auth_file")
         if upload is None or not hasattr(upload, "read"):
             return RedirectResponse("/admin/nlm?msg=Nessun+file+caricato&kind=err", status_code=303)
-        content = await upload.read()  # type: ignore[union-attr]
+        # un byte oltre il tetto basta a dire «troppo grande», senza portare in RAM il resto
+        content = await upload.read(5_000_001)  # type: ignore[union-attr]
 
         if not content:
             err: str | None = "file vuoto"
@@ -878,7 +884,11 @@ async def archive_view(request: Request) -> Response:
             for upload in uploads:
                 nome_file = Path(str(getattr(upload, "filename", "") or "")).name
                 suffix = Path(nome_file).suffix.lower() or ".jsonl"
-                tmp = db_dir / f".upload-{db_name}-{os.getpid()}{suffix}"
+                # Un nome per caricamento (due insieme sullo stesso DB non si pestano), e per i
+                # `.db` un nome che NON finisce in `.db`: a metà scrittura lo scan di archive-mcp
+                # e la pagina lo elencavano come un archivio (giro di revisione del 21/11).
+                tmp = db_dir / (f".upload-{db_name}-{os.getpid()}-{pysecrets.token_hex(4)}{suffix}"
+                                + (".caricamento" if suffix == ".db" else ""))
                 try:
                     # stream su disco a chunk (memoria costante anche su file da decine di MB).
                     # TETTO sull'upload (H39): i tetti di decompressione stanno a valle,
@@ -918,6 +928,12 @@ async def archive_view(request: Request) -> Response:
                         # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
                         if not _valid_archive_db(tmp):
                             raise ValueError("il .db non ha lo schema atteso (messages_fts)")
+                        # Un `.db` SOSTITUISCE, gli altri formati accumulano: su un nome già
+                        # usato si rifiuta, invece di far sparire in silenzio l'archivio che c'è.
+                        if db_path.exists():
+                            raise ValueError(
+                                f"esiste già un archivio '{db_name}': un .db lo sostituirebbe "
+                                "per intero. Scegli un altro nome, o elimina prima quello che c'è.")
                         tmp.replace(db_path)
                         n = archive_indexer.count_rows(db_path)
                         verb = "caricato (drop-in)"
@@ -1066,7 +1082,9 @@ async def archive_delete(request: Request) -> Response:
     if redirect:
         return redirect
     form = await request.form()
-    name = _safe_db_name(str(form.get("db") or ""), fallback="")
+    # Il nome com'è (find_db lo confronta col listato vero, niente percorsi dall'input):
+    # normalizzarlo qui faceva eliminare `foo` a chi premeva sulla riga `Foo`.
+    name = str(form.get("db") or "").strip()
     path = archive_indexer.find_db(get_settings().archive_db_dir, name)
     if path is None:
         audit({"event": "admin_archive_delete_err", "by": email, "db": name, "error": "not_found"})
@@ -1078,7 +1096,11 @@ async def archive_delete(request: Request) -> Response:
         audit({"event": "admin_archive_delete_err", "by": email, "db": name, "error": str(exc)})
         return RedirectResponse(
             f"/admin/archive?msg=Errore:+{str(exc).replace(' ', '+')}&kind=err", status_code=303)
-    audit({"event": "admin_archive_delete", "by": email, "db": name, "rows": rows})
+    # Con il DB se ne va il suo indice per senso: restava sul disco coi vettori dei messaggi
+    # eliminati, e un DB ricaricato con lo stesso nome veniva giudicato contro quello.
+    indice_tolto = archive_indexer.togli_indice(path)
+    audit({"event": "admin_archive_delete", "by": email, "db": name, "rows": rows,
+           "indice_tolto": indice_tolto})
     msg = f"DB '{name}' eliminato ({rows} messaggi). Per ripartire ricarica la fonte."
     return RedirectResponse(f"/admin/archive?msg={msg.replace(' ', '+')}&kind=ok", status_code=303)
 
@@ -1094,9 +1116,36 @@ async def archive_delete(request: Request) -> Response:
 
 def _read_json(path: Path) -> dict:
     try:
-        return json.loads(path.read_text())
+        dati = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return {}
+    # un JSON valido che non è un oggetto (una lista, un numero) vale «niente da leggere»:
+    # chi chiama fa `.get`, e una pagina in 500 non aiuta nessuno
+    return dati if isinstance(dati, dict) else {}
+
+
+def _scrivi_json(path: Path, dati: dict, *, modo: int | None = None) -> bool:
+    """Scrive `dati` in `path` tutto o niente: temporaneo accanto, permessi, rinomina.
+
+    `update_status.json` lo scrive anche il controllo giornaliero dell'host e lo legge la CLI;
+    l'intent di aggiornamento fa scattare una path unit appena ESISTE. Con `write_text` chi
+    leggeva a metà trovava un file vuoto: la CLI buttava l'intent come illeggibile, e una
+    rilettura a metà riscriveva lo stato senza la `latest` nota. Torna False se non si può
+    scrivere (volume non scrivibile dal container): la pagina lo dice, non va in 500."""
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{pysecrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_text(json.dumps(dati, indent=2) + "\n")
+        if modo is not None:
+            tmp.chmod(modo)
+        os.replace(tmp, path)
+        return True
+    except OSError as exc:
+        log.warning("non riesco a scrivere %s: %s", path.name, exc)
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
 
 
 async def update_state(request: Request) -> Response:
@@ -1160,7 +1209,7 @@ async def update_check(request: Request) -> Response:
         # NON error/checked_at: il verdetto del check host resta suo (H70) —
         # la decisione e il perché stanno in admin_core.stato_dopo_refresh_fallito.
         prev = admin_core.stato_dopo_refresh_fallito(prev, spiega, str(exc)[:200], now)
-        sf.write_text(json.dumps(prev, indent=2) + "\n")
+        _scrivi_json(sf, prev)
         audit({"event": "admin_update_check_err", "by": email, "error": str(exc)[:200]})
         return RedirectResponse(
             f"/admin/update?msg={(spiega + str(exc)[:60]).replace(' ', '+')}&kind=err",
@@ -1182,7 +1231,7 @@ async def update_check(request: Request) -> Response:
         prev.update(current=current,
                     error="GitHub non ha riportato una versione (tag_name assente)",
                     checked_at=now)
-        sf.write_text(json.dumps(prev, indent=2) + "\n")
+        _scrivi_json(sf, prev)
         # `latest` e non una chiave nuova: audit._CHIAVI_NOTE è un'allowlist, e il
         # valore da registrare qui È la latest nota — quella che si è TENUTA invece
         # di sovrascrivere. L'evento e `reason` dicono già in che senso.
@@ -1196,14 +1245,14 @@ async def update_check(request: Request) -> Response:
     # cache di GitHub — la «latest nota» non deve mai regredire (downgrade proposto).
     if known and latest and version_gt(known, latest):
         prev.update(current=current, error=None, checked_at=now)
-        sf.write_text(json.dumps(prev, indent=2) + "\n")
+        _scrivi_json(sf, prev)
         msg = f"GitHub riporta v{latest} ma la latest nota è v{known} (cache stantia): tengo la nota"
         return RedirectResponse(f"/admin/update?msg={msg.replace(' ', '+')}&kind=ok",
                                 status_code=303)
     prev.update(current=current, latest=latest,
                 changelog_excerpt=(rel.get("body") or "")[:1600],  # il lettore taglia a fine paragrafo
                 html_url=rel.get("html_url", ""), error=None, checked_at=now)
-    sf.write_text(json.dumps(prev, indent=2) + "\n")
+    _scrivi_json(sf, prev)
     audit({"event": "admin_update_check", "by": email, "latest": latest})
     return RedirectResponse(
         f"/admin/update?msg=Check+eseguito:+ultima+release+v{latest}&kind=ok",
@@ -1242,14 +1291,17 @@ async def update_view(request: Request) -> Response:
             "nonce": pysecrets.token_hex(16),
         }
         path = ob / "update_pending_update.json"
-        path.write_text(json.dumps(intent, indent=2) + "\n")
+        if not _scrivi_json(path, intent, modo=0o640):
+            return RedirectResponse(
+                "/admin/update?msg=" + quote_plus("Non riesco a scrivere la richiesta di aggiornamento "
+                                                 "(cartella non scrivibile): usa `vps1777 update` sulla VPS")
+                + "&kind=err", status_code=303)
         # 0640 (H36): NON world-readable. L'intent porta un nonce che autorizza
         # l'apply dell'update — non deve essere leggibile da ogni utente locale
         # dell'host. 0640 (non 0600) per robustezza: il file lo scrive il
         # container (uid 1000) e lo legge la CLI host, che sul bind-mount vede lo
         # stesso uid/gid 1000 dell'operator — ma se un giorno divergessero, il
         # gruppo copre la lettura senza rompere il pulsante update.
-        path.chmod(0o640)
         audit({"event": "admin_update_requested", "by": email, "target": latest})
         return RedirectResponse(
             "/admin/update?msg=Update+richiesto:+l'updater+parte+entro+pochi+secondi&kind=ok",
@@ -1571,6 +1623,13 @@ def _scrivi_marchi(marchi: dict) -> None:
     os.replace(tmp, f)
 
 
+def _marchi_leggibili(f: Path) -> bool:
+    try:
+        return isinstance(json.loads(f.read_text(encoding="utf-8")), dict)
+    except (OSError, ValueError):
+        return False
+
+
 async def temi_view(request: Request) -> Response:
     """I temi della mappa, con quelli da guardare in testa. GET mostra, POST marca."""
     email, redirect = await _require_admin(request)
@@ -1583,6 +1642,15 @@ async def temi_view(request: Request) -> Response:
         tema, stato = str(form.get("tema") or ""), str(form.get("stato") or "")
         if not tema.isdigit() or stato not in ("libero", "riservato"):
             return RedirectResponse("/admin/temi?msg=Richiesta+non+valida&kind=err", status_code=303)
+        # Un marchi.json che c'è ma non si legge (permessi, file toccato a mano) NON si riscrive:
+        # `_read_json` lo dà vuoto, e salvare da lì cancellerebbe tutti gli altri «riservato».
+        f_marchi = cartella / "marchi.json"
+        if f_marchi.exists() and not _marchi_leggibili(f_marchi):
+            audit({"event": "temi_marchio_err", "by": email, "error": "marchi_illeggibile"})
+            return RedirectResponse(
+                "/admin/temi?msg=" + quote_plus("Il file dei marchi c'è ma non si legge: non lo "
+                                                "riscrivo, per non perdere le scelte già fatte")
+                + "&kind=err", status_code=303)
         marchi[tema] = stato
         _scrivi_marchi(marchi)
         audit({"event": "temi_marchio", "by": email, "status": stato, "target": tema})

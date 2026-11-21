@@ -41,7 +41,7 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
-from .archive_indexer import count_rows, find_db, list_db_infos
+from .archive_indexer import count_rows, find_db, list_db_infos, togli_indice
 from .audit import audit, read_recent
 from .jwt_helpers import JWTError, issue, verify
 from .mcp_client import MCPCallError, call_tool
@@ -410,7 +410,7 @@ async def api_archive_db_delete(request: Request) -> Response:
         audit({"event": "miniapp_archive_delete_err", "user_id": claims.get("sub", ""), "db": name})
         return JSONResponse({"error": "delete_failed"}, status_code=500)
     audit({"event": "miniapp_archive_delete", "user_id": claims.get("sub", ""),
-           "db": name, "rows": rows})
+           "db": name, "rows": rows, "indice_tolto": togli_indice(path)})
     return JSONResponse({"ok": True, "db": name, "rows": rows})
 
 

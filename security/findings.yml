@@ -806,7 +806,7 @@ findings:
       - file: services/gateway/app/onboarding.py
         contains: ["PENDING_TTL = timedelta", "def _pending_is_stale", "def _read_pending"]
       - file: services/gateway/app/admin.py
-        contains: ["chmod(0o640)"]
+        contains: ["modo=0o640"]
     note: >
       pending.json con TTL 24h + auto-wipe alla lettura se scaduto (0600). Intent file
       di update da 0644 → 0640: non più world-readable (porta un nonce che autorizza
@@ -4162,3 +4162,123 @@ findings:
         output: "47 passed: 5 URI sensati accettati, 12 pericolosi rifiutati, code negato senza conferma"
         exit: 0
         quando: "2026-10-16"
+
+  - id: H85
+    severity: high
+    title: "Il blocco di `internal/` nel proxy si aggirava con un segmento `..`: gli endpoint privati di un servizio raggiungibili da un client autorizzato"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: lettura
+      nota: >
+        Giro di revisione dell'intero codice con un modello nuovo (richiesta del proprietario
+        del 21/11): un revisore in sola lettura sul gateway. Riprodotto in locale con l'app
+        ASGI e il percorso grezzo; mai visto sfruttato (nell'audit della VPS di riferimento
+        nessun `proxy_request` verso percorsi con `..`).
+    since: unreleased
+    why: >
+      Il proxy rifiutava `internal/…` confrontando il prefisso del percorso, ma httpx toglie i
+      segmenti `.` e `..` quando costruisce l'URL: `x/../internal/nlm/profile` (anche con
+      `%2e%2e`) superava il confronto e arrivava all'upstream come `/internal/nlm/profile`.
+      In più il proxy inoltrava l'header `x-vps1777-internal` mandato dal client, che è
+      l'unica guardia di quegli endpoint e porta un segreto che ogni client del proxy conosce
+      (sta nell'URL del connettore). Un client autorizzato poteva installare un profilo di
+      cookie Google su nb1777-mcp o leggere gli endpoint interni: la separazione di H6.
+    evidence:
+      - file: services/gateway/app/proxy.py
+        contains:
+          - "def _segmenti_a_punti("
+          - 'if interno or sub_path.startswith("/") or _segmenti_a_punti(sub_path):'
+          - 'not k.lower().startswith("x-vps1777-")'
+      - file: services/gateway/tests_runtime/test_proxy_upstream_generico.py
+        contains:
+          - "def test_i_segmenti_a_punti_non_passano("
+          - "def test_l_header_interno_del_client_non_arriva_all_upstream("
+    fix: >
+      Un percorso con un segmento `.` o `..` (anche scritto `%2e`, una o più volte codificato)
+      o con una barra in testa riceve 404 prima di ogni altro controllo, come `internal/`. Gli
+      header `x-vps1777-*` del client non si inoltrano mai. Un percorso che non è un URL
+      (`a%00b`) riceve 400 invece di un errore non gestito.
+    prova:
+      - comando: "uv run --locked --with pytest pytest -q tests_runtime/test_proxy_upstream_generico.py (services/gateway)"
+        dove: "PC"
+        output: "8 percorsi a punti rifiutati con 404 senza toccare l'upstream; l'header interno non arriva"
+        exit: 0
+        quando: "2026-11-21"
+
+  - id: H86
+    severity: medium
+    title: "Le pagine admin scrivevano `?kind=` nell'HTML senza escape: un link apriva un form che si portava via il campo csrf"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: lettura
+      nota: >
+        Stesso giro di revisione di H85, revisore delle pagine admin. Riprodotto col vero
+        `_layout`; che il campo csrf segua il form iniettato è dedotto dalla specifica HTML
+        (un form annidato viene ignorato dal parser), non provato in un browser.
+    since: unreleased
+    why: >
+      `_layout` metteva il tipo del messaggio nell'attributo `class` così com'era, e quattro
+      pagine (`/admin/nlm`, `/admin/archive`, `/admin/update`, `/admin/setup`) glielo passavano
+      da `?kind=`. Il cookie è `samesite=lax`: un link aperto dall'admin loggato chiudeva il
+      div e apriva un `<form>` verso un'azione scelta da chi aveva scritto il link, e il campo
+      csrf che la pagina inietta finiva in quel form. La CSP ferma gli script, non i form
+      (`form-action 'self'`): un clic qualunque inviava una POST valida (eliminare un
+      archivio, revocare un connettore, cambiare la configurazione in attesa).
+    evidence:
+      - file: services/gateway/app/admin.py
+        contains:
+          - 'tipo = "err" if flash_kind == "err" else "ok"'
+      - file: services/gateway/tests_runtime/test_flash_tipo.py
+        contains:
+          - "def test_un_tipo_ostile_non_esce_dalla_classe("
+    fix: >
+      Il tipo vale solo «ok» o «err», deciso in un punto unico (`_layout`) per tutte le pagine.
+    prova:
+      - comando: "uv run --locked --with pytest pytest -q tests_runtime/test_flash_tipo.py (services/gateway)"
+        dove: "PC"
+        output: "2 passed: il form ostile non compare nell'HTML"
+        exit: 0
+        quando: "2026-11-21"
+
+  - id: H87
+    severity: high
+    title: "Un volume che non si riusciva a salvare era un avviso: il backup usciva 0 con dentro solo config e segreti"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: lettura
+      nota: >
+        Stesso giro di revisione, trovato da due revisori in modo indipendente (strumenti
+        dell'operatore e infrastruttura) e riprodotto con un `docker run` e un `tar` che
+        falliscono. `high` come H72 e H73: è la copia che mente sul proprio contenuto.
+    since: unreleased
+    why: >
+      In `backup.sh` il dump di ogni volume finiva con `2>/dev/null || warn "dump fallito
+      (vuoto?)"`, e dopo il ciclo lo script stampava «Volumi dumpati», cifrava e usciva 0. Con
+      il disco pieno a metà `tar`, un errore di I/O o un `docker run` che non parte, l'archivio
+      nasceva senza quel volume (o con un tar troncato), la ritenzione lo contava come la copia
+      della notte e l'update proseguiva. La scusa «vuoto?» non reggeva: `tar` su un volume
+      vuoto esce 0.
+    evidence:
+      - file: tools/backup.sh
+        contains:
+          - "_dump_fallito() {"
+          - '[ "$DUMP_FALLITI" -eq 0 ] || die'
+      - file: tools/tests/test-backup-dump-fallito.sh
+        contains:
+          - "backup.sh è uscito 0 con un volume non salvato"
+    fix: >
+      Ogni dump fallito si conta e si nomina, con l'errore di `tar`; se ce n'è anche uno solo il
+      backup muore prima di cifrare e non lascia archivi. Un test esegue il backup con un `tar`
+      che fallisce su un volume e, come controprova, con quello vero.
+    prova:
+      - comando: "bash tools/tests/test-backup-dump-fallito.sh"
+        dove: "PC"
+        output: "esce ≠ 0, nomina il volume e l'errore, nessun archivio; sul codice di prima 3 controlli su 4 falliscono"
+        exit: 0
+        quando: "2026-11-21"

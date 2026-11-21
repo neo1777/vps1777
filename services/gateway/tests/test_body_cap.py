@@ -87,8 +87,14 @@ def _con_tetto(default_max: int, upload_max: int):
 # ───────────────────────── il classificatore (logica pura) ─────────────────────────
 
 def test_i_path_di_upload_prendono_il_tetto_alto():
-    for p in ("/admin/archive", "/admin/archive/", "/admin/nlm"):
+    for p in ("/admin/archive", "/admin/archive/", "/carica"):
         assert asgi_security.body_cap_for(p, default=10, upload=999) == 999, p
+
+
+def test_il_profilo_nlm_resta_sotto_il_tetto_basso():
+    # il profilo ha un tetto suo di 5 MB: col tetto alto un file sbagliato da gigabyte
+    # veniva messo da parte per intero prima del rifiuto
+    assert asgi_security.body_cap_for("/admin/nlm", default=10, upload=999) == 10
 
 
 def test_tutto_il_resto_prende_il_tetto_basso():

@@ -38,3 +38,14 @@ def test_sweep_rimuove_ip_inattivi():
     rl.sweep(now=105)
     assert "vecchio" not in rl._hits
     assert "nuovo" in rl._hits
+
+
+def test_le_voci_vecchie_si_tolgono_da_sole():
+    # giro di revisione del 21/11: `sweep` non la chiamava nessuno, e ogni IP visto restava
+    # in memoria fino al riavvio
+    rl = ratelimit.RateLimiter(max_calls=5, window_s=10)
+    for i in range(255):
+        rl.allow(f"10.0.{i // 250}.{i % 250}", now=float(i) / 1000)
+    assert len(rl._hits) == 255
+    rl.allow("192.0.2.1", now=100.0)          # la 256ª chiamata, a finestra scaduta per tutti
+    assert list(rl._hits) == ["192.0.2.1"]

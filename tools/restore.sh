@@ -180,6 +180,18 @@ fi
 #    non è ancora stato letto (succede a r.180), e una cura che deve INDOVINARE quale
 #    overlay era attivo sarebbe l'ennesimo insieme enumerato a mano. Docker sa già
 #    cosa appartiene al progetto: glielo si chiede, invece di dirglielo.
+# ── PRIMA di fermare lo stack si guarda se l'input si può leggere (21/11/2026) ──
+# Lo stack si fermava qui, e solo dopo si scopriva una chiave sbagliata, un file troncato o uno
+# snapshot senza tar: il servizio restava giù per un restore che non aveva toccato niente.
+magic=""
+if [ -d "$ARCHIVE" ]; then
+  ls "$ARCHIVE"/*.tar >/dev/null 2>&1 || die "nessun .tar nello snapshot ($ARCHIVE): non fermo lo stack"
+else
+  [ -r "$ARCHIVE" ] || die "non riesco a leggere $ARCHIVE (permessi?): non fermo lo stack"
+  magic="$( (age -d -i "$AGE_KEY" "$ARCHIVE" 2>/dev/null || true) | head -c 4 | od -An -tx1 | tr -d ' \n')"
+  [ -n "$magic" ] || die "decifratura fallita: chiave sbagliata, file troncato o non è un backup age ($ARCHIVE). Lo stack NON è stato fermato."
+fi
+
 log "Stop stack..."
 docker compose down --remove-orphans 2>/dev/null || true
 
@@ -188,10 +200,12 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 if [ -d "$ARCHIVE" ]; then
   # Snapshot locale: directory con <vol>.tar — nessuna cifratura.
+  # I tar si usano DOVE SONO (21/11/2026). Prima si copiavano tutti in `mktemp -d`: uno snapshot
+  # dell'archivio pesa ~10 GB, /tmp può essere RAM o un disco già pieno dello snapshot stesso, e
+  # l'errore della copia (coperto da 2>/dev/null) diventava «nessun .tar», a stack già fermo.
   log "Snapshot locale: $ARCHIVE"
-  mkdir -p "$TMP/volumes"
-  cp -a "$ARCHIVE"/*.tar "$TMP/volumes/" 2>/dev/null || die "nessun .tar nello snapshot"
-  ok "Snapshot caricato"
+  VOLDIR="$(cd "$ARCHIVE" && pwd)"
+  ok "Snapshot trovato"
 else
   # ── il formato si legge dai BYTE, non dal nome ──
   # Dal 0.43.13 backup.sh comprime prima di cifrare (zstd, o gzip) e il nome resta
@@ -201,7 +215,7 @@ else
   # solo per guardarne quattro. Poi la pipeline giusta, in streaming.
   #   28 b5 2f fd → zstd · 1f 8b → gzip · altro → tar nudo (i backup pre-0.43.13)
   log "Decifro archivio..."
-  magic="$( (age -d -i "$AGE_KEY" "$ARCHIVE" 2>/dev/null || true) | head -c 4 | od -An -tx1 | tr -d ' \n')"
+  VOLDIR="$TMP/volumes"
   case "$magic" in
     28b52ffd)
       command -v zstd >/dev/null || die "il backup è compresso con zstd e qui zstd manca (apt install zstd)"
@@ -262,9 +276,16 @@ if [ -z "$VOLUMES_ONLY" ]; then
   log "Ripristino secrets..."
   mkdir -p secrets
   if [ -d "$TMP/secrets" ]; then
-    cp -a "$TMP/secrets/"*.txt secrets/ 2>/dev/null && \
-      chmod 600 secrets/*.txt && \
+    # Come per la config (H72): un `cp` fallito non può finire in «Restore completato».
+    if ls "$TMP/secrets/"*.txt >/dev/null 2>&1; then
+      cp -a "$TMP/secrets/"*.txt secrets/ || die "ripristino dei secrets fallito (permessi su secrets/?)"
+      chmod 600 secrets/*.txt
       ok "Secrets ripristinati"
+    else
+      warn "Secrets NON ripristinati: la cartella secrets/ del backup è vuota"
+    fi
+  else
+    warn "Secrets NON ripristinati: il backup non contiene una cartella secrets/"
   fi
 fi
 
@@ -281,8 +302,9 @@ _want_volume() {
 }
 
 log "Ripristino volumi Docker..."
-if [ -d "$TMP/volumes" ]; then
-  for tar_file in "$TMP/volumes"/*.tar; do
+_ripristinati=0
+if [ -d "$VOLDIR" ]; then
+  for tar_file in "$VOLDIR"/*.tar; do
     [ -f "$tar_file" ] || continue
     vol_name="$(basename "$tar_file" .tar)"
     # Snapshot locali possono usare nomi corti: normalizza al nome compose.
@@ -296,10 +318,17 @@ if [ -d "$TMP/volumes" ]; then
       -v "$tar_file:/src.tar:ro" \
       --entrypoint sh \
       busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e \
-      -c "rm -rf /dst/* /dst/..?* /dst/.[!.]* 2>/dev/null; tar -C /dst -xf /src.tar"
+      -c "rm -rf /dst/* /dst/..?* /dst/.[!.]* 2>/dev/null; tar -C /dst -xf /src.tar" \
+      || die "ripristino del volume $vol_name FALLITO: il volume è stato svuotato e non riempito. Rilancia il restore prima di riavviare lo stack."
+    _ripristinati=$((_ripristinati + 1))
   done
-  ok "Volumi ripristinati"
 fi
+# «Volumi ripristinati» si dice solo se è vero: zero volumi (un --volumes-only che non combacia
+# con nessun tar, un backup senza volumes/) è un restore che non ha ripristinato i dati.
+if [ "$_ripristinati" -eq 0 ]; then
+  die "nessun volume ripristinato${VOLUMES_ONLY:+ (--volumes-only «$VOLUMES_ONLY» non combacia con nessun tar)}: i dati sono quelli di prima."
+fi
+ok "Volumi ripristinati: $_ripristinati"
 
 # ───── 5. done ─────
 echo

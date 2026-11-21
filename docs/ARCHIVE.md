@@ -1040,7 +1040,8 @@ Cose in più che l'ingest produce:
 > l'archivio non dice più «non so da quando» sapendolo.
 
 Un `.db` drop-in è accettato se è un SQLite con la tabella `messages_fts`
-(controllo in `admin.py`). Anche un DB **v1** (le sole 4 colonne
+(controllo in `admin.py`) e se quel nome non è già di un archivio: un `.db` lo sostituirebbe per
+intero, quindi su un nome già usato viene rifiutato (elimina prima quello che c'è, o cambia nome). Anche un DB **v1** (le sole 4 colonne
 `uuid, project, ts, content`) resta valido: `migrate_v1_to_v2()` gli aggiunge le
 colonne nuove e ricostruisce l'FTS: le righe vecchie restano (con `tools`/`thinking`
 vuoti finché non ri-esegui l'ingest sulla fonte, idempotente per `uuid`).
