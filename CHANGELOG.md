@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.95.4] — 2026-11-21
+
+**Ogni container ha i suoi tetti di risorse.**
+
 ### Cambiato
 - **Ogni container ha i suoi tetti di memoria, CPU e processi**, anche quelli degli overlay: mancavano la memoria
   dell'OCR (ora 1 GB, picco misurato 216 MiB) e del backup (1 GB), e tutti e tre i tetti di Caddy, cloudflared,
