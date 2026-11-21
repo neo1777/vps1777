@@ -38,8 +38,9 @@ DB_DIR = os.environ.get("ARCHIVE_DB_DIR", "/var/lib/archive/db")
 ORFANO_DOPO_S = 2 * 24 * 3600
 
 
-def _pulisci_orfani(cartella: Path, tranne: Path) -> int:
-    tolti = 0
+def _pulisci_orfani(cartella: Path, tranne: Path) -> tuple[int, int]:
+    """(tolti, non tolti): i file di lavori mai conclusi, più vecchi di ORFANO_DOPO_S."""
+    tolti = falliti = 0
     soglia = time.time() - ORFANO_DOPO_S
     for p in cartella.glob("*"):
         if p == tranne or not p.is_file():
@@ -49,8 +50,8 @@ def _pulisci_orfani(cartella: Path, tranne: Path) -> int:
                 p.unlink()
                 tolti += 1
         except OSError:
-            pass
-    return tolti
+            falliti += 1        # resta lì: l'esito lo dice, la prossima corsa riprova
+    return tolti, falliti
 
 
 def esegui_coda(jid: str, db: str, suffisso: str, project: str = "",
@@ -62,13 +63,16 @@ def esegui_coda(jid: str, db: str, suffisso: str, project: str = "",
     sorgente = cartella / f"{jid}{suffisso}"
     db_path = Path(db_dir) / f"{db}.db"
     try:
-        _pulisci_orfani(cartella, sorgente)
+        _tolti, non_tolti = _pulisci_orfani(cartella, sorgente)
         if not sorgente.is_file():
             return 3, {"errore": "il file del lavoro non c'è più nella coda"}
         n = archive_indexer.index_file(str(sorgente), str(db_path), project=project)
         if description:
             archive_indexer.set_meta(db_path, "description", description)
-        return 0, {"righe": n, "totale": archive_indexer.count_rows(db_path)}
+        esito = {"righe": n, "totale": archive_indexer.count_rows(db_path)}
+        if non_tolti:
+            esito["orfani_non_tolti"] = non_tolti
+        return 0, esito
     # BadZipFile non è un OSError: uno zip rotto è un rifiuto parlante, non un crash
     except (ValueError, OSError, RuntimeError, sqlite3.Error, zipfile.BadZipFile) as exc:
         return 3, {"errore": str(exc)[:600]}

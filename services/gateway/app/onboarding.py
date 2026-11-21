@@ -22,6 +22,7 @@ Questo separa nettamente "raccolta dati" (web, senza privilegi) da
 from __future__ import annotations
 
 import html
+import os
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -172,11 +173,13 @@ def _read_pending() -> dict:
     if not isinstance(data, dict) or _pending_is_stale(
         data.get("submitted_at"), datetime.now(timezone.utc)
     ):
+        # il file porta segreti in chiaro: se non si riesce a cancellarlo lo si DICE, con un
+        # evento diverso, invece di registrare una scadenza che non è avvenuta
         try:
             pp.unlink()
-        except OSError:
-            pass
-        audit({"event": "onboarding_pending_expired"})
+            audit({"event": "onboarding_pending_expired"})
+        except OSError as exc:
+            audit({"event": "onboarding_pending_expire_err", "error": str(exc)})
         return {}
     return data
 
@@ -200,10 +203,20 @@ async def setup_view(request: Request) -> Response:
                 pending[key] = val
         merged = {**existing, **pending}
         merged["submitted_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        # Tutto o niente, e mai leggibile da altri: il temporaneo NASCE a 0600 (con `write_text`
+        # il file coi segreti aveva i permessi dell'umask fino al `chmod`, e un'interruzione
+        # lo lasciava troncato).
+        tmp = pp.with_name(f".{pp.name}.{os.getpid()}.tmp")
         try:
-            pp.write_text(json.dumps(merged, indent=2), encoding="utf-8")
-            pp.chmod(0o600)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(merged, indent=2))
+            os.replace(tmp, pp)
         except OSError as exc:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass    # può non essere mai nato; l'errore vero va nella pagina, qui sotto
             return RedirectResponse(
                 f"/admin/setup?msg=Errore+scrittura:+{str(exc).replace(' ', '+')}&kind=err",
                 status_code=303,

@@ -60,7 +60,10 @@ def _scrivi_stato(f: Path, dati: Any, evento: str) -> bool:
     tmp = f.with_name(f".{f.name}.tmp")
     try:
         f.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(json.dumps(dati))
+        with tmp.open("w") as fh:
+            fh.write(json.dumps(dati))
+            fh.flush()
+            os.fsync(fh.fileno())       # senza, dopo un crash il file rinominato può essere vuoto
         os.replace(tmp, f)
     except (OSError, TypeError, ValueError) as exc:
         audit({"event": evento, "error": str(exc)})

@@ -51,22 +51,25 @@ def test_ogni_file_passa_dalle_guardie_e_pulisce_il_suo_temporaneo():
     """Le guardie (spazio disco, tetto) e la pulizia del `.upload-*` stanno DENTRO
     il ciclo: un check fatto una volta per cinque file misura lo spazio prima
     del primo, non prima del quinto."""
+    # Dal 21/11 il corpo del ciclo è una funzione sua, `_archive_un_file`: il ciclo la chiama
+    # per OGNI file, e le guardie stanno lì dentro, nell'ordine di sempre.
     i_for = CODICE.index("for upload in uploads:")
-    i_disk = CODICE.index("shutil.disk_usage(")
-    # S13: scrittura e indicizzazione girano in un thread; nel ciclo ci sono le chiamate
-    i_open = CODICE.index("asyncio.to_thread(_copia_upload")
-    i_index = CODICE.index("await _indicizza(")
-    assert i_for < i_disk < i_open < i_index
+    ciclo = CODICE[i_for:i_for + 200]
+    assert "await _archive_un_file(upload, c)" in ciclo, "il ciclo non passa più da _archive_un_file"
+    un_file = CODICE[CODICE.index("async def _archive_un_file("):CODICE.index("async def _archive_pagina(")]
+    i_disk = un_file.index("shutil.disk_usage(")
+    # S13: scrittura e indicizzazione girano in un thread; qui ci sono le chiamate
+    i_open = un_file.index("asyncio.to_thread(_copia_upload")
+    i_index = un_file.index("await _indicizza(")
+    assert i_disk < i_open < i_index
     copia = CODICE[CODICE.index("def _copia_upload("):CODICE.index("async def _indicizza(")]
     assert 'open(tmp, "wb")' in copia and "MAX_UPLOAD_BYTES" in copia, \
         "il tetto dell'upload deve restare dentro la copia"
     assert "archive_indexer.index_file" in CODICE[CODICE.index("async def _indicizza("):]
-    # il finally per-file: il primo `tmp.unlink` dopo il for sta più dentro del for
-    blocco = CODICE[i_for:]
-    riga_for = next(r for r in CODICE.splitlines() if "for upload in uploads:" in r)
-    riga_unlink = next(r for r in blocco.splitlines() if "tmp.unlink(missing_ok=True)" in r)
-    indent = lambda r: len(r) - len(r.lstrip())  # noqa: E731
-    assert indent(riga_unlink) > indent(riga_for), "la pulizia del temporaneo non è per-file"
+    # il finally per-file: `_archive_un_file` toglie il SUO temporaneo comunque finisca
+    coda = un_file[i_index:]
+    assert "finally:" in coda and "tmp.unlink(missing_ok=True)" in coda[coda.index("finally:"):], \
+        "la pulizia del temporaneo non è per-file"
 
 
 def test_un_errore_a_meta_dice_cosa_e_gia_entrato():

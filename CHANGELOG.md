@@ -4,6 +4,35 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+**Pannello admin, indicizzatore e Mini App riletti col catalogo di requisiti: tre fette, una sessantina di correzioni.**
+
+### Sicurezza
+- **Un elenco delle sessioni admin che non si legge chiude, invece di aprire (H95).** Se il file dei logout era
+  rotto, un cookie già chiuso tornava valido fino a 8 ore. Ora valgono solo le sessioni aperte dopo, il file viene
+  messo da parte e l'audit lo dice.
+- **Il file del primo setup nasce già chiuso (0600) e si scrive tutto o niente.** Prima, per un istante, i segreti
+  del modulo avevano i permessi di default; se non si riesce a cancellarlo alla scadenza, l'audit ora lo dice.
+- **La richiesta di aggiornamento dalla Mini App si scrive tutta o niente**, come già quella del pannello: la CLI
+  dell'host non può più leggerla a metà. Una versione che non si interpreta non è mai «più nuova».
+- Un `initData` enorme o con troppi campi non viene nemmeno analizzato; domanda e ricerca della Mini App hanno un
+  tetto di lunghezza.
+
+### Cambiato
+- **Un archivio che non si legge non sembra più vuoto**: la pagina dice «non leggibile adesso» invece di «0 messaggi».
+- **Ciò che l'indicizzatore salta lascia una lapide**: righe JSONL rotte (una sola, col conto), membri JSON rotti di
+  un export claude.ai o Telegram, pagine PDF illeggibili, PDF di un bundle troncato al tetto.
+- «Check eseguito» non compare più se lo stato non si è potuto salvare; senza una versione nota la Mini App dice
+  «non verificato» invece di «aggiornato».
+- Il pannello non tiene più in memoria per sempre gli IP che hanno sbagliato la password.
+
+### Corretto
+- Un corpo JSON valido che non è un oggetto (`[1]`) faceva rispondere la Mini App con un errore interno: ora 400.
+- Lo scarico di un artefatto (pannello e link firmati) chiude la connessione verso nb1777-mcp anche se chi scarica
+  se ne va prima dell'inizio.
+- `archive_view`, la funzione più intricata del pannello, è spezzata in quattro; `verify_init_data` in due.
+- La risposta del servizio OCR si legge con un tetto; un posticipo scritto a mano senza fuso orario non rompe più
+  la pagina dei secret.
+
 ## [0.97.0] — 2026-11-21
 
 **Il gateway riletto riga per riga con un catalogo di requisiti: trentacinque correzioni fra OAuth, proxy e audit.**

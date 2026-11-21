@@ -175,8 +175,10 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # impronta, volume degli artefatti, update ucciso a metà.
 # + 1 (H94, low, 21/11) = 94. Dalla revisione del gateway col catalogo di requisiti applicato da
 # due modelli: la rotazione del refresh proseguiva anche se la revoca non era arrivata su disco.
-EXPECTED_TOTAL = 94
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 55, "low": 21}
+# + 1 (H95, low, 21/11) = 95. Dalla stessa revisione, sul pannello admin: l'elenco delle sessioni
+# chiuse, se illeggibile, valeva «nessuna revoca».
+EXPECTED_TOTAL = 95
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 55, "low": 22}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

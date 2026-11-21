@@ -12,7 +12,7 @@ import hashlib
 import hmac
 import json as _json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl
 
 # Finestra di validità di `initData` (H27). Era 24h.
@@ -44,6 +44,32 @@ def webapp_secret_key(bot_token: str) -> bytes:
     return hmac.new(b"WebAppData", bot_token.encode("utf-8"), hashlib.sha256).digest()
 
 
+# Un initData vero ha una decina di campi e sta in pochi kB: oltre, non lo si analizza nemmeno.
+INIT_DATA_MAX_BYTE = 16_384
+INIT_DATA_MAX_CAMPI = 40
+
+
+def _chiave_di_firma(bot_token: str, webapp_secret_hex: str) -> bytes | None:
+    """La chiave con cui Telegram firma initData: quella già derivata se c'è (vince sul token),
+    altrimenti derivata dal token. None se non ce n'è una valida."""
+    if webapp_secret_hex:
+        try:
+            secret_key = bytes.fromhex(webapp_secret_hex.strip())
+        except ValueError:
+            return None
+        # Una chiave della lunghezza sbagliata non è una chiave: rifiutare qui
+        # evita che un segreto troncato in provisioning diventi un 401 di firma,
+        # che si legge come «initData scaduta» e manda a cercare dalla parte
+        # opposta. Un errore di configurazione deve somigliare a un errore di
+        # configurazione.
+        if len(secret_key) != hashlib.sha256().digest_size:
+            return None
+        return secret_key
+    if bot_token:
+        return webapp_secret_key(bot_token)
+    return None
+
+
 def verify_init_data(
     init_data: str,
     bot_token: str = "",
@@ -63,25 +89,16 @@ def verify_init_data(
     gateway. Se manca, si deriva dal token — quindi le installazioni esistenti si
     comportano esattamente come prima, senza toccare niente.
     """
-    if not init_data:
+    if not init_data or len(init_data) > INIT_DATA_MAX_BYTE:
         return None
-    if webapp_secret_hex:
-        try:
-            secret_key = bytes.fromhex(webapp_secret_hex.strip())
-        except ValueError:
-            return None
-        # Una chiave della lunghezza sbagliata non è una chiave: rifiutare qui
-        # evita che un segreto troncato in provisioning diventi un 401 di firma,
-        # che si legge come «initData scaduta» e manda a cercare dalla parte
-        # opposta. Un errore di configurazione deve somigliare a un errore di
-        # configurazione.
-        if len(secret_key) != hashlib.sha256().digest_size:
-            return None
-    elif bot_token:
-        secret_key = webapp_secret_key(bot_token)
-    else:
+    secret_key = _chiave_di_firma(bot_token, webapp_secret_hex)
+    if secret_key is None:
         return None
-    pairs = list(parse_qsl(init_data, strict_parsing=False, keep_blank_values=True))
+    try:
+        pairs = list(parse_qsl(init_data, strict_parsing=False, keep_blank_values=True,
+                               max_num_fields=INIT_DATA_MAX_CAMPI))
+    except ValueError:      # più campi del tetto: non è un initData di Telegram
+        return None
     received_hash = None
     data_pairs: list[tuple[str, str]] = []
     for k, v in pairs:
@@ -127,6 +144,7 @@ def is_owner(user_id: object, owner_id: int) -> bool:
     if not owner_id:
         return False
     try:
+        # `object` in ingresso: ciò che int() non regge cade nell'except qui sotto
         return int(user_id) == int(owner_id)  # type: ignore[arg-type]
     except (ValueError, TypeError):
         return False
@@ -254,7 +272,9 @@ def version_gt(a: str, b: str) -> bool:
         tb = tuple(int(x) for x in b.strip().lstrip("v").split("."))
         return ta > tb
     except ValueError:
-        return a > b
+        # Una versione che non si interpreta NON è «più nuova» (fail-closed). Prima si ricadeva
+        # sul confronto fra stringhe, e «0.9.0-rc» risultava più nuova di «0.10.0».
+        return False
 
 
 def summarize_secrets(status: dict) -> dict:
@@ -370,4 +390,6 @@ def posticipo_attivo(dati: dict, ora: datetime) -> str | None:
         fino = datetime.fromisoformat(str(dati["fino_a"]))
     except (KeyError, ValueError, TypeError):
         return None
+    if fino.tzinfo is None:             # scritta a mano senza fuso: vale UTC, non un errore
+        fino = fino.replace(tzinfo=timezone.utc)
     return dati["fino_a"] if fino > ora else None

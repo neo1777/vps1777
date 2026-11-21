@@ -140,6 +140,8 @@ def lavori(onboarding_dir: str | Path, *, limite: int = 12,
                 continue
             d = _leggi(p)
             if d is None:
+                if stato_default is None:       # un esito che c'è ma non si legge: si mostra
+                    visti[p.stem] = {"id": p.stem, "stato": "esito illeggibile"}
                 continue
             d["id"] = p.stem
             if stato_default:

@@ -42,7 +42,8 @@ Indexer CONDIVISO, due usi:
   - server-side: il gateway lo importa e chiama `index_file(...)` in /admin/archive
   - locale:      `python3 archive_indexer.py <input> out.db --project nome`
 
-Solo stdlib (json, zipfile, sqlite3, hashlib). Idempotente per `uuid`
+Solo stdlib (json, zipfile, sqlite3, hashlib), più `pypdf` per i PDF (importato solo lì) e,
+se configurato, il servizio OCR via HTTP. Idempotente per `uuid`
 (INSERT OR REPLACE): re-indicizzare non duplica; fonti diverse nello stesso DB
 si accumulano. L'FTS si ricostruisce a fine ingest ('rebuild') — coerente e
 immune alla corruzione da REPLACE dei trigger external-content.
@@ -223,10 +224,7 @@ def _zip_json(z: zipfile.ZipFile, name: str, budget: _Budget) -> object:
 
 def _check_file_size(path: Path, cap: int) -> None:
     """Tetto su un file NON compresso già su disco: qui st_size è la verità."""
-    try:
-        size = path.stat().st_size
-    except OSError:
-        return
+    size = path.stat().st_size      # se non si misura si solleva: il tetto non si salta in silenzio
     if size > cap:
         raise ValueError(
             f"file troppo grande: '{path.name}' è {_mb(size)}, il tetto è {_mb(cap)}. "
@@ -554,7 +552,7 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
                     continue                      # stesso contenuto: niente da conservare
                 rev.append((u, ts_old, cont_old, sender_old or "", proj or "",
                             tss_old or "messaggio",
-                            hashlib.sha1((cont_old or "").encode("utf-8")).hexdigest(),
+                            hashlib.sha1((cont_old or "").encode("utf-8"), usedforsecurity=False).hexdigest(),
                             ingest_date))
             if rev:
                 # OR IGNORE + PK(uuid, content_sha): la stessa versione non si archivia due
@@ -697,7 +695,7 @@ def _applica_potatura(conn: sqlite3.Connection, pot: _Potatura, ingest_date: str
                 "INSERT OR IGNORE INTO revisions(uuid, ts, content, sender, project,"
                 " ts_source, content_sha, superseded_date) VALUES (?,?,?,?,?,?,?,?)",
                 (u, r[0], r[1], r[2] or "", r[3] or "", r[4] or "messaggio",
-                 hashlib.sha1((r[1] or "").encode("utf-8")).hexdigest(), ingest_date))
+                 hashlib.sha1((r[1] or "").encode("utf-8"), usedforsecurity=False).hexdigest(), ingest_date))
             conn.execute("DELETE FROM messages WHERE uuid=?", (u,))
             tolte += 1
         conn.execute("DELETE FROM sightings WHERE uuid=? AND source=?", (u, pot.source))
@@ -1542,8 +1540,9 @@ def list_db_infos(db_dir: Union[str, Path], *, top: int = 5) -> list[dict]:
         return []
     paths = [p for p in sorted(d.glob("*.db")) if p.is_file() and not _sidecar(p)]
     vivi = {str(p) for p in paths}
-    for k in [k for k in _DB_INFO_CACHE if k not in vivi]:
-        _DB_INFO_CACHE.pop(k, None)  # DB eliminato: la sua scheda non resta in memoria
+    for memo in (_DB_INFO_CACHE, _STATO_INDICE_CACHE):
+        for k in [k for k in memo if k not in vivi]:
+            memo.pop(k, None)  # DB eliminato: la sua scheda non resta in memoria
     return [db_info(p, top=top) for p in paths]
 
 
@@ -1574,7 +1573,7 @@ def _db_info_calcola(p: Path, *, top: int) -> dict:
     """Il calcolo vero (le query). Vedi `db_info` per la cache."""
     out: dict = {"name": p.stem, "rows": 0, "labels": 0, "top": [],
                  "size": 0, "mtime": "", "skipped": 0, "description": "",
-                 "ruolo": ""}
+                 "ruolo": "", "illeggibile": ""}
     try:
         out["size"] = p.stat().st_size
         out["mtime"] = _file_ts(p)
@@ -1614,8 +1613,10 @@ def _db_info_calcola(p: Path, *, top: int) -> dict:
                 pass  # DB precedente alla tabella meta
         finally:
             conn.close()
-    except sqlite3.Error:
-        pass
+    except sqlite3.Error as exc:
+        # «0 messaggi» e «non riesco a leggerlo» sono due schede diverse: senza questo campo
+        # un DB rotto o occupato sembrava un archivio vuoto.
+        out["illeggibile"] = f"{type(exc).__name__}: {exc}"[:200]
     return out
 
 
@@ -1736,7 +1737,9 @@ def extract_text(content: object) -> str:
 
 def _uid(*parts: str) -> str:
     """uuid deterministico da parti (per fonti senza id nativo → dedup stabile)."""
-    return hashlib.sha1("\x1f".join(parts).encode("utf-8", "replace")).hexdigest()
+    # un'impronta per riconoscere lo stesso record, non una difesa: lo si dichiara
+    return hashlib.sha1("\x1f".join(parts).encode("utf-8", "replace"),
+                        usedforsecurity=False).hexdigest()
 
 
 # ── estrattore: sessione Claude Code (.jsonl) ────────────────────────────────
@@ -1866,6 +1869,7 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
         if rec.get("uuid"):
             ponte[str(rec["uuid"])] = str(rec.get("parentUuid") or "")
 
+    rotte = 0
     for line in fh:
         read += len(line)
         if read > MAX_FILE_BYTES:
@@ -1878,6 +1882,7 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
         try:
             d = json.loads(line)
         except json.JSONDecodeError:
+            rotte += 1          # contata: esce in una lapide sola in fondo
             continue
         if not isinstance(d, dict):
             # Una riga JSON valida che non è un oggetto (un `conversations.json` sciolto, tutto
@@ -1978,6 +1983,9 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
         ultimo_ts = str(ts)
         yield (uuid, proj, ts, blocks.text, sender,
                blocks.tools, blocks.thinking, "", _genitore(str(d.get("parentUuid") or "")))
+    if rotte:
+        # una sessione ancora aperta finisce spesso con una riga a metà: è normale, ma si dice
+        yield _Skip("claude-code", "righe-non-json", f"{rotte} righe non leggibili come JSON", "")
 
 
 def classify_cc(fh: IO[str]) -> list[str]:
@@ -2229,7 +2237,7 @@ def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[Ro
             try:
                 yield from _iter_memories(_zip_json(z, n, budget))
             except (json.JSONDecodeError, UnicodeDecodeError):
-                pass
+                yield _Skip("claude-export", "json-malformato", n, "")
         # users.json — anagrafica dell'account (nome, email, telefono verificato).
         #
         # SI INDICIZZA. L'ingestione non filtra: se l'utente carica un file,
@@ -2246,17 +2254,18 @@ def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[Ro
             try:
                 yield from _iter_users(_zip_json(z, "users.json", budget))
             except (json.JSONDecodeError, UnicodeDecodeError):
-                pass
+                yield _Skip("claude-export", "json-malformato", "users.json", "")
         if "login_history.json" in names:
             try:
                 yield from _iter_login_history(_zip_json(z, "login_history.json", budget))
             except (json.JSONDecodeError, UnicodeDecodeError):
-                pass
+                yield _Skip("claude-export", "json-malformato", "login_history.json", "")
         for n in names:
             if n.startswith("design_chats/") and n.endswith(".json"):
                 try:
                     data = _zip_json(z, n, budget)
                 except (json.JSONDecodeError, UnicodeDecodeError):
+                    yield _Skip("claude-export", "json-malformato", n, "")
                     continue
                 if isinstance(data, dict):
                     # il title è sempre il generico "Chat": l'etichetta utile è
@@ -2271,6 +2280,7 @@ def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[Ro
                 try:
                     proj = _zip_json(z, n, budget)
                 except (json.JSONDecodeError, UnicodeDecodeError):
+                    yield _Skip("claude-export", "json-malformato", n, "")
                     continue
                 if not isinstance(proj, dict):
                     continue
@@ -2292,7 +2302,8 @@ def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[Ro
 def _file_ts(path: Path) -> str:
     try:
         import datetime
-        return datetime.datetime.utcfromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.datetime.fromtimestamp(
+            path.stat().st_mtime, tz=datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     except OSError:
         return ""
 
@@ -2358,10 +2369,12 @@ def _iter_pdf(path: Union[str, Path], project: str) -> Iterator[Row]:
             f"Spezzalo, oppure alza MAX_PDF_PAGES in archive_indexer.py.")
     pages: list[str] = []
     chars = 0
+    saltate = 0
     for page in reader.pages:
         try:
             txt = page.extract_text() or ""
-        except Exception:  # noqa: BLE001 — pypdf inciampa su pagine malformate: si salta
+        except Exception:  # noqa: BLE001 — pypdf inciampa su pagine malformate: si salta e si conta
+            saltate += 1
             continue
         chars += len(txt)
         if chars > MAX_PDF_TEXT_CHARS:
@@ -2369,6 +2382,8 @@ def _iter_pdf(path: Union[str, Path], project: str) -> Iterator[Row]:
                 f"PDF: superati {MAX_PDF_TEXT_CHARS} caratteri estratti "
                 f"(bomba di decompressione?). Alza MAX_PDF_TEXT_CHARS se è legittimo.")
         pages.append(txt)
+    if saltate:
+        yield _Skip("pdf", "pagine-illeggibili", f"{path.name}: {saltate} su {n_pages}", _file_ts(path))
     yield from _chunk_rows("\n\n".join(pages), name, _file_ts(path), name)
 
 
@@ -2486,6 +2501,7 @@ def _iter_telegram_zip(zip_path: Union[str, Path], members: list[str],
             try:
                 data = _zip_json(z, m, budget)
             except (json.JSONDecodeError, UnicodeDecodeError):
+                yield _Skip("telegram", "json-malformato", m, "")
                 continue
             if isinstance(data, dict):
                 yield from _iter_telegram(data)
@@ -2874,15 +2890,25 @@ def _iter_pdf_bytes(raw: bytes, name: str, label: str, ts: str, *,
             return
         pages: list[str] = []
         chars = 0
+        saltate = 0
+        troncato = False
         for page in reader.pages:
             try:
                 txt = page.extract_text() or ""
-            except Exception:  # noqa: BLE001 — pagina malformata: si salta
+            except Exception:  # noqa: BLE001 — pagina malformata: si salta e si conta
+                saltate += 1
                 continue
             chars += len(txt)
             if chars > MAX_PDF_TEXT_CHARS:
+                troncato = True
                 break
             pages.append(txt)
+        if saltate:
+            yield _Skip(fonte, "pdf-pagine-illeggibili", f"{name}: {saltate} su {len(reader.pages)}", ts)
+        if troncato:
+            # il testo che segue è PARZIALE: senza lapide passava per il documento intero
+            yield _Skip(fonte, "pdf-troncato",
+                        f"{name}: oltre {MAX_PDF_TEXT_CHARS} caratteri, tenute {len(pages)} pagine", ts)
         text = "\n\n".join(pages).strip()
         if text:
             yield from _chunk_rows(f"[{name}]\n{text}", label, ts, name)
@@ -2910,6 +2936,7 @@ def _iter_pdf_bytes(raw: bytes, name: str, label: str, ts: str, *,
 _IMG_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
 MAX_IMG_BYTES = 12 * 1024 * 1024
 _OCR_TIMEOUT_S = 120            # il tetto di ocr1777: sul corpus non è mai scattato
+_OCR_MAX_RISPOSTA = 5 * 1024 * 1024    # il testo di UNA immagine: oltre, non è una risposta sensata
 
 
 def _ocr_url() -> str:
@@ -2938,7 +2965,11 @@ def _iter_immagine_bytes(raw: bytes, name: str, label: str, ts: str, *,
         req = urllib.request.Request(url, data=raw, method="POST",
                                      headers={"Content-Type": "application/octet-stream"})
         with urllib.request.urlopen(req, timeout=_OCR_TIMEOUT_S) as resp:
-            testo = resp.read().decode("utf-8", errors="replace").strip()
+            grezzo = resp.read(_OCR_MAX_RISPOSTA + 1)
+        if len(grezzo) > _OCR_MAX_RISPOSTA:
+            yield _Skip(fonte, "ocr-risposta-troppo-grande", name, ts)
+            return
+        testo = grezzo.decode("utf-8", errors="replace").strip()
     except Exception as exc:        # servizio giù, timeout: lapide, mai un crash
         yield _Skip(fonte, "ocr-errore", f"{name}: {type(exc).__name__}", ts)
         return
@@ -3627,6 +3658,7 @@ def index_jsonl(source: Union[str, Path, IO[str]], db_path: Union[str, Path],
                 *, project: str = "") -> int:
     """Compat/streaming: indicizza una sessione Claude Code da path o file-like."""
     if hasattr(source, "read"):
+        # `hasattr(…, "read")` non restringe il tipo per il verificatore: qui è un file aperto
         return write_rows(db_path, _iter_claude_code(source, project))  # type: ignore[arg-type]
     with open(source, encoding="utf-8", errors="replace") as fh:
         return write_rows(db_path, _iter_claude_code(fh, project))

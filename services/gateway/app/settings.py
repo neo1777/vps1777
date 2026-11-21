@@ -1,7 +1,8 @@
 """
 Configuration via pydantic-settings.
 
-Carica da env var + (per i secret) da file. Mai mette i secret in env.
+Carica da env var + (per i secret) da file. I secret veri stanno in file (`*_FILE`); le
+varianti senza `_FILE` esistono solo come ricaduta per lo sviluppo locale e per i test.
 """
 from __future__ import annotations
 

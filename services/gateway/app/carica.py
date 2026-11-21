@@ -73,7 +73,9 @@ async def carica(request: Request) -> Response:
     if not _LIMITE.allow(ip, time.time()):
         return JSONResponse({"error": "rate_limited", "reason": "troppe richieste: riprova fra "
                              "qualche minuto"}, status_code=429, headers=_INTESTAZIONI)
-    nome = unquote(request.query_params.get("nome") or request.headers.get("x-nome-file") or "file")
+    # il nome lo sceglie chi carica: 255 caratteri bastano a qualunque file vero
+    nome = unquote(request.query_params.get("nome") or request.headers.get("x-nome-file")
+                   or "file")[:255]
     try:
         r = await nlm_client.carica(gettone, nome, request.stream(),
                                     request.headers.get("content-length"))
