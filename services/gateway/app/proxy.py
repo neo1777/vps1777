@@ -67,10 +67,58 @@ def tool_chiamati(body: bytes | None) -> list[str]:
     return nomi
 
 
+# Un batch JSON-RPC può portare migliaia di `tools/call`: nell'audit ne vanno i primi, e una riga
+# sola dice quanti altri ce n'erano (una riga a chiamata, senza tetto, gonfiava il registro).
+_TOOL_PER_RICHIESTA = 20
+
+
 def _audit_tool(service: str, tools: list[str], t0: float, esito: str, status: int | None) -> None:
-    for nome in tools:
+    ms = int((time.monotonic() - t0) * 1000)
+    for nome in tools[:_TOOL_PER_RICHIESTA]:
         audit({"event": "proxy_tool", "service": service, "tool": nome,
-               "ms": int((time.monotonic() - t0) * 1000), "esito": esito, "status": status})
+               "ms": ms, "esito": esito, "status": status})
+    if len(tools) > _TOOL_PER_RICHIESTA:
+        audit({"event": "proxy_tool", "service": service,
+               "tool": f"(altri {len(tools) - _TOOL_PER_RICHIESTA} nella stessa richiesta)",
+               "ms": ms, "esito": esito, "status": status})
+
+
+# ── un upstream lento non si prende tutto il gateway ────────────────────────────────────────
+# Il tetto di connessioni è uno solo per tutto il processo (`GATEWAY_LIMIT_CONCURRENCY`): senza
+# una quota per upstream, le chiamate ferme su un servizio lento occupavano tutti i posti, e il
+# pannello, OAuth e l'altro servizio rispondevano 503. Ogni upstream può tenerne al più una
+# quota; oltre, la richiesta riceve subito 503 con `Retry-After`.
+_QUOTA_PER_UPSTREAM = 0.4
+_in_corso: dict[str, int] = {}
+_CORPO_TIMEOUT_S = 120.0     # entro quanto il client deve aver mandato il corpo
+
+
+def _prendi_posto(service: str, s: Any) -> bool:
+    tetto = max(1, int(int(getattr(s, "gateway_limit_concurrency", 100) or 100) * _QUOTA_PER_UPSTREAM))
+    if _in_corso.get(service, 0) >= tetto:
+        return False
+    _in_corso[service] = _in_corso.get(service, 0) + 1
+    return True
+
+
+def _lascia_posto(service: str) -> None:
+    _in_corso[service] = max(0, _in_corso.get(service, 0) - 1)
+
+
+class _RispostaChiusa(StreamingResponse):
+    """Una risposta in streaming che chiude l'upstream COMUNQUE finisca. La chiusura stava solo
+    nel `finally` del generatore: se il client se ne andava prima che il generatore partisse,
+    quel `finally` non girava mai e connessione e client restavano aperti."""
+
+    def __init__(self, *args: Any, chiusura: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._chiusura = chiusura
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            await self._chiusura()
 
 
 def _filter_headers(headers: dict[str, str]) -> dict[str, str]:
@@ -143,11 +191,38 @@ def _check_bearer(request: Request) -> tuple[bool, str | None, dict | None]:
 
 async def proxy(request: Request) -> Response:
     s = get_settings()
+    # Starlette tipizza `path_params` come dict[str, Any]: qui sono sempre stringhe del percorso
     path_params: dict[str, str] = request.path_params  # type: ignore[assignment]
-    secret = path_params.get("secret", "")
     service = path_params.get("service", "")
     sub_path = path_params.get("path", "")
 
+    negato, upstream, claims = _ammetti(request, s, path_params.get("secret", ""), service, sub_path)
+    if negato is not None:
+        return negato
+
+    if not _prendi_posto(service, s):
+        audit({"event": "proxy_upstream_busy", "service": service})
+        return JSONResponse({"error": "upstream_busy"}, status_code=503,
+                            headers={"retry-after": "5"})
+    try:
+        body = None
+        if request.method in {"POST", "PUT", "PATCH"}:
+            # un client che apre la richiesta e non manda il corpo non tiene il posto per sempre
+            body = await asyncio.wait_for(request.body(), timeout=_CORPO_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        _lascia_posto(service)
+        return JSONResponse({"error": "request_timeout"}, status_code=408)
+    except BaseException:
+        _lascia_posto(service)
+        raise
+    return await _inoltra(request, service, upstream, sub_path, body, claims)
+
+
+def _ammetti(request: Request, s: Any, secret: str, service: str,
+             sub_path: str) -> tuple[Response | None, str, dict | None]:
+    """I controlli prima dell'inoltro, nell'ordine in cui devono stare: percorso interno,
+    segreto, servizio, bearer. Torna (rifiuto, upstream, claims): se `rifiuto` c'è, si risponde
+    quello."""
     # 0. `internal/` NON si attraversa. Il proxy è un catch-all su {path:path}:
     # senza questo blocco, un client esterno raggiungerebbe gli endpoint privati
     # di un upstream via /<secret>/<service>/internal/... — compreso quello che
@@ -163,13 +238,13 @@ async def proxy(request: Request) -> Response:
     interno = sub_path == "internal" or sub_path.startswith("internal/")
     if interno or sub_path.startswith("/") or _segmenti_a_punti(sub_path):
         audit({"event": "proxy_internal_blocked", "service": service, "path": sub_path})
-        return JSONResponse({"error": "not_found"}, status_code=404)
+        return JSONResponse({"error": "not_found"}, status_code=404), "", None
 
     # 1. Secret check (constant-time)
     expected = s.effective_gateway_secret
     if not expected or not _constant_eq(secret, expected):
         audit({"event": "proxy_secret_mismatch", "service": service, "path": sub_path})
-        return JSONResponse({"error": "not_found"}, status_code=404)
+        return JSONResponse({"error": "not_found"}, status_code=404), "", None
 
     # 2. Service registry
     upstream = s.gateway_upstreams.get(service)
@@ -178,7 +253,7 @@ async def proxy(request: Request) -> Response:
         return JSONResponse(
             {"error": "unknown_service", "available": sorted(s.gateway_upstreams)},
             status_code=404,
-        )
+        ), "", None
 
     # 3. Bearer
     ok, err, claims = _check_bearer(request)
@@ -188,9 +263,14 @@ async def proxy(request: Request) -> Response:
             {"error": "unauthorized", "reason": err},
             status_code=401,
             headers={"www-authenticate": 'Bearer realm="vps1777"'},
-        )
+        ), "", None
+    return None, upstream, claims
 
-    # 4. Forward
+
+async def _inoltra(request: Request, service: str, upstream: str, sub_path: str,
+                   body: bytes | None, claims: dict | None) -> Response:
+    """Manda la richiesta all'upstream e ne restituisce la risposta in streaming. Chi chiama ha
+    già preso il posto per `service`: qui lo si lascia in OGNI uscita."""
     target = f"http://{upstream}/{sub_path}".rstrip("/")
     if request.url.query:
         target = f"{target}?{request.url.query}"
@@ -198,20 +278,17 @@ async def proxy(request: Request) -> Response:
     headers = _filter_headers(dict(request.headers))
     # Forza Host = upstream cosicché il backend non confonda l'hostname pubblico
     headers["host"] = upstream
-    # Il bearer si ferma QUI: è già stato verificato tre righe sopra, nessun
-    # backend lo legge, e un token che viaggia dove non serve è solo superficie
-    # d'attacco in più (token passthrough — vaglio corso1777, 03/09). Se un
-    # giorno un backend dovesse autenticare in proprio, gli si emette un token
-    # SUO (audience del servizio), non si inoltra quello del client.
+    # Il bearer si ferma QUI: è già stato verificato, nessun backend lo legge, e un
+    # token che viaggia dove non serve è solo superficie d'attacco in più (token
+    # passthrough — vaglio corso1777, 03/09). Se un giorno un backend dovesse
+    # autenticare in proprio, gli si emette un token SUO (audience del servizio),
+    # non si inoltra quello del client.
     headers.pop("authorization", None)
 
     method = request.method
-    body = await request.body() if method in {"POST", "PUT", "PATCH"} else None
     tools = tool_chiamati(body)
     t0 = time.monotonic()
-
-    timeout = httpx.Timeout(60.0, connect=5.0)
-    client = httpx.AsyncClient(timeout=timeout, follow_redirects=False)
+    client = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0), follow_redirects=False)
 
     try:
         # IMPORTANTE: send(stream=True) NON legge il body → poi lo streammiamo
@@ -222,16 +299,22 @@ async def proxy(request: Request) -> Response:
     except httpx.InvalidURL as exc:
         # un percorso che non è un URL (`a%00b`): colpa della richiesta, non dell'upstream
         await client.aclose()
+        _lascia_posto(service)
         _audit_tool(service, tools, t0, "400", 400)
         return JSONResponse({"error": "bad_request", "reason": str(exc)}, status_code=400)
     except httpx.RequestError as exc:
         log.warning("proxy upstream error: %s", exc)
         await client.aclose()
+        _lascia_posto(service)
         _audit_tool(service, tools, t0, "502", 502)
         return JSONResponse(
             {"error": "bad_gateway", "reason": str(exc)},
             status_code=502,
         )
+    except BaseException:
+        await client.aclose()
+        _lascia_posto(service)
+        raise
 
     audit({
         "event": "proxy_request",
@@ -246,46 +329,69 @@ async def proxy(request: Request) -> Response:
         "client_id": claims.get("aud") if claims else None,
     })
 
-    # Streaming response: passa attraverso il body byte-per-byte
-    async def _gen() -> Any:
+    flusso = _Flusso(service, tools, t0, client, upstream_resp)
+    return _RispostaChiusa(
+        flusso.corpo(),
+        status_code=upstream_resp.status_code,
+        headers=_filter_headers(dict(upstream_resp.headers)),
+        media_type=upstream_resp.headers.get("content-type"),
+        chiusura=flusso.chiudi,
+    )
+
+
+class _Flusso:
+    """Il corpo di una risposta dell'upstream mentre passa, e la sua chiusura. `esito` parte da
+    «interrotto»: se il generatore non parte nemmeno è perché il client ha chiuso prima.
+    `chiudi` gira una volta sola, chiamata dal generatore o dalla risposta: scrive l'esito dei
+    tool, chiude upstream e client, lascia il posto dell'upstream."""
+
+    def __init__(self, service: str, tools: list[str], t0: float,
+                 client: httpx.AsyncClient, risposta: httpx.Response) -> None:
+        self.service, self.tools, self.t0 = service, tools, t0
+        self.client, self.risposta = client, risposta
+        self.esito = "interrotto"
+        self._chiuso = False
+
+    async def chiudi(self) -> None:
+        if self._chiuso:
+            return
+        self._chiuso = True
+        try:
+            _audit_tool(self.service, self.tools, self.t0, self.esito, self.risposta.status_code)
+            await self.risposta.aclose()
+            await self.client.aclose()
+        finally:
+            _lascia_posto(self.service)
+
+    async def corpo(self) -> Any:
+        """Passa il corpo byte per byte, guardando se un tool ha risposto con un errore."""
         esito, coda = "ok", b""
         try:
-            async for chunk in upstream_resp.aiter_raw():
-                if tools and esito == "ok":
+            async for chunk in self.risposta.aiter_raw():
+                if self.tools and esito == "ok":
                     # il marcatore può cadere a cavallo di due pezzi: si tiene la coda
                     finestra = coda + chunk.replace(b'": ', b'":')
                     if _ERRORE_TOOL in finestra:
                         esito = "errore_tool"
                     coda = finestra[-len(_ERRORE_TOOL):]
                 yield chunk
+            self.esito = esito
         except httpx.TimeoutException:
-            esito = "timeout"
+            self.esito = "timeout"
             raise
         except (asyncio.CancelledError, GeneratorExit):
-            esito = "interrotto"        # il client ha chiuso prima della fine
+            self.esito = "interrotto"        # il client ha chiuso prima della fine
             raise
         except Exception:
-            esito = "errore_stream"
+            self.esito = "errore_stream"
             raise
         finally:
-            _audit_tool(service, tools, t0, esito, upstream_resp.status_code)
-            await upstream_resp.aclose()
-            await client.aclose()
-
-    resp_headers = _filter_headers(dict(upstream_resp.headers))
-    return StreamingResponse(
-        _gen(),
-        status_code=upstream_resp.status_code,
-        headers=resp_headers,
-        media_type=upstream_resp.headers.get("content-type"),
-    )
+            await self.chiudi()
 
 
 def _constant_eq(a: str, b: str) -> bool:
-    """Compare 2 stringhe in modo timing-safe."""
-    if len(a) != len(b):
-        return False
-    result = 0
-    for x, y in zip(a.encode("utf-8"), b.encode("utf-8")):
-        result |= x ^ y
-    return result == 0
+    """Confronta due stringhe in tempo costante, con la primitiva della libreria standard: la
+    versione fatta in casa usciva subito se le lunghezze erano diverse, e così la lunghezza del
+    segreto si poteva misurare. (Sui byte: `compare_digest` non accetta str non ASCII.)"""
+    import hmac
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))

@@ -173,8 +173,10 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # rimasti aperti dopo la 0.95.0, chiusi prima di far leggere il repo a un revisore esterno:
 # audit senza tetto, famiglia dei refresh, opzioni iniettate nella CLI nlm, plugin compose senza
 # impronta, volume degli artefatti, update ucciso a metà.
-EXPECTED_TOTAL = 93
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 55, "low": 20}
+# + 1 (H94, low, 21/11) = 94. Dalla revisione del gateway col catalogo di requisiti applicato da
+# due modelli: la rotazione del refresh proseguiva anche se la revoca non era arrivata su disco.
+EXPECTED_TOTAL = 94
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 55, "low": 21}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

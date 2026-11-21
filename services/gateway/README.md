@@ -8,13 +8,18 @@ OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*`.
 |---|---|---|
 | `GATEWAY_HOST` | `0.0.0.0` | bind address |
 | `GATEWAY_PORT` | `8080` | porta interna |
+| `GATEWAY_LIMIT_CONCURRENCY` | `100` | connessioni contemporanee oltre le quali il gateway risponde 503; ogni upstream può tenerne al più il 40% |
+| `LOG_LEVEL` | `INFO` | livello del log del container |
 | `GATEWAY_PUBLIC_BASE` | (none; compose: `PUBLIC_BASE` dal `.env`) | URL pubblico (`https://...`). Lasciato vuoto → loopback dev |
 | `GATEWAY_UPSTREAMS` | (none; compose: `archive=archive-mcp:8002,nb1777=nb1777-mcp:8003`) | CSV `name=host:port` per ogni MCP plugin |
 | `GATEWAY_SECRET_FILE` | (none; compose: `/run/secrets/gateway_secret`) | path al file contenente il namespace URL |
 | `OAUTH_SIGNING_SECRET_FILE` | (none; compose: `/run/secrets/oauth_signing_secret`) | JWT signing key file |
 | `OAUTH_PWD_HASH_FILE` | (none; compose: `/run/secrets/admin_password_bcrypt`) | hash bcrypt admin |
 | `OAUTH_ALLOWED_EMAILS` | (none) | CSV degli email autorizzati come admin |
+| `OAUTH_REQUIRED` | `true` | `false` spegne il Bearer sul proxy MCP: solo per sviluppo locale |
 | `OAUTH_ACCESS_TOKEN_LIFETIME` | `900` | sec |
+| `OAUTH_ADMIN_COOKIE_LIFETIME` | `28800` | sec: durata del cookie del pannello `/admin` |
+| `OAUTH_MINIAPP_TOKEN_LIFETIME` | `3600` | sec: durata del token della Mini App |
 | `OAUTH_REFRESH_TOKEN_LIFETIME` | `2592000` | sec |
 | `OAUTH_CORS_ORIGINS` | `https://claude.ai` (compose: `+ https://web.telegram.org`) | CSV |
 | `OAUTH_TRUSTED_REDIRECT_HOSTS` | `claude.ai,claude.com` | CSV degli host di redirect che la pagina di consenso dà per noti; verso gli altri (tranne il loopback) chiede una conferma in più (H84) |
@@ -24,7 +29,10 @@ OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*`.
 | `OCR_URL` | (none; compose: `http://ocr:8004/ocr`) | servizio OCR per le immagini |
 | `ARCHIVE_DESC_SECRET_FILE` | (none; compose: `/run/secrets/archive_desc_secret`) | segreto di `/internal/archive/*` |
 | `AUDIT_LOG_PATH` | `/var/lib/gateway/audit.jsonl` | path scrittura audit |
-| `AUDIT_RETENTION_DAYS` | `90` | potatura dell'audit oltre N giorni (0 = nessuna) |
+| `AUDIT_RETENTION_DAYS` | `90` | potatura dell'audit oltre N giorni (0 = nessuna potatura per età; il tetto di 20 MB vale comunque) |
+| `NLM_INTERNAL_BASE` | `http://nb1777-mcp:8003` | dove il gateway raggiunge nb1777-mcp sulla rete interna |
+| `ONBOARDING_DIR` | `/var/lib/onboarding` | cartella condivisa col primo setup |
+| `ARCHIVE_DB_DIR` | `/var/lib/archive/db` | dove `/admin/archive` scrive i DB indicizzati (volume condiviso con archive-mcp) |
 | `GATEWAY_FORWARDED_ALLOW_IPS` | `127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | peer fidati per `X-Forwarded-For` |
 | `TMPDIR` | (compose: `/var/lib/uploads`) | spool degli upload su disco |
 | `VPS1777_TAG` | `dev` | versione deployata (mostrata nel footer + card Update) |

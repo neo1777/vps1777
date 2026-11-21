@@ -176,6 +176,8 @@ def _reset(monkeypatch):
         "registered_at": 0,
     }
     oauth._codes.clear()
+    # la registrazione ora RIFIUTA (503) se il client non finisce su disco: qui il disco non c'è
+    monkeypatch.setattr(oauth, "_save_clients", lambda: True)
     admin_stub.verify_admin_cookie = lambda req: "admin@x.com"
     admin_stub._csrf_token = lambda email: f"csrf-{email}"
     admin_stub._verify_csrf = lambda form, email: form.get("csrf") == "valid"
@@ -458,7 +460,7 @@ def test_token_uses_compare_digest_for_pkce():
     """Guardia H32: il confronto PKCE deve passare per hmac.compare_digest
     (constant-time), non un `==` a corto-circuito."""
     import inspect
-    src = inspect.getsource(oauth.token)
+    src = inspect.getsource(oauth._grant_code)   # lo scambio del codice, dove sta la PKCE
     assert "compare_digest" in src, "il confronto PKCE non è constant-time (H32)"
     assert "code_challenge\"] ==" not in src and "== ctx[\"code_challenge\"]" not in src
 

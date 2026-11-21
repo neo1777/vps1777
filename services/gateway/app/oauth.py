@@ -49,17 +49,34 @@ def _clients_file() -> Path:
     return Path(get_settings().audit_log_path).parent / "oauth_clients.json"
 
 
-def _scrivi_stato(f: Path, dati: Any, evento: str) -> None:
+def _scrivi_stato(f: Path, dati: Any, evento: str) -> bool:
     """Tutto o niente: temporaneo accanto, poi rinomina. Con `write_text` un arresto a metà (o
     il disco pieno) lasciava il file troncato, e al riavvio lo stato ripartiva VUOTO: i refresh
-    già ruotati tornavano validi e i connettori sparivano (giro di revisione del 21/11)."""
+    già ruotati tornavano validi e i connettori sparivano (giro di revisione del 21/11).
+
+    Torna False se lo stato NON è su disco (e lo scrive nell'audit): chi ha appena cambiato
+    qualcosa che deve sopravvivere a un riavvio (una revoca, una registrazione) lo deve sapere,
+    e rifiutare l'operazione invece di rispondere come se fosse salvata."""
     tmp = f.with_name(f".{f.name}.tmp")
     try:
         f.parent.mkdir(parents=True, exist_ok=True)
         tmp.write_text(json.dumps(dati))
         os.replace(tmp, f)
-    except Exception as exc:  # non fatale: resta in memoria per questa sessione
+    except (OSError, TypeError, ValueError) as exc:
         audit({"event": evento, "error": str(exc)})
+        return False
+    return True
+
+
+def _metti_da_parte(f: Path, perche: str) -> None:
+    """Il file che non si legge prende il nome `<nome>.illeggibile`, così la prossima scrittura
+    non lo cancella; l'audit dice che cosa è successo, anche quando la rinomina non riesce."""
+    try:
+        os.replace(f, f.with_name(f.name + ".illeggibile"))
+        esito = "messo da parte"
+    except OSError as exc:
+        esito = f"NON messo da parte ({exc})"
+    audit({"event": "oauth_state_unreadable", "file": f.name, "error": f"{perche}; {esito}"})
 
 
 def _leggi_stato(f: Path) -> tuple[Any, bool]:
@@ -71,16 +88,12 @@ def _leggi_stato(f: Path) -> tuple[Any, bool]:
     except FileNotFoundError:
         return None, False
     except OSError as exc:
-        audit({"event": "oauth_state_unreadable", "file": f.name, "error": str(exc)})
+        _metti_da_parte(f, str(exc))
         return None, True
     try:
         return json.loads(testo), False
     except ValueError as exc:
-        audit({"event": "oauth_state_unreadable", "file": f.name, "error": str(exc)})
-        try:
-            os.replace(f, f.with_name(f.name + ".illeggibile"))
-        except OSError:
-            pass
+        _metti_da_parte(f, str(exc))
         return None, True
 
 
@@ -89,8 +102,8 @@ def _load_clients() -> dict[str, dict[str, Any]]:
     return dati if isinstance(dati, dict) else {}
 
 
-def _save_clients() -> None:
-    _scrivi_stato(_clients_file(), _clients, "oauth_clients_persist_error")
+def _save_clients() -> bool:
+    return _scrivi_stato(_clients_file(), _clients, "oauth_clients_persist_error")
 
 
 def _revoked_file() -> Path:
@@ -110,32 +123,79 @@ _refresh_non_prima_di: float = 0.0
 # valida per 30 giorni (giro di revisione del 21/11/2026).
 _famiglie_revocate: set[str] = set()
 
+# Una revoca serve finché il token revocato non sarebbe scaduto da sé: dopo, lo rifiuta già la
+# firma (`exp`). Senza una scadenza i due elenchi crescevano a ogni refresh, per sempre, e il
+# file si riscriveva intero ogni volta. Qui la scadenza di ogni jti e di ogni famiglia; chi non
+# ne ha una (uno stato scritto prima) prende la vita intera di un refresh da adesso.
+_scade_jti: dict[str, float] = {}
+_scade_fam: dict[str, float] = {}
+
+
+def _vita_refresh() -> float:
+    return float(getattr(get_settings(), "oauth_refresh_token_lifetime", 2_592_000) or 2_592_000)
+
+
+def _scadenze_da(dati: Any, chiave: str) -> dict[str, float]:
+    grezzo = dati.get(chiave) if isinstance(dati, dict) else None
+    out: dict[str, float] = {}
+    for k, v in (grezzo.items() if isinstance(grezzo, dict) else ()):
+        try:
+            out[str(k)] = float(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
 
 def _load_revoked() -> set[str]:
     global _refresh_non_prima_di
     dati, illeggibile = _leggi_stato(_revoked_file())
+    tardi = time.time() + _vita_refresh()
     if isinstance(dati, dict):                       # forma dal 21/11
         _refresh_non_prima_di = float(dati.get("non_prima_di") or 0)
         _famiglie_revocate.update(str(x) for x in (dati.get("famiglie") or []))
+        _scade_fam.update(_scadenze_da(dati, "scadenze_famiglie"))
+        _scade_jti.update(_scadenze_da(dati, "scadenze"))
         dati = dati.get("revocati")
+    for fam in _famiglie_revocate:
+        _scade_fam.setdefault(fam, tardi)
     if illeggibile or (dati is not None and not isinstance(dati, list)):
         _refresh_non_prima_di = time.time()
         return set()
-    return {str(x) for x in (dati or [])}            # una lista nuda: la forma di prima
+    revocati = {str(x) for x in (dati or [])}        # una lista nuda: la forma di prima
+    for jti in revocati:
+        _scade_jti.setdefault(jti, tardi)
+    return revocati
 
 
-def _save_revoked() -> None:
-    _scrivi_stato(_revoked_file(), {"revocati": sorted(_revoked_refresh),
-                                    "famiglie": sorted(_famiglie_revocate),
-                                    "non_prima_di": _refresh_non_prima_di},
-                  "oauth_revoked_persist_error")
+def _pota_revoche(ora: float) -> None:
+    """Toglie le revoche di token ormai scaduti da sé."""
+    for jti in [j for j in _revoked_refresh if _scade_jti.get(j, ora + 1) <= ora]:
+        _revoked_refresh.discard(jti)
+    for fam in [f for f in _famiglie_revocate if _scade_fam.get(f, ora + 1) <= ora]:
+        _famiglie_revocate.discard(fam)
+    for registro, vivi in ((_scade_jti, _revoked_refresh), (_scade_fam, _famiglie_revocate)):
+        for k in [k for k in registro if k not in vivi]:
+            del registro[k]
+
+
+def _save_revoked() -> bool:
+    """Scrive lo stato delle revoche, potato. La forma si ALLARGA soltanto: `revocati` e
+    `famiglie` restano liste, come le legge la versione di prima; le scadenze stanno in chiavi
+    nuove, che la versione di prima ignora."""
+    _pota_revoche(time.time())
+    return _scrivi_stato(_revoked_file(), {"revocati": sorted(_revoked_refresh),
+                                           "famiglie": sorted(_famiglie_revocate),
+                                           "non_prima_di": _refresh_non_prima_di,
+                                           "scadenze": _scade_jti,
+                                           "scadenze_famiglie": _scade_fam},
+                         "oauth_revoked_persist_error")
 
 
 _clients: dict[str, dict[str, Any]] = _load_clients()  # client_id → metadata (persistito)
 _codes: dict[str, dict[str, Any]] = {}       # code → {...} (effimero, in-memory)
 # jti dei refresh_token già usati/revocati — PERSISTITO su disco (sopravvive ai
-# restart: una revoca deve restare tale). Cresce coi refresh; a scala personale
-# resta piccolo (i jti contano solo finché il token non sarebbe scaduto).
+# restart: una revoca deve restare tale). Ogni jti esce dall'elenco quando il suo
+# token sarebbe scaduto comunque (`_pota_revoche`).
 _revoked_refresh: set[str] = _load_revoked()
 if _refresh_non_prima_di and not _revoked_file().exists():
     _save_revoked()        # la soglia deve sopravvivere al prossimo riavvio
@@ -248,7 +308,7 @@ async def register(request: Request) -> Response:
         return JSONResponse({"error": "rate_limited"}, status_code=429)
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:      # JSON non valido o non UTF-8
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     if not isinstance(body, dict):
         return JSONResponse({"error": "invalid_request"}, status_code=400)
@@ -268,7 +328,12 @@ async def register(request: Request) -> Response:
         "registered_at": now,
         "pendente": True,   # fino al primo «Autorizza»
     }
-    _save_clients()   # persiste → sopravvive ai restart del gateway
+    if not _save_clients():
+        # non è su disco: al prossimo riavvio il client sparirebbe e il connettore, già
+        # configurato dall'altra parte, smetterebbe di funzionare senza un motivo visibile.
+        # Meglio dirlo adesso (l'errore è già nell'audit) e far riprovare.
+        _clients.pop(client_id, None)
+        return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
     dove, tipo = _destinazione(redirect_uris[0])
     audit({"event": "oauth_register", "client_id": client_id, "redirect_host": dove,
            "destinazione": tipo, "pendenti_tolti": tolti})
@@ -419,9 +484,8 @@ async def authorize(request: Request) -> Response:
         return await _authorize_decide(request)
 
     params, err = _validate_authorize_params(request.query_params)
-    if err:
-        return err
-    assert params is not None  # err è None ⇒ params valorizzato
+    if err is not None or params is None:
+        return err or JSONResponse({"error": "invalid_request"}, status_code=400)
 
     # Verifica admin cookie (se già loggato)
     from .admin import verify_admin_cookie  # import qui per evitare circular
@@ -462,9 +526,8 @@ async def _authorize_decide(request: Request) -> Response:
     # Ri-valida i parametri PRIMA di qualsiasi redirect: così non si redirige mai
     # verso un redirect_uri non registrato (open-redirect), nemmeno sul Rifiuta.
     params, err = _validate_authorize_params(form)
-    if err:
-        return err
-    assert params is not None
+    if err is not None or params is None:
+        return err or JSONResponse({"error": "invalid_request"}, status_code=400)
 
     redirect_uri = params["redirect_uri"]
     state = params["state"]
@@ -501,6 +564,9 @@ async def _authorize_decide(request: Request) -> Response:
         f"🔐 Nuovo connettore autorizzato: «{params['client_name']}» verso {dove} "
         f"({_SPIEGA[tipo].rstrip('.')}). Se non sei stato tu, revocalo da "
         f"{base}/admin/connettori"))
+    adesso = int(time.time())
+    for vecchio in [c for c, v in _codes.items() if v["expires_at"] < adesso]:
+        del _codes[vecchio]      # i codici mai scambiati non restano in memoria oltre la scadenza
     code = pysecrets.token_urlsafe(32)
     _codes[code] = {
         "client_id": params["client_id"],
@@ -549,118 +615,135 @@ def revoca_client(client_id: str, by: str) -> bool:
 # ───── token ─────
 
 async def token(request: Request) -> Response:
-    s = get_settings()
     if not _TOKEN_LIMIT.allow(_ip(request), time.time()):
         return JSONResponse({"error": "rate_limited"}, status_code=429)
     try:
         form = await request.form()
-    except Exception:
+    except Exception:  # noqa: BLE001 — il parser dei form solleva tipi suoi (multipart rotto,
+        # corpo troncato, client che chiude): per chi chiama sono tutti la stessa richiesta non valida
         return JSONResponse({"error": "invalid_request"}, status_code=400)
 
     grant_type = form.get("grant_type", "")
-
     if grant_type == "authorization_code":
-        code = str(form.get("code", ""))
-        client_id = str(form.get("client_id", ""))
-        redirect_uri = str(form.get("redirect_uri", ""))
-        code_verifier = str(form.get("code_verifier", ""))
-
-        ctx = _codes.pop(code, None)
-        if not ctx:
-            return JSONResponse({"error": "invalid_grant"}, status_code=400)
-        if client_id not in _clients:   # revocato fra il consenso e lo scambio
-            return JSONResponse({"error": "invalid_client"}, status_code=400)
-        if ctx["expires_at"] < int(time.time()):
-            return JSONResponse({"error": "invalid_grant", "reason": "expired"}, status_code=400)
-        if ctx["client_id"] != client_id or ctx["redirect_uri"] != redirect_uri:
-            return JSONResponse({"error": "invalid_grant", "reason": "mismatch"}, status_code=400)
-
-        # PKCE check — constant-time (H32). Il code_verifier è il segreto che il
-        # client presenta al posto di un client_secret; confrontarlo con un `!=`
-        # a corto-circuito trapelerebbe via timing la lunghezza del prefisso
-        # corretto dell'hash atteso. hmac.compare_digest confronta in tempo
-        # costante (entrambi ASCII base64url).
-        expected = _b64url_sha256(code_verifier)
-        if not hmac.compare_digest(expected, str(ctx["code_challenge"])):
-            return JSONResponse({"error": "invalid_grant", "reason": "pkce"}, status_code=400)
-
-        access = issue(
-            typ="access", sub=ctx["sub"], aud=client_id,
-            ttl=s.oauth_access_token_lifetime,
-        )
-        refresh_jti = pysecrets.token_urlsafe(16)
-        refresh = issue(
-            typ="refresh", sub=ctx["sub"], aud=client_id,
-            ttl=s.oauth_refresh_token_lifetime,
-            extra={"jti": refresh_jti, "fam": pysecrets.token_urlsafe(12)},
-        )
-        audit({"event": "oauth_access_issued", "sub": ctx["sub"], "client_id": client_id})
-        return JSONResponse({
-            "access_token": access,
-            "token_type": "Bearer",
-            "expires_in": s.oauth_access_token_lifetime,
-            "refresh_token": refresh,
-        })
-
+        return _grant_code(form)
     if grant_type == "refresh_token":
-        rt = str(form.get("refresh_token", ""))
-        client_id = str(form.get("client_id", ""))
-        if client_id not in _clients:
-            # revocato da /admin/connettori: il refresh muore qui, e con lui il connettore
-            audit({"event": "oauth_refresh_revoked_client", "client_id": client_id})
-            return JSONResponse({"error": "invalid_client"}, status_code=400)
-        try:
-            claims = verify(rt, expected_typ="refresh", expected_aud=client_id)
-        except JWTError:
-            return JSONResponse({"error": "invalid_grant"}, status_code=400)
-        jti = claims.get("jti", "")
-        if float(claims.get("iat") or 0) < _refresh_non_prima_di:
-            audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
-                   "reason": "prima_della_soglia"})
-            return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
-        fam = str(claims.get("fam") or "")
-        if fam and fam in _famiglie_revocate:
-            audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
-                   "reason": "famiglia_revocata"})
-            return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
-        if jti in _revoked_refresh:
-            # REUSE DETECTION (OAuth 2.1 BCP): un refresh già ruotato/revocato
-            # ripresentato = segnale di furto → rifiuta, REVOCA LA FAMIGLIA e logga.
-            audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
-                   "reason": "famiglia_revocata" if fam else "riuso"})
-            if fam:
-                _famiglie_revocate.add(fam)
-                _save_revoked()
-            # il proprietario lo deve sapere: o un refresh è stato copiato, o un client ha
-            # riprovato dopo una risposta persa. In tutti e due i casi il connettore va
-            # ricollegato (una nuova autorizzazione): la catena di prima non vale più.
-            nome = _nome_client((_clients.get(client_id) or {}).get("client_name"))
-            notifiche.accoda("oauth_refresh_riuso",
-                             f"⚠️ Un connettore ({nome}) ha ripresentato un refresh token già "
-                             "usato: l'ho rifiutato e ho chiuso quella sessione del connettore, "
-                             "che va ricollegato. Se non te lo aspetti, revocalo del tutto in "
-                             "/admin/connettori.")
-            return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
-        sub = claims.get("sub", "")
-        # ROTAZIONE: revoca (durevolmente) il refresh appena usato ed emettine uno
-        # nuovo. Così un token rubato ha vita corta e il riuso si rileva.
-        _revoked_refresh.add(jti)
-        _save_revoked()
-        access = issue(typ="access", sub=sub, aud=client_id, ttl=s.oauth_access_token_lifetime)
-        new_jti = pysecrets.token_urlsafe(16)
-        # la famiglia segue la catena; un refresh di prima del 21/11 non ne ha una: nasce qui
-        new_refresh = issue(typ="refresh", sub=sub, aud=client_id,
-                            ttl=s.oauth_refresh_token_lifetime,
-                            extra={"jti": new_jti, "fam": fam or pysecrets.token_urlsafe(12)})
-        audit({"event": "oauth_refresh_rotated", "sub": sub, "client_id": client_id})
-        return JSONResponse({
-            "access_token": access,
-            "token_type": "Bearer",
-            "expires_in": s.oauth_access_token_lifetime,
-            "refresh_token": new_refresh,
-        })
-
+        return _grant_refresh(form)
     return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
+
+
+def _grant_code(form: Any) -> Response:
+    """Lo scambio del codice di autorizzazione (con PKCE) per la prima coppia di token."""
+    s = get_settings()
+    code = str(form.get("code", ""))
+    client_id = str(form.get("client_id", ""))
+    redirect_uri = str(form.get("redirect_uri", ""))
+    code_verifier = str(form.get("code_verifier", ""))
+
+    ctx = _codes.pop(code, None)
+    if not ctx:
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+    if client_id not in _clients:   # revocato fra il consenso e lo scambio
+        return JSONResponse({"error": "invalid_client"}, status_code=400)
+    if ctx["expires_at"] < int(time.time()):
+        return JSONResponse({"error": "invalid_grant", "reason": "expired"}, status_code=400)
+    if ctx["client_id"] != client_id or ctx["redirect_uri"] != redirect_uri:
+        return JSONResponse({"error": "invalid_grant", "reason": "mismatch"}, status_code=400)
+
+    # PKCE check — constant-time (H32). Il code_verifier è il segreto che il
+    # client presenta al posto di un client_secret; confrontarlo con un `!=`
+    # a corto-circuito trapelerebbe via timing la lunghezza del prefisso
+    # corretto dell'hash atteso. hmac.compare_digest confronta in tempo
+    # costante (entrambi ASCII base64url).
+    expected = _b64url_sha256(code_verifier)
+    if not hmac.compare_digest(expected, str(ctx["code_challenge"])):
+        return JSONResponse({"error": "invalid_grant", "reason": "pkce"}, status_code=400)
+
+    access = issue(
+        typ="access", sub=ctx["sub"], aud=client_id,
+        ttl=s.oauth_access_token_lifetime,
+    )
+    refresh_jti = pysecrets.token_urlsafe(16)
+    refresh = issue(
+        typ="refresh", sub=ctx["sub"], aud=client_id,
+        ttl=s.oauth_refresh_token_lifetime,
+        extra={"jti": refresh_jti, "fam": pysecrets.token_urlsafe(12)},
+    )
+    audit({"event": "oauth_access_issued", "sub": ctx["sub"], "client_id": client_id})
+    return JSONResponse({
+        "access_token": access,
+        "token_type": "Bearer",
+        "expires_in": s.oauth_access_token_lifetime,
+        "refresh_token": refresh,
+    })
+
+
+def _grant_refresh(form: Any) -> Response:
+    """Il rinnovo: verifica il refresh, lo ruota e riconosce il riuso."""
+    s = get_settings()
+    rt = str(form.get("refresh_token", ""))
+    client_id = str(form.get("client_id", ""))
+    if client_id not in _clients:
+        # revocato da /admin/connettori: il refresh muore qui, e con lui il connettore
+        audit({"event": "oauth_refresh_revoked_client", "client_id": client_id})
+        return JSONResponse({"error": "invalid_client"}, status_code=400)
+    try:
+        claims = verify(rt, expected_typ="refresh", expected_aud=client_id)
+    except JWTError:
+        return JSONResponse({"error": "invalid_grant"}, status_code=400)
+    jti = claims.get("jti", "")
+    if float(claims.get("iat") or 0) < _refresh_non_prima_di:
+        audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
+               "reason": "prima_della_soglia"})
+        return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
+    fam = str(claims.get("fam") or "")
+    if fam and fam in _famiglie_revocate:
+        audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
+               "reason": "famiglia_revocata"})
+        return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
+    if jti in _revoked_refresh:
+        # REUSE DETECTION (OAuth 2.1 BCP): un refresh già ruotato/revocato
+        # ripresentato = segnale di furto → rifiuta, REVOCA LA FAMIGLIA e logga.
+        audit({"event": "oauth_refresh_reuse", "client_id": client_id, "jti": jti,
+               "reason": "famiglia_revocata" if fam else "riuso"})
+        if fam:
+            _famiglie_revocate.add(fam)
+            _scade_fam[fam] = time.time() + _vita_refresh()
+            _save_revoked()      # se non si scrive resta in memoria, e l'audit lo dice
+        # il proprietario lo deve sapere: o un refresh è stato copiato, o un client ha
+        # riprovato dopo una risposta persa. In tutti e due i casi il connettore va
+        # ricollegato (una nuova autorizzazione): la catena di prima non vale più.
+        nome = _nome_client((_clients.get(client_id) or {}).get("client_name"))
+        notifiche.accoda("oauth_refresh_riuso",
+                         f"⚠️ Un connettore ({nome}) ha ripresentato un refresh token già "
+                         "usato: l'ho rifiutato e ho chiuso quella sessione del connettore, "
+                         "che va ricollegato. Se non te lo aspetti, revocalo del tutto in "
+                         "/admin/connettori.")
+        return JSONResponse({"error": "invalid_grant", "reason": "revoked"}, status_code=400)
+    sub = claims.get("sub", "")
+    # ROTAZIONE: revoca (durevolmente) il refresh appena usato ed emettine uno
+    # nuovo. Così un token rubato ha vita corta e il riuso si rileva.
+    _revoked_refresh.add(jti)
+    _scade_jti[jti] = float(claims.get("exp") or time.time() + _vita_refresh())
+    if not _save_revoked():
+        # La revoca non è su disco: se emettessi il refresh nuovo, dopo un riavvio quello appena
+        # usato tornerebbe valido, e un refresh copiato con lui. Senza scrittura niente
+        # rotazione: il client tiene il suo refresh e riprova (l'errore è già nell'audit).
+        _revoked_refresh.discard(jti)
+        _scade_jti.pop(jti, None)
+        return JSONResponse({"error": "temporarily_unavailable"}, status_code=503)
+    access = issue(typ="access", sub=sub, aud=client_id, ttl=s.oauth_access_token_lifetime)
+    new_jti = pysecrets.token_urlsafe(16)
+    # la famiglia segue la catena; un refresh di prima del 21/11 non ne ha una: nasce qui
+    new_refresh = issue(typ="refresh", sub=sub, aud=client_id,
+                        ttl=s.oauth_refresh_token_lifetime,
+                        extra={"jti": new_jti, "fam": fam or pysecrets.token_urlsafe(12)})
+    audit({"event": "oauth_refresh_rotated", "sub": sub, "client_id": client_id})
+    return JSONResponse({
+        "access_token": access,
+        "token_type": "Bearer",
+        "expires_in": s.oauth_access_token_lifetime,
+        "refresh_token": new_refresh,
+    })
 
 
 def _b64url_sha256(s: str) -> str:

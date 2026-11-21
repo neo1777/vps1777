@@ -47,7 +47,7 @@ def _int_or_zero(value: object) -> int:
     if value is None or value == "":
         return 0
     try:
-        return int(value)  # type: ignore[arg-type]
+        return int(value)  # type: ignore[arg-type]  # `object`: ciò che int() non regge cade nell'except
     except (ValueError, TypeError):
         return 0
 
@@ -174,8 +174,9 @@ class Settings(BaseSettings):
     # NON ha bisogno del token intero — e non montarlo è tutto il punto del rilievo:
     # il token intero permette di parlare come il bot fuori dal perimetro del gateway,
     # la chiave derivata no (la derivazione è a senso unico).
-    # Misurato prima di scriverla: il gateway non chiama MAI l'API di Telegram —
-    # zero occorrenze di api.telegram.org, sendMessage, getUpdates in services/gateway/.
+    # Misurato prima di scriverla: il gateway non chiama MAI l'API di Telegram. Lo
+    # ricontrolla a ogni corsa `tests/test_prova_a_fetta01.py`
+    # (`test_il_gateway_non_chiama_telegram`: l'host dell'API non sta in nessuna stringa usata).
     # L'unico uso a runtime era derivare questa chiave e verificare una firma.
     # Facoltativa di proposito: senza, tutto funziona come prima. Migrare è una
     # decisione di chi possiede la macchina, non un effetto collaterale di un update.

@@ -36,7 +36,7 @@ from starlette.requests import Request
 from starlette.responses import (HTMLResponse, JSONResponse, RedirectResponse, Response,
                                  StreamingResponse)
 
-from .audit import audit, audit_health, read_recent
+from .audit import audit, audit_health, leggi_recenti
 from .jwt_helpers import JWTError, issue, verify
 from .security import verify_admin_password
 from .settings import get_settings
@@ -1443,7 +1443,7 @@ async def audit_view(request: Request) -> Response:
     # sta in admin_core (stdlib-only, testata); qui il vestito: le chips per tipo
     # con il conto, il rumore nascosto di default e dichiarato.
     tipo = request.query_params.get("tipo", "").strip()[:64]
-    tutti = read_recent(admin_core.AUDIT_LETTURA)
+    tutti, lettura = leggi_recenti(admin_core.AUDIT_LETTURA)
     events, conteggi, nascosti = admin_core.filtra_audit(tutti, tipo)
     rows: list[str] = []
     for e in reversed(events):
@@ -1470,6 +1470,13 @@ async def audit_view(request: Request) -> Response:
             f'{health["write_failures"]} scritture fallite — gli eventi che vedi '
             f'potrebbero essere incompleti</div>'
         )
+    # e la LETTURA: righe rotte saltate, o un file che c'è ma non si legge
+    if lettura["illeggibile"]:
+        health_html += (f'<div class="kicker" style="color:var(--err)">⚠ il registro non si legge: '
+                        f'{html.escape(lettura["illeggibile"])}</div>')
+    if lettura["scartate"]:
+        health_html += (f'<div class="kicker" style="color:var(--err)">⚠ {lettura["scartate"]} righe '
+                        'del registro non sono leggibili e non compaiono qui sotto</div>')
     body = f"""
 <header>
   <h1>vps1777 <em>admin</em> · audit</h1>

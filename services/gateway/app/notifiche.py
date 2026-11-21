@@ -27,11 +27,30 @@ def _file() -> Path:
 
 
 def _leggi() -> list[dict[str, Any]]:
+    """La coda. Un file ASSENTE è una coda vuota; un file che c'è ma non si legge, o che non è
+    una lista, NON lo è: si dice nell'audit e si mette da parte (`.illeggibile`), perché la
+    prossima scrittura lo cancellerebbe senza traccia."""
+    f = _file()
     try:
-        dati = json.loads(_file().read_text())
-    except (OSError, ValueError):
+        testo = f.read_text()
+    except FileNotFoundError:
         return []
-    return [x for x in dati if isinstance(x, dict)] if isinstance(dati, list) else []
+    except OSError as exc:
+        audit({"event": "notifiche_unreadable", "error": str(exc)})
+        return []
+    try:
+        dati = json.loads(testo)
+        if not isinstance(dati, list):
+            raise ValueError("la coda non è una lista")
+    except ValueError as exc:
+        try:
+            os.replace(f, f.with_name(f.name + ".illeggibile"))
+            esito = "messa da parte"
+        except OSError as exc2:
+            esito = f"non messa da parte ({exc2})"
+        audit({"event": "notifiche_unreadable", "error": f"{exc}; {esito}"})
+        return []
+    return [x for x in dati if isinstance(x, dict)]
 
 
 def _scrivi(items: list[dict[str, Any]]) -> None:

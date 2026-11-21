@@ -474,7 +474,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** Gli 93 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 94 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -485,7 +485,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **93 voci** (2 critiche, 16 alte, 55 medie, 20 basse): 43 dalla
+Il registro conta **94 voci** (2 critiche, 16 alte, 55 medie, 21 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -534,11 +534,14 @@ del messaggio delle pagine admin entrava nell'HTML senza escape, e un backup usc
 quando un volume non si era salvato.
 E sei (`H88`-`H93`, 21/11) sono i rilievi di sicurezza dello stesso giro rimasti aperti dopo la prima
 release, chiusi insieme prima di far leggere il repo a un revisore esterno.
+E una (`H94`, 21/11) viene da quella lettura esterna: il gateway riletto applicando un catalogo di
+requisiti con due modelli diversi. La rotazione di un refresh proseguiva anche quando la revoca
+di quello usato non era arrivata su disco.
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 79 |
+| **chiusi** | 80 |
 | **parziali** | 10 |
 | **accettati** | 4 |
 | **aperti** | 0 |
