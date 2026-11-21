@@ -72,6 +72,10 @@ log = logging.getLogger(__name__)
 # perché un interruttore che si spegne da solo (variabile assente, errore di lettura) è
 # un presidio che non c'è.
 ATTIVA = os.getenv("ARCHIVE_REDACT", "1").strip().lower() not in ("0", "false", "no")
+if not ATTIVA:
+    # «rumorosa» va mantenuto: senza questa riga lo spegnimento non lasciava traccia
+    log.warning("REDAZIONE SPENTA (ARCHIVE_REDACT=%s): le risposte escono senza maschera",
+                os.getenv("ARCHIVE_REDACT"))
 
 EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]{2,}\b")
 # Telefono: prefisso internazionale opzionale, 8-14 cifre con separatori. Richiede o il

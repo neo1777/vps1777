@@ -158,3 +158,29 @@ def test_un_db_mai_letto_e_in_scrittura_non_entra_nel_perimetro_di_default(db):
     _in_scrittura(cartella, "a")
     assert modulo._ruolo("a") == "riservato"
     assert [r["db"] for r in modulo.search("memoria")] == ["b"]
+
+
+# ── dalle corse di revisione del 21/11 (Kimi e Claude sul codice della 0.95.2) ──
+
+def test_i_tetti_dei_parametri_di_lettura(db):
+    modulo, _ = db
+    assert modulo._entro(-1, 0, 200) == 0 and modulo._entro(10**9, 0, 200) == 200
+    assert modulo._entro("abc", 1, 5) == 1
+    # `before=-1` diventava `LIMIT -1`: tutto il project col testo pieno
+    righe = modulo.get_context("u-a", db="a", before=-1, after=-1)
+    assert [r["uuid"] for r in righe] == ["u-a"]
+
+
+def test_un_ruolo_gia_letto_non_si_perde_se_il_db_non_si_legge_per_un_attimo(db, monkeypatch):
+    modulo, cartella = db
+    c = sqlite3.connect(cartella / "a.db")
+    c.execute("UPDATE meta SET value='riservato' WHERE key='ruolo'")
+    c.commit()
+    c.close()
+    assert modulo._ruolo("a") == "riservato"
+
+    def bloccato(conn, chiave):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(modulo.fts, "meta_value_conn", bloccato)
+    (cartella / "a.db").touch()                       # lo snapshot cambia: il memo non vale più
+    assert modulo._ruolo("a") == "riservato"          # e non «non dichiarato»

@@ -100,8 +100,8 @@ def _snapshot(path: Path) -> str:
     """Data di ultima modifica del file DB (ISO, UTC) — la 'freschezza' del DB:
     ogni risposta la porta, così una sessione sa quanto è vecchio ciò che legge."""
     try:
-        return datetime.datetime.utcfromtimestamp(
-            path.stat().st_mtime).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return datetime.datetime.fromtimestamp(
+            path.stat().st_mtime, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     except OSError:
         return ""
 
@@ -329,9 +329,10 @@ def _cache_conn() -> dict[str, sqlite3.Connection]:
     if conns is None or getattr(_LOCALE, "sig", None) != sig:
         for c in (conns or {}).values():
             try:
-                c._chiudi_davvero()      # type: ignore[attr-defined]
-            except sqlite3.Error:
-                pass
+                c._chiudi_davvero()      # type: ignore[attr-defined]  # metodo di _Persistente
+            except sqlite3.Error as exc:
+                # una connessione già morta non si chiude: non è un guasto, ma si annota
+                log.debug("chiusura di una connessione in cache fallita: %s", exc)
         conns = {}
         _LOCALE.conns = conns
         _LOCALE.sig = sig
@@ -415,8 +416,14 @@ def _ruolo(name: str) -> str:
     try:
         ruolo = fts.meta_value_conn(conn, "ruolo") or RUOLO_NON_DICHIARATO
     except sqlite3.DatabaseError:
-        # anche «file is not a database»: il DB resta nel perimetro, e lì chi lo legge
-        # lo dichiara non letto (`saltati`) invece di rompere la ricerca per tutti
+        # Il ruolo non si è potuto leggere. Se lo si era già letto vale quello (il ruolo non
+        # cambia perché il DB è bloccato per un attimo: prima un DB riservato diventava «non
+        # dichiarato» ed entrava nel perimetro di default). Mai letto: resta «non dichiarato»,
+        # cioè nel perimetro, dove chi lo legge lo dichiara NON LETTO (`saltati`) invece di
+        # farlo sparire in silenzio: un file che non si apre non può esporre niente.
+        if ricordo is not None:
+            conn.close()
+            return ricordo[1]
         ruolo = RUOLO_NON_DICHIARATO
     finally:
         conn.close()
@@ -505,6 +512,20 @@ def integrita_archivi(db: str = "") -> dict[str, Any]:
 # F0-C3 del 27/09): con -1 `collected[:-1]` perdeva IN SILENZIO l'ultimo risultato, con 0
 # non tornava niente senza dire perché, con un numero enorme la risposta non aveva misura.
 LIMITE_MASSIMO = 200
+# I tetti dei tool di LETTURA (21/11/2026): `before`, `after`, `limit` e `top` arrivavano a SQL
+# com'erano. `before=-1` diventava `LIMIT -1` (tutto il project col testo pieno), un valore
+# enorme una risposta senza fine, `k_rrf=-1` una divisione per zero.
+CONTESTO_MASSIMO = 200          # righe prima/dopo in get_context
+LETTURA_MASSIMO = 2000          # righe di get_conversation, get_session, get_stirpe
+PROGETTI_MASSIMO = 5000         # etichette per DB in list_projects
+
+
+def _entro(valore: Any, minimo: int, massimo: int) -> int:
+    try:
+        v = int(valore)
+    except (TypeError, ValueError):
+        v = minimo
+    return max(minimo, min(v, massimo))
 
 
 def _limite(limit: int, massimo: int = LIMITE_MASSIMO) -> int:
@@ -942,6 +963,7 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     for lf, lv in zip(fts_per_testo, vec_per_testo):
         liste.append(([c for _, _, c in sorted(lf, key=lambda x: (x[0], x[1]))], peso_fts))
         liste.append(([c for _, _, c in sorted(lv, key=lambda x: (x[0], x[1]))], 1.0))
+    k_rrf = _entro(k_rrf, 1, 1000)
     fusi = semantica.fondi_rrf_liste(liste, k=k_rrf)
     # Lo stesso uuid vive in più DB (bundle e fotografie): come in `search` (#272) si
     # tiene la prima occorrenza nell'ordine della fusione, e gli altri DB vanno in
@@ -1167,6 +1189,7 @@ def _conta_fuori(nomi: list[str], query: str, budget: _Budget,
         try:
             conn = _open(name)
         except KeyError:
+            non_contati.append(name)      # sparito a metà: non contato, e lo si dice
             continue
         except ArchivioSporco as exc:
             _nota_sporco(name, exc)
@@ -1205,6 +1228,7 @@ def check_term(term: str, db: str = "", *, ruoli: str = "") -> dict[str, Any]:
         try:
             conn = _open(name)
         except KeyError:
+            saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
             continue
         except ArchivioSporco as exc:
             _nota_sporco(name, exc, saltati)
@@ -1300,6 +1324,7 @@ def get_context(uuid: str, db: str = "", *, before: int = 3,
                 after: int = 3, max_chars: int = 0) -> list[dict[str, Any]]:
     """I messaggi attorno a uno `uuid` col contenuto PIENO — supera il
     troncamento dello snippet di search. Cerca nel DB indicato o in tutti."""
+    before, after = _entro(before, 0, CONTESTO_MASSIMO), _entro(after, 0, CONTESTO_MASSIMO)
     _maybe_reload()
     for name in _targets(db):
         try:
@@ -1334,6 +1359,7 @@ def get_conversation(uuid: str, db: str = "", *, limit: int = 200,
                      max_chars: int = 0) -> list[dict[str, Any]]:
     """Il thread INTERO che contiene `uuid` (camminando parent_uuid), col contenuto
     pieno. Cerca il DB che contiene l'uuid, o in tutti."""
+    limit = _entro(limit, 1, LETTURA_MASSIMO)
     _maybe_reload()
     for name in _targets(db):
         try:
@@ -1477,7 +1503,7 @@ def precedenti(tema: str, db: str = "", limit: int = 30, *,
                            "righe_totali": len(trovato["righe"]),
                            "indici": trovato.get("indici", []),
                            "parametri": trovato.get("parametri", {})}
-    for chiave in ("saltati", "fuori_perimetro", "senza_indice"):
+    for chiave in ("saltati", "fuori_perimetro", "senza_indice", "parziale"):
         if trovato.get(chiave):
             out[chiave] = trovato[chiave]
     note = []
@@ -1608,6 +1634,7 @@ def delta(vecchio: str, nuovo: str, *, limit: int = DELTA_ESEMPI,
 def list_projects(db: str = "", *, top: int = 1000) -> list[dict[str, Any]]:
     """Le etichette `project` (con conteggi) per DB — per NAVIGARE l'archivio, non
     solo cercarlo. Su più DB i risultati portano `db` e sono ordinati per conteggio."""
+    top = _entro(top, 1, PROGETTI_MASSIMO)
     _maybe_reload()
     out: list[dict[str, Any]] = []
     for name in _targets(db):
@@ -1718,8 +1745,10 @@ def describe() -> list[dict[str, Any]]:
                 info["ruolo"] = (fts.meta_value_conn(conn, "ruolo")
                                  or RUOLO_NON_DICHIARATO)
             except sqlite3.DatabaseError:
+                # `non_letto`: zero righe qui NON vuol dire DB vuoto, vuol dire che non si è
+                # potuto leggere (prima le due cose erano indistinguibili)
                 info = {"rows": 0, "oldest": "", "newest": "", "labels": 0,
-                        "description": "", "ruolo": RUOLO_NON_DICHIARATO}
+                        "description": "", "ruolo": RUOLO_NON_DICHIARATO, "non_letto": True}
             finally:
                 conn.close()
             _STATS_MEMO[name] = (snap, dict(info))
@@ -1950,6 +1979,7 @@ def get_session(session_id: str, db: str = "", *, limit: int = 200,
     """La scheda di una sessione (id intero o prefisso ≥ 8 univoco) dal DB più
     aggiornato che la conosce. Serializzata col semaforo delle ricerche (#270): il
     conteggio passa dagli avvistamenti, che si scandiscono."""
+    limit = _entro(limit, 1, LETTURA_MASSIMO)
     sid, scelto, altri = _risolvi_sessione(session_id, db)
     conn = _open(scelto)
     try:
@@ -1968,6 +1998,7 @@ def get_stirpe(session_id: str, db: str = "", *, limit: int = 200,
                max_chars: int = 0) -> dict[str, Any]:
     """La stirpe di una sessione (chiusura sugli archi con chiusura=1) dal DB più
     aggiornato che la conosce."""
+    limit = _entro(limit, 1, LETTURA_MASSIMO)
     sid, scelto, altri = _risolvi_sessione(session_id, db)
     conn = _open(scelto)
     try:

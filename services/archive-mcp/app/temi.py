@@ -98,7 +98,11 @@ def scambi_di(db: Path, indice: Path, nome: str) -> list[dict[str, Any]]:
 
     Un DB senza assistente (i vocali) non ha scambi: l'unità è il messaggio da solo."""
     c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    v = sqlite3.connect(f"file:{indice}?mode=ro", uri=True)
+    try:
+        v = sqlite3.connect(f"file:{indice}?mode=ro", uri=True)
+    except sqlite3.Error:
+        c.close()                # se l'indice non si apre, il DB non resta aperto
+        raise
     try:
         con_assistente = c.execute(
             "SELECT 1 FROM messages WHERE speaker='assistant' LIMIT 1").fetchone() is not None
@@ -376,6 +380,8 @@ def stato_del_tema(tema: dict[str, Any], marchi: dict[str, str]) -> str:
     m = marchi.get(str(tema.get("id")))
     if m in ("libero", "riservato"):
         return m
+    if m is not None:
+        return "riservato"      # un marchio che non si capisce chiude, non apre
     return "da_guardare" if tema.get("da_guardare") else "libero"
 
 

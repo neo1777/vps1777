@@ -188,6 +188,13 @@ def apri_modello(model_dir: Path, *, thread: int = 2) -> tuple[Any, Any]:
             f"Runtime di embedding non installato nell'immagine ({exc}). "
             "Attese: onnxruntime, tokenizers."
         ) from exc
+    # onnxruntime ≥ 1.32 porta una telemetria (nel log: «Failed to persist telemetry device
+    # ID»). Questo container non ha uscita su Internet e il job notturno non ha rete, quindi
+    # non partirebbe niente comunque: la si spegne lo stesso, perché «non può uscire» è una
+    # proprietà della rete e «non ci prova» è una proprietà nostra.
+    spegni = getattr(ort, "disable_telemetry_events", None)
+    if callable(spegni):
+        spegni()
     opts = ort.SessionOptions()
     # Il server ne usa 2 (vedi `_carica_modello`); il costruttore, sul PC, tutti.
     opts.intra_op_num_threads = thread
