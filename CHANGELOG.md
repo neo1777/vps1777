@@ -4,6 +4,47 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+**Il gateway riletto riga per riga con un catalogo di requisiti: trentacinque correzioni fra OAuth, proxy e audit.**
+Due modelli diversi hanno applicato lo stesso catalogo alla prima fetta del codice (OAuth, proxy, rotte); ogni loro
+rilievo è stato riletto sul codice prima di toccare qualcosa.
+
+### Sicurezza
+- **Senza scrittura su disco niente rotazione del refresh (H94).** Se la revoca del refresh appena usato non si
+  riusciva a salvare (disco pieno), il gateway emetteva lo stesso quello nuovo: dopo un riavvio il vecchio tornava
+  valido. Ora risponde 503 e il client riprova; lo stesso per una registrazione di connettore non salvata.
+- **Il freno dell'audit copre anche le rotte interne (completa H88).** I rifiuti di `/internal/*` raggiunti da fuori
+  e i `/token` con un client sconosciuto scrivevano una riga a richiesta. E con `AUDIT_RETENTION_DAYS=0` il tetto di
+  20 MB non veniva applicato.
+- **Il segreto di firma dei token deve avere almeno 32 byte.** Quello generato dall'installer ne ha 48; un valore
+  corto messo a mano ora viene rifiutato, con un avviso all'avvio.
+- **Il confronto del segreto nell'URL usa `hmac.compare_digest`**: quello fatto in casa lasciava misurare la
+  lunghezza.
+- **L'indirizzo dell'admin non compare più nel log di avvio.**
+
+### Cambiato
+- **Un servizio lento non blocca più tutto il gateway.** Ogni upstream può tenere al più il 40% delle connessioni
+  (`GATEWAY_LIMIT_CONCURRENCY`); oltre, la richiesta riceve subito 503 con `Retry-After`. Il corpo di una richiesta
+  deve arrivare entro 120 secondi.
+- **L'elenco dei refresh revocati non cresce più per sempre**: ogni revoca esce quando il suo token sarebbe scaduto
+  comunque. Il file si allarga soltanto (chiavi nuove `scadenze`), quindi la 0.96.0 lo legge ancora.
+- **La pagina dell'audit dice se ci sono righe illeggibili** o se il registro non si legge, invece di mostrare un
+  elenco più corto; la Mini App riceve gli stessi due campi. La potatura conta le righe rotte che toglie.
+- Un batch con centinaia di chiamate a tool lascia nell'audit le prime 20 righe e un conteggio.
+- Il limitatore per IP ha un tetto alle chiavi in memoria (20.000).
+
+### Corretto
+- La connessione verso l'upstream si chiude anche quando il client se ne va prima che la risposta cominci.
+- Uno stato OAuth o una coda degli avvisi che c'è ma non si legge viene messo da parte e detto nell'audit, in ogni
+  caso (prima, su un errore di lettura, la scrittura successiva lo sovrascriveva).
+- `/internal/archive/*` con un corpo JSON che non è un oggetto risponde 400 invece di un errore interno.
+- I codici di autorizzazione mai scambiati escono dalla memoria alla scadenza.
+- Otto variabili del gateway mancavano dalla tabella del suo README; un test ora confronta le due liste.
+
+### Da sapere
+- **Tornare a una versione precedente alla 0.95.0 fa perdere l'elenco dei refresh revocati**: dalla 0.95.0 il file
+  ha una forma che le versioni più vecchie leggono come vuota. Dopo un ritorno così indietro conviene revocare i
+  connettori da `/admin/connettori` e ricollegarli.
+
 ## [0.96.0] — 2026-11-21
 
 **I sei rilievi di sicurezza rimasti aperti dal giro di revisione sono chiusi (H88-H93).**

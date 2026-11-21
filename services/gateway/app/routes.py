@@ -44,7 +44,7 @@ async def health(request: Request) -> JSONResponse:
                     asyncio.open_connection(host, int(port)), timeout=3,
                 )
                 writer.close()
-                await writer.wait_closed()
+                await asyncio.wait_for(writer.wait_closed(), timeout=3)
                 checks[name] = True
             except (OSError, asyncio.TimeoutError, ValueError):
                 checks[name] = False
@@ -181,7 +181,9 @@ async def internal_archive_description(request: Request) -> JSONResponse:
 
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:      # JSON non valido o non UTF-8
+        return JSONResponse({"error": "bad_json"}, status_code=400)
+    if not isinstance(body, dict):
         return JSONResponse({"error": "bad_json"}, status_code=400)
     db = str(body.get("db", ""))
     desc = str(body.get("description", ""))
@@ -224,7 +226,9 @@ async def internal_archive_ruolo(request: Request) -> JSONResponse:
 
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:      # JSON non valido o non UTF-8
+        return JSONResponse({"error": "bad_json"}, status_code=400)
+    if not isinstance(body, dict):
         return JSONResponse({"error": "bad_json"}, status_code=400)
     db = str(body.get("db", ""))
     ruolo = str(body.get("ruolo", "")).strip().lower()

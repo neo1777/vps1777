@@ -53,7 +53,8 @@ def test_la_soglia_sopravvive_al_salvataggio(stato, monkeypatch):
     monkeypatch.setattr(oauth, "_revoked_refresh", {"x"})
     oauth._save_revoked()
     assert json.loads((cartella / "oauth_revoked.json").read_text()) == {
-        "revocati": ["x"], "famiglie": [], "non_prima_di": 1234.0}
+        "revocati": ["x"], "famiglie": [], "non_prima_di": 1234.0,
+        "scadenze": {}, "scadenze_famiglie": {}}
     monkeypatch.setattr(oauth, "_refresh_non_prima_di", 0.0)
     assert oauth._load_revoked() == {"x"} and oauth._refresh_non_prima_di == 1234.0
     assert [p.name for p in cartella.iterdir()] == ["oauth_revoked.json"]   # nessun .tmp

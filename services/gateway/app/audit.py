@@ -53,15 +53,21 @@ _next_prune_at = _PRUNE_SIZE
 # La potatura toglieva solo le righe più vecchie della retention: dentro i 90 giorni il file
 # cresceva senza limite, e ogni richiesta anonima con un segreto sbagliato ne scriveva una riga
 # (`proxy_secret_mismatch`), senza freno. Una raffica riempiva il volume del gateway; sopra i
-# 5 MB ogni megabyte in più faceva riscrivere il file INTERO dentro la richiesta (618 ms a 42 MB).
+# 5 MB ogni megabyte in più faceva riscrivere il file INTERO dentro la richiesta (misurato il
+# 21/11/2026 su un file di prova da 42 MB: 618 ms per una potatura, cronometrando `_prune`).
 # Tre cure: (1) il file non supera `_MAX_BYTES`: oltre, si tiene la CODA (le righe più nuove) e
 # si scrive quante ne sono andate; (2) gli eventi che chiunque può provocare da fuori hanno un
 # tetto al minuto, e quelli in più si CONTANO in una riga sola; (3) la potatura si rifà quando
 # il file è cresciuto di metà, non di 1 MB: il costo resta ammortizzato.
 _MAX_BYTES = 20 * 1024 * 1024
 _TIENI_DOPO_TAGLIO = 0.6            # dopo un taglio per dimensione resta il 60% del tetto
+# Dentro ci sta ogni evento che si provoca SENZA credenziali valide. I tre `*_denied` sono le rotte
+# native `/internal/*` del gateway: Caddy inoltra tutto, quindi da fuori si raggiungono (e cadono
+# sull'IP non interno), una riga a richiesta. `oauth_refresh_revoked_client` è `/token` con un
+# client_id qualunque. `proxy_upstream_busy` vuole un bearer, ma sotto carico è una riga a rifiuto.
 _ANONIMI = frozenset({"proxy_secret_mismatch", "proxy_internal_blocked", "proxy_unknown_service",
-                      "proxy_auth_fail"})
+                      "proxy_auth_fail", "archive_desc_denied", "archive_ruolo_denied",
+                      "notifiche_denied", "oauth_refresh_revoked_client", "proxy_upstream_busy"})
 _ANONIMI_AL_MINUTO = 60
 _finestra_anonimi: dict[str, Any] = {"minuto": "", "visti": 0, "soppressi": 0}
 
@@ -98,9 +104,15 @@ def _prune(path: Path, retention_days: int) -> None:
 
     Streaming riga-per-riga su un file temporaneo: memoria costante anche su un
     log grande (prima si faceva `read_text()` dell'intero file).
+
+    Con `retention_days` a 0 (nessuna retention) non si guarda l'età, ma il tetto di DIMENSIONE
+    vale lo stesso: prima si usciva subito e il file cresceva senza limite. Le righe che non sono
+    JSON si scartano e si CONTANO: una riga `audit_trimmed` dice quante.
     """
     if retention_days <= 0:
+        _taglia_alla_coda(path)
         return
+    corrotte = 0
     cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
     tmp = path.with_suffix(path.suffix + ".tmp")
     with path.open("r", encoding="utf-8", errors="replace") as src, \
@@ -111,10 +123,15 @@ def _prune(path: Path, retention_days: int) -> None:
                 continue
             try:
                 ts = str(json.loads(line).get("ts", ""))
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, AttributeError):
+                corrotte += 1
                 continue
             if ts >= cutoff:
                 dst.write(line + "\n")
+        if corrotte:
+            ora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            dst.write(json.dumps({"ts": ora, "event": "audit_trimmed", "dropped": corrotte,
+                                  "reason": "righe illeggibili"}, ensure_ascii=False) + "\n")
     _taglia_alla_coda(tmp)
     tmp.replace(path)  # atomico: un lettore concorrente vede il vecchio o il nuovo
 
@@ -181,8 +198,9 @@ def _da_sopprimere(evento: Any, ora: str) -> dict[str, Any] | bool:
 #   rileva segreti. Contiene la SUPERFICIE. Un segreto messo in `error` (chiave ammessa,
 #   contenuto libero) passa, troncato a 500 caratteri. Il rilevatore vero resta in CI.
 #
-# Le 30 chiavi sono state estratte con l'AST da tutte le 53 chiamate del repo, non con un
-# grep: il grep si ferma a fine riga e sulle chiamate multi-riga ne perdeva sei.
+# Le chiavi sono estratte con l'AST da tutte le chiamate del repo, non con un grep (il grep si
+# ferma a fine riga e sulle chiamate multi-riga ne perdeva): le ricontrolla a ogni corsa
+# `test_OGNI_chiave_usata_nel_repo_e_dichiarata`, che è la fonte del loro numero.
 _CHIAVI_NOTE = frozenset({
     "by", "client_id", "connector", "db", "email", "email_known", "error", "event",
     "fields", "file", "files", "fmt", "i", "insecure", "ip", "jti", "latest", "len", "method",
@@ -354,18 +372,22 @@ def _tail_lines(path: Path, limit: int) -> list[str]:
     return lines[-limit:]
 
 
-def read_recent(limit: int = 200) -> list[dict[str, Any]]:
-    """Legge gli ultimi N eventi dal log. Tollera righe corrotte.
+def leggi_recenti(limit: int = 200) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Gli ultimi N eventi e COSA non si è potuto leggere: `{"scartate": n, "illeggibile": str}`.
 
-    `limit` è clampato a MAX_READ_LIMIT: nessun chiamante (né un `?n=` in query
-    string) può trasformare questa funzione in "carica tutto il file".
+    «Nessun evento» e «il file non si legge» sono risposte diverse, e così «200 eventi» e «200
+    eventi più 3 righe rotte»: chi mostra l'audit le deve poter dire (prima le righe corrotte si
+    saltavano e un file illeggibile diventava una lista vuota, senza traccia).
+    `limit` è clampato a MAX_READ_LIMIT: nessun chiamante (né un `?n=` in query string) può
+    trasformare questa funzione in "carica tutto il file".
     """
+    stato: dict[str, Any] = {"scartate": 0, "illeggibile": ""}
     try:
         limit = max(0, min(int(limit), MAX_READ_LIMIT))
     except (TypeError, ValueError):
         limit = 200
     if not limit:
-        return []
+        return [], stato
 
     path = Path(_settings().audit_log_path)
     events: list[dict[str, Any]] = []
@@ -375,9 +397,22 @@ def read_recent(limit: int = 200) -> list[dict[str, Any]]:
             if not line:
                 continue
             try:
-                events.append(json.loads(line))
+                riga = json.loads(line)
             except json.JSONDecodeError:
+                stato["scartate"] += 1
                 continue
-    except OSError:  # file assente o illeggibile → nessun evento, mai un'eccezione
+            if isinstance(riga, dict):
+                events.append(riga)
+            else:
+                stato["scartate"] += 1
+    except FileNotFoundError:   # nessun evento ancora scritto: non è un errore
         pass
-    return events
+    except OSError as exc:      # c'è ma non si legge: si dice, mai un'eccezione
+        stato["illeggibile"] = f"{type(exc).__name__}: {exc}"
+        log.warning("audit: lettura FALLITA: %s", stato["illeggibile"])
+    return events, stato
+
+
+def read_recent(limit: int = 200) -> list[dict[str, Any]]:
+    """Solo gli eventi di `leggi_recenti` (per chi non mostra lo stato della lettura)."""
+    return leggi_recenti(limit)[0]

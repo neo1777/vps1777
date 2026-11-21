@@ -90,11 +90,17 @@ def main() -> None:
     log.info("vps1777-gateway starting")
     log.info("public_base=%s", s.gateway_public_base or "(none)")
     log.info("upstreams=%s", s.gateway_upstreams)
-    log.info("oauth_required=%s admin_email=%s", s.oauth_required, s.admin_email or "(none)")
+    # l'indirizzo non si scrive nel log (un dato della persona senza un motivo per stare lì):
+    # per chi legge l'avvio conta solo se c'è
+    log.info("oauth_required=%s admin_email=%s", s.oauth_required,
+             "(set)" if s.admin_email else "(none)")
     if not s.effective_gateway_secret:
         log.warning("GATEWAY_SECRET is EMPTY — proxy will reject all requests with 404")
     if not s.effective_signing_secret:
         log.warning("OAUTH_SIGNING_SECRET is EMPTY — JWT issuance will fail")
+    elif len(s.effective_signing_secret.encode("utf-8")) < 32:
+        log.warning("OAUTH_SIGNING_SECRET is shorter than 32 bytes — JWT issuance and "
+                    "verification are REFUSED (rotate it: tools/rotate-secret.sh)")
     if not s.telegram_owner_id:
         log.warning("TELEGRAM_OWNER_ID not set (or malformed → coerced to 0) — "
                     "Mini App /app/auth denies EVERYONE (fail-closed). Set it to enable.")

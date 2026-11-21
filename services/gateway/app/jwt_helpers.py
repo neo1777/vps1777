@@ -25,6 +25,21 @@ class JWTError(Exception):
     pass
 
 
+# HS256 vuole una chiave di almeno 256 bit (RFC 7518 §3.2). `deploy.sh` e la rotazione ne
+# generano una da 48 byte casuali; questo tetto ferma il valore corto messo a mano, con cui i
+# token si potrebbero firmare provando le chiavi una per una.
+MIN_BYTE_SEGRETO = 32
+
+
+def _segreto() -> str:
+    secret = str(get_settings().effective_signing_secret or "")
+    if not secret:
+        raise JWTError("OAUTH_SIGNING_SECRET non configurato")
+    if len(secret.encode("utf-8")) < MIN_BYTE_SEGRETO:
+        raise JWTError(f"OAUTH_SIGNING_SECRET troppo corto: servono almeno {MIN_BYTE_SEGRETO} byte")
+    return secret
+
+
 def issue(
     *,
     typ: str,
@@ -36,9 +51,7 @@ def issue(
     if typ not in VALID_TYPS:
         raise JWTError(f"typ '{typ}' non valido")
     s = get_settings()
-    secret = s.effective_signing_secret
-    if not secret:
-        raise JWTError("OAUTH_SIGNING_SECRET non configurato")
+    secret = _segreto()
     now = int(time.time())
     payload: dict[str, Any] = {
         "iss": s.gateway_public_base,
@@ -68,10 +81,7 @@ def verify(
 ) -> dict[str, Any]:
     if expected_typ not in VALID_TYPS:
         raise JWTError(f"expected_typ '{expected_typ}' non valido")
-    s = get_settings()
-    secret = s.effective_signing_secret
-    if not secret:
-        raise JWTError("OAUTH_SIGNING_SECRET non configurato")
+    secret = _segreto()
     options = {"verify_aud": expected_aud is not None}
     try:
         claims: dict[str, Any] = jwt.decode(

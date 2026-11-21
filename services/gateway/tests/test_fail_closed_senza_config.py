@@ -57,14 +57,22 @@ def test_il_confronto_da_solo_NON_basta_sul_vuoto():
 
 
 def test_il_ramo_not_expected_esiste_e_viene_prima_degli_upstream():
-    """Sulla STRUTTURA: dentro `proxy()`, `not expected` sta in un test di
-    ramo che ritorna, e compare PRIMA del primo uso di `gateway_upstreams`.
+    """Sulla STRUTTURA: dentro `_ammetti()` (i controlli di `proxy()`, che la chiama per prima
+    cosa), `not expected` sta in un test di ramo che ritorna, e compare PRIMA del primo uso di
+    `gateway_upstreams`.
     """
     src = _PROXY.read_text(encoding="utf-8")
     albero = ast.parse(src)
     fn = next((n for n in ast.walk(albero)
-               if isinstance(n, ast.AsyncFunctionDef) and n.name == "proxy"), None)
-    assert fn is not None, "la funzione async proxy() non c'è più: la garanzia va ri-ancorata"
+               if isinstance(n, ast.FunctionDef) and n.name == "_ammetti"), None)
+    assert fn is not None, "la funzione _ammetti() non c'è più: la garanzia va ri-ancorata"
+    proxy_fn = next(n for n in ast.walk(albero)
+                    if isinstance(n, ast.AsyncFunctionDef) and n.name == "proxy")
+    righe = {getattr(n.func, "id", ""): n.lineno for n in ast.walk(proxy_fn)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    assert "_ammetti" in righe and righe["_ammetti"] < min(
+        righe.get("_prendi_posto", 10**9), righe.get("_inoltra", 10**9)), (
+        "proxy() deve passare da _ammetti() prima di prendere il posto e di inoltrare")
 
     riga_guardia = None
     riga_upstreams = None

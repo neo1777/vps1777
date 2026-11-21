@@ -42,7 +42,7 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, Response
 
 from .archive_indexer import count_rows, find_db, list_db_infos, togli_indice
-from .audit import audit, read_recent
+from .audit import audit, leggi_recenti
 from .jwt_helpers import JWTError, issue, verify
 from .mcp_client import MCPCallError, call_tool
 from .ratelimit import RateLimiter
@@ -530,9 +530,10 @@ async def api_audit(request: Request) -> Response:
         n = max(1, min(int(request.query_params.get("n", "50")), 200))
     except ValueError:
         n = 50
-    events = read_recent(n)
+    events, lettura = leggi_recenti(n)
     events.reverse()
-    return JSONResponse({"events": events})
+    # `scartate` e `illeggibile`: «nessun evento» e «non riesco a leggere» sono risposte diverse
+    return JSONResponse({"events": events, **lettura})
 
 
 async def api_update_state(request: Request) -> Response:

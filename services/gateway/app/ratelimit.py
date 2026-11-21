@@ -15,6 +15,11 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+# Tetto alle chiavi tenute in memoria. Dentro la finestra c'è una voce per ogni IP visto, e con
+# IPv6 gli indirizzi non finiscono: oltre il tetto si fa pulizia e, se non basta, un IP NUOVO
+# si rifiuta (fail-closed) finché la finestra non scorre. Chi è già dentro non ne risente.
+MAX_CHIAVI = 20_000
+
 
 class RateLimiter:
     """Max `max_calls` richieste per IP entro `window_s` secondi."""
@@ -32,6 +37,10 @@ class RateLimiter:
         self._chiamate += 1
         if self._chiamate % 256 == 0:
             self.sweep(now)
+        if ip not in self._hits and len(self._hits) >= MAX_CHIAVI:
+            self.sweep(now)
+            if len(self._hits) >= MAX_CHIAVI:
+                return False
         q = self._hits[ip]
         cutoff = now - self._window
         # pota le vecchie in-place (memoria limitata alla finestra)

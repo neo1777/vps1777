@@ -4521,3 +4521,45 @@ findings:
     residuo: >
       La decisione è provata con docker e health-gate sostituiti; un update ucciso davvero su
       una macchina di prova non è ancora stato eseguito.
+
+  - id: H94
+    severity: low
+    title: "Se la revoca di un refresh non arrivava su disco, la rotazione proseguiva: dopo un riavvio il refresh già usato tornava valido"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: audio-esterno
+      nota: >
+        Dalla revisione del gateway fatta applicando un catalogo di requisiti con due modelli
+        diversi (uno dei due l'ha detta, come «disco pieno trattato da successo»). Mai successo
+        sulla VPS di riferimento. `low` perché servono insieme un disco che non scrive, un
+        riavvio e un refresh copiato.
+    since: unreleased
+    why: >
+      A ogni rinnovo il gateway revoca il refresh appena usato e ne emette uno nuovo. La revoca
+      vale dopo un riavvio solo se è su disco; se la scrittura falliva (disco pieno, volume in
+      sola lettura) l'errore finiva nell'audit e il refresh nuovo usciva lo stesso. Al riavvio
+      l'elenco tornava quello di prima, e il refresh già ruotato, anche una sua copia rubata,
+      apriva di nuovo una catena valida. Lo stesso per una registrazione DCR: 201 al client, e
+      al riavvio il client non c'era più.
+    evidence:
+      - file: services/gateway/app/oauth.py
+        contains:
+          - "def _scrivi_stato(f: Path, dati: Any, evento: str) -> bool:"
+          - "if not _save_revoked():"
+          - "if not _save_clients():"
+      - file: services/gateway/tests_runtime/test_prova_a_fetta01.py
+        contains:
+          - "def test_senza_scrittura_niente_rotazione("
+          - "def test_la_registrazione_non_salvata_si_rifiuta("
+    fix: >
+      La scrittura dello stato dice se è riuscita. Senza scrittura la rotazione non avviene: il
+      gateway risponde 503 `temporarily_unavailable`, il refresh usato NON viene revocato e il
+      client riprova con quello. Una registrazione non salvata si rifiuta allo stesso modo.
+    prova:
+      - comando: "uv run --locked --with pytest pytest -q tests_runtime/test_prova_a_fetta01.py (services/gateway)"
+        dove: "PC"
+        output: "14 passed: con la rinomina che fallisce il rinnovo risponde 503 e il jti non entra fra i revocati"
+        exit: 0
+        quando: "2026-11-21"
