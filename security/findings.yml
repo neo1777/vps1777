@@ -4176,7 +4176,7 @@ findings:
         del 21/11): un revisore in sola lettura sul gateway. Riprodotto in locale con l'app
         ASGI e il percorso grezzo; mai visto sfruttato (nell'audit della VPS di riferimento
         nessun `proxy_request` verso percorsi con `..`).
-    since: unreleased
+    since: v0.95.0
     why: >
       Il proxy rifiutava `internal/…` confrontando il prefisso del percorso, ma httpx toglie i
       segmenti `.` e `..` quando costruisce l'URL: `x/../internal/nlm/profile` (anche con
@@ -4219,7 +4219,7 @@ findings:
         Stesso giro di revisione di H85, revisore delle pagine admin. Riprodotto col vero
         `_layout`; che il campo csrf segua il form iniettato è dedotto dalla specifica HTML
         (un form annidato viene ignorato dal parser), non provato in un browser.
-    since: unreleased
+    since: v0.95.0
     why: >
       `_layout` metteva il tipo del messaggio nell'attributo `class` così com'era, e quattro
       pagine (`/admin/nlm`, `/admin/archive`, `/admin/update`, `/admin/setup`) glielo passavano
@@ -4256,7 +4256,7 @@ findings:
         Stesso giro di revisione, trovato da due revisori in modo indipendente (strumenti
         dell'operatore e infrastruttura) e riprodotto con un `docker run` e un `tar` che
         falliscono. `high` come H72 e H73: è la copia che mente sul proprio contenuto.
-    since: unreleased
+    since: v0.95.0
     why: >
       In `backup.sh` il dump di ogni volume finiva con `2>/dev/null || warn "dump fallito
       (vuoto?)"`, e dopo il ciclo lo script stampava «Volumi dumpati», cifrava e usciva 0. Con

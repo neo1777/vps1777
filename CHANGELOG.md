@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.95.0] — 2026-11-21
+
 **Un giro di revisione di tutto il codice: tre difetti di sicurezza chiusi e una ventina di correzioni.**
 
 ### Sicurezza
