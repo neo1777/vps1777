@@ -200,17 +200,40 @@ async def _notify_loop(app: Application) -> None:
     """Preleva periodicamente le notifiche da nb1777-mcp e dal gateway e le manda
     all'owner. Fail-safe: se un server non risponde, logga e riprova al giro dopo."""
     s = get_settings()
+    # Il prelievo SVUOTA la coda sul server: una notifica che Telegram non accetta (timeout,
+    # flood) andava persa, e la sonda della sessione avvisa una volta sola. Quelle non
+    # consegnate restano qui e si riprovano ai giri dopo (21/11/2026).
+    in_sospeso: list[dict] = []
     while True:
         await asyncio.sleep(60)
         owner = get_settings().telegram_owner_id
         if not owner:
             continue
+        da_mandare, in_sospeso = in_sospeso, []
         for nome, url in _fonti_notifiche(s):
-            for item in await _preleva(nome, url, s.effective_gateway_secret):
-                try:
-                    await _send_notification(app, owner, item)
-                except Exception as exc:  # noqa: BLE001 — una notifica rotta non ferma il loop
-                    log.warning("notifica non inviata (%s): %s", item.get("kind"), exc)
+            da_mandare.extend(await _preleva(nome, url, s.effective_gateway_secret))
+        in_sospeso = await _consegna(app, owner, da_mandare)
+
+
+_TENTATIVI_MAX = 30          # mezz'ora di giri: oltre, la notifica si lascia andare e lo si dice
+_SOSPESE_MAX = 50
+
+
+async def _consegna(app: Application, owner: int, items: list[dict]) -> list[dict]:
+    """Manda le notifiche; torna quelle NON consegnate, da riprovare al giro dopo."""
+    restano: list[dict] = []
+    for item in items:
+        try:
+            await _send_notification(app, owner, item)
+        except Exception as exc:  # noqa: BLE001 — una notifica rotta non ferma il loop
+            tentativi = int(item.get("_tentativi", 0)) + 1
+            if tentativi >= _TENTATIVI_MAX:
+                log.warning("notifica PERSA dopo %d tentativi (%s): %s",
+                            tentativi, item.get("kind"), exc)
+                continue
+            log.warning("notifica non inviata (%s), riprovo: %s", item.get("kind"), exc)
+            restano.append({**item, "_tentativi": tentativi})
+    return restano[-_SOSPESE_MAX:]
 
 
 async def cmd_ack(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -286,19 +309,35 @@ async def run() -> None:
         return
     app = build_app()
     log.info("bot starting")
-    async with app:
-        await app.initialize()
+    # Il battito parte PRIMA di parlare con Telegram (21/11/2026). `initialize` chiama
+    # `get_me`: con Telegram irraggiungibile o il token rifiutato sollevava, il processo
+    # usciva e il container ripartiva in ciclo SENZA battito: unhealthy, e l'health-gate
+    # faceva fallire (e tornare indietro) ogni `vps1777 update`. È lo stesso esito che il
+    # ramo «senza token» qui sopra evita apposta. Ora si riprova con calma, a battito acceso.
+    heartbeat = asyncio.create_task(_heartbeat_loop())
+    attesa = 5.0
+    while True:
+        try:
+            await app.initialize()
+            break
+        except Exception as exc:  # noqa: BLE001 — rete, timeout, token rifiutato
+            log.warning("Telegram non risponde all'avvio (%s): riprovo fra %.0f s",
+                        type(exc).__name__, attesa)
+            await asyncio.sleep(attesa)
+            attesa = min(attesa * 2, 300.0)
+    notify: asyncio.Task | None = None
+    try:
         await app.start()
         await _install_menu_button(app)
         await app.updater.start_polling()
-        heartbeat = asyncio.create_task(_heartbeat_loop())
         notify = asyncio.create_task(_notify_loop(app))
-        # blocca fino a SIGTERM
-        try:
-            await asyncio.Event().wait()
-        finally:
-            heartbeat.cancel()
+        await asyncio.Event().wait()          # blocca fino a SIGTERM
+    finally:
+        heartbeat.cancel()
+        if notify is not None:
             notify.cancel()
+        if app.updater is not None and app.updater.running:
             await app.updater.stop()
+        if app.running:
             await app.stop()
-            await app.shutdown()
+        await app.shutdown()

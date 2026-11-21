@@ -42,7 +42,7 @@ def verifica(valore: str, nome: str, *, ora: float | None = None) -> str | None:
         scade = int(scade_txt)
     except ValueError:
         return "il link non vale: chiedi un link nuovo con studio_download"
-    if not hmac.compare_digest(firma, _firma(nome, scade)):
+    if not hmac.compare_digest(firma.encode(), _firma(nome, scade).encode()):  # byte: sulle stringhe un carattere non ASCII solleva TypeError (500 invece di 403)
         return ("il link non vale (altro file, link modificato, o nb1777 è ripartito): "
                 "chiedi un link nuovo con studio_download")
     if (time.time() if ora is None else ora) > scade:

@@ -322,7 +322,8 @@ def _internal_ok(request: "Request") -> bool:
     if not secret:                       # non configurato → nega (fail-closed)
         return False
     got = request.headers.get("x-vps1777-internal", "")
-    return hmac.compare_digest(got, secret)
+    # in byte: su stringhe, un header con un carattere non ASCII solleva TypeError
+    return hmac.compare_digest(got.encode("utf-8", "surrogatepass"), secret.encode())
 
 
 @mcp.custom_route("/internal/nlm/status", methods=["GET"])
@@ -1136,7 +1137,8 @@ async def studio_wait(notebook_id: str, artifact_id: str,
     Se non è pronto restituisce l'ultimo stato con `in_corso: true`: richiamalo. Il tetto
     esiste perché da claude.ai una chiamata oltre ~30 s cade."""
     return await _aio(core.studio_wait, notebook_id, artifact_id,
-                      poll_interval=poll_interval, timeout=min(float(timeout), 25.0),
+                      poll_interval=min(max(float(poll_interval), 1.0), 10.0),
+                      timeout=min(float(timeout), 25.0),
                       restituisci_al_tetto=True)
 
 

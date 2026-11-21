@@ -1153,8 +1153,15 @@ def studio_wait(nb_id: str, artifact_id: str, *,
             return last
         if time.time() >= deadline:
             break
-        time.sleep(poll_interval)
+        # mai oltre il tetto: con `poll_interval=60` e tetto 25 s si dormiva 60 s, e da
+        # claude.ai la chiamata cadeva (il caso che il tetto doveva evitare)
+        time.sleep(max(0.0, min(float(poll_interval), deadline - time.time())))
     if restituisci_al_tetto:
+        if not last:
+            # un id che nel notebook non c'è NON è «in corso»: prima lo si diceva per sempre
+            return {"in_corso": True, "trovato": False,
+                    "nota": "nel notebook non c'è un artefatto con questo id: se l'hai appena "
+                            "creato richiama fra poco, altrimenti controlla l'id con studio_list"}
         return {**last, "in_corso": True,
                 "nota": "l'artefatto non è ancora pronto: richiama studio_wait (o studio_status)"}
     raise AttesaScaduta(f"studio_wait timeout {timeout}s su {artifact_id}; ultimo stato: {last}")

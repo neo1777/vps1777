@@ -14,6 +14,13 @@
 services:
 
   cloudflared:
+    # Il tetto ai log non attraversa i file: l'ancora `x-logging` vive in compose.yaml, e questo
+    # container ne restava senza (json-file senza limite: un log per richiesta fino a disco pieno).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     profiles: [ingress.cloudflared]
     image: cloudflare/cloudflared:2026.9.3@sha256:072c067d25ccbe61d46e18f0d0723255f2bb5304f7317caa95b27031520ff92c
     container_name: vps1777-cloudflared

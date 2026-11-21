@@ -264,6 +264,9 @@ services:
     restart: "no"
     network_mode: none
     mem_limit: 1300m
+    # senza, Docker concede altrettanto swap: su una VPS con swap il job non muore al tetto,
+    # ci va dentro (il guasto misurato il 04/10 su archive-mcp)
+    memswap_limit: 1300m
     pids_limit: 256
     cpus: 1.0
     entrypoint: ["python", "tools/costruisci_indice.py"]

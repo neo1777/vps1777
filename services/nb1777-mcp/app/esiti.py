@@ -154,6 +154,7 @@ class StudioTutti(Esito):
 
 class ArtefattoAttesa(Artefatto):
     in_corso: bool | None = None
+    trovato: bool | None = Field(None, description="false se nel notebook non c'è un artefatto con questo id")
     nota: str | None = None
 
 

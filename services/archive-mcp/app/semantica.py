@@ -483,7 +483,9 @@ def query_fts_da_naturale(testo: str, *, minimo: int = 2) -> str:
             tenuti.append(p)
     if len(tenuti) < minimo:
         return ""
-    return " OR ".join(f'"{p}"' for p in tenuti)
+    # le virgolette dentro una parola si raddoppiano (`27"curvo`): senza, FTS5 rifiutava
+    # l'espressione e il ramo per parole di `search_ibrida` cadeva per ogni DB
+    return " OR ".join('"' + p.replace('"', '""') + '"' for p in tenuti)
 
 
 # Il PASSAGGIO (banco del 01/10/2026). Lo snippet di FTS5 si ferma a 64 token e

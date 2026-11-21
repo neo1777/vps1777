@@ -71,7 +71,15 @@ class _H(BaseHTTPRequestHandler):
         if self.path != "/ocr":
             self._rispondi(404, b"solo POST /ocr e GET /health")
             return
-        n = int(self.headers.get("Content-Length") or 0)
+        # Un Content-Length negativo faceva leggere fino alla fine del flusso (`read(-1)`),
+        # oltre il tetto; uno non numerico era un ValueError non gestito.
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if n <= 0:
+            self._rispondi(411, b"serve un Content-Length valido")
+            return
         if n > MAX_BODY:
             self._rispondi(413, b"Content-Length oltre il tetto")
             return

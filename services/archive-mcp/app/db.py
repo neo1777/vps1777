@@ -175,6 +175,36 @@ def _maybe_reload() -> None:
     if _dir_sig() != _SIG:
         log.info("dir DB cambiata — ricarico la registry")
         reload_registry()
+    _LOCALE.sporchi = {}       # i DB saltati perché in scrittura, per QUESTA chiamata
+
+
+# ── un DB in scrittura si SALTA e si DICHIARA (giro di revisione del 21/11/2026) ──
+# `_open` solleva ArchivioSporco se accanto al DB c'è un journal non vuoto. Succede anche con
+# un ingest VIVO (una transazione sola, minuti): i cicli sui DB prendevano solo KeyError, e per
+# tutta la durata dell'ingest ogni tool multi-DB falliva col messaggio «una scrittura è morta a
+# metà» — per colpa di un DB che magari non c'entrava con la domanda. Ora quel DB si salta, la
+# risposta lo dice (`saltati`) dove ha un posto per dirlo, e chi cerca UN uuid e non lo trova
+# riceve l'errore invece di un falso «non c'è».
+_MOTIVO_SPORCO = "in scrittura adesso (un caricamento in corso) o interrotta a metà: riprova fra poco"
+
+
+def _nota_sporco(name: str, exc: Exception, saltati: list | None = None, *,
+                 motivo: str = _MOTIVO_SPORCO) -> None:
+    visti = getattr(_LOCALE, "sporchi", None)
+    if visti is None:
+        visti = _LOCALE.sporchi = {}
+    visti[name] = (exc, motivo)
+    log.warning("DB %s saltato: %s", name, motivo)
+    if saltati is not None:
+        saltati.append({"db": name, "ramo": "db", "motivo": motivo})
+
+
+def _solleva_se_sporco() -> None:
+    """Per chi cerca una cosa precisa (un uuid) e non l'ha trovata: se un DB è stato saltato
+    la risposta onesta non è «non c'è», è l'errore di quel DB."""
+    visti = getattr(_LOCALE, "sporchi", None) or {}
+    if visti:
+        raise next(iter(visti.values()))[0]
 
 
 _ANAGRAFICA: tuple[tuple, set[str]] | None = None      # (firma della dir, valori)
@@ -202,6 +232,15 @@ def valori_anagrafici() -> set[str]:
         try:
             conn = _open(name)
         except KeyError:
+            continue
+        except ArchivioSporco as exc:
+            # Il DB in scrittura non si legge, ma i suoi valori noti NON si dimenticano: si
+            # tengono quelli dell'ultimo giro buono. Prima l'errore risaliva e il chiamante
+            # ripiegava su «nessun valore noto»: durante un caricamento nome ed email
+            # dell'anagrafica uscivano in chiaro da OGNI tool.
+            _nota_sporco(name, exc)
+            if _ANAGRAFICA is not None:
+                valori |= _ANAGRAFICA[1]
             continue
         try:
             valori |= redazione.valori_noti(conn)
@@ -367,6 +406,12 @@ def _ruolo(name: str) -> str:
         conn = _open(name)
     except KeyError:
         return RUOLO_NON_DICHIARATO
+    except ArchivioSporco:
+        # In scrittura: il ruolo non si può leggere ADESSO. Vale l'ultimo letto (il ruolo non
+        # cambia con un caricamento); se non si è mai letto, «riservato»: un DB di cui non so
+        # il ruolo non entra nel perimetro di default per un caso (fail-closed, P1). Senza
+        # memo: al prossimo giro si rilegge.
+        return ricordo[1] if ricordo is not None else "riservato"
     try:
         ruolo = fts.meta_value_conn(conn, "ruolo") or RUOLO_NON_DICHIARATO
     except sqlite3.DatabaseError:
@@ -545,6 +590,9 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
         try:
             conn = _open(name)
         except KeyError:
+            continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc)
             continue
         try:
             snap = _snapshot(_DBS[name])
@@ -736,6 +784,9 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                 conn = _open_con_indice(name, indici[name])
             except KeyError:
                 saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
+                continue
+            except ArchivioSporco as exc:
+                _nota_sporco(name, exc, saltati)
                 continue
             connessioni[name] = conn
             budget.attacca(conn)
@@ -1064,6 +1115,9 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
         except KeyError:
             saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
             continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc, saltati)
+            continue
         try:
             with budget.su(conn):
                 per_db[name] = fts.count_conn(
@@ -1114,6 +1168,10 @@ def _conta_fuori(nomi: list[str], query: str, budget: _Budget,
             conn = _open(name)
         except KeyError:
             continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc)
+            non_contati.append(name)
+            continue
         try:
             with budget.su(conn):
                 n = fts.count_conn(conn, query, **filtri)
@@ -1147,6 +1205,9 @@ def check_term(term: str, db: str = "", *, ruoli: str = "") -> dict[str, Any]:
         try:
             conn = _open(name)
         except KeyError:
+            continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc, saltati)
             continue
         try:
             with budget.su(conn):
@@ -1245,6 +1306,9 @@ def get_context(uuid: str, db: str = "", *, before: int = 3,
             conn = _open(name)
         except KeyError:
             continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc)
+            continue
         try:
             ctx = fts.context_conn(conn, uuid, before=before, after=after)
             if ctx:
@@ -1255,10 +1319,14 @@ def get_context(uuid: str, db: str = "", *, before: int = 3,
                     r["db"] = name
                     r["snapshot"] = snap
                 return _tronca_righe(ctx, max_chars)
-        except sqlite3.OperationalError as exc:
-            log.warning("DB %s schema error: %s", name, exc)
+        except sqlite3.DatabaseError as exc:
+            # DatabaseError e non OperationalError: «file is not a database» e «malformed» sono
+            # l'altra sottoclasse, e un file rotto nella cartella rompeva il tool per tutti
+            log.warning("DB %s non letto: %s", name, exc)
+            _nota_sporco(name, exc, motivo=f"non letto: {str(exc)[:120]}")
         finally:
             conn.close()
+    _solleva_se_sporco()
     return []
 
 
@@ -1272,6 +1340,9 @@ def get_conversation(uuid: str, db: str = "", *, limit: int = 200,
             conn = _open(name)
         except KeyError:
             continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc)
+            continue
         try:
             conv = fts.conversation_conn(conn, uuid, limit=limit)
             if conv:
@@ -1282,10 +1353,14 @@ def get_conversation(uuid: str, db: str = "", *, limit: int = 200,
                     r["db"] = name
                     r["snapshot"] = snap
                 return _tronca_righe(conv, max_chars)
-        except sqlite3.OperationalError as exc:
-            log.warning("DB %s schema error: %s", name, exc)
+        except sqlite3.DatabaseError as exc:
+            # DatabaseError e non OperationalError: «file is not a database» e «malformed» sono
+            # l'altra sottoclasse, e un file rotto nella cartella rompeva il tool per tutti
+            log.warning("DB %s non letto: %s", name, exc)
+            _nota_sporco(name, exc, motivo=f"non letto: {str(exc)[:120]}")
         finally:
             conn.close()
+    _solleva_se_sporco()
     return []
 
 
@@ -1320,6 +1395,9 @@ def get_many(uuids: list[str], db: str = "", *, max_chars: int = 0) -> dict[str,
             conn = _open(name)
         except KeyError:
             continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc)
+            continue
         try:
             righe = [dict(r) for r in conn.execute(
                 "SELECT uuid, project, ts, content FROM messages WHERE uuid IN (%s)"
@@ -1338,13 +1416,21 @@ def get_many(uuids: list[str], db: str = "", *, max_chars: int = 0) -> dict[str,
                     r["db"] = name
                     r["snapshot"] = snap
                     trovate[r["uuid"]] = r
-        except sqlite3.OperationalError as exc:
-            log.warning("DB %s schema error: %s", name, exc)
+        except sqlite3.DatabaseError as exc:
+            # DatabaseError e non OperationalError: «file is not a database» e «malformed» sono
+            # l'altra sottoclasse, e un file rotto nella cartella rompeva il tool per tutti
+            log.warning("DB %s non letto: %s", name, exc)
+            _nota_sporco(name, exc, motivo=f"non letto: {str(exc)[:120]}")
         finally:
             conn.close()
     righe = [trovate[u] for u in voluti if u in trovate]
-    return {"righe": _tronca_righe(righe, max_chars),
-            "mancanti": [u for u in voluti if u not in trovate]}
+    esito = {"righe": _tronca_righe(righe, max_chars),
+             "mancanti": [u for u in voluti if u not in trovate]}
+    non_letti = getattr(_LOCALE, "sporchi", None) or {}
+    if esito["mancanti"] and non_letti:
+        # «mancante» qui può voler dire «sta in un DB che non ho potuto leggere»
+        esito["saltati"] = [{"db": n, "ramo": "db", "motivo": m} for n, (_, m) in non_letti.items()]
+    return esito
 
 
 # ── P5 (11/10/2026): «l'hai già detto?» (#281) ─────────────────────────────────────
@@ -1529,12 +1615,18 @@ def list_projects(db: str = "", *, top: int = 1000) -> list[dict[str, Any]]:
             conn = _open(name)
         except KeyError:
             continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc)
+            continue
         try:
             for r in fts.projects_conn(conn, top=top):
                 r["db"] = name
                 out.append(r)
-        except sqlite3.OperationalError as exc:
-            log.warning("DB %s schema error: %s", name, exc)
+        except sqlite3.DatabaseError as exc:
+            # DatabaseError e non OperationalError: «file is not a database» e «malformed» sono
+            # l'altra sottoclasse, e un file rotto nella cartella rompeva il tool per tutti
+            log.warning("DB %s non letto: %s", name, exc)
+            _nota_sporco(name, exc, motivo=f"non letto: {str(exc)[:120]}")
         finally:
             conn.close()
     out.sort(key=lambda r: r.get("rows", 0), reverse=True)
@@ -1557,6 +1649,9 @@ def archive_stats(db: str = "") -> list[dict[str, Any]]:
             conn = _open(name)
         except KeyError:
             continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc)
+            continue
         try:
             righe = []
             for r in fts.stats_by_period_conn(conn):
@@ -1567,8 +1662,11 @@ def archive_stats(db: str = "") -> list[dict[str, Any]]:
             # è lo snapshot, e il memo si invalida da solo al prossimo upload.
             _PERIODI_MEMO[name] = (snap, [dict(r) for r in righe])
             out.extend(righe)
-        except sqlite3.OperationalError as exc:
-            log.warning("DB %s schema error: %s", name, exc)
+        except sqlite3.DatabaseError as exc:
+            # DatabaseError e non OperationalError: «file is not a database» e «malformed» sono
+            # l'altra sottoclasse, e un file rotto nella cartella rompeva il tool per tutti
+            log.warning("DB %s non letto: %s", name, exc)
+            _nota_sporco(name, exc, motivo=f"non letto: {str(exc)[:120]}")
         finally:
             conn.close()
     return out
@@ -1608,6 +1706,9 @@ def describe() -> list[dict[str, Any]]:
                 conn = _open(name)
             except KeyError:
                 continue
+            except ArchivioSporco as exc:
+                _nota_sporco(name, exc)
+                continue
             try:
                 info = fts.db_stats_conn(conn)
                 info["description"] = fts.meta_value_conn(conn, "description")
@@ -1616,7 +1717,7 @@ def describe() -> list[dict[str, Any]]:
                 # RITIRATO (stringa vuota). Tre strade, una sola risposta onesta.
                 info["ruolo"] = (fts.meta_value_conn(conn, "ruolo")
                                  or RUOLO_NON_DICHIARATO)
-            except sqlite3.OperationalError:
+            except sqlite3.DatabaseError:
                 info = {"rows": 0, "oldest": "", "newest": "", "labels": 0,
                         "description": "", "ruolo": RUOLO_NON_DICHIARATO}
             finally:
@@ -1765,6 +1866,9 @@ def _risolvi_sessione(chiave: str, db: str) -> tuple[str, str, list[str]]:
             conn = _open(name)
         except KeyError:
             continue
+        except ArchivioSporco as exc:
+            _nota_sporco(name, exc)
+            continue
         try:
             tab = fts.tabelle_conn(conn)
             if not set(_TABELLE_R1) <= tab:
@@ -1783,8 +1887,11 @@ def _risolvi_sessione(chiave: str, db: str) -> tuple[str, str, list[str]]:
                 n = fts.avvistamenti_sessione_conn(conn, k)
                 if n > 0:
                     avvistata_in[name] = n
-        except sqlite3.OperationalError as exc:
-            log.warning("DB %s schema error: %s", name, exc)
+        except sqlite3.DatabaseError as exc:
+            # DatabaseError e non OperationalError: «file is not a database» e «malformed» sono
+            # l'altra sottoclasse, e un file rotto nella cartella rompeva il tool per tutti
+            log.warning("DB %s non letto: %s", name, exc)
+            _nota_sporco(name, exc, motivo=f"non letto: {str(exc)[:120]}")
         finally:
             conn.close()
     if len(trovati) > 1:

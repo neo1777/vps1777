@@ -14,6 +14,13 @@
 services:
 
   backup:
+    # Il tetto ai log non attraversa i file: l'ancora `x-logging` vive in compose.yaml, e questo
+    # container ne restava senza (json-file senza limite: un log per richiesta fino a disco pieno).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     profiles: [ops.backup]
     image: alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
     container_name: vps1777-backup

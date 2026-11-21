@@ -44,6 +44,32 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **Il limite di richieste per IP non dimenticava mai gli indirizzi visti**: ora le voci scadute si tolgono da sole.
 - Un percorso non valido nel proxy (`a%00b`) riceve 400 invece di un errore interno.
 
+### Corretto (archivio, NotebookLM, bot)
+- **Durante un caricamento nell'archivio tutte le ricerche fallivano.** Il DB in scrittura ha accanto un journal, e i
+  tool lo leggevano come «scrittura morta a metà» fermandosi per tutti i DB. Ora quel DB si salta e la risposta lo
+  dice (`saltati`); chi cerca un `uuid` che sta lì riceve l'errore, non un falso «non c'è». Nello stesso momento la
+  redazione dei valori dell'anagrafica si spegneva: ora tiene quelli dell'ultimo giro buono.
+- **Un file `.db` che non è SQLite (o è corrotto) rompeva `get_context`, `get_many`, `list_projects` e le schede** per
+  tutti i DB: ora viene saltato e dichiarato.
+- **Un guasto del DB veniva detto «sintassi FTS5 non valida»** (la ricerca interrotta dal tetto di tempo, un DB
+  bloccato): `count` perdeva il suo `parziale: true`. Ora solo gli errori di sintassi lo sono.
+- **`get_context` rispondeva vuoto per una riga senza data**, e `temi(al="2026")` (solo l'anno) dava zero temi.
+- **Una parola con le virgolette dentro (`27"curvo`) faceva cadere il ramo per parole della ricerca per senso.**
+- **Le notifiche che Telegram non accettava andavano perse** (il bot svuota la coda quando le preleva): ora quelle non
+  consegnate si riprovano ai giri dopo. **Il bot non va più in ciclo di riavvii** se all'avvio Telegram non risponde o
+  rifiuta il token: resta su col battito acceso e riprova (prima un update in quel momento tornava indietro).
+- **`studio_wait` poteva dormire oltre il suo tetto di 25 secondi** (con `poll_interval` alto la chiamata cadeva), e per
+  un id che nel notebook non c'è rispondeva «in corso» per sempre: ora dice `trovato: false`.
+- **Un link di scaricamento con caratteri non ASCII nel gettone dava errore 500** invece di «il link non vale».
+- **Il servizio OCR con un `Content-Length` negativo leggeva oltre il suo tetto.**
+
+### Cambiato (infrastruttura)
+- **Caddy, cloudflared, backup e Portainer hanno un tetto ai log** (10 MB × 5), come gli altri container: prima il log
+  di Caddy, una riga per richiesta, poteva riempire il disco.
+- Il job notturno dell'indice non può più andare in swap oltre il suo tetto di memoria (`memswap_limit`).
+- Due controlli della CI non danno più verde senza aver guardato niente: il ledger delle feature senza voci, e il
+  confronto dei lock quando non legge nessun pacchetto.
+
 ## [0.94.2] — 2026-11-07
 
 **La mappa dei temi mette i vocali nel mese dell'audio, non in quello del caricamento.**
