@@ -4563,3 +4563,46 @@ findings:
         output: "14 passed: con la rinomina che fallisce il rinnovo risponde 503 e il jti non entra fra i revocati"
         exit: 0
         quando: "2026-11-21"
+
+  - id: H95
+    severity: low
+    title: "Se l'elenco delle sessioni admin chiuse non si leggeva, un cookie di cui si era fatto logout tornava valido"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: audio-esterno
+      nota: >
+        Dalla revisione del pannello admin fatta applicando un catalogo di requisiti con due
+        modelli diversi (uno dei due l'ha detta). È la stessa classe curata per i refresh OAuth
+        nella 0.95.0, rimasta aperta sul gemello delle sessioni admin. Mai successo sulla VPS
+        di riferimento. `low` perché servono un file rotto e un cookie copiato prima del logout,
+        e il cookie scade comunque in 8 ore.
+    since: unreleased
+    why: >
+      Il logout mette il `jti` del cookie in `admin_revoked.json`. Se quel file c'era ma non si
+      leggeva (troncato, permessi), l'elenco tornava vuoto in silenzio: «nessuna revoca». Un
+      cookie rubato e poi chiuso col logout riapriva il pannello fino alla sua scadenza.
+    evidence:
+      - file: services/gateway/app/admin_core.py
+        contains:
+          - "def _illeggibile(self, motivo: str) -> None:"
+          - "def prima_della_soglia(self, iat: object) -> bool:"
+      - file: services/gateway/app/admin.py
+        contains:
+          - "revoche.prima_della_soglia(claims.get(\"iat\"))"
+      - file: services/gateway/tests/test_admin_core.py
+        contains:
+          - "def test_elenco_illeggibile_chiude_le_sessioni_di_prima_e_lo_dice("
+    fix: >
+      Un elenco che c'è ma non si legge chiude: da quel momento valgono solo i cookie emessi
+      dopo (la soglia si scrive nel file e sopravvive al riavvio), il file rotto viene messo da
+      parte e l'audit lo dice (`admin_revoked_unreadable`). Un file assente resta una prima
+      installazione.
+    prova:
+      - comando: "uvx pytest -q services/gateway/tests/test_admin_core.py"
+        dove: "PC"
+        output: "58 passed: elenco troncato → i cookie di prima non valgono, la soglia regge un riavvio"
+        exit: 0
+        quando: "2026-11-21"
+

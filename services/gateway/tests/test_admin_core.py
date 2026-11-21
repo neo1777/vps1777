@@ -476,3 +476,43 @@ def test_md_minimo_rende_titoli_liste_grassetto_codice_e_scappa_l_html():
     assert '<a href="https://esempio.it/x" target="_blank" rel="noopener">doc</a>' in out
     assert "javascript:" in out and "<a href=\"javascript" not in out  # solo https diventa link
     assert out.count("<p>") == 1
+
+
+# ───── 21/11/2026: un elenco che c'è ma non si legge CHIUDE, e lo dice ─────
+
+def test_elenco_illeggibile_chiude_le_sessioni_di_prima_e_lo_dice(tmp_path):
+    path = tmp_path / "admin_revoked.json"
+    path.write_text('{"rubato": 99999')                     # troncato
+    detti: list[str] = []
+    prima = time.time()
+    rl = admin_core.RevocationList(path, avvisa=detti.append)
+    assert rl.prima_della_soglia(prima - 60) is True         # un cookie di prima non vale più
+    assert rl.prima_della_soglia(time.time() + 1) is False   # uno emesso dopo sì
+    assert detti and "messo da parte" in detti[0]
+    assert (tmp_path / "admin_revoked.json.illeggibile").exists()
+    # la soglia è su disco: sopravvive a un riavvio
+    dopo = admin_core.RevocationList(path, avvisa=detti.append)
+    assert dopo.non_prima_di == rl.non_prima_di and dopo.prima_della_soglia(prima - 60)
+    assert len(detti) == 1 and len(dopo) == 0                # la soglia non è una revoca
+
+
+def test_elenco_assente_non_chiude_niente(tmp_path):
+    detti: list[str] = []
+    rl = admin_core.RevocationList(tmp_path / "admin_revoked.json", avvisa=detti.append)
+    assert rl.non_prima_di == 0.0 and rl.prima_della_soglia(1.0) is False and detti == []
+    assert rl.prima_della_soglia(None) is False
+
+
+def test_le_voci_scartate_si_dicono(tmp_path):
+    path = tmp_path / "admin_revoked.json"
+    path.write_text(json.dumps({"buono": 9_999_999_999, "rotto": "domani"}))
+    detti: list[str] = []
+    admin_core.RevocationList(path, avvisa=detti.append)
+    assert detti == ["1 voci dell'elenco non leggibili, scartate"]
+
+
+def test_il_confronto_di_riserva_e_per_numeri():
+    assert admin_core._versione_maggiore("0.10.0", "0.9.9") is True
+    assert admin_core._versione_maggiore("0.9.9", "0.10.0") is False
+    classe, _ = admin_core.classe_verdetto_update("0.9.9", "0.10.0", "", None)
+    assert classe not in ("aggiornato", "latest-piu-vecchia")

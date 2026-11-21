@@ -13,11 +13,12 @@ from contextlib import AsyncExitStack
 
 import httpx
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, Response, StreamingResponse
+from starlette.responses import PlainTextResponse, Response
 
 from . import nlm_client
 from .audit import audit
 from .ratelimit import RateLimiter
+from .risposte import RispostaChiusa
 
 log = logging.getLogger("gateway.scarica")
 
@@ -75,4 +76,7 @@ async def scarica(request: Request) -> Response:
     headers["content-disposition"] = f'attachment; filename="{safe}"'
     if upstream.headers.get("content-length"):
         headers["content-length"] = upstream.headers["content-length"]
-    return StreamingResponse(_pezzi(), media_type="application/octet-stream", headers=headers)
+    # la chiusura sta anche sulla risposta: se chi scarica se ne va prima che `_pezzi` parta,
+    # il suo `finally` non gira (`AsyncExitStack.aclose` regge la seconda chiamata)
+    return RispostaChiusa(_pezzi(), media_type="application/octet-stream", headers=headers,
+                          chiusura=pila.aclose)

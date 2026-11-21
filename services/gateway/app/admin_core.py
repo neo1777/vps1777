@@ -34,6 +34,9 @@ def prune(entries: dict[str, float], now: float) -> dict[str, float]:
     return {jti: exp for jti, exp in entries.items() if exp > now}
 
 
+CHIAVE_SOGLIA = "__non_prima_di__"     # nel file accanto ai jti: da quando valgono le sessioni
+
+
 class RevocationList:
     """`jti` revocati → epoch di scadenza del token. Persistita su JSON.
 
@@ -45,10 +48,17 @@ class RevocationList:
     se un domani il gateway girasse con più worker (oggi è un processo solo).
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, avvisa=None) -> None:
         self._path = Path(path)
         self._entries: dict[str, float] = {}
         self._mtime: float = -1.0
+        # Se l'elenco c'era ma non si legge, non si sa più quali sessioni erano state chiuse:
+        # da quel momento valgono solo i token emessi DOPO (`prima_della_soglia`). Prima un file
+        # rotto valeva «nessuna revoca», e un cookie di cui si era fatto logout tornava buono
+        # fino alla sua scadenza. `avvisa(motivo)` lo dice a chi tiene l'audit.
+        self.non_prima_di: float = 0.0
+        self._avvisa = avvisa or (lambda _motivo: None)
+        self._da_salvare = False
         self.reload()
 
     # ───── I/O ─────
@@ -59,25 +69,62 @@ class RevocationList:
         except OSError:
             return -1.0
 
+    def _illeggibile(self, motivo: str) -> None:
+        """Il file c'è ma non dà un elenco: si chiude (soglia), si mette da parte e si dice."""
+        self.non_prima_di = time.time()
+        self._da_salvare = True
+        try:
+            os.replace(self._path, self._path.with_name(self._path.name + ".illeggibile"))
+            esito = "messo da parte"
+        except OSError as exc:
+            esito = f"NON messo da parte ({exc})"
+        self._avvisa(f"{motivo}; {esito}; valgono solo le sessioni aperte da adesso")
+
     def _read(self) -> dict[str, float]:
         try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            testo = self._path.read_text(encoding="utf-8")
+        except FileNotFoundError:           # prima installazione: nessuna revoca, davvero
             return {}
-        if not isinstance(raw, dict):
+        except OSError as exc:
+            self._illeggibile(str(exc))
+            return {}
+        try:
+            raw = json.loads(testo)
+            if not isinstance(raw, dict):
+                raise ValueError("l'elenco non è un oggetto JSON")
+        except ValueError as exc:
+            self._illeggibile(str(exc))
             return {}
         out: dict[str, float] = {}
+        scartate = 0
         for jti, exp in raw.items():
             try:
-                out[str(jti)] = float(exp)
+                valore = float(exp)
             except (TypeError, ValueError):
-                continue  # voce corrotta: si scarta quella, non il file
+                scartate += 1               # voce corrotta: si scarta quella, non il file
+                continue
+            if jti == CHIAVE_SOGLIA:
+                self.non_prima_di = max(self.non_prima_di, valore)
+            else:
+                out[str(jti)] = valore
+        if scartate:
+            self._avvisa(f"{scartate} voci dell'elenco non leggibili, scartate")
         return out
 
     def reload(self, now: float | None = None) -> None:
         """Rilegge il file da zero (e pota)."""
         self._entries = prune(self._read(), time.time() if now is None else now)
         self._mtime = self._stat_mtime()
+        if self._da_salvare:                # la soglia deve sopravvivere al prossimo riavvio
+            self._da_salvare = False
+            self.save()
+
+    def prima_della_soglia(self, iat: object) -> bool:
+        """True se un token emesso a `iat` è di PRIMA che l'elenco andasse perso."""
+        try:
+            return float(iat) < self.non_prima_di      # type: ignore[arg-type]  # `object`: l'except lo regge
+        except (TypeError, ValueError):
+            return self.non_prima_di > 0
 
     def _sync(self, now: float | None = None) -> None:
         """Ricarica solo se il file è cambiato sotto di noi (stat, non read)."""
@@ -93,7 +140,12 @@ class RevocationList:
                                        prefix=".revoked-", suffix=".tmp")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    json.dump(self._entries, fh)
+                    dati = dict(self._entries)
+                    if self.non_prima_di:
+                        dati[CHIAVE_SOGLIA] = self.non_prima_di
+                    json.dump(dati, fh)
+                    fh.flush()
+                    os.fsync(fh.fileno())   # senza, dopo un crash il file rinominato può essere vuoto
                 os.chmod(tmp, 0o600)
                 os.replace(tmp, self._path)
             except OSError:
@@ -228,6 +280,13 @@ def stato_dopo_refresh_fallito(prev: dict, spiega: str, dettaglio: str,
     return out
 
 
+def _versione_maggiore(a: object, b: object) -> bool:
+    """Il confronto di riserva, per numeri: fra stringhe «0.10» verrebbe prima di «0.9»."""
+    def numeri(v: object) -> tuple[int, ...]:
+        return tuple(int(x) for x in re.findall(r"\d+", str(v)))
+    return numeri(a) > numeri(b)
+
+
 def classe_verdetto_update(current: str, latest: str | None, checked_at: str,
                            error: str | None, now: float | None = None,
                            piu_recente=None) -> tuple[str, int | None]:
@@ -258,7 +317,7 @@ def classe_verdetto_update(current: str, latest: str | None, checked_at: str,
     """
     if error:
         return ("errore-check", None)
-    cmp_ = piu_recente or (lambda a, b: str(a) > str(b))
+    cmp_ = piu_recente or _versione_maggiore
     if latest and cmp_(str(latest), current):
         # L'ETÀ SERVE QUI PIÙ CHE ALTROVE, e la prima versione non la dava.
         # Trovato dall'artefatto del round-6 (27/07): avevo messo il perimetro sul
@@ -319,6 +378,8 @@ def testo_verdetto_update(classe: str, ore: int | None, current: str,
                 f"eri alla v{current}, l'ultima.")
     if classe == "aggiornato":
         return f"Al controllo di {ore} ore fa eri alla versione più recente."
+    if classe != "mai-controllato":
+        return f"Stato del controllo non riconosciuto ({classe})."
     return "Nessun check ancora eseguito (il timer gira una volta al giorno)."
 
 

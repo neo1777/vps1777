@@ -133,7 +133,7 @@ def test_gli_orfani_vecchi_se_ne_vanno_i_recenti_no(posto):
     recente.write_text("x")
     t = time.time() - iw.ORFANO_DOPO_S - 60
     os.utime(vecchio, (t, t))
-    assert iw._pulisci_orfani(coda, tranne=coda / "altro") == 1
+    assert iw._pulisci_orfani(coda, tranne=coda / "altro") == (1, 0)
     assert not vecchio.exists() and recente.exists()
 
 

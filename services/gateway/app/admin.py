@@ -1,5 +1,6 @@
 """
-Pannello admin — /admin/{login,logout,setup,nlm,archive,update,secrets,audit}.
+Pannello admin — /admin/{login,logout,setup,nlm,archive,update,secrets,audit,salute,
+connettori,temi}: le rotte vere stanno in routes.py, e le schede in `_layout`.
 
 Tutto dietro `admin_cookie` (JWT typ=admin) settato dopo bcrypt verify.
 
@@ -24,6 +25,7 @@ import zipfile
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from . import admin_core, archive_indexer, coda_ingest, nlm_client
 from .admin_core import safe_next_url
@@ -33,11 +35,11 @@ from urllib.parse import quote, quote_plus
 
 import httpx
 from starlette.requests import Request
-from starlette.responses import (HTMLResponse, JSONResponse, RedirectResponse, Response,
-                                 StreamingResponse)
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from .audit import audit, audit_health, leggi_recenti
 from .jwt_helpers import JWTError, issue, verify
+from .risposte import RispostaChiusa
 from .security import verify_admin_password
 from .settings import get_settings
 
@@ -64,7 +66,8 @@ def _revocations() -> admin_core.RevocationList:
     global _admin_revoked
     if _admin_revoked is None:
         path = Path(get_settings().audit_log_path).parent / "admin_revoked.json"
-        _admin_revoked = admin_core.RevocationList(path)
+        _admin_revoked = admin_core.RevocationList(
+            path, avvisa=lambda motivo: audit({"event": "admin_revoked_unreadable", "error": motivo}))
     return _admin_revoked
 
 
@@ -87,7 +90,8 @@ def _admin_claims(request: Request) -> dict | None:
     # rifiutalo invece di fidartene. In pratica succede una volta sola, ai cookie
     # emessi prima di questo fix → un re-login, non un bug.
     jti = str(claims.get("jti") or "")
-    if not jti or _revocations().is_revoked(jti):
+    revoche = _revocations()
+    if not jti or revoche.is_revoked(jti) or revoche.prima_della_soglia(claims.get("iat")):
         return None
     return claims
 
@@ -195,8 +199,24 @@ def _login_lock_remaining(ip: str) -> float:
     return max(0.0, _LOGIN_LOCK.get(ip, 0.0) - time.time())
 
 
+_LOGIN_MAX_IP = 10_000       # tetto alle voci in memoria: oltre, si tolgono le più vecchie
+
+
+def _login_pota(now: float) -> None:
+    """Toglie i blocchi scaduti e i tentativi fuori finestra: senza, restava una voce per ogni
+    IP che aveva sbagliato una volta, fino al riavvio."""
+    for ip in [k for k, fino in _LOGIN_LOCK.items() if fino <= now]:
+        del _LOGIN_LOCK[ip]
+    for ip in [k for k, v in _LOGIN_FAILS.items() if not v or now - v[-1] >= _LOGIN_WINDOW]:
+        del _LOGIN_FAILS[ip]
+    for mappa in (_LOGIN_FAILS, _LOGIN_LOCK):
+        while len(mappa) >= _LOGIN_MAX_IP:
+            del mappa[next(iter(mappa))]
+
+
 def _login_record_fail(ip: str) -> None:
     now = time.time()
+    _login_pota(now)
     fails = [t for t in _LOGIN_FAILS.get(ip, []) if now - t < _LOGIN_WINDOW]
     fails.append(now)
     if len(fails) >= _LOGIN_MAX:
@@ -561,13 +581,16 @@ async def nlm_artifact(request: Request) -> Response:
             async for pezzo in upstream.aiter_raw():
                 yield pezzo
         finally:
-            await pila.aclose()
+            await pila.aclose()     # reggere due chiamate è di AsyncExitStack: la seconda è vuota
 
     safe = name.replace('"', "").replace("\\", "")
     headers = {"content-disposition": f'attachment; filename="{safe}"'}
     if upstream.headers.get("content-length"):
         headers["content-length"] = upstream.headers["content-length"]
-    return StreamingResponse(_pezzi(), media_type="application/octet-stream", headers=headers)
+    # la chiusura sta anche sulla risposta: se il browser se ne va prima che `_pezzi` parta,
+    # il suo `finally` non gira e lo stream verso nb1777-mcp resterebbe aperto
+    return RispostaChiusa(_pezzi(), media_type="application/octet-stream", headers=headers,
+                          chiusura=pila.aclose)
 
 
 async def nlm_view(request: Request) -> Response:
@@ -581,6 +604,7 @@ async def nlm_view(request: Request) -> Response:
         if upload is None or not hasattr(upload, "read"):
             return RedirectResponse("/admin/nlm?msg=Nessun+file+caricato&kind=err", status_code=303)
         # un byte oltre il tetto basta a dire «troppo grande», senza portare in RAM il resto
+        # `form.get` dà UploadFile | str: qui è un file, garantito dall'`hasattr(…, "read")` sopra
         content = await upload.read(5_000_001)  # type: ignore[union-attr]
 
         if not content:
@@ -679,6 +703,14 @@ def _archive_dbs() -> list[dict]:
     for d in dbs:
         d["indice"] = archive_indexer.stato_indice(cartella / f"{d['name']}.db")
     return dbs
+
+
+def _celle_conteggi(d: dict) -> str:
+    """Messaggi ed etichette di un archivio; se il DB non si legge lo dice, invece di «0»."""
+    if d.get("illeggibile"):
+        return (f'<td colspan="2" title="{html.escape(str(d["illeggibile"]))}">'
+                'non leggibile adesso</td>')
+    return f"<td>{d['rows']}</td><td>{d['labels']}</td>"
 
 
 def _cella_indice(st: dict) -> str:
@@ -802,189 +834,220 @@ def _sezione_caricamenti(lavori: list[dict]) -> str:
 
 async def archive_view(request: Request) -> Response:
     email, redirect = await _require_admin(request)
-    if redirect:
-        return redirect
+    if redirect or email is None:
+        return redirect or RedirectResponse("/admin/login", status_code=302)
 
     s = get_settings()
     db_dir = Path(s.archive_db_dir)
     db_dir.mkdir(parents=True, exist_ok=True)
-
     if request.method == "POST":
-        # 🔴 IL TETTO SI GUARDA PRIMA DI `request.form()`, e la riga sotto è il punto
-        #   esatto in cui il danno avviene: `form()` legge il body e Starlette ci
-        #   spilla il multipart in `/tmp` (`SpooledTemporaryFile`, rollover a 1 MB).
-        #   ⚠️ E `/tmp` NON è il disco: `compose.yaml:43-52` lo monta come **tmpfs**
-        #   — il commento lo dice a voce — **senza un `size:` dichiarato**, quindi
-        #   vale il default del kernel: metà della RAM.
-        # ⇒ MISURATO il 03/08 (71d540e6, voce `2bd05092`, dalla revisione della #88):
-        #   la guardia sullo spazio disco introdotta lì è GIUSTA e guarda `db_dir` —
-        #   ma un upload da 4 GB, che `MAX_UPLOAD_BYTES` **ammette**, riempie la
-        #   tmpfs prima che quella guardia venga mai valutata. *Lo spazio era protetto
-        #   dove si scrive il risultato, non dove transita il materiale.*
-        # 🛡️ Perché QUESTA cura e non `tmpfs: size=`: quella richiede di sapere quanta
-        #   RAM ha la macchina, che da qui non è misurabile e cambia da VPS a VPS.
-        #   Questa non dipende né dalla RAM né dalla versione di Starlette: rifiuta
-        #   sulla DICHIARAZIONE del client, prima di materializzare un byte.
-        # ⚠️ IL PERIMETRO, e la prima versione di questo commento prometteva di più.
-        #   `Content-Length` LO DICHIARA IL CLIENT. Questa guardia copre il caso
-        #   ONESTO — l'upload troppo grande per errore — e **NON copre quello
-        #   malevolo**: chi vuole riempire la tmpfs apposta omette l'header (chunked)
-        #   o ci scrive un numero piccolo, e passa di qui senza essere visto.
-        #   🔴 Avevo scritto «rete in più sul caso PEGGIORE»: il caso peggiore è
-        #     esattamente quello che non copre. *Rilievo di b82df434 sulla PR #94, e
-        #     non è sul codice — è sulla riga che ne descrive il perimetro.*
-        #   ⭐ E la via che sembrava chiuderlo NON esiste: `Request.form()` espone
-        #     `max_part_size`, ma **misurato** (starlette 1.3.1, prova eseguita) NON è
-        #     un tetto — una parte da 3 MB passa sia col default da 1 MB sia con 2 MB:
-        #     è la dimensione del chunk di parsing, e il nome inganna. *Non dedotto
-        #     dalla firma: provato, perché una firma letta non è un comportamento.*
-        #   ⇒ Il tetto che regge anche contro un client che mente sta PRIMA del
-        #     gateway, nel proxy che conta i byte veri (`request_body max_size` in
-        #     Caddy). Voce aperta: copre 1 ingresso su 3 (Caddy sì, cloudflared e
-        #     tailscale-serve no) — la stessa forma dei tre installer.
-        #   Qui resta ciò che questa riga fa davvero: «non l'ho potuto leggere» ≠ «è
-        #   troppo grande», e a valle restano il tetto sul loop e la guardia sul disco.
-        _dichiarata = request.headers.get("content-length")
-        if _dichiarata is not None:
-            try:
-                _n = int(_dichiarata)
-            except ValueError:
-                _n = -1          # header illeggibile: come se mancasse, non un rifiuto
-            # Margine per l'overhead del multipart (boundary + campi del form): il
-            # file al tetto esatto deve poter passare, o rifiuteremmo un upload che
-            # il loop di scrittura accetterebbe.
-            _tetto = archive_indexer.MAX_UPLOAD_BYTES + 1024 * 1024
-            if _n > _tetto:
-                audit({"event": "admin_archive_upload_rifiutato_dichiarato", "by": email,
-                       "dichiarati_mb": _n // (1024 * 1024)})
-                return RedirectResponse(
-                    "/admin/archive?msg=" + quote_plus(
-                        f"upload rifiutato: dichiarati {_n // (1024 * 1024)} MB, il "
-                        f"tetto è {archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} "
-                        f"MB. " + _PER_FONTI_GRANDI
-                    ) + "&kind=err", status_code=303)
-        form = await request.form()
-        # Dal 29/08/2026 l'export claude.ai arriva in 5 zip per categoria: il form
-        # accetta PIÙ file in un gesto solo, tutti sullo stesso `nome DB`, in
-        # ordine — ognuno passa dalle stesse guardie (tetto, spazio) del singolo.
-        uploads = [u for u in form.getlist("jsonl_file") if u is not None and hasattr(u, "read")]
-        if not uploads:
-            return RedirectResponse("/admin/archive?msg=Nessun+file+caricato&kind=err", status_code=303)
-        db_name = _safe_db_name(
-            str(form.get("db_name") or ""),
-            fallback=_safe_db_name(Path(getattr(uploads[0], "filename", "") or "").stem),
-        )
-        project = str(form.get("project") or "").strip()
-        description = str(form.get("description") or "").strip()
-        db_path = db_dir / f"{db_name}.db"
-        esiti: list[str] = []          # un rigo per file, nell'ordine di arrivo
-        accodati = 0                   # P16: i file passati al servizio `ingest`
-        tmp = db_dir / f".upload-{db_name}-{os.getpid()}"
-        try:
-            for upload in uploads:
-                nome_file = Path(str(getattr(upload, "filename", "") or "")).name
-                suffix = Path(nome_file).suffix.lower() or ".jsonl"
-                # Un nome per caricamento (due insieme sullo stesso DB non si pestano), e per i
-                # `.db` un nome che NON finisce in `.db`: a metà scrittura lo scan di archive-mcp
-                # e la pagina lo elencavano come un archivio (giro di revisione del 21/11).
-                tmp = db_dir / (f".upload-{db_name}-{os.getpid()}-{pysecrets.token_hex(4)}{suffix}"
-                                + (".caricamento" if suffix == ".db" else ""))
-                try:
-                    # stream su disco a chunk (memoria costante anche su file da decine di MB).
-                    # TETTO sull'upload (H39): i tetti di decompressione stanno a valle,
-                    # nell'indexer — ma un upload da 100 GB riempirebbe il disco PRIMA di
-                    # arrivarci. Si conta mentre si scrive e si taglia. È la lezione del
-                    # tar-bomb: un limite sul trasporto va messo anche sul trasporto.
-                    # 🔴 LO SPAZIO SI GUARDA PRIMA DI SCRIVERE, e fino al 03/08 nessuno lo faceva.
-                    #   Il commento di `archive_indexer.py:105` lo prescriveva da tre settimane
-                    #   — «Il disco della VPS deve avere spazio per upload + DB: verificare prima
-                    #   dei giganti» — e in tutto `services/` c'erano ZERO `statvfs`/`disk_usage`.
-                    #   Un difetto scritto come specifica: la riga descrive il rimedio, e nessuno
-                    #   l'ha letta come «da fare» perché ha la forma di una cosa già decisa.
-                    # ⚠️ IL DANNO che previene non è l'upload fallito: è il DISCO PIENO. Il loop
-                    #   qui sotto scrive a chunk e si ferma solo al tetto — su un disco corto
-                    #   riempie tutto e muore a metà, e sulla stessa partizione ci sono il DB
-                    #   dell'archivio e i suoi journal. `archive-mcp` monta quel volume in `:ro`
-                    #   (H46): a disco pieno non potrebbe nemmeno riparare il proprio journal.
-                    # 📏 LA SOGLIA NON È INVENTATA: è `MAX_UPLOAD_BYTES`, che esiste già. Non
-                    #   conosciamo la dimensione dell'upload in anticipo (è uno stream), quindi
-                    #   l'unica soglia onesta è «lo spazio che servirebbe nel caso peggiore
-                    #   ammesso». È conservativa di proposito, e lo dice a chi la incontra.
-                    try:
-                        _libero = shutil.disk_usage(db_dir).free
-                    except OSError:
-                        _libero = None      # non misurabile ≠ misurato e va bene: si prosegue
-                    if _libero is not None and _libero < archive_indexer.MAX_UPLOAD_BYTES:
-                        audit({"event": "admin_archive_upload_rifiutato_spazio", "by": email,
-                               "db": db_name, "libero_mb": _libero // (1024 * 1024)})
-                        raise ValueError(
-                            f"spazio su disco insufficiente: liberi "
-                            f"{_libero // (1024 * 1024)} MB, ne servono almeno "
-                            f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
-                            f"(il tetto di un upload). Libera spazio sul disco della VPS "
-                            f"(backup vecchi, immagini Docker inutilizzate) e riprova.")
-                    await asyncio.to_thread(_copia_upload, upload.file, tmp)  # type: ignore[union-attr]
-                    if suffix == ".db":
-                        # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
-                        if not _valid_archive_db(tmp):
-                            raise ValueError("il .db non ha lo schema atteso (messages_fts)")
-                        # Un `.db` SOSTITUISCE, gli altri formati accumulano: su un nome già
-                        # usato si rifiuta, invece di far sparire in silenzio l'archivio che c'è.
-                        if db_path.exists():
-                            raise ValueError(
-                                f"esiste già un archivio '{db_name}': un .db lo sostituirebbe "
-                                "per intero. Scegli un altro nome, o elimina prima quello che c'è.")
-                        tmp.replace(db_path)
-                        n = archive_indexer.count_rows(db_path)
-                        verb = "caricato (drop-in)"
-                    elif s.archive_ingest_coda:
-                        # P16: l'indicizzazione la fa il servizio `ingest`, con il suo
-                        # tetto di memoria; qui il file passa in coda (un rename).
-                        jid = await asyncio.to_thread(
-                            coda_ingest.accoda, s.onboarding_dir, s.archive_db_dir, tmp,
-                            db=db_name, suffisso=suffix, nome_file=nome_file,
-                            project=project, description=description, by=email)
-                        audit({"event": "admin_archive_accodato", "by": email, "db": db_name,
-                               "fmt": suffix, "file": nome_file, "lavoro": jid})
-                        esiti.append(f"{nome_file}: in coda")
-                        accodati += 1
-                        continue
-                    else:
-                        # dispatch per estensione: .jsonl/.json → Claude Code; .zip → claude.ai; .md/.txt → testo
-                        n = await _indicizza(str(tmp), str(db_path), project)
-                        verb = "indicizzati"
-                    audit({"event": "admin_archive_ingest", "by": email, "db": db_name,
-                           "fmt": suffix, "file": nome_file, "rows": n})
-                    esiti.append(f"{nome_file}: {verb} {n}")
-                finally:
-                    tmp.unlink(missing_ok=True)
-            if accodati:
-                # la descrizione la scrive il lavoro, dopo l'indicizzazione: il DB
-                # può non esistere ancora
-                msg = (f"{' · '.join(esiti)} → '{db_name}'. L'indicizzazione gira a parte, "
-                       f"con un tetto di memoria suo: lo stato è qui sotto, in «Caricamenti».")
-                return RedirectResponse(f"/admin/archive?msg={quote_plus(msg)}&kind=ok",
-                                        status_code=303)
-            if description:
-                archive_indexer.set_meta(db_path, "description", description)
-            total = archive_indexer.count_rows(db_path)
-            if len(esiti) == 1:
-                msg = f"{esiti[0]} record in '{db_name}' (totale {total}). Ricerca attiva subito."
-            else:
-                msg = (f"{len(esiti)} file in '{db_name}' (totale {total}): "
-                       + " · ".join(esiti) + ". Ricerca attiva subito.")
-            return RedirectResponse(f"/admin/archive?msg={quote_plus(msg)}&kind=ok", status_code=303)
-        # BadZipFile non è un OSError: senza, uno zip rotto dava un 500 (trovato col P16)
-        except (ValueError, OSError, RuntimeError, sqlite3.Error, zipfile.BadZipFile) as exc:
-            audit({"event": "admin_archive_ingest_err", "by": email, "db": db_name, "error": str(exc)})
-            # I file già indicizzati RESTANO nel DB (ogni file è la sua transazione):
-            # lo si dice, perché «Errore» da solo farebbe ricaricare anche quelli.
-            fatti = f" (già indicizzati: {' · '.join(esiti)})" if esiti else ""
-            return RedirectResponse(
-                f"/admin/archive?msg={quote_plus('Errore: ' + str(exc) + fatti)}&kind=err", status_code=303)
-        finally:
-            tmp.unlink(missing_ok=True)
+        return await _archive_carica(request, email, s, db_dir)
+    return await _archive_pagina(request, email, s)
 
+
+def _upload_dichiarato_troppo_grande(request: Request, email: str) -> Response | None:
+    """Il rifiuto sul `Content-Length` dichiarato, o None se si può leggere il corpo."""
+    # 🔴 IL TETTO SI GUARDA PRIMA DI `request.form()`, e la riga sotto è il punto
+    #   esatto in cui il danno avviene: `form()` legge il body e Starlette ci
+    #   spilla il multipart in `/tmp` (`SpooledTemporaryFile`, rollover a 1 MB).
+    #   ⚠️ E `/tmp` NON è il disco: `compose.yaml:43-52` lo monta come **tmpfs**
+    #   — il commento lo dice a voce — **senza un `size:` dichiarato**, quindi
+    #   vale il default del kernel: metà della RAM.
+    # ⇒ MISURATO il 03/08 (71d540e6, voce `2bd05092`, dalla revisione della #88):
+    #   la guardia sullo spazio disco introdotta lì è GIUSTA e guarda `db_dir` —
+    #   ma un upload da 4 GB, che `MAX_UPLOAD_BYTES` **ammette**, riempie la
+    #   tmpfs prima che quella guardia venga mai valutata. *Lo spazio era protetto
+    #   dove si scrive il risultato, non dove transita il materiale.*
+    # 🛡️ Perché QUESTA cura e non `tmpfs: size=`: quella richiede di sapere quanta
+    #   RAM ha la macchina, che da qui non è misurabile e cambia da VPS a VPS.
+    #   Questa non dipende né dalla RAM né dalla versione di Starlette: rifiuta
+    #   sulla DICHIARAZIONE del client, prima di materializzare un byte.
+    # ⚠️ IL PERIMETRO, e la prima versione di questo commento prometteva di più.
+    #   `Content-Length` LO DICHIARA IL CLIENT. Questa guardia copre il caso
+    #   ONESTO — l'upload troppo grande per errore — e **NON copre quello
+    #   malevolo**: chi vuole riempire la tmpfs apposta omette l'header (chunked)
+    #   o ci scrive un numero piccolo, e passa di qui senza essere visto.
+    #   🔴 Avevo scritto «rete in più sul caso PEGGIORE»: il caso peggiore è
+    #     esattamente quello che non copre. *Rilievo di b82df434 sulla PR #94, e
+    #     non è sul codice — è sulla riga che ne descrive il perimetro.*
+    #   ⭐ E la via che sembrava chiuderlo NON esiste: `Request.form()` espone
+    #     `max_part_size`, ma **misurato** (starlette 1.3.1, prova eseguita) NON è
+    #     un tetto — una parte da 3 MB passa sia col default da 1 MB sia con 2 MB:
+    #     è la dimensione del chunk di parsing, e il nome inganna. *Non dedotto
+    #     dalla firma: provato, perché una firma letta non è un comportamento.*
+    #   ⇒ Il tetto che regge anche contro un client che mente sta PRIMA del
+    #     gateway, nel proxy che conta i byte veri (`request_body max_size` in
+    #     Caddy). Voce aperta: copre 1 ingresso su 3 (Caddy sì, cloudflared e
+    #     tailscale-serve no) — la stessa forma dei tre installer.
+    #   Qui resta ciò che questa riga fa davvero: «non l'ho potuto leggere» ≠ «è
+    #   troppo grande», e a valle restano il tetto sul loop e la guardia sul disco.
+    _dichiarata = request.headers.get("content-length")
+    if _dichiarata is not None:
+        try:
+            _n = int(_dichiarata)
+        except ValueError:
+            _n = -1          # header illeggibile: come se mancasse, non un rifiuto
+        # Margine per l'overhead del multipart (boundary + campi del form): il
+        # file al tetto esatto deve poter passare, o rifiuteremmo un upload che
+        # il loop di scrittura accetterebbe.
+        _tetto = archive_indexer.MAX_UPLOAD_BYTES + 1024 * 1024
+        if _n > _tetto:
+            audit({"event": "admin_archive_upload_rifiutato_dichiarato", "by": email,
+                   "dichiarati_mb": _n // (1024 * 1024)})
+            return RedirectResponse(
+                "/admin/archive?msg=" + quote_plus(
+                    f"upload rifiutato: dichiarati {_n // (1024 * 1024)} MB, il "
+                    f"tetto è {archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} "
+                    f"MB. " + _PER_FONTI_GRANDI
+                ) + "&kind=err", status_code=303)
+    return None
+
+
+class _Carico:
+    """Ciò che vale per tutti i file di UN caricamento: dove vanno e chi li manda."""
+
+    def __init__(self, s: Any, db_dir: Path, db_name: str, project: str, description: str,
+                 email: str) -> None:
+        self.s, self.db_dir, self.db_name = s, db_dir, db_name
+        self.db_path = db_dir / f"{db_name}.db"
+        self.project, self.description, self.email = project, description, email
+
+
+async def _archive_carica(request: Request, email: str, s: Any, db_dir: Path) -> Response:
+    """Il POST di /admin/archive: prima il tetto dichiarato, poi un file alla volta."""
+    rifiuto = _upload_dichiarato_troppo_grande(request, email)
+    if rifiuto is not None:
+        return rifiuto
+    form = await request.form()
+    # Dal 29/08/2026 l'export claude.ai arriva in 5 zip per categoria: il form
+    # accetta PIÙ file in un gesto solo, tutti sullo stesso `nome DB`, in
+    # ordine — ognuno passa dalle stesse guardie (tetto, spazio) del singolo.
+    uploads = [u for u in form.getlist("jsonl_file") if u is not None and hasattr(u, "read")]
+    if not uploads:
+        return RedirectResponse("/admin/archive?msg=Nessun+file+caricato&kind=err", status_code=303)
+    db_name = _safe_db_name(
+        str(form.get("db_name") or ""),
+        fallback=_safe_db_name(Path(getattr(uploads[0], "filename", "") or "").stem),
+    )
+    project = str(form.get("project") or "").strip()
+    description = str(form.get("description") or "").strip()
+    esiti: list[str] = []          # un rigo per file, nell'ordine di arrivo
+    accodati = 0                   # P16: i file passati al servizio `ingest`
+    c = _Carico(s, db_dir, db_name, project, description, email)
+    db_path = c.db_path
+    try:
+        for upload in uploads:
+            esito, in_coda = await _archive_un_file(upload, c)
+            esiti.append(esito)
+            accodati += in_coda
+        if accodati:
+            # la descrizione la scrive il lavoro, dopo l'indicizzazione: il DB
+            # può non esistere ancora
+            msg = (f"{' · '.join(esiti)} → '{db_name}'. L'indicizzazione gira a parte, "
+                   f"con un tetto di memoria suo: lo stato è qui sotto, in «Caricamenti».")
+            return RedirectResponse(f"/admin/archive?msg={quote_plus(msg)}&kind=ok",
+                                    status_code=303)
+        if description:
+            archive_indexer.set_meta(db_path, "description", description)
+        total = archive_indexer.count_rows(db_path)
+        if len(esiti) == 1:
+            msg = f"{esiti[0]} record in '{db_name}' (totale {total}). Ricerca attiva subito."
+        else:
+            msg = (f"{len(esiti)} file in '{db_name}' (totale {total}): "
+                   + " · ".join(esiti) + ". Ricerca attiva subito.")
+        return RedirectResponse(f"/admin/archive?msg={quote_plus(msg)}&kind=ok", status_code=303)
+    # BadZipFile non è un OSError: senza, uno zip rotto dava un 500 (trovato col P16)
+    except (ValueError, OSError, RuntimeError, sqlite3.Error, zipfile.BadZipFile) as exc:
+        audit({"event": "admin_archive_ingest_err", "by": email, "db": db_name, "error": str(exc)})
+        # I file già indicizzati RESTANO nel DB (ogni file è la sua transazione):
+        # lo si dice, perché «Errore» da solo farebbe ricaricare anche quelli.
+        fatti = f" (già indicizzati: {' · '.join(esiti)})" if esiti else ""
+        return RedirectResponse(
+            f"/admin/archive?msg={quote_plus('Errore: ' + str(exc) + fatti)}&kind=err", status_code=303)
+
+
+async def _archive_un_file(upload: Any, c: _Carico) -> tuple[str, bool]:
+    """Un file del caricamento: (riga d'esito, è finito in coda?). Passa dalle stesse guardie
+    del caricamento singolo (spazio, tetto, schema) e toglie sempre il suo temporaneo."""
+    nome_file = Path(str(getattr(upload, "filename", "") or "")).name
+    suffix = Path(nome_file).suffix.lower() or ".jsonl"
+    # Un nome per caricamento (due insieme sullo stesso DB non si pestano), e per i
+    # `.db` un nome che NON finisce in `.db`: a metà scrittura lo scan di archive-mcp
+    # e la pagina lo elencavano come un archivio (giro di revisione del 21/11).
+    tmp = c.db_dir / (f".upload-{c.db_name}-{os.getpid()}-{pysecrets.token_hex(4)}{suffix}"
+                    + (".caricamento" if suffix == ".db" else ""))
+    try:
+        # stream su disco a chunk (memoria costante anche su file da decine di MB).
+        # TETTO sull'upload (H39): i tetti di decompressione stanno a valle,
+        # nell'indexer — ma un upload da 100 GB riempirebbe il disco PRIMA di
+        # arrivarci. Si conta mentre si scrive e si taglia. È la lezione del
+        # tar-bomb: un limite sul trasporto va messo anche sul trasporto.
+        # 🔴 LO SPAZIO SI GUARDA PRIMA DI SCRIVERE, e fino al 03/08 nessuno lo faceva.
+        #   Il commento di `archive_indexer.py:105` lo prescriveva da tre settimane
+        #   — «Il disco della VPS deve avere spazio per upload + DB: verificare prima
+        #   dei giganti» — e in tutto `services/` c'erano ZERO `statvfs`/`disk_usage`.
+        #   Un difetto scritto come specifica: la riga descrive il rimedio, e nessuno
+        #   l'ha letta come «da fare» perché ha la forma di una cosa già decisa.
+        # ⚠️ IL DANNO che previene non è l'upload fallito: è il DISCO PIENO. Il loop
+        #   qui sotto scrive a chunk e si ferma solo al tetto — su un disco corto
+        #   riempie tutto e muore a metà, e sulla stessa partizione ci sono il DB
+        #   dell'archivio e i suoi journal. `archive-mcp` monta quel volume in `:ro`
+        #   (H46): a disco pieno non potrebbe nemmeno riparare il proprio journal.
+        # 📏 LA SOGLIA NON È INVENTATA: è `MAX_UPLOAD_BYTES`, che esiste già. Non
+        #   conosciamo la dimensione dell'upload in anticipo (è uno stream), quindi
+        #   l'unica soglia onesta è «lo spazio che servirebbe nel caso peggiore
+        #   ammesso». È conservativa di proposito, e lo dice a chi la incontra.
+        try:
+            _libero = shutil.disk_usage(c.db_dir).free
+        except OSError:
+            _libero = None      # non misurabile ≠ misurato e va bene: si prosegue
+        if _libero is not None and _libero < archive_indexer.MAX_UPLOAD_BYTES:
+            audit({"event": "admin_archive_upload_rifiutato_spazio", "by": c.email,
+                   "db": c.db_name, "libero_mb": _libero // (1024 * 1024)})
+            raise ValueError(
+                f"spazio su disco insufficiente: liberi "
+                f"{_libero // (1024 * 1024)} MB, ne servono almeno "
+                f"{archive_indexer.MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
+                f"(il tetto di un upload). Libera spazio sul disco della VPS "
+                f"(backup vecchi, immagini Docker inutilizzate) e riprova.")
+        # `upload` viene dalla lista filtrata con `hasattr(u, "read")`: è un UploadFile
+        await asyncio.to_thread(_copia_upload, upload.file, tmp)  # type: ignore[union-attr]
+        if suffix == ".db":
+            # drop-in: un .db già indicizzato. Valida lo schema prima di accettarlo.
+            if not _valid_archive_db(tmp):
+                raise ValueError("il .db non ha lo schema atteso (messages_fts)")
+            # Un `.db` SOSTITUISCE, gli altri formati accumulano: su un nome già
+            # usato si rifiuta, invece di far sparire in silenzio l'archivio che c'è.
+            if c.db_path.exists():
+                raise ValueError(
+                    f"esiste già un archivio '{c.db_name}': un .db lo sostituirebbe "
+                    "per intero. Scegli un altro nome, o elimina prima quello che c'è.")
+            tmp.replace(c.db_path)
+            n = archive_indexer.count_rows(c.db_path)
+            verb = "caricato (drop-in)"
+        elif c.s.archive_ingest_coda:
+            # P16: l'indicizzazione la fa il servizio `ingest`, con il suo
+            # tetto di memoria; qui il file passa in coda (un rename).
+            jid = await asyncio.to_thread(
+                coda_ingest.accoda, c.s.onboarding_dir, c.s.archive_db_dir, tmp,
+                db=c.db_name, suffisso=suffix, nome_file=nome_file,
+                project=c.project, description=c.description, by=c.email)
+            audit({"event": "admin_archive_accodato", "by": c.email, "db": c.db_name,
+                   "fmt": suffix, "file": nome_file, "lavoro": jid})
+            return f"{nome_file}: in coda", True
+        else:
+            # dispatch per estensione: .jsonl/.json → Claude Code; .zip → claude.ai; .md/.txt → testo
+            n = await _indicizza(str(tmp), str(c.db_path), c.project)
+            verb = "indicizzati"
+        audit({"event": "admin_archive_ingest", "by": c.email, "db": c.db_name,
+               "fmt": suffix, "file": nome_file, "rows": n})
+        return f"{nome_file}: {verb} {n}", False
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+async def _archive_pagina(request: Request, email: str, s: Any) -> Response:
+    """Il GET di /admin/archive: gli archivi, i caricamenti in corso, il modulo."""
     # GET — in un thread: il listato è cheap se in cache e costa MINUTI se no
     # (20/09/2026: 2-4 min sui 23 DB della VPS). Nel loop bloccava /health e
     # ogni altra richiesta: era questo il «si è impallato» della pagina.
@@ -1007,7 +1070,7 @@ async def archive_view(request: Request) -> Response:
                 # ancora pronunciato».
                 f"<td>{html.escape(d.get('ruolo') or 'non dichiarato')}</td>"
                 f"<td>{html.escape(d.get('description') or '—')}</td>"
-                f"<td>{d['rows']}</td><td>{d['labels']}</td>"
+                f"{_celle_conteggi(d)}"
                 f'<td class="top-labels">{top}</td>'
                 f"<td>{_fmt_size(d['size'])}</td>"
                 f"<td>{html.escape(str(d['mtime'])[:10])}</td>"
@@ -1144,7 +1207,7 @@ def _scrivi_json(path: Path, dati: dict, *, modo: int | None = None) -> bool:
         try:
             tmp.unlink()
         except OSError:
-            pass
+            pass    # il temporaneo può non essere mai nato: l'errore vero è già nel log qui sopra
         return False
 
 
@@ -1161,6 +1224,15 @@ async def update_state(request: Request) -> Response:
         "running_version": os.environ.get("VPS1777_VERSION", "dev"),
         "running_tag": os.environ.get("VPS1777_TAG", "dev"),
     })
+
+
+def _stato_non_scritto(email: str) -> Response:
+    """Il controllo è riuscito ma `update_status.json` non si è potuto scrivere: dirlo, invece
+    di «Check eseguito» su uno stato rimasto quello di prima."""
+    audit({"event": "admin_update_check_err", "by": email,
+           "error": "update_status.json non scrivibile"})
+    msg = "Controllo fatto, ma non riesco a salvarne l'esito (cartella non scrivibile o disco pieno)"
+    return RedirectResponse(f"/admin/update?msg={quote_plus(msg)}&kind=err", status_code=303)
 
 
 async def update_check(request: Request) -> Response:
@@ -1209,7 +1281,7 @@ async def update_check(request: Request) -> Response:
         # NON error/checked_at: il verdetto del check host resta suo (H70) —
         # la decisione e il perché stanno in admin_core.stato_dopo_refresh_fallito.
         prev = admin_core.stato_dopo_refresh_fallito(prev, spiega, str(exc)[:200], now)
-        _scrivi_json(sf, prev)
+        _scrivi_json(sf, prev)      # se non si scrive, il messaggio qui sotto è già un errore
         audit({"event": "admin_update_check_err", "by": email, "error": str(exc)[:200]})
         return RedirectResponse(
             f"/admin/update?msg={(spiega + str(exc)[:60]).replace(' ', '+')}&kind=err",
@@ -1231,7 +1303,7 @@ async def update_check(request: Request) -> Response:
         prev.update(current=current,
                     error="GitHub non ha riportato una versione (tag_name assente)",
                     checked_at=now)
-        _scrivi_json(sf, prev)
+        _scrivi_json(sf, prev)      # idem: l'esito mostrato è comunque un errore
         # `latest` e non una chiave nuova: audit._CHIAVI_NOTE è un'allowlist, e il
         # valore da registrare qui È la latest nota — quella che si è TENUTA invece
         # di sovrascrivere. L'evento e `reason` dicono già in che senso.
@@ -1245,14 +1317,16 @@ async def update_check(request: Request) -> Response:
     # cache di GitHub — la «latest nota» non deve mai regredire (downgrade proposto).
     if known and latest and version_gt(known, latest):
         prev.update(current=current, error=None, checked_at=now)
-        _scrivi_json(sf, prev)
+        if not _scrivi_json(sf, prev):
+            return _stato_non_scritto(email)
         msg = f"GitHub riporta v{latest} ma la latest nota è v{known} (cache stantia): tengo la nota"
         return RedirectResponse(f"/admin/update?msg={msg.replace(' ', '+')}&kind=ok",
                                 status_code=303)
     prev.update(current=current, latest=latest,
                 changelog_excerpt=(rel.get("body") or "")[:1600],  # il lettore taglia a fine paragrafo
                 html_url=rel.get("html_url", ""), error=None, checked_at=now)
-    _scrivi_json(sf, prev)
+    if not _scrivi_json(sf, prev):
+        return _stato_non_scritto(email)
     audit({"event": "admin_update_check", "by": email, "latest": latest})
     return RedirectResponse(
         f"/admin/update?msg=Check+eseguito:+ultima+release+v{latest}&kind=ok",

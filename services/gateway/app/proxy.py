@@ -20,10 +20,11 @@ from urllib.parse import unquote
 
 import httpx
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import JSONResponse, Response
 
 from .audit import audit
 from .jwt_helpers import JWTError, verify
+from .risposte import RispostaChiusa
 from .settings import get_settings
 
 log = logging.getLogger(__name__)
@@ -105,20 +106,7 @@ def _lascia_posto(service: str) -> None:
     _in_corso[service] = max(0, _in_corso.get(service, 0) - 1)
 
 
-class _RispostaChiusa(StreamingResponse):
-    """Una risposta in streaming che chiude l'upstream COMUNQUE finisca. La chiusura stava solo
-    nel `finally` del generatore: se il client se ne andava prima che il generatore partisse,
-    quel `finally` non girava mai e connessione e client restavano aperti."""
-
-    def __init__(self, *args: Any, chiusura: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self._chiusura = chiusura
-
-    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        try:
-            await super().__call__(scope, receive, send)
-        finally:
-            await self._chiusura()
+_RispostaChiusa = RispostaChiusa      # il nome di prima, per chi lo usa già
 
 
 def _filter_headers(headers: dict[str, str]) -> dict[str, str]:

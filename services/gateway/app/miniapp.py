@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 
 import json
+import logging
 from datetime import datetime, timezone
 import os
 import secrets as pysecrets
@@ -63,6 +64,8 @@ from .miniapp_core import (
 )
 from .settings import get_settings
 
+log = logging.getLogger(__name__)
+
 # Nomi degli upstream come registrati in GATEWAY_UPSTREAMS (default compose).
 # Se un'installazione li rinomina, gli endpoint rispondono 503 con messaggio
 # chiaro — documentato in docs/MINIAPP.md.
@@ -80,6 +83,11 @@ TELEGRAM_SDK_URL = "https://telegram.org/js/telegram-web-app.js"
 
 
 # ───── helpers ─────
+
+# Tetti di lunghezza su ciò che la pagina manda a NotebookLM e all'archivio: il corpo ha già il
+# suo tetto in byte (asgi_security), ma una domanda da megabyte finirebbe intera all'upstream.
+DOMANDA_MAX = 8000
+RICERCA_MAX = 1000
 
 def _client_ip(request: Request) -> str:
     """IP del chiamante — stesso pattern di admin.py:_client_ip (replicato, non
@@ -129,10 +137,19 @@ def _unauthorized() -> JSONResponse:
 
 
 def _read_json(path: Path) -> dict:
+    """Il JSON di `path`, o {} se non c'è. Un file che c'è ma non si legge (o non è un oggetto)
+    dà {} anche lui, ma lo dice nel log: «nessun dato» e «dato rotto» non sono la stessa cosa."""
     try:
-        return json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+        dati = json.loads(path.read_text())
+    except FileNotFoundError:
         return {}
+    except (OSError, ValueError) as exc:
+        log.warning("miniapp: %s non si legge (%s): lo tratto come vuoto", path.name, exc)
+        return {}
+    if not isinstance(dati, dict):
+        log.warning("miniapp: %s non contiene un oggetto JSON: lo tratto come vuoto", path.name)
+        return {}
+    return dati
 
 
 def _mcp_error(exc: MCPCallError) -> JSONResponse:
@@ -158,7 +175,9 @@ async def miniapp_auth(request: Request) -> Response:
     Owner-only: solo l'utente Telegram configurato ottiene un token."""
     s = get_settings()
     # H11: l'IP è la sola coordinata forense di /app/auth (niente sessione, niente
-    # cookie). Va in TUTTI gli eventi di fallimento, non solo nel rate limiter:
+    # cookie). Va in tutti gli eventi di fallimento che si REGISTRANO (firma, utente,
+    # owner; il rifiuto per troppe richieste e la richiesta malformata non scrivono eventi),
+    # non solo nel rate limiter:
     # senza, un brute force di initData non lascia traccia di CHI l'ha tentato.
     ip = _client_ip(request)
     if not _AUTH_LIMIT.allow(ip, time.time()):
@@ -174,7 +193,9 @@ async def miniapp_auth(request: Request) -> Response:
         return JSONResponse({"error": "bot_token_not_configured"}, status_code=503)
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:      # JSON non valido o non UTF-8
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not isinstance(body, dict):      # `[1]` è JSON valido, ma qui serve un oggetto
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     init_data = body.get("init_data", "")
     parsed = verify_init_data(init_data, bot_token, webapp_secret_hex=webapp_secret)
@@ -344,12 +365,16 @@ async def api_ask(request: Request) -> Response:
         return _unauthorized()
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:      # JSON non valido o non UTF-8
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not isinstance(body, dict):      # `[1]` è JSON valido, ma qui serve un oggetto
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     nb_id = str(body.get("notebook_id", "")).strip()
     question = str(body.get("question", "")).strip()
     if not nb_id or not question:
         return JSONResponse({"error": "missing_fields"}, status_code=400)
+    if len(question) > DOMANDA_MAX or len(nb_id) > 200:
+        return JSONResponse({"error": "too_long", "max": DOMANDA_MAX}, status_code=413)
     chiave = (str(claims.get("sub", "")), nb_id, question)
     pronta = _RISPOSTE.prendi(chiave)
     if pronta is not None:
@@ -397,7 +422,9 @@ async def api_archive_db_delete(request: Request) -> Response:
         return _unauthorized()
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:      # JSON non valido o non UTF-8
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not isinstance(body, dict):      # `[1]` è JSON valido, ma qui serve un oggetto
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     name = str(body.get("db", "")).strip()
     path = find_db(get_settings().archive_db_dir, name)
@@ -423,9 +450,13 @@ async def api_archive_search(request: Request) -> Response:
         return _unauthorized()
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:      # JSON non valido o non UTF-8
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not isinstance(body, dict):      # `[1]` è JSON valido, ma qui serve un oggetto
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     query = str(body.get("query", "")).strip()
+    if len(query) > RICERCA_MAX:
+        return JSONResponse({"error": "too_long", "max": RICERCA_MAX}, status_code=413)
     if not query:
         return JSONResponse({"error": "missing_query"}, status_code=400)
     db = str(body.get("db", "")).strip()
@@ -463,7 +494,9 @@ async def api_archive_context(request: Request) -> Response:
         return _unauthorized()
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:      # JSON non valido o non UTF-8
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not isinstance(body, dict):      # `[1]` è JSON valido, ma qui serve un oggetto
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     uuid = str(body.get("uuid", "")).strip()
     if not uuid:
@@ -503,7 +536,9 @@ async def api_secrets_posticipa(request: Request) -> Response:
         return _unauthorized()
     try:
         body = await request.json()
-    except Exception:
+    except ValueError:      # JSON non valido o non UTF-8
+        return JSONResponse({"error": "invalid_request"}, status_code=400)
+    if not isinstance(body, dict):      # `[1]` è JSON valido, ma qui serve un oggetto
         return JSONResponse({"error": "invalid_request"}, status_code=400)
     giorni = body.get("giorni") if isinstance(body, dict) else None
     f = Path(get_settings().onboarding_dir) / POSTICIPO_FILE
@@ -587,10 +622,22 @@ async def api_update_trigger(request: Request) -> Response:
         "nonce": pysecrets.token_hex(16),
     }
     path = ob / "update_pending_update.json"
-    path.write_text(json.dumps(intent, indent=2) + "\n")
+    # Tutto o niente: la path unit dell'host scatta appena il file ESISTE, e con una scrittura
+    # diretta poteva leggerlo a metà (e a disco pieno usciva un errore interno muto).
     # 0644 come nell'admin: l'intent non contiene segreti e dev'essere leggibile
     # dalla CLI host (uid diverso dal container).
-    path.chmod(0o644)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{pysecrets.token_hex(4)}.tmp")
+    try:
+        tmp.write_text(json.dumps(intent, indent=2) + "\n")
+        tmp.chmod(0o644)
+        os.replace(tmp, path)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        audit({"event": "miniapp_update_requested", "by": claims.get("sub", ""), "target": latest,
+               "error": str(exc)})
+        return JSONResponse({"error": "not_writable",
+                             "detail": "non riesco a scrivere la richiesta di aggiornamento"},
+                            status_code=507)
     audit({"event": "miniapp_update_requested", "by": claims.get("sub", ""), "target": latest})
     return JSONResponse({"ok": True, "target": latest})
 
@@ -873,7 +920,8 @@ function renderStato(){
     var v=o.version||{};
     $('stV').innerHTML = esc(v.running||'—') + (v.available
       ? ' <span class="badge warn">v'+esc(v.latest)+' disponibile</span>'
-      : ' <span class="badge ok">aggiornato</span>');
+      : (v.latest ? ' <span class="badge ok">aggiornato</span>'
+                  : ' <span class="badge">non verificato</span>'));
     var sc=o.secrets||{};
     $('stS').innerHTML = sc.total
       ? (sc.overdue ? '<span class="dot warn"></span>'+sc.overdue+' da ruotare'
@@ -1316,7 +1364,8 @@ function err(e){
   var m=String((e&&e.message)||e);
   if (m==='not_owner') return 'Questo account Telegram non è l\'owner del gateway.';
   if (m==='no_telegram') return 'Apri dal bot Telegram.';
-  // Una voce per ogni causa che /app/auth dichiara in `error` (il presidio è
+  // Una voce per ogni causa che /app/auth dichiara in `error` con 401, 403 o 503 (le
+  // richieste malformate, 400, la pagina non le produce e ricadono nella frase generica; il presidio è
   // tests/test_miniapp_auth_cause.py: un codice nuovo lato server senza la sua
   // frase qui fa diventare rosso il test).
   // initData oltre la finestra di 12h (H27): non è un bug, è la scadenza. La

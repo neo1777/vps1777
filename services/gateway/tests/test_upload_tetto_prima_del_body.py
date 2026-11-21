@@ -65,8 +65,8 @@ def _funzione(nome: str) -> str:
        classe della finestra di grep troppo corta e del `403` letto come «zero
        record». **Se l'oggetto è dentro una funzione, la finestra è la funzione.**
     """
-    i = CODICE_FILE.find(f"async def {nome}(")
-    assert i != -1, f"funzione {nome} non trovata: il test guarda un file che non conosce"
+    i = max(CODICE_FILE.find(f"async def {nome}("), CODICE_FILE.find(f"\ndef {nome}(") + 1)
+    assert i > 0, f"funzione {nome} non trovata: il test guarda un file che non conosce"
     # fino alla prossima definizione allo stesso livello (o alla fine)
     j = CODICE_FILE.find("\nasync def ", i + 1)
     k = CODICE_FILE.find("\ndef ", i + 1)
@@ -75,7 +75,10 @@ def _funzione(nome: str) -> str:
 
 
 CODICE_FILE = _solo_codice(SRC)
-CODICE = _funzione("archive_view")
+# Dal 21/11 `archive_view` è spezzata: il controllo sul Content-Length è una funzione sua, e il
+# POST (`_archive_carica`) la chiama PRIMA di leggere il corpo. L'ordine si guarda lì.
+CODICE = _funzione("_upload_dichiarato_troppo_grande")
+CARICA = _funzione("_archive_carica")
 
 
 def test_il_controllo_sul_content_length_esiste():
@@ -91,8 +94,10 @@ def test_il_controllo_sta_PRIMA_della_riga_che_legge_il_body():
     Un tetto dopo `await request.form()` non protegge niente — a quel punto Starlette
     ha già scritto il multipart su disco (tmpfs). *È l'ordine, non la presenza.*
     """
-    i_tetto = CODICE.find("content-length")
-    i_form = CODICE.find("await request.form()")
+    assert "request.form()" not in CODICE, "il controllo sul Content-Length non deve leggere il corpo"
+    assert "content-length" in CODICE, "controllo su Content-Length assente"
+    i_tetto = CARICA.find("_upload_dichiarato_troppo_grande(request")
+    i_form = CARICA.find("await request.form()")
     assert i_form != -1, "riga `await request.form()` non trovata: il test guarda un file che non conosce"
     assert i_tetto != -1, "controllo su Content-Length assente"
     assert i_tetto < i_form, (
