@@ -9,6 +9,7 @@ errore — i tool rispondono con liste vuote finché non aggiungi un DB.
 
 | Var | Default | Descrizione |
 |---|---|---|
+| `LOG_LEVEL` | `INFO` | livello dei log |
 | `ARCHIVE_HTTP_HOST` | `0.0.0.0` | bind |
 | `ARCHIVE_HTTP_PORT` | `8002` | porta |
 | `ARCHIVE_DB_DIR` | `/var/lib/archive/db` | dir **scansionata** per `*.db` (nome = nome file). Un DB qui compare **senza restart** (scan-mode). |
@@ -16,8 +17,10 @@ errore — i tool rispondono con liste vuote finché non aggiungi un DB.
 | `FASTMCP_STATELESS_HTTP` | `true` | MCP stateless mode (raccomandato) |
 | `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI) |
 | `ARCHIVE_MODEL_DIR` | `/var/lib/archive/models/e5-small` | modello della ricerca per senso |
+| `ARCHIVE_DESC_SECRET` | *(vuoto)* | lo stesso segreto dato come variabile invece che come file (vince sul file) |
 | `ARCHIVE_DESC_SECRET_FILE` | *(vuoto; compose: `/run/secrets/archive_desc_secret`)* | segreto per inoltrare `set_description`/`set_ruolo` al gateway |
 | `GATEWAY_INTERNAL_BASE` | `http://gateway:8080` | dove inoltrarle |
+| `ARCHIVE_REDACT` | `1` | la redazione di credenziali e dati personali nelle risposte; `0` la spegne (lo scrive nel log all'avvio) |
 | `ARCHIVE_REDACT_ESENTI` | *(vuoto)* | valori dell'anagrafica dichiarati pubblici, che la redazione non maschera (CSV) |
 
 ## Come popolarlo
@@ -42,9 +45,9 @@ Il minimo per la ricerca è una tabella `messages(uuid PRIMARY KEY, project, ts,
 
 ## Tool MCP esposti
 
-Diciotto tool, in quattro famiglie (firme complete e descrizioni: `app/server.py`):
+Diciannove tool, in quattro famiglie (firme complete e descrizioni: `app/server.py`):
 
-- **ricerca**: `search` (FTS5 + BM25 su uno o tutti i DB; anche `raw`, `sort`, `since`/`until`, `project`), `search_ibrida` (per senso), `count`, `check_term`, `precedenti`, `delta`
+- **ricerca**: `search` (FTS5 + BM25 su uno o tutti i DB; anche `raw`, `sort`, `since`/`until`, `project`), `search_ibrida` (per senso), `count`, `check_term`, `precedenti`, `delta`, `temi` (la mappa degli argomenti)
 - **lettura**: `get_context`, `get_conversation`, `get_many`, `get_session`, `get_stirpe`
 - **inventario**: `list_databases(schede)`, `describe_databases`, `list_projects`, `archive_stats`, `check_integrity`
 - **scheda del DB** (la scrittura la inoltra al gateway: qui il volume è `:ro`): `set_description`, `set_ruolo`

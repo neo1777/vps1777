@@ -21,7 +21,8 @@ def test_prima_i_da_guardare_poi_i_riservati_poi_i_liberi():
 def test_il_marchio_del_proprietario_vince():
     assert admin_core.stato_del_tema({"id": 1, "da_guardare": True}, {"1": "libero"}) == "libero"
     assert admin_core.stato_del_tema({"id": 0}, {"0": "riservato"}) == "riservato"
-    assert admin_core.stato_del_tema({"id": 0}, {"0": "inventato"}) == "libero"
+    # dal 21/11: un marchio che non si capisce CHIUDE (prima veniva ignorato, e il tema era libero)
+    assert admin_core.stato_del_tema({"id": 0}, {"0": "inventato"}) == "riservato"
     assert admin_core.stato_del_tema({"id": 1, "da_guardare": True}, {}) == "da_guardare"
 
 

@@ -55,7 +55,7 @@ mcp = FastMCP(
 
 
 # ── REDAZIONE IN USCITA: si avvolge `mcp.tool` STESSO, non i singoli tool ────────────
-# I tool che restituivano testo erano 3 su 9 (oggi i tool sono 15). Avvolgerne 3
+# I tool che restituivano testo erano 3 su 9 (oggi sono molti di più: li elenca ANNOTAZIONI). Avvolgerne 3
 # significa che **il quarto nasce cieco** — la forma di difetto che abbiamo misurato sette volte in una notte: il
 # presidio segue la forma del dato invece del rischio. Sostituendo il decoratore, un tool
 # nuovo scritto con `@mcp.tool()` eredita la redazione **per costruzione**, e chi lo
@@ -199,7 +199,7 @@ def search(
     nelle fotografie e nei riscontri (`anche_fuori`), `ruoli='tutti'` li riapre.
     Una query malformata solleva un errore che spiega come correggerla, non una lista vuota.
 
-    ⚠️ `voice='own'` NON vuol dire «lo ha scritto Neo»: vale anche per l'assistente (l'80%
+    ⚠️ `voice='own'` NON vuol dire «lo ha scritto il proprietario»: vale anche per l'assistente (l'80%
     degli `own`, misurato il 02/08). Per le parole di una persona servono DUE filtri:
     `speaker='human', voice='own'`.
 
@@ -244,7 +244,7 @@ def search_ibrida(
         "Lunghezza dello snippet FTS (default 64, che è anche il tetto di FTS5)."))] = 64,
     speaker: Annotated[str, Field(description=(
         "CHI HA SCRITTO, come in search ('human', 'assistant', 'tool', 'system', 'other', "
-        "'unknown'). Per «cosa ha detto Neo» usa 'human': senza, su 20 risultati le sue "
+        "'unknown'). Per «cosa ha detto il proprietario» usa 'human': senza, su 20 risultati le sue "
         "parole erano da 0 a 8 (27/09)."))] = "",
     riformulazioni: Annotated[list[str] | None, Field(description=(
         "Fino a 3 altri modi di dire la domanda. La fusione resta una, con lo stesso "
@@ -316,8 +316,8 @@ def check_term(term: str, db_name: str = "", ruoli: str = "") -> dict[str, Any]:
     `F#`) è davvero ricercabile o se l'indice lo fa COLLASSARE su una parola più
     corta e comune. È una sottrazione: confronta count(term) con count(prefisso
     alfanumerico). Se coincidono, per quell'indice `C++` == `C` e i risultati sono
-    falsi positivi silenziosi (la causa del falso ricordo dell'11/07: «Neo
-    programmatore C++» erano coordinate SVG, copyright, gradi centigradi). Non
+    falsi positivi silenziosi (un caso vero: un «programmatore C++» mai esistito, nato da
+    coordinate SVG, copyright e gradi centigradi). Non
     chiede alla documentazione — chiede all'indice, e si auto-tara: su un DB
     ricostruito con `tokenchars` i due conteggi divergono e collapsed=False.
 
@@ -533,8 +533,18 @@ def temi(dal: str = "", al: str = "", limit: int = 40) -> dict[str, Any]:
     if d is None:
         return mappa_temi.vista(None, None)
     cartella = mappa_temi.cartella(d)
-    return mappa_temi.vista(mappa_temi.leggi_json(cartella / mappa_temi.FILE_TEMI),
-                            mappa_temi.leggi_json(cartella / mappa_temi.FILE_MARCHI),
+    f_marchi = cartella / mappa_temi.FILE_MARCHI
+    marchi = mappa_temi.leggi_json(f_marchi)
+    if f_marchi.exists() and not isinstance(marchi, dict):
+        # Fail-CLOSED: i marchi ci sono ma non si leggono (file corrotto, permessi). Prima
+        # valevano «nessun marchio», e un tema che il proprietario aveva marcato riservato
+        # tornava visibile. Senza i marchi la mappa non si mostra affatto.
+        log.warning("temi: %s c'è ma non si legge: la mappa resta chiusa", f_marchi.name)
+        return {"disponibile": False,
+                "nota": "le scelte del proprietario sui temi (riservato/libero) non si riescono a "
+                        "leggere: finché non tornano leggibili la mappa non si mostra, per non "
+                        "esporre un tema riservato. Va guardato il file dei marchi sulla VPS."}
+    return mappa_temi.vista(mappa_temi.leggi_json(cartella / mappa_temi.FILE_TEMI), marchi,
                             dal=dal, al=al, limit=limit)
 
 

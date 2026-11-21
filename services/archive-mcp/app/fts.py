@@ -221,7 +221,7 @@ def _run_match(conn: sqlite3.Connection, match: str, *, where_extra: str,
                snippet_tokens: int, join: str = "") -> list[dict[str, Any]]:
     sql = (
         f"SELECT f.uuid, f.project, f.ts, bm25(messages_fts) AS rank, "
-        f"snippet(messages_fts, -1, '«', '»', '…', {int(snippet_tokens)}) AS snip "
+        f"snippet(messages_fts, -1, '«', '»', '…', {max(1, min(int(snippet_tokens), 64))}) AS snip "
         f"FROM messages_fts f{join} WHERE messages_fts MATCH ?{where_extra} "
         f"ORDER BY {order} LIMIT ?"
     )
@@ -274,7 +274,7 @@ def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
         for r in rows:
             r["snippet"] = r.pop("snip")
         return rows
-    raise FtsSyntaxError(f"{_SYNTAX_HINT} (dettaglio: {last_exc})")
+    raise FtsSyntaxError(f"{_SYNTAX_HINT} (dettaglio: {last_exc})") from last_exc
 
 
 def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
@@ -314,7 +314,7 @@ def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
             if _di_schema(exc) or _non_di_sintassi(exc):
                 raise
             last_exc = exc
-    raise FtsSyntaxError(f"{_SYNTAX_HINT} (dettaglio: {last_exc})")
+    raise FtsSyntaxError(f"{_SYNTAX_HINT} (dettaglio: {last_exc})") from last_exc
 
 
 # ── canary dei termini collassati ─────────────────────────────────────────────

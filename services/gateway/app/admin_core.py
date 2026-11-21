@@ -464,6 +464,8 @@ def stato_del_tema(tema: dict, marchi: dict) -> str:
     m = marchi.get(str(tema.get("id")))
     if m in ("libero", "riservato"):
         return m
+    if m is not None:
+        return "riservato"      # un marchio che non si capisce chiude, non apre
     return "da_guardare" if tema.get("da_guardare") else "libero"
 
 

@@ -266,3 +266,37 @@ def test_al_col_solo_anno_vale_fino_a_dicembre():
     piena = temi.vista(mappa, {}, dal="", al="2026-12", limit=10)
     solo_anno = temi.vista(mappa, {}, dal="", al="2026", limit=10)
     assert len(solo_anno["temi"]) == len(piena["temi"]) == 1
+
+
+def test_un_marchio_che_non_si_capisce_chiude_il_tema():
+    # dalle corse di revisione del 21/11: un valore diverso da libero/riservato veniva ignorato
+    assert temi.stato_del_tema({"id": 3}, {"3": "riservto"}) == "riservato"
+    assert temi.stato_del_tema({"id": 3}, {"3": "libero"}) == "libero"
+    assert temi.stato_del_tema({"id": 3}, {}) == "libero"
+
+
+def test_marchi_illeggibili_la_mappa_resta_chiusa(tmp_path, monkeypatch):
+    # dalle corse di revisione del 21/11 (lo dicono due revisori): un marchi.json corrotto
+    # valeva «nessun marchio», e un tema marcato riservato tornava visibile alle sessioni
+    server = pytest.importorskip("app.server")
+    monkeypatch.setattr(server.db, "_db_dir", lambda: tmp_path)
+    cartella = temi.cartella(tmp_path)
+    cartella.mkdir(parents=True, exist_ok=True)
+    mappa = {"temi": [{"id": 1, "parole": ["x"], "scambi": 3, "mesi": {"2026-09": 3},
+                       "esempi": [], "fonti": {}, "da_guardare": False}], "scambi": 3}
+    (cartella / temi.FILE_TEMI).write_text(__import__("json").dumps(mappa), encoding="utf-8")
+    (cartella / temi.FILE_MARCHI).write_text('{"1": "riservato"', encoding="utf-8")   # troncato
+
+    def chiama():
+        import asyncio
+        import inspect
+        r = server.temi.fn() if hasattr(server.temi, "fn") else server.temi()
+        return asyncio.run(r) if inspect.iscoroutine(r) else r
+    esito = chiama()
+    assert esito["disponibile"] is False and "temi" not in esito
+    (cartella / temi.FILE_MARCHI).write_text('{"1": "riservato"}', encoding="utf-8")
+    esito = chiama()
+    assert esito["disponibile"] is True and esito["temi"] == [] and esito["nascosti"]["riservati"] == 1
+    (cartella / temi.FILE_MARCHI).unlink()                     # assente: prima installazione
+    esito = chiama()
+    assert len(esito["temi"]) == 1

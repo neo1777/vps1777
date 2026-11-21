@@ -4,6 +4,28 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+**Correzioni da una revisione esterna dell'archivio: la mappa dei temi si chiude se le scelte non si leggono.**
+
+### Sicurezza
+- **Un file dei marchi dei temi corrotto riapriva i temi riservati.** Se `marchi.json` c'era ma non si leggeva, il tool
+  `temi` lo trattava come «nessuna scelta» e un tema marcato riservato tornava visibile. Ora la mappa non si mostra
+  finché il file non torna leggibile, e un marchio che non si capisce vale «riservato».
+- **Il ruolo di un DB non si perde se per un attimo non si legge.** Un DB riservato bloccato da una scrittura diventava
+  «non dichiarato» ed entrava nel perimetro di default: ora vale l'ultimo ruolo letto.
+- La telemetria di onnxruntime (comparsa con la 1.32) è spenta; il container dell'archivio non ha comunque uscita su
+  Internet. L'immagine opzionale `caddy-dns01` applica gli aggiornamenti Alpine alla costruzione.
+
+### Corretto
+- **I parametri di lettura hanno un tetto**: `before`/`after` di `get_context`, `limit` di `get_conversation`,
+  `get_session` e `get_stirpe`, `top` di `list_projects`, `snippet_tokens`, `k_rrf`. Con `before=-1` usciva un intero
+  progetto col testo pieno; con `k_rrf=-1` una divisione per zero.
+- Le descrizioni dei tool non nominano più una persona: dicono «il proprietario».
+- `describe_databases` marca `non_letto` un DB che non si è potuto leggere (prima sembrava vuoto); `precedenti` riporta
+  `parziale`; un DB sparito a metà di `count` o `check_term` finisce fra i non contati; la redazione spenta con
+  `ARCHIVE_REDACT=0` lo scrive nel log.
+- Il README di `archive-mcp` dice diciannove tool (mancava `temi`) ed elenca `ARCHIVE_REDACT`, `ARCHIVE_DESC_SECRET` e
+  `LOG_LEVEL`.
+
 ## [0.95.2] — 2026-11-21
 
 **Le immagini applicano gli aggiornamenti Debian alla costruzione.**

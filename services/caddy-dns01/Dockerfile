@@ -26,6 +26,9 @@ RUN xcaddy build --with github.com/caddy-dns/cloudflare@v0.2.4
 
 # ─────────────────────────────────────────── runtime
 FROM caddy:2.11-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+# Come `apt-get upgrade` nelle immagini Python (21/11/2026): i pacchetti Alpine corretti dopo la
+# costruzione della base (libssl3, libcrypto3, zlib nella scansione del 21/11) entrano qui.
+RUN apk upgrade --no-cache
 COPY --from=build /usr/bin/caddy /usr/bin/caddy
 # La versione del rilascio, come nelle altre immagini (release.yml la passa come
 # build-arg): `vps1777 version` la legge dal container per segnalare la deriva.
