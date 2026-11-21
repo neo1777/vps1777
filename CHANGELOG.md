@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.97.0] — 2026-11-21
+
 **Il gateway riletto riga per riga con un catalogo di requisiti: trentacinque correzioni fra OAuth, proxy e audit.**
 Due modelli diversi hanno applicato lo stesso catalogo alla prima fetta del codice (OAuth, proxy, rotte); ogni loro
 rilievo è stato riletto sul codice prima di toccare qualcosa.

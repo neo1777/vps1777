@@ -4535,7 +4535,7 @@ findings:
         diversi (uno dei due l'ha detta, come «disco pieno trattato da successo»). Mai successo
         sulla VPS di riferimento. `low` perché servono insieme un disco che non scrive, un
         riavvio e un refresh copiato.
-    since: unreleased
+    since: v0.97.0
     why: >
       A ogni rinnovo il gateway revoca il refresh appena usato e ne emette uno nuovo. La revoca
       vale dopo un riavvio solo se è su disco; se la scrittura falliva (disco pieno, volume in
