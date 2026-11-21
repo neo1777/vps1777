@@ -3381,6 +3381,58 @@ def quarantena_blocca(rel: dict, ore_minime: float | None,
     return None
 
 
+def _riprendi_update_interrotto(repo: Path, st: dict) -> int | None:
+    """Se l'update precedente è morto dopo il punto di non ritorno, lo chiude: None se non c'è
+    niente da riprendere, altrimenti l'esito (0 = era arrivato in fondo, 1 = rollback riuscito,
+    2 = serve intervento manuale).
+
+    21/11/2026 — `update_in_progress` veniva scritto allo step 10 e mai riletto. Un processo
+    ucciso fra `down` e `up` (la connessione SSH che cade, il TimeoutStartSec della unit, un
+    OOM) lasciava lo stack GIÙ col tag già al target: ogni `vps1777 update` successivo
+    rispondeva «già aggiornato» e usciva 0, e nessuno rialzava niente. Ora chi trova la
+    bandierina (e ha il lock, quindi quell'update non è più vivo) decide guardando i fatti:
+      · tag al target e stack sano  → l'update era arrivato in fondo: lo si registra;
+      · altrimenti                  → rollback alla versione precedente. I dati si
+        ripristinano dallo snapshot SOLO se lo stack è fermo: da fermo non ha scritto niente
+        dopo lo snapshot, quindi non si perde nulla; se è su, il restore butterebbe i minuti
+        di dati scritti nel frattempo, e resta una scelta dell'operatore (`rollback --with-data`).
+    """
+    uip = st.get("update_in_progress")
+    if not uip:
+        return None
+    target = norm_ver(str(uip.get("target") or ""))
+    previous = st.get("previous")
+    cur = norm_ver(current_version(repo))
+    in_piedi = stack_running(repo)
+    warn(f"l'update a v{target} cominciato il {uip.get('started_at', '?')} non è arrivato in "
+         f"fondo (processo terminato). Tag attuale v{cur}, stack {'su' if in_piedi else 'FERMO'}: lo chiudo.")
+    if target and cur == target and in_piedi:
+        healthy, why = health_gate(repo)
+        if healthy:
+            st["current"] = target
+            st["update_in_progress"] = None
+            st["history"].append({"event": "updated", "from": previous, "to": target,
+                                  "at": now_iso(), "ripreso": True})
+            state_save(repo, st)
+            status_write(repo, current=target)
+            telegram_notify(repo, f"✅ vps1777: l'update a v{target} era stato interrotto ma lo "
+                                  "stack è sano sulla versione nuova: registrato come riuscito.")
+            ok(f"l'update a v{target} era arrivato in fondo: registrato")
+            return 0
+        motivo, dati = f"update interrotto e stack non sano ({why})", False
+    else:
+        motivo, dati = "update interrotto a metà (processo terminato)", not in_piedi
+    if not previous:
+        st["update_in_progress"] = None
+        state_save(repo, st)
+        telegram_notify(repo, f"🆘 vps1777: update a v{target} interrotto e nessuna versione "
+                              "precedente registrata. Serve intervento manuale.")
+        die("update interrotto ma nessuna versione precedente in state.json: intervento manuale", 2)
+    snap = snapshot_latest(repo)
+    return _rollback_routine(repo, st, target, previous, staging_dir(repo, target) / "bundle",
+                             snap, dati and snap is not None, motivo)
+
+
 def cmd_update(repo: Path, args) -> int:
     # 0 — lock
     lock = acquire_lock(repo)
@@ -3389,6 +3441,11 @@ def cmd_update(repo: Path, args) -> int:
             Path(args.from_intent).unlink(missing_ok=True)
         die("update già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
     st = state_load(repo)
+    # prima di tutto: un update rimasto a metà si chiude, e QUESTO giro finisce lì (il prossimo
+    # riparte da uno stato pulito). Con un intent in attesa, la path unit lo rilancia da sola.
+    ripresa = _riprendi_update_interrotto(repo, st)
+    if ripresa is not None:
+        return ripresa
 
     target_req = args.version
     if args.from_intent:

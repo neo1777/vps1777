@@ -194,3 +194,50 @@ def test_OGNI_chiave_usata_nel_repo_e_dichiarata(monkeypatch) -> None:
     assert non_letterali == 0, (
         f"{non_letterali} chiamate ad audit() con un dict non letterale: questo test non "
         "può vederne le chiavi, e la garanzia vale solo per quelle statiche")
+
+
+# ── tetto di dimensione e freno agli eventi anonimi (giro di revisione del 21/11/2026) ──
+
+def test_oltre_il_tetto_resta_la_coda_e_si_dice_quante_righe_sono_andate(monkeypatch, tmp_path) -> None:
+    log = _wire(monkeypatch, tmp_path)
+    monkeypatch.setattr(audit, "_MAX_BYTES", 4000)
+    righe = [json.dumps({"event": "x", "i": i, "ts": "2999-01-01T00:00:00+00:00"}) for i in range(200)]
+    log.write_text("\n".join(righe) + "\n", encoding="utf-8")
+    audit._prune(log, retention_days=30)
+    assert log.stat().st_size <= 4000
+    lette = [json.loads(r) for r in log.read_text().splitlines()]
+    assert lette[0]["event"] == "audit_trimmed" and lette[0]["dropped"] > 0
+    assert lette[-1]["i"] == 199                       # la più nuova c'è
+    assert lette[0]["dropped"] + len(lette) - 1 == 200  # nessuna riga persa senza dirlo
+
+
+def test_gli_eventi_anonimi_hanno_un_tetto_al_minuto_e_i_soppressi_si_contano(monkeypatch, tmp_path) -> None:
+    log = _wire(monkeypatch, tmp_path)
+    monkeypatch.setattr(audit, "_ANONIMI_AL_MINUTO", 5)
+    monkeypatch.setattr(audit, "_finestra_anonimi", {"minuto": "", "visti": 0, "soppressi": 0})
+    ore = iter(["2026-11-21T10:00:01+00:00"] * 12 + ["2026-11-21T10:01:01+00:00"])
+
+    class _Orologio:
+        @staticmethod
+        def now(tz=None):
+            class _T:
+                def __init__(self, s): self.s = s
+                def isoformat(self, timespec="seconds"): return self.s
+            return _T(next(ore))
+    monkeypatch.setattr(audit, "datetime", _Orologio)
+    for _ in range(12):
+        audit.audit({"event": "proxy_secret_mismatch", "service": "x"})
+    audit.audit({"event": "proxy_secret_mismatch", "service": "x"})          # minuto dopo
+    eventi = [json.loads(r) for r in log.read_text().splitlines()]
+    assert [e["event"] for e in eventi].count("proxy_secret_mismatch") == 6   # 5 + 1 del minuto nuovo
+    riepilogo = [e for e in eventi if e["event"] == "audit_suppressed"]
+    assert len(riepilogo) == 1 and riepilogo[0]["dropped"] == 7
+
+
+def test_gli_eventi_autenticati_non_si_frenano(monkeypatch, tmp_path) -> None:
+    log = _wire(monkeypatch, tmp_path)
+    monkeypatch.setattr(audit, "_ANONIMI_AL_MINUTO", 2)
+    monkeypatch.setattr(audit, "_finestra_anonimi", {"minuto": "", "visti": 0, "soppressi": 0})
+    for _ in range(10):
+        audit.audit({"event": "proxy_request", "service": "x"})
+    assert len(log.read_text().splitlines()) == 10

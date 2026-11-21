@@ -4,6 +4,25 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+**I sei rilievi di sicurezza rimasti aperti dal giro di revisione sono chiusi (H88-H93).**
+
+### Sicurezza
+- **Un update ucciso a metà non lascia più lo stack fermo (H93).** Se il processo moriva fra lo spegnimento e
+  la riaccensione (connessione caduta, timeout, memoria), lo stack restava giù e ogni update successivo diceva «già
+  aggiornato». Ora il giro dopo se ne accorge e lo chiude: registra l'update se era arrivato in fondo, altrimenti torna
+  alla versione precedente.
+- **L'audit del gateway ha un tetto (H88).** Non supera 20 MB (restano le righe più nuove, e una riga dice quante sono
+  state tolte), e le richieste anonime sbagliate non possono più gonfiarlo: oltre 60 al minuto si contano soltanto.
+- **Un refresh token già usato che viene ripresentato chiude tutta la sua catena (H89).** Prima veniva rifiutato solo
+  quel token; chi lo aveva rubato e usato per primo restava dentro. Il connettore va ricollegato, e arriva l'avviso.
+- **Gli argomenti passati a `nlm` non possono diventare opzioni (H90).** Un id o una domanda che cominciava per «-»
+  veniva letto come opzione della CLI. Ora ogni valore che viene da fuori passa dopo `--`: anche un titolo come
+  «-1 giorno» funziona.
+- **Il plugin docker-compose si installa solo se l'impronta combacia (H91)**, nei due installer.
+- **Gli artefatti scaricati da NotebookLM hanno una scadenza e un tetto (H92).** Prima di ogni download si tolgono
+  quelli più vecchi di 30 giorni e, se serve, i più vecchi finché il totale sta sotto 5 GB (`NLM_ARTIFACTS_GIORNI`,
+  `NLM_ARTIFACTS_MAX_MB`). Sono copie: si riscaricano da NotebookLM.
+
 ## [0.95.4] — 2026-11-21
 
 **Ogni container ha i suoi tetti di risorse.**

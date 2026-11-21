@@ -169,8 +169,12 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # + 3 (H85 high, H86 medium, H87 high, 21/11) = 87. Dal giro di revisione dell'intero codice
 # con un modello nuovo: il blocco di `internal/` aggirabile con `..`, il tipo del messaggio
 # delle pagine admin scritto nell'HTML senza escape, il backup che usciva 0 senza i volumi.
-EXPECTED_TOTAL = 87
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 15, "medium": 51, "low": 19}
+# + 6 (H88-H91 medium, H92 low, H93 high, 21/11) = 93. I sei rilievi di sicurezza dello stesso giro
+# rimasti aperti dopo la 0.95.0, chiusi prima di far leggere il repo a un revisore esterno:
+# audit senza tetto, famiglia dei refresh, opzioni iniettate nella CLI nlm, plugin compose senza
+# impronta, volume degli artefatti, update ucciso a metà.
+EXPECTED_TOTAL = 93
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 55, "low": 20}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

@@ -49,6 +49,22 @@ _PRUNE_SIZE = 5 * 1024 * 1024  # 5 MB
 _PRUNE_GROWTH = 1 * 1024 * 1024  # 1 MB
 _next_prune_at = _PRUNE_SIZE
 
+# ── tetto di DIMENSIONE e freno agli eventi anonimi (giro di revisione del 21/11/2026) ──
+# La potatura toglieva solo le righe più vecchie della retention: dentro i 90 giorni il file
+# cresceva senza limite, e ogni richiesta anonima con un segreto sbagliato ne scriveva una riga
+# (`proxy_secret_mismatch`), senza freno. Una raffica riempiva il volume del gateway; sopra i
+# 5 MB ogni megabyte in più faceva riscrivere il file INTERO dentro la richiesta (618 ms a 42 MB).
+# Tre cure: (1) il file non supera `_MAX_BYTES`: oltre, si tiene la CODA (le righe più nuove) e
+# si scrive quante ne sono andate; (2) gli eventi che chiunque può provocare da fuori hanno un
+# tetto al minuto, e quelli in più si CONTANO in una riga sola; (3) la potatura si rifà quando
+# il file è cresciuto di metà, non di 1 MB: il costo resta ammortizzato.
+_MAX_BYTES = 20 * 1024 * 1024
+_TIENI_DOPO_TAGLIO = 0.6            # dopo un taglio per dimensione resta il 60% del tetto
+_ANONIMI = frozenset({"proxy_secret_mismatch", "proxy_internal_blocked", "proxy_unknown_service",
+                      "proxy_auth_fail"})
+_ANONIMI_AL_MINUTO = 60
+_finestra_anonimi: dict[str, Any] = {"minuto": "", "visti": 0, "soppressi": 0}
+
 # Lettura tail-like: blocchi dalla coda, e un tetto oltre il quale si smette di
 # risalire (un file con righe patologicamente lunghe non deve finirci tutto in RAM).
 _TAIL_BLOCK = 64 * 1024
@@ -99,7 +115,53 @@ def _prune(path: Path, retention_days: int) -> None:
                 continue
             if ts >= cutoff:
                 dst.write(line + "\n")
+    _taglia_alla_coda(tmp)
     tmp.replace(path)  # atomico: un lettore concorrente vede il vecchio o il nuovo
+
+
+def _taglia_alla_coda(f: Path) -> None:
+    """Se `f` supera `_MAX_BYTES`, tiene le righe più NUOVE (la coda) fino a una frazione del
+    tetto e mette in testa una riga che dice quante ne sono state tolte. Un audit che perde la
+    testa lo deve dire: «non c'è» e «è stato tagliato» sono risposte diverse."""
+    dim = f.stat().st_size
+    if dim <= _MAX_BYTES:
+        return
+    da = dim - int(_MAX_BYTES * _TIENI_DOPO_TAGLIO)
+    corto = f.with_suffix(f.suffix + ".coda")
+    tolte = 0
+    with f.open("rb") as src, corto.open("wb") as dst:
+        for raw in src:
+            if src.tell() <= da:
+                tolte += 1
+                continue
+            if tolte is not None:
+                ora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                dst.write((json.dumps({"ts": ora, "event": "audit_trimmed", "dropped": tolte,
+                                       "reason": "tetto di dimensione"}, ensure_ascii=False)
+                           + "\n").encode("utf-8"))
+                tolte = None
+            dst.write(raw)
+    corto.replace(f)
+
+
+def _da_sopprimere(evento: Any, ora: str) -> dict[str, Any] | bool:
+    """Per gli eventi che si provocano da fuori senza credenziali: True se questo va saltato;
+    un dict (la riga di riepilogo del minuto appena chiuso) se prima va scritto quello."""
+    if evento not in _ANONIMI:
+        return False
+    fin = _finestra_anonimi
+    minuto = ora[:16]
+    riepilogo: dict[str, Any] | bool = False
+    if fin["minuto"] != minuto:
+        if fin["soppressi"]:
+            riepilogo = {"event": "audit_suppressed", "dropped": fin["soppressi"],
+                         "reason": f"oltre {_ANONIMI_AL_MINUTO} eventi anonimi nel minuto {fin['minuto']}"}
+        fin.update(minuto=minuto, visti=0, soppressi=0)
+    fin["visti"] += 1
+    if fin["visti"] > _ANONIMI_AL_MINUTO:
+        fin["soppressi"] += 1
+        return True
+    return riepilogo
 
 
 # ── ③ Un audit log accetta solo ciò che SA, non tutto ciò che riceve ────────────────
@@ -219,8 +281,13 @@ def audit(event: dict[str, Any]) -> None:
         s = _settings()
         path = Path(s.audit_log_path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        freno = _da_sopprimere(event.get("event"), now)
+        if freno is True:
+            return                      # contato: esce nel riepilogo del minuto
         record = {"ts": now, **_redigi(event)}
         with path.open("a", encoding="utf-8") as fh:
+            if isinstance(freno, dict):
+                fh.write(json.dumps({"ts": now, **freno}, ensure_ascii=False) + "\n")
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as exc:  # noqa: BLE001 — mai bloccare la response per un audit fail
         _write_failures += 1
@@ -251,7 +318,8 @@ def audit(event: dict[str, Any]) -> None:
         size = path.stat().st_size
         if size > _next_prune_at:
             _prune(path, s.audit_retention_days)
-            _next_prune_at = max(_PRUNE_SIZE, path.stat().st_size + _PRUNE_GROWTH)
+            dopo = path.stat().st_size
+            _next_prune_at = max(_PRUNE_SIZE, dopo + max(_PRUNE_GROWTH, dopo // 2))
     except (OSError, ValueError, TypeError) as exc:
         log.warning("audit: potatura fallita: %s", exc)
 

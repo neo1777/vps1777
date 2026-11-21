@@ -4286,3 +4286,238 @@ findings:
         output: "esce ≠ 0, nomina il volume e l'errore, nessun archivio; sul codice di prima 3 controlli su 4 falliscono"
         exit: 0
         quando: "2026-11-21"
+
+  - id: H88
+    severity: medium
+    title: "L'audit del gateway cresceva senza tetto su richieste anonime, e la potatura riscriveva il file intero dentro la richiesta"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: lettura
+      nota: >
+        Giro di revisione dell'intero codice del 21/11 (revisore del gateway), riprodotto in
+        locale: 36.378 eventi anonimi portano il file a 42 MB, e a quella dimensione una
+        scrittura costa 618 ms. Mai visto sulla VPS di riferimento.
+    since: unreleased
+    why: >
+      La potatura toglieva solo le righe più vecchie della retention (90 giorni): dentro la
+      finestra il file non aveva un limite. Ogni richiesta con un segreto sbagliato scriveva una
+      riga (`proxy_secret_mismatch`) senza alcun freno, quindi chiunque da fuori poteva riempire
+      il volume del gateway; sopra i 5 MB ogni megabyte in più faceva riscrivere tutto il file
+      in modo sincrono, bloccando l'event loop. A disco pieno cadono anche lo stato OAuth e le
+      notifiche, che stanno sullo stesso volume.
+    evidence:
+      - file: services/gateway/app/audit.py
+        contains:
+          - "def _taglia_alla_coda("
+          - "def _da_sopprimere("
+          - "_ANONIMI_AL_MINUTO = 60"
+      - file: services/gateway/tests/test_audit.py
+        contains:
+          - "def test_oltre_il_tetto_resta_la_coda_e_si_dice_quante_righe_sono_andate("
+          - "def test_gli_eventi_anonimi_hanno_un_tetto_al_minuto_e_i_soppressi_si_contano("
+    fix: >
+      Il file non supera 20 MB: oltre, restano le righe più nuove e una riga `audit_trimmed`
+      dice quante sono state tolte. Gli eventi che si provocano da fuori senza credenziali hanno
+      un tetto di 60 al minuto, e quelli in più si contano in una riga `audit_suppressed`. La
+      potatura si rifà quando il file è cresciuto della metà, non di 1 MB.
+    prova:
+      - comando: "uv run --locked --with pytest pytest -q tests/test_audit.py (services/gateway)"
+        dove: "PC"
+        output: "16 passed: 200 righe con tetto a 4000 byte → coda più riepilogo, nessuna persa senza dirlo; 13 eventi anonimi con tetto 5 → 6 scritti e 7 contati"
+        exit: 0
+        quando: "2026-11-21"
+
+  - id: H89
+    severity: medium
+    title: "Il riuso di un refresh token già ruotato veniva rifiutato ma non chiudeva la catena: chi lo aveva rubato e usato per primo la teneva valida"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: lettura
+      nota: >
+        Giro di revisione del 21/11. Il commento nel codice citava la BCP di OAuth 2.1, che
+        chiede di revocare la famiglia; il codice rifiutava solo il token ripresentato.
+    since: unreleased
+    why: >
+      Con la rotazione, un refresh rubato e usato dal ladro PRIMA del proprietario produce una
+      catena valida in mano al ladro; il proprietario, al suo turno, presenta il token ormai
+      ruotato e viene rifiutato. Il segnale c'era (`oauth_refresh_reuse`) ma la catena del ladro
+      restava valida fino a 30 giorni.
+    evidence:
+      - file: services/gateway/app/oauth.py
+        contains:
+          - "_famiglie_revocate: set[str] = set()"
+          - "_famiglie_revocate.add(fam)"
+          - "if fam and fam in _famiglie_revocate:"
+      - file: services/gateway/tests_runtime/test_oauth_stato.py
+        contains:
+          - "def test_il_riuso_di_un_refresh_ruotato_chiude_tutta_la_catena("
+    fix: >
+      Ogni refresh porta `fam`, l'id della catena nata da un'autorizzazione, che segue le
+      rotazioni. Se un refresh già ruotato viene ripresentato la famiglia è revocata, in modo
+      durevole: nessun token di quella catena vale più e il connettore va ricollegato. Il
+      proprietario riceve l'avviso su Telegram.
+    prova:
+      - comando: "uv run --locked --with pytest pytest -q tests_runtime/test_oauth_stato.py (services/gateway)"
+        dove: "PC"
+        output: "7 passed: dopo il riuso del primo refresh, il secondo (ottenuto dalla rotazione) riceve invalid_grant; la revoca sopravvive al ricaricamento"
+        exit: 0
+        quando: "2026-11-21"
+
+  - id: H90
+    severity: medium
+    title: "Un id o un testo che cominciava per «-» arrivava alla CLI nlm come un'opzione"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: lettura
+      nota: >
+        Giro di revisione del 21/11 (revisore di nb1777-mcp). Riprodotto con la CLI vera:
+        `nlm notebook describe --profilo-finto=x` risponde «No such option», la stessa
+        chiamata dopo `--` arriva all'API.
+    since: unreleased
+    why: >
+      I valori che vengono dal client (id di notebook, fonti e artefatti, titoli, domande,
+      descrizioni) erano passati come posizionali senza separatore. Un valore come
+      `--profile=altro` veniva interpretato da nlm come opzione; una domanda che comincia col
+      trattino faceva fallire la chiamata. Il contenuto di un notebook, letto da un modello,
+      poteva così pilotare le opzioni della CLI che gira con la sessione Google del proprietario.
+    evidence:
+      - file: services/nb1777-mcp/app/core.py
+        contains:
+          - "class _P(str):"
+          - "def _argv(args: list[str]) -> list[str]:"
+          - "cmd = [NLM] + _argv(args)"
+      - file: services/nb1777-mcp/tests/test_giro_revisione.py
+        contains:
+          - "def test_i_posizionali_che_vengono_da_fuori_passano_dopo_il_separatore("
+    fix: >
+      Ogni posizionale che viene da fuori è marcato e passa in fondo alla riga di comando, dopo
+      `--`: resta un valore qualunque cosa contenga. Vale anche per il modulo della ricerca.
+    prova:
+      - comando: "nlm notebook describe -- --profilo-finto=x (CLI vera, nlm 0.16.2)"
+        dove: "PC"
+        output: "API error NOT_FOUND (il valore è arrivato come id); senza `--`: «No such option»"
+        exit: 1
+        quando: "2026-11-21"
+
+  - id: H91
+    severity: medium
+    title: "Il plugin docker-compose veniva scaricato e installato da root senza impronta"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: lettura
+      nota: >
+        Giro di revisione del 21/11: la stessa classe di H80 (cosign), rimasta aperta sul
+        binario che poi orchestra tutto lo stack. Le impronte sono quelle pubblicate accanto al
+        binario, ricalcolate dai file scaricati.
+    since: unreleased
+    why: >
+      `deploy.sh` e l'installer web scaricavano `docker-compose-linux-<arch>` da GitHub e lo
+      rendevano eseguibile nella cartella dei plugin di Docker senza confrontarlo con niente:
+      ci si fidava del trasporto. Per un'architettura non riconosciuta si ripiegava su x86_64.
+    evidence:
+      - file: deploy.sh
+        contains:
+          - 'COMPOSE_SHA256_X86_64="ed1917fb54db184192ea9d0717bcd59e3662ea79db48bff36d3475516c480a6b"'
+          - 'sha256sum -c -'
+      - file: installer/engine.py
+        contains:
+          - "COMPOSE_SHA256 = {"
+      - file: tools/tests/test_compose_impronta.py
+        contains:
+          - "def test_si_installa_solo_dopo_la_verifica("
+    fix: >
+      Il binario si scarica in un file temporaneo e si installa solo se lo sha256 combacia con
+      quello dichiarato per l'architettura; altrimenti l'installazione si ferma. Un test tiene
+      uguali le impronte nei due installer.
+    prova:
+      - comando: "sha256sum docker-compose-linux-{x86_64,aarch64} (v2.32.4) contro i .sha256 pubblicati"
+        dove: "PC"
+        output: "le due impronte calcolate coincidono con quelle pubblicate e con quelle dichiarate nei due installer"
+        exit: 0
+        quando: "2026-11-21"
+
+  - id: H92
+    severity: low
+    title: "Il volume degli artefatti di NotebookLM cresceva senza tetto"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: lettura
+      nota: >
+        Giro di revisione del 21/11. Nessuna via cancellava un artefatto scaricato, e `nlm
+        download` scriveva senza guardare lo spazio.
+    since: unreleased
+    why: >
+      Video, audio e censimenti si accumulavano nel volume `nlm-artifacts` fino a riempire il
+      disco; a disco pieno falliscono anche i caricamenti e il backup. Un client autorizzato
+      poteva arrivarci chiedendo download ripetuti.
+    evidence:
+      - file: services/nb1777-mcp/app/core.py
+        contains:
+          - "def fai_posto_agli_artefatti("
+          - "fai_posto_agli_artefatti()"
+      - file: services/nb1777-mcp/tests/test_giro_revisione.py
+        contains:
+          - "def test_gli_artefatti_scaduti_e_in_eccesso_si_tolgono_prima_di_scaricare("
+    fix: >
+      Prima di ogni download si tolgono gli artefatti più vecchi di 30 giorni
+      (`NLM_ARTIFACTS_GIORNI`), poi i più vecchi finché il totale sta sotto 5 GB
+      (`NLM_ARTIFACTS_MAX_MB`), e si pretende almeno 1 GB libero. Un artefatto è una copia: si
+      riscarica da NotebookLM.
+    prova:
+      - comando: "uv run --locked --with pytest pytest -q tests/test_giro_revisione.py (services/nb1777-mcp)"
+        dove: "PC"
+        output: "7 passed: uno scaduto e uno in eccesso tolti, restano i due più nuovi; senza spazio il download non parte"
+        exit: 0
+        quando: "2026-11-21"
+
+  - id: H93
+    severity: high
+    title: "Un update ucciso dopo il punto di non ritorno lasciava lo stack fermo, e ogni update successivo rispondeva «già aggiornato»"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: lettura
+      nota: >
+        Giro di revisione del 21/11 (revisore degli strumenti dell'operatore). Mai successo
+        sulla VPS di riferimento. `high` perché è la disponibilità di tutto il servizio, senza
+        un allarme: la bandierina veniva scritta e mai riletta.
+    since: unreleased
+    why: >
+      Allo step 10 l'update scrive il tag nuovo nel `.env`, allo step 11 ferma lo stack. Se il
+      processo muore lì (connessione SSH caduta, timeout della unit systemd, OOM) lo stack resta
+      giù col tag già al target: `vps1777 update` confrontava il tag col target e diceva «già
+      aggiornato», uscendo 0. `update_in_progress` restava scritto nello stato per sempre.
+    evidence:
+      - file: tools/vps1777.py
+        contains:
+          - "def _riprendi_update_interrotto(repo: Path, st: dict) -> int | None:"
+          - "ripresa = _riprendi_update_interrotto(repo, st)"
+      - file: tools/tests/test_update_interrotto.py
+        contains:
+          - "def test_stack_fermo_col_tag_al_target_torna_indietro_e_ripristina_i_dati("
+          - "def test_il_comando_di_update_guarda_la_bandierina_prima_di_dire_gia_aggiornato("
+    fix: >
+      Chi lancia un update e trova la bandierina (avendo il lock, quindi con l'update di prima
+      non più vivo) lo chiude prima di ogni altra cosa: se il tag è al target e lo stack è sano
+      lo registra come riuscito; altrimenti torna alla versione precedente, ripristinando i dati
+      dallo snapshot solo se lo stack è fermo (da fermo non ha scritto niente dopo lo snapshot).
+    prova:
+      - comando: "uv run --with pytest pytest -q tools/tests/test_update_interrotto.py"
+        dove: "PC"
+        output: "6 passed: cinque stati di partenza, cinque decisioni; il controllo precede «già aggiornato»"
+        exit: 0
+        quando: "2026-11-21"
+    residuo: >
+      La decisione è provata con docker e health-gate sostituiti; un update ucciso davvero su
+      una macchina di prova non è ancora stato eseguito.
