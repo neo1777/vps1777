@@ -25,6 +25,10 @@ impronta() { cut -d' ' -f1 "$1/SHA256SUMS" 2>/dev/null; }
 
 copia "$T/a" "2020-01-02 03:04:05"
 copia "$T/b" "2024-06-07 08:09:10"
+# La seconda copia ha i permessi di chi clona con umask 077 (trovato da un controllo esterno il
+# 22/11/2026: con permessi diversi sui sorgenti il pacchetto usciva diverso). Solo «gruppo e altri»:
+# il bit di esecuzione del proprietario è un dato del sorgente e resta.
+chmod -R go-rwx "$T/b"
 SOURCE_DATE_EPOCH=1700000000 bash "$T/a/tools/assembla-pacchetto.sh" 9.9.9 "$T/out-a" >/dev/null 2>"$T/err-a" || ko "la prima build è fallita: $(cat "$T/err-a")"
 ( umask 077; SOURCE_DATE_EPOCH=1700000000 bash "$T/b/tools/assembla-pacchetto.sh" 9.9.9 "$T/out-b" >/dev/null 2>"$T/err-b" ) || ko "la seconda build è fallita: $(cat "$T/err-b")"
 A="$(impronta "$T/out-a")"; B="$(impronta "$T/out-b")"
