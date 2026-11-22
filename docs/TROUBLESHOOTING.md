@@ -310,6 +310,14 @@ carica tutto in memoria (da 3,4 a 4 volte il file): oltre i ~500 MB muore il lav
 il gateway. Cura: dividi l'export, oppure indicizzalo sul PC e carica il `.db` già pronto
 da `/admin/archive` (drop-in, senza coda).
 
+Il database su cui stava scrivendo **non perde niente**: un caricamento è una scrittura sola, e
+se muore a metà torna a com'era prima. Però accanto resta il segno della scrittura interrotta,
+e finché c'è l'archivio (che legge soltanto) salta quel database nelle ricerche. Dalla 0.98.6 lo
+toglie da sé il servizio `ingest`, subito dopo il lavoro morto e all'inizio di ogni lavoro
+successivo, e l'esito in «Caricamenti» lo dice. A mano:
+`docker compose --profile ingest run --rm -T ingest risana` (stampa quali database ha rimesso a
+posto; esce 1 se uno non è sano, e allora si passa al ripristino da backup).
+
 ## Un servizio si riavvia da solo (tetto di memoria)
 
 I servizi hanno un tetto di memoria dove il picco è misurato (`mem_limit` in

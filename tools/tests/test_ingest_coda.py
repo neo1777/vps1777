@@ -225,3 +225,40 @@ def test_quello_che_non_e_un_intent_esce_dalla_coda(giro):
     (coda / "x.txt").write_text("?")
     assert cli.cmd_ingest_coda(repo, SimpleNamespace()) == 0
     assert not list(coda.iterdir())
+
+
+def test_un_lavoro_ucciso_fa_risanare_l_archivio_e_l_esito_lo_dice(giro, monkeypatch):
+    """22/11/2026: un ingest ucciso a metà lascia il DB intero ma illeggibile da archive-mcp
+    (il journal della scrittura interrotta). La CLI chiama subito `ingest risana`, non aspetta
+    il prossimo carico; che il risanamento funzioni davvero lo prova
+    services/gateway/tests/test_ingest_ucciso.py, che l'ingest lo uccide."""
+    cli, repo, coda, chiamate, risposte = giro
+    vero_run = cli.run
+
+    def run_con_risana(cmd, **kw):
+        if "risana" in cmd:
+            chiamate.append(list(cmd))
+            return SimpleNamespace(returncode=0, stdout='{"risanati": ["note"], "falliti": {}}', stderr="")
+        return vero_run(cmd, **kw)
+
+    monkeypatch.setattr(cli, "run", run_con_risana)
+    (coda / f"{JID}.json").write_text(json.dumps(_intent()))
+    risposte.append(SimpleNamespace(returncode=137, stdout="", stderr=""))
+    cli.cmd_ingest_coda(repo, SimpleNamespace())
+    (cmd,) = [c for c in chiamate if "risana" in c]
+    assert cmd == ["docker", "compose", "--profile", "ingest", "run", "--rm", "-T", "ingest", "risana"]
+    e = _esito(repo, JID)
+    assert e["stato"] == "errore" and "ucciso dal tetto" in e["errore"]
+    assert "riportato a com'era prima (note)" in e["errore"] and "niente è andato perso" in e["errore"]
+
+
+def test_se_il_risanamento_non_riesce_l_esito_non_tace(cli, monkeypatch):
+    monkeypatch.setattr(cli, "run", lambda cmd, **kw: SimpleNamespace(
+        returncode=1, stdout='{"risanati": [], "falliti": {"note": "database disk image is malformed"}}', stderr=""))
+    frase = cli._risana_archivio(["docker", "compose"])
+    assert "NON sono riuscita" in frase and "note" in frase and "malformed" in frase
+    monkeypatch.setattr(cli, "run", lambda cmd, **kw: SimpleNamespace(returncode=125, stdout="", stderr="boom"))
+    assert "Non ho potuto controllare" in cli._risana_archivio(["docker", "compose"])
+    monkeypatch.setattr(cli, "run", lambda cmd, **kw: SimpleNamespace(
+        returncode=0, stdout='{"risanati": [], "falliti": {}}', stderr=""))
+    assert cli._risana_archivio(["docker", "compose"]) == ""
