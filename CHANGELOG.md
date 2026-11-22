@@ -6,7 +6,7 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ### Cambiato
 - **Il pacchetto di runtime della release si può ricostruire e viene sempre uguale.** La ricetta è uscita da
-  `release.yml` ed è in `tools/assembla-pacchetto.sh`: ordine dei file, data (quella del commit), proprietario e
+  `release.yml` ed è in `tools/assembla-pacchetto.sh`: ordine dei file, data (quella del commit), proprietario, permessi e
   intestazione della compressione sono fissati. Prima due build dello stesso commit davano due impronte diverse.
   La CI lo costruisce due volte e confronta (`tools/tests/test-pacchetto-riproducibile.sh`). Il contenuto non
   cambia: confrontato file per file e permesso per permesso col pacchetto della 0.98.5. Le immagini dei container

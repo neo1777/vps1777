@@ -60,9 +60,10 @@ with open(os.path.join(root, "bundle-manifest.json"), "w") as fh:
 PY
 
 NOME="vps1777-runtime-v${VERSIONE}.tar.gz"
-# Ordine dei nomi, data, proprietario e intestazione gzip fissati: sono le quattro cose che cambiano
-# da una build all'altra senza che cambi una riga dei sorgenti.
-tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner \
+# Ordine dei nomi, data, proprietario, permessi e intestazione gzip fissati: sono le cose che cambiano
+# da una build all'altra senza che cambi una riga dei sorgenti. I permessi: 644, o 755 per ciò che è
+# eseguibile nel sorgente; senza, un clone fatto con umask 077 dava un pacchetto diverso.
+tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner --mode=u+rw,go=rX \
     --format=gnu -cf - -C "$B" . | gzip -n -9 > "$USCITA/$NOME"
 [ -s "$USCITA/$NOME" ] || { echo "il pacchetto è vuoto" >&2; exit 2; }
 ( cd "$USCITA" && sha256sum "$NOME" > SHA256SUMS && cat SHA256SUMS )
