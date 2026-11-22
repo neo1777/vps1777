@@ -4749,7 +4749,7 @@ findings:
         una scelta scritta («VPS riformattata = nuova host key»); il proprietario ha deciso
         il 22/11 di fermarsi e chiedere conferma. Mai sfruttato che si sappia. `low`: serve
         qualcuno in grado di mettersi fra il PC e la macchina al momento dell'installazione.
-    since: unreleased
+    since: v0.98.3
     why: >
       `deploy.sh` toglieva la voce da `known_hosts` prima di ogni connessione, e l'installer
       web usava `AutoAddPolicy` senza nessun elenco di chiavi note. In tutti e due i casi una
