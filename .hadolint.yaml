@@ -1,0 +1,8 @@
+# Le eccezioni di hadolint, ognuna col suo perché (22/11/2026). Lo lancia tools/scanner.sh.
+ignored:
+  # DL3008 «fissa la versione dei pacchetti apt»: non lo facciamo apposta. La base è fissata per
+  # impronta e subito dopo si fa `apt-get upgrade`, perché le correzioni di sicurezza uscite dopo la
+  # base entrino nell'immagine (scelta del 21/11/2026: CVE con fix da 368 a 16). Una versione fissata
+  # a mano terrebbe fuori proprio quelle. Il prezzo è dichiarato: le immagini sono uguali solo a
+  # parità di giorno; quello che gira sulla macchina è fissato per impronta in images.lock.
+  - DL3008

@@ -1,0 +1,39 @@
+name: Scanner del sorgente
+
+# Tre letture del repo che il resto della CI non fa: i Dockerfile (hadolint + trivy config), le
+# dipendenze dei lockfile (osv-scanner), i segreti vivi nella storia (trufflehog). La ricetta sta in
+# tools/scanner.sh, la stessa che si lancia a mano; qui prima gira la sua autoprova, perché uno
+# scanner che non sa diventare rosso è una riga di log.
+# A calendario oltre che sulle PR: una vulnerabilità nuova in una dipendenza esce senza che nel repo
+# cambi una riga.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "30 6 * * 1"  # ogni lunedì alle 6:30 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: scanner-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scanner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # tutta la storia: un segreto tolto da un commit resta nei precedenti
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Gli scanner sanno diventare rossi (autoprova)
+        run: bash tools/scanner.sh --autoprova
+      - name: Dockerfile, dipendenze, segreti
+        run: bash tools/scanner.sh tutti

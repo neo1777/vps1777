@@ -1,0 +1,6 @@
+# Le regole di ruff oltre il default, una famiglia per volta e ognuna col perché.
+# La versione di ruff è fissata dove lo si lancia (ci.yml e tools/check.sh), non qui.
+[lint]
+# S602, S604, S605 (22/11/2026): un comando passato alla shell. Il default non le ha. Ogni
+# `shell=True` che resta porta accanto `# noqa: S602` e, sopra, il perché.
+extend-select = ["S602", "S604", "S605"]
