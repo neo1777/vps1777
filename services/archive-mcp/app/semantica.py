@@ -441,7 +441,9 @@ def verdetto_registro(verificabile: bool, *, candidati: int, assenti: int,
                  f"({assenti} rowid spariti, {uuid_diversi} rowid ora di un altro "
                  f"messaggio) — {cura}")
     else:
-        stato = "verificato: ogni risultato vettoriale combacia col DB (uuid per rowid)"
+        # «verificato» solo se qualcosa è stato guardato: con zero candidati non ho misurato
+        stato = ("verificato: ogni risultato vettoriale combacia col DB (uuid per rowid)" if candidati
+                 else "niente da verificare: nessun risultato vettoriale in questa ricerca")
     return {"registro": verificabile, "candidati": candidati, "scartati": scartati,
             "rowid_assenti": assenti, "uuid_diversi": uuid_diversi, "stato": stato}
 

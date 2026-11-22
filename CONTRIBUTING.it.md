@@ -59,6 +59,8 @@ ancora in rosso su un guasto costruito, per la ragione giusta.
 
 Le suite girano **una alla volta**, come in CI:
 
+La CI fissa le versioni di `pytest` e `pyyaml` (le stesse di `tools/check.sh`: si leggono lì); i comandi qui sotto prendono quella che `uvx` risolve, e per un giro veloce in locale va bene.
+
 ```bash
 uvx --with bcrypt --with cryptography --with pyyaml pytest tools/tests/   # CLI, installer, presìdi del repo
 uvx pytest services/archive-mcp/tests/                         # archive-mcp (stdlib)

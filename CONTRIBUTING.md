@@ -63,6 +63,8 @@ turn red on a constructed fault, for the right reason.
 
 The suites run **one at a time**, as in CI:
 
+CI pins the versions of `pytest` and `pyyaml` (the same ones `tools/check.sh` uses: read them there); the commands below take whatever `uvx` resolves, which is fine for a quick local run.
+
 ```bash
 uvx --with bcrypt --with cryptography --with pyyaml pytest tools/tests/   # CLI, installers, repo guards
 uvx pytest services/archive-mcp/tests/                         # archive-mcp (stdlib)

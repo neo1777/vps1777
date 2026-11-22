@@ -4,6 +4,25 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Un database riservato non entra più nelle ricerche quando il suo ruolo non si riesce a leggere (H100).** Se la
+  prima lettura del ruolo falliva (il file bloccato per un attimo), il database diventava «non dichiarato», cioè
+  dentro il perimetro di default: la ricerca subito dopo poteva riuscire e restituirne il contenuto. Ora vale
+  «illeggibile»: resta fuori, non viene contato nemmeno fra quelli fuori, ed è dichiarato fra i non contati.
+
+### Corretto
+- Archivio: un database che non si lascia leggere durante una ricerca va fra i saltati (prima solo nel log); una
+  query oltre i 2000 caratteri è rifiutata dicendolo; il verdetto sull'indice non dice «verificato» con zero
+  risultati guardati; una mappa dei temi rovinata non è più detta «non ancora calcolata». Log in UTC.
+
+### Documenti
+- **SECURITY.md dice che cosa si conserva, perché e fino a quando** (nove righe, con scritto dove una scadenza non
+  c'è), e ha una sezione sui **limiti crittografici dichiarati**: backup cifrati con chiave classica, firma classica
+  del canale di aggiornamento, metadati di release senza scadenza.
+- Corrette tre frasi che il codice smentiva: i segreti non stanno «su tmpfs» (con compose è un bind-mount del file
+  dell'host); «container non-root» ora nomina l'eccezione del job di backup. Tolti dal documento di sicurezza i nomi
+  interni di sessione.
+
 ## [0.98.4] — 2026-11-22
 
 ### Corretto

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 import threading
 from pathlib import Path
 
@@ -13,9 +14,11 @@ from .settings import get_settings
 
 def main() -> None:
     s = get_settings()
+    logging.Formatter.converter = time.gmtime      # l'ora dei log in UTC, con la Z
     logging.basicConfig(
         level=s.log_level.upper(),
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+        format="%(asctime)sZ %(levelname)s [%(name)s] %(message)s",
         stream=sys.stdout,
     )
     log = logging.getLogger("archive-mcp")

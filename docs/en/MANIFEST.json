@@ -3,19 +3,19 @@
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "30825991b8ded81fbc66711845ac2c2a03896135bef00a06a267d5929758f06e"
+      "sorgente_sha256": "a47ebd6f9663d3d3476dfa6d30d9c4ec0c375935b6b510580270143f7444faf5"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
-      "sorgente_sha256": "e804ffe4148b6fa2f7e78aee0a01b15fe6def5ebff17f4e3dba0c894cd6f1af4"
+      "sorgente_sha256": "6a7d064356fca2373b47520aa16f19f1d21a26c77c6f60d0939ae05fd60daa9e"
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
-      "sorgente_sha256": "4475571ebb5e93fa86a99afb4383b5dea3d0dea40faad5d5ac9aaa19dea01688"
+      "sorgente_sha256": "a8a0e767daab30d040fd812575bb1155ff83cafcdd5dad84708995794eb44f46"
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
-      "sorgente_sha256": "af2fb63f20d45071f4c3aac68d659e6c22945a6bd65599f113098c645e549bc0"
+      "sorgente_sha256": "e1cd123e348f510025176117c5a74b7b24a3c94dbdf5bb549d3ece5ee55e3da4"
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",

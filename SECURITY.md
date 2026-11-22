@@ -4,7 +4,7 @@
 > Security posture in brief: only the gateway faces the network (backend on an
 > `internal:true` Docker network); non-root containers with `cap_drop: ALL` (except
 > the backup job, which runs as root with only three capabilities and the repo read-only, `H82`);
-> secrets via Docker `secrets:` on tmpfs, never env vars; releases are
+> secrets via Docker `secrets:` (files mounted read-only in `/run/secrets/`), never env vars; releases are
 > cosign-signed and verified **fail-closed**, images pinned by digest from the first
 > update on (a fresh install runs by tag until then, `H22`); age-encrypted
 > two-tier backups with the private key off the VPS; pre-update snapshots with
@@ -241,7 +241,8 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   al restore. `backup.sh` non genera più la coppia sulla VPS (che avrebbe messo
   la privata sullo stesso disco dei backup). Vedi [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md).
 - **Secrets sempre file-mounted** (baseline, `H68`): password, signing key, token via
-  Docker `secrets:` in `tmpfs /run/secrets/`, **mai** in env var — un env var lo mostra
+  Docker `secrets:` in `/run/secrets/` (file in sola lettura: con compose è un bind-mount del file
+  dell'host, non una tmpfs), **mai** in env var — un env var lo mostra
   `docker inspect` e lo ereditano tutti i processi figli. Vedi [docs/SECRETS.md](docs/SECRETS.md).
   ⚠️ **Quanto ne è PRESIDIATO, perché la promessa è più larga della copertura:**
   `tools/tests/test_secrets_file_mounted.py` aggancia la variabile al segreto **per
@@ -474,7 +475,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** I 99 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 100 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -485,7 +486,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **99 voci** (2 critiche, 16 alte, 57 medie, 24 basse): 43 dalla
+Il registro conta **100 voci** (2 critiche, 16 alte, 57 medie, 25 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -510,12 +511,12 @@ un backup acceso di default su un'installazione che non armava mai la chiave. E 
 credenziali in ogni risposta, ma guardava il testo intero, e lo snippet è un ritaglio.
 E una (`H75`, 28/09) dalla misura di quella stessa cura sugli snippet veri: nell'archivio
 c'era una password admin che `setup.sh` aveva stampato davanti a un agente.
-E una (`H76`, 30/09) dalla raccolta degli oggetti della curatrice: le righe
+E una (`H76`, 30/09) da una raccolta interna di materiale del progetto: le righe
 `RESULT_SECRET=…` dell'installer e l'URL del connettore portavano in chiaro il
 `gateway_secret` in uso, perché non hanno un prefisso di fornitore. E una (`H77`, 01/10)
 dalla preparazione della sua rotazione: `rotate-secret.sh` e `deploy.sh` lo stampavano
-anche davanti a un agente, come la password di H75. E una (`H78`, 01/10) dal censimento
-interno di Sagoma: l'access-log di Caddy scriveva l'URI col segreto. E una (`H79`, 04/10)
+anche davanti a un agente, come la password di H75. E una (`H78`, 01/10) da un censimento
+interno: l'access-log di Caddy scriveva l'URI col segreto. E una (`H79`, 04/10)
 dalla lettura della specifica MCP 2026-07-28: lo stesso log lo scriveva ancora quando il
 segreto non apriva il path, ma stava nel `resource` dell'autorizzazione OAuth. E una (`H80`,
 04/10) ancora dal censimento di Sagoma: cosign, che verifica la firma di ogni aggiornamento,
@@ -534,20 +535,21 @@ del messaggio delle pagine admin entrava nell'HTML senza escape, e un backup usc
 quando un volume non si era salvato.
 E sei (`H88`-`H93`, 21/11) sono i rilievi di sicurezza dello stesso giro rimasti aperti dopo la prima
 release, chiusi insieme prima di far leggere il repo a un revisore esterno.
-E sei (`H94`-`H99`, 21 e 22/11) vengono da quella lettura esterna: gateway, CLI e installatori
+E sette (`H94`-`H100`, 21 e 22/11) vengono da quella lettura esterna: gateway, CLI e installatori
 riletti applicando un catalogo di requisiti con due modelli diversi. La rotazione di un refresh
 proseguiva anche quando la revoca di quello usato non era arrivata su disco; l'elenco delle
 sessioni admin chiuse, se non si leggeva, valeva «nessuna revoca»; uno snapshot pre-update
 interrotto restava «il più recente», pronto per un rollback coi dati; i valori che
 `deploy.sh --apply` legge dal pannello erano controllati riga per riga, e un a-capo li faceva
 entrare in uno script eseguito sulla macchina; l'installer locale rispondeva a qualunque
-pagina aperta nel browser; e gli installatori accettavano qualunque chiave SSH della macchina,
-anche se cambiata dall'ultima volta.
+pagina aperta nel browser; gli installatori accettavano qualunque chiave SSH della macchina,
+anche se cambiata dall'ultima volta; e un database riservato entrava nelle ricerche se il suo
+ruolo non si leggeva alla prima lettura.
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 85 |
+| **chiusi** | 86 |
 | **parziali** | 10 |
 | **accettati** | 4 |
 | **aperti** | 0 |
@@ -967,7 +969,7 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
   backup notturno viaggiano cifrati. Cosa NON metterci è scritto
   in [docs/MEMORIA-1777.md](docs/MEMORIA-1777.md): persone terze, famiglia, il personale.
 - **I secret** (`secrets/*.txt`) sono in chiaro sul disco (mode 600), montati in
-  `tmpfs /run/secrets/`. Stessa storia: la protezione è nei permessi e nel non
+  `/run/secrets/` (bind-mount in sola lettura, non una tmpfs). Stessa storia: la protezione è nei permessi e nel non
   finire nei log/argv/backup-non-cifrati (vedi sopra), non nella cifratura a riposo.
 - **I backup** (`.tar.age`) invece **sono** cifrati (age), con la chiave privata
   fuori dalla VPS — dal `0.43.13` su due livelli, core notturno e archivio
@@ -1000,6 +1002,41 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
 - **Cancellazione**: l'archivio si cancella per **DB intero** (`/admin/archive`,
   con conferma e audit). La cancellazione per singola conversazione non c'è: è una
   scelta, non una dimenticanza.
+
+## Che cosa si conserva, perché e fino a quando
+
+Una riga per ogni cosa che la macchina tiene. «Fino a quando» è ciò che fa il codice, non
+un'intenzione; dove non c'è una scadenza è scritto.
+
+| Che cosa | Perché | Fino a quando |
+|---|---|---|
+| I database dell'archivio (le tue conversazioni) | è il prodotto: ritrovarle | **nessuna scadenza**: restano finché non cancelli tu il database, intero, dal pannello. Non si cancella una conversazione sola |
+| Il log di audit del gateway (chi ha chiamato quale strumento, da quale IP; mai i contenuti) | ricostruire un accesso sospetto | 90 giorni (`AUDIT_RETENTION_DAYS`), e comunque un tetto in dimensione |
+| I log dei container (stdout) | diagnosi | 10 MB × 5 file per servizio, poi i più vecchi si perdono |
+| L'access-log di Caddy, solo col profilo Caddy (IP del client, percorso col segreto mascherato) | diagnosi dell'ingresso | rotazione per dimensione; **nessuna scadenza in giorni** |
+| Gli snapshot pre-update (i volumi, **in chiaro**) | poter tornare indietro dopo un aggiornamento | l'ultimo delle ultime due versioni; il resto si cancella a ogni update, rollback o controllo giornaliero |
+| I backup cifrati sulla macchina | ripristino | core: 7 giornalieri, 4 settimanali e le ultime 3 versioni; archivio: le ultime 2 copie. Quelli che porti fuori li tieni tu |
+| Gli artefatti scaricati da NotebookLM | consegnarteli dal link | 30 giorni o 5 GB (`NLM_ARTIFACTS_GIORNI`, `NLM_ARTIFACTS_MAX_MB`) |
+| Token revocati e famiglie di refresh | rifiutare un token rubato | fino alla scadenza naturale del token, poi si potano |
+| Gli strati locali della memoria (`fatti.md`, `errata.md`) | servirli alle sessioni | **nessuna scadenza**: li scrivi e li togli tu |
+
+## Limiti crittografici dichiarati
+
+Tre cose che oggi reggono e che un giorno non basteranno. Non sono rilievi aperti: sono scelte
+datate, scritte perché chi adotta il progetto le trovi qui e non le scopra.
+
+- **I backup sono cifrati con `age` e chiave X25519 classica.** Non è resistente a un computer
+  quantistico: chi copiasse oggi un backup cifrato potrebbe aprirlo il giorno in cui quell'attacco
+  diventa praticabile («raccogli ora, decifra poi»). Riguarda soprattutto le copie che escono
+  dalla macchina. Quando `age` avrà recipient post-quantum stabili, la chiave va rigenerata.
+- **Il canale di aggiornamento è firmato con cosign classico** (ECDSA, firma senza chiave via
+  Sigstore). Una firma non si «raccoglie oggi per romperla poi»: il rischio comincia quando
+  falsificarla diventa possibile, e allora andrà cambiata. Oggi non c'è una firma post-quantum.
+- **I metadati di una release non hanno una scadenza.** La firma dice che il pacchetto è
+  autentico, non che è l'ultimo: chi controllasse la rete fra la macchina e GitHub potrebbe
+  continuare a servirle una release vecchia e autentica (un «congelamento»). L'aggiornamento
+  automatico non scende di versione, quindi non può essere riportata indietro; può essere tenuta ferma.
+  Lo si vede dall'età dell'ultimo controllo, che la macchina mostra.
 
 ## Postilla — l'hardening che faremo al 100% più avanti
 

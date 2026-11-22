@@ -536,6 +536,7 @@ silenzio.** Il campo `ruolo` la rende leggibile.
 | `riscontro` | non si interroga per **trovare** ma per **verificare**: ridondanza voluta, gemelli re-ingeriti con un indexer diverso, DB-sonda con un caso-noto-che-deve-riuscire |
 | `riservato` | materiale personale: fuori dai compiti tecnici senza richiesta esplicita. Dalla 0.74.0 la ricerca senza `db_name` lo **salta**; nominandolo si interroga. È una **dichiarazione, non un lucchetto**: chi ha accesso al server lo legge |
 | `non dichiarato` | **nessuno si è pronunciato** su quel DB. Non è «poco importante», e non va indovinato dal nome: è il valore che si legge quando `set_ruolo` non è mai stata chiamata (o quando la dichiarazione è stata ritirata passando `""`) |
+| `illeggibile` | non è una dichiarazione: è ciò che si legge quando il ruolo **non si è potuto leggere** e non lo si conosceva (file bloccato o rovinato). Il DB resta **fuori** dalla ricerca senza `db_name` e compare fra i non contati: non sapere il ruolo non può far entrare un DB riservato |
 
 > **Il ruolo decide dove si cerca (dalla 0.74.0, cura B della #278).** Senza `db_name`,
 > `search`, `search_ibrida`, `count`, `check_term` e `precedenti` guardano i **primari** e i
