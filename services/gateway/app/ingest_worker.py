@@ -13,6 +13,9 @@ Due modi:
       nella stessa cartella (dal 12/10/2026 non indicizza più dentro il gateway).
   indexer <argomenti di archive_indexer>
       passa tutto a `archive_indexer.main` (archive-migra, archive-retag).
+  risana
+      rimette leggibili i DB rimasti a metà di una scrittura (vedi `risana`); stampa UNA
+      riga JSON ({"risanati": [...], "falliti": {...}}). Esce 0 se non resta niente di rotto.
 
 Il percorso del file e del DB lo ricostruisce QUI da id e nome, con le stesse regole
 del gateway: la CLI li ha già validati, ma un argomento che arriva da un intent scritto
@@ -54,6 +57,48 @@ def _pulisci_orfani(cartella: Path, tranne: Path) -> tuple[int, int]:
     return tolti, falliti
 
 
+def risana(db_dir: str = DB_DIR) -> dict:
+    """Rimette leggibili i DB la cui ultima scrittura è morta a metà. {"risanati", "falliti"}.
+
+    22/11/2026, misurato uccidendo l'indicizzatore con `kill -9` a metà di un file: un ingest è
+    UNA transazione, quindi il DB resta intero (nessuna riga a metà), ma accanto resta il
+    journal della transazione interrotta. Finché c'è, chi apre il DB in sola lettura (archive-mcp
+    monta il volume `:ro`) riceve «attempt to write a readonly database» e lo salta: un DB con
+    anni di conversazioni spariva dalle ricerche finché qualcuno non ci caricava un altro file.
+    Succede davvero: il tetto di memoria del lavoro uccide proprio così.
+
+    La cura la può fare solo chi ha il volume in scrittura, cioè questo processo: aprire il DB
+    in scrittura e leggerlo basta, SQLite annulla da sé la transazione interrotta. Poi si
+    controlla che sia sano (`quick_check`), e se non lo è lo si dice: «risanato» non si
+    dichiara sulla fiducia. Un DB su cui un altro processo sta scrivendo DAVVERO non viene
+    toccato: il suo journal non è abbandonato e SQLite lo sa dal lock.
+    """
+    risanati: list[str] = []
+    falliti: dict[str, str] = {}
+    for db in sorted(Path(db_dir).glob("*.db")):
+        journal = db.with_name(db.name + "-journal")
+        try:
+            if not journal.is_file() or journal.stat().st_size == 0:
+                continue
+            conn = sqlite3.connect(str(db), timeout=5)
+            try:
+                conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+                esiti = [r[0] for r in conn.execute("PRAGMA quick_check(1)").fetchall()]
+            finally:
+                conn.close()
+            if esiti != ["ok"]:
+                falliti[db.stem] = "annullata la scrittura interrotta, ma il DB non è sano: " \
+                                   + "; ".join(esiti)[:300]
+            elif journal.is_file() and journal.stat().st_size > 0:
+                falliti[db.stem] = "il journal è ancora lì: un altro processo sta scrivendo, " \
+                                   "oppure non ho potuto annullare"
+            else:
+                risanati.append(db.stem)
+        except (sqlite3.Error, OSError) as exc:
+            falliti[db.stem] = str(exc)[:300]
+    return {"risanati": risanati, "falliti": falliti}
+
+
 def esegui_coda(jid: str, db: str, suffisso: str, project: str = "",
                 description: str = "", *, db_dir: str = DB_DIR) -> tuple[int, dict]:
     """(codice d'uscita, esito). Logica senza argparse: la provano i test."""
@@ -66,10 +111,15 @@ def esegui_coda(jid: str, db: str, suffisso: str, project: str = "",
         _tolti, non_tolti = _pulisci_orfani(cartella, sorgente)
         if not sorgente.is_file():
             return 3, {"errore": "il file del lavoro non c'è più nella coda"}
+        # prima di scrivere: un lavoro di prima ucciso a metà può aver lasciato un altro DB
+        # illeggibile, e questo è l'unico processo che lo può rimettere a posto
+        cura = risana(db_dir)
         n = archive_indexer.index_file(str(sorgente), str(db_path), project=project)
         if description:
             archive_indexer.set_meta(db_path, "description", description)
         esito = {"righe": n, "totale": archive_indexer.count_rows(db_path)}
+        if cura["risanati"] or cura["falliti"]:
+            esito["risanamento"] = cura
         if non_tolti:
             esito["orfani_non_tolti"] = non_tolti
         return 0, esito
@@ -98,7 +148,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--project", default="")
     p.add_argument("--description", default="")
     sub.add_parser("indexer", help="passa gli argomenti a archive_indexer")
+    sub.add_parser("risana", help="rimette leggibili i DB rimasti a metà di una scrittura")
     args = ap.parse_args(argv)
+    if args.modo == "risana":
+        cura = risana()
+        print(json.dumps(cura, ensure_ascii=False), flush=True)
+        return 1 if cura["falliti"] else 0
     codice, esito = esegui_coda(args.id, args.db, args.suffisso, args.project,
                                 args.description)
     print(json.dumps(esito, ensure_ascii=False), flush=True)

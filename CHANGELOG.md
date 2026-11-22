@@ -12,6 +12,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   cambia: confrontato file per file e permesso per permesso col pacchetto della 0.98.5. Le immagini dei container
   restano fuori da questa promessa, per scelta: prendono gli aggiornamenti di sicurezza al momento della build.
 
+### Corretto
+- **Un caricamento nell'archivio ucciso a metà non lascia più il database fuori dalle ricerche.** Trovato
+  uccidendo apposta l'indicizzatore mentre scriveva: il database restava intero (un caricamento è una scrittura
+  sola, e torna a com'era prima), ma accanto restava il segno della scrittura interrotta e l'archivio, che ha i
+  dati in sola lettura, da quel momento lo saltava finché qualcuno non ci caricava un altro file. Succede
+  davvero quando un export sfora il tetto di memoria. Ora il servizio `ingest` lo rimette leggibile subito dopo
+  il lavoro morto e all'inizio di ogni lavoro (`ingest risana`), controlla che sia sano e lo scrive nell'esito.
+  La prova lancia l'ingest vero, lo uccide con `kill -9` e verifica dati, indice di ricerca e rifacimento del
+  lavoro (`services/gateway/tests/test_ingest_ucciso.py`).
+
 ### Aggiunto
 - **Tre scanner in più leggono il sorgente a ogni PR e ogni lunedì** (`tools/scanner.sh`, workflow «Scanner del
   sorgente»): hadolint e `trivy config` sui Dockerfile, osv-scanner sulle dipendenze dei lockfile, trufflehog sui

@@ -4691,6 +4691,38 @@ def esito_lavoro_ingest(codice: int, uscita: str) -> dict:
     return {"stato": "errore", "errore": str(errore)[:600]}
 
 
+def _risana_archivio(cc: list[str]) -> str:
+    """Dopo un lavoro morto senza chiudere: rimette leggibili i DB rimasti a metà. Ritorna una
+    frase per l'esito ('' se non c'era niente da fare).
+
+    Un ingest ucciso (tetto di memoria, timeout) lascia accanto al DB il journal della scrittura
+    interrotta, e l'archivio, che ha il volume in sola lettura, da quel momento non lo legge
+    più. Solo il servizio `ingest` lo può annullare: lo si chiama subito, non al prossimo carico.
+    """
+    try:
+        r = run([*cc, *INGEST_RUN, "risana"], check=False, capture=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        return "Non ho potuto controllare se il database è rimasto a metà (tempo scaduto)."
+    dati: dict = {}
+    for riga in reversed((r.stdout or "").splitlines()):
+        if riga.strip().startswith("{"):
+            try:
+                dati = json.loads(riga)
+            except json.JSONDecodeError:
+                continue
+            break
+    if "risanati" not in dati:
+        return "Non ho potuto controllare se il database è rimasto a metà."
+    frasi = []
+    if dati.get("risanati"):
+        frasi.append("Il database era rimasto a metà della scrittura: l'ho riportato a com'era "
+                     f"prima ({', '.join(map(str, dati['risanati']))}); niente è andato perso.")
+    if dati.get("falliti"):
+        frasi.append("NON sono riuscita a rimettere leggibile: "
+                     + "; ".join(f"{k} ({v})" for k, v in dati["falliti"].items())[:400])
+    return " ".join(frasi)
+
+
 def _scrivi_esito_ingest(repo: Path, jid: str, dati: dict) -> None:
     d = onboarding_dir(repo) / INGEST_ESITI
     d.mkdir(exist_ok=True)
@@ -4813,6 +4845,9 @@ def _un_lavoro_della_coda(repo: Path, cc: list[str], p: Path) -> str:
         esito = {"stato": "errore", "errore": "il lavoro ha superato le 6 ore"}
         codice = -1
     if esito["stato"] == "errore" and codice not in (0, 3):
+        cura = _risana_archivio(cc)
+        if cura:
+            esito["errore"] = f"{esito['errore']} {cura}"[:1200]
         # un lavoro ucciso non arriva al suo `finally`: il file lo toglie il
         # gateway (stesso utente che l'ha scritto); se non ci riesce, lo toglie
         # il prossimo lavoro dopo due giorni
