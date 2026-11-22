@@ -1,6 +1,8 @@
 # tools/prove-empiriche/ — le conclusioni che solo il sistema vivo può chiudere
 
-**Scritte da setaccio (`abdd732a`) il 26/07/2026, round-1 e round-2 del loop-audit.**
+**Nate il 26/07/2026, nei primi due giri di una revisione del progetto fatta con più sessioni di lavoro.**
+Nei commenti degli script le sigle come `abdd732a` o `71d540e6` sono gli identificativi di quelle sessioni,
+«l'audio» è l'analisi esterna che apriva ogni giro, e `H43`, `H51`… sono voci di `security/findings.yml`.
 
 ## Perché esistono
 Un audit su un sistema in produzione arriva a un punto dove la lettura del codice non basta:
@@ -9,7 +11,7 @@ domande a cui **nessuna riga risponde** — servono una misura. Il kit chiama qu
 e le distingue dalle **cartacee**: una cartacea diventa un commit, un'empirica diventa un comando.
 
 **E una prova DESCRITTA la deve tradurre chi ha la macchina; una ESEGUIBILE la lancia.** Questa cartella
-esiste per non far pagare a Neo il lavoro di scriverle (una lezione di metodo del kit di audit, che non
+esiste per non far pagare a Neo (il proprietario del progetto) il lavoro di scriverle (una lezione di metodo del kit di audit, che non
 è in questo repo).
 
 ## Come si lanciano
@@ -25,26 +27,29 @@ ho saputo vedere», che è il difetto per cui una guardia muta è peggio di ness
 | | cosa misura | invasiva? |
 |---|---|---|
 | **1** `gateway-non-esce` | il gateway raggiunge Internet? (se sì, un gateway bucato esfiltra i 5 secret che monta) | no — solo richieste in uscita |
-| **2** `egress-non-entra` | su `egress` si esce ma non si entra? È **la lacuna che l'audio del round-2 ha dichiarato**: *«il vero isolamento NAT di egress non è stato testato dal vivo»* | no |
-| **3** `health-deep-solo-interni` | `/health?deep` è chiuso agli esterni, e un `X-Forwarded-For` iniettato non fa passare per interni | no — due GET |
+| **2** `egress-non-entra` | su `egress` si esce ma non si entra? È **la lacuna che l'analisi esterna del secondo giro ha dichiarato**: *«il vero isolamento NAT di egress non è stato testato dal vivo»* | no |
+| **3** `health-deep-solo-interni` | `/health?deep` risponde a chi chiama da dentro, e chi si presenta dal lato dei proxy con un indirizzo pubblico (`X-Forwarded-For`) riceve 403 | no — due GET |
 | **4** `snapshot-in-chiaro` | quanti snapshot pre-update ci sono, che età, se cifrati. **Osserva, non provoca** | no — sola lettura |
-| **5** `sandbox-update-service` | quali path scrive davvero il codice di `vps1777-update.service`, oggi stretto con `ProtectSystem=strict` (la prova è nata per decidere quella stretta), se `~/.sigstore` esiste, se l'ultimo backup ha contenuto (dove `PrivateTmp` romperebbe in silenzio). **Nata dal round-4** — dice *cosa serve* | no — solo lettura + `find`/`stat` |
-| **6** `sandbox-strict-regge-sul-kernel` | costruisce con `systemd-run` la sandbox proposta dall'audio (`ProtectSystem=strict` + i path) e prova a scrivere: cosa consente il kernel e cosa nega, con una controprova negativa su `/etc` e `/usr/bin`. **Nata dallo stesso round, sullo stesso bersaglio** — dice *se la stretta regge* | sì — richiede `sudo`/root; nessun update reale lanciato |
+| **5** `sandbox-update-service` | quali path scrive davvero il codice di `vps1777-update.service`, oggi stretto con `ProtectSystem=strict` (la prova è nata per decidere quella stretta), se `~/.sigstore` esiste, se l'ultimo backup ha contenuto (dove `PrivateTmp` romperebbe in silenzio). **Nata dal quarto giro** — dice *cosa serve* | no — solo lettura + `find`/`stat` |
+| **6** `sandbox-strict-regge-sul-kernel` | costruisce con `systemd-run` la sandbox proposta dall'analisi esterna (`ProtectSystem=strict` + i path) e prova a scrivere: cosa consente il kernel e cosa nega, con una controprova negativa su `/etc` e `/usr/bin`. **Nata dallo stesso giro, sullo stesso bersaglio** — dice *se la stretta regge* | sì — richiede `sudo`/root; nessun update reale lanciato |
 | **7** `porta-pubblicata-davvero` | la porta del gateway è pubblicata **e risponde, vista dall'host** — cioè da fuori del container, l'unico lato da cui il guasto si vede. **Nata da un guasto vero** (27/07, 1h28m di irraggiungibilità con tre verdi addosso), non da una lettura | no — un `docker port` e una GET sul loopback |
-| **8** `le-unit-si-comportano-come-dichiarano` | per ogni `systemd/*.service`, le direttive di sandboxing che il file DICHIARA sono davvero APPLICATE dal kernel? Chiede al demone (`systemctl show`) invece di leggere la stringa nel file. **Nata dal round-7**, dall'accusa che «il registro convalida il bugiardino invece del farmaco» | no — `grep` + `systemctl show`, sola lettura |
+| **8** `le-unit-si-comportano-come-dichiarano` | per ogni `systemd/*.service`, le direttive di sandboxing che il file DICHIARA sono davvero APPLICATE dal kernel? Chiede al demone (`systemctl show`) invece di leggere la stringa nel file. **Nata dal settimo giro**, dall'accusa che «il registro convalida il bugiardino invece del farmaco» | no — `grep` + `systemctl show`, sola lettura |
 | **9** `il-fail-closed-torna-indietro-davvero` | il ramo `health_gate → _rollback_routine` dell'update torna davvero alla versione precedente quando il collaudo fallisce (lo forza `VPS1777_COLLAUDO_HEALTH_KO=1`, che può solo dire no). Si esercita solo su un salto di versione reale | **sì — provoca un rollback vero, con i container che ripartono; senza `--esegui` dice solo cosa farebbe** |
 
 Più due script di servizio: `lancia-tutte.sh` le esegue tutte e scrive l'esito, datato, in
 `onboarding/prove-empiriche.json` (`--solo prova-N` per una sola, `--fase <nome>` per tenere
-separate le fotografie di momenti diversi); `onesta-a-macchina-nuda.sh` controlla, anche in CI,
-che a macchina nuda nessuna prova dichiari un PASS.
+separate le fotografie di momenti diversi; ogni prova ha un tempo massimo, `PROVE_TIMEOUT_S`);
+`onesta-a-macchina-nuda.sh` controlla, anche in CI, che a macchina nuda nessuna prova dichiari un PASS.
+`prove.elenco` è l'elenco delle nove: viaggia col pacchetto di rilascio, e serve al lanciatore per
+accorgersi che ne manca una là dove git non c'è (un test lo confronta coi file a ogni PR).
 
 ## ⚠️ COSA QUESTE PROVE NON SONO — leggere prima di fidarsi di un verde
 - 🟡 **Quali hanno girato davvero, e quali no** *(la riga qui sotto diceva «nessuna» ed era vera il 26/07:
   la lascio come traiettoria, non la cancello — un'affermazione è vera alla sua data)*:
   - **1** e **4** hanno girato sulla VPS viva il 27/07, e hanno chiuso due FAIL misurati con un PASS.
-  - **7** ha girato sui **due esiti**: PASS sul gateway reale, FAIL su un container rotto apposta. È l'unica
-    di cui si sappia che *sa diventare rossa* — per le altre il rosso non è mai stato osservato.
+  - **7** ha girato sui **due esiti**: PASS sul gateway reale, FAIL su un container rotto apposta: di lei
+    si sa che *sa diventare rossa*. Lo stesso vale per la **1** e la **4** (rosse prima della cura, verdi
+    dopo) e per la **8** (riga sotto). Per la 2, la 3, la 5, la 6 e la 9 il rosso non è mai stato osservato.
   - **8** ha girato sui **due esiti** sulla VPS viva: PASS su 23 direttive reali di 4 unit, e FAIL
     su un file che promette due direttive che il demone non applica.
   - **2**, **3**, **5**, **6** non erano state eseguite sul target fino al collaudo su macchina vergine
@@ -59,8 +64,8 @@ che a macchina nuda nessuna prova dichiari un PASS.
   `post-release-0-43-4` nel referto di `lancia-tutte.sh`. Il collaudo stesso ha trovato e curato
   tre difetti DELLE prove (prova-8 sui template di unit, prova-9 sul path dello stato, prova-6
   sonda del §③): *chi le lancia la prima volta collauda anche loro, ed è successo esattamente così.*
-- 🟢 **Arrivano sulla VPS col pacchetto di rilascio** — `release.yml` fa `cp -r tools/prove-empiriche
-  bundle/tools/` (commit `87f6391`, 27/07 **12:57**, H51 d).
+- 🟢 **Arrivano sulla VPS col pacchetto di rilascio** — `.github/workflows/release.yml` fa `cp -r
+  tools/prove-empiriche bundle/tools/` (commit `87f6391`, 27/07 **12:57**, voce H51 del registro di sicurezza).
   🔴 *(27/07 **09:33**, all'origine)* **Non arrivano sulla VPS da sole.** Il pacchetto di rilascio non
   include questa cartella: le prove vanno copiate a mano sulla macchina che devono misurare. Scoperto il
   27/07 nel modo peggiore — il primo comando ha risposto `RC=0` su uno script che sulla macchina **non
@@ -68,16 +73,17 @@ che a macchina nuda nessuna prova dichiari un PASS.
   ⚠️ **Le due righe distano tre ore e mezza, e per quattro giorni ha parlato solo la seconda.** *Non era
   sbagliata: era vera alle 09:33 e il commit delle 12:57 l'ha resa falsa senza toccarla.* ⭐ **Un file che
   descrive i propri limiti invecchia esattamente quando il limite viene curato** — ed è il momento in cui
-  nessuno lo rilegge, perché chi cura guarda il codice. *Trovato il 01/08 da `abdd732a` mentre verificava
-  un audio che quella contraddizione non l'aveva vista, pur avendo letto entrambi i file.*
+  nessuno lo rilegge, perché chi cura guarda il codice. *Trovato il 01/08 verificando
+  un'analisi esterna che quella contraddizione non l'aveva vista, pur avendo letto entrambi i file.*
 - 🔴 **La 2 e la 3 hanno un limite strutturale dichiarato dentro lo script**: girano **sulla** VPS, e la
   domanda vera («è raggiungibile da Internet?») si risponde solo **da fuori**. Lo dicono nel loro output
   invece di far credere il contrario. *Una prova che tace il proprio punto cieco è peggio di una che manca.*
 - 🔴 **La 4 non provoca un update fallito.** Sarebbe la prova più forte del claim-72h, ed è invasiva su una
   macchina in produzione: **provocare un guasto sul server di qualcuno non è una decisione tecnica.** Se
-  Neo la vuole, si progetta insieme con una finestra e un rollback pronto. *(Poi è stata progettata:
+  il proprietario la vuole, si progetta insieme con una finestra e un rollback pronto. *(Poi è stata progettata:
   è la prova-9, che non parte senza `--esegui`.)*
 - Nessuna stampa segreti: dove serve un valore si misura **forma, conteggio o codice di stato**.
+  *(È una promessa di chi le scrive: nessun controllo automatico la verifica.)*
 
 ## Se una fallisce
 Il FAIL stampa **l'impatto**, non solo l'esito — e il fix candidato quando esiste. Un fallimento qui non è

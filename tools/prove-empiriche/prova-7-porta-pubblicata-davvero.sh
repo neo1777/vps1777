@@ -27,8 +27,10 @@
 set -uo pipefail
 
 command -v docker >/dev/null || { echo "⚠️  docker assente — prova non eseguibile"; exit 2; }
+# Ogni chiamata a docker ha un tempo massimo: un demone appeso non deve appendere la prova.
+docker() { timeout "${PROVA_DOCKER_TIMEOUT_S:-60}" docker "$@"; }
 
-echo "── prova-7 · la porta del gateway è pubblicata e risponde?   $(date '+%F %T')"
+echo "── prova-7 · la porta del gateway è pubblicata e risponde?   $(date -u '+%FT%TZ')"
 
 # Il container si trova per LABEL, non per file compose: questa prova deve poter
 # girare senza sapere con quali `-f` lo stack è stato lanciato — ed è proprio la
@@ -50,7 +52,16 @@ if [ -z "$MAP" ]; then
   # Un proxy in container (caddy/cloudflared) pubblica LUI la porta: in quel
   # profilo il gateway non deve pubblicare nulla e la prova non si applica.
   # «Non applicabile» non è «passata»: exit 2, mai 0.
-  PROXY=$(docker ps --format '{{.Names}}' | grep -Ei 'caddy|cloudflared' | head -1)
+  # Il proxy si riconosce da ciò che lo stack DICHIARA (il servizio compose «caddy» o
+  # «cloudflared» dello STESSO progetto del gateway), non da un nome che gli somiglia:
+  # un container qualunque chiamato «…caddy…» trasformava un FAIL in «non applicabile».
+  PROGETTO=$(docker inspect "$CID" --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null)
+  PROXY=""
+  for s in caddy cloudflared; do
+    [ -n "$PROXY" ] && break
+    PROXY=$(docker ps --format '{{.Names}}' --filter "label=com.docker.compose.project=$PROGETTO" \
+              --filter "label=com.docker.compose.service=$s" | head -1)
+  done
   if [ -n "$PROXY" ]; then
     echo "   ⚠️  il gateway non pubblica porte, ma c'è un proxy in container ($PROXY):"
     echo "       profilo diverso da Tailscale — questa prova non si applica. NON è un PASS."
@@ -79,13 +90,15 @@ CODE=""
 if command -v curl >/dev/null; then
   CODE=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$URL" 2>/dev/null)
 elif command -v python3 >/dev/null; then
-  CODE=$(python3 -c "
+  CODE=$(python3 -c '
 import urllib.request,sys
 try:
-    print(urllib.request.urlopen('$URL', timeout=10).status)
-except Exception:
-    print('000')
-" 2>/dev/null)
+    with urllib.request.urlopen(sys.argv[1], timeout=10) as r:
+        print(r.status)
+except Exception as e:
+    print("   (python:", type(e).__name__ + ")", file=sys.stderr)
+    print("000")
+' "$URL")
 else
   echo "   ⚠️  né curl né python3 sull'host — non posso interrogare la porta"
   echo "   ⚠️  la porta È pubblicata, ma «risponde» resta NON MISURATO: non concludo."

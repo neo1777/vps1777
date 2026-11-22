@@ -13,10 +13,10 @@
 # COSA NON FA: non cancella nulla, non tocca i backup, non lancia update.
 # EXIT: 0 = nessuno snapshot oltre 72h · 1 = ce n'è almeno uno · 2 = non osservabile.
 set -uo pipefail
-REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../.." 2>/dev/null && pwd)}"
 BASE="$REPO/backups/pre-update"
 
-echo "── prova-4 · stato degli snapshot pre-update   $(date '+%F %T')"
+echo "── prova-4 · stato degli snapshot pre-update   $(date -u '+%FT%TZ')"
 echo "   repo: $REPO"
 [ -d "$BASE" ] || { echo "   ℹ️  «$BASE» non esiste — nessuno snapshot mai creato (o repo diverso)."
                     echo "   ⇒ NON è un PASS: è un'assenza di dato. Usa VPS1777_REPO=<path> se il repo è altrove."; exit 2; }

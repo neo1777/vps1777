@@ -55,11 +55,11 @@
 #           (⇒ la proposta romperebbe l'update o il backup)  ·  2 = non eseguibile.
 set -uo pipefail
 
-REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../.." 2>/dev/null && pwd)}"
 UNIT="$REPO/systemd/vps1777-update.service"
 HOME_DIR="${HOME:-/root}"
 
-echo "── prova-6 · la sandbox proposta regge sul kernel?   $(date '+%F %T')"
+echo "── prova-6 · la sandbox proposta regge sul kernel?   $(date -u '+%FT%TZ')"
 echo "   repo: $REPO"
 
 # ─── prerequisiti: senza questi non si misura, e «non misurato» non è «PASS» ───
@@ -79,6 +79,8 @@ SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo -n"
 #   e il blocco è diventato il suo guardiano: se un domani qualcuno la togliesse o
 #   dimenticasse un path, qui diventa rosso invece di restare un ricordo.
 falliti=0
+non_misurato=0     # sale a 1 ogni volta che un pezzo NON è stato guardato: allora l'esito è 2, mai 0
+provati=0          # i terreni di scrittura provati davvero nel §②
 echo
 echo "   ① LA UNIT — ProtectSystem=strict e i path necessari sono DICHIARATI?"
 if ! grep -q '^ProtectSystem=strict' "$UNIT"; then
@@ -106,7 +108,12 @@ else
   if grep -q -- '-/var/lib/gateway' "$UNIT"; then
     echo "      -/var/lib/gateway            dichiarato col prefisso «-» ✅ (assente sull'host ≠ unit che non parte)"
   elif grep -q -- '/var/lib/gateway' "$UNIT"; then
-    echo "      /var/lib/gateway             ⚠️  dichiarato SENZA «-»: se il path manca sull'host la unit NON PARTE"
+    if [ -e /var/lib/gateway ]; then
+      echo "      /var/lib/gateway             ⚠️  dichiarato SENZA «-»: qui il path esiste, ma dove manca la unit NON PARTE"
+    else
+      echo "      /var/lib/gateway             🔴 dichiarato SENZA «-» e ASSENTE su questo host: la unit NON PARTE"
+      falliti=$((falliti+1))
+    fi
   else
     echo "      /var/lib/gateway             non dichiarato (accettato: è un mount point del container)"
   fi
@@ -124,8 +131,11 @@ for p in $RWP; do props+=("--property=ReadWritePaths=$p"); done
 prova_scrittura() {  # <path> <atteso: ok|negato>
   local dir="$1" atteso="$2" f rc
   f="$dir/.prova5-$$"
-  $SUDO systemd-run --quiet --wait --collect --pipe "${props[@]}" \
-        /bin/sh -c "touch '$f' 2>/dev/null && rm -f '$f'" >/dev/null 2>&1
+  # Il percorso passa come ARGOMENTO, non dentro il testo del comando; e il servizio
+  # transitorio ha un tempo massimo, così `--wait` non può aspettare per sempre.
+  # shellcheck disable=SC2016  # $1 lo espande la shell del servizio, apposta
+  $SUDO systemd-run --quiet --wait --collect --pipe --property=RuntimeMaxSec=60 "${props[@]}" \
+        /bin/sh -c 'touch "$1" 2>/dev/null && rm -f "$1"' _ "$f" >/dev/null 2>&1
   rc=$?
   if [ "$atteso" = "ok" ]; then
     if [ $rc -eq 0 ]; then printf '      %-28s scrivibile        ✅\n' "$dir"; return 0
@@ -138,7 +148,10 @@ prova_scrittura() {  # <path> <atteso: ok|negato>
 
 # `falliti` NON si azzera qui: porta anche i rossi del §① (la unit senza stretta).
 for d in /usr/local/bin /etc/systemd/system /tmp "$HOME_DIR"; do
-  [ -d "$d" ] || { printf '      %-28s inesistente sull'\''host — salto\n' "$d"; continue; }
+  # Un terreno necessario che non c'è NON è stato provato: lo si conta, e il verdetto
+  # non può più dire «consente i quattro path».
+  [ -d "$d" ] || { printf '      %-28s inesistente sull'\''host — NON provato\n' "$d"; non_misurato=1; continue; }
+  provati=$((provati+1))
   prova_scrittura "$d" ok || falliti=$((falliti+1))
 done
 # CONTROPROVA NEGATIVA, obbligatoria: se questa passa, tutte le altre non valgono niente.
@@ -162,7 +175,6 @@ done
 # Non tocca la produzione: il volume è montato :ro, si scrive solo in un mktemp.
 echo
 echo "   ③ IL CASO SILENZIOSO — mktemp + bind-mount del backup, MISURATO in dimensione"
-non_misurato=0
 if ! grep -q 'mktemp -d' "$REPO/tools/backup.sh" 2>/dev/null; then
   echo "      ⚠️  'mktemp -d' non trovato in tools/backup.sh — la ragione dichiarata nella unit"
   echo "         va riverificata: o il file è cambiato, o il repo è un altro."
@@ -190,6 +202,17 @@ else
     non_misurato=1
   else
     echo "      volume reale sotto dump (ro): $VOL"
+    # La stessa immagine, con la stessa impronta, che usa backup.sh: lo strumento di misura
+    # non deve poter cambiare senza un diff (prima era `alpine` senza versione).
+    # 🔴 IL DUMP HA UN TETTO DI 1 MiB (22/11/2026). La domanda è «arrivano DATI o arriva il
+    #   vuoto?», e per rispondere basta il primo mebibyte. Senza tetto la prova copiava il
+    #   volume INTERO, due volte: ad agosto erano pochi MB, il 22/11/2026 sulla macchina
+    #   viva erano 14,7 GB per volta in /tmp (misurato: 6 minuti, disco al 55%). Una prova
+    #   «non invasiva» che può riempire il disco della macchina che misura non lo è.
+    IMMAGINE="busybox:1.37.0@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
+    # Lascia in DS_OUT l'output grezzo e in DS_RC il codice di docker: chi chiama deve
+    # poter distinguere «dump vuoto» da «la sandbox non è nemmeno partita».
+    DS_OUT=""; DS_RC=""
     dump_sotto() {  # <descrizione> <proprietà systemd-run extra...> → vero se il dump ha contenuto
       local desc="$1"; shift
       local out rc size resto
@@ -200,10 +223,10 @@ else
       #   il difetto che cercava*, e la controprova usciva rossa su un caso VERO.
       #   Il caso silenzioso nasce proprio perché il mktemp del SERVIZIO vive nel
       #   suo /tmp privato, che il demone non vede.
-      out="$($SUDO systemd-run --quiet --wait --collect --pipe "$@" \
+      out="$($SUDO systemd-run --quiet --wait --collect --pipe --property=RuntimeMaxSec=600 "$@" \
             /bin/sh -c "t=\$(mktemp -d); \
-                        docker run --rm -v '$VOL':/src:ro -v \"\$t\":/dst alpine \
-                          sh -c 'cd /src && tar cf /dst/dump.tar .' >/dev/null 2>&1; \
+                        docker run --rm -v '$VOL':/src:ro -v \"\$t\":/dst $IMMAGINE \
+                          sh -c 'cd /src && tar cf - . 2>/dev/null | head -c 1048576 > /dst/dump.tar' >/dev/null 2>&1; \
                         rc=\$?; \
                         size=\$(stat -c %s \"\$t/dump.tar\" 2>/dev/null || echo 0); \
                         rm -rf \"\$t\"; \
@@ -214,11 +237,15 @@ else
       # Sotto PrivateTmp il demone docker CREA il path sul /tmp dell'host (è il
       # meccanismo stesso del caso silenzioso): quel residuo va tolto dall'host.
       case "$resto" in /tmp/tmp.*) $SUDO rm -rf "$resto" 2>/dev/null ;; esac
+      DS_OUT="$out"; DS_RC="$rc"
       printf '      %-44s rc=%s dump=%s byte\n' "$desc" "${rc:-?}" "${size:-0}"
       [ "${size:-0}" -gt 0 ] 2>/dev/null
     }
     if dump_sotto "a) sandbox PROPOSTA (strict+RWP)" "${props[@]}"; then
       echo "         ✅ il dump ha CONTENUTO sotto la stretta proposta: il §③ regge"
+    elif [ -z "$DS_OUT" ]; then
+      echo "         ⚪ la sandbox non ha risposto (nessun output da systemd-run): NON misurato"
+      non_misurato=1
     else
       echo "         🔴 dump VUOTO sotto la sandbox proposta ⇒ la stretta rompe il backup, in silenzio"
       falliti=$((falliti+1))
@@ -227,6 +254,12 @@ else
       echo "         🔴 controprova FALLITA: sotto PrivateTmp il dump è arrivato PIENO —"
       echo "            la ragione scritta nella unit («si romperebbe in silenzio») è da riverificare"
       falliti=$((falliti+1))
+    elif [ -z "$DS_OUT" ] || [ "$DS_RC" != "0" ]; then
+      # Il caso silenzioso è «rc=0 E dump vuoto». Un systemd-run che non risponde, o un
+      # docker che esce in errore, danno anche loro un dump vuoto: non sono la conferma.
+      echo "         ⚪ controprova NON misurata (rc=«${DS_RC:-nessuno}»): il vuoto qui non è il caso"
+      echo "            silenzioso — è un comando che non è andato."
+      non_misurato=1
     else
       echo "         ✅ sotto PrivateTmp il dump esce vuoto (e docker non si lamenta):"
       echo "            il caso silenzioso ESISTE — la riga «NIENTE PrivateTmp» della unit è MISURATA"
@@ -261,14 +294,14 @@ fi
 #   in parte» — che resta l'unico esito che non mente in nessuna delle due direzioni.
 if [ "${non_misurato:-0}" -eq 1 ]; then
   echo "⚪ PASS PARZIALE — non è un verde, ed è un dato preciso su cosa è stato visto:"
-  echo "   ✅ MISURATO   la sandbox consente i quattro path necessari (compreso /tmp)"
+  echo "   ✅ MISURATO   la sandbox consente $provati dei 4 terreni di scrittura necessari"
   echo "                 e nega /etc e /usr/bin: il MECCANISMO regge sul kernel."
-  echo "   ⚪ NON VISTO  il caso silenzioso del §③: qui mancano docker o un volume"
-  echo "                 vps1777_* reale, e senza un dump vero la dimensione non si misura."
+  echo "   ⚪ NON VISTO  il resto: un terreno assente, oppure il caso silenzioso del §③ (qui"
+  echo "                 mancano docker o un volume vps1777_* reale, o un comando non è andato)."
   echo "   ⇒ su una macchina con lo stack (la VPS), il §③ misura da sé e la prova può dare 0."
   exit 2
 fi
-echo "✅ PASS — la sandbox proposta consente i quattro path necessari (compreso /tmp), nega /etc e /usr/bin,"
+echo "✅ PASS — la sandbox consente tutti e $provati i terreni necessari (compreso /tmp), nega /etc e /usr/bin,"
 echo "   e il §③ è MISURATO: il dump reale ha contenuto sotto la stretta proposta, e la controprova"
 echo "   PrivateTmp produce il vuoto-con-rc-0 che la unit dichiara."
 echo "   ⚠️  NON significa che l'update reale non scriva altrove: questa prova misura il MECCANISMO."

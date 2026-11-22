@@ -30,10 +30,10 @@
 #       1 = una discrepanza trovata (path scritto fuori da quelli noti, o
 #           backup vuoto) · 2 = non osservabile (repo/unit assenti).
 set -uo pipefail
-REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../.." 2>/dev/null && pwd)}"
 UNIT="$REPO/systemd/vps1777-update.service"
 
-echo "── prova-5 · sandbox di vps1777-update.service   $(date '+%F %T')"
+echo "── prova-5 · sandbox di vps1777-update.service   $(date -u '+%FT%TZ')"
 echo "   repo: $REPO"
 [ -f "$UNIT" ] || { echo "   ℹ️  «$UNIT» assente — nulla da osservare."; exit 2; }
 
@@ -43,18 +43,22 @@ echo
 echo "── (a) path assoluti che i sorgenti dell'update dichiarano di scrivere"
 echo "   (enumerati dal codice, non dedotti — grep su path che iniziano con /)"
 # tools/vps1777.py: cosa scrive fuori dal repo durante update/self-update
-grep -noE "(/usr/local/[a-zA-Z0-9_./-]+|/etc/systemd/[a-zA-Z0-9_./-]+)" "$REPO/tools/vps1777.py" 2>/dev/null \
-  | sort -u -t: -k2 | while IFS=: read -r ln path; do printf '   vps1777.py:%-6s %s\n' "$ln" "$path"; done
-grep -noE "mktemp[^\"']*" "$REPO/tools/backup.sh" "$REPO/tools/restore.sh" 2>/dev/null \
-  | while IFS=: read -r f rest; do printf '   %-14s %s\n' "$(basename "$f")" "$rest"; done
+a_cli="$(grep -noE "(/usr/local/[a-zA-Z0-9_./-]+|/etc/systemd/[a-zA-Z0-9_./-]+)" "$REPO/tools/vps1777.py" 2>/dev/null \
+  | sort -u -t: -k2)"
+a_tmp="$(grep -noE "mktemp[^\"']*" "$REPO/tools/backup.sh" "$REPO/tools/restore.sh" 2>/dev/null)"
+[ -n "$a_cli" ] && while IFS=: read -r ln path; do printf '   vps1777.py:%-6s %s\n' "$ln" "$path"; done <<<"$a_cli"
+[ -n "$a_tmp" ] && while IFS=: read -r f rest; do printf '   %-14s %s\n' "$(basename "$f")" "$rest"; done <<<"$a_tmp"
+# Quante righe ha letto DAVVERO il blocco (a): zero vuol dire che i sorgenti non c'erano.
+a_lette=$(printf '%s\n%s\n' "$a_cli" "$a_tmp" | grep -c . || true)
 echo "   ⇒ ReadWritePaths verificato solo su questi path conta come misura; il resto resta inferenza."
 
 echo
 echo "── (d) quali path della proposta esistono DAVVERO sull'host — un ReadWritePaths= su un"
 echo "      path assente impedisce l'avvio della unit (serve il prefisso '-')"
+d_assenti=0
 for p in /usr/local/bin /etc/systemd/system /var/lib/gateway "$HOME/.sigstore"; do
   if [ -e "$p" ]; then printf '   %-24s esiste\n' "$p"
-  else printf '   %-24s ⚠️  ASSENTE — ReadWritePaths=%s bloccherebbe l'\''avvio senza il prefisso "-"\n' "$p" "$p"
+  else d_assenti=$((d_assenti+1)); printf '   %-24s ⚠️  ASSENTE — ReadWritePaths=%s bloccherebbe l'\''avvio senza il prefisso "-"\n' "$p" "$p"
   fi
 done
 
@@ -105,9 +109,16 @@ fi
 #    file a dire cosa farne: «2 = non osservabile». C'era, e non era usato.
 # 📌 (a) e (d) restano validi e la loro conclusione si stampa lo stesso: dire «non
 #    concludo» su tutto sarebbe l'errore opposto — buttare due misure vere.
-echo "✅ (a) e (d) hanno osservato: la proposta dell'audio va corretta"
-echo "   (togliere /var/lib/gateway, aggiungere /tmp) PRIMA di essere applicata alla unit —"
-echo "   e resta un [da-prototipare]: nessuna riga qui prova che la unit riparta con la stretta."
+# La conclusione si scrive dai DATI di questa corsa, non da una frase fissa: quella di
+# prima («la proposta va corretta… PRIMA di essere applicata») era vera ad agosto e la
+# stretta è nella unit dal 27/08/2026; e si stampava anche con (a) rimasto a zero righe.
+if [ "${a_lette:-0}" -eq 0 ]; then
+  echo "⚪ NON MISURATO — il blocco (a) non ha letto nessun path dai sorgenti (tools/vps1777.py,"
+  echo "   backup.sh, restore.sh assenti o cambiati): prova non eseguibile su questo albero."
+  exit 2
+fi
+echo "✅ (a) ha enumerato $a_lette righe di path dai sorgenti; (d) ha guardato 4 path sull'host,"
+echo "   $d_assenti assenti. Sono osservazioni: che la stretta regga lo misura la prova-6."
 if [ "$c_osservato" -eq 0 ]; then
   echo
   echo "⚠️  MA IL BLOCCO (c) NON HA GUARDATO — nessun backup da ispezionare su questa macchina."

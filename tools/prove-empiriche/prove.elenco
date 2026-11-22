@@ -1,0 +1,9 @@
+prova-1-gateway-non-esce.sh
+prova-2-egress-non-entra.sh
+prova-3-health-deep-solo-interni.sh
+prova-4-snapshot-in-chiaro.sh
+prova-5-sandbox-update-service.sh
+prova-6-sandbox-strict-regge-sul-kernel.sh
+prova-7-porta-pubblicata-davvero.sh
+prova-8-le-unit-si-comportano-come-dichiarano.sh
+prova-9-il-fail-closed-torna-indietro-davvero.sh

@@ -24,7 +24,8 @@
 # precedente, così la domanda «da quanto non le lanciamo?» ha una risposta prima
 # ancora che tu lanci.
 #
-# Uso:  bash tools/prove-empiriche/lancia-tutte.sh [--solo prova-3]
+# Uso:  bash tools/prove-empiriche/lancia-tutte.sh [--fase <nome>] [--solo prova-3]
+#       PROVE_TIMEOUT_S=<secondi> cambia il tempo massimo di ogni prova (900).
 set -uo pipefail          # NON -e: una prova che fallisce non deve fermare le altre
 
 QUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,13 +80,17 @@ else
 fi
 
 # ── L'esecuzione ──────────────────────────────────────────────────────────────
+# Ogni prova ha un tempo massimo: un docker o un systemd appeso non deve bloccare le
+# altre otto né chi ha appeso questo script a un timer. Una prova scaduta non ha un
+# verdetto: va fra le NON eseguite, col motivo scritto.
+TETTO="${PROVE_TIMEOUT_S:-900}"
 righe=(); ok=0; ko=0; salt=0; tot=0
 for p in "$QUI"/prova-*.sh; do
   nome="$(basename "$p" .sh)"
   [ -n "$SOLO" ] && [[ "$nome" != *"$SOLO"* ]] && continue
   tot=$((tot+1))
   t0=$(date +%s)
-  out="$(bash "$p" 2>&1)"; rc=$?
+  out="$(timeout "$TETTO" bash "$p" 2>&1)"; rc=$?
   dt=$(( $(date +%s) - t0 ))
 
   # 🔴 «non ho potuto guardare» ≠ «non c'è niente»: exit 127 (comando assente) e
@@ -97,10 +102,19 @@ for p in "$QUI"/prova-*.sh; do
   #    distingue i tre stati. La mia prima versione trattava 2 come un FAIL, cioè
   #    trasformava l'unico attrezzo onesto nel più rumoroso. Trovato da 71d540e6,
   #    che è andata a leggere una prova invece di riprogettare la cura.
-  if [ $rc -eq 2 ] || [ $rc -eq 127 ] || printf '%s' "$out" | grep -qiE "docker: (command )?not found|impossibile connettersi al demone|cannot connect to the docker daemon|prova non eseguibile"; then
+  # 🔑 PRIMA IL CODICE, POI IL TESTO (22/11/2026). Il testo veniva guardato per primo: una
+  #    prova che usciva 1 (FAIL) o 0 (PASS) con dentro, per caso, una delle frasi qui sotto
+  #    veniva declassata a NON-ESEGUITA — un rosso vero nascosto, o un falso verde sottratto
+  #    al gate di onestà. Oggi tutte e nove rispettano il contratto 0/1/2: il testo serve
+  #    solo per i codici FUORI contratto (un crash, un comando che manca a metà).
+  if [ $rc -eq 2 ] || [ $rc -eq 127 ] || [ $rc -eq 124 ]; then
     esito="NON-ESEGUITA"; salt=$((salt+1)); segno="⚪"
   elif [ $rc -eq 0 ]; then
     esito="verde"; ok=$((ok+1)); segno="✅"
+  elif [ $rc -eq 1 ]; then
+    esito="ROSSA"; ko=$((ko+1)); segno="🔴"
+  elif printf '%s' "$out" | grep -qiE "docker: (command )?not found|impossibile connettersi al demone|cannot connect to the docker daemon|prova non eseguibile"; then
+    esito="NON-ESEGUITA"; salt=$((salt+1)); segno="⚪"
   else
     esito="ROSSA"; ko=$((ko+1)); segno="🔴"
   fi
@@ -129,7 +143,10 @@ for p in "$QUI"/prova-*.sh; do
     [ -z "$motivo" ] && motivo="$(grep -m1 -iE "non è in esecuzione|non trovat|non esiste|nessun|manca|assenza di dato" <<<"$out" | sed 's/^[[:space:]]*//' | cut -c1-160)"
     [ -z "$motivo" ] && motivo="$(grep -v '^[[:space:]]*$' <<<"$out" | tail -1 | sed 's/^[[:space:]]*//' | cut -c1-160)"
     [ -z "$motivo" ] && motivo="nessun output, rc=$rc — la prova non ha detto perché"
+    [ $rc -eq 124 ] && motivo="scaduta dopo ${TETTO}s senza concludere (PROVE_TIMEOUT_S): non misurato"
   fi
+  # Tabulazioni e altri caratteri di controllo romperebbero il JSON scritto a mano qui sotto.
+  motivo="$(printf '%s' "$motivo" | tr -d '[:cntrl:]')"
   printf '  %s %-52s %s (%ss)\n' "$segno" "$nome" "$esito" "$dt"
   [ -n "$motivo" ] && printf '       ↳ %s\n' "$motivo"
   mj="${motivo//\\/\\\\}"; mj="${mj//\"/\\\"}"
@@ -160,6 +177,22 @@ done
 #    sarebbe comunque distrutto, e un dato marcato bene ma perso è perso.*
 atteso="$(git -C "$REPO" ls-files 'tools/prove-empiriche/prova-*.sh' 2>/dev/null | wc -l)"
 [ "${atteso:-0}" -gt 0 ] || atteso=""      # git assente ⇒ «non lo so», non uno zero
+# 🔴 ③ E DOVE GIT NON C'È? (22/11/2026) Sulla macchina che queste prove devono misurare
+#   il repo arriva dal pacchetto di rilascio, che NON è un clone: lì `git ls-files` non
+#   risponde mai, l'atteso era sempre `null` e la guardia sul pacchetto incompleto non
+#   poteva scattare proprio dove il pacchetto si usa. ⇒ l'elenco viaggia col pacchetto,
+#   in `prove.elenco`. Non è «un elenco scritto a mano che invecchia in silenzio»: un
+#   test (tools/tests/test_prova_a_fetta07.py) lo confronta coi file a ogni PR.
+mancanti=""
+if [ -z "$atteso" ] && [ -f "$QUI/prove.elenco" ]; then
+  atteso="$(grep -c '^prova-.*\.sh$' "$QUI/prove.elenco" || true)"
+  [ "${atteso:-0}" -gt 0 ] || atteso=""
+fi
+if [ -f "$QUI/prove.elenco" ]; then
+  while IFS= read -r _n; do
+    case "$_n" in prova-*.sh) [ -f "$QUI/$_n" ] || mancanti="$mancanti $_n" ;; esac
+  done < "$QUI/prove.elenco"
+fi
 _atteso_json="${atteso:-null}"
 
 if [ -n "$SOLO" ]; then
@@ -169,11 +202,27 @@ if [ -n "$SOLO" ]; then
   printf '     sostituire il quadro di %s.\n' "${atteso:-tutte le}"
 fi
 
-printf '{"quando":"%s","dove":"%s","parziale":%s,"filtro":"%s","atteso":%s,"totale":%d,"ok":%d,"rosse":%d,"non_eseguite":%d,"prove":[%s]}\n' \
+# Il referto si scrive in un file provvisorio, si RILEGGE come JSON e solo allora prende
+# il nome vero: un'interruzione o un disco pieno non lasciano un referto troncato al posto
+# di quello di prima, e un referto che non si rilegge non viene annunciato come scritto.
+referto_scritto=1
+_tmp="$FUORI.tmp.$$"
+if ! { printf '{"quando":"%s","dove":"%s","parziale":%s,"filtro":"%s","atteso":%s,"totale":%d,"ok":%d,"rosse":%d,"non_eseguite":%d,"prove":[%s]}\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(hostname)" \
   "$([ -n "$SOLO" ] && echo true || echo false)" "$SOLO" "$_atteso_json" \
   "$tot" "$ok" "$ko" "$salt" \
-  "$(IFS=,; echo "${righe[*]:-}")" > "$FUORI"
+  "$(IFS=,; echo "${righe[*]:-}")" > "$_tmp"; } 2>/dev/null; then
+  referto_scritto=0
+elif ! python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$_tmp" 2>/dev/null; then
+  referto_scritto=0
+elif ! mv -f "$_tmp" "$FUORI"; then
+  referto_scritto=0
+fi
+if [ "$referto_scritto" -eq 0 ]; then
+  rm -f "$_tmp"
+  printf '  ⛔ il referto NON è stato scritto (disco pieno, cartella non scrivibile o JSON che non si\n' >&2
+  printf '     rilegge): in %s resta quello di prima, se c'"'"'era.\n' "${FUORI#"$REPO"/}" >&2
+fi
 
 # 🛡️ E il caso che nessuno dei due pezzi copre: corsa COMPLETA che vede meno
 #   prove di quante ne siano tracciate. Non è «non eseguite»: è che non le ha
@@ -182,9 +231,11 @@ if [ -z "$SOLO" ] && [ -n "$atteso" ] && [ "$tot" -lt "$atteso" ]; then
   printf '  🔴 ho eseguito %d prove ma ne risultano %d tracciate: %d NON sono state\n' \
     "$tot" "$atteso" "$((atteso - tot))"
   printf '     nemmeno viste dal glob. Non sono «non eseguite» — sono assenti.\n'
+  [ -n "$mancanti" ] && printf '     mancano:%s\n' "$mancanti"
 fi
 
-printf '\n  %d verdi · %d rosse · %d non eseguite   →  %s\n' "$ok" "$ko" "$salt" "${FUORI#"$REPO"/}"
+_dove="${FUORI#"$REPO"/}"; [ "$referto_scritto" -eq 1 ] || _dove="(referto NON scritto)"
+printf '\n  %d verdi · %d rosse · %d non eseguite   →  %s\n' "$ok" "$ko" "$salt" "$_dove"
 [ -n "$FASE" ] && printf '  📸 fase «%s»: questa foto NON sovrascrive le altre fasi.\n' "$FASE"
 [ $salt -gt 0 ] && printf '  ⚪ le NON ESEGUITE non sono passate: mancava un prerequisito, e QUALE lo dice la\n     riga «↳» sotto ciascuna (nel referto: campo "motivo"). Non è più indovinato.\n     Sono contate a parte apposta — un verde che include ciò che non hai guardato\n     è esattamente il difetto che queste prove esistono per non commettere.\n'
 # ─── il verdetto ──────────────────────────────────────────────────────────────
@@ -206,6 +257,21 @@ printf '\n  %d verdi · %d rosse · %d non eseguite   →  %s\n' "$ok" "$ko" "$s
 #   manca una misura — e va tolto curando la prova, non allargando questa soglia.
 if [ $ko -gt 0 ]; then
   exit 1
+fi
+# Le tre assenze che il TESTO diceva già e il codice di ritorno no (22/11/2026): una corsa
+# completa che vede meno prove di quelle attese, una che non sa quante dovrebbero essere,
+# e un referto che non si è potuto scrivere. Nessuna delle tre è un PASS.
+if [ "$referto_scritto" -eq 0 ]; then
+  echo "⚪ NON MISURATO per chi legge il referto: non è stato scritto."
+  exit 2
+fi
+if [ -z "$SOLO" ] && [ -z "$atteso" ]; then
+  echo "⚪ NON so quante prove dovrebbero esserci (né git né prove.elenco rispondono): non è un PASS pieno."
+  exit 2
+fi
+if [ -z "$SOLO" ] && [ "$tot" -lt "$atteso" ]; then
+  echo "⚪ INCOMPLETA: $tot prove viste su $atteso attese — non è un PASS."
+  exit 2
 fi
 if [ $ok -eq 0 ]; then
   echo "⚪ NESSUNA prova eseguita ($salt su $tot non eseguibili): non è un verde, è un'assenza di dato."

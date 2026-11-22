@@ -55,6 +55,9 @@ command -v systemctl >/dev/null || {
 systemctl show --version >/dev/null 2>&1 || systemctl --version >/dev/null 2>&1 || {
   echo "⚠️  systemd non risponde (container senza init?) — prova non eseguibile"; exit 2; }
 
+# Ogni domanda al demone ha un tempo massimo: un systemd appeso non deve appendere la prova.
+systemctl() { timeout "${PROVA_SYSTEMCTL_TIMEOUT_S:-30}" systemctl "$@"; }
+
 # Le direttive che ci interessano: quelle di CONTENIMENTO, non tutta la unit.
 # Se il repo ne aggiunge una nuova, va aggiunta qui — ed è deliberato: una
 # whitelist che cresce a mano è un elenco che qualcuno guarda.
@@ -62,7 +65,7 @@ DIRETTIVE="NoNewPrivileges ProtectSystem ProtectHome ProtectKernelTunables \
 ProtectKernelModules ProtectControlGroups ProtectClock ProtectHostname \
 RestrictRealtime LockPersonality PrivateTmp RestrictSUIDSGID MemoryDenyWriteExecute"
 
-echo "── prova-8 · le unit si comportano come dichiarano?   $(date '+%F %T %Z')"
+echo "── prova-8 · le unit si comportano come dichiarano?   $(date -u '+%FT%TZ')"
 
 # `true` nel file → `yes` dal demone. systemd normalizza i booleani, e
 # confrontarli come stringhe grezze darebbe un rosso su un sistema sano.
@@ -128,13 +131,18 @@ for f in "$REPO"/systemd/*.service; do
     *@.service) unit_query="${unit%@.service}@prova8.service" ;;
     *)          unit_query="$unit" ;;
   esac
-  if ! grep -qE "^[[:space:]]*ProtectSystem=" "$f"; then
-    v=$(systemctl show "$unit_query" -p ProtectSystem --value 2>/dev/null | tr -d '[:space:]')
-    if [ "$(norm "${v:-no}")" = "no" ]; then
-      echo "      ✅ $unit non dichiara ProtectSystem e il demone risponde «${v:-no}»: sa dire di no"
-      cp_ok=1; break
+  # Una qualunque direttiva dell'elenco che questa unit NON dichiara va bene: su una
+  # macchina dove tutte le unit dichiarassero ProtectSystem la controprova non deve
+  # restare senza candidati. La risposta deve ESSERCI ed essere «no»: un vuoto (errore
+  # soppresso) non è un no.
+  for d in $DIRETTIVE; do
+    grep -qE "^[[:space:]]*${d}=" "$f" && continue
+    v=$(systemctl show "$unit_query" -p "$d" --value 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$v" ] && [ "$(norm "$v")" = "no" ]; then
+      echo "      ✅ $unit non dichiara $d e il demone risponde «$v»: sa dire di no"
+      cp_ok=1; break 2
     fi
-  fi
+  done
 done
 [ "$cp_ok" -eq 1 ] || echo "      ⚠️  controprova non eseguita: non concludo che lo strumento sappia dire di no"
 
@@ -147,6 +155,17 @@ if [ "$falliti" -gt 0 ]; then
   echo "   Il file lo dice, il sistema no. È la distanza fra il bugiardino e il farmaco:"
   echo "   ogni voce del registro che si appoggia a quelle righe è chiusa su una stringa."
   exit 1
+fi
+# Un PASS vuole una misura: zero direttive controllate, o uno strumento di cui non so se
+# sappia dire di no, sono «non ho guardato» — e fino al 22/11/2026 uscivano 0.
+if [ "$controllate" -eq 0 ]; then
+  echo "⚪ NON MISURATO — nessuna direttiva di contenimento dichiarata nelle unit caricate: prova non eseguibile."
+  exit 2
+fi
+if [ "$cp_ok" -ne 1 ]; then
+  echo "⚪ NON MISURATO — la controprova non è riuscita: senza sapere che lo strumento sa dire"
+  echo "   di no, $controllate «sì» non provano niente. Prova non eseguibile fino in fondo."
+  exit 2
 fi
 echo "✅ PASS — $controllate direttive su $unit_viste unit: dichiarate E applicate."
 [ "$saltate" -gt 0 ] && echo "   ⚠️  $saltate unit NON controllate (non caricate su questo host): il verde non le copre."

@@ -23,7 +23,9 @@
 #   verde diventerebbe legittimo e questo script sbaglierebbe. Il criterio non è
 #   «nessuna verde» in assoluto — è «nessuna verde SENZA il sistema sotto».
 #
-# Esce 0 se tutte e nove sono NON-ESEGUITE · 1 se una qualunque è verde o rossa.
+# Esce 0 se tutte e nove sono NON-ESEGUITE · 1 se una qualunque è verde o rossa ·
+#      2 se il gate NON HA UN VERDETTO (referto assente, vuoto, parziale, senza il numero
+#        atteso, o con un esito che non conosce). Per la CI 1 e 2 sono entrambi rossi.
 set -uo pipefail
 
 QUI="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,9 +37,12 @@ printf '🧪 le nove prove su una macchina dove il prodotto NON gira: nessuna de
 
 # L'exit 2 di «nessuna prova eseguita» è l'esito ATTESO qui, non un errore:
 # per questo non lo propaghiamo. È il contenuto del referto a dare il verdetto.
+# Il referto di un giro precedente si toglie PRIMA: se il lanciatore non scrivesse, quello
+# vecchio verrebbe letto come l'esito di questa corsa.
+rm -f "$REFERTO"
 bash "$QUI/lancia-tutte.sh" --fase "$FASE" || true
 
-[ -f "$REFERTO" ] || { printf '\n⛔ il referto «%s» non è stato scritto: il gate NON ha un verdetto, e NON è un verde.\n' "$REFERTO" >&2; exit 1; }
+[ -f "$REFERTO" ] || { printf '\n⛔ il referto «%s» non è stato scritto: il gate NON ha un verdetto, e NON è un verde.\n' "$REFERTO" >&2; exit 2; }
 
 python3 - "$REFERTO" <<'PY'
 import json, sys
@@ -46,7 +51,7 @@ d = json.load(open(sys.argv[1]))
 prove = d.get("prove", [])
 if not prove:
     print("\n⛔ referto senza nessuna prova dentro: assenza di dato, non un verde.", file=sys.stderr)
-    sys.exit(1)
+    sys.exit(2)
 
 # 🔴 IL PARZIALE, e senza questo blocco il gate diceva «✅ 3 su 3» con tre prove su nove
 #    (rilievo di 71d540e6). **Il denominatore era quello TROVATO**, quindi non poteva
@@ -57,14 +62,15 @@ if not prove:
 # 🔑 `atteso: null` è «non lo so», non «zero» — e si dichiara invece di indovinare.
 atteso = d.get("atteso")
 if atteso is None:
-    print("  ⚠️  «atteso» assente dal referto: non so quante prove ESISTONO, quindi questo\n"
-          "     verdetto vale solo sulle prove che ho visto — non sulla loro completezza.",
+    print("\n⛔ «atteso» assente dal referto: non so quante prove ESISTONO, quindi non posso\n"
+          "   dire che le ho viste tutte. Fino al 22/11/2026 qui si avvisava e si usciva verdi.",
           file=sys.stderr)
+    sys.exit(2)
 elif len(prove) < atteso:
     print(f"\n⛔ referto PARZIALE: {len(prove)} prove su {atteso} esistenti. Le mancanti non\n"
           "   sono passate e non sono fallite: non sono state nemmeno viste dal glob.\n"
           "   Un verdetto su un sottoinsieme non è un verdetto sul sistema.", file=sys.stderr)
-    sys.exit(1)
+    sys.exit(2)
 
 # 🔎 Il verdetto si legge dagli ESITI, uno per uno — non dai contatori aggregati:
 #    un totale che torna può nascondere due errori che si compensano, ed è il
@@ -73,6 +79,9 @@ elif len(prove) < atteso:
 bugiarde = [p for p in prove if p.get("esito") == "verde"]
 rumorose = [p for p in prove if p.get("esito") == "ROSSA"]
 oneste   = [p for p in prove if p.get("esito") == "NON-ESEGUITA"]
+# L'elenco degli esiti è CHIUSO: una prova con un esito che non è uno dei tre non finiva
+# in nessuna delle liste, e il gate chiudeva verde senza averla classificata.
+ignote   = [p for p in prove if p.get("esito") not in ("verde", "ROSSA", "NON-ESEGUITA")]
 
 for p in oneste:
     print(f'  ⚪ {p["prova"]:<52} {p.get("motivo","(nessun motivo dichiarato)")[:70]}')
@@ -91,6 +100,10 @@ if rumorose:
 
 if bugiarde or rumorose:
     sys.exit(1)
+if ignote:
+    print(f'\n⛔ {len(ignote)} prova/e con un esito che non conosco: '
+          + ", ".join(f'{p.get("prova")}={p.get("esito")!r}' for p in ignote), file=sys.stderr)
+    sys.exit(2)
 
 print(f'\n✅ {len(oneste)} su {len(prove)}: nessuna prova dichiara un esito che non poteva misurare.')
 print('   Non è un collaudo del sistema — è la garanzia che il collaudo, quando')
