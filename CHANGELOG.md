@@ -4,6 +4,30 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Il controllo di salute di Cloudflare Tunnel poteva solo fallire.** Usava una shell (`CMD-SHELL … | grep`) che
+  nell'immagine di cloudflared non esiste: il container restava «unhealthy» anche col tunnel su. Ora usa
+  `cloudflared tunnel ready`, senza shell. Non provato con un tunnel vero.
+- **nb1777 non restituisce più un id «probabile» come certo.** Quando l'id di una fonte, di un artefatto o di un
+  notebook appena creato non si poteva stabilire, si ripiegava sull'ultimo della lista: su un id sbagliato poi si
+  rinomina o si cancella la cosa sbagliata. Ora l'operazione è detta riuscita e l'id no, con cosa fare.
+- **nb1777 rilegge dopo aver rinominato o cancellato un notebook**, invece di fidarsi del codice d'uscita.
+- **L'ack della memoria non si perde più in silenzio.** Lo stato si scrive in modo atomico; se non si salva, il tool
+  lo dice invece di rispondere «registrato»; uno stato rovinato lascia una riga nel log.
+- **Il gate anti-leak non chiude verde su file che non ha potuto leggere** (esce 2 e li elenca), e dice quanti file
+  ha saltato perché binari. Il confronto dei tre installatori esce 2 se un asse non trova più niente. Il registro
+  dei rilievi non passa senza SECURITY.md e pretende `si_sfrutta_oggi` sulle voci accettate.
+- I plugin d'esempio: il bot risponde solo al proprietario (`OWNER_ID` era dichiarato e mai letto) e non ripiega in
+  silenzio su un altro token; entrambi hanno il tetto ai log.
+
+### Cambiato
+- **CI**: ogni job ha un tempo massimo; pytest e pyyaml hanno una versione fissata, la stessa in CI e in
+  `tools/check.sh`; la release pubblicata viene riletta (i quattro allegati); il nome del tag deve avere la forma
+  vX.Y.Z; uno scan Trivy saltato perché l'immagine non si trova fallisce; il giro mensile fallisce se la cadenza di
+  nlm non si è potuta misurare. Un test tiene uguali le liste dei servizi nei workflow.
+- nb1777: al più 4 domande a NotebookLM in corso insieme; gettone di conferma delle cancellazioni a 128 bit;
+  nel messaggio d'errore la versione di nlm è quella fissata.
+
 ## [0.98.3] — 2026-11-22
 
 ### Sicurezza

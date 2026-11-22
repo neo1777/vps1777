@@ -179,3 +179,23 @@ def test_il_checker_non_ha_una_scorciatoia_verso_lo_zero():
     assert valori - {0}, (
         f"`main()` non ha nessun `return` diverso da zero: qualunque registro passerebbe. "
         f"Valori trovati: {sorted(valori)}")
+
+
+def test_un_rischio_ACCETTATO_deve_dire_se_oggi_si_sfrutta():
+    """«Accettato» senza `si_sfrutta_oggi` è un rinvio senza data (rilettura col catalogo, 22/11/2026)."""
+    reg = _registro_vero()
+    accettate = [f for f in reg["findings"] if f.get("status") == "accepted"]
+    assert accettate, "il caso non si costruisce: nessuna voce accettata nel registro"
+    accettate[0].pop("si_sfrutta_oggi", None)
+    rc, out = _esegui(reg)
+    assert rc != 0 and "si_sfrutta_oggi" in out, out[-400:]
+
+
+def test_senza_SECURITY_md_il_checker_non_passa(tmp_path):
+    """Prima i due confronti col documento venivano saltati in silenzio."""
+    m = _carica()
+    m.SECURITY_MD = tmp_path / "non-c-e.md"
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = m.main()
+    assert rc != 0 and "SECURITY.md non c'è" in buf.getvalue()

@@ -114,6 +114,7 @@ def fai_posto_agli_artefatti(*, ora: float | None = None) -> dict[str, int]:
     base = artifacts_dir()
     adesso = time.time() if ora is None else ora
     tolti = {"scaduti": 0, "in_eccesso": 0}
+    non_tolti = 0     # file che non si sono lasciati leggere o cancellare: si contano e si dicono
     file = []
     for f in base.iterdir():
         try:
@@ -121,6 +122,7 @@ def fai_posto_agli_artefatti(*, ora: float | None = None) -> dict[str, int]:
                 st = f.stat()
                 file.append((st.st_mtime, st.st_size, f))
         except OSError:
+            non_tolti += 1                       # non si lascia nemmeno guardare
             continue
     file.sort()                                  # dal più vecchio
     restano = []
@@ -131,7 +133,7 @@ def fai_posto_agli_artefatti(*, ora: float | None = None) -> dict[str, int]:
                 tolti["scaduti"] += 1
                 continue
             except OSError:
-                pass
+                non_tolti += 1
         restano.append((mtime, dim, f))
     totale = sum(d for _, d, _ in restano)
     for _, dim, f in restano:
@@ -142,7 +144,9 @@ def fai_posto_agli_artefatti(*, ora: float | None = None) -> dict[str, int]:
             totale -= dim
             tolti["in_eccesso"] += 1
         except OSError:
-            pass
+            non_tolti += 1
+    if non_tolti:
+        log.warning("artefatti: %d file non si sono lasciati leggere o cancellare", non_tolti)
     if tolti["scaduti"] or tolti["in_eccesso"]:
         log.info("artefatti: tolti %d scaduti (oltre %d giorni) e %d in eccesso",
                  tolti["scaduti"], ARTEFATTI_GIORNI, tolti["in_eccesso"])
@@ -224,6 +228,11 @@ log = logging.getLogger("nb1777-mcp.core")
 
 class NLMError(RuntimeError):
     """Errore nel chiamare il CLI nlm o nel parsare il suo output."""
+
+
+class IdNonDeterminato(NLMError):
+    """L'operazione è riuscita ma l'id dell'oggetto nuovo non si può stabilire con certezza.
+    Meglio dirlo che restituire un id plausibile: su un id sbagliato poi si cancella."""
 
 
 class NLMAuthError(NLMError):
@@ -369,20 +378,33 @@ def nb_create(title: str) -> str:
     if uid:
         return uid
     # fallback: cerca per titolo nella lista
-    for nb in nb_list():
-        if (nb.get("title") or "").strip() == title.strip():
-            return nb.get("id") or nb.get("notebook_id") or ""
+    # Con due notebook dallo stesso titolo «il primo che coincide» può essere quello VECCHIO:
+    # si accetta il ripiego solo se il titolo è di uno solo.
+    stessi = [nb for nb in nb_list() if (nb.get("title") or "").strip() == title.strip()]
+    if len(stessi) == 1:
+        return stessi[0].get("id") or stessi[0].get("notebook_id") or ""
+    if len(stessi) > 1:
+        raise IdNonDeterminato(
+            f"il notebook «{title}» è stato creato, ma ce ne sono {len(stessi)} con questo titolo "
+            "e non so quale sia il nuovo: NON riprovare (ne creeresti un altro), leggi nb_list.")
     raise NLMError(f"notebook create: ID non trovato:\n{p.stdout}\n{p.stderr}")
 
 
 def nb_rename(nb_id: str, new_title: str) -> None:
-    """Rinomina un notebook."""
+    """Rinomina un notebook, e RILEGGE il titolo: «rinominato» lo dice NotebookLM, non
+    il fatto che il comando sia uscito 0."""
     _run(["notebook", "rename", _P(nb_id), _P(new_title)])
+    letto = (nb_get(nb_id).get("title") or "").strip()
+    if letto != new_title.strip():
+        raise NLMError(f"la rinomina non risulta: rileggendo, il titolo è «{letto}»")
 
 
 def nb_delete(nb_id: str) -> None:
-    """Cancella un notebook in modo permanente (passa --confirm)."""
+    """Cancella un notebook in modo permanente (passa --confirm), e controlla nell'elenco
+    che non ci sia più."""
     _run(["notebook", "delete", _P(nb_id), "--confirm"])
+    if any((nb.get("id") or nb.get("notebook_id")) == nb_id for nb in nb_list()):
+        raise NLMError("la cancellazione non risulta: il notebook è ancora nell'elenco")
 
 
 def nb_describe(nb_id: str) -> str:
@@ -439,14 +461,19 @@ def _add_and_resolve_id(nb_id: str, args: list[str], *, timeout: float) -> str:
     new = after - before
     if len(new) == 1:
         return next(iter(new))
+    # 🔴 NIENTE PIÙ RIPIEGO SULL'ULTIMA DELLA LISTA (22/11/2026). Lo stesso commento qui sopra
+    #   dice che «l'ultima in lista è la nuova» è falso; eppure nei due casi ambigui si
+    #   restituiva proprio quella, come un id certo. Chi lo riceveva poteva poi rinominare o
+    #   cancellare la fonte SBAGLIATA. Ora l'aggiunta è dichiarata riuscita, l'id no.
     if not new:
-        log.warning("source add: nessun id nuovo rilevato (nb=%s) — ripiego su last", nb_id)
-        return _last_source_id(nb_id)
-    log.warning(
-        "source add: %d id nuovi (nb=%s) — concorrenza sullo stesso account? ripiego su last",
-        len(new), nb_id,
-    )
-    return _last_source_id(nb_id)
+        log.warning("source add: nessun id nuovo rilevato (nb=%s)", nb_id)
+        raise IdNonDeterminato(
+            "la fonte è stata inviata ma non compare ancora fra le fonti del notebook: NON "
+            "riprovare (la aggiungeresti due volte), leggi source_list fra poco per avere l'id.")
+    log.warning("source add: %d id nuovi (nb=%s) — concorrenza sullo stesso account?", len(new), nb_id)
+    raise IdNonDeterminato(
+        f"la fonte è stata aggiunta, ma nello stesso momento ne sono comparse {len(new)} e non "
+        "so quale sia la tua: NON riprovare, leggi source_list per riconoscerla dal titolo.")
 
 
 def source_add_url(nb_id: str, url: str, *, title: Optional[str] = None,
@@ -1182,9 +1209,10 @@ def _create_and_resolve_artifact_id(nb_id: str, args: list[str], kind: str,
     if len(new) == 1:
         return next(iter(new))
     if not new:
-        log.warning("studio create (%s): nessun id nuovo (nb=%s) — ripiego best-effort",
-                    kind, nb_id)
-        return _last_artifact_id(nb_id, kind)
+        log.warning("studio create (%s): nessun id nuovo (nb=%s)", kind, nb_id)
+        raise IdNonDeterminato(
+            f"la creazione ({kind}) è stata inviata ma l'artefatto non compare ancora: NON "
+            "riprovare (ne partirebbe un altro), leggi studio_list fra poco per avere l'id.")
     # >1 id nuovo: concorrenza sullo stesso account. Disambigua col tipo atteso.
     target = _norm_type(kind)
     typed = [aid for a in studio_list(nb_id, verbose=True)
@@ -1192,9 +1220,10 @@ def _create_and_resolve_artifact_id(nb_id: str, args: list[str], kind: str,
              and _norm_type(a.get("type") or a.get("artifact_type") or "") == target]
     if len(typed) == 1:
         return typed[0]
-    log.warning("studio create (%s): %d id nuovi (nb=%s) — concorrenza? ripiego best-effort",
-                kind, len(new), nb_id)
-    return _last_artifact_id(nb_id, kind)
+    log.warning("studio create (%s): %d id nuovi (nb=%s) — concorrenza?", kind, len(new), nb_id)
+    raise IdNonDeterminato(
+        f"la creazione ({kind}) è partita, ma sono comparsi {len(new)} artefatti nuovi e non so "
+        "quale sia il tuo: NON riprovare, leggi studio_list per riconoscerlo.")
 
 
 def studio_status(nb_id: str, artifact_id: str, verbose: bool = False) -> dict:

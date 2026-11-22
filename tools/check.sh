@@ -195,7 +195,7 @@ base_di_confronto() {
 fase_guardiani() {
   echo "── guardiani (job «lint» e «contract» di ci.yml, e verify-features.yml)"
   manca "registro dei rilievi (check_findings)" uv \
-    || passo "registro dei rilievi (check_findings)" uv run --with pyyaml security/check_findings.py
+    || passo "registro dei rilievi (check_findings)" uv run --with pyyaml==6.0.4 security/check_findings.py
   passo "i tre installer concordano — autoprova" python3 security/confronta-installer.py "$AUTOPROVA"
   passo "i tre installer concordano" python3 security/confronta-installer.py
   passo "gate anti-leak (check_no_leaks)" python3 security/check_no_leaks.py
@@ -224,7 +224,7 @@ fase_guardiani() {
   passo "le coordinate nei doc — autoprova" python3 tools/coordinate-nei-doc.py "$AUTOPROVA"
   passo "le coordinate nei doc puntano dentro il file" python3 tools/coordinate-nei-doc.py
   manca "gate locale — autoprova" uv \
-    || passo "gate locale — autoprova" uv run --with pyyaml python3 tools/gate-locale.py "$AUTOPROVA"
+    || passo "gate locale — autoprova" uv run --with pyyaml==6.0.4 python3 tools/gate-locale.py "$AUTOPROVA"
   passo "le nove prove non mentono a macchina nuda" bash tools/prove-empiriche/onesta-a-macchina-nuda.sh
   # verify-features.yml installa PyYAML dallo stesso file, con gli hash.
   manca "ledger delle feature (verify-features)" uv \
@@ -244,19 +244,19 @@ fase_test() {
   fi
   passo "nb1777-mcp (contract-test, nlm pinnato)" \
     uv run --locked --directory services/nb1777-mcp pytest -q tests/
-  passo "gateway (stdlib)" uvx pytest -q services/gateway/tests/
+  passo "gateway (stdlib)" uvx pytest@9.2.0 -q services/gateway/tests/
   passo "gateway gamba-2 XFF (uvicorn del lock)" \
-    uv run --locked --directory services/gateway --with pytest pytest -q tests_runtime/
-  passo "archive-mcp (stdlib)" uvx pytest -q services/archive-mcp/tests/
-  passo "nb1777-bot (stdlib)" uvx pytest -q services/nb1777-bot/tests/
+    uv run --locked --directory services/gateway --with pytest==9.2.0 pytest -q tests_runtime/
+  passo "archive-mcp (stdlib)" uvx pytest@9.2.0 -q services/archive-mcp/tests/
+  passo "nb1777-bot (stdlib)" uvx pytest@9.2.0 -q services/nb1777-bot/tests/
   passo "nb1777-bot comandi (deps del lock)" \
-    uv run --locked --directory services/nb1777-bot --with pytest pytest -q tests/test_comandi.py tests/test_notifiche_due_code.py
+    uv run --locked --directory services/nb1777-bot --with pytest==9.2.0 pytest -q tests/test_comandi.py tests/test_notifiche_due_code.py
   passo "archive-mcp /health e indice (deps del lock)" \
-    uv run --locked --directory services/archive-mcp --with pytest pytest -q \
+    uv run --locked --directory services/archive-mcp --with pytest==9.2.0 pytest -q \
       tests/test_health.py tests/test_superficie_tool.py tests/test_temi.py tests/test_costruisci_indice.py \
       tests/test_ibrida_verifica.py tests/test_sessioni.py tests/test_fuori_dal_loop.py tests/test_annotazioni.py tests/test_get_many_precedenti.py
   passo "CLI e presìdi del repo (tools/tests)" \
-    uvx --with bcrypt --with cryptography --with pyyaml pytest -q tools/tests/
+    uvx --with bcrypt --with cryptography --with pyyaml==6.0.4 pytest@9.2.0 -q tools/tests/
   # Il ciclo backup → restore cifra per davvero con `age` e usa docker: senza, esce 2
   # («SALTATO») e il runner lo conta rosso, di proposito. Qui lo si dice PRIMA.
   local nota=""

@@ -15,6 +15,7 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Python
@@ -104,7 +105,7 @@ jobs:
       # perché quella frase non puntava a nulla. Ora una dichiarazione falsa è
       # una build rossa.
       - name: Registro dei rilievi — nessun claim senza coordinata
-        run: uv run --with pyyaml security/check_findings.py
+        run: uv run --with pyyaml==6.0.4 security/check_findings.py
       # I TRE INSTALLER devono concordare. Nasce dal round-16 (`bedecdcb`): non
       # c'era NESSUN job che li confrontasse, e la divergenza è già costata due
       # volte — il fix #13 (6c764bc) allineò deploy.sh e engine.py e saltò
@@ -198,6 +199,7 @@ jobs:
   # appoggia. Un bump di nlm che cambia una firma fallisce QUI, non in prod.
   contract:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: lint
     steps:
       # 🔴 `fetch-depth: 0` NON è ottimizzazione al contrario: senza, il checkout è
@@ -459,7 +461,7 @@ jobs:
         working-directory: services/nb1777-mcp
         run: uv run pytest tests/ -v
       - name: Test archive indexer (gateway, stdlib-only)
-        run: uvx pytest services/gateway/tests/ -v
+        run: uvx pytest@9.2.0 services/gateway/tests/ -v
       # GAMBA 2 della garanzia «l'IP client non è spoofabile». `test_xff_trust_list.py`
       # copre la gamba NOSTRA (la trust-list, letta con `ast`) e dichiara scoperta quella
       # di TERZI: «uvicorn cammina l'XFF da destra» — un dettaglio interno che è
@@ -481,19 +483,19 @@ jobs:
         run: uv sync --frozen
       - name: Test gamba-2 XFF — uvicorn del lock, non uvx (garanzia IP client)
         working-directory: services/gateway
-        run: uv run --with pytest pytest tests_runtime/ -v
+        run: uv run --with pytest==9.2.0 pytest tests_runtime/ -v
       - name: Test archive-mcp FTS (stdlib-only)
-        run: uvx pytest services/archive-mcp/tests/ -v
+        run: uvx pytest@9.2.0 services/archive-mcp/tests/ -v
       # P12 (11/10/2026): il bot non aveva test. Qui girano le parti stdlib (il log senza
       # token); /start importa python-telegram-bot, salta qui (importorskip) e gira nello
       # step dopo, con le deps del lock. (formato.py è stato tolto con /lista e /chiedi.)
       - name: Test nb1777-bot (stdlib-only)
-        run: uvx pytest services/nb1777-bot/tests/ -v
+        run: uvx pytest@9.2.0 services/nb1777-bot/tests/ -v
       - name: Test nb1777-bot comandi (deps del lock)
         working-directory: services/nb1777-bot
         run: |
           uv sync --frozen
-          uv run --with pytest pytest tests/test_comandi.py tests/test_notifiche_due_code.py -v
+          uv run --with pytest==9.2.0 pytest tests/test_comandi.py tests/test_notifiche_due_code.py -v
       # /health importa l'SDK mcp: nello step stdlib-only qui sopra SALTA (importorskip
       # dichiarato nel test). Questo step lo fa girare con le deps del lock — senza,
       # il presidio del healthcheck semantico non girerebbe MAI in CI (vaglio 03/09).
@@ -506,7 +508,7 @@ jobs:
         working-directory: services/archive-mcp
         run: |
           uv sync --frozen
-          uv run --with pytest pytest tests/test_health.py tests/test_superficie_tool.py tests/test_temi.py tests/test_costruisci_indice.py tests/test_ibrida_verifica.py tests/test_sessioni.py tests/test_fuori_dal_loop.py tests/test_annotazioni.py tests/test_get_many_precedenti.py -v
+          uv run --with pytest==9.2.0 pytest tests/test_health.py tests/test_superficie_tool.py tests/test_temi.py tests/test_costruisci_indice.py tests/test_ibrida_verifica.py tests/test_sessioni.py tests/test_fuori_dal_loop.py tests/test_annotazioni.py tests/test_get_many_precedenti.py -v
       # La CLI è il componente che fa gli update in PRODUZIONE, ed era l'unico con
       # una suite che nessuno lanciava: 10 test verdi che non hanno mai protetto
       # niente. Trovato il 20/07 scrivendo i test del pre-flight — cioè stavo per
@@ -527,7 +529,7 @@ jobs:
         # pyyaml (29/09/2026): senza, test_checker_sa_rifiutare saltava PER INTERO in CI
         # («check_findings.py stesso richiede PyYAML») e altri 6 test non giravano: un
         # presidio che salta in CI è verde senza aver misurato niente.
-        run: uvx --with bcrypt --with cryptography --with pyyaml pytest tools/tests/ -v
+        run: uvx --with bcrypt --with cryptography --with pyyaml==6.0.4 pytest@9.2.0 tools/tests/ -v
       # `pytest tools/tests/` NON vede i file .sh: la suite qui sopra sarebbe
       # rimasta verde con il test della ritenzione fermo sul disco, che è
       # letteralmente il difetto raccontato nel commento qui sopra, ripetuto
@@ -546,7 +548,7 @@ jobs:
       #   una suite rotta, cioè risponderebbe al posto dei test. Prova anche il caso
       #   che un ciclo ingenuo sbaglia — ZERO test trovati → esito 2, non 0.
       # 📏 Controprova eseguita su copia (03/08): rotto test-onboarding-8080-bind.sh
-      #   in un punto raggiunto → `uvx pytest tools/tests/` resta VERDE (175 passed),
+      #   in un punto raggiunto → `uvx pytest@9.2.0 tools/tests/` resta VERDE (175 passed),
       #   il runner esce 1 e lo nomina.
       # 🔑 `age` serve a UN test — quello del ciclo backup → restore, che cifra e decifra
       #   per davvero — e senza di lui quel test esce 2 («SALTATO»), che il runner conta
@@ -614,6 +616,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: lint
     strategy:
       matrix:

@@ -138,6 +138,8 @@ def solo_codice(testo: str, nome: str) -> str:
             # non poter tokenizzare non è «non ci sono commenti»: si dichiara
             # tenendo il testo intero, e il confronto sarà più permissivo. Il
             # rischio resta scritto qui invece di sparire in un except muto.
+            print("  ⚠️  un file Python non si lascia tokenizzare: lo confronto sul testo intero "
+                  "(commenti compresi), quindi in modo più permissivo.", file=sys.stderr)
             return testo
     out = []
     for riga in testo.splitlines():
@@ -171,6 +173,7 @@ def confronta(radice: Path = RADICE) -> tuple[int, list[str]]:
             p.read_text(encoding="utf-8", errors="replace"), nome)
 
     divergenze = 0
+    non_misurati = 0
     for asse, pattern in ASSI:
         trovati = {n: estrai(t, pattern) for n, t in contenuti.items()}
         unione: set[str] = set().union(*trovati.values())
@@ -178,7 +181,7 @@ def confronta(radice: Path = RADICE) -> tuple[int, list[str]]:
             righe.append(f"  ⚪ {asse}: ZERO occorrenze in tutti e tre — "
                          "il pattern non ha trovato niente, quindi questo asse "
                          "NON è stato misurato (non è un verde).")
-            divergenze += 0
+            non_misurati += 1
             continue
         if len({frozenset(v) for v in trovati.values()}) == 1:
             righe.append(f"  ✅ {asse}: concordano ({len(unione)} voci)")
@@ -190,7 +193,9 @@ def confronta(radice: Path = RADICE) -> tuple[int, list[str]]:
             if len(chi_ce_l_ha) != len(INSTALLER):
                 mancano = [n for n in INSTALLER if n not in chi_ce_l_ha]
                 righe.append(f"       «{voce}» manca in: {', '.join(mancano)}")
-    return (1 if divergenze else 0), righe
+    # Un asse che non ha trovato niente non è stato misurato: prima lo si scriveva e si
+    # usciva 0, cioè «concordano». Ora, senza divergenze, l'esito è 2.
+    return (1 if divergenze else 2 if non_misurati else 0), righe
 
 
 def autoprova() -> int:
@@ -286,6 +291,9 @@ if __name__ == "__main__":
         print("✅ i tre installer CONCORDANO sugli assi misurati.\n"
               "   («sugli assi misurati» non è una formula: leggi il docstring — "
               "questo è statico e non vede tutto)")
+    elif esito == 2:
+        print("⚪ NON MISURATO su almeno un asse (vedi sopra): il pattern di quell'asse non trova\n"
+              "   più niente in nessuno dei tre. Non è «concordano»: va riancorato il pattern.")
     elif esito == 1:
         print("🔴 DIVERGONO. Una cura applicata a un installer solo lascia\n"
               "   scoperti gli altri due, ed è già successo (fix #13, H55).")

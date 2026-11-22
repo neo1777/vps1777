@@ -45,7 +45,8 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
-    command: ["tunnel", "--no-autoupdate", "run"]
+    # `--metrics` su loopback: è l'indirizzo a cui il controllo di salute qui sotto chiede /ready.
+    command: ["tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:20241", "run"]
     environment:
       TUNNEL_TOKEN_FILE: /run/secrets/cloudflared_token
     secrets:
@@ -56,7 +57,14 @@ services:
       gateway:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "cloudflared tunnel info 2>&1 | grep -q healthy || exit 1"]
+      # 🔴 IL CONTROLLO DI PRIMA NON POTEVA DARE UN ESITO VERO (22/11/2026). Era `CMD-SHELL`
+      #   con `… | grep -q healthy`: l'immagine non ha una shell (provato: `/bin/sh` non
+      #   esiste), quindi il comando falliva sempre e il container restava «unhealthy» anche
+      #   col tunnel su; e `grep healthy` avrebbe trovato anche «unhealthy». Ora si usa il
+      #   comando che cloudflared ha per questo: `tunnel ready` chiede /ready al proprio
+      #   endpoint e torna 0 solo con almeno una connessione attiva verso Cloudflare.
+      #   Provato senza tunnel: esce 1 («connection refused»). NON provato con un tunnel vero.
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:20241", "ready"]
       interval: 60s
       timeout: 5s
       retries: 3

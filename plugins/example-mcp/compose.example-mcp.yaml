@@ -24,6 +24,13 @@ services:
       context: ./plugins/example-mcp
     image: vps1777/example-mcp:${VPS1777_TAG:-dev}
     init: true
+    # Il tetto ai log non attraversa i file: l'ancora `x-logging` vive in compose.yaml. Senza
+    # questo blocco il servizio scrive in json-file senza limite, fino a disco pieno.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     environment:
       PLUGIN_HOST: 0.0.0.0
       PLUGIN_PORT: 8010

@@ -8,6 +8,8 @@
 #     `status artifacts` non è cronologico).
 from __future__ import annotations
 
+import pytest
+
 from app import core
 
 
@@ -84,14 +86,15 @@ def test_create_risolve_il_nuovo_id_per_differenza_non_per_ordine(monkeypatch) -
     assert got == "NEW"
 
 
-def test_create_ripiega_su_besteffort_se_nessun_id_nuovo(monkeypatch) -> None:
-    # Il create non registra nulla di nuovo (0 id nuovi) → best-effort: ultimo
-    # del tipo atteso.
+def test_create_senza_id_nuovo_non_indovina(monkeypatch) -> None:
+    # Il create non registra nulla di nuovo (0 id nuovi). Prima si restituiva «l'ultimo del
+    # tipo atteso», cioè un artefatto VECCHIO presentato come quello appena creato: su un id
+    # sbagliato poi si scarica o si cancella la cosa sbagliata. Ora lo si dice.
     arts = [{"id": "A", "type": "audio"}, {"id": "B", "type": "audio"}]
     monkeypatch.setattr(core, "_run", lambda args, **kw: None)
     monkeypatch.setattr(core, "_run_json", lambda args, **kw: list(arts))
-    got = core._create_and_resolve_artifact_id("nb", [], "audio", timeout=1)
-    assert got == "B"
+    with pytest.raises(core.IdNonDeterminato, match="NON riprovare"):
+        core._create_and_resolve_artifact_id("nb", [], "audio", timeout=1)
 
 
 def test_create_disambigua_col_tipo_su_concorrenza(monkeypatch) -> None:

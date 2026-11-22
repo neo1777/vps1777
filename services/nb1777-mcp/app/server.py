@@ -1,7 +1,7 @@
 """
 app/server.py — FastMCP wrapper sopra core.py (servizio nb1777-mcp).
 
-Espone le funzioni di `core.py` come tool MCP (40), più le rotte custom:
+Espone le funzioni di `core.py` come tool MCP (il conto lo tiene ANNOTAZIONI), più le rotte custom:
 gli endpoint `/internal/*` (H6) e `/health`. In compose ascolta su
 0.0.0.0:8003 sulla rete interna `backend`, mai pubblicata: da Internet si
 arriva solo attraverso il gateway (OAuth + path-secret), che rifiuta i
@@ -244,7 +244,7 @@ mcp.tool = _tool_annotato                                # type: ignore[method-a
 # ritorna un errore strutturato con istruzioni per l'admin panel /admin/nlm.
 NLM_CFG = Path.home() / ".notebooklm-mcp-cli"
 AUTH_FLAG = NLM_CFG / "AUTH_PENDING.flag"
-# nlm (dalla 0.7, verificato fino alla 0.16.1): l'auth è il profilo profiles/default/cookies.json (non auth.json)
+# nlm (dalla 0.7, verificato fino alla 0.16.2): l'auth è il profilo profiles/default/cookies.json (non auth.json)
 AUTH_COOKIES = NLM_CFG / "profiles" / "default" / "cookies.json"
 
 
@@ -253,7 +253,7 @@ def _check_auth_or_raise() -> None:
     if AUTH_FLAG.exists() or not AUTH_COOKIES.exists():
         raise AuthAssente(
             "Auth NotebookLM mancante. Sul TUO PC: `uv tool install "
-            "notebooklm-mcp-cli==0.16.1 --python 3.12 && nlm login` (se chiede «Protected or "
+            "notebooklm-mcp-cli==0.16.2 --python 3.12 && nlm login` (se chiede «Protected or "
             "plain file?» scegli il file), poi "
             "`cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` "
             "e carica il tar.gz su /admin/nlm del gateway."
@@ -777,6 +777,9 @@ def _attesa(attesa_max: float) -> float:
     return min(max(float(attesa_max), 1.0), ATTESA_MAX_TETTO)
 
 
+QUERY_MAX_INSIEME = 4     # domande a NotebookLM che possono essere in corso nello stesso momento
+
+
 def _pulisci_query() -> None:
     ora = time.monotonic()
     for qid, (task, nata) in list(_QUERY_IN_CORSO.items()):
@@ -833,6 +836,13 @@ async def notebook_query(notebook_id: str, question: str,
                   bool(verbose))
         qid = _QUERY_PER_DOMANDA.get(chiave)
         if qid is None or qid not in _QUERY_IN_CORSO:
+            # Ogni domanda nuova è un thread con un sottoprocesso `nlm`: senza un tetto una
+            # raffica di domande diverse ne apriva quante ne arrivavano.
+            vive = sum(1 for t, _ in _QUERY_IN_CORSO.values() if not t.done())
+            if vive >= QUERY_MAX_INSIEME:
+                raise core.NLMError(
+                    f"ci sono già {vive} domande in corso (il tetto è {QUERY_MAX_INSIEME}): ritira "
+                    "un esito con notebook_query_esito, o riprova fra poco.")
             task = asyncio.create_task(asyncio.to_thread(
                 core.notebook_query, notebook_id, question, source_ids=source_ids,
                 conversation_id=conversation_id, verbose=verbose))
@@ -1335,9 +1345,9 @@ async def memoria_check(versione_portata: str) -> esiti.MemoriaCheck:
     delta}`, più `portata` (la tua versione normalizzata) e, se sei vecchio, le
     `note` del canonico. Fail-open: se il canonico non è leggibile, o la versione
     passata non si riconosce, `stale: null` con una `nota` che lo dice.
-    Effetto collaterale che è IL PUNTO: se sei vecchio (`stale:true`), manda a
-    Neo UN ping Telegram (max 1 al giorno per coppia portata→canonico) — così
-    anche se la sessione ignora il verdetto, Neo lo sa. Chiamalo all'avvio se la
+    Effetto collaterale che è IL PUNTO: se sei vecchio (`stale:true`), manda al
+    proprietario UN ping Telegram (max 1 al giorno per coppia portata→canonico) — così
+    anche se la sessione ignora il verdetto, lui lo sa. Chiamalo all'avvio se la
     versione in testa al tuo blocco potrebbe essere superata."""
     verdict = await asyncio.to_thread(memoria.compare, versione_portata)
     if verdict.get("stale") and verdict.get("canonico"):

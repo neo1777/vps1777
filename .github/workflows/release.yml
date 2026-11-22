@@ -24,6 +24,7 @@ permissions:
 jobs:
   guard:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # Legge soltanto il repo: nessuna scrittura, nessun token OIDC.
     # actions:read serve alla guard CI-verde (interroga i run del commit).
     permissions:
@@ -38,6 +39,11 @@ jobs:
         id: ver
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          # Il nome del tag finisce nel testo di più passi (`${{ needs.guard.outputs.version }}`):
+          # qui se ne pretende la forma, così un tag con un nome strano si ferma al primo passo.
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::il tag «$GITHUB_REF_NAME» non ha la forma vX.Y.Z[-pre]: non rilascio"; exit 1
+          fi
           echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
           case "$VERSION" in
             *-*) echo "PRERELEASE=true"  >> "$GITHUB_OUTPUT" ;;
@@ -101,6 +107,7 @@ jobs:
 
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: guard
     # Pubblica su GHCR (packages:write) e firma keyless (id-token:write).
     # NON crea Release → niente contents:write.
@@ -165,6 +172,7 @@ jobs:
 
   bundle:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [guard, release]
     # Crea la GitHub Release (contents:write), rilegge i digest da GHCR
     # (packages:read) e firma il blob keyless (id-token:write).
@@ -281,3 +289,17 @@ jobs:
             SHA256SUMS
             SHA256SUMS.sig
             SHA256SUMS.pem
+      # La release si RILEGGE dall'API: «creata» lo dice ciò che GitHub serve adesso, non il
+      # fatto che l'azione qui sopra non abbia sollevato. Senza uno dei quattro allegati
+      # l'updater delle macchine installate non può verificare né scaricare.
+      - name: La release pubblicata ha i quattro allegati
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSIONE: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+          nomi="$(gh release view "v$VERSIONE" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name')"
+          echo "$nomi"
+          for atteso in "vps1777-runtime-v$VERSIONE.tar.gz" SHA256SUMS SHA256SUMS.sig SHA256SUMS.pem; do
+            grep -qxF "$atteso" <<<"$nomi" || { echo "::error::nella release v$VERSIONE manca l'allegato $atteso"; exit 1; }
+          done

@@ -26,5 +26,7 @@ def ensure_nlm_home_in_env() -> None:
     if not link.exists():
         try:
             link.symlink_to(home, target_is_directory=True)
-        except (OSError, FileExistsError):
-            pass
+        except OSError as e:     # (FileExistsError è un OSError: una corsa con un altro avvio)
+            import logging
+            logging.getLogger(__name__).warning(
+                "collegamento %s non creato (%s): nlm potrebbe non trovare il profilo", link, type(e).__name__)

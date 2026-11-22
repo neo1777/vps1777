@@ -19,7 +19,7 @@ _CHIAVE = secrets.token_bytes(32)
 
 def _firma(azione: str, ids: tuple[str, ...], scade: int) -> str:
     msg = "\x1f".join((azione, *ids, str(scade))).encode()
-    return hmac.new(_CHIAVE, msg, hashlib.sha256).hexdigest()[:24]
+    return hmac.new(_CHIAVE, msg, hashlib.sha256).hexdigest()[:32]   # 128 bit (erano 96)
 
 
 def gettone(azione: str, *ids: str, ora: float | None = None) -> str:

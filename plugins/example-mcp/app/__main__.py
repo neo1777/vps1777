@@ -30,7 +30,7 @@ def hello(name: str = "world") -> str:
 
 
 @mcp.tool()
-def echo(payload: dict) -> dict:
+def echo(payload: dict[str, object]) -> dict[str, object]:
     """Echo del payload ricevuto. Utile per debug."""
     return {"received": payload}
 

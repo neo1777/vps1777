@@ -9,7 +9,7 @@
 
 version: 2
 updates:
-  # ── GitHub Actions: mantiene freschi gli SHA pinnati nei 3 workflow ────────
+  # ── GitHub Actions: mantiene freschi gli SHA pinnati nei workflow ────────
   - package-ecosystem: github-actions
     directory: /
     schedule:
