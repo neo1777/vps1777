@@ -4797,7 +4797,7 @@ findings:
         compariva fra i risultati. Mai osservata sulla VPS di riferimento. `low`: serve un
         errore di lettura proprio alla prima lettura del ruolo dopo un avvio, e chi legge è
         comunque un client autorizzato dal proprietario.
-    since: unreleased
+    since: v0.98.5
     why: >
       `_ruolo` decide se un DB sta nel perimetro di default delle ricerche. Se la lettura del
       ruolo falliva (per esempio il file bloccato per un attimo) e il ruolo non era mai stato
