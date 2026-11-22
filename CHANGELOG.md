@@ -4,6 +4,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **Il pacchetto di runtime della release si può ricostruire e viene sempre uguale.** La ricetta è uscita da
+  `release.yml` ed è in `tools/assembla-pacchetto.sh`: ordine dei file, data (quella del commit), proprietario e
+  intestazione della compressione sono fissati. Prima due build dello stesso commit davano due impronte diverse.
+  La CI lo costruisce due volte e confronta (`tools/tests/test-pacchetto-riproducibile.sh`). Il contenuto non
+  cambia: confrontato file per file e permesso per permesso col pacchetto della 0.98.5. Le immagini dei container
+  restano fuori da questa promessa, per scelta: prendono gli aggiornamenti di sicurezza al momento della build.
+
+### Documenti
+- La guida ai guasti spiega che cosa fare quando il deploy si ferma perché la chiave SSH della macchina è
+  cambiata (dalla 0.98.3). SECURITY.md dice che il pacchetto si può ricostruire. Tolta da `docs/NB1777.md` una
+  sigla interna che non diceva niente a chi legge.
+
 ## [0.98.5] — 2026-11-22
 
 ### Sicurezza
