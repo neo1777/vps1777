@@ -744,6 +744,13 @@ def main() -> int:
                  f"{fid}: dichiarata CHIUSA senza evidenza.\n"
                  f"       Se non sai scrivere l'evidenza, non è chiusa.")
 
+        # Un rischio ACCETTATO deve dire se oggi si sfrutta: «accettato» senza quella risposta
+        # è un rinvio senza data. Le quattro voci accettate la portano dal 21/11/2026.
+        if status == "accepted" and not str(f.get("si_sfrutta_oggi") or "").strip():
+            fail(errors,
+                 f"{fid}: è `accepted` ma non risponde a `si_sfrutta_oggi:`.\n"
+                 f"       Scrivi sì o no, e perché: è la domanda che decide se resta accettato.")
+
         # LA REGOLA GEMELLA: niente «non fatto» senza dire cosa manca.
         if status in {"partial", "open"} and not f.get("missing"):
             fail(errors,
@@ -781,6 +788,11 @@ def main() -> int:
     # diceva 10 parziali e la prosa ne descriveva 9 — H52, aggiunta quel giorno,
     # non era nominata da nessuna parte. Il gate era verde: il totale tornava.
     # Un residuo che nessuna riga nomina è un residuo che nessuno legge.
+    if not SECURITY_MD.is_file():
+        # Senza il documento i due controlli qui sotto venivano saltati in silenzio, e il
+        # checker passava senza aver confrontato niente.
+        fail(errors, "SECURITY.md non c'è: non posso confrontare il registro con ciò che il "
+                     "progetto dichiara (residui nominati e conteggi).")
     if SECURITY_MD.is_file():
         md_ids = SECURITY_MD.read_text(encoding="utf-8")
         for f in findings:

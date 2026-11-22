@@ -24,6 +24,8 @@ import logging
 import os
 import subprocess
 import sys
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LINGUE = os.environ.get("OCR_LINGUE", "ita+eng")
@@ -53,7 +55,16 @@ def ocr_bytes(raw: bytes) -> tuple[int, bytes]:
     return 200, r.stdout.strip()
 
 
+# Quante immagini si lavorano insieme. Ogni richiesta tiene fino a MAX_BODY in memoria e un
+# tesseract: senza un tetto, tante connessioni insieme riempivano la memoria del container.
+# Le altre aspettano il loro turno (fino a TIMEOUT_S), non vengono rifiutate.
+MAX_INSIEME = int(os.environ.get("OCR_MAX_INSIEME", "2"))
+_POSTI = threading.BoundedSemaphore(MAX_INSIEME)
+
+
 class _H(BaseHTTPRequestHandler):
+    timeout = 30      # secondi sul socket: un client che non manda il corpo non tiene il thread per sempre
+
     def _rispondi(self, status: int, body: bytes) -> None:
         self.send_response(status)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
@@ -83,8 +94,17 @@ class _H(BaseHTTPRequestHandler):
         if n > MAX_BODY:
             self._rispondi(413, b"Content-Length oltre il tetto")
             return
-        raw = self.rfile.read(n)
-        status, body = ocr_bytes(raw)
+        # il posto si prende PRIMA di leggere il corpo: è il corpo che occupa memoria
+        if not _POSTI.acquire(timeout=TIMEOUT_S):
+            self._rispondi(503, b"OCR occupato: riprova fra poco")
+            return
+        try:
+            raw = self.rfile.read(n)
+            status, body = ocr_bytes(raw)
+        except OSError:
+            return                     # il client se n'è andato o non ha mandato il corpo in tempo
+        finally:
+            _POSTI.release()
         self._rispondi(status, body)
 
     def log_message(self, fmt: str, *args) -> None:            # noqa: A003
@@ -92,8 +112,9 @@ class _H(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    logging.basicConfig(level="INFO", stream=sys.stdout,
-                        format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
+    logging.Formatter.converter = time.gmtime      # l'ora dei log in UTC, con la Z
+    logging.basicConfig(level="INFO", stream=sys.stdout, datefmt="%Y-%m-%dT%H:%M:%S",
+                        format="%(asctime)sZ %(levelname)s [%(name)s] %(message)s")
     host = os.environ.get("OCR_HOST", "0.0.0.0")
     port = int(os.environ.get("OCR_PORT", "8004"))
     log.info("vps1777-ocr starting · %s:%s · lingue=%s", host, port, LINGUE)

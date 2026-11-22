@@ -17,12 +17,11 @@ NotebookLM MCP wrapper — espone i tool del CLI `nlm` come MCP streamable-http.
 | `NB1777_SONDA_ORE` | `4` | ogni quante ore la sonda viva prova la sessione Google; `0` la spegne |
 | `NOTEBOOKLM_ALLOWED_FILE_DIRS` | — (in `compose.yaml` `/var/lib/nlm-artifacts:/tmp`) | le sole cartelle da cui `nlm` carica un file (la legge `nlm`) |
 | `LOG_LEVEL` | `INFO` | livello dei log |
-| `FASTMCP_STATELESS_HTTP` | `true` | MCP stateless mode |
 | `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI) |
 
 ## Auth NotebookLM (post-install)
 
-`nlm` (dalla 0.7 alla 0.15) salva l'auth come profilo `${NLM_HOME}/profiles/default/cookies.json`. Se manca (o esiste `${NLM_HOME}/AUTH_PENDING.flag`), ogni tool che parla con NotebookLM fallisce con un errore `[auth_assente]` e le istruzioni (una sessione scaduta dà `[auth_scaduta]`); i tre tool della memoria (`canonico`, `memoria_check`, `memoria_ack`) leggono file locali e funzionano anche senza.
+`nlm` (dalla 0.7; verificato fino alla versione fissata in `pyproject.toml`) salva l'auth come profilo `${NLM_HOME}/profiles/default/cookies.json`. Se manca (o esiste `${NLM_HOME}/AUTH_PENDING.flag`), ogni tool che parla con NotebookLM fallisce con un errore `[auth_assente]` e le istruzioni (una sessione scaduta dà `[auth_scaduta]`); i tre tool della memoria (`canonico`, `memoria_check`, `memoria_ack`) leggono file locali e funzionano anche senza.
 
 Sul tuo PC: `nlm login` → `cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default` → carica il tar.gz dal pannello `<PUBLIC_BASE>/admin/nlm`.
 

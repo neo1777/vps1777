@@ -1,7 +1,9 @@
 # secrets/ — i valori non entrano MAI in git
 
 Questa cartella contiene i segreti dell'installazione. **I `.txt` sono
-gitignorati e nessun valore è mai entrato nella storia del repo** (verificato).
+gitignorati e nessun valore è mai entrato nella storia del repo** (verificato il 22/11/2026:
+`git log --all --diff-filter=A --oneline -- 'secrets/*.txt'` non dà nessun commit; il gate
+anti-leak della CI, `security/check_no_leaks.py`, lo controlla a ogni PR).
 `setup.sh` li genera se mancano o sono vuoti ed è idempotente: non tocca quelli già
 pieni (tranne `telegram_webapp_secret.txt`, che ricalcola sempre dal token), quindi
 rilanciarlo non invalida un'installazione viva.

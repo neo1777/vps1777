@@ -13,8 +13,19 @@ services:
       context: ./plugins/example-bot
     image: vps1777/example-bot:${VPS1777_TAG:-dev}
     init: true
+    # Il tetto ai log non attraversa i file: l'ancora `x-logging` vive in compose.yaml. Senza
+    # questo blocco il servizio scrive in json-file senza limite, fino a disco pieno.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     environment:
       TELEGRAM_BOT_TOKEN_FILE: /run/secrets/example_bot_token
+      # Il bot risponde SOLO a questo utente Telegram. 0 (o vuoto) = non risponde a nessuno.
       OWNER_ID: ${EXAMPLE_BOT_OWNER_ID:-0}
     secrets:
       - example_bot_token

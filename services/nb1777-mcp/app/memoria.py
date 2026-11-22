@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import logging
 import re
 import time
@@ -57,19 +58,35 @@ def _state_path() -> Path:
 
 
 def _load() -> dict:
-    try:
-        return json.loads(_state_path().read_text())
-    except (OSError, ValueError):
-        return {}
-
-
-def _save(state: dict) -> None:
     p = _state_path()
     try:
+        dati = json.loads(p.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}                   # mai scritto: stato vuoto, è il caso normale
+    except (OSError, ValueError) as exc:
+        # C'è ma non si legge: si riparte da vuoto (l'ack andrà ridato), ma lo si DICE —
+        # prima un file rovinato era indistinguibile da «nessuno ha mai dato l'ack».
+        log.warning("stato memoria illeggibile (%s): riparto da vuoto", type(exc).__name__)
+        return {}
+    return dati if isinstance(dati, dict) else {}
+
+
+def _save(state: dict) -> bool:
+    """Scrive lo stato in modo atomico (file provvisorio e rinomina). True se è su disco.
+
+    Con `write_text` diretto una scrittura interrotta o un disco pieno lasciavano un file
+    troncato, che alla lettura sembrava uno stato vuoto valido: l'ack spariva in silenzio.
+    """
+    p = _state_path()
+    tmp = p.with_name(p.name + ".tmp")
+    try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(state))
-    except OSError as exc:  # volume non scrivibile: non rompere, prosegui in RAM
+        tmp.write_text(json.dumps(state), encoding="utf-8")
+        os.replace(tmp, p)
+        return True
+    except OSError as exc:  # volume non scrivibile: non rompere, ma chi chiama lo deve sapere
         log.warning("stato memoria non scrivibile (%s)", exc)
+        return False
 
 
 # ── ② il verdetto ────────────────────────────────────────────────────────────
@@ -108,9 +125,12 @@ def note_drift(versione_portata: str, canonico_version: str) -> bool:
     pv = parse_version(versione_portata)
     porta = _vstr(pv) if pv else "?"
     key = f"{porta}->{canonico_version}"
-    today = datetime.date.today().isoformat()
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()   # il giorno in UTC, non locale
     st = _load()
-    sent = st.setdefault("drift_sent", {})
+    # Serve solo sapere cosa è già partito OGGI: le coppie dei giorni passati si buttano,
+    # altrimenti l'elenco cresceva a ogni combinazione di versioni, per sempre.
+    sent = {k: v for k, v in (st.get("drift_sent") or {}).items() if v == today}
+    st["drift_sent"] = sent
     if sent.get(key) == today:
         return False
     sent[key] = today
@@ -132,7 +152,10 @@ def set_ack(version: str) -> str:
     norm = _vstr(pv) if pv else version
     st = _load()
     st["acked_version"] = norm
-    _save(st)
+    if not _save(st):
+        # L'ack non è su disco: dirlo «registrato» vorrebbe dire che al prossimo riavvio
+        # il promemoria ricomincia e nessuno sa perché.
+        raise OSError("l'ack non è stato salvato: lo stato della memoria non è scrivibile")
     return norm
 
 

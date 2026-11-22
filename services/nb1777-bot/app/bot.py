@@ -136,9 +136,12 @@ async def _on_error(update: object, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("errore handler", exc_info=ctx.error)
     try:
         if isinstance(update, Update) and update.effective_message:
-            await update.effective_message.reply_text(f"Errore interno: {ctx.error}")
-    except Exception:  # noqa: BLE001 — non far fallire l'error handler
-        pass
+            # Solo il TIPO dell'errore: il testo intero può portare un indirizzo col token del
+            # bot (gli errori di rete lo citano), e nel log quel pezzo viene mascherato, qui no.
+            await update.effective_message.reply_text(
+                f"Errore interno ({type(ctx.error).__name__}): il dettaglio è nei log del bot.")
+    except Exception as exc:  # noqa: BLE001 — non far fallire l'error handler
+        log.warning("non sono riuscito ad avvisare dell'errore (%s)", type(exc).__name__)
 
 
 # ───── heartbeat (healthcheck del container) ─────
@@ -189,11 +192,23 @@ async def _preleva(nome: str, url: str, segreto: str) -> list[dict]:
         if r.status_code != 200:
             log.warning("notifiche: %s ha risposto %s", nome, r.status_code)
             return []
-        items = r.json().get("items", [])
+        corpo = r.json()
     except (httpx.RequestError, ValueError) as exc:
         log.warning("notifiche: %s irraggiungibile (%s)", nome, exc)
         return []
-    return [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
+    # La forma si controlla: una risposta che non è {"items": [...]} faceva sollevare
+    # AttributeError, che non era catturato e uccideva il ciclo delle notifiche per sempre
+    # (col battito ancora acceso, quindi container «healthy»).
+    items = corpo.get("items", []) if isinstance(corpo, dict) else None
+    if not isinstance(items, list):
+        log.warning("notifiche: %s ha risposto con una forma inattesa (%s): scartata",
+                    nome, type(corpo).__name__)
+        return []
+    buone = [x for x in items[:_PRELIEVO_MAX] if isinstance(x, dict)]
+    if len(buone) != len(items):
+        log.warning("notifiche: %s, %d elementi scartati su %d (non oggetti, o oltre il tetto di %d)",
+                    nome, len(items) - len(buone), len(items), _PRELIEVO_MAX)
+    return buone
 
 
 async def _notify_loop(app: Application) -> None:
@@ -209,14 +224,22 @@ async def _notify_loop(app: Application) -> None:
         owner = get_settings().telegram_owner_id
         if not owner:
             continue
-        da_mandare, in_sospeso = in_sospeso, []
-        for nome, url in _fonti_notifiche(s):
-            da_mandare.extend(await _preleva(nome, url, s.effective_gateway_secret))
-        in_sospeso = await _consegna(app, owner, da_mandare)
+        # Un giro che solleva NON deve chiudere il ciclo: è l'unico che porta i promemoria,
+        # e se muore nessuno se ne accorge. Si logga e si riprova al giro dopo.
+        try:
+            da_mandare, in_sospeso = in_sospeso, []
+            for nome, url in _fonti_notifiche(s):
+                da_mandare.extend(await _preleva(nome, url, s.effective_gateway_secret))
+            in_sospeso = await _consegna(app, owner, da_mandare)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — qualunque errore di un giro: il ciclo resta vivo
+            log.exception("giro delle notifiche fallito: riprovo fra un minuto")
 
 
 _TENTATIVI_MAX = 30          # mezz'ora di giri: oltre, la notifica si lascia andare e lo si dice
 _SOSPESE_MAX = 50
+_PRELIEVO_MAX = 200         # notifiche accettate da una coda in un solo giro
 
 
 async def _consegna(app: Application, owner: int, items: list[dict]) -> list[dict]:
@@ -233,6 +256,9 @@ async def _consegna(app: Application, owner: int, items: list[dict]) -> list[dic
                 continue
             log.warning("notifica non inviata (%s), riprovo: %s", item.get("kind"), exc)
             restano.append({**item, "_tentativi": tentativi})
+    if len(restano) > _SOSPESE_MAX:
+        log.warning("notifiche in sospeso oltre il tetto: %d PERSE (ne tengo %d)",
+                    len(restano) - _SOSPESE_MAX, _SOSPESE_MAX)
     return restano[-_SOSPESE_MAX:]
 
 
@@ -243,7 +269,9 @@ async def cmd_ack(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if q is None:
         return
     s = get_settings()
-    if not s.telegram_owner_id or (q.from_user and q.from_user.id != s.telegram_owner_id):
+    # stessa regola di `owner_only`, fail-closed: chi non si sa chi è non passa (prima un
+    # mittente assente rendeva falsa la condizione e l'ack passava).
+    if not s.telegram_owner_id or not q.from_user or q.from_user.id != s.telegram_owner_id:
         await q.answer("non autorizzato")
         return
     version = (q.data or "").split(":", 1)[1] if ":" in (q.data or "") else ""

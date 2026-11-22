@@ -15,14 +15,41 @@ log = logging.getLogger("example-bot")
 
 
 def _read_token() -> str:
+    """Il token dal file indicato, oppure dall'ambiente SOLO se nessun file è stato indicato.
+
+    Se `TELEGRAM_BOT_TOKEN_FILE` è impostato e il file non c'è, non si ripiega in silenzio
+    sulla variabile d'ambiente: una configurazione sbagliata deve fermare il bot, non farlo
+    partire con un altro token.
+    """
     path = os.environ.get("TELEGRAM_BOT_TOKEN_FILE", "")
-    if path and Path(path).is_file():
-        return Path(path).read_text(encoding="utf-8").strip()
+    if path:
+        try:
+            return Path(path).read_text(encoding="utf-8").strip()
+        except OSError as e:
+            log.error("TELEGRAM_BOT_TOKEN_FILE=%s non si legge (%s)", path, type(e).__name__)
+            return ""
     return os.environ.get("TELEGRAM_BOT_TOKEN", "")
+
+
+def _owner_id() -> int:
+    """L'unico utente a cui il bot risponde. 0 = nessuno (chiuso finché non lo imposti)."""
+    try:
+        return int(os.environ.get("OWNER_ID", "0") or "0")
+    except ValueError:
+        return 0
+
+
+def autorizzato(user_id: int | None, owner: int) -> bool:
+    """Un bot che gira sulla tua macchina non risponde a chiunque lo trovi: solo al proprietario."""
+    return bool(owner) and user_id == owner
 
 
 async def cmd_start(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
+    utente = update.effective_user
+    if not autorizzato(utente.id if utente else None, _owner_id()):
+        log.info("messaggio ignorato: non viene dal proprietario")
+        return
     if msg:
         await msg.reply_text("Ciao da example-bot (plugin vps1777).")
 
@@ -32,6 +59,8 @@ async def run() -> None:
     if not token:
         log.error("TOKEN mancante — exiting")
         sys.exit(1)
+    if not _owner_id():
+        log.warning("OWNER_ID non impostato: il bot parte ma non risponde a nessuno")
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", cmd_start))
     async with app:

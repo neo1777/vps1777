@@ -80,3 +80,69 @@ async def test_dopo_troppi_tentativi_la_notifica_si_lascia_andare(monkeypatch):
     monkeypatch.setattr(bot, "_send_notification", manda)
     quasi = [{"kind": "x", "_tentativi": bot._TENTATIVI_MAX - 1}]
     assert await bot._consegna(None, 1, quasi) == []
+
+
+# ── dalla rilettura col catalogo (22/11/2026) ──────────────────────────────────
+
+def _client_che_risponde(corpo):
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url, headers=None):
+            return types.SimpleNamespace(status_code=200, json=lambda: corpo)
+    return _Client
+
+
+@pytest.mark.anyio
+async def test_una_risposta_di_forma_sbagliata_non_uccide_il_prelievo(monkeypatch):
+    """Una lista al posto dell'oggetto faceva sollevare AttributeError: il ciclo moriva per
+    sempre e il container restava «healthy»."""
+    for corpo in ([1, 2, 3], "testo", None, {"items": "non-una-lista"}):
+        monkeypatch.setattr(bot.httpx, "AsyncClient", _client_che_risponde(corpo))
+        assert await bot._preleva("gateway", "http://gateway:8080/internal/notifications", "s") == []
+
+
+@pytest.mark.anyio
+async def test_un_giro_che_solleva_non_chiude_il_ciclo_delle_notifiche(monkeypatch):
+    giri = {"n": 0}
+
+    async def _dormi(_s):
+        giri["n"] += 1
+        if giri["n"] > 3:
+            raise bot.asyncio.CancelledError
+
+    async def _preleva_rotto(*a, **k):
+        raise RuntimeError("imprevisto")
+
+    monkeypatch.setattr(bot.asyncio, "sleep", _dormi)
+    monkeypatch.setattr(bot, "_preleva", _preleva_rotto)
+    monkeypatch.setattr(bot, "get_settings", lambda: types.SimpleNamespace(
+        telegram_owner_id=1, nlm_internal_base="http://nb1777-mcp:8003",
+        gateway_internal_base="", effective_gateway_secret="s"))
+    with pytest.raises(bot.asyncio.CancelledError):
+        await bot._notify_loop(None)
+    assert giri["n"] == 4, "il ciclo è arrivato al quarto giro nonostante tre giri falliti"
+
+
+@pytest.mark.anyio
+async def test_l_ack_senza_mittente_non_passa():
+    risposte = []
+
+    async def _answer(testo):
+        risposte.append(testo)
+
+    q = types.SimpleNamespace(from_user=None, data="ack:v2.6", answer=_answer)
+    vecchio = bot.get_settings
+    bot.get_settings = lambda: types.SimpleNamespace(telegram_owner_id=1)
+    try:
+        await bot.cmd_ack(types.SimpleNamespace(callback_query=q), None)
+    finally:
+        bot.get_settings = vecchio
+    assert risposte == ["non autorizzato"]

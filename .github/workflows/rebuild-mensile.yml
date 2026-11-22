@@ -23,6 +23,7 @@ permissions: {}
 jobs:
   valuta-e-agisci:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read         # dal 21/11 il workflow non tagga più: legge e apre una issue
       issues: write          # la via di fallback
@@ -43,7 +44,9 @@ jobs:
           RC=0
           python3 tools/nlm-cadenza.py > nlm.txt || RC=$?   # 1 e 2 non fermano il passo
           cat nlm.txt
-          if [ "$RC" = 2 ]; then echo "::warning::$(cat nlm.txt)"; exit 0; fi
+          # 2 = «non ho potuto misurare» (PyPI non risponde, risposta illeggibile): non è «in
+          # regola». Prima era un avviso con uscita 0, cioè un verde mensile che nessuno apre.
+          if [ "$RC" = 2 ]; then echo "::error::cadenza di nlm NON misurata: $(cat nlm.txt)"; exit 1; fi
           [ "$RC" = 1 ] || exit 0
           TITOLO="nlm (notebooklm-mcp-cli) indietro di più di un mese"
           CORPO="$(printf 'Il giro mensile del %s dice:\n\n> %s\n\nIl salto si fa a mano, in una PR, col metodo di `.github/dependabot.yml`: changelog a monte, `--help` dei comandi usati da `core.py`, chiavi dei JSON su un account vero, contract-test (`tools/check.sh`).' "$(date -u +%F)" "$(cat nlm.txt)")"

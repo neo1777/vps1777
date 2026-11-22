@@ -47,7 +47,10 @@ def ultimo() -> dict | None:
     """L'ultimo esito registrato, {quando, esito}, o None se la sonda non ha mai girato."""
     try:
         righe = _registro().read_text(encoding="utf-8").splitlines()
-    except OSError:
+    except FileNotFoundError:
+        return None             # la sonda non ha mai girato
+    except OSError as e:
+        log.warning("registro della sonda illeggibile (%s)", type(e).__name__)
         return None
     for riga in reversed(righe):
         try:

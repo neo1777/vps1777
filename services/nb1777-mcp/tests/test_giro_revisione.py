@@ -45,6 +45,8 @@ def test_ogni_chiamata_a_nlm_passa_da_argv(monkeypatch):
     class _Fatto:
         returncode, stdout, stderr = 0, "{}", ""
     monkeypatch.setattr(core.subprocess, "run", lambda cmd, **k: visti.append(cmd) or _Fatto())
+    # dal 22/11/2026 nb_rename rilegge il titolo: qui interessa l'argv, la rilettura è finta
+    monkeypatch.setattr(core, "nb_get", lambda nb_id: {"title": "-1 giorno"})
     core.nb_rename("nb-1", "-1 giorno")
     assert visti[-1][1:] == ["notebook", "rename", "--", "nb-1", "-1 giorno"]
     core.source_rename("nb-1", "s-1", "--confirm")

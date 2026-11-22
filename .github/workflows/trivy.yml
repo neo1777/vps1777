@@ -16,6 +16,7 @@ permissions: {}
 jobs:
   scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     # upload-sarif richiede security-events: write. Senza, col default read-only
     # del GITHUB_TOKEN (standard dei repo nuovi) l'upload fallisce 403 ogni run.
     permissions:
@@ -72,6 +73,10 @@ jobs:
                    "oppure NOME SBAGLIATO nel workflow. Al 02/08 tutte e quattro le"\
                    "immagini risultavano pubblicate e leggibili senza login ⇒ se lo vedi"\
                    "oggi, il primo sospettato è il nome, non la release."
+              # Dal 22/11/2026 questo ramo FALLISCE: tutte le immagini della matrice sono
+              # pubblicate da mesi, quindi «non trovata» oggi vuol dire nome sbagliato o
+              # pacchetto sparito, e uno scan saltato con un avviso è un verde che nessuno apre.
+              exit 1
               ;;
             *)
               echo "::error::NON HO POTUTO VERIFICARE $REF — non è «assente», è «non lo so»:"\

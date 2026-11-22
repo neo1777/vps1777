@@ -63,7 +63,7 @@ CI = ROOT / ".github" / "workflows" / "ci.yml"
 # dovuto accorgersene.** (Terza volta in un giorno per la stessa famiglia: un test che
 # falliva sul commento che nomina la stringa, un collaudo di rientri che eseguiva una
 # riga di prosa, e questa.) ⇒ si guarda la riga NUDA, senza `#` davanti.
-_ATTESO_IN_CI = re.compile(r"^\s*[^#\n]*pytest\s+tools/tests/", re.M)
+_ATTESO_IN_CI = re.compile(r"^\s*[^#\n]*pytest(?:@[0-9.]+)?\s+tools/tests/", re.M)   # con o senza versione fissata
 
 _DEF_TEST = re.compile(r"^(?:async\s+)?def\s+test_\w*\s*\(", re.M)
 

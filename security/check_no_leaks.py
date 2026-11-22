@@ -422,7 +422,7 @@ def tracked_files() -> list[str]:
     # differenza fra un presidio e un condono.
     out = subprocess.run(
         ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
-        capture_output=True, check=True
+        capture_output=True, check=True, timeout=120,   # un git appeso non appende il gate
     ).stdout
     return [p for p in out.decode("utf-8", "replace").split("\0") if p]
 
@@ -430,6 +430,10 @@ def tracked_files() -> list[str]:
 def main() -> int:
     problems: list[str] = []
     avvisi: list[str] = []  # R4: si stampano, non bocciano
+    # Ciò che NON è stato letto si conta e si dice: prima un file illeggibile o non UTF-8
+    # veniva saltato in silenzio e il gate chiudeva con «nessun materiale credenziale».
+    non_letti: list[str] = []      # errore di lettura: il gate non ha un verdetto su di loro
+    binari = non_utf8 = 0          # saltati per mestiere: R2/R3 leggono testo
 
     for path in tracked_files():
         # R1 — la forma del nome basta a bocciarlo: non serve guardarci dentro.
@@ -492,13 +496,16 @@ def main() -> int:
             continue
         try:
             raw = p.read_bytes()
-        except OSError:
+        except OSError as e:
+            non_letti.append(f"{path} ({type(e).__name__})")
             continue
         if BINARY_HINT in raw[:8192]:  # binario: niente scansione testuale
+            binari += 1
             continue
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
+            non_utf8 += 1
             continue
 
         # R3 gira anche sui file esenti da R2 — vedi il commento su ALLOWLIST_R2 —
@@ -583,6 +590,14 @@ def main() -> int:
             "    righe porta un valore vero, NON basta toglierlo — va ruotato. Se è un esempio,\n"
             "    rendilo evidente (<password>, segnaposto RFC): l'avviso sparisce da sé.\n"
         )
+    if binari or non_utf8:
+        print(f"  (non scansionati come testo: {binari} file binari, {non_utf8} non UTF-8 — R1 li ha guardati per nome)")
+    if non_letti:
+        print(f"⚪ gate anti-leak: NON MISURATO su {len(non_letti)} file che non ho potuto leggere:")
+        for riga in non_letti[:20]:
+            print(f"    {riga}")
+        print("  Sul resto non ho trovato niente, ma «non ho potuto leggere» non è «pulito».")
+        return 2
     print("✓ gate anti-leak: nessun export di sessione tracciato, nessun materiale credenziale.")
     return 0
 

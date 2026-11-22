@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+import time
 from typing import TextIO
 
 _TOKEN = re.compile(r"bot\d{5,}:[A-Za-z0-9_-]{20,}")
@@ -34,9 +35,11 @@ class MascheraToken(logging.Filter):
 
 
 def configura_log(livello: str, *, stream: TextIO | None = None) -> None:
+    logging.Formatter.converter = time.gmtime      # l'ora dei log in UTC, con la Z
     logging.basicConfig(
         level=livello.upper(),
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        format="%(asctime)sZ %(levelname)s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
         stream=stream or sys.stdout,
         force=True,
     )
