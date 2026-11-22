@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.1] — 2026-11-22
+
 **Gli strumenti attorno alla CLI riletti col catalogo di requisiti: backup, restore, rotazione dei segreti, hook.**
 
 ### Sicurezza
