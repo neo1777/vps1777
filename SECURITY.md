@@ -430,6 +430,10 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
   `images.lock` (digest immutabili) del runtime bundle di release; il bundle è
   firmato (`cosign sign-blob` keyless) e la verifica è **obbligatoria di default**
   (`VPS1777_REQUIRE_COSIGN=0` la disattiva solo come via d'emergenza esplicita).
+  Il bundle si può ricostruire: `tools/assembla-pacchetto.sh` dà lo stesso file, byte per
+  byte, dagli stessi sorgenti, dallo stesso `images.lock` e dalla stessa data (la CI lo
+  costruisce due volte e confronta). Le immagini no, per scelta: prendono gli aggiornamenti
+  di sicurezza al momento della build e sono uguali solo a parità di giorno.
   Nessun aggiornamento build-in-place — nessun compose di esercizio porta una
   chiave `build:`, e `tools/tests/test_nessun_build_in_place.py` lo verifica
   su tutti i compose del repo, eccezioni dichiarate una per una.

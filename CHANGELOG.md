@@ -12,6 +12,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   cambia: confrontato file per file e permesso per permesso col pacchetto della 0.98.5. Le immagini dei container
   restano fuori da questa promessa, per scelta: prendono gli aggiornamenti di sicurezza al momento della build.
 
+### Documenti
+- La guida ai guasti spiega che cosa fare quando il deploy si ferma perché la chiave SSH della macchina è
+  cambiata (dalla 0.98.3). SECURITY.md dice che il pacchetto si può ricostruire. Tolta da `docs/NB1777.md` una
+  sigla interna che non diceva niente a chi legge.
+
 ## [0.98.5] — 2026-11-22
 
 ### Sicurezza

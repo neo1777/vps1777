@@ -204,6 +204,23 @@ Verifica sul tuo PC che il profilo esista prima di taggarlo:
 ls ~/.notebooklm-mcp-cli/profiles/default/   # → cookies.json  metadata.json
 ```
 
+## Deploy: «La chiave SSH della macchina è DIVERSA da quella vista l'ultima volta»
+
+**Che cosa vedi.** `deploy.sh` (o l'installer grafico) si ferma al test di connessione e chiede conferma;
+senza terminale esce con «chiave della macchina cambiata e non confermata».
+
+**Perché.** Alla prima connessione la chiave della VPS viene ricordata. Se a una corsa successiva è diversa,
+i casi sono due: hai riformattato o reinstallato la macchina (normale), oppure qualcuno si è messo fra te
+e lei, proprio dove viaggia la password di root. Fino alla 0.98.2 la chiave ricordata veniva tolta a ogni
+corsa e il secondo caso passava in silenzio.
+
+**Che cosa fare.**
+- L'hai riformattata tu: rispondi sì alla domanda. Senza terminale: `VPS1777_NUOVA_CHIAVE_HOST=1 ./deploy.sh …`.
+  Nell'installer grafico c'è la casella corrispondente.
+- Non l'hai toccata: fermati. Controlla dal pannello del fornitore che l'indirizzo sia ancora della tua
+  macchina e confronta l'impronta della chiave dalla console del pannello (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`)
+  con quella che `ssh` ti mostra. Se non coincidono, non inserire la password.
+
 ## Tailscale Funnel non si attiva (URL resta HTTP su :8080)
 
 È il caso più comune al primo deploy. Il nodo entra nel tailnet ma il **Funnel
