@@ -77,6 +77,10 @@ RUOLI: tuple[str, ...] = ("primario", "fotografia", "riscontro", "riservato")
 # che si legge, che non appartiene a `RUOLI`, e che quindi nessun filtro
 # `ruolo in RUOLI` può scambiare per una dichiarazione.
 RUOLO_NON_DICHIARATO = "non dichiarato"
+# Il ruolo non si è potuto leggere e non lo si era mai letto: non è «non dichiarato» (che sta
+# nel perimetro di default) e non è «riservato» (che non si conta nemmeno fuori): è un DB che
+# resta FUORI dal perimetro e viene DETTO non letto. Vedi `_ruolo` (H100).
+RUOLO_ILLEGGIBILE = "illeggibile"
 
 
 def normalizza_ruolo(ruolo: str) -> str:
@@ -417,14 +421,16 @@ def _ruolo(name: str) -> str:
         ruolo = fts.meta_value_conn(conn, "ruolo") or RUOLO_NON_DICHIARATO
     except sqlite3.DatabaseError:
         # Il ruolo non si è potuto leggere. Se lo si era già letto vale quello (il ruolo non
-        # cambia perché il DB è bloccato per un attimo: prima un DB riservato diventava «non
-        # dichiarato» ed entrava nel perimetro di default). Mai letto: resta «non dichiarato»,
-        # cioè nel perimetro, dove chi lo legge lo dichiara NON LETTO (`saltati`) invece di
-        # farlo sparire in silenzio: un file che non si apre non può esporre niente.
-        if ricordo is not None:
-            conn.close()
-            return ricordo[1]
-        ruolo = RUOLO_NON_DICHIARATO
+        # cambia perché il DB è bloccato per un attimo).
+        # 🔴 MAI LETTO (H100, 22/11/2026): prima diventava «non dichiarato», cioè DENTRO il
+        #   perimetro di default, con l'idea che «un file che non si apre non può esporre
+        #   niente». Ma l'errore può essere di un attimo (il DB bloccato proprio su questa
+        #   lettura) e la ricerca subito dopo riuscire: un DB riservato veniva letto. E quel
+        #   «non dichiarato» finiva pure nel ricordo, quindi restava fino al cambio del file.
+        #   Ora: non so il ruolo → il DB resta FUORI dal perimetro di default (fail-closed),
+        #   col ruolo «illeggibile», che chi conta dichiara fra i non contati invece di farlo
+        #   sparire; e non lo ricordo: al prossimo giro si rilegge.
+        return ricordo[1] if ricordo is not None else RUOLO_ILLEGGIBILE
     finally:
         conn.close()
     _RUOLO_MEMO[name] = (snap, ruolo)
@@ -630,7 +636,9 @@ def search(query: str, db: str = "", limit: int = 20, *, raw: bool = False,
             # schema non conforme o file che non è un DB (DB estraneo nella dir): salta,
             # non è fatale. DatabaseError e non OperationalError: «file is not a database»
             # è l'altra sottoclasse, e rompeva la ricerca per tutti.
-            log.warning("DB %s schema error: %s", name, exc)
+            # ...ma si DICE: un DB del perimetro che non si è lasciato leggere va fra i
+            # saltati di questa chiamata, altrimenti i suoi zeri sembrano assenze.
+            _nota_sporco(name, exc, motivo=f"non si è lasciato leggere ({type(exc).__name__})")
         finally:
             conn.close()
     # ordinamento GLOBALE + limit globale: bm25 crescente (più rilevante prima),
@@ -1161,10 +1169,13 @@ def count(query: str, db: str = "", *, raw: bool = False, since: str = "",
             conn.close()
     out: dict[str, Any] = {"total": sum(per_db.values()), "per_db": per_db}
     if fuori and not str(ruoli or "").strip():
+        # un DB dal ruolo illeggibile non si conta (potrebbe essere riservato): si dichiara
+        illeggibili = [n for n in fuori if _ruolo(n) == RUOLO_ILLEGGIBILE]
         out["anche_fuori"], non_contati = _conta_fuori(
-            [n for n in fuori if _ruolo(n) != "riservato"], query, budget, raw=raw,
-            since=since, until=until, project=project, speaker=speaker, voice=voice,
+            [n for n in fuori if _ruolo(n) not in ("riservato", RUOLO_ILLEGGIBILE)], query, budget,
+            raw=raw, since=since, until=until, project=project, speaker=speaker, voice=voice,
             campi=campi)
+        non_contati = list(non_contati) + illeggibili
         if non_contati:
             out["anche_fuori_non_contati"] = non_contati
     if warnings:
@@ -1852,7 +1863,9 @@ def _leggi_segreto() -> str:
     if p:
         try:
             return Path(p).read_text(encoding="utf-8").strip()
-        except OSError:
+        except OSError as exc:
+            # chi chiama dirà «manca il segreto»: la causa vera resta almeno nel log
+            log.warning("il file del segreto interno (%s) non si legge: %s", p, type(exc).__name__)
             return ""
     return ""
 

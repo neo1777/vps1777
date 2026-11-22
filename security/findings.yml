@@ -46,7 +46,8 @@
 # └────────────────────────────────────────────────────────────────────────────┘
 #
 # COME SI USA
-#   status:  closed | partial | open
+#   status:  closed | partial | open | accepted
+#             (accepted = rischio che il proprietario ha deciso di tenere: vuole `si_sfrutta_oggi`)
 #   evidence: prove che lo stato è vero. Il checker le verifica per `closed`
 #             (e per la parte fatta di `partial`, se dichiarata).
 #     - file: percorso dal root del repo
@@ -62,7 +63,9 @@
 meta:
   dossier: "review difensiva vps1777, luglio 2026 — 5 fasi, 6 aree, 43 interventi deduplicati"
   base_commit: "v0.16.0"
-  updated: "2026-07-14"
+  # `updated` diceva 2026-07-14 con voci fino a novembre: una data scritta a mano invecchia.
+  # L'ultima modifica la dice git (`git log -1 --format=%cs -- security/findings.yml`).
+  dossier_del: "2026-07-14"
 
 findings:
 
@@ -4776,5 +4779,47 @@ findings:
       - comando: "uv run --with pytest --with pyyaml pytest -q tools/tests/test_copia_fuori_e_chiave_host.py"
         dove: "PC"
         output: "12 passed: chiave cambiata → errore e nessuna connessione; con la conferma la voce vecchia si toglie e si riprova; deploy.sh toglie la voce solo dopo aver visto la chiave cambiata"
+        exit: 0
+        quando: "2026-11-22"
+
+  - id: H100
+    severity: low
+    title: "Un database riservato entrava nelle ricerche se il suo ruolo non si leggeva alla prima lettura: «non lo so» valeva «non dichiarato»"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-22"
+      come: audio-esterno
+      nota: >
+        Dalla revisione dell'archivio fatta applicando un catalogo di requisiti con due modelli
+        diversi (uno dei due l'ha detta: il ramo che fallisce aperto accanto a quello che
+        chiude). Riprodotta con un test prima della cura: il contenuto del DB riservato
+        compariva fra i risultati. Mai osservata sulla VPS di riferimento. `low`: serve un
+        errore di lettura proprio alla prima lettura del ruolo dopo un avvio, e chi legge è
+        comunque un client autorizzato dal proprietario.
+    since: unreleased
+    why: >
+      `_ruolo` decide se un DB sta nel perimetro di default delle ricerche. Se la lettura del
+      ruolo falliva (per esempio il file bloccato per un attimo) e il ruolo non era mai stato
+      letto, il DB diventava «non dichiarato», cioè DENTRO il perimetro: la ricerca subito
+      dopo poteva riuscire e restituire il contenuto di un DB marcato riservato. Il ruolo
+      sbagliato finiva anche nel ricordo, quindi restava fino al cambio del file.
+    evidence:
+      - file: services/archive-mcp/app/db.py
+        contains:
+          - 'RUOLO_ILLEGGIBILE = "illeggibile"'
+          - "return ricordo[1] if ricordo is not None else RUOLO_ILLEGGIBILE"
+          - 'illeggibili = [n for n in fuori if _ruolo(n) == RUOLO_ILLEGGIBILE]'
+      - file: services/archive-mcp/tests/test_budget.py
+        contains:
+          - "def test_un_ruolo_che_non_si_legge_al_primo_colpo_non_apre_un_db_riservato("
+    fix: >
+      Un ruolo che non si è potuto leggere e non si conosce vale «illeggibile»: il DB resta
+      fuori dal perimetro di default, non viene contato nemmeno fra quelli fuori, ed è
+      dichiarato fra i non contati. Non si ricorda: al giro dopo si rilegge.
+    prova:
+      - comando: "cd services/archive-mcp && uv run --locked --with pytest pytest -q tests/test_budget.py"
+        dove: "PC"
+        output: "12 passed; sul codice di prima il test nuovo è rosso: il DB riservato compare fra i risultati della ricerca"
         exit: 0
         quando: "2026-11-22"

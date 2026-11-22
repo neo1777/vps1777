@@ -183,3 +183,43 @@ def test_a_budget_finito_la_ricerca_dei_vicini_non_parte(db, monkeypatch):
     assert vicini == [], "la ricerca dei vicini è partita a budget finito"
     assert ("a", "budget") in {(s["db"], s["ramo"]) for s in r["saltati"]}
     assert r["parziale"] is True
+
+
+# ── dalla rilettura col catalogo (22/11/2026) ──────────────────────────────────
+
+def test_un_ruolo_che_non_si_legge_al_primo_colpo_non_apre_un_db_riservato(db, tmp_path, monkeypatch):
+    """H100. Il DB «segreto» è riservato. Se la PRIMA lettura del suo ruolo fallisce per un
+    attimo (file bloccato), prima diventava «non dichiarato»: entrava nel perimetro di
+    default, la ricerca subito dopo riusciva e ne leggeva il contenuto; e quel ruolo sbagliato
+    restava nel ricordo. Ora resta fuori, viene detto, e al giro dopo si rilegge."""
+    _crea(tmp_path / "segreto.db", "riservato")
+    db._maybe_reload()
+    db.reload_registry()
+    vera = db.fts.meta_value_conn
+    stato = {"guasto": True}
+
+    def _una_volta_no(conn, chiave):
+        if stato["guasto"] and chiave == "ruolo" and "segreto" in str(conn.execute("PRAGMA database_list").fetchone()[2]):
+            raise sqlite3.OperationalError("database is locked")
+        return vera(conn, chiave)
+
+    monkeypatch.setattr(db.fts, "meta_value_conn", _una_volta_no)
+    assert "segreto" not in {x["db"] for x in db.search("memoria")}, "contenuto di un DB riservato nei risultati"
+    r = db.count("memoria")
+    assert "segreto" not in r["per_db"] and "segreto" not in r.get("anche_fuori", {})
+    assert "segreto" in r.get("anche_fuori_non_contati", []), "il DB non letto va DETTO, non fatto sparire"
+    stato["guasto"] = False
+    assert db._ruolo("segreto") == "riservato", "il ruolo sbagliato non deve restare nel ricordo"
+
+
+def test_una_query_enorme_si_rifiuta_dicendolo(db):
+    with pytest.raises(db.fts.FtsSyntaxError, match="troppo lunga"):
+        db.search("parola " * 1000)
+    with pytest.raises(db.fts.FtsSyntaxError, match="troppo lunga"):
+        db.count("x" * (db.fts.QUERY_MAX + 1))
+
+
+def test_verificato_solo_se_qualcosa_e_stato_guardato(db):
+    from app import semantica
+    assert semantica.verdetto_registro(True, candidati=0, assenti=0, uuid_diversi=0)["stato"].startswith("niente da verificare")
+    assert semantica.verdetto_registro(True, candidati=5, assenti=0, uuid_diversi=0)["stato"].startswith("verificato")

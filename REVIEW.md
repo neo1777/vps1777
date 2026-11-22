@@ -26,14 +26,14 @@ Riserva la severità alta per ciò che in questo repo fa danni veri:
 ## ⚠️ Cosa sappiamo GIÀ — non serve ridircelo
 
 Questo repo tiene un registro dei rilievi di sicurezza in **`security/findings.yml`**:
-99 voci, **85 chiuse**, e le **14 qui sotto non chiuse** (10 parziali, 4 accettate), ognuna con data, motivo e
+100 voci, **86 chiuse**, e le **14 qui sotto non chiuse** (10 parziali, 4 accettate), ognuna con data, motivo e
 stato. Sono già state trovate, discusse e classificate: segnalarle di nuovo consuma il
 giro senza aggiungere niente.
 
 | ID | stato | cosa resta aperto |
 |---|---|---|
 | H4 | partial | solo il contatore di fallimenti GLOBALE, scartato per scelta (farebbe l'auto-lockout dell'owner); `forwarded_allow_ips` per profilo è fatto |
-| H5 | partial | solo il push off-site dei backup, lasciato all'owner; chiave age fuori dall'host e solo il recipient sulla VPS sono fatti |
+| H5 | partial | solo il push off-site dei backup, lasciato all'owner (dalla 0.98.3 il controllo giornaliero avvisa se nessuna copia esce dalla macchina o se l'ultima invecchia); chiave age fuori dall'host e solo il recipient sulla VPS sono fatti |
 | H12 | partial | l'operator resta root-equivalente via il gruppo `docker`; la whitelist sudo è fatta, e un ritorno a `NOPASSWD:ALL` è una regressione |
 | H16 | partial | se il PC non ha bcrypt, la password viaggia in chiaro (dentro SSH) invece dell'hash |
 | H22 | partial | un'installazione nuova gira per tag finché non fa il primo update: gli installer non verificano i digest |

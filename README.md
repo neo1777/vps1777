@@ -197,7 +197,8 @@ default; to turn it off see [docs/OPS.md](docs/OPS.md) (Italian).
   everyone rather than open up
 - Per-IP rate limiting on auth endpoints; `X-Forwarded-For` trusted **only** from the
   proxy (client IP can't be spoofed)
-- Non-root containers (UID 1000 `app`), `cap_drop: ALL`, `no-new-privileges`, a
+- Non-root containers (UID 1000 `app`; the backup job is the exception: it runs as root with three
+  capabilities, see SECURITY.md), `cap_drop: ALL`, `no-new-privileges`, a
   **read-only rootfs** on every service in `compose.yaml` (`/tmp` is a 64 MB `noexec`
   tmpfs), healthchecks on every running service (the `indice-notturno` and `ingest` jobs, which
   start and finish, have none)

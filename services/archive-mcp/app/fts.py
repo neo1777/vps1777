@@ -40,6 +40,17 @@ def _non_di_sintassi(exc: sqlite3.OperationalError) -> bool:
     return any(x in testo for x in _NON_DI_SINTASSI)
 
 
+QUERY_MAX = 2000      # caratteri: una domanda vera sta in poche righe
+
+
+def _tetto_query(query: str) -> None:
+    """Una query arriva da fuori e finisce in FTS5 e in più espressioni regolari: oltre il
+    tetto la si rifiuta, dicendolo, prima di spendere tempo a cercarla."""
+    if len(query or "") > QUERY_MAX:
+        raise FtsSyntaxError(f"query troppo lunga ({len(query)} caratteri, il tetto è {QUERY_MAX}): "
+                             "accorciala alle parole che contano")
+
+
 class FtsSyntaxError(ValueError):
     """Query FTS5 malformata. Sollevata al posto di restituire lista vuota:
     un `[]` da errore di sintassi è indistinguibile da 'nessun match' e produce
@@ -238,6 +249,7 @@ def search_conn(conn: sqlite3.Connection, query: str, *, limit: int = 20,
     (solleva FtsSyntaxError). In modalità smart (default) prova la query
     sanitizzata e, se il parser la rifiuta, ricade sulla query originale così da
     non rompere mai ciò che 'raw' avrebbe accettato."""
+    _tetto_query(query)
     if sort and sort not in _SORTS:
         raise ValueError(f"sort={sort!r} non esiste: i valori sono {', '.join(_SORTS)}.")
     order = _SORTS.get(sort, _SORTS["rank"])
@@ -287,6 +299,7 @@ def count_conn(conn: sqlite3.Connection, query: str, *, raw: bool = False,
     parlerebbero di due popolazioni — che è il difetto che questo archivio ci ha
     già fatto fare più volte, con due numeri veri e nessuno confrontabile.
     """
+    _tetto_query(query)
     where = ""
     extra: list = []
     if since:

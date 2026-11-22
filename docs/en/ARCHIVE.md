@@ -540,6 +540,7 @@ The `ruolo` (role) field makes it readable.
 | `riscontro` | not queried to **find** but to **verify**: intentional redundancy, twins re-ingested with a different indexer, probe DBs with a known-case-that-must-succeed |
 | `riservato` | personal material: out of technical tasks without an explicit request. Since 0.74.0 a search without `db_name` **skips** it; naming it queries it. It is a **declaration, not a lock**: whoever has access to the server reads it |
 | `non dichiarato` | **nobody has said anything** about that DB. It doesn't mean "unimportant", and it must not be guessed from the name: it is the value you read when `set_ruolo` was never called (or when the declaration was withdrawn by passing `""`) |
+| `illeggibile` | not a declaration: it is what you read when the role **could not be read** and was not known yet (file locked or damaged). The DB stays **out** of searches without `db_name` and is listed among the uncounted ones: not knowing the role must not let a reserved DB in |
 
 > **The role decides where to search (since 0.74.0, cure B of #278).** Without
 > `db_name`, `search`, `search_ibrida`, `count`, `check_term` and `precedenti` look at the

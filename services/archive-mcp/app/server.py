@@ -544,8 +544,16 @@ def temi(dal: str = "", al: str = "", limit: int = 40) -> dict[str, Any]:
                 "nota": "le scelte del proprietario sui temi (riservato/libero) non si riescono a "
                         "leggere: finché non tornano leggibili la mappa non si mostra, per non "
                         "esporre un tema riservato. Va guardato il file dei marchi sulla VPS."}
-    return mappa_temi.vista(mappa_temi.leggi_json(cartella / mappa_temi.FILE_TEMI), marchi,
-                            dal=dal, al=al, limit=limit)
+    f_temi = cartella / mappa_temi.FILE_TEMI
+    mappa = mappa_temi.leggi_json(f_temi)
+    if mappa is None and f_temi.exists():
+        # C'è ma non si legge: non è «non ancora calcolata», e dirlo così manderebbe a
+        # cercare un job che invece ha girato.
+        log.warning("temi: %s c'è ma non si legge", f_temi.name)
+        return {"disponibile": False,
+                "nota": "la mappa dei temi c'è ma non si riesce a leggere (file rovinato o scritto a "
+                        "metà): la riscrive il prossimo giro notturno. Intanto usa search_ibrida."}
+    return mappa_temi.vista(mappa, marchi, dal=dal, al=al, limit=limit)
 
 
 @mcp.tool()
