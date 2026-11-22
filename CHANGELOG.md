@@ -12,6 +12,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   cambia: confrontato file per file e permesso per permesso col pacchetto della 0.98.5. Le immagini dei container
   restano fuori da questa promessa, per scelta: prendono gli aggiornamenti di sicurezza al momento della build.
 
+### Aggiunto
+- **Tre scanner in più leggono il sorgente a ogni PR e ogni lunedì** (`tools/scanner.sh`, workflow «Scanner del
+  sorgente»): hadolint e `trivy config` sui Dockerfile, osv-scanner sulle dipendenze dei lockfile, trufflehog sui
+  segreti vivi in tutta la storia. Immagini fissate per impronta. Prima di ogni corsa lo strumento pianta un
+  guasto per classe (un Dockerfile senza `USER`, una versione vulnerabile nel lockfile) e pretende il rosso. Alla
+  prima corsa: nessuna vulnerabilità, nessun segreto; due eccezioni dichiarate col perché in `.hadolint.yaml` e
+  `.trivyignore.yaml` (versioni apt non fissate; Caddy col modulo DNS che gira come root con le sole capacità
+  necessarie).
+- ruff controlla anche i comandi passati alla shell (S602, S604, S605): l'unico `shell=True` del repo, in
+  `tools/verify-features.py`, porta accanto il perché.
+
 ### Documenti
 - La guida ai guasti spiega che cosa fare quando il deploy si ferma perché la chiave SSH della macchina è
   cambiata (dalla 0.98.3). SECURITY.md dice che il pacchetto si può ricostruire. Tolta da `docs/NB1777.md` una

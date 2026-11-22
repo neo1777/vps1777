@@ -1,0 +1,17 @@
+# Le eccezioni di `trivy config` sui Dockerfile, ognuna col suo perché (22/11/2026). Lo lancia
+# tools/scanner.sh. Vale solo per la lettura dei Dockerfile: la scansione delle CVE (trivy.yml) non
+# passa da qui.
+misconfigurations:
+  - id: AVD-DS-0026
+    statement: >-
+      HEALTHCHECK non sta nei Dockerfile ma nei compose, servizio per servizio: lì si vede insieme a
+      ciò che lo usa (depends_on, il gate dell'update) e un presidio controlla che ogni servizio ne
+      abbia uno (tools/tests).
+  - id: AVD-DS-0002
+    paths:
+      - "services/caddy-dns01/Dockerfile"
+    statement: >-
+      L'immagine ufficiale di Caddy gira come root e questa ne è una ricostruzione col modulo DNS.
+      Nel compose il container ha solo le capacità che gli servono (NET_BIND_SERVICE per 80/443,
+      DAC_OVERRIDE per leggere il segreto di Cloudflare). Passare a un utente dedicato cambierebbe
+      il proprietario dei certificati già emessi su chi la usa: è un lavoro a parte, non fatto.

@@ -178,7 +178,7 @@ def run_check(spec: dict, repo: Path) -> tuple[bool, str]:
     if kind == "cmd":
         # `arg` viene dal ledger del repo (features.yaml), che passa da revisione come il codice
         try:
-            r = subprocess.run(arg, shell=True, cwd=repo, capture_output=True, text=True,
+            r = subprocess.run(arg, shell=True, cwd=repo, capture_output=True, text=True,  # noqa: S602
                                timeout=CMD_TIMEOUT_S)
         except subprocess.TimeoutExpired:
             return False, f"`{arg}` non ha finito entro {CMD_TIMEOUT_S} s"

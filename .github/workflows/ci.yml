@@ -38,6 +38,7 @@ jobs:
           # tutta tools/tests/. Misurato il 27/07 estendendo il comando: zero
           # rilievi — cioè il gate non copriva quel codice e non se ne sarebbe
           # mai accorto nessuno, perché il non-coperto era anche pulito.
+          # Le regole oltre il default stanno in ruff.toml (dal 22/11/2026: i comandi passati alla shell).
           ruff check services/ tools/ security/
       - name: ShellCheck bash
         run: |
