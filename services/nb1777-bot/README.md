@@ -10,8 +10,10 @@ Bot Telegram owner-only: apre il pannello (la Mini App) e recapita i promemoria 
 | `TELEGRAM_BOT_TOKEN_FILE` | — (in `compose.yaml` `/run/secrets/telegram_bot_token`) | path al file con il token di BotFather (in dev: `TELEGRAM_BOT_TOKEN`) |
 | `TELEGRAM_OWNER_ID` | (none) | il TUO Telegram numeric ID |
 | `GATEWAY_PUBLIC_BASE` | (none; in `compose.yaml` viene da `PUBLIC_BASE`) | URL pubblico del gateway: il bottone della Mini App (`<base>/app`, solo se https) e il link `/admin/nlm` |
-| `NLM_INTERNAL_BASE` | `http://nb1777-mcp:8003` | dove chiedere lo stato dell'auth, le notifiche e l'ack (`/internal/*`); il bot non monta i cookie (H6) |
+| `NLM_INTERNAL_BASE` | `http://nb1777-mcp:8003` | dove chiedere lo stato dell'auth, le notifiche e l'ack (`/internal/*`); il bot non monta i cookie di Google: li tiene solo nb1777-mcp |
 | `GATEWAY_SECRET_FILE` | — (in `compose.yaml` `/run/secrets/gateway_secret`) | segreto condiviso per gli `/internal/*` di nb1777-mcp: senza, stato dell'auth, notifiche e ack falliscono |
+| `GATEWAY_INTERNAL_BASE` | `http://gateway:8080` | la coda degli avvisi del gateway (un connettore appena autorizzato); vuoto = non la si legge |
+| `GATEWAY_SECRET` | — | solo in sviluppo: il segreto per valore, al posto del file |
 | `BOT_HEARTBEAT_FILE` | `/tmp/nb1777-bot.heartbeat` | il file della prova di vita |
 | `LOG_LEVEL` | `INFO` | livello dei log |
 | `VPS1777_VERSION` | `0.0.0-dev` | versione dell'immagine (iniettata dalla CI) |

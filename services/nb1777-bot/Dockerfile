@@ -2,7 +2,7 @@
 #
 # vps1777 nb1777-bot — long-poll Telegram + chiamate MCP via httpx.
 # Runtime: python:3.12-slim + tini (no Chromium qui — l'auth si carica
-# dall'admin del gateway, il bot consuma solo il volume).
+# dall'admin del gateway; il profilo lo tiene nb1777-mcp, il bot non monta nessun volume).
 
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS builder
 COPY --from=ghcr.io/astral-sh/uv:0.5.18@sha256:e2101b9e627153b8fe4e8a1249cc4194f1b38ece7f28a5a9b8f958e3b560e69c /uv /uvx /usr/local/bin/

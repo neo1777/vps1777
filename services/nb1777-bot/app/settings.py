@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import logging
 from pathlib import Path
 from typing import Annotated
 
@@ -12,7 +13,12 @@ def _read_file(value: str | None) -> str:
     if not value:
         return ""
     p = Path(value)
-    return p.read_text(encoding="utf-8").strip() if p.is_file() else ""
+    try:
+        return p.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        # Indicato e non leggibile non è «non configurato»: lo si dice, col percorso.
+        logging.getLogger(__name__).warning("il file %s non si legge (%s): valore vuoto", value, type(exc).__name__)
+        return ""
 
 
 SecretFromFile = Annotated[str, BeforeValidator(_read_file)]
@@ -25,6 +31,8 @@ def _int_or_zero(value: object) -> int:
     try:
         return int(value)  # type: ignore[arg-type]
     except (ValueError, TypeError):
+        logging.getLogger(__name__).warning(
+            "TELEGRAM_OWNER_ID non è un numero: lo tratto come non impostato (il bot non risponde a nessuno)")
         return 0
 
 

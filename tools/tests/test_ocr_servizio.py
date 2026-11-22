@@ -53,3 +53,23 @@ def test_tesseract_assente_esce_502(monkeypatch) -> None:
 def test_i_tetti_del_body() -> None:
     assert ocr.ocr_bytes(b"")[0] == 400
     assert ocr.ocr_bytes(b"x" * (ocr.MAX_BODY + 1))[0] == 413
+
+
+# ── dalla rilettura col catalogo (22/11/2026) ──────────────────────────────────
+
+def test_l_ocr_ha_un_tetto_alle_richieste_insieme_e_un_tempo_sul_socket():
+    """Senza tetto ogni connessione teneva fino a 16 MiB e un tesseract; senza tempo sul
+    socket un client che non manda il corpo teneva il thread per sempre."""
+    import importlib.util
+    from pathlib import Path
+    f = Path(__file__).resolve().parents[2] / "services" / "ocr" / "app" / "__main__.py"
+    spec = importlib.util.spec_from_file_location("ocr_main_a12", f)
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    assert m._H.timeout and m._H.timeout <= 60
+    assert 1 <= m.MAX_INSIEME <= 8
+    presi = [m._POSTI.acquire(blocking=False) for _ in range(m.MAX_INSIEME + 1)]
+    for p in presi:
+        if p:
+            m._POSTI.release()
+    assert presi == [True] * m.MAX_INSIEME + [False]

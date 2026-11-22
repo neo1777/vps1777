@@ -17,6 +17,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **Il gate anti-leak non chiude verde su file che non ha potuto leggere** (esce 2 e li elenca), e dice quanti file
   ha saltato perché binari. Il confronto dei tre installatori esce 2 se un asse non trova più niente. Il registro
   dei rilievi non passa senza SECURITY.md e pretende `si_sfrutta_oggi` sulle voci accettate.
+- **Il ciclo delle notifiche del bot non può più morire in silenzio.** Una risposta di forma inattesa da una coda
+  sollevava un errore non catturato: il ciclo si chiudeva per sempre, col container ancora «healthy», e i promemoria
+  non arrivavano più. Ora la forma si controlla e un giro fallito si logga e si riprova.
+- Il bot: l'ack senza mittente non passa (stessa regola fail-closed dei comandi); all'utente va il tipo dell'errore,
+  non il testo intero; un file del segreto indicato e illeggibile, o un `TELEGRAM_OWNER_ID` che non è un numero, lasciano
+  una riga nel log. L'OCR lavora al più due immagini insieme e ha un tempo massimo sul socket. Log di bot e OCR in UTC.
 - I plugin d'esempio: il bot risponde solo al proprietario (`OWNER_ID` era dichiarato e mai letto) e non ripiega in
   silenzio su un altro token; entrambi hanno il tetto ai log.
 
