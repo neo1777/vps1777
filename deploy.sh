@@ -9,11 +9,12 @@
 #   3. Prepara la VPS: installa Docker + Compose v2, crea utente operatore (vps1777)
 #   4. Trasferisce questo repo sulla VPS (tar over SSH)
 #   5. Genera .env + secrets sulla VPS (random + bcrypt)
-#   6. `docker compose up -d --build`
+#   6. Scarica le immagini firmate della release e avvia lo stack (`docker compose pull` + `up -d`);
+#      la build sulla VPS c'è solo con DEV_BUILD=1 o se non esiste nessuna release
 #   7. RIAVVIA la VPS e verifica che i container ripartano da soli al boot
 #   8. Stampa gli URL finali + prossimi step
 #
-# Requisiti PC locale: bash, ssh, tar. Per auth password: sshpass.
+# Requisiti PC locale: bash, ssh, tar, curl, python3. Per auth password: sshpass.
 #
 # Uso:
 #   ./deploy.sh                 # interattivo (chiede tutto)
@@ -116,7 +117,7 @@ consegna_password() {
   local dir="${XDG_CONFIG_HOME:-$HOME/.config}/vps1777" f
   f="$dir/admin-password-$(date +%Y%m%d-%H%M%S).txt"
   ( umask 077 && mkdir -p "$dir" && printf '%s\n' "$1" > "$f" )
-  warn "PASSWORD ADMIN GENERATA: non la stampo, l'output non va a un terminale (H75)."
+  warn "PASSWORD ADMIN GENERATA: non la stampo, l'output non va a un terminale."
   warn "  → è in $f (la legge solo il tuo utente): copiala in un password manager, poi cancella il file."
 }
 
@@ -136,7 +137,7 @@ consegna_gateway_secret() {
   ( umask 077 && mkdir -p "$dir" && printf 'gateway_secret: %s\nconnettore archive1777: %s/%s/archive/mcp\nconnettore nb1777: %s/%s/nb1777/mcp\n' "$1" "$base" "$1" "$base" "$1" > "$f" )
   # shellcheck disable=SC2034  # come sopra
   GW_SEGRETO_MOSTRATO="<nel file $f>" GW_SEGRETO_FILE="$f"
-  warn "GATEWAY_SECRET: non lo stampo, l'output non va a un terminale (H77)."
+  warn "GATEWAY_SECRET: non lo stampo, l'output non va a un terminale."
   warn "  → segreto e URL dei connettori sono in $f (lo legge solo il tuo utente)."
 }
 
@@ -171,6 +172,8 @@ BANNER
 # ─────────────────────────────────────────── prerequisiti locali
 command -v ssh >/dev/null || die "ssh non trovato"
 command -v tar >/dev/null || die "tar non trovato"
+command -v curl >/dev/null || die "curl non trovato (serve per chiedere a GitHub l'ultima release)"
+command -v python3 >/dev/null || die "python3 non trovato (serve per leggere la risposta di GitHub e provare l'URL pubblico)"
 for f in compose.yaml services/gateway/Dockerfile; do
   [ -f "$f" ] || die "File repo mancante: $f — lancia dalla dir di vps1777"
 done
@@ -252,93 +255,37 @@ rm -f secrets/ts_authkey.txt'
   fi
 }
 
-# ═══════════════════════════════════════════ MODALITÀ --apply
-# Legge onboarding/pending.json (scritto dal pannello /admin/setup) e applica:
-# tailscale up, secret bot, PUBLIC_BASE, restart servizi.
-if [ "$APPLY_MODE" = "1" ]; then
-  OPERATOR_USER="${OPERATOR_USER:-vps1777}"
-  REMOTE_DIR="/home/$OPERATOR_USER/vps1777"
-  PENDING="$REMOTE_DIR/onboarding/pending.json"
-  INGRESS_PROFILE="$(SSH "sudo -u $OPERATOR_USER grep ^INGRESS_PROFILE= $REMOTE_DIR/.env 2>/dev/null | cut -d= -f2" || echo "ingress.tailscale")"
-  [ -z "$INGRESS_PROFILE" ] && INGRESS_PROFILE="ingress.tailscale"
-  INGRESS="${INGRESS_PROFILE#ingress.}"
-  COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml --profile ${INGRESS_PROFILE}"
+# ─────────────────────────────────────────── la FORMA dei valori che entrano in uno script remoto
+# Un valore digitato (o letto da pending.json, che lo scrive un servizio esposto) finisce nel
+# TESTO di uno script eseguito sulla VPS: prima se ne controlla la forma, con un elenco chiuso
+# di caratteri. Il confronto è `[[ =~ ]]` sull'INTERA stringa, non `echo | grep`: grep giudica
+# riga per riga, e un valore con un a-capo dentro passava se UNA delle sue righe era in regola
+# (H97). Vuoto è ammesso: campo non compilato.
+RE_EMAIL='^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+RE_NUMERO='^[0-9]{1,20}$'
+RE_NOME_HOST='^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$'
+RE_DOMINIO='^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
+RE_TS_KEY='^tskey-[A-Za-z0-9-]+$'
+RE_TG_TOKEN='^[0-9]{5,}:[A-Za-z0-9_-]{30,}$'
+RE_CF_TOKEN='^[A-Za-z0-9_=+/.-]+$'
+RE_URL_HTTPS='^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$'
+forma_valida() {   # <valore> <regex> → vero se vuoto o se l'intera stringa ha quella forma
+  [ -z "$1" ] && return 0
+  [[ "$1" =~ $2 ]]
+}
 
-  step "APPLY — leggo la config dal pannello /admin/setup"
-  log "Leggo $PENDING ..."
-  SSH "test -f $PENDING" 2>/dev/null || die "Nessuna config trovata in $PENDING. Apri il pannello /admin/setup, compila e Salva, poi rilancia --apply."
-
-  get() { SSH "python3 -c \"import json;print(json.load(open('$PENDING')).get('$1',''))\" 2>/dev/null"; }
-  TS_KEY="$(get tailscale_authkey)"
-  TG_TOKEN="$(get telegram_bot_token)"
-  TG_OWNER="$(get telegram_owner_id)"
-  PUB="$(get public_base)"
-
-  # VALIDAZIONE dei valori scritti dal gateway (H9). pending.json arriva da un
-  # servizio esposto su Internet: prima di scriverli in .env/secrets, si controlla
-  # la FORMA di ognuno. Vuoto è ok (campo non compilato); malformato → si ferma,
-  # invece di scrivere spazzatura in un file di configurazione.
-  vfail() { die "Config non valida in pending.json: $1"; }
-  [ -z "$TS_KEY" ]   || echo "$TS_KEY"   | grep -qE '^tskey-[A-Za-z0-9-]+$'        || vfail "tailscale_authkey (atteso tskey-…)"
-  [ -z "$TG_TOKEN" ] || echo "$TG_TOKEN" | grep -qE '^[0-9]{5,}:[A-Za-z0-9_-]{30,}$' || vfail "telegram_bot_token (atteso <id>:<token>)"
-  [ -z "$TG_OWNER" ] || echo "$TG_OWNER" | grep -qE '^[0-9]{1,20}$'                || vfail "telegram_owner_id (atteso numerico)"
-  [ -z "$PUB" ]      || echo "$PUB"      | grep -qE '^https://[A-Za-z0-9._-]+(/.*)?$' || vfail "public_base (attesa URL https://…)"
-
-  ok "Config letta e validata (ts_key:$([ -n "$TS_KEY" ] && echo sì || echo no), bot:$([ -n "$TG_TOKEN" ] && echo sì || echo no), owner:$([ -n "$TG_OWNER" ] && echo sì || echo no))"
-
-  # 1. Scrivi i secret + .env come operator.
-  # I segreti NON vanno mai nell'argv di un comando remoto (dove `ps` li
-  # mostrerebbe a ogni utente locale): lo script viaggia nello STDIN di
-  # `bash -s` (canale SSH cifrato), e set_kv scrive con printf-redirect
-  # (builtin) — il valore non finisce nell'argv di sed/echo.
-  log "Scrivo secret + .env..."
-  APPLY_SCRIPT=$(cat <<'RS'
+# set_kv remoto: scrive una riga di .env senza passare il valore all'argv di un comando esterno
+# (dove `ps` lo mostrerebbe), e in modo ATOMICO: prima un file provvisorio a 600, poi la
+# rinomina. Con `> .env` diretto un'interruzione a metà lasciava un .env troncato.
+SET_KV_REMOTO=$(cat <<'RS'
 cd ~/vps1777 || exit 1
-set_kv() {   # scrittura .env senza passare il valore all'argv di comandi esterni
+set_kv() {
   k=$1; v=$2
   rest=$(grep -v "^${k}=" .env 2>/dev/null || true)
-  { [ -n "$rest" ] && printf '%s\n' "$rest"; printf '%s=%s\n' "$k" "$v"; } > .env
+  ( umask 077; { [ -n "$rest" ] && printf '%s\n' "$rest"; printf '%s=%s\n' "$k" "$v"; } > .env.tmp ) && mv -f .env.tmp .env
 }
 RS
 )
-  # Righe dinamiche: i segreti sono interpolati nel TESTO dello script, che
-  # però transita via STDIN, non via argv. tailscale key e bot token sono
-  # [A-Za-z0-9:_-] → l'apice singolo è sicuro.
-  # NB (H15): NIENTE `secrets/ts_authkey.txt` — era un file orfano, nessun compose
-  # lo consumava (Tailscale gira sull'host, non più come sidecar). La key sta in
-  # .env solo il tempo di servire, e viene azzerata dopo il `tailscale up`.
-  [ -n "$TS_KEY" ]   && APPLY_SCRIPT="$APPLY_SCRIPT
-set_kv TS_AUTHKEY '$TS_KEY'"
-  [ -n "$TG_TOKEN" ] && APPLY_SCRIPT="$APPLY_SCRIPT
-printf %s '$TG_TOKEN' > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt
-printf %s '$TG_TOKEN' | python3 -c \"import hmac,hashlib,sys;open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',sys.stdin.buffer.read(),hashlib.sha256).hexdigest())\"; chmod 600 secrets/telegram_webapp_secret.txt"
-  [ -n "$TG_OWNER" ] && APPLY_SCRIPT="$APPLY_SCRIPT
-set_kv TELEGRAM_OWNER_ID '$TG_OWNER'"
-  [ -n "$PUB" ]      && APPLY_SCRIPT="$APPLY_SCRIPT
-set_kv PUBLIC_BASE '$PUB'"
-  # .env contiene segreti (TS_AUTHKEY, e i valori che ci scrive il pannello):
-  # 600, non 644 (H15). E ripulisce l'orfano se un deploy precedente l'ha creato.
-  # Le righe di verifica dopo i chmod NON sono ridondanti: `2>/dev/null || true`
-  # sopprime l'esito due volte, e l'`ok` qui sotto dichiara «.env 600, dir
-  # sensibili 700» comunque. Il permesso si chiede all'OGGETTO (#66). Il `700`
-  # sulle dir è H38: stessa forma, e qui era l'unico dei quattro punti che si
-  # zittiva (deploy.sh:690, setup.sh:187, engine.py:491 falliscono rumorosi).
-  # Il `mkdir -p` viene PRIMA per la ragione trovata in revisione (@71d540e6):
-  # questo blocco è «applica la config dal pannello» su una macchina già
-  # installata, e NON passa dal `mkdir -p` di r.689 — una VPS installata prima di
-  # ba87c52 può non avere backups/ o onboarding/. Senza il mkdir, `stat` su una
-  # dir che non esiste dà vuoto e il verdetto sarebbe «permesso sbagliato» su un
-  # oggetto ASSENTE: un rosso che dice la cosa falsa e blocca un flusso utente.
-  # Creare-e-poi-chmoddare è già la sequenza degli altri tre punti (r.689-690).
-  APPLY_SCRIPT="$APPLY_SCRIPT
-chmod 600 .env 2>/dev/null || true
-if [ \"\$(stat -c %a .env 2>/dev/null)\" != \"600\" ]; then echo \"ENV_PERM_FALLITO\"; exit 1; fi
-mkdir -p secrets backups onboarding 2>/dev/null || true
-chmod 700 secrets backups onboarding 2>/dev/null || true
-for d in secrets backups onboarding; do if [ \"\$(stat -c %a \"\$d\" 2>/dev/null)\" != \"700\" ]; then echo \"DIR_PERM_FALLITO \$d\"; exit 1; fi; done
-rm -f secrets/ts_authkey.txt"
-  printf '%s\n' "$APPLY_SCRIPT" | SSH "sudo -u $OPERATOR_USER bash -s" || die "Scrittura secret/.env fallita"
-  ok "Secret + .env aggiornati (.env 600, dir sensibili 700)"
 
   # La conferma che il Funnel PORTA I BYTE, chiesta da questo PC (02/08, abdd732a).
   # Modellata su `installer/engine.py:_funnel_confermato_da_qui`, e con le sue due scelte:
@@ -383,16 +330,100 @@ PY
     return 1
   }
 
+# ═══════════════════════════════════════════ MODALITÀ --apply
+# Legge onboarding/pending.json (scritto dal pannello /admin/setup) e applica:
+# tailscale up, secret bot, PUBLIC_BASE, restart servizi.
+if [ "$APPLY_MODE" = "1" ]; then
+  OPERATOR_USER="${OPERATOR_USER:-vps1777}"
+  REMOTE_DIR="/home/$OPERATOR_USER/vps1777"
+  PENDING="$REMOTE_DIR/onboarding/pending.json"
+  INGRESS_PROFILE="$(SSH "sudo -u $OPERATOR_USER grep ^INGRESS_PROFILE= $REMOTE_DIR/.env 2>/dev/null | cut -d= -f2" || echo "ingress.tailscale")"
+  [ -z "$INGRESS_PROFILE" ] && INGRESS_PROFILE="ingress.tailscale"
+  INGRESS="${INGRESS_PROFILE#ingress.}"
+  COMPOSE_CMD="docker compose -f compose.yaml -f compose.ingress.${INGRESS}.yaml --profile ${INGRESS_PROFILE}"
+
+  step "APPLY — leggo la config dal pannello /admin/setup"
+  log "Leggo $PENDING ..."
+  SSH "test -f $PENDING" 2>/dev/null || die "Nessuna config trovata in $PENDING. Apri il pannello /admin/setup, compila e Salva, poi rilancia --apply."
+
+  get() { SSH "python3 -c \"import json;print(json.load(open('$PENDING')).get('$1',''))\" 2>/dev/null"; }
+  TS_KEY="$(get tailscale_authkey)"
+  TG_TOKEN="$(get telegram_bot_token)"
+  TG_OWNER="$(get telegram_owner_id)"
+  PUB="$(get public_base)"
+
+  # VALIDAZIONE dei valori scritti dal gateway (H9). pending.json arriva da un
+  # servizio esposto su Internet: prima di scriverli in .env/secrets, si controlla
+  # la FORMA di ognuno. Vuoto è ok (campo non compilato); malformato → si ferma,
+  # invece di scrivere spazzatura in un file di configurazione.
+  vfail() { die "Config non valida in pending.json: $1"; }
+  # H97 (22/11/2026): prima si usava `echo "$V" | grep -qE`, che un a-capo dentro il valore
+  # aggirava, e l'URL ammetteva qualunque carattere dopo la prima «/» (apice compreso).
+  forma_valida "$TS_KEY"   "$RE_TS_KEY"    || vfail "tailscale_authkey (atteso tskey-…)"
+  forma_valida "$TG_TOKEN" "$RE_TG_TOKEN"  || vfail "telegram_bot_token (atteso <id>:<token>)"
+  forma_valida "$TG_OWNER" "$RE_NUMERO"    || vfail "telegram_owner_id (atteso numerico)"
+  forma_valida "$PUB"      "$RE_URL_HTTPS" || vfail "public_base (attesa URL https://… senza spazi né apici)"
+  TS_HOSTNAME="${TS_HOSTNAME:-vps1777}"
+  forma_valida "$TS_HOSTNAME" "$RE_NOME_HOST" || die "TS_HOSTNAME non valido: solo lettere, cifre e trattini"
+
+  ok "Config letta e validata (ts_key:$([ -n "$TS_KEY" ] && echo sì || echo no), bot:$([ -n "$TG_TOKEN" ] && echo sì || echo no), owner:$([ -n "$TG_OWNER" ] && echo sì || echo no))"
+
+  # 1. Scrivi i secret + .env come operator.
+  # I segreti NON vanno mai nell'argv di un comando remoto (dove `ps` li
+  # mostrerebbe a ogni utente locale): lo script viaggia nello STDIN di
+  # `bash -s` (canale SSH cifrato), e set_kv scrive con printf-redirect
+  # (builtin) — il valore non finisce nell'argv di sed/echo.
+  log "Scrivo secret + .env..."
+  APPLY_SCRIPT="$SET_KV_REMOTO"
+  # Righe dinamiche: i segreti sono interpolati nel TESTO dello script, che
+  # però transita via STDIN, non via argv. tailscale key e bot token sono
+  # [A-Za-z0-9:_-] → l'apice singolo è sicuro.
+  # NB (H15): NIENTE `secrets/ts_authkey.txt` — era un file orfano, nessun compose
+  # lo consumava (Tailscale gira sull'host, non più come sidecar). La key sta in
+  # .env solo il tempo di servire, e viene azzerata dopo il `tailscale up`.
+  [ -n "$TS_KEY" ]   && APPLY_SCRIPT="$APPLY_SCRIPT
+set_kv TS_AUTHKEY '$TS_KEY'"
+  [ -n "$TG_TOKEN" ] && APPLY_SCRIPT="$APPLY_SCRIPT
+printf %s '$TG_TOKEN' > secrets/telegram_bot_token.txt; chmod 600 secrets/telegram_bot_token.txt
+printf %s '$TG_TOKEN' | python3 -c \"import hmac,hashlib,sys;open('secrets/telegram_webapp_secret.txt','w').write(hmac.new(b'WebAppData',sys.stdin.buffer.read(),hashlib.sha256).hexdigest())\"; chmod 600 secrets/telegram_webapp_secret.txt"
+  [ -n "$TG_OWNER" ] && APPLY_SCRIPT="$APPLY_SCRIPT
+set_kv TELEGRAM_OWNER_ID '$TG_OWNER'"
+  [ -n "$PUB" ]      && APPLY_SCRIPT="$APPLY_SCRIPT
+set_kv PUBLIC_BASE '$PUB'"
+  # .env contiene segreti (TS_AUTHKEY, e i valori che ci scrive il pannello):
+  # 600, non 644 (H15). E ripulisce l'orfano se un deploy precedente l'ha creato.
+  # Le righe di verifica dopo i chmod NON sono ridondanti: `2>/dev/null || true`
+  # sopprime l'esito due volte, e l'`ok` qui sotto dichiara «.env 600, dir
+  # sensibili 700» comunque. Il permesso si chiede all'OGGETTO (#66). Il `700`
+  # sulle dir è H38: stessa forma, e qui era l'unico dei quattro punti che si
+  # zittiva (deploy.sh:690, setup.sh:187, engine.py:491 falliscono rumorosi).
+  # Il `mkdir -p` viene PRIMA per la ragione trovata in revisione (@71d540e6):
+  # questo blocco è «applica la config dal pannello» su una macchina già
+  # installata, e NON passa dal `mkdir -p` di r.689 — una VPS installata prima di
+  # ba87c52 può non avere backups/ o onboarding/. Senza il mkdir, `stat` su una
+  # dir che non esiste dà vuoto e il verdetto sarebbe «permesso sbagliato» su un
+  # oggetto ASSENTE: un rosso che dice la cosa falsa e blocca un flusso utente.
+  # Creare-e-poi-chmoddare è già la sequenza degli altri tre punti (r.689-690).
+  APPLY_SCRIPT="$APPLY_SCRIPT
+chmod 600 .env 2>/dev/null || true
+if [ \"\$(stat -c %a .env 2>/dev/null)\" != \"600\" ]; then echo \"ENV_PERM_FALLITO\"; exit 1; fi
+mkdir -p secrets backups onboarding 2>/dev/null || true
+chmod 700 secrets backups onboarding 2>/dev/null || true
+for d in secrets backups onboarding; do if [ \"\$(stat -c %a \"\$d\" 2>/dev/null)\" != \"700\" ]; then echo \"DIR_PERM_FALLITO \$d\"; exit 1; fi; done
+rm -f secrets/ts_authkey.txt"
+  printf '%s\n' "$APPLY_SCRIPT" | SSH "sudo -u $OPERATOR_USER bash -s" || die "Scrittura secret/.env fallita"
+  ok "Secret + .env aggiornati (.env 600, dir sensibili 700)"
+
   # 2. Tailscale SULL'HOST: install + up + serve + funnel (no sidecar container).
   if [ -n "$TS_KEY" ]; then
     log "Attivo Tailscale sull'host + Funnel..."
-    SSH "curl -fsSL https://tailscale.com/install.sh | sh" >/dev/null 2>&1 || warn "install tailscale fallito"
+    SSH "curl -fsSL -m 300 https://tailscale.com/install.sh | sh" >/dev/null 2>&1 || warn "install tailscale fallito"
     SSH "systemctl enable --now tailscaled" >/dev/null 2>&1 || true
     # authkey via STDIN → file temporaneo → --authkey=file: (mai in argv/ps)
-    printf %s "$TS_KEY" | SSH "umask 077; f=\$(mktemp); cat > \"\$f\"; tailscale up --authkey=file:\"\$f\" --hostname=${TS_HOSTNAME:-vps1777} --accept-dns=false --reset; r=\$?; rm -f \"\$f\"; exit \$r" >/dev/null 2>&1 || warn "tailscale up fallito"
+    printf %s "$TS_KEY" | SSH "umask 077; f=\$(mktemp); cat > \"\$f\"; tailscale up --authkey=file:\"\$f\" --hostname='${TS_HOSTNAME:-vps1777}' --accept-dns=false --reset; r=\$?; rm -f \"\$f\"; exit \$r" >/dev/null 2>&1 || warn "tailscale up fallito"
     sleep 5
     TS_URL="$(SSH "tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);n=d.get('Self',{}).get('DNSName','').rstrip('.');print('https://'+n if n else '')\" 2>/dev/null" || echo "")"
-    if echo "$TS_URL" | grep -q '\.ts\.net$'; then
+    if [[ "$TS_URL" =~ ^https://[A-Za-z0-9.-]+\.ts\.net$ ]]; then
       SSH "tailscale serve reset" >/dev/null 2>&1 || true
       SSH "tailscale funnel --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
       SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
@@ -429,8 +460,13 @@ PY
 
   # 3. Se ho un PUBLIC_BASE (fornito o da Tailscale), aggiorno .env
   if [ -n "$PUB" ]; then
-    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$PUB|\" .env || echo PUBLIC_BASE=$PUB >> .env)'"
-    ok "PUBLIC_BASE=$PUB"
+    # Il valore viaggia nello STDIN di `bash -s`, non dentro il testo di un comando SSH, e
+    # l'esito si guarda: prima un fallimento qui stampava comunque «PUBLIC_BASE=…».
+    if printf '%s\n' "$SET_KV_REMOTO" "set_kv PUBLIC_BASE '$PUB'" | SSH "sudo -u $OPERATOR_USER bash -s"; then
+      ok "PUBLIC_BASE=$PUB"
+    else
+      warn "PUBLIC_BASE NON scritto in .env: i servizi restano con l'URL di prima."
+    fi
   fi
 
   # 3-bis. IL FALLBACK, e senza questo il fix sopra sarebbe solo un messaggio più onesto.
@@ -447,7 +483,7 @@ PY
     #   fallisse girerebbe anche il ramo d'errore, e verrebbe stampato «non sono
     #   riuscito» dopo essere riuscito. È la stessa classe che questo fix sta curando:
     #   un costrutto che sembra fare una cosa e ne fa un'altra.
-    if SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^GATEWAY_BIND= .env && sed -i \"s|^GATEWAY_BIND=.*|GATEWAY_BIND=0.0.0.0|\" .env || echo GATEWAY_BIND=0.0.0.0 >> .env)'"; then
+    if printf '%s\n' "$SET_KV_REMOTO" "set_kv GATEWAY_BIND 0.0.0.0" | SSH "sudo -u $OPERATOR_USER bash -s"; then
       warn "Apro la porta 8080 (HTTP) come fallback: il Funnel non ha risposto."
     else
       warn "NON sono riuscito ad aprire il fallback :8080 — la VPS può restare irraggiungibile."
@@ -528,6 +564,19 @@ case "$INGRESS_NUM" in
 esac
 
 ask_secret TG_TOKEN "TELEGRAM_BOT_TOKEN (da BotFather, vuoto = dopo)"
+
+# Tutti questi valori entrano nel testo di script eseguiti sulla VPS: forma controllata QUI,
+# prima di toccare la macchina (un'email con un apice o un token con uno spazio rompevano lo
+# script a metà installazione, o peggio venivano eseguiti).
+forma_valida "$ADMIN_EMAIL"       "$RE_EMAIL"     || die "Email admin non valida: «$ADMIN_EMAIL»"
+forma_valida "$TG_OWNER_ID"       "$RE_NUMERO"    || die "TELEGRAM_OWNER_ID non valido: deve essere un numero"
+forma_valida "${TS_HOSTNAME:-}"   "$RE_NOME_HOST" || die "Hostname Tailscale non valido: solo lettere, cifre e trattini"
+forma_valida "$TS_AUTHKEY"        "$RE_TS_KEY"    || die "Auth-key Tailscale non valida (attesa tskey-…)"
+forma_valida "$CADDY_DOMAIN"      "$RE_DOMINIO"   || die "Dominio non valido: scrivi solo il nome (es. vps.example.invalid)"
+forma_valida "$CADDY_EMAIL"       "$RE_EMAIL"     || die "Email Let's Encrypt non valida"
+forma_valida "$CF_TOKEN"          "$RE_CF_TOKEN"  || die "Token Cloudflare non valido: contiene caratteri che un token non ha"
+forma_valida "$TG_TOKEN"          "$RE_TG_TOKEN"  || die "Token Telegram non valido (atteso <id>:<token>)"
+forma_valida "$PUBLIC_BASE"       "$RE_URL_HTTPS" || die "URL pubblico non valido: «$PUBLIC_BASE»"
 
 # GEN_PWD può essere pre-impostato dall'installer (auto). Altrimenti chiedi.
 GEN_PWD="${GEN_PWD:-}"
@@ -658,7 +707,7 @@ if ! docker compose version >/dev/null 2>&1; then
   esac
   mkdir -p /usr/local/lib/docker/cli-plugins
   CTMP="$(mktemp)"
-  curl -fsSL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${CARCH}" -o "$CTMP"
+  curl -fsSL -m 300 "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-${CARCH}" -o "$CTMP"
   # si installa SOLO se l'impronta combacia: un binario diverso non diventa eseguibile da root
   if ! echo "${CSHA}  ${CTMP}" | sha256sum -c - >/dev/null 2>&1; then
     rm -f "$CTMP"
@@ -883,7 +932,7 @@ cp -n .env.example .env 2>/dev/null || true
 set_kv() {   # scrive .env senza passare il valore all'argv di comandi esterni (sed/echo)
   k=\$1; v=\$2
   rest=\$(grep -v "^\${k}=" .env 2>/dev/null || true)
-  { [ -n "\$rest" ] && printf '%s\n' "\$rest"; printf '%s=%s\n' "\$k" "\$v"; } > .env
+  ( umask 077; { [ -n "\$rest" ] && printf '%s\n' "\$rest"; printf '%s=%s\n' "\$k" "\$v"; } > .env.tmp ) && mv -f .env.tmp .env
 }
 set_kv ADMIN_EMAIL "$ADMIN_EMAIL"
 set_kv TELEGRAM_OWNER_ID "$TG_OWNER_ID"
@@ -1065,19 +1114,40 @@ SSH "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD ps'" || tru
 #    il gateway su 127.0.0.1:8080. Niente sidecar → niente containerboot/netns.
 if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
   log "Tailscale: installo sull'host + Funnel..."
-  SSH "curl -fsSL https://tailscale.com/install.sh | sh" >/dev/null 2>&1 || warn "install tailscale fallito"
+  SSH "curl -fsSL -m 300 https://tailscale.com/install.sh | sh" >/dev/null 2>&1 || warn "install tailscale fallito"
   SSH "systemctl enable --now tailscaled" >/dev/null 2>&1 || true
   # authkey via STDIN → file temporaneo → --authkey=file: (mai in argv/ps)
-  printf %s "$TS_AUTHKEY" | SSH "umask 077; f=\$(mktemp); cat > \"\$f\"; tailscale up --authkey=file:\"\$f\" --hostname=${TS_HOSTNAME:-vps1777} --accept-dns=false --reset; r=\$?; rm -f \"\$f\"; exit \$r" >/dev/null 2>&1 || warn "tailscale up fallito"
+  printf %s "$TS_AUTHKEY" | SSH "umask 077; f=\$(mktemp); cat > \"\$f\"; tailscale up --authkey=file:\"\$f\" --hostname='${TS_HOSTNAME:-vps1777}' --accept-dns=false --reset; r=\$?; rm -f \"\$f\"; exit \$r" >/dev/null 2>&1 || warn "tailscale up fallito"
   sleep 5
   TS_URL="$(SSH "tailscale status --json 2>/dev/null | python3 -c \"import sys,json;d=json.load(sys.stdin);n=d.get('Self',{}).get('DNSName','').rstrip('.');print('https://'+n if n else '')\" 2>/dev/null" || echo "")"
-  if echo "$TS_URL" | grep -q '\.ts\.net$'; then
+  if [[ "$TS_URL" =~ ^https://[A-Za-z0-9.-]+\.ts\.net$ ]]; then
     PUBLIC_BASE="$TS_URL"
     SSH "tailscale serve reset" >/dev/null 2>&1 || true
     SSH "tailscale funnel --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
     SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
-    SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && (grep -q ^PUBLIC_BASE= .env && sed -i \"s|^PUBLIC_BASE=.*|PUBLIC_BASE=$TS_URL|\" .env || echo PUBLIC_BASE=$TS_URL >> .env) && $COMPOSE_CMD up -d $SERVIZI_PUBLIC_BASE'" >/dev/null 2>&1 || true
-    ok "Funnel HTTPS attivo: $TS_URL"
+    if ! { printf '%s\n' "$SET_KV_REMOTO" "set_kv PUBLIC_BASE '$TS_URL'" | SSH "sudo -u $OPERATOR_USER bash -s" \
+           && SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d $SERVIZI_PUBLIC_BASE'" >/dev/null 2>&1; }; then
+      warn "PUBLIC_BASE non scritto o servizi non ricreati: gateway e bot possono avere ancora l'URL di prima."
+    fi
+    # 🔴 LA CONFERMA DA FUORI MANCAVA PROPRIO QUI (22/11/2026). Il ramo `--apply` e
+    #   installer/engine.py la fanno dal 02/08; questo, che è il percorso principale, stampava
+    #   «Funnel HTTPS attivo» dopo tre comandi con `|| true` e l'output scartato, e senza
+    #   fallback: se il Funnel non portava i byte l'utente restava con un verde e senza accesso.
+    if funnel_confermato_da_qui "$TS_URL"; then
+      ok "Funnel HTTPS attivo (confermato da questo PC): $TS_URL"
+    else
+      warn "Funnel CONFIGURATO sulla VPS ma NON raggiungibile da qui: $FUNNEL_PERCHE"
+      warn "  → se il certificato è appena stato emesso può servire qualche minuto."
+      warn "  → controlla: login.tailscale.com/admin/dns (MagicDNS + HTTPS) e"
+      warn "    Access Controls (nodeAttr «funnel»), poi riapri $TS_URL."
+      if printf '%s\n' "$SET_KV_REMOTO" "set_kv GATEWAY_BIND 0.0.0.0" | SSH "sudo -u $OPERATOR_USER bash -s" \
+         && SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1; then
+        warn "Apro la porta 8080 (HTTP) come fallback: il Funnel non ha risposto."
+        warn "  → quando il Funnel risponde, richiudila: GATEWAY_BIND=127.0.0.1 nel .env (vedi SECURITY.md)."
+      else
+        warn "NON sono riuscito ad aprire il fallback :8080 — la VPS può restare irraggiungibile."
+      fi
+    fi
     ts_wipe_authkey   # up riuscito: la key monouso non serve più (H15)
   else
     warn "URL Tailscale non ricavato — controlla key/prerequisiti (MagicDNS+HTTPS+nodeAttr funnel)."

@@ -179,8 +179,10 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # chiuse, se illeggibile, valeva «nessuna revoca».
 # + 1 (H96, medium, 21/11) = 96. Dalla stessa revisione, sulla CLI: uno snapshot pre-update
 # interrotto restava il più recente e un rollback coi dati l'avrebbe usato.
-EXPECTED_TOTAL = 96
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 56, "low": 22}
+# + 2 (H97 medium, H98 low, 22/11) = 98. Dalla stessa revisione, sugli installatori: i valori
+# di pending.json che entravano in uno script remoto, e l'installer locale senza Host/Origin.
+EXPECTED_TOTAL = 98
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 57, "low": 23}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

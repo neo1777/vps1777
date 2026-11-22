@@ -249,7 +249,7 @@ findings:
     since: v0.33.0
     evidence:
       - file: deploy.sh
-        contains: ["bash -s", "Config non valida in pending.json", "grep -qE '^tskey-"]
+        contains: ["bash -s", "Config non valida in pending.json", "RE_TS_KEY='^tskey-[A-Za-z0-9-]+$'"]
     note: >
       Interpolazione chiusa (via stdin, v0.29.0) + VALIDAZIONE della forma di ogni
       valore prima di scriverlo (tskey-…, <id>:<token>, owner numerico, URL https).
@@ -4647,3 +4647,90 @@ findings:
         exit: 0
         quando: "2026-11-21"
 
+
+  - id: H97
+    severity: medium
+    title: "I valori di `pending.json` entravano nel testo di uno script eseguito sulla VPS: il controllo della forma si aggirava con un a-capo, e l'URL pubblico ammetteva un apice"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-22"
+      come: audio-esterno
+      nota: >
+        Dalla revisione degli installatori fatta applicando un catalogo di requisiti con due
+        modelli diversi: uno dei due ha detto l'URL (qualunque carattere dopo la prima «/»).
+        L'a-capo l'ho trovato rileggendo quella riga: `echo "$V" | grep -qE` giudica riga per
+        riga. Mai sfruttato che si sappia. `medium` perché porta da «gateway compromesso» a
+        «comandi sulla macchina», ma serve che il proprietario lanci `deploy.sh --apply`.
+    since: unreleased
+    why: >
+      `deploy.sh --apply` legge `onboarding/pending.json`, che scrive il gateway (un servizio
+      esposto), e ne interpola i valori fra apici in uno script passato a `bash -s` come
+      operatore, e in un comando SSH. H9 ne controllava la forma, ma con `echo | grep`: un
+      valore con un a-capo passava se una sola delle sue righe era in regola, e la regex
+      dell'URL ammetteva qualunque carattere dopo la prima «/», apice compreso. Chi
+      controllava il gateway poteva far eseguire comandi sulla VPS al prossimo `--apply`.
+    evidence:
+      - file: deploy.sh
+        contains:
+          - "forma_valida() {   # <valore> <regex> → vero se vuoto o se l'intera stringa ha quella forma"
+          - "RE_URL_HTTPS='^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$'"
+          - 'forma_valida "$PUB"      "$RE_URL_HTTPS" || vfail'
+      - file: tools/tests/test_prova_a_fetta08.py
+        contains:
+          - "def test_i_valori_che_porterebbero_un_comando_sono_rifiutati("
+          - "def test_pending_json_non_si_valida_piu_riga_per_riga("
+          - "def test_nessun_valore_variabile_entra_in_un_sed_remoto("
+    fix: >
+      La forma si controlla sull'intera stringa (`[[ =~ ]]`), con elenchi chiusi di caratteri
+      per ogni campo; l'URL non ammette più spazi, apici né metacaratteri. `PUBLIC_BASE` e
+      `GATEWAY_BIND` si scrivono passando da `set_kv` nello stdin, non dentro un `sed` in un
+      comando SSH. Gli stessi controlli valgono per i campi digitati nel percorso principale.
+    prova:
+      - comando: "uv run --with pytest --with pyyaml pytest -q tools/tests/test_prova_a_fetta08.py"
+        dove: "PC"
+        output: "33 passed: i nove valori costruiti (a-capo, apice, spazio, sostituzione di comando) sono rifiutati, i sette in regola passano; 29 rossi sul codice di prima"
+        exit: 0
+        quando: "2026-11-22"
+
+  - id: H98
+    severity: low
+    title: "L'installer locale rispondeva a qualunque pagina web: avviare o chiudere un'installazione, e con un DNS che cambia indirizzo leggerne il risultato (password admin compresa)"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-22"
+      come: audio-esterno
+      nota: >
+        Dalla stessa revisione: uno dei due modelli ha detto la POST da un altro sito
+        (`/__quit`, `/api/deploy`). La lettura di `/api/stream` con un nome che cambia
+        indirizzo l'ho aggiunta rileggendo: mancava anche il controllo di `Host`. Mai
+        successo che si sappia. `low`: serve che chi installa apra una pagina ostile nello
+        stesso browser durante i minuti dell'installazione.
+    since: unreleased
+    why: >
+      `installer/installer.py` ascolta su 127.0.0.1 ma non guardava né `Host` né `Origin`.
+      Un browser raggiunge 127.0.0.1 anche per conto di un'altra pagina: quella pagina poteva
+      chiudere l'installer a metà o avviarne una; e con un nome di dominio fatto puntare a
+      127.0.0.1 dopo il caricamento poteva leggere il flusso dell'installazione, dove alla
+      fine passano la password admin e il segreto del gateway.
+    evidence:
+      - file: installer/installer.py
+        contains:
+          - "def _da_qui(self) -> bool:"
+          - 'if (self.headers.get("Host") or "").strip().lower() not in ammessi:'
+          - "return not origine or origine in {f\"http://{h}\" for h in ammessi}"
+      - file: tools/tests/test_prova_a_fetta08.py
+        contains:
+          - "def test_un_nome_che_non_e_il_nostro_non_legge_niente("
+          - "def test_un_altro_sito_non_puo_avviare_ne_chiudere_l_installazione("
+    fix: >
+      Ogni richiesta deve avere come `Host` l'indirizzo locale dell'installer e, se porta
+      `Origin`, quello della sua stessa pagina; altrimenti 403. Resta dichiarato nel README
+      che password e segreto restano nella memoria dell'installer finché non lo si chiude.
+    prova:
+      - comando: "uv run --with pytest --with pyyaml pytest -q tools/tests/test_prova_a_fetta08.py"
+        dove: "PC"
+        output: "33 passed: Host estraneo o assente → 403; Origin di un altro sito su /__quit e /api/deploy → 403 e il server resta su; la pagina vera risponde 200"
+        exit: 0
+        quando: "2026-11-22"

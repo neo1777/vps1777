@@ -64,11 +64,16 @@ def _run_deploy(params: dict):
     finally:
         with DEPLOY_LOCK:
             if DEPLOY["exit"] is None:
-                DEPLOY["exit"] = 0
+                # Il motore ha finito senza dire com'è andata: non è un successo. Prima qui
+                # si scriveva 0, e la UI mostrava «installazione riuscita».
+                DEPLOY["lines"].append("✗ L'installazione si è fermata senza dichiarare un esito.")
+                DEPLOY["lines"].append("__EXIT__1")
+                DEPLOY["exit"] = 1
             DEPLOY["running"] = False
             DEPLOY["done"] = True
 
 # paramiko è la sola dipendenza esterna. Se manca, la UI lo segnala.
+_ERRORE_MOTORE = ""     # perché il motore non si è caricato, se non è «manca paramiko»
 try:
     import paramiko  # noqa: F401
     from . import engine  # type: ignore
@@ -82,14 +87,46 @@ except Exception:
         _sys.modules["engine"] = engine
         _spec.loader.exec_module(engine)  # type: ignore
         _PARAMIKO = True
-    except Exception:
+    except ModuleNotFoundError as e:
         engine = None  # type: ignore
         _PARAMIKO = False
+        if e.name != "paramiko":
+            _ERRORE_MOTORE = f"{type(e).__name__}: {e}"
+    except Exception as e:  # noqa: BLE001 — un guasto del motore non è «manca paramiko»: si dice qual è
+        engine = None  # type: ignore
+        _PARAMIKO = False
+        _ERRORE_MOTORE = f"{type(e).__name__}: {e}"
+
+# Il corpo di una richiesta alla UI locale è un form: un megabyte è già cento volte troppo.
+CORPO_MAX_BYTE = 1024 * 1024
 
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_a):
         pass
+
+    def _da_qui(self) -> bool:
+        """La richiesta arriva dalla NOSTRA pagina, su questo PC?
+
+        Il server ascolta solo su 127.0.0.1, ma un browser ci arriva anche per conto di
+        un'altra pagina web: una pagina qualunque può fare una POST a http://127.0.0.1:8777
+        (avviare o chiudere un'installazione), e con un nome che cambia indirizzo a metà
+        (DNS rebinding) può LEGGERE /api/stream, dove alla fine passano la password admin e
+        il segreto del gateway (H98). Due controlli, tutti e due sull'intestazione che il
+        browser scrive da sé e una pagina non può falsificare:
+          · `Host` deve essere il nostro indirizzo locale (ferma il rebinding);
+          · `Origin`, quando c'è, deve essere la nostra pagina (ferma le POST di altri siti).
+        Un client che non è un browser (il rilancio dell'installer, curl) non manda Origin.
+        """
+        ammessi = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
+        if (self.headers.get("Host") or "").strip().lower() not in ammessi:
+            return False
+        origine = (self.headers.get("Origin") or "").strip().lower()
+        return not origine or origine in {f"http://{h}" for h in ammessi}
+
+    def _rifiuta(self):
+        self._send(403, b"richiesta non ammessa: questa pagina risponde solo a se stessa\n",
+                   "text/plain; charset=utf-8")
 
     def _send(self, code, body, ctype):
         self.send_response(code)
@@ -99,11 +136,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if not self._da_qui():
+            return self._rifiuta()
         path = urlparse(self.path).path
         if path in ("/", "/index.html"):
             self._send(200, (HERE / "ui.html").read_bytes(), "text/html; charset=utf-8")
         elif path == "/api/env":
-            self._send(200, json.dumps({"paramiko": _PARAMIKO}).encode(), "application/json")
+            self._send(200, json.dumps({"paramiko": _PARAMIKO, "errore": _ERRORE_MOTORE}).encode(), "application/json")
         elif path == "/__ping":
             # Firma per il rilancio: un nuovo installer la legge per sapere che chi
             # occupa la porta è un SUO predecessore (e non un servizio qualunque)
@@ -161,14 +200,22 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def _read_json(self):
-        n = int(self.headers.get("Content-Length", "0"))
+        try:
+            n = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return {}
+        if n < 0 or n > CORPO_MAX_BYTE:
+            return {}
         raw = self.rfile.read(n) if n else b"{}"
         try:
-            return json.loads(raw or b"{}")
-        except json.JSONDecodeError:
+            dati = json.loads(raw or b"{}")
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return {}
+        return dati if isinstance(dati, dict) else {}
 
     def do_POST(self):
+        if not self._da_qui():
+            return self._rifiuta()
         if self.path == "/__quit":
             # Un nuovo installer chiede a questo di uscire (porta occupata da un
             # run precedente mai chiuso — misurato 23/08: il browser non si apriva
@@ -178,7 +225,9 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
         if not _PARAMIKO:
-            self._send(200, json.dumps({"ok": False, "error": "paramiko non installato. Riavvia con launch.sh/launch.bat, oppure: pip install paramiko"}).encode(), "application/json")
+            errore = (f"il motore dell'installer non si è caricato ({_ERRORE_MOTORE})" if _ERRORE_MOTORE
+                      else "paramiko non installato. Riavvia con launch.sh/launch.bat, oppure: pip install paramiko")
+            self._send(200, json.dumps({"ok": False, "error": errore}).encode(), "application/json")
             return
         if self.path == "/api/check":
             p = self._read_json()
@@ -205,6 +254,34 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps({"started": True}).encode(), "application/json")
         else:
             self._send(404, b"not found", "text/plain")
+
+
+def _e_un_nostro_installer(cmdline: str, proc: Path) -> bool:
+    """Vero solo se quel processo è un Python che esegue QUESTO installer.py.
+
+    Prima bastava che la riga di comando contenesse «installer.py»: un editor aperto su un
+    file con quel nome, o l'installer di un altro programma, ricevevano il SIGTERM. Ora
+    servono un interprete Python come primo argomento e un argomento che, risolto dalla
+    cartella di lavoro di quel processo, sia proprio il nostro file.
+    """
+    argomenti = [a for a in cmdline.split("\0") if a]
+    if not argomenti or not Path(argomenti[0]).name.lower().startswith("python"):
+        return False
+    nostro = (HERE / "installer.py").resolve()
+    try:
+        cwd = (proc / "cwd").resolve()
+    except OSError:
+        cwd = None
+    for a in argomenti[1:]:
+        if Path(a).name != "installer.py":
+            continue
+        candidato = Path(a) if Path(a).is_absolute() else (cwd / a if cwd else None)
+        try:
+            if candidato is not None and candidato.resolve() == nostro:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _libera_porta() -> None:
@@ -243,7 +320,7 @@ def _libera_porta() -> None:
                 cmd = (p / "cmdline").read_bytes().decode(errors="replace")
             except OSError:
                 continue
-            if "installer.py" in cmd:
+            if _e_un_nostro_installer(cmd, p):
                 print(f"  ↻ installer precedente (pid {p.name}, senza /__quit): SIGTERM")
                 try:
                     os.kill(int(p.name), 15)
@@ -268,6 +345,8 @@ def main():
     print(f"\n  vps1777 installer → {url}")
     if not _PARAMIKO:
         print("  ⚠ paramiko non trovato — installalo: pip install paramiko")
+    if _ERRORE_MOTORE:
+        print(f"  ⚠ il motore dell'installer non si è caricato: {_ERRORE_MOTORE}")
     print("  (Ctrl+C per uscire)\n")
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
