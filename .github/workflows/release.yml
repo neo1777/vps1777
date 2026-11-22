@@ -214,43 +214,10 @@ jobs:
         env:
           VERSION: ${{ needs.guard.outputs.version }}
         run: |
-          mkdir -p bundle/tools
-          cp compose*.yaml CHANGELOG.md images.lock bundle/
-          cp -r ingress migrations systemd bundle/
-          # VERSION nel bundle = versione del TAG, non il file del repo. Il
-          # guard ammette VERSION=base per le prerelease (0.9.0 con tag
-          # 0.9.0-rc.1) → copiarlo verbatim renderebbe il bundle incoerente
-          # (lock/manifest sono rc): `vps1777 bootstrap` legge bundle/VERSION
-          # e pullerebbe un tag inesistente. Qui lo forziamo alla versione reale.
-          printf '%s\n' "${VERSION}" > bundle/VERSION
-          for f in backup.sh restore.sh rotate-secret.sh backup-container-setup.sh bootstrap.sh vps1777.py; do
-            cp "tools/$f" bundle/tools/
-          done
-          # H51 (d): le prove empiriche VANNO sulla macchina. Sono l'unico strumento
-          # che misura sul sistema vivo ciò che il resto dei gate verifica leggendo
-          # file — e finora restavano nel repo di sviluppo: sulla VPS andavano
-          # copiate a mano, quindi non c'erano. Un presidio che per essere usato
-          # richiede un gesto manuale è un presidio che nel giorno del guasto non
-          # esiste. 72 KB di shell, nessuna dipendenza: il costo non è un argomento.
-          # (`copy2` lato updater conserva i permessi: arrivano eseguibili.)
-          cp -r tools/prove-empiriche bundle/tools/
-          python3 - <<'PY'
-          import hashlib, json, os
-          root = "bundle"
-          files = {}
-          for dirpath, _, names in os.walk(root):
-              for n in sorted(names):
-                  p = os.path.join(dirpath, n)
-                  rel = os.path.relpath(p, root)
-                  with open(p, "rb") as fh:
-                      files[rel] = hashlib.sha256(fh.read()).hexdigest()
-          out = {"version": os.environ["VERSION"], "files": files}
-          with open(os.path.join(root, "bundle-manifest.json"), "w") as fh:
-              json.dump(out, fh, indent=2, sort_keys=True)
-          PY
-          tar czf "vps1777-runtime-v${VERSION}.tar.gz" -C bundle .
-          sha256sum "vps1777-runtime-v${VERSION}.tar.gz" > SHA256SUMS
-          cat SHA256SUMS
+          # La ricetta sta in tools/assembla-pacchetto.sh: la stessa che la CI costruisce due volte e
+          # confronta (tools/tests/test-pacchetto-riproducibile.sh). La data è quella del commit del tag.
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"; export SOURCE_DATE_EPOCH
+          bash tools/assembla-pacchetto.sh "${VERSION}" .
       - name: Install cosign
         # HELD a v3: cosign v4 cambia `sign-blob` (crea un bundle di default →
         # rompe la firma detached SHA256SUMS.sig/.pem su cui si appoggia

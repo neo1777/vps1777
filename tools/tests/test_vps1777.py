@@ -1204,12 +1204,15 @@ def test_le_prove_empiriche_viaggiano_nel_pacchetto_di_rilascio():
     andavano copiate a mano, quindi non c'erano. Un presidio che per essere usato
     richiede un gesto manuale, nel giorno del guasto non esiste.
 
-    ⚠️ LIMITE DICHIARATO: questo test legge una stringa nel workflow, non costruisce
-    il pacchetto. È esattamente la classe che H52 denuncia — un'etichetta di testo al
-    posto del comportamento — e la sola cosa verificabile senza far girare la CI.
-    Prende «qualcuno ha tolto la riga», non «il tar è arrivato completo»."""
+    Dal 22/11/2026 la ricetta del pacchetto sta in `tools/assembla-pacchetto.sh` e release.yml
+    la chiama. Questo test tiene ferme le due righe (chi chiama e chi copia); che le prove
+    arrivino DAVVERO dentro il tar lo misura `test-pacchetto-riproducibile.sh`, che il
+    pacchetto lo costruisce e lo apre."""
     wf = (_ROOT / ".github" / "workflows" / "release.yml").read_text()
-    assert "cp -r tools/prove-empiriche bundle/tools/" in wf, (
+    assert "bash tools/assembla-pacchetto.sh" in wf, (
+        "release.yml non costruisce più il pacchetto con la ricetta condivisa")
+    ricetta = (_ROOT / "tools" / "assembla-pacchetto.sh").read_text()
+    assert 'cp -r tools/prove-empiriche "$B/tools/"' in ricetta, (
         "le prove non entrano più nel bundle: sulla macchina tornerebbero assenti")
     # e devono esistere davvero: una riga che copia una cartella vuota è verde e inutile
     prove = sorted((_ROOT / "tools" / "prove-empiriche").glob("prova-*.sh"))
