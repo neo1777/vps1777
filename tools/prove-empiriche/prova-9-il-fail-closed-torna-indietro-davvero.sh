@@ -19,11 +19,13 @@
 # non esiste modo di usarlo per far passare un update malato. Il peggio che causa è
 # un rollback non necessario — cioè il comportamento che questa prova collauda.
 #
-# 🔴 DICHIARAZIONE ONESTA, e va letta prima di lanciare: **questo script non è mai
-#    stato eseguito.** È stato scritto sulla lettura del codice, non sull'osservazione
-#    della macchina. Le sue attese possono essere sbagliate; se lo sono, il primo giro
-#    lo dirà, e la correzione va scritta qui dentro. *Uno script mai eseguito non è
-#    una prova: è una proposta di prova.*
+# 🔴 DICHIARAZIONE ONESTA, e va letta prima di lanciare (stato al 22/11/2026): **questo
+#    script non ha ancora mai visto un rollback.** Ha girato una volta con `--esegui`, al
+#    collaudo su macchina vergine del 27/08/2026, e si è fermato su un errore SUO (vedi
+#    più sotto, «la prima stesura passava --version $CORRENTE»): corretto, e da allora
+#    non c'è stato un salto di versione su cui rilanciarlo. Le sue attese vengono dalla
+#    lettura del codice e possono essere sbagliate; se lo sono, la correzione va scritta
+#    qui dentro. *Finché non ha visto il rosso e il verde è una proposta di prova.*
 #
 # Uso:
 #   bash prova-9-il-fail-closed-torna-indietro-davvero.sh            # dice cosa farebbe, exit 2
@@ -32,7 +34,7 @@
 # Exit: 0 PASS · 1 FAIL · 2 NON MISURATO (comprese le precondizioni mancanti)
 set -uo pipefail
 
-REPO="${VPS1777_REPO:-$HOME/vps1777}"
+REPO="${VPS1777_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]:-.}")/../.." 2>/dev/null && pwd)}"
 ESEGUI=0
 [ "${1:-}" = "--esegui" ] && ESEGUI=1
 
@@ -93,20 +95,28 @@ dice "    · costo reale: il servizio è indisponibile per la durata del rollbac
 dice "    · dopo il verde: l'update alla v$TARGET si rifà pulito, senza il sabotaggio"
 dice ""
 if [ "$ESEGUI" -eq 0 ]; then
-  dice "  ⚪ giro a secco: NON ho toccato niente."
+  dice "  ⚪ giro a secco, NON MISURATO: non ho toccato niente (il rollback si provoca solo con --esegui)."
   dice "     Per farlo davvero:  bash $(basename "$0") --esegui"
   dice "     ⚠️ e prima dillo a chi usa la macchina: questa fa cadere il servizio."
   exit 2
 fi
 
 # ── 3. l'esecuzione ───────────────────────────────────────────────────────────
+# Il log dell'update vive in un file temporaneo: a prova riuscita si cancella, a prova
+# fallita resta (serve per capire) e il messaggio dice dov'è e che va tolto a mano.
 LOG="$(mktemp)"
-dice "  ▶ eseguo… (log in $LOG)"
-set +e
-VPS1777_COLLAUDO_HEALTH_KO=1 python3 "$CLI" update --version "$TARGET" --yes >"$LOG" 2>&1
+TETTO="${PROVA9_TIMEOUT_S:-3600}"
+dice "  ▶ eseguo… (log in $LOG, tempo massimo ${TETTO}s)"
+# Niente `set -e` da qui in poi (c'era): con lui una lettura fallita dello stato faceva
+# uscire 1 SENZA una riga, cioè un «non ho potuto guardare» travestito da FAIL.
+timeout "$TETTO" env VPS1777_COLLAUDO_HEALTH_KO=1 python3 "$CLI" update --version "$TARGET" --yes >"$LOG" 2>&1
 RC=$?
-set -e
 dice "  ▶ exit dell'update: $RC"
+if [ "$RC" -eq 124 ]; then
+  dice "🔴 FAIL — l'update non ha concluso entro ${TETTO}s ed è stato fermato."
+  dice "   GUARDA SUBITO la macchina: «vps1777 status», poi il log in $LOG (cancellalo dopo)."
+  exit 1
+fi
 
 # ── 4. il verdetto, su OSSERVABILI e non sull'exit ────────────────────────────
 # L'exit dell'update non basta: un rollback riuscito può uscire con codici diversi
@@ -117,7 +127,7 @@ GATE_KO=0
 grep -q "collaudo: fallimento forzato" "$LOG" && GATE_KO=1
 
 DOPO="$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('current') or '')" "$STATO" 2>/dev/null)"
-SU=$(docker compose -f "$REPO/compose.yaml" ps --format '{{.State}}' 2>/dev/null | grep -c running || true)
+SU=$(timeout 60 docker compose -f "$REPO/compose.yaml" ps --format '{{.State}}' 2>/dev/null | grep -c running || true)
 
 dice ""
 dice "  ── osservato ──"
@@ -127,15 +137,22 @@ dice "    versione prima/dopo                 : v$CORRENTE → v${DOPO:-?}"
 dice "    container running adesso            : ${SU:-0}"
 dice ""
 
+if [ -z "$DOPO" ]; then
+  dice "⚪ NON MISURATO — dopo l'update lo stato ($STATO) non si legge: non so a che versione siamo."
+  dice "   GUARDA SUBITO la macchina: «vps1777 status», poi il log in $LOG (cancellalo dopo)."
+  exit 2
+fi
 if [ "$GATE_KO" -eq 1 ] && [ "$ROLLBACK" -eq 1 ] && [ "$DOPO" = "$CORRENTE" ] && [ "${SU:-0}" -gt 0 ]; then
+  rm -f "$LOG"
   dice "✅ PASS — il gate ha detto no, il rollback è partito, la versione è quella di prima"
   dice "   e i container sono su. **Il fail-closed non è più una riga mai eseguita.**"
   exit 0
 fi
 dice "🔴 FAIL — o non è andata come previsto, o le mie attese erano sbagliate."
-dice "   ⚠️ Questo script non era mai stato eseguito prima: il primo giro può fallire"
+dice "   ⚠️ Questo script non ha ancora mai visto un rollback riuscito: può fallire"
 dice "      perché il codice si comporta diversamente da come l'ho letto. In quel caso"
 dice "      il difetto è QUI, non nel prodotto — e va corretto qui dentro."
-dice "   Il log completo è in $LOG: leggilo prima di concludere qualcosa sul prodotto."
+dice "   Il log completo è in $LOG: leggilo prima di concludere qualcosa sul prodotto,"
+dice "   e cancellalo quando hai finito (resta apposta, nessuno lo toglie da sé)."
 [ "${SU:-0}" -eq 0 ] && dice "   🔴 E GUARDA SUBITO: nessun container running. Il servizio è giù."
 exit 1

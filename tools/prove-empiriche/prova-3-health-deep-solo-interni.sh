@@ -25,6 +25,8 @@ if ! { [ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ]; }; then {
   echo "⚠️  repo non trovato (compose.yaml assente) — usa VPS1777_REPO=<path>"; exit 2; } fi
 cd "$REPO" || exit 2
 command -v docker >/dev/null || { echo "⚠️  docker assente"; exit 2; }
+# Ogni chiamata a docker ha un tempo massimo: un demone appeso non deve appendere la prova.
+docker() { timeout "${PROVA_DOCKER_TIMEOUT_S:-60}" docker "$@"; }
 # Stessa guardia a vuoto curata in prova-1 il 01/08: `docker compose ps -q` esce 0
 # con output VUOTO se il servizio non gira. Qui l'effetto era un FAIL invece di un
 # PASS — meno pericoloso, ma altrettanto falso: diceva «il claim non è verificabile»
@@ -32,8 +34,11 @@ command -v docker >/dev/null || { echo "⚠️  docker assente"; exit 2; }
 _gw="$(docker compose ps --status running -q gateway 2>/dev/null)"
 [ -n "$_gw" ] || { echo "⚠️  gateway non in esecuzione — prova non eseguibile"; exit 2; }
 
-echo "── prova-3 · /health?deep è chiuso agli esterni?   $(date '+%F %T')"
+echo "── prova-3 · /health?deep è chiuso agli esterni?   $(date -u '+%FT%TZ')"
 PORT="${GATEWAY_PORT:-8080}"
+case "$PORT" in
+  ""|*[!0-9]*) echo "⚠️  GATEWAY_PORT non è un numero — prova non eseguibile"; exit 2 ;;
+esac
 
 # ① DA DENTRO il container (loopback) → deve rispondere col deep
 # `</dev/null` alla fine di questa exec: inoltra stdin al container e, se lo script
@@ -41,17 +46,20 @@ PORT="${GATEWAY_PORT:-8080}"
 dentro=$(docker compose exec -T gateway python3 -c "
 import json,urllib.request
 try:
-    r=urllib.request.urlopen('http://127.0.0.1:${PORT}/health?deep=1', timeout=6)
-    b=r.read(400).decode('utf-8','replace')
-    print(r.status, 'DEEP' if ('checks' in b or 'deep' in b) else 'SHALLOW')
+    with urllib.request.urlopen('http://127.0.0.1:${PORT}/health?deep=1', timeout=6) as r:
+        b=r.read(400).decode('utf-8','replace')
+        print(r.status, 'DEEP' if ('checks' in b or 'deep' in b) else 'SHALLOW')
 except Exception as e: print('ERR', type(e).__name__)
 " </dev/null 2>/dev/null | tr -d '\r')
 echo "   da dentro (127.0.0.1): $dentro"
 
-# ② DALL'HOST con un XFF pubblico iniettato → l'XFF NON deve essere creduto.
-#    ⚠️ L'host arriva da una bridge PRIVATA, quindi è legittimamente «interno»:
-#    il punto della prova non è che l'host venga negato — è che l'XFF iniettato
-#    NON sostituisca l'IP vero. Se lo sostituisse, un pubblico si farebbe interno.
+# ② DALL'HOST, presentandosi come farebbe il proxy d'ingresso per un chiamante PUBBLICO
+#    (X-Forwarded-For: 6.6.6.6) → il deep deve essere NEGATO (403).
+#    L'host arriva da una bridge privata, cioè dal lato dei proxy fidati: il gateway deve
+#    credere all'indirizzo che il proxy dichiara e giudicare QUELLO. Se rispondesse 200,
+#    chiunque arrivi dall'ingresso risulterebbe «interno» (l'IP privato del proxy) e
+#    leggerebbe il deep. Misurato sulla macchina viva il 22/11/2026: 403 con l'XFF
+#    pubblico, 200 senza. Fino ad allora questa risposta si stampava e non si giudicava.
 fuori=$(curl -s -o /dev/null -m 6 -w '%{http_code}' \
         -H 'X-Forwarded-For: 6.6.6.6' \
         "http://127.0.0.1:${PORT}/health?deep=1" 2>/dev/null || echo 000)
@@ -62,8 +70,20 @@ case "$dentro" in
   *) echo "   🔴 il chiamante interno NON ottiene il deep ($dentro) — il claim non è verificabile così"
      echo "      (porta diversa? prova: GATEWAY_PORT=<porta> $0)"; exit 2 ;;
 esac
-echo "✅ PASS parziale — l'interno funziona e la richiesta con XFF iniettato non ha alterato l'esito."
-echo "   ⚠️  LIMITE DA LEGGERE: questa prova NON dimostra il diniego a un vero esterno."
+case "$fuori" in
+  403) echo "   ✅ un indirizzo pubblico dichiarato dal lato dei proxy riceve 403" ;;
+  200) echo "   🔴 un indirizzo pubblico dichiarato dal lato dei proxy ottiene 200"
+       echo "🔴 FAIL — il deep non è negato a chi arriva dall'ingresso."
+       echo "   Impatto: /health?deep sonda i servizi interni; aperto a tutti è un vettore d'abuso."
+       echo "   Da guardare: FORWARDED_ALLOW_IPS del gateway e ip_is_internal (asgi_security.py)."
+       exit 1 ;;
+  *)   echo "   ?  nessuna risposta interpretabile dall'host (HTTP $fuori): il diniego NON è misurato."
+       echo "      (la porta non è pubblicata sull'host in questo profilo, o manca curl)"
+       echo "⚪ NON MISURATO — prova non eseguibile fino in fondo su questa macchina."
+       exit 2 ;;
+esac
+echo "✅ PASS — l'interno ottiene il deep e un indirizzo pubblico dichiarato dal proxy riceve 403."
+echo "   ⚠️  LIMITE DA LEGGERE: provato dall'HOST, non da un vero esterno."
 echo "      L'unico test valido è una GET dall'ESTERNO verso l'URL pubblico:"
 # SC2028: la sequenza `\n` NON deve essere espansa — questa riga stampa un comando
 # da copiare e incollare, e nel comando ci va la barra-enne letterale.

@@ -4,6 +4,25 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **Le nove prove empiriche e il loro lanciatore non danno più un verde senza una misura.** Riletti col catalogo di
+  requisiti: la prova 1 usciva PASS anche quando nessuna misura aveva risposto; la 3 stampava la risposta data a un
+  indirizzo pubblico e non la giudicava (ora pretende 403, misurato sulla macchina viva); la 8 passava con zero
+  direttive controllate o senza controprova; la 5 chiudeva con una frase fissa di agosto. Il lanciatore dà a ogni
+  prova un tempo massimo, guarda prima il codice d'uscita e poi il testo (un FAIL col testo «non eseguibile» veniva
+  declassato), scrive il referto in modo atomico e lo rilegge, e non esce più 0 se mancano prove o non sa quante
+  dovrebbero essere. Il gate di onestà non legge più il referto di un giro precedente.
+- **`prove.elenco`**: l'elenco delle nove prove viaggia col pacchetto di rilascio. Sulla macchina installata git non
+  c'è, quindi il lanciatore non poteva accorgersi di una prova mancante proprio dove il pacchetto si usa.
+- **La prova 6 non copia più il volume intero**: per distinguere «dati» da «vuoto» basta il primo mebibyte. Sulla
+  macchina viva copiava 14,7 GB in `/tmp`, due volte. Usa la stessa immagine con impronta del backup, non più
+  `alpine` senza versione.
+- Le prove datano in UTC, trovano il repo con la stessa riga, danno un tempo massimo alle chiamate a docker e a
+  systemd, e passano indirizzi, porte e percorsi come argomenti invece che dentro il testo di un comando. La prova
+  7 riconosce il proxy dal servizio dichiarato nello stack, non da un nome che gli somiglia. La prova 9 ha un tempo
+  massimo sull'update provocato, non esce più in silenzio se lo stato non si legge e toglie il suo log a prova riuscita.
+- Il README delle prove spiega le sigle interne e dice quali prove sono state viste rosse e quali no.
+
 ## [0.98.1] — 2026-11-22
 
 **Gli strumenti attorno alla CLI riletti col catalogo di requisiti: backup, restore, rotazione dei segreti, hook.**

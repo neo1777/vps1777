@@ -23,8 +23,10 @@ if ! { [ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ]; }; then {
   echo "⚠️  repo non trovato (compose.yaml assente) — usa VPS1777_REPO=<path>"; exit 2; } fi
 cd "$REPO" || exit 2
 command -v docker >/dev/null || { echo "⚠️  docker assente"; exit 2; }
+# Ogni chiamata a docker ha un tempo massimo: un demone appeso non deve appendere la prova.
+docker() { timeout "${PROVA_DOCKER_TIMEOUT_S:-60}" docker "$@"; }
 
-echo "── prova-2 · la rete egress è unidirezionale?   $(date '+%F %T')"
+echo "── prova-2 · la rete egress è unidirezionale?   $(date -u '+%FT%TZ')"
 
 # ① nessuna porta PUBBLICATA dai servizi su egress (il fatto configurativo)
 #
@@ -104,10 +106,16 @@ esac
 
 # ③ l'IP del container su egress non è raggiungibile dall'host su porte comuni
 ip=$(docker compose exec -T nb1777-mcp hostname -i </dev/null 2>/dev/null | tr -d '\r' | awk '{print $1}')
+# L'indirizzo lo dice il CONTAINER: prima di usarlo si pretende che abbia la forma di un
+# indirizzo, e si passa come argomento (mai dentro il testo di un comando dell'host).
+case "$ip" in
+  ""|*[!0-9a-fA-F.:]*) [ -n "$ip" ] && echo "   ?  indirizzo non interpretabile dal container: salto il ③ (è solo informativo)"; ip="" ;;
+esac
 if [ -n "$ip" ]; then
   echo "   ip interno di nb1777-mcp: $ip (privato: atteso)"
   for p in 8003 80 443; do
-    if timeout 3 bash -c "echo > /dev/tcp/$ip/$p" 2>/dev/null; then
+    # shellcheck disable=SC2016  # $1 e $2 li espande la shell figlia, apposta
+    if timeout 3 bash -c 'echo > "/dev/tcp/$1/$2"' _ "$ip" "$p" 2>/dev/null; then
       echo "   ℹ️  $ip:$p risponde DALL'HOST — atteso: l'host è sulla bridge."
       echo "      NON è un fallimento: il claim è «non raggiungibile da INTERNET», non dall'host."
     fi

@@ -11,7 +11,8 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-FILE = [ROOT / "tools" / "vps1777.py", ROOT / "tools" / "backup.sh", ROOT / "tools" / "restore.sh"]
+FILE = [ROOT / "tools" / "vps1777.py", ROOT / "tools" / "backup.sh", ROOT / "tools" / "restore.sh",
+        ROOT / "tools" / "prove-empiriche" / "prova-6-sandbox-strict-regge-sul-kernel.sh"]
 _BUSYBOX = re.compile(r"busybox:[\w.-]+(@sha256:[0-9a-f]{64})?")
 
 

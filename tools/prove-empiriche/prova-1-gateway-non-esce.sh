@@ -29,6 +29,8 @@ if ! { [ -n "${REPO:-}" ] && [ -f "$REPO/compose.yaml" ]; }; then {
 cd "$REPO" || exit 2
 
 command -v docker >/dev/null || { echo "⚠️  docker assente — prova non eseguibile"; exit 2; }
+# Ogni chiamata a docker ha un tempo massimo: un demone appeso non deve appendere la prova.
+docker() { timeout "${PROVA_DOCKER_TIMEOUT_S:-60}" docker "$@"; }
 # 🔴 01/08 — QUESTA GUARDIA PASSAVA A VUOTO, e la prova dichiarava PASS su un
 # gateway che non esisteva. `docker compose ps -q <svc>` esce **0 con output
 # VUOTO** quando il servizio non gira: controllare l'exit code chiede «il comando
@@ -42,11 +44,12 @@ _gw="$(docker compose ps --status running -q gateway 2>/dev/null)"
 [ -n "$_gw" ] || {
   echo "⚠️  il servizio 'gateway' non è in esecuzione — prova non eseguibile"; exit 2; }
 
-echo "── prova-1 · il gateway raggiunge Internet?   $(date '+%F %T')"
+echo "── prova-1 · il gateway raggiunge Internet?   $(date -u '+%FT%TZ')"
 # Tre bersagli diversi: un IP nudo (salta il DNS), un dominio (usa il DNS), una porta alta.
 # Tre perché un solo negativo può essere un DNS rotto, non un egress chiuso — e
 # «non risolve» ≠ «non esce»: sono due difese diverse e vanno distinte.
 esce=0
+misure=0      # quante misure hanno dato un esito: zero non è un PASS
 for t in "https://1.1.1.1" "https://example.com" "https://api.telegram.org"; do
   # -m 6: se la rete è bloccata il timeout scade; se è aperta risponde in <2s.
   # `</dev/null` NON è cosmetico: `docker compose exec -T` INOLTRA stdin al container.
@@ -58,8 +61,11 @@ for t in "https://1.1.1.1" "https://example.com" "https://api.telegram.org"; do
         </dev/null 2>/dev/null | tr -d '\r')
   case "$code" in
     NOCURL) echo "   ?  $t → curl assente nel container (uso il fallback sotto)"; continue ;;
-    000|"")  echo "   ✅ $t → nessuna risposta (uscita bloccata)" ;;
-    *)       echo "   🔴 $t → HTTP $code — IL GATEWAY ESCE"; esce=1 ;;
+    # Con curl presente `-w` stampa SEMPRE un codice (000 se non arriva niente): un output
+    # VUOTO vuol dire che l'exec non ha risposto, cioè che non ho misurato.
+    "")      echo "   ?  $t → l'exec non ha risposto: NON misurato" ;;
+    000)     echo "   ✅ $t → nessuna risposta (uscita bloccata)"; misure=$((misure+1)) ;;
+    *)       echo "   🔴 $t → HTTP $code — IL GATEWAY ESCE"; esce=1; misure=$((misure+1)) ;;
   esac
 done
 
@@ -74,14 +80,20 @@ except Exception as e:
     print('CHIUSO', type(e).__name__)
 " </dev/null 2>/dev/null | tr -d '\r')
   case "$out" in
-    APERTO*) echo "   🔴 socket diretto 1.1.1.1:443 → APERTO — IL GATEWAY ESCE"; esce=1 ;;
-    CHIUSO*) echo "   ✅ socket diretto 1.1.1.1:443 → $out" ;;
+    APERTO*) echo "   🔴 socket diretto 1.1.1.1:443 → APERTO — IL GATEWAY ESCE"; esce=1; misure=$((misure+1)) ;;
+    CHIUSO*) echo "   ✅ socket diretto 1.1.1.1:443 → $out"; misure=$((misure+1)) ;;
     *)       echo "   ?  socket diretto: esito non interpretabile («$out») — NON concludo" ;;
   esac
 fi
 
+# «NON concludo» deve governare il verdetto: se nessuna misura ha dato un esito (curl
+# assente, exec muto, ripiego non interpretabile) non ho guardato, e non è un PASS.
+if [ "$esce" -eq 0 ] && [ "$misure" -eq 0 ]; then
+  echo "⚪ NON MISURATO — nessuna delle misure ha dato un esito: prova non eseguibile."
+  exit 2
+fi
 if [ "$esce" -eq 0 ]; then
-  echo "✅ PASS — nessuna uscita rilevata dal gateway."
+  echo "✅ PASS — nessuna uscita rilevata dal gateway ($misure misure riuscite)."
   echo "   ⚠️  Limite: prova l'assenza di uscita sulle destinazioni provate, non su TUTTE."
   exit 0
 fi
