@@ -4,6 +4,27 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **I valori del pannello non entrano più nel testo di uno script eseguito sulla macchina senza un controllo vero
+  (H97, completa H9).** `deploy.sh --apply` ne controllava la forma con `echo | grep`, che giudica riga per riga:
+  un valore con un a-capo passava. E l'URL pubblico ammetteva qualunque carattere dopo la prima «/». Ora la forma
+  si controlla sull'intera stringa, con elenchi chiusi di caratteri; lo stesso vale per i campi digitati.
+- **L'installer locale risponde solo alla propria pagina (H98).** Non guardava `Host` né `Origin`: un altro sito
+  aperto nel browser poteva avviare o chiudere un'installazione e, con un nome che cambia indirizzo, leggerne il
+  risultato. Il README dell'installer dice ora dove va ciascun dato, invece di «le credenziali non lasciano il PC».
+- **Una chiave age esistente non viene mai sovrascritta.** Se il file c'era ma senza la riga della chiave pubblica,
+  l'installer lo riscriveva: i backup fatti con quella chiave non si sarebbero più aperti.
+
+### Corretto
+- **`deploy.sh` conferma il Funnel da fuori anche nel percorso principale.** Stampava «Funnel HTTPS attivo» dopo
+  tre comandi il cui errore era ignorato; il ramo `--apply` e l'installer lo verificavano già. Ora, se il Funnel
+  non risponde, apre il fallback sulla 8080 e lo dice.
+- L'installer ferma un comando remoto che non finisce (due ore), non inghiotte più gli errori del canale SSH,
+  rilegge l'impronta del pacchetto arrivato prima di estrarlo, rilegge l'ACL di Tailscale dopo averla scritta, dice
+  se non è riuscito ad aprire il fallback e chiude con un errore se la macchina non torna dopo il riavvio.
+  Un'installazione che finisce senza dichiarare un esito non risulta più riuscita.
+- Le righe di `.env` si scrivono in modo atomico (file provvisorio a 600 e rinomina) in tutti e tre gli installatori.
+
 ### Cambiato
 - **Le nove prove empiriche e il loro lanciatore non danno più un verde senza una misura.** Riletti col catalogo di
   requisiti: la prova 1 usciva PASS anche quando nessuna misura aveva risposto; la 3 stampava la risposta data a un

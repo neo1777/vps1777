@@ -199,7 +199,7 @@ it does not open — proven on the simplest case (no `gateway_secret` → the pr
 everything) by `services/gateway/tests/test_fail_closed_senza_config.py`. What follows is the summary of the hardening: first the defensive review (July 2026,
 `v0.19.1 → v0.33.0`, which at the closing of the dossier counted **35 closed · 7
 partial · 1 accepted · 0 open** out of 43), then what came after. Today the register
-holds 96 findings: 82 closed, 10 partial, 4 accepted, 0 open. The operational detail
+holds 98 findings: 84 closed, 10 partial, 4 accepted, 0 open. The operational detail
 lives in [../../SECURITY.md](../../SECURITY.md), which is the source of truth — here is
 the summary, there the register that CI verifies.
 

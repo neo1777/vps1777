@@ -57,7 +57,7 @@ consegna_password() {
   local dir="${XDG_CONFIG_HOME:-$HOME/.config}/vps1777" f
   f="$dir/admin-password-$(date +%Y%m%d-%H%M%S).txt"
   ( umask 077 && mkdir -p "$dir" && printf '%s\n' "$1" > "$f" )
-  warn "PASSWORD ADMIN GENERATA: non la stampo, l'output non va a un terminale (H75)."
+  warn "PASSWORD ADMIN GENERATA: non la stampo, l'output non va a un terminale."
   warn "  → è in $f (la legge solo il tuo utente): copiala in un password manager, poi cancella il file."
 }
 
@@ -77,7 +77,7 @@ consegna_gateway_secret() {
   ( umask 077 && mkdir -p "$dir" && printf 'gateway_secret: %s\nconnettore archive1777: %s/%s/archive/mcp\nconnettore nb1777: %s/%s/nb1777/mcp\n' "$1" "$base" "$1" "$base" "$1" > "$f" )
   # shellcheck disable=SC2034  # come sopra
   GW_SEGRETO_MOSTRATO="<nel file $f>" GW_SEGRETO_FILE="$f"
-  warn "GATEWAY_SECRET: non lo stampo, l'output non va a un terminale (H77)."
+  warn "GATEWAY_SECRET: non lo stampo, l'output non va a un terminale."
   warn "  → segreto e URL dei connettori sono in $f (lo legge solo il tuo utente)."
 }
 

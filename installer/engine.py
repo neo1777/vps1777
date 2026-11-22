@@ -16,7 +16,9 @@ import io
 import json
 import os
 import re
+import hashlib
 import shlex
+import socket
 import tarfile
 import time
 import urllib.error
@@ -127,6 +129,21 @@ def age_ensure_keypair_on_pc() -> tuple[str, str, str]:
                       key_file.read_text(), re.M)
         if m:
             return m.group(1), str(key_file), "riusata"
+        # Il file C'È ma non porta la riga «# public key:» (una chiave messa a mano, o un
+        # file rovinato). Prima si cadeva nel ramo di creazione, che lo SOVRASCRIVEVA: se
+        # dentro c'era la chiave dei backup già fatti, quei backup non si aprivano più.
+        # Si prova a ricavarne la pubblica; se non si riesce ci si ferma, senza toccarlo.
+        try:
+            pub = subprocess.run(["age-keygen", "-y", str(key_file)], check=True,
+                                 capture_output=True, timeout=15, text=True).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pub = ""
+        if pub.startswith("age1"):
+            return pub, str(key_file), "riusata"
+        raise DeployError(
+            f"{key_file} esiste ma non riesco a leggerne la chiave pubblica: NON lo tocco "
+            "(potrebbe essere la chiave dei tuoi backup). Spostalo altrove, o aggiungi in "
+            "testa la riga «# public key: age1…», e rilancia.")
     key_dir.mkdir(parents=True, exist_ok=True)
     key_dir.chmod(0o700)
     try:
@@ -139,9 +156,15 @@ def age_ensure_keypair_on_pc() -> tuple[str, str, str]:
         return pub, str(key_file), "age-keygen"
     except (OSError, subprocess.SubprocessError):
         sec, pub = age_keypair_python()
-        stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-        key_file.write_text(f"# created: {stamp}\n# public key: {pub}\n{sec}\n")
-        key_file.chmod(0o600)
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        # creazione ESCLUSIVA e già a 600: se nel frattempo il file è comparso non lo si
+        # sovrascrive (age-keygen qui sopra può averne lasciato uno a metà: quello si toglie
+        # solo se è vuoto).
+        if key_file.exists() and key_file.stat().st_size == 0:
+            key_file.unlink()
+        fd = os.open(key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(f"# created: {stamp}\n# public key: {pub}\n{sec}\n")
         return pub, str(key_file), "python"
 
 
@@ -290,6 +313,23 @@ def _make_repo_tar() -> bytes:
     return buf.getvalue()
 
 
+# Tempo massimo di UN comando remoto in streaming (secondi). Largo apposta: la build locale
+# su una VPS piccola è il comando più lungo. Si cambia con VPS1777_INSTALLER_CMD_TIMEOUT_S.
+CMD_TIMEOUT_S = int(os.environ.get("VPS1777_INSTALLER_CMD_TIMEOUT_S", "7200"))
+
+# L'elenco degli ingressi è CHIUSO: un valore fuori elenco diventava «tailscale» in silenzio.
+INGRESSI = {"1": "tailscale", "2": "caddy", "3": "cloudflared"}
+
+
+def ingresso_da(num: object) -> str:
+    """Il nome dell'ingresso per la scelta 1/2/3 del pannello (vuoto = 1). Fuori elenco: errore."""
+    chiave = str(num or "1").strip()
+    if chiave not in INGRESSI:
+        raise DeployError(f"ingresso non previsto: «{chiave}». I valori ammessi sono 1 (Tailscale), "
+                          "2 (Caddy) e 3 (Cloudflare).")
+    return INGRESSI[chiave]
+
+
 class DeployError(Exception):
     pass
 
@@ -373,9 +413,15 @@ class Deployer:
 
     # ───── exec helpers ─────
 
+    def _cliente(self) -> "paramiko.SSHClient":
+        """Il client SSH aperto, o un errore che si legge (un `assert` spariva con -O)."""
+        if not self.client:
+            raise DeployError("connessione SSH non aperta: errore interno dell'installer "
+                              "(un passo è partito prima di connect())")
+        return self.client
+
     def _run_capture(self, cmd: str) -> str:
-        assert self.client
-        _in, out, err = self.client.exec_command(cmd, timeout=60)
+        _in, out, err = self._cliente().exec_command(cmd, timeout=60)
         rc = out.channel.recv_exit_status()
         data = out.read().decode("utf-8", "replace")
         if rc != 0:
@@ -395,8 +441,7 @@ class Deployer:
         la durata dell'esecuzione) — lo stdin no. deploy.sh usa `bash -s <<…`
         per la stessa ragione; qui è l'equivalente paramiko.
         """
-        assert self.client
-        chan = self.client.get_transport().open_session()  # type: ignore[union-attr]
+        chan = self._cliente().get_transport().open_session()  # type: ignore[union-attr]  # il trasporto c'è: il client è connesso
         # NIENTE pty: con un tty BuildKit/apt producono progress-bar ANSI che
         # si auto-refreshano → fiume di sequenze di escape che intasano la UI.
         # Senza tty l'output è "plain" (una riga per evento), pulito da streammare.
@@ -410,6 +455,10 @@ class Deployer:
             chan.shutdown_write()
         chan.settimeout(0.0)  # non-bloccante
         buf = b""
+        # Un comando remoto che non finisce mai (un apt appeso, una rete che non risponde)
+        # teneva l'installazione ferma per sempre, senza una riga. Il tetto è largo perché
+        # una build sulla VPS dura decine di minuti; scaduto, lo si dice e ci si ferma.
+        scadenza = time.monotonic() + CMD_TIMEOUT_S
         while True:
             got = False
             try:
@@ -420,8 +469,14 @@ class Deployer:
                     while b"\n" in buf:
                         line, buf = buf.split(b"\n", 1)
                         yield line.decode("utf-8", "replace").rstrip("\r")
-            except Exception:
-                pass
+            except socket.timeout:
+                pass    # canale non bloccante senza dati pronti: è il caso normale, si riprova
+            if not got and time.monotonic() > scadenza:
+                chan.close()
+                raise DeployError(
+                    f"il comando remoto «{label or cmd[:40]}» non ha concluso entro "
+                    f"{CMD_TIMEOUT_S // 60} minuti: l'ho fermato. Rilancia l'installazione; "
+                    "se si ripete, guarda la VPS (rete, disco, apt bloccato).")
             if chan.exit_status_ready() and not got:
                 # svuota il resto
                 try:
@@ -430,8 +485,8 @@ class Deployer:
                         if not data:
                             break
                         buf += data
-                except Exception:
-                    pass
+                except socket.timeout:
+                    pass    # niente altro da leggere
                 if buf:
                     for ln in buf.decode("utf-8", "replace").splitlines():
                         yield ln.rstrip("\r")
@@ -519,7 +574,7 @@ if ! docker compose version >/dev/null 2>&1; then
   esac
   mkdir -p /usr/local/lib/docker/cli-plugins
   T="$(mktemp)"
-  curl -fsSL "https://github.com/docker/compose/releases/download/{COMPOSE_VERSION}/docker-compose-linux-$A" -o "$T"
+  curl -fsSL --max-time 300 "https://github.com/docker/compose/releases/download/{COMPOSE_VERSION}/docker-compose-linux-$A" -o "$T"
   if ! echo "$H  $T" | sha256sum -c - >/dev/null 2>&1; then
     rm -f "$T"; echo "  ERRORE: docker-compose {COMPOSE_VERSION} non ha l'impronta attesa: NON lo installo" >&2; exit 1
   fi
@@ -585,14 +640,23 @@ docker compose version >/dev/null 2>&1 && echo "COMPOSE_OK" || echo "COMPOSE_MIS
         yield "✓ Docker + Compose + utente pronti (hardening: unattended-upgrades + fail2ban)"
 
     def step_upload(self) -> Iterator[str]:
-        assert self.client
         yield "── Trasferisco il repo (SFTP)…"
         data = _make_repo_tar()
-        sftp = self.client.open_sftp()
-        with sftp.open("/tmp/vps1777.tar.gz", "wb") as f:
-            f.write(data)
-        sftp.close()
-        yield f"  caricati {len(data)//1024} KB"
+        sftp = self._cliente().open_sftp()
+        try:
+            with sftp.open("/tmp/vps1777.tar.gz", "wb") as f:
+                f.write(data)
+        finally:
+            sftp.close()
+        # Ciò che è arrivato si RILEGGE prima di estrarlo: l'impronta calcolata sulla VPS
+        # deve essere quella del pacchetto fatto qui (un trasferimento troncato si estraeva).
+        atteso = hashlib.sha256(data).hexdigest()
+        arrivato = self._run_capture("sha256sum /tmp/vps1777.tar.gz 2>/dev/null | cut -d' ' -f1").strip()
+        if arrivato != atteso:
+            raise DeployError("il pacchetto arrivato sulla VPS non è quello partito dal PC "
+                              f"(impronta attesa {atteso[:12]}…, trovata «{arrivato[:12] or 'nessuna'}»): "
+                              "trasferimento incompleto. Rilancia.")
+        yield f"  caricati {len(data)//1024} KB (impronta riletta sulla VPS: coincide)"
         mv = f"""
 set -e
 install -d -o {OPERATOR_USER} -g {OPERATOR_USER} {REMOTE_DIR}
@@ -625,11 +689,11 @@ rm -f /tmp/vps1777.tar.gz
         try:
             token = _ts_oauth_token(cid, csec)
             yield "  ✓ token OAuth ottenuto"
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — rete, HTTP o JSON: per chi installa è «token non ottenuto»
             raise DeployError(
                 f"OAuth Tailscale: token fallito ({_httperr(e)}). "
                 "Controlla Client ID e Client Secret dell'OAuth client."
-            )
+            ) from e
         # 2) ACL: nodeAttr funnel per il tag — NON fatale (potrebbe già esserci)
         try:
             policy, etag = _http_json(f"{TS_API}/tailnet/-/acl", token=token)
@@ -639,10 +703,17 @@ rm -f /tmp/vps1777.tar.gz
                     hdrs["If-Match"] = etag
                 _http_json(f"{TS_API}/tailnet/-/acl", token=token,
                            data=json.dumps(policy).encode(), method="POST", headers=hdrs)
-                yield f"  ✓ ACL aggiornata: nodeAttr funnel concesso a {TS_TAG}"
+                # La scrittura si RILEGGE: «aggiornata» lo dice la policy che c'è adesso,
+                # non il fatto che la POST non abbia sollevato.
+                dopo, _ = _http_json(f"{TS_API}/tailnet/-/acl", token=token)
+                if _ts_ensure_funnel_attr(dopo, TS_TAG):
+                    yield (f"! ACL: la scrittura è stata accettata ma rileggendo il nodeAttr funnel per "
+                           f"{TS_TAG} non c'è. Proseguo: se il Funnel non parte, aggiungilo a mano.")
+                else:
+                    yield f"  ✓ ACL aggiornata e riletta: nodeAttr funnel concesso a {TS_TAG}"
             else:
                 yield f"  ✓ ACL già a posto (nodeAttr funnel per {TS_TAG})"
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — non fatale per scelta: l'attributo può già esserci
             yield (f"! ACL non aggiornata: {_httperr(e)} — serve lo scope 'policy_file' (write). "
                    "Proseguo: l'attributo potrebbe già esserci.")
         # 3) auth-key taggata — FATALE se fallisce (senza key il nodo non entra)
@@ -650,7 +721,7 @@ rm -f /tmp/vps1777.tar.gz
             key = _ts_create_authkey(token, TS_TAG)
             p["ts_authkey"] = key
             yield "  ✓ auth-key taggata generata (single-use)"
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001 — rete, HTTP o JSON: diventa un errore che dice cosa fare
             msg = _httperr(e)
             low = msg.lower()
             if "tag" in low and ("not permitted" in low or "invalid" in low):
@@ -660,15 +731,15 @@ rm -f /tmp/vps1777.tar.gz
                     f"FIX: nella admin Tailscale (Settings → OAuth clients) ricrea il client e, "
                     f"nello scope 'auth_keys', ASSEGNAGLI il tag {TS_TAG} (selezionandolo dalla "
                     "lista; dev'essere già in tagOwners). Evita di crearne uno nuovo a mano. Poi rilancia."
-                )
+                ) from e
             raise DeployError(
                 f"OAuth Tailscale: creazione auth-key fallita ({msg}). "
                 f"Servono lo scope 'auth_keys' e il tag {TS_TAG} assegnato all'OAuth client."
-            )
+            ) from e
 
     def step_config(self, p: dict) -> Iterator[str]:
         yield "── Genero .env + secrets…"
-        ingress = {"1": "tailscale", "2": "caddy", "3": "cloudflared"}.get(p.get("ingress_num", "1"), "tailscale")
+        ingress = ingresso_da(p.get("ingress_num"))
         public_base = _public_base(p, ingress)
         # L'URL della schermata finale (e degli URL connector costruiti sopra di lui) è
         # quello pubblico, quando lo si conosce già: con Caddy o Cloudflare non c'è un
@@ -755,7 +826,7 @@ cp -n .env.example .env 2>/dev/null || true
 # printf è builtin. Stessa forma di deploy.sh, che l'aveva già per questa ragione.
 set_kv() {{ k=$1; v=$2
   rest=$(grep -v "^${{k}}=" .env 2>/dev/null || true)
-  {{ [ -n "$rest" ] && printf '%s\\n' "$rest"; printf '%s=%s\\n' "$k" "$v"; }} > .env
+  ( umask 077; {{ [ -n "$rest" ] && printf '%s\\n' "$rest"; printf '%s=%s\\n' "$k" "$v"; }} > .env.tmp ) && mv -f .env.tmp .env
 }}
 set_kv ADMIN_EMAIL {shlex.quote(p.get('admin_email',''))}
 set_kv TELEGRAM_OWNER_ID {shlex.quote(p.get('telegram_owner_id',''))}
@@ -1036,13 +1107,26 @@ echo SELFUPDATE_OK
         if host:
             self._run_capture(f"tailscale cert {shlex.quote(host)} >/dev/null 2>&1 || true")
 
-    def _set_gateway_bind(self, ingress: str, bind: str) -> None:
+    def _set_gateway_bind(self, ingress: str, bind: str) -> bool:
         """Cambia l'esposizione del gateway (GATEWAY_BIND) e lo ricrea.
-        127.0.0.1 = solo loopback (produzione) · 0.0.0.0 = fallback pubblico."""
+        127.0.0.1 = solo loopback (produzione) · 0.0.0.0 = fallback pubblico.
+        Ritorna True solo se, RILEGGENDO .env, il valore è quello chiesto: chi chiama
+        annunciava «apro la porta come fallback» senza sapere se era successo."""
         cmd = self._compose_cmd(ingress, onboarding=False)
         self._run_capture(self._sudo(
             f"cd {REMOTE_DIR} && (grep -q ^GATEWAY_BIND= .env && sed -i 's|^GATEWAY_BIND=.*|GATEWAY_BIND={bind}|' .env || echo GATEWAY_BIND={bind} >> .env) && {cmd} up -d gateway"
         ))
+        letto = self._run_capture(self._sudo(
+            f"grep ^GATEWAY_BIND= {REMOTE_DIR}/.env 2>/dev/null | tail -1 | cut -d= -f2")).strip()
+        return letto == bind
+
+    def _apri_fallback(self, ingress: str) -> Iterator[str]:
+        """Apre la 8080 in HTTP come via d'accesso di riserva, e dice se c'è riuscito."""
+        if self._set_gateway_bind(ingress, "0.0.0.0"):
+            yield "  → Porta 8080 (HTTP) aperta come fallback."
+        else:
+            yield ("! NON sono riuscito ad aprire il fallback sulla 8080: la VPS può restare "
+                   "raggiungibile solo via SSH finché il Funnel non risponde.")
 
     def _scrivi_public_base(self, ingress: str, url: str, onboarding: bool = False) -> None:
         """Scrive PUBLIC_BASE in .env e RICREA tutti i servizi che lo leggono.
@@ -1083,7 +1167,7 @@ rm -f secrets/ts_authkey.txt
         key = p["ts_authkey"]
         hostname = (p.get("ts_hostname") or "vps1777").strip()
         yield "── Installo Tailscale sull'host…"
-        for line in self._stream("curl -fsSL https://tailscale.com/install.sh | sh", "ts-install"):
+        for line in self._stream("curl -fsSL --max-time 300 https://tailscale.com/install.sh | sh", "ts-install"):
             yield line
         self._run_capture("systemctl enable --now tailscaled 2>/dev/null || true")
         yield "── Login Tailscale (auth-key) + Funnel…"
@@ -1092,13 +1176,15 @@ rm -f secrets/ts_authkey.txt
         # --authkey=file:… e la cancelliamo subito. Come già fa deploy.sh.
         keyfile = self._run_capture("mktemp /tmp/.vps1777-tskey.XXXXXX").strip()
         try:
-            sftp = self.client.open_sftp()  # type: ignore[union-attr]
-            with sftp.open(keyfile, "w") as fh:
-                fh.write(key)
-            sftp.chmod(keyfile, 0o600)
-            sftp.close()
-        except Exception:  # noqa: BLE001 — se fallisce, up sotto darà errore chiaro
-            pass
+            sftp = self._cliente().open_sftp()
+            try:
+                with sftp.open(keyfile, "w") as fh:
+                    fh.write(key)
+                sftp.chmod(keyfile, 0o600)
+            finally:
+                sftp.close()
+        except Exception as e:  # noqa: BLE001 — si prosegue: `tailscale up` qui sotto fallirà e lo dirà
+            yield f"! non sono riuscito a consegnare la auth-key alla VPS ({type(e).__name__}): il login fallirà."
         up = self._run_capture(
             f"tailscale up --authkey=file:{shlex.quote(keyfile)} --hostname={shlex.quote(hostname)} "
             f"--accept-dns=false --reset 2>&1; r=$?; rm -f {shlex.quote(keyfile)}; exit $r"
@@ -1113,8 +1199,7 @@ rm -f secrets/ts_authkey.txt
             yield "  ."
         if not url.endswith(".ts.net"):
             yield "! Login Tailscale non completato. Dettaglio: " + (up.strip().replace("\n", " ")[:200] or "controlla la auth-key.")
-            yield "  → Lascio la porta 8080 (HTTP) come fallback."
-            self._set_gateway_bind(ingress, "0.0.0.0")
+            yield from self._apri_fallback(ingress)
             return
         self.result["URL"] = url
         yield f"✓ Nodo Tailscale: {url}"
@@ -1143,7 +1228,7 @@ rm -f secrets/ts_authkey.txt
                 yield "  → NON chiudo la porta 8080: resta il fallback finché non risponde davvero."
                 yield "  → se il certificato è appena stato emesso può servire qualche minuto;"
                 yield f"    riprova ad aprire {url} fra poco, e se risponde sei a posto."
-                self._set_gateway_bind(ingress, "0.0.0.0")
+                yield from self._apri_fallback(ingress)
         else:
             low = (fout + " " + up).lower()
             if "funnel" in low and ("attribute" in low or "not permitted" in low or "denied" in low):
@@ -1151,8 +1236,7 @@ rm -f secrets/ts_authkey.txt
             else:
                 yield "! Funnel non confermato. Dettaglio: " + (fout.strip().replace("\n", " ")[:200] or "verifica i prerequisiti account.")
             yield "  → Checklist: login.tailscale.com/admin/dns (MagicDNS + HTTPS) e Access Controls (nodeAttr funnel)."
-            yield "  → Apro la porta 8080 (HTTP) come fallback."
-            self._set_gateway_bind(ingress, "0.0.0.0")
+            yield from self._apri_fallback(ingress)
 
     def step_finalize(self, ingress: str) -> Iterator[str]:
         """Chiude la porta 8080 in chiaro quando il Funnel HTTPS è attivo."""
@@ -1179,7 +1263,7 @@ rm -f secrets/ts_authkey.txt
         yield "── Riavvio la VPS (test auto-start)…"
         try:
             self._run_capture("nohup reboot >/dev/null 2>&1 &")
-        except Exception:
+        except Exception:  # noqa: BLE001 — il riavvio chiude la connessione sotto i piedi: è atteso
             pass
         self.close()
         time.sleep(8)
@@ -1195,8 +1279,13 @@ rm -f secrets/ts_authkey.txt
             except Exception:
                 yield "  ."
         if not back:
-            yield "! VPS non ancora raggiungibile — controlla manualmente"
-            return
+            # Prima: un avviso e `return`; l'installazione risultava fallita solo perché il
+            # passo dopo inciampava sulla connessione chiusa. Ora l'esito è detto per nome.
+            raise DeployError(
+                "la VPS non è tornata raggiungibile entro due minuti e mezzo dal riavvio. "
+                "L'installazione è arrivata fino in fondo, ma NON ho potuto verificare che lo "
+                "stack riparta da solo: guarda la macchina dal pannello del fornitore e, quando "
+                "risponde, apri l'URL pubblico.")
         yield "✓ VPS tornata online, attendo i container…"
         time.sleep(20)
         cmd = self._compose_cmd(ingress, onboarding=not production)
@@ -1248,8 +1337,8 @@ def run(params: dict) -> Iterator[str]:
     import os as _os
     d = Deployer(params.get("ip", ""), params.get("user", "root") or "root",
                  params.get("password", ""))
-    ingress = {"1": "tailscale", "2": "caddy", "3": "cloudflared"}.get(params.get("ingress_num", "1"), "tailscale")
     try:
+        ingress = ingresso_da(params.get("ingress_num"))
         # Un dominio/hostname malformato si dice PRIMA di toccare la VPS, non al passo 3.
         _public_base(params, ingress)
         yield "▶ Connessione alla VPS…"
@@ -1320,7 +1409,7 @@ def run(params: dict) -> Iterator[str]:
     except DeployError as e:
         yield f"✗ {e}"
         yield "__EXIT__1"
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 — ultimo argine: l'installer deve chiudere con un esito, non morire
         yield f"✗ Errore: {e}"
         yield "__EXIT__1"
     finally:
@@ -1336,12 +1425,13 @@ def check(ip: str, user: str, password: str) -> dict:
     try:
         d.connect()
         os_info = d.detect_os()
-        d.close()
         return {"ok": True, "os": os_info}
     except paramiko.AuthenticationException:
         return {"ok": False, "error": "Autenticazione fallita (password/utente errati)"}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 — è un semaforo: qualunque causa diventa il testo dell'errore
         return {"ok": False, "error": str(e)}
+    finally:
+        d.close()
 
 
 def check_telegram(token: str) -> dict:
@@ -1363,5 +1453,5 @@ def check_telegram(token: str) -> dict:
         if e.code == 401:
             return {"ok": False, "error": "token non valido (401)"}
         return {"ok": False, "error": f"HTTP {e.code}"}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 — è un semaforo: qualunque causa diventa il testo dell'errore
         return {"ok": False, "error": str(e)}

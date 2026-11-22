@@ -37,8 +37,9 @@ L'**engine Python** (`engine.py`, basato su paramiko) si connette alla VPS,
 carica il repo via SFTP ed esegue gli step (prepara Docker + hardening, genera
 secret, **pull delle immagini dell'ultima release** + avvio, **installa
 Tailscale sull'host** + Funnel, installa il **canale di aggiornamento** — CLI
-`vps1777` + unit systemd —, reboot test) **direttamente via SSH**. Tutto resta
-su `127.0.0.1` — le credenziali non lasciano il tuo PC.
+`vps1777` + unit systemd —, reboot test) **direttamente via SSH**. La pagina vive
+su `127.0.0.1`: non c'è un server nostro in mezzo. Dove vanno i dati che scrivi è
+detto sotto, in «Sicurezza».
 
 > **Cross-OS vero**: la VPS è Linux e riceve comandi shell standard; il PC
 > esegue solo Python (paramiko + urllib + stdlib). Per questo gira anche su
@@ -87,6 +88,17 @@ Se nessuna release esiste ancora, l'engine ripiega da solo sulla build locale.
 
 ## Sicurezza
 
-- Bind solo su `127.0.0.1` (non raggiungibile dalla rete).
-- Le password viaggiano solo PC→localhost→SSH, mai verso terzi.
+- La pagina ascolta solo su `127.0.0.1` e risponde solo a se stessa: controlla le
+  intestazioni `Host` e `Origin`, così un altro sito aperto nel browser non può avviare
+  o chiudere un'installazione né leggere il risultato.
+- **Dove va ciascun dato** (non «resta sul PC»: l'installer li usa, e per usarli li manda
+  a chi serve):
+  - password SSH, email admin, token e chiavi → alla **tua VPS**, via SSH;
+  - Client ID e Client Secret dell'OAuth client Tailscale → a `api.tailscale.com`, dal PC,
+    per creare la auth-key (sulla VPS arriva solo quella);
+  - token del bot Telegram → a `api.telegram.org`, dal PC, quando premi «verifica»;
+  - nient'altro: nessun server del progetto riceve qualcosa.
+- La password admin e il segreto del gateway compaiono nella pagina a installazione
+  finita e restano nella memoria dell'installer finché non lo chiudi: chiudilo (Ctrl+C)
+  quando li hai salvati.
 - Per uso condiviso/non fidato, preferisci il flusso CLI (`./deploy.sh`).

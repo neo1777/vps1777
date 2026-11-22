@@ -113,7 +113,7 @@ consegna_password() {
   local dir="${XDG_CONFIG_HOME:-$HOME/.config}/vps1777" f
   f="$dir/admin-password-$(date +%Y%m%d-%H%M%S).txt"
   ( umask 077 && mkdir -p "$dir" && printf '%s\n' "$1" > "$f" )
-  warn "PASSWORD ADMIN GENERATA: non la stampo, l'output non va a un terminale (H75)."
+  warn "PASSWORD ADMIN GENERATA: non la stampo, l'output non va a un terminale."
   warn "  → è in $f (la legge solo il tuo utente): copiala in un password manager, poi cancella il file."
 }
 
@@ -298,12 +298,20 @@ else
   esac
 
   cp .env.example .env
-  sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=$ADMIN_EMAIL|" .env
-  sed -i "s|^TELEGRAM_OWNER_ID=.*|TELEGRAM_OWNER_ID=$TG_OWNER_ID|" .env
-  sed -i "s|^PUBLIC_BASE=.*|PUBLIC_BASE=$PUBLIC_BASE|" .env
-  [ -n "${CADDY_DOMAIN:-}" ] && sed -i "s|^CADDY_DOMAIN=.*|CADDY_DOMAIN=$CADDY_DOMAIN|" .env
-  [ -n "${CADDY_EMAIL:-}" ] && sed -i "s|^CADDY_EMAIL=.*|CADDY_EMAIL=$CADDY_EMAIL|" .env
-  echo "INGRESS_PROFILE=ingress.$INGRESS" >> .env
+  # I valori digitati non entrano in un'espressione di `sed`: una «|» o una «&» dentro
+  # l'email o il dominio la rompevano (o la riscrivevano). Stessa funzione di deploy.sh:
+  # legge il resto del file, aggiunge la riga, e rinomina un file provvisorio a 600.
+  set_kv() {
+    local k="$1" v="$2" rest
+    rest=$(grep -v "^${k}=" .env 2>/dev/null || true)
+    ( umask 077; { [ -n "$rest" ] && printf '%s\n' "$rest"; printf '%s=%s\n' "$k" "$v"; } > .env.tmp ) && mv -f .env.tmp .env
+  }
+  set_kv ADMIN_EMAIL "$ADMIN_EMAIL"
+  set_kv TELEGRAM_OWNER_ID "$TG_OWNER_ID"
+  set_kv PUBLIC_BASE "$PUBLIC_BASE"
+  [ -n "${CADDY_DOMAIN:-}" ] && set_kv CADDY_DOMAIN "$CADDY_DOMAIN"
+  [ -n "${CADDY_EMAIL:-}" ] && set_kv CADDY_EMAIL "$CADDY_EMAIL"
+  set_kv INGRESS_PROFILE "ingress.$INGRESS"
   ok ".env creato"
 fi
 # .env può contenere TS_AUTHKEY e altri valori sensibili → 600 (H15/H38).
@@ -692,7 +700,8 @@ H55
       # deploy.sh e installer/engine.py: tre copie, una regola.)
       scrivi_config_sudo() { # $1=path · $2=contenuto voluto (confronto senza newline finale)
         if [ ! -f "$1" ] || [ "$(cat "$1" 2>/dev/null)" = "$2" ]; then
-          printf '%s\n' "$2" | sudo tee "$1" >/dev/null 2>&1 || true
+          printf '%s\n' "$2" | sudo tee "$1" >/dev/null 2>&1 \
+            || warn "non sono riuscito a scrivere $1 (disco pieno? sudo?): quella parte dell'hardening NON è applicata"
         else
           warn "$1 esiste con contenuto diverso (config dell'admin?): NON lo tocco"
         fi
