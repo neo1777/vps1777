@@ -49,3 +49,13 @@ n_core="$(find "$DEST" -maxdepth 1 -name 'vps1777-*.tar.age' | wc -l)"
 n_arch="$(find "$DEST/archivio" -maxdepth 1 -name 'vps1777-archivio-*.tar.age' 2>/dev/null | wc -l)"
 echo "[✓] sul disco: $n_core backup core · $n_arch backup archivio · $(du -sh "$DEST" | cut -f1) totali"
 echo "    per ripristinare: tools/restore.sh <file> (serve la chiave privata age del PC)"
+
+# La data di questa copia resta sulla macchina: il suo controllo giornaliero la legge e avvisa
+# quando l'ultima copia fuori macchina invecchia (un gesto a mano che nessuno ricorda non fa
+# rumore da solo). Se non si riesce a scriverla la copia è buona lo stesso: lo si dice.
+# shellcheck disable=SC2029  # il percorso si espande qui apposta
+if ssh -o ConnectTimeout=20 "$HOST" "date -u +%Y-%m-%dT%H:%M:%SZ > '$REMOTE_REPO/backups/.ultima-copia-fuori'" 2>/dev/null; then
+  echo "[✓] data della copia registrata sulla macchina (la sorveglianza avvisa se invecchia)"
+else
+  echo "[!] copia fatta, ma non ho potuto registrarne la data sulla macchina: la sorveglianza non la vedrà" >&2
+fi

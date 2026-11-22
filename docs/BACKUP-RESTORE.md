@@ -240,6 +240,12 @@ non lasciano la macchina) e **senza** `--delete`: la VPS pota per spazio, il tuo
 tiene la storia. Un timer utente sul PC può lanciarlo ogni giorno: quando l'HD non è
 montato esce 2 e lo dice, invece di copiare nel posto sbagliato.
 
+A copia riuscita lo script lascia sulla VPS la data dell'ultima copia fuori macchina
+(`backups/.ultima-copia-fuori`). Il controllo giornaliero la legge: se ha più di 3 giorni, o
+se ci sono backup e nessuna copia risulta mai uscita, lo scrive nel log e manda **una**
+notifica Telegram (e un'altra quando torna fresca). Backup che restano solo sulla macchina
+non proteggono dalla sua perdita.
+
 > ⚠️ **Migrazione (installazioni esistenti)**: se hai una chiave privata in
 > `~/.config/age/keys.txt` **sulla VPS** (le versioni fino alla 0.25.0 la
 > generavano lì), **copiala sul tuo PC e poi rimuovila dalla VPS**:

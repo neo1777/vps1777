@@ -248,6 +248,12 @@ snapshots never leave the machine) and **without** `--delete`: the VPS prunes fo
 your disk keeps the history. A user timer on the PC can run it daily: when the HD isn't
 mounted it exits 2 and says so, instead of copying to the wrong place.
 
+After a successful copy the script leaves on the VPS the date of the last off-machine copy
+(`backups/.ultima-copia-fuori`). The daily check reads it: if it is older than 3 days, or if
+there are backups and no copy is known to have ever left, it logs it and sends **one**
+Telegram notification (and another when it is fresh again). Backups that only live on the
+machine do not protect against losing it.
+
 > ⚠️ **Migration (existing installations)**: if you have a private key in
 > `~/.config/age/keys.txt` **on the VPS** (versions up to 0.25.0 generated it
 > there), **copy it to your PC and then remove it from the VPS**:

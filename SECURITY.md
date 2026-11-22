@@ -474,7 +474,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** I 98 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 99 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -485,7 +485,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **98 voci** (2 critiche, 16 alte, 57 medie, 23 basse): 43 dalla
+Il registro conta **99 voci** (2 critiche, 16 alte, 57 medie, 24 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -534,19 +534,20 @@ del messaggio delle pagine admin entrava nell'HTML senza escape, e un backup usc
 quando un volume non si era salvato.
 E sei (`H88`-`H93`, 21/11) sono i rilievi di sicurezza dello stesso giro rimasti aperti dopo la prima
 release, chiusi insieme prima di far leggere il repo a un revisore esterno.
-E cinque (`H94`-`H98`, 21 e 22/11) vengono da quella lettura esterna: gateway, CLI e installatori
+E sei (`H94`-`H99`, 21 e 22/11) vengono da quella lettura esterna: gateway, CLI e installatori
 riletti applicando un catalogo di requisiti con due modelli diversi. La rotazione di un refresh
 proseguiva anche quando la revoca di quello usato non era arrivata su disco; l'elenco delle
 sessioni admin chiuse, se non si leggeva, valeva «nessuna revoca»; uno snapshot pre-update
 interrotto restava «il più recente», pronto per un rollback coi dati; i valori che
 `deploy.sh --apply` legge dal pannello erano controllati riga per riga, e un a-capo li faceva
-entrare in uno script eseguito sulla macchina; e l'installer locale rispondeva a qualunque
-pagina aperta nel browser.
+entrare in uno script eseguito sulla macchina; l'installer locale rispondeva a qualunque
+pagina aperta nel browser; e gli installatori accettavano qualunque chiave SSH della macchina,
+anche se cambiata dall'ultima volta.
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 84 |
+| **chiusi** | 85 |
 | **parziali** | 10 |
 | **accettati** | 4 |
 | **aperti** | 0 |

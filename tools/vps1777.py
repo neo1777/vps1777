@@ -2726,6 +2726,65 @@ def _sorveglia_backup_archivio(repo: Path, st: dict, notifica: bool) -> None:
                                   f"(ultima copia {eta} giorni fa).")
 
 
+FUORI_MAX_GIORNI = 3        # oltre, l'ultima copia fuori macchina è vecchia e si avvisa
+FUORI_MARCA = ".ultima-copia-fuori"   # la scrive chi porta fuori i backup (tools/backup-pull.sh)
+
+
+def eta_copia_fuori(repo: Path) -> int | None:
+    """Giorni dall'ultima copia dei backup FUORI da questa macchina, letti dalla marca che
+    `tools/backup-pull.sh` lascia in `backups/` a copia riuscita. `None` = nessuna marca
+    (mai portati fuori, o portati fuori con un altro mezzo) o marca illeggibile."""
+    try:
+        testo = (repo / "backups" / FUORI_MARCA).read_text(encoding="utf-8").strip()
+        quando = datetime.strptime(testo, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (OSError, ValueError):
+        return None
+    return max(0, (datetime.now(timezone.utc) - quando).days)
+
+
+def _sorveglia_copia_fuori(repo: Path, st: dict, notifica: bool) -> None:
+    """I backup che restano SOLO su questa macchina non proteggono dalla sua perdita, e
+    portarli fuori è un gesto di chi la possiede: se nessuno se ne ricorda non fa rumore.
+    (Misurato sulla macchina di riferimento il 22/11/2026: l'ultima copia fuori era di
+    tre mesi prima.) Qui si guarda la marca lasciata dall'ultimo pull: avviso nel log
+    sempre, notifica solo alla transizione — una volta quando invecchia, una quando torna.
+    Senza marca e senza backup non c'è niente da dire; senza marca ma coi backup si dice
+    una volta che nessuna copia risulta mai uscita."""
+    quanti, _primo, _ultimo = copertura_backup(repo)
+    eta = eta_copia_fuori(repo)
+    if eta is None:
+        if not quanti:
+            return
+        warn("copia fuori macchina: nessuna registrata — i backup stanno solo qui "
+             "(tools/backup-pull.sh, dal tuo PC, li porta su un disco tuo)")
+        if not str(st.get("fuori_mai_da") or ""):
+            st["fuori_mai_da"] = now_iso()
+            if notifica:
+                telegram_notify(
+                    repo,
+                    "🟡 vps1777: i backup stanno solo sulla macchina: nessuna copia risulta "
+                    "mai portata fuori. Se la macchina si perde, si perdono anche loro.\n"
+                    "Dal tuo PC: bash tools/backup-pull.sh <host> <cartella> (vedi BACKUP-RESTORE).")
+        return
+    st.pop("fuori_mai_da", None)
+    if eta > FUORI_MAX_GIORNI:
+        warn(f"copia fuori macchina: l'ultima ha {eta} giorni (soglia {FUORI_MAX_GIORNI})")
+        if not str(st.get("fuori_vecchia_da") or ""):
+            st["fuori_vecchia_da"] = now_iso()
+            if notifica:
+                telegram_notify(
+                    repo,
+                    f"🟡 vps1777: l'ultima copia dei backup FUORI dalla macchina ha {eta} giorni.\n"
+                    "Dal tuo PC: bash tools/backup-pull.sh <host> <cartella>.")
+        return
+    if str(st.get("fuori_vecchia_da") or ""):
+        st.pop("fuori_vecchia_da", None)
+        ok(f"copia fuori macchina: tornata fresca ({eta} giorni)")
+        if notifica:
+            telegram_notify(repo, f"🟢 vps1777: i backup sono di nuovo anche fuori dalla macchina "
+                                  f"(ultima copia {eta} giorni fa).")
+
+
 def _sorveglia_copertura_backup(repo: Path, st: dict, notifica: bool) -> None:
     """H59 — la finestra di ripristino si accorcia in silenzio, e nessuno lo dice.
 
@@ -3023,6 +3082,7 @@ def cmd_check(repo: Path, args) -> int:
     # non deve morire insieme a lui.
     _sorveglia_copertura_backup(repo, st, bool(getattr(args, "notify", False)))
     _sorveglia_backup_archivio(repo, st, bool(getattr(args, "notify", False)))
+    _sorveglia_copia_fuori(repo, st, bool(getattr(args, "notify", False)))
     # W5: il notturno fermo (la copertura non lo vede) e lo spazio su disco.
     _sorveglia_backup_notturno(repo, st, bool(getattr(args, "notify", False)))
     _sorveglia_disco(repo, st, bool(getattr(args, "notify", False)))

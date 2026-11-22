@@ -330,6 +330,23 @@ def ingresso_da(num: object) -> str:
     return INGRESSI[chiave]
 
 
+def chiavi_note_path() -> Path:
+    """Il file dove l'installer ricorda le chiavi SSH delle macchine già viste (creato se manca)."""
+    cartella = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "vps1777"
+    cartella.mkdir(parents=True, exist_ok=True)
+    f = cartella / "known_hosts"
+    if not f.exists():
+        f.touch(mode=0o600)
+    return f
+
+
+def dimentica_chiave_nota(noti: Path, ip: str) -> None:
+    """Toglie dall'elenco le chiavi di `ip` (la macchina è stata riformattata: ne avrà una nuova)."""
+    righe = noti.read_text(encoding="utf-8").splitlines()
+    tenute = [r for r in righe if ip not in r.split(" ", 1)[0].split(",")]
+    noti.write_text("".join(r + "\n" for r in tenute), encoding="utf-8")
+
+
 class DeployError(Exception):
     pass
 
@@ -380,10 +397,13 @@ def _public_base(p: dict, ingress: str) -> str:
 class Deployer:
     """Connessione SSH + step di deploy con output streaming."""
 
-    def __init__(self, ip: str, user: str, password: str):
+    def __init__(self, ip: str, user: str, password: str, nuova_chiave_host: bool = False):
         self.ip = ip
         self.user = user
         self.password = password
+        # True = chi installa ha dichiarato di aver riformattato la macchina: una chiave SSH
+        # diversa da quella vista l'ultima volta è attesa, e la si accetta.
+        self.nuova_chiave_host = nuova_chiave_host
         self.client: paramiko.SSHClient | None = None
         self.result: dict[str, str] = {}
         self.production = False
@@ -392,15 +412,35 @@ class Deployer:
     # ───── connessione ─────
 
     def connect(self) -> None:
-        c = paramiko.SSHClient()
-        c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # LA CHIAVE DELLA MACCHINA. Prima: `AutoAddPolicy` senza nessun elenco di chiavi note,
+        # cioè qualunque chiave accettata a ogni corsa, proprio dove passa la password di root.
+        # Ora l'installer tiene un elenco suo: la PRIMA volta che vede un indirizzo ne accetta
+        # la chiave e la ricorda; se a una corsa successiva la chiave è DIVERSA si ferma, a
+        # meno che chi installa abbia dichiarato di aver riformattato la macchina.
+        noti = chiavi_note_path()
         kwargs: dict = dict(hostname=self.ip, username=self.user, timeout=20,
                             allow_agent=True, look_for_keys=True)
         if self.password:
             kwargs["password"] = self.password
             kwargs["look_for_keys"] = False
             kwargs["allow_agent"] = False
-        c.connect(**kwargs)
+        for tentativo in (1, 2):
+            c = paramiko.SSHClient()
+            c.load_host_keys(str(noti))
+            c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            try:
+                c.connect(**kwargs)
+                break
+            except paramiko.BadHostKeyException as e:
+                c.close()
+                if not self.nuova_chiave_host or tentativo == 2:
+                    raise DeployError(
+                        f"la chiave SSH di {self.ip} è DIVERSA da quella vista all'ultima "
+                        "installazione. Se hai riformattato o reinstallato la macchina è normale: "
+                        "spunta «Ho riformattato o reinstallato questa macchina» e riprova. Se non "
+                        "l'hai fatto, fermati: qualcuno potrebbe essersi messo fra te e la macchina, "
+                        "e qui sta per passare la password di root.") from e
+                dimentica_chiave_nota(noti, self.ip)
         self.client = c
 
     def close(self) -> None:
@@ -1336,7 +1376,7 @@ def run(params: dict) -> Iterator[str]:
     """Generator completo: esegue tutti gli step, yield righe di log."""
     import os as _os
     d = Deployer(params.get("ip", ""), params.get("user", "root") or "root",
-                 params.get("password", ""))
+                 params.get("password", ""), nuova_chiave_host=bool(params.get("nuova_chiave_host")))
     try:
         ingress = ingresso_da(params.get("ingress_num"))
         # Un dominio/hostname malformato si dice PRIMA di toccare la VPS, non al passo 3.
@@ -1416,16 +1456,18 @@ def run(params: dict) -> Iterator[str]:
         d.close()
 
 
-def check(ip: str, user: str, password: str) -> dict:
+def check(ip: str, user: str, password: str, nuova_chiave_host: bool = False) -> dict:
     """Test connessione SSH (per il semaforo VPS)."""
     import re
     if not re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip):
         return {"ok": False, "error": "IP non valido"}
-    d = Deployer(ip, user or "root", password)
+    d = Deployer(ip, user or "root", password, nuova_chiave_host=nuova_chiave_host)
     try:
         d.connect()
         os_info = d.detect_os()
         return {"ok": True, "os": os_info}
+    except DeployError as e:
+        return {"ok": False, "error": str(e)}
     except paramiko.AuthenticationException:
         return {"ok": False, "error": "Autenticazione fallita (password/utente errati)"}
     except Exception as e:  # noqa: BLE001 — è un semaforo: qualunque causa diventa il testo dell'errore

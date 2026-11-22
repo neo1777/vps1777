@@ -11,7 +11,7 @@
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
-      "sorgente_sha256": "05942c2dd675a3105bca5695d5e42dbfb2bb9b353e110eb0fa3970c7c9ca6836"
+      "sorgente_sha256": "4475571ebb5e93fa86a99afb4383b5dea3d0dea40faad5d5ac9aaa19dea01688"
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
@@ -27,7 +27,7 @@
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
-      "sorgente_sha256": "85001c4d5fbc6da4516533168c6370bee4bfa3e43a057fdf081d936b30818f25"
+      "sorgente_sha256": "f7739ac6a346708cd6fd26ed274f1bbc392c360b3f62542f42df0fbd1be5cb1f"
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",

@@ -4734,3 +4734,47 @@ findings:
         output: "33 passed: Host estraneo o assente → 403; Origin di un altro sito su /__quit e /api/deploy → 403 e il server resta su; la pagina vera risponde 200"
         exit: 0
         quando: "2026-11-22"
+
+  - id: H99
+    severity: low
+    title: "Gli installatori accettavano qualunque chiave SSH della macchina a ogni corsa, anche se diversa da quella vista l'ultima volta"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-22"
+      come: audio-esterno
+      nota: >
+        Dalla revisione degli installatori fatta applicando un catalogo di requisiti con due
+        modelli diversi (uno dei due l'ha detta, come dubbio, su entrambi i percorsi). Era
+        una scelta scritta («VPS riformattata = nuova host key»); il proprietario ha deciso
+        il 22/11 di fermarsi e chiedere conferma. Mai sfruttato che si sappia. `low`: serve
+        qualcuno in grado di mettersi fra il PC e la macchina al momento dell'installazione.
+    since: unreleased
+    why: >
+      `deploy.sh` toglieva la voce da `known_hosts` prima di ogni connessione, e l'installer
+      web usava `AutoAddPolicy` senza nessun elenco di chiavi note. In tutti e due i casi una
+      chiave cambiata passava senza una riga, proprio dove viaggia la password di root.
+    evidence:
+      - file: deploy.sh
+        contains:
+          - "REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification failed"
+          - "VPS1777_NUOVA_CHIAVE_HOST"
+      - file: installer/engine.py
+        contains:
+          - "c.load_host_keys(str(noti))"
+          - "except paramiko.BadHostKeyException as e:"
+      - file: tools/tests/test_copia_fuori_e_chiave_host.py
+        contains:
+          - "def test_una_chiave_cambiata_ferma_l_installazione("
+          - "def test_deploy_non_dimentica_piu_la_chiave_a_ogni_corsa("
+    fix: >
+      La prima chiave di un indirizzo si accetta e si ricorda (ssh in `known_hosts`, l'installer
+      web in un elenco suo). Una chiave diversa ferma l'installazione finché chi installa non
+      conferma di aver riformattato la macchina. Resta il limite di ogni prima connessione:
+      alla prima installazione non c'è niente con cui confrontare la chiave.
+    prova:
+      - comando: "uv run --with pytest --with pyyaml pytest -q tools/tests/test_copia_fuori_e_chiave_host.py"
+        dove: "PC"
+        output: "12 passed: chiave cambiata → errore e nessuna connessione; con la conferma la voce vecchia si toglie e si riprova; deploy.sh toglie la voce solo dopo aver visto la chiave cambiata"
+        exit: 0
+        quando: "2026-11-22"

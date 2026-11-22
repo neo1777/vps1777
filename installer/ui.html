@@ -121,6 +121,7 @@ input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(21
         <div class="field"><label>Utente SSH</label><input type="text" id="user" value="root" autocomplete="off"></div>
         <div class="field"><label>Password SSH</label><input type="password" id="password" placeholder="••••••••" autocomplete="off"></div>
       </div>
+      <label class="hint" style="display:block;margin:2px 0 8px"><input type="checkbox" id="nuova_chiave_host" style="width:auto;margin-right:6px">Ho riformattato o reinstallato questa macchina (accetta una chiave SSH nuova)</label>
       <button class="btn" id="btn-check" onclick="checkVps()">Verifica connessione</button>
       <span id="vps-msg" class="hint"></span>
     </section>
@@ -329,7 +330,7 @@ async function checkVps(){
   vpsOk=false; setDot('dot-vps','');
   try{
     const r = await fetch('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ip:$('ip').value.trim(),user:$('user').value.trim()||'root',password:$('password').value})});
+      body:JSON.stringify({ip:$('ip').value.trim(),user:$('user').value.trim()||'root',password:$('password').value,nuova_chiave_host:$('nuova_chiave_host').checked})});
     const res = await r.json();
     if(res.ok){ vpsOk=true; setDot('dot-vps','ok'); $('vps-msg').innerHTML='<span style="color:var(--ok)">✓ '+(res.os||'connesso')+'</span>'; }
     else { setDot('dot-vps','err'); $('vps-msg').innerHTML='<span style="color:var(--err)">✗ '+(res.error||'errore')+'</span>'; }
@@ -341,6 +342,7 @@ async function checkVps(){
 function params(){
   return {
     ip:$('ip').value.trim(), user:$('user').value.trim()||'root', password:$('password').value,
+    nuova_chiave_host:$('nuova_chiave_host').checked,
     admin_email:$('admin_email').value.trim(),
     ingress_num:document.querySelector('input[name=ingress]:checked').value,
     ts_hostname:$('ts_hostname').value.trim()||'vps1777', ts_authkey:$('ts_authkey').value.trim(),

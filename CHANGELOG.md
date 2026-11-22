@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Gli installatori si fermano se la chiave SSH della macchina è cambiata (H99).** `deploy.sh` toglieva la voce
+  da `known_hosts` a ogni corsa e l'installer web accettava qualunque chiave. Ora la prima si accetta e si ricorda;
+  una chiave diversa chiede conferma («l'hai riformattata tu?»; senza terminale: `VPS1777_NUOVA_CHIAVE_HOST=1`;
+  nell'installer web una casella).
+
+### Aggiunto
+- **Il controllo giornaliero avvisa se i backup non escono dalla macchina.** `tools/backup-pull.sh` lascia sulla
+  VPS la data dell'ultima copia fuori macchina; se ha più di 3 giorni, o se ci sono backup e nessuna copia risulta
+  mai uscita, arriva una notifica (una, e un'altra quando torna fresca). Portarli fuori è un gesto a mano: sulla
+  macchina di riferimento l'ultima copia fuori aveva tre mesi e niente lo diceva.
+
 ## [0.98.2] — 2026-11-22
 
 ### Sicurezza
