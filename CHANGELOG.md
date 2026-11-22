@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.6] — 2026-11-22
+
 ### Cambiato
 - **Il pacchetto di runtime della release si può ricostruire e viene sempre uguale.** La ricetta è uscita da
   `release.yml` ed è in `tools/assembla-pacchetto.sh`: ordine dei file, data (quella del commit), proprietario, permessi e
