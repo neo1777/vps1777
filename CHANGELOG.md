@@ -4,9 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
-**Pannello admin, indicizzatore e Mini App riletti col catalogo di requisiti: tre fette, una sessantina di correzioni.**
+**Pannello admin, indicizzatore, Mini App e CLI riletti col catalogo di requisiti: quattro fette, un'ottantina di correzioni.**
 
 ### Sicurezza
+- **Uno snapshot interrotto non viene più usato per un rollback (H96).** Se il salvataggio dei volumi prima di un
+  update si fermava a metà, la cartella restava e risultava «la più recente»: un `rollback --with-data` avrebbe
+  ripristinato da un archivio troncato. Ora uno snapshot senza `meta.json` non conta, e quello nato a metà si toglie.
+- **Un registro delle migrazioni che non si legge ferma l'update**, invece di valere «nessuna migrazione applicata»
+  (le avrebbe rilanciate tutte). Il registro si scrive tutto o niente.
+- **Uno stato dell'updater corrotto non si perde in silenzio**: il file viene messo da parte e il giro dopo guarda la
+  salute dello stack prima di dire «già aggiornato».
 - **Un elenco delle sessioni admin che non si legge chiude, invece di aprire (H95).** Se il file dei logout era
   rotto, un cookie già chiuso tornava valido fino a 8 ore. Ora valgono solo le sessioni aperte dopo, il file viene
   messo da parte e l'audit lo dice.
@@ -26,6 +33,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - Il pannello non tiene più in memoria per sempre gli IP che hanno sbagliato la password.
 
 ### Corretto
+- La CLI non dice più «notifica mandata» se Telegram non ha risposto, né «tutti i secret entro la soglia» se ne
+  mancano di attesi; «modello verificato» si dice dopo aver riletto le impronte nel volume.
+- L'avviso di un comando fallito a mano usa il repo giusto anche con `--home`, e non afferma più che la macchina
+  «resta alla versione precedente» quando non può saperlo.
+- I download della CLI hanno un tetto ai byte; la storia degli update tiene le ultime 200 righe.
 - Un corpo JSON valido che non è un oggetto (`[1]`) faceva rispondere la Mini App con un errore interno: ora 400.
 - Lo scarico di un artefatto (pannello e link firmati) chiude la connessione verso nb1777-mcp anche se chi scarica
   se ne va prima dell'inizio.

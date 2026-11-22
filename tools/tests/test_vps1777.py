@@ -89,6 +89,9 @@ def test_snapshot_prune_with_keep_latest_survives_when_all_are_stale():
         newer.mkdir(parents=True)
         (older / "gateway-data.tar").write_text("x")
         (newer / "gateway-data.tar").write_text("x")
+        # uno snapshot è COMPLETO solo con meta.json (H96): senza, `snapshot_latest` lo ignora
+        for d in base.iterdir():
+            (d / "meta.json").write_text("{}")
         stale_ts = __import__("time").time() - 200 * 3600  # oltre il cutoff di 72h
         os.utime(older, (stale_ts, stale_ts))
         os.utime(newer, (stale_ts + 60, stale_ts + 60))  # più recente, ma comunque stale

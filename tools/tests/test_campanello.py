@@ -28,7 +28,7 @@ def _args(**kw) -> argparse.Namespace:
 @pytest.fixture
 def spia(monkeypatch):
     mandati: list[str] = []
-    monkeypatch.setattr(v, "telegram_notify", lambda repo, testo: mandati.append(testo))
+    monkeypatch.setattr(v, "telegram_notify", lambda repo, testo: mandati.append(testo) or True)
     return mandati
 
 

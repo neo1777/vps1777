@@ -4606,3 +4606,44 @@ findings:
         exit: 0
         quando: "2026-11-21"
 
+  - id: H96
+    severity: medium
+    title: "Uno snapshot pre-update interrotto restava «il più recente»: un rollback coi dati avrebbe ripristinato da un archivio troncato"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-21"
+      come: audio-esterno
+      nota: >
+        Dalla revisione della CLI fatta applicando un catalogo di requisiti con due modelli
+        diversi (uno dei due l'ha detta, in due righe: il tar troncato che resta e la scelta
+        senza guardare `meta.json`). Mai successo sulla VPS di riferimento: i due snapshot
+        presenti hanno entrambi `meta.json` (misurato il 21/11). `medium` perché tocca i dati,
+        ma serve uno snapshot fallito seguito da un rollback coi dati.
+    since: unreleased
+    why: >
+      `snapshot_create` scrive un tar per volume e, per ultimo, `meta.json`. Se un tar falliva
+      (disco pieno, processo fermato) l'update si annullava con lo stack intatto, ma la
+      cartella restava. `snapshot_latest` sceglieva la cartella più recente senza guardare se
+      era completa: un `rollback --with-data` successivo, o la ripresa di un update interrotto
+      (H93), avrebbe ripristinato i volumi da quell'archivio a metà.
+    evidence:
+      - file: tools/vps1777.py
+        contains:
+          - "def snapshot_completo(snap: Path) -> bool:"
+          - "def _togli_snapshot_incompleto(snap: Path) -> None:"
+          - "snaps = sorted((d for d in tutti if snapshot_completo(d)),"
+      - file: tools/tests/test_prova_a_fetta05.py
+        contains:
+          - "def test_uno_snapshot_senza_meta_non_e_il_piu_recente("
+          - "def test_uno_snapshot_che_fallisce_a_meta_non_resta("
+    fix: >
+      Uno snapshot senza `meta.json` non è uno snapshot: non viene scelto e non si lascia
+      ripristinare. Se un tar fallisce, la cartella nata a metà viene tolta subito.
+    prova:
+      - comando: "uv run --with pytest --with pyyaml pytest -q tools/tests/test_prova_a_fetta05.py"
+        dove: "PC"
+        output: "19 passed: la cartella senza meta.json è ignorata e rifiutata dal ripristino; il fallimento al secondo volume non lascia niente"
+        exit: 0
+        quando: "2026-11-21"
+

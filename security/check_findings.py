@@ -177,8 +177,10 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # due modelli: la rotazione del refresh proseguiva anche se la revoca non era arrivata su disco.
 # + 1 (H95, low, 21/11) = 95. Dalla stessa revisione, sul pannello admin: l'elenco delle sessioni
 # chiuse, se illeggibile, valeva «nessuna revoca».
-EXPECTED_TOTAL = 95
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 55, "low": 22}
+# + 1 (H96, medium, 21/11) = 96. Dalla stessa revisione, sulla CLI: uno snapshot pre-update
+# interrotto restava il più recente e un rollback coi dati l'avrebbe usato.
+EXPECTED_TOTAL = 96
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 56, "low": 22}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

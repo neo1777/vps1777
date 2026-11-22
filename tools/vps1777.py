@@ -15,6 +15,11 @@ Sottocomandi:
   version    versioni: tag deployato + VPS1777_VERSION dei container
   migrate    runner migrazioni (--pending | --run)
   bootstrap  cutover one-shot di un'installazione legacy (build locale → pull)
+  archive-ingest, archive-retag, archive-migra   documenti e manutenzione dell'archivio
+  indice-modello, indice-notturno, ingest-coda   ricerca per senso e coda dei caricamenti
+  campanello, avvisa-fallimento, secrets-status  avvisi e promemoria
+  memoria    il blocco di memoria servito da nb1777 (stato | mostra | importa)
+(l'elenco vero lo dà `vps1777 help`; un test lo confronta con questo)
 
 Design: docs/SELF_UPDATE_PLAN.md. Contratto migrazioni: migrations/README.md.
 """
@@ -421,15 +426,33 @@ def state_path(repo: Path) -> Path:
 
 def state_load(repo: Path) -> dict:
     p = state_path(repo)
+    vuoto = {"schema": 1, "current": None, "previous": None,
+             "previous_images": {}, "history": [], "last_check": None,
+             "last_notified_version": None, "update_in_progress": None,
+             "intent_nonces": []}
     if p.is_file():
         try:
-            return json.loads(p.read_text())
-        except json.JSONDecodeError:
-            warn(f"state.json corrotto, riparto pulito ({p})")
-    return {"schema": 1, "current": None, "previous": None,
-            "previous_images": {}, "history": [], "last_check": None,
-            "last_notified_version": None, "update_in_progress": None,
-            "intent_nonces": []}
+            dati = json.loads(p.read_text())
+            if not isinstance(dati, dict):
+                raise ValueError("non è un oggetto JSON")
+            return dati
+        except (ValueError, OSError) as exc:
+            # Si riparte, ma NON in silenzio: con lo stato se ne va `update_in_progress`, la
+            # bandierina su cui si regge la ripresa di un update interrotto. Il file rotto si
+            # tiene accanto, e lo stato nuovo dichiara di essere nato da una perdita: chi lancia
+            # un update lo vede e guarda la salute dello stack prima di dire «già aggiornato».
+            da_parte = p.with_name(p.name + ".corrotto")
+            try:
+                os.replace(p, da_parte)
+                dove = f"messo da parte in {da_parte.name}"
+            except OSError as exc2:
+                dove = f"NON messo da parte ({exc2})"
+            warn(f"state.json non leggibile ({exc}): {dove}. Riparto da uno stato vuoto.")
+            vuoto["stato_perso"] = now_iso()
+    return vuoto
+
+
+STORIA_MAX = 200        # eventi tenuti in `history` (anni di update; la pulizia delle immagini ne guarda pochi)
 
 
 def state_save(repo: Path, st: dict) -> None:
@@ -535,19 +558,20 @@ def status_write(repo: Path, **fields) -> None:
 
 # ─────────────────────────────────────────── Telegram (notifica, mai fatale)
 
-def telegram_notify(repo: Path, text: str, *, vista: str = "") -> None:
+def telegram_notify(repo: Path, text: str, *, vista: str = "") -> bool:
     """Un messaggio all'owner. Con `vista` (P18, 11/10/2026) porta un bottone che apre la
     Mini App su quella scheda (`/app?vista=…`: il fragment lo usa Telegram per l'initData),
-    solo se PUBLIC_BASE è https, come chiede Telegram per i bottoni web_app."""
+    solo se PUBLIC_BASE è https, come chiede Telegram per i bottoni web_app.
+    Torna True solo se Telegram ha accettato il messaggio: chi poi dice «mandata» lo guarda."""
     token_file = repo / "secrets" / "telegram_bot_token.txt"
     envd = env_read(repo)
     owner = envd.get("TELEGRAM_OWNER_ID", "")
     if not token_file.is_file() or not owner:
         log("telegram: token/owner assenti, notifica saltata")
-        return
+        return False
     token = token_file.read_text().strip()
     if not token:
-        return
+        return False
     # 🛡️ Round-15: questo era IL canale scoperto. Il `reason` di un update fallito
     #   porta `res.stdout`+`res.stderr` COMPLETI del container di migrazione, e
     #   usciva verso api.telegram.org senza passare da niente.
@@ -571,6 +595,8 @@ def telegram_notify(repo: Path, text: str, *, vista: str = "") -> None:
             pass
     except (urllib.error.URLError, OSError) as exc:
         warn(f"telegram: notifica fallita ({exc}) — proseguo")
+        return False
+    return True
 
 
 # ─────────────────────────────────────────── GitHub API
@@ -595,6 +621,7 @@ def latest_release(repo: Path) -> dict | None:
         if release_channel(repo) == "prerelease":
             rels = github_json("/releases?per_page=5")
             return rels[0] if rels else None
+        # `github_json` dà dict o list secondo l'endpoint; questo dà sempre un oggetto
         return github_json("/releases/latest")  # type: ignore[return-value]
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -603,13 +630,26 @@ def latest_release(repo: Path) -> dict | None:
 
 
 def release_by_tag(tag: str) -> dict:
+    # come sopra: `/releases/tags/<tag>` risponde con un oggetto
     return github_json(f"/releases/tags/{tag}")  # type: ignore[return-value]
 
 
-def download(url: str, dest: Path, timeout: int = 120) -> None:
+DOWNLOAD_MAX_BYTE = 1024 * 1024 * 1024      # nessun asset di release si avvicina a 1 GB
+
+
+def download(url: str, dest: Path, timeout: int = 120, *, massimo: int = DOWNLOAD_MAX_BYTE) -> None:
+    """Scarica `url` in `dest`, con un tetto ai byte: l'impronta si verifica DOPO, e fino a lì
+    un server che non smette di mandare dati riempirebbe il disco."""
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    scritti = 0
     with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest, "wb") as fh:
-        shutil.copyfileobj(resp, fh)
+        while blocco := resp.read(1 << 20):
+            scritti += len(blocco)
+            if scritti > massimo:
+                fh.close()
+                dest.unlink(missing_ok=True)
+                raise OSError(f"download oltre il tetto di {massimo // (1024 * 1024)} MB: {url}")
+            fh.write(blocco)
 
 
 # ─────────────────────────────────────────── versioni & semver
@@ -1058,7 +1098,7 @@ def porta_esterna_ok(repo: Path, env: dict | None = None) -> tuple[bool, str]:
                 status = r.status
         except urllib.error.HTTPError as e:
             status = e.code
-        except Exception:
+        except (urllib.error.URLError, OSError, ValueError):
             status = 0   # nessuna risposta: distinto da «non misurato» (None)
     return valuta_porta_esterna(port_map, servizi, status)
 
@@ -1159,27 +1199,46 @@ REGISTRY_VOLUME = "vps1777_gateway-data"
 REGISTRY_PATH = "state/migrations.json"  # dentro il volume
 
 
+_REGISTRO_ASSENTE = "__registro_assente__"
+
+
 def registry_read() -> dict:
+    """Il registro delle migrazioni applicate. ASSENTE (prima installazione) vale «nessuna»;
+    un registro che c'è ma non si legge NO: prima valeva «nessuna» anche lui, e le migrazioni
+    sarebbero ripartite tutte. Ora solleva `MigrationError` senza aver mutato niente."""
     res = run(["docker", "run", "--rm", "-v", f"{REGISTRY_VOLUME}:/state:ro",
                "--entrypoint", "sh", BUSYBOX,
-               "-c", f"cat /state/{REGISTRY_PATH} 2>/dev/null || echo '{{}}'"],
-              capture=True, check=False)
+               "-c", f"if [ -f /state/{REGISTRY_PATH} ]; then cat /state/{REGISTRY_PATH}; "
+                     f"else echo {_REGISTRO_ASSENTE}; fi"],
+              capture=True, check=False, timeout=120)
+    testo = (res.stdout or "").strip()
+    if res.returncode != 0:
+        raise MigrationError("registro delle migrazioni non leggibile "
+                             f"(exit {res.returncode}): {(res.stderr or '').strip()[:300]}", False)
+    if testo == _REGISTRO_ASSENTE:
+        return {"schema": 1, "applied": []}
     try:
-        data = json.loads(res.stdout.strip() or "{}")
-    except json.JSONDecodeError:
-        data = {}
-    if "applied" not in data:
-        data = {"schema": 1, "applied": []}
+        data = json.loads(testo)
+        if not isinstance(data, dict) or not isinstance(data.get("applied"), list):
+            raise ValueError("manca l'elenco `applied`")
+    except ValueError as exc:
+        raise MigrationError(
+            f"registro delle migrazioni corrotto ({exc}): non lo tratto come vuoto, le migrazioni "
+            f"ripartirebbero tutte. Guarda /state/{REGISTRY_PATH} nel volume {REGISTRY_VOLUME}.",
+            False) from exc
     return data
 
 
 def _registry_write(data: dict) -> None:
+    """Tutto o niente: temporaneo nella stessa cartella, poi rinomina. Con `cat >` sul file
+    finale un'interruzione (o il disco pieno) lasciava il registro troncato."""
     payload = json.dumps(data, indent=2, sort_keys=True)
     subprocess.run(
         ["docker", "run", "--rm", "-i", "-v", f"{REGISTRY_VOLUME}:/state",
          "--entrypoint", "sh", BUSYBOX,
-         "-c", f"mkdir -p /state/$(dirname {REGISTRY_PATH}) && cat > /state/{REGISTRY_PATH}"],
-        input=payload, text=True, check=True)
+         "-c", f"mkdir -p /state/$(dirname {REGISTRY_PATH}) && cat > /state/{REGISTRY_PATH}.tmp "
+               f"&& mv -f /state/{REGISTRY_PATH}.tmp /state/{REGISTRY_PATH}"],
+        input=payload, text=True, check=True, timeout=120)
 
 
 class MigrationError(RuntimeError):
@@ -1352,7 +1411,7 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
                    "--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
                    "--signature", str(stage / "SHA256SUMS.sig"),
                    "--certificate", str(stage / "SHA256SUMS.pem"),
-                   str(stage / "SHA256SUMS")], check=False, capture=True)
+                   str(stage / "SHA256SUMS")], check=False, capture=True, timeout=300)
         if res.returncode != 0:
             raise RuntimeError(f"cosign verify-blob fallita:\n{res.stderr}")
         ok("firma cosign verificata")
@@ -1385,6 +1444,11 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
             # Python ≥3.11.4: blocca anche symlink/device/permessi anomali
             tar.extractall(bundle, filter="data")
         except TypeError:
+            # Python senza `filter=`: quello che `filter="data"` rifiuterebbe lo si rifiuta qui
+            # (un collegamento può puntare fuori radice anche se il suo NOME sta dentro).
+            for m in tar.getmembers():
+                if not (m.isreg() or m.isdir()):
+                    raise RuntimeError(f"bundle malformato (collegamento o file speciale): {m.name}")
             tar.extractall(bundle)
 
     # Se questo update gira da root, ciò che ha appena creato deve restare
@@ -1757,12 +1821,18 @@ def snapshot_create(repo: Path, from_version: str, to_version: str) -> Path:
     snap.chmod(0o700)
     # SNAPSHOT_VOLUMES, non DATA_VOLUMES: vedi il commento su H14 in testa al
     # file — lo snapshot è in chiaro, i cookie Google non ci entrano.
-    for vol in SNAPSHOT_VOLUMES:
-        log(f"snapshot volume {vol}…")
-        run(["docker", "run", "--rm",
-             "-v", f"vps1777_{vol}:/src:ro", "-v", f"{snap}:/dst",
-             "--entrypoint", "sh", BUSYBOX,
-             "-c", f"cd /src && tar cf /dst/{vol}.tar ."], check=True)
+    try:
+        for vol in SNAPSHOT_VOLUMES:
+            log(f"snapshot volume {vol}…")
+            run(["docker", "run", "--rm",
+                 "-v", f"vps1777_{vol}:/src:ro", "-v", f"{snap}:/dst",
+                 "--entrypoint", "sh", BUSYBOX,
+                 "-c", f"cd /src && tar cf /dst/{vol}.tar ."], check=True)
+    except BaseException:
+        # Uno snapshot a metà (disco pieno, processo fermato) NON deve restare lì: era la
+        # cartella più recente, e un rollback coi dati avrebbe ripristinato da un tar troncato.
+        _togli_snapshot_incompleto(snap)
+        raise
     for vol in SNAPSHOT_EXCLUDED_VOLUMES:
         log(f"snapshot volume {vol}: ESCLUSO — {SNAPSHOT_EXCLUDED_REASON}")
     (snap / "meta.json").write_text(json.dumps({
@@ -1774,7 +1844,26 @@ def snapshot_create(repo: Path, from_version: str, to_version: str) -> Path:
     return snap
 
 
+def _togli_snapshot_incompleto(snap: Path) -> None:
+    """Toglie una cartella di snapshot nata a metà. I tar li scrive un container (root): se da
+    qui non si riesce, resta senza `meta.json` e `snapshot_latest` non la considera."""
+    try:
+        shutil.rmtree(snap)
+    except OSError:
+        run(["docker", "run", "--rm", "-v", f"{snap.parent}:/dst", "--entrypoint", "rm",
+             BUSYBOX, "-rf", f"/dst/{snap.name}"], check=False, timeout=600)
+    if snap.exists():
+        warn(f"snapshot incompleto non rimosso: {snap} (senza meta.json: non verrà usato)")
+
+
+def snapshot_completo(snap: Path) -> bool:
+    """`meta.json` si scrive per ULTIMO: se manca, i tar non sono arrivati tutti in fondo."""
+    return (snap / "meta.json").is_file()
+
+
 def snapshot_restore(repo: Path, snap: Path) -> None:
+    if not snapshot_completo(snap):
+        raise RuntimeError(f"lo snapshot {snap.name} è incompleto (manca meta.json): non lo ripristino")
     # si chiede a restore.sh esattamente ciò che lo snapshot contiene: i volumi
     # esclusi non sono lì e non vanno toccati (il volume vivo resta com'è).
     run(["bash", str(repo / "tools" / "restore.sh"), "--yes",
@@ -1787,7 +1876,12 @@ def snapshot_latest(repo: Path) -> Path | None:
         return None
     # per mtime, non per nome: i nomi iniziano con la versione (0.10.0 < 0.9.0
     # lessicograficamente) → l'ordinamento per stringa sceglierebbe il più vecchio
-    snaps = sorted((d for d in base.iterdir() if d.is_dir()),
+    # e solo quelli COMPLETI: una cartella senza meta.json è uno snapshot interrotto
+    tutti = [d for d in base.iterdir() if d.is_dir()]
+    for d in tutti:
+        if not snapshot_completo(d):
+            warn(f"snapshot incompleto ignorato: {d.name} (manca meta.json)")
+    snaps = sorted((d for d in tutti if snapshot_completo(d)),
                    key=lambda d: d.stat().st_mtime, reverse=True)
     return snaps[0] if snaps else None
 
@@ -3459,7 +3553,7 @@ def cmd_update(repo: Path, args) -> int:
     cur = current_version(repo)
 
     # 1 — preflight
-    if run(["docker", "info"], check=False, capture=True).returncode != 0:
+    if run(["docker", "info"], check=False, capture=True, timeout=60).returncode != 0:
         die("docker non attivo")
     if norm_ver(cur) == "dev":
         die("installazione in modalità dev (immagini locali): l'update gestito "
@@ -3491,6 +3585,18 @@ def cmd_update(repo: Path, args) -> int:
         return 0
     target = norm_ver(rel["tag_name"])
     if norm_ver(cur) == target:
+        if st.get("stato_perso"):
+            # lo stato è ripartito da vuoto (era illeggibile): se c'era un update interrotto la
+            # sua bandierina è andata persa. Prima di dire «già aggiornato» si guarda lo stack.
+            sano, perche = health_gate(repo) if stack_running(repo) else (False, "lo stack è fermo")
+            if not sano:
+                die(f"il tag è già a v{target} ma lo stack non è sano ({perche}), e lo stato "
+                    f"dell'updater era andato perso il {st['stato_perso']}: non posso sapere se un "
+                    "update è rimasto a metà. Guarda `vps1777 status --probe`; per tornare "
+                    "indietro: `vps1777 rollback`.", 2)
+            st.pop("stato_perso", None)
+            st["current"] = target
+            state_save(repo, st)
         ok(f"già aggiornato (v{target})")
         return 0
     # Version-floor anti-downgrade sul canale NON interattivo (pulsante admin
@@ -3907,6 +4013,7 @@ def cmd_update(repo: Path, args) -> int:
     st["update_in_progress"] = None
     st["history"].append({"event": "updated", "from": cur, "to": target,
                           "at": now_iso()})
+    st["history"] = st["history"][-STORIA_MAX:]     # una riga a update: senza tetto cresceva per sempre
     state_save(repo, st)
     prune_old_images(repo, {target, cur}, st["history"])
     snapshot_prune(repo, keep=snap)
@@ -4266,9 +4373,11 @@ def scarica_modello(dest: Path, *, sostituisci: bool = False,
         try:
             with apri(url, timeout=60) as r, open(parz, "wb") as f:
                 while blocco := r.read(1 << 20):
+                    n += len(blocco)
+                    if n > byte:        # più dati dell'atteso: inutile scriverli per scoprirlo alla fine
+                        raise OSError(f"ricevuti più di {byte} byte")
                     f.write(blocco)
                     h.update(blocco)
-                    n += len(blocco)
         except (OSError, urllib.error.URLError) as exc:
             parz.unlink(missing_ok=True)
             die(f"{nome}: download fallito ({exc}). Niente è stato sostituito; riprova.")
@@ -4314,6 +4423,16 @@ def cmd_indice_modello(repo: Path, args) -> int:
         run([*cc, "exec", "-T", "gateway", "mkdir", "-p", DIR_MODELLO_VOLUME])
         for nome, *_ in MODELLO_INDICE["file"]:
             run([*cc, "cp", str(Path(tmp) / nome), f"gateway:{DIR_MODELLO_VOLUME}/{nome}"])
+    # «verificato» si dice di ciò che sta NEL VOLUME: le impronte si rileggono lì dopo la copia
+    # (prima si verificava solo il file scaricato, e la riga qui sotto lo dava per arrivato).
+    dopo = run([*cc, "exec", "-T", "gateway", "sh", "-lc",
+                f"cd {DIR_MODELLO_VOLUME} && sha256sum model.onnx tokenizer.json"],
+               capture=True, check=False)
+    nel_volume = {r.split()[1]: r.split()[0] for r in (dopo.stdout or "").splitlines()
+                  if len(r.split()) == 2}
+    if nel_volume != attesi:
+        die(f"il modello copiato in {DIR_MODELLO_VOLUME} non ha le impronte attese "
+            f"({sorted(n for n in attesi if nel_volume.get(n) != attesi[n])}): copia non riuscita, riprova.")
     if sha_volume:
         # un modello era già lì e archive-mcp potrebbe averlo in memoria: lo si riavvia
         # perché la prossima domanda usi il file nuovo, non la sessione vecchia.
@@ -4616,7 +4735,8 @@ def _un_lavoro_della_coda(repo: Path, cc: list[str], p: Path) -> str:
         if INGEST_ID_RE.match(p.stem):
             _scrivi_esito_ingest(repo, p.stem, {"stato": "errore", "errore": motivo})
         return "guasto"
-    assert isinstance(d, dict)
+    if not isinstance(d, dict):     # `motivo` è vuoto solo se l'intent è stato letto: difesa
+        return "guasto"
     jid = d["id"]
     base = {k: d.get(k, "") for k in ("db", "file", "by", "accodato")}
     _scrivi_esito_ingest(repo, jid, {**base, "stato": "in-corso", "iniziato": now_iso()})
@@ -5293,7 +5413,10 @@ def cmd_campanello(repo: Path, args) -> int:
     if args.prova:
         print(testo)
         return 0
-    telegram_notify(repo, testo)
+    if not telegram_notify(repo, testo):
+        # non si registra come suonato: il prossimo giro riprova con lo stesso conto
+        warn("campanello: notifica NON mandata (Telegram non raggiunto o non configurato)")
+        return 1
     st["campanello"] = {"conto": conto, "quando": args.quando or now_iso()}
     state_save(repo, st)
     ok("campanello: notifica mandata")
@@ -5400,7 +5523,7 @@ def cmd_memoria(repo: Path, args) -> int:
     sh = (f"mkdir -p {MEMORIA_DIR_NEL_CONTAINER} && cat > {dest}.parziale && "
           f"mv -f {dest}.parziale {dest} && wc -c < {dest}")
     res = subprocess.run(memoria_exec_cmd(repo, sh), input=testo, capture_output=True,
-                         text=True, check=False)
+                         text=True, check=False, timeout=120)
     if res.returncode != 0:
         die(f"importazione fallita: {res.stderr.strip() or res.stdout.strip()}")
     scritti = int((res.stdout.strip() or "0").split()[-1])
@@ -5528,6 +5651,11 @@ def cmd_secrets_status(repo: Path, args) -> int:
             telegram_notify(repo, "🔑 vps1777 — secret da ruotare:\n• " + "\n• ".join(overdue)
                             + "\n\nSe lo farai più avanti: Pannello → Sistema → Posticipa.",
                             vista="sistema")
+    elif mancanti:
+        # i presenti sono entro la soglia, ma di quelli che mancano non si sa niente: «tutti a
+        # posto» sarebbe falso. Si esce 0 lo stesso (scelta già presa e provata: con almeno un
+        # secret osservato il comando resta eseguibile; i mancanti stanno nello stato e nel pannello).
+        warn(f"secret attesi e non trovati: {', '.join(mancanti)} — gli altri sono entro la soglia")
     else:
         ok("tutti i secret entro la soglia")
     return 0
@@ -5671,10 +5799,15 @@ def cmd_help(repo: Path, args) -> int:
     return 0
 
 
+_REPO_RISOLTO: Path | None = None
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     repo = find_repo(args.home)
+    global _REPO_RISOLTO
+    _REPO_RISOLTO = repo        # per l'avviso finale di `_esci`: lo stesso repo, anche con --home
     os.chdir(repo)
     # Appena il repo è noto, `log`/`ok`/`warn`/`die` e le notifiche smettono di
     # poter stampare un segreto. Prima di qui `_redigi` è un no-op — dichiarato
@@ -5748,15 +5881,16 @@ def _esci(codice: int) -> None:
         cmd = " ".join(sys.argv[1:]) or "(nessun argomento)"
         try:
             telegram_notify(
-                # `find_repo(None)` — la firma verificata, non indovinata: qui si
-                # arriva DOPO che main() ha già risolto il repo, quindi la stessa
-                # ricerca non può fallire in modo nuovo.
-                find_repo(None),
+                # il repo che `main()` ha già risolto (con `--home` se c'era): prima si
+                # ricercava da capo senza `--home`, e l'avviso poteva partire col token di
+                # un altro repo
+                _REPO_RISOLTO or find_repo(None),
                 # Qui si arriva SOLO a mano (sotto systemd avvisa OnFailure=): il
                 # dettaglio sta nel terminale, non nel journal di una unit.
                 f"🔴 vps1777 — «{cmd}» è USCITO {codice} (lanciato a mano).\n"
-                f"Se era un update: la macchina NON è stata aggiornata e resta "
-                f"alla versione precedente.\n"
+                f"Se era un update: la macchina NON è stata aggiornata. Di norma resta alla "
+                f"versione precedente; se l'output parla di rollback fallito, lo stato va "
+                f"guardato a mano (`vps1777 status --probe`).\n"
                 f"Dettaglio: nell'output del terminale da cui l'hai lanciato (per un "
                 f"update anche onboarding/update_journal.ndjson). Non in journalctl: "
                 f"lanciata a mano, la CLI non scrive nel journal di systemd.",
