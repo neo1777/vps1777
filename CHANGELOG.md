@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.2] — 2026-11-22
+
 ### Sicurezza
 - **I valori del pannello non entrano più nel testo di uno script eseguito sulla macchina senza un controllo vero
   (H97, completa H9).** `deploy.sh --apply` ne controllava la forma con `echo | grep`, che giudica riga per riga:
