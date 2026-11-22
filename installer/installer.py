@@ -231,7 +231,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/check":
             p = self._read_json()
-            res = engine.check(p.get("ip", ""), p.get("user", "root"), p.get("password", ""))
+            res = engine.check(p.get("ip", ""), p.get("user", "root"), p.get("password", ""),
+                               nuova_chiave_host=bool(p.get("nuova_chiave_host")))
             self._send(200, json.dumps(res).encode(), "application/json")
         elif self.path == "/api/check-telegram":
             p = self._read_json()

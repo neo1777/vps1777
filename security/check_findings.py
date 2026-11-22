@@ -181,8 +181,9 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # interrotto restava il più recente e un rollback coi dati l'avrebbe usato.
 # + 2 (H97 medium, H98 low, 22/11) = 98. Dalla stessa revisione, sugli installatori: i valori
 # di pending.json che entravano in uno script remoto, e l'installer locale senza Host/Origin.
-EXPECTED_TOTAL = 98
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 57, "low": 23}
+# + 1 (H99, low, 22/11) = 99. La chiave SSH della macchina accettata a ogni corsa dagli installatori.
+EXPECTED_TOTAL = 99
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 57, "low": 24}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

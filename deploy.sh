@@ -212,11 +212,29 @@ else
   PIPE_IN() { ssh "${SSH_OPTS[@]}" "$VPS_USER@$VPS_IP" "$@"; }
 fi
 
-# pulizia known_hosts stale (VPS riformattata = nuova host key)
-ssh-keygen -f "$HOME/.ssh/known_hosts" -R "$VPS_IP" >/dev/null 2>&1 || true
-
+# LA CHIAVE DELLA MACCHINA. Prima qui si toglieva la voce da known_hosts a OGNI corsa («VPS
+# riformattata = nuova host key»): comodo, ma così una chiave cambiata per un altro motivo —
+# qualcuno fra te e la macchina — passava senza una riga, proprio dove viaggia la password di
+# root. Ora: alla prima connessione la chiave si accetta (accept-new) e ssh la ricorda; se è
+# DIVERSA da quella ricordata ci si ferma e si chiede. Senza terminale (NONINTERACTIVE) la
+# conferma è VPS1777_NUOVA_CHIAVE_HOST=1.
 log "Test connessione..."
-SSH 'echo ok' >/dev/null 2>&1 || die "Connessione fallita. Verifica IP/user/password e che la VPS sia up."
+if ! ERR_SSH="$(SSH 'echo ok' 2>&1 >/dev/null)"; then
+  if grep -qE 'REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification failed' <<<"$ERR_SSH"; then
+    warn "La chiave SSH di $VPS_IP è DIVERSA da quella vista l'ultima volta."
+    warn "  Se hai riformattato o reinstallato la macchina è normale."
+    warn "  Se NON l'hai fatto, fermati: qualcuno potrebbe essersi messo in mezzo."
+    if [ "${VPS1777_NUOVA_CHIAVE_HOST:-0}" = "1" ] \
+       || { [ "${NONINTERACTIVE:-0}" != "1" ] && confirm "L'hai riformattata tu? Accetto la chiave nuova"; }; then
+      ssh-keygen -f "$HOME/.ssh/known_hosts" -R "$VPS_IP" >/dev/null 2>&1 || true
+      SSH 'echo ok' >/dev/null 2>&1 || die "Connessione fallita anche con la chiave nuova. Verifica IP/user/password."
+    else
+      die "Mi fermo: chiave della macchina cambiata e non confermata (per confermare senza terminale: VPS1777_NUOVA_CHIAVE_HOST=1)."
+    fi
+  else
+    die "Connessione fallita. Verifica IP/user/password e che la VPS sia up."
+  fi
+fi
 # SC2016 dice «negli apici singoli non espande»: è ESATTAMENTE lo scopo.
 # `$PRETTY_NAME` e `$(uname -m)` devono valutarsi sulla VPS, non qui — se li
 # espandessimo in locale leggeremmo il sistema operativo di CHI LANCIA il deploy.
