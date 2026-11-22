@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.0] — 2026-11-22
+
 **Pannello admin, indicizzatore, Mini App e CLI riletti col catalogo di requisiti: quattro fette, un'ottantina di correzioni.**
 
 ### Sicurezza
