@@ -4662,7 +4662,7 @@ findings:
         L'a-capo l'ho trovato rileggendo quella riga: `echo "$V" | grep -qE` giudica riga per
         riga. Mai sfruttato che si sappia. `medium` perché porta da «gateway compromesso» a
         «comandi sulla macchina», ma serve che il proprietario lanci `deploy.sh --apply`.
-    since: unreleased
+    since: v0.98.2
     why: >
       `deploy.sh --apply` legge `onboarding/pending.json`, che scrive il gateway (un servizio
       esposto), e ne interpola i valori fra apici in uno script passato a `bash -s` come
@@ -4707,7 +4707,7 @@ findings:
         indirizzo l'ho aggiunta rileggendo: mancava anche il controllo di `Host`. Mai
         successo che si sappia. `low`: serve che chi installa apra una pagina ostile nello
         stesso browser durante i minuti dell'installazione.
-    since: unreleased
+    since: v0.98.2
     why: >
       `installer/installer.py` ascolta su 127.0.0.1 ma non guardava né `Host` né `Origin`.
       Un browser raggiunge 127.0.0.1 anche per conto di un'altra pagina: quella pagina poteva
