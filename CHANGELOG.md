@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.4] — 2026-11-22
+
 ### Corretto
 - **Il controllo di salute di Cloudflare Tunnel poteva solo fallire.** Usava una shell (`CMD-SHELL … | grep`) che
   nell'immagine di cloudflared non esiste: il container restava «unhealthy» anche col tunnel su. Ora usa
