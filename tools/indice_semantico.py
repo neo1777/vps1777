@@ -95,9 +95,17 @@ def scarica(host: str, container: str, remoto: str, dest_dir: Path, esegui: Eseg
 
 
 def esiste_remoto(host: str, container: str, remoto: str, esegui: Esegui) -> bool:
-    r = esegui(_ssh(host, f"docker exec {shlex.quote(container)} test -f {shlex.quote(remoto)}"),
-               capture_output=True)
-    return r.returncode == 0
+    """True se c'è, False se non c'è; se non si riesce a saperlo solleva. Prima qualunque errore
+    (ssh che non risponde, container fermo) valeva «non c'è», e con `--tutto` si ricostruiva da
+    zero un indice che c'era."""
+    r = esegui(_ssh(host, f"docker exec {shlex.quote(container)} sh -c "
+                          + shlex.quote(f"test -f {shlex.quote(remoto)} && echo c-e || echo non-c-e")),
+               capture_output=True, text=True)
+    esito = (r.stdout or "").strip()
+    if r.returncode != 0 or esito not in ("c-e", "non-c-e"):
+        raise Fallito(f"non ho potuto sapere se {remoto} esiste sulla VPS "
+                      f"(exit {r.returncode}): {(r.stderr or '').strip()[:200]}")
+    return esito == "c-e"
 
 
 def sha_remoto(host: str, container: str, remoto: str, esegui: Esegui) -> str:
@@ -147,6 +155,12 @@ def carica(host: str, container: str, vec: Path, esegui: Esegui) -> None:
     if mv.returncode != 0:
         raise Fallito(f"il file è arrivato come {arrivo} ma la rinomina è fallita: "
                       "archive-mcp continua a leggere l'indice di prima.")
+    # ciò che conta è il file ARRIVATO: se l'impronta sulla VPS non è quella del file locale,
+    # il caricamento non è riuscito anche se ogni comando è uscito 0
+    arrivato = sha_remoto(host, container, f"{DIR_DB}/{vec.name}", esegui)
+    if arrivato != _sha256(vec):
+        raise Fallito(f"{vec.name} è arrivato sulla VPS con un'impronta diversa da quella locale: "
+                      "il file sul server NON è quello costruito qui. Ricarica.")
 
 
 def _stampa(*parti: object) -> None:

@@ -4,6 +4,26 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+**Gli strumenti attorno alla CLI riletti col catalogo di requisiti: backup, restore, rotazione dei segreti, hook.**
+
+### Sicurezza
+- **Un backup con una copia fallita non viene più scritto (completa H87).** Se la copia dei segreti, del `.env` o dei
+  marchi della mappa dei temi falliva, lo script avvisava, stampava «Config + secrets archiviati» e usciva 0: un
+  backup senza i segreti non si ripristina, e senza i marchi un tema riservato torna visibile dopo il restore. Ora
+  una copia fallita di un file che c'è ferma il backup, come già un volume non salvato.
+- **Il restore guarda che lo stack sia davvero fermo prima di svuotare i volumi.** Se `docker compose down` falliva,
+  l'errore era zittito e si proseguiva.
+- **La rotazione dei segreti scrive tutto o niente, e il token del bot incollato non resta sullo schermo.**
+- **L'hook di commit non porta più un percorso personale**: un gate locale più severo si dichiara con
+  `git config vps1777.gate-locale <percorso>`; senza, vale quello del repo. In più rifiuta i marcatori di conflitto.
+
+### Cambiato
+- **Tre controlli dei documenti non escono più verdi a vuoto**: con zero cose esaminate l'esito è «non misurato» (2).
+- Caricare un indice per senso sulla VPS rilegge l'impronta del file arrivato; se non si riesce a sapere se l'indice
+  remoto esiste ci si ferma, invece di ricostruirlo da zero.
+- Il pull dei backup sul PC ha un tempo massimo e non lascia un archivio troncato col nome definitivo.
+- I due README non usano più «sicuro» e «secure» senza una prova accanto; un test tiene la regola.
+
 ## [0.98.0] — 2026-11-22
 
 **Pannello admin, indicizzatore, Mini App e CLI riletti col catalogo di requisiti: quattro fette, un'ottantina di correzioni.**

@@ -64,11 +64,17 @@ def verdetto(pin: str, pypi: dict, *, oggi: dt.date) -> dict:
             "dal": dal.isoformat(), "messaggio": messaggio}
 
 
+PYPI_MAX_BYTE = 20 * 1024 * 1024    # il JSON di un pacchetto con molte release sta in pochi MB
+
+
 def _leggi_pypi(da_file: str) -> dict:
     if da_file:
         return json.loads(Path(da_file).read_text(encoding="utf-8"))
     with urllib.request.urlopen(f"https://pypi.org/pypi/{PACCHETTO}/json", timeout=30) as r:
-        return json.loads(r.read())
+        grezzo = r.read(PYPI_MAX_BYTE + 1)
+    if len(grezzo) > PYPI_MAX_BYTE:
+        raise ValueError(f"risposta di PyPI oltre {PYPI_MAX_BYTE // (1024 * 1024)} MB: non la leggo")
+    return json.loads(grezzo)
 
 
 def main(argv: list[str] | None = None) -> int:

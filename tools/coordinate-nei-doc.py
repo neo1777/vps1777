@@ -159,6 +159,10 @@ def main() -> int:
     if guasti:
         print(f"\n⛔ {len(guasti)} su {tot} mandano nel posto sbagliato.")
         return 1
+    if tot == 0:
+        print("⚪ NON MISURATO: nessuna coordinata `file:riga` trovata nei documenti. Zero su zero "
+              "non è un verde: o i documenti non ne hanno più, o non li ho letti.")
+        return 2
     print(f"✅ {tot} su {tot} puntano dentro il file che nominano.\n"
           "   ⚠️ NON dice che puntino alla riga GIUSTA: vedi il limite in testa al file.")
     return 0

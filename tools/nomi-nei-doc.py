@@ -136,9 +136,11 @@ def controlla(rel: str, testo: str, c: dict) -> list[str]:
 def main() -> int:
     c = contesto()
     errori: list[str] = []
+    esaminati = 0
     for f in _git_ls("*.md") + [".env.example"]:
         if f.startswith(FUORI) or not (RADICE / f).is_file():
             continue
+        esaminati += 1
         errori += controlla(f, (RADICE / f).read_text(encoding="utf-8"), c)
     for e in errori:
         print(f"  🔴 {e}")
@@ -146,7 +148,12 @@ def main() -> int:
         print(f"⛔ {len(errori)} nomi che la documentazione cita e il codice non ha. Allinea il "
               "documento; se la riga racconta la storia, dillo nella riga («tolto», «fino alla…»).")
         return 1
-    print("✅ ogni comando, flag, variabile, tool e comando del bot citato nei doc esiste")
+    if not esaminati:
+        print("⚪ NON MISURATO: nessun documento esaminato (git non ha dato i file?). Zero "
+              "documenti non è un verde.")
+        return 2
+    print(f"✅ ogni comando, flag, variabile, tool e comando del bot citato nei {esaminati} "
+          "documenti esiste")
     return 0
 
 
