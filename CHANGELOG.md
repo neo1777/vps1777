@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.3] — 2026-11-22
+
 ### Sicurezza
 - **Gli installatori si fermano se la chiave SSH della macchina è cambiata (H99).** `deploy.sh` toglieva la voce
   da `known_hosts` a ogni corsa e l'installer web accettava qualunque chiave. Ora la prima si accetta e si ricorda;
