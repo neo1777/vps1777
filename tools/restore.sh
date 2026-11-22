@@ -194,6 +194,12 @@ fi
 
 log "Stop stack..."
 docker compose down --remove-orphans 2>/dev/null || true
+# Il `down` può fallire (e l'errore sopra è zittito): prima di svuotare i volumi si GUARDA che
+# non giri più niente. Un restore con un servizio acceso scrive sopra dati che qualcuno sta usando.
+# (se `ps` stesso non risponde, per esempio senza un compose in questa cartella, non c'è uno
+# stack di cui parlare: conta zero)
+ancora_su="$( (docker compose ps -q 2>/dev/null || true) | wc -l)"
+[ "$ancora_su" -eq 0 ] || die "lo stack non si è fermato ($ancora_su container ancora attivi): non tocco i volumi. Fermalo a mano (docker compose down) e rilancia."
 
 # ───── 2. decifra / leggi input ─────
 TMP="$(mktemp -d)"

@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-# BOZZA per tools/verify-features.py nel repo vps1777 — penna: b82df434 (schema+verificatore).
-# Da mergiare in main da 71d540e6 (corsia release). Vedi sequenza anti-cozzo.
 """verify-features.py — il verificatore del ledger delle feature (features.yaml).
 
 Gira in CI (GitHub Actions) — NON è un daemon, NON gira in produzione né sul PC utente.
@@ -40,8 +38,11 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    sys.exit("verify-features: manca PyYAML (pip install pyyaml / uv add pyyaml)")
+    # 2 = non ho potuto misurare (manca uno strumento), non 1 = ho misurato ed è rosso
+    print("verify-features: manca PyYAML (pip install pyyaml / uv add pyyaml)", file=sys.stderr)
+    sys.exit(2)
 
+CMD_TIMEOUT_S = 600     # un `verify: cmd` che non finisce non tiene ferma la CI
 REQUIRED = ("id", "nome", "cosa", "dove", "status", "verify")
 STATUSES = ("active-default", "opt-in", "deferred", "removed")
 # 🔴 CATEGORIE ENTRATE NELL'ENUMERAZIONE DOPO CHE `baseline_completo` ERA GIÀ `true`.
@@ -175,7 +176,12 @@ def run_check(spec: dict, repo: Path) -> tuple[bool, str]:
         return False, f"tool MCP {arg['service']}/{want} NON registrato"
 
     if kind == "cmd":
-        r = subprocess.run(arg, shell=True, cwd=repo, capture_output=True, text=True)
+        # `arg` viene dal ledger del repo (features.yaml), che passa da revisione come il codice
+        try:
+            r = subprocess.run(arg, shell=True, cwd=repo, capture_output=True, text=True,
+                               timeout=CMD_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            return False, f"`{arg}` non ha finito entro {CMD_TIMEOUT_S} s"
         return r.returncode == 0, f"`{arg}` exit {r.returncode}"
 
     return False, f"tipo di verify sconosciuto: {kind}"
@@ -370,7 +376,7 @@ def main() -> int:
         print("ERRORE: il ledger non ha nessuna voce in `features`: non ho niente da "
               "verificare, e «niente» non è un verde.", file=sys.stderr)
         return 2
-    oggi = datetime.date.today()
+    oggi = datetime.datetime.now(datetime.timezone.utc).date()   # le scadenze si leggono in UTC
 
     hard_fail: list[str] = []      # fanno uscire != 0
     surveil: list[str] = []        # solo segnalati

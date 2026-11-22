@@ -34,7 +34,11 @@ fi
 command -v rsync >/dev/null || { echo "[✗] rsync non installato" >&2; exit 1; }
 
 echo "[*] pull da $HOST:$REMOTE_REPO/backups/ → $DEST/"
-rsync -a --partial --human-readable --info=progress2,stats1 \
+# `--timeout`: una connessione che si pianta non resta appesa per sempre. `--partial-dir`: un
+# trasferimento interrotto lascia il pezzo in una cartella a parte, non un `.tar.age` troncato
+# col nome definitivo, che sembrerebbe un backup buono.
+rsync -a --partial --partial-dir=.rsync-parziale --timeout=300 \
+  -e "ssh -o ConnectTimeout=20" --human-readable --info=progress2,stats1 \
   --include='/vps1777-*.tar.age' --include='/vps1777-*.tar.age.meta' \
   --include='/archivio/' --include='/archivio/vps1777-archivio-*.tar.age' \
   --include='/archivio/vps1777-archivio-*.tar.age.meta' \

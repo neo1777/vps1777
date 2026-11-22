@@ -49,7 +49,12 @@ class VpsFinta:
             (self.lavoro / "arch.vec.db").write_bytes(b"indice-remoto")
             return ok
         if "test -f" in testo:
-            return subprocess.CompletedProcess(cmd, 0 if self.vec_remoto else 1, "", "")
+            # tre esiti: c'è, non c'è, non lo so (qui la VPS risponde sempre)
+            return subprocess.CompletedProcess(cmd, 0, "c-e\n" if self.vec_remoto else "non-c-e\n", "")
+        if "sha256sum" in testo and "arch.vec.db" in testo:
+            # dopo il caricamento si rilegge l'impronta dell'indice arrivato: qui arriva intero
+            sha = hashlib.sha256((self.lavoro / "arch.vec.db").read_bytes()).hexdigest()
+            return subprocess.CompletedProcess(cmd, 0, f"{sha}  /var/lib/archive/db/arch.vec.db\n", "")
         if "sha256sum" in testo:
             sha = hashlib.sha256((self.lavoro / "arch.db").read_bytes()).hexdigest()
             if self.db_cambiato:

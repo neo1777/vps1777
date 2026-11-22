@@ -197,6 +197,10 @@ def main() -> int:
             print(f"    {p:44s} ← {', '.join(sorted(fs))}")
         print("\n  Se è una citazione esterna o un template, dichiaralo in ATTESI con la ragione.")
         return 1
+    if not sum(conteggi.values()):
+        print("\n  ⚪ NON MISURATO: nessun riferimento esaminato (git non ha dato i file, o i "
+              "documenti non ne contengono). Zero esaminati non è un verde.")
+        return 2
     print("\n  ✅ nessun riferimento introvabile.")
     print("     (le eccezioni dichiarate in ATTESI sono " + str(len(ATTESI)) + ", ognuna con la sua ragione)")
     return 0

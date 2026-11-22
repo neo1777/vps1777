@@ -134,7 +134,11 @@ avvisa_ramo
 #   `security/check_no_leaks.py`: guarda tutti i file tracciati e non le sole righe
 #   aggiunte, ma è lo stesso verdetto che la CI darebbe dopo il push.
 GATE="$(git rev-parse --show-toplevel 2>/dev/null)/gate-antileak.py"
-[ -f "$GATE" ] || GATE="$HOME/Scrivania/mcp_dash/_chat/gate-antileak.py"
+# Un gate più severo tenuto FUORI dal repo (legge le sole righe aggiunte) si dichiara nella
+# configurazione locale di git, che non è versionata:
+#   git config vps1777.gate-locale /percorso/del/gate.py
+# Qui non c'è nessun percorso personale: un clone qualunque passa al gate del repo (③).
+[ -f "$GATE" ] || GATE="$(git config --get vps1777.gate-locale 2>/dev/null || true)"
 _GATE_CI="$(git rev-parse --show-toplevel 2>/dev/null)/security/check_no_leaks.py"
 if [ ! -f "$GATE" ] && [ -f "$_GATE_CI" ] && command -v python3 >/dev/null 2>&1; then
   if ! python3 "$_GATE_CI" >&2; then
@@ -190,6 +194,21 @@ else
   printf '    (scelte/, msg/, e ciò che copiate a mano: non passano da qui)\n' >&2
   printf '    NotebookLM: coperto altrove — scripts/impacchetta-repo.py chiama il gate\n' >&2
   printf '    da sé e RIFIUTA di scrivere se trova qualcosa (regola-5).\n' >&2
+fi
+
+# ───────────────────────────────────────────────────────────────────────────────
+# MARCATORI DI CONFLITTO nelle righe che entrano
+#
+# Un merge risolto a metà lascia `<<<<<<<`, `=======`, `>>>>>>>` in un file: nessuno dei gate
+# qui sotto li cerca (shellcheck e ruff guardano solo .sh e .py), e in un YAML o in un
+# Markdown entrerebbero in git senza un fiato. Si guardano le sole righe AGGIUNTE.
+_CONFLITTI="$(git diff --cached -U0 --diff-filter=AM 2>/dev/null \
+  | grep -E '^\+(<<<<<<< |>>>>>>> |=======$)' | head -5 || true)"
+if [ -n "$_CONFLITTI" ]; then
+  printf '\n%s[✗] marcatori di conflitto nelle righe che stai committando%s\n' "$R" "$Z" >&2
+  printf '%s\n' "$_CONFLITTI" >&2
+  printf '     Risolvi il merge fino in fondo. Se è voluto: git commit --no-verify\n\n' >&2
+  exit 1
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -127,6 +127,21 @@ _dump_fallito() {   # $1 = volume; l'errore di tar è in $TMP/.tar-err
   DUMP_FALLITI_NOMI="$DUMP_FALLITI_NOMI $1"
   warn "    dump $1 FALLITO: $(head -c 300 "$TMP/.tar-err" 2>/dev/null | tr '\n' ' ')"
 }
+# Lo stesso per i FILE che vanno nel core (marchi dei temi, .env, compose, secrets): se il file c'è
+# e la copia fallisce, il backup non si scrive. Prima c'era un `warn` (o un `|| true`) e poi un
+# «archiviati» incondizionato: un backup senza i segreti non si ripristina, e senza i marchi un
+# tema riservato torna visibile dopo il restore.
+COPIE_FALLITE=0
+COPIE_FALLITE_NOMI=""
+_copia_o_fallisce() {   # $1 = cosa (per il messaggio); $2… = argomenti di `cp -a`
+  local cosa="$1"; shift
+  if ! cp -a "$@" 2>"$TMP/.cp-err"; then
+    COPIE_FALLITE=$((COPIE_FALLITE + 1))
+    COPIE_FALLITE_NOMI="$COPIE_FALLITE_NOMI $cosa"
+    warn "    copia di $cosa FALLITA: $(head -c 300 "$TMP/.cp-err" 2>/dev/null | tr '\n' ' ')"
+    return 1
+  fi
+}
 
 # ╔═ SOLO SE STIAMO CREANDO UN BACKUP ════════════════════════════════════════╗
 # Le sezioni «prerequisiti», «recipients» e 1-4 restano NON indentate dentro
@@ -381,9 +396,12 @@ for logico in $VOLUMI_ARCHIVIO; do
   temidir="${BACKUP_VOLUMES_DIR:-}/$logico/temi"
   if [ -f "$temidir/marchi.json" ]; then
     mkdir -p "$TMP/temi"
-    cp -a "$temidir/marchi.json" "$TMP/temi/" 2>/dev/null || warn "marchi dei temi non copiati"
-    cp -a "$temidir/stato.json" "$TMP/temi/" 2>/dev/null || warn "stato della mappa dei temi non copiato"
-    ok "marchi della mappa dei temi nel core (temi/)"
+    if _copia_o_fallisce "temi/marchi.json" "$temidir/marchi.json" "$TMP/temi/"; then
+      ok "marchi della mappa dei temi nel core (temi/)"
+    fi
+    if [ -f "$temidir/stato.json" ]; then
+      _copia_o_fallisce "temi/stato.json" "$temidir/stato.json" "$TMP/temi/" || true
+    fi
   fi
 done
 if [ "$n_descr" -gt 0 ]; then
@@ -395,11 +413,19 @@ fi
 # ───── 2. config + secrets ─────
 log "Archivio config + secrets..."
 mkdir -p "$TMP/config"
-cp -a .env "$TMP/config/" 2>/dev/null || warn ".env mancante"
-cp -a compose*.yaml "$TMP/config/" 2>/dev/null || true
-cp -a ingress "$TMP/config/" 2>/dev/null || true
+# Ciò che NON c'è si dice (warn); ciò che c'è e non si copia fa fallire il backup.
+if [ -f .env ]; then _copia_o_fallisce ".env" .env "$TMP/config/" || true; else warn ".env mancante"; fi
+if compgen -G "compose*.yaml" >/dev/null; then
+  _copia_o_fallisce "compose*.yaml" compose*.yaml "$TMP/config/" || true
+fi
+if [ -d ingress ]; then _copia_o_fallisce "ingress/" ingress "$TMP/config/" || true; fi
 mkdir -p "$TMP/secrets"
-cp -a secrets/*.txt "$TMP/secrets/" 2>/dev/null || warn "Nessun secret"
+if compgen -G "secrets/*.txt" >/dev/null; then
+  _copia_o_fallisce "secrets/*.txt" secrets/*.txt "$TMP/secrets/" || true
+else
+  warn "Nessun secret in secrets/"
+fi
+[ "$COPIE_FALLITE" -eq 0 ] || die "$COPIE_FALLITE copie fallite:$COPIE_FALLITE_NOMI. Questo backup NON viene scritto: sarebbe una copia incompleta che sembra buona."
 ok "Config + secrets archiviati"
 
 # ───── 3. metadata ─────

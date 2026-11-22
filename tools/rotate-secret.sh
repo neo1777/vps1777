@@ -27,6 +27,15 @@ ok()   { printf '%s[✓]%s %s\n' "$C_OK" "$C_R" "$*"; }
 warn() { printf '%s[!]%s %s\n' "$C_W"  "$C_R" "$*"; }
 die()  { printf '%s[✗]%s %s\n' "$C_E"  "$C_R" "$*" >&2; exit 1; }
 
+# Tutto o niente, e mai leggibile da altri: un `echo > FILE` interrotto lasciava un segreto
+# troncato al posto di quello buono. Il temporaneo nasce a 600 nella stessa cartella.
+scrivi_segreto() {   # $1 = file, $2 = valore
+  local tmp
+  tmp="$(mktemp "$(dirname "$1")/.$(basename "$1").XXXXXX")"
+  chmod 600 "$tmp"
+  printf '%s' "$2" > "$tmp"
+  mv -f "$tmp" "$1"
+}
 gen_random() { python3 -c "import secrets; print(secrets.token_urlsafe($1))"; }
 gen_pass()   { python3 -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range($1)))"; }
 
@@ -113,8 +122,7 @@ case "$WHICH" in
     read -r -p "Procedo? [s/N]: " ack
     case "$ack" in s|S|si|SI|y|Y|yes|YES) ;; *) die "Annullato" ;; esac
     NEW=$(gen_random 24)
-    echo -n "$NEW" > "$FILE"
-    chmod 600 "$FILE"
+    scrivi_segreto "$FILE" "$NEW"
     # H77: mai `ok "Nuovo gateway_secret: …"` — lanciato da un agente finiva nel transcript.
     consegna_gateway_secret "$NEW" "$(sed -n 's/^PUBLIC_BASE=//p' .env 2>/dev/null | tr -d "\"'")"
     # Il gateway_secret NON è solo il namespace dell'URL: dalla v0.30.0 (H6) è
@@ -135,8 +143,7 @@ case "$WHICH" in
     read -r -p "Procedo? [s/N]: " ack
     case "$ack" in s|S|si|SI|y|Y|yes|YES) ;; *) die "Annullato" ;; esac
     NEW=$(gen_random 48)
-    echo -n "$NEW" > "$FILE"
-    chmod 600 "$FILE"
+    scrivi_segreto "$FILE" "$NEW"
     ok "Nuovo oauth_signing_secret generato (48 byte url-safe)"
     docker compose restart gateway
     ok "Fatto"
@@ -178,10 +185,11 @@ print(bcrypt.hashpw(os.environ["ADMIN_PWD_RAW"].encode(), bcrypt.gensalt(12)).de
     log "Revoca il TOKEN vecchio su @BotFather → /mybots → API Token → Revoke."
     log "Poi genera il nuovo e incollalo qui."
     printf '%sNuovo TOKEN:%s ' "$C_B" "$C_R"
-    read -r TOK
+    # senza eco: il token incollato non resta sullo schermo né nello scrollback
+    read -rs TOK
+    echo
     [ -z "$TOK" ] && die "TOKEN vuoto"
-    echo -n "$TOK" > "$FILE"
-    chmod 600 "$FILE"
+    scrivi_segreto "$FILE" "$TOK"
     ok "TOKEN salvato"
     # 🔴 27/09 (audit della doc): il gateway verifica la Mini App con la chiave DERIVATA
     #   dal token (HMAC_SHA256 «WebAppData», H54), non col token. Senza riderivarla qui la

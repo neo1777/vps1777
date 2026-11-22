@@ -13,7 +13,7 @@
 > grafico (l'architettura completa è in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
 Colleghi i **tuoi** server MCP (e bot Telegram) a [claude.ai](https://claude.ai),
-Claude Code e all'app desktop, da un unico endpoint sicuro. vps1777 mette davanti
+Claude Code e all'app desktop, da un unico endpoint che chiede l'accesso (OAuth 2.1). vps1777 mette davanti
 ai tuoi servizi un gateway con autenticazione, reverse proxy, pannello di
 amministrazione e ingress HTTPS — e cresce con i plugin che ci aggiungi tu.
 
@@ -165,7 +165,7 @@ il bot Telegram ti avvisa; se la nuova versione non torna in salute, **rollback
 automatico**. Manuale completo: [docs/UPDATE.md](docs/UPDATE.md).
 
 E di default **fa da sola**: `vps1777-auto-update.timer` applica lo stesso
-update sicuro da sola, **appena una release ha 48 ore di vita** (la guarda ogni giorno) — feature `autoupdate` in
+update (firma verificata, ritorno automatico se qualcosa non va) da sola, **appena una release ha 48 ore di vita** (la guarda ogni giorno) — feature `autoupdate` in
 `VPS1777_FEATURES`, attiva di default; per spegnerla vedi [docs/OPS.md](docs/OPS.md).
 
 ## Sicurezza per design
