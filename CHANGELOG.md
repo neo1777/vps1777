@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.5] — 2026-11-22
+
 ### Sicurezza
 - **Un database riservato non entra più nelle ricerche quando il suo ruolo non si riesce a leggere (H100).** Se la
   prima lettura del ruolo falliva (il file bloccato per un attimo), il database diventava «non dichiarato», cioè
