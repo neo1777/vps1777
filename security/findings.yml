@@ -4578,7 +4578,7 @@ findings:
         nella 0.95.0, rimasta aperta sul gemello delle sessioni admin. Mai successo sulla VPS
         di riferimento. `low` perché servono un file rotto e un cookie copiato prima del logout,
         e il cookie scade comunque in 8 ore.
-    since: unreleased
+    since: v0.98.0
     why: >
       Il logout mette il `jti` del cookie in `admin_revoked.json`. Se quel file c'era ma non si
       leggeva (troncato, permessi), l'elenco tornava vuoto in silenzio: «nessuna revoca». Un
@@ -4620,7 +4620,7 @@ findings:
         senza guardare `meta.json`). Mai successo sulla VPS di riferimento: i due snapshot
         presenti hanno entrambi `meta.json` (misurato il 21/11). `medium` perché tocca i dati,
         ma serve uno snapshot fallito seguito da un rollback coi dati.
-    since: unreleased
+    since: v0.98.0
     why: >
       `snapshot_create` scrive un tar per volume e, per ultimo, `meta.json`. Se un tar falliva
       (disco pieno, processo fermato) l'update si annullava con lo stack intatto, ma la
