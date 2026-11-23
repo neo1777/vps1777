@@ -197,7 +197,7 @@ colpo d'occhio:
   se un comando non ha sezione ed esempio; i riferimenti fra documenti passano da
   un linter; le traduzioni inglesi portano l'hash del sorgente italiano e la CI
   segnala quando l'originale si muove ([docs/en/MANIFEST.json](docs/en/MANIFEST.json)).
-- **Oltre 1.400 test in sei suite**, molti dei quali *presidi strutturali* nati
+- **Oltre 1.800 test in sei suite**, molti dei quali *presidi strutturali* nati
   ciascuno da un incidente reale — il [CHANGELOG.md](CHANGELOG.md) racconta la
   storia di ogni guardia: che cosa ha morso, e come è diventata un test.
 - **Release firmate e update che sa tornare indietro**: bundle cosign fail-closed,

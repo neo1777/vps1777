@@ -17,6 +17,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - Un `code_verifier` con caratteri non ASCII dà un rifiuto (`invalid_grant`) e non un errore 500.
 - Due commenti dicevano cose che il codice non fa (l'audit «cresce senza limite» con ritenzione zero; un rimando
   a una riga vuota). Tutte e sei vengono da segnalazioni di revisori automatici sul codice, verificate.
+- Il README diceva «oltre 1.400 test»: era vero ma fermo da mesi (sono più di 1.800). Ora il numero è
+  aggiornato e un presidio lo confronta col conto vero a ogni PR (`tools/tests/test_readme_conta_i_test.py`).
 
 ## [0.98.8] — 2026-11-23
 

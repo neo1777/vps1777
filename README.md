@@ -230,7 +230,7 @@ a glance:
   lacks a section and an example; cross-references between docs go through a linter;
   English translations record the hash of their Italian source and CI flags them when
   the original moves ([docs/en/MANIFEST.json](docs/en/MANIFEST.json)).
-- **Over 1,400 tests across six suites**, many of them *structural guards* — each one
+- **Over 1,800 tests across six suites**, many of them *structural guards* — each one
   born from a real incident. The [CHANGELOG.md](CHANGELOG.md) tells every guard's
   story: what bit us, and how it became a test.
 - **Signed releases and an update that knows how to retreat**: fail-closed cosign
