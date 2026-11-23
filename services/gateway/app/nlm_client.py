@@ -41,7 +41,11 @@ async def status() -> dict | None:
         if r.status_code != 200:
             log.warning("nlm status: nb1777-mcp ha risposto %s", r.status_code)
             return None
-        return r.json()
+        dati = r.json()
+        if not isinstance(dati, dict):      # un JSON valido della forma sbagliata è «non so», non un 500
+            log.warning("nlm status: risposta che non è un oggetto")
+            return None
+        return dati
     except (httpx.RequestError, ValueError) as exc:
         log.warning("nlm status: nb1777-mcp irraggiungibile (%s)", exc)
         return None
@@ -60,7 +64,12 @@ async def artifacts() -> list[dict] | None:
         if r.status_code != 200:
             log.warning("nlm artifacts: nb1777-mcp ha risposto %s", r.status_code)
             return None
-        return r.json().get("artifacts", [])
+        dati = r.json()
+        elenco = dati.get("artifacts", []) if isinstance(dati, dict) else None
+        if not isinstance(elenco, list) or not all(isinstance(a, dict) for a in elenco):
+            log.warning("nlm artifacts: risposta della forma sbagliata")
+            return None
+        return elenco
     except (httpx.RequestError, ValueError) as exc:
         log.warning("nlm artifacts: nb1777-mcp irraggiungibile (%s)", exc)
         return None
@@ -145,10 +154,10 @@ async def upload(content: bytes) -> tuple[int | None, str | None]:
     if r.status_code == 200:
         try:
             return int(r.json().get("files", 0)), None
-        except ValueError:
+        except (ValueError, TypeError, AttributeError):   # non JSON, o JSON che non è un oggetto col numero
             return None, "risposta non valida da nb1777-mcp"
     try:
         reason = r.json().get("reason") or r.text
-    except ValueError:
+    except (ValueError, AttributeError):
         reason = r.text
     return None, str(reason)

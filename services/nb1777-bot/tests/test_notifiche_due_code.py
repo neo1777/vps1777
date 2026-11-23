@@ -146,3 +146,21 @@ async def test_l_ack_senza_mittente_non_passa():
     finally:
         bot.get_settings = vecchio
     assert risposte == ["non autorizzato"]
+
+
+@pytest.mark.parametrize("risposta, atteso", [
+    ({"ok": True}, False), ({"ok": False}, True), ({}, True),
+    ([1, 2], True), ("ok", True), (None, True), (7, True),          # JSON valido, forma sbagliata: «non so»
+])
+def test_lo_stato_di_nlm_con_una_risposta_della_forma_sbagliata_e_prudente(monkeypatch, risposta, atteso):
+    """`auth_pending` promette: se non so, mostro la guida. Con una lista al posto dell'oggetto
+    sollevava AttributeError dentro il comando (23/11/2026, stessa classe del client del gateway)."""
+    import asyncio
+
+    import httpx
+    vero = httpx.AsyncClient
+    monkeypatch.setattr(bot.httpx, "AsyncClient", lambda **kw: vero(
+        transport=httpx.MockTransport(lambda req: httpx.Response(200, json=risposta)), **kw))
+    monkeypatch.setattr(bot, "get_settings", lambda: types.SimpleNamespace(
+        nlm_internal_base="http://nb1777-mcp:8003", effective_gateway_secret="s" * 32))
+    assert asyncio.run(bot.auth_pending()) is atteso

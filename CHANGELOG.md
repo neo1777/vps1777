@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- Stessa cura della 0.98.10 negli altri due punti in cui un servizio ne chiama un altro: il gateway verso
+  NotebookLM (stato del profilo, elenco degli artefatti, caricamento del profilo) e il bot quando chiede se il
+  profilo c'è. Una risposta valida ma della forma sbagliata dava un errore nudo sulla pagina di amministrazione
+  o dentro un comando del bot; ora vale «non lo so», come per un guasto di rete. 45 prove nuove col servizio
+  finto, 18 rosse sul codice di prima.
+
 ## [0.98.10] — 2026-11-23
 
 ### Corretto

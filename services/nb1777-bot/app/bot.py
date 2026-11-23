@@ -56,7 +56,9 @@ async def auth_pending() -> bool:
         if r.status_code != 200:
             log.warning("stato nlm: nb1777-mcp ha risposto %s", r.status_code)
             return True
-        return not bool(r.json().get("ok"))
+        dati = r.json()
+        # una risposta che non è un oggetto è «non so»: vale la stessa prudenza del guasto di rete
+        return not (isinstance(dati, dict) and bool(dati.get("ok")))
     except (httpx.RequestError, ValueError) as exc:
         log.warning("stato nlm: nb1777-mcp irraggiungibile (%s)", exc)
         return True
