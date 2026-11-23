@@ -343,7 +343,7 @@ def reclaim_ownership(path: Path, repo: Path) -> None:
             for p in (path, *path.rglob("*")):
                 os.chown(p, uid, gid)
         elif path.stat().st_uid != os.geteuid():
-            sudo(["chown", "-R", f"{uid}:{gid}", str(path)])
+            sudo(["chown", "-hR", f"{uid}:{gid}", str(path)])
     except (OSError, subprocess.CalledProcessError) as exc:
         warn(f"proprietà di {path} non riallineata ({exc})")
 
@@ -4340,7 +4340,7 @@ def cmd_bootstrap(repo: Path, args) -> int:
     runtime_dirs = [repo / d for d in ("onboarding", "var", "backups", "releases")]
     for d in runtime_dirs:
         d.mkdir(exist_ok=True)
-    sudo(["chown", "-R", f"{os.getuid()}:{os.getgid()}", *[str(d) for d in runtime_dirs]])
+    sudo(["chown", "-hR", f"{os.getuid()}:{os.getgid()}", *[str(d) for d in runtime_dirs]])
     (repo / "var").chmod(0o700)
     # salva i compose LEGACY per il rollback del bootstrap. Solo la PRIMA volta:
     # se pre-bootstrap esiste già (bootstrap precedente fallito e ri-tentato),

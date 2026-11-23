@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **L'operatore può lanciare con sudo solo ciò che la CLI usa davvero (issue #283).** Prima poteva lanciare
+  `install`, `systemctl` e `chown` con qualunque argomento: fermare un servizio di sistema o prendersi una cartella
+  di sistema passava. Le installazioni nuove hanno regole che vincolano anche gli argomenti
+  (`tools/sudoers-operatore.sh`), e l'operatore non viene più messo nel gruppo `sudo`. Provato su una macchina
+  vera (collaudo del 23/11/2026: aggiornamento e ritorno indietro funzionano con le regole nuove) e in un
+  contenitore a ogni PR: 13 usi veri consentiti, 19 abusi negati; con la regola di prima la stessa tabella è
+  rossa. Non è un confine: l'operatore resta equivalente a root tramite docker. **Le macchine già installate
+  tengono le regole di prima** finché root non lancia il comando in `docs/OPS.md`.
+- La CLI cambia il proprietario delle sue cartelle con `chown -hR`: un collegamento simbolico non porta più il
+  cambio su ciò a cui punta.
+
 ## [0.98.7] — 2026-11-23
 
 ### Corretto

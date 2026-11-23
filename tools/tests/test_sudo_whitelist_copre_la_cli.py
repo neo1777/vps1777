@@ -178,3 +178,62 @@ def test_presidio_gira_anche_in_ci() -> None:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ───────────────────────── issue #283: gli ARGOMENTI, non solo i binari ─────────────────────────
+# Le regole di tools/sudoers-operatore.sh permettono solo gli usi che la CLI fa davvero. Quindi
+# ogni chiamata `sudo([...])` nuova o cambiata va portata nelle regole E nella tabella
+# (tools/sudoers-tabella.sh), altrimenti sulla macchina `sudo -n` la nega e l'update si ferma.
+# Qui sta la fotografia delle chiamate: se cambia, questo test lo dice e dice che cosa fare.
+# Che le regole le permettano DAVVERO lo prova tools/tests/test-sudoers-operatore.sh, in un
+# contenitore, e il 23/11/2026 lo ha provato una macchina vera.
+CHIAMATE_SUDO_NOTE = sorted([
+    '"chown", "-hR", f"{uid}:{gid}", str(path)',
+    '"install", "-m", "755", str(tmp), "/usr/local/bin/cosign"',
+    '"install", "-m", "644", str(tmp), str(installed)',
+    '"systemctl", "daemon-reload"',
+    '"systemctl", "enable", "--now", *units',
+    '"systemctl", "disable", "--now",',
+    '"systemctl", "enable", "--now", INGEST_PATH',
+    '"systemctl", verbo, "--now", "vps1777-auto-update.timer"',
+    '"install", "-m", "755", str(new_cli), INSTALLED_CLI',
+    '"install", "-m", "755", str(bundle / "tools" / "vps1777.py"), INSTALLED_CLI',
+    '"chown", "-hR", f"{os.getuid()}:{os.getgid()}", *[str(d) for d in runtime_dirs]',
+    '"systemctl", verbo, "--now", TIMER_INDICE',
+])
+
+
+def chiamate_sudo(src: str) -> list[str]:
+    """Il contenuto di ogni `sudo([ … ])` sulla sua prima riga, senza la parentesi di chiusura."""
+    fuori = []
+    for riga in src.splitlines():
+        m = re.search(r"(?<!def )\bsudo\(\[(.*)$", riga)
+        if m:
+            fuori.append(re.sub(r"\]\s*(,.*)?\)?\s*$", "", m.group(1)).strip())
+    return sorted(fuori)
+
+
+def test_ogni_chiamata_sudo_della_cli_e_fra_quelle_che_le_regole_conoscono():
+    viste = chiamate_sudo(CLI.read_text(encoding="utf-8"))
+    assert viste == CHIAMATE_SUDO_NOTE, (
+        "le chiamate `sudo([...])` della CLI sono cambiate. Prima di aggiornare questa lista: "
+        "1) porta la chiamata nuova in tools/sudoers-operatore.sh; 2) aggiungi la riga «prova sì» in "
+        "tools/sudoers-tabella.sh; 3) lancia tools/tests/test-sudoers-operatore.sh. "
+        f"Differenza: {sorted(set(viste) ^ set(CHIAMATE_SUDO_NOTE))}")
+
+
+def test_nessun_chown_senza_h():
+    """`chown -R` su un collegamento simbolico cambia ciò a cui punta: con le regole ad argomenti
+    bastava un collegamento verso /etc. La CLI passa sempre -hR, e le regole accettano solo quello."""
+    src = CLI.read_text(encoding="utf-8")
+    assert '"chown", "-R"' not in src
+    regole = (ROOT / "tools" / "sudoers-operatore.sh").read_text(encoding="utf-8")
+    assert "chown ^-hR $CHI" in regole and "chown ^-R" not in regole
+
+
+def test_gli_installatori_stringono_le_regole_e_non_mettono_l_operatore_nel_gruppo_sudo():
+    for nome in ("deploy.sh", "installer/engine.py"):
+        testo = (ROOT / nome).read_text(encoding="utf-8")
+        assert "sudoers-operatore.sh --installa" in testo, f"{nome} non installa le regole ad argomenti"
+        assert "usermod -aG sudo" not in testo, f"{nome} mette ancora l'operatore nel gruppo sudo"
+        assert "SUDOERS_ARGOMENTI_NON_APPLICATE" in testo, f"{nome} tace se le regole non si applicano"
