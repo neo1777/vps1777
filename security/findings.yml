@@ -4839,3 +4839,46 @@ findings:
         output: "12 passed; sul codice di prima il test nuovo è rosso: il DB riservato compare fra i risultati della ricerca"
         exit: 0
         quando: "2026-11-22"
+
+  - id: H101
+    severity: low
+    title: "I gettoni dei link firmati (scarico di un artefatto, caricamento di un file) finivano in chiaro nel log degli accessi"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-23"
+      come: audio-esterno
+      nota: >
+        Da una prova di revisione su una copia del gateway senza guasti piantati: due modelli
+        diversi l'hanno segnalata leggendo il codice, e il giudizio cieco l'ha confermata.
+        `low`: il log sta sulla macchina e lo legge chi ha già accesso a docker; il gettone di
+        scarico vale 30 minuti, quello di caricamento è monouso. Ma un log copiato altrove (un
+        ticket, un backup dei log) portava con sé link ancora validi.
+    since: unreleased
+    why: >
+      Il filtro dei log toglieva solo il segreto del gateway, che conosce in anticipo. I link
+      firmati di nb1777 portano il gettone nella query (`/scarica/<nome>?t=…`) o nel percorso
+      (`/carica/<gettone>`), e l'access-log di uvicorn scrive la riga di richiesta intera.
+    evidence:
+      - file: services/gateway/app/logredact.py
+        contains:
+          - "_FORME = ("
+          - "for forma, con in _FORME:"
+      - file: services/gateway/tests/test_logredact.py
+        contains:
+          - "def test_il_gettone_di_un_link_di_scarico_non_resta_nel_log("
+          - "def test_il_gettone_di_un_link_di_caricamento_non_resta_nel_log("
+    fix: >
+      Il filtro riconosce anche il POSTO del gettone, non solo i segreti noti: `?t=` e `&t=` in
+      qualunque indirizzo e il segmento dopo `/carica/` diventano `***`, anche dentro il testo di
+      un errore che cita l'indirizzo interno. Vale anche quando non c'è nessun segreto noto.
+    prova:
+      - comando: "uvx pytest@9.2.0 -q services/gateway/tests/test_logredact.py"
+        dove: "PC"
+        output: "9 passed; sul codice di prima i tre test nuovi sui gettoni sono rossi"
+        exit: 0
+        quando: "2026-11-23"
+    residuo: >
+      I log scritti prima della cura contengono ancora i gettoni di allora (scaduti o consumati).
+      Non provato leggendo il log di un gateway vero dopo una richiesta: provato sul filtro.
+

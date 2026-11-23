@@ -643,7 +643,7 @@ def test_revocato_il_refresh_si_rifiuta():
     assert oauth.revoca_client("cid", by="admin@x.com") is True
     r = _token({"grant_type": "refresh_token", "refresh_token": "rt", "client_id": "cid"})
     assert r.status_code == 400 and r.data["error"] == "invalid_client"
-    assert oauth.revoca_client("cid", by="admin@x.com") is False   # già tolto
+    assert oauth.revoca_client("cid", by="admin@x.com") is None    # già tolto (None = non c'era; False = tolto ma non salvato)
 
 
 def test_revocato_fra_consenso_e_scambio_il_code_non_vale():

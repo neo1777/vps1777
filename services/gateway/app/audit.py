@@ -208,11 +208,11 @@ _CHIAVI_NOTE = frozenset({
     "service", "status", "sub", "target", "user_id",
     # H84: dove va il permesso OAuth (l'host, mai l'URI intero) e quante registrazioni
     # mai autorizzate si sono tolte
-    "destinazione", "pendenti_tolti", "redirect_host",
+    "destinazione", "pendenti_tolti", "redirect_host", "salvata",
     # eliminazione di un DB: se con lui è stato tolto anche l'indice per senso
     "indice_tolto",
     # scritte dal modulo stesso, non dai chiamanti. `dropped`/`last_error` appartengono al
-    # record di recovery, che oggi si scrive DIRETTO (r.182) e non passa di qui: sono
+    # record di recovery, che oggi si scrive DIRETTO (`audit_write_recovered`) e non passa di qui: sono
     # dichiarate perché il giorno che passasse non si rompa in silenzio.
     # ⚠️ qui avevo scritto "audit_write_recovered", che è un VALORE del campo `event`, non
     #    una chiave: un'allowlist di chiavi che contiene un valore non protegge nulla in più

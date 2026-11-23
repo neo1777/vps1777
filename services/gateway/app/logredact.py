@@ -13,6 +13,17 @@ rotazione del secret, ma smette di produrne di nuovi in chiaro.
 from __future__ import annotations
 
 import logging
+import re
+
+# Segreti che NON conosciamo in anticipo, ma di cui conosciamo il POSTO (prova B, 23/11/2026: due
+# revisori su tre l'hanno visto sul codice pulito). I link firmati di nb1777 portano il gettone
+# nella query (`/scarica/<nome>?t=…`) o nel percorso (`/carica/<gettone>`): l'access-log di uvicorn
+# scrive la riga di richiesta intera, e il filtro toglieva solo il segreto del gateway. Chi legge
+# il log poteva scaricare un artefatto o caricare un file finché il gettone era valido.
+_FORME = (
+    (re.compile(r"""([?&]t=)[^\s&"'<>)]+"""), r"\1***"),
+    (re.compile(r"""(/carica/)[^\s/?"'<>)]+"""), r"\1***"),
+)
 
 
 class RedactSecrets(logging.Filter):
@@ -29,13 +40,13 @@ class RedactSecrets(logging.Filter):
         self._secrets = sorted({s for s in secrets if s}, key=len, reverse=True)
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if not self._secrets:
-            return True
         msg = record.getMessage()
         red = msg
         for sec in self._secrets:
             if sec in red:
                 red = red.replace(sec, "***")
+        for forma, con in _FORME:
+            red = forma.sub(con, red)
         if red != msg:
             record.msg = red
             record.args = ()

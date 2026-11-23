@@ -19,7 +19,8 @@ from .settings import UPSTREAMS_SCARTATI, get_settings
 
 async def health(request: Request) -> JSONResponse:
     s = get_settings()
-    want_deep = bool(request.query_params.get("deep"))
+    # `bool("0")` è True: `?deep=0` e `?deep=false` accendevano la sonda (prova B, 23/11/2026)
+    want_deep = request.query_params.get("deep", "").strip().lower() in ("1", "true", "yes", "on")
 
     # ?deep proba i backend MCP via TCP: è un vettore d'abuso (port-scan /
     # amplificazione) se aperto a chiunque → riservato ai chiamanti interni
