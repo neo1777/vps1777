@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.7] — 2026-11-23
+
 ### Corretto
 - **Chi installa senza bot Telegram può di nuovo aggiornare.** Gli installatori permettono di lasciare vuoto il
   token («bot in attesa»), ma l'aggiornamento contava quel vuoto come un segreto mancante e si fermava prima di
