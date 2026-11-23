@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.8] — 2026-11-23
+
 ### Sicurezza
 - **L'operatore può lanciare con sudo solo ciò che la CLI usa davvero (issue #283).** Prima poteva lanciare
   `install`, `systemctl` e `chown` con qualunque argomento: fermare un servizio di sistema o prendersi una cartella
