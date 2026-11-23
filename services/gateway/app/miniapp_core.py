@@ -197,10 +197,20 @@ def parse_mcp_payload(content_type: str, text: str) -> dict:
 def extract_tool_texts(rpc: dict) -> list[str]:
     """Dai content block del risultato tools/call ritorna i testi.
     Solleva ValueError con messaggio leggibile se il tool ha fallito."""
+    # Un JSON valido non è per forza una risposta JSON-RPC: un upstream guasto (o un proxy in mezzo) può
+    # rispondere una lista, una stringa, un `result` che non è un oggetto. Senza questi controlli usciva
+    # AttributeError, che il chiamante non aspetta (aspetta ValueError) e diventava un 500 nudo.
+    if not isinstance(rpc, dict):
+        raise ValueError("risposta MCP che non è un oggetto JSON-RPC")
     if "error" in rpc:
-        raise ValueError(str(rpc["error"].get("message", rpc["error"])))
-    result = rpc.get("result", {}) or {}
-    content = result.get("content", []) or []
+        err = rpc["error"]
+        raise ValueError(str(err.get("message", err) if isinstance(err, dict) else err)[:500])
+    result = rpc.get("result") or {}
+    if not isinstance(result, dict):
+        raise ValueError("risposta MCP con un risultato che non è un oggetto")
+    content = result.get("content") or []
+    if not isinstance(content, list):
+        raise ValueError("risposta MCP con un contenuto che non è una lista")
     texts = [
         b.get("text", "") for b in content
         if isinstance(b, dict) and b.get("type", "text") == "text"

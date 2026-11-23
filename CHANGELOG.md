@@ -4,6 +4,25 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Una risposta guasta di un servizio interno non diventa più un errore nudo nella Mini App.** Il client con cui
+  il gateway chiama i tool degli altri servizi leggeva la risposta dando per scontata la forma: una lista, una
+  stringa, un risultato che non è un oggetto davano un'eccezione che nessuno aspettava. Ora ogni forma sbagliata
+  è un errore dichiarato, col messaggio. Trovato verificando una segnalazione che avevo giudicato «discutibile»:
+  i test sostituivano il client intero, quindi i suoi rami di errore non li percorreva nessuno. Ora c'è un
+  servizio finto che si guasta a comando (500, irraggiungibile, lento, malformato): 19 prove.
+
+### Modificato
+- `notebooklm-mcp-cli` 0.16.2 → 0.16.5 (salto a mano: il cuore della libreria, dove sta il formato del profilo,
+  è identico byte per byte fra le due versioni; la prova di contratto sui comandi passa), con pydantic, numpy,
+  authlib e python-multipart agli ultimi rilasci di correzione.
+
+### Tolto
+- `tools/branch-verdetto.sh` e `tools/diagnosi-h55.sh`: due strumenti a mano che non servivano più. Il primo
+  censiva decine di rami rimasti dopo le unioni, e da quando il repository li cancella da sé non ce ne sono; il
+  secondo diagnosticava installazioni coi servizi di sistema lanciati da root, che nessun installatore produce
+  dal luglio 2026. Restano nella storia di git.
+
 ## [0.98.9] — 2026-11-23
 
 ### Sicurezza
