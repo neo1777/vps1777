@@ -57,6 +57,29 @@ jobs:
             gh issue create --title "$TITOLO" --body "$CORPO"
           fi
 
+      # 23/11/2026: le basi fissate per digest sono rimaste indietro? Dependabot dovrebbe spostare il
+      # digest ogni settimana, ma dal 27/09 al 21/11 non ha mai proposto quello di python:3.12-slim e
+      # nessuno lo vedeva. Qui si misura: digest fissato contro quello che il registro dà oggi, con
+      # una soglia di 45 giorni dal giorno in cui il digest è entrato nel repo (serve la storia: fetch-depth 0).
+      - name: Le basi delle immagini sono rimaste indietro?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RC=0
+          python3 tools/base-cadenza.py > basi.txt || RC=$?   # 1 e 2 non fermano il passo
+          cat basi.txt
+          if [ "$RC" = 2 ]; then echo "::error::età delle basi NON misurata: $(cat basi.txt)"; exit 1; fi
+          [ "$RC" = 1 ] || exit 0
+          TITOLO="Immagini base indietro di più di 45 giorni"
+          CORPO="$(printf 'Il giro mensile del %s dice:\n\n```\n%s\n```\n\nSi sposta il digest nelle righe `FROM` dei Dockerfile indicati (tutte insieme per la stessa base), in una PR: la CI ricostruisce le immagini e rilancia le prove. Se Dependabot non lo ha proposto da sé, guardare perché (`.github/dependabot.yml`, blocco docker).' "$(date -u +%F)" "$(cat basi.txt)")"
+          ESISTENTE="$(gh issue list --state open --search "in:title \"Immagini base indietro\"" --json number -q '.[0].number' || true)"
+          if [ -n "$ESISTENTE" ]; then
+            gh issue comment "$ESISTENTE" --body "$CORPO"
+          else
+            gh issue create --title "$TITOLO" --body "$CORPO"
+          fi
+
       # Un solo job, niente matrice: il verdetto è la SOMMA sulle 6 immagini, e
       # 6 job separati non possono sommarsi senza un settimo che li aspetti.
       # (caddy-dns01 entra il 01/10/2026: è opzionale per chi installa, ma è un'immagine
