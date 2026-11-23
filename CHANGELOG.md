@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.10] — 2026-11-23
+
 ### Corretto
 - **Una risposta guasta di un servizio interno non diventa più un errore nudo nella Mini App.** Il client con cui
   il gateway chiama i tool degli altri servizi leggeva la risposta dando per scontata la forma: una lista, una
