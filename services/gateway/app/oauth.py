@@ -602,17 +602,21 @@ def elenco_connettori() -> list[dict[str, Any]]:
     return sorted(out, key=lambda x: x["registrato"], reverse=True)
 
 
-def revoca_client(client_id: str, by: str) -> bool:
+def revoca_client(client_id: str, by: str) -> bool | None:
     """Toglie il client: da qui il refresh si rifiuta (`invalid_client`), e l'accesso
-    finisce quando scade l'ultimo access token (`OAUTH_ACCESS_TOKEN_LIFETIME`, 15 min)."""
+    finisce quando scade l'ultimo access token (`OAUTH_ACCESS_TOKEN_LIFETIME`, 15 min).
+
+    None = non c'era · True = tolto e SALVATO · False = tolto dalla memoria ma non salvato su
+    disco: al prossimo riavvio il connettore tornerebbe. Prima rispondeva True comunque (prova B,
+    23/11/2026), e il pannello diceva «revocato» di una revoca che non sarebbe sopravvissuta."""
     c = _clients.pop(client_id, None)
     if c is None:
-        return False
-    _save_clients()
+        return None
+    salvata = _save_clients()
     dove, tipo = _destinazione(str((c.get("redirect_uris") or [""])[0]))
     audit({"event": "oauth_client_revoked", "client_id": client_id, "by": by,
-           "redirect_host": dove, "destinazione": tipo})
-    return True
+           "redirect_host": dove, "destinazione": tipo, "salvata": salvata})
+    return salvata
 
 
 # ───── token ─────
@@ -657,8 +661,11 @@ def _grant_code(form: Any) -> Response:
     # a corto-circuito trapelerebbe via timing la lunghezza del prefisso
     # corretto dell'hash atteso. hmac.compare_digest confronta in tempo
     # costante (entrambi ASCII base64url).
+    # In byte: `compare_digest` su due `str` solleva TypeError se una non è ASCII, e il verifier
+    # arriva dal form senza controlli (un 500 al posto di un 400, prova B del 23/11/2026).
     expected = _b64url_sha256(code_verifier)
-    if not hmac.compare_digest(expected, str(ctx["code_challenge"])):
+    if not hmac.compare_digest(expected.encode("ascii"),
+                               str(ctx["code_challenge"]).encode("utf-8")):
         return JSONResponse({"error": "invalid_grant", "reason": "pkce"}, status_code=400)
 
     access = issue(
@@ -751,5 +758,5 @@ def _grant_refresh(form: Any) -> Response:
 
 def _b64url_sha256(s: str) -> str:
     import base64
-    digest = hashlib.sha256(s.encode("ascii")).digest()
+    digest = hashlib.sha256(s.encode("utf-8")).digest()   # utf-8: un non ASCII dà un hash diverso, non un'eccezione
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")

@@ -193,8 +193,9 @@ class Settings(BaseSettings):
     # ───── Storage ─────
     audit_log_path: str = "/var/lib/gateway/audit.jsonl"
     # retention dell'audit: le righe più vecchie di N giorni vengono potate quando
-    # il file supera una soglia di dimensione (0 = nessuna retention, cresce senza
-    # limite). Personalizzabile via AUDIT_RETENTION_DAYS.
+    # il file supera una soglia di dimensione. 0 = nessuna potatura per ETÀ: resta il tetto
+    # di dimensione, oltre il quale si tengono le righe più recenti (audit.py, `_prune`).
+    # Personalizzabile via AUDIT_RETENTION_DAYS.
     audit_retention_days: int = 90
     # Il profilo NotebookLM (cookie Google) NON è più montato qui (H6): lo
     # possiede nb1777-mcp, che fra i servizi in esercizio è l'unico a montare quel

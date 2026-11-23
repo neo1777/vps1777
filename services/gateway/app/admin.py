@@ -1681,8 +1681,13 @@ async def connettori_revoca(request: Request) -> Response:
 
     form = await request.form()
     cid = str(form.get("client_id") or "")
-    if oauth.revoca_client(cid, by=email):
+    esito = oauth.revoca_client(cid, by=email)
+    if esito:
         return RedirectResponse("/admin/connettori?msg=Connettore+revocato&kind=ok",
+                                status_code=303)
+    if esito is False:
+        return RedirectResponse("/admin/connettori?msg=Connettore+revocato+ma+NON+salvato+su+disco"
+                                "%3A+al+riavvio+tornerebbe.+Controlla+lo+spazio+e+riprova&kind=err",
                                 status_code=303)
     return RedirectResponse("/admin/connettori?msg=Connettore+non+trovato&kind=err",
                             status_code=303)

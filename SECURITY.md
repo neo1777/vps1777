@@ -479,7 +479,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** I 100 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 101 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -490,7 +490,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **100 voci** (2 critiche, 16 alte, 57 medie, 25 basse): 43 dalla
+Il registro conta **101 voci** (2 critiche, 16 alte, 57 medie, 26 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -549,11 +549,13 @@ entrare in uno script eseguito sulla macchina; l'installer locale rispondeva a q
 pagina aperta nel browser; gli installatori accettavano qualunque chiave SSH della macchina,
 anche se cambiata dall'ultima volta; e un database riservato entrava nelle ricerche se il suo
 ruolo non si leggeva alla prima lettura.
+E una (`H101`, 23/11) da una seconda prova di revisione, su una copia del gateway senza guasti
+piantati: i gettoni dei link firmati finivano in chiaro nel log degli accessi.
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 86 |
+| **chiusi** | 87 |
 | **parziali** | 10 |
 | **accettati** | 4 |
 | **aperti** | 0 |

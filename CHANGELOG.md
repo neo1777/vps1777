@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **I gettoni dei link per scaricare e caricare file non finiscono più nel log degli accessi (H101).** Il filtro
+  toglieva solo il segreto del gateway; i link firmati portano il loro gettone nell'indirizzo, e la riga di
+  richiesta veniva scritta intera. Ora `?t=…` e `/carica/<gettone>` diventano `***`. Il gettone di scarico vale
+  30 minuti e quello di caricamento è monouso, ma un log copiato altrove portava con sé link ancora validi.
+
+### Corretto
+- La revoca di un connettore dal pannello dice se è stata salvata: prima rispondeva «revocato» anche quando la
+  scrittura su disco era fallita, e al riavvio il connettore sarebbe tornato.
+- `/health?deep=0` e `?deep=false` non accendono più la sonda profonda (prima bastava che il parametro ci fosse).
+- Un `code_verifier` con caratteri non ASCII dà un rifiuto (`invalid_grant`) e non un errore 500.
+- Due commenti dicevano cose che il codice non fa (l'audit «cresce senza limite» con ritenzione zero; un rimando
+  a una riga vuota). Tutte e sei vengono da segnalazioni di revisori automatici sul codice, verificate.
+
 ## [0.98.8] — 2026-11-23
 
 ### Sicurezza
