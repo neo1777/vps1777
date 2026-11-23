@@ -1115,6 +1115,9 @@ def restart_counts(repo: Path) -> dict[str, int]:
     return counts
 
 
+_COLLAUDO_KO_USATO = False     # l'aggancio di collaudo scatta una volta per processo
+
+
 def health_gate(repo: Path, env: dict | None = None,
                 window_s: int = HEALTH_WINDOW_S) -> tuple[bool, str]:
     """True se tutti i servizi compose sono running+healthy E /health?deep=1
@@ -1133,7 +1136,13 @@ def health_gate(repo: Path, env: dict | None = None,
     # ⚠️ E si dichiara rumorosamente: se restasse acceso per sbaglio, ogni update
     # tornerebbe indietro, e la riga qui sotto è la sola cosa che lo spiegherebbe a
     # chi guarda i log alle tre di notte.
-    if os.environ.get("VPS1777_COLLAUDO_HEALTH_KO") == "1":
+    # Solo il PRIMO controllo del processo (collaudo del 23/11/2026, la prima volta che la
+    # prova-9 ha visto un rollback): l'aggancio faceva fallire anche il controllo DOPO il
+    # rollback, quindi l'update usciva 2 («nemmeno il rollback è sano, serve intervento») su un
+    # rollback riuscito, e il controllo di salute del ritorno non veniva mai misurato davvero.
+    global _COLLAUDO_KO_USATO
+    if os.environ.get("VPS1777_COLLAUDO_HEALTH_KO") == "1" and not _COLLAUDO_KO_USATO:
+        _COLLAUDO_KO_USATO = True
         warn("VPS1777_COLLAUDO_HEALTH_KO=1: health-gate forzato a FALLIRE (aggancio "
              "di collaudo). Se non stai eseguendo la prova-9, spegnilo: ogni update "
              "tornerà indietro.")
@@ -3152,6 +3161,15 @@ def cmd_check(repo: Path, args) -> int:
     return 0
 
 
+def _rimetti_precedente(st: dict) -> None:
+    """Dopo un auto-rollback riuscito: «precedente» torna quella di prima dell'update fallito.
+    Se l'update è di una versione che non la teneva da parte, lascia tutto com'è."""
+    prima = (st.get("update_in_progress") or {}).get("prima")
+    if isinstance(prima, dict) and "previous" in prima:
+        st["previous"] = prima.get("previous")
+        st["previous_images"] = prima.get("previous_images")
+
+
 def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
                       bundle: Path, snap: Path | None, need_data_restore: bool,
                       reason: str) -> int:
@@ -3198,6 +3216,7 @@ def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
         healthy, why = False, ("stack " + ("su" if healthy else f"non healthy ({why})")
                                + "; passi falliti: " + " | ".join(guasti))
     if healthy:
+        _rimetti_precedente(st)
         st["update_in_progress"] = None
         st["history"].append({"event": "rolled_back", "from": target,
                               "to": previous, "at": now_iso(), "reason": reason})
@@ -3278,6 +3297,27 @@ SEGRETI_NON_GENERABILI = {
                               "`tools/rotate-secret.sh telegram_bot_token`",
 }
 SEGRETI_GENERABILI = {"gateway_secret", "archive_desc_secret", "oauth_signing_secret"}
+# Il bot «in attesa» è uno stato AMMESSO, non un buco (collaudo su vergine del 23/11/2026).
+# Gli installatori lasciano vuoto il token di Telegram quando non lo si dà («vuoto = bot in
+# standby, da attivare poi»): il container parte, tiene vivo l'heartbeat e non risponde. Ma il
+# controllo dei segreti contava quel vuoto come un guasto e fermava OGNI update: chi installava
+# senza bot restava alla versione d'installazione per sempre, auto-update compreso.
+# Vale solo per questa coppia e solo se il token è VUOTO (un file che manca o non si legge resta
+# un guasto): la chiave della Mini App è derivata dal token, quindi senza token è vuota per forza.
+SEGRETI_DEL_BOT = ("telegram_bot_token", "telegram_webapp_secret")
+
+
+def _senza_bot_in_attesa(mancanti: list[str]) -> tuple[list[str], bool]:
+    """(i mancanti veri, bot_in_attesa). Toglie dalla lista le voci del bot quando il token è
+    VUOTO: è l'installazione senza bot, non un segreto perso. Logica pura."""
+    def voce(nome: str) -> str | None:
+        return next((m for m in mancanti if m.split(" → ")[0].strip() == nome), None)
+    token = voce(SEGRETI_DEL_BOT[0])
+    if token is None or "[VUOTO" not in token:
+        return mancanti, False
+    chiave = voce(SEGRETI_DEL_BOT[1])
+    tolte = {token} | ({chiave} if chiave is not None and "[VUOTO" in chiave else set())
+    return [m for m in mancanti if m not in tolte], True
 
 
 def _compose_sorgenti(root: Path, repo: Path) -> list[Path]:
@@ -3754,6 +3794,7 @@ def cmd_update(repo: Path, args) -> int:
         # fermarsi, con più contesto di quanto ne abbia il pre-flight.
         warn(f"pre-flight rollback non eseguibile: {exc}")
         rollback_bucato = []
+    rollback_bucato, _ = _senza_bot_in_attesa(rollback_bucato)
     if rollback_bucato:
         warn("la rete di ROLLBACK è bucata — segreti che la configurazione ATTUALE "
              "pretende e che mancano o sono vuoti in secrets/:\n"
@@ -3876,7 +3917,11 @@ def cmd_update(repo: Path, args) -> int:
         step(6, "preflight-secrets-bundle", "failed", str(exc))
         die(f"bundle v{target} incompleto: {exc}\n"
             "Niente è stato toccato. Rilancia l'update: il bundle viene riscaricato.")
-    mancanti = _secrets_mancanti(sorgenti, repo)
+    mancanti, bot_in_attesa = _senza_bot_in_attesa(_secrets_mancanti(sorgenti, repo))
+    if bot_in_attesa:
+        warn("il token di Telegram è vuoto: il bot resta in attesa (non risponde) e la Mini App "
+             "resta senza chiave. Non ferma l'update. Per accenderlo: "
+             "tools/rotate-secret.sh telegram_bot_token")
     if mancanti:
         step(6, "preflight-secrets-bundle", "failed", ", ".join(mancanti))
         # ⚠️ IL RIMEDIO PUÒ FABBRICARE UN GUASTO PEGGIORE DI QUELLO CHE CURA (setaccio,
@@ -4013,9 +4058,14 @@ def cmd_update(repo: Path, args) -> int:
     # ─── PUNTO DI NON RITORNO ───
     # 10 — applica i file gestiti
     step(10, "apply-files")
+    # la «precedente» di PRIMA di questo update si tiene da parte: se si torna indietro va
+    # rimessa, altrimenti dopo un auto-rollback corrente e precedente sono la stessa versione
+    # (visto al collaudo del 23/11/2026) e la storia di dove si poteva tornare è persa
+    prima = {"previous": st.get("previous"), "previous_images": st.get("previous_images")}
     st["previous"] = cur
     st["previous_images"] = capture_current_images(repo, cur)
-    st["update_in_progress"] = {"target": target, "step": 10, "started_at": now_iso()}
+    st["update_in_progress"] = {"target": target, "step": 10, "started_at": now_iso(),
+                                "prima": prima}
     state_save(repo, st)
     # 21/11/2026: da qui i file gestiti cambiano. Un errore a metà (una copia, `sudo install`
     # delle unit) usciva senza rollback: file nuovi col tag vecchio, e al rilancio

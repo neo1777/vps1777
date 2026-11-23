@@ -218,6 +218,12 @@ elif ! python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"
 elif ! mv -f "$_tmp" "$FUORI"; then
   referto_scritto=0
 fi
+# La prova 6 vuole root, quindi capita di lanciarle tutte da root: senza questo il referto restava
+# di root dentro la cartella dell'operatore (visto al collaudo del 23/11/2026), e il prossimo giro
+# lanciato dall'operatore non poteva più riscriverlo.
+if [ "$referto_scritto" -ne 0 ] && [ "$(id -u)" -eq 0 ]; then
+  chown --reference="$(dirname "$FUORI")" "$FUORI" 2>/dev/null || true
+fi
 if [ "$referto_scritto" -eq 0 ]; then
   rm -f "$_tmp"
   printf '  ⛔ il referto NON è stato scritto (disco pieno, cartella non scrivibile o JSON che non si\n' >&2
