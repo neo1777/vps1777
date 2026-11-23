@@ -1,0 +1,29 @@
+# Referto del collaudo su macchina vergine. Uno per collaudo, in questa cartella: il più recente
+# è quello che conta. Il metodo è in docs/COLLAUDO-VERGINE.md.
+data: 2026-11-23
+versioni: "installata 0.98.4, aggiornata a 0.98.5 e poi a 0.98.6"
+macchina: >-
+  VPS a ore di un fornitore diverso da quello di produzione, immagine ufficiale Debian 13
+  (produzione: Debian 12), 2 vCPU, 4 GB di RAM, 80 GB di disco, x86_64. Ingresso Tailscale Funnel.
+rto: "79 secondi dall'inizio del restore a «sei servizi sani e dato ritrovato» (98 secondi dal guasto), con dati minimi"
+rpo: "fino a 24 ore per il livello core e fino a 7 giorni per l'archivio (la cadenza dei backup); nel collaudo è andato perso, come atteso, ciò che era stato caricato dopo l'ultimo backup"
+non_misura: >-
+  La macchina e la rete di produzione; i dati veri (due note di prova: il tempo di restore cresce
+  coi dati); il bot in uso reale (token messo, proprietario non configurato); NotebookLM (nessun
+  profilo caricato); lo spegnimento brutale della macchina; l'installatore grafico (usata la via a
+  riga di comando).
+passi:
+  - {passo: "installazione da host vuoto, riavvio compreso", esito: riuscito, misura: "2 min 44 s, sei servizi sani"}
+  - {passo: "ingresso pubblico verificato da fuori (tools/collaudo-da-fuori.sh)", esito: riuscito, misura: "4 controlli su 4"}
+  - {passo: "update 0.98.4 → 0.98.5", esito: riuscito, misura: "2 min"}
+  - {passo: "nove prove empiriche dopo l'update", esito: "8 verdi, 0 rosse; la nona è il passo sotto"}
+  - {passo: "prova 9: update col controllo di salute forzato a fallire", esito: riuscito, misura: "rollback, versione di prima, sei container su"}
+  - {passo: "update 0.98.5 → 0.98.6", esito: riuscito, misura: "1 min 38 s; impronta del pacchetto uguale a quella ricostruita dal tag"}
+  - {passo: "backup, perdita di volumi, segreti e configurazione, restore", esito: riuscito, misura: "dato di prima del backup ritrovato, segreti e .env identici"}
+  - {passo: "update ucciso con kill -9 dopo il punto di non ritorno", esito: riuscito, misura: "l'update successivo torna alla versione di prima coi dati dello snapshot, in 78 s"}
+difetti_trovati:
+  - "Chi installa senza bot Telegram non poteva aggiornare: l'updater contava il token vuoto come un segreto mancante. Curato nella 0.98.7."
+  - "L'aggancio di collaudo della prova 9 faceva fallire anche il controllo di salute dopo il rollback: l'update usciva 2 su un rollback riuscito. Curato nella 0.98.7."
+  - "Dopo un rollback automatico «precedente» restava uguale a «corrente». Curato nella 0.98.7."
+  - "Il referto delle prove, lanciate da root, restava di root nella cartella dell'operatore. Curato nella 0.98.7."
+  - "Gli installatori mettono l'operatore nel gruppo sudo: non curato, va con la issue #283."

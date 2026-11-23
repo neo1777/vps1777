@@ -19,13 +19,14 @@
 # non esiste modo di usarlo per far passare un update malato. Il peggio che causa è
 # un rollback non necessario — cioè il comportamento che questa prova collauda.
 #
-# 🔴 DICHIARAZIONE ONESTA, e va letta prima di lanciare (stato al 22/11/2026): **questo
-#    script non ha ancora mai visto un rollback.** Ha girato una volta con `--esegui`, al
-#    collaudo su macchina vergine del 27/08/2026, e si è fermato su un errore SUO (vedi
-#    più sotto, «la prima stesura passava --version $CORRENTE»): corretto, e da allora
-#    non c'è stato un salto di versione su cui rilanciarlo. Le sue attese vengono dalla
-#    lettura del codice e possono essere sbagliate; se lo sono, la correzione va scritta
-#    qui dentro. *Finché non ha visto il rosso e il verde è una proposta di prova.*
+# ✅ HA VISTO IL ROLLBACK (collaudo su macchina vergine del 23/11/2026, referto in
+#    docs/collaudi/2026-11-23.yml): update 0.98.5 → 0.98.6 col gate forzato, rollback partito,
+#    versione rimasta 0.98.5, sei container su. Fino a quel giorno era una proposta di prova:
+#    aveva girato una volta sola (27/08/2026) fermandosi su un errore suo, poi corretto.
+#    Quel giro ha anche mostrato un difetto dell'aggancio: faceva fallire pure il controllo di
+#    salute DOPO il rollback, e l'update usciva 2 («serve intervento») su un rollback riuscito.
+#    Dalla 0.98.7 l'aggancio scatta una volta sola: l'esito atteso dell'update è 1.
+#    ⚠️ Non l'ha ancora vista la VPS di riferimento, e non gira in CI (serve uno stack vivo).
 #
 # Uso:
 #   bash prova-9-il-fail-closed-torna-indietro-davvero.sh            # dice cosa farebbe, exit 2
@@ -144,6 +145,9 @@ if [ -z "$DOPO" ]; then
 fi
 if [ "$GATE_KO" -eq 1 ] && [ "$ROLLBACK" -eq 1 ] && [ "$DOPO" = "$CORRENTE" ] && [ "${SU:-0}" -gt 0 ]; then
   rm -f "$LOG"
+  # 1 = «tornato indietro, sano». 2 = il prodotto crede che nemmeno il ritorno sia sano: con una
+  # CLI precedente alla 0.98.7 è l'aggancio che falsa anche quel controllo; dopo, è un difetto.
+  [ "$RC" -eq 1 ] || dice "  ⚠️ l'update è uscito $RC e non 1: il prodotto non ha visto sano il proprio rollback (vedi la testa di questo file)."
   dice "✅ PASS — il gate ha detto no, il rollback è partito, la versione è quella di prima"
   dice "   e i container sono su. **Il fail-closed non è più una riga mai eseguita.**"
   exit 0

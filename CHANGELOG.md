@@ -4,6 +4,24 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Chi installa senza bot Telegram può di nuovo aggiornare.** Gli installatori permettono di lasciare vuoto il
+  token («bot in attesa»), ma l'aggiornamento contava quel vuoto come un segreto mancante e si fermava prima di
+  cominciare: una macchina così restava alla versione d'installazione, anche con l'aggiornamento automatico acceso.
+  Ora il token vuoto è riconosciuto come bot in attesa, viene detto e non ferma niente; un file che manca o un
+  altro segreto vuoto fermano come prima. Trovato dal collaudo su macchina vergine del 23/11/2026.
+- **Dopo un ritorno automatico alla versione di prima, «precedente» non è più uguale a «corrente».** La versione
+  a cui si poteva tornare prima dell'aggiornamento fallito viene rimessa al suo posto.
+- La prova del rollback forzato (prova 9) faceva fallire anche il controllo di salute dopo il rollback:
+  l'aggiornamento usciva con «serve intervento» su un ritorno riuscito. L'aggancio di collaudo ora scatta una volta.
+- Le prove empiriche lanciate da root non lasciano più il loro referto di proprietà di root.
+
+### Documenti
+- **Referto del collaudo su macchina vergine del 23/11/2026** in `docs/collaudi/2026-11-23.yml`: installazione da
+  zero su Debian 13, due aggiornamenti, il primo rollback forzato mai visto, perdita e ripristino di dati, segreti
+  e configurazione (79 secondi), e un aggiornamento ucciso a metà da cui la macchina si è ripresa da sola.
+  `docs/COLLAUDO-VERGINE.md` ne riporta l'esito e che cosa guardare al prossimo.
+
 ## [0.98.6] — 2026-11-22
 
 ### Cambiato

@@ -4521,9 +4521,15 @@ findings:
         output: "6 passed: cinque stati di partenza, cinque decisioni; il controllo precede «già aggiornato»"
         exit: 0
         quando: "2026-11-21"
+      - comando: "vps1777 update --yes, ucciso con kill -9 dopo lo step 10; poi di nuovo vps1777 update --yes"
+        dove: "macchina di prova (collaudo su vergine, docs/collaudi/2026-11-23.yml)"
+        output: "dopo il colpo: stack fermo, tag al target, bandierina scritta. L'update successivo: «non è arrivato in fondo… lo chiudo», rollback alla versione di prima coi volumi dello snapshot, sei container sani, dato di prova intatto"
+        exit: 1
+        quando: "2026-11-23"
     residuo: >
-      La decisione è provata con docker e health-gate sostituiti; un update ucciso davvero su
-      una macchina di prova non è ancora stato eseguito.
+      Provato dal vivo su una macchina di prova il caso «stack fermo col tag al target». Gli altri
+      quattro stati di partenza restano provati solo con docker e health-gate sostituiti; sulla VPS
+      di riferimento non è mai successo né è stato provocato.
 
   - id: H94
     severity: low

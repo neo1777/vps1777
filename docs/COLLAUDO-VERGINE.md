@@ -247,3 +247,29 @@ campionati a mano, nessuna voce spontanea fra loro. Il retag degli archivi
 vivi arriva con la release che porta questa taratura in produzione.
 
 **Resta**: il completamento della prova-6 §③.
+
+---
+
+## Esito del secondo collaudo (23/11/2026)
+
+Referto: [`docs/collaudi/2026-11-23.yml`](collaudi/2026-11-23.yml). Macchina a ore di un fornitore
+diverso da quello di produzione, **Debian 13** (produzione: Debian 12), via a riga di comando.
+
+Che cosa ha visto per la prima volta:
+- **la prova 9**: l'update col controllo di salute forzato a fallire è tornato indietro davvero;
+- **un update ucciso con `kill -9`** dopo il punto di non ritorno: l'update successivo ha riportato
+  la macchina alla versione di prima, coi dati dello snapshot;
+- **il ciclo completo di perdita e ripristino** con volumi, segreti e configurazione cancellati:
+  79 secondi dall'inizio del restore a servizio sano e dato ritrovato (con dati minimi).
+
+Che cosa ha trovato, e che questo runbook ora chiede di guardare:
+- **installare senza bot e poi aggiornare.** Chi lasciava vuoto il token di Telegram non poteva
+  più aggiornare (curato nella 0.98.7). Al prossimo collaudo il primo update si fa *prima* di
+  mettere il token.
+- **sulla macchina si usa `vps1777`, non `docker compose` a mano.** Un `docker compose up` senza i
+  file dell'ingresso toglie la porta pubblicata, e da fuori si vede un 502.
+- **serve un update alle spalle** perché le prove 4, 5 e 9 siano misurabili: su una macchina appena
+  installata escono «non eseguite», ed è giusto così.
+
+**Resta**: l'installatore grafico su Debian 13, il bot in uso reale, NotebookLM, e la prova 9 sulla
+VPS di riferimento.
