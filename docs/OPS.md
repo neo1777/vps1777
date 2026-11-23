@@ -68,7 +68,8 @@ Per cambiare le feature, oggi, i gesti sono due e servono entrambi:
 2. **Applica il cambio adesso**, se non vuoi aspettare il prossimo update:
    - `autoupdate` — `sudo systemctl enable --now vps1777-auto-update.timer` per
      accenderlo, `sudo systemctl disable --now vps1777-auto-update.timer` per spegnerlo
-     (l'operatore ha `systemctl` nella whitelist sudo). Senza questo passo il timer resta
+     (sono fra i comandi che l'operatore può lanciare con sudo, vedi «Che cosa può fare
+     l'operatore con sudo» più sotto). Senza questo passo il timer resta
      com'era fino al primo update che installa davvero o al primo rollback, che lo
      riallineano alla riga del `.env`.
    - `backup`, `portainer` — sono profili compose: la CLI li aggiunge ai `docker compose`
@@ -200,3 +201,33 @@ i certificati da solo all'avvio.
 
 I profili sono indipendenti e cumulabili. Aggiungi più `-f compose.ops.*.yaml`
 e più `--profile ops.*` allo stesso comando.
+
+## Che cosa può fare l'operatore con sudo
+
+L'utente operatore (di default `vps1777`) non ha una password e non è nel gruppo `sudo`. Con
+`sudo` può lanciare solo ciò che la CLI usa per installarsi e aggiornarsi:
+
+- `install` della CLI in `/usr/local/bin/vps1777`, di cosign in `/usr/local/bin/cosign`, e
+  delle unit `vps1777-*` in `/etc/systemd/system/`;
+- `systemctl daemon-reload`, e `systemctl enable|disable --now` dei timer e dei path `vps1777-*`;
+- `chown -hR` a se stesso delle cartelle `onboarding`, `var`, `backups` e `releases` del prodotto.
+
+Ogni altra cosa (`sudo systemctl stop ssh`, `sudo chown` su `/etc`, `sudo install` altrove) è
+negata. Le regole stanno in `/etc/sudoers.d/90-<operatore>` e le scrive
+`tools/sudoers-operatore.sh`.
+
+**Non è un confine.** L'operatore resta equivalente a root: sta nel gruppo `docker` e può
+installare una unit `vps1777-*` scritta da lui. Le regole tolgono l'errore e l'abuso semplice.
+
+**Su una macchina installata prima della 0.98.8** le regole sono ancora quelle larghe (i tre
+comandi, con qualunque argomento) e l'operatore è nel gruppo `sudo`. Per stringerle, da root,
+dopo aver aggiornato almeno alla 0.98.8:
+
+```bash
+sudo bash /home/vps1777/vps1777/tools/sudoers-operatore.sh --installa vps1777 /home/vps1777/vps1777
+sudo -u vps1777 /bin/bash /home/vps1777/vps1777/tools/sudoers-tabella.sh /home/vps1777/vps1777   # deve uscire 0
+```
+
+Il primo comando valida le regole prima di installarle e toglie l'operatore dal gruppo `sudo`;
+il secondo prova, senza eseguire niente, che gli usi veri passino e gli abusi siano negati. Con
+un `sudo` più vecchio della 1.9.10 il primo esce 3 e non tocca niente.

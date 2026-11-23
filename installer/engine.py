@@ -637,7 +637,7 @@ if ! id {OPERATOR_USER} >/dev/null 2>&1; then
   fi
 fi
 usermod -aG docker {OPERATOR_USER}
-getent group sudo >/dev/null && usermod -aG sudo {OPERATOR_USER} || true
+# Niente più gruppo `sudo` per l'operatore (0.98.8): vedi deploy.sh, stesso punto.
 # H12 — sudoers WHITELIST invece di NOPASSWD:ALL. Via sudo l'operator esegue SOLO
 # i binari che la CLI vps1777 e gli script di install/update usano: install (CLI,
 # unit, cosign), systemctl (daemon-reload, enable), chown (ownership runtime).
@@ -703,8 +703,17 @@ install -d -o {OPERATOR_USER} -g {OPERATOR_USER} {REMOTE_DIR}
 tar -xzf /tmp/vps1777.tar.gz -C {REMOTE_DIR}
 chown -R {OPERATOR_USER}:{OPERATOR_USER} {REMOTE_DIR}
 rm -f /tmp/vps1777.tar.gz
+# Issue #283: la lista dei tre binari si stringe agli usi veri della CLI (vedi deploy.sh). Si
+# legge lo strumento in una copia di root prima di eseguirlo: la cartella è già dell'operatore.
+install -m 0700 -o root -g root {REMOTE_DIR}/tools/sudoers-operatore.sh /root/.sudoers-operatore.sh
+bash /root/.sudoers-operatore.sh --installa {OPERATOR_USER} {REMOTE_DIR} || echo "SUDOERS_ARGOMENTI_NON_APPLICATE"
+rm -f /root/.sudoers-operatore.sh
 """
         for line in self._stream(mv, "upload"):
+            if "SUDOERS_ARGOMENTI_NON_APPLICATE" in line:
+                yield ("! regole sudo ad argomenti vincolati NON applicate (sudo più vecchio della "
+                       "1.9.10?): resta la lista dei tre binari, con qualunque argomento.")
+                continue
             yield line
         yield "✓ Repo in posizione"
 

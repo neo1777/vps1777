@@ -804,7 +804,9 @@ if ! id "$OPERATOR_USER" >/dev/null 2>&1; then
   fi
 fi
 usermod -aG docker "$OPERATOR_USER"
-getent group sudo >/dev/null && usermod -aG sudo "$OPERATOR_USER" || true
+# Fino alla 0.98.7 l'operatore finiva anche nel gruppo `sudo` («tutto, con la password»): non avendo
+# una password non gli dava niente, ma avrebbe vanificato le regole qui sotto il giorno in cui ne
+# avesse avuta una (collaudo del 23/11/2026). Quello che gli serve via sudo sta nel suo file.
 # H12 — sudoers WHITELIST invece di NOPASSWD:ALL. Via sudo l'operator può
 # eseguire SOLO i binari che la CLI vps1777 e gli script di install/update usano:
 #   install    → CLI in /usr/local/bin, unit in /etc/systemd/system, cosign
@@ -871,9 +873,18 @@ set -e
 install -d -o "$OPERATOR_USER" -g "$OPERATOR_USER" "$REMOTE_DIR"
 cp -a /tmp/vps1777-xfer/. "$REMOTE_DIR/"
 chown -R "$OPERATOR_USER:$OPERATOR_USER" "$REMOTE_DIR"
+# Issue #283: la lista dei tre binari messa al passo 3 (qualunque argomento) si stringe agli usi
+# veri della CLI. Lo strumento si lancia dalla copia appena arrivata, che è ancora di root: non da
+# quella dell'operatore. Se sudo è troppo vecchio (esce 3) resta la lista di prima, e lo si dice.
+bash /tmp/vps1777-xfer/tools/sudoers-operatore.sh --installa "$OPERATOR_USER" "$REMOTE_DIR" || echo "SUDOERS_ARGOMENTI_NON_APPLICATE"
 rm -rf /tmp/vps1777-xfer
 PREP2
 ok "Repo in $REMOTE_DIR"
+if SSH "grep -q VPS1777_OPS /etc/sudoers.d/90-$OPERATOR_USER" 2>/dev/null; then
+  ok "sudo dell'operatore ristretto agli usi veri della CLI"
+else
+  warn "regole sudo ad argomenti vincolati NON applicate (sudo più vecchio della 1.9.10?): resta la lista dei tre binari, con qualunque argomento."
+fi
 
 # ═══════════════════════════════════════════ 5. .env + SECRETS
 step "5/8 — Genero .env + secrets sulla VPS"

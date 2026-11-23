@@ -301,7 +301,17 @@ findings:
         not_contains: ["NOPASSWD: ALL\n"]
       - file: installer/engine.py
         contains: ["ALL=(root) NOPASSWD:"]
+      - file: tools/sudoers-operatore.sh
+        contains: ["Cmnd_Alias VPS1777_OPS", "visudo -cf", "gpasswd -d"]
+      - file: tools/tests/test-sudoers-operatore.sh
+        contains: ["regole nuove: 32 righe su 32"]
     missing: >
+      Dalla 0.98.8 (issue #283) le installazioni NUOVE stringono anche gli ARGOMENTI: passano
+      solo gli usi che la CLI fa davvero (tools/sudoers-operatore.sh, provato su una macchina
+      vera il 23/11/2026 e in un contenitore a ogni PR), e l'operatore non è più nel gruppo
+      `sudo`. Le macchine installate prima tengono la lista dei tre binari finché root non
+      lancia `tools/sudoers-operatore.sh --installa` (docs/OPS.md). Con sudo più vecchio della
+      1.9.10 le regole ad argomenti non si applicano e resta la lista.
       Sudo ristretto a install/systemctl/chown (censiti alla fonte da ogni sudo() della
       CLI; validato con visudo -cf prima di installare). MA l'operator RESTA
       root-equivalente via il gruppo `docker` (può `docker run -v /:/host`): la whitelist
