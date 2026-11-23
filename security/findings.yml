@@ -4854,7 +4854,7 @@ findings:
         `low`: il log sta sulla macchina e lo legge chi ha già accesso a docker; il gettone di
         scarico vale 30 minuti, quello di caricamento è monouso. Ma un log copiato altrove (un
         ticket, un backup dei log) portava con sé link ancora validi.
-    since: unreleased
+    since: v0.98.9
     why: >
       Il filtro dei log toglieva solo il segreto del gateway, che conosce in anticipo. I link
       firmati di nb1777 portano il gettone nella query (`/scarica/<nome>?t=…`) o nel percorso

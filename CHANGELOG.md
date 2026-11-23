@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.9] — 2026-11-23
+
 ### Sicurezza
 - **I gettoni dei link per scaricare e caricare file non finiscono più nel log degli accessi (H101).** Il filtro
   toglieva solo il segreto del gateway; i link firmati portano il loro gettone nell'indirizzo, e la riga di
