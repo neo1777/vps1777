@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Le basi delle immagini non restano più indietro senza che nessuno lo veda.** Sono fissate per impronta, e a
+  spostare l'impronta dovrebbe pensarci Dependabot ogni settimana; per quella di Python non l'ha fatto per due
+  mesi (27/09 → 21/11/2026) e l'ha mostrato una scansione. Ora il controllo mensile confronta l'impronta fissata
+  con quella che il registro dà oggi (`tools/base-cadenza.py`) e apre una segnalazione se una base è ferma da
+  più di 45 giorni; se non riesce a misurare è rosso, non verde.
+
 ### Corretto
 - Stessa cura della 0.98.10 negli altri due punti in cui un servizio ne chiama un altro: il gateway verso
   NotebookLM (stato del profilo, elenco degli artefatti, caricamento del profilo) e il bot quando chiede se il
