@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.11] — 2026-11-24
+
 ### Sicurezza
 - **Il limite di frequenza sugli accessi conta la rete, non il singolo indirizzo IPv6.** Chi ha una connessione
   IPv6 dispone di miliardi di indirizzi nella stessa rete: cambiandone uno a ogni richiesta il limite su
