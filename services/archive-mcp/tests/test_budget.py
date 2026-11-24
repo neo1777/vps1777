@@ -223,3 +223,22 @@ def test_verificato_solo_se_qualcosa_e_stato_guardato(db):
     from app import semantica
     assert semantica.verdetto_registro(True, candidati=0, assenti=0, uuid_diversi=0)["stato"].startswith("niente da verificare")
     assert semantica.verdetto_registro(True, candidati=5, assenti=0, uuid_diversi=0)["stato"].startswith("verificato")
+
+
+def test_il_budget_parte_dopo_il_modello(db, monkeypatch):
+    """Il primo caricamento del modello è lento: se il budget nascesse prima, quel tempo
+    verrebbe tolto alle ricerche e la prima domanda dopo un riavvio uscirebbe «parziale»."""
+    ordine = []
+    monkeypatch.setattr(db, "_indici_disponibili", lambda: {"a": Path("/x/a.vec.db")})
+    monkeypatch.setattr(db.semantica, "embed_query", lambda t, d: ordine.append("modello") or b"\x00" * 4)
+    vero = db._Budget
+
+    class _Spia(vero):
+        def __init__(self, secondi):
+            ordine.append("budget")
+            super().__init__(secondi)
+    monkeypatch.setattr(db, "_Budget", _Spia)
+    monkeypatch.setattr(db, "BUDGET_IBRIDA_S", 0.0)
+    monkeypatch.setattr(db, "_open_con_indice", lambda name, idx: None)
+    db.search_ibrida("memoria", "a", limit=5, riformulazioni=["ricordo"])
+    assert ordine == ["modello", "modello", "budget"]

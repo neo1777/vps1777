@@ -524,3 +524,185 @@ def test_con_molte_copie_tornano_comunque_limit_righe(archivio, monkeypatch) -> 
     assert len(r["righe"]) == 2, [x["uuid"] for x in r["righe"]]
     assert r["righe"][0].get("copie") == 4
     assert r["righe"][1]["uuid"] == "u6"
+
+
+# ── i rami che nessuna prova percorreva (24/11/2026, prima di spezzare search_ibrida) ──
+# Misurati con la copertura per rami: 13 su 82 non erano mai stati eseguiti. Si scrivono
+# PRIMA di toccare la funzione: una funzione da 55 non si spezza alla cieca.
+
+def _pronto(archivio, monkeypatch):
+    """L'archivio con l'indice costruito e una domanda che «vale» il messaggio 2."""
+    modulo, db, tci = archivio
+    import costruisci_indice as ci
+    ci.costruisci(db, tci.Finto(), ci.Perimetro(tutto=True))
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    return modulo, db, tci
+
+
+def _con_fts(db: Path) -> None:
+    _rw(db, ("CREATE VIRTUAL TABLE messages_fts USING fts5(uuid, project, ts, content, "
+             "content='messages', content_rowid='rowid')",),
+        ("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')",))
+
+
+def _orologio(monkeypatch, modulo, passo: float) -> None:
+    stato = {"t": 1000.0}
+
+    def adesso() -> float:
+        stato["t"] += passo
+        return stato["t"]
+    monkeypatch.setattr(modulo, "_adesso", adesso)
+
+
+def test_senza_nessun_indice_lo_dice_e_indica_search(archivio):
+    modulo, _, _ = archivio
+    with pytest.raises(modulo.SemanticaNonPronta, match="Nessun indice vettoriale per i DB richiesti"):
+        modulo.search_ibrida("x", db="arch")
+    with pytest.raises(modulo.SemanticaNonPronta, match="gli archivi caricati") as e:
+        modulo.search_ibrida("x")
+    assert "DB con indice: nessuno" in str(e.value) and "`search` (FTS5)" in str(e.value)
+
+
+@vec
+def test_un_db_sparito_dal_registro_o_sporco_va_in_saltati(archivio, monkeypatch):
+    modulo, _, _ = _pronto(archivio, monkeypatch)
+
+    def sparito(name, idx):
+        raise KeyError(name)
+    monkeypatch.setattr(modulo, "_open_con_indice", sparito)
+    r = modulo.search_ibrida("x", db="arch", limit=3)
+    assert r["righe"] == [] and r["indici"] == []
+    assert r["saltati"] == [{"db": "arch", "ramo": "db", "motivo": "non più nel registro"}]
+    assert "parziale" not in r, "parziale è solo del budget"
+
+    def sporco(name, idx):
+        raise modulo.ArchivioSporco("journal caldo")
+    monkeypatch.setattr(modulo, "_open_con_indice", sporco)
+    r = modulo.search_ibrida("x", db="arch", limit=3)
+    assert r["righe"] == [] and [(s["db"], s["ramo"]) for s in r["saltati"]] == [("arch", "db")]
+
+
+@vec
+def test_il_budget_che_finisce_fra_due_testi_tiene_cio_che_c_e(archivio, monkeypatch):
+    """Le letture dell'orologio: nascita del budget, inizio del DB, prima dei vicini del
+    primo testo, inizio del secondo testo. Con 40 s e 15 s a lettura finisce alla quarta."""
+    modulo, _, _ = _pronto(archivio, monkeypatch)
+    monkeypatch.setattr(modulo, "BUDGET_IBRIDA_S", 40.0)
+    _orologio(monkeypatch, modulo, 15.0)
+    r = modulo.search_ibrida("x", db="arch", limit=3, riformulazioni=["y"])
+    assert r["righe"] and r["righe"][0]["uuid"] == "u2", "il primo testo aveva già risposto"
+    assert r["parziale"] is True
+    assert [(s["db"], s["ramo"]) for s in r["saltati"]] == [("arch", "budget")]
+    assert "a metà di" in r["saltati"][0]["motivo"]
+    assert [i["db"] for i in r["indici"]] == ["arch"], "il DB resta dichiarato"
+
+
+@vec
+def test_il_ramo_fts_rotto_su_due_testi_si_dice_una_volta_sola(archivio, monkeypatch):
+    modulo, _, _ = _pronto(archivio, monkeypatch)
+
+    def rotta(*a, **k):
+        raise modulo.FtsSyntaxError("espressione non valida")
+    monkeypatch.setattr(modulo.fts, "search_conn", rotta)
+    r = modulo.search_ibrida("memoria piano", db="arch", limit=3,
+                             riformulazioni=["ricordo progetto"])
+    assert r["saltati"] == [{"db": "arch", "ramo": "fts", "motivo": "espressione non valida"}]
+    assert r["righe"] and all(x["origine"] == "vettori" for x in r["righe"])
+
+
+@vec
+def test_indice_rotto_al_primo_testo_il_secondo_non_ritenta_i_vicini(archivio, monkeypatch):
+    modulo, db, _ = _pronto(archivio, monkeypatch)
+    _con_fts(db)
+    modulo._maybe_reload()
+    chiamate = []
+
+    def rotto(*a, **k):
+        chiamate.append(1)
+        raise sqlite3.OperationalError("no such table: vec.vettori")
+    monkeypatch.setattr(modulo.semantica, "knn_pezzi", rotto)
+    r = modulo.search_ibrida("messaggio sintetico abbastanza", db="arch", limit=3,
+                             riformulazioni=["indice vettoriale lungo"])
+    assert len(chiamate) == 1, "dopo il guasto i vicini non si richiedono per ogni testo"
+    assert [(s["db"], s["ramo"]) for s in r["saltati"]] == [("arch", "vettori")]
+    assert r["righe"] and all(x["origine"] == "fts" for x in r["righe"])
+    assert r["indici"][0]["messaggi_indicizzati"] == "?", "di un indice rotto non si legge il meta"
+
+
+@vec
+def test_nessun_vicino_non_e_un_errore(archivio, monkeypatch):
+    modulo, _, _ = _pronto(archivio, monkeypatch)
+    monkeypatch.setattr(modulo.semantica, "knn_pezzi", lambda *a, **k: [])
+    r = modulo.search_ibrida("x", db="arch", limit=3)
+    assert r["righe"] == [] and "saltati" not in r
+    assert r["indici"][0]["verifica"]["candidati"] == 0
+
+
+@vec
+def test_i_vicini_interrotti_dal_budget_sono_budget_non_guasto(archivio, monkeypatch):
+    """Orologio: nascita, inizio del DB, prima dei vicini (ancora dentro), poi dentro
+    l'eccezione (fuori): l'interruzione è del budget, non dell'indice."""
+    modulo, _, _ = _pronto(archivio, monkeypatch)
+    monkeypatch.setattr(modulo, "BUDGET_IBRIDA_S", 40.0)
+    _orologio(monkeypatch, modulo, 15.0)
+
+    def interrotto(*a, **k):
+        raise sqlite3.OperationalError("interrupted")
+    monkeypatch.setattr(modulo.semantica, "knn_pezzi", interrotto)
+    r = modulo.search_ibrida("x", db="arch", limit=3)
+    assert [(s["db"], s["ramo"]) for s in r["saltati"]] == [("arch", "budget")]
+    assert "prima di" in r["saltati"][0]["motivo"] and r["parziale"] is True
+
+
+@vec
+def test_il_meta_dell_indice_che_non_si_legge_diventa_punti_di_domanda(archivio, monkeypatch):
+    modulo, _, _ = _pronto(archivio, monkeypatch)
+
+    def niente(conn):
+        raise sqlite3.OperationalError("no such table: vec.indice_meta")
+    monkeypatch.setattr(modulo.semantica, "meta_indice", niente)
+    r = modulo.search_ibrida("x", db="arch", limit=3)
+    i = r["indici"][0]
+    assert (i["messaggi_indicizzati"], i["modello"], i["generato"]) == ("?", "?", "?")
+    assert i["perimetro"] == "non dichiarato"
+    assert r["righe"][0]["uuid"] == "u2", "la ricerca non dipende dal meta"
+
+
+@vec
+def test_lo_stesso_uuid_in_due_db_esce_una_volta_con_anche_in(tmp_path, monkeypatch):
+    import test_costruisci_indice as tci
+    righe = [(f"u{i}", "claude-code", f"2026-05-{10 + i:02d}", f"{FRASE} numero {i}")
+             for i in range(1, 5)]
+    primo = tci.nuovo_db(tmp_path / "bundle.db", righe)
+    secondo = tci.nuovo_db(tmp_path / "foto.db", righe)
+    for mod in [m for m in list(sys.modules) if m == "app" or m.startswith("app.")]:
+        del sys.modules[mod]
+    finte = types.ModuleType("app.settings")
+    finte.get_settings = lambda: _SettingsFinte(tmp_path)   # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "app.settings", finte)
+    from app import db as modulo
+    modulo.reload_registry()
+    import costruisci_indice as ci
+    for d in (primo, secondo):
+        ci.costruisci(d, tci.Finto(), ci.Perimetro(tutto=True))
+    blob = tci.vettore(semantica.PREFISSO_PASSAGGIO + f"{FRASE} numero 2")
+    monkeypatch.setattr(modulo.semantica, "embed_query", lambda q, d: blob)
+    modulo._maybe_reload()
+    r = modulo.search_ibrida("x", limit=4)
+    uuid = [x["uuid"] for x in r["righe"]]
+    assert sorted(uuid) == ["u1", "u2", "u3", "u4"], "ogni uuid una volta sola"
+    for x in r["righe"]:
+        assert {x["db"], *x["anche_in"]} == {"bundle", "foto"}, x
+
+
+@vec
+def test_col_passaggio_una_riga_senza_testo_tiene_lo_snippet_che_aveva(archivio, monkeypatch):
+    modulo, db, _ = _pronto(archivio, monkeypatch)
+    _rw(db, ("UPDATE messages SET content = '', tools = '' WHERE uuid = 'u2'",))
+    modulo._maybe_reload()
+    r = modulo.search_ibrida("x", db="arch", limit=6, passaggio=20)
+    riga = next(x for x in r["righe"] if x["uuid"] == "u2")
+    assert riga["snippet"] == "", "non c'è testo da cui prendere il passaggio"
+    assert any(x["snippet"] for x in r["righe"] if x["uuid"] != "u2")
