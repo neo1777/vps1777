@@ -685,15 +685,28 @@ def rapporto_epoca(findings: list[dict], data: str) -> int:
     return 0
 
 
-def main() -> int:
-    if "--epoca" in sys.argv:
-        i = sys.argv.index("--epoca")
-        if i + 1 >= len(sys.argv):
-            print("uso: check_findings.py --epoca AAAA-MM-GG")
-            return 2
-        data = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))
-        return rapporto_epoca(data.get("findings") or [], sys.argv[i + 1])
+class _Conto:
+    """Ciò che il giro sulle voci conta, per l'àncora, per SECURITY.md e per l'esito.
 
+    Una classe semplice e non una dataclass: le prove caricano questo file da percorso, senza
+    registrarlo in `sys.modules`, e `@dataclass` lì non funziona."""
+
+    def __init__(self) -> None:
+        self.counts = {"closed": 0, "partial": 0, "open": 0, "accepted": 0}
+        self.by_sev: dict[str, int] = {}
+        self.non_rilasciate: list[str] = []
+        self.senza_natura: list[str] = []
+        self.senza_scoperta: list[str] = []
+
+
+def main() -> int:
+    """Il registro regge? 0 sì, 1 no (e dice dove), 2 se è stato chiamato male.
+
+    I passi: le regole di ogni voce (`_controlla_le_voci`), l'àncora dei totali, i tre
+    confronti con SECURITY.md, poi la stampa di ciò che si conta senza accusare e l'esito.
+    """
+    if "--epoca" in sys.argv:
+        return _modo_epoca()
     errors: list[str] = []
 
     if not REGISTRY.is_file():
@@ -702,14 +715,28 @@ def main() -> int:
 
     data = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))
     findings = data.get("findings") or []
+    conto = _controlla_le_voci(findings, errors)
+    _controlla_l_ancora(len(findings), conto.by_sev, errors)
+    _confronta_con_security_md(findings, conto.counts, len(findings), errors)
+    _stampa_il_conto(len(findings), conto)
+    return _esito(errors)
 
+
+def _modo_epoca() -> int:
+    """`--epoca AAAA-MM-GG`: il rapporto delle voci per epoca, al posto del controllo."""
+    i = sys.argv.index("--epoca")
+    if i + 1 >= len(sys.argv):
+        print("uso: check_findings.py --epoca AAAA-MM-GG")
+        return 2
+    data = yaml.safe_load(REGISTRY.read_text(encoding="utf-8"))
+    return rapporto_epoca(data.get("findings") or [], sys.argv[i + 1])
+
+
+def _controlla_le_voci(findings: list[dict], errors: list[str]) -> _Conto:
+    """Lo schema di ogni voce e le sue regole; rende i conteggi."""
+    conto = _Conto()
     seen: set[str] = set()
-    counts = {"closed": 0, "partial": 0, "open": 0, "accepted": 0}
-    by_sev: dict[str, int] = {}
     rilasciate = versioni_rilasciate()
-    non_rilasciate: list[str] = []
-    senza_natura: list[str] = []
-    senza_scoperta: list[str] = []
     if not rilasciate:
         fail(errors,
              "CHANGELOG.md assente o senza intestazioni di versione: senza di lui\n"
@@ -728,54 +755,61 @@ def main() -> int:
         if status not in VALID_STATUS:
             fail(errors, f"{fid}: status «{status}» non valido")
             continue
-        counts[status] += 1
+        conto.counts[status] += 1
 
         sev = f.get("severity")
         if sev not in VALID_SEVERITY:
             fail(errors, f"{fid}: severity «{sev}» non valida")
         else:
-            by_sev[sev] = by_sev.get(sev, 0) + 1
+            conto.by_sev[sev] = conto.by_sev.get(sev, 0) + 1
 
-        if not f.get("title"):
-            fail(errors, f"{fid}: manca il titolo")
-
-        # LA REGOLA: niente claim senza coordinata.
-        if status == "closed" and not f.get("evidence"):
-            fail(errors,
-                 f"{fid}: dichiarata CHIUSA senza evidenza.\n"
-                 f"       Se non sai scrivere l'evidenza, non è chiusa.")
-
-        # Un rischio ACCETTATO deve dire se oggi si sfrutta: «accettato» senza quella risposta
-        # è un rinvio senza data. Le quattro voci accettate la portano dal 21/11/2026.
-        if status == "accepted" and not str(f.get("si_sfrutta_oggi") or "").strip():
-            fail(errors,
-                 f"{fid}: è `accepted` ma non risponde a `si_sfrutta_oggi:`.\n"
-                 f"       Scrivi sì o no, e perché: è la domanda che decide se resta accettato.")
-
-        # LA REGOLA GEMELLA: niente «non fatto» senza dire cosa manca.
-        if status in {"partial", "open"} and not f.get("missing"):
-            fail(errors,
-                 f"{fid}: è `{status}` ma non dichiara cosa manca.\n"
-                 f"       Un residuo taciuto è un residuo dimenticato.")
-
-        # Un rischio accettato senza motivazione è un rischio nascosto.
-        if status == "accepted" and not (f.get("missing") or f.get("rationale")):
-            fail(errors,
-                 f"{fid}: è `accepted` ma non dice PERCHÉ non si fa.\n"
-                 f"       Accettare un rischio in silenzio è peggio che non accettarlo.")
+        _regole_di_stato(f, fid, status, errors)
 
         if check_since(f, rilasciate, errors):
-            non_rilasciate.append(fid)
+            conto.non_rilasciate.append(fid)
         check_resta_aperto(f, errors)
-        check_natura_e_prova(f, errors, senza_natura)
+        check_natura_e_prova(f, errors, conto.senza_natura)
         check_documento_non_solo_assenza(f, errors)
-        check_scoperta(f, errors, senza_scoperta)
+        check_scoperta(f, errors, conto.senza_scoperta)
         check_rilievo_esterno(f, errors)
         check_evidence(f, errors)
         check_titolo_nomina_file(f, errors)
+    return conto
 
+
+def _regole_di_stato(f: dict, fid: str, status: str, errors: list[str]) -> None:
+    """Ciò che ogni stato pretende: titolo, evidenza, cosa manca, perché si accetta."""
+    if not f.get("title"):
+        fail(errors, f"{fid}: manca il titolo")
+
+    # LA REGOLA: niente claim senza coordinata.
+    if status == "closed" and not f.get("evidence"):
+        fail(errors,
+             f"{fid}: dichiarata CHIUSA senza evidenza.\n"
+             f"       Se non sai scrivere l'evidenza, non è chiusa.")
+
+    # Un rischio ACCETTATO deve dire se oggi si sfrutta: «accettato» senza quella risposta
+    # è un rinvio senza data. Le quattro voci accettate la portano dal 21/11/2026.
+    if status == "accepted" and not str(f.get("si_sfrutta_oggi") or "").strip():
+        fail(errors,
+             f"{fid}: è `accepted` ma non risponde a `si_sfrutta_oggi:`.\n"
+             f"       Scrivi sì o no, e perché: è la domanda che decide se resta accettato.")
+
+    # LA REGOLA GEMELLA: niente «non fatto» senza dire cosa manca.
+    if status in {"partial", "open"} and not f.get("missing"):
+        fail(errors,
+             f"{fid}: è `{status}` ma non dichiara cosa manca.\n"
+             f"       Un residuo taciuto è un residuo dimenticato.")
+
+    # Un rischio accettato senza motivazione è un rischio nascosto.
+    if status == "accepted" and not (f.get("missing") or f.get("rationale")):
+        fail(errors,
+             f"{fid}: è `accepted` ma non dice PERCHÉ non si fa.\n"
+             f"       Accettare un rischio in silenzio è peggio che non accettarlo.")
+
+
+def _controlla_l_ancora(total: int, by_sev: dict[str, int], errors: list[str]) -> None:
     # l'àncora: il totale atteso, dichiarato in testa con la sua provenienza
-    total = len(findings)
     if total != EXPECTED_TOTAL:
         fail(errors, f"il registro ha {total} voci, l'àncora ne dichiara {EXPECTED_TOTAL}")
     for sev, expected in EXPECTED_BY_SEVERITY.items():
@@ -783,6 +817,10 @@ def main() -> int:
         if got != expected:
             fail(errors, f"fascia {sev}: {got} voci nel registro, {expected} nel dossier")
 
+
+def _confronta_con_security_md(findings: list[dict], counts: dict[str, int], total: int,
+                               errors: list[str]) -> None:
+    """I tre confronti col documento: ogni residuo nominato, la tabella, la frase in prosa."""
     # ── ogni RESIDUO dev'essere NOMINATO in SECURITY.md, non solo contato ──
     # Il controllo qui sotto confronta quattro numeri, e quattro numeri combaciano
     # anche quando il testo racconta un'altra cosa. Misurato il 27/07: la tabella
@@ -794,33 +832,41 @@ def main() -> int:
         # checker passava senza aver confrontato niente.
         fail(errors, "SECURITY.md non c'è: non posso confrontare il registro con ciò che il "
                      "progetto dichiara (residui nominati e conteggi).")
-    if SECURITY_MD.is_file():
-        md_ids = SECURITY_MD.read_text(encoding="utf-8")
-        for f in findings:
-            fid = str(f.get("id", ""))
-            if f.get("status") in {"partial", "open"} and fid and not re.search(
-                    rf"\b{re.escape(fid)}\b", md_ids):
-                fail(errors,
-                     f"{fid}: è `{f.get('status')}` ma SECURITY.md non lo NOMINA mai.\n"
-                     f"       Il conteggio tornerebbe lo stesso — ed è il punto: un\n"
-                     f"       residuo contato e non raccontato sparisce dalla lettura.")
+        return
+    md = SECURITY_MD.read_text(encoding="utf-8")
+    _residui_nominati(md, findings, errors)
+    _conteggi_della_tabella(md, counts, errors)
+    _conteggi_della_prosa(md, findings, total, errors)
 
+
+def _residui_nominati(md_ids: str, findings: list[dict], errors: list[str]) -> None:
+    for f in findings:
+        fid = str(f.get("id", ""))
+        if f.get("status") in {"partial", "open"} and fid and not re.search(
+                rf"\b{re.escape(fid)}\b", md_ids):
+            fail(errors,
+                 f"{fid}: è `{f.get('status')}` ma SECURITY.md non lo NOMINA mai.\n"
+                 f"       Il conteggio tornerebbe lo stesso — ed è il punto: un\n"
+                 f"       residuo contato e non raccontato sparisce dalla lettura.")
+
+
+def _conteggi_della_tabella(md: str, counts: dict[str, int], errors: list[str]) -> None:
     # ── il conteggio in SECURITY.md deve combaciare col registro ──
     # È il loop che si chiude: il documento non può più dichiarare più del codice.
-    if SECURITY_MD.is_file():
-        md = SECURITY_MD.read_text(encoding="utf-8")
-        for label, key in (("chiusi", "closed"), ("parziali", "partial"),
-                           ("accettati", "accepted"), ("aperti", "open")):
-            m = re.search(rf"\*\*{label}\*\*\s*\|\s*(\d+)", md)
-            if not m:
-                fail(errors, f"SECURITY.md: non trovo il conteggio «{label}» nella tabella dei residui")
-            elif int(m.group(1)) != counts[key]:
-                fail(errors,
-                     f"SECURITY.md dichiara {m.group(1)} «{label}», il registro ne conta "
-                     f"{counts[key]}.\n"
-                     f"       È lo scostamento doc↔codice (H21). Allinea il documento, "
-                     f"non il registro — il registro lo verifica il codice.")
+    for label, key in (("chiusi", "closed"), ("parziali", "partial"),
+                       ("accettati", "accepted"), ("aperti", "open")):
+        m = re.search(rf"\*\*{label}\*\*\s*\|\s*(\d+)", md)
+        if not m:
+            fail(errors, f"SECURITY.md: non trovo il conteggio «{label}» nella tabella dei residui")
+        elif int(m.group(1)) != counts[key]:
+            fail(errors,
+                 f"SECURITY.md dichiara {m.group(1)} «{label}», il registro ne conta "
+                 f"{counts[key]}.\n"
+                 f"       È lo scostamento doc↔codice (H21). Allinea il documento, "
+                 f"non il registro — il registro lo verifica il codice.")
 
+
+def _conteggi_della_prosa(md: str, findings: list[dict], total: int, errors: list[str]) -> None:
     # ── …e ANCHE il conteggio in PROSA, non solo quello della tabella ──
     #
     # 🔴 PERCHÉ (abdd732a, 01/08). Il blocco qui sopra copre la TABELLA dei residui
@@ -835,39 +881,43 @@ def main() -> int:
     #   una condizione PARZIALE è peggio di nessun check, perché sposta la fiducia su un
     #   perimetro più stretto di quello che sembra coprire.* La sezione dichiara di non
     #   poter più marcire in silenzio — e stava marcendo nella metà non coperta.
-    if SECURITY_MD.is_file():
-        md = SECURITY_MD.read_text(encoding="utf-8")
-        sev_reali = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-        for f in findings:
-            s = str(f.get("severity", ""))
-            if s in sev_reali:
-                sev_reali[s] += 1
-        m = re.search(
-            r"Il registro conta \*\*(\d+) voci\*\*\s*\(\s*(\d+)\s+critiche?,\s*"
-            r"(\d+)\s+alte?,\s*(\d+)\s+medie?,\s*(\d+)\s+basse?\s*\)", md)
-        if not m:
-            fail(errors,
-                 "SECURITY.md: non trovo la frase «Il registro conta **N voci** (A critiche, "
-                 "B alte, C medie, D basse)».\n"
-                 "       Se l'hai riscritta, aggiorna anche questo controllo: un gate che non\n"
-                 "       trova più il suo bersaglio TACE, e il silenzio qui somiglia a un ok.")
-        else:
-            dich = {"totale": int(m.group(1)), "critical": int(m.group(2)),
-                    "high": int(m.group(3)), "medium": int(m.group(4)), "low": int(m.group(5))}
-            reali = dict(sev_reali, totale=total)
-            for k in ("totale", "critical", "high", "medium", "low"):
-                if dich[k] != reali[k]:
-                    fail(errors,
-                         f"SECURITY.md (prosa) dichiara {dich[k]} «{k}», il registro ne conta "
-                         f"{reali[k]}.\n"
-                         f"       Allinea il documento, non il registro.")
-            somma = dich["critical"] + dich["high"] + dich["medium"] + dich["low"]
-            if somma != dich["totale"]:
+    sev_reali = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+    for f in findings:
+        s = str(f.get("severity", ""))
+        if s in sev_reali:
+            sev_reali[s] += 1
+    m = re.search(
+        r"Il registro conta \*\*(\d+) voci\*\*\s*\(\s*(\d+)\s+critiche?,\s*"
+        r"(\d+)\s+alte?,\s*(\d+)\s+medie?,\s*(\d+)\s+basse?\s*\)", md)
+    if not m:
+        fail(errors,
+             "SECURITY.md: non trovo la frase «Il registro conta **N voci** (A critiche, "
+             "B alte, C medie, D basse)».\n"
+             "       Se l'hai riscritta, aggiorna anche questo controllo: un gate che non\n"
+             "       trova più il suo bersaglio TACE, e il silenzio qui somiglia a un ok.")
+    else:
+        dich = {"totale": int(m.group(1)), "critical": int(m.group(2)),
+                "high": int(m.group(3)), "medium": int(m.group(4)), "low": int(m.group(5))}
+        reali = dict(sev_reali, totale=total)
+        for k in ("totale", "critical", "high", "medium", "low"):
+            if dich[k] != reali[k]:
                 fail(errors,
-                     f"SECURITY.md (prosa): le severità dichiarate sommano a {somma}, ma il "
-                     f"totale dichiarato è {dich['totale']}.\n"
-                     f"       Il documento non torna con SE STESSO, prima ancora che col registro.")
+                     f"SECURITY.md (prosa) dichiara {dich[k]} «{k}», il registro ne conta "
+                     f"{reali[k]}.\n"
+                     f"       Allinea il documento, non il registro.")
+        somma = dich["critical"] + dich["high"] + dich["medium"] + dich["low"]
+        if somma != dich["totale"]:
+            fail(errors,
+                 f"SECURITY.md (prosa): le severità dichiarate sommano a {somma}, ma il "
+                 f"totale dichiarato è {dich['totale']}.\n"
+                 f"       Il documento non torna con SE STESSO, prima ancora che col registro.")
 
+
+def _stampa_il_conto(total: int, conto: _Conto) -> None:
+    """Il riassunto e ciò che si conta senza accusare: voci senza natura, senza scoperta,
+    sorvegliate, non ancora rilasciate."""
+    counts, senza_natura, senza_scoperta, non_rilasciate = (
+        conto.counts, conto.senza_natura, conto.senza_scoperta, conto.non_rilasciate)
     # ── esito ──
     print(f"{DIM}registro: {total} rilievi · "
           f"{GRN}{counts['closed']} chiusi{OFF}{DIM} · "
@@ -904,6 +954,8 @@ def main() -> int:
               f"{', '.join(non_rilasciate)}{OFF}"
               f"{DIM} — l'evidenza è nel codice, la versione che la porta non è uscita.{OFF}")
 
+
+def _esito(errors: list[str]) -> int:
     if errors:
         print(f"\n{RED}✗ il registro non regge — {len(errors)} problemi:{OFF}\n")
         for e in errors:
