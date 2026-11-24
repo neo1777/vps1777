@@ -26,7 +26,10 @@
 #    Quel giro ha anche mostrato un difetto dell'aggancio: faceva fallire pure il controllo di
 #    salute DOPO il rollback, e l'update usciva 2 («serve intervento») su un rollback riuscito.
 #    Dalla 0.98.7 l'aggancio scatta una volta sola: l'esito atteso dell'update è 1.
-#    ⚠️ Non l'ha ancora vista la VPS di riferimento, e non gira in CI (serve uno stack vivo).
+#    L'ha vista anche la VPS di riferimento (23/11/2026, PASS) e dal 24/11/2026 gira in CI su
+#    uno stack vivo: `.github/workflows/rollback.yml`, due job. «rollback-sano» pretende lo 0;
+#    «rollback-sabotato» spegne `_rollback_routine` e pretende l'1 (una prova che resta verde
+#    col rollback spento non misura niente).
 #
 # Uso:
 #   bash prova-9-il-fail-closed-torna-indietro-davvero.sh            # dice cosa farebbe, exit 2
@@ -153,9 +156,8 @@ if [ "$GATE_KO" -eq 1 ] && [ "$ROLLBACK" -eq 1 ] && [ "$DOPO" = "$CORRENTE" ] &&
   exit 0
 fi
 dice "🔴 FAIL — o non è andata come previsto, o le mie attese erano sbagliate."
-dice "   ⚠️ Questo script non ha ancora mai visto un rollback riuscito: può fallire"
-dice "      perché il codice si comporta diversamente da come l'ho letto. In quel caso"
-dice "      il difetto è QUI, non nel prodotto — e va corretto qui dentro."
+dice "   Il rollback riuscito questo script l'ha visto (23/11/2026, e in CI): se qui fallisce,"
+dice "   guarda prima il prodotto; se il prodotto ha fatto bene, il difetto è in queste attese."
 dice "   Il log completo è in $LOG: leggilo prima di concludere qualcosa sul prodotto,"
 dice "   e cancellalo quando hai finito (resta apposta, nessuno lo toglie da sé)."
 [ "${SU:-0}" -eq 0 ] && dice "   🔴 E GUARDA SUBITO: nessun container running. Il servizio è giù."

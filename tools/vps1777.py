@@ -601,10 +601,20 @@ def telegram_notify(repo: Path, text: str, *, vista: str = "") -> bool:
 
 # ─────────────────────────────────────────── GitHub API
 
+def _intestazioni_github() -> dict[str, str]:
+    """Le intestazioni per l'API di GitHub. Con `VPS1777_GITHUB_TOKEN` la chiamata è autenticata:
+    serve dove l'indirizzo è condiviso con altri e il limite delle chiamate anonime (60 l'ora per
+    IP) cade a caso, come sui runner della CI. Il gettone va SOLO a `API_BASE` (api.github.com):
+    gli scarichi dei pacchetti e delle firme restano anonimi. Facoltativo: senza, tutto come prima."""
+    h = {"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"}
+    gettone = os.environ.get("VPS1777_GITHUB_TOKEN", "").strip()
+    if gettone and re.fullmatch(r"[A-Za-z0-9_.\-]{20,255}", gettone):
+        h["Authorization"] = f"Bearer {gettone}"
+    return h
+
+
 def github_json(path: str) -> dict | list:
-    req = urllib.request.Request(
-        f"{API_BASE}{path}",
-        headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"})
+    req = urllib.request.Request(f"{API_BASE}{path}", headers=_intestazioni_github())
     with urllib.request.urlopen(req, timeout=10) as resp:
         return json.load(resp)
 

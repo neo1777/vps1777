@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Il ritorno indietro dopo un aggiornamento malato è provato in automatico, su un'installazione vera
+  (STA-06).** Due volte al mese `.github/workflows/rollback.yml` installa una release su una macchina pulita,
+  la aggiorna, poi lancia un aggiornamento col controllo di salute forzato a fallire. Sono due prove: nella
+  prima il prodotto deve tornare alla versione di prima; nella seconda il ritorno indietro viene spento
+  apposta, e la prova deve accorgersene. Una prova che resta verde col meccanismo spento non misura niente:
+  alla prima corsa il caso «spento» era verde per la ragione sbagliata (l'aggiornamento cadeva prima), e ora
+  si pretende di aver visto scattare il controllo.
+- `VPS1777_GITHUB_TOKEN` (facoltativo): la CLI lo usa solo per le chiamate all'API di GitHub, dove
+  l'indirizzo è condiviso e il limite delle chiamate anonime cade a caso. Senza, tutto come prima.
+
 ## [0.98.12] — 2026-11-24
 
 ### Sicurezza
