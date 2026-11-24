@@ -99,9 +99,9 @@ def test_il_limitatore_ha_un_tetto_alle_chiavi(monkeypatch):
     monkeypatch.setattr(ratelimit, "MAX_CHIAVI", 5)
     lim = ratelimit.RateLimiter(max_calls=3, window_s=60)
     for i in range(5):
-        assert lim.allow(f"2001:db8::{i}", 100.0)
-    assert not lim.allow("2001:db8::ffff", 100.0)       # un IP nuovo oltre il tetto: rifiutato
-    assert lim.allow("2001:db8::1", 100.0)              # chi è già dentro non ne risente
+        assert lim.allow(f"2001:db8:{i}::1", 100.0)        # reti /64 diverse: chiavi diverse
+    assert not lim.allow("2001:db8:ffff::1", 100.0)       # un IP nuovo oltre il tetto: rifiutato
+    assert lim.allow("2001:db8:1::1", 100.0)            # chi è già dentro non ne risente
     assert lim.allow("2001:db8::ffff", 200.0)           # passata la finestra c'è di nuovo posto
     assert len(lim._hits) <= 5
 

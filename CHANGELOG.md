@@ -4,6 +4,22 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **Il limite di frequenza sugli accessi conta la rete, non il singolo indirizzo IPv6.** Chi ha una connessione
+  IPv6 dispone di miliardi di indirizzi nella stessa rete: cambiandone uno a ogni richiesta il limite su
+  `/token`, `/register` e `/app/auth` non scattava mai. Ora si conta la rete /64; per IPv4 non cambia niente.
+- **Nel registro degli eventi un tipo di rifiuto non nasconde più gli altri.** Il freno «60 eventi anonimi al
+  minuto» era uno solo per tutti i tipi: sessanta richieste a un indirizzo qualunque bastavano a far sparire
+  dal registro, per quel minuto, i tentativi sul segreto. Ora ogni tipo ha il suo minuto.
+
+### Corretto
+- La coda degli avvisi e le potature del registro degli eventi vengono portate su disco prima di prendere il
+  posto del file buono: dopo uno spegnimento brusco il file poteva risultare vuoto.
+- Un avviso già consegnato al bot non viene rimandato a ogni giro quando il disco non permette di svuotare
+  la coda.
+- Dopo una potatura il registro degli eventi non può più superare il tetto dichiarato di 20 MB prima della
+  potatura successiva.
+
 ### Aggiunto
 - **Le basi delle immagini non restano più indietro senza che nessuno lo veda.** Sono fissate per impronta, e a
   spostare l'impronta dovrebbe pensarci Dependabot ogni settimana; per quella di Python non l'ha fatto per due

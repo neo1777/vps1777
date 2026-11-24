@@ -53,15 +53,23 @@ def _leggi() -> list[dict[str, Any]]:
     return [x for x in dati if isinstance(x, dict)]
 
 
-def _scrivi(items: list[dict[str, Any]]) -> None:
+def _scrivi(items: list[dict[str, Any]]) -> bool:
+    """True se la coda è su disco. Il file provvisorio si porta su disco (fsync) PRIMA della
+    rinomina: senza, dopo un crash il nome nuovo poteva puntare a un file vuoto, che `_leggi`
+    metteva da parte come illeggibile, e gli avvisi in coda erano persi."""
     f = _file()
     try:
         f.parent.mkdir(parents=True, exist_ok=True)
         tmp = f.with_suffix(".tmp")
-        tmp.write_text(json.dumps(items, ensure_ascii=False))
+        with tmp.open("w", encoding="utf-8") as fh:
+            fh.write(json.dumps(items, ensure_ascii=False))
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, f)
+        return True
     except OSError as exc:  # non fatale: l'avviso si perde, l'audit lo dice
         audit({"event": "notifiche_persist_error", "error": str(exc)})
+        return False
 
 
 def accoda(kind: str, text: str) -> None:
@@ -70,8 +78,25 @@ def accoda(kind: str, text: str) -> None:
     _scrivi(items[-_MAX:])
 
 
+# Gli avvisi già consegnati che NON si è riusciti a togliere dal disco (disco pieno, permessi).
+# Senza questo elenco restavano in coda e il bot li rimandava a ogni prelievo, per sempre.
+_consegnati_non_tolti: list[dict[str, Any]] = []
+
+
 def preleva() -> list[dict[str, Any]]:
+    global _consegnati_non_tolti
     items = _leggi()
-    if items:
-        _scrivi([])
+    if _consegnati_non_tolti:
+        gia = list(_consegnati_non_tolti)
+        nuovi = []
+        for x in items:                 # si toglie UNA copia per ogni avviso già consegnato
+            if x in gia:
+                gia.remove(x)
+            else:
+                nuovi.append(x)
+        items_su_disco, items = items, nuovi
+    else:
+        items_su_disco = items
+    if items_su_disco:
+        _consegnati_non_tolti = [] if _scrivi([]) else items_su_disco
     return items
