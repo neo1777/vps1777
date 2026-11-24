@@ -215,7 +215,8 @@ def test_il_workflow_firma_pubblica_e_rilegge():
     job = wf["jobs"]["firma"]
     assert wf["permissions"] == {} and job["permissions"] == {"contents": "write", "id-token": "write"}
     for pezzo in ("python3 tools/canale-genera.py genera --latest", "cosign sign-blob --yes",
-                  "--exclude-pre-releases", "gh release upload canale", "--clobber",
+                  "--exclude-pre-releases", "python3 tools/canale-genera.py impacchetta canale.json",
+                  "git -C pubblica push -q origin HEAD:refs/heads/canale-firmato",
                   "cosign verify-blob", "canale\\.yml@refs/heads/main"):
         assert pezzo in wf_testo, pezzo
     # un rinfresco a settimana contro 45 giorni di vita: ne possono saltare cinque
@@ -225,3 +226,38 @@ def test_il_workflow_firma_pubblica_e_rilegge():
 def test_il_rilascio_rinfresca_il_canale_appena_pubblica():
     testo = (RADICE / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     assert "gh workflow run canale.yml --ref main" in testo
+
+
+def test_il_canale_non_sta_in_una_release_ma_su_un_ramo():
+    """Le release del repository sono immutabili: un allegato non si rinfresca (HTTP 422, 24/11/2026)."""
+    wf = (RADICE / ".github" / "workflows" / "canale.yml").read_text(encoding="utf-8")
+    assert "gh release upload" not in wf and "gh release create" not in wf and "--force" not in wf
+    assert cli.CANALE_URL == "https://raw.githubusercontent.com/neo1777/vps1777/canale-firmato/canale.bundle.json"
+
+
+def test_il_file_unico_si_spacchetta_nei_tre_che_la_verifica_legge(prova, tmp_path):
+    """Chi firma impacchetta, la macchina spacchetta: il testo deve tornare BYTE PER BYTE, o la firma cade."""
+    shutil.copy(prova / "fresco.json", tmp_path / "canale.json")
+    shutil.copy(prova / "fresco.json.sig", tmp_path / "canale.json.sig")
+    (tmp_path / "canale.json.pem").write_text("certificato di prova\n", encoding="utf-8")
+    (tmp_path / "canale.bundle.json").write_text(genera.impacchetta(tmp_path / "canale.json"), encoding="utf-8")
+    dove = tmp_path / "macchina"
+    dove.mkdir()
+    file = cli.canale_spacchetta(tmp_path / "canale.bundle.json", dove)
+    assert file.read_bytes() == (prova / "fresco.json").read_bytes()
+    assert (dove / "canale.json.sig").read_bytes() == (prova / "fresco.json.sig").read_bytes()
+    assert cli.canale_verifica(file, chiave_pubblica=prova / "chiave.pub")[0] is True
+
+
+@pytest.mark.parametrize("testo", ["non json", "[1]", '{"canale": "x"}', '{"canale": "x", "sig": "", "pem": "y"}',
+                                   '{"canale": 1, "sig": "a", "pem": "b"}'])
+def test_un_file_unico_della_forma_sbagliata_e_canale_non_scaricabile(tmp_path, monkeypatch, testo):
+    (tmp_path / "b.json").write_text(testo, encoding="utf-8")
+    with pytest.raises(ValueError):
+        cli.canale_spacchetta(tmp_path / "b.json", tmp_path)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+
+    def scarica(repo):
+        return cli.canale_spacchetta(tmp_path / "b.json", tmp_path)
+    dati, perche = cli.canale_per_update(tmp_path, scarica=scarica)
+    assert dati is None and "non scaricabile" in perche

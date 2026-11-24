@@ -222,8 +222,8 @@ smetterebbe di ricevere le correzioni senza che niente diventi rosso.
 
 Per questo esiste `canale.json`: un file piccolo che dice «l'ultima stabile è la X, firmato il,
 **scade il**». Lo scrive e lo firma ogni settimana un workflow del repository
-(`.github/workflows/canale.yml`), con una vita di 45 giorni, e lo pubblica nella release fissa
-`canale` (che non è una versione). La firma è la stessa dei pacchetti: senza chiavi, legata
+(`.github/workflows/canale.yml`), con una vita di 45 giorni, e lo pubblica sul ramo
+`canale-firmato` del repository (un file solo, con la firma dentro). La firma è la stessa dei pacchetti: senza chiavi, legata
 all'identità di quel workflow.
 
 **Che cosa fa la tua macchina.** Solo l'aggiornamento **automatico** (il timer settimanale) lo

@@ -5,6 +5,8 @@ Due usi:
 
   genera --latest X.Y.Z [--giorni 45]     stampa il canale da firmare: lo usa
                                           .github/workflows/canale.yml, che poi lo firma con cosign
+  impacchetta <canale.json>               stampa il file unico da pubblicare (testo + firma +
+                                          certificato, presi da <file>, <file>.sig, <file>.pem)
   prova <cartella>                        prepara i file per PROVARE il client: una coppia di chiavi
                                           usa-e-getta, un canale fresco e uno scaduto, firmati
 
@@ -45,6 +47,17 @@ def canale(latest: str, *, adesso: dt.datetime, giorni: int = GIORNI) -> str:
                        "scade_il": (firmato + dt.timedelta(days=giorni)).isoformat()}) + "\n"
 
 
+def impacchetta(file: Path) -> str:
+    """Il file unico che si pubblica: il testo del canale COM'È (la firma vale su quei byte), la firma
+    e il certificato. Un file solo perché chi scarica veda sempre testo e firma dello stesso momento."""
+    pezzi = {"canale": file.read_text(encoding="utf-8"),
+             "sig": file.with_name(file.name + ".sig").read_text(encoding="utf-8"),
+             "pem": file.with_name(file.name + ".pem").read_text(encoding="utf-8")}
+    if not all(pezzi.values()):
+        raise ValueError("testo, firma o certificato vuoti")
+    return json.dumps(pezzi) + "\n"
+
+
 def _firma(openssl: str, chiave: Path, file: Path) -> None:
     grezza = subprocess.run([openssl, "dgst", "-sha256", "-sign", str(chiave), str(file)],
                             capture_output=True, check=True, timeout=60).stdout
@@ -76,6 +89,8 @@ def main(argv: list[str] | None = None) -> int:
     g = sub.add_parser("genera")
     g.add_argument("--latest", required=True)
     g.add_argument("--giorni", type=int, default=GIORNI)
+    i = sub.add_parser("impacchetta")
+    i.add_argument("file")
     p = sub.add_parser("prova")
     p.add_argument("cartella")
     a = ap.parse_args(argv)
@@ -83,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if a.cmd == "genera":
             sys.stdout.write(canale(a.latest.removeprefix("v"), adesso=adesso, giorni=a.giorni))
+        elif a.cmd == "impacchetta":
+            sys.stdout.write(impacchetta(Path(a.file)))
         else:
             prova(Path(a.cartella), adesso=adesso)
             print(f"file di prova in {a.cartella}: fresco.json, scaduto.json, le firme accanto, chiave.pub")

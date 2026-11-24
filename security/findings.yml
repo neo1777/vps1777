@@ -4980,7 +4980,7 @@ findings:
       - file: .github/workflows/canale.yml
         contains:
           - "cosign sign-blob --yes"
-          - "gh release upload canale canale.json.sig canale.json.pem canale.json --clobber"
+          - "git -C pubblica push -q origin HEAD:refs/heads/canale-firmato"
       - file: tools/tests/test_canale_firmato.py
         contains:
           - "def test_lo_scaduto_e_rifiutato_e_lo_dice("
@@ -4989,7 +4989,7 @@ findings:
     fix: >
       Un puntatore firmato con scadenza, `canale.json` (ultima stabile, firmato il, scade il),
       rifirmato ogni settimana da `.github/workflows/canale.yml` con vita di 45 giorni, nella
-      release fissa `canale`. L'aggiornamento automatico lo verifica a ogni giro, anche quando
+      ramo `canale-firmato` (un file solo, con la firma dentro). L'aggiornamento automatico lo verifica a ogni giro, anche quando
       non c'è niente da installare: firma del workflow su main, forma, scadenza. Se è scaduto,
       assente o non verificabile si ferma e avvisa su Telegram; se nomina una release più nuova
       di quella dell'API, segue il canale. L'aggiornamento a mano non lo guarda.
