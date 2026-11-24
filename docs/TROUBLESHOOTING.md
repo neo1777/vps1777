@@ -550,6 +550,9 @@ per-IP** (difesa anti-raffica). Le soglie:
 - `/register` (DCR del connector): 10 ogni 5 min
 - `/token` (OAuth del connector): 60 al minuto
 - `/app/auth` (Mini App): 20 ogni 5 min
+
+Con IPv6 il conto è per rete /64: più dispositivi della stessa casa o dello stesso ufficio
+condividono la soglia.
 - `/carica/<gettone>` (link di caricamento): 20 ogni 5 min
 - `/scarica/<nome>` (link firmati): 30 ogni 5 min
 - login `/admin/login`: 5 errori in 5 min → IP bloccato per 15 min («Troppi tentativi

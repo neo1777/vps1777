@@ -69,7 +69,10 @@ _ANONIMI = frozenset({"proxy_secret_mismatch", "proxy_internal_blocked", "proxy_
                       "proxy_auth_fail", "archive_desc_denied", "archive_ruolo_denied",
                       "notifiche_denied", "oauth_refresh_revoked_client", "proxy_upstream_busy"})
 _ANONIMI_AL_MINUTO = 60
-_finestra_anonimi: dict[str, Any] = {"minuto": "", "visti": 0, "soppressi": 0}
+# Una finestra PER TIPO di evento: con una sola per tutti, 60 richieste a un indirizzo qualunque
+# (un tipo) esaurivano il minuto e nascondevano gli eventi degli altri tipi, per esempio i
+# tentativi sul segreto. La chiave è il nome dell'evento; i tipi sono quelli di `_ANONIMI`, pochi.
+_finestra_anonimi: dict[str, dict[str, Any]] = {}
 
 # Lettura tail-like: blocchi dalla coda, e un tetto oltre il quale si smette di
 # risalire (un file con righe patologicamente lunghe non deve finirci tutto in RAM).
@@ -132,8 +135,17 @@ def _prune(path: Path, retention_days: int) -> None:
             ora = datetime.now(timezone.utc).isoformat(timespec="seconds")
             dst.write(json.dumps({"ts": ora, "event": "audit_trimmed", "dropped": corrotte,
                                   "reason": "righe illeggibili"}, ensure_ascii=False) + "\n")
+        _su_disco(dst)
     _taglia_alla_coda(tmp)
     tmp.replace(path)  # atomico: un lettore concorrente vede il vecchio o il nuovo
+
+
+def _su_disco(fh: Any) -> None:
+    """Porta su disco un file appena scritto, PRIMA che una rinomina lo metta al posto dell'audit.
+    La rinomina è atomica per chi legge, non per la corrente: senza fsync, dopo un crash il nome
+    dell'audit poteva puntare a un file vuoto o a metà, cioè la storia intera persa in una potatura."""
+    fh.flush()
+    os.fsync(fh.fileno())
 
 
 def _taglia_alla_coda(f: Path) -> None:
@@ -158,6 +170,7 @@ def _taglia_alla_coda(f: Path) -> None:
                            + "\n").encode("utf-8"))
                 tolte = None
             dst.write(raw)
+        _su_disco(dst)
     corto.replace(f)
 
 
@@ -166,13 +179,13 @@ def _da_sopprimere(evento: Any, ora: str) -> dict[str, Any] | bool:
     un dict (la riga di riepilogo del minuto appena chiuso) se prima va scritto quello."""
     if evento not in _ANONIMI:
         return False
-    fin = _finestra_anonimi
+    fin = _finestra_anonimi.setdefault(evento, {"minuto": "", "visti": 0, "soppressi": 0})
     minuto = ora[:16]
     riepilogo: dict[str, Any] | bool = False
     if fin["minuto"] != minuto:
         if fin["soppressi"]:
             riepilogo = {"event": "audit_suppressed", "dropped": fin["soppressi"],
-                         "reason": f"oltre {_ANONIMI_AL_MINUTO} eventi anonimi nel minuto {fin['minuto']}"}
+                         "reason": f"oltre {_ANONIMI_AL_MINUTO} eventi {evento} nel minuto {fin['minuto']}"}
         fin.update(minuto=minuto, visti=0, soppressi=0)
     fin["visti"] += 1
     if fin["visti"] > _ANONIMI_AL_MINUTO:
@@ -337,7 +350,9 @@ def audit(event: dict[str, Any]) -> None:
         if size > _next_prune_at:
             _prune(path, s.audit_retention_days)
             dopo = path.stat().st_size
-            _next_prune_at = max(_PRUNE_SIZE, dopo + max(_PRUNE_GROWTH, dopo // 2))
+            # mai oltre il tetto dichiarato: con un file già grande «dopo + metà» lo superava,
+            # e l'audit poteva arrivare a una volta e mezza i 20 MB prima della potatura successiva
+            _next_prune_at = min(_MAX_BYTES, max(_PRUNE_SIZE, dopo + max(_PRUNE_GROWTH, dopo // 2)))
     except (OSError, ValueError, TypeError) as exc:
         log.warning("audit: potatura fallita: %s", exc)
 

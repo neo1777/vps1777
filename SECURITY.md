@@ -185,6 +185,8 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
 - **Rate-limit sugli endpoint auth pubblici** (`v0.25.0`). Finestra scorrevole
   per-IP (in-memory, stdlib): `/register` 10/5min, `/token` 60/min, `/app/auth`
   20/5min — sopra al lockout del login admin. Ferma la raffica da singola sorgente.
+  Per IPv6 la «sorgente» è la rete /64, non il singolo indirizzo: chi ha una rete intera non
+  aggira il limite cambiando indirizzo a ogni richiesta.
 - **Quick-wins OAuth/admin** (`v0.21.0`): `code_challenge` vuoto → 400 (niente
   PKCE aggirabile); `state` url-encoded; redirect `next` con `//` o `/\` rifiutati
   (no open-redirect); CORS senza wildcard (fail-closed, default `https://claude.ai`,

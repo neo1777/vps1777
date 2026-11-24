@@ -13,12 +13,31 @@ sull'IP reale. `now` è iniettabile per i test.
 """
 from __future__ import annotations
 
+import ipaddress
 from collections import defaultdict
 
 # Tetto alle chiavi tenute in memoria. Dentro la finestra c'è una voce per ogni IP visto, e con
 # IPv6 gli indirizzi non finiscono: oltre il tetto si fa pulizia e, se non basta, un IP NUOVO
 # si rifiuta (fail-closed) finché la finestra non scorre. Chi è già dentro non ne risente.
 MAX_CHIAVI = 20_000
+
+
+def chiave(ip: str) -> str:
+    """La chiave del conto per un indirizzo. IPv4: l'indirizzo. IPv6: la sua rete /64.
+
+    Chi ha una connessione IPv6 riceve di norma un /64 intero (2^64 indirizzi): contando per
+    indirizzo bastava cambiarlo a ogni richiesta per non essere mai limitati. Un IPv4 scritto
+    dentro un IPv6 (`::ffff:a.b.c.d`) conta come quell'IPv4. Ciò che non è un indirizzo resta
+    com'è (i test passano etichette; un valore strano ha comunque il suo conto)."""
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if a.version == 4:
+        return str(a)
+    if a.ipv4_mapped is not None:
+        return str(a.ipv4_mapped)
+    return str(ipaddress.ip_network((int(a) >> 64 << 64, 64)))
 
 
 class RateLimiter:
@@ -34,6 +53,7 @@ class RateLimiter:
         """True se la chiamata è ammessa (e la registra); False se oltre soglia."""
         # `sweep` non la chiamava nessuno: una voce per ogni IP visto, fino al riavvio.
         # Ogni 256 chiamate si tolgono le voci senza richieste nella finestra.
+        ip = chiave(ip)
         self._chiamate += 1
         if self._chiamate % 256 == 0:
             self.sweep(now)
