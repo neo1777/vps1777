@@ -250,6 +250,17 @@ if AGE_KEY="$TMP/chiave.txt" bash "$TMP/repo/tools/restore.sh" --yes \
 else
   ko "restore.sh (archivio) è fallito (rc $?)"; sed 's/^/      /' "$TMP/restore-a.log" | tail -20; exit 1
 fi
+# Il livello archivio non porta config né segreti: va DETTO come un fatto, non con due avvisi
+# «NON ripristinati» che su un restore si leggono come un guasto (collaudo del 23/11/2026).
+# I due restore qui sopra usano --volumes-only, che quel passo lo salta: questo lo percorre.
+if AGE_KEY="$TMP/chiave.txt" bash "$TMP/repo/tools/restore.sh" --yes "$ARCHIVIO_A" >"$TMP/restore-a2.log" 2>&1 \
+   && grep -q "Livello archivio: questo backup non contiene config né segreti" "$TMP/restore-a2.log" \
+   && ! grep -q "NON ripristinat" "$TMP/restore-a2.log"; then
+  ok "restore (archivio, intero): dice che config e segreti stanno nel core, senza avvisi di guasto"
+else
+  ko "restore (archivio, intero): fallito, o avvisi «NON ripristinati» su un backup che non li contiene"
+  sed 's/^/      /' "$TMP/restore-a2.log" | tail -12
+fi
 
 # ───── ④ I DATI CI SONO ANCORA? il confronto è sui byte, non sui nomi ─────
 mkdir -p "$TMP/riletto"
