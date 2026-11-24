@@ -1164,10 +1164,11 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     limit = _limite(limit)
     model_dir = Path(get_settings().archive_model_dir)
     bersagli, senza_indice, fuori_perimetro = _ibrida_bersagli(db, ruoli)
+    # solleva SemanticaNonPronta se manca il modello. PRIMA del budget, in una riga sua:
+    # il tempo del modello (il primo caricamento è lento) non si toglie alle ricerche.
+    blobs = [semantica.embed_query(t, model_dir) for t in testi]
     r = _Ibrida(
-        testi=testi,
-        # solleva SemanticaNonPronta se manca il modello
-        blobs=[semantica.embed_query(t, model_dir) for t in testi],
+        testi=testi, blobs=blobs,
         quota=max(limit, CANDIDATI_MIN), budget=_Budget(BUDGET_IBRIDA_S),
         query_fts=query_fts, since=since, until=until, campi=campi, speaker=speaker,
         snippet_tokens=snippet_tokens)
