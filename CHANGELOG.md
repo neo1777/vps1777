@@ -13,6 +13,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   il prodotto sul proprio PC prima di affittare una macchina.
 
 ### Modificato
+- **Il codice dell'aggiornamento e del controllo del registro di sicurezza è riordinato** (QUA-04): le due
+  funzioni più intricate (`cmd_update`, complessità 54, e il controllo del registro, 40) sono spezzate nei
+  loro passi, senza cambiare comportamento. Prima di toccarle sono state scritte le prove di ogni loro
+  strada: per l'aggiornamento da 2 rami su 80 a 80 su 80. Un controllo nuovo impedisce che il codice
+  diventi più intricato: nessuna funzione nuova oltre complessità 10, nessuna di quelle censite che cresce
+  (`tools/complessita.py`).
 - **I controlli fra la documentazione italiana e quella inglese sono più stretti.** Prima il registro diceva
   solo «l'italiano non è cambiato da quando hai tradotto», e lo strumento che lo aggiorna si fidava: bastava
   lanciarlo e ogni traduzione tornava «fresca», anche senza averla toccata. Ora registra anche l'impronta
@@ -21,6 +27,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `docs/` è o tradotta o dichiarata «solo in italiano», col motivo.
 
 ### Corretto
+- **L'aggiornamento automatico non riprova ogni giorno una release già tornata indietro.** Se l'update
+  automatico a una versione falliva e la macchina tornava indietro da sola, il timer giornaliero la
+  riprovava al giro dopo, e a quello dopo ancora, finché non usciva una release nuova: ogni volta backup,
+  servizi fermi per qualche minuto, rollback e un «❌» su Telegram. Ora la salta, lo scrive nel journal e
+  aspetta la prossima. A mano e dal pulsante si può riprovarla. Visto da Sagoma rileggendo STA-06.
+- Il messaggio dello spazio disco insufficiente diceva quanto spazio serve senza l'unità («ne servono
+  2.0»): ora dice «2.0 GiB».
 - README: «Debian 12 consigliata, su Debian 13 instabile» era vero ad agosto. Il collaudo del 23/11/2026 è
   riuscito per intero su Debian 13: ora dice che vanno entrambe e che cosa era instabile (i volumi cifrati).
 - «Primi 15 minuti» diceva che il pannello ha sette schede: sono nove.
