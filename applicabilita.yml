@@ -1,0 +1,158 @@
+# La dichiarazione di applicabilità di vps1777 allo standard 1777 (requisito APP-01).
+# Lo standard 1777 (il catalogo dei requisiti e gli strumenti che leggono questo file) è ancora PRIVATO: sarà
+# pubblicato in un atto solo. Fino ad allora questo file dice che cosa il repo dichiara, e chi legge da fuori non
+# può ancora rilanciare i controlli.
+#
+# Che cosa c'è scritto: quali superfici ha il repo (che cosa espone, che cosa tratta), componente per componente,
+# e con quali comandi si provano alcuni requisiti (la sezione prove:). Da questo file e dal codice lo strumento
+# dello standard genera lo SoA, la tabella requisito per requisito; non si scrive a mano.
+#
+# Chi ha deciso che cosa:
+#   - le superfici rilevabili vengono dai rilevatori dello standard, sul codice della 0.98.12 (24/11/2026): accanto
+#     a ogni «sì» c'è il file dove il rilevatore la trova;
+#   - dati.personali e llm.contenuto-non-fidato non si rilevano dal codice: le ha confermate chi possiede il repo
+#     (scelta 2026-11-24-soglia-dichiarazione-superfici);
+#   - il livello lo ha deciso chi possiede il repo (scelta 2026-11-21-vps1777-livello-L2).
+# Tre «sì» vengono da falsi positivi dei rilevatori (un test o una stringa, non il prodotto): restano «sì», il
+# valore più severo, finché lo standard non ha un formato per l'esenzione.
+schema: applicabilita-1777/0.1
+standard: 1777-0.1.0
+repo: vps1777
+persone: [neo1777]
+
+classe:
+  livello: 1777-L2
+  decide: neo1777
+  scelta: 2026-11-21-vps1777-livello-L2
+  perche: "esposto su internet, OAuth verso client esterni, custodisce l'archivio delle conversazioni e i segreti dell'installazione, pubblico su GitHub"
+  avversario: A2          # proposta: lo decide il threat model
+
+# QUA-04 e QUA-23: i moduli critici si dichiarano qui, sopra il pavimento che il codice rileva da sé
+# (import, superfici sql, posizione fra un ingresso non fidato e la sua validazione). Dichiararne di più è
+# sempre ammesso; di meno solo con un'eccezione scritta. Chi possiede il repo ha scelto TUTTI i moduli: la complessità oltre 10
+# blocca in ognuno, salvo la deroga che passa il test della cancellazione, riletta da chi non ha scritto il codice.
+moduli_critici:
+  tutti: sì
+  decide: neo1777
+  scelta: 2026-11-22-qua04-quali-moduli
+  come: "ogni funzione oltre 10 si esamina una per una (scelta 2026-11-22-qua04-cosa-farne): si spezza dove migliora, si deroga solo dove spezzare darebbe pezzi senza senso, col motivo scritto"
+
+controlli:
+  registro: security/findings.yml
+  checker: "python3 security/check_findings.py"
+  rete: true                  # i controlli che leggono GitHub (il canale privato di SIC-18, l'ultima corsa di STA-06)
+
+default:
+  superfici:
+    ci: sì                      # .github/workflows/ci.yml
+    container: sì               # compose.yaml e gli overlay
+    repo.pubblico: sì
+    distribuisce: sì            # release firmate, immagini
+    aggiorna.se.stesso: sì      # il timer di auto-aggiornamento (systemd/)
+    host: sì                    # le unità systemd, setup.sh
+    esposizione: sì             # tre ingressi opzionali verso internet
+    segreti.runtime: sì
+    dati.personali: sì          # confermata: l'archivio delle conversazioni, il DB di Telegram
+    llm.contenuto-non-fidato: sì  # confermata: i due MCP consegnano a un agente chat e fonti
+    sql: no
+    processi: no
+    http.in: no
+    mcp.server: no
+    crittografia.propria: no
+    llm: no
+    client.mobile: no
+    typescript: no
+    dart: no
+    registro.rilievi: no
+
+componenti:
+  - id: gateway
+    percorso: services/gateway/
+    superfici:
+      container: sì               # services/gateway/Dockerfile
+      http.in: sì                 # services/gateway/app/__main__.py
+      sql: sì                     # services/gateway/app/admin.py, archive_indexer.py
+      crittografia.propria: sì    # services/gateway/app/jwt_helpers.py
+      processi: sì                # services/gateway/tests/test_ingest_ucciso.py
+      auth.propria: sì            # OAuth 2.1 + PKCE
+      esposizione: sì
+  - id: archive-mcp
+    percorso: services/archive-mcp/
+    superfici:
+      container: sì
+      http.in: sì                 # services/archive-mcp/app/server.py
+      mcp.server: sì
+      sql: sì                     # services/archive-mcp/app/db.py
+      llm: sì                     # falso positivo: services/archive-mcp/tests/test_redazione.py
+      linguaggio.query: sì        # FTS5, con la modalità raw
+  - id: nb1777-mcp
+    percorso: services/nb1777-mcp/
+    superfici:
+      container: sì
+      http.in: sì                 # services/nb1777-mcp/app/server.py
+      mcp.server: sì
+      processi: sì                # services/nb1777-mcp/app/core.py (la CLI nlm)
+  - id: nb1777-bot
+    percorso: services/nb1777-bot/
+    superfici:
+      container: sì
+  - id: ocr
+    percorso: services/ocr/
+    superfici:
+      container: sì
+      processi: sì                # services/ocr/app/__main__.py, argomenti fissi
+  - id: strumenti
+    percorso: [tools/, security/]
+    superfici:
+      processi: sì                # tools/vps1777.py, security/check_no_leaks.py
+      sql: sì                     # tools/collaudo-quadratura.py, tools/indice_semantico.py
+      registro.rilievi: sì        # security/findings.yml
+      mcp.server: sì              # falso positivo: tools/fatti-nei-doc.py nomina la stringa
+      crittografia.propria: sì    # falso positivo: tools/tests/test_installer_age.py
+  - id: installatore
+    percorso: installer/
+    superfici:
+      processi: sì                # installer/engine.py
+      crittografia.propria: sì    # installer/engine.py
+  - id: plugin
+    percorso: plugins/
+    superfici:
+      container: sì
+      mcp.server: sì              # plugins/example-mcp/app/__main__.py
+
+righe:
+  QUA-03:
+    stato: n.a. per superficie
+    superficie: typescript
+    perche: "niente TypeScript nel repo"
+
+# Le prove (dal 22/11/2026): i comandi del repo che i controlli dello standard lanciano, riga per riga.
+# Senza la voce, la riga esce NON MISURATO, mai verde.
+prove:
+  VER-08:
+    scanner:
+      - {classe: contenitori, comando: "bash tools/scanner.sh contenitori {cartella}"}
+      - {classe: dipendenze, comando: "bash tools/scanner.sh dipendenze {cartella}", lockfile: services/gateway/uv.lock}
+      - {classe: segreti, comando: "bash tools/scanner.sh segreti {cartella}"}
+      - {classe: segreti, comando: "python3 security/check_no_leaks.py"}
+      - {classe: codice, comando: "uvx ruff@0.15.22 check services/ tools/ security/", dove: tools}
+  SIC-14:
+    prepara: "printf '{\"gateway\": \"ghcr.io/example/vps1777-gateway@sha256:%064d\"}\\n' 0 > images.lock"
+    build: "bash tools/assembla-pacchetto.sh 9.9.9 {uscita}"
+    artefatto: vps1777-runtime-v9.9.9.tar.gz
+  STA-04:
+    prepara: "python3 tools/prova-scrittura-interrotta.py prepara var/prova"
+    scrittore: "exec python3 tools/prova-scrittura-interrotta.py scrivi var/prova"
+    segno: var/prova/prova.db-journal
+    dopo_s: 0.6
+    integrita: "python3 tools/prova-scrittura-interrotta.py integrita var/prova"
+  STA-08:
+    ciclo: "bash tools/tests/test-ciclo-backup-restore.sh"
+    lanciata_da: {file: tools/esegui-test-bash.sh, cartella: tools/tests}
+    referto: "docs/collaudi/*.yml"
+  STA-06:
+    prova: "tools/prove-empiriche/prova-9-il-fail-closed-torna-indietro-davvero.sh --esegui"
+    senza_rollback: "return 1  # SABOTAGGIO della prova (rollback.yml)"
+    lanciata_da: {workflow: .github/workflows/rollback.yml, job: rollback, matrice: modo, sano: sano, sabotato: sabotato}
+    tetto_giorni: 31
+  # SIC-15 (il canale firmato con la scadenza) non c'è ancora: la riga esce NON MISURATO finché non nasce.

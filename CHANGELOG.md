@@ -5,6 +5,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Aggiunto
+- `applicabilita.yml`: che cosa il progetto dichiara di sé allo standard di ingegneria 1777 (che cosa espone,
+  che dati tratta, con quali comandi si provano alcuni requisiti). Lo standard è ancora privato e il file lo
+  dice in testa: chi legge da fuori vede la dichiarazione ma non può ancora rilanciare i controlli. Un presidio
+  verifica che ogni file, comando e stringa nominati lì esistano ancora nel repo.
 - **Il ritorno indietro dopo un aggiornamento malato è provato in automatico, su un'installazione vera
   (STA-06).** Due volte al mese `.github/workflows/rollback.yml` installa una release su una macchina pulita,
   la aggiorna, poi lancia un aggiornamento col controllo di salute forzato a fallire. Sono due prove: nella
