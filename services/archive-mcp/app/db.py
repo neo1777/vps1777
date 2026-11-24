@@ -12,6 +12,7 @@ diverso.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import datetime
 import hashlib
 import heapq
@@ -734,6 +735,400 @@ def _chiave_di_testo(content: str | None, tools: str | None) -> str:
     return " ".join(testo.split())[:2000]
 
 
+_Chiave = tuple[str, str]            # (nome del DB, uuid): la stessa riga vive in più DB
+
+
+@dataclasses.dataclass
+class _Ibrida:
+    """Ciò che `search_ibrida` raccoglie da tutti i DB prima dell'unica fusione.
+
+    S2 (05/10): UNA fusione su tutti i DB. Prima ogni DB si fondeva da sé e i DB si
+    accodavano in ordine alfabetico: su tutti i DB le prime righe erano del primo in
+    ordine (misurato: 20 su 20 da `codice-roo-cline-2025`). Ora si raccolgono, per ogni
+    testo, la lista FTS di tutti i DB ordinata per bm25 e quella vettoriale ordinata per
+    distanza (stesso modello per tutti gli indici: le distanze si confrontano), e la RRF
+    è una sola. Con un DB solo l'ordine è quello di prima.
+    """
+    testi: list[str]
+    blobs: list[bytes]
+    quota: int                        # i candidati per ramo si contano da qui
+    budget: _Budget
+    query_fts: str
+    since: str
+    until: str
+    campi: str
+    speaker: str
+    snippet_tokens: int
+    fts_per_testo: list[list[tuple[float, int, _Chiave]]] = dataclasses.field(default_factory=list)
+    vec_per_testo: list[list[tuple[float, int, _Chiave]]] = dataclasses.field(default_factory=list)
+    per_chiave: dict[_Chiave, dict[str, Any]] = dataclasses.field(default_factory=dict)
+    in_fts: set[_Chiave] = dataclasses.field(default_factory=set)
+    in_vec: set[_Chiave] = dataclasses.field(default_factory=set)
+    connessioni: dict[str, sqlite3.Connection] = dataclasses.field(default_factory=dict)
+    # P4: per le righe arrivate dai vettori, (rowid del messaggio, rowid del pezzo vinto)
+    pezzo_di: dict[_Chiave, tuple[int, int]] = dataclasses.field(default_factory=dict)
+    termini: list[str] = dataclasses.field(default_factory=list)
+    meta_per_db: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    # S3 (05/10): ciò che si perde si DICE. Un DB sparito dal registro, un ramo FTS non
+    # utilizzabile, un indice che non risponde finivano solo nel log, e il risultato
+    # aveva l'aria di un «non c'è». Ogni voce: {db, ramo, motivo}.
+    saltati: list[dict[str, str]] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.fts_per_testo = [[] for _ in self.testi]
+        self.vec_per_testo = [[] for _ in self.testi]
+
+    @property
+    def filtrato(self) -> bool:
+        """Con un filtro (speaker, finestra temporale) il ramo vettoriale ne scarta molti:
+        si chiedono più vicini, perché la fusione abbia ancora una lista vera."""
+        return bool(self.speaker or self.since or self.until)
+
+    def gia_detto(self, name: str, ramo: str) -> bool:
+        return any(x["db"] == name and x["ramo"] == ramo for x in self.saltati)
+
+    def budget_finito_su(self, name: str, *, a_meta: bool = False) -> None:
+        """Il budget è finito lavorando su questo DB: lo si dice una volta sola."""
+        if not self.gia_detto(name, "budget"):
+            self.saltati.append(self.budget.saltato(name, a_meta=a_meta))
+
+
+@dataclasses.dataclass
+class _IbridaDb:
+    """Lo stato di UN DB mentre lo si interroga: serve al verdetto sul suo indice."""
+    name: str
+    conn: sqlite3.Connection
+    snap: str
+    candidati: set[int] = dataclasses.field(default_factory=set)
+    assenti: set[int] = dataclasses.field(default_factory=set)
+    uuid_diversi: set[int] = dataclasses.field(default_factory=set)
+    registro_ok: bool = True
+    vettori_ok: bool = True
+
+
+def _ibrida_apri(r: _Ibrida, name: str, idx: Path) -> sqlite3.Connection | None:
+    """La connessione con l'indice attaccato, o None dopo aver detto perché non c'è."""
+    try:
+        return _open_con_indice(name, idx)
+    except KeyError:
+        r.saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
+    except ArchivioSporco as exc:
+        _nota_sporco(name, exc, r.saltati)
+    return None
+
+
+def _ibrida_ramo_fts(r: _Ibrida, d: _IbridaDb, i: int, testo: str) -> None:
+    """① La lista FTS5 del testo `i` su questo DB.
+
+    La query naturale funziona male in FTS5 (è una frase, non un'espressione), quindi chi
+    chiama può passare `query_fts` col lessico giusto — vale per la domanda, le
+    riformulazioni vanno da sé. Se non lo fa, si prova comunque: una lista vuota non è un
+    errore, è semplicemente metà fusione. Meno di due termini con segnale: il ramo
+    full-text tace invece di inventarsi una query. Mezza fusione onesta > due liste di cui
+    una è rumore promosso a risultato.
+    """
+    espressione = (r.query_fts if i == 0 else "") or semantica.query_fts_da_naturale(testo)
+    if i == 0 and not r.termini:
+        # i termini del passaggio vengono dalla domanda; se il ramo FTS tace (meno di due
+        # termini con segnale) si usano le parole della domanda
+        r.termini = semantica.termini_della_query(espressione or testo)
+    if not espressione:
+        return
+    try:
+        rows_fts = fts.search_conn(d.conn, espressione, limit=r.quota * 3,
+                                   since=r.since, until=r.until, campi=r.campi,
+                                   speaker=r.speaker, snippet_tokens=r.snippet_tokens)
+    except (FtsSyntaxError, sqlite3.DatabaseError) as exc:
+        log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s", d.name, exc)
+        if r.budget.finito():
+            r.budget_finito_su(d.name)
+        elif not r.gia_detto(d.name, "fts"):
+            r.saltati.append({"db": d.name, "ramo": "fts", "motivo": str(exc)[:200]})
+        return
+    for pos, riga in enumerate(rows_fts):
+        chiave = (d.name, riga["uuid"])
+        r.per_chiave.setdefault(chiave, {**riga, "db": d.name, "snapshot": d.snap})
+        rank = riga.get("rank")
+        r.fts_per_testo[i].append((rank if rank is not None else 0.0, pos, chiave))
+        r.in_fts.add(chiave)
+
+
+def _fuori_dai_filtri(riga: dict[str, Any], r: _Ibrida) -> bool:
+    """I filtri di `search`, applicati a una riga arrivata dai vettori.
+
+    La finestra vale anche qui, con la regola di `search`: il vettore non sa di date, e
+    senza questo filtro tornava maggio a chi chiedeva settembre. Una riga senza ts resta
+    fuori, come in FTS (NULL >= x). E il vettore non dice se ha colpito le parole o le
+    azioni: con `campi='testo'` si tengono solo le righe che HANNO parole.
+    """
+    if r.speaker and riga["speaker"] != r.speaker:
+        return True
+    ts = riga["ts"]
+    if r.since and not (ts and ts >= r.since):
+        return True
+    if r.until and not (ts and ts <= r.until):
+        return True
+    return r.campi == "testo" and not riga["ha_testo"]
+
+
+def _ibrida_accogli_vicini(r: _Ibrida, d: _IbridaDb, i: int,
+                           vicini: list[tuple[int, float, int]],
+                           registro: dict[int, str] | None) -> None:
+    """Dai rowid dell'indice alle righe: chi non è più quel messaggio si SCARTA e si conta.
+
+    L'indice lavora su rowid, il mondo esterno su uuid: la traduzione sta qui e non
+    nell'indice, così un re-ingest che cambia i rowid rompe l'indice, non il contratto.
+    ⚠️ E il rowid può MENTIRE: dopo un re-ingest (INSERT OR REPLACE) un rowid dell'indice
+    può non esistere più o essere di un altro messaggio. Se l'indice ha il registro del
+    costruttore, ogni risultato si confronta con l'uuid registrato e chi non combacia si
+    scarta — e si dichiara in `indici[].verifica`, mai restituito come se fosse giusto.
+    """
+    rowids = [rid for rid, _, _ in vicini]
+    seg = ",".join("?" * len(rowids))
+    cur = d.conn.execute(
+        f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip, "
+        f"content <> '' AS ha_testo"
+        f"{', speaker' if r.speaker else ''} FROM messages "
+        f"WHERE rowid IN ({seg})",
+        rowids)
+    per_rowid = {riga["rowid"]: dict(riga) for riga in cur}
+    for pos, (rid, distanza, pezzo_vinto) in enumerate(vicini):   # l'ordine del knn è il rank
+        riga = per_rowid.get(rid)
+        if not riga:
+            d.assenti.add(rid)
+            continue
+        u = riga["uuid"]
+        if registro is not None and registro.get(rid) != u:
+            d.uuid_diversi.add(rid)
+            continue
+        if _fuori_dai_filtri(riga, r):
+            continue
+        chiave = (d.name, u)
+        r.vec_per_testo[i].append((distanza, pos, chiave))
+        r.in_vec.add(chiave)
+        if chiave not in r.per_chiave:
+            r.per_chiave[chiave] = {"uuid": u, "project": riga["project"],
+                                    "ts": riga["ts"], "rank": None,
+                                    "snippet": (riga["snip"] or "")[:400],
+                                    "db": d.name, "snapshot": d.snap}
+            r.pezzo_di[chiave] = (rid, pezzo_vinto)
+
+
+def _ibrida_ramo_vettori(r: _Ibrida, d: _IbridaDb, i: int, blob: bytes) -> None:
+    """② La lista vettoriale del testo `i` su questo DB."""
+    try:
+        vicini = semantica.knn_pezzi(d.conn, blob, topn=r.quota * (10 if r.filtrato else 3))
+        rowids = [rid for rid, _, _ in vicini]
+        registro = semantica.uuid_registrati(d.conn, rowids)
+        d.registro_ok = d.registro_ok and registro is not None
+        d.candidati.update(rowids)
+        if rowids:
+            _ibrida_accogli_vicini(r, d, i, vicini, registro)
+    except sqlite3.DatabaseError as exc:
+        # Prima il DB spariva intero (anche da `indici`) e la risposta era un falso
+        # «non c'è». Ora resta la sua metà full-text, e lo si dice.
+        d.vettori_ok = False
+        if r.budget.finito():
+            r.budget_finito_su(d.name)
+        else:
+            log.warning("indice di %s non interrogabile: %s", d.name, exc)
+            r.saltati.append({"db": d.name, "ramo": "vettori", "motivo": str(exc)[:200]})
+
+
+def _ibrida_meta(d: _IbridaDb, idx: Path) -> dict[str, Any]:
+    """La voce di `indici[]` per questo DB: che indice è, e il verdetto sul suo registro."""
+    try:
+        m = semantica.meta_indice(d.conn) if d.vettori_ok else {}
+    except sqlite3.OperationalError:
+        m = {}
+    if d.assenti or d.uuid_diversi:
+        log.warning("indice di %s disallineato: %d rowid assenti, %d uuid diversi "
+                    "su %d candidati", d.name, len(d.assenti), len(d.uuid_diversi),
+                    len(d.candidati))
+    return {"db": d.name, "indice": str(idx.name),
+            "messaggi_indicizzati": m.get("messaggi", "?"),
+            "perimetro": m.get("perimetro", "non dichiarato"),
+            "modello": m.get("modello", "?"),
+            "generato": m.get("generato", "?"),
+            # campo IN PIÙ: gli altri non cambiano forma
+            "verifica": semantica.verdetto_registro(
+                d.registro_ok, candidati=len(d.candidati),
+                assenti=len(d.assenti), uuid_diversi=len(d.uuid_diversi))}
+
+
+def _ibrida_raccogli(r: _Ibrida, name: str, idx: Path) -> None:
+    """Le due liste di ogni testo su UN DB, dentro il budget."""
+    conn = _ibrida_apri(r, name, idx)
+    if conn is None:
+        return
+    r.connessioni[name] = conn
+    r.budget.attacca(conn)
+    d = _IbridaDb(name, conn, _snapshot(_DBS[name]))
+    for i, (testo, blob) in enumerate(zip(r.testi, r.blobs)):
+        if i and r.budget.finito():
+            # fra un testo e l'altro (le riformulazioni): ciò che c'è resta
+            r.budget_finito_su(name, a_meta=True)
+            break
+        _ibrida_ramo_fts(r, d, i, testo)
+        if not d.vettori_ok:
+            continue
+        if r.budget.finito():
+            # la ricerca dei vicini non si ferma a metà: a budget finito non parte
+            r.budget_finito_su(name, a_meta=True)
+            break
+        _ibrida_ramo_vettori(r, d, i, blob)
+    r.meta_per_db.append(_ibrida_meta(d, idx))
+
+
+def _ibrida_fondi(r: _Ibrida, peso_fts: float, k_rrf: int) -> list[_Chiave]:
+    """③ La fusione: UNA sola, su tutte le liste di tutti i testi e di tutti i DB. Dentro
+    ogni lista l'ordine è quello della misura (bm25 crescente, distanza crescente), a
+    parità quello di arrivo."""
+    liste: list[tuple[list[_Chiave], float]] = []
+    for lf, lv in zip(r.fts_per_testo, r.vec_per_testo):
+        liste.append(([c for _, _, c in sorted(lf, key=lambda x: (x[0], x[1]))], peso_fts))
+        liste.append(([c for _, _, c in sorted(lv, key=lambda x: (x[0], x[1]))], 1.0))
+    return semantica.fondi_rrf_liste(liste, k=k_rrf)
+
+
+@dataclasses.dataclass
+class _Scelta:
+    """Le righe tenute dopo la fusione: al più `limit` testi diversi."""
+    limit: int
+    righe: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    scelti: list[_Chiave] = dataclasses.field(default_factory=list)
+    tenute: dict[str, dict[str, Any]] = dataclasses.field(default_factory=dict)
+
+    def smaltisci(self, blocco: list[tuple[_Chiave, dict[str, Any]]],
+                  connessioni: dict[str, sqlite3.Connection]) -> None:
+        """Un blocco della fusione: le copie di un testo già tenuto si CONTANO sulla prima,
+        gli altri entrano finché c'è posto."""
+        testo_di = _testi_per_copie(blocco, connessioni)
+        for chiave, riga in blocco:
+            k = testo_di.get(chiave, "")
+            if k and k in self.tenute:
+                prima = self.tenute[k]
+                prima["copie"] = prima.get("copie", 0) + 1
+                if len(prima.setdefault("copie_uuid", [])) < 5:
+                    prima["copie_uuid"].append(riga["uuid"])
+                continue
+            if len(self.righe) >= self.limit:
+                continue
+            if k:
+                self.tenute[k] = riga
+            self.righe.append(riga)
+            self.scelti.append(chiave)
+
+
+def _testi_per_copie(blocco: list[tuple[_Chiave, dict[str, Any]]],
+                     connessioni: dict[str, sqlite3.Connection]) -> dict[_Chiave, str]:
+    testo_di: dict[_Chiave, str] = {}
+    for name in {n for (n, _), _ in blocco}:
+        uuids = [u for (n, u), _ in blocco if n == name]
+        seg = ",".join("?" * len(uuids))
+        for u, c, s_ in connessioni[name].execute(
+                f"SELECT uuid, content, tools FROM messages WHERE uuid IN ({seg})", uuids):
+            testo_di[(name, u)] = _chiave_di_testo(c, s_)
+    return testo_di
+
+
+def _ibrida_scegli(r: _Ibrida, fusi: list[_Chiave], limit: int) -> _Scelta:
+    """Dalla fusione alle righe: un uuid una volta sola, un testo una volta sola.
+
+    Lo stesso uuid vive in più DB (bundle e fotografie): come in `search` (#272) si tiene
+    la prima occorrenza nell'ordine della fusione, e gli altri DB vanno in `anche_in`. Con
+    un DB solo non cambia niente.
+    0.91.0: le COPIE DI TESTO. Lo stesso testo in più righe (un prompt incollato più volte,
+    una routine che si ripete) occupava il 5% dei posti fra i primi 10 del banco grande: a
+    chi legge la seconda copia non dà niente. Resta la prima nell'ordine della fusione, con
+    `copie` (quante altre righe hanno lo stesso testo) e fino a 5 dei loro uuid in
+    `copie_uuid`. Misurato: nDCG@10 con novità +0,006, meglio in 24 domande e peggio in
+    nessuna.
+    0.91.1: si scorre la fusione A BLOCCHI finché ci sono `limit` testi diversi (o la
+    fusione finisce). La 0.91.0 guardava una riserva fissa di 2×limit: con 7 copie della
+    stessa routine tornavano 3 righe su 5 chieste, mentre più in basso c'erano testi diversi.
+    """
+    scelta = _Scelta(limit)
+    primo: dict[str, dict[str, Any]] = {}
+    blocco: list[tuple[_Chiave, dict[str, Any]]] = []
+    for chiave in fusi:
+        name, u = chiave
+        if u in primo:
+            primo[u].setdefault("anche_in", []).append(name)
+            continue
+        riga = dict(r.per_chiave[chiave])
+        riga["origine"] = ("entrambi" if chiave in r.in_fts and chiave in r.in_vec
+                           else "fts" if chiave in r.in_fts else "vettori")
+        primo[u] = riga
+        # anche quando le righe ci sono già si continua: si contano le copie di quelle tenute
+        blocco.append((chiave, riga))
+        if len(blocco) >= limit:
+            scelta.smaltisci(blocco, r.connessioni)
+            blocco = []
+    if blocco:
+        scelta.smaltisci(blocco, r.connessioni)
+    return scelta
+
+
+def _ibrida_passaggi(scelta: _Scelta, connessioni: dict[str, sqlite3.Connection],
+                     termini: list[str], passaggio: int) -> None:
+    """Il passo dove i termini sono più fitti, dal testo intero: lo snippet di FTS5 si
+    ferma a 64 token, quello vettoriale ai primi 400 caratteri.
+
+    0.90.1: il testo è `content` e, se è vuoto, `tools` — le righe di strumenti (i comandi,
+    e le risposte di Neo alle domande cliccabili) hanno lì tutto il testo. Prima, col
+    passaggio, il 21% delle righe del banco grande restava senza snippet; se anche `tools`
+    è vuoto, la riga tiene lo snippet che aveva.
+    """
+    for name in {n for n, _ in scelta.scelti}:
+        uuids = [u for n, u in scelta.scelti if n == name]
+        seg = ",".join("?" * len(uuids))
+        testi_pieni = {u: (c or "").strip() or (s or "").strip()
+                       for u, c, s in connessioni[name].execute(
+                           f"SELECT uuid, content, tools FROM messages WHERE uuid IN ({seg})",
+                           uuids)}
+        for riga in scelta.righe:
+            if riga["db"] == name and testi_pieni.get(riga["uuid"]):
+                riga["snippet"] = semantica.passaggio(testi_pieni[riga["uuid"]],
+                                                      termini, passaggio)
+
+
+def _ibrida_bersagli(db: str, ruoli: str) -> tuple[dict[str, Path], list[str], list[str]]:
+    """(indice di ogni DB da interrogare, DB del perimetro senza indice, DB fuori perimetro)."""
+    indici = _indici_disponibili()
+    nel_perimetro, fuori_perimetro = _perimetro(db, ruoli)
+    bersagli = {n: indici[n] for n in nel_perimetro if n in indici}
+    if not bersagli:
+        disponibili = sorted(indici) or "nessuno"
+        raise SemanticaNonPronta(
+            f"Nessun indice vettoriale per {'i DB richiesti' if db else 'gli archivi caricati'}"
+            f" (DB con indice: {disponibili}).\n"
+            "L'indice è un file `<nome-db>.vec.db` accanto al DB, generato sul PC "
+            "e caricato sul volume come i DB stessi (vedi docs/RICERCA-IBRIDA.md).\n"
+            "Senza indice, `search` (FTS5) resta pienamente funzionante: usa quello."
+        )
+    # 11/10/2026: i DB del perimetro SENZA indice per senso non entrano nella ricerca, e
+    # prima non lo diceva nessuno: dal vivo `precedenti` cercava in 5 DB su 8, e il
+    # primario di claude.ai non c'era. Uno zero da lì sembrava un'assenza.
+    senza = [n for n in nel_perimetro if n not in indici]
+    return bersagli, senza, fuori_perimetro
+
+
+def _ibrida_risposta(r: _Ibrida, righe: list[dict[str, Any]], senza_indice: list[str],
+                     fuori_perimetro: list[str], parametri: dict[str, Any]) -> dict[str, Any]:
+    """La forma della risposta: i campi delle perdite ci sono SOLO se c'è qualcosa da dire."""
+    out: dict[str, Any] = {"righe": righe, "indici": r.meta_per_db, "parametri": parametri}
+    if r.saltati:
+        out["saltati"] = r.saltati
+        if any(x["ramo"] == "budget" for x in r.saltati):
+            out["parziale"] = True
+    if fuori_perimetro:
+        out["fuori_perimetro"] = _fuori_per_ruolo(fuori_perimetro)
+    if senza_indice:
+        out["senza_indice"] = senza_indice
+    return out
+
+
 @_serializzata
 def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                   query_fts: str = "", since: str = "", until: str = "",
@@ -753,6 +1148,10 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
     le sue due liste, e la fusione è UNA sola su tutte: stesso `limit`, niente
     righe in più — il guadagno si misura a parità di risultati (vedi
     `semantica.testi_della_ricerca`).
+
+    I passi, ognuno nella sua funzione: ① e ② le due liste di ogni testo su ogni DB
+    (`_ibrida_raccogli`), ③ la fusione (`_ibrida_fondi`), poi la scelta delle righe senza
+    doppioni (`_ibrida_scegli`) e lo snippet.
     """
     # un valore sbagliato si dice prima di tutto (anche lo speaker: il ramo vettoriale
     # lo usa da sé, senza passare da FTS)
@@ -763,315 +1162,38 @@ def search_ibrida(query: str, db: str = "", limit: int = 20, *,
                          "parole. Una finestra più larga è il messaggio intero: per quello "
                          "c'è get_context.")
     limit = _limite(limit)
-    quota = max(limit, CANDIDATI_MIN)      # i candidati per ramo si contano da qui
-    s = get_settings()
-    model_dir = Path(s.archive_model_dir)
-    indici = _indici_disponibili()
-    nel_perimetro, fuori_perimetro = _perimetro(db, ruoli)
-    bersagli = [n for n in nel_perimetro if n in indici]
-    if not bersagli:
-        disponibili = sorted(indici) or "nessuno"
-        raise SemanticaNonPronta(
-            f"Nessun indice vettoriale per {'i DB richiesti' if db else 'gli archivi caricati'}"
-            f" (DB con indice: {disponibili}).\n"
-            "L'indice è un file `<nome-db>.vec.db` accanto al DB, generato sul PC "
-            "e caricato sul volume come i DB stessi (vedi docs/RICERCA-IBRIDA.md).\n"
-            "Senza indice, `search` (FTS5) resta pienamente funzionante: usa quello."
-        )
-    # solleva SemanticaNonPronta se manca il modello
-    blobs = [semantica.embed_query(t, model_dir) for t in testi]
-    meta_per_db: list[dict[str, Any]] = []
-    # ── S3 (05/10): ciò che si perde si DICE. Un DB sparito dal registro, un ramo FTS
-    # non utilizzabile, un indice che non risponde finivano solo nel log, e il risultato
-    # aveva l'aria di un «non c'è». Ogni voce: {db, ramo, motivo}.
-    saltati: list[dict[str, str]] = []
-    # ── S2 (05/10): UNA fusione su tutti i DB. Prima ogni DB si fondeva da sé e i DB si
-    # accodavano in ordine alfabetico: su tutti i DB le prime righe erano del primo in
-    # ordine (misurato: 20 su 20 da `codice-roo-cline-2025`). Ora si raccolgono, per ogni
-    # testo, la lista FTS di tutti i DB ordinata per bm25 e quella vettoriale ordinata per
-    # distanza (stesso modello per tutti gli indici: le distanze si confrontano), e la RRF
-    # è una sola. Con un DB solo l'ordine è quello di prima. Le chiavi sono (db, uuid).
-    fts_per_testo: list[list[tuple[float, int, tuple[str, str]]]] = [[] for _ in testi]
-    vec_per_testo: list[list[tuple[float, int, tuple[str, str]]]] = [[] for _ in testi]
-    per_chiave: dict[tuple[str, str], dict[str, Any]] = {}
-    in_fts: set[tuple[str, str]] = set()
-    in_vec: set[tuple[str, str]] = set()
-    connessioni: dict[str, sqlite3.Connection] = {}
-    # P4: per le righe arrivate dai vettori, (rowid del messaggio, rowid del pezzo vinto)
-    pezzo_di: dict[tuple[str, str], tuple[int, int]] = {}
-    termini: list[str] = []
-    # con un filtro (speaker, finestra temporale) il ramo vettoriale ne scarta
-    # molti: si chiedono più vicini, perché la fusione abbia ancora una lista vera
-    filtrato = bool(speaker or since or until)
-    budget = _Budget(BUDGET_IBRIDA_S)
+    model_dir = Path(get_settings().archive_model_dir)
+    bersagli, senza_indice, fuori_perimetro = _ibrida_bersagli(db, ruoli)
+    r = _Ibrida(
+        testi=testi,
+        # solleva SemanticaNonPronta se manca il modello
+        blobs=[semantica.embed_query(t, model_dir) for t in testi],
+        quota=max(limit, CANDIDATI_MIN), budget=_Budget(BUDGET_IBRIDA_S),
+        query_fts=query_fts, since=since, until=until, campi=campi, speaker=speaker,
+        snippet_tokens=snippet_tokens)
     try:
-        for name in bersagli:
-            if budget.finito():
-                saltati.append(budget.saltato(name))
+        for name, idx in bersagli.items():
+            if r.budget.finito():
+                r.saltati.append(r.budget.saltato(name))
                 continue
-            try:
-                conn = _open_con_indice(name, indici[name])
-            except KeyError:
-                saltati.append({"db": name, "ramo": "db", "motivo": "non più nel registro"})
-                continue
-            except ArchivioSporco as exc:
-                _nota_sporco(name, exc, saltati)
-                continue
-            connessioni[name] = conn
-            budget.attacca(conn)
-            snap = _snapshot(_DBS[name])
-            candidati: set[int] = set()
-            assenti: set[int] = set()
-            uuid_diversi: set[int] = set()
-            registro_ok = True
-            vettori_ok = True
-            for i, (testo, blob) in enumerate(zip(testi, blobs)):
-                if i and budget.finito():
-                    # fra un testo e l'altro (le riformulazioni): ciò che c'è resta
-                    if not any(x["db"] == name and x["ramo"] == "budget" for x in saltati):
-                        saltati.append(budget.saltato(name, a_meta=True))
-                    break
-                # ① lista FTS5: la query naturale funziona male in FTS5 (è una frase, non
-                #    un'espressione), quindi chi chiama può passare `query_fts` col lessico
-                #    giusto — vale per la domanda, le riformulazioni vanno da sé. Se non lo
-                #    fa, si prova comunque: una lista vuota non è un errore, è
-                #    semplicemente metà fusione.
-                espressione = (query_fts if i == 0 else "") or \
-                    semantica.query_fts_da_naturale(testo)
-                if i == 0 and not termini:
-                    # i termini del passaggio vengono dalla domanda; se il ramo FTS tace
-                    # (meno di due termini con segnale) si usano le parole della domanda
-                    termini = semantica.termini_della_query(espressione or testo)
-                rows_fts: list[dict[str, Any]] = []
-                if espressione:
-                    try:
-                        rows_fts = fts.search_conn(conn, espressione, limit=quota * 3,
-                                                   since=since, until=until, campi=campi,
-                                                   speaker=speaker,
-                                                   snippet_tokens=snippet_tokens)
-                    except (FtsSyntaxError, sqlite3.DatabaseError) as exc:
-                        log.info("ramo FTS di search_ibrida su %s non utilizzabile: %s",
-                                 name, exc)
-                        ramo = "budget" if budget.finito() else "fts"
-                        if not any(s["db"] == name and s["ramo"] == ramo for s in saltati):
-                            saltati.append(budget.saltato(name) if ramo == "budget" else
-                                           {"db": name, "ramo": "fts",
-                                            "motivo": str(exc)[:200]})
-                # Meno di due termini con segnale: il ramo full-text tace invece di
-                # inventarsi una query. Mezza fusione onesta > due liste di cui una
-                # è rumore promosso a risultato.
-                for pos, r in enumerate(rows_fts):
-                    chiave = (name, r["uuid"])
-                    per_chiave.setdefault(chiave, {**r, "db": name, "snapshot": snap})
-                    rank = r.get("rank")
-                    fts_per_testo[i].append((rank if rank is not None else 0.0, pos, chiave))
-                    in_fts.add(chiave)
-                # ② lista vettoriale: rowid → uuid (l'indice lavora su rowid, il mondo
-                #    esterno su uuid: la traduzione sta qui e non nell'indice, così un
-                #    re-ingest che cambia i rowid rompe l'indice, non il contratto).
-                #    ⚠️ E il rowid può MENTIRE: dopo un re-ingest (INSERT OR REPLACE) un
-                #    rowid dell'indice può non esistere più o essere di un altro messaggio.
-                #    Se l'indice ha il registro del costruttore, ogni risultato si confronta
-                #    con l'uuid registrato e chi non combacia si SCARTA — e si dichiara in
-                #    `indici[].verifica`, mai restituito come se fosse giusto.
-                if not vettori_ok:
-                    continue
-                if budget.finito():
-                    # la ricerca dei vicini non si ferma a metà: a budget finito non parte
-                    if not any(x["db"] == name and x["ramo"] == "budget" for x in saltati):
-                        saltati.append(budget.saltato(name, a_meta=True))
-                    break
-                try:
-                    vicini = semantica.knn_pezzi(
-                        conn, blob, topn=quota * (10 if filtrato else 3))
-                    rowids = [rid for rid, _, _ in vicini]
-                    distanza = {rid: d for rid, d, _ in vicini}
-                    pezzo_vinto = {rid: pz for rid, _, pz in vicini}
-                    registro = semantica.uuid_registrati(conn, rowids)
-                    registro_ok = registro_ok and registro is not None
-                    candidati.update(rowids)
-                    if rowids:
-                        seg = ",".join("?" * len(rowids))
-                        cur = conn.execute(
-                            f"SELECT rowid, uuid, project, ts, substr(content,1,400) AS snip, "
-                            f"content <> '' AS ha_testo"
-                            f"{', speaker' if speaker else ''} FROM messages "
-                            f"WHERE rowid IN ({seg})",
-                            rowids)
-                        per_rowid = {r["rowid"]: dict(r) for r in cur}
-                        for pos, rid in enumerate(rowids):      # l'ordine del knn è il rank
-                            r = per_rowid.get(rid)
-                            if not r:
-                                assenti.add(rid)
-                                continue
-                            u = r["uuid"]
-                            if registro is not None and registro.get(rid) != u:
-                                uuid_diversi.add(rid)
-                                continue
-                            if speaker and r["speaker"] != speaker:
-                                continue
-                            # la finestra vale anche qui, con la regola di `search`: il
-                            # vettore non sa di date, e senza questo filtro tornava maggio
-                            # a chi chiedeva settembre. Una riga senza ts resta fuori, come
-                            # in FTS (NULL >= x).
-                            if (since and not (r["ts"] and r["ts"] >= since)) or \
-                                    (until and not (r["ts"] and r["ts"] <= until)):
-                                continue
-                            if campi == "testo" and not r["ha_testo"]:
-                                # il vettore non dice se ha colpito le parole o le azioni:
-                                # con `campi='testo'` si tengono solo le righe che HANNO
-                                # parole.
-                                continue
-                            chiave = (name, u)
-                            vec_per_testo[i].append((distanza[rid], pos, chiave))
-                            in_vec.add(chiave)
-                            if chiave not in per_chiave:
-                                per_chiave[chiave] = {"uuid": u, "project": r["project"],
-                                                      "ts": r["ts"], "rank": None,
-                                                      "snippet": (r["snip"] or "")[:400],
-                                                      "db": name, "snapshot": snap}
-                                pezzo_di[chiave] = (rid, pezzo_vinto[rid])
-                except sqlite3.DatabaseError as exc:
-                    # Prima il DB spariva intero (anche da `indici`) e la risposta era un
-                    # falso «non c'è». Ora resta la sua metà full-text, e lo si dice.
-                    vettori_ok = False
-                    if budget.finito():
-                        if not any(s["db"] == name and s["ramo"] == "budget" for s in saltati):
-                            saltati.append(budget.saltato(name))
-                    else:
-                        log.warning("indice di %s non interrogabile: %s", name, exc)
-                        saltati.append({"db": name, "ramo": "vettori",
-                                        "motivo": str(exc)[:200]})
-            try:
-                m = semantica.meta_indice(conn) if vettori_ok else {}
-            except sqlite3.OperationalError:
-                m = {}
-            meta_per_db.append({"db": name, "indice": str(indici[name].name),
-                                "messaggi_indicizzati": m.get("messaggi", "?"),
-                                "perimetro": m.get("perimetro", "non dichiarato"),
-                                "modello": m.get("modello", "?"),
-                                "generato": m.get("generato", "?"),
-                                # campo IN PIÙ: gli altri non cambiano forma
-                                "verifica": semantica.verdetto_registro(
-                                    registro_ok, candidati=len(candidati),
-                                    assenti=len(assenti), uuid_diversi=len(uuid_diversi))})
-            if assenti or uuid_diversi:
-                log.warning("indice di %s disallineato: %d rowid assenti, %d uuid diversi "
-                            "su %d candidati", name, len(assenti), len(uuid_diversi),
-                            len(candidati))
+            _ibrida_raccogli(r, name, idx)
     finally:
         # la connessione è quella persistente del thread: un handler scaduto
         # interromperebbe le ricerche dopo
-        for c in connessioni.values():
+        for c in r.connessioni.values():
             c.set_progress_handler(None, 0)
-    # ③ fusione: UNA sola, su tutte le liste di tutti i testi e di tutti i DB. Dentro
-    # ogni lista l'ordine è quello della misura (bm25 crescente, distanza crescente), a
-    # parità quello di arrivo.
-    liste: list[tuple[list[tuple[str, str]], float]] = []
-    for lf, lv in zip(fts_per_testo, vec_per_testo):
-        liste.append(([c for _, _, c in sorted(lf, key=lambda x: (x[0], x[1]))], peso_fts))
-        liste.append(([c for _, _, c in sorted(lv, key=lambda x: (x[0], x[1]))], 1.0))
     k_rrf = _entro(k_rrf, 1, 1000)
-    fusi = semantica.fondi_rrf_liste(liste, k=k_rrf)
-    # Lo stesso uuid vive in più DB (bundle e fotografie): come in `search` (#272) si
-    # tiene la prima occorrenza nell'ordine della fusione, e gli altri DB vanno in
-    # `anche_in`. Con un DB solo non cambia niente.
-    # 0.91.0: le COPIE DI TESTO. Lo stesso testo in più righe (un prompt incollato più volte,
-    # una routine che si ripete) occupava il 5% dei posti fra i primi 10 del banco grande: a chi
-    # legge la seconda copia non dà niente. Resta la prima nell'ordine della fusione, con `copie`
-    # (quante altre righe hanno lo stesso testo) e fino a 5 dei loro uuid in `copie_uuid`.
-    # Misurato: nDCG@10 con novità +0,006, meglio in 24 domande e peggio in nessuna.
-    # 0.91.1: si scorre la fusione A BLOCCHI finché ci sono `limit` testi diversi (o la fusione
-    # finisce). La 0.91.0 guardava una riserva fissa di 2×limit: con 7 copie della stessa routine
-    # tornavano 3 righe su 5 chieste, mentre più in basso c'erano testi diversi.
-    scelti: list[tuple[str, str]] = []
-    primo: dict[str, dict[str, Any]] = {}
-    righe: list[dict[str, Any]] = []
-    tenute: dict[str, dict[str, Any]] = {}
-    blocco: list[tuple[tuple[str, str], dict[str, Any]]] = []
-
-    def _smaltisci(blocco):
-        testo_di: dict[tuple[str, str], str] = {}
-        for name in {n for (n, _), _ in blocco}:
-            uuids = [u for (n, u), _ in blocco if n == name]
-            seg = ",".join("?" * len(uuids))
-            for u, c, s_ in connessioni[name].execute(
-                    f"SELECT uuid, content, tools FROM messages WHERE uuid IN ({seg})", uuids):
-                testo_di[(name, u)] = _chiave_di_testo(c, s_)
-        for chiave, r in blocco:
-            k = testo_di.get(chiave, "")
-            if k and k in tenute:
-                prima = tenute[k]
-                prima["copie"] = prima.get("copie", 0) + 1
-                if len(prima.setdefault("copie_uuid", [])) < 5:
-                    prima["copie_uuid"].append(r["uuid"])
-                continue
-            if len(righe) >= limit:
-                continue
-            if k:
-                tenute[k] = r
-            righe.append(r)
-            scelti.append(chiave)
-
-    for chiave in fusi:
-        name, u = chiave
-        if u in primo:
-            primo[u].setdefault("anche_in", []).append(name)
-            continue
-        r = dict(per_chiave[chiave])
-        r["origine"] = ("entrambi" if chiave in in_fts and chiave in in_vec
-                        else "fts" if chiave in in_fts else "vettori")
-        primo[u] = r
-        # anche quando le righe ci sono già si continua: si contano le copie di quelle tenute
-        blocco.append((chiave, r))
-        if len(blocco) >= limit:
-            _smaltisci(blocco)
-            blocco = []
-    if blocco:
-        _smaltisci(blocco)
-    if not passaggio:
-        _snippet_dal_pezzo(righe, connessioni, pezzo_di, termini)
-    for name in {r["db"] for r in righe}:
-        _chi_parla(connessioni[name], [r for r in righe if r["db"] == name])
-    if passaggio and scelti:
-        # il passo dove i termini sono più fitti, dal testo intero: lo snippet di FTS5
-        # si ferma a 64 token, quello vettoriale ai primi 400 caratteri
-        for name in {n for n, _ in scelti}:
-            uuids = [u for n, u in scelti if n == name]
-            seg = ",".join("?" * len(uuids))
-            # 0.90.1: il testo è `content` e, se è vuoto, `tools` — le righe di strumenti (i
-            # comandi, e le risposte di Neo alle domande cliccabili) hanno lì tutto il testo.
-            # Prima, col passaggio, il 21% delle righe del banco grande restava senza snippet;
-            # se anche `tools` è vuoto, la riga tiene lo snippet che aveva.
-            testi_pieni = {u: (c or "").strip() or (s or "").strip()
-                           for u, c, s in connessioni[name].execute(
-                               f"SELECT uuid, content, tools FROM messages WHERE uuid IN ({seg})",
-                               uuids)}
-            for r in righe:
-                if r["db"] == name and testi_pieni.get(r["uuid"]):
-                    r["snippet"] = semantica.passaggio(testi_pieni[r["uuid"]],
-                                                       termini, passaggio)
-    out: dict[str, Any] = {
-        "righe": righe,
-        "indici": meta_per_db,
-        "parametri": {"k_rrf": k_rrf, "peso_fts": peso_fts,
-                      "modello": semantica.MODELLO_ATTESO,
-                      "testi": len(testi), "snippet_tokens": snippet_tokens,
-                      "passaggio": passaggio},
-    }
-    if saltati:
-        out["saltati"] = saltati
-        if any(x["ramo"] == "budget" for x in saltati):
-            out["parziale"] = True
-    if fuori_perimetro:
-        out["fuori_perimetro"] = _fuori_per_ruolo(fuori_perimetro)
-    # 11/10/2026: i DB del perimetro SENZA indice per senso non entrano nella ricerca, e
-    # prima non lo diceva nessuno: dal vivo `precedenti` cercava in 5 DB su 8, e il
-    # primario di claude.ai non c'era. Uno zero da lì sembrava un'assenza.
-    senza = [n for n in nel_perimetro if n not in indici]
-    if senza:
-        out["senza_indice"] = senza
-    return out
+    scelta = _ibrida_scegli(r, _ibrida_fondi(r, peso_fts, k_rrf), limit)
+    if passaggio:
+        _ibrida_passaggi(scelta, r.connessioni, r.termini, passaggio)
+    else:
+        _snippet_dal_pezzo(scelta.righe, r.connessioni, r.pezzo_di, r.termini)
+    for name in {riga["db"] for riga in scelta.righe}:
+        _chi_parla(r.connessioni[name], [x for x in scelta.righe if x["db"] == name])
+    return _ibrida_risposta(
+        r, scelta.righe, senza_indice, fuori_perimetro,
+        {"k_rrf": k_rrf, "peso_fts": peso_fts, "modello": semantica.MODELLO_ATTESO,
+         "testi": len(testi), "snippet_tokens": snippet_tokens, "passaggio": passaggio})
 
 # P4 (05/10/2026): per una riga trovata «per senso» lo snippet era l'inizio del messaggio,
 # anche quando il pezzo che aveva colpito stava migliaia di caratteri più in là. L'indice

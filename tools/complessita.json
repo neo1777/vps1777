@@ -8,10 +8,6 @@
  ],
  "soglia": 10,
  "funzioni": {
-  "services/archive-mcp/app/db.py::search_ibrida": {
-   "complessita": 55,
-   "stato": "da-esaminare"
-  },
   "tools/vps1777.py::cmd_update": {
    "complessita": 54,
    "stato": "da-esaminare"
