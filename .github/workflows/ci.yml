@@ -39,7 +39,15 @@ jobs:
           # rilievi — cioè il gate non copriva quel codice e non se ne sarebbe
           # mai accorto nessuno, perché il non-coperto era anche pulito.
           # Le regole oltre il default stanno in ruff.toml (dal 22/11/2026: i comandi passati alla shell).
-          ruff check services/ tools/ security/
+          # installer/ e plugins/ erano fuori (24/11/2026): puliti, quindi nessuno se n'era
+          # accorto. Stessa forma del 27/07 qui sopra.
+          ruff check services/ tools/ security/ installer/ plugins/
+      - name: Complessità — nessuna funzione nuova oltre 10, nessuna censita che cresce
+        run: |
+          # QUA-04. Il censimento è tools/complessita.json: una semina con la sua data di
+          # fine. Esce 2 se non ha potuto misurare: non è un verde.
+          python3 tools/complessita.py --autoprova
+          python3 tools/complessita.py
       - name: ShellCheck bash
         run: |
           # PINNATO PER DIGEST, come le immagini e le action di questo repo — e per

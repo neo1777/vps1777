@@ -129,13 +129,16 @@ righe:
 # Le prove (dal 22/11/2026): i comandi del repo che i controlli dello standard lanciano, riga per riga.
 # Senza la voce, la riga esce NON MISURATO, mai verde.
 prove:
+  QUA-04:
+    censimento: tools/complessita.json
+    comando: "python3 tools/complessita.py"     # 0 pulito, 1 rosso, 2 non ha guardato
   VER-08:
     scanner:
       - {classe: contenitori, comando: "bash tools/scanner.sh contenitori {cartella}"}
       - {classe: dipendenze, comando: "bash tools/scanner.sh dipendenze {cartella}", lockfile: services/gateway/uv.lock}
       - {classe: segreti, comando: "bash tools/scanner.sh segreti {cartella}"}
       - {classe: segreti, comando: "python3 security/check_no_leaks.py"}
-      - {classe: codice, comando: "uvx ruff@0.15.22 check services/ tools/ security/", dove: tools}
+      - {classe: codice, comando: "uvx ruff@0.15.22 check services/ tools/ security/ installer/ plugins/", dove: tools}
   SIC-14:
     prepara: "printf '{\"gateway\": \"ghcr.io/example/vps1777-gateway@sha256:%064d\"}\\n' 0 > images.lock"
     build: "bash tools/assembla-pacchetto.sh 9.9.9 {uscita}"
