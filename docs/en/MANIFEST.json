@@ -28,8 +28,8 @@
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
-      "sorgente_sha256": "7b5f51dcc06306bd59fa044cd1bbc7c5705163930cca63d3812849aea7923f6f",
-      "traduzione_sha256": "6f33d80f4bb9c7e829b774d755d115532ce298d5d00e54384a495a51e533a192"
+      "sorgente_sha256": "68ff33e8d0d99b67fb5848e531125a41d05ae706607ce20de6d5b31a0da71137",
+      "traduzione_sha256": "50f10edf120c8839e5749ed2f8cd947583c4091c6ee830425c494c28f17f0388"
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",

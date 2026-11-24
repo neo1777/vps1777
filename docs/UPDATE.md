@@ -150,6 +150,14 @@ per il percorso automatico: `vps1777 update` a mano, `--version` e il pulsante a
 installano subito, e sono la via per una correzione urgente. Una data di pubblicazione
 illeggibile vale come «troppo giovane»: in dubbio, da sola non installa.
 
+**Una release già tornata indietro non si riprova da sola** (dalla 0.98.14). Se l'update
+automatico a una versione fallisce e la macchina torna indietro da sola, il timer non
+riprova quella versione ai giri dopo: lo scrive nel journal («è già tornata indietro su
+questa macchina… l'aggiornamento automatico non la riprova») e aspetta la release
+successiva. Prima la riprovava ogni giorno, e ogni giro fermava i servizi per qualche
+minuto e mandava un nuovo «❌» su Telegram. A mano (`vps1777 update`, `--version`) e dal
+pulsante admin si può riprovarla quando si vuole.
+
 **4. Indice notturno (facoltativo)** — `vps1777-indice-notturno.timer`, **ogni notte
 alle 03:30** (con fino a 30 minuti di ritardo casuale). Non è acceso dall'installer: si
 accende con `vps1777 indice-notturno --abilita` (e si spegne con `--disabilita`), perché

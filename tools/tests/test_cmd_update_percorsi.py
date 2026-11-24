@@ -779,3 +779,50 @@ def test_il_bot_senza_token_non_buca_la_rete_di_rollback(b):
     b.mancanti[1] = [f"{v.SEGRETI_DEL_BOT[0]} → ./secrets/{v.SEGRETI_DEL_BOT[0]}   [VUOTO]"]
     assert b.esegui()[0] == 0
     assert "la rete di ROLLBACK è bucata" not in _uscita(b)
+
+
+# ── una release già tornata indietro non si riprova da sola (24/11/2026) ────
+
+CADUTA = {"event": "rolled_back", "from": "0.98.13", "to": "0.98.12",
+          "at": "2026-11-20T04:00:00Z", "reason": "health-gate: gateway unhealthy"}
+
+
+def test_l_automatico_non_riprova_una_release_gia_tornata_indietro(b):
+    b.st["history"] = [CADUTA]
+    assert b.esegui(eta_minima=48)[0] == 0
+    out = _uscita(b)
+    assert "è già tornata indietro su questa macchina il 2026-11-20T04:00:00Z" in out
+    assert "health-gate: gateway unhealthy" in out and "vps1777 update --version v0.98.13" in out
+    assert b.passi() == [] and "backup" not in b.nomi() and "telegram" not in b.nomi()
+
+
+@pytest.mark.parametrize("arg", [{}, {"version": "0.98.13"}, {"from_intent": "/x/i.json"}])
+def test_a_mano_e_dal_pulsante_si_puo_riprovare(b, arg):
+    b.st["history"] = [CADUTA]
+    assert b.esegui(**arg)[0] == 0
+    assert b.passi()[-1] == (15, "done", "ok")
+
+
+def test_una_release_nuova_passa_anche_se_la_precedente_era_caduta(b):
+    b.st["history"] = [dict(CADUTA, **{"from": "0.98.11"})]
+    assert b.esegui(eta_minima=48)[0] == 0
+    assert b.passi()[-1] == (15, "done", "ok")
+
+
+@pytest.mark.parametrize("storia,atteso", [
+    ([], None),
+    ([CADUTA], CADUTA),
+    ([{"event": "rolled_back", "from": "v0.98.13", "to": "0.98.12"}], "caduta"),
+    # caduta, poi installata a mano con successo: l'ultima cosa successa è il successo
+    ([CADUTA, {"event": "updated", "from": "0.98.12", "to": "0.98.13"}], None),
+    # installata, poi tornata indietro a mano: non è un auto-rollback
+    ([{"event": "manual_rollback", "from": "0.98.13", "to": "0.98.12"}], None),
+    # eventi di altre versioni dopo la caduta non la cancellano
+    ([CADUTA, {"event": "updated", "from": "0.98.10", "to": "0.98.11"}], CADUTA),
+])
+def test_tornata_indietro_guarda_l_ultima_cosa_successa_a_quella_versione(storia, atteso):
+    r = v.tornata_indietro({"history": storia}, "0.98.13")
+    if atteso == "caduta":
+        assert r is not None and r["event"] == "rolled_back"
+    else:
+        assert r == atteso

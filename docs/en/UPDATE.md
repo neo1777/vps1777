@@ -153,6 +153,14 @@ automatic path: `vps1777 update` by hand, `--version` and the admin button insta
 right away, and they are the way for an urgent fix. An unreadable publication date
 counts as "too young": when in doubt, it does not install on its own.
 
+**A release that already rolled back is not retried on its own** (since 0.98.14). If the
+automatic update to a version fails and the machine rolls back by itself, the timer does
+not retry that version on later runs: it says so in the journal ("è già tornata indietro
+su questa macchina… l'aggiornamento automatico non la riprova") and waits for the next
+release. Before, it retried it every day, and each run stopped the services for a few
+minutes and sent a new "❌" on Telegram. By hand (`vps1777 update`, `--version`) and from
+the admin button you can retry it whenever you want.
+
 **4. Nightly index (optional)** — `vps1777-indice-notturno.timer`, **every night at
 03:30** (with up to 30 minutes of random delay). The installer does not switch it on:
 you turn it on with `vps1777 indice-notturno --abilita` (and off with `--disabilita`),

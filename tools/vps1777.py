@@ -3876,7 +3876,7 @@ def cmd_update(repo: Path, args) -> int:
     target = norm_ver(rel["tag_name"])
     if norm_ver(cur) == target:
         return _update_gia_fatto(repo, st, target)
-    if not _update_da_installare(repo, args, target_req, rel, target, cur):
+    if not _update_da_installare(repo, args, target_req, rel, target, cur, st):
         return 0
     _update_conferma(args, rel, cur, target)
     step = _passi(repo, target)
@@ -4001,9 +4001,10 @@ def _update_gia_fatto(repo: Path, st: dict, target: str) -> int:
 
 
 def _update_da_installare(repo: Path, args, target_req: str | None, rel: dict,
-                          target: str, cur: str) -> bool:
-    """La release trovata va installata adesso? No (False) se è una risposta stantia di GitHub
-    o se è in quarantena; un downgrade chiesto dal pulsante muore qui."""
+                          target: str, cur: str, st: dict) -> bool:
+    """La release trovata va installata adesso? No (False) se è una risposta stantia di GitHub,
+    se è in quarantena o se su questa macchina è già tornata indietro; un downgrade chiesto
+    dal pulsante muore qui."""
     # Version-floor anti-downgrade sul canale NON interattivo (pulsante admin
     # via --from-intent): un gateway compromesso potrebbe forgiare un intent
     # verso una release più vecchia con vuln note. Il guard su update_status.json
@@ -4031,7 +4032,31 @@ def _update_da_installare(repo: Path, args, target_req: str | None, rel: dict,
             log(f"v{target} in quarantena: {motivo} — riprovo al prossimo giro "
                 f"(per installarla subito: `vps1777 update`)")
             return False
+        # Una release già TORNATA INDIETRO su questa macchina non si riprova da sola (24/11/2026,
+        # rilievo di Sagoma rileggendo STA-06): l'auto-rollback scriveva `rolled_back` nella
+        # storia e nessuno lo leggeva, quindi il timer giornaliero la riprovava ogni giorno
+        # (backup, `down` cioè servizi giù, migrazioni, `up`, salute rossa, rollback, «❌» su
+        # Telegram) finché non usciva una release nuova. A mano e dal pulsante si può riprovare.
+        caduta = tornata_indietro(st, target)
+        if caduta:
+            log(f"v{target} è già tornata indietro su questa macchina il {caduta.get('at', '?')} "
+                f"({caduta.get('reason', 'motivo non registrato')}): l'aggiornamento automatico "
+                f"non la riprova. Aspetta la prossima release, o riprovala a mano: "
+                f"`vps1777 update --version v{target}`")
+            return False
     return True
+
+
+def tornata_indietro(st: dict, target: str) -> dict | None:
+    """L'auto-rollback DA `target` su questa macchina, se è l'ultima cosa successa a quella
+    versione; None se non c'è stato, o se dopo è stata installata con successo."""
+    for ev in reversed(st.get("history") or []):
+        if target not in (norm_ver(str(ev.get("from") or "")), norm_ver(str(ev.get("to") or ""))):
+            continue
+        if ev.get("event") == "rolled_back" and norm_ver(str(ev.get("from") or "")) == target:
+            return ev
+        return None
+    return None
 
 
 def _update_conferma(args, rel: dict, cur: str, target: str) -> None:
