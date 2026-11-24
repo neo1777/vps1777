@@ -6,7 +6,9 @@ name: Canale di aggiornamento (firmato, con scadenza)
 #
 # Scrive `canale.json` ({latest, firmato_il, scade_il}), lo firma keyless con cosign (l'identità è
 # QUESTO workflow su main: il client accetta solo lei) e lo pubblica, con firma e certificato,
-# nella release fissa `canale` (prerelease: non è mai «l'ultima versione»).
+# sul ramo `canale-firmato`, in un file solo (`canale.bundle.json`: testo, firma e certificato).
+# Su un ramo e non in una release: le release di questo repository sono immutabili, e un allegato
+# pubblicato non si può sostituire ogni settimana (provato il 24/11/2026: HTTP 422).
 #
 # Vita 45 giorni, rinfresco ogni settimana: un giro saltato non ferma nessuno, sei sì. Se questo
 # workflow si rompe e nessuno lo ripara, dopo 45 giorni le macchine SMETTONO di aggiornarsi da sole
@@ -27,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write        # carica i tre file nella release `canale`
+      contents: write        # un commit sul ramo `canale-firmato` (mai su main)
       id-token: write        # firma keyless
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,30 +68,37 @@ jobs:
             --certificate-identity-regexp '^https://github\.com/${{ github.repository_owner }}/vps1777/\.github/workflows/canale\.yml@refs/heads/main$' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --signature canale.json.sig --certificate canale.json.pem canale.json
-      - name: Pubblica nella release fissa `canale`
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Pubblica sul ramo `canale-firmato`
         run: |
           set -euo pipefail
-          if ! gh release view canale >/dev/null 2>&1; then
-            gh release create canale --prerelease --target main \
-              --title "Canale di aggiornamento" \
-              --notes "Non è una versione. Qui sta \`canale.json\`, il puntatore firmato all'ultima release stabile, con la sua scadenza: l'aggiornamento automatico di vps1777 lo legge e lo pretende fresco. Lo rinfresca ogni settimana \`.github/workflows/canale.yml\`. Vedi docs/UPDATE.md."
+          python3 tools/canale-genera.py impacchetta canale.json > canale.bundle.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch -q origin canale-firmato 2>/dev/null; then
+            git worktree add -q --detach pubblica FETCH_HEAD
+          else
+            # prima volta: un ramo senza storia in comune con main, che contiene solo il canale
+            git worktree add -q --detach pubblica
+            git -C pubblica checkout -q --orphan canale-firmato
+            git -C pubblica rm -rfq .
           fi
-          # la firma PRIMA del contenuto: nel mezzo, chi scarica trova il JSON vecchio con accanto
-          # la firma nuova e riprova (la CLI ritenta una volta); l'ordine inverso sarebbe uguale
-          gh release upload canale canale.json.sig canale.json.pem canale.json --clobber
+          cp canale.bundle.json pubblica/
+          printf '%s\n' "Questo ramo contiene solo \`canale.bundle.json\`: il puntatore firmato all'ultima release stabile di vps1777, con la sua scadenza. Lo scrive ogni settimana \`.github/workflows/canale.yml\` (su main). Non si modifica a mano: una modifica rompe la firma e le macchine la rifiutano. Vedi docs/UPDATE.md su main." > pubblica/README.md
+          git -C pubblica add -A
+          git -C pubblica commit -q -m "canale: ${{ steps.rel.outputs.ultima }}, firmato il $(date -u +%F)"
+          # ogni rinfresco è un commit in più, mai una riscrittura: la storia del ramo è l'elenco delle firme
+          git -C pubblica push -q origin HEAD:refs/heads/canale-firmato
       - name: Ciò che è pubblicato è ciò che è stato firmato
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir riletto && cd riletto
-          for i in 1 2 3; do
-            rm -f canale.json*; gh release download canale -p 'canale.json*' && cmp -s canale.json ../canale.json && break
-            sleep 10
+          URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/canale-firmato/canale.bundle.json"
+          for i in 1 2 3 4 5 6; do
+            curl -fsS -m 20 -o canale.bundle.json "$URL" && cmp -s canale.bundle.json ../canale.bundle.json && break
+            sleep 30     # la CDN dei file grezzi tiene la copia vecchia qualche minuto
           done
-          cmp canale.json ../canale.json && cmp canale.json.sig ../canale.json.sig && cmp canale.json.pem ../canale.json.pem
+          cmp canale.bundle.json ../canale.bundle.json
+          python3 -c "import json;b=json.load(open('canale.bundle.json'));[open(n,'w').write(b[k]) for n,k in (('canale.json','canale'),('canale.json.sig','sig'),('canale.json.pem','pem'))]"
           cosign verify-blob \
             --certificate-identity-regexp '^https://github\.com/${{ github.repository_owner }}/vps1777/\.github/workflows/canale\.yml@refs/heads/main$' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \

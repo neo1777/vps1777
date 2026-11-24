@@ -227,8 +227,8 @@ the machine would stop receiving fixes without anything turning red.
 
 That is why `canale.json` exists: a small file saying "the latest stable is X, signed on,
 **expires on**". A workflow of the repository (`.github/workflows/canale.yml`) writes and signs it
-every week, with a 45-day life, and publishes it in the fixed release `canale` (which is not a
-version). The signature is the same kind as the packages': no keys, bound to the identity of that
+every week, with a 45-day life, and publishes it on the
+`canale-firmato` branch of the repository (one file, with the signature inside). The signature is the same kind as the packages': no keys, bound to the identity of that
 workflow.
 
 **What your machine does.** Only the **automatic** update (the weekly timer) checks it, on every

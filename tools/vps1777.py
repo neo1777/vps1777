@@ -634,7 +634,7 @@ def latest_release(repo: Path) -> dict | None:
     try:
         if release_channel(repo) == "prerelease":
             rels = [r for r in github_json("/releases?per_page=10")
-                    if str(r.get("tag_name", "")).startswith("v")]   # non la release fissa «canale»
+                    if str(r.get("tag_name", "")).startswith("v")]   # solo le versioni
             return rels[0] if rels else None
         # `github_json` dà dict o list secondo l'endpoint; questo dà sempre un oggetto
         return github_json("/releases/latest")  # type: ignore[return-value]
@@ -3590,13 +3590,17 @@ def _secrets_mancanti_in(compose: Path, radice_repo: Path,
 #
 # La difesa è un PUNTATORE firmato con una scadenza, rifirmato a calendario: `canale.json`
 # («l'ultima stabile è X, firmato il, scade il»), pubblicato da `.github/workflows/canale.yml`
-# nella release fissa `canale` con la firma keyless accanto. L'aggiornamento AUTOMATICO lo
+# sul ramo `canale-firmato` con la firma keyless dentro lo stesso file. L'aggiornamento AUTOMATICO lo
 # pretende fresco: se è scaduto, assente o non verificabile SI FERMA e avvisa su Telegram
 # (scelta del proprietario, 22/11/2026). L'aggiornamento a mano resta possibile: chi ha la shell
 # ha già scelto. È l'idea del ruolo «timestamp» di TUF e di `Valid-Until` di apt, ridotta a un
 # file: niente chiavi da custodire, l'identità che firma è il workflow.
-CANALE_TAG = "canale"
-CANALE_URL = f"https://github.com/{GITHUB_REPO}/releases/download/{CANALE_TAG}"
+# Su un RAMO e non fra gli allegati di una release: le release di questo repository sono immutabili
+# (un allegato pubblicato non si sostituisce), e il canale va rifirmato ogni settimana. Un file solo,
+# `canale.bundle.json`, porta il testo del canale, la firma e il certificato: tre file separati su una
+# CDN possono arrivare da tre momenti diversi, e la firma nuova accanto al testo vecchio sembra un attacco.
+CANALE_RAMO = "canale-firmato"
+CANALE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{CANALE_RAMO}/canale.bundle.json"
 CANALE_IDENTITA = (rf"^https://github\.com/{re.escape(GITHUB_REPO)}"
                    r"/\.github/workflows/canale\.yml@refs/heads/main$")
 CANALE_VITA_MAX_GIORNI = 60        # una vita più lunga è un errore di chi firma: si rifiuta
@@ -3721,13 +3725,26 @@ def cmd_canale_verifica(_repo: Path, args) -> int:
     return 1
 
 
+def canale_spacchetta(bundle: Path, dove: Path) -> Path:
+    """Dal file unico pubblicato ai tre che la verifica legge: `canale.json` (il testo ESATTO che è
+    stato firmato, byte per byte), `.sig` e `.pem`. Solleva ValueError se la forma non torna."""
+    try:
+        b = json.loads(bundle.read_bytes())
+    except ValueError:
+        raise ValueError("il canale pubblicato non è JSON") from None
+    if not isinstance(b, dict) or not all(isinstance(b.get(k), str) and b.get(k) for k in ("canale", "sig", "pem")):
+        raise ValueError("il canale pubblicato non ha i tre campi canale, sig, pem")
+    for nome, chiave in (("canale.json", "canale"), ("canale.json.sig", "sig"), ("canale.json.pem", "pem")):
+        (dove / nome).write_text(b[chiave], encoding="utf-8")
+    return dove / "canale.json"
+
+
 def canale_scarica(repo: Path) -> Path:
-    """Scarica canale.json con firma e certificato in `var/canale/`. Solleva su rete o 404."""
+    """Scarica il canale pubblicato in `var/canale/` e lo spacchetta. Solleva su rete, 404 o forma."""
     dove = repo / "var" / "canale"
     dove.mkdir(parents=True, exist_ok=True)
-    for nome in ("canale.json", "canale.json.sig", "canale.json.pem"):
-        download(f"{CANALE_URL}/{nome}", dove / nome, timeout=30, massimo=CANALE_MAX_BYTE)
-    return dove / "canale.json"
+    download(CANALE_URL, dove / "canale.bundle.json", timeout=30, massimo=4 * CANALE_MAX_BYTE)
+    return canale_spacchetta(dove / "canale.bundle.json", dove)
 
 
 def canale_per_update(repo: Path, *, scarica=None, attesa_s: float = 20.0) -> tuple[dict | None, str]:
@@ -3739,7 +3756,7 @@ def canale_per_update(repo: Path, *, scarica=None, attesa_s: float = 20.0) -> tu
     for tentativo in (1, 2):
         try:
             path = scarica(repo)
-        except (urllib.error.URLError, OSError, RuntimeError) as exc:
+        except (urllib.error.URLError, OSError, RuntimeError, ValueError) as exc:
             motivo = f"canale non scaricabile ({exc})"
         else:
             cosign = shutil.which("cosign") or _ensure_cosign(repo)
