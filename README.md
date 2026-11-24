@@ -1,0 +1,1 @@
+Questo ramo contiene solo `canale.bundle.json`: il puntatore firmato all'ultima release stabile di vps1777, con la sua scadenza. Lo scrive ogni settimana `.github/workflows/canale.yml` (su main). Non si modifica a mano: una modifica rompe la firma e le macchine la rifiutano. Vedi docs/UPDATE.md su main.
