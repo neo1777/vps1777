@@ -7,6 +7,8 @@
   "Fuori dal conto, dichiarato: i test (cartelle tests e tests_runtime, file test_*.py, conftest.py). Il limite parla dei moduli del prodotto e dei suoi strumenti; una prova lunga e piatta non è logica intricata da mantenere."
  ],
  "soglia": 10,
+ "fine_semina": "2027-01-31",
+ "fine_semina_scelta": "2026-11-24-soglia-qua04-fine-semina-confermata (chi possiede il repo)",
  "funzioni": {
   "tools/vps1777.py::cmd_update": {
    "complessita": 54,
