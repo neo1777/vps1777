@@ -4,6 +4,27 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Il README mostra il prodotto.** Tre schermate vere con dati inventati (l'installatore grafico, il pannello,
+  la Mini App di Telegram), più l'immagine di anteprima per i link condivisi. Gli script che le rifanno stanno
+  in `tools/schermate/`, e un controllo le fa rifare o confermare quando l'installatore cambia o la versione
+  sale di un gradino.
+- **«Primi 15 minuti» in inglese** (`docs/en/PRIMI-15-MINUTI.md`), col rimando in cima ai due README: provare
+  il prodotto sul proprio PC prima di affittare una macchina.
+
+### Modificato
+- **I controlli fra la documentazione italiana e quella inglese sono più stretti.** Prima il registro diceva
+  solo «l'italiano non è cambiato da quando hai tradotto», e lo strumento che lo aggiorna si fidava: bastava
+  lanciarlo e ogni traduzione tornava «fresca», anche senza averla toccata. Ora registra anche l'impronta
+  della pagina inglese e si rifiuta di riallineare se l'italiano è cambiato e l'inglese no. In più: le due
+  lingue devono avere la stessa struttura (titoli, esempi di codice, righe di tabella), e ogni pagina di
+  `docs/` è o tradotta o dichiarata «solo in italiano», col motivo.
+
+### Corretto
+- README: «Debian 12 consigliata, su Debian 13 instabile» era vero ad agosto. Il collaudo del 23/11/2026 è
+  riuscito per intero su Debian 13: ora dice che vanno entrambe e che cosa era instabile (i volumi cifrati).
+- «Primi 15 minuti» diceva che il pannello ha sette schede: sono nove.
+
 ## [0.98.13] — 2026-11-24
 
 ### Sicurezza

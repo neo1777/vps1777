@@ -14,6 +14,19 @@
 > server you control** — OAuth 2.1 sign-in, signed updates, a graphical installer (full
 > architecture in [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md)).
 
+<p align="center">
+  <img src="docs/img/installatore.png" width="49%" alt="The graphical installer: a form asking for the VPS address, the SSH user and the admin email, with an Install button at the bottom">
+  <img src="docs/img/pannello-aggiornamenti.png" width="49%" alt="The admin panel, Update tab: the deployed version, the latest release and a button to update">
+</p>
+<p align="center">
+  <img src="docs/img/miniapp-notebook.png" width="30%" alt="The Telegram Mini App on a phone, Notebook tab: a list of NotebookLM notebooks">
+</p>
+<p align="center"><sub>The installer you fill in on your PC · the admin panel on your server · the Telegram Mini App.
+Real screens, invented data (how they are made: <a href="tools/schermate/LEGGIMI.md">tools/schermate</a>). The interface is in Italian.</sub></p>
+
+**Want to see it running before renting anything?** [Try it on your own PC in 15 minutes](docs/en/PRIMI-15-MINUTI.md):
+every step timed on a clean machine, and what you cannot see locally written down.
+
 You connect **your** MCP servers (and Telegram bots) to [claude.ai](https://claude.ai),
 Claude Code and the desktop app, from one endpoint that asks for sign-in (OAuth 2.1). vps1777 puts a gateway in
 front of your services — authentication, reverse proxy, admin panel, HTTPS ingress —
@@ -61,17 +74,17 @@ the routing. You think about your MCP; the rest is already here.
 
 ## Installation
 
-All you need is a **fresh Linux VPS** (Debian 12 recommended — it's what the full
-clean-machine acceptance test of 2026-08-27 ran on; on Debian 13 with encrypted
-volumes the same VPS proved unstable, see `H56` in `security/findings.yml`) with an
-IP and a root password. Three ways, same repo.
+All you need is a **fresh Linux VPS** with an IP and a root password: **Debian 12 or 13**,
+both proven by a full clean-machine acceptance test (Debian 12 on 2026-08-27, Debian 13 on
+2026-11-23: the report is in [docs/collaudi/](docs/collaudi/)). Disks were unencrypted: Debian 13
+with encrypted volumes, in August and on a single provider, proved unstable (see `H56` in
+`security/findings.yml`). Three ways, same repo.
 
 > 💻 **Before renting one, run it on your own PC.** All three ways below need a real
 > machine with an IP and root; the fourth doesn't. The stack runs locally on Docker —
 > **from `git clone` to the admin panel, with every step timed on a clean box**, and
 > with what you *cannot* see locally written down instead of hidden (public HTTPS,
-> first of all). The page is in Italian:
-> **[docs/PRIMI-15-MINUTI.md](docs/PRIMI-15-MINUTI.md)**.
+> first of all): **[First 15 minutes](docs/en/PRIMI-15-MINUTI.md)**.
 
 ### 🖱 Graphical installer — zero commands (recommended)
 

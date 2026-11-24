@@ -12,6 +12,19 @@
 > su un server che controlli tu**: accesso OAuth 2.1, aggiornamenti firmati, installer
 > grafico (l'architettura completa è in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 
+<p align="center">
+  <img src="docs/img/installatore.png" width="49%" alt="L'installatore grafico: un modulo che chiede l'indirizzo della VPS, l'utente SSH e l'email dell'amministratore, con il pulsante Installa in fondo">
+  <img src="docs/img/pannello-aggiornamenti.png" width="49%" alt="Il pannello di amministrazione, scheda Update: la versione installata, l'ultima release e il pulsante per aggiornare">
+</p>
+<p align="center">
+  <img src="docs/img/miniapp-notebook.png" width="30%" alt="La Mini App di Telegram su un telefono, scheda Notebook: l'elenco dei notebook di NotebookLM">
+</p>
+<p align="center"><sub>L'installatore che compili sul tuo PC · il pannello sul tuo server · la Mini App di Telegram.
+Schermate vere, dati inventati (come si fanno: <a href="tools/schermate/LEGGIMI.md">tools/schermate</a>).</sub></p>
+
+**Vuoi vederlo acceso prima di affittare qualcosa?** [Provalo sul tuo PC in 15 minuti](docs/PRIMI-15-MINUTI.md):
+ogni passo coi tempi misurati su una macchina pulita, e ciò che in locale non si può vedere scritto.
+
 Colleghi i **tuoi** server MCP (e bot Telegram) a [claude.ai](https://claude.ai),
 Claude Code e all'app desktop, da un unico endpoint che chiede l'accesso (OAuth 2.1). vps1777 mette davanti
 ai tuoi servizi un gateway con autenticazione, reverse proxy, pannello di
@@ -59,10 +72,11 @@ servizio diventa una voce nel routing. Tu pensi al tuo MCP; il resto è già qui
 
 ## Installazione
 
-Ti serve solo una **VPS Linux fresh** (Debian 12 consigliata — è quella su cui è
-stato fatto il collaudo completo su macchina vergine del 27/08/2026; su Debian 13
-con volumi cifrati la stessa VPS risultava instabile, vedi `H56` in
-`security/findings.yml`) con IP e password root. Tre modi, dallo stesso repo.
+Ti serve solo una **VPS Linux fresh** con IP e password root: **Debian 12 o 13**, entrambe
+provate con un collaudo completo su macchina vergine (Debian 12 il 27/08/2026, Debian 13 il
+23/11/2026: il referto è in [docs/collaudi/](docs/collaudi/)). I dischi erano in chiaro: Debian 13
+con volumi cifrati, ad agosto e su un solo fornitore, risultava instabile (vedi `H56` in
+`security/findings.yml`). Tre modi, dallo stesso repo.
 
 > 💻 **Prima di affittarne una, provalo sul tuo PC.** Le tre vie qui sotto
 > chiedono tutte una macchina vera con IP e root: la quarta no. Lo stack gira in

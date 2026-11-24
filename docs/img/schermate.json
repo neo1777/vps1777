@@ -1,0 +1,12 @@
+{
+  "_nota": "Quando sono state fatte le schermate del README e su che cosa. tools/tests/test_schermate_del_readme.py le fa rifare (o confermare) se l'installatore cambia o la versione sale di un gradino. Come si rifanno: tools/schermate/LEGGIMI.md.",
+  "versione": "0.98.13",
+  "scattate_il": "2026-11-24",
+  "installer_ui_sha256": "7732dff04fd23e86b38c2c6eec10a7439127c7ff1fe57dfaf02b8785bd3bf1b4",
+  "immagini": [
+    "installatore.png",
+    "pannello-aggiornamenti.png",
+    "miniapp-notebook.png",
+    "anteprima-social.png"
+  ]
+}

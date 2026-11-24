@@ -16,7 +16,7 @@ sotto sono quelli **misurati lì**. Dove il tuo risultato può essere diverso, �
 | ✅ In locale vedi | ❌ In locale NON vedi |
 |---|---|
 | I **5 servizi** dello stack in piedi e `healthy`, più il container `backup` (feature accesa di default) | L'**ingress HTTPS pubblico** (Tailscale Funnel / Caddy / Cloudflare) |
-| Il **pannello admin** e le sue sette schede (Setup, Salute, NotebookLM, Archive, Update, Secrets, Audit) | I **connector su claude.ai**: per collegarli, claude.ai deve raggiungerti da Internet |
+| Il **pannello admin** e le sue nove schede (Setup, Salute, NotebookLM, Archive, Update, Secrets, Connettori, Temi, Audit) | I **connector su claude.ai**: per collegarli, claude.ai deve raggiungerti da Internet |
 | I **due endpoint MCP** che rispondono `401` (ci sono, e chiedono l'autenticazione) | Il **bot Telegram** (serve un token da @BotFather) |
 | Che un segreto sbagliato dà `404` e non `401` (non conferma il percorso) | **NotebookLM** (serve il profilo `profiles/default/` della CLI `nlm`, caricato come tar.gz da `/admin/nlm`) |
 
@@ -137,13 +137,14 @@ Se uno dei container resta `Restarting`, salta a *[Se non torna](#se-non-torna)*
 Apri **`http://127.0.0.1:8080/admin/login`** e accedi con l'email che hai dato e la
 password che il wizard ha stampato (o messo nel file che ti ha indicato).
 
-> **Deve apparire**: il login riesce (redirect), e le schede rispondono — sono sette:
+> **Deve apparire**: il login riesce (redirect), e le schede rispondono — sono nove:
 > `/admin/setup`, `/admin/salute`, `/admin/nlm`, `/admin/archive`, `/admin/update`, `/admin/secrets`, `/admin/connettori`, `/admin/temi`,
 > `/admin/audit`.
 > *(misurato il 07/09 su quattro di loro: `GET /admin/login` → `200`; `POST` col login
 > vero → `302`; `/admin/nlm`, `/admin/update`, `/admin/audit`, `/admin/archive`, con la
 > sessione, → `200`, coi titoli `vps1777 · NotebookLM`, `· update`, `· audit`,
-> `· Archive`. Setup e Secrets c'erano già, e non erano nella misura)*
+> `· Archive`. Setup e Secrets c'erano già, e non erano nella misura; Salute, Connettori e
+> Temi sono arrivate dopo)*
 
 E i due connettori MCP, che sono il cuore del prodotto:
 
