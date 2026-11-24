@@ -1,45 +1,76 @@
 {
-  "_nota": "Ogni traduzione inglese registra lo sha256 del suo sorgente italiano al momento della traduzione. tools/tests/test_traduzioni_fresche.py fallisce la CI se il sorgente si muove: si aggiorna la traduzione e poi tools/aggiorna-traduzioni.py. Una copia che puo' mentire non e' una copia.",
+  "_nota": "Ogni traduzione inglese registra lo sha256 del suo sorgente italiano E il proprio, al momento dell'allineamento. tools/tests/test_traduzioni_fresche.py fallisce la CI se uno dei due si muove senza l'altro: si aggiorna la traduzione e poi si lancia tools/aggiorna-traduzioni.py, che RIFIUTA di riallineare un sorgente cambiato se la traduzione è rimasta identica (salvo --solo-sorgente col motivo). Una copia che può mentire non è una copia.",
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "cab74c6b49590362bc47a52397be4656354d12776f046fbc0dc07474b925d505"
+      "sorgente_sha256": "18bdb05634c6d8bce6899b05a9b80dfd9e071ff62657c855d3810826b29ad568",
+      "traduzione_sha256": "87b25aa48707443844d5e71d97208b6aea6332eb2c6cfdd11b81009fb28b807f"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
-      "sorgente_sha256": "6a7d064356fca2373b47520aa16f19f1d21a26c77c6f60d0939ae05fd60daa9e"
+      "sorgente_sha256": "6a7d064356fca2373b47520aa16f19f1d21a26c77c6f60d0939ae05fd60daa9e",
+      "traduzione_sha256": "01f4c0b88dfbcff214f683086d88c05d4f620c25e7689d56171bc4b8bf8fd20c"
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
-      "sorgente_sha256": "9d1185a62a7e6bbdb807503a73a5f3381bb42523aac4bc518fd1b8c67e0c3800"
+      "sorgente_sha256": "9d1185a62a7e6bbdb807503a73a5f3381bb42523aac4bc518fd1b8c67e0c3800",
+      "traduzione_sha256": "7a8b69455ef5a47fe12a17fe180f609c45a9f4241bd32d819e9ccd67c7677e08"
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
-      "sorgente_sha256": "e1cd123e348f510025176117c5a74b7b24a3c94dbdf5bb549d3ece5ee55e3da4"
+      "sorgente_sha256": "e1cd123e348f510025176117c5a74b7b24a3c94dbdf5bb549d3ece5ee55e3da4",
+      "traduzione_sha256": "a8a96fdacdc72c263854582e99b7ee4848d87d7bafd1170cb9dd1f6db63412d6"
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",
-      "sorgente_sha256": "fe4cb46fa7b34aa470633edf0c5d89cf695019010e97bffbc88415eebfeee2a0"
+      "sorgente_sha256": "fe4cb46fa7b34aa470633edf0c5d89cf695019010e97bffbc88415eebfeee2a0",
+      "traduzione_sha256": "2b89a2800bd6567aeeeca642eaf65c30b8c2411ce4e93316a04b11b976a04660"
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
-      "sorgente_sha256": "7b5f51dcc06306bd59fa044cd1bbc7c5705163930cca63d3812849aea7923f6f"
+      "sorgente_sha256": "7b5f51dcc06306bd59fa044cd1bbc7c5705163930cca63d3812849aea7923f6f",
+      "traduzione_sha256": "6f33d80f4bb9c7e829b774d755d115532ce298d5d00e54384a495a51e533a192"
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
-      "sorgente_sha256": "f7739ac6a346708cd6fd26ed274f1bbc392c360b3f62542f42df0fbd1be5cb1f"
+      "sorgente_sha256": "f7739ac6a346708cd6fd26ed274f1bbc392c360b3f62542f42df0fbd1be5cb1f",
+      "traduzione_sha256": "13730611142eed5c18b08ea4de8f8e37ff81880bcdd21ef4e952d0a6f7d51c09"
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "4d204ba91adc741e9c9e766b58fa754e28d712966d114d169c89f34164b264a1"
+      "sorgente_sha256": "4d204ba91adc741e9c9e766b58fa754e28d712966d114d169c89f34164b264a1",
+      "traduzione_sha256": "97d50c70cb1c0abe1f7777cf8cb659f6a21f35d0d21f1315bc2970a96e93a8e2"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",
-      "sorgente_sha256": "f8728b92e497c9eeba825970e7ae7677d4bea27c26d6a297454afc5f559e2fa7"
+      "sorgente_sha256": "f8728b92e497c9eeba825970e7ae7677d4bea27c26d6a297454afc5f559e2fa7",
+      "traduzione_sha256": "ee80ce99f69c1600b45d032aa4ea5a2a8aa5b6b29e0234ea09a7aeb3b513fc9b"
     },
     "docs/en/RICERCA-IBRIDA.md": {
       "sorgente": "docs/RICERCA-IBRIDA.md",
-      "sorgente_sha256": "834755d735be1b1530e6b0fc3211d78f21edf70f0bce1901d2a18e8a2a103e4d"
+      "sorgente_sha256": "834755d735be1b1530e6b0fc3211d78f21edf70f0bce1901d2a18e8a2a103e4d",
+      "traduzione_sha256": "f829facb5241b3eceaba84e7ed4b49922f960be1b446e5d95e07ec2d09847b96"
+    },
+    "docs/en/PRIMI-15-MINUTI.md": {
+      "sorgente": "docs/PRIMI-15-MINUTI.md",
+      "sorgente_sha256": "e4ed8ee2fc8fc9552f822f02c17a6fca92646fe2d26f104127af9d9136550635",
+      "traduzione_sha256": "fe169e98ff59862e82a346f61de0d0a9b264c80fb916524357915e782ef06db7"
     }
+  },
+  "solo_italiano": {
+    "_perche": "La lingua del progetto è l'italiano (README, «Language policy»); in inglese ci sono le pagine d'ingresso. Ogni pagina di docs/ sta QUI o fra le traduzioni: una pagina nuova non resta senza traduzione per dimenticanza, ma per una scelta scritta.",
+    "docs/GLOSSARIO.md": "glossario dei termini italiani del progetto: tradurlo ne toglierebbe il senso",
+    "docs/FEATURES-METODO.md": "metodo interno del registro delle funzioni: lo legge chi contribuisce",
+    "docs/PLUGINS.md": "guida per chi scrive un plugin: in coda di traduzione",
+    "docs/ONBOARDING.md": "il primo giro nel pannello dopo l'installazione: in coda di traduzione",
+    "docs/MINIAPP.md": "la Mini App di Telegram: in coda di traduzione",
+    "docs/INGRESS.md": "le tre vie all'HTTPS: in coda di traduzione",
+    "docs/OPS.md": "esercizio quotidiano della macchina: in coda di traduzione",
+    "docs/SECRETS.md": "i segreti e la loro rotazione: in coda di traduzione",
+    "docs/CIFRATURA-ARCHIVIO.md": "studio di progetto sulla cifratura dell'archivio: documento di lavoro",
+    "docs/COLLAUDO-VERGINE.md": "referti dei collaudi su macchina vergine: documento di lavoro, datato",
+    "docs/SELF_UPDATE_PLAN.md": "il piano di progetto dell'aggiornamento: documento di lavoro, storico",
+    "docs/NB1777.md": "il server MCP di NotebookLM: in coda di traduzione",
+    "docs/TROUBLESHOOTING.md": "guida ai guasti: in coda di traduzione (le pagine inglesi la citano come «Italian»)"
   }
 }
