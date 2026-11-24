@@ -353,6 +353,27 @@ vps1777 secrets-status
 vps1777 secrets-status --notify
 ```
 
+## vps1777 canale-verifica
+
+Judges a `canale.json` file that is already on disk: the signed pointer to the latest stable
+release, with its expiry (see `docs/en/UPDATE.md`, "The signed channel"). It does not touch the
+network. It checks, in this order: the shape of the file, the signature (in `<file>.sig`, with
+the certificate in `<file>.pem`), the expiry. Exit **0** if it accepts it, **1** if it rejects it
+(and says why: expired, signature not matching, expiry missing), **2** if it could not look (file
+or tool missing).
+
+The automatic update runs this check by itself on every pass: the command is for redoing it by
+hand on a downloaded file, and for proving the rejection. `--chiave-pubblica` is **for tests
+only**: it verifies with a given key instead of the signature of the workflow that publishes the
+channel. `tools/canale-genera.py prova <folder>` prepares a fresh channel and an expired one with
+a throwaway key.
+
+```bash
+vps1777 canale-verifica var/canale/canale.json
+python3 tools/canale-genera.py prova var/prova-canale
+vps1777 canale-verifica --chiave-pubblica var/prova-canale/chiave.pub var/prova-canale/scaduto.json   # exits 1
+```
+
 ## vps1777 memoria
 
 The **local layers of the 1777 memory** ([MEMORIA-1777.md](MEMORIA-1777.md)):

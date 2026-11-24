@@ -155,4 +155,13 @@ prove:
     senza_rollback: "return 1  # SABOTAGGIO della prova (rollback.yml)"
     lanciata_da: {workflow: .github/workflows/rollback.yml, job: rollback, matrice: modo, sano: sano, sabotato: sabotato}
     tetto_giorni: 31
-  # SIC-15 (il canale firmato con la scadenza) non c'è ancora: la riga esce NON MISURATO finché non nasce.
+  # Il canale firmato con la scadenza. I file di prova nascono al momento (`prepara`): un canale «fresco»
+  # tenuto nel repo scadrebbe, e una chiave privata nel repo, anche di prova, non ci deve stare.
+  SIC-15:
+    prepara: "python3 tools/canale-genera.py prova var/prova-canale"
+    client: "python3 tools/vps1777.py canale-verifica --chiave-pubblica var/prova-canale/chiave.pub {canale}"
+    fresco: var/prova-canale/fresco.json
+    scaduto: var/prova-canale/scaduto.json
+    firma: "{canale}.sig"
+    campo_scadenza: scade_il
+    avviso: "canale di aggiornamento SCADUTO"

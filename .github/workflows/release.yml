@@ -270,3 +270,23 @@ jobs:
           for atteso in "vps1777-runtime-v$VERSIONE.tar.gz" SHA256SUMS SHA256SUMS.sig SHA256SUMS.pem; do
             grep -qxF "$atteso" <<<"$nomi" || { echo "::error::nella release v$VERSIONE manca l'allegato $atteso"; exit 1; }
           done
+
+  # SIC-15: appena la release è pubblicata si rinfresca il canale firmato, così il puntatore
+  # dice subito la versione nuova (il giro settimanale di canale.yml lo farebbe entro lunedì).
+  # Si LANCIA canale.yml, non lo si richiama come workflow riusabile: la firma deve portare
+  # l'identità «canale.yml su main», l'unica che le macchine accettano; richiamato da qui
+  # porterebbe quella del tag. Se il lancio fallisce il rilascio resta valido: lo dice un avviso.
+  canale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [guard, bundle]
+    if: needs.guard.outputs.prerelease != 'true'
+    permissions:
+      actions: write         # lanciare un workflow_dispatch
+    steps:
+      - name: Rinfresca il canale firmato
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run canale.yml --ref main --repo "$GITHUB_REPOSITORY" \
+            || echo "::warning::canale.yml non lanciato: il puntatore firmato si aggiorna al prossimo giro settimanale (o a mano: gh workflow run canale.yml --ref main)"

@@ -213,6 +213,39 @@ primo `vps1777 update` riuscito). È idempotente: rieseguito, dice "già a regim
 - **prerelease** (solo per test): `VPS1777_RELEASE_CHANNEL=prerelease` in
   `.env`, oppure update esplicito con `vps1777 update --version vX.Y.Z-rc.1`.
 
+## Il canale firmato: perché l'aggiornamento automatico può fermarsi
+
+Dalla `0.98.13`. «Qual è l'ultima release» è una domanda fatta a GitHub, e la risposta non è
+firmata. I pacchetti sì: ma un pacchetto vecchio è autentico quanto uno nuovo. Chi stesse in mezzo,
+o una cache rimasta ferma, potrebbe rispondere per mesi «l'ultima è quella che hai», e la macchina
+smetterebbe di ricevere le correzioni senza che niente diventi rosso.
+
+Per questo esiste `canale.json`: un file piccolo che dice «l'ultima stabile è la X, firmato il,
+**scade il**». Lo scrive e lo firma ogni settimana un workflow del repository
+(`.github/workflows/canale.yml`), con una vita di 45 giorni, e lo pubblica nella release fissa
+`canale` (che non è una versione). La firma è la stessa dei pacchetti: senza chiavi, legata
+all'identità di quel workflow.
+
+**Che cosa fa la tua macchina.** Solo l'aggiornamento **automatico** (il timer settimanale) lo
+controlla, a ogni giro, anche quando non c'è niente da installare:
+
+- canale firmato e non scaduto → prosegue come sempre. Se il canale nomina una release più nuova
+  di quella che GitHub ha risposto, segue il canale.
+- canale **scaduto**, assente o con una firma che non torna → **si ferma e ti avvisa su
+  Telegram**. Non installa niente da solo finché il canale non torna valido.
+
+L'aggiornamento **a mano** (`vps1777 update`, o il pulsante del pannello) non guarda il canale: chi
+decide di aggiornare ha già scelto, e i pacchetti restano verificati come prima.
+
+**Se ti arriva l'avviso.** Quasi sempre vuol dire che il workflow settimanale non gira da più di
+un mese e mezzo: guarda la pagina delle release del progetto. Se lì c'è una versione nuova e ti
+fidi, `vps1777 update` la installa. `vps1777 status` mostra lo stato del canale visto all'ultimo
+giro; `vps1777 canale-verifica var/canale/canale.json` rifà il controllo sul file scaricato.
+
+**Che cosa non copre.** Non sostituisce la verifica dei pacchetti e non ha rotazione o revoca di
+chiavi (non ci sono chiavi). È l'idea del «timestamp» di TUF e di `Valid-Until` di apt ridotta a
+un file: se un giorno servisse di più, la strada è TUF, non un secondo sistema fatto in casa.
+
 ## E Watchtower?
 
 **Rimosso nella 0.67.0.** Il profilo `ops.autoupdate` (Watchtower) bypassava backup,

@@ -218,6 +218,39 @@ run again, it says "already converged".
 - **prerelease** (testing only): `VPS1777_RELEASE_CHANNEL=prerelease` in
   `.env`, or an explicit update with `vps1777 update --version vX.Y.Z-rc.1`.
 
+## The signed channel: why the automatic update may stop
+
+Since `0.98.13`. "Which is the latest release" is a question asked to GitHub, and the answer is
+not signed. The packages are: but an old package is as authentic as a new one. Someone in the
+middle, or a cache that got stuck, could answer "the latest is the one you have" for months, and
+the machine would stop receiving fixes without anything turning red.
+
+That is why `canale.json` exists: a small file saying "the latest stable is X, signed on,
+**expires on**". A workflow of the repository (`.github/workflows/canale.yml`) writes and signs it
+every week, with a 45-day life, and publishes it in the fixed release `canale` (which is not a
+version). The signature is the same kind as the packages': no keys, bound to the identity of that
+workflow.
+
+**What your machine does.** Only the **automatic** update (the weekly timer) checks it, on every
+pass, even when there is nothing to install:
+
+- channel signed and not expired → it goes on as always. If the channel names a newer release than
+  the one GitHub answered, it follows the channel.
+- channel **expired**, missing, or with a signature that does not verify → **it stops and warns
+  you on Telegram**. It installs nothing by itself until the channel is valid again.
+
+The **manual** update (`vps1777 update`, or the button in the panel) does not look at the channel:
+whoever decides to update has already chosen, and packages are still verified as before.
+
+**If you get the warning.** It almost always means the weekly workflow has not run for more than
+a month and a half: look at the project's releases page. If there is a new version there and you
+trust it, `vps1777 update` installs it. `vps1777 status` shows the channel as seen on the last
+pass; `vps1777 canale-verifica var/canale/canale.json` redoes the check on the downloaded file.
+
+**What it does not cover.** It does not replace package verification and it has no key rotation
+or revocation (there are no keys). It is the idea of TUF's "timestamp" and of apt's `Valid-Until`
+reduced to one file: if more were ever needed, the way is TUF, not a second home-made system.
+
 ## What about Watchtower?
 
 **Removed in 0.67.0.** The `ops.autoupdate` profile (Watchtower) bypassed backups,

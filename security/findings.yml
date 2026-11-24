@@ -4952,3 +4952,56 @@ findings:
       Non provato con l'installatore grafico (stessa modifica, non eseguita) né con setup.sh.
       Una macchina aggiornata da una versione senza lo strumento tiene i permessi che ha: il
       caso non esisteva, perché lì l'installazione non riusciva.
+
+  - id: H103
+    severity: medium
+    title: "«Qual è l'ultima release» non era firmato né aveva una scadenza: una risposta ferma poteva tenere una macchina indietro per sempre senza che niente diventasse rosso"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-22"
+      come: lettura
+      nota: >
+        Dal confronto del prodotto con lo standard di ingegneria del progetto (requisito
+        SIC-15). `medium`: non fa installare niente di falso, i pacchetti restano firmati; ma
+        toglie le correzioni di sicurezza a chi si aggiorna da solo, in silenzio. Il rimedio è
+        l'idea del ruolo «timestamp» di TUF e di `Valid-Until` di apt.
+    since: unreleased
+    why: >
+      L'updater chiedeva l'ultima release all'API di GitHub, una risposta senza firma e senza
+      data. La firma cosign copre il pacchetto, e un pacchetto vecchio è autentico: chi sta in
+      mezzo, o una cache ferma, risponde «l'ultima è quella che hai» e l'updater esce contento.
+    evidence:
+      - file: tools/vps1777.py
+        contains:
+          - "def canale_verifica(path: Path"
+          - "canale, perche = canale_per_update(repo)"
+          - 'CANALE_SCADUTO = "canale di aggiornamento SCADUTO"'
+      - file: .github/workflows/canale.yml
+        contains:
+          - "cosign sign-blob --yes"
+          - "gh release upload canale canale.json.sig canale.json.pem canale.json --clobber"
+      - file: tools/tests/test_canale_firmato.py
+        contains:
+          - "def test_lo_scaduto_e_rifiutato_e_lo_dice("
+          - "def test_la_scadenza_allungata_senza_rifirmare_cade_sulla_firma("
+          - "def test_l_update_automatico_guarda_il_canale_prima_di_dirsi_aggiornato("
+    fix: >
+      Un puntatore firmato con scadenza, `canale.json` (ultima stabile, firmato il, scade il),
+      rifirmato ogni settimana da `.github/workflows/canale.yml` con vita di 45 giorni, nella
+      release fissa `canale`. L'aggiornamento automatico lo verifica a ogni giro, anche quando
+      non c'è niente da installare: firma del workflow su main, forma, scadenza. Se è scaduto,
+      assente o non verificabile si ferma e avvisa su Telegram; se nomina una release più nuova
+      di quella dell'API, segue il canale. L'aggiornamento a mano non lo guarda.
+    prova:
+      - comando: "uvx --with pyyaml==6.0.4 pytest@9.2.0 -q tools/tests/test_canale_firmato.py"
+        dove: "PC"
+        output: "32 passed: firme vere con una chiave usa-e-getta; rifiutati lo scaduto, il canale senza scadenza, la scadenza allungata e lo scaduto ringiovanito senza rifirmare"
+        exit: 0
+        quando: "2026-11-24"
+    residuo: >
+      Alla data della prova la verifica keyless (cosign, identità del workflow) è stata eseguita
+      solo dentro il workflow che firma, non ancora da una macchina installata: il primo giro
+      automatico con questa versione è la prova che manca. Niente rotazione né revoca di chiavi
+      (non ci sono chiavi) e nessuna difesa dal mescolare metadati: TUF le ha, questo no. Se
+      Telegram non è configurato, il fermo si vede solo in `vps1777 status` e nel log.

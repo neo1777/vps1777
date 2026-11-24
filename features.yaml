@@ -1812,6 +1812,14 @@ features:
     since: "0.13.0 (dichiarato qui il 02/08)"
     verify: {cli_command: secrets-status}
 
+  - id: cli.canale-verifica
+    nome: "vps1777 canale-verifica"
+    cosa: "Giudica un canale.json già sul disco (il puntatore firmato all'ultima release, con la scadenza): firma, forma, scadenza. Senza rete."
+    dove: ["cli:canale-verifica", "tools/vps1777.py"]
+    status: active-default
+    since: "0.98.13"
+    verify: {cli_command: canale-verifica}
+
   - id: cli.archive-ingest
     nome: "vps1777 archive-ingest"
     cosa: "Indicizza un file nell'archivio. Due percorsi scelti dal tipo (#285):
