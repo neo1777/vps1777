@@ -286,6 +286,7 @@ if [ -z "$VOLUMES_ONLY" ]; then
     if ls "$TMP/secrets/"*.txt >/dev/null 2>&1; then
       cp -a "$TMP/secrets/"*.txt secrets/ || die "ripristino dei secrets fallito (permessi su secrets/?)"
       chmod 600 secrets/*.txt
+      [ ! -f "$SCRIPT_DIR/permessi-servizi.sh" ] || bash "$SCRIPT_DIR/permessi-servizi.sh" "$REPO_ROOT" || warn "permessi dei segreti per i servizi non messi: lancia tools/permessi-servizi.sh prima di avviare"
       ok "Secrets ripristinati"
     else
       warn "Secrets NON ripristinati: la cartella secrets/ del backup è vuota"

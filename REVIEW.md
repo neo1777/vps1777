@@ -26,7 +26,7 @@ Riserva la severità alta per ciò che in questo repo fa danni veri:
 ## ⚠️ Cosa sappiamo GIÀ — non serve ridircelo
 
 Questo repo tiene un registro dei rilievi di sicurezza in **`security/findings.yml`**:
-101 voci, **87 chiuse**, e le **14 qui sotto non chiuse** (10 parziali, 4 accettate), ognuna con data, motivo e
+102 voci, **87 chiuse**, e le **15 qui sotto non chiuse** (11 parziali, 4 accettate), ognuna con data, motivo e
 stato. Sono già state trovate, discusse e classificate: segnalarle di nuovo consuma il
 giro senza aggiungere niente.
 
@@ -46,6 +46,7 @@ giro senza aggiungere niente.
 | H56 | **accepted** | seconda metà di H14: nello snapshot pre-update `archive-data` resta in chiaro |
 | H82 | partial | il container di backup resta root, con rootfs scrivibile e uscita su Internet, per l'`apk add` all'avvio; `no-new-privileges`, tre capability misurate e repo `:ro` sono fatti |
 | H83 | **accepted** | col profilo `cloudflared` Cloudflare termina il TLS e vede tutto in chiaro: è il funzionamento del tunnel, e i tre installer lo dicono al momento della scelta |
+| H102 | partial | dove l'uid 1000 è già di un altro utente i segreti sono leggibili al gruppo 1000 dell'host (rimedio provvisorio, scelta del 24/11/2026); la cura pulita è far girare i servizi col numero dell'operatore |
 
 `partial` = curata a metà, e il file dice quale metà. `accepted` = rischio **accettato
 consapevolmente**, con la ragione scritta accanto: non è una svista.

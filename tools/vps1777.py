@@ -870,6 +870,19 @@ def rimuovi_watchtower_orfano() -> bool:
     return True
 
 
+def permessi_servizi(repo: Path) -> None:
+    """Prima di ogni avvio: se l'operatore non ha l'uid 1000, i segreti vanno resi leggibili ai
+    servizi (`tools/permessi-servizi.sh`, rimedio provvisorio H102). Con l'uid 1000 non fa niente.
+    Non ferma l'avvio: se non riesce lo dice, e l'avvio fallirà dicendo perché."""
+    strumento = repo / "tools" / "permessi-servizi.sh"
+    if os.getuid() == 1000 or not strumento.is_file():
+        return
+    res = run(["bash", str(strumento), str(repo)], check=False)
+    if res.returncode != 0:
+        warn("i permessi dei segreti per i servizi non sono stati messi: l'operatore non ha l'uid "
+             "1000 e non è nel gruppo 1000 (vedi docs/TROUBLESHOOTING.md, «uid 1000»)")
+
+
 def assicura_webapp_secret(repo: Path) -> None:
     """Deriva `secrets/telegram_webapp_secret.txt` dal token, se non c'è (issue #61).
 
@@ -3208,6 +3221,7 @@ def _rollback_routine(repo: Path, st: dict, target: str, previous: str,
             _passo("restore dei dati dallo snapshot", lambda: snapshot_restore(repo, snap))
     _passo("unit systemd", lambda: install_systemd_units(repo, enable=False))
     _passo("chiave della Mini App", lambda: assicura_webapp_secret(repo))  # #61: PRIMA di up
+    permessi_servizi(repo)
     run([*compose_cmd(repo), "up", "-d"], check=False, env=env)
     healthy, why = health_gate(repo, env=env)
     if guasti:
@@ -4106,6 +4120,7 @@ def cmd_update(repo: Path, args) -> int:
     # 13 — up
     step(13, "up")
     assicura_webapp_secret(repo)      # #61: senza il file, compose non parte affatto
+    permessi_servizi(repo)
     res = run([*compose_cmd(repo), "up", "-d"], check=False, env=env_new)
     if res.returncode != 0:
         return _rollback_routine(repo, st, target, cur, bundle, snap,
@@ -4184,6 +4199,7 @@ def cmd_rollback(repo: Path, args) -> int:
     # col rollback, ma se il token è cambiato dopo l'ultimo update la chiave derivata va
     # riallineata qui, o la Mini App rifiuta tutto dopo `up`.
     assicura_webapp_secret(repo)
+    permessi_servizi(repo)
     run([*compose_cmd(repo), "up", "-d"], check=False, env=env)
     healthy, why = health_gate(repo, env=env)
     st["history"].append({"event": "manual_rollback", "from": cur, "to": prev,
@@ -4373,6 +4389,7 @@ def cmd_bootstrap(repo: Path, args) -> int:
 
     # cutover: up ricrea i container dalle immagini ghcr; i volumi named
     # non vengono MAI rimossi/ricreati da `up` → zero perdita dati.
+    permessi_servizi(repo)
     res = run([*compose_cmd(repo), "up", "-d"], check=False, env=env_new)
     healthy, why = health_gate(repo, env=env_new) if res.returncode == 0 else (False, "up fallito")
     if not healthy:
@@ -4381,6 +4398,7 @@ def cmd_bootstrap(repo: Path, args) -> int:
         for f in pre.glob("compose*.yaml"):
             shutil.copy2(f, repo / f.name)
         versione_set(repo, old_tag, None)
+        permessi_servizi(repo)
         run([*compose_cmd(repo), "up", "-d"], check=False,
             env=versione_env(old_tag, None))
         telegram_notify(repo, f"🆘 vps1777: bootstrap a v{target} fallito ({why}) "

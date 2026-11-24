@@ -17,7 +17,7 @@ copia() {  # una copia dei soli pezzi che il pacchetto usa, con le date dei file
   mkdir -p "$1/tools"
   ( cd "$REPO" && cp -r compose*.yaml CHANGELOG.md ingress migrations systemd "$1/" \
       && cp -r tools/prove-empiriche tools/assembla-pacchetto.sh "$1/tools/" \
-      && for f in backup.sh restore.sh rotate-secret.sh backup-container-setup.sh bootstrap.sh vps1777.py sudoers-operatore.sh sudoers-tabella.sh; do cp "tools/$f" "$1/tools/"; done )
+      && for f in backup.sh restore.sh rotate-secret.sh backup-container-setup.sh bootstrap.sh vps1777.py sudoers-operatore.sh sudoers-tabella.sh permessi-servizi.sh; do cp "tools/$f" "$1/tools/"; done )
   printf '{"gateway": "ghcr.io/example/vps1777-gateway@sha256:%064d"}\n' 0 > "$1/images.lock"
   find "$1" -exec touch -d "$2" {} +
 }
