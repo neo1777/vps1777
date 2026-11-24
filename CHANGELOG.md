@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.13] — 2026-11-24
+
 ### Sicurezza
 - **L'aggiornamento automatico pretende un «canale» firmato e con una scadenza (H103, requisito SIC-15).**
   «Qual è l'ultima release» era una domanda fatta a GitHub senza firma: chi stesse in mezzo, o una cache
