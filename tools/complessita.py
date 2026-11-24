@@ -31,6 +31,13 @@ un motivo. Non ha scadenza se il motivo è durevole: la riapre da sé il rosso �
 I test restano fuori dal conto (cartelle `tests`, `tests_runtime`, file `test_*.py`,
 `conftest.py`): una prova lunga e piatta non è logica intricata da mantenere.
 
+IL FORMATO È UN CONTRATTO ESTERNO. Il controllo QUA-04 dello standard 1777
+(`strumenti/controlli_repo.py --regola QUA-04`, dichiarato in `applicabilita.yml` sotto
+`prove:`) legge il censimento da sé e ci scrive una deroga di prova: si appoggia alla
+chiave «percorso::funzione» col percorso dalla radice, ai campi `fine_semina`, `stato`,
+`motivo`, `data`, `riletta_da`, `riletta_il`, e agli esiti 0/1/2. Chi li cambia lo dice a
+chi cura lo standard, o quel controllo smette di guardare senza dirlo.
+
 IL CENSIMENTO NON SI RIGENERA DA SOLO, apposta: uno strumento che riscrive il proprio
 termine di confronto è un timbro. Le righe si correggono a mano, una per commit.
 
