@@ -733,3 +733,49 @@ def test_salute_rossa_torna_indietro(b):
     rb = next(e for e in b.ev if e[0] == "ROLLBACK")
     assert rb[2] == "health-gate: archive-mcp unhealthy"
     assert "current" not in b.st and "status_write" not in b.nomi()
+
+
+# ── le regole che le prove sul SORGENTE difendevano, provate sul comportamento ──
+# (test_canale_firmato, test_update_interrotto, test_preflight_unit_del_bundle,
+# test_vps1777, test_collaudo_2026_11_23 leggono il testo di cmd_update: qui le stesse
+# regole si guardano da fuori, così valgono comunque sia scritto il codice)
+
+def test_il_canale_fermo_vince_anche_su_gia_aggiornato(b):
+    """Il congelamento è proprio la risposta «l'ultima è quella che hai»."""
+    b.cur = "0.98.13"
+    b.canale = (None, "canale di aggiornamento SCADUTO")
+    assert b.esegui(eta_minima=48)[0] == 0
+    assert b.st["canale"]["esito"] == "fermo"
+    assert "già aggiornato" not in _uscita(b)
+
+
+def test_l_update_interrotto_si_guarda_prima_di_gia_aggiornato(b):
+    b.cur = "0.98.13"
+    b.ripresa = 2
+    assert b.esegui()[0] == 2
+    assert "già aggiornato" not in _uscita(b)
+
+
+def test_le_unit_del_bundle_le_giudica_la_cli_installata_non_quella_nuova(b, cli_installata):
+    b.regressioni = {"vps1777-update.service": ["NoNewPrivileges=yes"]}
+    assert b.esegui(skip_self_update=False)[0] == 1
+    assert "execv" not in b.nomi()
+
+
+def test_watchtower_si_toglie_dopo_il_punto_di_non_ritorno_e_prima_del_down(b):
+    b.esegui()
+    n = [e[0] if e[0] != "compose" else f"compose_{e[2]}" for e in b.ev]
+    assert n.index("save_rollback_files") < n.index("rimuovi_watchtower") < n.index("compose_down")
+
+
+def test_un_fallimento_prima_del_punto_di_non_ritorno_non_tocca_watchtower(b):
+    b.esito["pull"] = 1
+    b.esegui()
+    assert "rimuovi_watchtower" not in b.nomi()
+
+
+def test_il_bot_senza_token_non_buca_la_rete_di_rollback(b):
+    """Il filtro dell'installazione senza bot vale per tutti e due i controlli dei segreti."""
+    b.mancanti[1] = [f"{v.SEGRETI_DEL_BOT[0]} → ./secrets/{v.SEGRETI_DEL_BOT[0]}   [VUOTO]"]
+    assert b.esegui()[0] == 0
+    assert "la rete di ROLLBACK è bucata" not in _uscita(b)
