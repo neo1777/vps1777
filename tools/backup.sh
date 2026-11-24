@@ -365,6 +365,7 @@ ok "Volumi dumpati"
 mkdir -p "$TMP/descrizioni" "$TMP/ruoli"
 n_descr=0
 n_ruoli=0
+n_db=0
 for logico in $VOLUMI_ARCHIVIO; do
   dbdir="${BACKUP_VOLUMES_DIR:-}/$logico/db"
   if [ -z "${BACKUP_VOLUMES_DIR:-}" ] || [ ! -d "$dbdir" ]; then continue; fi
@@ -375,6 +376,7 @@ for logico in $VOLUMI_ARCHIVIO; do
     # tabella `meta`, e ogni notte dava un avviso «non leggibile» per indice (e un file
     # vuoto `descrizioni/<db>.vec.txt` nel core). Il suo DB ha già la sua riga.
     case "$db" in *.vec.db) continue ;; esac
+    n_db=$((n_db + 1))
     if sqlite3 -readonly "$db" "SELECT value FROM meta WHERE key='description'" \
          > "$TMP/descrizioni/$(basename "$db" .db).txt" 2>/dev/null; then
       n_descr=$((n_descr + 1))
@@ -406,6 +408,9 @@ for logico in $VOLUMI_ARCHIVIO; do
 done
 if [ "$n_descr" -gt 0 ]; then
   ok "description di $n_descr DB esportate (descrizioni/<db>.txt nel core), ruolo di $n_ruoli (ruoli/<db>.txt)"
+elif [ "$n_db" -eq 0 ] && [ -n "${BACKUP_VOLUMES_DIR:-}" ] && command -v sqlite3 >/dev/null 2>&1; then
+  # un'installazione nuova non ha ancora nessun DB: non c'è niente da esportare, e non è un avviso
+  ok "nessun DB nell'archivio: nessuna description da esportare"
 else
   warn "description dei DB NON esportate (volume non leggibile in questo contesto o sqlite3 assente): restano quelle dentro l'ultimo backup archivio"
 fi

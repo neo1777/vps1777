@@ -247,7 +247,13 @@ if [ -f "$TMP/MANIFEST.txt" ]; then
 fi
 
 # ───── 3. restore config + secrets (saltato con --volumes-only) ─────
-if [ -z "$VOLUMES_ONLY" ]; then
+# Il backup del livello ARCHIVIO non porta config né segreti (stanno nel core): dirlo come un
+# fatto, non con due avvisi «NON ripristinati» che su un restore si leggono come un guasto
+# (collaudo su macchina vergine del 23/11/2026).
+LIVELLO_BACKUP="$(sed -n 's/^tier: //p' "$TMP/MANIFEST.txt" 2>/dev/null | head -1)"
+if [ -z "$VOLUMES_ONLY" ] && [ "$LIVELLO_BACKUP" = "archivio" ] && [ ! -d "$TMP/config" ] && [ ! -d "$TMP/secrets" ]; then
+  log "Livello archivio: questo backup non contiene config né segreti (stanno nel backup core). Niente da ripristinare qui."
+elif [ -z "$VOLUMES_ONLY" ]; then
   log "Ripristino config..."
   # ⚠️ Prima diceva `ok "Config ripristinata"` INCONDIZIONATO dopo tre `cp` con
   #   `2>/dev/null || true`: ogni fallimento era silenziato E forzato a successo,

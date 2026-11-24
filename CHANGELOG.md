@@ -15,6 +15,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - `VPS1777_GITHUB_TOKEN` (facoltativo): la CLI lo usa solo per le chiamate all'API di GitHub, dove
   l'indirizzo è condiviso e il limite delle chiamate anonime cade a caso. Senza, tutto come prima.
 
+### Corretto
+- Il ripristino di un backup del livello archivio non stampa più due avvisi «config e segreti NON
+  ripristinati»: quel backup per costruzione non li contiene (stanno nel backup core), e ora lo dice come
+  un fatto. Su un ripristino quegli avvisi si leggevano come un guasto. Il backup di un'installazione senza
+  ancora nessun archivio non avvisa più che le descrizioni «non sono state esportate».
+
 ## [0.98.12] — 2026-11-24
 
 ### Sicurezza
