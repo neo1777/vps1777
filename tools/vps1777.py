@@ -3891,7 +3891,7 @@ def cmd_update(repo: Path, args) -> int:
     serve, perche = spazio_richiesto_update(repo)
     if free < serve:
         die(f"spazio disco insufficiente: {free / 1024**3:.1f} GiB liberi, ne servono "
-            f"{serve / 1024**3:.1f} — {perche}")
+            f"{serve / 1024**3:.1f} GiB — {perche}")
 
     # 2 — risolvi target
     try:
