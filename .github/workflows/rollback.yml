@@ -1,0 +1,119 @@
+name: Rollback (prova 9 su uno stack vero)
+
+# STA-06: il ramo «il controllo di salute dice no → si torna indietro» provato DAVVERO, su
+# un'installazione viva, non letto nel codice. Ogni job installa la terzultima release sulla macchina
+# del runner come farebbe un utente (deploy.sh verso root@127.0.0.1), aggiorna alla penultima (così c'è
+# uno snapshot a cui tornare) e lancia tools/prove-empiriche/prova-9 verso l'ultima, col controllo di
+# salute forzato a fallire.
+#   · rollback-sano:     la prova deve uscire 0 (rollback partito, versione di prima, servizi su).
+#   · rollback-sabotato: prima si ammutolisce `_rollback_routine` nella CLI installata; la prova deve
+#     uscire 1. È verde SOLO se vede l'1: una prova che resta verde col rollback spento non misura niente.
+# Prova le RELEASE pubblicate, non il codice della PR: per questo gira a calendario e non a ogni PR.
+# Chi la legge da fuori (il controllo dello standard) guarda l'ultima corsa su main, tetto 31 giorni.
+on:
+  schedule:
+    - cron: "40 4 1,15 * *"   # il 1° e il 15 del mese, 04:40 UTC: due corse dentro ogni finestra di 31 giorni
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  rollback:
+    name: rollback-${{ matrix.modo }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    # Il gettone del job (sola lettura) serve SOLO alle chiamate della CLI all'API di GitHub: gli IP
+    # dei runner sono condivisi e il limite delle chiamate anonime (60 l'ora) cade a caso. La CLI lo
+    # legge da VPS1777_GITHUB_TOKEN dalla versione che lo introduce: con una CLI più vecchia sulla
+    # macchina resta anonima, e un 403 «rate limit» qui è quel limite, non un difetto della prova.
+    env:
+      VPS1777_GITHUB_TOKEN: ${{ github.token }}
+    strategy:
+      fail-fast: false
+      matrix:
+        modo: [sano, sabotato]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Le tre release più recenti
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t R < <(gh release list --limit 3 --exclude-drafts --exclude-pre-releases --json tagName -q '.[].tagName')
+          [ "${#R[@]}" -eq 3 ] || { echo "::error::servono tre release, ne vedo ${#R[@]}"; exit 1; }
+          echo "ultima=${R[0]#v}" >> "$GITHUB_OUTPUT"; echo "penultima=${R[1]#v}" >> "$GITHUB_OUTPUT"; echo "terzultima=${R[2]#v}" >> "$GITHUB_OUTPUT"
+          echo "ultima ${R[0]} · penultima ${R[1]} · terzultima ${R[2]}"
+      - name: ssh come root verso se stessa
+        run: |
+          set -euo pipefail
+          ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/id_ed25519
+          sudo mkdir -p /root/.ssh && sudo chmod 700 /root/.ssh
+          sudo tee -a /root/.ssh/authorized_keys < ~/.ssh/id_ed25519.pub >/dev/null
+          sudo chmod 600 /root/.ssh/authorized_keys
+          echo 'PermitRootLogin prohibit-password' | sudo tee /etc/ssh/sshd_config.d/99-collaudo.conf >/dev/null
+          sudo systemctl restart ssh
+          ssh-keyscan -H 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes root@127.0.0.1 'id -un'
+      # VPS1777_SALTA_RIAVVIO: a fine installazione deploy.sh riavvia la macchina per provare la
+      # ripartenza; qui il riavvio ucciderebbe il runner. Sul runner l'uid 1000 è di un altro utente:
+      # l'installazione passa dal rimedio di H102 (tools/permessi-servizi.sh), ed è una prova in più.
+      - name: Installa la terzultima (deploy.sh, come un utente)
+        run: |
+          set -o pipefail
+          NONINTERACTIVE=1 VPS1777_SALTA_RIAVVIO=1 VPS1777_INSTALL_VERSION="${{ steps.rel.outputs.terzultima }}" \
+            ADMIN_EMAIL=collaudo@example.invalid INGRESS_NUM=1 TS_HOSTNAME=collaudo-ci GEN_PWD=auto \
+            bash deploy.sh 127.0.0.1 2>&1 | grep --line-buffered -v -E "Extracting|Downloading|Pulling fs|Waiting$|Verifying|Download complete|Pull complete|Already exists" | stdbuf -oL cut -c1-220
+          sudo docker ps --format '{{.Names}} {{.Status}}'
+      - name: Aggiorna alla penultima (crea lo snapshot)
+        run: |
+          set -o pipefail
+          sudo --preserve-env=VPS1777_GITHUB_TOKEN -iu vps1777 vps1777 update --version "v${{ steps.rel.outputs.penultima }}" --yes < /dev/null 2>&1 | tail -15
+          sudo --preserve-env=VPS1777_GITHUB_TOKEN -iu vps1777 vps1777 check < /dev/null 2>&1 | tail -3 || true
+          sudo -iu vps1777 vps1777 status < /dev/null | head -4
+      - name: Sabotaggio, il rollback non fa più niente
+        if: matrix.modo == 'sabotato'
+        run: |
+          set -euo pipefail
+          CLI=/home/vps1777/vps1777/tools/vps1777.py
+          # la prima istruzione della funzione diventa un ritorno: il gate dice no e nessuno torna indietro
+          sudo sed -i '/^def _rollback_routine(/,/-> int:$/{/-> int:$/a\    return 1  # SABOTAGGIO della prova (rollback.yml)
+          }' "$CLI"
+          [ "$(grep -c 'SABOTAGGIO della prova' "$CLI")" = 1 ] || { echo "::error::il sabotaggio non è entrato: la forma di _rollback_routine è cambiata"; exit 1; }
+          python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$CLI"
+      - name: Prova 9 (il controllo di salute forzato deve far tornare indietro)
+        run: |
+          set -o pipefail
+          ATTESO=0; [ "${{ matrix.modo }}" = sabotato ] && ATTESO=1
+          RC=0
+          sudo --preserve-env=VPS1777_GITHUB_TOKEN -iu vps1777 bash /home/vps1777/vps1777/tools/prove-empiriche/prova-9-il-fail-closed-torna-indietro-davvero.sh --esegui < /dev/null > prova9.txt 2>&1 || RC=$?
+          tail -40 prova9.txt
+          echo "prova 9 (${{ matrix.modo }}): esito $RC, atteso $ATTESO"
+          # a prova fallita la prova 9 lascia il log dell'update: qui si mostra, senza non si capisce PERCHÉ
+          LOG="$(sed -n 's/.*(log in \([^,]*\),.*/\1/p' prova9.txt | head -1)"
+          : > update.log
+          if [ -n "$LOG" ] && sudo test -f "$LOG"; then sudo cat "$LOG" > update.log; echo "── log dell'update ──"; tail -25 update.log | cut -c1-220; fi
+          if [ "$RC" != "$ATTESO" ]; then
+            echo "::error::rollback-${{ matrix.modo }}: la prova 9 è uscita $RC, attesa $ATTESO"; exit 1
+          fi
+          # L'esito non basta: un 1 può venire da un update caduto PRIMA del controllo di salute (rete,
+          # limite dell'API), e sarebbe un «sabotato verde» che non ha visto niente (successo davvero alla
+          # prima corsa di questo workflow). Si pretende la firma di ciò che deve essere accaduto.
+          if [ "${{ matrix.modo }}" = sano ]; then
+            grep -q "il gate ha rifiutato per l'aggancio : sì" prova9.txt && grep -q "PASS" prova9.txt \
+              || { echo "::error::rollback-sano: esito 0 ma senza il rifiuto del controllo di salute"; exit 1; }
+          else
+            # col rollback spento il motivo del rifiuto non viene più scritto (lo scriveva la funzione
+            # ammutolita): che il controllo sia scattato lo dice l'avviso dell'aggancio nel log dell'update
+            grep -q "health-gate forzato a FALLIRE" update.log \
+              || { echo "::error::rollback-sabotato: il controllo di salute forzato non è scattato: l'update è caduto prima, la prova non ha misurato niente"; exit 1; }
+            grep -q "il log nomina un rollback           : NO" prova9.txt && grep -q "FAIL" prova9.txt \
+              || { echo "::error::rollback-sabotato: la prova non ha visto il rollback mancante"; exit 1; }
+          fi
+      - name: Stato alla fine
+        if: always()
+        run: |
+          sudo docker ps -a --format '{{.Names}} {{.Status}}' || true
+          sudo -iu vps1777 vps1777 status < /dev/null | head -4 || true
