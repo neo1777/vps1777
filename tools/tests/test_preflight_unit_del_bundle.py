@@ -196,23 +196,26 @@ def test_il_preflight_gira_PRIMA_del_self_update() -> None:
     """
     import ast
     albero = ast.parse((RADICE / "tools" / "vps1777.py").read_text(encoding="utf-8"))
-    fn = next(n for n in ast.walk(albero)
-              if isinstance(n, ast.FunctionDef) and n.name == "cmd_update")
-    riga_preflight = min(
-        (n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call)
-         and isinstance(n.func, ast.Name) and n.func.id == "regressioni_del_bundle"),
-        default=None)
-    riga_exec = min(
-        (n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call)
-         and isinstance(n.func, ast.Attribute) and n.func.attr == "execv"),
-        default=None)
-    assert riga_preflight is not None, (
-        "cmd_update non chiama regressioni_del_bundle: il pre-flight non gira più"
+    # Dal 24/11/2026 (QUA-04) cmd_update è spezzata nei suoi passi: il pre-flight sta in
+    # `_update_bundle`, il self-update in `_update_cli_nuova`, e l'ordine lo decide cmd_update.
+    # Il comportamento lo prova anche test_cmd_update_percorsi.py
+    # (test_le_unit_del_bundle_le_giudica_la_cli_installata_non_quella_nuova).
+    def fn(nome):
+        return next(n for n in ast.walk(albero) if isinstance(n, ast.FunctionDef) and n.name == nome)
+
+    def chiama(nodo, nome):
+        return [n.lineno for n in ast.walk(nodo) if isinstance(n, ast.Call) and (
+            (isinstance(n.func, ast.Name) and n.func.id == nome)
+            or (isinstance(n.func, ast.Attribute) and n.func.attr == nome))]
+    assert chiama(fn("_update_bundle"), "regressioni_del_bundle"), (
+        "_update_bundle non chiama regressioni_del_bundle: il pre-flight non gira più"
     )
-    assert riga_exec is not None, (
-        "non trovo os.execv in cmd_update — il self-update è cambiato forma: "
+    assert chiama(fn("_update_cli_nuova"), "execv"), (
+        "non trovo os.execv in _update_cli_nuova — il self-update è cambiato forma: "
         "questo test non sa più dove sta il confine e va riscritto, non ignorato"
     )
+    riga_preflight = min(chiama(fn("cmd_update"), "_update_bundle"))
+    riga_exec = min(chiama(fn("cmd_update"), "_update_cli_nuova"))
     assert riga_preflight < riga_exec, (
         f"il pre-flight (r.{riga_preflight}) gira DOPO il self-update (r.{riga_exec}).\n"
         "  Così a giudicare il bundle sarebbe la CLI del bundle stesso: un bundle che "

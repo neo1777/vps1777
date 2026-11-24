@@ -67,7 +67,8 @@ def test_solo_il_bot_e_solo_se_vuoto(cli, tmp_path):
 
 def test_l_update_usa_il_filtro_nei_due_controlli(cli):
     import inspect
-    src = inspect.getsource(cli.cmd_update)
+    # dal 24/11/2026 (QUA-04) i due controlli dei segreti sono due passi di cmd_update
+    src = inspect.getsource(cli._update_rete_di_rollback) + inspect.getsource(cli._update_segreti_della_release)
     assert src.count("_senza_bot_in_attesa(") == 2, "il filtro va sia sul controllo che ferma sia sull'avviso"
     assert "il bot resta in attesa" in src
 
@@ -100,7 +101,7 @@ def test_dopo_un_auto_rollback_la_precedente_e_quella_di_prima(cli):
     cli._rimetti_precedente(vecchio)
     assert vecchio["previous"] == "0.98.5"
     import inspect
-    assert '"prima": prima' in inspect.getsource(cli.cmd_update)
+    assert '"prima": prima' in inspect.getsource(cli._update_applica)
     assert "_rimetti_precedente(st)" in inspect.getsource(cli._rollback_routine)
 
 

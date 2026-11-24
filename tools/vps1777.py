@@ -3846,12 +3846,16 @@ def _riprendi_update_interrotto(repo: Path, st: dict) -> int | None:
 
 
 def cmd_update(repo: Path, args) -> int:
-    # 0 — lock
-    lock = acquire_lock(repo)
-    if lock is None:
-        if args.from_intent:
-            Path(args.from_intent).unlink(missing_ok=True)
-        die("update già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
+    """`vps1777 update`: porta la macchina a una release, o la lascia com'era.
+
+    Ogni passo sta in una funzione sua, nell'ordine in cui gira: il lock (0); la release
+    da installare (1-2) e il canale firmato (2-bis); se va installata davvero; la conferma
+    (3-4); poi i controlli che possono ancora fermare tutto senza aver toccato niente
+    (4-bis, 5, 5-bis, 6, 6-bis, 7, 8, 9) e, oltre il punto di non ritorno, l'applicazione
+    (10-15), dove ogni guasto passa dal rollback. Ogni strada ha la sua prova di
+    comportamento in tools/tests/test_cmd_update_percorsi.py.
+    """
+    lock = _update_lock(repo, args)
     st = state_load(repo)
     # prima di tutto: un update rimasto a metà si chiude, e QUESTO giro finisce lì (il prossimo
     # riparte da uno stato pulito). Con un intent in attesa, la path unit lo rilancia da sola.
@@ -3859,6 +3863,45 @@ def cmd_update(repo: Path, args) -> int:
     if ripresa is not None:
         return ripresa
 
+    target_req = _update_target_richiesto(repo, args, st)
+    cur = current_version(repo)
+    _update_preflight(repo, cur)
+    rel = _update_release(repo, target_req)
+    if rel is None:
+        log("nessuna release pubblicata — niente da fare")
+        return 0
+    rel = _update_canale(repo, args, target_req, st, rel)
+    if rel is None:
+        return 0                      # canale firmato non valido: l'automatico si ferma
+    target = norm_ver(rel["tag_name"])
+    if norm_ver(cur) == target:
+        return _update_gia_fatto(repo, st, target)
+    if not _update_da_installare(repo, args, target_req, rel, target, cur):
+        return 0
+    _update_conferma(args, rel, cur, target)
+    step = _passi(repo, target)
+    _update_rete_di_rollback(repo, step)
+    bundle, lockfile = _update_bundle(repo, args, rel, target, step)
+    _update_cli_nuova(repo, args, bundle, lock, target)
+    _update_segreti_della_release(repo, bundle, target, step)
+    snap = _update_backup(repo, bundle, cur, target, step)
+    env_new = _update_immagini(repo, bundle, lockfile, target, step)
+    # fin qui niente è stato toccato; da qui ogni guasto torna indietro da solo
+    return _update_applica(repo, st, cur, target, bundle, lockfile, snap, env_new, step)
+
+
+def _update_lock(repo: Path, args):
+    """0 — il lock. Occupato: c'è già chi lavora, e questo giro esce 75 («riprova dopo»)."""
+    lock = acquire_lock(repo)
+    if lock is None:
+        if args.from_intent:
+            Path(args.from_intent).unlink(missing_ok=True)
+        die("update già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
+    return lock
+
+
+def _update_target_richiesto(repo: Path, args, st: dict) -> str | None:
+    """La versione chiesta: `--version`, o quella dell'intent del pulsante (che si consuma)."""
     target_req = args.version
     if args.from_intent:
         try:
@@ -3867,9 +3910,11 @@ def cmd_update(repo: Path, args) -> int:
         except RuntimeError as exc:
             progress_write(repo, target_req or "?", 0, "intent", "failed", str(exc))
             die(f"intent rifiutato: {exc}")
+    return target_req
 
-    cur = current_version(repo)
 
+def _update_preflight(repo: Path, cur: str) -> None:
+    """1 — docker acceso, niente modalità dev, spazio su disco. Muore senza aver toccato niente."""
     # 1 — preflight
     if run(["docker", "info"], check=False, capture=True, timeout=60).returncode != 0:
         die("docker non attivo")
@@ -3891,16 +3936,21 @@ def cmd_update(repo: Path, args) -> int:
     serve, perche = spazio_richiesto_update(repo)
     if free < serve:
         die(f"spazio disco insufficiente: {free / 1024**3:.1f} GiB liberi, ne servono "
-            f"{serve / 1024**3:.1f} — {perche}")
+            f"{serve / 1024**3:.1f} GiB — {perche}")
 
-    # 2 — risolvi target
+
+def _update_release(repo: Path, target_req: str | None) -> dict | None:
+    """2 — la release: quella chiesta per nome, o l'ultima del canale. None se non ce n'è."""
     try:
         rel = release_by_tag(f"v{norm_ver(target_req)}") if target_req else latest_release(repo)
     except (urllib.error.URLError, OSError) as exc:
         die(f"GitHub irraggiungibile: {exc}")
-    if rel is None:
-        log("nessuna release pubblicata — niente da fare")
-        return 0
+    return rel
+
+
+def _update_canale(repo: Path, args, target_req: str | None, st: dict, rel: dict) -> dict | None:
+    """2-bis — la release da installare dopo aver sentito il canale firmato; None se l'automatico
+    si deve fermare (canale scaduto o non verificabile: lo dice su Telegram)."""
     target = norm_ver(rel["tag_name"])
     # 2-bis — IL CANALE FIRMATO (SIC-15), solo sul percorso automatico (il timer passa
     # --eta-minima e nessun target). Sta PRIMA di «già aggiornato»: il congelamento è proprio
@@ -3916,7 +3966,7 @@ def cmd_update(repo: Path, args) -> int:
                                   f"{perche}\n"
                                   "Finché il canale firmato non torna valido la macchina non si aggiorna "
                                   "da sola. A mano resta possibile: `vps1777 update`.")
-            return 0
+            return None
         st["canale"] = {"esito": "ok", "latest": canale["latest"], "scade_il": canale["scade_il"],
                         "quando": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         state_save(repo, st)
@@ -3929,22 +3979,31 @@ def cmd_update(repo: Path, args) -> int:
                 rel = release_by_tag(f"v{canale['latest']}")
             except (urllib.error.URLError, OSError) as exc:
                 die(f"GitHub irraggiungibile: {exc}")
-            target = norm_ver(rel["tag_name"])
-    if norm_ver(cur) == target:
-        if st.get("stato_perso"):
-            # lo stato è ripartito da vuoto (era illeggibile): se c'era un update interrotto la
-            # sua bandierina è andata persa. Prima di dire «già aggiornato» si guarda lo stack.
-            sano, perche = health_gate(repo) if stack_running(repo) else (False, "lo stack è fermo")
-            if not sano:
-                die(f"il tag è già a v{target} ma lo stack non è sano ({perche}), e lo stato "
-                    f"dell'updater era andato perso il {st['stato_perso']}: non posso sapere se un "
-                    "update è rimasto a metà. Guarda `vps1777 status --probe`; per tornare "
-                    "indietro: `vps1777 rollback`.", 2)
-            st.pop("stato_perso", None)
-            st["current"] = target
-            state_save(repo, st)
-        ok(f"già aggiornato (v{target})")
-        return 0
+    return rel
+
+
+def _update_gia_fatto(repo: Path, st: dict, target: str) -> int:
+    """La macchina è già alla versione: 0, salvo uno stato perso con lo stack malato (2)."""
+    if st.get("stato_perso"):
+        # lo stato è ripartito da vuoto (era illeggibile): se c'era un update interrotto la
+        # sua bandierina è andata persa. Prima di dire «già aggiornato» si guarda lo stack.
+        sano, perche = health_gate(repo) if stack_running(repo) else (False, "lo stack è fermo")
+        if not sano:
+            die(f"il tag è già a v{target} ma lo stack non è sano ({perche}), e lo stato "
+                f"dell'updater era andato perso il {st['stato_perso']}: non posso sapere se un "
+                "update è rimasto a metà. Guarda `vps1777 status --probe`; per tornare "
+                "indietro: `vps1777 rollback`.", 2)
+        st.pop("stato_perso", None)
+        st["current"] = target
+        state_save(repo, st)
+    ok(f"già aggiornato (v{target})")
+    return 0
+
+
+def _update_da_installare(repo: Path, args, target_req: str | None, rel: dict,
+                          target: str, cur: str) -> bool:
+    """La release trovata va installata adesso? No (False) se è una risposta stantia di GitHub
+    o se è in quarantena; un downgrade chiesto dal pulsante muore qui."""
     # Version-floor anti-downgrade sul canale NON interattivo (pulsante admin
     # via --from-intent): un gateway compromesso potrebbe forgiare un intent
     # verso una release più vecchia con vuln note. Il guard su update_status.json
@@ -3963,7 +4022,7 @@ def cmd_update(repo: Path, args) -> int:
     if not target_req and version_key(target) < version_key(cur):
         ok(f"la release più recente nota a GitHub (v{target}) è più vecchia "
            f"della v{cur} in esecuzione — risposta stantia, niente da fare")
-        return 0
+        return False
     # Quarantena: solo sul percorso automatico (il timer passa --eta-minima e nessun
     # target). Un target esplicito è una scelta umana e passa subito.
     if getattr(args, "eta_minima", None) and not target_req:
@@ -3971,7 +4030,12 @@ def cmd_update(repo: Path, args) -> int:
         if motivo:
             log(f"v{target} in quarantena: {motivo} — riprovo al prossimo giro "
                 f"(per installarla subito: `vps1777 update`)")
-            return 0
+            return False
+    return True
+
+
+def _update_conferma(args, rel: dict, cur: str, target: str) -> None:
+    """3-4 — il changelog e, a mano, la conferma."""
     log(f"update: {cur} → {target}")
 
     # 3 — changelog
@@ -3984,9 +4048,16 @@ def cmd_update(repo: Path, args) -> int:
         if ack not in ("s", "si", "y", "yes"):
             die("annullato")
 
+
+def _passi(repo: Path, target: str):
+    """La funzione che scrive i passi nel progress dei pannelli, per questo update."""
     def step(n: int, name: str, status: str = "running", detail: str = "") -> None:
         progress_write(repo, target, n, name, status, detail)
+    return step
 
+
+def _update_rete_di_rollback(repo: Path, step) -> None:
+    """4-bis — i segreti della configurazione ATTUALE: avvisa, non ferma mai."""
     # 4-bis — RETE DI ROLLBACK: i segreti della configurazione ATTUALE (mai fatale).
     #
     # ⚠️ QUESTO CONTROLLO NON È PIÙ QUELLO CHE PROTEGGE L'UPDATE — quello è il 6-bis.
@@ -4048,6 +4119,9 @@ def cmd_update(repo: Path, args) -> int:
              + "L'update prosegue (questo non è un motivo per non andare avanti), ma se "
                "fallisse, il ritorno alla versione precedente troverebbe questi buchi.")
 
+
+def _update_bundle(repo: Path, args, rel: dict, target: str, step) -> tuple[Path, dict]:
+    """5 e 5-bis — scarica e verifica il bundle, e lo giudica con la CLI INSTALLATA."""
     # 5 — fetch + verifica bundle
     step(5, "fetch")
     # cosign è OBBLIGATORIO di default (fail-closed): le release sono sempre
@@ -4098,7 +4172,11 @@ def cmd_update(repo: Path, args) -> int:
             "`NoNewPrivileges=no` proprio perché ne ha bisogno.\n"
             "  Niente è stato toccato. Installa una release che contenga la cura "
             "(`--version`), o metti la unit a mano se sai cosa stai facendo.")
+    return bundle, lockfile
 
+
+def _update_cli_nuova(repo: Path, args, bundle: Path, lock, target: str) -> None:
+    """6 — se il bundle porta una CLI diversa, la installa e le cede il posto (non ritorna)."""
     # 6 — self-update della CLI (poi re-exec)
     if not args.skip_self_update:
         new_cli = bundle / "tools" / "vps1777.py"
@@ -4119,6 +4197,10 @@ def cmd_update(repo: Path, args) -> int:
                 new_argv.append("--no-require-cosign")
             os.execv(INSTALLED_CLI, new_argv)
 
+
+def _update_segreti_della_release(repo: Path, bundle: Path, target: str, step) -> None:
+    """6-bis — i segreti che la release IN ARRIVO pretende. Fatale, con il rimedio giusto per
+    ogni segreto (vedi `_rimedio_segreto`)."""
     # 6-bis — PRE-FLIGHT DEI SEGRETI SUL COMPOSE CHE SI STA INSTALLANDO (fatale).
     #
     # PERCHÉ ESISTE: il 20/07 l'update alla 0.40.0 è fallito perché la release
@@ -4185,52 +4267,7 @@ def cmd_update(repo: Path, args) -> int:
         # comando è esplicitamente condizionato. Non si tiene qui una tabella nome→natura:
         # sarebbe l'ennesima lista scritta a mano che invecchia in silenzio — la natura
         # sta in `secrets/README.md`, accanto al segreto che descrive.
-        righe = []
-        for m in mancanti:
-            nome = m.split(" → ")[0].strip()
-            perche = SEGRETI_NON_GENERABILI.get(nome)
-            if "DIRECTORY NON LEGGIBILE" in m:
-                # Il guasto non è nel segreto né nel suo file: è nella CARTELLA che li
-                # contiene. Rimedio ancora diverso — e nessun comando che tocchi i file.
-                righe.append(
-                    f"  · {m}\n"
-                    f"      ⛔ Non è il segreto: è la cartella `secrets/` a non essere\n"
-                    f"         accessibile. I file dentro sono probabilmente intatti.\n"
-                    f"      → ls -ld {repo}/secrets    #  attesi: proprietario giusto, 0700\n"
-                    f"      ⚠️ NON ricreare né i file né la cartella: perderesti tutti i segreti.\n")
-                continue
-            if "NON LEGGIBILE" in m:
-                # ⚠️ IL FILE C'È. Qualunque comando col `>` lo TRONCHEREBBE — cioè il
-                # rimedio distruggerebbe il segreto che stiamo cercando di salvare.
-                # Qui il guasto non è il contenuto ma l'accesso: si ripara il permesso,
-                # non il file. Questo ramo esiste perché fino alla 0.40.1 il messaggio
-                # diceva «manca o è VUOTO» di un segreto integro e suggeriva il `>`.
-                percorso = m.split(" → ")[1].split("   [")[0].lstrip("./")
-                righe.append(
-                    f"  · {m}\n"
-                    f"      ⛔ IL FILE C'È: **non ricrearlo e non svuotarlo**, il valore dentro\n"
-                    f"         è probabilmente ancora buono. Il guasto è l'ACCESSO, non il contenuto.\n"
-                    f"      → controlla permessi e proprietario, senza toccare il contenuto:\n"
-                    f"         ls -l {percorso}   #  poi, se serve:  chmod 600 {percorso}\n"
-                    f"      ⚠️ NON usare un comando con `>`: troncherebbe un segreto valido.\n")
-                continue
-            if perche:
-                # ⚠️ per questi NON si stampa nessun comando: chi legge alle 23 con lo
-                # stack fermo copia la riga sotto il proprio nome, non la nota in coda.
-                righe.append(f"  · {m}\n      ⛔ NON generarlo con un valore casuale: è un "
-                             f"{perche}.\n         Un valore casuale qui dà un file pieno e "
-                             f"SBAGLIATO: lo stack parte,\n         questo controllo torna verde, "
-                             f"e il guasto si vede solo all'uso.\n")
-            elif nome in SEGRETI_GENERABILI:
-                percorso = m.split(" → ")[1].split("   [")[0].lstrip("./")
-                righe.append(f"  · {m}\n      → valore casuale, generalo:\n"
-                             f"         (umask 077; openssl rand -hex 32 > {percorso})\n")
-            else:
-                # segreto che nessuna delle due liste conosce: si DICE che non si sa,
-                # invece di indovinare. Il test che tiene sincronizzate le liste col
-                # compose dovrebbe impedirlo — questo ramo è la rete sotto quel test.
-                righe.append(f"  · {m}\n      ⚠️ natura non classificata: NON generarlo a caso, "
-                             f"vedi secrets/README.md.\n")
+        righe = [_rimedio_segreto(m, repo) for m in mancanti]
         die(f"la release v{target} dichiara segreti che in secrets/ mancano o sono VUOTI:\n"
             + "".join(righe)
             + "\nLo stack NON partirebbe. L'update si ferma qui: niente è stato toccato\n"
@@ -4244,6 +4281,57 @@ def cmd_update(repo: Path, args) -> int:
             + "   macchina viva fa molto più che creare un file.")
     ok(f"segreti richiesti da v{target}: tutti presenti")
 
+
+def _rimedio_segreto(m: str, repo: Path) -> str:
+    """Le righe del messaggio per UN segreto mancante: il rimedio dipende dalla sua natura,
+    e per alcuni il rimedio giusto è non dare nessun comando (vedi il commento in
+    `_update_segreti_della_release`)."""
+    nome = m.split(" → ")[0].strip()
+    perche = SEGRETI_NON_GENERABILI.get(nome)
+    if "DIRECTORY NON LEGGIBILE" in m:
+        # Il guasto non è nel segreto né nel suo file: è nella CARTELLA che li
+        # contiene. Rimedio ancora diverso — e nessun comando che tocchi i file.
+        return (
+            f"  · {m}\n"
+            f"      ⛔ Non è il segreto: è la cartella `secrets/` a non essere\n"
+            f"         accessibile. I file dentro sono probabilmente intatti.\n"
+            f"      → ls -ld {repo}/secrets    #  attesi: proprietario giusto, 0700\n"
+            f"      ⚠️ NON ricreare né i file né la cartella: perderesti tutti i segreti.\n")
+    if "NON LEGGIBILE" in m:
+        # ⚠️ IL FILE C'È. Qualunque comando col `>` lo TRONCHEREBBE — cioè il
+        # rimedio distruggerebbe il segreto che stiamo cercando di salvare.
+        # Qui il guasto non è il contenuto ma l'accesso: si ripara il permesso,
+        # non il file. Questo ramo esiste perché fino alla 0.40.1 il messaggio
+        # diceva «manca o è VUOTO» di un segreto integro e suggeriva il `>`.
+        percorso = m.split(" → ")[1].split("   [")[0].lstrip("./")
+        return (
+            f"  · {m}\n"
+            f"      ⛔ IL FILE C'È: **non ricrearlo e non svuotarlo**, il valore dentro\n"
+            f"         è probabilmente ancora buono. Il guasto è l'ACCESSO, non il contenuto.\n"
+            f"      → controlla permessi e proprietario, senza toccare il contenuto:\n"
+            f"         ls -l {percorso}   #  poi, se serve:  chmod 600 {percorso}\n"
+            f"      ⚠️ NON usare un comando con `>`: troncherebbe un segreto valido.\n")
+    if perche:
+        # ⚠️ per questi NON si stampa nessun comando: chi legge alle 23 con lo
+        # stack fermo copia la riga sotto il proprio nome, non la nota in coda.
+        return (f"  · {m}\n      ⛔ NON generarlo con un valore casuale: è un "
+                     f"{perche}.\n         Un valore casuale qui dà un file pieno e "
+                     f"SBAGLIATO: lo stack parte,\n         questo controllo torna verde, "
+                     f"e il guasto si vede solo all'uso.\n")
+    elif nome in SEGRETI_GENERABILI:
+        percorso = m.split(" → ")[1].split("   [")[0].lstrip("./")
+        return (f"  · {m}\n      → valore casuale, generalo:\n"
+                     f"         (umask 077; openssl rand -hex 32 > {percorso})\n")
+    else:
+        # segreto che nessuna delle due liste conosce: si DICE che non si sa,
+        # invece di indovinare. Il test che tiene sincronizzate le liste col
+        # compose dovrebbe impedirlo — questo ramo è la rete sotto quel test.
+        return (f"  · {m}\n      ⚠️ natura non classificata: NON generarlo a caso, "
+                     f"vedi secrets/README.md.\n")
+
+
+def _update_backup(repo: Path, bundle: Path, cur: str, target: str, step) -> Path:
+    """7 — backup cifrato e snapshot locale; lo snapshot serve al rollback."""
     # 7 — backup (age) + snapshot locale
     step(7, "backup")
     try:
@@ -4256,7 +4344,12 @@ def cmd_update(repo: Path, args) -> int:
     except (subprocess.CalledProcessError, OSError) as exc:
         step(7, "backup", "failed", str(exc))
         die(f"backup fallito — stack intatto, update annullato: {exc}")
+    return snap
 
+
+def _update_immagini(repo: Path, bundle: Path, lockfile: dict, target: str, step) -> dict:
+    """8-9 — il compose nuovo è valido, le immagini sono scaricate e hanno i digest del lock.
+    Ultimo passo da cui si esce senza aver toccato lo stack. Rende l'env della versione nuova."""
     # 8 — stage-check sui file del bundle
     # La lista si DERIVA da `_compose_sorgenti`, la stessa che usa il pre-flight: fino
     # alla 0.40.1 era scritta a mano qui (base + overlay di ingress), mentre
@@ -4300,7 +4393,12 @@ def cmd_update(repo: Path, args) -> int:
             run(["docker", "image", "rm", image_ref(repo, svc, target)],
                 check=False, capture=True)
         die(f"verifica digest fallita — immagini rimosse, stack intatto: {exc}")
+    return env_new
 
+
+def _update_applica(repo: Path, st: dict, cur: str, target: str, bundle: Path, lockfile: dict,
+                    snap: Path, env_new: dict, step) -> int:
+    """10-14 — oltre il punto di non ritorno: ogni guasto passa da `_rollback_routine`."""
     # ─── PUNTO DI NON RITORNO ───
     # 10 — applica i file gestiti
     step(10, "apply-files")
@@ -4364,7 +4462,11 @@ def cmd_update(repo: Path, args) -> int:
     if not healthy:
         return _rollback_routine(repo, st, target, cur, bundle, snap,
                                  need_data_restore, f"health-gate: {why}")
+    return _update_concludi(repo, st, cur, target, snap, step)
 
+
+def _update_concludi(repo: Path, st: dict, cur: str, target: str, snap: Path, step) -> int:
+    """15 — successo: lo stato, la pulizia, il pannello e l'avviso."""
     # 15 — successo
     st["current"] = target
     st["update_in_progress"] = None

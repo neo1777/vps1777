@@ -427,7 +427,7 @@ def test_l_update_toglie_watchtower_prima_del_down():
     un update che abortisce deve poter dire «niente è stato toccato») e PRIMA del
     `down` (finché il container è sulla rete `backend`, il `down` non la rimuove)."""
     import inspect
-    src = inspect.getsource(v.cmd_update)
+    src = inspect.getsource(v._update_applica)     # dal 24/11/2026 (QUA-04) è il passo 10-14
     i_ritorno = src.index("PUNTO DI NON RITORNO")
     i_rimuovi = src.index("rimuovi_watchtower_orfano()")
     i_down = src.index('"down"]')
@@ -626,16 +626,22 @@ def test_ogni_segreto_reale_ha_una_natura_dichiarata():
         f"pre-flight non sa se può suggerire di generarli")
 
 
+def _rimedio(nome: str, stato: str) -> str:
+    """Il rimedio che l'update stampa per un segreto (dal 24/11/2026, QUA-04, è una funzione
+    sua: queste prove la chiamano invece di leggere il sorgente)."""
+    return v._rimedio_segreto(f"{nome} → ./secrets/{nome}   [{stato}]", Path("/srv/vps1777"))
+
+
 def test_il_rimedio_non_suggerisce_mai_di_generare_un_segreto_non_generabile():
     # N13 (b82df434), metà collaudabile: il messaggio non deve MAI accostare un comando
     # generativo al nome di un segreto che non si può generare.
-    src = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
-    blocco = src[src.index("        righe = []"):src.index("    ok(f\"segreti richiesti")]
     for nome in v.SEGRETI_NON_GENERABILI:
-        assert f"openssl rand -hex 32 > {nome}" not in blocco
-    # e il ramo generativo esiste solo dentro il caso `in SEGRETI_GENERABILI`
-    assert blocco.index("SEGRETI_NON_GENERABILI.get(nome)") < blocco.index("openssl rand"), \
-        "il caso non-generabile deve essere valutato PRIMA di stampare un comando"
+        testo = _rimedio(nome, "VUOTO")
+        assert "openssl rand" not in testo and "NON generarlo" in testo, (nome, testo)
+    # e il comando generativo c'è solo per quelli generabili
+    for nome in v.SEGRETI_GENERABILI:
+        assert f"openssl rand -hex 32 > secrets/{nome}" in _rimedio(nome, "VUOTO")
+    assert "openssl rand" not in _rimedio("segreto_ignoto", "VUOTO")
 
 
 def test_assente_e_illeggibile_sono_due_stati_distinti():
@@ -718,24 +724,23 @@ def test_directory_secrets_illeggibile_anche_se_is_file_tace(monkeypatch):
 
 
 def test_il_rimedio_per_directory_illeggibile_non_tocca_i_file():
-    src = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
-    i = src.index('if "DIRECTORY NON LEGGIBILE" in m:')
-    ramo = src[i:src.index("continue", i)]
-    assert "ls -ld" in ramo, "deve far guardare la CARTELLA"
-    assert "openssl rand" not in ramo and "> secrets/" not in ramo, \
-        "nessun comando che scriva: i segreti sono intatti, è l'accesso a essere rotto"
-    assert "NON ricreare" in ramo
+    for nome in ("gateway_secret", "telegram_bot_token"):
+        ramo = _rimedio(nome, "DIRECTORY NON LEGGIBILE")
+        assert "ls -ld" in ramo, "deve far guardare la CARTELLA"
+        assert "openssl rand" not in ramo and "> secrets/" not in ramo, \
+            "nessun comando che scriva: i segreti sono intatti, è l'accesso a essere rotto"
+        assert "NON ricreare" in ramo
 
 
 def test_il_rimedio_per_illeggibile_non_contiene_mai_una_ridirezione():
     # N13 esteso: per «c'è ma non si legge» il messaggio non deve suggerire NESSUN
     # comando che scriva sul file — `>` troncherebbe il segreto che si vuole salvare.
-    src = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
-    i = src.index('if "NON LEGGIBILE" in m:')
-    ramo = src[i:src.index("continue", i)]
-    assert ">" not in ramo.split("ls -l")[0].split("chmod")[0] or "NON usare un comando con" in ramo
-    assert "chmod" in ramo and "ls -l" in ramo, "deve indicare come riparare l'ACCESSO"
-    assert "openssl rand" not in ramo, "non deve suggerire di rigenerare un file che esiste"
+    for nome in ("gateway_secret", "telegram_bot_token", "segreto_ignoto"):
+        ramo = _rimedio(nome, "NON LEGGIBILE")
+        con_ridirezione = [r for r in ramo.splitlines() if ">" in r]
+        assert all("NON usare un comando con" in r for r in con_ridirezione), con_ridirezione
+        assert "chmod" in ramo and "ls -l" in ramo, "deve indicare come riparare l'ACCESSO"
+        assert "openssl rand" not in ramo, "non deve suggerire di rigenerare un file che esiste"
 
 
 def test_stage_check_valida_gli_stessi_compose_che_lo_stack_monta():

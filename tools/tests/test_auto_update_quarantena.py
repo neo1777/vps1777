@@ -71,9 +71,12 @@ def test_il_parser_accetta_il_flag_della_unit():
 
 
 def _cmd_update() -> ast.FunctionDef:
+    # Dal 24/11/2026 (QUA-04) cmd_update è spezzata nei suoi passi: la decisione «va
+    # installata adesso?» sta in `_update_da_installare`. Il comportamento lo provano
+    # anche test_cmd_update_percorsi.py (test_la_quarantena_*).
     albero = ast.parse((_ROOT / "tools" / "vps1777.py").read_text())
     return next(n for n in ast.walk(albero)
-                if isinstance(n, ast.FunctionDef) and n.name == "cmd_update")
+                if isinstance(n, ast.FunctionDef) and n.name == "_update_da_installare")
 
 
 def test_cmd_update_chiama_la_quarantena_solo_senza_target_esplicito():

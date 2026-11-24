@@ -177,7 +177,11 @@ def test_l_update_automatico_guarda_il_canale_prima_di_dirsi_aggiornato():
                 and "release_channel" in r)
     assert "not target_req" in riga and '== "stable"' in riga
     fermo = corpo[corpo.index("if canale is None:"):corpo.index('st["canale"] = {"esito": "ok"')]
-    assert "telegram_notify(" in fermo and "return 0" in fermo and "A mano resta possibile" in fermo
+    assert "telegram_notify(" in fermo and "return None" in fermo and "A mano resta possibile" in fermo
+    # dal 24/11/2026 (QUA-04) i due controlli stanno in due passi: cmd_update li chiama in quest'ordine
+    import inspect
+    sorgente = inspect.getsource(cli.cmd_update)
+    assert sorgente.index("_update_canale(") < sorgente.index("_update_gia_fatto(")
 
 
 def test_il_giudizio_di_un_canale_non_manda_avvisi_di_guasto():
