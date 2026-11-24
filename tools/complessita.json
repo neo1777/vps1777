@@ -1,0 +1,236 @@
+{
+ "_leggimi": [
+  "Censimento delle funzioni oltre la complessità ciclomatica 10 (regola C901 di ruff). Lo legge tools/complessita.py.",
+  "È una semina: il controllo è nato il 24/11/2026 su codice che esisteva già. «fine_semina» (AAAA-MM-GG) è la data oltre la quale una riga ancora «da-esaminare» è rossa; finché manca, lo strumento lo dice a ogni corsa.",
+  "Non si rigenera: una riga si TOGLIE quando la funzione è spezzata, oppure diventa «deroga» con «motivo», «data», e poi «riletta_da» e «riletta_il» di chi non ha scritto il codice.",
+  "Il motivo di una deroga deve reggere il test della cancellazione: che cosa sarebbero i pezzi e perché sarebbero passacarte. «È lunga ma lineare» non basta; la comodità non è un motivo. Senza scadenza se il motivo è durevole: la riapre il rosso «CRESCIUTA».",
+  "Fuori dal conto, dichiarato: i test (cartelle tests e tests_runtime, file test_*.py, conftest.py). Il limite parla dei moduli del prodotto e dei suoi strumenti; una prova lunga e piatta non è logica intricata da mantenere."
+ ],
+ "soglia": 10,
+ "funzioni": {
+  "services/archive-mcp/app/db.py::search_ibrida": {
+   "complessita": 55,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::cmd_update": {
+   "complessita": 54,
+   "stato": "da-esaminare"
+  },
+  "security/check_findings.py::main": {
+   "complessita": 40,
+   "stato": "da-esaminare"
+  },
+  "tools/verify-features.py::main": {
+   "complessita": 33,
+   "stato": "da-esaminare"
+  },
+  "security/check_no_leaks.py::main": {
+   "complessita": 30,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::write_rows": {
+   "complessita": 30,
+   "stato": "da-esaminare"
+  },
+  "tools/verify-features.py::run_check": {
+   "complessita": 23,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::_iter_claude_code": {
+   "complessita": 21,
+   "stato": "da-esaminare"
+  },
+  "tools/verify-features.py::enum_reality": {
+   "complessita": 20,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::_secrets_mancanti_in": {
+   "complessita": 20,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::cmd_bootstrap": {
+   "complessita": 20,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::_iter_claude_zip": {
+   "complessita": 19,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::classify_voice": {
+   "complessita": 19,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::cmd_secrets_status": {
+   "complessita": 19,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::fetch_bundle": {
+   "complessita": 19,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::cmd_archive_ingest": {
+   "complessita": 18,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::main": {
+   "complessita": 16,
+   "stato": "da-esaminare"
+  },
+  "installer/engine.py::_stream": {
+   "complessita": 15,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/app/db.py::delta": {
+   "complessita": 15,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/tools/costruisci_indice.py::costruisci": {
+   "complessita": 15,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/app/db.py::_risolvi_sessione": {
+   "complessita": 14,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::_iter_zip_annidato": {
+   "complessita": 14,
+   "stato": "da-esaminare"
+  },
+  "tools/lock-salti.py::confronta": {
+   "complessita": 14,
+   "stato": "da-esaminare"
+  },
+  "tools/nomi-nei-doc.py::controlla": {
+   "complessita": 14,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::cmd_archive_migra": {
+   "complessita": 14,
+   "stato": "da-esaminare"
+  },
+  "security/check_no_leaks.py::_valore_innocuo": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/app/db.py::get_many": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/app/fts.py::stirpe_conn": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/app/temi.py::_riempi_vettori": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/tools/costruisci_indice.py::_aggiungi": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::_iter_memories": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/asgi_security.py::__call__": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "services/nb1777-mcp/app/core.py::fai_posto_agli_artefatti": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "tools/verify-features.py::_keys_of": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::health_gate": {
+   "complessita": 13,
+   "stato": "da-esaminare"
+  },
+  "installer/engine.py::step_reboot": {
+   "complessita": 12,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/app/db.py::count": {
+   "complessita": 12,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/app/db.py::precedenti": {
+   "complessita": 12,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/app/db.py::search": {
+   "complessita": 12,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/admin_core.py::md_minimo": {
+   "complessita": 12,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::stato_indice": {
+   "complessita": 12,
+   "stato": "da-esaminare"
+  },
+  "services/nb1777-mcp/app/server.py::codice_errore": {
+   "complessita": 12,
+   "stato": "da-esaminare"
+  },
+  "tools/fatti-nei-doc.py::conta": {
+   "complessita": 12,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::cmd_rollback": {
+   "complessita": 12,
+   "stato": "da-esaminare"
+  },
+  "security/check_no_leaks.py::righe_password_nuda": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "services/archive-mcp/app/fts.py::context_conn": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::_iter_bundle_zip": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "services/gateway/app/archive_indexer.py::extract_blocks": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "services/nb1777-mcp/app/core.py::censisci": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "services/nb1777-mcp/app/server.py::internal_nlm_carica": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "tools/collaudo-quadratura.py::main": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "tools/doc-riferimenti.py::analizza": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "tools/fatti-nei-doc.py::servizi_compose": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "tools/gate-locale.py::autoprova": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::_sorveglia_copertura_backup": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  },
+  "tools/vps1777.py::cmd_status": {
+   "complessita": 11,
+   "stato": "da-esaminare"
+  }
+ }
+}

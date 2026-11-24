@@ -76,3 +76,5 @@ htmlcov/
 docker-compose.override.yml
 compose.override.yaml
 compose.local.yaml
+# il file di lavoro della misura di copertura (pytest-cov)
+.coverage

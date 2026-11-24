@@ -130,7 +130,11 @@ _shellcheck() {
 fase_lint() {
   echo "── lint (job «lint» di ci.yml)"
   manca "ruff $RUFF_VERSIONE" uvx \
-    || passo "ruff $RUFF_VERSIONE" uvx "ruff@$RUFF_VERSIONE" check services/ tools/ security/
+    || passo "ruff $RUFF_VERSIONE" uvx "ruff@$RUFF_VERSIONE" check services/ tools/ security/ installer/ plugins/
+  manca "complessità (QUA-04)" uvx || {
+    passo "complessità — autoprova" python3 tools/complessita.py "$AUTOPROVA" --ruff "uvx ruff@$RUFF_VERSIONE"
+    passo "complessità — nessuna nuova oltre 10, nessuna cresciuta" python3 tools/complessita.py --ruff "uvx ruff@$RUFF_VERSIONE"
+  }
   manca "shellcheck (immagine della CI, per digest)" docker \
     || passo "shellcheck (immagine della CI, per digest)" _shellcheck
 }
