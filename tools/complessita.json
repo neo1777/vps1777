@@ -10,10 +10,6 @@
  "fine_semina": "2027-01-31",
  "fine_semina_scelta": "2026-11-24-soglia-qua04-fine-semina-confermata (chi possiede il repo)",
  "funzioni": {
-  "security/check_findings.py::main": {
-   "complessita": 40,
-   "stato": "da-esaminare"
-  },
   "tools/verify-features.py::main": {
    "complessita": 33,
    "stato": "da-esaminare"
