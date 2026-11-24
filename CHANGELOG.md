@@ -4,6 +4,26 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **L'installazione riesce anche dove il numero utente 1000 è già occupato, con un rimedio provvisorio
+  dichiarato (H102).** Sulle immagini cloud che hanno un utente predefinito l'installazione moriva al primo
+  avvio: i servizi girano col numero 1000 e non potevano leggere i segreti dell'operatore, nato con un altro
+  numero. Ora l'installatore mette l'operatore nel gruppo 1000 e, prima di ogni avvio, dà a quel gruppo la
+  lettura dei segreti (`tools/permessi-servizi.sh`). **Il prezzo:** su quelle macchine chi ha il gruppo 1000
+  (di norma l'utente predefinito) può leggere i segreti di vps1777. Sulle macchine dove l'operatore ha il
+  numero 1000, come una VPS vuota, non cambia niente. È provvisorio per scelta: la cura pulita è far girare i
+  servizi col numero dell'operatore, e quel giorno questo rimedio si toglie. Provato in un contenitore
+  (11 controlli) e dal vivo su una macchina con l'uid 1000 occupato: installazione, aggiornamento e ritorno
+  indietro riusciti.
+
+### Aggiunto
+- `VPS1777_SALTA_RIAVVIO=1` per `deploy.sh`: salta il riavvio di prova a fine installazione, dove la macchina
+  non può riavviarsi senza perdere chi installa. Il referto finale lo scrive: «NON ESEGUITO».
+
+### Corretto
+- Su un sistema con `sudo-rs` (Ubuntu recente) l'installatore diceva «sudo 0.0.0 è più vecchio della 1.9.10»:
+  ora dice che non riconosce quel sudo e perché le regole ad argomenti non si applicano.
+
 ## [0.98.11] — 2026-11-24
 
 ### Sicurezza

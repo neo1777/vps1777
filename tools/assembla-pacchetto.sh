@@ -37,7 +37,7 @@ cp -r ingress migrations systemd "$B/"
 # VERSION nel pacchetto = versione del TAG, non il file del repo: per le prerelease il repo tiene la
 # base (0.9.0 col tag 0.9.0-rc.1) e `vps1777 bootstrap` scaricherebbe un tag che non esiste.
 printf '%s\n' "$VERSIONE" > "$B/VERSION"
-for f in backup.sh restore.sh rotate-secret.sh backup-container-setup.sh bootstrap.sh vps1777.py sudoers-operatore.sh sudoers-tabella.sh; do
+for f in backup.sh restore.sh rotate-secret.sh backup-container-setup.sh bootstrap.sh vps1777.py sudoers-operatore.sh sudoers-tabella.sh permessi-servizi.sh; do
   cp "tools/$f" "$B/tools/"
 done
 # H51 (d): le prove empiriche vanno sulla macchina, altrimenti il giorno del guasto non ci sono.

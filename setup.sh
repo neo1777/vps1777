@@ -556,9 +556,11 @@ fi
 log ""
 if confirm "Procedo ora?"; then
   if [ "$DEV_BUILD" = "1" ]; then
+    bash tools/permessi-servizi.sh . || die "permessi dei segreti per i servizi non messi (vedi sopra)"
     docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" "${OPS_PROFILI[@]}" up -d --build
   else
     docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" "${OPS_PROFILI[@]}" pull
+    bash tools/permessi-servizi.sh . || die "permessi dei segreti per i servizi non messi (vedi sopra)"
     docker compose "${COMPOSE_FILES[@]}" --profile "$INGRESS_PROFILE" "${OPS_PROFILI[@]}" up -d
   fi
   echo

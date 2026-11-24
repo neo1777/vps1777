@@ -631,10 +631,16 @@ if ! id {OPERATOR_USER} >/dev/null 2>&1; then
     # con uid 1000 fisso, quindi i bind-mount avranno owner diversi host-container.
     # Chi installa lo deve sapere ORA, non da un permission denied nel gateway.
     echo "  ATTENZIONE: uid 1000 gia' occupato: {OPERATOR_USER} nasce con un altro uid."
-    echo "  I container usano uid 1000: possibili mismatch di ownership sui bind-mount (onboarding/, var/)."
+    echo "  I servizi girano come uid 1000: {OPERATOR_USER} entra nel gruppo 1000 e i segreti diventano"
+    echo "  leggibili a quel gruppo (rimedio provvisorio, H102). Chi ha il gruppo 1000 potra' leggerli."
   else
     useradd -m -u 1000 -s /bin/bash {OPERATOR_USER}
   fi
+fi
+# H102 (provvisorio): vedi deploy.sh, stesso punto, e tools/permessi-servizi.sh.
+if [ "$(id -u {OPERATOR_USER})" != 1000 ]; then
+  getent group 1000 >/dev/null || groupadd -g 1000 vps1777-servizi
+  usermod -aG "$(getent group 1000 | cut -d: -f1)" {OPERATOR_USER}
 fi
 usermod -aG docker {OPERATOR_USER}
 # Niente più gruppo `sudo` per l'operatore (0.98.8): vedi deploy.sh, stesso punto.
@@ -1016,7 +1022,7 @@ echo CONFIG_OK
         cmd = self._compose_cmd(ingress, onboarding=True)
         env = "COMPOSE_ANSI=never DOCKER_CLI_HINTS=false"
         for line in self._stream(
-                self._sudo(f"cd {REMOTE_DIR} && {env} {cmd} pull && {env} {cmd} up -d"),
+                self._sudo(f"cd {REMOTE_DIR} && {env} {cmd} pull && bash tools/permessi-servizi.sh . && {env} {cmd} up -d"),
                 "pull"):
             yield line
         yield "✓ Stack avviato (immagini pullate, niente build in produzione)"
@@ -1043,7 +1049,7 @@ echo CONFIG_OK
         cmd = self._compose_cmd(ingress, onboarding=True, build=True)
         # progress plain + niente ANSI: output pulito per lo streaming web
         env = "BUILDKIT_PROGRESS=plain COMPOSE_ANSI=never DOCKER_CLI_HINTS=false"
-        for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && {env} {cmd} up -d --build"), "build"):
+        for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && bash tools/permessi-servizi.sh . && {env} {cmd} up -d --build"), "build"):
             yield line
         yield "✓ Stack avviato (build locale)"
         motivo = self._dns01_esito(ingress, build=True)[1]
@@ -1163,7 +1169,7 @@ echo SELFUPDATE_OK
         annunciava «apro la porta come fallback» senza sapere se era successo."""
         cmd = self._compose_cmd(ingress, onboarding=False)
         self._run_capture(self._sudo(
-            f"cd {REMOTE_DIR} && (grep -q ^GATEWAY_BIND= .env && sed -i 's|^GATEWAY_BIND=.*|GATEWAY_BIND={bind}|' .env || echo GATEWAY_BIND={bind} >> .env) && {cmd} up -d gateway"
+            f"cd {REMOTE_DIR} && (grep -q ^GATEWAY_BIND= .env && sed -i 's|^GATEWAY_BIND=.*|GATEWAY_BIND={bind}|' .env || echo GATEWAY_BIND={bind} >> .env) && bash tools/permessi-servizi.sh . && {cmd} up -d gateway"
         ))
         letto = self._run_capture(self._sudo(
             f"grep ^GATEWAY_BIND= {REMOTE_DIR}/.env 2>/dev/null | tail -1 | cut -d= -f2")).strip()
@@ -1188,7 +1194,7 @@ echo SELFUPDATE_OK
         cmd = self._compose_cmd(ingress, onboarding=onboarding)
         servizi = " ".join(SERVIZI_PUBLIC_BASE)
         self._run_capture(self._sudo(
-            f"cd {REMOTE_DIR} && (grep -q ^PUBLIC_BASE= .env && sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE={url}|' .env || echo PUBLIC_BASE={url} >> .env) && {cmd} up -d {servizi}"
+            f"cd {REMOTE_DIR} && (grep -q ^PUBLIC_BASE= .env && sed -i 's|^PUBLIC_BASE=.*|PUBLIC_BASE={url}|' .env || echo PUBLIC_BASE={url} >> .env) && bash tools/permessi-servizi.sh . && {cmd} up -d {servizi}"
         ))
 
     def _wipe_ts_authkey(self) -> None:
@@ -1303,7 +1309,7 @@ rm -f secrets/ts_authkey.txt
         yield "── Modalità production: chiudo la porta 8080 (solo HTTPS via Funnel)…"
         cmd = self._compose_cmd(ingress, onboarding=False)
         # --force-recreate sul gateway per applicare la rimozione del port mapping
-        for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && {cmd} up -d --force-recreate gateway"), "finalize"):
+        for line in self._stream(self._sudo(f"cd {REMOTE_DIR} && bash tools/permessi-servizi.sh . && {cmd} up -d --force-recreate gateway"), "finalize"):
             yield line
         yield "✓ Porta 8080 chiusa — raggiungibile solo via HTTPS"
 

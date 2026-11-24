@@ -29,9 +29,17 @@ chown 1000:1000 secrets/*.txt        # 1000 = l'utente `app` DENTRO i container
 >
 > Il percorso `deploy.sh` di norma non incontra il caso: crea l'utente operatore
 > con `useradd -m -u 1000` e gli fa `chown -R` della dir remota, quindi l'UID
-> combacia già. Ma se l'UID 1000 è già preso (capita sulle immagini cloud, che hanno
-> un utente di default a 1000) l'operatore nasce con un altro UID — `deploy.sh` lo
-> avvisa («uid 1000 già occupato») — e vale lo stesso `chown 1000:1000 secrets/*.txt`.
+> combacia già. Se l'UID 1000 è già preso (capita sulle immagini cloud, che hanno
+> un utente di default a 1000) l'operatore nasce con un altro UID. Fino alla `0.98.11`
+> l'installazione si fermava qui, con questo errore. Dalla versione successiva gli installatori
+> mettono l'operatore nel gruppo 1000 e, prima di ogni avvio, `tools/permessi-servizi.sh` dà a
+> quel gruppo la lettura dei segreti (`640`) e la scrittura in `onboarding/`.
+>
+> **È un rimedio provvisorio e ha un prezzo** (`H102` in `security/findings.yml`): su quella
+> macchina chi ha il gruppo 1000, di norma l'utente predefinito dell'immagine, può leggere i
+> segreti di vps1777. Se non lo vuoi, installa su un'immagine che ha solo `root`: lì
+> l'operatore prende l'UID 1000 e i permessi restano `600`. Se dopo aver riscritto un segreto
+> a mano i servizi non partono, rilancia `bash tools/permessi-servizi.sh` come operatore.
 
 ## Gateway non risponde su `/health`
 

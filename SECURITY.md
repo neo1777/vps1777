@@ -481,7 +481,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** I 101 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 102 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -492,7 +492,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **101 voci** (2 critiche, 16 alte, 57 medie, 26 basse): 43 dalla
+Il registro conta **102 voci** (2 critiche, 16 alte, 58 medie, 26 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -558,7 +558,7 @@ Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 | | |
 |---|---|
 | **chiusi** | 87 |
-| **parziali** | 10 |
+| **parziali** | 11 |
 | **accettati** | 4 |
 | **aperti** | 0 |
 
@@ -939,7 +939,7 @@ a ogni giro** invece di lasciarlo dedurre, che è tutto quello che poteva fare.
 📌 E su `H60`, «chiuso» significa **il controllo**, non il dato: l'indirizzo resta nella
 storia del repo e nelle tre versioni, per decisione del proprietario.
 
-Gli altri **6 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
+Gli altri **7 parziali** non sono lavoro a metà: sono **scelte** o **rinvii dichiarati**, con
 il loro *perché* nel registro:
 
 - **Scelte deliberate** (resteranno tali): il *contatore globale* di `H4` (auto-lockout
@@ -952,6 +952,11 @@ il loro *perché* nel registro:
 - **Parziale, col residuo scritto**: il pinning ai digest nel compose (`H22`) c'è dalla
   `v0.59.0`, ma un'installazione nuova lo accende al primo update (gli installer
   scaricano per tag e non verificano digest).
+- **Rimedio provvisorio, col prezzo scritto** (`H102`, 24/11/2026): dove l'uid 1000 della
+  macchina è già di un altro utente, i segreti sono leggibili al gruppo 1000 dell'host, perché
+  i servizi girano come uid 1000 fisso e altrimenti non partirebbero. Sulle macchine con
+  l'operatore a uid 1000 (una VPS vuota) non cambia niente. Si toglie quando i servizi
+  gireranno col numero dell'operatore.
 - E, fuori dai parziali, un **rischio accettato con data di revisione**: l'approvazione
   manuale dei rilasci in `H24`. Con un solo account non sarebbe un confine; il rischio che copriva lo copre la
   **quarantena di 48 ore** dell'auto-update (postilla sotto).

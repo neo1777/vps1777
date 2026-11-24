@@ -511,7 +511,7 @@ rm -f secrets/ts_authkey.txt"
   # 4. Restart servizi. Per tailscale il gateway resta su 127.0.0.1:8080
   #    (GATEWAY_BIND) SE il Funnel ha risposto; altrimenti il punto 3-bis l'ha aperta.
   log "Riavvio i servizi..."
-  SSHT "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d'" || die "restart fallito"
+  SSHT "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && bash tools/permessi-servizi.sh . && $COMPOSE_CMD up -d'" || die "restart fallito"
   ok "Servizi riavviati"
 
   # 5. Cancella pending.json (contiene valori sensibili)
@@ -798,10 +798,18 @@ if ! id "$OPERATOR_USER" >/dev/null 2>&1; then
     # owner diversi tra host e container. Chi installa deve saperlo ORA, non
     # scoprirlo da un "permission denied" dentro il gateway.
     echo "  ⚠️  uid 1000 già occupato da '$(getent passwd 1000 | cut -d: -f1)': $OPERATOR_USER nasce con un altro uid."
-    echo "      I container usano uid 1000: possibili mismatch di ownership sui bind-mount (onboarding/, var/)."
+    echo "      I servizi girano come uid 1000: per fargli leggere i segreti, $OPERATOR_USER entra nel gruppo 1000"
+    echo "      e i segreti diventano leggibili a quel gruppo (rimedio provvisorio, H102 in security/findings.yml)."
+    echo "      Chi sulla macchina ha il gruppo 1000 potrà leggere i segreti di vps1777."
   else
     useradd -m -u 1000 -s /bin/bash "$OPERATOR_USER"
   fi
+fi
+# H102 (provvisorio): con l'operatore a un uid diverso da 1000 i servizi leggono i segreti tramite
+# il gruppo 1000 (tools/permessi-servizi.sh). Vale anche se l'operatore esisteva già.
+if [ "$(id -u "$OPERATOR_USER")" != 1000 ]; then
+  getent group 1000 >/dev/null || groupadd -g 1000 vps1777-servizi
+  usermod -aG "$(getent group 1000 | cut -d: -f1)" "$OPERATOR_USER"
 fi
 usermod -aG docker "$OPERATOR_USER"
 # Fino alla 0.98.7 l'operatore finiva anche nel gruppo `sudo` («tutto, con la password»): non avendo
@@ -1113,7 +1121,7 @@ if [ "$DEV_BUILD" = "1" ]; then
     || die "docker compose up (build locale) fallito"
   ok "Stack avviato (build locale — dev)"
 else
-  SSHT "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD pull && $COMPOSE_CMD up -d'" \
+  SSHT "sudo -u $OPERATOR_USER bash -lc 'cd $REMOTE_DIR && $COMPOSE_CMD pull && bash tools/permessi-servizi.sh . && $COMPOSE_CMD up -d'" \
     || die "docker compose pull/up fallito"
   ok "Stack avviato (immagini v$INSTALL_VERSION pullate — niente build in produzione)"
 fi
@@ -1155,7 +1163,7 @@ if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
     SSH "tailscale funnel --bg --https=443 http://127.0.0.1:8080" >/dev/null 2>&1 || true
     SSH "tailscale cert ${TS_URL#https://}" >/dev/null 2>&1 || true
     if ! { printf '%s\n' "$SET_KV_REMOTO" "set_kv PUBLIC_BASE '$TS_URL'" | SSH "sudo -u $OPERATOR_USER bash -s" \
-           && SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d $SERVIZI_PUBLIC_BASE'" >/dev/null 2>&1; }; then
+           && SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && bash tools/permessi-servizi.sh . && $COMPOSE_CMD up -d $SERVIZI_PUBLIC_BASE'" >/dev/null 2>&1; }; then
       warn "PUBLIC_BASE non scritto o servizi non ricreati: gateway e bot possono avere ancora l'URL di prima."
     fi
     # 🔴 LA CONFERMA DA FUORI MANCAVA PROPRIO QUI (22/11/2026). Il ramo `--apply` e
@@ -1170,7 +1178,7 @@ if [ "$INGRESS" = "tailscale" ] && [ -n "$TS_AUTHKEY" ]; then
       warn "  → controlla: login.tailscale.com/admin/dns (MagicDNS + HTTPS) e"
       warn "    Access Controls (nodeAttr «funnel»), poi riapri $TS_URL."
       if printf '%s\n' "$SET_KV_REMOTO" "set_kv GATEWAY_BIND 0.0.0.0" | SSH "sudo -u $OPERATOR_USER bash -s" \
-         && SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1; then
+         && SSH "sudo -u $OPERATOR_USER bash -lc 'cd ~/vps1777 && bash tools/permessi-servizi.sh . && $COMPOSE_CMD up -d gateway'" >/dev/null 2>&1; then
         warn "Apro la porta 8080 (HTTP) come fallback: il Funnel non ha risposto."
         warn "  → quando il Funnel risponde, richiudila: GATEWAY_BIND=127.0.0.1 nel .env (vedi SECURITY.md)."
       else
@@ -1186,7 +1194,12 @@ fi
 # ═══════════════════════════════════════════ 7. REBOOT TEST
 step "7/8 — Riavvio VPS per verificare che tutto riparta al boot"
 
-if confirm "Riavvio la VPS ora? (verifica auto-start dei container)"; then
+# VPS1777_SALTA_RIAVVIO=1: dove la macchina non può riavviarsi senza perdere chi sta installando
+# (il runner della CI che prova il rollback, STA-06). Il referto finale lo dice: «NON ESEGUITO».
+if [ "${VPS1777_SALTA_RIAVVIO:-0}" = "1" ]; then
+  warn "Riavvio di prova SALTATO su richiesta (VPS1777_SALTA_RIAVVIO=1): la ripartenza al boot NON è verificata."
+  REBOOT_TEST="NON ESEGUITO (saltato con VPS1777_SALTA_RIAVVIO=1)"
+elif confirm "Riavvio la VPS ora? (verifica auto-start dei container)"; then
   log "Reboot in corso..."
   SSH 'nohup reboot >/dev/null 2>&1 &' || true
   sleep 5

@@ -4882,3 +4882,73 @@ findings:
       I log scritti prima della cura contengono ancora i gettoni di allora (scaduti o consumati).
       Non provato leggendo il log di un gateway vero dopo una richiesta: provato sul filtro.
 
+
+  - id: H102
+    severity: medium
+    title: "Con l'uid 1000 già occupato l'installazione moriva al primo avvio; il rimedio provvisorio dà i segreti in lettura al gruppo 1000 dell'host"
+    status: partial
+    si_sfrutta_oggi: "solo sulle macchine dove l'operatore non ha l'uid 1000, e solo da chi su quella macchina ha già il gruppo 1000 (di norma l'utente predefinito dell'immagine, che di solito è già amministratore). Sulle macchine con l'operatore a uid 1000 non cambia niente."
+    natura: decisione
+    resta_aperto: >
+      [RIMEDIO PROVVISORIO — 24/11/2026, scelta dell'owner] Dove l'uid 1000 è di un altro
+      utente, chi sull'host ha il gruppo 1000 legge i segreti di vps1777.
+    missing: >
+      Oggi, su quelle macchine, `secrets/` è 750 e i segreti 640 col gruppo 1000 (segreto del
+      gateway, chiave di firma OAuth, token del bot, hash della password); `onboarding/` è 2770.
+      Parole dell'owner: «sosteniamo il caso, ma solo momentaneamente; appena possibile si passa
+      al lavoro pulito. Tutto dichiarato come sempre».
+      I servizi devono girare col numero dell'utente operatore, non col 1000 fisso: tocca le
+      immagini, i volumi e l'aggiornamento delle macchine già installate, e va provato su una
+      macchina vuota prima del rilascio. Quel giorno `tools/permessi-servizi.sh` e i suoi
+      agganci si tolgono, e i permessi tornano 700/600 ovunque.
+    scoperta:
+      quando: "2026-11-24"
+      come: misura
+      nota: >
+        Portando in CI la prova del rollback: sul runner (Ubuntu 26.04) l'uid 1000 è di un
+        altro utente, l'operatore è nato col 1002 e `docker compose up` è fallito con
+        «PermissionError: /run/secrets/gateway_secret» in gateway e nb1777-mcp. Gli installatori
+        conoscevano il caso e avvisavano di «possibili mismatch»: in realtà non partiva niente.
+        Succede su ogni immagine cloud con un utente predefinito (ubuntu, debian, admin).
+    since: unreleased
+    why: >
+      I contenitori girano come uid 1000 fisso (utente `app` delle immagini) e compose monta i
+      segreti come file dell'host, coi permessi dell'host: 600 dell'operatore. Se l'operatore
+      non è l'uid 1000, il servizio non li legge, e non scrive in `onboarding/`.
+    evidence:
+      - file: tools/permessi-servizi.sh
+        contains:
+          - "UID_SERVIZI=1000"
+          - 'chmod 640 "$f"'
+          - '{ [ "$OPERATORE" = "$UID_SERVIZI" ] || [ "$OPERATORE" = 0 ]; } && exit 0'
+      - file: tools/tests/test-permessi-servizi.sh
+        contains:
+          - "B uid 1000 legge: si · terzo legge: no"
+          - "E esito: 0 · permessi: 700 600 700"
+      - file: tools/tests/test_permessi_servizi_agganci.py
+        contains:
+          - "def test_ogni_avvio_dei_servizi_passa_prima_dai_permessi("
+      - file: deploy.sh
+        contains:
+          - "groupadd -g 1000 vps1777-servizi"
+    fix: >
+      `tools/permessi-servizi.sh`, lanciato prima di ogni avvio dei servizi (i due installatori,
+      setup.sh, la CLI, la rotazione dei segreti, il ripristino): se l'operatore non ha l'uid
+      1000 dà al gruppo 1000 la lettura dei segreti e la scrittura in `onboarding/`. Gli
+      installatori mettono l'operatore nel gruppo 1000 (lo creano se non c'è) e lo dicono a
+      chi installa. Con l'operatore a uid 1000 lo strumento esce subito senza toccare niente.
+    prova:
+      - comando: "bash tools/tests/test-permessi-servizi.sh"
+        dove: "PC"
+        output: "11 controlli in un contenitore Debian: senza la cura l'uid 1000 non legge; con la cura legge e un terzo utente no; con l'operatore a uid 1000 i permessi restano 700/600"
+        exit: 0
+        quando: "2026-11-24"
+      - comando: "deploy.sh verso la macchina stessa, poi vps1777 update, poi prova-9 --esegui"
+        dove: "runner"
+        output: "uid 1000 di un altro utente, operatore uid 1002 nel gruppo 1000: installazione in 74 s, sei servizi sani, update riuscito, prova 9 PASS con esito 1"
+        exit: 0
+        quando: "2026-11-24"
+    residuo: >
+      Non provato con l'installatore grafico (stessa modifica, non eseguita) né con setup.sh.
+      Una macchina aggiornata da una versione senza lo strumento tiene i permessi che ha: il
+      caso non esisteva, perché lì l'installazione non riusciva.

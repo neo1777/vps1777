@@ -131,6 +131,7 @@ case "$WHICH" in
     # segreto VECCHIO → 403 sul canale interno (/admin/nlm rotto, il bot che
     # crede l'auth mancante). Vanno riavviati TUTTI i consumatori.
     log "Restart dei consumatori (gateway, nb1777-mcp, nb1777-bot)..."
+    [ ! -f "$SCRIPT_DIR/permessi-servizi.sh" ] || bash "$SCRIPT_DIR/permessi-servizi.sh" "$REPO_ROOT" || die "permessi dei segreti per i servizi non messi (vedi sopra)"
     docker compose restart gateway nb1777-mcp nb1777-bot
     ok "Fatto. Aggiorna i connector claude.ai con i nuovi URL."
     ;;
@@ -145,6 +146,7 @@ case "$WHICH" in
     NEW=$(gen_random 48)
     scrivi_segreto "$FILE" "$NEW"
     ok "Nuovo oauth_signing_secret generato (48 byte url-safe)"
+    [ ! -f "$SCRIPT_DIR/permessi-servizi.sh" ] || bash "$SCRIPT_DIR/permessi-servizi.sh" "$REPO_ROOT" || die "permessi dei segreti per i servizi non messi (vedi sopra)"
     docker compose restart gateway
     ok "Fatto"
     ;;
@@ -176,6 +178,7 @@ print(bcrypt.hashpw(os.environ["ADMIN_PWD_RAW"].encode(), bcrypt.gensalt(12)).de
 ' > "$FILE"
     chmod 600 "$FILE"
     ok "Nuovo bcrypt salvato"
+    [ ! -f "$SCRIPT_DIR/permessi-servizi.sh" ] || bash "$SCRIPT_DIR/permessi-servizi.sh" "$REPO_ROOT" || die "permessi dei segreti per i servizi non messi (vedi sopra)"
     docker compose restart gateway
     ok "Fatto. Login admin con la nuova password."
     ;;
@@ -201,6 +204,7 @@ print(hmac.new(b"WebAppData", os.environ["TELEGRAM_BOT_TOKEN"].encode(), hashlib
 ' > secrets/telegram_webapp_secret.txt
     chmod 600 secrets/telegram_webapp_secret.txt
     ok "Chiave della Mini App (telegram_webapp_secret) riderivata dal token nuovo"
+    [ ! -f "$SCRIPT_DIR/permessi-servizi.sh" ] || bash "$SCRIPT_DIR/permessi-servizi.sh" "$REPO_ROOT" || die "permessi dei segreti per i servizi non messi (vedi sopra)"
     docker compose restart nb1777-bot gateway
     ok "Fatto"
     ;;

@@ -75,7 +75,12 @@ id "$U" >/dev/null 2>&1 || { echo "l'utente «$U» non esiste" >&2; exit 2; }
 # le espressioni regolari negli argomenti esistono da sudo 1.9.10: con uno più vecchio le regole
 # non corrisponderebbero a niente e l'operatore non potrebbe più aggiornare
 V="$(sudo -V 2>/dev/null | sed -n '1s/.*version \([0-9]*\)\.\([0-9]*\)\.\([0-9]*\).*/\1 \2 \3/p')"
-read -r v1 v2 v3 <<<"${V:-0 0 0}"
+if [ -z "$V" ]; then
+  # `sudo -V` non ha la forma «Sudo version X.Y.Z»: per esempio sudo-rs (Ubuntu dalla 25.10), che
+  # le espressioni regolari negli argomenti non le ha. Prima usciva «sudo 0.0.0 è più vecchio».
+  echo "SUDOERS_ARGOMENTI_NON_APPLICATE: non riconosco questo sudo («$(sudo -V 2>/dev/null | head -1)»): le regole ad argomenti vogliono sudo 1.9.10 o successivo" >&2; exit 3
+fi
+read -r v1 v2 v3 <<<"$V"
 if [ "$(( v1 * 10000 + v2 * 100 + v3 ))" -lt 10910 ]; then
   echo "SUDOERS_ARGOMENTI_NON_APPLICATE: sudo ${v1}.${v2}.${v3} è più vecchio della 1.9.10" >&2; exit 3
 fi
