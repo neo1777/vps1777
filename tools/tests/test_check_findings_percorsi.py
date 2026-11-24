@@ -214,3 +214,14 @@ def test_un_parziale_che_non_dice_cosa_manca(cf):
     v.pop("missing", None)
     rc, out = _esegui(cf, reg)
     assert rc == 1 and f"{v['id']}: è `partial` ma non dichiara cosa manca" in out
+
+
+def test_una_voce_senza_id_si_dice_invece_di_crollare(cf):
+    """Prima: KeyError 'id' in check_evidence, cioè un traceback (Sagoma, 24/11/2026)."""
+    reg = _reg()
+    v = _voce(reg, "closed")
+    titolo = v["title"]
+    v.pop("id")
+    rc, out = _esegui(cf, reg)
+    assert rc == 1
+    assert f"una voce senza `id` (titolo: «{titolo}»)" in out

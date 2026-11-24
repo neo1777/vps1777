@@ -4,6 +4,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Il controllo del registro di sicurezza dice «voce senza `id`» invece di crollare.** Una voce senza
+  `id` lo faceva uscire con un errore Python incomprensibile: il cancello teneva, ma non diceva che cosa
+  non andava. Visto da Sagoma rileggendo la riorganizzazione del controllo.
+
 ## [0.98.14] — 2026-11-24
 
 ### Aggiunto

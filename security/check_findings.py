@@ -745,6 +745,14 @@ def _controlla_le_voci(findings: list[dict], errors: list[str]) -> _Conto:
 
     for f in findings:
         fid = f.get("id", "<senza id>")
+        if not f.get("id"):
+            # Una voce senza `id` faceva crollare il controllo con un traceback (KeyError in
+            # `check_evidence`): il cancello teneva (uscita 1), ma non diceva che cosa non andava.
+            # Visto da Sagoma il 24/11/2026 rileggendo la PR #590. Gli altri controlli nominano
+            # la voce col suo id: senza, si dice e si passa alla prossima.
+            fail(errors, f"una voce senza `id` (titolo: «{f.get('title') or '?'}»): ogni voce del "
+                         "registro ne vuole uno, ed è il nome con cui gli altri controlli la citano.")
+            continue
 
         # schema
         if fid in seen:
