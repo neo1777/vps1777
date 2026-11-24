@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.12] — 2026-11-24
+
 ### Sicurezza
 - **L'installazione riesce anche dove il numero utente 1000 è già occupato, con un rimedio provvisorio
   dichiarato (H102).** Sulle immagini cloud che hanno un utente predefinito l'installazione moriva al primo
