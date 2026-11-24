@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.14] — 2026-11-24
+
 ### Aggiunto
 - **Il README mostra il prodotto.** Tre schermate vere con dati inventati (l'installatore grafico, il pannello,
   la Mini App di Telegram), più l'immagine di anteprima per i link condivisi. Gli script che le rifanno stanno
