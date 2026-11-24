@@ -150,3 +150,36 @@ def test_il_modo_risana_stampa_una_riga_json_ed_esce_zero_se_non_resta_niente(uc
     monkeypatch.setattr(ingest_worker.risana, "__defaults__", (str(cartella),))
     assert ingest_worker.main(["risana"]) == 0
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == {"risanati": ["prova"], "falliti": {}}
+
+
+# ── il journal che non è «caldo» (24/11/2026, visto da Sagoma sulla prova di STA-04) ──
+# Il `kill -9` caduto dopo che SQLite ha creato il journal e prima che ne abbia scritto
+# l'intestazione lascia un file non vuoto che SQLite non considera da annullare.
+
+def _db_sano(tmp_path: Path) -> Path:
+    db = tmp_path / "prova.db"
+    assert archive_indexer.index_file(str(_sorgente(tmp_path / "s.jsonl", RIGHE_PRIMA, "e")), str(db)) == RIGHE_PRIMA
+    db.with_name(db.name + "-journal").write_bytes(b"\x00" * 512)
+    return db
+
+
+def test_un_journal_non_caldo_si_toglie_e_il_db_e_quello_di_prima(tmp_path):
+    db = _db_sano(tmp_path)
+    assert _leggi_ro(db) == RIGHE_PRIMA, "il lettore in sola lettura lo legge già: nessun dato perso"
+    cura = ingest_worker.risana(str(tmp_path))
+    assert cura == {"risanati": ["prova"], "falliti": {}}, cura
+    assert not db.with_name(db.name + "-journal").exists()
+    assert _leggi_ro(db) == RIGHE_PRIMA
+
+
+def test_il_journal_di_un_altro_scrittore_vero_non_si_tocca(tmp_path):
+    db = _db_sano(tmp_path)
+    altro = sqlite3.connect(str(db), isolation_level=None)
+    altro.execute("BEGIN IMMEDIATE")          # un altro processo tiene il DB in scrittura
+    try:
+        cura = ingest_worker.risana(str(tmp_path))
+    finally:
+        altro.execute("ROLLBACK")
+        altro.close()
+    assert cura["risanati"] == [] and "un altro processo tiene il DB" in cura["falliti"]["prova"], cura
+    assert db.with_name(db.name + "-journal").exists(), "il journal di chi sta scrivendo è rimasto"

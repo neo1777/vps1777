@@ -89,14 +89,41 @@ def risana(db_dir: str = DB_DIR) -> dict:
             if esiti != ["ok"]:
                 falliti[db.stem] = "annullata la scrittura interrotta, ma il DB non è sano: " \
                                    + "; ".join(esiti)[:300]
-            elif journal.is_file() and journal.stat().st_size > 0:
-                falliti[db.stem] = "il journal è ancora lì: un altro processo sta scrivendo, " \
-                                   "oppure non ho potuto annullare"
+            elif journal.is_file() and journal.stat().st_size > 0 \
+                    and (perche := _togli_journal_residuo(db, journal)):
+                falliti[db.stem] = perche
             else:
                 risanati.append(db.stem)
         except (sqlite3.Error, OSError) as exc:
             falliti[db.stem] = str(exc)[:300]
     return {"risanati": risanati, "falliti": falliti}
+
+
+def _togli_journal_residuo(db: Path, journal: Path) -> str | None:
+    """Toglie un journal rimasto dopo che SQLite ha già fatto la sua parte; None se l'ha tolto.
+
+    24/11/2026, visto da Sagoma (la prova di STA-04 rossa una volta su tre col PC carico) e
+    riprodotto: se il `kill -9` cade dopo che SQLite ha CREATO il journal e prima che ne abbia
+    scritto l'intestazione, il journal non è «caldo». SQLite non ha niente da annullare e non
+    lo cancella; il DB è intero, e un lettore in sola lettura lo legge. Restava però lì, e
+    `risana` lo dava per fallito. Prova di proprietà: si prende il lock di scrittura
+    (BEGIN IMMEDIATE). Se lo si ottiene, nessun altro sta scrivendo e il journal non è di
+    nessuno: si toglie tenendo il lock. Se no, c'è davvero un altro scrittore e non si tocca.
+    """
+    conn = sqlite3.connect(str(db), timeout=1, isolation_level=None)
+    try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError:
+            return ("il journal è ancora lì e un altro processo tiene il DB in scrittura: "
+                    "non lo tocco")
+        try:
+            journal.unlink(missing_ok=True)
+        finally:
+            conn.execute("ROLLBACK")
+    finally:
+        conn.close()
+    return None
 
 
 def esegui_coda(jid: str, db: str, suffisso: str, project: str = "",
