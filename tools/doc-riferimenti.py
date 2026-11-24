@@ -62,6 +62,8 @@ ATTESI = {
         "fase 4): DELIBERATAMENTE fuori dal repo — porta i giudizi su messaggi "
         "privati; vive nel volume archive della macchina e nel backup dell'owner",
     "plugins/mio-mcp/compose.mio-mcp.yaml": "esempio didattico: è il file che il lettore CREA",
+    "canale.json": "il canale firmato (SIC-15): lo scrive e lo pubblica .github/workflows/canale.yml "
+        "nella release fissa `canale`; sulla macchina sta in var/canale/, mai nel repo",
     # 16/08 — i doc di `docs/roadmap/` parlano di cose FUORI da questo repo, ed è il loro
     # mestiere: sono prompt di onboarding e cataloghi, non documentazione del prodotto.
     # Il gate li segnava introvabili e aveva ragione ALLA LETTERA (nel repo non ci sono) e

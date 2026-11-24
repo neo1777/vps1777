@@ -1,0 +1,97 @@
+name: Canale di aggiornamento (firmato, con scadenza)
+
+# SIC-15: il PUNTATORE all'ultima release stabile, firmato e con una scadenza. L'aggiornamento
+# automatico delle macchine lo pretende fresco (tools/vps1777.py, «il canale firmato»): chi
+# rispondesse per mesi «l'ultima è quella che hai» verrebbe scoperto alla scadenza.
+#
+# Scrive `canale.json` ({latest, firmato_il, scade_il}), lo firma keyless con cosign (l'identità è
+# QUESTO workflow su main: il client accetta solo lei) e lo pubblica, con firma e certificato,
+# nella release fissa `canale` (prerelease: non è mai «l'ultima versione»).
+#
+# Vita 45 giorni, rinfresco ogni settimana: un giro saltato non ferma nessuno, sei sì. Se questo
+# workflow si rompe e nessuno lo ripara, dopo 45 giorni le macchine SMETTONO di aggiornarsi da sole
+# e avvisano su Telegram: è il prezzo scelto (22/11/2026), e l'aggiornamento a mano resta.
+on:
+  schedule:
+    - cron: "10 5 * * 1"      # ogni lunedì alle 05:10 UTC
+  workflow_dispatch:           # e subito dopo ogni rilascio: lo lancia release.yml
+
+permissions: {}
+
+concurrency:
+  group: canale
+  cancel-in-progress: false
+
+jobs:
+  firma:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write        # carica i tre file nella release `canale`
+      id-token: write        # firma keyless
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main          # il canale si firma SEMPRE dal codice di main, anche se lanciato a mano
+      - name: Solo da main
+        run: |
+          [ "${GITHUB_REF}" = "refs/heads/main" ] || { echo "::error::il canale si firma solo da main (qui: ${GITHUB_REF}): l'identità della firma sarebbe un'altra e le macchine la rifiuterebbero"; exit 1; }
+      - name: L'ultima release stabile
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ULTIMA="$(gh release list --limit 1 --exclude-drafts --exclude-pre-releases --json tagName -q '.[0].tagName')"
+          [[ "$ULTIMA" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::l'ultima release stabile non è una versione: «$ULTIMA»"; exit 1; }
+          echo "ultima=$ULTIMA" >> "$GITHUB_OUTPUT"; echo "ultima stabile: $ULTIMA"
+      - name: Scrive canale.json
+        run: |
+          set -euo pipefail
+          python3 tools/canale-genera.py genera --latest "${{ steps.rel.outputs.ultima }}" > canale.json
+          cat canale.json
+      - name: Install cosign
+        # stessa versione di release.yml: v4 cambia `sign-blob` e la verifica nella CLI
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+      - name: Firma (keyless)
+        run: |
+          cosign sign-blob --yes \
+            --output-signature canale.json.sig \
+            --output-certificate canale.json.pem \
+            canale.json
+      # La firma si RILEGGE come la leggerà la macchina: stessa identità, stesso emittente.
+      - name: La firma è quella che le macchine accettano
+        run: |
+          cosign verify-blob \
+            --certificate-identity-regexp '^https://github\.com/${{ github.repository_owner }}/vps1777/\.github/workflows/canale\.yml@refs/heads/main$' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --signature canale.json.sig --certificate canale.json.pem canale.json
+      - name: Pubblica nella release fissa `canale`
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view canale >/dev/null 2>&1; then
+            gh release create canale --prerelease --target main \
+              --title "Canale di aggiornamento" \
+              --notes "Non è una versione. Qui sta \`canale.json\`, il puntatore firmato all'ultima release stabile, con la sua scadenza: l'aggiornamento automatico di vps1777 lo legge e lo pretende fresco. Lo rinfresca ogni settimana \`.github/workflows/canale.yml\`. Vedi docs/UPDATE.md."
+          fi
+          # la firma PRIMA del contenuto: nel mezzo, chi scarica trova il JSON vecchio con accanto
+          # la firma nuova e riprova (la CLI ritenta una volta); l'ordine inverso sarebbe uguale
+          gh release upload canale canale.json.sig canale.json.pem canale.json --clobber
+      - name: Ciò che è pubblicato è ciò che è stato firmato
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir riletto && cd riletto
+          for i in 1 2 3; do
+            rm -f canale.json*; gh release download canale -p 'canale.json*' && cmp -s canale.json ../canale.json && break
+            sleep 10
+          done
+          cmp canale.json ../canale.json && cmp canale.json.sig ../canale.json.sig && cmp canale.json.pem ../canale.json.pem
+          cosign verify-blob \
+            --certificate-identity-regexp '^https://github\.com/${{ github.repository_owner }}/vps1777/\.github/workflows/canale\.yml@refs/heads/main$' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --signature canale.json.sig --certificate canale.json.pem canale.json
+          echo "canale pubblicato: $(cat canale.json)"

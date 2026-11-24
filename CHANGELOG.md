@@ -4,6 +4,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Sicurezza
+- **L'aggiornamento automatico pretende un «canale» firmato e con una scadenza (H103, requisito SIC-15).**
+  «Qual è l'ultima release» era una domanda fatta a GitHub senza firma: chi stesse in mezzo, o una cache
+  ferma, poteva rispondere per mesi «l'ultima è quella che hai» e la macchina smetteva di ricevere le
+  correzioni in silenzio. Ora un file piccolo, `canale.json`, dice qual è l'ultima stabile e **fino a quando
+  quell'affermazione vale**: lo firma ogni settimana un workflow del repository, con una vita di 45 giorni.
+  Il timer settimanale lo controlla a ogni giro. **Se il canale è scaduto, assente o la firma non torna,
+  l'aggiornamento automatico si ferma e avvisa su Telegram**; quello a mano (`vps1777 update`) resta sempre
+  possibile. Che cosa cambia per te: niente finché il progetto continua a firmare; se smettesse per più di
+  un mese e mezzo, la tua macchina te lo direbbe invece di restare indietro senza dirlo. `vps1777 status`
+  mostra lo stato del canale. Dettagli in `docs/UPDATE.md`, «Il canale firmato».
+- Comando nuovo `vps1777 canale-verifica <file>`: rifà quel controllo su un file già scaricato.
+
 ### Aggiunto
 - `applicabilita.yml`: che cosa il progetto dichiara di sé allo standard di ingegneria 1777 (che cosa espone,
   che dati tratta, con quali comandi si provano alcuni requisiti). Lo standard è ancora privato e il file lo

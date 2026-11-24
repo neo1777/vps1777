@@ -344,6 +344,26 @@ vps1777 secrets-status
 vps1777 secrets-status --notify
 ```
 
+## vps1777 canale-verifica
+
+Giudica un file `canale.json` che è già sul disco: il puntatore firmato all'ultima release
+stabile, con la sua scadenza (vedi `docs/UPDATE.md`, «Il canale firmato»). Non va in rete. Guarda,
+in quest'ordine: la forma del file, la firma (in `<file>.sig`, col certificato in `<file>.pem`),
+la scadenza. Esce **0** se lo accetta, **1** se lo rifiuta (e dice perché: scaduto, firma che non
+corrisponde, scadenza assente), **2** se non ha potuto guardare (file o strumento assente).
+
+L'aggiornamento automatico fa questo controllo da sé a ogni giro: il comando serve a rifarlo a
+mano su un file scaricato, e a provare il rifiuto. `--chiave-pubblica` è **solo per le prove**:
+verifica con una chiave data invece che con la firma del workflow che pubblica il canale.
+`tools/canale-genera.py prova <cartella>` prepara un canale fresco e uno scaduto con una chiave
+usa-e-getta.
+
+```bash
+vps1777 canale-verifica var/canale/canale.json
+python3 tools/canale-genera.py prova var/prova-canale
+vps1777 canale-verifica --chiave-pubblica var/prova-canale/chiave.pub var/prova-canale/scaduto.json   # esce 1
+```
+
 ## vps1777 memoria
 
 Gli **strati locali della memoria 1777** ([MEMORIA-1777.md](MEMORIA-1777.md)):

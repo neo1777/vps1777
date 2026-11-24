@@ -11,7 +11,7 @@
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
-      "sorgente_sha256": "8e988bcb91724655cd83fe0796c351fb16d37bd5bfc6747d58c53eda0fbebc9c"
+      "sorgente_sha256": "9d1185a62a7e6bbdb807503a73a5f3381bb42523aac4bc518fd1b8c67e0c3800"
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
@@ -23,7 +23,7 @@
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
-      "sorgente_sha256": "bba0521f5bb3bbb7bcd617b46977ff1f4e21578b279b965c8995543a9c333877"
+      "sorgente_sha256": "f281bb18af699e1e9c98f5bde5c7fdd90ed7f27dcc6889d6eb977e5b47a659db"
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
@@ -31,7 +31,7 @@
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "3a28df57941d2e3086917c0feaa53ec58aaf94d0d1b360bc3399ac485d244cf0"
+      "sorgente_sha256": "4d204ba91adc741e9c9e766b58fa754e28d712966d114d169c89f34164b264a1"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",

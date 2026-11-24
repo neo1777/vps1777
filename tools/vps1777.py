@@ -19,6 +19,7 @@ Sottocomandi:
   indice-modello, indice-notturno, ingest-coda   ricerca per senso e coda dei caricamenti
   campanello, avvisa-fallimento, secrets-status  avvisi e promemoria
   memoria    il blocco di memoria servito da nb1777 (stato | mostra | importa)
+  canale-verifica   giudica un canale.json già sul disco: firma e scadenza, senza rete
 (l'elenco vero lo dà `vps1777 help`; un test lo confronta con questo)
 
 Design: docs/SELF_UPDATE_PLAN.md. Contratto migrazioni: migrations/README.md.
@@ -26,6 +27,8 @@ Design: docs/SELF_UPDATE_PLAN.md. Contratto migrazioni: migrations/README.md.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import contextlib
 import fcntl
 import hashlib
@@ -40,11 +43,12 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ─────────────────────────────────────────── costanti
@@ -629,7 +633,8 @@ def latest_release(repo: Path) -> dict | None:
     prerelease → prima voce di /releases (solo test)."""
     try:
         if release_channel(repo) == "prerelease":
-            rels = github_json("/releases?per_page=5")
+            rels = [r for r in github_json("/releases?per_page=10")
+                    if str(r.get("tag_name", "")).startswith("v")]   # non la release fissa «canale»
             return rels[0] if rels else None
         # `github_json` dà dict o list secondo l'endpoint; questo dà sempre un oggetto
         return github_json("/releases/latest")  # type: ignore[return-value]
@@ -3576,6 +3581,178 @@ def _secrets_mancanti_in(compose: Path, radice_repo: Path,
 # macchina lo installi da sola. Vale SOLO sul percorso automatico: `vps1777 update` a
 # mano, `--version` e il pulsante admin restano immediati. Gemelli: `minimumReleaseAge`
 # di Renovate, `cooldown` di Dependabot.
+# ─────────────────────────────────────────── il canale firmato (SIC-15)
+#
+# «Qual è l'ultima release» l'updater lo chiedeva all'API di GitHub: una risposta non firmata e
+# senza data. Chi sta in mezzo (o una cache rimasta ferma) può rispondere per mesi «l'ultima è
+# quella che hai», e la macchina non riceve più le correzioni senza che niente diventi rosso:
+# è il congelamento (freeze). Le firme sui pacchetti non lo vedono: il pacchetto vecchio è autentico.
+#
+# La difesa è un PUNTATORE firmato con una scadenza, rifirmato a calendario: `canale.json`
+# («l'ultima stabile è X, firmato il, scade il»), pubblicato da `.github/workflows/canale.yml`
+# nella release fissa `canale` con la firma keyless accanto. L'aggiornamento AUTOMATICO lo
+# pretende fresco: se è scaduto, assente o non verificabile SI FERMA e avvisa su Telegram
+# (scelta del proprietario, 22/11/2026). L'aggiornamento a mano resta possibile: chi ha la shell
+# ha già scelto. È l'idea del ruolo «timestamp» di TUF e di `Valid-Until` di apt, ridotta a un
+# file: niente chiavi da custodire, l'identità che firma è il workflow.
+CANALE_TAG = "canale"
+CANALE_URL = f"https://github.com/{GITHUB_REPO}/releases/download/{CANALE_TAG}"
+CANALE_IDENTITA = (rf"^https://github\.com/{re.escape(GITHUB_REPO)}"
+                   r"/\.github/workflows/canale\.yml@refs/heads/main$")
+CANALE_VITA_MAX_GIORNI = 60        # una vita più lunga è un errore di chi firma: si rifiuta
+CANALE_ANTICIPO_MAX_S = 600        # tolleranza sull'orologio per «firmato nel futuro»
+CANALE_MAX_BYTE = 64 * 1024
+CANALE_SCADUTO = "canale di aggiornamento SCADUTO"
+
+
+def _canale_data(valore: object, campo: str) -> datetime:
+    if not isinstance(valore, str) or not valore:
+        raise ValueError(f"manca `{campo}`")
+    try:
+        d = datetime.fromisoformat(valore.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"`{campo}` non è una data ({valore!r})") from None
+    if d.tzinfo is None:
+        raise ValueError(f"`{campo}` è senza fuso orario ({valore!r})")
+    return d
+
+
+def canale_leggi(path: Path) -> dict:
+    """Il contenuto di `canale.json`, con la forma controllata. Solleva ValueError col motivo."""
+    grezzo = path.read_bytes()
+    if len(grezzo) > CANALE_MAX_BYTE:
+        raise ValueError("file troppo grande per essere un canale")
+    try:
+        dati = json.loads(grezzo)
+    except ValueError:
+        raise ValueError("non è JSON") from None
+    if not isinstance(dati, dict):
+        raise ValueError("non è un oggetto")
+    if dati.get("schema") != 1:
+        raise ValueError(f"schema sconosciuto ({dati.get('schema')!r})")
+    latest = dati.get("latest")
+    if not isinstance(latest, str) or not valid_semver(latest):
+        raise ValueError(f"`latest` non è una versione ({latest!r})")
+    firmato, scade = _canale_data(dati.get("firmato_il"), "firmato_il"), _canale_data(dati.get("scade_il"), "scade_il")
+    if scade <= firmato:
+        raise ValueError("`scade_il` non viene dopo `firmato_il`")
+    if scade - firmato > timedelta(days=CANALE_VITA_MAX_GIORNI):
+        raise ValueError(f"vita del canale oltre {CANALE_VITA_MAX_GIORNI} giorni: non è un canale a scadenza")
+    return dati
+
+
+def canale_firma(path: Path, *, chiave_pubblica: Path | None = None,
+                 cosign: str | None = None) -> tuple[bool | None, str]:
+    """(True, "") firma valida · (False, perché) non valida · (None, perché) non ho potuto guardare.
+
+    Due vie, e la seconda è SOLO per le prove: senza chiave la firma è quella keyless del
+    workflow (`<file>.sig` + `<file>.pem`, verificata con cosign contro l'identità di
+    `canale.yml` su main). Con `chiave_pubblica` è una firma ECDSA su SHA-256 verificata con
+    openssl: serve a provare il rifiuto di un canale scaduto o manomesso con file di prova che
+    stanno nel repo, dove la chiave vera non può stare. L'updater non passa mai una chiave."""
+    sig = path.with_name(path.name + ".sig")
+    if not sig.is_file():
+        return False, f"manca la firma ({sig.name})"
+    if chiave_pubblica is not None:
+        openssl = shutil.which("openssl")
+        if not openssl:
+            return None, "openssl non c'è: la firma di prova non si può verificare"
+        try:
+            binaria = base64.b64decode(sig.read_bytes().strip(), validate=True)
+        except (binascii.Error, ValueError):
+            return False, "la firma non è base64"
+        with tempfile.NamedTemporaryFile(suffix=".sig") as tmp:
+            tmp.write(binaria)
+            tmp.flush()
+            res = run([openssl, "dgst", "-sha256", "-verify", str(chiave_pubblica),
+                       "-signature", tmp.name, str(path)], check=False, capture=True, timeout=60)
+        return (True, "") if res.returncode == 0 else (False, "la firma non corrisponde al contenuto")
+    pem = path.with_name(path.name + ".pem")
+    if not pem.is_file():
+        return False, f"manca il certificato della firma ({pem.name})"
+    cosign = cosign or shutil.which("cosign")
+    if not cosign:
+        return None, "cosign non c'è: la firma del canale non si può verificare"
+    res = run([cosign, "verify-blob", "--certificate-identity-regexp", CANALE_IDENTITA,
+               "--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
+               "--signature", str(sig), "--certificate", str(pem), str(path)],
+              check=False, capture=True, timeout=300)
+    return (True, "") if res.returncode == 0 else (False, "la firma non è quella del workflow del canale")
+
+
+def canale_verifica(path: Path, *, chiave_pubblica: Path | None = None, cosign: str | None = None,
+                    adesso: datetime | None = None) -> tuple[bool | None, str, dict | None]:
+    """(esito, motivo, dati). L'ordine conta: prima la FORMA, poi la FIRMA, poi la SCADENZA.
+    Una scadenza si crede solo se sta sotto una firma valida: allungarla senza rifirmare
+    cade sulla firma, non passa per «non ancora scaduto»."""
+    try:
+        dati = canale_leggi(path)
+    except OSError as exc:
+        return None, f"non leggo {path.name}: {exc.strerror or exc}", None
+    except ValueError as exc:
+        return False, f"canale malformato: {exc}", None
+    valida, perche = canale_firma(path, chiave_pubblica=chiave_pubblica, cosign=cosign)
+    if not valida:
+        return valida, perche, None
+    ora = adesso or datetime.now(timezone.utc)
+    if _canale_data(dati["firmato_il"], "firmato_il") > ora + timedelta(seconds=CANALE_ANTICIPO_MAX_S):
+        return False, f"canale firmato nel futuro ({dati['firmato_il']}): orologio sbagliato, qui o da chi firma", None
+    if _canale_data(dati["scade_il"], "scade_il") <= ora:
+        return False, (f"{CANALE_SCADUTO} il {dati['scade_il']}: chi dice «l'ultima è la v{dati['latest']}» "
+                       "non lo conferma più da troppo tempo"), None
+    return True, f"canale valido fino al {dati['scade_il']}: l'ultima stabile è la v{dati['latest']}", dati
+
+
+def cmd_canale_verifica(_repo: Path, args) -> int:
+    """`vps1777 canale-verifica <canale.json>`: giudica un file di canale già sul disco, senza
+    rete. Esce 0 se lo accetta, 1 se lo rifiuta, 2 se non ha potuto guardare."""
+    chiave = Path(args.chiave_pubblica) if args.chiave_pubblica else None
+    if chiave is not None and not chiave.is_file():
+        warn(f"chiave pubblica non trovata: {chiave}")
+        return 2
+    esito, motivo, _ = canale_verifica(Path(args.canale), chiave_pubblica=chiave)
+    if esito:
+        ok(motivo)
+        return 0
+    if esito is None:
+        warn(f"canale NON verificato: {motivo}")
+        return 2
+    warn(f"canale RIFIUTATO: {motivo}")
+    return 1
+
+
+def canale_scarica(repo: Path) -> Path:
+    """Scarica canale.json con firma e certificato in `var/canale/`. Solleva su rete o 404."""
+    dove = repo / "var" / "canale"
+    dove.mkdir(parents=True, exist_ok=True)
+    for nome in ("canale.json", "canale.json.sig", "canale.json.pem"):
+        download(f"{CANALE_URL}/{nome}", dove / nome, timeout=30, massimo=CANALE_MAX_BYTE)
+    return dove / "canale.json"
+
+
+def canale_per_update(repo: Path, *, scarica=None, attesa_s: float = 20.0) -> tuple[dict | None, str]:
+    """Il canale per l'aggiornamento automatico: (dati, "") se è fresco e firmato, (None, perché)
+    altrimenti. Un secondo tentativo dopo una pausa: chi firma carica tre file uno dopo
+    l'altro, e nel mezzo il JSON nuovo sta accanto alla firma vecchia."""
+    scarica = scarica or canale_scarica
+    motivo = ""
+    for tentativo in (1, 2):
+        try:
+            path = scarica(repo)
+        except (urllib.error.URLError, OSError, RuntimeError) as exc:
+            motivo = f"canale non scaricabile ({exc})"
+        else:
+            cosign = shutil.which("cosign") or _ensure_cosign(repo)
+            esito, motivo, dati = canale_verifica(path, cosign=cosign)
+            if esito:
+                return dati, ""
+            if CANALE_SCADUTO in motivo:
+                break                     # scaduto è scaduto: riprovare non cambia la data
+        if tentativo == 1:
+            time.sleep(attesa_s)
+    return None, motivo
+
+
 def quarantena_blocca(rel: dict, ore_minime: float | None,
                       adesso: datetime | None = None) -> str | None:
     """Perché NON installare `rel` da soli adesso, o None se ha l'età per passare.
@@ -3708,6 +3885,34 @@ def cmd_update(repo: Path, args) -> int:
         log("nessuna release pubblicata — niente da fare")
         return 0
     target = norm_ver(rel["tag_name"])
+    # 2-bis — IL CANALE FIRMATO (SIC-15), solo sul percorso automatico (il timer passa
+    # --eta-minima e nessun target). Sta PRIMA di «già aggiornato»: il congelamento è proprio
+    # la risposta «l'ultima è quella che hai», e lì sotto si uscirebbe contenti senza guardare.
+    if getattr(args, "eta_minima", None) and not target_req and release_channel(repo) == "stable":
+        canale, perche = canale_per_update(repo)
+        if canale is None:
+            st["canale"] = {"esito": "fermo", "motivo": perche,
+                            "quando": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+            state_save(repo, st)
+            warn(f"aggiornamento automatico FERMO: {perche}")
+            telegram_notify(repo, "⚠️ vps1777: l'aggiornamento automatico si è FERMATO.\n"
+                                  f"{perche}\n"
+                                  "Finché il canale firmato non torna valido la macchina non si aggiorna "
+                                  "da sola. A mano resta possibile: `vps1777 update`.")
+            return 0
+        st["canale"] = {"esito": "ok", "latest": canale["latest"], "scade_il": canale["scade_il"],
+                        "quando": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        state_save(repo, st)
+        if version_key(canale["latest"]) > version_key(target):
+            # il puntatore firmato dice che esiste una release più nuova di quella che l'API
+            # ha risposto: si crede alla firma, e la release si chiede per nome
+            warn(f"l'API dice che l'ultima è la v{target}, il canale firmato dice v{canale['latest']}: "
+                 "seguo il canale")
+            try:
+                rel = release_by_tag(f"v{canale['latest']}")
+            except (urllib.error.URLError, OSError) as exc:
+                die(f"GitHub irraggiungibile: {exc}")
+            target = norm_ver(rel["tag_name"])
     if norm_ver(cur) == target:
         if st.get("stato_perso"):
             # lo stato è ripartito da vuoto (era illeggibile): se c'era un update interrotto la
@@ -4263,6 +4468,11 @@ def cmd_status(repo: Path, args) -> int:
         print(f"ultimo check      : {data['last_check'] or 'mai'}")
         if data["check_error"]:
             print(f"errore check      : {_redigi(str(data['check_error']))}")
+        canale = st.get("canale") or {}
+        if canale.get("esito") == "fermo":
+            print(f"⚠ canale firmato  : FERMO dal {canale.get('quando', '?')}: {_redigi(str(canale.get('motivo', '')))}")
+        elif canale.get("esito") == "ok":
+            print(f"canale firmato    : valido fino al {canale.get('scade_il', '?')} (visto il {canale.get('quando', '?')})")
         if data["update_in_progress"]:
             print(f"⚠ update in corso : {_redigi(str(data['update_in_progress']))}")
         if args.probe:
@@ -5847,6 +6057,12 @@ def build_parser() -> "argparse.ArgumentParser":
     parser.add_argument("--home", help="root del repo sulla VPS (default: $VPS1777_HOME, poi /home/vps1777/vps1777, poi la cartella corrente)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    p = sub.add_parser("canale-verifica",
+                       help="giudica un canale.json già sul disco (firma e scadenza), senza rete")
+    p.add_argument("canale", help="il file canale.json; la firma sta accanto, in <file>.sig")
+    p.add_argument("--chiave-pubblica", metavar="FILE",
+                   help="SOLO per le prove: verifica con questa chiave invece che con la firma del workflow")
+
     p = sub.add_parser("check", help="controlla l'ultima release")
     p.add_argument("--notify", action="store_true", help="notifica Telegram se c'è una versione nuova")
 
@@ -5998,6 +6214,7 @@ def main() -> int:
                 "ingest-coda": cmd_ingest_coda,
                 "secrets-status": cmd_secrets_status,
                 "memoria": cmd_memoria, "help": cmd_help,
+                "canale-verifica": cmd_canale_verifica,
                 "avvisa-fallimento": cmd_avvisa_fallimento,
                 "campanello": cmd_campanello}
     try:
@@ -6050,7 +6267,9 @@ def _esci(codice: int) -> None:
     #   il TTY — un `vps1777 update` in una pipe o in uno script di Neo non ha un TTY
     #   e resterebbe muto, che è il caso in cui l'avviso serve di più.
     sotto_systemd = bool(os.environ.get("INVOCATION_ID"))
-    if codice != 0 and not sotto_systemd:
+    # `canale-verifica` GIUDICA un file: l'1 è la sua risposta («rifiutato»), non un guasto da avvisare
+    giudizio = len(sys.argv) > 1 and "canale-verifica" in sys.argv[1:3]
+    if codice != 0 and not sotto_systemd and not giudizio:
         cmd = " ".join(sys.argv[1:]) or "(nessun argomento)"
         try:
             telegram_notify(
