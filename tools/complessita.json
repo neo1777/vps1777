@@ -18,10 +18,6 @@
    "complessita": 19,
    "stato": "da-esaminare"
   },
-  "services/gateway/app/archive_indexer.py::classify_voice": {
-   "complessita": 19,
-   "stato": "da-esaminare"
-  },
   "tools/vps1777.py::cmd_secrets_status": {
    "complessita": 19,
    "stato": "da-esaminare"
