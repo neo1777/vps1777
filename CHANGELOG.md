@@ -33,6 +33,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - ruff accende B904: un `raise` dentro un `except` dice da dove viene (`from err` o `from None`).
 - La ricerca ibrida cita la fonte della sua fusione (Reciprocal Rank Fusion, SIGIR 2009) e dice in che
   cosa se ne discosta; CONTRIBUTING elenca il prefisso `refactor:`.
+- `tools/scanner.sh segreti` in un worktree di git legge la storia come nel repo principale: prima ripiegava
+  sulla lettura del disco, che entra anche nelle `.venv` non tracciate, e dava un rosso falso.
 - **La semina degli script di `tools/` nel ledger delle feature finisce il 31/01/2027.** Dal 02/08 gli script
   non dichiarati davano solo avvisi, senza una data: dal 01/02/2027 saranno errori (la data è la stessa del
   censimento della complessità). `verify-features.py --oggi AAAA-MM-GG` legge scadenze e semine a una data
