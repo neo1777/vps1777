@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.17] — 2026-11-25
+
 ### Cambiato
 - **La lettura delle sessioni di Claude Code è riordinata** (QUA-04): `_iter_claude_code` (complessità 21)
   è spezzata in un lettore con un passo per specie di record, senza cambiare comportamento: ogni riga resa,
