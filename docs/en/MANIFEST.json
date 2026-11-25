@@ -18,8 +18,8 @@
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
-      "sorgente_sha256": "61cd08944841ce6cba4b93d4e6ae642f31ca97e35d6c5e1399c91f017cff8e12",
-      "traduzione_sha256": "2dd352a90e74840a132e581b4492ba32461c0215e2958af67bf94725cc68cfa8"
+      "sorgente_sha256": "c17f9ef970b16eae3a59212c0dde2c1020d008f9157852edfb143fb2d92ed1c5",
+      "traduzione_sha256": "0194722d42b31b300bf4c5ddc73bdc8e21f2fb2f1242cdeadfc5edb6a2a1d992"
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",
@@ -38,8 +38,8 @@
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "7a0e5904e8e1f3041aa3f25596d0a36e966376664971a440cc5a21348f1d128f",
-      "traduzione_sha256": "90e6feb8c13f825558b577c518e4e0801e9e8a9264f992fcb6ecb968cb3c6df5"
+      "sorgente_sha256": "e06f24b49cfa81297c1f13041723698ce9a6af9333a43b0b158b4d7b235afca5",
+      "traduzione_sha256": "fcdaca27a9c57e12405a09bd966f325fd4cacd09ca6a6a975d54ceb0e99af1c3"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",
@@ -48,8 +48,8 @@
     },
     "docs/en/RICERCA-IBRIDA.md": {
       "sorgente": "docs/RICERCA-IBRIDA.md",
-      "sorgente_sha256": "a8c34b0f9f35c657a831e2507f116a950e680d3e33b3d7dc971677d405151af5",
-      "traduzione_sha256": "36c551bbc94f538e95257b8b1aff24b5a9a0d3bf28bf962d70901106a126ebc9"
+      "sorgente_sha256": "5ee8987ca5a7526692998b4280b512ebe018d31887677f5e07d0eb112504d07a",
+      "traduzione_sha256": "bd78291f9c7ba02cd9c1d3466bb0b8c200a29d0502c3008c6c90830cac85610d"
     },
     "docs/en/PRIMI-15-MINUTI.md": {
       "sorgente": "docs/PRIMI-15-MINUTI.md",

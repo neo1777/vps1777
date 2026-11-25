@@ -323,7 +323,7 @@ are skipped. Even in dry-run it takes the archive lock, DB by DB (like `archive-
 
 ```bash
 vps1777 archive-migra                                  # anteprima su tutti i DB
-vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
+vps1777 archive-migra --db <nome-del-db> --scrivi  # applica su un DB solo
 ```
 
 With `--telegram` (and `--db`, required) it gives `speaker` to the messages of a

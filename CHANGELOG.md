@@ -15,6 +15,9 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `EXAMPLE_BOT_OWNER_ID` non risponde a nessuno; SECURITY.md chiamava «rebuild» un controllo mensile che non
   ricostruisce e non contava `H102` e `H103` nella provenienza. Da una pagina di roadmap sono usciti nomi di
   persone e dettagli personali; dalle altre i percorsi di una macchina di sviluppo.
+- **Il contatto per le segnalazioni di sicurezza è solo la segnalazione privata di GitHub** (attiva sul repo):
+  dai documenti esce l'indirizzo email personale del manutentore. ARCHIVE e RICERCA-IBRIDA non nominano più i
+  DB veri di un'installazione né il modello di un PC: le misure restano, con la loro data.
 - **Lo scanner dei segreti guarda due volte prima di dire rosso.** trufflehog segnala anche ciò che non riesce a
   verificare: quando la verifica remota falliva per un momento storto della rete, stringhe innocue della storia
   uscivano come «non verificabili» e `check.sh` (e il workflow degli scanner) arrossiva da solo, per tornare verde

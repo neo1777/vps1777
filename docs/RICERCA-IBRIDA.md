@@ -96,7 +96,7 @@ di vicino alla domanda, il ramo vettoriale torna vuoto e la risposta è quella d
 Lo stesso banco, con un secondo conteggio, S: l'elemento **si legge** nello snippet, senza
 aprire il file (almeno quattro parole di fila di una citazione della risposta attesa).
 
-| prime 10 righe | vocali (voce-1777) | gruppo Telegram | 21 verbali |
+| prime 10 righe | vocali | gruppo Telegram | 21 verbali |
 |---|---|---|---|
 | snippet di 32 token (il default fino alla 0.64.4) | 9 su 30 | 12 | 9 |
 | snippet di 64 token (il default ora) | 13 | 12 | 11 |
@@ -577,7 +577,7 @@ Il server scrive anche un avviso nel log quando scarta qualcosa.
 
 ## Quanto costa — misurato
 
-Misurato il 24/09/2026 su un PC a 4 core e 8 thread (Ryzen 5 2400G, solo AVX2), sulla copia del primario, per una
+Misurato il 24/09/2026 su un PC a 4 core e 8 thread (solo AVX2), sulla copia del primario, per una
 finestra di due giorni (1.618 messaggi, 4.366 vettori):
 
 | | |
@@ -602,7 +602,7 @@ Stime, dalla velocità misurata (sono stime, non misure):
 | luglio–settembre 2026 (pezzi contati dal prototipo sulla copia del 08/09) | ~282.000 | ~34 h |
 
 **La corsa intera, misurata** (25-26/09/2026, stesso PC a 4 core / 8 thread, in uso normale, a
-`nice` 15): il primario `recupero-20260924` con `--tutto` — 266.219 messaggi, **452.311
+`nice` 15): il DB primario con `--tutto` — 266.219 messaggi, **452.311
 vettori in 31 h 13'**, cioè **~4,0 vettori/s di media** (da ~2 all'avvio a 4,7 a
 regime), 1,70 vettori per messaggio, indice di 735 MB. La finestra di due giorni qui
 sopra sottostimava la velocità: era corta e comprendeva il riscaldamento.
@@ -723,7 +723,7 @@ DB: se non è in pari, aggiornalo lì e carica quello.
 
 `[stato dell'installazione al 27/09/2026 — lo stato di oggi di ogni indice è nella colonna «per senso» di /admin/archive]`
 
-- **Il primario per Claude Code è `recupero-20260924`** (dal 24/09: il primo bundle
+- **Il primario per Claude Code** è un DB nuovo dal 24/09 (dal 24/09: il primo bundle
   col contratto `recupero/` R1, vedi [ARCHIVE.md](ARCHIVE.md)), e il suo indice copre
   **tutto il DB**: 266.219 messaggi con testo indicizzabile (16.826 troppo corti restano
   fuori), **452.311 vettori**, log e sotto-agenti compresi, col registro `indice_righe`.
@@ -732,9 +732,9 @@ DB: se non è in pari, aggiornalo lì e carica quello.
   Dopo un re-ingest di questo DB l'indice va aggiornato su una copia nuova (vedi
   «Attivare la ricerca per senso», il capoverso sul re-ingest): finché non lo si fa, i risultati vettoriali
   che non combaciano più vengono scartati e dichiarati.
-- **`memoria-claudeai-20260926`** (le memorie di claude.ai) ha un indice suo su **tutto
+- **Il DB delle memorie di claude.ai** ha un indice suo su **tutto
   il DB**: 61 messaggi, col registro, generato il 26/09/2026.
-- **`recupero-20260905`** (il primario fino al 24/09, ora riscontro) tiene l'indice del
+- **Il primario precedente** (fino al 24/09, ora riscontro) tiene l'indice del
   prototipo: **maggio–giugno 2026** (58.322 messaggi, 139.011 vettori, generato il
   07/09/2026), con `indice_meta` scritta a mano e **senza** registro — `verifica.registro:
   false`; per aggiornarlo serve una ricostruzione (`--ricostruisci`).

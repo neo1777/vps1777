@@ -104,7 +104,7 @@ close to the question, the vector branch comes back empty and the answer is FTS5
 The same bench, with a second count, S: the element **can be read** in the snippet without
 opening the file (at least four consecutive words of a quote from the expected answer).
 
-| first 10 rows | voice notes (voce-1777) | Telegram group | 21 meeting records |
+| first 10 rows | voice notes | Telegram group | 21 meeting records |
 |---|---|---|---|
 | 32-token snippet (the default up to 0.64.4) | 9 of 30 | 12 | 9 |
 | 64-token snippet (the default now) | 13 | 12 | 11 |
@@ -605,7 +605,7 @@ The server also writes a warning to the log when it discards something.
 
 ## What it costs — measured
 
-Measured on 24/09/2026 on a PC with 4 cores and 8 threads (Ryzen 5 2400G, AVX2 only), on the copy of the primary DB, for a
+Measured on 24/09/2026 on a PC with 4 cores and 8 threads (AVX2 only), on the copy of the primary DB, for a
 two-day window (1,618 messages, 4,366 vectors):
 
 | | |
@@ -630,7 +630,7 @@ Estimates, from the measured speed (they are estimates, not measurements):
 | July–September 2026 (chunks counted by the prototype on the 08/09 copy) | ~282,000 | ~34 h |
 
 **The full run, measured** (25-26/09/2026, same 4-core / 8-thread PC, in normal use, at `nice`
-15): the primary `recupero-20260924` with `--tutto` — 266,219 messages, **452,311
+15): the primary DB with `--tutto` — 266,219 messages, **452,311
 vectors in 31 h 13'**, i.e. **~4.0 vectors/s on average** (from ~2 at start-up to 4.7
 at cruise speed), 1.70 vectors per message, a 735 MB index. The two-day window above
 underestimated the speed: it was short and included the warm-up.
@@ -752,7 +752,7 @@ it is not in step, update it there and upload that one.
 
 `[state of the installation on 27/09/2026 — today's state of each index is in the «per senso» column of /admin/archive]`
 
-- **The primary for Claude Code is `recupero-20260924`** (since 24/09: the first bundle
+- **The primary for Claude Code** is a new DB since 24/09 (since 24/09: the first bundle
   with the `recupero/` R1 contract, see [ARCHIVE.md](ARCHIVE.md)), and its index covers
   **the whole DB**: 266,219 messages with indexable text (16,826 too short stay out),
   **452,311 vectors**, logs and sub-agents included, with the `indice_righe` ledger.
@@ -761,9 +761,9 @@ it is not in step, update it there and upload that one.
   After a re-ingest of this DB the index has to be updated on a fresh copy (see "Turning
   on search by meaning", the paragraph on re-ingest): until then, vector results that no longer
   match are discarded and declared.
-- **`memoria-claudeai-20260926`** (the claude.ai memories) has an index of its own on
+- **The claude.ai memories DB** has an index of its own on
   **the whole DB**: 61 messages, with the ledger, generated on 26/09/2026.
-- **`recupero-20260905`** (the primary until 24/09, now a cross-check) keeps the
+- **The previous primary** (until 24/09, now a cross-check) keeps the
   prototype's index: **May–June 2026** (58,322 messages, 139,011 vectors, generated on
   07/09/2026), with a hand-written `indice_meta` and **no** ledger — `verifica.registro:
   false`; updating it requires a rebuild (`--ricostruisci`).

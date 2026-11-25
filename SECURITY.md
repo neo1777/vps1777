@@ -14,7 +14,7 @@
 > among the running services, the NotebookLM Google-session volume is mounted only
 > by `nb1777-mcp` (the backup job reads it solely to encrypt it).
 > **Reporting a vulnerability**: please do **not** open a public issue. Open a private
-> GitHub Security Advisory on this repository, or write to `antigravity1777@gmail.com`
+> GitHub Security Advisory on this repository
 > (see *Reporting a Vulnerability* below) — never post exploit details publicly. The rest of this document is in Italian (the project's
 > native language — see the README's language policy): it is the full defensive
 > review of July 2026, the threat model, the third-party data flows and the known
@@ -29,8 +29,8 @@ Pre-1.0: solo l'ultima `main` riceve security fix.
 
 **Non** aprire una issue pubblica.
 
-Mandami un'email a `antigravity1777@gmail.com` (oppure apri una *GitHub Security
-Advisory* privata sul repo) con:
+Apri una *GitHub Security Advisory* privata sul repo (scheda *Security* → *Report a
+vulnerability*: la vede solo il manutentore) con:
 - Descrizione della vuln
 - Step di riproduzione (PoC se possibile)
 - Impatto stimato

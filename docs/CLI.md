@@ -314,7 +314,7 @@ a secco prende, DB per DB, il lucchetto dell'archivio (come `archive-retag`).
 
 ```bash
 vps1777 archive-migra                                  # anteprima su tutti i DB
-vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
+vps1777 archive-migra --db <nome-del-db> --scrivi  # applica su un DB solo
 ```
 
 Con `--telegram` (e `--db`, obbligatorio) dà lo `speaker` ai messaggi di un **gruppo
