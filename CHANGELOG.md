@@ -27,6 +27,9 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   con la versione nuova. Visto da Sagoma.
 
 ### Cambiato
+- **La scrittura dell'archivio è riordinata** (QUA-04): `write_rows` (complessità 30), che scrive ogni
+  caricamento nei DB, è spezzata nei suoi passi senza cambiare comportamento: lo stesso flusso dà lo stesso
+  DB, verificato su 664 scenari col contenuto completo del database.
 - `tools/check.sh` lancia anche gli scanner del sorgente (Dockerfile, dipendenze, segreti nella storia),
   come fa `scanner.yml` in CI; il test che tiene check.sh al passo coi workflow ora guarda anche quello.
 - ruff accende B904: un `raise` dentro un `except` dice da dove viene (`from err` o `from None`).
