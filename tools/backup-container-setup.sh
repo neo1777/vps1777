@@ -40,10 +40,14 @@ apk add --no-cache age=1.2.1-r0 bash=5.2.26-r0 zstd=1.5.6-r0 sqlite=3.45.3-r3 >/
 # Il log sta sul volume dei backup (W5, 04/10/2026): in /var/log, dentro il container,
 # moriva a ogni update, che ricrea il container. Ultime 5000 righe, circa un mese di notti.
 # backup-pull.sh non lo porta via: copia solo gli archivi e i loro .meta.
+# L'esito del giro va in /backups/ultimo-esito (25/11/2026), SUBITO dopo backup.sh, prima di
+# `tail` che riscriverebbe `$?`: `vps1777 check` lo legge ogni giorno e avvisa al primo fallimento.
+# Prima un backup fallito si vedeva solo dopo due notti senza copie (rilievo di Sagoma). Il `\$?`
+# è scritto così perché l'heredoc qui sotto espande: nel crontab deve arrivare `$?`.
 echo "[backup] writing crontab..."
 cat > /etc/crontabs/root <<EOF
 # vps1777 daily backup at 03:00 UTC
-0 3 * * * cd /vps1777 && bash tools/backup.sh >> /backups/backup.log 2>&1; tail -n 5000 /backups/backup.log > /backups/backup.log.tmp && mv /backups/backup.log.tmp /backups/backup.log
+0 3 * * * cd /vps1777 && bash tools/backup.sh >> /backups/backup.log 2>&1; echo \$? > /backups/ultimo-esito; tail -n 5000 /backups/backup.log > /backups/backup.log.tmp && mv /backups/backup.log.tmp /backups/backup.log
 EOF
 
 touch /backups/backup.log
