@@ -16,7 +16,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 FINITO = '{"level":"info-0","msg":"finished scanning"}'
 
 
-def _gira(tmp_path: Path, esiti: list[int]) -> tuple[int, str, int]:
+def _gira(tmp_path: Path, esiti: list[int], specie: str = "verified") -> tuple[int, str, int]:
     """Lancia `scanner.sh segreti` con un docker finto che esce, chiamata dopo chiamata, con `esiti`."""
     finti = tmp_path / "bin"
     finti.mkdir()
@@ -29,7 +29,8 @@ def _gira(tmp_path: Path, esiti: list[int]) -> tuple[int, str, int]:
         f"n=$(wc -l < '{conta}')\n"
         f"esiti=({' '.join(map(str, esiti))})\n"
         'rc="${esiti[$((n - 1))]:-0}"\n'
-        'if [ "$rc" -eq 183 ]; then echo "Detector Type: Github"; echo "File: x.yml"; fi\n'
+        'if [ "$rc" -eq 183 ]; then echo "Found $SPECIE result"; echo "Detector Type: Github"; echo "File: x.yml";'
+        ' echo "Verification issue: i/o timeout"; fi\n'
         f"echo '{FINITO}'\n"
         'exit "$rc"\n')
     docker.chmod(0o755)
@@ -37,7 +38,7 @@ def _gira(tmp_path: Path, esiti: list[int]) -> tuple[int, str, int]:
     cartella.mkdir()
     r = subprocess.run(["bash", str(_ROOT / "tools" / "scanner.sh"), "segreti", str(cartella)],
                        capture_output=True, text=True, timeout=60,
-                       env={**os.environ, "PATH": f"{finti}:{os.environ['PATH']}", "SCANNER_PAUSA_S": "0"})
+                       env={**os.environ, "PATH": f"{finti}:{os.environ['PATH']}", "SCANNER_PAUSA_S": "0", "SPECIE": specie})
     return r.returncode, r.stdout + r.stderr, len(conta.read_text().splitlines())
 
 
@@ -47,9 +48,15 @@ def test_un_risultato_che_al_secondo_sguardo_non_c_e_non_e_rosso(tmp_path):
     assert "riguardo una volta" in detto
 
 
-def test_un_risultato_che_resta_e_rosso(tmp_path):
+def test_un_risultato_verificato_che_resta_e_rosso(tmp_path):
     rc, detto, chiamate = _gira(tmp_path, [183, 183])
     assert (rc, chiamate) == (1, 2), detto
+
+
+def test_risultati_mai_verificati_sono_non_misurato_col_motivo(tmp_path):
+    rc, detto, chiamate = _gira(tmp_path, [183, 183], specie="unverified")
+    assert (rc, chiamate) == (2, 2), detto
+    assert "non ho potuto verificare" in detto and "i/o timeout" in detto
 
 
 def test_il_pulito_non_si_guarda_due_volte(tmp_path):

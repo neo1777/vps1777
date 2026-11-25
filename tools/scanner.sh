@@ -94,6 +94,20 @@ segreti() {
     sleep "${SCANNER_PAUSA_S:-20}"
     out="$(timeout "$TETTO" docker run --rm -v "$DIR:/src:ro" "${monta[@]}" "$TRUFFLEHOG" "${modo[@]}" --no-update --results=verified,unknown --fail 2>&1)"; rc=$?
   fi
+  # Trovato ma NON verificato, anche al secondo sguardo: non è un segreto vivo e non è un pulito, è una
+  # verifica che non è riuscita (misurato: da dentro un contenitore la rete rispondeva in 5-10 s e ogni
+  # verifica scadeva con «i/o timeout»). Si dice per quello che è: non misurato, col motivo. Basta UN
+  # risultato verificato perché resti rosso.
+  local verificati incerti motivi
+  verificati="$(grep -c 'Found verified result' <<<"$out")"
+  incerti="$(grep -c 'Found unverified result' <<<"$out")"
+  if [ "$rc" -eq 183 ] && [ "$verificati" -eq 0 ] && [ "$incerti" -gt 0 ]; then
+    # del motivo solo lettere, spazi e barre: questo output va in un log pubblico
+    motivi="$(grep -o 'Verification issue: .*' <<<"$out" | sed 's/^Verification issue: //' | tr -cd 'A-Za-z /\n' | cut -c1-60 | sort | uniq -c | sed 's/^ *//' | paste -sd ';' -)"
+    grep -E 'Detector Type|File:|Commit:' <<<"$out" | tail -n 40
+    dice "⚪ segreti: $incerti risultati che non ho potuto verificare, nessuno verificato (${motivi:-motivo non detto})"
+    return 2
+  fi
   # Mai il valore nel log: solo le righe di riepilogo (questo output va in un log pubblico).
   grep -E '"msg":"finished scanning"|Detector Type|File:|Commit:' <<<"$out" | tail -n 40
   case "$rc" in
