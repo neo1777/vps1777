@@ -31,6 +31,21 @@ def _read_token() -> str:
     return os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
 
+# Il battito: il healthcheck del compose guarda l'età di questo file. Un bot non ha una porta da
+# interrogare; un file toccato dal ciclo di eventi dice che il processo c'è E che il ciclo gira.
+HEARTBEAT_FILE = Path(os.environ.get("BOT_HEARTBEAT_FILE", "/tmp/example-bot.heartbeat"))
+HEARTBEAT_OGNI_S = 30
+
+
+async def _batti() -> None:
+    while True:
+        try:
+            HEARTBEAT_FILE.touch()
+        except OSError as e:
+            log.warning("battito non scritto (%s): il container risulterà non sano", type(e).__name__)
+        await asyncio.sleep(HEARTBEAT_OGNI_S)
+
+
 def _owner_id() -> int:
     """L'unico utente a cui il bot risponde. 0 = nessuno (chiuso finché non lo imposti)."""
     try:
@@ -67,9 +82,11 @@ async def run() -> None:
         await app.initialize()
         await app.start()
         await app.updater.start_polling()
+        battito = asyncio.create_task(_batti())
         try:
             await asyncio.Event().wait()
         finally:
+            battito.cancel()
             await app.updater.stop()
             await app.stop()
             await app.shutdown()

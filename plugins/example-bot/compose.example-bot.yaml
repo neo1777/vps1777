@@ -34,6 +34,14 @@ services:
     # mai ingress.
     networks: [backend, egress]
     restart: unless-stopped
+    # Chi resta acceso dichiara come si vede che è vivo (SIC-06): il bot tocca un file ogni 30 s,
+    # e qui se ne guarda l'età. Stessa forma del bot di serie in compose.yaml.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,time; p='/tmp/example-bot.heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<90 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     labels:
       - "vps1777.role=bot"
       - "vps1777.name=example"

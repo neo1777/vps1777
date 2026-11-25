@@ -95,6 +95,28 @@ def test_un_file_del_token_indicato_e_assente_non_ripiega_sull_ambiente(bot, mon
     assert bot._read_token() == "un-altro-token"
 
 
+def test_il_bot_d_esempio_batte_e_il_compose_guarda_lo_stesso_file(bot, monkeypatch, tmp_path) -> None:
+    """Chi resta acceso dice come si vede che è vivo (SIC-06, 25/11/2026): il bot tocca un file, e
+    il healthcheck del suo compose guarda l'età di QUEL file, più a lungo del passo del battito."""
+    import asyncio
+    file = tmp_path / "battito"
+    monkeypatch.setattr(bot, "HEARTBEAT_FILE", file)
+    monkeypatch.setattr(bot, "HEARTBEAT_OGNI_S", 0.01)
+
+    async def un_giro() -> None:
+        compito = asyncio.create_task(bot._batti())
+        await asyncio.sleep(0.05)
+        compito.cancel()
+
+    asyncio.run(un_giro())
+    assert file.exists(), "il battito non ha scritto il file"
+    compose = (ROOT / "plugins/example-bot/compose.example-bot.yaml").read_text(encoding="utf-8")
+    assert "healthcheck:" in compose and "/tmp/example-bot.heartbeat" in compose
+    sorgente = (ROOT / "plugins/example-bot/app/__main__.py").read_text(encoding="utf-8")
+    assert '"/tmp/example-bot.heartbeat"' in sorgente, "il file predefinito non è più quello del compose"
+    assert "<90" in compose and "HEARTBEAT_OGNI_S = 30" in sorgente, "la soglia deve superare il passo"
+
+
 def test_env_example_non_promette_piu_un_audit_senza_limite() -> None:
     testo = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "cresce senza" not in testo
