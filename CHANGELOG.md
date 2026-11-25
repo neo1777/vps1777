@@ -23,6 +23,9 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   passi: sorgente, nome del DB, percorso diretto, trascrizione, errore della trascrizione, lettura del testo,
   resoconto. Complessità da 18 a 6 (QUA-04, restano 39 funzioni). Comportamento identico su 6.000 casi
   confrontati col codice di prima; tredici prove nuove per le strade che nessuna percorreva.
+- La `main` di `archive_indexer` è spezzata in un passo per modo (argomenti, `--migra-telegram`, `--migra`,
+  `--retag`, `--classify`, indicizzare). Complessità da 16 a 6 (QUA-04, restano 38 funzioni). Comportamento
+  identico su 6.000 righe di comando confrontate col codice di prima; dodici prove nuove, un modo per volta.
 
 ## [0.98.18] — 2026-11-25
 
