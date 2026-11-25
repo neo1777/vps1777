@@ -49,3 +49,32 @@ def test_senza_meta_il_ledger_e_severo() -> None:
     sorgente = (ROOT / "tools" / "verify-features.py").read_text(encoding="utf-8")
     assert '.get("baseline_completo", True)' in sorgente, \
         "il default di `baseline_completo` è tornato permissivo"
+
+
+def _verify_features(ledger: Path, repo: Path) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, str(ROOT / "tools" / "verify-features.py"),
+                           "--ledger", str(ledger), "--repo", str(repo)],
+                          capture_output=True, text=True, check=False)
+
+
+@pytest.mark.parametrize("testo", ["", "- una\n- due\n", "features: 3\n", "features: [ciao]\n",
+                                   "features: [\n"])
+def test_un_ledger_storto_esce_2_e_dice_perche(tmp_path: Path, testo: str) -> None:
+    """Un file vuoto, una lista al posto della mappa, `features` che non è una lista, una voce
+    che non è una mappa, un YAML rotto: prima alcuni facevano crollare lo strumento con un
+    errore Python (rilievo di Sagoma, 25/11). Ora esce 2, «non ho potuto guardare», e lo dice."""
+    ledger = tmp_path / "features.yaml"
+    ledger.write_text(testo, encoding="utf-8")
+    r = _verify_features(ledger, ROOT)
+    assert r.returncode == 2, (r.returncode, r.stderr[-400:])
+    assert "Traceback" not in r.stderr, r.stderr[-400:]
+    assert "ERRORE: " in r.stderr
+
+
+def test_senza_la_cli_le_voci_dei_comandi_sono_rosse_senza_crollare(tmp_path: Path) -> None:
+    """Un repo senza `tools/vps1777.py`: ogni voce `cli_command` è un fallimento che lo nomina,
+    non un FileNotFoundError che ferma il referto a metà."""
+    r = _verify_features(ROOT / "features.yaml", tmp_path)
+    assert r.returncode == 1, (r.returncode, r.stderr[-400:])
+    assert "Traceback" not in r.stdout + r.stderr
+    assert "tools/vps1777.py MANCA" in r.stdout + r.stderr

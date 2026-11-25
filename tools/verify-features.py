@@ -145,7 +145,12 @@ def _v_cli_command(arg, repo: Path) -> tuple[bool, str]:
     # che come un comando mai collegato.
     # ⇒ «esiste» qui vuol dire ENTRAMBE. Provarne una sola darebbe un verde su
     # metà della cosa, che è la classe che questo ledger esiste per chiudere.
-    src = (repo / "tools" / "vps1777.py").read_text(errors="replace")
+    cli = repo / "tools" / "vps1777.py"
+    if not cli.is_file():
+        # Senza la CLI non c'è niente in cui cercare il comando: una voce rossa che lo dice,
+        # non un FileNotFoundError che ferma tutto il referto (rilievo di Sagoma, 25/11).
+        return False, f"{arg}: tools/vps1777.py MANCA ⇒ nessun sottocomando da cercare"
+    src = cli.read_text(errors="replace")
     nel_parser = f'sub.add_parser("{arg}"' in src
     nel_dispatch = f'"{arg}": cmd_' in src
     ok = nel_parser and nel_dispatch
@@ -421,8 +426,11 @@ def main() -> int:
     a = ap.parse_args()
     repo = a.repo.resolve()
 
-    doc = yaml.safe_load((repo / a.ledger).read_text()) if not a.ledger.is_absolute() \
-        else yaml.safe_load(a.ledger.read_text())
+    doc = _leggi_ledger(a.ledger if a.ledger.is_absolute() else repo / a.ledger)
+    if isinstance(doc, str):
+        print(f"ERRORE: {doc}. Un ledger che non so leggere non si verifica, e non è un verde.",
+              file=sys.stderr)
+        return 2
     entries = doc.get("features", [])
     # Il default è SEVERO (21/11/2026). L'interruttore sta nel file che si verifica: se `_meta`
     # spariva (o il ledger restava senza voci) ogni «non dichiarato» diventava un avviso e la
@@ -442,6 +450,29 @@ def main() -> int:
     _reale_dichiarato(entries, repo, baseline_completo, hard_fail, surveil)
     _sorveglianza(entries, repo, oggi, surveil)
     return _referto(entries, baseline_completo, oggi, surveil, hard_fail)
+
+
+def _leggi_ledger(percorso: Path) -> dict | str:
+    """Il ledger come mappa con una lista di voci-mappa in `features`, o il perché non lo è.
+
+    Prima un file vuoto, una lista al posto della mappa o una voce che non è una mappa
+    facevano crollare lo strumento con un errore Python (rilievo di Sagoma, 25/11): il
+    cancello teneva, ma non diceva che cosa non andava."""
+    try:
+        doc = yaml.safe_load(percorso.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
+        return f"il ledger {percorso} non si legge ({type(e).__name__}: {e})"
+    if not isinstance(doc, dict):
+        return (f"il ledger {percorso} non è una mappa con la chiave `features` "
+                f"(è {type(doc).__name__})")
+    voci = doc.get("features", [])
+    if not isinstance(voci, list):
+        return f"`features` nel ledger {percorso} non è una lista (è {type(voci).__name__})"
+    storte = [str(i) for i, v in enumerate(voci) if not isinstance(v, dict)]
+    if storte:
+        return (f"nel ledger {percorso} le voci in posizione {', '.join(storte[:10])} "
+                "non sono mappe")
+    return doc
 
 
 def _schema(entries: list[dict], hard_fail: list[str]) -> None:

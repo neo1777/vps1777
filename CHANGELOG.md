@@ -4,6 +4,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Il controllo del ledger delle feature dice che cosa non va invece di crollare.** Un `features.yaml`
+  vuoto, una lista al posto della mappa, una voce che non è una mappa o un YAML rotto lo facevano uscire
+  con un errore Python; ora esce 2 («non ho potuto guardare») con il motivo. In un repo senza
+  `tools/vps1777.py` le voci dei sottocomandi diventano fallimenti che lo nominano, invece di fermare il
+  referto a metà. Visto da Sagoma.
+
+### Aggiunto
+- **I marcatori di conflitto si cercano anche in CI.** `tools/marcatori-di-conflitto.py` (con la sua
+  autoprova, nel job lint e in `tools/check.sh`) fallisce se un file tracciato ha una riga che comincia con
+  `<<<<<<< ` o `>>>>>>> `, o se è tracciato un `.rej` o un `.orig`. Prima lo cercava solo l'hook di
+  pre-commit, che si attiva a mano e non vede una PR aperta da un'altra macchina. Visto da Sagoma.
+
 ## [0.98.15] — 2026-11-25
 
 ### Corretto
