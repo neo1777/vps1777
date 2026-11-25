@@ -29,7 +29,7 @@ def _gira(tmp_path: Path, esiti: list[int], specie: str = "verified") -> tuple[i
         f"n=$(wc -l < '{conta}')\n"
         f"esiti=({' '.join(map(str, esiti))})\n"
         'rc="${esiti[$((n - 1))]:-0}"\n'
-        'if [ "$rc" -eq 183 ]; then echo "Found $SPECIE result"; echo "Detector Type: Github"; echo "File: x.yml";'
+        'specie=($SPECIE); if [ "$rc" -eq 183 ]; then echo "Found ${specie[$((n - 1))]:-${specie[0]}} result"; echo "Detector Type: Github"; echo "File: x.yml";'
         ' echo "Verification issue: i/o timeout"; fi\n'
         f"echo '{FINITO}'\n"
         'exit "$rc"\n')
@@ -43,13 +43,26 @@ def _gira(tmp_path: Path, esiti: list[int], specie: str = "verified") -> tuple[i
 
 
 def test_un_risultato_che_al_secondo_sguardo_non_c_e_non_e_rosso(tmp_path):
-    rc, detto, chiamate = _gira(tmp_path, [183, 0])
+    rc, detto, chiamate = _gira(tmp_path, [183, 0], specie="unverified")
     assert (rc, chiamate) == (0, 2), detto
     assert "riguardo una volta" in detto
 
 
-def test_un_risultato_verificato_che_resta_e_rosso(tmp_path):
+def test_un_risultato_verificato_e_rosso_subito_senza_riguardare(tmp_path):
     rc, detto, chiamate = _gira(tmp_path, [183, 183])
+    assert (rc, chiamate) == (1, 1), detto
+    assert "riguardo" not in detto
+
+
+def test_un_verificato_al_primo_sguardo_non_diventa_non_misurato_se_poi_la_rete_cede(tmp_path):
+    # il secondo giro, se ci fosse, direbbe «unverified»: non deve nemmeno partire
+    rc, detto, chiamate = _gira(tmp_path, [183, 183], specie="verified unverified")
+    assert (rc, chiamate) == (1, 1), detto
+    assert "non ho potuto verificare" not in detto
+
+
+def test_un_incerto_che_al_secondo_sguardo_si_verifica_e_rosso(tmp_path):
+    rc, detto, chiamate = _gira(tmp_path, [183, 183], specie="unverified verified")
     assert (rc, chiamate) == (1, 2), detto
 
 
@@ -67,5 +80,5 @@ def test_il_pulito_non_si_guarda_due_volte(tmp_path):
 
 @pytest.mark.parametrize("guasto", [125, 124, 1])
 def test_un_guasto_al_secondo_sguardo_e_non_misurato_e_non_verde(tmp_path, guasto):
-    rc, detto, chiamate = _gira(tmp_path, [183, guasto])
+    rc, detto, chiamate = _gira(tmp_path, [183, guasto], specie="unverified")
     assert (rc, chiamate) == (2, 2), detto
