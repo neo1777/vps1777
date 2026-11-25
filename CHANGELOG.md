@@ -18,6 +18,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **Il contatto per le segnalazioni di sicurezza è solo la segnalazione privata di GitHub** (attiva sul repo):
   dai documenti esce l'indirizzo email personale del manutentore. ARCHIVE e RICERCA-IBRIDA non nominano più i
   DB veri di un'installazione né il modello di un PC: le misure restano, con la loro data.
+- **L'installatore non resta appeso né mente quando un comando remoto va storto** (tre difetti vecchi di
+  `_stream`, visti da Sagoma rileggendo lo spezzamento). Al tetto di tempo diceva «l'ho fermato» di un processo
+  che sulla VPS poteva essere ancora vivo: ora dice che ha smesso di aspettarlo e che cosa guardare. La consegna
+  dello script per stdin non aveva tetto (se il remoto non leggeva, si restava fermi prima ancora del tetto del
+  comando): ora ne ha uno di 120 secondi. E se il lancio o l'invio fallivano, il canale restava aperto: ora si chiude.
 - **Lo scanner dei segreti guarda due volte prima di dire rosso.** trufflehog segnala anche ciò che non riesce a
   verificare: quando la verifica remota falliva per un momento storto della rete, stringhe innocue della storia
   uscivano come «non verificabili» e `check.sh` (e il workflow degli scanner) arrossiva da solo, per tornare verde

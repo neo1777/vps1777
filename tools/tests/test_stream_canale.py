@@ -82,7 +82,7 @@ def test_un_comando_muto_che_riesce_non_rende_niente(monkeypatch):
 def test_lo_script_va_per_stdin_prima_del_non_bloccante_e_la_scrittura_si_chiude(monkeypatch):
     canale = _Canale([b"fatto\n"])
     assert _gira(canale, monkeypatch, "bash -s", "config", "export PAROLA='é'\n") == ["fatto"]
-    assert canale.fatti == [("stderr_insieme", True), ("exec", "bash -s"),
+    assert canale.fatti == [("stderr_insieme", True), ("exec", "bash -s"), ("timeout", eng.STDIN_TIMEOUT_S),
                             ("sendall", "export PAROLA='é'\n".encode()), ("chiudi_scrittura",), ("timeout", 0.0)]
     # il segreto non è mai nel comando: argv è leggibile da tutta la macchina
     assert "PAROLA" not in canale.fatti[1][1]
@@ -118,3 +118,46 @@ def test_il_tetto_nomina_il_comando_se_manca_l_etichetta(monkeypatch):
 
 def test_un_pezzo_vuoto_a_comando_in_corso_non_e_la_fine(monkeypatch):
     assert _gira(_Canale([b"uno\n", b"", b"due\n"]), monkeypatch, "comando") == ["uno", "due"]
+
+
+def test_il_tetto_non_dice_di_aver_fermato_il_processo_remoto(monkeypatch):
+    # senza terminale chiudere il canale non uccide il processo: il messaggio dice ciò che è stato fatto
+    monkeypatch.setattr(eng, "CMD_TIMEOUT_S", 0)
+    canale = _Canale([None] * 5)
+    canale.exit_status_ready = lambda: False
+    with pytest.raises(eng.DeployError) as e:
+        _gira(canale, monkeypatch, "apt-get install", "pacchetti")
+    assert "ho smesso di aspettarlo" in str(e.value) and "può essere ancora vivo" in str(e.value)
+    assert "l'ho fermato" not in str(e.value)
+
+
+def test_lo_script_ha_un_tetto_per_la_consegna_e_poi_il_canale_torna_non_bloccante(monkeypatch):
+    canale = _Canale([b"ok\n"])
+    _gira(canale, monkeypatch, "bash -s", "config", "echo ciao\n")
+    tempi = [f[1] for f in canale.fatti if f[0] == "timeout"]
+    assert tempi == [eng.STDIN_TIMEOUT_S, 0.0]
+    assert canale.fatti.index(("timeout", eng.STDIN_TIMEOUT_S)) < canale.fatti.index(("sendall", b"echo ciao\n"))
+
+
+def test_uno_script_che_il_remoto_non_legge_chiude_il_canale_e_si_dice(monkeypatch):
+    canale = _Canale([])
+
+    def non_legge(_dati):
+        raise socket.timeout()
+    canale.sendall = non_legge
+    with pytest.raises(eng.DeployError, match="«config» non ha letto il suo script"):
+        _gira(canale, monkeypatch, "bash -s", "config", "export PAROLA=segreta\n")
+    assert ("close",) in canale.fatti
+    assert canale.fatti[-1] == ("close",)          # niente altro dopo: nessuna lettura su un canale chiuso
+
+
+@pytest.mark.parametrize("dove", ["exec_command", "sendall"])
+def test_un_errore_al_lancio_o_all_invio_chiude_il_canale_e_passa_com_e(monkeypatch, dove):
+    canale = _Canale([])
+
+    def cade(_x):
+        raise OSError("connessione caduta")
+    setattr(canale, dove, cade)
+    with pytest.raises(OSError, match="connessione caduta"):
+        _gira(canale, monkeypatch, "bash -s", "config", "script\n")
+    assert canale.fatti[-1] == ("close",)
