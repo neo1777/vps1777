@@ -17,6 +17,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `<<<<<<< ` o `>>>>>>> `, o se è tracciato un `.rej` o un `.orig`. Prima lo cercava solo l'hook di
   pre-commit, che si attiva a mano e non vede una PR aperta da un'altra macchina. Visto da Sagoma.
 
+### Cambiato
+- **La semina degli script di `tools/` nel ledger delle feature finisce il 31/01/2027.** Dal 02/08 gli script
+  non dichiarati davano solo avvisi, senza una data: dal 01/02/2027 saranno errori (la data è la stessa del
+  censimento della complessità). `verify-features.py --oggi AAAA-MM-GG` legge scadenze e semine a una data
+  scelta.
+
 ## [0.98.15] — 2026-11-25
 
 ### Corretto

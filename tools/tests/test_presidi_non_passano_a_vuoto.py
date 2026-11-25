@@ -78,3 +78,18 @@ def test_senza_la_cli_le_voci_dei_comandi_sono_rosse_senza_crollare(tmp_path: Pa
     assert r.returncode == 1, (r.returncode, r.stderr[-400:])
     assert "Traceback" not in r.stdout + r.stderr
     assert "tools/vps1777.py MANCA" in r.stdout + r.stderr
+
+
+def test_la_semina_di_tools_script_finisce_il_31_gennaio() -> None:
+    """DER-03: una semina ha una data di fine, e il controllo la legge (scelta di Neo
+    2026-11-25-soglia-tools-script-semina). L'ultimo giorno i non dichiarati sono avvisi; dal
+    giorno dopo sono fallimenti duri e l'esito è 1."""
+    def gira(oggi: str) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(ROOT / "tools" / "verify-features.py"),
+                               "--repo", str(ROOT), "--oggi", oggi],
+                              capture_output=True, text=True, check=False)
+    ultimo, dopo = gira("2027-01-31"), gira("2027-02-01")
+    assert "in semina fino al 2027-01-31" in ultimo.stdout + ultimo.stderr
+    assert "✗ [NON DICHIARATO] tools_script" not in ultimo.stdout + ultimo.stderr
+    assert dopo.returncode == 1
+    assert "✗ [NON DICHIARATO] tools_script" in dopo.stdout + dopo.stderr
