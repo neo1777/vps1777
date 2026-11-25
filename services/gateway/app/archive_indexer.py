@@ -492,6 +492,171 @@ _TABELLE_RECORD: dict[str, tuple[str, ...]] = {
 }
 
 
+def _apri_schema(conn: sqlite3.Connection) -> None:
+    """Lo schema, e le migrazioni idempotenti di un DB nato da una versione precedente."""
+    conn.executescript(_SCHEMA)
+    _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
+    _ensure_v3(conn)  # voice-tagging Fase 1: colonne nuove + `speaker` derivato
+    _ensure_sessioni_filoni(conn)  # `sessioni` con la chiave vecchia → (sessionId, file)
+    _ensure_speaker_strumenti(conn)  # tool_result scritti `user` da un indexer di prima
+    _ensure_speaker_sistema(conn)    # turni del programma scritti `user` (#293)
+
+
+def _tupla_del_record(row: _Record, ingest_date: str) -> tuple:
+    """La riga di un `_Record` nella forma della sua tabella; una tabella fuori elenco ferma tutto."""
+    if row.tabella == "meta":
+        valore = row.riga.get("value")
+        return (str(row.riga["key"]), None if valore is None else str(valore))
+    if row.tabella in _TABELLE_RECORD:
+        return tuple(str(row.riga.get(c, "") or "")
+                     for c in _TABELLE_RECORD[row.tabella]) + (ingest_date,)
+    raise ValueError(
+        f"_Record per una tabella sconosciuta: {row.tabella!r} (note: "
+        f"{', '.join(sorted(_TABELLE_RECORD))}, meta). È un errore "
+        f"dell'estrattore, non del file: nessuna riga scritta a caso.")
+
+
+class _Scrittura:
+    """I buffer di un ingest e chi li svuota nel DB: ciò che in `write_rows` erano le chiusure
+    con le loro variabili condivise (`nonlocal`). Classe semplice e non `@dataclass`: le prove
+    caricano questo modulo anche da percorso, senza registrarlo in `sys.modules`."""
+
+    def __init__(self, conn: sqlite3.Connection, batch: int) -> None:
+        self.conn = conn
+        self.batch = batch
+        self.n = 0
+        self.buf: list[tuple] = []
+        self.skip_buf: list[tuple] = []
+        self.sight_buf: list[tuple] = []
+        self.rec_buf: dict[str, list[tuple]] = {}
+        self.potature: list[_Potatura] = []
+        self.ingest_date = _now_iso()
+        self.n_rev = 0          # revisioni conservate in questo ingest (D18)
+
+    def _salva_revisioni(self) -> int:
+        """Conserva le versioni USCENTI prima che il REPLACE le sovrascriva (D18).
+
+        Va chiamata PRIMA dell'INSERT OR REPLACE: dopo, il vecchio contenuto non
+        esiste più da nessuna parte — è esattamente il difetto che questa funzione
+        chiude. Una sola query per batch (niente N+1): si leggono gli uuid del buf
+        che esistono già, si confrontano gli hash, e si archivia solo ciò che CAMBIA.
+        Uguale → nessuna revisione (il re-ingest di dati immutabili non sporca nulla).
+        """
+        buf, conn, ingest_date = self.buf, self.conn, self.ingest_date
+        if not buf:
+            return 0
+        by_uuid = {r[0]: r for r in buf}
+        ph = ",".join("?" * len(by_uuid))
+        esistenti = conn.execute(
+            f"SELECT uuid, project, ts, content, sender, ts_source FROM messages"
+            f" WHERE uuid IN ({ph})", tuple(by_uuid)).fetchall()
+        rev: list[tuple] = []
+        for u, proj, ts_old, cont_old, sender_old, tss_old in esistenti:
+            nuovo = by_uuid[u]
+            if (cont_old or "") == (nuovo[3] or ""):
+                continue                      # stesso contenuto: niente da conservare
+            rev.append((u, ts_old, cont_old, sender_old or "", proj or "",
+                        tss_old or "messaggio",
+                        hashlib.sha1((cont_old or "").encode("utf-8"), usedforsecurity=False).hexdigest(),
+                        ingest_date))
+        if rev:
+            # OR IGNORE + PK(uuid, content_sha): la stessa versione non si archivia due
+            # volte, quindi ri-eseguire l'ingest è idempotente anche qui.
+            conn.executemany(
+                "INSERT OR IGNORE INTO revisions"
+                "(uuid, ts, content, sender, project, ts_source, content_sha,"
+                " superseded_date) VALUES (?,?,?,?,?,?,?,?)", rev)
+        return len(rev)
+
+    def flush(self) -> None:
+        if self.buf:
+            self.n_rev += self._salva_revisioni()      # PRIMA del replace, o il vecchio è perso
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO messages"
+                "(uuid, project, ts, content, sender, tools, thinking, attachments,"
+                " parent_uuid, ts_source) VALUES (?,?,?,?,?,?,?,?,?,?)", self.buf,
+            )
+            self.buf.clear()
+
+    def flush_records(self) -> None:
+        conn = self.conn
+        for tabella, righe in self.rec_buf.items():
+            if not righe:
+                continue
+            if tabella == "meta":
+                # value None = togli la chiave: la scheda dice l'ULTIMO manifest
+                # letto, e una chiave di un bundle precedente che quello nuovo non
+                # porta affermerebbe di lui una cosa che non ha detto.
+                for key, value in righe:
+                    if value is None:
+                        conn.execute("DELETE FROM meta WHERE key=?", (key,))
+                    else:
+                        conn.execute("INSERT OR REPLACE INTO meta(key, value)"
+                                     " VALUES (?,?)", (key, value))
+            else:
+                cols = _TABELLE_RECORD[tabella]
+                # il nome della tabella viene dall'elenco chiuso, mai dall'input
+                conn.executemany(
+                    f"INSERT OR REPLACE INTO {tabella}({', '.join(cols)}, ingest_date)"
+                    f" VALUES ({','.join('?' * (len(cols) + 1))})", righe)
+            righe.clear()
+
+    def flush_skips(self) -> None:
+        if self.skip_buf:
+            # OR IGNORE: la prima ingest_date resta (ledger), il re-ingest non duplica.
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO skipped(uid, source, reason, detail, ts, ingest_date)"
+                " VALUES (?,?,?,?,?,?)", self.skip_buf,
+            )
+            self.skip_buf.clear()
+
+    def flush_sightings(self) -> None:
+        if self.sight_buf:
+            # OR IGNORE su (uuid, source): rivedere la stessa copia non duplica.
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO sightings(uuid, source, ingest_date)"
+                " VALUES (?,?,?)", self.sight_buf,
+            )
+            self.sight_buf.clear()
+
+    def accogli(self, row) -> None:
+        """Una voce dello stream nel suo buffer; un buffer pieno si svuota subito."""
+        ingest_date = self.ingest_date
+        if isinstance(row, _Skip):
+            self.skip_buf.append((_uid(row.source, row.reason, row.detail[:200], row.ts),
+                                  row.source, row.reason, row.detail[:2000], row.ts, ingest_date))
+            if len(self.skip_buf) >= self.batch:
+                self.flush_skips()
+            return
+        if isinstance(row, _Sighting):
+            self.sight_buf.append((row.uuid, row.source[:500], ingest_date))
+            if len(self.sight_buf) >= self.batch:
+                self.flush_sightings()
+            return
+        if isinstance(row, _Potatura):
+            self.potature.append(row)       # si applicano in fondo, a righe scritte
+            return
+        if isinstance(row, _Record):
+            coda = self.rec_buf.setdefault(row.tabella, [])
+            coda.append(_tupla_del_record(row, ingest_date))
+            if len(coda) >= self.batch:
+                self.flush_records()
+            return
+        self.buf.append(_pad(row))
+        self.n += 1
+        if len(self.buf) >= self.batch:
+            self.flush()
+
+    def svuota(self) -> None:
+        """In fondo allo stream: i buffer nel DB, poi le potature (a righe scritte)."""
+        self.flush()
+        self.flush_skips()
+        self.flush_sightings()
+        self.flush_records()
+        for pot in self.potature:
+            _applica_potatura(self.conn, pot, self.ingest_date)
+
+
 def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int = 500) -> int:
     # ⚠️ `batch` è ACCOPPIATO a _salva_revisioni(), che costruisce `WHERE uuid IN (?,…)` con un
     # parametro per riga: alzarlo oltre SQLITE_LIMIT_VARIABLE_NUMBER (250.000 qui, misurato)
@@ -514,149 +679,11 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
-        conn.executescript(_SCHEMA)
-        _ensure_v2(conn)  # DB creato da una versione precedente → aggiunge le colonne
-        _ensure_v3(conn)  # voice-tagging Fase 1: colonne nuove + `speaker` derivato
-        _ensure_sessioni_filoni(conn)  # `sessioni` con la chiave vecchia → (sessionId, file)
-        _ensure_speaker_strumenti(conn)  # tool_result scritti `user` da un indexer di prima
-        _ensure_speaker_sistema(conn)    # turni del programma scritti `user` (#293)
-        n = 0
-        buf: list[tuple] = []
-        skip_buf: list[tuple] = []
-        sight_buf: list[tuple] = []
-        rec_buf: dict[str, list[tuple]] = {}
-        potature: list[_Potatura] = []
-        ingest_date = _now_iso()
-        n_rev = 0          # revisioni conservate in questo ingest (D18)
-
-        def _salva_revisioni() -> int:
-            """Conserva le versioni USCENTI prima che il REPLACE le sovrascriva (D18).
-
-            Va chiamata PRIMA dell'INSERT OR REPLACE: dopo, il vecchio contenuto non
-            esiste più da nessuna parte — è esattamente il difetto che questa funzione
-            chiude. Una sola query per batch (niente N+1): si leggono gli uuid del buf
-            che esistono già, si confrontano gli hash, e si archivia solo ciò che CAMBIA.
-            Uguale → nessuna revisione (il re-ingest di dati immutabili non sporca nulla).
-            """
-            if not buf:
-                return 0
-            by_uuid = {r[0]: r for r in buf}
-            ph = ",".join("?" * len(by_uuid))
-            esistenti = conn.execute(
-                f"SELECT uuid, project, ts, content, sender, ts_source FROM messages"
-                f" WHERE uuid IN ({ph})", tuple(by_uuid)).fetchall()
-            rev: list[tuple] = []
-            for u, proj, ts_old, cont_old, sender_old, tss_old in esistenti:
-                nuovo = by_uuid[u]
-                if (cont_old or "") == (nuovo[3] or ""):
-                    continue                      # stesso contenuto: niente da conservare
-                rev.append((u, ts_old, cont_old, sender_old or "", proj or "",
-                            tss_old or "messaggio",
-                            hashlib.sha1((cont_old or "").encode("utf-8"), usedforsecurity=False).hexdigest(),
-                            ingest_date))
-            if rev:
-                # OR IGNORE + PK(uuid, content_sha): la stessa versione non si archivia due
-                # volte, quindi ri-eseguire l'ingest è idempotente anche qui.
-                conn.executemany(
-                    "INSERT OR IGNORE INTO revisions"
-                    "(uuid, ts, content, sender, project, ts_source, content_sha,"
-                    " superseded_date) VALUES (?,?,?,?,?,?,?,?)", rev)
-            return len(rev)
-
-        def flush() -> None:
-            if buf:
-                nonlocal n_rev
-                n_rev += _salva_revisioni()      # PRIMA del replace, o il vecchio è perso
-                conn.executemany(
-                    "INSERT OR REPLACE INTO messages"
-                    "(uuid, project, ts, content, sender, tools, thinking, attachments,"
-                    " parent_uuid, ts_source) VALUES (?,?,?,?,?,?,?,?,?,?)", buf,
-                )
-                buf.clear()
-
-        def flush_records() -> None:
-            for tabella, righe in rec_buf.items():
-                if not righe:
-                    continue
-                if tabella == "meta":
-                    # value None = togli la chiave: la scheda dice l'ULTIMO manifest
-                    # letto, e una chiave di un bundle precedente che quello nuovo non
-                    # porta affermerebbe di lui una cosa che non ha detto.
-                    for key, value in righe:
-                        if value is None:
-                            conn.execute("DELETE FROM meta WHERE key=?", (key,))
-                        else:
-                            conn.execute("INSERT OR REPLACE INTO meta(key, value)"
-                                         " VALUES (?,?)", (key, value))
-                else:
-                    cols = _TABELLE_RECORD[tabella]
-                    # il nome della tabella viene dall'elenco chiuso, mai dall'input
-                    conn.executemany(
-                        f"INSERT OR REPLACE INTO {tabella}({', '.join(cols)}, ingest_date)"
-                        f" VALUES ({','.join('?' * (len(cols) + 1))})", righe)
-                righe.clear()
-
-        def flush_skips() -> None:
-            if skip_buf:
-                # OR IGNORE: la prima ingest_date resta (ledger), il re-ingest non duplica.
-                conn.executemany(
-                    "INSERT OR IGNORE INTO skipped(uid, source, reason, detail, ts, ingest_date)"
-                    " VALUES (?,?,?,?,?,?)", skip_buf,
-                )
-                skip_buf.clear()
-
-        def flush_sightings() -> None:
-            if sight_buf:
-                # OR IGNORE su (uuid, source): rivedere la stessa copia non duplica.
-                conn.executemany(
-                    "INSERT OR IGNORE INTO sightings(uuid, source, ingest_date)"
-                    " VALUES (?,?,?)", sight_buf,
-                )
-                sight_buf.clear()
-
+        _apri_schema(conn)
+        scrittura = _Scrittura(conn, batch)
         for row in rows:
-            if isinstance(row, _Skip):
-                skip_buf.append((_uid(row.source, row.reason, row.detail[:200], row.ts),
-                                 row.source, row.reason, row.detail[:2000], row.ts, ingest_date))
-                if len(skip_buf) >= batch:
-                    flush_skips()
-                continue
-            if isinstance(row, _Sighting):
-                sight_buf.append((row.uuid, row.source[:500], ingest_date))
-                if len(sight_buf) >= batch:
-                    flush_sightings()
-                continue
-            if isinstance(row, _Potatura):
-                potature.append(row)       # si applicano in fondo, a righe scritte
-                continue
-            if isinstance(row, _Record):
-                tupla: tuple
-                if row.tabella == "meta":
-                    valore = row.riga.get("value")
-                    tupla = (str(row.riga["key"]), None if valore is None else str(valore))
-                elif row.tabella in _TABELLE_RECORD:
-                    tupla = tuple(str(row.riga.get(c, "") or "")
-                                  for c in _TABELLE_RECORD[row.tabella]) + (ingest_date,)
-                else:
-                    raise ValueError(
-                        f"_Record per una tabella sconosciuta: {row.tabella!r} (note: "
-                        f"{', '.join(sorted(_TABELLE_RECORD))}, meta). È un errore "
-                        f"dell'estrattore, non del file: nessuna riga scritta a caso.")
-                coda = rec_buf.setdefault(row.tabella, [])
-                coda.append(tupla)
-                if len(coda) >= batch:
-                    flush_records()
-                continue
-            buf.append(_pad(row))
-            n += 1
-            if len(buf) >= batch:
-                flush()
-        flush()
-        flush_skips()
-        flush_sightings()
-        flush_records()
-        for pot in potature:
-            _applica_potatura(conn, pot, ingest_date)
+            scrittura.accogli(row)
+        scrittura.svuota()
         # Voice-tagging: le righe appena scritte nascono con `voice=''`. Si classificano
         # QUI e non in `_ensure_v3` perché questa legge il `content` di ogni riga — è il
         # costo di un ingest, non quello di ogni apertura di DB. Idempotente: al secondo
@@ -671,7 +698,7 @@ def write_rows(db_path: Union[str, Path], rows: Iterable[tuple], *, batch: int =
         popola_voice(conn)
         conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
         conn.commit()
-        return n
+        return scrittura.n
     finally:
         conn.close()
 

@@ -10,10 +10,6 @@
  "fine_semina": "2027-01-31",
  "fine_semina_scelta": "2026-11-24-soglia-qua04-fine-semina-confermata (chi possiede il repo)",
  "funzioni": {
-  "services/gateway/app/archive_indexer.py::write_rows": {
-   "complessita": 30,
-   "stato": "da-esaminare"
-  },
   "services/gateway/app/archive_indexer.py::_iter_claude_code": {
    "complessita": 21,
    "stato": "da-esaminare"
