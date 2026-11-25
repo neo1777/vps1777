@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **Un journal di SQLite lasciato da un'interruzione nel momento sbagliato non è più segnalato come guasto.** Se
+  il lavoro di caricamento veniva ucciso subito dopo che SQLite aveva creato il file della transazione e prima
+  che lo scrivesse, il file restava lì: il database era intero e leggibile, ma la riparazione lo dava per
+  «fallito» a ogni giro. Ora, se nessun altro processo sta scrivendo, il file si toglie. Visto da Sagoma: la
+  prova di resistenza a un'uccisione (STA-04) era rossa una volta su tre col PC carico.
 - **Il controllo del registro di sicurezza dice «voce senza `id`» invece di crollare.** Una voce senza
   `id` lo faceva uscire con un errore Python incomprensibile: il cancello teneva, ma non diceva che cosa
   non andava. Visto da Sagoma rileggendo la riorganizzazione del controllo.
