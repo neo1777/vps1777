@@ -16,6 +16,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   su 1.500 casi generati, pacchetti malevoli compresi). Prima nessuna prova la chiamava: ora ogni suo
   rifiuto ha la sua.
 
+### Corretto
+- **Scaricando di nuovo il pacchetto di una versione, firma e certificato di prima non restano.** Se la
+  release non aveva più la firma, quella vecchia rimasta nella cartella di lavoro veniva provata sul file
+  nuovo: l'aggiornamento si fermava comunque, ma col messaggio sbagliato. Ora si tolgono prima di scaricare.
+- **L'estrazione del pacchetto sceglie la strada prima di cominciare.** La strada senza i filtri di Python
+  serve solo ai Python che non li hanno; prima ci si finiva anche per un errore qualunque nato durante
+  l'estrazione. Visti tutti e due da Sagoma rileggendo `fetch_bundle`.
+
 ## [0.98.17] — 2026-11-25
 
 ### Cambiato
