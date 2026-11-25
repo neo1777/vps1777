@@ -88,9 +88,11 @@ of the last 3 versions** (read from the `.meta` sidecar), plus **2 archives**, a
 `age`-encrypted. `vps1777 check` (the daily timer) warns if the latest archive backup is
 more than 14 days old; as long as no archive backup exists at all, that warning doesn't
 fire. It also warns if the latest core is more than 2 days old: a backup that stops no
-longer prunes the old copies, so coverage stays full and on its own wouldn't say so. The
-nightly log lives in `backups/backup.log` (the last 5000 lines), and survives the updates
-that recreate the container.
+longer prunes the old copies, so coverage stays full and on its own wouldn't say so. And it
+warns the day after a **failed** run: the cron writes the exit code of `backup.sh` to
+`backups/ultimo-esito` (`0` = success), and the check reads it (one notification per failed
+run, one when it succeeds again). The nightly log lives in `backups/backup.log` (the last 5000
+lines), and survives the updates that recreate the container.
 
 > **Why "declared" and not "remembered" — and it's the heart of never-losing-features.**
 > Before (up to v0.37.x) the backup was an **opt-in** profile: a reinstall of the VPS

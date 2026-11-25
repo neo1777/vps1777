@@ -83,8 +83,10 @@ versioni** (letta dal sidecar `.meta`), più **2 archivio**, tutti cifrati `age`
 `vps1777 check` (il timer giornaliero) avvisa se l'ultimo archivio ha più di 14 giorni;
 finché non esiste nessun backup archivio, quell'avviso non parte. Avvisa anche se l'ultimo
 core ha più di 2 giorni: un backup che si ferma non pota più le copie vecchie, quindi la
-copertura resta piena e da sola non lo direbbe. Il log del notturno sta in `backups/backup.log`
-(le ultime 5000 righe), e sopravvive agli update che ricreano il container.
+copertura resta piena e da sola non lo direbbe. E avvisa il giorno dopo un giro **fallito**: il
+cron scrive l'esito di `backup.sh` in `backups/ultimo-esito` (`0` = riuscito), e il check lo legge
+(una notifica per giro fallito, una quando torna a riuscire). Il log del notturno sta in
+`backups/backup.log` (le ultime 5000 righe), e sopravvive agli update che ricreano il container.
 
 > **Perché "dichiarato" e non "ricordato" — ed è il cuore del non-perdere-funzioni.**
 > Prima (fino a v0.37.x) il backup era un profilo **opt-in**: un reinstall della VPS non lo
