@@ -141,6 +141,16 @@ index, see above), and for a file **already** pushed it comes too late. The
 same rule that applies to code applies to you — **if a secret slipped through,
 removing it isn't enough: rotate it.** Git history doesn't forget.
 
+## Codes and names in comments, tests and the CHANGELOG
+
+vps1777 is developed partly with Claude Code sessions. Each session has a code, the first
+eight hexadecimal digits of its identifier (for example `b82df434`), or a name (Soglia,
+Sagoma, Madre and others). When they appear in a comment, a test, a document or the
+CHANGELOG, they say which session found a defect, wrote a fix or reviewed a change: they
+keep the history of a decision traceable. They are not people nor GitHub accounts, and
+there is no one to contact. A new code is written without a leading `@`, because on GitHub
+`@name` notifies the user with that name.
+
 ## Pull Requests
 
 1. Fork, branch off `main`

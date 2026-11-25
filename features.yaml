@@ -1705,7 +1705,7 @@ features:
   # ⭐ È la seconda cecità dello stesso presidio in dodici ore: stanotte era
   #    `tools/` (una CARTELLA intera), adesso i comandi DENTRO un file. La parte
   #    scoperta non è mai casuale — è quella con la forma diversa dalle altre,
-  #    perché un presidio nasce dove è facile metterlo (@71d540e6, 6ª istanza).
+  #    perché un presidio nasce dove è facile metterlo (71d540e6, 6ª istanza).
   # 🔑 E la forma diversa era anche la più esposta: `status`, `check`, `rollback`,
   #    `update` sono la superficie con cui Neo USA vps1777.
   # 🛡️ `verify: cli_command` controlla DUE cose, perché divergono: che il comando

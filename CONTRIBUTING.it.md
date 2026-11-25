@@ -137,6 +137,16 @@ nell'indice, vedi sopra), e per un file **già** pushato arriva tardi. Vale anch
 che vale per il codice — **se un segreto è passato, non basta toglierlo: va
 ruotato.** La storia di git non dimentica.
 
+## Sigle e nomi nei commenti, nei test e nel CHANGELOG
+
+vps1777 è sviluppato anche con sessioni di Claude Code. Ogni sessione ha una sigla, cioè
+le prime otto cifre esadecimali del suo identificativo (per esempio `b82df434`), oppure un
+nome (Soglia, Sagoma, Madre e altri). Quando compaiono in un commento, in un test, in un
+documento o nel CHANGELOG dicono quale sessione ha trovato un difetto, scritto una cura o
+riletto un cambiamento: servono a ritrovare la storia di una decisione. Non sono persone
+né account GitHub, e non c'è niente da contattare. Una sigla nuova si scrive senza `@`
+davanti, perché su GitHub `@nome` notifica l'utente che ha quel nome.
+
 ## Pull Request
 
 1. Forka, branch da `main`

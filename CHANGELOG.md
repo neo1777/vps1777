@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- `release.yml`, quando la CI del commit taggato non è verde, consigliava di «ri-taggare»: i tag di versione
+  non si rifanno (sono protetti). Ora dice di portare la CI al verde e rilasciare il numero successivo.
+- Il README citava «H45» senza dire che cos'è: è una voce del registro di sicurezza.
+- Le sigle e i nomi delle sessioni di lavoro che compaiono nel codice e nei documenti sono spiegati in
+  CONTRIBUTING; quelle scritte come `@sigla` hanno perso la `@`, che su GitHub notifica un utente.
 - **Un journal di SQLite lasciato da un'interruzione nel momento sbagliato non è più segnalato come guasto.** Se
   il lavoro di caricamento veniva ucciso subito dopo che SQLite aveva creato il file della transazione e prima
   che lo scrivesse, il file restava lì: il database era intero e leggibile, ma la riparazione lo dava per

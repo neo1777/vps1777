@@ -76,7 +76,7 @@ def comandi_richiesti(src: str) -> set[str]:
 def chiamate_non_lette(src: str) -> int:
     """Quante chiamate a `sudo(` la regex sopra NON riesce a leggere.
 
-    🔴 Rilievo di @b82df434 sulla revisione di questa PR, e coglie il difetto sull'asse
+    🔴 Rilievo di b82df434 sulla revisione di questa PR, e coglie il difetto sull'asse
     su cui il test stesso si giustifica. `comandi_richiesti` legge solo la forma
     letterale `sudo(["nome", …])`. Con una variabile — `sudo(cmd)` — o con l'unpacking
     — `sudo([*base, "x"])` — la regex non vede la chiamata, ma `richiesti` resta NON

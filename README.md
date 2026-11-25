@@ -215,7 +215,7 @@ default; to turn it off see [docs/OPS.md](docs/OPS.md) (Italian).
   **read-only rootfs** on every service in `compose.yaml` (`/tmp` is a 64 MB `noexec`
   tmpfs), healthchecks on every running service (the `indice-notturno` and `ingest` jobs, which
   start and finish, have none)
-- Automatic host hardening at install: `unattended-upgrades` + `fail2ban` (`H45`)
+- Automatic host hardening at install: `unattended-upgrades` + `fail2ban` (security registry, entry `H45` in `security/findings.yml`)
 - Updates **cosign-signed** and verified **fail-closed by default**; immutable digests
   (`images.lock`); age-encrypted backups + snapshots + **automatic rollback**
   ([docs/en/UPDATE.md](docs/en/UPDATE.md))

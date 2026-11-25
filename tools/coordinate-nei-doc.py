@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Le coordinate `file:riga` citate nei documenti puntano ancora dentro quel file?
 
-🔴 PERCHÉ ESISTE — voce `a80025f1` del registro, rilievo di @abdd732a dell'01/08:
+🔴 PERCHÉ ESISTE — voce `a80025f1` del registro, rilievo di abdd732a dell'01/08:
    «SECURITY.md rimanda a `snapshot_prune (tools/vps1777.py:1021-1032)` ma a quella
    riga oggi c'è `def spazio_richiesto_update`». Una coordinata in prosa che manda
    al posto sbagliato — e non è un refuso: **il codice si sposta, la prosa no**.

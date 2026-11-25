@@ -3,13 +3,13 @@
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "18bdb05634c6d8bce6899b05a9b80dfd9e071ff62657c855d3810826b29ad568",
-      "traduzione_sha256": "87b25aa48707443844d5e71d97208b6aea6332eb2c6cfdd11b81009fb28b807f"
+      "sorgente_sha256": "dd377d1861a4bb00e054cf6b65ac4101832de36379a21fe7504fc02e81f66253",
+      "traduzione_sha256": "cd8cc4e8adbefcf4a23fa8bb1139a1d9c6cf4fc6b13bc6b7ea85048a5682f927"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
-      "sorgente_sha256": "19249f13878a7404e30da39cf04ad9a3b8c8637654aa878f797840aa486a2ef7",
-      "traduzione_sha256": "aa227e610d33b6076b6b52eb51325b742540cc88ffe215c7fe47819df4e0ec90"
+      "sorgente_sha256": "e6e2bc5e4406a4bf7887e1044cfc5e6b7fac347be191c1c130609a06888a48eb",
+      "traduzione_sha256": "dcc70995291f3dd44a915b69c4b1f9bc5ff86501728a7efc5533a6cd4279448c"
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",

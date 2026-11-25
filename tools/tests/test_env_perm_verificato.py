@@ -71,7 +71,7 @@ def _blocchi() -> list[tuple[str, int, str]]:
         for i, riga in enumerate(righe):
             if re.search(r"^\s*chmod .*2>/dev/null \|\| true", riga):
                 # il `mkdir -p` che PRECEDE fa parte del blocco: senza di lui il
-                # frammento non è quello che gira davvero (rilievo @71d540e6 in
+                # frammento non è quello che gira davvero (rilievo 71d540e6 in
                 # revisione — una dir assente darebbe «permesso sbagliato»).
                 inizio = i - 1 if i and re.search(r"^\s*mkdir -p ", righe[i - 1]) else i
                 frammento = "\n".join(righe[inizio:i + 2])
@@ -165,7 +165,7 @@ def test_controprova_di_polarita(tmp_path, indice):
 
 
 def test_le_dir_assenti_non_bloccano_lapply(tmp_path):
-    """Una dir che NON C'È non deve diventare «permesso sbagliato» — @71d540e6, revisione.
+    """Una dir che NON C'È non deve diventare «permesso sbagliato» — 71d540e6, revisione.
 
     Il blocco vive in `APPLY_SCRIPT` («applica la config dal pannello»), che gira su
     una macchina GIÀ installata e non passa dal `mkdir -p` di deploy.sh:689. Una VPS

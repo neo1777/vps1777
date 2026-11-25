@@ -247,7 +247,7 @@ def test_render_unit_operator_user_inesistente_SI_FERMA(monkeypatch):
     credentials») e il servizio NON PARTE. Un difetto di privilegi sarebbe
     diventato un'INTERRUZIONE — e con `User=root` il servizio, male, funziona.
 
-    Trovato da @abdd732a mentre il comando era già nella casella di Neo, sulla
+    Trovato da abdd732a mentre il comando era già nella casella di Neo, sulla
     cui macchina le quattro unit giravano davvero come root. Il test vecchio non
     era sbagliato: rispondeva alla domanda giusta in un mondo in cui l'installer
     crea l'utente DOPO. Negli installer veri lo crea PRIMA (engine.py:306-314,
@@ -273,7 +273,7 @@ def test_render_unit_operator_user_inesistente_SI_FERMA(monkeypatch):
 def test_render_unit_operator_user_vuoto_non_e_una_dichiarazione(monkeypatch, valore):
     """`OPERATOR_USER=""` NON deve valere come «te l'ho detto».
 
-    ⭐ Caso trovato da @abdd732a sul pezzo bash (`4cc25eb`): là sarebbe passato con
+    ⭐ Caso trovato da abdd732a sul pezzo bash (`4cc25eb`): là sarebbe passato con
     un utente VUOTO — cioè `User=` nella unit, che systemd rifiuta o interpreta a
     modo suo. Il ramo python è protetto da uno `.strip()` + test di verità, ma
     **non aveva un caso che lo provasse**: una riscrittura che toglie lo `.strip()`

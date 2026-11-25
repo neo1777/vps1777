@@ -71,7 +71,7 @@ _FILE_CHE_LO_NOMINANO = {
 
 # 📌 I file che affermano l'ESCLUSIVITÀ, .md e codice insieme. Sono sette e le forme
 #    sono tre: le prime cinque le ho trovate cercando la frase nei documenti, la sesta
-#    @b82df434 cercando il NOME DEL VOLUME fuori dai .md, la settima @71d540e6 cercando
+#    b82df434 cercando il NOME DEL VOLUME fuori dai .md, la settima 71d540e6 cercando
 #    il LESSICO dell'esclusività nel codice. Tre sonde, tre raccolti diversi — e il
 #    numero si è fermato solo quando le sonde hanno smesso di guardare lo stesso posto.
 
@@ -169,7 +169,7 @@ def test_la_doc_nomina_tutti_quelli_che_montano(doc):
 
 # 🔎 La SESTA copia della frase non era in un .md: stava nella docstring di
 #    `services/nb1777-mcp/app/nlm_profile.py` — «nb1777-mcp è l'UNICO servizio che monta»
-#    — e l'ha trovata @b82df434 cercando il nome del volume FUORI dai .md, cioè
+#    — e l'ha trovata b82df434 cercando il nome del volume FUORI dai .md, cioè
 #    esattamente dove una sonda sulla documentazione non guarda. Una docstring sbagliata
 #    non fa sbagliare chi legge la doc: fa sbagliare chi SCRIVE il codice.
 #    ⇒ le forme dell'esclusività sono due, e vanno cercate entrambe: «solo nb1777-mcp»
@@ -177,7 +177,7 @@ def test_la_doc_nomina_tutti_quelli_che_montano(doc):
 _ESCLUSIVITA = (
     re.compile(r"\bsolo\W{0,4}`?nb1777-mcp`?", re.IGNORECASE),
     re.compile(r"nb1777-mcp\W{0,24}(?:è|e')\W{0,8}l['’]?\s?unico", re.IGNORECASE),
-    # la SETTIMA copia (@71d540e6, services/gateway/app/settings.py): «nb1777-mcp,
+    # la SETTIMA copia (71d540e6, services/gateway/app/settings.py): «nb1777-mcp,
     # l'unico servizio che monta quel volume» — nessun verbo fra il nome e «unico».
     re.compile(r"nb1777-mcp\W{0,6}l['’]\s?unico", re.IGNORECASE),
 )
@@ -240,7 +240,7 @@ def test_i_riferimenti_nel_codice_sono_quelli_dichiarati():
     )
 
 
-# 🔎 LA SONDA CHE MANCAVA, e l'ha scritta @b82df434 revisionando la #140: l'elenco
+# 🔎 LA SONDA CHE MANCAVA, e l'ha scritta b82df434 revisionando la #140: l'elenco
 #    `_FILE_CHE_LO_NOMINANO` verifica CHE un file nomini il volume, mai COSA DICE su di
 #    esso. Cercando l'AFFERMAZIONE invece del termine sono uscite altre cinque copie —
 #    tutte in commenti e docstring, cioè nel posto peggiore: *una frase falsa in un
