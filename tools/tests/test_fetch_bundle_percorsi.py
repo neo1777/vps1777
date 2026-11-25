@@ -119,3 +119,42 @@ def test_un_tarball_che_esce_dalla_radice_e_rifiutato(banco):
     with pytest.raises(RuntimeError, match="path traversal"):
         banco.gira()
     assert not (banco.repo / "stage" / "fuori.txt").exists()
+
+
+def test_firma_e_certificato_di_uno_scaricamento_precedente_non_restano(banco):
+    """La stessa versione scaricata due volte: la seconda release non ha firma. Deve dire «la
+    release non ha firma», non provare la firma vecchia sul file nuovo (visto da Sagoma, 25/11)."""
+    assert banco.gira().is_dir()
+    del banco.remoto["SHA256SUMS.sig"], banco.remoto["SHA256SUMS.pem"]
+    banco.ev.clear()
+    with pytest.raises(RuntimeError, match="la release non ha firma"):
+        banco.gira()
+    assert not [e for e in banco.ev if e[0] == "cosign"], "cosign lanciato su una firma di ieri"
+    assert not (banco.repo / "stage" / "SHA256SUMS.sig").exists()
+
+
+def test_un_typeerror_dentro_l_estrazione_non_fa_ripiegare_sulla_strada_senza_filtro(banco, monkeypatch):
+    """Il ripiego senza `filter=` vale solo per un Python che non ha i filtri: un TypeError nato
+    dentro l'estrazione è un guasto e deve uscire, non far ripartire l'estrazione senza filtro."""
+    chiamate: list[dict] = []
+
+    def estrai(self, path=".", members=None, **kw):
+        chiamate.append(kw)
+        raise TypeError("un guasto qualunque dentro l'estrazione")
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", estrai)
+    with pytest.raises(TypeError, match="un guasto qualunque"):
+        banco.gira()
+    assert chiamate == [{"filter": "data"}], "ha riprovato senza filtro"
+
+
+def test_su_un_python_senza_filtri_un_collegamento_e_rifiutato_a_mano(banco, monkeypatch):
+    monkeypatch.delattr(tarfile, "data_filter")
+    legame = tarfile.TarInfo("collegamento")
+    legame.type = tarfile.SYMTYPE
+    legame.linkname = "/etc/passwd"
+    banco.dati = _tarball(legame)
+    banco.remoto[NOME] = banco.dati
+    banco.remoto["SHA256SUMS"] = f"{hashlib.sha256(banco.dati).hexdigest()}  {NOME}\n".encode()
+    with pytest.raises(RuntimeError, match="collegamento o file speciale"):
+        banco.gira()

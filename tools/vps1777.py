@@ -1414,6 +1414,11 @@ def _bundle_scarica(release: dict, stage: Path, version: str) -> str:
     download(assets[tarball], stage / tarball)
     download(assets["SHA256SUMS"], stage / "SHA256SUMS")
     for optional in ("SHA256SUMS.sig", "SHA256SUMS.pem"):
+        # Via PRIMA l'avanzo di uno scaricamento precedente della stessa versione (25/11/2026,
+        # visto da Sagoma): se la release di oggi non ha firma, la .sig vecchia restava in stage
+        # e cosign la provava sul SHA256SUMS nuovo. Restava chiuso, ma col messaggio sbagliato
+        # («verify fallita» invece di «la release non ha firma»).
+        (stage / optional).unlink(missing_ok=True)
         if optional in assets:
             download(assets[optional], stage / optional)
     return tarball
@@ -1484,15 +1489,18 @@ def _bundle_estrai(stage: Path, tarball: str) -> Path:
             # prefix-check di /bundle. E rifiuta link/hardlink fuori radice.
             if dest != bundle.resolve() and not str(dest).startswith(bundle_root + os.sep):
                 raise RuntimeError(f"bundle malformato (path traversal): {m.name}")
-        try:
+        # Si decide PRIMA quale strada, guardando se questo Python ha i filtri (25/11/2026, visto
+        # da Sagoma): con `try/except TypeError` attorno all'estrazione, un TypeError nato DENTRO
+        # l'estrazione per un altro motivo faceva ripiegare sulla strada senza filtro, a metà lavoro.
+        if hasattr(tarfile, "data_filter"):
             # Python ≥3.11.4: blocca anche symlink/device/permessi anomali
             tar.extractall(bundle, filter="data")
-        except TypeError:
+        else:
             # Python senza `filter=`: quello che `filter="data"` rifiuterebbe lo si rifiuta qui
             # (un collegamento può puntare fuori radice anche se il suo NOME sta dentro).
             for m in tar.getmembers():
                 if not (m.isreg() or m.isdir()):
-                    raise RuntimeError(f"bundle malformato (collegamento o file speciale): {m.name}") from None
+                    raise RuntimeError(f"bundle malformato (collegamento o file speciale): {m.name}")
             tar.extractall(bundle)
     return bundle
 
