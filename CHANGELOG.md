@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **SECURITY.md, «Limiti crittografici dichiarati», rimesso al presente.** Diceva che i metadati di una
+  release non scadono: dalla 0.98.13 il canale firmato scade dopo 45 giorni e ferma l'aggiornamento
+  automatico; ora lo dice, con i due limiti che restano. E diceva di rigenerare la chiave dei backup
+  «quando `age` avrà recipient post-quantum»: li ha dalla 1.3.0 (dicembre 2025); ora dice che vps1777
+  non li usa ancora e che cosa servirebbe. Visto da Sagoma.
+
 ## [0.98.15] — 2026-11-25
 
 ### Corretto

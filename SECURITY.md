@@ -1041,15 +1041,24 @@ datate, scritte perché chi adotta il progetto le trovi qui e non le scopra.
 - **I backup sono cifrati con `age` e chiave X25519 classica.** Non è resistente a un computer
   quantistico: chi copiasse oggi un backup cifrato potrebbe aprirlo il giorno in cui quell'attacco
   diventa praticabile («raccogli ora, decifra poi»). Riguarda soprattutto le copie che escono
-  dalla macchina. Quando `age` avrà recipient post-quantum stabili, la chiave va rigenerata.
+  dalla macchina. **Aggiornato il 25/11/2026:** dalla 1.3.0 (27/12/2025) `age` ha recipient
+  post-quantum ibridi (ML-KEM-768 insieme a X25519, `age-keygen -pq`, chiavi pubbliche che
+  cominciano con `age1pq1`). vps1777 non li usa ancora: il container del backup installa `age`
+  1.2.1, e il passaggio chiede `age` ≥ 1.3 sia nel container sia dove si decifra, più una chiave
+  nuova. La decisione è aperta e la prende chi tiene la chiave; finché non è presa vale il rischio
+  scritto sopra.
 - **Il canale di aggiornamento è firmato con cosign classico** (ECDSA, firma senza chiave via
   Sigstore). Una firma non si «raccoglie oggi per romperla poi»: il rischio comincia quando
   falsificarla diventa possibile, e allora andrà cambiata. Oggi non c'è una firma post-quantum.
-- **I metadati di una release non hanno una scadenza.** La firma dice che il pacchetto è
-  autentico, non che è l'ultimo: chi controllasse la rete fra la macchina e GitHub potrebbe
-  continuare a servirle una release vecchia e autentica (un «congelamento»). L'aggiornamento
-  automatico non scende di versione, quindi non può essere riportata indietro; può essere tenuta ferma.
-  Lo si vede dall'età dell'ultimo controllo, che la macchina mostra.
+- **I metadati di una release hanno una scadenza solo per l'aggiornamento automatico** (dalla
+  0.98.13). La firma di un pacchetto dice che è autentico, non che è l'ultimo: chi controllasse la
+  rete fra la macchina e GitHub potrebbe continuare a servirle una release vecchia e autentica (un
+  «congelamento»). Per questo un workflow firma ogni settimana un canale che dice «l'ultima stabile
+  è la X» e scade dopo 45 giorni; l'aggiornamento automatico, se il canale è scaduto, assente o con
+  una firma che non torna, si ferma e avvisa (`docs/UPDATE.md`, «Il canale firmato»). Restano due
+  limiti: l'aggiornamento a mano non guarda il canale, e un congelamento più corto della vita del
+  canale (fino a 45 giorni) non si vede. È l'idea del «timestamp» di TUF ridotta a un file: non c'è
+  rotazione né revoca di chiavi.
 
 ## Postilla — l'hardening che faremo al 100% più avanti
 
