@@ -30,7 +30,9 @@ L'overlay `compose.build.yaml` serve perché `compose.yaml` è pull-only
 - Yaml: 2 spazi indent, no `version:` in compose (deprecato)
 - Commit message: un prefisso che dice **cosa** tocca, poi la frase in italiano. Quelli
   in uso: `fix:`, `feat:`, `docs:`, `ci:`, `build:` (i bump di Dependabot), `test:`,
-  `chore:`, `release:` (la PR che apre una versione: `release: X.Y.Z`), oppure l'area
+  `chore:`, `refactor:` (cambia la forma del codice e non il comportamento, come gli
+  spezzamenti di QUA-04: le prove restano le stesse e restano verdi), `release:` (la PR che
+  apre una versione: `release: X.Y.Z`), oppure l'area
   toccata (`installer:`, `gateway:`, `indexer:`…); uno scope fra parentesi è benvenuto
   (`docs(architettura):`), e un `!` dopo il prefisso segnala un cambio incompatibile
   (`feat(bot)!:`)
@@ -40,17 +42,18 @@ L'overlay `compose.build.yaml` serve perché `compose.yaml` è pull-only
 ### Prima di aprire una PR: `tools/check.sh`
 
 ```bash
-bash tools/check.sh              # lint, guardiani e test: ciò che fanno i job lint e contract della CI
+bash tools/check.sh              # lint, guardiani, test e scanner: ciò che fanno i job lint e contract della CI e scanner.yml
 bash tools/check.sh lint         # solo ruff e shellcheck, agli stessi pin della CI
 bash tools/check.sh guardiani    # i controlli della CI che non sono test
 bash tools/check.sh test         # le suite, una alla volta, e i test bash
+bash tools/check.sh scanner      # Dockerfile, dipendenze dei lock, segreti nella storia (tools/scanner.sh)
 ```
 
-Chiude con un riepilogo di cosa è verde e cosa è rosso, in circa due minuti. Esce 0 se è
+Chiude con un riepilogo di cosa è verde e cosa è rosso, in circa sei minuti. Esce 0 se è
 tutto verde, 1 se qualcosa è rosso, 2 se manca uno strumento (docker, uv, uvx): in quel
 caso lo dice, e non è un verde. Non installa niente e non riscrive file tracciati. Non
 copre il job `build` né la ratifica dei salti di lock, che vive nel corpo della PR.
-La fonte di verità resta `.github/workflows/ci.yml`: se la CI aggiunge un controllo e
+La fonte di verità restano i workflow (`ci.yml`, `verify-features.yml`, `scanner.yml`): se la CI aggiunge un controllo e
 `check.sh` no, `tools/tests/test_check_sh_segue_la_ci.py` va in rosso. E
 `tools/tests/test_i_guardiani_mordono.py` prova che i guardiani senza un'autoprova propria
 (anti-leak, registro dei rilievi, ledger delle feature, pre-commit, traduzioni) vanno

@@ -37,6 +37,9 @@ CHECK = RADICE / "tools" / "check.sh"
 PERIMETRO = {
     "ci.yml": ("lint", "contract"),
     "verify-features.yml": ("verify-features",),
+    # dal 25/11: lo scanner del sorgente (22/11) era rimasto fuori da questa lista, e quindi
+    # da check.sh, senza che niente se ne accorgesse (rilievo di Sagoma).
+    "scanner.yml": ("scanner",),
 }
 
 # Composto e non scritto: vedi 🪦 in `test_ogni_autoprova_e_agganciata.py`.
@@ -196,6 +199,7 @@ def test_la_sonda_sa_dire_di_no() -> None:
     ci = _codice_ci()
     vero = righe_logiche(CHECK.read_text(encoding="utf-8"))
     for ago in ("security/check_no_leaks.py", "tools/tests/", "services/nb1777-mcp",
+                "tools/scanner.sh",
                 "tools/verify-features.py", "uv lock --check", "compose.build.yaml",
                 "migrations/*/run.py"):
         tolto = [r for r in vero if ago not in r]

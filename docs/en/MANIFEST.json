@@ -8,8 +8,8 @@
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
-      "sorgente_sha256": "e6e2bc5e4406a4bf7887e1044cfc5e6b7fac347be191c1c130609a06888a48eb",
-      "traduzione_sha256": "dcc70995291f3dd44a915b69c4b1f9bc5ff86501728a7efc5533a6cd4279448c"
+      "sorgente_sha256": "ad53c8b9db3b5c8b7add4515325fec8dfb1199814e4d2eb8046348e4f4ceb030",
+      "traduzione_sha256": "625b497bfed8cfde6a3ac9f40872716aa17acde41753235595dbcb06bf020cb0"
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
@@ -48,8 +48,8 @@
     },
     "docs/en/RICERCA-IBRIDA.md": {
       "sorgente": "docs/RICERCA-IBRIDA.md",
-      "sorgente_sha256": "834755d735be1b1530e6b0fc3211d78f21edf70f0bce1901d2a18e8a2a103e4d",
-      "traduzione_sha256": "f829facb5241b3eceaba84e7ed4b49922f960be1b446e5d95e07ec2d09847b96"
+      "sorgente_sha256": "dd64efd169e1213aa679b70ad20c5cefc45d857a9f7b10304f0d7c3902a5d501",
+      "traduzione_sha256": "5e6613e0697433f47e7d0edfb8488dc5d580d16c86102bd456bea6303ca74c54"
     },
     "docs/en/PRIMI-15-MINUTI.md": {
       "sorgente": "docs/PRIMI-15-MINUTI.md",
