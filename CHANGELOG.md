@@ -20,6 +20,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   con un errore Python; ora esce 2 («non ho potuto guardare») con il motivo. In un repo senza
   `tools/vps1777.py` le voci dei sottocomandi diventano fallimenti che lo nominano, invece di fermare il
   referto a metà. Visto da Sagoma.
+- **Un backup notturno fallito si sa il giorno dopo, non due notti dopo.** Il cron del container scrive
+  l'esito di `backup.sh` in `backups/ultimo-esito`, e `vps1777 check` (il timer giornaliero) avvisa una
+  volta per ogni giro fallito, e una volta quando torna a riuscire. Prima un giro fallito si vedeva solo
+  quando l'ultima copia superava i due giorni. L'esito comincia a scriversi dal primo avvio del container
+  con la versione nuova. Visto da Sagoma.
 
 ### Cambiato
 - `tools/check.sh` lancia anche gli scanner del sorgente (Dockerfile, dipendenze, segreti nella storia),

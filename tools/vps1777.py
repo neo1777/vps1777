@@ -2948,6 +2948,38 @@ def _sorveglia_backup_notturno(repo: Path, st: dict, notifica: bool) -> None:
                                   f"(ultima copia {eta} giorni fa).")
 
 
+def _sorveglia_esito_backup(repo: Path, st: dict, notifica: bool) -> None:
+    """Il backup notturno che FALLISCE, la notte stessa e non dopo due notti.
+
+    Il cron del container scrive l'esito di backup.sh in `backups/ultimo-esito` (dal
+    25/11/2026): «0» è riuscito, altro è fallito. Prima un giro fallito si vedeva solo
+    quando l'ultima copia superava i due giorni (`_sorveglia_backup_notturno`), cioè due
+    notti dopo (rilievo di Sagoma). La notifica parte una volta per giro fallito: il giro
+    si riconosce dall'ora in cui il file è stato scritto. Senza file (un container di
+    prima, o un backup mai partito) non si dice niente: ci pensa la sorveglianza dell'età."""
+    f = repo / "backups" / "ultimo-esito"
+    try:
+        esito = f.read_text(encoding="utf-8").strip()
+        quando = datetime.fromtimestamp(f.stat().st_mtime, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    except (OSError, UnicodeDecodeError):
+        return
+    if esito == "0":
+        if st.pop("backup_fallito_il", None):
+            ok(f"backup notturno: l'ultimo giro è riuscito ({quando})")
+            if notifica:
+                telegram_notify(repo, f"🟢 vps1777: il backup notturno è riuscito ({quando}).")
+        return
+    warn(f"backup notturno: il giro del {quando} è FALLITO (esito «{esito}»): guarda backups/backup.log")
+    if st.get("backup_fallito_il") == quando:
+        return
+    st["backup_fallito_il"] = quando
+    if notifica:
+        telegram_notify(
+            repo,
+            f"🔴 vps1777: il backup notturno del {quando} è fallito (esito «{esito}»).\n"
+            f"Le copie vecchie restano dove sono. Il perché è in backups/backup.log.")
+
+
 DISCO_LIBERO_MIN_PCT = 10
 
 
@@ -3122,6 +3154,7 @@ def cmd_check(repo: Path, args) -> int:
     _sorveglia_copia_fuori(repo, st, bool(getattr(args, "notify", False)))
     # W5: il notturno fermo (la copertura non lo vede) e lo spazio su disco.
     _sorveglia_backup_notturno(repo, st, bool(getattr(args, "notify", False)))
+    _sorveglia_esito_backup(repo, st, bool(getattr(args, "notify", False)))
     _sorveglia_disco(repo, st, bool(getattr(args, "notify", False)))
     # P11: la pagina Salute. Dopo le sorveglianze (legge ciò che hanno scritto) e prima
     # del fetch, per la stessa ragione loro. Telemetria: non fa mai cadere il check.
