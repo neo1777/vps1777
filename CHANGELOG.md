@@ -8,9 +8,9 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **Lo scanner dei segreti guarda due volte prima di dire rosso.** trufflehog segnala anche ciò che non riesce a
   verificare: quando la verifica remota falliva per un momento storto della rete, stringhe innocue della storia
   uscivano come «non verificabili» e `check.sh` (e il workflow degli scanner) arrossiva da solo, per tornare verde
-  al rilancio. Ora un risultato si riguarda una volta dopo una pausa. Se resta ed è verificato, è rosso come
-  prima; se nessuno è verificato, lo scanner dice «non ho potuto verificare» col motivo ed esce da non misurato,
-  che non è un verde ma nemmeno un segreto trovato.
+  al rilancio. Ora un risultato non verificato si riguarda una volta dopo una pausa; uno verificato è rosso
+  subito, senza riguardare. Se dopo il secondo sguardo nessuno è verificato, lo scanner dice «non ho potuto
+  verificare» col motivo ed esce da non misurato, che non è un verde ma nemmeno un segreto trovato.
 
 ### Cambiato
 - `applicabilita.yml` dichiara lo standard `1777-0.3` e, per nb1777-mcp, la crittografia propria (gli HMAC dei
