@@ -135,6 +135,15 @@ prove:
     comando: "python3 tools/complessita.py"     # 0 pulito, 1 rosso, 2 non ha guardato
   # QUA-03 (25/11/2026): era «n.a. per typescript», ma la riga vale anche per il Python (rilievo di
   # Sagoma). Scelta 2026-11-25-soglia-qua03-tipi: mypy in semina come QUA-04, fine il 30/04/2027.
+  # SIC-06 (dalla 1777-0.3): chi resta acceso ha un healthcheck. Portainer non può: l'immagine a monte
+  # contiene solo il binario. L'eccezione nomina che cosa lo sostituisce, e si riguarda a una data.
+  SIC-06:
+    senza_healthcheck:
+      - file: compose.ops.portainer.yaml
+        servizio: portainer
+        motivo: "immagine di terzi col solo binario portainer: niente shell né client HTTP dentro il contenitore"
+        sostituto: tools/portainer-vivo.sh
+        rivedere_entro: 2027-03-31
   QUA-03:
     censimento: tools/tipi.json
     comando: "python3 tools/tipi.py"            # 0 pulito, 1 rosso, 2 non ha guardato

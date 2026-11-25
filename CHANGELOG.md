@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **Portainer, se è acceso, viene interrogato ogni giorno.** Non può avere un healthcheck (la sua immagine
+  contiene solo il binario, senza shell né client HTTP): `tools/portainer-vivo.sh` lo interroga dall'host, e
+  `vps1777 check` avvisa se smette di rispondere e quando torna. In `applicabilita.yml` l'assenza
+  dell'healthcheck è un'eccezione dichiarata, col motivo, il sostituto e la data in cui si riguarda.
+
 ## [0.98.17] — 2026-11-25
 
 ### Cambiato
