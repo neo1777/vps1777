@@ -40,6 +40,10 @@ moduli_critici:
 controlli:
   registro: security/findings.yml
   checker: "python3 security/check_findings.py"
+  # VER-04: ogni commit che cambia il totale atteso del registro nomina una voce nel messaggio.
+  # Senza questa riga il controllo dello standard diceva «non misurato» (rilievo di Sagoma, 24/11);
+  # provato il 25/11 sulla storia intera: verde.
+  ancora: 'security/check_findings.py:^EXPECTED_TOTAL = (\d+)'
   rete: true                  # i controlli che leggono GitHub (il canale privato di SIC-18, l'ultima corsa di STA-06)
 
 default:
