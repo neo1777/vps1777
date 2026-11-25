@@ -1866,36 +1866,150 @@ def _turno_del_programma(d: dict, testo: str) -> bool:
     return _forma_del_programma(testo)
 
 
-def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
+def _mittente_cc(d: dict, msg: dict, blocks: Blocks) -> str:
+    """Chi parla in un record user/assistant di Claude Code: il ruolo scritto, corretto dove il tipo
+    `user` lo ha scritto la macchina (mandato, strumento, sistema)."""
+    sender = str(msg.get("role") or d.get("type") or "")
+    if sender == "user" and (d.get("isSidechain") or d.get("parent_tool_use_id")):
+        # AN-11 modellata (28/08/2026): la riga è di TIPO user ma l'ha scritta
+        # la MACCHINA — il mandato a un subagent (`parent_tool_use_id` negli
+        # audit.jsonl, `isSidechain` nei transcript; i tool_result delle
+        # sidechain cadono qui con lo stesso diritto: nessuna è parola di Neo).
+        # Prima entrava come 'user' → speaker='human': la voce del committente
+        # fabbricata dallo schema — il difetto B3 della vecchia app, risorto in
+        # forma fine, ed è LETTERALMENTE l'errore che il Laboratorio dell'11/07
+        # ha scoperto (frasi dei mandati attribuite a Neo). sender='mandato'
+        # → speaker='assistant' (mappa in _SPEAKER_NOTI).
+        sender = "mandato"
+    elif (sender == "user" and not blocks.text and blocks.tools
+          and not _parola_utente_in_tool_result(blocks.tools)):
+        # Un record user fatto SOLO di tool_result: l'output di un comando, non una
+        # parola dell'utente (26/09/2026). Prima entrava `user` → speaker='human', e
+        # il filtro «le parole di chi scrive» restituiva soprattutto `ls` e referti
+        # di script. Viene DOPO il mandato: in una sidechain resta della macchina.
+        sender = "strumento"
+    elif sender == "user" and blocks.text and _turno_del_programma(d, blocks.text):
+        # Un turno che il programma inietta: notifiche, output di comandi locali,
+        # compattazioni, skill, altre sessioni (#293). Prima era speaker='human'.
+        sender = "sistema"
+    return sender
+
+
+class _LettoreCC:
+    """Lo stato di una lettura di sessione Claude Code: l'ultimo ts visto e il ponte dei genitori.
+    Era lo stato locale del generatore `_iter_claude_code`, con le due chiusure che lo usavano.
+    Classe semplice e non `@dataclass`: le prove caricano questo modulo anche da percorso."""
+
+    def __init__(self, project: str) -> None:
+        self.project = project
+        # ultimo ts visto: i record `ai-title` NON portano timestamp (misurato sui
+        # jsonl reali) e i titoli entravano con ts='' — 1.147 righe senza data nel
+        # bundle 20260811. Il titolo eredita l'ultimo ts di sessione visto; se
+        # arriva prima di ogni messaggio resta '' (onesto: la fonte non lo dice).
+        # NIENTE riordini: l'ordine di resa è un CONTRATTO (classify_cc/cc_buckets).
+        self.ultimo_ts = ""
+        # A5 (27/09/2026) — LA CATENA SALTA I RECORD NON TENUTI. Il genitore di un messaggio
+        # è spesso un record che qui non si tiene (una riga di servizio, un allegato senza
+        # nomi, un messaggio vuoto): la riga restava appesa a un uuid che nel DB non esiste —
+        # misurato: 40,3% delle righe con genitore in 47 sessioni del PC, 32% sul primario.
+        # `ponte` ricorda, per ogni scartato con uuid, il SUO genitore; una riga tenuta risale
+        # il ponte finché il genitore è un record tenuto (o la radice). Guardia sui cicli.
+        # I DB già scritti non si curano da qui: `skipped` non conserva i genitori.
+        self.ponte: dict[str, str] = {}
+
+    def _genitore(self, p: str) -> str:
+        visti: set[str] = set()
+        while p in self.ponte and p not in visti:
+            visti.add(p)
+            p = self.ponte[p]
+        return p
+
+    def _ricorda(self, rec: dict) -> None:
+        if rec.get("uuid"):
+            self.ponte[str(rec["uuid"])] = str(rec.get("parentUuid") or "")
+
+    def _scarta(self, d: dict) -> _Skip:
+        self._ricorda(d)
+        return _Skip("claude-code", "non-message", str(d)[:200], str(d.get("timestamp") or ""))
+
+    def _allegato(self, d: dict):
+        att = d.get("attachment") if isinstance(d.get("attachment"), dict) else {}
+        added = " ".join(str(x) for x in (att.get("addedNames") or []))
+        origine = att.get("origin") if isinstance(att.get("origin"), dict) else {}
+        accodato = (att.get("type") == "queued_command"
+                    and att.get("commandMode") == "prompt"
+                    and origine.get("kind") in (None, "human"))
+        testo_accodato = extract_blocks(att.get("prompt")).text if accodato else ""
+        if testo_accodato.strip():
+            # Un messaggio che l'utente ACCODA mentre la sessione lavora (27/09/2026):
+            # è parola sua, ma Claude Code lo scrive come attachment `queued_command`
+            # col testo in `prompt`, e qui veniva scartato (0 righe speaker=human su
+            # frasi accodate misurate sul primario). Notifiche e messaggi di altre
+            # sessioni accodati restano fuori: consegnati, il programma li scrive
+            # come turni suoi, già indicizzati come `sistema`.
+            self.ultimo_ts = str(d.get("timestamp") or self.ultimo_ts)
+            return (str(d["uuid"]),
+                    self.project or _label_da_cwd(str(d.get("cwd") or "")),
+                    str(d.get("timestamp") or ""), testo_accodato.strip(), "user",
+                    "", "", "", self._genitore(str(d.get("parentUuid") or "")))
+        if added.strip():
+            return (str(d["uuid"]),
+                    self.project or _label_da_cwd(str(d.get("cwd") or "")),
+                    str(d.get("timestamp") or ""), "", "attachment", "", "",
+                    added.strip(), self._genitore(str(d.get("parentUuid") or "")))
+        return self._scarta(d)
+
+    def non_messaggio(self, d: dict, typ: object):
+        """Un record che non è user/assistant: un titolo o un allegato utili, oppure una lapide."""
+        # NON un messaggio user/assistant. Prima: `continue` MUTO → 38k righe di
+        # servizio sparivano dal conteggio (né in n né in skipped): la quadratura
+        # non poteva chiudere. Ora ogni riga-non-messaggio è CONTATA, e le due che
+        # portano contenuto utile (titolo, allegati) sono indicizzate — parità col
+        # path claude.ai, che già cattura summary e attachments.
+        if typ == "ai-title" and str(d.get("aiTitle") or "").strip():
+            # uid per sessione se c'è, altrimenti sul TESTO del titolo (garantito
+            # non-vuoto dal guard sopra): titoli distinti → uid distinti, titoli
+            # uguali → una lapide sola. NB: `n_riga` era rimasto qui dopo la sua
+            # rimozione → NameError sui titoli senza sessionId (crash dell'ingest).
+            return (_uid("cc-title", str(d.get("sessionId") or d["aiTitle"])), "titoli",
+                    self.ultimo_ts, str(d["aiTitle"]).strip(), "title", "", "", "", "")
+        if typ == "attachment" and d.get("uuid"):
+            return self._allegato(d)
+        # metadati operativi (mode/system/last-prompt/queue-operation/…): non un
+        # messaggio, ma lascia una lapide contata invece di sparire in silenzio.
+        return self._scarta(d)
+
+    def messaggio(self, d: dict):
+        """Un record user/assistant: la riga, o la lapide se manca l'identità o il contenuto."""
+        uuid, ts = d.get("uuid"), d.get("timestamp")
+        if not uuid or not ts:
+            # detail = tipo + POSIZIONE nel file: senza l'indice, tutti gli scarti dello
+            # stesso tipo collassavano in UNA lapide (uid identico + OR IGNORE) — il
+            # contatore della perdita perdeva. L'indice è stabile fra re-ingest dello
+            # stesso file: dedup fra ingest sì, collasso dentro l'ingest no.
+            return _Skip("claude-code", "no-uuid-o-ts", str(d)[:200], str(ts or ""))
+        msg = d.get("message") or {}
+        blocks = extract_blocks(msg.get("content"))
+        # PRIMA: `if not text: continue` — un messaggio fatto di soli tool_use (una
+        # sessione agentica ne è piena) spariva senza lasciare traccia. Ora basta che
+        # abbia UN contenuto qualsiasi.
+        if not (blocks.text or blocks.tools or blocks.thinking):
+            self._ricorda(d)
+            return _Skip("claude-code", "empty", str(uuid), str(ts))
+        proj = self.project or _label_da_cwd(str(d.get("cwd") or ""))
+        sender = _mittente_cc(d, msg, blocks)
+        self.ultimo_ts = str(ts)
+        return (uuid, proj, ts, blocks.text, sender,
+                blocks.tools, blocks.thinking, "", self._genitore(str(d.get("parentUuid") or "")))
+
+
+def _record_cc(fh: IO[str]):
+    """I record di un jsonl di Claude Code, uno per riga: un dict, oppure la lapide di una riga
+    JSON che non è un oggetto. Le righe vuote si saltano; quelle rotte si contano e si dicono
+    in una lapide sola in fondo. Il tetto dei byte vale anche su uno stream."""
     # tetto anche qui: `index_jsonl` accetta un file-like (non solo un path), e su
     # uno stream non c'è nessuno `st_size` da controllare. Si contano i byte letti.
     read = 0
-    # ultimo ts visto: i record `ai-title` NON portano timestamp (misurato sui
-    # jsonl reali) e i titoli entravano con ts='' — 1.147 righe senza data nel
-    # bundle 20260811. Il titolo eredita l'ultimo ts di sessione visto; se
-    # arriva prima di ogni messaggio resta '' (onesto: la fonte non lo dice).
-    # NIENTE riordini: l'ordine di resa è un CONTRATTO (classify_cc/cc_buckets).
-    ultimo_ts = ""
-    # A5 (27/09/2026) — LA CATENA SALTA I RECORD NON TENUTI. Il genitore di un messaggio
-    # è spesso un record che qui non si tiene (una riga di servizio, un allegato senza
-    # nomi, un messaggio vuoto): la riga restava appesa a un uuid che nel DB non esiste —
-    # misurato: 40,3% delle righe con genitore in 47 sessioni del PC, 32% sul primario.
-    # `ponte` ricorda, per ogni scartato con uuid, il SUO genitore; una riga tenuta risale
-    # il ponte finché il genitore è un record tenuto (o la radice). Guardia sui cicli.
-    # I DB già scritti non si curano da qui: `skipped` non conserva i genitori.
-    ponte: dict[str, str] = {}
-
-    def _genitore(p: str) -> str:
-        visti: set[str] = set()
-        while p in ponte and p not in visti:
-            visti.add(p)
-            p = ponte[p]
-        return p
-
-    def _ricorda(rec: dict) -> None:
-        if rec.get("uuid"):
-            ponte[str(rec["uuid"])] = str(rec.get("parentUuid") or "")
-
     rotte = 0
     for line in fh:
         read += len(line)
@@ -1918,101 +2032,23 @@ def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
             # e il file caricato veniva cancellato (giro di revisione del 21/11).
             yield _Skip("claude-code", "non-dict", line[:200], "")
             continue
-        typ = d.get("type")
-        if typ not in _CC_TYPES:
-            # NON un messaggio user/assistant. Prima: `continue` MUTO → 38k righe di
-            # servizio sparivano dal conteggio (né in n né in skipped): la quadratura
-            # non poteva chiudere. Ora ogni riga-non-messaggio è CONTATA, e le due che
-            # portano contenuto utile (titolo, allegati) sono indicizzate — parità col
-            # path claude.ai, che già cattura summary e attachments.
-            if typ == "ai-title" and str(d.get("aiTitle") or "").strip():
-                # uid per sessione se c'è, altrimenti sul TESTO del titolo (garantito
-                # non-vuoto dal guard sopra): titoli distinti → uid distinti, titoli
-                # uguali → una lapide sola. NB: `n_riga` era rimasto qui dopo la sua
-                # rimozione → NameError sui titoli senza sessionId (crash dell'ingest).
-                yield (_uid("cc-title", str(d.get("sessionId") or d["aiTitle"])), "titoli",
-                       ultimo_ts, str(d["aiTitle"]).strip(), "title", "", "", "", "")
-            elif typ == "attachment" and d.get("uuid"):
-                att = d.get("attachment") if isinstance(d.get("attachment"), dict) else {}
-                added = " ".join(str(x) for x in (att.get("addedNames") or []))
-                origine = att.get("origin") if isinstance(att.get("origin"), dict) else {}
-                accodato = (att.get("type") == "queued_command"
-                            and att.get("commandMode") == "prompt"
-                            and origine.get("kind") in (None, "human"))
-                testo_accodato = extract_blocks(att.get("prompt")).text if accodato else ""
-                if testo_accodato.strip():
-                    # Un messaggio che l'utente ACCODA mentre la sessione lavora (27/09/2026):
-                    # è parola sua, ma Claude Code lo scrive come attachment `queued_command`
-                    # col testo in `prompt`, e qui veniva scartato (0 righe speaker=human su
-                    # frasi accodate misurate sul primario). Notifiche e messaggi di altre
-                    # sessioni accodati restano fuori: consegnati, il programma li scrive
-                    # come turni suoi, già indicizzati come `sistema`.
-                    ultimo_ts = str(d.get("timestamp") or ultimo_ts)
-                    yield (str(d["uuid"]),
-                           project or _label_da_cwd(str(d.get("cwd") or "")),
-                           str(d.get("timestamp") or ""), testo_accodato.strip(), "user",
-                           "", "", "", _genitore(str(d.get("parentUuid") or "")))
-                elif added.strip():
-                    yield (str(d["uuid"]),
-                           project or _label_da_cwd(str(d.get("cwd") or "")),
-                           str(d.get("timestamp") or ""), "", "attachment", "", "",
-                           added.strip(), _genitore(str(d.get("parentUuid") or "")))
-                else:
-                    _ricorda(d)
-                    yield _Skip("claude-code", "non-message", str(d)[:200], str(d.get("timestamp") or ""))
-            else:
-                # metadati operativi (mode/system/last-prompt/queue-operation/…): non un
-                # messaggio, ma lascia una lapide contata invece di sparire in silenzio.
-                _ricorda(d)
-                yield _Skip("claude-code", "non-message", str(d)[:200], str(d.get("timestamp") or ""))
-            continue
-        uuid, ts = d.get("uuid"), d.get("timestamp")
-        if not uuid or not ts:
-            # detail = tipo + POSIZIONE nel file: senza l'indice, tutti gli scarti dello
-            # stesso tipo collassavano in UNA lapide (uid identico + OR IGNORE) — il
-            # contatore della perdita perdeva. L'indice è stabile fra re-ingest dello
-            # stesso file: dedup fra ingest sì, collasso dentro l'ingest no.
-            yield _Skip("claude-code", "no-uuid-o-ts", str(d)[:200], str(ts or ""))
-            continue
-        msg = d.get("message") or {}
-        blocks = extract_blocks(msg.get("content"))
-        # PRIMA: `if not text: continue` — un messaggio fatto di soli tool_use (una
-        # sessione agentica ne è piena) spariva senza lasciare traccia. Ora basta che
-        # abbia UN contenuto qualsiasi.
-        if not (blocks.text or blocks.tools or blocks.thinking):
-            _ricorda(d)
-            yield _Skip("claude-code", "empty", str(uuid), str(ts))
-            continue
-        proj = project or _label_da_cwd(str(d.get("cwd") or ""))
-        sender = str(msg.get("role") or d.get("type") or "")
-        if sender == "user" and (d.get("isSidechain") or d.get("parent_tool_use_id")):
-            # AN-11 modellata (28/08/2026): la riga è di TIPO user ma l'ha scritta
-            # la MACCHINA — il mandato a un subagent (`parent_tool_use_id` negli
-            # audit.jsonl, `isSidechain` nei transcript; i tool_result delle
-            # sidechain cadono qui con lo stesso diritto: nessuna è parola di Neo).
-            # Prima entrava come 'user' → speaker='human': la voce del committente
-            # fabbricata dallo schema — il difetto B3 della vecchia app, risorto in
-            # forma fine, ed è LETTERALMENTE l'errore che il Laboratorio dell'11/07
-            # ha scoperto (frasi dei mandati attribuite a Neo). sender='mandato'
-            # → speaker='assistant' (mappa in _SPEAKER_NOTI).
-            sender = "mandato"
-        elif (sender == "user" and not blocks.text and blocks.tools
-              and not _parola_utente_in_tool_result(blocks.tools)):
-            # Un record user fatto SOLO di tool_result: l'output di un comando, non una
-            # parola dell'utente (26/09/2026). Prima entrava `user` → speaker='human', e
-            # il filtro «le parole di chi scrive» restituiva soprattutto `ls` e referti
-            # di script. Viene DOPO il mandato: in una sidechain resta della macchina.
-            sender = "strumento"
-        elif sender == "user" and blocks.text and _turno_del_programma(d, blocks.text):
-            # Un turno che il programma inietta: notifiche, output di comandi locali,
-            # compattazioni, skill, altre sessioni (#293). Prima era speaker='human'.
-            sender = "sistema"
-        ultimo_ts = str(ts)
-        yield (uuid, proj, ts, blocks.text, sender,
-               blocks.tools, blocks.thinking, "", _genitore(str(d.get("parentUuid") or "")))
+        yield d
     if rotte:
         # una sessione ancora aperta finisce spesso con una riga a metà: è normale, ma si dice
         yield _Skip("claude-code", "righe-non-json", f"{rotte} righe non leggibili come JSON", "")
+
+
+def _iter_claude_code(fh: IO[str], project: str) -> Iterator[RowFull]:
+    lettore = _LettoreCC(project)
+    for d in _record_cc(fh):
+        if isinstance(d, _Skip):
+            yield d
+            continue
+        typ = d.get("type")
+        if typ not in _CC_TYPES:
+            yield lettore.non_messaggio(d, typ)
+        else:
+            yield lettore.messaggio(d)
 
 
 def classify_cc(fh: IO[str]) -> list[str]:

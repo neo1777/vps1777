@@ -4,14 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **La lettura delle sessioni di Claude Code è riordinata** (QUA-04): `_iter_claude_code` (complessità 21)
+  è spezzata in un lettore con un passo per specie di record, senza cambiare comportamento: ogni riga resa,
+  nell'ordine, identica su 1.502 sessioni generate.
+
+### Corretto
+- Il CHANGELOG della 0.98.16 ripeteva otto voci due volte (un errore nell'unire i rami): tolte le copie.
+
 ## [0.98.16] — 2026-11-25
 
 ### Aggiunto
-- **I marcatori di conflitto si cercano anche in CI.** `tools/marcatori-di-conflitto.py` (con la sua
-  autoprova, nel job lint e in `tools/check.sh`) fallisce se un file tracciato ha una riga che comincia con
-  `<<<<<<< ` o `>>>>>>> `, o se è tracciato un `.rej` o un `.orig`. Prima lo cercava solo l'hook di
-  pre-commit, che si attiva a mano e non vede una PR aperta da un'altra macchina. Visto da Sagoma.
-
 - **I marcatori di conflitto si cercano anche in CI.** `tools/marcatori-di-conflitto.py` (con la sua
   autoprova, nel job lint e in `tools/check.sh`) fallisce se un file tracciato ha una riga che comincia con
   `<<<<<<< ` o `>>>>>>> `, o se è tracciato un `.rej` o un `.orig`. Prima lo cercava solo l'hook di
@@ -64,24 +67,6 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **La scrittura dell'archivio è riordinata** (QUA-04): `write_rows` (complessità 30), che scrive ogni
   caricamento nei DB, è spezzata nei suoi passi senza cambiare comportamento: lo stesso flusso dà lo stesso
   DB, verificato su 664 scenari col contenuto completo del database.
-- `tools/check.sh` lancia anche gli scanner del sorgente (Dockerfile, dipendenze, segreti nella storia),
-  come fa `scanner.yml` in CI; il test che tiene check.sh al passo coi workflow ora guarda anche quello.
-- ruff accende B904: un `raise` dentro un `except` dice da dove viene (`from err` o `from None`).
-- La ricerca ibrida cita la fonte della sua fusione (Reciprocal Rank Fusion, SIGIR 2009) e dice in che
-  cosa se ne discosta; CONTRIBUTING elenca il prefisso `refactor:`.
-- `tools/scanner.sh segreti` in un worktree di git legge la storia come nel repo principale: prima ripiegava
-  sulla lettura del disco, che entra anche nelle `.venv` non tracciate, e dava un rosso falso.
-- **La semina degli script di `tools/` nel ledger delle feature finisce il 31/01/2027.** Dal 02/08 gli script
-  non dichiarati davano solo avvisi, senza una data: dal 01/02/2027 saranno errori (la data è la stessa del
-  censimento della complessità). `verify-features.py --oggi AAAA-MM-GG` legge scadenze e semine a una data
-  scelta.
-- **SECURITY.md, «Limiti crittografici dichiarati», rimesso al presente.** Diceva che i metadati di una
-  release non scadono: dalla 0.98.13 il canale firmato scade dopo 45 giorni e ferma l'aggiornamento
-  automatico; ora lo dice, con i due limiti che restano. E diceva di rigenerare la chiave dei backup
-  «quando `age` avrà recipient post-quantum»: li ha dalla 1.3.0 (dicembre 2025); ora dice che vps1777
-  non li usa ancora, che cosa servirebbe e quando si rivede (31/03/2027). Visto da Sagoma.
-- `CODEOWNERS` nomina anche i file che istruiscono gli agenti (REVIEW.md, le istruzioni dei due server
-  MCP, la disciplina della memoria), e dice perché la review dei proprietari non è obbligatoria.
 
 ## [0.98.15] — 2026-11-25
 
