@@ -14,6 +14,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   regola per funzione, nell'ordine di precedenza di prima; identica su 8.024 testi composti.
 - **La lettura di un export claude.ai è riordinata** (QUA-04): `_iter_claude_zip` (complessità 19) è spezzata
   in un passo per specie di membro, identica su 1.500 export generati.
+- **Il controllo delle scadenze dei segreti è riordinato** (QUA-04): `secrets-status` (complessità 19) è
+  spezzato nei suoi passi; esito, messaggi e stato scritto identici su 2.000 casi generati.
 - `applicabilita.yml` dichiara lo standard `1777-0.2` (prima `1777-0.1.0`, che non aveva ancora lo strumento
   che misura i repo).
 
