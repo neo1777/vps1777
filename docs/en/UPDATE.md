@@ -113,7 +113,8 @@ optional one has nothing to do with updates and is switched on by hand (below, i
 Telegram message to the owner (once per release) and a badge in the admin card.
 If GitHub is unreachable: no noise, just a "stale check" badge. On the same round, and
 before asking GitHub, the check prunes the pre-update snapshots, runs the watches
-(reachability, backups, disk: it alerts on a change of state) and updates
+(reachability, backups, off-machine copy, disk and, if declared, Portainer: it alerts on a
+change of state) and updates
 `/admin/salute`: details in [CLI.md](CLI.md#vps1777-check).
 
 **2. Secret expirations** — `vps1777-secrets-check.timer`, **daily**
@@ -239,7 +240,7 @@ every week, with a 45-day life, and publishes it on the
 `canale-firmato` branch of the repository (one file, with the signature inside). The signature is the same kind as the packages': no keys, bound to the identity of that
 workflow.
 
-**What your machine does.** Only the **automatic** update (the weekly timer) checks it, on every
+**What your machine does.** Only the **automatic** update (the daily timer) checks it, on every
 pass, even when there is nothing to install:
 
 - channel signed and not expired → it goes on as always. If the channel names a newer release than
@@ -248,7 +249,8 @@ pass, even when there is nothing to install:
   you on Telegram**. It installs nothing by itself until the channel is valid again.
 
 The **manual** update (`vps1777 update`, or the button in the panel) does not look at the channel:
-whoever decides to update has already chosen, and packages are still verified as before.
+whoever decides to update has already chosen, and packages are still verified as before. With
+`VPS1777_RELEASE_CHANNEL=prerelease` (testing only) the signed channel is not consulted.
 
 **If you get the warning.** It almost always means the weekly workflow has not run for more than
 a month and a half: look at the project's releases page. If there is a new version there and you
@@ -288,7 +290,12 @@ updating is the `autoupdate` feature (the timer, with quarantine and the safety 
   again later"), which the update units count as success (`SuccessExitStatus=75`): a
   timer run that runs into an update in progress doesn't send a false "failed" on
   Telegram. If it's a leftover from a crash: `vps1777 status` shows
-  `update_in_progress`; no active process → retry, the lock is per-process.
+  `update_in_progress`; no active process → run `vps1777 update` again: before anything else
+  it closes the update left halfway, and that run ends there. If the tag is already the new
+  one and the stack is healthy it records it as successful (exit 0); otherwise it goes back
+  to the previous version (exit 1; 2 if manual intervention is needed), restoring the data
+  from the snapshot only if the stack was down. To install, run it once more. The lock is
+  per-process.
 - **Digest mismatch on pull** — something doesn't add up between the registry
   and the release (attack or corrupted release): the update aborts BEFORE
   touching the stack. Check the release on GitHub and retry.

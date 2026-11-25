@@ -11,6 +11,8 @@ NotebookLM MCP wrapper — espone i tool del CLI `nlm` come MCP streamable-http.
 | `NB1777_TRANSPORT` | `streamable-http` | `streamable-http`, `stdio`, `sse` |
 | `NLM_HOME` | `/var/lib/nlm` | volume col profilo `profiles/default/` + `AUTH_PENDING.flag` |
 | `NLM_ARTIFACTS` | `/var/lib/nlm-artifacts` | dove nascono gli artefatti di `studio_download` (volume separato, senza segreti) |
+| `NLM_ARTIFACTS_GIORNI` | `30` | giorni dopo i quali un artefatto scaricato si cancella (prima di ogni nuovo download) |
+| `NLM_ARTIFACTS_MAX_MB` | `5000` | tetto del volume degli artefatti: oltre, si tolgono i più vecchi |
 | `GATEWAY_SECRET_FILE` | — | segreto condiviso per gli endpoint `/internal/*`; senza, negano tutto |
 | `NOTEBOOKLM_DISABLE_HEADLESS_REFRESH` | — (in `compose.yaml` è `1`) | spegne il refresh headless dei cookie di `nlm`, che nel container non ha il profilo di browser e può solo fallire |
 | `GATEWAY_PUBLIC_BASE` | — (in `compose.yaml` viene da `PUBLIC_BASE`; vuoto = link relativi) | indirizzo pubblico del gateway per i link firmati `/scarica/` e i link di caricamento `/carica/` |

@@ -5,6 +5,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **Tutti i documenti riletti contro il codice** (63 file, una riga alla volta): una settantina di affermazioni
+  che non tornavano più. Le più pesanti: il timer dell'aggiornamento automatico era detto «settimanale» ed è
+  giornaliero; il check giornaliero fa otto sorveglianze e i documenti ne contavano cinque; ingest e giro
+  notturno dell'indice erano detti «non coordinati» mentre si mettono in fila col lucchetto dell'archivio; un
+  update interrotto si chiude da solo al lancio successivo e nessuna pagina lo diceva; la versione di `nlm` da
+  installare sul PC era ferma alla 0.16.1 (anche nella pagina `/admin/nlm`: ora 0.16.5, quella del server); una
+  «0.62.3» mai esistita era citata in sei pagine (è la 0.63.0); `example-bot` non diceva che senza
+  `EXAMPLE_BOT_OWNER_ID` non risponde a nessuno; SECURITY.md chiamava «rebuild» un controllo mensile che non
+  ricostruisce e non contava `H102` e `H103` nella provenienza. Da una pagina di roadmap sono usciti nomi di
+  persone e dettagli personali; dalle altre i percorsi di una macchina di sviluppo.
 - **Lo scanner dei segreti guarda due volte prima di dire rosso.** trufflehog segnala anche ciò che non riesce a
   verificare: quando la verifica remota falliva per un momento storto della rete, stringhe innocue della storia
   uscivano come «non verificabili» e `check.sh` (e il workflow degli scanner) arrossiva da solo, per tornare verde

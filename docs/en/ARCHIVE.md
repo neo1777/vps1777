@@ -57,7 +57,7 @@ highlights the searched term with `«»` (since 0.62.2 the redaction reads the t
 markers were not there: a `ghp*` search returned `«ghp»_<rest>` in clear). And it is a
 **window** that starts and ends wherever it happens to, even halfway through a secret,
 marked with `…`; the vector branch of `search_ibrida` cuts the text at 400 characters. That
-is why, since 0.62.3, a secret **cut by the edge** is masked too: a known prefix followed by
+is why, since 0.63.0, a secret **cut by the edge** is masked too: a known prefix followed by
 at least 8 characters at the end of the text, a run of at least 20 characters with upper
 case, lower case and digits right after the opening `…`, a private-key block of which only
 the start or only the end shows. The account's values are matched regardless of case and
@@ -420,7 +420,7 @@ the member's name and says why.
 | `bundle-recupero` | `recupero-tsv-fuori-contratto` | a `.tsv` whose header lacks a contract column (the whole file doesn't get in: no half-filled tables), or one of its rows with the wrong number of fields or an empty key (only that row is skipped, with its line number) |
 | `bundle-workfiles` | `non-testo`, `pdf-*`, `ocr-*`, `zip-*`, `membro-oltre-tetto`, … | a working file with no text to read, or that OCR / opening couldn't read |
 | `bundle-documents` | the same as `bundle-workfiles` | the same, for a member of `documents/` |
-| `claude-code` | `non-message`, `no-uuid-o-ts`, `empty` | a session record that isn't a message, has no uuid or ts, or is empty |
+| `claude-code` | `non-message`, `no-uuid-o-ts`, `empty`, `non-dict`, `righe-non-json` | a session record that isn't a message, has no uuid or ts, is empty, is not a JSON object; or file lines that cannot be read as JSON (a single tombstone, with their count) |
 
 ```sql
 -- what did not get into this DB, by reason
@@ -458,9 +458,9 @@ tools again.
 | Tool | What it does |
 |---|---|
 | `search(query, db_name, limit, …)` | FTS5 search; returns `{db, uuid, project, ts, rank, snippet, speaker, voice, snapshot}` (`speaker` and `voice` since 0.80.0: who wrote the row and whose voice it is, see below). When searching **all** DBs the same uuid arrives **once**, with `anche_in` listing the other archives that contain it (no limit wasted on copies). Filters `since`/`until`, `project`, `speaker`, `voice`, `campi` (below). `limit` goes from 1 to 200: below 1 it is an error that says so (before, `-1` silently lost the last result), above 200 it is cut |
-| `search_ibrida(query, db_name, limit, query_fts, …)` | search **by meaning**: FTS5 + vectors fused (RRF). For when you remember the meaning and not the wording; it needs the embedding model and a `<db>.vec.db` index on the volume, and if they are missing **it says so** instead of falling back to FTS5. Takes `campi` and, since 0.62.1, `speaker` like `search` (the filter applies to both lists). Since 0.64.0 it takes up to 3 `riformulazioni`, fused into the same top-k. Since 0.65.0 the snippet is 64 tokens and `passaggio` (up to 400 words) gives the spot of the whole text where the question is densest. See [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
+| `search_ibrida(query, db_name, limit, query_fts, …)` | search **by meaning**: FTS5 + vectors fused (RRF). For when you remember the meaning and not the wording; it needs the embedding model and a `<db>.vec.db` index on the volume, and if they are missing **it says so** instead of falling back to FTS5. Takes `campi` and, since 0.62.1, `speaker` like `search` (the filter applies to both lists). Since 0.64.0 it takes up to 3 `riformulazioni`, fused into the same top-k. Since 0.65.0 the snippet is 64 tokens; since 0.90.0 `passaggio` replaces it by default (120 words, up to 400; `0` = the short snippet): the spot of the whole text where the question is densest. See [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
 | `count(query, db_name, …)` | how many messages match (not limited): `{total, per_db}`; if a term **collapses** it adds `warnings`. Same filters as `search`, `campi` included |
-| `check_term(term, db_name)` | diagnoses whether a term with a non-alphanumeric character at its start or end (`C++`, `C#`, `g++`, `.NET`) is searchable or **collapses** onto a shorter token — it asks the index, not the docs |
+| `check_term(term, db_name, ruoli)` | diagnoses whether a term with a non-alphanumeric character at its start or end (`C++`, `C#`, `g++`, `.NET`) is searchable or **collapses** onto a shorter token — it asks the index, not the docs |
 | `get_context(uuid, db_name, before, after, max_chars)` | the messages **around** a result, with the **full content**; on Claude Code sessions the neighbours come from the **session file** (the matched row says so in `vicini_da`); elsewhere, if the message is in a thread, from the **same thread** (`parent_uuid` edge), not from mere closeness in time. `max_chars` (0 = whole) truncates each row **saying so in the text** — on giant hub messages the full payload killed the connection. A row **without text** (a tool_use, the output of a command) also carries **`tools`**, the actions that are its content (since 0.52.0: before, it came out empty), truncated by `max_chars` like the text |
 | `get_conversation(uuid, db_name, limit, max_chars)` | the **whole thread** containing the uuid (`parent_uuid` tree, ancestors + descendants, in `(ts, uuid)` order) — to **read a chat** from start to end, not just the ±N window; `max_chars` and `tools` as in `get_context`. On Claude Code sessions it is the whole **session file** (`conversazione_da`), and with bundles carrying `recupero/` the session's card comes **last**. Beyond `limit` rows (200) it returns a window that always contains the requested uuid and the card, declared in the `finestra` field of the match row |
 | `get_many(uuids, db_name, max_chars)` | since 0.80.0: the **whole** rows of several messages (up to 50) in **one** call, in the requested order, with `speaker`, `voice` and `tools`; `mancanti` lists the uuids no DB has. After a search it replaces one `get_context` per result. `max_chars` defaults to 4000 (0 = whole). Like `get_context` it looks at every DB, primaries first; the same uuid in several DBs comes back once, with `anche_in` |
@@ -577,7 +577,7 @@ The `ruolo` (role) field makes it readable.
 > for one search over 452,000 vectors, measured on 11/10), which is why `search_ibrida` has a
 > shorter budget and checks the clock before every search, not only between DBs (since
 > 0.81.1). An unreadable `.db` file in the
-> folder (SQLite: "file is not a database") no longer breaks the search for everyone: that
+> folder (SQLite: "file is not a database") no longer breaks the search for everyone:
 > the others answer. `count`, `check_term` and `search_ibrida` report it in `saltati`;
 > `search` skips it and writes it only to the server log.
 
@@ -619,7 +619,7 @@ searching):
   `1777` doesn't find `N1777`).
 - Terms with special characters (`- . / @ : # '`) **in double quotes**:
   `"flutter-elinux"`, `"0.7.9"`. In *smart* mode (the default) the server quotes
-  them itself, colons included (`errore:grave`, a URL): since 0.62.3 `word:` stays a
+  them itself, colons included (`errore:grave`, a URL): since 0.63.0 `word:` stays a
   column filter only if the word is a real column (`project:`, `content:`, `ts:`,
   `uuid:`, `tools:`, `attachments:`); with `raw=true` the query passes untouched (for NEAR/complex
   parentheses). **But quoting isn't enough for the suffix** — see the box below.
@@ -779,7 +779,8 @@ possible. "It isn't there" and "I couldn't look" stay two different answers.
 3. **Read it.** `get_conversation(sessione.last_uuid)` — the whole chat, with the
    card at the end. If the chat exceeds `limit` (200) it returns the window around
    `last_uuid`, that is the end, and the `finestra` field says so: for the whole of it,
-   raise `limit`.
+   raise `limit` (up to 2000 rows: beyond that a higher value is brought back to the cap with
+   no error, and the chat is read in windows).
 4. **Rebuild the family.** `get_stirpe(...)`: the members in order, and for each
    one `get_session` again.
 5. **Lineages from the text.** `search('"0f1e2d3c"', project="recupero:stirpi")`
@@ -936,7 +937,7 @@ sent** the row, taken from the source (`human` · `assistant` · `tool` · `syst
 `other` · `unknown`). `unknown` is everything that does not declare a known sender:
 attachments, titles, memories and cards, documents, MCP server logs.
 
-In **Telegram groups** the sender's name is in the text (`[Name] …`). Since 0.62.3 the
+In **Telegram groups** the sender's name is in the text (`[Name] …`). Since 0.63.0 the
 archive's owner is `human`, as in the other archives, and the other members `other`, but
 only if the installation declares who the owner is: `TELEGRAM_OWNER_ID` (the same as the
 Mini App's) is enough for the JSON export, which carries the sender's id; the HTML export
@@ -947,7 +948,7 @@ DB loaded earlier is fixed with `vps1777 archive-migra --db <name> --telegram` (
 then `--scrivi`): it uses the name at the head of the text, and must be run only on DBs
 that are Telegram exports. `system` comes from the record's field (`origin`, `isMeta`) when there is one; on the
 versions that did not write it, the shape of the text decides, and it is an estimate.
-A `speaker` or `voice` value that does not exist is an **error** (since 0.62.3), as for
+A `speaker` or `voice` value that does not exist is an **error** (since 0.63.0), as for
 `campi`: it used to return 0 rows, and «speaker='neo'» read as «never said it». `voice` is **whose voice** is in the content, a heuristic estimate
 (`own` · `pasted_transcript` · `pasted_ai` · `character` · `mixed` · `unknown`),
 with its confidence and the flags that explain it. They come out **populated** from

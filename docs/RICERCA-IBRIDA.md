@@ -76,7 +76,7 @@ modello che vinca sui soli vettori.
 | `query` | — | la domanda in linguaggio naturale, come la diresti a voce. È il segnale per i vettori |
 | `query_fts` | `""` | un'espressione FTS5 (la sintassi di `search`) per il ramo full-text. Se manca, il ramo FTS ne ricava una dalle parole di `query` |
 | `db_name` | `""` | un DB (qualunque ruolo abbia); vuoto = i DB del perimetro di `ruoli` che hanno un indice. Quelli del perimetro senza indice finiscono in `senza_indice` |
-| `ruoli` | `""` | dove cercare senza `db_name` (dalla 0.74.0): `""` = primari e non dichiarati; `tutti` = ogni DB; oppure ruoli separati da virgole (`primario`, `fotografia`, `riscontro`, `riservato`). Il riservato si interroga solo nominandolo. I DB lasciati fuori tornano in `fuori_perimetro`, raggruppati per ruolo |
+| `ruoli` | `""` | dove cercare senza `db_name` (dalla 0.74.0): `""` = primari e non dichiarati; `tutti` = ogni DB; oppure ruoli separati da virgole (`primario`, `fotografia`, `riscontro`, `riservato`, `non dichiarato`). Il riservato si interroga solo nominandolo. I DB lasciati fuori tornano in `fuori_perimetro`, raggruppati per ruolo |
 | `limit` | 20 | righe restituite, da 1 a 200: oltre 200 si tiene 200, sotto 1 è un errore |
 | `since` / `until` | `""` | finestra temporale (ISO, `ts >= since`, `ts <= until`), come in `search`. Vale per **tutte e due** le liste; le righe senza ts restano fuori |
 | `campi` | `tutto` | `testo` tiene solo le righe che hanno parole, anche nel ramo vettoriale (un vettore non dice se ha colpito le parole o le azioni) |
@@ -159,7 +159,7 @@ non si trova.
 | pezzo | dove vive | perché lì |
 |---|---|---|
 | il **codice di ricerca** (embedding della query + knn + fusione) | immagine `archive-mcp` | ~35 MB di dipendenze: onnxruntime, tokenizers, sqlite-vec, numpy |
-| il **modello** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; lo mette lì `vps1777 indice-modello` | ~490 MB (`model.onnx` 470 MB, `tokenizer.json` 17 MB): nell'immagine peserebbero su ogni pull, e si aggiornano senza rilasciare una versione |
+| il **modello** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; lo mette lì `vps1777 indice-modello` | ~490 MB (`model.onnx` 470 MB, cioè 449 MiB; `tokenizer.json` 17 MB): nell'immagine peserebbero su ogni pull, e si aggiornano senza rilasciare una versione |
 | l'**indice** (`<nome-db>.vec.db`) | volume, accanto al suo DB | indicizzare il corpus costa decine di ore di CPU: si fa **fuori** e l'indice viaggia come artefatto |
 | il **costruttore** dell'indice | repo, `services/archive-mcp/tools/costruisci_indice.py`, copiato anche nell'immagine `archive-mcp` | la prima costruzione gira sul PC, nell'ambiente del lock di archive-mcp; gli aggiornamenti notturni girano sulla VPS nella stessa immagine (servizio `indice-notturno`) |
 
@@ -527,10 +527,10 @@ tetto di una CPU (`cpus: 1.0`) e quello di memoria (1300m) del servizio compose.
 
 ⚠️ Il costruttore legge il DB mentre esiste. Dalla 0.84.0 l'ingest di `/admin/archive`
 gira come job a parte (servizio compose `ingest`, tetto 2g) quando arriva un file, anche
-di notte, e non si coordina col giro dell'indice: se si sovrappongono, il costruttore
-può vedere due stati del DB e i due job sommano la loro memoria. Il giro notturno non
-lancia `--controlla`: lo rivela un `--controlla` lanciato a mano, e il giro della notte
-dopo, con l'incrementale, lo rimette in pari.
+di notte; i due lavori si mettono in fila col lucchetto dell'archivio (`var/archivio.lock`),
+quindi non leggono e scrivono lo stesso DB insieme e i due tetti non si sommano. Il giro
+notturno non lancia `--controlla`: un disallineamento lo rivela un `--controlla` lanciato a
+mano, e il giro della notte dopo, con l'incrementale, lo rimette in pari.
 
 ## La verifica nel server: `indici[].verifica`
 
@@ -554,9 +554,11 @@ di prima non cambiano forma.
 | `uuid_diversi` | vicini il cui rowid ora appartiene a un altro messaggio |
 | `stato` | la frase per chi legge, con la cura |
 
-I tre stati possibili:
+I quattro stati possibili:
 
 - `verificato: ogni risultato vettoriale combacia col DB (uuid per rowid)`;
+- `niente da verificare: nessun risultato vettoriale in questa ricerca`: il ramo vettoriale
+  non ha portato candidati (per esempio un filtro li ha tolti tutti);
 - `indice disallineato col DB: N risultati vettoriali scartati (A rowid spariti,
   B rowid ora di un altro messaggio) — lancia …costruisci_indice.py --controlla
   su una copia del DB e aggiorna l'indice`;

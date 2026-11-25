@@ -3,43 +3,43 @@
   "traduzioni": {
     "README.md": {
       "sorgente": "README.it.md",
-      "sorgente_sha256": "dd377d1861a4bb00e054cf6b65ac4101832de36379a21fe7504fc02e81f66253",
-      "traduzione_sha256": "cd8cc4e8adbefcf4a23fa8bb1139a1d9c6cf4fc6b13bc6b7ea85048a5682f927"
+      "sorgente_sha256": "f75c1151d1f46735a84be1d1e72485f0ac26d92abd6484991d5e29ec7c12a1a5",
+      "traduzione_sha256": "78cbeadaf980cb4aca3a72739a96434b9df7b46b379da0324788b5fa3910181d"
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
-      "sorgente_sha256": "00290f3ee1a94a8b3fb004114966e9ed447191ceca02ed70e57cdb2dee262f55",
-      "traduzione_sha256": "1bb258f52d2560903d0b8950e09e0d674686e57e1de91f862e95b09a33e34913"
+      "sorgente_sha256": "e2283af1a99049b215dedbf1ccda617e1365e3deac59a0ed736d95e15f4e533e",
+      "traduzione_sha256": "e195d1a956fc0a9bbdc5b0588540fe7ac75bb2d0a526d6696c2cbb846eb943ea"
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
-      "sorgente_sha256": "9d1185a62a7e6bbdb807503a73a5f3381bb42523aac4bc518fd1b8c67e0c3800",
-      "traduzione_sha256": "7a8b69455ef5a47fe12a17fe180f609c45a9f4241bd32d819e9ccd67c7677e08"
+      "sorgente_sha256": "bbb4a18c0f99505e951d4c692d0f287bff0d9f97c59dfa012a0a7f965d3ec903",
+      "traduzione_sha256": "5c9cd44d44ef0d61c7969b141354c0ad6b6f08a7cdf3e54fb43d346ec208a0b0"
     },
     "docs/en/ARCHIVE.md": {
       "sorgente": "docs/ARCHIVE.md",
-      "sorgente_sha256": "e1cd123e348f510025176117c5a74b7b24a3c94dbdf5bb549d3ece5ee55e3da4",
-      "traduzione_sha256": "a8a96fdacdc72c263854582e99b7ee4848d87d7bafd1170cb9dd1f6db63412d6"
+      "sorgente_sha256": "61cd08944841ce6cba4b93d4e6ae642f31ca97e35d6c5e1399c91f017cff8e12",
+      "traduzione_sha256": "2dd352a90e74840a132e581b4492ba32461c0215e2958af67bf94725cc68cfa8"
     },
     "docs/en/INSTALL.md": {
       "sorgente": "docs/INSTALL.md",
-      "sorgente_sha256": "fe4cb46fa7b34aa470633edf0c5d89cf695019010e97bffbc88415eebfeee2a0",
-      "traduzione_sha256": "2b89a2800bd6567aeeeca642eaf65c30b8c2411ce4e93316a04b11b976a04660"
+      "sorgente_sha256": "2e8ee42f2986d3c52eba2d97290e468e6a83cf01118f3ae66d05853ec14043e3",
+      "traduzione_sha256": "0baee13e632f2fa78e4dcee1274e362c38ec8fdcdc37e07022d8470ac0198404"
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
-      "sorgente_sha256": "68ff33e8d0d99b67fb5848e531125a41d05ae706607ce20de6d5b31a0da71137",
-      "traduzione_sha256": "50f10edf120c8839e5749ed2f8cd947583c4091c6ee830425c494c28f17f0388"
+      "sorgente_sha256": "e6b4ca31d6d968c7ac097bad48ce948bb949d3854b6cb87b4219771f9d5b3db9",
+      "traduzione_sha256": "47775ae0bac14a18ec7f22d015329084f7092ac1dc0cfc4ebb3a52edf6f73770"
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
-      "sorgente_sha256": "48109213a5ec76c842467f8ac7c3eccd49b66ad217cba1146b4cfcd446fc16ce",
-      "traduzione_sha256": "bc2bf9074fe13c1fcbb7dd91063948f0d7ceb6fb4d5d6f47f692d3e1a3d71031"
+      "sorgente_sha256": "406969857d189e3b87755e4e1097ef7d83098c509a75cacb99a5122a6773c834",
+      "traduzione_sha256": "72b8aaed9e949cc2721608248232f1a3d6c0bf510012c5170163210c58249ad0"
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "ffe02acaf08878cf05d19078cf77b1f8038233b0ce8a3284624112eecae42032",
-      "traduzione_sha256": "728db0211ec88290b9d543239c2f9e9bbbbb55bd72789e03d43995b40cfc6abb"
+      "sorgente_sha256": "7a0e5904e8e1f3041aa3f25596d0a36e966376664971a440cc5a21348f1d128f",
+      "traduzione_sha256": "90e6feb8c13f825558b577c518e4e0801e9e8a9264f992fcb6ecb968cb3c6df5"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",
@@ -48,13 +48,13 @@
     },
     "docs/en/RICERCA-IBRIDA.md": {
       "sorgente": "docs/RICERCA-IBRIDA.md",
-      "sorgente_sha256": "dd64efd169e1213aa679b70ad20c5cefc45d857a9f7b10304f0d7c3902a5d501",
-      "traduzione_sha256": "5e6613e0697433f47e7d0edfb8488dc5d580d16c86102bd456bea6303ca74c54"
+      "sorgente_sha256": "a8c34b0f9f35c657a831e2507f116a950e680d3e33b3d7dc971677d405151af5",
+      "traduzione_sha256": "36c551bbc94f538e95257b8b1aff24b5a9a0d3bf28bf962d70901106a126ebc9"
     },
     "docs/en/PRIMI-15-MINUTI.md": {
       "sorgente": "docs/PRIMI-15-MINUTI.md",
-      "sorgente_sha256": "e4ed8ee2fc8fc9552f822f02c17a6fca92646fe2d26f104127af9d9136550635",
-      "traduzione_sha256": "fe169e98ff59862e82a346f61de0d0a9b264c80fb916524357915e782ef06db7"
+      "sorgente_sha256": "950d2d92b45d2b6a4dfe42f88c37d874989ac07a1d9741594974a3a2e864c6cd",
+      "traduzione_sha256": "c68019b6b2d3660e5418a8397c53ed17db29a77b37b2a98dd8b079c5f77fe5bc"
     }
   },
   "solo_italiano": {

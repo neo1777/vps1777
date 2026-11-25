@@ -84,7 +84,7 @@ wins on vectors alone.
 | `query` | — | the question in natural language, as you would say it. It is the signal for the vectors |
 | `query_fts` | `""` | an FTS5 expression (the syntax of `search`) for the full-text branch. If missing, the FTS branch derives one from the words of `query` |
 | `db_name` | `""` | one DB (whatever its role); empty = the DBs in the `ruoli` perimeter that have an index. Those in the perimeter without an index end up in `senza_indice` |
-| `ruoli` | `""` | where to search without `db_name` (since 0.74.0): `""` = primaries and undeclared; `tutti` = every DB; or comma-separated roles (`primario`, `fotografia`, `riscontro`, `riservato`). The reserved one is queried only by naming it. The DBs left out come back in `fuori_perimetro`, grouped by role |
+| `ruoli` | `""` | where to search without `db_name` (since 0.74.0): `""` = primaries and undeclared; `tutti` = every DB; or comma-separated roles (`primario`, `fotografia`, `riscontro`, `riservato`, `non dichiarato`). The reserved one is queried only by naming it. The DBs left out come back in `fuori_perimetro`, grouped by role |
 | `limit` | 20 | rows returned, from 1 to 200: above 200 it keeps 200, below 1 it is an error |
 | `since` / `until` | `""` | time window (ISO, `ts >= since`, `ts <= until`), as in `search`. It applies to **both** lists; rows without a ts stay out |
 | `campi` | `tutto` | `testo` keeps only the rows that have words, in the vector branch too (a vector does not say whether it hit the words or the actions) |
@@ -168,7 +168,7 @@ reach the point, not the file that cannot be found.
 | piece | where it lives | why there |
 |---|---|---|
 | the **search code** (query embedding + knn + fusion) | the `archive-mcp` image | ~35 MB of dependencies: onnxruntime, tokenizers, sqlite-vec, numpy |
-| the **model** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; `vps1777 indice-modello` puts it there | ~490 MB (`model.onnx` 470 MB, `tokenizer.json` 17 MB): in the image they would weigh on every pull, and they get updated without releasing a version |
+| the **model** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; `vps1777 indice-modello` puts it there | ~490 MB (`model.onnx` 470 MB, i.e. 449 MiB; `tokenizer.json` 17 MB): in the image they would weigh on every pull, and they get updated without releasing a version |
 | the **index** (`<nome-db>.vec.db`) | volume, next to its DB | indexing the corpus costs tens of hours of CPU: it is done **elsewhere** and the index travels as an artifact |
 | the index **builder** | repo, `services/archive-mcp/tools/costruisci_indice.py`, also copied into the `archive-mcp` image | the first build runs on the PC, in archive-mcp's lock environment; the nightly updates run on the VPS in that same image (`indice-notturno` service) |
 
@@ -550,10 +550,10 @@ builder lives in the container, which does not inherit that priority: what holds
 the compose service's one-CPU cap (`cpus: 1.0`) and its memory cap (1300m).
 
 ⚠️ The builder reads the DB as it is. Since 0.84.0 the `/admin/archive` ingest runs as a
-separate job (compose service `ingest`, 2g cap) when a file arrives, at night too, and it
-does not coordinate with the index round: if they overlap, the builder may see two states
-of the DB and the two jobs add up their memory. The nightly round does not run
-`--controlla`: a `--controlla` run by hand reveals it, and the next night's round, with
+separate job (compose service `ingest`, 2g cap) when a file arrives, at night too; the two
+jobs queue on the archive lock (`var/archivio.lock`), so they never read and write the same
+DB together and the two caps do not add up. The nightly round does not run `--controlla`: a
+misalignment is revealed by a `--controlla` run by hand, and the next night's round, with
 the incremental run, brings it back in step.
 
 ## Verification in the server: `indici[].verifica`
@@ -578,10 +578,12 @@ existing fields do not change shape.
 | `uuid_diversi` | neighbours whose rowid now belongs to another message |
 | `stato` | the sentence for the reader, with the fix |
 
-The three possible states:
+The four possible states:
 
 - `verificato: ogni risultato vettoriale combacia col DB (uuid per rowid)` —
   verified: every vector result matches the DB (uuid per rowid);
+- `niente da verificare: nessun risultato vettoriale in questa ricerca` — nothing to
+  verify: the vector branch brought no candidates (for instance a filter removed them all);
 - `indice disallineato col DB: N risultati vettoriali scartati (A rowid spariti,
   B rowid ora di un altro messaggio) — lancia …costruisci_indice.py --controlla
   su una copia del DB e aggiorna l'indice` — index out of step with the DB: N

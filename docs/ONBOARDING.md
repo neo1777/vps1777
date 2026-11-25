@@ -34,8 +34,10 @@ Dal tuo PC, nella cartella del repo clonato:
 Chiede IP (se non lo passi), utente e password SSH (vuota = usa la tua chiave; con la
 password serve `sshpass` sul PC), email admin, `TELEGRAM_OWNER_ID`, ingress (per
 Tailscale hostname e auth-key, per Caddy dominio ed email, per Cloudflare il token del
-tunnel), token del bot e se generare la password admin. I requisiti della VPS sono
-quelli di [INSTALL.md](INSTALL.md). Al termine, lo stack è su. La porta 8080 del
+tunnel e l'hostname pubblico), token del bot, se generare la password admin e, alla fine, se
+riavviare la VPS per provare la ripartenza al boot. I requisiti della VPS sono quelli di
+[INSTALL.md](INSTALL.md), con una restrizione: `deploy.sh` installa Docker e i pacchetti con
+`apt-get`, quindi la VPS dev'essere Debian o Ubuntu. Al termine, lo stack è su. La porta 8080 del
 gateway è pubblicata **solo sul loopback** della VPS (`127.0.0.1`): la governa
 `GATEWAY_BIND` col profilo Tailscale (`compose.ingress.tailscale.yaml`) e
 `ONBOARDING_BIND` con Caddy e Cloudflared (`compose.onboarding.yaml`). Da
@@ -53,7 +55,9 @@ Come ci arrivi dipende dal profilo:
 | HTTPS non ancora pronto (Tailscale senza key, certificato non emesso) | tunnel SSH dal tuo computer: `ssh -L 8080:127.0.0.1:8080 <utente>@<IP_VPS>`, poi `http://127.0.0.1:8080/admin/setup` |
 
 > Con Caddy o Cloudflared, `ONBOARDING_BIND=0.0.0.0` nel `.env` della VPS
-> rimette la porta su tutte le interfacce (`http://<IP_VPS>:8080/admin/setup`).
+> rimette la porta su tutte le interfacce (`http://<IP_VPS>:8080/admin/setup`): la variabile si
+> legge quando il gateway nasce, quindi dopo averla scritta va ricreato con l'overlay
+> `compose.onboarding.yaml` (gli stessi `-f` del tuo avvio, più quello, e `up -d gateway`).
 > È un compromesso dichiarato: pannello e login viaggiano in HTTP, quindi
 > password e sessione admin passano in chiaro finché non c'è HTTPS. Toglila
 > appena il pannello risponde in HTTPS.

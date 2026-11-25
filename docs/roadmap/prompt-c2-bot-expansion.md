@@ -61,8 +61,7 @@ build) → tag `vX.Y.Z` → release GHCR → `vps1777 update` → E2E live. Vers
 
 La docstring del bot attuale dice: *"In F8 estendiamo a tutti i **~60** del
 vecchio nb1777/bot.py"*. **È falso, verificato alla fonte.** Il bot legacy
-(`~/Scrivania/mcp_dash/mcp1777/notebookllm1777/nb1777/nb1777/bot.py`, 742 righe;
-copia identica in `.../workfiles/nb1777/nb1777/bot.py`) ha **19 CommandHandler**,
+(il `bot.py` del vecchio nb1777, fuori da questo repo: 742 righe) ha **19 CommandHandler**,
 di cui ~17 user-facing. Non 60. Il numero giusto da cui partire è **~19**, e il
 lavoro reale è ancora meno (vedi scope). Correggi quella docstring come prima cosa.
 
@@ -73,13 +72,11 @@ Neo prima di codificare:
 
 - **Visione "granulare di tutto"** (originale, giu 2026): *«voglio che di base
   sia server mcp che collega bot telegram ↔ llm ↔ nbllm, con comandi granulari
-  di tutto, bidirezionali per quanto possibile»* [archive1777 uuid 019ea1ca,
-  2026-06-07]. Qui il bot espone CRUD completo di NotebookLM.
+  di tutto, bidirezionali per quanto possibile»* [archivio, 2026-06-07]. Qui il bot espone CRUD completo di NotebookLM.
 - **Visione "complementare"** (più recente): divisione delle superfici concordata
   — **bot = notifiche + launcher + comandi rapidi**, **Mini App = mobile, azioni
   frequenti**, **admin = desktop/pesante** (memoria `vps1777-miniapp`). E in altri
-  contesti Neo stesso: *«comandi minimi /start /help … NON duplicare»* [uuid
-  019e8a4b]. Qui il bot è snello e non ricopia la Mini App.
+  contesti Neo stesso: *«comandi minimi /start /help … NON duplicare»* [archivio]. Qui il bot è snello e non ricopia la Mini App.
 
 Le due visioni **confliggono**: la prima vuole ~tutti i comandi nel bot, la
 seconda li tiene nella Mini App e lascia al bot solo l'essenziale + ciò che il
@@ -181,9 +178,9 @@ altre superfici non fanno bene.** Tre fasce:
    `on_document` (upload).
 4. **Memoria:** `vps1777-miniapp` (divisione superfici), e ogni nota sul bot.
 5. **Archivio `archive1777`:** cerca cosa Neo ha deciso sul bot e la divisione
-   superfici — c'è materiale (il tema è più vecchio, indicizzato): parti dagli
-   uuid 019ea1ca (visione "granulare di tutto") e 019e8a4b ("non duplicare"), poi
-   `get_context` per leggerli interi. Usa il **protocollo dello zero** e la doppia
+   superfici — c'è materiale (il tema è più vecchio, indicizzato): parti dalle
+   due visioni citate sopra ("granulare di tutto" e "non duplicare"), poi
+   `get_context` per leggerle intere. Usa il **protocollo dello zero** e la doppia
    lingua. Ricorda il **lag** dell'archivio (le decisioni recentissime potrebbero
    non esserci).
 6. **Chiedi a Neo** il §3: quale bot vuole (granulare vs complementare), e se le
@@ -217,7 +214,7 @@ Mini App già fa meglio senza una ragione.
 
 - Codice: `services/nb1777-bot/app/{bot,settings}.py`, `services/nb1777-mcp/app/`,
   `compose.yaml`.
-- Legacy: `~/Scrivania/mcp_dash/mcp1777/notebookllm1777/nb1777/nb1777/bot.py`.
+- Legacy: il `bot.py` del vecchio nb1777 (fuori da questo repo).
 - Doc: `docs/MINIAPP.md` (divisione superfici), `docs/ARCHITECTURE.md`.
 - Memoria: `vps1777-miniapp`.
 - MCP: `archive1777` (search/count/get_context; il server è v0.19.0, 5 tool).

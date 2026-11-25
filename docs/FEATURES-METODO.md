@@ -55,10 +55,14 @@ Il verificatore è **bidirezionale**:
 | verso | cosa cattura |
 |---|---|
 | **ledger → realtà** | ogni feature `active-default` o `opt-in` deve avere il suo `verify` che passa. Feature dichiarata ma **sparita** → CI rossa. *Cattura la PERDITA.* |
-| **realtà → ledger** | ogni tool MCP, unit systemd, profilo compose e comando della CLI **reale** deve avere una voce (gli endpoint HTTP no: il verificatore non li enumera). Feature reale **non dichiarata** → CI rossa. Gli script di `tools/` (`*.sh`, `*.py`, `prove-empiriche/*.sh`) sono enumerati anche loro, ma la categoria è ancora in semina: se mancano dal ledger vengono segnalati, non fanno fallire. *Cattura ciò che poi si DIMENTICA.* |
+| **realtà → ledger** | ogni tool MCP, unit systemd, profilo compose e comando della CLI **reale** deve avere una voce (gli endpoint HTTP no: il verificatore non li enumera). Feature reale **non dichiarata** → CI rossa. Gli script di `tools/` (`*.sh`, `*.py`, `prove-empiriche/*.sh`) sono enumerati anche loro, ma la categoria è in semina fino al 31/01/2027: fino a quel giorno se mancano dal ledger vengono segnalati, dal giorno dopo sono fallimenti. *Cattura ciò che poi si DIMENTICA.* |
 
 Una feature **non può sparire in silenzio** (il suo verify fallirebbe) **né entrare senza traccia**
 (il check inverso la pretende nel ledger). Servono entrambi i versi: uno solo lascia metà del buco.
+
+Il verificatore esce 0 (quadra), 1 (ledger e realtà divergono) o 2 (non ha potuto misurare: ledger
+illeggibile, che non è una mappa, senza voci, o PyYAML assente): un 2 non è un verde. `--oggi
+AAAA-MM-GG` fa leggere scadenze e semine a una data scelta.
 
 ## I due tipi di follow-up — o il verificatore diventa rumore
 

@@ -1,5 +1,9 @@
 # Prompt di onboarding — C3: argus1777 come agente browser server-side
 
+> **Riletto il 2026-11-25 (v0.98.18):** la rete interna dello stack si chiama `backend`
+> (internal: true), non `internal`; il resto della foto va comunque riverificato alla fonte,
+> come dice il file.
+
 > **Come usare questo file.** Prompt per una sessione dedicata (Claude Code, repo
 > `vps1777`) che progetta e costruisce l'agente-browser che **agisce come
 > l'utente**. Copia il blocco sotto la riga come primo messaggio. Scritto per
@@ -54,7 +58,7 @@ deve fare i conti col rootfs in sola lettura che ogni servizio ha dalla 0.58.0. 
 
 ## 2. Stato attuale di argus1777 (verificato — RI-VERIFICA)
 
-Fonte: `~/Scrivania/argus1777/` (codice) e `docs/` (README, ARCHITETTURA,
+Fonte: il repo locale di argus1777 (codice) e la sua `docs/` (README, ARCHITETTURA,
 **SICUREZZA.md**, **CONFINE_DEPLOY_vps1777.md**, RUNBOOK, PLAYBOOK_USO).
 
 - argus1777 è un **wrapper locale del Playwright MCP ufficiale** (`@playwright/
@@ -177,7 +181,7 @@ sessioni/credenziali di **ogni account loggato**. Da qui si progetta per
 
 ## 5. Ricognizione iniziale obbligatoria (prima di codice)
 
-1. **argus1777 alla fonte:** leggi `~/Scrivania/argus1777/docs/`
+1. **argus1777 alla fonte:** leggi la `docs/` del repo locale di argus1777
    **per intero** — soprattutto `SICUREZZA.md`, `CONFINE_DEPLOY_vps1777.md`,
    `ARCHITETTURA.md`. Capisci **perché** era local-only: quelle ragioni sono i
    rischi che ora devi mitigare, non ignorare.
@@ -191,8 +195,7 @@ sessioni/credenziali di **ogni account loggato**. Da qui si progetta per
    `feedback-security-build-for-evolution` (previeni, non ragionare dallo stato
    attuale).
 4. **Archivio `archive1777`:** cerca la genesi e le decisioni su argus (progetto
-   "Estensione browser per leggere siti con Claude", giu 2026: uuid 019ec633,
-   019ec56c, 019ec638; il confine deploy 019ec5d6). `get_context` per leggere
+   "Estensione browser per leggere siti con Claude", giu 2026, e il confine di deploy). `get_context` per leggere
    intero. Protocollo dello zero, doppia lingua, ricorda il lag.
 5. **Chiedi a Neo** il §3: complemento o sostituto dell'argus locale; scope della
    prima versione; livello di umano-nel-loop; quali account per primi.
@@ -227,8 +230,8 @@ modo irriducibile, **portagli il trade-off**, non risolverlo in silenzio.
 
 ## 8. Riferimenti
 
-- argus locale: `~/Scrivania/argus1777/` e `docs/` (SICUREZZA, CONFINE_DEPLOY,
-  ARCHITETTURA, RUNBOOK). Zip storici: `~/Scrivania/argus1777{,_v0.2}.zip`.
+- argus locale: il suo repo e la sua `docs/` (SICUREZZA, CONFINE_DEPLOY,
+  ARCHITETTURA, RUNBOOK).
 - vps1777: `services/nb1777-mcp/app/` (modello di MCP FastMCP in container — senza browser dalla 0.61.0), `docs/PLUGINS.md`,
   `SECURITY.md`, `docs/ARCHITECTURE.md`, `compose.yaml`.
 - Memoria: `argus1777-resta-locale`, `vps1777-security-auth`,

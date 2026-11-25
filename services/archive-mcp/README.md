@@ -29,7 +29,7 @@ errore — i tool rispondono con liste vuote finché non aggiungi un DB.
 
 **A mano**: metti un `.db` (SQLite FTS5, schema sotto) in `/var/lib/archive/db/` (volume `archive-data`). Lo **scan-mode** lo scopre alla prossima ricerca. In alternativa, dichiara path espliciti con `ARCHIVE_DB_PATHS`.
 
-**Costruire un DB da linea di comando**: l'indexer `services/gateway/app/archive_indexer.py` è stdlib-only e gira standalone:
+**Costruire un DB da linea di comando**: l'indexer `services/gateway/app/archive_indexer.py` è stdlib-only (tranne `pypdf` per i PDF) e gira standalone:
 ```
 python3 archive_indexer.py sessione.jsonl out.db --project nome
 ```

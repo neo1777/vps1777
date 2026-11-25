@@ -49,7 +49,7 @@ migrations/
 2. **Niente rete, niente secret.** Il container one-off gira senza rete e monta
    solo i volumi dichiarati, come l'utente del servizio (uid 1000).
 3. **Immutabile una volta pubblicata.** Un `run.py`/`migration.json` con id già
-   su `main` non si modifica mai (la CI lo blocca: job "Migrations immutability").
+   su `main` non si modifica mai (la CI lo blocca: step "Migrations immutability" del job `lint`).
    Serve un fix? Nuova migrazione con id successivo.
 4. **Ordine lessicografico** degli id `NNNN-slug`. Il runner applica in ordine
    stretto, registra dopo ogni successo, e al primo fallimento abortisce

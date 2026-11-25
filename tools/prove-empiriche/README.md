@@ -49,12 +49,14 @@ accorgersi che ne manca una là dove git non c'è (un test lo confronta coi file
   - **1** e **4** hanno girato sulla VPS viva il 27/07, e hanno chiuso due FAIL misurati con un PASS.
   - **7** ha girato sui **due esiti**: PASS sul gateway reale, FAIL su un container rotto apposta: di lei
     si sa che *sa diventare rossa*. Lo stesso vale per la **1** e la **4** (rosse prima della cura, verdi
-    dopo) e per la **8** (riga sotto). Per la 2, la 3, la 5, la 6 e la 9 il rosso non è mai stato osservato.
+    dopo) e per la **8** (riga sotto). Per la 2, la 3, la 5 e la 6 il rosso non è mai stato osservato.
   - **8** ha girato sui **due esiti** sulla VPS viva: PASS su 23 direttive reali di 4 unit, e FAIL
     su un file che promette due direttive che il demone non applica.
   - **2**, **3**, **5**, **6** non erano state eseguite sul target fino al collaudo su macchina vergine
     del 22-27/08/2026 (qui sotto), dove sono uscite verdi; per loro il rosso non è mai stato osservato.
-  - **9** non ha ancora girato su un salto di versione reale (al collaudo era non eseguibile).
+  - **9** ha girato su un salto di versione reale al collaudo del 23/11/2026
+    (`docs/collaudi/2026-11-23.yml`: rollback, versione di prima, sei container su) e gira due volte al
+    mese in `.github/workflows/rollback.yml`, anche col rollback spento apposta, dove deve uscire 1.
 - 🔴 *(26/07, all'origine)* **Non sono state eseguite sul target.** Di ognuna è verificata la **sintassi**
   (`bash -n`) e la logica è scritta sui meccanismi reali letti nel codice (nomi dei *servizi* compose, non
   dei container: i `container_name` non sono dichiarati, quindi indovinarli sarebbe stato un errore).
@@ -64,8 +66,9 @@ accorgersi che ne manca una là dove git non c'è (un test lo confronta coi file
   `post-release-0-43-4` nel referto di `lancia-tutte.sh`. Il collaudo stesso ha trovato e curato
   tre difetti DELLE prove (prova-8 sui template di unit, prova-9 sul path dello stato, prova-6
   sonda del §③): *chi le lancia la prima volta collauda anche loro, ed è successo esattamente così.*
-- 🟢 **Arrivano sulla VPS col pacchetto di rilascio** — `.github/workflows/release.yml` fa `cp -r
-  tools/prove-empiriche bundle/tools/` (commit `87f6391`, 27/07 **12:57**, voce H51 del registro di sicurezza).
+- 🟢 **Arrivano sulla VPS col pacchetto di rilascio** — `tools/assembla-pacchetto.sh`, lanciato da
+  `.github/workflows/release.yml`, fa `cp -r tools/prove-empiriche "$B/tools/"` (all'origine la riga stava nel
+  workflow: commit `87f6391`, 27/07 **12:57**, voce H51 del registro di sicurezza).
   🔴 *(27/07 **09:33**, all'origine)* **Non arrivano sulla VPS da sole.** Il pacchetto di rilascio non
   include questa cartella: le prove vanno copiate a mano sulla macchina che devono misurare. Scoperto il
   27/07 nel modo peggiore — il primo comando ha risposto `RC=0` su uno script che sulla macchina **non

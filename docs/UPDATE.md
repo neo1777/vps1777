@@ -110,8 +110,8 @@ una GET **non autenticata** a `api.github.com/repos/neo1777/vps1777/releases/lat
 nuova: messaggio Telegram al owner (una sola volta per release) e badge nella
 card admin. Se GitHub è irraggiungibile: nessun rumore, solo un badge
 "check stantio". Sullo stesso giro, e prima di chiedere a GitHub, il check pota gli
-snapshot pre-update, fa le sorveglianze (raggiungibilità, backup, disco: avvisa al cambio
-di stato) e aggiorna `/admin/salute`: dettagli in [CLI.md](CLI.md#vps1777-check).
+snapshot pre-update, fa le sorveglianze (raggiungibilità, backup, copia fuori macchina, disco e, se
+dichiarato, Portainer: avvisa al cambio di stato) e aggiorna `/admin/salute`: dettagli in [CLI.md](CLI.md#vps1777-check).
 
 **2. Scadenze dei secret** — `vps1777-secrets-check.timer`, **giornaliero**
 (era settimanale: i secret invecchiano lentamente, ma fra le voci controllate c'è la
@@ -234,7 +234,7 @@ Per questo esiste `canale.json`: un file piccolo che dice «l'ultima stabile è 
 `canale-firmato` del repository (un file solo, con la firma dentro). La firma è la stessa dei pacchetti: senza chiavi, legata
 all'identità di quel workflow.
 
-**Che cosa fa la tua macchina.** Solo l'aggiornamento **automatico** (il timer settimanale) lo
+**Che cosa fa la tua macchina.** Solo l'aggiornamento **automatico** (il timer giornaliero) lo
 controlla, a ogni giro, anche quando non c'è niente da installare:
 
 - canale firmato e non scaduto → prosegue come sempre. Se il canale nomina una release più nuova
@@ -243,7 +243,8 @@ controlla, a ogni giro, anche quando non c'è niente da installare:
   Telegram**. Non installa niente da solo finché il canale non torna valido.
 
 L'aggiornamento **a mano** (`vps1777 update`, o il pulsante del pannello) non guarda il canale: chi
-decide di aggiornare ha già scelto, e i pacchetti restano verificati come prima.
+decide di aggiornare ha già scelto, e i pacchetti restano verificati come prima. Con
+`VPS1777_RELEASE_CHANNEL=prerelease` (solo per le prove) il canale firmato non viene guardato.
 
 **Se ti arriva l'avviso.** Quasi sempre vuol dire che il workflow settimanale non gira da più di
 un mese e mezzo: guarda la pagina delle release del progetto. Se lì c'è una versione nuova e ti
@@ -283,7 +284,11 @@ CLI lo dice a ogni comando e la ignora: toglila dal `.env`. L'aggiornamento auto
   più tardi»), che le unit di update contano come successo (`SuccessExitStatus=75`):
   un giro del timer che incontra un update in corso non manda un falso «fallito» su
   Telegram. Se è un residuo di un crash: `vps1777 status` mostra `update_in_progress`;
-  nessun processo attivo → riprova, il lock è per-processo.
+  nessun processo attivo → rilancia `vps1777 update`: prima di ogni altra cosa chiude l'update
+  rimasto a metà, e quel giro finisce lì. Se il tag è già quello nuovo e lo stack è sano lo
+  registra come riuscito (esce 0); altrimenti torna alla versione precedente (esce 1; 2 se
+  serve un intervento a mano), ripristinando i dati dallo snapshot solo se lo stack era fermo.
+  Per installare, rilancia ancora. Il lock è per-processo.
 - **Digest mismatch al pull** — qualcosa non torna tra registry e release
   (attacco o release corrotta): l'update abortisce PRIMA di toccare lo stack.
   Controlla la release su GitHub e riprova.

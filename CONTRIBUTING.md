@@ -28,7 +28,7 @@ The `compose.build.yaml` overlay exists because `compose.yaml` is pull-only
 ## Code style
 
 - Python: `ruff` (version pinned in CI, currently `ruff==0.15.22`; `ruff check services/ tools/ security/ installer/ plugins/`). Types: `python3 tools/tipi.py` (mypy, pinned inside the tool) against the census `tools/tipi.json`: no type error in a new file, no counted file with more of them. It is a seeding phase until 30/04/2027 (QUA-03); when you fix errors in a file, lower its number in the census
-- Complexity: no new function above 10 (rule C901) and none of the already listed ones may grow: `python3 tools/complessita.py`. The census is `tools/complessita.json`; a row goes away when the function is split, or becomes a waiver with a written reason, reviewed by someone who did not write the code
+- Complexity: no new function above 10 (rule C901) and none of the already listed ones may grow: `python3 tools/complessita.py --ruff "uvx ruff@0.15.22"` (without `--ruff` it uses the `ruff` found on PATH). It is a seeding phase until 31/01/2027 (QUA-04): after that, every row still to be examined is red. The census is `tools/complessita.json`; a row goes away when the function is split, or becomes a waiver with a written reason, reviewed by someone who did not write the code
 - Bash: `shellcheck` (clean, minimum severity threshold as in CI)
 - Yaml: 2-space indent, no `version:` key in compose files (deprecated)
 - Commit messages: a prefix that says **what** is touched, then the sentence in Italian.
@@ -75,7 +75,7 @@ uvx pytest services/archive-mcp/tests/                         # archive-mcp (st
 uvx pytest services/gateway/tests/                             # gateway (stdlib)
 uv run --locked --directory services/gateway --with pytest pytest tests_runtime/   # gateway leg-2 XFF, uvicorn from the lock
 uvx pytest services/nb1777-bot/tests/                          # nb1777-bot (stdlib)
-uv run --locked --directory services/nb1777-bot --with pytest pytest tests/test_comandi.py   # bot, locked deps
+uv run --locked --directory services/nb1777-bot --with pytest pytest tests/test_comandi.py tests/test_notifiche_due_code.py   # bot, locked deps
 (cd services/nb1777-mcp && uv sync && uv run pytest tests/)    # nb1777-mcp, with the pinned nlm
 bash tools/esegui-test-bash.sh                                 # the .sh tests in tools/tests/
 ```
@@ -93,7 +93,8 @@ The checks CI will run again (`tools/check.sh` runs them all):
   workflow**, not rewritten by hand (`--elenco` says what it would do, `--job lint` runs
   just one). It skips and names the `uses:` steps and those with `${{ … }}`; it needs
   `pyyaml` (`uv run --with pyyaml python3 tools/gate-locale.py`), and some steps touch
-  the environment (the ruff one does `uv tool install`)
+  the environment (the ruff one does `uv tool install`). CI and `check.sh` run only its
+  `--autoprova`: the full gate would re-run CI inside itself
 - `python3 security/check_no_leaks.py` (no secrets),
   `uv run --with pyyaml security/check_findings.py` (the security register holds up
   against its evidence), `uv run --with-requirements .github/requirements-verify-features.txt
@@ -101,7 +102,11 @@ The checks CI will run again (`tools/check.sh` runs them all):
   how CI provides it), `python3 tools/doc-riferimenti.py` (the files the docs name exist),
   `python3 tools/fatti-nei-doc.py` (the numbers the docs repeat — MCP tools, images,
   containers, findings — are the ones the code counts: if you change one of those numbers
-  in the code, update the pages the guardian names)
+  in the code, update the pages the guardian names),
+  `python3 security/confronta-installer.py` (the three installers agree),
+  `python3 tools/nomi-nei-doc.py` and `python3 tools/coordinate-nei-doc.py` (the names and
+  coordinates cited in the docs exist), `python3 tools/marcatori-di-conflitto.py` (no
+  conflict markers, no `.rej` or `.orig`)
 - if you touched a document that has a translation (`README.it.md`, `CONTRIBUTING.it.md`,
   the pages with a copy in `docs/en/`): update **the translation too**, then
   `python3 tools/aggiorna-traduzioni.py` — never the other way round: the hash without

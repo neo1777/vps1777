@@ -62,8 +62,8 @@ da solo (`tailscale status`) e imposta `PUBLIC_BASE`.
 1. Punta DNS `A`/`AAAA` di `<dominio>` all'IP VPS
 2. Apri porte 80 e 443 in ufw/firewall
 3. Aggiungi a `.env`:
-   - `CADDY_DOMAIN=vps.tuosito.com`
-   - `CADDY_EMAIL=tu@gmail.com`
+   - `CADDY_DOMAIN=vps.example.invalid`
+   - `CADDY_EMAIL=tu@example.invalid`
    - `INGRESS_PROFILE=ingress.caddy` (vedi in cima: senza, il primo update torna a Tailscale)
 4. Lancia: `docker compose -f compose.yaml -f compose.ingress.caddy.yaml --profile ingress.caddy up -d`
    (senza gli `-f` l'overlay non viene montato e Caddy non entra nel progetto)

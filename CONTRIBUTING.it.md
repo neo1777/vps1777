@@ -25,7 +25,7 @@ L'overlay `compose.build.yaml` serve perché `compose.yaml` è pull-only
 ## Stile codice
 
 - Python: `ruff` (versione pinnata nella CI, oggi `ruff==0.15.22`; `ruff check services/ tools/ security/ installer/ plugins/`). I tipi: `python3 tools/tipi.py` (mypy, pinnato dentro lo strumento) contro il censimento `tools/tipi.json`: nessun errore di tipo in un file nuovo, nessun file censito che ne abbia di più. È una semina fino al 30/04/2027 (QUA-03); quando correggi errori in un file, abbassa il suo numero nel censimento
-- Complessità: nessuna funzione nuova oltre 10 (regola C901) e nessuna di quelle già censite che cresce: `python3 tools/complessita.py`. Il censimento è `tools/complessita.json`; una riga si toglie spezzando la funzione, oppure diventa una deroga col motivo scritto e riletto da chi non ha scritto il codice
+- Complessità: nessuna funzione nuova oltre 10 (regola C901) e nessuna di quelle già censite che cresce: `python3 tools/complessita.py --ruff "uvx ruff@0.15.22"` (senza `--ruff` usa il `ruff` che trova nel PATH). È una semina fino al 31/01/2027 (QUA-04): dopo, ogni riga ancora da esaminare è rossa. Il censimento è `tools/complessita.json`; una riga si toglie spezzando la funzione, oppure diventa una deroga col motivo scritto e riletto da chi non ha scritto il codice
 - Bash: `shellcheck` (pulito, soglia al minimo come in CI)
 - Yaml: 2 spazi indent, no `version:` in compose (deprecato)
 - Commit message: un prefisso che dice **cosa** tocca, poi la frase in italiano. Quelli
@@ -71,7 +71,7 @@ uvx pytest services/archive-mcp/tests/                         # archive-mcp (st
 uvx pytest services/gateway/tests/                             # gateway (stdlib)
 uv run --locked --directory services/gateway --with pytest pytest tests_runtime/   # gateway gamba-2 XFF, uvicorn del lock
 uvx pytest services/nb1777-bot/tests/                          # nb1777-bot (stdlib)
-uv run --locked --directory services/nb1777-bot --with pytest pytest tests/test_comandi.py   # bot, deps del lock
+uv run --locked --directory services/nb1777-bot --with pytest pytest tests/test_comandi.py tests/test_notifiche_due_code.py   # bot, deps del lock
 (cd services/nb1777-mcp && uv sync && uv run pytest tests/)    # nb1777-mcp, col nlm pinnato
 bash tools/esegui-test-bash.sh                                 # i test .sh di tools/tests/
 ```
@@ -89,7 +89,8 @@ I controlli che la CI rifarà (`tools/check.sh` li esegue tutti):
   non riscritti a mano (`--elenco` dice cosa farebbe, `--job lint` ne esegue uno). Salta e
   nomina gli step `uses:` e quelli con `${{ … }}`; vuole `pyyaml`
   (`uv run --with pyyaml python3 tools/gate-locale.py`), e qualche step tocca l'ambiente
-  (quello di ruff fa `uv tool install`)
+  (quello di ruff fa `uv tool install`). Di questo la CI e `check.sh` lanciano solo
+  `--autoprova`: il gate intero rieseguirebbe la CI dentro se stessa
 - `python3 security/check_no_leaks.py` (niente segreti),
   `uv run --with pyyaml security/check_findings.py` (il registro di sicurezza regge sulle
   sue evidenze), `uv run --with-requirements .github/requirements-verify-features.txt
@@ -97,7 +98,11 @@ I controlli che la CI rifarà (`tools/check.sh` li esegue tutti):
   e la CI lo porta così), `python3 tools/doc-riferimenti.py` (i file che i doc nominano
   esistono), `python3 tools/fatti-nei-doc.py` (i numeri che i doc ripetono — tool MCP,
   immagini, container, rilievi — sono quelli che il codice conta: se cambi uno di quei
-  numeri nel codice, aggiorna le pagine che il presidio ti nomina)
+  numeri nel codice, aggiorna le pagine che il presidio ti nomina),
+  `python3 security/confronta-installer.py` (i tre installer concordano),
+  `python3 tools/nomi-nei-doc.py` e `python3 tools/coordinate-nei-doc.py` (i nomi e le
+  coordinate citati nei doc esistono), `python3 tools/marcatori-di-conflitto.py` (nessun
+  marcatore di conflitto, nessun `.rej` o `.orig`)
 - se hai toccato un documento che ha una traduzione (`README.it.md`, `CONTRIBUTING.it.md`,
   le pagine con una copia in `docs/en/`): aggiorna **anche la traduzione**, poi
   `python3 tools/aggiorna-traduzioni.py` — mai il contrario: l'hash senza la traduzione è

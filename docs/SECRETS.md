@@ -1,17 +1,17 @@
 # Secrets — vps1777
 
-Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei container in `/run/secrets/<name>`, in sola lettura. Con Docker Compose fuori da Swarm un secret `file:` è un **bind mount del file dell'host**: dentro il container ha gli stessi permessi e lo stesso proprietario che ha fuori (gli installer lo lasciano `600`, dell'utente che l'ha generato — per questo quell'utente deve essere l'UID 1000 dei container, vedi [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
+Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei container in `/run/secrets/<name>`, in sola lettura. Con Docker Compose fuori da Swarm un secret `file:` è un **bind mount del file dell'host**: dentro il container ha gli stessi permessi e lo stesso proprietario che ha fuori (gli installer lo lasciano `600`, dell'utente che l'ha generato — per questo quell'utente deve essere l'UID 1000 dei container, vedi [TROUBLESHOOTING.md](TROUBLESHOOTING.md)). Eccezione provvisoria (`H102`): se sulla macchina l'UID 1000 è già di un altro utente, `tools/permessi-servizi.sh` dà la lettura al gruppo 1000 (`secrets/` a 750, i file a 640, `onboarding/` a 2770): lì chi sta nel gruppo 1000 legge i segreti.
 
 ## Inventario
 
 | Secret | File | Cosa contiene | Chi lo legge |
 |---|---|---|---|
-| `gateway_secret` | `secrets/gateway_secret.txt` | namespace nelle URL `/<SECRET>/<service>/mcp` (24-32 char) **e** segreto del canale interno verso nb1777-mcp (v0.30.0) | gateway, nb1777-mcp, nb1777-bot |
+| `gateway_secret` | `secrets/gateway_secret.txt` | namespace nelle URL `/<SECRET>/<service>/mcp` (24-32 char) **e** segreto dei canali interni: verso nb1777-mcp (v0.30.0) e, per il bot, verso `/internal/notifications` del gateway | gateway, nb1777-mcp, nb1777-bot |
 | `oauth_signing_secret` | `secrets/oauth_signing_secret.txt` | firma JWT HS256 (≥32 byte) | gateway |
 | `admin_password_bcrypt` | `secrets/admin_password_bcrypt.txt` | hash bcrypt della password admin (rounds=12) | gateway |
 | `archive_desc_secret` | `secrets/archive_desc_secret.txt` | segreto del canale interno con cui archive-mcp inoltra al gateway le `set_description` (separato da `gateway_secret` di proposito) | gateway, archive-mcp |
 | `telegram_bot_token` | `secrets/telegram_bot_token.txt` | TOKEN bot da BotFather | nb1777-bot (e la CLI sull'host, per le notifiche) |
-| `telegram_webapp_secret` | `secrets/telegram_webapp_secret.txt` | chiave **derivata** dal token (HMAC_SHA256 con chiave «WebAppData», 64 hex) con cui si verifica l'`initData` della Mini App — non risale al token. La scrive l'installer; la riallineano al token `rotate-secret.sh`, `vps1777 update` e `vps1777 rollback` | gateway |
+| `telegram_webapp_secret` | `secrets/telegram_webapp_secret.txt` | chiave **derivata** dal token (HMAC_SHA256 con chiave «WebAppData», 64 hex) con cui si verifica l'`initData` della Mini App — non risale al token. La scrive l'installer; la riallineano al token `rotate-secret.sh`, `vps1777 update`, `vps1777 rollback` e un nuovo giro di `./setup.sh` | gateway |
 | `cloudflared_token` | `secrets/cloudflared_token.txt` | (opz) CF Tunnel token | cloudflared sidecar |
 | `cf_api_token` | `secrets/cf_api_token.txt` | (opz) token API Cloudflare per la sfida DNS-01, permessi Zone·Zone·Read + Zone·DNS·Edit sulla zona — solo con la feature `caddy-dns01` | caddy (immagine `vps1777-caddy-dns01`) |
 
@@ -29,7 +29,7 @@ Tutti i secret stanno in `secrets/*.txt` (gitignored) e vengono montati nei cont
 
 ## Generazione iniziale
 
-`setup.sh` li genera tutti la prima volta. Per rigenerarne uno singolo: cancellalo (`rm secrets/<file>`), rilancia `./setup.sh` e poi riavvia i servizi che lo montano (`docker compose restart …`, colonna «Chi lo legge» qui sopra): `setup.sh` non ricrea i container, e i servizi leggono i secret all'avvio. Per `gateway_secret`, `oauth_signing_secret`, `admin_password` e `telegram_bot_token` usa piuttosto `tools/rotate-secret.sh` (sotto), che riavvia da sé.
+`setup.sh` genera la prima volta quelli che si possono generare (i segreti casuali, l'hash della password, la chiave derivata); i token di Telegram e di Cloudflare li fornisci tu. Per rigenerarne uno singolo: cancellalo (`rm secrets/<file>`), rilancia `./setup.sh` e poi riavvia i servizi che lo montano (`docker compose restart …`, colonna «Chi lo legge» qui sopra): `setup.sh` non ricrea i container, e i servizi leggono i secret all'avvio. Per `gateway_secret`, `oauth_signing_secret`, `admin_password` e `telegram_bot_token` usa piuttosto `tools/rotate-secret.sh` (sotto), che riavvia da sé.
 
 ## Rotation senza downtime
 
@@ -54,7 +54,7 @@ stesso a fine installazione (`RESULT_SECRET_FILE=` invece di `RESULT_SECRET=`).
 > bot si autenticano verso gli endpoint interni di `nb1777-mcp` (il profilo
 > NotebookLM — vedi [SECURITY.md](../SECURITY.md)). Riavviare il solo gateway lo
 > lascerebbe col segreto nuovo mentre gli altri due hanno ancora il vecchio: il
-> canale interno risponderebbe **403**, `/admin/nlm` direbbe "nb1777-mcp non
+> canale interno di nb1777-mcp risponderebbe **403** (quello del gateway **404**), `/admin/nlm` direbbe "nb1777-mcp non
 > raggiungibile" e il bot crederebbe l'auth NotebookLM mancante.
 > `tools/rotate-secret.sh` lo fa già correttamente.
 
@@ -77,13 +77,14 @@ docker compose restart gateway
                                               # scrive il token, RIDERIVA la chiave, riavvia bot e gateway
 ```
 
-Dalla 0.62.3 `rotate-secret.sh` rideriva da sé la chiave della Mini App; prima scriveva
+Dalla 0.63.0 `rotate-secret.sh` rideriva da sé la chiave della Mini App; prima scriveva
 solo il token, e il secondo passo andava fatto a mano.
 
 > ⚠️ **Perché conta.** La chiave derivata è una funzione del token: col token nuovo e la
 > chiave vecchia il bot risponde e la Mini App **rifiuta tutti**, senza un errore che
 > nomini la chiave. Si ricalcola da sola con `rotate-secret.sh`, con un `vps1777 update`
-> che installa davvero una versione, con `vps1777 rollback` e nell'auto-rollback — non
+> che installa davvero una versione, con `vps1777 rollback`, nell'auto-rollback e con un nuovo giro
+> di `./setup.sh` — non
 > con un `docker compose restart`. Se hai riscritto il token a mano nel file, rilancia
 > `rotate-secret.sh telegram_bot_token` (o vedi [TROUBLESHOOTING.md](TROUBLESHOOTING.md)).
 
@@ -216,7 +217,7 @@ vecchi) vedi [BACKUP-RESTORE.md](BACKUP-RESTORE.md#rotazione-della-chiave-age-h3
 
 ## Threat model
 
-- `secrets/`, `backups/`, `onboarding/` a mode 700 + file 600 (impostato dagli installer, H38)
+- `secrets/`, `backups/`, `onboarding/` a mode 700 + file 600 (impostato dagli installer, H38); 750/640 e `onboarding/` a 2770 solo nel caso `H102`, descritto in cima
 - Container vede solo i propri `/run/secrets/<name>`, montati in sola lettura con i
   permessi e il proprietario del file sull'host (`600`, UID 1000)
 - **Log redatti** (v0.24.0): un filtro di logging (`app/logredact.py`) sostituisce

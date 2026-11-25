@@ -243,7 +243,7 @@ a glance:
   lacks a section and an example; cross-references between docs go through a linter;
   English translations record the hash of their Italian source and CI flags them when
   the original moves ([docs/en/MANIFEST.json](docs/en/MANIFEST.json)).
-- **Over 1,800 tests across six suites**, many of them *structural guards* — each one
+- **Over 2,100 tests across six suites**, many of them *structural guards* — each one
   born from a real incident. The [CHANGELOG.md](CHANGELOG.md) tells every guard's
   story: what bit us, and how it became a test.
 - **Signed releases and an update that knows how to retreat**: fail-closed cosign
@@ -266,22 +266,22 @@ source, and a moved original turns the build red until the translation catches u
 | Doc | English | Italian |
 |---|---|---|
 | Architecture: flows, contracts, security model | [docs/en/ARCHITECTURE.md](docs/en/ARCHITECTURE.md) | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| Step-by-step install + post-install | [docs/en/INSTALL.md](docs/en/INSTALL.md) | [docs/INSTALL.md](docs/INSTALL.md) |
+| Step-by-step install + post-install (connectors, NotebookLM) | [docs/en/INSTALL.md](docs/en/INSTALL.md) | [docs/INSTALL.md](docs/INSTALL.md) |
 | Updates: `vps1777 update`, admin button, rollback | [docs/en/UPDATE.md](docs/en/UPDATE.md) | [docs/UPDATE.md](docs/UPDATE.md) |
 | Age-encrypted backup & restore, two tiers | [docs/en/BACKUP-RESTORE.md](docs/en/BACKUP-RESTORE.md) | [docs/BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) |
-| The `vps1777` CLI, every command with examples | [docs/en/CLI.md](docs/en/CLI.md) | [docs/CLI.md](docs/CLI.md) |
-| The 1777 memory discipline (canon, local layers) | [docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md) | [docs/MEMORIA-1777.md](docs/MEMORIA-1777.md) |
+| The `vps1777` CLI, every command with examples (kept aligned with the code by a test) | [docs/en/CLI.md](docs/en/CLI.md) | [docs/CLI.md](docs/CLI.md) |
+| The 1777 memory discipline: canon in the product (neutral), local layers `fatti`/`errata`, `vps1777 memoria` | [docs/en/MEMORIA-1777.md](docs/en/MEMORIA-1777.md) | [docs/MEMORIA-1777.md](docs/MEMORIA-1777.md) |
 | Search archive: `/admin/archive`, formats, the Session Recovery bundle (`recupero/`, `sessioni`/`archi`/`memorie` tables), the 19 MCP tools, sessions and lineages, NotebookLM ingest | [docs/en/ARCHIVE.md](docs/en/ARCHIVE.md) | [docs/ARCHIVE.md](docs/ARCHIVE.md) |
 | Hybrid search by meaning: the model, the vector index, its builder, incremental updates | [docs/en/RICERCA-IBRIDA.md](docs/en/RICERCA-IBRIDA.md) | [docs/RICERCA-IBRIDA.md](docs/RICERCA-IBRIDA.md) |
-| Trying it locally, no VPS: timed steps, what you see and what isn't there | — | [docs/PRIMI-15-MINUTI.md](docs/PRIMI-15-MINUTI.md) |
+| Trying it locally, no VPS: timed steps, what you see and what isn't there | [docs/en/PRIMI-15-MINUTI.md](docs/en/PRIMI-15-MINUTI.md) | [docs/PRIMI-15-MINUTI.md](docs/PRIMI-15-MINUTI.md) |
 | Public HTTPS: Tailscale Funnel / Caddy / Cloudflare | — | [docs/INGRESS.md](docs/INGRESS.md) |
 | Adding your own MCP or bot | — | [docs/PLUGINS.md](docs/PLUGINS.md) |
 | Secrets: management, rotation, backup | — | [docs/SECRETS.md](docs/SECRETS.md) |
-| Hardening + optional profiles | — | [docs/OPS.md](docs/OPS.md) |
-| NotebookLM: the 55 MCP tools, studio, auth, bot | — | [docs/NB1777.md](docs/NB1777.md) |
-| Glossary: the project's words, two lines each | — | [docs/GLOSSARIO.md](docs/GLOSSARIO.md) |
-| Telegram Mini App | — | [docs/MINIAPP.md](docs/MINIAPP.md) |
-| Clean-machine acceptance test | — | [docs/COLLAUDO-VERGINE.md](docs/COLLAUDO-VERGINE.md) |
+| Hardening + optional profiles (Portainer, backup) | — | [docs/OPS.md](docs/OPS.md) |
+| NotebookLM: the 55 MCP tools, studio, auth, the Telegram bot, the memory canon | — | [docs/NB1777.md](docs/NB1777.md) |
+| Glossary: the project's words, two lines each: container, release, MCP tool, canon… | — | [docs/GLOSSARIO.md](docs/GLOSSARIO.md) |
+| Telegram Mini App: the mobile dashboard — initData auth, endpoints, security | — | [docs/MINIAPP.md](docs/MINIAPP.md) |
+| The definitive test on a wiped VPS: install, targeted checks per fix, reconciliation | — | [docs/COLLAUDO-VERGINE.md](docs/COLLAUDO-VERGINE.md) |
 | Post-deploy onboarding panel | — | [docs/ONBOARDING.md](docs/ONBOARDING.md) |
 | Troubleshooting | — | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) |
 
