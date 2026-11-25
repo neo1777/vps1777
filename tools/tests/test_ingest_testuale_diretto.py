@@ -338,3 +338,18 @@ def test_un_artefatto_che_non_c_e_lo_dice(cli, tmp_path, capsys):
     with pytest.raises(SystemExit):
         mod.cmd_archive_ingest(tmp_path, _args_artefatto("manca.m4a"))
     assert "studio_download" in capsys.readouterr().err
+
+
+def test_uno_zip_va_diretto_e_non_tocca_notebooklm(cli, tmp_path):
+    """25/11/2026: un bundle di Recupero Sessioni (.zip) finiva sul giro NotebookLM, che lo
+    rifiuta sempre dopo aver provato a mandarlo a Google. L'indexer gli zip li legge."""
+    import zipfile
+    mod, chiamate = cli
+    f = tmp_path / "bundle.zip"
+    with zipfile.ZipFile(f, "w") as z:
+        z.writestr("MANIFEST.json", "{}")
+    assert mod.cmd_archive_ingest(tmp_path, _args(str(f))) == 0
+    piatto = [" ".join(c) for c in chiamate]
+    assert not any("nb1777-mcp" in c for c in piatto), f"uno zip è passato da NotebookLM: {piatto}"
+    lavoro = _lavoro(chiamate)
+    assert lavoro[lavoro.index("--suffisso") + 1] == ".zip"
