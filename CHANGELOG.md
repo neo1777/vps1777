@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.15] — 2026-11-25
+
 ### Corretto
 - **`vps1777 archive-ingest` carica i `.zip`.** Un export o un bundle di Recupero Sessioni finiva sul giro di
   NotebookLM, che lo rifiuta sempre, dopo aver provato a mandarlo a Google: un bundle non si poteva
