@@ -202,6 +202,7 @@ fi
 # Un merge risolto a metà lascia `<<<<<<<`, `=======`, `>>>>>>>` in un file: nessuno dei gate
 # qui sotto li cerca (shellcheck e ruff guardano solo .sh e .py), e in un YAML o in un
 # Markdown entrerebbero in git senza un fiato. Si guardano le sole righe AGGIUNTE.
+# Lo stesso controllo, sul repo intero, gira in CI: tools/marcatori-di-conflitto.py.
 _CONFLITTI="$(git diff --cached -U0 --diff-filter=AM 2>/dev/null \
   | grep -E '^\+(<<<<<<< |>>>>>>> |=======$)' | head -5 || true)"
 if [ -n "$_CONFLITTI" ]; then

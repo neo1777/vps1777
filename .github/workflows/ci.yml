@@ -606,6 +606,12 @@ jobs:
         run: |
           python3 tools/coordinate-nei-doc.py --autoprova
           python3 tools/coordinate-nei-doc.py
+      # Un merge risolto a metà: prima lo cercava solo l'hook di pre-commit, che si attiva a mano
+      #   e non gira su una PR aperta da un'altra macchina (rilievo di Sagoma, 24/11).
+      - name: Nessun marcatore di conflitto né avanzo .rej/.orig
+        run: |
+          python3 tools/marcatori-di-conflitto.py --autoprova
+          python3 tools/marcatori-di-conflitto.py
       - name: Gate locale — l'autoprova (che sappia ancora dire di no)
         run: python3 tools/gate-locale.py --autoprova
       # 🔴 LE NOVE PROVE EMPIRICHE SONO L'UNICO STRATO CHE NESSUNO ESEGUE, e sta
