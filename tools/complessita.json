@@ -14,10 +14,6 @@
    "complessita": 20,
    "stato": "da-esaminare"
   },
-  "tools/vps1777.py::fetch_bundle": {
-   "complessita": 19,
-   "stato": "da-esaminare"
-  },
   "tools/vps1777.py::cmd_archive_ingest": {
    "complessita": 18,
    "stato": "da-esaminare"
