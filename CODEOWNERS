@@ -15,3 +15,17 @@
 # acceso (la protezione di main non chiede review).
 
 /security/  @neo1777
+
+# I file che ISTRUISCONO gli agenti (25/11/2026, rilievo di Sagoma su PRO-07; scelta di Neo
+# 2026-11-25-soglia-codeowners): le regole di review, le istruzioni che i due server MCP danno a
+# ogni client, la disciplina della memoria. Una riga cambiata qui cambia il comportamento di un
+# agente su ogni macchina che aggiorna, senza toccare una riga di codice.
+# ⚠️ La review dei proprietari resta NON obbligatoria, ed è una scelta: con un solo manutentore
+#   l'obbligo bloccherebbe ogni merge (GitHub non lascia approvare le proprie PR). Oggi questo file
+#   dichiara chi risponde di questi file e fa comparire la richiesta di review; non è un cancello.
+/REVIEW.md                                   @neo1777
+/services/archive-mcp/app/server.py          @neo1777
+/services/nb1777-mcp/app/server.py           @neo1777
+/services/nb1777-mcp/app/canonical.py        @neo1777
+/services/nb1777-mcp/app/memoria_1777/       @neo1777
+/CODEOWNERS                                  @neo1777

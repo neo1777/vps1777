@@ -4,18 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
-### Corretto
-- **Le rotte interne dell'archivio rispondono 404 anche a un header non ASCII.** Il confronto del segreto
-  sulle stringhe sollevava un errore se l'header conteneva, per esempio, una «è»: il chiamante riceveva
-  un 500 invece del 404 che nasconde la rotta. Ora il gateway confronta le impronte sha256 del segreto e
-  del valore ricevuto: lunghe sempre uguali, così nemmeno la lunghezza del segreto entra nel confronto.
-- **Il controllo del ledger delle feature dice che cosa non va invece di crollare.** Un `features.yaml`
-  vuoto, una lista al posto della mappa, una voce che non è una mappa o un YAML rotto lo facevano uscire
-  con un errore Python; ora esce 2 («non ho potuto guardare») con il motivo. In un repo senza
-  `tools/vps1777.py` le voci dei sottocomandi diventano fallimenti che lo nominano, invece di fermare il
-  referto a metà. Visto da Sagoma.
-
 ### Aggiunto
+- **I marcatori di conflitto si cercano anche in CI.** `tools/marcatori-di-conflitto.py` (con la sua
+  autoprova, nel job lint e in `tools/check.sh`) fallisce se un file tracciato ha una riga che comincia con
+  `<<<<<<< ` o `>>>>>>> `, o se è tracciato un `.rej` o un `.orig`. Prima lo cercava solo l'hook di
+  pre-commit, che si attiva a mano e non vede una PR aperta da un'altra macchina. Visto da Sagoma.
+
 - **I marcatori di conflitto si cercano anche in CI.** `tools/marcatori-di-conflitto.py` (con la sua
   autoprova, nel job lint e in `tools/check.sh`) fallisce se un file tracciato ha una riga che comincia con
   `<<<<<<< ` o `>>>>>>> `, o se è tracciato un `.rej` o un `.orig`. Prima lo cercava solo l'hook di
@@ -26,6 +20,22 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   30/04/2027, poi ogni riga rimasta diventa rossa. Nel job lint della CI e in `tools/check.sh`, con la sua
   autoprova. Prima nessun type checker girava, e `applicabilita.yml` dichiarava la riga «non applicabile»
   come se valesse solo per TypeScript. Visto da Sagoma.
+
+### Corretto
+- **Le rotte interne dell'archivio rispondono 404 anche a un header non ASCII.** Il confronto del segreto
+  sulle stringhe sollevava un errore se l'header conteneva, per esempio, una «è»: il chiamante riceveva
+  un 500 invece del 404 che nasconde la rotta. Ora il gateway confronta le impronte sha256 del segreto e
+  del valore ricevuto: lunghe sempre uguali, così nemmeno la lunghezza del segreto entra nel confronto.
+- **Il controllo del ledger delle feature dice che cosa non va invece di crollare.** Un `features.yaml`
+  vuoto, una lista al posto della mappa, una voce che non è una mappa o un YAML rotto lo facevano uscire
+  con un errore Python; ora esce 2 («non ho potuto guardare») con il motivo. In un repo senza
+  `tools/vps1777.py` le voci dei sottocomandi diventano fallimenti che lo nominano, invece di fermare il
+  referto a metà. Visto da Sagoma.
+- **Un backup notturno fallito si sa il giorno dopo, non due notti dopo.** Il cron del container scrive
+  l'esito di `backup.sh` in `backups/ultimo-esito`, e `vps1777 check` (il timer giornaliero) avvisa una
+  volta per ogni giro fallito, e una volta quando torna a riuscire. Prima un giro fallito si vedeva solo
+  quando l'ultima copia superava i due giorni. L'esito comincia a scriversi dal primo avvio del container
+  con la versione nuova. Visto da Sagoma.
 
 ### Cambiato
 - `tools/check.sh` lancia anche gli scanner del sorgente (Dockerfile, dipendenze, segreti nella storia),
@@ -39,6 +49,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   non dichiarati davano solo avvisi, senza una data: dal 01/02/2027 saranno errori (la data è la stessa del
   censimento della complessità). `verify-features.py --oggi AAAA-MM-GG` legge scadenze e semine a una data
   scelta.
+- **SECURITY.md, «Limiti crittografici dichiarati», rimesso al presente.** Diceva che i metadati di una
+  release non scadono: dalla 0.98.13 il canale firmato scade dopo 45 giorni e ferma l'aggiornamento
+  automatico; ora lo dice, con i due limiti che restano. E diceva di rigenerare la chiave dei backup
+  «quando `age` avrà recipient post-quantum»: li ha dalla 1.3.0 (dicembre 2025); ora dice che vps1777
+  non li usa ancora, che cosa servirebbe e quando si rivede (31/03/2027). Visto da Sagoma.
+- `CODEOWNERS` nomina anche i file che istruiscono gli agenti (REVIEW.md, le istruzioni dei due server
+  MCP, la disciplina della memoria), e dice perché la review dei proprietari non è obbligatoria.
 
 ## [0.98.15] — 2026-11-25
 

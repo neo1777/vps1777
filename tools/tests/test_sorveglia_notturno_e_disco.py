@@ -94,3 +94,52 @@ def test_il_check_giornaliero_chiama_le_due_sorveglianze():
     corpo = testo.split("def cmd_check(", 1)[1].split("\ndef ", 1)[0]
     assert "_sorveglia_backup_notturno(repo, st," in corpo
     assert "_sorveglia_disco(repo, st," in corpo
+
+
+# ③ Il giro che FALLISCE (25/11/2026, rilievo di Sagoma): prima lo si vedeva solo due notti
+# dopo, quando l'ultima copia superava i due giorni. Ora il cron scrive l'esito e il check
+# lo legge il giorno dopo.
+
+def _esito(repo: Path, testo: str, ore_fa: int) -> None:
+    import os
+    d = repo / "backups"
+    d.mkdir(exist_ok=True)
+    f = d / "ultimo-esito"
+    f.write_text(testo + "\n", encoding="utf-8")
+    t = (datetime.now(timezone.utc) - timedelta(hours=ore_fa)).timestamp()
+    os.utime(f, (t, t))
+
+
+def test_un_giro_fallito_si_dice_una_volta_e_poi_il_ritorno(tmp_path, monkeypatch):
+    mandati: list[str] = []
+    monkeypatch.setattr(v, "telegram_notify", lambda _repo, testo: mandati.append(testo))
+    st: dict = {}
+    v._sorveglia_esito_backup(tmp_path, st, notifica=True)            # nessun file: silenzio
+    assert mandati == [] and "backup_fallito_il" not in st
+    _esito(tmp_path, "0", 20)
+    v._sorveglia_esito_backup(tmp_path, st, notifica=True)            # riuscito e niente da disarmare
+    assert mandati == []
+    _esito(tmp_path, "1", 20)
+    v._sorveglia_esito_backup(tmp_path, st, notifica=True)
+    v._sorveglia_esito_backup(tmp_path, st, notifica=True)            # lo stesso giro: una notifica
+    assert len(mandati) == 1 and "fallito" in mandati[0] and "«1»" in mandati[0]
+    _esito(tmp_path, "2", 1)                                          # un altro giro fallito: un'altra
+    v._sorveglia_esito_backup(tmp_path, st, notifica=True)
+    assert len(mandati) == 2
+    _esito(tmp_path, "0", 0)
+    v._sorveglia_esito_backup(tmp_path, st, notifica=True)
+    assert len(mandati) == 3 and "riuscito" in mandati[2] and "backup_fallito_il" not in st
+
+
+def test_un_esito_illeggibile_conta_come_fallito(tmp_path):
+    st: dict = {}
+    _esito(tmp_path, "", 3)                                           # un file scritto a metà
+    v._sorveglia_esito_backup(tmp_path, st, notifica=False)
+    assert st.get("backup_fallito_il")
+
+
+def test_il_check_giornaliero_chiama_la_sorveglianza_dell_esito():
+    sorgente = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
+    corpo = sorgente[sorgente.index("def cmd_check("):]
+    corpo = corpo[:corpo.index("\ndef ")]
+    assert "_sorveglia_esito_backup(repo, st," in corpo

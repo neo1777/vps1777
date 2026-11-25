@@ -33,8 +33,8 @@
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
-      "sorgente_sha256": "f7739ac6a346708cd6fd26ed274f1bbc392c360b3f62542f42df0fbd1be5cb1f",
-      "traduzione_sha256": "13730611142eed5c18b08ea4de8f8e37ff81880bcdd21ef4e952d0a6f7d51c09"
+      "sorgente_sha256": "48109213a5ec76c842467f8ac7c3eccd49b66ad217cba1146b4cfcd446fc16ce",
+      "traduzione_sha256": "bc2bf9074fe13c1fcbb7dd91063948f0d7ceb6fb4d5d6f47f692d3e1a3d71031"
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
