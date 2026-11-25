@@ -10,10 +10,6 @@
  "fine_semina": "2027-01-31",
  "fine_semina_scelta": "2026-11-24-soglia-qua04-fine-semina-confermata (chi possiede il repo)",
  "funzioni": {
-  "tools/verify-features.py::main": {
-   "complessita": 33,
-   "stato": "da-esaminare"
-  },
   "security/check_no_leaks.py::main": {
    "complessita": 30,
    "stato": "da-esaminare"
@@ -22,16 +18,8 @@
    "complessita": 30,
    "stato": "da-esaminare"
   },
-  "tools/verify-features.py::run_check": {
-   "complessita": 23,
-   "stato": "da-esaminare"
-  },
   "services/gateway/app/archive_indexer.py::_iter_claude_code": {
    "complessita": 21,
-   "stato": "da-esaminare"
-  },
-  "tools/verify-features.py::enum_reality": {
-   "complessita": 20,
    "stato": "da-esaminare"
   },
   "tools/vps1777.py::_secrets_mancanti_in": {
@@ -127,10 +115,6 @@
    "stato": "da-esaminare"
   },
   "services/nb1777-mcp/app/core.py::fai_posto_agli_artefatti": {
-   "complessita": 13,
-   "stato": "da-esaminare"
-  },
-  "tools/verify-features.py::_keys_of": {
    "complessita": 13,
    "stato": "da-esaminare"
   },

@@ -60,6 +60,12 @@ def _tipi_trattati() -> set[str]:
                 and isinstance(n.comparators[0], ast.Constant)
                 and isinstance(n.comparators[0].value, str)):
             tipi.add(n.comparators[0].value)
+        # dal 24/11/2026 (QUA-04) i tipi stanno nella tabella `_VERIFICHE` (tipo → funzione)
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "_VERIFICHE"
+                and isinstance(n.value, ast.Dict)):
+            tipi |= {k.value for k in n.value.keys
+                     if isinstance(k, ast.Constant) and isinstance(k.value, str)}
     return tipi
 
 

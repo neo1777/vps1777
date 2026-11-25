@@ -73,138 +73,149 @@ def run_check(spec: dict, repo: Path) -> tuple[bool, str]:
 
     if kind == "manual":
         return None, f"[manuale] {arg}"
-
-    if kind == "path_exists":
-        p = repo / arg
-        return p.exists(), f"path {'esiste' if p.exists() else 'MANCA'}: {arg}"
-
-    if kind == "file_contains":
-        p = repo / arg["path"]
-        if not p.exists():
-            return False, f"file MANCA: {arg['path']}"
-        hit = re.search(arg["pattern"], p.read_text(errors="replace"))
-        return bool(hit), f"pattern {'trovato' if hit else 'ASSENTE'} in {arg['path']}"
-
-    if kind == "python_def":
-        # `file_contains` con pattern «def nome_funzione» era il controllo più usato di
-        # questo registro (dieci voci su sedici), ed è il caso in cui una ricerca testuale
-        # è più debole di quanto sembri: la stessa stringa passa anche se sta in un
-        # commento, in una docstring, dentro un'altra stringa, o se il file NON SI COMPILA.
-        # 🔑 Il rilievo è dell'audit del round-11 e regge: `tools/prove-empiriche/
-        # prova-8-le-unit-si-comportano-come-dichiarano.sh` condanna il match di
-        # sottostringa, e questo registro lo praticava. Qui non si esegue nulla — si
-        # legge l'ALBERO SINTATTICO, che è strettamente più forte del testo e non ha
-        # gli effetti collaterali di un import.
-        #
-        # ⚠️ COSA NON PROVA, e va detto perché il difetto che cura nasce dal non dirlo:
-        #    che la funzione sia CHIAMATA · che il file sia importato da qualcuno ·
-        #    che la feature sia ACCESA a runtime. Prova che è DEFINITA, e che il file
-        #    che la contiene è codice Python valido. Per il resto ci sono `mcp_tool`,
-        #    `systemd_unit` e le prove empiriche.
-        p = repo / arg["path"]
-        if not p.exists():
-            return False, f"file MANCA: {arg['path']}"
-        try:
-            albero = ast.parse(p.read_text(errors="replace"))
-        except SyntaxError as e:
-            return False, (f"{arg['path']} NON SI COMPILA (riga {e.lineno}): "
-                           f"una ricerca testuale non se ne sarebbe accorta")
-        nomi = {n.name for n in ast.walk(albero)
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
-        ok = arg["name"] in nomi
-        return ok, (f"{arg['name']} {'DEFINITA' if ok else 'NON definita'} in "
-                    f"{arg['path']} (albero sintattico, non testo)")
-
-    if kind == "grep_count":
-        p = repo / arg["path"]
-        base = p if p.exists() else None
-        if base is None:
-            return False, f"path MANCA: {arg['path']}"
-        files = list(base.rglob("*")) if base.is_dir() else [base]
-        n = sum(len(re.findall(arg["pattern"], f.read_text(errors="replace")))
-                for f in files if f.is_file())
-        ok = n >= arg.get("min", 1)
-        return ok, f"{n} occorrenze di /{arg['pattern']}/ (min {arg.get('min', 1)})"
-
-    if kind == "cli_command":
-        # 🔴 PERCHÉ DUE CONDIZIONI E NON UNA (b82df434, 02/08). Un sottocomando vive
-        # in DUE posti: l'`add_parser` che lo fa accettare dalla riga di comando, e
-        # la mappa nome→funzione che lo esegue. **Divergono**: un `add_parser` senza
-        # voce nella mappa fa sì che `vps1777 <cmd>` venga accettato e non faccia
-        # NIENTE — o cada con un KeyError che si legge come un bug del comando invece
-        # che come un comando mai collegato.
-        # ⇒ «esiste» qui vuol dire ENTRAMBE. Provarne una sola darebbe un verde su
-        # metà della cosa, che è la classe che questo ledger esiste per chiudere.
-        src = (repo / "tools" / "vps1777.py").read_text(errors="replace")
-        nel_parser = f'sub.add_parser("{arg}"' in src
-        nel_dispatch = f'"{arg}": cmd_' in src
-        ok = nel_parser and nel_dispatch
-        return ok, (f"{arg}: parser {'sì' if nel_parser else 'NO'} · "
-                    f"dispatcher {'sì' if nel_dispatch else 'NO'}"
-                    + ("" if ok else " ⇒ definito a metà"))
-
-    if kind == "systemd_unit":
-        p = repo / "systemd" / arg
-        return p.exists(), f"systemd/{arg} {'esiste' if p.exists() else 'MANCA'}"
-
-    if kind == "compose_profile":
-        p = repo / arg["file"]
-        if not p.exists():
-            return False, f"compose MANCA: {arg['file']}"
-        hit = arg["profile"] in p.read_text(errors="replace")
-        return hit, f"profilo {arg['profile']} {'dichiarato' if hit else 'ASSENTE'} in {arg['file']}"
-
-    if kind == "mcp_tool":
-        # il tool è registrato se una `def <name>` porta il decoratore `@…​.tool`
-        svc = repo / "services" / arg["service"] / "app"
-        if not svc.exists():
-            return False, f"servizio MANCA: {arg['service']}"
-        want = arg["name"]
-        rotti = []
-        for f in svc.rglob("*.py"):
-            esito = _tool_mcp_definito(f, want)
-            if esito is None:
-                rotti.append(f.name)
-            elif esito:
-                return True, (f"tool MCP {arg['service']}/{want} registrato "
-                              "(albero sintattico, non testo)")
-        if rotti:
-            # un file che non compila non è «il tool non c'è»: è «non ho potuto guardare».
-            return False, (f"tool MCP {arg['service']}/{want} non trovato, MA "
-                           f"{len(rotti)} file NON COMPILANO ({', '.join(rotti[:3])}): "
-                           "questo esito non distingue «assente» da «illeggibile»")
-        return False, f"tool MCP {arg['service']}/{want} NON registrato"
-
-    if kind == "cmd":
-        # `arg` viene dal ledger del repo (features.yaml), che passa da revisione come il codice
-        try:
-            r = subprocess.run(arg, shell=True, cwd=repo, capture_output=True, text=True,  # noqa: S602
-                               timeout=CMD_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            return False, f"`{arg}` non ha finito entro {CMD_TIMEOUT_S} s"
-        return r.returncode == 0, f"`{arg}` exit {r.returncode}"
-
-    return False, f"tipo di verify sconosciuto: {kind}"
+    verifica = _VERIFICHE.get(kind)
+    if verifica is None:
+        return False, f"tipo di verify sconosciuto: {kind}"
+    return verifica(arg, repo)
 
 
-# 🔴 PERCHÉ QUESTA FUNZIONE ESISTE (b82df434, 02/08 — rilievo di `abdd732a`, referto
-#   di un suo agente, verificato da me con una controprova prima di toccare).
-#   Il matcher era una REGEX: `@mcp\.tool[\s\S]{0,200}?def\s+<nome>`. Misurato:
-#     · codice interamente COMMENTATO   → PASSA
-#     · dentro una DOCSTRING            → PASSA
-#   E copre **47 delle 67 feature attive**: il 70% del verso anti-perdita del ledger
-#   era una ricerca testuale su un file, cioè la stessa classe che stamattina avevo
-#   curato per `file_contains` introducendo `python_def` — e non avevo guardato qui.
-# ⭐ La cura era già in casa, scritta da me otto ore prima, e le 47 voci più importanti
-#   non la usavano. *Curare una classe su un tipo e non cercarla sugli altri è il modo
-#   in cui un difetto sopravvive a chi lo conosce.*
-# 📌 COSA ACCETTA, dichiarato: una `def`/`async def` col nome giusto che porti un
-#   decoratore `<qualcosa>.tool` (con o senza chiamata). Misurato sul repo: tutte e 47
-#   le occorrenze sono `@mcp.tool()` su `mcp = FastMCP`. Non vincolo il nome
-#   dell'oggetto a «mcp» di proposito — una rinomina del server non deve fingere
-#   che 47 tool siano spariti.
-# ⚠️ COSA NON PROVA: che il tool sia RAGGIUNGIBILE a runtime, che il servizio parta,
-#   che il file sia importato. Prova che è DEFINITO e DECORATO.
+
+def _v_path_exists(arg, repo: Path) -> tuple[bool, str]:
+    p = repo / arg
+    return p.exists(), f"path {'esiste' if p.exists() else 'MANCA'}: {arg}"
+
+
+def _v_file_contains(arg, repo: Path) -> tuple[bool, str]:
+    p = repo / arg["path"]
+    if not p.exists():
+        return False, f"file MANCA: {arg['path']}"
+    hit = re.search(arg["pattern"], p.read_text(errors="replace"))
+    return bool(hit), f"pattern {'trovato' if hit else 'ASSENTE'} in {arg['path']}"
+
+
+def _v_python_def(arg, repo: Path) -> tuple[bool, str]:
+    # `file_contains` con pattern «def nome_funzione» era il controllo più usato di
+    # questo registro (dieci voci su sedici), ed è il caso in cui una ricerca testuale
+    # è più debole di quanto sembri: la stessa stringa passa anche se sta in un
+    # commento, in una docstring, dentro un'altra stringa, o se il file NON SI COMPILA.
+    # 🔑 Il rilievo è dell'audit del round-11 e regge: `tools/prove-empiriche/
+    # prova-8-le-unit-si-comportano-come-dichiarano.sh` condanna il match di
+    # sottostringa, e questo registro lo praticava. Qui non si esegue nulla — si
+    # legge l'ALBERO SINTATTICO, che è strettamente più forte del testo e non ha
+    # gli effetti collaterali di un import.
+    #
+    # ⚠️ COSA NON PROVA, e va detto perché il difetto che cura nasce dal non dirlo:
+    #    che la funzione sia CHIAMATA · che il file sia importato da qualcuno ·
+    #    che la feature sia ACCESA a runtime. Prova che è DEFINITA, e che il file
+    #    che la contiene è codice Python valido. Per il resto ci sono `mcp_tool`,
+    #    `systemd_unit` e le prove empiriche.
+    p = repo / arg["path"]
+    if not p.exists():
+        return False, f"file MANCA: {arg['path']}"
+    try:
+        albero = ast.parse(p.read_text(errors="replace"))
+    except SyntaxError as e:
+        return False, (f"{arg['path']} NON SI COMPILA (riga {e.lineno}): "
+                       f"una ricerca testuale non se ne sarebbe accorta")
+    nomi = {n.name for n in ast.walk(albero)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    ok = arg["name"] in nomi
+    return ok, (f"{arg['name']} {'DEFINITA' if ok else 'NON definita'} in "
+                f"{arg['path']} (albero sintattico, non testo)")
+
+
+def _v_grep_count(arg, repo: Path) -> tuple[bool, str]:
+    p = repo / arg["path"]
+    base = p if p.exists() else None
+    if base is None:
+        return False, f"path MANCA: {arg['path']}"
+    files = list(base.rglob("*")) if base.is_dir() else [base]
+    n = sum(len(re.findall(arg["pattern"], f.read_text(errors="replace")))
+            for f in files if f.is_file())
+    ok = n >= arg.get("min", 1)
+    return ok, f"{n} occorrenze di /{arg['pattern']}/ (min {arg.get('min', 1)})"
+
+
+def _v_cli_command(arg, repo: Path) -> tuple[bool, str]:
+    # 🔴 PERCHÉ DUE CONDIZIONI E NON UNA (b82df434, 02/08). Un sottocomando vive
+    # in DUE posti: l'`add_parser` che lo fa accettare dalla riga di comando, e
+    # la mappa nome→funzione che lo esegue. **Divergono**: un `add_parser` senza
+    # voce nella mappa fa sì che `vps1777 <cmd>` venga accettato e non faccia
+    # NIENTE — o cada con un KeyError che si legge come un bug del comando invece
+    # che come un comando mai collegato.
+    # ⇒ «esiste» qui vuol dire ENTRAMBE. Provarne una sola darebbe un verde su
+    # metà della cosa, che è la classe che questo ledger esiste per chiudere.
+    src = (repo / "tools" / "vps1777.py").read_text(errors="replace")
+    nel_parser = f'sub.add_parser("{arg}"' in src
+    nel_dispatch = f'"{arg}": cmd_' in src
+    ok = nel_parser and nel_dispatch
+    return ok, (f"{arg}: parser {'sì' if nel_parser else 'NO'} · "
+                f"dispatcher {'sì' if nel_dispatch else 'NO'}"
+                + ("" if ok else " ⇒ definito a metà"))
+
+
+def _v_systemd_unit(arg, repo: Path) -> tuple[bool, str]:
+    p = repo / "systemd" / arg
+    return p.exists(), f"systemd/{arg} {'esiste' if p.exists() else 'MANCA'}"
+
+
+def _v_compose_profile(arg, repo: Path) -> tuple[bool, str]:
+    p = repo / arg["file"]
+    if not p.exists():
+        return False, f"compose MANCA: {arg['file']}"
+    hit = arg["profile"] in p.read_text(errors="replace")
+    return hit, f"profilo {arg['profile']} {'dichiarato' if hit else 'ASSENTE'} in {arg['file']}"
+
+
+def _v_mcp_tool(arg, repo: Path) -> tuple[bool, str]:
+    # il tool è registrato se una `def <name>` porta il decoratore `@…​.tool`
+    svc = repo / "services" / arg["service"] / "app"
+    if not svc.exists():
+        return False, f"servizio MANCA: {arg['service']}"
+    want = arg["name"]
+    rotti = []
+    for f in svc.rglob("*.py"):
+        esito = _tool_mcp_definito(f, want)
+        if esito is None:
+            rotti.append(f.name)
+        elif esito:
+            return True, (f"tool MCP {arg['service']}/{want} registrato "
+                          "(albero sintattico, non testo)")
+    if rotti:
+        # un file che non compila non è «il tool non c'è»: è «non ho potuto guardare».
+        return False, (f"tool MCP {arg['service']}/{want} non trovato, MA "
+                       f"{len(rotti)} file NON COMPILANO ({', '.join(rotti[:3])}): "
+                       "questo esito non distingue «assente» da «illeggibile»")
+    return False, f"tool MCP {arg['service']}/{want} NON registrato"
+
+
+def _v_cmd(arg, repo: Path) -> tuple[bool, str]:
+    # `arg` viene dal ledger del repo (features.yaml), che passa da revisione come il codice
+    try:
+        r = subprocess.run(arg, shell=True, cwd=repo, capture_output=True, text=True,  # noqa: S602
+                           timeout=CMD_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return False, f"`{arg}` non ha finito entro {CMD_TIMEOUT_S} s"
+    return r.returncode == 0, f"`{arg}` exit {r.returncode}"
+
+
+# I tipi di `verify` che il verificatore sa trattare, ognuno con la sua funzione. `manual` è a
+# parte (non è né ok né non-ok). `tools/tests/test_ledger_tipi.py` legge le chiavi di questa
+# tabella: un tipo usato nel ledger e assente qui è una voce che si dichiara verificata e non lo è.
+_VERIFICHE = {
+    "path_exists": _v_path_exists,
+    "file_contains": _v_file_contains,
+    "python_def": _v_python_def,
+    "grep_count": _v_grep_count,
+    "cli_command": _v_cli_command,
+    "systemd_unit": _v_systemd_unit,
+    "compose_profile": _v_compose_profile,
+    "mcp_tool": _v_mcp_tool,
+    "cmd": _v_cmd,
+}
+
+
+
 def _tool_mcp_definito(path: Path, want: str) -> bool | None:
     """True/False se il tool è definito+decorato. **None se il file non compila** —
     e la distinzione è il punto: «non ho potuto guardare» non è «non c'è»."""
@@ -230,6 +241,19 @@ def enum_reality(repo: Path) -> dict[str, set[str]]:
                                  "compose_profile": set(), "tools_script": set(),
                                  "cli_command": set()}
 
+    real["cli_command"] = _comandi_reali(repo)
+    script = _script_reali(repo)
+    if script is None:
+        del real["tools_script"]
+    else:
+        real["tools_script"] = script
+    real["mcp_tool"] = _tool_mcp_reali(repo)
+    real["systemd_unit"] = _unit_reali(repo)
+    real["compose_profile"] = _profili_reali(repo)
+    return real
+
+
+def _comandi_reali(repo: Path) -> set[str]:
     # ── cli_command ───────────────────────────────────────────────────────────
     # 🔴 PERCHÉ QUESTA CATEGORIA ESISTE (b82df434, 02/08/2026 09:2x), ed è la SECONDA
     #   volta che questo verso si scopre cieco su un piano. Stanotte avevo aggiunto
@@ -247,10 +271,15 @@ def enum_reality(repo: Path) -> dict[str, set[str]]:
     #   accettato dalla riga di comando E collegato a una funzione — le due metà che
     #   possono divergere in silenzio.
     cli = repo / "tools" / "vps1777.py"
-    if cli.exists():
-        testo = cli.read_text(errors="replace")
-        real["cli_command"] = set(re.findall(r'sub\.add_parser\("([a-z0-9-]+)"', testo))
+    if not cli.exists():
+        return set()
+    testo = cli.read_text(errors="replace")
+    return set(re.findall(r'sub\.add_parser\("([a-z0-9-]+)"', testo))
 
+
+
+def _script_reali(repo: Path) -> set[str] | None:
+    """Gli script tracciati in tools/; None se git non risponde (vedi sotto)."""
     # ── tools_script ──────────────────────────────────────────────────────────
     # 🔴 PERCHÉ QUESTA CATEGORIA ESISTE (b82df434, 02/08/2026 00:0x).
     #   Il verso reale→dichiarato enumerava TRE categorie. Tutto `tools/` era fuori
@@ -277,48 +306,67 @@ def enum_reality(repo: Path) -> dict[str, set[str]]:
         # git assente o non è un repo: NON fingo un insieme vuoto — un set vuoto qui
         # direbbe «nessuno script non dichiarato», che è esattamente il verde-senza-
         # aver-guardato. Lascio la categoria fuori: il referto dirà che manca.
-        del real["tools_script"]
-    else:
-        real["tools_script"] = {r for r in (x.strip() for x in tracciati) if r}
+        return None
+    return {r for r in (x.strip() for x in tracciati) if r}
 
 
+def _tool_mcp_reali(repo: Path) -> set[str]:
+    """Ogni funzione decorata `@x.tool` sotto services/, come «servizio/nome»."""
+    trovati: set[str] = set()
     svc = repo / "services"
-    if svc.exists():
-        for f in svc.rglob("*.py"):
-            if ".venv" in f.parts:
-                continue
-            service = None
-            for i, part in enumerate(f.parts):
-                if part == "services" and i + 1 < len(f.parts):
-                    service = f.parts[i + 1]
+    if not svc.exists():
+        return trovati
+    for f in svc.rglob("*.py"):
+        if ".venv" in f.parts:
+            continue
+        # stesso criterio del verso opposto: albero sintattico, non regex.
+        # Se il file non compila NON si enumera nulla da lì — e il verso
+        # dichiarato→reale lo dirà, invece di far sparire i tool in silenzio.
+        try:
+            albero = ast.parse(f.read_text(errors="replace"))
+        except SyntaxError:
+            continue
+        service = _servizio_di(f)
+        trovati |= {f"{service}/{nome}" for nome in _tool_decorati(albero)}
+    return trovati
+
+
+def _servizio_di(f: Path) -> str | None:
+    """Il nome del servizio: la cartella subito sotto `services/`."""
+    for i, part in enumerate(f.parts):
+        if part == "services" and i + 1 < len(f.parts):
+            return f.parts[i + 1]
+    return None
+
+
+def _tool_decorati(albero: ast.AST) -> list[str]:
+    """I nomi delle funzioni decorate con `@x.tool` o `@x.tool(...)`."""
+    nomi: list[str] = []
+    for n in ast.walk(albero):
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for d in n.decorator_list:
+            fn = d.func if isinstance(d, ast.Call) else d
+            if isinstance(fn, ast.Attribute) and fn.attr == "tool":
+                    nomi.append(n.name)
                     break
-            # stesso criterio del verso opposto: albero sintattico, non regex.
-            # Se il file non compila NON si enumera nulla da lì — e il verso
-            # dichiarato→reale lo dirà, invece di far sparire i tool in silenzio.
-            try:
-                albero = ast.parse(f.read_text(errors="replace"))
-            except SyntaxError:
-                continue
-            for n in ast.walk(albero):
-                if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    continue
-                for d in n.decorator_list:
-                    fn = d.func if isinstance(d, ast.Call) else d
-                    if isinstance(fn, ast.Attribute) and fn.attr == "tool":
-                        real["mcp_tool"].add(f"{service}/{n.name}")
-                        break
+    return nomi
 
+
+def _unit_reali(repo: Path) -> set[str]:
     sysd = repo / "systemd"
-    if sysd.exists():
-        for f in sysd.iterdir():
-            if f.suffix in (".service", ".timer", ".path"):
-                real["systemd_unit"].add(f.name)
+    if not sysd.exists():
+        return set()
+    return {f.name for f in sysd.iterdir() if f.suffix in (".service", ".timer", ".path")}
 
+
+def _profili_reali(repo: Path) -> set[str]:
+    profili: set[str] = set()
     for comp in repo.glob("compose*.yaml"):
         for m in re.finditer(r"profiles:\s*\[([^\]]+)\]", comp.read_text(errors="replace")):
             for prof in m.group(1).split(","):
-                real["compose_profile"].add(prof.strip())
-    return real
+                profili.add(prof.strip())
+    return profili
 
 
 def _keys_of(e: dict) -> dict[str, set[str]]:
@@ -330,6 +378,12 @@ def _keys_of(e: dict) -> dict[str, set[str]]:
     k: dict[str, set[str]] = {"mcp_tool": set(), "systemd_unit": set(),
                               "compose_profile": set(), "tools_script": set(),
                               "cli_command": set()}
+    _chiavi_dai_verify(e, k)
+    _chiavi_dal_dove(e, k)
+    return k
+
+
+def _chiavi_dai_verify(e: dict, k: dict[str, set[str]]) -> None:
     for spec in (e.get("verify"), (e.get("follow_up") or {}).get("verify")):
         if isinstance(spec, dict):
             if "mcp_tool" in spec:
@@ -340,6 +394,9 @@ def _keys_of(e: dict) -> dict[str, set[str]]:
                 k["compose_profile"].add(spec["compose_profile"]["profile"])
             elif "cli_command" in spec:
                 k["cli_command"].add(spec["cli_command"])
+
+
+def _chiavi_dal_dove(e: dict, k: dict[str, set[str]]) -> None:
     # dove: "compose-profile:<file>#<profilo>" · "mcp-tool:<svc>/<nome>" · "systemd:<unit>"
     for d in e.get("dove", []):
         if d.startswith("compose-profile:") and "#" in d:
@@ -355,7 +412,6 @@ def _keys_of(e: dict) -> dict[str, set[str]]:
         # senza toccarle. È il motivo per cui la semina parte già non-vuota.
         elif d.startswith("tools/"):
             k["tools_script"].add(d.split("#", 1)[0].split(":", 1)[0].strip())
-    return k
 
 
 def main() -> int:
@@ -381,41 +437,56 @@ def main() -> int:
     hard_fail: list[str] = []      # fanno uscire != 0
     surveil: list[str] = []        # solo segnalati
 
+    _schema(entries, hard_fail)
+    _dichiarato_reale(entries, repo, hard_fail, surveil)
+    _reale_dichiarato(entries, repo, baseline_completo, hard_fail, surveil)
+    _sorveglianza(entries, repo, oggi, surveil)
+    return _referto(entries, baseline_completo, oggi, surveil, hard_fail)
+
+
+def _schema(entries: list[dict], hard_fail: list[str]) -> None:
     # ── 1. SCHEMA + regola di cattura ─────────────────────────────────────────
     ids = set()
     for e in entries:
-        eid = e.get("id", "<senza id>")
-        for k in REQUIRED:
-            if k not in e:
-                hard_fail.append(f"[schema] {eid}: manca il campo obbligatorio '{k}'")
-        if e.get("status") not in STATUSES:
-            hard_fail.append(f"[schema] {eid}: status '{e.get('status')}' non valido {STATUSES}")
-        if eid in ids:
-            hard_fail.append(f"[schema] id duplicato: {eid}")
-        ids.add(eid)
-        # REGOLA DI CATTURA (setaccio): una deferred è una decisione a metà finché non
-        # dichiara COSA la chiude. Il follow_up è il cuore anti-amnesia — è ciò che
-        # mancava a Watchtower. Lo pretendiamo SEMPRE su una deferred, senza scampo:
-        # un `verify` non lo sostituisce (il verify prova la presenza, il follow_up
-        # dice cosa manca perché sia presente).
-        if e.get("status") == "deferred" and not e.get("follow_up"):
-            hard_fail.append(f"[cattura] {eid}: 'deferred' senza follow_up — decisione a metà "
-                             "(è ESATTAMENTE il buco che ha perso Watchtower per un mese)")
-        # «CONDIZIONE O DATA» (27/09/2026, lezione dei gemelli dei rinvii — todo_or_die,
-        # curatrice F1-Gbis): un rinvio che aspetta SOLO una condizione non scatta mai se
-        # la condizione non arriva (Graphiti, «dopo il test» cinque volte, e il test abolito).
-        # Una condizione verificabile porta anche la sua data di riserva.
-        fu_ = e.get("follow_up") or {}
-        if (e.get("status") == "deferred" and isinstance(fu_.get("verify"), dict)
-                and not fu_.get("rivedi_dopo")
-                and not (fu_.get("manuale") or {}).get("rivedi_dopo")):
-            hard_fail.append(f"[cattura] {eid}: follow_up.verify senza data — aggiungi "
-                             "follow_up.rivedi_dopo: la condizione può non avverarsi mai "
-                             "(condizione O data, non condizione E data)")
-        if e.get("status") in ("deferred", "removed", "opt-in") and not e.get("decisione"):
-            hard_fail.append(f"[cattura] {eid}: '{e['status']}' senza 'decisione' — invisibile "
-                             "allo storico (perché/quando fu deciso?)")
+        _schema_voce(e, ids, hard_fail)
 
+
+def _schema_voce(e: dict, ids: set, hard_fail: list[str]) -> None:
+    eid = e.get("id", "<senza id>")
+    for k in REQUIRED:
+        if k not in e:
+            hard_fail.append(f"[schema] {eid}: manca il campo obbligatorio '{k}'")
+    if e.get("status") not in STATUSES:
+        hard_fail.append(f"[schema] {eid}: status '{e.get('status')}' non valido {STATUSES}")
+    if eid in ids:
+        hard_fail.append(f"[schema] id duplicato: {eid}")
+    ids.add(eid)
+    # REGOLA DI CATTURA (setaccio): una deferred è una decisione a metà finché non
+    # dichiara COSA la chiude. Il follow_up è il cuore anti-amnesia — è ciò che
+    # mancava a Watchtower. Lo pretendiamo SEMPRE su una deferred, senza scampo:
+    # un `verify` non lo sostituisce (il verify prova la presenza, il follow_up
+    # dice cosa manca perché sia presente).
+    if e.get("status") == "deferred" and not e.get("follow_up"):
+        hard_fail.append(f"[cattura] {eid}: 'deferred' senza follow_up — decisione a metà "
+                         "(è ESATTAMENTE il buco che ha perso Watchtower per un mese)")
+    # «CONDIZIONE O DATA» (27/09/2026, lezione dei gemelli dei rinvii — todo_or_die,
+    # curatrice F1-Gbis): un rinvio che aspetta SOLO una condizione non scatta mai se
+    # la condizione non arriva (Graphiti, «dopo il test» cinque volte, e il test abolito).
+    # Una condizione verificabile porta anche la sua data di riserva.
+    fu_ = e.get("follow_up") or {}
+    if (e.get("status") == "deferred" and isinstance(fu_.get("verify"), dict)
+            and not fu_.get("rivedi_dopo")
+            and not (fu_.get("manuale") or {}).get("rivedi_dopo")):
+        hard_fail.append(f"[cattura] {eid}: follow_up.verify senza data — aggiungi "
+                         "follow_up.rivedi_dopo: la condizione può non avverarsi mai "
+                         "(condizione O data, non condizione E data)")
+    if e.get("status") in ("deferred", "removed", "opt-in") and not e.get("decisione"):
+        hard_fail.append(f"[cattura] {eid}: '{e['status']}' senza 'decisione' — invisibile "
+                         "allo storico (perché/quando fu deciso?)")
+
+
+def _dichiarato_reale(entries: list[dict], repo: Path, hard_fail: list[str],
+                      surveil: list[str]) -> None:
     # ── 2. DICHIARATO → REALE (cattura la PERDITA) ────────────────────────────
     for e in entries:
         if e.get("status") not in ACTIVE:
@@ -427,6 +498,9 @@ def main() -> int:
             hard_fail.append(f"[PERDITA] {e['id']} è dichiarata '{e['status']}' ma il verify "
                              f"FALLISCE: {det}. La feature è sparita, o la voce mente.")
 
+
+def _reale_dichiarato(entries: list[dict], repo: Path, baseline_completo: bool,
+                      hard_fail: list[str], surveil: list[str]) -> None:
     # ── 3. REALE → DICHIARATO (cattura ciò che poi si dimentica) ──────────────
     # Tre vie, non due (raffinamento dal buco fine di setaccio):
     #   reale + dichiarato present (active/opt-in) → OK
@@ -434,17 +508,7 @@ def main() -> int:
     #   reale + nessuna voce                       → NON DICHIARATO (aggiungi la voce)
     # (reale + deferred lo copre la sorveglianza [PROMUOVI] più sotto: è pronto a promozione.)
     real = enum_reality(repo)
-    present: dict[str, set[str]] = {c: set() for c in real}
-    accounted: dict[str, set[str]] = {c: set() for c in real}
-    removed_keys: dict[str, set[str]] = {c: set() for c in real}
-    for e in entries:
-        keys = _keys_of(e)
-        for c in real:
-            accounted[c] |= keys[c]
-            if e.get("status") in ACTIVE:
-                present[c] |= keys[c]
-            if e.get("status") == "removed":
-                removed_keys[c] |= keys[c]
+    accounted, removed_keys = _chiavi_dichiarate(entries, real)
     for cat in real:
         # una categoria in semina è NUOVA per l'enumerazione: `baseline_completo` non
         # parlava di lei, quindi non può renderla fatale senza mentire su cosa prometteva.
@@ -464,6 +528,23 @@ def main() -> int:
                        "(es. opt-in, se resta disponibile ma declassato)")
                 (hard_fail if baseline_completo else surveil).append(msg)
 
+
+def _chiavi_dichiarate(entries: list[dict], real: dict[str, set[str]]
+                       ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Per categoria: le chiavi nominate da qualche voce, e quelle delle voci `removed`."""
+    accounted: dict[str, set[str]] = {c: set() for c in real}
+    removed_keys: dict[str, set[str]] = {c: set() for c in real}
+    for e in entries:
+        keys = _keys_of(e)
+        for c in real:
+            accounted[c] |= keys[c]
+            if e.get("status") == "removed":
+                removed_keys[c] |= keys[c]
+    return accounted, removed_keys
+
+
+def _sorveglianza(entries: list[dict], repo: Path, oggi: datetime.date,
+                  surveil: list[str]) -> None:
     # ── SORVEGLIANZA: follow_up a-giudizio scaduti + verificabili pronti ──────
     for e in entries:
         fu = e.get("follow_up") or {}
@@ -484,6 +565,9 @@ def main() -> int:
                 surveil.append(f"[PROMUOVI] {e['id']}: il follow_up verificabile è ORA soddisfatto "
                                f"({det}) — la deferred può passare ad active-default")
 
+
+def _referto(entries: list[dict], baseline_completo: bool, oggi: datetime.date,
+             surveil: list[str], hard_fail: list[str]) -> int:
     # ── REFERTO ───────────────────────────────────────────────────────────────
     print(f"── ledger: {len(entries)} voci · baseline_completo={baseline_completo} · {oggi} ──")
     for s in surveil:
