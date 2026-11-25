@@ -20,6 +20,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   che misura i repo).
 
 ### Corretto
+- Il plugin d'esempio `example-bot` restava acceso senza dire se era vivo: ora scrive un battito su file e
+  il suo compose ha l'healthcheck, come il bot di serie.
 - Il CHANGELOG della 0.98.16 ripeteva otto voci due volte (un errore nell'unire i rami): tolte le copie.
 
 ## [0.98.16] — 2026-11-25
