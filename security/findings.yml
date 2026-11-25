@@ -493,7 +493,7 @@ findings:
     since: v0.33.0
     evidence:
       - file: SECURITY.md
-        contains: ["GitHub Security Advisory"]
+        contains: ["Apri una *GitHub Security Advisory* privata sul repo"]
       - file: security/check_findings.py
         contains: ["SECURITY.md dichiara", "non combacia"]
       - file: .github/workflows/ci.yml
