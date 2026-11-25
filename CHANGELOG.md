@@ -8,6 +8,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - **La lettura delle sessioni di Claude Code è riordinata** (QUA-04): `_iter_claude_code` (complessità 21)
   è spezzata in un lettore con un passo per specie di record, senza cambiare comportamento: ogni riga resa,
   nell'ordine, identica su 1.502 sessioni generate.
+- **Il controllo dei segreti prima di un aggiornamento è riordinato** (QUA-04): la funzione che legge la
+  sezione `secrets:` dei compose (complessità 20) è spezzata in tre passi, identica su 1.200 casi generati.
 
 ### Corretto
 - Il CHANGELOG della 0.98.16 ripeteva otto voci due volte (un errore nell'unire i rami): tolte le copie.

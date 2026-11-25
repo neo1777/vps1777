@@ -3492,17 +3492,13 @@ def _secrets_mancanti(compose_paths: list[Path], radice_repo: Path) -> list[str]
     return fuori
 
 
-def _secrets_mancanti_in(compose: Path, radice_repo: Path,
-                         visti: set[tuple[str, str]]) -> list[str]:
-    """Un compose solo. `visti` de-duplica fra overlay: lo stesso segreto dichiarato
-    in due file è un segreto solo, e va detto una volta."""
-    if not compose.is_file():
-        return []
-    righe = compose.read_text(encoding="utf-8", errors="replace").splitlines()
+def _secrets_dichiarati(righe: list[str]) -> tuple[list[tuple[str, str]], bool]:
+    """I segreti `file:` della sezione `secrets:` a colonna 0, come (nome, percorso), e se la
+    sezione ha del contenuto (righe che non sono vuote né commenti)."""
     try:
         start = next(n for n, r in enumerate(righe) if r.rstrip() == "secrets:")
     except StopIteration:
-        return []
+        return [], False
 
     # il blocco: tutto ciò che è indentato sotto `secrets:` a livello 0
     blocco = []
@@ -3516,7 +3512,7 @@ def _secrets_mancanti_in(compose: Path, radice_repo: Path,
     passo = next((len(r) - len(r.lstrip()) for r in blocco
                   if r.strip() and not r.lstrip().startswith("#")), 0)
     if not passo:
-        return []
+        return [], False
 
     nomi: list[tuple[str, str]] = []
     corrente = ""
@@ -3530,11 +3526,86 @@ def _secrets_mancanti_in(compose: Path, radice_repo: Path,
         elif ind > passo and corrente and spoglia.startswith("file:"):
             nomi.append((corrente, spoglia.split(":", 1)[1].strip()))
 
+    return nomi, any(r.strip() and not r.lstrip().startswith("#") for r in blocco)
+
+
+def _stato_del_segreto(p: Path) -> str | None:
+    """None se il file del segreto è a posto; altrimenti uno dei quattro stati, ognuno col
+    suo rimedio: ASSENTE, VUOTO, NON LEGGIBILE, DIRECTORY NON LEGGIBILE."""
+    # ⚠️ VUOTO = vuoto DOPO strip, non `st_size == 0` — difetto (e), riprodotto su
+    # banco da b82df434: un file con solo «\n» (1 byte) o con spazi passava per
+    # PIENO. Non è un caso di laboratorio: chi riempie un segreto a mano con un
+    # editor lascia il newline, e `echo "" > f` scrive un byte. Lo stack parte, il
+    # canale resta fail-closed, e il sintomo sembra un bug della feature — cioè
+    # **esattamente il fallimento che la docstring qui sopra dichiara di prevenire.**
+    #
+    # ⚠️⚠️ E «ASSENTE» E «C'È MA NON SI LEGGE» SONO DUE COSE, col rimedio OPPOSTO.
+    # Fino alla 0.40.1 questa riga era `not p.is_file() or not p.read_text(...)`:
+    # un `or` che **buttava via l'informazione già calcolata**. Un file integro ma
+    # illeggibile (permessi, ACL, mount, symlink rotto) finiva nel ramo «manca o è
+    # VUOTO», e il messaggio suggeriva il comando col `>` — che lo avrebbe
+    # **troncato**. Il rimedio distruggeva un segreto valido: la forma peggiore,
+    # perché il pre-flight esiste per far risparmiare tempo, non per far perdere un
+    # dato. Misurato: 3 segreti pieni, `chmod 000` su uno ⇒ 1 su 3 segnalato come
+    # «manca», e la guardia sulla radice sbagliata non scatta (scatta solo se
+    # mancano tutti). (Trovato da b82df434, riprodotto da setaccio.)
+    # ⇒ Non si enumerano le CAUSE (permessi, ACL, mount, immutable, symlink: quella
+    #   lista sarebbe incompleta dal primo giorno). Si usa il dato che il codice ha
+    #   già: `is_file()` separa i due mondi, la lettura decide dentro il secondo.
+    # ⭐ FORMA GENERALE, per chi legge: **un `or` fra due condizioni con rimedi
+    #   diversi è una perdita di informazione, non una semplificazione.**
+    # ⚠️ QUATTRO stati, non tre — e il quarto è una REGRESSIONE che ho introdotto
+    # separando i rami (b82df434, riprodotta sui due sha con la 0.40.1 come
+    # controprova). Prima un unico `except OSError` copriva tutto; separando le
+    # diagnosi è caduto il catch sul caso in cui a non essere leggibile è **il
+    # contenitore invece del contenuto**: `chmod 000` sulla DIRECTORY `secrets/`
+    # faceva sollevare `is_file()` e il pre-flight moriva con uno stack trace,
+    # **senza scrivere lo step failed** — quindi col pannello appeso su «running».
+    # È la stessa forma che avevo già chiuso per il `FileNotFoundError` del bundle:
+    # **avevo protetto la porta che conoscevo**. Separare i casi è giusto; separarli
+    # è anche il momento in cui si perde una copertura che l'`or` dava per pigrizia.
+    # ⚠️ `stat()` e non `is_file()`: da Python 3.14 `Path.is_file()` INGHIOTTE il
+    # PermissionError e risponde False, e la cartella illeggibile tornava «ASSENTE»
+    # — col rimedio opposto (trovato il 30/09: il test qui sotto era rosso con 3.14,
+    # verde con 3.12). `stat()` solleva uguale in ogni versione: «non c'è» è solo
+    # FileNotFoundError/NotADirectoryError, tutto il resto è il percorso.
+    stato = None                                   # None = a posto
+    try:
+        esiste = stat.S_ISREG(p.stat().st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        esiste = False
+    except OSError as exc:
+        # non è il file a non essere leggibile: è il PERCORSO. Rimedio diverso da
+        # tutti gli altri tre — si guarda la cartella, non il segreto.
+        esiste = None
+        stato = f"DIRECTORY NON LEGGIBILE ({exc.__class__.__name__})"
+    if stato is None and not esiste:
+        stato = "ASSENTE"
+    elif stato is None:
+        try:
+            if not p.read_text(encoding="utf-8", errors="replace").strip():
+                stato = "VUOTO"
+        except OSError as exc:
+            # C'È, e non riusciamo a leggerlo. Fermare l'update è GIUSTO (lo stack
+            # non partirebbe comunque); è il RIMEDIO a dover essere diverso, perché
+            # il file da salvare c'è già.
+            stato = f"NON LEGGIBILE ({exc.__class__.__name__})"
+    return stato
+
+
+def _secrets_mancanti_in(compose: Path, radice_repo: Path,
+                         visti: set[tuple[str, str]]) -> list[str]:
+    """Un compose solo. `visti` de-duplica fra overlay: lo stesso segreto dichiarato
+    in due file è un segreto solo, e va detto una volta."""
+    if not compose.is_file():
+        return []
+    righe = compose.read_text(encoding="utf-8", errors="replace").splitlines()
+    nomi, piena = _secrets_dichiarati(righe)
     # ⚠️ Distinguere «nessun segreto dichiarato» da «non ho saputo leggere»:
     # la sezione c'è ed è piena, ma non ne abbiamo estratto nemmeno uno ⇒ il
     # formato è cambiato sotto di noi. Restituire [] qui sarebbe il falso verde
     # in un'altra forma, quindi si SEGNALA invece di tacere.
-    if not nomi and any(r.strip() and not r.lstrip().startswith("#") for r in blocco):
+    if not nomi and piena:
         return [f"(pre-flight non ha saputo leggere la sezione `secrets:` di "
                 f"{compose.name} — formato inatteso: verificare a mano prima di procedere)"]
 
@@ -3544,64 +3615,7 @@ def _secrets_mancanti_in(compose: Path, radice_repo: Path,
             continue                                # già segnalato da un altro compose
         visti.add((nome, percorso))
         p = radice_repo / percorso.lstrip("./")
-        # ⚠️ VUOTO = vuoto DOPO strip, non `st_size == 0` — difetto (e), riprodotto su
-        # banco da b82df434: un file con solo «\n» (1 byte) o con spazi passava per
-        # PIENO. Non è un caso di laboratorio: chi riempie un segreto a mano con un
-        # editor lascia il newline, e `echo "" > f` scrive un byte. Lo stack parte, il
-        # canale resta fail-closed, e il sintomo sembra un bug della feature — cioè
-        # **esattamente il fallimento che la docstring qui sopra dichiara di prevenire.**
-        #
-        # ⚠️⚠️ E «ASSENTE» E «C'È MA NON SI LEGGE» SONO DUE COSE, col rimedio OPPOSTO.
-        # Fino alla 0.40.1 questa riga era `not p.is_file() or not p.read_text(...)`:
-        # un `or` che **buttava via l'informazione già calcolata**. Un file integro ma
-        # illeggibile (permessi, ACL, mount, symlink rotto) finiva nel ramo «manca o è
-        # VUOTO», e il messaggio suggeriva il comando col `>` — che lo avrebbe
-        # **troncato**. Il rimedio distruggeva un segreto valido: la forma peggiore,
-        # perché il pre-flight esiste per far risparmiare tempo, non per far perdere un
-        # dato. Misurato: 3 segreti pieni, `chmod 000` su uno ⇒ 1 su 3 segnalato come
-        # «manca», e la guardia sulla radice sbagliata non scatta (scatta solo se
-        # mancano tutti). (Trovato da b82df434, riprodotto da setaccio.)
-        # ⇒ Non si enumerano le CAUSE (permessi, ACL, mount, immutable, symlink: quella
-        #   lista sarebbe incompleta dal primo giorno). Si usa il dato che il codice ha
-        #   già: `is_file()` separa i due mondi, la lettura decide dentro il secondo.
-        # ⭐ FORMA GENERALE, per chi legge: **un `or` fra due condizioni con rimedi
-        #   diversi è una perdita di informazione, non una semplificazione.**
-        # ⚠️ QUATTRO stati, non tre — e il quarto è una REGRESSIONE che ho introdotto
-        # separando i rami (b82df434, riprodotta sui due sha con la 0.40.1 come
-        # controprova). Prima un unico `except OSError` copriva tutto; separando le
-        # diagnosi è caduto il catch sul caso in cui a non essere leggibile è **il
-        # contenitore invece del contenuto**: `chmod 000` sulla DIRECTORY `secrets/`
-        # faceva sollevare `is_file()` e il pre-flight moriva con uno stack trace,
-        # **senza scrivere lo step failed** — quindi col pannello appeso su «running».
-        # È la stessa forma che avevo già chiuso per il `FileNotFoundError` del bundle:
-        # **avevo protetto la porta che conoscevo**. Separare i casi è giusto; separarli
-        # è anche il momento in cui si perde una copertura che l'`or` dava per pigrizia.
-        # ⚠️ `stat()` e non `is_file()`: da Python 3.14 `Path.is_file()` INGHIOTTE il
-        # PermissionError e risponde False, e la cartella illeggibile tornava «ASSENTE»
-        # — col rimedio opposto (trovato il 30/09: il test qui sotto era rosso con 3.14,
-        # verde con 3.12). `stat()` solleva uguale in ogni versione: «non c'è» è solo
-        # FileNotFoundError/NotADirectoryError, tutto il resto è il percorso.
-        stato = None                                   # None = a posto
-        try:
-            esiste = stat.S_ISREG(p.stat().st_mode)
-        except (FileNotFoundError, NotADirectoryError):
-            esiste = False
-        except OSError as exc:
-            # non è il file a non essere leggibile: è il PERCORSO. Rimedio diverso da
-            # tutti gli altri tre — si guarda la cartella, non il segreto.
-            esiste = None
-            stato = f"DIRECTORY NON LEGGIBILE ({exc.__class__.__name__})"
-        if stato is None and not esiste:
-            stato = "ASSENTE"
-        elif stato is None:
-            try:
-                if not p.read_text(encoding="utf-8", errors="replace").strip():
-                    stato = "VUOTO"
-            except OSError as exc:
-                # C'È, e non riusciamo a leggerlo. Fermare l'update è GIUSTO (lo stack
-                # non partirebbe comunque); è il RIMEDIO a dover essere diverso, perché
-                # il file da salvare c'è già.
-                stato = f"NON LEGGIBILE ({exc.__class__.__name__})"
+        stato = _stato_del_segreto(p)
         if stato:
             fuori.append(f"{nome} → {percorso}   [{stato} · dichiarato in {compose.name}]")
     return fuori
