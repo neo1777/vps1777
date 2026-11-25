@@ -1,0 +1,28 @@
+{
+  "_leggimi": "QUA-03 in semina: i file con errori di tipo (mypy, opzioni in tools/tipi.py) e quanti ne hanno. Misurato il 2026-11-25 con mypy 1.18.2. Nessun file nuovo, nessun numero che cresce; quando un numero scende lo si abbassa qui, a mano. Dopo fine_semina ogni riga è rossa.",
+  "scelta": "2026-11-25-soglia-qua03-tipi",
+  "fine_semina": "2027-04-30",
+  "file": {
+    "installer/engine.py": 1,
+    "security/check_findings.py": 1,
+    "services/archive-mcp/app/db.py": 7,
+    "services/gateway/app/admin.py": 19,
+    "services/gateway/app/archive_indexer.py": 25,
+    "services/gateway/app/audit.py": 1,
+    "services/gateway/app/ingest_worker.py": 1,
+    "services/gateway/app/miniapp_core.py": 1,
+    "services/gateway/app/onboarding.py": 2,
+    "services/gateway/app/routes.py": 2,
+    "services/gateway/app/settings.py": 1,
+    "services/nb1777-bot/app/settings.py": 1,
+    "services/nb1777-mcp/app/core.py": 5,
+    "services/nb1777-mcp/app/lavori.py": 1,
+    "services/nb1777-mcp/app/server.py": 35,
+    "services/nb1777-mcp/app/sonda.py": 1,
+    "tools/fatti-nei-doc.py": 5,
+    "tools/lock-salti.py": 3,
+    "tools/nomi-nei-doc.py": 3,
+    "tools/verify-features.py": 2,
+    "tools/vps1777.py": 35
+  }
+}

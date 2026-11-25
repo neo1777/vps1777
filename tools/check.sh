@@ -137,6 +137,10 @@ fase_lint() {
     passo "complessità — autoprova" python3 tools/complessita.py "$AUTOPROVA" --ruff "uvx ruff@$RUFF_VERSIONE"
     passo "complessità — nessuna nuova oltre 10, nessuna cresciuta" python3 tools/complessita.py --ruff "uvx ruff@$RUFF_VERSIONE"
   }
+  manca "tipi (QUA-03)" uvx || {
+    passo "tipi — autoprova" python3 tools/tipi.py "$AUTOPROVA"
+    passo "tipi — nessun errore nuovo, nessun file censito che cresce" python3 tools/tipi.py
+  }
   manca "shellcheck (immagine della CI, per digest)" docker \
     || passo "shellcheck (immagine della CI, per digest)" _shellcheck
 }
