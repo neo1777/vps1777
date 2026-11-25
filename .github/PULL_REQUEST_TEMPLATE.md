@@ -6,7 +6,7 @@
 
 ## Come testato
 - [ ] Provato in locale con l'overlay di build (`docker compose -f compose.yaml -f compose.build.yaml -f compose.dev.yaml up --watch`): `docker compose up` da solo avvia le immagini pubblicate su GHCR, non questo codice
-- [ ] `bash tools/check.sh` verde (lint, guardiani e suite, come i job `lint` e `contract` della CI)
+- [ ] `bash tools/check.sh` verde (lint, guardiani, suite e scanner: i job `lint` e `contract` della CI e `scanner.yml`)
 - [ ] Lint pulito (`ruff check`, `shellcheck`)
 - [ ] CI verde
 

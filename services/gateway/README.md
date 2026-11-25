@@ -26,6 +26,7 @@ OAuth 2.1 + DCR + reverse proxy MCP + pannello `/admin/*` + Mini App `/app/*`.
 | `TELEGRAM_WEBAPP_SECRET_FILE` | (none; compose: `/run/secrets/telegram_webapp_secret`) | chiave derivata dal token del bot, per verificare l'`initData` della Mini App (il token intero il gateway non lo monta: `TELEGRAM_BOT_TOKEN_FILE` resta solo come ricaduta, H54) |
 | `TELEGRAM_OWNER_ID` | `0` | owner della Mini App; 0 o vuoto = non entra nessuno (fail-closed) |
 | `ARCHIVE_INGEST_CODA` | `false` (compose: `true`) | `/admin/archive` mette i file in coda per il job `ingest` invece di indicizzarli nel gateway |
+| `ARCHIVE_TELEGRAM_PROPRIETARIO` | (vuoto) | i nomi del proprietario negli export Telegram, separati da virgole: senza, l'ingest non sa dire chi è `human` e chi `other` |
 | `OCR_URL` | (none; compose: `http://ocr:8004/ocr`) | servizio OCR per le immagini |
 | `ARCHIVE_DESC_SECRET_FILE` | (none; compose: `/run/secrets/archive_desc_secret`) | segreto di `/internal/archive/*` |
 | `AUDIT_LOG_PATH` | `/var/lib/gateway/audit.jsonl` | path scrittura audit |
@@ -67,7 +68,7 @@ solo nell'overlay `compose.build.yaml`:
 docker build -t vps1777/gateway:dev .
 docker run --rm -p 8080:8080 \
   -e GATEWAY_PUBLIC_BASE=http://127.0.0.1:8080 \
-  -e OAUTH_ALLOWED_EMAILS=tu@gmail.com \
+  -e OAUTH_ALLOWED_EMAILS=tu@example.invalid \
   -e GATEWAY_SECRET_FILE=/run/secrets/gateway_secret \
   -e OAUTH_SIGNING_SECRET_FILE=/run/secrets/oauth_signing_secret \
   -e OAUTH_PWD_HASH_FILE=/run/secrets/admin_password_bcrypt \

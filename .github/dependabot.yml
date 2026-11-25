@@ -120,7 +120,7 @@ updates:
       # che regge una garanzia di sicurezza è esattamente ciò che non vogliamo.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
-      # notebooklm-mcp-cli: il pin (`==0.16.1` dal 07/11/2026) e INTENZIONALE, non pigrizia.
+      # notebooklm-mcp-cli: il pin (`==0.16.5` dal 23/11/2026) e INTENZIONALE, non pigrizia.
       #   Il formato auth di quella CLI (`profiles/default/cookies.json`) e cablato
       #   in QUATTRO punti che nessun bump automatico tocca - auth.py (il gate di
       #   auth), admin.py (le istruzioni all utente), il bot e la doc.

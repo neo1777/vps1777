@@ -48,8 +48,8 @@ To get them, re-run `./setup.sh` and answer "yes": the steps already done are sk
 ## What `setup.sh` does
 
 1. Checks Docker + Compose v2 + python3
-2. Creates `.env` (asks for: admin email, TG_OWNER_ID, ingress; with Caddy the domain,
-   with Cloudflare the tunnel's public hostname)
+2. Creates `.env` (asks for: admin email, TG_OWNER_ID, ingress; with Caddy the domain and
+   the Let's Encrypt email, with Cloudflare the tunnel's public hostname)
 3. Generates `secrets/*.txt`:
    - `gateway_secret.txt` (32 url-safe characters = 24 bytes of entropy)
    - `archive_desc_secret.txt` (32 url-safe characters = 24 bytes of entropy)
@@ -127,7 +127,7 @@ docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.
 1. **Admin login**: `<PUBLIC_BASE>/admin/login` → admin email + password
 2. **NotebookLM auth**: on YOUR PC install the `nlm` CLI, log in, then upload the **profile** (tar.gz) to `<PUBLIC_BASE>/admin/nlm`. The `nlm` CLI (0.7 and later) saves the auth as a `profiles/default/` folder (no longer a single `auth.json`):
    ```bash
-   uv tool install notebooklm-mcp-cli==0.16.1 --python 3.12   # needs uv (astral.sh)
+   uv tool install notebooklm-mcp-cli==0.16.5 --python 3.12   # needs uv (astral.sh)
    nlm login                                             # opens the browser → NotebookLM login
    # if it asks "Protected or plain file?" choose the FILE: the VPS cannot open the encrypted login
    cd ~/.notebooklm-mcp-cli && tar czf nlm-profile.tgz profiles/default

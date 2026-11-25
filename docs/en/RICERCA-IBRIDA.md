@@ -84,7 +84,7 @@ wins on vectors alone.
 | `query` | — | the question in natural language, as you would say it. It is the signal for the vectors |
 | `query_fts` | `""` | an FTS5 expression (the syntax of `search`) for the full-text branch. If missing, the FTS branch derives one from the words of `query` |
 | `db_name` | `""` | one DB (whatever its role); empty = the DBs in the `ruoli` perimeter that have an index. Those in the perimeter without an index end up in `senza_indice` |
-| `ruoli` | `""` | where to search without `db_name` (since 0.74.0): `""` = primaries and undeclared; `tutti` = every DB; or comma-separated roles (`primario`, `fotografia`, `riscontro`, `riservato`). The reserved one is queried only by naming it. The DBs left out come back in `fuori_perimetro`, grouped by role |
+| `ruoli` | `""` | where to search without `db_name` (since 0.74.0): `""` = primaries and undeclared; `tutti` = every DB; or comma-separated roles (`primario`, `fotografia`, `riscontro`, `riservato`, `non dichiarato`). The reserved one is queried only by naming it. The DBs left out come back in `fuori_perimetro`, grouped by role |
 | `limit` | 20 | rows returned, from 1 to 200: above 200 it keeps 200, below 1 it is an error |
 | `since` / `until` | `""` | time window (ISO, `ts >= since`, `ts <= until`), as in `search`. It applies to **both** lists; rows without a ts stay out |
 | `campi` | `tutto` | `testo` keeps only the rows that have words, in the vector branch too (a vector does not say whether it hit the words or the actions) |
@@ -104,7 +104,7 @@ close to the question, the vector branch comes back empty and the answer is FTS5
 The same bench, with a second count, S: the element **can be read** in the snippet without
 opening the file (at least four consecutive words of a quote from the expected answer).
 
-| first 10 rows | voice notes (voce-1777) | Telegram group | 21 meeting records |
+| first 10 rows | voice notes | Telegram group | 21 meeting records |
 |---|---|---|---|
 | 32-token snippet (the default up to 0.64.4) | 9 of 30 | 12 | 9 |
 | 64-token snippet (the default now) | 13 | 12 | 11 |
@@ -168,7 +168,7 @@ reach the point, not the file that cannot be found.
 | piece | where it lives | why there |
 |---|---|---|
 | the **search code** (query embedding + knn + fusion) | the `archive-mcp` image | ~35 MB of dependencies: onnxruntime, tokenizers, sqlite-vec, numpy |
-| the **model** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; `vps1777 indice-modello` puts it there | ~490 MB (`model.onnx` 470 MB, `tokenizer.json` 17 MB): in the image they would weigh on every pull, and they get updated without releasing a version |
+| the **model** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; `vps1777 indice-modello` puts it there | ~490 MB (`model.onnx` 470 MB, i.e. 449 MiB; `tokenizer.json` 17 MB): in the image they would weigh on every pull, and they get updated without releasing a version |
 | the **index** (`<nome-db>.vec.db`) | volume, next to its DB | indexing the corpus costs tens of hours of CPU: it is done **elsewhere** and the index travels as an artifact |
 | the index **builder** | repo, `services/archive-mcp/tools/costruisci_indice.py`, also copied into the `archive-mcp` image | the first build runs on the PC, in archive-mcp's lock environment; the nightly updates run on the VPS in that same image (`indice-notturno` service) |
 
@@ -550,10 +550,10 @@ builder lives in the container, which does not inherit that priority: what holds
 the compose service's one-CPU cap (`cpus: 1.0`) and its memory cap (1300m).
 
 ⚠️ The builder reads the DB as it is. Since 0.84.0 the `/admin/archive` ingest runs as a
-separate job (compose service `ingest`, 2g cap) when a file arrives, at night too, and it
-does not coordinate with the index round: if they overlap, the builder may see two states
-of the DB and the two jobs add up their memory. The nightly round does not run
-`--controlla`: a `--controlla` run by hand reveals it, and the next night's round, with
+separate job (compose service `ingest`, 2g cap) when a file arrives, at night too; the two
+jobs queue on the archive lock (`var/archivio.lock`), so they never read and write the same
+DB together and the two caps do not add up. The nightly round does not run `--controlla`: a
+misalignment is revealed by a `--controlla` run by hand, and the next night's round, with
 the incremental run, brings it back in step.
 
 ## Verification in the server: `indici[].verifica`
@@ -578,10 +578,12 @@ existing fields do not change shape.
 | `uuid_diversi` | neighbours whose rowid now belongs to another message |
 | `stato` | the sentence for the reader, with the fix |
 
-The three possible states:
+The four possible states:
 
 - `verificato: ogni risultato vettoriale combacia col DB (uuid per rowid)` —
   verified: every vector result matches the DB (uuid per rowid);
+- `niente da verificare: nessun risultato vettoriale in questa ricerca` — nothing to
+  verify: the vector branch brought no candidates (for instance a filter removed them all);
 - `indice disallineato col DB: N risultati vettoriali scartati (A rowid spariti,
   B rowid ora di un altro messaggio) — lancia …costruisci_indice.py --controlla
   su una copia del DB e aggiorna l'indice` — index out of step with the DB: N
@@ -603,7 +605,7 @@ The server also writes a warning to the log when it discards something.
 
 ## What it costs — measured
 
-Measured on 24/09/2026 on a PC with 4 cores and 8 threads (Ryzen 5 2400G, AVX2 only), on the copy of the primary DB, for a
+Measured on 24/09/2026 on a PC with 4 cores and 8 threads (AVX2 only), on the copy of the primary DB, for a
 two-day window (1,618 messages, 4,366 vectors):
 
 | | |
@@ -628,7 +630,7 @@ Estimates, from the measured speed (they are estimates, not measurements):
 | July–September 2026 (chunks counted by the prototype on the 08/09 copy) | ~282,000 | ~34 h |
 
 **The full run, measured** (25-26/09/2026, same 4-core / 8-thread PC, in normal use, at `nice`
-15): the primary `recupero-20260924` with `--tutto` — 266,219 messages, **452,311
+15): the primary DB with `--tutto` — 266,219 messages, **452,311
 vectors in 31 h 13'**, i.e. **~4.0 vectors/s on average** (from ~2 at start-up to 4.7
 at cruise speed), 1.70 vectors per message, a 735 MB index. The two-day window above
 underestimated the speed: it was short and included the warm-up.
@@ -750,7 +752,7 @@ it is not in step, update it there and upload that one.
 
 `[state of the installation on 27/09/2026 — today's state of each index is in the «per senso» column of /admin/archive]`
 
-- **The primary for Claude Code is `recupero-20260924`** (since 24/09: the first bundle
+- **The primary for Claude Code** is a new DB since 24/09 (since 24/09: the first bundle
   with the `recupero/` R1 contract, see [ARCHIVE.md](ARCHIVE.md)), and its index covers
   **the whole DB**: 266,219 messages with indexable text (16,826 too short stay out),
   **452,311 vectors**, logs and sub-agents included, with the `indice_righe` ledger.
@@ -759,9 +761,9 @@ it is not in step, update it there and upload that one.
   After a re-ingest of this DB the index has to be updated on a fresh copy (see "Turning
   on search by meaning", the paragraph on re-ingest): until then, vector results that no longer
   match are discarded and declared.
-- **`memoria-claudeai-20260926`** (the claude.ai memories) has an index of its own on
+- **The claude.ai memories DB** has an index of its own on
   **the whole DB**: 61 messages, with the ledger, generated on 26/09/2026.
-- **`recupero-20260905`** (the primary until 24/09, now a cross-check) keeps the
+- **The previous primary** (until 24/09, now a cross-check) keeps the
   prototype's index: **May–June 2026** (58,322 messages, 139,011 vectors, generated on
   07/09/2026), with a hand-written `indice_meta` and **no** ledger — `verifica.registro:
   false`; updating it requires a rebuild (`--ricostruisci`).

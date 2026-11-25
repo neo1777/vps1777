@@ -10,8 +10,8 @@ se sei root, `sudo -u <operatore> vps1777 …`). Le parole del glossario:
 [GLOSSARIO.md](GLOSSARIO.md).
 
 Un'opzione vale per tutti i comandi e va **prima** del comando: `--home CARTELLA`, la
-radice del repo sulla VPS. Senza, la CLI usa `$VPS1777_HOME` e, se manca anche quella,
-`/home/vps1777/vps1777`.
+radice del repo sulla VPS. Senza, la CLI usa `$VPS1777_HOME`, poi `/home/vps1777/vps1777`,
+poi la cartella corrente: la prima che contiene `compose.yaml`.
 
 ```bash
 vps1777 --home /srv/vps1777 status
@@ -37,20 +37,27 @@ giro.
 - **Pota gli snapshot pre-update** (`backups/pre-update/`): restano l'ultimo di ciascuna
   delle versioni n e n-1, più il più recente in assoluto — il punto di ritorno della
   versione in esecuzione ([BACKUP-RESTORE.md](BACKUP-RESTORE.md)).
-- **Cinque sorveglianze**, sempre, con l'esito nel log: la raggiungibilità del servizio da
+- **Otto sorveglianze**, con l'esito nel log: la raggiungibilità del servizio da
   fuori (la porta sull'host, poi l'indirizzo pubblico — il Funnel o `PUBLIC_BASE`;
   l'esito va anche in `onboarding/raggiungibilita.json`,
   letto da `/admin/setup`), la **copertura** dei backup (giorni distinti, avvisa se scende
   sotto il massimo già raggiunto, contato fino ai 7 giorni promessi) l'**età** dell'ultimo backup archivio (avvisa oltre i
   14 giorni; se l'archivio non esiste ancora, tace), l'**età** dell'ultimo backup core
   (avvisa oltre i 2 giorni: un notturno fermo non pota più, quindi la copertura da sola non
-  lo vede) e lo **spazio libero** sul disco dei backup (avvisa sotto il 10%). Le notifiche
-  partono alla transizione, una volta, e di nuovo quando la cosa rientra.
+  lo vede), lo **spazio libero** sul disco dei backup (avvisa sotto il 10%), l'**esito
+  dell'ultimo giro** del backup notturno (il cron lo scrive in `backups/ultimo-esito`: `0` è
+  riuscito; senza file tace), la **copia fuori macchina** (`backups/.ultima-copia-fuori`,
+  lasciata da `tools/backup-pull.sh`: avvisa oltre i 3 giorni, o se ci sono backup e nessuna
+  copia risulta mai uscita) e, solo con la feature `portainer` dichiarata, se **Portainer
+  risponde** (`tools/portainer-vivo.sh`, dall'host: «non ho potuto guardare» va nel log e non
+  arma niente). Le notifiche partono alla transizione, una volta, e di nuovo quando la cosa
+  rientra.
 - **Scrive lo stato**: `onboarding/update_status.json` (la card admin e la Mini App lo
   leggono) e `last_check` in `var/state.json`.
 - **Scrive la salute** (dalla 0.74.0): `onboarding/salute.json`, letto da `/admin/salute`.
   Una riga per voce, con stato (`ok`, `attenzione`, `guasto`, `non_misurato`) e la data
-  della misura: le cinque sorveglianze, la sessione Google (l'ultima sonda di nb1777) e la
+  della misura: raggiungibilità, backup notturno, backup archivio, copertura e disco (l'esito
+  dell'ultimo giro, la copia fuori macchina e Portainer non hanno ancora una riga qui), la sessione Google (l'ultima sonda di nb1777) e la
   memoria di ogni container (dal cgroup: memoria propria da `memory.stat`, picco da
   `memory.peak`, OOM kill da `memory.events`, e il tetto se c'è). Dalla 0.74.1
   «attenzione» lo dicono la memoria propria oltre il 90% del tetto o un OOM kill, non il
@@ -66,7 +73,7 @@ vps1777 check --notify    # in più: messaggio Telegram all'owner se c'è una nu
 ```
 
 `--notify` manda su Telegram la release nuova (una volta per versione) e i **cambi di
-stato** delle cinque sorveglianze — la caduta e il ritorno, non lo stato ogni giorno. Senza
+stato** delle sorveglianze — la caduta e il ritorno, non lo stato ogni giorno. Senza
 `--notify` le sorveglianze girano lo stesso e scrivono solo nel log.
 
 ## vps1777 update
@@ -103,6 +110,10 @@ step 10; in `onboarding/update_progress.json` l'ultimo step (la barra dei pannel
 `onboarding/update_journal.ndjson` **una riga per step**, anche per un update riuscito —
 è da lì che si legge la mattina dopo cosa ha fatto l'auto-update della notte.
 
+Se l'update precedente è morto dopo lo step 10, il primo `vps1777 update` successivo chiude
+quello (0 = era arrivato in fondo, 1 = tornato alla versione precedente, 2 = serve un
+intervento a mano) e non installa altro in quel giro.
+
 Se un altro update (o un rollback) è già in corso esce con **75** («riprova più tardi»),
 che le unit contano come successo: non è un guasto e non manda l'avviso di fallimento.
 Esce **1** se l'update fallisce e l'auto-rollback riporta la versione di prima (con un
@@ -135,9 +146,11 @@ vps1777 rollback --with-data --yes
 Lo stato del canale di aggiornamento: versione corrente, precedente, ultima release nota
 (`latest_known`), ora dell'ultimo check, l'eventuale errore del check e l'update in corso
 (`update_in_progress`: c'è dallo step 10 in poi, e resta se un update muore dopo quel
-punto di non ritorno). Con
+punto di non ritorno, finché il `vps1777 update` successivo non lo chiude). Con
 `--json` c'è anche il canale delle release (`channel`); con `--probe` lo stato di ogni
-container e il deep health. Snapshot ed esito dell'ultimo update non li mostra: stanno in
+container e il deep health. Se l'aggiornamento automatico ha già sentito il canale firmato,
+l'uscita a schermo ne mostra l'ultimo esito (valido fino a quando, o fermo e perché); in
+`--json` quella riga non c'è. Snapshot ed esito dell'ultimo update non li mostra: stanno in
 `backups/pre-update/` e in `onboarding/update_journal.ndjson`.
 
 ```bash
@@ -301,7 +314,7 @@ a secco prende, DB per DB, il lucchetto dell'archivio (come `archive-retag`).
 
 ```bash
 vps1777 archive-migra                                  # anteprima su tutti i DB
-vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
+vps1777 archive-migra --db <nome-del-db> --scrivi  # applica su un DB solo
 ```
 
 Con `--telegram` (e `--db`, obbligatorio) dà lo `speaker` ai messaggi di un **gruppo

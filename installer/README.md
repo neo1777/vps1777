@@ -75,6 +75,11 @@ Variabili d'ambiente avanzate (per chi lancia `installer.py` a mano):
 
 - `VPS1777_INSTALL_VERSION=X.Y.Z-rc.1` — installa una versione specifica (es. una rc)
 - `VPS1777_DEV_BUILD=1` — escape hatch: build locale con `compose.build.yaml` (solo sviluppo)
+- `VPS1777_RELEASE_CHANNEL=prerelease` — installa l'ultima prerelease (solo per le prove)
+- `VPS1777_INSTALLER_PORT=8778` — un'altra porta per la pagina locale, se la 8777 è occupata
+- `VPS1777_INSTALLER_CMD_TIMEOUT_S=7200` — tetto, in secondi, per ogni comando lanciato sulla
+  VPS: scaduto, l'installer smette di aspettarlo e lo dice (sulla VPS il comando può essere
+  ancora vivo: guardalo prima di rilanciare)
 
 Se nessuna release esiste ancora, l'engine ripiega da solo sulla build locale.
 

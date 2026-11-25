@@ -493,7 +493,7 @@ findings:
     since: v0.33.0
     evidence:
       - file: SECURITY.md
-        contains: ["antigravity1777@gmail.com"]
+        contains: ["Apri una *GitHub Security Advisory* privata sul repo"]
       - file: security/check_findings.py
         contains: ["SECURITY.md dichiara", "non combacia"]
       - file: .github/workflows/ci.yml
@@ -504,6 +504,9 @@ findings:
       Il GATE di release è `security/findings.yml` + `check_findings.py` in CI: verifica
       che ogni claim chiuso abbia la sua coordinata e che i conteggi in SECURITY.md
       combacino col registro. Lo scostamento doc↔codice ora fa fallire la build.
+      Dal 25/11/2026 il contatto per le segnalazioni è la segnalazione privata di GitHub
+      (attiva sul repo), non più un indirizzo email: scelta del proprietario, per non tenere
+      un dato personale nel repo pubblico. La prova guarda quella frase in SECURITY.md.
 
   - id: H22
     severity: medium

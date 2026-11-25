@@ -76,7 +76,7 @@ modello che vinca sui soli vettori.
 | `query` | — | la domanda in linguaggio naturale, come la diresti a voce. È il segnale per i vettori |
 | `query_fts` | `""` | un'espressione FTS5 (la sintassi di `search`) per il ramo full-text. Se manca, il ramo FTS ne ricava una dalle parole di `query` |
 | `db_name` | `""` | un DB (qualunque ruolo abbia); vuoto = i DB del perimetro di `ruoli` che hanno un indice. Quelli del perimetro senza indice finiscono in `senza_indice` |
-| `ruoli` | `""` | dove cercare senza `db_name` (dalla 0.74.0): `""` = primari e non dichiarati; `tutti` = ogni DB; oppure ruoli separati da virgole (`primario`, `fotografia`, `riscontro`, `riservato`). Il riservato si interroga solo nominandolo. I DB lasciati fuori tornano in `fuori_perimetro`, raggruppati per ruolo |
+| `ruoli` | `""` | dove cercare senza `db_name` (dalla 0.74.0): `""` = primari e non dichiarati; `tutti` = ogni DB; oppure ruoli separati da virgole (`primario`, `fotografia`, `riscontro`, `riservato`, `non dichiarato`). Il riservato si interroga solo nominandolo. I DB lasciati fuori tornano in `fuori_perimetro`, raggruppati per ruolo |
 | `limit` | 20 | righe restituite, da 1 a 200: oltre 200 si tiene 200, sotto 1 è un errore |
 | `since` / `until` | `""` | finestra temporale (ISO, `ts >= since`, `ts <= until`), come in `search`. Vale per **tutte e due** le liste; le righe senza ts restano fuori |
 | `campi` | `tutto` | `testo` tiene solo le righe che hanno parole, anche nel ramo vettoriale (un vettore non dice se ha colpito le parole o le azioni) |
@@ -96,7 +96,7 @@ di vicino alla domanda, il ramo vettoriale torna vuoto e la risposta è quella d
 Lo stesso banco, con un secondo conteggio, S: l'elemento **si legge** nello snippet, senza
 aprire il file (almeno quattro parole di fila di una citazione della risposta attesa).
 
-| prime 10 righe | vocali (voce-1777) | gruppo Telegram | 21 verbali |
+| prime 10 righe | vocali | gruppo Telegram | 21 verbali |
 |---|---|---|---|
 | snippet di 32 token (il default fino alla 0.64.4) | 9 su 30 | 12 | 9 |
 | snippet di 64 token (il default ora) | 13 | 12 | 11 |
@@ -159,7 +159,7 @@ non si trova.
 | pezzo | dove vive | perché lì |
 |---|---|---|
 | il **codice di ricerca** (embedding della query + knn + fusione) | immagine `archive-mcp` | ~35 MB di dipendenze: onnxruntime, tokenizers, sqlite-vec, numpy |
-| il **modello** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; lo mette lì `vps1777 indice-modello` | ~490 MB (`model.onnx` 470 MB, `tokenizer.json` 17 MB): nell'immagine peserebbero su ogni pull, e si aggiornano senza rilasciare una versione |
+| il **modello** (`model.onnx` + `tokenizer.json`) | volume, `/var/lib/archive/models/e5-small/`; lo mette lì `vps1777 indice-modello` | ~490 MB (`model.onnx` 470 MB, cioè 449 MiB; `tokenizer.json` 17 MB): nell'immagine peserebbero su ogni pull, e si aggiornano senza rilasciare una versione |
 | l'**indice** (`<nome-db>.vec.db`) | volume, accanto al suo DB | indicizzare il corpus costa decine di ore di CPU: si fa **fuori** e l'indice viaggia come artefatto |
 | il **costruttore** dell'indice | repo, `services/archive-mcp/tools/costruisci_indice.py`, copiato anche nell'immagine `archive-mcp` | la prima costruzione gira sul PC, nell'ambiente del lock di archive-mcp; gli aggiornamenti notturni girano sulla VPS nella stessa immagine (servizio `indice-notturno`) |
 
@@ -527,10 +527,10 @@ tetto di una CPU (`cpus: 1.0`) e quello di memoria (1300m) del servizio compose.
 
 ⚠️ Il costruttore legge il DB mentre esiste. Dalla 0.84.0 l'ingest di `/admin/archive`
 gira come job a parte (servizio compose `ingest`, tetto 2g) quando arriva un file, anche
-di notte, e non si coordina col giro dell'indice: se si sovrappongono, il costruttore
-può vedere due stati del DB e i due job sommano la loro memoria. Il giro notturno non
-lancia `--controlla`: lo rivela un `--controlla` lanciato a mano, e il giro della notte
-dopo, con l'incrementale, lo rimette in pari.
+di notte; i due lavori si mettono in fila col lucchetto dell'archivio (`var/archivio.lock`),
+quindi non leggono e scrivono lo stesso DB insieme e i due tetti non si sommano. Il giro
+notturno non lancia `--controlla`: un disallineamento lo rivela un `--controlla` lanciato a
+mano, e il giro della notte dopo, con l'incrementale, lo rimette in pari.
 
 ## La verifica nel server: `indici[].verifica`
 
@@ -554,9 +554,11 @@ di prima non cambiano forma.
 | `uuid_diversi` | vicini il cui rowid ora appartiene a un altro messaggio |
 | `stato` | la frase per chi legge, con la cura |
 
-I tre stati possibili:
+I quattro stati possibili:
 
 - `verificato: ogni risultato vettoriale combacia col DB (uuid per rowid)`;
+- `niente da verificare: nessun risultato vettoriale in questa ricerca`: il ramo vettoriale
+  non ha portato candidati (per esempio un filtro li ha tolti tutti);
 - `indice disallineato col DB: N risultati vettoriali scartati (A rowid spariti,
   B rowid ora di un altro messaggio) — lancia …costruisci_indice.py --controlla
   su una copia del DB e aggiorna l'indice`;
@@ -575,7 +577,7 @@ Il server scrive anche un avviso nel log quando scarta qualcosa.
 
 ## Quanto costa — misurato
 
-Misurato il 24/09/2026 su un PC a 4 core e 8 thread (Ryzen 5 2400G, solo AVX2), sulla copia del primario, per una
+Misurato il 24/09/2026 su un PC a 4 core e 8 thread (solo AVX2), sulla copia del primario, per una
 finestra di due giorni (1.618 messaggi, 4.366 vettori):
 
 | | |
@@ -600,7 +602,7 @@ Stime, dalla velocità misurata (sono stime, non misure):
 | luglio–settembre 2026 (pezzi contati dal prototipo sulla copia del 08/09) | ~282.000 | ~34 h |
 
 **La corsa intera, misurata** (25-26/09/2026, stesso PC a 4 core / 8 thread, in uso normale, a
-`nice` 15): il primario `recupero-20260924` con `--tutto` — 266.219 messaggi, **452.311
+`nice` 15): il DB primario con `--tutto` — 266.219 messaggi, **452.311
 vettori in 31 h 13'**, cioè **~4,0 vettori/s di media** (da ~2 all'avvio a 4,7 a
 regime), 1,70 vettori per messaggio, indice di 735 MB. La finestra di due giorni qui
 sopra sottostimava la velocità: era corta e comprendeva il riscaldamento.
@@ -721,7 +723,7 @@ DB: se non è in pari, aggiornalo lì e carica quello.
 
 `[stato dell'installazione al 27/09/2026 — lo stato di oggi di ogni indice è nella colonna «per senso» di /admin/archive]`
 
-- **Il primario per Claude Code è `recupero-20260924`** (dal 24/09: il primo bundle
+- **Il primario per Claude Code** è un DB nuovo dal 24/09 (dal 24/09: il primo bundle
   col contratto `recupero/` R1, vedi [ARCHIVE.md](ARCHIVE.md)), e il suo indice copre
   **tutto il DB**: 266.219 messaggi con testo indicizzabile (16.826 troppo corti restano
   fuori), **452.311 vettori**, log e sotto-agenti compresi, col registro `indice_righe`.
@@ -730,9 +732,9 @@ DB: se non è in pari, aggiornalo lì e carica quello.
   Dopo un re-ingest di questo DB l'indice va aggiornato su una copia nuova (vedi
   «Attivare la ricerca per senso», il capoverso sul re-ingest): finché non lo si fa, i risultati vettoriali
   che non combaciano più vengono scartati e dichiarati.
-- **`memoria-claudeai-20260926`** (le memorie di claude.ai) ha un indice suo su **tutto
+- **Il DB delle memorie di claude.ai** ha un indice suo su **tutto
   il DB**: 61 messaggi, col registro, generato il 26/09/2026.
-- **`recupero-20260905`** (il primario fino al 24/09, ora riscontro) tiene l'indice del
+- **Il primario precedente** (fino al 24/09, ora riscontro) tiene l'indice del
   prototipo: **maggio–giugno 2026** (58.322 messaggi, 139.011 vettori, generato il
   07/09/2026), con `indice_meta` scritta a mano e **senza** registro — `verifica.registro:
   false`; per aggiornarlo serve una ricostruzione (`--ricostruisci`).

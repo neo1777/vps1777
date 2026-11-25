@@ -183,8 +183,7 @@ docker compose -f compose.yaml -f compose.ingress.tailscale.yaml -f compose.ops.
 ## Se non torna
 
 **Uno o più container in `Restarting`, e nei log `PermissionError: [Errno 13] Permission
-denied: '/run/secrets/gateway_secret'`.** Hai installato da `root` (o il tuo uid non è
-1000): i container girano come uid **1000** e non riescono a leggere i secret.
+denied: '/run/secrets/gateway_secret'`.** Hai installato da `root`: i container girano come uid **1000** e non riescono a leggere i secret.
 
 ```bash
 chown 1000:1000 secrets/*.txt
@@ -194,6 +193,11 @@ docker compose -f compose.yaml -f compose.ingress.tailscale.yaml --profile ingre
 ⚠️ **Non** `chown $(id -u):$(id -g)`: serve l'uid **di dentro il container**, non il tuo.
 Se lanci quel comando da root non cambi niente e resti fermo credendo di aver curato.
 Il caso completo è in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+
+**`setup.sh` si ferma con «permessi dei segreti per i servizi non messi».** Il tuo uid non è
+1000 e non sei nel gruppo 1000: la riga sopra l'errore dà la cura (come root:
+`getent group 1000 || groupadd -g 1000 vps1777-servizi; usermod -aG 1000 <tuo-utente>`). Esci e
+rientra, poi rilancia `./setup.sh`.
 
 **`manifest unknown` sul pull.** Stai lanciando `docker compose` **senza** il `.env` che
 `setup.sh` scrive: senza `VPS1777_TAG` il default è `dev`, che su GHCR non esiste. Lancia

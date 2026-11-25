@@ -31,8 +31,9 @@ chown 1000:1000 secrets/*.txt        # 1000 = l'utente `app` DENTRO i container
 > con `useradd -m -u 1000` e gli fa `chown -R` della dir remota, quindi l'UID
 > combacia già. Se l'UID 1000 è già preso (capita sulle immagini cloud, che hanno
 > un utente di default a 1000) l'operatore nasce con un altro UID. Fino alla `0.98.11`
-> l'installazione si fermava qui, con questo errore. Dalla versione successiva gli installatori
-> mettono l'operatore nel gruppo 1000 e, prima di ogni avvio, `tools/permessi-servizi.sh` dà a
+> l'installazione si fermava qui, con questo errore. Dalla versione successiva `deploy.sh` e
+> l'installer grafico mettono l'operatore nel gruppo 1000 (`setup.sh` non lo fa: se non ci sei si
+> ferma prima dell'avvio e stampa il comando per entrarci) e, prima di ogni avvio, `tools/permessi-servizi.sh` dà a
 > quel gruppo la lettura dei segreti (`640`) e la scrittura in `onboarding/`.
 >
 > **È un rimedio provvisorio e ha un prezzo** (`H102` in `security/findings.yml`): su quella
@@ -141,9 +142,9 @@ davvero è un'altra risposta, `401 init_data_expired` (firma giusta, `initData` 
 12 ore): il pannello dice «Sessione Telegram scaduta (12h)» e basta riaprirlo dal bot.
 
 La chiave si riallinea da sola al token in cinque posti: `tools/rotate-secret.sh
-telegram_bot_token` (dalla 0.62.3: scrive il token, **rideriva la chiave** e riavvia bot
+telegram_bot_token` (dalla 0.63.0: scrive il token, **rideriva la chiave** e riavvia bot
 e gateway), un `vps1777 update` che installa davvero una versione (allo step 13),
-`vps1777 rollback` (dalla 0.62.3), l'auto-rollback e un nuovo giro di `./setup.sh` (che
+`vps1777 rollback` (dalla 0.63.0), l'auto-rollback e un nuovo giro di `./setup.sh` (che
 però non riavvia il gateway: dopo serve `docker compose restart gateway`). **Non** la riallineano un
 `docker compose restart` né un token riscritto a mano nel file: se hai fatto così, la
 via è rilanciare `tools/rotate-secret.sh telegram_bot_token` col token nuovo. In
@@ -162,7 +163,7 @@ gateway basta.
 `nlm` è il pacchetto PyPI **`notebooklm-mcp-cli`**, non un pacchetto apt/snap.
 Installalo con [uv](https://astral.sh):
 ```bash
-uv tool install notebooklm-mcp-cli --python 3.12
+uv tool install notebooklm-mcp-cli==0.16.5 --python 3.12
 nlm login
 ```
 Se dopo l'install resta "not found": `uv` mette i binari in `~/.local/bin` →
@@ -212,7 +213,15 @@ Verifica sul tuo PC che il profilo esista prima di taggarlo:
 ls ~/.notebooklm-mcp-cli/profiles/default/   # → cookies.json  metadata.json
 ```
 
-## Deploy: «La chiave SSH della macchina è DIVERSA da quella vista l'ultima volta»
+## Installer: «il comando remoto … non ha concluso entro N minuti»
+
+Un comando sulla VPS è rimasto appeso oltre il tetto (due ore di default). L'installer smette di
+aspettarlo e chiude il canale, ma senza terminale il processo remoto non riceve nessun segnale:
+può essere ancora vivo. Entra sulla VPS, guarda che cosa sta facendo (rete, disco, un `apt`
+bloccato) e, se serve, fermalo; poi rilancia l'installazione. Per una build davvero lunga alza
+il tetto con `VPS1777_INSTALLER_CMD_TIMEOUT_S` (secondi) sul PC da cui lanci.
+
+## Deploy: «La chiave SSH di <IP> è DIVERSA da quella vista l'ultima volta»
 
 **Che cosa vedi.** `deploy.sh` (o l'installer grafico) si ferma al test di connessione e chiede conferma;
 senza terminale esce con «chiave della macchina cambiata e non confermata».
@@ -330,8 +339,8 @@ posto; esce 1 se uno non è sano, e allora si passa al ripristino da backup).
 
 I servizi hanno un tetto di memoria dove il picco è misurato (`mem_limit` in
 `compose.yaml`, dalla 0.68; il gateway dalla 0.84): gateway 512m, archive-mcp 2g senza
-swap, nb1777-mcp 512m, nb1777-bot 256m, il lavoro `indice-notturno` 1300m; `ocr` ancora
-no. Chi lo supera viene ucciso (exit 137) e `restart` lo rialza.
+swap, nb1777-mcp 512m, nb1777-bot 256m, ocr 1g, i lavori `indice-notturno` 1300m e `ingest` 2g.
+Chi lo supera viene ucciso (exit 137) e `restart` lo rialza.
 
 Diagnosi:
 ```bash
@@ -397,7 +406,7 @@ Causa: `tailscale up` non è stato eseguito o la key era vuota/non valida.
 Fix (sull'host):
 ```bash
 ssh <user>@<vps>
-sudo tailscale up --authkey=tskey-auth-... --hostname=vps1777
+sudo tailscale up --authkey=file:<file con la tskey-auth-…> --hostname=vps1777 --accept-dns=false
 # Genera la key su https://login.tailscale.com/admin/machines/new-linux
 # Poi, un comando solo (serve e funnel separati danno 502, vedi sopra):
 sudo tailscale serve reset && sudo tailscale funnel --bg --https=443 http://127.0.0.1:8080
@@ -447,7 +456,9 @@ Il file nasce dell'utente del servizio (`app`), che è anche chi potrà toglierl
 già così dalla 0.58.0.
 
 `/tmp` è una tmpfs da 64 MB: per un file più grande scrivi in un volume del servizio
-(per nb1777-mcp `/var/lib/nlm-artifacts/`), come fa `vps1777 archive-ingest`.
+(per nb1777-mcp `/var/lib/nlm-artifacts/`), come fa `vps1777 archive-ingest`: i file
+testuali nel volume dell'archivio (`/var/lib/archive/coda/`, via gateway), quelli da
+trascrivere in `/var/lib/nlm-artifacts/ingest/` di nb1777-mcp.
 
 ## Update: digest mismatch al pull
 

@@ -12,8 +12,8 @@ if you are root, `sudo -u <operatore> vps1777 …`). Glossary terms:
 [GLOSSARIO.md](../GLOSSARIO.md) (Italian).
 
 One option applies to every command and goes **before** the command: `--home FOLDER`, the
-root of the repo on the VPS. Without it, the CLI uses `$VPS1777_HOME` and, if that is
-missing too, `/home/vps1777/vps1777`.
+root of the repo on the VPS. Without it, the CLI uses `$VPS1777_HOME`, then
+`/home/vps1777/vps1777`, then the current folder: the first one that contains `compose.yaml`.
 
 ```bash
 vps1777 --home /srv/vps1777 status
@@ -38,20 +38,27 @@ before asking GitHub it also does the maintenance and the watches that live on i
 - **It prunes the pre-update snapshots** (`backups/pre-update/`): what stays is the latest
   of each of versions n and n-1, plus the most recent one overall — the return point of
   the running version ([BACKUP-RESTORE.md](BACKUP-RESTORE.md)).
-- **Five watches**, always, with the outcome in the log: whether the service is
+- **Eight watches**, with the outcome in the log: whether the service is
   reachable from outside (the port on the host, then the public address — the Funnel or
   `PUBLIC_BASE`; the outcome also goes into `onboarding/raggiungibilita.json`, read by
   `/admin/setup`), the backup **coverage** (distinct days; it warns if it drops below the
   maximum already reached, counted up to the 7 promised days) the **age** of the latest archive backup (it warns past 14
   days; if no archive exists yet, it stays silent), the **age** of the latest core backup
   (it warns past 2 days: a stopped nightly backup no longer prunes, so coverage alone
-  doesn't see it) and the **free space** on the backups' disk (it warns below 10%).
-  Notifications go out on the transition, once, and again when the thing recovers.
+  doesn't see it), the **free space** on the backups' disk (it warns below 10%), the
+  **outcome of the last run** of the nightly backup (the cron writes it to
+  `backups/ultimo-esito`: `0` is success; with no file it stays silent), the **off-machine
+  copy** (`backups/.ultima-copia-fuori`, left by `tools/backup-pull.sh`: it warns past 3
+  days, or if there are backups and no copy is known to have ever left) and, only with the
+  `portainer` feature declared, whether **Portainer answers** (`tools/portainer-vivo.sh`,
+  from the host: "could not look" goes to the log and arms nothing). Notifications go out on
+  the transition, once, and again when the thing recovers.
 - **It writes the state**: `onboarding/update_status.json` (the admin card and the Mini
   App read it) and `last_check` in `var/state.json`.
 - **It writes the health** (since 0.74.0): `onboarding/salute.json`, read by
   `/admin/salute`. One row per item, with a state (`ok`, `attenzione`, `guasto`,
-  `non_misurato`) and the date of the measurement: the five watches, the Google session
+  `non_misurato`) and the date of the measurement: reachability, nightly backup, archive backup, coverage and disk (the last-run
+  outcome, the off-machine copy and Portainer have no row here yet), the Google session
   (nb1777's latest probe) and each container's memory (from the cgroup: its own memory from
   `memory.stat`, the peak from `memory.peak`, OOM kills from `memory.events`, and the
   ceiling if there is one). Since 0.74.1 "attenzione" comes from its own memory above 90% of
@@ -69,7 +76,7 @@ vps1777 check --notify    # in più: messaggio Telegram all'owner se c'è una nu
 ```
 
 `--notify` sends the new release to Telegram (once per version) and the **state changes**
-of the five watches — the fall and the recovery, not the state every day. Without
+of the watches — the fall and the recovery, not the state every day. Without
 `--notify` the watches run anyway and only write to the log.
 
 ## vps1777 update
@@ -108,6 +115,10 @@ What it leaves on disk: in `.env` the tag (`VPS1777_TAG`) and one digest per ser
 `onboarding/update_journal.ndjson` **one line per step**, even for a successful update —
 that is where you read, the morning after, what the nightly auto-update did.
 
+If the previous update died after step 10, the next `vps1777 update` closes that one first
+(0 = it had completed, 1 = rolled back to the previous version, 2 = manual intervention
+needed) and installs nothing else in that run.
+
 If another update (or a rollback) is already running it exits with **75** ("try again
 later"), which the units count as success: it isn't a fault and doesn't send the failure
 alert. It exits **1** if the update fails and the auto-rollback brings back the previous
@@ -141,8 +152,11 @@ vps1777 rollback --with-data --yes
 The state of the update channel: current version, previous one, latest known release
 (`latest_known`), time of the last check, the check error if any, and the update in
 progress (`update_in_progress`: present from step 10 on, and it stays if an update dies
-after that point of no return). With `--json` there is also the release channel
-(`channel`); with `--probe` the state of each container and the deep health. It does not
+after that point of no return, until the next `vps1777 update` closes it). With `--json`
+there is also the release channel (`channel`); with `--probe` the state of each container
+and the deep health. If the automatic update has already consulted the signed channel, the
+on-screen output shows its last outcome (valid until when, or stopped and why); that line
+is not in `--json`. It does not
 show snapshots or the outcome of the last update: they live in `backups/pre-update/` and
 in `onboarding/update_journal.ndjson`.
 
@@ -309,7 +323,7 @@ are skipped. Even in dry-run it takes the archive lock, DB by DB (like `archive-
 
 ```bash
 vps1777 archive-migra                                  # anteprima su tutti i DB
-vps1777 archive-migra --db recupero-20260924 --scrivi  # applica su un DB solo
+vps1777 archive-migra --db <nome-del-db> --scrivi  # applica su un DB solo
 ```
 
 With `--telegram` (and `--db`, required) it gives `speaker` to the messages of a

@@ -2,18 +2,19 @@
 
 > **English overview.** vps1777 is a self-hosted OAuth 2.1 gateway for MCP servers.
 > Security posture in brief: only the gateway faces the network (backend on an
-> `internal:true` Docker network); non-root containers with `cap_drop: ALL` (except
-> the backup job, which runs as root with only three capabilities and the repo read-only, `H82`);
+> `internal:true` Docker network); non-root containers with `cap_drop: ALL` (exceptions:
+> the backup job, root with only three capabilities and the repo read-only, `H82`; the optional Caddy
+> proxy, root with `NET_BIND_SERVICE` only; the optional Portainer, root with the Docker socket, loopback-only);
 > secrets via Docker `secrets:` (files mounted read-only in `/run/secrets/`), never env vars; releases are
 > cosign-signed and verified **fail-closed**, images pinned by digest from the first
 > update on (a fresh install runs by tag until then, `H22`); age-encrypted
 > two-tier backups with the private key off the VPS; pre-update snapshots with
 > automatic rollback; per-IP rate limiting and proxy-only `X-Forwarded-For` trust;
-> weekly Trivy scans (actionable-only) plus a monthly image-rebuild workflow;
+> weekly Trivy scans (actionable-only) plus a monthly workflow that recounts the fixable CVEs on the published images and opens an issue;
 > among the running services, the NotebookLM Google-session volume is mounted only
 > by `nb1777-mcp` (the backup job reads it solely to encrypt it).
 > **Reporting a vulnerability**: please do **not** open a public issue. Open a private
-> GitHub Security Advisory on this repository, or write to `antigravity1777@gmail.com`
+> GitHub Security Advisory on this repository
 > (see *Reporting a Vulnerability* below) — never post exploit details publicly. The rest of this document is in Italian (the project's
 > native language — see the README's language policy): it is the full defensive
 > review of July 2026, the threat model, the third-party data flows and the known
@@ -28,8 +29,8 @@ Pre-1.0: solo l'ultima `main` riceve security fix.
 
 **Non** aprire una issue pubblica.
 
-Mandami un'email a `antigravity1777@gmail.com` (oppure apri una *GitHub Security
-Advisory* privata sul repo) con:
+Apri una *GitHub Security Advisory* privata sul repo (scheda *Security* → *Report a
+vulnerability*: la vede solo il manutentore) con:
 - Descrizione della vuln
 - Step di riproduzione (PoC se possibile)
 - Impatto stimato
@@ -43,7 +44,7 @@ Mi impegno a:
 ## Security model
 
 vps1777 espone su Internet **solo** il gateway (porta 443 via Tailscale Funnel / Caddy /
-Cloudflared) — rimisurabile con `tools/tests/test_porte_con_bind.py` (nessuna porta
+Cloudflared; col profilo Caddy è pubblicata anche la 80) — rimisurabile con `tools/tests/test_porte_con_bind.py` (nessuna porta
 pubblicata nuda nei compose) e con `tools/tests/test-onboarding-8080-bind.sh` (la
 finestra 8080 dell'onboarding, l'eccezione nota di questa riga).
 
@@ -77,7 +78,7 @@ finestra 8080 dell'onboarding, l'eccezione nota di questa riga).
 > (`0.0.0.0` = il fallback è attivo) e `ss -tlnp | grep :8080`.
 
 > **La porta del pannello di setup: dalla 0.41.0 è sul loopback su tutti e tre i profili.**
-> `compose.onboarding.yaml` pubblica il pannello su **`${ONBOARDING_BIND:-127.0.0.1}:8080`**: raggiungibile dalla macchina, non dalla rete. **Con `caddy` e `cloudflared` al pannello si arriva dal dominio HTTPS del proxy**, che è servito dal primo avvio perché la destinazione è configurata prima — `CADDY_DOMAIN` è obbligatorio in `.env` ([`compose.ingress.caddy.yaml:28`](compose.ingress.caddy.yaml), `${CADDY_DOMAIN:?…}`), e per cloudflared il tunnel è pre-creato con l'hostname che punta a `http://gateway:8080` e il token in `secrets/cloudflared_token.txt`. **In ogni caso, e per `tailscale` prima che il tunnel esista, resta la via del tunnel SSH**: `ssh -L 8080:127.0.0.1:8080 <utente>@<vps>`, poi `http://127.0.0.1:8080/admin/setup` dal proprio computer.
+> `compose.onboarding.yaml` pubblica il pannello su **`${ONBOARDING_BIND:-127.0.0.1}:8080`**: raggiungibile dalla macchina, non dalla rete. **Con `caddy` e `cloudflared` al pannello si arriva dal dominio HTTPS del proxy**, che è servito dal primo avvio perché la destinazione è configurata prima — `CADDY_DOMAIN` è obbligatorio in `.env` ([`compose.ingress.caddy.yaml`](compose.ingress.caddy.yaml), `CADDY_DOMAIN: ${CADDY_DOMAIN:?…}`), e per cloudflared il tunnel è pre-creato con l'hostname che punta a `http://gateway:8080` e il token in `secrets/cloudflared_token.txt`. **In ogni caso, e per `tailscale` prima che il tunnel esista, resta la via del tunnel SSH**: `ssh -L 8080:127.0.0.1:8080 <utente>@<vps>`, poi `http://127.0.0.1:8080/admin/setup` dal proprio computer.
 >
 > | profilo | l'overlay onboarding | la 8080, per default | chi la lega al loopback |
 > |---|---|---|---|
@@ -121,7 +122,9 @@ Threat model dichiarato:
   (`DAC_OVERRIDE` per leggere i volumi e scrivere in `backups/`, `SETUID` e `SETGID` per crond), e
   monta il repo in **sola lettura** (`.:/vps1777:ro`: legge `secrets/` e `.env` per il core, non li
   può cambiare). Restano: rootfs scrivibile e la rete di default del progetto, che esce su Internet
-  (l'`apk add`). Dopo l'host resta il container più privilegiato del sistema
+  (l'`apk add`). Fra i container accesi per default resta il più privilegiato dopo l'host; con la
+  feature opzionale `portainer` lo supera Portainer, che monta il socket Docker (equivale a root
+  sull'host) ed è pubblicato solo sul loopback (`H47`)
 - Il gateway (unico servizio esposto) non ha accesso al Docker socket né al filesystem dell'host,
   **salvo la cartella `onboarding/`** (bind-mount `:rw`): ci scrive gli intent che le path unit
   `vps1777-update.path` e `vps1777-ingest.path` portano alla CLI host, che li rivalida (`H44`);
@@ -351,8 +354,8 @@ tutti i default. Ogni voce cita la versione in cui è entrata.
   `FROM python:3.12-slim@sha256:…` e `COPY --from=ghcr.io/astral-sh/uv:0.5.18@sha256:…`
   nei cinque servizi. La base fresca non arriva più «da sola» a ogni build: arriva con la
   PR settimanale di Dependabot (ecosistema `docker`, una cartella per servizio), che si
-  guarda. Anche il rebuild mensile ricostruisce sulla base fissata, quindi le correzioni
-  delle CVE della base passano da quella PR. `uv` è fissato alla sua versione (0.5.18):
+  guarda. Il controllo mensile non ricostruisce: conta le CVE con fix e apre una issue; le
+  correzioni delle CVE della base passano da quella PR e da una release. `uv` è fissato alla sua versione (0.5.18):
   Dependabot legge solo i `FROM`, e il digest di un tag di versione non ha ragioni di
   cambiare. I plugin di esempio restano col tag, perché sono punti di partenza fuori da
   Dependabot.
@@ -430,7 +433,8 @@ stesso invariante: **il gateway non esegue nulla di privilegiato**.
   promette *non può* deve negare quando non sa.
 - **Supply-chain**: le immagini si pullano da GHCR e si verificano contro
   `images.lock` (digest immutabili) del runtime bundle di release; il bundle è
-  firmato (`cosign sign-blob` keyless) e la verifica è **obbligatoria di default**
+  legato per sha256 a `SHA256SUMS`, e `SHA256SUMS` è firmato (`cosign sign-blob` keyless, identità: il
+  workflow `release.yml` di questo repo); la verifica è **obbligatoria di default**
   (`VPS1777_REQUIRE_COSIGN=0` la disattiva solo come via d'emergenza esplicita).
   Il bundle si può ricostruire: `tools/assembla-pacchetto.sh` dà lo stesso file, byte per
   byte, dagli stessi sorgenti, dallo stesso `images.lock` e dalla stessa data (la CI lo
@@ -471,7 +475,7 @@ quei container.
 | Comandi **testuali** del bot | — | — | tolti dalla v0.86.0 (prima `/lista` e `/chiedi` facevano passare titoli e risposte da **Telegram**, che non è E2E) |
 | Ogni richiesta, solo col profilo `cloudflared` | tutto il traffico del gateway in chiaro: il path col `gateway_secret`, i token OAuth, le risposte MCP (contenuti di archivio e notebook), la Mini App | **Cloudflare** | il tunnel termina il TLS sul bordo di Cloudflare ([docs/SECRETS.md](docs/SECRETS.md)); con `caddy` il TLS termina sulla VPS, e con `tailscale` il Funnel lo inoltra cifrato fino alla VPS. Rischio accettato per costruzione (`H83`): i tre installer lo dicono al momento della scelta |
 | Mini App (`/app/*`) | — | **nessun terzo** (con `cloudflared`: Cloudflare, vedi sopra) | parla solo col tuo gateway: è la superficie più privata |
-| Avvisi operativi (accesi per default se ci sono il token del bot e `TELEGRAM_OWNER_ID`) | nuova versione disponibile (con un estratto delle note di rilascio), esito di update e rollback, servizio giù/su con la durata, copertura dei backup, disco, secret da ruotare (solo i nomi), unit systemd fallite, un comando della CLI uscito in errore (con la sua riga di comando); dal bot: sessione Google scaduta, promemoria del canonico | **Telegram** | i timer spediti passano `--notify` e gli altri avvisi non chiedono flag; il testo della CLI passa dalla redazione dei secret (`_redigi`), che toglie i valori dei secret, non ogni dato: l'esito di un update fallito porta l'uscita del comando. Senza token o owner non parte niente |
+| Avvisi operativi (accesi per default se ci sono il token del bot e `TELEGRAM_OWNER_ID`) | nuova versione disponibile (con un estratto delle note di rilascio), esito di update e rollback, servizio giù/su con la durata, copertura dei backup, esito del backup notturno (fallito o tornato riuscito), copia fuori macchina, Portainer che non risponde (solo con la feature), disco, secret da ruotare (solo i nomi), unit systemd fallite, un comando della CLI uscito in errore (con la sua riga di comando); dal bot: sessione Google scaduta, promemoria del canonico | **Telegram** | i timer spediti passano `--notify` e gli altri avvisi non chiedono flag; il testo della CLI passa dalla redazione dei secret (`_redigi`), che toglie i valori dei secret, non ogni dato: l'esito di un update fallito porta l'uscita del comando. Senza token o owner non parte niente |
 | Check versione | — | GitHub | GET pubblica, nessun dato personale |
 
 **Massima privacy** è il default dalla v0.86.0: i notebook si interrogano solo dalla Mini
@@ -553,6 +557,10 @@ anche se cambiata dall'ultima volta; e un database riservato entrava nelle ricer
 ruolo non si leggeva alla prima lettura.
 E una (`H101`, 23/11) da una seconda prova di revisione, su una copia del gateway senza guasti
 piantati: i gettoni dei link firmati finivano in chiaro nel log degli accessi.
+E due (`H102`, `H103`, 22-24/11): la prima da un'installazione su una macchina con l'uid 1000 già
+occupato, che moriva al primo avvio (rimedio provvisorio, parziale); la seconda dal catalogo dei
+requisiti: «qual è l'ultima release» non era firmato né aveva una scadenza (chiusa col canale
+firmato, 0.98.13).
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
@@ -900,7 +908,7 @@ difetto non è nel lettore.*
 
 Ora ogni voce parziale porta **una riga sola** che dice cosa resta aperto oggi, separata dal
 racconto — con un tetto di lunghezza, *perché se serve un paragrafo quello che hai scritto è
-un altro racconto e il problema torna identico*. Tutte e quattordici sono state compilate
+un altro racconto e il problema torna identico*. Tutte e quattordici (quante erano quel giorno; oggi i parziali sono 11) sono state compilate
 rileggendo la loro storia, non a memoria. ⚠️ *Limite dichiarato: questo cura le voci
 parziali. Una voce chiusa il cui titolo nomina una cosa sola di un insieme che ne ha due
 resta illeggibile allo stesso modo — ed è una forma che abbiamo già incontrato due volte.*
@@ -981,7 +989,7 @@ Onestà su cosa **non** è cifrato a riposo, perché è facile darlo per scontat
   li restituisce solo il tool `canonico(full=true)` a una sessione autenticata; nel
   backup notturno viaggiano cifrati. Cosa NON metterci è scritto
   in [docs/MEMORIA-1777.md](docs/MEMORIA-1777.md): persone terze, famiglia, il personale.
-- **I secret** (`secrets/*.txt`) sono in chiaro sul disco (mode 600), montati in
+- **I secret** (`secrets/*.txt`) sono in chiaro sul disco (mode 600; 640 al gruppo 1000 nel caso `H102`), montati in
   `/run/secrets/` (bind-mount in sola lettura, non una tmpfs). Stessa storia: la protezione è nei permessi e nel non
   finire nei log/argv/backup-non-cifrati (vedi sopra), non nella cifratura a riposo.
 - **I backup** (`.tar.age`) invece **sono** cifrati (age), con la chiave privata
@@ -1111,7 +1119,7 @@ questa fase i rilasci sono frequenti e aggiungerebbero attrito:
 
 ## Out of scope
 
-- Vulnerabilità in immagini base (Python, Tailscale, Caddy) — segnalale a monte
+- Vulnerabilità in immagini base (Python, Alpine, Caddy, cloudflared, Portainer, busybox) o nel pacchetto Tailscale dell'host — segnalale a monte
 - Misconfigurazioni del DEPLOYER (es. lasciare la VPS aperta su altre porte)
 - Account claude.ai compromessi (responsabilità Anthropic)
 - Account Google compromessi (responsabilità Google)

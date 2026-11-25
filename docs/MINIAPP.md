@@ -128,8 +128,9 @@ messaggio chiaro.
   (`owner_not_configured`) e nega tutti — fail-closed dal v0.22.0. Configuralo
   comunque sempre in produzione, o il pannello resta inaccessibile.
 - **`secrets/telegram_webapp_secret.txt`**: la chiave derivata dal token con
-  cui il gateway verifica `initData`. La scrivono `deploy.sh` (anche con
-  `--apply`, quando il pannello gli passa il token) e l'installer; la CLI
+  cui il gateway verifica `initData`. La scrivono `setup.sh` (a ogni lancio), `deploy.sh` (anche con
+  `--apply`, quando il pannello gli passa il token), l'installer e
+  `tools/rotate-secret.sh telegram_bot_token`; la CLI
   `vps1777` la ricalcola dal token prima dei suoi `compose up`, così segue
   anche una rotazione del token. Senza, `/app/auth` risponde 503
   `bot_token_not_configured`.

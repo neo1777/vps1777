@@ -34,8 +34,12 @@ che queste skill richiedono [tool]:
 - superficie d'errore **parlante** → niente più falsi negativi silenziosi: una
   skill che conclude "non c'è" ora può fidarsi (dopo il *protocollo dello zero*).
 
+> **Aggiornamento 2026-11-25:** archive-mcp ha oggi 19 tool. La ricerca per senso
+> (`search_ibrida`), `precedenti(tema)` e `temi(dal, al)` coprono parte delle lenti
+> descritte sotto; il resto è ancora da costruire.
+>
 > **Aggiornamento 2026-07-14 — c'è più corpus di quanto questo doc assuma.** I 5
-> tool restano quelli, ma la **v0.20.0** ha cambiato *cosa viene indicizzato*: il
+> tool di allora restano quelli, ma la **v0.20.0** ha cambiato *cosa viene indicizzato*: il
 > contenuto pieno, incluse le **azioni** (tool-call, allegati) — **3,03× indicizzato**
 > rispetto a prima, con schema v2 (`sender`, `tools`, `thinking`, `attachments`,
 > `parent_uuid`). Le conseguenze sono **a favore** delle skill qui sotto:
@@ -62,14 +66,13 @@ mantenuto da ciò che è rimasto in sospeso. [paper §6.4 #1]
 **Il problema che risolve.** Neo prende impegni sparsi ("appena finisco ti passo
 l'MCP", "vi mando la versione libera") in canali diversi e li perde di vista. Una
 sessione isolata non può sapere quali sono aperti. Il paper l'ha usato come primo
-uso emergente e ne ha mostrato un ciclo end-to-end: **promessa dell'MCP agli amici
-→ repo pubblicato il 24-25 giu** (mantenuta), a fronte della *"versione libera di
-marzio1777 promessa a Lorenzo il 1 giu"* che **non risulta ancora uscita** (aperta).
-[paper §6.2, §6.4]
+uso emergente e ne ha mostrato un ciclo end-to-end: una promessa fatta a un gruppo e
+**mantenuta** (il repo pubblicato tre settimane dopo), a fronte di un'altra, fatta a una
+persona del gruppo, che **non risultava ancora chiusa** (aperta). [paper §6.2, §6.4]
 
 **Come funziona (pattern abilitante).** [paper §6.4 #1]
 - Ricerca degli impegni: `"vi passo" OR "ti passo" OR "appena" OR "prometto" OR "ti mando"`
-  sul DB `stirati-coding-group` e su `claude-ai`.
+  sul DB di un gruppo Telegram e su quello di claude.ai.
 - Per ogni impegno trovato: `get_context` per leggere l'oggetto preciso, poi
   follow-up sull'oggetto per cercarne la chiusura (es. il nome del deliverable
   promesso → esiste un messaggio successivo che lo consegna?).
@@ -100,11 +103,11 @@ finiscano in un deliverable. [paper §6.4 #3]
 **Il problema che risolve.** È la contro-parte operativa della scoperta centrale
 del paper: *«un'assunzione sbagliata in meno vale più di dieci ricordi in più»*,
 perché gli errori di premessa si propagano a valle. Il paper ha **corretto 5
-assunzioni** che una sessione isolata avrebbe fatto con fiducia (es. "Neo è un
-hobbista autodidatta" → in realtà programmatore C++; "il libro è il cantiere
-attivo" → in pausa volontaria; "l'archivio è stabile a 3 DB / 37.590 msg" → è uno
-snapshot datato). [paper §5.2] Un uso embrionale è già comparso il 21 giu e il
-6 lug (fact-checking del CV). [paper §6.1]
+assunzioni** che una sessione isolata avrebbe fatto con fiducia (es. "l'archivio è
+stabile a 3 DB" → è uno snapshot datato). [paper §5.2] Alcune di quelle «correzioni» si
+sono poi rivelate a loro volta voci di terzi prese per fatti: è il caso raccontato in
+[MEMORIA-1777.md](../MEMORIA-1777.md), ed è la ragione per cui la skill deve guardare
+CHI parla prima di correggere.
 
 **Come funziona (pattern abilitante).** [inferenza dai §5, §7 del paper]
 - Prende un "ricordo" (una riga di memoria, un claim in un CLAUDE.md).
@@ -139,8 +142,8 @@ già dimostrati nel paper ma meno "prodotto-izzabili" singolarmente. [paper §6.
 | **Genealogia dei Nomi** | quando e perché nasce un nome | `<nome> AND (nome OR "la mia" OR battezz*)` cross-DB; es. l'arco di "aurora" (wake-word 2 mag → battesimo 29 mag → manifesto 2 giu) |
 | **Estrattore di Gotcha** | runbook auto-generato delle regole dure | `SEQUENZIALI OR droppano OR "verifica alla fonte"` — restituisce ciò che fu ricopiato a mano 12+ volte |
 | **Cronotopo** | ritmi di lavoro dai timestamp | `count` + `sort` sui ts (2024 pomeridiano → 2026 notturno) |
-| **Indice delle Persone** | ruoli e relazioni dai soli nomi | 3 query hanno ricostruito il gruppo Telegram (Lorenzo il tecnico, Edo l'entusiasta) |
-| **Sismografo biografico** ⚠️ | marcatori emotivi datati per l'autobiografia | *uso delicato*: la fascia personale ott 2025–mar 2026; **solo con consenso esplicito e query non invasive** |
+| **Indice delle Persone** | ruoli e relazioni dai soli nomi | 3 query hanno ricostruito i ruoli dentro un gruppo Telegram (chi è il tecnico, chi l'entusiasta) |
+| **Sismografo biografico** ⚠️ | marcatori emotivi datati per l'autobiografia | *uso delicato*: tocca materiale personale; **solo con consenso esplicito e query non invasive** |
 
 **Da decidere in sessione.** Se è **una** skill con più modalità, cinque skill
 piccole, o semplicemente una pagina di **query-pattern** nella doc di archive1777.

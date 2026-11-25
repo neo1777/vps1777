@@ -10,7 +10,8 @@
 ┌──────────────── GATEWAY (core stabile) ──────────────┐
 │  - OAuth 2.1 + DCR + PKCE                            │
 │  - /admin/*: login, logout, setup, secrets, nlm,     │
-│              audit, archive, salute, update          │
+│              audit, archive, salute, update,         │
+│              connettori, temi                        │
 │  - /scarica/<nome>, /carica/<gettone> (link firmati) │
 │  - /app/* (Mini App Telegram)                        │
 │  - Reverse proxy: /<SECRET>/<name>/<path>            │
@@ -34,6 +35,7 @@
 | `ingress` | bridge | ❌ false | **solo** il proxy d'ingresso (caddy/cloudflared) e, col suo profilo, il gateway |
 | `egress` | bridge | ❌ false | nb1777-mcp, bot — escono su Internet, **fuori** da `ingress` |
 | `funnel` | bridge senza masquerade | ❌ false | solo col profilo Tailscale: il gateway. Ingresso sì, uscita no (H50) |
+| `default` (implicita) | bridge | ❌ false | solo il container `backup` (profilo `ops.backup`): gli serve l'uscita per `apk add` a ogni avvio; nessun altro servizio ci sta |
 
 In `compose.yaml` il gateway sta **solo** su `backend` (H50): dichiarargli `ingress` gli
 dava un'uscita NAT verso qualunque host, misurata sul vivo il 26/07. La rete d'ingresso
@@ -155,7 +157,7 @@ completo: [UPDATE.md](UPDATE.md).
 
 ## Healthcheck
 
-Ogni servizio di lunga durata ha un healthcheck compose (i job `ingest` e `indice-notturno` no: partono, lavorano ed escono). Sono usati anche dal health-gate dell'update:
+Ogni servizio di lunga durata ha un healthcheck compose, con due eccezioni dichiarate: i job `ingest` e `indice-notturno` (partono, lavorano ed escono) e Portainer (profilo opt-in: l'immagine contiene solo il binario, senza shell né client HTTP; lo interroga dall'host `tools/portainer-vivo.sh`, ogni giorno da `vps1777 check`). Sono usati anche dal health-gate dell'update:
 
 | Servizio | Probe |
 |---|---|
@@ -188,7 +190,7 @@ claude.ai                     gateway                    user browser
    │       proxy → archive-mcp:8002                          │
 ```
 
-JWT typ è la chiave: `access_token` non funziona dove serve `admin_cookie` e viceversa. Vedi [SECURITY.md](../SECURITY.md).
+JWT typ è la chiave: un token `access` non funziona dove serve il cookie admin (`typ: admin`) e viceversa. Vedi [SECURITY.md](../SECURITY.md).
 
 ## Modello di sicurezza
 
@@ -207,11 +209,12 @@ registro che la CI verifica.
   dalla v0.33.0 `nb1777-mcp` e il bot hanno un'uscita dedicata sulla rete `egress`
   — vedi **Rete** sopra. Chi resta solo su `backend`, come `archive-mcp`, non può
   esfiltrare nulla: è quello il punto, e per lui vale ancora alla lettera.)*
-- OAuth 2.1 + DCR + PKCE; JWT con `typ` separati (`access` ≠ `admin_cookie` ≠ miniapp).
+- OAuth 2.1 + DCR + PKCE; JWT con `typ` separati (`access` ≠ `refresh` ≠ `admin` ≠ `miniapp` ≠ `csrf`).
 - `GATEWAY_SECRET` come path-namespace del proxy MCP.
 - Servizi dello stack non-root, `cap_drop: ALL`, `no-new-privileges`. Gli overlay
-  operativi fanno eccezione e lo dichiarano: `backup` gira senza queste opzioni
-  (`watchtower` era il secondo caso, tolto nella 0.67.0), `portainer` ha solo `no-new-privileges` (e il socket Docker: è
+  operativi fanno eccezione e lo dichiarano: `backup` resta root (lo vogliono `apk add` e crond) ma con
+  `no-new-privileges`, `cap_drop: ALL` e tre sole capability riaggiunte (`DAC_OVERRIDE`, `SETUID`,
+  `SETGID`: H82); `watchtower`, che girava senza queste opzioni, è stato tolto nella 0.67.0; `portainer` ha solo `no-new-privileges` (e il socket Docker: è
   accesso root all'host, per questo è un profilo opt-in su loopback).
 - Gateway **senza** `docker.sock`; dell'host vede solo la cartella `onboarding/`
   (bind-mount, dove passano intent e stato dell'update). Vede i
@@ -314,7 +317,7 @@ bot               ──┘   X-Vps1777-Internal (constant-time)   (unico mount)
 
 | Endpoint (solo rete `backend`) | Chi chiama | Cosa fa |
 |---|---|---|
-| `GET /internal/nlm/status` | gateway, bot | dice **se** c'è un profilo valido (`{ok, has_cookies, pending}`) — mai il contenuto |
+| `GET /internal/nlm/status` | gateway, bot | dice **se** c'è un profilo valido (`{ok, has_cookies, pending, sonda, sessione}`) — mai il contenuto |
 | `POST /internal/nlm/profile` | gateway | riceve il tar.gz, **valida**, installa (staging → swap con rollback) |
 | `GET /internal/nlm/artifacts` | gateway | l'elenco degli artefatti Studio scaricati (`nlm-artifacts`) |
 | `GET /internal/nlm/artifact?name=` | gateway | un artefatto, per `/admin/nlm/artifact/{name}` |

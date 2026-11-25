@@ -211,7 +211,7 @@ colpo d'occhio:
   se un comando non ha sezione ed esempio; i riferimenti fra documenti passano da
   un linter; le traduzioni inglesi portano l'hash del sorgente italiano e la CI
   segnala quando l'originale si muove ([docs/en/MANIFEST.json](docs/en/MANIFEST.json)).
-- **Oltre 1.800 test in sei suite**, molti dei quali *presidi strutturali* nati
+- **Oltre 2.100 test in sei suite**, molti dei quali *presidi strutturali* nati
   ciascuno da un incidente reale — il [CHANGELOG.md](CHANGELOG.md) racconta la
   storia di ogni guardia: che cosa ha morso, e come è diventata un test.
 - **Release firmate e update che sa tornare indietro**: bundle cosign fail-closed,
@@ -244,12 +244,12 @@ colpo d'occhio:
 | [CLI.md](docs/CLI.md) | La CLI `vps1777`: tutti i comandi con esempi (allineata al codice da un test) |
 | [GLOSSARIO.md](docs/GLOSSARIO.md) | Le parole di vps1777 in due righe l'una: container, release, tool MCP, canonico… |
 | [MINIAPP.md](docs/MINIAPP.md) | Mini App Telegram: la plancia mobile — auth initData, endpoint, sicurezza |
-| [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) | Backup/restore volumi age-encrypted |
+| [BACKUP-RESTORE.md](docs/BACKUP-RESTORE.md) | Backup/restore volumi age-encrypted, due livelli |
 | [COLLAUDO-VERGINE.md](docs/COLLAUDO-VERGINE.md) | Il test definitivo su VPS formattata: install, verifiche mirate per cura, quadratura |
 | [ONBOARDING.md](docs/ONBOARDING.md) | Setup post-deploy dal pannello web |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Quando qualcosa va storto |
 
-> In inglese ([docs/en/](docs/en/)): ARCHITECTURE, INSTALL, UPDATE, BACKUP-RESTORE, CLI, MEMORIA-1777, ARCHIVE, RICERCA-IBRIDA — freschezza garantita da `tools/tests/test_traduzioni_fresche.py`.
+> In inglese ([docs/en/](docs/en/)): ARCHITECTURE, INSTALL, UPDATE, BACKUP-RESTORE, CLI, MEMORIA-1777, ARCHIVE, RICERCA-IBRIDA, PRIMI-15-MINUTI — freschezza garantita da `tools/tests/test_traduzioni_fresche.py`.
 
 ## Sviluppo locale
 

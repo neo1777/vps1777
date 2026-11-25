@@ -55,7 +55,7 @@ FTS5 evidenzia il termine cercato con `«»` (dalla 0.62.2 la redazione guarda i
 se i marcatori non ci fossero: una ricerca `ghp*` restituiva `«ghp»_<resto>` in chiaro). Ed
 è una **finestra** che comincia e finisce dove capita, anche a metà di un segreto, segnata
 da `…`; il ramo vettoriale di `search_ibrida` taglia il testo a 400 caratteri. Per questo,
-dalla 0.62.3, si maschera anche un segreto **tagliato dal bordo**: un prefisso noto seguito
+dalla 0.63.0, si maschera anche un segreto **tagliato dal bordo**: un prefisso noto seguito
 da almeno 8 caratteri in fondo al testo, una corsa di almeno 20 caratteri con maiuscole,
 minuscole e cifre subito dopo il `…` iniziale, un blocco di chiave privata di cui si vede
 solo l'inizio o solo la fine. I valori dell'anagrafica si cercano senza badare alle
@@ -416,7 +416,7 @@ dice il perché.
 | `bundle-recupero` | `recupero-tsv-fuori-contratto` | un `.tsv` la cui intestazione non ha una colonna del contratto (il file intero non entra: niente tabelle riempite a metà), oppure una sua riga con un numero di campi sbagliato o con la chiave vuota (salta solo quella riga, col numero di riga) |
 | `bundle-workfiles` | `non-testo`, `pdf-*`, `ocr-*`, `zip-*`, `membro-oltre-tetto`, … | un file di lavoro che non ha testo da leggere, o che l'OCR / l'apertura non ha potuto leggere |
 | `bundle-documents` | gli stessi di `bundle-workfiles` | lo stesso, per un membro di `documents/` |
-| `claude-code` | `non-message`, `no-uuid-o-ts`, `empty` | un record di una sessione che non è un messaggio, non ha uuid o ts, o è vuoto |
+| `claude-code` | `non-message`, `no-uuid-o-ts`, `empty`, `non-dict`, `righe-non-json` | un record di una sessione che non è un messaggio, non ha uuid o ts, è vuoto, non è un oggetto JSON; oppure righe del file che non si leggono come JSON (una lapide sola, col loro numero) |
 
 ```sql
 -- che cosa non è entrato da questo DB, per motivo
@@ -454,15 +454,15 @@ nuovo il permesso sui tool.
 | Tool | Cosa fa |
 |---|---|
 | `search(query, db_name, limit, …)` | ricerca FTS5; ritorna `{db, uuid, project, ts, rank, snippet, speaker, voice, snapshot}` (`speaker` e `voice` dalla 0.80.0: chi ha scritto la riga e di chi è la voce, vedi sotto). Sulla ricerca in **tutti** i DB lo stesso uuid arriva **una volta**, con `anche_in` per gli altri archivi che lo contengono (niente limit sprecato in fotocopie). Filtri `since`/`until`, `project`, `speaker`, `voice`, `campi` (sotto). `limit` va da 1 a 200: sotto 1 è un errore che lo dice (prima `-1` perdeva in silenzio l'ultimo risultato), sopra 200 si taglia |
-| `search_ibrida(query, db_name, limit, query_fts, …)` | ricerca **per senso**: FTS5 + vettori fusi (RRF). Serve quando ricordi il senso e non il lessico; richiede il modello di embedding e un indice `<db>.vec.db` sul volume, e se mancano **lo dice** invece di ricadere su FTS5. Accetta `campi` e, dalla 0.62.1, `speaker` come `search` (il filtro vale per tutte e due le liste). Dalla 0.64.0 accetta fino a 3 `riformulazioni`, fuse nella stessa top-k. Dalla 0.65.0 lo snippet è di 64 token e `passaggio` (fino a 400 parole) dà il punto del testo intero dove la domanda è più fitta. Vedi [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
+| `search_ibrida(query, db_name, limit, query_fts, …)` | ricerca **per senso**: FTS5 + vettori fusi (RRF). Serve quando ricordi il senso e non il lessico; richiede il modello di embedding e un indice `<db>.vec.db` sul volume, e se mancano **lo dice** invece di ricadere su FTS5. Accetta `campi` e, dalla 0.62.1, `speaker` come `search` (il filtro vale per tutte e due le liste). Dalla 0.64.0 accetta fino a 3 `riformulazioni`, fuse nella stessa top-k. Dalla 0.65.0 lo snippet è di 64 token; dalla 0.90.0 al suo posto arriva di default `passaggio` (120 parole, fino a 400; `0` = lo snippet corto), il punto del testo intero dove la domanda è più fitta. Vedi [RICERCA-IBRIDA.md](RICERCA-IBRIDA.md) |
 | `count(query, db_name, …)` | quanti messaggi corrispondono (non limitato): `{total, per_db}`; se un termine **collassa** aggiunge `warnings`. Stessi filtri di `search`, `campi` compreso |
-| `check_term(term, db_name)` | diagnostica se un termine con un carattere non alfanumerico in testa o in coda (`C++`, `C#`, `g++`, `.NET`) è ricercabile o **collassa** su un token più corto — chiede all'indice, non alla doc |
+| `check_term(term, db_name, ruoli)` | diagnostica se un termine con un carattere non alfanumerico in testa o in coda (`C++`, `C#`, `g++`, `.NET`) è ricercabile o **collassa** su un token più corto — chiede all'indice, non alla doc |
 | `get_context(uuid, db_name, before, after, max_chars)` | i messaggi **attorno** a un risultato, col **contenuto pieno**; sulle sessioni Claude Code i vicini vengono dal **file di sessione** (la riga cercata lo dice in `vicini_da`); altrove, se il messaggio è in un thread, dallo **stesso thread** (arco `parent_uuid`), non dalla sola vicinanza temporale. `max_chars` (0 = intero) tronca ogni riga **dichiarandolo nel testo** — sui messaggi-hub giganti il payload pieno uccideva la connessione. Una riga **senza testo** (un tool_use, l'output di un comando) porta anche **`tools`**, le azioni che sono il suo contenuto (dalla 0.52.0: prima arrivava vuota), troncato da `max_chars` come il testo |
 | `get_conversation(uuid, db_name, limit, max_chars)` | il **thread intero** che contiene l'uuid (albero `parent_uuid`, antenati + discendenti, in ordine `(ts, uuid)`) — per **leggere una chat** dall'inizio alla fine, non solo la finestra ±N; `max_chars` e `tools` come in `get_context`. Sulle sessioni Claude Code è il **file di sessione** intero (`conversazione_da`), e coi bundle con `recupero/` la scheda della sessione esce **in coda**. Oltre `limit` righe (200) torna una finestra che contiene sempre l'uuid chiesto e la scheda, dichiarata nel campo `finestra` della riga del match |
 | `get_many(uuids, db_name, max_chars)` | dalla 0.80.0: le righe **intere** di più messaggi (fino a 50) in **una** chiamata, nell'ordine chiesto, con `speaker`, `voice` e `tools`; `mancanti` dice gli uuid che nessun DB ha. Dopo una ricerca sostituisce un `get_context` per ogni risultato. `max_chars` vale 4000 di default (0 = intere). Come `get_context` guarda in ogni DB, prima i primari; lo stesso uuid in più DB torna una volta, con `anche_in` |
 | `precedenti(tema, giorni, limit, …)` | dalla 0.80.0: **«l'hai già detto?»** (#281). Cosa ha scritto il **proprietario** su un tema fino a `giorni` fa (default 7; 0 = fino a oggi): è `search_ibrida` con `speaker='human'`, raggruppata per `project` (`gruppi`: `{project, db, n, primo_ts, ultimo_ts, righe}`). Vedi sotto |
 | `temi(dal, al, limit)` | dalla 0.94.0: **«di cosa si è parlato?»** quando non sai cosa cercare. La mappa degli argomenti: parole tipiche, quanti scambi, mesi, fonti ed esempi da leggere con `get_many`. Dice su quali DB è calcolata (`perimetro`) e quanti temi sono nascosti (`nascosti`). Vedi sotto. |
-| `delta(vecchio, nuovo, limit, project)` | dalla 0.84.0: **cosa è cambiato fra due fotografie** dello stesso account (due export claude.ai), per uuid: righe **sparite** (chat cancellate), **nuove** e **cambiate** (stesso uuid, testo diverso), contate per `project`, con gli esempi più recenti di ciascun tipo. `uuid_condivisi` dice quanti uuid i due DB hanno in comune: se è bassa gli uuid non sono stabili fra le due fonti (mvp-100626, workfile) e il delta non vale. Budget di 40 s: oltre torna `parziale`; `project` restringe. Misurato l'11/10 sui canarini del 07/09: fra 080726 e 290826 (8,8 s) `project:bot1777` ha 2 righe sparite e `project:How to use Claude` 3; fra mvp-100626 e 290826 gli uuid condivisi sono lo 0% e la nota lo dice |
+| `delta(vecchio, nuovo, limit, project)` | dalla 0.84.0: **cosa è cambiato fra due fotografie** dello stesso account (due export claude.ai), per uuid: righe **sparite** (chat cancellate), **nuove** e **cambiate** (stesso uuid, testo diverso), contate per `project`, con gli esempi più recenti di ciascun tipo. `uuid_condivisi` dice quanti uuid i due DB hanno in comune: se è bassa gli uuid non sono stabili fra le due fonti (un export fatto con un altro strumento, i workfile) e il delta non vale. Budget di 40 s: oltre torna `parziale`; `project` restringe. Misurato l'11/10 sui canarini del 07/09: fra due export a sette settimane di distanza (8,8 s) un progetto ha 2 righe sparite e un altro 3; fra un export fatto con un altro strumento e l'ultimo gli uuid condivisi sono lo 0% e la nota lo dice |
 | `get_session(sessionId, db_name, limit, max_chars)` | tutto ciò che l'archivio sa di **una sessione** Claude Code: la riga di `sessioni`, la **scheda**, i messaggi della conversazione, gli archi, la stirpe — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `get_stirpe(sessionId, db_name, limit, max_chars)` | la **stirpe** di una sessione: la chiusura sugli archi con `chiusura=1`, coi dati di ogni membro — vedi [Sessioni e stirpi](#sessioni-e-stirpi--get_session-e-get_stirpe) |
 | `list_projects(db_name, top)` | le etichette `project` con i conteggi — per **navigare** l'archivio, non solo cercarlo |
@@ -613,7 +613,7 @@ modello legge prima di cercare):
   separano: `1777` non trova `N1777`).
 - Termini con caratteri speciali (`- . / @ : # '`) **tra virgolette**:
   `"flutter-elinux"`, `"0.7.9"`. In modalità *smart* (default) il server li quota
-  da sé, compresi i due punti (`errore:grave`, un URL): dalla 0.62.3 `parola:` resta
+  da sé, compresi i due punti (`errore:grave`, un URL): dalla 0.63.0 `parola:` resta
   un filtro di colonna solo se la parola è una colonna vera (`project:`, `content:`,
   `ts:`, `uuid:`, `tools:`, `attachments:`); con `raw=true` la query passa intatta (per NEAR/parentesi complesse).
   **Ma il quoting non basta per il suffisso** — vedi il riquadro sotto.
@@ -765,7 +765,9 @@ in cui è stata **cercata**, quelli con la tabella **vuota** (nessun bundle con
    `scheda` (ultime parole, fili aperti, commit).
 3. **Leggerla.** `get_conversation(sessione.last_uuid)` — la chat intera, con la
    scheda in coda. Se la chat supera `limit` (200) torna la finestra attorno a
-   `last_uuid`, cioè la fine, e il campo `finestra` lo dice: per l'intera, alza `limit`.
+   `last_uuid`, cioè la fine, e il campo `finestra` lo dice: per l'intera, alza `limit`
+   (fino a 2000 righe: oltre, un valore più alto si riporta al tetto senza errore, e la chat
+   si legge a finestre).
 4. **Ricostruire la famiglia.** `get_stirpe(...)`: i membri in ordine, e per
    ciascuno di nuovo `get_session`.
 5. **Le stirpi dal testo.** `search('"0f1e2d3c"', project="recupero:stirpi")`
@@ -922,7 +924,7 @@ la riga, preso dalla fonte (`human` · `assistant` · `tool` · `system` · `oth
 `unknown`). `unknown` è tutto ciò che non dichiara un mittente noto: allegati, titoli,
 memorie e schede, documenti, log dei server MCP.
 
-Nei **gruppi Telegram** il nome del mittente sta nel testo (`[Nome] …`). Dalla 0.62.3 il
+Nei **gruppi Telegram** il nome del mittente sta nel testo (`[Nome] …`). Dalla 0.63.0 il
 proprietario dell'archivio è `human`, come negli altri archivi, e gli altri membri
 `other`, ma solo se l'installazione dichiara chi è il proprietario: `TELEGRAM_OWNER_ID`
 (lo stesso della Mini App) basta per l'export JSON, che porta l'id del mittente; per
@@ -934,7 +936,7 @@ metterebbe il proprietario fra gli altri. Un DB Telegram caricato prima si siste
 testa al testo, e va lanciato solo sui DB che sono export Telegram. `system`
 viene dal campo del record (`origin`, `isMeta`) quando c'è; sulle versioni che non lo
 scrivevano lo decide la forma del testo, ed è una stima.
-Un valore di `speaker` o di `voice` che non esiste è un **errore** (dalla 0.62.3), come
+Un valore di `speaker` o di `voice` che non esiste è un **errore** (dalla 0.63.0), come
 per `campi`: prima rispondeva 0 righe, e «speaker='neo'» si leggeva «non l'ha mai detto».
 `voice` è **di chi è la voce** nel contenuto, una stima euristica (`own` ·
 `pasted_transcript` · `pasted_ai` · `character` · `mixed` · `unknown`), con la sua

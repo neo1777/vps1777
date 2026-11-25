@@ -83,7 +83,7 @@ versioni** (letta dal sidecar `.meta`), più **2 archivio**, tutti cifrati `age`
 `vps1777 check` (il timer giornaliero) avvisa se l'ultimo archivio ha più di 14 giorni;
 finché non esiste nessun backup archivio, quell'avviso non parte. Avvisa anche se l'ultimo
 core ha più di 2 giorni: un backup che si ferma non pota più le copie vecchie, quindi la
-copertura resta piena e da sola non lo direbbe. E avvisa il giorno dopo un giro **fallito**: il
+copertura resta piena e da sola non lo direbbe. E avvisa al primo check giornaliero dopo un giro **fallito** (entro un giorno): il
 cron scrive l'esito di `backup.sh` in `backups/ultimo-esito` (`0` = riuscito), e il check lo legge
 (una notifica per giro fallito, una quando torna a riuscire). Il log del notturno sta in
 `backups/backup.log` (le ultime 5000 righe), e sopravvive agli update che ricreano il container.
@@ -162,7 +162,7 @@ Step:
 3. Ripristina volumi + secrets + **configurazione** (il core: sovrascrive anche `.env`,
    `compose*.yaml` e `ingress/` con quelli del backup) o i volumi dell'archivio
 4. **Non riavvia lo stack**: stampa il comando da lanciare, con gli `-f` dell'ingress
-   letti da `INGRESS_PROFILE` nel `.env` ripristinato e, dalla 0.62.3, quelli delle
+   letti da `INGRESS_PROFILE` nel `.env` ripristinato e, dalla 0.63.0, quelli delle
    feature dichiarate in `VPS1777_FEATURES` (il backup notturno compreso: prima restava
    fuori, e il container `backup` restava spento fino al prossimo update).
    `./tools/restore.sh --comando-riavvio` lo stampa senza fare il restore. Col profilo e

@@ -89,7 +89,7 @@ of the last 3 versions** (read from the `.meta` sidecar), plus **2 archives**, a
 more than 14 days old; as long as no archive backup exists at all, that warning doesn't
 fire. It also warns if the latest core is more than 2 days old: a backup that stops no
 longer prunes the old copies, so coverage stays full and on its own wouldn't say so. And it
-warns the day after a **failed** run: the cron writes the exit code of `backup.sh` to
+warns at the first daily check after a **failed** run (within a day): the cron writes the exit code of `backup.sh` to
 `backups/ultimo-esito` (`0` = success), and the check reads it (one notification per failed
 run, one when it succeeds again). The nightly log lives in `backups/backup.log` (the last 5000
 lines), and survives the updates that recreate the container.
@@ -171,7 +171,7 @@ Steps:
 3. Restores volumes + secrets + **configuration** (the core: it also overwrites `.env`,
    `compose*.yaml` and `ingress/` with the ones from the backup) or the archive volumes
 4. **It does not restart the stack**: it prints the command to run, with the ingress
-   `-f` read from `INGRESS_PROFILE` in the restored `.env` and, since 0.62.3, those of
+   `-f` read from `INGRESS_PROFILE` in the restored `.env` and, since 0.63.0, those of
    the features declared in `VPS1777_FEATURES` (the nightly backup included: it used to
    be left out, and the `backup` container stayed off until the next update).
    `./tools/restore.sh --comando-riavvio` prints it without doing the restore. With the

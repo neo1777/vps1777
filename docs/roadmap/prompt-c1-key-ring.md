@@ -1,5 +1,13 @@
 # Prompt di onboarding — C1: Key-ring con grace window
 
+> **Riletto il 2026-11-25 (v0.98.18): il lavoro è ancora da fare** (nel codice non c'è
+> nessun `kid` né anello), ma quattro fatti della foto sotto sono invecchiati. La rete
+> interna si chiama `backend`, non `internal`, e fra gli upstream c'è anche `ocr`.
+> `jwt_helpers` oggi ha prove sue in `services/gateway/tests_runtime/` (con PyJWT vero) e
+> pretende un segreto di firma di almeno 32 byte. Il comando della CLI è
+> `vps1777 secrets-status` (`secrets-check` è il nome del timer). archive-mcp espone 19
+> tool, non 2. I numeri di riga citati nel §3 si sono spostati: cerca per nome.
+
 > **Come usare questo file.** È il prompt per aprire una **sessione dedicata**
 > (Claude Code, sul repo `vps1777`) che progetta e costruisce il key-ring. Copia
 > il blocco sotto la riga come primo messaggio. È scritto per reggere il tempo:
@@ -54,7 +62,7 @@ proxy MCP + pannello `/admin/*` + Mini App Telegram `/app/*`. Dietro, sulla rete
 (NotebookLM), `nb1777-bot` (Telegram). Aggiornamento a immagini GHCR via
 `vps1777 update` (CLI host + pulsante admin, pattern collect→apply, auto-rollback).
 
-Repo: `~/Scrivania/vps1777` (git). Rilascio: **branch → PR → CI (lint +
+Repo: `vps1777` (git). Rilascio: **branch → PR → CI (lint +
 contract + build di ogni immagine) → squash-merge → tag `vX.Y.Z` → release workflow
 (le immagini della matrice di `release.yml` + bundle su GHCR) → `vps1777 update` sul VPS → E2E live**. Versione attuale: leggi
 `VERSION`.

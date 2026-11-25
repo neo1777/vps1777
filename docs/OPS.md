@@ -160,6 +160,12 @@ container, stack, log e volumi.
   cui **non si espone mai a internet**. Il gateway pubblico resta senza socket;
   Portainer è un tool admin separato e locale. Sta su rete `backend` (internal,
   nessun egress).
+- **Sorvegliato dall'host**: l'immagine contiene solo il binario, quindi non ha con che farsi
+  un healthcheck. Con la feature `portainer` dichiarata, `vps1777 check` (il timer
+  giornaliero) lancia `tools/portainer-vivo.sh`, che interroga
+  `https://127.0.0.1:9443/api/system/status`: se non risponde lo scrive nel log e manda una
+  notifica Telegram, e un'altra quando torna. A mano: `bash tools/portainer-vivo.sh` (esce 0
+  se risponde, 1 se non risponde, 2 se non ha potuto guardare).
 
 ### Watchtower — **rimosso nella 0.67.0**
 

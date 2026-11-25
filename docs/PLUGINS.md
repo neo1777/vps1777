@@ -16,7 +16,9 @@ Apri `app/__main__.py`, modifica i tool. Lo scheletro è FastMCP streamable-http
 
 ### Step 2: compose
 
-Crea `plugins/mio-mcp/compose.mio-mcp.yaml`:
+Rinomina `compose.example-mcp.yaml` (già copiato) in `plugins/mio-mcp/compose.mio-mcp.yaml` e
+cambia nome del servizio, `context`, `image` e porta. Tieni i tetti e il blocco `logging`: senza,
+il servizio scrive log fino a riempire il disco.
 
 ```yaml
 services:
@@ -35,6 +37,12 @@ services:
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
+    pids_limit: 128
+    cpus: 0.5
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }
     healthcheck:
       test: ["CMD", "python", "-c", "import socket,sys; s=socket.create_connection(('127.0.0.1',8010),timeout=3); s.close()"]
       interval: 30s
@@ -126,6 +134,12 @@ non si esce. Mettilo anche sulla rete `egress`, come `nb1777-bot` in `compose.ya
 `backend` il container parte ma il long-poll non raggiunge mai Telegram.
 
 Token in `secrets/mio-bot-token.txt`, montato come `secrets: [mio_bot_token]` nel compose plugin.
+
+Dall'esempio tieni anche due cose. `OWNER_ID` (nel `.env`: `EXAMPLE_BOT_OWNER_ID`, da rinominare):
+il bot risponde solo a quell'id Telegram, e con 0 o vuoto non risponde a nessuno. E
+l'`healthcheck`: il bot tocca un file ogni 30 secondi (`/tmp/example-bot.heartbeat`, o
+`BOT_HEARTBEAT_FILE`) e il compose ne guarda l'età; se cambi il nome del file, cambialo in tutti
+e due i posti.
 
 ## Auto-discovery (futuro)
 

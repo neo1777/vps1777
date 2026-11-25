@@ -5,6 +5,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **Tutti i documenti riletti contro il codice** (63 file, una riga alla volta): una settantina di affermazioni
+  che non tornavano più. Le più pesanti: il timer dell'aggiornamento automatico era detto «settimanale» ed è
+  giornaliero; il check giornaliero fa otto sorveglianze e i documenti ne contavano cinque; ingest e giro
+  notturno dell'indice erano detti «non coordinati» mentre si mettono in fila col lucchetto dell'archivio; un
+  update interrotto si chiude da solo al lancio successivo e nessuna pagina lo diceva; la versione di `nlm` da
+  installare sul PC era ferma alla 0.16.1 (anche nella pagina `/admin/nlm`: ora 0.16.5, quella del server); una
+  «0.62.3» mai esistita era citata in sei pagine (è la 0.63.0); `example-bot` non diceva che senza
+  `EXAMPLE_BOT_OWNER_ID` non risponde a nessuno; SECURITY.md chiamava «rebuild» un controllo mensile che non
+  ricostruisce e non contava `H102` e `H103` nella provenienza. Da una pagina di roadmap sono usciti nomi di
+  persone e dettagli personali; dalle altre i percorsi di una macchina di sviluppo.
+- **Il contatto per le segnalazioni di sicurezza è solo la segnalazione privata di GitHub** (attiva sul repo):
+  dai documenti esce l'indirizzo email personale del manutentore. ARCHIVE e RICERCA-IBRIDA non nominano più i
+  DB veri di un'installazione né il modello di un PC: le misure restano, con la loro data.
 - **L'installatore non resta appeso né mente quando un comando remoto va storto** (tre difetti vecchi di
   `_stream`, visti da Sagoma rileggendo lo spezzamento). Al tetto di tempo diceva «l'ho fermato» di un processo
   che sulla VPS poteva essere ancora vivo: ora dice che ha smesso di aspettarlo e che cosa guardare. La consegna
