@@ -71,10 +71,19 @@ dipendenze() {
 # shellcheck disable=SC2329
 segreti() {
   dice "── trufflehog (solo credenziali verificate o non verificabili)"
-  local out rc modo=(filesystem /src)
+  local out rc comune modo=(filesystem /src) monta=()
   # Con la storia git a disposizione si legge anche quella: un segreto tolto da un commit resta nei precedenti.
-  [ -d "$DIR/.git" ] && modo=(git file:///src)
-  out="$(timeout "$TETTO" docker run --rm -v "$DIR:/src:ro" "$TRUFFLEHOG" "${modo[@]}" --no-update --results=verified,unknown --fail 2>&1)"; rc=$?
+  if [ -d "$DIR/.git" ]; then
+    modo=(git file:///src)
+  elif [ -f "$DIR/.git" ] && comune="$(git -C "$DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"; then
+    # Un worktree (25/11/2026): `.git` è un FILE che punta alla cartella git comune, fuori da /src.
+    # Prima si ripiegava sul filesystem, che legge anche le .venv non tracciate e dava un rosso falso
+    # (gli URI d'esempio di pydantic). Si monta anche la cartella comune, allo STESSO percorso,
+    # e si legge la storia come nel repo principale (misurato: stessi blocchi, stessi byte).
+    modo=(git file:///src)
+    monta=(-v "$comune:$comune:ro")
+  fi
+  out="$(timeout "$TETTO" docker run --rm -v "$DIR:/src:ro" "${monta[@]}" "$TRUFFLEHOG" "${modo[@]}" --no-update --results=verified,unknown --fail 2>&1)"; rc=$?
   # Mai il valore nel log: solo le righe di riepilogo (questo output va in un log pubblico).
   grep -E '"msg":"finished scanning"|Detector Type|File:|Commit:' <<<"$out" | tail -n 40
   case "$rc" in

@@ -10,6 +10,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `<<<<<<< ` o `>>>>>>> `, o se è tracciato un `.rej` o un `.orig`. Prima lo cercava solo l'hook di
   pre-commit, che si attiva a mano e non vede una PR aperta da un'altra macchina. Visto da Sagoma.
 
+- **I marcatori di conflitto si cercano anche in CI.** `tools/marcatori-di-conflitto.py` (con la sua
+  autoprova, nel job lint e in `tools/check.sh`) fallisce se un file tracciato ha una riga che comincia con
+  `<<<<<<< ` o `>>>>>>> `, o se è tracciato un `.rej` o un `.orig`. Prima lo cercava solo l'hook di
+  pre-commit, che si attiva a mano e non vede una PR aperta da un'altra macchina. Visto da Sagoma.
+- **I tipi si controllano (QUA-03, in semina).** `tools/tipi.py` lancia mypy (pinnato, con `uvx`) su servizi,
+  plugin, `tools/`, `security/` e `installer/`, e lo confronta col censimento `tools/tipi.json`: oggi 153
+  errori di tipo in 22 file. Nessun file nuovo con errori, nessun file censito che ne abbia di più; fino al
+  30/04/2027, poi ogni riga rimasta diventa rossa. Nel job lint della CI e in `tools/check.sh`, con la sua
+  autoprova. Prima nessun type checker girava, e `applicabilita.yml` dichiarava la riga «non applicabile»
+  come se valesse solo per TypeScript. Visto da Sagoma.
+
 ### Corretto
 - **Le rotte interne dell'archivio rispondono 404 anche a un header non ASCII.** Il confronto del segreto
   sulle stringhe sollevava un errore se l'header conteneva, per esempio, una «è»: il chiamante riceveva
@@ -35,6 +46,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - ruff accende B904: un `raise` dentro un `except` dice da dove viene (`from err` o `from None`).
 - La ricerca ibrida cita la fonte della sua fusione (Reciprocal Rank Fusion, SIGIR 2009) e dice in che
   cosa se ne discosta; CONTRIBUTING elenca il prefisso `refactor:`.
+- `tools/scanner.sh segreti` in un worktree di git legge la storia come nel repo principale: prima ripiegava
+  sulla lettura del disco, che entra anche nelle `.venv` non tracciate, e dava un rosso falso.
 - **La semina degli script di `tools/` nel ledger delle feature finisce il 31/01/2027.** Dal 02/08 gli script
   non dichiarati davano solo avvisi, senza una data: dal 01/02/2027 saranno errori (la data è la stessa del
   censimento della complessità). `verify-features.py --oggi AAAA-MM-GG` legge scadenze e semine a una data
