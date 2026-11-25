@@ -48,6 +48,12 @@ jobs:
           # fine. Esce 2 se non ha potuto misurare: non è un verde.
           python3 tools/complessita.py --autoprova
           python3 tools/complessita.py
+      - name: Tipi — nessun errore di tipo nuovo, nessun file censito che cresce (QUA-03, in semina)
+        run: |
+          # mypy (pinnato dentro lo strumento, lanciato con uvx) contro il censimento tools/tipi.json,
+          # fino al 30/04/2027 (scelta 2026-11-25-soglia-qua03-tipi). Esce 2 se non ha misurato.
+          python3 tools/tipi.py --autoprova
+          python3 tools/tipi.py
       - name: ShellCheck bash
         run: |
           # PINNATO PER DIGEST, come le immagini e le action di questo repo — e per

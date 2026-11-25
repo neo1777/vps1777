@@ -27,7 +27,7 @@ The `compose.build.yaml` overlay exists because `compose.yaml` is pull-only
 
 ## Code style
 
-- Python: `ruff` (version pinned in CI, currently `ruff==0.15.22`; `ruff check services/ tools/ security/ installer/ plugins/`). No `mypy`: no type checking runs anywhere, neither in CI nor in the hooks
+- Python: `ruff` (version pinned in CI, currently `ruff==0.15.22`; `ruff check services/ tools/ security/ installer/ plugins/`). Types: `python3 tools/tipi.py` (mypy, pinned inside the tool) against the census `tools/tipi.json`: no type error in a new file, no counted file with more of them. It is a seeding phase until 30/04/2027 (QUA-03); when you fix errors in a file, lower its number in the census
 - Complexity: no new function above 10 (rule C901) and none of the already listed ones may grow: `python3 tools/complessita.py`. The census is `tools/complessita.json`; a row goes away when the function is split, or becomes a waiver with a written reason, reviewed by someone who did not write the code
 - Bash: `shellcheck` (clean, minimum severity threshold as in CI)
 - Yaml: 2-space indent, no `version:` key in compose files (deprecated)

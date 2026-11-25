@@ -24,7 +24,7 @@ L'overlay `compose.build.yaml` serve perché `compose.yaml` è pull-only
 
 ## Stile codice
 
-- Python: `ruff` (versione pinnata nella CI, oggi `ruff==0.15.22`; `ruff check services/ tools/ security/ installer/ plugins/`). Niente `mypy`: nessun controllo di tipi gira, né in CI né negli hook
+- Python: `ruff` (versione pinnata nella CI, oggi `ruff==0.15.22`; `ruff check services/ tools/ security/ installer/ plugins/`). I tipi: `python3 tools/tipi.py` (mypy, pinnato dentro lo strumento) contro il censimento `tools/tipi.json`: nessun errore di tipo in un file nuovo, nessun file censito che ne abbia di più. È una semina fino al 30/04/2027 (QUA-03); quando correggi errori in un file, abbassa il suo numero nel censimento
 - Complessità: nessuna funzione nuova oltre 10 (regola C901) e nessuna di quelle già censite che cresce: `python3 tools/complessita.py`. Il censimento è `tools/complessita.json`; una riga si toglie spezzando la funzione, oppure diventa una deroga col motivo scritto e riletto da chi non ha scritto il codice
 - Bash: `shellcheck` (pulito, soglia al minimo come in CI)
 - Yaml: 2 spazi indent, no `version:` in compose (deprecato)

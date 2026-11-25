@@ -120,11 +120,8 @@ componenti:
       container: sì
       mcp.server: sì              # plugins/example-mcp/app/__main__.py
 
-righe:
-  QUA-03:
-    stato: n.a. per superficie
-    superficie: typescript
-    perche: "niente TypeScript nel repo"
+# Le righe dichiarate fuori dal perimetro, col perché. Oggi nessuna: QUA-03 è uscita il 25/11 (vedi prove:).
+righe: {}
 
 # Le prove (dal 22/11/2026): i comandi del repo che i controlli dello standard lanciano, riga per riga.
 # Senza la voce, la riga esce NON MISURATO, mai verde.
@@ -132,6 +129,11 @@ prove:
   QUA-04:
     censimento: tools/complessita.json
     comando: "python3 tools/complessita.py"     # 0 pulito, 1 rosso, 2 non ha guardato
+  # QUA-03 (25/11/2026): era «n.a. per typescript», ma la riga vale anche per il Python (rilievo di
+  # Sagoma). Scelta 2026-11-25-soglia-qua03-tipi: mypy in semina come QUA-04, fine il 30/04/2027.
+  QUA-03:
+    censimento: tools/tipi.json
+    comando: "python3 tools/tipi.py"            # 0 pulito, 1 rosso, 2 non ha guardato
   VER-08:
     scanner:
       - {classe: contenitori, comando: "bash tools/scanner.sh contenitori {cartella}"}

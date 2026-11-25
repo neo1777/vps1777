@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Aggiunto
+- **I tipi si controllano (QUA-03, in semina).** `tools/tipi.py` lancia mypy (pinnato, con `uvx`) su servizi,
+  plugin, `tools/`, `security/` e `installer/`, e lo confronta col censimento `tools/tipi.json`: oggi 153
+  errori di tipo in 22 file. Nessun file nuovo con errori, nessun file censito che ne abbia di più; fino al
+  30/04/2027, poi ogni riga rimasta diventa rossa. Nel job lint della CI e in `tools/check.sh`, con la sua
+  autoprova. Prima nessun type checker girava, e `applicabilita.yml` dichiarava la riga «non applicabile»
+  come se valesse solo per TypeScript. Visto da Sagoma.
+
 ### Corretto
 - **Le rotte interne dell'archivio rispondono 404 anche a un header non ASCII.** Il confronto del segreto
   sulle stringhe sollevava un errore se l'header conteneva, per esempio, una «è»: il chiamante riceveva
