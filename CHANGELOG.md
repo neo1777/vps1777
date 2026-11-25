@@ -19,6 +19,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   passi con un nome: pacchetto, controlli di partenza, cartelle di lavoro, paracadute dei compose, base delle
   immagini, ripristino, migrazioni di partenza. Complessità da 20 a sotto 10 (QUA-04, restano 40 funzioni).
   Comportamento identico su 3.000 casi confrontati col codice di prima; nessuna prova la chiamava, ora sono 24.
+- `cmd_archive_ingest` (indicizzare un file nell'archivio, diretto o passando da NotebookLM) è spezzata in sette
+  passi: sorgente, nome del DB, percorso diretto, trascrizione, errore della trascrizione, lettura del testo,
+  resoconto. Complessità da 18 a 6 (QUA-04, restano 39 funzioni). Comportamento identico su 6.000 casi
+  confrontati col codice di prima; tredici prove nuove per le strade che nessuna percorreva.
+- La `main` di `archive_indexer` è spezzata in un passo per modo (argomenti, `--migra-telegram`, `--migra`,
+  `--retag`, `--classify`, indicizzare). Complessità da 16 a 6 (QUA-04, restano 38 funzioni). Comportamento
+  identico su 6.000 righe di comando confrontate col codice di prima; dodici prove nuove, un modo per volta.
 
 ## [0.98.18] — 2026-11-25
 

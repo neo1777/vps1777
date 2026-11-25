@@ -5689,6 +5689,111 @@ def _indicizza_nel_lavoro(repo: Path, cc: list[str], *, db_name: str, project: s
         run([*cc, "exec", "-T", "gateway", "rm", "-f", dest], check=False, capture=True)
 
 
+def _ingest_sorgente(cc: list[str], args, artefatto) -> Path:
+    """Il file da indicizzare: un artefatto che sta già in nb1777 (solo il nome), o un file del disco."""
+    if artefatto:
+        # P17: un file che sta già nella cartella degli artefatti di nb1777 (un podcast
+        # dello Studio scaricato con studio_download): niente copia, e alla fine resta lì.
+        if not _ARTEFATTO_RE.fullmatch(artefatto):
+            die(f"nome di artefatto non valido: {artefatto!r} (solo il nome, senza cartelle)")
+        if run([*cc, "exec", "-T", "nb1777-mcp", "test", "-f",
+                f"{_DIR_ARTEFATTI}/{artefatto}"], check=False).returncode != 0:
+            die(f"l'artefatto «{artefatto}» non c'è in {_DIR_ARTEFATTI} "
+                "(scaricalo prima con studio_download)")
+        src = Path(artefatto)
+    else:
+        src = Path(args.file).expanduser().resolve()
+        if not src.is_file():
+            die(f"file non trovato: {src}")
+    return src
+
+
+def _ingest_nome_db(args, src: Path) -> str:
+    """Il nome del DB: quello chiesto o quello del file, ripulito; troppo lungo si dice subito."""
+    db_name = _ARCH_NAME_RE.sub("-", (args.db or src.stem).lower()).strip("-") or "archivio"
+    if not INGEST_DB_RE.match(db_name):
+        die(f"nome del DB troppo lungo ({len(db_name)} caratteri, al più 64): "
+            "scegline uno più corto con --db")
+    return db_name
+
+
+def _ingest_diretto(repo: Path, cc: list[str], src: Path, suffix: str, artefatto, nb_in: str,
+                    lavoro: dict) -> None:
+    """Un file che l'indexer legge da sé: va nel lavoro così com'è, senza NotebookLM."""
+    log(f"«{src.name}» lo legge l'indexer ({suffix}): indicizzo DIRETTO, niente NotebookLM")
+    # il file testuale viaggia con la SUA estensione: l'indexer sceglie il parser
+    # dal suffisso (un .jsonl non è un .txt)
+    if artefatto:
+        letto = run([*cc, "exec", "-T", "nb1777-mcp", "cat", nb_in],
+                    capture=True, check=True)
+        _indicizza_nel_lavoro(repo, cc, suffisso=suffix, testo=letto.stdout or "",
+                              **lavoro)
+    else:
+        _indicizza_nel_lavoro(repo, cc, suffisso=suffix, sorgente=src, **lavoro)
+
+
+def _ingest_trascrivi(cc: list[str], src: Path, artefatto, nb_in: str, args) -> subprocess.CompletedProcess:
+    """Porta il file in nb1777-mcp (se non c'è già) e chiede la trascrizione a NotebookLM."""
+    log(f"NotebookLM: trascrizione di «{src.name}» (può richiedere un minuto)…")
+    # NIENTE `docker cp`: il rootfs di nb1777-mcp è read-only (H43) e docker cp
+    # rifiuta, come per il gateway (#285 bis). Il file viaggia su stdin di un exec,
+    # scritto dall'utente `app` dentro il volume.
+    import shlex as _shlex
+    if not artefatto:
+        with open(src, "rb") as fh:
+            run([*cc, "exec", "-T", "nb1777-mcp", "sh", "-c",
+                 f"mkdir -p {_DIR_ARTEFATTI}/ingest && cat > {_shlex.quote(nb_in)}"],
+                stdin=fh, check=True)
+    ecmd = [*cc, "exec", "-T", "nb1777-mcp", "python", "-m", "app.ingest", "--file", nb_in]
+    if args.verify:
+        ecmd.append("--verify")
+    # un podcast di un'ora: caricamento e trascrizione di Google possono superare 15 minuti
+    res = run(ecmd, capture=True, check=False, timeout=1800)
+    return res
+
+
+def _ingest_trascrizione_fallita(res: subprocess.CompletedProcess) -> None:
+    """La trascrizione è uscita con un errore: lo dice, con la strada da prendere, ed esce."""
+    err_txt = (res.stderr or res.stdout or "").strip()[:300]
+    # ERRORE PARLANTE (#285): «Could not add file source» nudo non dice né
+    # dove né perché. Diagnosi 2026-09-06 sul vivo: nb_create/add_text/delete
+    # funzionavano, add-da-FILE falliva con QUALUNQUE estensione (md e txt)
+    # → regressione dell'upload-file nel client nlm (upstream), non cookie.
+    aiuto = ""
+    if "Could not add" in err_txt:
+        aiuto = ("\n  il canale sessione è probabilmente sano (la creazione del "
+                 "notebook scratch è riuscita): questo errore, misurato, indica "
+                 "l'upload-file del client nlm rotto (regressione upstream, #285). "
+                 "Se il file è testuale, rilancia SENZA --nlm: il percorso diretto "
+                 "non passa da NotebookLM. Cookie: vps1777 secrets-status.")
+    die(f"trascrizione fallita: {err_txt}{aiuto}")
+
+
+def _ingest_testo_trascritto(res: subprocess.CompletedProcess) -> tuple[dict, str]:
+    """L'ultima riga dell'uscita è il JSON della trascrizione: lo rende col suo testo, o esce."""
+    try:
+        data = json.loads((res.stdout or "").strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        die(f"output trascrizione non interpretabile: {(res.stdout or '')[:200]}")
+    text = data.get("text") or ""
+    if not text.strip():
+        die("NotebookLM non ha restituito testo — il file è leggibile?")
+    return data, text
+
+
+def _ingest_dici_trascrizione(data: dict, text: str) -> None:
+    """Che cosa è arrivato da NotebookLM: quanto, con quale metodo, e la verifica se c'è."""
+    # P17: «contenuto» = il testo indicizzato da Google; «domanda» = la risposta a una
+    # richiesta di trascrizione, riscritta da un modello (il ripiego)
+    come = {"contenuto": "il testo indicizzato della fonte",
+            "domanda": "la risposta a una domanda di trascrizione, riscritta da un modello"
+            }.get(str(data.get("metodo")), "metodo non dichiarato")
+    tipo = f", fonte {data['fonte_tipo']}" if data.get("fonte_tipo") else ""
+    ok(f"trascritti {len(text)} caratteri da NotebookLM ({come}{tipo})")
+    if data.get("verification"):
+        log(f"verifica NotebookLM: {data['verification'][:400]}")
+
+
 def cmd_archive_ingest(repo: Path, args) -> int:
     """Indicizza un file nell'archivio FTS. Due percorsi, scelti dal TIPO:
 
@@ -5709,24 +5814,8 @@ def cmd_archive_ingest(repo: Path, args) -> int:
     if bool(artefatto) == bool(args.file):
         die("dammi un file OPPURE --artefatto <nome>, uno dei due")
     cc = compose_cmd(repo)
-    if artefatto:
-        # P17: un file che sta già nella cartella degli artefatti di nb1777 (un podcast
-        # dello Studio scaricato con studio_download): niente copia, e alla fine resta lì.
-        if not _ARTEFATTO_RE.fullmatch(artefatto):
-            die(f"nome di artefatto non valido: {artefatto!r} (solo il nome, senza cartelle)")
-        if run([*cc, "exec", "-T", "nb1777-mcp", "test", "-f",
-                f"{_DIR_ARTEFATTI}/{artefatto}"], check=False).returncode != 0:
-            die(f"l'artefatto «{artefatto}» non c'è in {_DIR_ARTEFATTI} "
-                "(scaricalo prima con studio_download)")
-        src = Path(artefatto)
-    else:
-        src = Path(args.file).expanduser().resolve()
-        if not src.is_file():
-            die(f"file non trovato: {src}")
-    db_name = _ARCH_NAME_RE.sub("-", (args.db or src.stem).lower()).strip("-") or "archivio"
-    if not INGEST_DB_RE.match(db_name):
-        die(f"nome del DB troppo lungo ({len(db_name)} caratteri, al più 64): "
-            "scegline uno più corto con --db")
+    src = _ingest_sorgente(cc, args, artefatto)
+    db_name = _ingest_nome_db(args, src)
     project = args.project or db_name
     rid = os.urandom(4).hex()
     suffix = src.suffix.lower()
@@ -5742,62 +5831,13 @@ def cmd_archive_ingest(repo: Path, args) -> int:
 
     try:
         if testuale:
-            log(f"«{src.name}» lo legge l'indexer ({suffix}): indicizzo DIRETTO, niente NotebookLM")
-            # il file testuale viaggia con la SUA estensione: l'indexer sceglie il parser
-            # dal suffisso (un .jsonl non è un .txt)
-            if artefatto:
-                letto = run([*cc, "exec", "-T", "nb1777-mcp", "cat", nb_in],
-                            capture=True, check=True)
-                _indicizza_nel_lavoro(repo, cc, suffisso=suffix, testo=letto.stdout or "",
-                                      **lavoro)
-            else:
-                _indicizza_nel_lavoro(repo, cc, suffisso=suffix, sorgente=src, **lavoro)
+            _ingest_diretto(repo, cc, src, suffix, artefatto, nb_in, lavoro)
             return 0
-        log(f"NotebookLM: trascrizione di «{src.name}» (può richiedere un minuto)…")
-        # NIENTE `docker cp`: il rootfs di nb1777-mcp è read-only (H43) e docker cp
-        # rifiuta, come per il gateway (#285 bis). Il file viaggia su stdin di un exec,
-        # scritto dall'utente `app` dentro il volume.
-        import shlex as _shlex
-        if not artefatto:
-            with open(src, "rb") as fh:
-                run([*cc, "exec", "-T", "nb1777-mcp", "sh", "-c",
-                     f"mkdir -p {_DIR_ARTEFATTI}/ingest && cat > {_shlex.quote(nb_in)}"],
-                    stdin=fh, check=True)
-        ecmd = [*cc, "exec", "-T", "nb1777-mcp", "python", "-m", "app.ingest", "--file", nb_in]
-        if args.verify:
-            ecmd.append("--verify")
-        # un podcast di un'ora: caricamento e trascrizione di Google possono superare 15 minuti
-        res = run(ecmd, capture=True, check=False, timeout=1800)
+        res = _ingest_trascrivi(cc, src, artefatto, nb_in, args)
         if res.returncode != 0:
-            err_txt = (res.stderr or res.stdout or "").strip()[:300]
-            # ERRORE PARLANTE (#285): «Could not add file source» nudo non dice né
-            # dove né perché. Diagnosi 2026-09-06 sul vivo: nb_create/add_text/delete
-            # funzionavano, add-da-FILE falliva con QUALUNQUE estensione (md e txt)
-            # → regressione dell'upload-file nel client nlm (upstream), non cookie.
-            aiuto = ""
-            if "Could not add" in err_txt:
-                aiuto = ("\n  il canale sessione è probabilmente sano (la creazione del "
-                         "notebook scratch è riuscita): questo errore, misurato, indica "
-                         "l'upload-file del client nlm rotto (regressione upstream, #285). "
-                         "Se il file è testuale, rilancia SENZA --nlm: il percorso diretto "
-                         "non passa da NotebookLM. Cookie: vps1777 secrets-status.")
-            die(f"trascrizione fallita: {err_txt}{aiuto}")
-        try:
-            data = json.loads((res.stdout or "").strip().splitlines()[-1])
-        except (json.JSONDecodeError, IndexError):
-            die(f"output trascrizione non interpretabile: {(res.stdout or '')[:200]}")
-        text = data.get("text") or ""
-        if not text.strip():
-            die("NotebookLM non ha restituito testo — il file è leggibile?")
-        # P17: «contenuto» = il testo indicizzato da Google; «domanda» = la risposta a una
-        # richiesta di trascrizione, riscritta da un modello (il ripiego)
-        come = {"contenuto": "il testo indicizzato della fonte",
-                "domanda": "la risposta a una domanda di trascrizione, riscritta da un modello"
-                }.get(str(data.get("metodo")), "metodo non dichiarato")
-        tipo = f", fonte {data['fonte_tipo']}" if data.get("fonte_tipo") else ""
-        ok(f"trascritti {len(text)} caratteri da NotebookLM ({come}{tipo})")
-        if data.get("verification"):
-            log(f"verifica NotebookLM: {data['verification'][:400]}")
+            _ingest_trascrizione_fallita(res)
+        data, text = _ingest_testo_trascritto(res)
+        _ingest_dici_trascrizione(data, text)
         # la trascrizione è testo: viaggia come .txt, sullo stesso percorso del testo
         _indicizza_nel_lavoro(repo, cc, suffisso=".txt", testo=text, **lavoro)
         return 0
