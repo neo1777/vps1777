@@ -9,7 +9,9 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   release non scadono: dalla 0.98.13 il canale firmato scade dopo 45 giorni e ferma l'aggiornamento
   automatico; ora lo dice, con i due limiti che restano. E diceva di rigenerare la chiave dei backup
   «quando `age` avrà recipient post-quantum»: li ha dalla 1.3.0 (dicembre 2025); ora dice che vps1777
-  non li usa ancora e che cosa servirebbe. Visto da Sagoma.
+  non li usa ancora, che cosa servirebbe e quando si rivede (31/03/2027). Visto da Sagoma.
+- `CODEOWNERS` nomina anche i file che istruiscono gli agenti (REVIEW.md, le istruzioni dei due server
+  MCP, la disciplina della memoria), e dice perché la review dei proprietari non è obbligatoria.
 
 ## [0.98.15] — 2026-11-25
 

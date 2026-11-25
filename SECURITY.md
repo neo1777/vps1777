@@ -1045,8 +1045,9 @@ datate, scritte perché chi adotta il progetto le trovi qui e non le scopra.
   post-quantum ibridi (ML-KEM-768 insieme a X25519, `age-keygen -pq`, chiavi pubbliche che
   cominciano con `age1pq1`). vps1777 non li usa ancora: il container del backup installa `age`
   1.2.1, e il passaggio chiede `age` ≥ 1.3 sia nel container sia dove si decifra, più una chiave
-  nuova. La decisione è aperta e la prende chi tiene la chiave; finché non è presa vale il rischio
-  scritto sopra.
+  nuova. Il passaggio è rinviato con una data: **si rivede il 31/03/2027** (scelta del
+  25/11/2026), quando `age` 1.3 sarà nelle distribuzioni stabili; fino ad allora vale il rischio
+  scritto sopra, soprattutto per le copie che escono dalla macchina.
 - **Il canale di aggiornamento è firmato con cosign classico** (ECDSA, firma senza chiave via
   Sigstore). Una firma non si «raccoglie oggi per romperla poi»: il rischio comincia quando
   falsificarla diventa possibile, e allora andrà cambiata. Oggi non c'è una firma post-quantum.
