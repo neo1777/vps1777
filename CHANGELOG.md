@@ -4,6 +4,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- `applicabilita.yml` dichiara lo standard `1777-0.3` e, per nb1777-mcp, la crittografia propria (gli HMAC dei
+  gettoni di conferma e dei link firmati): la superficie c'era nel codice e la dichiarazione diceva di no.
+
 ## [0.98.18] — 2026-11-25
 
 ### Aggiunto

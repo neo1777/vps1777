@@ -16,7 +16,7 @@
 # Tre «sì» vengono da falsi positivi dei rilevatori (un test o una stringa, non il prodotto): restano «sì», il
 # valore più severo, finché lo standard non ha un formato per l'esenzione.
 schema: applicabilita-1777/0.1
-standard: 1777-0.2          # la minor: lo misura l'ultima patch di quella minor (CAT-05, dal 25/11/2026)
+standard: 1777-0.3          # la minor: lo misura l'ultima patch di quella minor (CAT-05, dal 25/11/2026)
 repo: vps1777
 persone: [neo1777]
 
@@ -96,6 +96,7 @@ componenti:
       http.in: sì                 # services/nb1777-mcp/app/server.py
       mcp.server: sì
       processi: sì                # services/nb1777-mcp/app/core.py (la CLI nlm)
+      crittografia.propria: sì    # services/nb1777-mcp/app/conferma.py, link_firmati.py: HMAC dei gettoni di conferma e dei link firmati
   - id: nb1777-bot
     percorso: services/nb1777-bot/
     superfici:
