@@ -10,10 +10,6 @@
  "fine_semina": "2027-01-31",
  "fine_semina_scelta": "2026-11-24-soglia-qua04-fine-semina-confermata (chi possiede il repo)",
  "funzioni": {
-  "tools/vps1777.py::cmd_bootstrap": {
-   "complessita": 20,
-   "stato": "da-esaminare"
-  },
   "tools/vps1777.py::cmd_archive_ingest": {
    "complessita": 18,
    "stato": "da-esaminare"

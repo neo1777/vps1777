@@ -4776,16 +4776,8 @@ def cmd_migrate(repo: Path, args) -> int:
     return 0
 
 
-def cmd_bootstrap(repo: Path, args) -> int:
-    """Cutover one-shot: installazione legacy (build locale) → modello pull."""
-    lock = acquire_lock(repo)
-    if lock is None:
-        die("update/bootstrap già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
-    st = state_load(repo)
-    if st.get("current"):
-        ok(f"già a regime (v{st['current']}) — bootstrap non necessario")
-        return 0
-
+def _bootstrap_bundle(args) -> Path:
+    """La cartella del bundle estratto: quella passata con --bundle, o quella da cui gira lo script."""
     bundle = Path(args.bundle).resolve() if args.bundle else None
     if bundle is None:
         # auto-detect: lo script gira dal bundle estratto (tools/vps1777.py)
@@ -4794,11 +4786,11 @@ def cmd_bootstrap(repo: Path, args) -> int:
             bundle = candidate
     if bundle is None or not (bundle / "bundle-manifest.json").is_file():
         die("bundle non trovato: passa --bundle <dir del bundle estratto>")
-    target = norm_ver((bundle / "VERSION").read_text().strip())
-    lockfile = json.loads((bundle / "images.lock").read_text())
-    cur = current_version(repo)
-    log(f"bootstrap: installazione legacy (tag '{cur}') → v{target} (pull)")
+    return bundle
 
+
+def _bootstrap_preflight(args, target: str) -> None:
+    """Docker acceso e il sì di chi lancia (o --yes), prima di toccare qualcosa."""
     # preflight
     if run(["docker", "info"], check=False, capture=True).returncode != 0:
         die("docker non attivo")
@@ -4807,16 +4799,9 @@ def cmd_bootstrap(repo: Path, args) -> int:
         if ack not in ("s", "si", "y", "yes"):
             die("annullato")
 
-    # rete di sicurezza: backup age completo pre-cutover
-    backup_script = repo / "tools" / "backup.sh"
-    if not backup_script.is_file():
-        backup_script = bundle / "tools" / "backup.sh"
-    # `--archivio`: il cutover è l'unico salto senza snapshot pre-update sotto,
-    # quindi qui il livello archivio si scrive COMUNQUE, dovuto o no.
-    run(["bash", str(backup_script), "--archivio"], cwd=repo)
 
-    # install CLI + unit
-    sudo(["install", "-m", "755", str(bundle / "tools" / "vps1777.py"), INSTALLED_CLI])
+def _bootstrap_dir_runtime(repo: Path) -> None:
+    """Le cartelle di lavoro esistono e sono dell'operatore."""
     # Dir runtime di proprietà dell'operator: su un'installazione LEGACY,
     # onboarding/ è spesso root-owned (creata da Docker al primo bind-mount, il
     # vecchio installer non la pre-creava) → CLI e gateway (stesso uid) non
@@ -4828,25 +4813,98 @@ def cmd_bootstrap(repo: Path, args) -> int:
         d.mkdir(exist_ok=True)
     sudo(["chown", "-hR", f"{os.getuid()}:{os.getgid()}", *[str(d) for d in runtime_dirs]])
     (repo / "var").chmod(0o700)
+
+
+def _bootstrap_salva_legacy(repo: Path, pre: Path) -> None:
+    """I compose di prima in `releases/pre-bootstrap`, il paracadute del cutover."""
     # salva i compose LEGACY per il rollback del bootstrap. Solo la PRIMA volta:
     # se pre-bootstrap esiste già (bootstrap precedente fallito e ri-tentato),
     # NON sovrascrivere — sync_managed_files ha già mutato i compose nel repo,
     # ri-salvarli catturerebbe la versione nuova e perderebbe il paracadute.
-    pre = repo / "releases" / "pre-bootstrap"
-    old_tag = cur
     if not pre.is_dir() or not any(pre.glob("compose*.yaml")):
         pre.mkdir(parents=True, exist_ok=True)
         for f in repo.glob("compose*.yaml"):
             shutil.copy2(f, pre / f.name)
     else:
         log("pre-bootstrap già presente (ri-tentativo): compose legacy preservati")
-    sync_managed_files(repo, bundle)
-    install_systemd_units(repo, enable=True)
+
+
+def _bootstrap_image_base(repo: Path, lockfile: dict) -> None:
+    """`VPS1777_IMAGE_BASE` nel .env, dedotta dal lock, se manca."""
     envd = env_read(repo)
     if "VPS1777_IMAGE_BASE" not in envd:
         first_ref = next(iter(lockfile.values()))
         base = first_ref.split("/vps1777-", 1)[0]
         env_set(repo, "VPS1777_IMAGE_BASE", base)
+
+
+def _bootstrap_ripristina(repo: Path, pre: Path, old_tag: str, target: str, why: str) -> None:
+    """Il cutover non è sano: torna lo stack di prima, lo dice, ed esce con 2."""
+    warn(f"cutover non healthy ({why}) → ripristino lo stack pre-bootstrap")
+    run([*compose_cmd(repo), "down"], check=False)
+    for f in pre.glob("compose*.yaml"):
+        shutil.copy2(f, repo / f.name)
+    versione_set(repo, old_tag, None)
+    permessi_servizi(repo)
+    run([*compose_cmd(repo), "up", "-d"], check=False,
+        env=versione_env(old_tag, None))
+    telegram_notify(repo, f"🆘 vps1777: bootstrap a v{target} fallito ({why}) "
+                          "— ripristinato lo stack precedente")
+    die(f"bootstrap fallito ({why}) — stack precedente ripristinato", 2)
+
+
+def _bootstrap_baseline_migrazioni(repo: Path, target: str) -> None:
+    """Le migrazioni del bundle d'arrivo entrano nel registro come già applicate."""
+    # baseline migrazioni: le migrazioni incluse nel bundle target sono
+    # considerate già riflesse nei dati (à la --fake-initial)
+    reg = registry_read()
+    known = {e["id"] for e in reg["applied"]}
+    for d in sorted((repo / "migrations").iterdir()) if (repo / "migrations").is_dir() else []:
+        if d.is_dir() and (d / "migration.json").is_file():
+            meta = json.loads((d / "migration.json").read_text())
+            if meta["id"] not in known:
+                reg["applied"].append({
+                    "id": meta["id"], "version": target, "applied_at": now_iso(),
+                    "checksum": hashlib.sha256((d / "run.py").read_bytes()).hexdigest(),
+                    "baseline": True})
+    _registry_write(reg)
+
+
+def cmd_bootstrap(repo: Path, args) -> int:
+    """Cutover one-shot: installazione legacy (build locale) → modello pull."""
+    lock = acquire_lock(repo)
+    if lock is None:
+        die("update/bootstrap già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
+    st = state_load(repo)
+    if st.get("current"):
+        ok(f"già a regime (v{st['current']}) — bootstrap non necessario")
+        return 0
+
+    bundle = _bootstrap_bundle(args)
+    target = norm_ver((bundle / "VERSION").read_text().strip())
+    lockfile = json.loads((bundle / "images.lock").read_text())
+    cur = current_version(repo)
+    log(f"bootstrap: installazione legacy (tag '{cur}') → v{target} (pull)")
+
+    _bootstrap_preflight(args, target)
+
+    # rete di sicurezza: backup age completo pre-cutover
+    backup_script = repo / "tools" / "backup.sh"
+    if not backup_script.is_file():
+        backup_script = bundle / "tools" / "backup.sh"
+    # `--archivio`: il cutover è l'unico salto senza snapshot pre-update sotto,
+    # quindi qui il livello archivio si scrive COMUNQUE, dovuto o no.
+    run(["bash", str(backup_script), "--archivio"], cwd=repo)
+
+    # install CLI + unit
+    sudo(["install", "-m", "755", str(bundle / "tools" / "vps1777.py"), INSTALLED_CLI])
+    _bootstrap_dir_runtime(repo)
+    pre = repo / "releases" / "pre-bootstrap"
+    old_tag = cur
+    _bootstrap_salva_legacy(repo, pre)
+    sync_managed_files(repo, bundle)
+    install_systemd_units(repo, enable=True)
+    _bootstrap_image_base(repo, lockfile)
     versione_set(repo, target, None)
 
     # pull (per tag, H22) + digest check; poi il pin acceso per `up`
@@ -4863,31 +4921,9 @@ def cmd_bootstrap(repo: Path, args) -> int:
     res = run([*compose_cmd(repo), "up", "-d"], check=False, env=env_new)
     healthy, why = health_gate(repo, env=env_new) if res.returncode == 0 else (False, "up fallito")
     if not healthy:
-        warn(f"cutover non healthy ({why}) → ripristino lo stack pre-bootstrap")
-        run([*compose_cmd(repo), "down"], check=False)
-        for f in pre.glob("compose*.yaml"):
-            shutil.copy2(f, repo / f.name)
-        versione_set(repo, old_tag, None)
-        permessi_servizi(repo)
-        run([*compose_cmd(repo), "up", "-d"], check=False,
-            env=versione_env(old_tag, None))
-        telegram_notify(repo, f"🆘 vps1777: bootstrap a v{target} fallito ({why}) "
-                              "— ripristinato lo stack precedente")
-        die(f"bootstrap fallito ({why}) — stack precedente ripristinato", 2)
+        _bootstrap_ripristina(repo, pre, old_tag, target, why)
 
-    # baseline migrazioni: le migrazioni incluse nel bundle target sono
-    # considerate già riflesse nei dati (à la --fake-initial)
-    reg = registry_read()
-    known = {e["id"] for e in reg["applied"]}
-    for d in sorted((repo / "migrations").iterdir()) if (repo / "migrations").is_dir() else []:
-        if d.is_dir() and (d / "migration.json").is_file():
-            meta = json.loads((d / "migration.json").read_text())
-            if meta["id"] not in known:
-                reg["applied"].append({
-                    "id": meta["id"], "version": target, "applied_at": now_iso(),
-                    "checksum": hashlib.sha256((d / "run.py").read_bytes()).hexdigest(),
-                    "baseline": True})
-    _registry_write(reg)
+    _bootstrap_baseline_migrazioni(repo, target)
 
     st.update({"current": target, "previous": None, "bootstrap": True})
     st["history"].append({"event": "bootstrap", "from": old_tag, "to": target,

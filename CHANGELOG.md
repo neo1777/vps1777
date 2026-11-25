@@ -7,6 +7,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ### Cambiato
 - `applicabilita.yml` dichiara lo standard `1777-0.3` e, per nb1777-mcp, la crittografia propria (gli HMAC dei
   gettoni di conferma e dei link firmati): la superficie c'era nel codice e la dichiarazione diceva di no.
+- `cmd_bootstrap` (il passaggio di un'installazione vecchia al canale degli aggiornamenti) è spezzata in sette
+  passi con un nome: pacchetto, controlli di partenza, cartelle di lavoro, paracadute dei compose, base delle
+  immagini, ripristino, migrazioni di partenza. Complessità da 20 a sotto 10 (QUA-04, restano 40 funzioni).
+  Comportamento identico su 3.000 casi confrontati col codice di prima; nessuna prova la chiamava, ora sono 24.
 
 ## [0.98.18] — 2026-11-25
 
