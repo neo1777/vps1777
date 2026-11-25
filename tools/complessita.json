@@ -14,10 +14,6 @@
    "complessita": 30,
    "stato": "da-esaminare"
   },
-  "services/gateway/app/archive_indexer.py::write_rows": {
-   "complessita": 30,
-   "stato": "da-esaminare"
-  },
   "services/gateway/app/archive_indexer.py::_iter_claude_code": {
    "complessita": 21,
    "stato": "da-esaminare"
