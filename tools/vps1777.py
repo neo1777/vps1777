@@ -1485,7 +1485,7 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
             # (un collegamento può puntare fuori radice anche se il suo NOME sta dentro).
             for m in tar.getmembers():
                 if not (m.isreg() or m.isdir()):
-                    raise RuntimeError(f"bundle malformato (collegamento o file speciale): {m.name}")
+                    raise RuntimeError(f"bundle malformato (collegamento o file speciale): {m.name}") from None
             tar.extractall(bundle)
 
     # Se questo update gira da root, ciò che ha appena creato deve restare
@@ -2196,7 +2196,7 @@ def render_unit(text: str, repo: Path) -> str:
                 "   (è quello che fa `installer/engine.py:306-322`, in un colpo solo)\n"
                 "\n"
                 "   Oppure indica un utente che esiste già:  id <nome>\n"
-            )
+            ) from None
     else:
         try:
             pw = pwd.getpwuid(os.getuid())

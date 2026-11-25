@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# check.sh — quello che fanno i job `lint` e `contract` della CI, in locale, con un comando.
+# check.sh — quello che fanno i job `lint` e `contract` della CI, e gli scanner del sorgente,
+#   in locale, con un comando.
 #
 # PERCHÉ ESISTE. Prima di aprire una PR i controlli da rifare erano una dozzina di
 #   comandi, ciascuno con le sue opzioni: ruff col pin, shellcheck per digest, una
@@ -7,7 +8,7 @@
 #   modi diversi di lanciarle. Chi arriva sul repo li deve riscoprire, e a volte ne salta uno —
 #   e il controllo saltato è quello che la CI boccia dopo il push.
 #
-# LA FONTE DI VERITÀ RESTA `.github/workflows/ci.yml` (e `verify-features.yml`). Questo
+# LA FONTE DI VERITÀ RESTA `.github/workflows/ci.yml` (e `verify-features.yml`, `scanner.yml`). Questo
 #   file NON la sostituisce: la RIPETE. Perché non resti indietro c'è
 #   `tools/tests/test_check_sh_segue_la_ci.py`: legge i workflow e fallisce se uno
 #   script di guardia, una suite o un pin della CI non compare qui.
@@ -28,10 +29,11 @@
 #     e versione di ogni salto, e in locale il corpo della PR non esiste;
 #   • non riscrive MAI un file tracciato: in coda lo verifica, e se è successo è rosso.
 #
-# USO    bash tools/check.sh                  → lint, guardiani e test (circa due minuti)
+# USO    bash tools/check.sh                  → lint, guardiani, test e scanner (sei minuti circa)
 #        bash tools/check.sh lint             → ruff + shellcheck
 #        bash tools/check.sh guardiani        → i controlli della CI che non sono test
 #        bash tools/check.sh test             → le suite, una alla volta, e i test bash
+#        bash tools/check.sh scanner          → Dockerfile, dipendenze, segreti (scanner.yml)
 #        bash tools/check.sh lint guardiani   → più fasi, nell'ordine dato
 set -uo pipefail
 
@@ -227,6 +229,8 @@ fase_guardiani() {
   passo "il runner dei test bash sa fallire — autoprova" bash tools/esegui-test-bash.sh "$AUTOPROVA"
   passo "le coordinate nei doc — autoprova" python3 tools/coordinate-nei-doc.py "$AUTOPROVA"
   passo "le coordinate nei doc puntano dentro il file" python3 tools/coordinate-nei-doc.py
+  passo "marcatori di conflitto — autoprova" python3 tools/marcatori-di-conflitto.py "$AUTOPROVA"
+  passo "nessun marcatore di conflitto né .rej/.orig" python3 tools/marcatori-di-conflitto.py
   manca "gate locale — autoprova" uv \
     || passo "gate locale — autoprova" uv run --with pyyaml==6.0.4 python3 tools/gate-locale.py "$AUTOPROVA"
   passo "le nove prove non mentono a macchina nuda" bash tools/prove-empiriche/onesta-a-macchina-nuda.sh
@@ -269,13 +273,25 @@ fase_test() {
   passo "test bash di tools/tests" bash tools/esegui-test-bash.sh
 }
 
+# ── scanner ───────────────────────────────────────────────────────────────────
+# Il job di `scanner.yml`: hadolint e trivy sui Dockerfile, osv-scanner sui lock, trufflehog
+# sulla storia. Le immagini sono fissate per impronta dentro `tools/scanner.sh`; la prima volta
+# si scaricano, poi bastano una trentina di secondi. Esito 2 dello scanner («non ho potuto
+# guardare») qui diventa rosso: non è un verde.
+fase_scanner() {
+  echo "── scanner (job «scanner» di scanner.yml)"
+  manca "scanner del sorgente" docker && return
+  passo "scanner — autoprova" bash tools/scanner.sh "$AUTOPROVA"
+  passo "scanner: Dockerfile, dipendenze, segreti" bash tools/scanner.sh tutti
+}
+
 # ── principale ────────────────────────────────────────────────────────────────
 FASI=()
 [ "$#" -eq 0 ] && set -- tutto
 for a in "$@"; do
   case "$a" in
-    lint | guardiani | test) FASI+=("$a") ;;
-    tutto) FASI+=(lint guardiani test) ;;
+    lint | guardiani | test | scanner) FASI+=("$a") ;;
+    tutto) FASI+=(lint guardiani test scanner) ;;
     -h | --help) uso; exit 0 ;;
     *) printf 'argomento sconosciuto: «%s»\n\n' "$a" >&2; uso >&2; exit 2 ;;
   esac
@@ -300,6 +316,7 @@ for f in "${FASI[@]}"; do
     lint) fase_lint ;;
     guardiani) fase_guardiani ;;
     test) fase_test ;;
+    scanner) fase_scanner ;;
   esac
 done
 

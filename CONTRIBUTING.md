@@ -33,7 +33,9 @@ The `compose.build.yaml` overlay exists because `compose.yaml` is pull-only
 - Yaml: 2-space indent, no `version:` key in compose files (deprecated)
 - Commit messages: a prefix that says **what** is touched, then the sentence in Italian.
   The ones in use: `fix:`, `feat:`, `docs:`, `ci:`, `build:` (Dependabot bumps), `test:`,
-  `chore:`, `release:` (the PR that opens a version: `release: X.Y.Z`), or the area
+  `chore:`, `refactor:` (changes the shape of the code, not its behaviour, like the
+  QUA-04 splits: the tests stay the same and stay green), `release:` (the PR that opens a
+  version: `release: X.Y.Z`), or the area
   touched (`installer:`, `gateway:`, `indexer:`…); a scope in parentheses is welcome
   (`docs(architettura):`), and a `!` after the prefix marks a breaking change
   (`feat(bot)!:`)
@@ -43,18 +45,19 @@ The `compose.build.yaml` overlay exists because `compose.yaml` is pull-only
 ### Before opening a PR: `tools/check.sh`
 
 ```bash
-bash tools/check.sh              # lint, guards and tests: what CI's lint and contract jobs do
+bash tools/check.sh              # lint, guards, tests and scanners: what CI's lint and contract jobs and scanner.yml do
 bash tools/check.sh lint         # just ruff and shellcheck, at the same pins as CI
 bash tools/check.sh guardiani    # the CI checks that aren't tests (the guards)
 bash tools/check.sh test         # the suites, one at a time, and the bash tests
+bash tools/check.sh scanner      # Dockerfiles, lockfile dependencies, secrets in history (tools/scanner.sh)
 ```
 
-It ends with a summary of what is green and what is red, in about two minutes. It exits 0
+It ends with a summary of what is green and what is red, in about six minutes. It exits 0
 if everything is green, 1 if something is red, 2 if a tool is missing (docker, uv, uvx):
 it says so, and that is not a green. It installs nothing and never rewrites tracked files.
 It doesn't cover the `build` job, nor the ratification of lock jumps, which lives in the
 PR body.
-The source of truth stays `.github/workflows/ci.yml`: if CI gains a check and `check.sh`
+The source of truth stays the workflows (`ci.yml`, `verify-features.yml`, `scanner.yml`): if CI gains a check and `check.sh`
 doesn't, `tools/tests/test_check_sh_segue_la_ci.py` turns red. And
 `tools/tests/test_i_guardiani_mordono.py` proves that the guards without a self-test of
 their own (anti-leak, security register, feature ledger, pre-commit, translations) still
