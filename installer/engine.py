@@ -468,19 +468,8 @@ class Deployer:
             data += err.read().decode("utf-8", "replace")
         return data
 
-    def _stream(self, cmd: str, label: str = "",
-                stdin_script: str | None = None) -> Iterator[str]:
-        """
-        Esegue cmd via SSH, yield righe appena arrivano (lettura a chunk,
-        non bufferizzata per riga → output più reattivo attraverso WSL2).
-
-        `stdin_script`: se presente, viene scritto sullo stdin del comando e il
-        canale di scrittura viene chiuso. È la via per gli script che portano
-        SEGRETI interpolati: un comando passa per argv, e argv è pubblico
-        (/proc/*/cmdline è leggibile da ogni processo della macchina per tutta
-        la durata dell'esecuzione) — lo stdin no. deploy.sh usa `bash -s <<…`
-        per la stessa ragione; qui è l'equivalente paramiko.
-        """
+    def _apri_canale(self, cmd: str, stdin_script: str | None) -> "paramiko.Channel":
+        """Lancia cmd su un canale nuovo, gli dà lo script per stdin se c'è, e lo rende non bloccante."""
         chan = self._cliente().get_transport().open_session()  # type: ignore[union-attr]  # il trasporto c'è: il client è connesso
         # NIENTE pty: con un tty BuildKit/apt producono progress-bar ANSI che
         # si auto-refreshano → fiume di sequenze di escape che intasano la UI.
@@ -494,6 +483,47 @@ class Deployer:
             chan.sendall(stdin_script.encode("utf-8"))
             chan.shutdown_write()
         chan.settimeout(0.0)  # non-bloccante
+        return chan
+
+    @staticmethod
+    def _canale_scaduto(chan: "paramiko.Channel", label: str, cmd: str) -> None:
+        """Il comando ha superato il tetto: chiude il canale e lo dice."""
+        chan.close()
+        raise DeployError(
+            f"il comando remoto «{label or cmd[:40]}» non ha concluso entro "
+            f"{CMD_TIMEOUT_S // 60} minuti: l'ho fermato. Rilancia l'installazione; "
+            "se si ripete, guarda la VPS (rete, disco, apt bloccato).")
+
+    @staticmethod
+    def _coda_del_canale(chan: "paramiko.Channel", buf: bytes) -> Iterator[str]:
+        """A comando finito: legge ciò che resta e rende le ultime righe, anche quella senza a capo."""
+        # svuota il resto
+        try:
+            while True:
+                data = chan.recv(8192)
+                if not data:
+                    break
+                buf += data
+        except socket.timeout:
+            pass    # niente altro da leggere
+        if buf:
+            for ln in buf.decode("utf-8", "replace").splitlines():
+                yield ln.rstrip("\r")
+
+    def _stream(self, cmd: str, label: str = "",
+                stdin_script: str | None = None) -> Iterator[str]:
+        """
+        Esegue cmd via SSH, yield righe appena arrivano (lettura a chunk,
+        non bufferizzata per riga → output più reattivo attraverso WSL2).
+
+        `stdin_script`: se presente, viene scritto sullo stdin del comando e il
+        canale di scrittura viene chiuso. È la via per gli script che portano
+        SEGRETI interpolati: un comando passa per argv, e argv è pubblico
+        (/proc/*/cmdline è leggibile da ogni processo della macchina per tutta
+        la durata dell'esecuzione) — lo stdin no. deploy.sh usa `bash -s <<…`
+        per la stessa ragione; qui è l'equivalente paramiko.
+        """
+        chan = self._apri_canale(cmd, stdin_script)
         buf = b""
         # Un comando remoto che non finisce mai (un apt appeso, una rete che non risponde)
         # teneva l'installazione ferma per sempre, senza una riga. Il tetto è largo perché
@@ -512,24 +542,9 @@ class Deployer:
             except socket.timeout:
                 pass    # canale non bloccante senza dati pronti: è il caso normale, si riprova
             if not got and time.monotonic() > scadenza:
-                chan.close()
-                raise DeployError(
-                    f"il comando remoto «{label or cmd[:40]}» non ha concluso entro "
-                    f"{CMD_TIMEOUT_S // 60} minuti: l'ho fermato. Rilancia l'installazione; "
-                    "se si ripete, guarda la VPS (rete, disco, apt bloccato).")
+                self._canale_scaduto(chan, label, cmd)
             if chan.exit_status_ready() and not got:
-                # svuota il resto
-                try:
-                    while True:
-                        data = chan.recv(8192)
-                        if not data:
-                            break
-                        buf += data
-                except socket.timeout:
-                    pass    # niente altro da leggere
-                if buf:
-                    for ln in buf.decode("utf-8", "replace").splitlines():
-                        yield ln.rstrip("\r")
+                yield from self._coda_del_canale(chan, buf)
                 break
             if not got:
                 time.sleep(0.08)

@@ -26,6 +26,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - La `main` di `archive_indexer` è spezzata in un passo per modo (argomenti, `--migra-telegram`, `--migra`,
   `--retag`, `--classify`, indicizzare). Complessità da 16 a 6 (QUA-04, restano 38 funzioni). Comportamento
   identico su 6.000 righe di comando confrontate col codice di prima; dodici prove nuove, un modo per volta.
+- `_stream` dell'installatore (legge riga per riga l'uscita di un comando lanciato sulla VPS) è spezzata in
+  apertura del canale, tetto di tempo e lettura della coda. Complessità da 15 a 9 (QUA-04, restano 37 funzioni).
+  Comportamento identico su 8.000 copioni con un canale finto; dodici prove nuove, fra cui lo script che
+  viaggia per stdin e mai nel comando.
 
 ## [0.98.18] — 2026-11-25
 
