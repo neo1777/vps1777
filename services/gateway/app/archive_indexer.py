@@ -975,18 +975,8 @@ _EN_STOP = {"the", "of", "and", "to", "in", "is", "it", "that", "for", "with",
             "have", "has", "was", "were", "can", "will", "would", "should"}
 
 
-def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
-    """Stima la NATURA del contenuto. Ritorna (voice, quoted_share, conf, flags).
-
-    Ordine di precedenza dalla spec §2. Ogni regola alza le sue bandiere, e le
-    bandiere sono l'AUTOPSIA del verdetto: senza, `voice` sarebbe un'etichetta di
-    cui non si può discutere. In dubbio ritorna `own`/`unknown`, mai `pasted`.
-    """
-    testo = content or ""
-    flags: list[str] = []
-    if not testo.strip():
-        return ("unknown", 0.0, 0.0, [])
-
+def _voce_scheda_recupero(testo: str, sender: str, project: str, flags: list[str]) -> tuple | None:
+    """Regola ⓪: una scheda di Recupero Sessioni non è una voce."""
     # ⓪ scheda di Recupero Sessioni (contratto `recupero/` R1, 24/09/2026): un record
     #    COMPOSTO da una macchina, che però cita [verbatim] le ultime parole dell'owner
     #    e dell'assistente. Nessuna voce è sua: lasciata alle regole sotto, heading e
@@ -996,7 +986,11 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
     #    («guardata, non è una voce»), e la bandiera dice perché.
     if (sender or "").strip().lower() == "recupero":
         return ("unknown", _quota_citata(testo), 0.0, ["scheda_recupero"])
+    return None
 
+
+def _voce_recita(testo: str, sender: str, project: str, flags: list[str]) -> tuple | None:
+    """Regola ①: progetto GDR e recitazione nel testo. Senza recita lascia la bandiera e prosegue."""
     # ① character — il project GDR da solo NON basta più: sul golden set (27/08) la
     #    regola «il PROGETTO lo dichiara» ha fatto 0/8, con 4 own veri marcati
     #    character — i falsi più CARI che il principio vieta. Il nome del progetto
@@ -1012,14 +1006,22 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
             return ("character", 0.0, 0.7, flags + ["recita"])
         # niente recita nel testo → si CONTINUA con le altre regole: il messaggio
         # è quasi sempre la voce propria di chi lavora SUL progetto.
+    return None
 
+
+def _voce_tick(testo: str, sender: str, project: str, flags: list[str]) -> tuple | None:
+    """Regola ①b: il tick di un'automazione."""
     # ①b pasted_ai — tick di automazione: un header «[… TICK …]» in apertura è un
     #    template macchina re-iniettato da un cron, mai la voce di chi scrive.
     #    (golden set: 2 casi veri, entrambi con questo header, entrambi mancati
     #    dalla regola vecchia che assumeva AI=inglese.)
     if _RE_TICK.match(testo):
         return ("pasted_ai", _quota_citata(testo), 0.8, flags + ["cron_tick"])
+    return None
 
+
+def _voce_template(testo: str, sender: str, project: str, flags: list[str]) -> tuple | None:
+    """Regola ①c: un prompt-template in italiano, su chi non è l'assistente."""
     # ①c pasted_ai — prompt-template in ITALIANO. La regola ③ (blocco inglese)
     #    assumeva AI=inglese, ma le AI di questo corpus scrivono italiano: sul
     #    golden set `pasted_ai` non è MAI stata emessa contro 8 casi veri, che
@@ -1041,7 +1043,11 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
             flags.append("prompt_template")
             conf = 0.7 if incipit else 0.6
             return ("pasted_ai", _quota_citata(testo), conf, flags)
+    return None
 
+
+def _voce_trascrizione(testo: str, sender: str, project: str, flags: list[str]) -> tuple | None:
+    """Regola ②: una trascrizione incollata (timestamp ripetuti, titolo-trappola), o incorniciata."""
     # ② pasted_transcript — timestamp ravvicinati, o un titolo-trappola nel project.
     #    ⚠️ Il timestamp da solo NON basta: «alle 14:30» è un orario. Serve la
     #    RIPETIZIONE (≥ TS_VIDEO_MIN), che un orario in prosa non produce.
@@ -1061,7 +1067,11 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
             return ("mixed", _quota_citata(testo), 0.6, flags)
         conf = 0.8 if trap else 0.6
         return ("pasted_transcript", _quota_citata(testo), conf, flags)
+    return None
 
+
+def _voce_blocco_inglese(testo: str, sender: str, project: str, flags: list[str]) -> tuple | None:
+    """Regola ③: un blocco inglese lungo in un messaggio a dominanza italiana."""
     # ③ pasted_ai — un blocco inglese lungo dentro un messaggio a dominanza italiana.
     parole = testo.split()
     if len(parole) >= EN_BLOCCO_MIN:
@@ -1081,6 +1091,31 @@ def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
                     return ("pasted_transcript", _quota_citata(testo), 0.6, flags)
                 return ("mixed", _quota_citata(testo), 0.5, flags)
             return ("pasted_ai", _quota_citata(testo), 0.6, flags)
+    return None
+
+
+# L'ORDINE È LA PRECEDENZA (spec §2): la prima regola che decide chiude. Ognuna riceve le bandiere
+# alzate da quelle prima e può alzarne di sue anche quando non decide (① e ② lo fanno).
+_REGOLE_VOCE = (_voce_scheda_recupero, _voce_recita, _voce_tick, _voce_template,
+                _voce_trascrizione, _voce_blocco_inglese)
+
+
+def classify_voice(content: str, sender: str = "", project: str = "") -> tuple:
+    """Stima la NATURA del contenuto. Ritorna (voice, quoted_share, conf, flags).
+
+    Ordine di precedenza dalla spec §2. Ogni regola alza le sue bandiere, e le
+    bandiere sono l'AUTOPSIA del verdetto: senza, `voice` sarebbe un'etichetta di
+    cui non si può discutere. In dubbio ritorna `own`/`unknown`, mai `pasted`.
+    """
+    testo = content or ""
+    flags: list[str] = []
+    if not testo.strip():
+        return ("unknown", 0.0, 0.0, [])
+
+    for regola in _REGOLE_VOCE:
+        esito = regola(testo, sender, project, flags)
+        if esito is not None:
+            return esito
 
     # ⑤ mixed — cornice + materiale: poca prosa propria e molto citato.
     quota = _quota_citata(testo)

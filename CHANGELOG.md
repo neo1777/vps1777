@@ -10,6 +10,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   nell'ordine, identica su 1.502 sessioni generate.
 - **Il controllo dei segreti prima di un aggiornamento è riordinato** (QUA-04): la funzione che legge la
   sezione `secrets:` dei compose (complessità 20) è spezzata in tre passi, identica su 1.200 casi generati.
+- **La stima della voce di un messaggio è riordinata** (QUA-04): `classify_voice` (complessità 19) diventa una
+  regola per funzione, nell'ordine di precedenza di prima; identica su 8.024 testi composti.
 - **La lettura di un export claude.ai è riordinata** (QUA-04): `_iter_claude_zip` (complessità 19) è spezzata
   in un passo per specie di membro, identica su 1.500 export generati.
 - `applicabilita.yml` dichiara lo standard `1777-0.2` (prima `1777-0.1.0`, che non aveva ancora lo strumento
