@@ -427,148 +427,187 @@ def tracked_files() -> list[str]:
     return [p for p in out.decode("utf-8", "replace").split("\0") if p]
 
 
-def main() -> int:
+def _r1_jsonl(path: str) -> str | None:
+    """Un `.jsonl` tracciato: legittimo solo se è una fixture piccola sotto tests/."""
+    size = Path(path).stat().st_size if Path(path).is_file() else 0
+    if FIXTURE_DIR.search(path) and size <= FIXTURE_MAX_BYTES:
+        return None  # fixture piccola e in chiaro sotto tests/: legittima
+    why = (
+        f"supera il tetto fixture ({size} B > {FIXTURE_MAX_BYTES} B)"
+        if FIXTURE_DIR.search(path)
+        else "sta fuori da tests/fixtures/"
+    )
+    return (
+        f"  [R1] {path}\n"
+        f"       → .jsonl tracciato che {why}.\n"
+        f"         È la stessa classe degli export di sessione: un transcript\n"
+        f"         integrale, password incollate comprese.\n"
+        f"       → se è davvero una fixture, mettila in tests/fixtures/ e tienila\n"
+        f"         piccola; se è un transcript, fuori dal repo."
+    )
+
+
+def _r1_per_nome(path: str) -> str | None:
+    """R1: il rilievo se il NOME del file basta a bocciarlo, None se si va a leggerlo."""
+    # R1 — la forma del nome basta a bocciarlo: non serve guardarci dentro.
+    # Questo per primo: è l'unico che parla dei NOSTRI segreti, e sono quelli
+    # che R2 non sa riconoscere (non hanno un formato, sono base64 casuale).
+    if SEGRETI_PER_MESTIERE.search(path) and path not in AMMESSI_R1:
+        return (
+            f"  [R1] {path}\n"
+            f"       → file che contiene materiale credenziale PER MESTIERE (nostro).\n"
+            f"       → R2 non può prenderlo: i nostri segreti non hanno un formato\n"
+            f"         riconoscibile — `token_urlsafe` è base64 casuale, e un hash\n"
+            f"         bcrypt somiglia a mille altre stringhe. Qui si guarda DOVE sta.\n"
+            f"       → `git rm --cached` e tienilo fuori. Se è un file legittimo che\n"
+            f"         vive lì (un template, un README), dichiaralo in AMMESSI_R1\n"
+            f"         COL PERCHÉ — e allora ruota il segreto, perché è già uscito."
+        )
+
+    if SESSION_EXPORT.search(path):
+        return (
+            f"  [R1] {path}\n"
+            f"       → export di sessione tracciato. Un transcript di lavoro non va nel repo:\n"
+            f"         dentro ci finisce tutto quello che ci si è detti lavorando.\n"
+            f"       → toglilo (`git rm --cached`) e tienilo fuori dal repo."
+        )
+
+    if DATABASE.search(path):
+        return (
+            f"  [R1] {path}\n"
+            f"       → database tracciato. Non è «un file grosso»: è l'intero contenuto\n"
+            f"         di un'installazione (un archivio può valere decine di migliaia di\n"
+            f"         messaggi) in un oggetto solo. I dati non stanno nel repo.\n"
+            f"       → `git rm --cached` e tienilo fuori. Nessuna eccezione prevista."
+        )
+
+    if SESSION_JSONL.search(path):
+        return _r1_jsonl(path)
+    return None
+
+
+class _Letture:
+    """Ciò che non è stato letto come testo, contato per il referto.
+
+    Ciò che NON è stato letto si conta e si dice: prima un file illeggibile o non UTF-8
+    veniva saltato in silenzio e il gate chiudeva con «nessun materiale credenziale».
+    (Classe semplice e non `@dataclass`: le prove caricano questo file da percorso, senza
+    registrarlo in `sys.modules`, e lì `@dataclass` non funziona.)"""
+
+    def __init__(self) -> None:
+        self.non_letti: list[str] = []   # errore di lettura: il gate non ha un verdetto su di loro
+        self.binari = 0                  # saltati per mestiere: R2/R3 leggono testo
+        self.non_utf8 = 0
+
+
+def _testo(path: str, letture: _Letture) -> str | None:
+    """Il contenuto come testo, o None (e il conto in `letture`) se non si legge come testo."""
+    p = Path(path)
+    if not p.is_file():
+        return None
+    try:
+        raw = p.read_bytes()
+    except OSError as e:
+        letture.non_letti.append(f"{path} ({type(e).__name__})")
+        return None
+    if BINARY_HINT in raw[:8192]:  # binario: niente scansione testuale
+        letture.binari += 1
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        letture.non_utf8 += 1
+        return None
+
+
+def _r2_in_breve(path: str, text: str) -> list[str]:
+    """R2 su un file esente da R3: la forma corta del rilievo."""
     problems: list[str] = []
-    avvisi: list[str] = []  # R4: si stampano, non bocciano
-    # Ciò che NON è stato letto si conta e si dice: prima un file illeggibile o non UTF-8
-    # veniva saltato in silenzio e il gate chiudeva con «nessun materiale credenziale».
-    non_letti: list[str] = []      # errore di lettura: il gate non ha un verdetto su di loro
-    binari = non_utf8 = 0          # saltati per mestiere: R2/R3 leggono testo
-
-    for path in tracked_files():
-        # R1 — la forma del nome basta a bocciarlo: non serve guardarci dentro.
-        # Questo per primo: è l'unico che parla dei NOSTRI segreti, e sono quelli
-        # che R2 non sa riconoscere (non hanno un formato, sono base64 casuale).
-        if SEGRETI_PER_MESTIERE.search(path) and path not in AMMESSI_R1:
-            problems.append(
-                f"  [R1] {path}\n"
-                f"       → file che contiene materiale credenziale PER MESTIERE (nostro).\n"
-                f"       → R2 non può prenderlo: i nostri segreti non hanno un formato\n"
-                f"         riconoscibile — `token_urlsafe` è base64 casuale, e un hash\n"
-                f"         bcrypt somiglia a mille altre stringhe. Qui si guarda DOVE sta.\n"
-                f"       → `git rm --cached` e tienilo fuori. Se è un file legittimo che\n"
-                f"         vive lì (un template, un README), dichiaralo in AMMESSI_R1\n"
-                f"         COL PERCHÉ — e allora ruota il segreto, perché è già uscito."
-            )
-            continue
-
-        if SESSION_EXPORT.search(path):
-            problems.append(
-                f"  [R1] {path}\n"
-                f"       → export di sessione tracciato. Un transcript di lavoro non va nel repo:\n"
-                f"         dentro ci finisce tutto quello che ci si è detti lavorando.\n"
-                f"       → toglilo (`git rm --cached`) e tienilo fuori dal repo."
-            )
-            continue
-
-        if DATABASE.search(path):
-            problems.append(
-                f"  [R1] {path}\n"
-                f"       → database tracciato. Non è «un file grosso»: è l'intero contenuto\n"
-                f"         di un'installazione (un archivio può valere decine di migliaia di\n"
-                f"         messaggi) in un oggetto solo. I dati non stanno nel repo.\n"
-                f"       → `git rm --cached` e tienilo fuori. Nessuna eccezione prevista."
-            )
-            continue
-
-        if SESSION_JSONL.search(path):
-            size = Path(path).stat().st_size if Path(path).is_file() else 0
-            if FIXTURE_DIR.search(path) and size <= FIXTURE_MAX_BYTES:
-                pass  # fixture piccola e in chiaro sotto tests/: legittima
-            else:
-                why = (
-                    f"supera il tetto fixture ({size} B > {FIXTURE_MAX_BYTES} B)"
-                    if FIXTURE_DIR.search(path)
-                    else "sta fuori da tests/fixtures/"
-                )
-                problems.append(
-                    f"  [R1] {path}\n"
-                    f"       → .jsonl tracciato che {why}.\n"
-                    f"         È la stessa classe degli export di sessione: un transcript\n"
-                    f"         integrale, password incollate comprese.\n"
-                    f"       → se è davvero una fixture, mettila in tests/fixtures/ e tienila\n"
-                    f"         piccola; se è un transcript, fuori dal repo."
-                )
-                continue
-
-        p = Path(path)
-        if not p.is_file():
-            continue
-        try:
-            raw = p.read_bytes()
-        except OSError as e:
-            non_letti.append(f"{path} ({type(e).__name__})")
-            continue
-        if BINARY_HINT in raw[:8192]:  # binario: niente scansione testuale
-            binari += 1
-            continue
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            non_utf8 += 1
-            continue
-
-        # R3 gira anche sui file esenti da R2 — vedi il commento su ALLOWLIST_R2 —
-        # e salta solo i due che gli indirizzi li contengono per mestiere.
-        if path in ALLOWLIST_R3:
-            if path in ALLOWLIST_R2:
-                continue
-            for label, pattern in SECRET_PATTERNS:
-                for m in pattern.finditer(text):
-                    line = text.count("\n", 0, m.start()) + 1
-                    problems.append(f"  [R2] {path}:{line} → sembra {label}.")
-                    break
-            continue
-        for m in IPV4.finditer(text):
-            ip = m.group(0)
-            if indirizzo_da_ignorare(ip):
-                continue
+    for label, pattern in SECRET_PATTERNS:
+        for m in pattern.finditer(text):
             line = text.count("\n", 0, m.start()) + 1
-            problems.append(
-                f"  [R3] {path}:{line}\n"
-                f"       → un indirizzo IP pubblico (valore non stampato di proposito).\n"
-                f"       → la regola è più stretta di «niente segreti»: nessun indirizzo\n"
-                f"         dell'ambiente, nemmeno in un esempio o in un output di prova.\n"
-                f"       → se serve un esempio, usa RFC 5737 (192.0.2.x, 198.51.100.x,\n"
-                f"         203.0.113.x): esistono apposta e non sono di nessuno.\n"
-                f"       → se è un bersaglio di test noto, aggiungilo a IP_AMMESSI COL PERCHÉ."
-            )
+            problems.append(f"  [R2] {path}:{line} → sembra {label}.")
             break
-        for m in TSNET.finditer(text):
-            if tsnet_da_ignorare(m.group(0)):
-                continue
-            line = text.count("\n", 0, m.start()) + 1
-            problems.append(
-                f"  [R3] {path}:{line}\n"
-                f"       → un nome di tailnet reale (valore non stampato di proposito).\n"
-                f"       → nella doc si scrive `<host>.ts.net`: identifica la forma,\n"
-                f"         non la rete di una persona."
-            )
-            break
+    return problems
 
+
+def _r3(path: str, text: str) -> list[str]:
+    """R3: un indirizzo IP pubblico e un nome di tailnet reale, al più uno per specie e per file."""
+    problems: list[str] = []
+    for m in IPV4.finditer(text):
+        ip = m.group(0)
+        if indirizzo_da_ignorare(ip):
+            continue
+        line = text.count("\n", 0, m.start()) + 1
+        problems.append(
+            f"  [R3] {path}:{line}\n"
+            f"       → un indirizzo IP pubblico (valore non stampato di proposito).\n"
+            f"       → la regola è più stretta di «niente segreti»: nessun indirizzo\n"
+            f"         dell'ambiente, nemmeno in un esempio o in un output di prova.\n"
+            f"       → se serve un esempio, usa RFC 5737 (192.0.2.x, 198.51.100.x,\n"
+            f"         203.0.113.x): esistono apposta e non sono di nessuno.\n"
+            f"       → se è un bersaglio di test noto, aggiungilo a IP_AMMESSI COL PERCHÉ."
+        )
+        break
+    for m in TSNET.finditer(text):
+        if tsnet_da_ignorare(m.group(0)):
+            continue
+        line = text.count("\n", 0, m.start()) + 1
+        problems.append(
+            f"  [R3] {path}:{line}\n"
+            f"       → un nome di tailnet reale (valore non stampato di proposito).\n"
+            f"       → nella doc si scrive `<host>.ts.net`: identifica la forma,\n"
+            f"         non la rete di una persona."
+        )
+        break
+    return problems
+
+
+def _r4(path: str, text: str) -> list[str]:
+    """R4 — avvisi: una password in prosa (R4a) o nuda (R4b). Una riga per file e per regola,
+    la POSIZIONE e mai il valore; non entra in `problems`: non boccia (vedi il perché sopra)."""
+    avvisi: list[str] = []
+    for riga in righe_password_in_prosa(text)[:1]:
+        avvisi.append(f"  [R4a] {path}:{riga} → possibile password scritta in prosa (valore non stampato).")
+    for riga in righe_password_nuda(text)[:1]:
+        avvisi.append(f"  [R4b] {path}:{riga} → token con la forma di una password nuda (valore non stampato).")
+    return avvisi
+
+
+def _r2(path: str, text: str) -> list[str]:
+    """R2: materiale credenziale con un formato riconoscibile, un rilievo per forma e per file."""
+    problems: list[str] = []
+    for label, pattern in SECRET_PATTERNS:
+        for m in pattern.finditer(text):
+            line = text.count("\n", 0, m.start()) + 1
+            # Riporta la POSIZIONE, mai il valore: questo output finisce in un log pubblico.
+            problems.append(
+                f"  [R2] {path}:{line}\n"
+                f"       → sembra {label} (valore non stampato di proposito).\n"
+                f"       → se è un segnaposto per la doc, rendilo evidente (`tskey-auth-...`);\n"
+                f"         se è vero: NON basta toglierlo — quel segreto va considerato bruciato\n"
+                f"         e va RUOTATO. La storia di git non dimentica."
+            )
+            break  # un rilievo per file/pattern basta a bocciare la build
+    return problems
+
+
+def _problemi_del_testo(path: str, text: str, avvisi: list[str]) -> list[str]:
+    """R3, R4 e R2 sul contenuto, con le esenzioni per file. Gli avvisi R4 vanno in `avvisi`."""
+    # R3 gira anche sui file esenti da R2 — vedi il commento su ALLOWLIST_R2 —
+    # e salta solo i due che gli indirizzi li contengono per mestiere.
+    if path in ALLOWLIST_R3:
         if path in ALLOWLIST_R2:
-            continue
+            return []
+        return _r2_in_breve(path, text)
+    problems = _r3(path, text)
+    if path in ALLOWLIST_R2:
+        return problems
+    avvisi += _r4(path, text)
+    return problems + _r2(path, text)
 
-        # R4 — avvisi: una password in prosa (R4a) o nuda (R4b). Una riga per file e per regola,
-        # la POSIZIONE e mai il valore; non entra in `problems`: non boccia (vedi il perché sopra).
-        for riga in righe_password_in_prosa(text)[:1]:
-            avvisi.append(f"  [R4a] {path}:{riga} → possibile password scritta in prosa (valore non stampato).")
-        for riga in righe_password_nuda(text)[:1]:
-            avvisi.append(f"  [R4b] {path}:{riga} → token con la forma di una password nuda (valore non stampato).")
 
-        for label, pattern in SECRET_PATTERNS:
-            for m in pattern.finditer(text):
-                line = text.count("\n", 0, m.start()) + 1
-                # Riporta la POSIZIONE, mai il valore: questo output finisce in un log pubblico.
-                problems.append(
-                    f"  [R2] {path}:{line}\n"
-                    f"       → sembra {label} (valore non stampato di proposito).\n"
-                    f"       → se è un segnaposto per la doc, rendilo evidente (`tskey-auth-...`);\n"
-                    f"         se è vero: NON basta toglierlo — quel segreto va considerato bruciato\n"
-                    f"         e va RUOTATO. La storia di git non dimentica."
-                )
-                break  # un rilievo per file/pattern basta a bocciare la build
-
+def _referto(problems: list[str], avvisi: list[str], letture: _Letture) -> int:
     if problems:
         print("✗ gate anti-leak: trovata roba che online non ci può stare\n")
         print("\n".join(problems))
@@ -590,16 +629,32 @@ def main() -> int:
             "    righe porta un valore vero, NON basta toglierlo — va ruotato. Se è un esempio,\n"
             "    rendilo evidente (<password>, segnaposto RFC): l'avviso sparisce da sé.\n"
         )
-    if binari or non_utf8:
-        print(f"  (non scansionati come testo: {binari} file binari, {non_utf8} non UTF-8 — R1 li ha guardati per nome)")
-    if non_letti:
-        print(f"⚪ gate anti-leak: NON MISURATO su {len(non_letti)} file che non ho potuto leggere:")
-        for riga in non_letti[:20]:
+    if letture.binari or letture.non_utf8:
+        print(f"  (non scansionati come testo: {letture.binari} file binari, {letture.non_utf8} non UTF-8 — R1 li ha guardati per nome)")
+    if letture.non_letti:
+        print(f"⚪ gate anti-leak: NON MISURATO su {len(letture.non_letti)} file che non ho potuto leggere:")
+        for riga in letture.non_letti[:20]:
             print(f"    {riga}")
         print("  Sul resto non ho trovato niente, ma «non ho potuto leggere» non è «pulito».")
         return 2
     print("✓ gate anti-leak: nessun export di sessione tracciato, nessun materiale credenziale.")
     return 0
+
+
+def main() -> int:
+    """Ogni file tracciato (e ogni nuovo non ignorato) passa da R1 sul nome, poi dal testo."""
+    problems: list[str] = []
+    avvisi: list[str] = []  # R4: si stampano, non bocciano
+    letture = _Letture()
+    for path in tracked_files():
+        rilievo = _r1_per_nome(path)
+        if rilievo:
+            problems.append(rilievo)
+            continue
+        text = _testo(path, letture)
+        if text is not None:
+            problems += _problemi_del_testo(path, text, avvisi)
+    return _referto(problems, avvisi, letture)
 
 
 if __name__ == "__main__":

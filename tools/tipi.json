@@ -5,7 +5,6 @@
   "file": {
     "installer/engine.py": 1,
     "security/check_findings.py": 1,
-    "security/check_no_leaks.py": 1,
     "services/archive-mcp/app/db.py": 7,
     "services/gateway/app/admin.py": 19,
     "services/gateway/app/archive_indexer.py": 25,
