@@ -229,6 +229,8 @@ fase_guardiani() {
   passo "il runner dei test bash sa fallire — autoprova" bash tools/esegui-test-bash.sh "$AUTOPROVA"
   passo "le coordinate nei doc — autoprova" python3 tools/coordinate-nei-doc.py "$AUTOPROVA"
   passo "le coordinate nei doc puntano dentro il file" python3 tools/coordinate-nei-doc.py
+  passo "marcatori di conflitto — autoprova" python3 tools/marcatori-di-conflitto.py "$AUTOPROVA"
+  passo "nessun marcatore di conflitto né .rej/.orig" python3 tools/marcatori-di-conflitto.py
   manca "gate locale — autoprova" uv \
     || passo "gate locale — autoprova" uv run --with pyyaml==6.0.4 python3 tools/gate-locale.py "$AUTOPROVA"
   passo "le nove prove non mentono a macchina nuda" bash tools/prove-empiriche/onesta-a-macchina-nuda.sh
