@@ -316,6 +316,10 @@ def _make_repo_tar() -> bytes:
 # Tempo massimo di UN comando remoto in streaming (secondi). Largo apposta: la build locale
 # su una VPS piccola è il comando più lungo. Si cambia con VPS1777_INSTALLER_CMD_TIMEOUT_S.
 CMD_TIMEOUT_S = int(os.environ.get("VPS1777_INSTALLER_CMD_TIMEOUT_S", "7200"))
+# Tempo massimo per CONSEGNARE uno script allo stdin del comando remoto (secondi). L'invio è
+# bloccante: se il remoto non legge e la finestra del canale si riempie, senza questo tetto
+# l'installazione restava ferma lì, prima ancora che partisse il tetto del comando.
+STDIN_TIMEOUT_S = 120
 
 # L'elenco degli ingressi è CHIUSO: un valore fuori elenco diventava «tailscale» in silenzio.
 INGRESSI = {"1": "tailscale", "2": "caddy", "3": "cloudflared"}
@@ -468,31 +472,48 @@ class Deployer:
             data += err.read().decode("utf-8", "replace")
         return data
 
-    def _apri_canale(self, cmd: str, stdin_script: str | None) -> "paramiko.Channel":
+    def _apri_canale(self, cmd: str, stdin_script: str | None, label: str = "") -> "paramiko.Channel":
         """Lancia cmd su un canale nuovo, gli dà lo script per stdin se c'è, e lo rende non bloccante."""
         chan = self._cliente().get_transport().open_session()  # type: ignore[union-attr]  # il trasporto c'è: il client è connesso
         # NIENTE pty: con un tty BuildKit/apt producono progress-bar ANSI che
         # si auto-refreshano → fiume di sequenze di escape che intasano la UI.
         # Senza tty l'output è "plain" (una riga per evento), pulito da streammare.
-        chan.set_combine_stderr(True)
-        chan.exec_command(cmd)
-        if stdin_script is not None:
-            # invio PRIMA di passare al non-bloccante: sendall su canale con
-            # timeout 0 può alzare a buffer pieno, e uno script troncato a metà
-            # è peggio di uno mai partito.
-            chan.sendall(stdin_script.encode("utf-8"))
-            chan.shutdown_write()
+        # Se il lancio o l'invio dello script falliscono, il canale si chiude QUI: prima restava
+        # aperto finché non si chiudeva il trasporto intero (rilettura di Sagoma, 25/11/2026).
+        try:
+            chan.set_combine_stderr(True)
+            chan.exec_command(cmd)
+            if stdin_script is not None:
+                # invio PRIMA di passare al non-bloccante: sendall su canale con
+                # timeout 0 può alzare a buffer pieno, e uno script troncato a metà
+                # è peggio di uno mai partito.
+                chan.settimeout(STDIN_TIMEOUT_S)
+                chan.sendall(stdin_script.encode("utf-8"))
+                chan.shutdown_write()
+        except socket.timeout:
+            chan.close()
+            raise DeployError(
+                f"il comando remoto «{label or cmd[:40]}» non ha letto il suo script entro "
+                f"{STDIN_TIMEOUT_S} secondi: ho chiuso il canale. Rilancia l'installazione; "
+                "se si ripete, guarda la VPS (rete, carico).") from None
+        except BaseException:
+            chan.close()
+            raise
         chan.settimeout(0.0)  # non-bloccante
         return chan
 
     @staticmethod
     def _canale_scaduto(chan: "paramiko.Channel", label: str, cmd: str) -> None:
         """Il comando ha superato il tetto: chiude il canale e lo dice."""
+        # Senza terminale, chiudere il canale NON uccide il processo remoto (nessun SIGHUP): diceva
+        # «l'ho fermato» di un apt che sulla VPS poteva essere ancora vivo. Ora dice che cosa ha
+        # fatto davvero, e che cosa guardare prima di rilanciare.
         chan.close()
         raise DeployError(
             f"il comando remoto «{label or cmd[:40]}» non ha concluso entro "
-            f"{CMD_TIMEOUT_S // 60} minuti: l'ho fermato. Rilancia l'installazione; "
-            "se si ripete, guarda la VPS (rete, disco, apt bloccato).")
+            f"{CMD_TIMEOUT_S // 60} minuti: ho smesso di aspettarlo e ho chiuso il canale. "
+            "Sulla VPS può essere ancora vivo: guardalo (rete, disco, apt bloccato) e, se serve, "
+            "fermalo prima di rilanciare l'installazione.")
 
     @staticmethod
     def _coda_del_canale(chan: "paramiko.Channel", buf: bytes) -> Iterator[str]:
@@ -523,7 +544,7 @@ class Deployer:
         la durata dell'esecuzione) — lo stdin no. deploy.sh usa `bash -s <<…`
         per la stessa ragione; qui è l'equivalente paramiko.
         """
-        chan = self._apri_canale(cmd, stdin_script)
+        chan = self._apri_canale(cmd, stdin_script, label)
         buf = b""
         # Un comando remoto che non finisce mai (un apt appeso, una rete che non risponde)
         # teneva l'installazione ferma per sempre, senza una riga. Il tetto è largo perché
