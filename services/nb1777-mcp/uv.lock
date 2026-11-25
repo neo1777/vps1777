@@ -703,7 +703,7 @@ wheels = [
 
 [[package]]
 name = "notebooklm-mcp-cli"
-version = "0.16.5"
+version = "0.16.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
@@ -721,9 +721,9 @@ dependencies = [
     { name = "typer" },
     { name = "websocket-client" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a5/87/fd6c2a0a1fe4ce0664bb125b59e83157050e09ef54837a41078b581930fd/notebooklm_mcp_cli-0.16.5.tar.gz", hash = "sha256:ec845d537d310e9d4865467dd11ea64a55b3569b867355f370b582abe910ad1c", size = 1202509, upload-time = "2026-11-14T22:07:53.757Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/89/355eebf80e7112c8c5d456de4de241636b13ec12fc83504e916eb3552c65/notebooklm_mcp_cli-0.16.6.tar.gz", hash = "sha256:d4c438677b6bbb48a8f2ba523813b6796462948013d8b21e3c1155d4f4dcecfb", size = 1205638, upload-time = "2026-11-22T03:23:21.457Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/31/d65df8f42413ba30e0e9233f96c15a9721ad723386b9d351a1c4e4edb388/notebooklm_mcp_cli-0.16.5-py3-none-any.whl", hash = "sha256:3c33cac11a47f59179ab170e6e06135b3aaf44c5153b5a469b6bd11157aee94f", size = 570119, upload-time = "2026-11-14T22:07:52.249Z" },
+    { url = "https://files.pythonhosted.org/packages/41/d5/840d2b3fc016cac48c17acf6a7ac1197abf84e65e1baee50831c7dd820db/notebooklm_mcp_cli-0.16.6-py3-none-any.whl", hash = "sha256:db4aab31816c371f1b69b6ed6a967102f7838c56f2a9676cd9f68dc844bdcf27", size = 571446, upload-time = "2026-11-22T03:23:19.508Z" },
 ]
 
 [[package]]
@@ -1451,7 +1451,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "mcp", specifier = ">=1.28,<2" },
-    { name = "notebooklm-mcp-cli", specifier = "==0.16.5" },
+    { name = "notebooklm-mcp-cli", specifier = "==0.16.6" },
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-settings", specifier = ">=2.15.0" },
     { name = "starlette", specifier = ">=1.6.0" },
