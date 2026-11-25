@@ -5,6 +5,9 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **`vps1777 archive-ingest` carica i `.zip`.** Un export o un bundle di Recupero Sessioni finiva sul giro di
+  NotebookLM, che lo rifiuta sempre, dopo aver provato a mandarlo a Google: un bundle non si poteva
+  caricare dalla riga di comando. Ora va diretto all'indexer, che riconosce lo zip dal contenuto.
 - `release.yml`, quando la CI del commit taggato non è verde, consigliava di «ri-taggare»: i tag di versione
   non si rifanno (sono protetti). Ora dice di portare la CI al verde e rilasciare il numero successivo.
 - Il README citava «H45» senza dire che cos'è: è una voce del registro di sicurezza.

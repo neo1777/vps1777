@@ -193,6 +193,9 @@ Indexes a file into the search archive. The extension picks the route:
 - **text files** (`.md` `.txt` `.markdown` `.rst` `.log` `.csv` `.json` `.jsonl`) →
   **straight to the indexer**, without NotebookLM (`.markdown`, `.rst`, `.log` and `.csv`
   reach the indexer as `.txt`);
+- **`.zip` archives** (a claude.ai export, a Recupero Sessioni bundle, a Roo/Cline export)
+  → **straight to the indexer**, which recognises them by their content (since 0.98.15;
+  before, they went to NotebookLM, which rejects them);
 - **everything else** (scanned PDFs, photos of documents…) → **going through NotebookLM**
   (multimodal/OCR reading). ⚠️ The file is sent to Google.
 

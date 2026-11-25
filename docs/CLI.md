@@ -185,6 +185,9 @@ Indicizza un file nell'archivio di ricerca. La strada la sceglie l'estensione:
 - **file di testo** (`.md` `.txt` `.markdown` `.rst` `.log` `.csv` `.json` `.jsonl`) →
   **diretti all'indexer**, senza NotebookLM (`.markdown`, `.rst`, `.log` e `.csv`
   arrivano all'indexer come `.txt`);
+- **archivi `.zip`** (un export di claude.ai, un bundle di Recupero Sessioni, un export di
+  Roo/Cline) → **diretti all'indexer**, che li riconosce dal contenuto (dalla 0.98.15;
+  prima finivano su NotebookLM, che li rifiuta);
 - **tutto il resto** (PDF-scansione, foto di documenti…) → **passando da NotebookLM**
   (lettura multimodale/OCR). ⚠️ Il file viene mandato a Google.
 

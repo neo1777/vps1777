@@ -5484,6 +5484,11 @@ def cmd_archive_retag(repo: Path, args) -> int:
 # avrebbe mangiati in un secondo. Il testo si indicizza DIRETTO; NotebookLM resta
 # per ciò che testo non è (PDF-immagine, scansioni, audio).
 _TESTO_EXTS = {".md", ".txt", ".markdown", ".rst", ".log", ".csv", ".json", ".jsonl"}
+# Uno .zip va diretto all'indexer anche lui (25/11/2026): l'indexer riconosce dal contenuto
+# un export di claude.ai, un bundle di Recupero Sessioni o un export di Roo/Cline. Prima
+# finiva sul giro di NotebookLM, che lo rifiuta sempre («Unsupported file type: .zip»),
+# dopo aver provato a mandarlo a Google: un bundle non si poteva caricare dalla CLI.
+_DIRETTI_EXTS = _TESTO_EXTS | {".zip"}
 # P17: la cartella degli artefatti di nb1777 (NLM_ARTIFACTS in compose.yaml) e i nomi che
 # `archive-ingest --artefatto` accetta: un nome di file, mai un percorso
 _DIR_ARTEFATTI = "/var/lib/nlm-artifacts"
@@ -5583,8 +5588,8 @@ def cmd_archive_ingest(repo: Path, args) -> int:
     project = args.project or db_name
     rid = os.urandom(4).hex()
     suffix = src.suffix.lower()
-    testuale = suffix in _TESTO_EXTS and not args.nlm
-    if suffix in _TESTO_EXTS and args.nlm:
+    testuale = suffix in _DIRETTI_EXTS and not args.nlm
+    if suffix in _DIRETTI_EXTS and args.nlm:
         log(f"«{src.name}» è testuale ma --nlm forza il giro NotebookLM")
     # Nel volume degli artefatti, non in /tmp (H43, 27/09/2026): con il rootfs read-only
     # /tmp è una tmpfs da 64 MB, e un audio o un PDF la superano. La sotto-cartella
@@ -5595,7 +5600,7 @@ def cmd_archive_ingest(repo: Path, args) -> int:
 
     try:
         if testuale:
-            log(f"«{src.name}» è già testo ({suffix}): indicizzo DIRETTO, niente NotebookLM")
+            log(f"«{src.name}» lo legge l'indexer ({suffix}): indicizzo DIRETTO, niente NotebookLM")
             # il file testuale viaggia con la SUA estensione: l'indexer sceglie il parser
             # dal suffisso (un .jsonl non è un .txt)
             if artefatto:
