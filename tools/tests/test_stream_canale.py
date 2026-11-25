@@ -61,8 +61,14 @@ def test_l_ultima_riga_senza_a_capo_esce_lo_stesso(monkeypatch):
 
 
 def test_cio_che_arriva_dopo_la_fine_del_comando_non_si_perde(monkeypatch):
-    canale = _Canale([b"uno\nmez"], coda=[b"za\nulti", b"ma\r\n", b""])
+    # un giro a vuoto (None) a comando finito: è lì che si legge la coda, fino al pezzo vuoto
+    canale = _Canale([b"uno\nmez"], coda=[None, b"za\nulti", b"ma\r\n", b"", b"oltre la fine\n"])
     assert _gira(canale, monkeypatch, "comando") == ["uno", "mezza", "ultima"]
+
+
+def test_la_coda_che_finisce_per_attesa_e_non_per_pezzo_vuoto_esce_lo_stesso(monkeypatch):
+    canale = _Canale([b"uno\n"], coda=[None, b"resto senza a capo"])
+    assert _gira(canale, monkeypatch, "comando") == ["uno", "resto senza a capo"]
 
 
 def test_i_byte_che_non_sono_utf8_non_fermano_la_lettura(monkeypatch):
@@ -108,3 +114,7 @@ def test_il_tetto_nomina_il_comando_se_manca_l_etichetta(monkeypatch):
     with pytest.raises(eng.DeployError, match="«" + "x" * 40 + "»"):
         _gira(canale, monkeypatch, "x" * 60)
     assert ("close",) in canale.fatti
+
+
+def test_un_pezzo_vuoto_a_comando_in_corso_non_e_la_fine(monkeypatch):
+    assert _gira(_Canale([b"uno\n", b"", b"due\n"]), monkeypatch, "comando") == ["uno", "due"]
