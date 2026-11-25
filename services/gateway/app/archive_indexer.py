@@ -2282,6 +2282,89 @@ def _e_export_claude(names: list) -> bool:
         n.startswith(("design_chats/", "projects/", "memories/")) for n in names)
 
 
+def _zip_memorie(z: zipfile.ZipFile, names: list, budget: _Budget) -> Iterator:
+    # memories.json — la memoria persistente dell'account. Non veniva indicizzata:
+    # l'archivio non conteneva la fonte che più di ogni altra determina cosa
+    # l'assistente crede dell'utente.
+    # Due layout: `memories.json` alla radice (export unico, fino ad agosto 2026)
+    # oppure `memories/<account_uuid>.json` (export a 5 zip, dal 29/08/2026).
+    for n in _membri_memories(names):
+        try:
+            yield from _iter_memories(_zip_json(z, n, budget))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            yield _Skip("claude-export", "json-malformato", n, "")
+
+
+def _zip_anagrafica(z: zipfile.ZipFile, names: list, budget: _Budget) -> Iterator:
+    # users.json — anagrafica dell'account (nome, email, telefono verificato).
+    #
+    # SI INDICIZZA. L'ingestione non filtra: se l'utente carica un file,
+    # l'archivio deve contenerlo verbatim. Decidere qui che un dato è "troppo
+    # sensibile" è la stessa mossa che faceva `extract_text` scartando i tool_use
+    # perché "rumore": una policy di OUTPUT applicata all'INGRESSO, dove nessuno
+    # la può più rivedere. Chi carica sa cosa carica.
+    #
+    # Il posto giusto per la protezione è a valle (ricerca/risposta) e non esiste
+    # ancora: vedi la issue di design sui contenuti sensibili. Finché non c'è,
+    # l'archivio va trattato come un contenitore di dati personali — perché lo è,
+    # con o senza questo file.
+    if "users.json" in names:
+        try:
+            yield from _iter_users(_zip_json(z, "users.json", budget))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            yield _Skip("claude-export", "json-malformato", "users.json", "")
+    if "login_history.json" in names:
+        try:
+            yield from _iter_login_history(_zip_json(z, "login_history.json", budget))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            yield _Skip("claude-export", "json-malformato", "login_history.json", "")
+
+
+def _zip_design_chats(z: zipfile.ZipFile, names: list, budget: _Budget) -> Iterator:
+    for n in names:
+        if n.startswith("design_chats/") and n.endswith(".json"):
+            try:
+                data = _zip_json(z, n, budget)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                yield _Skip("claude-export", "json-malformato", n, "")
+                continue
+            if isinstance(data, dict):
+                # il title è sempre il generico "Chat": l'etichetta utile è
+                # il progetto di appartenenza. `name` vince su `title` in
+                # _iter_conversations, quindi la si impone qui.
+                proj = data.get("project")
+                pname = proj.get("name") if isinstance(proj, dict) else ""
+                data = {**data, "name": f"design:{pname or data.get('title') or 'chat'}"}
+            yield from _iter_conversations(data, "claude-design-chats")
+
+
+def _righe_dei_documenti(proj: dict) -> Iterator:
+    """I documenti di un progetto dell'export: una riga per documento con contenuto."""
+    pname = f"project:{proj.get('name') or 'senza-nome'}"
+    for doc in (proj.get("docs") or []):
+        if not isinstance(doc, dict):
+            continue
+        content = doc.get("content") or ""
+        uuid = doc.get("uuid") or _uid(pname, doc.get("filename") or "", content[:64])
+        if not content:
+            continue
+        fn = doc.get("filename") or ""
+        body = f"[{fn}]\n{content}" if fn else content
+        yield (uuid, pname, doc.get("created_at") or "", body)
+
+
+def _zip_progetti(z: zipfile.ZipFile, names: list, budget: _Budget) -> Iterator:
+    for n in names:
+        if n.startswith("projects/") and n.endswith(".json"):
+            try:
+                proj = _zip_json(z, n, budget)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                yield _Skip("claude-export", "json-malformato", n, "")
+                continue
+            if isinstance(proj, dict):
+                yield from _righe_dei_documenti(proj)
+
+
 def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[RowFull]:
     with zipfile.ZipFile(zip_path) as z:
         names = z.namelist()
@@ -2291,73 +2374,10 @@ def _iter_claude_zip(zip_path: Union[str, Path], budget: _Budget) -> Iterator[Ro
             # i byte decompressi e abortisce con un messaggio invece di un OOM.
             yield from _iter_conversations(
                 _zip_json(z, "conversations.json", budget), "claude-conversations")
-        # memories.json — la memoria persistente dell'account. Non veniva indicizzata:
-        # l'archivio non conteneva la fonte che più di ogni altra determina cosa
-        # l'assistente crede dell'utente.
-        # Due layout: `memories.json` alla radice (export unico, fino ad agosto 2026)
-        # oppure `memories/<account_uuid>.json` (export a 5 zip, dal 29/08/2026).
-        for n in _membri_memories(names):
-            try:
-                yield from _iter_memories(_zip_json(z, n, budget))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                yield _Skip("claude-export", "json-malformato", n, "")
-        # users.json — anagrafica dell'account (nome, email, telefono verificato).
-        #
-        # SI INDICIZZA. L'ingestione non filtra: se l'utente carica un file,
-        # l'archivio deve contenerlo verbatim. Decidere qui che un dato è "troppo
-        # sensibile" è la stessa mossa che faceva `extract_text` scartando i tool_use
-        # perché "rumore": una policy di OUTPUT applicata all'INGRESSO, dove nessuno
-        # la può più rivedere. Chi carica sa cosa carica.
-        #
-        # Il posto giusto per la protezione è a valle (ricerca/risposta) e non esiste
-        # ancora: vedi la issue di design sui contenuti sensibili. Finché non c'è,
-        # l'archivio va trattato come un contenitore di dati personali — perché lo è,
-        # con o senza questo file.
-        if "users.json" in names:
-            try:
-                yield from _iter_users(_zip_json(z, "users.json", budget))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                yield _Skip("claude-export", "json-malformato", "users.json", "")
-        if "login_history.json" in names:
-            try:
-                yield from _iter_login_history(_zip_json(z, "login_history.json", budget))
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                yield _Skip("claude-export", "json-malformato", "login_history.json", "")
-        for n in names:
-            if n.startswith("design_chats/") and n.endswith(".json"):
-                try:
-                    data = _zip_json(z, n, budget)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    yield _Skip("claude-export", "json-malformato", n, "")
-                    continue
-                if isinstance(data, dict):
-                    # il title è sempre il generico "Chat": l'etichetta utile è
-                    # il progetto di appartenenza. `name` vince su `title` in
-                    # _iter_conversations, quindi la si impone qui.
-                    proj = data.get("project")
-                    pname = proj.get("name") if isinstance(proj, dict) else ""
-                    data = {**data, "name": f"design:{pname or data.get('title') or 'chat'}"}
-                yield from _iter_conversations(data, "claude-design-chats")
-        for n in names:
-            if n.startswith("projects/") and n.endswith(".json"):
-                try:
-                    proj = _zip_json(z, n, budget)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    yield _Skip("claude-export", "json-malformato", n, "")
-                    continue
-                if not isinstance(proj, dict):
-                    continue
-                pname = f"project:{proj.get('name') or 'senza-nome'}"
-                for doc in (proj.get("docs") or []):
-                    if not isinstance(doc, dict):
-                        continue
-                    content = doc.get("content") or ""
-                    uuid = doc.get("uuid") or _uid(pname, doc.get("filename") or "", content[:64])
-                    if not content:
-                        continue
-                    fn = doc.get("filename") or ""
-                    body = f"[{fn}]\n{content}" if fn else content
-                    yield (uuid, pname, doc.get("created_at") or "", body)
+        yield from _zip_memorie(z, names, budget)
+        yield from _zip_anagrafica(z, names, budget)
+        yield from _zip_design_chats(z, names, budget)
+        yield from _zip_progetti(z, names, budget)
 
 
 # ── helper testo condiviso ───────────────────────────────────────────────────

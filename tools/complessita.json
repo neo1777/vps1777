@@ -14,10 +14,6 @@
    "complessita": 20,
    "stato": "da-esaminare"
   },
-  "services/gateway/app/archive_indexer.py::_iter_claude_zip": {
-   "complessita": 19,
-   "stato": "da-esaminare"
-  },
   "services/gateway/app/archive_indexer.py::classify_voice": {
    "complessita": 19,
    "stato": "da-esaminare"
