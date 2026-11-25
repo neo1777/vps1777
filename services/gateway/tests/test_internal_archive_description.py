@@ -100,11 +100,11 @@ def test_il_controllo_di_rete_viene_prima_del_segreto():
     """Ordine non negoziabile: chi arriva da fuori non deve nemmeno arrivare al
     confronto del segreto. Se l'ordine si invertisse, un attaccante esterno
     potrebbe misurare i tempi di risposta del confronto."""
-    assert GUARDIA.index("ip_is_internal") < GUARDIA.index("compare_digest")
+    assert GUARDIA.index("ip_is_internal") < GUARDIA.index("_constant_eq(")
 
 
 def test_il_segreto_e_constant_time_e_fail_closed():
-    assert "hmac.compare_digest" in GUARDIA, "confronto non constant-time"
+    assert "proxy._constant_eq(" in GUARDIA, "confronto non constant-time (o non per impronte)"
     assert "not atteso or" in GUARDIA, "segreto non configurato deve NEGARE (fail-closed)"
 
 

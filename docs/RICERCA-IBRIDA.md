@@ -27,6 +27,14 @@ col lessico giusto. Posizione del bersaglio nei primi 10 risultati:
 | bersagli trovati | 5/9 | 4/9 | **6/9** |
 
 I due motori sbagliano in modi diversi: la fusione tiene il meglio di entrambi.
+
+La fusione è la **Reciprocal Rank Fusion** (RRF) di Cormack, Clarke e Büttcher, *Reciprocal Rank
+Fusion outperforms Condorcet and individual Rank Learning Methods*, SIGIR 2009: una riga riceve
+`peso / (k + posizione)` da ogni lista in cui compare, e i punti si sommano. Si guardano le
+posizioni e non i punteggi, perché bm25 e la distanza dei vettori non stanno sulla stessa scala.
+Il lavoro originale usa `k = 60` e liste di peso uguale; qui `k = 30` e la lista full-text pesa
+1.5 (`fondi_rrf_liste` in `services/archive-mcp/app/semantica.py`): sono i valori misurati sul
+banco, dentro una finestra in cui il risultato non cambia (k da 20 a 40, peso da 1.2 a 1.5).
 La fusione è **una sola su tutti i DB** (dalla 0.71.0): la lista full-text di tutti i DB
 ordinata per bm25, quella per senso ordinata per distanza (il modello è lo stesso per
 ogni indice, quindi le distanze si confrontano). Prima ogni DB si fondeva da sé e i DB si

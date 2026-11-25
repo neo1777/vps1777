@@ -4,6 +4,19 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Le rotte interne dell'archivio rispondono 404 anche a un header non ASCII.** Il confronto del segreto
+  sulle stringhe sollevava un errore se l'header conteneva, per esempio, una «è»: il chiamante riceveva
+  un 500 invece del 404 che nasconde la rotta. Ora il gateway confronta le impronte sha256 del segreto e
+  del valore ricevuto: lunghe sempre uguali, così nemmeno la lunghezza del segreto entra nel confronto.
+
+### Cambiato
+- `tools/check.sh` lancia anche gli scanner del sorgente (Dockerfile, dipendenze, segreti nella storia),
+  come fa `scanner.yml` in CI; il test che tiene check.sh al passo coi workflow ora guarda anche quello.
+- ruff accende B904: un `raise` dentro un `except` dice da dove viene (`from err` o `from None`).
+- La ricerca ibrida cita la fonte della sua fusione (Reciprocal Rank Fusion, SIGIR 2009) e dice in che
+  cosa se ne discosta; CONTRIBUTING elenca il prefisso `refactor:`.
+
 ## [0.98.15] — 2026-11-25
 
 ### Corretto

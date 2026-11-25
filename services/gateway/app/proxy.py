@@ -380,6 +380,14 @@ class _Flusso:
 def _constant_eq(a: str, b: str) -> bool:
     """Confronta due stringhe in tempo costante, con la primitiva della libreria standard: la
     versione fatta in casa usciva subito se le lunghezze erano diverse, e così la lunghezza del
-    segreto si poteva misurare. (Sui byte: `compare_digest` non accetta str non ASCII.)"""
+    segreto si poteva misurare.
+
+    Si confrontano le impronte sha256, non le stringhe: la documentazione di `compare_digest`
+    ammette che su due valori di lunghezza diversa il tempo possa rivelare la lunghezza (non il
+    contenuto). Due impronte sono lunghe sempre 32 byte, quindi la lunghezza del segreto non
+    entra più nel confronto. Uguali le impronte ⇔ uguali le stringhe (una collisione di sha256
+    non è un caso da considerare). Sui byte perché `compare_digest` non accetta str non ASCII."""
+    import hashlib
     import hmac
-    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+    return hmac.compare_digest(hashlib.sha256(a.encode("utf-8")).digest(),
+                               hashlib.sha256(b.encode("utf-8")).digest())
