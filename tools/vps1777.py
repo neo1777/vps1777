@@ -1403,11 +1403,8 @@ def staging_dir(repo: Path, version: str) -> Path:
     return repo / "releases" / f"v{norm_ver(version)}"
 
 
-def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
-    """Scarica e verifica il runtime bundle della release. Ritorna la dir bundle/."""
-    version = norm_ver(release["tag_name"])
-    stage = staging_dir(repo, version)
-    stage.mkdir(parents=True, exist_ok=True)
+def _bundle_scarica(release: dict, stage: Path, version: str) -> str:
+    """Scarica il tarball, SHA256SUMS e (se ci sono) firma e certificato. Rende il nome del tarball."""
     assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
     tarball = f"vps1777-runtime-v{version}.tar.gz"
     for required in (tarball, "SHA256SUMS"):
@@ -1419,7 +1416,11 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
     for optional in ("SHA256SUMS.sig", "SHA256SUMS.pem"):
         if optional in assets:
             download(assets[optional], stage / optional)
+    return tarball
 
+
+def _bundle_sha256(stage: Path, tarball: str) -> None:
+    """L'impronta del tarball dev'essere quella scritta in SHA256SUMS, o si solleva."""
     # verifica sha256
     want = ""
     for line in (stage / "SHA256SUMS").read_text().splitlines():
@@ -1431,6 +1432,9 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
         raise RuntimeError(f"sha256 mismatch sul bundle: atteso {want or '?'} ottenuto {got}")
     ok("sha256 del bundle verificato")
 
+
+def _bundle_firma(repo: Path, stage: Path, require_cosign: bool) -> None:
+    """La firma cosign di SHA256SUMS: verificata, o rifiutata se era richiesta, o detta mancante."""
     # cosign: obbligatorio di default. Se manca ma è richiesto, prova a
     # installarlo (fail-closed: se non ci riesce, la verifica non si salta).
     cosign = shutil.which("cosign")
@@ -1464,6 +1468,9 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
         warn("firma cosign NON verificata (release senza .sig/.pem, "
              "VPS1777_REQUIRE_COSIGN=0) — bundle installato senza verifica")
 
+
+def _bundle_estrai(stage: Path, tarball: str) -> Path:
+    """Estrae il tarball in `stage/bundle`, rifiutando ciò che uscirebbe dalla radice."""
     # estrai (path traversal guard)
     bundle = stage / "bundle"
     if bundle.exists():
@@ -1487,6 +1494,18 @@ def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
                 if not (m.isreg() or m.isdir()):
                     raise RuntimeError(f"bundle malformato (collegamento o file speciale): {m.name}") from None
             tar.extractall(bundle)
+    return bundle
+
+
+def fetch_bundle(repo: Path, release: dict, require_cosign: bool) -> Path:
+    """Scarica e verifica il runtime bundle della release. Ritorna la dir bundle/."""
+    version = norm_ver(release["tag_name"])
+    stage = staging_dir(repo, version)
+    stage.mkdir(parents=True, exist_ok=True)
+    tarball = _bundle_scarica(release, stage, version)
+    _bundle_sha256(stage, tarball)
+    _bundle_firma(repo, stage, require_cosign)
+    bundle = _bundle_estrai(stage, tarball)
 
     # Se questo update gira da root, ciò che ha appena creato deve restare
     # dell'operator: altrimenti il PROSSIMO update (lanciato da lui, com'è

@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- **Lo scaricamento e la verifica del pacchetto di una release sono riordinati** (QUA-04): `fetch_bundle`
+  (complessità 19) è spezzata in scarica, impronta, firma, estrai, senza cambiare comportamento (identica
+  su 1.500 casi generati, pacchetti malevoli compresi). Prima nessuna prova la chiamava: ora ogni suo
+  rifiuto ha la sua.
+
 ## [0.98.17] — 2026-11-25
 
 ### Cambiato
