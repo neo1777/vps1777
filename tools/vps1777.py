@@ -6135,26 +6135,27 @@ def posticipo_secrets(repo: Path, *, ora: "datetime.datetime | None" = None) -> 
     return dati["fino_a"] if fino > adesso else None
 
 
-def cmd_secrets_status(repo: Path, args) -> int:
-    """Età e scadenze dei secret. Scrive onboarding/secrets_status.json (letto
-    dalla pagina /admin/secrets) e — con --notify — avvisa su Telegram quelli
-    scaduti. L'età deriva dall'mtime del file (riscritto a ogni rotazione)."""
-    import time as _t
-    now = _t.time()
+def _secret_non_atteso(repo: Path, name: str) -> bool:
+    """Un secret che su QUESTA installazione non è atteso: la sua assenza non è un «mancante»."""
+    if name == "cloudflared_token" and ingress_profile(repo) != "ingress.cloudflared":
+        # 27/09 (audit della doc): è ATTESO solo col profilo Cloudflare. Prima finiva
+        # fra i mancanti su ogni altra installazione: un avviso che scatta sempre non
+        # si legge più, e copre quello vero.
+        return True
+    if name == "cf_api_token" and "caddy-dns01" not in enabled_features(repo):
+        # stessa ragione: atteso solo con la feature caddy-dns01 dichiarata.
+        return True
+    return False
+
+
+def _secrets_dei_file(repo: Path, now: float) -> tuple[list[dict], list[str], list[str]]:
+    """I secret di `secrets/` secondo `_SECRET_POLICY`: (voci, scaduti, attesi e mancanti)."""
     items: list[dict] = []
     overdue: list[str] = []
     mancanti: list[str] = []
     for name, fname, label, max_days, auto, note in _SECRET_POLICY:
         p = repo / "secrets" / fname
-        if not p.is_file() and name == "cloudflared_token" \
-                and ingress_profile(repo) != "ingress.cloudflared":
-            # 27/09 (audit della doc): è ATTESO solo col profilo Cloudflare. Prima finiva
-            # fra i mancanti su ogni altra installazione: un avviso che scatta sempre non
-            # si legge più, e copre quello vero.
-            continue
-        if not p.is_file() and name == "cf_api_token" \
-                and "caddy-dns01" not in enabled_features(repo):
-            # stessa ragione: atteso solo con la feature caddy-dns01 dichiarata.
+        if not p.is_file() and _secret_non_atteso(repo, name):
             continue
         if not p.is_file():
             # 🔴 PRIMA QUI C'ERA SOLO `continue`. Un secret ATTESO e ASSENTE è peggio
@@ -6172,37 +6173,20 @@ def cmd_secrets_status(repo: Path, args) -> int:
         })
         if is_overdue:
             overdue.append(f"{label} ({age_days}g)")
-    # H37: freschezza cookie NotebookLM (volume nlm-auth, non un file secrets/).
-    # Best-effort: se il profilo non è ancora caricato o docker non c'è, si salta.
-    nlm = nlm_cookie_status(repo)
-    if nlm is not None:
-        items.append(nlm)
-        if nlm["overdue"]:
-            overdue.append(f"{nlm['label']} ({nlm['age_days']}g)")
-    # H49 ③: non è un secret in secrets/ — è un interruttore di sicurezza lasciato
-    # aperto. Sta QUI e non in un check nuovo perché questa è già la pagina delle
-    # cose che scadono e vanno rimesse a posto, ha già il suo timer (giornaliero dalla 0.41.1, prima settimanale) e
-    # il suo canale Telegram: un promemoria in più non merita un timer in più.
-    cosign = cosign_bypass_status(repo)
-    if cosign is not None:
-        items.append(cosign)
-        if cosign["overdue"]:
-            overdue.append(f"{cosign['label']} ({cosign['age_days']}g)")
-    status = {"checked_at": now_iso(), "secrets": items, "mancanti": mancanti}
-    try:
-        (onboarding_dir(repo) / "secrets_status.json").write_text(json.dumps(status, indent=2))
-    except OSError as exc:
-        warn(f"scrittura secrets_status.json fallita: {exc}")
+    return items, overdue, mancanti
 
-    for it in items:
-        mark = "⚠️  SCADUTO" if it["overdue"] else "ok"
-        # `age_days` può essere None: «attivo, ma non so da quando» (marcatore
-        # illeggibile). Si stampa `  ??` invece di rompere la riga — e la nota
-        # accanto dice cosa fare. Un'età che non si sa non è un'età zero.
-        eta = "  ??" if it["age_days"] is None else f"{it['age_days']:>4}"
-        log(f"{it['label']:<22} {eta}g / max {it['max_age_days']}g  [{mark}]")
-    if mancanti:
-        warn(f"secret ATTESI e NON trovati ({len(mancanti)}): {', '.join(mancanti)}")
+
+def _aggiungi_voce(items: list[dict], overdue: list[str], voce: dict | None) -> None:
+    """Una voce che non è un file di `secrets/` (cookie NotebookLM, bypass di cosign), se c'è."""
+    if voce is not None:
+        items.append(voce)
+        if voce["overdue"]:
+            overdue.append(f"{voce['label']} ({voce['age_days']}g)")
+
+
+def _secrets_esito(repo: Path, args, items: list[dict], overdue: list[str],
+                   mancanti: list[str]) -> int:
+    """Che cosa dire e con che esito uscire: 2 se non si è osservato nessun secret."""
     if not items:
         # 🔴 QUI IL FLUSSO CADEVA NEL RAMO `else` E STAMPAVA «tutti i secret entro la
         # soglia», USCENDO 0 — dopo aver appena detto «nessun secret trovato». Due
@@ -6238,6 +6222,39 @@ def cmd_secrets_status(repo: Path, args) -> int:
     else:
         ok("tutti i secret entro la soglia")
     return 0
+
+
+def cmd_secrets_status(repo: Path, args) -> int:
+    """Età e scadenze dei secret. Scrive onboarding/secrets_status.json (letto
+    dalla pagina /admin/secrets) e — con --notify — avvisa su Telegram quelli
+    scaduti. L'età deriva dall'mtime del file (riscritto a ogni rotazione)."""
+    import time as _t
+    now = _t.time()
+    items, overdue, mancanti = _secrets_dei_file(repo, now)
+    # H37: freschezza cookie NotebookLM (volume nlm-auth, non un file secrets/).
+    # Best-effort: se il profilo non è ancora caricato o docker non c'è, si salta.
+    _aggiungi_voce(items, overdue, nlm_cookie_status(repo))
+    # H49 ③: non è un secret in secrets/ — è un interruttore di sicurezza lasciato
+    # aperto. Sta QUI e non in un check nuovo perché questa è già la pagina delle
+    # cose che scadono e vanno rimesse a posto, ha già il suo timer (giornaliero dalla 0.41.1, prima settimanale) e
+    # il suo canale Telegram: un promemoria in più non merita un timer in più.
+    _aggiungi_voce(items, overdue, cosign_bypass_status(repo))
+    status = {"checked_at": now_iso(), "secrets": items, "mancanti": mancanti}
+    try:
+        (onboarding_dir(repo) / "secrets_status.json").write_text(json.dumps(status, indent=2))
+    except OSError as exc:
+        warn(f"scrittura secrets_status.json fallita: {exc}")
+
+    for it in items:
+        mark = "⚠️  SCADUTO" if it["overdue"] else "ok"
+        # `age_days` può essere None: «attivo, ma non so da quando» (marcatore
+        # illeggibile). Si stampa `  ??` invece di rompere la riga — e la nota
+        # accanto dice cosa fare. Un'età che non si sa non è un'età zero.
+        eta = "  ??" if it["age_days"] is None else f"{it['age_days']:>4}"
+        log(f"{it['label']:<22} {eta}g / max {it['max_age_days']}g  [{mark}]")
+    if mancanti:
+        warn(f"secret ATTESI e NON trovati ({len(mancanti)}): {', '.join(mancanti)}")
+    return _secrets_esito(repo, args, items, overdue, mancanti)
 
 
 # ─────────────────────────────────────────── main
