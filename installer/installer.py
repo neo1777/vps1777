@@ -341,7 +341,7 @@ def main():
             print(f"\n  ✗ la porta {PORT} resta occupata e chi la tiene non è un nostro"
                   f"\n    installer. Rimedi: chiudi quel processo, oppure rilancia con"
                   f"\n    VPS1777_INSTALLER_PORT=8778 (o un'altra porta libera).\n")
-            raise SystemExit(1)
+            raise SystemExit(1) from None
     url = f"http://{HOST}:{PORT}"
     print(f"\n  vps1777 installer → {url}")
     if not _PARAMIKO:

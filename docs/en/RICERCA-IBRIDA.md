@@ -30,8 +30,18 @@ results:
 |---|---|---|---|
 | targets found | 5/9 | 4/9 | **6/9** |
 
-The two engines fail in different ways: fusion keeps the best of both. The
-fusion is **a single one across all DBs** (since 0.71.0): the full-text list of every DB
+The two engines fail in different ways: fusion keeps the best of both.
+
+The fusion is the **Reciprocal Rank Fusion** (RRF) of Cormack, Clarke and Büttcher, *Reciprocal Rank
+Fusion outperforms Condorcet and individual Rank Learning Methods*, SIGIR 2009: a row gets
+`weight / (k + position)` from every list it appears in, and the points add up. It looks at
+positions and not at scores, because bm25 and the vector distance are not on the same scale.
+The original paper uses `k = 60` and lists of equal weight; here `k = 30` and the full-text list
+weighs 1.5 (`fondi_rrf_liste` in `services/archive-mcp/app/semantica.py`): they are the values
+measured on the bench, inside a window where the result does not change (k from 20 to 40, weight
+from 1.2 to 1.5).
+
+The fusion is **a single one across all DBs** (since 0.71.0): the full-text list of every DB
 sorted by bm25, the meaning list sorted by distance (the model is the same for every
 index, so distances compare). Before, each DB fused on its own and the DBs were queued in
 alphabetical order: across all DBs the first rows came from the first name. The same

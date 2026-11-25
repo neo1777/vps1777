@@ -5,6 +5,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- **Le rotte interne dell'archivio rispondono 404 anche a un header non ASCII.** Il confronto del segreto
+  sulle stringhe sollevava un errore se l'header conteneva, per esempio, una «è»: il chiamante riceveva
+  un 500 invece del 404 che nasconde la rotta. Ora il gateway confronta le impronte sha256 del segreto e
+  del valore ricevuto: lunghe sempre uguali, così nemmeno la lunghezza del segreto entra nel confronto.
 - **Il controllo del ledger delle feature dice che cosa non va invece di crollare.** Un `features.yaml`
   vuoto, una lista al posto della mappa, una voce che non è una mappa o un YAML rotto lo facevano uscire
   con un errore Python; ora esce 2 («non ho potuto guardare») con il motivo. In un repo senza
@@ -18,6 +22,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   pre-commit, che si attiva a mano e non vede una PR aperta da un'altra macchina. Visto da Sagoma.
 
 ### Cambiato
+- `tools/check.sh` lancia anche gli scanner del sorgente (Dockerfile, dipendenze, segreti nella storia),
+  come fa `scanner.yml` in CI; il test che tiene check.sh al passo coi workflow ora guarda anche quello.
+- ruff accende B904: un `raise` dentro un `except` dice da dove viene (`from err` o `from None`).
+- La ricerca ibrida cita la fonte della sua fusione (Reciprocal Rank Fusion, SIGIR 2009) e dice in che
+  cosa se ne discosta; CONTRIBUTING elenca il prefisso `refactor:`.
 - **La semina degli script di `tools/` nel ledger delle feature finisce il 31/01/2027.** Dal 02/08 gli script
   non dichiarati davano solo avvisi, senza una data: dal 01/02/2027 saranno errori (la data è la stessa del
   censimento della complessità). `verify-features.py --oggi AAAA-MM-GG` legge scadenze e semine a una data
