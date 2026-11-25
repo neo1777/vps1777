@@ -3782,7 +3782,8 @@ def index_jsonl(source: Union[str, Path, IO[str]], db_path: Union[str, Path],
         return write_rows(db_path, _iter_claude_code(fh, project))
 
 
-def main(argv: list[str] | None = None) -> int:
+def _argomenti(argv: list[str] | None) -> argparse.Namespace:
+    """Gli argomenti della riga di comando."""
     ap = argparse.ArgumentParser(
         prog="archive_indexer",
         description="Indicizza sessioni/export in un DB FTS5 per archive-mcp.",
@@ -3813,52 +3814,66 @@ def main(argv: list[str] | None = None) -> int:
                     help="con --retag, --migra o --migra-telegram: applica davvero. "
                          "Senza, è solo un referto.")
     args = ap.parse_args(argv)
-    if not Path(args.input).is_file():
-        print(f"input non trovato: {args.input}", file=sys.stderr)
-        return 1
-    if args.migra_telegram:
-        try:
-            esito = migra_telegram(args.input, scrivi=args.scrivi)
-        except ValueError as exc:
-            print(str(exc), file=sys.stderr)
-            return 2
-        print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
-        if not args.scrivi:
-            print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
-                  file=sys.stderr)
-        return 0
-    if args.migra:
-        try:
-            esito = migra_derivate(args.input, scrivi=args.scrivi)
-        except ValueError as exc:
-            print(str(exc), file=sys.stderr)
-            return 2
-        print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
-        if not args.scrivi:
-            print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
-                  file=sys.stderr)
-        return 0
-    if args.retag:
-        # 🛡️ `--scrivi` è richiesto ESPLICITAMENTE e non è il default: questo comando
-        # riscrive la classificazione di ogni riga del DB, e un default che scrive
-        # trasforma una svista di battitura in una perdita di giudizi.
-        conn = sqlite3.connect(args.input)
-        try:
-            esito = retag_voice(conn, scrivi=args.scrivi)
-            if args.scrivi:
-                conn.commit()
-        finally:
-            conn.close()
-        print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
-        if not args.scrivi:
-            print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
-                  file=sys.stderr)
-        return 0
-    if args.classify:
-        with open(args.input, encoding="utf-8") as fh:
-            for verdict in classify_cc(fh):
-                print(verdict)
-        return 0
+    return args
+
+
+def _main_migra_telegram(args: argparse.Namespace) -> int:
+    """`--migra-telegram`: lo speaker ai messaggi di un DB Telegram già caricato."""
+    try:
+        esito = migra_telegram(args.input, scrivi=args.scrivi)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
+    if not args.scrivi:
+        print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
+              file=sys.stderr)
+    return 0
+
+
+def _main_migra(args: argparse.Namespace) -> int:
+    """`--migra`: le migrazioni delle colonne derivate."""
+    try:
+        esito = migra_derivate(args.input, scrivi=args.scrivi)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
+    if not args.scrivi:
+        print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
+              file=sys.stderr)
+    return 0
+
+
+def _main_retag(args: argparse.Namespace) -> int:
+    """`--retag`: ri-classifica `voice` su tutte le righe."""
+    # 🛡️ `--scrivi` è richiesto ESPLICITAMENTE e non è il default: questo comando
+    # riscrive la classificazione di ogni riga del DB, e un default che scrive
+    # trasforma una svista di battitura in una perdita di giudizi.
+    conn = sqlite3.connect(args.input)
+    try:
+        esito = retag_voice(conn, scrivi=args.scrivi)
+        if args.scrivi:
+            conn.commit()
+    finally:
+        conn.close()
+    print(json.dumps(esito, ensure_ascii=False, sort_keys=True))
+    if not args.scrivi:
+        print("[a secco] nessuna riga scritta — aggiungi --scrivi per applicare",
+              file=sys.stderr)
+    return 0
+
+
+def _main_classify(args: argparse.Namespace) -> int:
+    """`--classify`: il verdetto per ogni riga di un jsonl di Claude Code."""
+    with open(args.input, encoding="utf-8") as fh:
+        for verdict in classify_cc(fh):
+            print(verdict)
+    return 0
+
+
+def _main_indicizza(args: argparse.Namespace) -> int:
+    """Il modo normale: indicizza `input` in `db` e racconta che cosa ha scritto."""
     if not args.db:
         print("manca il file .db di output (o usa --classify)", file=sys.stderr)
         return 1
@@ -3899,6 +3914,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"scartati {lapidi} record (lapidi in `skipped`, DEDUPLICATE per "
               f"source+reason+detail[:200]+ts: gli scarti veri possono essere di più)")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _argomenti(argv)
+    if not Path(args.input).is_file():
+        print(f"input non trovato: {args.input}", file=sys.stderr)
+        return 1
+    if args.migra_telegram:
+        return _main_migra_telegram(args)
+    if args.migra:
+        return _main_migra(args)
+    if args.retag:
+        return _main_retag(args)
+    if args.classify:
+        return _main_classify(args)
+    return _main_indicizza(args)
 
 
 if __name__ == "__main__":

@@ -14,10 +14,6 @@
    "complessita": 18,
    "stato": "da-esaminare"
   },
-  "services/gateway/app/archive_indexer.py::main": {
-   "complessita": 16,
-   "stato": "da-esaminare"
-  },
   "installer/engine.py::_stream": {
    "complessita": 15,
    "stato": "da-esaminare"
