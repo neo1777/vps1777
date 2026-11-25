@@ -8,8 +8,8 @@
     },
     "CONTRIBUTING.md": {
       "sorgente": "CONTRIBUTING.it.md",
-      "sorgente_sha256": "ad53c8b9db3b5c8b7add4515325fec8dfb1199814e4d2eb8046348e4f4ceb030",
-      "traduzione_sha256": "625b497bfed8cfde6a3ac9f40872716aa17acde41753235595dbcb06bf020cb0"
+      "sorgente_sha256": "00290f3ee1a94a8b3fb004114966e9ed447191ceca02ed70e57cdb2dee262f55",
+      "traduzione_sha256": "1bb258f52d2560903d0b8950e09e0d674686e57e1de91f862e95b09a33e34913"
     },
     "docs/en/ARCHITECTURE.md": {
       "sorgente": "docs/ARCHITECTURE.md",
