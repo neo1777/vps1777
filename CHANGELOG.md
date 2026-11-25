@@ -10,6 +10,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   nell'ordine, identica su 1.502 sessioni generate.
 - **Il controllo dei segreti prima di un aggiornamento è riordinato** (QUA-04): la funzione che legge la
   sezione `secrets:` dei compose (complessità 20) è spezzata in tre passi, identica su 1.200 casi generati.
+- **La stima della voce di un messaggio è riordinata** (QUA-04): `classify_voice` (complessità 19) diventa una
+  regola per funzione, nell'ordine di precedenza di prima; identica su 8.024 testi composti.
 
 ### Corretto
 - Il CHANGELOG della 0.98.16 ripeteva otto voci due volte (un errore nell'unire i rami): tolte le copie.
