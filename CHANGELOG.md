@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.16] — 2026-11-25
+
 ### Aggiunto
 - **I marcatori di conflitto si cercano anche in CI.** `tools/marcatori-di-conflitto.py` (con la sua
   autoprova, nel job lint e in `tools/check.sh`) fallisce se un file tracciato ha una riga che comincia con
