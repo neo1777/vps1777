@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- **Lo scanner dei segreti guarda due volte prima di dire rosso.** trufflehog segnala anche ciò che non riesce a
+  verificare: quando la verifica remota falliva per un momento storto della rete, stringhe innocue della storia
+  uscivano come «non verificabili» e `check.sh` (e il workflow degli scanner) arrossiva da solo, per tornare verde
+  al rilancio. Ora un risultato si riguarda una volta dopo una pausa; se resta, è rosso come prima.
+
 ### Cambiato
 - `applicabilita.yml` dichiara lo standard `1777-0.3` e, per nb1777-mcp, la crittografia propria (gli HMAC dei
   gettoni di conferma e dei link firmati): la superficie c'era nel codice e la dichiarazione diceva di no.

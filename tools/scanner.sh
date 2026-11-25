@@ -84,6 +84,16 @@ segreti() {
     monta=(-v "$comune:$comune:ro")
   fi
   out="$(timeout "$TETTO" docker run --rm -v "$DIR:/src:ro" "${monta[@]}" "$TRUFFLEHOG" "${modo[@]}" --no-update --results=verified,unknown --fail 2>&1)"; rc=$?
+  if [ "$rc" -eq 183 ]; then
+    # Un secondo sguardo prima del rosso (25/11/2026). «unknown» vuol dire che la verifica contro il
+    # servizio non è riuscita: basta un momento storto della rete o un limite di richieste, e stringhe
+    # innocue della storia (i riferimenti a 40 cifre nei workflow) escono come «non verificabili».
+    # Misurato: 13 risultati così, spariti al rilancio senza cambiare niente. Una credenziale che
+    # FUNZIONA resta verificata anche la seconda volta, e il rosso resta rosso.
+    dice "   (trufflehog ha trovato qualcosa: riguardo una volta fra ${SCANNER_PAUSA_S:-20} s, prima di dirlo rosso)"
+    sleep "${SCANNER_PAUSA_S:-20}"
+    out="$(timeout "$TETTO" docker run --rm -v "$DIR:/src:ro" "${monta[@]}" "$TRUFFLEHOG" "${modo[@]}" --no-update --results=verified,unknown --fail 2>&1)"; rc=$?
+  fi
   # Mai il valore nel log: solo le righe di riepilogo (questo output va in un log pubblico).
   grep -E '"msg":"finished scanning"|Detector Type|File:|Commit:' <<<"$out" | tail -n 40
   case "$rc" in
