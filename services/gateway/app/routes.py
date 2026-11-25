@@ -7,7 +7,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-import hmac
 import re
 from pathlib import Path
 
@@ -142,7 +141,10 @@ def _guardia_interna(request: Request, evento: str, *, header: str = "x-vps1777-
     if atteso is None:
         atteso = get_settings().effective_archive_desc_secret
     got = request.headers.get(header, "")
-    if not atteso or not hmac.compare_digest(got, atteso):
+    # `proxy._constant_eq` e non `hmac.compare_digest(got, atteso)`: sulle str un carattere non
+    # ASCII nell'header sollevava TypeError (un 500 invece del 404), e sulle lunghezze diverse il
+    # tempo poteva dire quanto è lungo il segreto. Lì si confrontano le impronte sha256.
+    if not atteso or not proxy._constant_eq(got, atteso):
         audit({"event": evento, "reason": "secret"})
         return JSONResponse({"error": "not_found"}, status_code=404)
     return None

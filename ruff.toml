@@ -3,4 +3,8 @@
 [lint]
 # S602, S604, S605 (22/11/2026): un comando passato alla shell. Il default non le ha. Ogni
 # `shell=True` che resta porta accanto `# noqa: S602` e, sopra, il perché.
-extend-select = ["S602", "S604", "S605"]
+# B904 (25/11/2026): un `raise` dentro un `except` senza `from`. Senza, Python stampa anche
+# l'eccezione catturata con «During handling of the above exception, another exception
+# occurred», come se il nostro messaggio fosse un secondo guasto. `from err` quando la causa
+# serve a chi legge, `from None` quando il messaggio dice già tutto.
+extend-select = ["S602", "S604", "S605", "B904"]

@@ -56,7 +56,11 @@ STATUSES = ("active-default", "opt-in", "deferred", "removed")
 # le sue dieci voci sono state scritte subito, quindi non c'è un intervallo in cui
 # la categoria segnala e nessuno agisce. Una semina che dura è una segnalazione che
 # si impara a ignorare.
-CATEGORIE_IN_SEMINA = {"tools_script"}
+# ⏳ E una semina ha una FINE (DER-03 dello standard: «una semina che dura è una segnalazione
+#   che si impara a ignorare»). `tools_script` era in semina dal 02/08 senza data (rilievo di
+#   Sagoma, 24/11); Neo ha scelto il 31/01/2027, la stessa data di QUA-04 (scelta
+#   2026-11-25-soglia-tools-script-semina). Dal giorno dopo i non dichiarati sono fallimenti duri.
+CATEGORIE_IN_SEMINA = {"tools_script": "2027-01-31"}
 # gli status che DEVONO essere reali adesso (il verso dichiarato→reale li controlla).
 # 'deferred' e 'removed' NON si controllano contro il reale: il primo non c'è ANCORA,
 # il secondo non c'è PIÙ di proposito — la loro assenza è corretta, non un guasto.
@@ -145,7 +149,12 @@ def _v_cli_command(arg, repo: Path) -> tuple[bool, str]:
     # che come un comando mai collegato.
     # ⇒ «esiste» qui vuol dire ENTRAMBE. Provarne una sola darebbe un verde su
     # metà della cosa, che è la classe che questo ledger esiste per chiudere.
-    src = (repo / "tools" / "vps1777.py").read_text(errors="replace")
+    cli = repo / "tools" / "vps1777.py"
+    if not cli.is_file():
+        # Senza la CLI non c'è niente in cui cercare il comando: una voce rossa che lo dice,
+        # non un FileNotFoundError che ferma tutto il referto (rilievo di Sagoma, 25/11).
+        return False, f"{arg}: tools/vps1777.py MANCA ⇒ nessun sottocomando da cercare"
+    src = cli.read_text(errors="replace")
     nel_parser = f'sub.add_parser("{arg}"' in src
     nel_dispatch = f'"{arg}": cmd_' in src
     ok = nel_parser and nel_dispatch
@@ -418,11 +427,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Verifica il ledger delle feature vps1777")
     ap.add_argument("--ledger", default="features.yaml", type=Path)
     ap.add_argument("--repo", default=".", type=Path, help="radice del repo vps1777")
+    ap.add_argument("--oggi", type=datetime.date.fromisoformat, default=None,
+                    help="AAAA-MM-GG: la data con cui leggere scadenze e semine (default: oggi, UTC)")
     a = ap.parse_args()
     repo = a.repo.resolve()
 
-    doc = yaml.safe_load((repo / a.ledger).read_text()) if not a.ledger.is_absolute() \
-        else yaml.safe_load(a.ledger.read_text())
+    doc = _leggi_ledger(a.ledger if a.ledger.is_absolute() else repo / a.ledger)
+    if isinstance(doc, str):
+        print(f"ERRORE: {doc}. Un ledger che non so leggere non si verifica, e non è un verde.",
+              file=sys.stderr)
+        return 2
     entries = doc.get("features", [])
     # Il default è SEVERO (21/11/2026). L'interruttore sta nel file che si verifica: se `_meta`
     # spariva (o il ledger restava senza voci) ogni «non dichiarato» diventava un avviso e la
@@ -432,16 +446,39 @@ def main() -> int:
         print("ERRORE: il ledger non ha nessuna voce in `features`: non ho niente da "
               "verificare, e «niente» non è un verde.", file=sys.stderr)
         return 2
-    oggi = datetime.datetime.now(datetime.timezone.utc).date()   # le scadenze si leggono in UTC
+    oggi = a.oggi or datetime.datetime.now(datetime.timezone.utc).date()   # le scadenze in UTC
 
     hard_fail: list[str] = []      # fanno uscire != 0
     surveil: list[str] = []        # solo segnalati
 
     _schema(entries, hard_fail)
     _dichiarato_reale(entries, repo, hard_fail, surveil)
-    _reale_dichiarato(entries, repo, baseline_completo, hard_fail, surveil)
+    _reale_dichiarato(entries, repo, baseline_completo, hard_fail, surveil, oggi)
     _sorveglianza(entries, repo, oggi, surveil)
     return _referto(entries, baseline_completo, oggi, surveil, hard_fail)
+
+
+def _leggi_ledger(percorso: Path) -> dict | str:
+    """Il ledger come mappa con una lista di voci-mappa in `features`, o il perché non lo è.
+
+    Prima un file vuoto, una lista al posto della mappa o una voce che non è una mappa
+    facevano crollare lo strumento con un errore Python (rilievo di Sagoma, 25/11): il
+    cancello teneva, ma non diceva che cosa non andava."""
+    try:
+        doc = yaml.safe_load(percorso.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
+        return f"il ledger {percorso} non si legge ({type(e).__name__}: {e})"
+    if not isinstance(doc, dict):
+        return (f"il ledger {percorso} non è una mappa con la chiave `features` "
+                f"(è {type(doc).__name__})")
+    voci = doc.get("features", [])
+    if not isinstance(voci, list):
+        return f"`features` nel ledger {percorso} non è una lista (è {type(voci).__name__})"
+    storte = [str(i) for i, v in enumerate(voci) if not isinstance(v, dict)]
+    if storte:
+        return (f"nel ledger {percorso} le voci in posizione {', '.join(storte[:10])} "
+                "non sono mappe")
+    return doc
 
 
 def _schema(entries: list[dict], hard_fail: list[str]) -> None:
@@ -500,7 +537,8 @@ def _dichiarato_reale(entries: list[dict], repo: Path, hard_fail: list[str],
 
 
 def _reale_dichiarato(entries: list[dict], repo: Path, baseline_completo: bool,
-                      hard_fail: list[str], surveil: list[str]) -> None:
+                      hard_fail: list[str], surveil: list[str],
+                      oggi: datetime.date) -> None:
     # ── 3. REALE → DICHIARATO (cattura ciò che poi si dimentica) ──────────────
     # Tre vie, non due (raffinamento dal buco fine di setaccio):
     #   reale + dichiarato present (active/opt-in) → OK
@@ -512,13 +550,14 @@ def _reale_dichiarato(entries: list[dict], repo: Path, baseline_completo: bool,
     for cat in real:
         # una categoria in semina è NUOVA per l'enumerazione: `baseline_completo` non
         # parlava di lei, quindi non può renderla fatale senza mentire su cosa prometteva.
-        in_semina = cat in CATEGORIE_IN_SEMINA
+        fine = CATEGORIE_IN_SEMINA.get(cat)
+        in_semina = fine is not None and oggi <= datetime.date.fromisoformat(fine)
         for u in sorted(real[cat]):
             if u not in accounted[cat]:
                 msg = f"[NON DICHIARATO] {cat} '{u}' esiste nel codice ma NON è nel ledger"
                 if in_semina:
-                    surveil.append(msg + f" (categoria '{cat}' in semina: segnalato, "
-                                         "non-fatale finché le sue voci non sono scritte)")
+                    surveil.append(msg + f" (categoria '{cat}' in semina fino al {fine}: "
+                                         "segnalato, dal giorno dopo è un fallimento duro)")
                 else:
                     (hard_fail if baseline_completo else surveil).append(
                         msg + ("" if baseline_completo else " (semina in corso: segnalato, non-fatale)"))

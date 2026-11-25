@@ -237,3 +237,21 @@ def test_il_confronto_del_segreto_non_guarda_la_lunghezza():
     assert proxy._constant_eq("abc", "abc") and not proxy._constant_eq("abc", "abcd")
     assert proxy._constant_eq("è", "è") and not proxy._constant_eq("è", "e")
     assert proxy._constant_eq("", "") is True       # per questo c'è `not expected` davanti
+
+
+def test_la_guardia_interna_risponde_404_anche_a_un_header_non_ascii(monkeypatch):
+    """Prima `hmac.compare_digest(got, atteso)` sulle str: un «è» nell'header sollevava TypeError,
+    cioè un 500 al posto del 404 che nasconde la rotta (rilievo di Sagoma sul confronto del proxy,
+    25/11). Ora la guardia passa da `proxy._constant_eq`, che confronta le impronte."""
+    from app import routes
+    monkeypatch.setattr(routes, "audit", lambda evento: None)
+
+    def entra(valore: str):
+        richiesta = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"),
+                                    headers={"x-vps1777-archive-desc": valore})
+        return routes._guardia_interna(richiesta, "prova", atteso="giusto")
+
+    assert entra("giusto") is None
+    for sbagliato in ("sbagliato", "è", "giustò", ""):
+        risposta = entra(sbagliato)
+        assert risposta is not None and risposta.status_code == 404, sbagliato
