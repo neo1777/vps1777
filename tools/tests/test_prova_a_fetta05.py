@@ -115,7 +115,10 @@ def test_senza_il_filtro_di_python_i_collegamenti_si_rifiutano():
     src = (_ROOT / "tools" / "vps1777.py").read_text(encoding="utf-8")
     i = src.index('tar.extractall(bundle, filter="data")')
     ripiego = src[i:src.index("tar.extractall(bundle)\n", i)]
-    assert "except TypeError:" in ripiego and "m.isreg() or m.isdir()" in ripiego
+    # dal 25/11 la strada si sceglie PRIMA (hasattr), non con un except attorno all'estrazione:
+    # il comportamento lo prova test_fetch_bundle_percorsi.py; qui resta la forma.
+    assert "else:" in ripiego and "except TypeError" not in ripiego and "m.isreg() or m.isdir()" in ripiego
+    assert 'hasattr(tarfile, "data_filter")' in src[:i][-300:]
     # e la condizione fa quello che dice: un collegamento non è né file né cartella
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as t:

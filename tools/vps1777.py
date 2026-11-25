@@ -1501,7 +1501,7 @@ def _bundle_estrai(stage: Path, tarball: str) -> Path:
             for m in tar.getmembers():
                 if not (m.isreg() or m.isdir()):
                     raise RuntimeError(f"bundle malformato (collegamento o file speciale): {m.name}")
-            tar.extractall(bundle)  # noqa: S202 — nomi e tipi dei membri controllati qui sopra
+            tar.extractall(bundle)
     return bundle
 
 
