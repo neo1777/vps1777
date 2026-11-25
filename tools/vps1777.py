@@ -2980,6 +2980,37 @@ def _sorveglia_esito_backup(repo: Path, st: dict, notifica: bool) -> None:
             f"Le copie vecchie restano dove sono. Il perché è in backups/backup.log.")
 
 
+def _sorveglia_portainer(repo: Path, st: dict, notifica: bool) -> None:
+    """Portainer, se la feature è dichiarata, risponde? L'immagine a monte non ha con che farsi un
+    healthcheck (solo il binario): lo si interroga dall'host con `tools/portainer-vivo.sh`, che è
+    il sostituto dichiarato in `applicabilita.yml` (SIC-06). Avviso nel log sempre, notifica alla
+    transizione. Esito 2 dello script = non ho potuto guardare: si dice, e non arma niente."""
+    if "portainer" not in enabled_features(repo):
+        st.pop("portainer_giu_da", None)
+        return
+    try:
+        r = subprocess.run(["bash", str(repo / "tools" / "portainer-vivo.sh")], capture_output=True,
+                           text=True, check=False, timeout=30)
+        esito, detto = r.returncode, (r.stdout or r.stderr).strip()[:200]
+    except (OSError, subprocess.SubprocessError) as exc:
+        esito, detto = 2, f"{type(exc).__name__}: {exc}"
+    if esito == 0:
+        if st.pop("portainer_giu_da", None):
+            ok("portainer: tornato a rispondere")
+            if notifica:
+                telegram_notify(repo, "🟢 vps1777: Portainer è tornato a rispondere.")
+        return
+    if esito != 1:
+        warn(f"portainer: stato NON MISURATO ({detto})")
+        return
+    warn(f"portainer: {detto}")
+    if not str(st.get("portainer_giu_da") or ""):
+        st["portainer_giu_da"] = now_iso()
+        if notifica:
+            telegram_notify(repo, "🔴 vps1777: Portainer è acceso nella configurazione ma non risponde.\n"
+                                  "Guarda il container (docker ps, docker logs vps1777-portainer).")
+
+
 DISCO_LIBERO_MIN_PCT = 10
 
 
@@ -3155,6 +3186,7 @@ def cmd_check(repo: Path, args) -> int:
     # W5: il notturno fermo (la copertura non lo vede) e lo spazio su disco.
     _sorveglia_backup_notturno(repo, st, bool(getattr(args, "notify", False)))
     _sorveglia_esito_backup(repo, st, bool(getattr(args, "notify", False)))
+    _sorveglia_portainer(repo, st, bool(getattr(args, "notify", False)))
     _sorveglia_disco(repo, st, bool(getattr(args, "notify", False)))
     # P11: la pagina Salute. Dopo le sorveglianze (legge ciò che hanno scritto) e prima
     # del fetch, per la stessa ragione loro. Telemetria: non fa mai cadere il check.
