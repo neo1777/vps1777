@@ -146,7 +146,7 @@ autoprova() {
   _sonda_pipestatus() {
     local grande rc_pf rc_no ps_no ps_pf S_TMP_ERR out_pf err_pf
     S_TMP_ERR="$(mktemp)"; err_pf="$S_TMP_ERR"
-    # 🔴 LA FORMA, NON SOLO LA TAGLIA (rilievo di @b82df434, 16/08 — il primo giro
+    # 🔴 LA FORMA, NON SOLO LA TAGLIA (rilievo di b82df434, 16/08 — il primo giro
     #    di questa sonda aveva 65.684 byte in UNA riga e ha risposto rc=0 in CI:
     #    la taglia combaciava, la struttura era l'opposta). `grep` lavora per RIGHE:
     #    quando chiude la pipe rispetto a quanto printf ha ancora da scrivere dipende
@@ -170,7 +170,7 @@ autoprova() {
       "${#grande}" "$(printf '%s' "$grande" | wc -l)" "$rc_pf" "$ps_pf" "$rc_no" "$ps_no" \
       "$BASH_VERSION" "$(grep --version | head -1 | awk '{print $NF}')"
     printf '[SONDA-PIPESTATUS] stderr del ramo pipefail: «%s»\n' "$(tr -d '\n' < "$err_pf")"
-    printf '[SONDA-PIPESTATUS] lettura: rc=0 in entrambi = NON riprodotto NEMMENO con la forma vera (il costrutto da solo non basta: guardare il CONTESTO, @abdd732a) · rc!=0 con-pipefail = RIPRODOTTO, e PIPESTATUS dice chi muore\n\n'
+    printf '[SONDA-PIPESTATUS] lettura: rc=0 in entrambi = NON riprodotto NEMMENO con la forma vera (il costrutto da solo non basta: guardare il CONTESTO, abdd732a) · rc!=0 con-pipefail = RIPRODOTTO, e PIPESTATUS dice chi muore\n\n'
     rm -f "$err_pf"
   }
   _sonda_pipestatus

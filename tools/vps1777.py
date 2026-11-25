@@ -2147,7 +2147,7 @@ def render_unit(text: str, repo: Path) -> str:
 
     Il registro attribuiva il fatto (file `root:root`) a «la unit gira come root»,
     che nel repo NON era vero: le unit portano `@OPERATOR_USER@`. Il meccanismo vero
-    è questa riga, trovato da @abdd732a; il fatto restava, la causa no.
+    è questa riga, trovato da abdd732a; il fatto restava, la causa no.
 
     ⭐ La policy non è nuova e non l'abbiamo decisa noi: `installer/engine.py:30` la
     fissa già — `OPERATOR_USER = "vps1777"`. Era scritta in UN installer su tre,
@@ -2176,7 +2176,7 @@ def render_unit(text: str, repo: Path) -> str:
             #   systemd rifiuta una unit con un utente inesistente
             #   («Failed to determine user credentials») e il servizio NON PARTE.
             #   ⇒ un difetto di sicurezza sarebbe diventato un'interruzione.
-            #   Trovato da @abdd732a il 01/08, PRIMA che il comando arrivasse alla
+            #   Trovato da abdd732a il 01/08, PRIMA che il comando arrivasse alla
             #   macchina di Neo — dove le quattro unit giravano davvero come root.
             # ⭐ E non c'è un caso legittimo da salvare: negli installer l'utente
             #   si crea PRIMA (installer/engine.py: useradd :306-314, unit :583+).

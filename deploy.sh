@@ -415,7 +415,7 @@ set_kv PUBLIC_BASE '$PUB'"
   # sensibili 700» comunque. Il permesso si chiede all'OGGETTO (#66). Il `700`
   # sulle dir è H38: stessa forma, e qui era l'unico dei quattro punti che si
   # zittiva (deploy.sh:690, setup.sh:187, engine.py:491 falliscono rumorosi).
-  # Il `mkdir -p` viene PRIMA per la ragione trovata in revisione (@71d540e6):
+  # Il `mkdir -p` viene PRIMA per la ragione trovata in revisione (71d540e6):
   # questo blocco è «applica la config dal pannello» su una macchina già
   # installata, e NON passa dal `mkdir -p` di r.689 — una VPS installata prima di
   # ba87c52 può non avere backups/ o onboarding/. Senza il mkdir, `stat` su una

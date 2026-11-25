@@ -1,6 +1,6 @@
 # Il gate «chiude la #N» ha un workflow SUO, e non è una scelta di stile.
 #
-# Rilievo di @abdd732a sulla revisione della #137: `on: pull_request` senza `types`
+# Rilievo di abdd732a sulla revisione della #137: `on: pull_request` senza `types`
 # vale [opened, synchronize, reopened] — **`edited` non c'è**. Il gate legge il CORPO
 # della PR, e il corpo è l'unica cosa che si cambia **senza toccare un commit**: chi
 # toglie `Closes #N` dopo l'ultimo push non fa rigirare niente, e il presidio resta

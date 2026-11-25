@@ -92,7 +92,7 @@ query, stessi 4.000 hit su entrambi:
 ricerca sarebbe passata da 0,2 ms a **310 ms**: non 1,75x, **millecinquecento volte**.
 *(Curato il 17/08, #197: vedi sotto.)*
 
-🔴 **E il costo si moltiplica per il numero di DB — rilievo di @b82df434, verificato.**
+🔴 **E il costo si moltiplica per il numero di DB — rilievo di b82df434, verificato.**
 `_open()` sta **dentro il loop** `for name in _targets(db)` (in `search()` e negli altri
 tool che attraversano i DB), e `_targets("")` restituisce **tutti** i database (ramo
 `if not db`). Una ricerca senza filtro apre quindi **una connessione per DB**:
@@ -209,7 +209,7 @@ cancellato.* Prima di andare in produzione va deciso **dove la chiave viene cust
 **chi altro la conosce** — ed è una domanda di custodia, non di codice. Nessuna riga di
 questo repo può rispondere al posto di chi possiede la macchina.
 
-#### ⚠️ Al 16/08 le chiavi configurate erano ZERO — rilievo di @abdd732a, verificato
+#### ⚠️ Al 16/08 le chiavi configurate erano ZERO — rilievo di abdd732a, verificato
 
 `tools/backup.sh` legge il recipient da `tools/age-recipients.txt` (`RECIPIENTS_FILE`), e
 **quel file non esisteva**: non sul disco, non in `git ls-files`, non in `origin/main` (tre
@@ -234,7 +234,7 @@ quella dell'archivio: la domanda sembrava *«dove si custodisce la prima, e la s
 adegua?»*. Oggi la chiave age di norma c'è (riquadro sopra), quindi quella dell'archivio
 sarebbe la **seconda**, e la domanda torna a essere *«dove si custodiscono le due»*, sotto.
 
-#### 🔴 E le chiavi diventerebbero DUE — rilievo di @abdd732a, verificato
+#### 🔴 E le chiavi diventerebbero DUE — rilievo di abdd732a, verificato
 
 Il repo ha già una cifratura, con una chiave **diversa**: `tools/backup.sh` usa
 `tools/age-recipients.txt`, e i backup contengono il volume `archive-data` — cioè i `.db`

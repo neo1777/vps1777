@@ -97,12 +97,12 @@ jobs:
               *)
                 echo "::error::La CI sul commit taggato è '${CONCLUSION}', non 'success'."
                 echo "::error::Niente release da uno stato che non passa i propri controlli:"
-                echo "::error::porta la CI al verde su questo commit, poi ri-tagga."
+                echo "::error::porta la CI al verde e rilascia il numero successivo: un tag v* non si rifà (ruleset tag-v-immutabili)."
                 exit 1 ;;
             esac
           done
           echo "::error::CI del commit taggato mai conclusa dopo 15 minuti: release fermata."
-          echo "::error::Verifica lo stato della CI e ri-lancia il workflow (o ri-tagga a CI verde)."
+          echo "::error::Verifica lo stato della CI e ri-lancia questo workflow sullo stesso tag (il tag non si rifà)."
           exit 1
 
   release:
