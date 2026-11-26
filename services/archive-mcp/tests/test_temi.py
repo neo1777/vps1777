@@ -211,6 +211,44 @@ def test_una_riga_senza_registro_non_inventa_un_vettore(tmp_path: Path) -> None:
     assert [x["uuid"] for x in temi.scambi_di(db, vec, "x")] == ["z"]
 
 
+def _indice_finto(blocchi: dict[int, int], registro: dict[int, tuple[int, int]],
+                  dove: dict[int, tuple[int, int]]) -> sqlite3.Connection:
+    """Le tre tabelle che `_riempi_vettori` legge, come tabelle semplici: `blocchi` è
+    {blocco: quanti vettori}, e il vettore in posizione k del blocco b è l'asse 10*b+k."""
+    v = sqlite3.connect(":memory:")
+    v.execute("CREATE TABLE indice_righe(msg_rowid INTEGER PRIMARY KEY, primo_chunk, n_chunk)")
+    v.execute("CREATE TABLE vec_chunk_small_rowids(rowid INTEGER PRIMARY KEY, chunk_id, chunk_offset)")
+    v.execute("CREATE TABLE vec_chunk_small_vector_chunks00(rowid INTEGER PRIMARY KEY, vectors)")
+    for b, quanti in blocchi.items():
+        m = np.zeros((quanti, 384), dtype=np.float32)
+        for k in range(quanti):
+            m[k, 10 * b + k] = 1.0
+        v.execute("INSERT INTO vec_chunk_small_vector_chunks00 VALUES (?,?)", (b, m.tobytes()))
+    v.executemany("INSERT INTO indice_righe VALUES (?,?,?)", [(r, p, n) for r, (p, n) in registro.items()])
+    v.executemany("INSERT INTO vec_chunk_small_rowids VALUES (?,?,?)", [(p, b, k) for p, (b, k) in dove.items()])
+    return v
+
+
+def test_il_vettore_dello_scambio_pesa_due_il_proprietario() -> None:
+    # riga 1 → pezzo 1 (asse 10), riga 2 → pezzo 2 (asse 11): il proprietario è la riga 1
+    v = _indice_finto({1: 2}, {1: (1, 1), 2: (2, 1)}, {1: (1, 0), 2: (1, 1)})
+    scambi = [{"righe": [1, 2], "neo": 1}]
+    temi._riempi_vettori(scambi, v)
+    vec = scambi[0]["vec"]
+    assert abs(float(np.linalg.norm(vec)) - 1.0) < 1e-6
+    assert abs(vec[10] / vec[11] - 2.0) < 1e-5 and float(np.abs(vec).sum() - vec[10] - vec[11]) < 1e-6
+
+
+def test_un_pezzo_il_cui_blocco_manca_o_una_riga_senza_vettori_non_contano() -> None:
+    # riga 1: pezzo 1 nel blocco 1 (c'è). riga 2: pezzo 2 nel blocco 9 (la tabella non lo ha).
+    # riga 3: nel registro con zero pezzi. riga 4: senza registro.
+    v = _indice_finto({1: 1}, {1: (1, 1), 2: (2, 1), 3: (3, 0)}, {1: (1, 0), 2: (9, 0)})
+    scambi = [{"righe": [1, 2, 3, 4], "neo": 2}, {"righe": [2, 3, 4], "neo": 2}, {"righe": [], "neo": None}]
+    temi._riempi_vettori(scambi, v)
+    assert scambi[0]["vec"][10] == 1.0 and float(np.abs(scambi[0]["vec"]).sum()) == 1.0
+    assert scambi[1]["vec"] is None and scambi[2]["vec"] is None
+
+
 def _scambi_finti(n=60):
     X = _nuvole(n=n // 3)
     return [{"db": "a", "uuid": f"u{i}", "ts": "2026-09-01T00:00:00Z", "vec": v,
