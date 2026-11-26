@@ -183,8 +183,8 @@ VALID_SEVERITY = {"critical", "high", "medium", "low"}
 # di pending.json che entravano in uno script remoto, e l'installer locale senza Host/Origin.
 # + 1 (H99, low, 22/11) = 99. La chiave SSH della macchina accettata a ogni corsa dagli installatori.
 # + 1 (H100, low, 22/11) = 100. Un DB riservato entrava nelle ricerche se il ruolo non si leggeva.
-EXPECTED_TOTAL = 103
-EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 59, "low": 26}
+EXPECTED_TOTAL = 104
+EXPECTED_BY_SEVERITY = {"critical": 2, "high": 16, "medium": 59, "low": 27}
 
 RED, GRN, YEL, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
 if not sys.stdout.isatty():

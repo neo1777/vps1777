@@ -4,6 +4,14 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- Il gate anti-leak, dopo la parola «password», scambiava «parola più una-tre cifre» per un nome di pacchetto
+  (la regola di `python3` e `sha256` non guardava le maiuscole né la parola-spia) e la lasciava entrare: è la
+  forma più comune di una password scelta da una persona. Ora i nomi di pacchetto sono solo minuscoli, e dopo
+  «password», «pwd» e simili quella forma è un nome solo se sta in un elenco chiuso di nomi noti. Trovato
+  rileggendo lo spezzamento con Sagoma (H104). Misurato prima e dopo su 5.367 file di tre repo: nessun falso
+  allarme in più. Diciassette prove nuove.
+
 ### Cambiato
 - `_valore_innocuo` (il gate anti-leak: che cosa NON è una password dopo una parola-spia) è spezzata per
   famiglie di regole: ciò che non ha la forma di un valore (`_non_e_un_valore`), indirizzi e percorsi

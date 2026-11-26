@@ -5008,3 +5008,45 @@ findings:
       cambiato); il primo giro del timer con questa versione installata è la prova che manca. Niente rotazione né revoca di chiavi
       (non ci sono chiavi) e nessuna difesa dal mescolare metadati: TUF le ha, questo no. Se
       Telegram non è configurato, il fermo si vede solo in `vps1777 status` e nel log.
+
+  - id: H104
+    severity: low
+    title: "Dopo la parola «password» il gate anti-leak scambiava «parola più cifre» per un nome di pacchetto e la lasciava entrare"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-26"
+      come: lettura
+      nota: >
+        Rilettura dello spezzamento di `_valore_innocuo` (QUA-04): scrivendo le prove regola
+        per regola è emerso che un valore fatto di lettere seguite da una-tre cifre veniva
+        scartato come nome di pacchetto, anche con la maiuscola e anche dopo «password». `low`:
+        il gate è una rete in più sopra la disciplina di chi scrive, non l'unica difesa, e
+        non ci sono segni che un valore così sia mai entrato nel repo.
+    since: unreleased
+    why: >
+      La regola dei nomi di pacchetto (`python3`, `sha256`) non guardava le maiuscole e non
+      distingueva la parola-spia. «Parola più una-tre cifre» è la forma più comune di una
+      password scelta da una persona: proprio quella passava.
+    evidence:
+      - file: security/check_no_leaks.py
+        contains:
+          - 'PACCHETTO = re.compile(r"^[a-z]+\d{1,3}([-_.][a-z][a-z0-9]*)*$")'
+          - "if spia.lower() in SPIE_DI_PASSWORD and PAROLA_E_CIFRE.match(tok):"
+          - "return tok.lower() in NOMI_CON_CIFRE"
+      - file: tools/tests/test_no_leaks_valore_innocuo.py
+        contains:
+          - "def test_dopo_password_una_parola_piu_cifre_e_sospetta("
+          - "def test_la_riga_di_prosa_con_password_e_parola_piu_cifre_fa_rosso("
+          - "def test_i_nomi_noti_con_le_cifre_restano_nomi_anche_dopo_password("
+    prova:
+      - comando: "uvx --with pyyaml==6.0.4 pytest@9.2.0 -q tools/tests/test_no_leaks_valore_innocuo.py"
+        dove: "PC"
+        output: "48 passed: dopo «password» e «pwd» cinque valori finti di forma «parola più cifre» sono sospetti e la riga di prosa fa rosso; python3, sha256, utf8 restano nomi. Misurato prima e dopo su 5.367 file di tre repo: nessuna riga rossa in più."
+        exit: 0
+        quando: "2026-11-26"
+    residuo: >
+      Dopo «root» la forma minuscola `lettere+cifre` resta un nome (lì è quasi sempre una
+      macchina o un utente: misurate 56 righe innocue in più contro 2). Una parola tutta
+      minuscola con UNA sola cifra in coda dopo «password» resta innocua per l'ultima regola
+      sulla forma. Dopo una spia debole («token», «chiave») vale solo la cura delle maiuscole.

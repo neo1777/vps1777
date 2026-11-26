@@ -268,7 +268,23 @@ PAROLA_SPIA = re.compile(   # niente \b: «DB_PASSWORD=» ha l'underscore attacc
     r"api[ _-]?key|chiave|secret|segreto|credenzial\w*|root)(?![A-Za-z_])"   # ROOT_DIR, password_hash: identificatori
 )
 SPIE_FORTI = {"password", "passwd", "passwort", "pwd", "parola d'ordine", "passphrase", "root"}
-PACCHETTO = re.compile(r"^[a-z]+\d{1,3}([-_.][a-z][a-z0-9]*)*$", re.I)   # python3, sha256, python3-passlib, utf8
+# I nomi di pacchetto e di algoritmo sono MINUSCOLI (python3, sha256, python3-passlib, utf8). Fino
+# alla 0.98.22 la regola non guardava le maiuscole, e dopo «password» una parola seguita da una-tre
+# cifre («parola più cifre», la forma più comune di una password scelta da una persona) passava per
+# nome di pacchetto: il gate la lasciava entrare (rilettura di Sagoma, 26/11/2026, H104).
+PACCHETTO = re.compile(r"^[a-z]+\d{1,3}([-_.][a-z][a-z0-9]*)*$")
+# Dopo una parola che dice «password», la forma nuda `lettere+cifre` è un nome solo se sta in questo
+# elenco chiuso. Non vale per «root»: lì quella forma è quasi sempre un nome di macchina o di utente
+# (misurato su 4.534 file di lavoro: 56 righe innocue in più contro 2).
+PAROLA_E_CIFRE = re.compile(r"^[a-z]+\d{1,3}$", re.I)
+SPIE_DI_PASSWORD = frozenset({"password", "passwd", "passwort", "pwd", "parola d'ordine", "passphrase"})
+NOMI_CON_CIFRE = frozenset({
+    "python2", "python3", "sha1", "sha2", "sha3", "sha224", "sha256", "sha384", "sha512", "md4", "md5",
+    "utf8", "utf16", "utf32", "base16", "base32", "base64", "base85", "ipv4", "ipv6", "http2", "http3",
+    "oauth2", "argon2", "pbkdf2", "aes128", "aes192", "aes256", "crc32", "blake2",
+    "blake3", "sqlite3", "bzip2", "lz4", "mp3", "mp4", "h264", "h265", "win32", "x64", "x86", "arm64",
+    "amd64", "latin1", "ascii7",
+})
 FINESTRA_PROSA = 60
 TOKEN_PROSA = re.compile(r"[^\s`'\"()\[\]{}<>,;]+")
 LUNGHEZZA_MINIMA_PROSA = {"token": 10, "chiave": 8}  # parole comuni nella prosa: soglia più alta
@@ -315,13 +331,15 @@ def _e_un_indirizzo_o_un_percorso(tok: str) -> bool:
     return False
 
 
-def _e_un_nome(tok: str) -> bool:
+def _e_un_nome(spia: str, tok: str) -> bool:
     """Uno slug a trattini, un pacchetto, un identificatore con l'underscore: nomi, non valori."""
     if re.match(r"^[a-z0-9]+(-[a-z0-9]+){2,}$", tok, re.I) and not re.search(r"[A-Z]", tok[1:]):
         return True
-    if PACCHETTO.match(tok) or ("_" in tok and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", tok)):
-        return True   # python3-passlib, sha256, admin_password_hash: nomi, non valori
-    return False
+    if "_" in tok and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", tok):
+        return True   # admin_password_hash: un nome, non un valore
+    if spia.lower() in SPIE_DI_PASSWORD and PAROLA_E_CIFRE.match(tok):
+        return tok.lower() in NOMI_CON_CIFRE   # dopo «password», «parola più cifre» è un nome solo se noto
+    return bool(PACCHETTO.match(tok))          # python3-passlib, sha256: nomi, non valori
 
 
 def _ha_la_forma_di_un_segreto(spia: str, tok: str) -> bool:
@@ -342,7 +360,7 @@ def _valore_innocuo(spia: str, tok: str) -> bool:
     tok = tok.lstrip("=:→")                                # il separatore incollato al valore (DB_PASSWORD=x)
     if len(tok) < LUNGHEZZA_MINIMA_PROSA.get(spia.lower(), 6):
         return True
-    if _non_e_un_valore(tok) or _e_un_indirizzo_o_un_percorso(tok) or _e_un_nome(tok):
+    if _non_e_un_valore(tok) or _e_un_indirizzo_o_un_percorso(tok) or _e_un_nome(spia, tok):
         return True
     return not _ha_la_forma_di_un_segreto(spia, tok)
 
