@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Cambiato
+- `_aggiungi` (il costruttore dell'indice semantico) cede il controllo dei vettori di un lotto a
+  `_controlla_vettori`: uno per testo, della dimensione del modello, normalizzati. Complessità da 13 a 10
+  (QUA-04). Comportamento identico: 800 storie di costruzione a confronto in due processi, anche con embedder che
+  restituiscono vettori in meno, in più, corti, lunghi o non normalizzati, zero differenze, ogni ramo percorso,
+  sette mutazioni tutte viste. Tre prove nuove.
 - `stirpe_conn` (archive-mcp: la stirpe di una sessione) è spezzata in quattro: la visita degli archi con
   chiusura (`_stirpe_visita`), i membri coi loro filoni (`_stirpe_membri`), le stirpi dichiarate con le schede
   (`_stirpe_dichiarate`) e l'esito con le note. Complessità da 13 a sotto 10 (QUA-04). Comportamento identico:
