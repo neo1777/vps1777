@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- `get_many` (archive-mcp: le righe intere di più uuid) è spezzata in quattro: gli uuid chiesti e i loro limiti
+  (`_get_many_voluti`), l'ordine dei DB (`_get_many_ordine`), la lettura di un DB (`_get_many_leggi`) e il giro.
+  Complessità da 13 a sotto 10 (QUA-04). Comportamento identico: 2.500 scenari a confronto in due processi (DB di
+  ogni specie, rotti, in scrittura, spariti), zero differenze, ogni ramo percorso, dieci mutazioni tutte viste.
+  Una prova nuova per l'unico ramo che non ne aveva.
+
 ## [0.98.21] — 2026-11-26
 
 ### Cambiato

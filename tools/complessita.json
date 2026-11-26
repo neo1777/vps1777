@@ -26,10 +26,6 @@
    "complessita": 13,
    "stato": "da-esaminare"
   },
-  "services/archive-mcp/app/db.py::get_many": {
-   "complessita": 13,
-   "stato": "da-esaminare"
-  },
   "services/archive-mcp/app/fts.py::stirpe_conn": {
    "complessita": 13,
    "stato": "da-esaminare"
