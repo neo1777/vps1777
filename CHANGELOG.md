@@ -5,6 +5,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Cambiato
+- `_valore_innocuo` (il gate anti-leak: che cosa NON è una password dopo una parola-spia) è spezzata per
+  famiglie di regole: ciò che non ha la forma di un valore (`_non_e_un_valore`), indirizzi e percorsi
+  (`_e_un_indirizzo_o_un_percorso`), nomi (`_e_un_nome`) e l'ultima domanda sulla forma
+  (`_ha_la_forma_di_un_segreto`). Complessità da 13 a sotto 10 (QUA-04). Stesso verdetto su 120.000 candidati e
+  su 6.000 righe di prosa passate dalla funzione che la chiama; ogni ramo percorso; tredici mutazioni viste e
+  una equivalente (senza cifre né simboli forti la risposta è «innocuo» anche per l'ultima domanda). Trentuno
+  prove nuove: sei regole non scattavano in nessuna prova.
 - `_riempi_vettori` (archive-mcp, la mappa dei temi) è spezzata in quattro: il registro delle righe
   (`_registro_delle_righe`), i vettori dei pezzi (`_vettori_dei_pezzi`), la media pesata di uno scambio
   (`_vettore_dello_scambio`) e il giro. Complessità da 13 a sotto 10 (QUA-04). Comportamento identico: 3.000

@@ -14,10 +14,6 @@
    "complessita": 14,
    "stato": "da-esaminare"
   },
-  "security/check_no_leaks.py::_valore_innocuo": {
-   "complessita": 13,
-   "stato": "da-esaminare"
-  },
   "services/gateway/app/asgi_security.py::__call__": {
    "complessita": 13,
    "stato": "da-esaminare"
