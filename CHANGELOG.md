@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.22] — 2026-11-26
+
 ### Cambiato
 - `controlla` di `tools/nomi-nei-doc.py` (i comandi, i flag, le variabili, i tool e i comandi del bot che i
   documenti nominano) è spezzata in tre: gli errori della CLI in un pezzo (`_errori_della_cli`), quelli di un
