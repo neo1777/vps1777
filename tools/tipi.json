@@ -20,7 +20,6 @@
     "services/nb1777-mcp/app/server.py": 35,
     "services/nb1777-mcp/app/sonda.py": 1,
     "tools/fatti-nei-doc.py": 5,
-    "tools/lock-salti.py": 3,
     "tools/nomi-nei-doc.py": 3,
     "tools/verify-features.py": 2,
     "tools/vps1777.py": 30

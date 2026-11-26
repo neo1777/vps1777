@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Cambiato
+- `confronta` di `tools/lock-salti.py` (quali dipendenze attraversano un confine di versione) è spezzata in
+  quattro: la lettura dei due lock, i cambi per gravità, la stampa del quadro e il verdetto. Complessità da 14 a
+  sotto 10 (QUA-04), e il file non ha più errori di tipo (QUA-03: 133 in 20 file). Comportamento identico: 4.000
+  coppie di lock a confronto su codice d'uscita, stdout e stderr, zero differenze, ogni ramo percorso, dieci
+  mutazioni tutte viste. Otto prove nuove.
 - `fai_posto_agli_artefatti` (nb1777-mcp) è spezzata in quattro: l'elenco dal più vecchio
   (`_artefatti_dal_piu_vecchio`), gli scaduti (`_togli_gli_scaduti`), quelli in eccesso
   (`_togli_quelli_in_eccesso`) e il giro con lo spazio libero. Complessità da 13 a sotto 10 (QUA-04).
