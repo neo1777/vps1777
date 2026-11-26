@@ -287,8 +287,10 @@ updating is the `autoupdate` feature (the timer, with quarantine and the safety 
 
 - **"update già in corso"** — there's a lock (`var/update.lock`): another update,
   rollback or bootstrap is at work. (The daily `vps1777 check` uses the same lock, but
-  doesn't cause this message: it lasts a few seconds and the update waits for it up to
-  two minutes; the check, in turn, waits for an update in progress.) The CLI exits with **75** (`EX_TEMPFAIL`, "try
+  doesn't cause this message: the update waits for it up to two minutes, and if that is
+  not enough it exits with 75 saying «il controllo giornaliero sta ancora girando»; the
+  button click isn't lost, the update starts again by itself. The check, in turn, waits
+  for an update in progress.) The CLI exits with **75** (`EX_TEMPFAIL`, "try
   again later"), which the update units count as success (`SuccessExitStatus=75`): a
   timer run that runs into an update in progress doesn't send a false "failed" on
   Telegram. If it's a leftover from a crash: `vps1777 status` shows

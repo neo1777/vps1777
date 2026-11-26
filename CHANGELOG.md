@@ -13,7 +13,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   al controllo successivo. Ora il controllo aspetta l'update in corso (al più 30 minuti: oltre gira lo stesso, e
   lo dice) e tiene il lucchetto mentre legge e riscrive lo stato; un update, un rollback o un bootstrap che
   trovano il lucchetto in mano al controllo lo aspettano fino a due minuti invece di uscire con «riprova dopo».
-  Nel file del lucchetto resta scritto chi lo tiene, e chi lo trova occupato non lo cancella più.
+  Che a tenerlo sia il controllo lo dice un secondo lucchetto (`var/check.lock`), non il testo del file. Se il
+  controllo dura più di due minuti chi aspettava esce con 75 e il motivo vero («il controllo giornaliero sta
+  ancora girando»), e l'intent del pulsante «Aggiorna» resta: l'update riparte da solo appena può, il click non
+  si perde. Chi trova il lucchetto occupato non cancella più il nome di chi lo tiene.
 
 ## [0.98.20] — 2026-11-26
 

@@ -95,7 +95,7 @@
    "stato": "da-esaminare"
   },
   "tools/vps1777.py::cmd_rollback": {
-   "complessita": 12,
+   "complessita": 11,
    "stato": "da-esaminare"
   },
   "security/check_no_leaks.py::righe_password_nuda": {
