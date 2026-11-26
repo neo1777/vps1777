@@ -5,6 +5,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Cambiato
+- `fai_posto_agli_artefatti` (nb1777-mcp) è spezzata in quattro: l'elenco dal più vecchio
+  (`_artefatti_dal_piu_vecchio`), gli scaduti (`_togli_gli_scaduti`), quelli in eccesso
+  (`_togli_quelli_in_eccesso`) e il giro con lo spazio libero. Complessità da 13 a sotto 10 (QUA-04).
+  Comportamento identico: 3.000 cartelle a confronto (file che non si lasciano guardare o cancellare, cartelle,
+  link, tetti di ogni misura), zero differenze, ogni ramo percorso, undici mutazioni tutte viste. Quattro prove
+  nuove.
 - `_aggiungi` (il costruttore dell'indice semantico) cede il controllo dei vettori di un lotto a
   `_controlla_vettori`: uno per testo, della dimensione del modello, normalizzati. Complessità da 13 a 10
   (QUA-04). Comportamento identico: 800 storie di costruzione a confronto in due processi, anche con embedder che

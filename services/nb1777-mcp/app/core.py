@@ -108,13 +108,10 @@ ARTEFATTI_MAX_BYTE = int(os.environ.get("NLM_ARTIFACTS_MAX_MB", "5000")) * 1024 
 ARTEFATTI_LIBERO_MINIMO = 1024 * 1024 * 1024
 
 
-def fai_posto_agli_artefatti(*, ora: float | None = None) -> dict[str, int]:
-    """Toglie gli artefatti scaduti o in eccesso e controlla lo spazio. Solleva NLMError se sul
-    disco non resta ARTEFATTI_LIBERO_MINIMO. Torna quanti file ha tolto e perché."""
-    base = artifacts_dir()
-    adesso = time.time() if ora is None else ora
-    tolti = {"scaduti": 0, "in_eccesso": 0}
-    non_tolti = 0     # file che non si sono lasciati leggere o cancellare: si contano e si dicono
+def _artefatti_dal_piu_vecchio(base: Path) -> tuple[list[tuple[float, int, Path]], int]:
+    """I file della cartella (mtime, byte, percorso) dal più vecchio, e quanti non si sono
+    lasciati nemmeno guardare."""
+    non_tolti = 0
     file = []
     for f in base.iterdir():
         try:
@@ -125,16 +122,31 @@ def fai_posto_agli_artefatti(*, ora: float | None = None) -> dict[str, int]:
             non_tolti += 1                       # non si lascia nemmeno guardare
             continue
     file.sort()                                  # dal più vecchio
+    return file, non_tolti
+
+
+def _togli_gli_scaduti(file: list[tuple[float, int, Path]],
+                       adesso: float) -> tuple[list[tuple[float, int, Path]], int, int]:
+    """Toglie i file più vecchi di ARTEFATTI_GIORNI: quelli che restano, quanti ne ha tolti,
+    quanti non si sono lasciati cancellare."""
+    tolti = non_tolti = 0
     restano = []
     for mtime, dim, f in file:
         if ARTEFATTI_GIORNI > 0 and adesso - mtime > ARTEFATTI_GIORNI * 86400:
             try:
                 f.unlink()
-                tolti["scaduti"] += 1
+                tolti += 1
                 continue
             except OSError:
                 non_tolti += 1
         restano.append((mtime, dim, f))
+    return restano, tolti, non_tolti
+
+
+def _togli_quelli_in_eccesso(restano: list[tuple[float, int, Path]]) -> tuple[int, int]:
+    """Dal più vecchio, finché il totale non torna sotto ARTEFATTI_MAX_BYTE: quanti ne ha
+    tolti e quanti non si sono lasciati cancellare."""
+    tolti = non_tolti = 0
     totale = sum(d for _, d, _ in restano)
     for _, dim, f in restano:
         if totale <= ARTEFATTI_MAX_BYTE:
@@ -142,9 +154,23 @@ def fai_posto_agli_artefatti(*, ora: float | None = None) -> dict[str, int]:
         try:
             f.unlink()
             totale -= dim
-            tolti["in_eccesso"] += 1
+            tolti += 1
         except OSError:
             non_tolti += 1
+    return tolti, non_tolti
+
+
+def fai_posto_agli_artefatti(*, ora: float | None = None) -> dict[str, int]:
+    """Toglie gli artefatti scaduti o in eccesso e controlla lo spazio. Solleva NLMError se sul
+    disco non resta ARTEFATTI_LIBERO_MINIMO. Torna quanti file ha tolto e perché."""
+    base = artifacts_dir()
+    adesso = time.time() if ora is None else ora
+    # file che non si sono lasciati leggere o cancellare: si contano e si dicono
+    file, non_visti = _artefatti_dal_piu_vecchio(base)
+    restano, scaduti, duri = _togli_gli_scaduti(file, adesso)
+    in_eccesso, altri_duri = _togli_quelli_in_eccesso(restano)
+    tolti = {"scaduti": scaduti, "in_eccesso": in_eccesso}
+    non_tolti = non_visti + duri + altri_duri
     if non_tolti:
         log.warning("artefatti: %d file non si sono lasciati leggere o cancellare", non_tolti)
     if tolti["scaduti"] or tolti["in_eccesso"]:
