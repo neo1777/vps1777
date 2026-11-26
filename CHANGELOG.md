@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.21] — 2026-11-26
+
 ### Cambiato
 - `_iter_zip_annidato` (l'archivio dentro i workfiles, aperto per un livello) è spezzata in tre: la lettura di un
   membro col suo tetto (`_leggi_membro_annidato`), lo smistamento per tipo (`_iter_membro_annidato`) e il giro sui
