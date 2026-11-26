@@ -10,10 +10,6 @@
  "fine_semina": "2027-01-31",
  "fine_semina_scelta": "2026-11-24-soglia-qua04-fine-semina-confermata (chi possiede il repo)",
  "funzioni": {
-  "tools/lock-salti.py::confronta": {
-   "complessita": 14,
-   "stato": "da-esaminare"
-  },
   "tools/vps1777.py::cmd_archive_migra": {
    "complessita": 14,
    "stato": "da-esaminare"
