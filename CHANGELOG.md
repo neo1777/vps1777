@@ -5,6 +5,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Cambiato
+- `fai_posto_agli_artefatti` (nb1777-mcp) è spezzata in quattro: l'elenco dal più vecchio
+  (`_artefatti_dal_piu_vecchio`), gli scaduti (`_togli_gli_scaduti`), quelli in eccesso
+  (`_togli_quelli_in_eccesso`) e il giro con lo spazio libero. Complessità da 13 a sotto 10 (QUA-04).
+  Comportamento identico: 3.000 cartelle a confronto (file che non si lasciano guardare o cancellare, cartelle,
+  link, tetti di ogni misura), zero differenze, ogni ramo percorso, undici mutazioni tutte viste. Quattro prove
+  nuove.
 - `stirpe_conn` (archive-mcp: la stirpe di una sessione) è spezzata in quattro: la visita degli archi con
   chiusura (`_stirpe_visita`), i membri coi loro filoni (`_stirpe_membri`), le stirpi dichiarate con le schede
   (`_stirpe_dichiarate`) e l'esito con le note. Complessità da 13 a sotto 10 (QUA-04). Comportamento identico:

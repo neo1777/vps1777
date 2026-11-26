@@ -38,10 +38,6 @@
    "complessita": 13,
    "stato": "da-esaminare"
   },
-  "services/nb1777-mcp/app/core.py::fai_posto_agli_artefatti": {
-   "complessita": 13,
-   "stato": "da-esaminare"
-  },
   "tools/vps1777.py::health_gate": {
    "complessita": 13,
    "stato": "da-esaminare"
