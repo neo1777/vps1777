@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Cambiato
+- `stirpe_conn` (archive-mcp: la stirpe di una sessione) è spezzata in quattro: la visita degli archi con
+  chiusura (`_stirpe_visita`), i membri coi loro filoni (`_stirpe_membri`), le stirpi dichiarate con le schede
+  (`_stirpe_dichiarate`) e l'esito con le note. Complessità da 13 a sotto 10 (QUA-04). Comportamento identico:
+  4.000 archivi a confronto, zero differenze, ogni ramo percorso; undici mutazioni viste e una equivalente (il
+  `max(1, …)` sul limite: l'insieme ha sempre almeno un membro). Una prova nuova per il ramo delle stirpi diverse.
 - `get_many` (archive-mcp: le righe intere di più uuid) è spezzata in quattro: gli uuid chiesti e i loro limiti
   (`_get_many_voluti`), l'ordine dei DB (`_get_many_ordine`), la lettura di un DB (`_get_many_leggi`) e il giro.
   Complessità da 13 a sotto 10 (QUA-04). Comportamento identico: 2.500 scenari a confronto in due processi (DB di
