@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- Una dozzina di commenti e messaggi del codice dicevano cose non più vere, viste rileggendo i documenti:
+  l'aggiornamento automatico e il controllo delle scadenze sono giornalieri, non settimanali; il consiglio per
+  creare l'operatore lo metteva ancora nel gruppo `sudo`; la nota di `archive_desc_secret` diceva di ricreare solo
+  il gateway (lo monta anche archive-mcp). La nota di `delta` e la descrizione del suo tool non nominano più un
+  DB vero di un'installazione, e così due prove.
+
 ### Cambiato
 - `delta` di archive-mcp (il confronto fra due fotografie dello stesso account) è spezzata in tre: il conto
   (`_ContoDelta`, al posto di una funzione annidata che cambiava variabili di fuori), lo scorrimento dei due DB

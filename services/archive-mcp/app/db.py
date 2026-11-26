@@ -1658,7 +1658,7 @@ def precedenti(tema: str, db: str = "", limit: int = 30, *,
 # l'account ha perso (chat cancellate), guadagnato o riscritto. Prima si ricavava a mano;
 # i canarini del 07/09 (`bot1777`, `How to use Claude`: presenti nel 080726, a zero nel
 # 290826) erano saltati fuori per caso. Il confronto è per `uuid`, che negli export claude.ai
-# è stabile; in `mvp-100626` e nei workfile no, e lì il delta direbbe «tutto sparito, tutto
+# è stabile; in un export fatto con un altro strumento e nei workfile no, e lì il delta direbbe «tutto sparito, tutto
 # nuovo»: per questo si misura quanti uuid i due DB condividono e lo si dichiara.
 DELTA_ESEMPI = 20
 DELTA_ESEMPI_MASSIMO = 200
@@ -1742,7 +1742,7 @@ def _delta_note(out: dict[str, Any], parziale: bool, arrivato_a: str, piu_piccol
                     f"{arrivato_a!r} (in ordine di uuid). Restringi con project=.")
     if piu_piccolo and quota < DELTA_CONDIVISI_MINIMO:
         note.append(f"I due DB condividono solo il {quota:.0%} degli uuid: probabilmente gli "
-                    "uuid non sono stabili fra queste due fonti (succede con mvp-100626 e coi "
+                    "uuid non sono stabili fra queste due fonti (succede con un export fatto con un altro strumento e coi "
                     "workfile), e allora «spariti» e «nuovi» sono la stessa roba con due nomi.")
     if note:
         out["nota"] = " ".join(note)

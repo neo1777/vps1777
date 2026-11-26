@@ -106,7 +106,7 @@ def test_meta_indice_non_esplode_su_indice_senza_metadati():
 
 # ── ② il banco: solo dove ci sono indice e modello ───────────────────────────
 
-_DB = Path("/var/lib/archive/db/recupero-20260905.db")
+_DB = Path("/var/lib/archive/db/primario-di-prova.db")
 _MODELLO = Path("/var/lib/archive/models/e5-small")
 _ha_tutto = _DB.is_file() and semantica.percorso_indice(_DB).is_file() and \
     (_MODELLO / "model.onnx").is_file()
