@@ -488,6 +488,51 @@ def test_perimetro_vuoto_non_scrive_niente(tmp_path):
 
 
 @vec
+def test_un_vettore_in_meno_dei_testi_e_rifiutato(tmp_path):
+    class Avaro(Finto):
+        def __call__(self, testi):
+            return super().__call__(testi)[:-1]
+
+    with pytest.raises(ci.ErroreCostruttore, match=r"ha restituito \d+ vettori per \d+ testi"):
+        ci.costruisci(base(tmp_path), Avaro(), ci.Perimetro(tutto=True))
+    assert not (tmp_path / "prova.vec.db").exists()
+
+
+@vec
+def test_vettori_non_normalizzati_sono_rifiutati(tmp_path):
+    class Lungo(Finto):
+        def __call__(self, testi):
+            return [struct.pack(f"{semantica.DIM}f",
+                                *(x * 2 for x in struct.unpack(f"{semantica.DIM}f", v)))
+                    for v in super().__call__(testi)]
+
+    with pytest.raises(ci.ErroreCostruttore, match="norma 2.0000, atteso 1"):
+        ci.costruisci(base(tmp_path), Lungo(), ci.Perimetro(tutto=True))
+    assert not (tmp_path / "prova.vec.db").exists()
+
+
+@vec
+def test_il_progresso_arriva_a_ogni_lotto_e_un_messaggio_svuotato_non_entra(tmp_path, monkeypatch):
+    """Con `lotto=1` il progresso si dice a ogni messaggio; un messaggio che fra il perimetro e
+    la lettura è rimasto senza testo non produce pezzi e non entra nell'indice."""
+    db = base(tmp_path)
+    vera = ci.testi_per_rowid
+
+    def con_una_svuotata(src, rowids):
+        righe = list(vera(src, rowids))
+        yield (righe[0][0], righe[0][1], "")
+        yield from righe[1:]
+
+    monkeypatch.setattr(ci, "testi_per_rowid", con_una_svuotata)
+    passi = []
+    ci.costruisci(db, Finto(), ci.Perimetro(tutto=True), lotto=1,
+                  progresso=lambda *a: passi.append(a))
+    assert len(passi) >= 3, passi
+    assert rowid_di(db, "u1") not in msg_rowid_vettori(tmp_path / "prova.vec.db")
+    assert rowid_di(db, "u2") in msg_rowid_vettori(tmp_path / "prova.vec.db")
+
+
+@vec
 def test_vettori_della_dimensione_sbagliata_sono_rifiutati(tmp_path):
     class Corto(Finto):
         def __call__(self, testi):
