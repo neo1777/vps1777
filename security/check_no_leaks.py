@@ -288,17 +288,20 @@ _SCARTA_FORMA = (
 )
 
 
-def _valore_innocuo(spia: str, tok: str) -> bool:
-    """True se il candidato NON è una password: URL, email, path, nome di casa, orario, file, prompt."""
-    tok = tok.lstrip("=:→")                                # il separatore incollato al valore (DB_PASSWORD=x)
-    if len(tok) < LUNGHEZZA_MINIMA_PROSA.get(spia.lower(), 6):
-        return True
+def _non_e_un_valore(tok: str) -> bool:
+    """Un'assegnazione, una chiamata, una variabile, una menzione; o un candidato senza lettere,
+    o senza né cifre né simboli forti: non è la forma di un valore scritto a mano."""
     if "=" in tok or CODICE & set(tok) or "://" in tok or VARIABILE.search(tok) or HANDLE.match(tok):
         return True                                        # assegnazioni, chiamate, variabili, menzioni: non valori
     if not re.search(r"[A-Za-z]", tok):
         return True
     if not (re.search(r"[0-9]", tok) or SIMBOLI_FORTI.search(tok)):
         return True
+    return False
+
+
+def _e_un_indirizzo_o_un_percorso(tok: str) -> bool:
+    """URL, percorso, email, prompt di shell, nome di casa, orario, nome di file."""
     if tok.lower().startswith(("http", "www.", "/", "~", "./", "../", "[redatto", "--", "<")):
         return True
     if "@" in tok[1:] and "." in tok.split("@", 1)[1]:
@@ -309,18 +312,39 @@ def _valore_innocuo(spia: str, tok: str) -> bool:
         return True
     if re.search(r"\.(md|py|sh|json|jsonl|txt|html|yml|yaml|toml|ndjson|log|csv|tsv|png|pdf)$", tok, re.I):
         return True
+    return False
+
+
+def _e_un_nome(tok: str) -> bool:
+    """Uno slug a trattini, un pacchetto, un identificatore con l'underscore: nomi, non valori."""
     if re.match(r"^[a-z0-9]+(-[a-z0-9]+){2,}$", tok, re.I) and not re.search(r"[A-Z]", tok[1:]):
         return True
     if PACCHETTO.match(tok) or ("_" in tok and re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", tok)):
         return True   # python3-passlib, sha256, admin_password_hash: nomi, non valori
+    return False
+
+
+def _ha_la_forma_di_un_segreto(spia: str, tok: str) -> bool:
+    """L'ultima domanda, quando niente lo ha scartato: simboli forti, cifre, maiuscole e minuscole
+    insieme. Dopo una spia debole («token», «chiave») la forma deve essere più netta."""
     forte = bool(SIMBOLI_FORTI.search(tok))
     cifre = sum(ch.isdigit() for ch in tok)
     misto = bool(re.search(r"[a-z]", tok)) and bool(re.search(r"[A-Z]", tok))
     if spia.lower() not in SPIE_FORTI:
         # «token», «chiave», «secret»… sono parole comuni nella prosa: il valore deve avere
         # la forma di un segreto, non di un identificatore (misurato: 52 → pochi).
-        return not (forte or (cifre >= 2 and misto and len(tok) >= 12))
-    return not (forte or cifre >= 2 or (cifre == 1 and misto))
+        return forte or (cifre >= 2 and misto and len(tok) >= 12)
+    return forte or cifre >= 2 or (cifre == 1 and misto)
+
+
+def _valore_innocuo(spia: str, tok: str) -> bool:
+    """True se il candidato NON è una password: URL, email, path, nome di casa, orario, file, prompt."""
+    tok = tok.lstrip("=:→")                                # il separatore incollato al valore (DB_PASSWORD=x)
+    if len(tok) < LUNGHEZZA_MINIMA_PROSA.get(spia.lower(), 6):
+        return True
+    if _non_e_un_valore(tok) or _e_un_indirizzo_o_un_percorso(tok) or _e_un_nome(tok):
+        return True
+    return not _ha_la_forma_di_un_segreto(spia, tok)
 
 
 def righe_password_in_prosa(text: str) -> list[int]:
