@@ -620,3 +620,54 @@ def test_modello_mancante_si_dice_subito(tmp_path, monkeypatch):
     monkeypatch.setattr(ci.semantica, "apri_modello", apri)
     with pytest.raises(semantica.SemanticaNonPronta):
         ci.EmbedderOnnx(tmp_path)
+
+
+# ── le strade di `costruisci` che nessuna prova percorreva (26/11/2026, prima di spezzarla) ──
+
+@vec
+def test_ricostruisci_butta_un_parziale_rimasto_e_riparte_da_zero(tmp_path):
+    db = base(tmp_path)
+    parz = tmp_path / "prova.vec.db.parziale"
+    with pytest.raises(KeyboardInterrupt):
+        ci.costruisci(db, Finto(guasto_dopo=1), ci.Perimetro(tutto=True), lotto=1)
+    assert parz.exists()
+    e = Finto()
+    esito = ci.costruisci(db, e, ci.Perimetro(tutto=True), ricostruisci=True)
+    assert esito.modo == "ricostruzione" and esito.vettori == 5
+    assert len(e.visti) == 5, "una ricostruzione ricalcola tutto: niente si eredita dal parziale"
+    assert not parz.exists()
+
+
+@vec
+def test_un_parziale_che_non_e_una_costruzione_interrotta_si_rifiuta(tmp_path):
+    db = base(tmp_path)
+    ci.costruisci(db, Finto(), ci.Perimetro(tutto=True))
+    idx = semantica.percorso_indice(db)
+    parz = tmp_path / "prova.vec.db.parziale"
+    parz.write_bytes(idx.read_bytes())          # un indice COMPLETO col nome di un lavoro a metà
+    with pytest.raises(ci.ErroreCostruttore, match="non è una costruzione interrotta"):
+        ci.costruisci(db, Finto())
+    assert parz.exists(), "non si cancella ciò che non si è capito"
+
+
+@vec
+def test_un_perimetro_di_soli_messaggi_corti_non_scrive_niente(tmp_path):
+    db = nuovo_db(tmp_path / "prova.db", [("u1", "p", "2026-05-02T10:00:00Z", "corto"),
+                                          ("u2", "p", "2026-05-03T10:00:00Z", "breve")])
+    with pytest.raises(ci.ErroreCostruttore, match="2 messaggi nel perimetro ma nessuno con almeno"):
+        ci.costruisci(db, Finto(), ci.Perimetro(tutto=True))
+    assert not semantica.percorso_indice(db).exists()
+    assert not (tmp_path / "prova.vec.db.parziale").exists()
+
+
+@vec
+def test_un_messaggio_sparito_durante_la_costruzione_si_dice_nelle_note(tmp_path, monkeypatch):
+    db = base(tmp_path)
+    vera = ci.testi_per_rowid
+
+    def una_in_meno(src, rowids):
+        yield from list(vera(src, rowids))[:-1]
+    monkeypatch.setattr(ci, "testi_per_rowid", una_in_meno)
+    esito = ci.costruisci(db, Finto(), ci.Perimetro(tutto=True))
+    assert esito.indicizzabili == 5 and esito.messaggi == 4
+    assert any("1 messaggi indicizzabili senza vettori" in n for n in esito.note)
