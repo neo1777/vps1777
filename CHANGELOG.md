@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.20] — 2026-11-26
+
 ### Corretto
 - Una dozzina di commenti e messaggi del codice dicevano cose non più vere, viste rileggendo i documenti:
   l'aggiornamento automatico e il controllo delle scadenze sono giornalieri, non settimanali; il consiglio per
