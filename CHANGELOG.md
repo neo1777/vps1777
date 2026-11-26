@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.22] — 2026-11-26
+
 ### Cambiato
 - `_riempi_vettori` (archive-mcp, la mappa dei temi) è spezzata in quattro: il registro delle righe
   (`_registro_delle_righe`), i vettori dei pezzi (`_vettori_dei_pezzi`), la media pesata di uno scambio
