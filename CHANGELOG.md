@@ -4,6 +4,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- `delta` di archive-mcp (il confronto fra due fotografie dello stesso account) è spezzata in tre: il conto
+  (`_ContoDelta`, al posto di una funzione annidata che cambiava variabili di fuori), lo scorrimento dei due DB
+  e le avvertenze. Complessità da 15 a 3 (QUA-04, restano 36 funzioni). Comportamento identico su 3.000 scenari
+  confrontati col codice di prima in due processi separati; tre prove nuove.
+
 ## [0.98.19] — 2026-11-26
 
 ### Corretto
