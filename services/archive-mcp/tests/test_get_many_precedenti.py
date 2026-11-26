@@ -127,6 +127,15 @@ def test_get_many_dice_quali_uuid_mancano(db):
     assert r["mancanti"] == ["non-esiste"]
 
 
+def test_get_many_un_db_sparito_fra_l_elenco_e_l_apertura_si_salta(db, monkeypatch):
+    """Un nome che l'elenco dà e che all'apertura non c'è più (un DB tolto in quel momento)
+    non rompe la lettura degli altri."""
+    veri = db._targets
+    monkeypatch.setattr(db, "_targets", lambda nome: ["sparito-nel-frattempo", *veri(nome)])
+    r = db.get_many(["h1"], "prim")
+    assert [x["uuid"] for x in r["righe"]] == ["h1"] and r["mancanti"] == []
+
+
 def test_get_many_riga_senza_testo_porta_le_azioni(db):
     (riga,) = db.get_many(["t1"])["righe"]
     assert riga["content"] == "" and "Bash" in riga["tools"]
