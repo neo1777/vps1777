@@ -369,3 +369,60 @@ def test_i_due_tool_sono_registrati_e_chiamano_db(tmp_path) -> None:
         assert any("tool" in ast.dump(d) for d in fn.decorator_list), f"{nome} non registrato"
         assert fn.lineno > riga_sostituzione, f"{nome} sopra la redazione"
         assert f"'{nome}'" in ast.dump(fn.body[-1]), f"{nome} non chiama db.{nome}"
+
+
+# ── le strade di `_risolvi_sessione` che nessuna prova percorreva (26/11/2026, prima di spezzarla) ──
+
+Z = "9f9e9d9c-0000-4000-8000-00000000000f"      # una sessione che nessuna scheda conosce
+
+
+def _r1_vuoto(percorso: Path, avvistata: str = "") -> Path:
+    """Un DB col contratto R1 (tabelle `sessioni` e `archi`) ma senza nessuna scheda dentro."""
+    conn = sqlite3.connect(percorso)
+    conn.executescript("""
+        CREATE TABLE messages(uuid TEXT PRIMARY KEY, project, ts, content,
+            sender DEFAULT '', parent_uuid DEFAULT '');
+        CREATE VIRTUAL TABLE messages_fts USING fts5(
+            uuid, project, ts, content, content='messages', content_rowid='rowid');
+        CREATE TABLE sightings(uuid, source, ingest_date, PRIMARY KEY(uuid, source));
+        CREATE TABLE sessioni(sessionId, file, last_ts, PRIMARY KEY(sessionId, file));
+        CREATE TABLE archi(da, a, relazione);
+    """)
+    if avvistata:
+        conn.execute("INSERT INTO sightings VALUES ('z-u1', ?, '')", (f"sessions/{avvistata}.jsonl",))
+    conn.commit()
+    conn.close()
+    return percorso
+
+
+def test_una_tabella_sessioni_vuota_si_dice_e_la_conversazione_avvistata_pure(tmp_path, monkeypatch) -> None:
+    _r1_vuoto(tmp_path / "vuoto.db", avvistata=Z)
+    modulo = _modulo_db(tmp_path, monkeypatch)
+    with pytest.raises(modulo.SessioneNonRisolta) as exc:
+        modulo.get_session(Z)
+    msg = str(exc.value)
+    assert "tabella sessioni vuota in: vuoto" in msg, msg
+    assert "La CONVERSAZIONE però c'è" in msg and "vuoto (1 righe)" in msg, msg
+
+
+def test_un_archivio_col_journal_caldo_si_salta_e_gli_altri_rispondono(db) -> None:
+    modulo, cartella = db
+    (cartella / "vecchio.db-journal").write_text("scrittura morta a metà")
+    s = modulo.get_session(A)
+    assert s["db"] == "nuovo"
+
+
+def test_un_file_che_non_e_un_db_non_rompe_la_ricerca_della_sessione(tmp_path, monkeypatch) -> None:
+    _bundle(tmp_path / "nuovo.db")
+    (tmp_path / "rotto.db").write_text("questo non è sqlite " * 30)
+    for z in tmp_path.glob("*.zip"):
+        z.unlink()
+    modulo = _modulo_db(tmp_path, monkeypatch)
+    assert modulo.get_session(A)["db"] == "nuovo"
+
+
+def test_un_db_sparito_fra_l_elenco_e_l_apertura_si_salta(db, monkeypatch) -> None:
+    modulo, _ = db
+    veri = modulo._targets
+    monkeypatch.setattr(modulo, "_targets", lambda nome: [*veri(nome), "sparito-nel-frattempo"])
+    assert modulo.get_session(A)["db"] == "nuovo"
