@@ -143,10 +143,8 @@ def scambi_di(db: Path, indice: Path, nome: str) -> list[dict[str, Any]]:
         v.close()
 
 
-def _riempi_vettori(scambi: list[dict[str, Any]], v: sqlite3.Connection) -> None:
-    """Il vettore di ogni scambio: media delle righe, col messaggio del proprietario che pesa 2.
-    Si fidano solo del registro dell'indice: una riga senza registro non ha vettore."""
-    servono = sorted({r for s in scambi for r in s["righe"]})
+def _registro_delle_righe(v: sqlite3.Connection, servono: list[int]) -> dict[int, tuple[int, int]]:
+    """Per ogni riga che l'indice conosce: il suo primo pezzo e quanti ne ha."""
     registro: dict[int, tuple[int, int]] = {}
     for lotto in _a_lotti(servono):
         segni = ",".join("?" * len(lotto))
@@ -154,6 +152,12 @@ def _riempi_vettori(scambi: list[dict[str, Any]], v: sqlite3.Connection) -> None
                 f"SELECT msg_rowid, primo_chunk, n_chunk FROM indice_righe WHERE msg_rowid IN ({segni})",
                 lotto):
             registro[rowid] = (primo, n)
+    return registro
+
+
+def _vettori_dei_pezzi(v: sqlite3.Connection,
+                       registro: dict[int, tuple[int, int]]) -> dict[int, np.ndarray]:
+    """Il vettore di ogni pezzo del registro, letto blocco per blocco dalla tabella dei vettori."""
     pezzi = sorted({p for r in registro for p in range(registro[r][0], registro[r][0] + registro[r][1])})
     dove: dict[int, tuple[int, int]] = {}
     for lotto in _a_lotti(pezzi):
@@ -174,20 +178,35 @@ def _riempi_vettori(scambi: list[dict[str, Any]], v: sqlite3.Connection) -> None
         m = np.frombuffer(riga[0], dtype=np.float32).reshape(-1, 384)
         for p, pos in voci:
             vettori[p] = m[pos].copy()
+    return vettori
+
+
+def _vettore_dello_scambio(s: dict[str, Any], registro: dict[int, tuple[int, int]],
+                           vettori: dict[int, np.ndarray]) -> np.ndarray | None:
+    """La media pesata delle righe dello scambio che hanno un vettore, o None se nessuna ne ha."""
+    somma, peso = None, 0
+    for r in s["righe"]:
+        if r not in registro:
+            continue
+        primo, n = registro[r]
+        emb = [vettori[p] for p in range(primo, primo + n) if p in vettori]
+        if not emb:
+            continue
+        m = _unita(np.mean(emb, axis=0))
+        w = 2 if r == s["neo"] else 1
+        somma = m * w if somma is None else somma + m * w
+        peso += w
+    return None if somma is None else _unita(somma / peso)
+
+
+def _riempi_vettori(scambi: list[dict[str, Any]], v: sqlite3.Connection) -> None:
+    """Il vettore di ogni scambio: media delle righe, col messaggio del proprietario che pesa 2.
+    Si fidano solo del registro dell'indice: una riga senza registro non ha vettore."""
+    servono = sorted({r for s in scambi for r in s["righe"]})
+    registro = _registro_delle_righe(v, servono)
+    vettori = _vettori_dei_pezzi(v, registro)
     for s in scambi:
-        somma, peso = None, 0
-        for r in s["righe"]:
-            if r not in registro:
-                continue
-            primo, n = registro[r]
-            emb = [vettori[p] for p in range(primo, primo + n) if p in vettori]
-            if not emb:
-                continue
-            m = _unita(np.mean(emb, axis=0))
-            w = 2 if r == s["neo"] else 1
-            somma = m * w if somma is None else somma + m * w
-            peso += w
-        s["vec"] = None if somma is None else _unita(somma / peso)
+        s["vec"] = _vettore_dello_scambio(s, registro, vettori)
 
 
 def _senza_intestazione(testo: str) -> str:

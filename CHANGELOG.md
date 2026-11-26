@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- `_riempi_vettori` (archive-mcp, la mappa dei temi) è spezzata in quattro: il registro delle righe
+  (`_registro_delle_righe`), i vettori dei pezzi (`_vettori_dei_pezzi`), la media pesata di uno scambio
+  (`_vettore_dello_scambio`) e il giro. Complessità da 13 a sotto 10 (QUA-04). Comportamento identico: 3.000
+  indici a confronto coi vettori byte per byte, zero differenze, ogni ramo percorso, dieci mutazioni tutte viste.
+  Due prove nuove.
+
 ## [0.98.22] — 2026-11-26
 
 ### Cambiato
