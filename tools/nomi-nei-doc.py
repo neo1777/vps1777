@@ -95,6 +95,39 @@ def contesto() -> dict:
             "bot": set(re.findall(r'"([a-z_]+)"', m.group(1))) if m else set()}
 
 
+def _errori_della_cli(rel: str, i: int, pezzo: str, c: dict) -> list[str]:
+    """I `vps1777 <comando> [--flag]` di un pezzo che la CLI non ha."""
+    errori: list[str] = []
+    for m in VPS.finditer(pezzo):
+        cmd, resto = m.group(1), m.group(2) or ""
+        if cmd not in c["comandi"]:
+            errori.append(f"{rel}:{i}  `vps1777 {cmd}`: la CLI non ha questo comando")
+            continue
+        for flag in re.findall(r"(?<![\w-])(--[a-z][a-z0-9-]*)", resto):
+            if flag not in c["comandi"][cmd]:
+                errori.append(f"{rel}:{i}  `vps1777 {cmd} {flag}`: il comando non ha questo flag")
+    return errori
+
+
+def _errori_del_nome(rel: str, i: int, riga: str, s: str, c: dict) -> list[str]:
+    """Un nome fra apici che il repo non conosce: una variabile d'ambiente, una chiamata a un
+    tool o a una funzione, un comando del bot."""
+    errori: list[str] = []
+    if ENV.match(s) and s not in c["codice"] and s.lower() not in c["codice"]:
+        errori.append(f"{rel}:{i}  `{s}`: nessun file di codice o di config la nomina")
+    ch = CHIAMATA.match(s)
+    if ch and ch.group(1).startswith(FAMIGLIE) and ch.group(1) not in c["funzioni"]:
+        errori.append(f"{rel}:{i}  `{s[:40]}`: non è un tool né una funzione del repo")
+    b = BOTCMD.match(s)
+    if (b and re.search(r"\bbot\b|telegram", riga, re.I)
+            and not re.search(r"botfather", riga, re.I)
+            and not re.search(r"[\"']/" + b.group(1) + r"\b", c["codice"])
+            and b.group(1) not in c["bot"]):
+        errori.append(f"{rel}:{i}  `{s}`: il bot non ha questo comando "
+                      f"(ha: {', '.join('/' + x for x in sorted(c['bot']))})")
+    return errori
+
+
 def controlla(rel: str, testo: str, c: dict) -> list[str]:
     errori: list[str] = []
     in_blocco = False
@@ -106,30 +139,12 @@ def controlla(rel: str, testo: str, c: dict) -> list[str]:
             continue
         pezzi = [riga] if in_blocco or rel == ".env.example" else SPAN.findall(riga)
         for pezzo in pezzi:
-            for m in VPS.finditer(pezzo):
-                cmd, resto = m.group(1), m.group(2) or ""
-                if cmd not in c["comandi"]:
-                    errori.append(f"{rel}:{i}  `vps1777 {cmd}`: la CLI non ha questo comando")
-                    continue
-                for flag in re.findall(r"(?<![\w-])(--[a-z][a-z0-9-]*)", resto):
-                    if flag not in c["comandi"][cmd]:
-                        errori.append(f"{rel}:{i}  `vps1777 {cmd} {flag}`: il comando non ha questo flag")
+            errori += _errori_della_cli(rel, i, pezzo, c)
             if in_blocco and rel != ".env.example":
                 continue
             for s in ([pezzo.strip()] if rel != ".env.example"
                       else re.findall(r"^#?\s*([A-Z][A-Z0-9_]+)=", pezzo)):
-                if ENV.match(s) and s not in c["codice"] and s.lower() not in c["codice"]:
-                    errori.append(f"{rel}:{i}  `{s}`: nessun file di codice o di config la nomina")
-                ch = CHIAMATA.match(s)
-                if ch and ch.group(1).startswith(FAMIGLIE) and ch.group(1) not in c["funzioni"]:
-                    errori.append(f"{rel}:{i}  `{s[:40]}`: non è un tool né una funzione del repo")
-                b = BOTCMD.match(s)
-                if (b and re.search(r"\bbot\b|telegram", riga, re.I)
-                        and not re.search(r"botfather", riga, re.I)
-                        and not re.search(r"[\"']/" + b.group(1) + r"\b", c["codice"])
-                        and b.group(1) not in c["bot"]):
-                    errori.append(f"{rel}:{i}  `{s}`: il bot non ha questo comando "
-                                  f"(ha: {', '.join('/' + x for x in sorted(c['bot']))})")
+                errori += _errori_del_nome(rel, i, riga, s, c)
     return errori
 
 

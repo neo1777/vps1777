@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Cambiato
+- `controlla` di `tools/nomi-nei-doc.py` (i comandi, i flag, le variabili, i tool e i comandi del bot che i
+  documenti nominano) è spezzata in tre: gli errori della CLI in un pezzo (`_errori_della_cli`), quelli di un
+  nome fra apici (`_errori_del_nome`) e il giro sulle righe. Complessità da 14 a sotto 10 (QUA-04). Comportamento
+  identico: 6.000 documenti composti a caso, zero differenze, ogni ramo percorso, dieci mutazioni tutte viste.
+  Otto prove nuove: prima la funzione non ne aveva di dirette.
 - `confronta` di `tools/lock-salti.py` (quali dipendenze attraversano un confine di versione) è spezzata in
   quattro: la lettura dei due lock, i cambi per gravità, la stampa del quadro e il verdetto. Complessità da 14 a
   sotto 10 (QUA-04), e il file non ha più errori di tipo (QUA-03: 133 in 20 file). Comportamento identico: 4.000
