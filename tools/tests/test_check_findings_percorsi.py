@@ -181,7 +181,10 @@ def test_senza_voci_da_segnalare_le_righe_gialle_non_compaiono(cf, monkeypatch):
     rc, out = _esegui(cf)
     assert rc == 0
     assert "senza `natura`" not in out and "senza `scoperta`" not in out
-    assert "da analisi esterna SENZA i tre verdetti" not in out and "⧗" not in out
+    assert "da analisi esterna SENZA i tre verdetti" not in out
+    # la riga ⧗ non è un'accusa: c'è se e solo se il registro vero ha una voce che aspetta il rilascio
+    in_attesa = any(f.get("since") == "unreleased" for f in _REGISTRO["findings"])
+    assert ("⧗" in out) == in_attesa
 
 
 def test_le_voci_sorvegliate_si_nominano(cf, monkeypatch):
