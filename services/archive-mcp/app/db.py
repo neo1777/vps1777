@@ -2028,6 +2028,50 @@ _TABELLE_R1 = ("sessioni", "archi")
 _CANDIDATI_MAX = 20             # oltre, l'elenco dei candidati si taglia (dichiarato)
 
 
+def _cerca_la_sessione_in(conn: sqlite3.Connection, name: str, k: str,
+                          trovati: dict[str, list[tuple[str, str]]], senza_tabelle: list[str],
+                          vuoti: list[str], avvistata_in: dict[str, int]) -> None:
+    """Che cosa sa UN DB della sessione `k`: i candidati col loro ultimo ts, oppure perché non può dirlo
+    (nato prima del contratto R1, senza schede) e se almeno la conversazione vi è stata avvistata."""
+    tab = fts.tabelle_conn(conn)
+    if not set(_TABELLE_R1) <= tab:
+        senza_tabelle.append(name)
+        n = fts.avvistamenti_sessione_conn(conn, k)
+        if n > 0:
+            avvistata_in[name] = n
+        return
+    if conn.execute("SELECT count(*) FROM sessioni").fetchone()[0] == 0:
+        vuoti.append(name)
+    candidati = fts.candidati_sessione_conn(conn, k)
+    for sid in candidati:
+        trovati.setdefault(sid, []).append(
+            (name, fts.ultimo_ts_sessione_conn(conn, sid)))
+    if not candidati:
+        n = fts.avvistamenti_sessione_conn(conn, k)
+        if n > 0:
+            avvistata_in[name] = n
+
+
+def _sessione_ambigua(k: str, trovati: dict[str, list[tuple[str, str]]]) -> None:
+    """Il prefisso prende più sessioni: l'errore le elenca, coi DB che le conoscono."""
+    elenco = sorted(trovati)
+    righe = "; ".join(f"{s} ({', '.join(n for n, _ in trovati[s])})"
+                      for s in elenco[:_CANDIDATI_MAX])
+    altro = (f" … e altri {len(elenco) - _CANDIDATI_MAX}"
+             if len(elenco) > _CANDIDATI_MAX else "")
+    raise SessioneNonRisolta(
+        f"il prefisso '{k}' è ambiguo: {len(elenco)} sessioni. Candidati: {righe}{altro}. "
+        f"Passa più caratteri o l'id intero.")
+
+
+def _il_db_che_risponde(trovati: dict[str, list[tuple[str, str]]]) -> tuple[str, str, list[str]]:
+    """Della sola sessione trovata: l'id, il DB col `last_ts` più recente, e gli altri che la conoscono."""
+    sid, dove = next(iter(trovati.items()))
+    dove = sorted(dove)                          # per nome: la parità la vince il primo
+    scelto = max(dove, key=lambda d: d[1])[0]
+    return sid, scelto, [n for n, _ in dove if n != scelto]
+
+
 def _risolvi_sessione(chiave: str, db: str) -> tuple[str, str, list[str]]:
     """(sessionId intero, DB che risponde, altri DB che lo conoscono) — o
     SessioneNonRisolta con il perché.
@@ -2055,23 +2099,7 @@ def _risolvi_sessione(chiave: str, db: str) -> tuple[str, str, list[str]]:
             _nota_sporco(name, exc)
             continue
         try:
-            tab = fts.tabelle_conn(conn)
-            if not set(_TABELLE_R1) <= tab:
-                senza_tabelle.append(name)
-                n = fts.avvistamenti_sessione_conn(conn, k)
-                if n > 0:
-                    avvistata_in[name] = n
-                continue
-            if conn.execute("SELECT count(*) FROM sessioni").fetchone()[0] == 0:
-                vuoti.append(name)
-            candidati = fts.candidati_sessione_conn(conn, k)
-            for sid in candidati:
-                trovati.setdefault(sid, []).append(
-                    (name, fts.ultimo_ts_sessione_conn(conn, sid)))
-            if not candidati:
-                n = fts.avvistamenti_sessione_conn(conn, k)
-                if n > 0:
-                    avvistata_in[name] = n
+            _cerca_la_sessione_in(conn, name, k, trovati, senza_tabelle, vuoti, avvistata_in)
         except sqlite3.DatabaseError as exc:
             # DatabaseError e non OperationalError: «file is not a database» e «malformed» sono
             # l'altra sottoclasse, e un file rotto nella cartella rompeva il tool per tutti
@@ -2080,21 +2108,11 @@ def _risolvi_sessione(chiave: str, db: str) -> tuple[str, str, list[str]]:
         finally:
             conn.close()
     if len(trovati) > 1:
-        elenco = sorted(trovati)
-        righe = "; ".join(f"{s} ({', '.join(n for n, _ in trovati[s])})"
-                          for s in elenco[:_CANDIDATI_MAX])
-        altro = (f" … e altri {len(elenco) - _CANDIDATI_MAX}"
-                 if len(elenco) > _CANDIDATI_MAX else "")
-        raise SessioneNonRisolta(
-            f"il prefisso '{k}' è ambiguo: {len(elenco)} sessioni. Candidati: {righe}{altro}. "
-            f"Passa più caratteri o l'id intero.")
+        _sessione_ambigua(k, trovati)
     if not trovati:
         raise SessioneNonRisolta(_perche_non_trovata(k, db, senza_tabelle, vuoti,
                                                      avvistata_in))
-    sid, dove = next(iter(trovati.items()))
-    dove = sorted(dove)                          # per nome: la parità la vince il primo
-    scelto = max(dove, key=lambda d: d[1])[0]
-    return sid, scelto, [n for n, _ in dove if n != scelto]
+    return _il_db_che_risponde(trovati)
 
 
 def _perche_non_trovata(k: str, db: str, senza_tabelle: list[str], vuoti: list[str],

@@ -20,6 +20,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   in che modo si lavora (ripresa, incrementale, ricostruzione), che cosa dichiara l'indice di partenza, che cosa
   c'è da indicizzare, il file di lavoro, la chiusura del conto. Complessità da 15 a sotto 10 (QUA-04, restano 35
   funzioni). Comportamento identico su 900 storie di più passi sullo stesso indice; quattro prove nuove.
+- `_risolvi_sessione` di archive-mcp (da un id o un prefisso alla sessione, e al DB che ne ha la fotografia più
+  recente) è spezzata in tre: che cosa sa un singolo DB, l'errore del prefisso ambiguo, la scelta del DB che
+  risponde. Complessità da 14 a 8 (QUA-04, restano 34 funzioni). Comportamento identico su 3.000 casi; quattro
+  prove nuove, fra cui l'archivio col journal caldo che si salta senza fermare gli altri.
 
 ## [0.98.19] — 2026-11-26
 
