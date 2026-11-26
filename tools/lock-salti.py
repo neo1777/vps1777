@@ -96,20 +96,27 @@ def classifica(prima: str, dopo: str) -> tuple[str, str]:
     return "minore", f"{prima} → {dopo}"
 
 
-def confronta(f_prima: Path, f_dopo: Path) -> int:
+def _leggi_i_due_lock(f_prima: Path, f_dopo: Path) -> tuple[dict[str, str], dict[str, str]] | None:
+    """I pacchetti dei due lock, o None dopo aver detto perché non si è potuto misurare."""
     try:
-        prima, dopo = _pacchetti(f_prima), _pacchetti(f_dopo)
+        return _pacchetti(f_prima), _pacchetti(f_dopo)
     except FileNotFoundError as e:
         print(f"⚠️  NON MISURATO: manca {e.filename}", file=sys.stderr)
-        return 2
+        return None
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         print(f"⚠️  NON MISURATO: lock illeggibile ({e})", file=sys.stderr)
-        return 2
+        return None
     except ValueError as e:
         print(f"⚠️  NON MISURATO: {e}", file=sys.stderr)
-        return 2
+        return None
 
-    confini, minori, ignoti = [], [], []
+
+def _cambi_per_gravita(prima: dict[str, str], dopo: dict[str, str],
+                       ) -> tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, str]]]:
+    """I pacchetti che cambiano versione, divisi in (confini, minori, ignoti)."""
+    confini: list[tuple[str, str]] = []
+    minori: list[tuple[str, str]] = []
+    ignoti: list[tuple[str, str]] = []
     for nome in sorted(set(prima) & set(dopo)):
         if prima[nome] == dopo[nome]:
             continue
@@ -117,9 +124,14 @@ def confronta(f_prima: Path, f_dopo: Path) -> int:
         (confini if grav == "confine" else ignoti if grav == "ignoto" else minori).append(
             (nome, testo)
         )
+    return confini, minori, ignoti
+
+
+def _stampa_il_quadro(prima: dict[str, str], dopo: dict[str, str],
+                      confini: list[tuple[str, str]], minori: list[tuple[str, str]]) -> None:
+    """Il conto dei pacchetti, i salti per gravità, chi è entrato e chi è uscito."""
     nuovi = sorted(set(dopo) - set(prima))
     spariti = sorted(set(prima) - set(dopo))
-
     print(f"lock: {len(prima)} → {len(dopo)} pacchetti")
     for etichetta, voci in (("⛔ ATTRAVERSA UN CONFINE", confini), ("· patch/minor", minori)):
         if voci:
@@ -129,6 +141,15 @@ def confronta(f_prima: Path, f_dopo: Path) -> int:
     if nuovi or spariti:
         print(f"\n· entrati: {', '.join(nuovi) or '—'}")
         print(f"· usciti:  {', '.join(spariti) or '—'}")
+
+
+def confronta(f_prima: Path, f_dopo: Path) -> int:
+    letti = _leggi_i_due_lock(f_prima, f_dopo)
+    if letti is None:
+        return 2
+    prima, dopo = letti
+    confini, minori, ignoti = _cambi_per_gravita(prima, dopo)
+    _stampa_il_quadro(prima, dopo, confini, minori)
 
     if ignoti:
         print("\n⚠️  NON MISURATO — versioni che non so ordinare:", file=sys.stderr)
