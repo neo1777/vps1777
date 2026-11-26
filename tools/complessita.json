@@ -26,10 +26,6 @@
    "complessita": 13,
    "stato": "da-esaminare"
   },
-  "services/archive-mcp/app/fts.py::stirpe_conn": {
-   "complessita": 13,
-   "stato": "da-esaminare"
-  },
   "services/archive-mcp/app/temi.py::_riempi_vettori": {
    "complessita": 13,
    "stato": "da-esaminare"

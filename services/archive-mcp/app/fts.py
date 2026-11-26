@@ -930,16 +930,11 @@ def sessione_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
 _CHIUSURA = "(chiusura = 1 OR chiusura = '1')"
 
 
-def stirpe_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
-                max_chars: int = 0) -> dict[str, Any]:
-    """La STIRPE di `sid`: la chiusura sugli archi con `chiusura=1`, presi senza
-    verso (da↔a), a partire da `sid`. Ogni membro porta i suoi dati da `sessioni`;
-    un membro SENZA riga in `sessioni` resta nella stirpe e lo dice (`in_sessioni:
-    false`, e l'elenco `senza_riga`) — sparire sarebbe peggio che essere incompleto.
-    Un membro con più filoni porta i dati del principale e tutte le righe in
-    `filoni` ([] per chi non ha riga).
-    Oltre `limit` membri la visita si ferma e lo dichiara."""
-    note: list[str] = []
+def _stirpe_visita(conn: sqlite3.Connection, sid: str,
+                   limit: int) -> tuple[list[str], set[str], dict[tuple, dict[str, Any]], bool]:
+    """La chiusura sugli archi con `chiusura=1` a partire da `sid`, a fronti successivi: i
+    membri nell'ordine in cui si incontrano, il loro insieme, gli archi visti, e se la
+    visita si è fermata a `limit` membri."""
     visti: list[str] = [sid]
     insieme = {sid}
     fronte = [sid]
@@ -963,11 +958,13 @@ def stirpe_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
                     visti.append(estremo)
                     nuovo.append(estremo)
         fronte = nuovo
-    if troncata:
-        # gli archi verso i nodi rimasti fuori non si danno: nominerebbero membri
-        # che l'elenco non contiene
-        archi = {k: v for k, v in archi.items() if v["da"] in insieme and v["a"] in insieme}
-        note.append(f"stirpe troncata a {len(insieme)} membri (alza `limit`)")
+    return visti, insieme, archi, troncata
+
+
+def _stirpe_membri(conn: sqlite3.Connection, visti: list[str],
+                   ) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    """I membri coi dati del loro filone principale (o `in_sessioni: false`), ordinati, e i
+    filoni di chi ha una riga in `sessioni`."""
     seg = ",".join("?" * len(visti))
     per_sid: dict[str, list[dict[str, Any]]] = {}
     for r in _righe_dict(conn.execute(
@@ -986,6 +983,36 @@ def stirpe_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
         else:
             membri.append({"sessionId": m, "in_sessioni": False, "filoni": []})
     membri.sort(key=lambda d: (not d["in_sessioni"], d.get("first_ts") or "", d["sessionId"]))
+    return membri, filoni_di
+
+
+def _stirpe_dichiarate(conn: sqlite3.Connection, filoni_di: dict[str, list[dict[str, Any]]],
+                       max_chars: int) -> tuple[list[str], dict[str, str | None]]:
+    """Le stirpi che le righe di `sessioni` dichiarano, e la scheda di ciascuna."""
+    dichiarate = sorted({str(d["stirpe"]) for righe in filoni_di.values() for d in righe
+                         if d.get("stirpe")})
+    schede = {s: _tronca_testo(_scheda_da_avvistamenti(conn, f"recupero/stirpi/{s}.md"),
+                               max_chars) for s in dichiarate}
+    return dichiarate, schede
+
+
+def stirpe_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
+                max_chars: int = 0) -> dict[str, Any]:
+    """La STIRPE di `sid`: la chiusura sugli archi con `chiusura=1`, presi senza
+    verso (da↔a), a partire da `sid`. Ogni membro porta i suoi dati da `sessioni`;
+    un membro SENZA riga in `sessioni` resta nella stirpe e lo dice (`in_sessioni:
+    false`, e l'elenco `senza_riga`) — sparire sarebbe peggio che essere incompleto.
+    Un membro con più filoni porta i dati del principale e tutte le righe in
+    `filoni` ([] per chi non ha riga).
+    Oltre `limit` membri la visita si ferma e lo dichiara."""
+    note: list[str] = []
+    visti, insieme, archi, troncata = _stirpe_visita(conn, sid, limit)
+    if troncata:
+        # gli archi verso i nodi rimasti fuori non si danno: nominerebbero membri
+        # che l'elenco non contiene
+        archi = {k: v for k, v in archi.items() if v["da"] in insieme and v["a"] in insieme}
+        note.append(f"stirpe troncata a {len(insieme)} membri (alza `limit`)")
+    membri, filoni_di = _stirpe_membri(conn, visti)
     senza_riga = [m["sessionId"] for m in membri if not m["in_sessioni"]]
     if senza_riga:
         note.append(f"{len(senza_riga)} membri senza riga in `sessioni`: noti solo come "
@@ -995,10 +1022,7 @@ def stirpe_conn(conn: sqlite3.Connection, sid: str, *, limit: int = 200,
                                  (sid, sid)).fetchone()[0])
         note.append("nessun arco con chiusura=1: la sessione è sola nella sua stirpe"
                     + (f" ({altri} archi senza chiusura: vedi get_session)" if altri else ""))
-    dichiarate = sorted({str(d["stirpe"]) for righe in filoni_di.values() for d in righe
-                         if d.get("stirpe")})
-    schede = {s: _tronca_testo(_scheda_da_avvistamenti(conn, f"recupero/stirpi/{s}.md"),
-                               max_chars) for s in dichiarate}
+    dichiarate, schede = _stirpe_dichiarate(conn, filoni_di, max_chars)
     if len(dichiarate) > 1:
         note.append(f"i membri dichiarano {len(dichiarate)} stirpi diverse: la chiusura "
                     f"sugli archi le unisce, le righe di `sessioni` no")

@@ -252,6 +252,16 @@ def test_stirpe_e_la_chiusura_sugli_archi_con_chiusura_1(conn) -> None:
     assert any("senza riga" in n for n in st["note"]), st["note"]
 
 
+def test_stirpe_con_due_stirpi_dichiarate_lo_dice(conn) -> None:
+    """Gli archi uniscono A e B, ma le loro righe dichiarano due stirpi diverse: la chiusura
+    le tiene insieme e la nota lo dice; la stirpe senza scheda resta con `None`."""
+    conn.execute("UPDATE sessioni SET stirpe='stirpe-altra' WHERE sessionId=?", (A,))
+    st = fts.stirpe_conn(conn, B)
+    assert st["stirpi_dichiarate"] == sorted([S, "stirpe-altra"])
+    assert st["schede_stirpe"]["stirpe-altra"] is None and st["schede_stirpe"][S]
+    assert any("2 stirpi diverse" in n for n in st["note"]), st["note"]
+
+
 def test_stirpe_troncata_e_stirpe_sola(conn) -> None:
     st = fts.stirpe_conn(conn, A, limit=2)
     assert len(st["membri"]) == 2 and any("troncata" in n for n in st["note"])
