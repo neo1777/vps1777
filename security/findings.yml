@@ -5023,7 +5023,7 @@ findings:
         scartato come nome di pacchetto, anche con la maiuscola e anche dopo «password». `low`:
         il gate è una rete in più sopra la disciplina di chi scrive, non l'unica difesa, e
         non ci sono segni che un valore così sia mai entrato nel repo.
-    since: unreleased
+    since: v0.98.23
     why: >
       La regola dei nomi di pacchetto (`python3`, `sha256`) non guardava le maiuscole e non
       distingueva la parola-spia. «Parola più una-tre cifre» è la forma più comune di una

@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.23] — 2026-11-26
+
 ### Corretto
 - Il gate anti-leak, dopo la parola «password», scambiava «parola più una-tre cifre» per un nome di pacchetto
   (la regola di `python3` e `sha256` non guardava le maiuscole né la parola-spia) e la lasciava entrare: è la
