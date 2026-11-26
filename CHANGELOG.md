@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.19] — 2026-11-26
+
 ### Corretto
 - **Tutti i documenti riletti contro il codice** (63 file, una riga alla volta): una settantina di affermazioni
   che non tornavano più. Le più pesanti: il timer dell'aggiornamento automatico era detto «settimanale» ed è
