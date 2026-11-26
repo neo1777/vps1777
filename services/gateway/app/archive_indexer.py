@@ -2131,6 +2131,49 @@ def _attachment_names(m: dict) -> str:
     return "\n".join(out)
 
 
+def _iter_memorie_dei_progetti(pm: object) -> Iterator[RowFull]:
+    """Le memorie dei Project di un account: una mappa {uuid: testo}, o la lista di una
+    forma più vecchia; ogni voce è un testo o un oggetto col testo e il nome."""
+    # `project_memories` è una MAPPA {project_uuid: testo}, non una lista.
+    # (Su un export reale: 9 progetti, 74.404 caratteri — più di 7× la
+    # conversations_memory. Trattarla come lista ne perde il contenuto.)
+    entries: list[tuple[str, object]] = []
+    if isinstance(pm, dict):
+        entries = list(pm.items())
+    elif isinstance(pm, list):
+        entries = [(str(i), p) for i, p in enumerate(pm)]
+
+    for key, p in entries:
+        if isinstance(p, str):
+            body = p
+        elif isinstance(p, dict):
+            body = str(p.get("memory") or p.get("content") or p.get("text") or "")
+            key = str(p.get("name") or p.get("project_uuid") or key)
+        else:
+            continue
+        if body.strip():
+            label = f"memory:project:{key}"
+            yield from _chunk_rows_full(body, label, "", label, sender="memory")
+
+
+def _iter_file_di_memoria(files: object) -> Iterator[RowFull]:
+    """I file di memoria di un account (`memory_files`): uno per area, col suo percorso."""
+    # `memory_files` — dal 29/08/2026: i FILE di memoria di claude.ai
+    # (`/areas/<progetto>.md`, frontmatter name/description + corpo), uno per
+    # area. Sono la forma nuova della stessa cosa: testo scritto da un
+    # assistente su una persona. Etichetta `memory:file:<path>`, ts = updated_at.
+    for mf in (files or []):
+        if not isinstance(mf, dict):
+            continue
+        path = str(mf.get("path") or mf.get("name") or "")
+        content = mf.get("content")
+        if not path or not isinstance(content, str) or not content.strip():
+            continue
+        label = f"memory:file:{path}"
+        yield from _chunk_rows_full(content, label, str(mf.get("updated_at") or ""),
+                                    label, sender="memory")
+
+
 def _iter_memories(data: object) -> Iterator[RowFull]:
     """`memories.json` dell'export claude.ai — la MEMORIA PERSISTENTE dell'account.
 
@@ -2152,41 +2195,8 @@ def _iter_memories(data: object) -> Iterator[RowFull]:
         if isinstance(conv_mem, str) and conv_mem.strip():
             yield from _chunk_rows_full(conv_mem, "memory:conversations",
                                         "", "memory-conversations", sender="memory")
-        # `project_memories` è una MAPPA {project_uuid: testo}, non una lista.
-        # (Su un export reale: 9 progetti, 74.404 caratteri — più di 7× la
-        # conversations_memory. Trattarla come lista ne perde il contenuto.)
-        pm = acc.get("project_memories")
-        entries: list[tuple[str, object]] = []
-        if isinstance(pm, dict):
-            entries = list(pm.items())
-        elif isinstance(pm, list):
-            entries = [(str(i), p) for i, p in enumerate(pm)]
-
-        for key, p in entries:
-            if isinstance(p, str):
-                body = p
-            elif isinstance(p, dict):
-                body = str(p.get("memory") or p.get("content") or p.get("text") or "")
-                key = str(p.get("name") or p.get("project_uuid") or key)
-            else:
-                continue
-            if body.strip():
-                label = f"memory:project:{key}"
-                yield from _chunk_rows_full(body, label, "", label, sender="memory")
-        # `memory_files` — dal 29/08/2026: i FILE di memoria di claude.ai
-        # (`/areas/<progetto>.md`, frontmatter name/description + corpo), uno per
-        # area. Sono la forma nuova della stessa cosa: testo scritto da un
-        # assistente su una persona. Etichetta `memory:file:<path>`, ts = updated_at.
-        for mf in (acc.get("memory_files") or []):
-            if not isinstance(mf, dict):
-                continue
-            path = str(mf.get("path") or mf.get("name") or "")
-            content = mf.get("content")
-            if not path or not isinstance(content, str) or not content.strip():
-                continue
-            label = f"memory:file:{path}"
-            yield from _chunk_rows_full(content, label, str(mf.get("updated_at") or ""),
-                                        label, sender="memory")
+        yield from _iter_memorie_dei_progetti(acc.get("project_memories"))
+        yield from _iter_file_di_memoria(acc.get("memory_files"))
 
 
 def _iter_login_history(data: object) -> Iterator[RowFull]:
