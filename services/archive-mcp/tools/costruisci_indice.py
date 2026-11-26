@@ -616,13 +616,8 @@ def _perimetro_effettivo(perimetro: Perimetro | None, meta: dict[str, str], dove
         "passalo tu (--tutto | --dal/--al | --project).")
 
 
-def costruisci(db: Path, embed: Embedder, perimetro: Perimetro | None = None, *,
-               out: Path | None = None, ricostruisci: bool = False, lotto: int = LOTTO,
-               progresso: Callable[[int, int, int], None] | None = None) -> Esito:
-    """Costruisce o aggiorna `<db>.vec.db`. Lavora SEMPRE su `<indice>.parziale`
-    e lo rinomina sull'indice solo a lavoro finito e quadrato: l'indice servito
-    non è mai un file a metà."""
-    db = Path(db)
+def _indice_di_destinazione(db: Path, out: Path | None) -> Path:
+    """Dove va l'indice: accanto al suo DB, col nome che il server si aspetta."""
     out = Path(out) if out else semantica.percorso_indice(db)
     if out.resolve() == db.resolve():
         raise ErroreCostruttore("l'indice non può essere il DB stesso")
@@ -630,81 +625,157 @@ def costruisci(db: Path, embed: Embedder, perimetro: Perimetro | None = None, *,
         raise ErroreCostruttore(
             f"{out.name}: l'indice deve chiamarsi `<nome-db>.vec.db`. È così che il server "
             "lo trova accanto al suo DB, e che lo scan non lo scambia per un archivio.")
+    return out
+
+
+def _modo_e_base(out: Path, parz: Path, ricostruisci: bool) -> tuple[str, Path | None]:
+    """Ripresa di un lavoro interrotto, incrementale sull'indice che c'è, o ricostruzione da zero."""
+    if ricostruisci and parz.exists():
+        parz.unlink()
+    if parz.exists():
+        modo, base = "ripresa", parz
+    elif out.exists() and not ricostruisci:
+        modo, base = "incrementale", out
+    else:
+        modo, base = "ricostruzione", None
+    return modo, base
+
+
+def _meta_di_partenza(modo: str, base: Path | None, out: Path, parz: Path,
+                      perimetro: Perimetro | None, metro: dict[str, str]) -> dict[str, str]:
+    """Ciò che l'indice di partenza dichiara di sé, dopo aver controllato che ci si possa lavorare sopra."""
+    meta: dict[str, str] = {}
+    if base is not None:
+        vecchio = sqlite3.connect(f"file:{base}?mode=ro", uri=True)
+        try:
+            meta = leggi_meta(vecchio)
+            if not ha_registro(vecchio):
+                raise ErroreCostruttore(
+                    f"{base.name} non ha il registro `indice_righe` (è un indice del POC, "
+                    "o non è di questo strumento): l'incrementale non può sapere quali "
+                    "rowid sono stati riassegnati o quali testi sono cambiati. Serve "
+                    "--ricostruisci (una volta: dopo, gli aggiornamenti sono incrementali).")
+            if modo == "ripresa" and meta.get("stato") != "in costruzione":
+                raise ErroreCostruttore(
+                    f"{parz.name} esiste ma non è una costruzione interrotta: "
+                    "cancellalo, o usa --ricostruisci.")
+            _controlla_metro(meta, metro, base)
+        finally:
+            vecchio.close()
+    elif perimetro is None and out.exists():
+        # --ricostruisci senza perimetro: si ricostruisce QUELLO dichiarato.
+        vecchio = sqlite3.connect(f"file:{out}?mode=ro", uri=True)
+        try:
+            meta = leggi_meta(vecchio)
+        finally:
+            vecchio.close()
+    return meta
+
+
+def _misura_il_perimetro(src: sqlite3.Connection, perim: Perimetro) -> Bersaglio:
+    """Che cosa c'è da indicizzare; un perimetro vuoto si rifiuta prima di scrivere qualcosa."""
+    bers = analizza(src, perim)
+    if not bers.nel_perimetro:
+        raise ErroreCostruttore(
+            f"Perimetro vuoto: 0 messaggi con «{perim.descrizione(0)}». Un indice "
+            "vuoto sembrerebbe un indice: non lo scrivo.")
+    if not bers.righe:
+        raise ErroreCostruttore(
+            f"{bers.nel_perimetro} messaggi nel perimetro ma nessuno con almeno "
+            f"{TESTO_MIN} caratteri di testo: niente da indicizzare.")
+    return bers
+
+
+def _apri_il_lavoro(modo: str, out: Path, parz: Path, metro: dict[str, str],
+                    perim: Perimetro) -> sqlite3.Connection:
+    """Il file `.parziale` su cui si lavora, aperto: l'indice servito non si tocca."""
+    # ② Il file di lavoro: la copia dell'indice (incrementale), quello
+    #    interrotto (ripresa) o uno nuovo. L'indice servito non si tocca.
+    if modo == "incrementale":
+        # La copia passa da un nome suo: interrotta a metà, non deve sembrare
+        # un `.parziale` da riprendere.
+        copia = parz.with_name(parz.name + ".copia")
+        vecchio = sqlite3.connect(f"file:{out}?mode=ro", uri=True)
+        dest = sqlite3.connect(copia)
+        try:
+            vecchio.backup(dest)
+        finally:
+            dest.close()
+            vecchio.close()
+        os.replace(copia, parz)
+        conn = sqlite3.connect(parz)
+        _carica_vec(conn)
+        with conn:
+            conn.executemany("INSERT OR REPLACE INTO indice_meta VALUES (?, ?)",
+                             [("stato", "in costruzione"),
+                              ("perimetro_json", perim.come_json())])
+    else:
+        conn = sqlite3.connect(parz)
+        _carica_vec(conn)
+        if modo == "ricostruzione":
+            _crea_indice(conn, metro, perim)
+    return conn
+
+
+def _chiudi_il_conto(conn: sqlite3.Connection, db: Path, out: Path, modo: str, perim: Perimetro,
+                     bers: Bersaglio, registro: dict, d: Differenza, tolti: int, aggiunti: int,
+                     metro: dict[str, str]) -> Esito:
+    """Quadra l'indice, scrive ciò che dichiara di sé (`indice_meta`) e rende l'esito."""
+    messaggi, vettori = _quadra(conn)
+    esito = Esito(indice=out.name, modo=modo, perimetro=perim.descrizione(bers.senza_ts),
+                  nel_perimetro=bers.nel_perimetro, indicizzabili=len(bers.righe),
+                  corti=bers.corti, senza_ts=bers.senza_ts, registro_prima=len(registro),
+                  differenza=d.numeri(), vettori_tolti=tolti, vettori_aggiunti=aggiunti,
+                  messaggi=messaggi, vettori=vettori)
+    if messaggi != len(bers.righe):
+        esito.note.append(
+            f"{len(bers.righe) - messaggi} messaggi indicizzabili senza vettori "
+            "(spariti dal DB durante la costruzione?)")
+    meta_nuova = {
+        **metro,
+        "perimetro": esito.perimetro,
+        "perimetro_json": perim.come_json(),
+        "db_sorgente": db.stem,
+        "db_righe": str(bers.db_righe),
+        "db_max_rowid": str(bers.db_max_rowid),
+        "messaggi": str(messaggi),
+        "vettori": str(vettori),
+        "messaggi_perimetro": str(bers.nel_perimetro),
+        "messaggi_corti": str(bers.corti),
+        "righe_senza_ts": str(bers.senza_ts),
+        "generato": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "costruttore": f"costruisci_indice {VERSIONE}",
+        "ultimo_passaggio": json.dumps(
+            {"modo": modo, **esito.differenza, "vettori_tolti": tolti,
+             "vettori_aggiunti": aggiunti}, sort_keys=True),
+        "stato": "completo",
+    }
+    with conn:
+        conn.executemany("INSERT OR REPLACE INTO indice_meta(chiave, valore) "
+                         "VALUES (?, ?)", list(meta_nuova.items()))
+    return esito
+
+
+def costruisci(db: Path, embed: Embedder, perimetro: Perimetro | None = None, *,
+               out: Path | None = None, ricostruisci: bool = False, lotto: int = LOTTO,
+               progresso: Callable[[int, int, int], None] | None = None) -> Esito:
+    """Costruisce o aggiorna `<db>.vec.db`. Lavora SEMPRE su `<indice>.parziale`
+    e lo rinomina sull'indice solo a lavoro finito e quadrato: l'indice servito
+    non è mai un file a metà."""
+    db = Path(db)
+    out = _indice_di_destinazione(db, out)
     parz = out.with_name(out.name + ".parziale")
     metro = _parametri_metro(embed.nome, embed.impronta)
     src = apri_sorgente(db)
     try:
         # ① Prima si decide e si misura, POI si scrive: un rifiuto (metro
         #    diverso, perimetro vuoto) non deve lasciare dietro un `.parziale`.
-        if ricostruisci and parz.exists():
-            parz.unlink()
-        if parz.exists():
-            modo, base = "ripresa", parz
-        elif out.exists() and not ricostruisci:
-            modo, base = "incrementale", out
-        else:
-            modo, base = "ricostruzione", None
-        meta: dict[str, str] = {}
-        if base is not None:
-            vecchio = sqlite3.connect(f"file:{base}?mode=ro", uri=True)
-            try:
-                meta = leggi_meta(vecchio)
-                if not ha_registro(vecchio):
-                    raise ErroreCostruttore(
-                        f"{base.name} non ha il registro `indice_righe` (è un indice del POC, "
-                        "o non è di questo strumento): l'incrementale non può sapere quali "
-                        "rowid sono stati riassegnati o quali testi sono cambiati. Serve "
-                        "--ricostruisci (una volta: dopo, gli aggiornamenti sono incrementali).")
-                if modo == "ripresa" and meta.get("stato") != "in costruzione":
-                    raise ErroreCostruttore(
-                        f"{parz.name} esiste ma non è una costruzione interrotta: "
-                        "cancellalo, o usa --ricostruisci.")
-                _controlla_metro(meta, metro, base)
-            finally:
-                vecchio.close()
-        elif perimetro is None and out.exists():
-            # --ricostruisci senza perimetro: si ricostruisce QUELLO dichiarato.
-            vecchio = sqlite3.connect(f"file:{out}?mode=ro", uri=True)
-            try:
-                meta = leggi_meta(vecchio)
-            finally:
-                vecchio.close()
+        modo, base = _modo_e_base(out, parz, ricostruisci)
+        meta = _meta_di_partenza(modo, base, out, parz, perimetro, metro)
         perim = _perimetro_effettivo(perimetro, meta, out)
-        bers = analizza(src, perim)
-        if not bers.nel_perimetro:
-            raise ErroreCostruttore(
-                f"Perimetro vuoto: 0 messaggi con «{perim.descrizione(0)}». Un indice "
-                "vuoto sembrerebbe un indice: non lo scrivo.")
-        if not bers.righe:
-            raise ErroreCostruttore(
-                f"{bers.nel_perimetro} messaggi nel perimetro ma nessuno con almeno "
-                f"{TESTO_MIN} caratteri di testo: niente da indicizzare.")
+        bers = _misura_il_perimetro(src, perim)
 
-        # ② Il file di lavoro: la copia dell'indice (incrementale), quello
-        #    interrotto (ripresa) o uno nuovo. L'indice servito non si tocca.
-        if modo == "incrementale":
-            # La copia passa da un nome suo: interrotta a metà, non deve sembrare
-            # un `.parziale` da riprendere.
-            copia = parz.with_name(parz.name + ".copia")
-            vecchio = sqlite3.connect(f"file:{out}?mode=ro", uri=True)
-            dest = sqlite3.connect(copia)
-            try:
-                vecchio.backup(dest)
-            finally:
-                dest.close()
-                vecchio.close()
-            os.replace(copia, parz)
-            conn = sqlite3.connect(parz)
-            _carica_vec(conn)
-            with conn:
-                conn.executemany("INSERT OR REPLACE INTO indice_meta VALUES (?, ?)",
-                                 [("stato", "in costruzione"),
-                                  ("perimetro_json", perim.come_json())])
-        else:
-            conn = sqlite3.connect(parz)
-            _carica_vec(conn)
-            if modo == "ricostruzione":
-                _crea_indice(conn, metro, perim)
+        conn = _apri_il_lavoro(modo, out, parz, metro, perim)
         try:
             registro = _registro(conn)
             d = differenza(registro, bers, src)
@@ -712,38 +783,7 @@ def costruisci(db: Path, embed: Embedder, perimetro: Perimetro | None = None, *,
                 tolti = _togli(conn, d.da_togliere)
             aggiunti = _aggiungi(conn, src, d.da_indicizzare(bers), embed, lotto=lotto,
                                  progresso=progresso)
-            messaggi, vettori = _quadra(conn)
-            esito = Esito(indice=out.name, modo=modo, perimetro=perim.descrizione(bers.senza_ts),
-                          nel_perimetro=bers.nel_perimetro, indicizzabili=len(bers.righe),
-                          corti=bers.corti, senza_ts=bers.senza_ts, registro_prima=len(registro),
-                          differenza=d.numeri(), vettori_tolti=tolti, vettori_aggiunti=aggiunti,
-                          messaggi=messaggi, vettori=vettori)
-            if messaggi != len(bers.righe):
-                esito.note.append(
-                    f"{len(bers.righe) - messaggi} messaggi indicizzabili senza vettori "
-                    "(spariti dal DB durante la costruzione?)")
-            meta_nuova = {
-                **metro,
-                "perimetro": esito.perimetro,
-                "perimetro_json": perim.come_json(),
-                "db_sorgente": db.stem,
-                "db_righe": str(bers.db_righe),
-                "db_max_rowid": str(bers.db_max_rowid),
-                "messaggi": str(messaggi),
-                "vettori": str(vettori),
-                "messaggi_perimetro": str(bers.nel_perimetro),
-                "messaggi_corti": str(bers.corti),
-                "righe_senza_ts": str(bers.senza_ts),
-                "generato": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "costruttore": f"costruisci_indice {VERSIONE}",
-                "ultimo_passaggio": json.dumps(
-                    {"modo": modo, **esito.differenza, "vettori_tolti": tolti,
-                     "vettori_aggiunti": aggiunti}, sort_keys=True),
-                "stato": "completo",
-            }
-            with conn:
-                conn.executemany("INSERT OR REPLACE INTO indice_meta(chiave, valore) "
-                                 "VALUES (?, ?)", list(meta_nuova.items()))
+            esito = _chiudi_il_conto(conn, db, out, modo, perim, bers, registro, d, tolti, aggiunti, metro)
         finally:
             conn.close()
         # ③ Solo ora, a lavoro quadrato, l'indice nuovo prende il posto del vecchio.

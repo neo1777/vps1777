@@ -16,6 +16,10 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   (`_ContoDelta`, al posto di una funzione annidata che cambiava variabili di fuori), lo scorrimento dei due DB
   e le avvertenze. Complessità da 15 a 3 (QUA-04, restano 36 funzioni). Comportamento identico su 3.000 scenari
   confrontati col codice di prima in due processi separati; tre prove nuove.
+- `costruisci` (il costruttore dell'indice per la ricerca per senso) è spezzata in sei passi: dove va l'indice,
+  in che modo si lavora (ripresa, incrementale, ricostruzione), che cosa dichiara l'indice di partenza, che cosa
+  c'è da indicizzare, il file di lavoro, la chiusura del conto. Complessità da 15 a sotto 10 (QUA-04, restano 35
+  funzioni). Comportamento identico su 900 storie di più passi sullo stesso indice; quattro prove nuove.
 
 ## [0.98.19] — 2026-11-26
 
