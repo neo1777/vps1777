@@ -34,10 +34,6 @@
    "complessita": 13,
    "stato": "da-esaminare"
   },
-  "services/archive-mcp/tools/costruisci_indice.py::_aggiungi": {
-   "complessita": 13,
-   "stato": "da-esaminare"
-  },
   "services/gateway/app/asgi_security.py::__call__": {
    "complessita": 13,
    "stato": "da-esaminare"

@@ -5,6 +5,11 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Cambiato
+- `_aggiungi` (il costruttore dell'indice semantico) cede il controllo dei vettori di un lotto a
+  `_controlla_vettori`: uno per testo, della dimensione del modello, normalizzati. Complessità da 13 a 10
+  (QUA-04). Comportamento identico: 800 storie di costruzione a confronto in due processi, anche con embedder che
+  restituiscono vettori in meno, in più, corti, lunghi o non normalizzati, zero differenze, ogni ramo percorso,
+  sette mutazioni tutte viste. Tre prove nuove.
 - `get_many` (archive-mcp: le righe intere di più uuid) è spezzata in quattro: gli uuid chiesti e i loro limiti
   (`_get_many_voluti`), l'ordine dei DB (`_get_many_ordine`), la lettura di un DB (`_get_many_leggi`) e il giro.
   Complessità da 13 a sotto 10 (QUA-04). Comportamento identico: 2.500 scenari a confronto in due processi (DB di

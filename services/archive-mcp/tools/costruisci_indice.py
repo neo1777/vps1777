@@ -482,6 +482,25 @@ def _norma(blob: bytes) -> float:
     return math.sqrt(sum(x * x for x in struct.unpack(f"{semantica.DIM}f", blob)))
 
 
+def _controlla_vettori(blobs: list[bytes], n_testi: int) -> None:
+    """I vettori di un lotto sono quelli giusti: uno per testo, della dimensione del modello
+    atteso, e normalizzati. Altrimenti si ferma tutto, prima di scrivere una riga."""
+    if len(blobs) != n_testi:
+        raise ErroreCostruttore(
+            f"il modello ha restituito {len(blobs)} vettori per {n_testi} testi")
+    attesa = semantica.DIM * 4
+    if any(len(b) != attesa for b in blobs):
+        raise ErroreCostruttore(
+            f"vettori di {len(blobs[0]) // 4} dimensioni, attese {semantica.DIM}: "
+            f"non è il modello {semantica.MODELLO_ATTESO} (o l'export è sbagliato)")
+    n = _norma(blobs[0])
+    if abs(n - 1.0) > 1e-3:
+        raise ErroreCostruttore(
+            f"vettore di norma {n:.4f}, atteso 1: il grafo ONNX non normalizza. "
+            "L'export deve avere pooling e L2 DENTRO il grafo (docs/RICERCA-IBRIDA.md), "
+            "come quello che il server usa per le query.")
+
+
 def _aggiungi(conn: sqlite3.Connection, src: sqlite3.Connection, rowids: list[int],
               embed: Embedder, *, lotto: int, progresso: Callable[[int, int, int], None] | None) -> int:
     """Indicizza i rowid dati, un lotto per transazione: il registro e i vettori
@@ -499,20 +518,7 @@ def _aggiungi(conn: sqlite3.Connection, src: sqlite3.Connection, rowids: list[in
             return
         testi = [semantica.PREFISSO_PASSAGGIO + p for _, _, _, ps in buf for p in ps]
         blobs = embed(testi)
-        if len(blobs) != len(testi):
-            raise ErroreCostruttore(
-                f"il modello ha restituito {len(blobs)} vettori per {len(testi)} testi")
-        attesa = semantica.DIM * 4
-        if any(len(b) != attesa for b in blobs):
-            raise ErroreCostruttore(
-                f"vettori di {len(blobs[0]) // 4} dimensioni, attese {semantica.DIM}: "
-                f"non è il modello {semantica.MODELLO_ATTESO} (o l'export è sbagliato)")
-        n = _norma(blobs[0])
-        if abs(n - 1.0) > 1e-3:
-            raise ErroreCostruttore(
-                f"vettore di norma {n:.4f}, atteso 1: il grafo ONNX non normalizza. "
-                "L'export deve avere pooling e L2 DENTRO il grafo (docs/RICERCA-IBRIDA.md), "
-                "come quello che il server usa per le query.")
+        _controlla_vettori(blobs, len(testi))
         i = 0
         righe_vec, righe_reg = [], []
         for rid, uuid, imp, ps in buf:
