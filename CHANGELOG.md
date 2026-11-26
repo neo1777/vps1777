@@ -4,14 +4,16 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
-## [0.98.21] — 2026-11-26
-
 ### Cambiato
 - `get_many` (archive-mcp: le righe intere di più uuid) è spezzata in quattro: gli uuid chiesti e i loro limiti
   (`_get_many_voluti`), l'ordine dei DB (`_get_many_ordine`), la lettura di un DB (`_get_many_leggi`) e il giro.
   Complessità da 13 a sotto 10 (QUA-04). Comportamento identico: 2.500 scenari a confronto in due processi (DB di
   ogni specie, rotti, in scrittura, spariti), zero differenze, ogni ramo percorso, dieci mutazioni tutte viste.
   Una prova nuova per l'unico ramo che non ne aveva.
+
+## [0.98.21] — 2026-11-26
+
+### Cambiato
 - `_iter_zip_annidato` (l'archivio dentro i workfiles, aperto per un livello) è spezzata in tre: la lettura di un
   membro col suo tetto (`_leggi_membro_annidato`), lo smistamento per tipo (`_iter_membro_annidato`) e il giro sui
   membri. Complessità da 14 a sotto 10 (QUA-04). Comportamento identico: 1.205
