@@ -18,10 +18,6 @@
    "complessita": 13,
    "stato": "da-esaminare"
   },
-  "services/archive-mcp/app/temi.py::_riempi_vettori": {
-   "complessita": 13,
-   "stato": "da-esaminare"
-  },
   "services/gateway/app/asgi_security.py::__call__": {
    "complessita": 13,
    "stato": "da-esaminare"
