@@ -280,7 +280,9 @@ CLI lo dice a ogni comando e la ignora: toglila dal `.env`. L'aggiornamento auto
 ## Troubleshooting rapido
 
 - **"update già in corso"** — c'è un lock (`var/update.lock`): un altro update,
-  rollback o bootstrap sta lavorando. La CLI esce con **75** (`EX_TEMPFAIL`, «riprova
+  rollback o bootstrap sta lavorando. (Il controllo giornaliero `vps1777 check` usa lo
+  stesso lock, ma non dà questo messaggio: dura pochi secondi e l'update lo aspetta fino
+  a due minuti; a sua volta il check aspetta un update in corso.) La CLI esce con **75** (`EX_TEMPFAIL`, «riprova
   più tardi»), che le unit di update contano come successo (`SuccessExitStatus=75`):
   un giro del timer che incontra un update in corso non manda un falso «fallito» su
   Telegram. Se è un residuo di un crash: `vps1777 status` mostra `update_in_progress`;

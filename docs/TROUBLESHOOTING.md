@@ -417,7 +417,9 @@ sudo tailscale serve reset && sudo tailscale funnel --bg --https=443 http://127.
 Causa: un altro update (o un rollback) sta girando **adesso**. Il lock su
 `var/update.lock` è un `flock` del kernel: muore col processo che lo tiene, quindi
 un crash non lo lascia indietro. Il file resta sul disco, ma non è lui il lock —
-non va cancellato.
+non va cancellato. Dentro c'è scritto chi lo tiene: `update` (anche per rollback e bootstrap)
+o `check`, col pid e l'ora. Il controllo giornaliero (`vps1777 check`) prende lo stesso
+lock per pochi secondi: un update che lo trova lì lo aspetta, non esce con questo messaggio.
 
 Diagnosi:
 ```bash

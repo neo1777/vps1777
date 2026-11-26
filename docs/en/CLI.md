@@ -54,7 +54,9 @@ before asking GitHub it also does the maintenance and the watches that live on i
   from the host: "could not look" goes to the log and arms nothing). Notifications go out on
   the transition, once, and again when the thing recovers.
 - **It writes the state**: `onboarding/update_status.json` (the admin card and the Mini
-  App read it) and `last_check` in `var/state.json`.
+  App read it) and `last_check` in `var/state.json`. That is why it queues with the update
+  on the `var/update.lock` lock: if an update is in progress it waits for it (30 minutes at
+  most, then it runs anyway and says so), and an update arriving while it runs waits for it.
 - **It writes the health** (since 0.74.0): `onboarding/salute.json`, read by
   `/admin/salute`. One row per item, with a state (`ok`, `attenzione`, `guasto`,
   `non_misurato`) and the date of the measurement: reachability, nightly backup, archive backup, coverage and disk (the last-run

@@ -2341,15 +2341,61 @@ def allinea_timer_autoupdate(repo: Path) -> None:
 
 # ─────────────────────────────────────────── lock
 
+# Il lucchetto di chi cambia `var/state.json` e lo stack: update, rollback, bootstrap, e dal
+# 26/11/2026 anche il `check` giornaliero. Quel giorno il check è partito mentre un update
+# stava scambiando i container: ha visto il gateway giù, ha mandato «il servizio non
+# risponde» su Telegram e ha scritto `irraggiungibile_da` in uno stato che l'update, un
+# minuto dopo, ha riscritto col suo (letto prima): l'allarme falso non ha mai avuto il suo
+# «risponde di nuovo», `last_check` è rimasto al giorno prima, e il pannello ha detto
+# «non raggiungibile» fino al check successivo. Due processi che leggono, cambiano e
+# riscrivono lo stesso file devono mettersi in fila.
+LOCK_ATTESA_CHECK_S = 120       # quanto un update aspetta un check (che dura secondi)
+CHECK_ATTESA_UPDATE_S = 1800    # quanto un check aspetta un update (che dura minuti)
+_LOCK_DEL_CHECK = "check"
+
+
 def acquire_lock(repo: Path):
+    """Il lucchetto, o None se lo tiene un altro. Chi lo trova in mano a un `check` aspetta
+    fino a LOCK_ATTESA_CHECK_S: il check finisce in pochi secondi, e un click sul pulsante
+    o il giro dell'auto-update non devono perdersi per quello."""
     var = repo / "var"
     var.mkdir(mode=0o700, exist_ok=True)
-    fh = open(var / "update.lock", "w")
+    # "a+" e non "w": aprire con "w" cancellerebbe il nome di chi lo tiene adesso
+    fh = open(var / "update.lock", "a+", encoding="utf-8")
     try:
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
-        return None
-    fh.write(f"{os.getpid()} {now_iso()}\n")
+        fh.seek(0)
+        if not (fh.read().startswith(_LOCK_DEL_CHECK + " ")
+                and _flock_entro(fh, time.monotonic() + LOCK_ATTESA_CHECK_S, 1.0)):
+            fh.close()
+            return None
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"update {os.getpid()} {now_iso()}\n")
+    fh.flush()
+    return fh
+
+
+def _lock_del_check(repo: Path):
+    """Il lucchetto per il check: aspetta l'update in corso (fino a CHECK_ATTESA_UPDATE_S),
+    poi lo tiene finché gira. Se l'attesa scade torna None e il check gira lo stesso, senza
+    lucchetto: un update piantato non deve spegnere le sorveglianze proprio quel giorno."""
+    var = repo / "var"
+    var.mkdir(mode=0o700, exist_ok=True)
+    fh = open(var / "update.lock", "a+", encoding="utf-8")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("aspetto: un update è in corso (il check parte quando ha finito)")
+        if not _flock_entro(fh, time.monotonic() + CHECK_ATTESA_UPDATE_S, 5.0):
+            fh.close()
+            warn(f"l'update tiene il lucchetto da più di {CHECK_ATTESA_UPDATE_S // 60} minuti: "
+                 "il check gira lo stesso, e ciò che vede può essere un update a metà")
+            return None
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"{_LOCK_DEL_CHECK} {os.getpid()} {now_iso()}\n")
     fh.flush()
     return fh
 
@@ -3185,6 +3231,17 @@ def scrivi_salute(repo: Path, st: dict) -> None:
 
 
 def cmd_check(repo: Path, args) -> int:
+    """`vps1777 check`: le sorveglianze e la release più nuova. In fila con l'update: lo
+    aspetta se è in corso, e tiene il lucchetto mentre legge e riscrive lo stato."""
+    lock = _lock_del_check(repo)
+    try:
+        return _check(repo, args)
+    finally:
+        if lock is not None:
+            lock.close()
+
+
+def _check(repo: Path, args) -> int:
     st = state_load(repo)
     cur = current_version(repo)
     # La retention dello snapshot pre-update (n/n-1, decisione 29/08; 72h solo
