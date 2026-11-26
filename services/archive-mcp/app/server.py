@@ -457,7 +457,7 @@ def delta(
 
     ⚠️ `uuid_condivisi` è la quota di uuid in comune sul DB più piccolo. Se è bassa (`nota`)
     gli uuid non sono stabili fra le due fonti, e «spariti» e «nuovi» sono la stessa roba
-    con due nomi: vale per export claude.ai fra loro, non per mvp-100626 o i workfile."""
+    con due nomi: vale per export claude.ai fra loro, non per un export fatto con un altro strumento o i workfile."""
     return db.delta(vecchio, nuovo, limit=limit, project=project)
 
 

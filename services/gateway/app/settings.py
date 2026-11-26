@@ -200,7 +200,7 @@ class Settings(BaseSettings):
     # Il profilo NotebookLM (cookie Google) NON è più montato qui (H6): lo
     # possiede nb1777-mcp, che fra i servizi in esercizio è l'unico a montare quel
     # volume (in sola lettura lo montano anche il backup, che lo cifra, e il check
-    # settimanale delle scadenze, che ne legge solo la data — SECURITY.md). Il
+    # giornaliero delle scadenze, che ne legge solo la data — SECURITY.md). Il
     # gateway — l'unico esposto su Internet — glielo chiede su rete interna con un
     # segreto condiviso. Vedi app/nlm_client.py.
     nlm_internal_base: str = "http://nb1777-mcp:8003"

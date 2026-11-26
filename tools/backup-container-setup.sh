@@ -2,7 +2,7 @@
 # tools/backup-container-setup.sh — eseguito DENTRO il container backup all'avvio.
 #
 # Setup:
-#   1. installa age + bash + docker-cli (alpine apk)
+#   1. installa age + bash (alpine apk; niente docker-cli: vedi sotto)
 #   2. crea cron job: ogni notte 03:00 UTC → bash /vps1777/tools/backup.sh
 #   3. esegue cron in foreground
 

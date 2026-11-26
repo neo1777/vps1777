@@ -1468,7 +1468,7 @@ def _bundle_firma(repo: Path, stage: Path, require_cosign: bool) -> None:
         # VPS1777_REQUIRE_COSIGN=0 è nel .env (la via d'emergenza) e la release
         # non ha .sig/.pem — nessun log, nessun audit. L'interruttore è
         # persistente (letto dal .env a ogni update, incluso l'auto-update
-        # settimanale): chi lo usa per sbloccarsi in una crisi e si dimentica
+        # giornaliero): chi lo usa per sbloccarsi in una crisi e si dimentica
         # di toglierlo installa senza verifica firma a tempo indeterminato.
         warn("firma cosign NON verificata (release senza .sig/.pem, "
              "VPS1777_REQUIRE_COSIGN=0) — bundle installato senza verifica")
@@ -2218,7 +2218,7 @@ def render_unit(text: str, repo: Path) -> str:
                 "\n"
                 "   Crea l'operatore PRIMA — con la home, il repo e i permessi:\n"
                 f"       sudo useradd -m -s /bin/bash {forzato}\n"
-                f"       sudo usermod -aG docker,sudo {forzato}\n"
+                f"       sudo usermod -aG docker {forzato}\n"
                 f"       sudo chown -R {forzato}:{forzato} <la cartella del repo>\n"
                 "   (è quello che fa `installer/engine.py:306-322`, in un colpo solo)\n"
                 "\n"
@@ -5881,12 +5881,12 @@ _SECRET_POLICY = [
     # 📌 180 giorni come `gateway_secret`: ruotarlo non invalida sessioni utente né
     # token, cambia solo chi può scrivere le descrizioni — costo basso, urgenza bassa.
     # 🔺 `auto=False` E LA PRIMA STESURA DI QUESTA RIGA DICEVA `True`, citando un
-    # comando che NON esiste: `tools/rotate-secret.sh` copre **3 segreti su 6**
-    # (gateway_secret · oauth_signing_secret · admin_password, righe 61-63) e questo
-    # non c'è. *Stavo scrivendo una promessa falsa dentro il file che presidia i
+    # comando che NON esiste: `tools/rotate-secret.sh` copriva allora 3 segreti su 6
+    # (oggi 4: gateway_secret · oauth_signing_secret · admin_password ·
+    # telegram_bot_token) e questo non c'è. *Stavo scrivendo una promessa falsa dentro il file che presidia i
     # segreti* — la nota di una policy la legge chi deve agire in fretta.
     ("archive_desc_secret", "archive_desc_secret.txt", "Firma descrizioni archivio", 180, False,
-     "manuale: rigenera il file e ricrea il gateway — `rotate-secret.sh` NON lo copre"),
+     "manuale: rigenera il file e ricrea gateway e archive-mcp (lo montano tutti e due) — `rotate-secret.sh` NON lo copre"),
     # 90 giorni, non 365 (H29): è la RADICE DI FIDUCIA della Mini App — con questo
     # token si forgia un initData valido per qualunque user id. Fascia massima.
     ("telegram_bot_token", "telegram_bot_token.txt", "Token bot Telegram (radice Mini App)", 90, False,
