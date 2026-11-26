@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.21] — 2026-11-26
+
 ### Cambiato
 - `get_many` (archive-mcp: le righe intere di più uuid) è spezzata in quattro: gli uuid chiesti e i loro limiti
   (`_get_many_voluti`), l'ordine dei DB (`_get_many_ordine`), la lettura di un DB (`_get_many_leggi`) e il giro.
