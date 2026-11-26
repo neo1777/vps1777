@@ -112,3 +112,48 @@ def test_a_budget_finito_e_parziale(db, monkeypatch):
     monkeypatch.setattr(db, "_PASSI_HANDLER", 1)
     d = db.delta("claude-ai-080726", "claude-ai-290826")
     assert d["parziale"] is True and "Budget" in d["nota"]
+
+
+# ── le strade che le prove sopra non percorrevano (26/11/2026, prima di spezzare `delta`) ──
+
+def _altro_db(tmp_path, nome, righe, schema=_SCHEMA):
+    p = tmp_path / f"{nome}.db"
+    c = sqlite3.connect(p)
+    c.executescript(schema)
+    c.executemany(f"INSERT INTO messages VALUES ({','.join('?' * len(righe[0]))})", righe)
+    c.commit()
+    c.close()
+
+
+def test_fra_gli_esempi_un_piu_recente_scalza_il_piu_vecchio(db, tmp_path):
+    # in ordine di uuid arrivano prima i vecchi: con limit=2 i due più recenti devono scalzarli
+    _altro_db(tmp_path, "vuoto", [("zz", "p", "2020-01-01", "x")])
+    _altro_db(tmp_path, "quattro", [("a1", "p", "2026-01-01", "x"), ("a2", "p", "2026-01-02", "x"),
+                                    ("a3", "p", "2026-01-04", "x"), ("a4", "p", "2026-01-03", "x")])
+    db.reload_registry()
+    d = db.delta("quattro", "vuoto", limit=2)
+    assert d["spariti"] == 4
+    assert [e["uuid"] for e in d["esempi"]["spariti"]] == ["a3", "a4"]
+
+
+def test_un_errore_di_sqlite_che_non_e_un_interruzione_non_diventa_un_parziale(db, tmp_path):
+    _altro_db(tmp_path, "storto", [("u1", "p", "x")],
+              schema="CREATE TABLE messages(uuid TEXT PRIMARY KEY, project, content);"
+                     "CREATE VIRTUAL TABLE messages_fts USING fts5(uuid, project, content,"
+                     " content='messages', content_rowid='rowid');")
+    db.reload_registry()
+    with pytest.raises(sqlite3.OperationalError, match="ts"):
+        db.delta("claude-ai-080726", "storto")
+
+
+def test_un_parziale_a_meta_lettura_dice_fin_dove_e_arrivato(db, tmp_path, monkeypatch):
+    righe = [(f"u{i:04d}", "p", "2026-01-01", "x") for i in range(3000)]
+    _altro_db(tmp_path, "grande-a", righe)
+    _altro_db(tmp_path, "grande-b", righe)
+    db.reload_registry()
+    monkeypatch.setattr(db, "BUDGET_S", 0.0)
+    monkeypatch.setattr(db, "_PASSI_HANDLER", 2000)
+    d = db.delta("grande-a", "grande-b")
+    assert d["parziale"] is True
+    assert d["arrivato_a"].startswith("u") and 0 < d["in_comune"] < 3000
+    assert repr(d["arrivato_a"]) in d["nota"]

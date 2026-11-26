@@ -1677,79 +1677,63 @@ def _riga_delta(r: sqlite3.Row) -> dict[str, Any]:
 
 
 @_serializzata
-def delta(vecchio: str, nuovo: str, *, limit: int = DELTA_ESEMPI,
-          project: str = "") -> dict[str, Any]:
-    """Il confronto per uuid fra due DB: righe sparite, nuove e col testo cambiato,
-    contate per progetto, con gli esempi più recenti di ciascun tipo."""
-    _maybe_reload()
-    if vecchio == nuovo:
-        raise ValueError("vecchio e nuovo sono lo stesso DB: dammene due diversi.")
-    n_esempi = _limite(limit, DELTA_ESEMPI_MASSIMO)
-    ca, cb = _open(vecchio), _open(nuovo)
-    budget = _Budget(BUDGET_S)
-    filtro, args = ("WHERE project = ?", (project,)) if project else ("", ())
-    sql = f"SELECT uuid, project, ts, content FROM messages {filtro} ORDER BY uuid"
-    conti = {"in_comune": 0, "spariti": 0, "nuovi": 0, "cambiati": 0}
-    per_progetto: dict[str, dict[str, int]] = {}
-    esempi: dict[str, list] = {"spariti": [], "nuovi": [], "cambiati": []}
-    serie = 0                          # spareggio stabile per heapq
+class _ContoDelta:
+    """I conti di un delta mentre si scorre: i totali, quelli per progetto, e gli esempi più recenti
+    di ogni tipo. Era lo stato locale di `delta`, con la chiusura `conta` che lo aggiornava."""
 
-    def conta(tipo: str, r: sqlite3.Row) -> None:
-        nonlocal serie
-        conti[tipo] += 1
-        g = per_progetto.setdefault(r["project"] or "", {"spariti": 0, "nuovi": 0, "cambiati": 0})
+    def __init__(self, n_esempi: int) -> None:
+        self.n_esempi = n_esempi
+        self.conti = {"in_comune": 0, "spariti": 0, "nuovi": 0, "cambiati": 0}
+        self.per_progetto: dict[str, dict[str, int]] = {}
+        self.esempi: dict[str, list] = {"spariti": [], "nuovi": [], "cambiati": []}
+        self.serie = 0                          # spareggio stabile per heapq
+
+    def conta(self, tipo: str, r: sqlite3.Row) -> None:
+        self.conti[tipo] += 1
+        g = self.per_progetto.setdefault(r["project"] or "", {"spariti": 0, "nuovi": 0, "cambiati": 0})
         g[tipo] += 1
-        serie += 1
-        h = esempi[tipo]
-        voce = (r["ts"] or "", serie, r)
-        if len(h) < n_esempi:
+        self.serie += 1
+        h = self.esempi[tipo]
+        voce = (r["ts"] or "", self.serie, r)
+        if len(h) < self.n_esempi:
             heapq.heappush(h, voce)
         elif voce[0] > h[0][0]:
             heapq.heapreplace(h, voce)
 
-    parziale = False
+
+def _delta_scorri(ca: sqlite3.Connection, cb: sqlite3.Connection, sql: str, args: tuple,
+                  conto: _ContoDelta) -> tuple[bool, str]:
+    """Scorre i due DB in ordine di uuid e conta. Rende (parziale, ultimo uuid visto): parziale è
+    vero se il budget ha interrotto la lettura."""
     arrivato_a = ""
-    with budget.su(ca), budget.su(cb):
-        try:
-            ia, ib = ca.execute(sql, args), cb.execute(sql, args)
-            a, b = next(ia, None), next(ib, None)
-            while a is not None or b is not None:
-                if b is None or (a is not None and a["uuid"] < b["uuid"]):
-                    conta("spariti", a)
-                    arrivato_a = a["uuid"]
-                    a = next(ia, None)
-                elif a is None or b["uuid"] < a["uuid"]:
-                    conta("nuovi", b)
-                    arrivato_a = b["uuid"]
-                    b = next(ib, None)
-                else:
-                    conti["in_comune"] += 1
-                    if _impronta(a["content"]) != _impronta(b["content"]):
-                        conta("cambiati", b)
-                    arrivato_a = a["uuid"]
-                    a, b = next(ia, None), next(ib, None)
-        except sqlite3.OperationalError as exc:
-            if "interrupt" not in str(exc).lower():
-                raise
-            parziale = True
-    righe_v = conti["in_comune"] + conti["spariti"]
-    righe_n = conti["in_comune"] + conti["nuovi"]
-    piu_piccolo = min(righe_v, righe_n)
-    quota = round(conti["in_comune"] / piu_piccolo, 3) if piu_piccolo else 0.0
-    progetti = sorted(({"project": k, **v} for k, v in per_progetto.items()),
-                      key=lambda g: (g["spariti"] + g["nuovi"] + g["cambiati"]), reverse=True)
-    out: dict[str, Any] = {
-        "vecchio": {"db": vecchio, "righe": righe_v, "snapshot": _snapshot(Path(_DBS[vecchio]))},
-        "nuovo": {"db": nuovo, "righe": righe_n, "snapshot": _snapshot(Path(_DBS[nuovo]))},
-        **conti,
-        "uuid_condivisi": quota,
-        "progetti": progetti[:n_esempi],
-        "progetti_totali": len(progetti),
-        "esempi": {t: [_riga_delta(v[2]) for v in sorted(h, reverse=True)]
-                   for t, h in esempi.items()},
-    }
-    if project:
-        out["project"] = project
+    try:
+        ia, ib = ca.execute(sql, args), cb.execute(sql, args)
+        a, b = next(ia, None), next(ib, None)
+        while a is not None or b is not None:
+            if b is None or (a is not None and a["uuid"] < b["uuid"]):
+                conto.conta("spariti", a)
+                arrivato_a = a["uuid"]
+                a = next(ia, None)
+            elif a is None or b["uuid"] < a["uuid"]:
+                conto.conta("nuovi", b)
+                arrivato_a = b["uuid"]
+                b = next(ib, None)
+            else:
+                conto.conti["in_comune"] += 1
+                if _impronta(a["content"]) != _impronta(b["content"]):
+                    conto.conta("cambiati", b)
+                arrivato_a = a["uuid"]
+                a, b = next(ia, None), next(ib, None)
+    except sqlite3.OperationalError as exc:
+        if "interrupt" not in str(exc).lower():
+            raise
+        return True, arrivato_a
+    return False, arrivato_a
+
+
+def _delta_note(out: dict[str, Any], parziale: bool, arrivato_a: str, piu_piccolo: int,
+                quota: float) -> None:
+    """Le avvertenze del referto: lettura interrotta dal budget, uuid che i due DB quasi non condividono."""
     note = []
     if parziale:
         out["parziale"] = True
@@ -1762,6 +1746,42 @@ def delta(vecchio: str, nuovo: str, *, limit: int = DELTA_ESEMPI,
                     "workfile), e allora «spariti» e «nuovi» sono la stessa roba con due nomi.")
     if note:
         out["nota"] = " ".join(note)
+
+
+def delta(vecchio: str, nuovo: str, *, limit: int = DELTA_ESEMPI,
+          project: str = "") -> dict[str, Any]:
+    """Il confronto per uuid fra due DB: righe sparite, nuove e col testo cambiato,
+    contate per progetto, con gli esempi più recenti di ciascun tipo."""
+    _maybe_reload()
+    if vecchio == nuovo:
+        raise ValueError("vecchio e nuovo sono lo stesso DB: dammene due diversi.")
+    n_esempi = _limite(limit, DELTA_ESEMPI_MASSIMO)
+    ca, cb = _open(vecchio), _open(nuovo)
+    budget = _Budget(BUDGET_S)
+    filtro, args = ("WHERE project = ?", (project,)) if project else ("", ())
+    sql = f"SELECT uuid, project, ts, content FROM messages {filtro} ORDER BY uuid"
+    conto = _ContoDelta(n_esempi)
+    with budget.su(ca), budget.su(cb):
+        parziale, arrivato_a = _delta_scorri(ca, cb, sql, args, conto)
+    righe_v = conto.conti["in_comune"] + conto.conti["spariti"]
+    righe_n = conto.conti["in_comune"] + conto.conti["nuovi"]
+    piu_piccolo = min(righe_v, righe_n)
+    quota = round(conto.conti["in_comune"] / piu_piccolo, 3) if piu_piccolo else 0.0
+    progetti = sorted(({"project": k, **v} for k, v in conto.per_progetto.items()),
+                      key=lambda g: (g["spariti"] + g["nuovi"] + g["cambiati"]), reverse=True)
+    out: dict[str, Any] = {
+        "vecchio": {"db": vecchio, "righe": righe_v, "snapshot": _snapshot(Path(_DBS[vecchio]))},
+        "nuovo": {"db": nuovo, "righe": righe_n, "snapshot": _snapshot(Path(_DBS[nuovo]))},
+        **conto.conti,
+        "uuid_condivisi": quota,
+        "progetti": progetti[:n_esempi],
+        "progetti_totali": len(progetti),
+        "esempi": {t: [_riga_delta(v[2]) for v in sorted(h, reverse=True)]
+                   for t, h in conto.esempi.items()},
+    }
+    if project:
+        out["project"] = project
+    _delta_note(out, parziale, arrivato_a, piu_piccolo, quota)
     return out
 
 
