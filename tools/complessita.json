@@ -14,10 +14,6 @@
    "complessita": 14,
    "stato": "da-esaminare"
   },
-  "tools/nomi-nei-doc.py::controlla": {
-   "complessita": 14,
-   "stato": "da-esaminare"
-  },
   "tools/vps1777.py::cmd_archive_migra": {
    "complessita": 14,
    "stato": "da-esaminare"
