@@ -62,7 +62,7 @@ import urllib.request
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import IO, Iterable, Iterator, NamedTuple, Union
+from typing import IO, Any, Iterable, Iterator, NamedTuple, Union
 
 Row = tuple[str, str, str, str]  # (uuid, project, ts, content) — forma breve, ancora accettata
 RowFull = tuple[str, str, str, str, str, str, str, str, str]
@@ -2131,6 +2131,49 @@ def _attachment_names(m: dict) -> str:
     return "\n".join(out)
 
 
+def _iter_memorie_dei_progetti(pm: object) -> Iterator[RowFull]:
+    """Le memorie dei Project di un account: una mappa {uuid: testo}, o la lista di una
+    forma più vecchia; ogni voce è un testo o un oggetto col testo e il nome."""
+    # `project_memories` è una MAPPA {project_uuid: testo}, non una lista.
+    # (Su un export reale: 9 progetti, 74.404 caratteri — più di 7× la
+    # conversations_memory. Trattarla come lista ne perde il contenuto.)
+    entries: list[tuple[str, object]] = []
+    if isinstance(pm, dict):
+        entries = list(pm.items())
+    elif isinstance(pm, list):
+        entries = [(str(i), p) for i, p in enumerate(pm)]
+
+    for key, p in entries:
+        if isinstance(p, str):
+            body = p
+        elif isinstance(p, dict):
+            body = str(p.get("memory") or p.get("content") or p.get("text") or "")
+            key = str(p.get("name") or p.get("project_uuid") or key)
+        else:
+            continue
+        if body.strip():
+            label = f"memory:project:{key}"
+            yield from _chunk_rows_full(body, label, "", label, sender="memory")
+
+
+def _iter_file_di_memoria(files: Any) -> Iterator[RowFull]:
+    """I file di memoria di un account (`memory_files`): uno per area, col suo percorso."""
+    # `memory_files` — dal 29/08/2026: i FILE di memoria di claude.ai
+    # (`/areas/<progetto>.md`, frontmatter name/description + corpo), uno per
+    # area. Sono la forma nuova della stessa cosa: testo scritto da un
+    # assistente su una persona. Etichetta `memory:file:<path>`, ts = updated_at.
+    for mf in (files or []):
+        if not isinstance(mf, dict):
+            continue
+        path = str(mf.get("path") or mf.get("name") or "")
+        content = mf.get("content")
+        if not path or not isinstance(content, str) or not content.strip():
+            continue
+        label = f"memory:file:{path}"
+        yield from _chunk_rows_full(content, label, str(mf.get("updated_at") or ""),
+                                    label, sender="memory")
+
+
 def _iter_memories(data: object) -> Iterator[RowFull]:
     """`memories.json` dell'export claude.ai — la MEMORIA PERSISTENTE dell'account.
 
@@ -2152,41 +2195,8 @@ def _iter_memories(data: object) -> Iterator[RowFull]:
         if isinstance(conv_mem, str) and conv_mem.strip():
             yield from _chunk_rows_full(conv_mem, "memory:conversations",
                                         "", "memory-conversations", sender="memory")
-        # `project_memories` è una MAPPA {project_uuid: testo}, non una lista.
-        # (Su un export reale: 9 progetti, 74.404 caratteri — più di 7× la
-        # conversations_memory. Trattarla come lista ne perde il contenuto.)
-        pm = acc.get("project_memories")
-        entries: list[tuple[str, object]] = []
-        if isinstance(pm, dict):
-            entries = list(pm.items())
-        elif isinstance(pm, list):
-            entries = [(str(i), p) for i, p in enumerate(pm)]
-
-        for key, p in entries:
-            if isinstance(p, str):
-                body = p
-            elif isinstance(p, dict):
-                body = str(p.get("memory") or p.get("content") or p.get("text") or "")
-                key = str(p.get("name") or p.get("project_uuid") or key)
-            else:
-                continue
-            if body.strip():
-                label = f"memory:project:{key}"
-                yield from _chunk_rows_full(body, label, "", label, sender="memory")
-        # `memory_files` — dal 29/08/2026: i FILE di memoria di claude.ai
-        # (`/areas/<progetto>.md`, frontmatter name/description + corpo), uno per
-        # area. Sono la forma nuova della stessa cosa: testo scritto da un
-        # assistente su una persona. Etichetta `memory:file:<path>`, ts = updated_at.
-        for mf in (acc.get("memory_files") or []):
-            if not isinstance(mf, dict):
-                continue
-            path = str(mf.get("path") or mf.get("name") or "")
-            content = mf.get("content")
-            if not path or not isinstance(content, str) or not content.strip():
-                continue
-            label = f"memory:file:{path}"
-            yield from _chunk_rows_full(content, label, str(mf.get("updated_at") or ""),
-                                        label, sender="memory")
+        yield from _iter_memorie_dei_progetti(acc.get("project_memories"))
+        yield from _iter_file_di_memoria(acc.get("memory_files"))
 
 
 def _iter_login_history(data: object) -> Iterator[RowFull]:
@@ -3097,6 +3107,48 @@ def _iter_immagine_bytes(raw: bytes, name: str, label: str, ts: str, *,
     yield from _chunk_rows(f"[{name}] [ocr]\n{testo}", label, ts, name)
 
 
+def _leggi_membro_annidato(z: zipfile.ZipFile, m: str, visibile: str,
+                           budget: _Budget) -> tuple[bytes | None, str]:
+    """I byte di un membro dell'annidato, o il motivo della sua lapide. Il tetto GLOBALE
+    (budget finito) non si assorbe: quell'errore sale."""
+    try:
+        with z.open(m) as f:
+            return _read_capped(f, visibile, budget), ""
+    except ValueError:
+        if budget.left < 0:
+            raise               # il tetto dell'ARCHIVIO intero non si assorbe
+        return None, "membro-oltre-tetto"
+    except Exception:
+        return None, "membro-illeggibile"
+
+
+def _iter_membro_annidato(raw_m: bytes, visibile: str, ext: str, label: str, ts: str,
+                          fonte: str) -> Iterator:
+    """Un membro dell'annidato nella trafila del suo tipo: immagine, pdf, json/jsonl,
+    documento, testo riconosciuto dallo sniff; un archivio dentro l'archivio è una lapide."""
+    if ext in _ZIP_ANNIDATI_EXTS:
+        yield _Skip(fonte, "zip-annidato-oltre-profondita", visibile, ts)
+    elif ext in _IMG_EXTS:
+        yield from _iter_immagine_bytes(raw_m, visibile, label, ts, fonte=fonte)
+    elif ext == ".pdf":
+        yield from _iter_pdf_bytes(raw_m, visibile, label, ts, fonte=fonte)
+    elif ext in (".jsonl", ".json"):
+        text = raw_m.decode("utf-8", errors="replace")
+        if _sniff_jsonl_kind(text[:20000]) == "cc":
+            yield from _iter_cc_text(text, visibile)
+        else:
+            yield from _chunk_rows(text, label, ts, visibile, chunk_chars=4000)
+    elif ext in _DOC_ZIP_EXTS:
+        yield from _chunk_rows(f"[{visibile}]\n" + raw_m.decode("utf-8", errors="replace"),
+                               label, ts, visibile)
+    elif _sniff_e_testo(raw_m[:_SNIFF_BYTES]):
+        yield from _chunk_rows(f"[{visibile}] [testo-sniffato]\n"
+                               + raw_m.decode("utf-8", errors="replace"),
+                               label, ts, visibile)
+    else:
+        yield _Skip(fonte, "non-testo", visibile, ts)
+
+
 def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
                        budget: _Budget, *, fonte: str = "bundle-workfiles") -> Iterator:
     """UN livello di archivio dentro i workfiles (zip e .skill): i membri passano
@@ -3114,39 +3166,11 @@ def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
         return
     for m in membri:
         visibile = f"{name}!{m}"
-        ext = Path(m).suffix.lower()
-        try:
-            with z.open(m) as f:
-                raw_m = _read_capped(f, visibile, budget)
-        except ValueError:
-            if budget.left < 0:
-                raise               # il tetto dell'ARCHIVIO intero non si assorbe
-            yield _Skip(fonte, "membro-oltre-tetto", visibile, ts)
+        raw_m, motivo = _leggi_membro_annidato(z, m, visibile, budget)
+        if raw_m is None:
+            yield _Skip(fonte, motivo, visibile, ts)
             continue
-        except Exception:
-            yield _Skip(fonte, "membro-illeggibile", visibile, ts)
-            continue
-        if ext in _ZIP_ANNIDATI_EXTS:
-            yield _Skip(fonte, "zip-annidato-oltre-profondita", visibile, ts)
-        elif ext in _IMG_EXTS:
-            yield from _iter_immagine_bytes(raw_m, visibile, label, ts, fonte=fonte)
-        elif ext == ".pdf":
-            yield from _iter_pdf_bytes(raw_m, visibile, label, ts, fonte=fonte)
-        elif ext in (".jsonl", ".json"):
-            text = raw_m.decode("utf-8", errors="replace")
-            if _sniff_jsonl_kind(text[:20000]) == "cc":
-                yield from _iter_cc_text(text, visibile)
-            else:
-                yield from _chunk_rows(text, label, ts, visibile, chunk_chars=4000)
-        elif ext in _DOC_ZIP_EXTS:
-            yield from _chunk_rows(f"[{visibile}]\n" + raw_m.decode("utf-8", errors="replace"),
-                                   label, ts, visibile)
-        elif _sniff_e_testo(raw_m[:_SNIFF_BYTES]):
-            yield from _chunk_rows(f"[{visibile}] [testo-sniffato]\n"
-                                   + raw_m.decode("utf-8", errors="replace"),
-                                   label, ts, visibile)
-        else:
-            yield _Skip(fonte, "non-testo", visibile, ts)
+        yield from _iter_membro_annidato(raw_m, visibile, Path(m).suffix.lower(), label, ts, fonte)
 
 
 # I membri top-level del bundle che questo indexer SA leggere. È la mappa del

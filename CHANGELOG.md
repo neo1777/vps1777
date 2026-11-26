@@ -4,6 +4,18 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- `_iter_zip_annidato` (l'archivio dentro i workfiles, aperto per un livello) è spezzata in tre: la lettura di un
+  membro col suo tetto (`_leggi_membro_annidato`), lo smistamento per tipo (`_iter_membro_annidato`) e il giro sui
+  membri. Complessità da 14 a sotto 10 (QUA-04). Comportamento identico: 1.205
+  archivi a confronto fra il codice di prima e quello nuovo, zero differenze, con ogni ramo percorso e nove
+  mutazioni tutte viste. Sedici prove nuove, una per strada.
+- `_iter_memories` (la memoria persistente dell'export claude.ai) è spezzata in tre: le memorie dei Project
+  (`_iter_memorie_dei_progetti`), i file di memoria (`_iter_file_di_memoria`) e il giro sugli account. Complessità
+  da 13 a sotto 10 (QUA-04, 32 funzioni restano). Comportamento identico: 3.004 forme di `memories.json` a
+  confronto, zero differenze, ogni ramo percorso; otto mutazioni viste e una equivalente (un contenuto di soli
+  spazi non produce righe né col controllo né senza). Sette prove nuove.
+
 ## [0.98.20] — 2026-11-26
 
 ### Corretto
