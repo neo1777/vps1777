@@ -309,7 +309,7 @@ async def _lungo(nome: str, chiave: tuple, nb_id: str, attesa_max: float, fn, *a
 # Google — ed è l'unico che ci scrive. Il gateway (l'unico esposto su Internet) e
 # il bot non lo montano più: chiedono qui. Così un gateway compromesso non può né
 # leggere né riscrivere la sessione Google. (Lo montano in sola lettura anche il
-# backup, che li cifra, e il check settimanale delle scadenze: SECURITY.md.)
+# backup, che li cifra, e il check giornaliero delle scadenze: SECURITY.md.)
 #
 # Questi endpoint NON sono raggiungibili dall'esterno: il proxy del gateway
 # rifiuta i sotto-path `internal/` (vedi gateway/app/proxy.py) e la rete
