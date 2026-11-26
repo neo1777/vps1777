@@ -5050,3 +5050,5 @@ findings:
       macchina o un utente: misurate 56 righe innocue in più contro 2). Una parola tutta
       minuscola con UNA sola cifra in coda dopo «password» resta innocua per l'ultima regola
       sulla forma. Dopo una spia debole («token», «chiave») vale solo la cura delle maiuscole.
+      L'elenco chiuso copre la forma nuda: con un separatore e un pezzo dopo (`parola12-x`,
+      `parola12.abc`) la forma minuscola resta quella di un pacchetto anche dopo «password».
