@@ -16,6 +16,7 @@ check lento, il giorno in cui la rete va male, avrebbe fatto perdere il click in
 from __future__ import annotations
 
 import importlib.util
+import os
 import threading
 import time
 from pathlib import Path
@@ -219,6 +220,67 @@ def test_il_check_lascia_il_lucchetto_anche_se_cade(tmp_path, monkeypatch):
     dopo = v.acquire_lock(tmp_path)
     assert dopo is not None
     dopo.close()
+
+
+def test_un_lucchetto_che_non_si_apre_non_spegne_il_check(tmp_path, capsys):
+    """Un update lanciato da root può aver creato il file: il check dell'operatore non deve
+    morire su un permesso, e con lui le sorveglianze (nota di Sagoma, 26/11)."""
+    if os.geteuid() == 0:
+        pytest.skip("root apre qualunque file")
+    (tmp_path / "var").mkdir()
+    chiuso = tmp_path / "var" / "check.lock"
+    chiuso.write_text("")
+    chiuso.chmod(0o000)
+    try:
+        assert v._lock_del_check(tmp_path) is None
+        assert "senza mettersi in fila" in "".join(capsys.readouterr())
+        assert v._un_check_tiene_il_lucchetto(tmp_path / "var") is False
+        libero = v.acquire_lock(tmp_path)          # la fila non è rimasta presa
+        assert libero is not None
+        libero.close()
+    finally:
+        chiuso.chmod(0o600)
+
+
+def test_senza_il_secondo_flock_il_check_non_tiene_la_fila(tmp_path, monkeypatch, capsys):
+    """Con la fila ma senza il nome, un update ci scambierebbe per un update e cancellerebbe
+    l'intent: meglio girare senza lucchetto, dicendolo."""
+    altro = _tieni(tmp_path, "check.lock")
+    vero = v._flock_entro
+    monkeypatch.setattr(v, "_flock_entro",
+                        lambda fh, scadenza, passo: vero(fh, time.monotonic() + 0.2, 0.05))
+    assert v._lock_del_check(tmp_path) is None
+    assert "check.lock non si lascia prendere" in "".join(capsys.readouterr())
+    altro.close()
+    libero = v.acquire_lock(tmp_path)
+    assert libero is not None
+    libero.close()
+
+
+def test_il_giro_rieseguito_dalla_cli_nuova_aspetta_il_check_piu_a_lungo(tmp_path, monkeypatch):
+    """Dopo il re-exec non c'è più un intent che rilanci: uscire 75 lascerebbe la CLI nuova
+    con lo stack vecchio e l'aggiornamento chiesto a metà."""
+    monkeypatch.setattr(v, "LOCK_ATTESA_CHECK_S", 0.3)
+    del_check = v._lock_del_check(tmp_path)
+    with pytest.raises(SystemExit) as e:           # il primo giro, senza re-exec: 75 dopo 0,3 s
+        v._update_lock(tmp_path, SimpleNamespace(from_intent=None, skip_self_update=False))
+    assert e.value.code == v.ESITO_LOCK_OCCUPATO
+    t = _fra(0.8, del_check.close)                 # più di due attese, meno di cinque
+    lock = v._update_lock(tmp_path, SimpleNamespace(from_intent=None, skip_self_update=True))
+    t.join()
+    assert lock is not None
+    lock.close()
+
+
+def test_anche_il_giro_rieseguito_alla_fine_si_arrende(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(v, "LOCK_ATTESA_CHECK_S", 0.1)
+    monkeypatch.setattr(v, "LOCK_GIRI_DOPO_REEXEC", 2)
+    del_check = v._lock_del_check(tmp_path)
+    with pytest.raises(SystemExit) as e:
+        v._update_lock(tmp_path, SimpleNamespace(from_intent=None, skip_self_update=True))
+    assert e.value.code == v.ESITO_LOCK_OCCUPATO
+    assert "controllo giornaliero" in capsys.readouterr().err
+    del_check.close()
 
 
 def test_la_cli_lancia_il_check_in_fila():

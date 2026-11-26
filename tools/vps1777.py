@@ -2359,6 +2359,7 @@ def allinea_timer_autoupdate(repo: Path) -> None:
 LOCK_ATTESA_CHECK_S = 120       # quanto un update aspetta un check
 LOCK_SGUARDI_S = 2.0            # quanto si riguarda prima di credere che NON sia un check
 CHECK_ATTESA_UPDATE_S = 1800    # quanto un check aspetta un update (che dura minuti)
+LOCK_GIRI_DOPO_REEXEC = 5       # il giro rieseguito dalla CLI nuova aspetta il check 5 volte tanto
 
 
 class CheckInCorso(Exception):
@@ -2375,9 +2376,13 @@ def _prendi_subito(fh) -> bool:
 
 
 def _un_check_tiene_il_lucchetto(var: Path) -> bool:
-    """`check.lock` è tenuto da un altro? (Lo si prova e lo si lascia subito.)"""
-    with open(var / "check.lock", "a") as sonda:
-        return not _prendi_subito(sonda)
+    """`check.lock` è tenuto da un altro? (Lo si prova e lo si lascia subito.) Un file che
+    non si lascia aprire (creato da un'altra utenza) non è un check: si esce come sempre."""
+    try:
+        with open(var / "check.lock", "a") as sonda:
+            return not _prendi_subito(sonda)
+    except OSError:
+        return False
 
 
 def acquire_lock(repo: Path):
@@ -2415,12 +2420,16 @@ def _lock_o_riprova_dopo(repo: Path, occupato: str):
     try:
         lock = acquire_lock(repo)
     except CheckInCorso:
-        die(f"il controllo giornaliero (vps1777 check) sta ancora girando dopo "
-            f"{LOCK_ATTESA_CHECK_S} secondi: non c'è nessun update in corso, riprova fra poco",
-            ESITO_LOCK_OCCUPATO)
+        _muori_per_il_check()
     if lock is None:
         die(occupato, ESITO_LOCK_OCCUPATO)
     return lock
+
+
+def _muori_per_il_check() -> None:
+    die(f"il controllo giornaliero (vps1777 check) sta ancora girando dopo "
+        f"{LOCK_ATTESA_CHECK_S} secondi: non c'è nessun update in corso, riprova fra poco",
+        ESITO_LOCK_OCCUPATO)
 
 
 class _LockDelCheck:
@@ -2441,17 +2450,28 @@ def _lock_del_check(repo: Path):
     lucchetto: un update piantato non deve spegnere le sorveglianze proprio quel giorno."""
     var = repo / "var"
     var.mkdir(mode=0o700, exist_ok=True)
-    fila = open(var / "update.lock", "a+", encoding="utf-8")
+    try:
+        fila = open(var / "update.lock", "a+", encoding="utf-8")
+        chi = open(var / "check.lock", "a")
+    except OSError as exc:
+        # un update lanciato da un'altra utenza (root, da una shell) può aver creato i file:
+        # le sorveglianze non devono morire su un permesso
+        warn(f"il lucchetto non si apre ({exc}): il check gira lo stesso, senza mettersi in fila")
+        return None
     if not _prendi_subito(fila):
         log("aspetto: un update è in corso (il check parte quando ha finito)")
         if not _flock_entro(fila, time.monotonic() + CHECK_ATTESA_UPDATE_S, 5.0):
             fila.close()
+            chi.close()
             warn(f"l'update tiene il lucchetto da più di {CHECK_ATTESA_UPDATE_S // 60} minuti: "
                  "il check gira lo stesso, e ciò che vede può essere un update a metà")
             return None
-    chi = open(var / "check.lock", "a")
-    # un altro check (a mano, mentre gira quello del timer) lo lascia in un istante
-    _flock_entro(chi, time.monotonic() + 10.0, 0.1)
+    # le sonde lo tengono un istante; senza il nome un update ci scambierebbe per un update
+    if not _flock_entro(chi, time.monotonic() + 10.0, 0.1):
+        fila.close()
+        chi.close()
+        warn("check.lock non si lascia prendere: il check gira lo stesso, senza mettersi in fila")
+        return None
     fila.seek(0)
     fila.truncate()
     fila.write(f"check {os.getpid()} {now_iso()}\n")
@@ -4114,14 +4134,21 @@ def cmd_update(repo: Path, args) -> int:
 
 def _update_lock(repo: Path, args):
     """0 — il lock. Occupato: c'è già chi lavora, e questo giro esce 75 («riprova dopo»)."""
-    try:
-        lock = acquire_lock(repo)
-    except CheckInCorso:
-        # NON è un update in corso: l'intent del pulsante RESTA, e la path unit rilancia
-        # questo giro appena esce. Cancellarlo qui perderebbe il click in silenzio.
-        die(f"il controllo giornaliero (vps1777 check) sta ancora girando dopo "
-            f"{LOCK_ATTESA_CHECK_S} secondi: non c'è nessun update in corso, riprova fra poco",
-            ESITO_LOCK_OCCUPATO)
+    # Il giro rieseguito dalla CLI nuova (--skip-self-update) non ha più un intent che lo
+    # rilanci: se trova un check lento lo aspetta più a lungo, invece di lasciare la CLI
+    # nuova con lo stack vecchio e l'aggiornamento chiesto a metà.
+    giri = LOCK_GIRI_DOPO_REEXEC if getattr(args, "skip_self_update", False) else 1
+    lock = None
+    for giro in range(giri):
+        try:
+            lock = acquire_lock(repo)
+            break
+        except CheckInCorso:
+            if giro + 1 < giri:
+                continue
+            # NON è un update in corso: l'intent del pulsante RESTA, e la path unit rilancia
+            # questo giro appena esce. Cancellarlo qui perderebbe il click in silenzio.
+            _muori_per_il_check()
     if lock is None:
         if args.from_intent:
             Path(args.from_intent).unlink(missing_ok=True)

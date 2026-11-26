@@ -17,6 +17,9 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   controllo dura più di due minuti chi aspettava esce con 75 e il motivo vero («il controllo giornaliero sta
   ancora girando»), e l'intent del pulsante «Aggiorna» resta: l'update riparte da solo appena può, il click non
   si perde. Chi trova il lucchetto occupato non cancella più il nome di chi lo tiene.
+  Se i file del lucchetto non si aprono (creati da un'altra utenza) il controllo gira lo stesso e lo dice,
+  invece di morire con le sue sorveglianze; e il giro dell'update rieseguito dalla CLI nuova, che non ha più
+  un intent a rilanciarlo, aspetta il controllo cinque volte più a lungo.
 
 ## [0.98.20] — 2026-11-26
 
