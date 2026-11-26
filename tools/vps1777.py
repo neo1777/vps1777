@@ -3230,18 +3230,18 @@ def scrivi_salute(repo: Path, st: dict) -> None:
         {"checked_at": ora, "righe": righe}, indent=2, ensure_ascii=False) + "\n")
 
 
-def cmd_check(repo: Path, args) -> int:
-    """`vps1777 check`: le sorveglianze e la release più nuova. In fila con l'update: lo
-    aspetta se è in corso, e tiene il lucchetto mentre legge e riscrive lo stato."""
+def cmd_check_in_fila(repo: Path, args) -> int:
+    """`vps1777 check` come lo lancia la CLI: in fila con l'update. Lo aspetta se è in corso,
+    e tiene il lucchetto mentre `cmd_check` legge e riscrive lo stato."""
     lock = _lock_del_check(repo)
     try:
-        return _check(repo, args)
+        return cmd_check(repo, args)
     finally:
         if lock is not None:
             lock.close()
 
 
-def _check(repo: Path, args) -> int:
+def cmd_check(repo: Path, args) -> int:
     st = state_load(repo)
     cur = current_version(repo)
     # La retention dello snapshot pre-update (n/n-1, decisione 29/08; 72h solo
@@ -6608,7 +6608,7 @@ def main() -> int:
     # in `arma_redazione`: a quel punto non ne abbiamo ancora letto nessuno.
     arma_redazione(repo)
 
-    handlers = {"check": cmd_check, "update": cmd_update, "rollback": cmd_rollback,
+    handlers = {"check": cmd_check_in_fila, "update": cmd_update, "rollback": cmd_rollback,
                 "status": cmd_status, "version": cmd_version,
                 "migrate": cmd_migrate, "bootstrap": cmd_bootstrap,
                 "archive-ingest": cmd_archive_ingest,

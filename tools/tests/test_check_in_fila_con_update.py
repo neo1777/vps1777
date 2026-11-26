@@ -94,8 +94,8 @@ def test_un_update_piantato_non_spegne_il_check(tmp_path, monkeypatch, capsys):
     uscita = capsys.readouterr()
     assert "il check gira lo stesso" in uscita.out + uscita.err
     visto = []
-    monkeypatch.setattr(v, "_check", lambda repo, args: visto.append("girato") or 0)
-    assert v.cmd_check(tmp_path, SimpleNamespace(notify=False)) == 0
+    monkeypatch.setattr(v, "cmd_check", lambda repo, args: visto.append("girato") or 0)
+    assert v.cmd_check_in_fila(tmp_path, SimpleNamespace(notify=False)) == 0
     assert visto == ["girato"]
     update.close()
 
@@ -108,8 +108,8 @@ def test_il_check_tiene_il_lucchetto_mentre_gira_e_lo_lascia_dopo(tmp_path, monk
         durante.append(v.acquire_lock(repo))
         return 7
 
-    monkeypatch.setattr(v, "_check", finto)
-    assert v.cmd_check(tmp_path, SimpleNamespace(notify=False)) == 7
+    monkeypatch.setattr(v, "cmd_check", finto)
+    assert v.cmd_check_in_fila(tmp_path, SimpleNamespace(notify=False)) == 7
     assert durante == [None]
     dopo = v.acquire_lock(tmp_path)
     assert dopo is not None
@@ -120,9 +120,15 @@ def test_il_check_lascia_il_lucchetto_anche_se_cade(tmp_path, monkeypatch):
     def cade(repo, args):
         raise RuntimeError("guasto")
 
-    monkeypatch.setattr(v, "_check", cade)
+    monkeypatch.setattr(v, "cmd_check", cade)
     with pytest.raises(RuntimeError):
-        v.cmd_check(tmp_path, SimpleNamespace(notify=False))
+        v.cmd_check_in_fila(tmp_path, SimpleNamespace(notify=False))
     dopo = v.acquire_lock(tmp_path)
     assert dopo is not None
     dopo.close()
+
+
+def test_la_cli_lancia_il_check_in_fila():
+    """Il cablaggio: `vps1777 check` passa dal lucchetto, non dal corpo nudo."""
+    import inspect
+    assert '"check": cmd_check_in_fila' in inspect.getsource(v.main)
