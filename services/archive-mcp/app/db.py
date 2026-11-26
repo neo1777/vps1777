@@ -1533,10 +1533,8 @@ _ORDINE_RUOLI = {r: i for i, r in enumerate(("primario", RUOLO_NON_DICHIARATO,
                                               "fotografia", "riscontro", "riservato"))}
 
 
-def get_many(uuids: list[str], db: str = "", *, max_chars: int = 0) -> dict[str, Any]:
-    """Le righe intere di più uuid: {righe, mancanti}. Come get_context guarda in ogni
-    DB (un uuid si chiede perché lo si è già trovato), prima i primari; lo stesso uuid
-    in più DB torna una volta, con gli altri in `anche_in`."""
+def _get_many_voluti(uuids: list[str]) -> list[str]:
+    """Gli uuid chiesti, ripuliti e senza doppioni, nell'ordine; nessuno o troppi è un errore."""
     voluti = list(dict.fromkeys(str(u).strip() for u in (uuids or []) if str(u).strip()))
     if not voluti:
         raise ValueError("get_many vuole almeno un uuid: quelli tornati da search o "
@@ -1544,11 +1542,46 @@ def get_many(uuids: list[str], db: str = "", *, max_chars: int = 0) -> dict[str,
     if len(voluti) > GET_MANY_MASSIMO:
         raise ValueError(f"get_many legge al massimo {GET_MANY_MASSIMO} uuid per chiamata "
                          f"(ne sono arrivati {len(voluti)}): dividili in più chiamate.")
-    _maybe_reload()
+    return voluti
+
+
+def _get_many_ordine(db: str) -> list[str]:
+    """I DB in cui guardare: quello nominato, oppure tutti, prima i primari."""
     if db:
-        ordine = _targets(db)
-    else:
-        ordine = sorted(_DBS, key=lambda n: _ORDINE_RUOLI.get(_ruolo(n), len(_ORDINE_RUOLI)))
+        return _targets(db)
+    return sorted(_DBS, key=lambda n: _ORDINE_RUOLI.get(_ruolo(n), len(_ORDINE_RUOLI)))
+
+
+def _get_many_leggi(conn: sqlite3.Connection, name: str, voluti: list[str],
+                    trovate: dict[str, dict[str, Any]]) -> None:
+    """Le righe di `voluti` che stanno in questo DB: le nuove entrano in `trovate` con le loro
+    azioni, chi parla e lo snapshot; quelle già trovate altrove annotano `anche_in`."""
+    righe = [dict(r) for r in conn.execute(
+        "SELECT uuid, project, ts, content FROM messages WHERE uuid IN (%s)"
+        % ",".join("?" * len(voluti)), voluti)]
+    nuove = []
+    for r in righe:
+        if r["uuid"] in trovate:
+            trovate[r["uuid"]].setdefault("anche_in", []).append(name)
+        else:
+            nuove.append(r)
+    if nuove:
+        _con_azioni(conn, nuove)
+        _chi_parla(conn, nuove)
+        snap = _snapshot(_DBS[name])
+        for r in nuove:
+            r["db"] = name
+            r["snapshot"] = snap
+            trovate[r["uuid"]] = r
+
+
+def get_many(uuids: list[str], db: str = "", *, max_chars: int = 0) -> dict[str, Any]:
+    """Le righe intere di più uuid: {righe, mancanti}. Come get_context guarda in ogni
+    DB (un uuid si chiede perché lo si è già trovato), prima i primari; lo stesso uuid
+    in più DB torna una volta, con gli altri in `anche_in`."""
+    voluti = _get_many_voluti(uuids)
+    _maybe_reload()
+    ordine = _get_many_ordine(db)
     trovate: dict[str, dict[str, Any]] = {}
     for name in ordine:
         try:
@@ -1559,23 +1592,7 @@ def get_many(uuids: list[str], db: str = "", *, max_chars: int = 0) -> dict[str,
             _nota_sporco(name, exc)
             continue
         try:
-            righe = [dict(r) for r in conn.execute(
-                "SELECT uuid, project, ts, content FROM messages WHERE uuid IN (%s)"
-                % ",".join("?" * len(voluti)), voluti)]
-            nuove = []
-            for r in righe:
-                if r["uuid"] in trovate:
-                    trovate[r["uuid"]].setdefault("anche_in", []).append(name)
-                else:
-                    nuove.append(r)
-            if nuove:
-                _con_azioni(conn, nuove)
-                _chi_parla(conn, nuove)
-                snap = _snapshot(_DBS[name])
-                for r in nuove:
-                    r["db"] = name
-                    r["snapshot"] = snap
-                    trovate[r["uuid"]] = r
+            _get_many_leggi(conn, name, voluti, trovate)
         except sqlite3.DatabaseError as exc:
             # DatabaseError e non OperationalError: «file is not a database» e «malformed» sono
             # l'altra sottoclasse, e un file rotto nella cartella rompeva il tool per tutti
