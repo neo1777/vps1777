@@ -16,6 +16,23 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   confronto, zero differenze, ogni ramo percorso; otto mutazioni viste e una equivalente (un contenuto di soli
   spazi non produce righe né col controllo né senza). Sette prove nuove.
 
+### Corretto
+- Il controllo giornaliero (`vps1777 check`) e l'update ora si mettono in fila sullo stesso lucchetto
+  (`var/update.lock`). Il 26/11 il timer del controllo è scattato mentre un update stava scambiando i container:
+  ha visto il gateway giù, ha mandato su Telegram «il servizio non risponde» e ha scritto la caduta in uno stato
+  che l'update, un minuto dopo, ha riscritto col suo. L'allarme falso non ha mai avuto il suo «risponde di
+  nuovo», la data dell'ultimo controllo è rimasta al giorno prima e il pannello ha detto «non raggiungibile» fino
+  al controllo successivo. Ora il controllo aspetta l'update in corso (al più 30 minuti: oltre gira lo stesso, e
+  lo dice) e tiene il lucchetto mentre legge e riscrive lo stato; un update, un rollback o un bootstrap che
+  trovano il lucchetto in mano al controllo lo aspettano fino a due minuti invece di uscire con «riprova dopo».
+  Che a tenerlo sia il controllo lo dice un secondo lucchetto (`var/check.lock`), non il testo del file. Se il
+  controllo dura più di due minuti chi aspettava esce con 75 e il motivo vero («il controllo giornaliero sta
+  ancora girando»), e l'intent del pulsante «Aggiorna» resta: l'update riparte da solo appena può, il click non
+  si perde. Chi trova il lucchetto occupato non cancella più il nome di chi lo tiene.
+  Se i file del lucchetto non si aprono (creati da un'altra utenza) il controllo gira lo stesso e lo dice,
+  invece di morire con le sue sorveglianze; e il giro dell'update rieseguito dalla CLI nuova, che non ha più
+  un intent a rilanciarlo, aspetta il controllo cinque volte più a lungo.
+
 ## [0.98.20] — 2026-11-26
 
 ### Corretto

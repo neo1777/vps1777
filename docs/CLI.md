@@ -53,7 +53,9 @@ giro.
   arma niente). Le notifiche partono alla transizione, una volta, e di nuovo quando la cosa
   rientra.
 - **Scrive lo stato**: `onboarding/update_status.json` (la card admin e la Mini App lo
-  leggono) e `last_check` in `var/state.json`.
+  leggono) e `last_check` in `var/state.json`. Per questo si mette in fila con l'update
+  sul lock `var/update.lock`: se un update è in corso lo aspetta (al più 30 minuti, poi
+  gira lo stesso e lo dice), e mentre gira un update che arriva aspetta lui.
 - **Scrive la salute** (dalla 0.74.0): `onboarding/salute.json`, letto da `/admin/salute`.
   Una riga per voce, con stato (`ok`, `attenzione`, `guasto`, `non_misurato`) e la data
   della misura: raggiungibilità, backup notturno, backup archivio, copertura e disco (l'esito

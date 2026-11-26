@@ -2341,17 +2341,142 @@ def allinea_timer_autoupdate(repo: Path) -> None:
 
 # ─────────────────────────────────────────── lock
 
-def acquire_lock(repo: Path):
-    var = repo / "var"
-    var.mkdir(mode=0o700, exist_ok=True)
-    fh = open(var / "update.lock", "w")
+# Il lucchetto di chi cambia `var/state.json` e lo stack: update, rollback, bootstrap, e dal
+# 26/11/2026 anche il `check` giornaliero. Quel giorno il check è partito mentre un update
+# stava scambiando i container: ha visto il gateway giù, ha mandato «il servizio non
+# risponde» su Telegram e ha scritto `irraggiungibile_da` in uno stato che l'update, un
+# minuto dopo, ha riscritto col suo (letto prima): l'allarme falso non ha mai avuto il suo
+# «risponde di nuovo», `last_check` è rimasto al giorno prima, e il pannello ha detto
+# «non raggiungibile» fino al check successivo. Due processi che leggono, cambiano e
+# riscrivono lo stesso file devono mettersi in fila.
+#
+# CHI lo tiene non si legge dal testo del file (un nome scritto resta anche dopo, e fra il
+# flock e la scrittura c'è sempre un istante col nome di prima): lo dice un secondo flock,
+# `var/check.lock`, che il check prende DOPO `update.lock` e lascia dopo di lui. Lucchetto
+# occupato e `check.lock` tenuto = è un check, e lo si aspetta; `check.lock` libero = è un
+# update, e si esce come sempre. L'istante in cui il check ha il primo e non ancora il
+# secondo lo copre LOCK_SGUARDI_S: prima di dire «è un update» si riguarda per quel tanto.
+LOCK_ATTESA_CHECK_S = 120       # quanto un update aspetta un check
+LOCK_SGUARDI_S = 2.0            # quanto si riguarda prima di credere che NON sia un check
+CHECK_ATTESA_UPDATE_S = 1800    # quanto un check aspetta un update (che dura minuti)
+LOCK_GIRI_DOPO_REEXEC = 5       # il giro rieseguito dalla CLI nuova aspetta il check 5 volte tanto
+
+
+class CheckInCorso(Exception):
+    """Il lucchetto è in mano al check giornaliero da più di LOCK_ATTESA_CHECK_S: non c'è
+    nessun update in corso, e chi aspettava non deve buttare via ciò che aveva da fare."""
+
+
+def _prendi_subito(fh) -> bool:
     try:
         fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
     except BlockingIOError:
-        return None
-    fh.write(f"{os.getpid()} {now_iso()}\n")
+        return False
+
+
+def _un_check_tiene_il_lucchetto(var: Path) -> bool:
+    """`check.lock` è tenuto da un altro? (Lo si prova e lo si lascia subito.) Un file che
+    non si lascia aprire (creato da un'altra utenza) non è un check: si esce come sempre."""
+    try:
+        with open(var / "check.lock", "a") as sonda:
+            return not _prendi_subito(sonda)
+    except OSError:
+        return False
+
+
+def acquire_lock(repo: Path):
+    """Il lucchetto, o None se lo tiene un altro update, rollback o bootstrap. Se lo tiene il
+    check lo si aspetta fino a LOCK_ATTESA_CHECK_S; oltre, CheckInCorso (non è un «update già
+    in corso», e chi chiama non deve trattarlo come tale)."""
+    var = repo / "var"
+    var.mkdir(mode=0o700, exist_ok=True)
+    # "a+" e non "w": aprire con "w" cancellerebbe il nome di chi lo tiene adesso
+    fh = open(var / "update.lock", "a+", encoding="utf-8")
+    inizio = time.monotonic()
+    visto_un_check = False
+    while not _prendi_subito(fh):
+        ora = time.monotonic()
+        if _un_check_tiene_il_lucchetto(var):
+            visto_un_check = True
+            if ora - inizio >= LOCK_ATTESA_CHECK_S:
+                fh.close()
+                raise CheckInCorso()
+        elif visto_un_check or ora - inizio >= LOCK_SGUARDI_S:
+            # il check ha finito e se l'è preso un update, oppure non è mai stato un check
+            fh.close()
+            return None
+        time.sleep(0.2)
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"update {os.getpid()} {now_iso()}\n")
     fh.flush()
     return fh
+
+
+def _lock_o_riprova_dopo(repo: Path, occupato: str):
+    """Il lucchetto per update, rollback e bootstrap; se non c'è si esce 75 («riprova dopo»)
+    col motivo VERO: un altro lavoro, oppure il check giornaliero che non ha ancora finito."""
+    try:
+        lock = acquire_lock(repo)
+    except CheckInCorso:
+        _muori_per_il_check()
+    if lock is None:
+        die(occupato, ESITO_LOCK_OCCUPATO)
+    return lock
+
+
+def _muori_per_il_check() -> None:
+    die(f"il controllo giornaliero (vps1777 check) sta ancora girando dopo "
+        f"{LOCK_ATTESA_CHECK_S} secondi: non c'è nessun update in corso, riprova fra poco",
+        ESITO_LOCK_OCCUPATO)
+
+
+class _LockDelCheck:
+    """I due flock del check, tenuti insieme: `update.lock` (la fila) e `check.lock` (chi sono)."""
+
+    def __init__(self, fila, chi) -> None:
+        self.fila, self.chi = fila, chi
+
+    def close(self) -> None:
+        # prima la fila, poi il nome: finché la fila è occupata, chi guarda vede ancora un check
+        self.fila.close()
+        self.chi.close()
+
+
+def _lock_del_check(repo: Path):
+    """Il lucchetto per il check: aspetta l'update in corso (fino a CHECK_ATTESA_UPDATE_S),
+    poi lo tiene finché gira. Se l'attesa scade torna None e il check gira lo stesso, senza
+    lucchetto: un update piantato non deve spegnere le sorveglianze proprio quel giorno."""
+    var = repo / "var"
+    var.mkdir(mode=0o700, exist_ok=True)
+    try:
+        fila = open(var / "update.lock", "a+", encoding="utf-8")
+        chi = open(var / "check.lock", "a")
+    except OSError as exc:
+        # un update lanciato da un'altra utenza (root, da una shell) può aver creato i file:
+        # le sorveglianze non devono morire su un permesso
+        warn(f"il lucchetto non si apre ({exc}): il check gira lo stesso, senza mettersi in fila")
+        return None
+    if not _prendi_subito(fila):
+        log("aspetto: un update è in corso (il check parte quando ha finito)")
+        if not _flock_entro(fila, time.monotonic() + CHECK_ATTESA_UPDATE_S, 5.0):
+            fila.close()
+            chi.close()
+            warn(f"l'update tiene il lucchetto da più di {CHECK_ATTESA_UPDATE_S // 60} minuti: "
+                 "il check gira lo stesso, e ciò che vede può essere un update a metà")
+            return None
+    # le sonde lo tengono un istante; senza il nome un update ci scambierebbe per un update
+    if not _flock_entro(chi, time.monotonic() + 10.0, 0.1):
+        fila.close()
+        chi.close()
+        warn("check.lock non si lascia prendere: il check gira lo stesso, senza mettersi in fila")
+        return None
+    fila.seek(0)
+    fila.truncate()
+    fila.write(f"check {os.getpid()} {now_iso()}\n")
+    fila.flush()
+    return _LockDelCheck(fila, chi)
 
 
 # ─────────────────────────────────────────── lucchetto dell'archivio
@@ -3184,6 +3309,17 @@ def scrivi_salute(repo: Path, st: dict) -> None:
         {"checked_at": ora, "righe": righe}, indent=2, ensure_ascii=False) + "\n")
 
 
+def cmd_check_in_fila(repo: Path, args) -> int:
+    """`vps1777 check` come lo lancia la CLI: in fila con l'update. Lo aspetta se è in corso,
+    e tiene il lucchetto mentre `cmd_check` legge e riscrive lo stato."""
+    lock = _lock_del_check(repo)
+    try:
+        return cmd_check(repo, args)
+    finally:
+        if lock is not None:
+            lock.close()
+
+
 def cmd_check(repo: Path, args) -> int:
     st = state_load(repo)
     cur = current_version(repo)
@@ -3998,7 +4134,21 @@ def cmd_update(repo: Path, args) -> int:
 
 def _update_lock(repo: Path, args):
     """0 — il lock. Occupato: c'è già chi lavora, e questo giro esce 75 («riprova dopo»)."""
-    lock = acquire_lock(repo)
+    # Il giro rieseguito dalla CLI nuova (--skip-self-update) non ha più un intent che lo
+    # rilanci: se trova un check lento lo aspetta più a lungo, invece di lasciare la CLI
+    # nuova con lo stack vecchio e l'aggiornamento chiesto a metà.
+    giri = LOCK_GIRI_DOPO_REEXEC if getattr(args, "skip_self_update", False) else 1
+    lock = None
+    for giro in range(giri):
+        try:
+            lock = acquire_lock(repo)
+            break
+        except CheckInCorso:
+            if giro + 1 < giri:
+                continue
+            # NON è un update in corso: l'intent del pulsante RESTA, e la path unit rilancia
+            # questo giro appena esce. Cancellarlo qui perderebbe il click in silenzio.
+            _muori_per_il_check()
     if lock is None:
         if args.from_intent:
             Path(args.from_intent).unlink(missing_ok=True)
@@ -4619,9 +4769,7 @@ def _update_concludi(repo: Path, st: dict, cur: str, target: str, snap: Path, st
 
 
 def cmd_rollback(repo: Path, args) -> int:
-    lock = acquire_lock(repo)
-    if lock is None:
-        die("update/rollback già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
+    _lock = _lock_o_riprova_dopo(repo, "update/rollback già in corso (lock attivo)")   # tenuto finché il comando gira
     st = state_load(repo)
     cur = current_version(repo)
     prev = st.get("previous")
@@ -4872,9 +5020,7 @@ def _bootstrap_baseline_migrazioni(repo: Path, target: str) -> None:
 
 def cmd_bootstrap(repo: Path, args) -> int:
     """Cutover one-shot: installazione legacy (build locale) → modello pull."""
-    lock = acquire_lock(repo)
-    if lock is None:
-        die("update/bootstrap già in corso (lock attivo)", ESITO_LOCK_OCCUPATO)
+    _lock = _lock_o_riprova_dopo(repo, "update/bootstrap già in corso (lock attivo)")   # tenuto finché il comando gira
     st = state_load(repo)
     if st.get("current"):
         ok(f"già a regime (v{st['current']}) — bootstrap non necessario")
@@ -6551,7 +6697,7 @@ def main() -> int:
     # in `arma_redazione`: a quel punto non ne abbiamo ancora letto nessuno.
     arma_redazione(repo)
 
-    handlers = {"check": cmd_check, "update": cmd_update, "rollback": cmd_rollback,
+    handlers = {"check": cmd_check_in_fila, "update": cmd_update, "rollback": cmd_rollback,
                 "status": cmd_status, "version": cmd_version,
                 "migrate": cmd_migrate, "bootstrap": cmd_bootstrap,
                 "archive-ingest": cmd_archive_ingest,
