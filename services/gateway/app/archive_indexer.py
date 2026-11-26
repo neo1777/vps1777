@@ -62,7 +62,7 @@ import urllib.request
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import IO, Iterable, Iterator, NamedTuple, Union
+from typing import IO, Any, Iterable, Iterator, NamedTuple, Union
 
 Row = tuple[str, str, str, str]  # (uuid, project, ts, content) — forma breve, ancora accettata
 RowFull = tuple[str, str, str, str, str, str, str, str, str]
@@ -2156,7 +2156,7 @@ def _iter_memorie_dei_progetti(pm: object) -> Iterator[RowFull]:
             yield from _chunk_rows_full(body, label, "", label, sender="memory")
 
 
-def _iter_file_di_memoria(files: object) -> Iterator[RowFull]:
+def _iter_file_di_memoria(files: Any) -> Iterator[RowFull]:
     """I file di memoria di un account (`memory_files`): uno per area, col suo percorso."""
     # `memory_files` — dal 29/08/2026: i FILE di memoria di claude.ai
     # (`/areas/<progetto>.md`, frontmatter name/description + corpo), uno per
