@@ -3097,6 +3097,48 @@ def _iter_immagine_bytes(raw: bytes, name: str, label: str, ts: str, *,
     yield from _chunk_rows(f"[{name}] [ocr]\n{testo}", label, ts, name)
 
 
+def _leggi_membro_annidato(z: zipfile.ZipFile, m: str, visibile: str,
+                           budget: _Budget) -> tuple[bytes | None, str]:
+    """I byte di un membro dell'annidato, o il motivo della sua lapide. Il tetto GLOBALE
+    (budget finito) non si assorbe: quell'errore sale."""
+    try:
+        with z.open(m) as f:
+            return _read_capped(f, visibile, budget), ""
+    except ValueError:
+        if budget.left < 0:
+            raise               # il tetto dell'ARCHIVIO intero non si assorbe
+        return None, "membro-oltre-tetto"
+    except Exception:
+        return None, "membro-illeggibile"
+
+
+def _iter_membro_annidato(raw_m: bytes, visibile: str, ext: str, label: str, ts: str,
+                          fonte: str) -> Iterator:
+    """Un membro dell'annidato nella trafila del suo tipo: immagine, pdf, json/jsonl,
+    documento, testo riconosciuto dallo sniff; un archivio dentro l'archivio è una lapide."""
+    if ext in _ZIP_ANNIDATI_EXTS:
+        yield _Skip(fonte, "zip-annidato-oltre-profondita", visibile, ts)
+    elif ext in _IMG_EXTS:
+        yield from _iter_immagine_bytes(raw_m, visibile, label, ts, fonte=fonte)
+    elif ext == ".pdf":
+        yield from _iter_pdf_bytes(raw_m, visibile, label, ts, fonte=fonte)
+    elif ext in (".jsonl", ".json"):
+        text = raw_m.decode("utf-8", errors="replace")
+        if _sniff_jsonl_kind(text[:20000]) == "cc":
+            yield from _iter_cc_text(text, visibile)
+        else:
+            yield from _chunk_rows(text, label, ts, visibile, chunk_chars=4000)
+    elif ext in _DOC_ZIP_EXTS:
+        yield from _chunk_rows(f"[{visibile}]\n" + raw_m.decode("utf-8", errors="replace"),
+                               label, ts, visibile)
+    elif _sniff_e_testo(raw_m[:_SNIFF_BYTES]):
+        yield from _chunk_rows(f"[{visibile}] [testo-sniffato]\n"
+                               + raw_m.decode("utf-8", errors="replace"),
+                               label, ts, visibile)
+    else:
+        yield _Skip(fonte, "non-testo", visibile, ts)
+
+
 def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
                        budget: _Budget, *, fonte: str = "bundle-workfiles") -> Iterator:
     """UN livello di archivio dentro i workfiles (zip e .skill): i membri passano
@@ -3114,39 +3156,11 @@ def _iter_zip_annidato(raw: bytes, name: str, label: str, ts: str,
         return
     for m in membri:
         visibile = f"{name}!{m}"
-        ext = Path(m).suffix.lower()
-        try:
-            with z.open(m) as f:
-                raw_m = _read_capped(f, visibile, budget)
-        except ValueError:
-            if budget.left < 0:
-                raise               # il tetto dell'ARCHIVIO intero non si assorbe
-            yield _Skip(fonte, "membro-oltre-tetto", visibile, ts)
+        raw_m, motivo = _leggi_membro_annidato(z, m, visibile, budget)
+        if raw_m is None:
+            yield _Skip(fonte, motivo, visibile, ts)
             continue
-        except Exception:
-            yield _Skip(fonte, "membro-illeggibile", visibile, ts)
-            continue
-        if ext in _ZIP_ANNIDATI_EXTS:
-            yield _Skip(fonte, "zip-annidato-oltre-profondita", visibile, ts)
-        elif ext in _IMG_EXTS:
-            yield from _iter_immagine_bytes(raw_m, visibile, label, ts, fonte=fonte)
-        elif ext == ".pdf":
-            yield from _iter_pdf_bytes(raw_m, visibile, label, ts, fonte=fonte)
-        elif ext in (".jsonl", ".json"):
-            text = raw_m.decode("utf-8", errors="replace")
-            if _sniff_jsonl_kind(text[:20000]) == "cc":
-                yield from _iter_cc_text(text, visibile)
-            else:
-                yield from _chunk_rows(text, label, ts, visibile, chunk_chars=4000)
-        elif ext in _DOC_ZIP_EXTS:
-            yield from _chunk_rows(f"[{visibile}]\n" + raw_m.decode("utf-8", errors="replace"),
-                                   label, ts, visibile)
-        elif _sniff_e_testo(raw_m[:_SNIFF_BYTES]):
-            yield from _chunk_rows(f"[{visibile}] [testo-sniffato]\n"
-                                   + raw_m.decode("utf-8", errors="replace"),
-                                   label, ts, visibile)
-        else:
-            yield _Skip(fonte, "non-testo", visibile, ts)
+        yield from _iter_membro_annidato(raw_m, visibile, Path(m).suffix.lower(), label, ts, fonte)
 
 
 # I membri top-level del bundle che questo indexer SA leggere. È la mappa del

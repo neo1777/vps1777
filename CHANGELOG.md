@@ -4,6 +4,13 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Cambiato
+- `_iter_zip_annidato` (l'archivio dentro i workfiles, aperto per un livello) è spezzata in tre: la lettura di un
+  membro col suo tetto (`_leggi_membro_annidato`), lo smistamento per tipo (`_iter_membro_annidato`) e il giro sui
+  membri. Complessità da 14 a sotto 10 (QUA-04, 33 funzioni restano nel censimento). Comportamento identico: 1.205
+  archivi a confronto fra il codice di prima e quello nuovo, zero differenze, con ogni ramo percorso e nove
+  mutazioni tutte viste. Sedici prove nuove, una per strada.
+
 ## [0.98.20] — 2026-11-26
 
 ### Corretto
