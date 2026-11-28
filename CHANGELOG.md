@@ -8,7 +8,7 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 - `cmd_archive_migra` (`vps1777 archive-migra`) è spezzata in tre: il giro sui DB, la migrazione di un DB
   (`_migra_un_db`, col lucchetto dell'archivio e nel servizio `ingest`) e il referto (`_migra_dici`). Complessità
   da 14 a sotto 10 (QUA-04). Comportamento identico: 4.000 scenari a confronto su codice d'uscita, messaggi,
-  comandi lanciati e lucchetto, zero differenze, ogni ramo percorso, otto mutazioni viste. Dodici prove nuove
+  comandi lanciati e lucchetto, zero differenze, ogni ramo percorso, otto mutazioni viste. Nove prove nuove
   di comportamento; due prove che leggevano il sorgente ora guardano la funzione che tiene il lucchetto.
 
 ## [0.98.25] — 2026-11-28
