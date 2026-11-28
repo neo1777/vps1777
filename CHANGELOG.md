@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.24] — 2026-11-28
+
 ### Corretto
 - Quattro buchi nei presìdi, visti da Arianna rileggendo un articolo sul ledger. (1) Una voce `opt-in` o
   `removed` di `features.yaml` ora deve dire `al_posto_suo`: che cosa copre quel bisogno per chi non la attiva.
