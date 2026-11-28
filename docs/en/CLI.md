@@ -121,9 +121,11 @@ If the previous update died after step 10, the next `vps1777 update` closes that
 (0 = it had completed, 1 = rolled back to the previous version, 2 = manual intervention
 needed) and installs nothing else in that run.
 
-If another update (or a rollback) is already running it exits with **75** ("try again
-later"), which the units count as success: it isn't a fault and doesn't send the failure
-alert. It exits **1** if the update fails and the auto-rollback brings back the previous
+If another update, a rollback or a bootstrap is already running it exits with **75** ("try
+again later"), which the units count as success: it isn't a fault and doesn't send the failure
+alert. It also exits 75 if the daily check (`vps1777 check`) has been holding the lock for
+more than two minutes: the message says so («il controllo giornaliero sta ancora girando»),
+and the click on the «Aggiorna» button stays pending and starts again by itself. It exits **1** if the update fails and the auto-rollback brings back the previous
 version (with a Telegram message), **2** if not even the rollback comes back healthy: that
 needs manual intervention.
 
@@ -140,7 +142,8 @@ digests of the previous version). With `--with-data` it also restores the volume
 the pre-update snapshot — that is the invasive option. **It always asks for
 confirmation**, with or without `--with-data`: only `--yes` skips it.
 
-It exits **75** if an update or another rollback is running (the same lock as `update`),
+It exits **75** if an update, a bootstrap or another rollback is running (the same lock as
+`update`), or if the daily check has been holding that lock for more than two minutes,
 and **2** if the rollback is applied but the health gate doesn't turn green (alert on
 Telegram).
 

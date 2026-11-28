@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- La unit del controllo giornaliero (`vps1777-check-update.service`) aveva un tetto di 120 secondi. Dalla
+  0.98.21 il controllo aspetta un update in corso fino a 30 minuti: con quel tetto systemd lo avrebbe ucciso
+  dopo due minuti di attesa, la unit sarebbe risultata fallita e sarebbe partito l'avviso, proprio nel caso che
+  la fila fra controllo e update cura. Ora il tetto è 40 minuti, e una prova lo lega all'attesa scritta nel
+  codice. Visto rileggendo i documenti contro il codice, non in esercizio (i controlli del 27 e del 28/11 sono
+  girati regolari).
+- CLI.md, TROUBLESHOOTING.md e UPDATE.md (it e en) dicono tutti i casi in cui un update esce con 75: anche il
+  bootstrap in corso, e il controllo giornaliero che tiene il lucchetto oltre l'attesa (dieci minuti, non due,
+  per il giro rieseguito dalla CLI appena aggiornata).
+
 ## [0.98.23] — 2026-11-26
 
 ### Corretto
