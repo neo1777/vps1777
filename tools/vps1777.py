@@ -5609,6 +5609,51 @@ def _db_archivio(repo: Path, cc: list[str], solo: str | None) -> list[str]:
     return trovati
 
 
+def _migra_dici(nome: str, esito: dict) -> None:
+    """Il referto di un DB migrato: l'indice per etichetta, e quante righe cambiano mittente."""
+    if esito.get("indice_project"):
+        verbo_i = "creerei" if not esito.get("scritto") else "creato"
+        log(f"  {nome}: indice per etichetta {verbo_i} (idx_project)")
+    if not (esito.get("strumenti") or esito.get("sistema")):
+        if not esito.get("indice_project"):
+            log(f"  {nome}: niente da migrare")
+        return
+    verbo = "diventerebbero" if not esito.get("scritto") else "diventate"
+    prima = esito.get("speaker_prima", {}).get("human", 0)
+    dopo = esito.get("speaker_dopo", {}).get("human", 0)
+    log(f"  {nome}: {esito.get('strumenti', 0)} righe {verbo} 'tool', "
+        f"{esito.get('sistema', 0)} 'system' · human {prima} → {dopo}")
+
+
+def _migra_un_db(repo: Path, cc: list[str], db_path: str, scrivi: bool) -> int:
+    """Un DB dell'archivio passato dall'indexer in `--migra`: 0 se è andata (o se l'indexer
+    lo salta dicendo perché), 1 se la migrazione è fallita o il suo referto non si legge."""
+    nome = Path(db_path).stem
+    cmd = [*cc, *INGEST_RUN, "indexer",
+           db_path, "--migra"]
+    if scrivi:
+        cmd.append("--scrivi")
+    # anche a secco: il referto si misura su una transazione vera, e il lavoro gira
+    # nel servizio `ingest` col suo tetto, che non si somma a quello dell'indice
+    with lucchetto_archivio(repo, "archive-migra"):
+        r = run(cmd, capture=True, check=False, timeout=1800)
+    if r.returncode == 2:
+        # schema precedente al voice-tagging, o un file che non è un archivio: lo
+        # dice l'indexer, e non è un fallimento di questo comando.
+        log(f"  {nome}: saltato — {(r.stderr or '').strip()[:160]}")
+        return 0
+    if r.returncode != 0:
+        warn(f"«{nome}»: migrazione fallita — {(r.stderr or r.stdout or '').strip()[:200]}")
+        return 1
+    try:
+        esito = json.loads((r.stdout or "").strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        warn(f"«{nome}»: output non interpretabile — {(r.stdout or '')[:160]}")
+        return 1
+    _migra_dici(nome, esito)
+    return 0
+
+
 def cmd_archive_migra(repo: Path, args) -> int:
     """Applica ai DB già caricati le migrazioni delle colonne derivate, senza ingest,
     e mostra il delta di `speaker`. A SECCO di default, come `archive-retag`.
@@ -5639,42 +5684,7 @@ def cmd_archive_migra(repo: Path, args) -> int:
         return _archive_migra_telegram(repo, cc, trovati, args.scrivi)
     uscita = 0
     for db_path in trovati:
-        nome = Path(db_path).stem
-        cmd = [*cc, *INGEST_RUN, "indexer",
-               db_path, "--migra"]
-        if args.scrivi:
-            cmd.append("--scrivi")
-        # anche a secco: il referto si misura su una transazione vera, e il lavoro gira
-        # nel servizio `ingest` col suo tetto, che non si somma a quello dell'indice
-        with lucchetto_archivio(repo, "archive-migra"):
-            r = run(cmd, capture=True, check=False, timeout=1800)
-        if r.returncode == 2:
-            # schema precedente al voice-tagging, o un file che non è un archivio: lo
-            # dice l'indexer, e non è un fallimento di questo comando.
-            log(f"  {nome}: saltato — {(r.stderr or '').strip()[:160]}")
-            continue
-        if r.returncode != 0:
-            warn(f"«{nome}»: migrazione fallita — {(r.stderr or r.stdout or '').strip()[:200]}")
-            uscita = 1
-            continue
-        try:
-            esito = json.loads((r.stdout or "").strip().splitlines()[-1])
-        except (json.JSONDecodeError, IndexError):
-            warn(f"«{nome}»: output non interpretabile — {(r.stdout or '')[:160]}")
-            uscita = 1
-            continue
-        if esito.get("indice_project"):
-            verbo_i = "creerei" if not esito.get("scritto") else "creato"
-            log(f"  {nome}: indice per etichetta {verbo_i} (idx_project)")
-        if not (esito.get("strumenti") or esito.get("sistema")):
-            if not esito.get("indice_project"):
-                log(f"  {nome}: niente da migrare")
-            continue
-        verbo = "diventerebbero" if not esito.get("scritto") else "diventate"
-        prima = esito.get("speaker_prima", {}).get("human", 0)
-        dopo = esito.get("speaker_dopo", {}).get("human", 0)
-        log(f"  {nome}: {esito.get('strumenti', 0)} righe {verbo} 'tool', "
-            f"{esito.get('sistema', 0)} 'system' · human {prima} → {dopo}")
+        uscita = max(uscita, _migra_un_db(repo, cc, db_path, args.scrivi))
     if not args.scrivi:
         log("niente è stato scritto. Ripeti con --scrivi per applicare.")
     return uscita

@@ -210,7 +210,7 @@ def test_il_gateway_ha_un_tetto_e_la_coda_accesa():
 
 def test_i_comandi_che_riscrivono_un_db_non_girano_nel_gateway():
     src = (RADICE / "tools/vps1777.py").read_text(encoding="utf-8")
-    for nome in ("def cmd_archive_migra(", "def _archive_migra_telegram(", "def cmd_archive_retag("):
+    for nome in ("def _migra_un_db(", "def _archive_migra_telegram(", "def cmd_archive_retag("):
         i = src.index(nome)
         corpo = src[i:src.index("\ndef ", i + 10)]
         assert not re.search(r'"exec", "-T", "gateway", "python"', corpo), nome
