@@ -561,13 +561,14 @@ def _follow_up_ben_fatto(e: dict, eid: str, hard_fail: list[str]) -> dict:
     if man is not None and not isinstance(man, dict):
         hard_fail.append(f"[schema] {eid}: follow_up.manuale deve essere una mappa (cosa, "
                          f"rivedi_dopo), non {type(man).__name__}")
-        fu["manuale"] = {}
+        fu.pop("manuale")              # un rosso solo: non anche «manuale senza rivedi_dopo»
     for dove, mappa in (("follow_up", fu), ("follow_up.manuale", fu.get("manuale") or {})):
         data = mappa.get("rivedi_dopo")
         if data and not _data_iso(data):
+            # la data resta scritta (così non si aggiunge il rosso «senza data»): è la
+            # sorveglianza a saltare ciò che non sa leggere
             hard_fail.append(f"[schema] {eid}: {dove}.rivedi_dopo «{data}» non è una data "
                              "AAAA-MM-GG")
-            mappa.pop("rivedi_dopo")
     return fu
 
 
@@ -637,12 +638,12 @@ def _sorveglianza(entries: list[dict], repo: Path, oggi: datetime.date,
     for e in entries:
         fu = e.get("follow_up") or {}
         man = fu.get("manuale")
-        if man and man.get("rivedi_dopo"):
+        if man and _data_iso(man.get("rivedi_dopo")):
             due = datetime.date.fromisoformat(str(man["rivedi_dopo"]))
             if oggi > due:
                 surveil.append(f"[RIVEDI] {e['id']}: rinvio-a-giudizio scaduto il {due} "
                                f"(«{man.get('cosa', '')}») — rimettilo in discussione")
-        if fu.get("rivedi_dopo"):
+        if _data_iso(fu.get("rivedi_dopo")):
             due = datetime.date.fromisoformat(str(fu["rivedi_dopo"]))
             if oggi > due:
                 surveil.append(f"[RIVEDI] {e['id']}: la condizione non si è avverata e la data "

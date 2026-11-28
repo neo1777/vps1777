@@ -90,3 +90,14 @@ def test_un_manuale_scritto_come_testo_e_una_data_scritta_male_non_fanno_cadere(
     r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      verify: {path_exists: non/esiste}\n      rivedi_dopo: "31/12/2026"')
     assert r.returncode != 0 and "Traceback" not in r.stdout + r.stderr, r.stderr
     assert "follow_up.rivedi_dopo «31/12/2026» non è una data" in r.stdout, r.stdout
+
+
+def test_un_difetto_di_forma_e_un_rosso_solo_non_due(tmp_path):
+    """Un `manuale` scritto come testo o una data scritta male non aggiungono anche il rosso
+    «senza rivedi_dopo»: chi legge crederebbe a due difetti (nota di Sagoma)."""
+    for voce in ('    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      manuale: "poi"',
+                 '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      manuale:\n'
+                 '        cosa: "x"\n        rivedi_dopo: "fra un mese"'):
+        r = _verifica(tmp_path, voce)
+        assert r.returncode != 0 and "Traceback" not in r.stdout + r.stderr, r.stderr
+        assert r.stdout.count("prova.voce:") == 1, r.stdout

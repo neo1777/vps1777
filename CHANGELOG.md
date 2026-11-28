@@ -12,8 +12,9 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   `rivedi_dopo` è rosso: dava verde e non tornava più come `[RIVEDI]`. (3) Un `follow_up` scritto come testo, o
   una data scritta male, sono un rosso che dice che cosa correggere: prima il verificatore cadeva con un
   errore suo. (4) `check_findings.py` controlla anche la scomposizione per origine scritta in prosa in
-  SECURITY.md (quanti rilievi dalla campagna originaria, quanti per gruppo, nessuno taciuto): guardava solo
-  totale e severità, e «43 dalla campagna» cambiato in «44» passava. Dodici prove nuove.
+  SECURITY.md (quanti rilievi dalla campagna originaria, quanti per ogni gruppo, scritto come intervallo o come
+  elenco, in cifre o in lettere, e nessuno taciuto): guardava solo totale e severità, e «43 dalla campagna»
+  cambiato in «44» passava. Riletti da Sagoma. Quindici prove nuove.
 
 ### Corretto
 - La unit del controllo giornaliero (`vps1777-check-update.service`) aveva un tetto di 120 secondi. Dalla
