@@ -510,16 +510,65 @@ def _schema_voce(e: dict, ids: set, hard_fail: list[str]) -> None:
     # curatrice F1-Gbis): un rinvio che aspetta SOLO una condizione non scatta mai se
     # la condizione non arriva (Graphiti, «dopo il test» cinque volte, e il test abolito).
     # Una condizione verificabile porta anche la sua data di riserva.
-    fu_ = e.get("follow_up") or {}
+    fu_ = _follow_up_ben_fatto(e, eid, hard_fail)
     if (e.get("status") == "deferred" and isinstance(fu_.get("verify"), dict)
             and not fu_.get("rivedi_dopo")
             and not (fu_.get("manuale") or {}).get("rivedi_dopo")):
         hard_fail.append(f"[cattura] {eid}: follow_up.verify senza data — aggiungi "
                          "follow_up.rivedi_dopo: la condizione può non avverarsi mai "
                          "(condizione O data, non condizione E data)")
+    # UN RINVIO A GIUDIZIO HA LA SUA DATA (28/11/2026, rilievo di Arianna): senza
+    # `manuale.rivedi_dopo` la voce dava verde e non tornava più come [RIVEDI]. La
+    # sorveglianza può rimettere davanti solo ciò che ha una data.
+    if isinstance(fu_.get("manuale"), dict) and not fu_["manuale"].get("rivedi_dopo"):
+        hard_fail.append(f"[cattura] {eid}: follow_up.manuale senza rivedi_dopo — un rinvio a "
+                         "giudizio senza data non torna più davanti a nessuno")
     if e.get("status") in ("deferred", "removed", "opt-in") and not e.get("decisione"):
         hard_fail.append(f"[cattura] {eid}: '{e['status']}' senza 'decisione' — invisibile "
                          "allo storico (perché/quando fu deciso?)")
+    # CHE COSA C'È AL POSTO SUO (28/11/2026, rilievo di Arianna): una voce `opt-in` o
+    # `removed` non è accesa per chi installa. Watchtower fu declassato a «opt-in, non
+    # supportato» senza dire che cosa aggiornava la macchina al posto suo, e per un mese
+    # niente la aggiornò. La `decisione` dice perché; `al_posto_suo` dice che cosa copre
+    # quel bisogno per chi non la attiva, oppure «niente: è un di più» detto in chiaro.
+    if e.get("status") in ("removed", "opt-in") and not str(e.get("al_posto_suo") or "").strip():
+        hard_fail.append(f"[cattura] {eid}: '{e['status']}' senza 'al_posto_suo' — chi non la "
+                         "attiva che cosa ha? (scrivi che cosa la sostituisce, o «niente: …»)")
+
+
+def _data_iso(valore: object) -> bool:
+    try:
+        datetime.date.fromisoformat(str(valore))
+        return True
+    except ValueError:
+        return False
+
+
+def _follow_up_ben_fatto(e: dict, eid: str, hard_fail: list[str]) -> dict:
+    """Il `follow_up` della voce se ha la forma giusta, altrimenti {} e il rosso che dice che
+    cosa correggere. Un testo al posto della mappa faceva cadere il verificatore con un
+    AttributeError invece di un messaggio (28/11/2026, rilievo di Arianna); una data scritta
+    male lo faceva cadere nella sorveglianza."""
+    fu = e.get("follow_up")
+    if fu is None:
+        return {}
+    if not isinstance(fu, dict):
+        hard_fail.append(f"[schema] {eid}: follow_up deve essere una mappa (verify, rivedi_dopo, "
+                         f"manuale), non {type(fu).__name__}: «{str(fu)[:60]}»")
+        e["follow_up"] = {}
+        return {}
+    man = fu.get("manuale")
+    if man is not None and not isinstance(man, dict):
+        hard_fail.append(f"[schema] {eid}: follow_up.manuale deve essere una mappa (cosa, "
+                         f"rivedi_dopo), non {type(man).__name__}")
+        fu["manuale"] = {}
+    for dove, mappa in (("follow_up", fu), ("follow_up.manuale", fu.get("manuale") or {})):
+        data = mappa.get("rivedi_dopo")
+        if data and not _data_iso(data):
+            hard_fail.append(f"[schema] {eid}: {dove}.rivedi_dopo «{data}» non è una data "
+                             "AAAA-MM-GG")
+            mappa.pop("rivedi_dopo")
+    return fu
 
 
 def _dichiarato_reale(entries: list[dict], repo: Path, hard_fail: list[str],

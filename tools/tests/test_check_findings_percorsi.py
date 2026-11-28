@@ -228,3 +228,44 @@ def test_una_voce_senza_id_si_dice_invece_di_crollare(cf):
     rc, out = _esegui(cf, reg)
     assert rc == 1
     assert f"una voce senza `id` (titolo: «{titolo}»)" in out
+
+
+# ── la scomposizione per origine scritta in prosa (28/11/2026, rilievo di Arianna) ─────────────
+
+def test_il_numero_della_campagna_originaria_sbagliato_fa_rosso(cf):
+    """La prova rifatta da Arianna il 27/11 su una copia: «43 dalla campagna» → «44», e il
+    guardiano usciva 0 mentre SECURITY.md promette che fallisce."""
+    assert re.search(r"\b43 dalla\s+campagna originaria", _SECURITY)
+    rc, out = _esegui(cf, security=re.sub(r"\b43 dalla(\s+campagna originaria)", r"44 dalla\1",
+                                          _SECURITY, count=1))
+    assert rc != 0
+    assert "dichiara 44 rilievi «dalla campagna originaria», il registro ne conta 43" in out
+
+
+def test_un_gruppo_col_numero_sbagliato_fa_rosso(cf):
+    assert "7 (`H44`-`H50`)" in _SECURITY
+    rc, out = _esegui(cf, security=_SECURITY.replace("7 (`H44`-`H50`)", "8 (`H44`-`H50`)", 1))
+    assert rc != 0 and "dichiara 8 rilievi in H44-H50, il registro ne conta 7" in out
+
+
+def test_un_rilievo_nuovo_che_la_prosa_non_nomina_fa_rosso(cf):
+    ultimo = _REGISTRO["findings"][-1]["id"]
+    senza = re.sub(r"`" + ultimo + r"`", "`una voce`", _SECURITY)
+    rc, out = _esegui(cf, security=senza)
+    assert rc != 0 and f"la scomposizione per origine non nomina {ultimo}" in out
+
+
+def test_un_rilievo_nominato_che_non_esiste_fa_rosso(cf):
+    rc, out = _esegui(cf, security=_SECURITY.replace("7 (`H44`-`H50`)", "7 (`H44`-`H50`) e `H999`", 1))
+    assert rc != 0 and "nomina H999, che nel registro non ci sono" in out
+
+
+def test_senza_la_frase_della_campagna_il_controllo_lo_dice(cf):
+    rc, out = _esegui(cf, security=re.sub(r"dalla(\s+)campagna originaria", r"dal\1primo giro",
+                                          _SECURITY, count=1))
+    assert rc != 0 and "non trovo la scomposizione per origine" in out
+
+
+def test_la_prosa_di_oggi_torna_col_registro(cf):
+    rc, out = _esegui(cf)
+    assert rc == 0 and "scomposizione per origine" not in out
