@@ -62,6 +62,12 @@
 
 meta:
   dossier: "review difensiva vps1777, luglio 2026 — 5 fasi, 6 aree, 43 interventi deduplicati"
+  # Quanti rilievi vengono dalla campagna originaria: i primi N del registro (H1…HN). È
+  # l'àncora della scomposizione per origine scritta in SECURITY.md: il numero «N dalla
+  # campagna originaria» e il punto dove comincia il gruppo dopo si confrontano con QUESTO,
+  # non fra loro (28/11/2026: due numeri sbagliati ma coerenti in prosa davano verde).
+  # Non si muove: la campagna è finita il 14/07/2026.
+  dossier_interventi: 43
   base_commit: "v0.16.0"
   # `updated` diceva 2026-07-14 con voci fino a novembre: una data scritta a mano invecchia.
   # L'ultima modifica la dice git (`git log -1 --format=%cs -- security/findings.yml`).

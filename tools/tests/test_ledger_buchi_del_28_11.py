@@ -97,7 +97,7 @@ def test_un_difetto_di_forma_e_un_rosso_solo_non_due(tmp_path):
     «senza rivedi_dopo»: chi legge crederebbe a due difetti (nota di Sagoma)."""
     for voce in ('    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      manuale: "poi"',
                  '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      manuale:\n'
-                 '        cosa: "x"\n        rivedi_dopo: "fra un mese"'):
+                 '        cosa: "rivedere il rischio accettato"\n        rivedi_dopo: "fra un mese"'):
         r = _verifica(tmp_path, voce)
         assert r.returncode != 0 and "Traceback" not in r.stdout + r.stderr, r.stderr
         assert r.stdout.count("prova.voce:") == 1, r.stdout
@@ -118,8 +118,13 @@ def test_un_segnaposto_non_e_una_dichiarazione(tmp_path):
 def test_un_deferred_senza_condizione_ne_giudizio_vuole_comunque_una_data(tmp_path):
     r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      nota: "dopo il test"')
     assert r.returncode != 0 and "'deferred' senza una data" in r.stdout, r.stdout
+    # con la data ma senza dire che cosa lo chiude resta rosso (terzo giro): una `nota` non è
+    # né una condizione né un giudizio
     r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      nota: "dopo il test"\n'
                             '      rivedi_dopo: "2020-01-01"')
+    assert r.returncode != 0 and "non dice che cosa lo chiude" in r.stdout, r.stdout
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n'
+                            '      verify: {path_exists: non/esiste}\n      rivedi_dopo: "2020-01-01"')
     assert r.returncode == 0 and "[RIVEDI] prova.voce" in r.stdout, r.stdout
 
 
@@ -155,3 +160,56 @@ def test_il_ledger_vero_passa_e_dice_quante_segnalazioni_guarda():
     assert r.returncode == 0, r.stdout[-600:]
     m = re.search(r"ledger: (\d+) voci", r.stdout)
     assert m and int(m.group(1)) >= 140, r.stdout[:300]
+
+
+# ── terzo giro di Arianna (28/11/2026) ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("segnaposto", ["xxxxxxxxxxxx", "tbd tbd tbd tbd", "............", "dafarepiùavanti"])
+def test_un_segnaposto_lungo_non_e_una_frase(tmp_path, segnaposto):
+    """Dodici «x» passavano la sola lunghezza."""
+    r = _verifica(tmp_path, '    status: opt-in\n    decisione: "declassata il 10/06"\n'
+                            f'    al_posto_suo: "{segnaposto}"')
+    assert r.returncode != 0 and "senza 'al_posto_suo'" in r.stdout, r.stdout
+
+
+def test_niente_e_un_di_piu_resta_una_frase(tmp_path):
+    r = _verifica(tmp_path, '    status: removed\n    decisione: "tolta il 10/06"\n'
+                            '    al_posto_suo: "niente: è un di più"')
+    assert r.returncode == 0, r.stdout
+
+
+_DOMANI = (__import__("datetime").date.today() + __import__("datetime").timedelta(days=30)).isoformat()
+
+
+def test_un_rinvio_con_la_sola_data_non_dice_che_cosa_lo_chiude(tmp_path):
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata il 10/06"\n'
+                            f'    follow_up: {{rivedi_dopo: "{_DOMANI}"}}')
+    assert r.returncode != 0 and "'deferred' che non dice che cosa lo chiude" in r.stdout, r.stdout
+
+
+@pytest.mark.parametrize("cosa", ['""', '"xxxxxxxxxxxx"', "null"])
+def test_un_giudizio_senza_cosa_e_rosso(tmp_path, cosa):
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata il 10/06"\n'
+                            f'    follow_up: {{manuale: {{cosa: {cosa}, rivedi_dopo: "{_DOMANI}"}}}}')
+    assert r.returncode != 0 and "follow_up.manuale senza 'cosa'" in r.stdout, r.stdout
+    assert "non dice che cosa lo chiude" not in r.stdout, r.stdout       # un rosso solo
+
+
+def test_un_rinvio_che_dice_che_cosa_lo_chiude_passa(tmp_path):
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata il 10/06"\n'
+                            '    follow_up: {manuale: {cosa: "rivedere se il rischio resta '
+                            f'accettabile", rivedi_dopo: "{_DOMANI}"}}}}')
+    assert r.returncode == 0, r.stdout
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata il 10/06"\n'
+                            '    follow_up: {verify: {path_exists: "un/file/che/non/esiste"}, '
+                            f'rivedi_dopo: "{_DOMANI}"}}')
+    assert r.returncode == 0, r.stdout
+
+
+def test_una_data_passata_resta_un_promemoria_non_un_rosso(tmp_path):
+    """Voluto: la data passata è il caso NORMALE del promemoria. Il giorno dopo la scadenza la
+    voce torna come [RIVEDI]; se fosse un rosso, ogni scadenza fermerebbe la CI di tutti."""
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata il 10/06"\n'
+                            '    follow_up: {manuale: {cosa: "rivedere se il rischio resta '
+                            'accettabile", rivedi_dopo: "1999-01-01"}}')
+    assert r.returncode == 0 and "[RIVEDI]" in r.stdout, r.stdout

@@ -40,7 +40,8 @@ voce `opt-in` bastava la `decisione`: il declassamento di Watchtower, rifatto co
 avrebbe dato verde.
 
 **Due limiti, detti in chiaro.** `al_posto_suo` è testo libero: la macchina obbliga a scriverlo
-e ferma un segnaposto, ma se la frase sia vera lo guarda chi rilegge la PR. E il ledger guarda
+e ferma un segnaposto (troppo corto, una parola sola, o le stesse due lettere ripetute), ma se la
+frase sia vera lo guarda chi rilegge la PR: «da fare più avanti» passa. E il ledger guarda
 il **repo**, non la macchina: una funzione che il repo dichiara e che una VPS ha perso (un
 profilo non riacceso dopo una reinstallazione, com'è successo a luglio) da qui non si vede. Sulla
 macchina la difesa è un'altra: lo stato delle funzioni opzionali sta scritto in `.env`
@@ -96,6 +97,13 @@ Un follow-up dev'essere una **condizione**, non prosa — o la CI non sa quando 
    davanti con una riga `[RIVEDI] <id>: rinvio-a-giudizio scaduto il <data>`. Non grida (non è un
    bug), ma **non sparisce**. Per questo la data è obbligatoria: un `follow_up.manuale` senza
    `rivedi_dopo` è rosso (dal 28/11/2026; prima dava verde, e non tornava più davanti a nessuno).
+
+Un rinvio dice anche **che cosa** lo chiude, non solo quando torna: una condizione (`verify`) o un
+giudizio scritto in una frase (`manuale.cosa`). Un `deferred` con la sola data, o un `manuale` con
+`cosa` vuoto, è rosso: alla scadenza tornerebbe davanti a qualcuno senza dirgli che cosa guardare.
+Una data **passata** invece non è un rosso, ed è voluto: è il caso normale del promemoria. Il
+giorno dopo la scadenza la voce esce come `[RIVEDI]`; se fosse un rosso, ogni scadenza fermerebbe
+la CI di chiunque stia lavorando ad altro.
 
 Un `follow_up` scritto male (un testo al posto della mappa, una condizione scritta come frase,
 una data che non è `AAAA-MM-GG`) è un rosso che dice che cosa correggere, non un errore del

@@ -525,6 +525,7 @@ def _schema_voce(e: dict, ids: set, hard_fail: list[str]) -> None:
     if isinstance(fu_.get("manuale"), dict) and not fu_["manuale"].get("rivedi_dopo"):
         hard_fail.append(f"[cattura] {eid}: follow_up.manuale senza rivedi_dopo — un rinvio a "
                          "giudizio senza data non torna più davanti a nessuno")
+    _che_cosa_chiude(e, eid, fu_, hard_fail)
     if e.get("status") in ("deferred", "removed", "opt-in") and not e.get("decisione"):
         hard_fail.append(f"[cattura] {eid}: '{e['status']}' senza 'decisione' — invisibile "
                          "allo storico (perché/quando fu deciso?)")
@@ -535,14 +536,14 @@ def _schema_voce(e: dict, ids: set, hard_fail: list[str]) -> None:
     # quel bisogno per chi non la attiva, oppure «niente: è un di più» detto in chiaro.
     # ⚠️ È testo libero: la macchina obbliga a DIRLO, non può sapere se è vero. Che sia vero
     # lo guarda chi rilegge la PR. Qui si ferma solo il segnaposto (`x`, `tbd`): una frase.
-    al_posto = str(e.get("al_posto_suo") or "").strip()
-    if e.get("status") in ("removed", "opt-in") and len(al_posto) < AL_POSTO_SUO_MINIMO:
+    if e.get("status") in ("removed", "opt-in") and not _e_una_frase(e.get("al_posto_suo")):
         hard_fail.append(f"[cattura] {eid}: '{e['status']}' senza 'al_posto_suo' — chi non la "
                          "attiva che cosa ha? (scrivi in una frase che cosa la sostituisce, "
                          "o «niente: è un di più»)")
 
 
 AL_POSTO_SUO_MINIMO = 12        # caratteri: una frase, non un segnaposto
+FRASE_LETTERE_DIVERSE = 5       # «xxxxxxxxxxxx» e «tbd tbd tbd tbd» sono lunghi, non frasi
 RINVIO_MASSIMO_GIORNI = 366     # un rinvio oltre un anno è un «mai» scritto con una data
 
 
@@ -567,6 +568,33 @@ def _date_dei_rinvii(entries: list[dict], oggi: datetime.date, hard_fail: list[s
             if _data_iso(d) and (datetime.date.fromisoformat(str(d)) - oggi).days > RINVIO_MASSIMO_GIORNI:
                 hard_fail.append(f"[cattura] {eid}: rivedi_dopo «{d}» è oltre un anno da oggi — "
                                  "un rinvio così lontano è un «mai» scritto con una data")
+
+
+def _e_una_frase(valore: object) -> bool:
+    """Una frase e non un segnaposto: abbastanza lunga, almeno due parole, almeno cinque lettere
+    diverse. Terzo giro di Arianna (28/11/2026): dodici «x» passavano la sola lunghezza.
+    ⚠️ Resta testo libero: «da fare più avanti» passa. Si ferma chi riempie, non chi mente."""
+    testo = str(valore or "").strip()
+    lettere = {c for c in testo.lower() if c.isalpha()}
+    return (len(testo) >= AL_POSTO_SUO_MINIMO and len(testo.split()) >= 2
+            and len(lettere) >= FRASE_LETTERE_DIVERSE)
+
+
+def _che_cosa_chiude(e: dict, eid: str, fu: dict, hard_fail: list[str]) -> None:
+    """Un rinvio dice CHE COSA lo chiude, non solo quando torna: una condizione (`verify`) o un
+    giudizio scritto (`manuale.cosa`). Terzo giro di Arianna (28/11/2026): un `deferred` con la
+    sola `rivedi_dopo` dava verde, e così un `manuale` con `cosa` vuoto: alla data tornava
+    davanti a qualcuno senza dirgli che cosa guardare."""
+    man = fu.get("manuale")
+    if isinstance(man, dict):
+        if not _e_una_frase(man.get("cosa")):
+            hard_fail.append(f"[cattura] {eid}: follow_up.manuale senza 'cosa' — che cosa va "
+                             "guardato per chiudere il rinvio? (una frase)")
+        return
+    if e.get("status") == "deferred" and fu and not isinstance(fu.get("verify"), dict):
+        hard_fail.append(f"[cattura] {eid}: 'deferred' che non dice che cosa lo chiude — "
+                         "aggiungi follow_up.verify (una condizione verificabile) o "
+                         "follow_up.manuale.cosa (che cosa va guardato, in una frase)")
 
 
 def _data_iso(valore: object) -> bool:

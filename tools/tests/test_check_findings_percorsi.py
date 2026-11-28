@@ -312,3 +312,44 @@ def test_un_gruppo_che_non_dichiara_il_suo_numero_fa_rosso_sulla_somma(cf):
     rc, out = _esegui(cf, security=_SECURITY.replace("Due (`H69`, `H70`)", "Poi (`H69`, `H70`), due,", 1))
     assert rc != 0
     assert f"fanno {len(_REGISTRO['findings']) - 2}, il registro ha {len(_REGISTRO['findings'])} rilievi" in out
+
+
+# ── il confine della campagna lo dice il registro (terzo giro di Arianna, 28/11/2026) ─────────
+
+def test_due_numeri_sbagliati_ma_coerenti_fanno_rosso(cf):
+    """«43»→«44» insieme a «7 (`H44`-`H50`)»→«6 (`H45`-`H50`)»: i numeri tornano fra loro, e il
+    guardiano usciva 0. Il confine ora viene da `meta.dossier_interventi`."""
+    falso = re.sub(r"\b43 dalla(\s+campagna originaria)", r"44 dalla\1", _SECURITY, count=1)
+    falso = falso.replace("7 (`H44`-`H50`)", "6 (`H45`-`H50`)", 1)
+    assert falso != _SECURITY
+    rc, out = _esegui(cf, security=falso)
+    assert rc != 0
+    assert "il registro dice 43 (`meta.dossier_interventi`)" in out
+    assert "comincia a H45, ma la campagna sono i primi 43 rilievi" in out
+
+
+def test_il_primo_gruppo_allargato_all_indietro_fa_rosso(cf):
+    """L'altro verso: «42» e «8 (`H43`-`H50`)»."""
+    falso = re.sub(r"\b43 dalla(\s+campagna originaria)", r"42 dalla\1", _SECURITY, count=1)
+    falso = falso.replace("7 (`H44`-`H50`)", "8 (`H43`-`H50`)", 1)
+    rc, out = _esegui(cf, security=falso)
+    assert rc != 0 and "comincia a H43, ma la campagna sono i primi 43 rilievi" in out
+
+
+@pytest.mark.parametrize("valore", [None, "43", 0, True])
+def test_senza_l_ancora_della_campagna_il_registro_e_rosso(cf, valore):
+    reg = _reg()
+    if valore is None:
+        reg["meta"].pop("dossier_interventi")
+    else:
+        reg["meta"]["dossier_interventi"] = valore
+    rc, out = _esegui(cf, reg)
+    assert rc != 0 and "`meta.dossier_interventi` manca o non è un numero intero" in out
+
+
+def test_l_ancora_spostata_senza_la_frase_del_dossier_fa_rosso(cf):
+    """Chi sposta l'àncora per far tornare la prosa deve contraddire anche la frase del dossier."""
+    reg = _reg()
+    reg["meta"]["dossier_interventi"] = 44
+    rc, out = _esegui(cf, reg)
+    assert rc != 0 and "`meta.dossier` non dice «44 interventi»" in out

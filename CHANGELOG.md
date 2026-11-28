@@ -4,6 +4,17 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- Terzo giro sui presìdi del ledger e del registro (Arianna, 28/11). Due numeri sbagliati ma d'accordo fra
+  loro passavano il controllo della scomposizione per origine di SECURITY.md («43 dalla campagna» → «44»
+  insieme a «7 (`H44`-`H50`)» → «6 (`H45`-`H50`)»): il confine della campagna originaria ora lo dice il
+  registro (`meta.dossier_interventi`), non la prosa che si sta controllando. Nel ledger: `al_posto_suo`
+  vuole una frase vera (dodici «x» passavano la sola lunghezza); un `deferred` dice che cosa lo chiude, una
+  condizione o un giudizio scritto, e non solo quando torna; un `follow_up.manuale` con `cosa` vuoto è rosso.
+  Una data di revisione già passata resta un promemoria `[RIVEDI]` e non un rosso: è voluto, ed è scritto.
+  Dichiarato il limite che resta: a quale giro appartenga un rilievo nato dopo la campagna lo dice solo la
+  prosa. Sedici prove nuove.
+
 ## [0.98.26] — 2026-11-28
 
 ### Corretto
