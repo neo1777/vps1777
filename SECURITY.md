@@ -491,6 +491,10 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
 > **fallisce** se l'evidenza di una voce chiusa è sparita, se un residuo non
 > dichiara cosa manca, o se i numeri qui sotto non combaciano col registro.
+> Un limite, detto in chiaro: quanti rilievi vengono dalla review di luglio lo
+> dice il registro, e il controllo lo confronta con questa pagina; a quale giro
+> appartenga un rilievo nato **dopo** lo dice solo questa pagina. Spostarne uno
+> nel gruppo accanto correggendo i due numeri resta verde: lo vede chi rilegge.
 >
 > Esiste perché questa sezione, una volta, ha dichiarato «nessun rilievo è rimasto
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è

@@ -717,7 +717,8 @@ def main() -> int:
     findings = data.get("findings") or []
     conto = _controlla_le_voci(findings, errors)
     _controlla_l_ancora(len(findings), conto.by_sev, errors)
-    _confronta_con_security_md(findings, conto.counts, len(findings), errors)
+    _confronta_con_security_md(findings, conto.counts, len(findings), errors,
+                               _campagna_del_registro(data.get("meta"), errors))
     _stampa_il_conto(len(findings), conto)
     return _esito(errors)
 
@@ -827,7 +828,7 @@ def _controlla_l_ancora(total: int, by_sev: dict[str, int], errors: list[str]) -
 
 
 def _confronta_con_security_md(findings: list[dict], counts: dict[str, int], total: int,
-                               errors: list[str]) -> None:
+                               errors: list[str], campagna: int | None = None) -> None:
     """I tre confronti col documento: ogni residuo nominato, la tabella, la frase in prosa."""
     # ── ogni RESIDUO dev'essere NOMINATO in SECURITY.md, non solo contato ──
     # Il controllo qui sotto confronta quattro numeri, e quattro numeri combaciano
@@ -845,7 +846,7 @@ def _confronta_con_security_md(findings: list[dict], counts: dict[str, int], tot
     _residui_nominati(md, findings, errors)
     _conteggi_della_tabella(md, counts, errors)
     _conteggi_della_prosa(md, findings, total, errors)
-    _origini_della_prosa(md, findings, errors)
+    _origini_della_prosa(md, findings, errors, campagna)
 
 
 def _residui_nominati(md_ids: str, findings: list[dict], errors: list[str]) -> None:
@@ -973,7 +974,47 @@ def _somma_dei_gruppi(campagna: int, gruppi: list[tuple[int, str, set[int]]], re
              "       controllo non legge: va prima della parentesi, in cifre o in lettere).")
 
 
-def _origini_della_prosa(md: str, findings: list[dict], errors: list[str]) -> None:
+def _campagna_del_registro(meta: object, errors: list[str]) -> int | None:
+    """Quanti rilievi vengono dalla campagna originaria, detto dal REGISTRO
+    (`meta.dossier_interventi`); None, e il rosso, se il registro non lo dice bene."""
+    meta = meta if isinstance(meta, dict) else {}
+    n = meta.get("dossier_interventi")
+    if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        fail(errors,
+             "findings.yml: `meta.dossier_interventi` manca o non è un numero intero.\n"
+             "       È l'àncora della scomposizione per origine: senza, il confine della\n"
+             "       campagna originaria lo deciderebbe la prosa che si sta controllando.")
+        return None
+    if not re.search(rf"(?<!\d){n} interventi", str(meta.get("dossier", ""))):
+        fail(errors,
+             f"findings.yml: `meta.dossier_interventi` dice {n}, ma `meta.dossier` non dice "
+             f"«{n} interventi».\n       Il registro non torna con SE STESSO.")
+    return n
+
+
+def _confine_della_campagna(dichiarati: int, dopo_la_campagna: int, campagna: int | None,
+                            errors: list[str]) -> None:
+    """Il numero della campagna e il punto dove comincia il primo gruppo contato tornano con
+    l'àncora del registro, non soltanto fra loro."""
+    # Terzo giro di Arianna (28/11/2026): «43»→«44» insieme a «7 (`H44`-`H50`)»→«6 (`H45`-`H50`)»
+    # usciva verde, perché il confine lo dava la prosa stessa (il primo gruppo contato) e due
+    # numeri sbagliati d'accordo fra loro tornavano. Ora il confine lo dà il registro.
+    if campagna is None:
+        return
+    if dichiarati != campagna:
+        fail(errors,
+             f"SECURITY.md (prosa) dichiara {dichiarati} rilievi «dalla campagna originaria», il "
+             f"registro dice {campagna} (`meta.dossier_interventi`).\n"
+             f"       Allinea il documento, non il registro.")
+    if dopo_la_campagna != campagna + 1:
+        fail(errors,
+             f"SECURITY.md (prosa): il primo gruppo dopo la campagna originaria comincia a "
+             f"H{dopo_la_campagna}, ma la campagna sono i primi {campagna} rilievi "
+             f"(`meta.dossier_interventi`): comincia a H{campagna + 1}.")
+
+
+def _origini_della_prosa(md: str, findings: list[dict], errors: list[str],
+                         campagna: int | None = None) -> None:
     """La scomposizione per ORIGINE scritta in prosa in SECURITY.md torna col registro.
 
     Il controllo qui sopra guarda il totale e le severità. Il numero sbagliato del 01/08 però
@@ -982,7 +1023,13 @@ def _origini_della_prosa(md: str, findings: list[dict], errors: list[str]) -> No
     questo controllo è uscito verde, mentre SECURITY.md promette che fallisce. Tre regole:
     il numero della campagna originaria è quello dei rilievi prima del primo gruppo contato;
     ogni gruppo «N (…)», in cifre o in lettere, intervallo o elenco, nomina tanti rilievi quanti
-    ne dichiara; ogni rilievo del registro è nominato, e nessuno nominato manca dal registro."""
+    ne dichiara; ogni rilievo del registro è nominato, e nessuno nominato manca dal registro.
+    Il confine della campagna originaria lo dice il registro (`_confine_della_campagna`).
+
+    ⚠️ LIMITE, detto in chiaro: solo quel confine ha un'àncora fuori dalla prosa. A QUALE giro
+    appartenga un rilievo nato dopo lo dice soltanto SECURITY.md: spostare un rilievo da un
+    gruppo a quello accanto, correggendo i due numeri, torna e resta verde. Lo guarda chi
+    rilegge la PR, come ogni frase che una macchina può contare ma non capire."""
     inizio = md.find("Il registro conta **")
     fine = md.find("Nessuna è aperta", inizio)
     m = re.search(r"(\d+)\s+dalla\s+campagna\s+originaria", md[inizio:fine]) if 0 <= inizio < fine else None
@@ -1009,6 +1056,7 @@ def _origini_della_prosa(md: str, findings: list[dict], errors: list[str]) -> No
              f"SECURITY.md (prosa) dichiara {m.group(1)} rilievi «dalla campagna originaria», il "
              f"registro ne conta {originari} prima di H{dopo_la_campagna}.\n"
              f"       Allinea il documento, non il registro.")
+    _confine_della_campagna(int(m.group(1)), dopo_la_campagna, campagna, errors)
     for dichiarati, come, ids in gruppi:
         veri = len(ids & reali)
         if dichiarati != veri:

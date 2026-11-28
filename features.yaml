@@ -73,7 +73,8 @@ _schema:
               Un `removed`/`deferred` senza decisione è invisibile allo storico → CI rossa."
   al_posto_suo: "OBBLIGATORIO per opt-in/removed (dal 28/11/2026): che cosa copre quel bisogno
                  per chi NON la attiva, o «niente: è un di più» detto in chiaro. Watchtower fu
-                 declassato a opt-in senza dirlo, e per un mese niente aggiornò la macchina."
+                 declassato a opt-in senza dirlo, e per un mese niente aggiornò la macchina.
+                 Una FRASE: almeno due parole, non un segnaposto ripetuto."
   verify:
     _nota: "COME la macchina prova che la feature c'è (e, dove possibile, funziona).
             Una sola di queste chiavi per voce. `manual` è l'ultima spiaggia."
@@ -102,6 +103,8 @@ _schema:
              va con `rivedi_dopo: <data>` accanto (CONDIZIONE O DATA): una condizione che
              non si avvera non deve tenere il rinvio fermo per sempre."
     manuale: "{cosa, rivedi_dopo: <data>} — a giudizio umano (la CI non può decidere).
+              `cosa` è OBBLIGATORIO, in una frase: che cosa va guardato per chiudere il rinvio.
+              (Un `deferred` dice sempre che cosa lo chiude: `verify` oppure `manuale.cosa`.)
               NON tiene la CI rossa (non è un bug), ma la SORVEGLIA: se oggi > rivedi_dopo,
               il verificatore la rimette davanti («rivedi questo rinvio»). rivedi_dopo la
               stima CHI rinvia — sa quanto lontano sta rinviando meglio di un N globale (setaccio)."
