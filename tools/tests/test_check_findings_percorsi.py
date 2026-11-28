@@ -228,3 +228,63 @@ def test_una_voce_senza_id_si_dice_invece_di_crollare(cf):
     rc, out = _esegui(cf, reg)
     assert rc == 1
     assert f"una voce senza `id` (titolo: «{titolo}»)" in out
+
+
+# ── la scomposizione per origine scritta in prosa (28/11/2026, rilievo di Arianna) ─────────────
+
+def test_il_numero_della_campagna_originaria_sbagliato_fa_rosso(cf):
+    """La prova rifatta da Arianna il 27/11 su una copia: «43 dalla campagna» → «44», e il
+    guardiano usciva 0 mentre SECURITY.md promette che fallisce."""
+    assert re.search(r"\b43 dalla\s+campagna originaria", _SECURITY)
+    rc, out = _esegui(cf, security=re.sub(r"\b43 dalla(\s+campagna originaria)", r"44 dalla\1",
+                                          _SECURITY, count=1))
+    assert rc != 0
+    assert "dichiara 44 rilievi «dalla campagna originaria», il registro ne conta 43" in out
+
+
+def test_un_gruppo_col_numero_sbagliato_fa_rosso(cf):
+    assert "7 (`H44`-`H50`)" in _SECURITY
+    rc, out = _esegui(cf, security=_SECURITY.replace("7 (`H44`-`H50`)", "8 (`H44`-`H50`)", 1))
+    assert rc != 0 and "dichiara 8 rilievi in H44…H50, il registro ne conta 7" in out
+
+
+def test_un_rilievo_nuovo_che_la_prosa_non_nomina_fa_rosso(cf):
+    ultimo = _REGISTRO["findings"][-1]["id"]
+    senza = re.sub(r"`" + ultimo + r"`", "`una voce`", _SECURITY)
+    rc, out = _esegui(cf, security=senza)
+    assert rc != 0 and f"la scomposizione per origine non nomina {ultimo}" in out
+
+
+def test_un_rilievo_nominato_che_non_esiste_fa_rosso(cf):
+    rc, out = _esegui(cf, security=_SECURITY.replace("7 (`H44`-`H50`)", "7 (`H44`-`H50`) e `H999`", 1))
+    assert rc != 0 and "nomina H999, che nel registro non ci sono" in out
+
+
+def test_senza_la_frase_della_campagna_il_controllo_lo_dice(cf):
+    rc, out = _esegui(cf, security=re.sub(r"dalla(\s+)campagna originaria", r"dal\1primo giro",
+                                          _SECURITY, count=1))
+    assert rc != 0 and "non trovo la scomposizione per origine" in out
+
+
+def test_la_prosa_di_oggi_torna_col_registro(cf):
+    rc, out = _esegui(cf)
+    assert rc == 0 and "scomposizione per origine" not in out
+
+
+def test_un_gruppo_scritto_come_elenco_col_numero_sbagliato_fa_rosso(cf):
+    """Il 43 → 44 in piccolo (nota di Sagoma): i gruppi scritti come elenco e in lettere."""
+    assert "Due (`H69`, `H70`)" in _SECURITY
+    rc, out = _esegui(cf, security=_SECURITY.replace("Due (`H69`, `H70`)", "Tre (`H69`, `H70`)", 1))
+    assert rc != 0 and "dichiara 3 rilievi in H69…H70, il registro ne conta 2" in out
+    m = re.search(r"\b4 che\s+non\s+vengono", _SECURITY)
+    assert m, "il gruppo H51-H54 non è più scritto così: aggiorna la prova"
+    rc, out = _esegui(cf, security=_SECURITY[:m.start()] + "5" + _SECURITY[m.start() + 1:])
+    assert rc != 0 and "dichiara 5 rilievi in H51…H54, il registro ne conta 4" in out
+
+
+def test_un_numero_di_versione_prima_della_parentesi_non_e_un_conto(cf):
+    """`v0.40.3, 4 che … (H51 …)`: il «3» della versione non è il numero del gruppo."""
+    gruppi = cf._gruppi_contati("culminato nella `v0.40.3`, 4 che vengono da altro (`H51`, `H52` e "
+                                "`H54`, `H53`), e sette (`H94`-`H100`, 21/11).")
+    assert [(n, sorted(ids)) for n, _, ids in gruppi] == [(4, [51, 52, 53, 54]),
+                                                         (7, list(range(94, 101)))]

@@ -68,6 +68,9 @@ _schema:
   decisione: "OBBLIGATORIO per opt-in/deferred/removed: quando + perché, con
               provenienza [commit <sha>] / [conv <db·uuid·ts>] / [SECURITY.md:<riga>].
               Un `removed`/`deferred` senza decisione è invisibile allo storico → CI rossa."
+  al_posto_suo: "OBBLIGATORIO per opt-in/removed (dal 28/11/2026): che cosa copre quel bisogno
+                 per chi NON la attiva, o «niente: è un di più» detto in chiaro. Watchtower fu
+                 declassato a opt-in senza dirlo, e per un mese niente aggiornò la macchina."
   verify:
     _nota: "COME la macchina prova che la feature c'è (e, dove possibile, funziona).
             Una sola di queste chiavi per voce. `manual` è l'ultima spiaggia."
@@ -285,6 +288,7 @@ features:
     cosa: "Reverse-proxy Caddy con certificati ACME. Alternativa a Tailscale (se ne sceglie UNO)."
     dove: ["compose-profile:compose.ingress.caddy.yaml#ingress.caddy"]
     status: opt-in
+    al_posto_suo: "l'ingresso di default, Tailscale Funnel (ingress.tailscale), oppure cloudflared: se ne sceglie uno all'installazione."
     since: "0.9.0"
     decisione: "una delle tre opzioni di ingress mutuamente esclusive; l'utente ne sceglie una all'install. [docs/INSTALL.md]"
     verify:
@@ -295,6 +299,7 @@ features:
     cosa: "Tunnel outbound Cloudflare, nessuna porta aperta. Alternativa a Tailscale/Caddy."
     dove: ["compose-profile:compose.ingress.cloudflared.yaml#ingress.cloudflared"]
     status: opt-in
+    al_posto_suo: "l'ingresso di default, Tailscale Funnel (ingress.tailscale), oppure Caddy: se ne sceglie uno all'installazione."
     since: "0.9.0"
     decisione: "una delle tre opzioni di ingress mutuamente esclusive; l'utente ne sceglie una all'install. [docs/INSTALL.md]"
     verify:
@@ -317,6 +322,7 @@ features:
            "tools/tests/test_caddy_dns01.py",
            "docs/INGRESS.md"]
     status: opt-in
+    al_posto_suo: "Caddy coi certificati dalla porta 80 (ingress.caddy), che non chiede un account Cloudflare."
     since: "0.66.0"
     decisione: "01/10/2026, scelta di Neo («lo costruisco davvero»): prima docs/INGRESS.md
                 diceva che DNS-01 NON era predisposto (l'override citato nei commenti non
@@ -341,6 +347,7 @@ features:
            il container rimasto da prima lo ferma e rimuove l'update (rimuovi_watchtower_orfano)."
     dove: ["compose-profile:compose.ops.watchtower.yaml#ops.autoupdate"]
     status: removed   # era opt-in finché il file esisteva: la nota di b82df434 diceva «se Neo
+    al_posto_suo: "l'aggiornamento gestito dalla CLI (`vps1777 update` e il timer vps1777-auto-update), con backup, health-gate e rollback."
                       # lo vuole VERAMENTE via: cancellare il file E mettere removed». Fatto,
                       # le due cose insieme. Il `dove` resta: è la coordinata con cui il verso
                       # reale→dichiarato riconosce il profilo — se `ops.autoupdate` ricomparisse
@@ -366,6 +373,7 @@ features:
            amplia la superficie d'attacco, quindi non default."
     dove: ["compose-profile:compose.ops.portainer.yaml#ops.portainer"]
     status: opt-in
+    al_posto_suo: "niente: è un di più. I container si guardano con `vps1777 status` e con docker dalla shell."
     since: "0.26.0 (con i profili ops.*)"
     decisione: "opt-in per scelta: un pannello di gestione container esposto è superficie in
                 più; chi lo vuole lo accende. Legittima, ma DICHIARATA (un reinstall non la
@@ -446,6 +454,7 @@ features:
            "services/archive-mcp/tests/test_costruisci_indice.py",
            "docs/RICERCA-IBRIDA.md"]
     status: opt-in
+    al_posto_suo: "la ricerca per parole (`search`), che funziona sempre; senza indice la ricerca per senso degrada dichiarandolo (docs/RICERCA-IBRIDA.md)."
     since: "0.51.0"
     decisione: "la PRIMA costruzione si lancia a mano sul PC: indicizzare il corpus costa
                 decine di ore di CPU e sulla VPS non si fa (#281, docs/RICERCA-IBRIDA.md).
@@ -464,6 +473,7 @@ features:
     dove: ["tools/indice_semantico.py", "tools/tests/test_indice_semantico.py",
            "docs/RICERCA-IBRIDA.md"]
     status: opt-in
+    al_posto_suo: "il costruttore lanciato a mano (archive.indice-vettoriale), o l'aggiornamento notturno sulla VPS (archive.indice-notturno) dove un indice esiste già."
     since: "0.56.0"
     decisione: "si lancia a mano, quando si vuole l'indice di un DB (#281). Scelta di Neo
                 del 25/09: tutto il primario indicizzato. [docs/RICERCA-IBRIDA.md]"
@@ -480,6 +490,7 @@ features:
            "cli:indice-notturno", "compose-profile:compose.yaml#indice",
            "docs/RICERCA-IBRIDA.md"]
     status: opt-in
+    al_posto_suo: "l'aggiornamento dell'indice lanciato dal PC (archive.indice-dal-pc); finché non si fa, le righe nuove si trovano solo per parole."
     since: "0.57.0"
     decisione: "scelta di Neo del 26/09/2026 (gradino 3). NON lo accende l'installer: si
                 accende con `vps1777 indice-notturno --abilita`, perché ha senso solo dove
@@ -609,6 +620,7 @@ features:
            riservati o da guardare, e dichiarando quanti ne ha nascosti."
     dove: ["mcp-tool:archive-mcp/temi"]
     status: opt-in
+    al_posto_suo: "niente: è un di più. Senza la mappa restano le ricerche (`search`, `search_ibrida`)."
     decisione: "2026-11-07: spenta finché ARCHIVE_TEMI_DB è vuota, perché quali DB entrano in una mappa è una scelta del proprietario; i temi personali li propone la macchina e li decide lui"
     since: "0.94.0"
     verify:
@@ -1882,6 +1894,7 @@ features:
     dove: ["cli:indice-notturno", "tools/vps1777.py", "systemd:vps1777-indice-notturno.timer",
            "systemd:vps1777-indice-notturno.service", "compose-profile:compose.yaml#indice"]
     status: opt-in
+    al_posto_suo: "lo stesso aggiornamento lanciato dal PC (archive.indice-dal-pc)."
     since: "0.57.0"
     decisione: "sulla VPS e non sul PC, scelta di Neo del 26/09/2026 contro la raccomandazione
                 (timer sul PC) — il compromesso è la RAM, chiuso da mem_limit. Opt-in perché
@@ -2019,6 +2032,7 @@ features:
            pannello; restano i promemoria e il bottone «✓ Fatto»."
     dove: ["services/nb1777-bot/app/bot.py"]
     status: removed
+    al_posto_suo: "la Mini App del bot, che parla solo col gateway (le domande ai notebook non passano più dai server di Telegram)."
     since: "rimosso 0.86.0"
     decisione: "12/10/2026, decisione di Neo dopo la prova dal telefono: «col pannello mi pare
                 sia meglio». Le domande ai notebook passano dalla Mini App, che parla solo col
