@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.24] — 2026-11-28
+
 ### Corretto
 - La unit del controllo giornaliero (`vps1777-check-update.service`) aveva un tetto di 120 secondi. Dalla
   0.98.21 il controllo aspetta un update in corso fino a 30 minuti: con quel tetto systemd lo avrebbe ucciso
