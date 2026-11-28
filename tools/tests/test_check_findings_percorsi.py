@@ -288,3 +288,27 @@ def test_un_numero_di_versione_prima_della_parentesi_non_e_un_conto(cf):
                                 "`H54`, `H53`), e sette (`H94`-`H100`, 21/11).")
     assert [(n, sorted(ids)) for n, _, ids in gruppi] == [(4, [51, 52, 53, 54]),
                                                          (7, list(range(94, 101)))]
+
+
+# ── secondo giro di Arianna (28/11/2026) ───────────────────────────────────────────────────────
+
+def test_un_numero_in_lettere_oltre_dieci_si_legge(cf):
+    assert [(n, sorted(ids)) for n, _, ids in cf._gruppi_contati("Undici (`H55`-`H65`) e dodici (`H70`-`H81`).")] \
+        == [(11, list(range(55, 66))), (12, list(range(70, 82)))]
+    rc, out = _esegui(cf, security=_SECURITY.replace("10 (`H55`-`H64`)", "undici (`H55`-`H64`)", 1))
+    assert rc != 0 and "dichiara 11 rilievi in H55…H64, il registro ne conta 10" in out
+
+
+def test_due_gruppi_che_si_sovrappongono_fanno_rosso(cf):
+    assert "10 (`H55`-`H64`)" in _SECURITY
+    rc, out = _esegui(cf, security=_SECURITY.replace("10 (`H55`-`H64`)", "11 (`H55`-`H65`)", 1))
+    assert rc != 0 and "H65 sta in due gruppi della scomposizione" in out
+
+
+def test_un_gruppo_che_non_dichiara_il_suo_numero_fa_rosso_sulla_somma(cf):
+    """Il numero scritto dopo la parentesi, o non scritto: il gruppo non si conta, e la somma
+    non fa più il totale."""
+    assert "Due (`H69`, `H70`)" in _SECURITY
+    rc, out = _esegui(cf, security=_SECURITY.replace("Due (`H69`, `H70`)", "Poi (`H69`, `H70`), due,", 1))
+    assert rc != 0
+    assert f"fanno {len(_REGISTRO['findings']) - 2}, il registro ha {len(_REGISTRO['findings'])} rilievi" in out

@@ -923,7 +923,9 @@ def _conteggi_della_prosa(md: str, findings: list[dict], total: int, errors: lis
 
 
 _NUMERI_IN_LETTERE = {"uno": 1, "una": 1, "due": 2, "tre": 3, "quattro": 4, "cinque": 5, "sei": 6,
-                      "sette": 7, "otto": 8, "nove": 9, "dieci": 10}
+                      "sette": 7, "otto": 8, "nove": 9, "dieci": 10, "undici": 11, "dodici": 12,
+                      "tredici": 13, "quattordici": 14, "quindici": 15, "sedici": 16,
+                      "diciassette": 17, "diciotto": 18, "diciannove": 19, "venti": 20}
 _GRUPPO_CONTATO = re.compile(
     # il numero non è un pezzo di versione o di sigla (`v0.40.3`, `H44`): niente punto, lettera
     # o apice inverso attaccati prima
@@ -945,6 +947,30 @@ def _gruppi_contati(sezione: str) -> list[tuple[int, str, set[int]]]:
         come = f"H{nomi[0]}" if len(nomi) == 1 else f"H{nomi[0]}…H{nomi[-1]}"
         gruppi.append((dichiarati, come, ids))
     return gruppi
+
+
+def _somma_dei_gruppi(campagna: int, gruppi: list[tuple[int, str, set[int]]], reali: set[int],
+                      errors: list[str]) -> None:
+    """La campagna originaria più i gruppi contati fanno il totale, e nessun rilievo sta in due
+    gruppi."""
+    # LA SOMMA (secondo giro di Arianna, 28/11/2026): la campagna più i gruppi contati fanno il
+    # totale del registro. È ciò che prende ciò che le regole sopra non vedono: un gruppo senza
+    # numero o col numero scritto in un modo che non so leggere, due gruppi che si sovrappongono.
+    contati: set[int] = set()
+    for _, come, ids in gruppi:
+        doppi = sorted(contati & ids)
+        if doppi:
+            fail(errors,
+                 "SECURITY.md (prosa): " + ", ".join(f"H{n}" for n in doppi) + f" sta in due "
+                 f"gruppi della scomposizione (il secondo è {come}).")
+        contati |= ids
+    somma = campagna + sum(n for n, _, _ in gruppi)
+    if somma != len(reali):
+        fail(errors,
+             f"SECURITY.md (prosa): la campagna originaria più i gruppi contati fanno {somma}, il "
+             f"registro ha {len(reali)} rilievi.\n"
+             "       Un gruppo non dichiara il suo numero (o lo scrive in un modo che questo\n"
+             "       controllo non legge: va prima della parentesi, in cifre o in lettere).")
 
 
 def _origini_della_prosa(md: str, findings: list[dict], errors: list[str]) -> None:
@@ -989,6 +1015,7 @@ def _origini_della_prosa(md: str, findings: list[dict], errors: list[str]) -> No
             fail(errors,
                  f"SECURITY.md (prosa) dichiara {dichiarati} rilievi in {come}, il registro "
                  f"ne conta {veri}.\n       Allinea il documento, non il registro.")
+    _somma_dei_gruppi(int(m.group(1)), gruppi, reali, errors)
     taciuti = sorted(n for n in reali if n >= dopo_la_campagna and n not in nominati)
     if taciuti:
         fail(errors,

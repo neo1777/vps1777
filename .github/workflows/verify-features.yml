@@ -8,8 +8,9 @@ name: Verify features ledger
 #                        = CI ROSSA (ciò che entra senza traccia e poi si dimentica).
 # In SEMINA (`_meta.baseline_completo` assente/false) SEGNALA i non-dichiarati ma NON rompe
 # la CI (exit 0); a semina completa si mette `_meta: {baseline_completo: true}` e diventa
-# enforcing. Regola di cattura (setaccio): una `deferred` senza `follow_up` = ROSSA — è il
-# buco che perse Watchtower, chiuso. È un CHECK, non un daemon: non gira in produzione né
+# enforcing. Regola di cattura (setaccio): una `deferred` senza `follow_up` e senza data = ROSSA,
+# e una `opt-in` o `removed` deve dire che cosa c'è al posto suo (dal 28/11/2026: è la regola che
+# obbliga a dire che cosa resta ad aggiornare la macchina quando l'aggiornamento di prima è declassato). È un CHECK, non un daemon: non gira in produzione né
 # sul PC utente (il ledger è PARTE DEL PRODOTTO, vive nel repo e si verifica in CI).
 
 on:

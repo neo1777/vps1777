@@ -13,10 +13,13 @@
 # è vero finché qui non c'è la voce con `status` + `decisione` + `follow_up`. Una
 # decisione senza la sua voce non è presa — è chiacchiera. Il verificatore la fa
 # rispettare: una `deferred` senza `follow_up` = CI ROSSA.
-# Prova storica: sotto questa regola Watchtower sarebbe stato
-#   status: deferred · decisione: 10/06 declassato · follow_up: {verify: exists timer}
-# e la CI sarebbe stata ROSSA dal 10/06 finché il timer non esisteva. Non l'avremmo
-# perso: avrebbe gridato per un mese, invece di svanire in silenzio.
+# ⚠️ Che cosa questa regola NON avrebbe fatto (riletto il 28/11/2026): Watchtower nel
+# ledger è stato `opt-in`, non `deferred`, e una voce `opt-in` con la sua `decisione`
+# dava verde. La regola sui `deferred` da sola non l'avrebbe preso. Dal 28/11 una voce
+# `opt-in` o `removed` deve dire `al_posto_suo`: è quella la regola che obbliga a
+# scrivere che cosa aggiorna la macchina quando l'aggiornamento di prima è declassato.
+# E resta un limite: il ledger guarda il REPO. Una funzione che il repo dichiara e la
+# macchina ha perso (un profilo non riacceso dopo una reinstallazione) qui non si vede.
 #
 # ─ IL VERIFICATORE È BIDIREZIONALE (b82df434, la quadratura sulle feature) ─────
 #   dichiarato → reale : ogni voce `active*` deve superare il suo `verify`.
