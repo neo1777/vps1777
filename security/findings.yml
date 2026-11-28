@@ -5052,3 +5052,42 @@ findings:
       sulla forma. Dopo una spia debole («token», «chiave») vale solo la cura delle maiuscole.
       L'elenco chiuso copre la forma nuda: con un separatore e un pezzo dopo (`parola12-x`,
       `parola12.abc`) la forma minuscola resta quella di un pacchetto anche dopo «password».
+
+  - id: H105
+    severity: low
+    title: "Il gate anti-leak non riconosceva i token dei fornitori comuni (GitHub, Anthropic, OpenAI, AWS, Google, Slack)"
+    status: closed
+    natura: comportamento
+    scoperta:
+      quando: "2026-11-28"
+      come: misura
+      nota: >
+        Misurato da un'altra sessione di lavoro facendo passare dal gate un file con tre token
+        finti: verde. `low`: il gate è una rete in più sopra la disciplina di chi scrive, e non
+        ci sono segni che un token così sia mai entrato nel repo; ma il gettone con cui la CI
+        rilascia e le chiavi delle API sono proprio ciò che chi lavora qui ha in tasca.
+    since: unreleased
+    why: >
+      L'elenco dei modelli conosceva solo le credenziali che il prodotto maneggia (Tailscale,
+      Telegram, age, chiavi PEM, sshpass, stringhe di connessione). Un gettone GitHub o una
+      chiave di API incollati in un file passavano.
+    evidence:
+      - file: security/check_no_leaks.py
+        contains:
+          - '("gettone GitHub", re.compile('
+          - '("chiave API Anthropic", re.compile('
+          - '("chiave d''accesso AWS", re.compile('
+      - file: tools/tests/test_no_leaks_token_comuni.py
+        contains:
+          - "def test_un_token_di_un_fornitore_comune_fa_scattare_il_suo_modello("
+          - "def test_un_segnaposto_o_una_parola_che_gli_somiglia_non_scatta("
+    prova:
+      - comando: "uvx --with pyyaml==6.0.4 pytest@9.2.0 -q tools/tests/test_no_leaks_token_comuni.py"
+        dove: "PC"
+        output: "26 passed: dodici token finti costruiti a pezzi fanno scattare ciascuno il suo modello; tredici segnaposto e parole che gli somigliano no. Contato sui file tracciati di quattro repo: i modelli nuovi non scattano mai."
+        exit: 0
+        quando: "2026-11-28"
+    residuo: >
+      Sono i sei fornitori più comuni, non tutti: un token di un servizio non in elenco passa
+      ancora, se non ha la forma di una password dopo una parola-spia. I modelli guardano il
+      prefisso e una lunghezza minima: un fornitore che cambia prefisso va aggiunto a mano.
