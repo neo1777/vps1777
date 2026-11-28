@@ -287,7 +287,8 @@ updating is the `autoupdate` feature (the timer, with quarantine and the safety 
 
 - **"update già in corso"** — there's a lock (`var/update.lock`): another update,
   rollback or bootstrap is at work. (The daily `vps1777 check` uses the same lock, but
-  doesn't cause this message: the update waits for it up to two minutes, and if that is
+  doesn't cause this message: the update waits for it up to two minutes (ten if it is the run
+  re-executed by the freshly updated CLI), and if that is
   not enough it exits with 75 saying «il controllo giornaliero sta ancora girando»; the
   button click isn't lost, the update starts again by itself. The check, in turn, waits
   for an update in progress.) The CLI exits with **75** (`EX_TEMPFAIL`, "try

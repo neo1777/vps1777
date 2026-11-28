@@ -28,8 +28,8 @@
     },
     "docs/en/UPDATE.md": {
       "sorgente": "docs/UPDATE.md",
-      "sorgente_sha256": "012c41a65a3ef6c1c08bfabcc1804fa7bfa8bdf5840e79557db9a74d8aaa5e76",
-      "traduzione_sha256": "a39f445b14d2874156e3513ee34a9aeaadc833a26d306b34e53991a04f3329ac"
+      "sorgente_sha256": "7a9ce59873e85b4eaf211886c94ef3d6f1d537480fdd27b3c091531c8c52cacf",
+      "traduzione_sha256": "01db72b9bbab38e39eae0e7aa33e5d322c1dca05d10440b390c0761471f075ae"
     },
     "docs/en/BACKUP-RESTORE.md": {
       "sorgente": "docs/BACKUP-RESTORE.md",
@@ -38,8 +38,8 @@
     },
     "docs/en/CLI.md": {
       "sorgente": "docs/CLI.md",
-      "sorgente_sha256": "a052e91bf74ab148d92284d2f3f69e290b4876bd6a31409a31fe4c9c5e30122d",
-      "traduzione_sha256": "3c1a8cada50edcb780817d7b24aee0a21c7a60641db15239edc8cbe6a081a81b"
+      "sorgente_sha256": "71aa695af416f7059b6da8ad8ea5a273f260b4af7b461dafe7963ae9d5415480",
+      "traduzione_sha256": "5620bd95da9a8ed230f1c770e268ea8515c9398cf583d41c583709259efe78dc"
     },
     "docs/en/MEMORIA-1777.md": {
       "sorgente": "docs/MEMORIA-1777.md",

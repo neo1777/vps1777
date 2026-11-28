@@ -281,7 +281,8 @@ CLI lo dice a ogni comando e la ignora: toglila dal `.env`. L'aggiornamento auto
 
 - **"update già in corso"** — c'è un lock (`var/update.lock`): un altro update,
   rollback o bootstrap sta lavorando. (Il controllo giornaliero `vps1777 check` usa lo
-  stesso lock, ma non dà questo messaggio: l'update lo aspetta fino a due minuti, e se
+  stesso lock, ma non dà questo messaggio: l'update lo aspetta fino a due minuti (dieci se è
+  il giro rieseguito dalla CLI appena aggiornata), e se
   non basta esce con 75 dicendo «il controllo giornaliero sta ancora girando»; il click
   del pulsante non si perde, l'update riparte da solo. A sua volta il check aspetta un
   update in corso.) La CLI esce con **75** (`EX_TEMPFAIL`, «riprova

@@ -27,7 +27,11 @@ Group=@OPERATOR_USER@
 Environment=VPS1777_HOME=@REPO@
 WorkingDirectory=@REPO@
 ExecStart=/usr/local/bin/vps1777 check --notify
-TimeoutStartSec=120
+# Il check si mette in fila con l'update (dalla 0.98.21): se ne trova uno in corso lo aspetta
+# fino a 30 minuti (CHECK_ATTESA_UPDATE_S in tools/vps1777.py), poi gira. Il tetto deve stare
+# SOPRA quell'attesa più il check stesso: con i 120 secondi di prima systemd lo uccideva mentre
+# aspettava, la unit risultava fallita e partiva l'avviso, proprio nel caso che la fila cura.
+TimeoutStartSec=2400
 # Il check non ha bisogno di privilegi: niente sudo, niente escalation.
 NoNewPrivileges=true
 ProtectHome=read-only

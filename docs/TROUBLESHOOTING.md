@@ -414,13 +414,13 @@ sudo tailscale serve reset && sudo tailscale funnel --bg --https=443 http://127.
 
 ## Update: "update già in corso"
 
-Causa: un altro update (o un rollback) sta girando **adesso**. Il lock su
+Causa: un altro update (o un rollback, o un bootstrap) sta girando **adesso**. Il lock su
 `var/update.lock` è un `flock` del kernel: muore col processo che lo tiene, quindi
 un crash non lo lascia indietro. Il file resta sul disco, ma non è lui il lock —
 non va cancellato. Dentro c'è scritto l'ultimo che l'ha preso: `update` (anche per rollback
 e bootstrap) o `check`, col pid e l'ora. Il controllo giornaliero (`vps1777 check`) prende lo
 stesso lock mentre gira, e accanto tiene `var/check.lock`: un update che lo trova lì lo
-aspetta fino a due minuti, e se non basta esce con 75 e il messaggio «il controllo
+aspetta fino a due minuti (dieci se è il giro rieseguito dalla CLI appena aggiornata), e se non basta esce con 75 e il messaggio «il controllo
 giornaliero sta ancora girando» (non c'è nessun update in corso: basta riprovare).
 
 Diagnosi:
@@ -438,8 +438,9 @@ processo è attivo, riprova. Dettagli in [UPDATE.md](UPDATE.md).
 
 Dalla 0.59.0 questo caso esce con **75** («riprova più tardi») e non con 1: le unit
 `vps1777-auto-update.service` e `vps1777-update.service` lo contano come riuscito, e non
-arriva l'avviso di fallimento su Telegram. Se lo vedi in uno script tuo, 75 vuol dire
-«c'era già un update in corso», non «l'update è fallito».
+arriva l'avviso di fallimento su Telegram. Se lo vedi in uno script tuo, 75 vuol dire «il
+lucchetto era occupato, riprova» (un update, un rollback o un bootstrap in corso, oppure il
+controllo giornaliero che non aveva ancora finito: lo dice il messaggio), non «l'update è fallito».
 
 ## `docker cp` verso un container: "container rootfs is marked read-only"
 

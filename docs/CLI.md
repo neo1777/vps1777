@@ -116,8 +116,11 @@ Se l'update precedente è morto dopo lo step 10, il primo `vps1777 update` succe
 quello (0 = era arrivato in fondo, 1 = tornato alla versione precedente, 2 = serve un
 intervento a mano) e non installa altro in quel giro.
 
-Se un altro update (o un rollback) è già in corso esce con **75** («riprova più tardi»),
-che le unit contano come successo: non è un guasto e non manda l'avviso di fallimento.
+Se un altro update, un rollback o un bootstrap è già in corso esce con **75** («riprova più
+tardi»), che le unit contano come successo: non è un guasto e non manda l'avviso di fallimento.
+Esce 75 anche se il controllo giornaliero (`vps1777 check`) tiene il lucchetto da più di due
+minuti: lo dice il messaggio («il controllo giornaliero sta ancora girando»), e il click del
+pulsante «Aggiorna» resta in attesa e riparte da solo.
 Esce **1** se l'update fallisce e l'auto-rollback riporta la versione di prima (con un
 messaggio su Telegram), **2** se nemmeno il rollback torna in salute: lì serve intervento
 manuale.
@@ -135,7 +138,8 @@ versione precedente). Con `--with-data` ripristina anche i volumi dallo snapshot
 pre-update — è l'opzione invasiva. **Chiede sempre conferma**, con o senza `--with-data`:
 la salta solo `--yes`.
 
-Esce **75** se un update o un altro rollback è in corso (lo stesso lock di `update`), e
+Esce **75** se un update, un bootstrap o un altro rollback è in corso (lo stesso lock di
+`update`), oppure se il controllo giornaliero tiene quel lock da più di due minuti, e
 **2** se il rollback è applicato ma l'health-gate non torna verde (avviso su Telegram).
 
 ```bash
