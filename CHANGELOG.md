@@ -4,6 +4,20 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- Quattro buchi nei presìdi, visti da Arianna rileggendo un articolo sul ledger. (1) Una voce `opt-in` o
+  `removed` di `features.yaml` ora deve dire `al_posto_suo`: che cosa copre quel bisogno per chi non la attiva.
+  Bastava la `decisione`, e il declassamento di Watchtower da cui il ledger è nato, rifatto oggi, avrebbe dato
+  verde. Le undici voci esistenti lo dichiarano. (2) Un rinvio a giudizio (`follow_up.manuale`) senza
+  `rivedi_dopo` è rosso: dava verde e non tornava più come `[RIVEDI]`. (3) Un `follow_up` scritto come testo, o
+  una data scritta male, sono un rosso che dice che cosa correggere: prima il verificatore cadeva con un
+  errore suo. (4) `check_findings.py` controlla anche la scomposizione per origine scritta in prosa in
+  SECURITY.md (quanti rilievi dalla campagna originaria, quanti per ogni gruppo, scritto come intervallo o come
+  elenco, in cifre o in lettere, e nessuno taciuto): guardava solo totale e severità, e «43 dalla campagna»
+  cambiato in «44» passava. Riletti da Sagoma. Quindici prove nuove.
+
+### Corretto
+
 ## [0.98.24] — 2026-11-28
 
 ### Corretto

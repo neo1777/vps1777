@@ -33,6 +33,12 @@ che *manca*, e ciò che manca non grida.
 > (i nomi dei campi sono quelli di `features.yaml`; `deferred` = rinviata).
 > **Una decisione senza la sua voce non è presa: è chiacchiera.**
 
+Dal 28/11/2026 la regola vale anche per il declassamento da cui tutto è nato: una voce `opt-in`
+o `removed` deve dire **`al_posto_suo`**, cioè che cosa copre quel bisogno per chi non la attiva
+(oppure «niente: è un di più», detto in chiaro). Senza, la CI è rossa. Fino a quel giorno a una
+voce `opt-in` bastava la `decisione`: il declassamento di Watchtower, rifatto con quelle regole,
+avrebbe dato verde.
+
 Non è una regola nuova — è un pattern già validato altrove, voltato sulle feature:
 
 - **Come un registro degli aperti**: una cosa aperta *non esiste* finché non è appesa. Il ledger:
@@ -79,7 +85,11 @@ Un follow-up dev'essere una **condizione**, non prosa — o la CI non sa quando 
    oggi è un rischio accettato con una data, `rivedi_dopo: 2026-12-27`). La CI **non può
    deciderlo**, quindi non lo chiude — ma **lo sorveglia**: passata la sua `rivedi_dopo` lo rimette
    davanti con una riga `[RIVEDI] <id>: rinvio-a-giudizio scaduto il <data>`. Non grida (non è un
-   bug), ma **non sparisce**.
+   bug), ma **non sparisce**. Per questo la data è obbligatoria: un `follow_up.manuale` senza
+   `rivedi_dopo` è rosso (dal 28/11/2026; prima dava verde, e non tornava più davanti a nessuno).
+
+Un `follow_up` scritto male (un testo al posto della mappa, una data che non è `AAAA-MM-GG`) è
+un rosso che dice che cosa correggere, non un errore del verificatore.
 
 > **Perché la distinzione salva il sistema:** senza, o i follow-up-a-giudizio tengono la CI rossa
 > per sempre (rumore → si ignora → il verificatore muore), o i verificabili restano prosa e nessuno

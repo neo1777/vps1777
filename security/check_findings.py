@@ -845,6 +845,7 @@ def _confronta_con_security_md(findings: list[dict], counts: dict[str, int], tot
     _residui_nominati(md, findings, errors)
     _conteggi_della_tabella(md, counts, errors)
     _conteggi_della_prosa(md, findings, total, errors)
+    _origini_della_prosa(md, findings, errors)
 
 
 def _residui_nominati(md_ids: str, findings: list[dict], errors: list[str]) -> None:
@@ -919,6 +920,86 @@ def _conteggi_della_prosa(md: str, findings: list[dict], total: int, errors: lis
                  f"SECURITY.md (prosa): le severità dichiarate sommano a {somma}, ma il "
                  f"totale dichiarato è {dich['totale']}.\n"
                  f"       Il documento non torna con SE STESSO, prima ancora che col registro.")
+
+
+_NUMERI_IN_LETTERE = {"uno": 1, "una": 1, "due": 2, "tre": 3, "quattro": 4, "cinque": 5, "sei": 6,
+                      "sette": 7, "otto": 8, "nove": 9, "dieci": 10}
+_GRUPPO_CONTATO = re.compile(
+    # il numero non è un pezzo di versione o di sigla (`v0.40.3`, `H44`): niente punto, lettera
+    # o apice inverso attaccati prima
+    r"(?<![\w.`])(\d+|" + "|".join(_NUMERI_IN_LETTERE) + r")\b([^().]*?)\((`H\d+`[^)]*)\)", re.I)
+
+
+def _gruppi_contati(sezione: str) -> list[tuple[int, str, set[int]]]:
+    """I gruppi della scomposizione che dichiarano un numero: (dichiarati, come è scritto, i
+    rilievi nominati nella parentesi, con gli intervalli sciolti). «7 (`H44`-`H50`)», «Due
+    (`H69`, `H70`)», «4 che … (`H51` …, `H52` e `H54` …, `H53` …)»: il numero sta prima della
+    parentesi, nella stessa frase."""
+    gruppi = []
+    for numero, _, dentro in _GRUPPO_CONTATO.findall(sezione):
+        ids = {int(n) for n in re.findall(r"`H(\d+)`", dentro)}
+        for a, b in re.findall(r"`H(\d+)`-`H(\d+)`", dentro):
+            ids |= set(range(int(a), int(b) + 1))
+        dichiarati = int(numero) if numero.isdigit() else _NUMERI_IN_LETTERE[numero.lower()]
+        nomi = sorted(ids)
+        come = f"H{nomi[0]}" if len(nomi) == 1 else f"H{nomi[0]}…H{nomi[-1]}"
+        gruppi.append((dichiarati, come, ids))
+    return gruppi
+
+
+def _origini_della_prosa(md: str, findings: list[dict], errors: list[str]) -> None:
+    """La scomposizione per ORIGINE scritta in prosa in SECURITY.md torna col registro.
+
+    Il controllo qui sopra guarda il totale e le severità. Il numero sbagliato del 01/08 però
+    era un altro («la scomposizione in prosa sommava a 54, non ai 56»): quanti rilievi vengono
+    da quale giro. Il 27/11/2026 Arianna ha cambiato «43 dalla campagna» in «44» su una copia e
+    questo controllo è uscito verde, mentre SECURITY.md promette che fallisce. Tre regole:
+    il numero della campagna originaria è quello dei rilievi prima del primo gruppo contato;
+    ogni gruppo «N (…)», in cifre o in lettere, intervallo o elenco, nomina tanti rilievi quanti
+    ne dichiara; ogni rilievo del registro è nominato, e nessuno nominato manca dal registro."""
+    inizio = md.find("Il registro conta **")
+    fine = md.find("Nessuna è aperta", inizio)
+    m = re.search(r"(\d+)\s+dalla\s+campagna\s+originaria", md[inizio:fine]) if 0 <= inizio < fine else None
+    if not m:
+        fail(errors,
+             "SECURITY.md: non trovo la scomposizione per origine (da «Il registro conta» a "
+             "«Nessuna è aperta», con «N dalla campagna originaria»).\n"
+             "       Se l'hai riscritta, aggiorna anche questo controllo: un gate che non\n"
+             "       trova più il suo bersaglio TACE.")
+        return
+    sezione = md[inizio:fine]
+    reali = {int(str(f.get("id", ""))[1:]) for f in findings
+             if re.fullmatch(r"H\d+", str(f.get("id", "")))}
+    intervalli = [(int(a), int(b)) for a, b in re.findall(r"`H(\d+)`-`H(\d+)`", sezione)]
+    nominati = {int(n) for n in re.findall(r"`H(\d+)`", sezione)}
+    for a, b in intervalli:
+        nominati |= set(range(a, b + 1))
+    gruppi = _gruppi_contati(sezione)
+    dopo_la_campagna = min((min(ids) for _, _, ids in gruppi if ids),
+                           default=min(nominati, default=0))
+    originari = sum(1 for n in reali if n < dopo_la_campagna)
+    if int(m.group(1)) != originari:
+        fail(errors,
+             f"SECURITY.md (prosa) dichiara {m.group(1)} rilievi «dalla campagna originaria», il "
+             f"registro ne conta {originari} prima di H{dopo_la_campagna}.\n"
+             f"       Allinea il documento, non il registro.")
+    for dichiarati, come, ids in gruppi:
+        veri = len(ids & reali)
+        if dichiarati != veri:
+            fail(errors,
+                 f"SECURITY.md (prosa) dichiara {dichiarati} rilievi in {come}, il registro "
+                 f"ne conta {veri}.\n       Allinea il documento, non il registro.")
+    taciuti = sorted(n for n in reali if n >= dopo_la_campagna and n not in nominati)
+    if taciuti:
+        fail(errors,
+             "SECURITY.md (prosa): la scomposizione per origine non nomina "
+             + ", ".join(f"H{n}" for n in taciuti) + ".\n"
+             "       Ogni rilievo nato dopo la campagna originaria dice da dove viene.")
+    inventati = sorted(nominati - reali)
+    if inventati:
+        fail(errors,
+             "SECURITY.md (prosa): la scomposizione per origine nomina "
+             + ", ".join(f"H{n}" for n in inventati) + ", che nel registro non ci sono.")
 
 
 def _stampa_il_conto(total: int, conto: _Conto) -> None:
