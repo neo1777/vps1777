@@ -30,6 +30,16 @@ FINTI = [
     ("chiave API Google", "AI" + "za" + "SyA-" + A36),
     ("gettone Slack", "xox" + "b-" + "123456789012-" + "abcdefghijkl"),
     ("chiave privata PEM", "-----BEGIN " + "ENCRYPTED " + "PRIVATE KEY-----"),
+    ("chiave API OpenAI", "sk-" + "admin-" + A36),
+    ("chiave d'accesso AWS", "AK" + "IA" + "ABCDEFGHIJ2345678"),          # un carattere in più: scatta lo stesso
+    ("segreto di un client OAuth Google", "GOC" + "SPX-" + "Ab1_" * 7),
+    ("gettone Slack", "xap" + "p-" + "1-A0123456789-" + "abcdefghij"),
+    ("gettone Slack", "https://hooks.slack" + ".com/services/" + "T00000000/B00000000/" + A36),
+    ("gettone di un fornitore cloud", "dop" + "_v1_" + "0a1b2c3d" * 8),
+    ("gettone GitLab", "glp" + "at-" + "Ab1_" * 6),
+    ("gettone Hugging Face", "hf" + "_" + A36),
+    ("gettone di un registro di pacchetti", "pypi" + "-AgEI" + A36),
+    ("gettone di un registro di pacchetti", "np" + "m_" + A36),
 ]
 
 
@@ -48,13 +58,19 @@ SEGNAPOSTO = [
     "sk-" + "ant-<chiave>", "sk-" + "proj-…", "AK" + "IA...", "AK" + "IAXXXXXXXX", "AI" + "za...",
     "xox" + "b-...", "task-force-con-un-nome-lungo-abbastanza-per-sembrarlo-1234567890",
     "risk-assessment-2026-11-28-versione-definitiva-approvata", "gh" + "p_corto123",
+    # parole lunghe a trattini che cominciano per «sk-»: non sono chiavi (rilettura di Sagoma)
+    "sk-" + "learn-pipeline-with-a-very-long-descriptive-name",
+    "sk-" + "toggle-button-container-wrapper-element-large",
+    "dop" + "_v1_...", "GOC" + "SPX-...", "hf" + "_modello", "np" + "m_install", "glp" + "at-<token>",
 ]
 
 
 @pytest.mark.parametrize("testo", SEGNAPOSTO)
 def test_un_segnaposto_o_una_parola_che_gli_somiglia_non_scatta(testo):
     nuovi = {"gettone GitHub", "chiave API Anthropic", "chiave API OpenAI", "chiave d'accesso AWS",
-             "chiave API Google", "gettone Slack"}
+             "chiave API Google", "gettone Slack", "segreto di un client OAuth Google",
+             "gettone di un fornitore cloud", "gettone GitLab", "gettone Hugging Face",
+             "gettone di un registro di pacchetti"}
     assert not (_chi_scatta(f"usa {testo} nella configurazione") & nuovi)
 
 
@@ -63,3 +79,7 @@ def test_il_gate_intero_fa_rosso_su_un_file_con_un_gettone(tmp_path):
     assert any(nome == "gettone GitHub" for nome, _ in g.SECRET_PATTERNS)
     testo = "riga pulita\nGH_TOKEN=" + "gh" + "p_" + A36 + "\n"
     assert "gettone GitHub" in _chi_scatta(testo)
+
+
+def test_una_chiave_anthropic_non_prende_anche_il_nome_di_openai():
+    assert _chi_scatta("x = " + "sk-" + "ant-" + "api03-" + A36) == {"chiave API Anthropic"}

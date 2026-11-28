@@ -129,10 +129,23 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     #   Telegram qui sopra): un segnaposto con puntini o parentesi angolari non scatta.
     ("gettone GitHub", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})")),
     ("chiave API Anthropic", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}")),
-    ("chiave API OpenAI", re.compile(r"\bsk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}")),
-    ("chiave d'accesso AWS", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
+    # OpenAI ha due forme: la vecchia, `sk-` e poi sole lettere e cifre; la nuova, con un
+    # prefisso di progetto e un corpo che ammette `_` e `-`. Tenerle separate conta: con un solo
+    # modello largo scattava qualunque parola lunga a trattini che comincia per «sk-».
+    ("chiave API OpenAI", re.compile(
+        r"\bsk-(?:(?:proj|svcacct|admin)-[A-Za-z0-9_-]{32,}|[A-Za-z0-9]{32,})")),
+    ("chiave d'accesso AWS", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16,}\b")),
     ("chiave API Google", re.compile(r"\bAIza[0-9A-Za-z_-]{30,}")),
-    ("gettone Slack", re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{20,}")),
+    ("segreto di un client OAuth Google", re.compile(r"\bGOCSPX-[A-Za-z0-9_-]{20,}")),
+    ("gettone Slack", re.compile(
+        r"\bxox[abposr]-[A-Za-z0-9-]{20,}|\bxapp-[A-Za-z0-9-]{20,}"
+        r"|hooks\.slack\.com/services/[A-Za-z0-9/]{20,}")),
+    # i gettoni delle API dei fornitori di macchine: creano e distruggono server
+    ("gettone di un fornitore cloud", re.compile(r"\bdop_v1_[a-f0-9]{40,}")),
+    ("gettone GitLab", re.compile(r"\bglpat-[A-Za-z0-9_-]{20,}")),
+    ("gettone Hugging Face", re.compile(r"\bhf_[A-Za-z0-9]{30,}")),
+    ("gettone di un registro di pacchetti", re.compile(
+        r"\bpypi-AgEI[A-Za-z0-9_-]{30,}|\bnpm_[A-Za-z0-9]{30,}")),
     # sshpass con password letterale. `-e` (da env) è la forma giusta e passa;
     # `-p "$VAR"`, `-p '<password>'` e `-p …` sono segnaposto e passano.
     (

@@ -5,10 +5,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
-- Il gate anti-leak riconosce i token dei fornitori comuni: gettoni GitHub, chiavi di API Anthropic, OpenAI e
-  Google, chiavi d'accesso AWS, gettoni Slack, chiavi PEM cifrate. Conosceva solo le credenziali del prodotto, e
-  un file con tre token finti passava verde (misura di Bottega, H105). Contato sui file tracciati di quattro
-  repo: i modelli nuovi non scattano mai. Ventisei prove nuove.
+- Il gate anti-leak riconosce i token dei fornitori comuni: gettoni GitHub e GitLab, chiavi di API Anthropic,
+  OpenAI e Google, chiavi d'accesso AWS, gettoni Slack, segreti OAuth di Google, gettoni dei fornitori di
+  macchine, di Hugging Face e dei registri di pacchetti, chiavi PEM cifrate. Conosceva solo le credenziali del
+  prodotto, e un file con tre token finti passava verde (misura di Bottega, H105; modelli riletti e stretti da
+  Sagoma). Contato sui file tracciati di quattro repo: i modelli nuovi non scattano mai. Quarantaquattro prove
+  nuove.
 
 ### Corretto
 - La unit del controllo giornaliero (`vps1777-check-update.service`) aveva un tetto di 120 secondi. Dalla

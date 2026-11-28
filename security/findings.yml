@@ -5055,7 +5055,7 @@ findings:
 
   - id: H105
     severity: low
-    title: "Il gate anti-leak non riconosceva i token dei fornitori comuni (GitHub, Anthropic, OpenAI, AWS, Google, Slack)"
+    title: "Il gate anti-leak non riconosceva i token dei fornitori comuni (GitHub, Anthropic, OpenAI, AWS, Google, Slack e altri)"
     status: closed
     natura: comportamento
     scoperta:
@@ -5084,10 +5084,11 @@ findings:
     prova:
       - comando: "uvx --with pyyaml==6.0.4 pytest@9.2.0 -q tools/tests/test_no_leaks_token_comuni.py"
         dove: "PC"
-        output: "26 passed: dodici token finti costruiti a pezzi fanno scattare ciascuno il suo modello; tredici segnaposto e parole che gli somigliano no. Contato sui file tracciati di quattro repo: i modelli nuovi non scattano mai."
+        output: "44 passed: ventidue token finti costruiti a pezzi fanno scattare ciascuno il suo modello; venti segnaposto e parole che gli somigliano no (comprese due parole lunghe a trattini che cominciano per «sk-»). Contato sui file tracciati di quattro repo: i modelli nuovi non scattano mai."
         exit: 0
         quando: "2026-11-28"
     residuo: >
-      Sono i sei fornitori più comuni, non tutti: un token di un servizio non in elenco passa
+      Sono i fornitori più comuni, non tutti: un token di un servizio non in elenco passa
       ancora, se non ha la forma di una password dopo una parola-spia. I modelli guardano il
-      prefisso e una lunghezza minima: un fornitore che cambia prefisso va aggiunto a mano.
+      prefisso e una lunghezza minima: un fornitore che cambia prefisso va aggiunto a mano, e
+      un token senza prefisso (quelli di Cloudflare, per esempio) nessun modello lo riconosce.
