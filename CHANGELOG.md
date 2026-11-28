@@ -5,6 +5,12 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 ## [Non rilasciato]
 
 ### Corretto
+- Il gate anti-leak riconosce i token dei fornitori comuni: gettoni GitHub e GitLab, chiavi di API Anthropic,
+  OpenAI e Google, chiavi d'accesso AWS, gettoni Slack, segreti OAuth di Google, gettoni dei fornitori di
+  macchine, di Hugging Face e dei registri di pacchetti, chiavi PEM cifrate. Conosceva solo le credenziali del
+  prodotto, e un file con tre token finti passava verde (misura di Bottega, H105; modelli riletti e stretti da
+  Sagoma). Contato sui file tracciati di quattro repo: i modelli nuovi non scattano mai. Quarantaquattro prove
+  nuove.
 - Quattro buchi nei presìdi, visti da Arianna rileggendo un articolo sul ledger. (1) Una voce `opt-in` o
   `removed` di `features.yaml` ora deve dire `al_posto_suo`: che cosa copre quel bisogno per chi non la attiva.
   Bastava la `decisione`, e il declassamento di Watchtower da cui il ledger è nato, rifatto oggi, avrebbe dato
@@ -15,8 +21,6 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
   SECURITY.md (quanti rilievi dalla campagna originaria, quanti per ogni gruppo, scritto come intervallo o come
   elenco, in cifre o in lettere, e nessuno taciuto): guardava solo totale e severità, e «43 dalla campagna»
   cambiato in «44» passava. Riletti da Sagoma. Quindici prove nuove.
-
-### Corretto
 
 ## [0.98.24] — 2026-11-28
 

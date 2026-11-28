@@ -485,7 +485,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 
 ## Residui noti — cosa NON è ancora chiuso
 
-> **Questo conteggio è verificato dalla CI.** I 104 rilievi vivono in
+> **Questo conteggio è verificato dalla CI.** I 105 rilievi vivono in
 > [`security/findings.yml`](security/findings.yml): ognuno con il suo stato e, se
 > chiuso, con l'**evidenza puntuale** nel codice.
 > [`security/check_findings.py`](security/check_findings.py) gira a ogni PR e
@@ -496,7 +496,7 @@ transito: le risposte passano in chiaro dal bordo di Cloudflare (la riga in tabe
 > aperto» quando i chiusi erano 8 su 43. Un claim senza coordinata è
 > infalsificabile: marcisce in silenzio. Ora non può più.
 
-Il registro conta **104 voci** (2 critiche, 16 alte, 59 medie, 27 basse): 43 dalla
+Il registro conta **105 voci** (2 critiche, 16 alte, 59 medie, 28 basse): 43 dalla
 campagna originaria (`v0.19.1 → v0.33.0`, affrontate tutte), 7 (`H44`-`H50`) dal
 ciclo di audit con misure sul sistema vivo culminato nella `v0.40.3`, 4 che non
 vengono da una review ma da quello che è successo dopo (`H51` da un guasto in
@@ -563,11 +563,13 @@ requisiti: «qual è l'ultima release» non era firmato né aveva una scadenza (
 firmato, 0.98.13).
 E una (`H104`, 26/11) dalla rilettura di una funzione del gate anti-leak mentre la si spezzava:
 dopo la parola «password», una parola seguita da una-tre cifre passava per nome di pacchetto.
+E una (`H105`, 28/11) da una misura fatta sullo stesso gate da un'altra sessione di lavoro: non
+riconosceva i token dei fornitori comuni (GitHub, Anthropic, AWS e altri).
 Nessuna è aperta. Il conteggio, verificato contro il codice dal gate in CI:
 
 | | |
 |---|---|
-| **chiusi** | 89 |
+| **chiusi** | 90 |
 | **parziali** | 11 |
 | **accettati** | 4 |
 | **aperti** | 0 |
