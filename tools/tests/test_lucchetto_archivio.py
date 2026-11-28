@@ -133,7 +133,7 @@ def test_chi_aspetta_entra_fra_un_lavoro_e_l_altro(cli, tmp_path):
 
 def test_tutti_i_comandi_sull_archivio_lo_prendono():
     src = CLI.read_text(encoding="utf-8")
-    for nome in ("def cmd_archive_migra(", "def _archive_migra_telegram(",
+    for nome in ("def _migra_un_db(", "def _archive_migra_telegram(",
                  "def cmd_archive_retag(", "def _indicizza_nel_lavoro(",
                  "def cmd_indice_notturno(", "def cmd_ingest_coda("):
         i = src.index(nome)
