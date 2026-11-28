@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.25] — 2026-11-28
+
 ### Corretto
 - Il gate anti-leak riconosce i token dei fornitori comuni: gettoni GitHub e GitLab, chiavi di API Anthropic,
   OpenAI e Google, chiavi d'accesso AWS, gettoni Slack, segreti OAuth di Google, gettoni dei fornitori di
