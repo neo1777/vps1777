@@ -5066,7 +5066,7 @@ findings:
         finti: verde. `low`: il gate è una rete in più sopra la disciplina di chi scrive, e non
         ci sono segni che un token così sia mai entrato nel repo; ma il gettone con cui la CI
         rilascia e le chiavi delle API sono proprio ciò che chi lavora qui ha in tasca.
-    since: unreleased
+    since: v0.98.25
     why: >
       L'elenco dei modelli conosceva solo le credenziali che il prodotto maneggia (Tailscale,
       Telegram, age, chiavi PEM, sshpass, stringhe di connessione). Un gettone GitHub o una
