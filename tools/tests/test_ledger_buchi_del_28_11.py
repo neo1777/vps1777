@@ -101,3 +101,57 @@ def test_un_difetto_di_forma_e_un_rosso_solo_non_due(tmp_path):
         r = _verifica(tmp_path, voce)
         assert r.returncode != 0 and "Traceback" not in r.stdout + r.stderr, r.stderr
         assert r.stdout.count("prova.voce:") == 1, r.stdout
+
+
+# ── secondo giro di Arianna (28/11/2026): provare a rompere le correzioni ──────────────────────
+
+def test_un_segnaposto_non_e_una_dichiarazione(tmp_path):
+    """`al_posto_suo: x` passava. La macchina non sa se la frase è vera, ma un segnaposto lo
+    riconosce."""
+    for valore in ("x", "tbd", "da scrivere"):
+        r = _verifica(tmp_path, f'    status: opt-in\n    decisione: "declassata"\n    al_posto_suo: "{valore}"')
+        assert r.returncode != 0 and "senza 'al_posto_suo'" in r.stdout, (valore, r.stdout)
+    r = _verifica(tmp_path, '    status: opt-in\n    decisione: "declassata"\n    al_posto_suo: "niente: è un di più"')
+    assert r.returncode == 0, r.stdout
+
+
+def test_un_deferred_senza_condizione_ne_giudizio_vuole_comunque_una_data(tmp_path):
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      nota: "dopo il test"')
+    assert r.returncode != 0 and "'deferred' senza una data" in r.stdout, r.stdout
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      nota: "dopo il test"\n'
+                            '      rivedi_dopo: "2020-01-01"')
+    assert r.returncode == 0 and "[RIVEDI] prova.voce" in r.stdout, r.stdout
+
+
+def test_una_condizione_scritta_come_frase_e_rossa(tmp_path):
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n'
+                            '      verify: "quando esiste il timer"\n      rivedi_dopo: "2020-01-01"')
+    assert r.returncode != 0 and "Traceback" not in r.stdout + r.stderr, r.stderr
+    assert "follow_up.verify deve essere una mappa" in r.stdout, r.stdout
+
+
+def test_una_data_oltre_un_anno_e_un_mai(tmp_path):
+    base = '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n      manuale:\n        cosa: "x"\n        rivedi_dopo: '
+    r = _verifica(tmp_path, base + '"2999-01-01"')
+    assert r.returncode != 0 and "è oltre un anno da oggi" in r.stdout, r.stdout
+    r = _verifica(tmp_path, '    status: deferred\n    decisione: "rinviata"\n    follow_up:\n'
+                            '      verify: {path_exists: non/esiste}\n      rivedi_dopo: "2999-01-01"')
+    assert r.returncode != 0 and "è oltre un anno da oggi" in r.stdout, r.stdout
+
+
+def test_il_ledger_vero_passa_e_dice_quante_segnalazioni_guarda():
+    """La nota di Arianna: dopo una riscrittura del ledger il verificatore stampava «2
+    segnalazioni» invece di 151. Sul ledger vero il conto delle cose guardate non crolla."""
+    import re
+    try:
+        import yaml  # noqa: F401
+        cmd = [sys.executable]
+    except ImportError:
+        if not shutil.which("uv"):
+            pytest.skip("né PyYAML né uv")
+        cmd = ["uv", "run", "--no-project", "--with", "pyyaml", "python"]
+    r = subprocess.run([*cmd, str(RADICE / "tools" / "verify-features.py")], capture_output=True,
+                       text=True, timeout=300, cwd=RADICE)
+    assert r.returncode == 0, r.stdout[-600:]
+    m = re.search(r"ledger: (\d+) voci", r.stdout)
+    assert m and int(m.group(1)) >= 140, r.stdout[:300]

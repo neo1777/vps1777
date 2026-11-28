@@ -4,6 +4,15 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+### Corretto
+- Secondo giro sui presìdi del ledger e del registro, dopo che Arianna ha provato a rompere le correzioni della
+  0.98.25. Ora: `al_posto_suo` vuole una frase (un segnaposto come `x` è rosso); ogni `deferred` ha una data,
+  anche senza condizione né giudizio, e non oltre un anno (`2999-01-01` passava); una condizione scritta come
+  frase invece che come verifica è rossa; la scomposizione per origine di SECURITY.md controlla anche la somma
+  (campagna più gruppi fa il totale), i gruppi che si sovrappongono e i numeri in lettere fino a venti. Tre
+  testi del repo dicevano ancora che la regola sui `deferred` avrebbe preso Watchtower: non è vero (fu
+  `opt-in`), e ora lo dicono. Nove prove nuove.
+
 ### Cambiato
 - `cmd_archive_migra` (`vps1777 archive-migra`) è spezzata in tre: il giro sui DB, la migrazione di un DB
   (`_migra_un_db`, col lucchetto dell'archivio e nel servizio `ingest`) e il referto (`_migra_dici`). Complessità

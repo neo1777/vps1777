@@ -13,6 +13,7 @@ processo con `uv run --with pyyaml`, così in CI gira davvero invece di saltare.
 """
 from __future__ import annotations
 
+import datetime
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,8 @@ from pathlib import Path
 import pytest
 
 RADICE = Path(__file__).resolve().parents[2]
+# una data futura ma vicina: dal 28/11/2026 un rinvio oltre un anno è rosso («mai» con una data)
+_FRA_TRE_MESI = (datetime.date.today() + datetime.timedelta(days=90)).isoformat()
 
 
 def _verifica(tmp_path: Path, follow_up: str) -> subprocess.CompletedProcess:
@@ -65,5 +68,5 @@ def test_condizione_con_data_passata_rimette_il_rinvio_davanti(tmp_path):
 
 def test_condizione_con_data_futura_tace(tmp_path):
     r = _verifica(tmp_path, "      verify: {path_exists: non/esiste/ancora}\n"
-                            "      rivedi_dopo: \"2099-01-01\"")
+                            f"      rivedi_dopo: \"{_FRA_TRE_MESI}\"")
     assert r.returncode == 0 and "prova.rinvio" not in r.stdout, r.stdout

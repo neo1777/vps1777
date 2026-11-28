@@ -39,6 +39,15 @@ o `removed` deve dire **`al_posto_suo`**, cioè che cosa copre quel bisogno per 
 voce `opt-in` bastava la `decisione`: il declassamento di Watchtower, rifatto con quelle regole,
 avrebbe dato verde.
 
+**Due limiti, detti in chiaro.** `al_posto_suo` è testo libero: la macchina obbliga a scriverlo
+e ferma un segnaposto, ma se la frase sia vera lo guarda chi rilegge la PR. E il ledger guarda
+il **repo**, non la macchina: una funzione che il repo dichiara e che una VPS ha perso (un
+profilo non riacceso dopo una reinstallazione, com'è successo a luglio) da qui non si vede. Sulla
+macchina la difesa è un'altra: lo stato delle funzioni opzionali sta scritto in `.env`
+(`VPS1777_FEATURES`) e install, update e rollback lo riproducono; il controllo giornaliero
+sorveglia ciò che conta di più (raggiungibilità, backup, disco) e avvisa su Telegram. Non c'è
+un presidio generale «dichiarata ma non accesa su questa macchina».
+
 Non è una regola nuova — è un pattern già validato altrove, voltato sulle feature:
 
 - **Come un registro degli aperti**: una cosa aperta *non esiste* finché non è appesa. Il ledger:
@@ -88,8 +97,10 @@ Un follow-up dev'essere una **condizione**, non prosa — o la CI non sa quando 
    bug), ma **non sparisce**. Per questo la data è obbligatoria: un `follow_up.manuale` senza
    `rivedi_dopo` è rosso (dal 28/11/2026; prima dava verde, e non tornava più davanti a nessuno).
 
-Un `follow_up` scritto male (un testo al posto della mappa, una data che non è `AAAA-MM-GG`) è
-un rosso che dice che cosa correggere, non un errore del verificatore.
+Un `follow_up` scritto male (un testo al posto della mappa, una condizione scritta come frase,
+una data che non è `AAAA-MM-GG`) è un rosso che dice che cosa correggere, non un errore del
+verificatore. E ogni `deferred` ha una data in cui torna davanti a qualcuno, non oltre un anno:
+un rinvio senza data, o con una data lontanissima, è rosso.
 
 > **Perché la distinzione salva il sistema:** senza, o i follow-up-a-giudizio tengono la CI rossa
 > per sempre (rumore → si ignora → il verificatore muore), o i verificabili restano prosa e nessuno

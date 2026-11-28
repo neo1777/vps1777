@@ -452,6 +452,7 @@ def main() -> int:
     surveil: list[str] = []        # solo segnalati
 
     _schema(entries, hard_fail)
+    _date_dei_rinvii(entries, oggi, hard_fail)
     _dichiarato_reale(entries, repo, hard_fail, surveil)
     _reale_dichiarato(entries, repo, baseline_completo, hard_fail, surveil, oggi)
     _sorveglianza(entries, repo, oggi, surveil)
@@ -499,13 +500,14 @@ def _schema_voce(e: dict, ids: set, hard_fail: list[str]) -> None:
         hard_fail.append(f"[schema] id duplicato: {eid}")
     ids.add(eid)
     # REGOLA DI CATTURA (setaccio): una deferred è una decisione a metà finché non
-    # dichiara COSA la chiude. Il follow_up è il cuore anti-amnesia — è ciò che
-    # mancava a Watchtower. Lo pretendiamo SEMPRE su una deferred, senza scampo:
+    # dichiara COSA la chiude. Il follow_up è il cuore anti-amnesia. Lo pretendiamo
+    # SEMPRE su una deferred, senza scampo. (Watchtower però NON l'avrebbe preso questa
+    # regola: nel ledger fu `opt-in`, non `deferred`. Quel buco lo chiude `al_posto_suo`.)
     # un `verify` non lo sostituisce (il verify prova la presenza, il follow_up
     # dice cosa manca perché sia presente).
     if e.get("status") == "deferred" and not e.get("follow_up"):
-        hard_fail.append(f"[cattura] {eid}: 'deferred' senza follow_up — decisione a metà "
-                         "(è ESATTAMENTE il buco che ha perso Watchtower per un mese)")
+        hard_fail.append(f"[cattura] {eid}: 'deferred' senza follow_up — decisione a metà: "
+                         "che cosa la chiude, e quando si riguarda?")
     # «CONDIZIONE O DATA» (27/09/2026, lezione dei gemelli dei rinvii — todo_or_die,
     # curatrice F1-Gbis): un rinvio che aspetta SOLO una condizione non scatta mai se
     # la condizione non arriva (Graphiti, «dopo il test» cinque volte, e il test abolito).
@@ -531,9 +533,40 @@ def _schema_voce(e: dict, ids: set, hard_fail: list[str]) -> None:
     # supportato» senza dire che cosa aggiornava la macchina al posto suo, e per un mese
     # niente la aggiornò. La `decisione` dice perché; `al_posto_suo` dice che cosa copre
     # quel bisogno per chi non la attiva, oppure «niente: è un di più» detto in chiaro.
-    if e.get("status") in ("removed", "opt-in") and not str(e.get("al_posto_suo") or "").strip():
+    # ⚠️ È testo libero: la macchina obbliga a DIRLO, non può sapere se è vero. Che sia vero
+    # lo guarda chi rilegge la PR. Qui si ferma solo il segnaposto (`x`, `tbd`): una frase.
+    al_posto = str(e.get("al_posto_suo") or "").strip()
+    if e.get("status") in ("removed", "opt-in") and len(al_posto) < AL_POSTO_SUO_MINIMO:
         hard_fail.append(f"[cattura] {eid}: '{e['status']}' senza 'al_posto_suo' — chi non la "
-                         "attiva che cosa ha? (scrivi che cosa la sostituisce, o «niente: …»)")
+                         "attiva che cosa ha? (scrivi in una frase che cosa la sostituisce, "
+                         "o «niente: è un di più»)")
+
+
+AL_POSTO_SUO_MINIMO = 12        # caratteri: una frase, non un segnaposto
+RINVIO_MASSIMO_GIORNI = 366     # un rinvio oltre un anno è un «mai» scritto con una data
+
+
+def _date_dei_rinvii(entries: list[dict], oggi: datetime.date, hard_fail: list[str]) -> None:
+    """Ogni `deferred` ha una data in cui torna davanti a qualcuno, e quella data è vicina.
+
+    Secondo giro di Arianna (28/11/2026): un `deferred` con `follow_up: {nota: …}`, senza
+    condizione e senza giudizio, dava verde e non tornava mai; e `rivedi_dopo: 2999-01-01`
+    passava. La sorveglianza rimette davanti solo ciò che ha una data che arriva."""
+    for e in entries:
+        grezzo = e.get("follow_up")
+        fu: dict = grezzo if isinstance(grezzo, dict) else {}
+        grezzo = fu.get("manuale")
+        man: dict = grezzo if isinstance(grezzo, dict) else {}
+        date = [d for d in (fu.get("rivedi_dopo"), man.get("rivedi_dopo")) if d]
+        eid = e.get("id", "<senza id>")
+        if e.get("status") == "deferred" and fu and not date:
+            hard_fail.append(f"[cattura] {eid}: 'deferred' senza una data — aggiungi "
+                             "follow_up.rivedi_dopo (o follow_up.manuale.rivedi_dopo): un "
+                             "rinvio senza data non torna più davanti a nessuno")
+        for d in date:
+            if _data_iso(d) and (datetime.date.fromisoformat(str(d)) - oggi).days > RINVIO_MASSIMO_GIORNI:
+                hard_fail.append(f"[cattura] {eid}: rivedi_dopo «{d}» è oltre un anno da oggi — "
+                                 "un rinvio così lontano è un «mai» scritto con una data")
 
 
 def _data_iso(valore: object) -> bool:
@@ -562,6 +595,14 @@ def _follow_up_ben_fatto(e: dict, eid: str, hard_fail: list[str]) -> dict:
         hard_fail.append(f"[schema] {eid}: follow_up.manuale deve essere una mappa (cosa, "
                          f"rivedi_dopo), non {type(man).__name__}")
         fu.pop("manuale")              # un rosso solo: non anche «manuale senza rivedi_dopo»
+    ver = fu.get("verify")
+    if ver is not None and not isinstance(ver, dict):
+        # una condizione scritta come frase non la verifica nessuno: niente [PROMUOVI], e la
+        # regola «condizione O data» la saltava (rilievo di Arianna, secondo giro)
+        hard_fail.append(f"[schema] {eid}: follow_up.verify deve essere una mappa con un tipo di "
+                         f"verifica (path_exists, file_contains…), non {type(ver).__name__}: "
+                         f"«{str(ver)[:60]}»")
+        fu.pop("verify")
     for dove, mappa in (("follow_up", fu), ("follow_up.manuale", fu.get("manuale") or {})):
         data = mappa.get("rivedi_dopo")
         if data and not _data_iso(data):
