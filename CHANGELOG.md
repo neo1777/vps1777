@@ -4,6 +4,8 @@ Formato [Keep a Changelog](https://keepachangelog.com/it/1.1.0/), versioning [Se
 
 ## [Non rilasciato]
 
+## [0.98.26] — 2026-11-28
+
 ### Corretto
 - Secondo giro sui presìdi del ledger e del registro, dopo che Arianna ha provato a rompere le correzioni della
   0.98.25. Ora: `al_posto_suo` vuole una frase (un segnaposto come `x` è rosso); ogni `deferred` ha una data,
